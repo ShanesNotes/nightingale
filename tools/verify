@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# The one check. Green = every step in tools/verify.d/ passes, in lexical order.
+# A slice adds its own NN-name.sh step file and never edits this runner.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+for step in tools/verify.d/*.sh; do
+  echo "== $(basename "$step")"
+  bash "$step"
+done
+echo "verify: OK"
