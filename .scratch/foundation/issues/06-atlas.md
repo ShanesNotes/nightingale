@@ -30,3 +30,58 @@ All 13 cards share the template's headings on the same lines. L3 drop "and contr
 
 ## Open items moved from the cards by the hygiene pass
 
+### `docs/atlas/_template.md`
+
+What is not settled, and which decision or packet will settle it.
+
+### `docs/atlas/blood-chemistry.md`
+
+Electroneutrality and membrane charge (contract candidate A limit 4: only bulk charge conservation today). Stiff chemistry needs the implicit solver (pulse 0005 question 4).
+
+### `docs/atlas/cardiovascular.md`
+
+How rhythm modes and hazards enter the contract (pulse 0005 question 5). Fast step size (arena atlas decision 1: 2 ms native assumed). Whether the hemodynamic network is its own crate (`ng-net-hemo` in the arena atlas) or part of this one.
+
+### `docs/atlas/endocrine.md`
+
+Portal to peripheral insulin gradient (shared with HP). Which axes are admitted first beyond glucose and RAAS.
+
+### `docs/atlas/fluids-endothelium.md`
+
+Regional filtration coefficients and glycocalyx shedding (arena atlas flag). Whether the vessel wall is FL state (candidate A) or a typed shared seam (candidate B).
+
+### `docs/atlas/gastrointestinal.md`
+
+Enteric nervous control (arena atlas flag: folded into motility modes for now).
+
+### `docs/atlas/hematology.md`
+
+Thrombosis hazard coefficients (arena atlas flag). How much of the cascade runs at runtime (arena atlas: not the full Hockin-Mann cascade yet).
+
+### `docs/atlas/hepatic.md`
+
+Zonation, shunt fraction by stage, regeneration rate (arena atlas flags). Portal to peripheral insulin gradient (shared with EN).
+
+### `docs/atlas/immune.md`
+
+Cytopathic hypoxia size (arena atlas flag). Compensatory anti-inflammatory kinetics (flagged).
+
+### `docs/atlas/metabolism-thermal.md`
+
+Critical PO2 and anaerobic constants per bed (arena atlas flag). Number of thermal nodes (eight assumed). Whether the thermal network is its own crate (`ng-net-thermal`).
+
+### `docs/atlas/musculoskeletal-skin.md`
+
+Pressure-injury thresholds in humans (arena atlas flag). Bone as a reservoir only.
+
+### `docs/atlas/nervous.md`
+
+Consciousness index shape (arena atlas flag: no identified model exists; keep it labeled). Transmitter release and clearance rates (fitted).
+
+### `docs/atlas/renal.md`
+
+Crate name. Representative nephron per kidney versus cohorts (arena atlas flag; the DAE atlas wants nephron cohorts and cortex and medulla). How much tubular detail the first bench needs.
+
+### `docs/atlas/respiratory.md`
+
+Number of alveolar units (arena atlas flag: two per lung, resolver-visible). Whether the airway graph is its own crate (`ng-net-airway`).

@@ -2,7 +2,7 @@
 "Direct couplings" graph of docs/atlas/coupling-map.md, row by row.
 
 Run from solver-contract-sketch/:  python3 -I evidence/census-check.py
-Evidence only; the repository gate the catalog's doc comment names is future work.
+tools/verify (verify.d/20-sketch.sh) runs this as a gate.
 """
 import re
 import sys

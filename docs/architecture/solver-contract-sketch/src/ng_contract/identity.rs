@@ -169,8 +169,8 @@ impl ErrorScales {
 /// The arithmetic a run is bitwise reproducible under: correctly rounded IEEE 754 binary64 add,
 /// subtract, multiply, divide and sqrt, no host libm and no `mul_add` (both banned by the
 /// repository's clippy.toml), and the contract's own versioned transcendental routines. Replay is promised bitwise within one
-/// profile at any pace and chunking, from any checkpoint, and between native and WASM where both
-/// run; across profiles or other targets it is not promised.
+/// profile at any pace and chunking and from any checkpoint;
+/// across profiles or other targets it is not promised.
 pub struct ArithmeticProfile {
     _digest: Digest,
 }

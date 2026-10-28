@@ -1,6 +1,6 @@
 # RS. Respiratory
 
-Lungs, airways, pleura and the respiratory pump. Status: **proposed card**, drawn from the two atlas documents and contract pass 1. Not a clinical claim. Numbers and thresholds arrive only in a reviewed packet.
+Lungs, airways, pleura and the respiratory pump. Not a clinical claim. Numbers and thresholds arrive only in a reviewed packet.
 
 ## What it must get right first
 
@@ -44,25 +44,15 @@ Both contract drafts drop Pulse's fixed rate lanes; the coupled solve is the def
 
 | | |
 |---|---|
-| Crate today | `vitals-respiratory`; gas exchange in `vitals-substances` (`alveolar`, `gas_exchange`) |
 | Pulse reference | `RespiratoryModel.cpp` in Pulse REL_4_3_2; today's crate cites it line by line in its source headers |
 | Proposed crate | `ng-respiratory` (see the [crate map](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/atlas/crate-map.md)) |
-| Lane | 1, organ-system modules and coupling ([engineering-lanes.md](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/vision/engineering-lanes.md)). Its conditions, devices, drugs and labs hooks belong to lanes 2 to 5 |
-| Build step | 4 (see the [build order](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/atlas/build-order.md)) |
-| Proof status | Not started on the native contract. Today's crate is the Pulse port, used as the reference to diff against |
 
 ## Decided
 
 Gas amounts are conserved across inspired, alveolar, expired and diffused amounts. Drive comes from NS, muscle from MS, carriage from BC.
-
-## Open
-
-Number of alveolar units (arena atlas flag: two per lung, resolver-visible). Whether the airway graph is its own crate (`ng-net-airway`).
 
 ## Sources
 
 - Arena atlas ("Nightingale Organ System Architecture Atlas", sha256 `4eb9fa7c`), card RS at line 231; injury table at line 313; timescales at line 327. The card's sections 2 to 7 and 10 to 12 hold compartments, laws, control, energy, hooks, parameter sources and validation cases.
 - DAE atlas ("Version 1.0, Native Rust first", sha256 `cb4ecaa5`), respiratory section at line 127.
 - Contract pass 1: [synthesis](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/2026-10-26-contract-pass-1-synthesis.md); candidate A ownership table in [DESIGN.md section 3](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/raw/a-unknown-model/ng-contract/DESIGN.md).
-
-The atlas documents are not in the repo yet; line numbers refer to the copies Shane shared on 2026-10-26, identified by the hashes in [PROVENANCE.md](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/PROVENANCE.md#inputs).

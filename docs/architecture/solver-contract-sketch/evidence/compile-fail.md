@@ -1,13 +1,5 @@
 # Compile-fail doctests: intended errors
 
-Method. Every `compile_fail,EXXXX` marker in `src/lib.rs` was removed once (31 markers, one
-`sed` pass on a saved copy), `cargo test --doc` was run, and `src/lib.rs` was restored and
-re-verified (31 markers back, 31 compile-fail doctests passing in `cargo-doctest.txt`). With the
-markers removed all 31 snippets failed to build; the 26 positive doctests still passed. Raw output:
-`compile-fail-markers-removed.log`. Lines are the doctest fence lines rustdoc reports. Revision r1
-(`../../solver-contract-review-r1.md`) added the last seven rows; the first sixteen kept their
-lines and diagnostics.
-
 | Line | Forbidden move | Marker | Actual primary diagnostic (markers removed) | Legal twin |
 |---:|---|---|---|---|
 | 19 | Name the private pool handle | E0603 | E0603 struct `PoolRef` is private | kept from B |
@@ -41,16 +33,3 @@ lines and diagnostics.
 | 457 | **Fold.** The solver draws chance (`threshold`) | E0599 | E0599 no method `threshold` on `&CoupledProblem<'_>` | line 462: `Kernel::draw` on the owner's stream |
 | 471 | **Fold.** An observer draws error from the run seed | E0308 | E0308 expected `DomainSeed<ObservationDomain>`, found `DomainSeed<RunDomain>` | line 476: `ObservationSeed` |
 | 482 | **Fold.** A guard fires on a set point | E0277 | E0277 `Reference<Pressure>: Sensed` is not satisfied | line 490: a guard on the sensed pressure |
-
-## The judge's B probes against this crate
-
-Compiled with `rustc --edition=2024 --emit=metadata --extern solver_contract_sketch=<target-final/debug/libsolver_contract_sketch.rlib>`,
-probe files copied unchanged from `/home/ark/worktrees/arch-sc/judge-scratch/`.
-
-| Probe | Result now | Reading |
-|---|---|---|
-| `b-cross-kernel-expression.rs` | exit 1, E0425 `KernelBuilder` not found | The free-standing builder is gone; the same move in the scoped API is doctest line 78 (E0521) |
-| `b-double-kernel-from-builder.rs` | exit 1, E0599 no method `kernels` | `kernels()` is gone; the same move in the scoped API is doctest line 111 (E0521) |
-| `b-unrelated-certificate-inputs.rs` | exit 1, E0599 ×2 + E0061 | Same as doctest line 149 |
-| `b-no-tangent-constructor.rs` | exit 1, E0425/E0422 `Tangent` not found | The tangent is the workspace's y′. Legal path compiles (exit 0, no diagnostics): `workspace.derivative_mut()`, `workspace.point(t)`, `problem.evaluate(Scope::Whole, &point)` |
-| `b-no-boundary-horizon.rs` | exit 1, E0615 `boundary` is a method | Problem fields are private now. Legal path compiled then (exit 0, no diagnostics): `problem.boundary().next_breakpoint(at)`; since the fold no core sees the timeline and the contract clips each ticket (line 441) |

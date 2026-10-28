@@ -1,6 +1,6 @@
 # MS. Musculoskeletal and skin
 
-Muscle, neuromuscular junction, bone and skin. Status: **proposed card**, drawn from the two atlas documents and contract pass 1. Not a clinical claim. Numbers and thresholds arrive only in a reviewed packet.
+Muscle, neuromuscular junction, bone and skin. Not a clinical claim. Numbers and thresholds arrive only in a reviewed packet.
 
 ## What it must get right first
 
@@ -44,25 +44,15 @@ Both contract drafts drop Pulse's fixed rate lanes; the coupled solve is the def
 
 | | |
 |---|---|
-| Crate today | None as a module |
 | Pulse reference | No matching Pulse system model; parts appear as Pulse actions or inside other models |
 | Proposed crate | `ng-musculoskeletal` (see the [crate map](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/atlas/crate-map.md)) |
-| Lane | 1, organ-system modules and coupling ([engineering-lanes.md](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/vision/engineering-lanes.md)). Its conditions, devices, drugs and labs hooks belong to lanes 2 to 5 |
-| Build step | 11 (see the [build order](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/atlas/build-order.md)) |
-| Proof status | Not started on the native contract. Today's crate is the Pulse port, used as the reference to diff against |
 
 ## Decided
 
 Respiratory pump force is MS state that RS reads, not an RS parameter.
-
-## Open
-
-Pressure-injury thresholds in humans (arena atlas flag). Bone as a reservoir only.
 
 ## Sources
 
 - Arena atlas ("Nightingale Organ System Architecture Atlas", sha256 `4eb9fa7c`), card MS at line 1685; injury table at line 1761; timescales at line 1776. The card's sections 2 to 7 and 10 to 12 hold compartments, laws, control, energy, hooks, parameter sources and validation cases.
 - DAE atlas ("Version 1.0, Native Rust first", sha256 `cb4ecaa5`), musculoskeletal section at line 725.
 - Contract pass 1: [synthesis](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/2026-10-26-contract-pass-1-synthesis.md); candidate A ownership table in [DESIGN.md section 3](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/raw/a-unknown-model/ng-contract/DESIGN.md).
-
-The atlas documents are not in the repo yet; line numbers refer to the copies Shane shared on 2026-10-26, identified by the hashes in [PROVENANCE.md](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/PROVENANCE.md#inputs).
