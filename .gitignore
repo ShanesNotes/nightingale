@@ -1,0 +1,9 @@
+target/
+__pycache__/
+*.pyc
+.env
+.env.*
+.scratch/runs/*/wt-*
+.scratch/runs/*/*.log
+reference/
+.DS_Store

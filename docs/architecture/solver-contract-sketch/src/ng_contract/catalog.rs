@@ -13,10 +13,10 @@
 //! (neither end in the slice) and `unresolved` (an ownership conflict kept visible). Mapped means
 //! the route has a declared home, not that the outside system is simulated.
 //!
-//! The counts are compiler-checked below. A repository gate must later compare these rows,
-//! line by line, with `docs/atlas/coupling-map.md`, so an added, removed or relabelled arrow fails
-//! the build rather than waiting for a review; today that comparison is evidence only
-//! (`solver-contract-sketch/evidence/census.txt`).
+//! The counts are compiler-checked below. `tools/verify` reruns `evidence/census-check.py`,
+//! which compares these rows line by line with `docs/atlas/coupling-map.md`, so an added,
+//! removed or relabelled arrow fails the build rather than waiting for a review.
+//!
 use super::*;
 use core::marker::PhantomData;
 

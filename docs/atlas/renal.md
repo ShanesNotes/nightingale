@@ -1,6 +1,6 @@
 # RN. Renal
 
-Kidneys and urinary tract. Status: **proposed card**, drawn from the two atlas documents and contract pass 1. Not a clinical claim. Numbers and thresholds arrive only in a reviewed packet.
+Kidneys and urinary tract. Not a clinical claim. Numbers and thresholds arrive only in a reviewed packet.
 
 ## What it must get right first
 
@@ -44,25 +44,15 @@ Both contract drafts drop Pulse's fixed rate lanes; the coupled solve is the def
 
 | | |
 |---|---|
-| Crate today | `vitals-renal` |
 | Pulse reference | `RenalModel.cpp` in Pulse REL_4_3_2; today's crate cites it line by line in its source headers |
 | Proposed crate | `ng-renal` (contract candidate A proposes `ng-kidney`) (see the [crate map](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/atlas/crate-map.md)) |
-| Lane | 1, organ-system modules and coupling ([engineering-lanes.md](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/vision/engineering-lanes.md)). Its conditions, devices, drugs and labs hooks belong to lanes 2 to 5 |
-| Build step | 1 (kidney on the bench), 2 (kidney on a minimal circulation), 7 (full volume loop) (see the [build order](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/atlas/build-order.md)) |
-| Proof status | Not started on the native contract. Today's crate is the Pulse port, used as the reference to diff against |
 
 ## Decided
 
 Nephron mass is the parameter CKD acts on. Both contract drafts use the kidney as the first bench organ, and the next council pass is the kidney.
-
-## Open
-
-Crate name. Representative nephron per kidney versus cohorts (arena atlas flag; the DAE atlas wants nephron cohorts and cortex and medulla). How much tubular detail the first bench needs.
 
 ## Sources
 
 - Arena atlas ("Nightingale Organ System Architecture Atlas", sha256 `4eb9fa7c`), card RN at line 516; injury table at line 600; timescales at line 614. The card's sections 2 to 7 and 10 to 12 hold compartments, laws, control, energy, hooks, parameter sources and validation cases.
 - DAE atlas ("Version 1.0, Native Rust first", sha256 `cb4ecaa5`), renal section at line 231.
 - Contract pass 1: [synthesis](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/2026-10-26-contract-pass-1-synthesis.md); candidate A ownership table in [DESIGN.md section 3](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/raw/a-unknown-model/ng-contract/DESIGN.md).
-
-The atlas documents are not in the repo yet; line numbers refer to the copies Shane shared on 2026-10-26, identified by the hashes in [PROVENANCE.md](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/PROVENANCE.md#inputs).

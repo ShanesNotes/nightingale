@@ -1,6 +1,6 @@
 # HC. Hematology and coagulation
 
-Formed elements, factors and clotting. Status: **proposed card**, drawn from the two atlas documents and contract pass 1. Not a clinical claim. Numbers and thresholds arrive only in a reviewed packet.
+Formed elements, factors and clotting. Not a clinical claim. Numbers and thresholds arrive only in a reviewed packet.
 
 ## What it must get right first
 
@@ -44,25 +44,15 @@ Both contract drafts drop Pulse's fixed rate lanes; the coupled solve is the def
 
 | | |
 |---|---|
-| Crate today | None as a module; hemorrhage lives in `vitals-cardiovascular` (`hemorrhage`) |
 | Pulse reference | No matching Pulse system model; parts appear as Pulse actions or inside other models |
 | Proposed crate | `ng-hematology` (see the [crate map](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/atlas/crate-map.md)) |
-| Lane | 1, organ-system modules and coupling ([engineering-lanes.md](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/vision/engineering-lanes.md)). Its conditions, devices, drugs and labs hooks belong to lanes 2 to 5 |
-| Build step | 10 (see the [build order](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/atlas/build-order.md)) |
-| Proof status | Not started on the native contract. Today's crate is the Pulse port, used as the reference to diff against |
 
 ## Decided
 
 Hemoglobin concentration is mass over blood volume, so dilution and refill emerge.
-
-## Open
-
-Thrombosis hazard coefficients (arena atlas flag). How much of the cascade runs at runtime (arena atlas: not the full Hockin-Mann cascade yet).
 
 ## Sources
 
 - Arena atlas ("Nightingale Organ System Architecture Atlas", sha256 `4eb9fa7c`), card HC at line 1167; injury table at line 1249; timescales at line 1263. The card's sections 2 to 7 and 10 to 12 hold compartments, laws, control, energy, hooks, parameter sources and validation cases.
 - DAE atlas ("Version 1.0, Native Rust first", sha256 `cb4ecaa5`), hematology section at line 517.
 - Contract pass 1: [synthesis](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/2026-10-26-contract-pass-1-synthesis.md); candidate A ownership table in [DESIGN.md section 3](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/raw/a-unknown-model/ng-contract/DESIGN.md).
-
-The atlas documents are not in the repo yet; line numbers refer to the copies Shane shared on 2026-10-26, identified by the hashes in [PROVENANCE.md](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/PROVENANCE.md#inputs).

@@ -155,7 +155,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     ) -> Expr<'b, 'k, O, Rate<U>> {
         todo!()
     }
-    /// The contract's own pinned exponential, identical on native and WASM; never host libm.
+    /// The contract's own pinned exponential, identical on every host; never host libm.
     pub fn exp(&mut self, _x: Expr<'b, 'k, O, Dimensionless>) -> Expr<'b, 'k, O, Dimensionless> {
         todo!()
     }
