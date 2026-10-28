@@ -192,10 +192,10 @@ Records in this repo form one series from 0001. A record from nightingale-pulse 
 
 This SRS carries forward the rules of these nightingale-pulse records. Each rule here states its own reason, so none depends on them.
 
-- [pulse 0001](https://github.com/ShanesNotes/nightingale-pulse/blob/{S}/docs/decisions/0001-native-rust-first.md): native Rust first (rule 5)
-- [pulse 0002](https://github.com/ShanesNotes/nightingale-pulse/blob/{S}/docs/decisions/0002-pulse-as-reference.md): Pulse as a reference (rule 6, section 6)
-- [pulse 0003](https://github.com/ShanesNotes/nightingale-pulse/blob/{S}/docs/decisions/0003-one-patient-record.md): one patient (rule 1)
-- [pulse 0004](https://github.com/ShanesNotes/nightingale-pulse/blob/{S}/docs/decisions/0004-demise-is-modeled-physiology.md): demise is modeled physiology (rule 7)
-- [pulse 0006](https://github.com/ShanesNotes/nightingale-pulse/blob/{S}/docs/decisions/0006-first-milestone-stable-healthy-body.md): the first milestone (rules 2 to 4)
-- [pulse 0007](https://github.com/ShanesNotes/nightingale-pulse/blob/{S}/docs/decisions/0007-solver-picked-by-arena-ida-dropped.md): the solver arena (rule 8)
-- [pulse north star](https://github.com/ShanesNotes/nightingale-pulse/blob/{S}/docs/vision/north-star.md): the vision the rules came from (rule 2)
+- [pulse 0001](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/decisions/0001-native-rust-first.md): native Rust first (rule 5)
+- [pulse 0002](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/decisions/0002-pulse-as-reference.md): Pulse as a reference (rule 6, section 6)
+- [pulse 0003](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/decisions/0003-one-patient-record.md): one patient (rule 1)
+- [pulse 0004](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/decisions/0004-demise-is-modeled-physiology.md): demise is modeled physiology (rule 7)
+- [pulse 0006](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/decisions/0006-first-milestone-stable-healthy-body.md): the first milestone (rules 2 to 4)
+- [pulse 0007](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/decisions/0007-solver-picked-by-arena-ida-dropped.md): the solver arena (rule 8)
+- [pulse north star](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/vision/north-star.md): the vision the rules came from (rule 2)
