@@ -19,7 +19,7 @@ mkdir -p "$copy/architecture/sketch"
 cp ../solver-contract.md "$copy/architecture/"
 cp -r Cargo.toml Cargo.lock src "$copy/architecture/sketch/"
 sed -i 's/```compile_fail,E[0-9]*/```/' "$copy/architecture/sketch/src/lib.rs"
-(cd "$copy/architecture/sketch" && cargo test --doc --locked >"$copy/unmarked.log" 2>&1) || true
+(cd "$copy/architecture/sketch" && RUSTUP_TOOLCHAIN="$want" cargo test --doc --locked >"$copy/unmarked.log" 2>&1) || true
 python3 -I - src/lib.rs "$copy/unmarked.log" <<'PY'
 import re, sys
 want = {i + 1: m.group(1) for i, line in enumerate(open(sys.argv[1], encoding='utf-8'))
