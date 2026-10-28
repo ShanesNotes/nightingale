@@ -66,7 +66,7 @@ flowchart TB
   Organs --> REC
 ```
 
-The observation layer reads the record and posts nothing back to physiology (ADR-67).
+The observation layer reads the record and posts nothing back to physiology (pulse ADR-67).
 
 ## Direct couplings
 
@@ -128,7 +128,7 @@ From the arena atlas (line 1892), and enforced by the contract's ownership regis
 
 ## Demise paths
 
-Decision [0004](../decisions/0004-demise-is-modeled-physiology.md) needs dying to emerge from these couplings. The main paths in the cards:
+[pulse 0004](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/decisions/0004-demise-is-modeled-physiology.md) needs dying to emerge from these couplings. The main paths in the cards:
 
 ```mermaid
 flowchart LR
@@ -143,4 +143,4 @@ flowchart LR
   ARREST --> DEATH
 ```
 
-Neither contract draft has the discrete modes and hazards this needs yet; see the [synthesis](../council/2026-10-26-contract-pass-1/2026-10-26-contract-pass-1-synthesis.md#gaps-in-both) gap 1 and [decision 0005](../decisions/0005-core-contract-pass-1-choices.md) question 5. How death is defined as a record state is open in decision 0004.
+Neither contract draft has the discrete modes and hazards this needs yet; see the [synthesis](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/2026-10-26-contract-pass-1-synthesis.md#gaps-in-both) gap 1 and [pulse 0005](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/decisions/0005-core-contract-pass-1-choices.md) question 5. How death is defined as a record state is open in pulse 0004.

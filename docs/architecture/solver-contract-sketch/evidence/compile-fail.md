@@ -33,7 +33,7 @@ lines and diagnostics.
 | 309 | **r1.** Book extents as one sampled rate times the step | E0451 | E0451 fields `_layout`, `_interval`, `_forward` and `_reverse` of `Extents` are private | line 317: `Quadrature::finish` |
 | 327 | **r1.** Write a reaction from raw stoichiometry | E0451 | E0451 fields `_stoichiometry`, `_brand` and `_owner` of `BalancedReaction` are private | line 335: `ReceptorScope::parts` |
 | 344 | **r1.** Call host math on an expression | E0599 | E0599 no method `value` on `Expr` | line 351: `Kernel::exp` |
-| 360 | **#301.** A renal guard fires a CV mode transition | E0308 | E0308 expected `ModeTransition<'_, Renal>`, found `ModeTransition<'_, Cardiovascular>` | line 368: `Guard::new` with the owner's own transition |
+| 360 | **nightingale-pulse#301.** A renal guard fires a CV mode transition | E0308 | E0308 expected `ModeTransition<'_, Renal>`, found `ModeTransition<'_, Cardiovascular>` | line 368: `Guard::new` with the owner's own transition |
 | 378 | **Fold.** A capillary-bed law reads a junction's entry | E0308 | E0308 expected `CapillaryBed`, found `Junction` (`PureKernel<'b, Fluids, Dimensionless, CapillaryBed>`) | line 389: `Kernel::at_site` on the bed's own port |
 | 401 | **Fold.** A set point used as the variable it guards | E0308 | E0308 expected `Expr<'_, '_, Nervous, Pressure>`, found `Expr<'_, '_, Nervous, Reference<Pressure>>` | line 410: `Kernel::deviation` |
 | 421 | **Fold.** Volume times volume named a pressure | E0277 | E0277 `SameDimension<_>` is not implemented for `Product<Volume, Volume>` | line 430: `Product<Elastance, Volume>` as `Pressure` |

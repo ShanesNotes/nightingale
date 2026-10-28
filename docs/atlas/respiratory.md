@@ -32,7 +32,7 @@ Gases: RS owns alveolar exchange transfers (A section 3). BC derives PO2, SO2 an
 
 Bronchospasm, plugging, atelectasis, pulmonary edema, pneumonia, ARDS, pneumothorax. **Demise:** respiratory failure leads to hypoxemia and hypercapnia that drive CV rhythm hazards and NS hypoxic injury; RS itself has no death state.
 
-Decision [0004](../decisions/0004-demise-is-modeled-physiology.md) applies: a numerical failure is an engine fault, never a death.
+[pulse 0004](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/decisions/0004-demise-is-modeled-physiology.md) applies: a numerical failure is an engine fault, never a death.
 
 ## Timescales
 
@@ -46,9 +46,9 @@ Both contract drafts drop Pulse's fixed rate lanes; the coupled solve is the def
 |---|---|
 | Crate today | `vitals-respiratory`; gas exchange in `vitals-substances` (`alveolar`, `gas_exchange`) |
 | Pulse reference | `RespiratoryModel.cpp` in Pulse REL_4_3_2; today's crate cites it line by line in its source headers |
-| Proposed crate | `ng-respiratory` (see the [crate map](crate-map.md)) |
-| Lane | 1, organ-system modules and coupling ([engineering-lanes.md](../vision/engineering-lanes.md)). Its conditions, devices, drugs and labs hooks belong to lanes 2 to 5 |
-| Build step | 4 (see the [build order](build-order.md)) |
+| Proposed crate | `ng-respiratory` (see the [crate map](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/atlas/crate-map.md)) |
+| Lane | 1, organ-system modules and coupling ([engineering-lanes.md](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/vision/engineering-lanes.md)). Its conditions, devices, drugs and labs hooks belong to lanes 2 to 5 |
+| Build step | 4 (see the [build order](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/atlas/build-order.md)) |
 | Proof status | Not started on the native contract. Today's crate is the Pulse port, used as the reference to diff against |
 
 ## Decided
@@ -63,6 +63,6 @@ Number of alveolar units (arena atlas flag: two per lung, resolver-visible). Whe
 
 - Arena atlas ("Nightingale Organ System Architecture Atlas", sha256 `4eb9fa7c`), card RS at line 231; injury table at line 313; timescales at line 327. The card's sections 2 to 7 and 10 to 12 hold compartments, laws, control, energy, hooks, parameter sources and validation cases.
 - DAE atlas ("Version 1.0, Native Rust first", sha256 `cb4ecaa5`), respiratory section at line 127.
-- Contract pass 1: [synthesis](../council/2026-10-26-contract-pass-1/2026-10-26-contract-pass-1-synthesis.md); candidate A ownership table in [DESIGN.md section 3](../council/2026-10-26-contract-pass-1/raw/a-unknown-model/ng-contract/DESIGN.md).
+- Contract pass 1: [synthesis](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/2026-10-26-contract-pass-1-synthesis.md); candidate A ownership table in [DESIGN.md section 3](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/raw/a-unknown-model/ng-contract/DESIGN.md).
 
-The atlas documents are not in the repo yet; line numbers refer to the copies Shane shared on 2026-10-26, identified by the hashes in [PROVENANCE.md](../council/2026-10-26-contract-pass-1/PROVENANCE.md#inputs).
+The atlas documents are not in the repo yet; line numbers refer to the copies Shane shared on 2026-10-26, identified by the hashes in [PROVENANCE.md](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/PROVENANCE.md#inputs).

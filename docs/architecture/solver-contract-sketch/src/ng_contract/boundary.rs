@@ -123,7 +123,7 @@ pub enum SleepState {
     Awake,
     Nrem,
 }
-/// Pending timeline plus cursor and active deliveries: record state, checkpointed (#238).
+/// Pending timeline plus cursor and active deliveries: record state, checkpointed (nightingale-pulse#238).
 pub struct PendingInputs {
     _port: BoundaryPort,
     _cursor: u64,

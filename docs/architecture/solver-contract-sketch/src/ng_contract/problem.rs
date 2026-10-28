@@ -399,7 +399,7 @@ impl StepTicket {
     /// True when this interval starts at a physical breakpoint (an input applied, or a guard fired
     /// and changed mode). A core restarts its numerical caches there (method history, Jacobian,
     /// predictor, step controller) and validation checks that the proposal's `MethodHistory` starts
-    /// at this instant. Physiological state and the cumulative ledger never restart (0006).
+    /// at this instant. Physiological state and the cumulative ledger never restart (pulse 0006).
     pub fn after_breakpoint(&self) -> bool {
         todo!()
     }

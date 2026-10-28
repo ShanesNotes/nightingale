@@ -26,7 +26,7 @@ The rows of the core contract's ownership table where this system owns a process
 
 ## Injury, failure and demise
 
-Its failure stages, and its role in dying: rhythm modes, injury integrals, or what it passes to the cards that own them. A numerical failure is an engine fault, never a death ([decision 0004](../decisions/0004-demise-is-modeled-physiology.md)).
+Its failure stages, and its role in dying: rhythm modes, injury integrals, or what it passes to the cards that own them. A numerical failure is an engine fault, never a death ([pulse 0004](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/decisions/0004-demise-is-modeled-physiology.md)).
 
 ## Timescales
 
@@ -38,9 +38,9 @@ Fastest law to slowest adaptation, in one line.
 |---|---|
 | Crate today | The `vitals-*` crate and module, or "None" |
 | Pulse reference | The Pulse REL_4_3_2 model file, or "No matching Pulse system model" |
-| Proposed crate | From the [crate map](crate-map.md) |
-| Lane | From [engineering-lanes.md](../vision/engineering-lanes.md) |
-| Build step | From the [build order](build-order.md) |
+| Proposed crate | From the [crate map](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/atlas/crate-map.md) |
+| Lane | From [engineering-lanes.md](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/vision/engineering-lanes.md) |
+| Build step | From the [build order](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/atlas/build-order.md) |
 | Proof status | Not started, bench passing, loop passing, or validated, with the test that shows it |
 
 ## Decided

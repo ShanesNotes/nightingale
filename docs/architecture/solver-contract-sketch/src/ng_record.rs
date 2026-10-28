@@ -394,9 +394,9 @@ impl BranchId {
     }
 }
 /// The accepted record at one boundary: state, bound parameters, solver continuation, stream
-/// positions, pending and active boundary inputs (#238), command cursor and fence, history roots,
+/// positions, pending and active boundary inputs (nightingale-pulse#238), command cursor and fence, history roots,
 /// and the last dense segment. An observer's own state is checkpointed beside it, bound to its
-/// seal (`ng_observe::ObserverCheckpoint`), so a restore brings back outputs too (#273).
+/// seal (`ng_observe::ObserverCheckpoint`), so a restore brings back outputs too (nightingale-pulse#273).
 pub struct Checkpoint {
     _identity: RunIdentity,
     _branch: BranchAncestry,
