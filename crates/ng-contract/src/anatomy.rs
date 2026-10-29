@@ -564,35 +564,45 @@ impl Anatomy {
         }
     }
 
-    /// SHA-256 over the anatomy's canonical bytes: the map's part of the model hash.
+    /// SHA-256 over the anatomy's canonical bytes: the map's part of the model hash. Both structs are
+    /// destructured whole, so a field added to either cannot compile until it is hashed or named here.
     pub fn digest(&self) -> Digest {
+        let Self {
+            sites,
+            preorder: _,
+            vascular,
+            served_by,
+            regions,
+        } = self;
         let mut bytes = Canonical::new("ng-contract anatomy 1");
         let index = |bytes: &mut Canonical, site: usize| bytes.number(site as u64);
-        bytes.number(self.sites.len() as u64);
-        for site in &self.sites {
-            bytes.text(site.id.key);
-            bytes.number(site.id.class as u64);
-            for measure in [
-                &site.position.axial,
-                &site.position.lateral,
-                &site.position.sagittal,
-            ] {
+        bytes.number(sites.len() as u64);
+        let (mut contains, mut encloses, mut spaces) = (Vec::new(), Vec::new(), Vec::new());
+        for (at, site) in sites.iter().enumerate() {
+            let Placed {
+                id,
+                position,
+                parent,
+                subtree: _,
+                enclosed_by,
+                compliance,
+            } = site;
+            bytes.text(id.key);
+            bytes.number(id.class as u64);
+            for measure in [&position.axial, &position.lateral, &position.sagittal] {
                 bytes.number(measure.bits());
             }
+            contains.extend(parent.map(|up| (at, up)));
+            encloses.extend(enclosed_by.map(|space| (at, space)));
+            spaces.extend(compliance.map(|how| (at, how)));
         }
-        for link in [
-            self.links(|site| site.parent),
-            self.links(|site| site.enclosed_by),
-        ] {
+        for link in [contains, encloses] {
             bytes.number(link.len() as u64);
             for (from, to) in link {
                 index(&mut bytes, from);
                 index(&mut bytes, to);
             }
         }
-        let spaces: Vec<(usize, Compliance)> = (self.sites.iter().enumerate())
-            .filter_map(|(at, site)| site.compliance.map(|how| (at, how)))
-            .collect();
         bytes.number(spaces.len() as u64);
         for (space, how) in spaces {
             index(&mut bytes, space);
@@ -612,19 +622,19 @@ impl Anatomy {
                 }
             }
         }
-        bytes.number(self.vascular.len() as u64);
-        for &(from, to) in &self.vascular {
+        bytes.number(vascular.len() as u64);
+        for &(from, to) in vascular {
             index(&mut bytes, from);
             index(&mut bytes, to);
         }
-        bytes.number(self.served_by.len() as u64);
-        for &(site, segment, kind) in &self.served_by {
+        bytes.number(served_by.len() as u64);
+        for &(site, segment, kind) in served_by {
             index(&mut bytes, site);
             index(&mut bytes, segment);
             bytes.number(kind as u64);
         }
-        bytes.number(self.regions.len() as u64);
-        for &(key, root) in &self.regions {
+        bytes.number(regions.len() as u64);
+        for &(key, root) in regions {
             bytes.text(key);
             index(&mut bytes, root);
         }
@@ -639,13 +649,6 @@ impl Anatomy {
             .binary_search_by_key(&region.key, |&(key, _)| key)
             .ok()?;
         Some(&self.preorder[self.sites[self.regions[at].1].subtree.clone()])
-    }
-
-    fn links(&self, link: fn(&Placed) -> Option<usize>) -> Vec<(usize, usize)> {
-        let linked = self.sites.iter().enumerate();
-        linked
-            .filter_map(|(at, site)| link(site).map(|to| (at, to)))
-            .collect()
     }
 
     pub(crate) fn sites(&self) -> impl Iterator<Item = SiteId> + '_ {
