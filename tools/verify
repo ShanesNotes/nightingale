@@ -52,7 +52,7 @@ for step in tools/verify.d/*.sh; do
   case " $steps " in
     *" ${name%.sh} "*)
       echo "== $name"
-      bash "$step"
+      bash "$step" || { echo "verify: $name failed"; exit 1; }
       ;;
     *) echo "== $name (not selected)" ;;
   esac

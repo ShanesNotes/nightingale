@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Format, clippy with warnings denied and the tests over the plan's crates, the smoke targets of crates
+# the plan does not test, and the bans probe. Run by hand, without NG_GATE_CRATES, it covers every member.
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+# Cargo takes the first flag source it finds, so an empty RUSTFLAGS shuts out a host config's
+# `--cap-lints allow`, which would silently disable forbid.
+export RUSTFLAGS="" RUSTDOCFLAGS=""
+unset CARGO_ENCODED_RUSTFLAGS CARGO_ENCODED_RUSTDOCFLAGS CLIPPY_CONF_DIR RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER
+if [ -z "${NG_GATE_CRATES+set}" ]; then
+  NG_GATE_CRATES=$(python3 -I tools/gate/gate.py plan full | sed -n 's/^crates=//p') || exit 1
+fi
+cargo fmt --all --check
+pkgs=()
+for crate in $NG_GATE_CRATES; do
+  pkgs+=(-p "$crate")
+done
+if [ ${#pkgs[@]} -gt 0 ]; then
+  cargo clippy --locked --all-targets "${pkgs[@]}" -- -D warnings
+  if [ "${NG_GATE_MODE:-}" = full ]; then
+    cargo test --locked "${pkgs[@]}" -- --include-ignored
+  else
+    cargo test --locked "${pkgs[@]}"
+  fi
+fi
+for smoke in ${NG_GATE_SMOKE:-}; do
+  case " $NG_GATE_CRATES " in
+    *" ${smoke%%:*} "*) ;;
+    *) cargo test --locked -p "${smoke%%:*}" --test "${smoke#*:}" ;;
+  esac
+done
+[ "${NG_GATE_MODE:-}" = changed ] || python3 -I tools/gate/gate.py bans
