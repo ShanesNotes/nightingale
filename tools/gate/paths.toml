@@ -4,7 +4,6 @@
 # everything.
 schema = 1
 
-# Steps every run takes.
 always = ["01-toolchain"]
 
 # Steps a run adds when it reaches a crate, run over the crates it reaches.
