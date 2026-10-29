@@ -1,4 +1,3 @@
-# What tools/verify runs for a set of changed paths, and the crates it knows.
 # Globs: `*` stays inside one path segment and `**` crosses segments. The first rule that
 # matches a path wins for it, a run takes the union of its paths' rules, and a path no rule matches runs
 # everything.
