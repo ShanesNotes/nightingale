@@ -4,9 +4,9 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 **What to build:** A law declares a stream and a hazard guard that fires a mode change when the integrated hazard crosses the stream's draw, and a forcing that varies a rate on a knotted spline; replay holds with both on.
 
-**Blocked by:** 05
+Blocked by: 05
 
-**Status:** ready-for-agent
+Status: ready-for-agent
 
 - [ ] The stream's draw depends only on seed, key and event ordinal: adding a second stream leaves the first's draws unchanged
 - [ ] A forced extra evaluation before the hazard event leaves its draw and ordinal unchanged

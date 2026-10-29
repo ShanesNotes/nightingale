@@ -1,7 +1,7 @@
 # 07: Contract follow-ups
 
 Type: task
-Status: needs-triage
+Status: open
 Blocked by: none
 
 Changes to `docs/architecture/solver-contract.md` and its sketch, each a contract version where it changes a type. The split's hygiene pass moved the contract's open questions and its next implementation step here (below).
@@ -55,3 +55,7 @@ From the SRS sharpening (conflict ids from the approved SRS's change log):
 ### Next implementation step
 
 Build the first slice in the spec below, starting with the `ng-contract` anatomy and site-class laws. Then build one manufactured pulsatile circulation, renal, regional-fluid and baroreflex loop from typed fragments. It must prove incidence and energy closure, validate-then-publish refusal with nonempty pending inputs, the generated census gate and the replay gates before either 48 h core runs.
+
+## Comments
+
+Triage, 2026-10-29 (developer reviewer's call, delegated): ready. Its items (C3, C9, C16, the lens's clinical numbers, the day and the healthy-range set) are contract changes the first milestone needs (SRS I19, records 0003 to 0005). Sourcing the packet and the healthy-range set is not part of it.

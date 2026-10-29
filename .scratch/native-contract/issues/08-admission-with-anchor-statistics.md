@@ -4,9 +4,9 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 **What to build:** The admission system solves a manufactured pulsatile case once, fitting a calibrated parameter so that a cycle-mean anchor holds under the periodic goal, and records provenance for every value.
 
-**Blocked by:** 04
+Blocked by: 04
 
-**Status:** ready-for-agent
+Status: ready-for-agent
 
 - [ ] A cycle-mean anchor on a pulsatile output is met as a cycle mean, not an instant
 - [ ] An initializer that returns a guess violating a row or anchor is refused with the row named

@@ -4,9 +4,9 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 **What to build:** The validation crate runs the manufactured body under each replay gate and reports digests. The gates are pace (unbounded, wall clock, chunked), resume into a freshly built core through stored checkpoint bytes and a history store, an input admitted mid-run, and an in-process rewind after the parent ran ahead.
 
-**Blocked by:** 04
+Blocked by: 04
 
-**Status:** ready-for-agent
+Status: ready-for-agent
 
 - [ ] All four gates pass for the reference core, with identical accepted-state, ledger and event digests
 - [ ] A core that keeps a cache outside its continuation fails resume and rewind

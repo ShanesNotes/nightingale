@@ -4,9 +4,9 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 **What to build:** A chart author compiles a lens (channels and an output grid) against the body, reads the last accepted revision through `Session::observation`, and runs an observer that applies windows, delays and seeded measurement error, one revision at a time.
 
-**Blocked by:** 05
+Blocked by: 05
 
-**Status:** ready-for-agent
+Status: ready-for-agent
 
 - [ ] The lens digest is not in the run identity; applying a new lens to a finished replay gives identical physiology digests and new findings
 - [ ] Physiology digests are identical with observers attached, detached and changed (the non-perturbation gate)

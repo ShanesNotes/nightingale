@@ -1,7 +1,7 @@
 # 06: Atlas card trims, applied as each system is built
 
 Type: task
-Status: needs-triage
+Status: open
 Blocked by: none
 
 The atlas is frozen at import. When a system's crate is built, its card gets the uniform trim and its own cuts below, and the open items moved here from its card are answered or carried. Line numbers are at the audit's stand-in commit; re-derive them on the card. Never shift lines 1 to 114 of `docs/atlas/coupling-map.md`, and keep lines 77 to 114 byte for byte, because the sketch's census asserts them.
@@ -85,3 +85,7 @@ Crate name. Representative nephron per kidney versus cohorts (arena atlas flag; 
 ### `docs/atlas/respiratory.md`
 
 Number of alveolar units (arena atlas flag: two per lung, resolver-visible). Whether the airway graph is its own crate (`ng-net-airway`).
+
+## Comments
+
+Triage, 2026-10-29 (developer reviewer's call, delegated): ready. Each card trim lands with the crate of its system (SRS section 2, System), so the atlas matches the code as the 13 systems are built; nothing blocks it.
