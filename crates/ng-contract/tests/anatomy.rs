@@ -1,6 +1,5 @@
 use ng_contract::*;
 
-// Positions are synthetic heights, not anatomical ones.
 fn at(axial: f64) -> Result<Position, AdmissionError> {
     Ok(Position::new(
         Measure::new(axial)?,
@@ -22,8 +21,6 @@ struct Manufactured {
     region: RegionId,
 }
 
-// Ticket 02's manufactured anatomy: two capillary beds in series on a vascular loop, one enclosure,
-// one junction, one nerve segment, a served-by edge and a region.
 fn manufactured() -> Result<Manufactured, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let body = map.site::<TissueSite>("body", at(0.0)?);
@@ -331,14 +328,14 @@ fn a_site_enclosed_twice_is_refused() -> Result<(), AdmissionError> {
 }
 
 #[test]
-fn a_site_with_no_position_here_is_refused() -> Result<(), AdmissionError> {
+fn a_site_this_anatomy_does_not_declare_is_refused() -> Result<(), AdmissionError> {
     let mut elsewhere = AnatomyBuilder::new();
     let unplaced = elsewhere.site::<CapillaryBed>("bed 9", at(1.0)?);
     let Manufactured { mut map, organ, .. } = manufactured()?;
     map.contain(organ.id(), unplaced.id());
     assert_eq!(
         map.finish().err(),
-        refused(AnatomyDefect::NoPosition { site: "bed 9" })
+        refused(AnatomyDefect::Undeclared { site: "bed 9" })
     );
 
     let other_class = elsewhere.site::<CapillaryBed>("junction", at(1.0)?);
@@ -346,7 +343,7 @@ fn a_site_with_no_position_here_is_refused() -> Result<(), AdmissionError> {
     map.contain(organ.id(), other_class.id());
     assert_eq!(
         map.finish().err(),
-        refused(AnatomyDefect::NoPosition { site: "junction" })
+        refused(AnatomyDefect::Undeclared { site: "junction" })
     );
     Ok(())
 }
@@ -361,6 +358,24 @@ fn a_containment_cycle_is_refused() -> Result<(), AdmissionError> {
     assert_eq!(
         map.finish().err(),
         refused(AnatomyDefect::ContainmentCycle { site: "loop a" })
+    );
+
+    let mut map = AnatomyBuilder::new();
+    let mut tissue =
+        |key| -> Result<SiteId, AdmissionError> { Ok(map.site::<TissueSite>(key, at(0.0)?).id()) };
+    let (a, b, c, x, y) = (
+        tissue("a")?,
+        tissue("b")?,
+        tissue("c")?,
+        tissue("x")?,
+        tissue("y")?,
+    );
+    for (parent, child) in [(x, a), (y, x), (x, y), (c, b), (b, c)] {
+        map.contain(parent, child);
+    }
+    assert_eq!(
+        map.finish().err(),
+        refused(AnatomyDefect::ContainmentCycle { site: "b" })
     );
     Ok(())
 }

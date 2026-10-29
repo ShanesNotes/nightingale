@@ -1,4 +1,3 @@
-/// A directed graph over key-order site indices, as compressed adjacency.
 pub(super) struct Digraph {
     starts: Vec<usize>,
     targets: Vec<usize>,
@@ -97,7 +96,6 @@ impl Digraph {
         component
     }
 
-    /// Which nodes a walk along the edges from `seeds` reaches, the seeds included.
     pub(super) fn reachable(&self, seeds: &[usize]) -> Vec<bool> {
         let mut seen = vec![false; self.nodes()];
         for &seed in seeds {

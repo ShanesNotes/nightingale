@@ -1,7 +1,6 @@
 use crate::AdmissionError;
 use core::marker::PhantomData;
 
-/// Length, the dimension of a position in the body frame.
 pub enum Length {}
 
 /// A finite value of dimension `U` in its canonical unit.

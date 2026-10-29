@@ -28,7 +28,6 @@ macro_rules! site_classes {
     };
 }
 
-/// A kind of site whose members share the same laws. Sealed: a new class is a contract version.
 pub trait SiteClass: sealed::SiteClass {}
 
 site_classes!(
@@ -42,7 +41,6 @@ site_classes!(
 
 pub(crate) use sealed::Class;
 
-/// A site of class `C`, issued by [`AnatomyBuilder::site`].
 pub struct Site<C> {
     key: &'static str,
     class: PhantomData<C>,
@@ -69,8 +67,6 @@ impl SiteId {
     }
 }
 
-/// Height along the body's long axis, then the lateral and sagittal offsets. Posture rotates the
-/// frame, so a site's hydrostatic head follows from its position and no law carries gravity.
 pub struct Position {
     axial: Measure<Length>,
     lateral: Measure<Length>,
@@ -86,14 +82,11 @@ impl Position {
     }
 }
 
-/// A flow network over the sites. A network joins only with the check that holds it, so the lymph,
-/// airway, duct and cerebrospinal networks arrive with theirs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Network {
     Vascular,
 }
 
-/// How an enclosed space's pressure answers the volume inside it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Compliance {
     Rigid,
@@ -115,22 +108,20 @@ pub enum Afferent {
     Thermal,
 }
 
-/// A region named by its key; its members are the containment subtree under its root.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RegionId {
     key: &'static str,
 }
 
-/// Why `finish` refused an anatomy, with the least key that shows it. The checks run in this order.
+/// Each names the least key that shows it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnatomyDefect {
     /// Two sites under one key.
     DeclaredTwice {
         site: &'static str,
     },
-    /// A relation names a site this anatomy never placed: a key it does not hold, or one it holds
-    /// under another class.
-    NoPosition {
+    /// A relation names a site this anatomy does not declare under that key and class.
+    Undeclared {
         site: &'static str,
     },
     /// One region key on two roots.
@@ -141,15 +132,14 @@ pub enum AnatomyDefect {
     WrongRelation {
         site: &'static str,
     },
-    /// A site with two parents.
     ContainedTwice {
         site: &'static str,
     },
     ContainmentCycle {
         site: &'static str,
     },
-    /// A site outside the containment tree, whose root is the parentless site holding the most
-    /// sites.
+    /// A parentless site other than the root, which is the parentless site holding the most sites,
+    /// ties to the least key.
     OrphanSite {
         site: &'static str,
     },
@@ -183,7 +173,6 @@ struct Declared {
     position: Position,
 }
 
-/// Records declarations as given; `finish` checks them all at once.
 #[derive(Default)]
 pub struct AnatomyBuilder {
     sites: Vec<Declared>,
@@ -242,7 +231,6 @@ impl AnatomyBuilder {
     }
 }
 
-/// The declarations with sites in key order and each relation as sorted, distinct key-order indices.
 struct Facts {
     sites: Vec<Declared>,
     contains: Vec<(usize, usize)>,
@@ -261,7 +249,7 @@ impl Facts {
         }
         let place = |id: SiteId| match sites.binary_search_by_key(&id.key, |site| site.key) {
             Ok(index) if sites[index].class == id.class => Ok(index),
-            _ => Err(AnatomyDefect::NoPosition { site: id.key }),
+            _ => Err(AnatomyDefect::Undeclared { site: id.key }),
         };
         let named = (builder
             .contains
@@ -278,7 +266,7 @@ impl Facts {
         )
         .chain(builder.regions.iter().map(|&(_, root)| root));
         if let Some(site) = named.filter(|&id| place(id).is_err()).map(|id| id.key).min() {
-            return Err(AnatomyDefect::NoPosition { site });
+            return Err(AnatomyDefect::Undeclared { site });
         }
         let pair = |(first, second): (SiteId, SiteId)| Ok((place(first)?, place(second)?));
         let regions = relation(builder.regions, |(key, root)| Ok((key, place(root)?)))?;
@@ -315,9 +303,6 @@ impl Facts {
         }
     }
 
-    /// The circulation is the largest strongly connected part of the vascular network that holds a
-    /// vessel segment, ties to the one holding the least key. Blood enters a bed from it and must be
-    /// able to return to it. With no circulation, a bed fed from any vessel segment cannot drain.
     fn check_circulation(&self) -> Result<(), AnatomyDefect> {
         let count = self.sites.len();
         let forward = Digraph::new(count, &self.vascular);
@@ -357,7 +342,6 @@ impl Facts {
     }
 }
 
-/// A relation's declarations as key-order indices, sorted, with identical repeats merged into one fact.
 fn relation<T, U: Ord>(
     declared: Vec<T>,
     place: impl Fn(T) -> Result<U, AnatomyDefect>,
@@ -368,8 +352,7 @@ fn relation<T, U: Ord>(
     Ok(facts)
 }
 
-/// The least site on the first cycle met by walking `next` from each site in key order.
-fn first_cycle(next: &[Option<usize>]) -> Option<usize> {
+fn least_on_cycle(next: &[Option<usize>]) -> Option<usize> {
     #[derive(Clone, Copy, PartialEq)]
     enum Mark {
         New,
@@ -377,6 +360,7 @@ fn first_cycle(next: &[Option<usize>]) -> Option<usize> {
         Done,
     }
     let mut mark = vec![Mark::New; next.len()];
+    let mut least: Option<usize> = None;
     for start in 0..next.len() {
         let mut walk = Vec::new();
         let mut at = Some(start);
@@ -387,7 +371,12 @@ fn first_cycle(next: &[Option<usize>]) -> Option<usize> {
                     walk.push(site);
                     at = next[site];
                 }
-                Mark::OnWalk => return walk.iter().skip_while(|&&step| step != site).min().copied(),
+                Mark::OnWalk => {
+                    if let Some(found) = walk.iter().skip_while(|&&step| step != site).min().copied() {
+                        least = Some(least.map_or(found, |least| least.min(found)));
+                    }
+                    break;
+                }
                 Mark::Done => break,
             }
         }
@@ -395,10 +384,9 @@ fn first_cycle(next: &[Option<usize>]) -> Option<usize> {
             mark[site] = Mark::Done;
         }
     }
-    None
+    least
 }
 
-/// Gives each site the first value it is assigned, and returns the least site assigned a different one.
 fn single_valued<T: Copy + PartialEq>(
     slots: &mut [Option<T>],
     facts: impl Iterator<Item = (usize, T)>,
@@ -414,8 +402,6 @@ fn single_valued<T: Copy + PartialEq>(
     twice
 }
 
-/// The containment tree in pre-order from its root, children in key order, so every subtree is
-/// one contiguous run of `preorder`.
 struct Tree {
     parent: Vec<Option<usize>>,
     preorder: Vec<usize>,
@@ -430,7 +416,7 @@ impl Tree {
                 site: facts.key(site),
             });
         }
-        if let Some(site) = first_cycle(&parent) {
+        if let Some(site) = least_on_cycle(&parent) {
             return Err(AnatomyDefect::ContainmentCycle {
                 site: facts.key(site),
             });
@@ -473,7 +459,6 @@ impl Tree {
     }
 }
 
-/// Each site's enclosing space and each enclosed space's compliance.
 struct Enclosure {
     enclosed_by: Vec<Option<usize>>,
     compliance: Vec<Option<Compliance>>,
@@ -502,7 +487,7 @@ impl Enclosure {
                 space: facts.key(space),
             });
         }
-        if let Some(space) = first_cycle(&enclosed_by) {
+        if let Some(space) = least_on_cycle(&enclosed_by) {
             return Err(AnatomyDefect::EnclosureCycle {
                 space: facts.key(space),
             });
@@ -514,7 +499,6 @@ impl Enclosure {
     }
 }
 
-/// One site in key order, the index every relation, the registry and the compiler use.
 struct Placed {
     id: SiteId,
     position: Position,
@@ -524,8 +508,6 @@ struct Placed {
     compliance: Option<Compliance>,
 }
 
-/// The checked anatomy, laid out in key order. Nothing in it depends on the order declarations
-/// were made in or on how often an identical one was repeated.
 pub struct Anatomy {
     sites: Vec<Placed>,
     preorder: Vec<SiteId>,
@@ -564,8 +546,7 @@ impl Anatomy {
         }
     }
 
-    /// SHA-256 over the anatomy's canonical bytes: the map's part of the model hash. Both structs are
-    /// destructured whole, so a field added to either cannot compile until it is hashed or named here.
+    /// SHA-256 over the anatomy's canonical bytes: the map's part of the model hash.
     pub fn digest(&self) -> Digest {
         let Self {
             sites,

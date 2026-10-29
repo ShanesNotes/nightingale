@@ -1,7 +1,6 @@
 use ng_contract::*;
 
-// A linear congruential generator (Knuth's MMIX constants) with a fixed seed, so every run draws
-// the same maps.
+// A linear congruential generator (Knuth's MMIX constants).
 struct Draws(u64);
 impl Draws {
     fn below(&mut self, bound: usize) -> usize {
@@ -51,8 +50,6 @@ fn declare(map: &mut AnatomyBuilder, name: Name, height: usize) -> Result<SiteId
     })
 }
 
-// Ids are names, so a handle from a builder that is never finished names the site with the same
-// key and class in the map under test.
 fn id(name: Name) -> Result<SiteId, AdmissionError> {
     declare(&mut AnatomyBuilder::new(), name, 0)
 }
@@ -97,9 +94,6 @@ fn build(declarations: &[Declaration]) -> Result<Outcome, AdmissionError> {
     }))
 }
 
-// A map that starts valid (a tissue-site root containing every site, each bed on a loop through a
-// vessel segment, each enclosed space with a compliance) and then takes a few random declarations,
-// so both admitted and refused maps are common.
 fn draw_map(draws: &mut Draws) -> Vec<Declaration> {
     let mut keys: Vec<usize> = (0..KEYS.len()).collect();
     for last in (1..keys.len()).rev() {
@@ -160,8 +154,6 @@ fn draw_map(draws: &mut Draws) -> Vec<Declaration> {
     declarations
 }
 
-// The same declarations in another order, with some relations repeated. A site is never repeated:
-// a second declaration under one key is a different map.
 fn reordered(declarations: &[Declaration], draws: &mut Draws) -> Vec<Declaration> {
     let mut copy = declarations.to_vec();
     for last in (1..copy.len()).rev() {

@@ -3,8 +3,6 @@
 //!
 //! # Type rules
 //!
-//! Each rule is a compile-fail test with the error it must fail with, beside a legal twin.
-//!
 //! A site has a position.
 //! ```compile_fail,E0061
 //! use ng_contract::*;

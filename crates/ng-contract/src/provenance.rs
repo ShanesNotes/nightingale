@@ -1,4 +1,3 @@
-/// The stable key a parameter is declared and bound under; its value arrives later from a packet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ParameterKey {
     key: &'static str,

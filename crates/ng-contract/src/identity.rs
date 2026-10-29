@@ -90,8 +90,6 @@ fn compress(state: &mut [u32; 8], block: &[u8; 64]) {
     }
 }
 
-/// Bytes a digest is taken over: a format tag, then big-endian integers and length-prefixed UTF-8 in
-/// the order the caller writes them.
 pub(crate) struct Canonical {
     bytes: Vec<u8>,
 }
