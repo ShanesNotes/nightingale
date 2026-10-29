@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# The nightly: a full run of a clean checkout of origin/main, recorded through gate.py in
-# ~/.local/state/nightingale/nightly.json. The machine-state job owns the schedule, the fetch, the detached
-# checkout and the alert on a non-zero exit.
-#
 #   tools/gate/nightly.sh <log>   0 green or already green for this commit, verify's status when red,
 #                                 2 refused (usage, a dirty tree, or HEAD is not origin/main)
 set -euo pipefail

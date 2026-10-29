@@ -44,7 +44,7 @@ BUILD_FILES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "clippy.toml",
 
 
 class GateError(Exception):
-    """An input the gate reads is missing or malformed. The run fails; it is never a pass."""
+    pass
 
 
 @dataclasses.dataclass(frozen=True)
@@ -64,8 +64,6 @@ class Violations(Exception):
 
 @dataclasses.dataclass(frozen=True)
 class Glob:
-    """`*` stays inside one path segment, `**` crosses segments and `**/` may match no directory."""
-
     text: str
     regex: re.Pattern[str]
 
@@ -201,8 +199,6 @@ TABLE_NAME = re.compile(r"`(ng-[a-z0-9-]+)`( \(read only\))?")
 
 @dataclasses.dataclass(frozen=True)
 class TableRow:
-    """One crate of the contract's crate table, the only list of crates and of what each may depend on."""
-
     name: str
     allowed: frozenset[str]
     closure: bool
@@ -219,7 +215,6 @@ def _table_names(cell: str, where: str, read_only: bool) -> list[str]:
 
 
 def parse_crate_table(text: str) -> dict[str, TableRow]:
-    """Any cell the grammar does not cover fails, so the prose cannot drift from what the gate reads."""
     lines = text.splitlines()
     heads = [i for i, line in enumerate(lines) if line.strip() == TABLE_HEADER]
     if len(heads) != 1:
@@ -248,15 +243,12 @@ def parse_crate_table(text: str) -> dict[str, TableRow]:
 @dataclasses.dataclass(frozen=True)
 class Token:
     kind: Literal["ident", "punct", "literal", "lifetime"]
-    text: str  # a literal's text is its raw content; a raw identifier's text drops the r#
+    text: str
     line: int
 
 
 @dataclasses.dataclass(frozen=True)
 class Source:
-    """One member .rs file: its tokens, and the tokens of the Rust code blocks in its docs, which rustdoc
-    compiles and runs as tests."""
-
     path: str
     code: tuple[Token, ...]
     doctests: tuple[Token, ...]
@@ -271,7 +263,6 @@ QUOTED = re.compile(r'[bc]?"')
 
 
 def _skip_quoted(text: str, i: int, quote: str) -> int:
-    """The index just past the closing quote, honouring backslash escapes."""
     while i < len(text):
         if text[i] == "\\":
             i += 2
@@ -283,8 +274,6 @@ def _skip_quoted(text: str, i: int, quote: str) -> int:
 
 
 def lex(text: str, first_line: int = 1) -> tuple[list[Token], list[tuple[int, str]]]:
-    """Rust tokens without comments, and the doc text of `///`, `//!`, `/** */` and `/*! */` comments.
-    Literal contents never reach a check as code; a lifetime is not a char literal."""
     tokens: list[Token] = []
     docs: list[tuple[int, str]] = []
     i, line, n = 0, first_line, len(text)
@@ -375,7 +364,6 @@ def _punct(tokens: list[Token] | tuple[Token, ...], k: int, text: str) -> bool:
 
 
 def attributes(tokens: list[Token] | tuple[Token, ...]) -> list[list[Token]]:
-    """The tokens inside each `#[...]` and `#![...]`."""
     out, i = [], 0
     while i < len(tokens):
         j = i + 2 if _punct(tokens, i + 1, "!") else i + 1
@@ -412,7 +400,6 @@ FENCE = re.compile(r"^\s*(```+|~~~+)\s*(.*)$")
 
 
 def _is_rust_fence(info: str) -> bool:
-    """rustdoc's rule: an unknown word makes the block another language unless a rustdoc word is present."""
     words = [w for w in re.split(r"[\s,{}]+", info) if w]
     known = [w for w in words if w in RUSTDOC_ATTRS or re.fullmatch(r"E\d{4}|ignore-.+", w)]
     return len(known) == len(words) or bool(known)
@@ -465,8 +452,6 @@ TEST_ONLY = (["test"], ["not", "(", "test", ")"])
 
 
 def host_hits(src: Source) -> list[Token]:
-    """A name is refused anywhere, not just as a path or a call, so neither an alias (`use core::env as e`)
-    nor a macro argument (`m!(std)`) can reach it; each of those still writes the name."""
     return [
         t
         for t in (*src.code, *src.doctests)
@@ -497,7 +482,6 @@ def _predicate(toks: list[Token] | tuple[Token, ...], start: int, stop_at_comma:
 
 
 def cfg_hits(src: Source) -> list[tuple[int, str]]:
-    """Every cfg predicate that is not test or not(test), in attributes, nested cfg_attr and cfg!()."""
     preds = []
     for attr in attributes(src.code):
         for k, t in enumerate(attr):
@@ -512,9 +496,9 @@ def cfg_hits(src: Source) -> list[tuple[int, str]]:
 
 @dataclasses.dataclass(frozen=True)
 class Dep:
-    name: str  # the package name, whatever the manifest calls the dependency
+    name: str
     kind: Literal["normal", "dev", "build"]
-    member: str | None  # the workspace member it resolves to; None for a crate from outside the workspace
+    member: str | None
     source: str | None
     req: str
     optional: bool
@@ -524,24 +508,22 @@ class Dep:
 class Target:
     name: str
     kinds: frozenset[str]
-    src: str  # repo-relative when inside the repo
+    src: str
 
 
 @dataclasses.dataclass(frozen=True)
 class Member:
     name: str
-    dir: str  # repo-relative manifest directory
+    dir: str
     deps: tuple[Dep, ...]
     targets: tuple[Target, ...]
     manifest: Mapping[str, object]
-    sources: tuple[Source, ...]  # every .rs file under dir, read from disk
-    links: tuple[str, ...]  # symlinks under dir
+    sources: tuple[Source, ...]
+    links: tuple[str, ...]
 
 
 @dataclasses.dataclass(frozen=True)
 class Workspace:
-    """Everything a rule reads, built from the real tree or from a probe's mutated copy of it."""
-
     root: pathlib.Path
     files: frozenset[str]
     steps: frozenset[str]
@@ -587,7 +569,6 @@ def _git_z(root: pathlib.Path, *args: str) -> list[str]:
 
 
 def list_files(root: pathlib.Path) -> frozenset[str]:
-    """Tracked plus untracked files that git does not ignore; every file in a probe's copy, which has no .git."""
     if (root / ".git").exists():
         listed = _git_z(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
         return frozenset(p for p in listed if os.path.lexists(root / p))
@@ -656,8 +637,6 @@ def load(root: pathlib.Path) -> Workspace:
 
 @dataclasses.dataclass(frozen=True)
 class Mutation:
-    """One edit to a scratch copy of the files the rules read."""
-
     describe: str
     apply: Callable[[pathlib.Path], None]
 
@@ -674,8 +653,6 @@ RULES: list[Rule] = []
 
 
 def rule(code: str, phase: Phase, probe: Mutation):
-    """A rule cannot be registered without the mutation it must catch."""
-
     def register(check: Callable[[Workspace], list[Violation]]):
         RULES.append(Rule(code, phase, check, probe))
         return check
@@ -726,7 +703,7 @@ def add_member(name: str, row: bool) -> Mutation:
 
 
 def add_outside_crate(name: str, to: str) -> Mutation:
-    """The ticket's probe crate. The stub sits beside the copy, not inside it: Cargo makes a path
+    """The stub sits beside the copy, not inside it: Cargo makes a path
     dependency inside the workspace directory a member."""
 
     def apply(root: pathlib.Path) -> None:
@@ -840,7 +817,6 @@ def internal_edges(ws: Workspace) -> list[Violation]:
 
 @rule("seam.external", "seam", add_outside_crate("prost", to="ng-record"))
 def no_outside_crates(ws: Workspace) -> list[Violation]:
-    """Deny by default: no list of names (Pulse, pulse-io, prost, a provider SDK) for an agent to dodge."""
     code, out = "seam.external", []
     for m in sorted(ws.members.values(), key=lambda m: m.name):
         if (row := ws.table.get(m.name)) is None:
@@ -942,8 +918,6 @@ def every_line_is_checked(ws: Workspace) -> list[Violation]:
     append("crates/ng-record/src/lib.rs", 'const _: &str = include_str!("../../../README.md");\n'),
 )
 def sources_stay_home(ws: Workspace) -> list[Violation]:
-    """With seam.build, a member's build reads only its own directory, its dependencies and the root files
-    that run everything: what makes affected scope and docs-only sound."""
     code, out = "seam.include", []
     for m in sorted(ws.members.values(), key=lambda m: m.name):
         out += [
@@ -1047,9 +1021,6 @@ def _copy(ws: Workspace, dest: pathlib.Path) -> None:
 
 
 def run_probes(ws: Workspace, tree_passes: bool) -> tuple[list[Violation], int]:
-    """Each rule must fire on its mutation of a fresh copy of what the rules read; the unmutated copy passes.
-    Returns the violations and how many probes bit. A copy cannot carry a path dependency from outside the
-    repo, so a tree with one runs no probe; seam.external already refuses that dependency."""
     out, bites = [], 0
     with tempfile.TemporaryDirectory(prefix="gate-probes-") as tmp:
         clean = pathlib.Path(tmp) / "clean/ws"
@@ -1088,7 +1059,7 @@ class Plan:
     base: str | None
     reason: str
     crates: tuple[str, ...]
-    smoke: tuple[str, ...]  # crate:test-target
+    smoke: tuple[str, ...]
     steps: tuple[str, ...]
 
     def lines(self) -> str:
@@ -1105,7 +1076,7 @@ class Plan:
         )
 
 
-Modes = tuple[str | None, str | None]  # git modes at the base and in the working tree; None where absent
+Modes = tuple[str | None, str | None]
 
 
 def everything(ws: Workspace, mode: Mode, base: str | None, reason: str) -> Plan:
@@ -1166,7 +1137,6 @@ def plan_changes(ws: Workspace, mode: Mode, base: str | None, changes: Mapping[s
 
 
 def resolve_base(root: pathlib.Path, arg: str | None) -> tuple[str | None, str]:
-    """Never fetches: a stale origin/main only gives an older base and a wider run."""
     if arg is not None:
         if (sha := git(root, "rev-parse", "--verify", "--quiet", f"{arg}^{{commit}}")) is None:
             raise GateError(f"--base {arg}: not a commit")
@@ -1195,7 +1165,6 @@ def _lstat_mode(path: pathlib.Path) -> str:
 
 
 def changed_paths(root: pathlib.Path, base: str) -> dict[str, Modes]:
-    """The base against the working tree, so uncommitted edits count; a rename counts at both paths."""
     out: dict[str, Modes] = {}
     raw = _git_z(root, "diff", "--raw", "-z", "--no-renames", base)
     for meta, path in zip(raw[::2], raw[1::2], strict=True):
@@ -1219,15 +1188,12 @@ def plan(ws: Workspace, mode: Mode, base_arg: str | None) -> Plan:
 
 @dataclasses.dataclass(frozen=True)
 class PlanCase:
-    """An expectation drawn from the decided run semantics, never from a run. Scope everything always means
-    every member and every step file, so those cases name no crates and survive a new crate."""
-
     mode: Mode
     path: str
     scope: Scope
-    crates: frozenset[str] | None = None  # exactly these; None: not part of the expectation
-    reaches: frozenset[str] = frozenset()  # at least these
-    steps: frozenset[str] = frozenset()  # steps that must be selected
+    crates: frozenset[str] | None = None
+    reaches: frozenset[str] = frozenset()
+    steps: frozenset[str] = frozenset()
     modes: Modes = (REGULAR, REGULAR)
 
 
@@ -1299,7 +1265,6 @@ SCAN_CASES: tuple[tuple[str, frozenset[str]], ...] = (
 
 
 def scan_cases() -> list[Violation]:
-    """Each case expects what the rule it breaks or keeps says, never what a run printed."""
     out = []
     for text, want in SCAN_CASES:
         src = parse_source("case.rs", text)
@@ -1344,9 +1309,8 @@ def write_probe(name: str, source: str) -> pathlib.Path:
 
 
 def bans() -> int:
-    """The probe is generated from clippy.toml, so there is no second list of bans to drift."""
     conf = _toml(ROOT / "clippy.toml")
-    entries = {}  # probe line -> clippy.toml entry
+    entries = {}
     lines = ["#![allow(unused_imports)]"]
     for kind, form in (
         ("disallowed-types", "use {} as _T{};"),
@@ -1491,8 +1455,6 @@ def _has_float(x: object) -> bool:
 
 
 def float_items(doc: dict) -> set[str]:
-    """Local items whose own signature holds a bare f64 or f32. Impls are skipped because their members carry
-    the type; blanket and synthetic impls are not the crate's API."""
     index, paths = doc["index"], doc["paths"]
 
     def path_of(i: object) -> str | None:
@@ -1556,7 +1518,6 @@ def float_items(doc: dict) -> set[str]:
 
 
 def rustdoc(cwd: pathlib.Path, crate: str | None) -> dict:
-    """A separate target directory, so RUSTC_BOOTSTRAP does not touch the fingerprints of normal builds."""
     target = pathlib.Path(os.environ.get("CARGO_TARGET_DIR") or ROOT / "target") / "gate/rustdoc"
     package = ["-p", crate] if crate else []
     r = subprocess.run(
@@ -1593,7 +1554,6 @@ def rustdoc(cwd: pathlib.Path, crate: str | None) -> dict:
 
 
 def f64() -> int:
-    """rustdoc JSON holds exactly the public API: no private module, crate-visible item or private field."""
     ws = load(ROOT)
     crates = os.environ["NG_GATE_CRATES"].split() if "NG_GATE_CRATES" in os.environ else sorted(ws.members)
     found, allowed = [], 0
@@ -1637,7 +1597,6 @@ def f64() -> int:
 
 
 def _state_path() -> pathlib.Path:
-    """Written through nightly-record by tools/gate/nightly.sh; only the changed run's warning reads it."""
     return pathlib.Path.home() / ".local/state/nightingale/nightly.json"
 
 
@@ -1679,7 +1638,6 @@ def nightly_record(status: int, log: pathlib.Path) -> int:
 
 
 def changed_run_warning() -> None:
-    """Never changes the plan: the merge run reads no state from HOME."""
     try:
         state = nightly_state()
     except GateError as e:

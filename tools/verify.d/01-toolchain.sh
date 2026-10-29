@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# The tools later steps call by name are the ones rust-toolchain.toml pins. Exact equality with the channel
-# also refuses a channel such as `stable` or `1.98` and a RUSTUP_TOOLCHAIN override.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 want=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)

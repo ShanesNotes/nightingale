@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# git runs this before a push once ensure-prereqs.sh points core.hooksPath at tools/gate/hooks. It runs
-# the changed run when a pushed commit is the checked-out HEAD. git push --no-verify skips it once.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 head=$(git rev-parse HEAD)

@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# The solver-contract sketch: a warning-free build, every doctest, the error code of each
-# compile-fail doctest, and the coupling census against docs/atlas/coupling-map.md.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 want=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)

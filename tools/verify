@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# The one check. tools/gate/gate.py plans the run from the changed paths and tools/gate/paths.toml, and
-# the runner runs the steps the plan selects from tools/verify.d/, in lexical order. A slice adds its own
-# NN-name.sh step and names it in paths.toml; it never edits this runner.
-#
 #   tools/verify [--base REV]            the merge run: the pre-merge gate and the run prove.sh records
 #   tools/verify --changed [--base REV]  the changed run: the pre-push hook's checks for changed paths
 #   tools/verify --full                  the full run: every step and crate, ignored tests included
@@ -57,7 +53,6 @@ for step in tools/verify.d/*.sh; do
     *) echo "== $name (not selected)" ;;
   esac
 done
-# Only a merge or full run may print the exact line prove.sh accepts.
 if [ "$mode" = changed ]; then
   echo "verify: OK for changed paths only"
 else

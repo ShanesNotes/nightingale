@@ -1,5 +1,5 @@
-# What tools/verify runs for a set of changed paths, and the crates it knows. tools/gate/gate.py is the
-# only reader. Globs: `*` stays inside one path segment and `**` crosses segments. The first rule that
+# What tools/verify runs for a set of changed paths, and the crates it knows.
+# Globs: `*` stays inside one path segment and `**` crosses segments. The first rule that
 # matches a path wins for it, a run takes the union of its paths' rules, and a path no rule matches runs
 # everything.
 schema = 1
@@ -20,13 +20,11 @@ run = "everything"
 paths = ["crates/*/**"]
 run = "crate"
 
-# 05-seam parses the crate table; the sketch's lib.rs includes this file as its crate doc.
 [[rule]]
 paths = ["docs/architecture/solver-contract.md"]
 run = ["05-seam", "10-docs", "20-sketch"]
 docs_only = true
 
-# The sketch, and the coupling map its census reads.
 [[rule]]
 paths = ["docs/architecture/**", "docs/atlas/**"]
 run = ["10-docs", "20-sketch"]
@@ -37,7 +35,6 @@ paths = ["docs/**", "*.md"]
 run = ["10-docs"]
 docs_only = true
 
-# Tickets: no step reads them.
 [[rule]]
 paths = [".scratch/**/*.md"]
 run = []

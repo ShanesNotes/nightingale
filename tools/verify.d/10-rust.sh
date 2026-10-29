@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Format, clippy with warnings denied and the tests over the plan's crates, the smoke targets of crates
-# the plan does not test, and the bans probe. Run by hand, without NG_GATE_CRATES, it covers every member.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 # Cargo takes the first flag source it finds, so an empty RUSTFLAGS shuts out a host config's

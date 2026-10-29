@@ -1,8 +1,3 @@
-# Physiology must be bit-reproducible, so every workspace member inherits these bans.
-# sqrt, abs, floor, ceil, round, min and max stay allowed because IEEE 754 defines them exactly.
-# Clippy reads only the nearest clippy.toml, so a crate-local file would drop these bans:
-# 05-seam refuses any other.
-
 disallowed-types = [
   { path = "std::collections::HashMap", reason = "iteration order" },
   { path = "std::collections::HashSet", reason = "iteration order" },
@@ -14,7 +9,7 @@ disallowed-types = [
 ]
 
 disallowed-methods = [
-  # Host libm: transcendentals are the contract's own routines. mul_add may fuse.
+  # Host libm.
   "f64::exp", "f64::exp2", "f64::exp_m1", "f64::ln", "f64::ln_1p", "f64::log", "f64::log10", "f64::log2",
   "f64::powf", "f64::powi", "f64::sin", "f64::cos", "f64::sin_cos", "f64::tan", "f64::asin", "f64::acos",
   "f64::atan", "f64::atan2", "f64::sinh", "f64::cosh", "f64::tanh", "f64::asinh", "f64::acosh", "f64::atanh",
