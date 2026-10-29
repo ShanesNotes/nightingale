@@ -32,7 +32,7 @@ A PR that adds a file names which agent loads it and when. Two sizes are worth q
 - Every other doc uses a term exactly and never redefines it.
 - A pass that resolves or renames a term updates `GLOSSARY.md` in the same PR. A rename changes the entry, moves the old word to `_Avoid_` and replaces every use in docs and code names in one PR, expanding and contracting when the code change is wide. Prose gets no alias period.
 - Architecture prose uses the Pocock `codebase-design` words exactly: module, interface, implementation, depth, seam, adapter, leverage, locality.
-- Files are lowercase kebab-case. Crate names are `ng-<noun>`, with glossary nouns.
+- Files are lowercase kebab-case. The crate table in `docs/architecture/solver-contract.md` is the list of crate names. A new name follows `ng-<noun>` with a glossary noun, the table wins where the two differ (as for `ng-observe` and `ng-validate`), and `tools/verify.d/05-seam.sh` refuses any other name.
 - Prose goes through pstack `technical-writing`, then `unslop`: plain short words, no em dashes, no vague attributions, no filler.
 
 ## 4. Decision records

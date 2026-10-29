@@ -175,16 +175,16 @@ The forbidden moves fail to compile (`src/lib.rs`; each probe added since the fi
 
 `Assembly::compile` performs SA's §3.3 checks (SA/solver-design.md:549–578): resolve scopes and endpoints in canonical key order; check units and reference conditions; require exactly one owner per state, process and algebraic row in every reachable mode (algebraic loops become coupled residuals, replacing CA's DAG-only refusal); generate signed incidence for every transfer, exact element and charge stoichiometry for reactions and one debit/credit route per work claim; check domains, scales, modes and rate classes; check structural matching and pressure gauges without fake epsilon storage; derive sparsity, blocks and deterministic order; derive the conserved basis; compile CB's PK uniqueness rule, one owner per `(site, ligand, role, pathway)` regardless of representation (CB/src/pharmacokinetics.rs:47–101); check every held stand-in's declared supplies against its fragment's exterior columns and its intensive fields against the stores in the slice; refuse an orphan pool that no law touches and no declaration holds; and hash the normalized model, held declarations included. Parameter values are not in the model hash; they are bound later by key. Structural matching is not numerical rank; initialization and evaluation report the offending rows.
 
-| Module / proposed crate | Knowledge owned | Allowed body dependencies |
-|---|---|---|
-| `ng-contract` | Anatomy, declaration language, compiler, catalog, units, PK claims, problem and seam, admission system, split measurement, observation lenses | None |
-| `ng-cardiovascular`, `ng-fluids`, `ng-renal`, `ng-nervous`, `ng-receptor` | Constitutive and binding laws over granted capabilities | `ng-contract` only |
-| `ng-solver` | Newton or beat algorithm, scratch, event location, error control | `ng-contract` only |
-| `ng-record` | Accepted image, validate and publish, session latch, history, checkpoint, observation view | `ng-contract` only |
-| `ng-observe` | Observers: windows, delays, measurement error and findings through a lens, one revision at a time | Contract and record, read only |
-| `ng-validate` | Synthetic composition root and stand-ins, certificate, arena | Contract and record |
+| Module / proposed crate | Knowledge owned | Allowed body dependencies | Physiology closure |
+|---|---|---|---|
+| `ng-contract` | Anatomy, declaration language, compiler, catalog, units, PK claims, problem and seam, admission system, split measurement, observation lenses | None | yes |
+| `ng-cardiovascular`, `ng-fluids`, `ng-renal`, `ng-nervous`, `ng-receptor` | Constitutive and binding laws over granted capabilities | `ng-contract` | yes |
+| `ng-solver` | Newton or beat algorithm, scratch, event location, error control | `ng-contract` | yes |
+| `ng-record` | Accepted image, validate and publish, session latch, history, checkpoint, observation view | `ng-contract` | yes |
+| `ng-observe` | Observers: windows, delays, measurement error and findings through a lens, one revision at a time | `ng-contract`, `ng-record` (read only) | no |
+| `ng-validate` | Synthetic composition root and stand-ins, certificate, arena | `ng-contract`, `ng-record` | no |
 
-The sketch is a standalone crate outside the workspace. No oracle, pulse-io, prost, provider SDK, I/O, threads, clock, unsafe or host-libm in the physiology closure.
+The sketch is a standalone crate outside the workspace. No workspace crate names a host service, so none does I/O, starts a thread or reads the clock. The physiology closure (the rows marked yes) admits no crate from outside the workspace, so no Pulse, pulse-io, prost or provider SDK. Unsafe code and host libm are forbidden in every crate. `tools/verify.d/05-seam.sh` holds this table.
 
 ### 2. Coupling and conservation at incidence
 

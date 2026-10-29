@@ -8,7 +8,7 @@ schema = 1
 always = ["01-toolchain"]
 
 # Steps a run adds when it reaches a crate, run over the crates it reaches.
-crate_steps = []
+crate_steps = ["05-seam"]
 
 [[rule]]
 paths = [
@@ -20,6 +20,12 @@ run = "everything"
 [[rule]]
 paths = ["crates/*/**"]
 run = "crate"
+
+# 05-seam parses the crate table; the sketch's lib.rs includes this file as its crate doc.
+[[rule]]
+paths = ["docs/architecture/solver-contract.md"]
+run = ["05-seam", "10-docs", "20-sketch"]
+docs_only = true
 
 # The sketch, and the coupling map its census reads.
 [[rule]]
