@@ -4,13 +4,13 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 **What to build:** Four empty crates (`ng-contract`, `ng-record`, `ng-observe`, `ng-validate`) join the workspace, and this repository's seam check knows them. Each may depend only on what the contract's module table allows. Nothing in the physiology closure may pull in an oracle, pulse-io, prost, a provider SDK, I/O, threads, a clock, unsafe or host libm.
 
-**Blocked by:** None (can start immediately)
+Blocked by: None (can start immediately)
 
-**Lands with:** `.scratch/foundation/issues/03-first-crate.md`
+Lands with: `.scratch/foundation/issues/03-first-crate.md`
 
-**Status:** resolved
+Status: resolved
 
-**Claimed by:** claude
+Claimed by: claude
 
 - [x] The seam check lists the four crates with their allowed dependencies
 - [x] A probe crate that adds a forbidden dependency fails the check, and removing it passes

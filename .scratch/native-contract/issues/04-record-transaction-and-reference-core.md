@@ -4,9 +4,9 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 **What to build:** A session steps the two-reservoir body: the reference core solves, the quadrature and stage witness build the proposal, the record validates and publishes or refuses, and the certificate closes over the run.
 
-**Blocked by:** 03
+Blocked by: 03
 
-**Status:** ready-for-agent
+Status: ready-for-agent
 
 - [ ] The two-reservoir case with a stepped exterior inflow matches its closed form within the accuracy policy
 - [ ] A forward Euler core with h > RC closes every ledger and is rejected by the accuracy gate

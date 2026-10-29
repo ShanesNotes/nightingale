@@ -4,9 +4,9 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 **What to build:** An author declares sites of the six site classes with positions, containment, vascular edges (beds in series and a loop), an enclosure with its compliance, a served-by edge and a region, and gets a checked `Anatomy` and a `Schema` whose pool registry is derived from it.
 
-**Blocked by:** 01
+Blocked by: 01
 
-**Status:** ready-for-agent
+Status: ready-for-agent
 
 - [ ] The manufactured anatomy (two capillary beds in series on a vascular loop, one enclosure, one junction, one nerve segment) builds and hashes
 - [ ] `finish` refuses, each with a named reason: an unreachable bed, an undrained bed, a site enclosed twice, a site with no position, a containment cycle, an orphan site

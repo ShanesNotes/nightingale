@@ -1,6 +1,6 @@
 //! Solver and core contract sketch: organ laws are immutable data compiled by the proposed
-//! ng-contract. Module names mirror proposed crates in docs/atlas/crate-map.md, not installed
-//! crates. All executable bodies are deliberately unimplemented; doctests prove API shape only.
+//! ng-contract. Module names mirror proposed crates in the crate table (solver-contract.md
+//! section 1), not installed crates. Bodies are unimplemented; doctests prove API shape only.
 //! The crate documentation below is `docs/architecture/solver-contract.md`; its three caller
 //! examples compile as doctests, and [`signature_walk`] walks every seam from outside.
 //!

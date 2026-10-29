@@ -4,9 +4,9 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 **What to build:** An organ author writes whole-body and site-class kernels with instruction set v1, transfers and site transfers, memory rates, set points and modes, and `Assembly::compile` turns them into one hashed body with incidence, the conserved basis, sparsity and blocks.
 
-**Blocked by:** 02
+Blocked by: 02
 
-**Status:** ready-for-agent
+Status: ready-for-agent
 
 - [ ] A two-reservoir manufactured body compiles; its incidence and conserved basis match the hand-derived ones
 - [ ] A site-class Starling law over the two beds compiles to one program applied at both sites, with per-site parameters

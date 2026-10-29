@@ -4,9 +4,9 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 **What to build:** The validation crate runs the slice for a short window with the reference core under every gate in §7 and every must-fail row wired, and reports the certificate, accuracy, replay and numerical-health evidence separately, so the arena seats can be dispatched against it.
 
-**Blocked by:** 05, 06, 07, 10
+Blocked by: 05, 06, 07, 10
 
-**Status:** ready-for-agent
+Status: ready-for-agent
 
 - [ ] Every must-fail core or model in the §7 table is rejected by its named gate
 - [ ] A short slice window passes certificate, accuracy and all replay gates with the reference core
