@@ -8,7 +8,7 @@ schema = 1
 always = ["01-toolchain"]
 
 # Steps a run adds when it reaches a crate, run over the crates it reaches.
-crate_steps = ["05-seam", "10-rust"]
+crate_steps = ["05-seam", "10-rust", "15-f64"]
 
 [[rule]]
 paths = [

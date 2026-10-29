@@ -5,6 +5,7 @@ Python 3.11 stdlib only. Run as `python3 -I tools/gate/gate.py <command>`; it fi
     plan <merge|changed|full> [--base REV]   the run's plan as key=value lines
     seam                                     the workspace rules, every rule's probe, the plan and scan cases
     bans                                     clippy rejects a probe built from clippy.toml, entry by entry
+    f64                                      no bare f64 or f32 in a public API outside its row's allow list
 
 Exit codes: 0 pass; 1 violations, one per line as `<code>: <subject>: <what to do>`; 2 an input the gate
 reads is missing or malformed.
@@ -1230,6 +1231,195 @@ def bans() -> int:
     return 1 if found else 0
 
 
+# ---- the f64 scan: rustdoc JSON holds exactly the public API ------------------------------------------
+
+RUSTDOC_FORMAT = 60
+F64_PROBE = """\
+pub struct Pressure(f64);
+
+pub fn leak_param(_x: f64) {}
+
+pub fn leak_return() -> f32 {
+    0.0
+}
+
+pub struct LeakField {
+    pub value: f64,
+}
+
+pub struct LeakTuple(pub f64);
+
+pub enum LeakVariant {
+    Raw(f64),
+    Named { value: f64 },
+}
+
+pub trait LeakTrait {
+    fn leak_method(&self) -> f64;
+}
+
+pub struct LeakFrom(f64);
+
+impl From<f64> for LeakFrom {
+    fn from(x: f64) -> Self {
+        LeakFrom(x)
+    }
+}
+
+pub const LEAK_CONST: f64 = 0.0;
+
+pub type LeakAlias = f64;
+
+impl Pressure {
+    pub fn leak_inherent(&self) -> f64 {
+        self.0
+    }
+
+    pub fn ok_typed(&self) -> &Pressure {
+        self
+    }
+
+    fn ok_private(&self) -> f64 {
+        self.0
+    }
+}
+
+pub struct OkPrivateField {
+    value: f64,
+}
+
+pub(crate) fn ok_crate_visible(x: f64) -> f64 {
+    x
+}
+
+mod ok_private_module {
+    pub fn ok_unreachable(x: f64) -> f64 {
+        x
+    }
+}
+"""
+F64_PROBE_LEAKS = frozenset({
+    "leak_param", "leak_return", "LeakField.value", "LeakTuple.0", "LeakVariant::Raw.0", "LeakVariant::Named.value",
+    "LeakTrait::leak_method", "<LeakFrom as From>::from", "LEAK_CONST", "LeakAlias", "Pressure::leak_inherent",
+})
+
+
+def _has_float(x: object) -> bool:
+    if isinstance(x, dict):
+        return x.get("primitive") in ("f64", "f32") or any(_has_float(v) for v in x.values())
+    return isinstance(x, list) and any(_has_float(v) for v in x)
+
+
+def float_items(doc: dict) -> set[str]:
+    """Local items whose own signature holds a bare f64 or f32. Impls are skipped because their members carry
+    the type; blanket and synthetic impls are not the crate's API."""
+    index, paths = doc["index"], doc["paths"]
+
+    def path_of(i: object) -> str | None:
+        p = paths.get(str(i))
+        return "::".join(p["path"][1:]) if p and p["crate_id"] == 0 else None
+
+    def type_name(t: dict) -> str:
+        if "resolved_path" in t:
+            return path_of(t["resolved_path"]["id"]) or t["resolved_path"]["path"].split("::")[-1]
+        if "primitive" in t:
+            return t["primitive"]
+        if "borrowed_ref" in t:
+            return "&" + type_name(t["borrowed_ref"]["type"])
+        if "slice" in t:
+            return f"[{type_name(t['slice'])}]"
+        return t.get("generic", "_")
+
+    parent: dict[str, tuple[str, str]] = {}
+    for i, it in index.items():
+        (kind, body), = it["inner"].items() if isinstance(it["inner"], dict) else (("other", None),)
+        shape = body.get("kind") if isinstance(body, dict) else None
+        fields = []
+        if isinstance(shape, dict):
+            fields = shape.get("tuple") or shape.get("plain", {}).get("fields") or shape.get("struct", {}).get("fields") or []
+        if kind == "union":
+            fields = body["fields"]
+        parent |= {str(f): ("field", i) for f in fields if f is not None}
+        if kind in ("trait", "impl"):
+            parent |= {str(m): (kind, i) for m in body["items"]}
+
+    def name(i: str) -> str:
+        it = index[i]
+        if i not in parent:
+            return path_of(i) or it["name"] or f"item {i}"
+        how, p = parent[i]
+        if how == "field":
+            return f"{name(p)}.{it['name']}"
+        if how == "trait":
+            return f"{name(p)}::{it['name']}"
+        imp = index[p]["inner"]["impl"]
+        if imp["trait"] is None:
+            return f"{type_name(imp['for'])}::{it['name']}"
+        return f"<{type_name(imp['for'])} as {imp['trait']['path'].split('::')[-1]}>::{it['name']}"
+
+    def in_api_impl(i: str) -> bool:
+        if i not in parent or parent[i][0] != "impl":
+            return True
+        imp = index[parent[i][1]]["inner"]["impl"]
+        return not imp["is_synthetic"] and imp["blanket_impl"] is None
+
+    return {
+        name(i) for i, it in index.items()
+        if it["crate_id"] == 0 and "impl" not in it["inner"] and _has_float(it["inner"]) and in_api_impl(i)
+    }
+
+
+def rustdoc(cwd: pathlib.Path, crate: str | None) -> dict:
+    """A separate target directory, so RUSTC_BOOTSTRAP does not touch the fingerprints of normal builds."""
+    target = pathlib.Path(os.environ.get("CARGO_TARGET_DIR") or ROOT / "target") / "gate/rustdoc"
+    package = ["-p", crate] if crate else []
+    r = subprocess.run(
+        ["cargo", "rustdoc", *package, "--lib", "--locked", "--target-dir", str(target), "--",
+         "-Z", "unstable-options", "--output-format", "json"],
+        cwd=cwd, env={**os.environ, "RUSTC_BOOTSTRAP": "1"}, capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        raise GateError(f"cargo rustdoc {crate or cwd.name}: {r.stderr.strip()}")
+    lib = crate or tomllib.loads(_read(cwd / "Cargo.toml"))["package"]["name"]
+    doc = json.loads(_read(target / "doc" / f"{lib.replace('-', '_')}.json"))
+    if doc.get("format_version") != RUSTDOC_FORMAT:
+        rustc = subprocess.run(["rustc", "--version"], capture_output=True, text=True).stdout.strip()
+        raise GateError(f"rustdoc JSON format_version {doc.get('format_version')} under {rustc}; the f64 scan "
+                        f"reads {RUSTDOC_FORMAT}, so update it with the toolchain")
+    return doc
+
+
+def f64() -> int:
+    ws = load(ROOT)
+    crates = os.environ["NG_GATE_CRATES"].split() if "NG_GATE_CRATES" in os.environ else sorted(ws.members)
+    found, allowed = [], 0
+    for crate in crates:
+        items = float_items(rustdoc(ROOT, crate))
+        row = ws.registry.row(crate)
+        allow = {a.item for a in row.f64_allow} if row else set()
+        allowed += len(items & allow)
+        found += [
+            Violation("f64", f"{item} in {crate}", "a bare f64 or f32 crosses the crate boundary; use a dimensioned "
+                      "type, or allow the item in the crate's [[crate]] row with a reason")
+            for item in sorted(items - allow)
+        ]
+        found += [Violation("f64", f"{item} in {crate}", "the f64_allow entry matches no public item; drop it")
+                  for item in sorted(allow - items)]
+    summary = f"15-f64: {len(crates)} crates, {allowed} allowed items with a bare f64 or f32"
+    if os.environ.get("NG_GATE_MODE") != "changed":
+        flagged = float_items(rustdoc(write_probe("f64-probe", F64_PROBE), None))
+        found += [Violation("f64", f"{item} in the probe", "flagged, but the probe declares it private or typed")
+                  for item in sorted(flagged - F64_PROBE_LEAKS)]
+        found += [Violation("f64", f"{item} in the probe", "a public bare f64 the scan no longer flags")
+                  for item in sorted(F64_PROBE_LEAKS - flagged)]
+        summary += (f"; probe: {len(flagged & F64_PROBE_LEAKS)} of {len(F64_PROBE_LEAKS)} leaks flagged, "
+                    f"{len(flagged - F64_PROBE_LEAKS)} other items")
+    for v in found:
+        print(v)
+    print(summary)
+    return 1 if found else 0
+
+
 # ---- entry point --------------------------------------------------------------------------------------
 
 
@@ -1257,6 +1447,8 @@ def main(argv: list[str]) -> int:
                 return seam()
             case ["bans"]:
                 return bans()
+            case ["f64"]:
+                return f64()
             case _:
                 print(__doc__, file=sys.stderr)
                 return 2
