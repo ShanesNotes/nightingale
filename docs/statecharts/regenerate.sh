@@ -3,7 +3,7 @@
 # engine.mmd is the chart TLC's state graph gives, and render.mjs draws engine.svg from it.
 # Needs Node 22.18 or later, network for pele@1.9.0, and the pstack statechart skill's
 # scripts/statechart command, which runs TLC (installed with mise on its first run):
-#   STATECHART=<skill dir>/scripts/statechart docs/statecharts/regenerate.sh
+#   STATECHART=<skill dir>/scripts/statechart bash docs/statecharts/regenerate.sh
 set -euo pipefail
 cd "$(dirname "$0")"
 : "${STATECHART:?set STATECHART to scripts/statechart in the statechart skill}"
