@@ -15,11 +15,21 @@ The native Rust engine for one simulated patient. Read `docs/srs.md` first: it b
 - **Comments.** Only a non-obvious why or a cited physiological source or anchor. Run pstack `/no-comments` on code PRs.
 - **Types.** Physical quantities are dimensioned types, never a bare `f64` across a crate boundary. Systems never own amounts, and illegal states are unrepresentable. Each type rule has a compile-fail test.
 - **Behavior.** Only checks drawn from anchors and requirements judge physiology, never a previous run's output. An expect-test trace on a synthetic fixture pins each physiology slice to show change, not correctness: it fails until the PR updates it and explains the change.
-- **Held by checks, not prose:** docs hygiene (`tools/verify.d/10-docs.sh`) and the sketch (`tools/verify.d/20-sketch.sh`).
+- **Held by checks, not prose.** Each rule in this table has a check that fails when the rule breaks.
+
+| Rule | Held by |
+|---|---|
+| Docs hygiene and the line caps | `tools/verify.d/10-docs.sh` |
+| The sketch and its compile-fail doctests | `tools/verify.d/20-sketch.sh` |
+| The pinned toolchain | `tools/verify.d/01-toolchain.sh` |
+| Crate names and allowed dependencies come from the contract's crate table. No crate from outside the workspace enters the physiology closure, no crate names a host service, and no crate has a build script, an include, a feature or its own clippy config | `tools/verify.d/05-seam.sh` |
+| No unsafe code, host libm, hash order, wall clock or sockets, through the workspace lints and `clippy.toml` | `tools/verify.d/10-rust.sh`, whose bans probe proves each entry |
+| No bare `f64` across a crate boundary | `tools/verify.d/15-f64.sh` |
+| Comments | the `/no-comments` report |
 
 ## Verify and merge
 
-Run the `verify-nightingale` skill on the PR's current head. Its proof block must show `full_proof: yes`. A docs-only PR (every changed path is under `docs/`) merges on that proof plus `MERGEABLE`, and reviews on it are informational. A code PR also needs a `/no-comments` report and no open review thread; a code-heavy one also needs a local `codex review` on Omarchy with its accepted findings fixed. Codex is never requested through GitHub. A push voids the proof. Machine-state reruns `tools/verify` on the candidate merge. The developer reviewer reviews any PR as they see fit.
+Run the `verify-nightingale` skill on the PR's current head. Its proof block must show `full_proof: yes`. A docs-only PR is one whose proof block shows `gate_scope: docs-only`, because every changed path is under `docs/`, is a root Markdown file or is a Markdown file under `.scratch/`. It merges on that proof plus `MERGEABLE`, and reviews on it are informational. A code PR also needs a `/no-comments` report and no open review thread; a code-heavy one also needs a local `codex review` on Omarchy with its accepted findings fixed. Codex is never requested through GitHub. The skill's `ensure-prereqs.sh` turns on a pre-push hook that runs `tools/verify --changed`, and that run is never proof. A push voids the proof. Machine-state reruns `tools/verify` on the candidate merge. The developer reviewer reviews any PR as they see fit.
 
 ## Tracker and handoff
 
