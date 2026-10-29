@@ -3,8 +3,9 @@
 Type: task
 Status: ready-for-agent
 Blocked by: none
+Lands with: `.scratch/native-contract/issues/01-ng-purity-rules.md`
 
-Lands in one PR with `.scratch/native-contract/issues/01-ng-purity-rules.md`, which admits the four contract crates under these checks. An acceptance checklist against the retained interface (the sketch's public surface and its signature walk):
+An acceptance checklist against the retained interface (the sketch's public surface and its signature walk):
 
 - [ ] **Workspace.** `members = ["crates/*"]`, the sketch excluded, seams per the contract's crate table.
 - [ ] **Tiers.** No-argument `tools/verify` stays the pre-merge gate. Add `--changed` and `--full`, affected crates from `cargo metadata`, `tools/gate/paths.toml` registration with a self-check, and the pre-push hook.

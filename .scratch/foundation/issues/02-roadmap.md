@@ -1,16 +1,19 @@
-# 02: Write the roadmap from SRS section 7
+# 02: Chart the foundation map from SRS section 7
 
 Type: task
-Status: needs-triage
+Status: resolved
+Claimed by: claude
 Blocked by: none
 
-The approved SRS moved its section 7 out at import (ruling R5) into its own roadmap doc: a sequenced build plan holding the build order, the stage 1 milestone, its non-goals, D3 and D5. That doc is not written yet. The section is kept here word for word, so no approved text is lost and no agent has to read a brief for it.
+The approved SRS moved its section 7 out at import (ruling R5) for a roadmap doc, but governance keeps out roadmaps that restate tickets. The section becomes this effort's wayfinder map instead: `.scratch/foundation/map.md`, written by `/wayfinder` in the layout `docs/agents/issue-tracker.md` gives. The map indexes each decision and links where it lives; it never restates a ticket or a record. Sort the section into it:
 
-Also settle when the roadmap is written:
+- **Destination:** invariant I19 passing on the reference man ([record 0004](../../../docs/adr/0004-first-milestone.md)). It replaces the section's milestone paragraph, which judged stability on the ledger, not on vitals.
+- **Notes:** the build order, display after the architecture, with nightingale-pulse's existing monitor covering display until then; and the wayfinder override that carries execution into the map, since this effort builds as well as decides.
+- **Decisions so far:** D5 links to [record 0002](../../../docs/adr/0002-map-starts-grouped.md), and D3 to SRS rule 4.
+- **Out of scope:** the non-goals for milestone 1.
+- **Not yet specified:** C11, whether the SRS section 5 bullet "Pieces needed before the solver arena runs" moves out of the SRS (it is build sequencing inside the structural model, and the speed gate lacks the slowest steps' wall time); a name for "the agent" in the build order, which is not an SRS term; and where the monitor goes, which stays an SRS requirement (section 6).
 
-- C11: does the SRS section 5 bullet "Pieces needed before the solver arena runs" move into the roadmap? It is build sequencing inside the structural model, and the speed gate lacks the slowest steps' wall time.
-- The build order names "the agent", which is not an SRS term. Name it.
-- The monitor stays an SRS requirement (section 6); the roadmap places it after the architecture.
+Writing the map resolves this ticket: append an `## Answer` that links the map, and add this ticket's line to the map's Decisions so far. The section stays below word for word, so no approved text is lost. Triage then moves the foundation tickets from the triage labels onto the wayfinder statuses.
 
 ## SRS section 7, word for word
 
@@ -31,3 +34,7 @@ Non-goals for milestone 1:
 |---|---|---|---|
 | D3 | Fast-forward identity | Keep the same-trajectory rule strict; any reduced-resolution mode is a declared separate run | Developer reviewer |
 | D5 | Map detail at milestone 1 | Coarse territories with a refinement rule | Models, revisited in build |
+
+## Answer
+
+The [foundation wayfinder map](../map.md) charts this section in the layout above, with two changes. C11's question was already sharp, so it became the ticket [Whether the arena's prerequisites leave the SRS (C11)](09-arena-prerequisites.md) rather than fog. The map also adds a fog item that the section never held: the reference man's reviewed packet and a reviewed healthy-range set, which the destination needs.

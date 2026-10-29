@@ -14,7 +14,7 @@ Several patients simulated together, one engine each. How engines link is not ye
 The one person an engine simulates, described by a packet.
 
 **Packet**:
-The bundle of one patient's sourced parameters. It holds every parameter value with where it came from (cited, drawn from a population range, derived by an identity, fitted when the start state is solved, or set by hand with a reason), the anchors the start state must meet, and the source and population records behind them. A packet is either reviewed (clinical values with citations) or a synthetic test fixture. Its hash is fixed at admission and is part of the run's identity.
+The bundle of one patient's parameters and the day the patient lives. It holds every parameter value with where it came from (cited, drawn from a population range or chosen inside one with a reason, derived by an identity, fitted when the start state is solved, or inferred by a model), the anchors the start state must meet, the day (sleep, posture, meals, drinks and room conditions) that the run's boundary events are made from, and the source, population and inference records behind them. A packet is either reviewed (clinical values with citations, and a count of its inferred values) or a synthetic test fixture. Its hash is fixed at admission and is part of the run's identity.
 
 **Admission**:
 The moment a run starts. The start state is solved once here and never imposed again.
@@ -59,6 +59,9 @@ _Avoid_: save (in prose)
 
 **Scope stage**:
 One of the five stages of scope in section 1, built bottom up. Not a solver stage, which is a numerical sub-step inside one step.
+
+**Scenario**:
+A case authored for a learner, made of a packet, its events and the behaviors it teaches. Scenarios belong to later scope stages.
 
 **Start state**:
 The first accepted state of a run, solved at admission from the packet's anchors.
@@ -110,7 +113,7 @@ A risk rate a law integrates until it crosses its stream's draw, which fires an 
 ## The body's structure
 
 **Map**:
-The patient's anatomy held as data: every site with its class and position, the containment tree, the networks, the enclosures and the nerve links. The solver contract calls it the anatomy. Not the atlas's coupling map, which links systems, not sites.
+The patient's anatomy held as data: every site with its class and position, the containment tree, the networks, the enclosures and the nerve links. The solver contract calls it the anatomy. Not the atlas's coupling map, which links systems, not sites, nor a wayfinder `map.md`, which indexes an effort's tickets.
 _Avoid_: topology
 
 **Site**:
@@ -144,6 +147,14 @@ The "part of" relation: cell, tissue bed, functional unit, organ, region, person
 **Region**:
 A named node of the containment tree, such as an organ, a perfusion territory or the whole body. Its totals are exact sums over its sites.
 _Avoid_: organ module
+
+**Reference anatomy**:
+The real structure of the body's networks as section 5 describes it, which each grouped region stands for and each split moves the map toward. It is not the map.
+_Avoid_: real structure, full map
+
+**Grouped region**:
+A region the map holds as fewer sites than the reference anatomy it stands for. It states that part of the reference anatomy and the behaviors it cannot show because they happen only inside it.
+_Avoid_: lump, lumped compartment
 
 **Perfusion territory**:
 The tissue a named arterial branch supplies, down to the beds it ends in (section 5).
@@ -219,7 +230,7 @@ How fast a process moves: wave, beat, reflex, minutes or hours. It constrains sc
 One level of detail of a system. Rung 0 is its simplest working version.
 
 **Refinement**:
-Replacing a coarse region of the map with its finer subtree, allowed only with evidence that totals and port behavior match (I11). A refined map is a new body model, never a mid-run zoom.
+Replacing a grouped region of the map with its finer subtree, earned by a failing sourced check or by a clinician's question with a sourced target, and keeping every regional total exact and every sourced check passing (I11). A refined map is a new body model, never a mid-run zoom.
 
 ## Numbers and evidence
 
@@ -230,11 +241,27 @@ A property of the patient's body that laws read and nothing computes, such as a 
 Anything the body computes from state, laws and parameters, such as a pressure, a flow, a concentration, a heart rate or a lab value. It is never stored as a fixed number and never set.
 _Avoid_: output, computed value
 
+**Target**:
+A value or range that a check compares a produced quantity against, such as an anchor, a healthy range or a within-subject variation. Every target rests on the literature, and only a healthy range or a within-subject variation may also rest on an inference record, which adjusts a sourced one by a sourced shift or, for an amount no method can measure, reasons from the sourced flows into and out of it (rule 16).
+_Avoid_: golden value, goal
+
 **Anchor**:
 A target a produced quantity must meet when the start state is solved, stated with its measurement method and averaging window. An anchor is never a parameter's value. Methods are named as current charting practice names them (an arterial-line pressure is charted as from the arterial blood pressure monitor); that naming follows practice and is not a law, since practice can improve.
 
 **Anchor statistic**:
 What an anchor's value summarizes: an instant, a cycle mean or a window mean. An anchor on a pulsatile quantity is a cycle mean.
+
+**Healthy range**:
+The target for one reading, the central 95% of healthy adults over the averaging window their study used, matched to the patient in activity, sex, age or method wherever a source shows that one of these shifts the reading. It comes from a primary study, or from an inference record that adjusts a sourced range by a sourced shift (record 0004).
+_Avoid_: normal range, normal limits, reference range
+
+**Healthy-range set**:
+Every healthy range and within-subject variation, with the source and inference records behind them, either reviewed or a synthetic test fixture. Physiology never reads it, so it is not part of the run's identity, and correcting a value in it rechecks any replay without changing the run (record 0005).
+_Avoid_: normals, reference table
+
+**Within-subject variation**:
+How far one healthy adult's own reading, or the change in an amount in their body over a day, varies from one day to the next under the same conditions, as an SD from a primary study, or from an inference record that adjusts a sourced one by a sourced shift or, for an amount no method can measure, reasons from the sourced flows into and out of it. The return check allows a reading to change by up to 1.96 × √2 times it, the reference change value without its analytical part, and the certificate allows an amount to drift by up to 1.96 times it over any 24 hours (record 0004).
+_Avoid_: intra-individual variation, day-to-day noise
 
 **Snapshot**:
 The value of a produced quantity at one time and site, by one method.
@@ -246,14 +273,18 @@ _Avoid_: evidence record
 **Tier**:
 How strong a source is for one claim (section 6). A textbook may support a curve's shape; a number needs a primary study with a locator.
 
+**Inference record**:
+A model's inferred range for a parameter or a number of the patient's day that no source covers, for a healthy range or within-subject variation it adjusts by a sourced shift, or for the within-subject variation of an amount no method can measure, with the population, the model that made it, its reasoning, the source records it reasons from and the search that found no source. It is never a source record: it has no tier, its value displays as inferred, and a source replaces it once one covers the same value.
+_Avoid_: estimate, assumed value
+
 **Population record**:
 A parameter's range in a stated population (a mean and spread, quantiles or an interval), with the source records behind it and the parameters it varies with.
 
 **Value provenance**:
-How a packet value was set: specified (cited), sampled (drawn from a population record), derived (by an identity), calibrated (fitted at admission) or authored (set by hand with a reason). A synthetic fixture's values are fixture values instead.
+How a packet value was set: specified (cited), sampled (drawn from a population record), derived (by an identity), calibrated (fitted at admission), inferred (by a model, through an inference record) or authored (chosen inside a population record's range, with a reason). A synthetic fixture's values are fixture values instead.
 
 **Synthetic fixture**:
-A packet of obviously synthetic test values with no citations. The arena accepts only this kind.
+A packet or healthy-range set of obviously synthetic test values with no citations. The arena accepts only this kind.
 
 **Validity range**:
 Where a law's form is trusted, with its basis. A state outside it still publishes, and the step records the excursion.
@@ -363,7 +394,15 @@ _Avoid_: stub, mock
 The compiled list of which conserved combinations close inside the slice and which rest on held stand-ins.
 
 **Certificate**:
-The automatic check that every conserved quantity balances and does not drift over every sliding 24 h window. It shows stability, not accuracy.
+The automatic check that every conserved quantity balances, that charge never drifts, and that every other quantity drifts over every sliding 24 h window no further than its within-subject variation allows (record 0004). It shows stability, not accuracy.
+
+**Healthy-range check**:
+The check that each reading in the lens stays inside its healthy range for what the patient is doing at that moment. With the certificate and the return check, it decides the first milestone (record 0004).
+_Avoid_: health check, normal-range check
+
+**Return check**:
+The check that the patient meets the anchors again, within the change their within-subject variation allows, at the same time of day on each later day of the run, with nothing reimposed since admission. With the certificate and the healthy-range check, it decides the first milestone (record 0004).
+_Avoid_: re-anchoring, daily reset
 
 **Accuracy gate**:
 The arena check that runs a solver core on manufactured cases with known answers and against the reference integrator, because a step can close every ledger and still be wrong.

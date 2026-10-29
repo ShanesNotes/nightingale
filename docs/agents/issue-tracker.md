@@ -8,6 +8,7 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 - A spec is `.scratch/<effort-slug>/spec.md`
 - Implementation issues are one file per ticket at `.scratch/<effort-slug>/issues/<NN>-<slug>.md`, numbered from `01`, never a single combined tickets file
 - Triage state is a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
+- Tickets that ship in one PR each carry a `Lands with:` line near the top that names the others' paths. Claiming one claims them all, and none resolves until all do.
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
 - Orchestrate runs live in `.scratch/runs/<run-id>/` (gitignored except `run.md` and contracts); slice worktrees go under `~/worktrees`, because a sandboxed seat dies when its working directory is under the repo's `.scratch/`
 
