@@ -10,5 +10,5 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 - [ ] A cycle-mean anchor on a pulsatile output is met as a cycle mean, not an instant
 - [ ] An initializer that returns a guess violating a row or anchor is refused with the row named
-- [ ] Provenance is recorded per value (Derived, Calibrated, Sampled, Authored, Fixture); no parameter is pinned to an anchor
+- [ ] Provenance is recorded per value (Derived, Calibrated, Sampled, Authored, Fixture); an Authored value lies inside its population record's range (I16), and no parameter is pinned to an anchor
 - [ ] The fixture packet type is the only one the validation crate accepts

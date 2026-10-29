@@ -4,7 +4,7 @@ Type: task
 Status: ready-for-agent
 Blocked by: `.scratch/native-contract/issues/10-slice-laws.md`
 
-A trace test runs a short deterministic slice and keeps its printed trace inside the test, so a PR diff shows a behavior change next to the code change.
+A trace test runs a short deterministic slice and keeps its printed trace inside the test, so a PR diff shows a behavior change next to the code change. A trace shows that behavior changed, never that it is right: only checks drawn from anchors and requirements judge physiology (AGENTS.md, Behavior).
 
 - **Tool:** `expect-test` 1.5.1 as a dev-dependency. The expected text is an inline `expect![[...]]` literal; `UPDATE_EXPECT=1 cargo test` rewrites it, and a failure prints Expect beside Actual. Chosen over `insta`, which keeps snapshots in separate files.
 - **Format:** fixed seed, simulated clock and a synthetic fixture, so nothing is host-dependent and nothing is a clinical claim. At most 40 rows of 100 characters. A header gives each column its unit from its type (`t_s MAP_mmHg V_blood_mL HR_bpm urine_mL_min`). Fixed precision per quantity. No line starts with whitespace, because expect-test strips indentation. Events get their own line (`# t=12.0 s refused: StageResidual`). Waveforms are a text strip, one row of digits 0 to 9. A changed trace is explained in one PR sentence.

@@ -3,10 +3,10 @@
 The coupling map of the body's 13 systems, with one card per system. An agent reads only the card of the system it is building, and the coupling map when its work touches a coupling between systems.
 
 - The atlas is frozen. A card changes through a ticket when its system is built.
-- The cards are proposed and nonclinical. Clinical values enter only in a reviewed packet (SRS rule 12).
+- The cards are proposed and nonclinical. Clinical values enter only in a reviewed packet or healthy-range set (SRS rule 12).
 - Where any atlas file, the coupling map included, disagrees with `docs/srs.md` or `docs/architecture/solver-contract.md`, those win. Ownership wording such as "CV owns the solve", or an I&O ledger, predates the contract.
 - A system owns laws and their internal state, never a conserved pool; the state holds every amount.
-- The first milestone is stage 1 of the SRS's scope; [pulse 0006](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/decisions/0006-first-milestone-stable-healthy-body.md) defines it.
+- The first milestone is stage 1 of the SRS's scope and its invariant I19; [record 0004](../adr/0004-first-milestone.md) defines it.
 
 | File | What it is |
 |---|---|
