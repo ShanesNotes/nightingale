@@ -487,7 +487,8 @@ def host_hits(src: Source) -> list[Token]:
 
 def include_hits(src: Source) -> list[Token]:
     hits = [t for t in (*src.code, *src.doctests) if t.kind == "ident" and t.value in INCLUDE_NAMES]
-    for attr in attributes(src.code):
+    # A doctest compiles as its own crate, so a #[path] there reaches a file no scan reads.
+    for attr in (*attributes(src.code), *attributes(src.doctests)):
         hits += [t for k, t in enumerate(attr) if t.kind == "ident" and t.value == "path" and _punct(attr, k + 1, "=")]
     return hits
 
@@ -644,7 +645,9 @@ def cargo_members(root: pathlib.Path) -> dict[str, Member]:
             )
             for d in p["dependencies"]
         )
-        targets = tuple(Target(t["name"], frozenset(t["kind"]), pathlib.Path(t["src_path"]).resolve()) for t in p["targets"])
+        targets = tuple(
+            Target(t["name"], frozenset(t["kind"]), pathlib.Path(t["src_path"]).resolve()) for t in p["targets"]
+        )
         manifest = pathlib.Path(p["manifest_path"])
         rel = _rel(root, manifest.parent)
         members[p["name"]] = Member(p["name"], rel, deps, targets, _toml(manifest), *_member_tree(root, rel))
@@ -1233,7 +1236,9 @@ PLAN_CASES = (
     PlanCase("merge", ".scratch/foundation/map.md", "docs-only", frozenset()),
     PlanCase("merge", "AGENTS.md", "docs-only", frozenset(), steps=frozenset({"10-docs"})),
     PlanCase("merge", CONTRACT, "docs-only", frozenset(), steps=frozenset({"05-seam", "10-docs", "20-sketch"})),
-    PlanCase("merge", "docs/atlas/coupling-map.md", "docs-only", frozenset(), steps=frozenset({"10-docs", "20-sketch"})),
+    PlanCase(
+        "merge", "docs/atlas/coupling-map.md", "docs-only", frozenset(), steps=frozenset({"10-docs", "20-sketch"})
+    ),
     PlanCase("merge", "crates/ng-record/src/lib.rs", "affected", RECORD_USERS),
     PlanCase("changed", "crates/ng-record/src/lib.rs", "affected", frozenset({"ng-record"})),
     PlanCase("merge", "crates/ng-contract/src/lib.rs", "affected", reaches=RECORD_USERS | {"ng-contract"}),
@@ -1296,6 +1301,11 @@ SCAN_CASES: tuple[tuple[str, frozenset[str]], ...] = (
     ('const S: &str = include_str!("x");', INCLUDE),
     ("use core::include_str as i;", INCLUDE),
     ('#[cfg_attr(test, path = "x.rs")]\nmod x;', INCLUDE),
+    ('/// ```\n/// #[path = "../x.rs"] mod external;\n/// ```\npub fn f() {}', INCLUDE),
+    ('/// ```\n/// # #[path = "../x.rs"]\n/// # mod external;\n/// ```\npub fn f() {}', INCLUDE),
+    ('/// ```\n/// #[cfg_attr(all(), path = "../x.rs")] mod external;\n/// ```\npub fn f() {}', INCLUDE),
+    ('#[doc = "```\\n#[path = \\"../x.rs\\"] mod external;\\n```"]\npub fn f() {}', INCLUDE),
+    ('/// ```text\n/// #[path = "../x.rs"] mod external;\n/// ```\npub fn f() {}', frozenset()),
     ("#[cfg(test)]\nmod t {}\n#[cfg(not(test))]\nfn f() {}\n#[cfg_attr(test, derive(Debug))]\nstruct S;", frozenset()),
     ('#[cfg(feature = "x")]\nfn f() {}', CFG),
     ("#[cfg_attr(test, cfg(any()))]\nfn f() {}", CFG),
@@ -1352,12 +1362,44 @@ def write_probe(name: str, source: str) -> pathlib.Path:
 # so a toolchain that stabilizes another libm method (erf and gamma are unstable on 1.98.1) cannot slip in.
 EXACT_FLOAT_METHODS = frozenset(
     {
-        "abs", "abs_sub", "ceil", "clamp", "classify", "copysign", "div_euclid", "floor", "fract",
-        "from_be_bytes", "from_bits", "from_le_bytes", "from_ne_bytes", "is_finite", "is_infinite", "is_nan",
-        "is_normal", "is_sign_negative", "is_sign_positive", "is_subnormal", "midpoint",
-        "next_down", "next_up", "recip", "rem_euclid", "round", "round_ties_even", "signum", "sqrt",
-        "to_be_bytes", "to_bits", "to_degrees", "to_int_unchecked", "to_le_bytes", "to_ne_bytes", "to_radians",
-        "total_cmp", "trunc",
+        "abs",
+        "abs_sub",
+        "ceil",
+        "clamp",
+        "classify",
+        "copysign",
+        "div_euclid",
+        "floor",
+        "fract",
+        "from_be_bytes",
+        "from_bits",
+        "from_le_bytes",
+        "from_ne_bytes",
+        "is_finite",
+        "is_infinite",
+        "is_nan",
+        "is_normal",
+        "is_sign_negative",
+        "is_sign_positive",
+        "is_subnormal",
+        "midpoint",
+        "next_down",
+        "next_up",
+        "recip",
+        "rem_euclid",
+        "round",
+        "round_ties_even",
+        "signum",
+        "sqrt",
+        "to_be_bytes",
+        "to_bits",
+        "to_degrees",
+        "to_int_unchecked",
+        "to_le_bytes",
+        "to_ne_bytes",
+        "to_radians",
+        "total_cmp",
+        "trunc",
     }
 )
 
@@ -1472,8 +1514,10 @@ def bans() -> int:
     gaps = float_gaps(methods, banned)
     found += [
         Violation(
-            "bans", m, "a stable method clippy.toml does not ban and EXACT_FLOAT_METHODS does not name; ban it, "
-            "or name it there if IEEE 754 makes its result the same on every host"
+            "bans",
+            m,
+            "a stable method clippy.toml does not ban and EXACT_FLOAT_METHODS does not name; ban it, "
+            "or name it there if IEEE 754 makes its result the same on every host",
         )
         for m in gaps
     ]
@@ -1829,7 +1873,9 @@ def doctests() -> int:
     summary = f"10-rust: doctests: {len(listed)} listed by rustdoc, {len(listed) - len(found)} read by the host scan"
     if os.environ.get("NG_GATE_MODE") != "changed":
         src = parse_source("src/lib.rs", DOCTEST_PROBE)
-        got = {line for _, _, line in listed_doctests(write_probe("doctest-probe", DOCTEST_PROBE), []) if unread(src, line)}
+        got = {
+            line for _, _, line in listed_doctests(write_probe("doctest-probe", DOCTEST_PROBE), []) if unread(src, line)
+        }
         want = {
             n
             for n, text in enumerate(DOCTEST_PROBE.splitlines(), 1)
@@ -1837,7 +1883,11 @@ def doctests() -> int:
         }
         if got != want:
             found.append(
-                Violation("doctest", "the probe", f"unread doctests at lines {sorted(got)}; the probe has them at {sorted(want)}")
+                Violation(
+                    "doctest",
+                    "the probe",
+                    f"unread doctests at lines {sorted(got)}; the probe has them at {sorted(want)}",
+                )
             )
         summary += f"; probe: {len(want)} unreadable doctests flagged"
     for v in found:
