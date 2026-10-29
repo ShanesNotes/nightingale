@@ -17,6 +17,8 @@
 - [Fast-forward identity (D3)](../../docs/srs.md#3-hard-rules): SRS rule 4 gives identical bits at every pace, fast-forward included. Resolution is part of a run's identity, so a run at a reduced resolution is a different run.
 - [Map detail at milestone 1 (D5)](../../docs/adr/0002-map-starts-grouped.md): the map starts grouped, and each split is earned. At stage 1 the map holds only the regions that the anchors and the stage 1 checks name.
 - [Chart the foundation map from SRS section 7](issues/02-roadmap.md): this wayfinder map sorts the section, and the ticket keeps the section word for word.
+- [First crate](issues/03-first-crate.md): `tools/verify` plans a merge, changed or full run over four `ng-*` crates; root and ticket Markdown count as docs-only; the pin rule waits for a pin without a lockfile. The nightly job is [Add the nightly job](issues/10-nightly-job.md).
+- [Admit the ng-* crates under purity rules](../native-contract/issues/01-ng-purity-rules.md): the contract's crate table marks the physiology closure, which takes no crate from outside the workspace, and no crate may name a host service.
 
 ## Not yet specified
 
