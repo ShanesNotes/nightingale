@@ -12,3 +12,7 @@ Status: ready-for-agent
 - [ ] A site-class Starling law over the two beds compiles to one program applied at both sites, with per-site parameters
 - [ ] Every compile-fail doctest in the sketch has a compile-fail test here with the same error code, and each legal twin compiles
 - [ ] Compilation refuses an omitted law, a second owner of a row, and a mode without law coverage, each naming the law
+
+## Comments
+
+From 02: `Schema::pools` lists one water pool per space of every site, in key order. Whether a pool no law touches is refused here, as the contract's orphan rule reads, or never becomes an amount row, as the arena's Codex runner and judge proposed, is this ticket's call; 02's answer gives both sides. Under the first reading, a two-bed Starling bench must also move or hold each bed's cell water. Compile-fail error codes are checked by the gate only for the sketch, and this ticket's third box needs the same check for `crates/ng-contract`.

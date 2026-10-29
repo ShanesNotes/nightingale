@@ -19,6 +19,7 @@
 - [Chart the foundation map from SRS section 7](issues/02-roadmap.md): this wayfinder map sorts the section, and the ticket keeps the section word for word.
 - [First crate](issues/03-first-crate.md): `tools/verify` plans a merge, changed or full run over four `ng-*` crates; root and ticket Markdown count as docs-only; the pin rule waits for a pin without a lockfile. The nightly job is [Add the nightly job](issues/10-nightly-job.md).
 - [Admit the ng-* crates under purity rules](../native-contract/issues/01-ng-purity-rules.md): the contract's crate table marks the physiology closure, which takes no crate from outside the workspace, and no crate may name a host service.
+- [Anatomy as data](../native-contract/issues/02-anatomy-as-data.md): `ng-contract` checks a map at `finish` with named reasons, hashes it in key order and derives one water pool per space. A bed must lie on the circulation, no pump is declared, and site ids are names resolved by key.
 
 ## Not yet specified
 

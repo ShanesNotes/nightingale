@@ -162,6 +162,9 @@ The tissue a named arterial branch supplies, down to the beds it ends in (sectio
 **Network**:
 The "connected to" relation: a graph of real anatomical segments that crosses organ boundaries. Section 5 lists the networks.
 
+**Circulation**:
+The largest part of the vascular network in which every site reaches every other and that holds a vessel segment. Every capillary bed lies on it, so blood reaches each bed and can return.
+
 **Tissue bed**:
 A capillary bed with the tissue it serves (its plasma, interstitial fluid and cells), where blood and tissue exchange.
 
@@ -187,6 +190,9 @@ A wall between two spaces, classed by what can cross it (section 5).
 
 **Pool**:
 The amount of one conserved quantity (water, sodium, oxygen, heat, and so on) held in one site, or in one space of a site such as a tissue bed's plasma. The body names its pools, the state holds their amounts, and no organ or system owns one.
+
+**Space**:
+One part of a site that holds pools: a tissue bed's plasma, interstitial fluid or cells, a vessel segment's lumen, or an enclosed space's own fluid. A junction, a tissue site and a nerve segment have none.
 
 **Conserved quantity**:
 A quantity the ledger balances: water, an element (sodium, potassium, chloride, calcium, magnesium, phosphorus, nitrogen), charge, energy, a moiety such as glucose or catecholamine, or carrier mass. The contract's `Book` type names one.
