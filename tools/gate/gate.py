@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import pathlib
+import posixpath
 import re
 import shutil
 import stat
@@ -474,6 +475,8 @@ def parse_source(path: str, text: str) -> Source:
 
 HOST_NAMES = frozenset({"std", "atomic", "env", "option_env", "thread_local"})
 INCLUDE_NAMES = frozenset({"include", "include_str", "include_bytes"})
+# What each admissible dev_external helper names that reads a file, so its reads stay inside the member.
+FILE_READERS: Mapping[str, frozenset[str]] = {"expect-test": frozenset({"expect_file"})}
 TEST_ONLY = (["test"], ["not", "(", "test", ")"])
 
 
@@ -485,9 +488,28 @@ def host_hits(src: Source) -> list[Token]:
     ]
 
 
-def include_hits(src: Source) -> list[Token]:
-    hits = [t for t in (*src.code, *src.doctests) if t.kind == "ident" and t.value in INCLUDE_NAMES]
-    for attr in attributes(src.code):
+def _reads_home(code: tuple[Token, ...], k: int, src: Source, home: str) -> bool:
+    """`expect_file!["x"]` reads x beside the calling file; only a literal that stays in the member is known."""
+    if not (_punct(code, k + 1, "!") and k + 4 < len(code) and code[k + 3].kind == "literal"):
+        return False
+    if (code[k + 2].value, code[k + 4].value) not in (("[", "]"), ("(", ")"), ("{", "}")) or "\\" in code[k + 3].value:
+        return False
+    target = posixpath.normpath(posixpath.join(posixpath.dirname(src.path), code[k + 3].value))
+    return target.startswith(home + "/")
+
+
+def include_hits(src: Source, home: str) -> list[Token]:
+    readers = INCLUDE_NAMES.union(*FILE_READERS.values())
+    hits = [t for t in src.doctests if t.kind == "ident" and t.value in readers]
+    hits += [
+        t
+        for k, t in enumerate(src.code)
+        if t.kind == "ident"
+        and t.value in readers
+        and (t.value in INCLUDE_NAMES or not _reads_home(src.code, k, src, home))
+    ]
+    # A doctest compiles as its own crate, so a #[path] there reaches a file no scan reads.
+    for attr in (*attributes(src.code), *attributes(src.doctests)):
         hits += [t for k, t in enumerate(attr) if t.kind == "ident" and t.value == "path" and _punct(attr, k + 1, "=")]
     return hits
 
@@ -644,7 +666,9 @@ def cargo_members(root: pathlib.Path) -> dict[str, Member]:
             )
             for d in p["dependencies"]
         )
-        targets = tuple(Target(t["name"], frozenset(t["kind"]), pathlib.Path(t["src_path"]).resolve()) for t in p["targets"])
+        targets = tuple(
+            Target(t["name"], frozenset(t["kind"]), pathlib.Path(t["src_path"]).resolve()) for t in p["targets"]
+        )
         manifest = pathlib.Path(p["manifest_path"])
         rel = _rel(root, manifest.parent)
         members[p["name"]] = Member(p["name"], rel, deps, targets, _toml(manifest), *_member_tree(root, rel))
@@ -854,6 +878,14 @@ def no_outside_crates(ws: Workspace) -> list[Violation]:
         admitted = r.dev_external if (r := ws.registry.row(m.name)) else {}
         if row.closure and admitted:
             out.append(Violation(code, m.name, "a physiology closure crate admits no dev_external entry; drop it"))
+        out += [
+            Violation(
+                code,
+                f"{m.name} -> {p}",
+                "the gate does not know which of its names read a file; add them to FILE_READERS in gate.py",
+            )
+            for p in sorted(admitted.keys() - FILE_READERS.keys())
+        ]
         for d in m.deps:
             if d.member:
                 continue
@@ -954,10 +986,10 @@ def sources_stay_home(ws: Workspace) -> list[Violation]:
             Violation(
                 code,
                 f"{s.path}:{t.line}",
-                f"`{t.value}` reads a file into the build; a member builds from its own sources only",
+                f"`{t.value}` reads a file at build or test time; a member builds and tests from its own sources only",
             )
             for s in m.sources
-            for t in include_hits(s)
+            for t in include_hits(s, m.dir)
         ]
         out += [
             Violation(code, link, "a symlink in a member can reach outside it; put the file there") for link in m.links
@@ -968,6 +1000,24 @@ def sources_stay_home(ws: Workspace) -> list[Violation]:
             if not t.src.is_relative_to((ws.root / m.dir).resolve())
         ]
     return out
+
+
+def lib_path(path: str) -> Mutation:
+    def apply(root: pathlib.Path) -> None:
+        append("crates/ng-record/Cargo.toml", f'\n[lib]\npath = "{path}"\n').apply(root)
+        shutil.copy2(root / "crates/ng-record/src/lib.rs", root / "crates/ng-record" / path)
+
+    return Mutation(f"point ng-record's [lib] path at {path}", apply)
+
+
+@rule("seam.target", "seam", lib_path("src/lib.txt"))
+def targets_are_scanned(ws: Workspace) -> list[Violation]:
+    return [
+        Violation("seam.target", f"{m.name}:{t.name}", f"{t.src.name} is not a .rs file, so no source scan reads it")
+        for m in sorted(ws.members.values(), key=lambda m: m.name)
+        for t in m.targets
+        if t.src.suffix != ".rs"
+    ]
 
 
 @rule("seam.build", "seam", append("crates/ng-contract/build.rs", "fn main() {}\n"))
@@ -1233,7 +1283,9 @@ PLAN_CASES = (
     PlanCase("merge", ".scratch/foundation/map.md", "docs-only", frozenset()),
     PlanCase("merge", "AGENTS.md", "docs-only", frozenset(), steps=frozenset({"10-docs"})),
     PlanCase("merge", CONTRACT, "docs-only", frozenset(), steps=frozenset({"05-seam", "10-docs", "20-sketch"})),
-    PlanCase("merge", "docs/atlas/coupling-map.md", "docs-only", frozenset(), steps=frozenset({"10-docs", "20-sketch"})),
+    PlanCase(
+        "merge", "docs/atlas/coupling-map.md", "docs-only", frozenset(), steps=frozenset({"10-docs", "20-sketch"})
+    ),
     PlanCase("merge", "crates/ng-record/src/lib.rs", "affected", RECORD_USERS),
     PlanCase("changed", "crates/ng-record/src/lib.rs", "affected", frozenset({"ng-record"})),
     PlanCase("merge", "crates/ng-contract/src/lib.rs", "affected", reaches=RECORD_USERS | {"ng-contract"}),
@@ -1296,6 +1348,18 @@ SCAN_CASES: tuple[tuple[str, frozenset[str]], ...] = (
     ('const S: &str = include_str!("x");', INCLUDE),
     ("use core::include_str as i;", INCLUDE),
     ('#[cfg_attr(test, path = "x.rs")]\nmod x;', INCLUDE),
+    ('/// ```\n/// #[path = "../x.rs"] mod external;\n/// ```\npub fn f() {}', INCLUDE),
+    ('/// ```\n/// # #[path = "../x.rs"]\n/// # mod external;\n/// ```\npub fn f() {}', INCLUDE),
+    ('/// ```\n/// #[cfg_attr(all(), path = "../x.rs")] mod external;\n/// ```\npub fn f() {}', INCLUDE),
+    ('#[doc = "```\\n#[path = \\"../x.rs\\"] mod external;\\n```"]\npub fn f() {}', INCLUDE),
+    ('/// ```text\n/// #[path = "../x.rs"] mod external;\n/// ```\npub fn f() {}', frozenset()),
+    ('fn f() { expect_test::expect_file!["../../../docs/x.txt"].assert_eq(""); }', INCLUDE),
+    ('fn f() { expect_file!["/tmp/x.txt"].assert_eq(""); }', INCLUDE),
+    ('fn f() { expect_file![r"..\\..\\..\\x.txt"].assert_eq(""); }', INCLUDE),
+    ("fn f() { expect_file![P].assert_eq(\"\"); }", INCLUDE),
+    ("use expect_test::expect_file as e;", INCLUDE),
+    ('/// ```\n/// expect_test::expect_file!["x.txt"];\n/// ```\npub fn f() {}', INCLUDE),
+    ('fn f() { expect_file!["../tests/x.txt"].assert_eq(""); }', frozenset()),
     ("#[cfg(test)]\nmod t {}\n#[cfg(not(test))]\nfn f() {}\n#[cfg_attr(test, derive(Debug))]\nstruct S;", frozenset()),
     ('#[cfg(feature = "x")]\nfn f() {}', CFG),
     ("#[cfg_attr(test, cfg(any()))]\nfn f() {}", CFG),
@@ -1306,12 +1370,12 @@ SCAN_CASES: tuple[tuple[str, frozenset[str]], ...] = (
 def scan_cases() -> list[Violation]:
     out = []
     for text, want in SCAN_CASES:
-        src = parse_source("case.rs", text)
+        src = parse_source("crates/ng-case/src/case.rs", text)
         got = {
             code
             for code, hits in (
                 ("seam.host", host_hits(src)),
-                ("seam.include", include_hits(src)),
+                ("seam.include", include_hits(src, "crates/ng-case")),
                 ("seam.cfg", cfg_hits(src)),
             )
             if hits
@@ -1352,12 +1416,44 @@ def write_probe(name: str, source: str) -> pathlib.Path:
 # so a toolchain that stabilizes another libm method (erf and gamma are unstable on 1.98.1) cannot slip in.
 EXACT_FLOAT_METHODS = frozenset(
     {
-        "abs", "abs_sub", "ceil", "clamp", "classify", "copysign", "div_euclid", "floor", "fract",
-        "from_be_bytes", "from_bits", "from_le_bytes", "from_ne_bytes", "is_finite", "is_infinite", "is_nan",
-        "is_normal", "is_sign_negative", "is_sign_positive", "is_subnormal", "midpoint",
-        "next_down", "next_up", "recip", "rem_euclid", "round", "round_ties_even", "signum", "sqrt",
-        "to_be_bytes", "to_bits", "to_degrees", "to_int_unchecked", "to_le_bytes", "to_ne_bytes", "to_radians",
-        "total_cmp", "trunc",
+        "abs",
+        "abs_sub",
+        "ceil",
+        "clamp",
+        "classify",
+        "copysign",
+        "div_euclid",
+        "floor",
+        "fract",
+        "from_be_bytes",
+        "from_bits",
+        "from_le_bytes",
+        "from_ne_bytes",
+        "is_finite",
+        "is_infinite",
+        "is_nan",
+        "is_normal",
+        "is_sign_negative",
+        "is_sign_positive",
+        "is_subnormal",
+        "midpoint",
+        "next_down",
+        "next_up",
+        "recip",
+        "rem_euclid",
+        "round",
+        "round_ties_even",
+        "signum",
+        "sqrt",
+        "to_be_bytes",
+        "to_bits",
+        "to_degrees",
+        "to_int_unchecked",
+        "to_le_bytes",
+        "to_ne_bytes",
+        "to_radians",
+        "total_cmp",
+        "trunc",
     }
 )
 
@@ -1472,8 +1568,10 @@ def bans() -> int:
     gaps = float_gaps(methods, banned)
     found += [
         Violation(
-            "bans", m, "a stable method clippy.toml does not ban and EXACT_FLOAT_METHODS does not name; ban it, "
-            "or name it there if IEEE 754 makes its result the same on every host"
+            "bans",
+            m,
+            "a stable method clippy.toml does not ban and EXACT_FLOAT_METHODS does not name; ban it, "
+            "or name it there if IEEE 754 makes its result the same on every host",
         )
         for m in gaps
     ]
@@ -1517,6 +1615,12 @@ pub enum LeakVariant {
     Raw(f64),
     Named { value: f64 },
 }
+
+pub use core::primitive::f64 as LeakReexport;
+
+pub use core::primitive::f32;
+
+pub use core::primitive as leak_primitive;
 
 pub trait LeakTrait {
     fn leak_method(&self) -> f64;
@@ -1596,6 +1700,9 @@ F64_PROBE_LEAKS = frozenset(
         "<LeakFrom as From>::from",
         "LEAK_CONST",
         "LeakAlias",
+        "LeakReexport",
+        "f32",
+        "leak_primitive",
         "Pressure::leak_inherent",
         "leak_hidden",
         "hidden::leak_in_hidden_module",
@@ -1609,6 +1716,18 @@ def _has_float(x: object) -> bool:
     if isinstance(x, dict):
         return x.get("primitive") in ("f64", "f32") or any(_has_float(v) for v in x.values())
     return isinstance(x, list) and any(_has_float(v) for v in x)
+
+
+def _reexports_float(it: dict, paths: dict) -> bool:
+    """A `use` of a primitive has no item to resolve, so its source path names it; `core::primitive` hands
+    out every float under any alias."""
+    if "use" not in it["inner"]:
+        return False
+    use = it["inner"]["use"]
+    target = paths.get(str(use["id"])) if use["id"] is not None else None
+    if target and target["kind"] == "module" and target["path"][1:] == ["primitive"]:
+        return True
+    return use["source"].split("::")[-1] in ("f64", "f32")
 
 
 def float_items(doc: dict) -> set[str]:
@@ -1651,7 +1770,7 @@ def float_items(doc: dict) -> set[str]:
     def name(i: str) -> str:
         it = index[i]
         if i not in parent:
-            return path_of(i) or it["name"] or f"item {i}"
+            return path_of(i) or it["name"] or ("use" in it["inner"] and it["inner"]["use"]["name"]) or f"item {i}"
         how, p = parent[i]
         if how == "field":
             return f"{name(p)}.{it['name']}"
@@ -1671,7 +1790,10 @@ def float_items(doc: dict) -> set[str]:
     return {
         name(i)
         for i, it in index.items()
-        if it["crate_id"] == 0 and "impl" not in it["inner"] and _has_float(it["inner"]) and in_api_impl(i)
+        if it["crate_id"] == 0
+        and "impl" not in it["inner"]
+        and (_has_float(it["inner"]) or _reexports_float(it, paths))
+        and in_api_impl(i)
     }
 
 
@@ -1829,7 +1951,9 @@ def doctests() -> int:
     summary = f"10-rust: doctests: {len(listed)} listed by rustdoc, {len(listed) - len(found)} read by the host scan"
     if os.environ.get("NG_GATE_MODE") != "changed":
         src = parse_source("src/lib.rs", DOCTEST_PROBE)
-        got = {line for _, _, line in listed_doctests(write_probe("doctest-probe", DOCTEST_PROBE), []) if unread(src, line)}
+        got = {
+            line for _, _, line in listed_doctests(write_probe("doctest-probe", DOCTEST_PROBE), []) if unread(src, line)
+        }
         want = {
             n
             for n, text in enumerate(DOCTEST_PROBE.splitlines(), 1)
@@ -1837,7 +1961,11 @@ def doctests() -> int:
         }
         if got != want:
             found.append(
-                Violation("doctest", "the probe", f"unread doctests at lines {sorted(got)}; the probe has them at {sorted(want)}")
+                Violation(
+                    "doctest",
+                    "the probe",
+                    f"unread doctests at lines {sorted(got)}; the probe has them at {sorted(want)}",
+                )
             )
         summary += f"; probe: {len(want)} unreadable doctests flagged"
     for v in found:

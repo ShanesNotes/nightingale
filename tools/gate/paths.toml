@@ -44,7 +44,8 @@ docs_only = true
 # Optional keys, absent while the crates are empty:
 #   smoke = ["trace"]                          test targets every merge run that reaches a crate runs
 #   dev_external = { expect-test = "=1.5.1" }  dev-dependencies from outside the workspace, at exact versions;
-#                                              refused for a physiology closure crate
+#                                              refused for a physiology closure crate and for a
+#                                              helper whose file readers gate.py's FILE_READERS lacks
 #   [[crate.f64_allow]]                        a public item allowed a bare f64 or f32, as
 #   item = "Workspace::unknowns"               15-f64 names it; an entry that matches no
 #   reason = "..."                             item fails
