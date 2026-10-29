@@ -1469,12 +1469,13 @@ def bans() -> int:
         found = [Violation("bans", e, "clippy did not reject its probe line") for e in unnamed]
     methods = stable_float_methods()
     banned = {e["path"] if isinstance(e, dict) else e for e in conf.get("disallowed-methods", [])}
+    gaps = float_gaps(methods, banned)
     found += [
         Violation(
             "bans", m, "a stable method clippy.toml does not ban and EXACT_FLOAT_METHODS does not name; ban it, "
             "or name it there if IEEE 754 makes its result the same on every host"
         )
-        for m in float_gaps(methods, banned)
+        for m in gaps
     ]
     found += [
         Violation("bans", m, "EXACT_FLOAT_METHODS names no stable f64 or f32 method; drop it")
@@ -1483,14 +1484,15 @@ def bans() -> int:
     found += [
         Violation("bans", m, "dropping its ban leaves no gap the check reports")
         for m in sorted(banned)
-        if m.split("::")[-1] in methods.get(m.split("::")[0], ()) and float_gaps(methods, banned - {m}) != [m]
+        if m.split("::")[-1] in methods.get(m.split("::")[0], ()) and m not in float_gaps(methods, banned - {m})
     ]
     for v in found:
         print(v)
     rejected = len(entries) - len(unnamed)
     print(
         f"10-rust: bans probe: {len(entries)} clippy.toml entries, {rejected} rejected on their own line; "
-        f"{sum(map(len, methods.values()))} stable f64 and f32 methods, each banned or exact"
+        f"{sum(map(len, methods.values()))} stable f64 and f32 methods, "
+        + (f"{len(gaps)} neither banned nor exact" if gaps else "each banned or exact")
     )
     return 1 if found else 0
 
