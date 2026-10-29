@@ -1,0 +1,13 @@
+[package]
+name = "ng-validate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+ng-contract = { path = "../ng-contract" }
+ng-record = { path = "../ng-record" }
+
+[lints]
+workspace = true

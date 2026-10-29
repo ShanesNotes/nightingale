@@ -338,6 +338,9 @@ _Avoid_: organ crate
 **Record crate**:
 `ng-record`: the state, the ledger, the pending events and the check that accepts or refuses each step. It is the only code that changes state.
 
+**Physiology closure**:
+The crates a step's arithmetic runs through: the rows the crate table in `docs/architecture/solver-contract.md` marks yes, which are the contract, the system crates, the solver and the record crate. It admits no crate from outside the workspace.
+
 **Fragment**:
 What a system crate declares: its laws, ports, parameter slots, modes and streams, as data the contract compiles. No fragment runs during a solve.
 

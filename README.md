@@ -4,8 +4,8 @@ The native Rust engine for one simulated patient: a whole-body physiology comput
 
 ## Build and verify
 
-    .agents/skills/verify-nightingale/ensure-prereqs.sh   # the toolchain from rust-toolchain.toml
-    tools/verify                                           # every check
+    .agents/skills/verify-nightingale/ensure-prereqs.sh   # the pinned toolchain and the pre-push hook
+    tools/verify                                           # the merge run, which prove.sh records
 
 ## Where docs live
 

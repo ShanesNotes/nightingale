@@ -1,0 +1,20 @@
+[workspace]
+members = ["crates/*"]
+exclude = ["docs/architecture/solver-contract-sketch"]
+resolver = "3"
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98.1"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+disallowed_methods = "forbid"
+disallowed_types = "forbid"
+print_stdout = "forbid"
+print_stderr = "forbid"
+dbg_macro = "forbid"

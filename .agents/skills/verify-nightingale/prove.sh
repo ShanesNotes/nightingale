@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Run full tools/verify from the repo root and print a proof block.
+# Run tools/verify, the merge run, from the repo root and print a proof block.
 # Exit 0 only when the block says full_proof: yes.
 # A non-zero tools/verify status is preserved when that status is already non-zero.
 # Exit 2 means tools/verify exited 0 but the run is still not full proof
-# (dirty tree, head moved, or the OK line is absent).
+# (dirty tree, head moved, the OK line or the merge plan line is absent).
 set -euo pipefail
 
 die() { echo "prove: $*" >&2; exit 1; }
@@ -40,6 +40,9 @@ end_sha=$(git rev-parse HEAD)
 end_dirty=$(git status --porcelain)
 log_sha=$(sha256sum "$log" | awk '{print $1}')
 final=$(awk 'NF {line=$0} END {print line}' "$log")
+gate_line=$(grep -m1 '^gate: mode=' "$log" || true)
+gate_scope=$(sed -n 's/.* scope=\([^ ]*\).*/\1/p' <<<"$gate_line")
+gate_base=$(sed -n 's/.* base=\([^ ]*\).*/\1/p' <<<"$gate_line")
 
 if [ -n "$start_dirty" ] || [ -n "$end_dirty" ]; then
   worktree=dirty
@@ -65,6 +68,9 @@ if [ "$verify_exit" -ne 0 ]; then
 elif [ "$final" != "verify: OK" ]; then
   full=no
   reason="final line is '${final}', not 'verify: OK'"
+elif ! grep -q '^gate: mode=merge ' "$log"; then
+  full=no
+  reason="the log has no 'gate: mode=merge' plan line"
 elif [ "$worktree" != clean ]; then
   full=no
   reason="worktree dirty; the commit SHA is not the tree that ran"
@@ -81,6 +87,8 @@ proof="${log}.proof"
   echo
   echo "- commit: ${start_sha}"
   echo "- command: bash tools/verify"
+  echo "- gate_scope: ${gate_scope:-none}"
+  echo "- gate_base: ${gate_base:-none}"
   echo "- verify_exit: ${verify_exit}"
   echo "- final_line: ${final}"
   echo "- wall_time_s: ${wall}"
