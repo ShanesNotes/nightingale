@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-# The solver-contract sketch: the pinned toolchain, a warning-free build, every doctest, the error
-# code of each compile-fail doctest, and the coupling census against docs/atlas/coupling-map.md.
+# The solver-contract sketch: a warning-free build, every doctest, the error code of each
+# compile-fail doctest, and the coupling census against docs/atlas/coupling-map.md.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 want=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
-have=$(rustc --version | cut -d' ' -f2)
-[ "$have" = "$want" ] || { echo "20-sketch: rustc $have, rust-toolchain.toml pins $want"; exit 1; }
 sketch=docs/architecture/solver-contract-sketch
 cd "$sketch"
 RUSTFLAGS="-D warnings" cargo check --all-targets --locked

@@ -1,10 +1,65 @@
 #!/usr/bin/env bash
-# The one check. Green = every step in tools/verify.d/ passes, in lexical order.
-# A slice adds its own NN-name.sh step file and never edits this runner.
+# The one check. tools/gate/gate.py plans the run from the changed paths and tools/gate/paths.toml, and
+# the runner runs the steps the plan selects from tools/verify.d/, in lexical order. A slice adds its own
+# NN-name.sh step and names it in paths.toml; it never edits this runner.
+#
+#   tools/verify [--base REV]            the merge run: the pre-merge gate and the run prove.sh records
+#   tools/verify --changed [--base REV]  the changed run: the pre-push hook's checks for changed paths
+#   tools/verify --full                  the full run: every step and crate, ignored tests included
+#
+# Exit 0 green, 1 the plan or a step failed, 64 usage.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-for step in tools/verify.d/*.sh; do
-  echo "== $(basename "$step")"
-  bash "$step"
+
+usage() {
+  echo "usage: tools/verify [--changed | --full] [--base REV]" >&2
+  exit 64
+}
+mode=merge
+base_args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --changed | --full)
+      [ "$mode" = merge ] || usage
+      mode=${1#--}
+      ;;
+    --base)
+      { [ $# -ge 2 ] && [ ${#base_args[@]} -eq 0 ]; } || usage
+      base_args=(--base "$2")
+      shift
+      ;;
+    *) usage ;;
+  esac
+  shift
 done
-echo "verify: OK"
+[ "$mode" != full ] || [ ${#base_args[@]} -eq 0 ] || usage
+
+# A command substitution, not `< <(...)`: set -e ignores a failed process substitution.
+plan=$(python3 -I tools/gate/gate.py plan "$mode" "${base_args[@]}") || exit 1
+scope='' base='' reason='' crates='' smoke='' steps=''
+while IFS='=' read -r key value; do
+  case "$key" in
+    scope | base | reason | crates | smoke | steps) printf -v "$key" '%s' "$value" ;;
+  esac
+done <<<"$plan"
+echo "gate: mode=$mode scope=$scope base=$base reason=$reason"
+echo "gate: crates=${crates:-none} smoke=${smoke:-none}"
+echo "gate: steps=$steps"
+export NG_GATE_MODE="$mode" NG_GATE_SCOPE="$scope" NG_GATE_CRATES="$crates" NG_GATE_SMOKE="$smoke"
+
+for step in tools/verify.d/*.sh; do
+  name=$(basename "$step")
+  case " $steps " in
+    *" ${name%.sh} "*)
+      echo "== $name"
+      bash "$step"
+      ;;
+    *) echo "== $name (not selected)" ;;
+  esac
+done
+# Only a merge or full run may print the exact line prove.sh accepts.
+if [ "$mode" = changed ]; then
+  echo "verify: OK for changed paths only"
+else
+  echo "verify: OK"
+fi

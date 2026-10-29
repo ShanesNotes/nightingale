@@ -1,0 +1,59 @@
+# What tools/verify runs for a set of changed paths, and the crates it knows. tools/gate/gate.py is the
+# only reader. Globs: `*` stays inside one path segment and `**` crosses segments. The first rule that
+# matches a path wins for it, a run takes the union of its paths' rules, and a path no rule matches runs
+# everything.
+schema = 1
+
+# Steps every run takes.
+always = ["01-toolchain"]
+
+# Steps a run adds when it reaches a crate, run over the crates it reaches.
+crate_steps = []
+
+[[rule]]
+paths = [
+  "rust-toolchain.toml", "Cargo.toml", "Cargo.lock", "clippy.toml", "rustfmt.toml", ".cargo/**",
+  "tools/**", ".agents/skills/verify-nightingale/**", ".claude/**",
+]
+run = "everything"
+
+[[rule]]
+paths = ["crates/*/**"]
+run = "crate"
+
+# The sketch, and the coupling map its census reads.
+[[rule]]
+paths = ["docs/architecture/**", "docs/atlas/**"]
+run = ["10-docs", "20-sketch"]
+docs_only = true
+
+[[rule]]
+paths = ["docs/**", "*.md"]
+run = ["10-docs"]
+docs_only = true
+
+# Tickets: no step reads them.
+[[rule]]
+paths = [".scratch/**/*.md"]
+run = []
+docs_only = true
+
+# One row per workspace member, named for its directory: the member lives at crates/<name>.
+# Optional keys, absent while the crates are empty:
+#   smoke = ["trace"]                          test targets every merge run that reaches a crate runs
+#   dev_external = { expect-test = "=1.5.1" }  dev-dependencies from outside the workspace, at exact versions;
+#                                              refused for a physiology closure crate
+#   [[crate.f64_allow]]                        a public item allowed a bare f64 or f32, as
+#   item = "Workspace::unknowns"               15-f64 names it; an entry that matches no
+#   reason = "..."                             item fails
+[[crate]]
+name = "ng-contract"
+
+[[crate]]
+name = "ng-record"
+
+[[crate]]
+name = "ng-observe"
+
+[[crate]]
+name = "ng-validate"
