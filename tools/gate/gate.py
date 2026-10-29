@@ -6,6 +6,8 @@ Python 3.11 stdlib only. Run as `python3 -I tools/gate/gate.py <command>`; it fi
     seam                                     the workspace rules, every rule's probe, the plan and scan cases
     bans                                     clippy rejects a probe built from clippy.toml, entry by entry
     f64                                      no bare f64 or f32 in a public API outside its row's allow list
+    nightly-record <exit> <log>              record a nightly full run (tools/gate/nightly.sh)
+    nightly-passed <sha>                     exit 0 when the nightly state records sha as passed
 
 Exit codes: 0 pass; 1 violations, one per line as `<code>: <subject>: <what to do>`; 2 an input the gate
 reads is missing or malformed.
@@ -14,6 +16,8 @@ reads is missing or malformed.
 from __future__ import annotations
 
 import dataclasses
+import datetime
+import hashlib
 import json
 import os
 import pathlib
@@ -1420,6 +1424,62 @@ def f64() -> int:
     return 1 if found else 0
 
 
+# ---- nightly state: written by tools/gate/nightly.sh, read only by the changed run's warning -----------
+
+
+def _state_path() -> pathlib.Path:
+    return pathlib.Path.home() / ".local/state/nightingale/nightly.json"
+
+
+def nightly_state() -> dict | None:
+    try:
+        state = json.loads(_state_path().read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as e:
+        raise GateError(f"{_state_path()}: {e}") from None
+    if not isinstance(state, dict):
+        raise GateError(f"{_state_path()}: not a JSON object")
+    return state
+
+
+def nightly_record(status: int, log: pathlib.Path) -> int:
+    sha = git(ROOT, "rev-parse", "HEAD")
+    try:
+        last_green = (nightly_state() or {}).get("last_green")
+    except GateError:
+        last_green = None
+    state = {
+        "sha": sha,
+        "result": "passed" if status == 0 else "failed",
+        "finished_utc": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "log": str(log.resolve()),
+        "log_sha256": hashlib.sha256(log.read_bytes()).hexdigest(),
+        "last_green": sha if status == 0 else last_green,
+    }
+    path = _state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".nightly-", suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        json.dump(state, out, indent=2)
+        out.write("\n")
+    os.replace(tmp, path)
+    print(f"nightly: {state['result']} on {sha}, recorded in {path}")
+    return 0
+
+
+def changed_run_warning() -> None:
+    """Never changes the plan: the merge run reads no state from HOME."""
+    try:
+        state = nightly_state()
+    except GateError as e:
+        print(f"gate: warning: the nightly state is unreadable ({e})", file=sys.stderr)
+        return
+    if state and state.get("result") == "failed":
+        print(f"gate: warning: the last nightly full run failed on {state.get('sha')} (log {state.get('log')}); "
+              "tools/verify --full fails until main is fixed", file=sys.stderr)
+
+
 # ---- entry point --------------------------------------------------------------------------------------
 
 
@@ -1436,19 +1496,31 @@ def seam() -> int:
     return 1 if found or probes or cases else 0
 
 
+def plan_command(mode: Mode, base: str | None) -> int:
+    print(plan(load(ROOT), mode, base).lines())
+    if mode == "changed":
+        changed_run_warning()
+    return 0
+
+
 def main(argv: list[str]) -> int:
     try:
         match argv:
             case ["plan", "merge" | "changed" | "full" as mode]:
-                print(plan(load(ROOT), mode, None).lines())
+                return plan_command(mode, None)
             case ["plan", "merge" | "changed" as mode, "--base", base]:
-                print(plan(load(ROOT), mode, base).lines())
+                return plan_command(mode, base)
             case ["seam"]:
                 return seam()
             case ["bans"]:
                 return bans()
             case ["f64"]:
                 return f64()
+            case ["nightly-record", status, log] if status.isdigit():
+                return nightly_record(int(status), pathlib.Path(log))
+            case ["nightly-passed", sha]:
+                state = nightly_state() or {}
+                return 0 if state.get("sha") == sha and state.get("result") == "passed" else 1
             case _:
                 print(__doc__, file=sys.stderr)
                 return 2
@@ -1459,7 +1531,6 @@ def main(argv: list[str]) -> int:
     except GateError as e:
         print(f"gate: {e}")
         return 2
-    return 0
 
 
 if __name__ == "__main__":
