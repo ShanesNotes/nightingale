@@ -151,8 +151,8 @@ impl AnatomyBuilder {
     pub fn refines(&mut self, _rule: RefinementRule) {
         todo!()
     }
-    /// Checks the graph: every bed reachable from a pump and drained, one enclosure chain per
-    /// enclosed site, a position for every site, containment a tree, no orphan site.
+    /// Checks the graph: every bed on the circulation, one enclosure chain per enclosed site, a
+    /// position for every site, containment a tree, no orphan site.
     pub fn finish(self) -> Result<Anatomy, AdmissionError> {
         todo!()
     }

@@ -8,16 +8,16 @@ use super::*;
 pub struct PoolRegistry {
     _pools: Vec<PoolRef>,
 }
-/// The anatomy plus the pools it generates: each site class's compartments, the species and
-/// carrier media in each, and the conserved books they make. Organs are regions of the anatomy,
+/// The anatomy plus the pools it generates: each site class's spaces, the species and carrier
+/// media in each, and the conserved books they make. Organs are regions of the anatomy,
 /// so the registry has no organ in it.
 pub struct Schema {
     _anatomy: Anatomy,
     _registry: PoolRegistry,
 }
 impl Schema {
-    /// Derives the pool registry from the anatomy's site classes; a site class with no
-    /// compartments, or a species with no carrier, is refused.
+    /// Derives the pool registry from the anatomy's site classes; a species with no carrier is
+    /// refused.
     pub fn new(_anatomy: Anatomy) -> Result<Self, AdmissionError> {
         todo!()
     }

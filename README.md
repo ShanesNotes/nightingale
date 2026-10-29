@@ -16,7 +16,7 @@ Rust 1.98.1, edition 2024, one Cargo workspace, `unsafe` code forbidden. Laws ar
 4. `ng-observe` would read the accepted step and would not write.
 5. `ng-validate` would check conservation and compare solvers. It sits outside that path.
 
-The four crates under `crates/` compile. Each source file is only a comment naming that role. The type sketch they are meant to grow into is [solver-contract-sketch](docs/architecture/solver-contract-sketch), and its function bodies are `todo!()`. Heart and vessels, fluids, kidney, nerves, receptors and the solver are modules there, not workspace crates. Read [the requirements](docs/srs.md), [decision records](docs/adr), [the 13-system atlas](docs/atlas), [the glossary](GLOSSARY.md) and [the solver contract](docs/architecture/solver-contract.md).
+The four crates under `crates/` compile. `ng-contract` holds the anatomy: it checks a map of the body's sites and gives it a hash. The other three are each only a comment naming their role. The type sketch they are meant to grow into is [solver-contract-sketch](docs/architecture/solver-contract-sketch), and its function bodies are `todo!()`. Heart and vessels, fluids, kidney, nerves, receptors and the solver are modules there, not workspace crates. Read [the requirements](docs/srs.md), [decision records](docs/adr), [the 13-system atlas](docs/atlas), [the glossary](GLOSSARY.md) and [the solver contract](docs/architecture/solver-contract.md).
 
 nightingale-pulse is a private reference implementation. This tree does not build or run against it.
 
@@ -33,7 +33,7 @@ cargo test --doc --locked --manifest-path docs/architecture/solver-contract-sket
 tools/verify
 ```
 
-There is no program to run. Workspace tests pass with zero tests. The sketch's doctests check the API shape, including forms that must fail to compile. The first command installs the pinned toolchain and, when git has no hook path yet, turns on this repo's pre-push check. `tools/verify` is the merge check.
+There is no program to run. Workspace tests check the anatomy on synthetic maps. The sketch's doctests check the API shape, including forms that must fail to compile. The first command installs the pinned toolchain and, when git has no hook path yet, turns on this repo's pre-push check. `tools/verify` is the merge check.
 
 ## What is in place
 

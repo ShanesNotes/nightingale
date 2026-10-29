@@ -52,6 +52,10 @@ docs_only = true
 [[crate]]
 name = "ng-contract"
 
+[[crate.f64_allow]]
+item = "quantity::Measure::new"
+reason = "the parser where a raw number becomes a dimensioned measure, refused unless finite"
+
 [[crate]]
 name = "ng-record"
 
