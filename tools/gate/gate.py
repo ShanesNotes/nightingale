@@ -1046,13 +1046,20 @@ def _copy(ws: Workspace, dest: pathlib.Path) -> None:
         (dest / STEPS / f"{s}.sh").touch()
 
 
-def run_probes(ws: Workspace, tree_passes: bool) -> list[Violation]:
-    """Each rule must fire on its mutation of a fresh copy of what the rules read; the unmutated copy passes."""
-    out = []
+def run_probes(ws: Workspace, tree_passes: bool) -> tuple[list[Violation], int]:
+    """Each rule must fire on its mutation of a fresh copy of what the rules read; the unmutated copy passes.
+    Returns the violations and how many probes bit. A copy cannot carry a path dependency from outside the
+    repo, so a tree with one runs no probe; seam.external already refuses that dependency."""
+    out, bites = [], 0
     with tempfile.TemporaryDirectory(prefix="gate-probes-") as tmp:
         clean = pathlib.Path(tmp) / "clean/ws"
         _copy(ws, clean)
-        copy_ws = load(clean)
+        try:
+            copy_ws = load(clean)
+        except GateError as e:
+            return [
+                Violation("probe", "the copy of the tree", f"does not load, so no probe ran: {str(e).splitlines()[0]}")
+            ], 0
         if tree_passes:
             out += [
                 Violation("probe", "the unmutated copy", f"fails {v}")
@@ -1067,9 +1074,11 @@ def run_probes(ws: Workspace, tree_passes: bool) -> list[Violation]:
             except GateError as e:
                 out.append(Violation("probe", r.code, f"{r.probe.describe}: the mutated copy does not load: {e}"))
                 continue
-            if not fired:
+            if fired:
+                bites += 1
+            else:
                 out.append(Violation("probe", r.code, f"{r.probe.describe}: the rule does not fire on it"))
-    return out
+    return out, bites
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1210,27 +1219,29 @@ def plan(ws: Workspace, mode: Mode, base_arg: str | None) -> Plan:
 
 @dataclasses.dataclass(frozen=True)
 class PlanCase:
-    """An expectation drawn from the decided run semantics, never from a run."""
+    """An expectation drawn from the decided run semantics, never from a run. Scope everything always means
+    every member and every step file, so those cases name no crates and survive a new crate."""
 
     mode: Mode
     path: str
     scope: Scope
-    crates: frozenset[str] | None = None  # None: not part of the expectation
+    crates: frozenset[str] | None = None  # exactly these; None: not part of the expectation
+    reaches: frozenset[str] = frozenset()  # at least these
     steps: frozenset[str] = frozenset()  # steps that must be selected
     modes: Modes = (REGULAR, REGULAR)
 
 
-ALL4 = frozenset({"ng-contract", "ng-record", "ng-observe", "ng-validate"})
+RECORD_USERS = frozenset({"ng-record", "ng-observe", "ng-validate"})
 PLAN_CASES = (
-    PlanCase("merge", "docs/srs.md", "docs-only", frozenset(), frozenset({"10-docs"})),
+    PlanCase("merge", "docs/srs.md", "docs-only", frozenset(), steps=frozenset({"10-docs"})),
     PlanCase("merge", ".scratch/foundation/map.md", "docs-only", frozenset()),
-    PlanCase("merge", "AGENTS.md", "docs-only", frozenset(), frozenset({"10-docs"})),
-    PlanCase("merge", "crates/ng-record/src/lib.rs", "affected", frozenset({"ng-record", "ng-observe", "ng-validate"})),
+    PlanCase("merge", "AGENTS.md", "docs-only", frozenset(), steps=frozenset({"10-docs"})),
+    PlanCase("merge", "crates/ng-record/src/lib.rs", "affected", RECORD_USERS),
     PlanCase("changed", "crates/ng-record/src/lib.rs", "affected", frozenset({"ng-record"})),
-    PlanCase("merge", "crates/ng-contract/src/lib.rs", "affected", ALL4),
-    PlanCase("merge", "Cargo.lock", "everything", ALL4),
-    PlanCase("merge", "tools/verify", "everything", ALL4),
-    PlanCase("merge", "notes.txt", "everything", ALL4),
+    PlanCase("merge", "crates/ng-contract/src/lib.rs", "affected", reaches=RECORD_USERS | {"ng-contract"}),
+    PlanCase("merge", "Cargo.lock", "everything"),
+    PlanCase("merge", "tools/verify", "everything"),
+    PlanCase("merge", "notes.txt", "everything"),
     PlanCase("merge", "docs/srs.md", "everything", modes=(REGULAR, "100755")),
     PlanCase("merge", "AGENTS.md", "everything", modes=(REGULAR, "120000")),
 )
@@ -1241,19 +1252,18 @@ def plan_cases(ws: Workspace) -> list[Violation]:
     for c in PLAN_CASES:
         p = plan_changes(ws, c.mode, "base", {c.path: c.modes})
         subject = f"{c.mode} {c.path}" + ("" if c.modes == (REGULAR, REGULAR) else f" ({c.modes[1]})")
+        crates, steps = set(p.crates), set(p.steps)
+        exact = set(ws.members) if c.scope == "everything" else c.crates
         if p.scope != c.scope:
             out.append(Violation("plan", subject, f"scope {p.scope}, the run semantics say {c.scope}"))
-        if c.crates is not None and set(p.crates) != c.crates:
-            out.append(
-                Violation(
-                    "plan",
-                    subject,
-                    f"crates {' '.join(p.crates) or 'none'}, expected {' '.join(sorted(c.crates)) or 'none'}",
-                )
-            )
-        if missing := c.steps - set(p.steps):
+        if exact is not None and crates != exact:
+            got, want = " ".join(sorted(crates)) or "none", " ".join(sorted(exact)) or "none"
+            out.append(Violation("plan", subject, f"crates {got}, expected {want}"))
+        if missing := c.reaches - crates:
+            out.append(Violation("plan", subject, f"does not reach {' '.join(sorted(missing))}"))
+        if missing := (ws.steps if c.scope == "everything" else c.steps) - steps:
             out.append(Violation("plan", subject, f"does not select {' '.join(sorted(missing))}"))
-        if c.scope == "docs-only" and set(p.steps) & set(ws.registry.crate_steps):
+        if c.scope == "docs-only" and steps & set(ws.registry.crate_steps):
             out.append(Violation("plan", subject, "a docs-only plan selects a crate step"))
     return out
 
@@ -1686,11 +1696,12 @@ def changed_run_warning() -> None:
 def seam() -> int:
     ws = load(ROOT)
     found = check(ws, "registration") + check(ws, "seam")
-    probes = run_probes(ws, tree_passes=not found)
-    cases = plan_cases(ws) + scan_cases()
-    for v in found + probes + cases:
+    for v in found:
         print(v)
-    bites = len(RULES) - len({v.subject for v in probes if v.code == "probe" and v.subject != "the unmutated copy"})
+    probes, bites = run_probes(ws, tree_passes=not found)
+    cases = plan_cases(ws) + scan_cases()
+    for v in probes + cases:
+        print(v)
     print(
         f"05-seam: {len(ws.members)} members against the crate table; {len(RULES)} rules, {bites} probes bite; "
         f"{len(PLAN_CASES)} plan cases; {len(SCAN_CASES)} scan cases"
