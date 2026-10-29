@@ -1,0 +1,31 @@
+# Physiology must be bit-reproducible, so every workspace member inherits these bans.
+# sqrt, abs, floor, ceil, round, min and max stay allowed because IEEE 754 defines them exactly.
+# Clippy reads only the nearest clippy.toml, so a crate-local file would drop these bans:
+# 05-seam refuses any other.
+
+disallowed-types = [
+  { path = "std::collections::HashMap", reason = "iteration order" },
+  { path = "std::collections::HashSet", reason = "iteration order" },
+  { path = "std::time::Instant", reason = "no wall clock" },
+  { path = "std::time::SystemTime", reason = "no wall clock" },
+  { path = "std::net::TcpStream", reason = "no sockets" },
+  { path = "std::net::UdpSocket", reason = "no sockets" },
+  { path = "std::net::TcpListener", reason = "no sockets" },
+]
+
+disallowed-methods = [
+  # Host libm: transcendentals are the contract's own routines. mul_add may fuse.
+  "f64::exp", "f64::exp2", "f64::exp_m1", "f64::ln", "f64::ln_1p", "f64::log", "f64::log10", "f64::log2",
+  "f64::powf", "f64::powi", "f64::sin", "f64::cos", "f64::sin_cos", "f64::tan", "f64::asin", "f64::acos",
+  "f64::atan", "f64::atan2", "f64::sinh", "f64::cosh", "f64::tanh", "f64::asinh", "f64::acosh", "f64::atanh",
+  "f64::hypot", "f64::cbrt", "f64::mul_add",
+  "f32::exp", "f32::exp2", "f32::exp_m1", "f32::ln", "f32::ln_1p", "f32::log", "f32::log10", "f32::log2",
+  "f32::powf", "f32::powi", "f32::sin", "f32::cos", "f32::sin_cos", "f32::tan", "f32::asin", "f32::acos",
+  "f32::atan", "f32::atan2", "f32::sinh", "f32::cosh", "f32::tanh", "f32::asinh", "f32::acosh", "f32::atanh",
+  "f32::hypot", "f32::cbrt", "f32::mul_add",
+  # May reassociate.
+  "f64::algebraic_add", "f64::algebraic_sub", "f64::algebraic_mul", "f64::algebraic_div",
+  "f64::algebraic_rem",
+  "f32::algebraic_add", "f32::algebraic_sub", "f32::algebraic_mul", "f32::algebraic_div",
+  "f32::algebraic_rem",
+]
