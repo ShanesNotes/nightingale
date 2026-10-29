@@ -9,6 +9,8 @@ cargo=$(cargo --version | cut -d' ' -f2) || { echo "01-toolchain: cargo does not
 [ "$cargo" = "$want" ] || { echo "01-toolchain: cargo $cargo, rust-toolchain.toml pins $want"; exit 1; }
 cargo fmt --version >/dev/null || { echo "01-toolchain: cargo fmt does not answer; add rustfmt"; exit 1; }
 cargo clippy --version >/dev/null || { echo "01-toolchain: cargo clippy does not answer; add clippy"; exit 1; }
+[ -f "$(rustc --print sysroot)/lib/rustlib/src/rust/library/std/src/num/f64.rs" ] \
+  || { echo "01-toolchain: rust-src is missing; run .agents/skills/verify-nightingale/ensure-prereqs.sh"; exit 1; }
 python3 -I -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
   || { echo "01-toolchain: python3 3.11 or newer is required"; exit 1; }
-echo "01-toolchain: rustc $rustc, cargo $cargo, $(python3 --version)"
+echo "01-toolchain: rustc $rustc, cargo $cargo, rust-src, $(python3 --version)"

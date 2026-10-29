@@ -31,7 +31,11 @@ done
 [ "$mode" != full ] || [ ${#base_args[@]} -eq 0 ] || usage
 
 # A command substitution, not `< <(...)`: set -e ignores a failed process substitution.
-plan=$(python3 -I tools/gate/gate.py plan "$mode" "${base_args[@]}") || exit 1
+if ! plan=$(python3 -I tools/gate/gate.py plan "$mode" "${base_args[@]}"); then
+  printf '%s\n' "$plan"
+  echo "verify: the plan failed"
+  exit 1
+fi
 scope='' base='' reason='' crates='' smoke='' steps=''
 while IFS='=' read -r key value; do
   case "$key" in

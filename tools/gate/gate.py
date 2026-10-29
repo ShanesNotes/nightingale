@@ -8,6 +8,7 @@ Python 3.11 stdlib only. Run as `python3 -I tools/gate/gate.py <command>`; it fi
     f64                                      no bare f64 or f32 in a public API outside its row's allow list
     nightly-record <exit> <log>              record a nightly full run (tools/gate/nightly.sh)
     nightly-passed <sha>                     exit 0 when the nightly state records sha as passed
+    doctests                                 every doctest rustdoc lists is one the host scan read
 
 Exit codes: 0 pass; 1 violations, one per line as `<code>: <subject>: <what to do>`; 2 an input the gate
 reads is missing or malformed.
@@ -28,7 +29,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Set
 from typing import Literal
 
 Mode = Literal["merge", "changed", "full"]
@@ -134,7 +135,7 @@ class Registry:
         return frozenset(named)
 
 
-def _table(raw: object, where: str, required: set[str], optional: set[str] = frozenset()) -> dict:
+def _table(raw: object, where: str, required: Set[str], optional: Set[str] = frozenset()) -> dict:
     if not isinstance(raw, dict):
         raise GateError(f"{where}: expected a table")
     if missing := required - raw.keys():
@@ -243,7 +244,7 @@ def parse_crate_table(text: str) -> dict[str, TableRow]:
 @dataclasses.dataclass(frozen=True)
 class Token:
     kind: Literal["ident", "punct", "literal", "lifetime"]
-    text: str
+    value: str
     line: int
 
 
@@ -252,6 +253,7 @@ class Source:
     path: str
     code: tuple[Token, ...]
     doctests: tuple[Token, ...]
+    blocks: tuple[int, ...]
 
 
 class LexError(Exception):
@@ -360,7 +362,7 @@ def lex(text: str, first_line: int = 1) -> tuple[list[Token], list[tuple[int, st
 
 
 def _punct(tokens: list[Token] | tuple[Token, ...], k: int, text: str) -> bool:
-    return k < len(tokens) and tokens[k].kind == "punct" and tokens[k].text == text
+    return k < len(tokens) and tokens[k].kind == "punct" and tokens[k].value == text
 
 
 def attributes(tokens: list[Token] | tuple[Token, ...]) -> list[list[Token]]:
@@ -370,9 +372,9 @@ def attributes(tokens: list[Token] | tuple[Token, ...]) -> list[list[Token]]:
         if _punct(tokens, i, "#") and _punct(tokens, j, "["):
             depth, k = 0, j
             while k < len(tokens):
-                if tokens[k].kind == "punct" and tokens[k].text in ("(", "[", "{"):
+                if tokens[k].kind == "punct" and tokens[k].value in ("(", "[", "{"):
                     depth += 1
-                elif tokens[k].kind == "punct" and tokens[k].text in (")", "]", "}"):
+                elif tokens[k].kind == "punct" and tokens[k].value in (")", "]", "}"):
                     depth -= 1
                     if depth == 0:
                         break
@@ -391,35 +393,58 @@ RUSTDOC_ATTRS = {
     "compile_fail",
     "test_harness",
     "standalone_crate",
-    "edition2015",
-    "edition2018",
-    "edition2021",
-    "edition2024",
 }
 FENCE = re.compile(r"^\s*(```+|~~~+)\s*(.*)$")
 
 
 def _is_rust_fence(info: str) -> bool:
-    words = [w for w in re.split(r"[\s,{}]+", info) if w]
+    words = [w for w in re.split(r"[\s,{}]+", info) if w and not re.fullmatch(r"edition.*|rust\d+", w)]
     known = [w for w in words if w in RUSTDOC_ATTRS or re.fullmatch(r"E\d{4}|ignore-.+", w)]
     return len(known) == len(words) or bool(known)
 
 
-def rust_blocks(docs: list[tuple[int, str]]) -> list[tuple[int, str]]:
-    blocks, fence, body, start, rust = [], None, [], 0, False
+def _doc_groups(docs: list[tuple[int, str]]) -> list[list[tuple[int, str]]]:
+    """Adjacent doc lines are one item's docs, which rustdoc unindents together."""
+    groups: list[list[tuple[int, str]]] = []
     for first, text in docs:
-        for k, ln in enumerate(text.split("\n")):
-            if fence is None:
-                if m := FENCE.match(ln):
-                    fence, body, start, rust = m.group(1), [], first + k + 1, _is_rust_fence(m.group(2))
-            elif ln.strip().startswith(fence) and not ln.strip().strip(fence[0]):
-                if rust:
-                    blocks.append((start, "\n".join(body)))
-                fence = None
-            else:
+        lines = [(first + k, ln) for k, ln in enumerate(text.split("\n"))]
+        if groups and groups[-1][-1][0] + 1 == first:
+            groups[-1] += lines
+        else:
+            groups.append(lines)
+    return groups
+
+
+def rust_blocks(docs: list[tuple[int, str]]) -> list[tuple[int, int, str]]:
+    """The code blocks rustdoc runs: fenced blocks it reads as Rust, and lines indented four past the docs'
+    own indent after a blank line. That second rule also takes a list item's indented paragraph, which
+    rustdoc does not run: an over-reach, never a miss."""
+    blocks = []
+    for group in _doc_groups(docs):
+        base = min((len(t) - len(t.lstrip()) for _, t in group if t.strip()), default=0)
+        fence, rust, start, body, blank = None, False, 0, [], True
+        for n, ln in group:
+            indented = bool(ln.strip()) and len(ln) - len(ln.lstrip()) >= base + 4
+            if fence is not None:
+                if ln.strip().startswith(fence) and not ln.strip().strip(fence[0]):
+                    if rust:
+                        blocks.append((start - 1, start, "\n".join(body)))
+                    fence, body = None, []
+                else:
+                    body.append(ln)
+            elif body and (indented or not ln.strip()):
                 body.append(ln)
-    if fence is not None and rust:
-        blocks.append((start, "\n".join(body)))
+            else:
+                if body:
+                    blocks.append((start, start, "\n".join(body)))
+                    body = []
+                if indented and blank:
+                    start, body = n, [ln]
+                elif m := FENCE.match(ln):
+                    fence, start, rust = m.group(1), n + 1, _is_rust_fence(m.group(2))
+            blank = not ln.strip()
+        if body and (fence is None or rust):
+            blocks.append((start - 1 if fence else start, start, "\n".join(body)))
     return blocks
 
 
@@ -432,18 +457,19 @@ def parse_source(path: str, text: str) -> Source:
         for k in range(len(attr) - 2):
             if (
                 attr[k].kind == "ident"
-                and attr[k].text == "doc"
+                and attr[k].value == "doc"
                 and _punct(attr, k + 1, "=")
                 and attr[k + 2].kind == "literal"
             ):
-                docs.append((attr[k].line, attr[k + 2].text.replace("\\n", "\n").replace('\\"', '"')))
+                docs.append((attr[k].line, attr[k + 2].value.replace("\\n", "\n").replace('\\"', '"')))
     doctests: list[Token] = []
-    for start, block in rust_blocks(docs):
+    blocks = rust_blocks(docs)
+    for _, start, block in blocks:
         try:
             doctests += lex(block, start)[0]
         except LexError:
             doctests += [Token("ident", w, start) for w in re.findall(r"[A-Za-z_]\w*", block)]
-    return Source(path, tuple(code), tuple(doctests))
+    return Source(path, tuple(code), tuple(doctests), tuple(b[0] for b in blocks))
 
 
 HOST_NAMES = frozenset({"std", "atomic", "env", "option_env", "thread_local"})
@@ -455,29 +481,29 @@ def host_hits(src: Source) -> list[Token]:
     return [
         t
         for t in (*src.code, *src.doctests)
-        if t.kind == "ident" and (t.text in HOST_NAMES or re.fullmatch(r"is_\w+_feature_detected", t.text))
+        if t.kind == "ident" and (t.value in HOST_NAMES or re.fullmatch(r"is_\w+_feature_detected", t.value))
     ]
 
 
 def include_hits(src: Source) -> list[Token]:
-    hits = [t for t in (*src.code, *src.doctests) if t.kind == "ident" and t.text in INCLUDE_NAMES]
+    hits = [t for t in (*src.code, *src.doctests) if t.kind == "ident" and t.value in INCLUDE_NAMES]
     for attr in attributes(src.code):
-        hits += [t for k, t in enumerate(attr) if t.kind == "ident" and t.text == "path" and _punct(attr, k + 1, "=")]
+        hits += [t for k, t in enumerate(attr) if t.kind == "ident" and t.value == "path" and _punct(attr, k + 1, "=")]
     return hits
 
 
 def _predicate(toks: list[Token] | tuple[Token, ...], start: int, stop_at_comma: bool) -> list[str]:
     out, depth = [], 0
     for t in toks[start:]:
-        if t.kind == "punct" and t.text in ("(", "[", "{"):
+        if t.kind == "punct" and t.value in ("(", "[", "{"):
             depth += 1
-        elif t.kind == "punct" and t.text in (")", "]", "}"):
+        elif t.kind == "punct" and t.value in (")", "]", "}"):
             if depth == 0:
                 break
             depth -= 1
-        elif t.kind == "punct" and t.text == "," and depth == 0 and stop_at_comma:
+        elif t.kind == "punct" and t.value == "," and depth == 0 and stop_at_comma:
             break
-        out.append(t.text if t.kind != "literal" else '"..."')
+        out.append(t.value if t.kind != "literal" else '"..."')
     return out
 
 
@@ -485,18 +511,18 @@ def cfg_hits(src: Source) -> list[tuple[int, str]]:
     preds = []
     for attr in attributes(src.code):
         for k, t in enumerate(attr):
-            if t.kind == "ident" and t.text in ("cfg", "cfg_attr") and _punct(attr, k + 1, "("):
-                preds.append((t.line, _predicate(attr, k + 2, t.text == "cfg_attr")))
+            if t.kind == "ident" and t.value in ("cfg", "cfg_attr") and _punct(attr, k + 1, "("):
+                preds.append((t.line, _predicate(attr, k + 2, t.value == "cfg_attr")))
     code = src.code
     for k, t in enumerate(code):
-        if t.kind == "ident" and t.text == "cfg" and _punct(code, k + 1, "!") and _punct(code, k + 2, "("):
+        if t.kind == "ident" and t.value == "cfg" and _punct(code, k + 1, "!") and _punct(code, k + 2, "("):
             preds.append((t.line, _predicate(code, k + 3, False)))
     return [(line, " ".join(p)) for line, p in preds if p not in TEST_ONLY]
 
 
 @dataclasses.dataclass(frozen=True)
 class Dep:
-    name: str
+    package: str
     kind: Literal["normal", "dev", "build"]
     member: str | None
     source: str | None
@@ -508,7 +534,7 @@ class Dep:
 class Target:
     name: str
     kinds: frozenset[str]
-    src: str
+    src: pathlib.Path
 
 
 @dataclasses.dataclass(frozen=True)
@@ -530,7 +556,7 @@ class Workspace:
     registry: Registry
     table: Mapping[str, TableRow]
     members: Mapping[str, Member]
-    root_manifest: Mapping[str, object]
+    root_manifest: dict
 
     def owner(self, path: str) -> str | None:
         owners = [m for m in self.members.values() if path.startswith(m.dir + "/")]
@@ -553,7 +579,9 @@ def _toml(path: pathlib.Path) -> dict:
 
 def _rel(root: pathlib.Path, path: str | pathlib.Path) -> str:
     p = pathlib.Path(path).resolve()
-    return p.relative_to(root.resolve()).as_posix() if p.is_relative_to(root.resolve()) else p.as_posix()
+    if not p.is_relative_to(root.resolve()):
+        raise GateError(f"{p} is outside the repo; a member lives at crates/<name>")
+    return p.relative_to(root.resolve()).as_posix()
 
 
 def git(root: pathlib.Path, *args: str) -> str | None:
@@ -616,7 +644,7 @@ def cargo_members(root: pathlib.Path) -> dict[str, Member]:
             )
             for d in p["dependencies"]
         )
-        targets = tuple(Target(t["name"], frozenset(t["kind"]), _rel(root, t["src_path"])) for t in p["targets"])
+        targets = tuple(Target(t["name"], frozenset(t["kind"]), pathlib.Path(t["src_path"]).resolve()) for t in p["targets"])
         manifest = pathlib.Path(p["manifest_path"])
         rel = _rel(root, manifest.parent)
         members[p["name"]] = Member(p["name"], rel, deps, targets, _toml(manifest), *_member_tree(root, rel))
@@ -689,6 +717,8 @@ def append(path: str, text: str) -> Mutation:
 def add_member(name: str, row: bool) -> Mutation:
     def apply(root: pathlib.Path) -> None:
         d = root / "crates" / name
+        if d.exists():
+            raise GateError(f"probe: crates/{name} is a real member; give the probe a name no crate will take")
         (d / "src").mkdir(parents=True)
         (d / "Cargo.toml").write_text(
             f'[package]\nname = "{name}"\nversion.workspace = true\nedition.workspace = true\n\n'
@@ -721,7 +751,7 @@ def add_outside_crate(name: str, to: str) -> Mutation:
     return Mutation(f"{to} depends on a stub crate named {name} from outside the workspace", apply)
 
 
-@rule("registration.rows", "registration", add_member("ng-solver", row=False))
+@rule("registration.rows", "registration", add_member("ng-unregistered", row=False))
 def rows_match_members(ws: Workspace) -> list[Violation]:
     code = "registration.rows"
     names = [r.name for r in ws.registry.crates]
@@ -779,7 +809,7 @@ def docs_globs_cover_no_code(ws: Workspace) -> list[Violation]:
     return out
 
 
-@rule("seam.name", "seam", add_member("ng-probe", row=True))
+@rule("seam.name", "seam", add_member("ng-unnamed", row=True))
 def member_names(ws: Workspace) -> list[Violation]:
     return [
         Violation("seam.name", m, f"no row of the crate table in {CONTRACT} names it; a crate enters that table first")
@@ -831,19 +861,19 @@ def no_outside_crates(ws: Workspace) -> list[Violation]:
                 out.append(
                     Violation(
                         code,
-                        f"{m.name} -> {d.name}",
+                        f"{m.name} -> {d.package}",
                         "the physiology closure takes no crate from outside the workspace, of any kind",
                     )
                 )
             elif (
                 d.kind != "dev"
-                or admitted.get(d.name) != d.req
+                or admitted.get(d.package) != d.req
                 or not (d.source or "").startswith(("registry+", "sparse+"))
             ):
                 out.append(
                     Violation(
                         code,
-                        f"{m.name} -> {d.name}",
+                        f"{m.name} -> {d.package}",
                         f"a {d.kind} dependency at {d.req!r}; outside the closure a member takes only the "
                         "registry dev-dependencies its [[crate]] row's dev_external admits, at that exact version",
                     )
@@ -876,7 +906,7 @@ def no_host_service(ws: Workspace) -> list[Violation]:
         Violation(
             "seam.host",
             f"{s.path}:{t.line}",
-            f"`{t.text}` names a host service (files, threads, the clock, the environment); "
+            f"`{t.value}` names a host service (files, threads, the clock, the environment); "
             "no workspace crate may name it, even as an alias or a macro argument; rename or remove it",
         )
         for m in sorted(ws.members.values(), key=lambda m: m.name)
@@ -896,7 +926,7 @@ def every_line_is_checked(ws: Workspace) -> list[Violation]:
         if "features" in m.manifest:
             out.append(Violation(code, m.name, "a [features] table hides code from clippy, the tests and the f64 scan"))
         out += [
-            Violation(code, f"{m.name} -> {d.name}", "an optional dependency is a feature; make it plain")
+            Violation(code, f"{m.name} -> {d.package}", "an optional dependency is a feature; make it plain")
             for d in m.deps
             if d.optional
         ]
@@ -924,7 +954,7 @@ def sources_stay_home(ws: Workspace) -> list[Violation]:
             Violation(
                 code,
                 f"{s.path}:{t.line}",
-                f"`{t.text}` reads a file into the build; a member builds from its own sources only",
+                f"`{t.value}` reads a file into the build; a member builds from its own sources only",
             )
             for s in m.sources
             for t in include_hits(s)
@@ -935,7 +965,7 @@ def sources_stay_home(ws: Workspace) -> list[Violation]:
         out += [
             Violation(code, f"{m.name}:{t.name}", f"the target's source {t.src} is outside {m.dir}")
             for t in m.targets
-            if not t.src.startswith(m.dir + "/")
+            if not t.src.is_relative_to((ws.root / m.dir).resolve())
         ]
     return out
 
@@ -1202,6 +1232,8 @@ PLAN_CASES = (
     PlanCase("merge", "docs/srs.md", "docs-only", frozenset(), steps=frozenset({"10-docs"})),
     PlanCase("merge", ".scratch/foundation/map.md", "docs-only", frozenset()),
     PlanCase("merge", "AGENTS.md", "docs-only", frozenset(), steps=frozenset({"10-docs"})),
+    PlanCase("merge", CONTRACT, "docs-only", frozenset(), steps=frozenset({"05-seam", "10-docs", "20-sketch"})),
+    PlanCase("merge", "docs/atlas/coupling-map.md", "docs-only", frozenset(), steps=frozenset({"10-docs", "20-sketch"})),
     PlanCase("merge", "crates/ng-record/src/lib.rs", "affected", RECORD_USERS),
     PlanCase("changed", "crates/ng-record/src/lib.rs", "affected", frozenset({"ng-record"})),
     PlanCase("merge", "crates/ng-contract/src/lib.rs", "affected", reaches=RECORD_USERS | {"ng-contract"}),
@@ -1229,7 +1261,7 @@ def plan_cases(ws: Workspace) -> list[Violation]:
             out.append(Violation("plan", subject, f"does not reach {' '.join(sorted(missing))}"))
         if missing := (ws.steps if c.scope == "everything" else c.steps) - steps:
             out.append(Violation("plan", subject, f"does not select {' '.join(sorted(missing))}"))
-        if c.scope == "docs-only" and steps & set(ws.registry.crate_steps):
+        if c.scope == "docs-only" and steps & set(ws.registry.crate_steps) - c.steps:
             out.append(Violation("plan", subject, "a docs-only plan selects a crate step"))
     return out
 
@@ -1253,7 +1285,14 @@ SCAN_CASES: tuple[tuple[str, frozenset[str]], ...] = (
     ('/// ```\n/// std::fs::read("x").unwrap();\n/// ```\npub fn f() {}', HOST),
     ("/// ```no_run\n/// # use std::fs;\n/// ```\npub fn f() {}", HOST),
     ("/// ```text\n/// std::fs\n/// ```\npub fn f() {}", frozenset()),
+    ('/// ```editionfoo\n/// std::fs::read("x");\n/// ```\npub fn f() {}', HOST),
+    ('/// ```rust2021\n/// std::fs::read("x");\n/// ```\npub fn f() {}', HOST),
     ('#[doc = "```\\nstd::fs::read(\\"x\\");\\n```"]\npub fn f() {}', HOST),
+    ('//! Text.\n//!\n//!     let _ = std::fs::read("x");\npub fn f() {}', HOST),
+    ('/// Text.\n///     std::fs::read("x");\npub fn f() {}', frozenset()),
+    ('///     std::fs::read("x");\npub fn f() {}', frozenset()),
+    ('/**\n * Text.\n *\n *     std::fs::read("x");\n */\npub fn f() {}', HOST),
+    ('#[doc = "Text.\\n\\n    std::fs::read(\\"x\\");"]\npub fn f() {}', HOST),
     ('const S: &str = include_str!("x");', INCLUDE),
     ("use core::include_str as i;", INCLUDE),
     ('#[cfg_attr(test, path = "x.rs")]\nmod x;', INCLUDE),
@@ -1308,6 +1347,75 @@ def write_probe(name: str, source: str) -> pathlib.Path:
     return d
 
 
+# The stable f64 and f32 methods clippy.toml leaves allowed: predicates, bit and byte conversions, and
+# IEEE 754 operations every host rounds the same way. A stable method on neither list fails the bans probe,
+# so a toolchain that stabilizes another libm method (erf and gamma are unstable on 1.98.1) cannot slip in.
+EXACT_FLOAT_METHODS = frozenset(
+    {
+        "abs", "abs_sub", "ceil", "clamp", "classify", "copysign", "div_euclid", "floor", "fract",
+        "from_be_bytes", "from_bits", "from_le_bytes", "from_ne_bytes", "is_finite", "is_infinite", "is_nan",
+        "is_normal", "is_sign_negative", "is_sign_positive", "is_subnormal", "midpoint",
+        "next_down", "next_up", "recip", "rem_euclid", "round", "round_ties_even", "signum", "sqrt",
+        "to_be_bytes", "to_bits", "to_degrees", "to_int_unchecked", "to_le_bytes", "to_ne_bytes", "to_radians",
+        "total_cmp", "trunc",
+    }
+)
+
+
+def _stable_methods(toks: list[Token], ty: str) -> set[str]:
+    names, i = set(), 0
+    while i < len(toks):
+        if not (toks[i].value == "impl" and i + 2 < len(toks) and toks[i + 1].value == ty and _punct(toks, i + 2, "{")):
+            i += 1
+            continue
+        depth, k, attrs = 1, i + 3, []
+        while k < len(toks) and depth:
+            t = toks[k]
+            if t.kind == "punct" and t.value in ("(", "[", "{"):
+                depth += 1
+            elif t.kind == "punct" and t.value in (")", "]", "}"):
+                depth -= 1
+            elif depth == 1 and _punct(toks, k, "#") and _punct(toks, k + 1, "["):
+                attrs.append(toks[k + 2].value)
+            elif depth == 1 and t.value == ";":
+                attrs = []
+            elif depth == 1 and t.value == "fn":
+                j = k - 1
+                while toks[j].value in ("const", "unsafe"):
+                    j -= 1
+                if toks[j].value == "pub" and "stable" in attrs:
+                    names.add(toks[k + 1].value)
+                attrs = []
+            k += 1
+        i = k
+    return names
+
+
+def stable_float_methods() -> dict[str, frozenset[str]]:
+    """Every stable inherent method of f64 and f32, read from the pinned toolchain's own library source."""
+    sysroot = subprocess.run(["rustc", "--print", "sysroot"], capture_output=True, text=True).stdout.strip()
+    lib = pathlib.Path(sysroot) / "lib/rustlib/src/rust/library"
+    out = {}
+    for ty in ("f64", "f32"):
+        names: set[str] = set()
+        for crate in ("core", "std"):
+            path = lib / crate / "src/num" / f"{ty}.rs"
+            if not path.is_file():
+                raise GateError(f"{path} is missing: rust-src is not installed; run ensure-prereqs.sh")
+            names |= _stable_methods(lex(_read(path))[0], ty)
+        out[ty] = frozenset(names)
+    return out
+
+
+def float_gaps(methods: Mapping[str, frozenset[str]], banned: set[str]) -> list[str]:
+    return sorted(
+        f"{ty}::{m}"
+        for ty, names in methods.items()
+        for m in names
+        if f"{ty}::{m}" not in banned and m not in EXACT_FLOAT_METHODS
+    )
+
+
 def bans() -> int:
     conf = _toml(ROOT / "clippy.toml")
     entries = {}
@@ -1359,10 +1467,31 @@ def bans() -> int:
         ]
     else:
         found = [Violation("bans", e, "clippy did not reject its probe line") for e in unnamed]
+    methods = stable_float_methods()
+    banned = {e["path"] if isinstance(e, dict) else e for e in conf.get("disallowed-methods", [])}
+    found += [
+        Violation(
+            "bans", m, "a stable method clippy.toml does not ban and EXACT_FLOAT_METHODS does not name; ban it, "
+            "or name it there if IEEE 754 makes its result the same on every host"
+        )
+        for m in float_gaps(methods, banned)
+    ]
+    found += [
+        Violation("bans", m, "EXACT_FLOAT_METHODS names no stable f64 or f32 method; drop it")
+        for m in sorted(EXACT_FLOAT_METHODS - methods["f64"] - methods["f32"])
+    ]
+    found += [
+        Violation("bans", m, "dropping its ban leaves no gap the check reports")
+        for m in sorted(banned)
+        if m.split("::")[-1] in methods.get(m.split("::")[0], ()) and float_gaps(methods, banned - {m}) != [m]
+    ]
     for v in found:
         print(v)
     rejected = len(entries) - len(unnamed)
-    print(f"10-rust: bans probe: {len(entries)} clippy.toml entries, {rejected} rejected on their own line")
+    print(
+        f"10-rust: bans probe: {len(entries)} clippy.toml entries, {rejected} rejected on their own line; "
+        f"{sum(map(len, methods.values()))} stable f64 and f32 methods, each banned or exact"
+    )
     return 1 if found else 0
 
 
@@ -1430,6 +1559,28 @@ mod ok_private_module {
         x
     }
 }
+
+#[doc(hidden)]
+pub fn leak_hidden(_x: f64) {}
+
+#[doc(hidden)]
+pub mod hidden {
+    pub fn leak_in_hidden_module(_x: f64) {}
+}
+
+pub trait LeakBlanket {
+    type Unit;
+
+    fn number(&self) -> Self::Unit;
+}
+
+impl<T> LeakBlanket for T {
+    type Unit = f64;
+
+    fn number(&self) -> f64 {
+        0.0
+    }
+}
 """
 F64_PROBE_LEAKS = frozenset(
     {
@@ -1444,6 +1595,10 @@ F64_PROBE_LEAKS = frozenset(
         "LEAK_CONST",
         "LeakAlias",
         "Pressure::leak_inherent",
+        "leak_hidden",
+        "hidden::leak_in_hidden_module",
+        "<T as LeakBlanket>::Unit",
+        "<T as LeakBlanket>::number",
     }
 )
 
@@ -1488,7 +1643,8 @@ def float_items(doc: dict) -> set[str]:
             fields = body["fields"]
         parent |= {str(f): ("field", i) for f in fields if f is not None}
         if kind in ("trait", "impl"):
-            parent |= {str(m): (kind, i) for m in body["items"]}
+            original = kind == "trait" or (not body["is_synthetic"] and body["blanket_impl"] is None)
+            parent |= {str(m): (kind, i) for m in body["items"] if original or str(m) not in parent}
 
     def name(i: str) -> str:
         it = index[i]
@@ -1518,7 +1674,7 @@ def float_items(doc: dict) -> set[str]:
 
 
 def rustdoc(cwd: pathlib.Path, crate: str | None) -> dict:
-    target = pathlib.Path(os.environ.get("CARGO_TARGET_DIR") or ROOT / "target") / "gate/rustdoc"
+    target = (ROOT / (os.environ.get("CARGO_TARGET_DIR") or "target")).resolve() / "gate/rustdoc"
     package = ["-p", crate] if crate else []
     r = subprocess.run(
         [
@@ -1532,6 +1688,7 @@ def rustdoc(cwd: pathlib.Path, crate: str | None) -> dict:
             "--",
             "-Z",
             "unstable-options",
+            "--document-hidden-items",
             "--output-format",
             "json",
         ],
@@ -1590,6 +1747,97 @@ def f64() -> int:
             f"; probe: {len(flagged & F64_PROBE_LEAKS)} of {len(F64_PROBE_LEAKS)} leaks flagged, "
             f"{len(flagged - F64_PROBE_LEAKS)} other items"
         )
+    for v in found:
+        print(v)
+    print(summary)
+    return 1 if found else 0
+
+
+DOCTEST_PROBE = """\
+//! ```
+//! let _ = 1;
+//! ```
+
+/// ```edition2021
+/// let _ = 2;
+/// ```
+pub fn fenced() {}
+
+/// Text.
+///
+///     let _ = 3;
+pub fn indented() {}
+
+#[doc = concat!("```\\n", "let _ = 4;\\n", "```")]
+pub fn concatenated() {}
+
+macro_rules! documented {
+    ($d:literal) => {
+        #[doc = $d]
+        pub fn generated() {}
+    };
+}
+
+documented!("```\\nlet _ = 5;\\n```");
+"""
+
+
+def listed_doctests(cwd: pathlib.Path, crates: list[str]) -> list[tuple[str, str, int]]:
+    """rustdoc's own list as (crate, file, line), so the host scan's reading of the docs is checked, not trusted."""
+    r = subprocess.run(
+        ["cargo", "test", "--doc", "--locked", *(a for c in crates for a in ("-p", c)), "--", "--list"],
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    if r.returncode != 0:
+        raise GateError(f"cargo test --doc -- --list: {r.stdout.strip()}")
+    crate, out = "", []
+    for line in r.stdout.splitlines():
+        if m := re.fullmatch(r"\s*Doc-tests (\S+)", line):
+            crate = m.group(1).replace("_", "-")
+        elif m := re.fullmatch(r"(\S+) - .*\(line (\d+)\): test", line):
+            out.append((crate, m.group(1), int(m.group(2))))
+    return out
+
+
+def unread(src: Source | None, line: int) -> bool:
+    """rustdoc reports a block comment's fence one line early."""
+    return src is None or not {line, line + 1} & set(src.blocks)
+
+
+def doctests() -> int:
+    ws = load(ROOT)
+    crates = os.environ["NG_GATE_CRATES"].split() if "NG_GATE_CRATES" in os.environ else sorted(ws.members)
+    listed = listed_doctests(ROOT, crates) if crates else []
+    found = []
+    for crate, file, line in listed:
+        m = ws.members.get(crate)
+        src = next((s for s in m.sources if s.path in (f"{m.dir}/{file}", file)), None) if m else None
+        if unread(src, line):
+            found.append(
+                Violation(
+                    "doctest",
+                    f"{src.path if src else file}:{line}",
+                    "rustdoc runs a doctest here that the host scan cannot read, such as one a macro or concat! "
+                    "builds; write it as a /// code block",
+                )
+            )
+    summary = f"10-rust: doctests: {len(listed)} listed by rustdoc, {len(listed) - len(found)} read by the host scan"
+    if os.environ.get("NG_GATE_MODE") != "changed":
+        src = parse_source("src/lib.rs", DOCTEST_PROBE)
+        got = {line for _, _, line in listed_doctests(write_probe("doctest-probe", DOCTEST_PROBE), []) if unread(src, line)}
+        want = {
+            n
+            for n, text in enumerate(DOCTEST_PROBE.splitlines(), 1)
+            if text.startswith(("#[doc = concat!", "documented!("))
+        }
+        if got != want:
+            found.append(
+                Violation("doctest", "the probe", f"unread doctests at lines {sorted(got)}; the probe has them at {sorted(want)}")
+            )
+        summary += f"; probe: {len(want)} unreadable doctests flagged"
     for v in found:
         print(v)
     print(summary)
@@ -1687,6 +1935,8 @@ def main(argv: list[str]) -> int:
                 return bans()
             case ["f64"]:
                 return f64()
+            case ["doctests"]:
+                return doctests()
             case ["nightly-record", status, log] if status.isdigit():
                 return nightly_record(int(status), pathlib.Path(log))
             case ["nightly-passed", sha]:

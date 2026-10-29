@@ -14,7 +14,7 @@ An agent loads this skill before it claims a change works or asks for a merge.
 
 `tools/gate/gate.py` plans each run from the changed paths and `tools/gate/paths.toml`. The runner then runs the steps the plan selects from `tools/verify.d/`, in order.
 
-- `tools/verify` is the merge run and the only run that is proof. It diffs the working tree against `git merge-base HEAD origin/main` without fetching, and covers the crates the change touches, every crate that depends on them and each registered smoke test.
+- `tools/verify` is the merge run and the only run that is proof. It diffs the working tree against `git merge-base HEAD origin/main` without fetching, since a stale `origin/main` only gives an older base and a wider run, and covers the crates the change touches, every crate that depends on them and each registered smoke test.
 - `tools/verify --changed` is the changed run that the pre-push hook takes. It covers only the crates the change touches, skips the probes that compile, and ends with `verify: OK for changed paths only`, which is not proof.
 - `tools/verify --full` is the full run that the nightly takes. It runs every step over every crate, ignored tests included.
 
@@ -22,12 +22,14 @@ An agent loads this skill before it claims a change works or asks for a merge.
 
 ## The steps
 
-- `01-toolchain.sh`: rustc and cargo match the channel in `rust-toolchain.toml`, rustfmt and clippy answer, and python3 is 3.11 or newer.
-- `05-seam.sh`: the workspace against the contract's crate table (names, allowed dependencies and the physiology closure), the rules that keep each crate's build and tests inside its own directory, a must-fail probe for every rule, and the plan and scan cases.
+- `01-toolchain.sh`: rustc and cargo match the channel in `rust-toolchain.toml`, rustfmt and clippy answer, rust-src is installed, and python3 is 3.11 or newer.
+- `05-seam.sh`: the workspace against the contract's crate table (names, allowed dependencies and the physiology closure), the rules that keep each crate's build and tests inside its own directory, a must-fail probe for every rule, and the plan and scan cases. Because no crate's build or tests can read a file outside its own directory, a run may skip the crates a change does not reach, and a docs-only change may skip them all.
 - `10-docs.sh`: the docs hygiene rules in `docs/governance.md`.
-- `10-rust.sh`: `cargo fmt`, clippy with warnings denied and the tests over the planned crates, then the bans probe, which requires clippy to reject a use of every `clippy.toml` entry.
+- `10-rust.sh`: `cargo fmt`, clippy with warnings denied and the tests over the planned crates, then two checks: every doctest rustdoc lists must be one `05-seam`'s host scan read, and the bans probe requires clippy to reject a use of every `clippy.toml` entry and every stable `f64` and `f32` method in the toolchain's rust-src to be banned or named exact.
 - `15-f64.sh`: no bare `f64` or `f32` in the public API of a planned crate unless its `paths.toml` row allows the item with a reason, then a probe crate the scan must flag exactly.
 - `20-sketch.sh`: the solver-contract sketch built with warnings denied, every doctest, the error code of each compile-fail doctest, and the coupling census.
+
+A new step is an `NN-name.sh` file in `tools/verify.d/`, named in `tools/gate/paths.toml`; `registration.steps` refuses a step that no run selects.
 
 ## Read the gate lines
 

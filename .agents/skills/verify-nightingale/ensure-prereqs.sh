@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Install what tools/verify needs: the Rust toolchain rust-toolchain.toml pins, with rustfmt and
-# clippy, and python3 3.11 or newer; then turn on the pre-push hook. Safe to rerun; it changes nothing
+# Install what tools/verify needs: the Rust toolchain rust-toolchain.toml pins, with rustfmt, clippy
+# and rust-src, and python3 3.11 or newer; then turn on the pre-push hook. Safe to rerun; it changes nothing
 # when all three are in place.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -11,7 +11,7 @@ if ! command -v rustup >/dev/null 2>&1; then
   # shellcheck disable=SC1091
   . "$HOME/.cargo/env"
 fi
-rustup toolchain install "$channel" --profile minimal --component rustfmt --component clippy
+rustup toolchain install "$channel" --profile minimal --component rustfmt --component clippy --component rust-src
 python3 -I -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
   || { echo "ensure-prereqs: python3 3.11 or newer is required"; exit 1; }
 echo "ensure-prereqs: rustc $(rustc --version | cut -d' ' -f2), $(python3 --version)"

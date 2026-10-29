@@ -2,11 +2,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 # Cargo takes the first flag source it finds, so an empty RUSTFLAGS shuts out a host config's
-# `--cap-lints allow`, which would silently disable forbid.
+# `--cap-lints allow`, which would silently disable forbid. RUSTC_BOOTSTRAP would admit #![feature] and
+# with it the unstable float methods the bans probe does not classify; UPDATE_EXPECT would rewrite a trace.
 export RUSTFLAGS="" RUSTDOCFLAGS=""
-unset CARGO_ENCODED_RUSTFLAGS CARGO_ENCODED_RUSTDOCFLAGS CLIPPY_CONF_DIR RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER
+unset CARGO_ENCODED_RUSTFLAGS CARGO_ENCODED_RUSTDOCFLAGS CLIPPY_CONF_DIR RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER RUSTC_BOOTSTRAP \
+  UPDATE_EXPECT
 if [ -z "${NG_GATE_CRATES+set}" ]; then
-  NG_GATE_CRATES=$(python3 -I tools/gate/gate.py plan full | sed -n 's/^crates=//p') || exit 1
+  plan=$(python3 -I tools/gate/gate.py plan full) || { printf '%s\n' "$plan"; exit 1; }
+  NG_GATE_CRATES=$(sed -n 's/^crates=//p' <<<"$plan")
 fi
 cargo fmt --all --check
 pkgs=()
@@ -27,4 +30,5 @@ for smoke in ${NG_GATE_SMOKE:-}; do
     *) cargo test --locked -p "${smoke%%:*}" --test "${smoke#*:}" ;;
   esac
 done
+python3 -I tools/gate/gate.py doctests
 [ "${NG_GATE_MODE:-}" = changed ] || python3 -I tools/gate/gate.py bans
