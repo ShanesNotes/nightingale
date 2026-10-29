@@ -1,7 +1,8 @@
 # 02: Chart the foundation map from SRS section 7
 
 Type: task
-Status: ready-for-agent
+Status: resolved
+Claimed by: claude
 Blocked by: none
 
 The approved SRS moved its section 7 out at import (ruling R5) for a roadmap doc, but governance keeps out roadmaps that restate tickets. The section becomes this effort's wayfinder map instead: `.scratch/foundation/map.md`, written by `/wayfinder` in the layout `docs/agents/issue-tracker.md` gives. The map indexes each decision and links where it lives; it never restates a ticket or a record. Sort the section into it:
@@ -33,3 +34,7 @@ Non-goals for milestone 1:
 |---|---|---|---|
 | D3 | Fast-forward identity | Keep the same-trajectory rule strict; any reduced-resolution mode is a declared separate run | Developer reviewer |
 | D5 | Map detail at milestone 1 | Coarse territories with a refinement rule | Models, revisited in build |
+
+## Answer
+
+The [foundation wayfinder map](../map.md) charts this section in the layout above, with two changes. C11's question was already sharp, so it became the ticket [Whether the arena's prerequisites leave the SRS (C11)](09-arena-prerequisites.md) rather than fog. The map also adds a fog item that the section never held: the reference man's reviewed packet and a reviewed healthy-range set, which the destination needs.
