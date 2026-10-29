@@ -179,7 +179,7 @@ def parse_registry(text: str) -> Registry:
         if not isinstance(dev, dict) or not all(
             isinstance(v, str) and re.fullmatch(r"=\d+\.\d+\.\d+", v) for v in dev.values()
         ):
-            raise GateError(f"{where}: dev_external maps a crate name to an exact requirement such as \"=1.5.1\"")
+            raise GateError(f'{where}: dev_external maps a crate name to an exact requirement such as "=1.5.1"')
         allows = []
         for j, a in enumerate(c.get("f64_allow", [])):
             a = _table(a, f"{where}: f64_allow {j + 1}", {"item", "reason"})
@@ -395,8 +395,19 @@ def attributes(tokens: list[Token] | tuple[Token, ...]) -> list[list[Token]]:
     return out
 
 
-RUSTDOC_ATTRS = {"rust", "ignore", "should_panic", "no_run", "compile_fail", "test_harness", "standalone_crate",
-                 "edition2015", "edition2018", "edition2021", "edition2024"}
+RUSTDOC_ATTRS = {
+    "rust",
+    "ignore",
+    "should_panic",
+    "no_run",
+    "compile_fail",
+    "test_harness",
+    "standalone_crate",
+    "edition2015",
+    "edition2018",
+    "edition2021",
+    "edition2024",
+}
 FENCE = re.compile(r"^\s*(```+|~~~+)\s*(.*)$")
 
 
@@ -432,7 +443,12 @@ def parse_source(path: str, text: str) -> Source:
         raise GateError(f"{path}: cannot read as Rust: {e}") from None
     for attr in attributes(code):
         for k in range(len(attr) - 2):
-            if attr[k].kind == "ident" and attr[k].text == "doc" and _punct(attr, k + 1, "=") and attr[k + 2].kind == "literal":
+            if (
+                attr[k].kind == "ident"
+                and attr[k].text == "doc"
+                and _punct(attr, k + 1, "=")
+                and attr[k + 2].kind == "literal"
+            ):
                 docs.append((attr[k].line, attr[k + 2].text.replace("\\n", "\n").replace('\\"', '"')))
     doctests: list[Token] = []
     for start, block in rust_blocks(docs):
@@ -452,7 +468,8 @@ def host_hits(src: Source) -> list[Token]:
     """A name is refused anywhere, not just as a path or a call, so neither an alias (`use core::env as e`)
     nor a macro argument (`m!(std)`) can reach it; each of those still writes the name."""
     return [
-        t for t in (*src.code, *src.doctests)
+        t
+        for t in (*src.code, *src.doctests)
         if t.kind == "ident" and (t.text in HOST_NAMES or re.fullmatch(r"is_\w+_feature_detected", t.text))
     ]
 
@@ -574,9 +591,7 @@ def list_files(root: pathlib.Path) -> frozenset[str]:
     if (root / ".git").exists():
         listed = _git_z(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
         return frozenset(p for p in listed if os.path.lexists(root / p))
-    return frozenset(
-        (pathlib.Path(d) / f).relative_to(root).as_posix() for d, _, fs in os.walk(root) for f in fs
-    )
+    return frozenset((pathlib.Path(d) / f).relative_to(root).as_posix() for d, _, fs in os.walk(root) for f in fs)
 
 
 def _member_tree(root: pathlib.Path, rel: str) -> tuple[tuple[Source, ...], tuple[str, ...]]:
@@ -597,7 +612,9 @@ def cargo_members(root: pathlib.Path) -> dict[str, Member]:
     """`--no-deps` reads the manifests without resolving, so it needs no network and no fresh lockfile."""
     r = subprocess.run(
         ["cargo", "metadata", "--format-version", "1", "--no-deps", "--offline", "--locked"],
-        cwd=root, capture_output=True, text=True,
+        cwd=root,
+        capture_output=True,
+        text=True,
     )
     if r.returncode != 0:
         raise GateError(f"cargo metadata: {r.stderr.strip()}")
@@ -715,11 +732,14 @@ def add_outside_crate(name: str, to: str) -> Mutation:
     def apply(root: pathlib.Path) -> None:
         stub = root.parent / "outside" / name
         (stub / "src").mkdir(parents=True)
-        (stub / "Cargo.toml").write_text(f'[package]\nname = "{name}"\nversion = "0.1.0"\nedition = "2024"\n',
-                                         encoding="utf-8")
+        (stub / "Cargo.toml").write_text(
+            f'[package]\nname = "{name}"\nversion = "0.1.0"\nedition = "2024"\n', encoding="utf-8"
+        )
         (stub / "src/lib.rs").write_text("", encoding="utf-8")
         rel = os.path.relpath(stub, root / "crates" / to)
-        edit(f"crates/{to}/Cargo.toml", r"^\[dependencies\]\n", f'[dependencies]\n{name} = {{ path = "{rel}" }}\n').apply(root)
+        edit(
+            f"crates/{to}/Cargo.toml", r"^\[dependencies\]\n", f'[dependencies]\n{name} = {{ path = "{rel}" }}\n'
+        ).apply(root)
 
     return Mutation(f"{to} depends on a stub crate named {name} from outside the workspace", apply)
 
@@ -728,7 +748,10 @@ def add_outside_crate(name: str, to: str) -> Mutation:
 def rows_match_members(ws: Workspace) -> list[Violation]:
     code = "registration.rows"
     names = [r.name for r in ws.registry.crates]
-    out = [Violation(code, n, "two [[crate]] rows name it; keep one") for n in sorted({n for n in names if names.count(n) > 1})]
+    out = [
+        Violation(code, n, "two [[crate]] rows name it; keep one")
+        for n in sorted({n for n in names if names.count(n) > 1})
+    ]
     for m in sorted(ws.members.values(), key=lambda m: m.name):
         if m.name not in names:
             out.append(Violation(code, m.name, f"member has no [[crate]] row; add one to {PATHS}"))
@@ -743,7 +766,9 @@ def rows_match_members(ws: Workspace) -> list[Violation]:
 def steps_resolve(ws: Workspace) -> list[Violation]:
     code = "registration.steps"
     named = ws.registry.named_steps()
-    out = [Violation(code, s, f"names no {STEPS}/{s}.sh; add the step or drop the name") for s in sorted(named - ws.steps)]
+    out = [
+        Violation(code, s, f"names no {STEPS}/{s}.sh; add the step or drop the name") for s in sorted(named - ws.steps)
+    ]
     out += [
         Violation(code, f"{STEPS}/{s}.sh", "no run would select it; name it in always, crate_steps or a rule")
         for s in sorted(ws.steps - named)
@@ -751,12 +776,19 @@ def steps_resolve(ws: Workspace) -> list[Violation]:
     for row in ws.registry.crates:
         m = ws.members.get(row.name)
         tests = {t.name for t in m.targets if "test" in t.kinds} if m else set()
-        out += [Violation(code, f"{row.name}:{t}", "smoke names no test target of its crate") for t in row.smoke if m and t not in tests]
+        out += [
+            Violation(code, f"{row.name}:{t}", "smoke names no test target of its crate")
+            for t in row.smoke
+            if m and t not in tests
+        ]
     return out
 
 
-@rule("registration.docs-sound", "registration",
-      append(PATHS, '\n[[rule]]\npaths = ["crates/**"]\nrun = ["10-docs"]\ndocs_only = true\n'))
+@rule(
+    "registration.docs-sound",
+    "registration",
+    append(PATHS, '\n[[rule]]\npaths = ["crates/**"]\nrun = ["10-docs"]\ndocs_only = true\n'),
+)
 def docs_globs_cover_no_code(ws: Workspace) -> list[Violation]:
     code = "registration.docs-sound"
     guarded = sorted({f for f in ws.files if ws.owner(f) or f.startswith("tools/")} | set(BUILD_FILES))
@@ -764,7 +796,9 @@ def docs_globs_cover_no_code(ws: Workspace) -> list[Violation]:
     for r in ws.registry.rules:
         for g in r.globs if r.docs_only else ():
             if hit := next((f for f in guarded if g.matches(f)), None):
-                out.append(Violation(code, g.text, f"a docs_only glob matches {hit}; narrow it so code is never docs-only"))
+                out.append(
+                    Violation(code, g.text, f"a docs_only glob matches {hit}; narrow it so code is never docs-only")
+                )
     return out
 
 
@@ -772,12 +806,20 @@ def docs_globs_cover_no_code(ws: Workspace) -> list[Violation]:
 def member_names(ws: Workspace) -> list[Violation]:
     return [
         Violation("seam.name", m, f"no row of the crate table in {CONTRACT} names it; a crate enters that table first")
-        for m in sorted(ws.members) if m not in ws.table
+        for m in sorted(ws.members)
+        if m not in ws.table
     ]
 
 
-@rule("seam.edge", "seam",
-      edit("crates/ng-observe/Cargo.toml", r"^\[dependencies\]\n", '[dependencies]\nng-validate = { path = "../ng-validate" }\n'))
+@rule(
+    "seam.edge",
+    "seam",
+    edit(
+        "crates/ng-observe/Cargo.toml",
+        r"^\[dependencies\]\n",
+        '[dependencies]\nng-validate = { path = "../ng-validate" }\n',
+    ),
+)
 def internal_edges(ws: Workspace) -> list[Violation]:
     out = []
     for m in sorted(ws.members.values(), key=lambda m: m.name):
@@ -785,8 +827,13 @@ def internal_edges(ws: Workspace) -> list[Violation]:
             continue
         allowed = ", ".join(sorted(row.allowed)) or "no workspace crate"
         out += [
-            Violation("seam.edge", f"{m.name} -> {d.member}", f"the crate table allows {allowed}; drop this {d.kind} dependency")
-            for d in m.deps if d.member and d.member not in row.allowed
+            Violation(
+                "seam.edge",
+                f"{m.name} -> {d.member}",
+                f"the crate table allows {allowed}; drop this {d.kind} dependency",
+            )
+            for d in m.deps
+            if d.member and d.member not in row.allowed
         ]
     return out
 
@@ -798,71 +845,123 @@ def no_outside_crates(ws: Workspace) -> list[Violation]:
     for m in sorted(ws.members.values(), key=lambda m: m.name):
         if (row := ws.table.get(m.name)) is None:
             continue
-        admitted = (r.dev_external if (r := ws.registry.row(m.name)) else {})
+        admitted = r.dev_external if (r := ws.registry.row(m.name)) else {}
         if row.closure and admitted:
             out.append(Violation(code, m.name, "a physiology closure crate admits no dev_external entry; drop it"))
         for d in m.deps:
             if d.member:
                 continue
             if row.closure:
-                out.append(Violation(code, f"{m.name} -> {d.name}",
-                                     "the physiology closure takes no crate from outside the workspace, of any kind"))
-            elif d.kind != "dev" or admitted.get(d.name) != d.req or not (d.source or "").startswith(("registry+", "sparse+")):
-                out.append(Violation(code, f"{m.name} -> {d.name}",
-                                     f"a {d.kind} dependency at {d.req!r}; outside the closure a member takes only the "
-                                     "registry dev-dependencies its [[crate]] row's dev_external admits, at that exact version"))
+                out.append(
+                    Violation(
+                        code,
+                        f"{m.name} -> {d.name}",
+                        "the physiology closure takes no crate from outside the workspace, of any kind",
+                    )
+                )
+            elif (
+                d.kind != "dev"
+                or admitted.get(d.name) != d.req
+                or not (d.source or "").startswith(("registry+", "sparse+"))
+            ):
+                out.append(
+                    Violation(
+                        code,
+                        f"{m.name} -> {d.name}",
+                        f"a {d.kind} dependency at {d.req!r}; outside the closure a member takes only the "
+                        "registry dev-dependencies its [[crate]] row's dev_external admits, at that exact version",
+                    )
+                )
     return out
 
 
-@rule("seam.closure", "seam",
-      edit(CONTRACT, r"^(\| `ng-record` \|.*\| )`ng-contract`( \| yes \|)$", r"\1`ng-contract`, `ng-observe`\2"))
+@rule(
+    "seam.closure",
+    "seam",
+    edit(CONTRACT, r"^(\| `ng-record` \|.*\| )`ng-contract`( \| yes \|)$", r"\1`ng-contract`, `ng-observe`\2"),
+)
 def closure_is_closed(ws: Workspace) -> list[Violation]:
     return [
-        Violation("seam.closure", f"{r.name} -> {a}", "the table marks it outside the physiology closure, which takes only closure crates")
-        for r in sorted(ws.table.values(), key=lambda r: r.name) if r.closure
-        for a in sorted(r.allowed) if not ws.table[a].closure
+        Violation(
+            "seam.closure",
+            f"{r.name} -> {a}",
+            "the table marks it outside the physiology closure, which takes only closure crates",
+        )
+        for r in sorted(ws.table.values(), key=lambda r: r.name)
+        if r.closure
+        for a in sorted(r.allowed)
+        if not ws.table[a].closure
     ]
 
 
 @rule("seam.host", "seam", append("crates/ng-record/src/lib.rs", "use std::fs;\n"))
 def no_host_service(ws: Workspace) -> list[Violation]:
     return [
-        Violation("seam.host", f"{s.path}:{t.line}",
-                  f"`{t.text}` names a host service (files, threads, the clock, the environment); "
-                  "no workspace crate may name it, even as an alias or a macro argument; rename or remove it")
-        for m in sorted(ws.members.values(), key=lambda m: m.name) for s in m.sources for t in host_hits(s)
+        Violation(
+            "seam.host",
+            f"{s.path}:{t.line}",
+            f"`{t.text}` names a host service (files, threads, the clock, the environment); "
+            "no workspace crate may name it, even as an alias or a macro argument; rename or remove it",
+        )
+        for m in sorted(ws.members.values(), key=lambda m: m.name)
+        for s in m.sources
+        for t in host_hits(s)
     ]
 
 
-@rule("seam.cfg", "seam",
-      append("crates/ng-contract/src/lib.rs", '#[cfg(feature = "hidden")]\npub fn leak(x: f64) -> f64 {\n    x\n}\n'))
+@rule(
+    "seam.cfg",
+    "seam",
+    append("crates/ng-contract/src/lib.rs", '#[cfg(feature = "hidden")]\npub fn leak(x: f64) -> f64 {\n    x\n}\n'),
+)
 def every_line_is_checked(ws: Workspace) -> list[Violation]:
     code, out = "seam.cfg", []
     for m in sorted(ws.members.values(), key=lambda m: m.name):
         if "features" in m.manifest:
             out.append(Violation(code, m.name, "a [features] table hides code from clippy, the tests and the f64 scan"))
-        out += [Violation(code, f"{m.name} -> {d.name}", "an optional dependency is a feature; make it plain") for d in m.deps if d.optional]
         out += [
-            Violation(code, f"{s.path}:{line}", f"cfg predicate `{p}`; only test and not(test), so every line that can ship is checked")
-            for s in m.sources for line, p in cfg_hits(s)
+            Violation(code, f"{m.name} -> {d.name}", "an optional dependency is a feature; make it plain")
+            for d in m.deps
+            if d.optional
+        ]
+        out += [
+            Violation(
+                code,
+                f"{s.path}:{line}",
+                f"cfg predicate `{p}`; only test and not(test), so every line that can ship is checked",
+            )
+            for s in m.sources
+            for line, p in cfg_hits(s)
         ]
     return out
 
 
-@rule("seam.include", "seam", append("crates/ng-record/src/lib.rs", 'const _: &str = include_str!("../../../README.md");\n'))
+@rule(
+    "seam.include",
+    "seam",
+    append("crates/ng-record/src/lib.rs", 'const _: &str = include_str!("../../../README.md");\n'),
+)
 def sources_stay_home(ws: Workspace) -> list[Violation]:
     """With seam.build, a member's build reads only its own directory, its dependencies and the root files
     that run everything: what makes affected scope and docs-only sound."""
     code, out = "seam.include", []
     for m in sorted(ws.members.values(), key=lambda m: m.name):
         out += [
-            Violation(code, f"{s.path}:{t.line}", f"`{t.text}` reads a file into the build; a member builds from its own sources only")
-            for s in m.sources for t in include_hits(s)
+            Violation(
+                code,
+                f"{s.path}:{t.line}",
+                f"`{t.text}` reads a file into the build; a member builds from its own sources only",
+            )
+            for s in m.sources
+            for t in include_hits(s)
         ]
-        out += [Violation(code, link, "a symlink in a member can reach outside it; put the file there") for link in m.links]
+        out += [
+            Violation(code, link, "a symlink in a member can reach outside it; put the file there") for link in m.links
+        ]
         out += [
             Violation(code, f"{m.name}:{t.name}", f"the target's source {t.src} is outside {m.dir}")
-            for t in m.targets if not t.src.startswith(m.dir + "/")
+            for t in m.targets
+            if not t.src.startswith(m.dir + "/")
         ]
     return out
 
@@ -870,13 +969,23 @@ def sources_stay_home(ws: Workspace) -> list[Violation]:
 @rule("seam.build", "seam", append("crates/ng-contract/build.rs", "fn main() {}\n"))
 def no_build_code(ws: Workspace) -> list[Violation]:
     return [
-        Violation("seam.build", f"{m.name}:{t.name}", "a build script or proc macro runs host code at build time; remove it")
-        for m in sorted(ws.members.values(), key=lambda m: m.name) for t in m.targets if t.kinds & {"custom-build", "proc-macro"}
+        Violation(
+            "seam.build", f"{m.name}:{t.name}", "a build script or proc macro runs host code at build time; remove it"
+        )
+        for m in sorted(ws.members.values(), key=lambda m: m.name)
+        for t in m.targets
+        if t.kinds & {"custom-build", "proc-macro"}
     ]
 
 
-REQUIRED_LEVELS = (("rust", "unsafe_code"), ("clippy", "disallowed_methods"), ("clippy", "disallowed_types"),
-                   ("clippy", "print_stdout"), ("clippy", "print_stderr"), ("clippy", "dbg_macro"))
+REQUIRED_LEVELS = (
+    ("rust", "unsafe_code"),
+    ("clippy", "disallowed_methods"),
+    ("clippy", "disallowed_types"),
+    ("clippy", "print_stdout"),
+    ("clippy", "print_stderr"),
+    ("clippy", "dbg_macro"),
+)
 
 
 @rule("seam.lints", "seam", edit("crates/ng-observe/Cargo.toml", r"^\[lints\]\nworkspace = true\n", ""))
@@ -885,7 +994,8 @@ def lints_inherited(ws: Workspace) -> list[Violation]:
     attribute can lower."""
     out = [
         Violation("seam.lints", m.name, "a member's [lints] table is exactly `workspace = true`")
-        for m in sorted(ws.members.values(), key=lambda m: m.name) if m.manifest.get("lints") != {"workspace": True}
+        for m in sorted(ws.members.values(), key=lambda m: m.name)
+        if m.manifest.get("lints") != {"workspace": True}
     ]
     lints = ws.root_manifest.get("workspace", {}).get("lints", {})
     for group, name in REQUIRED_LEVELS:
@@ -902,7 +1012,11 @@ def one_clippy_conf(ws: Workspace) -> list[Violation]:
         for d in (pathlib.PurePosixPath(m.dir), *pathlib.PurePosixPath(m.dir).parents):
             found |= {(d / n).as_posix() for n in ("clippy.toml", ".clippy.toml") if (ws.root / d / n).exists()}
     return [
-        Violation("seam.clippy-conf", f, "clippy reads only the nearest clippy.toml, so this one drops the root bans; delete it")
+        Violation(
+            "seam.clippy-conf",
+            f,
+            "clippy reads only the nearest clippy.toml, so this one drops the root bans; delete it",
+        )
         for f in sorted(found - {"clippy.toml"})
     ]
 
@@ -912,7 +1026,9 @@ def no_cargo_config(ws: Workspace) -> list[Violation]:
     found = {f for f in ws.files if re.fullmatch(r"(?:.*/)?\.cargo/config(?:\.toml)?", f)}
     found |= {n for n in (".cargo/config", ".cargo/config.toml") if (ws.root / n).exists()}
     return [
-        Violation("seam.cargo-config", f, "a Cargo config can cap lints or swap rustc under every cargo call; delete it")
+        Violation(
+            "seam.cargo-config", f, "a Cargo config can cap lints or swap rustc under every cargo call; delete it"
+        )
         for f in sorted(found)
     ]
 
@@ -938,7 +1054,10 @@ def run_probes(ws: Workspace, tree_passes: bool) -> list[Violation]:
         _copy(ws, clean)
         copy_ws = load(clean)
         if tree_passes:
-            out += [Violation("probe", "the unmutated copy", f"fails {v}") for v in check(copy_ws, "registration") + check(copy_ws, "seam")]
+            out += [
+                Violation("probe", "the unmutated copy", f"fails {v}")
+                for v in check(copy_ws, "registration") + check(copy_ws, "seam")
+            ]
         for r in RULES:
             root = pathlib.Path(tmp) / r.code / "ws"
             _copy(ws, root)
@@ -964,10 +1083,17 @@ class Plan:
     steps: tuple[str, ...]
 
     def lines(self) -> str:
-        return "\n".join([
-            f"mode={self.mode}", f"scope={self.scope}", f"base={self.base or '-'}", f"reason={self.reason}",
-            f"crates={' '.join(self.crates)}", f"smoke={' '.join(self.smoke)}", f"steps={' '.join(self.steps)}",
-        ])
+        return "\n".join(
+            [
+                f"mode={self.mode}",
+                f"scope={self.scope}",
+                f"base={self.base or '-'}",
+                f"reason={self.reason}",
+                f"crates={' '.join(self.crates)}",
+                f"smoke={' '.join(self.smoke)}",
+                f"steps={' '.join(self.steps)}",
+            ]
+        )
 
 
 Modes = tuple[str | None, str | None]  # git modes at the base and in the working tree; None where absent
@@ -1020,9 +1146,14 @@ def plan_changes(ws: Workspace, mode: Mode, base: str | None, changes: Mapping[s
         steps |= set(ws.registry.crate_steps)
     smoke = tuple(f"{r.name}:{t}" for r in ws.registry.crates for t in r.smoke) if mode == "merge" and crates else ()
     shown = sorted(changes)
-    reason = shown[0] if len(shown) == 1 else f"{len(shown)} changed paths: {' '.join(shown[:3])}" + (" ..." if len(shown) > 3 else "")
-    return Plan(mode, "docs-only" if docs_only else "affected", base, reason, tuple(sorted(crates)), smoke,
-                tuple(sorted(steps)))
+    reason = (
+        shown[0]
+        if len(shown) == 1
+        else f"{len(shown)} changed paths: {' '.join(shown[:3])}" + (" ..." if len(shown) > 3 else "")
+    )
+    return Plan(
+        mode, "docs-only" if docs_only else "affected", base, reason, tuple(sorted(crates)), smoke, tuple(sorted(steps))
+    )
 
 
 def resolve_base(root: pathlib.Path, arg: str | None) -> tuple[str | None, str]:
@@ -1058,7 +1189,7 @@ def changed_paths(root: pathlib.Path, base: str) -> dict[str, Modes]:
     """The base against the working tree, so uncommitted edits count; a rename counts at both paths."""
     out: dict[str, Modes] = {}
     raw = _git_z(root, "diff", "--raw", "-z", "--no-renames", base)
-    for meta, path in zip(raw[::2], raw[1::2]):
+    for meta, path in zip(raw[::2], raw[1::2], strict=True):
         old, new = meta.lstrip(":").split()[:2]
         out[path] = (None if old == "000000" else old, None if new == "000000" else new)
     for path in _git_z(root, "ls-files", "-z", "--others", "--exclude-standard"):
@@ -1113,7 +1244,13 @@ def plan_cases(ws: Workspace) -> list[Violation]:
         if p.scope != c.scope:
             out.append(Violation("plan", subject, f"scope {p.scope}, the run semantics say {c.scope}"))
         if c.crates is not None and set(p.crates) != c.crates:
-            out.append(Violation("plan", subject, f"crates {' '.join(p.crates) or 'none'}, expected {' '.join(sorted(c.crates)) or 'none'}"))
+            out.append(
+                Violation(
+                    "plan",
+                    subject,
+                    f"crates {' '.join(p.crates) or 'none'}, expected {' '.join(sorted(c.crates)) or 'none'}",
+                )
+            )
         if missing := c.steps - set(p.steps):
             out.append(Violation("plan", subject, f"does not select {' '.join(sorted(missing))}"))
         if c.scope == "docs-only" and set(p.steps) & set(ws.registry.crate_steps):
@@ -1130,11 +1267,11 @@ SCAN_CASES: tuple[tuple[str, frozenset[str]], ...] = (
     ('const B: &[u8] = br##"std"##;', frozenset()),
     ("fn f<'a>(x: &'a str) -> char { 'a' }", frozenset()),
     ("const Q: char = '\\''; const S: &str = \"std\";", frozenset()),
-    ("const C: u8 = b'\"'; const S: &str = \"std\";", frozenset()),
+    ('const C: u8 = b\'"\'; const S: &str = "std";', frozenset()),
     ("fn f() { let r#std = 1; }", HOST),
     ("use core::env as e;", HOST),
     ("use core::sync as s; fn f() -> usize { s::atomic::AtomicUsize::new(0).into_inner() }", HOST),
-    ("macro_rules! r { ($r:ident) => { $r::fs::read(\"x\") }; }\nfn f() { let _ = r!(std); }", HOST),
+    ('macro_rules! r { ($r:ident) => { $r::fs::read("x") }; }\nfn f() { let _ = r!(std); }', HOST),
     ("thread_local! { static X: u8 = 0; }", HOST),
     ('fn f() -> bool { is_x86_feature_detected!("avx") }', HOST),
     ('/// ```\n/// std::fs::read("x").unwrap();\n/// ```\npub fn f() {}', HOST),
@@ -1156,14 +1293,29 @@ def scan_cases() -> list[Violation]:
     out = []
     for text, want in SCAN_CASES:
         src = parse_source("case.rs", text)
-        got = {code for code, hits in (("seam.host", host_hits(src)), ("seam.include", include_hits(src)),
-                                       ("seam.cfg", cfg_hits(src))) if hits}
+        got = {
+            code
+            for code, hits in (
+                ("seam.host", host_hits(src)),
+                ("seam.include", include_hits(src)),
+                ("seam.cfg", cfg_hits(src)),
+            )
+            if hits
+        }
         if got != want:
-            out.append(Violation("scan", repr(text[:50]), f"found {sorted(got) or 'nothing'}, the rules say {sorted(want) or 'nothing'}"))
+            out.append(
+                Violation(
+                    "scan",
+                    repr(text[:50]),
+                    f"found {sorted(got) or 'nothing'}, the rules say {sorted(want) or 'nothing'}",
+                )
+            )
     return out
 
 
-PROBE_LOCK = "# This file is automatically @generated by Cargo.\n# It is not intended for manual editing.\nversion = 4\n"
+PROBE_LOCK = (
+    "# This file is automatically @generated by Cargo.\n# It is not intended for manual editing.\nversion = 4\n"
+)
 
 
 def write_probe(name: str, source: str) -> pathlib.Path:
@@ -1172,8 +1324,11 @@ def write_probe(name: str, source: str) -> pathlib.Path:
     (d / "src").mkdir(parents=True, exist_ok=True)
     (d / "Cargo.toml").write_text(
         f'[package]\nname = "gate-{name}"\nversion = "0.0.0"\nedition = "2024"\npublish = false\n\n[workspace]\n',
-        encoding="utf-8")
-    (d / "Cargo.lock").write_text(PROBE_LOCK + f'\n[[package]]\nname = "gate-{name}"\nversion = "0.0.0"\n', encoding="utf-8")
+        encoding="utf-8",
+    )
+    (d / "Cargo.lock").write_text(
+        PROBE_LOCK + f'\n[[package]]\nname = "gate-{name}"\nversion = "0.0.0"\n', encoding="utf-8"
+    )
     (d / "src/lib.rs").write_text(source, encoding="utf-8")
     return d
 
@@ -1183,16 +1338,31 @@ def bans() -> int:
     conf = _toml(ROOT / "clippy.toml")
     entries = {}  # probe line -> clippy.toml entry
     lines = ["#![allow(unused_imports)]"]
-    for kind, form in (("disallowed-types", "use {} as _T{};"), ("disallowed-methods", "fn _m{1}() {{ let _ = {0}; }}")):
+    for kind, form in (
+        ("disallowed-types", "use {} as _T{};"),
+        ("disallowed-methods", "fn _m{1}() {{ let _ = {0}; }}"),
+    ):
         for i, e in enumerate(conf.get(kind, [])):
             path = e["path"] if isinstance(e, dict) else e
             lines.append(form.format(path, i))
             entries[len(lines)] = path
     probe = write_probe("bans-probe", "\n".join(lines) + "\n")
     r = subprocess.run(
-        ["cargo", "clippy", "--locked", "--offline", "--message-format=json", "--",
-         "-F", "clippy::disallowed_methods", "-F", "clippy::disallowed_types"],
-        cwd=probe, capture_output=True, text=True,
+        [
+            "cargo",
+            "clippy",
+            "--locked",
+            "--offline",
+            "--message-format=json",
+            "--",
+            "-F",
+            "clippy::disallowed_methods",
+            "-F",
+            "clippy::disallowed_types",
+        ],
+        cwd=probe,
+        capture_output=True,
+        text=True,
     )
     named: dict[int, set[str]] = {}
     errors = []
@@ -1210,12 +1380,15 @@ def bans() -> int:
     if r.returncode == 0:
         found = [Violation("bans", "probe", "clippy accepted it: a lint cap or a lowered level is in effect")]
     elif errors:
-        found = errors[:5] + [Violation("bans", "probe", "it did not compile, so clippy checked no entry; fix the entry named")]
+        found = errors[:5] + [
+            Violation("bans", "probe", "it did not compile, so clippy checked no entry; fix the entry named")
+        ]
     else:
         found = [Violation("bans", e, "clippy did not reject its probe line") for e in unnamed]
     for v in found:
         print(v)
-    print(f"10-rust: bans probe: {len(entries)} clippy.toml entries, {len(entries) - len(unnamed)} rejected on their own line")
+    rejected = len(entries) - len(unnamed)
+    print(f"10-rust: bans probe: {len(entries)} clippy.toml entries, {rejected} rejected on their own line")
     return 1 if found else 0
 
 
@@ -1284,10 +1457,21 @@ mod ok_private_module {
     }
 }
 """
-F64_PROBE_LEAKS = frozenset({
-    "leak_param", "leak_return", "LeakField.value", "LeakTuple.0", "LeakVariant::Raw.0", "LeakVariant::Named.value",
-    "LeakTrait::leak_method", "<LeakFrom as From>::from", "LEAK_CONST", "LeakAlias", "Pressure::leak_inherent",
-})
+F64_PROBE_LEAKS = frozenset(
+    {
+        "leak_param",
+        "leak_return",
+        "LeakField.value",
+        "LeakTuple.0",
+        "LeakVariant::Raw.0",
+        "LeakVariant::Named.value",
+        "LeakTrait::leak_method",
+        "<LeakFrom as From>::from",
+        "LEAK_CONST",
+        "LeakAlias",
+        "Pressure::leak_inherent",
+    }
+)
 
 
 def _has_float(x: object) -> bool:
@@ -1322,7 +1506,12 @@ def float_items(doc: dict) -> set[str]:
         shape = body.get("kind") if isinstance(body, dict) else None
         fields = []
         if isinstance(shape, dict):
-            fields = shape.get("tuple") or shape.get("plain", {}).get("fields") or shape.get("struct", {}).get("fields") or []
+            fields = (
+                shape.get("tuple")
+                or shape.get("plain", {}).get("fields")
+                or shape.get("struct", {}).get("fields")
+                or []
+            )
         if kind == "union":
             fields = body["fields"]
         parent |= {str(f): ("field", i) for f in fields if f is not None}
@@ -1350,7 +1539,8 @@ def float_items(doc: dict) -> set[str]:
         return not imp["is_synthetic"] and imp["blanket_impl"] is None
 
     return {
-        name(i) for i, it in index.items()
+        name(i)
+        for i, it in index.items()
         if it["crate_id"] == 0 and "impl" not in it["inner"] and _has_float(it["inner"]) and in_api_impl(i)
     }
 
@@ -1360,9 +1550,24 @@ def rustdoc(cwd: pathlib.Path, crate: str | None) -> dict:
     target = pathlib.Path(os.environ.get("CARGO_TARGET_DIR") or ROOT / "target") / "gate/rustdoc"
     package = ["-p", crate] if crate else []
     r = subprocess.run(
-        ["cargo", "rustdoc", *package, "--lib", "--locked", "--target-dir", str(target), "--",
-         "-Z", "unstable-options", "--output-format", "json"],
-        cwd=cwd, env={**os.environ, "RUSTC_BOOTSTRAP": "1"}, capture_output=True, text=True,
+        [
+            "cargo",
+            "rustdoc",
+            *package,
+            "--lib",
+            "--locked",
+            "--target-dir",
+            str(target),
+            "--",
+            "-Z",
+            "unstable-options",
+            "--output-format",
+            "json",
+        ],
+        cwd=cwd,
+        env={**os.environ, "RUSTC_BOOTSTRAP": "1"},
+        capture_output=True,
+        text=True,
     )
     if r.returncode != 0:
         raise GateError(f"cargo rustdoc {crate or cwd.name}: {r.stderr.strip()}")
@@ -1370,8 +1575,10 @@ def rustdoc(cwd: pathlib.Path, crate: str | None) -> dict:
     doc = json.loads(_read(target / "doc" / f"{lib.replace('-', '_')}.json"))
     if doc.get("format_version") != RUSTDOC_FORMAT:
         rustc = subprocess.run(["rustc", "--version"], capture_output=True, text=True).stdout.strip()
-        raise GateError(f"rustdoc JSON format_version {doc.get('format_version')} under {rustc}; the f64 scan "
-                        f"reads {RUSTDOC_FORMAT}, so update it with the toolchain")
+        raise GateError(
+            f"rustdoc JSON format_version {doc.get('format_version')} under {rustc}; the f64 scan "
+            f"reads {RUSTDOC_FORMAT}, so update it with the toolchain"
+        )
     return doc
 
 
@@ -1386,21 +1593,33 @@ def f64() -> int:
         allow = {a.item for a in row.f64_allow} if row else set()
         allowed += len(items & allow)
         found += [
-            Violation("f64", f"{item} in {crate}", "a bare f64 or f32 crosses the crate boundary; use a dimensioned "
-                      "type, or allow the item in the crate's [[crate]] row with a reason")
+            Violation(
+                "f64",
+                f"{item} in {crate}",
+                "a bare f64 or f32 crosses the crate boundary; use a dimensioned "
+                "type, or allow the item in the crate's [[crate]] row with a reason",
+            )
             for item in sorted(items - allow)
         ]
-        found += [Violation("f64", f"{item} in {crate}", "the f64_allow entry matches no public item; drop it")
-                  for item in sorted(allow - items)]
+        found += [
+            Violation("f64", f"{item} in {crate}", "the f64_allow entry matches no public item; drop it")
+            for item in sorted(allow - items)
+        ]
     summary = f"15-f64: {len(crates)} crates, {allowed} allowed items with a bare f64 or f32"
     if os.environ.get("NG_GATE_MODE") != "changed":
         flagged = float_items(rustdoc(write_probe("f64-probe", F64_PROBE), None))
-        found += [Violation("f64", f"{item} in the probe", "flagged, but the probe declares it private or typed")
-                  for item in sorted(flagged - F64_PROBE_LEAKS)]
-        found += [Violation("f64", f"{item} in the probe", "a public bare f64 the scan no longer flags")
-                  for item in sorted(F64_PROBE_LEAKS - flagged)]
-        summary += (f"; probe: {len(flagged & F64_PROBE_LEAKS)} of {len(F64_PROBE_LEAKS)} leaks flagged, "
-                    f"{len(flagged - F64_PROBE_LEAKS)} other items")
+        found += [
+            Violation("f64", f"{item} in the probe", "flagged, but the probe declares it private or typed")
+            for item in sorted(flagged - F64_PROBE_LEAKS)
+        ]
+        found += [
+            Violation("f64", f"{item} in the probe", "a public bare f64 the scan no longer flags")
+            for item in sorted(F64_PROBE_LEAKS - flagged)
+        ]
+        summary += (
+            f"; probe: {len(flagged & F64_PROBE_LEAKS)} of {len(F64_PROBE_LEAKS)} leaks flagged, "
+            f"{len(flagged - F64_PROBE_LEAKS)} other items"
+        )
     for v in found:
         print(v)
     print(summary)
@@ -1457,8 +1676,11 @@ def changed_run_warning() -> None:
         print(f"gate: warning: the nightly state is unreadable ({e})", file=sys.stderr)
         return
     if state and state.get("result") == "failed":
-        print(f"gate: warning: the last nightly full run failed on {state.get('sha')} (log {state.get('log')}); "
-              "tools/verify --full fails until main is fixed", file=sys.stderr)
+        print(
+            f"gate: warning: the last nightly full run failed on {state.get('sha')} (log {state.get('log')}); "
+            "tools/verify --full fails until main is fixed",
+            file=sys.stderr,
+        )
 
 
 def seam() -> int:
@@ -1469,8 +1691,10 @@ def seam() -> int:
     for v in found + probes + cases:
         print(v)
     bites = len(RULES) - len({v.subject for v in probes if v.code == "probe" and v.subject != "the unmutated copy"})
-    print(f"05-seam: {len(ws.members)} members against the crate table; {len(RULES)} rules, {bites} probes bite; "
-          f"{len(PLAN_CASES)} plan cases; {len(SCAN_CASES)} scan cases")
+    print(
+        f"05-seam: {len(ws.members)} members against the crate table; {len(RULES)} rules, {bites} probes bite; "
+        f"{len(PLAN_CASES)} plan cases; {len(SCAN_CASES)} scan cases"
+    )
     return 1 if found or probes or cases else 0
 
 
