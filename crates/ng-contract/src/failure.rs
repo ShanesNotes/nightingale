@@ -3,7 +3,7 @@ use crate::{
     RowKind, SimTime, SiteId, SourceId, Space,
 };
 
-/// A refusal at a construction call, at `AnatomyBuilder::finish`, or at `Assembly::compile`.
+/// A refusal at a construction call, at `AnatomyBuilder::finish`, at `Assembly::compile`, or at admission.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdmissionError {
     NonFinite,

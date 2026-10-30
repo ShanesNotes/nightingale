@@ -26,9 +26,8 @@ struct Dual {
     slope: f64,
 }
 
-/// Half of the limit's square-root term and its slope. The limit is defined where the root is zero, and
-/// its derivative term there is zero, the mean of the two one-sided derivatives, so a Newton step only
-/// loses speed.
+/// A smooth limit, with `sign` on its root. It is defined where the root is zero, and its derivative term
+/// there is zero, the mean of the two one-sided derivatives, so a Newton step only loses speed.
 fn smooth(a: Dual, b: Dual, width: Dual, sign: f64) -> Dual {
     let difference = a.value - b.value;
     let root = (difference * difference + width.value * width.value).sqrt();

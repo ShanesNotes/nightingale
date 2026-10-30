@@ -34,7 +34,11 @@ impl Ratio {
         if denominator == 0 {
             return Err(AdmissionError::ZeroDenominator);
         }
-        Self::reduced(u128::from(numerator), u128::from(denominator)).ok_or(AdmissionError::ZeroDenominator)
+        let common = greatest_common_divisor(u128::from(numerator), u128::from(denominator)) as u64;
+        Ok(Self {
+            numerator: numerator / common,
+            denominator: denominator / common,
+        })
     }
     fn reduced(numerator: u128, denominator: u128) -> Option<Self> {
         let common = greatest_common_divisor(numerator, denominator);
@@ -79,6 +83,21 @@ pub(crate) struct Stage {
     pub(crate) slope: usize,
 }
 
+const HALF: Ratio = Ratio {
+    numerator: 1,
+    denominator: 2,
+};
+
+fn stage(offset_ns: u64, weight: Ratio, from: Option<usize>, span_ns: u64, slope: usize) -> Stage {
+    Stage {
+        offset_ns,
+        weight,
+        from,
+        span_ns,
+        slope,
+    }
+}
+
 /// How a core's stages make its increment: one of a closed set, so no caller depends on a general tableau
 /// that only one case would test. A later general form changes this private table and no caller.
 #[derive(Clone, Copy)]
@@ -105,69 +124,20 @@ impl StageScheme {
         }
     }
     pub(crate) fn stages(self, length_ns: u64) -> Vec<Stage> {
-        let half = |numerator| Ratio::reduced(numerator, 2 * u128::from(length_ns));
+        let whole = length_ns;
         match self.method {
-            Method::ForwardEuler => vec![Stage {
-                offset_ns: 0,
-                weight: Ratio::ONE,
-                from: None,
-                span_ns: 0,
-                slope: 0,
-            }],
-            Method::Heun => {
-                let half = half(u128::from(length_ns)).unwrap_or(Ratio::ONE);
-                vec![
-                    Stage {
-                        offset_ns: 0,
-                        weight: half,
-                        from: None,
-                        span_ns: 0,
-                        slope: 0,
-                    },
-                    Stage {
-                        offset_ns: length_ns,
-                        weight: half,
-                        from: None,
-                        span_ns: length_ns,
-                        slope: 0,
-                    },
-                ]
+            Method::ForwardEuler => vec![stage(0, Ratio::ONE, None, 0, 0)],
+            Method::Heun => vec![stage(0, HALF, None, 0, 0), stage(whole, HALF, None, whole, 0)],
+            Method::BackwardEulerDoubled if whole < 2 => {
+                vec![stage(whole, Ratio::ONE, None, whole, 0)]
             }
-            Method::BackwardEulerDoubled if length_ns < 2 => vec![Stage {
-                offset_ns: length_ns,
-                weight: Ratio::ONE,
-                from: None,
-                span_ns: length_ns,
-                slope: 0,
-            }],
             Method::BackwardEulerDoubled => {
-                let first = length_ns / 2;
-                let second = length_ns - first;
-                let fraction = |span: u64| {
-                    Ratio::reduced(u128::from(span), u128::from(length_ns)).unwrap_or(Ratio::ZERO)
-                };
+                let (first, second) = (whole / 2, whole - whole / 2);
+                let part = |span| Ratio::new(span, whole).expect("a ticket's length is not zero");
                 vec![
-                    Stage {
-                        offset_ns: length_ns,
-                        weight: Ratio::ZERO,
-                        from: None,
-                        span_ns: length_ns,
-                        slope: 0,
-                    },
-                    Stage {
-                        offset_ns: first,
-                        weight: fraction(first),
-                        from: None,
-                        span_ns: first,
-                        slope: 1,
-                    },
-                    Stage {
-                        offset_ns: length_ns,
-                        weight: fraction(second),
-                        from: Some(1),
-                        span_ns: second,
-                        slope: 2,
-                    },
+                    stage(whole, Ratio::ZERO, None, whole, 0),
+                    stage(first, part(first), None, first, 1),
+                    stage(whole, part(second), Some(1), second, 2),
                 ]
             }
         }

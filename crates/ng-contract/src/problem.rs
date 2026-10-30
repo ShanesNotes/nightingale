@@ -69,7 +69,9 @@ impl<'r> CoupledProblem<'r> {
         };
         let plan = self.accepted.pending.plan(start);
         let intrinsic_end = start.plus_ns(span_ns).ok_or(mismatch)?;
-        let end = (plan.next_breakpoint.into_iter().chain([intrinsic_end]).min()).ok_or(mismatch)?;
+        let end = plan
+            .next_breakpoint
+            .map_or(intrinsic_end, |next| next.min(intrinsic_end));
         let interval = Interval::new(start, end).ok_or(mismatch)?;
         let identity = self.identity.digest();
         let mut out = Canonical::new("ng-contract ticket 1");
