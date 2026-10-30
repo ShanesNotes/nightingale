@@ -470,3 +470,24 @@ impl CoupledSolver for PoisonedPoint {
         self.inner.solve(problem, ticket)
     }
 }
+
+/// Evaluates at amounts of its own before it solves, as a core does when its trial crosses a pole, so a
+/// start inside the law's domain still reaches the law's refusal at every length.
+pub struct TrialOutside<'c> {
+    pub inner: &'c dyn CoupledSolver,
+    pub amounts: [f64; 2],
+}
+impl CoupledSolver for TrialOutside<'_> {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+        self.inner.next_step(problem)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let mut workspace = problem.workspace();
+        workspace.unknowns_mut().copy_from_slice(&self.amounts);
+        problem.evaluate(&workspace.point(ticket.at(0)?))?;
+        self.inner.solve(problem, ticket)
+    }
+}

@@ -21,10 +21,16 @@ fn fast_two_sum(a: f64, b: f64) -> (f64, f64) {
     (sum, b - (sum - a))
 }
 
+/// Past this, the splitter's own product overflows though `a` and the product asked for are finite.
+const SPLIT_LIMIT: f64 = f64::from_bits(0x7E30_0000_0000_0000);
+const SPLIT_SCALE: f64 = 268_435_456.0;
+
 fn split(a: f64) -> (f64, f64) {
-    let scaled = a * 134_217_729.0;
-    let high = scaled - (scaled - a);
-    (high, a - high)
+    let scale = if a.abs() > SPLIT_LIMIT { SPLIT_SCALE } else { 1.0 };
+    let reduced = a / scale;
+    let scaled = reduced * 134_217_729.0;
+    let high = scaled - (scaled - reduced);
+    (high * scale, (reduced - high) * scale)
 }
 
 fn two_product(a: f64, b: f64) -> (f64, f64) {
@@ -160,6 +166,21 @@ mod tests {
         assert!(one.minus(exact(1.0)).abs() < exact(1e-31));
         let half = Measure::<Dimensionless>::new(0.5).map(|factor| third.times(&factor));
         assert_eq!(half.map(|value| value.bits()), Ok(third.quotient(2.0).bits()));
+    }
+
+    #[test]
+    fn a_finite_product_of_a_huge_value_stays_exact() {
+        let huge = exact(1e301);
+        assert_eq!(huge.scaled(1), huge);
+        assert_eq!(huge.scaled(-1), exact(-1e301));
+        assert_eq!(exact(1e300).scaled(4), exact(4e300));
+        let half = Measure::<Dimensionless>::new(0.5).map(|factor| huge.times(&factor));
+        assert_eq!(half, Ok(exact(5e300)));
+    }
+
+    #[test]
+    fn a_product_past_the_finite_range_says_so() {
+        assert!(!exact(1e301).scaled(1_000_000_000).is_finite());
     }
 
     #[test]

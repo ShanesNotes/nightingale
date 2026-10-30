@@ -196,7 +196,11 @@ pub fn observed_order(
             return Err(AccuracyFailure::MixedEvidence { refinement });
         }
         for (case, (coarse, fine)) in pair[0].worst.iter().zip(&pair[1].worst).enumerate() {
-            if *coarse < fine.times(&low) || *coarse > fine.times(&high) {
+            // Read this way round, an overflowed limit's NaN fails instead of passing, and an exact
+            // answer, which has no ratio to read, fails too.
+            let within =
+                *fine > Compensated::ZERO && *coarse >= fine.times(&low) && *coarse <= fine.times(&high);
+            if !within {
                 return Err(AccuracyFailure::Order { case, refinement });
             }
         }

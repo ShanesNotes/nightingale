@@ -61,7 +61,7 @@ impl InitializationSystem<'_> {
     }
     /// The only constructor of `InitialRevision`. Refuses a workspace from another body. Refuses by row a
     /// moved amount or memory value, a value outside its admissible set and an algebraic row that is not
-    /// exactly zero.
+    /// exactly zero, and by law a law with no value at the start.
     pub fn admit(
         self,
         solved: SolveWorkspace,
@@ -86,22 +86,20 @@ impl InitializationSystem<'_> {
             }
         }
         let time = request.anchor_moment;
-        if (body.rows().iter()).any(|row| matches!(row.kind(), RowKind::Algebraic(_))) {
-            let frame = pending.plan(time).frame;
-            let inputs = Inputs {
-                parameters: &parameters.values,
-                frame: &frame,
-                unknowns,
-            };
-            let values = (body.instance_values(&inputs))
-                .map_err(|undefined| InitializationFailure::Undefined { law: undefined.law })?;
-            let (columns, rows) = body.targets(&values);
-            let residuals = body.residuals(&columns, &rows, &vec![0.0; rows.len()]);
-            for row in body.rows() {
-                let solved = residuals[row.id().index()] == 0.0;
-                if matches!(row.kind(), RowKind::Algebraic(_)) && !solved {
-                    return Err(InitializationFailure::Inconsistent { row: row.id() });
-                }
+        let frame = pending.plan(time).frame;
+        let inputs = Inputs {
+            parameters: &parameters.values,
+            frame: &frame,
+            unknowns,
+        };
+        let values = (body.instance_values(&inputs))
+            .map_err(|undefined| InitializationFailure::Undefined { law: undefined.law })?;
+        let (columns, rows) = body.targets(&values);
+        let residuals = body.residuals(&columns, &rows, &vec![0.0; rows.len()]);
+        for row in body.rows() {
+            let solved = residuals[row.id().index()] == 0.0;
+            if matches!(row.kind(), RowKind::Algebraic(_)) && !solved {
+                return Err(InitializationFailure::Inconsistent { row: row.id() });
             }
         }
         Ok(InitialRevision {

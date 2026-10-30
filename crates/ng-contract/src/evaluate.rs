@@ -72,9 +72,10 @@ fn run(ops: &[Op], inputs: &[Dual], partial_volume: f64) -> Result<Dual, Operato
                 if b.value <= 0.0 {
                     return Err(OperatorDomain::Divisor);
                 }
+                let value = a.value / b.value;
                 Dual {
-                    value: a.value / b.value,
-                    slope: (a.slope * b.value - a.value * b.slope) / (b.value * b.value),
+                    value,
+                    slope: (a.slope - value * b.slope) / b.value,
                 }
             }
             Op::AsDimension([x]) => at(*x),

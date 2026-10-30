@@ -5,7 +5,8 @@ use cores::forced_refusal::{ForcedRefusal, Refuser};
 use cores::must_fail::{
     EarlierAttempt, ForeignBody, ForeignHistory, ForeignProposal, ForeignRefusal, ForeignWorkspace,
     KeptHistory, MisplacedStage, NeverConverges, OneSample, OtherValues, PoisonedPoint, ShadowTicket,
-    StaleIncrement, StaleProposal, SwappedTicket, UnevenWeights, UnfitWeights, UnreachedStage, WrongWeight,
+    StaleIncrement, StaleProposal, SwappedTicket, TrialOutside, UnevenWeights, UnfitWeights, UnreachedStage,
+    WrongWeight,
 };
 use cores::stages::{ForwardEuler, Heun};
 use ng_contract::*;
@@ -628,7 +629,25 @@ enum EdgeLaw {
 }
 
 /// `q = g h f(a, b)`, where `f` reads the downstream or the upstream amount through one operator.
+/// A start inside the law's domain, so admission passes it.
 fn edge_law_body(law: EdgeLaw) -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
+    let start = match law {
+        EdgeLaw::TakesTheLogNearZero => [1.0, 1e-320],
+        EdgeLaw::Divides | EdgeLaw::TakesTheLog | EdgeLaw::Exponentiates => [1.0, 1.0],
+    };
+    edge_law_body_from(law, start)
+}
+
+/// Amounts where the law has no value, or for the subnormal case the start itself.
+fn outside_domain(law: EdgeLaw) -> [f64; 2] {
+    match law {
+        EdgeLaw::Divides | EdgeLaw::TakesTheLog => [1.0, 0.0],
+        EdgeLaw::TakesTheLogNearZero => [1.0, 1e-320],
+        EdgeLaw::Exponentiates => [1e6, 1.0],
+    }
+}
+
+fn edge_law_body_from(law: EdgeLaw, start: [f64; 2]) -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", origin());
     let a = map.site::<VesselSegment>("a", origin());
@@ -705,16 +724,11 @@ fn edge_law_body(law: EdgeLaw) -> (CompiledBody, ParameterPacket<SyntheticFixtur
             .synthetic(reach, default, measure::<Volume>(1.0), "synthetic")
             .expect("once");
     }
-    let (start_a, start_b) = match law {
-        EdgeLaw::Divides | EdgeLaw::TakesTheLog => (1.0, 0.0),
-        EdgeLaw::TakesTheLogNearZero => (1.0, 1e-320),
-        EdgeLaw::Exponentiates => (1e6, 1.0),
-    };
     packet
-        .start(lumen(a.id()), measure::<Water>(start_a), "synthetic")
+        .start(lumen(a.id()), measure::<Water>(start[0]), "synthetic")
         .expect("once");
     packet
-        .start(lumen(b.id()), measure::<Water>(start_b), "synthetic")
+        .start(lumen(b.id()), measure::<Water>(start[1]), "synthetic")
         .expect("once");
     (body, packet)
 }
@@ -722,7 +736,11 @@ fn edge_law_body(law: EdgeLaw) -> (CompiledBody, ParameterPacket<SyntheticFixtur
 fn refused_source_at_the_floor(law: EdgeLaw) -> RefusalSource {
     let (body, packet) = edge_law_body(law);
     let boundary = BoundaryPort::new(Vec::new()).expect("no event");
-    let core = reference(4 * MILLISECOND);
+    let inner = reference(4 * MILLISECOND);
+    let core = TrialOutside {
+        inner: &inner,
+        amounts: outside_domain(law),
+    };
     let session = admit_fixture(&body, packet, boundary, &core).expect("admitted");
     let stopped = exhaust(session.step());
     assert_eq!(stopped.fault().kind(), EngineFaultKind::NoAdmissibleStep);
@@ -738,7 +756,7 @@ fn refused_source_at_the_floor(law: EdgeLaw) -> RefusalSource {
 }
 
 #[test]
-fn a_law_undefined_at_the_start_refuses_until_a_fault_names_its_operator() {
+fn a_trial_outside_a_laws_domain_refuses_until_a_fault_names_its_operator() {
     let law = LawName {
         owner: "CV",
         local: "circulation",
@@ -774,7 +792,11 @@ fn a_finite_value_with_a_non_finite_slope_is_refused_where_it_linearizes() {
 fn a_non_finite_value_is_refused_at_its_law_not_at_the_row_it_reaches() {
     // Forward Euler never linearizes, so only the operator's own check can name the law.
     let (body, packet) = edge_law_body(EdgeLaw::Exponentiates);
-    let core = euler(4 * MILLISECOND);
+    let inner = euler(4 * MILLISECOND);
+    let core = TrialOutside {
+        inner: &inner,
+        amounts: outside_domain(EdgeLaw::Exponentiates),
+    };
     let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
     let session = refused(session.step());
     let NumericalRefusal::TrialDomain { source } = session.refused().reason() else {
@@ -1613,6 +1635,20 @@ fn an_algebraic_start_that_does_not_solve_is_refused_with_its_row() {
 }
 
 #[test]
+fn a_rate_law_undefined_at_the_start_is_refused_by_its_name_at_admission() {
+    let law = LawName {
+        owner: "CV",
+        local: "circulation",
+    };
+    for edge in [EdgeLaw::Divides, EdgeLaw::TakesTheLog, EdgeLaw::Exponentiates] {
+        let (body, packet) = edge_law_body_from(edge, outside_domain(edge));
+        let core = reference(SECOND);
+        let refused = admit_fixture(&body, packet, no_events(), &core).err();
+        assert_eq!(refused, Some(InitializationFailure::Undefined { law }));
+    }
+}
+
+#[test]
 fn a_law_undefined_at_the_start_is_refused_by_its_name_at_admission() {
     // `x = u / m` has no value at `m = 0`, and `m`'s own row, the first algebraic row, is solved.
     let mut map = AnatomyBuilder::new();
@@ -2334,6 +2370,139 @@ fn a_ladder_of_two_policies_states_no_order() {
         failure,
         Err(AccuracyFailure::MixedEvidence { refinement: 0 })
     ));
+}
+
+#[test]
+fn an_overflowed_order_limit_fails_instead_of_passing() {
+    let error = |interval| accuracy(&reference(interval), &gate(stepped())).expect("within the policy");
+    let (coarse, medium, fine) = (error(16 * SECOND), error(8 * SECOND), error(4 * SECOND));
+    let failure = observed_order([&coarse, &medium, &fine], measure(1.7e308), measure(1.79e308));
+    assert!(matches!(
+        failure,
+        Err(AccuracyFailure::Order {
+            case: 0,
+            refinement: 0
+        })
+    ));
+}
+
+#[test]
+fn exact_answers_show_no_order() {
+    let error = |interval| {
+        let start = [measure::<Water>(5e5), measure::<Water>(5e5)];
+        let still = TwoReservoirs::delivering(start, Vec::new()).expect("a body");
+        let still = still.until(SimTime::from_ns(1_000 * SECOND));
+        accuracy(&reference(interval), &gate(still)).expect("within the policy")
+    };
+    let (coarse, medium, fine) = (error(16 * SECOND), error(8 * SECOND), error(4 * SECOND));
+    assert_eq!(hi(coarse.worst()[0]), 0.0);
+    let failure = observed_order([&coarse, &medium, &fine], measure(1.9), measure(2.1));
+    assert!(matches!(
+        failure,
+        Err(AccuracyFailure::Order {
+            case: 0,
+            refinement: 0
+        })
+    ));
+}
+
+#[test]
+fn an_amount_past_the_split_limit_still_balances_in_the_ledger() {
+    let start = [measure::<Water>(1e301), measure::<Water>(1e301)];
+    let case = TwoReservoirs::delivering(start, Vec::new()).expect("a body");
+    let core = reference(SECOND);
+    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
+    let view = session.record().conservation();
+    let quantity = view.basis().ids().next().expect("one combination");
+    let segment = view.segments().next().expect("one step");
+    let inventory = segment.inventory(quantity).on(segment.interval());
+    let total = Compensated::of(&measure::<Water>(2e301));
+    assert_eq!(inventory, Some(vec![total, total]));
+}
+
+#[test]
+fn a_ledger_past_the_finite_range_is_refused_before_it_publishes() {
+    let start = [measure::<Water>(1.5e308), measure::<Water>(1.5e308)];
+    let case = TwoReservoirs::delivering(start, Vec::new()).expect("a body");
+    let core = reference(SECOND);
+    let stopped = exhaust(case.admit(&core).expect("admitted").step());
+    assert_eq!(stopped.fault().kind(), EngineFaultKind::NoAdmissibleStep);
+    assert_eq!(
+        stopped.fault().last_refusal(),
+        Some(NumericalRefusal::LedgerOverflow)
+    );
+    assert_eq!(stopped.record().revision(), 0);
+}
+
+fn quotient_body() -> CompiledBody {
+    let schema = Schema::new(AnatomyBuilder::new().finish().expect("an anatomy")).expect("a schema");
+    assemble(schema, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let level = laws.state::<Dimensionless>("level", Admissible::finite());
+        let unit = laws.parameter::<Pressure>(ParameterKey::new("ns.unit"), Admissible::positive());
+        let speed = laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.s"), Admissible::positive());
+        let reflex = RateClass::new(RateBand::Reflex, SECOND)?;
+        let rate = laws.kernel(|mut k| {
+            let x = k.state(&level);
+            let numerator = k.parameter(&unit);
+            let numerator = k.scale(numerator, x);
+            let denominator = k.parameter(&unit);
+            let target = k.divide(numerator, denominator);
+            let target = k.as_dimension::<_, Dimensionless>(target);
+            let zero = k.zero::<Dimensionless>();
+            let speed = k.parameter(&speed);
+            let value = k.relax(target, zero, speed);
+            k.finish(value, laws.every_mode(), reflex)
+        });
+        laws.memory_rate(&level, rate);
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled")
+}
+
+#[test]
+fn a_quotient_keeps_its_derivative_at_any_scale_of_its_parts() {
+    // `x' = (u x) / u` is `x' = x` whatever `u` is, so with a shift of 10 per second the Jacobian is
+    // -1 + 10, and doubled backward Euler over 0.1 s reaches 1 / (1 - 0.05)^2.
+    let interval = 100 * MILLISECOND;
+    for unit in [1.0, 1e200, 1e-200] {
+        let body = quotient_body();
+        let mut packet = ParameterPacket::new();
+        packet
+            .synthetic(
+                ParameterKey::new("ns.unit"),
+                Binding::Body,
+                measure::<Pressure>(unit),
+                "synthetic",
+            )
+            .expect("once");
+        packet
+            .synthetic(
+                ParameterKey::new("ns.s"),
+                Binding::Body,
+                measure::<Rate<Dimensionless>>(1.0),
+                "synthetic",
+            )
+            .expect("once");
+        let (kind, row) = (body.rows()[0].kind(), body.rows()[0].id());
+        packet
+            .start(kind, measure::<Dimensionless>(1.0), "synthetic")
+            .expect("once");
+        let core = reference(interval);
+        let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
+        let problem = session.record().problem();
+        let ticket = problem.ticket(interval).expect("a ticket");
+        let workspace = problem.workspace();
+        let point = workspace.point(ticket.at(0).expect("inside"));
+        let shift = ticket.shift(interval).expect("a shift");
+        let jacobian = problem.linearize(&point, shift).expect("a finite Jacobian");
+        assert_eq!(jacobian.view().values(), [9.0]);
+        let (session, _) = accepted(session.step());
+        let reached = hi(session.record().accepted().value(row));
+        let exact = 1.0 / ((1.0 - 0.05) * (1.0 - 0.05));
+        assert!((reached - exact).abs() < 1e-12, "{reached}");
+    }
 }
 
 #[test]

@@ -170,6 +170,9 @@ impl<'m> PatientRecord<'m> {
             }
         }
         let chunk = LedgerChunk::after(&self.history, self.body, &step);
+        if !chunk.is_finite() {
+            return Err(step.ticket().refuse(NumericalRefusal::LedgerOverflow));
+        }
         let pending = self.pending.after(step.ticket());
         let time = step.ticket().interval().end();
         let applied = step.applied().to_vec();

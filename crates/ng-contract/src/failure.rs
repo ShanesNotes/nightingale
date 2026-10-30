@@ -169,6 +169,8 @@ pub enum NumericalRefusal {
     TrialDomain { source: SourceId },
     /// A stage equation is unmet on this row.
     StageResidual { row: RowId },
+    /// A conserved sum or a cumulative exchange left the finite range, so the ledger cannot hold the step.
+    LedgerOverflow,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

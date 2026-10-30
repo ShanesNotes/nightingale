@@ -1,6 +1,6 @@
 use ng_contract::{
-    AcceptedStateView, ColumnId, Compensated, CompiledBody, ConservedBasis, Digest, Interval, QuantityId,
-    SimTime, VerifiedStep,
+    AcceptedStateView, AdmissibleSet, ColumnId, Compensated, CompiledBody, ConservedBasis, Digest, Interval,
+    QuantityId, SimTime, VerifiedStep,
 };
 
 pub(crate) fn push_bits(bytes: &mut Vec<u8>, value: Compensated) {
@@ -74,6 +74,29 @@ impl LedgerChunk {
             quantities,
             columns,
         }
+    }
+    /// Whether every value fits the ledger. A sum of finite amounts can leave the finite range.
+    pub(crate) fn is_finite(&self) -> bool {
+        let Self {
+            interval: _,
+            quantities,
+            columns,
+        } = self;
+        let totals = quantities.iter().flat_map(|quantity| {
+            let QuantityStep {
+                inventory,
+                inflow,
+                outflow,
+            } = quantity;
+            inventory.iter().chain(inflow).chain(outflow)
+        });
+        let exchanges = columns.iter().flat_map(|column| {
+            let ColumnStep { forward, reverse } = column;
+            forward.iter().chain(reverse)
+        });
+        totals
+            .chain(exchanges)
+            .all(|&value| AdmissibleSet::Finite.holds(value))
     }
     pub(crate) fn digest(&self) -> Digest {
         let Self {
