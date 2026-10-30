@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Install what tools/verify needs: the Rust toolchain rust-toolchain.toml pins, with rustfmt, clippy
-# and rust-src, and python3 3.11 or newer; then turn on the pre-push hook. Safe to rerun; it changes nothing
-# when all three are in place.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)

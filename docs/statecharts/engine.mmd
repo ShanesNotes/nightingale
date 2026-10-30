@@ -1,0 +1,51 @@
+---
+title: "Nightingale engine lifecycle"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: runs today
+    lg1: typed in the sketch
+    lg2: attention
+    lg3: planned
+  }
+  class lg0 teal
+  class lg1 blue
+  class lg2 orange
+  class lg3 tan
+  s0: Map declared
+  s1: Map checked and hashed
+  s2: Not admitted
+  s3: Body compiled
+  s4: Parameters bound
+  s5: Run at an accepted state
+  s6: Death (planned, foundation 08)
+  s7: Step proposed
+  s8: Engine fault, run stopped
+  s9: Step refused
+  [*] --> s0
+  s0 --> s1: the map passes its checks
+  s0 --> s2: a map check fails
+  s1 --> s3: organ laws compile into one body
+  s1 --> s2: compilation rejects a law
+  s3 --> s4: a packet binds to the body
+  s3 --> s2: the packet does not bind
+  s4 --> s5: admission solves the start state
+  s4 --> s2: admission fails
+  s5 --> s6: physiology reaches death
+  s5 --> s7: the solver proposes a step
+  s7 --> s5: accepted whole
+  s7 --> s8: the solver or model cannot go on
+  s7 --> s9: refused whole, nothing changes
+  s8 --> s5: recover on a new branch from an earlier checkpoint
+  s9 --> s7: retry over a shorter interval
+  s9 --> s8: no shorter interval is left
+  class s0 teal
+  class s1 teal
+  class s2 orange
+  class s3 blue
+  class s4 blue
+  class s5 blue
+  class s6 tan
+  class s7 blue
+  class s8 orange
+  class s9 orange

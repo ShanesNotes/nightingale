@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Run tools/verify, the merge run, from the repo root and print a proof block.
 # Exit 0 only when the block says full_proof: yes.
 # A non-zero tools/verify status is preserved when that status is already non-zero.
 # Exit 2 means tools/verify exited 0 but the run is still not full proof
