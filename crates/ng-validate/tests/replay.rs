@@ -1408,6 +1408,43 @@ fn a_rewind_refuses_a_sibling_with_one_ledger_and_another_accepted_image() {
 }
 
 #[test]
+fn a_fork_may_not_take_the_name_of_a_branch_it_came_from() {
+    let case = busy();
+    let core = reference(8 * SECOND);
+    let mut store = Store::default();
+    let session = to(case.admit(&core).expect("admitted"), at(16));
+    let saved = session.checkpoint(&mut store).expect("saved");
+    let first = BranchId::new(Digest::of_canonical(b"first"));
+    let second = BranchId::new(Digest::of_canonical(b"second"));
+    let middle = session.rewind(&saved, first).expect("a fork");
+    let on_middle = middle.checkpoint(&mut store).expect("saved");
+    let last = middle.rewind(&on_middle, second).expect("a fork of a fork");
+    assert_eq!(last.record().ancestry().len(), 2);
+    let on_last = last.checkpoint(&mut store).expect("saved");
+    assert_eq!(
+        last.rewind(&on_last, first).err(),
+        Some(CheckpointError::BranchInUse)
+    );
+}
+
+#[test]
+fn a_byte_left_over_after_the_parts_is_malformed() {
+    let case = delivering(vec![delivery(b"input", 8, 16)], 40);
+    let core = reference(8 * SECOND);
+    let mut store = Store::default();
+    let (session, saved) = past_every_input(case.admit(&core).expect("admitted"), &case, &mut store);
+    let mut bytes = saved.as_bytes().to_vec();
+    bytes.push(0);
+    let body = (bytes.len() - HEADER) as u64;
+    bytes[40..48].copy_from_slice(&body.to_be_bytes());
+    let identity = session.record().identity();
+    assert_eq!(
+        Session::resume(&resealed(bytes), identity, case.body(), &core, &store).err(),
+        Some(CheckpointError::Malformed)
+    );
+}
+
+#[test]
 fn a_fork_named_after_the_branch_it_saved_from_is_refused() {
     let case = busy();
     let core = reference(8 * SECOND);

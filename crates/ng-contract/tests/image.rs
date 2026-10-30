@@ -157,6 +157,18 @@ fn put(bytes: &mut [u8], at: usize, value: u64) {
     bytes[at..at + 8].copy_from_slice(&value.to_be_bytes());
 }
 
+/// Gives an image with no dense segment one over `from` to `to`, holding each of its two rows.
+fn with_segment(bytes: &mut Vec<u8>, from: u64, to: u64) {
+    put(bytes, DENSE, 1);
+    let mut segment = from.to_be_bytes().to_vec();
+    segment.extend_from_slice(&to.to_be_bytes());
+    for _ in 0..2 {
+        segment.extend_from_slice(&2_u64.to_be_bytes());
+        segment.extend_from_slice(&[0; 32]);
+    }
+    bytes.splice(DENSE + 8..DENSE + 24, segment);
+}
+
 #[test]
 fn an_image_reads_back_to_the_same_bytes() {
     let (body, sites) = body().expect("a body");
@@ -209,16 +221,16 @@ fn each_field_a_run_never_writes_is_malformed() {
         ("a negative amount", |bytes| {
             put(bytes, FIRST_AMOUNT, (-1.0_f64).to_bits());
         }),
-        ("a dense tag no writer uses", |bytes| put(bytes, DENSE, 2)),
+        ("a dense tag no writer uses", |bytes| {
+            put(bytes, DENSE, 2);
+            bytes.drain(DENSE + 8..DENSE + 24);
+        }),
         ("a segment on an empty interval", |bytes| {
             put(bytes, DENSE, 1);
             bytes.splice(DENSE + 8..DENSE + 8, [0; 16]);
         }),
         ("a segment that ends elsewhere", |bytes| {
-            put(bytes, DENSE, 1);
-            let mut interval = 0_u64.to_be_bytes().to_vec();
-            interval.extend_from_slice(&(3 * SECOND).to_be_bytes());
-            bytes.splice(DENSE + 8..DENSE + 8, interval);
+            with_segment(bytes, 0, 3 * SECOND)
         }),
         ("a segment short of rows", |bytes| {
             put(bytes, DENSE, 1);
@@ -241,7 +253,11 @@ fn each_field_a_run_never_writes_is_malformed() {
         }),
         ("an applied input at the head", |bytes| put(bytes, TIME, 0)),
         ("a cursor past the timeline", |bytes| put(bytes, CURSOR, 3)),
-        ("a waiting input before the head", |bytes| put(bytes, CURSOR, 0)),
+        ("a waiting input before the head", |bytes| {
+            put(bytes, CURSOR, 0);
+            put(bytes, ACTIVE, 0);
+            bytes.drain(ACTIVE + 8..ACTIVE + 16);
+        }),
         ("a running delivery that never applied", |bytes| {
             put(bytes, ACTIVE + 8, 1)
         }),
@@ -270,10 +286,12 @@ fn a_timeline_out_of_order_or_with_an_id_twice_is_malformed() {
     let mut swapped = bytes.clone();
     let (head, tail) = swapped.split_at_mut(second);
     head[first..second].swap_with_slice(&mut tail[..DELIVERY]);
+    put(&mut swapped, TIME, 6 * SECOND);
+    put(&mut swapped, CURSOR, 2);
     assert_eq!(
         ImageParts::parse(&body, &swapped).err(),
         Some(Malformed),
-        "out of order"
+        "out of order, with each read as applied so no other check can see it"
     );
     let mut twice = bytes.clone();
     twice.copy_within(first..first + 32, second);
@@ -282,6 +300,36 @@ fn a_timeline_out_of_order_or_with_an_id_twice_is_malformed() {
         Some(Malformed),
         "one id twice"
     );
+}
+
+#[test]
+fn a_segment_that_ends_at_the_head_reads_back() {
+    let (body, sites) = body().expect("a body");
+    let mut bytes = image(&body, sites).canonical();
+    with_segment(&mut bytes, 0, SECOND);
+    let read = ImageParts::parse(&body, &bytes).expect("parsed");
+    assert_eq!(read.canonical(), bytes);
+}
+
+#[test]
+fn the_applied_digest_covers_the_fence_and_an_input_no_list_still_holds() {
+    let (body, sites) = body().expect("a body");
+    let bytes = image(&body, sites).canonical();
+    let applied = |bytes: &[u8]| {
+        let parts = ImageParts::parse(&body, bytes).expect("parsed");
+        parts.pending.applied().digest()
+    };
+    let mut fenced = bytes.clone();
+    put(&mut fenced, FENCE, 2 * SECOND);
+    assert_ne!(applied(&fenced), applied(&bytes));
+    let ended = |amount: f64| {
+        let mut ended = bytes.clone();
+        put(&mut ended, FIRST_DELIVERY + 62, amount.to_bits());
+        put(&mut ended, ACTIVE, 0);
+        ended.drain(ACTIVE + 8..ACTIVE + 16);
+        ended
+    };
+    assert_ne!(applied(&ended(4.0)), applied(&ended(5.0)));
 }
 
 #[test]

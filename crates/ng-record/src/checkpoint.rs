@@ -276,11 +276,6 @@ pub(crate) fn restore<'m>(
         opening,
         origin,
     } = parts;
-    if opening.len() != body.conserved_basis().combinations().len()
-        || image.parameters.packet_hash() != expected.packet()
-    {
-        return Err(CheckpointError::Malformed);
-    }
     let start = Start {
         run: expected.digest(),
         opening,
