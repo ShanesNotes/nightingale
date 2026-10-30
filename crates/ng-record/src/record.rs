@@ -22,7 +22,7 @@ impl Seal {
 
 /// Each law stream's event ordinal, kept once, here. Empty until ticket 06 declares a stream.
 #[derive(Default)]
-pub struct StreamPositions {
+struct StreamPositions {
     ordinals: Vec<(Digest, u64)>,
 }
 impl StreamPositions {

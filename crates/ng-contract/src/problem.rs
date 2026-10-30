@@ -54,7 +54,7 @@ impl<'r> CoupledProblem<'r> {
                 kind: EngineFaultKind::BindingMismatch,
                 at: refused.at,
                 attempted_ns: refused.attempted_ns,
-                last_refusal: Some(refused.reason),
+                last_refusal: None,
             });
         }
         self.issue(refused.retry_ns, refused.attempt + 1)

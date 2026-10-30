@@ -60,17 +60,6 @@ impl Ratio {
     }
 }
 
-impl Seal for Ratio {
-    fn seal(&self, out: &mut Canonical) {
-        let Self {
-            numerator,
-            denominator,
-        } = self;
-        out.number(*numerator);
-        out.number(*denominator);
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Method {
     ForwardEuler,
@@ -277,10 +266,13 @@ impl DeclaredResolution {
         policy.seal(&mut out);
         out.number(*minimum_interval_ns);
         out.number(u64::from(*retry_budget));
-        arithmetic.digest.seal(&mut out);
-        out.number(scheme.method as u64);
-        scales.absolute.seal(&mut out);
-        scales.relative.seal(&mut out);
+        let ArithmeticProfile { digest } = arithmetic;
+        digest.seal(&mut out);
+        let StageScheme { method } = scheme;
+        out.number(*method as u64);
+        let ErrorScales { absolute, relative } = scales;
+        absolute.seal(&mut out);
+        relative.seal(&mut out);
         out.digest()
     }
     pub fn policy(&self) -> Digest {
@@ -338,8 +330,9 @@ impl RunIdentity {
         let mut out = Canonical::new("ng-contract run identity 1");
         model.digest().seal(&mut out);
         packet.digest().seal(&mut out);
-        for word in seed.words {
-            out.number(word);
+        let Seed { words } = seed;
+        for word in words {
+            out.number(*word);
         }
         resolution.digest().seal(&mut out);
         out.digest()

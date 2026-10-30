@@ -5,5 +5,5 @@ mod record;
 mod session;
 
 pub use history::{ConservationView, Curve, HistorySeal, HistorySegment, Segments};
-pub use record::{NextImage, PatientRecord, RecordDigests, Seal, StepReceipt, StreamPositions};
+pub use record::{NextImage, PatientRecord, RecordDigests, Seal, StepReceipt};
 pub use session::{Faulted, Retrying, Running, Session, Step};

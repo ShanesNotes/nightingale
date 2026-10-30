@@ -60,9 +60,14 @@ impl<K: PacketKind> ParameterPacket<K> {
         }
     }
     fn hash(&self) -> PacketHash {
-        let mut parameters: Vec<&ParameterEntry> = self.parameters.iter().collect();
+        let Self {
+            parameters,
+            starts,
+            kind: _,
+        } = self;
+        let mut parameters: Vec<&ParameterEntry> = parameters.iter().collect();
         parameters.sort_by_key(|entry| (entry.key, entry.binding));
-        let mut starts: Vec<&StartEntry> = self.starts.iter().collect();
+        let mut starts: Vec<&StartEntry> = starts.iter().collect();
         starts.sort_by_key(|entry| entry.row);
         let mut out = Canonical::new("ng-contract packet 1");
         out.number(<K as sealed::PacketKind>::TAG);

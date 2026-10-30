@@ -1,6 +1,6 @@
 use crate::{
-    AnatomyDefect, Binding, Digest, InputId, LawName, ModeValue, ParameterKey, Predicate, RowId, RowKind,
-    SimTime, SiteId, SourceId, Space,
+    AnatomyDefect, Binding, Digest, InputId, LawName, ModeValue, ParameterKey, Predicate, QuantityId, RowId,
+    RowKind, SimTime, SiteId, SourceId, Space,
 };
 
 /// A refusal at a construction call, at `AnatomyBuilder::finish`, or at `Assembly::compile`.
@@ -93,6 +93,16 @@ pub enum AdmissionError {
     /// A run identity that is not this body's, this origin's and this solver's.
     IdentityMismatch,
     ZeroMinimumInterval,
+    /// A policy limit in a dimension the combination does not balance.
+    QuantityDimension {
+        quantity: QuantityId,
+    },
+    /// A certificate policy that does not hold one entry per combination, in basis order.
+    PolicyCoverage,
+    /// A sliding window coverage that does not exceed one window.
+    ShortCoverage,
+    /// An accuracy policy with no case or a zero grid.
+    EmptyAccuracyPolicy,
 }
 impl From<AnatomyDefect> for AdmissionError {
     fn from(defect: AnatomyDefect) -> Self {

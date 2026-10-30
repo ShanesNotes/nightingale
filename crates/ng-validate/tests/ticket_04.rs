@@ -1,0 +1,1650 @@
+//! Ticket 04's checks and every refusal and fault reason, driven at the highest seam: a manufactured body,
+//! a session and the gates, through public items only. Every number is synthetic, and each expected value
+//! comes from the closed form or the requirement, never from a previous run.
+mod cores;
+
+use core::cell::RefCell;
+use cores::forced_refusal::{ForcedRefusal, Refuser};
+use cores::must_fail::{
+    EarlierAttempt, ForeignBody, ForeignHistory, ForeignProposal, ForeignRefusal, ForeignWorkspace,
+    KeptHistory, MisplacedStage, NeverConverges, OneSample, OtherValues, PoisonedPoint, ShadowTicket,
+    StaleProposal, SwappedTicket, UnevenWeights, WrongWeight,
+};
+use cores::stages::{ForwardEuler, Heun};
+use ng_contract::*;
+use ng_record::*;
+use ng_validate::*;
+
+const SECOND: u64 = 1_000_000_000;
+const MILLISECOND: u64 = 1_000_000;
+const HOUR: u64 = 3600 * SECOND;
+
+fn measure<U>(value: f64) -> Measure<U> {
+    Measure::new(value).expect("finite")
+}
+
+fn origin() -> Position {
+    Position::new(measure(0.0), measure(0.0), measure(0.0))
+}
+
+fn scales(absolute: f64, relative: f64) -> ErrorScales {
+    ErrorScales::uniform(measure(absolute), measure(relative)).expect("positive")
+}
+
+fn stepped() -> TwoReservoirs {
+    TwoReservoirs::stepped_inflow().expect("a body")
+}
+
+fn reference(interval_ns: u64) -> ReferenceIntegrator {
+    ReferenceIntegrator::new(interval_ns)
+}
+
+fn euler(interval_ns: u64) -> ForwardEuler {
+    ForwardEuler { interval_ns }
+}
+
+fn to<'m>(session: Session<'m, Running>, end: SimTime) -> Session<'m, Running> {
+    match run_until(session, end) {
+        Ok(session) => session,
+        Err(stopped) => panic!("{:?}", stopped.fault()),
+    }
+}
+
+fn accepted(step: Step<'_>) -> (Session<'_, Running>, StepReceipt) {
+    match step {
+        Step::Accepted(session, receipt) => (session, receipt),
+        Step::Refused(session) => panic!("refused: {:?}", session.refused()),
+        Step::Faulted(session) => panic!("faulted: {:?}", session.fault()),
+    }
+}
+
+fn refused(step: Step<'_>) -> Session<'_, Retrying> {
+    match step {
+        Step::Refused(session) => session,
+        Step::Accepted(..) => panic!("accepted"),
+        Step::Faulted(session) => panic!("faulted: {:?}", session.fault()),
+    }
+}
+
+fn fault_of(step: Step<'_>) -> EngineFault {
+    match step {
+        Step::Faulted(stopped) => *stopped.fault(),
+        Step::Accepted(..) => panic!("accepted"),
+        Step::Refused(session) => panic!("refused: {:?}", session.refused()),
+    }
+}
+
+/// Retries until a fault ends it.
+fn exhaust(mut attempt: Step<'_>) -> Session<'_, Faulted> {
+    loop {
+        attempt = match attempt {
+            Step::Refused(session) => session.retry(),
+            Step::Faulted(stopped) => return stopped,
+            Step::Accepted(..) => panic!("accepted"),
+        };
+    }
+}
+
+fn hi(value: Compensated) -> f64 {
+    f64::from_bits(value.bits()[0])
+}
+
+fn gate(case: TwoReservoirs) -> AccuracyPolicy {
+    let cases = vec![AccuracyCase::TwoReservoir(case)];
+    AccuracyPolicy::new(cases, measure(5.0), measure(0.0), 100 * SECOND).expect("a policy")
+}
+
+fn ledger_policy(basis: &ConservedBasis, drift: f64) -> CertificatePolicy {
+    let quantities = (basis.ids())
+        .map(|quantity| QuantityPolicy::new::<Water>(quantity, measure(1e-24), measure(1e-9), measure(drift)))
+        .collect::<Result<Vec<_>, _>>()
+        .expect("a policy of water");
+    let windows = Sliding24Hours::covering(48 * HOUR).expect("a coverage");
+    CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows).expect("a policy")
+}
+
+fn total_received(record: &PatientRecord<'_>, column: ColumnId) -> Compensated {
+    let view = record.conservation();
+    let segment = view.segments().next_back().expect("an accepted step");
+    let (forward, reverse) = segment.exchange(column);
+    let piece = segment.interval();
+    forward.on(piece)[1].minus(reverse.on(piece)[1])
+}
+
+// The ticket's checks.
+
+#[test]
+fn the_stepped_inflow_matches_its_closed_form_at_first_order_over_three_refinements() {
+    let error = |interval| accuracy(&reference(interval), &gate(stepped())).expect("within the policy");
+    let (coarse, medium, fine) = (error(16 * SECOND), error(8 * SECOND), error(4 * SECOND));
+    assert!(fine.worst()[0] < medium.worst()[0] && medium.worst()[0] < coarse.worst()[0]);
+    observed_order([&coarse, &medium, &fine], measure(1.9), measure(2.1)).expect("first order");
+    let reversed = observed_order([&fine, &medium, &coarse], measure(1.9), measure(2.1));
+    assert!(matches!(reversed, Err(AccuracyFailure::Order { .. })));
+}
+
+#[test]
+fn forward_euler_past_rc_closes_every_ledger_and_fails_the_accuracy_gate() {
+    let case = stepped();
+    let core = euler(case.relaxation_ns() * 102 / 100);
+    let mut session = case.admit(&core).expect("admitted");
+    while session.record().accepted().time() < SimTime::from_ns(48 * HOUR) {
+        (session, _) = accepted(session.step());
+    }
+    let view = session.record().conservation();
+    let unbounded = ledger_policy(view.basis(), 1e12);
+    certify(&view, &unbounded).expect("the ledger closes though the difference grows");
+
+    let failure = accuracy(&core, &gate(stepped()));
+    let Err(AccuracyFailure::Exceeded { at, .. }) = failure else {
+        panic!("not rejected on accuracy: {failure:?}");
+    };
+    assert!(at.nanoseconds() <= core.interval_ns, "inside the first step");
+    let (first, _) = accepted(case.admit(&core).expect("admitted").step());
+    for row in case.rows() {
+        assert!(first.record().accepted().value(row) > Compensated::ZERO);
+    }
+}
+
+#[test]
+fn a_forced_refusal_changes_nothing_and_the_retry_applies_the_delivery_once() {
+    for by in [Refuser::Record, Refuser::Core] {
+        let case = stepped();
+        let (instant, delivery) = case.delivery().expect("a delivery");
+        let inner = reference(8 * SECOND);
+        let core = ForcedRefusal {
+            inner: &inner,
+            at: instant,
+            by,
+        };
+        let session = to(case.admit(&core).expect("admitted"), instant);
+        let before = session.record().digests();
+        let seal = session.record().seal();
+        let session = refused(session.step());
+        let wanted = match by {
+            Refuser::Record => matches!(session.refused().reason(), NumericalRefusal::StageResidual { .. }),
+            Refuser::Core => session.refused().reason() == NumericalRefusal::IterationLimit,
+        };
+        assert!(wanted, "{:?}", session.refused());
+        assert_eq!(session.record().digests(), before);
+        assert_eq!(session.record().seal(), seal);
+        let (session, receipt) = accepted(session.retry());
+        assert_eq!(receipt.applied(), [delivery]);
+        let (session, next) = accepted(session.step());
+        assert_eq!(next.applied(), []);
+        let session = to(session, SimTime::from_ns(7_000 * SECOND));
+        let received = total_received(session.record(), case.inflow().expect("an open body"));
+        assert!((hi(received) - 20_000.0).abs() < 1e-7, "{received:?}");
+    }
+}
+
+#[test]
+fn a_core_that_books_one_sample_while_its_endpoint_came_from_other_stages_faults() {
+    let case = stepped();
+    let core = OneSample {
+        interval_ns: 8 * SECOND,
+    };
+    let session = case.admit(&core).expect("admitted");
+    let before = session.record().digests();
+    let Step::Faulted(stopped) = session.step() else {
+        panic!("not faulted");
+    };
+    assert_eq!(stopped.fault().kind(), EngineFaultKind::MethodMismatch);
+    assert_eq!(stopped.record().digests(), before);
+}
+
+#[test]
+fn an_honest_heun_core_passes_what_its_broken_twins_fail() {
+    let case = stepped();
+    let core = Heun {
+        interval_ns: 8 * SECOND,
+    };
+    let session = to(
+        case.admit(&core).expect("admitted"),
+        SimTime::from_ns(80 * SECOND),
+    );
+    assert_eq!(session.record().accepted().time(), SimTime::from_ns(80 * SECOND));
+}
+
+#[test]
+fn the_certificate_reads_compensated_amounts_where_a_plain_ledger_loses_the_exchange() {
+    const RATE: f64 = 1e-18;
+    const STEP_SECONDS: u64 = 60;
+    const STEPS: u64 = 48 * 3600 / STEP_SECONDS;
+    let delivered = RATE * (STEPS * STEP_SECONDS) as f64;
+    let delivery = Delivery {
+        id: b"tiny",
+        from: SimTime::from_ns(0),
+        to: SimTime::from_ns(48 * HOUR),
+        amount: measure(delivered),
+    };
+    let case = TwoReservoirs::delivering([1.0, 1.0], vec![delivery]).expect("a body");
+    let core = reference(STEP_SECONDS * SECOND);
+    let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
+    let view = session.record().conservation();
+    let certificate = certify(&view, &ledger_policy(view.basis(), 1.0)).expect("it closes");
+    assert!(certificate.pieces() > 0);
+
+    let (mut inventory, mut exchange) = (2.0_f64, 0.0_f64);
+    for _ in 0..STEPS {
+        inventory += RATE * STEP_SECONDS as f64;
+        exchange += RATE * STEP_SECONDS as f64;
+    }
+    let plain_closure = ((inventory - 2.0) - exchange).abs();
+    let allowed = 1e-24 + 1e-9 * exchange;
+    assert!(plain_closure > allowed, "a plain f64 ledger fails this same body");
+}
+
+// The method checks.
+
+#[test]
+fn a_misplaced_stage_and_a_wrong_weight_fault_with_method_mismatch() {
+    let case = stepped();
+    let core = MisplacedStage {
+        interval_ns: 8 * SECOND,
+    };
+    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault.kind(), EngineFaultKind::MethodMismatch);
+    let core = WrongWeight {
+        interval_ns: 8 * SECOND,
+    };
+    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault.kind(), EngineFaultKind::MethodMismatch);
+}
+
+#[test]
+fn a_stage_evaluated_on_other_values_faults_with_method_mismatch() {
+    let case = stepped();
+    let values = case.other_values().expect("bound");
+    let inner = reference(8 * SECOND);
+    let identity = RunIdentity::new(
+        case.body().model_hash(),
+        values.packet_hash(),
+        Seed::new([0, 0, 0, 0]),
+        inner.resolution(),
+    );
+    let core = OtherValues {
+        body: case.body(),
+        values: &values,
+        identity: &identity,
+        inner,
+    };
+    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault.kind(), EngineFaultKind::MethodMismatch);
+}
+
+#[test]
+fn a_history_kept_across_a_breakpoint_faults_with_method_mismatch() {
+    let case = stepped();
+    let (instant, _) = case.delivery().expect("a delivery");
+    let core = KeptHistory {
+        inner: euler(8 * SECOND),
+    };
+    let session = to(case.admit(&core).expect("admitted"), instant);
+    assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::MethodMismatch);
+}
+
+#[test]
+fn a_continuation_of_another_core_faults_with_binding_mismatch() {
+    let case = stepped();
+    let core = ForeignHistory {
+        inner: euler(8 * SECOND),
+    };
+    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
+}
+
+#[test]
+fn a_stale_proposal_is_a_binding_mismatch_not_a_refusal() {
+    let case = stepped();
+    let core = StaleProposal {
+        inner: euler(8 * SECOND),
+        kept: RefCell::new(None),
+    };
+    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
+}
+
+#[test]
+fn an_evaluation_from_an_earlier_attempt_is_a_binding_mismatch() {
+    let case = stepped();
+    let core = EarlierAttempt {
+        inner: euler(8 * SECOND),
+        kept: RefCell::new(None),
+    };
+    let session = refused(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault_of(session.retry()).kind(), EngineFaultKind::BindingMismatch);
+}
+
+#[test]
+fn a_fresh_ticket_swapped_for_the_issued_one_is_a_binding_mismatch() {
+    let case = stepped();
+    let core = SwappedTicket {
+        inner: euler(8 * SECOND),
+        own_span_ns: 4 * SECOND,
+    };
+    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
+}
+
+#[test]
+fn a_refusal_of_another_ticket_is_a_binding_mismatch_so_no_core_resets_its_budget() {
+    let case = stepped();
+    let core = ForeignRefusal {
+        inner: euler(8 * SECOND),
+    };
+    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
+}
+
+#[test]
+fn a_ticket_this_record_would_not_issue_is_a_binding_mismatch() {
+    let quiet = TwoReservoirs::delivering([500_500.0, 499_500.0], Vec::new()).expect("a body");
+    let case = stepped();
+    let (instant, _) = case.delivery().expect("a delivery");
+    let inner = euler(4_000 * SECOND);
+    let shadow = quiet.admit(&inner).expect("admitted");
+    let values = quiet.other_values().expect("bound");
+    let real_base = case.admit(&inner).expect("admitted").record().seal().digest();
+    let core = ShadowTicket {
+        inner: euler(4_000 * SECOND),
+        body: case.body(),
+        values: &values,
+        identity: shadow.record().identity(),
+        shadow: shadow.record().accepted(),
+        base: real_base,
+        refuse: false,
+    };
+    assert!(
+        instant.nanoseconds() < core.inner.interval_ns,
+        "the ticket would cross the delivery"
+    );
+    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
+}
+
+#[test]
+fn a_refusal_of_a_foreign_base_cannot_be_retried() {
+    let case = stepped();
+    let inner = euler(8 * SECOND);
+    let session = case.admit(&inner).expect("admitted");
+    let values = case.other_values().expect("bound");
+    let core = ShadowTicket {
+        inner: euler(8 * SECOND),
+        body: case.body(),
+        values: &values,
+        identity: session.record().identity(),
+        shadow: session.record().accepted(),
+        base: Digest::of_canonical(b"a foreign base"),
+        refuse: true,
+    };
+    let session = refused(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault_of(session.retry()).kind(), EngineFaultKind::BindingMismatch);
+}
+
+#[test]
+fn weights_that_do_not_sum_to_one_are_a_binding_mismatch_at_finish() {
+    let case = stepped();
+    let core = UnevenWeights {
+        interval_ns: 8 * SECOND,
+    };
+    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
+}
+
+#[test]
+fn another_bodys_stage_workspace_or_proposal_is_a_binding_mismatch() {
+    let (case, other) = (stepped(), TwoReservoirs::closed().expect("a body"));
+    let inner = euler(8 * SECOND);
+    let host = other.admit(&inner).expect("admitted");
+    let values = other.other_values().expect("bound");
+    let (body, identity) = (other.body(), host.record().identity());
+    let accepted = host.record().accepted();
+    let core = ForeignBody {
+        inner: euler(8 * SECOND),
+        body,
+        values: &values,
+        identity,
+        accepted,
+    };
+    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
+    let core = ForeignWorkspace {
+        inner: euler(8 * SECOND),
+        body,
+        values: &values,
+        identity,
+        accepted,
+    };
+    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
+    let core = ForeignProposal {
+        inner: euler(8 * SECOND),
+        body,
+        values: &values,
+        identity,
+        accepted,
+    };
+    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
+}
+
+#[test]
+fn a_ticket_refuses_an_empty_span_an_offset_past_its_end_and_a_zero_shift() {
+    let case = stepped();
+    let core = euler(8 * SECOND);
+    let session = case.admit(&core).expect("admitted");
+    let problem = session.record().problem();
+    let kind = |fault: EngineFault| fault.kind();
+    assert_eq!(
+        problem.ticket(0).map_err(kind).err(),
+        Some(EngineFaultKind::BindingMismatch)
+    );
+    let ticket = problem.ticket(8 * SECOND).expect("a ticket");
+    assert!(ticket.at(8 * SECOND).is_ok());
+    assert_eq!(
+        ticket.at(8 * SECOND + 1).map(|_| ()).map_err(kind),
+        Err(EngineFaultKind::BindingMismatch)
+    );
+    assert_eq!(
+        ticket.shift(0).map(|_| ()).map_err(kind),
+        Err(EngineFaultKind::BindingMismatch)
+    );
+}
+
+// Refusals and the floor.
+
+#[test]
+fn an_estimate_above_one_is_refused_and_the_retry_is_accepted() {
+    let case = stepped();
+    let core = reference(8 * SECOND).with_scales(scales(0.01, 0.0));
+    let session = refused(case.admit(&core).expect("admitted").step());
+    assert!(matches!(
+        session.refused().reason(),
+        NumericalRefusal::Accuracy { .. }
+    ));
+    assert_eq!(session.refused().retry_ns(), 4 * SECOND);
+    let (session, _) = accepted(session.retry());
+    assert_eq!(session.record().accepted().time(), SimTime::from_ns(4 * SECOND));
+}
+
+#[test]
+fn an_estimate_above_one_at_the_floor_faults_and_never_publishes() {
+    let case = stepped();
+    let core = reference(8 * SECOND)
+        .with_scales(scales(1e-3, 0.0))
+        .with_floor(4 * SECOND);
+    let session = case.admit(&core).expect("admitted");
+    let before = session.record().digests();
+    let stopped = exhaust(session.step());
+    let fault = stopped.fault();
+    assert_eq!(stopped.refusals().len(), 1);
+    assert_eq!(fault.kind(), EngineFaultKind::NoAdmissibleStep);
+    assert!(matches!(
+        fault.last_refusal(),
+        Some(NumericalRefusal::Accuracy { .. })
+    ));
+    assert_eq!(fault.at(), SimTime::from_ns(0));
+    assert_eq!(fault.attempted_ns(), 4 * SECOND);
+    assert_eq!(stopped.record().digests(), before);
+}
+
+#[test]
+fn an_exhausted_retry_budget_faults_with_no_admissible_step() {
+    let case = stepped();
+    let core = NeverConverges {
+        interval_ns: 8 * SECOND,
+        budget: 3,
+    };
+    let stopped = exhaust(case.admit(&core).expect("admitted").step());
+    assert_eq!(stopped.fault().kind(), EngineFaultKind::NoAdmissibleStep);
+    assert_eq!(
+        stopped.fault().last_refusal(),
+        Some(NumericalRefusal::IterationLimit)
+    );
+    assert_eq!(stopped.refusals().len(), 3);
+}
+
+#[test]
+fn a_fault_keeps_the_refusals_before_it() {
+    let case = stepped();
+    let core = NeverConverges {
+        interval_ns: 8 * SECOND,
+        budget: 2,
+    };
+    let stopped = exhaust(case.admit(&core).expect("admitted").step());
+    assert_eq!(stopped.refusals().len(), 2);
+    assert_eq!(stopped.refusals()[0].attempted_ns(), 8 * SECOND);
+    assert_eq!(stopped.refusals()[1].attempted_ns(), 4 * SECOND);
+    assert_eq!(stopped.refusals()[1].at(), SimTime::from_ns(0));
+}
+
+#[test]
+fn a_negative_amount_is_refused_on_the_row_it_left() {
+    // A step of 20 RC multiplies the difference by -39: from 1,000 to -39,000, then to 1,521,000, which
+    // is more than the sum of 1,000,000, so `b` would go negative on the second step.
+    let case = TwoReservoirs::delivering([500_500.0, 499_500.0], Vec::new()).expect("a body");
+    let core = euler(20 * case.relaxation_ns());
+    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
+    let session = refused(session.step());
+    let NumericalRefusal::TrialDomain { source } = session.refused().reason() else {
+        panic!("not a trial domain");
+    };
+    let sources = case.body().refusal_sources();
+    assert_eq!(
+        sources[source.index()],
+        RefusalSource::Row { row: case.rows()[1] }
+    );
+}
+
+#[test]
+fn a_non_finite_coordinate_is_refused_on_its_row() {
+    let case = stepped();
+    let core = PoisonedPoint {
+        inner: euler(8 * SECOND),
+    };
+    let session = refused(case.admit(&core).expect("admitted").step());
+    let NumericalRefusal::TrialDomain { source } = session.refused().reason() else {
+        panic!("not a trial domain");
+    };
+    let sources = case.body().refusal_sources();
+    assert_eq!(
+        sources[source.index()],
+        RefusalSource::Row { row: case.rows()[1] }
+    );
+}
+
+/// Which operator the edge law routes through.
+#[derive(Clone, Copy, PartialEq)]
+enum EdgeLaw {
+    Divides,
+    TakesTheLog,
+    Exponentiates,
+}
+
+/// `q = g h f(a, b)`, where `f` reads the downstream or the upstream amount through one operator.
+fn edge_law_body(law: EdgeLaw) -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin());
+    let a = map.site::<VesselSegment>("a", origin());
+    let b = map.site::<VesselSegment>("b", origin());
+    map.contain(root.id(), a.id());
+    map.contain(root.id(), b.id());
+    map.connect(Network::Vascular, a.id(), b.id());
+    let mut schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    schema.partial_volume(measure(1.0)).expect("a coefficient");
+    let (conductance, head, reach) = (
+        ParameterKey::new("cv.g"),
+        ParameterKey::new("cv.head"),
+        ParameterKey::new("cv.reach"),
+    );
+    let body = assemble(schema, |mut body| {
+        let (mut laws, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut laws);
+        let g = laws.edge_parameter::<Conductance<Water>>(conductance, Admissible::nonnegative());
+        let h = laws.edge_parameter::<Pressure>(head, Admissible::finite());
+        let c = laws.edge_parameter::<Volume>(reach, Admissible::positive());
+        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let flow = laws.edge_kernel(|mut k| {
+            let upstream = k.at_edge(&route.from_amount());
+            let downstream = k.at_edge(&route.to_amount());
+            let upstream = k.volume(upstream);
+            let downstream = k.volume(downstream);
+            let reach = k.edge_parameter(&c);
+            let factor = match law {
+                EdgeLaw::Divides => {
+                    let ratio = k.divide(upstream, downstream);
+                    k.as_dimension::<_, Dimensionless>(ratio)
+                }
+                EdgeLaw::TakesTheLog => {
+                    let ratio = k.divide(downstream, reach);
+                    let ratio = k.as_dimension::<_, Dimensionless>(ratio);
+                    k.ln(ratio)
+                }
+                EdgeLaw::Exponentiates => {
+                    let ratio = k.divide(upstream, reach);
+                    let ratio = k.as_dimension::<_, Dimensionless>(ratio);
+                    k.exp(ratio)
+                }
+            };
+            let head = k.edge_parameter(&h);
+            let head = k.scale(head, factor);
+            let conductance = k.edge_parameter(&g);
+            let flow = k.conductance_flow(conductance, head);
+            k.finish(flow, laws.every_mode(), wave)
+        });
+        laws.transfer_along(&route, flow);
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let default = Binding::Network(Network::Vascular);
+    let lumen = |site| RowKind::Amount {
+        site,
+        space: Space::Lumen,
+    };
+    let mut packet = ParameterPacket::new();
+    packet
+        .synthetic(
+            conductance,
+            default,
+            measure::<Conductance<Water>>(1.0),
+            "synthetic",
+        )
+        .expect("once");
+    packet
+        .synthetic(head, default, measure::<Pressure>(1.0), "synthetic")
+        .expect("once");
+    if law != EdgeLaw::Divides {
+        packet
+            .synthetic(reach, default, measure::<Volume>(1.0), "synthetic")
+            .expect("once");
+    }
+    let (start_a, start_b) = match law {
+        EdgeLaw::Divides | EdgeLaw::TakesTheLog => (1.0, 0.0),
+        EdgeLaw::Exponentiates => (1e6, 1.0),
+    };
+    packet
+        .start(lumen(a.id()), measure::<Water>(start_a), "synthetic")
+        .expect("once");
+    packet
+        .start(lumen(b.id()), measure::<Water>(start_b), "synthetic")
+        .expect("once");
+    (body, packet)
+}
+
+fn refused_source_at_the_floor(law: EdgeLaw) -> RefusalSource {
+    let (body, packet) = edge_law_body(law);
+    let boundary = BoundaryPort::new(Vec::new()).expect("no event");
+    let core = reference(4 * MILLISECOND);
+    let session = admit_fixture(&body, packet, boundary, &core).expect("admitted");
+    let stopped = exhaust(session.step());
+    assert_eq!(stopped.fault().kind(), EngineFaultKind::NoAdmissibleStep);
+    assert_eq!(
+        stopped.refusals().len(),
+        2,
+        "4 ms and 2 ms refuse; the refusal at 1 ms is the floor fault"
+    );
+    let Some(NumericalRefusal::TrialDomain { source }) = stopped.fault().last_refusal() else {
+        panic!("not a trial domain");
+    };
+    body.refusal_sources()[source.index()]
+}
+
+#[test]
+fn a_law_undefined_at_the_start_refuses_until_a_fault_names_its_operator() {
+    let law = LawName {
+        owner: "CV",
+        local: "circulation",
+    };
+    assert_eq!(
+        refused_source_at_the_floor(EdgeLaw::Divides),
+        RefusalSource::Divisor { law }
+    );
+    assert_eq!(
+        refused_source_at_the_floor(EdgeLaw::TakesTheLog),
+        RefusalSource::LogarithmArgument { law }
+    );
+    assert_eq!(
+        refused_source_at_the_floor(EdgeLaw::Exponentiates),
+        RefusalSource::NonFinite { law }
+    );
+}
+
+#[test]
+fn the_refusal_sources_list_each_rows_set_and_each_laws_operators() {
+    let law = LawName {
+        owner: "CV",
+        local: "circulation",
+    };
+    let (body, _) = edge_law_body(EdgeLaw::Divides);
+    let rows: Vec<RefusalSource> = (body.rows().iter())
+        .map(|row| RefusalSource::Row { row: row.id() })
+        .collect();
+    let wanted = [
+        rows[0],
+        rows[1],
+        RefusalSource::Divisor { law },
+        RefusalSource::NonFinite { law },
+    ];
+    assert_eq!(body.refusal_sources(), wanted);
+    let (body, _) = edge_law_body(EdgeLaw::TakesTheLog);
+    assert!(
+        body.refusal_sources()
+            .contains(&RefusalSource::LogarithmArgument { law })
+    );
+}
+
+#[test]
+fn a_published_state_is_evaluated_once_so_a_law_undefined_there_is_refused() {
+    // The stage at the start is fine; one second of a forward Euler flow of one empties `a` exactly, so
+    // only the published state divides by zero, and the retry's half step stops short of it.
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin());
+    let a = map.site::<VesselSegment>("a", origin());
+    let b = map.site::<VesselSegment>("b", origin());
+    map.contain(root.id(), a.id());
+    map.contain(root.id(), b.id());
+    map.connect(Network::Vascular, a.id(), b.id());
+    let mut schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    schema.partial_volume(measure(1.0)).expect("a coefficient");
+    let (conductance, head) = (ParameterKey::new("cv.g"), ParameterKey::new("cv.head"));
+    let body = assemble(schema, |mut body| {
+        let (mut laws, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut laws);
+        let g = laws.edge_parameter::<Conductance<Water>>(conductance, Admissible::nonnegative());
+        let h = laws.edge_parameter::<Pressure>(head, Admissible::finite());
+        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let flow = laws.edge_kernel(|mut k| {
+            let upstream = k.at_edge(&route.from_amount());
+            let downstream = k.at_edge(&route.to_amount());
+            let upstream = k.volume(upstream);
+            let downstream = k.volume(downstream);
+            let ratio = k.divide(downstream, upstream);
+            let factor = k.as_dimension::<_, Dimensionless>(ratio);
+            let head = k.edge_parameter(&h);
+            let head = k.scale(head, factor);
+            let conductance = k.edge_parameter(&g);
+            let flow = k.conductance_flow(conductance, head);
+            k.finish(flow, laws.every_mode(), wave)
+        });
+        laws.transfer_along(&route, flow);
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let default = Binding::Network(Network::Vascular);
+    let lumen = |site| RowKind::Amount {
+        site,
+        space: Space::Lumen,
+    };
+    let mut packet = ParameterPacket::new();
+    packet
+        .synthetic(
+            conductance,
+            default,
+            measure::<Conductance<Water>>(1.0),
+            "synthetic",
+        )
+        .expect("once");
+    packet
+        .synthetic(head, default, measure::<Pressure>(1.0), "synthetic")
+        .expect("once");
+    packet
+        .start(lumen(a.id()), measure::<Water>(1.0), "synthetic")
+        .expect("once");
+    packet
+        .start(lumen(b.id()), measure::<Water>(1.0), "synthetic")
+        .expect("once");
+    let boundary = BoundaryPort::new(Vec::new()).expect("no event");
+    let core = euler(SECOND);
+    let session = admit_fixture(&body, packet, boundary, &core).expect("admitted");
+    let session = refused(session.step());
+    let NumericalRefusal::TrialDomain { source } = session.refused().reason() else {
+        panic!("not a trial domain");
+    };
+    let law = LawName {
+        owner: "CV",
+        local: "circulation",
+    };
+    assert_eq!(
+        body.refusal_sources()[source.index()],
+        RefusalSource::Divisor { law }
+    );
+    let (session, _) = accepted(session.retry());
+    assert_eq!(session.record().accepted().time(), SimTime::from_ns(SECOND / 2));
+}
+
+// Binding and admission.
+
+#[test]
+fn a_body_with_a_mode_is_refused_by_name_at_binding() {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin());
+    let a = map.site::<VesselSegment>("a", origin());
+    let b = map.site::<VesselSegment>("b", origin());
+    map.contain(root.id(), a.id());
+    map.contain(root.id(), b.id());
+    map.connect(Network::Vascular, a.id(), b.id());
+    let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    let body = assemble(schema, |mut body| {
+        let (mut laws, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut laws);
+        let _modes = laws.modes("valve", ["open", "shut"]);
+        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let flow = laws.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, laws.every_mode(), wave)
+        });
+        laws.transfer_along(&route, flow);
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let refused = body.bind(ParameterPacket::<SyntheticFixture>::new()).err();
+    let variable = LawName {
+        owner: "CV",
+        local: "valve",
+    };
+    assert_eq!(refused, Some(AdmissionError::ModesNotYetRun { variable }));
+}
+
+/// The two-reservoir packet, in the order given.
+fn reservoir_packet(body: &CompiledBody, e: f64, g: f64) -> ParameterPacket<SyntheticFixture> {
+    let default = Binding::Network(Network::Vascular);
+    let mut packet = ParameterPacket::new();
+    packet
+        .synthetic(
+            ParameterKey::new("cv.e"),
+            default,
+            measure::<Elastance>(e),
+            "synthetic",
+        )
+        .expect("once");
+    packet
+        .synthetic(
+            ParameterKey::new("cv.g"),
+            default,
+            measure::<Conductance<Water>>(g),
+            "synthetic",
+        )
+        .expect("once");
+    for row in body.rows() {
+        packet
+            .start(row.kind(), measure::<Water>(5.0), "synthetic")
+            .expect("once");
+    }
+    packet
+}
+
+#[test]
+fn a_packet_binds_its_values_and_its_hash_ignores_declaration_order() {
+    let case = stepped();
+    let body = case.body();
+    let bound = body.bind(reservoir_packet(body, 1.0, 0.5)).expect("bound");
+    let default = Binding::Network(Network::Vascular);
+    let mut reversed = ParameterPacket::new();
+    let rows: Vec<RowKind> = body.rows().iter().map(Row::kind).rev().collect();
+    for row in rows {
+        reversed
+            .start(row, measure::<Water>(5.0), "synthetic")
+            .expect("once");
+    }
+    let g = measure::<Conductance<Water>>(0.5);
+    reversed
+        .synthetic(ParameterKey::new("cv.g"), default, g, "synthetic")
+        .expect("once");
+    reversed
+        .synthetic(
+            ParameterKey::new("cv.e"),
+            default,
+            measure::<Elastance>(1.0),
+            "synthetic",
+        )
+        .expect("once");
+    assert_eq!(
+        body.bind(reversed).expect("bound").packet_hash(),
+        bound.packet_hash()
+    );
+    let other = body.bind(reservoir_packet(body, 1.0, 0.25)).expect("bound");
+    assert_ne!(other.packet_hash(), bound.packet_hash());
+}
+
+#[test]
+fn a_site_binding_wins_over_the_network_default() {
+    let case = stepped();
+    let body = case.body();
+    let site = (body.parameters().iter())
+        .find(|slot| slot.key() == ParameterKey::new("cv.e"))
+        .map(|slot| slot.binding())
+        .expect("a slot");
+    let mut packet = reservoir_packet(body, 1.0, 0.5);
+    packet
+        .synthetic(
+            ParameterKey::new("cv.e"),
+            site,
+            measure::<Elastance>(2.0),
+            "synthetic",
+        )
+        .expect("once");
+    let overridden = body.bind(packet).expect("bound").packet_hash();
+    let plain = body
+        .bind(reservoir_packet(body, 1.0, 0.5))
+        .expect("bound")
+        .packet_hash();
+    assert_ne!(overridden, plain);
+}
+
+#[test]
+fn each_bad_packet_is_refused_by_name() {
+    let case = stepped();
+    let body = case.body();
+    let (e, g) = (ParameterKey::new("cv.e"), ParameterKey::new("cv.g"));
+    let default = Binding::Network(Network::Vascular);
+    let refusal = |packet: ParameterPacket<SyntheticFixture>| body.bind(packet).err().expect("refused");
+
+    let mut unbound = ParameterPacket::new();
+    unbound
+        .synthetic(e, default, measure::<Elastance>(1.0), "synthetic")
+        .expect("once");
+    assert!(matches!(refusal(unbound), AdmissionError::UnboundParameter { key, .. } if key == g));
+
+    let mut unknown = reservoir_packet(body, 1.0, 0.5);
+    let stray = ParameterKey::new("cv.stray");
+    unknown
+        .synthetic(stray, default, measure::<Elastance>(1.0), "synthetic")
+        .expect("once");
+    assert_eq!(
+        refusal(unknown),
+        AdmissionError::UnknownParameter {
+            key: stray,
+            binding: default
+        }
+    );
+
+    let mut twice = reservoir_packet(body, 1.0, 0.5);
+    assert_eq!(
+        twice.synthetic(e, default, measure::<Elastance>(2.0), "synthetic"),
+        Err(AdmissionError::DuplicateParameter {
+            key: e,
+            binding: default
+        })
+    );
+
+    let outside = reservoir_packet(body, -1.0, 0.5);
+    assert!(matches!(refusal(outside), AdmissionError::ParameterOutsideSet { key, .. } if key == e));
+
+    let mut wrong = ParameterPacket::new();
+    wrong
+        .synthetic(e, default, measure::<Pressure>(1.0), "synthetic")
+        .expect("once");
+    wrong
+        .synthetic(g, default, measure::<Conductance<Water>>(1.0), "synthetic")
+        .expect("once");
+    assert!(matches!(refusal(wrong), AdmissionError::ParameterDimension { key, .. } if key == e));
+
+    let rows: Vec<RowKind> = body.rows().iter().map(Row::kind).collect();
+    let mut missing = ParameterPacket::new();
+    missing
+        .synthetic(e, default, measure::<Elastance>(1.0), "synthetic")
+        .expect("once");
+    missing
+        .synthetic(g, default, measure::<Conductance<Water>>(1.0), "synthetic")
+        .expect("once");
+    assert_eq!(refusal(missing), AdmissionError::MissingStart { row: rows[0] });
+
+    let mut no_such_row = reservoir_packet(body, 1.0, 0.5);
+    let memory = RowKind::Memory(LawName {
+        owner: "NS",
+        local: "nothing",
+    });
+    no_such_row
+        .start(memory, measure::<Dimensionless>(0.0), "synthetic")
+        .expect("once");
+    assert_eq!(refusal(no_such_row), AdmissionError::UnknownStart { row: memory });
+
+    let mut again = reservoir_packet(body, 1.0, 0.5);
+    assert_eq!(
+        again.start(rows[0], measure::<Water>(1.0), "synthetic"),
+        Err(AdmissionError::DuplicateStart { row: rows[0] })
+    );
+
+    let mut pressure = ParameterPacket::new();
+    pressure
+        .synthetic(e, default, measure::<Elastance>(1.0), "synthetic")
+        .expect("once");
+    pressure
+        .synthetic(g, default, measure::<Conductance<Water>>(1.0), "synthetic")
+        .expect("once");
+    pressure
+        .start(rows[0], measure::<Pressure>(1.0), "synthetic")
+        .expect("once");
+    pressure
+        .start(rows[1], measure::<Water>(1.0), "synthetic")
+        .expect("once");
+    assert_eq!(refusal(pressure), AdmissionError::StartDimension { row: rows[0] });
+
+    let mut negative = ParameterPacket::new();
+    negative
+        .synthetic(e, default, measure::<Elastance>(1.0), "synthetic")
+        .expect("once");
+    negative
+        .synthetic(g, default, measure::<Conductance<Water>>(1.0), "synthetic")
+        .expect("once");
+    negative
+        .start(rows[0], measure::<Water>(-1.0), "synthetic")
+        .expect("once");
+    negative
+        .start(rows[1], measure::<Water>(1.0), "synthetic")
+        .expect("once");
+    assert_eq!(
+        refusal(negative),
+        AdmissionError::StartOutsideSet { row: rows[0] }
+    );
+}
+
+fn water_event(name: &[u8], boundary: &'static str, from: u64, to: u64, amount: f64) -> BoundaryEvent {
+    let id = InputId::new(Digest::of_canonical(name));
+    let delivery = WaterDelivery {
+        boundary,
+        amount: measure(amount),
+        ends: SimTime::from_ns(to),
+    };
+    BoundaryEvent::new(id, SimTime::from_ns(from), BoundaryInput::Water(delivery))
+}
+
+#[test]
+fn each_bad_timeline_is_refused_by_name() {
+    let id = InputId::new(Digest::of_canonical(b"x"));
+    let refusal = |events| BoundaryPort::new(events).err();
+    assert_eq!(
+        refusal(vec![water_event(b"x", "inflow", 5, 5, 1.0)]),
+        Some(AdmissionError::EmptyDelivery { id })
+    );
+    assert_eq!(
+        refusal(vec![water_event(b"x", "inflow", 5, 4, 1.0)]),
+        Some(AdmissionError::EmptyDelivery { id })
+    );
+    assert_eq!(
+        refusal(vec![water_event(b"x", "inflow", 5, 6, -1.0)]),
+        Some(AdmissionError::NegativeDelivery { id })
+    );
+    assert_eq!(
+        refusal(vec![
+            water_event(b"x", "inflow", 5, 6, 1.0),
+            water_event(b"x", "inflow", 5, 6, 2.0),
+        ]),
+        Some(AdmissionError::InputConflict { id })
+    );
+
+    let case = stepped();
+    let body = case.body();
+    let bound = || body.bind(reservoir_packet(body, 1.0, 0.5)).expect("bound");
+    let at = |ns| InitializationRequest::consistent_instant(SimTime::from_ns(ns));
+    let unknown = BoundaryPort::new(vec![water_event(b"x", "outflow", 5, 6, 1.0)]).expect("parsed");
+    assert_eq!(
+        body.initialization(bound(), unknown, at(0)).err(),
+        Some(AdmissionError::UnknownBoundary { name: "outflow" })
+    );
+    let early = BoundaryPort::new(vec![water_event(b"x", "inflow", 5, 6, 1.0)]).expect("parsed");
+    assert_eq!(
+        body.initialization(bound(), early, at(6)).err(),
+        Some(AdmissionError::EventBeforeHead { id })
+    );
+}
+
+#[test]
+fn one_id_with_one_payload_collapses_and_applies_once() {
+    let open = TwoReservoirs::delivering([10.0, 10.0], Vec::new()).expect("a body");
+    let body = open.body();
+    let port = BoundaryPort::new(vec![
+        water_event(b"x", "inflow", SECOND, 2 * SECOND, 3.0),
+        water_event(b"x", "inflow", SECOND, 2 * SECOND, 3.0),
+    ])
+    .expect("collapsed");
+    let core = reference(SECOND);
+    let packet = reservoir_packet(body, 1.0, 0.001);
+    let session = admit_fixture(body, packet, port, &core).expect("admitted");
+    let session = to(session, SimTime::from_ns(3 * SECOND));
+    let received = total_received(session.record(), open.inflow().expect("an open body"));
+    assert!((hi(received) - 3.0).abs() < 1e-12, "{received:?}");
+}
+
+#[test]
+fn admission_refuses_a_workspace_that_moved_a_start_or_came_from_another_body() {
+    let (case, other) = (stepped(), TwoReservoirs::closed().expect("a body"));
+    let body = case.body();
+    let at = SimTime::from_ns(0);
+    let history = || MethodHistory::new(Digest::of_canonical(b"a schema"), at, Vec::new());
+    let system = || {
+        let parameters = body.bind(reservoir_packet(body, 1.0, 0.5)).expect("bound");
+        let request = InitializationRequest::consistent_instant(at);
+        let port = BoundaryPort::new(Vec::new()).expect("no event");
+        body.initialization(parameters, port, request).expect("a system")
+    };
+    let moved = {
+        let system = system();
+        let mut solved = system.workspace();
+        solved.unknowns_mut()[1] += 1.0;
+        system.admit(solved, history()).err()
+    };
+    let row = body.rows()[1].id();
+    assert_eq!(moved, Some(InitializationFailure::Inconsistent { row }));
+
+    let parameters = other
+        .body()
+        .bind(reservoir_packet(other.body(), 1.0, 0.5))
+        .expect("bound");
+    let request = InitializationRequest::consistent_instant(at);
+    let port = BoundaryPort::new(Vec::new()).expect("no event");
+    let foreign = other
+        .body()
+        .initialization(parameters, port, request)
+        .expect("a system");
+    let foreign = system().admit(foreign.workspace(), history()).err();
+    assert_eq!(
+        foreign,
+        Some(InitializationFailure::Admission(AdmissionError::ForeignWorkspace))
+    );
+
+    let parameters = other
+        .body()
+        .bind(reservoir_packet(other.body(), 1.0, 0.5))
+        .expect("bound");
+    let request = InitializationRequest::consistent_instant(at);
+    let port = BoundaryPort::new(Vec::new()).expect("no event");
+    assert_eq!(
+        body.initialization(parameters, port, request).err(),
+        Some(AdmissionError::ForeignParameters)
+    );
+}
+
+#[test]
+fn a_session_refuses_an_identity_of_another_body_origin_or_solver_and_a_zero_floor() {
+    let (case, other) = (stepped(), TwoReservoirs::closed().expect("a body"));
+    let body = case.body();
+    let core = reference(8 * SECOND);
+    let revision = |target: &TwoReservoirs| {
+        let body = target.body();
+        let parameters = body.bind(reservoir_packet(body, 1.0, 0.5)).expect("bound");
+        let at = SimTime::from_ns(0);
+        let request = InitializationRequest::consistent_instant(at);
+        let port = BoundaryPort::new(Vec::new()).expect("no event");
+        let system = body.initialization(parameters, port, request).expect("a system");
+        let solved = system.workspace();
+        let history = MethodHistory::new(core.resolution().policy(), at, Vec::new());
+        system.admit(solved, history).expect("admitted")
+    };
+    let seed = Seed::new([1, 2, 3, 4]);
+    let admit =
+        |origin: InitialRevision, identity: RunIdentity| Session::admit(body, &core, origin, identity).err();
+
+    let origin = revision(&case);
+    let packet = origin.packet_hash();
+    let wrong_model = RunIdentity::new(other.body().model_hash(), packet, seed, core.resolution());
+    assert_eq!(admit(origin, wrong_model), Some(AdmissionError::IdentityMismatch));
+
+    let origin = revision(&other);
+    let packet = origin.packet_hash();
+    let right_identity = RunIdentity::new(body.model_hash(), packet, seed, core.resolution());
+    assert_eq!(
+        admit(origin, right_identity),
+        Some(AdmissionError::IdentityMismatch)
+    );
+
+    let foreign_packet = body
+        .bind(reservoir_packet(body, 1.0, 0.25))
+        .expect("bound")
+        .packet_hash();
+    let origin = revision(&case);
+    let wrong_packet = RunIdentity::new(body.model_hash(), foreign_packet, seed, core.resolution());
+    assert_eq!(
+        admit(origin, wrong_packet),
+        Some(AdmissionError::IdentityMismatch)
+    );
+
+    let origin = revision(&case);
+    let packet = origin.packet_hash();
+    let foreign_core = reference(4 * SECOND);
+    let wrong_core = RunIdentity::new(body.model_hash(), packet, seed, foreign_core.resolution());
+    assert_eq!(admit(origin, wrong_core), Some(AdmissionError::IdentityMismatch));
+
+    let bottomless = reference(8 * SECOND).with_floor(0);
+    let origin = revision(&case);
+    let packet = origin.packet_hash();
+    let identity = RunIdentity::new(body.model_hash(), packet, seed, bottomless.resolution());
+    let refused = Session::admit(body, &bottomless, origin, identity).err();
+    assert_eq!(refused, Some(AdmissionError::ZeroMinimumInterval));
+}
+
+#[test]
+fn two_settings_of_one_core_never_share_an_identity() {
+    let digest = |interval| reference(interval).resolution().digest();
+    assert_ne!(digest(2 * SECOND), digest(8 * SECOND));
+    let tight = reference(8 * SECOND)
+        .with_scales(scales(1e-3, 0.0))
+        .resolution()
+        .digest();
+    assert_ne!(tight, digest(8 * SECOND));
+}
+
+// The drive at a breakpoint.
+
+#[test]
+fn the_ending_interval_sees_the_left_value_and_the_next_the_new_one() {
+    let breakpoint = 7 * SECOND + 1;
+    let end = breakpoint + 3 * SECOND;
+    let first = 7.000000001;
+    let second = 30.0;
+    let last = 1e-9;
+    let delivery = |id, from, to, amount: f64| Delivery {
+        id,
+        from: SimTime::from_ns(from),
+        to: SimTime::from_ns(to),
+        amount: measure(amount),
+    };
+    let case = TwoReservoirs::delivering(
+        [100.0, 100.0],
+        vec![
+            delivery(b"slow", 0, breakpoint, first),
+            delivery(b"fast", breakpoint, end, second),
+            delivery(b"one nanosecond", end, end + 1, last),
+        ],
+    )
+    .expect("a body");
+    let inner = reference(2 * SECOND);
+    let core = ForcedRefusal {
+        inner: &inner,
+        at: SimTime::from_ns(6 * SECOND),
+        by: Refuser::Core,
+    };
+    let inflow = case.inflow().expect("an open body");
+    let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(breakpoint));
+    assert_eq!(session.record().accepted().time(), SimTime::from_ns(breakpoint));
+    let received = hi(total_received(session.record(), inflow));
+    assert!((received - first).abs() < 1e-12, "{received}");
+    let session = to(session, SimTime::from_ns(end));
+    let received = hi(total_received(session.record(), inflow));
+    assert!((received - (first + second)).abs() < 1e-12, "{received}");
+    let (session, receipt) = accepted(session.step());
+    assert_eq!(session.record().accepted().time(), SimTime::from_ns(end + 1));
+    assert_eq!(receipt.applied().len(), 1);
+    let received = hi(total_received(session.record(), inflow));
+    assert!((received - (first + second + last)).abs() < 1e-12, "{received}");
+}
+
+// Memory, algebraic rows and validity.
+
+/// A filter `m' = s (t - m)` and a reading closed algebraically at `x = p m`.
+fn filter_body() -> CompiledBody {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", origin());
+    let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    assemble(schema, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let filter = laws.state::<Dimensionless>("filter", Admissible::finite());
+        let reading = laws.algebraic::<Dimensionless>("reading", Admissible::finite());
+        let speed =
+            laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.speed"), Admissible::positive());
+        let target = laws.parameter::<Dimensionless>(ParameterKey::new("ns.target"), Admissible::finite());
+        let gain = laws.parameter::<Dimensionless>(ParameterKey::new("ns.gain"), Admissible::finite());
+        let reflex = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let rate = laws.kernel(|mut k| {
+            let goal = k.parameter(&target);
+            let now = k.state(&filter);
+            let speed = k.parameter(&speed);
+            let rate = k.relax(goal, now, speed);
+            k.finish(rate, laws.every_mode(), reflex)
+        });
+        laws.memory_rate(&filter, rate);
+        let closure = laws.kernel(|mut k| {
+            let x = k.algebraic(&reading);
+            let g = k.parameter(&gain);
+            let now = k.state(&filter);
+            let scaled = k.scale(g, now);
+            let residual = k.subtract(x, scaled);
+            k.finish(residual, laws.every_mode(), reflex)
+        });
+        laws.residual(&reading, closure);
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled")
+}
+
+fn filter_packet() -> ParameterPacket<SyntheticFixture> {
+    let mut packet = ParameterPacket::new();
+    let bind = Binding::Body;
+    let speed = measure::<Rate<Dimensionless>>(0.01);
+    packet
+        .synthetic(ParameterKey::new("ns.speed"), bind, speed, "synthetic")
+        .expect("once");
+    let target = measure::<Dimensionless>(2.0);
+    packet
+        .synthetic(ParameterKey::new("ns.target"), bind, target, "synthetic")
+        .expect("once");
+    let gain = measure::<Dimensionless>(3.0);
+    packet
+        .synthetic(ParameterKey::new("ns.gain"), bind, gain, "synthetic")
+        .expect("once");
+    let name = |local| LawName { owner: "NS", local };
+    packet
+        .start(
+            RowKind::Memory(name("filter")),
+            measure::<Dimensionless>(1.0),
+            "synthetic",
+        )
+        .expect("once");
+    packet
+        .start(
+            RowKind::Algebraic(name("reading")),
+            measure::<Dimensionless>(3.0),
+            "synthetic",
+        )
+        .expect("once");
+    packet
+}
+
+#[test]
+fn memory_and_algebraic_rows_run_against_their_closed_form() {
+    const END: u64 = 100 * SECOND;
+    let body = filter_body();
+    let error = |interval| {
+        let core = reference(interval);
+        let port = BoundaryPort::new(Vec::new()).expect("no event");
+        let session = admit_fixture(&body, filter_packet(), port, &core).expect("admitted");
+        let session = to(session, SimTime::from_ns(END));
+        let accepted = session.record().accepted();
+        let (filter, reading) = (body.rows()[0].id(), body.rows()[1].id());
+        let exact = 2.0 - exp(-0.01 * 100.0);
+        let values = [hi(accepted.value(filter)), hi(accepted.value(reading))];
+        assert!(
+            (values[1] - 3.0 * values[0]).abs() < 1e-9,
+            "the closure holds at the head"
+        );
+        (values[0] - exact).abs()
+    };
+    // Backward Euler's global error here is `h / 4 * s^2 * T * exp(-s T)` for doubled steps of `h`.
+    let (coarse, fine) = (error(2 * SECOND), error(SECOND));
+    let predicted = 0.25 * 1e-4 * 100.0 * exp(-1.0);
+    assert!(fine < 1.2 * predicted, "{fine} against {predicted}");
+    assert!(coarse / fine > 1.8 && coarse / fine < 2.2, "{coarse} over {fine}");
+}
+
+#[test]
+fn an_unsolved_closure_at_the_published_state_is_refused_on_its_row() {
+    // The stage solves the closure at the start, and the end keeps that reading while the filter moved
+    // by 0.01 * 1 * 1 s, so the published residual is 0.03, above a scale of 1e-3.
+    let body = filter_body();
+    let core = ForwardEulerWithScale {
+        inner: euler(SECOND),
+        scales: scales(1e-3, 0.0),
+    };
+    let port = BoundaryPort::new(Vec::new()).expect("no event");
+    let session = admit_fixture(&body, filter_packet(), port, &core).expect("admitted");
+    let session = refused(session.step());
+    let reading = body.rows()[1].id();
+    assert_eq!(
+        session.refused().reason(),
+        NumericalRefusal::StageResidual { row: reading }
+    );
+}
+
+struct ForwardEulerWithScale {
+    inner: ForwardEuler,
+    scales: ErrorScales,
+}
+impl CoupledSolver for ForwardEulerWithScale {
+    fn resolution(&self) -> DeclaredResolution {
+        DeclaredResolution::new(
+            Digest::of_canonical(b"forward euler, tight"),
+            MILLISECOND,
+            12,
+            ArithmeticProfile::contract_v1(),
+            StageScheme::forward_euler(),
+            self.scales,
+        )
+    }
+    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+        self.inner.next_step(problem)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.inner.solve(problem, ticket)
+    }
+}
+
+#[test]
+fn an_algebraic_start_that_does_not_solve_is_refused_with_its_row() {
+    let body = filter_body();
+    let mut packet = ParameterPacket::new();
+    let bind = Binding::Body;
+    let speed = measure::<Rate<Dimensionless>>(0.01);
+    packet
+        .synthetic(ParameterKey::new("ns.speed"), bind, speed, "synthetic")
+        .expect("once");
+    let target = measure::<Dimensionless>(2.0);
+    packet
+        .synthetic(ParameterKey::new("ns.target"), bind, target, "synthetic")
+        .expect("once");
+    let gain = measure::<Dimensionless>(3.0);
+    packet
+        .synthetic(ParameterKey::new("ns.gain"), bind, gain, "synthetic")
+        .expect("once");
+    let name = |local| LawName { owner: "NS", local };
+    packet
+        .start(
+            RowKind::Memory(name("filter")),
+            measure::<Dimensionless>(1.0),
+            "synthetic",
+        )
+        .expect("once");
+    packet
+        .start(
+            RowKind::Algebraic(name("reading")),
+            measure::<Dimensionless>(4.0),
+            "synthetic",
+        )
+        .expect("once");
+    let core = reference(SECOND);
+    let port = BoundaryPort::new(Vec::new()).expect("no event");
+    let refused = admit_fixture(&body, packet, port, &core).err();
+    let row = body.rows()[1].id();
+    assert_eq!(refused, Some(InitializationFailure::Inconsistent { row }));
+}
+
+#[test]
+fn a_validity_excursion_is_published_and_named_never_refused() {
+    let flow =
+        |lower, upper| ValidityRange::new(measure(lower), measure(upper), Basis::Fixture("synthetic range"));
+    let excursions = |range| {
+        let case = TwoReservoirs::trusted_within(range).expect("a body");
+        let core = reference(8 * SECOND);
+        let (_, receipt) = accepted(case.admit(&core).expect("admitted").step());
+        receipt.excursions().to_vec()
+    };
+    // `q` starts at k (a - b) = 1 and decays slowly, so these ranges sit either side of it.
+    let above = excursions(flow(-1.0, 0.5).expect("a range"));
+    assert_eq!(above.len(), 1);
+    assert_eq!(above[0].side(), ExcursionSide::Above);
+    assert_eq!(
+        above[0].law(),
+        LawName {
+            owner: "CV",
+            local: "circulation"
+        }
+    );
+    assert_eq!(above[0].at(), SimTime::from_ns(8 * SECOND));
+    assert!(matches!(above[0].context(), Context::Edge { .. }));
+    assert!(hi(above[0].value()) > 0.9 && hi(above[0].value()) < 1.0);
+    let below = excursions(flow(2.0, 3.0).expect("a range"));
+    assert_eq!(below[0].side(), ExcursionSide::Below);
+    assert_eq!(excursions(flow(0.0, 2.0).expect("a range")), []);
+}
+
+// The certificate.
+
+fn delivery(id: &'static [u8], from_s: u64, to_s: u64, rate: f64) -> Delivery {
+    Delivery {
+        id,
+        from: SimTime::from_ns(from_s * SECOND),
+        to: SimTime::from_ns(to_s * SECOND),
+        amount: measure(rate * (to_s - from_s) as f64),
+    }
+}
+
+#[test]
+fn closure_holds_over_every_window_and_drift_tells_a_closed_body_from_an_open_one() {
+    let closed = TwoReservoirs::closed().expect("a body");
+    let core = reference(60 * SECOND);
+    let session = to(
+        closed.admit(&core).expect("admitted"),
+        SimTime::from_ns(48 * HOUR),
+    );
+    let view = session.record().conservation();
+    let policy = ledger_policy(view.basis(), 1e-6);
+    let certificate = certify(&view, &policy).expect("a closed body holds still");
+    assert_eq!(
+        certificate.pieces(),
+        1440,
+        "one piece per window start, none sampled"
+    );
+    assert_eq!(certificate.seal(), view.seal());
+    assert_eq!(certificate.basis(), view.basis().digest());
+    assert_eq!(certificate.policy(), policy.digest());
+    let result = certificate.results()[0];
+    assert_eq!(
+        result.quantity(),
+        view.basis().ids().next().expect("one combination")
+    );
+    assert!(result.worst_closure() < Compensated::of(&measure::<Water>(1e-24)));
+    assert_eq!(result.closure_window().length_ns(), 24 * HOUR);
+    assert!(result.worst_drift() < Compensated::of(&measure::<Water>(1e-6)));
+
+    let open = stepped();
+    let session = to(open.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
+    let view = session.record().conservation();
+    certify(&view, &ledger_policy(view.basis(), 1e12)).expect("an open body's ledger still closes");
+    let failure = certify(&view, &ledger_policy(view.basis(), 1.0)).expect_err("it does not hold still");
+    assert_eq!(failure.check(), CertificateCheck::Drift);
+    assert!(failure.window().is_some() && failure.quantity().is_some());
+    assert!(hi(failure.residual()) > 1.0);
+}
+
+#[test]
+fn the_worst_window_can_start_inside_a_segment() {
+    // The change over a day peaks with the window ending where the high rate stops: 96,400 + 20,000 s,
+    // so the window starts at 30,000 s, between the 70 s grid's 29,960 and 30,030.
+    let case = TwoReservoirs::delivering(
+        [500_500.0, 499_500.0],
+        vec![
+            delivery(b"baseline", 0, 96_400, 1.0),
+            delivery(b"high", 96_400, 116_400, 5.0),
+        ],
+    )
+    .expect("a body");
+    let core = reference(70 * SECOND);
+    let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
+    let view = session.record().conservation();
+    let certificate = certify(&view, &ledger_policy(view.basis(), 1e12)).expect("it closes");
+    let result = certificate.results()[0];
+    assert_eq!(result.drift_window().start(), SimTime::from_ns(30_000 * SECOND));
+    assert!(
+        (hi(result.worst_drift()) - 166_400.0).abs() < 1e-3,
+        "{:?}",
+        result.worst_drift()
+    );
+}
+
+#[test]
+fn a_ledger_that_does_not_close_fails_closure_before_drift() {
+    // The bulk fills the low limb of `a`, about 16 on a high limb of 1e18, and a 6e-17 extent is then
+    // below that limb's rounding, so the inventory stands still while the exchange grows. Only an extent
+    // this far below an amount can leave a compensated ledger open.
+    let bulk = delivery(b"bulk", 0, 3_600, 1.0);
+    let tiny = Delivery {
+        id: b"below the pair's precision",
+        from: SimTime::from_ns(3_600 * SECOND),
+        to: SimTime::from_ns(48 * HOUR),
+        amount: measure(1e-18 * 169_200.0),
+    };
+    let case = TwoReservoirs::delivering([1e18, 1e18], vec![bulk, tiny]).expect("a body");
+    let core = reference(60 * SECOND);
+    let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
+    let view = session.record().conservation();
+    let failure = certify(&view, &ledger_policy(view.basis(), 0.0)).expect_err("it does not close");
+    assert_eq!(failure.check(), CertificateCheck::Closure);
+    assert!(failure.window().is_some());
+}
+
+#[test]
+fn coverage_under_48_hours_and_a_policy_of_another_basis_fail() {
+    let core = reference(60 * SECOND);
+    let case = stepped();
+    let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(30 * HOUR));
+    let view = session.record().conservation();
+    let failure = certify(&view, &ledger_policy(view.basis(), 1e12)).expect_err("too short");
+    assert_eq!(failure.check(), CertificateCheck::Coverage);
+
+    let session = case.admit(&core).expect("admitted");
+    let view = session.record().conservation();
+    let failure = certify(&view, &ledger_policy(view.basis(), 1e12)).expect_err("no step yet");
+    assert_eq!(failure.check(), CertificateCheck::Coverage);
+
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin());
+    let sites = [
+        map.site::<VesselSegment>("a", origin()),
+        map.site::<VesselSegment>("b", origin()),
+        map.site::<VesselSegment>("c", origin()),
+    ];
+    for site in &sites {
+        map.contain(root.id(), site.id());
+    }
+    map.connect(Network::Vascular, sites[0].id(), sites[1].id());
+    map.connect(Network::Vascular, sites[1].id(), sites[2].id());
+    let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    let three = assemble(schema, |mut body| {
+        let (mut laws, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut laws);
+        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let flow = laws.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, laws.every_mode(), wave)
+        });
+        laws.transfer_along(&route, flow);
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
+    let view = session.record().conservation();
+    let foreign = ledger_policy(three.conserved_basis(), 1e12);
+    let failure = certify(&view, &foreign).expect_err("another basis");
+    assert_eq!(failure.check(), CertificateCheck::Coverage);
+}
+
+#[test]
+fn a_certificate_policy_is_checked_when_it_is_built() {
+    let case = stepped();
+    let basis = case.body().conserved_basis();
+    let quantity = basis.ids().next().expect("one combination");
+    let wrong = QuantityPolicy::new::<Pressure>(quantity, measure(1.0), measure(0.0), measure(1.0)).err();
+    assert_eq!(wrong, Some(AdmissionError::QuantityDimension { quantity }));
+    let windows = Sliding24Hours::covering(48 * HOUR).expect("a coverage");
+    let short = CertificatePolicy::new(basis, Vec::new(), ExpectedDrift::Zero, windows).err();
+    assert_eq!(short, Some(AdmissionError::PolicyCoverage));
+    assert_eq!(
+        Sliding24Hours::covering(24 * HOUR).err(),
+        Some(AdmissionError::ShortCoverage)
+    );
+}
+
+#[test]
+fn an_accuracy_policy_needs_a_case_and_a_grid() {
+    let no_case = AccuracyPolicy::new(Vec::new(), measure(5.0), measure(0.0), SECOND).err();
+    assert_eq!(no_case, Some(AdmissionError::EmptyAccuracyPolicy));
+    let cases = vec![AccuracyCase::TwoReservoir(stepped())];
+    let no_grid = AccuracyPolicy::new(cases, measure(5.0), measure(0.0), 0).err();
+    assert_eq!(no_grid, Some(AdmissionError::EmptyAccuracyPolicy));
+}
+
+#[test]
+fn a_core_that_cannot_finish_a_case_has_not_failed_on_accuracy() {
+    let core = NeverConverges {
+        interval_ns: 8 * SECOND,
+        budget: 2,
+    };
+    let failure = accuracy(&core, &gate(stepped()));
+    assert!(matches!(failure, Err(AccuracyFailure::Faulted(_))), "{failure:?}");
+}
+
+#[test]
+fn the_same_inputs_give_the_same_digests_and_seal_twice() {
+    let run = || {
+        let case = stepped();
+        let core = reference(64 * SECOND);
+        let session = to(case.admit(&core).expect("admitted"), case.end());
+        (session.record().digests(), session.record().seal())
+    };
+    assert_eq!(run(), run());
+}
