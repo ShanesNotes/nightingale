@@ -1,4 +1,4 @@
-use crate::checkpoint::{BranchId, Checkpoint, CheckpointError, HistoryStore, restore};
+use crate::checkpoint::{BranchId, Checkpoint, CheckpointError, Continuing, HistoryStore, restore};
 use crate::record::{AuthorizedInput, InputReceipt, NextImage, PatientRecord, StepReceipt};
 use ng_contract::{
     AdmissionError, Attempt, CompiledBody, CoupledSolver, EngineFault, InitialRevision, Refused, RunIdentity,
@@ -68,14 +68,19 @@ impl<'m, S> Session<'m, S> {
     }
     /// The solver is this session's, so a core that kept state while the parent ran ahead carries it into
     /// the fork.
-    fn fork(&self, saved: &Checkpoint, branch: BranchId) -> Result<Session<'m, Running>, CheckpointError> {
+    fn fork(
+        &self,
+        saved: &Checkpoint,
+        branch: BranchId,
+        continuing: Continuing,
+    ) -> Result<Session<'m, Running>, CheckpointError> {
         if self.record.branch().uses(branch.digest()) {
             return Err(CheckpointError::BranchInUse);
         }
         let resolve = self.record.history().resolver();
         let identity = self.record.identity();
         let body = self.record.body();
-        let record = restore(saved, identity, body, &resolve, Some(branch)).map_err(|error| match error {
+        let record = restore(saved, identity, body, &resolve, continuing).map_err(|error| match error {
             CheckpointError::HistoryMissing { .. } => CheckpointError::NotOnThisBranch,
             other => other,
         })?;
@@ -125,7 +130,8 @@ impl<'m> Session<'m, Running> {
         {
             return Err(CheckpointError::IdentityMismatch);
         }
-        let record = restore(saved, expected, body, &|root| store.resolve(root), None)?;
+        let resolve = |seal: &_| store.resolve(seal);
+        let record = restore(saved, expected, body, &resolve, Continuing::Resume)?;
         Ok(Self {
             solver,
             record: Box::new(record),
@@ -158,7 +164,7 @@ impl<'m> Session<'m, Running> {
         saved: &Checkpoint,
         branch: BranchId,
     ) -> Result<Session<'m, Running>, CheckpointError> {
-        self.fork(saved, branch)
+        self.fork(saved, branch, Continuing::Rewind(branch))
     }
 }
 impl<'m> Session<'m, Retrying> {
@@ -199,7 +205,7 @@ impl<'m> Session<'m, Faulted> {
         earlier: &Checkpoint,
         branch: BranchId,
     ) -> Result<Session<'m, Running>, CheckpointError> {
-        self.fork(earlier, branch)
+        self.fork(earlier, branch, Continuing::Recover(branch))
     }
 }
 

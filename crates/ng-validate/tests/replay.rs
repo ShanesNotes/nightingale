@@ -337,15 +337,12 @@ fn a_core_told_the_timeline_in_only_one_run_fails_late_admission() {
     let cores = two_callers(spread, Vec::new());
     let clock = script();
     let failure = replay_gate(ReplayGate::LateAdmission, &case, &cores, &plan(&clock));
-    assert!(
-        matches!(
-            failure,
-            Err(ReplayFailure::InputRefused {
-                error: AdmissionError::EventBeforeHead { .. },
-                ..
-            })
-        ),
-        "the late run has passed the head the known run gave the input: {failure:?}"
+    assert_eq!(
+        failure.err(),
+        Some(ReplayFailure::NoLateBoundary {
+            id: InputId::new(Digest::of_canonical(b"input"))
+        }),
+        "the late run has passed the head the known run gave the input"
     );
 }
 
@@ -1509,6 +1506,12 @@ fn a_latched_session_exports_an_image_only_recover_continues() {
         .expect("a new branch");
     assert_eq!(recovered.record().accepted().time(), at(16));
     assert_eq!(recovered.record().ancestry().len(), 1);
+    let another = BranchId::new(Digest::of_canonical(b"another"));
+    assert_eq!(
+        recovered.rewind(report.last_accepted(), another).err(),
+        Some(CheckpointError::Latched),
+        "a running session on that chain goes back to the latch only through a fault"
+    );
     assert_eq!(recovered.record().digests(), stopped.record().digests());
     let from_earlier = stopped.recover(&earlier, branch).expect("a new branch");
     assert_eq!(from_earlier.record().digests(), stopped.record().digests());
@@ -1561,14 +1564,14 @@ fn a_run_on_the_same_grid_diverges_at_the_first_seal_it_changed() {
     };
     let clock = script();
     let plan = ReplayPlan {
-        resume_every: 2,
+        resume_every: 3,
         ..plan(&clock)
     };
     assert_eq!(
         replay_gate(ReplayGate::Resume, &case, &cores, &plan).err(),
         Some(ReplayFailure::Diverged {
             gate: ReplayGate::Resume,
-            first_divergence: at(24),
+            first_divergence: at(16),
         })
     );
 }
@@ -1605,6 +1608,115 @@ fn a_core_that_restarts_after_a_jump_fails_rewind_though_a_load_and_a_fork_agree
         Some(ReplayFailure::Diverged {
             gate: ReplayGate::Rewind,
             first_divergence: at(20),
+        })
+    );
+}
+
+fn counting(interval: u64) -> impl Fn() -> KeepsACache {
+    move || KeepsACache {
+        interval_ns: interval * SECOND,
+        steps: Cell::new(0),
+    }
+}
+
+#[test]
+fn a_hidden_period_cannot_land_on_every_resume() {
+    let case = delivering(Vec::new(), 100);
+    for resume_every in [3, 1_000_000] {
+        let clock = script();
+        let plan = ReplayPlan {
+            resume_every,
+            ..plan(&clock)
+        };
+        let failure = replay_gate(ReplayGate::Resume, &case, &counting(12), &plan);
+        assert!(
+            matches!(failure, Err(ReplayFailure::Diverged { .. })),
+            "{resume_every}"
+        );
+    }
+}
+
+#[test]
+fn a_hidden_period_cannot_land_on_every_fork() {
+    for end in (50..=200).step_by(2) {
+        let case = delivering(vec![delivery(b"input", 40, 45)], end);
+        let clock = script();
+        let failure = replay_gate(ReplayGate::Rewind, &case, &counting(12), &plan(&clock));
+        assert!(matches!(failure, Err(ReplayFailure::Diverged { .. })), "{end}");
+    }
+    let case = delivering(Vec::new(), 88);
+    let clock = script();
+    let failure = replay_gate(ReplayGate::Rewind, &case, &counting(12), &plan(&clock));
+    assert!(matches!(failure, Err(ReplayFailure::Diverged { .. })));
+}
+
+#[test]
+fn an_input_no_step_applies_has_no_late_boundary() {
+    let id = InputId::new(Digest::of_canonical(b"input"));
+    for stamp in [40, 200] {
+        let case = delivering(vec![delivery(b"input", stamp, 300)], 40);
+        let clock = script();
+        let cores = || reference(8 * SECOND);
+        let gate = replay_gate(ReplayGate::LateAdmission, &case, &cores, &plan(&clock));
+        assert_eq!(gate.err(), Some(ReplayFailure::NoLateBoundary { id }), "{stamp}");
+    }
+}
+
+#[test]
+fn a_pace_that_never_stops_a_run_short_of_its_end_is_missing_evidence() {
+    let case = delivering(vec![delivery(b"input", 40, 60)], 100);
+    let cores = || reference(8 * SECOND);
+    let gate = ReplayGate::Pace;
+    let missing = Some(ReplayFailure::MissingEvidence { gate });
+    let clock = script();
+    let straight_through = ReplayPlan {
+        chunks: vec![3_000 * SECOND],
+        ..plan(&clock)
+    };
+    assert_eq!(replay_gate(gate, &case, &cores, &straight_through).err(), missing);
+    let clock = ScriptedClock::new(vec![3_000 * SECOND]);
+    let one_reading = plan(&clock);
+    assert_eq!(replay_gate(gate, &case, &cores, &one_reading).err(), missing);
+}
+
+#[test]
+fn a_pace_that_moves_no_simulated_time_is_missing_evidence_before_it_reads_a_clock() {
+    struct NeverRead;
+    impl WallClock for NeverRead {
+        fn elapsed_ns(&self) -> Option<u64> {
+            panic!("this plan spins on its clock")
+        }
+        fn source(&self) -> ClockSource {
+            ClockSource::Host
+        }
+    }
+    let case = delivering(Vec::new(), 40);
+    let plan = ReplayPlan {
+        clock: &NeverRead,
+        simulated_per_wall: 0,
+        chunks: vec![SECOND],
+        resume_every: 5,
+    };
+    let gate = ReplayGate::Pace;
+    assert_eq!(
+        replay_gate(gate, &case, &|| reference(8 * SECOND), &plan).err(),
+        Some(ReplayFailure::MissingEvidence { gate })
+    );
+}
+
+#[test]
+fn every_gate_in_one_evidence_measured_one_run() {
+    let case = delivering(vec![delivery(b"input", 40, 60)], 100);
+    let calls = Cell::new(0);
+    let cores = || {
+        calls.set(calls.get() + 1);
+        reference(if calls.get() <= 3 { 8 } else { 4 } * SECOND)
+    };
+    let clock = script();
+    assert_eq!(
+        replay_gates(&case, &cores, &plan(&clock)).err(),
+        Some(ReplayFailure::MissingEvidence {
+            gate: ReplayGate::Resume
         })
     );
 }

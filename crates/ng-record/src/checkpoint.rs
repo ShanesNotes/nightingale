@@ -152,10 +152,10 @@ impl BranchAncestry {
 }
 
 const MAGIC: [u8; 8] = *b"ngcheck1";
-/// `MAGIC` and the raw digest, which covers every byte after it, so checking it reads no field.
-const RAW_DIGEST_END: usize = 40;
-/// `MAGIC`, the raw digest, the body's length, the run identity, the revision, the seal and the latch.
-const HEADER: usize = 128;
+/// The raw digest covers every byte after it, so checking it reads no field.
+const RAW_DIGEST_END: usize = MAGIC.len() + 32;
+/// The body's length, the run identity, the revision, the seal and the latch.
+const HEADER: usize = RAW_DIGEST_END + 8 + 32 + 8 + 32 + 8;
 
 struct Header<'b> {
     identity: Digest,
@@ -197,6 +197,14 @@ fn opened(bytes: &[u8]) -> Result<Header<'_>, CheckpointError> {
         latched,
         body,
     })
+}
+
+/// What a restored record goes on as. Only `Recover` goes past a latch, and it opens a new branch.
+#[derive(Clone, Copy)]
+pub(crate) enum Continuing {
+    Resume,
+    Rewind(BranchId),
+    Recover(BranchId),
 }
 
 pub(crate) struct Sections<'r> {
@@ -249,13 +257,13 @@ pub(crate) fn restore<'m>(
     expected: &RunIdentity,
     body: &'m CompiledBody,
     resolve: &dyn Fn(&Digest) -> Option<Vec<u8>>,
-    fork: Option<BranchId>,
+    continuing: Continuing,
 ) -> Result<PatientRecord<'m>, CheckpointError> {
     let header = opened(saved.as_bytes())?;
     if header.identity != expected.digest() {
         return Err(CheckpointError::IdentityMismatch);
     }
-    if header.latched && fork.is_none() {
+    if header.latched && !matches!(continuing, Continuing::Recover(_)) {
         return Err(CheckpointError::Latched);
     }
     let parts = Parts::read(header.body, body).map_err(|_| CheckpointError::Malformed)?;
@@ -273,9 +281,11 @@ pub(crate) fn restore<'m>(
         parameters: image.parameters.digest(),
     };
     let history = History::walked(body, start, header.seal, header.revision, resolve)?;
-    let branch = match fork {
-        None => branch,
-        Some(fork) => branch.forked(fork, header.revision, image.time)?,
+    let branch = match continuing {
+        Continuing::Resume => branch,
+        Continuing::Rewind(fork) | Continuing::Recover(fork) => {
+            branch.forked(fork, header.revision, image.time)?
+        }
     };
     let parts = Restored {
         branch,

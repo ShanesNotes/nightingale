@@ -370,8 +370,8 @@ A gate counts only if it rejects a core built to fail it. Each one below is part
 | Keeps a counter or cache outside its continuation | Resume into a freshly built core must match the uninterrupted run; an in-process rewind after the parent ran ahead must match it too |
 | Spreads its steps toward a known later input | Does not compile (no core sees the timeline); the late-admission gate |
 | Asks for a huge span to read the next breakpoint | Does not compile (`problem.ticket` is gone). A span that does not pass reads nothing and spends the core's budget, and one that passes leaves no head before the input: the late-admission gate |
-| Reads a cut, refuses it and spreads its steps toward that instant | The fence leaves no head before the input: the late-admission gate |
-| Clips at caller output times | `step` takes no target (E0061). A core told them by its factory fails the pace and late-admission gates |
+| Reads a cut, refuses it and spreads its steps toward that instant | From the first step, no head is left before the input: the late-admission gate. From a later head the spread starts where the input has already arrived, so the run is the known run and nothing breaks I5 |
+| Clips at caller output times | `step` takes no target (E0061). A factory that tells two runs different times fails every gate. One set in every run is a grid of the core's own, which replays and passes |
 | Reads the host's clock | The pace gate |
 | Draws chance per solver step | Does not compile (no `threshold` on the problem); the extra-evaluation and two-step-policy checks |
 | Keeps its predictor or Jacobian across a posture breakpoint | `validate`: the method history must start at the breakpoint |

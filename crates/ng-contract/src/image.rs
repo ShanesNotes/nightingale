@@ -38,9 +38,9 @@ impl<'b> ByteReader<'b> {
     pub fn compensated(&mut self) -> Result<Compensated, Malformed> {
         Ok(Compensated::from_bits([self.number()?, self.number()?]))
     }
-    pub fn count(&mut self, item_bytes: usize) -> Result<usize, Malformed> {
+    pub fn count(&mut self, least_item_bytes: usize) -> Result<usize, Malformed> {
         let count = usize::try_from(self.number()?).map_err(|_| Malformed)?;
-        let needed = count.checked_mul(item_bytes).ok_or(Malformed)?;
+        let needed = count.checked_mul(least_item_bytes).ok_or(Malformed)?;
         if needed > self.bytes.len() {
             return Err(Malformed);
         }

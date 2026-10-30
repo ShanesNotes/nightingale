@@ -153,7 +153,6 @@ pub(crate) struct Plan {
     /// The earliest end of a delivery running or due here. That input has applied or applies with this
     /// step, so every run at this head knows this instant.
     pub(crate) running_end: Option<SimTime>,
-    pub(crate) next_waiting: Option<SimTime>,
 }
 
 #[derive(Clone, Copy)]
@@ -225,7 +224,6 @@ impl PendingInputs {
     }
     pub(crate) fn plan(&self, start: SimTime) -> Plan {
         let due = self.due_at(start);
-        let later = self.timeline[self.past.cursor + due.len()..].first();
         let ended = self.past.active.iter().any(|delivery| delivery.ends == start);
         let mut frame = DriveFrame::default();
         for delivery in self.running_at(start) {
@@ -236,7 +234,6 @@ impl PendingInputs {
             frame,
             after_breakpoint: !due.is_empty() || ended,
             running_end: self.running_at(start).map(|delivery| delivery.ends).min(),
-            next_waiting: later.map(|delivery| delivery.at),
         }
     }
     /// One attempt of a step: issues its ticket and hands it to `solved`, which solves and validates. When
@@ -296,7 +293,8 @@ impl PendingInputs {
         };
         ticket.digest = ticket.sealed(identity);
         let passed = solved(&ticket)?;
-        let cut = (plan.next_waiting)
+        let cut = (self.timeline[self.past.cursor + ticket.due.len()..].first())
+            .map(|delivery| delivery.at)
             .filter(|next| *next < end)
             .and_then(|next| Some((next, Interval::new(start, next)?)));
         let Some((next, interval)) = cut else {
@@ -451,8 +449,8 @@ impl PendingInputs {
 }
 
 const WATER_PAYLOAD: u64 = 0;
-/// An id, a stamp, a tag, a name's length, an amount and an end: the least one delivery can take.
-const DELIVERY_BYTES: usize = 72;
+/// An id, a stamp, a tag, a name's length, an amount and an end.
+const DELIVERY_BYTES: usize = 32 + 8 + 8 + 8 + 8 + 8;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct DriveFrame {

@@ -437,7 +437,7 @@
 //! ```
 //!
 //! A core cannot see the boundary timeline, so no step can depend on a later input (the causal
-//! step rule): the contract clips the step at the next breakpoint.
+//! step rule): the record cuts a passed span at the next breakpoint.
 //! ```compile_fail,E0599
 //! use solver_contract_sketch::ng_contract::*;
 //! fn peek(problem: &CoupledProblem<'_>) -> Option<SimTime> {

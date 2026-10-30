@@ -115,8 +115,8 @@ impl<'r> CoupledProblem<'r> {
     }
 }
 
-/// Binds one attempt: its base, the identity, the exact interval, the due inputs, the frozen drives and the
-/// attempt number, all in its digest.
+/// Binds one attempt: its base, the identity, the exact interval, the span it came from, the due inputs, the
+/// frozen drives, the attempt number and the fence, all in its digest.
 #[derive(Clone, Debug)]
 pub struct StepTicket {
     pub(crate) base: Digest,

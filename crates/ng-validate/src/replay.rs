@@ -43,7 +43,8 @@ pub struct ReplayPlan<'c> {
     pub simulated_per_wall: u64,
     /// Lengths of simulated time, each after the last, repeating to the end of the case.
     pub chunks: Vec<u64>,
-    /// Resume at every revision this many apart, and on each side of a breakpoint or a refusal.
+    /// Resume at each pair of neighbouring revisions this many apart, and on each side of a breakpoint or a
+    /// refusal.
     pub resume_every: u64,
 }
 
@@ -85,10 +86,11 @@ pub enum ReplayFailure {
         gate: ReplayGate,
         error: CheckpointError,
     },
-    /// An input with no head after admission to arrive at: the run would be the known run by construction,
-    /// and a gate that tests nothing passes nothing.
+    /// An input with no head after admission to arrive at, or no step left to apply it: the run would be the
+    /// known run by construction, and a gate that tests nothing passes nothing.
     NoLateBoundary { id: InputId },
-    /// A plan or a case that gives the gate nothing to compare, or a clock that stopped before the end.
+    /// A plan or a case that gives the gate nothing to compare, a pace that never stopped a run short of its
+    /// end, a clock that stopped before it, or a gate that measured another run.
     MissingEvidence { gate: ReplayGate },
 }
 
@@ -238,6 +240,7 @@ fn traced<'m>(
     pace: &Pace<'_>,
 ) -> Result<(Session<'m, Running>, Trace), ReplayFailure> {
     let head = |session: &Session<'_, Running>| session.record().accepted().time();
+    let mut stopped_short = false;
     match pace {
         Pace::Unbounded => session = step_to(gate, session, end, &mut rows)?,
         Pace::Chunked(lengths) => {
@@ -247,7 +250,9 @@ fn traced<'m>(
                     break;
                 }
                 stop = stop.saturating_add(*length);
+                let before = rows.len();
                 session = step_to(gate, session, SimTime::from_ns(stop).min(end), &mut rows)?;
+                stopped_short |= rows.len() > before && head(&session) < end;
             }
         }
         Pace::Live {
@@ -259,9 +264,14 @@ fn traced<'m>(
                     .elapsed_ns()
                     .ok_or(ReplayFailure::MissingEvidence { gate })?;
                 let allowed = SimTime::from_ns(reading.saturating_mul(*simulated_per_wall));
+                let before = rows.len();
                 session = step_to(gate, session, allowed.min(end), &mut rows)?;
+                stopped_short |= rows.len() > before && head(&session) < end;
             }
         }
+    }
+    if !stopped_short && !matches!(pace, Pace::Unbounded) {
+        return Err(ReplayFailure::MissingEvidence { gate });
     }
     let last = session.record().digests();
     Ok((session, Trace { rows, last }))
@@ -310,7 +320,7 @@ fn pace_gate(
     plan: &ReplayPlan<'_>,
 ) -> Result<GateEvidence, ReplayFailure> {
     let gate = ReplayGate::Pace;
-    if plan.chunks.is_empty() || plan.chunks.contains(&0) {
+    if plan.chunks.is_empty() || plan.chunks.contains(&0) || plan.simulated_per_wall == 0 {
         return Err(ReplayFailure::MissingEvidence { gate });
     }
     let (reference, run) = reference(gate, case, cores)?;
@@ -353,13 +363,13 @@ impl HistoryStore for MemoryStore {
 }
 
 /// Each side of a step that started at a breakpoint or met a refusal is a boundary a resume is likeliest to
-/// lose.
+/// lose. Neighbouring revisions are never both multiples of a hidden state's period, whatever `every` is.
 fn boundaries(rows: &[Row], every: u64) -> Vec<u64> {
     let last = rows.len() as u64 - 1;
     let mut revisions = Vec::new();
     for (revision, row) in (0..).zip(rows) {
         if revision % every == 0 {
-            revisions.push(revision);
+            revisions.extend([revision, (revision + 1).min(last)]);
         }
         if row.near_a_break {
             revisions.extend([revision - 1, revision, (revision + 1).min(last)]);
@@ -420,10 +430,15 @@ fn resume_gate(
     })
 }
 
-/// Admits each input at the last head a run can still take it, so every step before that head was blind to
-/// it: the last reference row whose earliest stamp is before the input's. The next reference step reached
-/// the stamp, or was refused short of it after a cut there, and a run that did not know the input would
-/// have gone past.
+/// The last head a run can still take `event`, so every step before it was blind: the last reference row
+/// whose earliest stamp is before the input's. The next reference step reached the stamp, or was refused
+/// short of it after a cut there, and a run that did not know the input would have gone past. Admission is
+/// no arrival, so the first head is the earliest, and an input at that head's stamp can still arrive there.
+fn arrival(rows: &[Row], event: &BoundaryEvent) -> u64 {
+    let last = rows.iter().rposition(|row| row.earliest < event.at());
+    last.unwrap_or(0).max(1) as u64
+}
+
 fn late_admission_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<GateEvidence, ReplayFailure> {
     let gate = ReplayGate::LateAdmission;
     let (reference, run) = reference(gate, case, cores)?;
@@ -435,8 +450,10 @@ fn late_admission_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<
     }
     let mut arrivals: Vec<(u64, BoundaryEvent)> = Vec::new();
     for event in events {
-        let row = reference.rows.iter().rposition(|row| row.earliest < event.at());
-        arrivals.push((row.unwrap_or(0).max(1) as u64, event));
+        if event.at() >= reference.last.time {
+            return Err(ReplayFailure::NoLateBoundary { id: event.id() });
+        }
+        arrivals.push((arrival(&reference.rows, &event), event));
     }
     arrivals.sort_by_key(|arrival| arrival.0);
     let core = cores.fresh();
@@ -444,7 +461,7 @@ fn late_admission_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<
     let mut rows = vec![Row::of(&session, false)];
     for (revision, event) in arrivals {
         session = revision_to(gate, session, revision, &mut rows)?;
-        if revision == 1 && session.record().earliest_stamp() > event.at() {
+        if session.record().earliest_stamp() > event.at() {
             return Err(ReplayFailure::NoLateBoundary { id: event.id() });
         }
         let command = Digest::of_canonical(b"replay gate");
@@ -463,7 +480,7 @@ fn late_admission_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<
 }
 
 /// The rewind keeps the parent's core object on purpose: a state it kept while the parent ran ahead has
-/// nowhere to hide.
+/// nowhere to hide. It runs from two neighbouring revisions, so a hidden period cannot land on both.
 fn rewind_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<GateEvidence, ReplayFailure> {
     let gate = ReplayGate::Rewind;
     let checkpointed = |error| ReplayFailure::Checkpoint { gate, error };
@@ -474,24 +491,35 @@ fn rewind_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<GateEvid
     let session = admitted(gate, case.admit(&*core))?;
     let mut rows = vec![Row::of(&session, false)];
     let session = revision_to(gate, session, middle as u64, &mut rows)?;
-    let saved = session.checkpoint(&mut store).map_err(checkpointed)?;
+    let first = session.checkpoint(&mut store).map_err(checkpointed)?;
+    let session = revision_to(gate, session, middle as u64 + 1, &mut rows)?;
+    let second = session.checkpoint(&mut store).map_err(checkpointed)?;
     let (parent, ahead) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
-    let branch = BranchId::new(Digest::of_canonical(b"replay gate fork"));
-    let forked = parent.rewind(&saved, branch).map_err(checkpointed)?;
-    let rows = vec![Row::of(&forked, false)];
-    let (_, fork) = traced(gate, forked, rows, case.end(), &Pace::Unbounded)?;
-    let fresh = cores.fresh();
-    let identity = parent.record().identity();
-    let loaded = Session::resume(&saved, identity, case.body(), &*fresh, &store).map_err(checkpointed)?;
-    let rows = vec![Row::of(&loaded, false)];
-    let (_, load) = traced(gate, loaded, rows, case.end(), &Pace::Unbounded)?;
-    same_or_diverged(gate, &load.rows, &load.last, &fork)?;
     same_or_diverged(gate, &reference.rows, &reference.last, &ahead)?;
-    same_or_diverged(gate, &ahead.rows[middle..], &ahead.last, &fork)?;
+    let identity = parent.record().identity();
+    let mut runs = vec![reference.last, ahead.last];
+    let forks: [(&[u8], _, _); 2] = [
+        (b"replay gate fork", &first, middle),
+        (b"replay gate later fork", &second, middle + 1),
+    ];
+    for (name, saved, revision) in forks {
+        let branch = BranchId::new(Digest::of_canonical(name));
+        let forked = parent.rewind(saved, branch).map_err(checkpointed)?;
+        let rows = vec![Row::of(&forked, false)];
+        let (_, fork) = traced(gate, forked, rows, case.end(), &Pace::Unbounded)?;
+        let fresh = cores.fresh();
+        let loaded = Session::resume(saved, identity, case.body(), &*fresh, &store);
+        let loaded = loaded.map_err(checkpointed)?;
+        let rows = vec![Row::of(&loaded, false)];
+        let (_, load) = traced(gate, loaded, rows, case.end(), &Pace::Unbounded)?;
+        same_or_diverged(gate, &load.rows, &load.last, &fork)?;
+        same_or_diverged(gate, &ahead.rows[revision..], &ahead.last, &fork)?;
+        runs.extend([fork.last, load.last]);
+    }
     Ok(GateEvidence {
         gate,
         run,
-        runs: vec![reference.last, ahead.last, fork.last, load.last],
+        runs,
         clock: None,
     })
 }
@@ -516,12 +544,21 @@ pub fn replay_gates(
     plan: &ReplayPlan<'_>,
 ) -> Result<ReplayEvidence, ReplayFailure> {
     let pace = replay_gate(ReplayGate::Pace, case, cores, plan)?;
+    let run = pace.run;
+    let of_this_run = |gate| {
+        let evidence = replay_gate(gate, case, cores, plan)?;
+        if evidence.run == run {
+            Ok(evidence)
+        } else {
+            Err(ReplayFailure::MissingEvidence { gate })
+        }
+    };
     Ok(ReplayEvidence {
-        run: pace.run,
+        run,
         pace,
-        resume: replay_gate(ReplayGate::Resume, case, cores, plan)?,
-        late_admission: replay_gate(ReplayGate::LateAdmission, case, cores, plan)?,
-        rewind: replay_gate(ReplayGate::Rewind, case, cores, plan)?,
+        resume: of_this_run(ReplayGate::Resume)?,
+        late_admission: of_this_run(ReplayGate::LateAdmission)?,
+        rewind: of_this_run(ReplayGate::Rewind)?,
     })
 }
 
