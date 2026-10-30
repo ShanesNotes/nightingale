@@ -12,3 +12,7 @@ Status: ready-for-agent
 - [ ] A forced extra evaluation before the hazard event leaves its draw and ordinal unchanged
 - [ ] Two step policies give the same event time to the replay tolerance, and a must-fail core that draws per step is rejected
 - [ ] Admission holds the forcing at its mean; every replay gate in ticket 05 passes with the stream and the forcing on
+
+## Comments
+
+From 03: `FragmentBuilder` has no `stream`, `forcing` or `hazard` yet, and the walk's step 1c waits for this ticket (`crates/ng-contract/tests/walk.rs` marks it). Laws attach by reference, and a declaration records what it owes when it is made, so streams and hazards can follow the same pattern. Sketch probe this ticket owns: line 457 (E0599).

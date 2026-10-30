@@ -20,6 +20,7 @@
 - [First crate](issues/03-first-crate.md): `tools/verify` plans a merge, changed or full run over four `ng-*` crates; root and ticket Markdown count as docs-only; the pin rule waits for a pin without a lockfile. The nightly job is [Add the nightly job](issues/10-nightly-job.md).
 - [Admit the ng-* crates under purity rules](../native-contract/issues/01-ng-purity-rules.md): the contract's crate table marks the physiology closure, which takes no crate from outside the workspace, and no crate may name a host service.
 - [Anatomy as data](../native-contract/issues/02-anatomy-as-data.md): `ng-contract` checks a map at `finish` with named reasons, hashes it in key order and derives one water pool per space. A bed must lie on the circulation, no pump is declared, and site ids are names resolved by key.
+- [Declaration language and compiler](../native-contract/issues/03-declaration-language-and-compiler.md): laws attach by reference, so compile refuses an omitted law, a second owner and an uncovered mode by name; route families are requested whole; every registry pool is an amount unless the schema leaves its space out with a reason, and one no transfer moves is refused.
 
 ## Not yet specified
 

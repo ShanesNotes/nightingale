@@ -11,3 +11,7 @@ Status: ready-for-agent
 - [ ] The slice compiles with no law naming a site and no organ owning a pool
 - [ ] Initialization meets every fixture anchor with recorded provenance
 - [ ] Water, ions, moieties and energy close over the first accepted steps with the reference core
+
+## Comments
+
+From 03: owed here and not built: the renal scope (the `Renal` owner type exists), the pressure-gauge check, and per-edge modes and edge guards for valves. 03's modes are owner-wide, and a guard's zero kernel is whole-body. Solutes and their partial volumes are owed too, since 03 has water only. Reconcile two 03 shapes with the sketch. CV's circulation is an `EdgeRoute<Water>` with `transfer_along` in the crate, but a `FluidRoute` with `advect` in the sketch. Boundary water is named in the schema in the crate (`Schema::water_boundary`, `BoundaryPorts::water(name)`), but is fixed fields in the sketch (`intake_water`, `evaporative_loss`, `heat_exchange`). The BC/FL cell-water conflict is still open, and 03's benches leave cell water out with a stated reason. Sketch probes this ticket owns: lines 40 (E0603) and 327 (E0451).

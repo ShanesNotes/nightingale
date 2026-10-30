@@ -21,6 +21,21 @@ impl Schema {
     pub fn new(_anatomy: Anatomy) -> Result<Self, AdmissionError> {
         todo!()
     }
+    /// States that this body does not model the space, and why: its pools are not amounts, and a law
+    /// that moves or reads one is refused. Every other pool is an amount some transfer must move.
+    pub fn leave_out(&mut self, _space: Space, _reason: &'static str) {
+        todo!()
+    }
+}
+/// One part of a site that holds pools: a capillary bed's plasma, interstitium and cells, a vessel
+/// segment's lumen and an enclosed space's fluid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Space {
+    Plasma,
+    Interstitium,
+    Cells,
+    Lumen,
+    Fluid,
 }
 pub struct Assembly<'b> {
     _schema: Schema,
@@ -57,8 +72,9 @@ impl<'b> Assembly<'b> {
     /// Resolves ports, dimensions, mode coverage, ownership, PK claims, incidence, structural
     /// matching, Jacobian sparsity, conserved basis, gauges and stable order, then hashes. Refuses a
     /// held stand-in whose declared supplies are not exactly its fragment's exterior columns, a
-    /// held intensive field tied to a store inside the slice, and an orphan pool (one no law
-    /// touches and no declaration holds).
+    /// held intensive field tied to a store inside the slice, an orphan pool (one the schema does
+    /// not leave out that no transfer moves and no declaration holds), and a law that moves or
+    /// reads a pool the schema left out.
     /// Only here is the lifetime brand erased. Missing contributors are errors, not zeroes.
     pub fn compile(self) -> Result<CompiledBody, AdmissionError> {
         todo!()
@@ -175,18 +191,33 @@ pub struct CardiovascularPorts<'b> {
 }
 /// Starling exchange at every capillary bed, the pleural space and the legs alike.
 pub struct FluidsPorts<'b> {
-    /// Plasma to interstitium at every capillary bed: one law, one column per bed.
-    pub starling: SiteRoute<'b, Fluids, CapillaryBed, Water>,
     /// Each bed's extravascular pressure, from the space that encloses it (or zero gauge when
     /// none does). Pleural and abdominal pressure reach the beds this way, not as wires.
     pub extravascular_pressure: ReadPort<'b, Fluids, PerSite<CapillaryBed, Pressure>>,
     pub lymph: FluidRoute<'b, Fluids>,
 }
-/// Paired transmitter routes at every junction; NS writes no heart rate or resistance.
+impl<'b> FluidsPorts<'b> {
+    /// Plasma to interstitium at every capillary bed: one law, one column per bed. Requesting the
+    /// route records the law the fragment owes, so dropping the route never drops the debt.
+    pub fn starling(&self, _laws: &mut FragmentBuilder<'b, Fluids>) -> SiteRoute<'b, Fluids, CapillaryBed, Water> {
+        todo!()
+    }
+}
+/// Paired transmitter routes at every junction; NS writes no heart rate or resistance. Each request
+/// records the law the fragment owes.
 pub struct NervousPorts<'b> {
-    pub sympathetic_release: SiteRoute<'b, Nervous, Junction, Norepinephrine>,
-    pub sympathetic_reuptake: SiteRoute<'b, Nervous, Junction, Norepinephrine>,
-    pub vagal_release: SiteRoute<'b, Nervous, Junction, Acetylcholine>,
+    _brand: Brand<'b>,
+}
+impl<'b> NervousPorts<'b> {
+    pub fn sympathetic_release(&self, _laws: &mut FragmentBuilder<'b, Nervous>) -> SiteRoute<'b, Nervous, Junction, Norepinephrine> {
+        todo!()
+    }
+    pub fn sympathetic_reuptake(&self, _laws: &mut FragmentBuilder<'b, Nervous>) -> SiteRoute<'b, Nervous, Junction, Norepinephrine> {
+        todo!()
+    }
+    pub fn vagal_release(&self, _laws: &mut FragmentBuilder<'b, Nervous>) -> SiteRoute<'b, Nervous, Junction, Acetylcholine> {
+        todo!()
+    }
 }
 pub struct ReceptorPorts<'b> {
     /// Ligand + free receptor to complex, per receptor site (beta-1, alpha-1, M2, V2).

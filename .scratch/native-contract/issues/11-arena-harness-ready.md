@@ -12,3 +12,7 @@ Status: ready-for-agent
 - [ ] A short slice window passes certificate, accuracy and all replay gates with the reference core
 - [ ] The run reports throughput beside the record, never inside the certificate
 - [ ] The arena seat contracts can name this harness and its report schema
+
+## Comments
+
+From 03: sketch probes this ticket owns: lines 218 (a split qualification is not bytes, E0308) and 232 (no split trace from invented samples, E0599). Both are rows of the §7 must-fail table. No ticket scopes split measurement itself, which both of them need.

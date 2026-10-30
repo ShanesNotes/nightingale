@@ -13,3 +13,7 @@ Status: ready-for-agent
 - [ ] A core cannot see the timeline (the contract clips each ticket); a core that clips at caller output times fails late admission
 - [ ] `admit_input` refuses an input stamped before the accepted head
 - [ ] Corrupted checkpoint bytes are refused before any body byte is decoded
+
+## Comments
+
+From 03: the sketch probe at line 441 (a core cannot see the boundary timeline, E0599) is this ticket's, on the core API that ticket 04 builds.

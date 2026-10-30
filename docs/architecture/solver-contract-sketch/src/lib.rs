@@ -27,12 +27,12 @@
 //! fn overwrite(record: &mut PatientRecord) { record.set_mean_arterial_pressure(1.0); }
 //! ```
 //!
-//! A transfer cannot be made with just its donor. The only constructor consumes a pair.
+//! A transfer cannot be made with just its donor. The only constructor takes a pair.
 //! ```compile_fail,E0308
 //! use solver_contract_sketch::ng_contract::*;
 //! fn unpaired<'b>(donor: Endpoint<'b, Renal, Water>, rate: PureKernel<'b, Renal, Rate<Water>>)
 //!     -> Transfer<'b, Renal, Water> {
-//!     Transfer::new(donor, rate)
+//!     Transfer::new(&donor, rate)
 //! }
 //! ```
 //!
@@ -64,12 +64,12 @@
 //! }
 //! ```
 //!
-//! A renal law cannot consume a cardiovascular route capability.
+//! A renal law cannot take a cardiovascular route capability.
 //! ```compile_fail,E0308
 //! use solver_contract_sketch::ng_contract::*;
 //! fn foreign<'b>(scope: &mut FragmentBuilder<'b, Renal>, route: Pair<'b, Cardiovascular, Water>,
 //!     rate: PureKernel<'b, Renal, Rate<Water>>) {
-//!     scope.transfer(Transfer::new(route, rate));
+//!     scope.transfer(Transfer::new(&route, rate));
 //! }
 //! ```
 //!
