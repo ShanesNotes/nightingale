@@ -21,6 +21,7 @@
 - [Admit the ng-* crates under purity rules](../native-contract/issues/01-ng-purity-rules.md): the contract's crate table marks the physiology closure, which takes no crate from outside the workspace, and no crate may name a host service.
 - [Anatomy as data](../native-contract/issues/02-anatomy-as-data.md): `ng-contract` checks a map at `finish` with named reasons, hashes it in key order and derives one water pool per space. A bed must lie on the circulation, no pump is declared, and site ids are names resolved by key.
 - [Declaration language and compiler](../native-contract/issues/03-declaration-language-and-compiler.md): laws attach by reference, so compile refuses an omitted law, a second owner and an uncovered mode by name; route families are requested whole; every registry pool is an amount unless the schema leaves its space out with a reason, and one no transfer moves is refused.
+- [Record transaction and reference core](../native-contract/issues/04-record-transaction-and-reference-core.md): a core can only propose. `StepProposal::verify` replays its stages on the record's own values, `validate` compares the ticket the session issued, a refused session can only retry, a fault latches, and a ticket freezes its drives, so a refusal changes nothing and a delivery applies once. The certificate walks every sliding 24 h window without sampling, and a forward Euler core past RC closes every ledger and fails the accuracy gate.
 
 ## Not yet specified
 

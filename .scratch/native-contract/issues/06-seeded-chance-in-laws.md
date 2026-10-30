@@ -16,3 +16,5 @@ Status: ready-for-agent
 ## Comments
 
 From 03: `FragmentBuilder` has no `stream`, `forcing` or `hazard` yet, and the walk's step 1c waits for this ticket (`crates/ng-contract/tests/walk.rs` marks it). Laws attach by reference, and a declaration records what it owes when it is made, so streams and hazards can follow the same pattern. Sketch probe this ticket owns: line 457 (E0599).
+
+From 04: `StreamPositions` is an empty list in `ng-record`, digested by `digests` and the seal, so ticket 04's forced refusal proves only that the field is read. Your extra-evaluation check carries the rest of that box. `bind` refuses any body with a mode variable (`AdmissionError::ModesNotYetRun`), and this ticket, 08 and 10 lift it. `propose` takes no modes yet. In the sketch `CoupledProblem::transitions` now reads two stage evaluations, because a core holds no `Candidate`. A ticket's `after_breakpoint` is set only by deliveries today and must also follow a guard that changed mode.
