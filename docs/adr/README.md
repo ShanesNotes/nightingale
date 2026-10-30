@@ -9,3 +9,4 @@ One series from 0001, one decision per file (`NNNN-slug.md`). An agent reads the
 | [0003](0003-inferred-parameters.md) | A model may fill a gap in the packet, but every target rests on a source |
 | [0004](0004-first-milestone.md) | The first milestone is a healthy man stable over two ordinary days |
 | [0005](0005-packet-and-healthy-range-set.md) | The packet holds what moves the body, and healthy ranges live apart |
+| [0006](0006-waiting-input-shows-after-a-span-passes.md) | A step shows a waiting input only after its span has passed |

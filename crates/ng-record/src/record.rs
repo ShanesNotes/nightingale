@@ -1,11 +1,16 @@
-use crate::history::{ConservationView, History, HistorySeal, LedgerChunk};
+use crate::checkpoint::{
+    BranchAncestry, BranchFork, Checkpoint, CheckpointError, HistoryStore, Restored, Sections, write,
+};
+use crate::history::{ConservationView, History, HistorySeal, LedgerChunk, Link};
 use ng_contract::{
-    AcceptedStateView, BoundParameters, Candidate, CompiledBody, CoupledProblem, DenseSegment, Digest,
-    InitialParts, InitialRevision, InputId, MethodHistory, NumericalRefusal, PendingInputs, RunIdentity,
-    SimTime, StepProposal, StepTicket, TrialFailure, ValidityExcursion, VerifiedParts,
+    AcceptedStateView, AdmissionError, AppliedInputs, Attempt, BoundaryEvent, ByteReader, Candidate,
+    CompiledBody, CoupledProblem, CoupledSolver, DenseSegment, Digest, ImageParts, InitialRevision, InputId,
+    Malformed, MethodHistory, NumericalRefusal, RunIdentity, SimTime, StepProposal, StepTicket, TrialFailure,
+    ValidityExcursion, VerifiedParts,
 };
 
 /// The chained seal of one accepted revision: the previous seal, the image's digests and the ledger chunk.
+/// It covers the past and nothing that waits, so a ticket's digest built on it reads no later input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Seal {
     digest: Digest,
@@ -17,18 +22,36 @@ impl Seal {
 }
 
 #[derive(Default)]
-struct StreamPositions {
+pub(crate) struct StreamPositions {
     ordinals: Vec<(Digest, u64)>,
 }
 impl StreamPositions {
     fn digest(&self) -> Digest {
+        Digest::of_canonical(&self.bytes())
+    }
+    fn bytes(&self) -> Vec<u8> {
         let Self { ordinals } = self;
         let mut bytes = Vec::new();
         for (stream, ordinal) in ordinals {
             bytes.extend_from_slice(stream.as_bytes());
             bytes.extend_from_slice(&ordinal.to_be_bytes());
         }
-        Digest::of_canonical(&bytes)
+        bytes
+    }
+    pub(crate) fn write(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&(self.ordinals.len() as u64).to_be_bytes());
+        out.extend_from_slice(&self.bytes());
+    }
+    pub(crate) fn read(read: &mut ByteReader<'_>) -> Result<Self, Malformed> {
+        let mut ordinals: Vec<(Digest, u64)> = Vec::new();
+        for _ in 0..read.count(40)? {
+            let (stream, ordinal) = (read.digest()?, read.number()?);
+            if ordinals.last().is_some_and(|last| last.0 >= stream) {
+                return Err(Malformed);
+            }
+            ordinals.push((stream, ordinal));
+        }
+        Ok(Self { ordinals })
     }
 }
 
@@ -36,16 +59,10 @@ impl StreamPositions {
 pub struct PatientRecord<'m> {
     body: &'m CompiledBody,
     identity: RunIdentity,
-    parameters: BoundParameters,
-    branch: Digest,
+    branch: BranchAncestry,
     revision: u64,
-    seal: Seal,
-    time: SimTime,
-    state: Candidate,
-    continuation: MethodHistory,
-    dense: DenseSegment,
+    image: ImageParts,
     streams: StreamPositions,
-    pending: PendingInputs,
     history: History,
 }
 
@@ -55,76 +72,91 @@ struct Image<'a> {
     continuation: &'a MethodHistory,
     dense: &'a DenseSegment,
     streams: &'a StreamPositions,
-    pending: &'a PendingInputs,
+    applied: &'a AppliedInputs,
 }
-fn chain(previous: Digest, revision: u64, image: Image<'_>, ledger: Digest) -> Seal {
+fn image_digest(image: Image<'_>) -> Digest {
     let Image {
         time,
         state,
         continuation,
         dense,
         streams,
-        pending,
+        applied,
     } = image;
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(previous.as_bytes());
-    bytes.extend_from_slice(&revision.to_be_bytes());
-    bytes.extend_from_slice(&time.nanoseconds().to_be_bytes());
+    let mut bytes = time.nanoseconds().to_be_bytes().to_vec();
     for digest in [
         state.digest(),
         continuation.digest(),
         dense.digest(),
         streams.digest(),
-        pending.digest(),
-        ledger,
+        applied.digest(),
     ] {
         bytes.extend_from_slice(digest.as_bytes());
     }
-    Seal {
-        digest: Digest::of_canonical(&bytes),
-    }
+    Digest::of_canonical(&bytes)
+}
+fn digest_of(image: &ImageParts, streams: &StreamPositions) -> Digest {
+    image_digest(Image {
+        time: image.time,
+        state: &image.state,
+        continuation: &image.continuation,
+        dense: &image.dense,
+        streams,
+        applied: image.pending.applied(),
+    })
 }
 
 impl<'m> PatientRecord<'m> {
     pub(crate) fn admit(body: &'m CompiledBody, identity: RunIdentity, origin: InitialRevision) -> Self {
-        let InitialParts {
-            time,
-            state,
-            continuation,
-            dense,
-            pending,
-            parameters,
-        } = origin.into_parts();
+        let image = origin.into_parts();
         let run = identity.digest();
         let streams = StreamPositions::default();
-        let history = History::opening(
-            body,
-            AcceptedStateView::new(time, &state, &continuation, &dense, &pending),
-        );
-        let image = Image {
-            time,
-            state: &state,
-            continuation: &continuation,
-            dense: &dense,
-            streams: &streams,
-            pending: &pending,
-        };
-        let seal = chain(run, 0, image, history.digest());
+        let accepted = AcceptedStateView::new(image.time, &image.state, &image.continuation, &image.dense);
+        let opened = digest_of(&image, &streams);
+        let history = History::opening(body, accepted, run, opened, image.parameters().digest());
         Self {
             body,
             identity,
-            parameters,
-            branch: run,
+            branch: BranchAncestry::of_run(run),
             revision: 0,
-            seal,
-            time,
-            state,
-            continuation,
-            dense,
+            image,
             streams,
-            pending,
             history,
         }
+    }
+    pub(crate) fn restored(
+        body: &'m CompiledBody,
+        identity: RunIdentity,
+        parts: Restored,
+    ) -> Result<Self, CheckpointError> {
+        let Restored {
+            branch,
+            revision,
+            image,
+            streams,
+            history,
+        } = parts;
+        if digest_of(&image, &streams) != history.head_image() {
+            return Err(CheckpointError::SealMismatch);
+        }
+        Ok(Self {
+            body,
+            identity,
+            branch,
+            revision,
+            image,
+            streams,
+            history,
+        })
+    }
+    pub(crate) fn body(&self) -> &'m CompiledBody {
+        self.body
+    }
+    pub(crate) fn branch(&self) -> &BranchAncestry {
+        &self.branch
+    }
+    pub(crate) fn history(&self) -> &History {
+        &self.history
     }
     pub fn identity(&self) -> &RunIdentity {
         &self.identity
@@ -133,32 +165,53 @@ impl<'m> PatientRecord<'m> {
         self.revision
     }
     pub fn seal(&self) -> Seal {
-        self.seal
+        Seal {
+            digest: self.history.seal(),
+        }
     }
     pub fn accepted(&self) -> AcceptedStateView<'_> {
-        AcceptedStateView::new(
-            self.time,
-            &self.state,
-            &self.continuation,
-            &self.dense,
-            &self.pending,
-        )
+        let image = &self.image;
+        AcceptedStateView::new(image.time, &image.state, &image.continuation, &image.dense)
+    }
+    /// The earliest stamp `Session::enqueue` takes now.
+    pub fn earliest_stamp(&self) -> SimTime {
+        self.image.pending.earliest_stamp(self.image.time)
+    }
+    /// Oldest first. Empty on the run's own branch.
+    pub fn ancestry(&self) -> &[BranchFork] {
+        self.branch.forks()
     }
     pub fn problem(&self) -> CoupledProblem<'_> {
         CoupledProblem::new(
             self.body,
-            &self.parameters,
+            self.image.parameters(),
             &self.identity,
             self.accepted(),
-            self.seal.digest(),
+            self.history.seal(),
         )
     }
-    /// The contract answers whether the core followed its declared method; this answers whether the result
-    /// may become the next accepted image. `expected` is the ticket the session issued, so a proposal for
-    /// any other attempt, or an issued ticket this record would not issue, is `BindingMismatch`.
-    pub fn validate(&self, expected: &StepTicket, proposal: StepProposal) -> Result<NextImage, TrialFailure> {
+    /// Immutable, so a host can drive a core by hand. Only a session publishes.
+    pub fn attempt(
+        &self,
+        solver: &dyn CoupledSolver,
+        attempt: Attempt<'_>,
+    ) -> Result<NextImage, TrialFailure> {
         let problem = self.problem();
-        if !expected.binds(&problem) || proposal.ticket().digest() != expected.digest() {
+        self.image.pending.attempt(&problem, attempt, |ticket| {
+            let proposal = solver.solve(&problem, ticket).map_err(|failure| match failure {
+                TrialFailure::Refused(refused) if refused.ticket() != ticket.digest() => {
+                    ticket.mismatch().into()
+                }
+                other => other,
+            })?;
+            self.validate(ticket, proposal)
+        })
+    }
+    /// The contract answers whether the core followed its declared method; this answers whether the result
+    /// may become the next accepted image.
+    fn validate(&self, expected: &StepTicket, proposal: StepProposal) -> Result<NextImage, TrialFailure> {
+        let problem = self.problem();
+        if proposal.ticket().digest() != expected.digest() {
             return Err(expected.mismatch().into());
         }
         let step = proposal.verify(&problem)?;
@@ -173,8 +226,9 @@ impl<'m> PatientRecord<'m> {
         if !chunk.is_finite() {
             return Err(step.ticket().refuse(NumericalRefusal::LedgerOverflow));
         }
-        let pending = self.pending.after(step.ticket());
+        let pending = self.image.pending.after(step.ticket());
         let time = step.ticket().interval().end();
+        let after_breakpoint = step.ticket().after_breakpoint();
         let applied = step.applied().to_vec();
         let VerifiedParts {
             state,
@@ -183,56 +237,79 @@ impl<'m> PatientRecord<'m> {
             excursions,
         } = step.into_parts();
         let revision = self.revision + 1;
-        let image = Image {
+        let image = image_digest(Image {
             time,
             state: &state,
             continuation: &continuation,
             dense: &dense,
             streams: &self.streams,
-            pending: &pending,
-        };
-        let seal = chain(self.seal.digest(), revision, image, chunk.digest());
+            applied: &pending,
+        });
+        let link = self.history.linked(chunk, revision, image);
         Ok(NextImage {
             revision,
-            seal,
             time,
             state,
             continuation,
             dense,
             pending,
-            chunk,
+            link,
             applied,
+            after_breakpoint,
             excursions,
         })
     }
-    /// The only `&mut` path. Installs every part of the image together and cannot fail.
+    /// The one path that changes accepted state. Installs every part of the image together and cannot fail.
     pub fn publish(&mut self, next: NextImage) -> StepReceipt {
         let NextImage {
             revision,
-            seal,
             time,
             state,
             continuation,
             dense,
             pending,
-            chunk,
+            link,
             applied,
+            after_breakpoint,
             excursions,
         } = next;
         self.revision = revision;
-        self.seal = seal;
-        self.time = time;
-        self.state = state;
-        self.continuation = continuation;
-        self.dense = dense;
-        self.pending = pending;
-        self.history.push(chunk);
+        self.image.time = time;
+        self.image.state = state;
+        self.image.continuation = continuation;
+        self.image.dense = dense;
+        self.image.pending.advance(pending);
+        let digest = link.seal();
+        self.history.push(link);
         StepReceipt {
             revision,
-            seal,
+            seal: Seal { digest },
             applied,
+            after_breakpoint,
             excursions,
         }
+    }
+    pub(crate) fn admit_input(&mut self, input: AuthorizedInput) -> Result<InputReceipt, AdmissionError> {
+        let AuthorizedInput { command: _, event } = input;
+        let (id, at) = (event.id(), event.at());
+        let payload = self.image.pending.admit(self.body, self.image.time, event)?;
+        Ok(InputReceipt { id, payload, at })
+    }
+    pub(crate) fn checkpoint(
+        &self,
+        store: &mut dyn HistoryStore,
+        latched: bool,
+    ) -> Result<Checkpoint, CheckpointError> {
+        for (seal, link) in self.history.unkept(&|seal| store.resolve(seal).is_some()) {
+            store.keep(seal, link)?;
+        }
+        let sections = Sections {
+            image: &self.image,
+            streams: &self.streams,
+            branch: &self.branch,
+            history: &self.history,
+        };
+        Ok(write(&self.identity, self.revision, latched, sections))
     }
     pub fn conservation(&self) -> ConservationView<'_> {
         ConservationView {
@@ -240,8 +317,8 @@ impl<'m> PatientRecord<'m> {
             basis: self.body.conserved_basis(),
             seal: HistorySeal {
                 run: self.identity.digest(),
-                branch: self.branch,
-                base: self.seal.digest(),
+                branch: self.branch.id(),
+                base: self.history.seal(),
             },
         }
     }
@@ -250,26 +327,21 @@ impl<'m> PatientRecord<'m> {
         let Self {
             body: _,
             identity: _,
-            parameters: _,
             branch: _,
             revision,
-            seal: _,
-            time,
-            state,
-            continuation,
-            dense,
+            image,
             streams,
-            pending,
             history,
         } = self;
         RecordDigests {
             revision: *revision,
-            time: *time,
-            state: state.digest(),
-            continuation: continuation.digest(),
-            segment: dense.digest(),
+            time: image.time,
+            state: image.state.digest(),
+            continuation: image.continuation.digest(),
+            segment: image.dense.digest(),
             streams: streams.digest(),
-            pending: pending.digest(),
+            applied: image.pending.applied().digest(),
+            waiting: image.pending.waiting_digest(),
             ledger: history.digest(),
         }
     }
@@ -284,21 +356,22 @@ pub struct RecordDigests {
     pub continuation: Digest,
     pub segment: Digest,
     pub streams: Digest,
-    pub pending: Digest,
+    pub applied: Digest,
+    pub waiting: Digest,
     pub ledger: Digest,
 }
 
 /// The entire next accepted image, validated and not yet visible.
 pub struct NextImage {
     revision: u64,
-    seal: Seal,
     time: SimTime,
     state: Candidate,
     continuation: MethodHistory,
     dense: DenseSegment,
-    pending: PendingInputs,
-    chunk: LedgerChunk,
+    pending: AppliedInputs,
+    link: Link,
     applied: Vec<InputId>,
+    after_breakpoint: bool,
     excursions: Vec<ValidityExcursion>,
 }
 
@@ -307,6 +380,7 @@ pub struct StepReceipt {
     revision: u64,
     seal: Seal,
     applied: Vec<InputId>,
+    after_breakpoint: bool,
     excursions: Vec<ValidityExcursion>,
 }
 impl StepReceipt {
@@ -320,7 +394,49 @@ impl StepReceipt {
     pub fn applied(&self) -> &[InputId] {
         &self.applied
     }
+    pub fn after_breakpoint(&self) -> bool {
+        self.after_breakpoint
+    }
     pub fn excursions(&self) -> &[ValidityExcursion] {
         &self.excursions
+    }
+}
+
+/// A durable input reference from an authorized command's receipt, never a speculative request.
+pub struct AuthorizedInput {
+    command: Digest,
+    event: BoundaryEvent,
+}
+impl AuthorizedInput {
+    pub fn from_command_receipt(receipt: Digest, event: BoundaryEvent) -> Self {
+        Self {
+            command: receipt,
+            event,
+        }
+    }
+    /// No seal covers it, so an input with a command and the same input known at admission give the same
+    /// bits. A host's own log pairs the two.
+    pub fn command(&self) -> Digest {
+        self.command
+    }
+}
+
+/// What a host keeps of an admitted input, derived from the input alone, so one request has one receipt
+/// whichever command repeats it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InputReceipt {
+    id: InputId,
+    payload: Digest,
+    at: SimTime,
+}
+impl InputReceipt {
+    pub fn id(&self) -> InputId {
+        self.id
+    }
+    pub fn payload(&self) -> Digest {
+        self.payload
+    }
+    pub fn at(&self) -> SimTime {
+        self.at
     }
 }

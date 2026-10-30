@@ -106,9 +106,6 @@ pub enum InitializationFailure {
     /// A law the solved workspace leaves without a value, such as a divisor at zero.
     Undefined { law: LawOrigin },
 }
-pub struct CheckpointError {
-    _reason: String,
-}
 
 /// Types reserved now; no death-producing operation exists in this sketch.
 pub struct Demise {

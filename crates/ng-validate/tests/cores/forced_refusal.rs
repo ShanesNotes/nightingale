@@ -19,8 +19,8 @@ impl CoupledSolver for ForcedRefusal<'_> {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         if ticket.interval().start() != self.at || ticket.attempt() > 0 {

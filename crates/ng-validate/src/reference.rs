@@ -52,8 +52,8 @@ impl CoupledSolver for ReferenceIntegrator {
             self.scales,
         )
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        problem.ticket(self.interval_ns)
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        self.interval_ns
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let length = ticket.length_ns();

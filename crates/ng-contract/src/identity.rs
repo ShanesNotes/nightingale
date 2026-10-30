@@ -7,6 +7,10 @@ impl Digest {
     pub fn of_canonical(bytes: &[u8]) -> Self {
         Self { bytes: sha256(bytes) }
     }
+    /// A digest is a value, never a capability.
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self { bytes }
+    }
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.bytes
     }
@@ -109,8 +113,14 @@ impl Canonical {
         self.number(text.len() as u64);
         self.bytes.extend_from_slice(text.as_bytes());
     }
+    pub(crate) fn raw(&mut self, bytes: &[u8]) {
+        self.bytes.extend_from_slice(bytes);
+    }
     pub(crate) fn digest(&self) -> Digest {
         Digest::of_canonical(&self.bytes)
+    }
+    pub(crate) fn into_bytes(self) -> Vec<u8> {
+        self.bytes
     }
 }
 

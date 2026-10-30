@@ -230,7 +230,7 @@ impl TwoReservoirs {
         }
         Ok(packet)
     }
-    fn boundary(&self) -> Result<BoundaryPort, AdmissionError> {
+    pub fn events(&self) -> Result<Vec<BoundaryEvent>, AdmissionError> {
         let mut events = Vec::with_capacity(self.deliveries.len());
         for delivery in &self.deliveries {
             let water = WaterDelivery {
@@ -244,7 +244,7 @@ impl TwoReservoirs {
                 BoundaryInput::Water(water),
             ));
         }
-        BoundaryPort::new(events)
+        Ok(events)
     }
     /// The same packet with a doubled conductance: what a core reads if it evaluates on other values.
     pub fn other_values(&self) -> Result<BoundParameters, AdmissionError> {
@@ -254,7 +254,17 @@ impl TwoReservoirs {
         &'m self,
         core: &'m dyn CoupledSolver,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
-        admit_fixture(&self.body, self.packet(CONDUCTANCE)?, self.boundary()?, core)
+        let boundary = BoundaryPort::new(self.events()?)?;
+        admit_fixture(&self.body, self.packet(CONDUCTANCE)?, boundary, core)
+    }
+    /// The same run with no timeline input known at admission, so each must come through
+    /// `Session::enqueue`. The timeline is not part of the run identity, so this is the same run.
+    pub fn admit_withheld<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+    ) -> Result<Session<'m, Running>, InitializationFailure> {
+        let boundary = BoundaryPort::new(Vec::new())?;
+        admit_fixture(&self.body, self.packet(CONDUCTANCE)?, boundary, core)
     }
     /// Everything that makes this case this case, so two cases on one body never share an identity.
     pub fn digest(&self) -> Digest {

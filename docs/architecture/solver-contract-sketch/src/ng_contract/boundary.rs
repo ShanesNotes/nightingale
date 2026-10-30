@@ -1,6 +1,8 @@
 //! The boundary port: ONE timestamped timeline of the day, partitioned by payload and ordered by
 //! (time, id). Pending events and active continuous deliveries are record state and checkpoint.
-use super::{AdmissionError, Digest, Measure, SimTime, StepTicket, Water};
+use super::{
+    AdmissionError, CompiledBody, CoupledProblem, Digest, Measure, Refused, SimTime, StepTicket, TrialFailure, Water,
+};
 
 pub struct BoundaryPort {
     _events: Vec<BoundaryEvent>,
@@ -19,6 +21,12 @@ pub struct BoundaryEvent {
 }
 impl BoundaryEvent {
     pub fn new(_id: InputId, _at: SimTime, _payload: BoundaryInput) -> Self {
+        todo!()
+    }
+    pub fn id(&self) -> InputId {
+        todo!()
+    }
+    pub fn at(&self) -> SimTime {
         todo!()
     }
 }
@@ -133,24 +141,72 @@ pub enum SleepState {
     Awake,
     Nrem,
 }
-/// Pending timeline plus cursor and active deliveries: record state, checkpointed
-/// (nightingale-pulse#238). Applying an input moves the cursor past it and adds its delivery in one
-/// accepted image, so a refusal cannot half apply it. Its fields are private and `CoupledProblem`
-/// lends no view of them: the contract clips each ticket at the next physical breakpoint (a timeline
-/// event or a delivery's end; never a UI refresh, pace change or checkpoint request), so no core
-/// sees a later input.
+#[derive(Clone, Copy)]
+pub enum Attempt<'a> {
+    First { span_ns: u64 },
+    After(&'a Refused),
+}
+/// The timeline: record state, checkpointed (nightingale-pulse#238), and the one way to a ticket. A
+/// core holds a problem, and neither a problem nor an accepted view lends this value, so a waiting
+/// input shows to a core only in a cut.
 pub struct PendingInputs {
-    _port: BoundaryPort,
+    _timeline: BoundaryPort,
+    _past: AppliedInputs,
+}
+/// What has applied of the timeline: the part an accepted image seals and one publish replaces. It
+/// reads no input that still waits, so two runs with one past seal the same bytes whatever waits.
+pub struct AppliedInputs {
     _cursor: u64,
     _active_deliveries: Vec<Intake>,
+    _chain: Digest,
+    _fence: SimTime,
 }
-impl PendingInputs {
-    /// The pending inputs once `ticket`'s interval publishes: its due inputs applied, and deliveries
-    /// that ended at its start dropped.
-    pub fn after(&self, _ticket: &StepTicket) -> Self {
+impl AppliedInputs {
+    pub fn digest(&self) -> Digest {
         todo!()
     }
-    pub fn digest(&self) -> Digest {
+}
+impl PendingInputs {
+    /// One attempt of a step: issues its ticket and hands it to `solved`, which solves and validates.
+    /// When the span passes and a waiting input lies inside it, drops that result and hands `solved`
+    /// the same ticket ended at that input. This order is the causal step rule: every ticket before a
+    /// pass is a function of the sealed past, the span and the refusals of this base, so it is the same
+    /// ticket whatever waits. A waiting input shows only to a step the record would have accepted past
+    /// it, and then no late input can still arrive before it, except behind the fence a refused cut
+    /// leaves.
+    pub fn attempt<T>(
+        &self,
+        _problem: &CoupledProblem<'_>,
+        _attempt: Attempt<'_>,
+        _solved: impl FnMut(&StepTicket) -> Result<T, TrialFailure>,
+    ) -> Result<T, TrialFailure> {
+        todo!()
+    }
+    /// Adds a late input to what waits, and returns its payload's digest. No accepted part moves. The
+    /// same id with the same payload is the same request whenever it comes, even after it applied.
+    pub fn admit(
+        &mut self,
+        _body: &CompiledBody,
+        _head: SimTime,
+        _event: BoundaryEvent,
+    ) -> Result<Digest, AdmissionError> {
+        todo!()
+    }
+    /// The earliest stamp `admit` takes at `head`.
+    pub fn earliest_stamp(&self, _head: SimTime) -> SimTime {
+        todo!()
+    }
+    /// What has applied once `ticket`'s interval publishes.
+    pub fn after(&self, _ticket: &StepTicket) -> AppliedInputs {
+        todo!()
+    }
+    pub fn advance(&mut self, _past: AppliedInputs) {
+        todo!()
+    }
+    pub fn applied(&self) -> &AppliedInputs {
+        todo!()
+    }
+    pub fn waiting_digest(&self) -> Digest {
         todo!()
     }
 }

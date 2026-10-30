@@ -22,3 +22,5 @@ From 04: `body.bind(packet)`, `body.initialization(parameters, boundary, request
 From the deep review of 02 to 04: `admit` now evaluates every law at the start in every body, so a law with no value there is `InitializationFailure::Undefined` whether or not the body has an algebraic row.
 
 Decided after the deep review of 02 to 04 (nightingale#13, findings 12 to 17): finding 15 gets a partial admission check. Admission refuses a constant built only from literals, and a parameter divided by itself, when the constant has no packet entry. This is not a complete check: other ways to build a constant stay possible, and no compile-time check is claimed.
+
+From 05: `ImageParts` replaces `InitialParts`, with `canonical` and `parse` for its bytes, so a new image part lands in that one place and in the checkpoint at once. `PendingInputs::opening` sets the fence one nanosecond past the anchor, because initialization read that instant's drive. A windowed initialization reads a span of drives, so it must raise the opening fence past every instant it read, or a late input at one of them breaks I5.

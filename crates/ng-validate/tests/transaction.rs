@@ -5,8 +5,8 @@ use cores::forced_refusal::{ForcedRefusal, Refuser};
 use cores::must_fail::{
     EarlierAttempt, ForeignBody, ForeignHistory, ForeignProposal, ForeignRefusal, ForeignWorkspace,
     KeptHistory, MisplacedStage, NeverConverges, OneSample, OtherValues, PoisonedPoint,
-    ProposesThroughAnotherBody, ShadowTicket, ShortWorkspace, StaleIncrement, StaleProposal, SwappedTicket,
-    TrialOutside, UnevenWeights, UnfitWeights, UnreachedStage, WrongWeight,
+    ProposesThroughAnotherBody, ReadsItsTicket, ShortWorkspace, Spans, StaleIncrement, StaleProposal,
+    SwappedTicket, TrialOutside, UnevenWeights, UnfitWeights, UnreachedStage, WrongWeight,
 };
 use cores::stages::{ForwardEuler, Heun, KeepsItsSpan};
 use ng_contract::*;
@@ -348,14 +348,14 @@ fn an_evaluation_from_an_earlier_attempt_is_a_binding_mismatch() {
 }
 
 #[test]
-fn a_fresh_ticket_swapped_for_the_issued_one_is_a_binding_mismatch() {
+fn a_kept_ticket_swapped_for_the_issued_one_is_a_binding_mismatch() {
     let case = stepped();
     let core = SwappedTicket {
         inner: euler(8 * SECOND),
-        own_span_ns: 4 * SECOND,
+        kept: RefCell::new(None),
     };
-    let fault = fault_of(case.admit(&core).expect("admitted").step());
-    assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
+    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
 }
 
 #[test]
@@ -363,55 +363,27 @@ fn a_refusal_of_another_ticket_is_a_binding_mismatch_so_no_core_resets_its_budge
     let case = stepped();
     let core = ForeignRefusal {
         inner: euler(8 * SECOND),
+        kept: RefCell::new(None),
     };
-    let fault = fault_of(case.admit(&core).expect("admitted").step());
-    assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
-}
-
-#[test]
-fn a_ticket_this_record_would_not_issue_is_a_binding_mismatch() {
-    let quiet =
-        TwoReservoirs::delivering([measure(500_500.0), measure(499_500.0)], Vec::new()).expect("a body");
-    let case = stepped();
-    let (instant, _) = case.delivery().expect("a delivery");
-    let inner = euler(4_000 * SECOND);
-    let shadow = quiet.admit(&inner).expect("admitted");
-    let values = quiet.other_values().expect("bound");
-    let real_base = case.admit(&inner).expect("admitted").record().seal().digest();
-    let core = ShadowTicket {
-        inner: euler(4_000 * SECOND),
-        body: case.body(),
-        values: &values,
-        identity: shadow.record().identity(),
-        shadow: shadow.record().accepted(),
-        base: real_base,
-        refuse: false,
-    };
-    assert!(
-        instant.nanoseconds() < core.inner.interval_ns,
-        "the ticket would cross the delivery"
-    );
-    let fault = fault_of(case.admit(&core).expect("admitted").step());
-    assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
+    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
 }
 
 #[test]
 fn a_refusal_of_a_foreign_base_cannot_be_retried() {
     let case = stepped();
-    let inner = euler(8 * SECOND);
-    let session = case.admit(&inner).expect("admitted");
-    let values = case.other_values().expect("bound");
-    let core = ShadowTicket {
-        inner: euler(8 * SECOND),
-        body: case.body(),
-        values: &values,
-        identity: session.record().identity(),
-        shadow: session.record().accepted(),
-        base: Digest::of_canonical(b"a foreign base"),
-        refuse: true,
+    let core = euler(8 * SECOND);
+    let foreign = NeverConverges {
+        interval_ns: 8 * SECOND,
+        budget: 12,
     };
-    let session = refused(case.admit(&core).expect("admitted").step());
-    assert_eq!(fault_of(session.retry()).kind(), EngineFaultKind::BindingMismatch);
+    let session = refused(case.admit(&foreign).expect("admitted").step());
+    let (moved, _) = accepted(case.admit(&core).expect("admitted").step());
+    let fault = moved.record().attempt(&core, Attempt::After(session.refused()));
+    let Err(TrialFailure::EngineFault(fault)) = fault.map(|_| ()) else {
+        panic!("not a fault");
+    };
+    assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
 }
 
 #[test]
@@ -478,32 +450,33 @@ fn another_bodys_stage_workspace_or_proposal_is_a_binding_mismatch() {
 }
 
 #[test]
-fn a_ticket_refuses_an_empty_span_an_offset_past_its_end_and_a_zero_shift() {
+fn a_zero_span_and_a_span_past_the_end_of_time_are_binding_mismatches() {
     let case = stepped();
-    let core = euler(8 * SECOND);
-    let session = case.admit(&core).expect("admitted");
-    let problem = session.record().problem();
-    let kind = |fault: EngineFault| fault.kind();
-    assert_eq!(
-        problem.ticket(0).map_err(kind).err(),
-        Some(EngineFaultKind::BindingMismatch)
-    );
-    let ticket = problem.ticket(8 * SECOND).expect("a ticket");
-    assert!(ticket.at(8 * SECOND).is_ok());
-    assert_eq!(
-        ticket.at(8 * SECOND + 1).map(|_| ()).map_err(kind),
-        Err(EngineFaultKind::BindingMismatch)
-    );
-    assert_eq!(
-        ticket.shift(0).map(|_| ()).map_err(kind),
-        Err(EngineFaultKind::BindingMismatch)
-    );
-    let (session, _) = accepted(session.step());
-    let past_the_end_of_time = session.record().problem().ticket(u64::MAX);
-    assert_eq!(
-        past_the_end_of_time.map(|_| ()).map_err(kind),
-        Err(EngineFaultKind::BindingMismatch)
-    );
+    let zero = Spans {
+        inner: euler(8 * SECOND),
+        then_ns: 0,
+    };
+    let (session, _) = accepted(case.admit(&zero).expect("admitted").step());
+    assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
+    let past = Spans {
+        inner: euler(8 * SECOND),
+        then_ns: u64::MAX,
+    };
+    let (session, _) = accepted(case.admit(&past).expect("admitted").step());
+    assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
+}
+
+#[test]
+fn a_ticket_refuses_an_offset_past_its_end_and_a_zero_shift() {
+    let case = stepped();
+    let core = ReadsItsTicket {
+        inner: euler(8 * SECOND),
+        reads: RefCell::new(Vec::new()),
+    };
+    accepted(case.admit(&core).expect("admitted").step());
+    let reads = core.reads.borrow();
+    let mismatch = Some(EngineFaultKind::BindingMismatch);
+    assert_eq!(*reads, [(None, mismatch, mismatch)]);
 }
 
 #[test]
@@ -1586,8 +1559,8 @@ impl CoupledSolver for ForwardEulerWithScale {
             self.scales,
         )
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         self.inner.solve(problem, ticket)
@@ -2700,6 +2673,26 @@ fn a_delivery_no_law_reads_is_refused_at_admission() {
         Some(InitializationFailure::Admission(AdmissionError::DriveNotRead {
             name: "exterior"
         }))
+    );
+}
+
+#[test]
+fn a_late_delivery_no_law_reads_is_refused_at_enqueue() {
+    let (body, packet) = deaf_boundary_body();
+    let core = reference(SECOND);
+    let port = BoundaryPort::new(Vec::new()).expect("no event");
+    let mut session = admit_fixture(&body, packet, port, &core).expect("admitted");
+    let delivery = WaterDelivery {
+        boundary: "exterior",
+        amount: measure(30.0),
+        ends: SimTime::from_ns(10 * SECOND),
+    };
+    let id = InputId::new(Digest::of_canonical(b"meal"));
+    let event = BoundaryEvent::new(id, SimTime::from_ns(SECOND), BoundaryInput::Water(delivery));
+    let input = AuthorizedInput::from_command_receipt(Digest::of_canonical(b"a command"), event);
+    assert_eq!(
+        session.enqueue(input).err(),
+        Some(AdmissionError::DriveNotRead { name: "exterior" })
     );
 }
 

@@ -34,18 +34,6 @@ impl<'r> CoupledProblem<'r> {
     pub fn workspace(&self) -> SolveWorkspace {
         todo!()
     }
-    /// Binds the core's intrinsic span to the accepted base, due inputs, frozen drives and identity.
-    /// The contract ends the ticket at the earlier of that span's end and the next physical
-    /// breakpoint, which no core can see: the causal step rule holds by construction, and a ticket
-    /// that starts at a breakpoint says so (`StepTicket::after_breakpoint`).
-    pub fn ticket(&self, _intrinsic_span_ns: u64) -> Result<StepTicket, EngineFault> {
-        todo!()
-    }
-    /// The same base over the smaller span a refusal left, through the same clipping as any ticket.
-    /// A refusal of another base is `BindingMismatch`.
-    pub fn retry(&self, _refused: &Refused) -> Result<StepTicket, EngineFault> {
-        todo!()
-    }
     /// Rate-class and strongly connected blocks derived from dependencies, never organ names.
     /// `Coupled` gives the exact block-triangular order; a split needs a matching qualification.
     pub fn blocks(&self, _plan: EvaluationPlan<'_>) -> Result<&[EquationBlock], EngineFault> {
@@ -356,16 +344,19 @@ pub struct EventWitness {
     _ordinal: u64,
 }
 
-/// Binds one attempt: its base, the identity, the exact interval, the due inputs, the frozen drives
-/// and the attempt number, all in its digest.
+/// Binds one attempt: its base, the identity, the exact interval, the committed span, the due inputs,
+/// the frozen drives, the attempt number and the fence a cut left, all in its digest. Only
+/// `PendingInputs::attempt` mints one.
 #[derive(Clone)]
 pub struct StepTicket {
     _base: Digest,
     _interval: Interval,
+    _span_ns: u64,
     _due: Vec<InputId>,
     _frame: DriveFrame,
     _after_breakpoint: bool,
     _attempt: u32,
+    _fence: SimTime,
     _floor_ns: u64,
     _budget: u32,
     _digest: Digest,
@@ -397,16 +388,14 @@ impl StepTicket {
         todo!()
     }
     /// A refusal of this attempt, or the fault `NoAdmissibleStep` when its retry would go below the
-    /// floor or past the budget. One path, so nothing can accept excess error at the floor.
+    /// floor or past the budget. One path, so nothing can accept excess error at the floor. The retry
+    /// halves the committed span until it is shorter than this ticket, because a cut's length depends
+    /// on a waiting input past the retry's end, and a retry's end must not.
     pub fn refuse(&self, _reason: NumericalRefusal) -> TrialFailure {
         todo!()
     }
     /// A `BindingMismatch` naming this attempt.
     pub fn mismatch(&self) -> EngineFault {
-        todo!()
-    }
-    /// Whether this is the ticket `problem` issues for its length and attempt.
-    pub fn binds(&self, _problem: &CoupledProblem<'_>) -> bool {
         todo!()
     }
     /// True when this interval starts at a physical breakpoint (an input applied, a delivery ended,

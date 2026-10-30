@@ -6,13 +6,61 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 Blocked by: 04
 
-Status: ready-for-agent
+Status: resolved
 
-- [ ] All four gates pass for the reference core, with identical accepted-state, ledger and event digests
-- [ ] A core that keeps a cache outside its continuation fails resume and rewind
-- [ ] A core cannot see the timeline (the contract clips each ticket); a core that clips at caller output times fails late admission
-- [ ] `admit_input` refuses an input stamped before the accepted head
-- [ ] Corrupted checkpoint bytes are refused before any body byte is decoded
+- [x] All four gates pass for the reference core, with identical accepted-state, ledger and event digests
+- [x] A core that keeps a cache outside its continuation fails resume and rewind
+- [ ] A core cannot see the timeline (the contract clips each ticket); a core that clips at caller output times fails late admission. Answered below: no ticket is clipped before a span passes, and the reason is the fork in the answer
+- [x] `admit_input` refuses an input stamped before the accepted head
+- [x] Corrupted checkpoint bytes are refused before any body byte is decoded
+
+## Answer
+
+The validation crate now runs the manufactured body under four replay gates and reports digests, and a core reads a timeline it cannot probe. `next_step` returns a span the core commits to before any ticket exists. The record issues every ticket, each attempt runs at that span with the head's frozen drives, and a waiting input shows only after a span has passed. A checkpoint is its bytes, one `restore` serves `resume`, `rewind` and `recover`, and one chain of seals covers every accepted part. Record 0006 holds the rule.
+
+- **All four gates pass for the reference core.** `replay_gates` over the stepped and the busy case, in `tests/replay.rs`, compares a seal at every row and `RecordDigests` at the end: state, continuation, segment, streams, applied, waiting and ledger, each recomputed from the live fields. Pace runs unbounded, chunked and live, and each paced run must stop short of the end at least once; resume loads into a fresh core at neighbouring revisions every `resume_every` and on each side of a breakpoint or a refusal, and each load runs to the end; late admission withholds each input until the last head a run can take it; rewind forks from two neighbouring revisions and compares the fork, a fresh load and the parent's own course. The real clock ran only through a crate outside the workspace, because no crate here reads one: see the evidence.
+- **A cache outside the continuation fails resume and rewind.** `KeepsACache` fails both at any stride and any case length, and its twin `KeepsACount` passes. A review found its period could land on every resume and on the fork, so both gates now use neighbouring revisions, which a period above one cannot both land on. `ShowsAt` fails resume only at a delivery's end and rewind only at the load, and `RestartsAfterAJump` fails rewind though a load and a fork agree, which only the comparison with the parent can see.
+- **A core cannot see the timeline: answered, not ticked as written.** The box says the contract clips each ticket, and that is the part this ticket did not build, for the reason below. No core can read a timeline by construction: `problem.ticket` is gone (E0599), `next_step` takes no ticket (E0053), `accepted.pending` is gone (E0609) and a core mints no ticket (E0451). `ReadsPastTheBreakpoint` commits a huge span and refuses, and reads nothing: the retries it sees equal the ones a run with no waiting input gives. A factory that tells two runs different output times fails every gate; one set in every run is a grid of the core's own, which replays and passes. The honest limit is in the contract: a span that would pass does show the next waiting input inside it, once, after the solve that passed. That step would have crossed the input in a run that did not know it, so no late input can still arrive before it. A core that acts on it from the first step fails with `NoLateBoundary`. From a later head its spread starts where the input has already arrived, so the run equals the known run and I5 holds, and no gate can or need reject it. A core can also build a `PendingInputs` of its own from public parts and mint a ticket on it, but that ticket reads only its own timeline and `validate` takes none but the one issued.
+- **`enqueue` refuses an input stamped before the accepted head.** `EventBeforeHead`, and `EventBeforeFence` behind a refused cut, each with a test that fails without its check. `admit_input` is `PatientRecord::admit_input`, reached through `Session::enqueue`, which moves no revision and no seal.
+- **Corrupted bytes are refused before any body byte is decoded.** `opened` decides length, magic, raw digest and identity on the header alone, and `Corrupt` comes before any field. Every position in a checkpoint is flipped in a test, with a stale digest and resealed, and no input panics.
+
+**The fork that decided the shape.** Both runners found that hiding the timeline from `next_step` is not enough, because a cut ticket can pass where the uncut ticket of the same head is refused: a run that knows an input and one that does not then land on different heads, with no dishonest core involved. Clip first (the Codex candidate, and the judge's pick, 20 to 15) cuts every ticket at issue and fences every instant an attempt reached. Span first (the Opus candidate) runs each attempt at the core's span and cuts only after a pass. Measured on one corpus of 400 random honest cases, `fork-numbers.log`: clip first leaves a fence past the head after 19.13% of 10,458 steps, refuses 9.98% of stamps drawn after a head, refuses the input of the case that started this (stamp 18 s at head 16 s), and still lets a committed 2^60 ns span read the breakpoint. Span first left no fence in 14,500 rows and all 400 late runs equal their known runs, for 979 extra solves on that dense corpus, about 15 in a 48 h run. The decision on finding 12 says "capped" and gives its purpose, "so it cannot probe the timeline by asking for a huge span". Under span first every accepted step is capped and that purpose holds; the first attempt is not capped. That departs from the word and from the judge, and the judge and the orchestrator each share a vendor with one candidate, so the numbers decide. Reversing it is one function and its docs.
+
+**Choices, each with its evidence.**
+
+- **Span.** A `u64`, as every length in this repo. A `StepSpan` type added no rule.
+- **Mint.** `PendingInputs::attempt` is the one way to a ticket, and `AcceptedStateView` no longer lends pending inputs, so nothing but the record holds what a mint needs.
+- **Retry.** Halves the committed span until it is shorter than the refused ticket, so a retry reads the same lengths with or without a cut behind it. `the_retry_of_a_cut_halves_the_span_and_not_the_cut` holds it.
+- **Fence.** The earliest legal stamp: the instant of a refused cut, or one nanosecond past the anchor at opening, since initialization read that instant's drive. It stands until the head passes it. It is what makes the claim exact, so SRS I5 gains a clause, "or before an event a refused step already stopped at".
+- **Seal.** One chain: each seal chains the seal before it, the revision, the image's digest and the ledger chunk's digest, and the chain's start covers the bound values. The first build chained a separate ledger root, and both adversary reviews showed what that left open: a rewind taking a sibling with an equal ledger and another image, and a resealed file running other bound values under one identity. A store is addressed by seal, so being on a chain means the same accepted course.
+- **Applied, not waiting.** The seal covers applied inputs only (`AppliedInputs`: cursor, running deliveries, chain, fence), so a ticket's digest reads nothing that waits and admission moves no accepted part.
+- **Checkpoint format.** Fixed-width big-endian of its own, 128-byte header, because the crate table bars postcard and JCS. Order of checks: length, magic, length again, raw digest, identity, latch, body, chain, head image. No stored bytes exist yet, so a format change costs nothing today.
+- **A parsed image.** `parse` holds bound values to the sets `bind` holds them to, and `ImageParts` lends them and never moves them, so bytes cannot seed a new admission under an old identity. A decoded compensated pair must be one a sum leaves, because `at_most` reads `hi` first and `[1, -2]` would pass as nonnegative. A decoded delivery takes the body's check `enqueue` takes, and an opening list reads to the body's exact count, so a consistent forgery still cannot panic a step.
+- **Fault export.** Latched, so only `recover` continues it, on a new branch. `restore` takes the calling path, so a running session on that chain cannot `rewind` onto it.
+- **A ticket's plan.** `Plan` holds nothing of what waits, and `attempt` reads the next input only after `solved` returned, so the order that gives the causal step rule is structure and not a comment.
+- **Gates take `&TwoReservoirs`.** A `ReplayCase` trait would forward to one type. Ticket 06 or 11 adds it with a second case.
+- **Comparison.** One function, `first_divergence`: seals at each row, then the last digests, which also read what waits and are recomputed from the live fields. Each gate's evidence carries its reference run's last seal, and `replay_gates` refuses evidence of two courses, since end states alone miss a course that differs early. A load costs the rest of a run, so `resume_every` sets the gate's cost: a first design ran most loads only to the next boundary, and a lost count that showed six steps later passed it.
+- **Rejected:** `Prepared`, `StepSpan`, `Arc` history nodes, `AcceptedLink`, `DecodeBudget`, section tags, 4,096-chunk batches and fixed-time chunks. Ticket 04's claim that fixed-time chunks answer the 19 GB figure was wrong: grouping moves no bytes, and merged chords do not bound the curve.
+
+**Evidence**, on this PR's last code change, all synthetic.
+
+- **Mutation sweep.** 104 mutants, each removing one check or rule, and each killed by a test. A first sweep left 24 alive. Seven were checks that another check or the chain already held, so they went or merged. The rest were masked by a neighbouring check, and each got a test where it alone fires.
+- **Differential fuzz.** 4,000 random cases of pure cores with inputs at random heads: 19,028 accepted inputs, each late run equal to the run with those inputs known at admission, attempt by attempt, refusals included, and 11,275 replays through a load, a rewind and a fork of a fork. No failure. Weakening the fence check in a copy failed five of the first 30 seeds.
+- **Any bytes.** 120,000 mutated checkpoints, half with a forged seal: 11,567 sessions, each then stepped, saved and forked, and 62,528 named errors, with no panic. A store that lied drew 2,925 refusals in 3,000 tries, and every other answer was the true link.
+- **Ordinary runs keep their bits.** With no input and no refusal, a run's accepted bits equal the base's: full digests on three cases, and 7,043 lines of amounts and ledger bits over 14 runs at spans from 1 ns to 64 s.
+- **The real clock.** A crate outside the workspace ran the pace gate on a host clock, 120 s simulated at 60 times real speed with a pause partway, and it passed.
+- **Reviews.** Two adversaries at max, Opus and Codex, reported 15 distinct findings on an earlier head: 12 fixed and 3 closed by narrowing a claim, because the runs match and I5 holds. Four local Codex Astra passes followed. They reported four, two, two and none, and one of the second-last pair was already fixed.
+
+**Limits.**
+
+- The real clock ran only through a crate outside the workspace, once per head, with the result in the evidence. The test suite's clock is a script.
+- A digest has no key. A host that rewrites a checkpoint and its links consistently forges them; the chain finds accidents and any partial edit.
+- Waiting inputs and branch ids are outside the seal, under the raw digest only.
+- A resume reads all history, and the resume gate's cost grows with the number of loads. The chain is one link per accepted step, which adds 64 bytes to each chunk, so the 19 GB figure stands and grows by about 5.5 GB at a 2 ms step over 48 h. Ticket 11 measures it with the real slice.
+- `streams` is checkpointed and sealed, and ticket 06 is the first to move a position.
+- The gates cover the two-reservoir case only, with four gates of the five the contract names. Ticket 07 adds non-perturbation.
+
+Hard-part check: nothing here reached cross-site coupling, validation against outside physiology, stiff numerics near death or at extremes, or mechanistic disease. All values are synthetic.
 
 ## Comments
 

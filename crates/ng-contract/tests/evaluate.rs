@@ -24,7 +24,7 @@ fn resolution(scheme: StageScheme) -> Result<DeclaredResolution, AdmissionError>
 
 struct Bench {
     body: CompiledBody,
-    parts: InitialParts,
+    parts: ImageParts,
     identity: RunIdentity,
 }
 impl Bench {
@@ -57,7 +57,7 @@ impl Bench {
         let Self { body, parts, .. } = self;
         let identity = RunIdentity::new(
             body.model_hash(),
-            parts.parameters.packet_hash(),
+            parts.parameters().packet_hash(),
             Seed::new([1, 2, 3, 4]),
             resolution(scheme)?,
         );
@@ -69,15 +69,13 @@ impl Bench {
     }
     fn problem(&self) -> CoupledProblem<'_> {
         let parts = &self.parts;
-        let accepted = AcceptedStateView::new(
-            parts.time,
-            &parts.state,
-            &parts.continuation,
-            &parts.dense,
-            &parts.pending,
-        );
+        let accepted = AcceptedStateView::new(parts.time, &parts.state, &parts.continuation, &parts.dense);
         let base = Digest::of_canonical(b"base");
-        CoupledProblem::new(&self.body, &parts.parameters, &self.identity, accepted, base)
+        CoupledProblem::new(&self.body, parts.parameters(), &self.identity, accepted, base)
+    }
+    fn ticket(&self, span_ns: u64) -> Result<StepTicket, TrialFailure> {
+        let attempt = Attempt::First { span_ns };
+        (self.parts.pending).attempt(&self.problem(), attempt, |ticket| Ok(ticket.clone()))
     }
 }
 
@@ -187,7 +185,7 @@ fn the_two_reservoir_body_has_its_hand_derived_residual_and_jacobian() -> Result
     // q = g v (e a - e b) = 0.5 * 3 * (2 * 10 - 2 * 4) = 18, u = 14 / 7 = 2 per second.
     let bench = reservoir_bench([10.0, 4.0], vec![delivery(b"on", 0, 7 * SECOND, "inflow", 14.0)?])?;
     let problem = bench.problem();
-    let ticket = problem.ticket(SECOND).expect("a ticket");
+    let ticket = bench.ticket(SECOND).expect("a ticket");
     let mut workspace = problem.workspace();
     workspace.derivative_mut().copy_from_slice(&[1.0, 2.0]);
     let point = workspace.point(ticket.at(SECOND).expect("an offset"));
@@ -210,7 +208,7 @@ fn a_stage_at_a_tickets_end_reads_the_left_limit_of_the_drive() -> Result<(), In
     ];
     let bench = reservoir_bench([5.0, 5.0], events)?;
     let problem = bench.problem();
-    let ticket = problem.ticket(100 * SECOND).expect("a ticket");
+    let ticket = bench.ticket(100 * SECOND).expect("a ticket");
     assert_eq!(
         ticket.length_ns(),
         2 * SECOND,
@@ -231,7 +229,7 @@ fn overlapping_deliveries_add_and_no_delivery_means_zero() -> Result<(), Initial
     ];
     let bench = reservoir_bench([5.0, 5.0], events)?;
     let problem = bench.problem();
-    let ticket = problem.ticket(SECOND).expect("a ticket");
+    let ticket = bench.ticket(SECOND).expect("a ticket");
     let workspace = problem.workspace();
     let stage = problem
         .evaluate(&workspace.point(ticket.at(0).expect("an offset")))
@@ -239,7 +237,7 @@ fn overlapping_deliveries_add_and_no_delivery_means_zero() -> Result<(), Initial
     assert_eq!(stage.residuals()[0], -4.0);
     let silent = reservoir_bench([5.0, 5.0], Vec::new())?;
     let problem = silent.problem();
-    let ticket = problem.ticket(SECOND).expect("a ticket");
+    let ticket = silent.ticket(SECOND).expect("a ticket");
     let workspace = problem.workspace();
     let stage = problem
         .evaluate(&workspace.point(ticket.at(0).expect("an offset")))
@@ -389,7 +387,7 @@ fn derivatives_match_central_differences_on_nearly_nearly_every_operator() -> Re
     )?;
     let bench = Bench::admitted(body, packet, BoundaryPort::new(Vec::new())?)?;
     let problem = bench.problem();
-    let ticket = problem.ticket(SECOND).expect("a ticket");
+    let ticket = bench.ticket(SECOND).expect("a ticket");
     let time = ticket.at(SECOND).expect("an offset");
     let shift = ticket.shift(SECOND).expect("a shift");
     let rows = bench.body.rows().len();
@@ -462,7 +460,7 @@ fn a_smooth_limit_is_defined_where_its_root_is_zero() -> Result<(), Initializati
     packet.start(memory("first"), Measure::<Dimensionless>::new(0.0)?, "synthetic")?;
     let bench = Bench::admitted(body, packet, BoundaryPort::new(Vec::new())?)?;
     let problem = bench.problem();
-    let ticket = problem.ticket(SECOND).expect("a ticket");
+    let ticket = bench.ticket(SECOND).expect("a ticket");
     let workspace = problem.workspace();
     let time = ticket.at(0).expect("an offset");
     let stage = problem.evaluate(&workspace.point(time)).expect("evaluated");
@@ -476,7 +474,7 @@ fn a_smooth_limit_is_defined_where_its_root_is_zero() -> Result<(), Initializati
 
 fn forward_euler(bench: &Bench, span_ns: u64) -> Result<VerifiedStep, TrialFailure> {
     let problem = bench.problem();
-    let ticket = problem.ticket(span_ns)?;
+    let ticket = bench.ticket(span_ns)?;
     let mut workspace = problem.workspace();
     let time = ticket.at(0)?;
     let rates: Vec<f64> = (problem.evaluate(&workspace.point(time))?.residuals().iter())

@@ -1,0 +1,384 @@
+use core::cell::{Cell, RefCell};
+use ng_contract::*;
+use ng_validate::{ClockSource, ReferenceIntegrator, WallClock};
+
+const MILLISECOND: u64 = 1_000_000;
+
+fn explicit_resolution(tag: &[u8]) -> DeclaredResolution {
+    let measure = |value| Measure::<Dimensionless>::new(value).expect("finite");
+    let scales = ErrorScales::uniform(measure(1.0), measure(1e-5)).expect("positive");
+    DeclaredResolution::new(
+        Digest::of_canonical(tag),
+        MILLISECOND,
+        12,
+        ArithmeticProfile::contract_v1(),
+        StageScheme::forward_euler(),
+        scales,
+    )
+}
+
+/// An honest forward Euler step with these `counters` as its continuation, since a core that keeps
+/// anything there has to propose for itself.
+fn explicit(
+    problem: &CoupledProblem<'_>,
+    ticket: &StepTicket,
+    counters: Vec<u64>,
+) -> Result<StepProposal, TrialFailure> {
+    let mut workspace = problem.workspace();
+    let time = ticket.at(0)?;
+    let rates: Vec<f64> = (problem.evaluate(&workspace.point(time))?.residuals().iter())
+        .map(|residual| -residual)
+        .collect();
+    workspace.derivative_mut().copy_from_slice(&rates);
+    let stage = problem.evaluate(&workspace.point(time))?;
+    let mut quadrature = problem.quadrature(ticket);
+    quadrature.add(&stage, Ratio::ONE)?;
+    let schema = problem.accepted().method_history().schema();
+    let history = MethodHistory::new(schema, ticket.interval().start(), counters);
+    Ok(problem.propose(ticket, quadrature.finish()?, &workspace, history))
+}
+
+pub struct KeepsACache {
+    pub interval_ns: u64,
+    pub steps: Cell<u64>,
+}
+impl CoupledSolver for KeepsACache {
+    fn resolution(&self) -> DeclaredResolution {
+        explicit_resolution(b"keeps a count")
+    }
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        let steps = self.steps.get();
+        self.steps.set(steps + 1);
+        self.interval_ns / (1 + steps % 3)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        explicit(problem, ticket, Vec::new())
+    }
+}
+
+/// A count in a `Cell` shapes only what it proposes, so a run it changes keeps the reference's time grid and
+/// leaves it only by a seal.
+pub struct CountsInACell {
+    pub interval_ns: u64,
+    pub steps: Cell<u64>,
+}
+impl CoupledSolver for CountsInACell {
+    fn resolution(&self) -> DeclaredResolution {
+        explicit_resolution(b"counts in a cell")
+    }
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        self.interval_ns
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.steps.set(self.steps.get() + 1);
+        explicit(problem, ticket, vec![self.steps.get()])
+    }
+}
+
+pub struct KeepsACount {
+    pub interval_ns: u64,
+}
+impl CoupledSolver for KeepsACount {
+    fn resolution(&self) -> DeclaredResolution {
+        explicit_resolution(b"keeps a count")
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        let steps = accepted.method_history().counters().first().copied().unwrap_or(0);
+        self.interval_ns / (1 + steps % 3)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let history = problem.accepted().method_history();
+        let steps = history.counters().first().copied().unwrap_or(0);
+        explicit(problem, ticket, vec![steps + 1])
+    }
+}
+
+/// It never hears the output times through the seam, so a test's factory hands them over.
+pub struct ClipsAt {
+    pub inner: ReferenceIntegrator,
+    pub outputs: Vec<SimTime>,
+}
+impl CoupledSolver for ClipsAt {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        let own = self.inner.next_step(accepted);
+        let head = accepted.time();
+        let next = self.outputs.iter().find(|output| **output > head);
+        next.map_or(own, |output| own.min(output.nanoseconds() - head.nanoseconds()))
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.inner.solve(problem, ticket)
+    }
+}
+
+pub struct ScriptedClock {
+    pub readings: Vec<u64>,
+    pub next: Cell<usize>,
+    pub last: Cell<u64>,
+}
+impl ScriptedClock {
+    pub fn new(readings: Vec<u64>) -> Self {
+        Self {
+            readings,
+            next: Cell::new(0),
+            last: Cell::new(0),
+        }
+    }
+}
+impl WallClock for ScriptedClock {
+    fn elapsed_ns(&self) -> Option<u64> {
+        let reading = *self.readings.get(self.next.get())?;
+        self.next.set(self.next.get() + 1);
+        self.last.set(reading);
+        Some(reading)
+    }
+    fn source(&self) -> ClockSource {
+        ClockSource::Scripted
+    }
+}
+
+pub struct ReadsTheHostClock {
+    pub inner: ReferenceIntegrator,
+    pub clock: &'static ScriptedClock,
+}
+impl CoupledSolver for ReadsTheHostClock {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted) + self.clock.last.get() % 3
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.inner.solve(problem, ticket)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Seen {
+    pub interval: Interval,
+    pub attempt: u32,
+    pub digest: Digest,
+}
+
+pub struct ReadsPastTheBreakpoint {
+    pub inner: ReferenceIntegrator,
+    pub span_ns: u64,
+    pub refuses_over_ns: u64,
+    pub seen: &'static RefCell<Vec<Seen>>,
+}
+impl CoupledSolver for ReadsPastTheBreakpoint {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        self.span_ns
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.seen.borrow_mut().push(Seen {
+            interval: ticket.interval(),
+            attempt: ticket.attempt(),
+            digest: ticket.digest(),
+        });
+        if ticket.length_ns() > self.refuses_over_ns {
+            return Err(ticket.refuse(NumericalRefusal::IterationLimit));
+        }
+        self.inner.solve(problem, ticket)
+    }
+}
+
+/// The instant a cut shows crosses from the refused attempt to the retry in a `Cell`, because a retry's
+/// length no longer tells it.
+pub struct ActsOnACut {
+    pub span_ns: u64,
+    pub read: Cell<Option<u64>>,
+}
+impl CoupledSolver for ActsOnACut {
+    fn resolution(&self) -> DeclaredResolution {
+        explicit_resolution(b"acts on a cut")
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        let read = accepted.method_history().counters().first().copied();
+        let left = read.map(|read| read.saturating_sub(accepted.time().nanoseconds()));
+        left.filter(|left| *left > 1)
+            .map_or(self.span_ns, |left| left / 2)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        if ticket.attempt() == 0 && ticket.length_ns() < self.span_ns && self.read.get().is_none() {
+            self.read.set(Some(ticket.interval().end().nanoseconds()));
+            return Err(ticket.refuse(NumericalRefusal::IterationLimit));
+        }
+        let kept = problem.accepted().method_history().counters().to_vec();
+        let counters = self.read.get().map_or(kept, |read| vec![read]);
+        explicit(problem, ticket, counters)
+    }
+}
+
+pub struct RefusesOne {
+    pub inner: ReferenceIntegrator,
+    pub interval: Interval,
+    pub later_ns: u64,
+    pub seen: &'static RefCell<Vec<Seen>>,
+}
+impl CoupledSolver for RefusesOne {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        if accepted.time() == SimTime::from_ns(0) {
+            self.inner.next_step(accepted)
+        } else {
+            self.later_ns
+        }
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.seen.borrow_mut().push(Seen {
+            interval: ticket.interval(),
+            attempt: ticket.attempt(),
+            digest: ticket.digest(),
+        });
+        if ticket.interval() == self.interval {
+            return Err(ticket.refuse(NumericalRefusal::IterationLimit));
+        }
+        self.inner.solve(problem, ticket)
+    }
+}
+
+/// Honest in every way, so a run that differs by a waiting input differs only if a digest carried that
+/// input.
+pub struct KeepsTheDigest {
+    pub interval_ns: u64,
+}
+impl CoupledSolver for KeepsTheDigest {
+    fn resolution(&self) -> DeclaredResolution {
+        explicit_resolution(b"keeps the digest")
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        let kept = accepted.method_history().counters().first().copied().unwrap_or(0);
+        self.interval_ns + kept % 1_000
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let digest = ticket.digest();
+        let bytes = digest.as_bytes().first_chunk().expect("thirty-two bytes");
+        explicit(problem, ticket, vec![u64::from_be_bytes(*bytes)])
+    }
+}
+
+/// Its hidden state shows only to a resume exactly at `at`.
+pub struct ShowsAt {
+    pub inner: ReferenceIntegrator,
+    pub at: SimTime,
+    pub primed: Cell<bool>,
+}
+impl CoupledSolver for ShowsAt {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        let head = accepted.time();
+        if head < self.at {
+            self.primed.set(true);
+        }
+        let own = self.inner.next_step(accepted);
+        if head == self.at && !self.primed.get() {
+            own / 2
+        } else {
+            own
+        }
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.inner.solve(problem, ticket)
+    }
+}
+
+/// A pure core that refuses a third of all tickets, by a hash of the interval, so a cut is refused often: the
+/// worst an honest function of its arguments can do to the late-admission claim.
+pub struct RefusesByHash {
+    pub inner: ReferenceIntegrator,
+    pub salt: u64,
+}
+impl CoupledSolver for RefusesByHash {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let mut bytes = self.salt.to_be_bytes().to_vec();
+        bytes.extend_from_slice(&ticket.interval().start().nanoseconds().to_be_bytes());
+        bytes.extend_from_slice(&ticket.interval().end().nanoseconds().to_be_bytes());
+        if Digest::of_canonical(&bytes).as_bytes()[0].is_multiple_of(3) {
+            return Err(ticket.refuse(NumericalRefusal::IterationLimit));
+        }
+        self.inner.solve(problem, ticket)
+    }
+}
+
+pub struct RestartsAfterAJump {
+    pub inner: ReferenceIntegrator,
+    pub last: Cell<Option<SimTime>>,
+    pub restarted: Cell<bool>,
+}
+impl CoupledSolver for RestartsAfterAJump {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        let head = accepted.time();
+        let jumped = match self.last.replace(Some(head)) {
+            None => head.nanoseconds() > 0,
+            Some(last) => head <= last,
+        };
+        self.restarted.set(self.restarted.get() || jumped);
+        let own = self.inner.next_step(accepted);
+        if self.restarted.get() { own / 2 } else { own }
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.inner.solve(problem, ticket)
+    }
+}
+
+/// Refreshes on every sixth call. On an unbroken run that call always falls at one head and changes nothing,
+/// so a load that lost the count shows only at its next refresh.
+pub struct RefreshesASixth {
+    pub inner: ReferenceIntegrator,
+    pub calls: Cell<u64>,
+}
+impl CoupledSolver for RefreshesASixth {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        let calls = self.calls.replace(self.calls.get() + 1);
+        let own = self.inner.next_step(accepted);
+        let at_its_head = accepted.time().nanoseconds() % (6 * own) == 5 * own;
+        if calls % 6 == 5 && !at_its_head {
+            own / 2
+        } else {
+            own
+        }
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.inner.solve(problem, ticket)
+    }
+}
+
+/// Leaves `marker` in its continuation for the first two seconds and clears it, so two markers end on equal
+/// digests and differ only in the seals of the steps between.
+pub struct MarksItsFirstSteps {
+    pub marker: u64,
+}
+impl CoupledSolver for MarksItsFirstSteps {
+    fn resolution(&self) -> DeclaredResolution {
+        explicit_resolution(b"marks its first steps")
+    }
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        1_000 * MILLISECOND
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let early = ticket.interval().end().nanoseconds() <= 2_000 * MILLISECOND;
+        explicit(problem, ticket, vec![if early { self.marker } else { 0 }])
+    }
+}

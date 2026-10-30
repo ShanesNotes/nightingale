@@ -5,7 +5,7 @@ use crate::identity::{Canonical, Seal};
 use crate::quadrature::StageEvaluation;
 use crate::{
     AcceptedStateView, BoundParameters, CompiledBody, Digest, EngineFault, EngineFaultKind, InputId,
-    Interval, NumericalRefusal, Ratio, Refused, RowId, RunIdentity, TrialFailure,
+    Interval, NumericalRefusal, Ratio, Refused, RowId, RunIdentity, SimTime, TrialFailure,
 };
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
@@ -38,53 +38,6 @@ impl<'r> CoupledProblem<'r> {
     }
     pub fn accepted(&self) -> AcceptedStateView<'r> {
         self.accepted
-    }
-    /// The core's own span, cut short only at the next breakpoint. A zero span, or one past the end of
-    /// time, is `BindingMismatch`.
-    pub fn ticket(&self, intrinsic_span_ns: u64) -> Result<StepTicket, EngineFault> {
-        self.issue(intrinsic_span_ns, 0)
-    }
-    /// The same base over the smaller span a refusal left, through the same clipping as any ticket. A
-    /// refusal of another base is `BindingMismatch`.
-    pub fn retry(&self, refused: &Refused) -> Result<StepTicket, EngineFault> {
-        if refused.base != self.base {
-            return Err(EngineFault {
-                kind: EngineFaultKind::BindingMismatch,
-                at: refused.at,
-                attempted_ns: refused.attempted_ns,
-                last_refusal: None,
-            });
-        }
-        self.issue(refused.retry_ns, refused.attempt + 1)
-    }
-    fn issue(&self, span_ns: u64, attempt: u32) -> Result<StepTicket, EngineFault> {
-        let start = self.accepted.time();
-        let mismatch = EngineFault {
-            kind: EngineFaultKind::BindingMismatch,
-            at: start,
-            attempted_ns: span_ns,
-            last_refusal: None,
-        };
-        let plan = self.accepted.pending.plan(start);
-        let intrinsic_end = start.plus_ns(span_ns).ok_or(mismatch)?;
-        let end = plan
-            .next_breakpoint
-            .map_or(intrinsic_end, |next| next.min(intrinsic_end));
-        let interval = Interval::new(start, end).ok_or(mismatch)?;
-        let resolution = self.identity.resolution();
-        let mut ticket = StepTicket {
-            base: self.base,
-            interval,
-            due: plan.due,
-            frame: plan.frame,
-            after_breakpoint: plan.after_breakpoint,
-            attempt,
-            floor_ns: resolution.minimum_interval_ns(),
-            budget: resolution.retry_budget(),
-            digest: self.base,
-        };
-        ticket.digest = ticket.sealed(self.identity.digest());
-        Ok(ticket)
     }
     /// The row at a workspace slot, so a core can name where a stage failed.
     pub fn row(&self, slot: usize) -> Option<RowId> {
@@ -162,30 +115,34 @@ impl<'r> CoupledProblem<'r> {
     }
 }
 
-/// Binds one attempt: its base, the identity, the exact interval, the due inputs, the frozen drives and the
-/// attempt number, all in its digest.
+/// Binds one attempt: its base, the identity, the exact interval, the span it came from, the due inputs, the
+/// frozen drives, the attempt number and the fence, all in its digest.
 #[derive(Clone, Debug)]
 pub struct StepTicket {
     pub(crate) base: Digest,
     pub(crate) interval: Interval,
+    pub(crate) span_ns: u64,
     pub(crate) due: Vec<InputId>,
     pub(crate) frame: DriveFrame,
     pub(crate) after_breakpoint: bool,
     pub(crate) attempt: u32,
+    pub(crate) fence: SimTime,
     pub(crate) floor_ns: u64,
     pub(crate) budget: u32,
     pub(crate) digest: Digest,
 }
 impl StepTicket {
     /// The floor and the budget are the identity's, so sealing the identity covers them.
-    fn sealed(&self, identity: Digest) -> Digest {
+    pub(crate) fn sealed(&self, identity: Digest) -> Digest {
         let Self {
             base,
             interval,
+            span_ns,
             due,
             frame,
             after_breakpoint,
             attempt,
+            fence,
             floor_ns: _,
             budget: _,
             digest: _,
@@ -195,10 +152,12 @@ impl StepTicket {
         identity.seal(&mut out);
         interval.start().seal(&mut out);
         interval.end().seal(&mut out);
+        span_ns.seal(&mut out);
         due.seal(&mut out);
         frame.seal(&mut out);
         out.number(u64::from(*after_breakpoint));
         out.number(u64::from(*attempt));
+        fence.seal(&mut out);
         out.digest()
     }
     pub fn interval(&self) -> Interval {
@@ -242,9 +201,13 @@ impl StepTicket {
         })
     }
     /// A refusal of this attempt, or the fault `NoAdmissibleStep` when its retry would go below the floor
-    /// or past the budget.
+    /// or past the budget. The retry halves the committed span, not the interval: a cut's length depends on
+    /// a waiting input past the retry's end, and a retry's end must not.
     pub fn refuse(&self, reason: NumericalRefusal) -> TrialFailure {
-        let retry_ns = self.length_ns() / 2;
+        let mut retry_ns = self.span_ns / 2;
+        while retry_ns >= self.length_ns() {
+            retry_ns /= 2;
+        }
         let at = self.interval.start();
         if self.attempt >= self.budget || retry_ns < self.floor_ns {
             return TrialFailure::EngineFault(EngineFault {
@@ -262,6 +225,7 @@ impl StepTicket {
             attempted_ns: self.length_ns(),
             retry_ns,
             attempt: self.attempt,
+            fence: self.fence,
         })
     }
     /// A `BindingMismatch` naming this attempt.
@@ -272,11 +236,6 @@ impl StepTicket {
             attempted_ns: self.length_ns(),
             last_refusal: None,
         }
-    }
-    /// Whether this ticket is the one `problem` issues for its length and attempt: the same base, identity,
-    /// interval, due inputs and drives.
-    pub fn binds(&self, problem: &CoupledProblem<'_>) -> bool {
-        (problem.issue(self.length_ns(), self.attempt)).is_ok_and(|issued| issued.digest == self.digest)
     }
 }
 

@@ -95,21 +95,38 @@ impl InitialRevision {
         todo!()
     }
     /// What the record takes on at admission.
-    pub fn into_parts(self) -> InitialParts {
+    pub fn into_parts(self) -> ImageParts {
         todo!()
     }
     pub fn provenance(&self) -> &InitializationProvenance {
         todo!()
     }
 }
-pub struct InitialParts {
+/// What the contract owns of one accepted image. Parts enter a record only through `InitialRevision`,
+/// which only `InitializationSystem::admit` makes, or through checkpoint bytes the record has verified,
+/// so `parse` mints nothing a record takes.
+pub struct ImageParts {
     pub time: SimTime,
     pub state: Candidate,
     pub continuation: MethodHistory,
     pub dense: DenseSegment,
     pub pending: PendingInputs,
-    pub parameters: BoundParameters,
+    parameters: BoundParameters,
 }
+impl ImageParts {
+    /// Lent, never moved, so bound values in a parsed image cannot seed a new admission.
+    pub fn parameters(&self) -> &BoundParameters {
+        &self.parameters
+    }
+    pub fn canonical(&self) -> Vec<u8> {
+        todo!()
+    }
+    /// Any bytes give parts or `Malformed`, never a panic.
+    pub fn parse(_body: &CompiledBody, _bytes: &[u8]) -> Result<Self, Malformed> {
+        todo!()
+    }
+}
+pub struct Malformed;
 pub struct InitializationProvenance {
     _values: Vec<(ParameterKey, ValueProvenance)>,
     _anchors_met: Vec<AnchorId>,
