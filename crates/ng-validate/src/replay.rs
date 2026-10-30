@@ -179,11 +179,15 @@ fn first_difference(reference: &[Row], run: &[Row]) -> Option<SimTime> {
         .map(|(known, seen)| known.time.min(seen.time))
 }
 
-/// `None` when two traces agree at every row and at the end, whose digests also read what waits and are
-/// recomputed from the live fields, so a part a seal failed to cover still shows.
-fn first_divergence(reference: &Trace, run: &Trace) -> Option<SimTime> {
-    first_difference(&reference.rows, &run.rows)
-        .or_else(|| (reference.last != run.last).then_some(run.last.time))
+/// `None` when two courses agree at every row they share and at the end, whose digests also read what waits
+/// and are recomputed from the live fields, so a part a seal failed to cover still shows.
+fn first_divergence(
+    known: &[Row],
+    expected: &RecordDigests,
+    rows: &[Row],
+    last: &RecordDigests,
+) -> Option<SimTime> {
+    first_difference(known, rows).or_else(|| (expected != last).then_some(last.time))
 }
 
 fn advance<'m>(
@@ -297,8 +301,13 @@ fn reference(
     Ok((trace, session.record().identity().digest()))
 }
 
-fn same_or_diverged(gate: ReplayGate, reference: &Trace, run: &Trace) -> Result<(), ReplayFailure> {
-    match first_divergence(reference, run) {
+fn same_or_diverged(
+    gate: ReplayGate,
+    known: &[Row],
+    expected: &RecordDigests,
+    run: &Trace,
+) -> Result<(), ReplayFailure> {
+    match first_divergence(known, expected, &run.rows, &run.last) {
         None => Ok(()),
         Some(first_divergence) => Err(ReplayFailure::Diverged {
             gate,
@@ -327,7 +336,7 @@ fn pace_gate(
         let session = admitted(gate, case.admit(&*core))?;
         let rows = vec![Row::of(&session, false)];
         let (_, paced) = traced(gate, session, rows, case.end(), &pace)?;
-        same_or_diverged(gate, &reference, &paced)?;
+        same_or_diverged(gate, &reference.rows, &reference.last, &paced)?;
         runs.push(paced.last);
     }
     Ok(GateEvidence {
@@ -411,18 +420,11 @@ fn resume_gate(
             Some((next, ..)) => revision_to(gate, resumed, *next, &mut rows)?,
             None => step_to(gate, resumed, case.end(), &mut rows)?,
         };
-        let divergence = first_difference(known, &rows);
         let last = resumed.record().digests();
         let expected = next.map_or(reference.last, |(_, _, digests)| *digests);
-        match divergence.or((last != expected).then_some(last.time)) {
-            None => runs.push(last),
-            Some(first_divergence) => {
-                return Err(ReplayFailure::Diverged {
-                    gate,
-                    first_divergence,
-                });
-            }
-        }
+        let leg = Trace { rows, last };
+        same_or_diverged(gate, known, &expected, &leg)?;
+        runs.push(last);
     }
     Ok(GateEvidence {
         gate,
@@ -467,7 +469,7 @@ fn late_admission_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<
         session.enqueue(input).map_err(refused)?;
     }
     let (_, late) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
-    same_or_diverged(gate, &reference, &late)?;
+    same_or_diverged(gate, &reference.rows, &reference.last, &late)?;
     Ok(GateEvidence {
         gate,
         run,
@@ -500,20 +502,15 @@ fn rewind_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<GateEvid
     let loaded = Session::resume(&saved, identity, case.body(), &*fresh, &store).map_err(checkpointed)?;
     let rows = vec![Row::of(&loaded, false)];
     let (_, load) = traced(gate, loaded, rows, case.end(), &Pace::Unbounded)?;
-    same_or_diverged(gate, &load, &fork)?;
-    same_or_diverged(gate, &reference, &ahead)?;
-    match first_difference(&ahead.rows[middle..], &fork.rows) {
-        None if parent.record().digests() == ahead.last => Ok(GateEvidence {
-            gate,
-            run,
-            runs: vec![reference.last, ahead.last, fork.last, load.last],
-            clock: None,
-        }),
-        divergence => Err(ReplayFailure::Diverged {
-            gate,
-            first_divergence: divergence.unwrap_or(ahead.last.time),
-        }),
-    }
+    same_or_diverged(gate, &load.rows, &load.last, &fork)?;
+    same_or_diverged(gate, &reference.rows, &reference.last, &ahead)?;
+    same_or_diverged(gate, &ahead.rows[middle..], &ahead.last, &fork)?;
+    Ok(GateEvidence {
+        gate,
+        run,
+        runs: vec![reference.last, ahead.last, fork.last, load.last],
+        clock: None,
+    })
 }
 
 /// One gate, in fresh cores from `cores`.
@@ -571,8 +568,8 @@ mod tests {
             last: session.record().digests(),
         };
         let (reference, run) = (trace(&session), trace(&withheld));
-        assert_eq!(first_difference(&reference.rows, &run.rows), None);
-        assert_eq!(first_divergence(&reference, &reference), None);
-        assert_eq!(first_divergence(&reference, &run), Some(run.last.time));
+        let compare = |run: &Trace| first_divergence(&reference.rows, &reference.last, &run.rows, &run.last);
+        assert_eq!(compare(&reference), None);
+        assert_eq!(compare(&run), Some(run.last.time));
     }
 }

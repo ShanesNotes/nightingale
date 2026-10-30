@@ -314,11 +314,11 @@ fn two_callers(first: Vec<SimTime>, later: Vec<SimTime>) -> impl Fn() -> ClipsAt
 }
 
 #[test]
-fn a_core_that_clips_at_caller_output_times_fails_pace_and_late_admission() {
+fn a_core_that_clips_at_caller_output_times_fails_every_gate() {
     let case = delivering(vec![delivery(b"input", 40, 60)], 100);
     let clock = script();
     let outputs = vec![SimTime::from_ns(19 * SECOND + 7)];
-    for gate in [ReplayGate::Pace, ReplayGate::LateAdmission] {
+    for gate in GATES {
         let cores = two_callers(Vec::new(), outputs.clone());
         let failure = replay_gate(gate, &case, &cores, &plan(&clock));
         assert!(
@@ -1575,6 +1575,24 @@ fn a_run_on_the_same_grid_diverges_at_the_first_seal_it_changed() {
         Some(ReplayFailure::Diverged {
             gate: ReplayGate::Resume,
             first_divergence: at(24),
+        })
+    );
+}
+
+#[test]
+fn a_core_that_needs_a_mark_a_fresh_core_lacks_fails_rewind_at_the_load() {
+    let case = delivering(Vec::new(), 40);
+    let cores = || ShowsAt {
+        inner: reference(8 * SECOND),
+        at: at(16),
+        primed: Cell::new(false),
+    };
+    let clock = script();
+    assert_eq!(
+        replay_gate(ReplayGate::Rewind, &case, &cores, &plan(&clock)).err(),
+        Some(ReplayFailure::Diverged {
+            gate: ReplayGate::Rewind,
+            first_divergence: at(20),
         })
     );
 }
