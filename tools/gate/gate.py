@@ -475,7 +475,6 @@ def parse_source(path: str, text: str) -> Source:
 
 HOST_NAMES = frozenset({"std", "atomic", "env", "option_env", "thread_local"})
 INCLUDE_NAMES = frozenset({"include", "include_str", "include_bytes"})
-# What each admissible dev_external helper names that reads a file, so its reads stay inside the member.
 FILE_READERS: Mapping[str, frozenset[str]] = {"expect-test": frozenset({"expect_file"})}
 TEST_ONLY = (["test"], ["not", "(", "test", ")"])
 

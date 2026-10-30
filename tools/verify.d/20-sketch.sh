@@ -8,7 +8,6 @@ RUSTFLAGS="-D warnings" cargo check --all-targets --locked
 cargo test --doc --locked
 # Stable rustdoc does not check a compile_fail block's error code, so a copy with the markers
 # removed must fail each block with the code its marker names.
-# lib.rs includes ../../solver-contract.md as its crate doc, so the copy keeps that layout.
 copy=$(mktemp -d)
 trap 'rm -rf "$copy"' EXIT
 mkdir -p "$copy/architecture/sketch"
