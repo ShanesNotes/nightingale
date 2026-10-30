@@ -73,8 +73,6 @@ fn water(id: &[u8], from: SimTime, to: SimTime) -> BoundaryEvent {
     )
 }
 
-/// An image one second in: one delivery from the origin running to 2 s, and one waiting at 5 s. Its layout
-/// is known to the byte, so a test can break one field.
 fn image(body: &CompiledBody, sites: [SiteId; 2]) -> ImageParts {
     let mut packet = ParameterPacket::new();
     let edges = Binding::Network(Network::Vascular);
@@ -145,7 +143,6 @@ const COUNTERS: usize = SCHEMA + 32 + 8;
 const DENSE: usize = COUNTERS + 8;
 const TIMELINE: usize = DENSE + 8 + 8 + 8;
 const FIRST_DELIVERY: usize = TIMELINE + 8;
-/// An id, a stamp, a tag, a length and "inflow", an amount and an end.
 const DELIVERY: usize = 32 + 8 + 8 + 8 + 6 + 8 + 8;
 const CURSOR: usize = FIRST_DELIVERY + 2 * DELIVERY;
 const ACTIVE: usize = CURSOR + 8;
@@ -157,7 +154,6 @@ fn put(bytes: &mut [u8], at: usize, value: u64) {
     bytes[at..at + 8].copy_from_slice(&value.to_be_bytes());
 }
 
-/// Gives an image with no dense segment one over `from` to `to`, holding each of its two rows.
 fn with_segment(bytes: &mut Vec<u8>, from: u64, to: u64) {
     put(bytes, DENSE, 1);
     let mut segment = from.to_be_bytes().to_vec();

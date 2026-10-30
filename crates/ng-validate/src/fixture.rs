@@ -230,7 +230,6 @@ impl TwoReservoirs {
         }
         Ok(packet)
     }
-    /// Every timeline input, as `admit` knows them.
     pub fn events(&self) -> Result<Vec<BoundaryEvent>, AdmissionError> {
         let mut events = Vec::with_capacity(self.deliveries.len());
         for delivery in &self.deliveries {

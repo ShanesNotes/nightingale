@@ -187,7 +187,7 @@ impl MethodHistory {
 }
 
 /// What a problem reads of the accepted image. The record builds one per attempt; a core reads the head's
-/// time, values and continuation here. It holds no timeline, so no core can reach one through it.
+/// time, values and continuation here.
 #[derive(Clone, Copy)]
 pub struct AcceptedStateView<'r> {
     time: SimTime,

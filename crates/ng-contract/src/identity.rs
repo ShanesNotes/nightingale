@@ -7,7 +7,7 @@ impl Digest {
     pub fn of_canonical(bytes: &[u8]) -> Self {
         Self { bytes: sha256(bytes) }
     }
-    /// A digest read back from stored bytes. A digest is a value, never a capability.
+    /// A digest is a value, never a capability.
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
         Self { bytes }
     }

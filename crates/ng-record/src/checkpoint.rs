@@ -5,9 +5,8 @@ use ng_contract::{
     ByteReader, Compensated, CompiledBody, Digest, ImageParts, Malformed, RunIdentity, SimTime,
 };
 
-/// A checkpoint's only form: the envelope's bytes. `Session::checkpoint` writes them, and `Session::resume`,
-/// `Session::rewind` and `Session::recover` read them through `restore`, so an in-process retry and a
-/// loaded save are one path. A host persists `as_bytes` and reloads with `from_bytes`, which checks nothing.
+/// A checkpoint's only form: the envelope's bytes, so an in-process retry and a loaded save are one path.
+/// `from_bytes` checks nothing.
 pub struct Checkpoint {
     bytes: Vec<u8>,
 }
@@ -20,7 +19,6 @@ impl Checkpoint {
     }
 }
 
-/// Why stored bytes did not become a session. The first six are decided with no body byte decoded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CheckpointError {
     /// Fewer bytes than the header, or than the header says the body holds.
@@ -72,7 +70,6 @@ impl BranchId {
     }
 }
 
-/// One fork on a branch's way from the run's own branch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BranchFork {
     parent: Digest,
@@ -91,8 +88,8 @@ impl BranchFork {
     }
 }
 
-/// A branch's id and the forks that led to it. A checkpoint carries it and no seal covers it, so a fork and
-/// the same course loaded from its checkpoint have equal seals.
+/// A checkpoint carries it and no seal covers it, so a fork and the same course loaded from its checkpoint
+/// have equal seals.
 #[derive(Clone)]
 pub(crate) struct BranchAncestry {
     id: Digest,
@@ -111,11 +108,9 @@ impl BranchAncestry {
     pub(crate) fn forks(&self) -> &[BranchFork] {
         &self.forks
     }
-    /// Whether `id` names this branch or one it came from.
     pub(crate) fn uses(&self, id: Digest) -> bool {
         id == self.id || self.forks.iter().any(|fork| fork.parent == id)
     }
-    /// The ancestry of `branch` leaving this branch at `revision`. Refuses an id on this line.
     fn forked(&self, branch: BranchId, revision: u64, at: SimTime) -> Result<Self, CheckpointError> {
         if self.uses(branch.digest) {
             return Err(CheckpointError::BranchInUse);
@@ -170,7 +165,6 @@ struct Header<'b> {
     body: &'b [u8],
 }
 
-/// Everything decided before a body byte is decoded, in this order.
 fn opened(bytes: &[u8]) -> Result<Header<'_>, CheckpointError> {
     let (header, body) = bytes.split_at_checked(HEADER).ok_or(CheckpointError::Truncated)?;
     let mut read = ByteReader::new(header);
@@ -205,7 +199,6 @@ fn opened(bytes: &[u8]) -> Result<Header<'_>, CheckpointError> {
     })
 }
 
-/// What the envelope holds beside its header.
 pub(crate) struct Sections<'r> {
     pub(crate) image: &'r ImageParts,
     pub(crate) streams: &'r StreamPositions,
@@ -213,7 +206,6 @@ pub(crate) struct Sections<'r> {
     pub(crate) history: &'r History,
 }
 
-/// One accepted image has one output, so a checkpoint does not depend on when it was taken.
 pub(crate) fn write(
     identity: &RunIdentity,
     revision: u64,
@@ -250,10 +242,8 @@ pub(crate) fn write(
     Checkpoint { bytes }
 }
 
-/// The one way bytes become a record: a host's store on a load, this branch's chain on a rewind, and `fork`
-/// is the only other difference. Any bytes from either source give a record or an error, never a panic. No
-/// body byte is decoded until the raw digest and the identity hold, and no record leaves here until the
-/// chain and the image it recorded for this head hold.
+/// Any bytes, from a host's store on a load or this branch's chain on a rewind, give a record or an error,
+/// never a panic.
 pub(crate) fn restore<'m>(
     saved: &Checkpoint,
     expected: &RunIdentity,
@@ -297,7 +287,6 @@ pub(crate) fn restore<'m>(
     PatientRecord::restored(body, expected.clone(), parts)
 }
 
-/// What a record takes from a verified checkpoint.
 pub(crate) struct Restored {
     pub(crate) branch: BranchAncestry,
     pub(crate) revision: u64,

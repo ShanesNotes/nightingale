@@ -110,7 +110,6 @@ impl Compensated {
     pub fn bits(self) -> [u64; 2] {
         [self.hi.to_bits(), self.lo.to_bits()]
     }
-    /// The inverse of `bits`, for stored bytes.
     pub fn from_bits(bits: [u64; 2]) -> Self {
         let [hi, lo] = bits;
         Self {

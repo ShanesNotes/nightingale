@@ -11,8 +11,7 @@ use super::*;
 pub trait CoupledSolver {
     /// The declared resolution this core runs under; part of the run identity.
     fn resolution(&self) -> DeclaredResolution;
-    /// The span this core commits to for its next step, in ns, from the accepted view alone. It takes
-    /// no problem and returns no ticket, so a core has nothing to ask before it commits, and its step
+    /// The span this core commits to for its next step, in ns, from the accepted view alone, so its step
     /// cannot depend on pace or on a later input.
     fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64;
     /// Solves exactly the ticketed interval or returns a refusal or fault. A proposal is owned and

@@ -21,8 +21,6 @@ impl CompiledBody {
         (self.layout.instances.iter().flat_map(|instance| &instance.inputs))
             .any(|input| matches!(input, Bound::Boundary(name) if *name == boundary))
     }
-    /// The one check of an input against this body, for a timeline at admission and a late input alike.
-    /// Refuses a boundary the schema does not declare or no law reads, and an instant before `earliest`.
     pub(crate) fn check_delivery(
         &self,
         delivery: &Delivery,
@@ -44,7 +42,6 @@ impl CompiledBody {
         }
         Ok(())
     }
-    /// The schema's own name for a boundary read back from bytes.
     pub(crate) fn boundary_name(&self, name: &str) -> Option<&'static str> {
         let boundaries = &self.layout.schema.boundaries;
         boundaries

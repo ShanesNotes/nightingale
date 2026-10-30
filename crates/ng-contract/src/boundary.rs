@@ -44,7 +44,6 @@ impl BoundaryEvent {
     pub fn id(&self) -> InputId {
         self.id
     }
-    /// The stamp: the instant this event applies.
     pub fn at(&self) -> SimTime {
         self.at
     }
@@ -140,7 +139,6 @@ impl Delivery {
             rate,
         })
     }
-    /// What one id must repeat to be the same request, and what a receipt names.
     fn payload(&self) -> Digest {
         let mut out = Canonical::new("ng-contract delivery 1");
         self.seal(&mut out);
@@ -155,21 +153,17 @@ pub(crate) struct Plan {
     /// The earliest end of a delivery running or due here. That input has applied or applies with this
     /// step, so every run at this head knows this instant.
     pub(crate) running_end: Option<SimTime>,
-    /// The next input still waiting. Only `PendingInputs::attempt` reads it, once a span has passed.
     pub(crate) next_waiting: Option<SimTime>,
 }
 
-/// Which attempt of one step a ticket is for.
 #[derive(Clone, Copy)]
 pub enum Attempt<'a> {
-    /// The span `CoupledSolver::next_step` committed to.
     First { span_ns: u64 },
-    /// The smaller span a refusal of this base left.
     After(&'a Refused),
 }
 
 /// The timeline: record state, and the one way to a ticket. A core holds a problem, and neither a problem
-/// nor an accepted view lends this value, so a core has no path to `attempt`.
+/// nor an accepted view lends this value, so a waiting input shows to a core only in a cut.
 pub struct PendingInputs {
     timeline: Vec<Delivery>,
     past: AppliedInputs,
@@ -342,12 +336,11 @@ impl PendingInputs {
         self.timeline.insert(self.past.cursor + at, delivery);
         Ok(delivery.payload())
     }
-    /// The earliest stamp `admit` takes at `head`: the head, or later behind a refused cut.
+    /// The earliest stamp `admit` takes at `head`.
     pub fn earliest_stamp(&self, head: SimTime) -> SimTime {
         self.past.fence.max(head)
     }
-    /// What has applied once `ticket`'s interval publishes: its due inputs applied, and deliveries that
-    /// ended at its start dropped.
+    /// What has applied once `ticket`'s interval publishes.
     pub fn after(&self, ticket: &StepTicket) -> AppliedInputs {
         let start = ticket.interval().start();
         let due = self.due_at(start);
@@ -358,7 +351,6 @@ impl PendingInputs {
             fence: ticket.fence.max(self.past.fence),
         }
     }
-    /// Installs what `after` returned, as `publish` does.
     pub fn advance(&mut self, past: AppliedInputs) {
         self.past = past;
     }
@@ -370,8 +362,7 @@ impl PendingInputs {
         self.timeline[self.past.cursor..].seal(&mut out);
         out.digest()
     }
-    /// The timeline with each input's payload tag, then the cursor, each running delivery by its place on
-    /// the timeline and the fence. `rate` and `chain` are derived, so `read` never takes them on trust.
+    /// `rate` and `chain` are derived, so `read` never takes them on trust.
     pub(crate) fn write(&self, out: &mut Canonical) {
         let Self { timeline, past } = self;
         let AppliedInputs {
@@ -405,9 +396,7 @@ impl PendingInputs {
         }
         fence.seal(out);
     }
-    /// Reads `write`'s bytes against `body`, at the head `time`. Refuses bytes no run writes: a timeline
-    /// out of order or with an id twice, a boundary the body does not declare, an applied input at or past
-    /// the head, a waiting one before it, and a running delivery that never applied or has ended.
+    /// Refuses bytes no run writes.
     pub(crate) fn read(
         read: &mut ByteReader<'_>,
         body: &CompiledBody,
@@ -461,7 +450,6 @@ impl PendingInputs {
     }
 }
 
-/// The payload tag of a water delivery. A new payload takes a new tag.
 const WATER_PAYLOAD: u64 = 0;
 /// An id, a stamp, a tag, a name's length, an amount and an end: the least one delivery can take.
 const DELIVERY_BYTES: usize = 72;

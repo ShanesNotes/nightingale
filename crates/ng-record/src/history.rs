@@ -130,8 +130,6 @@ impl LedgerChunk {
     fn digest(&self) -> Digest {
         Digest::of_canonical(&self.bytes())
     }
-    /// Reads `bytes`'s output for a body of `quantities` combinations and `columns` columns. Refuses an
-    /// empty interval and a value no published step holds.
     fn read(read: &mut ByteReader<'_>, quantities: usize, columns: usize) -> Result<Self, Malformed> {
         let interval = Interval::new(read.time()?, read.time()?).ok_or(Malformed)?;
         let quantities = (0..quantities)
@@ -164,8 +162,6 @@ impl LedgerChunk {
     }
 }
 
-/// The seal of one accepted revision: the seal before it, the revision, the digest of the image it ends at
-/// and the digest of its ledger. It covers the past and nothing that waits.
 fn linked(previous: Digest, revision: u64, image: Digest, ledger: Digest) -> Digest {
     let mut bytes = Vec::with_capacity(104);
     bytes.extend_from_slice(previous.as_bytes());
@@ -175,7 +171,6 @@ fn linked(previous: Digest, revision: u64, image: Digest, ledger: Digest) -> Dig
     Digest::of_canonical(&bytes)
 }
 
-/// One accepted step as the chain holds it.
 pub(crate) struct Link {
     chunk: LedgerChunk,
     image: Digest,
@@ -187,8 +182,7 @@ impl Link {
     }
 }
 
-/// What the chain starts from: the digest of the admitted image and the seal of revision 0, which also
-/// covers the values bound for the run, because no later revision changes them.
+/// The seal of revision 0 also covers the values bound for the run, because no later revision changes them.
 pub(crate) struct Origin {
     pub(crate) image: Digest,
     seal: Digest,
@@ -264,15 +258,12 @@ impl History {
     pub(crate) fn origin(&self) -> &Origin {
         &self.origin
     }
-    /// The seal of the accepted head.
     pub(crate) fn seal(&self) -> Digest {
         self.links.last().map_or(self.origin.seal, |link| link.seal)
     }
-    /// The digest of the image the accepted head holds, as the chain recorded it.
     pub(crate) fn head_image(&self) -> Digest {
         self.links.last().map_or(self.origin.image, |link| link.image)
     }
-    /// Chains `chunk` and the digest of the image it ends at onto the head.
     pub(crate) fn linked(&self, chunk: LedgerChunk, revision: u64, image: Digest) -> Link {
         let seal = linked(self.seal(), revision, image, chunk.digest());
         Link { chunk, image, seal }
@@ -280,7 +271,6 @@ impl History {
     pub(crate) fn push(&mut self, link: Link) {
         self.links.push(link);
     }
-    /// The stored form of one link: the seal before it, the image digest it holds, then its chunk.
     fn stored(&self, at: usize) -> Vec<u8> {
         let previous = (at.checked_sub(1)).map_or(self.origin.seal, |before| self.links[before].seal);
         let link = &self.links[at];
@@ -289,8 +279,8 @@ impl History {
         bytes.extend_from_slice(&link.chunk.bytes());
         bytes
     }
-    /// Every link the store lacks, oldest first, so a store that fails part way still holds a chain with
-    /// no gap. `held` answers for what the store holds, and a store is asked to keep what it took.
+    /// The links after the newest one `held`, oldest first, so a store that fails part way still holds a
+    /// chain with no gap. A store is asked to keep what it took, so nothing older is offered again.
     pub(crate) fn unkept(&self, held: &dyn Fn(&Digest) -> bool) -> Vec<(Digest, Vec<u8>)> {
         let kept = self.links.iter().rposition(|link| held(&link.seal));
         let from = kept.map_or(0, |at| at + 1);
@@ -308,8 +298,6 @@ impl History {
             Some(self.stored(at))
         }
     }
-    /// Rebuilds a history of `count` links from `seal` back to the opening. Each link is checked against
-    /// the seal that asked for it before a byte of it is parsed, so a store is trusted for nothing.
     pub(crate) fn walked(
         body: &CompiledBody,
         start: Start,
@@ -376,7 +364,6 @@ impl History {
     }
 }
 
-/// What a walk needs to rebuild the start of a chain: the checkpoint holds the rest of the origin's facts.
 pub(crate) struct Start {
     pub(crate) run: Digest,
     pub(crate) opening: Vec<Compensated>,

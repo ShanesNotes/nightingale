@@ -53,7 +53,6 @@ fn delivering(deliveries: Vec<Delivery>, end: u64) -> TwoReservoirs {
         .until(at(end))
 }
 
-/// Overlapping deliveries, two at one instant and one off the core's grid.
 fn busy() -> TwoReservoirs {
     let deliveries = vec![
         delivery(b"first", 30, 90),
@@ -296,7 +295,6 @@ fn the_same_count_in_a_continuation_passes_resume_and_rewind() {
     }
 }
 
-/// A factory for two runs of one case: the reference run's core hears `first`, each later run's `later`.
 fn two_callers(first: Vec<SimTime>, later: Vec<SimTime>) -> impl Fn() -> ClipsAt {
     let calls = Cell::new(0);
     move || {
@@ -436,8 +434,6 @@ fn reader(span_ns: u64, refuses_over_ns: u64, seen: Seeing) -> ReadsPastTheBreak
     }
 }
 
-/// Every ticket a core that commits to `span_ns` and refuses past `refuses_over_ns` is shown before its
-/// budget ends the run.
 fn tickets_until_the_fault(
     case: &TwoReservoirs,
     span_ns: u64,
@@ -1182,7 +1178,6 @@ fn a_missing_or_altered_link_is_refused_by_its_seal() {
     }
 }
 
-/// A link that chains true to a new seal, holding `image` and `chunk`, on a checkpoint named for that seal.
 fn relinked(store: &mut Store, saved: &Checkpoint, image: &[u8], chunk: &[u8]) -> (Digest, Checkpoint) {
     let (_, link) = store.links[0].clone();
     let revision = u64::from_be_bytes(*saved.as_bytes()[80..].first_chunk().expect("a revision"));
@@ -1464,7 +1459,6 @@ fn a_fork_named_after_the_branch_it_saved_from_is_refused() {
     );
 }
 
-/// Faults on the first ticket from one head, so a run can reach a latch with nothing wrong in its body.
 struct FaultsAt {
     inner: ReferenceIntegrator,
     at: SimTime,
@@ -1722,8 +1716,7 @@ impl Random {
     }
 }
 
-/// One random timeline: every input known at admission against each arriving at a random head that can
-/// still take it. Returns `None` when the known run faults, which says nothing about a late one.
+/// Returns `None` when the known run faults, which says nothing about a late one.
 fn late_against_known(core: &dyn CoupledSolver, random: &mut Random) -> Option<u64> {
     let names: [&[u8]; 4] = [b"a", b"b", b"c", b"d"];
     let inputs: Vec<(&[u8], SimTime, SimTime)> = (0..1 + random.below(4))

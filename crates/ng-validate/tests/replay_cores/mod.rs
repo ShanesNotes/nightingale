@@ -38,7 +38,6 @@ fn explicit(
     Ok(problem.propose(ticket, quadrature.finish()?, &workspace, history))
 }
 
-/// A count in a `Cell`, outside its continuation, shapes its span.
 pub struct KeepsACache {
     pub interval_ns: u64,
     pub steps: Cell<u64>,
@@ -76,7 +75,6 @@ impl CoupledSolver for CountsInACell {
     }
 }
 
-/// The legal twin of `KeepsACache`: the same count, in its continuation.
 pub struct KeepsACount {
     pub interval_ns: u64,
 }
@@ -95,8 +93,7 @@ impl CoupledSolver for KeepsACount {
     }
 }
 
-/// Cuts its span at the output times a caller told it, as a core that clips at them does. It never hears
-/// them through the seam, so a test's factory hands them over.
+/// It never hears the output times through the seam, so a test's factory hands them over.
 pub struct ClipsAt {
     pub inner: ReferenceIntegrator,
     pub outputs: Vec<SimTime>,
@@ -116,8 +113,6 @@ impl CoupledSolver for ClipsAt {
     }
 }
 
-/// A list of readings, each read once, and what the last read returned, which `ReadsTheHostClock` shapes
-/// its span from.
 pub struct ScriptedClock {
     pub readings: Vec<u64>,
     pub next: Cell<usize>,
@@ -160,7 +155,6 @@ impl CoupledSolver for ReadsTheHostClock {
     }
 }
 
-/// One solve as a core sees it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Seen {
     pub interval: Interval,
@@ -168,8 +162,6 @@ pub struct Seen {
     pub digest: Digest,
 }
 
-/// The attempt to read past the breakpoint: commits to any span and writes down every ticket it is shown.
-/// It refuses a ticket longer than `refuses_over_ns`, as a core's own error control would.
 pub struct ReadsPastTheBreakpoint {
     pub inner: ReferenceIntegrator,
     pub span_ns: u64,
@@ -196,8 +188,8 @@ impl CoupledSolver for ReadsPastTheBreakpoint {
     }
 }
 
-/// Reads a cut, refuses it, and spreads its steps toward the instant it read. The instant crosses from the
-/// refused attempt to the retry in a `Cell`, because a retry's length no longer tells it.
+/// The instant a cut shows crosses from the refused attempt to the retry in a `Cell`, because a retry's
+/// length no longer tells it.
 pub struct ActsOnACut {
     pub span_ns: u64,
     pub read: Cell<Option<u64>>,
@@ -223,11 +215,9 @@ impl CoupledSolver for ActsOnACut {
     }
 }
 
-/// Refuses exactly one ticket, by its ends: a pure core, so what it does a run with the same tickets does.
 pub struct RefusesOne {
     pub inner: ReferenceIntegrator,
     pub interval: Interval,
-    /// Its span from every head past the origin, so a test can step short of a fence.
     pub later_ns: u64,
     pub seen: &'static RefCell<Vec<Seen>>,
 }
@@ -255,8 +245,8 @@ impl CoupledSolver for RefusesOne {
     }
 }
 
-/// Keeps the bytes of each ticket's digest in its continuation and shapes its span from them. Honest in
-/// every way, so a run that differs by a waiting input differs only if a digest carried that input.
+/// Honest in every way, so a run that differs by a waiting input differs only if a digest carried that
+/// input.
 pub struct KeepsTheDigest {
     pub interval_ns: u64,
 }
@@ -275,8 +265,7 @@ impl CoupledSolver for KeepsTheDigest {
     }
 }
 
-/// Keeps a mark in a `Cell` from every head before `at`, and takes a shorter span from `at` when the mark is
-/// missing, so its hidden state shows only to a resume exactly there.
+/// Its hidden state shows only to a resume exactly at `at`.
 pub struct ShowsAt {
     pub inner: ReferenceIntegrator,
     pub at: SimTime,
@@ -327,8 +316,6 @@ impl CoupledSolver for RefusesByHash {
     }
 }
 
-/// Halves its span once a run has jumped, as a core that restarts its method on a load or a rewind does. A
-/// load and a fork then agree with each other and with no run that came straight there.
 pub struct RestartsAfterAJump {
     pub inner: ReferenceIntegrator,
     pub last: Cell<Option<SimTime>>,

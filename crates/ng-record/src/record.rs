@@ -42,7 +42,6 @@ impl StreamPositions {
         out.extend_from_slice(&(self.ordinals.len() as u64).to_be_bytes());
         out.extend_from_slice(&self.bytes());
     }
-    /// Keys strictly ascending, as a run keeps them.
     pub(crate) fn read(read: &mut ByteReader<'_>) -> Result<Self, Malformed> {
         let mut ordinals: Vec<(Digest, u64)> = Vec::new();
         for _ in 0..read.count(40)? {
@@ -125,8 +124,6 @@ impl<'m> PatientRecord<'m> {
             history,
         }
     }
-    /// A record from parts a checkpoint held, or `SealMismatch` when they are not the image the chain
-    /// recorded for this head.
     pub(crate) fn restored(
         body: &'m CompiledBody,
         identity: RunIdentity,
@@ -176,11 +173,11 @@ impl<'m> PatientRecord<'m> {
         let image = &self.image;
         AcceptedStateView::new(image.time, &image.state, &image.continuation, &image.dense)
     }
-    /// The earliest stamp `Session::enqueue` takes now: the accepted head, or later behind a refused cut.
+    /// The earliest stamp `Session::enqueue` takes now.
     pub fn earliest_stamp(&self) -> SimTime {
         self.image.pending.earliest_stamp(self.image.time)
     }
-    /// The forks that led to this branch, oldest first. Empty on the run's own branch.
+    /// Oldest first. Empty on the run's own branch.
     pub fn ancestry(&self) -> &[BranchFork] {
         self.branch.forks()
     }
@@ -193,8 +190,7 @@ impl<'m> PatientRecord<'m> {
             self.history.seal(),
         )
     }
-    /// Runs one attempt of the next step to the image it would publish, or its failure. Immutable, so a
-    /// host can drive a core by hand. Only a session publishes.
+    /// Immutable, so a host can drive a core by hand. Only a session publishes.
     pub fn attempt(
         &self,
         solver: &dyn CoupledSolver,
@@ -212,8 +208,7 @@ impl<'m> PatientRecord<'m> {
         })
     }
     /// The contract answers whether the core followed its declared method; this answers whether the result
-    /// may become the next accepted image. `expected` is the ticket `attempt` issued, so a proposal for any
-    /// other attempt is `BindingMismatch`.
+    /// may become the next accepted image.
     fn validate(&self, expected: &StepTicket, proposal: StepProposal) -> Result<NextImage, TrialFailure> {
         let problem = self.problem();
         if proposal.ticket().digest() != expected.digest() {
@@ -294,15 +289,12 @@ impl<'m> PatientRecord<'m> {
             excursions,
         }
     }
-    /// Adds a late input to what waits, through the check `initialization` makes. It moves no accepted
-    /// part, so no revision and no seal, and an observer sees no gap.
     pub(crate) fn admit_input(&mut self, input: AuthorizedInput) -> Result<InputReceipt, AdmissionError> {
         let AuthorizedInput { command: _, event } = input;
         let (id, at) = (event.id(), event.at());
         let payload = self.image.pending.admit(self.body, self.image.time, event)?;
         Ok(InputReceipt { id, payload, at })
     }
-    /// Writes the envelope once `store` holds every link it names. `latched` marks a fault's last image.
     pub(crate) fn checkpoint(
         &self,
         store: &mut dyn HistoryStore,
@@ -402,7 +394,6 @@ impl StepReceipt {
     pub fn applied(&self) -> &[InputId] {
         &self.applied
     }
-    /// True when this step started at a breakpoint: an input applied, or a delivery ended.
     pub fn after_breakpoint(&self) -> bool {
         self.after_breakpoint
     }
@@ -423,8 +414,8 @@ impl AuthorizedInput {
             event,
         }
     }
-    /// The receipt this input came from. No seal covers it, so an input with a command and the same input
-    /// known at admission give the same bits. A host's own log pairs the two.
+    /// No seal covers it, so an input with a command and the same input known at admission give the same
+    /// bits. A host's own log pairs the two.
     pub fn command(&self) -> Digest {
         self.command
     }

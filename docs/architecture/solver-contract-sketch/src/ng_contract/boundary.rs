@@ -26,7 +26,6 @@ impl BoundaryEvent {
     pub fn id(&self) -> InputId {
         todo!()
     }
-    /// The stamp: the instant this event applies.
     pub fn at(&self) -> SimTime {
         todo!()
     }
@@ -142,18 +141,14 @@ pub enum SleepState {
     Awake,
     Nrem,
 }
-/// Which attempt of one step a ticket is for.
 #[derive(Clone, Copy)]
 pub enum Attempt<'a> {
-    /// The span `CoupledSolver::next_step` committed to.
     First { span_ns: u64 },
-    /// The smaller span a refusal of this base left.
     After(&'a Refused),
 }
 /// The timeline: record state, checkpointed (nightingale-pulse#238), and the one way to a ticket. A
-/// core holds a problem, and neither a problem nor an accepted view lends this value, so a core has no
-/// path to `attempt`. A breakpoint is a timeline event or a delivery's end, never a UI refresh, pace
-/// change or checkpoint request.
+/// core holds a problem, and neither a problem nor an accepted view lends this value, so a waiting
+/// input shows to a core only in a cut.
 pub struct PendingInputs {
     _timeline: BoundaryPort,
     _past: AppliedInputs,
@@ -197,16 +192,14 @@ impl PendingInputs {
     ) -> Result<Digest, AdmissionError> {
         todo!()
     }
-    /// The earliest stamp `admit` takes at `head`: the head, or later behind a refused cut.
+    /// The earliest stamp `admit` takes at `head`.
     pub fn earliest_stamp(&self, _head: SimTime) -> SimTime {
         todo!()
     }
-    /// What has applied once `ticket`'s interval publishes: its due inputs applied, and deliveries
-    /// that ended at its start dropped.
+    /// What has applied once `ticket`'s interval publishes.
     pub fn after(&self, _ticket: &StepTicket) -> AppliedInputs {
         todo!()
     }
-    /// Installs what `after` returned, as `publish` does.
     pub fn advance(&mut self, _past: AppliedInputs) {
         todo!()
     }

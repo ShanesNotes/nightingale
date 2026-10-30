@@ -8,8 +8,7 @@ use ng_record::{
 };
 
 /// Builds a core with no state from earlier runs. A gate calls it once per run, its reference run first, so
-/// a core that must differ between two runs can differ only through what its factory gives it: the seam
-/// gives two runs of one case nothing else to read.
+/// a core that must differ between two runs can differ only through what its factory gives it.
 pub trait CoreFactory {
     fn fresh(&self) -> Box<dyn CoupledSolver + '_>;
 }
@@ -27,23 +26,20 @@ where
 pub enum ClockSource {
     /// A list of readings, which proves pace cannot reach a run and is no live clock.
     Scripted,
-    /// A host read a real clock.
     Host,
 }
 
-/// What a host reads to pace a live run. No crate here reads a clock, so a host outside the workspace passes
-/// one in. A host's clock may wait for its next tick before it answers.
+/// No crate here reads a clock, so a host outside the workspace passes one in. A host's clock may wait for
+/// its next tick before it answers.
 pub trait WallClock {
     /// Wall ns since the run began, or `None` when this clock has no more to say.
     fn elapsed_ns(&self) -> Option<u64>;
     fn source(&self) -> ClockSource;
 }
 
-/// How a gate presses a case. The values are policy, and the evidence reports them through its runs.
 pub struct ReplayPlan<'c> {
     pub clock: &'c dyn WallClock,
-    /// Simulated ns per wall ns under `clock`. A reading that stands still is a pause and one that jumps
-    /// is a fast-forward.
+    /// Simulated ns per wall ns under `clock`.
     pub simulated_per_wall: u64,
     /// Lengths of simulated time, each after the last, repeating to the end of the case.
     pub chunks: Vec<u64>,
@@ -82,7 +78,7 @@ pub enum ReplayFailure {
         gate: ReplayGate,
         failure: InitializationFailure,
     },
-    /// A timeline input refused by `enqueue` at the head the gate chose.
+    /// A timeline input the case could not build, or `enqueue` refused at the head the gate chose.
     InputRefused { gate: ReplayGate, error: AdmissionError },
     /// A checkpoint that could not be saved or loaded.
     Checkpoint {
@@ -96,8 +92,7 @@ pub enum ReplayFailure {
     MissingEvidence { gate: ReplayGate },
 }
 
-/// One gate's digests, bound to the run identity they measured: its reference run first, then each run it
-/// compared.
+/// `runs` holds the reference run first, then each run the gate compared.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GateEvidence {
     gate: ReplayGate,
@@ -115,14 +110,13 @@ impl GateEvidence {
     pub fn runs(&self) -> &[RecordDigests] {
         &self.runs
     }
-    /// What paced the live run, for the pace gate. A script here is no evidence of a live clock.
+    /// What paced the live run, for the pace gate.
     pub fn clock(&self) -> Option<ClockSource> {
         self.clock
     }
 }
 
-/// Every gate's digests for one run, one field per gate. No public constructor, so evidence comes only from
-/// `replay_gates`.
+/// No public constructor, so evidence comes only from `replay_gates`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReplayEvidence {
     run: Digest,
@@ -145,8 +139,7 @@ impl ReplayEvidence {
     }
 }
 
-/// One accepted step as a gate reads it. A seal covers every accepted part, so comparing seals per step
-/// needs no rehash of the ledger.
+/// A seal covers every accepted part, so comparing seals per step needs no rehash of the ledger.
 struct Row {
     time: SimTime,
     seal: Seal,
@@ -165,22 +158,20 @@ impl Row {
     }
 }
 
-/// A run's course and its digests recomputed from the live fields at the end.
 struct Trace {
     rows: Vec<Row>,
     last: RecordDigests,
 }
 
-/// The first instant `run` leaves `reference`, reading as many rows as they share. Two runs to one end with
-/// equal seals have equal rows, so a shared prefix is the whole of each.
+/// Two runs to one end with equal seals have equal rows, so a shared prefix is the whole of each.
 fn first_difference(reference: &[Row], run: &[Row]) -> Option<SimTime> {
     (reference.iter().zip(run))
         .find(|(known, seen)| known.seal != seen.seal)
         .map(|(known, seen)| known.time.min(seen.time))
 }
 
-/// `None` when two courses agree at every row they share and at the end, whose digests also read what waits
-/// and are recomputed from the live fields, so a part a seal failed to cover still shows.
+/// The end's digests also read what waits and are recomputed from the live fields, so a part a seal failed
+/// to cover still shows.
 fn first_divergence(
     known: &[Row],
     expected: &RecordDigests,
@@ -239,8 +230,6 @@ fn revision_to<'m>(
     Ok(session)
 }
 
-/// Steps to `end` under `pace`, which only chooses when this loop calls `step`, so it cannot enter a
-/// compiled body, a ticket or a run identity.
 fn traced<'m>(
     gate: ReplayGate,
     mut session: Session<'m, Running>,
@@ -285,7 +274,6 @@ fn admitted<'m>(
     session.map_err(|failure| ReplayFailure::Admission { gate, failure })
 }
 
-/// Every timeline input known at admission, unbounded pace: what each gate compares against.
 fn reference(
     gate: ReplayGate,
     case: &TwoReservoirs,
@@ -347,7 +335,6 @@ fn pace_gate(
     })
 }
 
-/// A host's store, held in memory for a gate's run.
 #[derive(Default)]
 struct MemoryStore {
     links: Vec<(Digest, Vec<u8>)>,
@@ -365,8 +352,8 @@ impl HistoryStore for MemoryStore {
     }
 }
 
-/// The revisions to resume at: every `every`th, and each side of a step that started at a breakpoint or met
-/// a refusal, since those are the boundaries a resume is likeliest to lose.
+/// Each side of a step that started at a breakpoint or met a refusal is a boundary a resume is likeliest to
+/// lose.
 fn boundaries(rows: &[Row], every: u64) -> Vec<u64> {
     let last = rows.len() as u64 - 1;
     let mut revisions = Vec::new();
@@ -383,8 +370,7 @@ fn boundaries(rows: &[Row], every: u64) -> Vec<u64> {
     revisions
 }
 
-/// Takes checkpoints at chosen boundaries of one uninterrupted run, then loads each into a freshly built
-/// core. The first runs to the end and each other to the next boundary, so the cost stays near two runs and
+/// The first load runs to the end and each other to the next boundary, so the cost stays near two runs and
 /// a slow leak of hidden state still shows.
 fn resume_gate(
     case: &TwoReservoirs,
@@ -437,9 +423,7 @@ fn resume_gate(
 /// Admits each input at the last head a run can still take it, so every step before that head was blind to
 /// it: the last reference row whose earliest stamp is before the input's. The next reference step reached
 /// the stamp, or was refused short of it after a cut there, and a run that did not know the input would
-/// have gone past. An input past only the origin arrives at the first head, if that head can take it, and
-/// otherwise it has no head to arrive at. The gate reads only heads and stamps, so it needs no knowledge of
-/// the core.
+/// have gone past.
 fn late_admission_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<GateEvidence, ReplayFailure> {
     let gate = ReplayGate::LateAdmission;
     let (reference, run) = reference(gate, case, cores)?;
@@ -478,9 +462,8 @@ fn late_admission_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<
     })
 }
 
-/// Runs a parent ahead of a checkpoint, rewinds it in process with the same core object, and loads the same
-/// checkpoint into a freshly built core. The same core object is the point: a state it kept while the parent
-/// ran ahead has nowhere to hide.
+/// The rewind keeps the parent's core object on purpose: a state it kept while the parent ran ahead has
+/// nowhere to hide.
 fn rewind_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<GateEvidence, ReplayFailure> {
     let gate = ReplayGate::Rewind;
     let checkpointed = |error| ReplayFailure::Checkpoint { gate, error };
@@ -513,7 +496,6 @@ fn rewind_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<GateEvid
     })
 }
 
-/// One gate, in fresh cores from `cores`.
 pub fn replay_gate(
     gate: ReplayGate,
     case: &TwoReservoirs,
@@ -528,7 +510,6 @@ pub fn replay_gate(
     }
 }
 
-/// Every gate, stopping at the first failure.
 pub fn replay_gates(
     case: &TwoReservoirs,
     cores: &dyn CoreFactory,

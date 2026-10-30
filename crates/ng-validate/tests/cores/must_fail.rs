@@ -289,8 +289,6 @@ impl CoupledSolver for EarlierAttempt {
     }
 }
 
-/// Keeps the ticket of its first step and solves that one in the next step, so its proposal answers a
-/// ticket the session did not issue for this attempt.
 pub struct SwappedTicket {
     pub inner: ForwardEuler,
     pub kept: RefCell<Option<StepTicket>>,
@@ -314,8 +312,6 @@ impl CoupledSolver for SwappedTicket {
     }
 }
 
-/// Keeps the ticket of its first step and answers the next with a refusal of that one, so a core cannot
-/// reset its budget through a refusal of another ticket.
 pub struct ForeignRefusal {
     pub inner: ForwardEuler,
     pub kept: RefCell<Option<StepTicket>>,
@@ -339,7 +335,6 @@ impl CoupledSolver for ForeignRefusal {
     }
 }
 
-/// Takes `inner`'s span at the origin and `then_ns` from every later head.
 pub struct Spans {
     pub inner: ForwardEuler,
     pub then_ns: u64,

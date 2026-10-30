@@ -73,7 +73,6 @@ impl Bench {
         let base = Digest::of_canonical(b"base");
         CoupledProblem::new(&self.body, &parts.parameters, &self.identity, accepted, base)
     }
-    /// The ticket a step of `span_ns` ends with, through the one mint.
     fn ticket(&self, span_ns: u64) -> Result<StepTicket, TrialFailure> {
         let attempt = Attempt::First { span_ns };
         (self.parts.pending).attempt(&self.problem(), attempt, |ticket| Ok(ticket.clone()))

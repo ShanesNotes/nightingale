@@ -66,9 +66,8 @@ impl<'m, S> Session<'m, S> {
     pub fn record(&self) -> &PatientRecord<'m> {
         &self.record
     }
-    /// A new branch from `saved`, through the path a load takes, with this branch's own chain in place of a
-    /// store. The solver is this session's, so a core that kept state while the parent ran ahead carries it
-    /// into the fork. The parent is untouched.
+    /// The solver is this session's, so a core that kept state while the parent ran ahead carries it into
+    /// the fork.
     fn fork(&self, saved: &Checkpoint, branch: BranchId) -> Result<Session<'m, Running>, CheckpointError> {
         if self.record.branch().uses(branch.digest()) {
             return Err(CheckpointError::BranchInUse);
@@ -112,8 +111,8 @@ impl<'m> Session<'m, Running> {
             status: Running,
         })
     }
-    /// Continues the run `saved` holds, on its branch, in `solver`, which may be freshly built. `store`
-    /// resolves the history `saved` names. Everything is verified before a record exists.
+    /// Continues the run `saved` holds, on its branch, in `solver`, which may be freshly built.
+    /// Everything is verified before a record exists.
     pub fn resume(
         saved: &Checkpoint,
         expected: &RunIdentity,
@@ -133,8 +132,7 @@ impl<'m> Session<'m, Running> {
             status: Running,
         })
     }
-    /// Adds a late input. Stamped before the accepted head or the fence, it is refused. Only a running
-    /// session takes one: a retry is mid-step, and a faulted run has no next step to take it.
+    /// Adds a late input. Stamped before the accepted head or the fence, it is refused.
     pub fn enqueue(&mut self, input: AuthorizedInput) -> Result<InputReceipt, AdmissionError> {
         self.record.admit_input(input)
     }
@@ -187,8 +185,7 @@ impl<'m> Session<'m, Faulted> {
     pub fn refusals(&self) -> &[Refused] {
         &self.status.refusals
     }
-    /// The last accepted image, the fault and the refusals before it, for diagnosis. The image is marked,
-    /// so `resume` refuses it: a faulted run goes on only through `recover`.
+    /// The image is marked, so `resume` refuses it: a faulted run goes on only through `recover`.
     pub fn export(&self, store: &mut dyn HistoryStore) -> Result<FaultReport, CheckpointError> {
         Ok(FaultReport {
             last_accepted: self.record.checkpoint(store, true)?,

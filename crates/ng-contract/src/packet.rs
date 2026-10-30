@@ -161,7 +161,6 @@ impl BoundParameters {
     pub fn packet_hash(&self) -> PacketHash {
         self.packet
     }
-    /// Every bound value, which no later revision changes.
     pub fn digest(&self) -> Digest {
         let Self {
             model,

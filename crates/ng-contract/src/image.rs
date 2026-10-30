@@ -7,13 +7,11 @@ use crate::{
 
 const IMAGE_FORMAT: &str = "ng-contract image 1";
 
-/// Bytes that are not the canonical form they were read as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Malformed;
 
-/// A cursor over canonical bytes: fixed-width big-endian fields, a float as its bits, each list after its
-/// length. No read goes past the bytes, and a length is refused unless the bytes left can hold it, so a
-/// corrupt length asks for no allocation the input does not back.
+/// A length is refused unless the bytes left can hold it, so a corrupt length asks for no allocation the
+/// input does not back.
 pub struct ByteReader<'b> {
     bytes: &'b [u8],
 }
@@ -40,7 +38,6 @@ impl<'b> ByteReader<'b> {
     pub fn compensated(&mut self) -> Result<Compensated, Malformed> {
         Ok(Compensated::from_bits([self.number()?, self.number()?]))
     }
-    /// A list's length, for items of at least `item_bytes` each.
     pub fn count(&mut self, item_bytes: usize) -> Result<usize, Malformed> {
         let count = usize::try_from(self.number()?).map_err(|_| Malformed)?;
         let needed = count.checked_mul(item_bytes).ok_or(Malformed)?;
@@ -49,7 +46,6 @@ impl<'b> ByteReader<'b> {
         }
         Ok(count)
     }
-    /// Refuses a byte left over.
     pub fn finish(self) -> Result<(), Malformed> {
         if self.bytes.is_empty() {
             Ok(())
@@ -81,9 +77,9 @@ impl<'b> ByteReader<'b> {
     }
 }
 
-/// What the contract owns of one accepted image. Admission makes the first, and a record moves it forward.
-/// Parts enter a record only through `InitialRevision`, which only `InitializationSystem::admit` makes, or
-/// through checkpoint bytes `ng-record` has verified, so `parse` mints nothing a record takes.
+/// What the contract owns of one accepted image. Parts enter a record only through `InitialRevision`,
+/// which only `InitializationSystem::admit` makes, or through checkpoint bytes `ng-record` has verified,
+/// so `parse` mints nothing a record takes.
 pub struct ImageParts {
     pub time: SimTime,
     pub state: Candidate,
@@ -93,7 +89,6 @@ pub struct ImageParts {
     pub parameters: BoundParameters,
 }
 impl ImageParts {
-    /// One image has one output, so a checkpoint's bytes do not depend on when it was taken.
     pub fn canonical(&self) -> Vec<u8> {
         let Self {
             time,
@@ -140,8 +135,7 @@ impl ImageParts {
         starts.seal(&mut out);
         out.into_bytes()
     }
-    /// Reads `canonical` bytes against `body`. Any bytes give parts or `Malformed`, never a panic. Refuses
-    /// a value outside its row's set, which no accepted state holds.
+    /// Any bytes give parts or `Malformed`, never a panic.
     pub fn parse(body: &CompiledBody, bytes: &[u8]) -> Result<Self, Malformed> {
         let mut read = ByteReader::new(bytes);
         let format = read.text()?;

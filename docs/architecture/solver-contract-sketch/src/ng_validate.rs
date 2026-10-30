@@ -267,11 +267,10 @@ pub enum Pace {
 pub enum ClockSource {
     /// A list of readings, which proves pace cannot reach a run and is no live clock.
     Scripted,
-    /// A host read a real clock.
     Host,
 }
-/// What a host reads to pace a live run. No crate here reads a clock, so a host outside the workspace
-/// passes one in. A host's clock may wait for its next tick before it answers.
+/// No crate here reads a clock, so a host outside the workspace passes one in. A host's clock may wait
+/// for its next tick before it answers.
 pub trait WallClock {
     /// Wall ns since the run began, or `None` when this clock has no more to say.
     fn elapsed_ns(&self) -> Option<u64>;
@@ -317,8 +316,7 @@ impl ArenaSpec {
         todo!()
     }
 }
-/// One gate's digests, bound to the run identity they measured: its reference run first, then each
-/// run it compared.
+/// Digests of the reference run first, then each run the gate compared.
 pub struct GateEvidence {
     _gate: ReplayGate,
     _run: Digest,
@@ -356,7 +354,7 @@ pub struct NumericalHealth {
 }
 /// Builds a fresh core with no state from earlier runs. A gate calls it once per run, its reference
 /// run first, so a core that must differ between two runs can differ only through what its factory
-/// gives it: the seam gives two runs of one case nothing else to read.
+/// gives it.
 pub trait CoreFactory {
     fn fresh(&self) -> Box<dyn CoupledSolver + '_>;
 }

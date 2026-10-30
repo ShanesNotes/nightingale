@@ -58,12 +58,11 @@ impl PatientRecord<'_> {
     pub fn problem(&self) -> CoupledProblem<'_> {
         todo!()
     }
-    /// The earliest stamp `Session::enqueue` takes now: the accepted head, or later behind a refused
-    /// cut.
+    /// The earliest stamp `Session::enqueue` takes now.
     pub fn earliest_stamp(&self) -> SimTime {
         todo!()
     }
-    /// The forks that led to this branch, oldest first. Empty on the run's own branch.
+    /// Oldest first. Empty on the run's own branch.
     pub fn ancestry(&self) -> &[BranchFork] {
         todo!()
     }
@@ -124,8 +123,6 @@ pub struct NextImage {
     _applied: Vec<InputId>,
     _excursions: Vec<ValidityExcursion>,
 }
-/// What one published step did: its revision and seal, each input it applied, whether it started at
-/// a breakpoint, and any excursion.
 pub struct StepReceipt {
     _revision: u64,
     _seal: Seal,
@@ -144,7 +141,6 @@ impl StepReceipt {
     pub fn applied(&self) -> &[InputId] {
         todo!()
     }
-    /// True when this step started at a breakpoint: an input applied, or a delivery ended.
     pub fn after_breakpoint(&self) -> bool {
         todo!()
     }
@@ -161,8 +157,8 @@ impl AuthorizedInput {
     pub fn from_command_receipt(_receipt: Digest, _event: BoundaryEvent) -> Self {
         todo!()
     }
-    /// The receipt this input came from. No seal covers it, so an input with a command and the same
-    /// input known at admission give the same bits. A host's own log pairs the two.
+    /// No seal covers it, so an input with a command and the same input known at admission give the same
+    /// bits. A host's own log pairs the two.
     pub fn command(&self) -> Digest {
         todo!()
     }
@@ -408,7 +404,7 @@ impl<'m> Session<'m, Running> {
         todo!()
     }
     /// Continues the run `saved` holds, on its branch, in `solver`, which may be freshly built.
-    /// `store` resolves the history `saved` names. Everything is verified before a record exists.
+    /// Everything is verified before a record exists.
     pub fn resume(
         _saved: &Checkpoint,
         _expected: &RunIdentity,
@@ -419,8 +415,7 @@ impl<'m> Session<'m, Running> {
         todo!()
     }
     /// Adds a late input. No accepted part moves, so no revision and no seal, and an observer sees no
-    /// gap. Stamped before the accepted head or the fence, it is refused. Only a running session takes
-    /// one: a retry is mid-step, and a faulted run has no next step to take it.
+    /// gap. Stamped before the accepted head or the fence, it is refused.
     pub fn enqueue(&mut self, _input: AuthorizedInput) -> Result<InputReceipt, AdmissionError> {
         todo!()
     }
@@ -457,8 +452,7 @@ impl<'m> Session<'m, Faulted> {
     pub fn refusals(&self) -> &[Refused] {
         todo!()
     }
-    /// The last accepted image, the fault and the refusals before it, for diagnosis. The image is
-    /// marked, so `resume` refuses it: a faulted run goes on only through `recover`.
+    /// The image is marked, so `resume` refuses it: a faulted run goes on only through `recover`.
     pub fn export(&self, _store: &mut dyn HistoryStore) -> Result<FaultReport, CheckpointError> {
         todo!()
     }
@@ -474,14 +468,13 @@ pub struct FaultReport {
     /// The refusals that preceded it, each naming its row or source.
     _refusals: Vec<Refused>,
 }
-/// One fork on a branch's way from the run's own branch.
 pub struct BranchFork {
     _parent: Digest,
     _revision: u64,
     _at: SimTime,
 }
-/// A branch's id and the forks that led to it. A checkpoint carries it and no seal covers it, so a fork
-/// and the same course loaded from its checkpoint have equal seals.
+/// A checkpoint carries it and no seal covers it, so a fork and the same course loaded from its
+/// checkpoint have equal seals.
 pub struct BranchAncestry {
     _id: Digest,
     _forks: Vec<BranchFork>,
@@ -512,7 +505,6 @@ impl Checkpoint {
         todo!()
     }
 }
-/// Why stored bytes did not become a session.
 pub enum CheckpointError {
     Truncated,
     UnknownFormat,
