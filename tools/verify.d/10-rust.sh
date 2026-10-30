@@ -31,4 +31,5 @@ for smoke in ${NG_GATE_SMOKE:-}; do
   esac
 done
 python3 -I tools/gate/gate.py doctests
+python3 -I tools/gate/gate.py codes
 [ "${NG_GATE_MODE:-}" = changed ] || python3 -I tools/gate/gate.py bans

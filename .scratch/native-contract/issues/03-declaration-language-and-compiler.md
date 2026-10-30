@@ -6,7 +6,9 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 Blocked by: 02
 
-Status: ready-for-agent
+Status: claimed
+
+Claimed by: claude
 
 - [ ] A two-reservoir manufactured body compiles; its incidence and conserved basis match the hand-derived ones
 - [ ] A site-class Starling law over the two beds compiles to one program applied at both sites, with per-site parameters
