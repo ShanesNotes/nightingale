@@ -234,8 +234,8 @@ fn reflexes(
     let relax = laws.kernel(|mut k| {
         let reference = k.state(&set_point);
         let now = k.state(&filter);
-        let goal = k.deviation(now, reference);
-        let target = k.logistic(goal);
+        let error = k.deviation(now, reference);
+        let target = k.logistic(error);
         let now = k.state(&filter);
         let pace = k.parameter(&speed);
         let rate = k.relax(target, now, pace);

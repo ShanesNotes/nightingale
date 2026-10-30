@@ -157,7 +157,7 @@ impl<U> Measure<U> {
 }
 
 /// Where a value is mathematically admissible, the only set a trial is refused against. No
-/// constructor takes bounds, so a reference range cannot become a refusal rule and a deteriorating
+/// constructor takes bounds, so a healthy range cannot become a refusal rule and a deteriorating
 /// patient keeps publishing; where a law is trusted is a `ValidityRange`, which only reports.
 pub struct Admissible<U> {
     set: AdmissibleSet,

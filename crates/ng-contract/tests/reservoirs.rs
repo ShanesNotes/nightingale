@@ -150,7 +150,7 @@ fn the_two_reservoir_body_has_the_hand_derived_incidence_and_basis() -> Result<(
     assert_eq!(kinds, [lumen(a), lumen(b)]);
     assert_eq!(compiled.columns().len(), 2);
     // The circulation takes from a and gives to b; the inflow gives to a, and its receipt outside the
-    // body books the opposite, so no amount row is ever negative for the exterior.
+    // body takes the opposite, so no amount row is ever negative for the exterior.
     let circulation = column(&compiled, law("CV", "circulation"));
     assert_eq!(circulation.context(), Context::Edge { from: a, to: b });
     assert_eq!(coefficients(circulation, 2), [-1, 1]);

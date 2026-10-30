@@ -211,7 +211,7 @@
 //!     })
 //! }
 //! ```
-//! An admissible set takes no bounds, so a reference range cannot become a refusal rule.
+//! An admissible set takes no bounds, so a healthy range cannot become a refusal rule.
 //! ```compile_fail,E0599
 //! use ng_contract::*;
 //! fn refuse_low_pressure(low: Measure<Pressure>, high: Measure<Pressure>) -> Admissible<Pressure> {

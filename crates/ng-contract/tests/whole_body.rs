@@ -99,10 +99,10 @@ fn body(defect: Defect) -> Result<CompiledBody, AdmissionError> {
 
         let relax = |modes| {
             laws.kernel(|mut k| {
-                let goal = k.parameter(&target);
+                let toward = k.parameter(&target);
                 let now = k.state(&filter);
                 let pace = k.parameter(&speed);
-                let rate = k.relax(goal, now, pace);
+                let rate = k.relax(toward, now, pace);
                 k.finish(rate, modes, reflex)
             })
         };
@@ -528,10 +528,10 @@ fn a_block_comes_after_the_blocks_it_depends_on() -> Result<(), AdmissionError> 
         let follower = laws.state::<Dimensionless>("follower", Admissible::finite());
         let leader = laws.state::<Dimensionless>("leader", Admissible::finite());
         let follow = laws.kernel(|mut k| {
-            let goal = k.state(&leader);
+            let toward = k.state(&leader);
             let now = k.state(&follower);
             let pace = k.parameter(&speed);
-            let rate = k.relax(goal, now, pace);
+            let rate = k.relax(toward, now, pace);
             k.finish(rate, laws.every_mode(), reflex)
         });
         let rest = laws.kernel(|mut k| {

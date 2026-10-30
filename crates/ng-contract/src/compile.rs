@@ -564,7 +564,7 @@ fn column(law: LawName, reach: &Reach, rows: &Rows) -> Result<Column, CompileDef
     })
 }
 
-/// A boundary transfer moves its pool and books the opposite on its receipt.
+/// A boundary transfer moves its pool, and its receipt takes the opposite.
 fn exterior(law: LawName, water: &WaterBoundary, rows: &Rows) -> Result<Column, CompileDefect> {
     let row = rows.amount(water.pool).ok_or(left_out(law, water.pool))?;
     let coefficient = match water.direction {
