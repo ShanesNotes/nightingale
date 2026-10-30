@@ -206,6 +206,8 @@ impl CoupledSolver for ActsOnACut {
 pub struct RefusesOne {
     pub inner: ReferenceIntegrator,
     pub interval: Interval,
+    /// Its span from every head past the origin, so a test can step short of a fence.
+    pub later_ns: u64,
     pub seen: Rc<RefCell<Vec<Seen>>>,
 }
 impl CoupledSolver for RefusesOne {
@@ -213,7 +215,11 @@ impl CoupledSolver for RefusesOne {
         self.inner.resolution()
     }
     fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
-        self.inner.next_step(accepted)
+        if accepted.time() == SimTime::from_ns(0) {
+            self.inner.next_step(accepted)
+        } else {
+            self.later_ns
+        }
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         self.seen.borrow_mut().push(Seen {

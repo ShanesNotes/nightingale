@@ -567,6 +567,7 @@ fn refusing(cut: u64, seen: &Rc<RefCell<Vec<Seen>>>) -> RefusesOne {
     RefusesOne {
         inner: reference(8 * SECOND),
         interval: Interval::new(at(0), at(cut)).expect("an interval"),
+        later_ns: 8 * SECOND,
         seen: Rc::clone(seen),
     }
 }
@@ -610,6 +611,28 @@ fn a_refused_cut_leaves_a_fence_and_the_stamp_behind_it_is_refused() {
     session
         .enqueue(authorized(b"at the fence", 6, 100))
         .expect("a stamp at the fence");
+}
+
+#[test]
+fn a_fence_stands_until_the_head_passes_it() {
+    let seen = Rc::default();
+    let core = RefusesOne {
+        later_ns: SECOND,
+        ..refusing(6, &seen)
+    };
+    let case = delivering(vec![delivery(b"input", 6, 100)], 200);
+    let session = advance(advance(case.admit(&core).expect("admitted")));
+    assert_eq!(session.record().accepted().time(), at(5));
+    assert_eq!(
+        session.record().earliest_stamp(),
+        at(6),
+        "a later step does not lower it"
+    );
+    let session = advance(session);
+    assert_eq!(session.record().earliest_stamp(), at(6));
+    let session = advance(session);
+    assert_eq!(session.record().accepted().time(), at(7));
+    assert_eq!(session.record().earliest_stamp(), at(7), "the head has passed it");
 }
 
 #[test]
