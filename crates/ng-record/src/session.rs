@@ -84,6 +84,9 @@ impl<'m, S> Session<'m, S> {
             CheckpointError::HistoryMissing { .. } => CheckpointError::NotOnThisBranch,
             other => other,
         })?;
+        if record.history().origin() != self.record.history().origin() {
+            return Err(CheckpointError::NotOnThisBranch);
+        }
         Ok(Session {
             solver: self.solver,
             record: Box::new(record),
@@ -138,7 +141,8 @@ impl<'m> Session<'m, Running> {
             status: Running,
         })
     }
-    /// Adds a late input. Stamped before the accepted head or the fence, it is refused.
+    /// Adds a late input. A new one stamped before the accepted head or the fence is refused. The same id
+    /// with the same payload is the same request, whenever it comes.
     pub fn enqueue(&mut self, input: AuthorizedInput) -> Result<InputReceipt, AdmissionError> {
         self.record.admit_input(input)
     }

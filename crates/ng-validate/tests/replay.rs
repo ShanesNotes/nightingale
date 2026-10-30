@@ -6,7 +6,8 @@ use ng_record::*;
 use ng_validate::*;
 use replay_cores::{
     ActsOnACut, ClipsAt, CountsInACell, KeepsACache, KeepsACount, KeepsTheDigest, ReadsPastTheBreakpoint,
-    ReadsTheHostClock, RefusesByHash, RefusesOne, RestartsAfterAJump, ScriptedClock, Seen, ShowsAt,
+    ReadsTheHostClock, RefreshesASixth, RefusesByHash, RefusesOne, RestartsAfterAJump, ScriptedClock, Seen,
+    ShowsAt,
 };
 
 const SECOND: u64 = 1_000_000_000;
@@ -182,7 +183,11 @@ impl HistoryStore for RefusesToKeep {
 fn every_gate_passes_the_reference_core_with_one_set_of_digests() {
     for case in [delivering(vec![delivery(b"input", 2_000, 6_000)], 7_000), busy()] {
         let clock = script();
-        let evidence = replay_gates(&case, &|| reference(8 * SECOND), &plan(&clock)).expect("every gate");
+        let plan = ReplayPlan {
+            resume_every: 100,
+            ..plan(&clock)
+        };
+        let evidence = replay_gates(&case, &|| reference(8 * SECOND), &plan).expect("every gate");
         let core = reference(8 * SECOND);
         let run = case.admit(&core).expect("admitted").record().identity().digest();
         assert_eq!(evidence.run(), run);
@@ -1718,6 +1723,112 @@ fn every_gate_in_one_evidence_measured_one_run() {
         Some(ReplayFailure::MissingEvidence {
             gate: ReplayGate::Resume
         })
+    );
+}
+
+#[test]
+fn a_lost_count_that_shows_steps_after_the_load_fails_resume() {
+    let case = delivering(Vec::new(), 24);
+    let cores = || RefreshesASixth {
+        inner: reference(SECOND),
+        calls: Cell::new(0),
+    };
+    let clock = script();
+    let plan = ReplayPlan {
+        resume_every: 1,
+        ..plan(&clock)
+    };
+    let failure = replay_gate(ReplayGate::Resume, &case, &cores, &plan);
+    assert_eq!(
+        failure.err(),
+        Some(ReplayFailure::Diverged {
+            gate: ReplayGate::Resume,
+            first_divergence: SimTime::from_ns(6 * SECOND + SECOND / 2),
+        })
+    );
+}
+
+#[test]
+fn every_gate_in_one_evidence_measured_one_course() {
+    let case = delivering(vec![delivery(b"input", 40, 60)], 100);
+    let calls = Cell::new(0);
+    let cores = || {
+        calls.set(calls.get() + 1);
+        ClipsAt {
+            inner: reference(8 * SECOND),
+            outputs: if calls.get() <= 3 {
+                vec![at(20)]
+            } else {
+                Vec::new()
+            },
+        }
+    };
+    let clock = script();
+    assert_eq!(
+        replay_gates(&case, &cores, &plan(&clock)).err(),
+        Some(ReplayFailure::MissingEvidence {
+            gate: ReplayGate::Resume
+        })
+    );
+}
+
+/// `case`'s own run, admitted again at `instant`: the same identity from another start.
+fn admitted_at<'m>(
+    case: &'m TwoReservoirs,
+    core: &'m dyn CoupledSolver,
+    instant: SimTime,
+    identity: &RunIdentity,
+) -> Session<'m, Running> {
+    let default = Binding::Network(Network::Vascular);
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    (packet.synthetic(
+        ParameterKey::new("cv.e"),
+        default,
+        measure::<Elastance>(1.0),
+        "synthetic",
+    ))
+    .expect("a value");
+    (packet.synthetic(
+        ParameterKey::new("cv.g"),
+        default,
+        measure::<Conductance<Water>>(0.001),
+        "synthetic",
+    ))
+    .expect("a value");
+    for (row, amount) in case.body().rows().iter().zip([500_500.0, 499_500.0]) {
+        (packet.start(row.kind(), measure::<Water>(amount), "synthetic")).expect("a start");
+    }
+    let parameters = case.body().bind(packet).expect("bound");
+    let port = BoundaryPort::new(Vec::new()).expect("a port");
+    let request = InitializationRequest::consistent_instant(instant);
+    let system = (case.body().initialization(parameters, port, request)).expect("a system");
+    let solved = system.workspace();
+    let start = MethodHistory::new(core.resolution().policy(), instant, Vec::new());
+    let origin = system.admit(solved, start).expect("admitted");
+    Session::admit(case.body(), core, origin, identity.clone()).expect("the same identity")
+}
+
+#[test]
+fn a_rewind_refuses_the_admission_checkpoint_of_another_start() {
+    let case = TwoReservoirs::closed().expect("a body");
+    let core = reference(SECOND);
+    let mut store = Store::default();
+    let parent = case.admit(&core).expect("admitted");
+    let own = parent.checkpoint(&mut store).expect("saved");
+    let identity = parent.record().identity().clone();
+    let foreign = admitted_at(&case, &core, at(100), &identity);
+    assert_ne!(foreign.record().seal(), parent.record().seal());
+    let foreign = foreign.checkpoint(&mut store).expect("saved");
+    let parent = to(parent, at(2));
+    let first = BranchId::new(Digest::of_canonical(b"own origin"));
+    let second = BranchId::new(Digest::of_canonical(b"another origin"));
+    assert_eq!(
+        (parent.rewind(&own, first).expect("a fork").record().accepted()).time(),
+        at(0)
+    );
+    assert_eq!(
+        parent.rewind(&foreign, second).err(),
+        Some(CheckpointError::NotOnThisBranch)
     );
 }
 

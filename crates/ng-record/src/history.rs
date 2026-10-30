@@ -183,6 +183,7 @@ impl Link {
 }
 
 /// The seal of revision 0 also covers the values bound for the run, because no later revision changes them.
+#[derive(PartialEq)]
 pub(crate) struct Origin {
     pub(crate) image: Digest,
     seal: Digest,

@@ -543,6 +543,15 @@
 //! use ng_contract::*;
 //! fn read(ticket: &StepTicket) -> Interval { ticket.interval() }
 //! ```
+//! Bound values in a parsed image are lent to a record and never move into a new admission.
+//! ```compile_fail,E0616
+//! use ng_contract::*;
+//! fn reuse(parts: ImageParts) -> BoundParameters { parts.parameters }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn read(parts: &ImageParts) -> PacketHash { parts.parameters().packet_hash() }
+//! ```
 
 mod admission;
 mod anatomy;

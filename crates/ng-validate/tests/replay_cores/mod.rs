@@ -339,3 +339,28 @@ impl CoupledSolver for RestartsAfterAJump {
         self.inner.solve(problem, ticket)
     }
 }
+
+/// Refreshes on every sixth call. On an unbroken run that call always falls at one head and changes nothing,
+/// so a load that lost the count shows only at its next refresh.
+pub struct RefreshesASixth {
+    pub inner: ReferenceIntegrator,
+    pub calls: Cell<u64>,
+}
+impl CoupledSolver for RefreshesASixth {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        let calls = self.calls.replace(self.calls.get() + 1);
+        let own = self.inner.next_step(accepted);
+        let at_its_head = accepted.time().nanoseconds() % (6 * own) == 5 * own;
+        if calls % 6 == 5 && !at_its_head {
+            own / 2
+        } else {
+            own
+        }
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.inner.solve(problem, ticket)
+    }
+}

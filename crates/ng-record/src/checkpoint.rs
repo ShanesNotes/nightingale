@@ -27,7 +27,7 @@ pub enum CheckpointError {
     UnknownFormat,
     /// More bytes than the header says the body holds.
     TrailingContent,
-    /// The raw digest does not match the bytes: corruption, caught with no field read.
+    /// The raw digest does not match the bytes: corruption, caught with no body field decoded.
     Corrupt,
     /// Well sealed, for another run, another body or another solver's resolution.
     IdentityMismatch,
@@ -152,7 +152,7 @@ impl BranchAncestry {
 }
 
 const MAGIC: [u8; 8] = *b"ngcheck1";
-/// The raw digest covers every byte after it, so checking it reads no field.
+/// The raw digest covers every byte after it, so checking it decodes no body field.
 const RAW_DIGEST_END: usize = MAGIC.len() + 32;
 /// The body's length, the run identity, the revision, the seal and the latch.
 const HEADER: usize = RAW_DIGEST_END + 8 + 32 + 8 + 32 + 8;
@@ -278,7 +278,7 @@ pub(crate) fn restore<'m>(
         run: expected.digest(),
         opening,
         image: origin,
-        parameters: image.parameters.digest(),
+        parameters: image.parameters().digest(),
     };
     let history = History::walked(body, start, header.seal, header.revision, resolve)?;
     let branch = match continuing {

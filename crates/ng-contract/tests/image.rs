@@ -117,11 +117,11 @@ fn image(body: &CompiledBody, sites: [SiteId; 2]) -> ImageParts {
     );
     let identity = RunIdentity::new(
         body.model_hash(),
-        parts.parameters.packet_hash(),
+        parts.parameters().packet_hash(),
         Seed::new([1, 2, 3, 4]),
         resolution,
     );
-    let problem = CoupledProblem::new(body, &parts.parameters, &identity, view, digest);
+    let problem = CoupledProblem::new(body, parts.parameters(), &identity, view, digest);
     let attempt = Attempt::First { span_ns: SECOND };
     let ticket = parts
         .pending
@@ -184,7 +184,7 @@ fn an_image_reads_back_to_the_same_bytes() {
     assert_eq!(read.pending.applied().digest(), parts.pending.applied().digest());
     assert_eq!(read.pending.waiting_digest(), parts.pending.waiting_digest());
     assert_eq!(read.state.digest(), parts.state.digest());
-    assert_eq!(read.parameters.packet_hash(), parts.parameters.packet_hash());
+    assert_eq!(read.parameters().packet_hash(), parts.parameters().packet_hash());
 }
 
 #[test]
@@ -208,7 +208,7 @@ type Break = fn(&mut Vec<u8>);
 fn each_field_a_run_never_writes_is_malformed() {
     let (body, sites) = body().expect("a body");
     let bytes = image(&body, sites).canonical();
-    let breaks: [(&str, Break); 22] = [
+    let breaks: [(&str, Break); 24] = [
         ("another format", |bytes| bytes[8] ^= 1),
         ("a list that cannot fit", |bytes| put(bytes, TIMELINE, u64::MAX)),
         ("a list past the bytes", |bytes| put(bytes, COUNTERS, 1 << 40)),
@@ -266,6 +266,12 @@ fn each_field_a_run_never_writes_is_malformed() {
         }),
         ("another body's model", |bytes| bytes[MODEL] ^= 1),
         ("a parameter no slot owns", |bytes| put(bytes, VALUES, 3)),
+        ("a parameter outside its set", |bytes| {
+            put(bytes, VALUES + 16, (-1.0_f64).to_bits())
+        }),
+        ("a start outside its set", |bytes| {
+            put(bytes, VALUES + 32, (-1.0_f64).to_bits())
+        }),
     ];
     for (name, damage) in breaks {
         let mut broken = bytes.clone();

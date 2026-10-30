@@ -113,7 +113,7 @@ impl<'m> PatientRecord<'m> {
         let streams = StreamPositions::default();
         let accepted = AcceptedStateView::new(image.time, &image.state, &image.continuation, &image.dense);
         let opened = digest_of(&image, &streams);
-        let history = History::opening(body, accepted, run, opened, image.parameters.digest());
+        let history = History::opening(body, accepted, run, opened, image.parameters().digest());
         Self {
             body,
             identity,
@@ -184,7 +184,7 @@ impl<'m> PatientRecord<'m> {
     pub fn problem(&self) -> CoupledProblem<'_> {
         CoupledProblem::new(
             self.body,
-            &self.image.parameters,
+            self.image.parameters(),
             &self.identity,
             self.accepted(),
             self.history.seal(),

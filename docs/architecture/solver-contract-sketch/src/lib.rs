@@ -569,6 +569,17 @@
 //!     record.attempt(core, Attempt::First { span_ns })
 //! }
 //! ```
+//!
+//! Bound values in a parsed image are lent to a record and never move into a new admission.
+//! ```compile_fail,E0616
+//! use solver_contract_sketch::ng_contract::*;
+//! fn reuse(parts: ImageParts) -> BoundParameters { parts.parameters }
+//! ```
+//! Legal twin: a record reads them.
+//! ```
+//! use solver_contract_sketch::ng_contract::*;
+//! fn read(parts: &ImageParts) -> PacketHash { parts.parameters().packet_hash() }
+//! ```
 
 #![forbid(unsafe_code)]
 #![doc = include_str!("../../solver-contract.md")]

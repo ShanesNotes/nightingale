@@ -111,9 +111,13 @@ pub struct ImageParts {
     pub continuation: MethodHistory,
     pub dense: DenseSegment,
     pub pending: PendingInputs,
-    pub parameters: BoundParameters,
+    parameters: BoundParameters,
 }
 impl ImageParts {
+    /// Lent, never moved, so bound values in a parsed image cannot seed a new admission.
+    pub fn parameters(&self) -> &BoundParameters {
+        &self.parameters
+    }
     pub fn canonical(&self) -> Vec<u8> {
         todo!()
     }

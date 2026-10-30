@@ -57,7 +57,7 @@ impl Bench {
         let Self { body, parts, .. } = self;
         let identity = RunIdentity::new(
             body.model_hash(),
-            parts.parameters.packet_hash(),
+            parts.parameters().packet_hash(),
             Seed::new([1, 2, 3, 4]),
             resolution(scheme)?,
         );
@@ -71,7 +71,7 @@ impl Bench {
         let parts = &self.parts;
         let accepted = AcceptedStateView::new(parts.time, &parts.state, &parts.continuation, &parts.dense);
         let base = Digest::of_canonical(b"base");
-        CoupledProblem::new(&self.body, &parts.parameters, &self.identity, accepted, base)
+        CoupledProblem::new(&self.body, parts.parameters(), &self.identity, accepted, base)
     }
     fn ticket(&self, span_ns: u64) -> Result<StepTicket, TrialFailure> {
         let attempt = Attempt::First { span_ns };

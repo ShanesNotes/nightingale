@@ -90,7 +90,7 @@ pub enum ReplayFailure {
     /// known run by construction, and a gate that tests nothing passes nothing.
     NoLateBoundary { id: InputId },
     /// A plan or a case that gives the gate nothing to compare, a pace that never stopped a run short of its
-    /// end, a clock that stopped before it, or a gate that measured another run.
+    /// end, a clock that stopped before it, or a gate that measured another run or another course.
     MissingEvidence { gate: ReplayGate },
 }
 
@@ -380,8 +380,8 @@ fn boundaries(rows: &[Row], every: u64) -> Vec<u64> {
     revisions
 }
 
-/// The first load runs to the end and each other to the next boundary, so the cost stays near two runs and
-/// a slow leak of hidden state still shows.
+/// Every load runs to the end, because a lost state can show many steps after it. `resume_every` sets the
+/// cost: each load costs the rest of a run.
 fn resume_gate(
     case: &TwoReservoirs,
     cores: &dyn CoreFactory,
@@ -400,27 +400,19 @@ fn resume_gate(
     let mut saved = Vec::new();
     for revision in boundaries(&reference.rows, plan.resume_every) {
         session = revision_to(gate, session, revision, &mut rows)?;
-        let checkpoint = session.checkpoint(&mut store).map_err(checkpointed)?;
-        saved.push((revision, checkpoint, session.record().digests()));
+        saved.push((revision, session.checkpoint(&mut store).map_err(checkpointed)?));
     }
     let identity = session.record().identity();
     let mut runs = vec![reference.last];
-    for (index, (revision, checkpoint, _)) in saved.iter().enumerate() {
+    for (revision, checkpoint) in &saved {
         let fresh = cores.fresh();
         let resumed = Session::resume(checkpoint, identity, case.body(), &*fresh, &store);
         let resumed = resumed.map_err(checkpointed)?;
-        let mut rows = vec![Row::of(&resumed, false)];
+        let rows = vec![Row::of(&resumed, false)];
+        let (_, rest) = traced(gate, resumed, rows, case.end(), &Pace::Unbounded)?;
         let known = &reference.rows[*revision as usize..];
-        let next = saved.get(index + 1).filter(|_| index > 0);
-        let resumed = match next {
-            Some((next, ..)) => revision_to(gate, resumed, *next, &mut rows)?,
-            None => step_to(gate, resumed, case.end(), &mut rows)?,
-        };
-        let last = resumed.record().digests();
-        let expected = next.map_or(reference.last, |(_, _, digests)| *digests);
-        let leg = Trace { rows, last };
-        same_or_diverged(gate, known, &expected, &leg)?;
-        runs.push(last);
+        same_or_diverged(gate, known, &reference.last, &rest)?;
+        runs.push(rest.last);
     }
     Ok(GateEvidence {
         gate,
@@ -544,10 +536,10 @@ pub fn replay_gates(
     plan: &ReplayPlan<'_>,
 ) -> Result<ReplayEvidence, ReplayFailure> {
     let pace = replay_gate(ReplayGate::Pace, case, cores, plan)?;
-    let run = pace.run;
+    let (run, course) = (pace.run, pace.runs[0]);
     let of_this_run = |gate| {
         let evidence = replay_gate(gate, case, cores, plan)?;
-        if evidence.run == run {
+        if evidence.run == run && evidence.runs[0] == course {
             Ok(evidence)
         } else {
             Err(ReplayFailure::MissingEvidence { gate })

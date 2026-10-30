@@ -1,8 +1,8 @@
 use crate::boundary::PendingInputs;
 use crate::identity::{Canonical, Seal};
 use crate::{
-    BoundParameters, Candidate, Compensated, CompiledBody, DenseSegment, Digest, Interval, MethodHistory,
-    PacketHash, RowKind, SimTime,
+    AdmissibleSet, BoundParameters, Candidate, Compensated, CompiledBody, DenseSegment, Digest, Interval,
+    MethodHistory, PacketHash, RowKind, SimTime,
 };
 
 const IMAGE_FORMAT: &str = "ng-contract image 1";
@@ -86,9 +86,13 @@ pub struct ImageParts {
     pub continuation: MethodHistory,
     pub dense: DenseSegment,
     pub pending: PendingInputs,
-    pub parameters: BoundParameters,
+    pub(crate) parameters: BoundParameters,
 }
 impl ImageParts {
+    /// Lent, never moved, so bound values in a parsed image cannot seed a new admission.
+    pub fn parameters(&self) -> &BoundParameters {
+        &self.parameters
+    }
     pub fn canonical(&self) -> Vec<u8> {
         let Self {
             time,
@@ -191,6 +195,13 @@ impl ImageParts {
             values: read.float_list(body.layout.parameters.len())?,
             starts: read.float_list(rows.len())?,
         };
+        let inside = |set: AdmissibleSet, value: &f64| set.holds(Compensated::exact(*value));
+        if !(body.layout.parameters.iter().zip(&parameters.values))
+            .all(|(slot, value)| inside(slot.admissible, value))
+            || !(rows.iter().zip(&parameters.starts)).all(|(row, value)| inside(row.admissible(), value))
+        {
+            return Err(Malformed);
+        }
         read.finish()?;
         Ok(Self {
             time,
