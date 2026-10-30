@@ -67,7 +67,7 @@ impl<'b> ByteReader<'b> {
             Err(Malformed)
         }
     }
-    fn compensated_list(&mut self, expected: usize) -> Result<Vec<Compensated>, Malformed> {
+    pub fn compensated_list(&mut self, expected: usize) -> Result<Vec<Compensated>, Malformed> {
         self.exact_count(16, expected)?;
         (0..expected).map(|_| self.compensated()).collect()
     }

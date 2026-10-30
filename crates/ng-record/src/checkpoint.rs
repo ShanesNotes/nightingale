@@ -319,9 +319,7 @@ impl Parts {
         let image = ImageParts::parse(body, read.take(count)?)?;
         let streams = StreamPositions::read(&mut read)?;
         let branch = BranchAncestry::read(&mut read)?;
-        let opening = (0..read.count(16)?)
-            .map(|_| read.compensated())
-            .collect::<Result<_, _>>()?;
+        let opening = read.compensated_list(body.conserved_basis().combinations().len())?;
         let origin = read.digest()?;
         read.finish()?;
         Ok(Self {

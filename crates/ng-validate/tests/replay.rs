@@ -1425,6 +1425,27 @@ fn a_fork_may_not_take_the_name_of_a_branch_it_came_from() {
 }
 
 #[test]
+fn an_opening_of_another_length_is_malformed_whatever_a_forged_chain_says() {
+    let case = delivering(Vec::new(), 40);
+    let core = reference(8 * SECOND);
+    let mut store = Store::default();
+    let session = case.admit(&core).expect("admitted");
+    let saved = session.checkpoint(&mut store).expect("saved");
+    let identity = session.record().identity();
+    let values = case.body().conserved_basis().combinations().len();
+    let mut bytes = saved.as_bytes().to_vec();
+    let count_at = bytes.len() - 32 - 16 * values - 8;
+    bytes[count_at..count_at + 8].copy_from_slice(&(values as u64 - 1).to_be_bytes());
+    bytes.drain(count_at + 8..count_at + 24);
+    let body = (bytes.len() - HEADER) as u64;
+    bytes[40..48].copy_from_slice(&body.to_be_bytes());
+    assert_eq!(
+        Session::resume(&resealed(bytes), identity, case.body(), &core, &store).err(),
+        Some(CheckpointError::Malformed)
+    );
+}
+
+#[test]
 fn a_byte_left_over_after_the_parts_is_malformed() {
     let case = delivering(vec![delivery(b"input", 8, 16)], 40);
     let core = reference(8 * SECOND);
