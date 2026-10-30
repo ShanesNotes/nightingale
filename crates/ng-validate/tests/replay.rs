@@ -6,7 +6,7 @@ use ng_record::*;
 use ng_validate::*;
 use replay_cores::{
     ActsOnACut, ClipsAt, CountsInACell, KeepsACache, KeepsACount, KeepsTheDigest, ReadsPastTheBreakpoint,
-    ReadsTheHostClock, RefusesByHash, RefusesOne, ScriptedClock, Seen, ShowsAt,
+    ReadsTheHostClock, RefusesByHash, RefusesOne, RestartsAfterAJump, ScriptedClock, Seen, ShowsAt,
 };
 
 const SECOND: u64 = 1_000_000_000;
@@ -1586,6 +1586,24 @@ fn a_core_that_needs_a_mark_a_fresh_core_lacks_fails_rewind_at_the_load() {
         inner: reference(8 * SECOND),
         at: at(16),
         primed: Cell::new(false),
+    };
+    let clock = script();
+    assert_eq!(
+        replay_gate(ReplayGate::Rewind, &case, &cores, &plan(&clock)).err(),
+        Some(ReplayFailure::Diverged {
+            gate: ReplayGate::Rewind,
+            first_divergence: at(20),
+        })
+    );
+}
+
+#[test]
+fn a_core_that_restarts_after_a_jump_fails_rewind_though_a_load_and_a_fork_agree() {
+    let case = delivering(Vec::new(), 40);
+    let cores = || RestartsAfterAJump {
+        inner: reference(8 * SECOND),
+        last: Cell::new(None),
+        restarted: Cell::new(false),
     };
     let clock = script();
     assert_eq!(
