@@ -8,7 +8,7 @@ use cores::forced_refusal::{ForcedRefusal, Refuser};
 use cores::must_fail::{
     EarlierAttempt, ForeignBody, ForeignHistory, ForeignProposal, ForeignRefusal, ForeignWorkspace,
     KeptHistory, MisplacedStage, NeverConverges, OneSample, OtherValues, PoisonedPoint, ShadowTicket,
-    StaleProposal, SwappedTicket, UnevenWeights, WrongWeight,
+    StaleProposal, SwappedTicket, UnevenWeights, UnfitWeights, WrongWeight,
 };
 use cores::stages::{ForwardEuler, Heun};
 use ng_contract::*;
@@ -218,7 +218,7 @@ fn the_certificate_reads_compensated_amounts_where_a_plain_ledger_loses_the_exch
         to: SimTime::from_ns(48 * HOUR),
         amount: measure(delivered),
     };
-    let case = TwoReservoirs::delivering([1.0, 1.0], vec![delivery]).expect("a body");
+    let case = TwoReservoirs::delivering([measure(1.0), measure(1.0)], vec![delivery]).expect("a body");
     let core = reference(STEP_SECONDS * SECOND);
     let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
     let view = session.record().conservation();
@@ -339,7 +339,8 @@ fn a_refusal_of_another_ticket_is_a_binding_mismatch_so_no_core_resets_its_budge
 
 #[test]
 fn a_ticket_this_record_would_not_issue_is_a_binding_mismatch() {
-    let quiet = TwoReservoirs::delivering([500_500.0, 499_500.0], Vec::new()).expect("a body");
+    let quiet =
+        TwoReservoirs::delivering([measure(500_500.0), measure(499_500.0)], Vec::new()).expect("a body");
     let case = stepped();
     let (instant, _) = case.delivery().expect("a delivery");
     let inner = euler(4_000 * SECOND);
@@ -386,6 +387,16 @@ fn a_refusal_of_a_foreign_base_cannot_be_retried() {
 fn weights_that_do_not_sum_to_one_are_a_binding_mismatch_at_finish() {
     let case = stepped();
     let core = UnevenWeights {
+        interval_ns: 8 * SECOND,
+    };
+    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
+}
+
+#[test]
+fn weights_whose_sum_does_not_fit_in_lowest_terms_are_a_binding_mismatch() {
+    let case = stepped();
+    let core = UnfitWeights {
         interval_ns: 8 * SECOND,
     };
     let fault = fault_of(case.admit(&core).expect("admitted").step());
@@ -523,7 +534,8 @@ fn a_fault_keeps_the_refusals_before_it() {
 fn a_negative_amount_is_refused_on_the_row_it_left() {
     // A step of 20 RC multiplies the difference by -39: from 1,000 to -39,000, then to 1,521,000, which
     // is more than the sum of 1,000,000, so `b` would go negative on the second step.
-    let case = TwoReservoirs::delivering([500_500.0, 499_500.0], Vec::new()).expect("a body");
+    let case =
+        TwoReservoirs::delivering([measure(500_500.0), measure(499_500.0)], Vec::new()).expect("a body");
     let core = euler(20 * case.relaxation_ns());
     let (session, _) = accepted(case.admit(&core).expect("admitted").step());
     let session = refused(session.step());
@@ -1075,7 +1087,7 @@ fn each_bad_timeline_is_refused_by_name() {
 
 #[test]
 fn one_id_with_one_payload_collapses_and_applies_once() {
-    let open = TwoReservoirs::delivering([10.0, 10.0], Vec::new()).expect("a body");
+    let open = TwoReservoirs::delivering([measure(10.0), measure(10.0)], Vec::new()).expect("a body");
     let body = open.body();
     let port = BoundaryPort::new(vec![
         water_event(b"x", "inflow", SECOND, 2 * SECOND, 3.0),
@@ -1224,7 +1236,7 @@ fn the_ending_interval_sees_the_left_value_and_the_next_the_new_one() {
         amount: measure(amount),
     };
     let case = TwoReservoirs::delivering(
-        [100.0, 100.0],
+        [measure(100.0), measure(100.0)],
         vec![
             delivery(b"slow", 0, breakpoint, first),
             delivery(b"fast", breakpoint, end, second),
@@ -1515,7 +1527,7 @@ fn the_worst_window_can_start_inside_a_segment() {
     // The change over a day peaks with the window ending where the high rate stops: 96,400 + 20,000 s,
     // so the window starts at 30,000 s, between the 70 s grid's 29,960 and 30,030.
     let case = TwoReservoirs::delivering(
-        [500_500.0, 499_500.0],
+        [measure(500_500.0), measure(499_500.0)],
         vec![
             delivery(b"baseline", 0, 96_400, 1.0),
             delivery(b"high", 96_400, 116_400, 5.0),
@@ -1547,7 +1559,7 @@ fn a_ledger_that_does_not_close_fails_closure_before_drift() {
         to: SimTime::from_ns(48 * HOUR),
         amount: measure(1e-18 * 169_200.0),
     };
-    let case = TwoReservoirs::delivering([1e18, 1e18], vec![bulk, tiny]).expect("a body");
+    let case = TwoReservoirs::delivering([measure(1e18), measure(1e18)], vec![bulk, tiny]).expect("a body");
     let core = reference(60 * SECOND);
     let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
     let view = session.record().conservation();

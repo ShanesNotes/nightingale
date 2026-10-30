@@ -456,6 +456,29 @@
 //!     })
 //! }
 //! ```
+//! An engine fault cannot be converted to physiological demise.
+//! ```compile_fail,E0277
+//! use ng_contract::{Demise, EngineFault};
+//! fn hide_bug(fault: EngineFault) -> Demise { fault.into() }
+//! ```
+//! ```
+//! use ng_contract::{EngineFault, EngineFaultKind};
+//! fn diagnose(fault: EngineFault) -> EngineFaultKind { fault.kind() }
+//! ```
+//! Extents cannot be booked as one sampled rate times the step: only the quadrature makes them.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn sampled(layout: Digest, forward: Vec<Compensated>, reverse: Vec<Compensated>) -> Extents {
+//!     Extents { layout, forward, reverse }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn integrated(mut quadrature: Quadrature, stage: &StageEvaluation) -> Result<Increment, EngineFault> {
+//!     quadrature.add(stage, Ratio::ONE)?;
+//!     quadrature.finish()
+//! }
+//! ```
 
 mod admission;
 mod anatomy;

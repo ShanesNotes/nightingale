@@ -99,6 +99,27 @@ impl CoupledSolver for UnevenWeights {
     }
 }
 
+/// Books weights whose exact sum does not fit in lowest terms.
+pub struct UnfitWeights {
+    pub interval_ns: u64,
+}
+impl CoupledSolver for UnfitWeights {
+    fn resolution(&self) -> DeclaredResolution {
+        resolution(StageScheme::forward_euler(), b"unfit weights", 12)
+    }
+    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+        problem.ticket(self.interval_ns)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let (workspace, stage) = euler_step(problem, ticket)?;
+        let mut quadrature = problem.quadrature(ticket);
+        quadrature.add(&stage, Ratio::new(1, u64::MAX).expect("a fraction"))?;
+        quadrature.add(&stage, Ratio::new(1, u64::MAX - 1).expect("a fraction"))?;
+        let history = fresh_history(problem, ticket);
+        Ok(problem.propose(ticket, quadrature.finish()?, &workspace, history))
+    }
+}
+
 /// Solves on other parameter values under the real ticket. Each number is honest for those values, so only
 /// the record's replay on its own values sees it: this is what makes a recorded rate differ while
 /// `StageEvaluation` stays unforgeable.

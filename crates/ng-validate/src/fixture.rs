@@ -71,7 +71,7 @@ impl TwoReservoirs {
             to: SimTime::from_ns(6_000 * SECOND),
             amount: Measure::new(20_000.0)?,
         };
-        let mut case = Self::delivering(START, vec![delivery])?;
+        let mut case = Self::declared(true, None, START, vec![delivery])?;
         case.end = SimTime::from_ns(12_000 * SECOND);
         Ok(case)
     }
@@ -84,8 +84,8 @@ impl TwoReservoirs {
         Self::declared(true, Some(range), START, Vec::new())
     }
     /// The open body from `start`, with these deliveries.
-    pub fn delivering(start: [f64; 2], deliveries: Vec<Delivery>) -> Result<Self, AdmissionError> {
-        Self::declared(true, None, start, deliveries)
+    pub fn delivering(start: [Measure<Water>; 2], deliveries: Vec<Delivery>) -> Result<Self, AdmissionError> {
+        Self::declared(true, None, start.map(|amount| number(&amount)), deliveries)
     }
     fn declared(
         open: bool,
