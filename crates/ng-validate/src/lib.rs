@@ -25,6 +25,7 @@ mod accuracy;
 mod certificate;
 mod fixture;
 mod reference;
+mod replay;
 mod run;
 
 pub use accuracy::{
@@ -36,4 +37,8 @@ pub use certificate::{
 };
 pub use fixture::{Delivery, TwoReservoirs, admit_fixture};
 pub use reference::ReferenceIntegrator;
+pub use replay::{
+    ClockSource, CoreFactory, GateEvidence, ReplayEvidence, ReplayFailure, ReplayGate, ReplayPlan, WallClock,
+    replay_gate, replay_gates,
+};
 pub use run::run_until;

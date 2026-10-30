@@ -1,11 +1,11 @@
-use crate::{CoupledProblem, DeclaredResolution, EngineFault, StepProposal, StepTicket, TrialFailure};
+use crate::{AcceptedStateView, CoupledProblem, DeclaredResolution, StepProposal, StepTicket, TrialFailure};
 
 /// An implementor holds algorithm configuration, never accepted continuation.
 pub trait CoupledSolver {
     fn resolution(&self) -> DeclaredResolution;
-    /// Chooses an intrinsic span from accepted continuation alone and asks `problem.ticket(span)`; the
-    /// contract clips it at the next breakpoint.
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault>;
+    /// The span this core commits to for its next step, in ns, from the accepted view alone. It takes
+    /// no problem and returns no ticket, so a core has nothing to ask before it commits.
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64;
     /// Solves exactly the ticketed interval. A proposal is owned, and it is verified against the record's
     /// own problem, so nothing the core built it from is trusted.
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure>;

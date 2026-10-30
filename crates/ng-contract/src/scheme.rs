@@ -180,6 +180,7 @@ impl ArithmeticProfile {
 }
 
 /// A solver core's declared settings; part of the run identity. Pace is not in it.
+#[derive(Clone)]
 pub struct DeclaredResolution {
     policy: Digest,
     minimum_interval_ns: u64,
@@ -259,6 +260,7 @@ impl Seed {
 }
 
 /// The body model's hash, the packet's hash, the run seed and the declared resolution. Nothing else.
+#[derive(Clone)]
 pub struct RunIdentity {
     model: ModelHash,
     packet: PacketHash,

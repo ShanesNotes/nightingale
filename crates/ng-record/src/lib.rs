@@ -42,10 +42,12 @@
 //! fn legal(session: Session<'_, Running>) -> Step<'_> { session.step() }
 //! ```
 
+mod checkpoint;
 mod history;
 mod record;
 mod session;
 
+pub use checkpoint::{BranchFork, BranchId, Checkpoint, CheckpointError, HistoryStore};
 pub use history::{ConservationView, Curve, HistorySeal, HistorySegment, Segments};
-pub use record::{NextImage, PatientRecord, RecordDigests, Seal, StepReceipt};
-pub use session::{Faulted, Retrying, Running, Session, Step};
+pub use record::{AuthorizedInput, InputReceipt, NextImage, PatientRecord, RecordDigests, Seal, StepReceipt};
+pub use session::{FaultReport, Faulted, Retrying, Running, Session, Step};

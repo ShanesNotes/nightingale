@@ -1,10 +1,10 @@
 use crate::body::{Bound, RowKind};
-use crate::boundary::PendingInputs;
+use crate::boundary::{Delivery, PendingInputs};
 use crate::evaluate::Inputs;
 use crate::problem::SolveWorkspace;
 use crate::{
-    AdmissionError, BoundParameters, BoundaryPort, Candidate, CompiledBody, DenseSegment, LawName,
-    MethodHistory, ModelHash, PacketHash, RowId, SimTime,
+    AdmissionError, BoundParameters, BoundaryPort, Candidate, CompiledBody, DenseSegment, ImageParts,
+    LawName, MethodHistory, ModelHash, PacketHash, RowId, SimTime,
 };
 
 pub struct InitializationRequest {
@@ -21,8 +21,38 @@ impl CompiledBody {
         (self.layout.instances.iter().flat_map(|instance| &instance.inputs))
             .any(|input| matches!(input, Bound::Boundary(name) if *name == boundary))
     }
-    /// Refuses parameters bound on another body, an event naming a boundary the schema does not declare or
-    /// no law reads, and an event before the anchor moment.
+    /// The one check of an input against this body, for a timeline at admission and a late input alike.
+    /// Refuses a boundary the schema does not declare or no law reads, and an instant before `earliest`.
+    pub(crate) fn check_delivery(
+        &self,
+        delivery: &Delivery,
+        earliest: SimTime,
+    ) -> Result<(), AdmissionError> {
+        let boundaries = &self.layout.schema.boundaries;
+        if !boundaries.iter().any(|known| known.name == delivery.boundary) {
+            return Err(AdmissionError::UnknownBoundary {
+                name: delivery.boundary,
+            });
+        }
+        if delivery.at < earliest {
+            return Err(AdmissionError::EventBeforeHead { id: delivery.id });
+        }
+        if !self.reads_drive(delivery.boundary) {
+            return Err(AdmissionError::DriveNotRead {
+                name: delivery.boundary,
+            });
+        }
+        Ok(())
+    }
+    /// The schema's own name for a boundary read back from bytes.
+    pub(crate) fn boundary_name(&self, name: &str) -> Option<&'static str> {
+        let boundaries = &self.layout.schema.boundaries;
+        boundaries
+            .iter()
+            .find(|known| known.name == name)
+            .map(|known| known.name)
+    }
+    /// Refuses parameters bound on another body and an event `check_delivery` refuses at the anchor moment.
     pub fn initialization<'m>(
         &'m self,
         parameters: BoundParameters,
@@ -32,26 +62,13 @@ impl CompiledBody {
         if parameters.model != self.model_hash() {
             return Err(AdmissionError::ForeignParameters);
         }
-        let boundaries = &self.layout.schema.boundaries;
         for delivery in &boundary.deliveries {
-            if !boundaries.iter().any(|known| known.name == delivery.boundary) {
-                return Err(AdmissionError::UnknownBoundary {
-                    name: delivery.boundary,
-                });
-            }
-            if delivery.at < request.anchor_moment {
-                return Err(AdmissionError::EventBeforeHead { id: delivery.id });
-            }
-            if !self.reads_drive(delivery.boundary) {
-                return Err(AdmissionError::DriveNotRead {
-                    name: delivery.boundary,
-                });
-            }
+            self.check_delivery(delivery, request.anchor_moment)?;
         }
         Ok(InitializationSystem {
             body: self,
             parameters,
-            pending: PendingInputs::opening(boundary),
+            pending: PendingInputs::opening(boundary, request.anchor_moment),
             request,
         })
     }
@@ -112,7 +129,7 @@ impl InitializationSystem<'_> {
             }
         }
         Ok(InitialRevision {
-            parts: InitialParts {
+            parts: ImageParts {
                 time,
                 state: Candidate::of_coordinates(body, unknowns),
                 continuation: history,
@@ -125,15 +142,7 @@ impl InitializationSystem<'_> {
 }
 
 pub struct InitialRevision {
-    parts: InitialParts,
-}
-pub struct InitialParts {
-    pub time: SimTime,
-    pub state: Candidate,
-    pub continuation: MethodHistory,
-    pub dense: DenseSegment,
-    pub pending: PendingInputs,
-    pub parameters: BoundParameters,
+    parts: ImageParts,
 }
 impl InitialRevision {
     pub fn packet_hash(&self) -> PacketHash {
@@ -142,7 +151,7 @@ impl InitialRevision {
     pub fn model_hash(&self) -> ModelHash {
         self.parts.parameters.model
     }
-    pub fn into_parts(self) -> InitialParts {
+    pub fn into_parts(self) -> ImageParts {
         self.parts
     }
 }

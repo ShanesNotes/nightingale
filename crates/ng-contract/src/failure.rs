@@ -89,9 +89,15 @@ pub enum AdmissionError {
     InputConflict {
         id: InputId,
     },
-    /// An event before the moment the run starts from.
+    /// An event before the moment the run starts from, or before the accepted head.
     EventBeforeHead {
         id: InputId,
+    },
+    /// An input stamped behind the fence a refused cut left, or at the admission instant, whose drive
+    /// initialization has already read.
+    EventBeforeFence {
+        id: InputId,
+        fence: SimTime,
     },
     /// Parameters bound on another compiled body.
     ForeignParameters,
@@ -226,6 +232,7 @@ pub struct Refused {
     pub(crate) attempted_ns: u64,
     pub(crate) retry_ns: u64,
     pub(crate) attempt: u32,
+    pub(crate) fence: SimTime,
 }
 impl Refused {
     pub fn reason(&self) -> NumericalRefusal {

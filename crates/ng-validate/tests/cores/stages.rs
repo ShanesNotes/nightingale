@@ -42,8 +42,8 @@ impl CoupledSolver for ForwardEuler {
     fn resolution(&self) -> DeclaredResolution {
         resolution(StageScheme::forward_euler(), b"forward euler", 12)
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        problem.ticket(self.interval_ns)
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        self.interval_ns
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let (workspace, stage) = euler_step(problem, ticket)?;
@@ -63,8 +63,8 @@ impl CoupledSolver for Heun {
     fn resolution(&self) -> DeclaredResolution {
         resolution(StageScheme::heun(), b"heun", 12)
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        problem.ticket(self.interval_ns)
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        self.interval_ns
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let (first, second, workspace) = heun_stages(problem, ticket)?;
@@ -94,9 +94,9 @@ impl CoupledSolver for KeepsItsSpan {
     fn resolution(&self) -> DeclaredResolution {
         resolution(StageScheme::forward_euler(), b"keeps its span", 0)
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        let kept = problem.accepted().method_history().counters().first();
-        problem.ticket(kept.copied().unwrap_or(self.first_ns))
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        let kept = accepted.method_history().counters().first();
+        kept.copied().unwrap_or(self.first_ns)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let (workspace, stage) = euler_step(problem, ticket)?;

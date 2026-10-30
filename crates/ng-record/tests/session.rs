@@ -84,8 +84,8 @@ impl CoupledSolver for Explicit {
             scales,
         )
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        problem.ticket(self.interval_ns)
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        self.interval_ns
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         if self.refuse_at == Some(ticket.interval().start()) && ticket.attempt() == 0 {
@@ -189,12 +189,12 @@ fn an_accepted_step_moves_every_part_and_chains_its_seal() -> Result<(), Initial
     assert_ne!(after.ledger, before.ledger);
     assert_eq!(after.streams, before.streams);
     assert_eq!(
-        after.pending, before.pending,
+        after.applied, before.applied,
         "no input was due on the first step"
     );
     let (session, receipt) = accepted(session.step());
     assert_eq!(receipt.applied().len(), 1);
-    assert_ne!(session.record().digests().pending, after.pending);
+    assert_ne!(session.record().digests().applied, after.applied);
     Ok(())
 }
 

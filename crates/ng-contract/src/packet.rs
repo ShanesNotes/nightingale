@@ -24,6 +24,9 @@ pub struct PacketHash {
     digest: Digest,
 }
 impl PacketHash {
+    pub(crate) fn of_digest(digest: Digest) -> Self {
+        Self { digest }
+    }
     pub fn digest(&self) -> Digest {
         self.digest
     }

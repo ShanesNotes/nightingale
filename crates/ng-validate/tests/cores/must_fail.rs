@@ -16,8 +16,8 @@ impl CoupledSolver for OneSample {
         }
         .resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        problem.ticket(self.interval_ns)
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        self.interval_ns
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let (first, _, workspace) = heun_stages(problem, ticket)?;
@@ -38,8 +38,8 @@ impl CoupledSolver for MisplacedStage {
         }
         .resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        problem.ticket(self.interval_ns)
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        self.interval_ns
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let (mut workspace, first) = euler_step(problem, ticket)?;
@@ -63,8 +63,8 @@ impl CoupledSolver for UnreachedStage {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let length = ticket.length_ns();
@@ -91,8 +91,8 @@ impl CoupledSolver for WrongWeight {
         }
         .resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        problem.ticket(self.interval_ns)
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        self.interval_ns
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let (first, second, workspace) = heun_stages(problem, ticket)?;
@@ -111,8 +111,8 @@ impl CoupledSolver for UnevenWeights {
     fn resolution(&self) -> DeclaredResolution {
         resolution(StageScheme::forward_euler(), b"uneven weights", 12)
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        problem.ticket(self.interval_ns)
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        self.interval_ns
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let (workspace, stage) = euler_step(problem, ticket)?;
@@ -130,8 +130,8 @@ impl CoupledSolver for UnfitWeights {
     fn resolution(&self) -> DeclaredResolution {
         resolution(StageScheme::forward_euler(), b"unfit weights", 12)
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        problem.ticket(self.interval_ns)
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        self.interval_ns
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let (workspace, stage) = euler_step(problem, ticket)?;
@@ -156,8 +156,8 @@ impl CoupledSolver for OtherValues<'_> {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let base = Digest::of_canonical(b"not the record's base");
@@ -175,8 +175,8 @@ impl CoupledSolver for KeptHistory {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let (workspace, stage) = euler_step(problem, ticket)?;
@@ -199,8 +199,8 @@ impl CoupledSolver for ForeignHistory {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let (workspace, stage) = euler_step(problem, ticket)?;
@@ -220,8 +220,8 @@ impl CoupledSolver for StaleProposal {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         if let Some(stale) = self.kept.borrow_mut().take() {
@@ -244,8 +244,8 @@ impl CoupledSolver for StaleIncrement {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let (workspace, stage) = euler_step(problem, ticket)?;
@@ -268,8 +268,8 @@ impl CoupledSolver for EarlierAttempt {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let (workspace, stage) = euler_step(problem, ticket)?;
@@ -289,66 +289,103 @@ impl CoupledSolver for EarlierAttempt {
     }
 }
 
+/// Keeps the ticket of its first step and solves that one in the next step, so its proposal answers a
+/// ticket the session did not issue for this attempt.
 pub struct SwappedTicket {
     pub inner: ForwardEuler,
-    pub own_span_ns: u64,
+    pub kept: RefCell<Option<StepTicket>>,
 }
 impl CoupledSolver for SwappedTicket {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
-    fn solve(
-        &self,
-        problem: &CoupledProblem<'_>,
-        _ticket: &StepTicket,
-    ) -> Result<StepProposal, TrialFailure> {
-        let fresh = problem.ticket(self.own_span_ns)?;
-        self.inner.solve(problem, &fresh)
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let kept = self.kept.borrow().clone();
+        match kept {
+            Some(earlier) => self.inner.solve(problem, &earlier),
+            None => {
+                self.kept.replace(Some(ticket.clone()));
+                self.inner.solve(problem, ticket)
+            }
+        }
     }
 }
 
+/// Keeps the ticket of its first step and answers the next with a refusal of that one, so a core cannot
+/// reset its budget through a refusal of another ticket.
 pub struct ForeignRefusal {
     pub inner: ForwardEuler,
+    pub kept: RefCell<Option<StepTicket>>,
 }
 impl CoupledSolver for ForeignRefusal {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
-        let fresh = problem.ticket(ticket.length_ns() / 2)?;
-        Err(fresh.refuse(NumericalRefusal::IterationLimit))
+        let kept = self.kept.borrow().clone();
+        match kept {
+            Some(earlier) => Err(earlier.refuse(NumericalRefusal::IterationLimit)),
+            None => {
+                self.kept.replace(Some(ticket.clone()));
+                self.inner.solve(problem, ticket)
+            }
+        }
     }
 }
 
-/// Reads its ticket from a problem over another record's pending inputs under `base`, so with the real
-/// base the ticket still misses a delivery. With `refuse` it refuses that ticket instead of solving it.
-pub struct ShadowTicket<'c> {
+/// Takes `inner`'s span at the origin and `then_ns` from every later head.
+pub struct Spans {
     pub inner: ForwardEuler,
-    pub body: &'c CompiledBody,
-    pub values: &'c BoundParameters,
-    pub identity: &'c RunIdentity,
-    pub shadow: AcceptedStateView<'c>,
-    pub base: Digest,
-    pub refuse: bool,
+    pub then_ns: u64,
 }
-impl CoupledSolver for ShadowTicket<'_> {
+impl CoupledSolver for Spans {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, _problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        let shadow = CoupledProblem::new(self.body, self.values, self.identity, self.shadow, self.base);
-        shadow.ticket(self.inner.interval_ns)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        if accepted.time() == SimTime::from_ns(0) {
+            self.inner.next_step(accepted)
+        } else {
+            self.then_ns
+        }
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
-        if self.refuse {
-            return Err(ticket.refuse(NumericalRefusal::IterationLimit));
-        }
+        self.inner.solve(problem, ticket)
+    }
+}
+
+/// Solves honestly and first asks its ticket for what it must refuse: the instant past its end and a zero
+/// shift, each beside a legal read, so a refusal here is the check's and not a broken ticket's.
+pub struct ReadsItsTicket {
+    pub inner: ForwardEuler,
+    pub reads: RefCell<Vec<TicketReads>>,
+}
+pub type TicketReads = (
+    Option<EngineFaultKind>,
+    Option<EngineFaultKind>,
+    Option<EngineFaultKind>,
+);
+impl CoupledSolver for ReadsItsTicket {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let kind = |fault: EngineFault| fault.kind();
+        let length = ticket.length_ns();
+        self.reads.borrow_mut().push((
+            ticket.at(length).map(|_| ()).map_err(kind).err(),
+            ticket.at(length + 1).map(|_| ()).map_err(kind).err(),
+            ticket.shift(0).map(|_| ()).map_err(kind).err(),
+        ));
         self.inner.solve(problem, ticket)
     }
 }
@@ -364,8 +401,8 @@ impl CoupledSolver for ForeignBody<'_> {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let base = Digest::of_canonical(b"another body");
@@ -389,8 +426,8 @@ impl CoupledSolver for ForeignWorkspace<'_> {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let base = Digest::of_canonical(b"another body");
@@ -415,8 +452,8 @@ impl CoupledSolver for ForeignProposal<'_> {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(
         &self,
@@ -441,8 +478,8 @@ impl CoupledSolver for NeverConverges {
     fn resolution(&self) -> DeclaredResolution {
         resolution(StageScheme::forward_euler(), b"never converges", self.budget)
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        problem.ticket(self.interval_ns)
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        self.interval_ns
     }
     fn solve(
         &self,
@@ -460,8 +497,8 @@ impl CoupledSolver for PoisonedPoint {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let mut workspace = problem.workspace();
@@ -481,8 +518,8 @@ impl CoupledSolver for TrialOutside<'_> {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let mut workspace = problem.workspace();
@@ -507,8 +544,8 @@ impl CoupledSolver for ProposesThroughAnotherBody<'_> {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let (mut workspace, stage) = euler_step(problem, ticket)?;
@@ -537,8 +574,8 @@ impl CoupledSolver for ShortWorkspace<'_> {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-        self.inner.next_step(problem)
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let base = Digest::of_canonical(b"another record");

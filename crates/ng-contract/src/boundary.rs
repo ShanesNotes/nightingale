@@ -1,5 +1,9 @@
 use crate::identity::{Canonical, Seal};
-use crate::{AdmissionError, Digest, Measure, SimTime, StepTicket, Water};
+use crate::{
+    AdmissionError, ByteReader, CompiledBody, CoupledProblem, Digest, EngineFault, EngineFaultKind, Interval,
+    Malformed, Measure, Refused, SimTime, StepTicket, TrialFailure, Water,
+};
+use std::collections::BTreeSet;
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 
@@ -37,6 +41,13 @@ pub struct BoundaryEvent {
 impl BoundaryEvent {
     pub fn new(id: InputId, at: SimTime, payload: BoundaryInput) -> Self {
         Self { id, at, payload }
+    }
+    pub fn id(&self) -> InputId {
+        self.id
+    }
+    /// The stamp: the instant this event applies.
+    pub fn at(&self) -> SimTime {
+        self.at
     }
 }
 
@@ -101,10 +112,18 @@ impl Delivery {
                     ends,
                 }),
         } = event;
+        Self::checked(id, at, boundary, amount.value(), ends)
+    }
+    fn checked(
+        id: InputId,
+        at: SimTime,
+        boundary: &'static str,
+        amount: f64,
+        ends: SimTime,
+    ) -> Result<Self, AdmissionError> {
         if ends <= at {
             return Err(AdmissionError::EmptyDelivery { id });
         }
-        let amount = amount.value();
         if amount < 0.0 {
             return Err(AdmissionError::NegativeDelivery { id });
         }
@@ -122,44 +141,99 @@ impl Delivery {
             rate,
         })
     }
+    /// What one id must repeat to be the same request, and what a receipt names.
+    fn payload(&self) -> Digest {
+        let mut out = Canonical::new("ng-contract delivery 1");
+        self.seal(&mut out);
+        out.digest()
+    }
 }
 
 pub(crate) struct Plan {
     pub(crate) due: Vec<InputId>,
     pub(crate) frame: DriveFrame,
     pub(crate) after_breakpoint: bool,
-    pub(crate) next_breakpoint: Option<SimTime>,
+    /// The earliest end of a delivery running or due here. That input has applied or applies with this
+    /// step, so every run at this head knows this instant.
+    pub(crate) running_end: Option<SimTime>,
+    /// The next input still waiting. Only `PendingInputs::attempt` reads it, once a span has passed.
+    pub(crate) next_waiting: Option<SimTime>,
 }
 
-/// The future of the timeline and the deliveries running now: record state.
-/// Applying an input moves the cursor past it and adds its delivery in one accepted image, so a refusal
-/// cannot half apply it.
+/// Which attempt of one step a ticket is for.
+#[derive(Clone, Copy)]
+pub enum Attempt<'a> {
+    /// The span `CoupledSolver::next_step` committed to.
+    First { span_ns: u64 },
+    /// The smaller span a refusal of this base left.
+    After(&'a Refused),
+}
+
+/// The timeline: record state, and the one way to a ticket. A core holds a problem, and neither a problem
+/// nor an accepted view lends this value, so a core has no path to `attempt`.
 pub struct PendingInputs {
-    deliveries: Vec<Delivery>,
+    timeline: Vec<Delivery>,
+    past: AppliedInputs,
+}
+
+/// What has applied of the timeline: the part an accepted image seals and one publish replaces. It reads no
+/// input that still waits, so two runs with one past seal the same bytes whatever waits.
+pub struct AppliedInputs {
     cursor: usize,
     active: Vec<Delivery>,
+    chain: Digest,
+    fence: SimTime,
 }
+impl AppliedInputs {
+    pub fn digest(&self) -> Digest {
+        let Self {
+            cursor,
+            active,
+            chain,
+            fence,
+        } = self;
+        let mut out = Canonical::new("ng-contract applied inputs 1");
+        cursor.seal(&mut out);
+        active.seal(&mut out);
+        chain.seal(&mut out);
+        fence.seal(&mut out);
+        out.digest()
+    }
+}
+
+fn chained(chain: Digest, delivery: &Delivery) -> Digest {
+    let mut out = Canonical::new("ng-contract applied chain 1");
+    chain.seal(&mut out);
+    delivery.seal(&mut out);
+    out.digest()
+}
+
 impl PendingInputs {
-    pub(crate) fn opening(port: BoundaryPort) -> Self {
+    /// The fence opens one nanosecond past `head`, because initialization has read `head`'s drive: an input
+    /// stamped there cannot arrive after the start state that read it.
+    pub(crate) fn opening(port: BoundaryPort, head: SimTime) -> Self {
         Self {
-            deliveries: port.deliveries,
-            cursor: 0,
-            active: Vec::new(),
+            timeline: port.deliveries,
+            past: AppliedInputs {
+                cursor: 0,
+                active: Vec::new(),
+                chain: Digest::of_canonical(b"ng-contract no input applied"),
+                fence: head.plus_ns(1).unwrap_or(head),
+            },
         }
     }
     fn due_at(&self, start: SimTime) -> &[Delivery] {
-        let waiting = &self.deliveries[self.cursor..];
+        let waiting = &self.timeline[self.past.cursor..];
         &waiting[..waiting.partition_point(|delivery| delivery.at <= start)]
     }
     fn running_at(&self, start: SimTime) -> impl Iterator<Item = &Delivery> {
-        let running = self.active.iter().filter(move |delivery| delivery.ends > start);
+        let running = (self.past.active.iter()).filter(move |delivery| delivery.ends > start);
         running.chain(self.due_at(start))
     }
     pub(crate) fn plan(&self, start: SimTime) -> Plan {
         let due = self.due_at(start);
-        let later = self.deliveries[self.cursor + due.len()..].first();
-        let ends = self.running_at(start).map(|delivery| delivery.ends);
-        let ended = self.active.iter().any(|delivery| delivery.ends == start);
+        let later = self.timeline[self.past.cursor + due.len()..].first();
+        let ended = self.past.active.iter().any(|delivery| delivery.ends == start);
         let mut frame = DriveFrame::default();
         for delivery in self.running_at(start) {
             frame.add(delivery.boundary, delivery.rate);
@@ -168,34 +242,231 @@ impl PendingInputs {
             due: due.iter().map(|delivery| delivery.id).collect(),
             frame,
             after_breakpoint: !due.is_empty() || ended,
-            next_breakpoint: later.map(|delivery| delivery.at).into_iter().chain(ends).min(),
+            running_end: self.running_at(start).map(|delivery| delivery.ends).min(),
+            next_waiting: later.map(|delivery| delivery.at),
         }
     }
-    /// The pending inputs once `ticket`'s interval publishes: its due inputs applied, and deliveries that
+    /// One attempt of a step: issues its ticket and hands it to `solved`, which solves and validates. When
+    /// the span passes and a waiting input lies inside it, drops that result and hands `solved` the same
+    /// ticket ended at that input. A cut can be refused like any ticket.
+    ///
+    /// This order is the causal step rule. Every ticket before a pass is a function of the sealed past, the
+    /// span and the refusals of this base, so it is the same ticket whatever waits. A waiting input shows
+    /// only to a step the record would have accepted past it, and then no late input can still arrive
+    /// before it, except behind the fence a refused cut leaves. A zero span, or one past the end of time, is
+    /// `BindingMismatch`, as is a refusal of another base.
+    pub fn attempt<T>(
+        &self,
+        problem: &CoupledProblem<'_>,
+        attempt: Attempt<'_>,
+        mut solved: impl FnMut(&StepTicket) -> Result<T, TrialFailure>,
+    ) -> Result<T, TrialFailure> {
+        let start = problem.accepted.time();
+        let (span_ns, number, fence) = match attempt {
+            Attempt::First { span_ns } => (span_ns, 0, start),
+            Attempt::After(refused) if refused.base == problem.base => {
+                (refused.retry_ns, refused.attempt + 1, refused.fence)
+            }
+            Attempt::After(refused) => {
+                return Err(TrialFailure::EngineFault(EngineFault {
+                    kind: EngineFaultKind::BindingMismatch,
+                    at: refused.at,
+                    attempted_ns: refused.attempted_ns,
+                    last_refusal: None,
+                }));
+            }
+        };
+        let mismatch = EngineFault {
+            kind: EngineFaultKind::BindingMismatch,
+            at: start,
+            attempted_ns: span_ns,
+            last_refusal: None,
+        };
+        let plan = self.plan(start);
+        let wanted = start.plus_ns(span_ns).ok_or(mismatch)?;
+        let end = plan.running_end.map_or(wanted, |ends| ends.min(wanted));
+        let interval = Interval::new(start, end).ok_or(mismatch)?;
+        let resolution = problem.identity.resolution();
+        let identity = problem.identity.digest();
+        let mut ticket = StepTicket {
+            base: problem.base,
+            interval,
+            span_ns,
+            due: plan.due,
+            frame: plan.frame,
+            after_breakpoint: plan.after_breakpoint,
+            attempt: number,
+            fence,
+            floor_ns: resolution.minimum_interval_ns(),
+            budget: resolution.retry_budget(),
+            digest: problem.base,
+        };
+        ticket.digest = ticket.sealed(identity);
+        let passed = solved(&ticket)?;
+        let cut = (plan.next_waiting)
+            .filter(|next| *next < end)
+            .and_then(|next| Some((next, Interval::new(start, next)?)));
+        let Some((next, interval)) = cut else {
+            return Ok(passed);
+        };
+        drop(passed);
+        ticket.interval = interval;
+        ticket.fence = next;
+        ticket.digest = ticket.sealed(identity);
+        solved(&ticket)
+    }
+    /// Adds a late input to what waits, and returns its payload's digest. No accepted part moves: no
+    /// revision, no seal, no ticket. The same id with the same payload is the same request whenever it
+    /// comes, even after it applied.
+    pub fn admit(
+        &mut self,
+        body: &CompiledBody,
+        head: SimTime,
+        event: BoundaryEvent,
+    ) -> Result<Digest, AdmissionError> {
+        let delivery = Delivery::parsed(event)?;
+        let id = delivery.id;
+        if let Some(known) = self.timeline.iter().find(|known| known.id == id) {
+            if *known == delivery {
+                return Ok(known.payload());
+            }
+            return Err(AdmissionError::InputConflict { id });
+        }
+        body.check_delivery(&delivery, head)?;
+        let fence = self.past.fence;
+        if delivery.at < fence {
+            return Err(AdmissionError::EventBeforeFence { id, fence });
+        }
+        let waiting = &self.timeline[self.past.cursor..];
+        let key = (delivery.at, delivery.id);
+        let at = waiting.partition_point(|known| (known.at, known.id) < key);
+        self.timeline.insert(self.past.cursor + at, delivery);
+        Ok(delivery.payload())
+    }
+    /// The earliest stamp `admit` takes at `head`: the head, or later behind a refused cut.
+    pub fn earliest_stamp(&self, head: SimTime) -> SimTime {
+        self.past.fence.max(head)
+    }
+    /// What has applied once `ticket`'s interval publishes: its due inputs applied, and deliveries that
     /// ended at its start dropped.
-    pub fn after(&self, ticket: &StepTicket) -> Self {
+    pub fn after(&self, ticket: &StepTicket) -> AppliedInputs {
         let start = ticket.interval().start();
         let due = self.due_at(start);
-        let active = self.running_at(start).copied().collect();
-        Self {
-            deliveries: self.deliveries.clone(),
-            cursor: self.cursor + due.len(),
-            active,
+        AppliedInputs {
+            cursor: self.past.cursor + due.len(),
+            active: self.running_at(start).copied().collect(),
+            chain: due.iter().fold(self.past.chain, chained),
+            fence: ticket.fence.max(self.past.fence),
         }
     }
-    pub fn digest(&self) -> Digest {
-        let Self {
-            deliveries,
-            cursor,
-            active,
-        } = self;
-        let mut out = Canonical::new("ng-contract pending inputs 1");
-        deliveries.seal(&mut out);
-        cursor.seal(&mut out);
-        active.seal(&mut out);
+    /// Installs what `after` returned, as `publish` does.
+    pub fn advance(&mut self, past: AppliedInputs) {
+        self.past = past;
+    }
+    pub fn applied(&self) -> &AppliedInputs {
+        &self.past
+    }
+    pub fn waiting_digest(&self) -> Digest {
+        let mut out = Canonical::new("ng-contract waiting inputs 1");
+        self.timeline[self.past.cursor..].seal(&mut out);
         out.digest()
     }
+    /// The timeline with each input's payload tag, then the cursor, each running delivery by its place on
+    /// the timeline and the fence. `rate` and `chain` are derived, so `read` never takes them on trust.
+    pub(crate) fn write(&self, out: &mut Canonical) {
+        let Self { timeline, past } = self;
+        let AppliedInputs {
+            cursor,
+            active,
+            chain: _,
+            fence,
+        } = past;
+        out.length(timeline.len());
+        for delivery in timeline {
+            let Delivery {
+                id,
+                at,
+                boundary,
+                amount,
+                ends,
+                rate: _,
+            } = delivery;
+            out.raw(id.digest.as_bytes());
+            at.seal(out);
+            out.number(WATER_PAYLOAD);
+            out.text(boundary);
+            amount.seal(out);
+            ends.seal(out);
+        }
+        cursor.seal(out);
+        out.length(active.len());
+        for delivery in active {
+            let place = timeline.iter().position(|known| known.id == delivery.id);
+            place.expect("a running delivery is on the timeline").seal(out);
+        }
+        fence.seal(out);
+    }
+    /// Reads `write`'s bytes against `body`, at the head `time`. Refuses bytes no run writes: a timeline
+    /// out of order or with an id twice, a boundary the body does not declare, an applied input at or past
+    /// the head, a waiting one before it, and a running delivery that never applied or has ended.
+    pub(crate) fn read(
+        read: &mut ByteReader<'_>,
+        body: &CompiledBody,
+        time: SimTime,
+    ) -> Result<Self, Malformed> {
+        let mut timeline: Vec<Delivery> = Vec::new();
+        let mut ids = BTreeSet::new();
+        for _ in 0..read.count(DELIVERY_BYTES)? {
+            let id = InputId::new(read.digest()?);
+            let at = read.time()?;
+            if read.number()? != WATER_PAYLOAD {
+                return Err(Malformed);
+            }
+            let boundary = body.boundary_name(read.text()?).ok_or(Malformed)?;
+            let amount = read.float()?;
+            let ends = read.time()?;
+            let delivery = Delivery::checked(id, at, boundary, amount, ends).map_err(|_| Malformed)?;
+            let ordered = (timeline.last()).is_none_or(|last| (last.at, last.id) < (at, id));
+            if !ordered || !ids.insert(id) {
+                return Err(Malformed);
+            }
+            timeline.push(delivery);
+        }
+        let cursor = usize::try_from(read.number()?).map_err(|_| Malformed)?;
+        let applied = timeline.get(..cursor).ok_or(Malformed)?;
+        if applied.iter().any(|delivery| delivery.at >= time)
+            || timeline[cursor..].iter().any(|delivery| delivery.at < time)
+        {
+            return Err(Malformed);
+        }
+        let mut active: Vec<Delivery> = Vec::new();
+        for _ in 0..read.count(8)? {
+            let place = usize::try_from(read.number()?).map_err(|_| Malformed)?;
+            let delivery = *applied.get(place).ok_or(Malformed)?;
+            if delivery.ends < time || active.iter().any(|known| known.id == delivery.id) {
+                return Err(Malformed);
+            }
+            active.push(delivery);
+        }
+        let fence = read.time()?;
+        let start = Digest::of_canonical(b"ng-contract no input applied");
+        let chain = applied.iter().fold(start, chained);
+        Ok(Self {
+            timeline,
+            past: AppliedInputs {
+                cursor,
+                active,
+                chain,
+                fence,
+            },
+        })
+    }
 }
+
+/// The payload tag of a water delivery. A new payload takes a new tag.
+const WATER_PAYLOAD: u64 = 0;
+/// An id, a stamp, a tag, a name's length, an amount and an end: the least one delivery can take.
+const DELIVERY_BYTES: usize = 72;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct DriveFrame {

@@ -500,6 +500,7 @@ mod evaluate;
 mod failure;
 mod graph;
 mod identity;
+mod image;
 mod law;
 mod packet;
 mod pinned;
@@ -518,11 +519,14 @@ mod time;
 pub use admission::*;
 pub use anatomy::*;
 pub use body::*;
-pub use boundary::{BoundaryEvent, BoundaryInput, BoundaryPort, InputId, PendingInputs, WaterDelivery};
+pub use boundary::{
+    AppliedInputs, Attempt, BoundaryEvent, BoundaryInput, BoundaryPort, InputId, PendingInputs, WaterDelivery,
+};
 pub use compensated::*;
 pub use conservation::*;
 pub use failure::*;
 pub use identity::*;
+pub use image::*;
 pub use law::*;
 pub use packet::*;
 pub use pinned::exp;

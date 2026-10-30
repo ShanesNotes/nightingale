@@ -110,6 +110,14 @@ impl Compensated {
     pub fn bits(self) -> [u64; 2] {
         [self.hi.to_bits(), self.lo.to_bits()]
     }
+    /// The inverse of `bits`, for stored bytes.
+    pub fn from_bits(bits: [u64; 2]) -> Self {
+        let [hi, lo] = bits;
+        Self {
+            hi: f64::from_bits(hi),
+            lo: f64::from_bits(lo),
+        }
+    }
     pub(crate) fn rounded(self) -> f64 {
         self.hi + self.lo
     }
@@ -223,6 +231,12 @@ mod tests {
                 .abs()
                 .at_most(exact(1e-45))
         );
+    }
+
+    #[test]
+    fn stored_bits_read_back_as_the_same_pair() {
+        let value = exact(1.0).plus(exact(1e-30));
+        assert_eq!(Compensated::from_bits(value.bits()).bits(), value.bits());
     }
 
     #[test]
