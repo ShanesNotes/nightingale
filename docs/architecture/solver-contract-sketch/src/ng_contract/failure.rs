@@ -45,6 +45,8 @@ pub enum NumericalRefusal {
     TrialDomain { source: SourceId },
     /// The witnessed stages do not satisfy the declared scheme's stage equations within the scales.
     StageResidual { row: RowId },
+    /// A conserved sum or a cumulative exchange left the finite range, so the ledger cannot hold the step.
+    LedgerOverflow,
     SplitNotConverged,
 }
 /// The solver or model cannot produce a possible body under the declared policy. The session

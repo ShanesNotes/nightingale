@@ -31,8 +31,7 @@ pub enum AdmissionError {
     ZeroDenominator,
     /// An absolute scale that is not positive, or a relative scale below zero.
     NonPositiveScale,
-    /// A body with a mode variable: nothing fires a guard until tickets 06, 08 and 10, and a guard that
-    /// silently never fires is worse than a run that never starts.
+    /// A body with a mode variable.
     ModesNotYetRun {
         variable: LawName,
     },
@@ -77,6 +76,14 @@ pub enum AdmissionError {
     },
     NegativeDelivery {
         id: InputId,
+    },
+    /// An amount so large over its span that the rate left the finite range.
+    UnboundedDelivery {
+        id: InputId,
+    },
+    /// An event on a boundary whose law never reads its drive, so the amount would never arrive.
+    DriveNotRead {
+        name: &'static str,
     },
     /// One id with two different payloads.
     InputConflict {
@@ -170,6 +177,8 @@ pub enum NumericalRefusal {
     TrialDomain { source: SourceId },
     /// A stage equation is unmet on this row.
     StageResidual { row: RowId },
+    /// A conserved sum or a cumulative exchange left the finite range, so the ledger cannot hold the step.
+    LedgerOverflow,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -247,7 +256,6 @@ impl From<EngineFault> for TrialFailure {
     }
 }
 
-/// No operation produces one until a later scope stage models it.
 pub struct Demise {
     _rhythm: ArrestRhythm,
     _injury: IrreversibleInjury,

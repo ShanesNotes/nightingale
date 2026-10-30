@@ -1,4 +1,3 @@
-//! The accuracy gate: a core against known answers, because a step can close every ledger and be wrong.
 use crate::TwoReservoirs;
 use crate::run::advance;
 use ng_contract::{
@@ -7,8 +6,7 @@ use ng_contract::{
 };
 use ng_record::{Curve, HistorySegment, PatientRecord};
 
-/// A manufactured case with a closed form. Ticket 11 adds the drain, zero-flow, removal, independence and
-/// slice cases, the last against the reference integrator on a body it is handed.
+/// A manufactured case with a closed form.
 pub enum AccuracyCase {
     TwoReservoir(TwoReservoirs),
 }
@@ -20,11 +18,9 @@ pub struct AccuracyPolicy {
     absolute: Compensated,
     relative: Measure<Dimensionless>,
     grid_ns: u64,
-    digest: Digest,
 }
 impl AccuracyPolicy {
-    /// Refuses a zero grid, no case and a case that ends where it starts, which would pass by never
-    /// stepping.
+    /// Refuses a zero grid, no case and a case that ends where it starts.
     pub fn new(
         cases: Vec<AccuracyCase>,
         absolute: Measure<Water>,
@@ -35,28 +31,32 @@ impl AccuracyPolicy {
         if grid_ns == 0 || cases.is_empty() || cases.iter().any(never_steps) {
             return Err(AdmissionError::EmptyAccuracyPolicy);
         }
-        let absolute = Compensated::of(&absolute);
-        let mut bytes = grid_ns.to_be_bytes().to_vec();
-        for limb in absolute
-            .bits()
-            .into_iter()
-            .chain(Compensated::of(&relative).bits())
-        {
-            bytes.extend_from_slice(&limb.to_be_bytes());
-        }
-        for AccuracyCase::TwoReservoir(case) in &cases {
-            bytes.extend_from_slice(case.digest().as_bytes());
-        }
         Ok(Self {
+            cases,
+            absolute: Compensated::of(&absolute),
+            relative,
+            grid_ns,
+        })
+    }
+    pub fn digest(&self) -> Digest {
+        let Self {
             cases,
             absolute,
             relative,
             grid_ns,
-            digest: Digest::of_canonical(&bytes),
-        })
-    }
-    pub fn digest(&self) -> Digest {
-        self.digest
+        } = self;
+        let mut bytes = grid_ns.to_be_bytes().to_vec();
+        for limb in absolute
+            .bits()
+            .into_iter()
+            .chain(Compensated::of(relative).bits())
+        {
+            bytes.extend_from_slice(&limb.to_be_bytes());
+        }
+        for AccuracyCase::TwoReservoir(case) in cases {
+            bytes.extend_from_slice(case.digest().as_bytes());
+        }
+        Digest::of_canonical(&bytes)
     }
 }
 /// The worst error per case. Accepted values only: a trial state is never read.
@@ -81,7 +81,7 @@ pub enum AccuracyFailure {
         at: SimTime,
         error: Compensated,
     },
-    /// The core could not finish the case. A must-fail core that reaches this has not failed on accuracy.
+    /// The core could not finish the case.
     Faulted(EngineFault),
     Admission(InitializationFailure),
     /// Adjacent refinements' errors are outside the band.
@@ -109,8 +109,6 @@ fn net_at(segment: &HistorySegment<'_>, column: ColumnId, at: SimTime) -> Compen
     reached(forward).minus(reached(reverse))
 }
 
-/// Each grid instant inside a segment, start excluded, then the segment's end, so a breakpoint is always
-/// compared.
 fn compared_instants(interval: Interval, grid_ns: u64) -> Vec<SimTime> {
     let (start, end) = (interval.start().nanoseconds(), interval.end().nanoseconds());
     let first = (start / grid_ns + 1) * grid_ns;
@@ -166,16 +164,14 @@ pub fn accuracy(
             for at in compared_instants(interval, policy.grid_ns) {
                 for (value, exact) in comparisons(case, record, at) {
                     let error = value.minus(exact).abs();
-                    // Read this way round, an overflowed value's NaN fails instead of passing.
-                    let within = error <= policy.absolute.plus(exact.abs().times(&policy.relative));
-                    if !within {
+                    if !error.at_most(policy.absolute.plus(exact.abs().times(&policy.relative))) {
                         return Err(AccuracyFailure::Exceeded {
                             case: index,
                             at,
                             error,
                         });
                     }
-                    if error > largest {
+                    if !error.at_most(largest) {
                         largest = error;
                     }
                 }
@@ -184,7 +180,7 @@ pub fn accuracy(
         worst.push(largest);
     }
     Ok(AccuracyEvidence {
-        policy: policy.digest,
+        policy: policy.digest(),
         worst,
     })
 }
@@ -201,7 +197,11 @@ pub fn observed_order(
             return Err(AccuracyFailure::MixedEvidence { refinement });
         }
         for (case, (coarse, fine)) in pair[0].worst.iter().zip(&pair[1].worst).enumerate() {
-            if *coarse < fine.times(&low) || *coarse > fine.times(&high) {
+            // An exact answer has no ratio to read, so it fails too.
+            let within = !fine.at_most(Compensated::ZERO)
+                && fine.times(&low).at_most(*coarse)
+                && coarse.at_most(fine.times(&high));
+            if !within {
                 return Err(AccuracyFailure::Order { case, refinement });
             }
         }

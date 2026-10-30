@@ -157,7 +157,6 @@ impl Row {
     pub fn kind(&self) -> RowKind {
         self.kind
     }
-    /// The set the row's unknown is refused outside of.
     pub fn admissible(&self) -> AdmissibleSet {
         self.admissible
     }
@@ -176,7 +175,6 @@ impl Seal for Row {
         dimension.seal(out);
     }
 }
-/// An amount's row sums the columns that move it, so no law owns an amount.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RowKind {
     Amount { site: SiteId, space: Space },
@@ -251,7 +249,6 @@ pub struct Receipt {
     pub(crate) coefficient: i64,
 }
 impl Receipt {
-    /// The schema boundary it receives for.
     pub fn boundary(&self) -> &'static str {
         self.boundary
     }
@@ -360,7 +357,6 @@ impl Seal for Target {
     }
 }
 
-/// A program applied in one context.
 #[derive(Debug, PartialEq)]
 pub struct Instance {
     pub(crate) program: ProgramId,

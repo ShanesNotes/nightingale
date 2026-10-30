@@ -1,4 +1,4 @@
-use crate::body::RowKind;
+use crate::body::{Bound, RowKind};
 use crate::boundary::PendingInputs;
 use crate::evaluate::Inputs;
 use crate::problem::SolveWorkspace;
@@ -7,7 +7,6 @@ use crate::{
     MethodHistory, ModelHash, PacketHash, RowId, SimTime,
 };
 
-/// Ticket 08 adds a goal, a budget and a guess beside the anchor moment.
 pub struct InitializationRequest {
     anchor_moment: SimTime,
 }
@@ -18,8 +17,12 @@ impl InitializationRequest {
 }
 
 impl CompiledBody {
-    /// Refuses parameters bound on another body, an event naming a boundary the schema does not declare and
-    /// an event before the anchor moment.
+    fn reads_drive(&self, boundary: &str) -> bool {
+        (self.layout.instances.iter().flat_map(|instance| &instance.inputs))
+            .any(|input| matches!(input, Bound::Boundary(name) if *name == boundary))
+    }
+    /// Refuses parameters bound on another body, an event naming a boundary the schema does not declare or
+    /// no law reads, and an event before the anchor moment.
     pub fn initialization<'m>(
         &'m self,
         parameters: BoundParameters,
@@ -38,6 +41,11 @@ impl CompiledBody {
             }
             if delivery.at < request.anchor_moment {
                 return Err(AdmissionError::EventBeforeHead { id: delivery.id });
+            }
+            if !self.reads_drive(delivery.boundary) {
+                return Err(AdmissionError::DriveNotRead {
+                    name: delivery.boundary,
+                });
             }
         }
         Ok(InitializationSystem {
@@ -62,7 +70,7 @@ impl InitializationSystem<'_> {
     }
     /// The only constructor of `InitialRevision`. Refuses a workspace from another body. Refuses by row a
     /// moved amount or memory value, a value outside its admissible set and an algebraic row that is not
-    /// exactly zero, because no tolerance is declared before ticket 08.
+    /// exactly zero, and by law a law with no value at the start.
     pub fn admit(
         self,
         solved: SolveWorkspace,
@@ -87,22 +95,20 @@ impl InitializationSystem<'_> {
             }
         }
         let time = request.anchor_moment;
-        if (body.rows().iter()).any(|row| matches!(row.kind(), RowKind::Algebraic(_))) {
-            let frame = pending.plan(time).frame;
-            let inputs = Inputs {
-                parameters: &parameters.values,
-                frame: &frame,
-                unknowns,
-            };
-            let values = (body.instance_values(&inputs))
-                .map_err(|undefined| InitializationFailure::Undefined { law: undefined.law })?;
-            let (columns, rows) = body.targets(&values);
-            let residuals = body.residuals(&columns, &rows, &vec![0.0; rows.len()]);
-            for row in body.rows() {
-                let solved = residuals[row.id().index()] == 0.0;
-                if matches!(row.kind(), RowKind::Algebraic(_)) && !solved {
-                    return Err(InitializationFailure::Inconsistent { row: row.id() });
-                }
+        let frame = pending.plan(time).frame;
+        let inputs = Inputs {
+            parameters: &parameters.values,
+            frame: &frame,
+            unknowns,
+        };
+        let values = (body.instance_values(&inputs))
+            .map_err(|undefined| InitializationFailure::Undefined { law: undefined.law })?;
+        let (columns, rows) = body.targets(&values);
+        let residuals = body.residuals(&columns, &rows, &vec![0.0; rows.len()]);
+        for row in body.rows() {
+            let solved = residuals[row.id().index()] == 0.0;
+            if matches!(row.kind(), RowKind::Algebraic(_)) && !solved {
+                return Err(InitializationFailure::Inconsistent { row: row.id() });
             }
         }
         Ok(InitialRevision {
@@ -118,11 +124,9 @@ impl InitializationSystem<'_> {
     }
 }
 
-/// The first accepted image and the bound parameters, never imposed again.
 pub struct InitialRevision {
     parts: InitialParts,
 }
-/// Only `InitialRevision::into_parts` hands these out.
 pub struct InitialParts {
     pub time: SimTime,
     pub state: Candidate,

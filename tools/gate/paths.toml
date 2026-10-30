@@ -5,7 +5,6 @@ schema = 1
 
 always = ["01-toolchain"]
 
-# Steps a run adds when it reaches a crate, run over the crates it reaches.
 crate_steps = ["05-seam", "10-rust", "15-f64"]
 
 [[rule]]
@@ -40,13 +39,13 @@ run = []
 docs_only = true
 
 # One row per workspace member, named for its directory: the member lives at crates/<name>.
-# Optional keys, absent while the crates are empty:
+# Optional keys:
 #   smoke = ["trace"]                          test targets every merge run that reaches a crate runs
 #   dev_external = { expect-test = "=1.5.1" }  dev-dependencies from outside the workspace, at exact versions;
 #                                              refused for a physiology closure crate and for a
 #                                              helper whose file readers gate.py's FILE_READERS lacks
 #   [[crate.f64_allow]]                        a public item allowed a bare f64 or f32, as
-#   item = "Workspace::unknowns"               15-f64 names it; an entry that matches no
+#   item = "quantity::Measure::new"            15-f64 names it; an entry that matches no
 #   reason = "..."                             item fails
 [[crate]]
 name = "ng-contract"

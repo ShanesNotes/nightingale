@@ -1,5 +1,3 @@
-//! These types live in the contract, not the record, because a core reads them and
-//! `StepProposal::verify` derives the next ones.
 use crate::body::RowKind;
 use crate::boundary::PendingInputs;
 use crate::identity::{Canonical, Seal};
@@ -123,6 +121,31 @@ impl DenseSegment {
     }
 }
 
+/// The polynomial family and degree of every dense curve: the chord, degree 1, in Bernstein form.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DenseBasis {
+    family: BasisFamily,
+    degree: u8,
+}
+impl DenseBasis {
+    pub const CHORD: Self = Self {
+        family: BasisFamily::Bernstein,
+        degree: 1,
+    };
+    pub fn family(&self) -> BasisFamily {
+        self.family
+    }
+    pub fn degree(&self) -> u8 {
+        self.degree
+    }
+}
+/// Bernstein form: the coefficient hull bounds every interior value, which makes the certificate's
+/// interior-extremum check conservative without sampling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BasisFamily {
+    Bernstein,
+}
+
 /// What a solver core needs to continue exactly, tagged by its schema. Integers only: a float travels as
 /// its `to_bits`.
 #[derive(Clone)]
@@ -145,6 +168,9 @@ impl MethodHistory {
     }
     pub fn started_at(&self) -> SimTime {
         self.started_at
+    }
+    pub fn counters(&self) -> &[u64] {
+        &self.counters
     }
     pub fn digest(&self) -> Digest {
         let Self {
@@ -199,7 +225,6 @@ impl<'r> AcceptedStateView<'r> {
     pub fn method_history(self) -> &'r MethodHistory {
         self.history
     }
-    /// The last accepted dense segment, so a reader samples it without keeping history.
     pub fn last_segment(self) -> &'r DenseSegment {
         self.segment
     }

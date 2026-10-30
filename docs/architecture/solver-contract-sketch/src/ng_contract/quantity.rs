@@ -167,7 +167,7 @@ impl<U> ValidityRange<U> {
 /// An accepted amount held as an unevaluated sum of two f64 (two-sum). The record keeps amounts and
 /// cumulative exchanges this way so closure is not limited by f64 rounding when an exterior flow is
 /// small against a pool's turnover (`evidence/ledger-rounding.txt`); solver workspaces stay f64.
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Compensated {
     _high: f64,
     _low: f64,
@@ -190,6 +190,11 @@ impl Compensated {
         todo!()
     }
     pub fn abs(self) -> Self {
+        todo!()
+    }
+    /// Whether this is no more than `limit`, and false when either side is not finite. It is the one
+    /// comparison: `<` and `>` read false on a NaN, so a check written with them passes what overflowed.
+    pub fn at_most(self, _limit: Self) -> bool {
         todo!()
     }
     /// A combination's integer coefficient times this value.

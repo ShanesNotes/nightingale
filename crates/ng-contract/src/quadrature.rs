@@ -112,8 +112,6 @@ pub struct Extents {
     forward: Vec<Compensated>,
     reverse: Vec<Compensated>,
 }
-/// A rate is not kept: `verify` re-evaluates each point and re-adds it, so a recorded rate is a replayed
-/// one.
 struct StageWitness {
     stages: Vec<WitnessStage>,
 }
@@ -225,7 +223,13 @@ impl StepProposal {
             algebraic,
             history,
         } = self;
-        if layout != problem.layout() || extents.layout != problem.layout() || finished_for != ticket.digest()
+        let algebraic_rows = (problem.body.rows().iter())
+            .filter(|row| matches!(row.kind(), RowKind::Algebraic(_)))
+            .count();
+        if layout != problem.layout()
+            || extents.layout != problem.layout()
+            || finished_for != ticket.digest()
+            || algebraic.len() != algebraic_rows
         {
             return Err(ticket.mismatch().into());
         }

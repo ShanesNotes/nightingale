@@ -3,7 +3,6 @@ use ng_contract::*;
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 
-/// Evaluates at the workspace's point with the tangent at the rates there: an explicit stage.
 pub fn explicit_stage(
     problem: &CoupledProblem<'_>,
     workspace: &mut SolveWorkspace,
@@ -17,7 +16,6 @@ pub fn explicit_stage(
     problem.evaluate(&workspace.point(time))
 }
 
-/// Forward Euler's one stage, with the workspace still at the start and its tangent at the rates there.
 pub fn euler_step(
     problem: &CoupledProblem<'_>,
     ticket: &StepTicket,
@@ -79,7 +77,6 @@ impl CoupledSolver for Heun {
     }
 }
 
-/// Both Heun stages, with the workspace at the second.
 pub fn heun_stages(
     problem: &CoupledProblem<'_>,
     ticket: &StepTicket,
@@ -88,4 +85,26 @@ pub fn heun_stages(
     advance(&mut workspace, ticket);
     let second = explicit_stage(problem, &mut workspace, ticket.at(ticket.length_ns())?)?;
     Ok((first, second, workspace))
+}
+
+pub struct KeepsItsSpan {
+    pub first_ns: u64,
+}
+impl CoupledSolver for KeepsItsSpan {
+    fn resolution(&self) -> DeclaredResolution {
+        resolution(StageScheme::forward_euler(), b"keeps its span", 0)
+    }
+    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+        let kept = problem.accepted().method_history().counters().first();
+        problem.ticket(kept.copied().unwrap_or(self.first_ns))
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let (workspace, stage) = euler_step(problem, ticket)?;
+        let mut quadrature = problem.quadrature(ticket);
+        quadrature.add(&stage, Ratio::ONE)?;
+        let schema = problem.accepted().method_history().schema();
+        let next = vec![2 * ticket.length_ns()];
+        let history = MethodHistory::new(schema, ticket.interval().start(), next);
+        Ok(problem.propose(ticket, quadrature.finish()?, &workspace, history))
+    }
 }

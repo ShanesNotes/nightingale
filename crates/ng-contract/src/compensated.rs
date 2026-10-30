@@ -2,9 +2,8 @@ use crate::identity::{Canonical, Seal};
 use crate::{Dimensionless, Measure};
 
 /// An amount as a compensated pair: `hi` the rounded sum and `lo` what rounding left out, normalized so
-/// the derived order is the order of the exact values. It is how an amount, a cumulative exchange and a
-/// curve value cross a crate boundary, so no ledger reading is a bare number.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+/// `at_most` reads the order of the exact values.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Compensated {
     hi: f64,
     lo: f64,
@@ -22,10 +21,16 @@ fn fast_two_sum(a: f64, b: f64) -> (f64, f64) {
     (sum, b - (sum - a))
 }
 
+/// Past this, the splitter's own product overflows though `a` and the product asked for are finite.
+const SPLIT_LIMIT: f64 = f64::from_bits(0x7E30_0000_0000_0000);
+const SPLIT_SCALE: f64 = 268_435_456.0;
+
 fn split(a: f64) -> (f64, f64) {
-    let scaled = a * 134_217_729.0;
-    let high = scaled - (scaled - a);
-    (high, a - high)
+    let scale = if a.abs() > SPLIT_LIMIT { SPLIT_SCALE } else { 1.0 };
+    let reduced = a / scale;
+    let scaled = reduced * 134_217_729.0;
+    let high = scaled - (scaled - reduced);
+    (high * scale, (reduced - high) * scale)
 }
 
 fn two_product(a: f64, b: f64) -> (f64, f64) {
@@ -44,6 +49,13 @@ impl Compensated {
     }
     pub(crate) fn exact(value: f64) -> Self {
         Self { hi: value, lo: 0.0 }
+    }
+    /// Whether this is no more than `limit`, and false when either side is not finite. It is the one
+    /// comparison: `<` and `>` read false on a NaN, so a check written with them passes what overflowed.
+    pub fn at_most(self, limit: Self) -> bool {
+        self.is_finite()
+            && limit.is_finite()
+            && (self.hi < limit.hi || (self.hi == limit.hi && self.lo <= limit.lo))
     }
     pub fn plus(self, other: Self) -> Self {
         let (sum, error) = two_sum(self.hi, other.hi);
@@ -144,7 +156,18 @@ mod tests {
     fn the_order_is_the_order_of_the_exact_values() {
         let above = exact(1.0).plus(exact(1e-30));
         let below = exact(1.0).minus(exact(1e-30));
-        assert!(below < exact(1.0) && exact(1.0) < above);
+        assert!(below.at_most(exact(1.0)) && exact(1.0).at_most(above));
+        assert!(!exact(1.0).at_most(below) && !above.at_most(exact(1.0)));
+        assert!(above.at_most(above));
+    }
+
+    #[test]
+    fn no_comparison_passes_what_is_not_finite() {
+        let nan = exact(f64::NAN);
+        assert!(!nan.at_most(exact(1.0)) && !exact(1.0).at_most(nan) && !nan.at_most(nan));
+        assert!(!exact(1.0).at_most(exact(f64::INFINITY)));
+        let overflowed = exact(f64::MAX).scaled(1);
+        assert!(!overflowed.is_finite() && !exact(1.0).at_most(overflowed));
     }
 
     #[test]
@@ -158,9 +181,24 @@ mod tests {
     fn a_product_keeps_its_low_part() {
         let third = exact(1.0).quotient(3.0);
         let one = third.scaled(3);
-        assert!(one.minus(exact(1.0)).abs() < exact(1e-31));
+        assert!(one.minus(exact(1.0)).abs().at_most(exact(1e-31)));
         let half = Measure::<Dimensionless>::new(0.5).map(|factor| third.times(&factor));
         assert_eq!(half.map(|value| value.bits()), Ok(third.quotient(2.0).bits()));
+    }
+
+    #[test]
+    fn a_finite_product_of_a_huge_value_stays_exact() {
+        let huge = exact(1e301);
+        assert_eq!(huge.scaled(1), huge);
+        assert_eq!(huge.scaled(-1), exact(-1e301));
+        assert_eq!(exact(1e300).scaled(4), exact(4e300));
+        let half = Measure::<Dimensionless>::new(0.5).map(|factor| huge.times(&factor));
+        assert_eq!(half, Ok(exact(5e300)));
+    }
+
+    #[test]
+    fn a_product_past_the_finite_range_says_so() {
+        assert!(!exact(1e301).scaled(1_000_000_000).is_finite());
     }
 
     #[test]
@@ -179,7 +217,12 @@ mod tests {
         let inside = Compensated::between(exact(0.0), exact(3.0), 1, 3);
         assert_eq!(inside, exact(1.0));
         let tiny = Compensated::between(exact(1.0), exact(1.0).plus(exact(3e-30)), 2, 3);
-        assert!(tiny.minus(exact(1.0)).minus(exact(2e-30)).abs() < exact(1e-45));
+        assert!(
+            tiny.minus(exact(1.0))
+                .minus(exact(2e-30))
+                .abs()
+                .at_most(exact(1e-45))
+        );
     }
 
     #[test]

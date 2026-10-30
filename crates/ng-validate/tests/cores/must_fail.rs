@@ -28,7 +28,6 @@ impl CoupledSolver for OneSample {
     }
 }
 
-/// Declares Heun and books its second stage away from the interval's end.
 pub struct MisplacedStage {
     pub interval_ns: u64,
 }
@@ -82,7 +81,6 @@ impl CoupledSolver for UnreachedStage {
     }
 }
 
-/// Declares Heun and weighs its stages unevenly. The weights still sum to one.
 pub struct WrongWeight {
     pub interval_ns: u64,
 }
@@ -106,7 +104,6 @@ impl CoupledSolver for WrongWeight {
     }
 }
 
-/// Books weights that do not sum to one.
 pub struct UnevenWeights {
     pub interval_ns: u64,
 }
@@ -126,7 +123,6 @@ impl CoupledSolver for UnevenWeights {
     }
 }
 
-/// Books weights whose exact sum does not fit in lowest terms.
 pub struct UnfitWeights {
     pub interval_ns: u64,
 }
@@ -196,7 +192,6 @@ impl CoupledSolver for KeptHistory {
     }
 }
 
-/// Publishes a continuation tagged with another core's schema.
 pub struct ForeignHistory {
     pub inner: ForwardEuler,
 }
@@ -217,7 +212,6 @@ impl CoupledSolver for ForeignHistory {
     }
 }
 
-/// Solves the first step twice and answers the second step with the spare: a proposal of a stale base.
 pub struct StaleProposal {
     pub inner: ForwardEuler,
     pub kept: RefCell<Option<StepProposal>>,
@@ -266,7 +260,6 @@ impl CoupledSolver for StaleIncrement {
     }
 }
 
-/// Refuses its first attempt, then books the evaluation it kept from it.
 pub struct EarlierAttempt {
     pub inner: ForwardEuler,
     pub kept: RefCell<Option<StageEvaluation>>,
@@ -296,7 +289,6 @@ impl CoupledSolver for EarlierAttempt {
     }
 }
 
-/// Solves a fresh ticket of its own span and hands back that proposal for the one it was issued.
 pub struct SwappedTicket {
     pub inner: ForwardEuler,
     pub own_span_ns: u64,
@@ -318,7 +310,6 @@ impl CoupledSolver for SwappedTicket {
     }
 }
 
-/// Refuses every attempt through a fresh ticket, whose budget has never been spent.
 pub struct ForeignRefusal {
     pub inner: ForwardEuler,
 }
@@ -362,7 +353,6 @@ impl CoupledSolver for ShadowTicket<'_> {
     }
 }
 
-/// Evaluates on another body under the real ticket.
 pub struct ForeignBody<'c> {
     pub inner: ForwardEuler,
     pub body: &'c CompiledBody,
@@ -388,7 +378,6 @@ impl CoupledSolver for ForeignBody<'_> {
     }
 }
 
-/// Evaluates the real problem at another body's workspace.
 pub struct ForeignWorkspace<'c> {
     pub inner: ForwardEuler,
     pub body: &'c CompiledBody,
@@ -415,7 +404,6 @@ impl CoupledSolver for ForeignWorkspace<'_> {
     }
 }
 
-/// Builds its whole proposal on another body.
 pub struct ForeignProposal<'c> {
     pub inner: ForwardEuler,
     pub body: &'c CompiledBody,
@@ -445,7 +433,6 @@ impl CoupledSolver for ForeignProposal<'_> {
     }
 }
 
-/// Refuses every attempt, so the budget or the floor must end it.
 pub struct NeverConverges {
     pub interval_ns: u64,
     pub budget: u32,
@@ -466,7 +453,6 @@ impl CoupledSolver for NeverConverges {
     }
 }
 
-/// Writes a non-finite coordinate before it evaluates.
 pub struct PoisonedPoint {
     pub inner: ForwardEuler,
 }
@@ -480,6 +466,84 @@ impl CoupledSolver for PoisonedPoint {
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let mut workspace = problem.workspace();
         workspace.unknowns_mut()[1] = f64::INFINITY;
+        problem.evaluate(&workspace.point(ticket.at(0)?))?;
+        self.inner.solve(problem, ticket)
+    }
+}
+
+/// Evaluates at amounts of its own before it solves, as a core does when its trial crosses a pole, so a
+/// start inside the law's domain still reaches the law's refusal at every length.
+pub struct TrialOutside<'c> {
+    pub inner: &'c dyn CoupledSolver,
+    pub amounts: [f64; 2],
+}
+impl CoupledSolver for TrialOutside<'_> {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+        self.inner.next_step(problem)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let mut workspace = problem.workspace();
+        workspace.unknowns_mut().copy_from_slice(&self.amounts);
+        problem.evaluate(&workspace.point(ticket.at(0)?))?;
+        self.inner.solve(problem, ticket)
+    }
+}
+
+/// Books its stages honestly on the record's own problem, then has `propose` read the end workspace through
+/// another body's rows, so the algebraic list it hands over is the other body's length. With `stash` it
+/// writes numbers of its own into that list first.
+pub struct ProposesThroughAnotherBody<'c> {
+    pub inner: ForwardEuler,
+    pub foreign: &'c CompiledBody,
+    pub values: &'c BoundParameters,
+    pub identity: &'c RunIdentity,
+    pub accepted: AcceptedStateView<'c>,
+    pub stash: Option<[f64; 2]>,
+}
+impl CoupledSolver for ProposesThroughAnotherBody<'_> {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+        self.inner.next_step(problem)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let (mut workspace, stage) = euler_step(problem, ticket)?;
+        let mut quadrature = problem.quadrature(ticket);
+        quadrature.add(&stage, Ratio::ONE)?;
+        let history = fresh_history(problem, ticket);
+        if let Some(stash) = self.stash {
+            workspace.unknowns_mut()[..2].copy_from_slice(&stash);
+        }
+        let base = Digest::of_canonical(b"another body");
+        let foreign = CoupledProblem::new(self.foreign, self.values, self.identity, self.accepted, base);
+        Ok(foreign.propose(ticket, quadrature.finish()?, &workspace, history))
+    }
+}
+
+/// Seeds a workspace from another record's accepted view under the record's own body, so the workspace has
+/// the right layout digest and too few coordinates.
+pub struct ShortWorkspace<'c> {
+    pub inner: ForwardEuler,
+    pub body: &'c CompiledBody,
+    pub values: &'c BoundParameters,
+    pub identity: &'c RunIdentity,
+    pub accepted: AcceptedStateView<'c>,
+}
+impl CoupledSolver for ShortWorkspace<'_> {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+        self.inner.next_step(problem)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let base = Digest::of_canonical(b"another record");
+        let shadow = CoupledProblem::new(self.body, self.values, self.identity, self.accepted, base);
+        let workspace = shadow.workspace();
         problem.evaluate(&workspace.point(ticket.at(0)?))?;
         self.inner.solve(problem, ticket)
     }

@@ -1,5 +1,3 @@
-//! Every place a trial can be refused for leaving a set. A precondition can still encode a threshold, so
-//! listing them makes that reviewable, and ticket 11 counts refusals per source.
 use crate::body::Layout;
 use crate::evaluate::{OperatorDomain, Undefined};
 use crate::law::Op;
@@ -81,9 +79,9 @@ impl AdmissibleSet {
         value.is_finite()
             && match self {
                 AdmissibleSet::Finite => true,
-                AdmissibleSet::Nonnegative => value >= Compensated::ZERO,
-                AdmissibleSet::Positive => value > Compensated::ZERO,
-                AdmissibleSet::UnitInterval => value >= Compensated::ZERO && value <= one,
+                AdmissibleSet::Nonnegative => Compensated::ZERO.at_most(value),
+                AdmissibleSet::Positive => !value.at_most(Compensated::ZERO),
+                AdmissibleSet::UnitInterval => Compensated::ZERO.at_most(value) && value.at_most(one),
             }
     }
 }

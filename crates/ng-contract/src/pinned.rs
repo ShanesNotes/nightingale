@@ -1,7 +1,3 @@
-//! The arithmetic profile's own transcendental routines: correctly rounded add, subtract, multiply and
-//! divide, exact scaling by powers of two, no `mul_add` and no host libm. A changed bit is a new
-//! `ArithmeticProfile`, never a silent change.
-
 const LN2_HI: f64 = f64::from_bits(0x3FE6_2E42_FEE0_0000);
 const LN2_LO: f64 = f64::from_bits(0x3DEA_39EF_3579_3C76);
 const INV_LN2: f64 = f64::from_bits(0x3FF7_1547_652B_82FE);
@@ -72,9 +68,6 @@ pub fn exp(x: f64) -> f64 {
     y * power_of_two(half) * power_of_two(k - half)
 }
 
-/// `ln x` within one unit in the last place: the atanh series to `z^11` on a mantissa in
-/// `[sqrt(1/2), sqrt(2))`. `ln(1)` is exactly +0. `None` for an argument that is not positive, which is
-/// the operator's own refusal source.
 pub(crate) fn ln(x: f64) -> Option<f64> {
     if x.is_nan() || x <= 0.0 {
         return None;

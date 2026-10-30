@@ -479,6 +479,15 @@
 //!     quadrature.finish()
 //! }
 //! ```
+//! A compensated value has no order, because `>` reads false on a NaN and passes what overflowed.
+//! ```compile_fail,E0369
+//! use ng_contract::Compensated;
+//! fn exceeds(value: Compensated, limit: Compensated) -> bool { value > limit }
+//! ```
+//! ```
+//! use ng_contract::Compensated;
+//! fn exceeds(value: Compensated, limit: Compensated) -> bool { !value.at_most(limit) }
+//! ```
 
 mod admission;
 mod anatomy;

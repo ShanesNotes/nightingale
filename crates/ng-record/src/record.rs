@@ -1,4 +1,3 @@
-//! `&mut PatientRecord` is never lent outside this crate, so only `Session` publishes.
 use crate::history::{ConservationView, History, HistorySeal, LedgerChunk};
 use ng_contract::{
     AcceptedStateView, BoundParameters, Candidate, CompiledBody, CoupledProblem, DenseSegment, Digest,
@@ -7,7 +6,6 @@ use ng_contract::{
 };
 
 /// The chained seal of one accepted revision: the previous seal, the image's digests and the ledger chunk.
-/// It hashes with `Digest::of_canonical`, so the contract's canonical writer stays private.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Seal {
     digest: Digest,
@@ -18,7 +16,6 @@ impl Seal {
     }
 }
 
-/// Each law stream's event ordinal, kept once, here. Empty until ticket 06 declares a stream.
 #[derive(Default)]
 struct StreamPositions {
     ordinals: Vec<(Digest, u64)>,
@@ -173,6 +170,9 @@ impl<'m> PatientRecord<'m> {
             }
         }
         let chunk = LedgerChunk::after(&self.history, self.body, &step);
+        if !chunk.is_finite() {
+            return Err(step.ticket().refuse(NumericalRefusal::LedgerOverflow));
+        }
         let pending = self.pending.after(step.ticket());
         let time = step.ticket().interval().end();
         let applied = step.applied().to_vec();
@@ -245,8 +245,7 @@ impl<'m> PatientRecord<'m> {
             },
         }
     }
-    /// One digest per part, recomputed from the live fields on every call. It reads no seal, because a
-    /// seal would still match if a field changed underneath it.
+    /// One digest per part, recomputed from the live fields on every call.
     pub fn digests(&self) -> RecordDigests {
         let Self {
             body: _,
@@ -276,8 +275,7 @@ impl<'m> PatientRecord<'m> {
     }
 }
 
-/// What must stay byte-identical across a refusal. `streams` is over an empty list until ticket 06, so it
-/// proves only that the field is read.
+/// What must stay byte-identical across a refusal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RecordDigests {
     pub revision: u64,

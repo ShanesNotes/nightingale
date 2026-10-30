@@ -6,20 +6,16 @@ mod dimensions {
         fn name() -> String;
     }
 }
-/// A scalar dimension. Sealed, so a kernel's reads, parameters, slots and results take only these:
-/// an invented unit or a per-site vector in a scalar position does not type-check.
 pub trait Dimension: dimensions::Sealed {}
 
 mod material {
     pub trait Sealed {}
 }
-/// What memory may hold. An amount is not one, so material cannot hide in a law's own state.
 pub trait NonMaterial: material::Sealed + Dimension {}
 
 mod sensed {
     pub trait Sealed {}
 }
-/// What a receptor or a guard senses. A set point is not sensed, so no guard fires on one.
 pub trait Sensed: sensed::Sealed + Dimension {}
 
 pub enum Dimensionless {}
@@ -33,18 +29,14 @@ pub enum Water {}
 pub struct Rate<Q>(PhantomData<Q>);
 /// Flow per pressure difference.
 pub struct Conductance<Q>(PhantomData<Q>);
-/// The dimension of `A * B`. It gets a name only through the identity table.
 pub struct Product<A, B>(PhantomData<(A, B)>);
-/// The dimension of `A / B`. It gets a name only through the identity table.
 pub struct Quotient<A, B>(PhantomData<(A, B)>);
 /// A set point in the unit of the variable it guards. It is its own dimension, so no law adds,
 /// subtracts or relaxes across the two; `Kernel::deviation` is the one operator that meets them.
 pub struct Reference<U: Sensed>(PhantomData<U>);
 /// Volume per amount of a species: a fixed structural coefficient of the schema, not a parameter.
 pub struct PartialVolume<Q>(PhantomData<Q>);
-/// One value per site of class `C`. A kernel declared for `C` reads its own site's entry.
 pub struct PerSite<C: SiteClass, U>(PhantomData<(C, U)>);
-/// One value per vascular edge. An edge kernel reads its own edge's entry.
 pub struct PerEdge<U>(PhantomData<U>);
 
 macro_rules! named {

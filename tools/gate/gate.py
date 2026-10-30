@@ -1492,7 +1492,6 @@ def _stable_methods(toks: list[Token], ty: str) -> set[str]:
 
 
 def stable_float_methods() -> dict[str, frozenset[str]]:
-    """Every stable inherent method of f64 and f32, read from the pinned toolchain's own library source."""
     sysroot = subprocess.run(["rustc", "--print", "sysroot"], capture_output=True, text=True).stdout.strip()
     lib = pathlib.Path(sysroot) / "lib/rustlib/src/rust/library"
     out = {}
@@ -1911,7 +1910,6 @@ documented!("```\\nlet _ = 5;\\n```");
 
 
 def listed_doctests(cwd: pathlib.Path, crates: list[str]) -> list[tuple[str, str, int]]:
-    """rustdoc's own list as (crate, file, line), so the host scan's reading of the docs is checked, not trusted."""
     r = subprocess.run(
         ["cargo", "test", "--doc", "--locked", *(a for c in crates for a in ("-p", c)), "--", "--list"],
         cwd=cwd,

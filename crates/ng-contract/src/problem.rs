@@ -1,4 +1,3 @@
-//! No time step enters a kernel: a stage time is an exact integer offset inside a ticketed interval.
 use crate::body::UnknownId;
 use crate::boundary::DriveFrame;
 use crate::evaluate::{Inputs, Undefined};
@@ -6,7 +5,7 @@ use crate::identity::{Canonical, Seal};
 use crate::quadrature::StageEvaluation;
 use crate::{
     AcceptedStateView, BoundParameters, CompiledBody, Digest, EngineFault, EngineFaultKind, InputId,
-    Interval, NumericalRefusal, Ratio, Refused, RunIdentity, TrialFailure,
+    Interval, NumericalRefusal, Ratio, Refused, RowId, RunIdentity, TrialFailure,
 };
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
@@ -40,8 +39,8 @@ impl<'r> CoupledProblem<'r> {
     pub fn accepted(&self) -> AcceptedStateView<'r> {
         self.accepted
     }
-    /// The core's own span, cut short only at the next breakpoint, which the core never sees. A zero span,
-    /// or one past the end of time, is `BindingMismatch`.
+    /// The core's own span, cut short only at the next breakpoint. A zero span, or one past the end of
+    /// time, is `BindingMismatch`.
     pub fn ticket(&self, intrinsic_span_ns: u64) -> Result<StepTicket, EngineFault> {
         self.issue(intrinsic_span_ns, 0)
     }
@@ -72,18 +71,8 @@ impl<'r> CoupledProblem<'r> {
             .next_breakpoint
             .map_or(intrinsic_end, |next| next.min(intrinsic_end));
         let interval = Interval::new(start, end).ok_or(mismatch)?;
-        let identity = self.identity.digest();
-        let mut out = Canonical::new("ng-contract ticket 1");
-        self.base.seal(&mut out);
-        identity.seal(&mut out);
-        start.seal(&mut out);
-        end.seal(&mut out);
-        plan.due.seal(&mut out);
-        plan.frame.seal(&mut out);
-        out.number(u64::from(plan.after_breakpoint));
-        out.number(u64::from(attempt));
         let resolution = self.identity.resolution();
-        Ok(StepTicket {
+        let mut ticket = StepTicket {
             base: self.base,
             interval,
             due: plan.due,
@@ -92,8 +81,14 @@ impl<'r> CoupledProblem<'r> {
             attempt,
             floor_ns: resolution.minimum_interval_ns(),
             budget: resolution.retry_budget(),
-            digest: out.digest(),
-        })
+            digest: self.base,
+        };
+        ticket.digest = ticket.sealed(self.identity.digest());
+        Ok(ticket)
+    }
+    /// The row at a workspace slot, so a core can name where a stage failed.
+    pub fn row(&self, slot: usize) -> Option<RowId> {
+        self.body.rows().get(slot).map(|row| row.id())
     }
     /// Numerical scratch seeded from the accepted state: each amount rounded once, the tangent at zero.
     pub fn workspace(&self) -> SolveWorkspace {
@@ -104,7 +99,8 @@ impl<'r> CoupledProblem<'r> {
     }
     fn check(&self, point: &StagePoint<'_, '_>) -> Result<(), TrialFailure> {
         let ticket = point.time.ticket;
-        if point.layout != self.layout() {
+        let rows = self.body.rows().len();
+        if point.layout != self.layout() || point.unknowns.len() != rows || point.derivative.len() != rows {
             return Err(ticket.mismatch().into());
         }
         let bad = |values: &[f64]| values.iter().position(|value| !value.is_finite());
@@ -181,6 +177,30 @@ pub struct StepTicket {
     pub(crate) digest: Digest,
 }
 impl StepTicket {
+    /// The floor and the budget are the identity's, so sealing the identity covers them.
+    fn sealed(&self, identity: Digest) -> Digest {
+        let Self {
+            base,
+            interval,
+            due,
+            frame,
+            after_breakpoint,
+            attempt,
+            floor_ns: _,
+            budget: _,
+            digest: _,
+        } = self;
+        let mut out = Canonical::new("ng-contract ticket 1");
+        base.seal(&mut out);
+        identity.seal(&mut out);
+        interval.start().seal(&mut out);
+        interval.end().seal(&mut out);
+        due.seal(&mut out);
+        frame.seal(&mut out);
+        out.number(u64::from(*after_breakpoint));
+        out.number(u64::from(*attempt));
+        out.digest()
+    }
     pub fn interval(&self) -> Interval {
         self.interval
     }
@@ -222,7 +242,7 @@ impl StepTicket {
         })
     }
     /// A refusal of this attempt, or the fault `NoAdmissibleStep` when its retry would go below the floor
-    /// or past the budget. One path, so nothing can accept excess error at the floor.
+    /// or past the budget.
     pub fn refuse(&self, reason: NumericalRefusal) -> TrialFailure {
         let retry_ns = self.length_ns() / 2;
         let at = self.interval.start();
@@ -260,7 +280,7 @@ impl StepTicket {
     }
 }
 
-/// An offset inside one ticket. It borrows the ticket, so `evaluate` can refuse with only a point in hand.
+/// An offset inside one ticket.
 #[derive(Clone, Copy)]
 pub struct StageTime<'t> {
     pub(crate) ticket: &'t StepTicket,

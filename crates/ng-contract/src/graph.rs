@@ -40,9 +40,7 @@ impl Digraph {
         Self::new(self.nodes(), &edges)
     }
 
-    /// Each node's strongly connected component, by Tarjan's algorithm (SIAM J. Comput. 1(2), 1972)
-    /// with an explicit call stack, so a deep map cannot exhaust the thread's stack.
-    pub(crate) fn components(&self) -> Vec<usize> {
+    pub(crate) fn strongly_connected_components(&self) -> Vec<usize> {
         let nodes = self.nodes();
         let mut order = vec![UNSEEN; nodes];
         let mut low = vec![0; nodes];

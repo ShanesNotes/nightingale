@@ -1,5 +1,3 @@
-//! The certificate: closure and drift over every sliding 24 h window, read from one view and policy data.
-//! It shows stability, not accuracy, and takes no vital, reading or second history.
 use ng_contract::{
     AdmissionError, Compensated, ConservedBasis, Digest, Dimension, Dimensionless, Interval, Measure,
     QuantityId, SimTime,
@@ -36,7 +34,7 @@ impl QuantityPolicy {
         })
     }
 }
-/// What drift is compared with. A later fasting protocol adds a stated curve.
+/// What drift is compared with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExpectedDrift {
     Zero,
@@ -47,7 +45,7 @@ pub struct Sliding24Hours {
     coverage_ns: u64,
 }
 impl Sliding24Hours {
-    /// Refuses a coverage that does not exceed one window, which could slide nowhere.
+    /// Refuses a coverage that does not exceed one window.
     pub fn covering(coverage_ns: u64) -> Result<Self, AdmissionError> {
         if coverage_ns <= DAY_NS {
             return Err(AdmissionError::ShortCoverage);
@@ -57,7 +55,6 @@ impl Sliding24Hours {
 }
 pub struct CertificatePolicy {
     basis: Digest,
-    digest: Digest,
     quantities: Vec<QuantityPolicy>,
     expected: ExpectedDrift,
     windows: Sliding24Hours,
@@ -74,12 +71,25 @@ impl CertificatePolicy {
         if !held.eq(basis.ids()) {
             return Err(AdmissionError::PolicyCoverage);
         }
-        let basis = basis.digest();
+        Ok(Self {
+            basis: basis.digest(),
+            quantities,
+            expected,
+            windows,
+        })
+    }
+    pub fn digest(&self) -> Digest {
+        let Self {
+            basis,
+            quantities,
+            expected,
+            windows,
+        } = self;
         let mut bytes = basis.as_bytes().to_vec();
         let ExpectedDrift::Zero = expected;
         let Sliding24Hours { coverage_ns } = windows;
         bytes.extend_from_slice(&coverage_ns.to_be_bytes());
-        for quantity in &quantities {
+        for quantity in quantities {
             let QuantityPolicy {
                 quantity: _,
                 absolute,
@@ -92,16 +102,7 @@ impl CertificatePolicy {
                 }
             }
         }
-        Ok(Self {
-            basis,
-            digest: Digest::of_canonical(&bytes),
-            quantities,
-            expected,
-            windows,
-        })
-    }
-    pub fn digest(&self) -> Digest {
-        self.digest
+        Digest::of_canonical(&bytes)
     }
 }
 
@@ -305,9 +306,7 @@ pub fn certify(
                 let closure = change[index].minus(inflow[index].minus(outflow[index])).abs();
                 let gross = inflow[index].plus(outflow[index]);
                 let allowed = limits.absolute.plus(gross.times(&limits.relative));
-                // Read this way round, an overflowed window's NaN fails instead of passing.
-                let closes = closure <= allowed;
-                if !closes {
+                if !closure.at_most(allowed) {
                     return Err(CertificateFailure {
                         check: CertificateCheck::Closure,
                         quantity: Some(quantity),
@@ -316,7 +315,7 @@ pub fn certify(
                     });
                 }
                 let drift = change[index].abs();
-                if drift > limits.drift && drifted.is_none() {
+                if !drift.at_most(limits.drift) && drifted.is_none() {
                     drifted = Some(CertificateFailure {
                         check: CertificateCheck::Drift,
                         quantity: Some(quantity),
@@ -331,11 +330,11 @@ pub fn certify(
                     worst_drift: drift,
                     drift_window: window,
                 });
-                if closure > result.worst_closure {
+                if !closure.at_most(result.worst_closure) {
                     result.worst_closure = closure;
                     result.closure_window = window;
                 }
-                if drift > result.worst_drift {
+                if !drift.at_most(result.worst_drift) {
                     result.worst_drift = drift;
                     result.drift_window = window;
                 }
@@ -349,7 +348,7 @@ pub fn certify(
     Ok(Certificate {
         seal: view.seal(),
         basis: policy.basis,
-        policy: policy.digest,
+        policy: policy.digest(),
         results,
         pieces,
     })

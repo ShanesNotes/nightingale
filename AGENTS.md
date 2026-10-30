@@ -26,6 +26,7 @@ The native Rust engine for one simulated patient. Read `docs/srs.md` first: it b
 | Crate names and allowed dependencies come from the contract's crate table. No crate from outside the workspace enters the physiology closure, no crate names a host service, and no crate has a build script, an include, a feature or its own clippy config | `tools/verify.d/05-seam.sh`, and `10-rust.sh` checks that its scan read every doctest |
 | No unsafe code, host libm, hash order, wall clock or sockets, through the workspace lints and `clippy.toml` | `tools/verify.d/10-rust.sh`, whose bans probe proves each entry and that every stable float method is banned or exact |
 | No bare `f64` across a crate boundary | `tools/verify.d/15-f64.sh` |
+| A comparison of ledger values fails closed on a NaN: `Compensated` has only `at_most` | the compile-fail doctest in `crates/ng-contract/src/lib.rs` |
 | Comments | the `/no-comments` report |
 
 ## Verify and merge
