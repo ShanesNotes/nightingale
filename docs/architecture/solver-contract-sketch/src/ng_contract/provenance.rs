@@ -197,7 +197,7 @@ impl EvidenceRecord {
         _certainty: Certainty,
         _rights: Digest,
     ) -> Result<Self, AdmissionError> {
-        // Refuses a `Textbook` record whose certainty is above `Moderate`.
+        // Refuses a `Compiled` or `Textbook` record whose certainty is above `Moderate`.
         todo!()
     }
 }
@@ -211,8 +211,8 @@ impl SourceSpan {
         todo!()
     }
 }
-/// What a record supports. Any tier may support any claim; a `Textbook` record caps its
-/// `Certainty` at `Moderate` and names the edition and page.
+/// What a record supports. Any tier may support any claim; a `Compiled` or `Textbook` record
+/// caps its `Certainty` at `Moderate`, and a `Textbook` record names the edition and page.
 pub enum Claim {
     Magnitude,
     Range,
@@ -236,15 +236,14 @@ impl Population {
     }
 }
 /// How strong a source is for one claim: population-specific primary data first, then a
-/// textbook, then inference (record 0003). A textbook record states whether a primary source
-/// would upgrade it.
+/// compiled source (a reference compilation, a review or a consensus standard), then a
+/// textbook, then inference (record 0003). A compiled or textbook record states whether a
+/// primary source would upgrade it.
 pub enum Tier {
     PrimaryMeasured,
     PrimaryFitted,
-    CompiledReference,
-    Review,
+    Compiled { primary_would_upgrade: bool },
     Textbook { primary_would_upgrade: bool },
-    Standard,
 }
 pub enum Certainty {
     High,
