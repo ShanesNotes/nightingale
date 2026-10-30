@@ -13,3 +13,7 @@ Status: ready-for-agent
 - [ ] An observer refuses a skipped or repeated revision; each grid instant appears in exactly one step
 - [ ] An observer checkpoint restores its findings after a resume
 - [ ] Measurement error draws from the observation namespace: adding a channel leaves physiology draws unchanged
+
+## Comments
+
+From 03: sketch probe this ticket owns: line 471 (seed domains never mix, E0308).

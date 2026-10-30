@@ -78,8 +78,8 @@
 //!     // Where the filter law is trusted: leaving it is reported on the receipt, never refused.
 //!     let trusted = ValidityRange::new(Measure::new(-1.0)?, Measure::new(1.0)?, Basis::Fixture("fixture design range"))?;
 //!     laws.validity(&relax, trusted);
-//!     laws.memory_rate(filter, relax);
-//!     laws.memory_rate(set_point, drift);
+//!     laws.memory_rate(&filter, relax);
+//!     laws.memory_rate(&set_point, drift);
 //!     Ok(laws.finish())
 //! }
 //!
@@ -126,7 +126,7 @@
 //!     });
 //!     // Fires when the integral reaches the stream's exponential draw; the contract resets it.
 //!     laws.hazard(HazardGuard::new(&hazard, dice, sinus.to(&ectopic)?));
-//!     laws.memory_rate(hazard, accrue);
+//!     laws.memory_rate(&hazard, accrue);
 //!     Ok(())
 //! }
 //!
@@ -134,6 +134,7 @@
 //! // read at each bed's own pressures; a bed's enclosure sets its extravascular pressure.
 //! fn starling<'b>(scope: FluidsScope<'b>) -> Result<Fragment<'b, Fluids>, AdmissionError> {
 //!     let (mut laws, ports) = scope.parts();
+//!     let route = ports.starling(&mut laws);
 //!     let pressures: CapillaryAndVenousPressure<Reads<'b, Fluids>> = laws.receive();
 //!     let kf = laws.site_parameter::<CapillaryBed, Conductance<Water>>(ParameterKey::new("fl.kf"),
 //!         Admissible::nonnegative());
@@ -146,7 +147,7 @@
 //!         let flow = k.conductance_flow(conductance, head);
 //!         k.finish(flow, laws.every_mode(), minutes)
 //!     });
-//!     laws.transfer_at(ports.starling, filtration);
+//!     laws.transfer_at(&route, filtration);
 //!     Ok(laws.finish())
 //! }
 //!

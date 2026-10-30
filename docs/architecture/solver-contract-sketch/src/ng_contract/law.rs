@@ -22,16 +22,11 @@ pub struct Endpoint<'b, O, Q> {
     _brand: Brand<'b>,
     _kind: PhantomData<(O, Q)>,
 }
-/// Same species and dimension at both ends, including an explicitly named exterior endpoint.
+/// Same species and dimension at both ends, including an explicitly named exterior endpoint. Only a
+/// scope grants one, so no law assembles a pair from loose endpoints.
 pub struct Pair<'b, O, Q> {
     _from: Endpoint<'b, O, Q>,
     _to: Endpoint<'b, O, Q>,
-}
-impl<'b, O, Q> Pair<'b, O, Q> {
-    /// Neither raw indices nor optional destinations are accepted.
-    pub fn new(_from: Endpoint<'b, O, Q>, _to: Endpoint<'b, O, Q>) -> Self {
-        todo!()
-    }
 }
 /// Published read capability; it cannot address arbitrary organ state.
 pub struct ReadPort<'b, O, U> {
@@ -235,12 +230,13 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     }
 }
 
+/// A transfer law on a pair it borrows, so the compiler sees every law on the route together.
 pub struct Transfer<'b, O, Q> {
-    _pair: Pair<'b, O, Q>,
+    _route: u32,
     _rate: PureKernel<'b, O, Rate<Q>>,
 }
 impl<'b, O, Q> Transfer<'b, O, Q> {
-    pub fn new(_pair: Pair<'b, O, Q>, _rate: PureKernel<'b, O, Rate<Q>>) -> Self {
+    pub fn new(_pair: &Pair<'b, O, Q>, _rate: PureKernel<'b, O, Rate<Q>>) -> Self {
         todo!()
     }
 }
@@ -375,7 +371,8 @@ pub struct BalancedReaction<'b, O> {
     _owner: PhantomData<O>,
 }
 
-/// Consumed declarations enforce single use; the model compiler checks global coverage and modes.
+/// Declaring a slot, an output or a route records a law the fragment owes, and attaching a law borrows
+/// it, so the model compiler sees every law on a row together and checks coverage and modes.
 pub struct FragmentBuilder<'b, O> {
     _brand: Brand<'b>,
     _owner: PhantomData<O>,
@@ -401,7 +398,7 @@ impl<'b, O> FragmentBuilder<'b, O> {
         todo!()
     }
     /// One transfer law for every site of the route's class.
-    pub fn transfer_at<C: SiteClass, Q>(&mut self, _route: SiteRoute<'b, O, C, Q>, _rate: PureKernel<'b, O, Rate<Q>, C>) {
+    pub fn transfer_at<C: SiteClass, Q>(&mut self, _route: &SiteRoute<'b, O, C, Q>, _rate: PureKernel<'b, O, Rate<Q>, C>) {
         todo!()
     }
     /// Slow memory in the guarded variable's unit (`Reference<U>`), moved by `memory_rate` like any
@@ -437,18 +434,18 @@ impl<'b, O> FragmentBuilder<'b, O> {
         todo!()
     }
     /// Declares a memory slot's rate kernel. The contract integrates it; no organ steps its own state.
-    pub fn memory_rate<U: NonMaterial>(&mut self, _slot: StateSlot<'b, O, U>, _rate: PureKernel<'b, O, Rate<U>>) {
+    pub fn memory_rate<U: NonMaterial>(&mut self, _slot: &StateSlot<'b, O, U>, _rate: PureKernel<'b, O, Rate<U>>) {
         todo!()
     }
     /// Declares local non-authoritative mechanical or chemical closure coordinates.
     pub fn algebraic<U>(&mut self, _local_name: &str, _domain: Admissible<U>) -> AlgebraicSlot<'b, O, U> {
         todo!()
     }
-    pub fn residual<U>(&mut self, _slot: AlgebraicSlot<'b, O, U>, _residual: PureKernel<'b, O, U>) {
+    pub fn residual<U>(&mut self, _slot: &AlgebraicSlot<'b, O, U>, _residual: PureKernel<'b, O, U>) {
         todo!()
     }
     /// Defines one published coupling field.
-    pub fn define<U>(&mut self, _output: Output<'b, O, U>, _value: PureKernel<'b, O, U>) {
+    pub fn define<U>(&mut self, _output: &Output<'b, O, U>, _value: PureKernel<'b, O, U>) {
         todo!()
     }
     /// Issues the definition capabilities of a coupling-map edge this owner emits.
@@ -469,14 +466,14 @@ impl<'b, O> FragmentBuilder<'b, O> {
     pub fn transfer<Q>(&mut self, _transfer: Transfer<'b, O, Q>) {
         todo!()
     }
-    pub fn advect(&mut self, _route: FluidRoute<'b, O>, _flow: PureKernel<'b, O, Rate<Volume>>) {
+    pub fn advect(&mut self, _route: &FluidRoute<'b, O>, _flow: PureKernel<'b, O, Rate<Volume>>) {
         todo!()
     }
     /// Energy is a book: power moves joules between two energy endpoints under one work claim.
-    pub fn work(&mut self, _pair: WorkPair<'b, O>, _power: PureKernel<'b, O, Rate<Energy>>) {
+    pub fn work(&mut self, _pair: &WorkPair<'b, O>, _power: PureKernel<'b, O, Rate<Energy>>) {
         todo!()
     }
-    pub fn reaction(&mut self, _reaction: BalancedReaction<'b, O>, _rate: PureKernel<'b, O, Rate<Dimensionless>>) {
+    pub fn reaction(&mut self, _reaction: &BalancedReaction<'b, O>, _rate: PureKernel<'b, O, Rate<Dimensionless>>) {
         todo!()
     }
     pub fn event<U>(&mut self, _guard: Guard<'b, O, U>) {

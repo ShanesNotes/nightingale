@@ -9,6 +9,8 @@ Python 3.11 stdlib only. Run as `python3 -I tools/gate/gate.py <command>`; it fi
     nightly-record <exit> <log>              record a nightly full run (tools/gate/nightly.sh)
     nightly-passed <sha>                     exit 0 when the nightly state records sha as passed
     doctests                                 every doctest rustdoc lists is one the host scan read
+    codes [DIR]                              every compile_fail doctest fails with the error code it declares,
+                                             in the planned crates or in the standalone crate at DIR
 
 Exit codes: 0 pass; 1 violations, one per line as `<code>: <subject>: <what to do>`; 2 an input the gate
 reads is missing or malformed.
@@ -18,6 +20,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime
+import fcntl
 import hashlib
 import json
 import os
@@ -1973,6 +1976,124 @@ def doctests() -> int:
     return 1 if found else 0
 
 
+DOC_FENCE = re.compile(r"^(\s*//[/!] ?\s*)(```+|~~~+)(.*)$")
+FAILURE = re.compile(r"^---- (\S+) - .*\(line (\d+)\) stdout ----$", re.M)
+CODES_PROBE = """\
+//! ```compile_fail,E0308
+//! let _: u8 = "text";
+//! ```
+//! ```compile_fail,E0599
+//! let _: u8 = "text";
+//! ```
+//! ```compile_fail,E0308
+//! let _: u8 = 1;
+//! ```
+//! ```compile_fail
+//! let _: u8 = "text";
+//! ```
+"""
+CODES_PROBE_FLAGGED = {4, 7, 10}
+
+
+def _fence_words(info: str) -> list[str]:
+    return [w for w in re.split(r"[\s,]+", info) if w]
+
+
+def compile_fail_codes(
+    root: pathlib.Path, cwd: str, sources: list[str], packages: list[str]
+) -> tuple[list[Violation], int, int]:
+    """Stable rustdoc runs a compile_fail doctest without checking its code, so the doctests run again in a
+    copy of the tree with the markers removed, and each must fail with the code its marker declares."""
+    base = (ROOT / (os.environ.get("CARGO_TARGET_DIR") or "target")).resolve() / "gate/codes"
+    tree = base / "tree"
+    base.mkdir(parents=True, exist_ok=True)
+    # An absolute CARGO_TARGET_DIR, as on the integrate gate, shares this tree between checkouts, so runs
+    # take turns: otherwise one run's doctests could build from another checkout's copy.
+    with open(base / "lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        shutil.rmtree(tree, ignore_errors=True)
+        for rel in list_files(root):
+            if (root / rel).is_file() and not (root / rel).is_symlink():
+                (tree / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(root / rel, tree / rel)
+        declared: dict[tuple[str, int], str | None] = {}
+        for rel in sources:
+            lines = _read(root / rel).split("\n")
+            for n, line in enumerate(lines, 1):
+                m = DOC_FENCE.match(line)
+                if m and "compile_fail" in (words := _fence_words(m.group(3))):
+                    codes = [w for w in words if re.fullmatch(r"E\d{4}", w)]
+                    declared[(rel, n)] = codes[0] if len(codes) == 1 else None
+                    kept = [w for w in words if w != "compile_fail" and not re.fullmatch(r"E\d{4}", w)]
+                    lines[n - 1] = m.group(1) + m.group(2) + ",".join(kept)
+            (tree / rel).write_text("\n".join(lines), encoding="utf-8")
+        r = subprocess.run(
+            ["cargo", "test", "--doc", "--locked", "--no-fail-fast", *(a for p in packages for a in ("-p", p)),
+             "--target-dir", str(base / "target")],
+            cwd=tree / cwd,
+            env={**os.environ, "RUSTFLAGS": "", "RUSTDOCFLAGS": ""},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    if r.returncode != 0 and "Doc-tests" not in r.stdout:
+        raise GateError(f"cargo test --doc in {cwd} built no doctests: {r.stdout.strip()[-2000:]}")
+    sections = FAILURE.split(r.stdout)
+    got = {
+        (posixpath.normpath(posixpath.join(cwd, sections[i])), int(sections[i + 1])): set(
+            re.findall(r"error\[(E\d{4})\]", sections[i + 2])
+        )
+        for i in range(1, len(sections), 3)
+    }
+    found, passed = [], 0
+    for (rel, line), code in sorted(declared.items()):
+        failed_with = got.pop((rel, line), set())
+        if code is None:
+            found.append(Violation("codes", f"{rel}:{line}", "declare the one error code the doctest fails with, "
+                                   "as in compile_fail,E0308"))
+        elif code not in failed_with:
+            what = f"fails with {', '.join(sorted(failed_with))}" if failed_with else "compiles"
+            found.append(Violation("codes", f"{rel}:{line}", f"declares {code} but {what} without the marker"))
+        else:
+            passed += 1
+    found += [
+        Violation("codes", f"{rel}:{line}", "a doctest fails here that the scan read no compile_fail marker for; "
+                  "write it as a /// block")
+        for rel, line in sorted(got)
+    ]
+    return found, len(declared), passed
+
+
+def codes(sketch: str | None) -> int:
+    if sketch is not None:
+        sources = sorted(_rel(ROOT, p) for p in (ROOT / sketch / "src").rglob("*.rs"))
+        found, count, passed = compile_fail_codes(ROOT, sketch, sources, [])
+        if not count:
+            found.append(Violation("codes", sketch, "no compile_fail doctests; the sketch's type rules are gone"))
+        summary = f"codes: {sketch}: {count} compile_fail doctests, {passed} fail with their code"
+    else:
+        ws = load(ROOT)
+        crates = os.environ["NG_GATE_CRATES"].split() if "NG_GATE_CRATES" in os.environ else sorted(ws.members)
+        sources = sorted(
+            s.path for c in crates for s in ws.members[c].sources if s.path.startswith(f"{ws.members[c].dir}/src/")
+        )
+        found, count, passed = compile_fail_codes(ROOT, ".", sources, crates) if crates else ([], 0, 0)
+        summary = f"codes: {len(crates)} crates, {count} compile_fail doctests, {passed} fail with their code"
+    if os.environ.get("NG_GATE_MODE") != "changed":
+        flagged, _, _ = compile_fail_codes(write_probe("codes-probe", CODES_PROBE), ".", ["src/lib.rs"], [])
+        lines = {int(v.subject.rsplit(":", 1)[1]) for v in flagged}
+        if lines != CODES_PROBE_FLAGGED:
+            found.append(
+                Violation("codes", "the probe", f"flagged lines {sorted(lines)}; its bad codes are at "
+                          f"{sorted(CODES_PROBE_FLAGGED)}")
+            )
+        summary += f"; probe: {len(lines & CODES_PROBE_FLAGGED)} of {len(CODES_PROBE_FLAGGED)} bad codes flagged"
+    for v in found:
+        print(v)
+    print(summary)
+    return 1 if found else 0
+
+
 def _state_path() -> pathlib.Path:
     return pathlib.Path.home() / ".local/state/nightingale/nightly.json"
 
@@ -2066,6 +2187,10 @@ def main(argv: list[str]) -> int:
                 return f64()
             case ["doctests"]:
                 return doctests()
+            case ["codes"]:
+                return codes(None)
+            case ["codes", sketch]:
+                return codes(sketch)
             case ["nightly-record", status, log] if status.isdigit():
                 return nightly_record(int(status), pathlib.Path(log))
             case ["nightly-passed", sha]:

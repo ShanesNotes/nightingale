@@ -102,11 +102,71 @@ impl Canonical {
     pub(crate) fn number(&mut self, number: u64) {
         self.bytes.extend_from_slice(&number.to_be_bytes());
     }
+    pub(crate) fn length(&mut self, length: usize) {
+        self.number(length as u64);
+    }
     pub(crate) fn text(&mut self, text: &str) {
         self.number(text.len() as u64);
         self.bytes.extend_from_slice(text.as_bytes());
     }
     pub(crate) fn digest(&self) -> Digest {
         Digest::of_canonical(&self.bytes)
+    }
+}
+
+pub(crate) trait Seal {
+    fn seal(&self, out: &mut Canonical);
+}
+impl<T: Seal> Seal for [T] {
+    fn seal(&self, out: &mut Canonical) {
+        out.length(self.len());
+        for item in self {
+            item.seal(out);
+        }
+    }
+}
+impl<T: Seal> Seal for Option<T> {
+    fn seal(&self, out: &mut Canonical) {
+        match self {
+            None => out.number(0),
+            Some(value) => {
+                out.number(1);
+                value.seal(out);
+            }
+        }
+    }
+}
+impl Seal for str {
+    fn seal(&self, out: &mut Canonical) {
+        out.text(self);
+    }
+}
+impl<A: Seal, B: Seal> Seal for (A, B) {
+    fn seal(&self, out: &mut Canonical) {
+        self.0.seal(out);
+        self.1.seal(out);
+    }
+}
+impl Seal for i64 {
+    fn seal(&self, out: &mut Canonical) {
+        out.number(*self as u64);
+    }
+}
+impl Seal for u64 {
+    fn seal(&self, out: &mut Canonical) {
+        out.number(*self);
+    }
+}
+impl Seal for usize {
+    fn seal(&self, out: &mut Canonical) {
+        out.number(*self as u64);
+    }
+}
+impl Seal for Digest {
+    fn seal(&self, out: &mut Canonical) {
+        let Self { bytes } = self;
+        for &byte in bytes {
+            out.number(u64::from(byte));
+        }
     }
 }

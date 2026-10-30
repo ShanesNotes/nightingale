@@ -10,3 +10,8 @@ impl ParameterKey {
         self.key
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Basis {
+    Fixture(&'static str),
+}

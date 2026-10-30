@@ -207,6 +207,15 @@ A flow with two ends: what leaves one pool enters another pool or a receipt pool
 **Receipt pool**:
 A named pool outside the body, or behind a held stand-in, that takes what crosses the boundary, so a boundary transfer still has two ends.
 
+**Route family**:
+Every transfer of one kind the map implies: one per site of a class, such as plasma to interstitium at every capillary bed, or one per vascular edge. A system requests it whole through its scope, so the body owes a law for every one, and no law names a site.
+
+**Left-out space**:
+A space the schema states this body does not model, with its reason, such as cell water in a bench with no cell-water law. Its pools are not amounts, and no law may move or read them. Every other pool is an amount some transfer must move; one that none moves is an orphan pool, which compilation refuses.
+
+**Partial volume**:
+The volume one unit amount of a species takes up: a fixed coefficient of the schema, not a parameter. A space's volume derives from its amounts through it.
+
 **Shared substrate**:
 One of the ten resources the systems share (S1 to S10 in the coupling map), such as the vascular registry, or water and osmoles per space.
 

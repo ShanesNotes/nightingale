@@ -21,6 +21,7 @@ The native Rust engine for one simulated patient. Read `docs/srs.md` first: it b
 |---|---|
 | Docs hygiene and the line caps | `tools/verify.d/10-docs.sh` |
 | The sketch and its compile-fail doctests | `tools/verify.d/20-sketch.sh` |
+| Each compile-fail test fails with the error code it declares, in the crates and the sketch | `tools/gate/gate.py codes`, from `10-rust.sh` and `20-sketch.sh` |
 | The pinned toolchain | `tools/verify.d/01-toolchain.sh` |
 | Crate names and allowed dependencies come from the contract's crate table. No crate from outside the workspace enters the physiology closure, no crate names a host service, and no crate has a build script, an include, a feature or its own clippy config | `tools/verify.d/05-seam.sh`, and `10-rust.sh` checks that its scan read every doctest |
 | No unsafe code, host libm, hash order, wall clock or sockets, through the workspace lints and `clippy.toml` | `tools/verify.d/10-rust.sh`, whose bans probe proves each entry and that every stable float method is banned or exact |

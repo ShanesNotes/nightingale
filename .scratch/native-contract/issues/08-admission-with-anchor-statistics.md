@@ -12,3 +12,7 @@ Status: ready-for-agent
 - [ ] An initializer that returns a guess violating a row or anchor is refused with the row named
 - [ ] Provenance is recorded per value (Derived, Calibrated, Sampled, Authored, Fixture); an Authored value lies inside its population record's range (I16), and no parameter is pinned to an anchor
 - [ ] The fixture packet type is the only one the validation crate accepts
+
+## Comments
+
+From 03: a mode variable declares its values but no starting value, so initialization picks one consistent with the guards. Sketch probes this ticket owns: lines 46 (an anchor needs a citation, E0061) and 201 (a synthetic value cannot be an anchor, E0308).
