@@ -36,7 +36,7 @@ impl<'b> ByteReader<'b> {
         Ok(Digest::from_bytes(*bytes))
     }
     pub fn compensated(&mut self) -> Result<Compensated, Malformed> {
-        Ok(Compensated::from_bits([self.number()?, self.number()?]))
+        Compensated::from_bits([self.number()?, self.number()?]).ok_or(Malformed)
     }
     pub fn count(&mut self, least_item_bytes: usize) -> Result<usize, Malformed> {
         let count = usize::try_from(self.number()?).map_err(|_| Malformed)?;

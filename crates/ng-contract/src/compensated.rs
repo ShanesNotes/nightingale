@@ -110,12 +110,10 @@ impl Compensated {
     pub fn bits(self) -> [u64; 2] {
         [self.hi.to_bits(), self.lo.to_bits()]
     }
-    pub fn from_bits(bits: [u64; 2]) -> Self {
-        let [hi, lo] = bits;
-        Self {
-            hi: f64::from_bits(hi),
-            lo: f64::from_bits(lo),
-        }
+    /// `None` for a pair no sum leaves: `at_most` reads `hi` first, so `lo` must round away against it.
+    pub fn from_bits(bits: [u64; 2]) -> Option<Self> {
+        let [hi, lo] = bits.map(f64::from_bits);
+        (hi + lo == hi).then_some(Self { hi, lo })
     }
     pub(crate) fn rounded(self) -> f64 {
         self.hi + self.lo
@@ -235,7 +233,10 @@ mod tests {
     #[test]
     fn stored_bits_read_back_as_the_same_pair() {
         let value = exact(1.0).plus(exact(1e-30));
-        assert_eq!(Compensated::from_bits(value.bits()).bits(), value.bits());
+        assert_eq!(
+            Compensated::from_bits(value.bits()).map(Compensated::bits),
+            Some(value.bits())
+        );
     }
 
     #[test]

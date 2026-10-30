@@ -208,12 +208,16 @@ type Break = fn(&mut Vec<u8>);
 fn each_field_a_run_never_writes_is_malformed() {
     let (body, sites) = body().expect("a body");
     let bytes = image(&body, sites).canonical();
-    let breaks: [(&str, Break); 24] = [
+    let breaks: [(&str, Break); 25] = [
         ("another format", |bytes| bytes[8] ^= 1),
         ("a list that cannot fit", |bytes| put(bytes, TIMELINE, u64::MAX)),
         ("a list past the bytes", |bytes| put(bytes, COUNTERS, 1 << 40)),
         ("one amount short", |bytes| put(bytes, AMOUNTS, 1)),
         ("a memory value no row owns", |bytes| put(bytes, MEMORY, 1)),
+        ("a negative amount hidden in its limbs", |bytes| {
+            put(bytes, FIRST_AMOUNT, 1.0_f64.to_bits());
+            put(bytes, FIRST_AMOUNT + 8, (-2.0_f64).to_bits());
+        }),
         ("a negative amount", |bytes| {
             put(bytes, FIRST_AMOUNT, (-1.0_f64).to_bits());
         }),

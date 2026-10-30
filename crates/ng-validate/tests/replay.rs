@@ -5,9 +5,9 @@ use ng_contract::*;
 use ng_record::*;
 use ng_validate::*;
 use replay_cores::{
-    ActsOnACut, ClipsAt, CountsInACell, KeepsACache, KeepsACount, KeepsTheDigest, ReadsPastTheBreakpoint,
-    ReadsTheHostClock, RefreshesASixth, RefusesByHash, RefusesOne, RestartsAfterAJump, ScriptedClock, Seen,
-    ShowsAt,
+    ActsOnACut, ClipsAt, CountsInACell, KeepsACache, KeepsACount, KeepsTheDigest, MarksItsFirstSteps,
+    ReadsPastTheBreakpoint, ReadsTheHostClock, RefreshesASixth, RefusesByHash, RefusesOne,
+    RestartsAfterAJump, ScriptedClock, Seen, ShowsAt,
 };
 
 const SECOND: u64 = 1_000_000_000;
@@ -1750,17 +1750,19 @@ fn a_lost_count_that_shows_steps_after_the_load_fails_resume() {
 
 #[test]
 fn every_gate_in_one_evidence_measured_one_course() {
-    let case = delivering(vec![delivery(b"input", 40, 60)], 100);
+    let case = delivering(vec![delivery(b"nothing", 4, 6)], 10);
+    let (one, two) = (MarksItsFirstSteps { marker: 1 }, MarksItsFirstSteps { marker: 2 });
+    let (one, two) = (
+        to(case.admit(&one).expect("admitted"), case.end()),
+        to(case.admit(&two).expect("admitted"), case.end()),
+    );
+    assert_eq!(one.record().digests(), two.record().digests());
+    assert_ne!(one.record().seal(), two.record().seal());
     let calls = Cell::new(0);
     let cores = || {
         calls.set(calls.get() + 1);
-        ClipsAt {
-            inner: reference(8 * SECOND),
-            outputs: if calls.get() <= 3 {
-                vec![at(20)]
-            } else {
-                Vec::new()
-            },
+        MarksItsFirstSteps {
+            marker: if calls.get() <= 3 { 1 } else { 2 },
         }
     };
     let clock = script();

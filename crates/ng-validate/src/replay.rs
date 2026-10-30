@@ -101,6 +101,7 @@ pub struct GateEvidence {
     run: Digest,
     runs: Vec<RecordDigests>,
     clock: Option<ClockSource>,
+    course: Seal,
 }
 impl GateEvidence {
     pub fn gate(&self) -> ReplayGate {
@@ -163,6 +164,7 @@ impl Row {
 struct Trace {
     rows: Vec<Row>,
     last: RecordDigests,
+    seal: Seal,
 }
 
 /// Two runs to one end with equal seals have equal rows, so a shared prefix is the whole of each.
@@ -273,8 +275,8 @@ fn traced<'m>(
     if !stopped_short && !matches!(pace, Pace::Unbounded) {
         return Err(ReplayFailure::MissingEvidence { gate });
     }
-    let last = session.record().digests();
-    Ok((session, Trace { rows, last }))
+    let (last, seal) = (session.record().digests(), session.record().seal());
+    Ok((session, Trace { rows, last, seal }))
 }
 
 fn admitted<'m>(
@@ -342,6 +344,7 @@ fn pace_gate(
         run,
         runs,
         clock: Some(plan.clock.source()),
+        course: reference.seal,
     })
 }
 
@@ -419,6 +422,7 @@ fn resume_gate(
         run,
         runs,
         clock: None,
+        course: reference.seal,
     })
 }
 
@@ -468,6 +472,7 @@ fn late_admission_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<
         run,
         runs: vec![reference.last, late.last],
         clock: None,
+        course: reference.seal,
     })
 }
 
@@ -513,6 +518,7 @@ fn rewind_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<GateEvid
         run,
         runs,
         clock: None,
+        course: reference.seal,
     })
 }
 
@@ -536,10 +542,10 @@ pub fn replay_gates(
     plan: &ReplayPlan<'_>,
 ) -> Result<ReplayEvidence, ReplayFailure> {
     let pace = replay_gate(ReplayGate::Pace, case, cores, plan)?;
-    let (run, course) = (pace.run, pace.runs[0]);
+    let (run, course) = (pace.run, pace.course);
     let of_this_run = |gate| {
         let evidence = replay_gate(gate, case, cores, plan)?;
-        if evidence.run == run && evidence.runs[0] == course {
+        if evidence.course == course {
             Ok(evidence)
         } else {
             Err(ReplayFailure::MissingEvidence { gate })
@@ -576,6 +582,7 @@ mod tests {
         let trace = |session: &Session<'_, Running>| Trace {
             rows: vec![Row::of(session, false)],
             last: session.record().digests(),
+            seal: session.record().seal(),
         };
         let (reference, run) = (trace(&session), trace(&withheld));
         let compare = |run: &Trace| first_divergence(&reference.rows, &reference.last, &run.rows, &run.last);

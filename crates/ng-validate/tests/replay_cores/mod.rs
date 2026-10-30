@@ -364,3 +364,21 @@ impl CoupledSolver for RefreshesASixth {
         self.inner.solve(problem, ticket)
     }
 }
+
+/// Leaves `marker` in its continuation for the first two seconds and clears it, so two markers end on equal
+/// digests and differ only in the seals of the steps between.
+pub struct MarksItsFirstSteps {
+    pub marker: u64,
+}
+impl CoupledSolver for MarksItsFirstSteps {
+    fn resolution(&self) -> DeclaredResolution {
+        explicit_resolution(b"marks its first steps")
+    }
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        1_000 * MILLISECOND
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let early = ticket.interval().end().nanoseconds() <= 2_000 * MILLISECOND;
+        explicit(problem, ticket, vec![if early { self.marker } else { 0 }])
+    }
+}
