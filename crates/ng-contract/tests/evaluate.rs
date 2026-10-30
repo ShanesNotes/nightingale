@@ -265,6 +265,7 @@ fn every_operator() -> Result<(CompiledBody, LawName), AdmissionError> {
         let first = laws.state::<Dimensionless>("first", Admissible::finite());
         let second = laws.state::<Dimensionless>("second", Admissible::finite());
         let third = laws.algebraic::<Pressure>("third", Admissible::finite());
+        let pace = laws.algebraic::<Rate<Dimensionless>>("pace", Admissible::finite());
         let set_point = laws.set_point::<Dimensionless>("set point", Admissible::finite());
         let speed =
             laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.speed"), Admissible::positive());
@@ -287,7 +288,7 @@ fn every_operator() -> Result<(CompiledBody, LawName), AdmissionError> {
             let logistic = k.logistic(y);
             let target = k.scale(exponential, logistic);
             let x = k.state(&first);
-            let rate = k.parameter(&speed);
+            let rate = k.algebraic(&pace);
             let rate = k.relax(target, x, rate);
             k.finish(rate, laws.every_mode(), wave)
         });
@@ -315,6 +316,13 @@ fn every_operator() -> Result<(CompiledBody, LawName), AdmissionError> {
             k.finish(residual, laws.every_mode(), wave)
         });
         laws.residual(&third, third_residual);
+        let pace_residual = laws.kernel(|mut k| {
+            let now = k.algebraic(&pace);
+            let declared = k.parameter(&speed);
+            let residual = k.subtract(now, declared);
+            k.finish(residual, laws.every_mode(), wave)
+        });
+        laws.residual(&pace, pace_residual);
         let set_point_rate = laws.kernel(|mut k| {
             let zero = k.zero::<Rate<Reference<Dimensionless>>>();
             k.finish(zero, laws.every_mode(), wave)
@@ -370,6 +378,11 @@ fn derivatives_match_central_differences_on_every_operator() -> Result<(), Initi
         local: "third",
     });
     packet.start(third, Measure::<Pressure>::new(1.5)?, "synthetic")?;
+    let pace = RowKind::Algebraic(LawName {
+        owner: "NS",
+        local: "pace",
+    });
+    packet.start(pace, Measure::<Rate<Dimensionless>>::new(0.7)?, "synthetic")?;
     packet.start(
         memory("set point"),
         Measure::<Reference<Dimensionless>>::new(0.1)?,
@@ -382,7 +395,7 @@ fn derivatives_match_central_differences_on_every_operator() -> Result<(), Initi
     let shift = ticket.shift(SECOND).expect("a shift");
     let rows = bench.body.rows().len();
     let mut workspace = problem.workspace();
-    let tangent = [0.3, -0.1, 0.2, 0.0];
+    let tangent = [0.3, -0.1, 0.2, 0.0, 0.0];
     workspace.derivative_mut().copy_from_slice(&tangent);
     let start = workspace.unknowns_mut().to_vec();
     let analytic = dense(

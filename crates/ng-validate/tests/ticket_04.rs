@@ -622,6 +622,7 @@ fn a_non_finite_coordinate_is_refused_on_its_row() {
 enum EdgeLaw {
     Divides,
     TakesTheLog,
+    TakesTheLogNearZero,
     Exponentiates,
 }
 
@@ -659,7 +660,7 @@ fn edge_law_body(law: EdgeLaw) -> (CompiledBody, ParameterPacket<SyntheticFixtur
                     let ratio = k.divide(upstream, downstream);
                     k.as_dimension::<_, Dimensionless>(ratio)
                 }
-                EdgeLaw::TakesTheLog => {
+                EdgeLaw::TakesTheLog | EdgeLaw::TakesTheLogNearZero => {
                     let ratio = k.divide(downstream, reach);
                     let ratio = k.as_dimension::<_, Dimensionless>(ratio);
                     k.ln(ratio)
@@ -705,6 +706,7 @@ fn edge_law_body(law: EdgeLaw) -> (CompiledBody, ParameterPacket<SyntheticFixtur
     }
     let (start_a, start_b) = match law {
         EdgeLaw::Divides | EdgeLaw::TakesTheLog => (1.0, 0.0),
+        EdgeLaw::TakesTheLogNearZero => (1.0, 1e-320),
         EdgeLaw::Exponentiates => (1e6, 1.0),
     };
     packet
@@ -750,6 +752,39 @@ fn a_law_undefined_at_the_start_refuses_until_a_fault_names_its_operator() {
     );
     assert_eq!(
         refused_source_at_the_floor(EdgeLaw::Exponentiates),
+        RefusalSource::NonFinite { law }
+    );
+}
+
+#[test]
+fn a_finite_value_with_a_non_finite_slope_is_refused_where_it_linearizes() {
+    // `ln` of a subnormal is finite and its slope is not, so `evaluate` passes and `linearize` refuses.
+    let law = LawName {
+        owner: "CV",
+        local: "circulation",
+    };
+    assert_eq!(
+        refused_source_at_the_floor(EdgeLaw::TakesTheLogNearZero),
+        RefusalSource::NonFinite { law }
+    );
+}
+
+#[test]
+fn a_non_finite_value_is_refused_at_its_law_not_at_the_row_it_reaches() {
+    // Forward Euler never linearizes, so only the operator's own check can name the law.
+    let (body, packet) = edge_law_body(EdgeLaw::Exponentiates);
+    let core = euler(4 * MILLISECOND);
+    let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
+    let session = refused(session.step());
+    let NumericalRefusal::TrialDomain { source } = session.refused().reason() else {
+        panic!("not a trial domain");
+    };
+    let law = LawName {
+        owner: "CV",
+        local: "circulation",
+    };
+    assert_eq!(
+        body.refusal_sources()[source.index()],
         RefusalSource::NonFinite { law }
     );
 }
@@ -1585,6 +1620,66 @@ fn an_algebraic_start_that_does_not_solve_is_refused_with_its_row() {
 }
 
 #[test]
+fn a_solved_algebraic_value_outside_its_set_is_refused_with_its_row() {
+    // `x = g m` with `g = -3` and `m = 1` solves at `x = -3`, which a positive slot cannot hold.
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", origin());
+    let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    let body = assemble(schema, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let filter = laws.state::<Dimensionless>("filter", Admissible::finite());
+        let reading = laws.algebraic::<Dimensionless>("reading", Admissible::positive());
+        let gain = laws.parameter::<Dimensionless>(ParameterKey::new("ns.gain"), Admissible::finite());
+        let reflex = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let rate = laws.kernel(|mut k| {
+            let zero = k.zero::<Rate<Dimensionless>>();
+            k.finish(zero, laws.every_mode(), reflex)
+        });
+        laws.memory_rate(&filter, rate);
+        let closure = laws.kernel(|mut k| {
+            let x = k.algebraic(&reading);
+            let g = k.parameter(&gain);
+            let now = k.state(&filter);
+            let scaled = k.scale(g, now);
+            let residual = k.subtract(x, scaled);
+            k.finish(residual, laws.every_mode(), reflex)
+        });
+        laws.residual(&reading, closure);
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let name = |local| LawName { owner: "NS", local };
+    let mut packet = ParameterPacket::new();
+    let gain = measure::<Dimensionless>(-3.0);
+    packet
+        .synthetic(ParameterKey::new("ns.gain"), Binding::Body, gain, "synthetic")
+        .expect("once");
+    let (filter, reading) = (
+        RowKind::Memory(name("filter")),
+        RowKind::Algebraic(name("reading")),
+    );
+    packet
+        .start(filter, measure::<Dimensionless>(1.0), "synthetic")
+        .expect("once");
+    packet
+        .start(reading, measure::<Dimensionless>(1.0), "synthetic")
+        .expect("once");
+    let at = SimTime::from_ns(0);
+    let parameters = body.bind(packet).expect("the guess is in its set");
+    let request = InitializationRequest::consistent_instant(at);
+    let system = body
+        .initialization(parameters, no_events(), request)
+        .expect("a system");
+    let mut solved = system.workspace();
+    solved.unknowns_mut()[1] = -3.0;
+    let history = MethodHistory::new(Digest::of_canonical(b"a schema"), at, Vec::new());
+    let refused = system.admit(solved, history).err();
+    let row = body.rows()[1].id();
+    assert_eq!(refused, Some(InitializationFailure::Inconsistent { row }));
+}
+
+#[test]
 fn a_validity_excursion_is_published_and_named_never_refused() {
     let flow =
         |lower, upper| ValidityRange::new(measure(lower), measure(upper), Basis::Fixture("synthetic range"));
@@ -1852,6 +1947,80 @@ fn a_boundary_out_of_the_body_counts_as_outflow_and_the_ledger_closes() {
     assert!((hi(segment.inventory(quantity).on(piece)[1]) - (200.0 - drained)).abs() < 1e-9);
 }
 
+/// Two reservoirs with no flow between them and a boundary law that runs backward at a fixed rate.
+fn backward_boundary_body(direction: BoundaryDirection) -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin());
+    let a = map.site::<VesselSegment>("a", origin());
+    let b = map.site::<VesselSegment>("b", origin());
+    map.contain(root.id(), a.id());
+    map.contain(root.id(), b.id());
+    map.connect(Network::Vascular, a.id(), b.id());
+    let mut schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    schema
+        .water_boundary("exterior", direction, a.id(), Space::Lumen)
+        .expect("one boundary");
+    let leak = ParameterKey::new("boundary.leak");
+    let body = assemble(schema, |mut body| {
+        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let (mut laws, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut laws);
+        let flow = laws.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, laws.every_mode(), wave)
+        });
+        laws.transfer_along(&route, flow);
+        body.add(laws.finish());
+        let (mut laws, ports) = body.boundary()?.parts();
+        let BoundaryWater { route: pair, .. } = ports.water("exterior")?;
+        let rate = laws.parameter::<Rate<Water>>(leak, Admissible::positive());
+        let backward = laws.kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            let rate = k.parameter(&rate);
+            let backward = k.subtract(zero, rate);
+            k.finish(backward, laws.every_mode(), wave)
+        });
+        laws.transfer(Transfer::new(&pair, backward));
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let mut packet = ParameterPacket::new();
+    packet
+        .synthetic(leak, Binding::Body, measure::<Rate<Water>>(0.5), "synthetic")
+        .expect("once");
+    for row in body.rows() {
+        packet
+            .start(row.kind(), measure::<Water>(100.0), "synthetic")
+            .expect("once");
+    }
+    (body, packet)
+}
+
+#[test]
+fn a_boundary_flow_that_runs_backward_counts_on_the_side_it_moves() {
+    // Against an inward boundary a reverse flow leaves the body; against an outward one it enters.
+    for (direction, gained, lost) in [
+        (BoundaryDirection::IntoBody, 0.0, 5.0),
+        (BoundaryDirection::OutOfBody, 5.0, 0.0),
+    ] {
+        let (body, packet) = backward_boundary_body(direction);
+        let core = reference(SECOND);
+        let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
+        let session = to(session, SimTime::from_ns(10 * SECOND));
+        let view = session.record().conservation();
+        let quantity = view.basis().ids().next().expect("one combination");
+        let segment = view.segments().next_back().expect("an accepted step");
+        let piece = segment.interval();
+        assert_eq!(hi(segment.inflow(quantity).on(piece)[1]), gained);
+        assert_eq!(hi(segment.outflow(quantity).on(piece)[1]), lost);
+        assert_eq!(
+            hi(segment.inventory(quantity).on(piece)[1]),
+            200.0 + gained - lost
+        );
+    }
+}
+
 #[test]
 fn a_segment_samples_only_its_own_interval() {
     let case = stepped();
@@ -1885,6 +2054,19 @@ fn a_relative_accuracy_limit_reads_the_exact_value() {
         matches!(failure, Err(AccuracyFailure::Exceeded { .. })),
         "{failure:?}"
     );
+}
+
+#[test]
+fn a_relative_limit_holds_the_exchange_to_its_own_size() {
+    // Amounts near 5e5 carry at most 2 in error, four parts in a million. The same error sits on an
+    // exchange near 8 at the first step, about 0.4%, so only reading the exchange can reject this.
+    let cases = vec![AccuracyCase::TwoReservoir(stepped())];
+    let policy = AccuracyPolicy::new(cases, measure(1e-300), measure(1e-4), 100 * SECOND).expect("a policy");
+    let failure = accuracy(&reference(8 * SECOND), &policy);
+    let Err(AccuracyFailure::Exceeded { at, .. }) = failure else {
+        panic!("not rejected on the exchange: {failure:?}");
+    };
+    assert_eq!(at, SimTime::from_ns(8 * SECOND));
 }
 
 #[test]

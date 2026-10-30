@@ -173,6 +173,14 @@ mod tests {
         let (start, end) = (exact(1e6).plus(exact(1e-12)), exact(2e6).minus(exact(1e-12)));
         assert_eq!(Compensated::between(start, end, 0, 7), start);
         assert_eq!(Compensated::between(start, end, 7, 7), end);
+        let (start, end) = (
+            exact(1.0).quotient(3.0),
+            exact(2e6).plus(exact(1.0).quotient(7.0)),
+        );
+        for denominator in 1..1000 {
+            assert_eq!(Compensated::between(start, end, 0, denominator), start);
+            assert_eq!(Compensated::between(start, end, denominator, denominator), end);
+        }
         let inside = Compensated::between(exact(0.0), exact(3.0), 1, 3);
         assert_eq!(inside, exact(1.0));
         let tiny = Compensated::between(exact(1.0), exact(1.0).plus(exact(3e-30)), 2, 3);
