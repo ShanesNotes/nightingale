@@ -93,6 +93,31 @@
 //!     let _ = map.finish();
 //! }
 //! ```
+//! No law can name or hold a pool: the registry's handle on one is private.
+//! ```compile_fail,E0603
+//! use ng_contract::PoolRef;
+//! fn steal(_: PoolRef) {}
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn granted<'b>(ports: &BoundaryPorts<'b>) -> Result<Pair<'b, Boundary, Water>, AdmissionError> {
+//!     Ok(ports.water("inflow")?.route)
+//! }
+//! ```
+//! A transfer takes a pair, never its donor alone.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn unpaired<'b>(donor: Endpoint<'b, Renal, Water>, rate: PureKernel<'b, Renal, Rate<Water>>)
+//!     -> Transfer<'b, Renal, Water> {
+//!     Transfer::new(&donor, rate)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn paired<'b>(pair: &Pair<'b, Renal, Water>, rate: PureKernel<'b, Renal, Rate<Water>>) -> Transfer<'b, Renal, Water> {
+//!     Transfer::new(pair, rate)
+//! }
+//! ```
 //! Material cannot hide in a law's own memory: an amount is not a memory dimension.
 //! ```compile_fail,E0277
 //! use ng_contract::*;
@@ -104,6 +129,21 @@
 //! use ng_contract::*;
 //! fn memory<'b>(laws: &mut FragmentBuilder<'b, Renal>) {
 //!     let _ = laws.state::<Dimensionless>("filter", Admissible::unit_interval());
+//! }
+//! ```
+//! A renal law cannot take a cardiovascular route: the route keeps its owner's brand.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn foreign<'b>(scope: &mut FragmentBuilder<'b, Renal>, route: Pair<'b, Cardiovascular, Water>,
+//!     rate: PureKernel<'b, Renal, Rate<Water>>) {
+//!     scope.transfer(Transfer::new(&route, rate));
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn own<'b>(laws: &mut FragmentBuilder<'b, Renal>, route: &Pair<'b, Renal, Water>,
+//!     rate: PureKernel<'b, Renal, Rate<Water>>) {
+//!     laws.transfer(Transfer::new(route, rate));
 //! }
 //! ```
 //! An admissible set takes no bounds, so a reference range cannot become a refusal rule.

@@ -1,7 +1,7 @@
 use crate::body::{
     Binding, Block, Bound, Code, Column, ColumnId, CompiledBody, Context, GuardLayout, Instance, Layout,
-    ModeLayout, ParameterId, ParameterSlot, Program, ProgramId, Row, RowId, RowKind, Sparsity, Target,
-    UnknownId,
+    ModeLayout, ParameterId, ParameterSlot, Program, ProgramId, Receipt, Row, RowId, RowKind, Sparsity,
+    Target, UnknownId,
 };
 use crate::conservation::conserved_basis;
 use crate::graph::Digraph;
@@ -11,10 +11,10 @@ use crate::law::{
     ParameterDeclaration, Selector, SlotDeclaration, SlotKind,
 };
 use crate::quantity::dimension;
-use crate::scope::PoolRef;
+use crate::scope::{PoolRef, WaterBoundary};
 use crate::{
-    AdmissibleSet, AdmissionError, Anatomy, Class, CompileDefect, LawName, ModeValue, Network, ParameterKey,
-    Predicate, RateClass, Schema, Space, Water,
+    AdmissibleSet, AdmissionError, Anatomy, Boundary, BoundaryDirection, Class, CompileDefect, LawName,
+    ModeValue, Network, Owner, ParameterKey, Predicate, RateClass, Schema, Space, Water,
 };
 
 /// Checks that need no layout run before the body is laid out, so a body with one defect is refused
@@ -25,17 +25,24 @@ pub(crate) fn compile(
     mut fragments: Vec<FragmentData>,
 ) -> Result<CompiledBody, AdmissionError> {
     fragments.sort_by_key(|fragment| fragment.owner);
-    check_fragments(&issued, &fragments)?;
+    check_fragments(&issued, &fragments, &schema)?;
+    check_boundaries(&schema)?;
     let declarations = declarations(&fragments)?;
-    let owed = obligations(&fragments)?;
+    let unissued = FragmentData::empty(Boundary::CARD);
+    let owed = obligations(&fragments, &schema, &unissued)?;
     check_guards(&fragments)?;
     check_volume(&schema, &owed, &fragments)?;
 
     let rows = Rows::lay_out(&schema, &fragments);
     let reaches = Reaches::of(&schema.anatomy);
-    let placement = place(&owed, &rows, &reaches)?;
+    let places = Places {
+        rows: &rows,
+        reaches: &reaches,
+        boundaries: &schema.boundaries,
+    };
+    let placement = place(&owed, &places)?;
     check_orphans(&rows, &placement.columns)?;
-    let guards = guards(&fragments, &rows, &reaches)?;
+    let guards = guards(&fragments, &places)?;
     let (parameters, instances, guards) = bind(placement.instances, guards, &declarations);
     let (reads, rates) = reads(&rows.rows, &placement.columns, &placement.programs, &instances);
     let solved_by = solve_order(&rows.rows, &reads)?;
@@ -56,17 +63,23 @@ pub(crate) fn compile(
     }))
 }
 
-fn check_fragments(issued: &[&'static str], fragments: &[FragmentData]) -> Result<(), CompileDefect> {
+fn check_fragments(
+    issued: &[&'static str],
+    fragments: &[FragmentData],
+    schema: &Schema,
+) -> Result<(), CompileDefect> {
     let added = |owner: &&'static str| fragments.iter().any(|fragment| fragment.owner == *owner);
     if let Some(&owner) = issued.iter().filter(|owner| !added(owner)).min() {
         return Err(CompileDefect::MissingFragment { owner });
     }
-    fragments.iter().try_for_each(check_names)
+    fragments
+        .iter()
+        .try_for_each(|fragment| check_names(fragment, schema))
 }
 
-/// Slots, mode variables and route families share one namespace per owner, so a law's name names
-/// one law.
-fn check_names(fragment: &FragmentData) -> Result<(), CompileDefect> {
+/// Slots, mode variables, route families and, for the boundary, the schema's boundaries share one
+/// namespace per owner, so a law's name names one law.
+fn check_names(fragment: &FragmentData, schema: &Schema) -> Result<(), CompileDefect> {
     let named = |local| LawName {
         owner: fragment.owner,
         local,
@@ -74,6 +87,11 @@ fn check_names(fragment: &FragmentData) -> Result<(), CompileDefect> {
     let mut names: Vec<&'static str> = (fragment.slots.iter().map(|slot| slot.name))
         .chain(fragment.modes.iter().map(|mode| mode.name))
         .chain(fragment.families.iter().map(|family| family.name()))
+        .chain(
+            (schema.boundaries.iter())
+                .filter(|_| fragment.owner == Boundary::CARD)
+                .map(|boundary| boundary.name),
+        )
         .collect();
     names.sort_unstable();
     if let Some(pair) = names.windows(2).find(|pair| pair[0] == pair[1]) {
@@ -91,6 +109,27 @@ fn check_names(fragment: &FragmentData) -> Result<(), CompileDefect> {
     match bad.first() {
         Some(&name) => Err(CompileDefect::BadModeVariable {
             variable: named(name),
+        }),
+        None => Ok(()),
+    }
+}
+
+/// A water boundary reaches one of the registry's pools.
+fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
+    let pools: Vec<PoolRef> = schema
+        .pools()
+        .map(|(site, space)| PoolRef { site, space })
+        .collect();
+    match schema
+        .boundaries
+        .iter()
+        .find(|boundary| !pools.contains(&boundary.pool))
+    {
+        Some(boundary) => Err(CompileDefect::BoundaryEndpoint {
+            law: LawName {
+                owner: Boundary::CARD,
+                local: boundary.name,
+            },
         }),
         None => Ok(()),
     }
@@ -120,17 +159,35 @@ fn declarations(fragments: &[FragmentData]) -> Result<Vec<&ParameterDeclaration>
 struct Owed<'f> {
     name: LawName,
     fragment: &'f FragmentData,
-    serves: Serves,
+    serves: Serves<'f>,
     laws: Vec<(Predicate, &'f KernelData)>,
 }
 #[derive(Clone, Copy)]
-enum Serves {
+enum Serves<'f> {
     Slot,
     Family(Family),
+    Boundary(&'f WaterBoundary),
 }
 
-fn obligations(fragments: &[FragmentData]) -> Result<Vec<Owed<'_>>, CompileDefect> {
+/// Every slot and requested route family, and every schema boundary, which the boundary owes whether
+/// or not its scope was issued.
+fn obligations<'f>(
+    fragments: &'f [FragmentData],
+    schema: &'f Schema,
+    unissued: &'f FragmentData,
+) -> Result<Vec<Owed<'f>>, CompileDefect> {
     let mut owed = Vec::new();
+    let boundary = (fragments.iter())
+        .find(|fragment| fragment.owner == Boundary::CARD)
+        .unwrap_or(unissued);
+    for water in &schema.boundaries {
+        owed.push(Owed::gather(
+            boundary,
+            water.name,
+            Serves::Boundary(water),
+            Obligation::Boundary(water.name),
+        ));
+    }
     for fragment in fragments {
         for slot in &fragment.slots {
             owed.push(Owed::gather(
@@ -160,7 +217,7 @@ impl<'f> Owed<'f> {
     fn gather(
         fragment: &'f FragmentData,
         local: &'static str,
-        serves: Serves,
+        serves: Serves<'f>,
         obligation: Obligation,
     ) -> Self {
         let mut laws: Vec<(Predicate, &KernelData)> = (fragment.laws.iter())
@@ -434,9 +491,18 @@ struct Placed {
 enum Address {
     Parameter(ParameterKey, Binding),
     Unknown(UnknownId),
+    Boundary(usize),
 }
 
-fn place(owed: &[Owed], rows: &Rows, reaches: &Reaches) -> Result<Placement, CompileDefect> {
+/// What an input can reach: the rows, the route instances and the schema's boundaries.
+struct Places<'a> {
+    rows: &'a Rows,
+    reaches: &'a Reaches,
+    boundaries: &'a [WaterBoundary],
+}
+
+fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
+    let Places { rows, reaches, .. } = *places;
     let mut placement = Placement {
         columns: Vec::new(),
         programs: Vec::new(),
@@ -445,6 +511,11 @@ fn place(owed: &[Owed], rows: &Rows, reaches: &Reaches) -> Result<Placement, Com
     for law in owed {
         let targets = match law.serves {
             Serves::Slot => vec![(Context::Body, Target::Row(RowId::at(rows.slot(law.name))))],
+            Serves::Boundary(water) => {
+                let target = Target::Column(ColumnId::at(placement.columns.len()));
+                placement.columns.push(exterior(law.name, water, rows)?);
+                vec![(Context::Body, target)]
+            }
             Serves::Family(family) => {
                 let mut targets = Vec::new();
                 for reach in reaches.of_family(family) {
@@ -469,7 +540,7 @@ fn place(owed: &[Owed], rows: &Rows, reaches: &Reaches) -> Result<Placement, Com
                     program,
                     context,
                     target,
-                    addresses: addresses(law.name, kernel, context, rows, reaches)?,
+                    addresses: addresses(law.name, kernel, context, places)?,
                 });
             }
         }
@@ -492,6 +563,25 @@ fn column(law: LawName, reach: &Reach, rows: &Rows) -> Result<Column, CompileDef
         terms,
         origin: law,
         context: reach.context,
+        receipt: None,
+    })
+}
+
+/// A boundary transfer moves its pool and books the opposite on its receipt.
+fn exterior(law: LawName, water: &WaterBoundary, rows: &Rows) -> Result<Column, CompileDefect> {
+    let row = rows.amount(water.pool).ok_or(left_out(law, water.pool))?;
+    let coefficient = match water.direction {
+        BoundaryDirection::IntoBody => 1,
+        BoundaryDirection::OutOfBody => -1,
+    };
+    Ok(Column {
+        terms: vec![(RowId::at(row), coefficient)],
+        origin: law,
+        context: Context::Body,
+        receipt: Some(Receipt {
+            boundary: water.name,
+            coefficient: -coefficient,
+        }),
     })
 }
 
@@ -523,9 +613,13 @@ fn addresses(
     law: LawName,
     kernel: &KernelData,
     context: Context,
-    rows: &Rows,
-    reaches: &Reaches,
+    places: &Places,
 ) -> Result<Vec<Address>, CompileDefect> {
+    let Places {
+        rows,
+        reaches,
+        boundaries,
+    } = *places;
     let inputs = kernel.code.iter().filter_map(|op| match op {
         Op::Input(input) => Some(*input),
         _ => None,
@@ -544,6 +638,9 @@ fn addresses(
                 (Input::Amount(family, end), _) => {
                     let pool = reaches.pool(family, end, context);
                     Address::Unknown(UnknownId::at(rows.amount(pool).ok_or(left_out(law, pool))?))
+                }
+                (Input::Drive(name), _) => {
+                    Address::Boundary(boundaries.partition_point(|boundary| boundary.name < name))
                 }
                 (Input::Parameter(key), _) => Address::Parameter(key, Binding::Body),
                 (Input::SiteParameter(key), Context::Site(at)) => Address::Parameter(key, Binding::Site(at)),
@@ -578,8 +675,7 @@ fn check_orphans(rows: &Rows, columns: &[Column]) -> Result<(), CompileDefect> {
 
 fn guards(
     fragments: &[FragmentData],
-    rows: &Rows,
-    reaches: &Reaches,
+    places: &Places,
 ) -> Result<Vec<(GuardLayout, Vec<Address>)>, CompileDefect> {
     let mut guards = Vec::new();
     for fragment in fragments {
@@ -597,7 +693,7 @@ fn guards(
                 code: code(fragment, predicate(fragment, guard.zero.modes), &guard.zero),
                 inputs: Vec::new(),
             };
-            let addresses = addresses(variable, &guard.zero, Context::Body, rows, reaches)?;
+            let addresses = addresses(variable, &guard.zero, Context::Body, places)?;
             guards.push((layout, addresses));
         }
     }
@@ -615,7 +711,7 @@ fn bind(
         .flatten()
         .filter_map(|address| match *address {
             Address::Parameter(key, binding) => Some((key, binding)),
-            Address::Unknown(_) => None,
+            Address::Unknown(_) | Address::Boundary(_) => None,
         })
         .collect();
     wanted.sort_unstable();
@@ -643,6 +739,7 @@ fn bind(
             wanted.partition_point(|entry| *entry < (key, binding)),
         )),
         Address::Unknown(unknown) => Bound::Unknown(unknown),
+        Address::Boundary(boundary) => Bound::Boundary(boundary),
     };
     let instances = (placed.into_iter())
         .map(|placed| {
@@ -692,7 +789,7 @@ fn reads(
         let unknowns: Vec<UnknownId> = (instance.inputs.iter())
             .filter_map(|input| match *input {
                 Bound::Unknown(unknown) => Some(unknown),
-                Bound::Parameter(_) => None,
+                Bound::Parameter(_) | Bound::Boundary(_) => None,
             })
             .collect();
         let defined: Vec<RowId> = match instance.target {

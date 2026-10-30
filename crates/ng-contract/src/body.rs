@@ -198,6 +198,7 @@ pub struct Column {
     pub(crate) terms: Vec<(RowId, i64)>,
     pub(crate) origin: LawName,
     pub(crate) context: Context,
+    pub(crate) receipt: Option<Receipt>,
 }
 impl Column {
     /// In row order. A transfer whose two ends are one pool has none.
@@ -211,12 +212,40 @@ impl Column {
     pub fn context(&self) -> Context {
         self.context
     }
+    /// The exterior end of a transfer across the boundary; `None` for a transfer inside the body.
+    pub fn receipt(&self) -> Option<Receipt> {
+        self.receipt
+    }
 }
 impl Seal for Column {
     fn seal(&self, out: &mut Canonical) {
         self.terms.seal(out);
         self.origin.seal(out);
         self.context.seal(out);
+        self.receipt.seal(out);
+    }
+}
+/// The receipt pool outside the body that takes what a boundary transfer moves, so the transfer still
+/// has two ends and no amount row goes negative for the exterior.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Receipt {
+    pub(crate) boundary: &'static str,
+    pub(crate) coefficient: i64,
+}
+impl Receipt {
+    /// The schema boundary it receives for.
+    pub fn boundary(&self) -> &'static str {
+        self.boundary
+    }
+    /// Its signed coefficient, the opposite of the body end's.
+    pub fn coefficient(&self) -> i64 {
+        self.coefficient
+    }
+}
+impl Seal for Receipt {
+    fn seal(&self, out: &mut Canonical) {
+        self.boundary.seal(out);
+        self.coefficient.seal(out);
     }
 }
 
@@ -340,6 +369,8 @@ impl Seal for Instance {
 pub(crate) enum Bound {
     Parameter(ParameterId),
     Unknown(UnknownId),
+    /// The drive of the schema's boundary at this position in name order.
+    Boundary(usize),
 }
 impl Seal for Bound {
     fn seal(&self, out: &mut Canonical) {
@@ -351,6 +382,10 @@ impl Seal for Bound {
             Bound::Unknown(unknown) => {
                 out.number(1);
                 unknown.seal(out);
+            }
+            Bound::Boundary(boundary) => {
+                out.number(2);
+                boundary.seal(out);
             }
         }
     }

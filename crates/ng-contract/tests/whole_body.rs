@@ -12,6 +12,7 @@ fn schema() -> Result<Schema, AdmissionError> {
 enum Defect {
     None,
     UnattachedSlot,
+    UnclosedAlgebraicSlot,
     SecondEveryModeRate,
     LawOnSecondVariable,
     UncoveredValue,
@@ -63,6 +64,9 @@ fn body(defect: Defect) -> Result<CompiledBody, AdmissionError> {
         match defect {
             Defect::UnattachedSlot => {
                 laws.state::<Dimensionless>("unattached", Admissible::finite());
+            }
+            Defect::UnclosedAlgebraicSlot => {
+                laws.algebraic::<Pressure>("unclosed", Admissible::finite());
             }
             Defect::SlotNamedTwice => {
                 laws.state::<Dimensionless>("filter", Admissible::finite());
@@ -312,6 +316,16 @@ fn a_slot_no_law_defines_is_an_omitted_law() {
         compile_refusal(Defect::UnattachedSlot),
         CompileDefect::OmittedLaw {
             law: named("unattached")
+        }
+    );
+}
+
+#[test]
+fn an_algebraic_slot_no_residual_closes_is_an_omitted_law() {
+    assert_eq!(
+        compile_refusal(Defect::UnclosedAlgebraicSlot),
+        CompileDefect::OmittedLaw {
+            law: named("unclosed")
         }
     );
 }

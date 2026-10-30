@@ -49,7 +49,8 @@ impl Seal for Combination {
 
 /// An internal transfer takes from one amount and gives the same to another, so a vector `l` with
 /// `l N = 0` is constant across each transfer, and the indicator vectors of the connected parts of the
-/// transfer graph are a complete, exact basis. An amount only exterior transfers move is its own part.
+/// transfer graph are a complete, exact basis. An exterior transfer has one term in the body, so it
+/// joins nothing, and an amount only exterior transfers move is its own part.
 pub(crate) fn conserved_basis(amounts: usize, columns: &[Column]) -> ConservedBasis {
     let mut edges = Vec::new();
     for column in columns {

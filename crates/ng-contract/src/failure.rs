@@ -21,6 +21,14 @@ pub enum AdmissionError {
     NonPositivePartialVolume,
     /// A second partial-volume coefficient that differs from the first.
     PartialVolumeTwice,
+    /// A second water boundary under a name the schema already declares.
+    BoundaryNamedTwice {
+        name: &'static str,
+    },
+    /// A boundary port asked for a name the schema does not declare.
+    UnknownBoundary {
+        name: &'static str,
+    },
 }
 impl From<AnatomyDefect> for AdmissionError {
     fn from(defect: AnatomyDefect) -> Self {
@@ -71,4 +79,6 @@ pub enum CompileDefect {
     },
     /// A law that reads a volume when the schema declares no partial-volume coefficient.
     MissingPartialVolume { law: LawName },
+    /// A water boundary at a space its site does not have, or at a site the anatomy does not declare.
+    BoundaryEndpoint { law: LawName },
 }

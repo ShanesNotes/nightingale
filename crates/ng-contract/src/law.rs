@@ -1,7 +1,7 @@
 use crate::identity::{Canonical, Seal};
 use crate::quantity::dimension;
 use crate::{
-    Admissible, AdmissibleSet, AdmissionError, Basis, Class, Conductance, Dimension, Dimensionless,
+    Admissible, AdmissibleSet, AdmissionError, Basis, Boundary, Class, Conductance, Dimension, Dimensionless,
     NonMaterial, Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reference,
     SameDimension, Sensed, SiteClass, ValidityRange, Volume, Water,
 };
@@ -124,6 +124,7 @@ pub(crate) enum Input {
     Memory(&'static str),
     Algebraic(&'static str),
     Amount(Family, End),
+    Drive(&'static str),
 }
 impl Op {
     fn map(&self, f: impl FnMut(usize) -> usize) -> Op {
@@ -213,6 +214,10 @@ impl Seal for Input {
                 out.number(6);
                 out.text(family.name());
                 out.number(end as u64);
+            }
+            Input::Drive(boundary) => {
+                out.number(7);
+                out.text(boundary);
             }
         }
     }
@@ -478,11 +483,13 @@ pub struct ReadPort<'b, O, U> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Source {
     Amount(Family, End),
+    Drive(&'static str),
 }
 impl Source {
     fn input(self) -> Input {
         match self {
             Source::Amount(family, end) => Input::Amount(family, end),
+            Source::Drive(boundary) => Input::Drive(boundary),
         }
     }
 }
@@ -539,6 +546,49 @@ impl<'b, O, Q> EdgeRoute<'b, O, Q> {
     /// The amount at each edge's downstream end.
     pub fn to_amount(&self) -> ReadPort<'b, O, PerEdge<Q>> {
         ReadPort::of(Source::Amount(self.family, End::To))
+    }
+}
+
+/// One end of a pair. No law builds or holds one alone: a transfer takes the whole pair.
+pub struct Endpoint<'b, O, Q> {
+    brand: Brand<'b>,
+    kind: PhantomData<(O, Q)>,
+}
+/// Both ends of one transfer, the same species at each, one of them the receipt pool outside the
+/// body. The schema names where it reaches into the body.
+pub struct Pair<'b, O, Q> {
+    boundary: &'static str,
+    brand: Brand<'b>,
+    kind: PhantomData<(O, Q)>,
+}
+/// A transfer law on a pair: what leaves one end enters the other.
+pub struct Transfer<'b, O, Q> {
+    boundary: &'static str,
+    rate: PureKernel<'b, O, Rate<Q>>,
+}
+impl<'b, O, Q> Transfer<'b, O, Q> {
+    pub fn new(pair: &Pair<'b, O, Q>, rate: PureKernel<'b, O, Rate<Q>>) -> Self {
+        Self {
+            boundary: pair.boundary,
+            rate,
+        }
+    }
+}
+/// A schema boundary's pair and the drive the boundary port supplies at each stage.
+pub struct BoundaryWater<'b> {
+    pub route: Pair<'b, Boundary, Water>,
+    pub drive: ReadPort<'b, Boundary, Rate<Water>>,
+}
+impl<'b> BoundaryWater<'b> {
+    pub(crate) fn named(boundary: &'static str) -> Self {
+        Self {
+            route: Pair {
+                boundary,
+                brand: PhantomData,
+                kind: PhantomData,
+            },
+            drive: ReadPort::of(Source::Drive(boundary)),
+        }
     }
 }
 
@@ -669,16 +719,7 @@ pub struct FragmentBuilder<'b, O> {
 impl<'b, O: Owner> FragmentBuilder<'b, O> {
     pub(crate) fn new() -> Self {
         Self {
-            data: FragmentData {
-                owner: O::CARD,
-                slots: Vec::new(),
-                modes: Vec::new(),
-                parameters: Vec::new(),
-                families: Vec::new(),
-                laws: Vec::new(),
-                guards: Vec::new(),
-                validity: Vec::new(),
-            },
+            data: FragmentData::empty(O::CARD),
             kernels: Cell::new(0),
             brand: PhantomData,
             owner: PhantomData,
@@ -890,6 +931,9 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     ) {
         self.attach(Obligation::Family(route.family), rate.data);
     }
+    pub fn transfer<Q>(&mut self, transfer: Transfer<'b, O, Q>) {
+        self.attach(Obligation::Boundary(transfer.boundary), transfer.rate.data);
+    }
     /// Records that the fragment owes a law for every instance of `family`, before any law exists.
     pub(crate) fn request(&mut self, family: Family) {
         if !self.data.families.contains(&family) {
@@ -930,6 +974,20 @@ pub(crate) struct FragmentData {
     pub(crate) guards: Vec<GuardDeclaration>,
     pub(crate) validity: Vec<(u32, Validity)>,
 }
+impl FragmentData {
+    pub(crate) fn empty(owner: &'static str) -> Self {
+        Self {
+            owner,
+            slots: Vec::new(),
+            modes: Vec::new(),
+            parameters: Vec::new(),
+            families: Vec::new(),
+            laws: Vec::new(),
+            guards: Vec::new(),
+            validity: Vec::new(),
+        }
+    }
+}
 pub(crate) struct SlotDeclaration {
     pub(crate) name: &'static str,
     pub(crate) kind: SlotKind,
@@ -962,11 +1020,12 @@ pub(crate) struct LawDeclaration {
     pub(crate) serves: Obligation,
     pub(crate) kernel: KernelData,
 }
-/// What a law defines: a slot by name, or every instance of a route family.
+/// What a law defines: a slot by name, every instance of a route family, or a schema boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Obligation {
     Slot(&'static str),
     Family(Family),
+    Boundary(&'static str),
 }
 pub(crate) struct GuardDeclaration {
     pub(crate) zero: KernelData,

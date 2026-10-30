@@ -3,25 +3,68 @@ use crate::compile::compile;
 use crate::identity::{Canonical, Seal};
 use crate::law::{Brand, Family, FragmentData};
 use crate::{
-    AdmissionError, Anatomy, CapillaryBed, Cardiovascular, CompiledBody, EdgeRoute, Fluids, Fragment,
-    FragmentBuilder, Measure, Nervous, Owner, PartialVolume, SiteId, SiteRoute, Water,
+    AdmissionError, Anatomy, Boundary, BoundaryWater, CapillaryBed, Cardiovascular, CompiledBody, EdgeRoute,
+    Fluids, Fragment, FragmentBuilder, Measure, Nervous, Owner, PartialVolume, SiteId, SiteRoute, Water,
 };
 use core::marker::PhantomData;
 
-/// The anatomy and the composition data laws never see: the partial-volume coefficient and the spaces
-/// this body leaves out.
+/// The anatomy and the composition data laws never see: where water crosses the boundary, the
+/// partial-volume coefficient and the spaces this body leaves out.
 pub struct Schema {
     pub(crate) anatomy: Anatomy,
+    pub(crate) boundaries: Vec<WaterBoundary>,
     pub(crate) partial_volume: Option<Measure<PartialVolume<Water>>>,
     pub(crate) left_out: Vec<(Space, &'static str)>,
+}
+/// A named route by which water crosses the body's boundary at one pool, in order of name.
+#[derive(Clone, Copy)]
+pub(crate) struct WaterBoundary {
+    pub(crate) name: &'static str,
+    pub(crate) direction: BoundaryDirection,
+    pub(crate) pool: PoolRef,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BoundaryDirection {
+    IntoBody,
+    OutOfBody,
 }
 impl Schema {
     pub fn new(anatomy: Anatomy) -> Result<Self, AdmissionError> {
         Ok(Self {
             anatomy,
+            boundaries: Vec::new(),
             partial_volume: None,
             left_out: Vec::new(),
         })
+    }
+
+    /// Names where water crosses the boundary: composition data may name a site, a law never does.
+    /// Its law is owed whether or not a boundary scope is issued. Refuses a name declared twice.
+    pub fn water_boundary(
+        &mut self,
+        name: &'static str,
+        direction: BoundaryDirection,
+        site: SiteId,
+        space: Space,
+    ) -> Result<(), AdmissionError> {
+        match self
+            .boundaries
+            .binary_search_by_key(&name, |boundary| boundary.name)
+        {
+            Ok(_) => Err(AdmissionError::BoundaryNamedTwice { name }),
+            Err(at) => {
+                let pool = PoolRef { site, space };
+                self.boundaries.insert(
+                    at,
+                    WaterBoundary {
+                        name,
+                        direction,
+                        pool,
+                    },
+                );
+                Ok(())
+            }
+        }
     }
 
     /// The volume per amount of water, a fixed structural coefficient `Kernel::volume` reads. Refuses
@@ -60,6 +103,13 @@ impl Schema {
 impl Seal for Schema {
     fn seal(&self, out: &mut Canonical) {
         self.anatomy.digest().seal(out);
+        out.number(self.boundaries.len() as u64);
+        for boundary in &self.boundaries {
+            out.text(boundary.name);
+            out.number(boundary.direction as u64);
+            boundary.pool.site.seal(out);
+            out.number(boundary.pool.space as u64);
+        }
         self.partial_volume.as_ref().map(Measure::bits).seal(out);
         let mut left_out = self.left_out.clone();
         left_out.sort_unstable();
@@ -126,6 +176,20 @@ impl<'b> Assembly<'b> {
             ports: FluidsPorts { brand: PhantomData },
         })
     }
+    pub fn boundary(&mut self) -> Result<BoundaryScope<'b>, AdmissionError> {
+        Ok(BoundaryScope {
+            laws: self.issue()?,
+            ports: BoundaryPorts {
+                names: self
+                    .schema
+                    .boundaries
+                    .iter()
+                    .map(|boundary| boundary.name)
+                    .collect(),
+                brand: PhantomData,
+            },
+        })
+    }
     pub fn nervous(&mut self) -> Result<NervousScope<'b>, AdmissionError> {
         Ok(NervousScope {
             laws: self.issue()?,
@@ -169,10 +233,24 @@ macro_rules! scope {
         }
     };
 }
+scope!(BoundaryScope, Boundary, BoundaryPorts);
 scope!(CardiovascularScope, Cardiovascular, CardiovascularPorts);
 scope!(FluidsScope, Fluids, FluidsPorts);
 scope!(NervousScope, Nervous, NervousPorts);
 
+pub struct BoundaryPorts<'b> {
+    names: Vec<&'static str>,
+    brand: Brand<'b>,
+}
+impl<'b> BoundaryPorts<'b> {
+    /// The schema boundary's pair and drive. Refuses a name the schema does not declare.
+    pub fn water(&self, name: &'static str) -> Result<BoundaryWater<'b>, AdmissionError> {
+        match self.names.binary_search(&name) {
+            Ok(_) => Ok(BoundaryWater::named(name)),
+            Err(_) => Err(AdmissionError::UnknownBoundary { name }),
+        }
+    }
+}
 pub struct CardiovascularPorts<'b> {
     brand: Brand<'b>,
 }
