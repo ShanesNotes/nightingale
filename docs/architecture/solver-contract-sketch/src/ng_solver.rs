@@ -9,7 +9,7 @@ impl CoupledSolver for CompiledNewton {
     fn resolution(&self) -> DeclaredResolution {
         todo!()
     }
-    fn next_step(&self, _problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
         todo!()
     }
     fn solve(&self, _problem: &CoupledProblem<'_>, _ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
@@ -31,7 +31,7 @@ impl CoupledSolver for BeatStepper {
     fn resolution(&self) -> DeclaredResolution {
         todo!()
     }
-    fn next_step(&self, _problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
         todo!()
     }
     fn solve(&self, _problem: &CoupledProblem<'_>, _ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {

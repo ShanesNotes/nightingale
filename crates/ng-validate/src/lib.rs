@@ -20,6 +20,36 @@
 //!     certify(&record.conservation(), policy)
 //! }
 //! ```
+//! A pace is when a host calls `step`, and `step` takes nothing, so a caller's stop cannot reach a core.
+//! ```compile_fail,E0061
+//! use ng_contract::SimTime;
+//! use ng_record::*;
+//! fn clipped<'m>(session: Session<'m, Running>, stop: SimTime) -> Step<'m> { session.step(stop) }
+//! ```
+//! ```
+//! use ng_contract::SimTime;
+//! use ng_record::*;
+//! use ng_validate::*;
+//! fn paced<'m>(session: Session<'m, Running>, stop: SimTime)
+//!     -> Result<Session<'m, Running>, Session<'m, Faulted>> {
+//!     run_until(session, stop)
+//! }
+//! ```
+//! Evidence comes only from a gate that ran.
+//! ```compile_fail,E0451
+//! use ng_contract::Digest;
+//! use ng_validate::*;
+//! fn forged(run: Digest, pace: GateEvidence) -> ReplayEvidence {
+//!     ReplayEvidence { run, pace: pace.clone(), resume: pace.clone(), late_admission: pace.clone(), rewind: pace }
+//! }
+//! ```
+//! ```
+//! use ng_validate::*;
+//! fn ran(case: &TwoReservoirs, cores: &dyn CoreFactory, plan: &ReplayPlan<'_>)
+//!     -> Result<ReplayEvidence, ReplayFailure> {
+//!     replay_gates(case, cores, plan)
+//! }
+//! ```
 
 mod accuracy;
 mod certificate;

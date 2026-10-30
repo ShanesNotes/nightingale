@@ -488,6 +488,61 @@
 //! use ng_contract::Compensated;
 //! fn exceeds(value: Compensated, limit: Compensated) -> bool { !value.at_most(limit) }
 //! ```
+//! A core commits to a span and gets a ticket only to solve. No problem issues one, so a span of any size
+//! asks nothing.
+//! ```compile_fail,E0599
+//! use ng_contract::*;
+//! fn probe(problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+//!     problem.ticket(1 << 60)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn commit(accepted: AcceptedStateView<'_>, span_ns: u64) -> u64 {
+//!     accepted.method_history().counters().first().copied().unwrap_or(span_ns)
+//! }
+//! ```
+//! `next_step` returns a span, so a core cannot hand the session a ticket of its choosing.
+//! ```compile_fail,E0053
+//! use ng_contract::*;
+//! struct Asks;
+//! impl CoupledSolver for Asks {
+//!     fn resolution(&self) -> DeclaredResolution { todo!() }
+//!     fn next_step(&self, accepted: AcceptedStateView<'_>) -> StepTicket { todo!() }
+//!     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket)
+//!         -> Result<StepProposal, TrialFailure> { todo!() }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! struct Commits;
+//! impl CoupledSolver for Commits {
+//!     fn resolution(&self) -> DeclaredResolution { todo!() }
+//!     fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 { 1_000_000 }
+//!     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket)
+//!         -> Result<StepProposal, TrialFailure> { todo!() }
+//! }
+//! ```
+//! An accepted view lends no timeline, so a problem has none to reach.
+//! ```compile_fail,E0609
+//! use ng_contract::*;
+//! fn reach(accepted: AcceptedStateView<'_>) { let _ = accepted.pending; }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn head(accepted: AcceptedStateView<'_>) -> SimTime { accepted.time() }
+//! ```
+//! A core reads a ticket and cannot rewrite one.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn stretched(ticket: &StepTicket, interval: Interval) -> StepTicket {
+//!     StepTicket { interval, ..ticket.clone() }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn read(ticket: &StepTicket) -> Interval { ticket.interval() }
+//! ```
 
 mod admission;
 mod anatomy;

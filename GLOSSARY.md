@@ -57,6 +57,12 @@ Rerunning a run from its event log, with the same run seed (identical bits) or a
 A saved copy of the whole accepted state at a step boundary, from which a run resumes exactly or branches.
 _Avoid_: save (in prose)
 
+**Ledger root**:
+A digest that rolls the root before it with one accepted step's ledger chunk, so one root stands for the whole ledger up to that step.
+
+**History store**:
+Host storage for ledger links, addressed by ledger root and trusted for nothing: a load checks each link against the root that asked for it.
+
 **Scope stage**:
 One of the five stages of scope in section 1, built bottom up. Not a solver stage, which is a numerical sub-step inside one step.
 
@@ -88,6 +94,18 @@ An instant that ends a step: an event or a guard crossing. A display refresh, a 
 **Delivery**:
 An event's amount entering the body through a boundary at a steady rate from the event's instant until its end. Overlapping deliveries add.
 
+**Waiting input**:
+An admitted event not yet due. No seal or ticket digest covers it, so nothing a core reads carries it until a cut shows it.
+
+**Span**:
+The length of simulated time a solver core commits to for its next step, before the session issues a ticket.
+
+**Cut**:
+A ticket ended at a waiting input, solved only after the same ticket at the core's span has passed.
+
+**Fence**:
+The earliest stamp a late input may take: the instant of a refused cut, or just past the admission instant.
+
 **Due input**:
 An event whose instant is the start of a step. It is applied when that step is accepted, so a refused step leaves it pending.
 
@@ -95,7 +113,7 @@ An event whose instant is the start of a step. It is applied when that step is a
 What the boundary supplies over one step, frozen when the step's interval is issued, so a stage at the step's end never reads a delivery that starts there.
 
 **Causal step rule**:
-A step is the solver's own interval, cut short only at the next breakpoint and blind to anything later, so an event that arrives during the run gives the same bits as the same event known from the start (I5).
+A step is the solver's own interval, cut short only at the next breakpoint and blind to anything later, so an event that arrives during the run gives the same bits as the same event known from the start (I5). A waiting input shows only in a cut.
 
 **Refusal**:
 A step the record crate rejects, leaving state, ledger, pending events and stream positions unchanged (I4). The only way on is the solver's retry over a shorter interval.

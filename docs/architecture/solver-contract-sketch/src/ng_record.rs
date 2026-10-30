@@ -1,15 +1,16 @@
 //! Proposed ng-record: the sole accepted-state writer, its session latch, one bound history and
 //! the checkpoint envelope.
 //!
-//! A step is validate, then publish. `PatientRecord::validate(&self, ..)` is immutable and returns
-//! the ENTIRE next image or a failure; `publish(&mut self, ..)` installs that image and cannot fail.
+//! A step is validate, then publish. `PatientRecord::attempt(&self, ..)` is immutable and returns the
+//! ENTIRE next image or a failure; `publish(&mut self, ..)` installs that image and cannot fail.
 //! `&mut PatientRecord` is never lent outside this module, so only the session publishes. A session
 //! that met a refusal becomes `Session<Retrying>`, which can only retry, and one that met an
 //! `EngineFault` becomes `Session<Faulted>`, which has no step.
 use crate::ng_contract::*;
 
 /// The chained seal of one accepted revision: the previous seal, the image's digests and the ledger
-/// chunk.
+/// root. It covers the past and nothing that waits, so a ticket's digest built on it reads no later
+/// input.
 #[derive(Clone, Copy)]
 pub struct Seal {
     _digest: Digest,
@@ -32,6 +33,7 @@ pub struct PatientRecord<'m> {
     _parameters: BoundParameters,
     _branch: BranchAncestry,
     _revision: u64,
+    _previous: Digest,
     _seal: Seal,
     _time: SimTime,
     _state: Candidate,
@@ -39,7 +41,6 @@ pub struct PatientRecord<'m> {
     _dense: DenseSegment,
     _streams: StreamPositions,
     _pending: PendingInputs,
-    _commands: CommandCursor,
     _history: History,
 }
 impl PatientRecord<'_> {
@@ -59,23 +60,26 @@ impl PatientRecord<'_> {
     pub fn problem(&self) -> CoupledProblem<'_> {
         todo!()
     }
-    /// The contract answers whether the core followed its declared method (`StepProposal::verify`,
-    /// on this record's own problem); this answers whether the result may become the next accepted
-    /// image. `expected` is the ticket the session issued, so a proposal for any other attempt, or
-    /// an issued ticket this record would not issue, is `BindingMismatch`. Then it checks admissible
-    /// sets and builds the whole next image, with any validity excursions recorded rather than
-    /// refused. Never mutates. A refusal is retryable; an `EngineFault` is not, and the session
-    /// latches on it.
-    pub fn validate(&self, _expected: &StepTicket, _proposal: StepProposal) -> Result<NextImage, TrialFailure> {
+    /// The earliest stamp `Session::enqueue` takes now: the accepted head, or later behind a refused
+    /// cut.
+    pub fn earliest_stamp(&self) -> SimTime {
         todo!()
     }
-    /// Same id and payload returns the prior receipt; a changed payload is refused; a new input
-    /// becomes a next image that only extends the pending timeline. An input stamped before the
-    /// accepted head is refused: the host stamps a click at the head or later, never in the past.
-    pub fn admit_input(&self, _input: AuthorizedInput) -> Result<InputAdmission, AdmissionError> {
+    /// The forks that led to this branch, oldest first. Empty on the run's own branch.
+    pub fn ancestry(&self) -> &[BranchFork] {
         todo!()
     }
-    /// The only `&mut` path. Installs every part of the image together; cannot fail.
+    /// Runs one attempt of the next step to the image it would publish, or its failure: the contract
+    /// answers whether the core followed its declared method (`StepProposal::verify`, on this record's
+    /// own problem), and the record whether the result may become the next accepted image. It builds
+    /// the whole next image, with any validity excursions recorded rather than refused. Immutable, so
+    /// a host can drive a core by hand. Only a session publishes. A refusal is retryable; an
+    /// `EngineFault` is not, and the session latches on it.
+    pub fn attempt(&self, _solver: &dyn CoupledSolver, _attempt: Attempt<'_>) -> Result<NextImage, TrialFailure> {
+        todo!()
+    }
+    /// The one path that changes accepted state. Installs every part of the image together; cannot
+    /// fail.
     pub fn publish(&mut self, _next: NextImage) -> StepReceipt {
         todo!()
     }
@@ -102,7 +106,8 @@ pub struct RecordDigests {
     pub continuation: Digest,
     pub segment: Digest,
     pub streams: Digest,
-    pub pending: Digest,
+    pub applied: Digest,
+    pub waiting: Digest,
     pub ledger: Digest,
 }
 
@@ -114,17 +119,12 @@ pub struct NextImage {
     _fired: ModeChanges,
     _continuation: MethodHistory,
     _ledger: LedgerChunk,
-    _inputs: CommandCursor,
-    _pending: PendingInputs,
+    _pending: AppliedInputs,
     _dense: DenseSegment,
     _streams: StreamPositions,
     _seal: Seal,
     _applied: Vec<InputId>,
     _excursions: Vec<ValidityExcursion>,
-}
-pub enum InputAdmission {
-    AlreadyPresent(InputReceipt),
-    Staged(NextImage),
 }
 /// What one published step did: its revision and seal, each input it applied, and any excursion.
 pub struct StepReceipt {
@@ -157,15 +157,18 @@ impl AuthorizedInput {
     pub fn from_command_receipt(_receipt: Digest, _event: BoundaryEvent) -> Self {
         todo!()
     }
+    /// The receipt this input came from. No seal covers it, so an input with a command and the same
+    /// input known at admission give the same bits. A host's own log pairs the two.
+    pub fn command(&self) -> Digest {
+        todo!()
+    }
 }
+/// What a host keeps of an admitted input, derived from the input alone, so one request has one
+/// receipt whichever command repeats it.
 pub struct InputReceipt {
     _id: InputId,
-    _revision: u64,
-}
-/// Applied input ids advance only with a published image.
-pub struct CommandCursor {
-    _applied: u64,
-    _fence: u64,
+    _payload: Digest,
+    _at: SimTime,
 }
 
 /// One accepted interval of the history, each value at the interval's ends in the segment's basis:
@@ -205,11 +208,13 @@ impl Impulse {
         todo!()
     }
 }
-/// Fixed-time sealed chunks with prefix extents; a seal never rehashes all history per beat.
+/// One sealed chunk per accepted step, with prefix extents, and one rolling root per chunk: a root
+/// rolls the root before it with its chunk's digest, so a seal never rehashes all history per beat.
 struct History {
     _basis: Digest,
+    _opening: Vec<Compensated>,
     _chunks: Vec<LedgerChunk>,
-    _roots: Vec<Digest>,
+    _root: Digest,
 }
 /// Run identity, branch and the accepted base this view was lent at.
 #[derive(Clone, Copy)]
@@ -399,6 +404,20 @@ impl<'m> Session<'m, Running> {
     ) -> Result<Self, AdmissionError> {
         todo!()
     }
+    /// Continues the run `saved` holds, on its branch, in `solver`, which may be freshly built.
+    /// `store` resolves the history `saved` names. Everything is verified before a record exists.
+    pub fn resume(
+        _saved: &Checkpoint,
+        _expected: &RunIdentity,
+        _body: &'m CompiledBody,
+        _solver: &'m dyn CoupledSolver,
+        _store: &dyn HistoryStore,
+    ) -> Result<Self, CheckpointError> {
+        todo!()
+    }
+    /// Adds a late input. No accepted part moves, so no revision and no seal, and an observer sees no
+    /// gap. Stamped before the accepted head or the fence, it is refused. Only a running session takes
+    /// one: a retry is mid-step, and a faulted run has no next step to take it.
     pub fn enqueue(&mut self, _input: AuthorizedInput) -> Result<InputReceipt, AdmissionError> {
         todo!()
     }
@@ -406,11 +425,13 @@ impl<'m> Session<'m, Running> {
     pub fn step(self) -> Step<'m> {
         todo!()
     }
-    /// Saves the latest accepted boundary; never cuts an interval.
-    pub fn checkpoint(&self) -> Checkpoint {
+    /// Saves the latest accepted boundary; never cuts an interval. `store` takes the links it lacks
+    /// first, so the bytes this returns are complete with that store.
+    pub fn checkpoint(&self, _store: &mut dyn HistoryStore) -> Result<Checkpoint, CheckpointError> {
         todo!()
     }
-    /// A new branch from a saved boundary of this run, with ancestry. The parent is untouched.
+    /// A new branch from a checkpoint on this branch's own chain, with ancestry, through the path a
+    /// load takes. The parent is untouched, and the solver is this session's.
     pub fn rewind(&self, _saved: &Checkpoint, _branch: BranchId) -> Result<Session<'m, Running>, CheckpointError> {
         todo!()
     }
@@ -433,11 +454,12 @@ impl<'m> Session<'m, Faulted> {
     pub fn refusals(&self) -> &[Refused] {
         todo!()
     }
-    /// Last accepted image, the fault and the refused attempt's ticket, for diagnosis.
-    pub fn export(&self) -> FaultReport {
+    /// The last accepted image, the fault and the refusals before it, for diagnosis. The image is
+    /// marked, so `resume` refuses it: a faulted run goes on only through `recover`.
+    pub fn export(&self, _store: &mut dyn HistoryStore) -> Result<FaultReport, CheckpointError> {
         todo!()
     }
-    /// The only way on: a NEW branch from an earlier checkpoint of this run, with ancestry.
+    /// The only way on: a NEW branch from a checkpoint on this branch's own chain, with ancestry.
     pub fn recover(&self, _earlier: &Checkpoint, _branch: BranchId) -> Result<Session<'m, Running>, CheckpointError> {
         todo!()
     }
@@ -449,10 +471,17 @@ pub struct FaultReport {
     /// The refusals that preceded it, each naming its row or source.
     _refusals: Vec<Refused>,
 }
-pub struct BranchAncestry {
+/// One fork on a branch's way from the run's own branch.
+pub struct BranchFork {
     _parent: Digest,
-    _fork_revision: u64,
-    _fork_at: SimTime,
+    _revision: u64,
+    _at: SimTime,
+}
+/// A branch's id and the forks that led to it. A checkpoint carries it and no seal covers it, so a fork
+/// and the same course loaded from its checkpoint have equal seals.
+pub struct BranchAncestry {
+    _id: Digest,
+    _forks: Vec<BranchFork>,
 }
 pub struct BranchId {
     _digest: Digest,
@@ -462,77 +491,44 @@ impl BranchId {
         todo!()
     }
 }
-/// The accepted record at one boundary: state, bound parameters, solver continuation, stream
-/// positions, pending and active boundary inputs (nightingale-pulse#238), command cursor and fence, history roots,
-/// and the last dense segment. An observer's own state is checkpointed beside it, bound to its
-/// seal (`ng_observe::ObserverCheckpoint`), so a restore brings back outputs too (nightingale-pulse#273).
+/// A checkpoint's only form: the envelope's bytes. `Session::checkpoint` writes them, and
+/// `Session::resume`, `Session::rewind` and `Session::recover` read them through one private path, so
+/// an in-process retry and a loaded save are one path. A host persists `as_bytes` and reloads with
+/// `from_bytes`, which checks nothing. The envelope holds state, bound parameters, solver continuation,
+/// stream positions, the timeline, the fence, branch ancestry, the ledger root and the last dense
+/// segment. An observer's own state is checkpointed beside it, bound to its seal
+/// (`ng_observe::ObserverCheckpoint`), so a restore brings back outputs too (nightingale-pulse#273).
 pub struct Checkpoint {
-    _identity: RunIdentity,
-    _branch: BranchAncestry,
-    _revision: u64,
-    _seal: Seal,
-    _time: SimTime,
-    _state: Candidate,
-    _parameters: BoundParameters,
-    _continuation: MethodHistory,
-    _streams: StreamPositions,
-    _pending: PendingInputs,
-    _commands: CommandCursor,
-    _history_roots: Vec<Digest>,
-    _dense: DenseSegment,
+    _bytes: Vec<u8>,
 }
-/// The sealed envelope as stored. A host persists and reloads its bytes; only the codec reads them.
-pub struct CanonicalCheckpoint {
-    _sealed_bytes: Vec<u8>,
-}
-impl CanonicalCheckpoint {
+impl Checkpoint {
     pub fn as_bytes(&self) -> &[u8] {
         todo!()
     }
-    /// Wraps stored bytes unchecked: `decode` verifies the raw seal and the identity before any
-    /// body byte and refuses bytes that do not verify.
-    pub fn from_bytes(_sealed_bytes: Vec<u8>) -> Self {
+    pub fn from_bytes(_bytes: Vec<u8>) -> Self {
         todo!()
     }
 }
-/// Only this codec interprets the envelope. Verify identity and raw seal before body decode.
-/// Body is pinned postcard; a raw SHA-256 seals stored bytes; the header is RFC 8785 JCS.
-pub trait CheckpointCodec {
-    fn codec_digest(&self) -> Digest;
-    fn encode(&self, checkpoint: &Checkpoint) -> Result<CanonicalCheckpoint, CheckpointError>;
-    /// Resumes the branch head; an earlier checkpoint continues only through `rewind`/`recover`.
-    /// The envelope holds history roots, not chunks: `history` resolves each root to sealed chunk
-    /// bytes, which are verified against the root before the record is rebuilt.
-    fn decode<'m>(
-        &self,
-        bytes: &CanonicalCheckpoint,
-        expected: &RunIdentity,
-        body: &'m CompiledBody,
-        solver: &'m dyn CoupledSolver,
-        history: &dyn HistoryStore,
-    ) -> Result<Session<'m, Running>, CheckpointError>;
+/// Why stored bytes did not become a session.
+pub enum CheckpointError {
+    Truncated,
+    UnknownFormat,
+    TrailingContent,
+    Corrupt,
+    IdentityMismatch,
+    Latched,
+    Malformed,
+    SealMismatch,
+    HistoryMissing { root: Digest },
+    HistoryAltered { root: Digest },
+    StoreFailed { root: Digest },
+    BranchInUse,
+    NotOnThisBranch,
 }
-pub struct PostcardCheckpointCodec;
-impl CheckpointCodec for PostcardCheckpointCodec {
-    fn codec_digest(&self) -> Digest {
-        todo!()
-    }
-    fn encode(&self, _checkpoint: &Checkpoint) -> Result<CanonicalCheckpoint, CheckpointError> {
-        todo!()
-    }
-    fn decode<'m>(
-        &self,
-        _bytes: &CanonicalCheckpoint,
-        _expected: &RunIdentity,
-        _body: &'m CompiledBody,
-        _solver: &'m dyn CoupledSolver,
-        _history: &dyn HistoryStore,
-    ) -> Result<Session<'m, Running>, CheckpointError> {
-        todo!()
-    }
-}
-/// Durable storage for sealed history chunks, addressed by root. A checkpoint is complete only
-/// with a store that resolves every root it names.
+/// Durable storage for ledger links, addressed by root. It is host code and trusted for nothing: a walk
+/// rolls what comes back to the root it asked for. A checkpoint is complete only with a store that
+/// keeps what it took.
 pub trait HistoryStore {
-    fn resolve(&self, root: &Digest) -> Result<Vec<u8>, CheckpointError>;
+    fn resolve(&self, root: &Digest) -> Option<Vec<u8>>;
+    fn keep(&mut self, root: Digest, link: Vec<u8>) -> Result<(), CheckpointError>;
 }

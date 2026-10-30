@@ -41,6 +41,76 @@
 //! use ng_record::*;
 //! fn legal(session: Session<'_, Running>) -> Step<'_> { session.step() }
 //! ```
+//! A refused session is mid-step and a faulted one has no next step, so neither takes an input or a save.
+//! ```compile_fail,E0599
+//! use ng_record::*;
+//! fn late(refused: &mut Session<'_, Retrying>, input: AuthorizedInput) -> Result<InputReceipt, ng_contract::AdmissionError> {
+//!     refused.enqueue(input)
+//! }
+//! ```
+//! ```compile_fail,E0599
+//! use ng_record::*;
+//! fn late(stopped: &mut Session<'_, Faulted>, input: AuthorizedInput) -> Result<InputReceipt, ng_contract::AdmissionError> {
+//!     stopped.enqueue(input)
+//! }
+//! ```
+//! ```compile_fail,E0599
+//! use ng_record::*;
+//! fn save(refused: &Session<'_, Retrying>, store: &mut dyn HistoryStore) -> Result<Checkpoint, CheckpointError> {
+//!     refused.checkpoint(store)
+//! }
+//! ```
+//! ```
+//! use ng_record::*;
+//! fn late(running: &mut Session<'_, Running>, input: AuthorizedInput) -> Result<InputReceipt, ng_contract::AdmissionError> {
+//!     running.enqueue(input)
+//! }
+//! fn save(running: &Session<'_, Running>, store: &mut dyn HistoryStore) -> Result<Checkpoint, CheckpointError> {
+//!     running.checkpoint(store)
+//! }
+//! ```
+//! A lent record takes no input: the one path from a clinician to the body goes through the session.
+//! ```compile_fail,E0596
+//! use ng_record::*;
+//! fn sneak(session: &Session<'_, Running>, input: AuthorizedInput) -> Result<InputReceipt, ng_contract::AdmissionError> {
+//!     session.enqueue(input)
+//! }
+//! ```
+//! ```
+//! use ng_contract::SimTime;
+//! use ng_record::*;
+//! fn stamp(session: &Session<'_, Running>) -> SimTime { session.record().earliest_stamp() }
+//! ```
+//! An input names the command that authorized it, through the one constructor.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! use ng_record::*;
+//! fn forged(command: Digest, event: BoundaryEvent) -> AuthorizedInput { AuthorizedInput { command, event } }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! use ng_record::*;
+//! fn authorized(command: Digest, event: BoundaryEvent) -> AuthorizedInput {
+//!     AuthorizedInput::from_command_receipt(command, event)
+//! }
+//! ```
+//! A host cannot hand the record a ticket: an attempt issues its own.
+//! ```compile_fail,E0624
+//! use ng_contract::*;
+//! use ng_record::*;
+//! fn swap(record: &PatientRecord<'_>, ticket: &StepTicket, proposal: StepProposal)
+//!     -> Result<NextImage, TrialFailure> {
+//!     record.validate(ticket, proposal)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! use ng_record::*;
+//! fn by_hand(record: &PatientRecord<'_>, core: &dyn CoupledSolver) -> Result<NextImage, TrialFailure> {
+//!     let span_ns = core.next_step(record.accepted());
+//!     record.attempt(core, Attempt::First { span_ns })
+//! }
+//! ```
 
 mod checkpoint;
 mod history;

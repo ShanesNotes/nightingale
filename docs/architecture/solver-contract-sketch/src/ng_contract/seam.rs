@@ -11,10 +11,10 @@ use super::*;
 pub trait CoupledSolver {
     /// The declared resolution this core runs under; part of the run identity.
     fn resolution(&self) -> DeclaredResolution;
-    /// Chooses an intrinsic span from accepted continuation alone and asks
-    /// `problem.ticket(span)`; the contract clips it at the next breakpoint. A core never sees the
-    /// timeline, so its step cannot depend on pace or on a later input.
-    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault>;
+    /// The span this core commits to for its next step, in ns, from the accepted view alone. It takes
+    /// no problem and returns no ticket, so a core has nothing to ask before it commits, and its step
+    /// cannot depend on pace or on a later input.
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64;
     /// Solves exactly the ticketed interval or returns a refusal or fault. A proposal is owned and
     /// verified against the record's own problem, so nothing the core built it from is trusted.
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure>;

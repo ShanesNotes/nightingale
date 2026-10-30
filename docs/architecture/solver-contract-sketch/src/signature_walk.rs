@@ -263,10 +263,10 @@
 //!         DeclaredResolution::new(self.policy, 1_000, 12, ArithmeticProfile::contract_v1(),
 //!             StageScheme::backward_euler_doubled(), scales)
 //!     }
-//!     fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
-//!         let preferred = problem.accepted().method_history().counters().first().copied();
-//!         // The contract clips this at the next breakpoint, which the core never sees.
-//!         problem.ticket(preferred.unwrap_or(1_000_000))
+//!     fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+//!         let preferred = accepted.method_history().counters().first().copied();
+//!         // A commitment: the session issues the ticket, and no core asks where a breakpoint is.
+//!         preferred.unwrap_or(1_000_000)
 //!     }
 //!     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket)
 //!         -> Result<StepProposal, TrialFailure> {
@@ -336,21 +336,16 @@
 //! // 7. Validate: immutable, returns the whole next image or a refusal. Only `step` publishes.
 //! fn dry_validate(session: &Session<'_, Running>, core: &Core) -> Option<NextImage> {
 //!     let record = session.record();
-//!     let problem = record.problem();
-//!     let ticket = core.next_step(&problem).ok()?;
-//!     let proposal = core.solve(&problem, &ticket).ok()?;
-//!     match record.validate(&ticket, proposal) {
+//!     let span_ns = core.next_step(record.accepted());
+//!     match record.attempt(core, Attempt::First { span_ns }) {
 //!         Ok(next) => Some(next),
-//!         Err(TrialFailure::Refused(refused)) => {
-//!             let _smaller: StepTicket = problem.retry(&refused).ok()?;
-//!             None
-//!         }
+//!         Err(TrialFailure::Refused(refused)) => record.attempt(core, Attempt::After(&refused)).ok(),
 //!         Err(TrialFailure::EngineFault(_latches)) => None,
 //!     }
 //! }
 //!
 //! // 8. Step: accept, refuse and retry smaller, or latch on a fault and recover on a new branch.
-//! fn advance<'m>(session: Session<'m, Running>, earlier: &Checkpoint)
+//! fn advance<'m>(session: Session<'m, Running>, earlier: &Checkpoint, history: &mut dyn HistoryStore)
 //!     -> Result<Session<'m, Running>, CheckpointError> {
 //!     let mut attempt = session.step();
 //!     loop {
@@ -361,7 +356,7 @@
 //!                 retrying.retry()
 //!             }
 //!             Step::Faulted(stopped) => {
-//!                 let _report: FaultReport = stopped.export();
+//!                 let _report: FaultReport = stopped.export(history)?;
 //!                 return stopped.recover(earlier, BranchId::new(Digest::of_canonical(b"b1")));
 //!             }
 //!         };
@@ -370,12 +365,11 @@
 //!
 //! // 9. Checkpoint and resume: state, continuation and the last dense segment together.
 //! fn resume<'m>(session: &Session<'m, Running>, body: &'m CompiledBody, core: &'m Core,
-//!     history: &dyn HistoryStore) -> Result<Session<'m, Running>, CheckpointError> {
-//!     let codec = PostcardCheckpointCodec;
-//!     let sealed = codec.encode(&session.checkpoint())?;
-//!     let stored: Vec<u8> = sealed.as_bytes().to_vec(); // to durable storage and back
-//!     let bytes = CanonicalCheckpoint::from_bytes(stored);
-//!     let resumed = codec.decode(&bytes, session.record().identity(), body, core, history)?;
+//!     history: &mut dyn HistoryStore) -> Result<Session<'m, Running>, CheckpointError> {
+//!     let saved = session.checkpoint(history)?;
+//!     let stored: Vec<u8> = saved.as_bytes().to_vec(); // to durable storage and back
+//!     let bytes = Checkpoint::from_bytes(stored);
+//!     let resumed = Session::resume(&bytes, session.record().identity(), body, core, history)?;
 //!     let _segment = resumed.record().accepted().last_segment().basis().degree();
 //!     Ok(resumed)
 //! }

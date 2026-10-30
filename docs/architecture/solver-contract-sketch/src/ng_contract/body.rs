@@ -139,15 +139,14 @@ impl Candidate {
     }
 }
 /// What a problem reads of the accepted image; no setter, no organ object. The record builds one per
-/// attempt, and a core reads the head's time, values and continuation here and nothing of the
-/// timeline.
+/// attempt, and a core reads the head's time, values and continuation here. It holds no timeline, so
+/// no core can reach one through it.
 #[derive(Clone, Copy)]
 pub struct AcceptedStateView<'a> {
     _time: SimTime,
     _state: &'a Candidate,
     _history: &'a MethodHistory,
     _dense: &'a DenseSegment,
-    _pending: &'a PendingInputs,
 }
 impl<'a> AcceptedStateView<'a> {
     pub fn new(
@@ -155,7 +154,6 @@ impl<'a> AcceptedStateView<'a> {
         _state: &'a Candidate,
         _history: &'a MethodHistory,
         _dense: &'a DenseSegment,
-        _pending: &'a PendingInputs,
     ) -> Self {
         todo!()
     }

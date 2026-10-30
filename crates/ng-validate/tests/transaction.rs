@@ -2677,6 +2677,26 @@ fn a_delivery_no_law_reads_is_refused_at_admission() {
 }
 
 #[test]
+fn a_late_delivery_no_law_reads_is_refused_at_enqueue() {
+    let (body, packet) = deaf_boundary_body();
+    let core = reference(SECOND);
+    let port = BoundaryPort::new(Vec::new()).expect("no event");
+    let mut session = admit_fixture(&body, packet, port, &core).expect("admitted");
+    let delivery = WaterDelivery {
+        boundary: "exterior",
+        amount: measure(30.0),
+        ends: SimTime::from_ns(10 * SECOND),
+    };
+    let id = InputId::new(Digest::of_canonical(b"meal"));
+    let event = BoundaryEvent::new(id, SimTime::from_ns(SECOND), BoundaryInput::Water(delivery));
+    let input = AuthorizedInput::from_command_receipt(Digest::of_canonical(b"a command"), event);
+    assert_eq!(
+        session.enqueue(input).err(),
+        Some(AdmissionError::DriveNotRead { name: "exterior" })
+    );
+}
+
+#[test]
 fn a_delivery_whose_rate_leaves_the_finite_range_is_refused_when_it_is_stated() {
     let id = InputId::new(Digest::of_canonical(b"overflow"));
     let delivery = WaterDelivery {

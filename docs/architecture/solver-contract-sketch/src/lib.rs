@@ -444,12 +444,12 @@
 //!     problem.boundary().next_breakpoint(problem.accepted().time())
 //! }
 //! ```
-//! Legal twin: the core asks for its intrinsic span, and the ticket says where the step ends.
+//! Legal twin: the core commits to a span from the accepted view, and the session issues the ticket.
 //! ```
 //! use solver_contract_sketch::ng_contract::*;
-//! fn step(problem: &CoupledProblem<'_>, intrinsic_span_ns: u64)
-//!     -> Result<StepTicket, EngineFault> {
-//!     problem.ticket(intrinsic_span_ns)
+//! fn step(accepted: AcceptedStateView<'_>, intrinsic_span_ns: u64)
+//!     -> u64 {
+//!     accepted.method_history().counters().first().copied().unwrap_or(intrinsic_span_ns)
 //! }
 //! ```
 //!
@@ -504,6 +504,70 @@
 //! ```
 //! use solver_contract_sketch::ng_record::*;
 //! fn again(refused: Session<'_, Retrying>) -> Step<'_> { refused.retry() }
+//! ```
+//!
+//! No problem issues a ticket, so a span of any size asks nothing.
+//! ```compile_fail,E0599
+//! use solver_contract_sketch::ng_contract::*;
+//! fn probe(problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+//!     problem.ticket(1 << 60)
+//! }
+//! ```
+//! Legal twin: a span is a number the core commits to.
+//! ```
+//! use solver_contract_sketch::ng_contract::*;
+//! fn commit(accepted: AcceptedStateView<'_>, span_ns: u64) -> u64 {
+//!     accepted.method_history().counters().first().copied().unwrap_or(span_ns)
+//! }
+//! ```
+//!
+//! An accepted view lends no timeline, so a problem has none to reach.
+//! ```compile_fail,E0609
+//! use solver_contract_sketch::ng_contract::*;
+//! fn reach(accepted: AcceptedStateView<'_>) { let _ = accepted.pending; }
+//! ```
+//! Legal twin: the head's own time.
+//! ```
+//! use solver_contract_sketch::ng_contract::*;
+//! fn head(accepted: AcceptedStateView<'_>) -> SimTime { accepted.time() }
+//! ```
+//!
+//! A refused session is mid-step, so it takes no input.
+//! ```compile_fail,E0599
+//! use solver_contract_sketch::ng_contract::*;
+//! use solver_contract_sketch::ng_record::*;
+//! fn late(refused: &mut Session<'_, Retrying>, input: AuthorizedInput)
+//!     -> Result<InputReceipt, AdmissionError> {
+//!     refused.enqueue(input)
+//! }
+//! ```
+//! Legal twin: a running session takes one.
+//! ```
+//! use solver_contract_sketch::ng_contract::*;
+//! use solver_contract_sketch::ng_record::*;
+//! fn late(running: &mut Session<'_, Running>, input: AuthorizedInput)
+//!     -> Result<InputReceipt, AdmissionError> {
+//!     running.enqueue(input)
+//! }
+//! ```
+//!
+//! A host cannot hand the record a ticket: an attempt issues its own.
+//! ```compile_fail,E0599
+//! use solver_contract_sketch::ng_contract::*;
+//! use solver_contract_sketch::ng_record::*;
+//! fn swap(record: &PatientRecord<'_>, ticket: &StepTicket, proposal: StepProposal)
+//!     -> Result<NextImage, TrialFailure> {
+//!     record.validate(ticket, proposal)
+//! }
+//! ```
+//! Legal twin: a host drives a core by hand through an attempt.
+//! ```
+//! use solver_contract_sketch::ng_contract::*;
+//! use solver_contract_sketch::ng_record::*;
+//! fn by_hand(record: &PatientRecord<'_>, core: &dyn CoupledSolver) -> Result<NextImage, TrialFailure> {
+//!     let span_ns = core.next_step(record.accepted());
+//!     record.attempt(core, Attempt::First { span_ns })
+//! }
 //! ```
 
 #![forbid(unsafe_code)]

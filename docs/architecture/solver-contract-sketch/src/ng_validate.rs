@@ -4,7 +4,7 @@
 //! a core can close every ledger and still compute the wrong trajectory, which the accuracy gate
 //! checks.
 use crate::ng_contract::*;
-use crate::ng_record::{ConservationView, FaultReport, HistorySeal, PatientRecord, Running, Session};
+use crate::ng_record::{ConservationView, FaultReport, HistorySeal, PatientRecord, RecordDigests, Running, Session};
 
 /// One combination's limits. `absolute + relative * gross exchange in the window` bounds closure, so
 /// a tiny exchange needs a tiny residual. `drift` is 1.96 times the combination's within-subject
@@ -185,7 +185,7 @@ impl CoupledSolver for ReferenceIntegrator {
     fn resolution(&self) -> DeclaredResolution {
         todo!()
     }
-    fn next_step(&self, _problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
         todo!()
     }
     fn solve(&self, _problem: &CoupledProblem<'_>, _ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
@@ -263,6 +263,20 @@ pub enum Pace {
     WallClock,
     Chunked,
 }
+#[derive(Clone, Copy)]
+pub enum ClockSource {
+    /// A list of readings, which proves pace cannot reach a run and is no live clock.
+    Scripted,
+    /// A host read a real clock.
+    Host,
+}
+/// What a host reads to pace a live run. No crate here reads a clock, so a host outside the workspace
+/// passes one in. A host's clock may wait for its next tick before it answers.
+pub trait WallClock {
+    /// Wall ns since the run began, or `None` when this clock has no more to say.
+    fn elapsed_ns(&self) -> Option<u64>;
+    fn source(&self) -> ClockSource;
+}
 /// The synthetic composition root's anatomy for the CV, FL, RN, NS and receptor slice.
 pub fn arena_schema() -> Schema {
     todo!()
@@ -303,22 +317,30 @@ impl ArenaSpec {
         todo!()
     }
 }
+/// One gate's digests, bound to the run identity they measured: its reference run first, then each
+/// run it compared.
+pub struct GateEvidence {
+    _gate: ReplayGate,
+    _run: Digest,
+    _runs: Vec<RecordDigests>,
+    _clock: Option<ClockSource>,
+}
 /// Digests of accepted state, ledger, events and observer findings under each replay gate. Every
 /// gate compares against the same uninterrupted run:
 /// - pace: unbounded, live wall clock and irregular chunks;
-/// - resume: each checkpoint decoded into a freshly built core;
-/// - late admission: each timeline input admitted mid-run through `Session::enqueue` instead of
-///   at admission (the causal step rule);
+/// - resume: each checkpoint loaded into a freshly built core;
+/// - late admission: each timeline input admitted through `Session::enqueue` at the last head a run
+///   can still take it, instead of at admission (the causal step rule);
 /// - rewind: a branch rewound in the same process after the parent ran ahead, against the same
-///   branch decoded into a fresh core;
+///   branch loaded into a fresh core;
 /// - non-perturbation: physiology bits with observers attached, detached and changed.
 pub struct ReplayEvidence {
     _run: Digest,
-    _pace_digests: Vec<Digest>,
-    _resume_digests: Vec<Digest>,
-    _late_admission_digests: Vec<Digest>,
-    _rewind_digests: Vec<Digest>,
-    _observer_variant_digests: Vec<Digest>,
+    _pace: GateEvidence,
+    _resume: GateEvidence,
+    _late_admission: GateEvidence,
+    _rewind: GateEvidence,
+    _non_perturbation: GateEvidence,
 }
 pub struct ThroughputEvidence {
     _elapsed_wall_ns: u64,
@@ -332,9 +354,11 @@ pub struct NumericalHealth {
     _floor_faults: u64,
     _excursions: u64,
 }
-/// Builds a fresh core with no state from earlier runs, for the resume and rewind gates.
+/// Builds a fresh core with no state from earlier runs. A gate calls it once per run, its reference
+/// run first, so a core that must differ between two runs can differ only through what its factory
+/// gives it: the seam gives two runs of one case nothing else to read.
 pub trait CoreFactory {
-    fn fresh(&self) -> Box<dyn CoupledSolver>;
+    fn fresh(&self) -> Box<dyn CoupledSolver + '_>;
 }
 /// The run's evidence, bound to the run identity it measured, so evidence from another run
 /// cannot be scored with this one.
@@ -369,6 +393,8 @@ pub enum ArenaFailure {
     Certificate(CertificateFailure),
     Accuracy(AccuracyFailure),
     Replay { gate: ReplayGate, first_divergence: SimTime },
+    /// An input with no head after admission to arrive at: the gate would test nothing.
+    NoLateBoundary { id: InputId },
     /// A gate that did not run, or evidence from another run: never scored as a pass.
     MissingEvidence { gate: ReplayGate },
 }
