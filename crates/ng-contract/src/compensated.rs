@@ -1,3 +1,4 @@
+use crate::identity::{Canonical, Seal};
 use crate::{Dimensionless, Measure};
 
 /// An amount as a compensated pair: `hi` the rounded sum and `lo` what rounding left out, normalized so
@@ -107,6 +108,14 @@ impl Compensated {
     }
     pub(crate) fn is_finite(self) -> bool {
         self.hi.is_finite() && self.lo.is_finite()
+    }
+}
+
+impl Seal for Compensated {
+    fn seal(&self, out: &mut Canonical) {
+        let Self { hi, lo } = self;
+        hi.seal(out);
+        lo.seal(out);
     }
 }
 

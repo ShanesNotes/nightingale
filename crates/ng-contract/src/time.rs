@@ -1,3 +1,5 @@
+use crate::identity::{Canonical, Seal};
+
 /// Simulated time, in integer nanoseconds from the run's origin.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SimTime {
@@ -12,6 +14,13 @@ impl SimTime {
     }
     pub fn plus_ns(self, ns: u64) -> Option<Self> {
         self.ns.checked_add(ns).map(Self::from_ns)
+    }
+}
+
+impl Seal for SimTime {
+    fn seal(&self, out: &mut Canonical) {
+        let Self { ns } = self;
+        out.number(*ns);
     }
 }
 

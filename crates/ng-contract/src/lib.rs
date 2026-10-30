@@ -457,37 +457,53 @@
 //! }
 //! ```
 
+mod admission;
 mod anatomy;
 mod body;
-#[allow(dead_code)]
+mod boundary;
 mod compensated;
 mod compile;
 mod conservation;
+#[allow(dead_code)]
+mod evaluate;
 mod failure;
 mod graph;
 mod identity;
 mod law;
-#[allow(dead_code)]
+mod packet;
 mod pinned;
+#[allow(dead_code)]
+mod problem;
 mod provenance;
+#[allow(dead_code)]
+mod quadrature;
 mod quantity;
 #[allow(dead_code)]
 mod scheme;
 mod scope;
+mod sources;
+mod state;
 mod system;
 mod time;
 
+pub use admission::*;
 pub use anatomy::*;
 pub use body::*;
+pub use boundary::{BoundaryEvent, BoundaryInput, BoundaryPort, InputId, PendingInputs, WaterDelivery};
 pub use compensated::*;
 pub use conservation::*;
 pub use failure::*;
 pub use identity::*;
 pub use law::*;
+pub use packet::*;
 pub use pinned::exp;
+pub use problem::*;
 pub use provenance::*;
+pub use quadrature::*;
 pub use quantity::*;
 pub use scheme::*;
 pub use scope::*;
+pub use sources::{ExcursionSide, RefusalSource, SourceId, ValidityExcursion};
+pub use state::*;
 pub use system::*;
 pub use time::*;

@@ -1,5 +1,6 @@
 use crate::identity::{Canonical, Seal};
 use crate::law::{Op, Validity};
+use crate::sources::{RefusalSource, refusal_sources};
 use crate::{
     AdmissibleSet, Class, ConservedBasis, Crossing, Digest, LawName, Network, ParameterKey, Predicate,
     RateClass, Schema, SiteId, Space,
@@ -42,7 +43,8 @@ index!(
 /// them or the model hash.
 pub struct CompiledBody {
     hash: ModelHash,
-    layout: Layout,
+    pub(crate) layout: Layout,
+    pub(crate) sources: Vec<RefusalSource>,
 }
 pub(crate) struct Layout {
     pub(crate) schema: Schema,
@@ -63,6 +65,7 @@ impl CompiledBody {
         layout.seal(&mut out);
         Self {
             hash: ModelHash { digest: out.digest() },
+            sources: refusal_sources(&layout),
             layout,
         }
     }
@@ -145,6 +148,9 @@ pub struct Row {
     pub(crate) dimension: String,
 }
 impl Row {
+    pub fn id(&self) -> RowId {
+        RowId::at(self.unknown.index())
+    }
     pub fn unknown(&self) -> UnknownId {
         self.unknown
     }
@@ -171,7 +177,7 @@ impl Seal for Row {
     }
 }
 /// An amount's row sums the columns that move it, so no law owns an amount.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RowKind {
     Amount { site: SiteId, space: Space },
     Memory(LawName),
