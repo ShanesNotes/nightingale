@@ -9,6 +9,8 @@ use core::marker::PhantomData;
 /// Reading status records evidence actually inspected; there is no FromMemory variant.
 pub enum Reading {
     FullText,
+    /// Only the abstract was read; the full text upgrades the record when it turns up.
+    Abstract,
     SecondaryReproduction { reproduction: String },
 }
 pub struct Citation {
@@ -183,7 +185,6 @@ pub struct EvidenceRecord {
     _population: Population,
     _method: &'static str,
     _certainty: Certainty,
-    _rights: Digest,
 }
 impl EvidenceRecord {
     pub fn new(
@@ -195,7 +196,6 @@ impl EvidenceRecord {
         _population: Population,
         _method: &'static str,
         _certainty: Certainty,
-        _rights: Digest,
     ) -> Result<Self, AdmissionError> {
         // Refuses a `Compiled` or `Textbook` record whose certainty is above `Moderate`.
         todo!()
