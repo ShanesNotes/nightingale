@@ -391,7 +391,8 @@ pub enum ArenaFailure {
     Certificate(CertificateFailure),
     Accuracy(AccuracyFailure),
     Replay { gate: ReplayGate, first_divergence: SimTime },
-    /// An input with no head after admission to arrive at: the gate would test nothing.
+    /// An input with no head after admission to arrive at, or no step left to apply it: the gate
+    /// would test nothing.
     NoLateBoundary { id: InputId },
     /// A gate that did not run, or evidence from another run: never scored as a pass.
     MissingEvidence { gate: ReplayGate },
