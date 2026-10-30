@@ -57,6 +57,25 @@ impl CoupledSolver for KeepsACache {
     }
 }
 
+/// A count in a `Cell` shapes only what it proposes, so a run it changes keeps the reference's time grid and
+/// leaves it only by a seal.
+pub struct CountsInACell {
+    pub interval_ns: u64,
+    pub steps: Cell<u64>,
+}
+impl CoupledSolver for CountsInACell {
+    fn resolution(&self) -> DeclaredResolution {
+        explicit_resolution(b"counts in a cell")
+    }
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        self.interval_ns
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.steps.set(self.steps.get() + 1);
+        explicit(problem, ticket, vec![self.steps.get()])
+    }
+}
+
 /// The legal twin of `KeepsACache`: the same count, in its continuation.
 pub struct KeepsACount {
     pub interval_ns: u64,

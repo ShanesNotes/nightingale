@@ -171,23 +171,18 @@ struct Trace {
     last: RecordDigests,
 }
 
-/// The first instant `run` leaves `reference`, reading as many rows as they share.
+/// The first instant `run` leaves `reference`, reading as many rows as they share. Two runs to one end with
+/// equal seals have equal rows, so a shared prefix is the whole of each.
 fn first_difference(reference: &[Row], run: &[Row]) -> Option<SimTime> {
     (reference.iter().zip(run))
-        .find(|(known, seen)| known.time != seen.time || known.seal != seen.seal)
+        .find(|(known, seen)| known.seal != seen.seal)
         .map(|(known, seen)| known.time.min(seen.time))
 }
 
-/// `None` when two whole traces agree at every row and at the end, the waiting inputs included.
+/// `None` when two traces agree at every row and at the end, whose digests also read what waits and are
+/// recomputed from the live fields, so a part a seal failed to cover still shows.
 fn first_divergence(reference: &Trace, run: &Trace) -> Option<SimTime> {
-    let (known, seen) = (&reference.rows, &run.rows);
-    first_difference(known, seen)
-        .or_else(|| {
-            known
-                .get(seen.len())
-                .or_else(|| seen.get(known.len()))
-                .map(|row| row.time)
-        })
+    first_difference(&reference.rows, &run.rows)
         .or_else(|| (reference.last != run.last).then_some(run.last.time))
 }
 
@@ -405,17 +400,10 @@ fn resume_gate(
     }
     let identity = session.record().identity();
     let mut runs = vec![reference.last];
-    for (index, (revision, checkpoint, digests)) in saved.iter().enumerate() {
+    for (index, (revision, checkpoint, _)) in saved.iter().enumerate() {
         let fresh = cores.fresh();
         let resumed = Session::resume(checkpoint, identity, case.body(), &*fresh, &store);
         let resumed = resumed.map_err(checkpointed)?;
-        let head = resumed.record().accepted().time();
-        if resumed.record().digests() != *digests {
-            return Err(ReplayFailure::Diverged {
-                gate,
-                first_divergence: head,
-            });
-        }
         let mut rows = vec![Row::of(&resumed, false)];
         let known = &reference.rows[*revision as usize..];
         let next = saved.get(index + 1).filter(|_| index > 0);
@@ -557,4 +545,34 @@ pub fn replay_gates(
         late_admission: replay_gate(ReplayGate::LateAdmission, case, cores, plan)?,
         rewind: replay_gate(ReplayGate::Rewind, case, cores, plan)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Delivery, ReferenceIntegrator};
+    use ng_contract::Measure;
+
+    #[test]
+    fn a_trace_that_differs_only_in_what_waits_has_diverged() {
+        let delivery = Delivery {
+            id: b"waits past the end",
+            from: SimTime::from_ns(10),
+            to: SimTime::from_ns(20),
+            amount: Measure::new(0.0).expect("finite"),
+        };
+        let start = || Measure::new(1_000.0).expect("finite");
+        let case = TwoReservoirs::delivering([start(), start()], vec![delivery]).expect("a body");
+        let core = ReferenceIntegrator::new(1_000_000_000);
+        let session = case.admit(&core).expect("admitted");
+        let withheld = case.admit_withheld(&core).expect("admitted");
+        let trace = |session: &Session<'_, Running>| Trace {
+            rows: vec![Row::of(session, false)],
+            last: session.record().digests(),
+        };
+        let (reference, run) = (trace(&session), trace(&withheld));
+        assert_eq!(first_difference(&reference.rows, &run.rows), None);
+        assert_eq!(first_divergence(&reference, &reference), None);
+        assert_eq!(first_divergence(&reference, &run), Some(run.last.time));
+    }
 }

@@ -5,8 +5,8 @@ use ng_contract::*;
 use ng_record::*;
 use ng_validate::*;
 use replay_cores::{
-    ActsOnACut, ClipsAt, KeepsACache, KeepsACount, KeepsTheDigest, ReadsPastTheBreakpoint, ReadsTheHostClock,
-    RefusesByHash, RefusesOne, ScriptedClock, Seen, ShowsAt,
+    ActsOnACut, ClipsAt, CountsInACell, KeepsACache, KeepsACount, KeepsTheDigest, ReadsPastTheBreakpoint,
+    ReadsTheHostClock, RefusesByHash, RefusesOne, ScriptedClock, Seen, ShowsAt,
 };
 
 const SECOND: u64 = 1_000_000_000;
@@ -1556,6 +1556,27 @@ fn the_contracts_call_site_saves_resumes_and_rewinds() {
         save_resume_rewind(&session, case.body(), &fresh, &mut store, fork).expect("the call site");
     assert_eq!(resumed.record().digests(), session.record().digests());
     assert_eq!(forked.record().digests(), session.record().digests());
+}
+
+#[test]
+fn a_run_on_the_same_grid_diverges_at_the_first_seal_it_changed() {
+    let case = delivering(Vec::new(), 40);
+    let cores = || CountsInACell {
+        interval_ns: 8 * SECOND,
+        steps: Cell::new(0),
+    };
+    let clock = script();
+    let plan = ReplayPlan {
+        resume_every: 2,
+        ..plan(&clock)
+    };
+    assert_eq!(
+        replay_gate(ReplayGate::Resume, &case, &cores, &plan).err(),
+        Some(ReplayFailure::Diverged {
+            gate: ReplayGate::Resume,
+            first_divergence: at(24),
+        })
+    );
 }
 
 #[test]
