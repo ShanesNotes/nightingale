@@ -42,6 +42,8 @@ pub(crate) fn compile(
     let guards = guards(&fragments, &places)?;
     let (parameters, instances, guards) = bind(placement.instances, guards, &declarations);
     let (reads, rates) = reads(&rows.rows, &placement.columns, &placement.programs, &instances);
+    let modes = modes(&fragments);
+    match_each_mode(&rows.rows, &placement.programs, &instances, &modes)?;
     let solved_by = solved_by(&rows.rows, &reads)?;
     let blocks = blocks(&solved_by, &reads, &rates);
     let basis = conserved_basis(rows.amounts.len(), &placement.columns);
@@ -54,7 +56,7 @@ pub(crate) fn compile(
         parameters,
         sparsity: sparsity(reads),
         blocks,
-        modes: modes(&fragments),
+        modes,
         guards,
         basis,
     }))
@@ -250,7 +252,8 @@ impl<'f> Owed<'f> {
                     .iter()
                     .any(|law| law.1.modes == Selector::Only { variable, value })
             };
-            if let Some(value) = (0..mode.values.len()).find(|&value| !covered(value)) {
+            let uncovered = (0..mode.values.len()).filter(|&value| !covered(value));
+            if let Some(value) = uncovered.min_by_key(|&value| mode.values[value]) {
                 return Err(CompileDefect::UncoveredMode {
                     law,
                     mode: ModeValue {
@@ -843,6 +846,69 @@ fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, Compi
     Ok(solved_by)
 }
 
+/// A law that does not hold cannot stand in for one that does, so the algebraic rows are matched in each
+/// combination of the mode values their laws hold in.
+fn match_each_mode(
+    rows: &[Row],
+    programs: &[Program],
+    instances: &[Instance],
+    modes: &[ModeLayout],
+) -> Result<(), CompileDefect> {
+    let algebraic: Vec<(RowId, &Instance, &Program)> = (instances.iter())
+        .filter_map(|instance| match instance.target {
+            Target::Row(row) if matches!(rows[row.index()].kind, RowKind::Algebraic(_)) => {
+                Some((row, instance, &programs[instance.program.index()]))
+            }
+            Target::Row(_) | Target::Column(_) => None,
+        })
+        .collect();
+    let variable = |program: &Program, mode: ModeValue| LawName {
+        owner: program.law.owner,
+        local: mode.variable,
+    };
+    let mut variables: Vec<LawName> = (algebraic.iter())
+        .filter_map(|&(_, _, program)| match program.code.predicate {
+            Predicate::EveryMode => None,
+            Predicate::Only(mode) => Some(variable(program, mode)),
+        })
+        .collect();
+    variables.sort_unstable();
+    variables.dedup();
+    let values: Vec<&[&'static str]> = (variables.iter())
+        .map(|name| {
+            modes[modes.partition_point(|mode| mode.variable < *name)]
+                .values
+                .as_slice()
+        })
+        .collect();
+    let mut chosen = vec![0; variables.len()];
+    loop {
+        let holds = |program: &Program| match program.code.predicate {
+            Predicate::EveryMode => true,
+            Predicate::Only(mode) => {
+                let at = variables.partition_point(|name| *name < variable(program, mode));
+                values[at][chosen[at]] == mode.value
+            }
+        };
+        let mut reads: Vec<Vec<UnknownId>> = vec![Vec::new(); rows.len()];
+        for &(row, instance, _) in algebraic.iter().filter(|&&(_, _, program)| holds(program)) {
+            reads[row.index()].extend(instance.inputs.iter().filter_map(|input| match *input {
+                Bound::Unknown(unknown) => Some(unknown),
+                Bound::Parameter(_) | Bound::Boundary(_) => None,
+            }));
+        }
+        solved_by(rows, &reads)?;
+        let Some(at) = (0..chosen.len())
+            .rev()
+            .find(|&at| chosen[at] + 1 < values[at].len())
+        else {
+            return Ok(());
+        };
+        chosen[at] += 1;
+        chosen[at + 1..].fill(0);
+    }
+}
+
 fn augment(adjacency: &[Vec<usize>], row: usize, seen: &mut [bool], matched: &mut [Option<usize>]) -> bool {
     for &unknown in &adjacency[row] {
         if seen[unknown] {
@@ -895,16 +961,17 @@ fn blocks(solved_by: &[RowId], reads: &[Vec<UnknownId>], rates: &[Vec<RateClass>
 fn modes(fragments: &[FragmentData]) -> Vec<ModeLayout> {
     let mut modes: Vec<ModeLayout> = (fragments.iter())
         .flat_map(|fragment| {
-            fragment
-                .modes
-                .iter()
-                .map(|ModeDeclaration { name, values }| ModeLayout {
+            fragment.modes.iter().map(|ModeDeclaration { name, values }| {
+                let mut values = values.clone();
+                values.sort_unstable();
+                ModeLayout {
                     variable: LawName {
                         owner: fragment.owner,
                         local: name,
                     },
-                    values: values.clone(),
-                })
+                    values,
+                }
+            })
         })
         .collect();
     modes.sort_by_key(|mode| mode.variable);

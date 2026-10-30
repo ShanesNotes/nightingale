@@ -2029,8 +2029,8 @@ def compile_fail_codes(
                     lines[n - 1] = m.group(1) + m.group(2) + ",".join(kept)
             (tree / rel).write_text("\n".join(lines), encoding="utf-8")
         r = subprocess.run(
-            ["cargo", "test", "--doc", "--locked", *(a for p in packages for a in ("-p", p)), "--target-dir",
-             str(base / "target")],
+            ["cargo", "test", "--doc", "--locked", "--no-fail-fast", *(a for p in packages for a in ("-p", p)),
+             "--target-dir", str(base / "target")],
             cwd=tree / cwd,
             env={**os.environ, "RUSTFLAGS": "", "RUSTDOCFLAGS": ""},
             stdout=subprocess.PIPE,

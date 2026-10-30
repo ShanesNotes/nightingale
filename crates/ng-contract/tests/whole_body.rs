@@ -627,3 +627,77 @@ fn a_guard_that_reads_a_volume_needs_the_schemas_partial_volume() -> Result<(), 
     volume_guard(true)?;
     Ok(())
 }
+
+/// `q`'s residual reads `q` only while the switch is on, so while it is off nothing determines `q`,
+/// though across both modes together every residual has an unknown of its own.
+fn singular_while_off() -> Result<CompiledBody, AdmissionError> {
+    assemble(schema()?, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let level = laws.parameter::<Pressure>(ParameterKey::new("ns.level"), Admissible::finite());
+        let p = laws.algebraic::<Pressure>("p", Admissible::finite());
+        let q = laws.algebraic::<Pressure>("q", Admissible::finite());
+        let [off, on] = laws.modes("switch", ["off", "on"]);
+        let closes_p = laws.kernel(|mut k| {
+            let p = k.algebraic(&p);
+            let level = k.parameter(&level);
+            let gap = k.subtract(p, level);
+            k.finish(gap, laws.every_mode(), wave)
+        });
+        let off_reads_p = laws.kernel(|mut k| {
+            let p = k.algebraic(&p);
+            let level = k.parameter(&level);
+            let gap = k.subtract(p, level);
+            k.finish(gap, off.only(), wave)
+        });
+        let on_reads_q = laws.kernel(|mut k| {
+            let q = k.algebraic(&q);
+            let level = k.parameter(&level);
+            let gap = k.subtract(q, level);
+            k.finish(gap, on.only(), wave)
+        });
+        laws.residual(&p, closes_p);
+        laws.residual(&q, off_reads_p);
+        laws.residual(&q, on_reads_q);
+        body.add(laws.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn a_mode_in_which_a_residual_reads_no_unknown_of_its_own_is_structurally_singular() {
+    assert_eq!(
+        singular_while_off().map(|compiled| compiled.model_hash()),
+        Err(AdmissionError::Compile(CompileDefect::StructuralSingularity {
+            law: named("q")
+        }))
+    );
+}
+
+#[test]
+fn an_uncovered_mode_is_named_by_its_least_value_whatever_the_declared_order() -> Result<(), AdmissionError> {
+    let refused = assemble(schema()?, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let reflex = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let filter = laws.state::<Dimensionless>("filter", Admissible::unit_interval());
+        let [_c, b, _a] = laws.modes("phase", ["c", "b", "a"]);
+        let still = laws.kernel(|mut k| {
+            let zero = k.zero::<Rate<Dimensionless>>();
+            k.finish(zero, b.only(), reflex)
+        });
+        laws.memory_rate(&filter, still);
+        body.add(laws.finish());
+        body.compile()
+    });
+    assert_eq!(
+        refused.map(|compiled| compiled.model_hash()),
+        Err(AdmissionError::Compile(CompileDefect::UncoveredMode {
+            law: named("filter"),
+            mode: ModeValue {
+                variable: "phase",
+                value: "a"
+            }
+        }))
+    );
+    Ok(())
+}

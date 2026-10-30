@@ -223,7 +223,13 @@ fn reflexes(
             pressure,
         )
     };
-    let [on, off] = laws.modes("switch", ["on", "off"]);
+    let (on, off) = if order == Order::Forward {
+        let [on, off] = laws.modes("switch", ["on", "off"]);
+        (on, off)
+    } else {
+        let [off, on] = laws.modes("switch", ["off", "on"]);
+        (on, off)
+    };
     let gate = laws.state::<Dimensionless>("gate", Admissible::unit_interval());
     let relax = laws.kernel(|mut k| {
         let reference = k.state(&set_point);
