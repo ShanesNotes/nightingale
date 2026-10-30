@@ -17,8 +17,6 @@ use crate::{
     ModeValue, Network, Owner, ParameterKey, Predicate, RateClass, Schema, Space, Water,
 };
 
-/// Checks that need no layout run before the body is laid out, so a body with one defect is refused
-/// for that defect alone.
 pub(crate) fn compile(
     schema: Schema,
     issued: Vec<&'static str>,
@@ -77,8 +75,6 @@ fn check_fragments(
         .try_for_each(|fragment| check_names(fragment, schema))
 }
 
-/// Slots, mode variables, route families and, for the boundary, the schema's boundaries share one
-/// namespace per owner, so a law's name names one law.
 fn check_names(fragment: &FragmentData, schema: &Schema) -> Result<(), CompileDefect> {
     let named = |local| LawName {
         owner: fragment.owner,
@@ -134,7 +130,6 @@ fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
     }
 }
 
-/// Every parameter declaration, one per key: an identical repeat is the same parameter.
 fn declarations(fragments: &[FragmentData]) -> Result<Vec<&ParameterDeclaration>, CompileDefect> {
     let mut all: Vec<&ParameterDeclaration> = fragments
         .iter()
@@ -154,7 +149,6 @@ fn declarations(fragments: &[FragmentData]) -> Result<Vec<&ParameterDeclaration>
     Ok(all)
 }
 
-/// What a fragment owes and the laws it attached to it, by predicate.
 struct Owed<'f> {
     name: LawName,
     fragment: &'f FragmentData,
@@ -168,8 +162,6 @@ enum Serves<'f> {
     Boundary(&'f WaterBoundary),
 }
 
-/// Every slot and requested route family, and every schema boundary, which the boundary owes whether
-/// or not its scope was issued.
 fn obligations<'f>(
     fragments: &'f [FragmentData],
     schema: &'f Schema,
@@ -235,8 +227,6 @@ impl<'f> Owed<'f> {
         }
     }
 
-    /// Exactly one law holds in each mode: none at all is an omitted law, two holding together is a
-    /// second owner, and a value of the row's variable that no law holds in is uncovered.
     fn check_coverage(&self) -> Result<(), CompileDefect> {
         let law = self.name;
         let Some(&(_, first)) = self.laws.first() else {
@@ -301,7 +291,6 @@ fn predicate(fragment: &FragmentData, selector: Selector) -> Predicate {
     }
 }
 
-/// A guard fires on leaving a value, so its zero kernel must hold throughout that value.
 fn check_guards(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     let holds = |guard: &GuardDeclaration| match guard.zero.modes {
         Selector::Every => true,
@@ -332,7 +321,6 @@ fn check_guards(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     Ok(())
 }
 
-/// A guard is named by its mode variable.
 fn check_volume(schema: &Schema, owed: &[Owed], fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     if schema.partial_volume.is_some() {
         return Ok(());
@@ -355,8 +343,6 @@ fn check_volume(schema: &Schema, owed: &[Owed], fragments: &[FragmentData]) -> R
     }
 }
 
-/// The equation layout: every registry pool whose space the schema does not leave out, in registry
-/// order, then memory rows and then algebraic rows, each by law name. Row `i`'s unknown is `i`.
 struct Rows {
     rows: Vec<Row>,
     amounts: Vec<PoolRef>,
@@ -419,7 +405,6 @@ impl Rows {
             slots: index,
         }
     }
-    /// `None` when the schema leaves the pool's space out.
     fn amount(&self, pool: PoolRef) -> Option<usize> {
         self.amounts.binary_search(&pool).ok()
     }
@@ -428,7 +413,6 @@ impl Rows {
     }
 }
 
-/// Where each instance of a route family applies and the two pools it joins.
 struct Reach {
     context: Context,
     ends: [PoolRef; 2],
@@ -484,7 +468,6 @@ struct Placement {
     programs: Vec<Program>,
     instances: Vec<Placed>,
 }
-/// A program instance before the parameter layout exists.
 struct Placed {
     program: ProgramId,
     context: Context,
@@ -551,7 +534,6 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
     Ok(placement)
 }
 
-/// With both ends in one pool a transfer moves nothing.
 fn column(law: LawName, reach: &Reach, rows: &Rows) -> Result<Column, CompileDefect> {
     let [from, to] = reach.ends;
     let mut terms = Vec::new();
@@ -570,7 +552,6 @@ fn column(law: LawName, reach: &Reach, rows: &Rows) -> Result<Column, CompileDef
     })
 }
 
-/// A boundary transfer moves its pool, and its receipt takes the opposite.
 fn exterior(law: LawName, water: &WaterBoundary, rows: &Rows) -> Result<Column, CompileDefect> {
     let row = rows.amount(water.pool).ok_or(left_out(law, water.pool))?;
     let coefficient = match water.direction {
@@ -596,7 +577,6 @@ fn left_out(law: LawName, pool: PoolRef) -> CompileDefect {
     }
 }
 
-/// `predicate` is the kernel's mode selector already named; its id only finds its validity ranges.
 fn code(fragment: &FragmentData, predicate: Predicate, kernel: &KernelData) -> Code {
     let KernelData {
         id,
@@ -619,7 +599,6 @@ fn code(fragment: &FragmentData, predicate: Predicate, kernel: &KernelData) -> C
     }
 }
 
-/// What each input instruction of `kernel` reads at `context`, in instruction order.
 fn addresses(
     law: LawName,
     kernel: &KernelData,
@@ -717,7 +696,6 @@ fn guards(
     Ok(guards)
 }
 
-/// The parameter layout, one slot per key and binding in that order, and every input bound to it.
 fn bind(
     placed: Vec<Placed>,
     guards: Vec<(GuardLayout, Vec<Address>)>,
@@ -797,8 +775,6 @@ fn bind(
     (parameters, instances, guards)
 }
 
-/// An amount's row reads what every column moving it reads; a differential row also reads its own
-/// unknown.
 fn reads(
     rows: &[Row],
     columns: &[Column],
@@ -845,8 +821,6 @@ fn sparsity(reads: Vec<Vec<UnknownId>>) -> Sparsity {
     }
 }
 
-/// The row that determines each unknown: a differential row its own unknown, an algebraic row the
-/// unknown a structural matching pairs it with (Kuhn's augmenting paths, rows in order).
 fn solve_order(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<usize>, CompileDefect> {
     let algebraic: Vec<LawName> = (rows.iter())
         .filter_map(|row| match row.kind {
@@ -895,9 +869,6 @@ fn augment(adjacency: &[Vec<usize>], row: usize, seen: &mut [bool], matched: &mu
     false
 }
 
-/// Strongly connected parts of the graph from each row to the rows that determine what it reads.
-/// Tarjan's algorithm numbers a part only after every part it reaches, so ascending numbers put each
-/// block after the blocks it depends on.
 fn blocks(solved_by: &[usize], reads: &[Vec<UnknownId>], rates: &[Vec<RateClass>]) -> Vec<Block> {
     let edges: Vec<(usize, usize)> = (reads.iter().enumerate())
         .flat_map(|(row, read)| read.iter().map(move |unknown| (row, solved_by[unknown.index()])))

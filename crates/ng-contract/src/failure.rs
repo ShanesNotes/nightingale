@@ -6,7 +6,6 @@ pub enum AdmissionError {
     NonFinite,
     Anatomy(AnatomyDefect),
     Compile(CompileDefect),
-    /// A second scope for an owner this assembly already issued one to.
     ScopeIssuedTwice {
         owner: &'static str,
     },
@@ -16,16 +15,13 @@ pub enum AdmissionError {
         to: ModeValue,
     },
     ZeroRateInterval,
-    /// A validity range whose lower bound is above its upper bound.
     ReversedValidityRange,
     NonPositivePartialVolume,
     /// A second partial-volume coefficient that differs from the first.
     PartialVolumeTwice,
-    /// A second water boundary under a name the schema already declares.
     BoundaryNamedTwice {
         name: &'static str,
     },
-    /// A boundary port asked for a name the schema does not declare.
     UnknownBoundary {
         name: &'static str,
     },
@@ -60,7 +56,7 @@ pub enum CompileDefect {
     GuardOutsideMode { variable: LawName, leaves: &'static str },
     /// A scope this assembly issued whose fragment was never added.
     MissingFragment { owner: &'static str },
-    /// Two slots, mode variables or route families under one name in one owner.
+    /// Two slots, mode variables, route families or schema boundaries under one name in one owner.
     NamedTwice { law: LawName },
     /// One parameter key declared with two dimensions, contexts or admissible sets.
     ParameterConflict { key: ParameterKey },
@@ -77,7 +73,8 @@ pub enum CompileDefect {
         site: SiteId,
         space: Space,
     },
-    /// A law that reads a volume when the schema declares no partial-volume coefficient.
+    /// A law or a guard that reads a volume when the schema declares no partial-volume coefficient. A
+    /// guard is named by its mode variable.
     MissingPartialVolume { law: LawName },
     /// A water boundary at a space its site does not have, or at a site the anatomy does not declare.
     BoundaryEndpoint { law: LawName },

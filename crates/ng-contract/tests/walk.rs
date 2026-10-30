@@ -1,8 +1,7 @@
 use ng_contract::*;
 
 // The signature walk (docs/architecture/solver-contract-sketch/src/signature_walk.rs): step 0 with only
-// the crate path changed, then steps 1, 1b, 1d and 2 on this ticket's scopes, each change marked with
-// the ticket that restores it.
+// the crate path changed, then steps 1, 1b, 1d and 2, each change marked with the ticket that restores it.
 fn anatomy() -> Result<Schema, AdmissionError> {
     let at = |axial: f64| -> Result<Position, AdmissionError> {
         // synthetic heights
@@ -45,8 +44,6 @@ fn anatomy() -> Result<Schema, AdmissionError> {
     Schema::new(map.finish()?)
 }
 
-// 1. Graph construction: NS compares a stretch with a set point that drifts slowly, and relaxes a
-// filter toward the saturating response.
 fn baroreflex<'b>(scope: NervousScope<'b>) -> Result<Fragment<'b, Nervous>, AdmissionError> {
     let (mut laws, _transmitters) = scope.parts();
     // 09 restores the catalog's carotid sinus stretch; a fixture parameter stands in for it.
@@ -81,7 +78,6 @@ fn baroreflex<'b>(scope: NervousScope<'b>) -> Result<Fragment<'b, Nervous>, Admi
         let rate = k.relax(target, current, speed);
         k.finish(rate, laws.every_mode(), slow)
     });
-    // Where the filter law is trusted: leaving it is reported on the receipt, never refused.
     let trusted = ValidityRange::new(
         Measure::new(-1.0)?,
         Measure::new(1.0)?,
@@ -93,8 +89,6 @@ fn baroreflex<'b>(scope: NervousScope<'b>) -> Result<Fragment<'b, Nervous>, Admi
     Ok(laws.finish())
 }
 
-// 1b. A mode and its guards: a valve opens when chamber pressure rises past its outflow and shuts
-// when it falls back. Each guard is a kernel that holds in the mode it leaves.
 fn valve<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardiovascular>, AdmissionError> {
     let (mut laws, ports) = scope.parts();
     let wave = || RateClass::new(RateBand::Wave, 1_000_000);
@@ -130,8 +124,6 @@ fn valve<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardiovascul
         });
         laws.residual(slot, residual);
     }
-    // Every requested route owes a law in every mode, so the valve's edge flows: open, and an
-    // explicit zero when shut.
     let route = ports.circulation(&mut laws);
     let class = wave()?;
     let flow = laws.edge_kernel(|mut k| {
@@ -152,8 +144,6 @@ fn valve<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardiovascul
     Ok(laws.finish())
 }
 
-// 1d. One law for every capillary bed: Starling filtration declared once for the class and read at
-// each bed's own pressures.
 fn starling<'b>(scope: FluidsScope<'b>) -> Result<Fragment<'b, Fluids>, AdmissionError> {
     let (mut laws, ports) = scope.parts();
     let route = ports.starling(&mut laws);
@@ -186,11 +176,11 @@ fn starling<'b>(scope: FluidsScope<'b>) -> Result<Fragment<'b, Fluids>, Admissio
     Ok(laws.finish())
 }
 
-// 2. Compile: organ crates return fragments. 09 adds the held stand-ins and 10 the renal, receptor
-// and boundary fragments; until then the bench leaves out the spaces no law here moves.
+// 09 adds the held stand-ins and 10 the renal, receptor and boundary fragments; until then the bench
+// leaves out the spaces no law here moves.
 fn compile() -> Result<CompiledBody, AdmissionError> {
     let mut schema = anatomy()?;
-    schema.partial_volume(Measure::new(1.0)?)?; // synthetic coefficient
+    schema.partial_volume(Measure::new(1.0)?)?;
     schema.leave_out(Space::Cells, "no cell-water law before 10");
     schema.leave_out(Space::Fluid, "no pleural law before 10");
     assemble(schema, |mut body| {

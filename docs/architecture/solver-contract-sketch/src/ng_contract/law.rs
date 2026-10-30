@@ -23,7 +23,7 @@ pub struct Endpoint<'b, O, Q> {
     _kind: PhantomData<(O, Q)>,
 }
 /// Same species and dimension at both ends, including an explicitly named exterior endpoint. Only a
-/// scope grants one; there is no constructor, so no law assembles a pair from loose endpoints.
+/// scope grants one, so no law assembles a pair from loose endpoints.
 pub struct Pair<'b, O, Q> {
     _from: Endpoint<'b, O, Q>,
     _to: Endpoint<'b, O, Q>,

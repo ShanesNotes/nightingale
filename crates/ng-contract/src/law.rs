@@ -64,17 +64,12 @@ pub enum RateBand {
 
 /// The context of a kernel declared once for the whole body.
 pub enum Body {}
-/// The context of a kernel declared once for every vascular edge: a relation, not a seventh site
-/// class.
+/// The context of a kernel declared once for every vascular edge.
 pub enum VascularEdge {}
 
-/// A route family: one transfer per site of a class, or per edge of a network, which a scope's port
-/// requests whole. No law names a site.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Family {
-    /// Along every vascular edge, from the upstream site's vascular space to the downstream site's.
     Circulation,
-    /// At every capillary bed, from plasma to interstitium.
     Starling,
 }
 impl Family {
@@ -91,7 +86,6 @@ pub(crate) enum End {
     To,
 }
 
-/// One instruction of instruction set v1. Operands index earlier instructions of the same graph.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Op {
     Input(Input),
@@ -112,8 +106,6 @@ pub(crate) enum Op {
     ConductanceFlow([usize; 2]),
     Volume([usize; 1]),
 }
-/// What an input instruction reads, by its declared name, so a graph's meaning never depends on
-/// declaration order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Input {
     Parameter(ParameterKey),
@@ -222,8 +214,6 @@ impl Seal for Input {
     }
 }
 
-/// The graph reachable from `result`, operands before their users and `result` last. Operand order
-/// is kept, so `a + b` and `b + a` stay distinct and floating arithmetic is never reassociated.
 fn reachable(code: &[Op], result: usize) -> Vec<Op> {
     fn place(code: &[Op], at: usize, placed: &mut [Option<usize>], out: &mut Vec<Op>) -> usize {
         if let Some(done) = placed[at] {
@@ -411,8 +401,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     ) -> Expr<'b, 'k, O, Rate<Q>> {
         self.push(Op::ConductanceFlow([conductance.at, head.at]))
     }
-    /// Closes the graph. The result takes no admissible set: a refusal set belongs to a slot, never
-    /// to a computed expression.
+    /// The result takes no admissible set: a refusal set belongs to a slot, never to a computed expression.
     pub fn finish<U: Dimension>(
         self,
         value: Expr<'b, 'k, O, U>,
@@ -432,7 +421,6 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
 }
 
 impl<'b, 'k, O, C: SiteClass> Kernel<'b, 'k, O, C> {
-    /// This site's entry.
     pub fn at_site<U: Dimension>(&mut self, port: &ReadPort<'b, O, PerSite<C, U>>) -> Expr<'b, 'k, O, U> {
         self.input(port.source.input())
     }
@@ -445,7 +433,6 @@ impl<'b, 'k, O, C: SiteClass> Kernel<'b, 'k, O, C> {
     }
 }
 impl<'b, 'k, O> Kernel<'b, 'k, O, VascularEdge> {
-    /// This edge's entry.
     pub fn at_edge<U: Dimension>(&mut self, port: &ReadPort<'b, O, PerEdge<U>>) -> Expr<'b, 'k, O, U> {
         self.input(port.source.input())
     }
@@ -547,7 +534,6 @@ impl<'b, O, Q> EdgeRoute<'b, O, Q> {
     }
 }
 
-/// One end of a pair. No law builds or holds one alone: a transfer takes the whole pair.
 pub struct Endpoint<'b, O, Q> {
     brand: Brand<'b>,
     kind: PhantomData<(O, Q)>,
@@ -931,7 +917,6 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     pub fn transfer<Q>(&mut self, transfer: Transfer<'b, O, Q>) {
         self.attach(Obligation::Boundary(transfer.boundary), transfer.rate.data);
     }
-    /// Records that the fragment owes a law for every instance of `family`, before any law exists.
     pub(crate) fn request(&mut self, family: Family) {
         if !self.data.families.contains(&family) {
             self.data.families.push(family);

@@ -29,7 +29,6 @@ macro_rules! index {
     )*};
 }
 index!(
-    /// A row of the compiled body: an amount's balance, a memory's rate or an algebraic residual.
     RowId,
     /// An unknown: row `i`'s own coordinate has index `i`.
     UnknownId,
@@ -171,7 +170,7 @@ impl Seal for Row {
         dimension.seal(out);
     }
 }
-/// What a row balances. An amount's row sums the columns that move it, so no law owns an amount.
+/// An amount's row sums the columns that move it, so no law owns an amount.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RowKind {
     Amount { site: SiteId, space: Space },
@@ -355,7 +354,7 @@ impl Seal for Target {
     }
 }
 
-/// A program applied in one context, with what each of its inputs reads there.
+/// A program applied in one context.
 #[derive(Debug, PartialEq)]
 pub struct Instance {
     pub(crate) program: ProgramId,
@@ -395,12 +394,10 @@ impl Seal for Instance {
         inputs.seal(out);
     }
 }
-/// What one input instruction of a program reads at one instance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Bound {
     Parameter(ParameterId),
     Unknown(UnknownId),
-    /// The drive of the schema's boundary at this position in name order.
     Boundary(usize),
 }
 impl Seal for Bound {

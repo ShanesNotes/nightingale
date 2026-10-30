@@ -16,7 +16,6 @@ pub struct Schema {
     pub(crate) partial_volume: Option<Measure<PartialVolume<Water>>>,
     pub(crate) left_out: Vec<(Space, &'static str)>,
 }
-/// A named route by which water crosses the body's boundary at one pool, in order of name.
 #[derive(Clone, Copy)]
 pub(crate) struct WaterBoundary {
     pub(crate) name: &'static str,
@@ -133,7 +132,6 @@ impl Seal for Schema {
     }
 }
 
-/// The registry's handle on one pool. Private: no law can name or hold a pool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct PoolRef {
     pub(crate) site: SiteId,

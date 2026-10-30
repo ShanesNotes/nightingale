@@ -1,13 +1,11 @@
 use ng_contract::*;
 
-/// The same declarations made in two orders.
 #[derive(Clone, Copy, PartialEq)]
 enum Order {
     Forward,
     Backward,
 }
 
-/// One change to the body that must change its model hash.
 #[derive(Clone, Copy, PartialEq)]
 enum Change {
     None,
@@ -27,9 +25,6 @@ fn position(axial: f64) -> Result<Position, AdmissionError> {
     ))
 }
 
-/// A vessel and two beds on one loop with water flowing in at the vessel: circulation, Starling
-/// filtration, the inflow and a nervous fragment with memory, a set point, modes, a guard and an
-/// algebraic row. Every value is synthetic.
 fn schema(order: Order, change: Change) -> Result<Schema, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let shift = if change == Change::Anatomy { 1.0 } else { 0.0 };
@@ -76,7 +71,6 @@ enum End {
     Downstream,
 }
 
-/// One end's pressure: its own elastance times the volume of the water it holds.
 fn pressure<'b, 'k>(
     k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>,
     route: &EdgeRoute<'b, Cardiovascular, Water>,
@@ -398,7 +392,6 @@ fn the_refusal_named_does_not_depend_on_fragment_order() -> Result<(), Admission
     Ok(())
 }
 
-/// Two memory slots whose rate laws are the same zero kernel, with a validity range on one of them.
 fn twins(range_on_first: bool, first_built_first: bool) -> Result<ModelHash, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", position(0.0)?);

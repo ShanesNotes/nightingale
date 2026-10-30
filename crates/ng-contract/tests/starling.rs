@@ -16,8 +16,6 @@ struct Beds {
     space: SiteId,
 }
 
-/// Two beds in series on a vessel loop, an enclosure around the second bed, a junction and a nerve
-/// segment. Eight water pools; the Starling law moves the four plasma and interstitium pools.
 fn beds() -> Result<Beds, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at()?);
@@ -58,8 +56,6 @@ enum Defect {
     ParameterInTwoContexts,
 }
 
-/// Starling filtration declared once for capillary beds, read at each bed's own amounts. The schema
-/// leaves out the cells, the lumen and the enclosure fluid, which no law here moves.
 fn starling(defect: Defect) -> Result<CompiledBody, AdmissionError> {
     let mut schema = beds()?.schema;
     if defect != Defect::NoPartialVolume {
@@ -141,7 +137,6 @@ fn compile_refusal(defect: Defect) -> CompileDefect {
     }
 }
 
-/// Column `c`'s coefficient on row `r`, zero where the column has no term.
 fn incidence(compiled: &CompiledBody) -> Vec<Vec<i64>> {
     let amounts = (compiled.rows().iter())
         .take_while(|row| matches!(row.kind(), RowKind::Amount { .. }))
@@ -197,9 +192,7 @@ fn the_starling_law_has_the_hand_derived_incidence_and_basis() -> Result<(), Adm
         columns,
         [(starling, Context::Site(a)), (starling, Context::Site(b))]
     );
-    // Each bed's filtration takes from its plasma and gives to its interstitium.
     assert_eq!(incidence(&compiled), [[-1, 0], [1, 0], [0, -1], [0, 1]]);
-    // Water in each bed's plasma and interstitium together is what no transfer here changes.
     assert_eq!(
         basis(&compiled),
         [
@@ -405,7 +398,6 @@ fn a_second_partial_volume_must_repeat_the_first() -> Result<(), AdmissionError>
     Ok(())
 }
 
-/// The Starling route with a law that reads neither end, so only its move reaches a left-out pool.
 fn unread(left_out: Space) -> Result<CompiledBody, AdmissionError> {
     let mut schema = beds()?.schema;
     schema.partial_volume(Measure::new(1.0)?)?;
@@ -446,7 +438,6 @@ fn a_law_that_moves_a_left_out_pool_without_reading_it_is_refused() -> Result<()
     Ok(())
 }
 
-/// One vessel whose vascular edge returns to itself: the circulation column's two ends are one pool.
 fn looped(lumen: Option<&'static str>, reads_amount: bool) -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at()?);

@@ -26,9 +26,6 @@ struct Reservoirs {
     compiled: Result<CompiledBody, AdmissionError>,
 }
 
-/// Two vessel segments joined by one vascular edge `a -> b`, with water flowing in at `a`'s lumen.
-/// One law moves water along the edge by the pressure difference of its two ends, each end's pressure
-/// its own elastance times its volume; the inflow takes the boundary's drive.
 fn reservoirs(defect: Defect) -> Result<Reservoirs, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at()?);
@@ -149,8 +146,6 @@ fn the_two_reservoir_body_has_the_hand_derived_incidence_and_basis() -> Result<(
     let kinds: Vec<RowKind> = compiled.rows().iter().map(Row::kind).collect();
     assert_eq!(kinds, [lumen(a), lumen(b)]);
     assert_eq!(compiled.columns().len(), 2);
-    // The circulation takes from a and gives to b; the inflow gives to a, and its receipt outside the
-    // body takes the opposite, so no amount row is ever negative for the exterior.
     let circulation = column(&compiled, law("CV", "circulation"));
     assert_eq!(circulation.context(), Context::Edge { from: a, to: b });
     assert_eq!(coefficients(circulation, 2), [-1, 1]);
@@ -162,8 +157,6 @@ fn the_two_reservoir_body_has_the_hand_derived_incidence_and_basis() -> Result<(
         .receipt()
         .map(|receipt| (receipt.boundary(), receipt.coefficient()));
     assert_eq!(receipt, Some(("inflow", -1)));
-    // Total water is the one conserved combination: the circulation keeps it, the inflow changes it
-    // only through its receipt.
     let basis: Vec<(Book, Vec<(usize, i64)>)> = (compiled.conserved_basis().combinations().iter())
         .map(|combination| {
             let terms = combination
@@ -290,7 +283,6 @@ enum Reads {
     Downstream,
 }
 
-/// The two reservoirs without the inflow, and an edge law that reads the elastance at one end only.
 fn one_end(reads: Reads) -> Result<(SiteId, SiteId, CompiledBody), AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at()?);

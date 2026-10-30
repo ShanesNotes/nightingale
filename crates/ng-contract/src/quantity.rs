@@ -156,9 +156,8 @@ impl<U> Measure<U> {
     }
 }
 
-/// Where a value is mathematically admissible, the only set a trial is refused against. No
-/// constructor takes bounds, so a healthy range cannot become a refusal rule and a deteriorating
-/// patient keeps publishing; where a law is trusted is a `ValidityRange`, which only reports.
+/// Where a value is mathematically admissible, the only set a trial is refused against. Where a law
+/// is trusted is a `ValidityRange`, which only reports.
 pub struct Admissible<U> {
     set: AdmissibleSet,
     unit: PhantomData<U>,
@@ -183,7 +182,6 @@ impl<U> Admissible<U> {
     pub fn nonnegative() -> Self {
         Self::of(AdmissibleSet::Nonnegative)
     }
-    /// For what a law divides by or takes the logarithm of.
     pub fn positive() -> Self {
         Self::of(AdmissibleSet::Positive)
     }

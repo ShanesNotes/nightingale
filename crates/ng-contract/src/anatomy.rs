@@ -11,7 +11,6 @@ macro_rules! site_classes {
             pub trait SiteClass {
                 const CLASS: Class;
             }
-            /// A site class as a value, for what a compiled body names by class.
             #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
             pub enum Class {
                 $($name),*
@@ -642,7 +641,6 @@ impl Anatomy {
         self.sites.iter().map(|site| site.id)
     }
 
-    /// Each vascular edge once, by its ends' keys.
     pub(crate) fn vascular(&self) -> impl Iterator<Item = (SiteId, SiteId)> + '_ {
         (self.vascular.iter()).map(|&(from, to)| (self.sites[from].id, self.sites[to].id))
     }

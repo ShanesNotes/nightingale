@@ -7,7 +7,6 @@ fn schema() -> Result<Schema, AdmissionError> {
     Schema::new(map.finish()?)
 }
 
-/// The one defect a test adds to the valid body.
 #[derive(Clone, Copy, PartialEq)]
 enum Defect {
     None,
@@ -33,8 +32,6 @@ enum Defect {
     ReversedValidityRange,
 }
 
-/// A filter relaxing toward a parameter, a gate with one law per value of a switch, a guard leaving
-/// `on`, and a pressure closed by its residual. Every value is synthetic.
 fn body(defect: Defect) -> Result<CompiledBody, AdmissionError> {
     assemble(schema()?, |mut body| {
         let (mut laws, _ports) = body.nervous()?.parts();

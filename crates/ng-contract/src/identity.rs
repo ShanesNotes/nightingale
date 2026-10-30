@@ -111,8 +111,6 @@ impl Canonical {
     }
 }
 
-/// Writes a value's canonical bytes. A sequence writes its length first, so no two values share an
-/// encoding.
 pub(crate) trait Seal {
     fn seal(&self, out: &mut Canonical);
 }
