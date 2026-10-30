@@ -2271,8 +2271,11 @@ fn newton_solves_an_algebraic_row_to_rounding_on_a_short_step() {
 
 #[test]
 fn newton_reads_the_stage_its_last_update_reaches() {
-    // From `x = 1` the root of 16 takes all eight updates.
-    newton_reaches_the_root(15.0, SECOND);
+    // From `x = 1` each of these roots takes all eight updates. Some square back to their target exactly and
+    // stop on a zero residual, so only the run of them shows the last update is read.
+    for rate in 15..36 {
+        newton_reaches_the_root(f64::from(rate), SECOND);
+    }
 }
 
 #[test]
