@@ -1,4 +1,3 @@
-//! No time step enters a kernel: a stage time is an exact integer offset inside a ticketed interval.
 use crate::body::UnknownId;
 use crate::boundary::DriveFrame;
 use crate::evaluate::{Inputs, Undefined};
@@ -222,7 +221,7 @@ impl StepTicket {
         })
     }
     /// A refusal of this attempt, or the fault `NoAdmissibleStep` when its retry would go below the floor
-    /// or past the budget. One path, so nothing can accept excess error at the floor.
+    /// or past the budget.
     pub fn refuse(&self, reason: NumericalRefusal) -> TrialFailure {
         let retry_ns = self.length_ns() / 2;
         let at = self.interval.start();
@@ -260,7 +259,7 @@ impl StepTicket {
     }
 }
 
-/// An offset inside one ticket. It borrows the ticket, so `evaluate` can refuse with only a point in hand.
+/// An offset inside one ticket.
 #[derive(Clone, Copy)]
 pub struct StageTime<'t> {
     pub(crate) ticket: &'t StepTicket,

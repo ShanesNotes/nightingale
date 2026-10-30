@@ -1,4 +1,3 @@
-//! The accuracy gate: a core against known answers, because a step can close every ledger and be wrong.
 use crate::TwoReservoirs;
 use crate::run::advance;
 use ng_contract::{
@@ -7,8 +6,7 @@ use ng_contract::{
 };
 use ng_record::{Curve, HistorySegment, PatientRecord};
 
-/// A manufactured case with a closed form. Ticket 11 adds the drain, zero-flow, removal, independence and
-/// slice cases, the last against the reference integrator on a body it is handed.
+/// A manufactured case with a closed form.
 pub enum AccuracyCase {
     TwoReservoir(TwoReservoirs),
 }
@@ -23,8 +21,7 @@ pub struct AccuracyPolicy {
     digest: Digest,
 }
 impl AccuracyPolicy {
-    /// Refuses a zero grid, no case and a case that ends where it starts, which would pass by never
-    /// stepping.
+    /// Refuses a zero grid, no case and a case that ends where it starts.
     pub fn new(
         cases: Vec<AccuracyCase>,
         absolute: Measure<Water>,
@@ -81,7 +78,7 @@ pub enum AccuracyFailure {
         at: SimTime,
         error: Compensated,
     },
-    /// The core could not finish the case. A must-fail core that reaches this has not failed on accuracy.
+    /// The core could not finish the case.
     Faulted(EngineFault),
     Admission(InitializationFailure),
     /// Adjacent refinements' errors are outside the band.
@@ -109,8 +106,6 @@ fn net_at(segment: &HistorySegment<'_>, column: ColumnId, at: SimTime) -> Compen
     reached(forward).minus(reached(reverse))
 }
 
-/// Each grid instant inside a segment, start excluded, then the segment's end, so a breakpoint is always
-/// compared.
 fn compared_instants(interval: Interval, grid_ns: u64) -> Vec<SimTime> {
     let (start, end) = (interval.start().nanoseconds(), interval.end().nanoseconds());
     let first = (start / grid_ns + 1) * grid_ns;

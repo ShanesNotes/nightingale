@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-#   tools/gate/nightly.sh <log>   0 green or already green for this commit, verify's status when red,
-#                                 2 refused (usage, a dirty tree, or HEAD is not origin/main)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 [ $# -eq 1 ] || { echo "usage: tools/gate/nightly.sh <log>" >&2; exit 2; }

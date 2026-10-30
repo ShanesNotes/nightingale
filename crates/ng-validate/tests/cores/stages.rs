@@ -3,7 +3,6 @@ use ng_contract::*;
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 
-/// Evaluates at the workspace's point with the tangent at the rates there: an explicit stage.
 pub fn explicit_stage(
     problem: &CoupledProblem<'_>,
     workspace: &mut SolveWorkspace,
@@ -17,7 +16,6 @@ pub fn explicit_stage(
     problem.evaluate(&workspace.point(time))
 }
 
-/// Forward Euler's one stage, with the workspace still at the start and its tangent at the rates there.
 pub fn euler_step(
     problem: &CoupledProblem<'_>,
     ticket: &StepTicket,
@@ -79,7 +77,6 @@ impl CoupledSolver for Heun {
     }
 }
 
-/// Both Heun stages, with the workspace at the second.
 pub fn heun_stages(
     problem: &CoupledProblem<'_>,
     ticket: &StepTicket,

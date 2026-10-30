@@ -1,5 +1,3 @@
-//! The evaluator through the public seam: hand-derived residuals and Jacobians, and derivatives against
-//! finite differences. Every number is synthetic.
 use ng_contract::*;
 
 fn at() -> Result<Position, AdmissionError> {

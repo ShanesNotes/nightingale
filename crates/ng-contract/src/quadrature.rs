@@ -112,8 +112,6 @@ pub struct Extents {
     forward: Vec<Compensated>,
     reverse: Vec<Compensated>,
 }
-/// A rate is not kept: `verify` re-evaluates each point and re-adds it, so a recorded rate is a replayed
-/// one.
 struct StageWitness {
     stages: Vec<WitnessStage>,
 }

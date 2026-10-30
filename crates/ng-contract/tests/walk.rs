@@ -4,7 +4,6 @@ use ng_contract::*;
 // the crate path changed, then steps 1, 1b, 1d and 2, each change marked with the ticket that restores it.
 fn anatomy() -> Result<Schema, AdmissionError> {
     let at = |axial: f64| -> Result<Position, AdmissionError> {
-        // synthetic heights
         Ok(Position::new(
             Measure::new(axial)?,
             Measure::new(0.0)?,
@@ -30,7 +29,7 @@ fn anatomy() -> Result<Schema, AdmissionError> {
         (glomerular.id(), peritubular.id()),
         (peritubular.id(), heart.id()),
     ] {
-        map.connect(Network::Vascular, from, to); // two beds in series, closing a loop
+        map.connect(Network::Vascular, from, to);
     }
     map.connect(Network::Vascular, heart.id(), lung.id());
     map.connect(Network::Vascular, lung.id(), heart.id());

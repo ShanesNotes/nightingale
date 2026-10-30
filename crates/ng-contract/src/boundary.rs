@@ -1,5 +1,3 @@
-//! A delivery stated at its start holds a rate until it ends, so a drive is constant over any ticket and
-//! no ticket crosses a change.
 use crate::identity::{Canonical, Seal};
 use crate::{AdmissionError, Digest, Measure, SimTime, StepTicket, Water};
 
@@ -22,8 +20,7 @@ impl Seal for InputId {
 }
 
 /// `amount` of water through the named boundary, from the event's instant until `ends`, at the constant
-/// rate that delivers it: "applied once" shows as a total received. Overlapping deliveries add. Ticket 09
-/// adds the other intake payloads beside this one.
+/// rate that delivers it: "applied once" shows as a total received. Overlapping deliveries add.
 pub struct WaterDelivery {
     pub boundary: &'static str,
     pub amount: Measure<Water>,
@@ -130,10 +127,9 @@ pub(crate) struct Plan {
     pub(crate) next_breakpoint: Option<SimTime>,
 }
 
-/// The future of the timeline and the deliveries running now: record state, checkpointed by ticket 05.
+/// The future of the timeline and the deliveries running now: record state.
 /// Applying an input moves the cursor past it and adds its delivery in one accepted image, so a refusal
-/// cannot half apply it. Its fields are private, so no core reaches the timeline, which is the causal step
-/// rule.
+/// cannot half apply it.
 pub struct PendingInputs {
     deliveries: Vec<Delivery>,
     cursor: usize,
@@ -197,9 +193,6 @@ impl PendingInputs {
     }
 }
 
-/// What the boundary supplies over one ticket, frozen when the ticket is issued. `Op::Input` reads this and
-/// never the stage's instant, so a stage at the ticket's end reads the left limit even when the next
-/// delivery starts exactly there.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct DriveFrame {
     drives: Vec<(&'static str, f64)>,

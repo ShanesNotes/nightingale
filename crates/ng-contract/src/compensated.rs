@@ -2,8 +2,7 @@ use crate::identity::{Canonical, Seal};
 use crate::{Dimensionless, Measure};
 
 /// An amount as a compensated pair: `hi` the rounded sum and `lo` what rounding left out, normalized so
-/// the derived order is the order of the exact values. It is how an amount, a cumulative exchange and a
-/// curve value cross a crate boundary, so no ledger reading is a bare number.
+/// the derived order is the order of the exact values.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct Compensated {
     hi: f64,

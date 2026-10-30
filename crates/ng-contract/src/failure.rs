@@ -31,8 +31,7 @@ pub enum AdmissionError {
     ZeroDenominator,
     /// An absolute scale that is not positive, or a relative scale below zero.
     NonPositiveScale,
-    /// A body with a mode variable: nothing fires a guard until tickets 06, 08 and 10, and a guard that
-    /// silently never fires is worse than a run that never starts.
+    /// A body with a mode variable.
     ModesNotYetRun {
         variable: LawName,
     },
@@ -247,7 +246,6 @@ impl From<EngineFault> for TrialFailure {
     }
 }
 
-/// No operation produces one until a later scope stage models it.
 pub struct Demise {
     _rhythm: ArrestRhythm,
     _injury: IrreversibleInjury,

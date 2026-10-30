@@ -10,8 +10,7 @@ fn greatest_common_divisor(mut a: u128, mut b: u128) -> u128 {
     a
 }
 
-/// An exact nonnegative fraction in lowest terms. Stage weights are ratios, so summing them to one is an
-/// integer equality with no float tolerance.
+/// An exact nonnegative fraction in lowest terms.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ratio {
     numerator: u64,
@@ -45,7 +44,6 @@ impl Ratio {
             denominator: u64::try_from(denominator / common).ok()?,
         })
     }
-    /// The exact sum, or `None` when it does not fit in lowest terms.
     pub(crate) fn plus(self, other: Self) -> Option<Self> {
         let (a, b) = (u128::from(self.numerator), u128::from(self.denominator));
         let (c, d) = (u128::from(other.numerator), u128::from(other.denominator));
@@ -93,8 +91,7 @@ fn stage(offset_ns: u64, weight: Ratio, from: Option<usize>, span_ns: u64, slope
     }
 }
 
-/// How a core's stages make its increment: one of a closed set, so no caller depends on a general tableau
-/// that only one case would test. A later general form changes this private table and no caller.
+/// How a core's stages make its increment: one of a closed set.
 #[derive(Clone, Copy)]
 pub struct StageScheme {
     method: Method,
@@ -137,7 +134,6 @@ impl StageScheme {
             }
         }
     }
-    /// The two stages whose difference is the error estimate at this length.
     pub(crate) fn estimate(self, length_ns: u64) -> Option<(usize, usize)> {
         (self.method == Method::BackwardEulerDoubled && length_ns >= 2).then_some((2, 0))
     }
@@ -168,10 +164,7 @@ impl ErrorScales {
     }
 }
 
-/// The hex of the SHA-256 of the pinned routines' bits over the fixed grid in this module's tests. A
-/// changed bit fails that test until this changes, and this enters the run identity, so a changed routine
-/// is a new profile.
-const ROUTINE_BITS: &str = "d42e4b1ce0ae507032fbce98d4721abd6a41f9f8a7766f0ee5a19ce7625d4dcf";
+const ROUTINE_BITS_SHA256: &str = "d42e4b1ce0ae507032fbce98d4721abd6a41f9f8a7766f0ee5a19ce7625d4dcf";
 
 /// The floating-point operations a run may use. Bitwise replay is promised within one profile.
 #[derive(Clone, Copy)]
@@ -181,7 +174,7 @@ pub struct ArithmeticProfile {
 impl ArithmeticProfile {
     pub fn contract_v1() -> Self {
         Self {
-            digest: Digest::of_canonical(ROUTINE_BITS.as_bytes()),
+            digest: Digest::of_canonical(ROUTINE_BITS_SHA256.as_bytes()),
         }
     }
 }
@@ -255,7 +248,6 @@ impl DeclaredResolution {
     }
 }
 
-/// The run seed. Ticket 07 keeps the patient and observation seeds apart from it.
 #[derive(Clone, Copy)]
 pub struct Seed {
     words: [u64; 4],
@@ -312,7 +304,7 @@ impl RunIdentity {
 
 #[cfg(test)]
 mod tests {
-    use super::{ROUTINE_BITS, Ratio, StageScheme};
+    use super::{ROUTINE_BITS_SHA256, Ratio, StageScheme};
     use crate::pinned::{exp, ln};
     use crate::{AdmissionError, Digest, Dimensionless, ErrorScales, Measure};
 
@@ -361,7 +353,10 @@ mod tests {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect();
-        assert_eq!(hex, ROUTINE_BITS, "a changed bit is a new ArithmeticProfile");
+        assert_eq!(
+            hex, ROUTINE_BITS_SHA256,
+            "a changed bit is a new ArithmeticProfile"
+        );
     }
 
     #[test]

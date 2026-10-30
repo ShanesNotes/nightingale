@@ -1,5 +1,3 @@
-//! A core sees the compiled body only through `CoupledProblem`, so it never sees the timeline, a pending
-//! input or a stream position.
 use crate::{CoupledProblem, DeclaredResolution, EngineFault, StepProposal, StepTicket, TrialFailure};
 
 /// An implementor holds algorithm configuration, never accepted continuation.

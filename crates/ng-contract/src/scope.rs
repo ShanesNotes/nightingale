@@ -157,8 +157,6 @@ impl Space {
     }
 }
 
-/// One composition: the scopes it issued and the fragments added to it, under a brand no other
-/// assembly shares, so declarations from two assemblies never mix.
 pub struct Assembly<'b> {
     schema: Schema,
     issued: Vec<&'static str>,

@@ -1,14 +1,12 @@
-//! The reference integrator: fully coupled backward Euler with Newton on the contract's public seam and
-//! nothing else, step doubled so its own error is read and its floor is real.
 use ng_contract::*;
 
 const NEWTON_LIMIT: u32 = 8;
 const RETRY_BUDGET: u32 = 12;
 const MILLISECOND: u64 = 1_000_000;
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
-/// Eight units in the last place. Newton stops at rounding, not at the declared scales: those say what
-/// may be accepted, and an accuracy reference must not stop early merely because it may.
-const ROUNDOFF: f64 = 1.0 / 562_949_953_421_312.0;
+/// Newton stops at rounding, not at the declared scales: those say what may be accepted, and an accuracy
+/// reference must not stop early merely because it may.
+const NEWTON_STOP: f64 = 8.0 * f64::EPSILON;
 
 /// A model default reported with every result. Measured on the two-reservoir case: the estimate reaches
 /// 4.0 on 64 s steps of amounts near 5e5, so this passes those steps and refuses much longer ones.
@@ -79,7 +77,6 @@ impl CoupledSolver for ReferenceIntegrator {
     }
 }
 
-/// Solves `F(t, y, (y - y0) / span) = 0` at `offset_ns`, from the workspace's point `y0`.
 fn newton(
     problem: &CoupledProblem<'_>,
     workspace: &mut SolveWorkspace,
@@ -113,7 +110,7 @@ fn newton(
         // value on another, so this one test fits both. The update still applies: on a stiff row one
         // unit in the last place can be a defect above the scales.
         settled = (update.iter().zip(&unknowns))
-            .all(|(change, unknown)| change.abs() <= ROUNDOFF * (1.0 + unknown.abs()));
+            .all(|(change, unknown)| change.abs() <= NEWTON_STOP * (1.0 + unknown.abs()));
         for (unknown, change) in workspace.unknowns_mut().iter_mut().zip(update) {
             *unknown -= change;
         }

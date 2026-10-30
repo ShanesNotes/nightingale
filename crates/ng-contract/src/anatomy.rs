@@ -99,7 +99,6 @@ pub enum Compliance {
         elastance: ParameterKey,
         unstressed: ParameterKey,
     },
-    /// Prescribed by the named held stand-in, whose declaration compilation links it to.
     Held {
         card: &'static str,
     },
@@ -121,7 +120,6 @@ pub struct RegionId {
 /// Each names the least key that shows it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnatomyDefect {
-    /// Two sites under one key.
     DeclaredTwice {
         site: &'static str,
     },
@@ -129,7 +127,6 @@ pub enum AnatomyDefect {
     Undeclared {
         site: &'static str,
     },
-    /// One region key on two roots.
     RegionTwice {
         region: &'static str,
     },
@@ -148,7 +145,6 @@ pub enum AnatomyDefect {
     OrphanSite {
         site: &'static str,
     },
-    /// A site in two enclosures. Enclosures nest, so each enclosed site has one chain of them.
     EnclosedTwice {
         site: &'static str,
     },
@@ -311,7 +307,7 @@ impl Facts {
     fn check_circulation(&self) -> Result<(), AnatomyDefect> {
         let count = self.sites.len();
         let forward = Digraph::new(count, &self.vascular);
-        let component = forward.components();
+        let component = forward.strongly_connected_components();
         let mut size = vec![0; count];
         let mut has_vessel = vec![false; count];
         for (site, &part) in component.iter().enumerate() {

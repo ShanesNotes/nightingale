@@ -897,7 +897,6 @@ fn laws_on_algebraic_rows(first: usize, programs: &[Program], instances: &[Insta
         .collect()
 }
 
-/// A variable's values that change what its rows read: one value stands for each distinct set of reads.
 fn values_with_distinct_reads(
     laws: &[&AlgebraicLaw],
     variable: LawName,
@@ -950,7 +949,7 @@ fn match_each_mode(
             edges.push((node, law.row));
         }
     }
-    let part = Digraph::new(2 * count + variables.len(), &edges).components();
+    let part = Digraph::new(2 * count + variables.len(), &edges).strongly_connected_components();
     let mut parts: Vec<Vec<usize>> = vec![Vec::new(); part.len()];
     for row in 0..count {
         parts[part[row]].push(row);
@@ -1024,7 +1023,7 @@ fn blocks(solved_by: &[RowId], reads: &[Vec<UnknownId>], rates: &[Vec<RateClass>
                 .map(move |unknown| (row, solved_by[unknown.index()].index()))
         })
         .collect();
-    let part = Digraph::new(reads.len(), &edges).components();
+    let part = Digraph::new(reads.len(), &edges).strongly_connected_components();
     let mut solves = vec![0; reads.len()];
     for (unknown, row) in solved_by.iter().enumerate() {
         solves[row.index()] = unknown;

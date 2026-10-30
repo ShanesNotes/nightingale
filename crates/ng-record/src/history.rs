@@ -1,5 +1,3 @@
-//! One chunk per accepted step, behind a view the certificate reads, so ticket 05's fixed-time chunks and
-//! history store change no reader.
 use ng_contract::{
     AcceptedStateView, ColumnId, Compensated, CompiledBody, ConservedBasis, Digest, Interval, QuantityId,
     SimTime, VerifiedStep,
@@ -11,10 +9,6 @@ pub(crate) fn push_bits(bytes: &mut Vec<u8>, value: Compensated) {
     }
 }
 
-/// One accepted interval, each value at the interval's two ends in Bernstein form: for every conserved
-/// combination its inventory and its cumulative gross inflow and outflow, and for every column its
-/// cumulative gross forward and reverse extents. Both ends are compensated, so a window's closure at a
-/// boundary is formed before any rounding.
 pub(crate) struct LedgerChunk {
     interval: Interval,
     quantities: Vec<QuantityStep>,
@@ -113,8 +107,6 @@ impl LedgerChunk {
 
 pub(crate) struct History {
     opening: Vec<Compensated>,
-    /// What one unit of each column moves each combination by. Zero is an internal transfer, which no
-    /// combination sees, gross or not.
     incidence: Vec<Vec<i64>>,
     chunks: Vec<LedgerChunk>,
 }
@@ -153,7 +145,6 @@ impl History {
     pub(crate) fn push(&mut self, chunk: LedgerChunk) {
         self.chunks.push(chunk);
     }
-    /// Recomputed from the chunks on every call, so it witnesses the fields and reads no running root.
     pub(crate) fn digest(&self) -> Digest {
         let Self {
             opening,
@@ -182,8 +173,7 @@ pub struct HistorySeal {
     pub base: Digest,
 }
 
-/// One immutable view of one record's history over one conserved basis. There is no way to pair one
-/// record's amounts with another's exchanges: both come only through this view.
+/// One immutable view of one record's history over one conserved basis.
 pub struct ConservationView<'r> {
     pub(crate) history: &'r History,
     pub(crate) basis: &'r ConservedBasis,

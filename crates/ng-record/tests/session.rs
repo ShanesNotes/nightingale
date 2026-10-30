@@ -1,5 +1,3 @@
-//! The transaction at the record's own seam, with the smallest honest core. The full table of refusals
-//! and faults is in `ng-validate`.
 use ng_contract::*;
 use ng_record::*;
 

@@ -1,5 +1,3 @@
-//! A value carries its dimension's name and its bits, so `bind` can parse it against a compiled slot, and
-//! the hash reads the same entries sorted, so declaration order is not in it.
 use crate::identity::{Canonical, Seal};
 use crate::quantity::dimension;
 use crate::{
@@ -13,9 +11,8 @@ mod sealed {
         const TAG: u64;
     }
 }
-/// Reviewed or a synthetic test fixture. Ticket 08 adds `Reviewed` and each kind's anchors.
 pub trait PacketKind: sealed::PacketKind {}
-/// Obviously synthetic test values with no citations. The arena accepts only this kind.
+/// Obviously synthetic test values with no citations.
 pub enum SyntheticFixture {}
 impl sealed::PacketKind for SyntheticFixture {
     const TAG: u64 = 0;
@@ -129,7 +126,7 @@ impl ParameterPacket<SyntheticFixture> {
         Ok(())
     }
     /// One row's start value, named as the compiled body names the row. The start values live in the
-    /// packet, so its hash and the run identity cover them; ticket 08 solves them from anchors instead.
+    /// packet, so its hash and the run identity cover them.
     /// Refuses the same row twice.
     pub fn start<U: Dimension>(
         &mut self,

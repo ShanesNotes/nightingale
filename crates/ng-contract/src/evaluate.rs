@@ -1,5 +1,3 @@
-//! Differentiation runs in the same walk as evaluation, so a value and its row of the Jacobian cannot
-//! describe different programs.
 use crate::body::{Bound, Instance, RowKind, Target, UnknownId};
 use crate::boundary::DriveFrame;
 use crate::law::{Op, Validity};
@@ -169,7 +167,6 @@ impl CompiledBody {
             })
             .collect()
     }
-    /// Each column's rate and each row's kernel value, from instance values.
     pub(crate) fn targets(&self, values: &[f64]) -> (Vec<f64>, Vec<f64>) {
         let mut columns = vec![0.0; self.layout.columns.len()];
         let mut rows = vec![0.0; self.layout.rows.len()];
@@ -181,8 +178,6 @@ impl CompiledBody {
         }
         (columns, rows)
     }
-    /// `F(t, y, y')` per row: `y' - rates` on an amount or memory row, the kernel's value on an algebraic
-    /// row.
     pub(crate) fn residuals(&self, columns: &[f64], rows: &[f64], derivative: &[f64]) -> Vec<f64> {
         let mut residuals = Vec::with_capacity(rows.len());
         for (row, (&value, &tangent)) in self.layout.rows.iter().zip(rows.iter().zip(derivative)) {
@@ -249,8 +244,6 @@ impl CompiledBody {
         }
         Ok(values)
     }
-    /// Each published kernel value outside a validity range on its program. Only an accepted state can be
-    /// an excursion, so a stage never reaches this.
     pub(crate) fn excursions(&self, values: &[f64], at: SimTime) -> Vec<ValidityExcursion> {
         let mut excursions = Vec::new();
         for (instance, &value) in self.layout.instances.iter().zip(values) {

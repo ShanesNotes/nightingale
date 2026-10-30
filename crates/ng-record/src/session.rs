@@ -10,7 +10,6 @@ pub struct Session<'m, S> {
     status: S,
 }
 pub struct Running;
-/// A refusal stands: the record is untouched, and the only way on is the smaller retry.
 pub struct Retrying {
     refused: Refused,
     earlier: Vec<Refused>,
@@ -27,8 +26,6 @@ pub enum Step<'m> {
     Faulted(Session<'m, Faulted>),
 }
 
-/// A refusal that names any ticket but the one issued would spend another attempt's budget, so it is
-/// `BindingMismatch`.
 fn attempt(
     record: &PatientRecord<'_>,
     solver: &dyn CoupledSolver,

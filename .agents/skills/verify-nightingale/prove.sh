@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Exit 0 only when the block says full_proof: yes.
-# A non-zero tools/verify status is preserved when that status is already non-zero.
-# Exit 2 means tools/verify exited 0 but the run is still not full proof
-# (dirty tree, head moved, the OK line or the merge plan line is absent).
 set -euo pipefail
 
 die() { echo "prove: $*" >&2; exit 1; }

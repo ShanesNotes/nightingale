@@ -1,6 +1,3 @@
-//! The record transaction's checks and every refusal and fault reason, driven at the highest seam: a
-//! manufactured body, a session and the gates, through public items only. Every number is synthetic, and
-//! each expected value comes from the closed form or the requirement, never from a previous run.
 mod cores;
 
 use core::cell::RefCell;

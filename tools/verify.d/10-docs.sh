@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Docs hygiene over every Markdown file outside .scratch/. docs/governance.md states each rule this
-# step holds; a finding prints as <file>:<line>: <rule>: <text>. Permalink URLs are exempt.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 python3 -I - <<'PY'
@@ -21,7 +19,6 @@ for f in tree:
         p = p.parent
 docs = sorted(f for f in tree if f.endswith('.md') and not f.startswith('.scratch/'))
 
-# Prose files must sit where docs/governance.md's allowlist puts them.
 ALLOWED = ('README.md', 'AGENTS.md', 'CLAUDE.md', 'GLOSSARY.md', 'docs/srs.md', 'docs/governance.md', 'docs/adr/',
            'docs/agents/', 'docs/atlas/', 'docs/architecture/solver-contract.md',
            'docs/architecture/solver-contract-sketch/', '.agents/skills/')
@@ -69,7 +66,6 @@ def exists_from(doc_dir, path):
             d = d.parent
         if not bases:
             return True
-    # A glob or brace set is checked up to the last directory before it.
     stem = re.split(r'[*{]', path, maxsplit=1)[0]
     if stem != path:
         stem = stem.rsplit('/', 1)[0]
@@ -128,7 +124,6 @@ for doc, cap in caps.items():
         findings.append(f'{doc}:{n}: over its {cap}-line cap')
 
 
-# GLOSSARY.md carries every SRS section 2 definition word for word, plus its Avoid words.
 def srs_terms(text):
     body = text.split('\n## 2. Definitions\n', 1)[1].split('\n## 3.', 1)[0]
     terms = {}

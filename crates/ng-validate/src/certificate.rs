@@ -1,5 +1,3 @@
-//! The certificate: closure and drift over every sliding 24 h window, read from one view and policy data.
-//! It shows stability, not accuracy, and takes no vital, reading or second history.
 use ng_contract::{
     AdmissionError, Compensated, ConservedBasis, Digest, Dimension, Dimensionless, Interval, Measure,
     QuantityId, SimTime,
@@ -36,7 +34,7 @@ impl QuantityPolicy {
         })
     }
 }
-/// What drift is compared with. A later fasting protocol adds a stated curve.
+/// What drift is compared with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExpectedDrift {
     Zero,
@@ -47,7 +45,7 @@ pub struct Sliding24Hours {
     coverage_ns: u64,
 }
 impl Sliding24Hours {
-    /// Refuses a coverage that does not exceed one window, which could slide nowhere.
+    /// Refuses a coverage that does not exceed one window.
     pub fn covering(coverage_ns: u64) -> Result<Self, AdmissionError> {
         if coverage_ns <= DAY_NS {
             return Err(AdmissionError::ShortCoverage);

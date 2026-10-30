@@ -1,5 +1,3 @@
-//! These types live in the contract, not the record, because a core reads them and
-//! `StepProposal::verify` derives the next ones.
 use crate::body::RowKind;
 use crate::boundary::PendingInputs;
 use crate::identity::{Canonical, Seal};
@@ -199,7 +197,6 @@ impl<'r> AcceptedStateView<'r> {
     pub fn method_history(self) -> &'r MethodHistory {
         self.history
     }
-    /// The last accepted dense segment, so a reader samples it without keeping history.
     pub fn last_segment(self) -> &'r DenseSegment {
         self.segment
     }

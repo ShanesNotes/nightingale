@@ -7,7 +7,6 @@ use crate::{
     MethodHistory, ModelHash, PacketHash, RowId, SimTime,
 };
 
-/// Ticket 08 adds a goal, a budget and a guess beside the anchor moment.
 pub struct InitializationRequest {
     anchor_moment: SimTime,
 }
@@ -62,7 +61,7 @@ impl InitializationSystem<'_> {
     }
     /// The only constructor of `InitialRevision`. Refuses a workspace from another body. Refuses by row a
     /// moved amount or memory value, a value outside its admissible set and an algebraic row that is not
-    /// exactly zero, because no tolerance is declared before ticket 08.
+    /// exactly zero.
     pub fn admit(
         self,
         solved: SolveWorkspace,
@@ -118,11 +117,9 @@ impl InitializationSystem<'_> {
     }
 }
 
-/// The first accepted image and the bound parameters, never imposed again.
 pub struct InitialRevision {
     parts: InitialParts,
 }
-/// Only `InitialRevision::into_parts` hands these out.
 pub struct InitialParts {
     pub time: SimTime,
     pub state: Candidate,

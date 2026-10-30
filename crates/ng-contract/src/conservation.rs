@@ -95,7 +95,7 @@ pub(crate) fn conserved_basis(amounts: usize, columns: &[Column]) -> ConservedBa
             _ => unreachable!("a transfer moves one unit between two amounts, or across the boundary"),
         }
     }
-    let part = Digraph::new(amounts, &edges).components();
+    let part = Digraph::new(amounts, &edges).strongly_connected_components();
     let mut seen: Vec<usize> = Vec::new();
     let mut combinations: Vec<Combination> = Vec::new();
     for (row, &part) in part.iter().enumerate() {

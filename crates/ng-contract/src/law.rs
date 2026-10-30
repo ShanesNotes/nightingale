@@ -237,14 +237,12 @@ pub struct Kernel<'b, 'k, O, S = Body> {
     kernel: Brand<'k>,
     kind: PhantomData<(O, S)>,
 }
-/// An expression of exactly one kernel graph. It carries no number, so no host math can run on it.
 pub struct Expr<'b, 'k, O, U> {
     at: usize,
     brand: Brand<'b>,
     kernel: Brand<'k>,
     kind: PhantomData<(O, U)>,
 }
-/// A finished graph, still inside its kernel's scope.
 pub struct Finished<'b, 'k, O, U, S = Body> {
     code: Vec<Op>,
     result: usize,
@@ -291,7 +289,6 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     fn input<U>(&mut self, input: Input) -> Expr<'b, 'k, O, U> {
         self.push(Op::Input(input))
     }
-    /// Its value binds later, by key.
     pub fn parameter<U: Dimension>(&mut self, parameter: &Parameter<'b, O, U>) -> Expr<'b, 'k, O, U> {
         self.input(Input::Parameter(parameter.key))
     }
@@ -301,7 +298,6 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     pub fn algebraic<U: Dimension>(&mut self, slot: &AlgebraicSlot<'b, O, U>) -> Expr<'b, 'k, O, U> {
         self.input(Input::Algebraic(slot.name))
     }
-    /// A scalar port. A per-site or per-edge port is not a dimension, so it never reads here.
     pub fn read<U: Dimension>(&mut self, port: &ReadPort<'b, O, U>) -> Expr<'b, 'k, O, U> {
         self.input(port.source.input())
     }
@@ -335,7 +331,6 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     ) -> Expr<'b, 'k, O, Quotient<A, B>> {
         self.push(Op::Divide([a.at, b.at]))
     }
-    /// Names a product or a quotient through the pinned identity table; there is no free cast.
     pub fn as_dimension<T: SameDimension<U>, U>(&mut self, x: Expr<'b, 'k, O, T>) -> Expr<'b, 'k, O, U> {
         self.push(Op::AsDimension([x.at]))
     }
@@ -401,7 +396,6 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     ) -> Expr<'b, 'k, O, Rate<Q>> {
         self.push(Op::ConductanceFlow([conductance.at, head.at]))
     }
-    /// The result takes no admissible set: a refusal set belongs to a slot, never to a computed expression.
     pub fn finish<U: Dimension>(
         self,
         value: Expr<'b, 'k, O, U>,
@@ -459,7 +453,6 @@ impl<'b, 'k, O> Kernel<'b, 'k, O, VascularEdge> {
     }
 }
 
-/// A port laws read: never an amount store, never a pool.
 pub struct ReadPort<'b, O, U> {
     source: Source,
     brand: Brand<'b>,
@@ -501,11 +494,9 @@ impl<'b, O, C: SiteClass, Q> SiteRoute<'b, O, C, Q> {
             kind: PhantomData,
         }
     }
-    /// The amount the route takes from, at each site.
     pub fn from_amount(&self) -> ReadPort<'b, O, PerSite<C, Q>> {
         ReadPort::of(Source::Amount(self.family, End::From))
     }
-    /// The amount the route gives to, at each site.
     pub fn to_amount(&self) -> ReadPort<'b, O, PerSite<C, Q>> {
         ReadPort::of(Source::Amount(self.family, End::To))
     }
@@ -524,11 +515,9 @@ impl<'b, O, Q> EdgeRoute<'b, O, Q> {
             kind: PhantomData,
         }
     }
-    /// The amount at each edge's upstream end.
     pub fn from_amount(&self) -> ReadPort<'b, O, PerEdge<Q>> {
         ReadPort::of(Source::Amount(self.family, End::From))
     }
-    /// The amount at each edge's downstream end.
     pub fn to_amount(&self) -> ReadPort<'b, O, PerEdge<Q>> {
         ReadPort::of(Source::Amount(self.family, End::To))
     }
@@ -682,7 +671,6 @@ pub struct Guard<'b, O, U> {
     transition: ModeTransition<'b, O>,
 }
 impl<'b, O, U: Sensed> Guard<'b, O, U> {
-    /// The zero kernel's dimension is sensed, so a guard never fires on a set point itself.
     pub fn new(zero: PureKernel<'b, O, U>, crossing: Crossing, transition: ModeTransition<'b, O>) -> Self {
         Self {
             zero,
@@ -724,22 +712,18 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
             kind: PhantomData,
         }
     }
-    /// Builds one whole-body kernel. `'k` is fresh, so an expression from another kernel, open or
-    /// finished, does not type-check here.
     pub fn kernel<U: Dimension, F>(&self, build: F) -> PureKernel<'b, O, U>
     where
         F: for<'k> FnOnce(Kernel<'b, 'k, O>) -> Finished<'b, 'k, O, U>,
     {
         self.close(build(Kernel::open()))
     }
-    /// Builds one kernel for every site of class `C`: declared once, applied at each site of its route.
     pub fn site_kernel<C: SiteClass, U: Dimension, F>(&self, build: F) -> PureKernel<'b, O, U, C>
     where
         F: for<'k> FnOnce(Kernel<'b, 'k, O, C>) -> Finished<'b, 'k, O, U, C>,
     {
         self.close(build(Kernel::open()))
     }
-    /// Builds one kernel for every vascular edge.
     pub fn edge_kernel<U: Dimension, F>(&self, build: F) -> PureKernel<'b, O, U, VascularEdge>
     where
         F: for<'k> FnOnce(Kernel<'b, 'k, O, VascularEdge>) -> Finished<'b, 'k, O, U, VascularEdge>,
@@ -898,7 +882,6 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     pub fn residual<U: Dimension>(&mut self, slot: &AlgebraicSlot<'b, O, U>, residual: PureKernel<'b, O, U>) {
         self.attach(Obligation::Slot(slot.name), residual.data);
     }
-    /// One transfer law for every site of the route's class.
     pub fn transfer_at<C: SiteClass, Q>(
         &mut self,
         route: &SiteRoute<'b, O, C, Q>,
@@ -906,7 +889,6 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     ) {
         self.attach(Obligation::Family(route.family), rate.data);
     }
-    /// One transfer law for every vascular edge.
     pub fn transfer_along<Q>(
         &mut self,
         route: &EdgeRoute<'b, O, Q>,

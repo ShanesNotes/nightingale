@@ -1,5 +1,3 @@
-//! The synthetic composition root: a manufactured body declared through the public API, with obviously
-//! synthetic numbers kept private, so a test names a case instead of passing bare physical quantities.
 use ng_contract::*;
 use ng_record::{Running, Session};
 
@@ -7,7 +5,6 @@ const SECOND: u64 = 1_000_000_000;
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 
 const RELAXATION_SECONDS: u64 = 1000;
-/// `g` with `e` and the partial volume at one, so it is `k`.
 const CONDUCTANCE: f64 = 0.001;
 const START: [f64; 2] = [500_500.0, 499_500.0];
 const EXTERIOR: &str = "exterior";
@@ -160,7 +157,6 @@ impl TwoReservoirs {
             end: SimTime::from_ns(48 * 3600 * SECOND),
         })
     }
-    /// The same case, ending at `end`.
     pub fn until(self, end: SimTime) -> Self {
         Self { end, ..self }
     }
@@ -285,7 +281,6 @@ impl TwoReservoirs {
         }
         Digest::of_canonical(&bytes)
     }
-    /// A number computed from the case's own constants, never from the run under test.
     pub(crate) fn exact(&self, at: SimTime) -> Exact {
         let k = CONDUCTANCE;
         let (mut sum, mut difference) = (self.start[0] + self.start[1], self.start[0] - self.start[1]);
