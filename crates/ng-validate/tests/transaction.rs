@@ -2320,3 +2320,77 @@ fn a_ladder_of_two_policies_states_no_order() {
         Err(AccuracyFailure::MixedEvidence { refinement: 0 })
     ));
 }
+
+#[test]
+fn newton_applies_a_correction_too_small_to_read_as_a_change() {
+    // A rate of 1e6 per second makes a change of one ulp in the filter a defect far above these scales, so
+    // a stage that stopped before its last correction fails its own equation.
+    let body = filter_body();
+    let mut packet = ParameterPacket::new();
+    let bind = Binding::Body;
+    let speed = measure::<Rate<Dimensionless>>(1e6);
+    packet
+        .synthetic(ParameterKey::new("ns.speed"), bind, speed, "synthetic")
+        .expect("once");
+    let target = measure::<Dimensionless>(1.000_000_000_000_001);
+    packet
+        .synthetic(ParameterKey::new("ns.target"), bind, target, "synthetic")
+        .expect("once");
+    let gain = measure::<Dimensionless>(1.0);
+    packet
+        .synthetic(ParameterKey::new("ns.gain"), bind, gain, "synthetic")
+        .expect("once");
+    let name = |local| LawName { owner: "NS", local };
+    for start in [
+        RowKind::Memory(name("filter")),
+        RowKind::Algebraic(name("reading")),
+    ] {
+        packet
+            .start(start, measure::<Dimensionless>(1.0), "synthetic")
+            .expect("once");
+    }
+    let core = reference(MILLISECOND).with_scales(scales(1e-14, 0.0));
+    let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
+    accepted(session.step());
+}
+
+#[test]
+fn a_stage_already_solved_needs_no_factorization() {
+    // `x x = 0` from `x = 0` is solved, and its one Jacobian entry is zero.
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", origin());
+    let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    let body = assemble(schema, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let reading = laws.algebraic::<Dimensionless>("reading", Admissible::finite());
+        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let root = laws.kernel(|mut k| {
+            let x = k.algebraic(&reading);
+            let again = k.algebraic(&reading);
+            let square = k.scale(x, again);
+            k.finish(square, laws.every_mode(), wave)
+        });
+        laws.residual(&reading, root);
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let mut packet = ParameterPacket::new();
+    let row = RowKind::Algebraic(LawName {
+        owner: "NS",
+        local: "reading",
+    });
+    packet
+        .start(row, measure::<Dimensionless>(0.0), "synthetic")
+        .expect("once");
+    let core = reference(SECOND);
+    let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
+    accepted(session.step());
+}
+
+#[test]
+fn a_case_that_never_steps_is_refused_as_no_case() {
+    let cases = vec![AccuracyCase::TwoReservoir(stepped().until(SimTime::from_ns(0)))];
+    let empty = AccuracyPolicy::new(cases, measure(5.0), measure(0.0), SECOND).err();
+    assert_eq!(empty, Some(AdmissionError::EmptyAccuracyPolicy));
+}

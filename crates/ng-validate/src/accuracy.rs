@@ -23,14 +23,16 @@ pub struct AccuracyPolicy {
     digest: Digest,
 }
 impl AccuracyPolicy {
-    /// Refuses a zero grid and no case.
+    /// Refuses a zero grid, no case and a case that ends where it starts, which would pass by never
+    /// stepping.
     pub fn new(
         cases: Vec<AccuracyCase>,
         absolute: Measure<Water>,
         relative: Measure<Dimensionless>,
         grid_ns: u64,
     ) -> Result<Self, AdmissionError> {
-        if grid_ns == 0 || cases.is_empty() {
+        let never_steps = |AccuracyCase::TwoReservoir(case): &AccuracyCase| case.end() == SimTime::from_ns(0);
+        if grid_ns == 0 || cases.is_empty() || cases.iter().any(never_steps) {
             return Err(AdmissionError::EmptyAccuracyPolicy);
         }
         let absolute = Compensated::of(&absolute);

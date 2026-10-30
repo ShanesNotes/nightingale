@@ -101,7 +101,7 @@ pub enum AdmissionError {
     PolicyCoverage,
     /// A sliding window coverage that does not exceed one window.
     ShortCoverage,
-    /// An accuracy policy with no case or a zero grid.
+    /// An accuracy policy with no case, a case that never steps or a zero grid.
     EmptyAccuracyPolicy,
 }
 impl From<AnatomyDefect> for AdmissionError {
