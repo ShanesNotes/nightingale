@@ -1,8 +1,8 @@
 use crate::identity::{Canonical, Seal};
 use crate::law::{Op, Validity};
 use crate::{
-    AdmissibleSet, Class, Crossing, Digest, LawName, Network, ParameterKey, Predicate, RateClass, Schema,
-    SiteId, Space,
+    AdmissibleSet, Class, ConservedBasis, Crossing, Digest, LawName, Network, ParameterKey, Predicate,
+    RateClass, Schema, SiteId, Space,
 };
 
 macro_rules! index {
@@ -32,6 +32,7 @@ index!(
     RowId,
     /// An unknown: row `i`'s own coordinate has index `i`.
     UnknownId,
+    ColumnId,
     ProgramId,
     ParameterId
 );
@@ -46,6 +47,7 @@ pub struct CompiledBody {
 pub(crate) struct Layout {
     pub(crate) schema: Schema,
     pub(crate) rows: Vec<Row>,
+    pub(crate) columns: Vec<Column>,
     pub(crate) programs: Vec<Program>,
     pub(crate) instances: Vec<Instance>,
     pub(crate) parameters: Vec<ParameterSlot>,
@@ -53,6 +55,7 @@ pub(crate) struct Layout {
     pub(crate) blocks: Vec<Block>,
     pub(crate) modes: Vec<ModeLayout>,
     pub(crate) guards: Vec<GuardLayout>,
+    pub(crate) basis: ConservedBasis,
 }
 impl CompiledBody {
     pub(crate) fn seal(layout: Layout) -> Self {
@@ -70,6 +73,10 @@ impl CompiledBody {
     pub fn rows(&self) -> &[Row] {
         &self.layout.rows
     }
+    /// One per instance of each transfer, in law-name order and then site or edge key order.
+    pub fn columns(&self) -> &[Column] {
+        &self.layout.columns
+    }
     pub fn programs(&self) -> &[Program] {
         &self.layout.programs
     }
@@ -86,12 +93,16 @@ impl CompiledBody {
     pub fn blocks(&self) -> &[Block] {
         &self.layout.blocks
     }
+    pub fn conserved_basis(&self) -> &ConservedBasis {
+        &self.layout.basis
+    }
 }
 impl Seal for Layout {
     fn seal(&self, out: &mut Canonical) {
         let Self {
             schema,
             rows,
+            columns,
             programs,
             instances,
             parameters,
@@ -99,9 +110,11 @@ impl Seal for Layout {
             blocks,
             modes,
             guards,
+            basis,
         } = self;
         schema.seal(out);
         rows.seal(out);
+        columns.seal(out);
         programs.seal(out);
         instances.seal(out);
         parameters.seal(out);
@@ -109,6 +122,7 @@ impl Seal for Layout {
         blocks.seal(out);
         modes.seal(out);
         guards.seal(out);
+        basis.seal(out);
     }
 }
 
@@ -177,6 +191,35 @@ impl Seal for RowKind {
     }
 }
 
+/// One instance of a transfer: the amounts it moves, each with its signed coefficient. Its rate comes
+/// from whichever law on its route holds in the current mode.
+#[derive(Debug, PartialEq)]
+pub struct Column {
+    pub(crate) terms: Vec<(RowId, i64)>,
+    pub(crate) origin: LawName,
+    pub(crate) context: Context,
+}
+impl Column {
+    /// In row order. A transfer whose two ends are one pool has none.
+    pub fn terms(&self) -> &[(RowId, i64)] {
+        &self.terms
+    }
+    /// The route family's law name, shared by every instance of the route.
+    pub fn origin(&self) -> LawName {
+        self.origin
+    }
+    pub fn context(&self) -> Context {
+        self.context
+    }
+}
+impl Seal for Column {
+    fn seal(&self, out: &mut Canonical) {
+        self.terms.seal(out);
+        self.origin.seal(out);
+        self.context.seal(out);
+    }
+}
+
 /// Where a program instance applies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Context {
@@ -238,10 +281,11 @@ impl Seal for Code {
     }
 }
 
-/// The row a program instance defines.
+/// What a program instance defines: a memory or algebraic row, or a transfer's column.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
     Row(RowId),
+    Column(ColumnId),
 }
 impl Seal for Target {
     fn seal(&self, out: &mut Canonical) {
@@ -249,6 +293,10 @@ impl Seal for Target {
             Target::Row(row) => {
                 out.number(0);
                 row.seal(out);
+            }
+            Target::Column(column) => {
+                out.number(1);
+                column.seal(out);
             }
         }
     }

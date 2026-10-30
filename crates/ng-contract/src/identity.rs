@@ -140,6 +140,22 @@ impl Seal for str {
         out.text(self);
     }
 }
+impl<A: Seal, B: Seal> Seal for (A, B) {
+    fn seal(&self, out: &mut Canonical) {
+        self.0.seal(out);
+        self.1.seal(out);
+    }
+}
+impl Seal for i64 {
+    fn seal(&self, out: &mut Canonical) {
+        out.number(*self as u64);
+    }
+}
+impl Seal for u64 {
+    fn seal(&self, out: &mut Canonical) {
+        out.number(*self);
+    }
+}
 impl Seal for usize {
     fn seal(&self, out: &mut Canonical) {
         out.number(*self as u64);

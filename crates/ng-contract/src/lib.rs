@@ -211,10 +211,191 @@
 //!     let _ = laws.parameter::<Pressure>(ParameterKey::new("fixture.pressure"), Admissible::finite());
 //! }
 //! ```
+//! An expression cannot leave its kernel: one read in a finished kernel does not type-check in the next.
+//! ```compile_fail,E0521
+//! use ng_contract::*;
+//! type Close<'b> = (ModeSet<'b, Renal>, RateClass);
+//! fn cross<'b>(laws: &FragmentBuilder<'b, Renal>, port: &ReadPort<'b, Renal, Pressure>,
+//!     first: Close<'b>, second: Close<'b>) -> PureKernel<'b, Renal, Pressure> {
+//!     let mut stolen = None;
+//!     let _first = laws.kernel(|mut k| {
+//!         stolen = Some(k.read(port));
+//!         let own = k.read(port);
+//!         k.finish(own, first.0, first.1)
+//!     });
+//!     laws.kernel(|k| k.finish(stolen.unwrap(), second.0, second.1))
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! type Close<'b> = (ModeSet<'b, Renal>, RateClass);
+//! fn own<'b>(laws: &FragmentBuilder<'b, Renal>, port: &ReadPort<'b, Renal, Pressure>,
+//!     first: Close<'b>, second: Close<'b>) -> PureKernel<'b, Renal, Pressure> {
+//!     let _first = laws.kernel(|mut k| {
+//!         let own = k.read(port);
+//!         k.finish(own, first.0, first.1)
+//!     });
+//!     laws.kernel(|mut k| {
+//!         let own = k.read(port);
+//!         k.finish(own, second.0, second.1)
+//!     })
+//! }
+//! ```
+//! Two kernels open from one fragment builder cannot share an expression.
+//! ```compile_fail,E0521
+//! use ng_contract::*;
+//! type Close<'b> = (ModeSet<'b, Renal>, RateClass);
+//! fn cross<'b>(laws: &FragmentBuilder<'b, Renal>, port: &ReadPort<'b, Renal, Pressure>,
+//!     outer: Close<'b>, inner: Close<'b>) -> PureKernel<'b, Renal, Pressure> {
+//!     laws.kernel(|mut first| {
+//!         let foreign = first.read(port);
+//!         let _second = laws.kernel(|mut second| {
+//!             let own = second.read(port);
+//!             let mixed = second.add(own, foreign);
+//!             second.finish(mixed, inner.0, inner.1)
+//!         });
+//!         let own = first.read(port);
+//!         first.finish(own, outer.0, outer.1)
+//!     })
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! type Close<'b> = (ModeSet<'b, Renal>, RateClass);
+//! fn nested<'b>(laws: &FragmentBuilder<'b, Renal>, port: &ReadPort<'b, Renal, Pressure>,
+//!     outer: Close<'b>, inner: Close<'b>) -> PureKernel<'b, Renal, Pressure> {
+//!     laws.kernel(|mut first| {
+//!         let _second = laws.kernel(|mut second| {
+//!             let a = second.read(port);
+//!             let b = second.read(port);
+//!             let sum = second.add(a, b);
+//!             second.finish(sum, inner.0, inner.1)
+//!         });
+//!         let own = first.read(port);
+//!         first.finish(own, outer.0, outer.1)
+//!     })
+//! }
+//! ```
+//! A kernel's result takes no admissible set, so a threshold cannot become a sign constraint on a
+//! computed expression.
+//! ```compile_fail,E0061
+//! use ng_contract::*;
+//! fn threshold<'b>(laws: &FragmentBuilder<'b, Renal>, pressure: &ReadPort<'b, Renal, Pressure>,
+//!     reference: &Parameter<'b, Renal, Pressure>, modes: ModeSet<'b, Renal>, class: RateClass)
+//!     -> PureKernel<'b, Renal, Pressure> {
+//!     laws.kernel(|mut k| {
+//!         let p = k.read(pressure);
+//!         let a = k.parameter(reference);
+//!         let shifted = k.subtract(p, a);
+//!         k.finish(shifted, Admissible::nonnegative(), modes, class)
+//!     })
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn declare<'b>(laws: &mut FragmentBuilder<'b, Renal>, pressure: &ReadPort<'b, Renal, Pressure>,
+//!     reference: &Parameter<'b, Renal, Pressure>, modes: ModeSet<'b, Renal>, class: RateClass,
+//!     low: Measure<Pressure>, high: Measure<Pressure>) -> Result<StateSlot<'b, Renal, Dimensionless>, AdmissionError> {
+//!     let shifted = laws.kernel(|mut k| {
+//!         let p = k.read(pressure);
+//!         let a = k.parameter(reference);
+//!         let difference = k.subtract(p, a);
+//!         k.finish(difference, modes, class)
+//!     });
+//!     laws.validity(&shifted, ValidityRange::new(low, high, Basis::Fixture("fixture design range"))?);
+//!     Ok(laws.state::<Dimensionless>("occupancy-like memory", Admissible::unit_interval()))
+//! }
+//! ```
+//! A law declared for one site class reads only that class's entries: a capillary-bed law cannot read
+//! a junction's value.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn crossed<'b>(laws: &FragmentBuilder<'b, Fluids>, released: &ReadPort<'b, Fluids, PerSite<Junction, Dimensionless>>,
+//!     class: RateClass) -> PureKernel<'b, Fluids, Dimensionless, CapillaryBed> {
+//!     laws.site_kernel(|mut k| {
+//!         let value = k.at_site(released);
+//!         k.finish(value, laws.every_mode(), class)
+//!     })
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn own<'b>(laws: &FragmentBuilder<'b, Fluids>, pressure: &ReadPort<'b, Fluids, PerSite<CapillaryBed, Pressure>>,
+//!     class: RateClass) -> PureKernel<'b, Fluids, Pressure, CapillaryBed> {
+//!     laws.site_kernel(|mut k| {
+//!         let value = k.at_site(pressure);
+//!         k.finish(value, laws.every_mode(), class)
+//!     })
+//! }
+//! ```
+//! A per-site vector is not a scalar, so the whole-body read refuses it.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn vector<'b>(laws: &FragmentBuilder<'b, Fluids>, volumes: &ReadPort<'b, Fluids, PerSite<CapillaryBed, Volume>>,
+//!     class: RateClass) -> PureKernel<'b, Fluids, PerSite<CapillaryBed, Volume>> {
+//!     laws.kernel(|mut k| {
+//!         let volume = k.read(volumes);
+//!         k.finish(volume, laws.every_mode(), class)
+//!     })
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn entry<'b>(laws: &FragmentBuilder<'b, Fluids>, volumes: &ReadPort<'b, Fluids, PerSite<CapillaryBed, Volume>>,
+//!     class: RateClass) -> PureKernel<'b, Fluids, Volume, CapillaryBed> {
+//!     laws.site_kernel(|mut k| {
+//!         let volume = k.at_site(volumes);
+//!         k.finish(volume, laws.every_mode(), class)
+//!     })
+//! }
+//! ```
+//! A whole-body kernel has no site, so it reads no site's entry.
+//! ```compile_fail,E0599
+//! use ng_contract::*;
+//! fn whole<'b>(laws: &FragmentBuilder<'b, Fluids>, volumes: &ReadPort<'b, Fluids, PerSite<CapillaryBed, Volume>>,
+//!     class: RateClass) -> PureKernel<'b, Fluids, Volume> {
+//!     laws.kernel(|mut k| {
+//!         let volume = k.at_site(volumes);
+//!         k.finish(volume, laws.every_mode(), class)
+//!     })
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn bed<'b>(laws: &FragmentBuilder<'b, Fluids>, volumes: &ReadPort<'b, Fluids, PerSite<CapillaryBed, Volume>>,
+//!     class: RateClass) -> PureKernel<'b, Fluids, Volume, CapillaryBed> {
+//!     laws.site_kernel(|mut k| {
+//!         let volume = k.at_site(volumes);
+//!         k.finish(volume, laws.every_mode(), class)
+//!     })
+//! }
+//! ```
+//! An edge kernel is not declared for a site class, so it reads no site's entry; it reads its edge's.
+//! ```compile_fail,E0599
+//! use ng_contract::*;
+//! fn edge<'b>(laws: &FragmentBuilder<'b, Cardiovascular>, lumens: &ReadPort<'b, Cardiovascular, PerSite<VesselSegment, Water>>,
+//!     class: RateClass) -> PureKernel<'b, Cardiovascular, Water, VascularEdge> {
+//!     laws.edge_kernel(|mut k| {
+//!         let amount = k.at_site(lumens);
+//!         k.finish(amount, laws.every_mode(), class)
+//!     })
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn edge<'b>(laws: &FragmentBuilder<'b, Cardiovascular>, route: &EdgeRoute<'b, Cardiovascular, Water>,
+//!     class: RateClass) -> PureKernel<'b, Cardiovascular, Water, VascularEdge> {
+//!     laws.edge_kernel(|mut k| {
+//!         let amount = k.at_edge(&route.from_amount());
+//!         k.finish(amount, laws.every_mode(), class)
+//!     })
+//! }
+//! ```
 
 mod anatomy;
 mod body;
 mod compile;
+mod conservation;
 mod failure;
 mod graph;
 mod identity;
@@ -226,6 +407,7 @@ mod system;
 
 pub use anatomy::*;
 pub use body::*;
+pub use conservation::*;
 pub use failure::*;
 pub use identity::*;
 pub use law::*;

@@ -213,9 +213,10 @@ fn each_law_is_one_program_with_one_whole_body_instance() -> Result<(), Admissio
     let compiled = body(Defect::None)?;
     assert_eq!(compiled.programs().len(), 4);
     let row = |target: Target| match target {
-        Target::Row(row) => row.index(),
+        Target::Row(row) => Some(row.index()),
+        Target::Column(_) => None,
     };
-    let placed: Vec<(usize, Context, usize)> = (compiled.instances().iter())
+    let placed: Vec<(usize, Context, Option<usize>)> = (compiled.instances().iter())
         .map(|instance| {
             (
                 instance.program().index(),
@@ -227,10 +228,10 @@ fn each_law_is_one_program_with_one_whole_body_instance() -> Result<(), Admissio
     assert_eq!(
         placed,
         [
-            (0, Context::Body, 0),
-            (1, Context::Body, 1),
-            (2, Context::Body, 1),
-            (3, Context::Body, 2)
+            (0, Context::Body, Some(0)),
+            (1, Context::Body, Some(1)),
+            (2, Context::Body, Some(1)),
+            (3, Context::Body, Some(2))
         ]
     );
     Ok(())

@@ -1,8 +1,9 @@
 use crate::identity::{Canonical, Seal};
 use crate::quantity::dimension;
 use crate::{
-    Admissible, AdmissibleSet, AdmissionError, Basis, Conductance, Dimension, Dimensionless, NonMaterial,
-    Owner, ParameterKey, Pressure, Product, Quotient, Rate, Reference, SameDimension, Sensed, ValidityRange,
+    Admissible, AdmissibleSet, AdmissionError, Basis, Class, Conductance, Dimension, Dimensionless,
+    NonMaterial, Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reference,
+    SameDimension, Sensed, SiteClass, ValidityRange, Volume, Water,
 };
 use core::cell::Cell;
 use core::marker::PhantomData;
@@ -63,6 +64,33 @@ pub enum RateBand {
 
 /// The context of a kernel declared once for the whole body.
 pub enum Body {}
+/// The context of a kernel declared once for every vascular edge: a relation, not a seventh site
+/// class.
+pub enum VascularEdge {}
+
+/// A route family: one transfer per site of a class, or per edge of a network, which a scope's port
+/// requests whole. No law names a site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Family {
+    /// Along every vascular edge, from the upstream site's vascular space to the downstream site's.
+    Circulation,
+    /// At every capillary bed, from plasma to interstitium.
+    Starling,
+}
+impl Family {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Family::Circulation => "circulation",
+            Family::Starling => "starling",
+        }
+    }
+}
+/// The end of a route a read or a parameter is at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum End {
+    From,
+    To,
+}
 
 /// One instruction of instruction set v1. Operands index earlier instructions of the same graph.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,14 +111,19 @@ pub(crate) enum Op {
     Deviation([usize; 2]),
     Relax([usize; 3]),
     ConductanceFlow([usize; 2]),
+    Volume([usize; 1]),
 }
 /// What an input instruction reads, by its declared name, so a graph's meaning never depends on
 /// declaration order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Input {
     Parameter(ParameterKey),
+    SiteParameter(ParameterKey),
+    EdgeParameter(ParameterKey),
+    EndParameter(ParameterKey, End),
     Memory(&'static str),
     Algebraic(&'static str),
+    Amount(Family, End),
 }
 impl Op {
     fn map(&self, f: impl FnMut(usize) -> usize) -> Op {
@@ -111,6 +144,7 @@ impl Op {
             Op::Deviation(operands) => Op::Deviation(operands.map(f)),
             Op::Relax(operands) => Op::Relax(operands.map(f)),
             Op::ConductanceFlow(operands) => Op::ConductanceFlow(operands.map(f)),
+            Op::Volume(operands) => Op::Volume(operands.map(f)),
         }
     }
 }
@@ -139,6 +173,7 @@ impl Seal for Op {
             Op::Deviation(operands) => (13, operands),
             Op::Relax(operands) => (14, operands),
             Op::ConductanceFlow(operands) => (15, operands),
+            Op::Volume(operands) => (16, operands),
         };
         out.number(tag);
         for &operand in operands {
@@ -153,13 +188,31 @@ impl Seal for Input {
                 out.number(0);
                 out.text(key.key());
             }
-            Input::Memory(name) => {
+            Input::SiteParameter(key) => {
                 out.number(1);
+                out.text(key.key());
+            }
+            Input::EdgeParameter(key) => {
+                out.number(2);
+                out.text(key.key());
+            }
+            Input::EndParameter(key, end) => {
+                out.number(3);
+                out.text(key.key());
+                out.number(end as u64);
+            }
+            Input::Memory(name) => {
+                out.number(4);
                 out.text(name);
             }
             Input::Algebraic(name) => {
-                out.number(2);
+                out.number(5);
                 out.text(name);
+            }
+            Input::Amount(family, end) => {
+                out.number(6);
+                out.text(family.name());
+                out.number(end as u64);
             }
         }
     }
@@ -253,6 +306,15 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     }
     pub fn algebraic<U: Dimension>(&mut self, slot: &AlgebraicSlot<'b, O, U>) -> Expr<'b, 'k, O, U> {
         self.input(Input::Algebraic(slot.name))
+    }
+    /// A scalar port. A per-site or per-edge port is not a dimension, so it never reads here.
+    pub fn read<U: Dimension>(&mut self, port: &ReadPort<'b, O, U>) -> Expr<'b, 'k, O, U> {
+        self.input(port.source.input())
+    }
+    /// The amount's volume, through the schema's fixed partial-volume coefficient; a body whose
+    /// schema declares none is refused.
+    pub fn volume(&mut self, amount: Expr<'b, 'k, O, Water>) -> Expr<'b, 'k, O, Volume> {
+        self.push(Op::Volume([amount.at]))
     }
     /// The one literal is the additive identity; a physical value enters as a declared parameter.
     pub fn zero<U: Dimension>(&mut self) -> Expr<'b, 'k, O, U> {
@@ -366,6 +428,120 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     }
 }
 
+impl<'b, 'k, O, C: SiteClass> Kernel<'b, 'k, O, C> {
+    /// This site's entry.
+    pub fn at_site<U: Dimension>(&mut self, port: &ReadPort<'b, O, PerSite<C, U>>) -> Expr<'b, 'k, O, U> {
+        self.input(port.source.input())
+    }
+    /// The value bound at this site, or else at its class.
+    pub fn site_parameter<U: Dimension>(
+        &mut self,
+        parameter: &SiteParameter<'b, O, C, U>,
+    ) -> Expr<'b, 'k, O, U> {
+        self.input(Input::SiteParameter(parameter.key))
+    }
+}
+impl<'b, 'k, O> Kernel<'b, 'k, O, VascularEdge> {
+    /// This edge's entry.
+    pub fn at_edge<U: Dimension>(&mut self, port: &ReadPort<'b, O, PerEdge<U>>) -> Expr<'b, 'k, O, U> {
+        self.input(port.source.input())
+    }
+    /// The value bound at this edge, or else at the vascular network.
+    pub fn edge_parameter<U: Dimension>(
+        &mut self,
+        parameter: &EdgeParameter<'b, O, U>,
+    ) -> Expr<'b, 'k, O, U> {
+        self.input(Input::EdgeParameter(parameter.key))
+    }
+    /// The value bound at this edge's upstream site, or else at the vascular network.
+    pub fn upstream_parameter<U: Dimension>(
+        &mut self,
+        parameter: &EndParameter<'b, O, U>,
+    ) -> Expr<'b, 'k, O, U> {
+        self.input(Input::EndParameter(parameter.key, End::From))
+    }
+    /// The value bound at this edge's downstream site, or else at the vascular network.
+    pub fn downstream_parameter<U: Dimension>(
+        &mut self,
+        parameter: &EndParameter<'b, O, U>,
+    ) -> Expr<'b, 'k, O, U> {
+        self.input(Input::EndParameter(parameter.key, End::To))
+    }
+}
+
+/// A port laws read: never an amount store, never a pool.
+pub struct ReadPort<'b, O, U> {
+    source: Source,
+    brand: Brand<'b>,
+    kind: PhantomData<(O, U)>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Source {
+    Amount(Family, End),
+}
+impl Source {
+    fn input(self) -> Input {
+        match self {
+            Source::Amount(family, end) => Input::Amount(family, end),
+        }
+    }
+}
+impl<'b, O, U> ReadPort<'b, O, U> {
+    fn of(source: Source) -> Self {
+        Self {
+            source,
+            brand: PhantomData,
+            kind: PhantomData,
+        }
+    }
+}
+/// A route family at every site of class `C`: one column per site, from one space to another.
+pub struct SiteRoute<'b, O, C, Q> {
+    family: Family,
+    brand: Brand<'b>,
+    kind: PhantomData<(O, C, Q)>,
+}
+impl<'b, O, C: SiteClass, Q> SiteRoute<'b, O, C, Q> {
+    pub(crate) fn requested(family: Family) -> Self {
+        Self {
+            family,
+            brand: PhantomData,
+            kind: PhantomData,
+        }
+    }
+    /// The amount the route takes from, at each site.
+    pub fn from_amount(&self) -> ReadPort<'b, O, PerSite<C, Q>> {
+        ReadPort::of(Source::Amount(self.family, End::From))
+    }
+    /// The amount the route gives to, at each site.
+    pub fn to_amount(&self) -> ReadPort<'b, O, PerSite<C, Q>> {
+        ReadPort::of(Source::Amount(self.family, End::To))
+    }
+}
+/// A route family along every vascular edge: one column per edge.
+pub struct EdgeRoute<'b, O, Q> {
+    family: Family,
+    brand: Brand<'b>,
+    kind: PhantomData<(O, Q)>,
+}
+impl<'b, O, Q> EdgeRoute<'b, O, Q> {
+    pub(crate) fn requested(family: Family) -> Self {
+        Self {
+            family,
+            brand: PhantomData,
+            kind: PhantomData,
+        }
+    }
+    /// The amount at each edge's upstream end.
+    pub fn from_amount(&self) -> ReadPort<'b, O, PerEdge<Q>> {
+        ReadPort::of(Source::Amount(self.family, End::From))
+    }
+    /// The amount at each edge's downstream end.
+    pub fn to_amount(&self) -> ReadPort<'b, O, PerEdge<Q>> {
+        ReadPort::of(Source::Amount(self.family, End::To))
+    }
+}
+
 /// A whole-body parameter slot. Its value binds later, by key, and stays out of the model hash.
 pub struct Parameter<'b, O, U> {
     key: ParameterKey,
@@ -380,6 +556,25 @@ pub struct StateSlot<'b, O, U: NonMaterial> {
 /// An unknown its residual law closes.
 pub struct AlgebraicSlot<'b, O, U> {
     name: &'static str,
+    brand: Brand<'b>,
+    kind: PhantomData<(O, U)>,
+}
+/// A parameter of every site of class `C`, bound per site with the class as default.
+pub struct SiteParameter<'b, O, C, U> {
+    key: ParameterKey,
+    brand: Brand<'b>,
+    kind: PhantomData<(O, C, U)>,
+}
+/// A parameter of every vascular edge, bound per edge with the network as default.
+pub struct EdgeParameter<'b, O, U> {
+    key: ParameterKey,
+    brand: Brand<'b>,
+    kind: PhantomData<(O, U)>,
+}
+/// A parameter of every site at an end of a vascular edge, bound per site with the network as
+/// default, so one edge law reads each end's own value without naming a site.
+pub struct EndParameter<'b, O, U> {
+    key: ParameterKey,
     brand: Brand<'b>,
     kind: PhantomData<(O, U)>,
 }
@@ -479,6 +674,7 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
                 slots: Vec::new(),
                 modes: Vec::new(),
                 parameters: Vec::new(),
+                families: Vec::new(),
                 laws: Vec::new(),
                 guards: Vec::new(),
                 validity: Vec::new(),
@@ -511,6 +707,20 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     {
         self.close(build(Kernel::open()))
     }
+    /// Builds one kernel for every site of class `C`: declared once, applied at each site of its route.
+    pub fn site_kernel<C: SiteClass, U: Dimension, F>(&self, build: F) -> PureKernel<'b, O, U, C>
+    where
+        F: for<'k> FnOnce(Kernel<'b, 'k, O, C>) -> Finished<'b, 'k, O, U, C>,
+    {
+        self.close(build(Kernel::open()))
+    }
+    /// Builds one kernel for every vascular edge.
+    pub fn edge_kernel<U: Dimension, F>(&self, build: F) -> PureKernel<'b, O, U, VascularEdge>
+    where
+        F: for<'k> FnOnce(Kernel<'b, 'k, O, VascularEdge>) -> Finished<'b, 'k, O, U, VascularEdge>,
+    {
+        self.close(build(Kernel::open()))
+    }
     fn declare_parameter<U: Dimension>(
         &mut self,
         key: ParameterKey,
@@ -531,6 +741,42 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     ) -> Parameter<'b, O, U> {
         self.declare_parameter::<U>(key, ParameterContext::Body, domain.set());
         Parameter {
+            key,
+            brand: PhantomData,
+            kind: PhantomData,
+        }
+    }
+    pub fn site_parameter<C: SiteClass, U: Dimension>(
+        &mut self,
+        key: ParameterKey,
+        domain: Admissible<U>,
+    ) -> SiteParameter<'b, O, C, U> {
+        self.declare_parameter::<U>(key, ParameterContext::Site(C::CLASS), domain.set());
+        SiteParameter {
+            key,
+            brand: PhantomData,
+            kind: PhantomData,
+        }
+    }
+    pub fn edge_parameter<U: Dimension>(
+        &mut self,
+        key: ParameterKey,
+        domain: Admissible<U>,
+    ) -> EdgeParameter<'b, O, U> {
+        self.declare_parameter::<U>(key, ParameterContext::Edge, domain.set());
+        EdgeParameter {
+            key,
+            brand: PhantomData,
+            kind: PhantomData,
+        }
+    }
+    pub fn end_parameter<U: Dimension>(
+        &mut self,
+        key: ParameterKey,
+        domain: Admissible<U>,
+    ) -> EndParameter<'b, O, U> {
+        self.declare_parameter::<U>(key, ParameterContext::End, domain.set());
+        EndParameter {
             key,
             brand: PhantomData,
             kind: PhantomData,
@@ -628,6 +874,28 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     pub fn residual<U: Dimension>(&mut self, slot: &AlgebraicSlot<'b, O, U>, residual: PureKernel<'b, O, U>) {
         self.attach(Obligation::Slot(slot.name), residual.data);
     }
+    /// One transfer law for every site of the route's class.
+    pub fn transfer_at<C: SiteClass, Q>(
+        &mut self,
+        route: &SiteRoute<'b, O, C, Q>,
+        rate: PureKernel<'b, O, Rate<Q>, C>,
+    ) {
+        self.attach(Obligation::Family(route.family), rate.data);
+    }
+    /// One transfer law for every vascular edge.
+    pub fn transfer_along<Q>(
+        &mut self,
+        route: &EdgeRoute<'b, O, Q>,
+        rate: PureKernel<'b, O, Rate<Q>, VascularEdge>,
+    ) {
+        self.attach(Obligation::Family(route.family), rate.data);
+    }
+    /// Records that the fragment owes a law for every instance of `family`, before any law exists.
+    pub(crate) fn request(&mut self, family: Family) {
+        if !self.data.families.contains(&family) {
+            self.data.families.push(family);
+        }
+    }
     pub fn event<U>(&mut self, guard: Guard<'b, O, U>) {
         self.data.guards.push(GuardDeclaration {
             zero: guard.zero.data,
@@ -657,6 +925,7 @@ pub(crate) struct FragmentData {
     pub(crate) slots: Vec<SlotDeclaration>,
     pub(crate) modes: Vec<ModeDeclaration>,
     pub(crate) parameters: Vec<ParameterDeclaration>,
+    pub(crate) families: Vec<Family>,
     pub(crate) laws: Vec<LawDeclaration>,
     pub(crate) guards: Vec<GuardDeclaration>,
     pub(crate) validity: Vec<(u32, Validity)>,
@@ -685,15 +954,19 @@ pub(crate) struct ParameterDeclaration {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ParameterContext {
     Body,
+    Site(Class),
+    Edge,
+    End,
 }
 pub(crate) struct LawDeclaration {
     pub(crate) serves: Obligation,
     pub(crate) kernel: KernelData,
 }
-/// What a law defines: a slot by name.
+/// What a law defines: a slot by name, or every instance of a route family.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Obligation {
     Slot(&'static str),
+    Family(Family),
 }
 pub(crate) struct GuardDeclaration {
     pub(crate) zero: KernelData,

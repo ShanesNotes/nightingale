@@ -1,16 +1,53 @@
 use crate::anatomy::Class;
 use crate::compile::compile;
 use crate::identity::{Canonical, Seal};
-use crate::law::{Brand, FragmentData};
-use crate::{AdmissionError, Anatomy, CompiledBody, Fragment, FragmentBuilder, Nervous, Owner, SiteId};
+use crate::law::{Brand, Family, FragmentData};
+use crate::{
+    AdmissionError, Anatomy, CapillaryBed, Cardiovascular, CompiledBody, EdgeRoute, Fluids, Fragment,
+    FragmentBuilder, Measure, Nervous, Owner, PartialVolume, SiteId, SiteRoute, Water,
+};
 use core::marker::PhantomData;
 
+/// The anatomy and the composition data laws never see: the partial-volume coefficient and the spaces
+/// this body leaves out.
 pub struct Schema {
     pub(crate) anatomy: Anatomy,
+    pub(crate) partial_volume: Option<Measure<PartialVolume<Water>>>,
+    pub(crate) left_out: Vec<(Space, &'static str)>,
 }
 impl Schema {
     pub fn new(anatomy: Anatomy) -> Result<Self, AdmissionError> {
-        Ok(Self { anatomy })
+        Ok(Self {
+            anatomy,
+            partial_volume: None,
+            left_out: Vec::new(),
+        })
+    }
+
+    /// The volume per amount of water, a fixed structural coefficient `Kernel::volume` reads. Refuses
+    /// a coefficient that is not positive, and a second one that differs from the first.
+    pub fn partial_volume(
+        &mut self,
+        coefficient: Measure<PartialVolume<Water>>,
+    ) -> Result<(), AdmissionError> {
+        if coefficient.value() <= 0.0 {
+            return Err(AdmissionError::NonPositivePartialVolume);
+        }
+        if self
+            .partial_volume
+            .as_ref()
+            .is_some_and(|held| held.bits() != coefficient.bits())
+        {
+            return Err(AdmissionError::PartialVolumeTwice);
+        }
+        self.partial_volume = Some(coefficient);
+        Ok(())
+    }
+
+    /// States that this body does not model the space, and why: its pools are not amount rows, and a
+    /// law that moves or reads one is refused. Every other pool is an amount some transfer must move.
+    pub fn leave_out(&mut self, space: Space, reason: &'static str) {
+        self.left_out.push((space, reason));
     }
 
     /// One water pool per space of every site, sites in key order and each class's spaces in the
@@ -23,7 +60,23 @@ impl Schema {
 impl Seal for Schema {
     fn seal(&self, out: &mut Canonical) {
         self.anatomy.digest().seal(out);
+        self.partial_volume.as_ref().map(Measure::bits).seal(out);
+        let mut left_out = self.left_out.clone();
+        left_out.sort_unstable();
+        left_out.dedup();
+        out.number(left_out.len() as u64);
+        for (space, reason) in left_out {
+            out.number(space as u64);
+            out.text(reason);
+        }
     }
+}
+
+/// The registry's handle on one pool. Private: no law can name or hold a pool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct PoolRef {
+    pub(crate) site: SiteId,
+    pub(crate) space: Space,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -60,6 +113,18 @@ impl<'b> Assembly<'b> {
         }
         self.issued.push(O::CARD);
         Ok(FragmentBuilder::new())
+    }
+    pub fn cardiovascular(&mut self) -> Result<CardiovascularScope<'b>, AdmissionError> {
+        Ok(CardiovascularScope {
+            laws: self.issue()?,
+            ports: CardiovascularPorts { brand: PhantomData },
+        })
+    }
+    pub fn fluids(&mut self) -> Result<FluidsScope<'b>, AdmissionError> {
+        Ok(FluidsScope {
+            laws: self.issue()?,
+            ports: FluidsPorts { brand: PhantomData },
+        })
     }
     pub fn nervous(&mut self) -> Result<NervousScope<'b>, AdmissionError> {
         Ok(NervousScope {
@@ -104,8 +169,37 @@ macro_rules! scope {
         }
     };
 }
+scope!(CardiovascularScope, Cardiovascular, CardiovascularPorts);
+scope!(FluidsScope, Fluids, FluidsPorts);
 scope!(NervousScope, Nervous, NervousPorts);
 
+pub struct CardiovascularPorts<'b> {
+    brand: Brand<'b>,
+}
+impl<'b> CardiovascularPorts<'b> {
+    /// Records a law owed for every vascular edge before returning the route, so dropping the route
+    /// never drops what the fragment owes.
+    pub fn circulation(
+        &self,
+        laws: &mut FragmentBuilder<'b, Cardiovascular>,
+    ) -> EdgeRoute<'b, Cardiovascular, Water> {
+        laws.request(Family::Circulation);
+        EdgeRoute::requested(Family::Circulation)
+    }
+}
+pub struct FluidsPorts<'b> {
+    brand: Brand<'b>,
+}
+impl<'b> FluidsPorts<'b> {
+    /// Records a law owed for every capillary bed before returning the route.
+    pub fn starling(
+        &self,
+        laws: &mut FragmentBuilder<'b, Fluids>,
+    ) -> SiteRoute<'b, Fluids, CapillaryBed, Water> {
+        laws.request(Family::Starling);
+        SiteRoute::requested(Family::Starling)
+    }
+}
 pub struct NervousPorts<'b> {
     brand: Brand<'b>,
 }

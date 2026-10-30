@@ -1,210 +1,67 @@
 use crate::body::{
-    Binding, Block, Bound, Code, CompiledBody, Context, GuardLayout, Instance, Layout, ModeLayout,
-    ParameterId, ParameterSlot, Program, ProgramId, Row, RowId, RowKind, Sparsity, Target, UnknownId,
+    Binding, Block, Bound, Code, Column, ColumnId, CompiledBody, Context, GuardLayout, Instance, Layout,
+    ModeLayout, ParameterId, ParameterSlot, Program, ProgramId, Row, RowId, RowKind, Sparsity, Target,
+    UnknownId,
 };
+use crate::conservation::conserved_basis;
 use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::law::{
-    FragmentData, GuardDeclaration, Input, KernelData, Obligation, Op, ParameterContext,
+    End, Family, FragmentData, GuardDeclaration, Input, KernelData, Obligation, Op, ParameterContext,
     ParameterDeclaration, Selector, SlotDeclaration, SlotKind,
 };
-use crate::{AdmissionError, CompileDefect, LawName, ModeValue, ParameterKey, Predicate, RateClass, Schema};
+use crate::quantity::dimension;
+use crate::scope::PoolRef;
+use crate::{
+    AdmissibleSet, AdmissionError, Anatomy, Class, CompileDefect, LawName, ModeValue, Network, ParameterKey,
+    Predicate, RateClass, Schema, Space, Water,
+};
 
-/// The passes run in the order of `CompileDefect`'s refusals that need no layout, then lay the body
-/// out, so a body with one defect is refused for that defect and no other.
+/// Checks that need no layout run before the body is laid out, so a body with one defect is refused
+/// for that defect alone.
 pub(crate) fn compile(
     schema: Schema,
     issued: Vec<&'static str>,
     mut fragments: Vec<FragmentData>,
 ) -> Result<CompiledBody, AdmissionError> {
     fragments.sort_by_key(|fragment| fragment.owner);
-    let added = |owner: &&'static str| fragments.iter().any(|fragment| fragment.owner == *owner);
-    if let Some(&owner) = issued.iter().filter(|owner| !added(owner)).min() {
-        return Err(CompileDefect::MissingFragment { owner }.into());
-    }
-    for fragment in &fragments {
-        check_names(fragment)?;
-    }
+    check_fragments(&issued, &fragments)?;
     let declarations = declarations(&fragments)?;
     let owed = obligations(&fragments)?;
     check_guards(&fragments)?;
+    check_volume(&schema, &owed, &fragments)?;
 
-    let slots = slots(&fragments);
-    let rows: Vec<Row> = slots
-        .iter()
-        .enumerate()
-        .map(|(at, &(kind, name, slot))| Row {
-            unknown: UnknownId::at(at),
-            kind: match kind {
-                SlotKind::Memory => RowKind::Memory(name),
-                SlotKind::Algebraic => RowKind::Algebraic(name),
-            },
-            admissible: slot.set,
-            dimension: slot.dimension.clone(),
-        })
-        .collect();
-    let mut index: Vec<(LawName, usize)> = slots.iter().enumerate().map(|(at, slot)| (slot.1, at)).collect();
-    index.sort_unstable();
-    let row_of = |name: LawName| index[index.partition_point(|entry| entry.0 < name)].1;
-    let unknown = |name: LawName| UnknownId::at(row_of(name));
-
-    let mut programs = Vec::new();
-    let mut placed = Vec::new();
-    for law in &owed {
-        for &(predicate, kernel) in &law.laws {
-            let id = ProgramId::at(programs.len());
-            programs.push(Program {
-                id,
-                law: law.name,
-                code: code(law.fragment, predicate, kernel),
-            });
-            let (context, target) = match law.serves {
-                Serves::Slot => (Context::Body, Target::Row(RowId::at(row_of(law.name)))),
-            };
-            placed.push(Placed {
-                program: id,
-                context,
-                target,
-                addresses: addresses(law.fragment.owner, kernel, &unknown),
-            });
-        }
-    }
-    let mut guards = Vec::new();
-    for fragment in &fragments {
-        for guard in &fragment.guards {
-            let mode = &fragment.modes[guard.variable];
-            let layout = GuardLayout {
-                variable: LawName {
-                    owner: fragment.owner,
-                    local: mode.name,
-                },
-                leaves: mode.values[guard.leaves],
-                enters: mode.values[guard.enters],
-                crossing: guard.crossing,
-                code: code(fragment, predicate(fragment, guard.zero.modes), &guard.zero),
-                inputs: Vec::new(),
-            };
-            guards.push((layout, addresses(fragment.owner, &guard.zero, &unknown)));
-        }
-    }
-
-    let mut wanted: Vec<(ParameterKey, Binding)> = (placed.iter().map(|placed| &placed.addresses))
-        .chain(guards.iter().map(|guard| &guard.1))
-        .flatten()
-        .filter_map(|address| match *address {
-            Address::Parameter(key, binding) => Some((key, binding)),
-            Address::Unknown(_) => None,
-        })
-        .collect();
-    wanted.sort_unstable();
-    wanted.dedup();
-    let parameters = wanted
-        .iter()
-        .map(|&(key, binding)| {
-            let declared = declarations[declarations.partition_point(|declared| declared.key < key)];
-            ParameterSlot {
-                key,
-                binding,
-                default: match declared.context {
-                    ParameterContext::Body => None,
-                },
-                admissible: declared.set,
-                dimension: declared.dimension.clone(),
-            }
-        })
-        .collect();
-    let resolve = |address: &Address| match *address {
-        Address::Parameter(key, binding) => Bound::Parameter(ParameterId::at(
-            wanted.partition_point(|entry| *entry < (key, binding)),
-        )),
-        Address::Unknown(unknown) => Bound::Unknown(unknown),
-    };
-    let instances: Vec<Instance> = placed
-        .into_iter()
-        .map(|placed| {
-            let inputs: Vec<Bound> = placed.addresses.iter().map(resolve).collect();
-            let mut parameters = Vec::new();
-            for input in &inputs {
-                if let Bound::Parameter(parameter) = *input
-                    && !parameters.contains(&parameter)
-                {
-                    parameters.push(parameter);
-                }
-            }
-            Instance {
-                program: placed.program,
-                context: placed.context,
-                target: placed.target,
-                parameters,
-                inputs,
-            }
-        })
-        .collect();
-    let mut guards: Vec<GuardLayout> = guards
-        .into_iter()
-        .map(|(mut layout, addresses)| {
-            layout.inputs = addresses.iter().map(resolve).collect();
-            layout
-        })
-        .collect();
-    guards.sort_by_cached_key(|guard| {
-        let mut out = Canonical::new("guard");
-        guard.seal(&mut out);
-        out.digest()
-    });
-
-    let mut reads: Vec<Vec<UnknownId>> = vec![Vec::new(); rows.len()];
-    let mut rates: Vec<Vec<RateClass>> = vec![Vec::new(); rows.len()];
-    for instance in &instances {
-        let Target::Row(row) = instance.target;
-        reads[row.index()].extend(instance.inputs.iter().filter_map(|input| match *input {
-            Bound::Unknown(unknown) => Some(unknown),
-            Bound::Parameter(_) => None,
-        }));
-        rates[row.index()].push(programs[instance.program.index()].code.rate);
-    }
-    for (at, row) in rows.iter().enumerate() {
-        if !matches!(row.kind, RowKind::Algebraic(_)) {
-            reads[at].push(UnknownId::at(at));
-        }
-        reads[at].sort_unstable();
-        reads[at].dedup();
-    }
-    let solves = solve_order(&rows, &reads)?;
-    let blocks = blocks(&solves, &reads, &rates);
-    let mut offsets = vec![0];
-    offsets.extend(reads.iter().scan(0, |total, row| {
-        *total += row.len();
-        Some(*total)
-    }));
-    let sparsity = Sparsity {
-        offsets,
-        unknowns: reads.concat(),
-    };
-    let mut modes: Vec<ModeLayout> = fragments
-        .iter()
-        .flat_map(|fragment| {
-            fragment.modes.iter().map(|mode| ModeLayout {
-                variable: LawName {
-                    owner: fragment.owner,
-                    local: mode.name,
-                },
-                values: mode.values.clone(),
-            })
-        })
-        .collect();
-    modes.sort_by_key(|mode| mode.variable);
+    let rows = Rows::lay_out(&schema, &fragments);
+    let reaches = Reaches::of(&schema.anatomy);
+    let placement = place(&owed, &rows, &reaches)?;
+    check_orphans(&rows, &placement.columns)?;
+    let guards = guards(&fragments, &rows, &reaches)?;
+    let (parameters, instances, guards) = bind(placement.instances, guards, &declarations);
+    let (reads, rates) = reads(&rows.rows, &placement.columns, &placement.programs, &instances);
+    let solved_by = solve_order(&rows.rows, &reads)?;
+    let blocks = blocks(&solved_by, &reads, &rates);
+    let basis = conserved_basis(rows.amounts.len(), &placement.columns);
     Ok(CompiledBody::seal(Layout {
         schema,
-        rows,
-        programs,
+        rows: rows.rows,
+        columns: placement.columns,
+        programs: placement.programs,
         instances,
         parameters,
-        sparsity,
+        sparsity: sparsity(reads),
         blocks,
-        modes,
+        modes: modes(&fragments),
         guards,
+        basis,
     }))
+}
+
+fn check_fragments(issued: &[&'static str], fragments: &[FragmentData]) -> Result<(), CompileDefect> {
+    let added = |owner: &&'static str| fragments.iter().any(|fragment| fragment.owner == *owner);
+    if let Some(&owner) = issued.iter().filter(|owner| !added(owner)).min() {
+        return Err(CompileDefect::MissingFragment { owner });
+    }
+    fragments.iter().try_for_each(check_names)
 }
 
 /// Slots, mode variables and route families share one namespace per owner, so a law's name names
@@ -216,6 +73,7 @@ fn check_names(fragment: &FragmentData) -> Result<(), CompileDefect> {
     };
     let mut names: Vec<&'static str> = (fragment.slots.iter().map(|slot| slot.name))
         .chain(fragment.modes.iter().map(|mode| mode.name))
+        .chain(fragment.families.iter().map(|family| family.name()))
         .collect();
     names.sort_unstable();
     if let Some(pair) = names.windows(2).find(|pair| pair[0] == pair[1]) {
@@ -265,8 +123,10 @@ struct Owed<'f> {
     serves: Serves,
     laws: Vec<(Predicate, &'f KernelData)>,
 }
+#[derive(Clone, Copy)]
 enum Serves {
     Slot,
+    Family(Family),
 }
 
 fn obligations(fragments: &[FragmentData]) -> Result<Vec<Owed<'_>>, CompileDefect> {
@@ -278,6 +138,14 @@ fn obligations(fragments: &[FragmentData]) -> Result<Vec<Owed<'_>>, CompileDefec
                 slot.name,
                 Serves::Slot,
                 Obligation::Slot(slot.name),
+            ));
+        }
+        for &family in &fragment.families {
+            owed.push(Owed::gather(
+                fragment,
+                family.name(),
+                Serves::Family(family),
+                Obligation::Family(family),
             ));
         }
     }
@@ -408,21 +276,231 @@ fn check_guards(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     Ok(())
 }
 
-/// Memory slots, then algebraic slots, each by law name.
-fn slots(fragments: &[FragmentData]) -> Vec<(SlotKind, LawName, &SlotDeclaration)> {
-    let mut slots: Vec<(SlotKind, LawName, &SlotDeclaration)> = (fragments.iter())
-        .flat_map(|fragment| {
-            fragment.slots.iter().map(|slot| {
-                let name = LawName {
-                    owner: fragment.owner,
-                    local: slot.name,
-                };
-                (slot.kind, name, slot)
+/// A volume needs the schema's coefficient. A guard is named by its mode variable.
+fn check_volume(schema: &Schema, owed: &[Owed], fragments: &[FragmentData]) -> Result<(), CompileDefect> {
+    if schema.partial_volume.is_some() {
+        return Ok(());
+    }
+    let reads_volume = |kernel: &KernelData| kernel.code.iter().any(|op| matches!(op, Op::Volume(_)));
+    let laws = (owed.iter())
+        .filter(|law| law.laws.iter().any(|(_, kernel)| reads_volume(kernel)))
+        .map(|law| law.name);
+    let guards = fragments.iter().flat_map(|fragment| {
+        (fragment.guards.iter())
+            .filter(|guard| reads_volume(&guard.zero))
+            .map(|guard| LawName {
+                owner: fragment.owner,
+                local: fragment.modes[guard.variable].name,
             })
-        })
-        .collect();
-    slots.sort_unstable_by_key(|slot| (slot.0, slot.1));
-    slots
+    });
+    match laws.chain(guards).min() {
+        Some(law) => Err(CompileDefect::MissingPartialVolume { law }),
+        None => Ok(()),
+    }
+}
+
+/// The equation layout: every registry pool whose space the schema does not leave out, in registry
+/// order, then memory rows and then algebraic rows, each by law name. Row `i`'s unknown is `i`.
+struct Rows {
+    rows: Vec<Row>,
+    amounts: Vec<PoolRef>,
+    slots: Vec<(LawName, usize)>,
+}
+impl Rows {
+    fn lay_out(schema: &Schema, fragments: &[FragmentData]) -> Self {
+        let left_out = |space| schema.left_out.iter().any(|&(out, _)| out == space);
+        let amounts: Vec<PoolRef> = (schema.pools())
+            .filter(|&(_, space)| !left_out(space))
+            .map(|(site, space)| PoolRef { site, space })
+            .collect();
+        let mut slots: Vec<(SlotKind, LawName, &SlotDeclaration)> = (fragments.iter())
+            .flat_map(|fragment| {
+                fragment.slots.iter().map(|slot| {
+                    let name = LawName {
+                        owner: fragment.owner,
+                        local: slot.name,
+                    };
+                    (slot.kind, name, slot)
+                })
+            })
+            .collect();
+        slots.sort_unstable_by_key(|slot| (slot.0, slot.1));
+        let amount_rows = amounts.iter().map(|pool| {
+            let kind = RowKind::Amount {
+                site: pool.site,
+                space: pool.space,
+            };
+            (kind, AdmissibleSet::Nonnegative, dimension::<Water>())
+        });
+        let slot_rows = slots.iter().map(|&(kind, name, slot)| {
+            let kind = match kind {
+                SlotKind::Memory => RowKind::Memory(name),
+                SlotKind::Algebraic => RowKind::Algebraic(name),
+            };
+            (kind, slot.set, slot.dimension.clone())
+        });
+        let rows = (amount_rows.chain(slot_rows).enumerate())
+            .map(|(at, (kind, admissible, dimension))| Row {
+                unknown: UnknownId::at(at),
+                kind,
+                admissible,
+                dimension,
+            })
+            .collect();
+        let mut index: Vec<(LawName, usize)> = (slots.iter().enumerate())
+            .map(|(at, slot)| (slot.1, amounts.len() + at))
+            .collect();
+        index.sort_unstable();
+        Self {
+            rows,
+            amounts,
+            slots: index,
+        }
+    }
+    /// `None` when the schema leaves the pool's space out.
+    fn amount(&self, pool: PoolRef) -> Option<usize> {
+        self.amounts.binary_search(&pool).ok()
+    }
+    fn slot(&self, name: LawName) -> usize {
+        self.slots[self.slots.partition_point(|entry| entry.0 < name)].1
+    }
+}
+
+/// Where each instance of a route family applies and the two pools it joins.
+struct Reach {
+    context: Context,
+    ends: [PoolRef; 2],
+}
+struct Reaches {
+    circulation: Vec<Reach>,
+    starling: Vec<Reach>,
+}
+impl Reaches {
+    fn of(anatomy: &Anatomy) -> Self {
+        let vascular = |site: crate::SiteId| PoolRef {
+            site,
+            space: if site.class() == Class::CapillaryBed {
+                Space::Plasma
+            } else {
+                Space::Lumen
+            },
+        };
+        let circulation = (anatomy.vascular())
+            .map(|(from, to)| Reach {
+                context: Context::Edge { from, to },
+                ends: [vascular(from), vascular(to)],
+            })
+            .collect();
+        let starling = (anatomy.sites())
+            .filter(|site| site.class() == Class::CapillaryBed)
+            .map(|site| Reach {
+                context: Context::Site(site),
+                ends: [Space::Plasma, Space::Interstitium].map(|space| PoolRef { site, space }),
+            })
+            .collect();
+        Self {
+            circulation,
+            starling,
+        }
+    }
+    fn of_family(&self, family: Family) -> &[Reach] {
+        match family {
+            Family::Circulation => &self.circulation,
+            Family::Starling => &self.starling,
+        }
+    }
+    fn pool(&self, family: Family, end: End, context: Context) -> PoolRef {
+        let reach = (self.of_family(family).iter())
+            .find(|reach| reach.context == context)
+            .expect("a kernel reads a route's amounts only where a route of its own context applies");
+        reach.ends[end as usize]
+    }
+}
+
+/// Columns, programs and the instances that place them, in obligation order.
+struct Placement {
+    columns: Vec<Column>,
+    programs: Vec<Program>,
+    instances: Vec<Placed>,
+}
+/// A program instance before the parameter layout exists.
+struct Placed {
+    program: ProgramId,
+    context: Context,
+    target: Target,
+    addresses: Vec<Address>,
+}
+#[derive(Clone, Copy)]
+enum Address {
+    Parameter(ParameterKey, Binding),
+    Unknown(UnknownId),
+}
+
+fn place(owed: &[Owed], rows: &Rows, reaches: &Reaches) -> Result<Placement, CompileDefect> {
+    let mut placement = Placement {
+        columns: Vec::new(),
+        programs: Vec::new(),
+        instances: Vec::new(),
+    };
+    for law in owed {
+        let targets = match law.serves {
+            Serves::Slot => vec![(Context::Body, Target::Row(RowId::at(rows.slot(law.name))))],
+            Serves::Family(family) => {
+                let mut targets = Vec::new();
+                for reach in reaches.of_family(family) {
+                    targets.push((
+                        reach.context,
+                        Target::Column(ColumnId::at(placement.columns.len())),
+                    ));
+                    placement.columns.push(column(law.name, reach, rows)?);
+                }
+                targets
+            }
+        };
+        for &(predicate, kernel) in &law.laws {
+            let program = ProgramId::at(placement.programs.len());
+            placement.programs.push(Program {
+                id: program,
+                law: law.name,
+                code: code(law.fragment, predicate, kernel),
+            });
+            for &(context, target) in &targets {
+                placement.instances.push(Placed {
+                    program,
+                    context,
+                    target,
+                    addresses: addresses(law.name, kernel, context, rows, reaches)?,
+                });
+            }
+        }
+    }
+    Ok(placement)
+}
+
+/// A transfer takes from one end and gives to the other; with both ends in one pool it moves nothing.
+fn column(law: LawName, reach: &Reach, rows: &Rows) -> Result<Column, CompileDefect> {
+    let [from, to] = reach.ends;
+    let mut terms = Vec::new();
+    if from != to {
+        for (pool, coefficient) in [(from, -1), (to, 1)] {
+            let row = rows.amount(pool).ok_or(left_out(law, pool))?;
+            terms.push((RowId::at(row), coefficient));
+        }
+        terms.sort_unstable();
+    }
+    Ok(Column {
+        terms,
+        origin: law,
+        context: reach.context,
+    })
+}
+
+fn left_out(law: LawName, pool: PoolRef) -> CompileDefect {
+    CompileDefect::LeftOutTouched {
+        law,
+        site: pool.site,
+        space: pool.space,
+    }
 }
 
 fn code(fragment: &FragmentData, predicate: Predicate, kernel: &KernelData) -> Code {
@@ -440,37 +518,212 @@ fn code(fragment: &FragmentData, predicate: Predicate, kernel: &KernelData) -> C
     }
 }
 
-/// A program instance before the parameter layout exists.
-struct Placed {
-    program: ProgramId,
-    context: Context,
-    target: Target,
-    addresses: Vec<Address>,
-}
-#[derive(Clone, Copy)]
-enum Address {
-    Parameter(ParameterKey, Binding),
-    Unknown(UnknownId),
-}
-
-/// What each input instruction of `kernel` reads, in instruction order.
+/// What each input instruction of `kernel` reads at `context`, in instruction order.
 fn addresses(
-    owner: &'static str,
+    law: LawName,
     kernel: &KernelData,
-    unknown: &impl Fn(LawName) -> UnknownId,
-) -> Vec<Address> {
+    context: Context,
+    rows: &Rows,
+    reaches: &Reaches,
+) -> Result<Vec<Address>, CompileDefect> {
     let inputs = kernel.code.iter().filter_map(|op| match op {
         Op::Input(input) => Some(*input),
         _ => None,
     });
+    let site = |end, from, to| if end == End::From { from } else { to };
     inputs
-        .map(|input| match input {
-            Input::Parameter(key) => Address::Parameter(key, Binding::Body),
-            Input::Memory(local) | Input::Algebraic(local) => {
-                Address::Unknown(unknown(LawName { owner, local }))
-            }
+        .map(|input| {
+            Ok(match (input, context) {
+                (Input::Memory(local) | Input::Algebraic(local), _) => {
+                    let slot = LawName {
+                        owner: law.owner,
+                        local,
+                    };
+                    Address::Unknown(UnknownId::at(rows.slot(slot)))
+                }
+                (Input::Amount(family, end), _) => {
+                    let pool = reaches.pool(family, end, context);
+                    Address::Unknown(UnknownId::at(rows.amount(pool).ok_or(left_out(law, pool))?))
+                }
+                (Input::Parameter(key), _) => Address::Parameter(key, Binding::Body),
+                (Input::SiteParameter(key), Context::Site(at)) => Address::Parameter(key, Binding::Site(at)),
+                (Input::EdgeParameter(key), Context::Edge { from, to }) => {
+                    Address::Parameter(key, Binding::Edge { from, to })
+                }
+                (Input::EndParameter(key, end), Context::Edge { from, to }) => {
+                    Address::Parameter(key, Binding::Site(site(end, from, to)))
+                }
+                (Input::SiteParameter(_) | Input::EdgeParameter(_) | Input::EndParameter(..), _) => {
+                    unreachable!("a kernel reads a site or edge parameter only in a context of its kind")
+                }
+            })
         })
         .collect()
+}
+
+/// An amount every column leaves untouched is modeled and never moved.
+fn check_orphans(rows: &Rows, columns: &[Column]) -> Result<(), CompileDefect> {
+    let mut moved = vec![false; rows.amounts.len()];
+    for &(row, _) in columns.iter().flat_map(|column| &column.terms) {
+        moved[row.index()] = true;
+    }
+    match rows.amounts.iter().zip(&moved).find(|(_, moved)| !**moved) {
+        Some((pool, _)) => Err(CompileDefect::OrphanPool {
+            site: pool.site,
+            space: pool.space,
+        }),
+        None => Ok(()),
+    }
+}
+
+fn guards(
+    fragments: &[FragmentData],
+    rows: &Rows,
+    reaches: &Reaches,
+) -> Result<Vec<(GuardLayout, Vec<Address>)>, CompileDefect> {
+    let mut guards = Vec::new();
+    for fragment in fragments {
+        for guard in &fragment.guards {
+            let mode = &fragment.modes[guard.variable];
+            let variable = LawName {
+                owner: fragment.owner,
+                local: mode.name,
+            };
+            let layout = GuardLayout {
+                variable,
+                leaves: mode.values[guard.leaves],
+                enters: mode.values[guard.enters],
+                crossing: guard.crossing,
+                code: code(fragment, predicate(fragment, guard.zero.modes), &guard.zero),
+                inputs: Vec::new(),
+            };
+            let addresses = addresses(variable, &guard.zero, Context::Body, rows, reaches)?;
+            guards.push((layout, addresses));
+        }
+    }
+    Ok(guards)
+}
+
+/// The parameter layout, one slot per key and binding in that order, and every input bound to it.
+fn bind(
+    placed: Vec<Placed>,
+    guards: Vec<(GuardLayout, Vec<Address>)>,
+    declarations: &[&ParameterDeclaration],
+) -> (Vec<ParameterSlot>, Vec<Instance>, Vec<GuardLayout>) {
+    let mut wanted: Vec<(ParameterKey, Binding)> = (placed.iter().map(|placed| &placed.addresses))
+        .chain(guards.iter().map(|guard| &guard.1))
+        .flatten()
+        .filter_map(|address| match *address {
+            Address::Parameter(key, binding) => Some((key, binding)),
+            Address::Unknown(_) => None,
+        })
+        .collect();
+    wanted.sort_unstable();
+    wanted.dedup();
+    let parameters = (wanted.iter())
+        .map(|&(key, binding)| {
+            let declared = declarations[declarations.partition_point(|declared| declared.key < key)];
+            ParameterSlot {
+                key,
+                binding,
+                default: match declared.context {
+                    ParameterContext::Body => None,
+                    ParameterContext::Site(class) => Some(Binding::Class(class)),
+                    ParameterContext::Edge | ParameterContext::End => {
+                        Some(Binding::Network(Network::Vascular))
+                    }
+                },
+                admissible: declared.set,
+                dimension: declared.dimension.clone(),
+            }
+        })
+        .collect();
+    let resolve = |address: &Address| match *address {
+        Address::Parameter(key, binding) => Bound::Parameter(ParameterId::at(
+            wanted.partition_point(|entry| *entry < (key, binding)),
+        )),
+        Address::Unknown(unknown) => Bound::Unknown(unknown),
+    };
+    let instances = (placed.into_iter())
+        .map(|placed| {
+            let inputs: Vec<Bound> = placed.addresses.iter().map(resolve).collect();
+            let mut parameters = Vec::new();
+            for input in &inputs {
+                if let Bound::Parameter(parameter) = *input
+                    && !parameters.contains(&parameter)
+                {
+                    parameters.push(parameter);
+                }
+            }
+            Instance {
+                program: placed.program,
+                context: placed.context,
+                target: placed.target,
+                parameters,
+                inputs,
+            }
+        })
+        .collect();
+    let mut guards: Vec<GuardLayout> = (guards.into_iter())
+        .map(|(mut layout, addresses)| {
+            layout.inputs = addresses.iter().map(resolve).collect();
+            layout
+        })
+        .collect();
+    guards.sort_by_cached_key(|guard| {
+        let mut out = Canonical::new("guard");
+        guard.seal(&mut out);
+        out.digest()
+    });
+    (parameters, instances, guards)
+}
+
+/// What each row reads and the rate classes of the laws defining it. An amount's row reads what
+/// every column moving it reads; a differential row also reads its own unknown.
+fn reads(
+    rows: &[Row],
+    columns: &[Column],
+    programs: &[Program],
+    instances: &[Instance],
+) -> (Vec<Vec<UnknownId>>, Vec<Vec<RateClass>>) {
+    let mut reads: Vec<Vec<UnknownId>> = vec![Vec::new(); rows.len()];
+    let mut rates: Vec<Vec<RateClass>> = vec![Vec::new(); rows.len()];
+    for instance in instances {
+        let unknowns: Vec<UnknownId> = (instance.inputs.iter())
+            .filter_map(|input| match *input {
+                Bound::Unknown(unknown) => Some(unknown),
+                Bound::Parameter(_) => None,
+            })
+            .collect();
+        let defined: Vec<RowId> = match instance.target {
+            Target::Row(row) => vec![row],
+            Target::Column(column) => columns[column.index()].terms.iter().map(|term| term.0).collect(),
+        };
+        for row in defined {
+            reads[row.index()].extend(&unknowns);
+            rates[row.index()].push(programs[instance.program.index()].code.rate);
+        }
+    }
+    for (at, row) in rows.iter().enumerate() {
+        if !matches!(row.kind, RowKind::Algebraic(_)) {
+            reads[at].push(UnknownId::at(at));
+        }
+        reads[at].sort_unstable();
+        reads[at].dedup();
+    }
+    (reads, rates)
+}
+
+fn sparsity(reads: Vec<Vec<UnknownId>>) -> Sparsity {
+    let mut offsets = vec![0];
+    offsets.extend(reads.iter().scan(0, |total, row| {
+        *total += row.len();
+        Some(*total)
+    }));
+    Sparsity {
+        offsets,
+        unknowns: reads.concat(),
+    }
 }
 
 /// The row that determines each unknown: a differential row its own unknown, an algebraic row the
@@ -544,7 +797,7 @@ fn blocks(solved_by: &[usize], reads: &[Vec<UnknownId>], rates: &[Vec<RateClass>
             let rate = (rows.iter().flat_map(|&row| &rates[row]))
                 .copied()
                 .min_by_key(|rate| (rate.maximum_ns(), rate.band()))
-                .expect("coverage gives every row at least one law");
+                .expect("coverage and the orphan rule give every row at least one law");
             Block {
                 rows: rows.into_iter().map(RowId::at).collect(),
                 unknowns,
@@ -552,4 +805,20 @@ fn blocks(solved_by: &[usize], reads: &[Vec<UnknownId>], rates: &[Vec<RateClass>
             }
         })
         .collect()
+}
+
+fn modes(fragments: &[FragmentData]) -> Vec<ModeLayout> {
+    let mut modes: Vec<ModeLayout> = (fragments.iter())
+        .flat_map(|fragment| {
+            fragment.modes.iter().map(|mode| ModeLayout {
+                variable: LawName {
+                    owner: fragment.owner,
+                    local: mode.name,
+                },
+                values: mode.values.clone(),
+            })
+        })
+        .collect();
+    modes.sort_by_key(|mode| mode.variable);
+    modes
 }

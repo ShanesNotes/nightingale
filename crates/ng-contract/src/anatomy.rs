@@ -640,4 +640,9 @@ impl Anatomy {
     pub(crate) fn sites(&self) -> impl Iterator<Item = SiteId> + '_ {
         self.sites.iter().map(|site| site.id)
     }
+
+    /// Each vascular edge once, by its ends' keys.
+    pub(crate) fn vascular(&self) -> impl Iterator<Item = (SiteId, SiteId)> + '_ {
+        (self.vascular.iter()).map(|&(from, to)| (self.sites[from].id, self.sites[to].id))
+    }
 }

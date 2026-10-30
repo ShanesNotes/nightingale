@@ -1,4 +1,4 @@
-use crate::{AnatomyDefect, LawName, ModeValue, ParameterKey, Predicate};
+use crate::{AnatomyDefect, LawName, ModeValue, ParameterKey, Predicate, SiteId, Space};
 
 /// A refusal at a construction call, at `AnatomyBuilder::finish`, or at `Assembly::compile`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -18,6 +18,9 @@ pub enum AdmissionError {
     ZeroRateInterval,
     /// A validity range whose lower bound is above its upper bound.
     ReversedValidityRange,
+    NonPositivePartialVolume,
+    /// A second partial-volume coefficient that differs from the first.
+    PartialVolumeTwice,
 }
 impl From<AnatomyDefect> for AdmissionError {
     fn from(defect: AnatomyDefect) -> Self {
@@ -57,4 +60,15 @@ pub enum CompileDefect {
     BadModeVariable { variable: LawName },
     /// An algebraic row that no structural matching pairs with an algebraic unknown it reads.
     StructuralSingularity { law: LawName },
+    /// A pool this body models that no transfer moves. A read never moves a pool, and a transfer whose
+    /// two ends are one pool moves nothing.
+    OrphanPool { site: SiteId, space: Space },
+    /// A law that moves or reads a pool in a space the schema leaves out.
+    LeftOutTouched {
+        law: LawName,
+        site: SiteId,
+        space: Space,
+    },
+    /// A law that reads a volume when the schema declares no partial-volume coefficient.
+    MissingPartialVolume { law: LawName },
 }
