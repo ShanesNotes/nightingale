@@ -11,7 +11,7 @@ const NANOSECONDS_PER_SECOND: f64 = 1e9;
 const ROUNDOFF: f64 = 1.0 / 562_949_953_421_312.0;
 
 /// A model default reported with every result. Measured on the two-reservoir case: the estimate reaches
-/// 4.0 on 64 s steps of amounts near 1e6, so this passes those steps and refuses much longer ones.
+/// 4.0 on 64 s steps of amounts near 5e5, so this passes those steps and refuses much longer ones.
 fn default_scales() -> ErrorScales {
     let scale = |value| Measure::new(value).expect("a finite constant");
     ErrorScales::uniform(scale(1.0), scale(1e-5)).expect("positive constants")
