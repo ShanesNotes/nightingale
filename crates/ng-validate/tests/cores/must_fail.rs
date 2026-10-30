@@ -170,9 +170,10 @@ impl CoupledSolver for OtherValues<'_> {
     }
 }
 
-/// Keeps its history across a breakpoint.
+/// Restarts honestly through `keeps_after`, then keeps its history across the next breakpoint.
 pub struct KeptHistory {
     pub inner: ForwardEuler,
+    pub keeps_after: SimTime,
 }
 impl CoupledSolver for KeptHistory {
     fn resolution(&self) -> DeclaredResolution {
@@ -186,7 +187,11 @@ impl CoupledSolver for KeptHistory {
         let mut quadrature = problem.quadrature(ticket);
         quadrature.add(&stage, Ratio::ONE)?;
         let accepted = problem.accepted().method_history();
-        let history = MethodHistory::new(accepted.schema(), accepted.started_at(), Vec::new());
+        let history = if ticket.interval().start() > self.keeps_after {
+            MethodHistory::new(accepted.schema(), accepted.started_at(), Vec::new())
+        } else {
+            fresh_history(problem, ticket)
+        };
         Ok(problem.propose(ticket, quadrature.finish()?, &workspace, history))
     }
 }
@@ -379,7 +384,7 @@ impl CoupledSolver for ForeignWorkspace<'_> {
         let mut quadrature = problem.quadrature(ticket);
         quadrature.add(&stage, Ratio::ONE)?;
         let history = fresh_history(problem, ticket);
-        Ok(problem.propose(ticket, quadrature.finish()?, &workspace, history))
+        Ok(problem.propose(ticket, quadrature.finish()?, &problem.workspace(), history))
     }
 }
 

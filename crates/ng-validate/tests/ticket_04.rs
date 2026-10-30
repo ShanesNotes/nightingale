@@ -292,12 +292,22 @@ fn a_stage_evaluated_on_other_values_faults_with_method_mismatch() {
 #[test]
 fn a_history_kept_across_a_breakpoint_faults_with_method_mismatch() {
     let case = stepped();
-    let (instant, _) = case.delivery().expect("a delivery");
-    let core = KeptHistory {
-        inner: euler(8 * SECOND),
-    };
-    let session = to(case.admit(&core).expect("admitted"), instant);
-    assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::MethodMismatch);
+    let (start, _) = case.delivery().expect("a delivery");
+    let end = SimTime::from_ns(6_000 * SECOND);
+    for (keeps_after, breakpoint) in [(SimTime::from_ns(0), start), (start, end)] {
+        let core = KeptHistory {
+            inner: euler(8 * SECOND),
+            keeps_after,
+        };
+        let session = to(case.admit(&core).expect("admitted"), breakpoint);
+        let fault = fault_of(session.step());
+        assert_eq!(fault.kind(), EngineFaultKind::MethodMismatch);
+        assert_eq!(
+            fault.at(),
+            breakpoint,
+            "a delivery's start and its end each restart a core"
+        );
+    }
 }
 
 #[test]
@@ -436,15 +446,21 @@ fn another_bodys_stage_workspace_or_proposal_is_a_binding_mismatch() {
     };
     let fault = fault_of(case.admit(&core).expect("admitted").step());
     assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
-    let core = ForeignWorkspace {
-        inner: euler(8 * SECOND),
-        body,
-        values: &values,
-        identity,
-        accepted,
-    };
-    let fault = fault_of(case.admit(&core).expect("admitted").step());
-    assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
+    {
+        // One row where the record's body has two, so a read past its end would panic, not refuse.
+        let lone = filter_only_body();
+        let host = admit_fixture(&lone, filter_only_packet(), no_events(), &inner).expect("admitted");
+        let values = lone.bind(filter_only_packet()).expect("bound");
+        let core = ForeignWorkspace {
+            inner: euler(8 * SECOND),
+            body: &lone,
+            values: &values,
+            identity: host.record().identity(),
+            accepted: host.record().accepted(),
+        };
+        let fault = fault_of(case.admit(&core).expect("admitted").step());
+        assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
+    }
     let core = ForeignProposal {
         inner: euler(8 * SECOND),
         body,
@@ -1354,6 +1370,42 @@ fn the_ending_interval_sees_the_left_value_and_the_next_the_new_one() {
 }
 
 // Memory, algebraic rows and validity.
+
+fn no_events() -> BoundaryPort {
+    BoundaryPort::new(Vec::new()).expect("no event")
+}
+
+/// One memory row and nothing else.
+fn filter_only_body() -> CompiledBody {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", origin());
+    let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    assemble(schema, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let filter = laws.state::<Dimensionless>("filter", Admissible::finite());
+        let reflex = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let rate = laws.kernel(|mut k| {
+            let zero = k.zero::<Rate<Dimensionless>>();
+            k.finish(zero, laws.every_mode(), reflex)
+        });
+        laws.memory_rate(&filter, rate);
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled")
+}
+
+fn filter_only_packet() -> ParameterPacket<SyntheticFixture> {
+    let mut packet = ParameterPacket::new();
+    let row = RowKind::Memory(LawName {
+        owner: "NS",
+        local: "filter",
+    });
+    packet
+        .start(row, measure::<Dimensionless>(1.0), "synthetic")
+        .expect("once");
+    packet
+}
 
 /// A filter `m' = s (t - m)` and a reading closed algebraically at `x = p m`.
 fn filter_body() -> CompiledBody {
