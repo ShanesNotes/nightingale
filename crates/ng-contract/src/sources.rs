@@ -79,9 +79,9 @@ impl AdmissibleSet {
         value.is_finite()
             && match self {
                 AdmissibleSet::Finite => true,
-                AdmissibleSet::Nonnegative => value >= Compensated::ZERO,
-                AdmissibleSet::Positive => value > Compensated::ZERO,
-                AdmissibleSet::UnitInterval => value >= Compensated::ZERO && value <= one,
+                AdmissibleSet::Nonnegative => Compensated::ZERO.at_most(value),
+                AdmissibleSet::Positive => !value.at_most(Compensated::ZERO),
+                AdmissibleSet::UnitInterval => Compensated::ZERO.at_most(value) && value.at_most(one),
             }
     }
 }

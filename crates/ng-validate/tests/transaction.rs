@@ -119,7 +119,7 @@ fn the_stepped_inflow_matches_its_closed_form_at_first_order_over_three_refineme
     let error = |interval| accuracy(&reference(interval), &gate(stepped())).expect("within the policy");
     let (coarse, medium, fine) = (error(16 * SECOND), error(8 * SECOND), error(4 * SECOND));
     assert_eq!(coarse.policy(), gate(stepped()).digest());
-    assert!(fine.worst()[0] < medium.worst()[0] && medium.worst()[0] < coarse.worst()[0]);
+    assert!(fine.worst()[0].at_most(medium.worst()[0]) && medium.worst()[0].at_most(coarse.worst()[0]));
     observed_order([&coarse, &medium, &fine], measure(1.9), measure(2.1)).expect("first order");
     let reversed = observed_order([&fine, &medium, &coarse], measure(1.9), measure(2.1));
     assert!(matches!(reversed, Err(AccuracyFailure::Order { .. })));
@@ -148,7 +148,7 @@ fn forward_euler_past_rc_closes_every_ledger_and_fails_the_accuracy_gate() {
     );
     let (first, _) = accepted(case.admit(&core).expect("admitted").step());
     for row in case.rows() {
-        assert!(first.record().accepted().value(row) > Compensated::ZERO);
+        assert!(!first.record().accepted().value(row).at_most(Compensated::ZERO));
     }
 }
 
@@ -1836,9 +1836,17 @@ fn closure_holds_over_every_window_and_drift_tells_a_closed_body_from_an_open_on
         result.quantity(),
         view.basis().ids().next().expect("one combination")
     );
-    assert!(result.worst_closure() < Compensated::of(&measure::<Water>(1e-24)));
+    assert!(
+        result
+            .worst_closure()
+            .at_most(Compensated::of(&measure::<Water>(1e-24)))
+    );
     assert_eq!(result.closure_window().length_ns(), 24 * HOUR);
-    assert!(result.worst_drift() < Compensated::of(&measure::<Water>(1e-6)));
+    assert!(
+        result
+            .worst_drift()
+            .at_most(Compensated::of(&measure::<Water>(1e-6)))
+    );
 
     let open = stepped();
     let session = to(open.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
@@ -2151,7 +2159,7 @@ fn a_segment_samples_only_its_own_interval() {
     let end = session.record().accepted().value(row);
     assert_eq!(segment.sample(row, SimTime::from_ns(8 * SECOND)), Some(end));
     let halfway = segment.sample(row, SimTime::from_ns(4 * SECOND)).expect("inside");
-    assert!(start > halfway && halfway > end);
+    assert!(!start.at_most(halfway) && !halfway.at_most(end));
     assert_eq!(segment.sample(row, SimTime::from_ns(8 * SECOND + 1)), None);
     let view = session.record().conservation();
     let quantity = view.basis().ids().next().expect("one combination");

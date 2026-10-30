@@ -164,16 +164,14 @@ pub fn accuracy(
             for at in compared_instants(interval, policy.grid_ns) {
                 for (value, exact) in comparisons(case, record, at) {
                     let error = value.minus(exact).abs();
-                    // Read this way round, an overflowed value's NaN fails instead of passing.
-                    let within = error <= policy.absolute.plus(exact.abs().times(&policy.relative));
-                    if !within {
+                    if !error.at_most(policy.absolute.plus(exact.abs().times(&policy.relative))) {
                         return Err(AccuracyFailure::Exceeded {
                             case: index,
                             at,
                             error,
                         });
                     }
-                    if error > largest {
+                    if !error.at_most(largest) {
                         largest = error;
                     }
                 }
@@ -199,10 +197,10 @@ pub fn observed_order(
             return Err(AccuracyFailure::MixedEvidence { refinement });
         }
         for (case, (coarse, fine)) in pair[0].worst.iter().zip(&pair[1].worst).enumerate() {
-            // Read this way round, an overflowed limit's NaN fails instead of passing, and an exact
-            // answer, which has no ratio to read, fails too.
-            let within =
-                *fine > Compensated::ZERO && *coarse >= fine.times(&low) && *coarse <= fine.times(&high);
+            // An exact answer has no ratio to read, so it fails too.
+            let within = !fine.at_most(Compensated::ZERO)
+                && fine.times(&low).at_most(*coarse)
+                && coarse.at_most(fine.times(&high));
             if !within {
                 return Err(AccuracyFailure::Order { case, refinement });
             }

@@ -306,9 +306,7 @@ pub fn certify(
                 let closure = change[index].minus(inflow[index].minus(outflow[index])).abs();
                 let gross = inflow[index].plus(outflow[index]);
                 let allowed = limits.absolute.plus(gross.times(&limits.relative));
-                // Read this way round, an overflowed window's NaN fails instead of passing.
-                let closes = closure <= allowed;
-                if !closes {
+                if !closure.at_most(allowed) {
                     return Err(CertificateFailure {
                         check: CertificateCheck::Closure,
                         quantity: Some(quantity),
@@ -317,7 +315,7 @@ pub fn certify(
                     });
                 }
                 let drift = change[index].abs();
-                if drift > limits.drift && drifted.is_none() {
+                if !drift.at_most(limits.drift) && drifted.is_none() {
                     drifted = Some(CertificateFailure {
                         check: CertificateCheck::Drift,
                         quantity: Some(quantity),
@@ -332,11 +330,11 @@ pub fn certify(
                     worst_drift: drift,
                     drift_window: window,
                 });
-                if closure > result.worst_closure {
+                if !closure.at_most(result.worst_closure) {
                     result.worst_closure = closure;
                     result.closure_window = window;
                 }
-                if drift > result.worst_drift {
+                if !drift.at_most(result.worst_drift) {
                     result.worst_drift = drift;
                     result.drift_window = window;
                 }

@@ -2,8 +2,8 @@ use crate::identity::{Canonical, Seal};
 use crate::{Dimensionless, Measure};
 
 /// An amount as a compensated pair: `hi` the rounded sum and `lo` what rounding left out, normalized so
-/// the derived order is the order of the exact values.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+/// `at_most` reads the order of the exact values.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Compensated {
     hi: f64,
     lo: f64,
@@ -49,6 +49,11 @@ impl Compensated {
     }
     pub(crate) fn exact(value: f64) -> Self {
         Self { hi: value, lo: 0.0 }
+    }
+    /// Whether this is no more than `limit`, and false on a NaN at either side. It is the one comparison:
+    /// `<` and `>` read false on a NaN, so a check written with them passes what overflowed.
+    pub fn at_most(self, limit: Self) -> bool {
+        self.hi < limit.hi || (self.hi == limit.hi && self.lo <= limit.lo)
     }
     pub fn plus(self, other: Self) -> Self {
         let (sum, error) = two_sum(self.hi, other.hi);
@@ -149,7 +154,15 @@ mod tests {
     fn the_order_is_the_order_of_the_exact_values() {
         let above = exact(1.0).plus(exact(1e-30));
         let below = exact(1.0).minus(exact(1e-30));
-        assert!(below < exact(1.0) && exact(1.0) < above);
+        assert!(below.at_most(exact(1.0)) && exact(1.0).at_most(above));
+        assert!(!exact(1.0).at_most(below) && !above.at_most(exact(1.0)));
+        assert!(above.at_most(above));
+    }
+
+    #[test]
+    fn no_comparison_passes_a_nan() {
+        let nan = exact(f64::NAN);
+        assert!(!nan.at_most(exact(1.0)) && !exact(1.0).at_most(nan) && !nan.at_most(nan));
     }
 
     #[test]
@@ -163,7 +176,7 @@ mod tests {
     fn a_product_keeps_its_low_part() {
         let third = exact(1.0).quotient(3.0);
         let one = third.scaled(3);
-        assert!(one.minus(exact(1.0)).abs() < exact(1e-31));
+        assert!(one.minus(exact(1.0)).abs().at_most(exact(1e-31)));
         let half = Measure::<Dimensionless>::new(0.5).map(|factor| third.times(&factor));
         assert_eq!(half.map(|value| value.bits()), Ok(third.quotient(2.0).bits()));
     }
@@ -199,7 +212,12 @@ mod tests {
         let inside = Compensated::between(exact(0.0), exact(3.0), 1, 3);
         assert_eq!(inside, exact(1.0));
         let tiny = Compensated::between(exact(1.0), exact(1.0).plus(exact(3e-30)), 2, 3);
-        assert!(tiny.minus(exact(1.0)).minus(exact(2e-30)).abs() < exact(1e-45));
+        assert!(
+            tiny.minus(exact(1.0))
+                .minus(exact(2e-30))
+                .abs()
+                .at_most(exact(1e-45))
+        );
     }
 
     #[test]
