@@ -92,7 +92,7 @@ fn newton(
     let per_second = NANOSECONDS_PER_SECOND / span_ns as f64;
     let start = workspace.unknowns_mut().to_vec();
     let mut settled = false;
-    for _ in 0..NEWTON_LIMIT {
+    for updates_left in (0..=NEWTON_LIMIT).rev() {
         let unknowns = workspace.unknowns_mut().to_vec();
         for ((tangent, now), then) in workspace.derivative_mut().iter_mut().zip(&unknowns).zip(&start) {
             *tangent = (now - then) * per_second;
@@ -101,6 +101,9 @@ fn newton(
         let stage = problem.evaluate(&point)?;
         if settled || stage.residuals().iter().all(|residual| *residual == 0.0) {
             return Ok(stage);
+        }
+        if updates_left == 0 {
+            break;
         }
         let jacobian = problem.linearize(&point, shift)?;
         let Some(update) = solve_dense(jacobian.view(), stage.residuals()) else {

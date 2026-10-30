@@ -2207,10 +2207,8 @@ fn the_accuracy_gate_does_not_pass_on_a_value_that_overflowed() {
     );
 }
 
-#[test]
-fn newton_solves_an_algebraic_row_to_rounding_on_a_short_step() {
-    // `m' = 0.001` and `x x = m` from `(1, 1)`. At 1 ms a test scaled for `m`'s rate would stop with `x`'s
-    // residual near 2.5e-13, above these scales, though one more iteration solves it.
+/// One step of `m' = r` and `x x = m` from `(1, 1)`, under scales that leave no room to stop early.
+fn newton_reaches_the_root(rate: f64, interval_ns: u64) {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", origin());
     let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
@@ -2241,9 +2239,9 @@ fn newton_solves_an_algebraic_row_to_rounding_on_a_short_step() {
     .expect("compiled");
     let name = |local| LawName { owner: "NS", local };
     let mut packet = ParameterPacket::new();
-    let rate = measure::<Rate<Dimensionless>>(0.001);
+    let value = measure::<Rate<Dimensionless>>(rate);
     packet
-        .synthetic(ParameterKey::new("ns.rate"), Binding::Body, rate, "synthetic")
+        .synthetic(ParameterKey::new("ns.rate"), Binding::Body, value, "synthetic")
         .expect("once");
     for start in [
         RowKind::Memory(name("memory")),
@@ -2253,11 +2251,28 @@ fn newton_solves_an_algebraic_row_to_rounding_on_a_short_step() {
             .start(start, measure::<Dimensionless>(1.0), "synthetic")
             .expect("once");
     }
-    let core = reference(MILLISECOND).with_scales(scales(1e-14, 0.0));
+    let core = reference(interval_ns)
+        .with_floor(1)
+        .with_scales(scales(1e-14, 0.0));
     let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
     let (session, _) = accepted(session.step());
+    let root = (1.0 + rate * interval_ns as f64 / 1e9).sqrt();
     let solved = hi(session.record().accepted().value(body.rows()[1].id()));
-    assert!((solved - 1.000_000_5).abs() < 1e-9, "{solved}");
+    assert!((solved - root).abs() < 1e-12, "{solved} against {root}");
+}
+
+#[test]
+fn newton_solves_an_algebraic_row_to_rounding_on_a_short_step() {
+    // Scaling every residual by the span stops the 1 ns stage with the root's residual near 9.6e-13, above
+    // these scales, though the next update solves it.
+    newton_reaches_the_root(0.001, MILLISECOND);
+    newton_reaches_the_root(2.8e6, 1);
+}
+
+#[test]
+fn newton_reads_the_stage_its_last_update_reaches() {
+    // From `x = 1` the root of 16 takes all eight updates.
+    newton_reaches_the_root(15.0, SECOND);
 }
 
 #[test]
