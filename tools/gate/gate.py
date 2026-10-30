@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime
+import fcntl
 import hashlib
 import json
 import os
@@ -2006,31 +2007,36 @@ def compile_fail_codes(
     copy of the tree with the markers removed, and each must fail with the code its marker declares."""
     base = (ROOT / (os.environ.get("CARGO_TARGET_DIR") or "target")).resolve() / "gate/codes"
     tree = base / "tree"
-    shutil.rmtree(tree, ignore_errors=True)
-    for rel in list_files(root):
-        if (root / rel).is_file() and not (root / rel).is_symlink():
-            (tree / rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(root / rel, tree / rel)
-    declared: dict[tuple[str, int], str | None] = {}
-    for rel in sources:
-        lines = _read(root / rel).split("\n")
-        for n, line in enumerate(lines, 1):
-            m = DOC_FENCE.match(line)
-            if m and "compile_fail" in (words := _fence_words(m.group(3))):
-                codes = [w for w in words if re.fullmatch(r"E\d{4}", w)]
-                declared[(rel, n)] = codes[0] if len(codes) == 1 else None
-                kept = [w for w in words if w != "compile_fail" and not re.fullmatch(r"E\d{4}", w)]
-                lines[n - 1] = m.group(1) + m.group(2) + ",".join(kept)
-        (tree / rel).write_text("\n".join(lines), encoding="utf-8")
-    r = subprocess.run(
-        ["cargo", "test", "--doc", "--locked", *(a for p in packages for a in ("-p", p)), "--target-dir",
-         str(base / "target")],
-        cwd=tree / cwd,
-        env={**os.environ, "RUSTFLAGS": "", "RUSTDOCFLAGS": ""},
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    base.mkdir(parents=True, exist_ok=True)
+    # An absolute CARGO_TARGET_DIR, as on the integrate gate, shares this tree between checkouts, so runs
+    # take turns: otherwise one run's doctests could build from another checkout's copy.
+    with open(base / "lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        shutil.rmtree(tree, ignore_errors=True)
+        for rel in list_files(root):
+            if (root / rel).is_file() and not (root / rel).is_symlink():
+                (tree / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(root / rel, tree / rel)
+        declared: dict[tuple[str, int], str | None] = {}
+        for rel in sources:
+            lines = _read(root / rel).split("\n")
+            for n, line in enumerate(lines, 1):
+                m = DOC_FENCE.match(line)
+                if m and "compile_fail" in (words := _fence_words(m.group(3))):
+                    codes = [w for w in words if re.fullmatch(r"E\d{4}", w)]
+                    declared[(rel, n)] = codes[0] if len(codes) == 1 else None
+                    kept = [w for w in words if w != "compile_fail" and not re.fullmatch(r"E\d{4}", w)]
+                    lines[n - 1] = m.group(1) + m.group(2) + ",".join(kept)
+            (tree / rel).write_text("\n".join(lines), encoding="utf-8")
+        r = subprocess.run(
+            ["cargo", "test", "--doc", "--locked", *(a for p in packages for a in ("-p", p)), "--target-dir",
+             str(base / "target")],
+            cwd=tree / cwd,
+            env={**os.environ, "RUSTFLAGS": "", "RUSTDOCFLAGS": ""},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
     if r.returncode != 0 and "Doc-tests" not in r.stdout:
         raise GateError(f"cargo test --doc in {cwd} built no doctests: {r.stdout.strip()[-2000:]}")
     sections = FAILURE.split(r.stdout)
