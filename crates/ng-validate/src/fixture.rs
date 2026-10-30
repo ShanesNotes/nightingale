@@ -160,6 +160,10 @@ impl TwoReservoirs {
             end: SimTime::from_ns(48 * 3600 * SECOND),
         })
     }
+    /// The same case, ending at `end`.
+    pub fn until(self, end: SimTime) -> Self {
+        Self { end, ..self }
+    }
     pub fn body(&self) -> &CompiledBody {
         &self.body
     }

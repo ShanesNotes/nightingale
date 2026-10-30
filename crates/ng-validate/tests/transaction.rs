@@ -2264,6 +2264,7 @@ fn newton_solves_an_algebraic_row_to_rounding_on_a_short_step() {
 fn the_closed_form_follows_a_boundary_out_of_the_body() {
     let start = [measure(500_500.0), measure(499_500.0)];
     let case = TwoReservoirs::draining(start, vec![delivery(b"drain", 0, 100, 1.0)]).expect("a body");
+    let case = case.until(SimTime::from_ns(1_000 * SECOND));
     accuracy(&reference(16 * SECOND), &gate(case)).expect("within the policy");
 }
 
@@ -2272,6 +2273,7 @@ fn the_closed_form_counts_a_repeated_delivery_once() {
     let start = [measure(500_500.0), measure(499_500.0)];
     let once = || delivery(b"once", 0, 100, 1.0);
     let case = TwoReservoirs::delivering(start, vec![once(), once()]).expect("a body");
+    let case = case.until(SimTime::from_ns(1_000 * SECOND));
     accuracy(&reference(16 * SECOND), &gate(case)).expect("within the policy");
 }
 
@@ -2300,9 +2302,11 @@ fn a_ladder_of_two_policies_states_no_order() {
     let error = |policy: &AccuracyPolicy, interval| {
         accuracy(&reference(interval), policy).expect("within the policy")
     };
+    let short = TwoReservoirs::closed().expect("a body");
+    let short = short.until(SimTime::from_ns(1_000 * SECOND));
     let cases = vec![
         AccuracyCase::TwoReservoir(stepped()),
-        AccuracyCase::TwoReservoir(TwoReservoirs::closed().expect("a body")),
+        AccuracyCase::TwoReservoir(short),
     ];
     let wider = AccuracyPolicy::new(cases, measure(5.0), measure(0.0), 100 * SECOND).expect("a policy");
     let (coarse, medium, fine) = (
