@@ -114,7 +114,6 @@ fn check_names(fragment: &FragmentData, schema: &Schema) -> Result<(), CompileDe
     }
 }
 
-/// A water boundary reaches one of the registry's pools.
 fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
     let pools: Vec<PoolRef> = schema
         .pools()
@@ -333,7 +332,7 @@ fn check_guards(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     Ok(())
 }
 
-/// A volume needs the schema's coefficient. A guard is named by its mode variable.
+/// A guard is named by its mode variable.
 fn check_volume(schema: &Schema, owed: &[Owed], fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     if schema.partial_volume.is_some() {
         return Ok(());
@@ -474,7 +473,6 @@ impl Reaches {
     }
 }
 
-/// Columns, programs and the instances that place them, in obligation order.
 struct Placement {
     columns: Vec<Column>,
     programs: Vec<Program>,
@@ -494,7 +492,6 @@ enum Address {
     Boundary(usize),
 }
 
-/// What an input can reach: the rows, the route instances and the schema's boundaries.
 struct Places<'a> {
     rows: &'a Rows,
     reaches: &'a Reaches,
@@ -548,7 +545,7 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
     Ok(placement)
 }
 
-/// A transfer takes from one end and gives to the other; with both ends in one pool it moves nothing.
+/// With both ends in one pool a transfer moves nothing.
 fn column(law: LawName, reach: &Reach, rows: &Rows) -> Result<Column, CompileDefect> {
     let [from, to] = reach.ends;
     let mut terms = Vec::new();
@@ -658,7 +655,6 @@ fn addresses(
         .collect()
 }
 
-/// An amount every column leaves untouched is modeled and never moved.
 fn check_orphans(rows: &Rows, columns: &[Column]) -> Result<(), CompileDefect> {
     let mut moved = vec![false; rows.amounts.len()];
     for &(row, _) in columns.iter().flat_map(|column| &column.terms) {
@@ -775,8 +771,8 @@ fn bind(
     (parameters, instances, guards)
 }
 
-/// What each row reads and the rate classes of the laws defining it. An amount's row reads what
-/// every column moving it reads; a differential row also reads its own unknown.
+/// An amount's row reads what every column moving it reads; a differential row also reads its own
+/// unknown.
 fn reads(
     rows: &[Row],
     columns: &[Column],

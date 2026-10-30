@@ -249,7 +249,6 @@ impl Seal for Receipt {
     }
 }
 
-/// Where a program instance applies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Context {
     Body,

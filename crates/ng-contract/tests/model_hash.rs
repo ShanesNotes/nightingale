@@ -390,3 +390,46 @@ fn the_refusal_named_does_not_depend_on_fragment_order() -> Result<(), Admission
     assert_eq!(refused(false), named);
     Ok(())
 }
+
+/// Two memory slots whose rate laws are the same zero kernel, with a validity range on one of them.
+fn twins(range_on_first: bool, first_built_first: bool) -> Result<ModelHash, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", position(0.0)?);
+    let compiled = assemble(Schema::new(map.finish()?)?, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let reflex = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let first = laws.state::<Dimensionless>("first", Admissible::finite());
+        let second = laws.state::<Dimensionless>("second", Admissible::finite());
+        let still = || {
+            laws.kernel(|mut k| {
+                let zero = k.zero::<Rate<Dimensionless>>();
+                k.finish(zero, laws.every_mode(), reflex)
+            })
+        };
+        let (one, two) = if first_built_first {
+            let one = still();
+            (one, still())
+        } else {
+            let two = still();
+            (still(), two)
+        };
+        let range = ValidityRange::new(
+            Measure::new(-1.0)?,
+            Measure::new(1.0)?,
+            Basis::Fixture("synthetic"),
+        )?;
+        laws.validity(if range_on_first { &one } else { &two }, range);
+        laws.memory_rate(&first, one);
+        laws.memory_rate(&second, two);
+        body.add(laws.finish());
+        body.compile()
+    })?;
+    Ok(compiled.model_hash())
+}
+
+#[test]
+fn a_validity_range_stays_with_its_kernel_however_alike_two_kernels_are() -> Result<(), AdmissionError> {
+    assert_ne!(twins(true, true)?, twins(false, true)?);
+    assert_eq!(twins(true, true)?, twins(true, false)?);
+    Ok(())
+}

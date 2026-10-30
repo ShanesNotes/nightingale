@@ -85,7 +85,6 @@ impl Family {
         }
     }
 }
-/// The end of a route a read or a parameter is at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum End {
     From,
@@ -350,7 +349,6 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     pub fn as_dimension<T: SameDimension<U>, U>(&mut self, x: Expr<'b, 'k, O, T>) -> Expr<'b, 'k, O, U> {
         self.push(Op::AsDimension([x.at]))
     }
-    /// Scales by a dimensionless factor, such as a gain.
     pub fn scale<U>(
         &mut self,
         x: Expr<'b, 'k, O, U>,
@@ -831,7 +829,6 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
             set,
         });
     }
-    /// A memory slot and the closed set it stays in.
     pub fn state<U: NonMaterial>(
         &mut self,
         name: &'static str,
@@ -1020,7 +1017,6 @@ pub(crate) struct LawDeclaration {
     pub(crate) serves: Obligation,
     pub(crate) kernel: KernelData,
 }
-/// What a law defines: a slot by name, every instance of a route family, or a schema boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Obligation {
     Slot(&'static str),
