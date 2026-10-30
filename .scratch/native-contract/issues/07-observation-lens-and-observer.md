@@ -17,3 +17,5 @@ Status: ready-for-agent
 ## Comments
 
 From 03: sketch probe this ticket owns: line 471 (seed domains never mix, E0308).
+
+From 04: `Seed` is a plain struct, and this ticket brings `DomainSeed<D>` with the domains. `AcceptedStateView::last_segment` and `DenseSegment::sample` are what a lens reads. A segment is the degree 1 chord between the accepted ends, and the admission segment has no interval. `sample` returns `Compensated`, so a channel's value needs a rule for its one rounding.

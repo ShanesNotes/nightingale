@@ -85,11 +85,20 @@ The one port for events from outside the body: intake, posture, environment, clo
 **Breakpoint**:
 An instant that ends a step: an event or a guard crossing. A display refresh, a pace change or a checkpoint request is never one.
 
+**Delivery**:
+An event's amount entering the body through a boundary at a steady rate from the event's instant until its end. Overlapping deliveries add.
+
+**Due input**:
+An event whose instant is the start of a step. It is applied when that step is accepted, so a refused step leaves it pending.
+
+**Drive frame**:
+What the boundary supplies over one step, frozen when the step's interval is issued, so a stage at the step's end never reads a delivery that starts there.
+
 **Causal step rule**:
 A step is the solver's own interval, cut short only at the next breakpoint and blind to anything later, so an event that arrives during the run gives the same bits as the same event known from the start (I5).
 
 **Refusal**:
-A step the record crate rejects, leaving state, ledger, pending events and stream positions unchanged (I4). The solver retries over a shorter interval.
+A step the record crate rejects, leaving state, ledger, pending events and stream positions unchanged (I4). The only way on is the solver's retry over a shorter interval.
 
 **Engine fault**:
 A step the solver or the model cannot complete under its declared settings, including a refusal below the minimum interval. It stops the run for diagnosis and never writes death (rule 7).
@@ -390,10 +399,10 @@ The floating-point operations a run may use: correctly rounded add, subtract, mu
 The amount a transfer moved over one step, kept as gross forward and reverse parts and produced only by summing evaluated rates.
 
 **Stage witness**:
-The record of each numerical stage a step used (its time, point, rates and weight), which the record crate re-evaluates before it accepts the step.
+The record of each numerical stage a step used (its time, point and weight), which the contract re-evaluates on the record crate's own values before the step can be accepted.
 
 **Reference integrator**:
-The contract's fully coupled backward Euler core at three refinements, against which the accuracy gate measures each solver core.
+The fully coupled backward Euler core in `ng-validate`, run at three refinements, against which the accuracy gate measures each solver core.
 
 **Bench integrator**:
 An explicit Heun integrator that serves only as a test bench, never as a solver core (rule 8).

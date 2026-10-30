@@ -1,6 +1,6 @@
 //! The boundary port: ONE timestamped timeline of the day, partitioned by payload and ordered by
 //! (time, id). Pending events and active continuous deliveries are record state and checkpoint.
-use super::{AdmissionError, Digest, SimTime};
+use super::{AdmissionError, Digest, Measure, SimTime, StepTicket, Water};
 
 pub struct BoundaryPort {
     _events: Vec<BoundaryEvent>,
@@ -22,6 +22,7 @@ impl BoundaryEvent {
         todo!()
     }
 }
+#[derive(Clone, Copy)]
 pub struct InputId {
     _digest: Digest,
 }
@@ -31,11 +32,20 @@ impl InputId {
     }
 }
 pub enum BoundaryInput {
+    /// A bench's plain delivery. `Intake` adds composition and routes to the same envelope.
+    Water(WaterDelivery),
     Intake(Intake),
     Posture(Posture),
     Environment(Environment),
     Clock(ClockPhase),
     Sleep(SleepState),
+}
+/// `amount` of water through the named boundary, from the event's instant until `ends`, at the rate
+/// that delivers it exactly, so "applied once" shows as a total received. Overlapping deliveries add.
+pub struct WaterDelivery {
+    pub boundary: &'static str,
+    pub amount: Measure<Water>,
+    pub ends: SimTime,
 }
 /// Oral, tube and IV deliveries share one envelope with distinct physical routes.
 pub struct Intake {
@@ -123,15 +133,31 @@ pub enum SleepState {
     Awake,
     Nrem,
 }
-/// Pending timeline plus cursor and active deliveries: record state, checkpointed (nightingale-pulse#238).
+/// Pending timeline plus cursor and active deliveries: record state, checkpointed
+/// (nightingale-pulse#238). Applying an input moves the cursor past it and adds its delivery in one
+/// accepted image, so a refusal cannot half apply it. Its fields are private and `CoupledProblem`
+/// lends no view of them: the contract clips each ticket at the next physical breakpoint (a timeline
+/// event or a delivery's end; never a UI refresh, pace change or checkpoint request), so no core
+/// sees a later input.
 pub struct PendingInputs {
     _port: BoundaryPort,
     _cursor: u64,
     _active_deliveries: Vec<Intake>,
 }
-/// Read-only view of the pending timeline inside one problem. Only the contract reads it: it
-/// clips each ticket at the next physical breakpoint (a timeline event or a delivery's end; never a
-/// UI refresh, pace change or checkpoint request), so no core sees a later input.
-pub struct BoundaryView<'a> {
-    _pending: &'a PendingInputs,
+impl PendingInputs {
+    /// The pending inputs once `ticket`'s interval publishes: its due inputs applied, and deliveries
+    /// that ended at its start dropped.
+    pub fn after(&self, _ticket: &StepTicket) -> Self {
+        todo!()
+    }
+    pub fn digest(&self) -> Digest {
+        todo!()
+    }
+}
+/// What the boundary supplies over one ticket, frozen when the ticket is issued. A law reads this and
+/// never the stage's instant, so a stage at the ticket's end reads the left limit even when the
+/// next delivery starts exactly there. A boundary with no delivery running supplies zero.
+#[derive(Clone)]
+pub struct DriveFrame {
+    _drives: Vec<(&'static str, f64)>,
 }

@@ -167,25 +167,42 @@ impl<U> ValidityRange<U> {
 /// An accepted amount held as an unevaluated sum of two f64 (two-sum). The record keeps amounts and
 /// cumulative exchanges this way so closure is not limited by f64 rounding when an exterior flow is
 /// small against a pool's turnover (`evidence/ledger-rounding.txt`); solver workspaces stay f64.
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub struct Compensated {
     _high: f64,
     _low: f64,
 }
 impl Compensated {
-    /// The high and low words, for lossless serialization, sealing and restoration.
-    pub fn parts(&self) -> (f64, f64) {
+    pub const ZERO: Self = Self { _high: 0.0, _low: 0.0 };
+    pub fn of<U>(_value: &Measure<U>) -> Self {
         todo!()
     }
-    /// `self - other` as a compensated pair: window differences keep both words.
-    pub fn minus(&self, _other: &Compensated) -> Compensated {
+    /// The bits of both words, for lossless sealing and restoration.
+    pub fn bits(self) -> [u64; 2] {
         todo!()
     }
-    /// `self + increment` by two-sum: how an extent or a prefix is added.
-    pub fn plus(&self, _increment: f64) -> Compensated {
+    /// How an extent or a prefix is added; both words stay.
+    pub fn plus(self, _other: Self) -> Self {
         todo!()
     }
-    /// Rounded once, for a solver coordinate or a display value; never before certification.
-    pub fn value(&self) -> f64 {
+    /// Window differences keep both words.
+    pub fn minus(self, _other: Self) -> Self {
+        todo!()
+    }
+    pub fn abs(self) -> Self {
+        todo!()
+    }
+    /// A combination's integer coefficient times this value.
+    pub fn scaled(self, _coefficient: i64) -> Self {
+        todo!()
+    }
+    /// This value times a dimensionless factor, as a relative tolerance reads a gross exchange.
+    pub fn times(self, _factor: &Measure<Dimensionless>) -> Self {
+        todo!()
+    }
+    /// `start + (end - start) * numerator / denominator`, the point an integer-ns fraction of a
+    /// chord reaches. Exact at both ends.
+    pub fn between(_start: Self, _end: Self, _numerator: u64, _denominator: u64) -> Self {
         todo!()
     }
 }

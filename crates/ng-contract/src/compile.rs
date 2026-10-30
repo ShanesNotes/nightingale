@@ -816,13 +816,27 @@ fn sparsity(reads: Vec<Vec<UnknownId>>) -> Sparsity {
     }
 }
 
-fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, CompileDefect> {
-    let algebraic: Vec<LawName> = (rows.iter())
+fn algebraic_laws(rows: &[Row]) -> Vec<LawName> {
+    (rows.iter())
         .filter_map(|row| match row.kind {
             RowKind::Algebraic(law) => Some(law),
             _ => None,
         })
-        .collect();
+        .collect()
+}
+
+fn matching(adjacency: &[Vec<usize>], rows: &[usize]) -> Result<Vec<Option<usize>>, usize> {
+    let mut matched = vec![None; adjacency.len()];
+    for &row in rows {
+        if !augment(adjacency, row, &mut vec![false; adjacency.len()], &mut matched) {
+            return Err(row);
+        }
+    }
+    Ok(matched)
+}
+
+fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, CompileDefect> {
+    let algebraic = algebraic_laws(rows);
     let first = rows.len() - algebraic.len();
     let adjacency: Vec<Vec<usize>> = (first..rows.len())
         .map(|row| {
@@ -831,12 +845,9 @@ fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, Compi
                 .collect()
         })
         .collect();
-    let mut matched: Vec<Option<usize>> = vec![None; algebraic.len()];
-    for (row, &law) in algebraic.iter().enumerate() {
-        if !augment(&adjacency, row, &mut vec![false; algebraic.len()], &mut matched) {
-            return Err(CompileDefect::StructuralSingularity { law });
-        }
-    }
+    let every: Vec<usize> = (0..algebraic.len()).collect();
+    let matched = matching(&adjacency, &every)
+        .map_err(|row| CompileDefect::StructuralSingularity { law: algebraic[row] })?;
     let mut solved_by: Vec<RowId> = (0..rows.len()).map(RowId::at).collect();
     for (unknown, row) in matched.iter().enumerate() {
         if let Some(row) = row {
@@ -846,67 +857,146 @@ fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, Compi
     Ok(solved_by)
 }
 
+struct AlgebraicLaw {
+    row: usize,
+    reads: Vec<usize>,
+    holds: Option<(LawName, &'static str)>,
+}
+
+fn laws_on_algebraic_rows(first: usize, programs: &[Program], instances: &[Instance]) -> Vec<AlgebraicLaw> {
+    (instances.iter())
+        .filter_map(|instance| match instance.target {
+            Target::Row(row) if row.index() >= first => {
+                let program = &programs[instance.program.index()];
+                let mut reads: Vec<usize> = (instance.inputs.iter())
+                    .filter_map(|input| match *input {
+                        Bound::Unknown(unknown) => unknown.index().checked_sub(first),
+                        Bound::Parameter(_) | Bound::Boundary(_) => None,
+                    })
+                    .collect();
+                reads.sort_unstable();
+                reads.dedup();
+                let holds = match program.code.predicate {
+                    Predicate::EveryMode => None,
+                    Predicate::Only(mode) => {
+                        let variable = LawName {
+                            owner: program.law.owner,
+                            local: mode.variable,
+                        };
+                        Some((variable, mode.value))
+                    }
+                };
+                Some(AlgebraicLaw {
+                    row: row.index() - first,
+                    reads,
+                    holds,
+                })
+            }
+            Target::Row(_) | Target::Column(_) => None,
+        })
+        .collect()
+}
+
+/// A variable's values that change what its rows read: one value stands for each distinct set of reads.
+fn values_with_distinct_reads(
+    laws: &[&AlgebraicLaw],
+    variable: LawName,
+    values: &[&'static str],
+) -> Vec<&'static str> {
+    let reads_under = |value: &'static str| -> Vec<(usize, &[usize])> {
+        (laws.iter())
+            .filter(|law| law.holds == Some((variable, value)))
+            .map(|law| (law.row, law.reads.as_slice()))
+            .collect()
+    };
+    let mut distinct: Vec<&'static str> = Vec::new();
+    for &value in values {
+        if !distinct
+            .iter()
+            .any(|&kept| reads_under(kept) == reads_under(value))
+        {
+            distinct.push(value);
+        }
+    }
+    distinct
+}
+
 /// A law that does not hold cannot stand in for one that does, so the algebraic rows are matched in each
-/// combination of the mode values their laws hold in.
+/// combination of the mode values their laws hold in. Rows that share no unknown and no mode variable have
+/// independent matchings, and only values that change a row's reads change a matching, so the work
+/// follows the body's coupling and not the product of its mode variables.
 fn match_each_mode(
     rows: &[Row],
     programs: &[Program],
     instances: &[Instance],
     modes: &[ModeLayout],
 ) -> Result<(), CompileDefect> {
-    let algebraic: Vec<(RowId, &Instance, &Program)> = (instances.iter())
-        .filter_map(|instance| match instance.target {
-            Target::Row(row) if matches!(rows[row.index()].kind, RowKind::Algebraic(_)) => {
-                Some((row, instance, &programs[instance.program.index()]))
-            }
-            Target::Row(_) | Target::Column(_) => None,
-        })
-        .collect();
-    let variable = |program: &Program, mode: ModeValue| LawName {
-        owner: program.law.owner,
-        local: mode.variable,
-    };
-    let mut variables: Vec<LawName> = (algebraic.iter())
-        .filter_map(|&(_, _, program)| match program.code.predicate {
-            Predicate::EveryMode => None,
-            Predicate::Only(mode) => Some(variable(program, mode)),
-        })
+    let algebraic = algebraic_laws(rows);
+    let count = algebraic.len();
+    let laws = laws_on_algebraic_rows(rows.len() - count, programs, instances);
+    let mut variables: Vec<LawName> = (laws.iter())
+        .filter_map(|law| law.holds.map(|holds| holds.0))
         .collect();
     variables.sort_unstable();
     variables.dedup();
-    let values: Vec<&[&'static str]> = (variables.iter())
-        .map(|name| {
-            modes[modes.partition_point(|mode| mode.variable < *name)]
-                .values
-                .as_slice()
-        })
-        .collect();
-    let mut chosen = vec![0; variables.len()];
-    loop {
-        let holds = |program: &Program| match program.code.predicate {
-            Predicate::EveryMode => true,
-            Predicate::Only(mode) => {
-                let at = variables.partition_point(|name| *name < variable(program, mode));
-                values[at][chosen[at]] == mode.value
-            }
-        };
-        let mut reads: Vec<Vec<UnknownId>> = vec![Vec::new(); rows.len()];
-        for &(row, instance, _) in algebraic.iter().filter(|&&(_, _, program)| holds(program)) {
-            reads[row.index()].extend(instance.inputs.iter().filter_map(|input| match *input {
-                Bound::Unknown(unknown) => Some(unknown),
-                Bound::Parameter(_) | Bound::Boundary(_) => None,
-            }));
+    let mut edges = Vec::new();
+    for law in &laws {
+        let unknowns = law.reads.iter().map(|&unknown| count + unknown);
+        let variable = law
+            .holds
+            .map(|holds| 2 * count + variables.partition_point(|name| *name < holds.0));
+        for node in unknowns.chain(variable) {
+            edges.push((law.row, node));
+            edges.push((node, law.row));
         }
-        solved_by(rows, &reads)?;
-        let Some(at) = (0..chosen.len())
-            .rev()
-            .find(|&at| chosen[at] + 1 < values[at].len())
-        else {
-            return Ok(());
-        };
-        chosen[at] += 1;
-        chosen[at + 1..].fill(0);
     }
+    let part = Digraph::new(2 * count + variables.len(), &edges).components();
+    let mut parts: Vec<Vec<usize>> = vec![Vec::new(); part.len()];
+    for row in 0..count {
+        parts[part[row]].push(row);
+    }
+    parts.retain(|members| !members.is_empty());
+    parts.sort_unstable();
+    for members in &parts {
+        let laws: Vec<&AlgebraicLaw> = (laws.iter())
+            .filter(|law| members.binary_search(&law.row).is_ok())
+            .collect();
+        let cases: Vec<(LawName, Vec<&'static str>)> = (variables.iter())
+            .filter(|&&name| {
+                laws.iter()
+                    .any(|law| law.holds.is_some_and(|holds| holds.0 == name))
+            })
+            .map(|&name| {
+                let values = &modes[modes.partition_point(|mode| mode.variable < name)].values;
+                (name, values_with_distinct_reads(&laws, name, values))
+            })
+            .collect();
+        let mut chosen = vec![0; cases.len()];
+        loop {
+            let holds = |law: &&&AlgebraicLaw| match law.holds {
+                None => true,
+                Some((variable, value)) => {
+                    let at = cases.partition_point(|case| case.0 < variable);
+                    cases[at].1[chosen[at]] == value
+                }
+            };
+            let mut adjacency: Vec<Vec<usize>> = vec![Vec::new(); count];
+            for law in laws.iter().filter(holds) {
+                adjacency[law.row].extend(&law.reads);
+            }
+            matching(&adjacency, members)
+                .map_err(|row| CompileDefect::StructuralSingularity { law: algebraic[row] })?;
+            let Some(at) = (0..chosen.len())
+                .rev()
+                .find(|&at| chosen[at] + 1 < cases[at].1.len())
+            else {
+                break;
+            };
+            chosen[at] += 1;
+            chosen[at + 1..].fill(0);
+        }
+    }
+    Ok(())
 }
 
 fn augment(adjacency: &[Vec<usize>], row: usize, seen: &mut [bool], matched: &mut [Option<usize>]) -> bool {

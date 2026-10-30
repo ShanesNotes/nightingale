@@ -162,6 +162,11 @@ impl Seal for usize {
         out.number(*self as u64);
     }
 }
+impl Seal for f64 {
+    fn seal(&self, out: &mut Canonical) {
+        out.number(self.to_bits());
+    }
+}
 impl Seal for Digest {
     fn seal(&self, out: &mut Canonical) {
         let Self { bytes } = self;

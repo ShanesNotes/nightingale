@@ -176,7 +176,7 @@
 //! Publication happens only inside the session; a lent record is read-only.
 //! ```compile_fail,E0596
 //! use solver_contract_sketch::ng_record::*;
-//! fn sneak(session: &Session<'_, Running>, next: NextImage) -> Receipt {
+//! fn sneak(session: &Session<'_, Running>, next: NextImage) -> StepReceipt {
 //!     session.record().publish(next)
 //! }
 //! ```
@@ -308,16 +308,16 @@
 //! Extents cannot be booked as one sampled rate times the step: only the quadrature makes them.
 //! ```compile_fail,E0451
 //! use solver_contract_sketch::ng_contract::*;
-//! fn sampled(layout: Digest, interval: Interval, rates: &[f64], seconds: f64) -> Extents {
-//!     Extents { _layout: layout, _interval: interval,
-//!         _forward: rates.iter().map(|rate| rate * seconds).collect(), _reverse: vec![0.0; rates.len()] }
+//! fn sampled(layout: Digest, forward: Vec<Compensated>, reverse: Vec<Compensated>) -> Extents {
+//!     // One sampled rate times the step, booked by hand.
+//!     Extents { _layout: layout, _forward: forward, _reverse: reverse }
 //! }
 //! ```
 //! Legal twin: weighted stage evaluations, finished by the quadrature.
 //! ```
 //! use solver_contract_sketch::ng_contract::*;
-//! fn integrated(mut quadrature: Quadrature<'_>, stage: &StageEvaluation) -> Result<Increment, EngineFault> {
-//!     quadrature.add(stage, StageWeight::new(1.0)?)?;
+//! fn integrated(mut quadrature: Quadrature, stage: &StageEvaluation) -> Result<Increment, EngineFault> {
+//!     quadrature.add(stage, Ratio::ONE)?;
 //!     quadrature.finish()
 //! }
 //! ```
@@ -440,16 +440,16 @@
 //! step rule): the contract clips the step at the next breakpoint.
 //! ```compile_fail,E0599
 //! use solver_contract_sketch::ng_contract::*;
-//! fn peek(problem: &CoupledProblem<'_>, start: AcceptedStateView<'_>) -> Option<SimTime> {
-//!     problem.boundary().next_breakpoint(start)
+//! fn peek(problem: &CoupledProblem<'_>) -> Option<SimTime> {
+//!     problem.boundary().next_breakpoint(problem.accepted().time())
 //! }
 //! ```
-//! Legal twin: the core asks for its intrinsic end, and the ticket says where the step ends.
+//! Legal twin: the core asks for its intrinsic span, and the ticket says where the step ends.
 //! ```
 //! use solver_contract_sketch::ng_contract::*;
-//! fn step(problem: &CoupledProblem<'_>, start: AcceptedStateView<'_>, intrinsic_end: SimTime)
+//! fn step(problem: &CoupledProblem<'_>, intrinsic_span_ns: u64)
 //!     -> Result<StepTicket, EngineFault> {
-//!     problem.ticket(start, intrinsic_end)
+//!     problem.ticket(intrinsic_span_ns)
 //! }
 //! ```
 //!
@@ -493,6 +493,17 @@
 //!     -> Guard<'b, Nervous, Pressure> {
 //!     Guard::new(zero, Crossing::Rising, change)
 //! }
+//! ```
+//!
+//! A refused session can only retry, so a host cannot drop a refusal and restart the budget.
+//! ```compile_fail,E0599
+//! use solver_contract_sketch::ng_record::*;
+//! fn restart(refused: Session<'_, Retrying>) -> Step<'_> { refused.step() }
+//! ```
+//! Legal twin: the smaller retry of the same base.
+//! ```
+//! use solver_contract_sketch::ng_record::*;
+//! fn again(refused: Session<'_, Retrying>) -> Step<'_> { refused.retry() }
 //! ```
 
 #![forbid(unsafe_code)]

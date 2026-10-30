@@ -27,6 +27,14 @@ impl ConservedBasis {
 pub struct QuantityId {
     _index: u32,
 }
+impl QuantityId {
+    pub fn index(self) -> usize {
+        todo!()
+    }
+    pub fn book(self) -> Book {
+        todo!()
+    }
+}
 pub struct Combination {
     _id: QuantityId,
     _book: Book,

@@ -55,6 +55,26 @@ name = "ng-contract"
 item = "quantity::Measure::new"
 reason = "the parser where a raw number becomes a dimensioned measure, refused unless finite"
 
+[[crate.f64_allow]]
+item = "pinned::exp"
+reason = "the arithmetic profile's own routine, a number in and a number out; the accuracy gate's closed form reads it"
+
+[[crate.f64_allow]]
+item = "problem::SolveWorkspace::unknowns_mut"
+reason = "trial coordinates a core writes, in row order; amounts are never read back from them"
+
+[[crate.f64_allow]]
+item = "problem::SolveWorkspace::derivative_mut"
+reason = "the tangent a stage evaluates against, one solver coordinate per row"
+
+[[crate.f64_allow]]
+item = "quadrature::StageEvaluation::residuals"
+reason = "F per row, in mixed row dimensions: what a Newton core drives to zero and an explicit core reads as rates"
+
+[[crate.f64_allow]]
+item = "problem::SparseView::values"
+reason = "Jacobian entries in mixed row and column dimensions, for a core's own linear solve"
+
 [[crate]]
 name = "ng-record"
 
