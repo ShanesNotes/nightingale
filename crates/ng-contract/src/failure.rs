@@ -90,6 +90,9 @@ pub enum AdmissionError {
     ForeignParameters,
     /// A workspace from another compiled body.
     ForeignWorkspace,
+    /// A run identity that is not this body's, this origin's and this solver's.
+    IdentityMismatch,
+    ZeroMinimumInterval,
 }
 impl From<AnatomyDefect> for AdmissionError {
     fn from(defect: AnatomyDefect) -> Self {

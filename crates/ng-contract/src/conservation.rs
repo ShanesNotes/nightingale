@@ -1,11 +1,35 @@
 use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
-use crate::{Column, RowId};
+use crate::quantity::dimension;
+use crate::{Column, Digest, Dimension, RowId, Water};
 
 /// The conserved quantity a combination balances.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Book {
     Water,
+}
+impl Book {
+    /// Whether `U` is the dimension this quantity is counted in.
+    pub fn measures<U: Dimension>(self) -> bool {
+        match self {
+            Book::Water => dimension::<U>() == dimension::<Water>(),
+        }
+    }
+}
+
+/// A combination's position in the basis, with what it balances.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QuantityId {
+    index: usize,
+    book: Book,
+}
+impl QuantityId {
+    pub fn index(self) -> usize {
+        self.index
+    }
+    pub fn book(self) -> Book {
+        self.book
+    }
 }
 
 /// Every conserved combination of the body's amounts: a complete basis of the left null space of the
@@ -18,6 +42,17 @@ impl ConservedBasis {
     /// Ordered by each combination's least row.
     pub fn combinations(&self) -> &[Combination] {
         &self.combinations
+    }
+    pub fn ids(&self) -> impl Iterator<Item = QuantityId> + '_ {
+        (self.combinations.iter().enumerate()).map(|(index, combination)| QuantityId {
+            index,
+            book: combination.book,
+        })
+    }
+    pub fn digest(&self) -> Digest {
+        let mut out = Canonical::new("ng-contract conserved basis 1");
+        self.seal(&mut out);
+        out.digest()
     }
 }
 /// A sum of amounts no internal transfer changes. An exterior transfer changes it through its receipt.
