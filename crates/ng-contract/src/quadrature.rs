@@ -211,8 +211,8 @@ impl StepProposal {
         &self.ticket
     }
     /// Whether the core followed its declared method on this body. `problem` must be the record's own:
-    /// every value re-read here comes from it, none from the core. The checks run in this order because
-    /// each assumes the ones before it, and only the first two are lies no smaller step can fix.
+    /// every value re-read here comes from it, none from the core. A refusal is an honest attempt a smaller
+    /// step can fix; a fault is a lie about the method or a binding that no smaller step can.
     pub fn verify(self, problem: &CoupledProblem<'_>) -> Result<VerifiedStep, TrialFailure> {
         let Self {
             ticket,

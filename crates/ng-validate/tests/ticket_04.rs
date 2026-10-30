@@ -1781,6 +1781,16 @@ fn an_accuracy_policy_needs_a_case_and_a_grid() {
 }
 
 #[test]
+fn a_core_that_cannot_be_admitted_has_not_failed_on_accuracy() {
+    let core = reference(8 * SECOND).with_floor(0);
+    let failure = accuracy(&core, &gate(stepped()));
+    assert!(
+        matches!(failure, Err(AccuracyFailure::Admission(_))),
+        "{failure:?}"
+    );
+}
+
+#[test]
 fn a_core_that_cannot_finish_a_case_has_not_failed_on_accuracy() {
     let core = NeverConverges {
         interval_ns: 8 * SECOND,
