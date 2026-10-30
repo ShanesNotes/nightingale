@@ -411,6 +411,9 @@ impl PendingInputs {
             let amount = read.float()?;
             let ends = read.time()?;
             let delivery = Delivery::checked(id, at, boundary, amount, ends).map_err(|_| Malformed)?;
+            let start_of_time = SimTime::from_ns(0);
+            body.check_delivery(&delivery, start_of_time)
+                .map_err(|_| Malformed)?;
             let ordered = (timeline.last()).is_none_or(|last| (last.at, last.id) < (at, id));
             if !ordered || timeline.iter().any(|known| known.id == id) {
                 return Err(Malformed);

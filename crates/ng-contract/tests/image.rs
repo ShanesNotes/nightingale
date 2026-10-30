@@ -24,6 +24,7 @@ fn body() -> Result<(CompiledBody, [SiteId; 2]), AdmissionError> {
     map.connect(Network::Vascular, a.id(), b.id());
     let mut schema = Schema::new(map.finish()?)?;
     schema.water_boundary("inflow", BoundaryDirection::IntoBody, a.id(), Space::Lumen)?;
+    schema.water_boundary("unread", BoundaryDirection::IntoBody, b.id(), Space::Lumen)?;
     schema.partial_volume(measure(1.0))?;
     let body = assemble(schema, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
@@ -54,6 +55,12 @@ fn body() -> Result<(CompiledBody, [SiteId; 2]), AdmissionError> {
             k.finish(value, laws.every_mode(), wave)
         });
         laws.transfer(Transfer::new(&pair, rate));
+        let BoundaryWater { route: unread, .. } = ports.water("unread")?;
+        let nothing = laws.kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, laws.every_mode(), wave)
+        });
+        laws.transfer(Transfer::new(&unread, nothing));
         body.add(laws.finish());
         body.compile()
     })?;
@@ -208,7 +215,7 @@ type Break = fn(&mut Vec<u8>);
 fn each_field_a_run_never_writes_is_malformed() {
     let (body, sites) = body().expect("a body");
     let bytes = image(&body, sites).canonical();
-    let breaks: [(&str, Break); 25] = [
+    let breaks: [(&str, Break); 26] = [
         ("another format", |bytes| bytes[8] ^= 1),
         ("a list that cannot fit", |bytes| put(bytes, TIMELINE, u64::MAX)),
         ("a list past the bytes", |bytes| put(bytes, COUNTERS, 1 << 40)),
@@ -243,6 +250,9 @@ fn each_field_a_run_never_writes_is_malformed() {
         }),
         ("a boundary the body does not declare", |bytes| {
             bytes[FIRST_DELIVERY + 56] = b'x'
+        }),
+        ("a boundary no law reads", |bytes| {
+            bytes[FIRST_DELIVERY + 56..FIRST_DELIVERY + 62].copy_from_slice(b"unread");
         }),
         ("a boundary name that is no text", |bytes| {
             bytes[FIRST_DELIVERY + 56] = 0xFF
