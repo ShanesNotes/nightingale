@@ -1399,9 +1399,11 @@ PROBE_LOCK = (
 
 
 def write_probe(name: str, source: str) -> pathlib.Path:
-    """A throwaway crate under target/gate/, its own workspace, beneath the root so clippy finds clippy.toml."""
+    """A throwaway crate under target/gate/, its own workspace, beneath the root so clippy finds clippy.toml.
+    It carries the pinned toolchain itself, because `codes` copies it to CARGO_TARGET_DIR, outside the root."""
     d = ROOT / "target/gate" / name
     (d / "src").mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(ROOT / "rust-toolchain.toml", d / "rust-toolchain.toml")
     (d / "Cargo.toml").write_text(
         f'[package]\nname = "gate-{name}"\nversion = "0.0.0"\nedition = "2024"\npublish = false\n\n[workspace]\n',
         encoding="utf-8",
