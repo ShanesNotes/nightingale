@@ -82,6 +82,7 @@ impl Quadrature {
         }
         let Self {
             layout,
+            ticket,
             forward,
             reverse,
             memory,
@@ -89,6 +90,7 @@ impl Quadrature {
             ..
         } = self;
         Ok(Increment {
+            ticket,
             extents: Extents {
                 layout,
                 forward,
@@ -100,8 +102,9 @@ impl Quadrature {
     }
 }
 
-/// A finished quadrature: extents, the memory increment and the stage witness.
+/// A finished quadrature: extents, the memory increment and the stage witness, for one ticket.
 pub struct Increment {
+    ticket: Digest,
     extents: Extents,
     memory: Vec<f64>,
     witness: StageWitness,
@@ -219,6 +222,7 @@ impl StepProposal {
             layout,
             increment:
                 Increment {
+                    ticket: finished_for,
                     extents,
                     memory,
                     witness,
@@ -226,7 +230,7 @@ impl StepProposal {
             algebraic,
             history,
         } = self;
-        if layout != problem.layout() || extents.layout != problem.layout() {
+        if layout != problem.layout() || extents.layout != problem.layout() || finished_for != ticket.digest() {
             return Err(ticket.mismatch().into());
         }
         let mismatch = |ticket: &StepTicket| EngineFault {

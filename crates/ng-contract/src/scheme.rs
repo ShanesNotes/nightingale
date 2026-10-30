@@ -56,7 +56,7 @@ impl Ratio {
             b.checked_mul(d)?,
         )
     }
-    /// This fraction of an interval, in seconds, rounded once.
+    /// This fraction of an interval, in seconds.
     pub(crate) fn seconds_of(self, length_ns: u64) -> f64 {
         let numerator = u128::from(self.numerator) * u128::from(length_ns);
         let denominator = u128::from(self.denominator) * NANOSECONDS_PER_SECOND;
@@ -403,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn seconds_round_once_from_exact_integers() -> Result<(), AdmissionError> {
+    fn seconds_are_exact_where_the_integers_are() -> Result<(), AdmissionError> {
         assert_eq!(Ratio::ONE.seconds_of(2_000_000_000).to_bits(), 2.0_f64.to_bits());
         assert_eq!(
             Ratio::new(1, 4)?.seconds_of(2_000_000_000).to_bits(),

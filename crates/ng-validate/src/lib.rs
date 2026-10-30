@@ -1,4 +1,4 @@
-//! Synthetic composition root and stand-ins, certificate and arena.
+//! Synthetic composition root and stand-ins, reference integrator, certificate and arena.
 //!
 //! # Type rules
 //!

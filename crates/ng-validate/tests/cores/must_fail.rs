@@ -239,6 +239,33 @@ impl CoupledSolver for StaleProposal {
     }
 }
 
+/// Solves its first step twice and books the spare increment for the next step, with a fresh ticket and
+/// a fresh history, so only the increment is stale. The state barely moved, so each witnessed stage still
+/// lands within the scales.
+pub struct StaleIncrement {
+    pub inner: ForwardEuler,
+    pub kept: RefCell<Option<Increment>>,
+}
+impl CoupledSolver for StaleIncrement {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+        self.inner.next_step(problem)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let (workspace, stage) = euler_step(problem, ticket)?;
+        let history = fresh_history(problem, ticket);
+        if let Some(stale) = self.kept.borrow_mut().take() {
+            return Ok(problem.propose(ticket, stale, &workspace, history));
+        }
+        let mut quadrature = problem.quadrature(ticket);
+        quadrature.add(&stage, Ratio::ONE)?;
+        self.kept.replace(Some(quadrature.finish()?));
+        self.inner.solve(problem, ticket)
+    }
+}
+
 /// Refuses its first attempt, then books the evaluation it kept from it.
 pub struct EarlierAttempt {
     pub inner: ForwardEuler,

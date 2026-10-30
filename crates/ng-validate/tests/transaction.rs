@@ -1,6 +1,6 @@
-//! Ticket 04's checks and every refusal and fault reason, driven at the highest seam: a manufactured body,
-//! a session and the gates, through public items only. Every number is synthetic, and each expected value
-//! comes from the closed form or the requirement, never from a previous run.
+//! The record transaction's checks and every refusal and fault reason, driven at the highest seam: a
+//! manufactured body, a session and the gates, through public items only. Every number is synthetic, and
+//! each expected value comes from the closed form or the requirement, never from a previous run.
 mod cores;
 
 use core::cell::RefCell;
@@ -8,7 +8,7 @@ use cores::forced_refusal::{ForcedRefusal, Refuser};
 use cores::must_fail::{
     EarlierAttempt, ForeignBody, ForeignHistory, ForeignProposal, ForeignRefusal, ForeignWorkspace,
     KeptHistory, MisplacedStage, NeverConverges, OneSample, OtherValues, PoisonedPoint, ShadowTicket,
-    StaleProposal, SwappedTicket, UnevenWeights, UnfitWeights, UnreachedStage, WrongWeight,
+    StaleIncrement, StaleProposal, SwappedTicket, UnevenWeights, UnfitWeights, UnreachedStage, WrongWeight,
 };
 use cores::stages::{ForwardEuler, Heun};
 use ng_contract::*;
@@ -325,6 +325,17 @@ fn a_stale_proposal_is_a_binding_mismatch_not_a_refusal() {
     let case = stepped();
     let core = StaleProposal {
         inner: euler(8 * SECOND),
+        kept: RefCell::new(None),
+    };
+    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
+    assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
+}
+
+#[test]
+fn an_increment_finished_for_an_earlier_ticket_is_a_binding_mismatch() {
+    let case = stepped();
+    let core = StaleIncrement {
+        inner: euler(SECOND),
         kept: RefCell::new(None),
     };
     let (session, _) = accepted(case.admit(&core).expect("admitted").step());
