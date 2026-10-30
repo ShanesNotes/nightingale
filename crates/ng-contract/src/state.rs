@@ -46,6 +46,19 @@ impl Candidate {
         }
         Compensated::exact(algebraic[at - memory.len()])
     }
+    /// Every row's value in row order.
+    pub(crate) fn values(&self) -> Vec<Compensated> {
+        let Self {
+            amounts,
+            memory,
+            algebraic,
+        } = self;
+        let coordinates = memory
+            .iter()
+            .chain(algebraic)
+            .map(|&value| Compensated::exact(value));
+        amounts.iter().copied().chain(coordinates).collect()
+    }
     /// Solver coordinates in row order, each amount rounded once.
     pub(crate) fn coordinates(&self) -> Vec<f64> {
         let Self {

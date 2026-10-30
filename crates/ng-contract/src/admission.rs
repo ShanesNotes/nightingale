@@ -77,7 +77,7 @@ impl InitializationSystem<'_> {
             pending,
             request,
         } = self;
-        if !solved.is_of(body) {
+        if solved.layout() != body.model_hash().digest() {
             return Err(AdmissionError::ForeignWorkspace.into());
         }
         let unknowns = solved.coordinates();

@@ -98,7 +98,7 @@ impl<'r> CoupledProblem<'r> {
     pub fn workspace(&self) -> SolveWorkspace {
         SolveWorkspace::seeded(self.body, self.accepted.state().coordinates())
     }
-    fn layout(&self) -> Digest {
+    pub(crate) fn layout(&self) -> Digest {
         self.body.model_hash().digest()
     }
     /// Refuses a point from another body's workspace, and a non-finite coordinate, by its row.
@@ -282,8 +282,8 @@ impl SolveWorkspace {
             unknowns,
         }
     }
-    pub(crate) fn is_of(&self, body: &CompiledBody) -> bool {
-        self.layout == body.model_hash().digest()
+    pub(crate) fn layout(&self) -> Digest {
+        self.layout
     }
     pub(crate) fn coordinates(&self) -> &[f64] {
         &self.unknowns

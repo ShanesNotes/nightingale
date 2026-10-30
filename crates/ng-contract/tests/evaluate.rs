@@ -12,14 +12,14 @@ fn at() -> Result<Position, AdmissionError> {
 
 const SECOND: u64 = 1_000_000_000;
 
-fn scheme_resolution() -> Result<DeclaredResolution, AdmissionError> {
+fn resolution(scheme: StageScheme) -> Result<DeclaredResolution, AdmissionError> {
     let scales = ErrorScales::uniform(Measure::new(1.0)?, Measure::new(0.0)?)?;
     Ok(DeclaredResolution::new(
         Digest::of_canonical(b"evaluator test"),
         1,
         4,
         ArithmeticProfile::contract_v1(),
-        StageScheme::backward_euler_doubled(),
+        scheme,
         scales,
     ))
 }
@@ -47,9 +47,23 @@ impl Bench {
             body.model_hash(),
             revision.packet_hash(),
             Seed::new([1, 2, 3, 4]),
-            scheme_resolution()?,
+            resolution(StageScheme::backward_euler_doubled())?,
         );
         let parts = revision.into_parts();
+        Ok(Self {
+            body,
+            parts,
+            identity,
+        })
+    }
+    fn declaring(self, scheme: StageScheme) -> Result<Self, AdmissionError> {
+        let Self { body, parts, .. } = self;
+        let identity = RunIdentity::new(
+            body.model_hash(),
+            parts.parameters.packet_hash(),
+            Seed::new([1, 2, 3, 4]),
+            resolution(scheme)?,
+        );
         Ok(Self {
             body,
             parts,
@@ -445,5 +459,48 @@ fn a_smooth_limit_is_defined_where_its_root_is_zero() -> Result<(), Initializati
         .linearize(&workspace.point(time), ticket.shift(SECOND).expect("a shift"))
         .expect("defined");
     assert_eq!(dense(jacobian.view(), 1), [[1.0]]);
+    Ok(())
+}
+
+/// Forward Euler by hand: one stage at the start, its tangent the rates there.
+fn forward_euler(bench: &Bench, span_ns: u64) -> Result<VerifiedStep, TrialFailure> {
+    let problem = bench.problem();
+    let ticket = problem.ticket(span_ns)?;
+    let mut workspace = problem.workspace();
+    let time = ticket.at(0)?;
+    let rates: Vec<f64> = (problem.evaluate(&workspace.point(time))?.residuals().iter())
+        .map(|residual| -residual)
+        .collect();
+    workspace.derivative_mut().copy_from_slice(&rates);
+    let stage = problem.evaluate(&workspace.point(time))?;
+    let mut quadrature = problem.quadrature(&ticket);
+    quadrature.add(&stage, Ratio::ONE)?;
+    let history = bench.parts.continuation.clone();
+    let proposal = problem.propose(&ticket, quadrature.finish()?, &workspace, history);
+    proposal.verify(&problem)
+}
+
+#[test]
+fn a_verified_step_publishes_the_start_plus_the_increment() -> Result<(), InitializationFailure> {
+    let bench = reservoir_bench([10.0, 4.0], vec![delivery(b"on", 0, 7 * SECOND, "inflow", 14.0)?])?;
+    let bench = bench.declaring(StageScheme::forward_euler())?;
+    let step = forward_euler(&bench, SECOND / 4).expect("verified");
+    let rows: Vec<RowId> = bench.body.rows().iter().map(Row::id).collect();
+    // A quarter second of q = 18 and u = 2: a = 10 + (2 - 18) / 4, b = 4 + 18 / 4.
+    assert_eq!(step.value(rows[0]), Compensated::of(&Measure::<Water>::new(6.0)?));
+    assert_eq!(step.value(rows[1]), Compensated::of(&Measure::<Water>::new(8.5)?));
+    let gross: Vec<(Compensated, Compensated)> = step.gross().collect();
+    let water = |value| Measure::<Water>::new(value).map(|measure| Compensated::of(&measure));
+    let circulation = bench
+        .body
+        .columns()
+        .iter()
+        .position(|column| column.terms().len() == 2);
+    assert_eq!(gross[circulation.expect("a circulation column")].0, water(4.5)?);
+    assert_eq!(
+        gross[circulation.expect("a circulation column") ^ 1].0,
+        water(0.5)?
+    );
+    assert_eq!(step.applied().len(), 1);
     Ok(())
 }

@@ -464,7 +464,6 @@ mod boundary;
 mod compensated;
 mod compile;
 mod conservation;
-#[allow(dead_code)]
 mod evaluate;
 mod failure;
 mod graph;
@@ -472,15 +471,13 @@ mod identity;
 mod law;
 mod packet;
 mod pinned;
-#[allow(dead_code)]
 mod problem;
 mod provenance;
-#[allow(dead_code)]
 mod quadrature;
 mod quantity;
-#[allow(dead_code)]
 mod scheme;
 mod scope;
+mod seam;
 mod sources;
 mod state;
 mod system;
@@ -503,6 +500,7 @@ pub use quadrature::*;
 pub use quantity::*;
 pub use scheme::*;
 pub use scope::*;
+pub use seam::*;
 pub use sources::{ExcursionSide, RefusalSource, SourceId, ValidityExcursion};
 pub use state::*;
 pub use system::*;
