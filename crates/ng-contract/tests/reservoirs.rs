@@ -17,6 +17,7 @@ enum Defect {
     InflowNamedTwice,
     UnknownBoundaryName,
     BoundarySlotNamedLikeInflow,
+    LumenLeftOut,
 }
 
 struct Reservoirs {
@@ -48,6 +49,9 @@ fn reservoirs(defect: Defect) -> Result<Reservoirs, AdmissionError> {
     schema.water_boundary("inflow", BoundaryDirection::IntoBody, site, space)?;
     if defect == Defect::InflowNamedTwice {
         schema.water_boundary("inflow", BoundaryDirection::OutOfBody, b.id(), Space::Lumen)?;
+    }
+    if defect == Defect::LumenLeftOut {
+        schema.leave_out(Space::Lumen, "a defect: the inflow and the circulation move it");
     }
     schema.partial_volume(Measure::new(1.0)?)?;
     let compiled = assemble(schema, |mut body| {
@@ -264,4 +268,87 @@ fn a_boundary_slot_under_a_boundarys_name_is_named_twice() {
             law: law("Boundary", "inflow")
         })
     );
+}
+
+#[test]
+fn a_boundary_transfer_into_a_left_out_pool_is_refused() -> Result<(), AdmissionError> {
+    let Reservoirs { a, .. } = reservoirs(Defect::None)?;
+    assert_eq!(
+        refusal(Defect::LumenLeftOut),
+        AdmissionError::Compile(CompileDefect::LeftOutTouched {
+            law: law("Boundary", "inflow"),
+            site: a,
+            space: Space::Lumen,
+        })
+    );
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum Reads {
+    Upstream,
+    Downstream,
+}
+
+/// The two reservoirs without the inflow, and an edge law that reads the elastance at one end only.
+fn one_end(reads: Reads) -> Result<(SiteId, SiteId, CompiledBody), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let a = map.site::<VesselSegment>("a", at()?);
+    let b = map.site::<VesselSegment>("b", at()?);
+    map.contain(root.id(), a.id());
+    map.contain(root.id(), b.id());
+    map.connect(Network::Vascular, a.id(), b.id());
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.partial_volume(Measure::new(1.0)?)?;
+    let compiled = assemble(schema, |mut body| {
+        let (mut laws, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut laws);
+        let e = laws.end_parameter::<Elastance>(ParameterKey::new("cv.e"), Admissible::positive());
+        let g =
+            laws.edge_parameter::<Conductance<Water>>(ParameterKey::new("cv.g"), Admissible::nonnegative());
+        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let flow = laws.edge_kernel(|mut k| {
+            let elastance = match reads {
+                Reads::Upstream => k.upstream_parameter(&e),
+                Reads::Downstream => k.downstream_parameter(&e),
+            };
+            let amount = k.at_edge(&route.from_amount());
+            let volume = k.volume(amount);
+            let pressure = k.multiply(elastance, volume);
+            let head = k.as_dimension::<_, Pressure>(pressure);
+            let conductance = k.edge_parameter(&g);
+            let flow = k.conductance_flow(conductance, head);
+            k.finish(flow, laws.every_mode(), wave)
+        });
+        laws.transfer_along(&route, flow);
+        body.add(laws.finish());
+        body.compile()
+    })?;
+    Ok((a.id(), b.id(), compiled))
+}
+
+#[test]
+fn the_upstream_parameter_binds_at_the_edges_upstream_site_and_the_downstream_at_its_downstream()
+-> Result<(), AdmissionError> {
+    let network = Some(Binding::Network(Network::Vascular));
+    let (e, g) = (ParameterKey::new("cv.e"), ParameterKey::new("cv.g"));
+    for reads in [Reads::Upstream, Reads::Downstream] {
+        let (a, b, compiled) = one_end(reads)?;
+        let site = match reads {
+            Reads::Upstream => a,
+            Reads::Downstream => b,
+        };
+        let slots: Vec<(ParameterKey, Binding, Option<Binding>)> = (compiled.parameters().iter())
+            .map(|slot| (slot.key(), slot.binding(), slot.default_binding()))
+            .collect();
+        assert_eq!(
+            slots,
+            [
+                (e, Binding::Site(site), network),
+                (g, Binding::Edge { from: a, to: b }, network),
+            ]
+        );
+    }
+    Ok(())
 }

@@ -405,6 +405,47 @@ fn a_second_partial_volume_must_repeat_the_first() -> Result<(), AdmissionError>
     Ok(())
 }
 
+/// The Starling route with a law that reads neither end, so only its move reaches a left-out pool.
+fn unread(left_out: Space) -> Result<CompiledBody, AdmissionError> {
+    let mut schema = beds()?.schema;
+    schema.partial_volume(Measure::new(1.0)?)?;
+    schema.leave_out(Space::Cells, "no cell-water law in this bench");
+    schema.leave_out(Space::Lumen, "no circulation law in this bench");
+    schema.leave_out(Space::Fluid, "no enclosure law in this bench");
+    schema.leave_out(left_out, "a defect: the Starling law moves it");
+    assemble(schema, |mut body| {
+        let (mut laws, ports) = body.fluids()?.parts();
+        let route = ports.starling(&mut laws);
+        let minutes = RateClass::new(RateBand::Minutes, 60_000_000_000)?;
+        let still = laws.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, laws.every_mode(), minutes)
+        });
+        laws.transfer_at(&route, still);
+        body.add(laws.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn a_law_that_moves_a_left_out_pool_without_reading_it_is_refused() -> Result<(), AdmissionError> {
+    let Beds { a, .. } = beds()?;
+    for space in [Space::Plasma, Space::Interstitium] {
+        assert_eq!(
+            unread(space).map(|compiled| compiled.model_hash()),
+            Err(AdmissionError::Compile(CompileDefect::LeftOutTouched {
+                law: LawName {
+                    owner: "FL",
+                    local: "starling"
+                },
+                site: a,
+                space,
+            }))
+        );
+    }
+    Ok(())
+}
+
 /// One vessel whose vascular edge returns to itself: the circulation column's two ends are one pool.
 fn looped(lumen: Option<&'static str>, reads_amount: bool) -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();

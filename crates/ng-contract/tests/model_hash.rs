@@ -14,6 +14,7 @@ enum Change {
     RateClass,
     Law,
     LeftOut,
+    LeftOutReason,
     Anatomy,
     Validity,
 }
@@ -54,9 +55,14 @@ fn schema(order: Order, change: Change) -> Result<Schema, AdmissionError> {
     let mut schema = Schema::new(map.finish()?)?;
     schema.water_boundary("inflow", BoundaryDirection::IntoBody, vessel.id(), Space::Lumen)?;
     schema.partial_volume(Measure::new(1.0)?)?;
-    schema.leave_out(Space::Cells, "no cell-water law in this bench");
+    let reason = if change == Change::LeftOutReason {
+        "cell water waits for its law"
+    } else {
+        "no cell-water law in this bench"
+    };
+    schema.leave_out(Space::Cells, reason);
     if order == Order::Backward {
-        schema.leave_out(Space::Cells, "no cell-water law in this bench");
+        schema.leave_out(Space::Cells, reason);
     }
     if change == Change::LeftOut {
         schema.leave_out(Space::Fluid, "no enclosure in this bench");
@@ -344,13 +350,14 @@ fn compiling_one_body_twice_gives_one_hash() -> Result<(), AdmissionError> {
 }
 
 #[test]
-fn a_changed_rate_class_law_left_out_space_anatomy_or_validity_changes_the_hash() -> Result<(), AdmissionError>
-{
+fn a_changed_rate_class_law_left_out_space_or_reason_anatomy_or_validity_changes_the_hash()
+-> Result<(), AdmissionError> {
     let base = body(Order::Forward, Change::None)?.model_hash();
     for change in [
         Change::RateClass,
         Change::Law,
         Change::LeftOut,
+        Change::LeftOutReason,
         Change::Anatomy,
         Change::Validity,
     ] {
