@@ -26,11 +26,11 @@ impl<'r> CoupledProblem<'r> {
     pub fn accepted(&self) -> AcceptedStateView<'r> {
         todo!()
     }
-    /// Numerical scratch seeded from the accepted state, never an accepted patient copy.
     /// The row at a workspace slot, so a core can name where a stage failed.
     pub fn row(&self, _slot: usize) -> Option<RowId> {
         todo!()
     }
+    /// Numerical scratch seeded from the accepted state, never an accepted patient copy.
     pub fn workspace(&self) -> SolveWorkspace {
         todo!()
     }

@@ -638,8 +638,7 @@ fn edge_law_body(law: EdgeLaw) -> (CompiledBody, ParameterPacket<SyntheticFixtur
     edge_law_body_from(law, start)
 }
 
-/// Amounts where the law has no value, or for the subnormal case the start itself.
-fn outside_domain(law: EdgeLaw) -> [f64; 2] {
+fn refused_amounts(law: EdgeLaw) -> [f64; 2] {
     match law {
         EdgeLaw::Divides | EdgeLaw::TakesTheLog => [1.0, 0.0],
         EdgeLaw::TakesTheLogNearZero => [1.0, 1e-320],
@@ -739,7 +738,7 @@ fn refused_source_at_the_floor(law: EdgeLaw) -> RefusalSource {
     let inner = reference(4 * MILLISECOND);
     let core = TrialOutside {
         inner: &inner,
-        amounts: outside_domain(law),
+        amounts: refused_amounts(law),
     };
     let session = admit_fixture(&body, packet, boundary, &core).expect("admitted");
     let stopped = exhaust(session.step());
@@ -795,7 +794,7 @@ fn a_non_finite_value_is_refused_at_its_law_not_at_the_row_it_reaches() {
     let inner = euler(4 * MILLISECOND);
     let core = TrialOutside {
         inner: &inner,
-        amounts: outside_domain(EdgeLaw::Exponentiates),
+        amounts: refused_amounts(EdgeLaw::Exponentiates),
     };
     let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
     let session = refused(session.step());
@@ -1641,7 +1640,7 @@ fn a_rate_law_undefined_at_the_start_is_refused_by_its_name_at_admission() {
         local: "circulation",
     };
     for edge in [EdgeLaw::Divides, EdgeLaw::TakesTheLog, EdgeLaw::Exponentiates] {
-        let (body, packet) = edge_law_body_from(edge, outside_domain(edge));
+        let (body, packet) = edge_law_body_from(edge, refused_amounts(edge));
         let core = reference(SECOND);
         let refused = admit_fixture(&body, packet, no_events(), &core).err();
         assert_eq!(refused, Some(InitializationFailure::Undefined { law }));

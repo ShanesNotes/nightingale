@@ -50,10 +50,12 @@ impl Compensated {
     pub(crate) fn exact(value: f64) -> Self {
         Self { hi: value, lo: 0.0 }
     }
-    /// Whether this is no more than `limit`, and false on a NaN at either side. It is the one comparison:
-    /// `<` and `>` read false on a NaN, so a check written with them passes what overflowed.
+    /// Whether this is no more than `limit`, and false when either side is not finite. It is the one
+    /// comparison: `<` and `>` read false on a NaN, so a check written with them passes what overflowed.
     pub fn at_most(self, limit: Self) -> bool {
-        self.hi < limit.hi || (self.hi == limit.hi && self.lo <= limit.lo)
+        self.is_finite()
+            && limit.is_finite()
+            && (self.hi < limit.hi || (self.hi == limit.hi && self.lo <= limit.lo))
     }
     pub fn plus(self, other: Self) -> Self {
         let (sum, error) = two_sum(self.hi, other.hi);
@@ -160,9 +162,12 @@ mod tests {
     }
 
     #[test]
-    fn no_comparison_passes_a_nan() {
+    fn no_comparison_passes_what_is_not_finite() {
         let nan = exact(f64::NAN);
         assert!(!nan.at_most(exact(1.0)) && !exact(1.0).at_most(nan) && !nan.at_most(nan));
+        assert!(!exact(1.0).at_most(exact(f64::INFINITY)));
+        let overflowed = exact(f64::MAX).scaled(1);
+        assert!(!overflowed.is_finite() && !exact(1.0).at_most(overflowed));
     }
 
     #[test]

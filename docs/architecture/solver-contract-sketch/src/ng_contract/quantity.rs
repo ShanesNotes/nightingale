@@ -192,7 +192,7 @@ impl Compensated {
     pub fn abs(self) -> Self {
         todo!()
     }
-    /// Whether this is no more than `limit`, and false on a NaN at either side. It is the one
+    /// Whether this is no more than `limit`, and false when either side is not finite. It is the one
     /// comparison: `<` and `>` read false on a NaN, so a check written with them passes what overflowed.
     pub fn at_most(self, _limit: Self) -> bool {
         todo!()

@@ -87,8 +87,6 @@ pub fn heun_stages(
     Ok((first, second, workspace))
 }
 
-/// Keeps its next span in its accepted continuation and doubles it every step, so a span it wrote is a span
-/// it must read back.
 pub struct KeepsItsSpan {
     pub first_ns: u64,
 }

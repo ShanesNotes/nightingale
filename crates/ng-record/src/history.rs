@@ -75,7 +75,6 @@ impl LedgerChunk {
             columns,
         }
     }
-    /// Whether every value fits the ledger. A sum of finite amounts can leave the finite range.
     pub(crate) fn is_finite(&self) -> bool {
         let Self {
             interval: _,
