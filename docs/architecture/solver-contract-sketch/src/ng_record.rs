@@ -9,7 +9,7 @@
 use crate::ng_contract::*;
 
 /// The chained seal of one accepted revision: the previous seal, the image's digests and the ledger
-/// root. It covers the past and nothing that waits, so a ticket's digest built on it reads no later
+/// chunk. It covers the past and nothing that waits, so a ticket's digest built on it reads no later
 /// input.
 #[derive(Clone, Copy)]
 pub struct Seal {
@@ -33,8 +33,6 @@ pub struct PatientRecord<'m> {
     _parameters: BoundParameters,
     _branch: BranchAncestry,
     _revision: u64,
-    _previous: Digest,
-    _seal: Seal,
     _time: SimTime,
     _state: Candidate,
     _continuation: MethodHistory,
@@ -126,11 +124,13 @@ pub struct NextImage {
     _applied: Vec<InputId>,
     _excursions: Vec<ValidityExcursion>,
 }
-/// What one published step did: its revision and seal, each input it applied, and any excursion.
+/// What one published step did: its revision and seal, each input it applied, whether it started at
+/// a breakpoint, and any excursion.
 pub struct StepReceipt {
     _revision: u64,
     _seal: Seal,
     _applied: Vec<InputId>,
+    _after_breakpoint: bool,
     _excursions: Vec<ValidityExcursion>,
 }
 impl StepReceipt {
@@ -142,6 +142,10 @@ impl StepReceipt {
     }
     /// Each input this step applied, once, in `(time, id)` order.
     pub fn applied(&self) -> &[InputId] {
+        todo!()
+    }
+    /// True when this step started at a breakpoint: an input applied, or a delivery ended.
+    pub fn after_breakpoint(&self) -> bool {
         todo!()
     }
     pub fn excursions(&self) -> &[ValidityExcursion] {
@@ -208,13 +212,12 @@ impl Impulse {
         todo!()
     }
 }
-/// One sealed chunk per accepted step, with prefix extents, and one rolling root per chunk: a root
-/// rolls the root before it with its chunk's digest, so a seal never rehashes all history per beat.
+/// One sealed chunk per accepted step, with prefix extents. Each seal chains the seal before it, the
+/// image's digest and its chunk's digest, so a seal never rehashes all history per beat.
 struct History {
     _basis: Digest,
     _opening: Vec<Compensated>,
     _chunks: Vec<LedgerChunk>,
-    _root: Digest,
 }
 /// Run identity, branch and the accepted base this view was lent at.
 #[derive(Clone, Copy)]
@@ -495,7 +498,7 @@ impl BranchId {
 /// `Session::resume`, `Session::rewind` and `Session::recover` read them through one private path, so
 /// an in-process retry and a loaded save are one path. A host persists `as_bytes` and reloads with
 /// `from_bytes`, which checks nothing. The envelope holds state, bound parameters, solver continuation,
-/// stream positions, the timeline, the fence, branch ancestry, the ledger root and the last dense
+/// stream positions, the timeline, the fence, branch ancestry, the head's seal and the last dense
 /// segment. An observer's own state is checkpointed beside it, bound to its seal
 /// (`ng_observe::ObserverCheckpoint`), so a restore brings back outputs too (nightingale-pulse#273).
 pub struct Checkpoint {
@@ -519,16 +522,16 @@ pub enum CheckpointError {
     Latched,
     Malformed,
     SealMismatch,
-    HistoryMissing { root: Digest },
-    HistoryAltered { root: Digest },
-    StoreFailed { root: Digest },
+    HistoryMissing { seal: Digest },
+    HistoryAltered { seal: Digest },
+    StoreFailed { seal: Digest },
     BranchInUse,
     NotOnThisBranch,
 }
-/// Durable storage for ledger links, addressed by root. It is host code and trusted for nothing: a walk
-/// rolls what comes back to the root it asked for. A checkpoint is complete only with a store that
-/// keeps what it took.
+/// Durable storage for the chain's links, addressed by seal. It is host code and trusted for nothing:
+/// a walk chains what comes back to the seal it asked for. A checkpoint is complete only with a store
+/// that keeps what it took.
 pub trait HistoryStore {
-    fn resolve(&self, root: &Digest) -> Option<Vec<u8>>;
-    fn keep(&mut self, root: Digest, link: Vec<u8>) -> Result<(), CheckpointError>;
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>>;
+    fn keep(&mut self, seal: Digest, link: Vec<u8>) -> Result<(), CheckpointError>;
 }

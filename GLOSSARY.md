@@ -57,11 +57,11 @@ Rerunning a run from its event log, with the same run seed (identical bits) or a
 A saved copy of the whole accepted state at a step boundary, from which a run resumes exactly or branches.
 _Avoid_: save (in prose)
 
-**Ledger root**:
-A digest that rolls the root before it with one accepted step's ledger chunk, so one root stands for the whole ledger up to that step.
+**Seal**:
+A digest that chains the seal before it with one accepted step's image and ledger chunk, so one seal stands for the whole accepted course up to that step. It covers nothing that waits.
 
 **History store**:
-Host storage for ledger links, addressed by ledger root and trusted for nothing: a load checks each link against the root that asked for it.
+Host storage for the links of the seal's chain, addressed by seal and trusted for nothing: a load checks each link against the seal that asked for it.
 
 **Scope stage**:
 One of the five stages of scope in section 1, built bottom up. Not a solver stage, which is a numerical sub-step inside one step.
