@@ -42,6 +42,15 @@ The validation crate now runs the manufactured body under four replay gates and 
 - **Comparison.** One function, `first_divergence`: seals at each row, then the last digests, which also read what waits and are recomputed from the live fields. Each gate's evidence carries its reference run's last seal, and `replay_gates` refuses evidence of two courses, since end states alone miss a course that differs early. A load costs the rest of a run, so `resume_every` sets the gate's cost: a first design ran most loads only to the next boundary, and a lost count that showed six steps later passed it.
 - **Rejected:** `Prepared`, `StepSpan`, `Arc` history nodes, `AcceptedLink`, `DecodeBudget`, section tags, 4,096-chunk batches and fixed-time chunks. Ticket 04's claim that fixed-time chunks answer the 19 GB figure was wrong: grouping moves no bytes, and merged chords do not bound the curve.
 
+**Evidence**, on this PR's last code change, all synthetic.
+
+- **Mutation sweep.** 104 mutants, each removing one check or rule, and each killed by a test. A first sweep left 24 alive. Seven were checks that another check or the chain already held, so they went or merged. The rest were masked by a neighbouring check, and each got a test where it alone fires.
+- **Differential fuzz.** 4,000 random cases of pure cores with inputs at random heads: 19,028 accepted inputs, each late run equal to the run with those inputs known at admission, attempt by attempt, refusals included, and 11,275 replays through a load, a rewind and a fork of a fork. No failure. Weakening the fence check in a copy failed five of the first 30 seeds.
+- **Any bytes.** 120,000 mutated checkpoints, half with a forged seal: 11,567 sessions, each then stepped, saved and forked, and 62,528 named errors, with no panic. A store that lied drew 2,925 refusals in 3,000 tries, and every other answer was the true link.
+- **Ordinary runs keep their bits.** With no input and no refusal, a run's accepted bits equal the base's: full digests on three cases, and 7,043 lines of amounts and ledger bits over 14 runs at spans from 1 ns to 64 s.
+- **The real clock.** A crate outside the workspace ran the pace gate on a host clock, 120 s simulated at 60 times real speed with a pause partway, and it passed.
+- **Reviews.** Two adversaries at max, Opus and Codex, reported 15 distinct findings on an earlier head: 12 fixed and 3 closed by narrowing a claim, because the runs match and I5 holds. Four local Codex Astra passes followed. They reported four, two, two and none, and one of the second-last pair was already fixed.
+
 **Limits.**
 
 - The real clock ran only through a crate outside the workspace, once per head, with the result in the evidence. The test suite's clock is a script.
