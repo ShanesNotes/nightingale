@@ -238,6 +238,8 @@ pub enum AccuracyFailure {
     Admission(InitializationFailure),
     /// Adjacent refinements' errors are outside the band.
     Order { case: usize, refinement: usize },
+    /// Adjacent refinements ran under different policies, so they compare no one case.
+    MixedEvidence { refinement: usize },
 }
 /// Runs each case with the same core. After every accepted step it compares the accepted dense
 /// segment, never a trial state, with the closed form or the refined run: amounts, exchanges and

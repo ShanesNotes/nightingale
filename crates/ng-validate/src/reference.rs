@@ -90,7 +90,6 @@ fn newton(
     let time = ticket.at(offset_ns)?;
     let shift = ticket.shift(span_ns)?;
     let per_second = NANOSECONDS_PER_SECOND / span_ns as f64;
-    let weight = if per_second > 1.0 { 1.0 / per_second } else { 1.0 };
     let start = workspace.unknowns_mut().to_vec();
     for _ in 0..NEWTON_LIMIT {
         let unknowns = workspace.unknowns_mut().to_vec();
@@ -99,15 +98,17 @@ fn newton(
         }
         let point = workspace.point(time);
         let stage = problem.evaluate(&point)?;
-        let converged = (stage.residuals().iter().zip(&unknowns))
-            .all(|(residual, unknown)| weight * residual.abs() <= ROUNDOFF * (1.0 + unknown.abs()));
-        if converged {
-            return Ok(stage);
-        }
         let jacobian = problem.linearize(&point, shift)?;
         let Some(update) = solve_dense(jacobian.view(), stage.residuals()) else {
             break;
         };
+        // An update is in each row's own unknown, where a residual is a rate on one row and a kernel's
+        // value on another, so this one test fits both.
+        let converged = (update.iter().zip(&unknowns))
+            .all(|(change, unknown)| change.abs() <= ROUNDOFF * (1.0 + unknown.abs()));
+        if converged {
+            return Ok(stage);
+        }
         for (unknown, change) in workspace.unknowns_mut().iter_mut().zip(update) {
             *unknown -= change;
         }

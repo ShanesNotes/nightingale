@@ -55,6 +55,7 @@ pub struct TwoReservoirs {
     body: CompiledBody,
     a: SiteId,
     b: SiteId,
+    direction: Option<BoundaryDirection>,
     start: [f64; 2],
     deliveries: Vec<Delivery>,
     end: SimTime,
@@ -153,6 +154,7 @@ impl TwoReservoirs {
             body,
             a: a.id(),
             b: b.id(),
+            direction: boundary,
             start,
             deliveries,
             end: SimTime::from_ns(48 * 3600 * SECOND),
@@ -254,12 +256,47 @@ impl TwoReservoirs {
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         admit_fixture(&self.body, self.packet(CONDUCTANCE)?, self.boundary()?, core)
     }
+    /// Everything that makes this case this case, so two cases on one body never share an identity.
+    pub fn digest(&self) -> Digest {
+        let Self {
+            body,
+            a: _,
+            b: _,
+            direction: _,
+            start,
+            deliveries,
+            end,
+        } = self;
+        let mut bytes = body.model_hash().digest().as_bytes().to_vec();
+        for amount in start {
+            bytes.extend_from_slice(&amount.to_bits().to_be_bytes());
+        }
+        bytes.extend_from_slice(&end.nanoseconds().to_be_bytes());
+        for Delivery { id, from, to, amount } in deliveries {
+            bytes.extend_from_slice(&id.len().to_be_bytes());
+            bytes.extend_from_slice(id);
+            bytes.extend_from_slice(&from.nanoseconds().to_be_bytes());
+            bytes.extend_from_slice(&to.nanoseconds().to_be_bytes());
+            bytes.extend_from_slice(&number(amount).to_bits().to_be_bytes());
+        }
+        Digest::of_canonical(&bytes)
+    }
     /// A number computed from the case's own constants, never from the run under test.
     pub(crate) fn exact(&self, at: SimTime) -> Exact {
         let k = CONDUCTANCE;
         let (mut sum, mut difference) = (self.start[0] + self.start[1], self.start[0] - self.start[1]);
         let (mut circulated, mut received) = (0.0, 0.0);
-        let mut edges: Vec<SimTime> = (self.deliveries.iter())
+        let sign = match self.direction {
+            Some(BoundaryDirection::OutOfBody) => -1.0,
+            _ => 1.0,
+        };
+        let mut applied: Vec<&Delivery> = Vec::with_capacity(self.deliveries.len());
+        for delivery in &self.deliveries {
+            if !applied.iter().any(|known| known.id == delivery.id) {
+                applied.push(delivery);
+            }
+        }
+        let mut edges: Vec<SimTime> = (applied.iter())
             .flat_map(|delivery| [delivery.from, delivery.to])
             .collect();
         edges.push(at);
@@ -270,16 +307,17 @@ impl TwoReservoirs {
                 continue;
             }
             let span = seconds(edge.nanoseconds() - reached.nanoseconds());
-            let inflow: f64 = (self.deliveries.iter())
+            let gross: f64 = (applied.iter())
                 .filter(|delivery| delivery.from <= reached && reached < delivery.to)
-                .map(Delivery::rate)
+                .map(|delivery| delivery.rate())
                 .sum();
+            let inflow = sign * gross;
             let decay = exp(-2.0 * k * span);
             let fading = (1.0 - decay) / (2.0 * k);
             circulated += k * (difference * fading + inflow / (2.0 * k) * (span - fading));
             sum += inflow * span;
             difference = difference * decay + inflow * fading;
-            received += inflow * span;
+            received += gross * span;
             reached = edge;
         }
         Exact {

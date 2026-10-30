@@ -43,7 +43,7 @@ impl AccuracyPolicy {
             bytes.extend_from_slice(&limb.to_be_bytes());
         }
         for AccuracyCase::TwoReservoir(case) in &cases {
-            bytes.extend_from_slice(case.body().model_hash().digest().as_bytes());
+            bytes.extend_from_slice(case.digest().as_bytes());
         }
         Ok(Self {
             cases,
@@ -85,6 +85,10 @@ pub enum AccuracyFailure {
     /// Adjacent refinements' errors are outside the band.
     Order {
         case: usize,
+        refinement: usize,
+    },
+    /// Adjacent refinements ran under different policies, so they compare no one case.
+    MixedEvidence {
         refinement: usize,
     },
 }
@@ -160,7 +164,9 @@ pub fn accuracy(
             for at in compared_instants(interval, policy.grid_ns) {
                 for (value, exact) in comparisons(case, record, at) {
                     let error = value.minus(exact).abs();
-                    if error > policy.absolute.plus(exact.abs().times(&policy.relative)) {
+                    // Read this way round, an overflowed value's NaN fails instead of passing.
+                    let within = error <= policy.absolute.plus(exact.abs().times(&policy.relative));
+                    if !within {
                         return Err(AccuracyFailure::Exceeded {
                             case: index,
                             at,
@@ -189,6 +195,9 @@ pub fn observed_order(
     high: Measure<Dimensionless>,
 ) -> Result<(), AccuracyFailure> {
     for (refinement, pair) in ladder.windows(2).enumerate() {
+        if pair[0].policy != pair[1].policy {
+            return Err(AccuracyFailure::MixedEvidence { refinement });
+        }
         for (case, (coarse, fine)) in pair[0].worst.iter().zip(&pair[1].worst).enumerate() {
             if *coarse < fine.times(&low) || *coarse > fine.times(&high) {
                 return Err(AccuracyFailure::Order { case, refinement });

@@ -305,7 +305,9 @@ pub fn certify(
                 let closure = change[index].minus(inflow[index].minus(outflow[index])).abs();
                 let gross = inflow[index].plus(outflow[index]);
                 let allowed = limits.absolute.plus(gross.times(&limits.relative));
-                if closure > allowed {
+                // Read this way round, an overflowed window's NaN fails instead of passing.
+                let closes = closure <= allowed;
+                if !closes {
                     return Err(CertificateFailure {
                         check: CertificateCheck::Closure,
                         quantity: Some(quantity),

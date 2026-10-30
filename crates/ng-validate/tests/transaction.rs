@@ -2173,3 +2173,146 @@ fn the_same_inputs_give_the_same_digests_and_seal_twice() {
     };
     assert_eq!(run(), run());
 }
+
+/// Amounts so large that a chord read at an integer-ns fraction overflows, so a compared value is a NaN.
+fn overflowing() -> (TwoReservoirs, ReferenceIntegrator) {
+    let delivery = Delivery {
+        id: b"large",
+        from: SimTime::from_ns(0),
+        to: SimTime::from_ns(48 * HOUR),
+        amount: measure(1e300),
+    };
+    let case = TwoReservoirs::delivering([measure(1e290), measure(1e290)], vec![delivery]).expect("a body");
+    (case, reference(5_000 * SECOND).with_scales(scales(1e295, 0.1)))
+}
+
+#[test]
+fn a_certificate_does_not_pass_on_a_value_that_overflowed() {
+    let (case, core) = overflowing();
+    let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
+    let view = session.record().conservation();
+    let failure = certify(&view, &ledger_policy_with(view.basis(), 1e280, 0.0, 0.0)).expect_err("a NaN");
+    assert_eq!(failure.check(), CertificateCheck::Closure);
+}
+
+#[test]
+fn the_accuracy_gate_does_not_pass_on_a_value_that_overflowed() {
+    let (case, core) = overflowing();
+    let cases = vec![AccuracyCase::TwoReservoir(case)];
+    let policy = AccuracyPolicy::new(cases, measure(1e299), measure(0.0), 100 * SECOND).expect("a policy");
+    let failure = accuracy(&core, &policy);
+    assert!(
+        matches!(failure, Err(AccuracyFailure::Exceeded { .. })),
+        "{failure:?}"
+    );
+}
+
+#[test]
+fn newton_solves_an_algebraic_row_to_rounding_on_a_short_step() {
+    // `m' = 0.001` and `x x = m` from `(1, 1)`. At 1 ms a test scaled for `m`'s rate would stop with `x`'s
+    // residual near 2.5e-13, above these scales, though one more iteration solves it.
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", origin());
+    let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    let body = assemble(schema, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let memory = laws.state::<Dimensionless>("memory", Admissible::finite());
+        let reading = laws.algebraic::<Dimensionless>("reading", Admissible::finite());
+        let rate =
+            laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.rate"), Admissible::positive());
+        let reflex = RateClass::new(RateBand::Reflex, 1_000_000)?;
+        let rise = laws.kernel(|mut k| {
+            let value = k.parameter(&rate);
+            k.finish(value, laws.every_mode(), reflex)
+        });
+        laws.memory_rate(&memory, rise);
+        let root = laws.kernel(|mut k| {
+            let x = k.algebraic(&reading);
+            let again = k.algebraic(&reading);
+            let square = k.scale(x, again);
+            let m = k.state(&memory);
+            let residual = k.subtract(square, m);
+            k.finish(residual, laws.every_mode(), reflex)
+        });
+        laws.residual(&reading, root);
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let name = |local| LawName { owner: "NS", local };
+    let mut packet = ParameterPacket::new();
+    let rate = measure::<Rate<Dimensionless>>(0.001);
+    packet
+        .synthetic(ParameterKey::new("ns.rate"), Binding::Body, rate, "synthetic")
+        .expect("once");
+    for start in [
+        RowKind::Memory(name("memory")),
+        RowKind::Algebraic(name("reading")),
+    ] {
+        packet
+            .start(start, measure::<Dimensionless>(1.0), "synthetic")
+            .expect("once");
+    }
+    let core = reference(MILLISECOND).with_scales(scales(1e-14, 0.0));
+    let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
+    let (session, _) = accepted(session.step());
+    let solved = hi(session.record().accepted().value(body.rows()[1].id()));
+    assert!((solved - 1.000_000_5).abs() < 1e-9, "{solved}");
+}
+
+#[test]
+fn the_closed_form_follows_a_boundary_out_of_the_body() {
+    let start = [measure(500_500.0), measure(499_500.0)];
+    let case = TwoReservoirs::draining(start, vec![delivery(b"drain", 0, 100, 1.0)]).expect("a body");
+    accuracy(&reference(16 * SECOND), &gate(case)).expect("within the policy");
+}
+
+#[test]
+fn the_closed_form_counts_a_repeated_delivery_once() {
+    let start = [measure(500_500.0), measure(499_500.0)];
+    let once = || delivery(b"once", 0, 100, 1.0);
+    let case = TwoReservoirs::delivering(start, vec![once(), once()]).expect("a body");
+    accuracy(&reference(16 * SECOND), &gate(case)).expect("within the policy");
+}
+
+#[test]
+fn a_policy_names_the_whole_case_and_not_only_its_body() {
+    let digest = |case| gate(case).digest();
+    let start = || [measure(500_500.0), measure(499_500.0)];
+    let quiet = || TwoReservoirs::delivering(start(), Vec::new()).expect("a body");
+    assert_eq!(digest(quiet()), digest(quiet()));
+    let moved = TwoReservoirs::delivering([measure(500_000.0), measure(500_000.0)], Vec::new());
+    assert_ne!(digest(quiet()), digest(moved.expect("a body")));
+    let fed = TwoReservoirs::delivering(start(), vec![delivery(b"fed", 0, 100, 1.0)]);
+    assert_ne!(digest(quiet()), digest(fed.expect("a body")));
+    let same_delivery = Delivery {
+        id: b"stepped inflow",
+        from: SimTime::from_ns(2_000 * SECOND),
+        to: SimTime::from_ns(6_000 * SECOND),
+        amount: measure(20_000.0),
+    };
+    let longer = TwoReservoirs::delivering(start(), vec![same_delivery]).expect("a body");
+    assert_ne!(digest(stepped()), digest(longer), "only the case's end differs");
+}
+
+#[test]
+fn a_ladder_of_two_policies_states_no_order() {
+    let error = |policy: &AccuracyPolicy, interval| {
+        accuracy(&reference(interval), policy).expect("within the policy")
+    };
+    let cases = vec![
+        AccuracyCase::TwoReservoir(stepped()),
+        AccuracyCase::TwoReservoir(TwoReservoirs::closed().expect("a body")),
+    ];
+    let wider = AccuracyPolicy::new(cases, measure(5.0), measure(0.0), 100 * SECOND).expect("a policy");
+    let (coarse, medium, fine) = (
+        error(&gate(stepped()), 16 * SECOND),
+        error(&wider, 8 * SECOND),
+        error(&gate(stepped()), 4 * SECOND),
+    );
+    let failure = observed_order([&coarse, &medium, &fine], measure(1.9), measure(2.1));
+    assert!(matches!(
+        failure,
+        Err(AccuracyFailure::MixedEvidence { refinement: 0 })
+    ));
+}
