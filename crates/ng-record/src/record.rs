@@ -1,7 +1,7 @@
 use crate::checkpoint::{
     BranchAncestry, BranchFork, Checkpoint, CheckpointError, HistoryStore, Restored, Sections, write,
 };
-use crate::history::{ConservationView, History, HistorySeal, LedgerChunk};
+use crate::history::{ConservationView, History, HistorySeal, LedgerChunk, Link};
 use ng_contract::{
     AcceptedStateView, AdmissionError, AppliedInputs, Attempt, BoundaryEvent, ByteReader, Candidate,
     CompiledBody, CoupledProblem, CoupledSolver, DenseSegment, Digest, ImageParts, InitialRevision, InputId,
@@ -227,7 +227,7 @@ impl<'m> PatientRecord<'m> {
                 }));
             }
         }
-        let mut chunk = LedgerChunk::after(&self.history, self.body, &step);
+        let chunk = LedgerChunk::after(&self.history, self.body, &step);
         if !chunk.is_finite() {
             return Err(step.ticket().refuse(NumericalRefusal::LedgerOverflow));
         }
@@ -250,18 +250,15 @@ impl<'m> PatientRecord<'m> {
             streams: &self.streams,
             applied: &pending,
         });
-        let seal = Seal {
-            digest: chunk.seal(self.history.seal(), revision, image),
-        };
+        let link = self.history.linked(chunk, revision, image);
         Ok(NextImage {
             revision,
-            seal,
             time,
             state,
             continuation,
             dense,
             pending,
-            chunk,
+            link,
             applied,
             after_breakpoint,
             excursions,
@@ -271,13 +268,12 @@ impl<'m> PatientRecord<'m> {
     pub fn publish(&mut self, next: NextImage) -> StepReceipt {
         let NextImage {
             revision,
-            seal,
             time,
             state,
             continuation,
             dense,
             pending,
-            chunk,
+            link,
             applied,
             after_breakpoint,
             excursions,
@@ -288,10 +284,11 @@ impl<'m> PatientRecord<'m> {
         self.image.continuation = continuation;
         self.image.dense = dense;
         self.image.pending.advance(pending);
-        self.history.push(chunk);
+        let digest = link.seal();
+        self.history.push(link);
         StepReceipt {
             revision,
-            seal,
+            seal: Seal { digest },
             applied,
             after_breakpoint,
             excursions,
@@ -375,13 +372,12 @@ pub struct RecordDigests {
 /// The entire next accepted image, validated and not yet visible.
 pub struct NextImage {
     revision: u64,
-    seal: Seal,
     time: SimTime,
     state: Candidate,
     continuation: MethodHistory,
     dense: DenseSegment,
     pending: AppliedInputs,
-    chunk: LedgerChunk,
+    link: Link,
     applied: Vec<InputId>,
     after_breakpoint: bool,
     excursions: Vec<ValidityExcursion>,
