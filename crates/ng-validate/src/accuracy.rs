@@ -18,7 +18,6 @@ pub struct AccuracyPolicy {
     absolute: Compensated,
     relative: Measure<Dimensionless>,
     grid_ns: u64,
-    digest: Digest,
 }
 impl AccuracyPolicy {
     /// Refuses a zero grid, no case and a case that ends where it starts.
@@ -32,28 +31,32 @@ impl AccuracyPolicy {
         if grid_ns == 0 || cases.is_empty() || cases.iter().any(never_steps) {
             return Err(AdmissionError::EmptyAccuracyPolicy);
         }
-        let absolute = Compensated::of(&absolute);
-        let mut bytes = grid_ns.to_be_bytes().to_vec();
-        for limb in absolute
-            .bits()
-            .into_iter()
-            .chain(Compensated::of(&relative).bits())
-        {
-            bytes.extend_from_slice(&limb.to_be_bytes());
-        }
-        for AccuracyCase::TwoReservoir(case) in &cases {
-            bytes.extend_from_slice(case.digest().as_bytes());
-        }
         Ok(Self {
+            cases,
+            absolute: Compensated::of(&absolute),
+            relative,
+            grid_ns,
+        })
+    }
+    pub fn digest(&self) -> Digest {
+        let Self {
             cases,
             absolute,
             relative,
             grid_ns,
-            digest: Digest::of_canonical(&bytes),
-        })
-    }
-    pub fn digest(&self) -> Digest {
-        self.digest
+        } = self;
+        let mut bytes = grid_ns.to_be_bytes().to_vec();
+        for limb in absolute
+            .bits()
+            .into_iter()
+            .chain(Compensated::of(relative).bits())
+        {
+            bytes.extend_from_slice(&limb.to_be_bytes());
+        }
+        for AccuracyCase::TwoReservoir(case) in cases {
+            bytes.extend_from_slice(case.digest().as_bytes());
+        }
+        Digest::of_canonical(&bytes)
     }
 }
 /// The worst error per case. Accepted values only: a trial state is never read.
@@ -179,7 +182,7 @@ pub fn accuracy(
         worst.push(largest);
     }
     Ok(AccuracyEvidence {
-        policy: policy.digest,
+        policy: policy.digest(),
         worst,
     })
 }

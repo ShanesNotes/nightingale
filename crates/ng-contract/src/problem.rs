@@ -71,18 +71,8 @@ impl<'r> CoupledProblem<'r> {
             .next_breakpoint
             .map_or(intrinsic_end, |next| next.min(intrinsic_end));
         let interval = Interval::new(start, end).ok_or(mismatch)?;
-        let identity = self.identity.digest();
-        let mut out = Canonical::new("ng-contract ticket 1");
-        self.base.seal(&mut out);
-        identity.seal(&mut out);
-        start.seal(&mut out);
-        end.seal(&mut out);
-        plan.due.seal(&mut out);
-        plan.frame.seal(&mut out);
-        out.number(u64::from(plan.after_breakpoint));
-        out.number(u64::from(attempt));
         let resolution = self.identity.resolution();
-        Ok(StepTicket {
+        let mut ticket = StepTicket {
             base: self.base,
             interval,
             due: plan.due,
@@ -91,8 +81,10 @@ impl<'r> CoupledProblem<'r> {
             attempt,
             floor_ns: resolution.minimum_interval_ns(),
             budget: resolution.retry_budget(),
-            digest: out.digest(),
-        })
+            digest: self.base,
+        };
+        ticket.digest = ticket.sealed(self.identity.digest());
+        Ok(ticket)
     }
     /// Numerical scratch seeded from the accepted state: each amount rounded once, the tangent at zero.
     pub fn workspace(&self) -> SolveWorkspace {
@@ -180,6 +172,30 @@ pub struct StepTicket {
     pub(crate) digest: Digest,
 }
 impl StepTicket {
+    /// The floor and the budget are the identity's, so sealing the identity covers them.
+    fn sealed(&self, identity: Digest) -> Digest {
+        let Self {
+            base,
+            interval,
+            due,
+            frame,
+            after_breakpoint,
+            attempt,
+            floor_ns: _,
+            budget: _,
+            digest: _,
+        } = self;
+        let mut out = Canonical::new("ng-contract ticket 1");
+        base.seal(&mut out);
+        identity.seal(&mut out);
+        interval.start().seal(&mut out);
+        interval.end().seal(&mut out);
+        due.seal(&mut out);
+        frame.seal(&mut out);
+        out.number(u64::from(*after_breakpoint));
+        out.number(u64::from(*attempt));
+        out.digest()
+    }
     pub fn interval(&self) -> Interval {
         self.interval
     }

@@ -55,7 +55,6 @@ impl Sliding24Hours {
 }
 pub struct CertificatePolicy {
     basis: Digest,
-    digest: Digest,
     quantities: Vec<QuantityPolicy>,
     expected: ExpectedDrift,
     windows: Sliding24Hours,
@@ -72,12 +71,25 @@ impl CertificatePolicy {
         if !held.eq(basis.ids()) {
             return Err(AdmissionError::PolicyCoverage);
         }
-        let basis = basis.digest();
+        Ok(Self {
+            basis: basis.digest(),
+            quantities,
+            expected,
+            windows,
+        })
+    }
+    pub fn digest(&self) -> Digest {
+        let Self {
+            basis,
+            quantities,
+            expected,
+            windows,
+        } = self;
         let mut bytes = basis.as_bytes().to_vec();
         let ExpectedDrift::Zero = expected;
         let Sliding24Hours { coverage_ns } = windows;
         bytes.extend_from_slice(&coverage_ns.to_be_bytes());
-        for quantity in &quantities {
+        for quantity in quantities {
             let QuantityPolicy {
                 quantity: _,
                 absolute,
@@ -90,16 +102,7 @@ impl CertificatePolicy {
                 }
             }
         }
-        Ok(Self {
-            basis,
-            digest: Digest::of_canonical(&bytes),
-            quantities,
-            expected,
-            windows,
-        })
-    }
-    pub fn digest(&self) -> Digest {
-        self.digest
+        Digest::of_canonical(&bytes)
     }
 }
 
@@ -347,7 +350,7 @@ pub fn certify(
     Ok(Certificate {
         seal: view.seal(),
         basis: policy.basis,
-        policy: policy.digest,
+        policy: policy.digest(),
         results,
         pieces,
     })
