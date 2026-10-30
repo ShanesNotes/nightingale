@@ -15,10 +15,14 @@ pub struct Citation {
     _source: String,
     _page_or_table: String,
     _reading: Reading,
+    _tier: Tier,
 }
 impl Citation {
-    /// Validates nonempty locators, but cannot prove that a person read a source.
-    pub fn new(_source: String, _page_or_table: String, _reading: Reading) -> Result<Self, AdmissionError> {
+    /// Validates nonempty locators, but cannot prove that a person read a source. The tier says
+    /// how strong the source is; a `Textbook` tier carries an edition and page in the locator and
+    /// whether a primary source would upgrade the anchor.
+    pub fn new(_source: String, _page_or_table: String, _reading: Reading, _tier: Tier)
+        -> Result<Self, AdmissionError> {
         todo!()
     }
 }
@@ -232,8 +236,8 @@ impl Population {
     }
 }
 /// How strong a source is for one claim: population-specific primary data first, then a
-/// textbook, then inference (record 0003). A non-primary record states whether a primary
-/// source would upgrade it.
+/// textbook, then inference (record 0003). A textbook record states whether a primary source
+/// would upgrade it.
 pub enum Tier {
     PrimaryMeasured,
     PrimaryFitted,
