@@ -16,6 +16,7 @@ A doc earns its load when it binds behavior, defines a word, records a hard-to-r
 | `docs/adr/` | Decision records, one series from 0001 | When a pass touches that area, so it does not reopen a settled choice | Below the SRS |
 | `GLOSSARY.md` | The vocabulary | Before writing prose, a ticket or a name | Words only. SRS section 2 binds the terms it defines |
 | `docs/architecture/solver-contract.{md,svg,png}` and `solver-contract-sketch/` | The design the crates build against | When building or changing a crate or a seam | Below the records |
+| `docs/statecharts/` | The engine lifecycle as a TLA+ model, its Mermaid chart and the README image, with the script that redraws them | When a change adds, removes or moves a lifecycle state or transition | Below the contract: the model follows it |
 | `docs/atlas/` | The coupling map and one card per system, frozen | Only the cards a pass names, when that system is built | Lowest: the SRS and the contract win |
 | `docs/governance.md` | This doc | Before adding, moving, renaming or deleting a doc, term or record | Rules for docs |
 | `.scratch/` | Tickets: buildable slices with blocking edges | When picking up the slice a ticket names | Work, not authority |
