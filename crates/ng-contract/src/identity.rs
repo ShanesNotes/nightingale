@@ -110,3 +110,45 @@ impl Canonical {
         Digest::of_canonical(&self.bytes)
     }
 }
+
+/// Writes a value's canonical bytes. A sequence writes its length first, so no two values share an
+/// encoding.
+pub(crate) trait Seal {
+    fn seal(&self, out: &mut Canonical);
+}
+impl<T: Seal> Seal for [T] {
+    fn seal(&self, out: &mut Canonical) {
+        out.number(self.len() as u64);
+        for item in self {
+            item.seal(out);
+        }
+    }
+}
+impl<T: Seal> Seal for Option<T> {
+    fn seal(&self, out: &mut Canonical) {
+        match self {
+            None => out.number(0),
+            Some(value) => {
+                out.number(1);
+                value.seal(out);
+            }
+        }
+    }
+}
+impl Seal for str {
+    fn seal(&self, out: &mut Canonical) {
+        out.text(self);
+    }
+}
+impl Seal for usize {
+    fn seal(&self, out: &mut Canonical) {
+        out.number(*self as u64);
+    }
+}
+impl Seal for Digest {
+    fn seal(&self, out: &mut Canonical) {
+        for &byte in &self.bytes {
+            out.number(u64::from(byte));
+        }
+    }
+}

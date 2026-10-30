@@ -10,3 +10,10 @@ impl ParameterKey {
         self.key
     }
 }
+
+/// What a validity range rests on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Basis {
+    /// A synthetic fixture's range, by name.
+    Fixture(&'static str),
+}

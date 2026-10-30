@@ -1,5 +1,5 @@
 use crate::graph::Digraph;
-use crate::identity::Canonical;
+use crate::identity::{Canonical, Seal};
 use crate::{AdmissionError, Digest, Length, Measure, ParameterKey};
 use core::cmp::Reverse;
 use core::marker::PhantomData;
@@ -65,6 +65,12 @@ impl SiteId {
         self.class
     }
 }
+impl Seal for SiteId {
+    fn seal(&self, out: &mut Canonical) {
+        out.text(self.key);
+        out.number(self.class as u64);
+    }
+}
 
 pub struct Position {
     axial: Measure<Length>,
@@ -81,7 +87,7 @@ impl Position {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Network {
     Vascular,
 }
