@@ -1,4 +1,4 @@
-pub(super) struct Digraph {
+pub(crate) struct Digraph {
     starts: Vec<usize>,
     targets: Vec<usize>,
 }
@@ -6,7 +6,7 @@ pub(super) struct Digraph {
 const UNSEEN: usize = usize::MAX;
 
 impl Digraph {
-    pub(super) fn new(nodes: usize, edges: &[(usize, usize)]) -> Self {
+    pub(crate) fn new(nodes: usize, edges: &[(usize, usize)]) -> Self {
         let mut starts = vec![0; nodes + 1];
         for &(from, _) in edges {
             starts[from + 1] += 1;
@@ -33,7 +33,7 @@ impl Digraph {
         &self.targets[self.starts[node]..self.starts[node + 1]]
     }
 
-    pub(super) fn reversed(&self) -> Self {
+    pub(crate) fn reversed(&self) -> Self {
         let edges: Vec<(usize, usize)> = (0..self.nodes())
             .flat_map(|from| self.successors(from).iter().map(move |&to| (to, from)))
             .collect();
@@ -42,7 +42,7 @@ impl Digraph {
 
     /// Each node's strongly connected component, by Tarjan's algorithm (SIAM J. Comput. 1(2), 1972)
     /// with an explicit call stack, so a deep map cannot exhaust the thread's stack.
-    pub(super) fn components(&self) -> Vec<usize> {
+    pub(crate) fn components(&self) -> Vec<usize> {
         let nodes = self.nodes();
         let mut order = vec![UNSEEN; nodes];
         let mut low = vec![0; nodes];
@@ -96,7 +96,7 @@ impl Digraph {
         component
     }
 
-    pub(super) fn reachable(&self, seeds: &[usize]) -> Vec<bool> {
+    pub(crate) fn reachable(&self, seeds: &[usize]) -> Vec<bool> {
         let mut seen = vec![false; self.nodes()];
         for &seed in seeds {
             seen[seed] = true;

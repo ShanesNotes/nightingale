@@ -96,6 +96,7 @@
 
 mod anatomy;
 mod failure;
+mod graph;
 mod identity;
 mod provenance;
 mod quantity;

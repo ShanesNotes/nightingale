@@ -1,11 +1,9 @@
-mod graph;
-
+use crate::graph::Digraph;
 use crate::identity::Canonical;
 use crate::{AdmissionError, Digest, Length, Measure, ParameterKey};
 use core::cmp::Reverse;
 use core::marker::PhantomData;
 use core::ops::Range;
-use graph::Digraph;
 
 macro_rules! site_classes {
     ($($name:ident),*) => {
@@ -13,7 +11,8 @@ macro_rules! site_classes {
             pub trait SiteClass {
                 const CLASS: Class;
             }
-            #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+            /// A site class as a value, for what a compiled body names by class.
+            #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
             pub enum Class {
                 $($name),*
             }
@@ -39,7 +38,7 @@ site_classes!(
     NerveSegment
 );
 
-pub(crate) use sealed::Class;
+pub use sealed::Class;
 
 pub struct Site<C> {
     key: &'static str,
@@ -56,7 +55,7 @@ impl<C: SiteClass> Site<C> {
 
 /// A site named by its key and class. Every anatomy resolves it by key at `finish`, so an id from
 /// another builder names the site declared here under the same key and class, or no site at all.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SiteId {
     key: &'static str,
     class: Class,
