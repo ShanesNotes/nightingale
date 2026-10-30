@@ -1,5 +1,5 @@
-//! The packet and its binding. A value carries its dimension's name and its bits, so `bind` can parse it
-//! against a compiled slot, and the hash reads the same entries sorted, so declaration order is not in it.
+//! A value carries its dimension's name and its bits, so `bind` can parse it against a compiled slot, and
+//! the hash reads the same entries sorted, so declaration order is not in it.
 use crate::identity::{Canonical, Seal};
 use crate::quantity::dimension;
 use crate::{
@@ -45,7 +45,6 @@ struct StartEntry {
     bits: u64,
     note: &'static str,
 }
-/// One patient's parameter values and start values.
 pub struct ParameterPacket<K: PacketKind> {
     parameters: Vec<ParameterEntry>,
     starts: Vec<StartEntry>,
@@ -151,7 +150,7 @@ impl ParameterPacket<SyntheticFixture> {
     }
 }
 
-/// Packet values in compiled parameter order with the packet's hash. Evaluation reads these values.
+/// Packet values in compiled parameter order with the packet's hash.
 pub struct BoundParameters {
     pub(crate) model: ModelHash,
     pub(crate) packet: PacketHash,

@@ -42,15 +42,14 @@ impl Compensated {
     pub fn of<U>(value: &Measure<U>) -> Self {
         Self::exact(value.value())
     }
-    /// A number no rounding has touched yet.
     pub(crate) fn exact(value: f64) -> Self {
         Self { hi: value, lo: 0.0 }
     }
     pub fn plus(self, other: Self) -> Self {
         let (sum, error) = two_sum(self.hi, other.hi);
         let (low, low_error) = two_sum(self.lo, other.lo);
-        let (sum, error) = fast_two_sum(sum, error + low);
-        let (hi, lo) = fast_two_sum(sum, error + low_error);
+        let (sum, error) = two_sum(sum, error + low);
+        let (hi, lo) = two_sum(sum, error + low_error);
         Self { hi, lo }
     }
     pub fn minus(self, other: Self) -> Self {
@@ -66,11 +65,9 @@ impl Compensated {
             self
         }
     }
-    /// A combination's integer coefficient times this value.
     pub fn scaled(self, coefficient: i64) -> Self {
         self.product(coefficient as f64)
     }
-    /// This value times a dimensionless factor, as a relative tolerance reads a gross exchange.
     pub fn times(self, factor: &Measure<Dimensionless>) -> Self {
         self.product(factor.value())
     }
@@ -98,11 +95,9 @@ impl Compensated {
         let change = end.minus(start).product(numerator as f64);
         start.plus(change.quotient(denominator as f64))
     }
-    /// The bits of both limbs, for a digest.
     pub fn bits(self) -> [u64; 2] {
         [self.hi.to_bits(), self.lo.to_bits()]
     }
-    /// The one rounding of a compensated value into a solver coordinate.
     pub(crate) fn rounded(self) -> f64 {
         self.hi + self.lo
     }

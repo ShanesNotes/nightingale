@@ -1,5 +1,3 @@
-//! The one producer of extents, and what becomes of a proposal. A core books stages; the contract says
-//! whether they are the declared method on this body; the record says whether the result may be published.
 use crate::body::RowKind;
 use crate::problem::{SolveWorkspace, StagePoint};
 use crate::scheme::Stage;
@@ -102,21 +100,20 @@ impl Quadrature {
     }
 }
 
-/// A finished quadrature: extents, the memory increment and the stage witness, for one ticket.
 pub struct Increment {
     ticket: Digest,
     extents: Extents,
     memory: Vec<f64>,
     witness: StageWitness,
 }
-/// Integrated gross extents per compiled column. No public constructor and no public field.
+/// Integrated gross extents per compiled column.
 pub struct Extents {
     layout: Digest,
     forward: Vec<Compensated>,
     reverse: Vec<Compensated>,
 }
-/// The stages an increment was built from: each one's offset, weight and point. A rate is not kept:
-/// `verify` re-evaluates each point and re-adds it, so a recorded rate is a replayed one.
+/// A rate is not kept: `verify` re-evaluates each point and re-adds it, so a recorded rate is a replayed
+/// one.
 struct StageWitness {
     stages: Vec<WitnessStage>,
 }
@@ -128,7 +125,6 @@ struct WitnessStage {
 }
 
 impl CoupledProblem<'_> {
-    /// Bound to the ticket, so a stage from another attempt is refused.
     pub fn quadrature(&self, ticket: &StepTicket) -> Quadrature {
         let columns = self.body.columns().len();
         let first_memory = (self.body.rows().iter())
@@ -177,7 +173,6 @@ fn seconds(ns: u64) -> f64 {
     ns as f64 / NANOSECONDS_PER_SECOND
 }
 
-/// The worst `defect / scale` so far and the row it fell on, the least row on a tie.
 #[derive(Clone, Copy)]
 struct Worst {
     normalized: f64,
@@ -230,7 +225,8 @@ impl StepProposal {
             algebraic,
             history,
         } = self;
-        if layout != problem.layout() || extents.layout != problem.layout() || finished_for != ticket.digest() {
+        if layout != problem.layout() || extents.layout != problem.layout() || finished_for != ticket.digest()
+        {
             return Err(ticket.mismatch().into());
         }
         let mismatch = |ticket: &StepTicket| EngineFault {
@@ -363,7 +359,6 @@ fn same_floats(a: &[f64], b: &[f64]) -> bool {
         .eq(b.iter().map(|value| value.to_bits()))
 }
 
-/// Amounts and memory are the start plus the increment, never a core's coordinates.
 fn next_state(
     body: &CompiledBody,
     base: &Candidate,
@@ -400,7 +395,6 @@ pub struct VerifiedStep {
     reverse: Vec<Compensated>,
     excursions: Vec<ValidityExcursion>,
 }
-/// What the record takes from a verified step when it builds the next image.
 pub struct VerifiedParts {
     pub state: Candidate,
     pub continuation: MethodHistory,
@@ -411,7 +405,6 @@ impl VerifiedStep {
     pub fn ticket(&self) -> &StepTicket {
         &self.ticket
     }
-    /// The published value of one row.
     pub fn value(&self, row: RowId) -> Compensated {
         self.state.value(row)
     }

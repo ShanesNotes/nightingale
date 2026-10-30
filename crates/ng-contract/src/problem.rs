@@ -1,5 +1,4 @@
-//! One step's problem and what a core reads and writes while it solves. No time step enters a kernel: a
-//! stage time is an exact integer offset inside a ticketed interval.
+//! No time step enters a kernel: a stage time is an exact integer offset inside a ticketed interval.
 use crate::body::UnknownId;
 use crate::boundary::DriveFrame;
 use crate::evaluate::{Inputs, Undefined};
@@ -12,9 +11,9 @@ use crate::{
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 
-/// What a solver core sees of one attempt: the compiled body, the bound values, the identity and the
-/// accepted image. The record builds one per attempt from its own fields. Building one on other values is
-/// allowed and reaches nothing, because `StepProposal::verify` re-evaluates on the record's.
+/// What a solver core sees of one attempt. The record builds one per attempt from its own fields. Building
+/// one on other values is allowed and reaches nothing, because `StepProposal::verify` re-evaluates on the
+/// record's.
 pub struct CoupledProblem<'r> {
     pub(crate) body: &'r CompiledBody,
     pub(crate) parameters: &'r BoundParameters,
@@ -103,7 +102,6 @@ impl<'r> CoupledProblem<'r> {
     pub(crate) fn layout(&self) -> Digest {
         self.body.model_hash().digest()
     }
-    /// Refuses a point from another body's workspace, and a non-finite coordinate, by its row.
     fn check(&self, point: &StagePoint<'_, '_>) -> Result<(), TrialFailure> {
         let ticket = point.time.ticket;
         if point.layout != self.layout() {
@@ -211,7 +209,6 @@ impl StepTicket {
             offset_ns,
         })
     }
-    /// `span_ns` as a fraction of this interval: an exact stage weight.
     pub fn fraction(&self, span_ns: u64) -> Ratio {
         Ratio::new(span_ns, self.length_ns()).expect("a ticket's length is not zero")
     }
@@ -293,11 +290,9 @@ impl SolveWorkspace {
     pub fn unknowns_mut(&mut self) -> &mut [f64] {
         &mut self.unknowns
     }
-    /// The tangent `y'` a stage evaluates against.
     pub fn derivative_mut(&mut self) -> &mut [f64] {
         &mut self.derivative
     }
-    /// The current `(y, y')` at a stage time.
     pub fn point<'w, 't>(&'w self, time: StageTime<'t>) -> StagePoint<'w, 't> {
         StagePoint {
             layout: self.layout,

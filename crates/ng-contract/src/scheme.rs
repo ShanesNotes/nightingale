@@ -1,5 +1,3 @@
-//! What a solver core declares: how its stages make its increment, the scales its error is read against,
-//! its floor and retry budget, and the arithmetic it runs under. All of it enters the run identity.
 use crate::identity::{Canonical, Seal};
 use crate::{AdmissionError, Digest, Dimensionless, Measure, ModelHash, PacketHash};
 
@@ -56,7 +54,6 @@ impl Ratio {
             b.checked_mul(d)?,
         )
     }
-    /// This fraction of an interval, in seconds.
     pub(crate) fn seconds_of(self, length_ns: u64) -> f64 {
         let numerator = u128::from(self.numerator) * u128::from(length_ns);
         let denominator = u128::from(self.denominator) * NANOSECONDS_PER_SECOND;
@@ -71,9 +68,7 @@ enum Method {
     BackwardEulerDoubled,
 }
 
-/// One stage of a scheme over one interval length: where it sits, what it weighs, and how its value comes
-/// from an earlier one. Its value is `from` (the accepted state when `None`) plus `span_ns` times the
-/// tangent of stage `slope`.
+/// Its value is `from` (the accepted state when `None`) plus `span_ns` times the tangent of stage `slope`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Stage {
     pub(crate) offset_ns: u64,
@@ -168,7 +163,6 @@ impl ErrorScales {
             relative: relative.value(),
         })
     }
-    /// What one unit of normalized error means at this value.
     pub(crate) fn at(self, value: f64) -> f64 {
         self.absolute + self.relative * value.abs()
     }

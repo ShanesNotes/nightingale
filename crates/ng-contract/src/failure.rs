@@ -222,7 +222,6 @@ impl Refused {
     pub fn reason(&self) -> NumericalRefusal {
         self.reason
     }
-    /// The digest of the ticket this refuses.
     pub fn ticket(&self) -> Digest {
         self.ticket
     }
@@ -248,7 +247,7 @@ impl From<EngineFault> for TrialFailure {
     }
 }
 
-/// Reserved now: no operation produces one until a later scope stage models it.
+/// No operation produces one until a later scope stage models it.
 pub struct Demise {
     _rhythm: ArrestRhythm,
     _injury: IrreversibleInjury,

@@ -2,10 +2,10 @@
 use crate::TwoReservoirs;
 use crate::run::advance;
 use ng_contract::{
-    AdmissionError, ColumnId, Compensated, CoupledSolver, Dimensionless, EngineFault, InitializationFailure,
-    Interval, Measure, SimTime, Water,
+    AdmissionError, ColumnId, Compensated, CoupledSolver, Digest, Dimensionless, EngineFault,
+    InitializationFailure, Interval, Measure, SimTime, Water,
 };
-use ng_record::{HistorySegment, PatientRecord};
+use ng_record::{Curve, HistorySegment, PatientRecord};
 
 /// A manufactured case with a closed form. Ticket 11 adds the drain, zero-flow, removal, independence and
 /// slice cases, the last against the reference integrator on a body it is handed.
@@ -13,13 +13,14 @@ pub enum AccuracyCase {
     TwoReservoir(TwoReservoirs),
 }
 
-/// A model default reported with every result. `absolute + relative * exact` bounds the error at each
-/// compared instant, and `grid_ns` spaces the instants compared inside a segment.
+/// `absolute + relative * exact` bounds the error at each compared instant, and `grid_ns` spaces the
+/// instants compared inside a segment.
 pub struct AccuracyPolicy {
     cases: Vec<AccuracyCase>,
     absolute: Compensated,
     relative: Measure<Dimensionless>,
     grid_ns: u64,
+    digest: Digest,
 }
 impl AccuracyPolicy {
     /// Refuses a zero grid and no case.
@@ -32,20 +33,40 @@ impl AccuracyPolicy {
         if grid_ns == 0 || cases.is_empty() {
             return Err(AdmissionError::EmptyAccuracyPolicy);
         }
+        let absolute = Compensated::of(&absolute);
+        let mut bytes = grid_ns.to_be_bytes().to_vec();
+        for limb in absolute
+            .bits()
+            .into_iter()
+            .chain(Compensated::of(&relative).bits())
+        {
+            bytes.extend_from_slice(&limb.to_be_bytes());
+        }
+        for AccuracyCase::TwoReservoir(case) in &cases {
+            bytes.extend_from_slice(case.body().model_hash().digest().as_bytes());
+        }
         Ok(Self {
             cases,
-            absolute: Compensated::of(&absolute),
+            absolute,
             relative,
             grid_ns,
+            digest: Digest::of_canonical(&bytes),
         })
+    }
+    pub fn digest(&self) -> Digest {
+        self.digest
     }
 }
 /// The worst error per case. Accepted values only: a trial state is never read.
 #[derive(Debug)]
 pub struct AccuracyEvidence {
+    policy: Digest,
     worst: Vec<Compensated>,
 }
 impl AccuracyEvidence {
+    pub fn policy(&self) -> Digest {
+        self.policy
+    }
     pub fn worst(&self) -> &[Compensated] {
         &self.worst
     }
@@ -72,12 +93,14 @@ fn water(value: f64) -> Compensated {
     Compensated::of(&Measure::<Water>::new(value).expect("the closed form of finite constants is finite"))
 }
 
-/// The value a column's net extent has reached at `at`, inside `segment`.
 fn net_at(segment: &HistorySegment<'_>, column: ColumnId, at: SimTime) -> Compensated {
     let piece = Interval::new(segment.interval().start(), at).expect("a compared instant is after the start");
+    let reached = |curve: Curve<'_>| {
+        let ends = curve.on(piece).expect("a compared instant is inside the segment");
+        ends[ends.len() - 1]
+    };
     let (forward, reverse) = segment.exchange(column);
-    let (forward, reverse) = (forward.on(piece), reverse.on(piece));
-    forward[forward.len() - 1].minus(reverse[reverse.len() - 1])
+    reached(forward).minus(reached(reverse))
 }
 
 /// Each grid instant inside a segment, start excluded, then the segment's end, so a breakpoint is always
@@ -93,7 +116,6 @@ fn compared_instants(interval: Interval, grid_ns: u64) -> Vec<SimTime> {
     instants
 }
 
-/// Each accepted value at `at` beside its closed form.
 fn comparisons(
     case: &TwoReservoirs,
     record: &PatientRecord<'_>,
@@ -119,8 +141,8 @@ fn comparisons(
 }
 
 /// Runs each case with the same core. After every accepted step it compares the accepted dense segment
-/// with the closed form: both amounts, the circulation exchange and the gross inflow. A core that diverges fails
-/// here at its first bad instant, before positivity can intervene.
+/// with the closed form: both amounts, the circulation exchange and the gross inflow. A core that
+/// diverges fails here at its first bad instant, before positivity can intervene.
 pub fn accuracy(
     solver: &dyn CoupledSolver,
     policy: &AccuracyPolicy,
@@ -153,7 +175,10 @@ pub fn accuracy(
         }
         worst.push(largest);
     }
-    Ok(AccuracyEvidence { worst })
+    Ok(AccuracyEvidence {
+        policy: policy.digest,
+        worst,
+    })
 }
 
 /// The ratio test for a core's observed order: for a refinement by two and order `p`, each error over the

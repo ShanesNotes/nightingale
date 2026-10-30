@@ -105,8 +105,7 @@ impl CertificatePolicy {
     }
 }
 
-/// The worst window of one combination, named by instant. Every window was checked; keeping each would be
-/// tens of thousands of rows per combination, and none would add a fact.
+/// The worst window of one combination, named by instant. Every window was checked.
 #[derive(Clone, Copy, Debug)]
 pub struct QuantityResult {
     quantity: QuantityId,
@@ -230,13 +229,15 @@ fn window_starts(segments: &[HistorySegment<'_>], first: u64, last: u64) -> Vec<
     starts
 }
 
-fn differences(later: &Curve<'_>, late: Interval, earlier: &Curve<'_>, early: Interval) -> Vec<Compensated> {
-    let (later, earlier) = (later.on(late), earlier.on(early));
-    later
-        .iter()
-        .zip(&earlier)
-        .map(|(later, earlier)| later.minus(*earlier))
-        .collect()
+fn differences(
+    later: &Curve<'_>,
+    late: Interval,
+    earlier: &Curve<'_>,
+    early: Interval,
+) -> Option<Vec<Compensated>> {
+    let (later, earlier) = (later.on(late)?, earlier.on(early)?);
+    let difference = |(later, earlier): (&Compensated, &Compensated)| later.minus(*earlier);
+    Some(later.iter().zip(&earlier).map(difference).collect())
 }
 
 /// Closure failures win over drift, so a `Drift` failure says the ledger closed everywhere and the body
@@ -287,14 +288,17 @@ pub fn certify(
                 late,
                 &trailing.inventory(quantity),
                 early,
-            );
-            let inflow = differences(&leading.inflow(quantity), late, &trailing.inflow(quantity), early);
+            )
+            .ok_or(coverage)?;
+            let inflow = differences(&leading.inflow(quantity), late, &trailing.inflow(quantity), early)
+                .ok_or(coverage)?;
             let outflow = differences(
                 &leading.outflow(quantity),
                 late,
                 &trailing.outflow(quantity),
                 early,
-            );
+            )
+            .ok_or(coverage)?;
             for (index, &start) in pair.iter().enumerate() {
                 let window = Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + DAY_NS))
                     .ok_or(coverage)?;

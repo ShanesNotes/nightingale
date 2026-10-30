@@ -299,10 +299,10 @@ pub struct Curve<'r> {
     _coefficients: &'r [Compensated],
 }
 impl Curve<'_> {
-    /// The Bernstein coefficients of this curve restricted to `piece`, which must lie inside the
-    /// segment. Same degree, so two curves on one piece subtract coefficient by coefficient, and
-    /// the hull of the result bounds the difference.
-    pub fn on(&self, _piece: Interval) -> Vec<Compensated> {
+    /// The Bernstein coefficients of this curve restricted to `piece`; `None` outside the segment.
+    /// Same degree, so two curves on one piece subtract coefficient by coefficient, and the hull of
+    /// the result bounds the difference.
+    pub fn on(&self, _piece: Interval) -> Option<Vec<Compensated>> {
         todo!()
     }
 }

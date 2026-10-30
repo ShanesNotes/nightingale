@@ -12,7 +12,6 @@ const EXP_UNDERFLOW: f64 = f64::from_bits(0xC087_4910_D52D_3051);
 const MANTISSA: u64 = 0x000F_FFFF_FFFF_FFFF;
 const ONE_BITS: u64 = 0x3FF0_0000_0000_0000;
 
-/// `1 / n!` from `n = 13` down to `n = 3`.
 const EXP_SERIES: [f64; 11] = [
     1.0 / 6_227_020_800.0,
     1.0 / 479_001_600.0,
@@ -26,7 +25,6 @@ const EXP_SERIES: [f64; 11] = [
     1.0 / 24.0,
     1.0 / 6.0,
 ];
-/// `1 / n` for odd `n` from 23 down to 3.
 const ATANH_SERIES: [f64; 11] = [
     1.0 / 23.0,
     1.0 / 21.0,

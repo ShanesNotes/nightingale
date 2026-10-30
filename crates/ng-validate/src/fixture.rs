@@ -6,7 +6,6 @@ use ng_record::{Running, Session};
 const SECOND: u64 = 1_000_000_000;
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 
-/// `1 / k` in seconds, the time constant a forward Euler step must not pass.
 const RELAXATION_SECONDS: u64 = 1000;
 /// `g` with `e` and the partial volume at one, so it is `k`.
 const CONDUCTANCE: f64 = 0.001;
@@ -43,14 +42,13 @@ fn at_origin() -> Result<Position, AdmissionError> {
     ))
 }
 
-/// The closed form at one instant, from the case's own constants and the pinned `exp`.
 pub(crate) struct Exact {
     pub(crate) amounts: [f64; 2],
     pub(crate) circulated: f64,
     pub(crate) received: f64,
 }
 
-/// Two vessel segments `a -> b` joined by one conductance, with one water boundary into `a`. With
+/// Two vessel segments `a -> b` joined by one conductance, with at most one water boundary, at `a`. With
 /// `k = g e v`, `q = k (a - b)`, `a' = -q + u` and `b' = q`, so `s = a + b` and `d = a - b` have a closed
 /// form on every constant stretch of `u`.
 pub struct TwoReservoirs {
@@ -163,7 +161,7 @@ impl TwoReservoirs {
     pub fn body(&self) -> &CompiledBody {
         &self.body
     }
-    /// `1 / k`, the time constant a forward Euler step must not pass.
+    /// `1 / k`. A forward Euler step past this makes the difference between the reservoirs grow.
     pub fn relaxation_ns(&self) -> u64 {
         RELAXATION_SECONDS * SECOND
     }

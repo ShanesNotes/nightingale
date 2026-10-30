@@ -74,7 +74,6 @@ fn fault_of(step: Step<'_>) -> EngineFault {
     }
 }
 
-/// Retries until a fault ends it.
 fn exhaust(mut attempt: Step<'_>) -> Session<'_, Faulted> {
     loop {
         attempt = match attempt {
@@ -114,15 +113,14 @@ fn total_received(record: &PatientRecord<'_>, column: ColumnId) -> Compensated {
     let segment = view.segments().next_back().expect("an accepted step");
     let (forward, reverse) = segment.exchange(column);
     let piece = segment.interval();
-    forward.on(piece)[1].minus(reverse.on(piece)[1])
+    forward.on(piece).expect("its own segment")[1].minus(reverse.on(piece).expect("its own segment")[1])
 }
-
-// The ticket's checks.
 
 #[test]
 fn the_stepped_inflow_matches_its_closed_form_at_first_order_over_three_refinements() {
     let error = |interval| accuracy(&reference(interval), &gate(stepped())).expect("within the policy");
     let (coarse, medium, fine) = (error(16 * SECOND), error(8 * SECOND), error(4 * SECOND));
+    assert_eq!(coarse.policy(), gate(stepped()).digest());
     assert!(fine.worst()[0] < medium.worst()[0] && medium.worst()[0] < coarse.worst()[0]);
     observed_order([&coarse, &medium, &fine], measure(1.9), measure(2.1)).expect("first order");
     let reversed = observed_order([&fine, &medium, &coarse], measure(1.9), measure(2.1));
@@ -250,8 +248,6 @@ fn the_certificate_reads_compensated_amounts_where_a_plain_ledger_loses_the_exch
     let failure = certify(&view, &unscaled).expect_err("the same residual is above the absolute floor alone");
     assert_eq!(failure.check(), CertificateCheck::Closure);
 }
-
-// The method checks.
 
 #[test]
 fn a_misplaced_stage_and_a_wrong_weight_fault_with_method_mismatch() {
@@ -512,8 +508,6 @@ fn a_ticket_refuses_an_empty_span_an_offset_past_its_end_and_a_zero_shift() {
     );
 }
 
-// Refusals and the floor.
-
 #[test]
 fn an_estimate_above_one_is_refused_and_the_retry_is_accepted() {
     let case = stepped();
@@ -628,7 +622,6 @@ fn a_non_finite_coordinate_is_refused_on_its_row() {
     );
 }
 
-/// Which operator the edge law routes through.
 #[derive(Clone, Copy, PartialEq)]
 enum EdgeLaw {
     Divides,
@@ -904,8 +897,6 @@ fn a_published_state_is_evaluated_once_so_a_law_undefined_there_is_refused() {
     assert_eq!(session.record().accepted().time(), SimTime::from_ns(SECOND / 2));
 }
 
-// Binding and admission.
-
 #[test]
 fn a_body_with_a_mode_is_refused_by_name_at_binding() {
     let mut map = AnatomyBuilder::new();
@@ -938,7 +929,6 @@ fn a_body_with_a_mode_is_refused_by_name_at_binding() {
     assert_eq!(refused, Some(AdmissionError::ModesNotYetRun { variable }));
 }
 
-/// The two-reservoir packet, in the order given.
 fn reservoir_packet(body: &CompiledBody, e: f64, g: f64) -> ParameterPacket<SyntheticFixture> {
     let default = Binding::Network(Network::Vascular);
     let mut packet = ParameterPacket::new();
@@ -1338,8 +1328,6 @@ fn two_settings_of_one_core_never_share_an_identity() {
     );
 }
 
-// The drive at a breakpoint.
-
 #[test]
 fn a_step_is_the_cores_own_interval_cut_short_only_at_the_next_breakpoint() {
     // 2,000 s is no multiple of 7 s, so the step that would cross the delivery's start stops at it.
@@ -1415,13 +1403,10 @@ fn the_ending_interval_sees_the_left_value_and_the_next_the_new_one() {
     assert!((received - (first + second + last)).abs() < 1e-12, "{received}");
 }
 
-// Memory, algebraic rows and validity.
-
 fn no_events() -> BoundaryPort {
     BoundaryPort::new(Vec::new()).expect("no event")
 }
 
-/// One memory row and nothing else.
 fn filter_only_body() -> CompiledBody {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", origin());
@@ -1453,7 +1438,7 @@ fn filter_only_packet() -> ParameterPacket<SyntheticFixture> {
     packet
 }
 
-/// A filter `m' = s (t - m)` and a reading closed algebraically at `x = p m`.
+/// A filter `m' = s (t - m)` and a reading closed algebraically at `x = g m`.
 fn filter_body() -> CompiledBody {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", origin());
@@ -1631,6 +1616,72 @@ fn an_algebraic_start_that_does_not_solve_is_refused_with_its_row() {
 }
 
 #[test]
+fn a_law_undefined_at_the_start_is_refused_by_its_name_at_admission() {
+    // `x = u / m` has no value at `m = 0`, and `m`'s own row, the first algebraic row, is solved.
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", origin());
+    let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    let body = assemble(schema, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let level = laws.algebraic::<Pressure>("level", Admissible::finite());
+        let reading = laws.algebraic::<Dimensionless>("reading", Admissible::finite());
+        let low = laws.parameter::<Pressure>(ParameterKey::new("ns.low"), Admissible::finite());
+        let unit = laws.parameter::<Pressure>(ParameterKey::new("ns.unit"), Admissible::positive());
+        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let held = laws.kernel(|mut k| {
+            let m = k.algebraic(&level);
+            let target = k.parameter(&low);
+            let residual = k.subtract(m, target);
+            k.finish(residual, laws.every_mode(), wave)
+        });
+        laws.residual(&level, held);
+        let closure = laws.kernel(|mut k| {
+            let x = k.algebraic(&reading);
+            let u = k.parameter(&unit);
+            let m = k.algebraic(&level);
+            let ratio = k.divide(u, m);
+            let ratio = k.as_dimension::<_, Dimensionless>(ratio);
+            let residual = k.subtract(x, ratio);
+            k.finish(residual, laws.every_mode(), wave)
+        });
+        laws.residual(&reading, closure);
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let name = |local| LawName { owner: "NS", local };
+    let mut packet = ParameterPacket::new();
+    for (key, value) in [("ns.low", 0.0), ("ns.unit", 1.0)] {
+        packet
+            .synthetic(
+                ParameterKey::new(key),
+                Binding::Body,
+                measure::<Pressure>(value),
+                "synthetic",
+            )
+            .expect("once");
+    }
+    packet
+        .start(
+            RowKind::Algebraic(name("level")),
+            measure::<Pressure>(0.0),
+            "synthetic",
+        )
+        .expect("once");
+    packet
+        .start(
+            RowKind::Algebraic(name("reading")),
+            measure::<Dimensionless>(1.0),
+            "synthetic",
+        )
+        .expect("once");
+    let core = reference(SECOND);
+    let refused = admit_fixture(&body, packet, no_events(), &core).err();
+    let law = name("reading");
+    assert_eq!(refused, Some(InitializationFailure::Undefined { law }));
+}
+
+#[test]
 fn a_solved_algebraic_value_outside_its_set_is_refused_with_its_row() {
     // `x = g m` with `g = -3` and `m = 1` solves at `x = -3`, which a positive slot cannot hold.
     let mut map = AnatomyBuilder::new();
@@ -1718,8 +1769,6 @@ fn a_validity_excursion_is_published_and_named_never_refused() {
     assert_eq!(below[0].side(), ExcursionSide::Below);
     assert_eq!(excursions(flow(0.0, 2.0).expect("a range")), []);
 }
-
-// The certificate.
 
 fn delivery(id: &'static [u8], from_s: u64, to_s: u64, rate: f64) -> Delivery {
     Delivery {
@@ -1884,6 +1933,12 @@ fn an_accuracy_policy_needs_a_case_and_a_grid() {
     let cases = vec![AccuracyCase::TwoReservoir(stepped())];
     let no_grid = AccuracyPolicy::new(cases, measure(5.0), measure(0.0), 0).err();
     assert_eq!(no_grid, Some(AdmissionError::EmptyAccuracyPolicy));
+    let limit = |absolute| {
+        let cases = vec![AccuracyCase::TwoReservoir(stepped())];
+        AccuracyPolicy::new(cases, measure(absolute), measure(0.0), SECOND).expect("a policy")
+    };
+    assert_eq!(limit(5.0).digest(), limit(5.0).digest());
+    assert_ne!(limit(5.0).digest(), limit(6.0).digest());
 }
 
 #[test]
@@ -1922,18 +1977,21 @@ fn a_flow_that_runs_backward_keeps_its_gross_reverse_apart() {
     let segment = view.segments().next_back().expect("an accepted step");
     let (forward, reverse) = segment.exchange(circulation);
     let piece = segment.interval();
-    assert_eq!(forward.on(piece)[1], Compensated::ZERO);
-    let moved = hi(reverse.on(piece)[1]);
+    assert_eq!(forward.on(piece).expect("its own segment")[1], Compensated::ZERO);
+    let moved = hi(reverse.on(piece).expect("its own segment")[1]);
     assert!(moved > 0.19 && moved < 0.2, "{moved}");
     let [a, b] = case.rows().map(|row| hi(session.record().accepted().value(row)));
     assert!((a - (400.0 + moved)).abs() < 1e-12 && (b - (600.0 - moved)).abs() < 1e-12);
     let quantity = view.basis().ids().next().expect("one combination");
     assert_eq!(
-        segment.inflow(quantity).on(piece)[1],
+        segment.inflow(quantity).on(piece).expect("its own segment")[1],
         Compensated::ZERO,
         "no combination sees it"
     );
-    assert_eq!(segment.outflow(quantity).on(piece)[1], Compensated::ZERO);
+    assert_eq!(
+        segment.outflow(quantity).on(piece).expect("its own segment")[1],
+        Compensated::ZERO
+    );
 }
 
 #[test]
@@ -1953,9 +2011,15 @@ fn a_boundary_out_of_the_body_counts_as_outflow_and_the_ledger_closes() {
     let quantity = view.basis().ids().next().expect("one combination");
     let segment = view.segments().next_back().expect("an accepted step");
     let piece = segment.interval();
-    assert!((hi(segment.outflow(quantity).on(piece)[1]) - drained).abs() < 1e-9);
-    assert_eq!(segment.inflow(quantity).on(piece)[1], Compensated::ZERO);
-    assert!((hi(segment.inventory(quantity).on(piece)[1]) - (200.0 - drained)).abs() < 1e-9);
+    assert!((hi(segment.outflow(quantity).on(piece).expect("its own segment")[1]) - drained).abs() < 1e-9);
+    assert_eq!(
+        segment.inflow(quantity).on(piece).expect("its own segment")[1],
+        Compensated::ZERO
+    );
+    assert!(
+        (hi(segment.inventory(quantity).on(piece).expect("its own segment")[1]) - (200.0 - drained)).abs()
+            < 1e-9
+    );
 }
 
 /// Two reservoirs with no flow between them and a boundary law that runs backward at a fixed rate.
@@ -2023,10 +2087,16 @@ fn a_boundary_flow_that_runs_backward_counts_on_the_side_it_moves() {
         let quantity = view.basis().ids().next().expect("one combination");
         let segment = view.segments().next_back().expect("an accepted step");
         let piece = segment.interval();
-        assert_eq!(hi(segment.inflow(quantity).on(piece)[1]), gained);
-        assert_eq!(hi(segment.outflow(quantity).on(piece)[1]), lost);
         assert_eq!(
-            hi(segment.inventory(quantity).on(piece)[1]),
+            hi(segment.inflow(quantity).on(piece).expect("its own segment")[1]),
+            gained
+        );
+        assert_eq!(
+            hi(segment.outflow(quantity).on(piece).expect("its own segment")[1]),
+            lost
+        );
+        assert_eq!(
+            hi(segment.inventory(quantity).on(piece).expect("its own segment")[1]),
             200.0 + gained - lost
         );
     }
@@ -2050,6 +2120,19 @@ fn a_segment_samples_only_its_own_interval() {
     let halfway = segment.sample(row, SimTime::from_ns(4 * SECOND)).expect("inside");
     assert!(start > halfway && halfway > end);
     assert_eq!(segment.sample(row, SimTime::from_ns(8 * SECOND + 1)), None);
+    let view = session.record().conservation();
+    let quantity = view.basis().ids().next().expect("one combination");
+    let curve = view
+        .segments()
+        .next_back()
+        .expect("an accepted step")
+        .inventory(quantity);
+    let piece = |from, to| {
+        Interval::new(SimTime::from_ns(from * SECOND), SimTime::from_ns(to * SECOND)).expect("an interval")
+    };
+    assert!(curve.on(piece(0, 8)).is_some());
+    assert_eq!(curve.on(piece(8, 9)), None);
+    assert_eq!(curve.on(piece(1, 9)), None);
 }
 
 #[test]
@@ -2069,8 +2152,8 @@ fn a_relative_accuracy_limit_reads_the_exact_value() {
 
 #[test]
 fn a_relative_limit_holds_the_exchange_to_its_own_size() {
-    // Amounts near 5e5 carry at most 2 in error, four parts in a million. The same error sits on an
-    // exchange near 8 at the first step, about 0.4%, so only reading the exchange can reject this.
+    // Amounts near 5e5 carry at most 2 in error, four parts in a million. The first step's error of about
+    // 0.03 sits on an exchange near 8, about 0.4%, so only reading the exchange can reject this.
     let cases = vec![AccuracyCase::TwoReservoir(stepped())];
     let policy = AccuracyPolicy::new(cases, measure(1e-300), measure(1e-4), 100 * SECOND).expect("a policy");
     let failure = accuracy(&reference(8 * SECOND), &policy);

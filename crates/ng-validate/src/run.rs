@@ -1,7 +1,6 @@
 use ng_contract::SimTime;
 use ng_record::{Faulted, Running, Session, Step};
 
-/// Steps to the next accepted step, retrying every refusal. A fault ends it with the latch.
 pub(crate) fn advance<'m>(
     session: Session<'m, Running>,
 ) -> Result<Session<'m, Running>, Session<'m, Faulted>> {

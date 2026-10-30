@@ -17,7 +17,7 @@ pub fn explicit_stage(
     problem.evaluate(&workspace.point(time))
 }
 
-/// Forward Euler's one stage and the state it reaches.
+/// Forward Euler's one stage, with the workspace still at the start and its tangent at the rates there.
 pub fn euler_step(
     problem: &CoupledProblem<'_>,
     ticket: &StepTicket,
@@ -27,7 +27,6 @@ pub fn euler_step(
     Ok((workspace, stage))
 }
 
-/// Moves the workspace along its tangent over the whole ticket.
 pub fn advance(workspace: &mut SolveWorkspace, ticket: &StepTicket) {
     let seconds = ticket.length_ns() as f64 / NANOSECONDS_PER_SECOND;
     let tangent = workspace.derivative_mut().to_vec();
@@ -37,7 +36,7 @@ pub fn advance(workspace: &mut SolveWorkspace, ticket: &StepTicket) {
 }
 
 /// An honest explicit method that follows its declared scheme, so `validate` passes it and every ledger
-/// closes while the difference between the reservoirs grows.
+/// closes even while the difference between the reservoirs grows.
 pub struct ForwardEuler {
     pub interval_ns: u64,
 }
@@ -57,8 +56,8 @@ impl CoupledSolver for ForwardEuler {
     }
 }
 
-/// An honest Heun core: the start and the Euler-predicted end, a half each. The legal twin of every core
-/// below that declares this scheme and breaks it.
+/// An honest Heun core: the start and the Euler-predicted end, a half each. The legal twin of every
+/// must-fail core that declares this scheme.
 pub struct Heun {
     pub interval_ns: u64,
 }

@@ -55,7 +55,6 @@ impl CompiledBody {
     pub fn refusal_sources(&self) -> &[RefusalSource] {
         &self.sources
     }
-    /// The source that names one row's admissible set.
     pub fn row_source(&self, row: RowId) -> SourceId {
         self.source_of(RefusalSource::Row { row })
     }

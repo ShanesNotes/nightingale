@@ -1,5 +1,5 @@
-//! The ledger's account of a run: one chunk per accepted step today, behind a view the certificate reads,
-//! so ticket 05's fixed-time chunks and history store change no reader.
+//! One chunk per accepted step, behind a view the certificate reads, so ticket 05's fixed-time chunks and
+//! history store change no reader.
 use ng_contract::{
     AcceptedStateView, ColumnId, Compensated, CompiledBody, ConservedBasis, Digest, Interval, QuantityId,
     SimTime, VerifiedStep,
@@ -30,7 +30,6 @@ struct ColumnStep {
     reverse: [Compensated; 2],
 }
 impl LedgerChunk {
-    /// The ledger's arithmetic, the record's own, from public reads of body and step.
     pub(crate) fn after(history: &History, body: &CompiledBody, step: &VerifiedStep) -> Self {
         let previous = history.chunks.last();
         let columns: Vec<ColumnStep> = (step.gross().enumerate())
@@ -112,9 +111,7 @@ impl LedgerChunk {
     }
 }
 
-/// Every chunk of one record.
 pub(crate) struct History {
-    /// Every combination's inventory at admission, which the first chunk starts from.
     opening: Vec<Compensated>,
     /// What one unit of each column moves each combination by. Zero is an internal transfer, which no
     /// combination sees, gross or not.
@@ -262,11 +259,12 @@ pub struct Curve<'r> {
     coefficients: &'r [Compensated; 2],
 }
 impl Curve<'_> {
-    /// The Bernstein coefficients of this curve restricted to `piece`, which must lie inside the segment.
-    /// Same degree, so two curves on one piece subtract coefficient by coefficient, and the hull of the
-    /// result bounds the difference.
-    pub fn on(&self, piece: Interval) -> Vec<Compensated> {
-        vec![self.at(piece.start()), self.at(piece.end())]
+    /// The Bernstein coefficients of this curve restricted to `piece`; `None` outside the segment. Same
+    /// degree, so two curves on one piece subtract coefficient by coefficient, and the hull of the result
+    /// bounds the difference.
+    pub fn on(&self, piece: Interval) -> Option<Vec<Compensated>> {
+        let inside = self.interval.start() <= piece.start() && piece.end() <= self.interval.end();
+        inside.then(|| vec![self.at(piece.start()), self.at(piece.end())])
     }
     fn at(&self, instant: SimTime) -> Compensated {
         let reached = instant.nanoseconds() - self.interval.start().nanoseconds();

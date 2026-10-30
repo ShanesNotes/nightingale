@@ -55,8 +55,8 @@ impl CoupledSolver for MisplacedStage {
     }
 }
 
-/// Declares doubled backward Euler and books each stage at the start with its tangent at the rates there.
-/// Every residual is zero and no stage reaches the value its tangent says it should.
+/// Declares doubled backward Euler and books each stage at the start state with its tangent at the rates
+/// there. Every residual is zero and no stage reaches the value its tangent says it should.
 pub struct UnreachedStage {
     pub inner: ReferenceIntegrator,
 }

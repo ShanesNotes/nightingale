@@ -9,7 +9,6 @@ pub enum Book {
     Water,
 }
 impl Book {
-    /// Whether `U` is the dimension this quantity is counted in.
     pub fn measures<U: Dimension>(self) -> bool {
         match self {
             Book::Water => dimension::<U>() == dimension::<Water>(),

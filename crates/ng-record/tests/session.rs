@@ -69,7 +69,6 @@ fn reservoirs() -> Result<Reservoirs, AdmissionError> {
     })
 }
 
-/// Forward Euler under a declared resolution: a one-step core that refuses one chosen attempt.
 struct Explicit {
     interval_ns: u64,
     refuse_at: Option<SimTime>,

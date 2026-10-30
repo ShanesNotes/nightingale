@@ -24,7 +24,6 @@ fn resolution(scheme: StageScheme) -> Result<DeclaredResolution, AdmissionError>
     ))
 }
 
-/// Everything a stage needs, built through admission.
 struct Bench {
     body: CompiledBody,
     parts: InitialParts,
@@ -251,8 +250,9 @@ fn overlapping_deliveries_add_and_no_delivery_means_zero() -> Result<(), Initial
     Ok(())
 }
 
-/// Memory rows that read every operator the body language has, each at a smooth point.
-fn every_operator() -> Result<(CompiledBody, LawName), AdmissionError> {
+/// Memory and algebraic rows that read every operator but `multiply`, `conductance_flow` and `volume`,
+/// which the reservoir body reads, each at a smooth point.
+fn nearly_every_operator() -> Result<(CompiledBody, LawName), AdmissionError> {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", at()?);
     let schema = Schema::new(map.finish()?)?;
@@ -339,8 +339,9 @@ fn memory(local: &'static str) -> RowKind {
 }
 
 #[test]
-fn derivatives_match_central_differences_on_every_operator() -> Result<(), InitializationFailure> {
-    let (body, _) = every_operator()?;
+fn derivatives_match_central_differences_on_nearly_nearly_every_operator() -> Result<(), InitializationFailure>
+{
+    let (body, _) = nearly_every_operator()?;
     let mut packet = ParameterPacket::new();
     let bind = Binding::Body;
     packet.synthetic(
@@ -475,7 +476,6 @@ fn a_smooth_limit_is_defined_where_its_root_is_zero() -> Result<(), Initializati
     Ok(())
 }
 
-/// Forward Euler by hand: one stage at the start, its tangent the rates there.
 fn forward_euler(bench: &Bench, span_ns: u64) -> Result<VerifiedStep, TrialFailure> {
     let problem = bench.problem();
     let ticket = problem.ticket(span_ns)?;

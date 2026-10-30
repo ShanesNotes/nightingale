@@ -200,6 +200,7 @@ pub struct AccuracyPolicy {
     _absolute: Compensated,
     _relative: Measure<Dimensionless>,
     _grid_ns: u64,
+    _digest: Digest,
 }
 impl AccuracyPolicy {
     /// Refuses a zero grid and no case.
@@ -211,12 +212,19 @@ impl AccuracyPolicy {
     ) -> Result<Self, AdmissionError> {
         todo!()
     }
+    pub fn digest(&self) -> Digest {
+        todo!()
+    }
 }
-/// The worst error per case. Accepted values only: a trial state is never read.
+/// The worst error per case, under one policy. Accepted values only: a trial state is never read.
 pub struct AccuracyEvidence {
+    _policy: Digest,
     _worst: Vec<Compensated>,
 }
 impl AccuracyEvidence {
+    pub fn policy(&self) -> Digest {
+        todo!()
+    }
     pub fn worst(&self) -> &[Compensated] {
         todo!()
     }

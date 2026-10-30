@@ -1,6 +1,4 @@
-//! The accepted image's owner and the check that accepts or refuses each step. `validate` is immutable and
-//! returns the whole next image or a failure; `publish` installs that image and cannot fail. `&mut
-//! PatientRecord` is never lent outside this crate, so only `Session` publishes.
+//! `&mut PatientRecord` is never lent outside this crate, so only `Session` publishes.
 use crate::history::{ConservationView, History, HistorySeal, LedgerChunk};
 use ng_contract::{
     AcceptedStateView, BoundParameters, Candidate, CompiledBody, CoupledProblem, DenseSegment, Digest,
@@ -149,7 +147,6 @@ impl<'m> PatientRecord<'m> {
             &self.pending,
         )
     }
-    /// Lends the problem for one attempt. Only `Session` publishes.
     pub fn problem(&self) -> CoupledProblem<'_> {
         CoupledProblem::new(
             self.body,
@@ -161,8 +158,7 @@ impl<'m> PatientRecord<'m> {
     }
     /// The contract answers whether the core followed its declared method; this answers whether the result
     /// may become the next accepted image. `expected` is the ticket the session issued, so a proposal for
-    /// any other attempt, or an issued ticket this record would not issue, is `BindingMismatch`. Never
-    /// mutates. A refusal is retryable; a fault latches.
+    /// any other attempt, or an issued ticket this record would not issue, is `BindingMismatch`.
     pub fn validate(&self, expected: &StepTicket, proposal: StepProposal) -> Result<NextImage, TrialFailure> {
         let problem = self.problem();
         if !expected.binds(&problem) || proposal.ticket().digest() != expected.digest() {
@@ -238,7 +234,6 @@ impl<'m> PatientRecord<'m> {
             excursions,
         }
     }
-    /// The one history the certificate reads.
     pub fn conservation(&self) -> ConservationView<'_> {
         ConservationView {
             history: &self.history,
@@ -281,8 +276,8 @@ impl<'m> PatientRecord<'m> {
     }
 }
 
-/// What must stay byte-identical across a refusal. `streams` is over an empty list until ticket 06, so
-/// today it proves only that the field is read.
+/// What must stay byte-identical across a refusal. `streams` is over an empty list until ticket 06, so it
+/// proves only that the field is read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RecordDigests {
     pub revision: u64,
@@ -309,7 +304,6 @@ pub struct NextImage {
     excursions: Vec<ValidityExcursion>,
 }
 
-/// What one published step did: its revision and seal, each input it applied, and any excursion.
 #[derive(Debug)]
 pub struct StepReceipt {
     revision: u64,

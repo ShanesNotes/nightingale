@@ -1,13 +1,11 @@
-//! The one interpreter of the instruction set, in fixed order, private to the contract. Each `Op::Input`
-//! reads its instance's next `Bound`; a drive reads the ticket's frame. Differentiation runs in the same
-//! walk, so a value and its row of the Jacobian cannot describe different programs.
+//! Differentiation runs in the same walk as evaluation, so a value and its row of the Jacobian cannot
+//! describe different programs.
 use crate::body::{Bound, Instance, RowKind, Target, UnknownId};
 use crate::boundary::DriveFrame;
 use crate::law::{Op, Validity};
 use crate::pinned;
 use crate::{Compensated, CompiledBody, ExcursionSide, LawName, SimTime, ValidityExcursion};
 
-/// Why an operator stopped. `evaluate` turns it into `TrialDomain` naming the source.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum OperatorDomain {
     Divisor,
@@ -129,7 +127,6 @@ fn run(ops: &[Op], inputs: &[Dual], partial_volume: f64) -> Result<Dual, Operato
     Ok(stack[stack.len() - 1])
 }
 
-/// What a body's laws read at one point: bound values, trial coordinates and the frozen drives.
 pub(crate) struct Inputs<'a> {
     pub(crate) parameters: &'a [f64],
     pub(crate) frame: &'a DriveFrame,
@@ -164,7 +161,6 @@ impl CompiledBody {
             domain,
         })
     }
-    /// Each instance's value at a point, in instance order.
     pub(crate) fn instance_values(&self, inputs: &Inputs<'_>) -> Result<Vec<f64>, Undefined> {
         (self.layout.instances.iter())
             .map(|instance| {
@@ -203,7 +199,6 @@ impl CompiledBody {
         }
         residuals
     }
-    /// `dF/dy + shift * dF/dy'` on the compiled sparsity, by fixed-order forward differentiation.
     pub(crate) fn jacobian(&self, inputs: &Inputs<'_>, shift: f64) -> Result<Vec<f64>, Undefined> {
         let sparsity = &self.layout.sparsity;
         let mut values = vec![0.0; sparsity.unknowns.len()];

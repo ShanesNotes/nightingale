@@ -898,7 +898,11 @@ fn laws_on_algebraic_rows(first: usize, programs: &[Program], instances: &[Insta
 }
 
 /// A variable's values that change what its rows read: one value stands for each distinct set of reads.
-fn distinct_values(laws: &[&AlgebraicLaw], variable: LawName, values: &[&'static str]) -> Vec<&'static str> {
+fn values_with_distinct_reads(
+    laws: &[&AlgebraicLaw],
+    variable: LawName,
+    values: &[&'static str],
+) -> Vec<&'static str> {
     let reads_under = |value: &'static str| -> Vec<(usize, &[usize])> {
         (laws.iter())
             .filter(|law| law.holds == Some((variable, value)))
@@ -964,7 +968,7 @@ fn match_each_mode(
             })
             .map(|&name| {
                 let values = &modes[modes.partition_point(|mode| mode.variable < name)].values;
-                (name, distinct_values(&laws, name, values))
+                (name, values_with_distinct_reads(&laws, name, values))
             })
             .collect();
         let mut chosen = vec![0; cases.len()];

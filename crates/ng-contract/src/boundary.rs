@@ -1,5 +1,5 @@
-//! The boundary port: one timestamped timeline, ordered by `(time, id)`. A delivery stated at its start
-//! holds a rate until it ends, so a drive is constant over any ticket and no ticket crosses a change.
+//! A delivery stated at its start holds a rate until it ends, so a drive is constant over any ticket and
+//! no ticket crosses a change.
 use crate::identity::{Canonical, Seal};
 use crate::{AdmissionError, Digest, Measure, SimTime, StepTicket, Water};
 
@@ -21,8 +21,8 @@ impl Seal for InputId {
     }
 }
 
-/// `amount` of water through the named boundary, from the event's instant until `ends`, at the rate that
-/// delivers it exactly: "applied once" shows as a total received. Overlapping deliveries add. Ticket 09
+/// `amount` of water through the named boundary, from the event's instant until `ends`, at the constant
+/// rate that delivers it: "applied once" shows as a total received. Overlapping deliveries add. Ticket 09
 /// adds the other intake payloads beside this one.
 pub struct WaterDelivery {
     pub boundary: &'static str,
@@ -71,8 +71,7 @@ impl Seal for Delivery {
     }
 }
 
-/// The parsed timeline. Boundary names are checked against the compiled body at
-/// `CompiledBody::initialization`.
+/// Boundary names are checked against the compiled body at `CompiledBody::initialization`.
 pub struct BoundaryPort {
     pub(crate) deliveries: Vec<Delivery>,
 }
@@ -124,7 +123,6 @@ impl Delivery {
     }
 }
 
-/// What a ticket starting at one instant binds.
 pub(crate) struct Plan {
     pub(crate) due: Vec<InputId>,
     pub(crate) frame: DriveFrame,
@@ -201,8 +199,7 @@ impl PendingInputs {
 
 /// What the boundary supplies over one ticket, frozen when the ticket is issued. `Op::Input` reads this and
 /// never the stage's instant, so a stage at the ticket's end reads the left limit even when the next
-/// delivery starts exactly there. The next ticket's frame holds the new value. A boundary with no delivery
-/// running supplies zero.
+/// delivery starts exactly there.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct DriveFrame {
     drives: Vec<(&'static str, f64)>,

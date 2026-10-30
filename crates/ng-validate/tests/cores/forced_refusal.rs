@@ -1,12 +1,10 @@
 use super::fresh_history;
 use ng_contract::*;
 
-/// Who refuses the forced attempt.
 #[derive(Clone, Copy)]
 pub enum Refuser {
     /// The core books its stages unsolved, so the record refuses, as with a real unconverged proposal.
     Record,
-    /// The core refuses it itself.
     Core,
 }
 

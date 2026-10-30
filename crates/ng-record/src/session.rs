@@ -1,6 +1,3 @@
-//! The host's session over one record, bound at admission to one compiled body and one solver. A refused
-//! session can only retry, and a fault latches: `Session<Faulted>` has no `step`, and nothing moves a
-//! session back to `Running`.
 use crate::record::{NextImage, PatientRecord, StepReceipt};
 use ng_contract::{
     AdmissionError, CompiledBody, CoupledProblem, CoupledSolver, EngineFault, InitialRevision, Refused,
@@ -30,8 +27,8 @@ pub enum Step<'m> {
     Faulted(Session<'m, Faulted>),
 }
 
-/// One attempt, through solve and validate. A refusal that names any ticket but the one issued would spend
-/// another attempt's budget, so it is `BindingMismatch`.
+/// A refusal that names any ticket but the one issued would spend another attempt's budget, so it is
+/// `BindingMismatch`.
 fn attempt(
     record: &PatientRecord<'_>,
     solver: &dyn CoupledSolver,
@@ -142,7 +139,7 @@ impl Session<'_, Faulted> {
     pub fn fault(&self) -> &EngineFault {
         &self.status.fault
     }
-    /// The refusals before the fault, each naming its row or source.
+    /// The refusals before the fault, in attempt order.
     pub fn refusals(&self) -> &[Refused] {
         &self.status.refusals
     }

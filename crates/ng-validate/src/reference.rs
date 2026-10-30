@@ -31,7 +31,6 @@ impl ReferenceIntegrator {
             scales: default_scales(),
         }
     }
-    /// Tighter or looser scales, which make the estimate refuse sooner or later.
     pub fn with_scales(self, scales: ErrorScales) -> Self {
         Self { scales, ..self }
     }

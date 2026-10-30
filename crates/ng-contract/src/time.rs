@@ -31,7 +31,6 @@ pub struct Interval {
     end: SimTime,
 }
 impl Interval {
-    /// `None` unless `start` is before `end`.
     pub fn new(start: SimTime, end: SimTime) -> Option<Self> {
         (start < end).then_some(Self { start, end })
     }

@@ -1,15 +1,13 @@
-//! The admission path: once, yielding the only `InitialRevision` a session can be admitted from. Ticket 08
-//! adds calibrated unknowns, anchors, the periodic goal and the `Initializer` trait on this same surface.
 use crate::body::RowKind;
 use crate::boundary::PendingInputs;
 use crate::evaluate::Inputs;
 use crate::problem::SolveWorkspace;
 use crate::{
-    AdmissionError, BoundParameters, BoundaryPort, Candidate, CompiledBody, DenseSegment, MethodHistory,
-    ModelHash, PacketHash, RowId, SimTime,
+    AdmissionError, BoundParameters, BoundaryPort, Candidate, CompiledBody, DenseSegment, LawName,
+    MethodHistory, ModelHash, PacketHash, RowId, SimTime,
 };
 
-/// When the start state stands. Ticket 08 adds a goal, a budget and a guess as further constructors.
+/// Ticket 08 adds a goal, a budget and a guess beside the anchor moment.
 pub struct InitializationRequest {
     anchor_moment: SimTime,
 }
@@ -51,7 +49,6 @@ impl CompiledBody {
     }
 }
 
-/// The start-state problem, solved once.
 pub struct InitializationSystem<'m> {
     body: &'m CompiledBody,
     parameters: BoundParameters,
@@ -90,10 +87,7 @@ impl InitializationSystem<'_> {
             }
         }
         let time = request.anchor_moment;
-        let first_algebraic = (body.rows().iter())
-            .find(|row| matches!(row.kind(), RowKind::Algebraic(_)))
-            .map(|row| row.id());
-        if let Some(first) = first_algebraic {
+        if (body.rows().iter()).any(|row| matches!(row.kind(), RowKind::Algebraic(_))) {
             let frame = pending.plan(time).frame;
             let inputs = Inputs {
                 parameters: &parameters.values,
@@ -101,7 +95,7 @@ impl InitializationSystem<'_> {
                 unknowns,
             };
             let values = (body.instance_values(&inputs))
-                .map_err(|_| InitializationFailure::Inconsistent { row: first })?;
+                .map_err(|undefined| InitializationFailure::Undefined { law: undefined.law })?;
             let (columns, rows) = body.targets(&values);
             let residuals = body.residuals(&columns, &rows, &vec![0.0; rows.len()]);
             for row in body.rows() {
@@ -128,7 +122,7 @@ impl InitializationSystem<'_> {
 pub struct InitialRevision {
     parts: InitialParts,
 }
-/// What the record takes on at admission. Only `InitialRevision::into_parts` hands these out.
+/// Only `InitialRevision::into_parts` hands these out.
 pub struct InitialParts {
     pub time: SimTime,
     pub state: Candidate,
@@ -155,6 +149,10 @@ pub enum InitializationFailure {
     /// A row the solved workspace leaves inconsistent with the packet, its set or its residual.
     Inconsistent {
         row: RowId,
+    },
+    /// A law the solved workspace leaves without a value, such as a divisor at zero.
+    Undefined {
+        law: LawName,
     },
 }
 impl From<AdmissionError> for InitializationFailure {

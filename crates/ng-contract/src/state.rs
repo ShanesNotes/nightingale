@@ -1,5 +1,5 @@
-//! The accepted condition's parts. The record owns the only instances; these types live in the contract
-//! because a core reads them and `StepProposal::verify` derives the next ones.
+//! These types live in the contract, not the record, because a core reads them and
+//! `StepProposal::verify` derives the next ones.
 use crate::body::RowKind;
 use crate::boundary::PendingInputs;
 use crate::identity::{Canonical, Seal};
@@ -13,7 +13,6 @@ pub struct Candidate {
     pub(crate) algebraic: Vec<f64>,
 }
 impl Candidate {
-    /// Splits solver coordinates by row kind. Each is exact: nothing has been rounded yet.
     pub(crate) fn of_coordinates(body: &CompiledBody, coordinates: &[f64]) -> Self {
         let mut state = Self {
             amounts: Vec::new(),
@@ -45,7 +44,6 @@ impl Candidate {
         }
         Compensated::exact(algebraic[at - memory.len()])
     }
-    /// Every row's value in row order.
     pub(crate) fn values(&self) -> Vec<Compensated> {
         let Self {
             amounts,
@@ -58,7 +56,6 @@ impl Candidate {
             .map(|&value| Compensated::exact(value));
         amounts.iter().copied().chain(coordinates).collect()
     }
-    /// Solver coordinates in row order, each amount rounded once.
     pub(crate) fn coordinates(&self) -> Vec<f64> {
         let Self {
             amounts,
