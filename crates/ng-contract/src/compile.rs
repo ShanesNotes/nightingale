@@ -7,8 +7,8 @@ use crate::conservation::conserved_basis;
 use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::law::{
-    End, Family, FragmentData, GuardDeclaration, Input, KernelData, Obligation, Op, ParameterContext,
-    ParameterDeclaration, Selector, SlotDeclaration, SlotKind,
+    End, Family, FragmentData, GuardDeclaration, Input, KernelData, ModeDeclaration, Obligation, Op,
+    ParameterContext, ParameterDeclaration, Selector, SlotDeclaration, SlotKind,
 };
 use crate::quantity::dimension;
 use crate::scope::{PoolRef, WaterBoundary};
@@ -369,14 +369,20 @@ impl Rows {
             .filter(|&(_, space)| !left_out(space))
             .map(|(site, space)| PoolRef { site, space })
             .collect();
-        let mut slots: Vec<(SlotKind, LawName, &SlotDeclaration)> = (fragments.iter())
+        let mut slots: Vec<(SlotKind, LawName, AdmissibleSet, &String)> = (fragments.iter())
             .flat_map(|fragment| {
                 fragment.slots.iter().map(|slot| {
+                    let SlotDeclaration {
+                        name,
+                        kind,
+                        dimension,
+                        set,
+                    } = slot;
                     let name = LawName {
                         owner: fragment.owner,
-                        local: slot.name,
+                        local: name,
                     };
-                    (slot.kind, name, slot)
+                    (*kind, name, *set, dimension)
                 })
             })
             .collect();
@@ -388,12 +394,12 @@ impl Rows {
             };
             (kind, AdmissibleSet::Nonnegative, dimension::<Water>())
         });
-        let slot_rows = slots.iter().map(|&(kind, name, slot)| {
+        let slot_rows = slots.iter().map(|&(kind, name, set, dimension)| {
             let kind = match kind {
                 SlotKind::Memory => RowKind::Memory(name),
                 SlotKind::Algebraic => RowKind::Algebraic(name),
             };
-            (kind, slot.set, slot.dimension.clone())
+            (kind, set, dimension.clone())
         });
         let rows = (amount_rows.chain(slot_rows).enumerate())
             .map(|(at, (kind, admissible, dimension))| Row {
@@ -590,17 +596,25 @@ fn left_out(law: LawName, pool: PoolRef) -> CompileDefect {
     }
 }
 
+/// `predicate` is the kernel's mode selector already named; its id only finds its validity ranges.
 fn code(fragment: &FragmentData, predicate: Predicate, kernel: &KernelData) -> Code {
+    let KernelData {
+        id,
+        code,
+        dimension,
+        modes: _,
+        rate,
+    } = kernel;
     let mut validity: Vec<_> = (fragment.validity.iter())
-        .filter(|(id, _)| *id == kernel.id)
+        .filter(|(kernel, _)| kernel == id)
         .map(|&(_, range)| range)
         .collect();
     validity.sort_unstable();
     Code {
-        ops: kernel.code.clone(),
-        dimension: kernel.dimension.clone(),
+        ops: code.clone(),
+        dimension: dimension.clone(),
         predicate,
-        rate: kernel.rate,
+        rate: *rate,
         validity,
     }
 }
@@ -676,20 +690,27 @@ fn guards(
     let mut guards = Vec::new();
     for fragment in fragments {
         for guard in &fragment.guards {
-            let mode = &fragment.modes[guard.variable];
+            let GuardDeclaration {
+                zero,
+                crossing,
+                variable,
+                leaves,
+                enters,
+            } = guard;
+            let mode = &fragment.modes[*variable];
             let variable = LawName {
                 owner: fragment.owner,
                 local: mode.name,
             };
             let layout = GuardLayout {
                 variable,
-                leaves: mode.values[guard.leaves],
-                enters: mode.values[guard.enters],
-                crossing: guard.crossing,
-                code: code(fragment, predicate(fragment, guard.zero.modes), &guard.zero),
+                leaves: mode.values[*leaves],
+                enters: mode.values[*enters],
+                crossing: *crossing,
+                code: code(fragment, predicate(fragment, zero.modes), zero),
                 inputs: Vec::new(),
             };
-            let addresses = addresses(variable, &guard.zero, Context::Body, places)?;
+            let addresses = addresses(variable, zero, Context::Body, places)?;
             guards.push((layout, addresses));
         }
     }
@@ -714,19 +735,24 @@ fn bind(
     wanted.dedup();
     let parameters = (wanted.iter())
         .map(|&(key, binding)| {
-            let declared = declarations[declarations.partition_point(|declared| declared.key < key)];
+            let ParameterDeclaration {
+                key: _,
+                context,
+                dimension,
+                set,
+            } = declarations[declarations.partition_point(|declared| declared.key < key)];
             ParameterSlot {
                 key,
                 binding,
-                default: match declared.context {
+                default: match context {
                     ParameterContext::Body => None,
-                    ParameterContext::Site(class) => Some(Binding::Class(class)),
+                    ParameterContext::Site(class) => Some(Binding::Class(*class)),
                     ParameterContext::Edge | ParameterContext::End => {
                         Some(Binding::Network(Network::Vascular))
                     }
                 },
-                admissible: declared.set,
-                dimension: declared.dimension.clone(),
+                admissible: *set,
+                dimension: dimension.clone(),
             }
         })
         .collect();
@@ -903,13 +929,16 @@ fn blocks(solved_by: &[usize], reads: &[Vec<UnknownId>], rates: &[Vec<RateClass>
 fn modes(fragments: &[FragmentData]) -> Vec<ModeLayout> {
     let mut modes: Vec<ModeLayout> = (fragments.iter())
         .flat_map(|fragment| {
-            fragment.modes.iter().map(|mode| ModeLayout {
-                variable: LawName {
-                    owner: fragment.owner,
-                    local: mode.name,
-                },
-                values: mode.values.clone(),
-            })
+            fragment
+                .modes
+                .iter()
+                .map(|ModeDeclaration { name, values }| ModeLayout {
+                    variable: LawName {
+                        owner: fragment.owner,
+                        local: name,
+                    },
+                    values: values.clone(),
+                })
         })
         .collect();
     modes.sort_by_key(|mode| mode.variable);

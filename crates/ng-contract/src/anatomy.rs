@@ -67,8 +67,9 @@ impl SiteId {
 }
 impl Seal for SiteId {
     fn seal(&self, out: &mut Canonical) {
-        out.text(self.key);
-        out.number(self.class as u64);
+        let Self { key, class } = self;
+        out.text(key);
+        out.number(*class as u64);
     }
 }
 

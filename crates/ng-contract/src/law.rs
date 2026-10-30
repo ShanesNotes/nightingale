@@ -1039,14 +1039,16 @@ pub(crate) struct Validity {
 
 impl Seal for LawName {
     fn seal(&self, out: &mut Canonical) {
-        out.text(self.owner);
-        out.text(self.local);
+        let Self { owner, local } = self;
+        out.text(owner);
+        out.text(local);
     }
 }
 impl Seal for ModeValue {
     fn seal(&self, out: &mut Canonical) {
-        out.text(self.variable);
-        out.text(self.value);
+        let Self { variable, value } = self;
+        out.text(variable);
+        out.text(value);
     }
 }
 impl Seal for Predicate {
@@ -1062,8 +1064,9 @@ impl Seal for Predicate {
 }
 impl Seal for RateClass {
     fn seal(&self, out: &mut Canonical) {
-        out.number(self.band as u64);
-        out.number(self.maximum_ns);
+        let Self { band, maximum_ns } = self;
+        out.number(*band as u64);
+        out.number(*maximum_ns);
     }
 }
 impl Seal for Crossing {
@@ -1073,9 +1076,13 @@ impl Seal for Crossing {
 }
 impl Seal for Validity {
     fn seal(&self, out: &mut Canonical) {
-        out.number(self.lower);
-        out.number(self.upper);
-        let Basis::Fixture(name) = self.basis;
+        let Self {
+            lower,
+            upper,
+            basis: Basis::Fixture(name),
+        } = self;
+        out.number(*lower);
+        out.number(*upper);
         out.text(name);
     }
 }

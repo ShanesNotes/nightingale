@@ -163,7 +163,8 @@ impl Seal for usize {
 }
 impl Seal for Digest {
     fn seal(&self, out: &mut Canonical) {
-        for &byte in &self.bytes {
+        let Self { bytes } = self;
+        for &byte in bytes {
             out.number(u64::from(byte));
         }
     }

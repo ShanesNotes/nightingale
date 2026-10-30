@@ -102,16 +102,27 @@ impl Schema {
 }
 impl Seal for Schema {
     fn seal(&self, out: &mut Canonical) {
-        self.anatomy.digest().seal(out);
-        out.number(self.boundaries.len() as u64);
-        for boundary in &self.boundaries {
-            out.text(boundary.name);
-            out.number(boundary.direction as u64);
-            boundary.pool.site.seal(out);
-            out.number(boundary.pool.space as u64);
+        let Self {
+            anatomy,
+            boundaries,
+            partial_volume,
+            left_out,
+        } = self;
+        anatomy.digest().seal(out);
+        out.number(boundaries.len() as u64);
+        for WaterBoundary {
+            name,
+            direction,
+            pool: PoolRef { site, space },
+        } in boundaries
+        {
+            out.text(name);
+            out.number(*direction as u64);
+            site.seal(out);
+            out.number(*space as u64);
         }
-        self.partial_volume.as_ref().map(Measure::bits).seal(out);
-        let mut left_out = self.left_out.clone();
+        partial_volume.as_ref().map(Measure::bits).seal(out);
+        let mut left_out = left_out.clone();
         left_out.sort_unstable();
         left_out.dedup();
         out.number(left_out.len() as u64);

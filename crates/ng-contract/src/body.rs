@@ -22,7 +22,8 @@ macro_rules! index {
         }
         impl Seal for $name {
             fn seal(&self, out: &mut Canonical) {
-                self.index.seal(out);
+                let Self { index } = self;
+                index.seal(out);
             }
         }
     )*};
@@ -158,10 +159,16 @@ impl Row {
 }
 impl Seal for Row {
     fn seal(&self, out: &mut Canonical) {
-        self.unknown.seal(out);
-        self.kind.seal(out);
-        out.number(self.admissible as u64);
-        self.dimension.seal(out);
+        let Self {
+            unknown,
+            kind,
+            admissible,
+            dimension,
+        } = self;
+        unknown.seal(out);
+        kind.seal(out);
+        out.number(*admissible as u64);
+        dimension.seal(out);
     }
 }
 /// What a row balances. An amount's row sums the columns that move it, so no law owns an amount.
@@ -219,10 +226,16 @@ impl Column {
 }
 impl Seal for Column {
     fn seal(&self, out: &mut Canonical) {
-        self.terms.seal(out);
-        self.origin.seal(out);
-        self.context.seal(out);
-        self.receipt.seal(out);
+        let Self {
+            terms,
+            origin,
+            context,
+            receipt,
+        } = self;
+        terms.seal(out);
+        origin.seal(out);
+        context.seal(out);
+        receipt.seal(out);
     }
 }
 /// The receipt pool outside the body that takes what a boundary transfer moves, so the transfer still
@@ -244,8 +257,12 @@ impl Receipt {
 }
 impl Seal for Receipt {
     fn seal(&self, out: &mut Canonical) {
-        self.boundary.seal(out);
-        self.coefficient.seal(out);
+        let Self {
+            boundary,
+            coefficient,
+        } = self;
+        boundary.seal(out);
+        coefficient.seal(out);
     }
 }
 
@@ -286,9 +303,10 @@ impl Program {
 }
 impl Seal for Program {
     fn seal(&self, out: &mut Canonical) {
-        self.id.seal(out);
-        self.law.seal(out);
-        self.code.seal(out);
+        let Self { id, law, code } = self;
+        id.seal(out);
+        law.seal(out);
+        code.seal(out);
     }
 }
 #[derive(Debug, PartialEq)]
@@ -301,11 +319,18 @@ pub(crate) struct Code {
 }
 impl Seal for Code {
     fn seal(&self, out: &mut Canonical) {
-        self.ops.seal(out);
-        self.dimension.seal(out);
-        self.predicate.seal(out);
-        self.rate.seal(out);
-        self.validity.seal(out);
+        let Self {
+            ops,
+            dimension,
+            predicate,
+            rate,
+            validity,
+        } = self;
+        ops.seal(out);
+        dimension.seal(out);
+        predicate.seal(out);
+        rate.seal(out);
+        validity.seal(out);
     }
 }
 
@@ -356,11 +381,18 @@ impl Instance {
 }
 impl Seal for Instance {
     fn seal(&self, out: &mut Canonical) {
-        self.program.seal(out);
-        self.context.seal(out);
-        self.target.seal(out);
-        self.parameters.seal(out);
-        self.inputs.seal(out);
+        let Self {
+            program,
+            context,
+            target,
+            parameters,
+            inputs,
+        } = self;
+        program.seal(out);
+        context.seal(out);
+        target.seal(out);
+        parameters.seal(out);
+        inputs.seal(out);
     }
 }
 /// What one input instruction of a program reads at one instance.
@@ -450,11 +482,18 @@ impl ParameterSlot {
 }
 impl Seal for ParameterSlot {
     fn seal(&self, out: &mut Canonical) {
-        self.key.key().seal(out);
-        self.binding.seal(out);
-        self.default.seal(out);
-        out.number(self.admissible as u64);
-        self.dimension.seal(out);
+        let Self {
+            key,
+            binding,
+            default,
+            admissible,
+            dimension,
+        } = self;
+        key.key().seal(out);
+        binding.seal(out);
+        default.seal(out);
+        out.number(*admissible as u64);
+        dimension.seal(out);
     }
 }
 
@@ -475,8 +514,9 @@ impl Sparsity {
 }
 impl Seal for Sparsity {
     fn seal(&self, out: &mut Canonical) {
-        self.offsets.seal(out);
-        self.unknowns.seal(out);
+        let Self { offsets, unknowns } = self;
+        offsets.seal(out);
+        unknowns.seal(out);
     }
 }
 
@@ -501,9 +541,10 @@ impl Block {
 }
 impl Seal for Block {
     fn seal(&self, out: &mut Canonical) {
-        self.rows.seal(out);
-        self.unknowns.seal(out);
-        self.rate.seal(out);
+        let Self { rows, unknowns, rate } = self;
+        rows.seal(out);
+        unknowns.seal(out);
+        rate.seal(out);
     }
 }
 
@@ -513,9 +554,10 @@ pub(crate) struct ModeLayout {
 }
 impl Seal for ModeLayout {
     fn seal(&self, out: &mut Canonical) {
-        self.variable.seal(out);
-        out.number(self.values.len() as u64);
-        for value in &self.values {
+        let Self { variable, values } = self;
+        variable.seal(out);
+        out.number(values.len() as u64);
+        for value in values {
             value.seal(out);
         }
     }
@@ -530,11 +572,19 @@ pub(crate) struct GuardLayout {
 }
 impl Seal for GuardLayout {
     fn seal(&self, out: &mut Canonical) {
-        self.variable.seal(out);
-        self.leaves.seal(out);
-        self.enters.seal(out);
-        self.crossing.seal(out);
-        self.code.seal(out);
-        self.inputs.seal(out);
+        let Self {
+            variable,
+            leaves,
+            enters,
+            crossing,
+            code,
+            inputs,
+        } = self;
+        variable.seal(out);
+        leaves.seal(out);
+        enters.seal(out);
+        crossing.seal(out);
+        code.seal(out);
+        inputs.seal(out);
     }
 }

@@ -37,13 +37,15 @@ impl Combination {
 }
 impl Seal for ConservedBasis {
     fn seal(&self, out: &mut Canonical) {
-        self.combinations.seal(out);
+        let Self { combinations } = self;
+        combinations.seal(out);
     }
 }
 impl Seal for Combination {
     fn seal(&self, out: &mut Canonical) {
-        out.number(self.book as u64);
-        self.terms.seal(out);
+        let Self { book, terms } = self;
+        out.number(*book as u64);
+        terms.seal(out);
     }
 }
 
