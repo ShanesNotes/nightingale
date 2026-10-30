@@ -459,24 +459,35 @@
 
 mod anatomy;
 mod body;
+#[allow(dead_code)]
+mod compensated;
 mod compile;
 mod conservation;
 mod failure;
 mod graph;
 mod identity;
 mod law;
+#[allow(dead_code)]
+mod pinned;
 mod provenance;
 mod quantity;
+#[allow(dead_code)]
+mod scheme;
 mod scope;
 mod system;
+mod time;
 
 pub use anatomy::*;
 pub use body::*;
+pub use compensated::*;
 pub use conservation::*;
 pub use failure::*;
 pub use identity::*;
 pub use law::*;
+pub use pinned::exp;
 pub use provenance::*;
 pub use quantity::*;
+pub use scheme::*;
 pub use scope::*;
 pub use system::*;
+pub use time::*;

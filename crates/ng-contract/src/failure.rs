@@ -25,6 +25,7 @@ pub enum AdmissionError {
     UnknownBoundary {
         name: &'static str,
     },
+    ZeroDenominator,
 }
 impl From<AnatomyDefect> for AdmissionError {
     fn from(defect: AnatomyDefect) -> Self {
