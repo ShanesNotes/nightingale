@@ -8,7 +8,7 @@ use cores::forced_refusal::{ForcedRefusal, Refuser};
 use cores::must_fail::{
     EarlierAttempt, ForeignBody, ForeignHistory, ForeignProposal, ForeignRefusal, ForeignWorkspace,
     KeptHistory, MisplacedStage, NeverConverges, OneSample, OtherValues, PoisonedPoint, ShadowTicket,
-    StaleProposal, SwappedTicket, UnevenWeights, UnfitWeights, WrongWeight,
+    StaleProposal, SwappedTicket, UnevenWeights, UnfitWeights, UnreachedStage, WrongWeight,
 };
 use cores::stages::{ForwardEuler, Heun};
 use ng_contract::*;
@@ -95,8 +95,14 @@ fn gate(case: TwoReservoirs) -> AccuracyPolicy {
 }
 
 fn ledger_policy(basis: &ConservedBasis, drift: f64) -> CertificatePolicy {
+    ledger_policy_with(basis, 1e-24, 1e-9, drift)
+}
+
+fn ledger_policy_with(basis: &ConservedBasis, absolute: f64, relative: f64, drift: f64) -> CertificatePolicy {
     let quantities = (basis.ids())
-        .map(|quantity| QuantityPolicy::new::<Water>(quantity, measure(1e-24), measure(1e-9), measure(drift)))
+        .map(|quantity| {
+            QuantityPolicy::new::<Water>(quantity, measure(absolute), measure(relative), measure(drift))
+        })
         .collect::<Result<Vec<_>, _>>()
         .expect("a policy of water");
     let windows = Sliding24Hours::covering(48 * HOUR).expect("a coverage");
@@ -139,7 +145,11 @@ fn forward_euler_past_rc_closes_every_ledger_and_fails_the_accuracy_gate() {
     let Err(AccuracyFailure::Exceeded { at, .. }) = failure else {
         panic!("not rejected on accuracy: {failure:?}");
     };
-    assert!(at.nanoseconds() <= core.interval_ns, "inside the first step");
+    assert_eq!(
+        at,
+        SimTime::from_ns(100 * SECOND),
+        "the first grid instant inside the first step"
+    );
     let (first, _) = accepted(case.admit(&core).expect("admitted").step());
     for row in case.rows() {
         assert!(first.record().accepted().value(row) > Compensated::ZERO);
@@ -173,7 +183,7 @@ fn a_forced_refusal_changes_nothing_and_the_retry_applies_the_delivery_once() {
         let (session, next) = accepted(session.step());
         assert_eq!(next.applied(), []);
         let session = to(session, SimTime::from_ns(7_000 * SECOND));
-        let received = total_received(session.record(), case.inflow().expect("an open body"));
+        let received = total_received(session.record(), case.exterior().expect("an open body"));
         assert!((hi(received) - 20_000.0).abs() < 1e-7, "{received:?}");
     }
 }
@@ -233,6 +243,12 @@ fn the_certificate_reads_compensated_amounts_where_a_plain_ledger_loses_the_exch
     let plain_closure = ((inventory - 2.0) - exchange).abs();
     let allowed = 1e-24 + 1e-9 * exchange;
     assert!(plain_closure > allowed, "a plain f64 ledger fails this same body");
+
+    let scaled = ledger_policy_with(view.basis(), 1e-40, 1e-9, 1.0);
+    certify(&view, &scaled).expect("the residual is small against this window's own exchange");
+    let unscaled = ledger_policy_with(view.basis(), 1e-40, 0.0, 1.0);
+    let failure = certify(&view, &unscaled).expect_err("the same residual is above the absolute floor alone");
+    assert_eq!(failure.check(), CertificateCheck::Closure);
 }
 
 // The method checks.
@@ -461,6 +477,12 @@ fn a_ticket_refuses_an_empty_span_an_offset_past_its_end_and_a_zero_shift() {
         ticket.shift(0).map(|_| ()).map_err(kind),
         Err(EngineFaultKind::BindingMismatch)
     );
+    let (session, _) = accepted(session.step());
+    let past_the_end_of_time = session.record().problem().ticket(u64::MAX);
+    assert_eq!(
+        past_the_end_of_time.map(|_| ()).map_err(kind),
+        Err(EngineFaultKind::BindingMismatch)
+    );
 }
 
 // Refusals and the floor.
@@ -528,6 +550,19 @@ fn a_fault_keeps_the_refusals_before_it() {
     assert_eq!(stopped.refusals()[0].attempted_ns(), 8 * SECOND);
     assert_eq!(stopped.refusals()[1].attempted_ns(), 4 * SECOND);
     assert_eq!(stopped.refusals()[1].at(), SimTime::from_ns(0));
+}
+
+#[test]
+fn a_stage_that_does_not_reach_the_value_its_tangent_says_is_refused() {
+    let case = stepped();
+    let core = UnreachedStage {
+        inner: reference(8 * SECOND),
+    };
+    let session = refused(case.admit(&core).expect("admitted").step());
+    assert!(matches!(
+        session.refused().reason(),
+        NumericalRefusal::StageResidual { .. }
+    ));
 }
 
 #[test]
@@ -1050,21 +1085,21 @@ fn each_bad_timeline_is_refused_by_name() {
     let id = InputId::new(Digest::of_canonical(b"x"));
     let refusal = |events| BoundaryPort::new(events).err();
     assert_eq!(
-        refusal(vec![water_event(b"x", "inflow", 5, 5, 1.0)]),
+        refusal(vec![water_event(b"x", "exterior", 5, 5, 1.0)]),
         Some(AdmissionError::EmptyDelivery { id })
     );
     assert_eq!(
-        refusal(vec![water_event(b"x", "inflow", 5, 4, 1.0)]),
+        refusal(vec![water_event(b"x", "exterior", 5, 4, 1.0)]),
         Some(AdmissionError::EmptyDelivery { id })
     );
     assert_eq!(
-        refusal(vec![water_event(b"x", "inflow", 5, 6, -1.0)]),
+        refusal(vec![water_event(b"x", "exterior", 5, 6, -1.0)]),
         Some(AdmissionError::NegativeDelivery { id })
     );
     assert_eq!(
         refusal(vec![
-            water_event(b"x", "inflow", 5, 6, 1.0),
-            water_event(b"x", "inflow", 5, 6, 2.0),
+            water_event(b"x", "exterior", 5, 6, 1.0),
+            water_event(b"x", "exterior", 5, 6, 2.0),
         ]),
         Some(AdmissionError::InputConflict { id })
     );
@@ -1078,7 +1113,7 @@ fn each_bad_timeline_is_refused_by_name() {
         body.initialization(bound(), unknown, at(0)).err(),
         Some(AdmissionError::UnknownBoundary { name: "outflow" })
     );
-    let early = BoundaryPort::new(vec![water_event(b"x", "inflow", 5, 6, 1.0)]).expect("parsed");
+    let early = BoundaryPort::new(vec![water_event(b"x", "exterior", 5, 6, 1.0)]).expect("parsed");
     assert_eq!(
         body.initialization(bound(), early, at(6)).err(),
         Some(AdmissionError::EventBeforeHead { id })
@@ -1090,15 +1125,15 @@ fn one_id_with_one_payload_collapses_and_applies_once() {
     let open = TwoReservoirs::delivering([measure(10.0), measure(10.0)], Vec::new()).expect("a body");
     let body = open.body();
     let port = BoundaryPort::new(vec![
-        water_event(b"x", "inflow", SECOND, 2 * SECOND, 3.0),
-        water_event(b"x", "inflow", SECOND, 2 * SECOND, 3.0),
+        water_event(b"x", "exterior", SECOND, 2 * SECOND, 3.0),
+        water_event(b"x", "exterior", SECOND, 2 * SECOND, 3.0),
     ])
     .expect("collapsed");
     let core = reference(SECOND);
     let packet = reservoir_packet(body, 1.0, 0.001);
     let session = admit_fixture(body, packet, port, &core).expect("admitted");
     let session = to(session, SimTime::from_ns(3 * SECOND));
-    let received = total_received(session.record(), open.inflow().expect("an open body"));
+    let received = total_received(session.record(), open.exterior().expect("an open body"));
     assert!((hi(received) - 3.0).abs() < 1e-12, "{received:?}");
 }
 
@@ -1218,9 +1253,62 @@ fn two_settings_of_one_core_never_share_an_identity() {
         .resolution()
         .digest();
     assert_ne!(tight, digest(8 * SECOND));
+    let floored = reference(8 * SECOND).with_floor(SECOND).resolution().digest();
+    assert_ne!(floored, digest(8 * SECOND));
+    let identity = |seed: Seed| {
+        let case = stepped();
+        let packet = case
+            .body()
+            .bind(reservoir_packet(case.body(), 1.0, 0.5))
+            .expect("bound");
+        let core = reference(8 * SECOND);
+        RunIdentity::new(
+            case.body().model_hash(),
+            packet.packet_hash(),
+            seed,
+            core.resolution(),
+        )
+        .digest()
+    };
+    assert_ne!(
+        identity(Seed::new([1, 2, 3, 4])),
+        identity(Seed::new([1, 2, 3, 5]))
+    );
 }
 
 // The drive at a breakpoint.
+
+#[test]
+fn a_step_is_the_cores_own_interval_cut_short_only_at_the_next_breakpoint() {
+    // 2,000 s is no multiple of 7 s, so the step that would cross the delivery's start stops at it.
+    let case = stepped();
+    let (instant, _) = case.delivery().expect("a delivery");
+    let core = reference(7 * SECOND);
+    let session = to(case.admit(&core).expect("admitted"), instant);
+    assert_eq!(session.record().accepted().time(), instant);
+    let last = session
+        .record()
+        .accepted()
+        .last_segment()
+        .interval()
+        .expect("a step");
+    assert_eq!(last.length_ns(), 2_000 * SECOND % (7 * SECOND));
+    let (session, _) = accepted(session.step());
+    let next = session
+        .record()
+        .accepted()
+        .last_segment()
+        .interval()
+        .expect("a step");
+    assert_eq!(next.length_ns(), 7 * SECOND, "the core's own interval again");
+    let end = SimTime::from_ns(6_000 * SECOND);
+    let session = to(session, end);
+    assert_eq!(
+        session.record().accepted().time(),
+        end,
+        "and at the delivery's end"
+    );
+}
 
 #[test]
 fn the_ending_interval_sees_the_left_value_and_the_next_the_new_one() {
@@ -1250,7 +1338,7 @@ fn the_ending_interval_sees_the_left_value_and_the_next_the_new_one() {
         at: SimTime::from_ns(6 * SECOND),
         by: Refuser::Core,
     };
-    let inflow = case.inflow().expect("an open body");
+    let inflow = case.exterior().expect("an open body");
     let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(breakpoint));
     assert_eq!(session.record().accepted().time(), SimTime::from_ns(breakpoint));
     let received = hi(total_received(session.record(), inflow));
@@ -1648,6 +1736,93 @@ fn a_core_that_cannot_finish_a_case_has_not_failed_on_accuracy() {
     };
     let failure = accuracy(&core, &gate(stepped()));
     assert!(matches!(failure, Err(AccuracyFailure::Faulted(_))), "{failure:?}");
+}
+
+#[test]
+fn a_flow_that_runs_backward_keeps_its_gross_reverse_apart() {
+    // `b` starts above `a`, so the circulation's rate is negative throughout.
+    let case = TwoReservoirs::delivering([measure(400.0), measure(600.0)], Vec::new()).expect("a body");
+    let core = reference(SECOND);
+    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
+    let circulation = (case.body().instances().iter())
+        .find_map(|instance| match (instance.context(), instance.target()) {
+            (Context::Edge { .. }, Target::Column(column)) => Some(column),
+            _ => None,
+        })
+        .expect("the body circulates");
+    let view = session.record().conservation();
+    let segment = view.segments().next_back().expect("an accepted step");
+    let (forward, reverse) = segment.exchange(circulation);
+    let piece = segment.interval();
+    assert_eq!(forward.on(piece)[1], Compensated::ZERO);
+    let moved = hi(reverse.on(piece)[1]);
+    assert!(moved > 0.19 && moved < 0.2, "{moved}");
+    let [a, b] = case.rows().map(|row| hi(session.record().accepted().value(row)));
+    assert!((a - (400.0 + moved)).abs() < 1e-12 && (b - (600.0 - moved)).abs() < 1e-12);
+    let quantity = view.basis().ids().next().expect("one combination");
+    assert_eq!(
+        segment.inflow(quantity).on(piece)[1],
+        Compensated::ZERO,
+        "no combination sees it"
+    );
+    assert_eq!(segment.outflow(quantity).on(piece)[1], Compensated::ZERO);
+}
+
+#[test]
+fn a_boundary_out_of_the_body_counts_as_outflow_and_the_ledger_closes() {
+    let drained = 30.0;
+    let case = TwoReservoirs::draining(
+        [measure(100.0), measure(100.0)],
+        vec![delivery(b"drain", 0, 100, drained / 100.0)],
+    )
+    .expect("a body");
+    let core = reference(8 * SECOND);
+    let session = to(
+        case.admit(&core).expect("admitted"),
+        SimTime::from_ns(120 * SECOND),
+    );
+    let view = session.record().conservation();
+    let quantity = view.basis().ids().next().expect("one combination");
+    let segment = view.segments().next_back().expect("an accepted step");
+    let piece = segment.interval();
+    assert!((hi(segment.outflow(quantity).on(piece)[1]) - drained).abs() < 1e-9);
+    assert_eq!(segment.inflow(quantity).on(piece)[1], Compensated::ZERO);
+    assert!((hi(segment.inventory(quantity).on(piece)[1]) - (200.0 - drained)).abs() < 1e-9);
+}
+
+#[test]
+fn a_segment_samples_only_its_own_interval() {
+    let case = stepped();
+    let core = reference(8 * SECOND);
+    let session = case.admit(&core).expect("admitted");
+    let row = case.rows()[0];
+    let opening = session.record().accepted().last_segment();
+    assert_eq!(opening.interval(), None);
+    assert_eq!(opening.sample(row, SimTime::from_ns(0)), None);
+    let (session, _) = accepted(session.step());
+    let segment = session.record().accepted().last_segment();
+    let start = Compensated::of(&measure::<Water>(500_500.0));
+    assert_eq!(segment.sample(row, SimTime::from_ns(0)), Some(start));
+    let end = session.record().accepted().value(row);
+    assert_eq!(segment.sample(row, SimTime::from_ns(8 * SECOND)), Some(end));
+    let halfway = segment.sample(row, SimTime::from_ns(4 * SECOND)).expect("inside");
+    assert!(start > halfway && halfway > end);
+    assert_eq!(segment.sample(row, SimTime::from_ns(8 * SECOND + 1)), None);
+}
+
+#[test]
+fn a_relative_accuracy_limit_reads_the_exact_value() {
+    let case = |relative| {
+        let cases = vec![AccuracyCase::TwoReservoir(stepped())];
+        AccuracyPolicy::new(cases, measure(1e-300), measure(relative), 100 * SECOND).expect("a policy")
+    };
+    let core = reference(8 * SECOND);
+    accuracy(&core, &case(1e-2)).expect("within one part in a hundred of each exact value");
+    let failure = accuracy(&core, &case(1e-9));
+    assert!(
+        matches!(failure, Err(AccuracyFailure::Exceeded { .. })),
+        "{failure:?}"
+    );
 }
 
 #[test]

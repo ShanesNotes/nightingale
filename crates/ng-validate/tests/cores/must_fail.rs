@@ -55,6 +55,33 @@ impl CoupledSolver for MisplacedStage {
     }
 }
 
+/// Declares doubled backward Euler and books each stage at the start with its tangent at the rates there.
+/// Every residual is zero and no stage reaches the value its tangent says it should.
+pub struct UnreachedStage {
+    pub inner: ReferenceIntegrator,
+}
+impl CoupledSolver for UnreachedStage {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+        self.inner.next_step(problem)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let length = ticket.length_ns();
+        let half = length / 2;
+        let mut workspace = problem.workspace();
+        let mut stage = |offset| explicit_stage(problem, &mut workspace, ticket.at(offset)?);
+        let (whole, first, second) = (stage(length)?, stage(half)?, stage(length)?);
+        let mut quadrature = problem.quadrature(ticket);
+        quadrature.add(&whole, Ratio::ZERO)?;
+        quadrature.add(&first, ticket.fraction(half))?;
+        quadrature.add(&second, ticket.fraction(length - half))?;
+        let history = fresh_history(problem, ticket);
+        Ok(problem.propose(ticket, quadrature.finish()?, &problem.workspace(), history))
+    }
+}
+
 /// Declares Heun and weighs its stages unevenly. The weights still sum to one.
 pub struct WrongWeight {
     pub interval_ns: u64,
@@ -321,11 +348,11 @@ impl CoupledSolver for ForeignBody<'_> {
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let base = Digest::of_canonical(b"another body");
         let foreign = CoupledProblem::new(self.body, self.values, self.identity, self.accepted, base);
-        let (workspace, stage) = euler_step(&foreign, ticket)?;
+        let (_, stage) = euler_step(&foreign, ticket)?;
         let mut quadrature = problem.quadrature(ticket);
         quadrature.add(&stage, Ratio::ONE)?;
         let history = fresh_history(problem, ticket);
-        Ok(problem.propose(ticket, quadrature.finish()?, &workspace, history))
+        Ok(problem.propose(ticket, quadrature.finish()?, &problem.workspace(), history))
     }
 }
 

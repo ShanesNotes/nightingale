@@ -7,7 +7,6 @@ use crate::{Compensated, CompiledBody, Digest, Interval, RowId, SimTime};
 
 /// A full state in one compiled layout: amounts stay compensated, memory and algebraic values are
 /// coordinates. No public constructor: admission makes the first and `verify` every other.
-#[derive(Clone, Debug, PartialEq)]
 pub struct Candidate {
     pub(crate) amounts: Vec<Compensated>,
     pub(crate) memory: Vec<f64>,
@@ -87,7 +86,6 @@ impl Candidate {
 
 /// One accepted interval of every row, degree 1: the chord between the base and the published values,
 /// derived, so no core can publish a curve its stages did not make. The admission segment has no interval.
-#[derive(Clone, Debug, PartialEq)]
 pub struct DenseSegment {
     pub(crate) interval: Option<Interval>,
     pub(crate) start: Vec<Compensated>,
@@ -130,7 +128,7 @@ impl DenseSegment {
 
 /// What a solver core needs to continue exactly, tagged by its schema. Integers only: a float travels as
 /// its `to_bits`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct MethodHistory {
     pub(crate) schema: Digest,
     pub(crate) started_at: SimTime,

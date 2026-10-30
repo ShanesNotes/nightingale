@@ -2,7 +2,7 @@
 //!
 //! # Type rules
 //!
-//! The certificate cannot pair one record's inventories with another's ledger: a record lends no separate
+//! The certificate cannot pair one record's amounts with another's exchanges: a record lends no separate
 //! histories, only one view.
 //! ```compile_fail,E0599
 //! use ng_record::PatientRecord;

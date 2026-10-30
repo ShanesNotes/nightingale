@@ -40,7 +40,7 @@ impl AccuracyPolicy {
         })
     }
 }
-/// The worst error per case. Accepted output only: a trial state is never read.
+/// The worst error per case. Accepted values only: a trial state is never read.
 #[derive(Debug)]
 pub struct AccuracyEvidence {
     worst: Vec<Compensated>,
@@ -112,14 +112,14 @@ fn comparisons(
     }
     let circulation = case.circulation().expect("the body circulates");
     pairs.push((net_at(&segment, circulation, at), water(exact.circulated)));
-    if let Some(inflow) = case.inflow() {
-        pairs.push((net_at(&segment, inflow, at), water(exact.received)));
+    if let Some(exterior) = case.exterior() {
+        pairs.push((net_at(&segment, exterior, at), water(exact.received)));
     }
     pairs
 }
 
-/// Runs each case with the same core. After every accepted step it compares the accepted dense output with
-/// the closed form: both amounts, the circulation exchange and the gross inflow. A core that diverges fails
+/// Runs each case with the same core. After every accepted step it compares the accepted dense segment
+/// with the closed form: both amounts, the circulation exchange and the gross inflow. A core that diverges fails
 /// here at its first bad instant, before positivity can intervene.
 pub fn accuracy(
     solver: &dyn CoupledSolver,

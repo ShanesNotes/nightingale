@@ -11,7 +11,7 @@ const RELAXATION_SECONDS: u64 = 1000;
 /// `g` with `e` and the partial volume at one, so it is `k`.
 const CONDUCTANCE: f64 = 0.001;
 const START: [f64; 2] = [500_500.0, 499_500.0];
-const INFLOW: &str = "inflow";
+const EXTERIOR: &str = "exterior";
 
 fn seconds(ns: u64) -> f64 {
     ns as f64 / NANOSECONDS_PER_SECOND
@@ -71,24 +71,30 @@ impl TwoReservoirs {
             to: SimTime::from_ns(6_000 * SECOND),
             amount: Measure::new(20_000.0)?,
         };
-        let mut case = Self::declared(true, None, START, vec![delivery])?;
+        let mut case = Self::declared(Some(BoundaryDirection::IntoBody), None, START, vec![delivery])?;
         case.end = SimTime::from_ns(12_000 * SECOND);
         Ok(case)
     }
     /// No boundary at all: inventory cannot move, so drift is the ledger's own rounding.
     pub fn closed() -> Result<Self, AdmissionError> {
-        Self::declared(false, None, START, Vec::new())
+        Self::declared(None, None, START, Vec::new())
     }
     /// The open body with no delivery, the circulation law trusted only inside `range`.
     pub fn trusted_within(range: ValidityRange<Rate<Water>>) -> Result<Self, AdmissionError> {
-        Self::declared(true, Some(range), START, Vec::new())
+        Self::declared(Some(BoundaryDirection::IntoBody), Some(range), START, Vec::new())
     }
-    /// The open body from `start`, with these deliveries.
+    /// The open body from `start`, with these deliveries into `a`.
     pub fn delivering(start: [Measure<Water>; 2], deliveries: Vec<Delivery>) -> Result<Self, AdmissionError> {
-        Self::declared(true, None, start.map(|amount| number(&amount)), deliveries)
+        let start = start.map(|amount| number(&amount));
+        Self::declared(Some(BoundaryDirection::IntoBody), None, start, deliveries)
+    }
+    /// The same body with the boundary running out of `a`: these deliveries leave it.
+    pub fn draining(start: [Measure<Water>; 2], deliveries: Vec<Delivery>) -> Result<Self, AdmissionError> {
+        let start = start.map(|amount| number(&amount));
+        Self::declared(Some(BoundaryDirection::OutOfBody), None, start, deliveries)
     }
     fn declared(
-        open: bool,
+        boundary: Option<BoundaryDirection>,
         trusted: Option<ValidityRange<Rate<Water>>>,
         start: [f64; 2],
         deliveries: Vec<Delivery>,
@@ -101,8 +107,8 @@ impl TwoReservoirs {
         map.contain(root.id(), b.id());
         map.connect(Network::Vascular, a.id(), b.id());
         let mut schema = Schema::new(map.finish()?)?;
-        if open {
-            schema.water_boundary(INFLOW, BoundaryDirection::IntoBody, a.id(), Space::Lumen)?;
+        if let Some(direction) = boundary {
+            schema.water_boundary(EXTERIOR, direction, a.id(), Space::Lumen)?;
         }
         schema.partial_volume(Measure::new(1.0)?)?;
         let body = assemble(schema, |mut body| {
@@ -133,9 +139,9 @@ impl TwoReservoirs {
             }
             laws.transfer_along(&route, flow);
             body.add(laws.finish());
-            if open {
+            if boundary.is_some() {
                 let (mut laws, ports) = body.boundary()?.parts();
-                let BoundaryWater { route: pair, drive } = ports.water(INFLOW)?;
+                let BoundaryWater { route: pair, drive } = ports.water(EXTERIOR)?;
                 let rate = laws.kernel(|mut k| {
                     let value = k.read(&drive);
                     k.finish(value, laws.every_mode(), wave)
@@ -198,7 +204,7 @@ impl TwoReservoirs {
         })
     }
     /// The boundary's column; `None` for a closed body.
-    pub fn inflow(&self) -> Option<ColumnId> {
+    pub fn exterior(&self) -> Option<ColumnId> {
         self.column(Context::Body)
     }
     fn input(name: &[u8]) -> InputId {
@@ -228,7 +234,7 @@ impl TwoReservoirs {
         let mut events = Vec::with_capacity(self.deliveries.len());
         for delivery in &self.deliveries {
             let water = WaterDelivery {
-                boundary: INFLOW,
+                boundary: EXTERIOR,
                 amount: Measure::new(number(&delivery.amount))?,
                 ends: delivery.to,
             };

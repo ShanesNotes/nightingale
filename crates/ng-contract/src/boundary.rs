@@ -136,7 +136,6 @@ pub(crate) struct Plan {
 /// Applying an input moves the cursor past it and adds its delivery in one accepted image, so a refusal
 /// cannot half apply it. Its fields are private, so no core reaches the timeline, which is the causal step
 /// rule.
-#[derive(Clone, Debug, PartialEq)]
 pub struct PendingInputs {
     deliveries: Vec<Delivery>,
     cursor: usize,

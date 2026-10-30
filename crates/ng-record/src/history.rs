@@ -186,7 +186,7 @@ pub struct HistorySeal {
 }
 
 /// One immutable view of one record's history over one conserved basis. There is no way to pair one
-/// record's inventories with another's exchanges: both come only through this view.
+/// record's amounts with another's exchanges: both come only through this view.
 pub struct ConservationView<'r> {
     pub(crate) history: &'r History,
     pub(crate) basis: &'r ConservedBasis,

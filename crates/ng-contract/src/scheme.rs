@@ -81,7 +81,7 @@ pub(crate) struct Stage {
 
 /// How a core's stages make its increment: one of a closed set, so no caller depends on a general tableau
 /// that only one case would test. A later general form changes this private table and no caller.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct StageScheme {
     method: Method,
 }
@@ -210,7 +210,7 @@ impl ErrorScales {
 const ROUTINE_BITS: &str = "d42e4b1ce0ae507032fbce98d4721abd6a41f9f8a7766f0ee5a19ce7625d4dcf";
 
 /// The floating-point operations a run may use. Bitwise replay is promised within one profile.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct ArithmeticProfile {
     digest: Digest,
 }
@@ -223,7 +223,6 @@ impl ArithmeticProfile {
 }
 
 /// A solver core's declared settings; part of the run identity. Pace is not in it.
-#[derive(Clone, Debug, PartialEq)]
 pub struct DeclaredResolution {
     policy: Digest,
     minimum_interval_ns: u64,
@@ -293,7 +292,7 @@ impl DeclaredResolution {
 }
 
 /// The run seed. Ticket 07 keeps the patient and observation seeds apart from it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Seed {
     words: [u64; 4],
 }
@@ -304,7 +303,6 @@ impl Seed {
 }
 
 /// The body model's hash, the packet's hash, the run seed and the declared resolution. Nothing else.
-#[derive(Clone, Debug, PartialEq)]
 pub struct RunIdentity {
     model: ModelHash,
     packet: PacketHash,
