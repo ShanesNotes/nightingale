@@ -223,7 +223,13 @@ impl StepProposal {
             algebraic,
             history,
         } = self;
-        if layout != problem.layout() || extents.layout != problem.layout() || finished_for != ticket.digest()
+        let algebraic_rows = (problem.body.rows().iter())
+            .filter(|row| matches!(row.kind(), RowKind::Algebraic(_)))
+            .count();
+        if layout != problem.layout()
+            || extents.layout != problem.layout()
+            || finished_for != ticket.digest()
+            || algebraic.len() != algebraic_rows
         {
             return Err(ticket.mismatch().into());
         }

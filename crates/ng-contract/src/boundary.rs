@@ -73,8 +73,8 @@ pub struct BoundaryPort {
     pub(crate) deliveries: Vec<Delivery>,
 }
 impl BoundaryPort {
-    /// Refuses a delivery ending at or before its event, a negative amount and one id with two payloads.
-    /// Collapses one id repeated with one payload.
+    /// Refuses a delivery ending at or before its event, a negative amount, a rate past the finite range
+    /// and one id with two payloads. Collapses one id repeated with one payload.
     pub fn new(events: Vec<BoundaryEvent>) -> Result<Self, AdmissionError> {
         let mut deliveries: Vec<Delivery> = Vec::with_capacity(events.len());
         for event in events {
@@ -109,13 +109,17 @@ impl Delivery {
             return Err(AdmissionError::NegativeDelivery { id });
         }
         let seconds = (ends.nanoseconds() - at.nanoseconds()) as f64 / NANOSECONDS_PER_SECOND;
+        let rate = amount / seconds;
+        if !rate.is_finite() {
+            return Err(AdmissionError::UnboundedDelivery { id });
+        }
         Ok(Self {
             id,
             at,
             boundary,
             amount,
             ends,
-            rate: amount / seconds,
+            rate,
         })
     }
 }

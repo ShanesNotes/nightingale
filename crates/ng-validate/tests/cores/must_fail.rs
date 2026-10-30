@@ -491,3 +491,60 @@ impl CoupledSolver for TrialOutside<'_> {
         self.inner.solve(problem, ticket)
     }
 }
+
+/// Books its stages honestly on the record's own problem, then has `propose` read the end workspace through
+/// another body's rows, so the algebraic list it hands over is the other body's length. With `stash` it
+/// writes numbers of its own into that list first.
+pub struct ProposesThroughAnotherBody<'c> {
+    pub inner: ForwardEuler,
+    pub foreign: &'c CompiledBody,
+    pub values: &'c BoundParameters,
+    pub identity: &'c RunIdentity,
+    pub accepted: AcceptedStateView<'c>,
+    pub stash: Option<[f64; 2]>,
+}
+impl CoupledSolver for ProposesThroughAnotherBody<'_> {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+        self.inner.next_step(problem)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let (mut workspace, stage) = euler_step(problem, ticket)?;
+        let mut quadrature = problem.quadrature(ticket);
+        quadrature.add(&stage, Ratio::ONE)?;
+        let history = fresh_history(problem, ticket);
+        if let Some(stash) = self.stash {
+            workspace.unknowns_mut()[..2].copy_from_slice(&stash);
+        }
+        let base = Digest::of_canonical(b"another body");
+        let foreign = CoupledProblem::new(self.foreign, self.values, self.identity, self.accepted, base);
+        Ok(foreign.propose(ticket, quadrature.finish()?, &workspace, history))
+    }
+}
+
+/// Seeds a workspace from another record's accepted view under the record's own body, so the workspace has
+/// the right layout digest and too few coordinates.
+pub struct ShortWorkspace<'c> {
+    pub inner: ForwardEuler,
+    pub body: &'c CompiledBody,
+    pub values: &'c BoundParameters,
+    pub identity: &'c RunIdentity,
+    pub accepted: AcceptedStateView<'c>,
+}
+impl CoupledSolver for ShortWorkspace<'_> {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+        self.inner.next_step(problem)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let base = Digest::of_canonical(b"another record");
+        let shadow = CoupledProblem::new(self.body, self.values, self.identity, self.accepted, base);
+        let workspace = shadow.workspace();
+        problem.evaluate(&workspace.point(ticket.at(0)?))?;
+        self.inner.solve(problem, ticket)
+    }
+}

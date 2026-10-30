@@ -4,11 +4,11 @@ use core::cell::RefCell;
 use cores::forced_refusal::{ForcedRefusal, Refuser};
 use cores::must_fail::{
     EarlierAttempt, ForeignBody, ForeignHistory, ForeignProposal, ForeignRefusal, ForeignWorkspace,
-    KeptHistory, MisplacedStage, NeverConverges, OneSample, OtherValues, PoisonedPoint, ShadowTicket,
-    StaleIncrement, StaleProposal, SwappedTicket, TrialOutside, UnevenWeights, UnfitWeights, UnreachedStage,
-    WrongWeight,
+    KeptHistory, MisplacedStage, NeverConverges, OneSample, OtherValues, PoisonedPoint,
+    ProposesThroughAnotherBody, ShadowTicket, ShortWorkspace, StaleIncrement, StaleProposal, SwappedTicket,
+    TrialOutside, UnevenWeights, UnfitWeights, UnreachedStage, WrongWeight,
 };
-use cores::stages::{ForwardEuler, Heun};
+use cores::stages::{ForwardEuler, Heun, KeepsItsSpan};
 use ng_contract::*;
 use ng_record::*;
 use ng_validate::*;
@@ -2503,6 +2503,283 @@ fn a_quotient_keeps_its_derivative_at_any_scale_of_its_parts() {
         let exact = 1.0 / ((1.0 - 0.05) * (1.0 - 0.05));
         assert!((reached - exact).abs() < 1e-12, "{reached}");
     }
+}
+
+#[test]
+fn a_core_reads_back_the_continuation_it_wrote() {
+    let case = TwoReservoirs::closed().expect("a body");
+    let core = KeepsItsSpan { first_ns: SECOND };
+    let mut session = case.admit(&core).expect("admitted");
+    for span in [SECOND, 2 * SECOND, 4 * SECOND] {
+        session = accepted(session.step()).0;
+        let segment = session.record().accepted().last_segment();
+        let interval = segment.interval().expect("a step");
+        assert_eq!(interval.length_ns(), span);
+    }
+}
+
+#[test]
+fn the_certificate_walk_reads_each_combination_and_each_segments_basis() {
+    let case = TwoReservoirs::closed().expect("a body");
+    let core = reference(SECOND);
+    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
+    let view = session.record().conservation();
+    let ids: Vec<QuantityId> = view.basis().ids().collect();
+    let named: Vec<QuantityId> = view.basis().combinations().iter().map(Combination::id).collect();
+    assert_eq!(named, ids);
+    let segment = view.segments().next().expect("one step");
+    let basis = segment.basis();
+    assert_eq!(basis.family(), BasisFamily::Bernstein);
+    let curve = segment
+        .inventory(ids[0])
+        .on(segment.interval())
+        .expect("its own segment");
+    assert_eq!(curve.len(), usize::from(basis.degree()) + 1);
+}
+
+fn two_slot_body() -> CompiledBody {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", origin());
+    let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    assemble(schema, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        for name in ["first", "second"] {
+            let slot = laws.algebraic::<Dimensionless>(name, Admissible::finite());
+            let closure = laws.kernel(|mut k| {
+                let value = k.algebraic(&slot);
+                k.finish(value, laws.every_mode(), wave)
+            });
+            laws.residual(&slot, closure);
+        }
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled")
+}
+
+fn two_slot_packet() -> ParameterPacket<SyntheticFixture> {
+    let name = |local| LawName { owner: "NS", local };
+    let mut packet = ParameterPacket::new();
+    for slot in ["first", "second"] {
+        packet
+            .start(
+                RowKind::Algebraic(name(slot)),
+                measure::<Dimensionless>(0.0),
+                "synthetic",
+            )
+            .expect("once");
+    }
+    packet
+}
+
+#[test]
+fn a_proposal_short_of_algebraic_values_is_a_binding_mismatch() {
+    let foreign_case = TwoReservoirs::closed().expect("a body");
+    let inner = euler(SECOND);
+    let host = foreign_case.admit(&inner).expect("admitted");
+    let values = foreign_case.other_values().expect("bound");
+    let core = ProposesThroughAnotherBody {
+        inner: euler(SECOND),
+        foreign: foreign_case.body(),
+        values: &values,
+        identity: host.record().identity(),
+        accepted: host.record().accepted(),
+        stash: None,
+    };
+    let body = filter_body();
+    let session = admit_fixture(&body, filter_packet(), no_events(), &core).expect("admitted");
+    assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
+}
+
+#[test]
+fn a_core_cannot_stash_numbers_in_the_accepted_state() {
+    let foreign = two_slot_body();
+    let inner = euler(SECOND);
+    let host = admit_fixture(&foreign, two_slot_packet(), no_events(), &inner).expect("admitted");
+    let values = foreign.bind(two_slot_packet()).expect("bound");
+    let core = ProposesThroughAnotherBody {
+        inner: euler(SECOND),
+        foreign: &foreign,
+        values: &values,
+        identity: host.record().identity(),
+        accepted: host.record().accepted(),
+        stash: Some([1234.5, 6789.25]),
+    };
+    let case = TwoReservoirs::closed().expect("a body");
+    let session = case.admit(&core).expect("admitted");
+    assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
+}
+
+#[test]
+fn a_workspace_of_another_length_is_a_binding_mismatch() {
+    let case = TwoReservoirs::closed().expect("a body");
+    let inner = euler(SECOND);
+    let host = case.admit(&inner).expect("admitted");
+    let values = case.other_values().expect("bound");
+    let lone = filter_only_body();
+    let small = admit_fixture(&lone, filter_only_packet(), no_events(), &inner).expect("admitted");
+    let core = ShortWorkspace {
+        inner: euler(SECOND),
+        body: case.body(),
+        values: &values,
+        identity: host.record().identity(),
+        accepted: small.record().accepted(),
+    };
+    let session = case.admit(&core).expect("admitted");
+    assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
+}
+
+fn singular_body() -> CompiledBody {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", origin());
+    let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    assemble(schema, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let memory = laws.state::<Dimensionless>("memory", Admissible::finite());
+        let reading = laws.algebraic::<Dimensionless>("reading", Admissible::finite());
+        let rate =
+            laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.rate"), Admissible::positive());
+        let held = laws.parameter::<Dimensionless>(ParameterKey::new("ns.held"), Admissible::finite());
+        let reflex = RateClass::new(RateBand::Reflex, SECOND)?;
+        let rise = laws.kernel(|mut k| {
+            let value = k.parameter(&rate);
+            k.finish(value, laws.every_mode(), reflex)
+        });
+        laws.memory_rate(&memory, rise);
+        let closure = laws.kernel(|mut k| {
+            let x = k.algebraic(&reading);
+            let again = k.algebraic(&reading);
+            let nothing = k.subtract(x, again);
+            let m = k.state(&memory);
+            let c = k.parameter(&held);
+            let off = k.subtract(m, c);
+            let residual = k.add(nothing, off);
+            k.finish(residual, laws.every_mode(), reflex)
+        });
+        laws.residual(&reading, closure);
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled")
+}
+
+#[test]
+fn a_singular_row_is_named_by_the_fault_that_ends_the_run() {
+    // `(x - x) + (m - c)` reads `x`, so it matches structurally, and it has no slope in `x`, so the
+    // stage's Jacobian has no pivot on that row.
+    let body = singular_body();
+    let name = |local| LawName { owner: "NS", local };
+    let mut packet = ParameterPacket::new();
+    let bind = Binding::Body;
+    let rate = measure::<Rate<Dimensionless>>(0.5);
+    packet
+        .synthetic(ParameterKey::new("ns.rate"), bind, rate, "synthetic")
+        .expect("once");
+    let held = measure::<Dimensionless>(1.0);
+    packet
+        .synthetic(ParameterKey::new("ns.held"), bind, held, "synthetic")
+        .expect("once");
+    for (row, start) in [
+        (RowKind::Memory(name("memory")), 1.0),
+        (RowKind::Algebraic(name("reading")), 0.0),
+    ] {
+        packet
+            .start(row, measure::<Dimensionless>(start), "synthetic")
+            .expect("once");
+    }
+    let core = reference(SECOND);
+    let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
+    let stopped = exhaust(session.step());
+    assert_eq!(stopped.fault().kind(), EngineFaultKind::NoAdmissibleStep);
+    let row = body.rows()[1].id();
+    assert_eq!(
+        stopped.fault().last_refusal(),
+        Some(NumericalRefusal::StageResidual { row })
+    );
+}
+
+fn deaf_boundary_body() -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin());
+    let a = map.site::<VesselSegment>("a", origin());
+    let b = map.site::<VesselSegment>("b", origin());
+    map.contain(root.id(), a.id());
+    map.contain(root.id(), b.id());
+    map.connect(Network::Vascular, a.id(), b.id());
+    let mut schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    schema
+        .water_boundary("exterior", BoundaryDirection::IntoBody, a.id(), Space::Lumen)
+        .expect("one boundary");
+    let leak = ParameterKey::new("boundary.leak");
+    let body = assemble(schema, |mut body| {
+        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let (mut laws, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut laws);
+        let flow = laws.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, laws.every_mode(), wave)
+        });
+        laws.transfer_along(&route, flow);
+        body.add(laws.finish());
+        let (mut laws, ports) = body.boundary()?.parts();
+        let BoundaryWater { route: pair, .. } = ports.water("exterior")?;
+        let rate = laws.parameter::<Rate<Water>>(leak, Admissible::nonnegative());
+        let fixed = laws.kernel(|mut k| {
+            let rate = k.parameter(&rate);
+            k.finish(rate, laws.every_mode(), wave)
+        });
+        laws.transfer(Transfer::new(&pair, fixed));
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let mut packet = ParameterPacket::new();
+    packet
+        .synthetic(leak, Binding::Body, measure::<Rate<Water>>(0.0), "synthetic")
+        .expect("once");
+    for row in body.rows() {
+        packet
+            .start(row.kind(), measure::<Water>(100.0), "synthetic")
+            .expect("once");
+    }
+    (body, packet)
+}
+
+#[test]
+fn a_delivery_no_law_reads_is_refused_at_admission() {
+    let (body, packet) = deaf_boundary_body();
+    let delivery = WaterDelivery {
+        boundary: "exterior",
+        amount: measure(30.0),
+        ends: SimTime::from_ns(10 * SECOND),
+    };
+    let id = InputId::new(Digest::of_canonical(b"meal"));
+    let event = BoundaryEvent::new(id, SimTime::from_ns(0), BoundaryInput::Water(delivery));
+    let port = BoundaryPort::new(vec![event]).expect("parsed");
+    let core = reference(SECOND);
+    let refused = admit_fixture(&body, packet, port, &core).err();
+    assert_eq!(
+        refused,
+        Some(InitializationFailure::Admission(AdmissionError::DriveNotRead {
+            name: "exterior"
+        }))
+    );
+}
+
+#[test]
+fn a_delivery_whose_rate_leaves_the_finite_range_is_refused_when_it_is_stated() {
+    let id = InputId::new(Digest::of_canonical(b"overflow"));
+    let delivery = WaterDelivery {
+        boundary: "exterior",
+        amount: measure(1e300),
+        ends: SimTime::from_ns(1),
+    };
+    let event = BoundaryEvent::new(id, SimTime::from_ns(0), BoundaryInput::Water(delivery));
+    assert_eq!(
+        BoundaryPort::new(vec![event]).err(),
+        Some(AdmissionError::UnboundedDelivery { id })
+    );
 }
 
 #[test]

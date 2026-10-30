@@ -43,10 +43,7 @@ impl ConservedBasis {
         &self.combinations
     }
     pub fn ids(&self) -> impl Iterator<Item = QuantityId> + '_ {
-        (self.combinations.iter().enumerate()).map(|(index, combination)| QuantityId {
-            index,
-            book: combination.book,
-        })
+        self.combinations.iter().map(Combination::id)
     }
     pub fn digest(&self) -> Digest {
         let mut out = Canonical::new("ng-contract conserved basis 1");
@@ -57,12 +54,15 @@ impl ConservedBasis {
 /// A sum of amounts no internal transfer changes. An exterior transfer changes it through its receipt.
 #[derive(Debug, PartialEq)]
 pub struct Combination {
-    book: Book,
+    id: QuantityId,
     terms: Vec<(RowId, i64)>,
 }
 impl Combination {
+    pub fn id(&self) -> QuantityId {
+        self.id
+    }
     pub fn book(&self) -> Book {
-        self.book
+        self.id.book
     }
     /// In row order.
     pub fn terms(&self) -> &[(RowId, i64)] {
@@ -77,8 +77,8 @@ impl Seal for ConservedBasis {
 }
 impl Seal for Combination {
     fn seal(&self, out: &mut Canonical) {
-        let Self { book, terms } = self;
-        out.number(*book as u64);
+        let Self { id, terms } = self;
+        out.number(id.book as u64);
         terms.seal(out);
     }
 }
@@ -104,7 +104,10 @@ pub(crate) fn conserved_basis(amounts: usize, columns: &[Column]) -> ConservedBa
             None => {
                 seen.push(part);
                 combinations.push(Combination {
-                    book: Book::Water,
+                    id: QuantityId {
+                        index: seen.len() - 1,
+                        book: Book::Water,
+                    },
                     terms: Vec::new(),
                 });
                 seen.len() - 1

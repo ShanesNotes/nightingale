@@ -5,7 +5,7 @@ use crate::identity::{Canonical, Seal};
 use crate::quadrature::StageEvaluation;
 use crate::{
     AcceptedStateView, BoundParameters, CompiledBody, Digest, EngineFault, EngineFaultKind, InputId,
-    Interval, NumericalRefusal, Ratio, Refused, RunIdentity, TrialFailure,
+    Interval, NumericalRefusal, Ratio, Refused, RowId, RunIdentity, TrialFailure,
 };
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
@@ -39,8 +39,8 @@ impl<'r> CoupledProblem<'r> {
     pub fn accepted(&self) -> AcceptedStateView<'r> {
         self.accepted
     }
-    /// The core's own span, cut short only at the next breakpoint, which the core never sees. A zero span,
-    /// or one past the end of time, is `BindingMismatch`.
+    /// The core's own span, cut short only at the next breakpoint. A zero span, or one past the end of
+    /// time, is `BindingMismatch`.
     pub fn ticket(&self, intrinsic_span_ns: u64) -> Result<StepTicket, EngineFault> {
         self.issue(intrinsic_span_ns, 0)
     }
@@ -86,6 +86,10 @@ impl<'r> CoupledProblem<'r> {
         ticket.digest = ticket.sealed(self.identity.digest());
         Ok(ticket)
     }
+    /// The row at a workspace slot, so a core can name where a stage failed.
+    pub fn row(&self, slot: usize) -> Option<RowId> {
+        self.body.rows().get(slot).map(|row| row.id())
+    }
     /// Numerical scratch seeded from the accepted state: each amount rounded once, the tangent at zero.
     pub fn workspace(&self) -> SolveWorkspace {
         SolveWorkspace::seeded(self.body, self.accepted.state().coordinates())
@@ -95,7 +99,8 @@ impl<'r> CoupledProblem<'r> {
     }
     fn check(&self, point: &StagePoint<'_, '_>) -> Result<(), TrialFailure> {
         let ticket = point.time.ticket;
-        if point.layout != self.layout() {
+        let rows = self.body.rows().len();
+        if point.layout != self.layout() || point.unknowns.len() != rows || point.derivative.len() != rows {
             return Err(ticket.mismatch().into());
         }
         let bad = |values: &[f64]| values.iter().position(|value| !value.is_finite());

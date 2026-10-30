@@ -4,7 +4,7 @@ use crate::{CoupledProblem, DeclaredResolution, EngineFault, StepProposal, StepT
 pub trait CoupledSolver {
     fn resolution(&self) -> DeclaredResolution;
     /// Chooses an intrinsic span from accepted continuation alone and asks `problem.ticket(span)`; the
-    /// contract clips it at the next breakpoint, which no core can see.
+    /// contract clips it at the next breakpoint.
     fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault>;
     /// Solves exactly the ticketed interval. A proposal is owned, and it is verified against the record's
     /// own problem, so nothing the core built it from is trusted.

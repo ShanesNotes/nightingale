@@ -1,4 +1,4 @@
-use crate::body::RowKind;
+use crate::body::{Bound, RowKind};
 use crate::boundary::PendingInputs;
 use crate::evaluate::Inputs;
 use crate::problem::SolveWorkspace;
@@ -17,8 +17,12 @@ impl InitializationRequest {
 }
 
 impl CompiledBody {
-    /// Refuses parameters bound on another body, an event naming a boundary the schema does not declare and
-    /// an event before the anchor moment.
+    fn reads_drive(&self, boundary: &str) -> bool {
+        (self.layout.instances.iter().flat_map(|instance| &instance.inputs))
+            .any(|input| matches!(input, Bound::Boundary(name) if *name == boundary))
+    }
+    /// Refuses parameters bound on another body, an event naming a boundary the schema does not declare or
+    /// no law reads, and an event before the anchor moment.
     pub fn initialization<'m>(
         &'m self,
         parameters: BoundParameters,
@@ -37,6 +41,11 @@ impl CompiledBody {
             }
             if delivery.at < request.anchor_moment {
                 return Err(AdmissionError::EventBeforeHead { id: delivery.id });
+            }
+            if !self.reads_drive(delivery.boundary) {
+                return Err(AdmissionError::DriveNotRead {
+                    name: delivery.boundary,
+                });
             }
         }
         Ok(InitializationSystem {

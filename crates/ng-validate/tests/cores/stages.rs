@@ -86,3 +86,27 @@ pub fn heun_stages(
     let second = explicit_stage(problem, &mut workspace, ticket.at(ticket.length_ns())?)?;
     Ok((first, second, workspace))
 }
+
+/// Keeps its next span in its accepted continuation and doubles it every step, so a span it wrote is a span
+/// it must read back.
+pub struct KeepsItsSpan {
+    pub first_ns: u64,
+}
+impl CoupledSolver for KeepsItsSpan {
+    fn resolution(&self) -> DeclaredResolution {
+        resolution(StageScheme::forward_euler(), b"keeps its span", 0)
+    }
+    fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+        let kept = problem.accepted().method_history().counters().first();
+        problem.ticket(kept.copied().unwrap_or(self.first_ns))
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let (workspace, stage) = euler_step(problem, ticket)?;
+        let mut quadrature = problem.quadrature(ticket);
+        quadrature.add(&stage, Ratio::ONE)?;
+        let schema = problem.accepted().method_history().schema();
+        let next = vec![2 * ticket.length_ns()];
+        let history = MethodHistory::new(schema, ticket.interval().start(), next);
+        Ok(problem.propose(ticket, quadrature.finish()?, &workspace, history))
+    }
+}

@@ -77,6 +77,14 @@ pub enum AdmissionError {
     NegativeDelivery {
         id: InputId,
     },
+    /// An amount so large over its span that the rate left the finite range.
+    UnboundedDelivery {
+        id: InputId,
+    },
+    /// An event on a boundary whose law never reads its drive, so the amount would never arrive.
+    DriveNotRead {
+        name: &'static str,
+    },
     /// One id with two different payloads.
     InputConflict {
         id: InputId,

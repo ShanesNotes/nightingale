@@ -1,6 +1,6 @@
 use ng_contract::{
-    AcceptedStateView, AdmissibleSet, ColumnId, Compensated, CompiledBody, ConservedBasis, Digest, Interval,
-    QuantityId, SimTime, VerifiedStep,
+    AcceptedStateView, AdmissibleSet, ColumnId, Compensated, CompiledBody, ConservedBasis, DenseBasis,
+    Digest, Interval, QuantityId, SimTime, VerifiedStep,
 };
 
 pub(crate) fn push_bits(bytes: &mut Vec<u8>, value: Compensated) {
@@ -242,6 +242,9 @@ pub struct HistorySegment<'r> {
 impl<'r> HistorySegment<'r> {
     pub fn interval(&self) -> Interval {
         self.chunk.interval
+    }
+    pub fn basis(&self) -> DenseBasis {
+        DenseBasis::CHORD
     }
     pub fn inventory(&self, quantity: QuantityId) -> Curve<'r> {
         self.curve(&self.chunk.quantities[quantity.index()].inventory)
