@@ -286,7 +286,7 @@ One located claim in clinically reviewed literature: the source, the page or tab
 _Avoid_: evidence record
 
 **Tier**:
-How strong a source is for one claim (section 6). A textbook may support a curve's shape; a number needs a primary study with a locator.
+How strong a source is for one claim (section 6). Primary data from the target population ranks first, then a textbook value, then inference. A textbook may support a magnitude, a range or a shape, with a capped certainty and an edition and page locator.
 
 **Inference record**:
 A model's inferred range for a parameter or a number of the patient's day that no source covers, for a healthy range or within-subject variation it adjusts by a sourced shift, or for the within-subject variation of an amount no method can measure, with the population, the model that made it, its reasoning, the source records it reasons from and the search that found no source. It is never a source record: it has no tier, its value displays as inferred, and a source replaces it once one covers the same value.

@@ -174,6 +174,7 @@ pub struct EvidenceRecord {
     _span: SourceSpan,
     _reading: Reading,
     _claim: Claim,
+    _tier: Tier,
     _statistic: Statistic,
     _population: Population,
     _method: &'static str,
@@ -185,12 +186,14 @@ impl EvidenceRecord {
         _span: SourceSpan,
         _reading: Reading,
         _claim: Claim,
+        _tier: Tier,
         _statistic: Statistic,
         _population: Population,
         _method: &'static str,
         _certainty: Certainty,
         _rights: Digest,
     ) -> Result<Self, AdmissionError> {
+        // Refuses a `Textbook` record whose certainty is above `Moderate`.
         todo!()
     }
 }
@@ -204,8 +207,8 @@ impl SourceSpan {
         todo!()
     }
 }
-/// What a record supports. A textbook reproduction may support a `Shape`; a `Magnitude` or a
-/// `Range` needs a primary record, or a reproduction that names its primary and locator.
+/// What a record supports. Any tier may support any claim; a `Textbook` record caps its
+/// `Certainty` at `Moderate` and names the edition and page.
 pub enum Claim {
     Magnitude,
     Range,
@@ -227,6 +230,17 @@ impl Population {
     pub fn new(_description: &'static str, _count: Option<u32>, _covariates: Vec<&'static str>) -> Self {
         todo!()
     }
+}
+/// How strong a source is for one claim: population-specific primary data first, then a
+/// textbook, then inference (record 0003). A non-primary record states whether a primary
+/// source would upgrade it.
+pub enum Tier {
+    PrimaryMeasured,
+    PrimaryFitted,
+    CompiledReference,
+    Review,
+    Textbook { primary_would_upgrade: bool },
+    Standard,
 }
 pub enum Certainty {
     High,

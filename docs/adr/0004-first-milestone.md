@@ -8,7 +8,7 @@ The first milestone is the ICRP 89 reference adult male living two ordinary days
 - The certificate and the healthy-range check, without the return check: rejected. A healthy range spans many healthy men, so this man could drift across it for the whole run and still pass. The return check holds him to his own anchors, and it needs no new sources, because the anchors already exist.
 - A fixed list of vitals and labs in this record, as the healthy-range check's set: rejected. The lens can grow past the list, and a learner would then see readings that no check holds.
 - Only the anchored quantities, as that set: rejected. The anchors were chosen to solve the start state, not to cover what a learner sees.
-- One clinical normal range all day, from a textbook or a laboratory: rejected. It misjudges him asleep and after a meal, and a number from a textbook falls below the evidence standard (SRS section 6).
+- One clinical normal range all day, from a textbook or a laboratory: rejected. It misjudges him asleep and after a meal.
 - Within-subject variation around his anchors, as the healthy range: rejected. It measures him against himself, which is the return check's job, and his anchors exist only for 06:55.
 - A narrower band, such as the middle half, because a reference man should look typical: rejected. Few studies report one, and it judges how typical he is, not whether he is healthy.
 - A range covers only the activities, population and method its study measured: rejected. It would need a study for every combination, even to show that nothing changes, and would stall the milestone with no gain in rigor.
