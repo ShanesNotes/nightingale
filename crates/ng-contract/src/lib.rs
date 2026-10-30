@@ -146,111 +146,6 @@
 //!     laws.transfer(Transfer::new(route, rate));
 //! }
 //! ```
-//! An admissible set takes no bounds, so a reference range cannot become a refusal rule.
-//! ```compile_fail,E0599
-//! use ng_contract::*;
-//! fn refuse_low_pressure(low: Measure<Pressure>, high: Measure<Pressure>) -> Admissible<Pressure> {
-//!     Admissible::new(low, high)
-//! }
-//! ```
-//! ```
-//! use ng_contract::*;
-//! fn validity(low: Measure<Pressure>, high: Measure<Pressure>) -> Result<ValidityRange<Pressure>, AdmissionError> {
-//!     ValidityRange::new(low, high, Basis::Fixture("synthetic range"))
-//! }
-//! ```
-//! An expression carries no number, so no host math runs on it.
-//! ```compile_fail,E0599
-//! use ng_contract::*;
-//! fn host<'b, 'k>(x: Expr<'b, 'k, Renal, Dimensionless>) -> f64 {
-//!     x.value().exp()
-//! }
-//! ```
-//! ```
-//! use ng_contract::*;
-//! fn pinned<'b, 'k>(k: &mut Kernel<'b, 'k, Renal>, x: Expr<'b, 'k, Renal, Dimensionless>)
-//!     -> Expr<'b, 'k, Renal, Dimensionless> {
-//!     k.exp(x)
-//! }
-//! ```
-//! A guard fires only its own owner's transition: a renal guard cannot switch a valve.
-//! ```compile_fail,E0308
-//! use ng_contract::*;
-//! fn foreign<'b>(zero: PureKernel<'b, Renal, Pressure>, valve: ModeTransition<'b, Cardiovascular>)
-//!     -> Guard<'b, Renal, Pressure> {
-//!     Guard::new(zero, Crossing::Rising, valve)
-//! }
-//! ```
-//! ```
-//! use ng_contract::*;
-//! fn own<'b>(zero: PureKernel<'b, Renal, Pressure>, transition: ModeTransition<'b, Renal>)
-//!     -> Guard<'b, Renal, Pressure> {
-//!     Guard::new(zero, Crossing::Rising, transition)
-//! }
-//! ```
-//! A set point is not the variable it guards: no law subtracts across the two.
-//! ```compile_fail,E0308
-//! use ng_contract::*;
-//! fn as_pressure<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>, pressure: Expr<'b, 'k, Nervous, Pressure>,
-//!     set_point: &StateSlot<'b, Nervous, Reference<Pressure>>) -> Expr<'b, 'k, Nervous, Pressure> {
-//!     let reference = k.state(set_point);
-//!     k.subtract(pressure, reference)
-//! }
-//! ```
-//! ```
-//! use ng_contract::*;
-//! fn error<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>, pressure: Expr<'b, 'k, Nervous, Pressure>,
-//!     set_point: &StateSlot<'b, Nervous, Reference<Pressure>>) -> Expr<'b, 'k, Nervous, Pressure> {
-//!     let reference = k.state(set_point);
-//!     k.deviation(pressure, reference)
-//! }
-//! ```
-//! A product gets a name only through the identity table: volume times volume is not a pressure.
-//! ```compile_fail,E0277
-//! use ng_contract::*;
-//! fn invented<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular>, a: Expr<'b, 'k, Cardiovascular, Volume>,
-//!     b: Expr<'b, 'k, Cardiovascular, Volume>) -> Expr<'b, 'k, Cardiovascular, Pressure> {
-//!     let product = k.multiply(a, b);
-//!     k.as_dimension(product)
-//! }
-//! ```
-//! ```
-//! use ng_contract::*;
-//! fn pressure<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular>, e: Expr<'b, 'k, Cardiovascular, Elastance>,
-//!     v: Expr<'b, 'k, Cardiovascular, Volume>) -> Expr<'b, 'k, Cardiovascular, Pressure> {
-//!     let product = k.multiply(e, v);
-//!     k.as_dimension(product)
-//! }
-//! ```
-//! A guard never fires on a set point: only a sensed dimension is guarded.
-//! ```compile_fail,E0277
-//! use ng_contract::*;
-//! fn on_reference<'b>(zero: PureKernel<'b, Nervous, Reference<Pressure>>, change: ModeTransition<'b, Nervous>)
-//!     -> Guard<'b, Nervous, Reference<Pressure>> {
-//!     Guard::new(zero, Crossing::Rising, change)
-//! }
-//! ```
-//! ```
-//! use ng_contract::*;
-//! fn on_pressure<'b>(zero: PureKernel<'b, Nervous, Pressure>, change: ModeTransition<'b, Nervous>)
-//!     -> Guard<'b, Nervous, Pressure> {
-//!     Guard::new(zero, Crossing::Rising, change)
-//! }
-//! ```
-//! A parameter's dimension is one of the contract's, never an invented unit.
-//! ```compile_fail,E0277
-//! use ng_contract::*;
-//! enum Invented {}
-//! fn invent<'b>(laws: &mut FragmentBuilder<'b, Nervous>) {
-//!     let _ = laws.parameter::<Invented>(ParameterKey::new("fixture.invented"), Admissible::finite());
-//! }
-//! ```
-//! ```
-//! use ng_contract::*;
-//! fn declare<'b>(laws: &mut FragmentBuilder<'b, Nervous>) {
-//!     let _ = laws.parameter::<Pressure>(ParameterKey::new("fixture.pressure"), Admissible::finite());
-//! }
-//! ```
 //! An expression cannot leave its kernel: one read in a finished kernel does not type-check in the next.
 //! ```compile_fail,E0521
 //! use ng_contract::*;
@@ -316,6 +211,19 @@
 //!     })
 //! }
 //! ```
+//! An admissible set takes no bounds, so a reference range cannot become a refusal rule.
+//! ```compile_fail,E0599
+//! use ng_contract::*;
+//! fn refuse_low_pressure(low: Measure<Pressure>, high: Measure<Pressure>) -> Admissible<Pressure> {
+//!     Admissible::new(low, high)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn validity(low: Measure<Pressure>, high: Measure<Pressure>) -> Result<ValidityRange<Pressure>, AdmissionError> {
+//!     ValidityRange::new(low, high, Basis::Fixture("synthetic range"))
+//! }
+//! ```
 //! A kernel's result takes no admissible set, so a threshold cannot become a sign constraint on a
 //! computed expression.
 //! ```compile_fail,E0061
@@ -346,6 +254,35 @@
 //!     Ok(laws.state::<Dimensionless>("occupancy-like memory", Admissible::unit_interval()))
 //! }
 //! ```
+//! An expression carries no number, so no host math runs on it.
+//! ```compile_fail,E0599
+//! use ng_contract::*;
+//! fn host<'b, 'k>(x: Expr<'b, 'k, Renal, Dimensionless>) -> f64 {
+//!     x.value().exp()
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn pinned<'b, 'k>(k: &mut Kernel<'b, 'k, Renal>, x: Expr<'b, 'k, Renal, Dimensionless>)
+//!     -> Expr<'b, 'k, Renal, Dimensionless> {
+//!     k.exp(x)
+//! }
+//! ```
+//! A guard fires only its own owner's transition: a renal guard cannot switch a valve.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn foreign<'b>(zero: PureKernel<'b, Renal, Pressure>, valve: ModeTransition<'b, Cardiovascular>)
+//!     -> Guard<'b, Renal, Pressure> {
+//!     Guard::new(zero, Crossing::Rising, valve)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn own<'b>(zero: PureKernel<'b, Renal, Pressure>, transition: ModeTransition<'b, Renal>)
+//!     -> Guard<'b, Renal, Pressure> {
+//!     Guard::new(zero, Crossing::Rising, transition)
+//! }
+//! ```
 //! A law declared for one site class reads only that class's entries: a capillary-bed law cannot read
 //! a junction's value.
 //! ```compile_fail,E0308
@@ -366,6 +303,69 @@
 //!         let value = k.at_site(pressure);
 //!         k.finish(value, laws.every_mode(), class)
 //!     })
+//! }
+//! ```
+//! A set point is not the variable it guards: no law subtracts across the two.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn as_pressure<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>, pressure: Expr<'b, 'k, Nervous, Pressure>,
+//!     set_point: &StateSlot<'b, Nervous, Reference<Pressure>>) -> Expr<'b, 'k, Nervous, Pressure> {
+//!     let reference = k.state(set_point);
+//!     k.subtract(pressure, reference)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn error<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>, pressure: Expr<'b, 'k, Nervous, Pressure>,
+//!     set_point: &StateSlot<'b, Nervous, Reference<Pressure>>) -> Expr<'b, 'k, Nervous, Pressure> {
+//!     let reference = k.state(set_point);
+//!     k.deviation(pressure, reference)
+//! }
+//! ```
+//! A product gets a name only through the identity table: volume times volume is not a pressure.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn invented<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular>, a: Expr<'b, 'k, Cardiovascular, Volume>,
+//!     b: Expr<'b, 'k, Cardiovascular, Volume>) -> Expr<'b, 'k, Cardiovascular, Pressure> {
+//!     let product = k.multiply(a, b);
+//!     k.as_dimension(product)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn pressure<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular>, e: Expr<'b, 'k, Cardiovascular, Elastance>,
+//!     v: Expr<'b, 'k, Cardiovascular, Volume>) -> Expr<'b, 'k, Cardiovascular, Pressure> {
+//!     let product = k.multiply(e, v);
+//!     k.as_dimension(product)
+//! }
+//! ```
+//! A guard never fires on a set point: only a sensed dimension is guarded.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn on_reference<'b>(zero: PureKernel<'b, Nervous, Reference<Pressure>>, change: ModeTransition<'b, Nervous>)
+//!     -> Guard<'b, Nervous, Reference<Pressure>> {
+//!     Guard::new(zero, Crossing::Rising, change)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn on_pressure<'b>(zero: PureKernel<'b, Nervous, Pressure>, change: ModeTransition<'b, Nervous>)
+//!     -> Guard<'b, Nervous, Pressure> {
+//!     Guard::new(zero, Crossing::Rising, change)
+//! }
+//! ```
+//! A parameter's dimension is one of the contract's, never an invented unit.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! enum Invented {}
+//! fn invent<'b>(laws: &mut FragmentBuilder<'b, Nervous>) {
+//!     let _ = laws.parameter::<Invented>(ParameterKey::new("fixture.invented"), Admissible::finite());
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn declare<'b>(laws: &mut FragmentBuilder<'b, Nervous>) {
+//!     let _ = laws.parameter::<Pressure>(ParameterKey::new("fixture.pressure"), Admissible::finite());
 //! }
 //! ```
 //! A per-site vector is not a scalar, so the whole-body read refuses it.
