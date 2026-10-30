@@ -267,7 +267,7 @@ A target a produced quantity must meet when the start state is solved, stated wi
 What an anchor's value summarizes: an instant, a cycle mean or a window mean. An anchor on a pulsatile quantity is a cycle mean.
 
 **Healthy range**:
-The target for one reading, the central 95% of healthy adults over the averaging window their study used, matched to the patient in activity, sex, age or method wherever a source shows that one of these shifts the reading. It comes from a primary study, or from an inference record that adjusts a sourced range by a sourced shift (record 0004).
+The target for one reading, the central 95% of healthy adults over the averaging window their study used, matched to the patient in activity, sex, age or method wherever a source shows that one of these shifts the reading. It comes from a primary study, else a compiled source or a textbook value at its tier (section 6), else an inference record that adjusts a sourced range by a sourced shift (record 0004).
 _Avoid_: normal range, normal limits, reference range
 
 **Healthy-range set**:
@@ -275,7 +275,7 @@ Every healthy range and within-subject variation, with the source and inference 
 _Avoid_: normals, reference table
 
 **Within-subject variation**:
-How far one healthy adult's own reading, or the change in an amount in their body over a day, varies from one day to the next under the same conditions, as an SD from a primary study, or from an inference record that adjusts a sourced one by a sourced shift or, for an amount no method can measure, reasons from the sourced flows into and out of it. The return check allows a reading to change by up to 1.96 × √2 times it, the reference change value without its analytical part, and the certificate allows an amount to drift by up to 1.96 times it over any 24 hours (record 0004).
+How far one healthy adult's own reading, or the change in an amount in their body over a day, varies from one day to the next under the same conditions, as an SD from a primary study, else a compiled source or a textbook value at its tier (section 6), else an inference record that adjusts a sourced one by a sourced shift or, for an amount no method can measure, reasons from the sourced flows into and out of it. The return check allows a reading to change by up to 1.96 × √2 times it, the reference change value without its analytical part, and the certificate allows an amount to drift by up to 1.96 times it over any 24 hours (record 0004).
 _Avoid_: intra-individual variation, day-to-day noise
 
 **Snapshot**:
@@ -286,7 +286,7 @@ One located claim in clinically reviewed literature: the source, the page or tab
 _Avoid_: evidence record
 
 **Tier**:
-How strong a source is for one claim (section 6). A textbook may support a curve's shape; a number needs a primary study with a locator.
+How strong a source is for one claim (section 6). Primary data from the target population ranks first, then a compiled source (a reference compilation, review or consensus standard), then a textbook value, then inference. A compiled source or a textbook may support a magnitude, a range or a shape, with a capped certainty and a locator (table or section; edition and page for a textbook).
 
 **Inference record**:
 A model's inferred range for a parameter or a number of the patient's day that no source covers, for a healthy range or within-subject variation it adjusts by a sourced shift, or for the within-subject variation of an amount no method can measure, with the population, the model that made it, its reasoning, the source records it reasons from and the search that found no source. It is never a source record: it has no tier, its value displays as inferred, and a source replaces it once one covers the same value.

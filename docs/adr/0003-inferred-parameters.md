@@ -1,6 +1,6 @@
 # A model may fill a gap in the packet, but every target rests on a source
 
-Nightingale is a simulation for teaching and never informs the care of a real patient, so a labeled inference gives a learner more fidelity than leaving an unsourced mechanism out. A parameter or a number of the patient's day that no clinically reviewed source covers may carry an inference record: the model that made it, its reasoning, the population, the source records it reasons from and the search that found no source, frozen in the packet hash and displayed as inferred. Every target rests on the literature, because a check against a target the model made up would show only that the model agrees with itself.
+Nightingale is a simulation for teaching and never informs the care of a real patient, so a labeled inference gives a learner more fidelity than leaving an unsourced mechanism out. A parameter or a number of the patient's day that no clinically reviewed source, primary, compiled or textbook, covers may carry an inference record: the model that made it, its reasoning, the population, the source records it reasons from and the search that found no source, frozen in the packet hash and displayed as inferred. Every target rests on the literature, because a check against a target the model made up would show only that the model agrees with itself.
 
 ## Considered options
 
@@ -12,6 +12,6 @@ Nightingale is a simulation for teaching and never informs the care of a real pa
 ## Consequences
 
 - An inference never changes in place. A better model makes a new inference record, which makes a new packet with a new hash.
-- Available literature still comes first. A source replaces an inferred value once one covers it, and every reviewed packet states how many inferred values it carries.
+- Available literature still comes first: primary data from the target population, then a compiled source (a reference compilation, review or consensus standard), then a textbook value, then inference. A textbook value fills a gap that only a gated or missing primary paper leaves, so the search an inference record names covers compiled sources and textbooks too. A source replaces an inferred value once one covers it, and every reviewed packet states how many inferred values it carries.
 - An anchor never carries an inference. A healthy range or a within-subject variation carries one only to adjust a sourced one by a sourced shift, so it still rests on two sources, or, for an amount no method can measure, to reason from the sourced flows into and out of it (record 0004).
 - The contract's value provenance gains an inferred kind, which an anchor refuses.

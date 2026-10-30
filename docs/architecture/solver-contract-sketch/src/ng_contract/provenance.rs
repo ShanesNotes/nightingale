@@ -15,10 +15,14 @@ pub struct Citation {
     _source: String,
     _page_or_table: String,
     _reading: Reading,
+    _tier: Tier,
 }
 impl Citation {
-    /// Validates nonempty locators, but cannot prove that a person read a source.
-    pub fn new(_source: String, _page_or_table: String, _reading: Reading) -> Result<Self, AdmissionError> {
+    /// Validates nonempty locators, but cannot prove that a person read a source. The tier says
+    /// how strong the source is; a `Textbook` tier carries an edition and page in the locator and
+    /// whether a primary source would upgrade the anchor.
+    pub fn new(_source: String, _page_or_table: String, _reading: Reading, _tier: Tier)
+        -> Result<Self, AdmissionError> {
         todo!()
     }
 }
@@ -174,6 +178,7 @@ pub struct EvidenceRecord {
     _span: SourceSpan,
     _reading: Reading,
     _claim: Claim,
+    _tier: Tier,
     _statistic: Statistic,
     _population: Population,
     _method: &'static str,
@@ -185,12 +190,14 @@ impl EvidenceRecord {
         _span: SourceSpan,
         _reading: Reading,
         _claim: Claim,
+        _tier: Tier,
         _statistic: Statistic,
         _population: Population,
         _method: &'static str,
         _certainty: Certainty,
         _rights: Digest,
     ) -> Result<Self, AdmissionError> {
+        // Refuses a `Compiled` or `Textbook` record whose certainty is above `Moderate`.
         todo!()
     }
 }
@@ -204,8 +211,8 @@ impl SourceSpan {
         todo!()
     }
 }
-/// What a record supports. A textbook reproduction may support a `Shape`; a `Magnitude` or a
-/// `Range` needs a primary record, or a reproduction that names its primary and locator.
+/// What a record supports. Any tier may support any claim; a `Compiled` or `Textbook` record
+/// caps its `Certainty` at `Moderate`, and a `Textbook` record names the edition and page.
 pub enum Claim {
     Magnitude,
     Range,
@@ -227,6 +234,16 @@ impl Population {
     pub fn new(_description: &'static str, _count: Option<u32>, _covariates: Vec<&'static str>) -> Self {
         todo!()
     }
+}
+/// How strong a source is for one claim: population-specific primary data first, then a
+/// compiled source (a reference compilation, a review or a consensus standard), then a
+/// textbook, then inference (record 0003). A compiled or textbook record states whether a
+/// primary source would upgrade it.
+pub enum Tier {
+    PrimaryMeasured,
+    PrimaryFitted,
+    Compiled { primary_would_upgrade: bool },
+    Textbook { primary_would_upgrade: bool },
 }
 pub enum Certainty {
     High,
