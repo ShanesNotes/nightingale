@@ -320,9 +320,35 @@ impl CoupledSolver for RefusesByHash {
         let mut bytes = self.salt.to_be_bytes().to_vec();
         bytes.extend_from_slice(&ticket.interval().start().nanoseconds().to_be_bytes());
         bytes.extend_from_slice(&ticket.interval().end().nanoseconds().to_be_bytes());
-        if Digest::of_canonical(&bytes).as_bytes()[0] % 3 == 0 {
+        if Digest::of_canonical(&bytes).as_bytes()[0].is_multiple_of(3) {
             return Err(ticket.refuse(NumericalRefusal::IterationLimit));
         }
+        self.inner.solve(problem, ticket)
+    }
+}
+
+/// Halves its span once a run has jumped, as a core that restarts its method on a load or a rewind does. A
+/// load and a fork then agree with each other and with no run that came straight there.
+pub struct RestartsAfterAJump {
+    pub inner: ReferenceIntegrator,
+    pub last: Cell<Option<SimTime>>,
+    pub restarted: Cell<bool>,
+}
+impl CoupledSolver for RestartsAfterAJump {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        let head = accepted.time();
+        let jumped = match self.last.replace(Some(head)) {
+            None => head.nanoseconds() > 0,
+            Some(last) => head <= last,
+        };
+        self.restarted.set(self.restarted.get() || jumped);
+        let own = self.inner.next_step(accepted);
+        if self.restarted.get() { own / 2 } else { own }
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         self.inner.solve(problem, ticket)
     }
 }
