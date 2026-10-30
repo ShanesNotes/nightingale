@@ -1,29 +1,45 @@
-//! One solve's problem and every value a solver core produces or consumes. A running session lends
-//! the problem: compiled body, bound parameter values, run identity and the pending boundary.
-//! No dt enters a kernel; stage times are exact integer offsets inside a ticketed interval.
+//! One step's problem and every value a solver core produces or consumes. The record builds one
+//! per attempt from its own fields: compiled body, bound parameter values, run identity and the
+//! accepted view. No dt enters a kernel; stage times are exact integer offsets inside a ticketed
+//! interval.
 use super::*;
 
+/// Building one on other values is allowed and reaches nothing: `StepProposal::verify` re-evaluates
+/// on the record's own.
 pub struct CoupledProblem<'r> {
     _body: &'r CompiledBody,
     _parameters: &'r BoundParameters,
     _identity: &'r RunIdentity,
-    _base: &'r Seal,
-    _boundary: BoundaryView<'r>,
+    _accepted: AcceptedStateView<'r>,
+    _base: Digest,
 }
 impl<'r> CoupledProblem<'r> {
-    /// Maps a failing row and its residual to the law it came from, for an `EngineFault`.
-    pub fn diagnose(&self, _row: RowId, _residual: f64) -> RowDiagnosis {
+    pub fn new(
+        _body: &'r CompiledBody,
+        _parameters: &'r BoundParameters,
+        _identity: &'r RunIdentity,
+        _accepted: AcceptedStateView<'r>,
+        _base: Digest,
+    ) -> Self {
+        todo!()
+    }
+    pub fn accepted(&self) -> AcceptedStateView<'r> {
         todo!()
     }
     /// Numerical scratch seeded from the accepted state, never an accepted patient copy.
-    pub fn workspace(&self, _start: AcceptedStateView<'_>) -> SolveWorkspace {
+    pub fn workspace(&self) -> SolveWorkspace {
         todo!()
     }
-    /// Binds the core's intrinsic end to the accepted base, due inputs and identity. The contract
-    /// ends the ticket at the earlier of `intrinsic_end` and the next physical breakpoint, which
-    /// no core can see: the causal step rule holds by construction, and a ticket that a
-    /// breakpoint cut says so (`StepTicket::after_breakpoint` on the next one).
-    pub fn ticket(&self, _start: AcceptedStateView<'_>, _intrinsic_end: SimTime) -> Result<StepTicket, EngineFault> {
+    /// Binds the core's intrinsic span to the accepted base, due inputs, frozen drives and identity.
+    /// The contract ends the ticket at the earlier of that span's end and the next physical
+    /// breakpoint, which no core can see: the causal step rule holds by construction, and a ticket
+    /// that starts at a breakpoint says so (`StepTicket::after_breakpoint`).
+    pub fn ticket(&self, _intrinsic_span_ns: u64) -> Result<StepTicket, EngineFault> {
+        todo!()
+    }
+    /// The same base over the smaller span a refusal left, through the same clipping as any ticket.
+    /// A refusal of another base is `BindingMismatch`.
+    pub fn retry(&self, _refused: &Refused) -> Result<StepTicket, EngineFault> {
         todo!()
     }
     /// Rate-class and strongly connected blocks derived from dependencies, never organ names.
@@ -31,57 +47,67 @@ impl<'r> CoupledProblem<'r> {
     pub fn blocks(&self, _plan: EvaluationPlan<'_>) -> Result<&[EquationBlock], EngineFault> {
         todo!()
     }
-    /// Rates, memory rates, residuals F(t, y, y') and guards of the rows in scope, with the bound
-    /// parameter values. The evaluation keeps a copy of the point it was evaluated at.
-    pub fn evaluate(&self, _scope: Scope<'_>, _point: &StagePoint<'_>) -> Result<StageEvaluation, TrialFailure> {
+    /// Residuals F(t, y, y') of every row and the guards, with the bound parameter values. A drive
+    /// reads the ticket's frozen frame, never the stage's instant. The evaluation keeps a copy of
+    /// the point it was evaluated at.
+    pub fn evaluate(&self, _point: &StagePoint<'_, '_>) -> Result<StageEvaluation, TrialFailure> {
+        todo!()
+    }
+    /// One block's rows, for a split core: added beside `evaluate`, so a whole-scope core never
+    /// names a scope.
+    pub fn evaluate_block(
+        &self,
+        _block: &EquationBlock,
+        _point: &StagePoint<'_, '_>,
+    ) -> Result<StageEvaluation, TrialFailure> {
         todo!()
     }
     /// dF/dy + shift * dF/dy' of the same expression program, by fixed-order forward
-    /// differentiation, as a sparse matrix over the scope's rows and unknowns.
-    pub fn linearize(
+    /// differentiation, as a sparse matrix over the compiled pattern.
+    pub fn linearize(&self, _point: &StagePoint<'_, '_>, _shift: Shift) -> Result<Jacobian, TrialFailure> {
+        todo!()
+    }
+    pub fn linearize_block(
         &self,
-        _scope: Scope<'_>,
-        _point: &StagePoint<'_>,
+        _block: &EquationBlock,
+        _point: &StagePoint<'_, '_>,
         _shift: Shift,
     ) -> Result<Jacobian, TrialFailure> {
         todo!()
     }
-    /// Bound to the ticket and to the plan the stepper's blocks come from (`Coupled` for whole-scope
-    /// stages). A split plan is checked as `blocks` checks it, else `BindingMismatch`; the plan's
-    /// digest enters the stage witness.
-    pub fn quadrature(
+    /// Bound to the ticket, so a stage from another attempt is refused.
+    pub fn quadrature(&self, _ticket: &StepTicket) -> Quadrature {
+        todo!()
+    }
+    /// Bound also to the plan a split stepper's blocks come from. A split plan is checked as
+    /// `blocks` checks it, else `BindingMismatch`; the plan's digest enters the stage witness.
+    pub fn quadrature_for(
         &self,
         _ticket: &StepTicket,
         _plan: EvaluationPlan<'_>,
-    ) -> Result<Quadrature<'_>, EngineFault> {
-        todo!()
-    }
-    /// Starts at the accepted image's end node, so consecutive segments are continuous.
-    pub fn dense_output(&self, _start: AcceptedStateView<'_>, _ticket: &StepTicket) -> DenseOutputBuilder<'_> {
+    ) -> Result<Quadrature, EngineFault> {
         todo!()
     }
     /// Guard localization and simultaneous-event ordering by stable guard identity.
     pub fn transitions(
         &self,
-        _before: &Candidate,
-        _after: &Candidate,
+        _before: &StageEvaluation,
+        _after: &StageEvaluation,
         _ticket: &StepTicket,
     ) -> Result<ModeChanges, TrialFailure> {
         todo!()
     }
-    /// Assembles a proposal. Amounts and memory come from the start plus the increment, never from
-    /// the solver's own coordinates, so the ledger is the published update whatever stages the core
-    /// used; `end` supplies only algebraic values and modes, which validation rechecks at the
-    /// published state, and the dense segment must end on it. Acceptance is decided by the record.
-    pub fn proposal(
+    /// Assembles a proposal. Amounts and memory will come from the start plus the increment, never
+    /// from the solver's own coordinates, and the dense segment from the published ends; `end`
+    /// supplies only algebraic values, which `verify` rechecks at the published state.
+    pub fn propose(
         &self,
         _ticket: &StepTicket,
-        _end: Candidate,
         _increment: Increment,
+        _end: &SolveWorkspace,
         _modes: ModeChanges,
         _history: MethodHistory,
-        _dense: DenseSegment,
-    ) -> Result<StepProposal<'_>, TrialFailure> {
+    ) -> StepProposal {
         todo!()
     }
     /// Eligible only when the compiled body has no algebraic residual rows.
@@ -97,9 +123,6 @@ pub struct SolveWorkspace {
     _derivative: Vec<f64>,
 }
 impl SolveWorkspace {
-    pub fn unknowns(&self) -> &[f64] {
-        todo!()
-    }
     pub fn unknowns_mut(&mut self) -> &mut [f64] {
         todo!()
     }
@@ -109,63 +132,47 @@ impl SolveWorkspace {
         todo!()
     }
     /// The current (y, y') at a stage time, bound to this layout.
-    pub fn point(&self, _time: StageTime) -> Result<StagePoint<'_>, TrialFailure> {
-        todo!()
-    }
-    /// Checks the layout and finiteness; amounts are recomputed from extents in `proposal`.
-    pub fn candidate(&self) -> Result<Candidate, TrialFailure> {
+    pub fn point<'w, 't>(&'w self, _time: StageTime<'t>) -> StagePoint<'w, 't> {
         todo!()
     }
 }
-pub struct StagePoint<'w> {
+pub struct StagePoint<'w, 't> {
     _layout: Digest,
-    _time: StageTime,
+    _time: StageTime<'t>,
     _unknowns: &'w [f64],
     _derivative: &'w [f64],
 }
-/// An exact origin plus a bounded integer offset; minted by a ticket, never from f64 time. It
-/// carries that ticket's digest, so an evaluation from an earlier attempt cannot enter this one.
-pub struct StageTime {
-    _ticket: Digest,
-    _origin: SimTime,
+/// An exact integer offset inside one ticket, minted by it, never from f64 time. It borrows the
+/// ticket, so `evaluate` can refuse with only a point in hand, and an evaluation from an earlier
+/// attempt cannot enter this one.
+#[derive(Clone, Copy)]
+pub struct StageTime<'t> {
+    _ticket: &'t StepTicket,
     _offset_ns: u64,
 }
-pub enum Scope<'a> {
-    Whole,
-    Block(&'a EquationBlock),
-}
 /// The derivative coefficient in dF/dy + shift * dF/dy' (1/h for backward Euler).
+#[derive(Clone, Copy)]
 pub struct Shift {
-    _alpha: f64,
-}
-impl Shift {
-    pub fn new(_alpha: f64) -> Result<Self, EngineFault> {
-        todo!()
-    }
+    _per_second: f64,
 }
 /// One stage's evaluation. It carries the point (y, y') it was evaluated at, copied in, so the stage
 /// outlives the workspace moving on and the record can re-evaluate it, and, for a block evaluation,
-/// the block's plan digest and ordinal.
+/// the block's plan digest and ordinal. Only `CoupledProblem::evaluate` makes one.
 pub struct StageEvaluation {
     _layout: Digest,
-    _time: StageTime,
+    _ticket: Digest,
+    _offset_ns: u64,
     _block: Option<(Digest, u32)>,
     _unknowns: Vec<f64>,
     _derivative: Vec<f64>,
-    _columns: Vec<u32>,
-    _rates: Vec<f64>,
-    _memory_rates: Vec<f64>,
+    _columns: Vec<f64>,
+    _rows: Vec<f64>,
     _residuals: Vec<f64>,
     _guards: Vec<f64>,
 }
 impl StageEvaluation {
-    /// Signed instantaneous rate per transfer, reaction and work column in scope.
-    pub fn rates(&self) -> &[f64] {
-        todo!()
-    }
-    pub fn memory_rates(&self) -> &[f64] {
-        todo!()
-    }
+    /// F per row: what a Newton core drives to zero. With the tangent at zero, a differential row's
+    /// value is minus its rate, so an explicit core reads its rates here too.
     pub fn residuals(&self) -> &[f64] {
         todo!()
     }
@@ -175,8 +182,7 @@ impl StageEvaluation {
 }
 pub struct Jacobian {
     _layout: Digest,
-    _rows: Vec<RowId>,
-    _row_offsets: Vec<u32>,
+    _row_offsets: Vec<usize>,
     _columns: Vec<UnknownId>,
     _values: Vec<f64>,
 }
@@ -185,20 +191,16 @@ impl Jacobian {
         todo!()
     }
 }
-/// Compressed sparse rows over the scope's rows; the pattern is the compiled dependency envelope.
-/// View row `r` is `residuals()[r]` of an evaluation in the same scope, its entries are
+/// Compressed sparse rows; the pattern is the compiled dependency envelope. View row `r` is
+/// `residuals()[r]` of an evaluation at the same point, its entries are
 /// `row_offsets()[r]..row_offsets()[r + 1]`, and a column's `UnknownId::index` is its workspace slot.
 pub struct SparseView<'a> {
-    _rows: &'a [RowId],
-    _row_offsets: &'a [u32],
+    _row_offsets: &'a [usize],
     _columns: &'a [UnknownId],
     _values: &'a [f64],
 }
 impl<'a> SparseView<'a> {
-    pub fn rows(&self) -> &'a [RowId] {
-        todo!()
-    }
-    pub fn row_offsets(&self) -> &'a [u32] {
+    pub fn row_offsets(&self) -> &'a [usize] {
         todo!()
     }
     pub fn columns(&self) -> &'a [UnknownId] {
@@ -239,109 +241,86 @@ pub enum EvaluationPlan<'a> {
 }
 
 /// Accumulates weighted stage evaluations over one ticketed interval: the ONLY producer of
-/// `Extents` and `MemoryIncrement`. Backward Euler is one evaluation at weight 1; a beat
+/// `Extents` and the memory increment. Backward Euler is one evaluation at weight 1; a beat
 /// stepper's bins are many block evaluations whose weights sum to 1 per column; SDIRK uses its
 /// stage weights. Forward and reverse parts of each column stay apart, so the ledger keeps gross
 /// in and out. The seam therefore admits one-step methods only: a linear multistep (BDF) or
 /// Rosenbrock update is not a weighted sum of rates inside the interval, and such a core needs a
 /// contract version with a history term. No ledger term crosses an interval boundary.
-pub struct Quadrature<'p> {
-    _body: &'p CompiledBody,
+pub struct Quadrature {
     _layout: Digest,
-    _interval: Interval,
+    _ticket: Digest,
     _plan: Digest,
-    _coverage: Vec<f64>,
-    _forward: Vec<f64>,
-    _reverse: Vec<f64>,
+    _length_ns: u64,
+    _total: Ratio,
+    _forward: Vec<Compensated>,
+    _reverse: Vec<Compensated>,
     _memory: Vec<f64>,
     _stages: Vec<WitnessStage>,
 }
-impl Quadrature<'_> {
-    /// Adds the weighted rates and keeps the evaluation's point, rates, weight and block as a witness
-    /// stage. Refuses an evaluation from another layout, one whose stage time another ticket minted
-    /// (an earlier attempt), or one of a block another plan issued: `BindingMismatch`.
-    pub fn add(&mut self, _evaluation: &StageEvaluation, _weight: StageWeight) -> Result<(), EngineFault> {
+impl Quadrature {
+    /// Adds the weighted rates and keeps the evaluation's point, weight and block as a witness
+    /// stage. `weight` is an exact fraction of the ticketed interval, so summing to one is an
+    /// integer equality. Refuses an evaluation from another layout, one another ticket minted (an
+    /// earlier attempt), or one of a block another plan issued: `BindingMismatch`.
+    pub fn add(&mut self, _evaluation: &StageEvaluation, _weight: Ratio) -> Result<(), EngineFault> {
         todo!()
     }
-    /// Refuses unless every column's weights sum to one over the interval.
+    /// Refuses unless the weights sum to one exactly.
     pub fn finish(self) -> Result<Increment, EngineFault> {
         todo!()
     }
 }
-/// A finite, nonnegative fraction of the ticketed interval. Negative weights are outside the seam,
-/// because gross forward and reverse extents could not then be kept apart.
-pub struct StageWeight {
-    _fraction: f64,
-}
-impl StageWeight {
-    pub fn new(_fraction: f64) -> Result<Self, EngineFault> {
-        todo!()
-    }
-}
 pub struct Increment {
+    _ticket: Digest,
     _extents: Extents,
-    _memory: MemoryIncrement,
+    _memory: Vec<f64>,
     _witness: StageWitness,
 }
-/// The stages an increment was built from: each stage's time, point (y, y'), recorded rates, weight
-/// and block, and the digest of the evaluation plan the quadrature was bound to. Made only by
-/// `Quadrature`. `PatientRecord::validate` re-evaluates every stage on the compiled body in the scope
-/// it names (the whole, or that block of the witnessed plan), so a ledger cannot come from one
-/// sample while the state came from other stages, a block cannot be lagged without a
-/// qualification, and the declared scheme's error estimate is recomputed, not trusted.
-pub struct StageWitness {
+/// The stages an increment was built from: each stage's offset, weight, point (y, y') and block,
+/// and the digest of the evaluation plan the quadrature was bound to. Made only by `Quadrature`,
+/// and private: a rate is not kept, because `StepProposal::verify` re-evaluates every point and
+/// re-adds it through the same quadrature, so one code path decides that a recorded rate differs
+/// and that the sum is not the scheme's. A ledger cannot come from one sample while the state came
+/// from other stages, a block cannot be lagged without a qualification, and the declared scheme's
+/// error estimate is recomputed, not trusted.
+struct StageWitness {
     _plan: Digest,
     _stages: Vec<WitnessStage>,
 }
-pub struct WitnessStage {
-    _time: StageTime,
+struct WitnessStage {
+    _offset_ns: u64,
+    _weight: Ratio,
     /// The block's ordinal under the witnessed plan; `None` for a whole-scope stage.
     _block: Option<u32>,
     _unknowns: Vec<f64>,
     _derivative: Vec<f64>,
-    _rates: Digest,
-    _weight: f64,
 }
 /// Integrated gross extents per compiled column. No public constructor.
 pub struct Extents {
     _layout: Digest,
-    _interval: Interval,
-    _forward: Vec<f64>,
-    _reverse: Vec<f64>,
-}
-/// Integrated change of nonmaterial memory, distinct from a time derivative. No public constructor.
-pub struct MemoryIncrement {
-    _layout: Digest,
-    _values: Vec<f64>,
+    _forward: Vec<Compensated>,
+    _reverse: Vec<Compensated>,
 }
 
-/// Builds one accepted interval's dense output from stage points (values and tangents).
-pub struct DenseOutputBuilder<'p> {
-    _body: &'p CompiledBody,
-    _interval: Interval,
-    _nodes: Vec<(u64, Vec<f64>, Vec<f64>)>,
-}
-impl DenseOutputBuilder<'_> {
-    pub fn node(&mut self, _point: &StagePoint<'_>) -> Result<(), EngineFault> {
-        todo!()
-    }
-    /// Refuses without a node at the ticket's end.
-    pub fn finish(self) -> Result<DenseSegment, EngineFault> {
-        todo!()
-    }
-}
-/// Fixed-degree polynomial over one accepted interval in a declared basis. Waveform samples on
-/// the output grid, inventory curves and the certificate's extrema bounds all read this form.
+/// One accepted interval of every row: today the chord between the base and the published values,
+/// degree 1, derived, so no core can publish a curve its stages did not make. Waveform samples on
+/// the output grid and inventory curves all read this form. The admission segment has no interval.
 pub struct DenseSegment {
-    _interval: Interval,
+    _interval: Option<Interval>,
     _basis: DenseBasis,
-    _coefficients: Vec<f64>,
+    _start: Vec<Compensated>,
+    _end: Vec<Compensated>,
 }
 impl DenseSegment {
-    pub fn interval(&self) -> &Interval {
+    pub fn interval(&self) -> Option<Interval> {
         todo!()
     }
     pub fn basis(&self) -> DenseBasis {
+        todo!()
+    }
+    /// One row at `at`; `None` outside the interval.
+    pub fn sample(&self, _row: RowId, _at: SimTime) -> Option<Compensated> {
         todo!()
     }
 }
@@ -373,54 +352,127 @@ pub struct EventWitness {
     _ordinal: u64,
 }
 
-/// Binds one attempt: base seal, exact interval start AND end, due input ids and run identity.
+/// Binds one attempt: its base, the identity, the exact interval, the due inputs, the frozen drives
+/// and the attempt number, all in its digest.
+#[derive(Clone)]
 pub struct StepTicket {
     _base: Digest,
     _interval: Interval,
-    _inputs: Digest,
-    _identity: Digest,
+    _due: Vec<InputId>,
+    _frame: DriveFrame,
+    _after_breakpoint: bool,
+    _attempt: u32,
+    _floor_ns: u64,
+    _budget: u32,
+    _digest: Digest,
 }
 impl StepTicket {
-    pub fn interval(&self) -> &Interval {
+    pub fn interval(&self) -> Interval {
         todo!()
     }
     pub fn length_ns(&self) -> u64 {
         todo!()
     }
+    /// How many refusals of this base came before this ticket.
+    pub fn attempt(&self) -> u32 {
+        todo!()
+    }
+    pub fn digest(&self) -> Digest {
+        todo!()
+    }
     /// A stage time inside this interval; an offset past the end is `BindingMismatch`.
-    pub fn at(&self, _offset_ns: u64) -> Result<StageTime, EngineFault> {
+    pub fn at(&self, _offset_ns: u64) -> Result<StageTime<'_>, EngineFault> {
         todo!()
     }
-    /// A smaller retry of the same base and inputs. An exhausted budget, or a retry that would go
-    /// below the resolution's minimum interval, is the diagnosed fault `NoAdmissibleStep`.
-    pub fn refuse(&self, _reason: NumericalRefusal) -> Result<Refused, EngineFault> {
+    /// `span_ns` as a fraction of this interval: an exact stage weight.
+    pub fn fraction(&self, _span_ns: u64) -> Ratio {
         todo!()
     }
-    /// True when this interval starts at a physical breakpoint (an input applied, or a guard fired
-    /// and changed mode). A core restarts its numerical caches there (method history, Jacobian,
-    /// predictor, step controller) and validation checks that the proposal's `MethodHistory` starts
-    /// at this instant. Physiological state and the cumulative ledger never restart (pulse 0006).
+    /// `1 / span` for a stage that spans `span_ns` of this interval. Zero is `BindingMismatch`.
+    pub fn shift(&self, _span_ns: u64) -> Result<Shift, EngineFault> {
+        todo!()
+    }
+    /// A refusal of this attempt, or the fault `NoAdmissibleStep` when its retry would go below the
+    /// floor or past the budget. One path, so nothing can accept excess error at the floor.
+    pub fn refuse(&self, _reason: NumericalRefusal) -> TrialFailure {
+        todo!()
+    }
+    /// A `BindingMismatch` naming this attempt.
+    pub fn mismatch(&self) -> EngineFault {
+        todo!()
+    }
+    /// Whether this is the ticket `problem` issues for its length and attempt.
+    pub fn binds(&self, _problem: &CoupledProblem<'_>) -> bool {
+        todo!()
+    }
+    /// True when this interval starts at a physical breakpoint (an input applied, a delivery ended,
+    /// or a guard fired and changed mode). A core restarts its numerical caches there (method
+    /// history, Jacobian, predictor, step controller) and `verify` checks that the proposal's
+    /// `MethodHistory` starts at this instant. Physiological state and the cumulative ledger never
+    /// restart (pulse 0006).
     pub fn after_breakpoint(&self) -> bool {
         todo!()
     }
 }
-pub struct RetryTicket {
+/// A candidate step. Owned, holding no problem, and proving nothing until `verify` runs on a problem
+/// the record built from its own fields.
+pub struct StepProposal {
     _ticket: StepTicket,
-    _budget_remaining: u32,
+    _layout: Digest,
+    _increment: Increment,
+    _algebraic: Vec<f64>,
+    _modes: ModeChanges,
+    _history: MethodHistory,
 }
-impl RetryTicket {
+impl StepProposal {
     pub fn ticket(&self) -> &StepTicket {
         todo!()
     }
+    /// Whether the core followed its declared method on this body. In order: the stage structure
+    /// (`MethodMismatch`), the replay of each witnessed point compared by bits (`MethodMismatch`),
+    /// the stage equations (`StageResidual`), the scheme's error estimate (`Accuracy`, or
+    /// `NoAdmissibleStep` at the floor), the restart after a breakpoint (`MethodMismatch`) and the
+    /// continuation schema (`BindingMismatch`), then the published state, evaluated once: algebraic
+    /// residuals (`StageResidual`), non-finite values (`TrialDomain`) and validity excursions.
+    pub fn verify(self, _problem: &CoupledProblem<'_>) -> Result<VerifiedStep, TrialFailure> {
+        todo!()
+    }
 }
-/// A sealed candidate transaction, still carrying the problem it was built against so that
-/// validation can recheck closures with the same compiled body and parameter values.
-pub struct StepProposal<'p> {
-    _problem: &'p CoupledProblem<'p>,
+/// A step that followed its declared method. Everything in it derives from the record's own
+/// problem; the record still decides whether it may publish.
+pub struct VerifiedStep {
     _ticket: StepTicket,
-    _end: Candidate,
-    _increment: Increment,
-    _modes: ModeChanges,
-    _history: MethodHistory,
+    _state: Candidate,
+    _continuation: MethodHistory,
     _dense: DenseSegment,
+    _forward: Vec<Compensated>,
+    _reverse: Vec<Compensated>,
+    _excursions: Vec<ValidityExcursion>,
+}
+impl VerifiedStep {
+    pub fn ticket(&self) -> &StepTicket {
+        todo!()
+    }
+    /// The published value of one row.
+    pub fn value(&self, _row: RowId) -> Compensated {
+        todo!()
+    }
+    /// Each column's gross forward and reverse extent, in compiled column order.
+    pub fn gross(&self) -> impl Iterator<Item = (Compensated, Compensated)> + '_ {
+        core::iter::empty()
+    }
+    /// The inputs this step applies, each once, in `(time, id)` order.
+    pub fn applied(&self) -> &[InputId] {
+        todo!()
+    }
+    pub fn into_parts(self) -> VerifiedParts {
+        todo!()
+    }
+}
+/// What the record takes from a verified step when it builds the next image.
+pub struct VerifiedParts {
+    pub state: Candidate,
+    pub continuation: MethodHistory,
+    pub dense: DenseSegment,
+    pub excursions: Vec<ValidityExcursion>,
 }

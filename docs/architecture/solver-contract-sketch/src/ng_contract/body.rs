@@ -37,24 +37,43 @@ impl CompiledBody {
     pub fn origin(&self, _row: RowId) -> LawOrigin {
         todo!()
     }
-    /// Every place a trial can be refused for leaving a set: each slot's `Admissible` set and each
-    /// operator precondition (a logarithm's positive argument), with its law. A precondition can
-    /// still encode a threshold; listing them makes that reviewable, and `NumericalHealth` counts
-    /// refusals per source.
+    /// Every place a trial can be refused for leaving a set: each row's `Admissible` set and each
+    /// operator's domain, with its law. A precondition can still encode a threshold; listing them
+    /// makes that reviewable, and `NumericalHealth` counts refusals per source.
     pub fn refusal_sources(&self) -> &[RefusalSource] {
         todo!()
     }
+    /// The source that names one row's admissible set.
+    pub fn row_source(&self, _row: RowId) -> SourceId {
+        todo!()
+    }
 }
-pub struct RefusalSource {
-    _row: RowId,
-    _origin: LawOrigin,
-    _kind: RefusalKind,
+/// A position in `CompiledBody::refusal_sources`.
+#[derive(Clone, Copy)]
+pub struct SourceId {
+    _index: usize,
 }
-pub enum RefusalKind {
-    /// A slot's closed `Admissible` set, or a pool's nonnegative amount.
-    Slot,
-    /// An operator's own domain, such as a logarithm's positive argument.
-    OperatorPrecondition,
+pub enum RefusalSource {
+    /// A row's admissible set: an amount is nonnegative, and a slot takes its declared set.
+    Row { row: RowId },
+    /// A `divide` whose divisor must stay positive, so a step cannot jump a pole unseen.
+    Divisor { law: LawOrigin },
+    /// A `ln` whose argument must stay positive.
+    LogarithmArgument { law: LawOrigin },
+    /// An evaluation at a finite point that came back non-finite, such as an `exp` overflow.
+    NonFinite { law: LawOrigin },
+}
+/// An accepted value outside a law's `ValidityRange`: reported on the step, never refused. Abnormal
+/// physiology publishes; only an `Admissible` set can refuse a trial.
+pub struct ValidityExcursion {
+    _law: LawOrigin,
+    _at: SimTime,
+    _side: ExcursionSide,
+    _value: Compensated,
+}
+pub enum ExcursionSide {
+    Below,
+    Above,
 }
 /// The owning card and the physical process of one compiled row.
 pub struct LawOrigin {
@@ -75,6 +94,11 @@ impl BoundParameters {
     }
 }
 
+/// Stable column identity in the compiled incidence.
+#[derive(Clone, Copy)]
+pub struct ColumnId {
+    _index: u32,
+}
 /// Stable row identity in the compiled equation layout.
 #[derive(Clone, Copy)]
 pub struct RowId {
@@ -92,14 +116,15 @@ pub struct UnknownId {
     _index: u32,
 }
 impl UnknownId {
-    /// The slot this unknown occupies in `SolveWorkspace::unknowns()`, so a core can read sparse
+    /// The slot this unknown occupies in the solve workspace, so a core can read sparse
     /// columns and scatter a block's solution. Read-only: only the compiler makes unknown ids.
     pub fn index(self) -> usize {
         todo!()
     }
 }
 
-/// A full candidate state in one compiled layout: amounts, memory, algebraic values and modes.
+/// A full state in one compiled layout: amounts, memory, algebraic values and modes. No public
+/// constructor: admission makes the first and `verify` every other.
 pub struct Candidate {
     _layout: Digest,
     /// Base plus paired extents, kept compensated (see `Compensated`).
@@ -108,22 +133,41 @@ pub struct Candidate {
     _algebraic: Vec<f64>,
     _modes: Vec<u32>,
 }
-/// Immutable snapshot of the accepted image; no setter, no organ object.
+impl Candidate {
+    pub fn digest(&self) -> Digest {
+        todo!()
+    }
+}
+/// What a problem reads of the accepted image; no setter, no organ object. The record builds one per
+/// attempt, and a core reads the head's time, values and continuation here and nothing of the
+/// timeline.
 #[derive(Clone, Copy)]
 pub struct AcceptedStateView<'a> {
     _time: SimTime,
     _state: &'a Candidate,
-    _continuation: &'a SolverContinuation,
+    _history: &'a MethodHistory,
     _dense: &'a DenseSegment,
+    _pending: &'a PendingInputs,
 }
 impl<'a> AcceptedStateView<'a> {
+    pub fn new(
+        _time: SimTime,
+        _state: &'a Candidate,
+        _history: &'a MethodHistory,
+        _dense: &'a DenseSegment,
+        _pending: &'a PendingInputs,
+    ) -> Self {
+        todo!()
+    }
     pub fn time(&self) -> SimTime {
         todo!()
     }
-    pub fn state(&self) -> &'a Candidate {
+    /// The accepted value of one row, compensated for an amount and exact for memory and algebraic
+    /// values.
+    pub fn value(&self, _row: RowId) -> Compensated {
         todo!()
     }
-    pub fn continuation(&self) -> &'a SolverContinuation {
+    pub fn method_history(&self) -> &'a MethodHistory {
         todo!()
     }
     /// The last accepted dense segment, so consecutive segments join and observers sample it.
@@ -132,38 +176,26 @@ impl<'a> AcceptedStateView<'a> {
     }
 }
 
-/// Solver-owned numerical memory, tagged by schema; contains no authoritative physiology.
+/// What a solver core needs to continue exactly, tagged by its schema, advanced only through
+/// accepted images. It contains no authoritative physiology. Integers only: a float travels as its
+/// `to_bits`.
 pub struct MethodHistory {
     _schema: Digest,
     _started_at: SimTime,
-    _scalars: Vec<f64>,
-    _integer_counters: Vec<u64>,
+    _counters: Vec<u64>,
 }
 impl MethodHistory {
     /// `started_at` is where this history began; after a breakpoint it must be that breakpoint.
-    pub fn new(_schema: Digest, _started_at: SimTime, _scalars: Vec<f64>, _integer_counters: Vec<u64>) -> Self {
+    pub fn new(_schema: Digest, _started_at: SimTime, _counters: Vec<u64>) -> Self {
         todo!()
     }
-    pub fn scalars(&self) -> &[f64] {
+    pub fn schema(&self) -> Digest {
         todo!()
     }
-    pub fn integer_counters(&self) -> &[u64] {
+    pub fn started_at(&self) -> SimTime {
         todo!()
     }
-}
-/// Each law stream's event ordinal, kept once, in the accepted image (never in the solver's
-/// continuation): a stream's value is a pure function of seed, stream key and ordinal.
-pub struct StreamPositions {
-    _ordinals: Vec<(Digest, u64)>,
-}
-/// Everything a solver needs to continue bit for bit; advanced only through accepted images.
-pub struct SolverContinuation {
-    _schema: Digest,
-    _method: MethodHistory,
-    _event_cursors: Vec<u64>,
-}
-impl SolverContinuation {
-    pub fn method_history(&self) -> &MethodHistory {
+    pub fn counters(&self) -> &[u64] {
         todo!()
     }
 }

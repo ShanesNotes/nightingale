@@ -215,9 +215,8 @@
 //! /// column's index is its slot in the workspace.
 //! fn newton_update(jacobian: SparseView<'_>, residual: &[f64], unknowns: &mut [f64]) {
 //!     let offsets = jacobian.row_offsets();
-//!     for (r, row) in jacobian.rows().iter().enumerate() {
-//!         let _equation = row.index();
-//!         let entries = offsets[r] as usize..offsets[r + 1] as usize;
+//!     for r in 0..residual.len() {
+//!         let entries = offsets[r]..offsets[r + 1];
 //!         let _pivot = (residual[r], &jacobian.values()[entries.clone()]);
 //!         for column in &jacobian.columns()[entries] {
 //!             let _slot: &mut f64 = &mut unknowns[column.index()];
@@ -232,7 +231,7 @@
 //!         let residual = system.evaluate(&workspace)?;
 //!         let jacobian = system.linearize(&workspace)?;
 //!         newton_update(jacobian.view(), residual.residuals(), workspace.unknowns_mut());
-//!         system.admit(workspace, MethodHistory::new(self.policy, SimTime::from_ns(0), vec![], vec![]))
+//!         system.admit(workspace, MethodHistory::new(self.policy, SimTime::from_ns(0), vec![]))
 //!     }
 //! }
 //! fn admit<'m>(body: &'m CompiledBody, core: &'m Core) -> Option<Session<'m, Running>> {
@@ -249,99 +248,101 @@
 //!     let boundary = morning(Digest::of_canonical(b"fixture meal schema")).ok()?;
 //!     let request = InitializationRequest::new(InitializationGoal::ConsistentInstant,
 //!         InitializationBudget::new(50, 0), InitialStateGuess::PacketValues, SimTime::from_ns(0));
-//!     let system = body.initialization(parameters, &boundary, request).ok()?;
+//!     let system = body.initialization(parameters, boundary, request).ok()?;
 //!     let origin = core.initialize(system).ok()?;
 //!     let _how = origin.provenance();
 //!     let identity = RunIdentity::new(body.model_hash(), origin.packet_hash(),
 //!         Seed::new([1, 2, 3, 4]), core.resolution());
-//!     Session::admit(body, core, origin, identity, boundary).ok()
+//!     Session::admit(body, core, origin, identity).ok()
 //! }
 //!
 //! impl CoupledSolver for Core {
 //!     fn resolution(&self) -> DeclaredResolution {
-//!         let backward_euler = StageScheme::tableau(vec![1.0], vec![1.0], vec![1.0], vec![]).unwrap_or_else(|_| panic!("tableau"));
-//!         let scales = ErrorScales::uniform(1e-9, 1e-6).unwrap_or_else(|_| panic!("scales"));
-//!         DeclaredResolution::new(self.policy, 1_000, ArithmeticProfile::contract_v1(),
-//!             StageScheme::step_doubled(backward_euler), scales)
+//!         let scale = |value| Measure::<Dimensionless>::new(value).unwrap_or_else(|_| panic!("a scale"));
+//!         let scales = ErrorScales::uniform(scale(1e-9), scale(1e-6)).unwrap_or_else(|_| panic!("scales"));
+//!         DeclaredResolution::new(self.policy, 1_000, 12, ArithmeticProfile::contract_v1(),
+//!             StageScheme::backward_euler_doubled(), scales)
 //!     }
-//!     fn next_step(&self, problem: &CoupledProblem<'_>, start: AcceptedStateView<'_>)
-//!         -> Result<StepTicket, EngineFault> {
-//!         let preferred = start.continuation().method_history().integer_counters().first().copied();
-//!         let wanted = start.time().plus_ns(preferred.unwrap_or(1_000_000)).ok_or_else(|| {
-//!             EngineFault::new(EngineFaultKind::NoAdmissibleStep, start.time(), 0, vec![])
-//!         })?;
+//!     fn next_step(&self, problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+//!         let preferred = problem.accepted().method_history().counters().first().copied();
 //!         // The contract clips this at the next breakpoint, which the core never sees.
-//!         problem.ticket(start, wanted)
+//!         problem.ticket(preferred.unwrap_or(1_000_000))
 //!     }
-//!     fn solve<'p>(&self, problem: &'p CoupledProblem<'_>, start: AcceptedStateView<'_>,
-//!         ticket: &StepTicket) -> Result<StepProposal<'p>, TrialFailure> {
+//!     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket)
+//!         -> Result<StepProposal, TrialFailure> {
 //!         // A one-step core keeps no method history across a breakpoint; it restarts step control.
 //!         let _restart = ticket.after_breakpoint();
-//!         newton_stage(self.policy, problem, start, ticket)
+//!         newton_stage(self.policy, problem, ticket)
 //!     }
 //! }
 //!
-//! // 4. One Newton-style stage: backward Euler over the whole ticket (evaluate + linearize).
-//! fn newton_stage<'p>(policy: Digest, problem: &'p CoupledProblem<'_>, start: AcceptedStateView<'_>,
-//!     ticket: &StepTicket) -> Result<StepProposal<'p>, TrialFailure> {
-//!     let shift = Shift::new(1e9 / ticket.length_ns() as f64)?;
-//!     let mut workspace = problem.workspace(start);
-//!     let point = workspace.point(ticket.at(ticket.length_ns())?)?;
-//!     let residual = problem.evaluate(Scope::Whole, &point)?;
-//!     let jacobian = problem.linearize(Scope::Whole, &point, shift)?;
-//!     newton_update(jacobian.view(), residual.residuals(), workspace.unknowns_mut());
-//!     let _tangent: &mut [f64] = workspace.derivative_mut(); // y' = (y - y0) / h
-//!     let point = workspace.point(ticket.at(ticket.length_ns())?)?;
-//!     let converged = problem.evaluate(Scope::Whole, &point)?;
-//!     // 5. Quadrature: one evaluation at weight 1 is backward Euler's extents and memory increment.
-//!     let mut quadrature = problem.quadrature(ticket, EvaluationPlan::Coupled)?;
-//!     quadrature.add(&converged, StageWeight::new(1.0)?)?;
-//!     let mut dense = problem.dense_output(start, ticket);
-//!     dense.node(&point)?;
-//!     let end = workspace.candidate()?;
-//!     let modes = problem.transitions(start.state(), &end, ticket)?;
-//!     // 6. Proposal: amounts are rebuilt from the paired extents, not taken from `end`.
-//!     problem.proposal(ticket, end, quadrature.finish()?, modes,
-//!         MethodHistory::new(policy, ticket.interval().start(), vec![], vec![]), dense.finish()?)
+//! // 4. Newton-style stages: backward Euler over the whole ticket and over its two parts
+//! // (evaluate + linearize).
+//! fn newton_stage(policy: Digest, problem: &CoupledProblem<'_>, ticket: &StepTicket)
+//!     -> Result<StepProposal, TrialFailure> {
+//!     let (length, part) = (ticket.length_ns(), ticket.length_ns() / 2);
+//!     let stage = |workspace: &mut SolveWorkspace, offset: u64, span: u64|
+//!         -> Result<StageEvaluation, TrialFailure> {
+//!         let shift = ticket.shift(span)?;
+//!         let point = workspace.point(ticket.at(offset)?);
+//!         let residual = problem.evaluate(&point)?;
+//!         let jacobian = problem.linearize(&point, shift)?;
+//!         newton_update(jacobian.view(), residual.residuals(), workspace.unknowns_mut());
+//!         let _tangent: &mut [f64] = workspace.derivative_mut(); // y' = (y - y0) / h
+//!         problem.evaluate(&workspace.point(ticket.at(offset)?))
+//!     };
+//!     let whole = stage(&mut problem.workspace(), length, length)?;
+//!     let mut workspace = problem.workspace();
+//!     let first = stage(&mut workspace, part, part)?;
+//!     let second = stage(&mut workspace, length, length - part)?;
+//!     // 5. Quadrature: the whole stage reads the error at weight zero; its parts carry the increment.
+//!     let mut quadrature = problem.quadrature(ticket);
+//!     quadrature.add(&whole, Ratio::ZERO)?;
+//!     quadrature.add(&first, ticket.fraction(part))?;
+//!     quadrature.add(&second, ticket.fraction(length - part))?;
+//!     let modes = problem.transitions(&first, &second, ticket)?;
+//!     // 6. Proposal: amounts are rebuilt from the paired extents, not taken from the workspace.
+//!     Ok(problem.propose(ticket, quadrature.finish()?, &workspace, modes,
+//!         MethodHistory::new(policy, ticket.interval().start(), vec![])))
 //! }
 //!
 //! // 4b. One block stage: dependency blocks evaluated in two bins each (a beat core's shape).
-//! fn block_stage<'p>(policy: Digest, problem: &'p CoupledProblem<'_>, start: AcceptedStateView<'_>,
-//!     ticket: &StepTicket, plan: EvaluationPlan<'_>) -> Result<StepProposal<'p>, TrialFailure> {
-//!     let mut workspace = problem.workspace(start);
-//!     let mut quadrature = problem.quadrature(ticket, plan)?;
+//! fn block_stage(policy: Digest, problem: &CoupledProblem<'_>, ticket: &StepTicket,
+//!     plan: EvaluationPlan<'_>) -> Result<StepProposal, TrialFailure> {
+//!     let mut workspace = problem.workspace();
+//!     let mut quadrature = problem.quadrature_for(ticket, plan)?;
+//!     let half = ticket.fraction(ticket.length_ns() / 2);
+//!     let mut last = None;
 //!     for block in problem.blocks(plan)? {
 //!         let _structure = (block.rows(), block.rate_class().band());
-//!         let _why: Option<RowDiagnosis> = block.rows().first().map(|row| problem.diagnose(*row, 0.0));
 //!         // A block's local solution goes back to the workspace by each unknown's index.
 //!         let local = vec![0.0; block.unknowns().len()];
 //!         for (k, id) in block.unknowns().iter().enumerate() {
 //!             workspace.unknowns_mut()[id.index()] += local[k];
 //!         }
 //!         for bin_end in [ticket.length_ns() / 2, ticket.length_ns()] {
-//!             let point = workspace.point(ticket.at(bin_end)?)?;
-//!             let rates = problem.evaluate(Scope::Block(block), &point)?;
-//!             quadrature.add(&rates, StageWeight::new(0.5)?)?;
+//!             let point = workspace.point(ticket.at(bin_end)?);
+//!             let rates = problem.evaluate_block(block, &point)?;
+//!             quadrature.add(&rates, half)?;
+//!             last = Some(rates);
 //!         }
 //!     }
-//!     let mut dense = problem.dense_output(start, ticket);
-//!     dense.node(&workspace.point(ticket.at(ticket.length_ns())?)?)?;
-//!     let end = workspace.candidate()?;
-//!     let modes = problem.transitions(start.state(), &end, ticket)?;
-//!     problem.proposal(ticket, end, quadrature.finish()?, modes,
-//!         MethodHistory::new(policy, ticket.interval().start(), vec![], vec![]), dense.finish()?)
+//!     let first = problem.evaluate(&problem.workspace().point(ticket.at(0)?))?;
+//!     let modes = problem.transitions(&first, last.as_ref().unwrap_or(&first), ticket)?;
+//!     Ok(problem.propose(ticket, quadrature.finish()?, &workspace, modes,
+//!         MethodHistory::new(policy, ticket.interval().start(), vec![])))
 //! }
 //!
 //! // 7. Validate: immutable, returns the whole next image or a refusal. Only `step` publishes.
 //! fn dry_validate(session: &Session<'_, Running>, core: &Core) -> Option<NextImage> {
-//!     let problem = session.problem();
-//!     let start = session.record().accepted();
-//!     let ticket = core.next_step(&problem, start).ok()?;
-//!     let proposal = core.solve(&problem, start, &ticket).ok()?;
-//!     match session.record().validate(proposal) {
+//!     let record = session.record();
+//!     let problem = record.problem();
+//!     let ticket = core.next_step(&problem).ok()?;
+//!     let proposal = core.solve(&problem, &ticket).ok()?;
+//!     match record.validate(&ticket, proposal) {
 //!         Ok(next) => Some(next),
 //!         Err(TrialFailure::Refused(refused)) => {
-//!             let _smaller: &StepTicket = refused.retry().ticket();
+//!             let _smaller: StepTicket = problem.retry(&refused).ok()?;
 //!             None
 //!         }
 //!         Err(TrialFailure::EngineFault(_latches)) => None,
@@ -351,16 +352,19 @@
 //! // 8. Step: accept, refuse and retry smaller, or latch on a fault and recover on a new branch.
 //! fn advance<'m>(session: Session<'m, Running>, earlier: &Checkpoint)
 //!     -> Result<Session<'m, Running>, CheckpointError> {
-//!     match session.step() {
-//!         Step::Accepted(running, _receipt) => Ok(running),
-//!         Step::Refused(running, refused) => match running.retry(refused) {
-//!             Step::Accepted(running, _) | Step::Refused(running, _) => Ok(running),
-//!             Step::Faulted(stopped) => stopped.recover(earlier, BranchId::new(Digest::of_canonical(b"b2"))),
-//!         },
-//!         Step::Faulted(stopped) => {
-//!             let _report: FaultReport = stopped.export();
-//!             stopped.recover(earlier, BranchId::new(Digest::of_canonical(b"b1")))
-//!         }
+//!     let mut attempt = session.step();
+//!     loop {
+//!         attempt = match attempt {
+//!             Step::Accepted(running, _receipt) => return Ok(running),
+//!             Step::Refused(retrying) => {
+//!                 let _why = retrying.refused().reason();
+//!                 retrying.retry()
+//!             }
+//!             Step::Faulted(stopped) => {
+//!                 let _report: FaultReport = stopped.export();
+//!                 return stopped.recover(earlier, BranchId::new(Digest::of_canonical(b"b1")));
+//!             }
+//!         };
 //!     }
 //! }
 //!
@@ -389,24 +393,28 @@
 //! // 11. Certificate: one sealed view of one record, with the segment queries it needs.
 //! fn certify_run(session: &Session<'_, Running>, body: &CompiledBody) -> Option<Certificate> {
 //!     let view = session.record().conservation();
-//!     let _sealed: &HistorySeal = view.seal();
-//!     let tolerances = view.basis().combinations().iter()
-//!         .map(|combination| QuantityTolerance::new(combination.id(), 1e-9, 1e-9))
-//!         .collect::<Result<Vec<_>, _>>().ok()?;
+//!     let _sealed: HistorySeal = view.seal();
+//!     let limit = |value| Measure::<Water>::new(value).ok();
+//!     let mut quantities = Vec::new();
+//!     for combination in view.basis().combinations() {
+//!         let relative = Measure::new(1e-9).ok()?;
+//!         quantities.push(QuantityPolicy::new(combination.id(), limit(1e-9)?, relative, limit(1.0)?).ok()?);
+//!     }
 //!     let windows = Sliding24Hours::covering(48 * 3_600_000_000_000).ok()?;
-//!     let policy = CertificatePolicy::new(body.conserved_basis(), tolerances, ExpectedDrift::Zero, windows).ok()?;
+//!     let policy = CertificatePolicy::new(body.conserved_basis(), quantities, ExpectedDrift::Zero, windows).ok()?;
 //!     let first = view.basis().combinations().first()?.id();
 //!     let held = view.basis().coverage().held_routes();
-//!     for segment in view.segments(&view.span()) {
-//!         let _shape = (segment.interval().start(), segment.basis().family(), segment.basis().degree());
-//!         let _inventory = segment.inventory(first).coefficients();
-//!         let _exchange = (segment.inflow(first).start(), segment.outflow(first).coefficients());
+//!     for segment in view.segments() {
+//!         let piece = segment.interval();
+//!         let _shape = (piece.start(), segment.basis().family(), segment.basis().degree());
+//!         let _inventory = segment.inventory(first).on(piece);
+//!         let _exchange = (segment.inflow(first).on(piece), segment.outflow(first).on(piece));
 //!         for jump in segment.impulses() {
 //!             let _bolus = (jump.at(), jump.quantity(), jump.amount());
 //!         }
 //!         for route in held {
-//!             let _support = (route.name(), route.quantity(), segment.held_inflow(route.id()).start(),
-//!                 segment.held_outflow(route.id()).coefficients());
+//!             let _support = (route.name(), route.quantity(), segment.held_inflow(route.id()).on(piece),
+//!                 segment.held_outflow(route.id()).on(piece));
 //!         }
 //!     }
 //!     certify(&view, &policy).ok()
@@ -414,11 +422,12 @@
 //!
 //! // 12. Accuracy: the core on manufactured cases and against the contract's reference integrator.
 //! fn accuracy_gate(body: &CompiledBody, core: &Core) -> Option<AccuracyEvidence> {
-//!     let cases = vec![AccuracyCase::TwoReservoir, AccuracyCase::DrainAndRefill,
-//!         AccuracyCase::SliceReference { factor: 100 }];
+//!     let reference = ReferenceIntegrator::new(100_000);
+//!     let cases = vec![AccuracyCase::TwoReservoir(TwoReservoirs::stepped_inflow().ok()?),
+//!         AccuracyCase::DrainAndRefill, AccuracyCase::SliceReference { reference, factor: 100 }];
 //!     let _sources: &[RefusalSource] = body.refusal_sources();
-//!     let policy = AccuracyPolicy::new(cases, ReferenceIntegrator::new(100_000).ok()?, 1e-9, 1e-6).ok()?;
-//!     accuracy(body, core, core, &policy).ok()
+//!     let policy = AccuracyPolicy::new(cases, Measure::new(1e-9).ok()?, Measure::new(1e-6).ok()?, 1_000_000).ok()?;
+//!     accuracy(core, &policy).ok()
 //! }
 //!
 //! // 13. Observe through a lens compiled apart from the body: read-only, one revision at a time,

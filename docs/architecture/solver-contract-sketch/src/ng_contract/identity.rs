@@ -1,6 +1,6 @@
 //! Identity and time. Identity carries schema and version, never process addresses or `Debug`
 //! text. All physical and event boundaries are integer nanoseconds.
-use super::AdmissionError;
+use super::{AdmissionError, Dimensionless, Measure};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Digest {
@@ -38,10 +38,6 @@ pub type PacketSeed = DomainSeed<PacketDomain>;
 /// The seed in a run's identity. Only the run domain.
 pub type Seed = DomainSeed<RunDomain>;
 pub type ObservationSeed = DomainSeed<ObservationDomain>;
-/// Chained seal of one accepted revision: previous seal plus the digest of the published image.
-pub struct Seal {
-    _digest: Digest,
-}
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SimTime {
@@ -58,15 +54,24 @@ impl SimTime {
         todo!()
     }
 }
+/// `[start, end]`, with `start` before `end`.
+#[derive(Clone, Copy)]
 pub struct Interval {
     _start: SimTime,
     _end: SimTime,
 }
 impl Interval {
-    pub fn start(&self) -> SimTime {
+    /// `None` unless `start` is before `end`.
+    pub fn new(_start: SimTime, _end: SimTime) -> Option<Self> {
         todo!()
     }
-    pub fn end(&self) -> SimTime {
+    pub fn start(self) -> SimTime {
+        todo!()
+    }
+    pub fn end(self) -> SimTime {
+        todo!()
+    }
+    pub fn length_ns(self) -> u64 {
         todo!()
     }
 }
@@ -96,58 +101,84 @@ pub enum RateBand {
     Hours,
 }
 
-/// Algorithm, version, arithmetic profile, tolerances, event rules, partition policy and the
-/// minimum interval. Pace is not in it; a reduced-detail run declares a different resolution.
+/// Algorithm, version, arithmetic profile, tolerances, event rules, partition policy, the minimum
+/// interval and the retry budget. Pace is not in it; a reduced-detail run declares a different
+/// resolution.
 pub struct DeclaredResolution {
     _policy: Digest,
     _minimum_interval_ns: u64,
+    _retry_budget: u32,
     _arithmetic: ArithmeticProfile,
     _scheme: StageScheme,
     _scales: ErrorScales,
 }
 impl DeclaredResolution {
-    /// `minimum_interval_ns` is the floor: a refusal whose retry would go below it is the fault
-    /// `NoAdmissibleStep`, and validation refuses an estimated error above tolerance at the floor
-    /// as well, so a core cannot accept excess error there. A breakpoint may still end an interval
-    /// shorter than the floor. Session admission refuses a zero floor. The value is policy, chosen
-    /// per core before the arena. The scheme and scales are readable, not only a digest, because
-    /// `PatientRecord::validate` rechecks the proposal against them.
+    /// `policy` hashes everything else a core is configured by, such as its interval, so two
+    /// settings of one core never share an identity. `minimum_interval_ns` is the floor: a refusal
+    /// whose retry would go below it, or past `retry_budget`, is the fault `NoAdmissibleStep`, so a
+    /// core cannot accept excess error there. A breakpoint may still end an interval shorter than
+    /// the floor. Session admission refuses a zero floor. The value is policy, chosen per core
+    /// before the arena.
     pub fn new(
         _policy: Digest,
         _minimum_interval_ns: u64,
+        _retry_budget: u32,
         _arithmetic: ArithmeticProfile,
         _scheme: StageScheme,
         _scales: ErrorScales,
     ) -> Self {
         todo!()
     }
+    pub fn policy(&self) -> Digest {
+        todo!()
+    }
     pub fn minimum_interval_ns(&self) -> u64 {
         todo!()
     }
-    pub fn scheme(&self) -> &StageScheme {
+}
+/// An exact nonnegative fraction in lowest terms. Stage weights are ratios, so summing them to one
+/// is an integer equality with no float tolerance. Negative weights are outside the seam, because
+/// gross forward and reverse extents could not then be kept apart.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Ratio {
+    _numerator: u64,
+    _denominator: u64,
+}
+impl Ratio {
+    pub const ZERO: Self = Self {
+        _numerator: 0,
+        _denominator: 1,
+    };
+    pub const ONE: Self = Self {
+        _numerator: 1,
+        _denominator: 1,
+    };
+    /// Refuses a zero denominator.
+    pub fn new(_numerator: u64, _denominator: u64) -> Result<Self, AdmissionError> {
         todo!()
     }
 }
-/// How a core's stages make its increment: stage coefficients, nonnegative weights per column, and
-/// the embedded error estimate. A step-doubled scheme or backward-Euler substeps (a beat core's
-/// bins) are schemes too. Validation re-evaluates the witnessed stages, checks the stage equations
-/// and recomputes the error estimate from them.
+/// How a core's stages make its increment: one of a closed set over one private table, so no caller
+/// depends on a general tableau that only one case would test, and a later general form changes
+/// no caller. Validation re-evaluates the witnessed stages, checks the stage equations and
+/// recomputes the error estimate from them.
+#[derive(Clone, Copy)]
 pub struct StageScheme {
-    _coefficients: Vec<f64>,
-    _weights: Vec<f64>,
-    _nodes: Vec<f64>,
-    _error_weights: Vec<f64>,
-    _substeps: u32,
+    _method: u32,
 }
 impl StageScheme {
-    /// One implicit Runge-Kutta tableau (backward Euler is `[1], [1], [1]` with no embedded pair).
-    pub fn tableau(_coefficients: Vec<f64>, _weights: Vec<f64>, _nodes: Vec<f64>, _error_weights: Vec<f64>)
-        -> Result<Self, AdmissionError> {
+    /// One stage at the interval's start. It reads no estimate.
+    pub fn forward_euler() -> Self {
         todo!()
     }
-    /// The same tableau once over the interval and twice over its halves; the difference is the
-    /// error estimate (solver-A's step doubling).
-    pub fn step_doubled(_base: StageScheme) -> Self {
+    /// The start and the Euler-predicted end, at weight one half each. It reads no estimate.
+    pub fn heun() -> Self {
+        todo!()
+    }
+    /// The whole interval at weight zero, then its first `floor(h / 2)` and the rest, which carry
+    /// the increment. The estimate is the difference of the two ends (solver-A's step doubling). A
+    /// length of 1 ns has one whole stage and no estimate.
+    pub fn backward_euler_doubled() -> Self {
         todo!()
     }
     /// Backward-Euler substeps inside the interval, each with a predictor-corrector error estimate
@@ -156,13 +187,18 @@ impl StageScheme {
         todo!()
     }
 }
-/// Per-unknown absolute and relative scales for local error and residual norms.
+/// The absolute and relative scales a stage defect and an error estimate are normalized by.
+#[derive(Clone, Copy)]
 pub struct ErrorScales {
-    _absolute: Vec<f64>,
-    _relative: Vec<f64>,
+    _absolute: f64,
+    _relative: f64,
 }
 impl ErrorScales {
-    pub fn uniform(_absolute: f64, _relative: f64) -> Result<Self, AdmissionError> {
+    /// Refuses an absolute scale that is not positive and a relative scale below zero.
+    pub fn uniform(
+        _absolute: Measure<Dimensionless>,
+        _relative: Measure<Dimensionless>,
+    ) -> Result<Self, AdmissionError> {
         todo!()
     }
 }
@@ -171,6 +207,7 @@ impl ErrorScales {
 /// repository's clippy.toml), and the contract's own versioned transcendental routines. Replay is promised bitwise within one
 /// profile at any pace and chunking and from any checkpoint;
 /// across profiles or other targets it is not promised.
+#[derive(Clone, Copy)]
 pub struct ArithmeticProfile {
     _digest: Digest,
 }
@@ -193,6 +230,9 @@ impl RunIdentity {
         _seed: Seed,
         _resolution: DeclaredResolution,
     ) -> Self {
+        todo!()
+    }
+    pub fn digest(&self) -> Digest {
         todo!()
     }
 }

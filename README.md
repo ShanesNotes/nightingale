@@ -2,7 +2,7 @@
 
 Nightingale is a Rust simulation of one patient's body, for teaching. It does not inform the care of a real person. Pressures, flows, lab values and other readings are meant to be computed from conserved amounts (water, salts, gases, heat) and from physics, so illness, chance and treatment would later act on the same body. Numbers in this repository are synthetic. Clinical values may enter only in a reviewed packet, and none is here.
 
-<img src="docs/statecharts/engine.svg" alt="Engine lifecycle statechart: the map is checked, laws compile into a body, a packet binds, admission solves the start state, then each step is accepted whole or refused and retried, and an engine fault stops the run."><br>The chart shows the engine lifecycle the contract defines, and only the map check runs today. Its TLA+ model, which TLC checks, and the script that redraws it are in [docs/statecharts](docs/statecharts).
+<img src="docs/statecharts/engine.svg" alt="Engine lifecycle statechart: the map is checked, laws compile into a body, a packet binds, admission solves the start state, then each step is accepted whole or refused and retried, and an engine fault stops the run."><br>The chart shows the engine lifecycle the contract defines. The map check, the compiler, binding, a checked start and each step's accept, refuse, retry and fault run today on synthetic bodies. Solving a start state, recovery and death do not. Its TLA+ model, which TLC checks, and the script that redraws it are in [docs/statecharts](docs/statecharts).
 
 ## Why it matters
 
@@ -12,13 +12,13 @@ A monitor and a chart can both describe one patient and still disagree. The desi
 
 Rust 1.98.1, edition 2024, one Cargo workspace, `unsafe` code forbidden. Laws are data. One time step is meant to run in this order:
 
-1. `ng-contract` would compile anatomy and laws into one body.
-2. A solver, not a crate yet, would propose the next state and see only that body.
-3. `ng-record` would accept or refuse the whole step and keep the ledger.
+1. `ng-contract` compiles anatomy and laws into one body.
+2. A solver proposes the next state and sees only that body. The one core so far is a test reference in `ng-validate`, and the solver crate does not exist yet.
+3. `ng-record` accepts or refuses the whole step and keeps the ledger.
 4. `ng-observe` would read the accepted step and would not write.
-5. `ng-validate` would check conservation and compare solvers. It sits outside that path.
+5. `ng-validate` checks conservation and accuracy, and would compare solvers. It sits outside that path.
 
-The four crates under `crates/` compile. `ng-contract` holds the anatomy: it checks a map of the body's sites and gives it a hash. The other three are each only a comment naming their role. The type sketch they are meant to grow into is [solver-contract-sketch](docs/architecture/solver-contract-sketch), and its function bodies are `todo!()`. Heart and vessels, fluids, kidney, nerves, receptors and the solver are modules there, not workspace crates. Read [the requirements](docs/srs.md), [decision records](docs/adr), [the 13-system atlas](docs/atlas), [the glossary](GLOSSARY.md) and [the solver contract](docs/architecture/solver-contract.md). nightingale-pulse is a private reference implementation. This tree does not build or run against it.
+The four crates under `crates/` compile. `ng-contract` holds the anatomy, the language laws are declared in, the compiler and the solver interface. `ng-record` holds the accepted state, the step check and the ledger. `ng-validate` holds a synthetic two-reservoir body, a backward Euler reference core, the certificate and the accuracy gate. `ng-observe` is still only a comment naming its role. The type sketch they are meant to grow into is [solver-contract-sketch](docs/architecture/solver-contract-sketch), and its function bodies are `todo!()`. Heart and vessels, fluids, kidney, nerves, receptors and the solver are modules there, not workspace crates. Read [the requirements](docs/srs.md), [decision records](docs/adr), [the 13-system atlas](docs/atlas), [the glossary](GLOSSARY.md) and [the solver contract](docs/architecture/solver-contract.md). nightingale-pulse is a private reference implementation. This tree does not build or run against it.
 
 ## Build
 
@@ -33,8 +33,8 @@ cargo test --doc --locked --manifest-path docs/architecture/solver-contract-sket
 tools/verify
 ```
 
-There is no program to run. Workspace tests check the anatomy on synthetic maps. The sketch's doctests check the API shape, including forms that must fail to compile. The first command installs the pinned toolchain and, when git has no hook path yet, turns on this repo's pre-push check. `tools/verify` is the merge check.
+There is no program to run. Workspace tests run synthetic bodies through the compiler, the step check and the gates. The sketch's doctests check the API shape, including forms that must fail to compile. The first command installs the pinned toolchain and, when git has no hook path yet, turns on this repo's pre-push check. `tools/verify` is the merge check.
 
 ## What is in place
 
-Requirements, decision records, the atlas and the solver-contract sketch are written, and the sketch type-checks. The workspace crates compile and do not simulate a patient. Disease, treatment, a bedside monitor and learner scenarios are specified and not implemented.
+Requirements, decision records, the atlas and the solver-contract sketch are written, and the sketch type-checks. The workspace runs a manufactured two-reservoir body, and it does not simulate a patient. Disease, treatment, a bedside monitor and learner scenarios are specified and not implemented.

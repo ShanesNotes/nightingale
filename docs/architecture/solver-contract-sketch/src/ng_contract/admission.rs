@@ -37,6 +37,10 @@ impl InitializationRequest {
     ) -> Self {
         todo!()
     }
+    /// Consistent at the anchor moment from the packet's start values, with no calibration.
+    pub fn consistent_instant(_anchor_moment: SimTime) -> Self {
+        todo!()
+    }
 }
 impl CompiledBody {
     /// The square admission system: state unknowns plus calibrated parameters; consistency
@@ -44,7 +48,7 @@ impl CompiledBody {
     pub fn initialization<'m>(
         &'m self,
         _parameters: BoundParameters,
-        _boundary: &'m BoundaryPort,
+        _boundary: BoundaryPort,
         _request: InitializationRequest,
     ) -> Result<InitializationSystem<'m>, AdmissionError> {
         todo!()
@@ -53,7 +57,7 @@ impl CompiledBody {
 pub struct InitializationSystem<'m> {
     _body: &'m CompiledBody,
     _parameters: BoundParameters,
-    _boundary: &'m BoundaryPort,
+    _pending: PendingInputs,
     _request: InitializationRequest,
 }
 impl InitializationSystem<'_> {
@@ -77,18 +81,34 @@ impl InitializationSystem<'_> {
 pub struct InitialRevision {
     _state: Candidate,
     _parameters: BoundParameters,
-    _continuation: SolverContinuation,
-    /// A constant segment at the anchor instant, so the first step's segment joins it.
+    _continuation: MethodHistory,
+    /// No interval yet: the first step's chord starts from the admitted state.
     _dense: DenseSegment,
+    _pending: PendingInputs,
     _provenance: InitializationProvenance,
 }
 impl InitialRevision {
     pub fn packet_hash(&self) -> PacketHash {
         todo!()
     }
+    pub fn model_hash(&self) -> ModelHash {
+        todo!()
+    }
+    /// What the record takes on at admission.
+    pub fn into_parts(self) -> InitialParts {
+        todo!()
+    }
     pub fn provenance(&self) -> &InitializationProvenance {
         todo!()
     }
+}
+pub struct InitialParts {
+    pub time: SimTime,
+    pub state: Candidate,
+    pub continuation: MethodHistory,
+    pub dense: DenseSegment,
+    pub pending: PendingInputs,
+    pub parameters: BoundParameters,
 }
 pub struct InitializationProvenance {
     _values: Vec<(ParameterKey, ValueProvenance)>,

@@ -6,31 +6,46 @@
 use crate::ng_contract::*;
 use crate::ng_record::{ConservationView, FaultReport, HistorySeal, PatientRecord, Running, Session};
 
-pub struct QuantityTolerance {
+/// One combination's limits. `absolute + relative * gross exchange in the window` bounds closure, so
+/// a tiny exchange needs a tiny residual. `drift` is 1.96 times the combination's within-subject
+/// variation from the healthy-range set, or the closure floor for charge (record 0004); a fixture
+/// states a synthetic limit in its place.
+pub struct QuantityPolicy {
     _quantity: QuantityId,
-    _absolute: f64,
-    _relative: f64,
+    _absolute: Compensated,
+    _relative: Measure<Dimensionless>,
+    _drift: Compensated,
 }
-impl QuantityTolerance {
-    pub fn new(_quantity: QuantityId, _absolute: f64, _relative: f64) -> Result<Self, AdmissionError> {
+impl QuantityPolicy {
+    /// Refuses a dimension that is not what the combination balances.
+    pub fn new<U>(
+        _quantity: QuantityId,
+        _absolute: Measure<U>,
+        _relative: Measure<Dimensionless>,
+        _drift: Measure<U>,
+    ) -> Result<Self, AdmissionError> {
         todo!()
     }
 }
-/// Tolerance per conserved combination is data, fixed at admission against one basis.
+/// Limits per conserved combination are data, fixed at admission against one basis.
 pub struct CertificatePolicy {
     _basis: Digest,
-    _tolerances: Vec<QuantityTolerance>,
+    _digest: Digest,
+    _quantities: Vec<QuantityPolicy>,
     _expected: ExpectedDrift,
     _windows: Sliding24Hours,
 }
 impl CertificatePolicy {
-    /// Refuses unless every combination of the basis has exactly one tolerance.
+    /// Refuses unless every combination of the basis has exactly one entry, in basis order.
     pub fn new(
         _basis: &ConservedBasis,
-        _tolerances: Vec<QuantityTolerance>,
+        _quantities: Vec<QuantityPolicy>,
         _expected: ExpectedDrift,
         _windows: Sliding24Hours,
     ) -> Result<Self, AdmissionError> {
+        todo!()
+    }
+    pub fn digest(&self) -> Digest {
         todo!()
     }
 }
@@ -49,6 +64,7 @@ pub struct Sliding24Hours {
     _coverage_ns: u64,
 }
 impl Sliding24Hours {
+    /// Refuses a coverage that does not exceed one window, which could slide nowhere.
     pub fn covering(_coverage_ns: u64) -> Result<Self, AdmissionError> {
         todo!()
     }
@@ -56,16 +72,39 @@ impl Sliding24Hours {
 pub struct Certificate {
     _seal: HistorySeal,
     _basis: Digest,
-    _windows: Vec<WindowResult>,
-}
-pub struct WindowResult {
-    _from: SimTime,
-    _to: SimTime,
-    _closure: Vec<f64>,
-    _drift: Vec<f64>,
-    /// Gross inflow and outflow on each held route in this window, from the route's own curves
+    _policy: Digest,
+    _results: Vec<QuantityResult>,
+    _pieces: u64,
+    /// Gross inflow and outflow on each held route per window, from the route's own curves
     /// (`HistorySegment::held_inflow`, `held_outflow`), in `CoverageManifest::held_routes` order.
     _held_support: Vec<(HeldRouteId, f64, f64)>,
+}
+impl Certificate {
+    pub fn seal(&self) -> HistorySeal {
+        todo!()
+    }
+    pub fn basis(&self) -> Digest {
+        todo!()
+    }
+    pub fn policy(&self) -> Digest {
+        todo!()
+    }
+    pub fn results(&self) -> &[QuantityResult] {
+        todo!()
+    }
+    /// How many stretches of window starts the walk covered, so a run that checked nothing shows zero.
+    pub fn pieces(&self) -> u64 {
+        todo!()
+    }
+}
+/// The worst window of one combination, named by instant. Every window was checked; keeping each
+/// would add rows and no fact.
+pub struct QuantityResult {
+    _quantity: QuantityId,
+    _worst_closure: Compensated,
+    _closure_window: Interval,
+    _worst_drift: Compensated,
+    _drift_window: Interval,
 }
 pub enum CertificateCheck {
     /// inventory change minus net boundary exchange
@@ -77,23 +116,33 @@ pub enum CertificateCheck {
 }
 pub struct CertificateFailure {
     _check: CertificateCheck,
-    _quantity: QuantityId,
-    _window: Interval,
-    _residual: f64,
+    _quantity: Option<QuantityId>,
+    _window: Option<Interval>,
+    _residual: Compensated,
 }
 /// Pure by construction of its inputs: one sealed history view and policy data. Window starts
 /// include every accepted segment boundary and its 24 h shift; inside a segment the Bernstein
-/// coefficients bound interior extrema of the closure and drift differences.
+/// coefficients bound interior extrema of the closure and drift differences. Closure failures win
+/// over drift, so a `Drift` failure says the ledger closed everywhere and the body still moved.
 pub fn certify(_view: &ConservationView<'_>, _policy: &CertificatePolicy) -> Result<Certificate, CertificateFailure> {
     todo!()
 }
 
+/// Two reservoirs joined by one conductance, with an exterior inflow that steps at breakpoints,
+/// declared through the public API with obviously synthetic numbers. Its closed form is known.
+pub struct TwoReservoirs {
+    _body: CompiledBody,
+}
+impl TwoReservoirs {
+    pub fn stepped_inflow() -> Result<Self, AdmissionError> {
+        todo!()
+    }
+}
 /// The manufactured cases every core runs besides the slice. Each is synthetic and has a closed
 /// form or a refined reference; none carries a physiological value.
 pub enum AccuracyCase {
-    /// Two compartments joined by one conductance, with an exterior inflow that steps at a
-    /// breakpoint. The closed form is known, so a step that conserves but diverges fails here.
-    TwoReservoir,
+    /// A step that conserves but diverges fails here.
+    TwoReservoir(TwoReservoirs),
     /// An amount drained toward zero and refilled. The core keeps publishing until the admissible
     /// bound, refuses only there, and never refuses or faults on a validity range.
     DrainAndRefill,
@@ -110,54 +159,91 @@ pub enum AccuracyCase {
     /// which give the reference's own error and the core's observed order. The windows cover
     /// admission and the first posture change and meal, sleep onset, and the second day's waking.
     /// Never against the core itself: a lagged or biased core converges to its own wrong limit.
-    SliceReference { factor: u32 },
+    SliceReference { reference: ReferenceIntegrator, factor: u32 },
 }
-/// The contract's slow reference: fully coupled backward Euler with Newton to convergence on the
-/// compiled body, at a fixed small interval. It serves the accuracy gate and split measurement only
-/// and is never scored.
+/// The contract's slow reference: fully coupled backward Euler, step doubled, with Newton to
+/// convergence on the compiled body, on the public seam and nothing else. It serves the accuracy
+/// gate and split measurement only and is never scored.
 pub struct ReferenceIntegrator {
     _interval_ns: u64,
+    _minimum_interval_ns: u64,
+    _scales: ErrorScales,
 }
 impl ReferenceIntegrator {
-    pub fn new(_interval_ns: u64) -> Result<Self, AdmissionError> {
+    pub fn new(_interval_ns: u64) -> Self {
+        todo!()
+    }
+    /// Tighter or looser scales, which make the estimate refuse sooner or later.
+    pub fn with_scales(self, _scales: ErrorScales) -> Self {
+        todo!()
+    }
+    pub fn with_floor(self, _minimum_interval_ns: u64) -> Self {
+        todo!()
+    }
+}
+impl CoupledSolver for ReferenceIntegrator {
+    fn resolution(&self) -> DeclaredResolution {
+        todo!()
+    }
+    fn next_step(&self, _problem: &CoupledProblem<'_>) -> Result<StepTicket, EngineFault> {
+        todo!()
+    }
+    fn solve(&self, _problem: &CoupledProblem<'_>, _ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         todo!()
     }
 }
 /// Error bounds per case. The values are policy: model defaults set before the arena and reported
-/// with every result.
+/// with every result. `absolute + relative * exact` bounds the error at each compared instant, and
+/// `grid_ns` spaces the instants compared inside a segment.
 pub struct AccuracyPolicy {
     _cases: Vec<AccuracyCase>,
-    _reference: ReferenceIntegrator,
-    _absolute: f64,
-    _relative: f64,
+    _absolute: Compensated,
+    _relative: Measure<Dimensionless>,
+    _grid_ns: u64,
 }
 impl AccuracyPolicy {
+    /// Refuses a zero grid and no case.
     pub fn new(
         _cases: Vec<AccuracyCase>,
-        _reference: ReferenceIntegrator,
-        _absolute: f64,
-        _relative: f64,
+        _absolute: Measure<Water>,
+        _relative: Measure<Dimensionless>,
+        _grid_ns: u64,
     ) -> Result<Self, AdmissionError> {
         todo!()
     }
 }
+/// The worst error per case. Accepted values only: a trial state is never read.
 pub struct AccuracyEvidence {
-    _errors: Vec<f64>,
-    _observed_order: Vec<f64>,
+    _worst: Vec<Compensated>,
 }
-pub struct AccuracyFailure {
-    _case: AccuracyCase,
-    _at: SimTime,
-    _error: f64,
+impl AccuracyEvidence {
+    pub fn worst(&self) -> &[Compensated] {
+        todo!()
+    }
 }
-/// Runs each case on its own manufactured body (the slice case on `slice`) with the same core,
-/// and compares accepted dense output, never trial states, with the closed form or the refined run.
-pub fn accuracy(
-    _slice: &CompiledBody,
-    _solver: &dyn CoupledSolver,
-    _initializer: &dyn Initializer,
-    _policy: &AccuracyPolicy,
-) -> Result<AccuracyEvidence, AccuracyFailure> {
+pub enum AccuracyFailure {
+    /// The first compared instant above the policy, in time order.
+    Exceeded { case: usize, at: SimTime, error: Compensated },
+    /// The core could not finish the case. A must-fail core that reaches this has not failed on
+    /// accuracy.
+    Faulted(EngineFault),
+    Admission(InitializationFailure),
+    /// Adjacent refinements' errors are outside the band.
+    Order { case: usize, refinement: usize },
+}
+/// Runs each case with the same core. After every accepted step it compares the accepted dense
+/// segment, never a trial state, with the closed form or the refined run: amounts, exchanges and
+/// the gross inflow, at each grid instant and each segment's end.
+pub fn accuracy(_solver: &dyn CoupledSolver, _policy: &AccuracyPolicy) -> Result<AccuracyEvidence, AccuracyFailure> {
+    todo!()
+}
+/// The ratio test for a core's observed order: for a refinement by two and order `p`, each error
+/// over the next must lie in `[low, high]` around `2^p`. A ratio states the order with no logarithm.
+pub fn observed_order(
+    _ladder: [&AccuracyEvidence; 3],
+    _low: Measure<Dimensionless>,
+    _high: Measure<Dimensionless>,
+) -> Result<(), AccuracyFailure> {
     todo!()
 }
 
@@ -251,8 +337,8 @@ pub struct ArenaRun<'m> {
     _session: Session<'m, Running>,
     _evidence: RunEvidence,
 }
-impl ArenaRun<'_> {
-    pub fn record(&self) -> &PatientRecord {
+impl<'m> ArenaRun<'m> {
+    pub fn record(&self) -> &PatientRecord<'m> {
         todo!()
     }
     pub fn into_evidence(self) -> RunEvidence {

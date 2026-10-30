@@ -22,14 +22,15 @@
 | 250 | **r1.** Give a refusal domain bounds (a reference range) | E0599 | E0599 no associated function `new` for `Admissible` | line 274: closed set on a slot, `ValidityRange` reports |
 | 259 | **r1.** Put a sign constraint on a computed expression, `pressure − reference` (judge probe P13) | E0061 | E0061 this method takes 3 arguments but 4 arguments were supplied (`Kernel::finish`) | line 274 |
 | 291 | **r1.** Hold a card without declaring what it supplies | E0061 | E0061 this method takes 1 argument but 0 arguments were supplied (`Assembly::hold`) | line 298 |
-| 309 | **r1.** Book extents as one sampled rate times the step | E0451 | E0451 fields `_layout`, `_interval`, `_forward` and `_reverse` of `Extents` are private | line 317: `Quadrature::finish` |
+| 309 | **r1.** Book extents as one sampled rate times the step | E0451 | E0451 fields `_layout`, `_forward` and `_reverse` of `Extents` are private | line 317: `Quadrature::finish` |
 | 327 | **r1.** Write a reaction from raw stoichiometry | E0451 | E0451 fields `_stoichiometry`, `_brand` and `_owner` of `BalancedReaction` are private | line 335: `ReceptorScope::parts` |
 | 344 | **r1.** Call host math on an expression | E0599 | E0599 no method `value` on `Expr` | line 351: `Kernel::exp` |
 | 360 | **nightingale-pulse#301.** A renal guard fires a CV mode transition | E0308 | E0308 expected `ModeTransition<'_, Renal>`, found `ModeTransition<'_, Cardiovascular>` | line 368: `Guard::new` with the owner's own transition |
 | 378 | **Fold.** A capillary-bed law reads a junction's entry | E0308 | E0308 expected `CapillaryBed`, found `Junction` (`PureKernel<'b, Fluids, Dimensionless, CapillaryBed>`) | line 389: `Kernel::at_site` on the bed's own port |
 | 401 | **Fold.** A set point used as the variable it guards | E0308 | E0308 expected `Expr<'_, '_, Nervous, Pressure>`, found `Expr<'_, '_, Nervous, Reference<Pressure>>` | line 410: `Kernel::deviation` |
 | 421 | **Fold.** Volume times volume named a pressure | E0277 | E0277 `SameDimension<_>` is not implemented for `Product<Volume, Volume>` | line 430: `Product<Elastance, Volume>` as `Pressure` |
-| 441 | **Fold.** A core reads the boundary timeline | E0599 | E0599 no method `boundary` on `&CoupledProblem<'_>` | line 448: `CoupledProblem::ticket(start, intrinsic_end)` |
+| 441 | **Fold.** A core reads the boundary timeline | E0599 | E0599 no method `boundary` on `&CoupledProblem<'_>` | line 448: `CoupledProblem::ticket(intrinsic_span_ns)` |
 | 457 | **Fold.** The solver draws chance (`threshold`) | E0599 | E0599 no method `threshold` on `&CoupledProblem<'_>` | line 462: `Kernel::draw` on the owner's stream |
 | 471 | **Fold.** An observer draws error from the run seed | E0308 | E0308 expected `DomainSeed<ObservationDomain>`, found `DomainSeed<RunDomain>` | line 476: `ObservationSeed` |
 | 482 | **Fold.** A guard fires on a set point | E0277 | E0277 `Reference<Pressure>: Sensed` is not satisfied | line 490: a guard on the sensed pressure |
+| 499 | **Ticket 04.** Step a refused session, dropping the refusal to restart the budget | E0599 | E0599 no method `step` for `Session<'_, Retrying>` | line 504: `Session::retry` |

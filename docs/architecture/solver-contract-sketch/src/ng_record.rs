@@ -2,48 +2,71 @@
 //! the checkpoint envelope.
 //!
 //! A step is validate, then publish. `PatientRecord::validate(&self, ..)` is immutable and returns
-//! the ENTIRE next image or a refusal; `publish(&mut self, ..)` installs that image and cannot fail.
-//! `&mut PatientRecord` is never lent outside this module, so only `Session<Running>` publishes,
-//! and a session that met an `EngineFault` becomes `Session<Faulted>`, which has no step.
+//! the ENTIRE next image or a failure; `publish(&mut self, ..)` installs that image and cannot fail.
+//! `&mut PatientRecord` is never lent outside this module, so only the session publishes. A session
+//! that met a refusal becomes `Session<Retrying>`, which can only retry, and one that met an
+//! `EngineFault` becomes `Session<Faulted>`, which has no step.
 use crate::ng_contract::*;
 
+/// The chained seal of one accepted revision: the previous seal, the image's digests and the ledger
+/// chunk.
+#[derive(Clone, Copy)]
+pub struct Seal {
+    _digest: Digest,
+}
+impl Seal {
+    pub fn digest(&self) -> Digest {
+        todo!()
+    }
+}
+/// Each law stream's event ordinal, kept once, in the accepted image (never in the solver's
+/// continuation): a stream's value is a pure function of seed, stream key and ordinal.
+struct StreamPositions {
+    _ordinals: Vec<(Digest, u64)>,
+}
+
 /// No Clone, no public constructor and no setter. One body state per branch.
-pub struct PatientRecord {
+pub struct PatientRecord<'m> {
+    _body: &'m CompiledBody,
     _identity: RunIdentity,
     _parameters: BoundParameters,
-    _basis: ConservedBasis,
     _branch: BranchAncestry,
     _revision: u64,
     _seal: Seal,
     _time: SimTime,
     _state: Candidate,
-    _continuation: SolverContinuation,
+    _continuation: MethodHistory,
     _dense: DenseSegment,
     _streams: StreamPositions,
     _pending: PendingInputs,
     _commands: CommandCursor,
     _history: History,
 }
-impl PatientRecord {
+impl PatientRecord<'_> {
     pub fn identity(&self) -> &RunIdentity {
+        todo!()
+    }
+    pub fn revision(&self) -> u64 {
+        todo!()
+    }
+    pub fn seal(&self) -> Seal {
         todo!()
     }
     pub fn accepted(&self) -> AcceptedStateView<'_> {
         todo!()
     }
-    /// Rechecks, with the proposal's own compiled body and parameter values: identity, branch and
-    /// base seal, exact ticket start AND end, due input ids, complete mode, state and closure
-    /// coverage, admissible sets, amounts = base + paired extents, nonlinear energy closure,
-    /// continuation schema and dense-segment endpoints. It re-evaluates every witnessed stage on
-    /// the compiled body in the scope the stage names, the whole or a block of the witnessed plan
-    /// (`MethodMismatch` if a recorded rate or the weighted sum differs), checks the declared
-    /// scheme's stage equations (`StageResidual`), recomputes the scheme's error estimate against
-    /// the resolution's scales (refused above one, and a fault at the floor), and after a
-    /// breakpoint checks that the method history restarted there. Then it builds the whole next
-    /// image, with any validity excursions recorded rather than refused. Never mutates. A refusal
-    /// is retryable; an `EngineFault` (a method mismatch, excess error at the floor) is not, and
-    /// the session latches on it.
-    pub fn validate(&self, _proposal: StepProposal<'_>) -> Result<NextImage, TrialFailure> {
+    /// Lends the problem for one attempt, built from this record's own fields. Only `step` publishes.
+    pub fn problem(&self) -> CoupledProblem<'_> {
+        todo!()
+    }
+    /// The contract answers whether the core followed its declared method (`StepProposal::verify`,
+    /// on this record's own problem); this answers whether the result may become the next accepted
+    /// image. `expected` is the ticket the session issued, so a proposal for any other attempt, or
+    /// an issued ticket this record would not issue, is `BindingMismatch`. Then it checks admissible
+    /// sets and builds the whole next image, with any validity excursions recorded rather than
+    /// refused. Never mutates. A refusal is retryable; an `EngineFault` is not, and the session
+    /// latches on it.
+    pub fn validate(&self, _expected: &StepTicket, _proposal: StepProposal) -> Result<NextImage, TrialFailure> {
         todo!()
     }
     /// Same id and payload returns the prior receipt; a changed payload is refused; a new input
@@ -53,11 +76,16 @@ impl PatientRecord {
         todo!()
     }
     /// The only `&mut` path. Installs every part of the image together; cannot fail.
-    pub fn publish(&mut self, _next: NextImage) -> Receipt {
+    pub fn publish(&mut self, _next: NextImage) -> StepReceipt {
         todo!()
     }
     /// The one history object the certificate reads.
     pub fn conservation(&self) -> ConservationView<'_> {
+        todo!()
+    }
+    /// One digest per part, recomputed from the live fields on every call. It reads no seal, because
+    /// a seal would still match if a field changed underneath it.
+    pub fn digests(&self) -> RecordDigests {
         todo!()
     }
     /// Four-family samples of this branch on a grid, for split measurement only.
@@ -66,36 +94,59 @@ impl PatientRecord {
     }
 }
 
+/// What must stay byte-identical across a refusal.
+pub struct RecordDigests {
+    pub revision: u64,
+    pub time: SimTime,
+    pub state: Digest,
+    pub continuation: Digest,
+    pub segment: Digest,
+    pub streams: Digest,
+    pub pending: Digest,
+    pub ledger: Digest,
+}
+
 /// The entire next accepted image, validated and not yet visible.
 pub struct NextImage {
-    _base: Seal,
     _revision: u64,
     _time: SimTime,
     _state: Candidate,
     _fired: ModeChanges,
-    _continuation: SolverContinuation,
+    _continuation: MethodHistory,
     _ledger: LedgerChunk,
     _inputs: CommandCursor,
     _pending: PendingInputs,
     _dense: DenseSegment,
     _streams: StreamPositions,
     _seal: Seal,
+    _applied: Vec<InputId>,
+    _excursions: Vec<ValidityExcursion>,
 }
 pub enum InputAdmission {
     AlreadyPresent(InputReceipt),
     Staged(NextImage),
 }
-pub struct Receipt {
+/// What one published step did: its revision and seal, each input it applied, and any excursion.
+pub struct StepReceipt {
     _revision: u64,
     _seal: Seal,
+    _applied: Vec<InputId>,
     _excursions: Vec<ValidityExcursion>,
 }
-/// An accepted value outside its law's `ValidityRange`: reported, never refused. Abnormal
-/// physiology publishes; only an `Admissible` set can refuse a trial.
-pub struct ValidityExcursion {
-    _row: RowId,
-    _at: SimTime,
-    _value: f64,
+impl StepReceipt {
+    pub fn revision(&self) -> u64 {
+        todo!()
+    }
+    pub fn seal(&self) -> Seal {
+        todo!()
+    }
+    /// Each input this step applied, once, in `(time, id)` order.
+    pub fn applied(&self) -> &[InputId] {
+        todo!()
+    }
+    pub fn excursions(&self) -> &[ValidityExcursion] {
+        todo!()
+    }
 }
 /// A durable input reference from an authorized command's receipt, never a speculative request.
 pub struct AuthorizedInput {
@@ -117,30 +168,25 @@ pub struct CommandCursor {
     _fence: u64,
 }
 
-/// One accepted interval in the history: dense inventory of every conserved combination and its
-/// cumulative gross inflow and outflow, the same exchange for every held route, all in the segment's
-/// declared basis, plus right-continuous impulses for boluses.
-pub struct LedgerChunk {
+/// One accepted interval of the history, each value at the interval's ends in the segment's basis:
+/// for every conserved combination its inventory and its cumulative gross inflow and outflow, for
+/// every column its cumulative gross forward and reverse extents, plus right-continuous impulses
+/// for boluses. All compensated. Private, so fixed-time chunks and a history store change no reader.
+struct LedgerChunk {
     _interval: Interval,
     _basis: DenseBasis,
-    /// Compensated inventory of every combination at the chunk start; coefficients are changes.
-    _inventory: Vec<Compensated>,
-    /// Cumulative gross exchange since admission, compensated like the amounts themselves.
-    _inflow_prefix: Vec<Compensated>,
-    _outflow_prefix: Vec<Compensated>,
-    _inflow: Vec<f64>,
-    _outflow: Vec<f64>,
-    /// Per held route, summed from that route's compiled columns; part of the totals above, not
-    /// added to them.
-    _held: Vec<RouteExchange>,
+    _quantities: Vec<QuantityStep>,
+    _columns: Vec<ColumnStep>,
     _impulses: Vec<Impulse>,
 }
-/// One held route's gross exchange in a chunk, compensated and in the chunk's basis like the totals.
-pub struct RouteExchange {
-    _inflow_prefix: Compensated,
-    _outflow_prefix: Compensated,
-    _inflow: Vec<f64>,
-    _outflow: Vec<f64>,
+struct QuantityStep {
+    _inventory: [Compensated; 2],
+    _inflow: [Compensated; 2],
+    _outflow: [Compensated; 2],
+}
+struct ColumnStep {
+    _forward: [Compensated; 2],
+    _reverse: [Compensated; 2],
 }
 /// A bolus, right-continuous: its amount is in the combination's inventory from `at` on.
 pub struct Impulse {
@@ -160,16 +206,17 @@ impl Impulse {
     }
 }
 /// Fixed-time sealed chunks with prefix extents; a seal never rehashes all history per beat.
-pub struct History {
+struct History {
     _basis: Digest,
     _chunks: Vec<LedgerChunk>,
     _roots: Vec<Digest>,
 }
 /// Run identity, branch and the accepted base this view was lent at.
+#[derive(Clone, Copy)]
 pub struct HistorySeal {
-    _run: Digest,
-    _branch: Digest,
-    _base: Digest,
+    pub run: Digest,
+    pub branch: Digest,
+    pub base: Digest,
 }
 /// One immutable, sealed view of one record's history over one conserved basis. There is no way
 /// to pair one record's inventories with another's exchanges.
@@ -179,17 +226,18 @@ pub struct ConservationView<'r> {
     _seal: HistorySeal,
 }
 impl<'r> ConservationView<'r> {
-    pub fn seal(&self) -> &HistorySeal {
+    pub fn seal(&self) -> HistorySeal {
         todo!()
     }
     pub fn basis(&self) -> &'r ConservedBasis {
         todo!()
     }
-    pub fn span(&self) -> Interval {
+    /// Admission to the accepted head; `None` before the first accepted step.
+    pub fn span(&self) -> Option<Interval> {
         todo!()
     }
-    /// Accepted segments overlapping the window, in time order.
-    pub fn segments(&self, _window: &Interval) -> Segments<'r> {
+    /// Every accepted segment in time order, each ending where the next starts.
+    pub fn segments(&self) -> Segments<'r> {
         todo!()
     }
 }
@@ -202,11 +250,16 @@ impl<'r> Iterator for Segments<'r> {
         todo!()
     }
 }
+impl<'r> DoubleEndedIterator for Segments<'r> {
+    fn next_back(&mut self) -> Option<HistorySegment<'r>> {
+        todo!()
+    }
+}
 pub struct HistorySegment<'r> {
     _chunk: &'r LedgerChunk,
 }
 impl<'r> HistorySegment<'r> {
-    pub fn interval(&self) -> &'r Interval {
+    pub fn interval(&self) -> Interval {
         todo!()
     }
     /// Polynomial family and degree of every curve in this segment.
@@ -216,14 +269,20 @@ impl<'r> HistorySegment<'r> {
     pub fn inventory(&self, _quantity: QuantityId) -> Curve<'r> {
         todo!()
     }
+    /// Cumulative gross inflow since admission.
     pub fn inflow(&self, _quantity: QuantityId) -> Curve<'r> {
         todo!()
     }
+    /// Cumulative gross outflow since admission.
     pub fn outflow(&self, _quantity: QuantityId) -> Curve<'r> {
         todo!()
     }
-    /// Gross exchange on one held route (`CoverageManifest::held_routes`), apart from its
-    /// combination's totals.
+    /// One column's cumulative gross forward and reverse extents since admission.
+    pub fn exchange(&self, _column: ColumnId) -> (Curve<'r>, Curve<'r>) {
+        todo!()
+    }
+    /// Gross exchange on one held route (`CoverageManifest::held_routes`), summed from its columns,
+    /// apart from its combination's totals.
     pub fn held_inflow(&self, _route: HeldRouteId) -> Curve<'r> {
         todo!()
     }
@@ -234,43 +293,47 @@ impl<'r> HistorySegment<'r> {
         todo!()
     }
 }
-/// Compensated value at the segment start plus f64 coefficients of the change within the segment,
-/// in the segment's basis. Window differences are formed in compensated arithmetic.
+/// One quantity's curve over one segment, compensated, in Bernstein form.
 pub struct Curve<'r> {
-    _start: Compensated,
-    _coefficients: &'r [f64],
+    _interval: Interval,
+    _coefficients: &'r [Compensated],
 }
-impl<'r> Curve<'r> {
-    pub fn start(&self) -> &Compensated {
-        todo!()
-    }
-    pub fn coefficients(&self) -> &'r [f64] {
+impl Curve<'_> {
+    /// The Bernstein coefficients of this curve restricted to `piece`, which must lie inside the
+    /// segment. Same degree, so two curves on one piece subtract coefficient by coefficient, and
+    /// the hull of the result bounds the difference.
+    pub fn on(&self, _piece: Interval) -> Vec<Compensated> {
         todo!()
     }
 }
 
 /// The host's session over one record, bound at admission to one compiled body and one solver.
 pub struct Session<'m, S> {
-    _body: &'m CompiledBody,
     _solver: &'m dyn CoupledSolver,
-    _record: PatientRecord,
+    _record: Box<PatientRecord<'m>>,
     _status: S,
 }
 pub struct Running {
     _private: (),
 }
+/// A refusal stands: the record is untouched, and the only way on is the smaller retry.
+pub struct Retrying {
+    _refused: Refused,
+    _earlier: Vec<Refused>,
+}
 pub struct Faulted {
     _fault: EngineFault,
+    _refusals: Vec<Refused>,
 }
 pub enum Step<'m> {
-    Accepted(Session<'m, Running>, Receipt),
-    /// Nothing changed; retry smaller with `Session::retry`.
-    Refused(Session<'m, Running>, Refused),
+    Accepted(Session<'m, Running>, StepReceipt),
+    /// Nothing changed; `Session::retry` tries the same base over a shorter interval.
+    Refused(Session<'m, Retrying>),
     /// Latched: stop and show it, never death.
     Faulted(Session<'m, Faulted>),
 }
-impl<S> Session<'_, S> {
-    pub fn record(&self) -> &PatientRecord {
+impl<'m, S> Session<'m, S> {
+    pub fn record(&self) -> &PatientRecord<'m> {
         todo!()
     }
     /// Reads the last accepted image through a lens, also after a fault. A lens compiled for
@@ -326,18 +389,14 @@ pub enum ObservationRefusal {
     Gap { expected: u64, found: u64 },
 }
 impl<'m> Session<'m, Running> {
-    /// Checks model, packet and resolution identity against the body, origin and solver.
+    /// Checks model, packet and resolution identity against the body, origin and solver, and
+    /// refuses a zero floor.
     pub fn admit(
         _body: &'m CompiledBody,
         _solver: &'m dyn CoupledSolver,
         _origin: InitialRevision,
         _identity: RunIdentity,
-        _boundary: BoundaryPort,
     ) -> Result<Self, AdmissionError> {
-        todo!()
-    }
-    /// Lends the problem for inspection or a dry validation; only `step` publishes.
-    pub fn problem(&self) -> CoupledProblem<'_> {
         todo!()
     }
     pub fn enqueue(&mut self, _input: AuthorizedInput) -> Result<InputReceipt, AdmissionError> {
@@ -345,10 +404,6 @@ impl<'m> Session<'m, Running> {
     }
     /// `next_step`, `solve`, `validate`, then `publish`. A fault from any of them latches.
     pub fn step(self) -> Step<'m> {
-        todo!()
-    }
-    /// The same base and inputs over the refusal's smaller ticket; an exhausted budget latches.
-    pub fn retry(self, _refused: Refused) -> Step<'m> {
         todo!()
     }
     /// Saves the latest accepted boundary; never cuts an interval.
@@ -360,8 +415,22 @@ impl<'m> Session<'m, Running> {
         todo!()
     }
 }
+impl<'m> Session<'m, Retrying> {
+    pub fn refused(&self) -> &Refused {
+        todo!()
+    }
+    /// The same base and inputs over the refusal's smaller span; an exhausted budget latches. The
+    /// core solves; it does not pick the interval.
+    pub fn retry(self) -> Step<'m> {
+        todo!()
+    }
+}
 impl<'m> Session<'m, Faulted> {
     pub fn fault(&self) -> &EngineFault {
+        todo!()
+    }
+    /// The refusals before the fault, each naming its row or source.
+    pub fn refusals(&self) -> &[Refused] {
         todo!()
     }
     /// Last accepted image, the fault and the refused attempt's ticket, for diagnosis.
@@ -375,9 +444,9 @@ impl<'m> Session<'m, Faulted> {
 }
 pub struct FaultReport {
     _last_accepted: Checkpoint,
-    /// The fault itself: kind, time, attempted interval and per-row diagnosis.
+    /// The fault itself: kind, time, attempted interval and the refusal that ended it.
     _fault: EngineFault,
-    /// The refusals that preceded it, each with its own diagnosis.
+    /// The refusals that preceded it, each naming its row or source.
     _refusals: Vec<Refused>,
 }
 pub struct BranchAncestry {
@@ -405,7 +474,7 @@ pub struct Checkpoint {
     _time: SimTime,
     _state: Candidate,
     _parameters: BoundParameters,
-    _continuation: SolverContinuation,
+    _continuation: MethodHistory,
     _streams: StreamPositions,
     _pending: PendingInputs,
     _commands: CommandCursor,
