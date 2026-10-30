@@ -1,4 +1,4 @@
-use crate::history::{History, push_bits};
+use crate::history::{History, Start, push_bits};
 use crate::record::{PatientRecord, StreamPositions};
 use core::cmp::Ordering;
 use ng_contract::{
@@ -37,26 +37,26 @@ pub enum CheckpointError {
     Latched,
     /// Well sealed and for this run, and not the canonical form of an image.
     Malformed,
-    /// The parts parsed, and they chain to another seal than the header's.
+    /// The parts parsed, and they are not the image the chain recorded for this head.
     SealMismatch,
-    /// The store has no link for this root.
-    HistoryMissing { root: Digest },
-    /// A link that does not roll to its root, does not parse or does not reach the opening.
-    HistoryAltered { root: Digest },
+    /// The store has no link for this seal.
+    HistoryMissing { seal: Digest },
+    /// A link that does not chain to its seal, does not parse or does not reach the opening.
+    HistoryAltered { seal: Digest },
     /// A store that could not keep a link. No checkpoint exists until it does.
-    StoreFailed { root: Digest },
+    StoreFailed { seal: Digest },
     /// `rewind` or `recover` given a branch id this branch or an ancestor already uses.
     BranchInUse,
     /// `rewind` or `recover` given a checkpoint off this branch's own chain.
     NotOnThisBranch,
 }
 
-/// Durable storage for ledger links, addressed by root. It is host code and trusted for nothing: a walk
-/// rolls what comes back to the root it asked for. A checkpoint is complete only with a store that keeps
-/// what it took, and a store that loses a link fails at `resume`, by that link's root.
+/// Durable storage for the chain's links, addressed by seal. It is host code and trusted for nothing: a
+/// walk chains what comes back to the seal it asked for. A checkpoint is complete only with a store that
+/// keeps what it took, and a store that loses a link fails at `resume`, by that link's seal.
 pub trait HistoryStore {
-    fn resolve(&self, root: &Digest) -> Option<Vec<u8>>;
-    fn keep(&mut self, root: Digest, link: Vec<u8>) -> Result<(), CheckpointError>;
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>>;
+    fn keep(&mut self, seal: Digest, link: Vec<u8>) -> Result<(), CheckpointError>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -172,10 +172,7 @@ struct Header<'b> {
 
 /// Everything decided before a body byte is decoded, in this order.
 fn opened(bytes: &[u8]) -> Result<Header<'_>, CheckpointError> {
-    if bytes.len() < HEADER {
-        return Err(CheckpointError::Truncated);
-    }
-    let (header, body) = bytes.split_at(HEADER);
+    let (header, body) = bytes.split_at_checked(HEADER).ok_or(CheckpointError::Truncated)?;
     let mut read = ByteReader::new(header);
     let short = |_: Malformed| CheckpointError::Truncated;
     if read.take(MAGIC.len()).map_err(short)? != MAGIC {
@@ -211,7 +208,6 @@ fn opened(bytes: &[u8]) -> Result<Header<'_>, CheckpointError> {
 /// What the envelope holds beside its header.
 pub(crate) struct Sections<'r> {
     pub(crate) image: &'r ImageParts,
-    pub(crate) previous: Digest,
     pub(crate) streams: &'r StreamPositions,
     pub(crate) branch: &'r BranchAncestry,
     pub(crate) history: &'r History,
@@ -221,13 +217,11 @@ pub(crate) struct Sections<'r> {
 pub(crate) fn write(
     identity: &RunIdentity,
     revision: u64,
-    seal: Digest,
     latched: bool,
     sections: Sections<'_>,
 ) -> Checkpoint {
     let Sections {
         image,
-        previous,
         streams,
         branch,
         history,
@@ -235,7 +229,6 @@ pub(crate) fn write(
     let image = image.canonical();
     let mut body = (image.len() as u64).to_be_bytes().to_vec();
     body.extend_from_slice(&image);
-    body.extend_from_slice(previous.as_bytes());
     streams.write(&mut body);
     branch.write(&mut body);
     let opening = history.opening_values();
@@ -243,13 +236,13 @@ pub(crate) fn write(
     for value in opening {
         push_bits(&mut body, *value);
     }
-    body.extend_from_slice(history.root().as_bytes());
+    body.extend_from_slice(history.origin().image.as_bytes());
     let mut bytes = MAGIC.to_vec();
     bytes.extend_from_slice(&[0; 32]);
     bytes.extend_from_slice(&(body.len() as u64).to_be_bytes());
     bytes.extend_from_slice(identity.digest().as_bytes());
     bytes.extend_from_slice(&revision.to_be_bytes());
-    bytes.extend_from_slice(seal.as_bytes());
+    bytes.extend_from_slice(history.seal().as_bytes());
     bytes.extend_from_slice(&u64::from(latched).to_be_bytes());
     bytes.extend_from_slice(&body);
     let raw = Digest::of_canonical(&bytes[RAW_DIGEST_END..]);
@@ -260,7 +253,7 @@ pub(crate) fn write(
 /// The one way bytes become a record: a host's store on a load, this branch's chain on a rewind, and `fork`
 /// is the only other difference. Any bytes from either source give a record or an error, never a panic. No
 /// body byte is decoded until the raw digest and the identity hold, and no record leaves here until the
-/// history and the seal hold.
+/// chain and the image it recorded for this head hold.
 pub(crate) fn restore<'m>(
     saved: &Checkpoint,
     expected: &RunIdentity,
@@ -278,40 +271,41 @@ pub(crate) fn restore<'m>(
     let parts = Parts::read(header.body, body).map_err(|_| CheckpointError::Malformed)?;
     let Parts {
         image,
-        previous,
         streams,
         branch,
         opening,
-        root,
+        origin,
     } = parts;
-    if opening.len() != body.conserved_basis().combinations().len() {
+    if opening.len() != body.conserved_basis().combinations().len()
+        || image.parameters.packet_hash() != expected.packet()
+    {
         return Err(CheckpointError::Malformed);
     }
-    let history = History::walked(body, opening, root, header.revision, resolve)?;
+    let start = Start {
+        run: expected.digest(),
+        opening,
+        image: origin,
+        parameters: image.parameters.digest(),
+    };
+    let history = History::walked(body, start, header.seal, header.revision, resolve)?;
     let branch = match fork {
         None => branch,
         Some(fork) => branch.forked(fork, header.revision, image.time)?,
     };
-    let sections = Restored {
+    let parts = Restored {
         branch,
         revision: header.revision,
-        previous,
         image,
         streams,
         history,
     };
-    let record = PatientRecord::restored(body, expected.clone(), sections);
-    if record.seal().digest() != header.seal {
-        return Err(CheckpointError::SealMismatch);
-    }
-    Ok(record)
+    PatientRecord::restored(body, expected.clone(), parts)
 }
 
 /// What a record takes from a verified checkpoint.
 pub(crate) struct Restored {
     pub(crate) branch: BranchAncestry,
     pub(crate) revision: u64,
-    pub(crate) previous: Digest,
     pub(crate) image: ImageParts,
     pub(crate) streams: StreamPositions,
     pub(crate) history: History,
@@ -319,32 +313,29 @@ pub(crate) struct Restored {
 
 struct Parts {
     image: ImageParts,
-    previous: Digest,
     streams: StreamPositions,
     branch: BranchAncestry,
     opening: Vec<Compensated>,
-    root: Digest,
+    origin: Digest,
 }
 impl Parts {
     fn read(bytes: &[u8], body: &CompiledBody) -> Result<Self, Malformed> {
         let mut read = ByteReader::new(bytes);
         let count = read.count(1)?;
         let image = ImageParts::parse(body, read.take(count)?)?;
-        let previous = read.digest()?;
         let streams = StreamPositions::read(&mut read)?;
         let branch = BranchAncestry::read(&mut read)?;
         let opening = (0..read.count(16)?)
             .map(|_| read.compensated())
             .collect::<Result<_, _>>()?;
-        let root = read.digest()?;
+        let origin = read.digest()?;
         read.finish()?;
         Ok(Self {
             image,
-            previous,
             streams,
             branch,
             opening,
-            root,
+            origin,
         })
     }
 }

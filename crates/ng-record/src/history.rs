@@ -11,20 +11,18 @@ pub(crate) fn push_bits(bytes: &mut Vec<u8>, value: Compensated) {
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct LedgerChunk {
     interval: Interval,
     quantities: Vec<QuantityStep>,
     columns: Vec<ColumnStep>,
-    root: Digest,
+    image: Digest,
+    seal: Digest,
 }
-#[derive(Clone)]
 struct QuantityStep {
     inventory: [Compensated; 2],
     inflow: [Compensated; 2],
     outflow: [Compensated; 2],
 }
-#[derive(Clone)]
 struct ColumnStep {
     forward: [Compensated; 2],
     reverse: [Compensated; 2],
@@ -75,24 +73,27 @@ impl LedgerChunk {
                 }
             })
             .collect();
-        let mut chunk = Self {
+        Self {
             interval: step.ticket().interval(),
             quantities,
             columns,
-            root: history.root(),
-        };
-        chunk.root = rolled(history.root(), chunk.digest());
-        chunk
+            image: Digest::of_canonical(b"set when the chunk is sealed"),
+            seal: Digest::of_canonical(b"set when the chunk is sealed"),
+        }
     }
-    pub(crate) fn root(&self) -> Digest {
-        self.root
+    /// Chains this chunk onto `previous` with the digest of the image it ends at, and returns its seal.
+    pub(crate) fn seal(&mut self, previous: Digest, revision: u64, image: Digest) -> Digest {
+        self.image = image;
+        self.seal = linked(previous, revision, image, self.digest());
+        self.seal
     }
     pub(crate) fn is_finite(&self) -> bool {
         let Self {
             interval: _,
             quantities,
             columns,
-            root: _,
+            image: _,
+            seal: _,
         } = self;
         let totals = quantities.iter().flat_map(|quantity| {
             let QuantityStep {
@@ -115,7 +116,8 @@ impl LedgerChunk {
             interval,
             quantities,
             columns,
-            root: _,
+            image: _,
+            seal: _,
         } = self;
         let mut bytes = Vec::new();
         for instant in [interval.start(), interval.end()] {
@@ -144,7 +146,13 @@ impl LedgerChunk {
     }
     /// Reads `bytes`'s output for a body of `quantities` combinations and `columns` columns. Refuses an
     /// empty interval and a value no published step holds.
-    fn read(read: &mut ByteReader<'_>, quantities: usize, columns: usize) -> Result<Self, Malformed> {
+    fn read(
+        read: &mut ByteReader<'_>,
+        quantities: usize,
+        columns: usize,
+        image: Digest,
+        seal: Digest,
+    ) -> Result<Self, Malformed> {
         let interval = Interval::new(read.time()?, read.time()?).ok_or(Malformed)?;
         let quantities = (0..quantities)
             .map(|_| {
@@ -167,7 +175,8 @@ impl LedgerChunk {
             interval,
             quantities,
             columns,
-            root: Digest::of_canonical(b"set by the walk"),
+            image,
+            seal,
         };
         if chunk.is_finite() {
             Ok(chunk)
@@ -177,22 +186,38 @@ impl LedgerChunk {
     }
 }
 
-/// One link of the ledger chain: the root it follows and the digest of its chunk.
-fn rolled(previous: Digest, chunk: Digest) -> Digest {
-    let mut pair = [0u8; 64];
-    pair[..32].copy_from_slice(previous.as_bytes());
-    pair[32..].copy_from_slice(chunk.as_bytes());
-    Digest::of_canonical(&pair)
+/// One link of the chain every accepted revision seals: the seal before it, the revision, the digest of
+/// the image it ends at and the digest of its ledger. It covers the past and nothing that waits.
+pub(crate) fn linked(previous: Digest, revision: u64, image: Digest, ledger: Digest) -> Digest {
+    let mut bytes = Vec::with_capacity(104);
+    bytes.extend_from_slice(previous.as_bytes());
+    bytes.extend_from_slice(&revision.to_be_bytes());
+    bytes.extend_from_slice(image.as_bytes());
+    bytes.extend_from_slice(ledger.as_bytes());
+    Digest::of_canonical(&bytes)
+}
+
+/// What the chain starts from: the digest of the admitted image and the seal of revision 0, which also
+/// covers the values bound for the run, because no later revision changes them.
+pub(crate) struct Origin {
+    pub(crate) image: Digest,
+    seal: Digest,
 }
 
 pub(crate) struct History {
     opening: Vec<Compensated>,
     incidence: Vec<Vec<i64>>,
-    opening_root: Digest,
+    origin: Origin,
     chunks: Vec<LedgerChunk>,
 }
 impl History {
-    pub(crate) fn opening(body: &CompiledBody, accepted: AcceptedStateView<'_>) -> Self {
+    pub(crate) fn opening(
+        body: &CompiledBody,
+        accepted: AcceptedStateView<'_>,
+        run: Digest,
+        image: Digest,
+        parameters: Digest,
+    ) -> Self {
         let combinations = body.conserved_basis().combinations();
         let opening = (combinations.iter())
             .map(|combination| {
@@ -201,9 +226,15 @@ impl History {
                 })
             })
             .collect();
-        Self::from_opening(body, opening)
+        Self::from_opening(body, opening, run, image, parameters)
     }
-    fn from_opening(body: &CompiledBody, opening: Vec<Compensated>) -> Self {
+    fn from_opening(
+        body: &CompiledBody,
+        opening: Vec<Compensated>,
+        run: Digest,
+        image: Digest,
+        parameters: Digest,
+    ) -> Self {
         let combinations = body.conserved_basis().combinations();
         let incidence: Vec<Vec<i64>> = (combinations.iter())
             .map(|combination| {
@@ -221,91 +252,106 @@ impl History {
                     .collect()
             })
             .collect();
-        let mut bytes = b"ng-record ledger root 1".to_vec();
+        let mut bytes = b"ng-record ledger opening 1".to_vec();
         for value in &opening {
             push_bits(&mut bytes, *value);
         }
         for coefficient in incidence.iter().flatten() {
             bytes.extend_from_slice(&coefficient.to_be_bytes());
         }
+        bytes.extend_from_slice(parameters.as_bytes());
+        let seal = linked(run, 0, image, Digest::of_canonical(&bytes));
         Self {
             opening,
             incidence,
-            opening_root: Digest::of_canonical(&bytes),
+            origin: Origin { image, seal },
             chunks: Vec::new(),
         }
     }
     pub(crate) fn opening_values(&self) -> &[Compensated] {
         &self.opening
     }
-    /// The ledger root at the accepted head: one link per accepted step from the opening.
-    pub(crate) fn root(&self) -> Digest {
-        self.chunks.last().map_or(self.opening_root, |chunk| chunk.root)
+    pub(crate) fn origin(&self) -> &Origin {
+        &self.origin
+    }
+    /// The seal of the accepted head.
+    pub(crate) fn seal(&self) -> Digest {
+        self.chunks.last().map_or(self.origin.seal, |chunk| chunk.seal)
+    }
+    /// The digest of the image the accepted head holds, as the chain recorded it.
+    pub(crate) fn head_image(&self) -> Digest {
+        self.chunks.last().map_or(self.origin.image, |chunk| chunk.image)
     }
     pub(crate) fn push(&mut self, chunk: LedgerChunk) {
         self.chunks.push(chunk);
     }
-    /// The stored form of one link: the root before it, then its chunk.
+    /// The stored form of one link: the seal before it, the image digest it holds, then its chunk.
     fn link(&self, at: usize) -> Vec<u8> {
-        let previous = at
-            .checked_sub(1)
-            .map_or(self.opening_root, |before| self.chunks[before].root);
+        let previous = (at.checked_sub(1)).map_or(self.origin.seal, |before| self.chunks[before].seal);
+        let chunk = &self.chunks[at];
         let mut bytes = previous.as_bytes().to_vec();
-        bytes.extend_from_slice(&self.chunks[at].bytes());
+        bytes.extend_from_slice(chunk.image.as_bytes());
+        bytes.extend_from_slice(&chunk.bytes());
         bytes
     }
     /// Every link the store lacks, oldest first, so a store that fails part way still holds a chain with
-    /// no gap. `resolve` answers for what the store holds, and a store is asked to keep what it took.
-    pub(crate) fn unkept(
-        &self,
-        resolve: &dyn Fn(&Digest) -> bool,
-    ) -> impl Iterator<Item = (Digest, Vec<u8>)> {
-        let kept = self.chunks.iter().rposition(|chunk| resolve(&chunk.root));
+    /// no gap. `held` answers for what the store holds, and a store is asked to keep what it took.
+    pub(crate) fn unkept(&self, held: &dyn Fn(&Digest) -> bool) -> Vec<(Digest, Vec<u8>)> {
+        let kept = self.chunks.iter().rposition(|chunk| held(&chunk.seal));
         let from = kept.map_or(0, |at| at + 1);
-        (from..self.chunks.len()).map(|at| (self.chunks[at].root, self.link(at)))
+        (from..self.chunks.len())
+            .map(|at| (self.chunks[at].seal, self.link(at)))
+            .collect()
     }
     /// Answers a walk from this record's own chain, newest first, as a store would.
     pub(crate) fn resolver(&self) -> impl Fn(&Digest) -> Option<Vec<u8>> + '_ {
         let end = Cell::new(self.chunks.len());
-        move |root| {
+        move |seal| {
             let chunks = &self.chunks[..end.get()];
-            let at = chunks.iter().rposition(|chunk| chunk.root == *root)?;
+            let at = chunks.iter().rposition(|chunk| chunk.seal == *seal)?;
             end.set(at);
             Some(self.link(at))
         }
     }
-    /// Rebuilds a history of `count` links from `root` back to the opening. Each link is checked against
-    /// the root that asked for it before a byte of it is parsed, so a store is trusted for nothing.
+    /// Rebuilds a history of `count` links from `seal` back to the opening. Each link is checked against
+    /// the seal that asked for it before a byte of it is parsed, so a store is trusted for nothing.
     pub(crate) fn walked(
         body: &CompiledBody,
-        opening: Vec<Compensated>,
-        root: Digest,
+        start: Start,
+        seal: Digest,
         count: u64,
         resolve: &dyn Fn(&Digest) -> Option<Vec<u8>>,
     ) -> Result<Self, CheckpointError> {
-        let mut history = Self::from_opening(body, opening);
+        let Start {
+            run,
+            opening,
+            image,
+            parameters,
+        } = start;
+        let mut history = Self::from_opening(body, opening, run, image, parameters);
         let quantities = body.conserved_basis().combinations().len();
+        let columns = body.columns().len();
         let mut chunks = Vec::new();
-        let mut at = root;
-        for _ in 0..count {
-            let altered = CheckpointError::HistoryAltered { root: at };
-            let link = resolve(&at).ok_or(CheckpointError::HistoryMissing { root: at })?;
-            let (previous, bytes) = link.split_at_checked(32).ok_or(altered)?;
-            let previous = *previous.first_chunk().ok_or(altered)?;
-            let previous = Digest::from_bytes(previous);
-            if rolled(previous, Digest::of_canonical(bytes)) != at {
+        let mut at = seal;
+        for revision in (1..=count).rev() {
+            let altered = CheckpointError::HistoryAltered { seal: at };
+            let link = resolve(&at).ok_or(CheckpointError::HistoryMissing { seal: at })?;
+            let (previous, rest) = link.split_at_checked(32).ok_or(altered)?;
+            let (image, bytes) = rest.split_at_checked(32).ok_or(altered)?;
+            let previous = Digest::from_bytes(*previous.first_chunk().ok_or(altered)?);
+            let image = Digest::from_bytes(*image.first_chunk().ok_or(altered)?);
+            if linked(previous, revision, image, Digest::of_canonical(bytes)) != at {
                 return Err(altered);
             }
             let mut read = ByteReader::new(bytes);
-            let mut chunk =
-                LedgerChunk::read(&mut read, quantities, body.columns().len()).map_err(|_| altered)?;
+            let chunk = LedgerChunk::read(&mut read, quantities, columns, image, at);
+            let chunk = chunk.map_err(|_| altered)?;
             read.finish().map_err(|_| altered)?;
-            chunk.root = at;
             chunks.push(chunk);
             at = previous;
         }
-        if at != history.opening_root {
-            return Err(CheckpointError::HistoryAltered { root: at });
+        if at != history.origin.seal {
+            return Err(CheckpointError::HistoryAltered { seal: at });
         }
         chunks.reverse();
         history.chunks = chunks;
@@ -315,7 +361,7 @@ impl History {
         let Self {
             opening,
             incidence,
-            opening_root: _,
+            origin: _,
             chunks,
         } = self;
         let mut bytes = Vec::new();
@@ -330,6 +376,14 @@ impl History {
         }
         Digest::of_canonical(&bytes)
     }
+}
+
+/// What a walk needs to rebuild the start of a chain: the checkpoint holds the rest of the origin's facts.
+pub(crate) struct Start {
+    pub(crate) run: Digest,
+    pub(crate) opening: Vec<Compensated>,
+    pub(crate) image: Digest,
+    pub(crate) parameters: Digest,
 }
 
 /// Run identity, branch and the accepted base this view was lent at.

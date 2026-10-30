@@ -6,7 +6,6 @@ use ng_contract::{
 use ng_record::{
     AuthorizedInput, BranchId, CheckpointError, HistoryStore, RecordDigests, Running, Seal, Session, Step,
 };
-use std::collections::{BTreeMap, BTreeSet};
 
 /// Builds a core with no state from earlier runs. A gate calls it once per run, its reference run first, so
 /// a core that must differ between two runs can differ only through what its factory gives it: the seam
@@ -48,8 +47,7 @@ pub struct ReplayPlan<'c> {
     pub simulated_per_wall: u64,
     /// Lengths of simulated time, each after the last, repeating to the end of the case.
     pub chunks: Vec<u64>,
-    /// Resume at every revision this many apart, and on each side of a step that applied an input or met
-    /// a refusal.
+    /// Resume at every revision this many apart, and on each side of a breakpoint or a refusal.
     pub resume_every: u64,
 }
 
@@ -153,16 +151,16 @@ struct Row {
     time: SimTime,
     seal: Seal,
     earliest: SimTime,
-    applied_or_refused: bool,
+    near_a_break: bool,
 }
 impl Row {
-    fn of(session: &Session<'_, Running>, applied_or_refused: bool) -> Self {
+    fn of(session: &Session<'_, Running>, near_a_break: bool) -> Self {
         let record = session.record();
         Self {
             time: record.accepted().time(),
             seal: record.seal(),
             earliest: record.earliest_stamp(),
-            applied_or_refused,
+            near_a_break,
         }
     }
 }
@@ -203,7 +201,7 @@ fn advance<'m>(
     loop {
         attempt = match attempt {
             Step::Accepted(session, receipt) => {
-                rows.push(Row::of(&session, refused || !receipt.applied().is_empty()));
+                rows.push(Row::of(&session, refused || receipt.after_breakpoint()));
                 return Ok(session);
             }
             Step::Refused(session) => {
@@ -298,6 +296,9 @@ fn reference(
     let session = admitted(gate, case.admit(&*core))?;
     let rows = vec![Row::of(&session, false)];
     let (session, trace) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
+    if trace.rows.len() < 2 {
+        return Err(ReplayFailure::MissingEvidence { gate });
+    }
     Ok((trace, session.record().identity().digest()))
 }
 
@@ -345,32 +346,37 @@ fn pace_gate(
 /// A host's store, held in memory for a gate's run.
 #[derive(Default)]
 struct MemoryStore {
-    links: BTreeMap<Digest, Vec<u8>>,
+    links: Vec<(Digest, Vec<u8>)>,
 }
 impl HistoryStore for MemoryStore {
-    fn resolve(&self, root: &Digest) -> Option<Vec<u8>> {
-        self.links.get(root).cloned()
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+        let at = self.links.binary_search_by_key(seal, |link| link.0).ok()?;
+        Some(self.links[at].1.clone())
     }
-    fn keep(&mut self, root: Digest, link: Vec<u8>) -> Result<(), CheckpointError> {
-        self.links.insert(root, link);
+    fn keep(&mut self, seal: Digest, link: Vec<u8>) -> Result<(), CheckpointError> {
+        if let Err(at) = self.links.binary_search_by_key(&seal, |link| link.0) {
+            self.links.insert(at, (seal, link));
+        }
         Ok(())
     }
 }
 
-/// The revisions to resume at: every `every`th, and each side of a step that applied an input or met a
-/// refusal, since those are the boundaries a resume is likeliest to lose.
+/// The revisions to resume at: every `every`th, and each side of a step that started at a breakpoint or met
+/// a refusal, since those are the boundaries a resume is likeliest to lose.
 fn boundaries(rows: &[Row], every: u64) -> Vec<u64> {
     let last = rows.len() as u64 - 1;
-    let mut revisions = BTreeSet::new();
+    let mut revisions = Vec::new();
     for (revision, row) in (0..).zip(rows) {
         if revision % every == 0 {
-            revisions.insert(revision);
+            revisions.push(revision);
         }
-        if row.applied_or_refused {
+        if row.near_a_break {
             revisions.extend([revision - 1, revision, (revision + 1).min(last)]);
         }
     }
-    revisions.into_iter().collect()
+    revisions.sort_unstable();
+    revisions.dedup();
+    revisions
 }
 
 /// Takes checkpoints at chosen boundaries of one uninterrupted run, then loads each into a freshly built
@@ -441,7 +447,9 @@ fn resume_gate(
 /// Admits each input at the last head a run can still take it, so every step before that head was blind to
 /// it: the last reference row whose earliest stamp is before the input's. The next reference step reached
 /// the stamp, or was refused short of it after a cut there, and a run that did not know the input would
-/// have gone past. The gate reads only heads and stamps, so it needs no knowledge of the core.
+/// have gone past. An input past only the origin arrives at the first head, if that head can take it, and
+/// otherwise it has no head to arrive at. The gate reads only heads and stamps, so it needs no knowledge of
+/// the core.
 fn late_admission_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<GateEvidence, ReplayFailure> {
     let gate = ReplayGate::LateAdmission;
     let (reference, run) = reference(gate, case, cores)?;
@@ -453,11 +461,8 @@ fn late_admission_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<
     }
     let mut arrivals: Vec<(u64, BoundaryEvent)> = Vec::new();
     for event in events {
-        let id = event.id();
         let row = reference.rows.iter().rposition(|row| row.earliest < event.at());
-        let revision = row.filter(|revision| *revision > 0);
-        let revision = revision.ok_or(ReplayFailure::NoLateBoundary { id })?;
-        arrivals.push((revision as u64, event));
+        arrivals.push((row.unwrap_or(0).max(1) as u64, event));
     }
     arrivals.sort_by_key(|arrival| arrival.0);
     let core = cores.fresh();
@@ -465,6 +470,9 @@ fn late_admission_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<
     let mut rows = vec![Row::of(&session, false)];
     for (revision, event) in arrivals {
         session = revision_to(gate, session, revision, &mut rows)?;
+        if revision == 1 && session.record().earliest_stamp() > event.at() {
+            return Err(ReplayFailure::NoLateBoundary { id: event.id() });
+        }
         let command = Digest::of_canonical(b"replay gate");
         let input = AuthorizedInput::from_command_receipt(command, event);
         let refused = |error| ReplayFailure::InputRefused { gate, error };
@@ -487,10 +495,7 @@ fn rewind_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<GateEvid
     let gate = ReplayGate::Rewind;
     let checkpointed = |error| ReplayFailure::Checkpoint { gate, error };
     let (reference, run) = reference(gate, case, cores)?;
-    let middle = reference.rows.len() / 2;
-    if middle == 0 {
-        return Err(ReplayFailure::MissingEvidence { gate });
-    }
+    let middle = (reference.rows.len() - 1) / 2;
     let core = cores.fresh();
     let mut store = MemoryStore::default();
     let session = admitted(gate, case.admit(&*core))?;

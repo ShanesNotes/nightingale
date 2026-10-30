@@ -161,6 +161,21 @@ impl BoundParameters {
     pub fn packet_hash(&self) -> PacketHash {
         self.packet
     }
+    /// Every bound value, which no later revision changes.
+    pub fn digest(&self) -> Digest {
+        let Self {
+            model,
+            packet,
+            values,
+            starts,
+        } = self;
+        let mut out = Canonical::new("ng-contract bound parameters 1");
+        model.digest().seal(&mut out);
+        packet.digest().seal(&mut out);
+        values.seal(&mut out);
+        starts.seal(&mut out);
+        out.digest()
+    }
 }
 
 impl CompiledBody {

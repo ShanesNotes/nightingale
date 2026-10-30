@@ -6,10 +6,8 @@ use ng_record::*;
 use ng_validate::*;
 use replay_cores::{
     ActsOnACut, ClipsAt, KeepsACache, KeepsACount, KeepsTheDigest, ReadsPastTheBreakpoint, ReadsTheHostClock,
-    RefusesOne, ScriptedClock, Seen,
+    RefusesByHash, RefusesOne, ScriptedClock, Seen, ShowsAt,
 };
-use std::collections::BTreeMap;
-use std::rc::Rc;
 
 const SECOND: u64 = 1_000_000_000;
 const GATES: [ReplayGate; 4] = [
@@ -21,6 +19,11 @@ const GATES: [ReplayGate; 4] = [
 
 fn measure<U>(value: f64) -> Measure<U> {
     Measure::new(value).expect("finite")
+}
+
+/// What a core and its test both hold, for the length of the test.
+fn shared<T>(value: T) -> &'static T {
+    Box::leak(Box::new(value))
 }
 
 fn at(seconds: u64) -> SimTime {
@@ -140,27 +143,39 @@ fn seals(mut session: Session<'_, Running>, end: SimTime) -> Vec<(SimTime, Seal)
     rows
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Store {
-    links: BTreeMap<Digest, Vec<u8>>,
+    links: Vec<(Digest, Vec<u8>)>,
+}
+impl Store {
+    fn replace(&mut self, seal: Digest, link: Vec<u8>) {
+        self.links.retain(|known| known.0 != seal);
+        self.links.push((seal, link));
+    }
+    fn without(&self, seal: Digest) -> Self {
+        let mut store = self.clone();
+        store.links.retain(|known| known.0 != seal);
+        store
+    }
 }
 impl HistoryStore for Store {
-    fn resolve(&self, root: &Digest) -> Option<Vec<u8>> {
-        self.links.get(root).cloned()
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+        let link = self.links.iter().find(|known| known.0 == *seal)?;
+        Some(link.1.clone())
     }
-    fn keep(&mut self, root: Digest, link: Vec<u8>) -> Result<(), CheckpointError> {
-        self.links.insert(root, link);
+    fn keep(&mut self, seal: Digest, link: Vec<u8>) -> Result<(), CheckpointError> {
+        self.replace(seal, link);
         Ok(())
     }
 }
 
 struct RefusesToKeep;
 impl HistoryStore for RefusesToKeep {
-    fn resolve(&self, _root: &Digest) -> Option<Vec<u8>> {
+    fn resolve(&self, _seal: &Digest) -> Option<Vec<u8>> {
         None
     }
-    fn keep(&mut self, root: Digest, _link: Vec<u8>) -> Result<(), CheckpointError> {
-        Err(CheckpointError::StoreFailed { root })
+    fn keep(&mut self, seal: Digest, _link: Vec<u8>) -> Result<(), CheckpointError> {
+        Err(CheckpointError::StoreFailed { seal })
     }
 }
 
@@ -339,14 +354,13 @@ fn a_core_told_the_timeline_in_only_one_run_fails_late_admission() {
 #[test]
 fn a_core_that_reads_the_host_clock_fails_pace() {
     let case = delivering(vec![delivery(b"input", 40, 60)], 100);
-    let clock = Rc::new(ScriptedClock::new(vec![0, 7, 19, 101, 90_000 * SECOND]));
-    let shared = Rc::clone(&clock);
+    let clock = shared(ScriptedClock::new(vec![0, 7, 19, 101, 90_000 * SECOND]));
     let cores = move || ReadsTheHostClock {
         inner: reference(8 * SECOND),
-        clock: Rc::clone(&shared),
+        clock,
     };
     let plan = ReplayPlan {
-        clock: &*clock,
+        clock,
         simulated_per_wall: 1,
         chunks: vec![SECOND],
         resume_every: 5,
@@ -411,12 +425,14 @@ fn a_plan_that_compares_nothing_is_missing_evidence() {
     );
 }
 
-fn reader(span_ns: u64, refuses_over_ns: u64, seen: &Rc<RefCell<Vec<Seen>>>) -> ReadsPastTheBreakpoint {
+type Seeing = &'static RefCell<Vec<Seen>>;
+
+fn reader(span_ns: u64, refuses_over_ns: u64, seen: Seeing) -> ReadsPastTheBreakpoint {
     ReadsPastTheBreakpoint {
         inner: reference(8 * SECOND),
         span_ns,
         refuses_over_ns,
-        seen: Rc::clone(seen),
+        seen,
     }
 }
 
@@ -427,8 +443,8 @@ fn tickets_until_the_fault(
     span_ns: u64,
     refuses_over_ns: u64,
 ) -> (Vec<Seen>, EngineFault) {
-    let seen = Rc::default();
-    let core = reader(span_ns, refuses_over_ns, &seen);
+    let seen = shared(RefCell::default());
+    let core = reader(span_ns, refuses_over_ns, seen);
     let mut attempt = case.admit(&core).expect("admitted").step();
     loop {
         attempt = match attempt {
@@ -460,12 +476,12 @@ fn a_span_of_any_size_reads_no_breakpoint_while_it_does_not_pass() {
 #[test]
 fn a_ticket_shows_no_waiting_input_until_a_span_past_it_has_passed() {
     let run = |case: &TwoReservoirs| -> Vec<Seen> {
-        let seen = Rc::default();
+        let seen = shared(RefCell::default());
         let core = ReadsPastTheBreakpoint {
             inner: refused_past_the_input(),
             span_ns: 16 * SECOND,
             refuses_over_ns: u64::MAX,
-            seen: Rc::clone(&seen),
+            seen,
         };
         to(case.admit(&core).expect("admitted"), at(18));
         seen.take()
@@ -494,7 +510,7 @@ fn a_core_that_tries_to_read_past_the_breakpoint_fails_late_admission() {
         inner: reference(8 * SECOND),
         span_ns: 1 << 50,
         refuses_over_ns: 8 * SECOND,
-        seen: Rc::default(),
+        seen: shared(RefCell::default()),
     };
     let failure = replay_gate(ReplayGate::LateAdmission, &case, &refused, &plan(&clock));
     assert!(
@@ -506,7 +522,7 @@ fn a_core_that_tries_to_read_past_the_breakpoint_fails_late_admission() {
         inner: reference(8 * SECOND),
         span_ns: 1 << 50,
         refuses_over_ns: u64::MAX,
-        seen: Rc::default(),
+        seen: shared(RefCell::default()),
     };
     let failure = replay_gate(ReplayGate::LateAdmission, &case, &passed, &plan(&clock));
     assert!(
@@ -523,8 +539,8 @@ fn at_rest_with(deliveries: Vec<Delivery>) -> TwoReservoirs {
 #[test]
 fn a_cut_shows_only_after_its_span_has_passed() {
     let span = 1 << 50;
-    let seen = Rc::new(RefCell::new(Vec::new()));
-    let core = reader(span, u64::MAX, &seen);
+    let seen = shared(RefCell::default());
+    let core = reader(span, u64::MAX, seen);
     let case = at_rest_with(vec![delivery(b"input", 2_000, 6_000)]);
     let session = advance(case.admit(&core).expect("admitted"));
     assert_eq!(session.record().accepted().time(), at(2_000));
@@ -563,20 +579,20 @@ fn a_tickets_digest_is_blind_to_a_waiting_input() {
     replay_gate(ReplayGate::LateAdmission, &case, &cores, &plan(&clock)).expect("a digest reads no waiter");
 }
 
-fn refusing(cut: u64, seen: &Rc<RefCell<Vec<Seen>>>) -> RefusesOne {
+fn refusing(cut: u64, seen: Seeing) -> RefusesOne {
     RefusesOne {
         inner: reference(8 * SECOND),
         interval: Interval::new(at(0), at(cut)).expect("an interval"),
         later_ns: 8 * SECOND,
-        seen: Rc::clone(seen),
+        seen,
     }
 }
 
 #[test]
 fn the_retry_of_a_cut_halves_the_span_and_not_the_cut() {
     for (cut, retry) in [(5, 4), (7, 4), (3, 2)] {
-        let seen = Rc::default();
-        let core = refusing(cut, &seen);
+        let seen = shared(RefCell::default());
+        let core = refusing(cut, seen);
         let case = delivering(vec![delivery(b"input", cut, 100)], 200);
         let session = advance(case.admit(&core).expect("admitted"));
         let read = seen.take();
@@ -592,8 +608,8 @@ fn the_retry_of_a_cut_halves_the_span_and_not_the_cut() {
 
 #[test]
 fn a_refused_cut_leaves_a_fence_and_the_stamp_behind_it_is_refused() {
-    let seen = Rc::default();
-    let core = refusing(6, &seen);
+    let seen = shared(RefCell::default());
+    let core = refusing(6, seen);
     let case = delivering(vec![delivery(b"input", 6, 100)], 200);
     let mut session = advance(case.admit(&core).expect("admitted"));
     assert_eq!(session.record().accepted().time(), at(4));
@@ -615,10 +631,9 @@ fn a_refused_cut_leaves_a_fence_and_the_stamp_behind_it_is_refused() {
 
 #[test]
 fn a_fence_stands_until_the_head_passes_it() {
-    let seen = Rc::default();
     let core = RefusesOne {
         later_ns: SECOND,
-        ..refusing(6, &seen)
+        ..refusing(6, shared(RefCell::default()))
     };
     let case = delivering(vec![delivery(b"input", 6, 100)], 200);
     let session = advance(advance(case.admit(&core).expect("admitted")));
@@ -637,8 +652,8 @@ fn a_fence_stands_until_the_head_passes_it() {
 
 #[test]
 fn a_late_input_at_the_fence_matches_the_same_input_known_from_the_start() {
-    let seen = Rc::default();
-    let core = refusing(6, &seen);
+    let seen = shared(RefCell::default());
+    let core = refusing(6, seen);
     let late = delivering(vec![delivery(b"input", 6, 100)], 40);
     let known = delivering(
         vec![delivery(b"input", 6, 100), delivery(b"at the fence", 6, 100)],
@@ -885,8 +900,8 @@ fn a_delivery_ending_at_the_head_survives_a_resume() {
 
 #[test]
 fn a_fence_survives_a_resume() {
-    let seen = Rc::default();
-    let core = refusing(6, &seen);
+    let seen = shared(RefCell::default());
+    let core = refusing(6, seen);
     let case = delivering(vec![delivery(b"input", 6, 100)], 200);
     let mut store = Store::default();
     let session = advance(case.admit(&core).expect("admitted"));
@@ -1022,29 +1037,51 @@ fn a_well_sealed_malformed_body_is_refused_and_never_panics() {
     let mut store = Store::default();
     let (session, saved) = past_every_input(case.admit(&core).expect("admitted"), &case, &mut store);
     let identity = session.record().identity();
-    let digests = session.record().digests();
-    let mut named = 0;
-    for position in HEADER..saved.as_bytes().len() {
+    let (digests, earliest) = (session.record().digests(), session.record().earliest_stamp());
+    let bytes = saved.as_bytes();
+    let image = u64::from_be_bytes(*bytes[HEADER..].first_chunk().expect("a length")) as usize;
+    let branch = HEADER + 8 + image + 8;
+    for position in HEADER..bytes.len() {
         for flip in [0x01, 0x80] {
-            let mut bytes = saved.as_bytes().to_vec();
-            bytes[position] ^= flip;
-            match Session::resume(&resealed(bytes), identity, case.body(), &core, &store) {
-                Ok(session) => assert_eq!(
-                    session.record().digests(),
-                    digests,
-                    "a flip at {position} published something else"
-                ),
+            let mut flipped = bytes.to_vec();
+            flipped[position] ^= flip;
+            match Session::resume(&resealed(flipped), identity, case.body(), &core, &store) {
+                Ok(session) => {
+                    assert!(
+                        (branch..branch + 40).contains(&position),
+                        "a flip at {position} loaded, and only a branch's name is under no seal"
+                    );
+                    assert_eq!(session.record().digests(), digests);
+                    assert_eq!(session.record().earliest_stamp(), earliest);
+                }
                 Err(
                     CheckpointError::Malformed
                     | CheckpointError::SealMismatch
                     | CheckpointError::HistoryMissing { .. }
                     | CheckpointError::HistoryAltered { .. },
-                ) => named += 1,
+                ) => {}
                 Err(other) => panic!("a flip at {position}: {other:?}"),
             }
         }
     }
-    assert!(named > saved.as_bytes().len(), "{named} of the flips were named");
+}
+
+#[test]
+fn a_bound_value_changed_under_a_good_digest_is_refused() {
+    let case = delivering(vec![delivery(b"input", 8, 16)], 40);
+    let core = reference(8 * SECOND);
+    let mut store = Store::default();
+    let (session, saved) = past_every_input(case.admit(&core).expect("admitted"), &case, &mut store);
+    let identity = session.record().identity();
+    let mut bytes = saved.as_bytes().to_vec();
+    let image = u64::from_be_bytes(*bytes[HEADER..].first_chunk().expect("a length")) as usize;
+    let value = HEADER + 8 + image - 8;
+    bytes[value] ^= 1;
+    let refused = Session::resume(&resealed(bytes), identity, case.body(), &core, &store).err();
+    assert!(
+        matches!(refused, Some(CheckpointError::HistoryAltered { .. })),
+        "{refused:?}"
+    );
 }
 
 #[test]
@@ -1076,7 +1113,7 @@ fn arbitrary_bodies_are_refused_and_never_panic() {
 fn with_stream_ordinals(saved: &Checkpoint, ordinals: [(u8, u64); 2]) -> Checkpoint {
     let bytes = saved.as_bytes();
     let image = u64::from_be_bytes(*bytes[HEADER..].first_chunk().expect("a length")) as usize;
-    let count_at = HEADER + 8 + image + 32;
+    let count_at = HEADER + 8 + image;
     let mut out = bytes[..count_at].to_vec();
     out.extend_from_slice(&2_u64.to_be_bytes());
     for (key, ordinal) in ordinals {
@@ -1111,76 +1148,90 @@ fn stream_ordinals_read_back_under_the_seal_and_only_in_order() {
 }
 
 #[test]
-fn a_missing_or_altered_link_is_refused_by_its_root() {
+fn a_missing_or_altered_link_is_refused_by_its_seal() {
     let case = delivering(vec![delivery(b"input", 8, 16)], 40);
     let core = reference(8 * SECOND);
     let mut store = Store::default();
     let (session, saved) = past_every_input(case.admit(&core).expect("admitted"), &case, &mut store);
     let identity = session.record().identity();
     let body = case.body();
-    let (root, link) = store
-        .links
-        .iter()
-        .next()
-        .map(|(root, link)| (*root, link.clone()))
-        .expect("a link");
-    let mut missing = Store::default();
-    missing.links.clone_from(&store.links);
-    missing.links.remove(&root);
+    let (seal, link) = store.links[0].clone();
     assert_eq!(
-        Session::resume(&saved, identity, body, &core, &missing).err(),
-        Some(CheckpointError::HistoryMissing { root })
+        Session::resume(&saved, identity, body, &core, &store.without(seal)).err(),
+        Some(CheckpointError::HistoryMissing { seal })
     );
-    for (position, length) in [(40, link.len()), (0, link.len()), (40, 40)] {
-        let mut altered = Store::default();
-        altered.links.clone_from(&store.links);
+    let altered = Some(CheckpointError::HistoryAltered { seal });
+    for (position, length) in [(70, link.len()), (40, link.len()), (0, link.len()), (70, 70)] {
+        let mut changed = store.clone();
         let mut bytes = link.clone();
         bytes[position] ^= 1;
         bytes.truncate(length);
-        altered.links.insert(root, bytes);
+        changed.replace(seal, bytes);
         assert_eq!(
-            Session::resume(&saved, identity, body, &core, &altered).err(),
-            Some(CheckpointError::HistoryAltered { root })
+            Session::resume(&saved, identity, body, &core, &changed).err(),
+            altered
         );
     }
-    let mut short = Store::default();
-    short.links.clone_from(&store.links);
-    short.links.insert(root, vec![0; 31]);
-    assert_eq!(
-        Session::resume(&saved, identity, body, &core, &short).err(),
-        Some(CheckpointError::HistoryAltered { root })
-    );
+    for short in [31, 63] {
+        let mut changed = store.clone();
+        changed.replace(seal, vec![0; short]);
+        assert_eq!(
+            Session::resume(&saved, identity, body, &core, &changed).err(),
+            altered
+        );
+    }
+}
+
+/// A link that chains true to a new seal, holding `image` and `chunk`, on a checkpoint named for that seal.
+fn relinked(store: &mut Store, saved: &Checkpoint, image: &[u8], chunk: &[u8]) -> (Digest, Checkpoint) {
+    let (_, link) = store.links[0].clone();
+    let revision = u64::from_be_bytes(*saved.as_bytes()[80..].first_chunk().expect("a revision"));
+    let mut chained = link[..32].to_vec();
+    chained.extend_from_slice(&revision.to_be_bytes());
+    chained.extend_from_slice(image);
+    chained.extend_from_slice(Digest::of_canonical(chunk).as_bytes());
+    let seal = Digest::of_canonical(&chained);
+    let stored = [&link[..32], image, chunk].concat();
+    store.replace(seal, stored);
+    let mut named = saved.as_bytes().to_vec();
+    named[88..120].copy_from_slice(seal.as_bytes());
+    (seal, resealed(named))
 }
 
 #[test]
-fn a_store_that_rolls_true_but_holds_no_chunk_is_altered() {
+fn a_link_that_chains_true_and_holds_no_chunk_is_altered() {
     let case = delivering(vec![delivery(b"input", 8, 16)], 16);
     let core = reference(8 * SECOND);
-    let mut forged = Store::default();
-    let (session, saved) = saved_at(case.admit(&core).expect("admitted"), at(8), &mut forged);
+    let mut store = Store::default();
+    let (session, saved) = saved_at(case.admit(&core).expect("admitted"), at(8), &mut store);
     let identity = session.record().identity();
-    let (root, link) = forged
-        .links
-        .iter()
-        .next()
-        .map(|(root, link)| (*root, link.clone()))
-        .expect("a link");
-    let previous: [u8; 32] = *link.first_chunk().expect("a root");
-    let empty = Digest::of_canonical(&[]);
-    let mut pair = previous.to_vec();
-    pair.extend_from_slice(empty.as_bytes());
-    let rolled = Digest::of_canonical(&pair);
-    let mut bytes = saved.as_bytes().to_vec();
-    let at = bytes
-        .windows(32)
-        .rposition(|window| window == root.as_bytes())
-        .expect("the root");
-    bytes[at..at + 32].copy_from_slice(rolled.as_bytes());
-    forged.links.insert(rolled, previous.to_vec());
+    let (image, good) = (store.links[0].1[32..64].to_vec(), store.links[0].1[64..].to_vec());
+    let mut long = good.clone();
+    long.push(0);
+    let empty_interval: Vec<u8> = [&good[8..16], &good[8..16], &good[16..]].concat();
+    let mut not_finite = good.clone();
+    not_finite[16..24].copy_from_slice(&f64::INFINITY.to_bits().to_be_bytes());
+    for chunk in [Vec::new(), long, empty_interval, not_finite] {
+        let (seal, named) = relinked(&mut store, &saved, &image, &chunk);
+        assert_eq!(
+            Session::resume(&named, identity, case.body(), &core, &store).err(),
+            Some(CheckpointError::HistoryAltered { seal })
+        );
+    }
+}
+
+#[test]
+fn a_chain_that_records_another_image_for_the_head_is_a_seal_mismatch() {
+    let case = delivering(vec![delivery(b"input", 8, 16)], 16);
+    let core = reference(8 * SECOND);
+    let mut store = Store::default();
+    let (session, saved) = saved_at(case.admit(&core).expect("admitted"), at(8), &mut store);
+    let identity = session.record().identity();
+    let good = store.links[0].1[64..].to_vec();
+    let (_, named) = relinked(&mut store, &saved, &[7; 32], &good);
     assert_eq!(
-        Session::resume(&resealed(bytes), identity, case.body(), &core, &forged).err(),
-        Some(CheckpointError::HistoryAltered { root: rolled }),
-        "a link that hashes true and holds no chunk"
+        Session::resume(&named, identity, case.body(), &core, &store).err(),
+        Some(CheckpointError::SealMismatch)
     );
 }
 
@@ -1216,11 +1267,11 @@ fn a_store_keeps_each_link_once_oldest_first() {
         kept: Vec<Digest>,
     }
     impl HistoryStore for Counting {
-        fn resolve(&self, root: &Digest) -> Option<Vec<u8>> {
-            self.kept.contains(root).then(Vec::new)
+        fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+            self.kept.contains(seal).then(Vec::new)
         }
-        fn keep(&mut self, root: Digest, _link: Vec<u8>) -> Result<(), CheckpointError> {
-            self.kept.push(root);
+        fn keep(&mut self, seal: Digest, _link: Vec<u8>) -> Result<(), CheckpointError> {
+            self.kept.push(seal);
             Ok(())
         }
     }
@@ -1235,18 +1286,13 @@ fn a_store_keeps_each_link_once_oldest_first() {
     assert_eq!(store.kept.len(), 5, "the first two were not kept again");
     let mut fresh = Store::default();
     session.checkpoint(&mut fresh).expect("saved");
-    let order: Vec<&Digest> = store.kept.iter().collect();
-    let mut previous = None;
-    for root in order {
-        let link = &fresh.links[root];
-        if let Some(before) = previous {
-            assert_eq!(
-                &link[..32],
-                Digest::as_bytes(before),
-                "each link follows the one before"
-            );
-        }
-        previous = Some(root);
+    for pair in store.kept.windows(2) {
+        let link = fresh.resolve(&pair[1]).expect("a link");
+        assert_eq!(
+            link[..32],
+            *pair[0].as_bytes(),
+            "each link follows the one before"
+        );
     }
 }
 
@@ -1330,6 +1376,33 @@ fn a_rewind_refuses_a_branch_on_its_line_another_run_and_a_checkpoint_off_its_ch
     let (_, off_the_chain) = saved_at(parted.admit(&core).expect("admitted"), at(40), &mut store);
     assert_eq!(
         session.rewind(&off_the_chain, first).err(),
+        Some(CheckpointError::NotOnThisBranch)
+    );
+}
+
+#[test]
+fn a_rewind_refuses_a_sibling_with_one_ledger_and_another_accepted_image() {
+    let case = delivering(Vec::new(), 40);
+    let core = reference(8 * SECOND);
+    let mut store = Store::default();
+    let (session, saved) = saved_at(case.admit(&core).expect("admitted"), at(8), &mut store);
+    let branch = BranchId::new(Digest::of_canonical(b"sibling"));
+    let mut sibling = session.rewind(&saved, branch).expect("a fork");
+    let nothing = water(b"nothing", at(8), at(24), 0.0);
+    let command = Digest::of_canonical(b"a command");
+    sibling
+        .enqueue(AuthorizedInput::from_command_receipt(command, nothing))
+        .expect("admitted");
+    let (sibling, parent) = (to(sibling, at(16)), to(session, at(16)));
+    assert_eq!(
+        sibling.record().digests().ledger,
+        parent.record().digests().ledger
+    );
+    assert_ne!(sibling.record().seal(), parent.record().seal());
+    let off_the_chain = sibling.checkpoint(&mut store).expect("saved");
+    let other = BranchId::new(Digest::of_canonical(b"other"));
+    assert_eq!(
+        parent.rewind(&off_the_chain, other).err(),
         Some(CheckpointError::NotOnThisBranch)
     );
 }
@@ -1446,4 +1519,198 @@ fn the_contracts_call_site_saves_resumes_and_rewinds() {
         save_resume_rewind(&session, case.body(), &fresh, &mut store, fork).expect("the call site");
     assert_eq!(resumed.record().digests(), session.record().digests());
     assert_eq!(forked.record().digests(), session.record().digests());
+}
+
+#[test]
+fn a_case_with_no_step_is_missing_evidence_for_every_gate() {
+    let case = delivering(vec![delivery(b"input", 8, 16)], 0);
+    for gate in GATES {
+        let clock = script();
+        let failure = replay_gate(gate, &case, &|| reference(8 * SECOND), &plan(&clock));
+        assert_eq!(failure.err(), Some(ReplayFailure::MissingEvidence { gate }));
+    }
+}
+
+#[test]
+fn a_rewind_on_a_case_of_one_step_still_compares_what_ran() {
+    let case = delivering(vec![delivery(b"input", 8, 16)], 8);
+    let cores = || KeepsACache {
+        interval_ns: 8 * SECOND,
+        steps: Cell::new(0),
+    };
+    let clock = script();
+    let failure = replay_gate(ReplayGate::Rewind, &case, &cores, &plan(&clock));
+    assert!(
+        matches!(failure, Err(ReplayFailure::Diverged { .. })),
+        "{failure:?}"
+    );
+}
+
+#[test]
+fn a_cache_that_shows_only_at_a_deliverys_end_fails_resume() {
+    let deliveries = vec![Delivery {
+        id: b"nothing",
+        from: at(12),
+        to: at(48),
+        amount: measure(0.0),
+    }];
+    let case = TwoReservoirs::delivering(at_rest(), deliveries).expect("a body");
+    let case = case.until(at(80));
+    let cores = || ShowsAt {
+        inner: reference(4 * SECOND),
+        at: at(48),
+        primed: Cell::new(false),
+    };
+    let clock = script();
+    let plan = ReplayPlan {
+        resume_every: 100,
+        ..plan(&clock)
+    };
+    let failure = replay_gate(ReplayGate::Resume, &case, &cores, &plan);
+    assert!(
+        matches!(
+            failure,
+            Err(ReplayFailure::Diverged {
+                gate: ReplayGate::Resume,
+                ..
+            })
+        ),
+        "{failure:?}"
+    );
+}
+
+#[test]
+fn a_receipt_says_when_its_step_started_at_a_breakpoint() {
+    let case = delivering(vec![delivery(b"input", 8, 16)], 40);
+    let core = reference(8 * SECOND);
+    let mut session = case.admit(&core).expect("admitted");
+    let mut started_at_one = Vec::new();
+    while session.record().accepted().time() < at(32) {
+        let Step::Accepted(next, receipt) = session.step() else {
+            panic!("not accepted");
+        };
+        started_at_one.push(receipt.after_breakpoint());
+        session = next;
+    }
+    assert_eq!(started_at_one, [false, true, true, false]);
+}
+
+#[test]
+fn an_input_stamped_at_the_first_head_arrives_there() {
+    let case = delivering(vec![delivery(b"input", 8, 24)], 40);
+    let clock = script();
+    let cores = || reference(8 * SECOND);
+    let gate = replay_gate(ReplayGate::LateAdmission, &case, &cores, &plan(&clock));
+    assert_eq!(gate.expect("a late boundary").runs().len(), 2);
+}
+
+#[test]
+fn an_input_inside_the_first_step_has_no_late_boundary() {
+    let case = delivering(vec![delivery(b"input", 5, 24)], 40);
+    let clock = script();
+    let cores = || reference(8 * SECOND);
+    let gate = replay_gate(ReplayGate::LateAdmission, &case, &cores, &plan(&clock));
+    assert_eq!(
+        gate.err(),
+        Some(ReplayFailure::NoLateBoundary {
+            id: InputId::new(Digest::of_canonical(b"input"))
+        })
+    );
+}
+
+struct Random(u64);
+impl Random {
+    fn below(&mut self, limit: u64) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0 % limit
+    }
+}
+
+/// One random timeline: every input known at admission against each arriving at a random head that can
+/// still take it. Returns `None` when the known run faults, which says nothing about a late one.
+fn late_against_known(core: &dyn CoupledSolver, random: &mut Random) -> Option<u64> {
+    let names: [&[u8]; 4] = [b"a", b"b", b"c", b"d"];
+    let inputs: Vec<(&[u8], SimTime, SimTime)> = (0..1 + random.below(4))
+        .map(|name| {
+            let from = at(1).nanoseconds() + random.below(100 * SECOND);
+            let to = from + (1 + random.below(30)) * SECOND;
+            (names[name as usize], SimTime::from_ns(from), SimTime::from_ns(to))
+        })
+        .collect();
+    let deliveries = (inputs.iter())
+        .map(|&(id, from, to)| Delivery {
+            id: Box::leak(id.to_vec().into_boxed_slice()),
+            from,
+            to,
+            amount: measure(10.0 * (1 + from.nanoseconds() % 50) as f64),
+        })
+        .collect();
+    let case = delivering(deliveries, 120);
+    let mut known = case.admit(core).expect("admitted");
+    let mut rows = vec![(
+        known.record().accepted().time(),
+        known.record().seal(),
+        known.record().earliest_stamp(),
+    )];
+    while known.record().accepted().time() < case.end() {
+        let mut attempt = known.step();
+        known = loop {
+            attempt = match attempt {
+                Step::Accepted(session, _) => break session,
+                Step::Refused(session) => session.retry(),
+                Step::Faulted(_) => return None,
+            };
+        };
+        let record = known.record();
+        rows.push((record.accepted().time(), record.seal(), record.earliest_stamp()));
+    }
+    let mut arrivals: Vec<(u64, BoundaryEvent)> = Vec::new();
+    for event in case.events().expect("events") {
+        let last = rows.iter().rposition(|row| row.2 < event.at()).unwrap_or(0) as u64;
+        arrivals.push((random.below(last + 1), event));
+    }
+    arrivals.sort_by_key(|arrival| arrival.0);
+    let mut late = case.admit_withheld(core).expect("admitted");
+    let mut seen = vec![(late.record().accepted().time(), late.record().seal())];
+    for (revision, event) in arrivals {
+        while late.record().revision() < revision {
+            late = advance(late);
+            seen.push((late.record().accepted().time(), late.record().seal()));
+        }
+        let command = Digest::of_canonical(b"a command");
+        let input = AuthorizedInput::from_command_receipt(command, event);
+        late.enqueue(input).expect("a head that can still take it");
+    }
+    while late.record().accepted().time() < case.end() {
+        late = advance(late);
+        seen.push((late.record().accepted().time(), late.record().seal()));
+    }
+    let known_rows: Vec<(SimTime, Seal)> = rows.iter().map(|row| (row.0, row.1)).collect();
+    assert_eq!(seen, known_rows, "every revision, by its seal");
+    assert_eq!(late.record().digests(), known.record().digests());
+    Some(rows.len() as u64)
+}
+
+#[test]
+fn late_inputs_match_the_known_timeline_on_random_timelines() {
+    let mut random = Random(0x9E37_79B9_7F4A_7C15);
+    let (mut honest, mut hashed) = (0, 0);
+    for _ in 0..40 {
+        let scale = [0.02, 0.05, 0.1, 0.3, 1.0][random.below(5) as usize];
+        let scales = ErrorScales::uniform(measure(scale), measure(0.0)).expect("scales");
+        let interval_ns = (1 + random.below(40)) * SECOND / 2;
+        let core = reference(interval_ns).with_scales(scales);
+        honest += late_against_known(&core, &mut random).expect("an honest core finishes");
+        let refuses = RefusesByHash {
+            inner: reference(interval_ns),
+            salt: random.below(u64::MAX),
+        };
+        hashed += late_against_known(&refuses, &mut random).unwrap_or(0);
+    }
+    assert!(
+        honest > 1_000 && hashed > 500,
+        "{honest} and {hashed} rows compared"
+    );
 }

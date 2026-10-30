@@ -1,7 +1,6 @@
 use core::cell::{Cell, RefCell};
 use ng_contract::*;
 use ng_validate::{ClockSource, ReferenceIntegrator, WallClock};
-use std::rc::Rc;
 
 const MILLISECOND: u64 = 1_000_000;
 
@@ -101,20 +100,23 @@ impl CoupledSolver for ClipsAt {
 /// A list of readings, each read once, and what the last read returned, which `ReadsTheHostClock` shapes
 /// its span from.
 pub struct ScriptedClock {
-    pub readings: RefCell<std::vec::IntoIter<u64>>,
+    pub readings: Vec<u64>,
+    pub next: Cell<usize>,
     pub last: Cell<u64>,
 }
 impl ScriptedClock {
     pub fn new(readings: Vec<u64>) -> Self {
         Self {
-            readings: RefCell::new(readings.into_iter()),
+            readings,
+            next: Cell::new(0),
             last: Cell::new(0),
         }
     }
 }
 impl WallClock for ScriptedClock {
     fn elapsed_ns(&self) -> Option<u64> {
-        let reading = self.readings.borrow_mut().next()?;
+        let reading = *self.readings.get(self.next.get())?;
+        self.next.set(self.next.get() + 1);
         self.last.set(reading);
         Some(reading)
     }
@@ -125,7 +127,7 @@ impl WallClock for ScriptedClock {
 
 pub struct ReadsTheHostClock {
     pub inner: ReferenceIntegrator,
-    pub clock: Rc<ScriptedClock>,
+    pub clock: &'static ScriptedClock,
 }
 impl CoupledSolver for ReadsTheHostClock {
     fn resolution(&self) -> DeclaredResolution {
@@ -153,7 +155,7 @@ pub struct ReadsPastTheBreakpoint {
     pub inner: ReferenceIntegrator,
     pub span_ns: u64,
     pub refuses_over_ns: u64,
-    pub seen: Rc<RefCell<Vec<Seen>>>,
+    pub seen: &'static RefCell<Vec<Seen>>,
 }
 impl CoupledSolver for ReadsPastTheBreakpoint {
     fn resolution(&self) -> DeclaredResolution {
@@ -208,7 +210,7 @@ pub struct RefusesOne {
     pub interval: Interval,
     /// Its span from every head past the origin, so a test can step short of a fence.
     pub later_ns: u64,
-    pub seen: Rc<RefCell<Vec<Seen>>>,
+    pub seen: &'static RefCell<Vec<Seen>>,
 }
 impl CoupledSolver for RefusesOne {
     fn resolution(&self) -> DeclaredResolution {
@@ -251,5 +253,57 @@ impl CoupledSolver for KeepsTheDigest {
         let digest = ticket.digest();
         let bytes = digest.as_bytes().first_chunk().expect("thirty-two bytes");
         explicit(problem, ticket, vec![u64::from_be_bytes(*bytes)])
+    }
+}
+
+/// Keeps a mark in a `Cell` from every head before `at`, and takes a shorter span from `at` when the mark is
+/// missing, so its hidden state shows only to a resume exactly there.
+pub struct ShowsAt {
+    pub inner: ReferenceIntegrator,
+    pub at: SimTime,
+    pub primed: Cell<bool>,
+}
+impl CoupledSolver for ShowsAt {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        let head = accepted.time();
+        if head < self.at {
+            self.primed.set(true);
+        }
+        let own = self.inner.next_step(accepted);
+        if head == self.at && !self.primed.get() {
+            own / 2
+        } else {
+            own
+        }
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.inner.solve(problem, ticket)
+    }
+}
+
+/// A pure core that refuses a third of all tickets, by a hash of the interval, so a cut is refused often: the
+/// worst an honest function of its arguments can do to the late-admission claim.
+pub struct RefusesByHash {
+    pub inner: ReferenceIntegrator,
+    pub salt: u64,
+}
+impl CoupledSolver for RefusesByHash {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let mut bytes = self.salt.to_be_bytes().to_vec();
+        bytes.extend_from_slice(&ticket.interval().start().nanoseconds().to_be_bytes());
+        bytes.extend_from_slice(&ticket.interval().end().nanoseconds().to_be_bytes());
+        if Digest::of_canonical(&bytes).as_bytes()[0] % 3 == 0 {
+            return Err(ticket.refuse(NumericalRefusal::IterationLimit));
+        }
+        self.inner.solve(problem, ticket)
     }
 }

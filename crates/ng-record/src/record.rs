@@ -9,7 +9,7 @@ use ng_contract::{
     ValidityExcursion, VerifiedParts,
 };
 
-/// The chained seal of one accepted revision: the previous seal, the image's digests and the ledger root.
+/// The chained seal of one accepted revision: the previous seal, the image's digests and the ledger chunk.
 /// It covers the past and nothing that waits, so a ticket's digest built on it reads no later input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Seal {
@@ -62,8 +62,6 @@ pub struct PatientRecord<'m> {
     identity: RunIdentity,
     branch: BranchAncestry,
     revision: u64,
-    previous: Digest,
-    seal: Seal,
     image: ImageParts,
     streams: StreamPositions,
     history: History,
@@ -77,7 +75,7 @@ struct Image<'a> {
     streams: &'a StreamPositions,
     applied: &'a AppliedInputs,
 }
-fn chain(previous: Digest, revision: u64, image: Image<'_>, ledger: Digest) -> Seal {
+fn image_digest(image: Image<'_>) -> Digest {
     let Image {
         time,
         state,
@@ -86,40 +84,27 @@ fn chain(previous: Digest, revision: u64, image: Image<'_>, ledger: Digest) -> S
         streams,
         applied,
     } = image;
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(previous.as_bytes());
-    bytes.extend_from_slice(&revision.to_be_bytes());
-    bytes.extend_from_slice(&time.nanoseconds().to_be_bytes());
+    let mut bytes = time.nanoseconds().to_be_bytes().to_vec();
     for digest in [
         state.digest(),
         continuation.digest(),
         dense.digest(),
         streams.digest(),
         applied.digest(),
-        ledger,
     ] {
         bytes.extend_from_slice(digest.as_bytes());
     }
-    Seal {
-        digest: Digest::of_canonical(&bytes),
-    }
+    Digest::of_canonical(&bytes)
 }
-fn sealed(
-    previous: Digest,
-    revision: u64,
-    image: &ImageParts,
-    streams: &StreamPositions,
-    ledger: Digest,
-) -> Seal {
-    let parts = Image {
+fn digest_of(image: &ImageParts, streams: &StreamPositions) -> Digest {
+    image_digest(Image {
         time: image.time,
         state: &image.state,
         continuation: &image.continuation,
         dense: &image.dense,
         streams,
         applied: image.pending.applied(),
-    };
-    chain(previous, revision, parts, ledger)
+    })
 }
 
 impl<'m> PatientRecord<'m> {
@@ -128,43 +113,44 @@ impl<'m> PatientRecord<'m> {
         let run = identity.digest();
         let streams = StreamPositions::default();
         let accepted = AcceptedStateView::new(image.time, &image.state, &image.continuation, &image.dense);
-        let history = History::opening(body, accepted);
-        let seal = sealed(run, 0, &image, &streams, history.root());
+        let opened = digest_of(&image, &streams);
+        let history = History::opening(body, accepted, run, opened, image.parameters.digest());
         Self {
             body,
             identity,
             branch: BranchAncestry::of_run(run),
             revision: 0,
-            previous: run,
-            seal,
             image,
             streams,
             history,
         }
     }
-    /// A record from parts a checkpoint held. Its seal is chained from those parts, so the caller's
-    /// comparison with the sealed header decides whether they are what was saved.
-    pub(crate) fn restored(body: &'m CompiledBody, identity: RunIdentity, parts: Restored) -> Self {
+    /// A record from parts a checkpoint held, or `SealMismatch` when they are not the image the chain
+    /// recorded for this head.
+    pub(crate) fn restored(
+        body: &'m CompiledBody,
+        identity: RunIdentity,
+        parts: Restored,
+    ) -> Result<Self, CheckpointError> {
         let Restored {
             branch,
             revision,
-            previous,
             image,
             streams,
             history,
         } = parts;
-        let seal = sealed(previous, revision, &image, &streams, history.root());
-        Self {
+        if digest_of(&image, &streams) != history.head_image() {
+            return Err(CheckpointError::SealMismatch);
+        }
+        Ok(Self {
             body,
             identity,
             branch,
             revision,
-            previous,
-            seal,
             image,
             streams,
             history,
-        }
+        })
     }
     pub(crate) fn body(&self) -> &'m CompiledBody {
         self.body
@@ -182,7 +168,9 @@ impl<'m> PatientRecord<'m> {
         self.revision
     }
     pub fn seal(&self) -> Seal {
-        self.seal
+        Seal {
+            digest: self.history.seal(),
+        }
     }
     pub fn accepted(&self) -> AcceptedStateView<'_> {
         let image = &self.image;
@@ -202,7 +190,7 @@ impl<'m> PatientRecord<'m> {
             &self.image.parameters,
             &self.identity,
             self.accepted(),
-            self.seal.digest(),
+            self.history.seal(),
         )
     }
     /// Runs one attempt of the next step to the image it would publish, or its failure. Immutable, so a
@@ -239,12 +227,13 @@ impl<'m> PatientRecord<'m> {
                 }));
             }
         }
-        let chunk = LedgerChunk::after(&self.history, self.body, &step);
+        let mut chunk = LedgerChunk::after(&self.history, self.body, &step);
         if !chunk.is_finite() {
             return Err(step.ticket().refuse(NumericalRefusal::LedgerOverflow));
         }
         let pending = self.image.pending.after(step.ticket());
         let time = step.ticket().interval().end();
+        let after_breakpoint = step.ticket().after_breakpoint();
         let applied = step.applied().to_vec();
         let VerifiedParts {
             state,
@@ -253,15 +242,17 @@ impl<'m> PatientRecord<'m> {
             excursions,
         } = step.into_parts();
         let revision = self.revision + 1;
-        let image = Image {
+        let image = image_digest(Image {
             time,
             state: &state,
             continuation: &continuation,
             dense: &dense,
             streams: &self.streams,
             applied: &pending,
+        });
+        let seal = Seal {
+            digest: chunk.seal(self.history.seal(), revision, image),
         };
-        let seal = chain(self.seal.digest(), revision, image, chunk.root());
         Ok(NextImage {
             revision,
             seal,
@@ -272,6 +263,7 @@ impl<'m> PatientRecord<'m> {
             pending,
             chunk,
             applied,
+            after_breakpoint,
             excursions,
         })
     }
@@ -287,11 +279,10 @@ impl<'m> PatientRecord<'m> {
             pending,
             chunk,
             applied,
+            after_breakpoint,
             excursions,
         } = next;
-        self.previous = self.seal.digest();
         self.revision = revision;
-        self.seal = seal;
         self.image.time = time;
         self.image.state = state;
         self.image.continuation = continuation;
@@ -302,6 +293,7 @@ impl<'m> PatientRecord<'m> {
             revision,
             seal,
             applied,
+            after_breakpoint,
             excursions,
         }
     }
@@ -319,27 +311,16 @@ impl<'m> PatientRecord<'m> {
         store: &mut dyn HistoryStore,
         latched: bool,
     ) -> Result<Checkpoint, CheckpointError> {
-        let unkept: Vec<_> = self
-            .history
-            .unkept(&|root| store.resolve(root).is_some())
-            .collect();
-        for (root, link) in unkept {
-            store.keep(root, link)?;
+        for (seal, link) in self.history.unkept(&|seal| store.resolve(seal).is_some()) {
+            store.keep(seal, link)?;
         }
         let sections = Sections {
             image: &self.image,
-            previous: self.previous,
             streams: &self.streams,
             branch: &self.branch,
             history: &self.history,
         };
-        Ok(write(
-            &self.identity,
-            self.revision,
-            self.seal.digest(),
-            latched,
-            sections,
-        ))
+        Ok(write(&self.identity, self.revision, latched, sections))
     }
     pub fn conservation(&self) -> ConservationView<'_> {
         ConservationView {
@@ -348,7 +329,7 @@ impl<'m> PatientRecord<'m> {
             seal: HistorySeal {
                 run: self.identity.digest(),
                 branch: self.branch.id(),
-                base: self.seal.digest(),
+                base: self.history.seal(),
             },
         }
     }
@@ -359,8 +340,6 @@ impl<'m> PatientRecord<'m> {
             identity: _,
             branch: _,
             revision,
-            previous: _,
-            seal: _,
             image,
             streams,
             history,
@@ -404,6 +383,7 @@ pub struct NextImage {
     pending: AppliedInputs,
     chunk: LedgerChunk,
     applied: Vec<InputId>,
+    after_breakpoint: bool,
     excursions: Vec<ValidityExcursion>,
 }
 
@@ -412,6 +392,7 @@ pub struct StepReceipt {
     revision: u64,
     seal: Seal,
     applied: Vec<InputId>,
+    after_breakpoint: bool,
     excursions: Vec<ValidityExcursion>,
 }
 impl StepReceipt {
@@ -424,6 +405,10 @@ impl StepReceipt {
     /// Each input this step applied, once, in `(time, id)` order.
     pub fn applied(&self) -> &[InputId] {
         &self.applied
+    }
+    /// True when this step started at a breakpoint: an input applied, or a delivery ended.
+    pub fn after_breakpoint(&self) -> bool {
+        self.after_breakpoint
     }
     pub fn excursions(&self) -> &[ValidityExcursion] {
         &self.excursions
