@@ -36,14 +36,13 @@ pub(crate) fn compile(
     let places = Places {
         rows: &rows,
         reaches: &reaches,
-        boundaries: &schema.boundaries,
     };
     let placement = place(&owed, &places)?;
     check_orphans(&rows, &placement.columns)?;
     let guards = guards(&fragments, &places)?;
     let (parameters, instances, guards) = bind(placement.instances, guards, &declarations);
     let (reads, rates) = reads(&rows.rows, &placement.columns, &placement.programs, &instances);
-    let solved_by = solve_order(&rows.rows, &reads)?;
+    let solved_by = solved_by(&rows.rows, &reads)?;
     let blocks = blocks(&solved_by, &reads, &rates);
     let basis = conserved_basis(rows.amounts.len(), &placement.columns);
     Ok(CompiledBody::seal(Layout {
@@ -478,17 +477,16 @@ struct Placed {
 enum Address {
     Parameter(ParameterKey, Binding),
     Unknown(UnknownId),
-    Boundary(usize),
+    Boundary(&'static str),
 }
 
 struct Places<'a> {
     rows: &'a Rows,
     reaches: &'a Reaches,
-    boundaries: &'a [WaterBoundary],
 }
 
 fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
-    let Places { rows, reaches, .. } = *places;
+    let Places { rows, reaches } = *places;
     let mut placement = Placement {
         columns: Vec::new(),
         programs: Vec::new(),
@@ -514,12 +512,12 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                 targets
             }
         };
-        for &(predicate, kernel) in &law.laws {
+        for &(_, kernel) in &law.laws {
             let program = ProgramId::at(placement.programs.len());
             placement.programs.push(Program {
                 id: program,
                 law: law.name,
-                code: code(law.fragment, predicate, kernel),
+                code: code(law.fragment, kernel),
             });
             for &(context, target) in &targets {
                 placement.instances.push(Placed {
@@ -577,12 +575,12 @@ fn left_out(law: LawName, pool: PoolRef) -> CompileDefect {
     }
 }
 
-fn code(fragment: &FragmentData, predicate: Predicate, kernel: &KernelData) -> Code {
+fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
     let KernelData {
         id,
         code,
         dimension,
-        modes: _,
+        modes,
         rate,
     } = kernel;
     let mut validity: Vec<_> = (fragment.validity.iter())
@@ -593,7 +591,7 @@ fn code(fragment: &FragmentData, predicate: Predicate, kernel: &KernelData) -> C
     Code {
         ops: code.clone(),
         dimension: dimension.clone(),
-        predicate,
+        predicate: predicate(fragment, *modes),
         rate: *rate,
         validity,
     }
@@ -605,11 +603,7 @@ fn addresses(
     context: Context,
     places: &Places,
 ) -> Result<Vec<Address>, CompileDefect> {
-    let Places {
-        rows,
-        reaches,
-        boundaries,
-    } = *places;
+    let Places { rows, reaches } = *places;
     let inputs = kernel.code.iter().filter_map(|op| match op {
         Op::Input(input) => Some(*input),
         _ => None,
@@ -629,9 +623,7 @@ fn addresses(
                     let pool = reaches.pool(family, end, context);
                     Address::Unknown(UnknownId::at(rows.amount(pool).ok_or(left_out(law, pool))?))
                 }
-                (Input::Drive(name), _) => {
-                    Address::Boundary(boundaries.partition_point(|boundary| boundary.name < name))
-                }
+                (Input::Drive(name), _) => Address::Boundary(name),
                 (Input::Parameter(key), _) => Address::Parameter(key, Binding::Body),
                 (Input::SiteParameter(key), Context::Site(at)) => Address::Parameter(key, Binding::Site(at)),
                 (Input::EdgeParameter(key), Context::Edge { from, to }) => {
@@ -686,7 +678,7 @@ fn guards(
                 leaves: mode.values[*leaves],
                 enters: mode.values[*enters],
                 crossing: *crossing,
-                code: code(fragment, predicate(fragment, zero.modes), zero),
+                code: code(fragment, zero),
                 inputs: Vec::new(),
             };
             let addresses = addresses(variable, zero, Context::Body, places)?;
@@ -821,7 +813,7 @@ fn sparsity(reads: Vec<Vec<UnknownId>>) -> Sparsity {
     }
 }
 
-fn solve_order(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<usize>, CompileDefect> {
+fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, CompileDefect> {
     let algebraic: Vec<LawName> = (rows.iter())
         .filter_map(|row| match row.kind {
             RowKind::Algebraic(law) => Some(law),
@@ -842,10 +834,10 @@ fn solve_order(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<usize>, Com
             return Err(CompileDefect::StructuralSingularity { law });
         }
     }
-    let mut solved_by: Vec<usize> = (0..rows.len()).collect();
+    let mut solved_by: Vec<RowId> = (0..rows.len()).map(RowId::at).collect();
     for (unknown, row) in matched.iter().enumerate() {
         if let Some(row) = row {
-            solved_by[first + unknown] = first + row;
+            solved_by[first + unknown] = RowId::at(first + row);
         }
     }
     Ok(solved_by)
@@ -869,14 +861,17 @@ fn augment(adjacency: &[Vec<usize>], row: usize, seen: &mut [bool], matched: &mu
     false
 }
 
-fn blocks(solved_by: &[usize], reads: &[Vec<UnknownId>], rates: &[Vec<RateClass>]) -> Vec<Block> {
+fn blocks(solved_by: &[RowId], reads: &[Vec<UnknownId>], rates: &[Vec<RateClass>]) -> Vec<Block> {
     let edges: Vec<(usize, usize)> = (reads.iter().enumerate())
-        .flat_map(|(row, read)| read.iter().map(move |unknown| (row, solved_by[unknown.index()])))
+        .flat_map(|(row, read)| {
+            read.iter()
+                .map(move |unknown| (row, solved_by[unknown.index()].index()))
+        })
         .collect();
     let part = Digraph::new(reads.len(), &edges).components();
     let mut solves = vec![0; reads.len()];
-    for (unknown, &row) in solved_by.iter().enumerate() {
-        solves[row] = unknown;
+    for (unknown, row) in solved_by.iter().enumerate() {
+        solves[row.index()] = unknown;
     }
     let count = part.iter().max().map_or(0, |last| last + 1);
     (0..count)

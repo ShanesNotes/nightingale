@@ -398,7 +398,7 @@ impl Seal for Instance {
 pub(crate) enum Bound {
     Parameter(ParameterId),
     Unknown(UnknownId),
-    Boundary(usize),
+    Boundary(&'static str),
 }
 impl Seal for Bound {
     fn seal(&self, out: &mut Canonical) {
@@ -553,7 +553,7 @@ impl Seal for ModeLayout {
     fn seal(&self, out: &mut Canonical) {
         let Self { variable, values } = self;
         variable.seal(out);
-        out.number(values.len() as u64);
+        out.length(values.len());
         for value in values {
             value.seal(out);
         }

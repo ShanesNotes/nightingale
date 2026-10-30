@@ -108,7 +108,7 @@ impl Seal for Schema {
             left_out,
         } = self;
         anatomy.digest().seal(out);
-        out.number(boundaries.len() as u64);
+        out.length(boundaries.len());
         for WaterBoundary {
             name,
             direction,
@@ -124,7 +124,7 @@ impl Seal for Schema {
         let mut left_out = left_out.clone();
         left_out.sort_unstable();
         left_out.dedup();
-        out.number(left_out.len() as u64);
+        out.length(left_out.len());
         for (space, reason) in left_out {
             out.number(space as u64);
             out.text(reason);

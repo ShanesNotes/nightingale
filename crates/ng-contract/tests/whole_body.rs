@@ -594,3 +594,36 @@ fn the_matching_pairs_each_residual_with_an_unknown_it_reads() -> Result<(), Adm
     );
     Ok(())
 }
+
+fn volume_guard(partial_volume: bool) -> Result<CompiledBody, AdmissionError> {
+    let mut schema = schema()?;
+    if partial_volume {
+        schema.partial_volume(Measure::new(1.0)?)?;
+    }
+    assemble(schema, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let held = laws.parameter::<Water>(ParameterKey::new("ns.held"), Admissible::nonnegative());
+        let [low, high] = laws.modes("level", ["low", "high"]);
+        let reflex = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let zero = laws.kernel(|mut k| {
+            let amount = k.parameter(&held);
+            let volume = k.volume(amount);
+            k.finish(volume, low.only(), reflex)
+        });
+        laws.event(Guard::new(zero, Crossing::Rising, low.to(&high)?));
+        body.add(laws.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn a_guard_that_reads_a_volume_needs_the_schemas_partial_volume() -> Result<(), AdmissionError> {
+    assert_eq!(
+        volume_guard(false).map(|compiled| compiled.model_hash()),
+        Err(AdmissionError::Compile(CompileDefect::MissingPartialVolume {
+            law: named("level")
+        }))
+    );
+    volume_guard(true)?;
+    Ok(())
+}

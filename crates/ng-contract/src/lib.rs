@@ -431,6 +431,31 @@
 //!     })
 //! }
 //! ```
+//! Two assemblies never mix: a fragment is added only to the assembly that issued its scope.
+//! ```compile_fail,E0521
+//! use ng_contract::*;
+//! fn cross(first: Schema, second: Schema) -> Result<CompiledBody, AdmissionError> {
+//!     assemble(first, |mut outer| {
+//!         let (laws, _ports) = outer.nervous()?.parts();
+//!         let stray = laws.finish();
+//!         assemble(second, |mut inner| {
+//!             inner.add(stray);
+//!             inner.compile()
+//!         })
+//!     })
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn own(schema: Schema) -> Result<CompiledBody, AdmissionError> {
+//!     assemble(schema, |mut body| {
+//!         let (laws, _ports) = body.nervous()?.parts();
+//!         let fragment = laws.finish();
+//!         body.add(fragment);
+//!         body.compile()
+//!     })
+//! }
+//! ```
 
 mod anatomy;
 mod body;

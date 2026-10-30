@@ -102,6 +102,9 @@ impl Canonical {
     pub(crate) fn number(&mut self, number: u64) {
         self.bytes.extend_from_slice(&number.to_be_bytes());
     }
+    pub(crate) fn length(&mut self, length: usize) {
+        self.number(length as u64);
+    }
     pub(crate) fn text(&mut self, text: &str) {
         self.number(text.len() as u64);
         self.bytes.extend_from_slice(text.as_bytes());
@@ -116,7 +119,7 @@ pub(crate) trait Seal {
 }
 impl<T: Seal> Seal for [T] {
     fn seal(&self, out: &mut Canonical) {
-        out.number(self.len() as u64);
+        out.length(self.len());
         for item in self {
             item.seal(out);
         }

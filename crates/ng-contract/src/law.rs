@@ -346,8 +346,8 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     ) -> Expr<'b, 'k, O, U> {
         self.push(Op::Scale([x.at, by.at]))
     }
-    /// `0.5 (a + b + sqrt((a - b)^2 + w^2))`, a limit with a continuous Jacobian. The width `w` is a
-    /// declared parameter, never a solver tolerance.
+    /// `0.5 (a + b + sqrt((a - b)^2 + w^2))`, a limit with a continuous Jacobian. The width `w` comes from
+    /// the law's declared values, never from a solver.
     pub fn smooth_max<U>(
         &mut self,
         a: Expr<'b, 'k, O, U>,

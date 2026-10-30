@@ -52,9 +52,13 @@ impl Seal for Combination {
 pub(crate) fn conserved_basis(amounts: usize, columns: &[Column]) -> ConservedBasis {
     let mut edges = Vec::new();
     for column in columns {
-        if let [(from, _), (to, _)] = column.terms[..] {
-            edges.push((from.index(), to.index()));
-            edges.push((to.index(), from.index()));
+        match column.terms[..] {
+            [(from, -1), (to, 1)] | [(to, 1), (from, -1)] => {
+                edges.push((from.index(), to.index()));
+                edges.push((to.index(), from.index()));
+            }
+            [] | [_] => {}
+            _ => unreachable!("a transfer moves one unit between two amounts, or across the boundary"),
         }
     }
     let part = Digraph::new(amounts, &edges).components();
