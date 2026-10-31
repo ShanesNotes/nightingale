@@ -364,6 +364,11 @@ fn check_chance(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
         let mut integrals: Vec<&'static str> =
             (fragment.hazards.iter()).map(|hazard| hazard.integral).collect();
         integrals.sort_unstable();
+        if let Some(pair) = integrals.windows(2).find(|pair| pair[0] == pair[1]) {
+            return Err(CompileDefect::SecondGuardOnIntegral {
+                integral: named(pair[0]),
+            });
+        }
         for &integral in &integrals {
             let slot = fragment.slots.iter().find(|slot| slot.name == integral);
             if slot.map(|slot| slot.set) != Some(AdmissibleSet::Nonnegative) {

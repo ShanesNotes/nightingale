@@ -354,7 +354,8 @@ const OWNER: &str = "CV";
 const RHYTHM: &str = "rhythm";
 const BYSTANDER: &str = "bystander";
 const TONE: &str = "tone";
-const INTEGRAL: &str = "rhythm-hazard";
+const ONSET_INTEGRAL: &str = "onset-hazard";
+const RETURN_INTEGRAL: &str = "return-hazard";
 const SECOND_INTEGRAL: &str = "second-hazard";
 
 fn named(local: &'static str) -> LawName {
@@ -428,10 +429,10 @@ fn flow<'b>(
     })
 }
 
-/// The second replay case: two vessels whose conductance a rhythm selects. One integral accrues at a rate each
-/// rhythm sets, and its two guards, each on a stream of its own, move the rhythm there and back. A forcing
-/// varies both rates, which read a memory row, so a core can reach a rate only through a row the scales hold.
-/// It carries a delivery, so the late-admission gate has an input to withhold.
+/// The second replay case: two vessels whose conductance a rhythm selects. Two guards, each with an integral and
+/// a stream of its own, move the rhythm there and back, and each integral accrues only in the rhythm its guard
+/// leaves. A forcing varies both rates, which read a memory row, so a core can reach a rate only through a row
+/// the scales hold. It carries a delivery, so the late-admission gate has an input to withhold.
 pub struct ChanceCase {
     body: CompiledBody,
     a: SiteId,
@@ -447,7 +448,6 @@ enum Variant {
     Bystander,
     Racing,
     Relaxing,
-    Ledger,
 }
 impl ChanceCase {
     pub fn ectopy() -> Result<Self, AdmissionError> {
@@ -458,18 +458,14 @@ impl ChanceCase {
     pub fn ectopy_and_bystander() -> Result<Self, AdmissionError> {
         Self::declared(Variant::Bystander)
     }
-    /// A second hazard, with an integral and a stream of its own, leaves sinus for ectopic too, so two guards can
-    /// cross in one landing and race for one mode variable.
+    /// A second hazard leaves sinus for ectopic too, so two guards can cross in one landing and race for one mode
+    /// variable. Its rate holds in every mode, so it accrues while its guard is not armed.
     pub fn racing() -> Result<Self, AdmissionError> {
         Self::declared(Variant::Racing)
     }
     /// The walk's relaxing law on the ectopy rate, which goes negative.
     pub fn relaxing() -> Result<Self, AdmissionError> {
         Self::declared(Variant::Relaxing)
-    }
-    /// A second integral whose rate holds in every mode, so it accrues while its guard is not armed.
-    pub fn accruing_while_disarmed() -> Result<Self, AdmissionError> {
-        Self::declared(Variant::Ledger)
     }
     fn declared(variant: Variant) -> Result<Self, AdmissionError> {
         let mut map = AnatomyBuilder::new();
@@ -504,7 +500,8 @@ impl ChanceCase {
                 ParameterKey::new("cv.knot-period"),
                 ParameterKey::new("cv.hazard-amplitude"),
             );
-            let integral = laws.state::<Dimensionless>(INTEGRAL, Admissible::nonnegative());
+            let onset_hazard = laws.state::<Dimensionless>(ONSET_INTEGRAL, Admissible::nonnegative());
+            let return_hazard = laws.state::<Dimensionless>(RETURN_INTEGRAL, Admissible::nonnegative());
             let [sinus, ectopic] = laws.modes(RHYTHM, ["sinus", "ectopic"]);
             let (wave, beat) = (
                 RateClass::new(RateBand::Wave, 1_000_000)?,
@@ -521,15 +518,24 @@ impl ChanceCase {
             });
             laws.memory_rate(&tone, settling);
             let onset_rate = if variant == Variant::Relaxing {
-                relaxing_rate(&laws, &onset, &integral, &tone, &wobble, sinus.only(), beat)
+                relaxing_rate(&laws, &onset, &onset_hazard, &tone, &wobble, sinus.only(), beat)
             } else {
                 hazard_rate(&laws, &onset, &tone, &wobble, sinus.only(), beat)
             };
-            laws.memory_rate(&integral, onset_rate);
+            let still = |holds| {
+                laws.kernel(|mut k| {
+                    let rate = k.zero::<Rate<Dimensionless>>();
+                    k.finish(rate, holds, beat)
+                })
+            };
+            let (idle_onset, idle_return) = (still(ectopic.only()), still(sinus.only()));
             let return_rate = hazard_rate(&laws, &recovery, &tone, &wobble, ectopic.only(), beat);
-            laws.memory_rate(&integral, return_rate);
-            laws.hazard(HazardGuard::new(&integral, &dice, sinus.to(&ectopic)?));
-            laws.hazard(HazardGuard::new(&integral, &back, ectopic.to(&sinus)?));
+            laws.memory_rate(&onset_hazard, onset_rate);
+            laws.memory_rate(&onset_hazard, idle_onset);
+            laws.memory_rate(&return_hazard, return_rate);
+            laws.memory_rate(&return_hazard, idle_return);
+            laws.hazard(HazardGuard::new(&onset_hazard, &dice, sinus.to(&ectopic)?));
+            laws.hazard(HazardGuard::new(&return_hazard, &back, ectopic.to(&sinus)?));
             match variant {
                 Variant::Bystander => {
                     let pace =
@@ -541,7 +547,7 @@ impl ChanceCase {
                     laws.memory_rate(&second, rate);
                     laws.hazard(HazardGuard::new(&second, &other, quiet.to(&stirred)?));
                 }
-                Variant::Racing | Variant::Ledger => {
+                Variant::Racing => {
                     let other = laws.stream("second-stream");
                     let second = laws.state::<Dimensionless>(SECOND_INTEGRAL, Admissible::nonnegative());
                     let rate = hazard_rate(&laws, &onset, &tone, &wobble, laws.every_mode(), beat);
@@ -638,7 +644,8 @@ impl ChanceCase {
         packet.synthetic(ParameterKey::new("cv.hazard-amplitude"), body, amplitude, note)?;
         let memory = |local| RowKind::Memory(named(local));
         packet.start(memory(TONE), Measure::<Dimensionless>::new(1.0)?, note)?;
-        packet.start(memory(INTEGRAL), zero()?, note)?;
+        packet.start(memory(ONSET_INTEGRAL), zero()?, note)?;
+        packet.start(memory(RETURN_INTEGRAL), zero()?, note)?;
         packet.start_mode(named(RHYTHM), "sinus", note)?;
         match self.variant {
             Variant::Bystander => {
@@ -647,7 +654,7 @@ impl ChanceCase {
                 packet.start(memory(SECOND_INTEGRAL), zero()?, note)?;
                 packet.start_mode(named(BYSTANDER), "quiet", note)?;
             }
-            Variant::Racing | Variant::Ledger => packet.start(memory(SECOND_INTEGRAL), zero()?, note)?,
+            Variant::Racing => packet.start(memory(SECOND_INTEGRAL), zero()?, note)?,
             Variant::Plain | Variant::Relaxing => {}
         }
         for (site, amount) in [self.a, self.b].into_iter().zip(START) {

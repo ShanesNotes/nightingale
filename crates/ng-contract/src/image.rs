@@ -230,6 +230,7 @@ impl ImageParts {
         if !(body.layout.parameters.iter().zip(&parameters.values))
             .all(|(slot, value)| inside(slot.admissible, value))
             || !(rows.iter().zip(&parameters.starts)).all(|(row, value)| inside(row.admissible(), value))
+            || body.unheld_period(&parameters.values).is_some()
         {
             return Err(Malformed);
         }

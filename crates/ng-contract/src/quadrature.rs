@@ -1,5 +1,4 @@
-use crate::body::RowKind;
-use crate::landing::GuardGap;
+use crate::body::{HazardLayout, RowKind};
 use crate::problem::{SolveWorkspace, StagePoint};
 use crate::scheme::Stage;
 use crate::{
@@ -428,8 +427,11 @@ impl VerifiedStep {
     pub fn applied(&self) -> &[InputId] {
         &self.ticket.due
     }
-    pub(crate) fn gap(&self, problem: &CoupledProblem<'_>) -> GuardGap {
-        problem.chance.gap(problem.body, &self.state)
+    pub(crate) fn crossed<'b>(&self, problem: &CoupledProblem<'b>) -> Option<&'b HazardLayout> {
+        problem.chance.crossed(problem.body, &self.state)
+    }
+    pub(crate) fn gap(&self, problem: &CoupledProblem<'_>, guard: &HazardLayout) -> f64 {
+        problem.chance.gap(&self.state, guard)
     }
     /// Applies what crossed, all at once, to the step the attempt selected. The dense segment keeps the left
     /// limit, so a chord never runs through a reset and the next segment starts at the reset.

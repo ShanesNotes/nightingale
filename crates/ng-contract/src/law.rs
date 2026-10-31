@@ -1031,8 +1031,8 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
             enters: guard.transition.to,
         });
     }
-    /// Compile refuses a second guard on one stream and an integral not declared nonnegative, which must hold
-    /// the reset at zero and reach any threshold.
+    /// Compile refuses a second guard on one stream or one integral, and an integral not declared nonnegative,
+    /// which must hold the reset at zero and reach any threshold.
     pub fn hazard(&mut self, guard: HazardGuard<'b, O>) {
         self.data.hazards.push(HazardDeclaration {
             integral: guard.integral,

@@ -42,6 +42,11 @@ pub enum AdmissionError {
     UnbackedConstant {
         law: LawName,
     },
+    /// A forcing's period that is no whole number of nanoseconds in the clock's range, which a run could only
+    /// round into another period.
+    ForcingPeriod {
+        key: ParameterKey,
+    },
     /// A mode variable with no starting value in the packet.
     MissingStartMode {
         variable: LawName,
@@ -194,6 +199,9 @@ pub enum CompileDefect {
     UnreadForcing { forcing: LawName },
     /// A second guard on one stream: one draw cannot be two events' threshold.
     SecondGuardOnStream { stream: LawName },
+    /// A second guard on one integral: one reset cannot serve two thresholds, because a firing would erase what
+    /// the other guard crossed.
+    SecondGuardOnIntegral { integral: LawName },
     /// A hazard integral not declared nonnegative, so it could not hold the reset or reach a threshold.
     HazardSet { integral: LawName },
 }

@@ -115,6 +115,26 @@ fn a_second_guard_on_one_stream_is_refused_by_name() {
 }
 
 #[test]
+fn a_second_guard_on_one_integral_is_refused_by_name() {
+    let outcome = declared(|laws| {
+        let (dice, more) = (laws.stream("dice"), laws.stream("more dice"));
+        let integral = laws.state::<Dimensionless>("integral", Admissible::nonnegative());
+        let [a, b] = laws.modes("rhythm", ["a", "b"]);
+        laws.hazard(HazardGuard::new(&integral, &dice, a.to(&b)?));
+        laws.hazard(HazardGuard::new(&integral, &more, b.to(&a)?));
+        let rate = plain_rate(laws)?;
+        laws.memory_rate(&integral, rate);
+        Ok(())
+    });
+    assert_eq!(
+        defect(outcome),
+        Some(CompileDefect::SecondGuardOnIntegral {
+            integral: name("integral")
+        })
+    );
+}
+
+#[test]
 fn a_hazard_integral_whose_set_cannot_hold_a_reset_is_refused_by_name() {
     for domain in [
         Admissible::positive(),

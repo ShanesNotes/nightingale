@@ -1,4 +1,5 @@
 use crate::body::Layout;
+use crate::chance::holds_a_period;
 use crate::identity::{Canonical, Seal};
 use crate::law::{Input, Op};
 use crate::quantity::dimension;
@@ -270,6 +271,13 @@ impl CompiledBody {
             .find(|program| unbacked(&program.code.ops))
             .map(|program| program.law)
     }
+    /// The first forcing whose period the clock cannot hold.
+    pub(crate) fn unheld_period(&self, values: &[f64]) -> Option<ParameterKey> {
+        (self.layout.forcings.iter())
+            .map(|forcing| forcing.period)
+            .find(|period| !holds_a_period(values[period.index()]))
+            .map(|period| self.layout.parameters[period.index()].key)
+    }
     /// Parses a packet against the compiled layout. Each refusal is by name. What cannot run yet is refused
     /// first, and a mode's start next, because which laws hold decides what every later value means.
     pub fn bind<K: PacketKind>(&self, packet: ParameterPacket<K>) -> Result<BoundParameters, AdmissionError> {
@@ -327,6 +335,9 @@ impl CompiledBody {
                 return Err(AdmissionError::ParameterOutsideSet { key, binding });
             }
             values.push(value);
+        }
+        if let Some(key) = self.unheld_period(&values) {
+            return Err(AdmissionError::ForcingPeriod { key });
         }
         if let Some(entry) = (packet.parameters.iter().zip(&read))
             .filter(|(_, read)| !**read)

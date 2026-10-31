@@ -1,5 +1,5 @@
+use crate::body::HazardLayout;
 use crate::identity::{Canonical, Seal};
-use crate::landing::GuardGap;
 use crate::{Candidate, CompiledBody, Digest, Fired, LawName, ModeValue, Seed, SimTime};
 
 /// Admission holds no seed, so a start state is a function of the packet alone: a draw reads its mean and a
@@ -118,19 +118,15 @@ impl Chance {
             .map(|forcing| 1.0 + forcing.amplitude * spline(forcing.keyed, forcing.period_ns, at))
             .collect()
     }
-    fn past_threshold(&self, state: &Candidate, integral: crate::RowId, stream: usize) -> f64 {
-        state.value(integral).rounded() - self.thresholds[stream]
+    /// How far a guard's integral stands past its threshold.
+    pub(crate) fn gap(&self, state: &Candidate, hazard: &HazardLayout) -> f64 {
+        state.value(hazard.integral).rounded() - self.thresholds[hazard.stream]
     }
-    /// How far the most-crossed armed guard stands past its threshold.
-    pub(crate) fn gap(&self, body: &CompiledBody, state: &Candidate) -> GuardGap {
-        let armed = (body.layout.hazards.iter()).filter(|hazard| hazard.armed(&state.modes));
-        armed.fold(GuardGap::NONE, |worst, hazard| {
-            worst.or(GuardGap::of(self.past_threshold(
-                state,
-                hazard.integral,
-                hazard.stream,
-            )))
-        })
+    /// The first armed guard past its threshold, in stable order. A landing reads this guard alone, so a guard
+    /// that crossed nothing moves no other stream's landing, not even inside the floor.
+    pub(crate) fn crossed<'b>(&self, body: &'b CompiledBody, state: &Candidate) -> Option<&'b HazardLayout> {
+        (body.layout.hazards.iter())
+            .find(|hazard| hazard.armed(&state.modes) && self.gap(state, hazard) >= 0.0)
     }
     /// Applies a crossing to a value no record holds yet, so a refusal or a dropped trial discards every part.
     /// Only a guard armed before any of them fires can fire, so walking in stable order decides a race on one
@@ -147,7 +143,7 @@ impl Chance {
         let first_memory = state.amounts.len();
         let mut fired = Vec::new();
         for (hazard, armed) in body.layout.hazards.iter().zip(armed) {
-            let crossed = self.past_threshold(&state, hazard.integral, hazard.stream) >= 0.0;
+            let crossed = self.gap(&state, hazard) >= 0.0;
             if !armed || !hazard.armed(&state.modes) || !crossed {
                 continue;
             }
@@ -172,9 +168,16 @@ impl Chance {
     }
 }
 
-/// Finer than the clock is the clock's own nanosecond, and a positive period below it must not divide by zero.
+/// Whether the clock holds this period exactly, so a run reads the period the packet gave.
+pub(crate) fn holds_a_period(seconds: f64) -> bool {
+    let ns = seconds * NANOSECONDS_PER_SECOND;
+    (1.0..18_446_744_073_709_551_616.0).contains(&ns) && ns == ns.round()
+}
+
+/// `bind` and `parse` refuse a period the clock cannot hold, and a problem built on other values reaches nothing
+/// but must not divide by zero.
 fn period_ns(seconds: f64) -> u64 {
-    ((seconds * NANOSECONDS_PER_SECOND).round() as u64).max(1)
+    ((seconds * NANOSECONDS_PER_SECOND) as u64).max(1)
 }
 
 #[cfg(test)]

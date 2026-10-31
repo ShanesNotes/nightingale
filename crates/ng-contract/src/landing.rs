@@ -1,24 +1,3 @@
-/// How far the most-crossed armed guard stands past its threshold at a published state, below zero when none
-/// is. The attempt reads it and nothing outside the contract does.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct GuardGap {
-    value: f64,
-}
-impl GuardGap {
-    pub(crate) const NONE: Self = Self {
-        value: f64::NEG_INFINITY,
-    };
-    pub(crate) fn of(value: f64) -> Self {
-        Self { value }
-    }
-    pub(crate) fn or(self, other: Self) -> Self {
-        if other.value > self.value { other } else { self }
-    }
-    pub(crate) fn crossed(self) -> bool {
-        self.value >= 0.0
-    }
-}
-
 #[derive(Clone, Copy, PartialEq)]
 enum End {
     Bottom,
@@ -30,9 +9,9 @@ enum End {
 /// this base, whatever waits.
 pub(crate) struct Bracket {
     bottom_ns: u64,
-    bottom: GuardGap,
+    bottom: f64,
     top_ns: u64,
-    top: GuardGap,
+    top: f64,
     tolerance_ns: u64,
     moved: End,
     /// A first trial near the root rarely halves a bracket, and calling that a stall sends the second trial to
@@ -42,7 +21,7 @@ pub(crate) struct Bracket {
 }
 impl Bracket {
     /// `base` is the gap at the accepted state, the bottom of length zero.
-    pub(crate) fn new(base: GuardGap, top_ns: u64, top: GuardGap, tolerance_ns: u64) -> Self {
+    pub(crate) fn new(base: f64, top_ns: u64, top: f64, tolerance_ns: u64) -> Self {
         Self {
             bottom_ns: 0,
             bottom: base,
@@ -74,11 +53,11 @@ impl Bracket {
             ..
         } = *self;
         let width = top_ns - bottom_ns;
-        let slope = top.value - bottom.value;
+        let slope = top - bottom;
         if stalled || width / 2 <= tolerance_ns || !(slope > 0.0 && slope.is_finite()) {
             return bottom_ns + width / 2;
         }
-        let root = bottom_ns as f64 + width as f64 * -bottom.value / slope;
+        let root = bottom_ns as f64 + width as f64 * -bottom / slope;
         let half = tolerance_ns as f64 / 2.0;
         let aim = if moved == End::Top {
             root - half
@@ -89,9 +68,9 @@ impl Bracket {
     }
     /// Two trials that together failed to halve the bracket make the next one bisect, so its width halves at
     /// least every three trials, and a span below 2^64 ns takes at most 192 trials at any tolerance.
-    pub(crate) fn note(&mut self, length_ns: u64, gap: GuardGap) {
+    pub(crate) fn note(&mut self, length_ns: u64, gap: f64, crossed: bool) {
         let width = self.top_ns - self.bottom_ns;
-        if gap.crossed() {
+        if crossed {
             self.top_ns = length_ns;
             self.top = gap;
             self.moved = End::Top;
@@ -107,15 +86,16 @@ impl Bracket {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bracket, GuardGap};
+    use super::Bracket;
 
     fn trials(base: f64, top_ns: u64, top: f64, tolerance_ns: u64, mut gap: impl FnMut(u64) -> f64) -> u32 {
-        let mut bracket = Bracket::new(GuardGap::of(base), top_ns, GuardGap::of(top), tolerance_ns);
+        let mut bracket = Bracket::new(base, top_ns, top, tolerance_ns);
         let mut spent = 0;
         while !bracket.closed() {
             let length = bracket.aim();
             assert!(bracket.bottom_ns < length && length < bracket.top_ns);
-            bracket.note(length, GuardGap::of(gap(length)));
+            let value = gap(length);
+            bracket.note(length, value, value >= 0.0);
             spent += 1;
         }
         spent

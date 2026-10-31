@@ -15,7 +15,8 @@ const MILLISECOND: u64 = 1_000_000;
 /// A model default: the landing tolerance plus what a quadrature books wrong on this case, about a quarter of
 /// the coarser step times the rate's relative swing.
 const EVENT_TOLERANCE_NS: u64 = 500 * MILLISECOND;
-const INTEGRAL: &str = "rhythm-hazard";
+const ONSET_INTEGRAL: &str = "onset-hazard";
+const RETURN_INTEGRAL: &str = "return-hazard";
 const SECOND_INTEGRAL: &str = "second-hazard";
 const ONSET: &str = "ectopic-beat";
 const RETURN: &str = "sinus-return";
@@ -117,49 +118,41 @@ fn each_stream_and_each_ordinal_has_its_own_draw() {
 }
 
 #[test]
-fn a_rate_holds_where_its_law_says_so_an_integral_keeps_what_a_rate_that_does_not_hold_there_would_add() {
+fn a_rate_runs_only_in_the_mode_its_law_holds_in() {
     let case = ChanceCase::ectopy().expect("a body");
     let core = reference(SECOND);
-    let integral = row(&case, INTEGRAL);
+    let (onset, recovery) = (row(&case, ONSET_INTEGRAL), row(&case, RETURN_INTEGRAL));
+    let bits = |session: &Session<'_, Running>, row| session.record().accepted().value(row).bits();
     let mut session = case.admit(&core).expect("admitted");
-    let (mut sinus, mut ectopic) = (Vec::new(), Vec::new());
-    let mut rhythm = "sinus";
+    let mut idle = recovery;
+    let (mut moved, mut held) = (0, 0);
     while session.record().accepted().time() < case.end() {
-        let before = session.record().accepted().value(integral);
-        let time = session.record().accepted().time();
+        let before = bits(&session, idle);
         let (next, receipt) = one_step(session);
         session = next;
-        if let Some(event) = receipt.fired().first() {
-            rhythm = event.entered().value;
-            continue;
+        match receipt.fired().first() {
+            None => {
+                assert_eq!(bits(&session, idle), before, "the zero law holds here");
+                held += 1;
+            }
+            Some(event) => {
+                idle = if event.entered().value == "sinus" {
+                    recovery
+                } else {
+                    onset
+                };
+                moved += 1;
+            }
         }
-        let gained = session.record().accepted().value(integral).minus(before);
-        let seconds = (session.record().accepted().time().nanoseconds() - time.nanoseconds()) as f64;
-        let per_second = f64::from_bits(gained.bits()[0]) / seconds * 1e9;
-        if rhythm == "sinus" {
-            &mut sinus
-        } else {
-            &mut ectopic
-        }
-        .push(per_second);
     }
-    let mean = |rates: &[f64]| rates.iter().sum::<f64>() / rates.len() as f64;
-    assert!(!sinus.is_empty() && !ectopic.is_empty());
-    assert!(
-        mean(&ectopic) > 2.0 * mean(&sinus),
-        "each rhythm runs its own law: {} and {}",
-        mean(&sinus),
-        mean(&ectopic)
-    );
+    assert!(moved >= 2 && held >= 20, "{moved} firings and {held} held steps");
 }
 
 /// A rate whose law holds in every mode accrues while its guard is not armed, as the law says. The guard then
 /// fires within a floor of arming, at the end of a first ticket no longer than the floor.
 #[test]
 fn an_integral_past_its_draw_when_its_guard_arms_fires_within_a_floor() {
-    let case = ChanceCase::accruing_while_disarmed()
-        .expect("a body")
-        .until(at(2_400));
+    let case = ChanceCase::racing().expect("a body").until(at(2_400));
     let fired = events(&case, &reference(SECOND));
     let overdue = fired.windows(2).filter(|pair| {
         pair[0].entered().value == "sinus"
@@ -177,7 +170,7 @@ fn an_integral_past_its_draw_when_its_guard_arms_fires_within_a_floor() {
 fn a_rate_that_falls_below_zero_never_lowers_its_integral() {
     let case = ChanceCase::relaxing().expect("a body");
     let core = reference(SECOND / 4);
-    let integral = row(&case, INTEGRAL);
+    let integral = row(&case, ONSET_INTEGRAL);
     let mut session = case.admit(&core).expect("admitted");
     let mut last = Compensated::ZERO;
     let mut held = 0;
@@ -201,7 +194,7 @@ fn a_rate_that_falls_below_zero_never_lowers_its_integral() {
 fn a_segment_ends_at_the_left_limit_of_a_reset() {
     let case = ChanceCase::ectopy().expect("a body");
     let core = reference(SECOND);
-    let integral = row(&case, INTEGRAL);
+    let integral = row(&case, ONSET_INTEGRAL);
     let mut session = case.admit(&core).expect("admitted");
     loop {
         let (next, receipt) = one_step(session);
@@ -587,9 +580,18 @@ fn a_late_input_on_either_side_of_a_crossing_takes_the_known_runs_tickets_under_
         },
         trace: RefCell::new(Vec::new()),
     };
-    let quiet = ChanceCase::ectopy().expect("a body").delivering(Vec::new());
-    let crossing = events(&quiet, &core())[0].at().nanoseconds();
-    assert!(crossing > 15 * SECOND, "the crossing lies past the short spans");
+    let seeded = |word| {
+        ChanceCase::ectopy()
+            .expect("a body")
+            .seeded(Seed::new([word, 2, 3, 4]))
+    };
+    let first = |word| {
+        let quiet = seeded(word).delivering(Vec::new());
+        events(&quiet, &core())[0].at().nanoseconds()
+    };
+    let word = (0..64).find(|&word| (20 * SECOND..60 * SECOND).contains(&first(word)));
+    let word = word.expect("a seed whose first crossing lies past the short spans");
+    let crossing = first(word);
     let mut refusals = 0;
     for stamp in [crossing - 5 * SECOND, crossing + 5 * SECOND] {
         let delivery = Delivery {
@@ -598,10 +600,7 @@ fn a_late_input_on_either_side_of_a_crossing_takes_the_known_runs_tickets_under_
             to: at(100),
             amount: Measure::new(10.0).expect("finite"),
         };
-        let case = ChanceCase::ectopy()
-            .expect("a body")
-            .delivering(vec![delivery])
-            .until(at(120));
+        let case = seeded(word).delivering(vec![delivery]).until(at(120));
         let withheld = core();
         let mut heads = vec![case.admit_withheld(&withheld).expect("admitted")];
         let mut late = None;
@@ -866,6 +865,59 @@ fn a_refusal_discards_the_reset_the_advance_and_the_mode_together() {
             Step::Faulted(stopped) => panic!("{:?}", stopped.fault()),
         }
     }
+}
+
+#[test]
+fn a_forcing_period_the_clock_cannot_hold_is_refused_at_binding() {
+    let (body, _) = holds_a_forcing().expect("a body");
+    let key = ParameterKey::new("fixture.period");
+    for seconds in [1.5e-9, 1e-12, 1e100] {
+        let mut packet = ParameterPacket::<SyntheticFixture>::new();
+        let note = "synthetic";
+        let scale = Measure::<Dimensionless>::new(3.0).expect("finite");
+        packet
+            .synthetic(ParameterKey::new("fixture.scale"), Binding::Body, scale, note)
+            .expect("one entry");
+        let amplitude = Measure::<Dimensionless>::new(0.5).expect("finite");
+        packet
+            .synthetic(
+                ParameterKey::new("fixture.amplitude"),
+                Binding::Body,
+                amplitude,
+                note,
+            )
+            .expect("one entry");
+        let period = Measure::<Time>::new(seconds).expect("finite");
+        packet
+            .synthetic(key, Binding::Body, period, note)
+            .expect("one entry");
+        assert_eq!(
+            body.bind(packet).err(),
+            Some(AdmissionError::ForcingPeriod { key }),
+            "{seconds}"
+        );
+    }
+}
+
+/// A forged period under a good digest: `parse` holds bytes to what `bind` holds a packet to.
+#[test]
+fn a_forcing_period_the_clock_cannot_hold_is_malformed_under_a_good_digest() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = reference(SECOND);
+    let session = case.admit(&core).expect("admitted");
+    let mut store = Store::default();
+    let saved = session.checkpoint(&mut store).expect("saved");
+    let identity = session.record().identity().clone();
+    let held = 10.0_f64.to_bits().to_be_bytes();
+    let bytes = saved.as_bytes();
+    let at = (0..bytes.len() - 8)
+        .find(|&at| bytes[at..at + 8] == held)
+        .expect("the bound period");
+    let forged = forged(&saved, at, 1.5e-9_f64.to_bits());
+    assert_eq!(
+        Session::resume(&forged, &identity, case.body(), &core, &store).err(),
+        Some(CheckpointError::Malformed)
+    );
 }
 
 #[test]

@@ -472,14 +472,13 @@ fn land<T>(
     solved: &mut impl FnMut(&StepTicket) -> Result<(VerifiedStep, T), TrialFailure>,
 ) -> Result<(VerifiedStep, T), TrialFailure> {
     let start = ticket.interval().start();
-    let gap = passed.0.gap(problem);
-    if !gap.crossed() {
+    let Some(guard) = passed.0.crossed(problem) else {
         return Ok(passed);
-    }
+    };
     let floor = problem.identity.resolution().minimum_interval_ns();
     let identity = problem.identity.digest();
-    let base = problem.chance.gap(problem.body, problem.accepted.state());
-    let mut bracket = Bracket::new(base, ticket.length_ns(), gap, floor);
+    let base = problem.chance.gap(problem.accepted.state(), guard);
+    let mut bracket = Bracket::new(base, ticket.length_ns(), passed.0.gap(problem, guard), floor);
     let mut top = passed;
     while !bracket.closed() {
         let length = bracket.aim();
@@ -490,9 +489,9 @@ fn land<T>(
         // A refusal leaves through `?` and drops the bracket: a shorter span is a new attempt, and a shorter
         // ticket can be the refused one, because a stage's error is not monotone in its length.
         let step = solved(&trial)?;
-        let gap = step.0.gap(problem);
-        bracket.note(length, gap);
-        if gap.crossed() {
+        let crossed = step.0.crossed(problem).is_some();
+        bracket.note(length, step.0.gap(problem, guard), crossed);
+        if crossed {
             top = step;
         }
     }
