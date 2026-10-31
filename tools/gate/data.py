@@ -698,6 +698,7 @@ def centred_on_one_mean(s: Store, row: dict) -> bool:
 def population(s: Store) -> list[Violation]:
     code, out = "data.population", []
     in_packet = {r.get("id", ""): r for r in s.packet}
+    out += [Violation(code, str(r.get("id")), "a set row states its own interval; range is for a packet row") for r in s.ranges if "range" in r]
     for row in s.packet:
         subject = str(row.get("id"))
         if not well_formed(row):
@@ -1138,6 +1139,7 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.number", "fx.none_sd", lambda s: on(s, "fx.none_sd").update(value={"point": -1.0})),
     ("data.population", "fx.leaf_more", lambda s: on(s, "fx.leaf_more").update(value={"point": 2.0})),
     ("data.population", "fx.base", lambda s: cut(on(s, "fx.base"), "n")),
+    ("data.population", "fx.span", lambda s: on(s, "fx.span").update(range="fx.area_range")),
     ("data.population", "fx.base", lambda s: (on(s, "fx.base").update(value={"mean": 1.5, "ci_low": 1.3, "ci_high": 1.7, "coverage": 0.95}), cut(on(s, "fx.base"), "n"))),
     ("data.population", "fx.area", lambda s: on(s, "fx.area_range").update(value={"mean": 2.0, "ci_low": 1.5, "ci_high": 2.5, "coverage": 0.95})),
     ("data.population", "fx.area", lambda s: cut(on(s, "fx.area"), "range")),
