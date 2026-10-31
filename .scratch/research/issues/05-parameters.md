@@ -3,6 +3,7 @@
 Type: research
 Status: open
 Blocked by: 02
+Data: ns.*
 
 **Question:** What value does each law read, in the order the slice composes them?
 
@@ -13,3 +14,7 @@ Reading order matters more than row count, since one document answers many rows.
 - [ ] RN: segmental transport for each conserved solute
 - [ ] NS and the receptor layer: affinities, on and off rates, junction volumes. An unmeasurable release per firing takes an inference record from spillover
 - [ ] RS, BC, EN, HP, GI, HC, MT, MS and IM at rung 0
+
+## Comments
+
+- The sinus node's `R0`, `m` and `n` are in `data/` from Katona 1982, read from its abstract in 10 nonathletes, and `XC-36` closes them against the heart rate anchor. The abstract names no posture, so this cohort's rest and the anchor's supine rest are only assumed to match.
