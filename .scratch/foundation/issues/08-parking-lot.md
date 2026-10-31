@@ -9,7 +9,7 @@ Work outside the solver, the contract and the atlas. Nothing here starts before 
 - The chart, rebuilt on the new state and event log: assessment, vitals, medication administration, labs and progress notes.
 - The monitor's display (SRS section 6). Until display work starts, nightingale-pulse's monitor covers display. The monitor's readings are not parked: they stay in the lens the milestone checks ([record 0004](../../../docs/adr/0004-first-milestone.md)).
 - How evidence is displayed (SRS question Q5, UI/UX).
-- Scenarios, disease and conditions, chance and hazards, interventions, pharmacology, debrief, death behavior and the EHR, each in its scope stage (SRS section 1).
+- Scenarios, disease and conditions, chance and hazards, interventions, pharmacology, debrief and the EHR, each in its scope stage (SRS section 1).
 
 ## Comments
 

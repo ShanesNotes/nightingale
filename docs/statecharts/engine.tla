@@ -5,7 +5,7 @@ CONSTANTS MaxRevision, MaxInterval, MinInterval, MaxBranch
 
 Phases == {"mapDeclared", "mapChecked", "compiled", "bound",
            "accepted", "proposed", "refused", "faulted",
-           "notAdmitted", "death"}
+           "notAdmitted"}
 
 VARIABLES phase, mapOk, bodyOk, packetOk, startOk,
           revision, base, interval, branch,
@@ -105,14 +105,8 @@ Recover ==
   /\ Remember("recover")
   /\ UNCHANGED <<mapOk, bodyOk, packetOk, startOk, base, interval>>
 
-\* Planned: SRS rule 7 and GLOSSARY Death; behavior waits for a later scope stage (foundation 08).
-Die ==
-  /\ phase = "accepted" /\ phase' = "death"
-  /\ Remember("die")
-  /\ UNCHANGED <<mapOk, bodyOk, packetOk, startOk, revision, base, interval, branch>>
-
 Done ==
-  /\ phase \in {"notAdmitted", "death"}
+  /\ phase = "notAdmitted"
   /\ UNCHANGED vars
 
 Next ==
@@ -121,18 +115,18 @@ Next ==
   \/ PacketBinds \/ BindFails
   \/ Admit \/ AdmitFails
   \/ Propose \/ Accept \/ Refuse \/ Retry \/ NoShorterInterval \/ EngineFault
-  \/ Recover \/ Die \/ Done
+  \/ Recover \/ Done
 
 Spec == Init /\ [][Next]_vars
 
 Bound == revision <= MaxRevision /\ branch <= MaxBranch
 
-RunPhases == {"accepted", "proposed", "refused", "faulted", "death"}
+RunPhases == {"accepted", "proposed", "refused", "faulted"}
 
 TypeOK ==
   /\ phase \in Phases
   /\ act \in {"init", "fail", "mapPasses", "compile", "bind", "admit", "propose",
-              "accept", "refuse", "retry", "exhausted", "fault", "recover", "die"}
+              "accept", "refuse", "retry", "exhausted", "fault", "recover"}
   /\ interval \in MinInterval..MaxInterval
 
 NoStepBeforeAdmission ==
@@ -158,7 +152,4 @@ FaultIsLatched ==
 
 RecoverOpensNewBranch ==
   act = "recover" => (prevPhase = "faulted" /\ branch = prevBranch + 1 /\ revision <= prevRevision)
-
-FaultNeverWritesDeath ==
-  act = "die" => prevPhase = "accepted"
 ====

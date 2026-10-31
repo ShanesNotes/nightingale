@@ -38,4 +38,4 @@ This effort leaves out the first milestone's non-goals, which [Chart the foundat
 - Display work, the chart included. Display comes after the architecture.
 - Map detail finer than the first milestone needs. D5 rules it out.
 - A build target other than native Rust (SRS rule 5).
-- Death behavior, scripted outcomes and arbitrary odds. Death behavior waits for a later scope stage (SRS rule 7). The body computes every number from its physics, and chance fires only at cited odds (SRS section 1).
+- Scripted outcomes and arbitrary odds. The body computes every number from its physics, and chance fires only at cited odds (SRS section 1).

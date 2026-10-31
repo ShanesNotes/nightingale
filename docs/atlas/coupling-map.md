@@ -139,8 +139,8 @@ flowchart LR
   MT --> BRAIN["NS hypoxic-ischemic injury integral"]
   RHY --> ARREST["Arrest: flow only from CPR"]
   ARREST --> MT
-  BRAIN --> DEATH[("Death as a record state, written by physiology only")]
+  BRAIN --> DEATH[("Physiology stops: the patient is dead")]
   ARREST --> DEATH
 ```
 
-Neither contract draft has the discrete modes and hazards this needs yet; see the [synthesis](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/2026-10-26-contract-pass-1-synthesis.md#gaps-in-both) gap 1 and [pulse 0005](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/decisions/0005-core-contract-pass-1-choices.md) question 5. How death is defined as a record state is open in pulse 0004.
+Neither contract draft has the discrete modes and hazards this needs yet; see the [synthesis](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/council/2026-10-26-contract-pass-1/2026-10-26-contract-pass-1-synthesis.md#gaps-in-both) gap 1 and [pulse 0005](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/decisions/0005-core-contract-pass-1-choices.md) question 5.

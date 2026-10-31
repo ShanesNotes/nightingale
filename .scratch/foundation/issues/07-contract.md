@@ -10,7 +10,6 @@ From the SRS sharpening (conflict ids from the approved SRS's change log):
 
 - **C3, before the first exchange law.** Confirm that one membrane type with two settings, conductance and reflection (SRS section 5), fits the contract. The sketch has no wall type; exchange lives inside site-class laws.
 - **C9.** Add the measurement method to anchors, beside the averaging window (`AnchorStatistic`), and match both at admission (SRS rule 17).
-- **C15.** The contract's model default for who attests evidence names people per discipline. SRS rule 16 makes attestation a citation check; change that row.
 - **C16.** A disease enters as parameter shifts or timed events in the event log (rule 14, I15), but the contract binds parameters once per run and has no parameter-shift payload. Design the boundary payload and the rule for changing a bound value.
 - **C18.** "Tier" has no field in the sketch. Define it once and map it to `Certainty`, `Reading` and `Claim`.
 - **C19.** Alarm limits are monitor settings a clinician can change (SRS section 6). Decide whether they are their own lens field or a `ReferenceInterval`.

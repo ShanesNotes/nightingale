@@ -8,20 +8,18 @@ const states: Record<string, string> = {
   refused: "Step refused",
   faulted: "Engine fault, run stopped",
   notAdmitted: "Not admitted",
-  death: "Death (planned, foundation 08)",
 };
 
 const groups: Record<string, string> = {
   mapDeclared: "runs today",
   mapChecked: "runs today",
-  compiled: "typed in the sketch",
-  bound: "typed in the sketch",
-  accepted: "typed in the sketch",
-  proposed: "typed in the sketch",
+  compiled: "runs today",
+  bound: "runs today",
+  accepted: "runs today",
+  proposed: "runs today",
   refused: "attention",
   faulted: "attention",
   notAdmitted: "attention",
-  death: "planned",
 };
 
 const steps: Record<string, string> = {
@@ -36,7 +34,6 @@ const steps: Record<string, string> = {
   exhausted: "no shorter interval is left",
   fault: "the solver or model cannot go on",
   recover: "recover on a new branch from an earlier checkpoint",
-  die: "physiology reaches death",
 };
 
 const fails: Record<string, string> = {
@@ -50,9 +47,7 @@ export const state = (v: any) => states[v.phase];
 export const group = (v: any) => groups[v.phase];
 export const colors = {
   "runs today": "teal",
-  "typed in the sketch": "blue",
   attention: "orange",
-  planned: "tan",
 };
 export const step = (action: string, from: any, to: any) => {
   if (action === "Done") return null;
