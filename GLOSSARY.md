@@ -119,15 +119,12 @@ A step is the solver's own interval, cut short only at the next breakpoint and b
 A step the record crate rejects, leaving state, ledger, pending events and stream positions unchanged (I4). The only way on is the solver's retry over a shorter interval.
 
 **Engine fault**:
-A step the solver or the model cannot complete under its declared settings, including a refusal below the minimum interval. It stops the run for diagnosis and never writes death (rule 7).
+A step the solver or the model cannot complete under its declared settings, including a refusal below the minimum interval. It stops the run for diagnosis and is never death (rule 7).
 _Avoid_: crash, death (for a numerical failure)
 
 **Death**:
-A modeled end state of the patient's physiology, never a numerical failure. Its types exist from stage 1; its behavior comes in a later scope stage.
+When the patient's physiology stops, the patient is dead. A numerical failure is never death (rule 7).
 _Avoid_: fatal latch
-
-**Code blue**:
-The resuscitation effort that cardiac arrest starts, in an inpatient setting (rule 7).
 
 ## Chance
 
@@ -332,7 +329,7 @@ A packet or healthy-range set of obviously synthetic test values with no citatio
 Where a law's form is trusted, with its basis. A state outside it still publishes, and the step records the excursion.
 
 **Developer reviewer**:
-The person who reviews the software and confirms the arena's pick. The developer reviewer never attests clinical content (rule 16).
+The person who reviews the software and confirms the arena's pick.
 
 ## Reading the body
 

@@ -15,7 +15,7 @@ Rules for the arena seats:
 
 - Seats read nightingale-pulse only at the import commit, never as a build edge: `mkdir -p reference/pulse && git -C <pulse clone> archive bdc01c567f6cadacbd96728c0600a2e052882a59 docs/council/2026-10-26-solver-pass-1 docs/council/2026-10-26-contract-pass-1 | tar -x -C reference/pulse` (`reference/` is gitignored).
 - The cores go in `crates/ng-solver-a` and `crates/ng-solver-b`.
-- Anchor attestation is a citation check, not a person's sign-off: each anchor cites clinically reviewed literature with a stated tier, plus its measurement method and averaging window (SRS rules 16 and 17).
+- Anchor attestation is a citation check: each anchor cites clinically reviewed literature with a stated tier, plus its measurement method and averaging window (SRS rules 16 and 17).
 - The milestone build reads [pulse 0006](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/decisions/0006-first-milestone-stable-healthy-body.md)'s defaults and section 1e choices by permalink, once every anchor passes that check. They enter the repo only through a reviewed packet.
 
 Source: the split plan's map ticket, from the consolidated vision's section B, steps 3 to 6.
