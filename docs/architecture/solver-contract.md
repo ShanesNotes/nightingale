@@ -376,8 +376,8 @@ A gate counts only if it rejects a core built to fail it. Each one below is part
 | Reads a cut, refuses it and spreads its steps toward that instant | From the first step, no head is left before the input: the late-admission gate. From a later head the spread starts where the input has already arrived, so the run is the known run and nothing breaks I5 |
 | Clips at caller output times | `step` takes no target (E0061). A factory that tells two runs different times fails every gate. One set in every run is a grid of the core's own, which replays and passes |
 | Reads the host's clock | The pace gate |
-| Draws chance per solver step | Does not compile (no `threshold` on the problem, no seed on a core). A core with private dice can still tilt a row a rate reads, inside the scales: it replays bit for bit and passes every bit gate, and the step-policy gate rejects it once its events move past the plan's distance, which is that gate's stated limit |
-| Draws chance per evaluation or attempt | The extra-evaluation gate |
+| Draws chance per solver step or attempt | Does not compile (no `threshold` on the problem, no seed on a core). A core with private dice keyed on a ticket or its attempt number can still tilt a row a rate reads, inside the scales: it replays bit for bit and passes every bit gate, and the step-policy gate rejects it once its events move past the plan's distance, which is that gate's stated limit |
+| Draws chance per evaluation | The extra-evaluation gate |
 | Biases every step alike, so its own two policies agree | The step-policy gate, against the reference integrator |
 | Refuses every landing, hoping to skip an event | `NoAdmissibleStep`, with nothing published past the crossing |
 | Keeps its predictor or Jacobian across a firing | `validate`: the method history must start at the breakpoint |

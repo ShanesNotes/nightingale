@@ -90,8 +90,8 @@ pub enum ReplayGate {
     Resume,
     LateAdmission,
     Rewind,
-    /// Every ticket solved twice and the second kept: same bits, or a value moved with an evaluation or an
-    /// attempt (I8).
+    /// Every ticket solved twice and the second kept: same bits, or a value moved with an evaluation (I8). The
+    /// attempt is the same both times, so dice keyed on it answer to `StepPolicy`.
     ExtraEvaluation,
     /// Two step policies, each the same events as the reference within the plan's distance (I8).
     StepPolicy,
