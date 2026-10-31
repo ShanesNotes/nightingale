@@ -1,7 +1,8 @@
 use crate::identity::{Canonical, Seal};
+use crate::landing::Bracket;
 use crate::{
     AdmissionError, ByteReader, CompiledBody, CoupledProblem, Digest, EngineFault, EngineFaultKind, Interval,
-    Malformed, Measure, Refused, SimTime, StepTicket, TrialFailure, Water,
+    Malformed, Measure, Refused, SimTime, StepTicket, TrialFailure, VerifiedStep, Water,
 };
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
@@ -222,7 +223,7 @@ impl PendingInputs {
         let running = (self.past.active.iter()).filter(move |delivery| delivery.ends > start);
         running.chain(self.due_at(start))
     }
-    pub(crate) fn plan(&self, start: SimTime) -> Plan {
+    pub(crate) fn plan(&self, start: SimTime, fired: bool) -> Plan {
         let due = self.due_at(start);
         let ended = self.past.active.iter().any(|delivery| delivery.ends == start);
         let mut frame = DriveFrame::default();
@@ -232,25 +233,28 @@ impl PendingInputs {
         Plan {
             due: due.iter().map(|delivery| delivery.id).collect(),
             frame,
-            after_breakpoint: !due.is_empty() || ended,
+            after_breakpoint: !due.is_empty() || ended || fired,
             running_end: self.running_at(start).map(|delivery| delivery.ends).min(),
         }
     }
-    /// One attempt of a step: issues its ticket and hands it to `solved`, which solves and validates. When
-    /// the span passes and a waiting input lies inside it, drops that result and hands `solved` the same
-    /// ticket ended at that input. A cut can be refused like any ticket.
+    /// One attempt of a step: issues its ticket and hands it to `solved`, which solves and validates. It finds
+    /// the blind step first: the span's result, or, when that crosses a guard, the landing inside it, fired. When
+    /// a waiting input lies inside the blind step, it drops that result and hands `solved` the same ticket
+    /// ended at that input. A cut can be refused like any ticket, and a cut that crosses lands in turn.
     ///
-    /// This order is the causal step rule. Every ticket before a pass is a function of the sealed past, the
-    /// span and the refusals of this base, so it is the same ticket whatever waits. A waiting input shows
-    /// only to a step the record would have accepted past it, and then no late input can still arrive
-    /// before it, except behind the fence a refused cut leaves. A zero span, or one past the end of time, is
-    /// `BindingMismatch`, as is a refusal of another base.
+    /// This order is the causal step rule. Every ticket of the blind step is a function of the sealed past,
+    /// the span, the refusals of this base and published integrals, so it is the same ticket whatever waits.
+    /// A waiting input shows only to a step the record would have accepted past it, and then no late input
+    /// can still arrive before it, except behind the fence a cut leaves when it does not publish at its own
+    /// end. An input past the landing shows to no one, so a run that takes it at the landing's head equals the
+    /// run that knew it. A zero span, or one past the end of time, is `BindingMismatch`, as is a refusal of
+    /// another base.
     pub fn attempt<T>(
         &self,
         problem: &CoupledProblem<'_>,
         attempt: Attempt<'_>,
-        mut solved: impl FnMut(&StepTicket) -> Result<T, TrialFailure>,
-    ) -> Result<T, TrialFailure> {
+        mut solved: impl FnMut(&StepTicket) -> Result<(VerifiedStep, T), TrialFailure>,
+    ) -> Result<(VerifiedStep, T), TrialFailure> {
         let start = problem.accepted.time();
         let (span_ns, number, fence) = match attempt {
             Attempt::First { span_ns } => (span_ns, 0, start),
@@ -272,7 +276,7 @@ impl PendingInputs {
             attempted_ns: span_ns,
             last_refusal: None,
         };
-        let plan = self.plan(start);
+        let plan = self.plan(start, problem.accepted.state().fired);
         let wanted = start.plus_ns(span_ns).ok_or(mismatch)?;
         let end = plan.running_end.map_or(wanted, |ends| ends.min(wanted));
         let interval = Interval::new(start, end).ok_or(mismatch)?;
@@ -293,18 +297,21 @@ impl PendingInputs {
         };
         ticket.digest = ticket.sealed(identity);
         let passed = solved(&ticket)?;
+        let blind = land(problem, &ticket, passed, &mut solved)?;
+        let end = blind.0.ticket().interval().end();
         let cut = (self.timeline[self.past.cursor + ticket.due.len()..].first())
             .map(|delivery| delivery.at)
             .filter(|next| *next < end)
             .and_then(|next| Some((next, Interval::new(start, next)?)));
         let Some((next, interval)) = cut else {
-            return Ok(passed);
+            return Ok(blind);
         };
-        drop(passed);
+        drop(blind);
         ticket.interval = interval;
         ticket.fence = next;
         ticket.digest = ticket.sealed(identity);
-        solved(&ticket)
+        let passed = solved(&ticket)?;
+        land(problem, &ticket, passed, &mut solved)
     }
     /// Adds a late input to what waits, and returns its payload's digest. No accepted part moves: no
     /// revision, no seal, no ticket. The same id with the same payload is the same request whenever it
@@ -449,6 +456,42 @@ impl PendingInputs {
             },
         })
     }
+}
+
+/// A cut's ticket carries its fence into every trial, so a landing short of a shown input leaves that fence
+/// when it publishes. What comes back has fired, so a firing with no state to publish refuses before anything
+/// reads the timeline, in a run that knows an input as in one that does not.
+fn land<T>(
+    problem: &CoupledProblem<'_>,
+    ticket: &StepTicket,
+    passed: (VerifiedStep, T),
+    solved: &mut impl FnMut(&StepTicket) -> Result<(VerifiedStep, T), TrialFailure>,
+) -> Result<(VerifiedStep, T), TrialFailure> {
+    let start = ticket.interval().start();
+    let Some(guard) = passed.0.crossed(problem) else {
+        return Ok(passed);
+    };
+    let floor = problem.identity.resolution().minimum_interval_ns();
+    let identity = problem.identity.digest();
+    let base = problem.chance.gap(problem.accepted.state(), guard);
+    let mut bracket = Bracket::new(base, ticket.length_ns(), passed.0.gap(problem, guard), floor);
+    let mut top = passed;
+    while !bracket.closed() {
+        let length = bracket.aim();
+        let end = start.plus_ns(length).ok_or(ticket.mismatch())?;
+        let mut trial = ticket.clone();
+        trial.interval = Interval::new(start, end).ok_or(ticket.mismatch())?;
+        trial.digest = trial.sealed(identity);
+        // A refusal drops the bracket: a shorter ticket can be the refused one, because a stage's error is
+        // not monotone in its length.
+        let step = solved(&trial)?;
+        let crossed = step.0.crossed(problem).is_some();
+        bracket.note(length, step.0.gap(problem, guard), crossed);
+        if crossed {
+            top = step;
+        }
+    }
+    Ok((top.0.fire(problem)?, top.1))
 }
 
 const WATER_PAYLOAD: u64 = 0;

@@ -1,5 +1,6 @@
 use crate::body::{Bound, RowKind};
 use crate::boundary::{Delivery, PendingInputs};
+use crate::chance::{HELD_DRAW, HELD_FACTOR};
 use crate::evaluate::Inputs;
 use crate::problem::SolveWorkspace;
 use crate::{
@@ -109,11 +110,16 @@ impl InitializationSystem<'_> {
             }
         }
         let time = request.anchor_moment;
-        let frame = pending.plan(time).frame;
+        let frame = pending.plan(time, false).frame;
+        let draws = vec![HELD_DRAW; body.layout.streams.len()];
+        let factors = vec![HELD_FACTOR; body.layout.forcings.len()];
         let inputs = Inputs {
             parameters: &parameters.values,
             frame: &frame,
             unknowns,
+            modes: &parameters.modes,
+            draws: &draws,
+            factors: &factors,
         };
         let values = (body.instance_values(&inputs))
             .map_err(|undefined| InitializationFailure::Undefined { law: undefined.law })?;
@@ -128,7 +134,7 @@ impl InitializationSystem<'_> {
         Ok(InitialRevision {
             parts: ImageParts {
                 time,
-                state: Candidate::of_coordinates(body, unknowns),
+                state: Candidate::of_coordinates(body, unknowns, parameters.modes.clone()),
                 continuation: history,
                 dense: DenseSegment::empty(),
                 pending,

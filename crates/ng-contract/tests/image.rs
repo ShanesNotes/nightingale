@@ -130,10 +130,12 @@ fn image(body: &CompiledBody, sites: [SiteId; 2]) -> ImageParts {
     );
     let problem = CoupledProblem::new(body, parts.parameters(), &identity, view, digest);
     let attempt = Attempt::First { span_ns: SECOND };
-    let ticket = parts
-        .pending
-        .attempt(&problem, attempt, |ticket| Ok(ticket.clone()));
-    let applied = parts.pending.after(&ticket.expect("a ticket"));
+    let mut issued = None;
+    let _ = parts.pending.attempt(&problem, attempt, |ticket| {
+        issued = Some(ticket.clone());
+        Err::<(VerifiedStep, ()), _>(ticket.mismatch().into())
+    });
+    let applied = parts.pending.after(&issued.expect("a ticket"));
     parts.pending.advance(applied);
     parts.time = at(1);
     parts
@@ -145,7 +147,10 @@ const AMOUNTS: usize = TIME + 8;
 const FIRST_AMOUNT: usize = AMOUNTS + 8;
 const MEMORY: usize = FIRST_AMOUNT + 32;
 const ALGEBRAIC: usize = MEMORY + 8;
-const SCHEMA: usize = ALGEBRAIC + 8;
+const MODES: usize = ALGEBRAIC + 8;
+const ORDINALS: usize = MODES + 8;
+const FIRED: usize = ORDINALS + 8;
+const SCHEMA: usize = FIRED + 8;
 const COUNTERS: usize = SCHEMA + 32 + 8;
 const DENSE: usize = COUNTERS + 8;
 const TIMELINE: usize = DENSE + 8 + 8 + 8;
@@ -215,7 +220,7 @@ type Break = fn(&mut Vec<u8>);
 fn each_field_a_run_never_writes_is_malformed() {
     let (body, sites) = body().expect("a body");
     let bytes = image(&body, sites).canonical();
-    let breaks: [(&str, Break); 26] = [
+    let breaks: [(&str, Break); 29] = [
         ("another format", |bytes| bytes[8] ^= 1),
         ("a list that cannot fit", |bytes| put(bytes, TIMELINE, u64::MAX)),
         ("a list past the bytes", |bytes| put(bytes, COUNTERS, 1 << 40)),
@@ -278,6 +283,13 @@ fn each_field_a_run_never_writes_is_malformed() {
             put(bytes, ACTIVE, 2);
             bytes.splice(ACTIVE + 8..ACTIVE + 8, 0_u64.to_be_bytes());
         }),
+        ("a mode list the body does not declare", |bytes| {
+            put(bytes, MODES, 1)
+        }),
+        ("an ordinal list the body does not declare", |bytes| {
+            put(bytes, ORDINALS, 1)
+        }),
+        ("a flag that is neither no nor yes", |bytes| put(bytes, FIRED, 2)),
         ("another body's model", |bytes| bytes[MODEL] ^= 1),
         ("a parameter no slot owns", |bytes| put(bytes, VALUES, 3)),
         ("a parameter outside its set", |bytes| {

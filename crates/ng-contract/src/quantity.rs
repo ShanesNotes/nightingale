@@ -22,6 +22,8 @@ pub enum Dimensionless {}
 pub enum Pressure {}
 pub enum Volume {}
 pub enum Length {}
+/// Simulated time, in seconds in a packet.
+pub enum Time {}
 /// Pressure per volume: a wall's stiffness, never a pressure.
 pub enum Elastance {}
 /// Water, whose amount is in the canonical amount unit; its volume derives from it.
@@ -54,6 +56,7 @@ named!(
     Pressure = "pressure",
     Volume = "volume",
     Length = "length",
+    Time = "time",
     Elastance = "elastance",
     Water = "water",
 );

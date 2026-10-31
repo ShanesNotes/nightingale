@@ -552,11 +552,137 @@
 //! use ng_contract::*;
 //! fn read(parts: &ImageParts) -> PacketHash { parts.parameters().packet_hash() }
 //! ```
+//! The solver holds no dice: chance is drawn inside a law from a keyed stream.
+//! ```compile_fail,E0599
+//! use ng_contract::*;
+//! fn solver_dice(problem: &CoupledProblem<'_>) -> f64 { problem.threshold(0, 1) }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn law_dice<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular>, stream: &Stream<'b, Cardiovascular>)
+//!     -> Expr<'b, 'k, Cardiovascular, Dimensionless> {
+//!     k.draw(stream)
+//! }
+//! ```
+//! A problem keeps the run's seed and every threshold to itself, so a core computes no draw of its own.
+//! ```compile_fail,E0616
+//! use ng_contract::*;
+//! fn read_the_dice(problem: &CoupledProblem<'_>) -> &RunIdentity { problem.identity }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn head(problem: &CoupledProblem<'_>) -> SimTime { problem.accepted().time() }
+//! ```
+//! A core locates no event and claims no mode change: a proposal has nowhere to put one, and a problem has no
+//! `transitions`, because the attempt lands a guard from values `verify` published.
+//! ```compile_fail,E0599
+//! use ng_contract::*;
+//! fn locate(problem: &CoupledProblem<'_>, a: &StageEvaluation, b: &StageEvaluation, ticket: &StepTicket) {
+//!     let _ = problem.transitions(a, b, ticket);
+//! }
+//! ```
+//! ```compile_fail,E0061
+//! use ng_contract::*;
+//! fn claim(problem: &CoupledProblem<'_>, ticket: &StepTicket, increment: Increment, end: &SolveWorkspace,
+//!     fired: Vec<ModeValue>, history: MethodHistory) -> StepProposal {
+//!     problem.propose(ticket, increment, end, fired, history)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn honest(problem: &CoupledProblem<'_>, ticket: &StepTicket, increment: Increment, end: &SolveWorkspace,
+//!     history: MethodHistory) -> StepProposal {
+//!     problem.propose(ticket, increment, end, history)
+//! }
+//! ```
+//! A firing comes only from an attempt, so a receipt cannot be written by hand.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn forged(stream: LawName, at: SimTime, entered: ModeValue) -> Fired {
+//!     Fired { stream, at, ordinal: 0, threshold_bits: 0, entered }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn read(fired: &Fired) -> (LawName, SimTime, u64) { (fired.stream(), fired.at(), fired.ordinal()) }
+//! ```
+//! A stream comes only from its owner's builder, which records the guard it owes.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn minted<'b>() -> Stream<'b, Renal> {
+//!     Stream { name: "dice", brand: core::marker::PhantomData, owner: core::marker::PhantomData }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn declared<'b>(laws: &mut FragmentBuilder<'b, Renal>) -> Stream<'b, Renal> { laws.stream("dice") }
+//! ```
+//! A guard draws only on its own owner's stream.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn foreign<'b>(integral: &StateSlot<'b, Renal, Dimensionless>, dice: &Stream<'b, Cardiovascular>,
+//!     change: ModeTransition<'b, Renal>) -> HazardGuard<'b, Renal> {
+//!     HazardGuard::new(integral, dice, change)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn own<'b>(integral: &StateSlot<'b, Renal, Dimensionless>, dice: &Stream<'b, Renal>,
+//!     change: ModeTransition<'b, Renal>) -> HazardGuard<'b, Renal> {
+//!     HazardGuard::new(integral, dice, change)
+//! }
+//! ```
+//! A hazard integral is dimensionless: a threshold is `-ln u`, so a pressure or a set point cannot reach one.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn on_reference<'b>(integral: &StateSlot<'b, Nervous, Reference<Pressure>>, dice: &Stream<'b, Nervous>,
+//!     change: ModeTransition<'b, Nervous>) -> HazardGuard<'b, Nervous> {
+//!     HazardGuard::new(integral, dice, change)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn on_memory<'b>(integral: &StateSlot<'b, Nervous, Dimensionless>, dice: &Stream<'b, Nervous>,
+//!     change: ModeTransition<'b, Nervous>) -> HazardGuard<'b, Nervous> {
+//!     HazardGuard::new(integral, dice, change)
+//! }
+//! ```
+//! A forcing is a factor with no unit of amount, so it varies a rate and never adds to one (I10).
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn injected<'b, 'k>(k: &mut Kernel<'b, 'k, Renal>, rate: Expr<'b, 'k, Renal, Rate<Water>>,
+//!     wobble: &Forcing<'b, Renal>) -> Expr<'b, 'k, Renal, Rate<Water>> {
+//!     let varied = k.forcing(wobble);
+//!     k.add(rate, varied)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn varied<'b, 'k>(k: &mut Kernel<'b, 'k, Renal>, rate: Expr<'b, 'k, Renal, Rate<Water>>,
+//!     wobble: &Forcing<'b, Renal>) -> Expr<'b, 'k, Renal, Rate<Water>> {
+//!     let factor = k.forcing(wobble);
+//!     k.scale(rate, factor)
+//! }
+//! ```
+//! A forcing's period and amplitude are packet values, never numbers in a fragment (finding 15).
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn literal<'b>(laws: &mut FragmentBuilder<'b, Renal>) -> Forcing<'b, Renal> {
+//!     laws.forcing("wobble", 1_000_000_000, 0.1)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn declared<'b>(laws: &mut FragmentBuilder<'b, Renal>) -> Forcing<'b, Renal> {
+//!     laws.forcing("wobble", ParameterKey::new("rn.period"), ParameterKey::new("rn.amplitude"))
+//! }
+//! ```
 
 mod admission;
 mod anatomy;
 mod body;
 mod boundary;
+mod chance;
 mod compensated;
 mod compile;
 mod conservation;
@@ -565,6 +691,7 @@ mod failure;
 mod graph;
 mod identity;
 mod image;
+mod landing;
 mod law;
 mod packet;
 mod pinned;

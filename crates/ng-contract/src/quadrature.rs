@@ -1,9 +1,10 @@
-use crate::body::RowKind;
+use crate::body::{HazardLayout, RowKind};
 use crate::problem::{SolveWorkspace, StagePoint};
 use crate::scheme::Stage;
 use crate::{
     Candidate, Compensated, CompiledBody, CoupledProblem, DenseSegment, Digest, EngineFault, EngineFaultKind,
-    InputId, MethodHistory, NumericalRefusal, Ratio, RowId, StepTicket, TrialFailure, ValidityExcursion,
+    InputId, LawName, MethodHistory, ModeValue, NumericalRefusal, Ratio, RowId, SimTime, StepTicket,
+    TrialFailure, ValidityExcursion,
 };
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
@@ -18,7 +19,7 @@ pub struct StageEvaluation {
     pub(crate) derivative: Vec<f64>,
     pub(crate) columns: Vec<f64>,
     pub(crate) rows: Vec<f64>,
-    pub(crate) values: Vec<f64>,
+    pub(crate) values: Vec<Option<f64>>,
     pub(crate) residuals: Vec<f64>,
 }
 impl StageEvaluation {
@@ -336,6 +337,7 @@ impl StepProposal {
                 start: base.values(),
                 end: state.values(),
             },
+            fired: Vec::new(),
             state,
             continuation: history,
             forward: extents.forward,
@@ -385,6 +387,9 @@ fn next_state(
         amounts,
         memory,
         algebraic,
+        modes: base.modes.clone(),
+        ordinals: base.ordinals.clone(),
+        fired: false,
     }
 }
 
@@ -398,12 +403,14 @@ pub struct VerifiedStep {
     forward: Vec<Compensated>,
     reverse: Vec<Compensated>,
     excursions: Vec<ValidityExcursion>,
+    fired: Vec<Fired>,
 }
 pub struct VerifiedParts {
     pub state: Candidate,
     pub continuation: MethodHistory,
     pub dense: DenseSegment,
     pub excursions: Vec<ValidityExcursion>,
+    pub fired: Vec<Fired>,
 }
 impl VerifiedStep {
     pub fn ticket(&self) -> &StepTicket {
@@ -420,6 +427,28 @@ impl VerifiedStep {
     pub fn applied(&self) -> &[InputId] {
         &self.ticket.due
     }
+    pub(crate) fn crossed<'b>(&self, problem: &CoupledProblem<'b>) -> Option<&'b HazardLayout> {
+        problem.chance.crossed(problem.body, &self.state)
+    }
+    pub(crate) fn gap(&self, problem: &CoupledProblem<'_>, guard: &HazardLayout) -> f64 {
+        problem.chance.gap(&self.state, guard)
+    }
+    /// The dense segment keeps the left limit, so a chord never runs through a reset and the next segment
+    /// starts at the reset. A firing moves a mode, a draw and an integral, so what it leaves is read again: a law
+    /// with no value there refuses the trial, and a range is judged on both sides of the instant.
+    pub(crate) fn fire(self, problem: &CoupledProblem<'_>) -> Result<Self, TrialFailure> {
+        let at = self.ticket.interval().end();
+        let (state, fired) = problem.chance.fired(problem.body, self.state, at);
+        let values = problem.values_after_firing(&self.ticket, &state)?;
+        let mut excursions = self.excursions;
+        excursions.extend(problem.body.excursions(&values, at));
+        Ok(Self {
+            state,
+            fired,
+            excursions,
+            ..self
+        })
+    }
     pub fn into_parts(self) -> VerifiedParts {
         let Self {
             ticket: _,
@@ -429,12 +458,41 @@ impl VerifiedStep {
             forward: _,
             reverse: _,
             excursions,
+            fired,
         } = self;
         VerifiedParts {
             state,
             continuation,
             dense,
             excursions,
+            fired,
         }
+    }
+}
+
+/// A chance event is no input: replay recreates it from the seed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fired {
+    pub(crate) stream: LawName,
+    pub(crate) at: SimTime,
+    pub(crate) ordinal: u64,
+    pub(crate) threshold_bits: u64,
+    pub(crate) entered: ModeValue,
+}
+impl Fired {
+    pub fn stream(&self) -> LawName {
+        self.stream
+    }
+    pub fn at(&self) -> SimTime {
+        self.at
+    }
+    pub fn ordinal(&self) -> u64 {
+        self.ordinal
+    }
+    pub fn threshold(&self) -> Compensated {
+        Compensated::exact(f64::from_bits(self.threshold_bits))
+    }
+    pub fn entered(&self) -> ModeValue {
+        self.entered
     }
 }

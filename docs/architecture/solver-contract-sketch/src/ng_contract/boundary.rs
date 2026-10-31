@@ -1,8 +1,6 @@
 //! The boundary port: ONE timestamped timeline of the day, partitioned by payload and ordered by
 //! (time, id). Pending events and active continuous deliveries are record state and checkpoint.
-use super::{
-    AdmissionError, CompiledBody, CoupledProblem, Digest, Measure, Refused, SimTime, StepTicket, TrialFailure, Water,
-};
+use super::{AdmissionError, CompiledBody, CoupledProblem, Digest, Measure, Refused, SimTime, StepTicket, TrialFailure, VerifiedStep, Water};
 
 pub struct BoundaryPort {
     _events: Vec<BoundaryEvent>,
@@ -168,18 +166,19 @@ impl AppliedInputs {
 }
 impl PendingInputs {
     /// One attempt of a step: issues its ticket and hands it to `solved`, which solves and validates.
-    /// When the span passes and a waiting input lies inside it, drops that result and hands `solved`
-    /// the same ticket ended at that input. This order is the causal step rule: every ticket before a
-    /// pass is a function of the sealed past, the span and the refusals of this base, so it is the same
-    /// ticket whatever waits. A waiting input shows only to a step the record would have accepted past
-    /// it, and then no late input can still arrive before it, except behind the fence a refused cut
-    /// leaves.
+    /// It finds the blind step first: the span's result, or, when that crosses a guard, the landing
+    /// inside it. When a waiting input lies inside the blind step, it drops that result and hands
+    /// `solved` the same ticket ended at that input. This order is the causal step rule: every ticket of
+    /// the blind step is a function of the sealed past, the span, the refusals of this base and
+    /// published integrals, so it is the same ticket whatever waits. A waiting input shows only to a
+    /// step the record would have accepted past it, and then no late input can still arrive before it,
+    /// except behind the fence a cut leaves when it does not publish at its own end.
     pub fn attempt<T>(
         &self,
         _problem: &CoupledProblem<'_>,
         _attempt: Attempt<'_>,
-        _solved: impl FnMut(&StepTicket) -> Result<T, TrialFailure>,
-    ) -> Result<T, TrialFailure> {
+        _solved: impl FnMut(&StepTicket) -> Result<(VerifiedStep, T), TrialFailure>,
+    ) -> Result<(VerifiedStep, T), TrialFailure> {
         todo!()
     }
     /// Adds a late input to what waits, and returns its payload's digest. No accepted part moves. The

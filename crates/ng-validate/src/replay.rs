@@ -1,11 +1,27 @@
-use crate::TwoReservoirs;
+use crate::ReferenceIntegrator;
 use ng_contract::{
-    AdmissionError, BoundaryEvent, CoupledSolver, Digest, EngineFault, InitializationFailure, InputId,
-    SimTime,
+    AcceptedStateView, AdmissionError, BoundaryEvent, CompiledBody, CoupledProblem, CoupledSolver,
+    DeclaredResolution, Digest, EngineFault, Fired, InitializationFailure, InputId, LawName, SimTime,
+    StepProposal, StepTicket, TrialFailure,
 };
 use ng_record::{
     AuthorizedInput, BranchId, CheckpointError, HistoryStore, RecordDigests, Running, Seal, Session, Step,
 };
+
+pub trait ReplayCase {
+    fn body(&self) -> &CompiledBody;
+    fn end(&self) -> SimTime;
+    fn events(&self) -> Result<Vec<BoundaryEvent>, AdmissionError>;
+    fn admit<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+    ) -> Result<Session<'m, Running>, InitializationFailure>;
+    /// The same run with no timeline input known at admission, so each must come through `Session::enqueue`.
+    fn admit_withheld<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+    ) -> Result<Session<'m, Running>, InitializationFailure>;
+}
 
 /// Builds a core with no state from earlier runs. A gate calls it once per run, its reference run first, so
 /// a core that must differ between two runs can differ only through what its factory gives it.
@@ -37,6 +53,15 @@ pub trait WallClock {
     fn source(&self) -> ClockSource;
 }
 
+/// `reference` is typed so a caller cannot name another core.
+pub struct ChancePlan<'c> {
+    pub second_policy: &'c dyn CoreFactory,
+    pub reference: &'c dyn Fn() -> ReferenceIntegrator,
+    /// How far from the reference a policy may fire one event: the landing tolerance plus what a quadrature of
+    /// the hazard rate gets wrong. A model default.
+    pub event_tolerance_ns: u64,
+}
+
 pub struct ReplayPlan<'c> {
     pub clock: &'c dyn WallClock,
     /// Simulated ns per wall ns under `clock`.
@@ -46,6 +71,8 @@ pub struct ReplayPlan<'c> {
     /// Resume at each pair of neighbouring revisions this many apart, and on each side of a breakpoint or a
     /// refusal.
     pub resume_every: u64,
+    /// `None` only for a body with no hazard guard.
+    pub chance: Option<ChancePlan<'c>>,
 }
 
 enum Pace<'c> {
@@ -63,6 +90,11 @@ pub enum ReplayGate {
     Resume,
     LateAdmission,
     Rewind,
+    /// Every ticket solved twice and the second kept: same bits, or a value moved with an evaluation (I8). The
+    /// attempt is the same both times, so dice keyed on it answer to `StepPolicy`.
+    ExtraEvaluation,
+    /// Two step policies, each the same events as the reference within the plan's distance (I8).
+    StepPolicy,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,8 +121,17 @@ pub enum ReplayFailure {
     /// An input with no head after admission to arrive at, or no step left to apply it: the run would be the
     /// known run by construction, and a gate that tests nothing passes nothing.
     NoLateBoundary { id: InputId },
+    /// One event, by its stream and ordinal, further from the reference than the plan allows.
+    EventMoved {
+        stream: LawName,
+        ordinal: u64,
+        apart_ns: u64,
+    },
+    /// A policy that fired a different list of events than the reference.
+    EventsDiffer { reference: usize, policy: usize },
     /// A plan or a case that gives the gate nothing to compare, a pace that never stopped a run short of its
-    /// end, a clock that stopped before it, or a gate that measured another run or another course.
+    /// end, a clock that stopped before it, a gate that measured another run or another course, a body with a
+    /// hazard guard whose run fired nothing, or two step policies on one grid.
     MissingEvidence { gate: ReplayGate },
 }
 
@@ -102,6 +143,8 @@ pub struct GateEvidence {
     runs: Vec<RecordDigests>,
     clock: Option<ClockSource>,
     course: Seal,
+    fired: Vec<Fired>,
+    tolerance_ns: Option<u64>,
 }
 impl GateEvidence {
     pub fn gate(&self) -> ReplayGate {
@@ -117,6 +160,12 @@ impl GateEvidence {
     pub fn clock(&self) -> Option<ClockSource> {
         self.clock
     }
+    pub fn fired(&self) -> &[Fired] {
+        &self.fired
+    }
+    pub fn tolerance_ns(&self) -> Option<u64> {
+        self.tolerance_ns
+    }
 }
 
 /// No public constructor, so evidence comes only from `replay_gates`.
@@ -127,6 +176,8 @@ pub struct ReplayEvidence {
     resume: GateEvidence,
     late_admission: GateEvidence,
     rewind: GateEvidence,
+    extra_evaluation: GateEvidence,
+    step_policy: GateEvidence,
 }
 impl ReplayEvidence {
     pub fn run(&self) -> Digest {
@@ -138,6 +189,8 @@ impl ReplayEvidence {
             ReplayGate::Resume => &self.resume,
             ReplayGate::LateAdmission => &self.late_admission,
             ReplayGate::Rewind => &self.rewind,
+            ReplayGate::ExtraEvaluation => &self.extra_evaluation,
+            ReplayGate::StepPolicy => &self.step_policy,
         }
     }
 }
@@ -148,6 +201,7 @@ struct Row {
     seal: Seal,
     earliest: SimTime,
     near_a_break: bool,
+    fired: Vec<Fired>,
 }
 impl Row {
     fn of(session: &Session<'_, Running>, near_a_break: bool) -> Self {
@@ -157,8 +211,13 @@ impl Row {
             seal: record.seal(),
             earliest: record.earliest_stamp(),
             near_a_break,
+            fired: Vec::new(),
         }
     }
+}
+
+fn fired(rows: &[Row]) -> Vec<Fired> {
+    rows.iter().flat_map(|row| row.fired.iter().copied()).collect()
 }
 
 struct Trace {
@@ -195,7 +254,11 @@ fn advance<'m>(
     loop {
         attempt = match attempt {
             Step::Accepted(session, receipt) => {
-                rows.push(Row::of(&session, refused || receipt.after_breakpoint()));
+                let fired = receipt.fired().to_vec();
+                let near_a_break = refused || receipt.after_breakpoint() || !fired.is_empty();
+                let mut row = Row::of(&session, near_a_break);
+                row.fired = fired;
+                rows.push(row);
                 return Ok(session);
             }
             Step::Refused(session) => {
@@ -261,13 +324,14 @@ fn traced<'m>(
             clock,
             simulated_per_wall,
         } => {
+            let origin = head(&session).nanoseconds();
             while head(&session) < end {
                 let reading = clock
                     .elapsed_ns()
                     .ok_or(ReplayFailure::MissingEvidence { gate })?;
-                let allowed = SimTime::from_ns(reading.saturating_mul(*simulated_per_wall));
+                let allowed = origin.saturating_add(reading.saturating_mul(*simulated_per_wall));
                 let before = rows.len();
-                session = step_to(gate, session, allowed.min(end), &mut rows)?;
+                session = step_to(gate, session, SimTime::from_ns(allowed).min(end), &mut rows)?;
                 stopped_short |= rows.len() > before && head(&session) < end;
             }
         }
@@ -288,14 +352,15 @@ fn admitted<'m>(
 
 fn reference(
     gate: ReplayGate,
-    case: &TwoReservoirs,
+    case: &dyn ReplayCase,
     cores: &dyn CoreFactory,
 ) -> Result<(Trace, Digest), ReplayFailure> {
     let core = cores.fresh();
     let session = admitted(gate, case.admit(&*core))?;
     let rows = vec![Row::of(&session, false)];
     let (session, trace) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
-    if trace.rows.len() < 2 {
+    let fired_nothing = case.body().hazards().next().is_some() && fired(&trace.rows).is_empty();
+    if trace.rows.len() < 2 || fired_nothing {
         return Err(ReplayFailure::MissingEvidence { gate });
     }
     Ok((trace, session.record().identity().digest()))
@@ -317,7 +382,7 @@ fn same_or_diverged(
 }
 
 fn pace_gate(
-    case: &TwoReservoirs,
+    case: &dyn ReplayCase,
     cores: &dyn CoreFactory,
     plan: &ReplayPlan<'_>,
 ) -> Result<GateEvidence, ReplayFailure> {
@@ -345,6 +410,8 @@ fn pace_gate(
         runs,
         clock: Some(plan.clock.source()),
         course: reference.seal,
+        fired: fired(&reference.rows),
+        tolerance_ns: None,
     })
 }
 
@@ -365,8 +432,8 @@ impl HistoryStore for MemoryStore {
     }
 }
 
-/// Each side of a step that started at a breakpoint or met a refusal is a boundary a resume is likeliest to
-/// lose. Neighbouring revisions are never both multiples of a hidden state's period, whatever `every` is.
+/// Each side of a step that started at a breakpoint, met a refusal or fired is a boundary a resume is likeliest
+/// to lose. Neighbouring revisions are never both multiples of a hidden state's period, whatever `every` is.
 fn boundaries(rows: &[Row], every: u64) -> Vec<u64> {
     let last = rows.len() as u64 - 1;
     let mut revisions = Vec::new();
@@ -386,7 +453,7 @@ fn boundaries(rows: &[Row], every: u64) -> Vec<u64> {
 /// Every load runs to the end, because a lost state can show many steps after it. `resume_every` sets the
 /// cost: each load costs the rest of a run.
 fn resume_gate(
-    case: &TwoReservoirs,
+    case: &dyn ReplayCase,
     cores: &dyn CoreFactory,
     plan: &ReplayPlan<'_>,
 ) -> Result<GateEvidence, ReplayFailure> {
@@ -423,40 +490,32 @@ fn resume_gate(
         runs,
         clock: None,
         course: reference.seal,
+        fired: fired(&reference.rows),
+        tolerance_ns: None,
     })
 }
 
-/// The last head a run can still take `event`, so every step before it was blind: the last reference row
-/// whose earliest stamp is before the input's. The next reference step reached the stamp, or was refused
-/// short of it after a cut there, and a run that did not know the input would have gone past. Admission is
-/// no arrival, so the first head is the earliest, and an input at that head's stamp can still arrive there.
+/// The last head that still takes `event`, read off a run that does not know it: its own earliest stamps, not
+/// the known run's. A fence in the known run comes from a cut only it showed, so its heads hide an input the
+/// late run would have taken after a landing, which is the arrival a landing puts at risk. Admission is no
+/// arrival, so the first head is the earliest, and an input at that head's stamp can still arrive there.
 fn arrival(rows: &[Row], event: &BoundaryEvent) -> u64 {
-    let last = rows.iter().rposition(|row| row.earliest < event.at());
+    let last = rows.iter().rposition(|row| row.earliest <= event.at());
     last.unwrap_or(0).max(1) as u64
 }
 
-fn late_admission_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<GateEvidence, ReplayFailure> {
-    let gate = ReplayGate::LateAdmission;
-    let (reference, run) = reference(gate, case, cores)?;
-    let events = case
-        .events()
-        .map_err(|error| ReplayFailure::InputRefused { gate, error })?;
-    if events.is_empty() {
-        return Err(ReplayFailure::MissingEvidence { gate });
-    }
-    let mut arrivals: Vec<(u64, BoundaryEvent)> = Vec::new();
-    for event in events {
-        if event.at() >= reference.last.time {
-            return Err(ReplayFailure::NoLateBoundary { id: event.id() });
-        }
-        arrivals.push((arrival(&reference.rows, &event), event));
-    }
-    arrivals.sort_by_key(|arrival| arrival.0);
-    let core = cores.fresh();
-    let mut session = admitted(gate, case.admit_withheld(&*core))?;
-    let mut rows = vec![Row::of(&session, false)];
-    for (revision, event) in arrivals {
-        session = revision_to(gate, session, revision, &mut rows)?;
+fn late_run<'m>(
+    gate: ReplayGate,
+    case: &'m dyn ReplayCase,
+    core: &'m dyn CoupledSolver,
+    arrivals: &[u64],
+    rows: &mut Vec<Row>,
+) -> Result<Session<'m, Running>, ReplayFailure> {
+    let mut session = admitted(gate, case.admit_withheld(core))?;
+    rows.push(Row::of(&session, false));
+    let events = stamped(gate, case)?;
+    for (revision, event) in arrivals.iter().zip(events) {
+        session = revision_to(gate, session, *revision, rows)?;
         if session.record().earliest_stamp() > event.at() {
             return Err(ReplayFailure::NoLateBoundary { id: event.id() });
         }
@@ -465,6 +524,43 @@ fn late_admission_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<
         let refused = |error| ReplayFailure::InputRefused { gate, error };
         session.enqueue(input).map_err(refused)?;
     }
+    Ok(session)
+}
+
+fn stamped(gate: ReplayGate, case: &dyn ReplayCase) -> Result<Vec<BoundaryEvent>, ReplayFailure> {
+    let mut events = case
+        .events()
+        .map_err(|error| ReplayFailure::InputRefused { gate, error })?;
+    events.sort_by_key(|event| (event.at(), event.id()));
+    Ok(events)
+}
+
+/// Costs one run per input and one more: each input's arrival is read off the run that holds every input
+/// before it at its own arrival.
+fn late_admission_gate(
+    case: &dyn ReplayCase,
+    cores: &dyn CoreFactory,
+) -> Result<GateEvidence, ReplayFailure> {
+    let gate = ReplayGate::LateAdmission;
+    let (reference, run) = reference(gate, case, cores)?;
+    let events = stamped(gate, case)?;
+    if events.is_empty() {
+        return Err(ReplayFailure::MissingEvidence { gate });
+    }
+    let mut arrivals: Vec<u64> = Vec::new();
+    for event in &events {
+        if event.at() >= reference.last.time {
+            return Err(ReplayFailure::NoLateBoundary { id: event.id() });
+        }
+        let core = cores.fresh();
+        let mut rows = Vec::new();
+        let session = late_run(gate, case, &*core, &arrivals, &mut rows)?;
+        let (_, withheld) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
+        arrivals.push(arrival(&withheld.rows, event));
+    }
+    let core = cores.fresh();
+    let mut rows = Vec::new();
+    let session = late_run(gate, case, &*core, &arrivals, &mut rows)?;
     let (_, late) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
     same_or_diverged(gate, &reference.rows, &reference.last, &late)?;
     Ok(GateEvidence {
@@ -473,12 +569,14 @@ fn late_admission_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<
         runs: vec![reference.last, late.last],
         clock: None,
         course: reference.seal,
+        fired: fired(&reference.rows),
+        tolerance_ns: None,
     })
 }
 
 /// The rewind keeps the parent's core object on purpose: a state it kept while the parent ran ahead has
 /// nowhere to hide. It runs from two neighbouring revisions, so a hidden period cannot land on both.
-fn rewind_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<GateEvidence, ReplayFailure> {
+fn rewind_gate(case: &dyn ReplayCase, cores: &dyn CoreFactory) -> Result<GateEvidence, ReplayFailure> {
     let gate = ReplayGate::Rewind;
     let checkpointed = |error| ReplayFailure::Checkpoint { gate, error };
     let (reference, run) = reference(gate, case, cores)?;
@@ -519,12 +617,143 @@ fn rewind_gate(case: &TwoReservoirs, cores: &dyn CoreFactory) -> Result<GateEvid
         runs,
         clock: None,
         course: reference.seal,
+        fired: fired(&reference.rows),
+        tolerance_ns: None,
+    })
+}
+
+/// Its resolution is its inner core's, so the run identity holds and seals compare.
+struct SolvesTwice<'c> {
+    inner: Box<dyn CoupledSolver + 'c>,
+}
+impl CoupledSolver for SolvesTwice<'_> {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let _ = self.inner.solve(problem, ticket);
+        self.inner.solve(problem, ticket)
+    }
+}
+
+fn extra_evaluation_gate(
+    case: &dyn ReplayCase,
+    cores: &dyn CoreFactory,
+) -> Result<GateEvidence, ReplayFailure> {
+    let gate = ReplayGate::ExtraEvaluation;
+    let (reference, run) = reference(gate, case, cores)?;
+    let forced = SolvesTwice { inner: cores.fresh() };
+    let session = admitted(gate, case.admit(&forced))?;
+    let rows = vec![Row::of(&session, false)];
+    let (_, twice) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
+    same_or_diverged(gate, &reference.rows, &reference.last, &twice)?;
+    Ok(GateEvidence {
+        gate,
+        run,
+        runs: vec![reference.last, twice.last],
+        clock: None,
+        course: reference.seal,
+        fired: fired(&reference.rows),
+        tolerance_ns: None,
+    })
+}
+
+fn pair<'f>(event: &Fired, list: &'f [Fired]) -> Option<&'f Fired> {
+    (list.iter()).find(|other| other.stream() == event.stream() && other.ordinal() == event.ordinal())
+}
+
+/// Pairs by stream and ordinal, because two unrelated events a floor apart can share a landing under a coarser
+/// policy, and then the lists differ in order and in nothing else. An event with no pair within the tolerance of
+/// the case's end is an honest straddle: one policy fired it just before the end.
+fn same_events(
+    reference: &[Fired],
+    policy: &[Fired],
+    tolerance_ns: u64,
+    end: SimTime,
+) -> Result<(), ReplayFailure> {
+    let differ = ReplayFailure::EventsDiffer {
+        reference: reference.len(),
+        policy: policy.len(),
+    };
+    let unpaired = |event: &Fired| event.at().nanoseconds().saturating_add(tolerance_ns) < end.nanoseconds();
+    for known in reference {
+        match pair(known, policy) {
+            Some(seen) => {
+                let apart_ns = known.at().nanoseconds().abs_diff(seen.at().nanoseconds());
+                if apart_ns > tolerance_ns {
+                    return Err(ReplayFailure::EventMoved {
+                        stream: known.stream(),
+                        ordinal: known.ordinal(),
+                        apart_ns,
+                    });
+                }
+            }
+            None if unpaired(known) => return Err(differ),
+            None => {}
+        }
+    }
+    let extra = |seen: &&Fired| pair(seen, reference).is_none();
+    if policy.iter().filter(extra).any(unpaired) {
+        return Err(differ);
+    }
+    Ok(())
+}
+
+/// Two policies have two identities, so nothing here compares bits. Each is held to the reference integrator,
+/// because a core that biases every step alike agrees with itself.
+fn step_policy_gate(
+    case: &dyn ReplayCase,
+    cores: &dyn CoreFactory,
+    plan: &ReplayPlan<'_>,
+) -> Result<GateEvidence, ReplayFailure> {
+    let gate = ReplayGate::StepPolicy;
+    let (first, run) = reference(gate, case, cores)?;
+    let Some(chance) = plan.chance.as_ref() else {
+        if case.body().hazards().next().is_some() {
+            return Err(ReplayFailure::MissingEvidence { gate });
+        }
+        return Ok(GateEvidence {
+            gate,
+            run,
+            runs: vec![first.last],
+            clock: None,
+            course: first.seal,
+            fired: Vec::new(),
+            tolerance_ns: None,
+        });
+    };
+    let (second, _) = reference(gate, case, chance.second_policy)?;
+    let grid = |rows: &[Row]| rows.iter().map(|row| row.time).collect::<Vec<_>>();
+    if grid(&first.rows) == grid(&second.rows) {
+        return Err(ReplayFailure::MissingEvidence { gate });
+    }
+    let (known, _) = reference(gate, case, &chance.reference)?;
+    let events = fired(&known.rows);
+    for policy in [&first, &second] {
+        same_events(
+            &events,
+            &fired(&policy.rows),
+            chance.event_tolerance_ns,
+            case.end(),
+        )?;
+    }
+    Ok(GateEvidence {
+        gate,
+        run,
+        runs: vec![first.last, second.last, known.last],
+        clock: None,
+        course: first.seal,
+        fired: fired(&first.rows),
+        tolerance_ns: Some(chance.event_tolerance_ns),
     })
 }
 
 pub fn replay_gate(
     gate: ReplayGate,
-    case: &TwoReservoirs,
+    case: &dyn ReplayCase,
     cores: &dyn CoreFactory,
     plan: &ReplayPlan<'_>,
 ) -> Result<GateEvidence, ReplayFailure> {
@@ -533,11 +762,13 @@ pub fn replay_gate(
         ReplayGate::Resume => resume_gate(case, cores, plan),
         ReplayGate::LateAdmission => late_admission_gate(case, cores),
         ReplayGate::Rewind => rewind_gate(case, cores),
+        ReplayGate::ExtraEvaluation => extra_evaluation_gate(case, cores),
+        ReplayGate::StepPolicy => step_policy_gate(case, cores, plan),
     }
 }
 
 pub fn replay_gates(
-    case: &TwoReservoirs,
+    case: &dyn ReplayCase,
     cores: &dyn CoreFactory,
     plan: &ReplayPlan<'_>,
 ) -> Result<ReplayEvidence, ReplayFailure> {
@@ -557,14 +788,16 @@ pub fn replay_gates(
         resume: of_this_run(ReplayGate::Resume)?,
         late_admission: of_this_run(ReplayGate::LateAdmission)?,
         rewind: of_this_run(ReplayGate::Rewind)?,
+        extra_evaluation: of_this_run(ReplayGate::ExtraEvaluation)?,
+        step_policy: of_this_run(ReplayGate::StepPolicy)?,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Delivery, ReferenceIntegrator};
-    use ng_contract::Measure;
+    use crate::{Delivery, ReferenceIntegrator, TwoReservoirs};
+    use ng_contract::{BoundaryInput, Measure, WaterDelivery};
 
     #[test]
     fn a_trace_that_differs_only_in_what_waits_has_diverged() {
@@ -588,5 +821,29 @@ mod tests {
         let compare = |run: &Trace| first_divergence(&reference.rows, &reference.last, &run.rows, &run.last);
         assert_eq!(compare(&reference), None);
         assert_eq!(compare(&run), Some(run.last.time));
+    }
+
+    #[test]
+    fn an_input_arrives_at_the_last_head_that_still_takes_it_and_never_at_admission() {
+        let start = || Measure::new(1_000.0).expect("finite");
+        let case = TwoReservoirs::delivering([start(), start()], Vec::new()).expect("a body");
+        let core = ReferenceIntegrator::new(1_000_000_000);
+        let session = case.admit(&core).expect("admitted");
+        let head = |earliest| Row {
+            earliest: SimTime::from_ns(earliest),
+            ..Row::of(&session, false)
+        };
+        let rows = [head(1), head(10), head(20)];
+        let event = |stamp| {
+            let water = WaterDelivery {
+                boundary: "exterior",
+                amount: Measure::new(1.0).expect("finite"),
+                ends: SimTime::from_ns(stamp + 1),
+            };
+            let id = InputId::new(Digest::of_canonical(b"an input"));
+            BoundaryEvent::new(id, SimTime::from_ns(stamp), BoundaryInput::Water(water))
+        };
+        let arrivals = [1, 9, 10, 19, 20, 21].map(|stamp| arrival(&rows, &event(stamp)));
+        assert_eq!(arrivals, [1, 1, 1, 1, 2, 2]);
     }
 }

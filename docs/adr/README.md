@@ -10,3 +10,4 @@ One series from 0001, one decision per file (`NNNN-slug.md`). An agent reads the
 | [0004](0004-first-milestone.md) | The first milestone is a healthy man stable over two ordinary days |
 | [0005](0005-packet-and-healthy-range-set.md) | The packet holds what moves the body, and healthy ranges live apart |
 | [0006](0006-waiting-input-shows-after-a-span-passes.md) | A step shows a waiting input only after its span has passed |
+| [0007](0007-a-guard-lands-before-anything-waiting-shows.md) | A guard lands before anything waiting shows |

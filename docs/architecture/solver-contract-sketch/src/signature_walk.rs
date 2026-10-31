@@ -109,7 +109,8 @@
 //! // physiology and treatment set the rate.
 //! fn ectopy<'b>(laws: &mut FragmentBuilder<'b, Cardiovascular>) -> Result<(), AdmissionError> {
 //!     let dice = laws.stream("ectopic-beat");
-//!     let wobble = laws.forcing("hazard-variability", 1_000_000_000)?;
+//!     let wobble = laws.forcing("hazard-variability", ParameterKey::new("cv.hazard-period"),
+//!         ParameterKey::new("cv.hazard-amplitude"));
 //!     let hazard = laws.state::<Dimensionless>("ectopy-hazard", Admissible::nonnegative());
 //!     let ceiling = laws.parameter(ParameterKey::new("cv.ectopy-ceiling"), Admissible::nonnegative());
 //!     let pace = laws.parameter(ParameterKey::new("cv.ectopy-rate"), Admissible::nonnegative());
@@ -124,8 +125,9 @@
 //!         let rate = k.relax(target, current, speed);
 //!         k.finish(rate, every, beat)
 //!     });
-//!     // Fires when the integral reaches the stream's exponential draw; the contract resets it.
-//!     laws.hazard(HazardGuard::new(&hazard, dice, sinus.to(&ectopic)?));
+//!     // Fires when the integral reaches the stream's exponential draw; the contract integrates the rate's
+//!     // positive part, so a target the forcing lowers cannot lower the integral, and resets it on firing.
+//!     laws.hazard(HazardGuard::new(&hazard, &dice, sinus.to(&ectopic)?));
 //!     laws.memory_rate(&hazard, accrue);
 //!     Ok(())
 //! }
@@ -300,9 +302,9 @@
 //!     quadrature.add(&whole, Ratio::ZERO)?;
 //!     quadrature.add(&first, ticket.fraction(part))?;
 //!     quadrature.add(&second, ticket.fraction(length - part))?;
-//!     let modes = problem.transitions(&first, &second, ticket)?;
-//!     // 6. Proposal: amounts are rebuilt from the paired extents, not taken from the workspace.
-//!     Ok(problem.propose(ticket, quadrature.finish()?, &workspace, modes,
+//!     // 6. Proposal: amounts are rebuilt from the paired extents, not taken from the workspace. A core
+//!     // says nothing of a guard: the attempt reads a crossing from the verified state and re-solves shorter.
+//!     Ok(problem.propose(ticket, quadrature.finish()?, &workspace,
 //!         MethodHistory::new(policy, ticket.interval().start(), vec![])))
 //! }
 //!
@@ -312,7 +314,6 @@
 //!     let mut workspace = problem.workspace();
 //!     let mut quadrature = problem.quadrature_for(ticket, plan)?;
 //!     let half = ticket.fraction(ticket.length_ns() / 2);
-//!     let mut last = None;
 //!     for block in problem.blocks(plan)? {
 //!         let _structure = (block.rows(), block.rate_class().band());
 //!         // A block's local solution goes back to the workspace by each unknown's index.
@@ -324,12 +325,9 @@
 //!             let point = workspace.point(ticket.at(bin_end)?);
 //!             let rates = problem.evaluate_block(block, &point)?;
 //!             quadrature.add(&rates, half)?;
-//!             last = Some(rates);
 //!         }
 //!     }
-//!     let first = problem.evaluate(&problem.workspace().point(ticket.at(0)?))?;
-//!     let modes = problem.transitions(&first, last.as_ref().unwrap_or(&first), ticket)?;
-//!     Ok(problem.propose(ticket, quadrature.finish()?, &workspace, modes,
+//!     Ok(problem.propose(ticket, quadrature.finish()?, &workspace,
 //!         MethodHistory::new(policy, ticket.interval().start(), vec![])))
 //! }
 //!

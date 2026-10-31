@@ -31,8 +31,31 @@ pub enum AdmissionError {
     ZeroDenominator,
     /// An absolute scale that is not positive, or a relative scale below zero.
     NonPositiveScale,
-    /// A body with a mode variable.
+    /// A mode variable a plain guard fires or no hazard guard moves, or any mode variable in a body with an
+    /// algebraic row, which a firing could leave false. A guard that silently never fires is worse than a run
+    /// that never starts.
     ModesNotYetRun {
+        variable: LawName,
+    },
+    /// A nonzero constant built only from literals, or a division of two equal nodes, which no packet entry
+    /// backs. This check is partial: it reads the graph, never a value, so a copy built from separate reads
+    /// passes.
+    UnbackedConstant {
+        law: LawName,
+    },
+    /// A forcing's period that is no whole number of nanoseconds in the clock's range, which a run could only
+    /// round into another period.
+    ForcingPeriod {
+        key: ParameterKey,
+    },
+    MissingStartMode {
+        variable: LawName,
+    },
+    UnknownStartMode {
+        variable: LawName,
+        value: &'static str,
+    },
+    DuplicateStartMode {
         variable: LawName,
     },
     UnboundParameter {
@@ -93,8 +116,8 @@ pub enum AdmissionError {
     EventBeforeHead {
         id: InputId,
     },
-    /// An input stamped behind the fence a refused cut left, or at the admission instant, whose drive
-    /// initialization has already read.
+    /// An input stamped behind the fence a cut left by not publishing at its own end, or at the admission
+    /// instant, whose drive initialization has already read.
     EventBeforeFence {
         id: InputId,
         fence: SimTime,
@@ -169,6 +192,17 @@ pub enum CompileDefect {
     MissingPartialVolume { law: LawName },
     /// A water boundary at a space its site does not have, or at a site the anatomy does not declare.
     BoundaryEndpoint { law: LawName },
+    /// A stream no guard draws on, so its ordinal would never move.
+    UndrawnStream { stream: LawName },
+    /// A forcing no law reads.
+    UnreadForcing { forcing: LawName },
+    /// A second guard on one stream: one draw cannot be two events' threshold.
+    SecondGuardOnStream { stream: LawName },
+    /// A second guard on one integral: one reset cannot serve two thresholds, because a firing would erase what
+    /// the other guard crossed.
+    SecondGuardOnIntegral { integral: LawName },
+    /// A hazard integral not declared nonnegative, the set that holds the reset and every threshold.
+    HazardSet { integral: LawName },
 }
 
 /// Why one attempt cannot stand. A smaller retry of the same base can still succeed. A row or source id

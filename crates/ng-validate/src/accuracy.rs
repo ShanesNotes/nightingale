@@ -1,3 +1,4 @@
+use crate::ReplayCase;
 use crate::TwoReservoirs;
 use crate::run::advance;
 use ng_contract::{

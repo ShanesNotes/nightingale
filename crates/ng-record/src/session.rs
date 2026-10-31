@@ -133,6 +133,9 @@ impl<'m> Session<'m, Running> {
         {
             return Err(CheckpointError::IdentityMismatch);
         }
+        if solver.resolution().minimum_interval_ns() == 0 {
+            return Err(CheckpointError::ZeroMinimumInterval);
+        }
         let resolve = |seal: &_| store.resolve(seal);
         let record = restore(saved, expected, body, &resolve, Continuing::Resume)?;
         Ok(Self {
