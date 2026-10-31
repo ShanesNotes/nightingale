@@ -63,7 +63,7 @@ VALUE_FORMS = (
     {"point"},
     {"mean", "sd"},
     {"mean", "se"},
-    {"mean", "ci_low", "ci_high"},
+    {"mean", "ci_low", "ci_high", "coverage"},
     {"low", "high", "coverage"},
     {"median", "low", "high", "coverage"},
 )
@@ -651,7 +651,7 @@ def number(s: Store) -> list[Violation]:
             out.append(Violation(code, subject, "an interval holds its centre"))
         if "coverage" in v and not 0 < v["coverage"] <= 1:
             out.append(Violation(code, subject, "coverage is a fraction"))
-        if row.get("kind") == "healthy_range" and v.get("coverage") != 0.95:
+        if row.get("kind") == "healthy_range" and (v.get("coverage") != 0.95 or "low" not in v):
             out.append(Violation(code, subject, "a healthy range is a central 95% (record 0004)"))
         if row.get("basis") == "mean_1_96_sd" and evidence_form(row.get("evidence")) != "interval":
             out.append(Violation(code, subject, "mean plus or minus 1.96 SD is written as a derived interval (record 0004)"))
@@ -678,7 +678,9 @@ def is_flow_of(row: dict, amount: dict) -> bool:
 
 def has_spread(row: dict) -> bool:
     v = row.get("value", {})
-    return "sd" in v or "coverage" in v or (("se" in v or "ci_low" in v) and "n" in row)
+    if "se" in v or "ci_low" in v:
+        return "n" in row
+    return "sd" in v or "coverage" in v
 
 
 def centred_on_one_mean(s: Store, row: dict) -> bool:
@@ -702,7 +704,7 @@ def population(s: Store) -> list[Violation]:
             continue
         if "range" in row:
             held = in_packet.get(row["range"], {}) if is_text(row["range"]) else {}
-            if not (well_formed(held) and "coverage" in held["value"] and held.get("unit") == row.get("unit")):
+            if not (well_formed(held) and "low" in held["value"] and held.get("unit") == row.get("unit")):
                 out.append(Violation(code, subject, f"range {row['range']} is not a packet interval in the same unit"))
             elif not all(held["value"]["low"] <= x <= held["value"]["high"] for x in stated_values(row)):
                 out.append(Violation(code, subject, f"the value leaves {row['range']} (I16)"))
@@ -1048,6 +1050,7 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.schema", "fx.rate", lambda s: evidence(s, "fx.rate", source_text="a passage")),
     ("data.schema", "fx.fitted", lambda s: evidence(s, "fx.fitted", calibrated=["fx.stroke"])),
     ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 60.0})),
+    ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 60.0, "ci_low": 50.0, "ci_high": 70.0})),
     ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(evidence=None)),
     ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(unit=None)),
     ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(value=None)),
@@ -1116,13 +1119,14 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.locator", "fx.share", lambda s: evidence(s, "fx.share", locator="Table")),
     ("data.locator", "fx.share", lambda s: evidence(s, "fx.share", locator="Fig 3")),
     ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 60.0, "sd": -1.0})),
-    ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 60.0, "ci_low": 100.0, "ci_high": 1.0})),
+    ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 60.0, "ci_low": 100.0, "ci_high": 1.0, "coverage": 0.95})),
     ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 60.0, "se": -1.0})),
-    ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 0.0, "ci_low": 1.0, "ci_high": 2.0})),
-    ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 3.0, "ci_low": 1.0, "ci_high": 2.0})),
+    ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 0.0, "ci_low": 1.0, "ci_high": 2.0, "coverage": 0.95})),
+    ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 3.0, "ci_low": 1.0, "ci_high": 2.0, "coverage": 0.95})),
     ("data.number", "fx.none_sd", lambda s: on(s, "fx.none_sd").update(value={"low": -1.0, "high": 3.0, "coverage": 0.95})),
-    ("data.number", "fx.none_sd", lambda s: on(s, "fx.none_sd").update(value={"mean": 1.0, "ci_low": -1.0, "ci_high": 3.0})),
+    ("data.number", "fx.none_sd", lambda s: on(s, "fx.none_sd").update(value={"mean": 1.0, "ci_low": -1.0, "ci_high": 3.0, "coverage": 0.95})),
     ("data.number", "fx.median", lambda s: on(s, "fx.median")["value"].update(coverage=1.5)),
+    ("data.number", "fx.span", lambda s: on(s, "fx.span").update(value={"mean": 6.0, "ci_low": 5.0, "ci_high": 7.0, "coverage": 0.95}, n=20)),
     ("data.number", "fx.span", lambda s: on(s, "fx.span")["value"].update(low=8.0)),
     ("data.number", "fx.median", lambda s: on(s, "fx.median")["value"].update(median=9.0)),
     ("data.number", "fx.span", lambda s: on(s, "fx.span").update(value={"point": 6.0})),
@@ -1134,6 +1138,8 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.number", "fx.none_sd", lambda s: on(s, "fx.none_sd").update(value={"point": -1.0})),
     ("data.population", "fx.leaf_more", lambda s: on(s, "fx.leaf_more").update(value={"point": 2.0})),
     ("data.population", "fx.base", lambda s: cut(on(s, "fx.base"), "n")),
+    ("data.population", "fx.base", lambda s: (on(s, "fx.base").update(value={"mean": 1.5, "ci_low": 1.3, "ci_high": 1.7, "coverage": 0.95}), cut(on(s, "fx.base"), "n"))),
+    ("data.population", "fx.area", lambda s: on(s, "fx.area_range").update(value={"mean": 2.0, "ci_low": 1.5, "ci_high": 2.5, "coverage": 0.95})),
     ("data.population", "fx.area", lambda s: cut(on(s, "fx.area"), "range")),
     ("data.population", "fx.area", lambda s: on(s, "fx.area").update(range="fx.rate")),
     ("data.population", "fx.area", lambda s: on(s, "fx.area").update(value={"point": 3.0})),
@@ -1225,7 +1231,7 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(low=3, high=2)),
     ("data.inference", "fx.guess", lambda s: on(s, "fx.guess").update(value={"point": 2000.0})),
     ("data.inference", "fx.guess", lambda s: on(s, "fx.guess").update(value={"point": 0.5})),
-    ("data.inference", "fx.guess", lambda s: on(s, "fx.guess").update(value={"mean": 1.5, "ci_low": 0.0, "ci_high": 4.0})),
+    ("data.inference", "fx.guess", lambda s: on(s, "fx.guess").update(value={"mean": 1.5, "ci_low": 0.0, "ci_high": 4.0, "coverage": 0.95})),
     ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.narrowed", "fx.dip"])),
     ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.guess", "fx.dip", "fx.span"])),
     ("data.inference", "fx.narrowed", lambda s: inf(s, "inf.adjust").update(form="fill")),

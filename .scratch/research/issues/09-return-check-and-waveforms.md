@@ -10,3 +10,7 @@ Model default: every anchor keeps its return check, read by its own method over 
 
 - [ ] Each of the 17 names the window its source used, moves to the parameters under the SRS definition, or is listed as blocking the claim
 - [ ] Each anchor's within-subject variation matches that window (ticket 07)
+
+## Comments
+
+- A cycle-mean anchor such as `cv.hr.supine_rest` reads "Read as a cycle mean", with no duration, because Wolsk 2017 states none. A dry run had to guess it. This ticket owes the duration the return check uses for such a window.
