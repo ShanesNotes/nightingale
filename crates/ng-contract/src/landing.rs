@@ -20,14 +20,15 @@ pub(crate) struct Bracket {
     stalled: bool,
 }
 impl Bracket {
-    /// `base` is the gap at the accepted state, the bottom of length zero.
+    /// `base` is the gap at the accepted state, the bottom of length zero. A tolerance of zero is a nanosecond,
+    /// the finest the clock holds: `resume` can reach one from forged bytes, and a bracket must still close.
     pub(crate) fn new(base: f64, top_ns: u64, top: f64, tolerance_ns: u64) -> Self {
         Self {
             bottom_ns: 0,
             bottom: base,
             top_ns,
             top,
-            tolerance_ns,
+            tolerance_ns: tolerance_ns.max(1),
             moved: End::Top,
             earlier_ns: u64::MAX,
             stalled: false,
@@ -144,6 +145,11 @@ mod tests {
             let spent = trials(-1.0, u64::MAX, 1.0, 1, &mut jagged);
             assert!(spent <= 192, "{spent} trials");
         }
+    }
+
+    #[test]
+    fn a_tolerance_of_zero_closes_at_a_nanosecond() {
+        assert!(trials(-1.0, 1 << 40, 1.0, 0, |length| length as f64 - 100.0) <= 192);
     }
 
     #[test]

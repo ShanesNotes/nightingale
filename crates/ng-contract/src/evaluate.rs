@@ -136,6 +136,15 @@ pub(crate) struct Inputs<'a> {
     pub(crate) factors: &'a [f64],
 }
 
+/// A hazard's rate as the contract integrates it. A law's own value stays what a validity range judges.
+fn positive_part(instance: &Instance, value: f64) -> f64 {
+    if instance.rectified && value <= 0.0 {
+        0.0
+    } else {
+        value
+    }
+}
+
 impl CompiledBody {
     fn partial_volume(&self) -> f64 {
         (self.layout.schema.partial_volume.as_ref()).map_or(0.0, |coefficient| coefficient.value())
@@ -167,17 +176,10 @@ impl CompiledBody {
     }
     fn walk(&self, instance: &Instance, duals: &[Dual]) -> Result<Dual, Undefined> {
         let program = &self.layout.programs[instance.program.index()];
-        let value = run(&program.code.ops, duals, self.partial_volume()).map_err(|domain| Undefined {
+        run(&program.code.ops, duals, self.partial_volume()).map_err(|domain| Undefined {
             law: program.law,
             domain,
-        })?;
-        if instance.rectified && value.value <= 0.0 {
-            return Ok(Dual {
-                value: 0.0,
-                slope: 0.0,
-            });
-        }
-        Ok(value)
+        })
     }
     /// `None` for a law that does not hold in these modes: it is not evaluated, and it refuses nothing.
     pub(crate) fn instance_values(&self, inputs: &Inputs<'_>) -> Result<Vec<Option<f64>>, Undefined> {
@@ -198,7 +200,7 @@ impl CompiledBody {
             let Some(value) = *value else { continue };
             match instance.target {
                 Target::Column(column) => columns[column.index()] = value,
-                Target::Row(row) => rows[row.index()] = value,
+                Target::Row(row) => rows[row.index()] = positive_part(instance, value),
             }
         }
         (columns, rows)
@@ -238,7 +240,9 @@ impl CompiledBody {
             read.dedup();
             for direction in read {
                 let duals = self.read(instance, inputs, Some(direction));
-                let slope = self.walk(instance, &duals)?.slope;
+                let walked = self.walk(instance, &duals)?;
+                let flat = positive_part(instance, walked.value) != walked.value;
+                let slope = if flat { 0.0 } else { walked.slope };
                 if !slope.is_finite() {
                     let program = &self.layout.programs[instance.program.index()];
                     return Err(Undefined {

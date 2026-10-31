@@ -357,6 +357,7 @@ const TONE: &str = "tone";
 const ONSET_INTEGRAL: &str = "onset-hazard";
 const RETURN_INTEGRAL: &str = "return-hazard";
 const SECOND_INTEGRAL: &str = "second-hazard";
+const THIRD_INTEGRAL: &str = "third-hazard";
 
 fn named(local: &'static str) -> LawName {
     LawName { owner: OWNER, local }
@@ -442,12 +443,13 @@ pub struct ChanceCase {
     variant: Variant,
     end: SimTime,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq)]
 enum Variant {
     Plain,
     Bystander,
     Racing,
     Relaxing,
+    TwoRhythms,
 }
 impl ChanceCase {
     pub fn ectopy() -> Result<Self, AdmissionError> {
@@ -467,7 +469,22 @@ impl ChanceCase {
     pub fn relaxing() -> Result<Self, AdmissionError> {
         Self::declared(Variant::Relaxing)
     }
+    /// The same, with that law trusted only inside `range`.
+    pub fn relaxing_within(range: ValidityRange<Rate<Dimensionless>>) -> Result<Self, AdmissionError> {
+        Self::declared_within(Variant::Relaxing, Some(range))
+    }
+    /// A second rhythm of its own, on its own mode variable and streams, so two events can fall a floor apart and
+    /// neither has anything to do with the other.
+    pub fn two_rhythms() -> Result<Self, AdmissionError> {
+        Self::declared(Variant::TwoRhythms)
+    }
     fn declared(variant: Variant) -> Result<Self, AdmissionError> {
+        Self::declared_within(variant, None)
+    }
+    fn declared_within(
+        variant: Variant,
+        trusted: Option<ValidityRange<Rate<Dimensionless>>>,
+    ) -> Result<Self, AdmissionError> {
         let mut map = AnatomyBuilder::new();
         let root = map.site::<TissueSite>("body", at_origin()?);
         let a = map.site::<VesselSegment>("a", at_origin()?);
@@ -522,6 +539,9 @@ impl ChanceCase {
             } else {
                 hazard_rate(&laws, &onset, &tone, &wobble, sinus.only(), beat)
             };
+            if let Some(range) = trusted {
+                laws.validity(&onset_rate, range);
+            }
             let still = |holds| {
                 laws.kernel(|mut k| {
                     let rate = k.zero::<Rate<Dimensionless>>();
@@ -553,6 +573,30 @@ impl ChanceCase {
                     let rate = hazard_rate(&laws, &onset, &tone, &wobble, laws.every_mode(), beat);
                     laws.memory_rate(&second, rate);
                     laws.hazard(HazardGuard::new(&second, &other, sinus.to(&ectopic)?));
+                }
+                Variant::TwoRhythms => {
+                    let there = laws.stream("second-there");
+                    let home = laws.stream("second-back");
+                    let out = laws.state::<Dimensionless>(SECOND_INTEGRAL, Admissible::nonnegative());
+                    let back_again = laws.state::<Dimensionless>(THIRD_INTEGRAL, Admissible::nonnegative());
+                    let [quiet, stirred] = laws.modes(BYSTANDER, ["quiet", "stirred"]);
+                    let (going, coming) = (
+                        hazard_rate(&laws, &onset, &tone, &wobble, quiet.only(), beat),
+                        hazard_rate(&laws, &recovery, &tone, &wobble, stirred.only(), beat),
+                    );
+                    let still = |holds| {
+                        laws.kernel(|mut k| {
+                            let rate = k.zero::<Rate<Dimensionless>>();
+                            k.finish(rate, holds, beat)
+                        })
+                    };
+                    let (idle_out, idle_back) = (still(stirred.only()), still(quiet.only()));
+                    laws.memory_rate(&out, going);
+                    laws.memory_rate(&out, idle_out);
+                    laws.memory_rate(&back_again, coming);
+                    laws.memory_rate(&back_again, idle_back);
+                    laws.hazard(HazardGuard::new(&out, &there, quiet.to(&stirred)?));
+                    laws.hazard(HazardGuard::new(&back_again, &home, stirred.to(&quiet)?));
                 }
                 Variant::Plain | Variant::Relaxing => {}
             }
@@ -655,6 +699,11 @@ impl ChanceCase {
                 packet.start_mode(named(BYSTANDER), "quiet", note)?;
             }
             Variant::Racing => packet.start(memory(SECOND_INTEGRAL), zero()?, note)?,
+            Variant::TwoRhythms => {
+                packet.start(memory(SECOND_INTEGRAL), zero()?, note)?;
+                packet.start(memory(THIRD_INTEGRAL), zero()?, note)?;
+                packet.start_mode(named(BYSTANDER), "quiet", note)?;
+            }
             Variant::Plain | Variant::Relaxing => {}
         }
         for (site, amount) in [self.a, self.b].into_iter().zip(START) {

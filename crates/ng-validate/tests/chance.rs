@@ -333,20 +333,55 @@ fn a_guard_inside_a_span_ends_the_step_at_its_crossing_to_the_landing_tolerance(
     }
 }
 
+/// One seed is not enough: a guard that crossed nothing moved another stream's landing on about one seed in six
+/// while a search read every armed guard.
 #[test]
 fn adding_a_second_stream_leaves_the_first_streams_events_unchanged() {
-    let one = ChanceCase::ectopy().expect("a body");
-    let both = ChanceCase::ectopy_and_bystander().expect("a body");
     let core = reference(SECOND);
-    let bystander = "bystander-stream";
-    let (lone, shared) = (events(&one, &core), events(&both, &core));
-    let first = shared.iter().position(|event| event.stream().local == bystander);
-    let compared = first.unwrap_or(shared.len());
-    assert!(compared > 0, "the bystander fired before anything compared");
-    assert_eq!(
-        lone[..compared],
-        shared[..compared],
-        "every bit of each event up to it"
+    let mut compared = 0;
+    for word in 0..24 {
+        let seed = Seed::new([word, 5, 6, 7]);
+        let one = ChanceCase::ectopy().expect("a body").seeded(seed);
+        let both = ChanceCase::ectopy_and_bystander().expect("a body").seeded(seed);
+        let (lone, shared) = (events(&one, &core), events(&both, &core));
+        let first = (shared.iter()).position(|event| event.stream().local == "bystander-stream");
+        let upto = first.unwrap_or(shared.len());
+        assert_eq!(
+            lone[..upto],
+            shared[..upto],
+            "every bit of each event, seed {word}"
+        );
+        compared += upto;
+    }
+    assert!(compared >= 24, "{compared} events compared");
+}
+
+/// A rate's positive part is what the contract integrates, and a validity range judges the law's own value, so a
+/// negative rate a law was not trusted at still shows on the receipt.
+#[test]
+fn a_hazard_rate_outside_its_range_is_reported_though_it_holds_flat() {
+    let case = ChanceCase::relaxing_within(
+        ValidityRange::new(
+            Measure::new(0.0).expect("finite"),
+            Measure::new(1.0).expect("finite"),
+            Basis::Fixture("synthetic"),
+        )
+        .expect("a range"),
+    )
+    .expect("a body");
+    let core = reference(SECOND / 4);
+    let mut session = case.admit(&core).expect("admitted");
+    let mut below = 0;
+    while session.record().accepted().time() < case.end() {
+        let (next, receipt) = one_step(session);
+        session = next;
+        below += (receipt.excursions().iter())
+            .filter(|excursion| excursion.side() == ExcursionSide::Below)
+            .count();
+    }
+    assert!(
+        below > 0,
+        "the rate never left its range, so this test pressed nothing"
     );
 }
 
@@ -516,6 +551,47 @@ fn a_core_that_stops_firing_differs_from_the_reference_by_its_list_of_events() {
         matches!(failure, Err(ReplayFailure::EventsDiffer { .. })),
         "{failure:?}"
     );
+}
+
+/// Two rhythms that fire independently, so two unrelated events can share a landing under a coarser policy and
+/// come out in another order. Each is paired by its stream and ordinal.
+#[test]
+fn two_step_policies_may_fire_unrelated_events_in_another_order() {
+    let mut swapped = 0;
+    for word in 0..48 {
+        let case = ChanceCase::two_rhythms()
+            .expect("a body")
+            .delivering(Vec::new())
+            .seeded(Seed::new([word, 8, 9, 10]));
+        let (coarse, known) = (
+            events(&case, &reference(SECOND)),
+            events(&case, &reference(SECOND / 16)),
+        );
+        let order = |list: &[Fired]| -> Vec<(LawName, u64)> {
+            list.iter()
+                .map(|event| (event.stream(), event.ordinal()))
+                .collect()
+        };
+        swapped += usize::from(order(&coarse) != order(&known));
+        let clock = clock();
+        let fine = || reference(SECOND / 4);
+        let plan = plan(&clock, &fine);
+        let cores = || reference(SECOND);
+        let verdict = replay_gate(ReplayGate::StepPolicy, &case, &cores, &plan);
+        assert!(verdict.is_ok(), "seed {word}: {:?}", verdict.err());
+    }
+    assert!(swapped > 0, "no two events swapped, so this test pressed nothing");
+}
+
+#[test]
+fn step_policy_evidence_names_the_distance_it_held() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let clock = clock();
+    let fine = || reference(SECOND / 4);
+    let plan = plan(&clock, &fine);
+    let cores = || reference(SECOND);
+    let evidence = replay_gate(ReplayGate::StepPolicy, &case, &cores, &plan).expect("the gate");
+    assert_eq!(evidence.tolerance_ns(), Some(EVENT_TOLERANCE_NS));
 }
 
 #[test]

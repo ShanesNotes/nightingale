@@ -146,6 +146,7 @@ pub struct GateEvidence {
     clock: Option<ClockSource>,
     course: Seal,
     fired: Vec<Fired>,
+    tolerance_ns: Option<u64>,
 }
 impl GateEvidence {
     pub fn gate(&self) -> ReplayGate {
@@ -164,6 +165,10 @@ impl GateEvidence {
     /// What the reference run fired.
     pub fn fired(&self) -> &[Fired] {
         &self.fired
+    }
+    /// The distance a step-policy gate held its events to.
+    pub fn tolerance_ns(&self) -> Option<u64> {
+        self.tolerance_ns
     }
 }
 
@@ -407,6 +412,7 @@ fn pace_gate(
         clock: Some(plan.clock.source()),
         course: reference.seal,
         fired: fired(&reference.rows),
+        tolerance_ns: None,
     })
 }
 
@@ -486,6 +492,7 @@ fn resume_gate(
         clock: None,
         course: reference.seal,
         fired: fired(&reference.rows),
+        tolerance_ns: None,
     })
 }
 
@@ -566,6 +573,7 @@ fn late_admission_gate(
         clock: None,
         course: reference.seal,
         fired: fired(&reference.rows),
+        tolerance_ns: None,
     })
 }
 
@@ -613,6 +621,7 @@ fn rewind_gate(case: &dyn ReplayCase, cores: &dyn CoreFactory) -> Result<GateEvi
         clock: None,
         course: reference.seal,
         fired: fired(&reference.rows),
+        tolerance_ns: None,
     })
 }
 
@@ -653,11 +662,17 @@ fn extra_evaluation_gate(
         clock: None,
         course: reference.seal,
         fired: fired(&reference.rows),
+        tolerance_ns: None,
     })
 }
 
-/// Pairs events by stream and ordinal first, so a moved event is named as one. An event left over within the
-/// tolerance of the case's end is an honest straddle: one policy fired it just before the end.
+fn pair<'f>(event: &Fired, list: &'f [Fired]) -> Option<&'f Fired> {
+    (list.iter()).find(|other| other.stream() == event.stream() && other.ordinal() == event.ordinal())
+}
+
+/// Pairs by stream and ordinal, because two unrelated events a floor apart can share a landing under a coarser
+/// policy, and then the lists differ in order and in nothing else. An event with no pair within the tolerance of
+/// the case's end is an honest straddle: one policy fired it just before the end.
 fn same_events(
     reference: &[Fired],
     policy: &[Fired],
@@ -668,26 +683,25 @@ fn same_events(
         reference: reference.len(),
         policy: policy.len(),
     };
-    for (known, seen) in reference.iter().zip(policy) {
-        if known.stream() != seen.stream() || known.ordinal() != seen.ordinal() {
-            return Err(differ);
-        }
-        let apart_ns = known.at().nanoseconds().abs_diff(seen.at().nanoseconds());
-        if apart_ns > tolerance_ns {
-            return Err(ReplayFailure::EventMoved {
-                stream: known.stream(),
-                ordinal: known.ordinal(),
-                apart_ns,
-            });
+    let unpaired = |event: &Fired| event.at().nanoseconds() + tolerance_ns < end.nanoseconds();
+    for known in reference {
+        match pair(known, policy) {
+            Some(seen) => {
+                let apart_ns = known.at().nanoseconds().abs_diff(seen.at().nanoseconds());
+                if apart_ns > tolerance_ns {
+                    return Err(ReplayFailure::EventMoved {
+                        stream: known.stream(),
+                        ordinal: known.ordinal(),
+                        apart_ns,
+                    });
+                }
+            }
+            None if unpaired(known) => return Err(differ),
+            None => {}
         }
     }
-    let longer = if reference.len() > policy.len() {
-        reference
-    } else {
-        policy
-    };
-    let left_over = &longer[reference.len().min(policy.len())..];
-    if (left_over.iter()).any(|event| event.at().nanoseconds() + tolerance_ns < end.nanoseconds()) {
+    let extra = |seen: &&Fired| pair(seen, reference).is_none();
+    if policy.iter().filter(extra).any(unpaired) {
         return Err(differ);
     }
     Ok(())
@@ -714,6 +728,7 @@ fn step_policy_gate(
             clock: None,
             course: first.seal,
             fired: Vec::new(),
+            tolerance_ns: None,
         });
     };
     let (second, _) = reference(gate, case, chance.second_policy)?;
@@ -738,6 +753,7 @@ fn step_policy_gate(
         clock: None,
         course: first.seal,
         fired: fired(&first.rows),
+        tolerance_ns: Some(chance.event_tolerance_ns),
     })
 }
 
