@@ -943,6 +943,13 @@ fn chance_fields(body: &CompiledBody) -> (usize, usize, usize) {
     (modes, ordinals, ordinals + 2 * 8)
 }
 
+/// The image closes on the bound first modes, and the fixture's one variable is its last word.
+fn bound_mode(saved: &Checkpoint) -> usize {
+    let bytes = saved.as_bytes();
+    let stated = bytes[HEADER..].first_chunk().expect("the image's length");
+    HEADER + u64::from_be_bytes(*stated) as usize
+}
+
 fn resealed(mut bytes: Vec<u8>) -> Checkpoint {
     let raw = Digest::of_canonical(&bytes[RAW_DIGEST.end..]);
     bytes[RAW_DIGEST].copy_from_slice(raw.as_bytes());
@@ -998,6 +1005,11 @@ fn a_head_after_a_firing_resumes_and_rewinds_exactly_and_refuses_forged_chance_s
         let refused = Session::resume(&forged(&saved, place, value), &identity, body, &fresh, &store);
         assert_eq!(refused.err(), Some(expected), "at {place}, {value}");
     }
+    let moved = forged(&saved, bound_mode(&saved), 0);
+    assert!(matches!(
+        Session::resume(&moved, &identity, body, &fresh, &store).err(),
+        Some(CheckpointError::HistoryAltered { .. })
+    ));
     let short = short_of_an_ordinal(&saved, ordinals);
     assert_eq!(
         Session::resume(&short, &identity, body, &fresh, &store).err(),
