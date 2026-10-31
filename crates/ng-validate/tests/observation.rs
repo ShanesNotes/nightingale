@@ -1166,20 +1166,15 @@ fn a_resealed_queue_is_held_to_what_an_observer_can_leave() {
     let resumed =
         |edit: &dyn Fn(&mut Vec<u8>)| Observer::resume(&lens, seed(), &resealed(&saved, edit)).err();
     let malformed = Some(ObservationRefusal::Malformed);
-    let queue = |body: &[u8]| {
-        let bytes = body[COUNT..QUEUE].first_chunk().expect("eight bytes");
-        u64::from_be_bytes(*bytes)
-    };
-    resealed(&saved, |body| assert!(queue(body) > 1, "two held readings"));
-    let second = QUEUE + HELD_BYTES;
+    let body = &saved.as_bytes()[RAW_DIGEST_END..];
+    let count = body[COUNT..].first_chunk().expect("eight bytes");
+    let held = u64::from_be_bytes(*count) as usize;
+    assert!(held > 1, "two held readings");
+    let last = QUEUE + (held - 1) * HELD_BYTES;
     assert_eq!(resumed(&|_| ()), None, "the same bytes, resealed, are good");
+    assert_eq!(resumed(&|body| word_at(body, last, 0)), malformed, "out of order");
     assert_eq!(
-        resumed(&|body| word_at(body, second, 0)),
-        malformed,
-        "out of order"
-    );
-    assert_eq!(
-        resumed(&|body| word_at(body, second, u64::MAX)),
+        resumed(&|body| word_at(body, last, u64::MAX)),
         malformed,
         "past the clock"
     );

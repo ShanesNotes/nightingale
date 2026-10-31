@@ -1498,7 +1498,10 @@ fn every_replay_gate_passes_with_a_stream_and_a_forcing_on() {
     let plan = plan(&clock, &fine);
     let evidence = replay_gates(&case, &|| reference(SECOND), &plan).expect("every gate");
     assert!(!evidence.of(ReplayGate::Resume).fired().is_empty());
-    assert!(!evidence.of(ReplayGate::NonPerturbation).fired().is_empty());
+    let watched = evidence.of(ReplayGate::NonPerturbation);
+    assert_eq!(watched.gate(), ReplayGate::NonPerturbation);
+    assert!(!watched.fired().is_empty());
+    assert_eq!(watched.observed().len(), 2);
 }
 
 struct Random(u64);
