@@ -31,8 +31,27 @@ pub enum AdmissionError {
     ZeroDenominator,
     /// An absolute scale that is not positive, or a relative scale below zero.
     NonPositiveScale,
-    /// A body with a mode variable.
+    /// A mode variable a plain guard fires or no hazard guard moves, or any mode variable in a body with an
+    /// algebraic row, which a firing could leave false. A guard that silently never fires is worse than a run
+    /// that never starts.
     ModesNotYetRun {
+        variable: LawName,
+    },
+    /// A value built only from literals, or a parameter divided by itself: a constant no packet entry backs.
+    /// This check is partial. It reads the graph, never a value.
+    UnbackedConstant {
+        law: LawName,
+    },
+    /// A mode variable with no starting value in the packet.
+    MissingStartMode {
+        variable: LawName,
+    },
+    /// A starting value of a mode variable or a value the body does not declare.
+    UnknownStartMode {
+        variable: LawName,
+        value: &'static str,
+    },
+    DuplicateStartMode {
         variable: LawName,
     },
     UnboundParameter {
@@ -169,6 +188,14 @@ pub enum CompileDefect {
     MissingPartialVolume { law: LawName },
     /// A water boundary at a space its site does not have, or at a site the anatomy does not declare.
     BoundaryEndpoint { law: LawName },
+    /// A stream no guard draws on, so its ordinal would never move.
+    UndrawnStream { stream: LawName },
+    /// A forcing no law reads.
+    UnreadForcing { forcing: LawName },
+    /// A second guard on one stream: one draw cannot be two events' threshold.
+    SecondGuardOnStream { stream: LawName },
+    /// A hazard integral not declared nonnegative, so it could not hold the reset or reach a threshold.
+    HazardSet { integral: LawName },
 }
 
 /// Why one attempt cannot stand. A smaller retry of the same base can still succeed. A row or source id

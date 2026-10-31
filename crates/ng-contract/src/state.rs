@@ -3,19 +3,27 @@ use crate::identity::{Canonical, Seal};
 use crate::{Compensated, CompiledBody, Digest, Interval, RowId, SimTime};
 
 /// A full state in one compiled layout: amounts stay compensated, memory and algebraic values are
-/// coordinates. No public constructor: admission makes the first, `verify` every other, and
-/// `ImageParts::parse` one a checkpoint saved.
+/// coordinates, each mode variable holds a value's index and each stream an ordinal, both in compiled order.
+/// `fired` says this head ended at a firing, so a fresh session here reaches the ticket a running one would:
+/// the flag lives in sealed state, not in a ticket. No public constructor: admission makes the first,
+/// `verify` every other, and `ImageParts::parse` one a checkpoint saved.
 pub struct Candidate {
     pub(crate) amounts: Vec<Compensated>,
     pub(crate) memory: Vec<f64>,
     pub(crate) algebraic: Vec<f64>,
+    pub(crate) modes: Vec<usize>,
+    pub(crate) ordinals: Vec<u64>,
+    pub(crate) fired: bool,
 }
 impl Candidate {
-    pub(crate) fn of_coordinates(body: &CompiledBody, coordinates: &[f64]) -> Self {
+    pub(crate) fn of_coordinates(body: &CompiledBody, coordinates: &[f64], modes: Vec<usize>) -> Self {
         let mut state = Self {
             amounts: Vec::new(),
             memory: Vec::new(),
             algebraic: Vec::new(),
+            modes,
+            ordinals: vec![0; body.layout.streams.len()],
+            fired: false,
         };
         for (row, &value) in body.rows().iter().zip(coordinates) {
             match row.kind() {
@@ -31,6 +39,7 @@ impl Candidate {
             amounts,
             memory,
             algebraic,
+            ..
         } = self;
         let at = row.index();
         if at < amounts.len() {
@@ -47,6 +56,7 @@ impl Candidate {
             amounts,
             memory,
             algebraic,
+            ..
         } = self;
         let coordinates = memory
             .iter()
@@ -59,22 +69,41 @@ impl Candidate {
             amounts,
             memory,
             algebraic,
+            ..
         } = self;
         (amounts.iter().map(|amount| amount.rounded()))
             .chain(memory.iter().copied())
             .chain(algebraic.iter().copied())
             .collect()
     }
+    /// Covers modes, ordinals and the flag, so every image digest and seal covers them with no section of
+    /// their own.
     pub fn digest(&self) -> Digest {
         let Self {
             amounts,
             memory,
             algebraic,
+            modes,
+            ordinals,
+            fired,
         } = self;
         let mut out = Canonical::new("ng-contract state 1");
         amounts.seal(&mut out);
         memory.seal(&mut out);
         algebraic.seal(&mut out);
+        modes.seal(&mut out);
+        ordinals.seal(&mut out);
+        out.number(u64::from(*fired));
+        out.digest()
+    }
+    pub fn modes_digest(&self) -> Digest {
+        let mut out = Canonical::new("ng-contract modes 1");
+        self.modes.seal(&mut out);
+        out.digest()
+    }
+    pub fn streams_digest(&self) -> Digest {
+        let mut out = Canonical::new("ng-contract streams 1");
+        self.ordinals.seal(&mut out);
         out.digest()
     }
 }

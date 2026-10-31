@@ -11,11 +11,12 @@ use replay_cores::{
 };
 
 const SECOND: u64 = 1_000_000_000;
-const GATES: [ReplayGate; 4] = [
+const GATES: [ReplayGate; 5] = [
     ReplayGate::Pace,
     ReplayGate::Resume,
     ReplayGate::LateAdmission,
     ReplayGate::Rewind,
+    ReplayGate::ExtraEvaluation,
 ];
 
 fn measure<U>(value: f64) -> Measure<U> {
@@ -113,6 +114,7 @@ fn plan(clock: &ScriptedClock) -> ReplayPlan<'_> {
         simulated_per_wall: 1,
         chunks: vec![3 * SECOND, 11 * SECOND + 1, SECOND / 2],
         resume_every: 5,
+        chance: None,
     }
 }
 
@@ -344,10 +346,11 @@ fn a_core_told_the_timeline_in_only_one_run_fails_late_admission() {
     let failure = replay_gate(ReplayGate::LateAdmission, &case, &cores, &plan(&clock));
     assert_eq!(
         failure.err(),
-        Some(ReplayFailure::NoLateBoundary {
-            id: InputId::new(Digest::of_canonical(b"input"))
+        Some(ReplayFailure::Diverged {
+            gate: ReplayGate::LateAdmission,
+            first_divergence: at(20),
         }),
-        "the late run has passed the head the known run gave the input"
+        "the late run takes the input at its own last head and still leaves the known run's course"
     );
 }
 
@@ -364,6 +367,7 @@ fn a_core_that_reads_the_host_clock_fails_pace() {
         simulated_per_wall: 1,
         chunks: vec![SECOND],
         resume_every: 5,
+        chance: None,
     };
     let failure = replay_gate(ReplayGate::Pace, &case, &cores, &plan);
     assert!(
@@ -410,6 +414,7 @@ fn a_plan_that_compares_nothing_is_missing_evidence() {
             simulated_per_wall: 1,
             chunks,
             resume_every,
+            chance: None,
         };
         let failure = replay_gate(gate, &case, &cores, &plan);
         assert_eq!(failure.err(), Some(ReplayFailure::MissingEvidence { gate }));
@@ -1038,7 +1043,7 @@ fn a_well_sealed_malformed_body_is_refused_and_never_panics() {
     let (digests, earliest) = (session.record().digests(), session.record().earliest_stamp());
     let bytes = saved.as_bytes();
     let image = u64::from_be_bytes(*bytes[HEADER..].first_chunk().expect("a length")) as usize;
-    let branch = HEADER + 8 + image + 8;
+    let branch = HEADER + 8 + image;
     for position in HEADER..bytes.len() {
         for flip in [0x01, 0x80] {
             let mut flipped = bytes.to_vec();
@@ -1073,7 +1078,7 @@ fn a_bound_value_changed_under_a_good_digest_is_refused() {
     let identity = session.record().identity();
     let mut bytes = saved.as_bytes().to_vec();
     let image = u64::from_be_bytes(*bytes[HEADER..].first_chunk().expect("a length")) as usize;
-    let value = HEADER + 8 + image - 8;
+    let value = HEADER + 8 + image - 16;
     bytes[value] ^= 1;
     let refused = Session::resume(&resealed(bytes), identity, case.body(), &core, &store).err();
     assert!(
@@ -1108,40 +1113,35 @@ fn arbitrary_bodies_are_refused_and_never_panic() {
     }
 }
 
-fn with_stream_ordinals(saved: &Checkpoint, ordinals: [(u8, u64); 2]) -> Checkpoint {
-    let bytes = saved.as_bytes();
-    let image = u64::from_be_bytes(*bytes[HEADER..].first_chunk().expect("a length")) as usize;
-    let count_at = HEADER + 8 + image;
-    let mut out = bytes[..count_at].to_vec();
-    out.extend_from_slice(&2_u64.to_be_bytes());
-    for (key, ordinal) in ordinals {
-        out.extend_from_slice(&[key; 32]);
-        out.extend_from_slice(&ordinal.to_be_bytes());
-    }
-    out.extend_from_slice(&bytes[count_at + 8..]);
-    let body = (out.len() - HEADER) as u64;
-    out[40..48].copy_from_slice(&body.to_be_bytes());
-    resealed(out)
+/// Ordinals now sit inside the image, in the body's stream order, so a checkpoint has no key list to order and
+/// the only forgery left is a value under the seal.
+fn with_first_ordinal(saved: &Checkpoint, ordinal: u64, body: &CompiledBody) -> Checkpoint {
+    let mut bytes = saved.as_bytes().to_vec();
+    let kinds = |wanted: fn(&RowKind) -> bool| body.rows().iter().filter(|row| wanted(&row.kind())).count();
+    let amounts = kinds(|kind| matches!(kind, RowKind::Amount { .. }));
+    let coordinates = body.rows().len() - amounts;
+    let tag = 8 + "ng-contract image 1".len();
+    let modes = 1;
+    let lists = 8 + 16 * amounts + 8 + 8 + 8 * coordinates + 8 + 8 * modes + 8;
+    let at = HEADER + 8 + tag + 8 + lists;
+    bytes[at..at + 8].copy_from_slice(&ordinal.to_be_bytes());
+    resealed(bytes)
 }
 
 #[test]
-fn stream_ordinals_read_back_under_the_seal_and_only_in_order() {
-    let case = delivering(vec![delivery(b"input", 8, 16)], 40);
-    let core = reference(8 * SECOND);
+fn a_stream_ordinal_changed_under_a_good_digest_is_a_seal_mismatch() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = reference(SECOND);
     let mut store = Store::default();
-    let (session, saved) = past_every_input(case.admit(&core).expect("admitted"), &case, &mut store);
+    let session = case.admit(&core).expect("admitted");
+    let session = to(session, at(10));
+    let saved = session.checkpoint(&mut store).expect("saved");
     let identity = session.record().identity();
-    let body = case.body();
-    let ordered = with_stream_ordinals(&saved, [(1, 5), (2, 6)]);
+    let forged = with_first_ordinal(&saved, 5, case.body());
     assert_eq!(
-        Session::resume(&ordered, identity, body, &core, &store).err(),
+        Session::resume(&forged, identity, case.body(), &core, &store).err(),
         Some(CheckpointError::SealMismatch),
         "well formed, and the seal covers it"
-    );
-    let unordered = with_stream_ordinals(&saved, [(2, 6), (1, 5)]);
-    assert_eq!(
-        Session::resume(&unordered, identity, body, &core, &store).err(),
-        Some(CheckpointError::Malformed)
     );
 }
 
@@ -1722,6 +1722,7 @@ fn a_pace_that_moves_no_simulated_time_is_missing_evidence_before_it_reads_a_clo
         simulated_per_wall: 0,
         chunks: vec![SECOND],
         resume_every: 5,
+        chance: None,
     };
     let gate = ReplayGate::Pace;
     assert_eq!(

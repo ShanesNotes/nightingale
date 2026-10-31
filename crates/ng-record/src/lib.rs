@@ -94,6 +94,20 @@
 //!     AuthorizedInput::from_command_receipt(command, event)
 //! }
 //! ```
+//! A mode and a stream's ordinal are accepted state in the contract's image, so a record has no second copy to
+//! write: only a step moves them.
+//! ```compile_fail,E0599
+//! use ng_record::*;
+//! fn advance(record: &mut PatientRecord<'_>) { record.advance_stream(0); }
+//! ```
+//! ```
+//! use ng_contract::Digest;
+//! use ng_record::*;
+//! fn read(record: &PatientRecord<'_>) -> (Digest, Digest) {
+//!     let digests = record.digests();
+//!     (digests.modes, digests.streams)
+//! }
+//! ```
 //! A host cannot hand the record a ticket: an attempt issues its own.
 //! ```compile_fail,E0624
 //! use ng_contract::*;

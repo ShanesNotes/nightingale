@@ -1,0 +1,940 @@
+mod chance_cores;
+
+use chance_cores::{
+    CountsEvaluations, DelaysEveryEvent, DrawsPerEvaluation, DrawsPerStep, JittersItsSpan,
+    KeepsItsHistoryAcrossAFiring, ReadingClock, RefusesByHash, RefusesEveryLanding, RefusesItsFirstTrial,
+    VerifiesDry,
+};
+use core::cell::Cell;
+use ng_contract::*;
+use ng_record::*;
+use ng_validate::*;
+
+const SECOND: u64 = 1_000_000_000;
+const MILLISECOND: u64 = 1_000_000;
+/// A model default: the landing tolerance plus what a quadrature books wrong on this case, about a quarter of
+/// the coarser step times the rate's relative swing.
+const EVENT_TOLERANCE_NS: u64 = 500 * MILLISECOND;
+const INTEGRAL: &str = "rhythm-hazard";
+const SECOND_INTEGRAL: &str = "second-hazard";
+const ONSET: &str = "ectopic-beat";
+const RETURN: &str = "sinus-return";
+const SECOND_STREAM: &str = "second-stream";
+
+fn at(seconds: u64) -> SimTime {
+    SimTime::from_ns(seconds * SECOND)
+}
+
+fn reference(interval_ns: u64) -> ReferenceIntegrator {
+    ReferenceIntegrator::new(interval_ns)
+}
+
+fn clock() -> ReadingClock {
+    ReadingClock {
+        readings: vec![0, 40, 90, 170, 900, 90_000],
+        next: Cell::new(0),
+    }
+}
+
+fn plan<'c>(clock: &'c ReadingClock, second: &'c dyn CoreFactory) -> ReplayPlan<'c> {
+    ReplayPlan {
+        clock,
+        simulated_per_wall: SECOND,
+        chunks: vec![7 * SECOND, 13 * SECOND + 1],
+        resume_every: 60,
+        chance: Some(ChancePlan {
+            second_policy: second,
+            reference: &|| ReferenceIntegrator::new(SECOND / 16),
+            event_tolerance_ns: EVENT_TOLERANCE_NS,
+        }),
+    }
+}
+
+fn finished<'m>(session: Session<'m, Running>, end: SimTime) -> (Session<'m, Running>, Vec<Fired>) {
+    let mut session = session;
+    let mut fired = Vec::new();
+    while session.record().accepted().time() < end {
+        let mut attempt = session.step();
+        session = loop {
+            attempt = match attempt {
+                Step::Accepted(session, receipt) => {
+                    fired.extend_from_slice(receipt.fired());
+                    break session;
+                }
+                Step::Refused(session) => session.retry(),
+                Step::Faulted(stopped) => panic!("{:?}", stopped.fault()),
+            };
+        };
+    }
+    (session, fired)
+}
+
+fn events(case: &dyn ReplayCase, core: &dyn CoupledSolver) -> Vec<Fired> {
+    finished(case.admit(core).expect("admitted"), case.end()).1
+}
+
+fn one_step<'m>(session: Session<'m, Running>) -> (Session<'m, Running>, StepReceipt) {
+    let mut attempt = session.step();
+    loop {
+        attempt = match attempt {
+            Step::Accepted(session, receipt) => return (session, receipt),
+            Step::Refused(session) => session.retry(),
+            Step::Faulted(stopped) => panic!("{:?}", stopped.fault()),
+        };
+    }
+}
+
+fn row(case: &ChanceCase, local: &'static str) -> RowId {
+    case.memory(local).expect("the body declares it")
+}
+
+#[test]
+fn a_streams_ordinals_climb_by_one_per_event_from_zero() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let fired = events(&case, &reference(SECOND));
+    let ordinals = |local: &'static str| -> Vec<u64> {
+        (fired.iter())
+            .filter(|event| event.stream().local == local)
+            .map(|event| event.ordinal())
+            .collect()
+    };
+    let (onset, recovery) = (ordinals(ONSET), ordinals(RETURN));
+    assert!(onset.len() >= 2);
+    assert_eq!(onset, (0..onset.len() as u64).collect::<Vec<u64>>());
+    assert_eq!(recovery, (0..recovery.len() as u64).collect::<Vec<u64>>());
+}
+
+#[test]
+fn a_rate_holds_where_its_law_says_so_an_integral_keeps_what_a_rate_that_does_not_hold_there_would_add() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = reference(SECOND);
+    let integral = row(&case, INTEGRAL);
+    let mut session = case.admit(&core).expect("admitted");
+    let (mut sinus, mut ectopic) = (Vec::new(), Vec::new());
+    let mut rhythm = "sinus";
+    while session.record().accepted().time() < case.end() {
+        let before = session.record().accepted().value(integral);
+        let time = session.record().accepted().time();
+        let (next, receipt) = one_step(session);
+        session = next;
+        if let Some(event) = receipt.fired().first() {
+            rhythm = event.entered().value;
+            continue;
+        }
+        let gained = session.record().accepted().value(integral).minus(before);
+        let seconds = (session.record().accepted().time().nanoseconds() - time.nanoseconds()) as f64;
+        let per_second = f64::from_bits(gained.bits()[0]) / seconds * 1e9;
+        if rhythm == "sinus" {
+            &mut sinus
+        } else {
+            &mut ectopic
+        }
+        .push(per_second);
+    }
+    let mean = |rates: &[f64]| rates.iter().sum::<f64>() / rates.len() as f64;
+    assert!(!sinus.is_empty() && !ectopic.is_empty());
+    assert!(
+        mean(&ectopic) > 2.0 * mean(&sinus),
+        "each rhythm runs its own law: {} and {}",
+        mean(&sinus),
+        mean(&ectopic)
+    );
+}
+
+/// A rate whose law holds in every mode accrues while its guard is not armed, as the law says. The guard then
+/// fires within a floor of arming, at the end of a first ticket no longer than the floor.
+#[test]
+fn an_integral_past_its_draw_when_its_guard_arms_fires_within_a_floor() {
+    let case = ChanceCase::accruing_while_disarmed()
+        .expect("a body")
+        .until(at(2_400));
+    let fired = events(&case, &reference(SECOND));
+    let overdue = fired.windows(2).filter(|pair| {
+        pair[0].entered().value == "sinus"
+            && pair[1].stream().local == SECOND_STREAM
+            && pair[1].at().nanoseconds() - pair[0].at().nanoseconds() <= MILLISECOND
+    });
+    assert!(
+        overdue.count() > 0,
+        "no guard armed past its draw in {} events",
+        fired.len()
+    );
+}
+
+#[test]
+fn a_rate_that_falls_below_zero_never_lowers_its_integral() {
+    let case = ChanceCase::relaxing().expect("a body");
+    let core = reference(SECOND / 4);
+    let integral = row(&case, INTEGRAL);
+    let mut session = case.admit(&core).expect("admitted");
+    let mut last = Compensated::ZERO;
+    let mut held = 0;
+    while session.record().accepted().time() < case.end() {
+        let (next, receipt) = one_step(session);
+        session = next;
+        let now = session.record().accepted().value(integral);
+        if receipt.fired().is_empty() {
+            assert!(last.at_most(now), "the integral fell with no firing");
+            held += u32::from(now.bits() == last.bits() && now.bits() != Compensated::ZERO.bits());
+        }
+        last = now;
+    }
+    assert!(
+        held > 0,
+        "the rate never went negative, so this test pressed nothing"
+    );
+}
+
+#[test]
+fn a_segment_ends_at_the_left_limit_of_a_reset() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = reference(SECOND);
+    let integral = row(&case, INTEGRAL);
+    let mut session = case.admit(&core).expect("admitted");
+    loop {
+        let (next, receipt) = one_step(session);
+        session = next;
+        if receipt.fired().is_empty() {
+            continue;
+        }
+        let accepted = session.record().accepted();
+        assert_eq!(
+            accepted.value(integral).bits(),
+            Compensated::ZERO.bits(),
+            "the reset"
+        );
+        let segment = accepted.last_segment();
+        let reached = segment.sample(integral, accepted.time()).expect("its end");
+        assert!(
+            !reached.at_most(Compensated::ZERO),
+            "the chord does not run through the reset"
+        );
+        return;
+    }
+}
+
+/// A floor past the span lands a guard at the first ticket that crosses, so two can cross in one landing. The
+/// first in stable order fires. The loser did not happen: it keeps its integral past its draw and its ordinal.
+#[test]
+fn two_guards_racing_for_one_mode_fire_once_and_the_loser_keeps_its_draw() {
+    let mut raced = 0;
+    for seed in 0..64 {
+        let case = ChanceCase::racing()
+            .expect("a body")
+            .delivering(Vec::new())
+            .seeded(Seed::new([seed, 1, 2, 3]))
+            .until(at(120));
+        let core = reference(16 * SECOND).with_floor(300 * SECOND);
+        let thresholds = events(&case, &reference(SECOND));
+        let Some(loser) = (thresholds.iter()).find(|event| event.stream().local == SECOND_STREAM) else {
+            continue;
+        };
+        let (draw, ordinal) = (loser.threshold(), loser.ordinal());
+        if ordinal != 0 {
+            continue;
+        }
+        let second = row(&case, SECOND_INTEGRAL);
+        let mut session = case.admit(&core).expect("admitted");
+        while session.record().accepted().time() < case.end() {
+            let (next, receipt) = one_step(session);
+            session = next;
+            assert!(receipt.fired().len() <= 1, "one mode variable moves once");
+            let Some(event) = receipt.fired().first() else {
+                continue;
+            };
+            if event.stream().local == ONSET && draw.at_most(session.record().accepted().value(second)) {
+                raced += 1;
+            }
+            break;
+        }
+    }
+    assert!(
+        raced > 0,
+        "no two guards raced in 64 seeds, so this test pressed nothing"
+    );
+}
+
+/// The landing stops short of an input the core has been shown, so a late stamp between them would give two
+/// schedules of one input set two heads: the same reason a refused cut leaves a fence.
+#[test]
+fn a_cut_that_crosses_lands_short_of_its_input_and_leaves_a_fence() {
+    let mut found = 0;
+    for seed in 0..400 {
+        let base = ChanceCase::ectopy().expect("a body");
+        let tone = base.tone_slot();
+        let stamp = at(5 + seed % 40);
+        let delivery = Delivery {
+            id: b"shown input",
+            from: stamp,
+            to: at(100),
+            amount: Measure::new(10.0).expect("finite"),
+        };
+        let case = base.delivering(vec![delivery]).seeded(Seed::new([seed, 1, 2, 3]));
+        let core = DrawsPerStep {
+            interval_ns: 8 * SECOND,
+            tone,
+            reach: 1.5,
+        };
+        let mut session = case.admit(&core).expect("admitted");
+        while session.record().accepted().time() < stamp {
+            let (next, receipt) = one_step(session);
+            session = next;
+            let (head, earliest) = (
+                session.record().accepted().time(),
+                session.record().earliest_stamp(),
+            );
+            if !receipt.fired().is_empty() && head < stamp && earliest == stamp {
+                found += 1;
+                let between = SimTime::from_ns(head.nanoseconds() + 1);
+                let late = BoundaryEvent::new(
+                    InputId::new(Digest::of_canonical(b"between")),
+                    between,
+                    BoundaryInput::Water(WaterDelivery {
+                        boundary: "exterior",
+                        amount: Measure::new(1.0).expect("finite"),
+                        ends: at(100),
+                    }),
+                );
+                let command = Digest::of_canonical(b"a command");
+                let input = AuthorizedInput::from_command_receipt(command, late);
+                assert!(matches!(
+                    session.enqueue(input),
+                    Err(AdmissionError::EventBeforeFence { .. })
+                ));
+                break;
+            }
+        }
+    }
+    assert!(
+        found > 0,
+        "no cut crossed in 400 seeds, so this test pressed nothing"
+    );
+}
+
+#[test]
+fn a_guard_inside_a_span_ends_the_step_at_its_crossing_to_the_landing_tolerance() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = reference(64 * SECOND);
+    let landed = events(&case, &core);
+    let fine = events(&case, &reference(SECOND / 8));
+    assert!(!landed.is_empty());
+    for (a, b) in landed.iter().zip(&fine) {
+        assert_eq!((a.stream(), a.ordinal()), (b.stream(), b.ordinal()));
+        assert_ne!(
+            a.at().nanoseconds() % (64 * SECOND),
+            0,
+            "a landing lies inside a span"
+        );
+    }
+}
+
+#[test]
+fn adding_a_second_stream_leaves_the_first_streams_events_unchanged() {
+    let one = ChanceCase::ectopy().expect("a body");
+    let both = ChanceCase::ectopy_and_bystander().expect("a body");
+    let core = reference(SECOND);
+    let bystander = "bystander-stream";
+    let (lone, shared) = (events(&one, &core), events(&both, &core));
+    let first = shared.iter().position(|event| event.stream().local == bystander);
+    let compared = first.unwrap_or(shared.len());
+    assert!(compared > 0, "the bystander fired before anything compared");
+    assert_eq!(
+        lone[..compared],
+        shared[..compared],
+        "every bit of each event up to it"
+    );
+}
+
+/// A second stream that does fire moves the steps and so the instants, and it still moves no draw.
+#[test]
+fn a_draw_is_a_function_of_seed_key_and_ordinal_whatever_else_fires() {
+    let plain = ChanceCase::ectopy().expect("a body").until(at(1_200));
+    let raced = ChanceCase::racing().expect("a body").until(at(1_200));
+    let core = reference(SECOND);
+    let (lone, shared) = (events(&plain, &core), events(&raced, &core));
+    let mut compared = 0;
+    for event in shared
+        .iter()
+        .filter(|event| event.stream().local != SECOND_STREAM)
+    {
+        let same = (lone.iter())
+            .find(|known| known.stream() == event.stream() && known.ordinal() == event.ordinal());
+        if let Some(known) = same {
+            assert_eq!(known.threshold().bits(), event.threshold().bits());
+            compared += 1;
+        }
+    }
+    assert!(compared >= 4, "{compared} draws compared");
+    assert_ne!(lone, shared, "the second stream changed the course");
+}
+
+#[test]
+fn a_new_seed_gives_a_different_course_through_the_same_body() {
+    let first = ChanceCase::ectopy().expect("a body");
+    let second = ChanceCase::ectopy()
+        .expect("a body")
+        .seeded(Seed::new([9, 9, 9, 9]));
+    let core = reference(SECOND);
+    assert_ne!(events(&first, &core), events(&second, &core));
+}
+
+#[test]
+fn a_forced_extra_evaluation_leaves_every_draw_and_ordinal_unchanged() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let clock = clock();
+    let fine = || reference(SECOND / 4);
+    let plan = plan(&clock, &fine);
+    let cores = || CountsEvaluations {
+        inner: reference(SECOND),
+        evaluations: Cell::new(0),
+    };
+    let evidence = replay_gate(ReplayGate::ExtraEvaluation, &case, &cores, &plan).expect("the gate");
+    assert!(!evidence.fired().is_empty());
+    assert_eq!(evidence.runs()[0].streams, evidence.runs()[1].streams);
+}
+
+#[test]
+fn a_core_that_draws_per_evaluation_fails_the_extra_evaluation_gate() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let tone = case.tone_slot();
+    let clock = clock();
+    let fine = || reference(SECOND / 4);
+    let plan = plan(&clock, &fine);
+    let cores = move || DrawsPerEvaluation {
+        interval_ns: SECOND,
+        tone,
+        reach: 0.5,
+        solves: Cell::new(0),
+    };
+    let failure = replay_gate(ReplayGate::ExtraEvaluation, &case, &cores, &plan);
+    assert!(matches!(
+        failure,
+        Err(ReplayFailure::Diverged {
+            gate: ReplayGate::ExtraEvaluation,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn two_step_policies_fire_the_same_events_within_the_tolerance() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let clock = clock();
+    let fine = || reference(SECOND / 4);
+    let plan = plan(&clock, &fine);
+    let coarse = || reference(SECOND);
+    let evidence = replay_gate(ReplayGate::StepPolicy, &case, &coarse, &plan).expect("the gate");
+    assert!(evidence.fired().len() >= 2, "more than one event, so a reset ran");
+}
+
+#[test]
+fn a_step_length_from_private_dice_is_a_legal_step_policy() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let clock = clock();
+    let fine = || reference(SECOND / 4);
+    let plan = plan(&clock, &fine);
+    let jitters = || JittersItsSpan {
+        inner: reference(SECOND / 2),
+        spread_ns: SECOND / 4,
+    };
+    assert!(replay_gates(&case, &jitters, &plan).is_ok());
+}
+
+#[test]
+fn a_core_that_draws_per_step_passes_every_bit_gate_and_fails_the_step_policy_gate() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let tone = case.tone_slot();
+    let clock = clock();
+    let fine = || reference(SECOND / 4);
+    let plan = plan(&clock, &fine);
+    let cores = move || DrawsPerStep {
+        interval_ns: SECOND / 4,
+        tone,
+        reach: 1.5,
+    };
+    for gate in [
+        ReplayGate::Pace,
+        ReplayGate::Resume,
+        ReplayGate::LateAdmission,
+        ReplayGate::Rewind,
+        ReplayGate::ExtraEvaluation,
+    ] {
+        assert!(replay_gate(gate, &case, &cores, &plan).is_ok(), "{gate:?}");
+    }
+    let failure = replay_gate(ReplayGate::StepPolicy, &case, &cores, &plan);
+    assert!(matches!(failure, Err(ReplayFailure::EventMoved { .. })));
+}
+
+#[test]
+fn a_core_that_delays_every_event_alike_fails_against_a_reference_policy() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let tone = case.tone_slot();
+    let clock = clock();
+    let fine = || reference(SECOND / 4);
+    let plan = plan(&clock, &fine);
+    let cores = move || DelaysEveryEvent {
+        interval_ns: SECOND / 4,
+        tone,
+        by: 0.5,
+    };
+    let failure = replay_gate(ReplayGate::StepPolicy, &case, &cores, &plan);
+    assert!(
+        matches!(failure, Err(ReplayFailure::EventMoved { .. })),
+        "{failure:?}"
+    );
+}
+
+/// A trial shorter than a span that passed can still be refused, because a stage's error over a forcing is not
+/// monotone in its length, so this run must reach its end at spans that alias the knots.
+#[test]
+fn a_long_span_over_a_forcing_lands_every_event_and_never_crawls() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = reference(64 * SECOND);
+    let mut session = case.admit(&core).expect("admitted");
+    let mut steps = 0;
+    while session.record().accepted().time() < case.end() {
+        let next = session.record().accepted().time().nanoseconds() + 1;
+        session = finished(session, SimTime::from_ns(next)).0;
+        steps += 1;
+        assert!(
+            steps < 400,
+            "a run of 240 s at 64 s spans crawled at {steps} steps"
+        );
+    }
+}
+
+#[test]
+fn a_core_that_refuses_every_landing_faults_and_publishes_nothing_past_the_crossing() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let honest = events(&case, &reference(SECOND));
+    let core = RefusesEveryLanding {
+        inner: reference(SECOND),
+        interval_ns: SECOND,
+    };
+    let mut session = case.admit(&core).expect("admitted");
+    let stopped = loop {
+        let mut attempt = session.step();
+        session = loop {
+            attempt = match attempt {
+                Step::Accepted(session, _) => break session,
+                Step::Refused(session) => session.retry(),
+                Step::Faulted(stopped) => {
+                    assert_eq!(stopped.fault().kind(), EngineFaultKind::NoAdmissibleStep);
+                    let head = stopped.record().accepted().time();
+                    assert!(head < honest[0].at());
+                    return;
+                }
+            };
+        };
+        if session.record().accepted().time() >= case.end() {
+            break session;
+        }
+    };
+    panic!("{:?}", stopped.record().accepted().time());
+}
+
+#[test]
+fn a_refused_landing_trial_retries_at_a_halved_span_and_loses_nothing() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = RefusesItsFirstTrial {
+        inner: reference(SECOND),
+        interval_ns: SECOND,
+        seen: Cell::new(None),
+    };
+    let events = events(&case, &core);
+    let honest = self::events(&case, &reference(SECOND));
+    assert_eq!(events.len(), honest.len());
+    for (a, b) in events.iter().zip(&honest) {
+        assert_eq!((a.stream(), a.ordinal()), (b.stream(), b.ordinal()));
+        assert!(a.at().nanoseconds().abs_diff(b.at().nanoseconds()) <= EVENT_TOLERANCE_NS);
+    }
+}
+
+#[test]
+fn a_core_that_keeps_its_history_across_a_firing_is_a_method_mismatch() {
+    // No delivery, so a firing is the only breakpoint that can catch it.
+    let case = ChanceCase::ectopy().expect("a body").delivering(Vec::new());
+    let core = KeepsItsHistoryAcrossAFiring { interval_ns: SECOND };
+    let mut session = case.admit(&core).expect("admitted");
+    let fault = loop {
+        let mut attempt = session.step();
+        session = loop {
+            attempt = match attempt {
+                Step::Accepted(session, _) => break session,
+                Step::Refused(session) => session.retry(),
+                Step::Faulted(stopped) => {
+                    assert_eq!(stopped.fault().kind(), EngineFaultKind::MethodMismatch);
+                    return;
+                }
+            };
+        };
+        if session.record().accepted().time() >= case.end() {
+            break session.record().revision();
+        }
+    };
+    panic!("{fault}");
+}
+
+#[test]
+fn a_firing_is_a_breakpoint_a_fresh_session_reaches_from_sealed_state() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = reference(SECOND);
+    let session = case.admit(&core).expect("admitted");
+    let (session, fired) = finished(session, at(1));
+    let first = events(&case, &core)[0];
+    assert!(fired.is_empty(), "no event yet");
+    let mut session = session;
+    let mut last = None;
+    while session.record().accepted().time() < first.at() {
+        let mut attempt = session.step();
+        session = loop {
+            attempt = match attempt {
+                Step::Accepted(session, receipt) => {
+                    last = Some(receipt);
+                    break session;
+                }
+                Step::Refused(session) => session.retry(),
+                Step::Faulted(stopped) => panic!("{:?}", stopped.fault()),
+            };
+        };
+    }
+    assert_eq!(last.expect("a step").fired()[0].at(), first.at());
+    let Step::Accepted(_, receipt) = session.step() else {
+        panic!("the step after a firing");
+    };
+    assert!(receipt.after_breakpoint());
+}
+
+#[test]
+fn a_refusal_discards_the_reset_the_advance_and_the_mode_together() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = RefusesItsFirstTrial {
+        inner: reference(SECOND),
+        interval_ns: SECOND,
+        seen: Cell::new(None),
+    };
+    let mut session = case.admit(&core).expect("admitted");
+    loop {
+        let before = session.record().digests();
+        match session.step() {
+            Step::Accepted(next, _) => session = next,
+            Step::Refused(refused) => {
+                assert_eq!(refused.record().digests(), before);
+                return;
+            }
+            Step::Faulted(stopped) => panic!("{:?}", stopped.fault()),
+        }
+    }
+}
+
+#[test]
+fn every_replay_gate_passes_with_a_stream_and_a_forcing_on() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let clock = clock();
+    let fine = || reference(SECOND / 4);
+    let plan = plan(&clock, &fine);
+    let evidence = replay_gates(&case, &|| reference(SECOND), &plan).expect("every gate");
+    assert!(!evidence.of(ReplayGate::Resume).fired().is_empty());
+}
+
+struct Random(u64);
+impl Random {
+    fn below(&mut self, limit: u64) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0 % limit
+    }
+}
+
+/// Up to three deliveries at random stamps, each its own span, with a guard firing among them.
+fn random_case(random: &mut Random) -> ChanceCase {
+    let names: [&'static [u8]; 3] = [b"a", b"b", b"c"];
+    let deliveries = (0..1 + random.below(3))
+        .map(|name| {
+            let from = SECOND + random.below(40 * SECOND);
+            let to = from + (1 + random.below(30)) * SECOND;
+            Delivery {
+                id: names[name as usize],
+                from: SimTime::from_ns(from),
+                to: SimTime::from_ns(to),
+                amount: Measure::new((10 * (1 + from % 50)) as f64).expect("finite"),
+            }
+        })
+        .collect();
+    let words = [random.below(1 << 40), random.below(1 << 40), 3, 4];
+    ChanceCase::ectopy()
+        .expect("a body")
+        .delivering(deliveries)
+        .seeded(Seed::new(words))
+        .until(at(60))
+}
+
+/// The late-admission gate, on random timelines with a guard firing among the inputs, pressing each input at the
+/// late run's own last head. A fault, an input inside the first step or a case that fired nothing says nothing
+/// about the claim; a divergence breaks it.
+#[test]
+fn late_inputs_match_the_known_timeline_with_a_guard_among_them() {
+    let mut random = Random(0x9E37_79B9_7F4A_7C15);
+    let (mut same, mut said_nothing) = (0, 0);
+    for round in 0..120 {
+        let case = random_case(&mut random);
+        let interval_ns = (1 + random.below(40)) * SECOND / 2;
+        let salt = random.below(u64::MAX);
+        let clock = clock();
+        let fine = || reference(SECOND);
+        let plan = plan(&clock, &fine);
+        let tone = case.tone_slot();
+        let honest = move || reference(interval_ns);
+        let refusing = move || RefusesByHash {
+            inner: reference(interval_ns),
+            salt,
+        };
+        let jagged = move || DrawsPerStep {
+            interval_ns,
+            tone,
+            reach: 1.5,
+        };
+        let cores: [&dyn CoreFactory; 3] = [&honest, &refusing, &jagged];
+        let cores = cores[round % 3];
+        match replay_gate(ReplayGate::LateAdmission, &case, cores, &plan) {
+            Ok(_) => same += 1,
+            Err(
+                ReplayFailure::NoLateBoundary { .. }
+                | ReplayFailure::Faulted { .. }
+                | ReplayFailure::MissingEvidence { .. },
+            ) => said_nothing += 1,
+            Err(failure) => panic!("round {round}: {failure:?}"),
+        }
+    }
+    assert!(same > 60, "{same} compared and {said_nothing} said nothing");
+}
+
+fn holds_a_forcing() -> Result<(CompiledBody, RowId), AdmissionError> {
+    let origin = || -> Result<Position, AdmissionError> {
+        Ok(Position::new(
+            Measure::new(0.0)?,
+            Measure::new(0.0)?,
+            Measure::new(0.0)?,
+        ))
+    };
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin()?);
+    let a = map.site::<VesselSegment>("a", origin()?);
+    let b = map.site::<VesselSegment>("b", origin()?);
+    map.contain(root.id(), a.id());
+    map.contain(root.id(), b.id());
+    map.connect(Network::Vascular, a.id(), b.id());
+    let schema = Schema::new(map.finish()?)?;
+    let body = assemble(schema, |mut body| {
+        let (mut laws, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut laws);
+        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let flow = laws.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, laws.every_mode(), wave)
+        });
+        laws.transfer_along(&route, flow);
+        let scale = laws.parameter(ParameterKey::new("fixture.scale"), Admissible::finite());
+        let wobble = laws.forcing(
+            "wobble",
+            ParameterKey::new("fixture.period"),
+            ParameterKey::new("fixture.amplitude"),
+        );
+        let held = laws.algebraic::<Dimensionless>("held", Admissible::finite());
+        let closure = laws.kernel(|mut k| {
+            let seen = k.algebraic(&held);
+            let scale = k.parameter(&scale);
+            let factor = k.forcing(&wobble);
+            let target = k.scale(scale, factor);
+            let residual = k.subtract(seen, target);
+            k.finish(residual, laws.every_mode(), wave)
+        });
+        laws.residual(&held, closure);
+        body.add(laws.finish());
+        body.compile()
+    })?;
+    let row = (body.rows().iter())
+        .find(|row| matches!(row.kind(), RowKind::Algebraic(_)))
+        .map(Row::id)
+        .expect("the slot");
+    Ok((body, row))
+}
+
+/// `verify` is public, so a core can run it on its own proposal. It says nothing of a guard there: only an
+/// attempt reads a crossing, and only the step an attempt selects fires.
+#[test]
+fn a_dry_verify_fires_nothing_and_shows_no_threshold() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = VerifiesDry {
+        inner: reference(SECOND),
+        checked: Cell::new(0),
+    };
+    let fired = events(&case, &core);
+    assert!(!fired.is_empty());
+    assert!(core.checked.get() > fired.len() as u64);
+}
+
+/// One step of each span to one instant: a forcing read at a ticket's start would differ between them, and one
+/// read at the stage's instant agrees to the solve's own rounding.
+#[test]
+fn a_forcing_is_a_function_of_the_instant_and_not_of_the_step() -> Result<(), InitializationFailure> {
+    let (body, held) = holds_a_forcing()?;
+    let packet = || -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+        let mut packet = ParameterPacket::new();
+        let note = "synthetic";
+        let body_binding = Binding::Body;
+        let scale = Measure::<Dimensionless>::new(3.0)?;
+        packet.synthetic(ParameterKey::new("fixture.scale"), body_binding, scale, note)?;
+        let amplitude = Measure::<Dimensionless>::new(0.5)?;
+        packet.synthetic(
+            ParameterKey::new("fixture.amplitude"),
+            body_binding,
+            amplitude,
+            note,
+        )?;
+        let period = Measure::<Time>::new(1.0)?;
+        packet.synthetic(ParameterKey::new("fixture.period"), body_binding, period, note)?;
+        for row in body.rows() {
+            match row.kind() {
+                RowKind::Algebraic(_) => {
+                    packet.start(row.kind(), Measure::<Dimensionless>::new(3.0)?, note)?
+                }
+                _ => packet.start(row.kind(), Measure::<Water>::new(100.0)?, note)?,
+            }
+        }
+        Ok(packet)
+    };
+    let value_at_one_second = |interval: u64| -> Result<Compensated, InitializationFailure> {
+        let core = reference(interval);
+        let session = admit_fixture(&body, packet()?, BoundaryPort::new(Vec::new())?, &core)?;
+        let (session, _) = finished(session, at(1));
+        Ok(session.record().accepted().value(held))
+    };
+    let (long, short) = (value_at_one_second(SECOND)?, value_at_one_second(SECOND / 4)?);
+    let apart = long.minus(short);
+    let small = Compensated::of(&Measure::<Dimensionless>::new(1e-6)?);
+    assert!(apart.at_most(small) && Compensated::ZERO.minus(apart).at_most(small));
+    let unmoved = Compensated::of(&Measure::<Dimensionless>::new(3.0)?);
+    assert_ne!(long.bits(), unmoved.bits(), "the forcing moved it");
+    Ok(())
+}
+
+/// Admission takes no seed, so a draw reads its mean. A body with a stream holds no algebraic row yet, so a law's
+/// own domain shows the value: `ln(draw - p)` has a value at admission only for `p` below one half.
+#[test]
+fn admission_holds_a_draw_at_its_mean() -> Result<(), InitializationFailure> {
+    let origin = || -> Result<Position, AdmissionError> {
+        Ok(Position::new(
+            Measure::new(0.0)?,
+            Measure::new(0.0)?,
+            Measure::new(0.0)?,
+        ))
+    };
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin()?);
+    let a = map.site::<VesselSegment>("a", origin()?);
+    let b = map.site::<VesselSegment>("b", origin()?);
+    map.contain(root.id(), a.id());
+    map.contain(root.id(), b.id());
+    map.connect(Network::Vascular, a.id(), b.id());
+    let schema = Schema::new(map.finish()?)?;
+    let body = assemble(schema, |mut body| {
+        let (mut laws, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut laws);
+        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let flow = laws.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, laws.every_mode(), wave)
+        });
+        laws.transfer_along(&route, flow);
+        let offset = laws.parameter(ParameterKey::new("fixture.offset"), Admissible::finite());
+        let pace = laws.parameter(ParameterKey::new("fixture.pace"), Admissible::finite());
+        let dice = laws.stream("dice");
+        let integral = laws.state::<Dimensionless>("integral", Admissible::nonnegative());
+        let [a, b] = laws.modes("rhythm", ["a", "b"]);
+        let rate = laws.kernel(|mut k| {
+            let draw = k.draw(&dice);
+            let offset = k.parameter(&offset);
+            let above = k.subtract(draw, offset);
+            let logarithm = k.ln(above);
+            let pace = k.parameter(&pace);
+            let rate = k.scale(pace, logarithm);
+            k.finish(rate, laws.every_mode(), wave)
+        });
+        laws.memory_rate(&integral, rate);
+        laws.hazard(HazardGuard::new(&integral, &dice, a.to(&b)?));
+        body.add(laws.finish());
+        body.compile()
+    })?;
+    let start = |offset: f64| -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+        let mut packet = ParameterPacket::new();
+        let note = "synthetic";
+        let number = Measure::<Dimensionless>::new(offset)?;
+        packet.synthetic(ParameterKey::new("fixture.offset"), Binding::Body, number, note)?;
+        let pace = Measure::<Rate<Dimensionless>>::new(1.0)?;
+        packet.synthetic(ParameterKey::new("fixture.pace"), Binding::Body, pace, note)?;
+        let variable = LawName {
+            owner: "CV",
+            local: "rhythm",
+        };
+        packet.start_mode(variable, "a", note)?;
+        for row in body.rows() {
+            match row.kind() {
+                RowKind::Memory(_) => packet.start(row.kind(), Measure::<Dimensionless>::new(0.0)?, note)?,
+                _ => packet.start(row.kind(), Measure::<Water>::new(100.0)?, note)?,
+            }
+        }
+        Ok(packet)
+    };
+    let core = reference(SECOND);
+    let port = || BoundaryPort::new(Vec::new());
+    assert!(admit_fixture(&body, start(0.4999)?, port()?, &core).is_ok());
+    let past = admit_fixture(&body, start(0.5001)?, port()?, &core).err();
+    assert!(matches!(past, Some(InitializationFailure::Undefined { .. })));
+    Ok(())
+}
+
+/// A law's algebraic row equals the forcing's factor times a constant, so admission's exact-zero check passes
+/// only if it read exactly the mean.
+#[test]
+fn admission_holds_the_forcing_at_its_mean() -> Result<(), InitializationFailure> {
+    let (body, _) = holds_a_forcing()?;
+    let start = |held: f64| -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+        let mut packet = ParameterPacket::new();
+        let default = Binding::Body;
+        packet.synthetic(
+            ParameterKey::new("fixture.scale"),
+            default,
+            Measure::<Dimensionless>::new(3.0)?,
+            "synthetic",
+        )?;
+        packet.synthetic(
+            ParameterKey::new("fixture.amplitude"),
+            default,
+            Measure::<Dimensionless>::new(0.5)?,
+            "synthetic",
+        )?;
+        packet.synthetic(
+            ParameterKey::new("fixture.period"),
+            default,
+            Measure::<Time>::new(1.0)?,
+            "synthetic",
+        )?;
+        for row in body.rows() {
+            match row.kind() {
+                RowKind::Algebraic(_) => {
+                    packet.start(row.kind(), Measure::<Dimensionless>::new(held)?, "synthetic")?;
+                }
+                _ => packet.start(row.kind(), Measure::<Water>::new(100.0)?, "synthetic")?,
+            }
+        }
+        Ok(packet)
+    };
+    let core = reference(SECOND);
+    let port = || BoundaryPort::new(Vec::new());
+    assert!(admit_fixture(&body, start(3.0)?, port()?, &core).is_ok());
+    let off = admit_fixture(&body, start(3.0001)?, port()?, &core).err();
+    assert!(matches!(off, Some(InitializationFailure::Inconsistent { .. })));
+    Ok(())
+}

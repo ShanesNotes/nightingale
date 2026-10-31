@@ -1,9 +1,11 @@
 use crate::body::RowKind;
+use crate::landing::GuardGap;
 use crate::problem::{SolveWorkspace, StagePoint};
 use crate::scheme::Stage;
 use crate::{
     Candidate, Compensated, CompiledBody, CoupledProblem, DenseSegment, Digest, EngineFault, EngineFaultKind,
-    InputId, MethodHistory, NumericalRefusal, Ratio, RowId, StepTicket, TrialFailure, ValidityExcursion,
+    InputId, LawName, MethodHistory, ModeValue, NumericalRefusal, Ratio, RowId, SimTime, StepTicket,
+    TrialFailure, ValidityExcursion,
 };
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
@@ -18,7 +20,7 @@ pub struct StageEvaluation {
     pub(crate) derivative: Vec<f64>,
     pub(crate) columns: Vec<f64>,
     pub(crate) rows: Vec<f64>,
-    pub(crate) values: Vec<f64>,
+    pub(crate) values: Vec<Option<f64>>,
     pub(crate) residuals: Vec<f64>,
 }
 impl StageEvaluation {
@@ -336,6 +338,7 @@ impl StepProposal {
                 start: base.values(),
                 end: state.values(),
             },
+            fired: Vec::new(),
             state,
             continuation: history,
             forward: extents.forward,
@@ -385,6 +388,9 @@ fn next_state(
         amounts,
         memory,
         algebraic,
+        modes: base.modes.clone(),
+        ordinals: base.ordinals.clone(),
+        fired: false,
     }
 }
 
@@ -398,12 +404,14 @@ pub struct VerifiedStep {
     forward: Vec<Compensated>,
     reverse: Vec<Compensated>,
     excursions: Vec<ValidityExcursion>,
+    fired: Vec<Fired>,
 }
 pub struct VerifiedParts {
     pub state: Candidate,
     pub continuation: MethodHistory,
     pub dense: DenseSegment,
     pub excursions: Vec<ValidityExcursion>,
+    pub fired: Vec<Fired>,
 }
 impl VerifiedStep {
     pub fn ticket(&self) -> &StepTicket {
@@ -420,6 +428,16 @@ impl VerifiedStep {
     pub fn applied(&self) -> &[InputId] {
         &self.ticket.due
     }
+    pub(crate) fn gap(&self, problem: &CoupledProblem<'_>) -> GuardGap {
+        problem.chance.gap(problem.body, &self.state)
+    }
+    /// Applies what crossed, all at once, to the step the attempt selected. The dense segment keeps the left
+    /// limit, so a chord never runs through a reset and the next segment starts at the reset.
+    pub(crate) fn fire(self, problem: &CoupledProblem<'_>) -> Self {
+        let at = self.ticket.interval().end();
+        let (state, fired) = problem.chance.fired(problem.body, self.state, at);
+        Self { state, fired, ..self }
+    }
     pub fn into_parts(self) -> VerifiedParts {
         let Self {
             ticket: _,
@@ -429,12 +447,44 @@ impl VerifiedStep {
             forward: _,
             reverse: _,
             excursions,
+            fired,
         } = self;
         VerifiedParts {
             state,
             continuation,
             dense,
             excursions,
+            fired,
         }
+    }
+}
+
+/// One hazard guard that fired at a step's end, named by its stream. A chance event is no input: replay
+/// recreates it from the seed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fired {
+    pub(crate) stream: LawName,
+    pub(crate) at: SimTime,
+    pub(crate) ordinal: u64,
+    pub(crate) threshold_bits: u64,
+    pub(crate) entered: ModeValue,
+}
+impl Fired {
+    pub fn stream(&self) -> LawName {
+        self.stream
+    }
+    pub fn at(&self) -> SimTime {
+        self.at
+    }
+    /// The ordinal of the draw it crossed. The stream stands at the next one after this step.
+    pub fn ordinal(&self) -> u64 {
+        self.ordinal
+    }
+    /// The draw's exponential threshold, a function of the seed, the stream's key and the ordinal alone.
+    pub fn threshold(&self) -> Compensated {
+        Compensated::exact(f64::from_bits(self.threshold_bits))
+    }
+    pub fn entered(&self) -> ModeValue {
+        self.entered
     }
 }

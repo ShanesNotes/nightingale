@@ -40,7 +40,15 @@
 //! use ng_contract::Digest;
 //! use ng_validate::*;
 //! fn forged(run: Digest, pace: GateEvidence) -> ReplayEvidence {
-//!     ReplayEvidence { run, pace: pace.clone(), resume: pace.clone(), late_admission: pace.clone(), rewind: pace }
+//!     ReplayEvidence {
+//!         run,
+//!         pace: pace.clone(),
+//!         resume: pace.clone(),
+//!         late_admission: pace.clone(),
+//!         rewind: pace.clone(),
+//!         extra_evaluation: pace.clone(),
+//!         step_policy: pace,
+//!     }
 //! }
 //! ```
 //! ```
@@ -65,10 +73,10 @@ pub use certificate::{
     Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, ExpectedDrift, QuantityPolicy,
     QuantityResult, Sliding24Hours, certify,
 };
-pub use fixture::{Delivery, TwoReservoirs, admit_fixture};
+pub use fixture::{ChanceCase, Delivery, TwoReservoirs, admit_fixture, admit_seeded};
 pub use reference::ReferenceIntegrator;
 pub use replay::{
-    ClockSource, CoreFactory, GateEvidence, ReplayEvidence, ReplayFailure, ReplayGate, ReplayPlan, WallClock,
-    replay_gate, replay_gates,
+    ChancePlan, ClockSource, CoreFactory, GateEvidence, ReplayCase, ReplayEvidence, ReplayFailure,
+    ReplayGate, ReplayPlan, WallClock, replay_gate, replay_gates,
 };
 pub use run::run_until;

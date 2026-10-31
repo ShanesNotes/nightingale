@@ -75,7 +75,16 @@ impl Bench {
     }
     fn ticket(&self, span_ns: u64) -> Result<StepTicket, TrialFailure> {
         let attempt = Attempt::First { span_ns };
-        (self.parts.pending).attempt(&self.problem(), attempt, |ticket| Ok(ticket.clone()))
+        let mut issued = None;
+        let refused = (self.parts.pending).attempt(&self.problem(), attempt, |ticket| {
+            issued = Some(ticket.clone());
+            Err::<(VerifiedStep, ()), _>(ticket.mismatch().into())
+        });
+        match (issued, refused) {
+            (Some(ticket), _) => Ok(ticket),
+            (None, Err(failure)) => Err(failure),
+            (None, Ok(_)) => panic!("an attempt that issued no ticket passed"),
+        }
     }
 }
 

@@ -1,3 +1,4 @@
+use crate::chance::seed_word;
 use crate::identity::{Canonical, Seal};
 use crate::{AdmissionError, Digest, Dimensionless, Measure, ModelHash, PacketHash};
 
@@ -192,7 +193,8 @@ pub struct DeclaredResolution {
 impl DeclaredResolution {
     /// `policy` hashes everything else a core is configured by, such as its interval, so two settings of
     /// one core never share an identity. `minimum_interval_ns` is the floor and `retry_budget` the refusals
-    /// one step may spend. `Session::admit` refuses a zero floor.
+    /// one step may spend. The floor is also this core's event rule: a guard's crossing is located to within
+    /// it. `Session::admit` refuses a zero floor.
     pub fn new(
         policy: Digest,
         minimum_interval_ns: u64,
@@ -249,13 +251,24 @@ impl DeclaredResolution {
     }
 }
 
+/// The run domain's tag. It enters the seed's word, so equal words in two domains never alias, and ticket 07's
+/// `DomainSeed<D>` keeps this tag for the run domain, so no draw moves when that type lands.
+const RUN_DOMAIN: &str = "run";
+
 #[derive(Clone, Copy)]
 pub struct Seed {
     words: [u64; 4],
+    word: u64,
 }
 impl Seed {
     pub fn new(words: [u64; 4]) -> Self {
-        Self { words }
+        Self {
+            words,
+            word: seed_word(RUN_DOMAIN, words),
+        }
+    }
+    pub(crate) fn word(self) -> u64 {
+        self.word
     }
 }
 
@@ -286,7 +299,7 @@ impl RunIdentity {
         let mut out = Canonical::new("ng-contract run identity 1");
         model.digest().seal(&mut out);
         packet.digest().seal(&mut out);
-        let Seed { words } = seed;
+        let Seed { words, word: _ } = seed;
         for word in words {
             out.number(*word);
         }
@@ -301,6 +314,9 @@ impl RunIdentity {
     }
     pub fn resolution(&self) -> &DeclaredResolution {
         &self.resolution
+    }
+    pub(crate) fn seed(&self) -> Seed {
+        self.seed
     }
 }
 

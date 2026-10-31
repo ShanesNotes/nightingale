@@ -1,8 +1,10 @@
+use crate::body::Layout;
 use crate::identity::{Canonical, Seal};
+use crate::law::{Input, Op};
 use crate::quantity::dimension;
 use crate::{
-    AdmissionError, Binding, Compensated, CompiledBody, Digest, Dimension, Measure, ModelHash, ParameterKey,
-    RowKind,
+    AdmissionError, Binding, Compensated, CompiledBody, Digest, Dimension, LawName, Measure, ModelHash,
+    ParameterKey, RowKind,
 };
 use core::marker::PhantomData;
 
@@ -18,6 +20,15 @@ impl sealed::PacketKind for SyntheticFixture {
     const TAG: u64 = 0;
 }
 impl PacketKind for SyntheticFixture {}
+
+fn reads_a_parameter(op: &Op) -> bool {
+    matches!(
+        op,
+        Op::Input(
+            Input::Parameter(_) | Input::SiteParameter(_) | Input::EdgeParameter(_) | Input::EndParameter(..)
+        )
+    )
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PacketHash {
@@ -45,9 +56,15 @@ struct StartEntry {
     bits: u64,
     note: &'static str,
 }
+struct ModeEntry {
+    variable: LawName,
+    value: &'static str,
+    note: &'static str,
+}
 pub struct ParameterPacket<K: PacketKind> {
     parameters: Vec<ParameterEntry>,
     starts: Vec<StartEntry>,
+    modes: Vec<ModeEntry>,
     kind: PhantomData<K>,
 }
 impl<K: PacketKind> ParameterPacket<K> {
@@ -55,6 +72,7 @@ impl<K: PacketKind> ParameterPacket<K> {
         Self {
             parameters: Vec::new(),
             starts: Vec::new(),
+            modes: Vec::new(),
             kind: PhantomData,
         }
     }
@@ -62,6 +80,7 @@ impl<K: PacketKind> ParameterPacket<K> {
         let Self {
             parameters,
             starts,
+            modes,
             kind: _,
         } = self;
         let mut parameters: Vec<&ParameterEntry> = parameters.iter().collect();
@@ -96,6 +115,19 @@ impl<K: PacketKind> ParameterPacket<K> {
             row.seal(&mut out);
             out.text(dimension);
             out.number(*bits);
+            out.text(note);
+        }
+        let mut modes: Vec<&ModeEntry> = modes.iter().collect();
+        modes.sort_by_key(|entry| entry.variable);
+        out.length(modes.len());
+        for ModeEntry {
+            variable,
+            value,
+            note,
+        } in modes
+        {
+            variable.seal(&mut out);
+            out.text(value);
             out.text(note);
         }
         PacketHash { digest: out.digest() }
@@ -148,6 +180,24 @@ impl ParameterPacket<SyntheticFixture> {
         });
         Ok(())
     }
+    /// One mode variable's starting value, in the packet for the reason a start value is. Refuses the same
+    /// variable twice.
+    pub fn start_mode(
+        &mut self,
+        variable: LawName,
+        value: &'static str,
+        note: &'static str,
+    ) -> Result<(), AdmissionError> {
+        if self.modes.iter().any(|entry| entry.variable == variable) {
+            return Err(AdmissionError::DuplicateStartMode { variable });
+        }
+        self.modes.push(ModeEntry {
+            variable,
+            value,
+            note,
+        });
+        Ok(())
+    }
 }
 
 /// Packet values in compiled parameter order with the packet's hash.
@@ -156,6 +206,7 @@ pub struct BoundParameters {
     pub(crate) packet: PacketHash,
     pub(crate) values: Vec<f64>,
     pub(crate) starts: Vec<f64>,
+    pub(crate) modes: Vec<usize>,
 }
 impl BoundParameters {
     pub fn packet_hash(&self) -> PacketHash {
@@ -167,23 +218,92 @@ impl BoundParameters {
             packet,
             values,
             starts,
+            modes,
         } = self;
         let mut out = Canonical::new("ng-contract bound parameters 1");
         model.digest().seal(&mut out);
         packet.digest().seal(&mut out);
         values.seal(&mut out);
         starts.seal(&mut out);
+        modes.seal(&mut out);
         out.digest()
     }
 }
 
 impl CompiledBody {
-    /// Parses a packet against the compiled layout. Each refusal is by name, and a body with a mode
-    /// variable is refused first.
+    /// A mode variable runs only when hazard guards alone move it, in a body with no algebraic row: a firing
+    /// leaves algebraic values as they were, and nothing here solves them again.
+    fn unrun_mode(&self) -> Option<LawName> {
+        let Layout {
+            rows,
+            modes,
+            guards,
+            hazards,
+            ..
+        } = &self.layout;
+        let algebraic = rows.iter().any(|row| matches!(row.kind, RowKind::Algebraic(_)));
+        let plain = |variable| guards.iter().any(|guard| guard.variable == variable);
+        let moved = |at| hazards.iter().any(|hazard| hazard.variable == at);
+        (modes.iter().enumerate())
+            .find(|&(at, mode)| algebraic || plain(mode.variable) || !moved(at))
+            .map(|(_, mode)| mode.variable)
+    }
+    /// Ruling 15's partial check. A literal is zero, so only `exp` and `logistic` make a nonzero constant from
+    /// literals, and `divide` makes one from a parameter over itself. It reads the graph and never a value.
+    fn unbacked_constant(&self) -> Option<LawName> {
+        let unbacked = |code: &[Op]| {
+            let mut literal = vec![false; code.len()];
+            code.iter().enumerate().any(|(at, op)| {
+                literal[at] = match op {
+                    Op::Zero(_) => true,
+                    Op::Input(_) => false,
+                    _ => op.operands().iter().all(|&operand| literal[operand]),
+                };
+                match op {
+                    Op::Exp(_) | Op::Logistic(_) => literal[at],
+                    Op::Divide([a, b]) => code[*a] == code[*b] && reads_a_parameter(&code[*a]),
+                    _ => false,
+                }
+            })
+        };
+        (self.layout.programs.iter())
+            .find(|program| unbacked(&program.code.ops))
+            .map(|program| program.law)
+    }
+    /// Parses a packet against the compiled layout. Each refusal is by name. What cannot run yet is refused
+    /// first, and a mode's start next, because which laws hold decides what every later value means.
     pub fn bind<K: PacketKind>(&self, packet: ParameterPacket<K>) -> Result<BoundParameters, AdmissionError> {
-        if let Some(mode) = self.layout.modes.first() {
-            return Err(AdmissionError::ModesNotYetRun {
-                variable: mode.variable,
+        if let Some(variable) = self.unrun_mode() {
+            return Err(AdmissionError::ModesNotYetRun { variable });
+        }
+        if let Some(law) = self.unbacked_constant() {
+            return Err(AdmissionError::UnbackedConstant { law });
+        }
+        let mut modes = Vec::with_capacity(self.layout.modes.len());
+        for mode in &self.layout.modes {
+            let variable = mode.variable;
+            let Some(entry) = packet.modes.iter().find(|entry| entry.variable == variable) else {
+                return Err(AdmissionError::MissingStartMode { variable });
+            };
+            let value = entry.value;
+            let Some(at) = mode.values.iter().position(|known| *known == value) else {
+                return Err(AdmissionError::UnknownStartMode { variable, value });
+            };
+            modes.push(at);
+        }
+        if let Some(entry) = (packet.modes.iter())
+            .filter(|entry| {
+                !self
+                    .layout
+                    .modes
+                    .iter()
+                    .any(|mode| mode.variable == entry.variable)
+            })
+            .min_by_key(|entry| entry.variable)
+        {
+            return Err(AdmissionError::UnknownStartMode {
+                variable: entry.variable,
+                value: entry.value,
             });
         }
         let mut read = vec![false; packet.parameters.len()];
@@ -244,6 +364,7 @@ impl CompiledBody {
             packet: packet.hash(),
             values,
             starts,
+            modes,
         })
     }
 }

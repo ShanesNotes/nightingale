@@ -1,8 +1,9 @@
 use crate::body::{
-    Binding, Block, Bound, Code, Column, ColumnId, CompiledBody, Context, GuardLayout, Instance, Layout,
-    ModeLayout, ParameterId, ParameterSlot, Program, ProgramId, Receipt, Row, RowId, RowKind, Sparsity,
-    Target, UnknownId,
+    Binding, Block, Bound, Code, Column, ColumnId, CompiledBody, Context, ForcingLayout, GuardLayout,
+    HazardLayout, Instance, Layout, ModeLayout, ParameterId, ParameterSlot, Program, ProgramId, Receipt, Row,
+    RowId, RowKind, Sparsity, StreamLayout, Target, UnknownId,
 };
+use crate::chance::{ChanceKind, key_word};
 use crate::conservation::conserved_basis;
 use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
@@ -29,20 +30,27 @@ pub(crate) fn compile(
     let unissued = FragmentData::empty(Boundary::CARD);
     let owed = obligations(&fragments, &schema, &unissued)?;
     check_guards(&fragments)?;
+    check_chance(&fragments)?;
     check_volume(&schema, &owed, &fragments)?;
 
     let rows = Rows::lay_out(&schema, &fragments);
     let reaches = Reaches::of(&schema.anatomy);
+    let chance = ChanceNames::of(&fragments);
     let places = Places {
         rows: &rows,
         reaches: &reaches,
+        chance: &chance,
     };
     let placement = place(&owed, &places)?;
     check_orphans(&rows, &placement.columns)?;
     let guards = guards(&fragments, &places)?;
-    let (parameters, instances, guards) = bind(placement.instances, guards, &declarations);
+    let forced = forcing_parameters(&fragments);
+    let (parameters, instances, guards) = bind(placement.instances, guards, &forced, &declarations);
     let (reads, rates) = reads(&rows.rows, &placement.columns, &placement.programs, &instances);
     let modes = modes(&fragments);
+    let hazards = hazards(&fragments, &rows, &chance, &modes);
+    let instances = selected(instances, &placement.programs, &modes, &hazards);
+    let (streams, forcings) = chance.laid_out(&fragments, &parameters);
     match_each_mode(&rows.rows, &placement.programs, &instances, &modes)?;
     let solved_by = solved_by(&rows.rows, &reads)?;
     let blocks = blocks(&solved_by, &reads, &rates);
@@ -58,6 +66,9 @@ pub(crate) fn compile(
         blocks,
         modes,
         guards,
+        streams,
+        forcings,
+        hazards,
         basis,
     }))
 }
@@ -83,6 +94,8 @@ fn check_names(fragment: &FragmentData, schema: &Schema) -> Result<(), CompileDe
     };
     let mut names: Vec<&'static str> = (fragment.slots.iter().map(|slot| slot.name))
         .chain(fragment.modes.iter().map(|mode| mode.name))
+        .chain(fragment.streams.iter().copied())
+        .chain(fragment.forcings.iter().map(|forcing| forcing.name))
         .chain(fragment.families.iter().map(|family| family.name()))
         .chain(
             (schema.boundaries.iter())
@@ -323,6 +336,57 @@ fn check_guards(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     Ok(())
 }
 
+/// Each names the first offender in canonical order, streams, then integrals, then forcings.
+fn check_chance(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
+    for fragment in fragments {
+        let named = |local| LawName {
+            owner: fragment.owner,
+            local,
+        };
+        let mut streams = fragment.streams.clone();
+        streams.sort_unstable();
+        for &stream in &streams {
+            let guards = (fragment.hazards.iter()).filter(|hazard| hazard.stream == stream);
+            match guards.count() {
+                0 => {
+                    return Err(CompileDefect::UndrawnStream {
+                        stream: named(stream),
+                    });
+                }
+                1 => {}
+                _ => {
+                    return Err(CompileDefect::SecondGuardOnStream {
+                        stream: named(stream),
+                    });
+                }
+            }
+        }
+        let mut integrals: Vec<&'static str> =
+            (fragment.hazards.iter()).map(|hazard| hazard.integral).collect();
+        integrals.sort_unstable();
+        for &integral in &integrals {
+            let slot = fragment.slots.iter().find(|slot| slot.name == integral);
+            if slot.map(|slot| slot.set) != Some(AdmissibleSet::Nonnegative) {
+                return Err(CompileDefect::HazardSet {
+                    integral: named(integral),
+                });
+            }
+        }
+        let mut forcings: Vec<&'static str> =
+            (fragment.forcings.iter()).map(|forcing| forcing.name).collect();
+        forcings.sort_unstable();
+        for &forcing in &forcings {
+            let read = Op::Input(Input::Forcing(forcing));
+            if !(fragment.laws.iter()).any(|law| law.kernel.code.contains(&read)) {
+                return Err(CompileDefect::UnreadForcing {
+                    forcing: named(forcing),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 fn check_volume(schema: &Schema, owed: &[Owed], fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     if schema.partial_volume.is_some() {
         return Ok(());
@@ -481,15 +545,155 @@ enum Address {
     Parameter(ParameterKey, Binding),
     Unknown(UnknownId),
     Boundary(&'static str),
+    Draw(usize),
+    Forcing(usize),
 }
 
 struct Places<'a> {
     rows: &'a Rows,
     reaches: &'a Reaches,
+    chance: &'a ChanceNames,
+}
+
+/// Streams and forcings in canonical order, so a position is the same whatever order fragments arrive in.
+struct ChanceNames {
+    streams: Vec<LawName>,
+    forcings: Vec<LawName>,
+}
+impl ChanceNames {
+    fn of(fragments: &[FragmentData]) -> Self {
+        let named = |owner, local| LawName { owner, local };
+        let mut streams: Vec<LawName> = (fragments.iter())
+            .flat_map(|fragment| fragment.streams.iter().map(|name| named(fragment.owner, *name)))
+            .collect();
+        let mut forcings: Vec<LawName> = (fragments.iter())
+            .flat_map(|fragment| {
+                fragment
+                    .forcings
+                    .iter()
+                    .map(|forcing| named(fragment.owner, forcing.name))
+            })
+            .collect();
+        streams.sort_unstable();
+        forcings.sort_unstable();
+        Self { streams, forcings }
+    }
+    fn stream(&self, name: LawName) -> usize {
+        self.streams.partition_point(|known| *known < name)
+    }
+    fn forcing(&self, name: LawName) -> usize {
+        self.forcings.partition_point(|known| *known < name)
+    }
+    fn laid_out(
+        &self,
+        fragments: &[FragmentData],
+        parameters: &[ParameterSlot],
+    ) -> (Vec<StreamLayout>, Vec<ForcingLayout>) {
+        let streams = (self.streams.iter())
+            .map(|&name| StreamLayout {
+                name,
+                key: key_word(ChanceKind::Stream, name),
+            })
+            .collect();
+        let forcings = (fragments.iter())
+            .flat_map(|fragment| {
+                fragment
+                    .forcings
+                    .iter()
+                    .map(move |forcing| (fragment.owner, forcing))
+            })
+            .map(|(owner, forcing)| {
+                let name = LawName {
+                    owner,
+                    local: forcing.name,
+                };
+                let slot = |key| {
+                    let at = parameters.iter().position(|slot| slot.key == key);
+                    ParameterId::at(at.expect("bind lays out both of a forcing's parameters"))
+                };
+                ForcingLayout {
+                    name,
+                    key: key_word(ChanceKind::Forcing, name),
+                    period: slot(forcing.period),
+                    amplitude: slot(forcing.amplitude),
+                }
+            });
+        let mut forcings: Vec<ForcingLayout> = forcings.collect();
+        forcings.sort_unstable_by_key(|forcing| forcing.name);
+        (streams, forcings)
+    }
+}
+
+/// No kernel reads these, so no address lays them out.
+fn forcing_parameters(fragments: &[FragmentData]) -> Vec<(ParameterKey, Binding)> {
+    (fragments.iter())
+        .flat_map(|fragment| &fragment.forcings)
+        .flat_map(|forcing| [forcing.period, forcing.amplitude])
+        .map(|key| (key, Binding::Body))
+        .collect()
+}
+
+/// In `LawName` order of the stream, the order firing walks them.
+fn hazards(
+    fragments: &[FragmentData],
+    rows: &Rows,
+    chance: &ChanceNames,
+    modes: &[ModeLayout],
+) -> Vec<HazardLayout> {
+    let mut hazards: Vec<HazardLayout> = Vec::new();
+    for fragment in fragments {
+        for hazard in &fragment.hazards {
+            let named = |local| LawName {
+                owner: fragment.owner,
+                local,
+            };
+            let declared = &fragment.modes[hazard.variable];
+            let variable = named(declared.name);
+            let at = modes.partition_point(|mode| mode.variable < variable);
+            let value = |index: usize| {
+                let wanted = declared.values[index];
+                let sorted = &modes[at].values;
+                sorted.partition_point(|known| *known < wanted)
+            };
+            hazards.push(HazardLayout {
+                integral: RowId::at(rows.slot(named(hazard.integral))),
+                stream: chance.stream(named(hazard.stream)),
+                variable: at,
+                leaves: value(hazard.leaves),
+                enters: value(hazard.enters),
+            });
+        }
+    }
+    hazards.sort_unstable_by_key(|hazard| hazard.stream);
+    hazards
+}
+
+/// Each instance's mode as indices, so evaluation never reads a name.
+fn selected(
+    mut instances: Vec<Instance>,
+    programs: &[Program],
+    modes: &[ModeLayout],
+    hazards: &[HazardLayout],
+) -> Vec<Instance> {
+    for instance in &mut instances {
+        let program = &programs[instance.program.index()];
+        if let Predicate::Only(mode) = program.code.predicate {
+            let variable = LawName {
+                owner: program.law.owner,
+                local: mode.variable,
+            };
+            let at = modes.partition_point(|known| known.variable < variable);
+            let value = modes[at].values.partition_point(|known| *known < mode.value);
+            instance.mode = Some((at, value));
+        }
+        instance.rectified = matches!(instance.target, Target::Row(row)
+            if hazards.iter().any(|hazard| hazard.integral == row));
+    }
+    instances
 }
 
 fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
-    let Places { rows, reaches } = *places;
+    let Places { rows, reaches, .. } = *places;
     let mut placement = Placement {
         columns: Vec::new(),
         programs: Vec::new(),
@@ -606,7 +810,11 @@ fn addresses(
     context: Context,
     places: &Places,
 ) -> Result<Vec<Address>, CompileDefect> {
-    let Places { rows, reaches } = *places;
+    let Places {
+        rows,
+        reaches,
+        chance,
+    } = *places;
     let inputs = kernel.code.iter().filter_map(|op| match op {
         Op::Input(input) => Some(*input),
         _ => None,
@@ -627,6 +835,14 @@ fn addresses(
                     Address::Unknown(UnknownId::at(rows.amount(pool).ok_or(left_out(law, pool))?))
                 }
                 (Input::Drive(name), _) => Address::Boundary(name),
+                (Input::Draw(local), _) => Address::Draw(chance.stream(LawName {
+                    owner: law.owner,
+                    local,
+                })),
+                (Input::Forcing(local), _) => Address::Forcing(chance.forcing(LawName {
+                    owner: law.owner,
+                    local,
+                })),
                 (Input::Parameter(key), _) => Address::Parameter(key, Binding::Body),
                 (Input::SiteParameter(key), Context::Site(at)) => Address::Parameter(key, Binding::Site(at)),
                 (Input::EdgeParameter(key), Context::Edge { from, to }) => {
@@ -694,6 +910,7 @@ fn guards(
 fn bind(
     placed: Vec<Placed>,
     guards: Vec<(GuardLayout, Vec<Address>)>,
+    forced: &[(ParameterKey, Binding)],
     declarations: &[&ParameterDeclaration],
 ) -> (Vec<ParameterSlot>, Vec<Instance>, Vec<GuardLayout>) {
     let mut wanted: Vec<(ParameterKey, Binding)> = (placed.iter().map(|placed| &placed.addresses))
@@ -701,8 +918,9 @@ fn bind(
         .flatten()
         .filter_map(|address| match *address {
             Address::Parameter(key, binding) => Some((key, binding)),
-            Address::Unknown(_) | Address::Boundary(_) => None,
+            Address::Unknown(_) | Address::Boundary(_) | Address::Draw(_) | Address::Forcing(_) => None,
         })
+        .chain(forced.iter().copied())
         .collect();
     wanted.sort_unstable();
     wanted.dedup();
@@ -735,6 +953,8 @@ fn bind(
         )),
         Address::Unknown(unknown) => Bound::Unknown(unknown),
         Address::Boundary(boundary) => Bound::Boundary(boundary),
+        Address::Draw(stream) => Bound::Draw(stream),
+        Address::Forcing(forcing) => Bound::Forcing(forcing),
     };
     let instances = (placed.into_iter())
         .map(|placed| {
@@ -753,6 +973,8 @@ fn bind(
                 target: placed.target,
                 parameters,
                 inputs,
+                mode: None,
+                rectified: false,
             }
         })
         .collect();
@@ -779,12 +1001,7 @@ fn reads(
     let mut reads: Vec<Vec<UnknownId>> = vec![Vec::new(); rows.len()];
     let mut rates: Vec<Vec<RateClass>> = vec![Vec::new(); rows.len()];
     for instance in instances {
-        let unknowns: Vec<UnknownId> = (instance.inputs.iter())
-            .filter_map(|input| match *input {
-                Bound::Unknown(unknown) => Some(unknown),
-                Bound::Parameter(_) | Bound::Boundary(_) => None,
-            })
-            .collect();
+        let unknowns: Vec<UnknownId> = (instance.inputs.iter()).filter_map(Bound::unknown).collect();
         let defined: Vec<RowId> = match instance.target {
             Target::Row(row) => vec![row],
             Target::Column(column) => columns[column.index()].terms.iter().map(|term| term.0).collect(),
@@ -869,10 +1086,8 @@ fn laws_on_algebraic_rows(first: usize, programs: &[Program], instances: &[Insta
             Target::Row(row) if row.index() >= first => {
                 let program = &programs[instance.program.index()];
                 let mut reads: Vec<usize> = (instance.inputs.iter())
-                    .filter_map(|input| match *input {
-                        Bound::Unknown(unknown) => unknown.index().checked_sub(first),
-                        Bound::Parameter(_) | Bound::Boundary(_) => None,
-                    })
+                    .filter_map(Bound::unknown)
+                    .filter_map(|unknown| unknown.index().checked_sub(first))
                     .collect();
                 reads.sort_unstable();
                 reads.dedup();

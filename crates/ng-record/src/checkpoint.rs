@@ -1,5 +1,5 @@
 use crate::history::{History, Start, push_bits};
-use crate::record::{PatientRecord, StreamPositions};
+use crate::record::PatientRecord;
 use core::cmp::Ordering;
 use ng_contract::{
     ByteReader, Compensated, CompiledBody, Digest, ImageParts, Malformed, RunIdentity, SimTime,
@@ -209,7 +209,6 @@ pub(crate) enum Continuing {
 
 pub(crate) struct Sections<'r> {
     pub(crate) image: &'r ImageParts,
-    pub(crate) streams: &'r StreamPositions,
     pub(crate) branch: &'r BranchAncestry,
     pub(crate) history: &'r History,
 }
@@ -222,14 +221,12 @@ pub(crate) fn write(
 ) -> Checkpoint {
     let Sections {
         image,
-        streams,
         branch,
         history,
     } = sections;
     let image = image.canonical();
     let mut body = (image.len() as u64).to_be_bytes().to_vec();
     body.extend_from_slice(&image);
-    streams.write(&mut body);
     branch.write(&mut body);
     let opening = history.opening_values();
     body.extend_from_slice(&(opening.len() as u64).to_be_bytes());
@@ -269,7 +266,6 @@ pub(crate) fn restore<'m>(
     let parts = Parts::read(header.body, body).map_err(|_| CheckpointError::Malformed)?;
     let Parts {
         image,
-        streams,
         branch,
         opening,
         origin,
@@ -291,7 +287,6 @@ pub(crate) fn restore<'m>(
         branch,
         revision: header.revision,
         image,
-        streams,
         history,
     };
     PatientRecord::restored(body, expected.clone(), parts)
@@ -301,13 +296,11 @@ pub(crate) struct Restored {
     pub(crate) branch: BranchAncestry,
     pub(crate) revision: u64,
     pub(crate) image: ImageParts,
-    pub(crate) streams: StreamPositions,
     pub(crate) history: History,
 }
 
 struct Parts {
     image: ImageParts,
-    streams: StreamPositions,
     branch: BranchAncestry,
     opening: Vec<Compensated>,
     origin: Digest,
@@ -317,14 +310,12 @@ impl Parts {
         let mut read = ByteReader::new(bytes);
         let count = read.count(1)?;
         let image = ImageParts::parse(body, read.take(count)?)?;
-        let streams = StreamPositions::read(&mut read)?;
         let branch = BranchAncestry::read(&mut read)?;
         let opening = read.compensated_list(body.conserved_basis().combinations().len())?;
         let origin = read.digest()?;
         read.finish()?;
         Ok(Self {
             image,
-            streams,
             branch,
             opening,
             origin,
