@@ -14,7 +14,7 @@ A hazard guard's crossing ends a step somewhere the core's span did not say, and
 
 ## Consequences
 
-- A step that lands pays 3 to 6 extra solves on the one fixture measured, and no other step pays anything. Bisection paid 10 to 30.
+- A step that lands pays 3 to 7 extra solves on the one fixture measured, and no other step pays anything. Bisection paid 10 to 30.
 - The landing tolerance is the core's floor, so the run identity already covers it and a core declares nothing new.
 - A refused trial drops the bracket and retries by `StepTicket::refuse`, unchanged. A landing's own lengths come from the bracket. Its retry is a new attempt at a shorter span, which lands in turn or steps short of the crossing and loses nothing.
 - A firing belongs to the blind step. Every law is read on the state it leaves, and a law with no value there refuses the trial before the timeline is read, so a run that knows an input and one that does not refuse alike.
