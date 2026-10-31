@@ -675,7 +675,7 @@ fn same_events(
         reference: reference.len(),
         policy: policy.len(),
     };
-    let unpaired = |event: &Fired| event.at().nanoseconds() + tolerance_ns < end.nanoseconds();
+    let unpaired = |event: &Fired| event.at().nanoseconds().saturating_add(tolerance_ns) < end.nanoseconds();
     for known in reference {
         match pair(known, policy) {
             Some(seen) => {
@@ -794,7 +794,7 @@ pub fn replay_gates(
 mod tests {
     use super::*;
     use crate::{Delivery, ReferenceIntegrator, TwoReservoirs};
-    use ng_contract::Measure;
+    use ng_contract::{BoundaryInput, Measure, WaterDelivery};
 
     #[test]
     fn a_trace_that_differs_only_in_what_waits_has_diverged() {
@@ -818,5 +818,29 @@ mod tests {
         let compare = |run: &Trace| first_divergence(&reference.rows, &reference.last, &run.rows, &run.last);
         assert_eq!(compare(&reference), None);
         assert_eq!(compare(&run), Some(run.last.time));
+    }
+
+    #[test]
+    fn an_input_arrives_at_the_last_head_that_still_takes_it_and_never_at_admission() {
+        let start = || Measure::new(1_000.0).expect("finite");
+        let case = TwoReservoirs::delivering([start(), start()], Vec::new()).expect("a body");
+        let core = ReferenceIntegrator::new(1_000_000_000);
+        let session = case.admit(&core).expect("admitted");
+        let head = |earliest| Row {
+            earliest: SimTime::from_ns(earliest),
+            ..Row::of(&session, false)
+        };
+        let rows = [head(1), head(10), head(20)];
+        let event = |stamp| {
+            let water = WaterDelivery {
+                boundary: "exterior",
+                amount: Measure::new(1.0).expect("finite"),
+                ends: SimTime::from_ns(stamp + 1),
+            };
+            let id = InputId::new(Digest::of_canonical(b"an input"));
+            BoundaryEvent::new(id, SimTime::from_ns(stamp), BoundaryInput::Water(water))
+        };
+        let arrivals = [1, 9, 10, 19, 20, 21].map(|stamp| arrival(&rows, &event(stamp)));
+        assert_eq!(arrivals, [1, 1, 1, 1, 2, 2]);
     }
 }

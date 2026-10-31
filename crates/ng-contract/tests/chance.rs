@@ -173,6 +173,15 @@ fn a_stream_and_a_slot_under_one_name_are_named_twice() {
     );
 }
 
+#[test]
+fn a_forcing_and_a_slot_under_one_name_are_named_twice() {
+    let outcome = declared(|laws| forced(laws, "memory", beat()?));
+    assert_eq!(
+        defect(outcome),
+        Some(CompileDefect::NamedTwice { law: name("memory") })
+    );
+}
+
 fn bound_rate(
     rate: impl for<'b, 'k> FnOnce(
         &mut Kernel<'b, 'k, Cardiovascular>,
@@ -195,7 +204,7 @@ fn bound_rate(
 }
 
 #[test]
-fn ruling_15_a_constant_built_only_from_literals_is_refused_by_name() {
+fn finding_15_a_constant_built_only_from_literals_is_refused_by_name() {
     let exp = bound_rate(|k, _| {
         let zero = k.zero::<Dimensionless>();
         let one = k.exp(zero);
@@ -220,7 +229,7 @@ fn ruling_15_a_constant_built_only_from_literals_is_refused_by_name() {
 }
 
 #[test]
-fn ruling_15_a_parameter_divided_by_itself_is_refused_by_name() {
+fn finding_15_a_parameter_divided_by_itself_is_refused_by_name() {
     let over_itself = bound_rate(|k, p| {
         let (first, second) = (k.parameter(p), k.parameter(p));
         let ratio = k.divide(first, second);
@@ -235,7 +244,7 @@ fn ruling_15_a_parameter_divided_by_itself_is_refused_by_name() {
 }
 
 #[test]
-fn ruling_15_zero_and_a_law_on_a_parameter_are_backed() {
+fn finding_15_zero_and_a_law_on_a_parameter_are_backed() {
     let outcome = bound_rate(|k, p| {
         let (first, second) = (k.parameter(p), k.parameter(p));
         let gap = k.subtract(first, second);
@@ -323,6 +332,32 @@ fn a_mode_variable_a_plain_guard_fires_stays_refused_by_name() {
 }
 
 #[test]
+fn a_mode_variable_a_hazard_and_a_plain_guard_share_stays_refused_by_name() {
+    let body = declared(|laws| {
+        let dice = laws.stream("dice");
+        let integral = laws.state::<Dimensionless>("integral", Admissible::nonnegative());
+        let [a, b] = laws.modes("rhythm", ["a", "b"]);
+        laws.hazard(HazardGuard::new(&integral, &dice, a.to(&b)?));
+        let rate = plain_rate(laws)?;
+        laws.memory_rate(&integral, rate);
+        let class = beat()?;
+        let head = laws.kernel(|mut k| {
+            let zero = k.zero::<Pressure>();
+            k.finish(zero, b.only(), class)
+        });
+        laws.event(Guard::new(head, Crossing::Rising, b.to(&a)?));
+        Ok(())
+    })
+    .expect("compiled");
+    assert_eq!(
+        body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
+        Some(AdmissionError::ModesNotYetRun {
+            variable: name("rhythm")
+        })
+    );
+}
+
+#[test]
 fn a_hazard_in_a_body_with_an_algebraic_row_stays_refused_by_name() {
     let body = hazard_body(|laws| {
         let held = laws.algebraic::<Dimensionless>("held", Admissible::finite());
@@ -340,6 +375,26 @@ fn a_hazard_in_a_body_with_an_algebraic_row_stays_refused_by_name() {
             variable: name("rhythm")
         })
     );
+}
+
+#[test]
+fn a_start_mode_enters_the_packet_hash() {
+    let body = hazard_body(|_| Ok(()));
+    let hash = |value| -> Result<PacketHash, AdmissionError> {
+        let mut packet = ParameterPacket::<SyntheticFixture>::new();
+        packet.start_mode(name("rhythm"), value, "synthetic")?;
+        for row in body.rows() {
+            match row.kind() {
+                RowKind::Memory(_) => {
+                    packet.start(row.kind(), Measure::<Dimensionless>::new(0.0)?, "synthetic")?
+                }
+                _ => packet.start(row.kind(), Measure::<Water>::new(100.0)?, "synthetic")?,
+            }
+        }
+        Ok(body.bind(packet)?.packet_hash())
+    };
+    assert_eq!(hash("a"), hash("a"));
+    assert_ne!(hash("a"), hash("b"));
 }
 
 fn hash_of(declare: impl for<'b> FnOnce(&mut Heart<'b>) -> Result<(), AdmissionError>) -> ModelHash {

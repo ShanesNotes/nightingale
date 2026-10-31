@@ -446,6 +446,7 @@ enum Variant {
     Racing,
     Relaxing,
     TwoRhythms,
+    Echoing,
 }
 impl ChanceCase {
     pub fn ectopy() -> Result<Self, AdmissionError> {
@@ -460,6 +461,11 @@ impl ChanceCase {
     /// variable. Its rate holds in every mode, so it accrues while its guard is not armed.
     pub fn racing() -> Result<Self, AdmissionError> {
         Self::declared(Variant::Racing)
+    }
+    /// A second hazard leaves ectopic for sinus. Its rate holds in every mode, so it can stand past its draw when
+    /// the first guard's firing arms it, and it sorts after that guard, so the two meet inside one walk.
+    pub fn echoing() -> Result<Self, AdmissionError> {
+        Self::declared(Variant::Echoing)
     }
     /// The walk's relaxing law on the ectopy rate, which goes negative.
     pub fn relaxing() -> Result<Self, AdmissionError> {
@@ -562,12 +568,17 @@ impl ChanceCase {
                     laws.memory_rate(&second, rate);
                     laws.hazard(HazardGuard::new(&second, &other, quiet.to(&stirred)?));
                 }
-                Variant::Racing => {
+                Variant::Racing | Variant::Echoing => {
                     let other = laws.stream("second-stream");
                     let second = laws.state::<Dimensionless>(SECOND_INTEGRAL, Admissible::nonnegative());
                     let rate = hazard_rate(&laws, &onset, &tone, &wobble, laws.every_mode(), beat);
                     laws.memory_rate(&second, rate);
-                    laws.hazard(HazardGuard::new(&second, &other, sinus.to(&ectopic)?));
+                    let move_to = if variant == Variant::Racing {
+                        sinus.to(&ectopic)?
+                    } else {
+                        ectopic.to(&sinus)?
+                    };
+                    laws.hazard(HazardGuard::new(&second, &other, move_to));
                 }
                 Variant::TwoRhythms => {
                     let there = laws.stream("second-there");
@@ -696,7 +707,7 @@ impl ChanceCase {
                 packet.start(memory(SECOND_INTEGRAL), zero()?, note)?;
                 packet.start_mode(named(BYSTANDER), "quiet", note)?;
             }
-            Variant::Racing => packet.start(memory(SECOND_INTEGRAL), zero()?, note)?,
+            Variant::Racing | Variant::Echoing => packet.start(memory(SECOND_INTEGRAL), zero()?, note)?,
             Variant::TwoRhythms => {
                 packet.start(memory(SECOND_INTEGRAL), zero()?, note)?;
                 packet.start(memory(THIRD_INTEGRAL), zero()?, note)?;

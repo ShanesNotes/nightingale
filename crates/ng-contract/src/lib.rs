@@ -664,7 +664,7 @@
 //!     k.scale(rate, factor)
 //! }
 //! ```
-//! A forcing's period and amplitude are packet values, never numbers in a fragment (ruling 15).
+//! A forcing's period and amplitude are packet values, never numbers in a fragment (finding 15).
 //! ```compile_fail,E0308
 //! use ng_contract::*;
 //! fn literal<'b>(laws: &mut FragmentBuilder<'b, Renal>) -> Forcing<'b, Renal> {

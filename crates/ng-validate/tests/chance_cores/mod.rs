@@ -289,6 +289,50 @@ impl CoupledSolver for VerifiesDry {
     }
 }
 
+/// Holds `linearize` to a forward difference of `evaluate` at the base of every ticket, so a slope is the slope of
+/// what a run integrates, in whichever mode the run is in and on either side of a rate's zero.
+pub struct DifferencesItsJacobian {
+    pub inner: ReferenceIntegrator,
+    pub compared: Cell<u64>,
+}
+impl CoupledSolver for DifferencesItsJacobian {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        const WIDTH: f64 = 1e-6;
+        let time = ticket.at(0)?;
+        let mut workspace = problem.workspace();
+        let linear = problem.linearize(&workspace.point(time), ticket.shift(ticket.length_ns())?)?;
+        let shift = 1e9 / ticket.length_ns() as f64;
+        let view = linear.view();
+        let base = problem.evaluate(&workspace.point(time))?.residuals().to_vec();
+        for column in 0..base.len() {
+            let held = workspace.unknowns_mut()[column];
+            let width = WIDTH * (1.0 + held.abs());
+            workspace.unknowns_mut()[column] = held + width;
+            let moved = problem.evaluate(&workspace.point(time))?.residuals().to_vec();
+            workspace.unknowns_mut()[column] = held;
+            for row in 0..base.len() {
+                let mut entries = view.row_offsets()[row]..view.row_offsets()[row + 1];
+                let entry = entries.find(|&entry| view.columns()[entry].index() == column);
+                let held_shift = if row == column { shift } else { 0.0 };
+                let slope = entry.map_or(0.0, |entry| view.values()[entry]) - held_shift;
+                let difference = (moved[row] - base[row]) / width;
+                assert!(
+                    (slope - difference).abs() <= WIDTH * (1.0 + slope.abs()),
+                    "row {row}, column {column}: {slope} against {difference}"
+                );
+            }
+        }
+        self.compared.set(self.compared.get() + 1);
+        self.inner.solve(problem, ticket)
+    }
+}
+
 pub struct ReadingClock {
     pub readings: Vec<u64>,
     pub next: Cell<usize>,

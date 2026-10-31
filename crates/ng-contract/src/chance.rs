@@ -144,6 +144,7 @@ impl Chance {
             state.modes[hazard.variable] = hazard.enters;
             let ordinal = state.ordinals[hazard.stream];
             state.ordinals[hazard.stream] = ordinal.wrapping_add(1);
+            state.fired = true;
             fired.push(Fired {
                 stream: body.layout.streams[hazard.stream].name,
                 at,
@@ -155,7 +156,6 @@ impl Chance {
                 },
             });
         }
-        state.fired = !fired.is_empty();
         (state, fired)
     }
 }

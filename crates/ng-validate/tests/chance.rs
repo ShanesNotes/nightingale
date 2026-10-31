@@ -1,9 +1,9 @@
 mod chance_cores;
 
 use chance_cores::{
-    CountsEvaluations, DelaysEveryEvent, DrawsPerEvaluation, DrawsPerStep, JittersItsSpan,
-    KeepsItsHistoryAcrossAFiring, ReadingClock, RefusesByHash, RefusesEveryLanding, RefusesItsFirstTrial,
-    TracesItsTickets, VerifiesDry,
+    CountsEvaluations, DelaysEveryEvent, DifferencesItsJacobian, DrawsPerEvaluation, DrawsPerStep,
+    JittersItsSpan, KeepsItsHistoryAcrossAFiring, ReadingClock, RefusesByHash, RefusesEveryLanding,
+    RefusesItsFirstTrial, TracesItsTickets, VerifiesDry,
 };
 use core::cell::{Cell, RefCell};
 use ng_contract::*;
@@ -165,6 +165,59 @@ fn an_integral_past_its_draw_when_its_guard_arms_fires_within_a_floor() {
     );
 }
 
+/// A rate that holds in every mode climbs past its draw while its guard is not armed, and only an armed guard ends
+/// a step.
+#[test]
+fn an_integral_past_its_draw_stops_no_step_while_its_guard_is_disarmed() {
+    let case = ChanceCase::racing()
+        .expect("a body")
+        .delivering(Vec::new())
+        .until(at(2_400));
+    let core = reference(SECOND);
+    let mut session = case.admit(&core).expect("admitted");
+    let mut fired = Vec::new();
+    while session.record().accepted().time() < case.end() {
+        let before = session.record().accepted().time().nanoseconds();
+        let (next, receipt) = one_step(session);
+        session = next;
+        let span = session.record().accepted().time().nanoseconds() - before;
+        if receipt.fired().is_empty() {
+            assert_eq!(span, SECOND, "a step from {before} ns stopped for no firing");
+        }
+        fired.extend_from_slice(receipt.fired());
+    }
+    let overdue = fired.windows(2).filter(|pair| {
+        pair[0].entered().value == "sinus"
+            && pair[1].stream().local == SECOND_STREAM
+            && pair[1].at().nanoseconds() - pair[0].at().nanoseconds() <= MILLISECOND
+    });
+    assert!(
+        overdue.count() > 0,
+        "no guard stood past its draw, so this test pressed nothing"
+    );
+}
+
+/// Only a guard armed before any guard fires can fire, so a guard a firing arms waits for the next step.
+#[test]
+fn a_guard_a_firing_arms_fires_on_the_next_step_within_a_floor() {
+    let case = ChanceCase::echoing().expect("a body").until(at(2_400));
+    let fired = events(&case, &reference(SECOND));
+    let mut echoes = 0;
+    for pair in fired.windows(2) {
+        let apart = pair[1].at().nanoseconds() - pair[0].at().nanoseconds();
+        if pair[0].stream().local == ONSET && pair[1].stream().local == SECOND_STREAM && apart <= MILLISECOND
+        {
+            assert!(apart > 0, "a firing armed a guard that fired in its own step");
+            echoes += 1;
+        }
+    }
+    assert!(
+        echoes > 0,
+        "no firing armed a guard past its draw in {} events",
+        fired.len()
+    );
+}
+
 #[test]
 fn a_rate_that_falls_below_zero_never_lowers_its_integral() {
     let case = ChanceCase::relaxing().expect("a body");
@@ -286,7 +339,11 @@ fn a_cut_that_crosses_lands_short_of_its_input_and_leaves_a_fence() {
                 session.record().accepted().time(),
                 session.record().earliest_stamp(),
             );
-            if !receipt.fired().is_empty() && head < stamp && earliest == stamp {
+            if head < stamp && earliest == stamp {
+                assert!(
+                    !receipt.fired().is_empty(),
+                    "a landing fires on the step it stops"
+                );
                 found += 1;
                 let between = SimTime::from_ns(head.nanoseconds() + 1);
                 let late = BoundaryEvent::new(
@@ -379,6 +436,41 @@ fn a_hazard_rate_outside_its_range_is_reported_though_it_holds_flat() {
         below > 0,
         "the rate never left its range, so this test pressed nothing"
     );
+}
+
+#[test]
+fn a_slope_is_the_slope_of_what_a_run_integrates_in_each_mode_and_past_a_rates_zero() {
+    let cases = [ChanceCase::ectopy, ChanceCase::relaxing];
+    for case in cases.map(|case| case().expect("a body")) {
+        let core = DifferencesItsJacobian {
+            inner: reference(SECOND / 4),
+            compared: Cell::new(0),
+        };
+        let fired = events(&case, &core);
+        assert!(fired.len() >= 2, "both modes ran");
+        assert!(core.compared.get() > 100);
+    }
+}
+
+/// Ordinals keep climbing where a mode comes back, so one list cannot stand in for the other.
+#[test]
+fn the_modes_digest_reads_modes_and_the_streams_digest_reads_ordinals() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = reference(SECOND);
+    let mut session = case.admit(&core).expect("admitted");
+    let start = session.record().digests();
+    let mut fired = 0;
+    while fired < 2 {
+        let (next, receipt) = one_step(session);
+        session = next;
+        fired += receipt.fired().len();
+        if fired == 1 {
+            assert_ne!(session.record().digests().modes, start.modes);
+        }
+    }
+    let back = session.record().digests();
+    assert_eq!(back.modes, start.modes);
+    assert_ne!(back.streams, start.streams);
 }
 
 #[test]
@@ -519,6 +611,12 @@ fn a_core_that_delays_every_event_alike_fails_against_a_reference_policy() {
         matches!(failure, Err(ReplayFailure::EventMoved { .. })),
         "{failure:?}"
     );
+    let honest = || reference(SECOND);
+    let failure = replay_gate(ReplayGate::StepPolicy, &case, &honest, &plan);
+    assert!(
+        matches!(failure, Err(ReplayFailure::EventMoved { .. })),
+        "the second policy answers too: {failure:?}"
+    );
 }
 
 /// It stalls just before the reference's last event, so its own falls past the case's end, every pair agrees
@@ -540,6 +638,37 @@ fn a_core_that_stops_firing_differs_from_the_reference_by_its_list_of_events() {
         tone,
         by: 1.0,
         from: SimTime::from_ns(last - SECOND),
+    };
+    let failure = replay_gate(ReplayGate::StepPolicy, &case, &cores, &plan);
+    assert!(
+        matches!(failure, Err(ReplayFailure::EventsDiffer { .. })),
+        "{failure:?}"
+    );
+}
+
+/// A negative delay hurries, past the reference's last event, so every pair agrees and the policy's list is one
+/// long, with its extra event far enough from the end to be no straddle.
+#[test]
+fn a_core_that_fires_an_event_too_many_differs_from_the_reference_by_its_list_of_events() {
+    let long = ChanceCase::ectopy().expect("a body").until(at(2_400));
+    let tone = long.tone_slot();
+    let fired = events(&long, &reference(SECOND / 16));
+    let pair = fired.windows(2).find(|pair| {
+        pair[0].entered().value == "sinus"
+            && pair[1].at().nanoseconds() - pair[0].at().nanoseconds() >= 16 * SECOND
+    });
+    let pair = pair.expect("a long wait for an event");
+    let case = ChanceCase::ectopy()
+        .expect("a body")
+        .until(SimTime::from_ns(pair[1].at().nanoseconds() - 2 * SECOND));
+    let clock = clock();
+    let fine = || reference(SECOND / 4);
+    let plan = plan(&clock, &fine);
+    let cores = move || DelaysEveryEvent {
+        interval_ns: SECOND / 8,
+        tone,
+        by: -1.0,
+        from: SimTime::from_ns(pair[0].at().nanoseconds() + SECOND),
     };
     let failure = replay_gate(ReplayGate::StepPolicy, &case, &cores, &plan);
     assert!(
@@ -612,6 +741,35 @@ fn a_landing_stops_at_the_first_crossing_whichever_guard_it_reads() {
     );
 }
 
+/// A run stops at its first head past the end. Just short of an event, a coarse step overshoots and fires it and a
+/// fine run stops before it, so one list is short and nothing differs.
+#[test]
+fn an_event_only_a_coarse_step_reaches_past_the_end_is_no_difference() {
+    let whole = ChanceCase::ectopy().expect("a body");
+    let last = events(&whole, &reference(SECOND / 16));
+    let last = last.last().expect("an event").at().nanoseconds();
+    let case = ChanceCase::ectopy()
+        .expect("a body")
+        .until(SimTime::from_ns(last - SECOND / 8));
+    assert_eq!(
+        events(&case, &reference(SECOND)).len(),
+        events(&case, &reference(SECOND / 16)).len() + 1,
+        "one list is short, or this test presses nothing"
+    );
+    let clock = clock();
+    let fine = || reference(SECOND / 4);
+    let cores = || reference(SECOND);
+    for distance in [EVENT_TOLERANCE_NS, u64::MAX] {
+        let mut plan = plan(&clock, &fine);
+        plan.chance
+            .as_mut()
+            .expect("a plan for chance")
+            .event_tolerance_ns = distance;
+        let gate = replay_gate(ReplayGate::StepPolicy, &case, &cores, &plan);
+        assert!(gate.is_ok(), "{distance}: {:?}", gate.err());
+    }
+}
+
 #[test]
 fn step_policy_evidence_names_the_distance_it_held() {
     let case = ChanceCase::ectopy().expect("a body");
@@ -664,13 +822,17 @@ fn a_run_that_fired_nothing_is_missing_evidence_for_every_gate() {
     let fine = || reference(SECOND / 4);
     let plan = plan(&clock, &fine);
     let cores = || reference(SECOND / 4);
-    let failure = replay_gate(ReplayGate::Pace, &case, &cores, &plan);
-    assert_eq!(
-        failure.err(),
-        Some(ReplayFailure::MissingEvidence {
-            gate: ReplayGate::Pace
-        })
-    );
+    for gate in [
+        ReplayGate::Pace,
+        ReplayGate::Resume,
+        ReplayGate::LateAdmission,
+        ReplayGate::Rewind,
+        ReplayGate::ExtraEvaluation,
+        ReplayGate::StepPolicy,
+    ] {
+        let failure = replay_gate(gate, &case, &cores, &plan);
+        assert_eq!(failure.err(), Some(ReplayFailure::MissingEvidence { gate }));
+    }
 }
 
 /// The first firing with no input in play tells where the crossing lies, and each input then sits inside one 64 s
@@ -781,12 +943,32 @@ fn chance_fields(body: &CompiledBody) -> (usize, usize, usize) {
     (modes, ordinals, ordinals + 2 * 8)
 }
 
-fn forged(saved: &Checkpoint, at: usize, value: u64) -> Checkpoint {
-    let mut bytes = saved.as_bytes().to_vec();
-    bytes[at..at + 8].copy_from_slice(&value.to_be_bytes());
+fn resealed(mut bytes: Vec<u8>) -> Checkpoint {
     let raw = Digest::of_canonical(&bytes[RAW_DIGEST.end..]);
     bytes[RAW_DIGEST].copy_from_slice(raw.as_bytes());
     Checkpoint::from_bytes(bytes)
+}
+
+fn forged(saved: &Checkpoint, at: usize, value: u64) -> Checkpoint {
+    let mut bytes = saved.as_bytes().to_vec();
+    bytes[at..at + 8].copy_from_slice(&value.to_be_bytes());
+    resealed(bytes)
+}
+
+/// One ordinal gone and every length around it true, so only the list's length is wrong.
+fn short_of_an_ordinal(saved: &Checkpoint, ordinals: usize) -> Checkpoint {
+    let mut bytes = saved.as_bytes().to_vec();
+    bytes.drain(ordinals..ordinals + 8);
+    let mut lower = |at: usize| {
+        let stated = bytes[at..at + 8].first_chunk().expect("eight bytes");
+        let shorter = u64::from_be_bytes(*stated) - 8;
+        bytes[at..at + 8].copy_from_slice(&shorter.to_be_bytes());
+    };
+    lower(RAW_DIGEST.end);
+    lower(HEADER);
+    let count = ordinals - 8;
+    bytes[count..ordinals].copy_from_slice(&1_u64.to_be_bytes());
+    resealed(bytes)
 }
 
 #[test]
@@ -816,6 +998,11 @@ fn a_head_after_a_firing_resumes_and_rewinds_exactly_and_refuses_forged_chance_s
         let refused = Session::resume(&forged(&saved, place, value), &identity, body, &fresh, &store);
         assert_eq!(refused.err(), Some(expected), "at {place}, {value}");
     }
+    let short = short_of_an_ordinal(&saved, ordinals);
+    assert_eq!(
+        Session::resume(&short, &identity, body, &fresh, &store).err(),
+        Some(CheckpointError::Malformed)
+    );
     let resumed = Session::resume(&saved, &identity, body, &fresh, &store).expect("resumed");
     let (continued, receipt) = one_step(session);
     let (resumed, on_resume) = one_step(resumed);
@@ -920,7 +1107,7 @@ fn a_core_that_keeps_its_history_across_a_firing_is_a_method_mismatch() {
 
 #[test]
 fn a_firing_is_a_breakpoint_a_fresh_session_reaches_from_sealed_state() {
-    let case = ChanceCase::ectopy().expect("a body");
+    let case = ChanceCase::ectopy().expect("a body").delivering(Vec::new());
     let core = reference(SECOND);
     let session = case.admit(&core).expect("admitted");
     let (session, fired) = finished(session, at(1));
@@ -942,10 +1129,14 @@ fn a_firing_is_a_breakpoint_a_fresh_session_reaches_from_sealed_state() {
         };
     }
     assert_eq!(last.expect("a step").fired()[0].at(), first.at());
-    let Step::Accepted(_, receipt) = session.step() else {
+    let Step::Accepted(session, receipt) = session.step() else {
         panic!("the step after a firing");
     };
     assert!(receipt.after_breakpoint());
+    let Step::Accepted(_, receipt) = session.step() else {
+        panic!("the step after that");
+    };
+    assert!(!receipt.after_breakpoint(), "one firing is one breakpoint");
 }
 
 #[test]

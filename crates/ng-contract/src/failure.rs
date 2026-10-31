@@ -37,8 +37,8 @@ pub enum AdmissionError {
     ModesNotYetRun {
         variable: LawName,
     },
-    /// A nonzero constant built only from literals, or a parameter divided by itself, which no packet entry
-    /// backs. This check is partial: it reads the graph, never a value.
+    /// A nonzero constant built only from literals, or anything divided by itself, which no packet entry backs.
+    /// This check is partial: it reads the graph, never a value.
     UnbackedConstant {
         law: LawName,
     },

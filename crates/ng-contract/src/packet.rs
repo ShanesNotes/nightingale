@@ -1,7 +1,7 @@
 use crate::body::Layout;
 use crate::chance::holds_a_period;
 use crate::identity::{Canonical, Seal};
-use crate::law::{Input, Op};
+use crate::law::Op;
 use crate::quantity::dimension;
 use crate::{
     AdmissionError, Binding, Compensated, CompiledBody, Digest, Dimension, LawName, Measure, ModelHash,
@@ -21,15 +21,6 @@ impl sealed::PacketKind for SyntheticFixture {
     const TAG: u64 = 0;
 }
 impl PacketKind for SyntheticFixture {}
-
-fn reads_a_parameter(op: &Op) -> bool {
-    matches!(
-        op,
-        Op::Input(
-            Input::Parameter(_) | Input::SiteParameter(_) | Input::EdgeParameter(_) | Input::EndParameter(..)
-        )
-    )
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PacketHash {
@@ -246,8 +237,8 @@ impl CompiledBody {
             .find(|&(at, mode)| algebraic || plain(mode.variable) || !moved(at))
             .map(|(_, mode)| mode.variable)
     }
-    /// Ruling 15's partial check. A literal is zero, so only `exp` and `logistic` make a nonzero constant from
-    /// literals, and `divide` makes one from a parameter over itself.
+    /// Finding 15's partial check. A literal is zero, so only `exp` and `logistic` make a nonzero constant from
+    /// literals, and `divide` makes one from anything over itself.
     fn unbacked_constant(&self) -> Option<LawName> {
         let unbacked = |code: &[Op]| {
             let mut literal = vec![false; code.len()];
@@ -259,7 +250,7 @@ impl CompiledBody {
                 };
                 match op {
                     Op::Exp(_) | Op::Logistic(_) => literal[at],
-                    Op::Divide([a, b]) => code[*a] == code[*b] && reads_a_parameter(&code[*a]),
+                    Op::Divide([a, b]) => code[*a] == code[*b],
                     _ => false,
                 }
             })

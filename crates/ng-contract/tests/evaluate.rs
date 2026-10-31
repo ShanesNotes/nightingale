@@ -481,6 +481,91 @@ fn a_smooth_limit_is_defined_where_its_root_is_zero() -> Result<(), Initializati
     Ok(())
 }
 
+const STREAMS: [(&str, &str, &str, &str); 2] = [
+    ("first dice", "first wobble", "first integral", "ns.first"),
+    ("second dice", "second wobble", "second integral", "ns.second"),
+];
+
+/// One integral per entry, with a rate that reads that entry's stream and forcing.
+fn reading_chance(entries: &[usize]) -> Result<Bench, InitializationFailure> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", at()?);
+    let schema = Schema::new(map.finish()?)?;
+    let body = assemble(schema, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let [a, b] = laws.modes("rhythm", ["a", "b"]);
+        let pace = laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.pace"), Admissible::finite());
+        for &entry in entries {
+            let (stream, forcing, integral, key) = STREAMS[entry];
+            let dice = laws.stream(stream);
+            let wobble = laws.forcing(forcing, ParameterKey::new(key), ParameterKey::new("ns.amplitude"));
+            let slot = laws.state::<Dimensionless>(integral, Admissible::nonnegative());
+            let rate = laws.kernel(|mut k| {
+                let draw = k.draw(&dice);
+                let factor = k.forcing(&wobble);
+                let pace = k.parameter(&pace);
+                let drawn = k.scale(pace, draw);
+                let rate = k.scale(drawn, factor);
+                k.finish(rate, laws.every_mode(), wave)
+            });
+            laws.memory_rate(&slot, rate);
+            laws.hazard(HazardGuard::new(&slot, &dice, a.to(&b)?));
+        }
+        body.add(laws.finish());
+        body.compile()
+    })?;
+    let mut packet = ParameterPacket::new();
+    let (bind, note) = (Binding::Body, "synthetic");
+    packet.synthetic(
+        ParameterKey::new("ns.pace"),
+        bind,
+        Measure::<Rate<Dimensionless>>::new(1.0)?,
+        note,
+    )?;
+    packet.synthetic(
+        ParameterKey::new("ns.amplitude"),
+        bind,
+        Measure::<Dimensionless>::new(0.5)?,
+        note,
+    )?;
+    for &entry in entries {
+        let (_, _, integral, key) = STREAMS[entry];
+        packet.synthetic(ParameterKey::new(key), bind, Measure::<Time>::new(1.0)?, note)?;
+        packet.start(memory(integral), Measure::<Dimensionless>::new(0.0)?, note)?;
+    }
+    let rhythm = LawName {
+        owner: "NS",
+        local: "rhythm",
+    };
+    packet.start_mode(rhythm, "a", note)?;
+    Bench::admitted(body, packet, BoundaryPort::new(Vec::new())?)
+}
+
+fn rate_of(bench: &Bench, entry: usize) -> f64 {
+    let problem = bench.problem();
+    let ticket = bench.ticket(SECOND).expect("a ticket");
+    let workspace = problem.workspace();
+    let time = ticket.at(SECOND / 3).expect("an offset");
+    let stage = problem.evaluate(&workspace.point(time)).expect("evaluated");
+    let wanted = memory(STREAMS[entry].2);
+    let row = (bench.body.rows().iter()).position(|row| row.kind() == wanted);
+    -stage.residuals()[row.expect("the row")]
+}
+
+/// A draw and a factor are functions of the seed and a name, so a law reads the same value alone in a body as
+/// beside the other's, whatever place the compiled order gives each.
+#[test]
+fn a_law_reads_the_stream_and_the_forcing_it_names() -> Result<(), InitializationFailure> {
+    let both = reading_chance(&[0, 1])?;
+    for entry in [0, 1] {
+        let alone = reading_chance(&[entry])?;
+        assert_eq!(rate_of(&both, entry).to_bits(), rate_of(&alone, entry).to_bits());
+    }
+    assert_ne!(rate_of(&both, 0).to_bits(), rate_of(&both, 1).to_bits());
+    Ok(())
+}
+
 fn forward_euler(bench: &Bench, span_ns: u64) -> Result<VerifiedStep, TrialFailure> {
     let problem = bench.problem();
     let ticket = bench.ticket(span_ns)?;
