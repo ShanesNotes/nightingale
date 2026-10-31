@@ -112,8 +112,8 @@ pub enum AdmissionError {
     EventBeforeHead {
         id: InputId,
     },
-    /// An input stamped behind the fence a refused cut left, or at the admission instant, whose drive
-    /// initialization has already read.
+    /// An input stamped behind the fence a cut left by not publishing at its own end, or at the admission
+    /// instant, whose drive initialization has already read.
     EventBeforeFence {
         id: InputId,
         fence: SimTime,
