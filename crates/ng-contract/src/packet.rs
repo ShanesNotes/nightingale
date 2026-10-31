@@ -238,7 +238,7 @@ impl CompiledBody {
             .map(|(_, mode)| mode.variable)
     }
     /// Finding 15's partial check. A literal is zero, so only `exp` and `logistic` make a nonzero constant from
-    /// literals, and `divide` makes one from anything over itself.
+    /// literals, and `divide` makes one from two equal nodes.
     fn unbacked_constant(&self) -> Option<LawName> {
         let unbacked = |code: &[Op]| {
             let mut literal = vec![false; code.len()];

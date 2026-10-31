@@ -2,8 +2,8 @@ mod chance_cores;
 
 use chance_cores::{
     CountsEvaluations, DelaysEveryEvent, DifferencesItsJacobian, DrawsPerEvaluation, DrawsPerStep,
-    JittersItsSpan, KeepsItsHistoryAcrossAFiring, ReadingClock, RefusesByHash, RefusesEveryLanding,
-    RefusesItsFirstTrial, TracesItsTickets, VerifiesDry,
+    JittersItsSpan, KeepsItsHistoryAcrossAFiring, LosesItsWayIfResumedAt, ReadingClock, RefusesByHash,
+    RefusesEveryLanding, RefusesItsFirstTrial, TracesItsTickets, VerifiesDry,
 };
 use core::cell::{Cell, RefCell};
 use ng_contract::*;
@@ -1072,6 +1072,40 @@ fn a_late_input_on_either_side_of_a_crossing_takes_the_known_runs_tickets_under_
     assert!(
         refusals > 0,
         "no ticket was refused, so this test pressed nothing"
+    );
+}
+
+/// The step into a firing is a landing, so its head is where a resume has the most to lose, and no spacing of
+/// `resume_every` is what picks it here.
+#[test]
+fn the_resume_gate_presses_the_head_just_before_a_firing() {
+    let case = ChanceCase::ectopy().expect("a body").delivering(Vec::new());
+    let honest = reference(SECOND);
+    let mut session = case.admit(&honest).expect("admitted");
+    let head = loop {
+        let head = session.record().accepted().time();
+        let (next, receipt) = one_step(session);
+        session = next;
+        if !receipt.fired().is_empty() {
+            break head;
+        }
+    };
+    assert!(head > at(1), "the gate's first revisions would pick this head");
+    let clock = clock();
+    let fine = || reference(SECOND / 4);
+    let plan = ReplayPlan {
+        resume_every: u64::MAX,
+        ..plan(&clock, &fine)
+    };
+    let cores = move || LosesItsWayIfResumedAt {
+        inner: reference(SECOND),
+        head,
+        first: Cell::new(true),
+    };
+    let failure = replay_gate(ReplayGate::Resume, &case, &cores, &plan);
+    assert!(
+        matches!(failure, Err(ReplayFailure::Faulted { .. })),
+        "{failure:?}"
     );
 }
 

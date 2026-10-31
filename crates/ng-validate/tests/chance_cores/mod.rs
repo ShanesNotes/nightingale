@@ -289,6 +289,28 @@ impl CoupledSolver for VerifiesDry {
     }
 }
 
+/// Refuses to go on from one head, and only as the first thing it is asked: what a run reaches stepping past that
+/// head it reaches, so only a session resumed there shows.
+pub struct LosesItsWayIfResumedAt {
+    pub inner: ReferenceIntegrator,
+    pub head: SimTime,
+    pub first: Cell<bool>,
+}
+impl CoupledSolver for LosesItsWayIfResumedAt {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        if self.first.replace(false) && problem.accepted().time() == self.head {
+            return Err(ticket.mismatch().into());
+        }
+        self.inner.solve(problem, ticket)
+    }
+}
+
 /// Holds `linearize` to a forward difference of `evaluate` at the base of every ticket, so a slope is the slope of
 /// what a run integrates, in whichever mode the run is in and on either side of a rate's zero.
 pub struct DifferencesItsJacobian {

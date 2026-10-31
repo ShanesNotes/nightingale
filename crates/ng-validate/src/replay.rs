@@ -254,8 +254,10 @@ fn advance<'m>(
     loop {
         attempt = match attempt {
             Step::Accepted(session, receipt) => {
-                let mut row = Row::of(&session, refused || receipt.after_breakpoint());
-                row.fired = receipt.fired().to_vec();
+                let fired = receipt.fired().to_vec();
+                let near_a_break = refused || receipt.after_breakpoint() || !fired.is_empty();
+                let mut row = Row::of(&session, near_a_break);
+                row.fired = fired;
                 rows.push(row);
                 return Ok(session);
             }
@@ -429,8 +431,8 @@ impl HistoryStore for MemoryStore {
     }
 }
 
-/// Each side of a step that started at a breakpoint or met a refusal is a boundary a resume is likeliest to
-/// lose. Neighbouring revisions are never both multiples of a hidden state's period, whatever `every` is.
+/// Each side of a step that started at a breakpoint, met a refusal or fired is a boundary a resume is likeliest
+/// to lose. Neighbouring revisions are never both multiples of a hidden state's period, whatever `every` is.
 fn boundaries(rows: &[Row], every: u64) -> Vec<u64> {
     let last = rows.len() as u64 - 1;
     let mut revisions = Vec::new();
