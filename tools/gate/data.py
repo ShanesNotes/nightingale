@@ -668,7 +668,6 @@ def same_dimension(a: dict, b: dict) -> bool:
 
 
 def is_flow_of(row: dict, amount: dict) -> bool:
-    """A flow's dimension is its amount's per unit time, so a urine volume is no flow of a catecholamine."""
     try:
         per_time = list(parse_unit(amount.get("unit", ""))[1])
         per_time[DIMENSIONS.index("s")] -= 1
@@ -756,7 +755,7 @@ def derived(s: Store) -> list[Violation]:
             else:
                 compare(row, e["derived_low"], value["low"])
                 compare(row, e["derived_high"], value["high"])
-        except (KeyError, ValueError, SyntaxError) as err:
+        except (KeyError, ValueError, SyntaxError, ArithmeticError) as err:
             out.append(Violation(code, subject, f"cannot evaluate: {err}"))
     return out
 
@@ -771,7 +770,7 @@ def dimension(s: Store) -> list[Violation]:
             try:
                 got = value_of(expression, s.quantity)
                 want = parse_unit(row["unit"])[1]
-            except (KeyError, ValueError, SyntaxError):
+            except (KeyError, ValueError, SyntaxError, ArithmeticError):
                 continue
             if got.dimension != want:
                 out.append(Violation(code, subject, f"the identity has dimension {got.dimension}, the unit {want}"))
@@ -901,7 +900,7 @@ def closure(s: Store) -> list[Violation]:
             lhs = value_of(c["lhs"], s.quantity)
             rhs = value_of(c["rhs"], s.quantity)
             tol = si_difference(c["tol_abs"], c["tol_unit"]) if abs_ else None
-        except (KeyError, ValueError, SyntaxError) as err:
+        except (KeyError, ValueError, SyntaxError, ArithmeticError) as err:
             out.append(Violation(code, subject, f"cannot evaluate: {err}"))
             continue
         if lhs.dimension != rhs.dimension or (tol and tol.dimension != lhs.dimension):
@@ -1098,6 +1097,7 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.work", "fixture-paper", lambda s: work_of(s, "fixture-paper").update(kind="pamphlet")),
     ("data.work", "fixture-book", lambda s: work_of(s, "fixture-book").update(edition=True)),
     ("data.work", "fixture-paper\n", lambda s: work_of(s, "fixture-paper").update(id="fixture-paper\n")),
+    ("data.work", "records", lambda s: evidence(s, "fx.rate", source=["fixture-paper", "fixture-book"])),
     ("data.tier", "fx.base", lambda s: evidence(s, "fx.base", certainty="high")),
     ("data.tier", "fx.base", lambda s: evidence(s, "fx.base", tier="primary_measured")),
     ("data.tier", "fx.share", lambda s: cut(on(s, "fx.share")["evidence"], "upgrade")),
@@ -1185,6 +1185,7 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.derived", "fx.flow", lambda s: evidence(s, "fx.flow", derived="fx.index * fx.area + fx.none")),
     ("data.derived", "fx.flow", lambda s: evidence(s, "fx.flow", derived="(1e309 - 1e309) * fx.index * fx.area")),
     ("data.derived", "fx.flow", lambda s: evidence(s, "fx.flow", derived="fx.index * fx.nothing")),
+    ("data.derived", "fx.half", lambda s: evidence(s, "fx.half", derived="fx.flow * fx.none / fx.none")),
     ("data.derived", "fx.flow", lambda s: evidence(s, "fx.flow", derived="fx.index * fx.area + n1 * n0 * 0")),
     ("data.dimension", "fx.flow", lambda s: on(s, "fx.flow").update(unit="kg")),
     ("data.cycle", "fx.flow", lambda s: (evidence(s, "fx.flow", derived="fx.half / fx.share"))),
@@ -1249,6 +1250,7 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(tol_rel="a lot")),
     ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(tol_rel=-0.05)),
     ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(lhs="(1e309 - 1e309) * fx.flow")),
+    ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(lhs="fx.flow * fx.none / fx.none")),
     ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(rhs="fx.rate")),
     ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(level="gut")),
     ("data.schema", "None", lambda s: cut(closure_of(s, "XC-01"), "id")),
@@ -1292,9 +1294,13 @@ def write_store(s: Store, root: pathlib.Path) -> None:
 
 
 def run(s: Store) -> list[Violation]:
-    if shapes := RULES[0][1](s):
-        return shapes
-    return [v for _, check in RULES[1:] for v in check(s)]
+    found: list[Violation] = []
+    for code, check in RULES:
+        try:
+            found += check(s)
+        except (TypeError, ValueError, KeyError, AttributeError, ArithmeticError) as err:
+            found.append(Violation(code, "records", f"the rule could not read a record: {err!r}"))
+    return found
 
 
 def probes() -> list[Violation]:
