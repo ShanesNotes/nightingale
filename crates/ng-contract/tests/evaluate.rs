@@ -486,7 +486,6 @@ const STREAMS: [(&str, &str, &str, &str); 2] = [
     ("second dice", "second wobble", "second integral", "ns.second"),
 ];
 
-/// One integral per entry, with a rate that reads that entry's stream and forcing.
 fn reading_chance(entries: &[usize]) -> Result<Bench, InitializationFailure> {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", at()?);
