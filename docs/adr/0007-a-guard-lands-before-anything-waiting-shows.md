@@ -17,6 +17,7 @@ A hazard guard's crossing ends a step somewhere the core's span did not say, and
 - A step that lands pays 3 to 6 extra solves on the one fixture measured, and no other step pays anything. Bisection paid 10 to 30.
 - The landing tolerance is the core's floor, so the run identity already covers it and a core declares nothing new.
 - A refused trial drops the bracket and retries by `StepTicket::refuse`, unchanged. A landing's own lengths come from the bracket. Its retry is a new attempt at a shorter span, which lands in turn or steps short of the crossing and loses nothing.
+- A firing belongs to the blind step. Every law is read on the state it leaves, and a law with no value there refuses the trial before the timeline is read, so a run that knows an input and one that does not refuse alike.
 - A cut that crosses lands in turn, short of an input a core has seen, so it keeps the cut's fence. That is a second way to stop short of an input, and I5's clause now says so.
 - A search can be dropped for a cut, at about 15 cuts in a 48 h run.
 - The contract integrates a hazard rate's positive part, because a crossing read only at published states must not depend on the step. A compile refusal cannot read a sign, and a refusal at run time would fault on a seed-dependent dip.

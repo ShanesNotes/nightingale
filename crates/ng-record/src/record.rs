@@ -166,8 +166,8 @@ impl<'m> PatientRecord<'m> {
         Ok(self.next_image(step, chunk))
     }
     /// The contract answers whether the core followed its declared method; this answers whether the result
-    /// may stand. A firing moves no amount and resets to zero, which compile holds in the slot's set, so what
-    /// passes here passes after it.
+    /// may stand. A firing moves no amount and resets to zero, which compile holds in the slot's set, so these
+    /// checks hold after it, and it reads the laws on what it leaves itself.
     fn validate(
         &self,
         problem: &CoupledProblem<'_>,

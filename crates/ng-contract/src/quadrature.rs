@@ -434,11 +434,20 @@ impl VerifiedStep {
         problem.chance.gap(&self.state, guard)
     }
     /// The dense segment keeps the left limit, so a chord never runs through a reset and the next segment
-    /// starts at the reset.
-    pub(crate) fn fire(self, problem: &CoupledProblem<'_>) -> Self {
+    /// starts at the reset. A firing moves a mode, a draw and an integral, so what it leaves is read again: a law
+    /// with no value there refuses the trial, and a range is judged on both sides of the instant.
+    pub(crate) fn fire(self, problem: &CoupledProblem<'_>) -> Result<Self, TrialFailure> {
         let at = self.ticket.interval().end();
         let (state, fired) = problem.chance.fired(problem.body, self.state, at);
-        Self { state, fired, ..self }
+        let values = problem.values_after_firing(&self.ticket, &state)?;
+        let mut excursions = self.excursions;
+        excursions.extend(problem.body.excursions(&values, at));
+        Ok(Self {
+            state,
+            fired,
+            excursions,
+            ..self
+        })
     }
     pub fn into_parts(self) -> VerifiedParts {
         let Self {

@@ -218,6 +218,167 @@ fn a_guard_a_firing_arms_fires_on_the_next_step_within_a_floor() {
     );
 }
 
+const PROBE: LawName = LawName {
+    owner: "CV",
+    local: "probe",
+};
+
+#[derive(Clone, Copy, PartialEq)]
+enum Reads {
+    LogarithmOfTheIntegral,
+    TheIntegral,
+    TheDraw,
+}
+
+/// An integral that climbs in the first mode, and a law that holds only in the second, so the law first reads what a
+/// firing leaves. Its range lies above any value it can read there.
+fn reads_a_reset(reads: Reads) -> Result<(CompiledBody, ParameterPacket<SyntheticFixture>), AdmissionError> {
+    let body = assemble(two_vessels()?, |mut body| {
+        let (mut laws, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut laws);
+        let class = RateClass::new(RateBand::Beat, SECOND)?;
+        let flow = laws.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, laws.every_mode(), class)
+        });
+        laws.transfer_along(&route, flow);
+        let integral = laws.state::<Dimensionless>("integral", Admissible::nonnegative());
+        let probe = laws.state::<Dimensionless>(PROBE.local, Admissible::finite());
+        let pace = laws.parameter(ParameterKey::new("fixture.pace"), Admissible::positive());
+        let dice = laws.stream("dice");
+        let [before, after] = laws.modes("rhythm", ["before", "after"]);
+        let still = |holds| {
+            laws.kernel(|mut k| {
+                let rate = k.zero::<Rate<Dimensionless>>();
+                k.finish(rate, holds, class)
+            })
+        };
+        let (idle_integral, idle_probe) = (still(after.only()), still(before.only()));
+        let climbing = laws.kernel(|mut k| {
+            let rate = k.parameter(&pace);
+            k.finish(rate, before.only(), class)
+        });
+        let reading = laws.kernel(|mut k| {
+            let value = k.state(&integral);
+            let factor = match reads {
+                Reads::LogarithmOfTheIntegral => k.ln(value),
+                Reads::TheIntegral => value,
+                Reads::TheDraw => k.draw(&dice),
+            };
+            let pace = k.parameter(&pace);
+            let rate = k.scale(pace, factor);
+            k.finish(rate, after.only(), class)
+        });
+        if reads != Reads::LogarithmOfTheIntegral {
+            let range = ValidityRange::new(
+                Measure::new(1.0)?,
+                Measure::new(2.0)?,
+                Basis::Fixture("synthetic"),
+            )?;
+            laws.validity(&reading, range);
+        }
+        laws.memory_rate(&integral, climbing);
+        laws.memory_rate(&integral, idle_integral);
+        laws.memory_rate(&probe, reading);
+        laws.memory_rate(&probe, idle_probe);
+        laws.hazard(HazardGuard::new(&integral, &dice, before.to(&after)?));
+        body.add(laws.finish());
+        body.compile()
+    })?;
+    let mut packet = ParameterPacket::new();
+    let pace = Measure::<Rate<Dimensionless>>::new(1.0)?;
+    packet.synthetic(
+        ParameterKey::new("fixture.pace"),
+        Binding::Body,
+        pace,
+        "synthetic",
+    )?;
+    for row in body.rows() {
+        match row.kind() {
+            RowKind::Memory(_) => {
+                packet.start(row.kind(), Measure::<Dimensionless>::new(0.0)?, "synthetic")?
+            }
+            _ => packet.start(row.kind(), Measure::<Water>::new(100.0)?, "synthetic")?,
+        }
+    }
+    let rhythm = LawName {
+        owner: "CV",
+        local: "rhythm",
+    };
+    packet.start_mode(rhythm, "before", "synthetic")?;
+    Ok((body, packet))
+}
+
+/// A crossing nothing can move, into a state one law cannot read: the run must stop short of it and say why.
+#[test]
+fn a_firing_no_law_can_read_faults_short_of_its_crossing_and_names_the_law()
+-> Result<(), InitializationFailure> {
+    let (body, packet) = reads_a_reset(Reads::LogarithmOfTheIntegral)?;
+    let core = reference(SECOND);
+    let mut session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core)?;
+    loop {
+        let mut attempt = session.step();
+        session = loop {
+            attempt = match attempt {
+                Step::Accepted(session, receipt) => {
+                    assert!(receipt.fired().is_empty(), "a state no law can read published");
+                    break session;
+                }
+                Step::Refused(session) => session.retry(),
+                Step::Faulted(stopped) => {
+                    let fault = stopped.fault();
+                    assert_eq!(fault.kind(), EngineFaultKind::NoAdmissibleStep);
+                    let Some(NumericalRefusal::TrialDomain { source }) = fault.last_refusal() else {
+                        panic!("{fault:?}");
+                    };
+                    assert_eq!(
+                        body.refusal_sources()[source.index()],
+                        RefusalSource::LogarithmArgument { law: PROBE }
+                    );
+                    return Ok(());
+                }
+            };
+        };
+    }
+}
+
+fn first_excursion_after_a_firing(reads: Reads) -> Result<(ValidityExcursion, Fired), InitializationFailure> {
+    let (body, packet) = reads_a_reset(reads)?;
+    let core = reference(SECOND);
+    let mut session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core)?;
+    loop {
+        let (next, receipt) = one_step(session);
+        session = next;
+        let Some(event) = receipt.fired().first() else {
+            assert!(receipt.excursions().is_empty(), "the law does not hold yet");
+            continue;
+        };
+        let excursion = (receipt.excursions().first()).expect("what it left is below its range");
+        assert_eq!((excursion.law(), excursion.side()), (PROBE, ExcursionSide::Below));
+        assert_eq!(excursion.at(), event.at());
+        return Ok((*excursion, *event));
+    }
+}
+
+#[test]
+fn a_range_is_judged_on_what_a_firing_leaves() -> Result<(), InitializationFailure> {
+    let (excursion, _) = first_excursion_after_a_firing(Reads::TheIntegral)?;
+    assert_eq!(excursion.value().bits(), Compensated::ZERO.bits());
+    Ok(())
+}
+
+/// The firing spent its draw, so a law read on what it leaves reads the stream's next one.
+#[test]
+fn what_a_firing_leaves_reads_the_next_draw() -> Result<(), InitializationFailure> {
+    let (excursion, event) = first_excursion_after_a_firing(Reads::TheDraw)?;
+    let [threshold, _] = event.threshold().bits();
+    let spent = exp(-f64::from_bits(threshold));
+    let [read, _] = excursion.value().bits();
+    let read = f64::from_bits(read);
+    assert!((read - spent).abs() > 1e-9, "{read} is the draw that fired");
+    Ok(())
+}
+
 #[test]
 fn a_rate_that_falls_below_zero_never_lowers_its_integral() {
     let case = ChanceCase::relaxing().expect("a body");
@@ -1332,7 +1493,7 @@ fn late_inputs_match_the_known_timeline_with_a_guard_among_them() {
     assert!(same > 60, "{same} compared and {said_nothing} said nothing");
 }
 
-fn holds_a_forcing() -> Result<(CompiledBody, RowId), AdmissionError> {
+fn two_vessels() -> Result<Schema, AdmissionError> {
     let origin = || -> Result<Position, AdmissionError> {
         Ok(Position::new(
             Measure::new(0.0)?,
@@ -1347,8 +1508,11 @@ fn holds_a_forcing() -> Result<(CompiledBody, RowId), AdmissionError> {
     map.contain(root.id(), a.id());
     map.contain(root.id(), b.id());
     map.connect(Network::Vascular, a.id(), b.id());
-    let schema = Schema::new(map.finish()?)?;
-    let body = assemble(schema, |mut body| {
+    Schema::new(map.finish()?)
+}
+
+fn holds_a_forcing() -> Result<(CompiledBody, RowId), AdmissionError> {
+    let body = assemble(two_vessels()?, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
         let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
@@ -1446,22 +1610,7 @@ fn a_forcing_is_a_function_of_the_instant_and_not_of_the_step() -> Result<(), In
 /// a value at admission only for `p` below one half.
 #[test]
 fn admission_holds_a_draw_at_its_mean() -> Result<(), InitializationFailure> {
-    let origin = || -> Result<Position, AdmissionError> {
-        Ok(Position::new(
-            Measure::new(0.0)?,
-            Measure::new(0.0)?,
-            Measure::new(0.0)?,
-        ))
-    };
-    let mut map = AnatomyBuilder::new();
-    let root = map.site::<TissueSite>("body", origin()?);
-    let a = map.site::<VesselSegment>("a", origin()?);
-    let b = map.site::<VesselSegment>("b", origin()?);
-    map.contain(root.id(), a.id());
-    map.contain(root.id(), b.id());
-    map.connect(Network::Vascular, a.id(), b.id());
-    let schema = Schema::new(map.finish()?)?;
-    let body = assemble(schema, |mut body| {
+    let body = assemble(two_vessels()?, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
         let wave = RateClass::new(RateBand::Wave, 1_000_000)?;

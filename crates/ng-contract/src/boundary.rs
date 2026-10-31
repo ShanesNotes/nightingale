@@ -238,8 +238,8 @@ impl PendingInputs {
         }
     }
     /// One attempt of a step: issues its ticket and hands it to `solved`, which solves and validates. It finds
-    /// the blind step first: the span's result, or, when that crosses a guard, the landing inside it. When a
-    /// waiting input lies inside the blind step, it drops that result and hands `solved` the same ticket
+    /// the blind step first: the span's result, or, when that crosses a guard, the landing inside it, fired. When
+    /// a waiting input lies inside the blind step, it drops that result and hands `solved` the same ticket
     /// ended at that input. A cut can be refused like any ticket, and a cut that crosses lands in turn.
     ///
     /// This order is the causal step rule. Every ticket of the blind step is a function of the sealed past,
@@ -304,15 +304,14 @@ impl PendingInputs {
             .filter(|next| *next < end)
             .and_then(|next| Some((next, Interval::new(start, next)?)));
         let Some((next, interval)) = cut else {
-            return Ok((blind.0.fire(problem), blind.1));
+            return Ok(blind);
         };
         drop(blind);
         ticket.interval = interval;
         ticket.fence = next;
         ticket.digest = ticket.sealed(identity);
         let passed = solved(&ticket)?;
-        let (step, kept) = land(problem, &ticket, passed, &mut solved)?;
-        Ok((step.fire(problem), kept))
+        land(problem, &ticket, passed, &mut solved)
     }
     /// Adds a late input to what waits, and returns its payload's digest. No accepted part moves: no
     /// revision, no seal, no ticket. The same id with the same payload is the same request whenever it
@@ -460,7 +459,8 @@ impl PendingInputs {
 }
 
 /// A cut's ticket carries its fence into every trial, so a landing short of a shown input leaves that fence
-/// when it publishes.
+/// when it publishes. What comes back has fired, so a firing with no state to publish refuses before anything
+/// reads the timeline, in a run that knows an input as in one that does not.
 fn land<T>(
     problem: &CoupledProblem<'_>,
     ticket: &StepTicket,
@@ -491,7 +491,7 @@ fn land<T>(
             top = step;
         }
     }
-    Ok(top)
+    Ok((top.0.fire(problem)?, top.1))
 }
 
 const WATER_PAYLOAD: u64 = 0;

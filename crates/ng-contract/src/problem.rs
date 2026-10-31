@@ -5,8 +5,8 @@ use crate::evaluate::{Inputs, Undefined};
 use crate::identity::{Canonical, Seal};
 use crate::quadrature::StageEvaluation;
 use crate::{
-    AcceptedStateView, BoundParameters, CompiledBody, Digest, EngineFault, EngineFaultKind, InputId,
-    Interval, NumericalRefusal, Ratio, Refused, RowId, RunIdentity, SimTime, TrialFailure,
+    AcceptedStateView, BoundParameters, Candidate, CompiledBody, Digest, EngineFault, EngineFaultKind,
+    InputId, Interval, NumericalRefusal, Ratio, Refused, RowId, RunIdentity, SimTime, TrialFailure,
 };
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
@@ -124,6 +124,23 @@ impl<'r> CoupledProblem<'r> {
             columns: sparsity.unknowns().to_vec(),
             values,
         })
+    }
+    /// Every law on `state` at the ticket's end, in its modes and on its draws.
+    pub(crate) fn values_after_firing(
+        &self,
+        ticket: &StepTicket,
+        state: &Candidate,
+    ) -> Result<Vec<Option<f64>>, TrialFailure> {
+        let chance = Chance::at(self.body, &self.parameters.values, self.identity.seed(), state);
+        let inputs = Inputs {
+            parameters: &self.parameters.values,
+            frame: &ticket.frame,
+            unknowns: &state.coordinates(),
+            modes: &state.modes,
+            draws: chance.draws(),
+            factors: &chance.factors(ticket.interval().end()),
+        };
+        (self.body.instance_values(&inputs)).map_err(|undefined| self.undefined(ticket, undefined))
     }
     fn factors(&self, point: &StagePoint<'_, '_>) -> Vec<f64> {
         let ticket = point.time.ticket;
