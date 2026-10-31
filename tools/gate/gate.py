@@ -1282,7 +1282,8 @@ class PlanCase:
 RECORD_USERS = frozenset({"ng-record", "ng-observe", "ng-validate"})
 PLAN_CASES = (
     PlanCase("merge", "docs/srs.md", "docs-only", frozenset(), steps=frozenset({"10-docs"})),
-    PlanCase("merge", ".scratch/foundation/map.md", "docs-only", frozenset()),
+    PlanCase("merge", ".scratch/foundation/map.md", "docs-only", frozenset(), steps=frozenset({"30-data"})),
+    PlanCase("merge", "data/closure.jsonl", "affected", frozenset(), steps=frozenset({"30-data"})),
     PlanCase("merge", "AGENTS.md", "docs-only", frozenset(), steps=frozenset({"10-docs"})),
     PlanCase("merge", CONTRACT, "docs-only", frozenset(), steps=frozenset({"05-seam", "10-docs", "20-sketch"})),
     PlanCase(

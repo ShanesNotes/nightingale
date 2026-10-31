@@ -19,6 +19,7 @@ A doc earns its load when it binds behavior, defines a word, records a hard-to-r
 | `docs/statecharts/` | The engine lifecycle as a TLA+ model, its Mermaid chart and the README image, with the script that redraws them | When a change adds, removes or moves a lifecycle state or transition | Below the contract: the model follows it |
 | `docs/atlas/` | The coupling map and one card per system, frozen | Only the cards a pass names, when that system is built | Lowest: the SRS and the contract win |
 | `docs/governance.md` | This doc | Before adding, moving, renaming or deleting a doc, term or record | Rules for docs |
+| `data/` | The source and inference records behind the reviewed packet and healthy-range set, as derived, cited numbers, with the identities they must close. Source text never enters | When binding a clinical value or writing a check that judges one | Below the records: a value is only as good as its source record |
 | `.scratch/` | Tickets: buildable slices with blocking edges | When picking up the slice a ticket names | Work, not authority |
 | `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/agents/`, `.agents/skills/` | Entry points, agent operating notes and the verify skill | At session start, to find the rest, and the skill before claiming a change works | Point, never restate |
 

@@ -14,6 +14,8 @@ The reference man's reviewed packet and a reviewed healthy-range set exist as ch
 
 ## Decisions so far
 
+- [Public data and the check over it](issues/01-data-layout-and-check.md): `data/` holds records as sorted JSON lines with closed fields and capped text, and `30-data` runs 18 rules and their must-fail probes over them. No crate reads `data/` yet.
+
 ## Not yet specified
 
 - **How a reviewed packet reaches a crate.** No crate reads a file. [Reviewed packet builder](issues/10-reviewed-packet-builder.md) scopes it.

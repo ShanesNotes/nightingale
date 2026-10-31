@@ -35,8 +35,12 @@ docs_only = true
 
 [[rule]]
 paths = [".scratch/**/*.md"]
-run = []
+run = ["30-data"]
 docs_only = true
+
+[[rule]]
+paths = ["data/**"]
+run = ["30-data"]
 
 # One row per workspace member, named for its directory: the member lives at crates/<name>.
 # Optional keys:
