@@ -381,8 +381,6 @@ fn hazard_rate<'b>(
     })
 }
 
-/// The walk's own law: the integral relaxes toward a target the forcing varies, so its rate goes negative
-/// whenever the target falls below it.
 fn relaxing_rate<'b>(
     laws: &FragmentBuilder<'b, Cardiovascular>,
     pace: &Parameter<'b, Cardiovascular, Rate<Dimensionless>>,
@@ -403,7 +401,6 @@ fn relaxing_rate<'b>(
     })
 }
 
-/// The circulation's flow, at the conductance a rhythm's value selects.
 fn flow<'b>(
     laws: &FragmentBuilder<'b, Cardiovascular>,
     route: &EdgeRoute<'b, Cardiovascular, Water>,
@@ -430,9 +427,7 @@ fn flow<'b>(
     })
 }
 
-/// The second replay case: two vessels whose conductance a rhythm selects. Two guards, each with an integral and
-/// a stream of its own, move the rhythm there and back, and each integral accrues only in the rhythm its guard
-/// leaves. A forcing varies both rates, which read a memory row, so a core can reach a rate only through a row
+/// A forcing varies the hazard rates, which read a memory row, so a core can reach a rate only through a row
 /// the scales hold. It carries a delivery, so the late-admission gate has an input to withhold.
 pub struct ChanceCase {
     body: CompiledBody,
@@ -469,7 +464,6 @@ impl ChanceCase {
     pub fn relaxing() -> Result<Self, AdmissionError> {
         Self::declared(Variant::Relaxing)
     }
-    /// The same, with that law trusted only inside `range`.
     pub fn relaxing_within(range: ValidityRange<Rate<Dimensionless>>) -> Result<Self, AdmissionError> {
         Self::declared_within(Variant::Relaxing, Some(range))
     }
@@ -630,26 +624,21 @@ impl ChanceCase {
     pub fn until(self, end: SimTime) -> Self {
         Self { end, ..self }
     }
-    /// The same case with these deliveries into `a` in place of its own.
     pub fn delivering(self, deliveries: Vec<Delivery>) -> Self {
         Self { deliveries, ..self }
     }
-    /// A fresh course through the same events: a new run seed, the one thing that moves a draw.
     pub fn seeded(self, seed: Seed) -> Self {
         Self { seed, ..self }
     }
-    /// A memory row by its local name, which also gives its workspace slot: `row.index()`.
     pub fn memory(&self, local: &'static str) -> Option<RowId> {
         let kind = RowKind::Memory(named(local));
         (self.body.rows().iter())
             .find(|row| row.kind() == kind)
             .map(Row::id)
     }
-    /// The workspace slot of the memory row every hazard rate reads.
     pub fn tone_slot(&self) -> usize {
         self.memory(TONE).expect("the body declares it").index()
     }
-    /// Both amount rows, `a` first.
     pub fn rows(&self) -> [RowId; 2] {
         [self.a, self.b].map(|site| {
             let lumen = RowKind::Amount {
@@ -754,7 +743,7 @@ pub fn admit_fixture<'m>(
     admit_seeded(body, packet, boundary, core, Seed::new([1, 2, 3, 4]))
 }
 
-/// The same under a chosen run seed. Admission reads no seed, so only the identity and the course move with it.
+/// Admission reads no seed, so only the identity and the course move with it.
 pub fn admit_seeded<'m>(
     body: &'m CompiledBody,
     packet: ParameterPacket<SyntheticFixture>,

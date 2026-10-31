@@ -223,8 +223,6 @@ impl PendingInputs {
         let running = (self.past.active.iter()).filter(move |delivery| delivery.ends > start);
         running.chain(self.due_at(start))
     }
-    /// `fired` is the head's: a guard that fired at `start` is a breakpoint, read from sealed state, so a fresh
-    /// session at this head reaches the same ticket.
     pub(crate) fn plan(&self, start: SimTime, fired: bool) -> Plan {
         let due = self.due_at(start);
         let ended = self.past.active.iter().any(|delivery| delivery.ends == start);
@@ -461,10 +459,8 @@ impl PendingInputs {
     }
 }
 
-/// The step a ticket's result stands for: the result itself when it crosses no guard, else the landing inside
-/// it. It takes no timeline, so when `ticket` is blind this is blind, and a cut's ticket carries its fence into
-/// every trial, so a landing short of a shown input leaves that fence when it publishes. Every trial is an
-/// ordinary ticket through `solved`, so `verify` proves each one, and a core sees only a shorter ticket.
+/// A cut's ticket carries its fence into every trial, so a landing short of a shown input leaves that fence
+/// when it publishes.
 fn land<T>(
     problem: &CoupledProblem<'_>,
     ticket: &StepTicket,
@@ -486,8 +482,8 @@ fn land<T>(
         let mut trial = ticket.clone();
         trial.interval = Interval::new(start, end).ok_or(ticket.mismatch())?;
         trial.digest = trial.sealed(identity);
-        // A refusal leaves through `?` and drops the bracket: a shorter span is a new attempt, and a shorter
-        // ticket can be the refused one, because a stage's error is not monotone in its length.
+        // A refusal drops the bracket: a shorter ticket can be the refused one, because a stage's error is
+        // not monotone in its length.
         let step = solved(&trial)?;
         let crossed = step.0.crossed(problem).is_some();
         bracket.note(length, step.0.gap(problem, guard), crossed);

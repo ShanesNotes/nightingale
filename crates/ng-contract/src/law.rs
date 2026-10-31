@@ -336,8 +336,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     }
     /// A rate's factor at the stage's instant: `1 + a s(t)`, with `s` the cubic B-spline over seeded knots and
     /// `a` the forcing's amplitude. It stays positive, its mean is exactly one and admission reads exactly
-    /// one, so `scale` by it needs no literal one and no literal can stand in for it. It carries no unit of
-    /// amount, so it varies a rate and never adds to one.
+    /// one, so `scale` by it needs no literal one and no literal can stand in for it.
     pub fn forcing(&mut self, forcing: &Forcing<'b, O>) -> Expr<'b, 'k, O, Dimensionless> {
         self.input(Input::Forcing(forcing.name))
     }
@@ -721,15 +720,14 @@ impl<'b, O, U: Sensed> Guard<'b, O, U> {
 }
 
 /// A named sequence of random draws of one owner, under a stable key: owner and name. Its draws are a pure
-/// function of the run seed, that key and an event ordinal, so adding a stream changes no other. Declaring
-/// one owes a guard that draws on it.
+/// function of the run seed, that key and an event ordinal, so adding a stream changes no other.
 pub struct Stream<'b, O> {
     name: &'static str,
     brand: Brand<'b>,
     owner: PhantomData<O>,
 }
 /// Smooth seeded variability of one owner: knots every declared period, under a stable key. A knot is no
-/// breakpoint, so a forcing never cuts a step. Declaring one owes a law that reads it.
+/// breakpoint, so a forcing never cuts a step.
 pub struct Forcing<'b, O> {
     name: &'static str,
     brand: Brand<'b>,
@@ -1031,8 +1029,6 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
             enters: guard.transition.to,
         });
     }
-    /// Compile refuses a second guard on one stream or one integral, and an integral not declared nonnegative,
-    /// which must hold the reset at zero and reach any threshold.
     pub fn hazard(&mut self, guard: HazardGuard<'b, O>) {
         self.data.hazards.push(HazardDeclaration {
             integral: guard.integral,

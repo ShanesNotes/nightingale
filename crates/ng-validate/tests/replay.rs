@@ -1113,8 +1113,6 @@ fn arbitrary_bodies_are_refused_and_never_panic() {
     }
 }
 
-/// Ordinals now sit inside the image, in the body's stream order, so a checkpoint has no key list to order and
-/// the only forgery left is a value under the seal.
 fn with_first_ordinal(saved: &Checkpoint, ordinal: u64, body: &CompiledBody) -> Checkpoint {
     let mut bytes = saved.as_bytes().to_vec();
     let kinds = |wanted: fn(&RowKind) -> bool| body.rows().iter().filter(|row| wanted(&row.kind())).count();

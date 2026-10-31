@@ -181,8 +181,6 @@ impl ParameterPacket<SyntheticFixture> {
         });
         Ok(())
     }
-    /// One mode variable's starting value, in the packet for the reason a start value is. Refuses the same
-    /// variable twice.
     pub fn start_mode(
         &mut self,
         variable: LawName,
@@ -232,8 +230,7 @@ impl BoundParameters {
 }
 
 impl CompiledBody {
-    /// A mode variable runs only when hazard guards alone move it, in a body with no algebraic row: a firing
-    /// leaves algebraic values as they were, and nothing here solves them again.
+    /// A firing leaves algebraic values as they were, and nothing here solves them again.
     fn unrun_mode(&self) -> Option<LawName> {
         let Layout {
             rows,
@@ -250,7 +247,7 @@ impl CompiledBody {
             .map(|(_, mode)| mode.variable)
     }
     /// Ruling 15's partial check. A literal is zero, so only `exp` and `logistic` make a nonzero constant from
-    /// literals, and `divide` makes one from a parameter over itself. It reads the graph and never a value.
+    /// literals, and `divide` makes one from a parameter over itself.
     fn unbacked_constant(&self) -> Option<LawName> {
         let unbacked = |code: &[Op]| {
             let mut literal = vec![false; code.len()];
@@ -271,7 +268,6 @@ impl CompiledBody {
             .find(|program| unbacked(&program.code.ops))
             .map(|program| program.law)
     }
-    /// The first forcing whose period the clock cannot hold.
     pub(crate) fn unheld_period(&self, values: &[f64]) -> Option<ParameterKey> {
         (self.layout.forcings.iter())
             .map(|forcing| forcing.period)

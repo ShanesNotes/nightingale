@@ -9,15 +9,13 @@ pub(crate) const HELD_FACTOR: f64 = 1.0;
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 
-/// A stable word from owner and name alone, so adding a declaration moves no other key. `check_names` keeps a
-/// stream and a forcing of one owner apart, so a name is one key.
+/// `check_names` keeps a stream and a forcing of one owner apart, so a name is one key.
 pub(crate) fn key_word(name: LawName) -> u64 {
     let mut out = Canonical::new("ng-contract chance key 1");
     name.seal(&mut out);
     first_word(out.digest())
 }
 
-/// The domain enters here, so equal words in two seed domains never alias.
 pub(crate) fn seed_word(domain: &str, words: [u64; 4]) -> u64 {
     let mut out = Canonical::new("ng-contract seed word 1");
     out.text(domain);
@@ -44,8 +42,6 @@ fn keyed(seed: Seed, key: u64) -> u64 {
     mix(seed.word() ^ key)
 }
 
-/// A draw and a knot are the word at one index of one key. It takes no step, attempt or evaluation count, so
-/// it cannot depend on one (I8).
 fn word(keyed: u64, index: u64) -> u64 {
     mix(keyed ^ mix(index.wrapping_add(0x9E37_79B9_7F4A_7C15)))
 }
@@ -80,8 +76,8 @@ struct Knots {
     amplitude: f64,
 }
 
-/// What one attempt reads of chance, built once per problem from the accepted state. Modes and ordinals move
-/// only when an image publishes, so a draw is constant across a ticket, as a drive is.
+/// Modes and ordinals move only when an image publishes, so a draw is constant across a ticket, as a
+/// drive is.
 pub(crate) struct Chance {
     draws: Vec<f64>,
     thresholds: Vec<f64>,
@@ -111,25 +107,21 @@ impl Chance {
     pub(crate) fn draws(&self) -> &[f64] {
         &self.draws
     }
-    /// `1 + a s(t)` per forcing at a stage's instant. The contract reads it, so an author has no literal one
-    /// to want, and it is exactly 1 at admission.
     pub(crate) fn factors(&self, at: SimTime) -> Vec<f64> {
         (self.forcings.iter())
             .map(|forcing| 1.0 + forcing.amplitude * spline(forcing.keyed, forcing.period_ns, at))
             .collect()
     }
-    /// How far a guard's integral stands past its threshold.
     pub(crate) fn gap(&self, state: &Candidate, hazard: &HazardLayout) -> f64 {
         state.value(hazard.integral).rounded() - self.thresholds[hazard.stream]
     }
-    /// The first armed guard past its threshold, in stable order. A landing reads this guard alone, so a guard
-    /// that crossed nothing moves no other stream's landing, not even inside the floor.
+    /// A landing's gaps read only the guard this returns, so a guard that crossed nothing moves no other
+    /// stream's landing, not even inside the floor.
     pub(crate) fn crossed<'b>(&self, body: &'b CompiledBody, state: &Candidate) -> Option<&'b HazardLayout> {
         (body.layout.hazards.iter())
             .find(|hazard| hazard.armed(&state.modes) && self.gap(state, hazard) >= 0.0)
     }
-    /// Applies a crossing to a value no record holds yet, so a refusal or a dropped trial discards every part.
-    /// Only a guard armed before any of them fires can fire, so walking in stable order decides a race on one
+    /// Only a guard armed before any guard fires can fire, so walking in stable order decides a race on one
     /// mode variable: the loser did not happen, and it keeps its integral and its draw.
     pub(crate) fn fired(
         &self,
@@ -168,21 +160,20 @@ impl Chance {
     }
 }
 
-/// Whether the clock holds this period exactly, so a run reads the period the packet gave.
+/// Whether a period is a count of the clock's nanoseconds, so a run reads the period the packet gave. The count
+/// is read back because the product is inexact: 1.001 s multiplies to an ulp past 1,001,000,000.
 pub(crate) fn holds_a_period(seconds: f64) -> bool {
-    let ns = seconds * NANOSECONDS_PER_SECOND;
-    (1.0..18_446_744_073_709_551_616.0).contains(&ns) && ns == ns.round()
+    let ns = period_ns(seconds);
+    ns > 0 && ns as f64 / NANOSECONDS_PER_SECOND == seconds
 }
 
-/// `bind` and `parse` refuse a period the clock cannot hold, and a problem built on other values reaches nothing
-/// but must not divide by zero.
 fn period_ns(seconds: f64) -> u64 {
-    ((seconds * NANOSECONDS_PER_SECOND) as u64).max(1)
+    (seconds * NANOSECONDS_PER_SECOND).round() as u64
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{knot, open_unit, seed_word, spline, word};
+    use super::{holds_a_period, knot, open_unit, period_ns, seed_word, spline, word};
     use crate::SimTime;
 
     const KEYED: u64 = 0x0123_4567_89AB_CDEF;
@@ -261,5 +252,30 @@ mod tests {
         let words = [1, 2, 3, 4];
         assert_ne!(seed_word("run", words), seed_word("observation", words));
         assert_ne!(seed_word("run", words), seed_word("run", [1, 2, 3, 5]));
+    }
+
+    #[test]
+    fn a_period_written_in_whole_nanoseconds_is_held_exactly() {
+        for per_second in [1e3, 1e6, 1e9] {
+            for count in 1..100_000_u64 {
+                let seconds = count as f64 / per_second;
+                assert!(holds_a_period(seconds), "{seconds}");
+                assert_eq!(period_ns(seconds), (seconds * 1e9).round() as u64);
+            }
+        }
+        let mut count = 1_u64;
+        for _ in 0..1_000_000 {
+            count = word(count, count) >> 13;
+            let seconds = count as f64 / 1e9;
+            assert!(holds_a_period(seconds), "{count}");
+            assert_eq!(period_ns(seconds), count);
+        }
+    }
+
+    #[test]
+    fn a_period_the_clock_cannot_hold_is_not_held() {
+        for seconds in [1.5e-9, 1e-12, 1e100, 0.0, -1.0, 0.1 + 0.2] {
+            assert!(!holds_a_period(seconds), "{seconds}");
+        }
     }
 }

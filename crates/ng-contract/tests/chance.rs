@@ -57,7 +57,6 @@ fn beat() -> Result<RateClass, AdmissionError> {
     RateClass::new(RateBand::Beat, 100_000_000)
 }
 
-/// A rate kernel that reads no chance, for a slot whose test is about something else.
 fn plain_rate<'b>(
     laws: &Heart<'b>,
 ) -> Result<PureKernel<'b, Cardiovascular, Rate<Dimensionless>>, AdmissionError> {
@@ -174,7 +173,6 @@ fn a_stream_and_a_slot_under_one_name_are_named_twice() {
     );
 }
 
-/// A body with one memory row at this rate, which binds up to its parameters.
 fn bound_rate(
     rate: impl for<'b, 'k> FnOnce(
         &mut Kernel<'b, 'k, Cardiovascular>,
@@ -324,9 +322,6 @@ fn a_mode_variable_a_plain_guard_fires_stays_refused_by_name() {
     );
 }
 
-/// The judge's probe: a law that holds in one mode on an algebraic row would publish a value the new mode's law
-/// does not satisfy, because a firing leaves algebraic values as they were and nothing solves them again. A
-/// draw read by an algebraic law would do the same. A body with both stays refused until ticket 10.
 #[test]
 fn a_hazard_in_a_body_with_an_algebraic_row_stays_refused_by_name() {
     let body = hazard_body(|laws| {

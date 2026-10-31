@@ -433,8 +433,8 @@ impl VerifiedStep {
     pub(crate) fn gap(&self, problem: &CoupledProblem<'_>, guard: &HazardLayout) -> f64 {
         problem.chance.gap(&self.state, guard)
     }
-    /// Applies what crossed, all at once, to the step the attempt selected. The dense segment keeps the left
-    /// limit, so a chord never runs through a reset and the next segment starts at the reset.
+    /// The dense segment keeps the left limit, so a chord never runs through a reset and the next segment
+    /// starts at the reset.
     pub(crate) fn fire(self, problem: &CoupledProblem<'_>) -> Self {
         let at = self.ticket.interval().end();
         let (state, fired) = problem.chance.fired(problem.body, self.state, at);
@@ -461,8 +461,7 @@ impl VerifiedStep {
     }
 }
 
-/// One hazard guard that fired at a step's end, named by its stream. A chance event is no input: replay
-/// recreates it from the seed.
+/// A chance event is no input: replay recreates it from the seed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Fired {
     pub(crate) stream: LawName,
@@ -478,11 +477,9 @@ impl Fired {
     pub fn at(&self) -> SimTime {
         self.at
     }
-    /// The ordinal of the draw it crossed. The stream stands at the next one after this step.
     pub fn ordinal(&self) -> u64 {
         self.ordinal
     }
-    /// The draw's exponential threshold, a function of the seed, the stream's key and the ordinal alone.
     pub fn threshold(&self) -> Compensated {
         Compensated::exact(f64::from_bits(self.threshold_bits))
     }

@@ -102,7 +102,6 @@ impl CompiledBody {
     pub fn conserved_basis(&self) -> &ConservedBasis {
         &self.layout.basis
     }
-    /// Each hazard guard, named by its stream, in the order firing walks them.
     pub fn hazards(&self) -> impl Iterator<Item = LawName> + '_ {
         (self.layout.hazards.iter()).map(|hazard| self.layout.streams[hazard.stream].name)
     }
@@ -377,10 +376,8 @@ pub struct Instance {
     pub(crate) target: Target,
     pub(crate) parameters: Vec<ParameterId>,
     pub(crate) inputs: Vec<Bound>,
-    /// The `(variable, value)` its law holds in, as indices. The compiled sparsity is the union over modes, so
-    /// selecting by mode moves no entry.
+    /// The compiled sparsity is the union over modes, so selecting by mode moves no entry.
     pub(crate) mode: Option<(usize, usize)>,
-    /// A hazard integral's rate, of which the contract integrates the positive part.
     pub(crate) rectified: bool,
 }
 impl Instance {
@@ -661,7 +658,6 @@ impl Seal for ForcingLayout {
         amplitude.seal(out);
     }
 }
-/// `variable`, `leaves` and `enters` index `Layout::modes`; `stream` indexes `Layout::streams`.
 pub(crate) struct HazardLayout {
     pub(crate) integral: RowId,
     pub(crate) stream: usize,

@@ -4,9 +4,6 @@ enum End {
     Top,
 }
 
-/// The search's only state: a verified length that does not cross and one that does. Plain arithmetic on
-/// values `verify` produced, so its tickets are a function of the sealed past, the span and the refusals of
-/// this base, whatever waits.
 pub(crate) struct Bracket {
     bottom_ns: u64,
     bottom: f64,
@@ -20,28 +17,25 @@ pub(crate) struct Bracket {
     stalled: bool,
 }
 impl Bracket {
-    /// `base` is the gap at the accepted state, the bottom of length zero. A tolerance of zero is a nanosecond,
-    /// the finest the clock holds: `resume` can reach one from forged bytes, and a bracket must still close.
     pub(crate) fn new(base: f64, top_ns: u64, top: f64, tolerance_ns: u64) -> Self {
         Self {
             bottom_ns: 0,
             bottom: base,
             top_ns,
             top,
-            tolerance_ns: tolerance_ns.max(1),
+            tolerance_ns,
             moved: End::Top,
             earlier_ns: u64::MAX,
             stalled: false,
         }
     }
-    /// A landing: a ticket that crosses, and one at most the tolerance shorter that does not.
     pub(crate) fn closed(&self) -> bool {
         self.top_ns - self.bottom_ns <= self.tolerance_ns
     }
-    /// The next trial's length, strictly inside the bracket. The secant's root, half a tolerance toward the end
-    /// that has not moved, so two trials close a straight gap. Inside two tolerances the middle closes on
-    /// either outcome. Past that, a trial stays a tolerance from each end, so it closes the bracket or moves
-    /// an end by a tolerance, and no ticket is shorter than the tolerance for a root near the head.
+    /// The secant's root, half a tolerance toward the end that has not moved, so two trials close a straight
+    /// gap. Inside two tolerances the middle closes on either outcome. Past that, a trial stays a tolerance
+    /// from each end, so it closes the bracket or moves an end by a tolerance, and no ticket is shorter than
+    /// the tolerance for a root near the head.
     pub(crate) fn aim(&self) -> u64 {
         let Self {
             bottom_ns,
@@ -68,7 +62,7 @@ impl Bracket {
         (aim as u64).clamp(bottom_ns + tolerance_ns, top_ns - tolerance_ns)
     }
     /// Two trials that together failed to halve the bracket make the next one bisect, so its width halves at
-    /// least every three trials, and a span below 2^64 ns takes at most 192 trials at any tolerance.
+    /// least every three trials, and a span below 2^64 ns takes at most 192 trials at any floor, and admission and `resume` refuse a floor of zero.
     pub(crate) fn note(&mut self, length_ns: u64, gap: f64, crossed: bool) {
         let width = self.top_ns - self.bottom_ns;
         if crossed {
@@ -145,11 +139,6 @@ mod tests {
             let spent = trials(-1.0, u64::MAX, 1.0, 1, &mut jagged);
             assert!(spent <= 192, "{spent} trials");
         }
-    }
-
-    #[test]
-    fn a_tolerance_of_zero_closes_at_a_nanosecond() {
-        assert!(trials(-1.0, 1 << 40, 1.0, 0, |length| length as f64 - 100.0) <= 192);
     }
 
     #[test]

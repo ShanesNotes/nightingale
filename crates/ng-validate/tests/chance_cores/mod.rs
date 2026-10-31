@@ -37,7 +37,6 @@ fn euler(
     Ok(problem.propose(ticket, quadrature.finish()?, &workspace, history))
 }
 
-/// A number in [-1/2, 1/2] from a digest.
 fn dice_of(digest: Digest) -> f64 {
     f64::from(digest.as_bytes()[0]) / 255.0 - 0.5
 }
@@ -86,8 +85,7 @@ impl CoupledSolver for JittersItsSpan {
     }
 }
 
-/// Draws per attempt from a count in a `Cell`, so its dice move with every solve: a forced extra evaluation
-/// shows at the first step.
+/// Draws per solve from a count in a `Cell`, so a forced extra evaluation shows at the first step.
 pub struct DrawsPerEvaluation {
     pub interval_ns: u64,
     pub tone: usize,
@@ -134,9 +132,6 @@ impl CoupledSolver for DelaysEveryEvent {
     }
 }
 
-/// Refuses every ticket shorter than its span, each trial of a landing among them, hoping to skip the event.
-/// No span crosses a guard unseen, so it spends its budget at the crossing and faults, and nothing publishes
-/// past it.
 pub struct RefusesEveryLanding {
     pub inner: ReferenceIntegrator,
     pub interval_ns: u64,
@@ -182,8 +177,7 @@ impl CoupledSolver for RefusesByHash {
     }
 }
 
-/// Short spans early, so an input can arrive, then spans that hold a crossing and an input together, with a hash
-/// refusing a seventh of its tickets. It traces every ticket, so two runs compare attempt by attempt.
+/// Short spans early, so an input can arrive, then spans that hold a crossing and an input together.
 pub struct TracesItsTickets {
     pub inner: RefusesByHash,
     pub trace: RefCell<Vec<(u64, u64, u32)>>,
@@ -208,8 +202,7 @@ impl CoupledSolver for TracesItsTickets {
     }
 }
 
-/// Refuses its first landing trial once, so a test can watch the retry. The `Cell` makes it impure, which only
-/// this test's single run can afford.
+/// The `Cell` makes it impure, which only a single run can afford.
 pub struct RefusesItsFirstTrial {
     pub inner: ReferenceIntegrator,
     pub interval_ns: u64,
@@ -231,7 +224,6 @@ impl CoupledSolver for RefusesItsFirstTrial {
     }
 }
 
-/// Keeps its continuation's start across a firing, as if a mode change were not a breakpoint.
 pub struct KeepsItsHistoryAcrossAFiring {
     pub interval_ns: u64,
 }
@@ -278,7 +270,6 @@ impl CoupledSolver for CountsEvaluations {
     }
 }
 
-/// Honest, and it runs the public `verify` on its own proposal before it hands in another of the same.
 pub struct VerifiesDry {
     pub inner: ReferenceIntegrator,
     pub checked: Cell<u64>,
@@ -298,7 +289,6 @@ impl CoupledSolver for VerifiesDry {
     }
 }
 
-/// Answers from a list, so the live pace stops a run short of its end at known instants.
 pub struct ReadingClock {
     pub readings: Vec<u64>,
     pub next: Cell<usize>,

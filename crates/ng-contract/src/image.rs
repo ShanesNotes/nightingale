@@ -79,8 +79,6 @@ impl<'b> ByteReader<'b> {
         self.exact_count(8, expected)?;
         (0..expected).map(|_| self.number()).collect()
     }
-    /// One value's index per mode variable, each a value the body declares, so evaluation indexes nothing a
-    /// corrupt byte chose.
     fn mode_list(&mut self, body: &CompiledBody) -> Result<Vec<usize>, Malformed> {
         let modes = &body.layout.modes;
         self.exact_count(8, modes.len())?;

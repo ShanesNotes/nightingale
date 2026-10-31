@@ -143,9 +143,6 @@ fn valve<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardiovascul
     Ok(laws.finish())
 }
 
-// 1c. Seeded chance in the body: a hazard accrues in memory at a rate the clock-tied forcing varies, and fires a
-// mode change when it crosses its stream's draw. The seed fixes the dice; physiology and treatment set the rate.
-// The stream goes by reference, as a law's slot does, and the period and amplitude are packet values.
 fn ectopy<'b>(laws: &mut FragmentBuilder<'b, Cardiovascular>) -> Result<(), AdmissionError> {
     let dice = laws.stream("ectopic-beat");
     let wobble = laws.forcing(

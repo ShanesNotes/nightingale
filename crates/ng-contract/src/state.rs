@@ -3,10 +3,9 @@ use crate::identity::{Canonical, Seal};
 use crate::{Compensated, CompiledBody, Digest, Interval, RowId, SimTime};
 
 /// A full state in one compiled layout: amounts stay compensated, memory and algebraic values are
-/// coordinates, each mode variable holds a value's index and each stream an ordinal, both in compiled order.
-/// `fired` says this head ended at a firing, so a fresh session here reaches the ticket a running one would:
-/// the flag lives in sealed state, not in a ticket. No public constructor: admission makes the first,
-/// `verify` every other, and `ImageParts::parse` one a checkpoint saved.
+/// coordinates. `fired` says this head ended at a firing, so a fresh session here reaches the ticket a
+/// running one would. No public constructor: admission makes the first, `verify` every other, and
+/// `ImageParts::parse` one a checkpoint saved.
 pub struct Candidate {
     pub(crate) amounts: Vec<Compensated>,
     pub(crate) memory: Vec<f64>,
@@ -76,8 +75,6 @@ impl Candidate {
             .chain(algebraic.iter().copied())
             .collect()
     }
-    /// Covers modes, ordinals and the flag, so every image digest and seal covers them with no section of
-    /// their own.
     pub fn digest(&self) -> Digest {
         let Self {
             amounts,

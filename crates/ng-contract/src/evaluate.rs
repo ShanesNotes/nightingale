@@ -125,8 +125,6 @@ fn run(ops: &[Op], inputs: &[Dual], partial_volume: f64) -> Result<Dual, Operato
     Ok(stack[stack.len() - 1])
 }
 
-/// `modes` and `draws` are the head's, constant across a ticket as `frame` is, and `factors` are read at the
-/// stage's instant, so `verify` replays each bit for bit.
 pub(crate) struct Inputs<'a> {
     pub(crate) parameters: &'a [f64],
     pub(crate) frame: &'a DriveFrame,
@@ -136,7 +134,7 @@ pub(crate) struct Inputs<'a> {
     pub(crate) factors: &'a [f64],
 }
 
-/// A hazard's rate as the contract integrates it. A law's own value stays what a validity range judges.
+/// A law's own value stays what a validity range judges.
 fn positive_part(instance: &Instance, value: f64) -> f64 {
     if instance.rectified && value <= 0.0 {
         0.0
@@ -181,7 +179,6 @@ impl CompiledBody {
             domain,
         })
     }
-    /// `None` for a law that does not hold in these modes: it is not evaluated, and it refuses nothing.
     pub(crate) fn instance_values(&self, inputs: &Inputs<'_>) -> Result<Vec<Option<f64>>, Undefined> {
         (self.layout.instances.iter())
             .map(|instance| {

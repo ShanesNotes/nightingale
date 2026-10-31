@@ -31,6 +31,9 @@ pub enum CheckpointError {
     Corrupt,
     /// Well sealed, for another run, another body or another solver's resolution.
     IdentityMismatch,
+    /// A resolution with a floor of zero, which no admission takes, so only forged bytes can hold one, and a
+    /// landing's search would never close on it.
+    ZeroMinimumInterval,
     /// A fault's last image. It continues only through `recover`, on a new branch.
     Latched,
     /// Well sealed and for this run, and not the canonical form of an image.

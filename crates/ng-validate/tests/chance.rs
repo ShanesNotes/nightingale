@@ -148,8 +148,6 @@ fn a_rate_runs_only_in_the_mode_its_law_holds_in() {
     assert!(moved >= 2 && held >= 20, "{moved} firings and {held} held steps");
 }
 
-/// A rate whose law holds in every mode accrues while its guard is not armed, as the law says. The guard then
-/// fires within a floor of arming, at the end of a first ticket no longer than the floor.
 #[test]
 fn an_integral_past_its_draw_when_its_guard_arms_fires_within_a_floor() {
     let case = ChanceCase::racing().expect("a body").until(at(2_400));
@@ -218,8 +216,7 @@ fn a_segment_ends_at_the_left_limit_of_a_reset() {
     }
 }
 
-/// A floor past the span lands a guard at the first ticket that crosses, so two can cross in one landing. The
-/// first in stable order fires. The loser did not happen: it keeps its integral past its draw and its ordinal.
+/// A floor past the span lands a guard at the first ticket that crosses, so two can cross in one landing.
 #[test]
 fn two_guards_racing_for_one_mode_fire_once_and_the_loser_keeps_its_draw() {
     let mut raced = 0;
@@ -356,8 +353,6 @@ fn adding_a_second_stream_leaves_the_first_streams_events_unchanged() {
     assert!(compared >= 24, "{compared} events compared");
 }
 
-/// A rate's positive part is what the contract integrates, and a validity range judges the law's own value, so a
-/// negative rate a law was not trusted at still shows on the receipt.
 #[test]
 fn a_hazard_rate_outside_its_range_is_reported_though_it_holds_flat() {
     let case = ChanceCase::relaxing_within(
@@ -385,7 +380,6 @@ fn a_hazard_rate_outside_its_range_is_reported_though_it_holds_flat() {
     );
 }
 
-/// A second stream that does fire moves the steps and so the instants, and it still moves no draw.
 #[test]
 fn a_draw_is_a_function_of_seed_key_and_ordinal_whatever_else_fires() {
     let plain = ChanceCase::ectopy().expect("a body").until(at(1_200));
@@ -526,8 +520,8 @@ fn a_core_that_delays_every_event_alike_fails_against_a_reference_policy() {
     );
 }
 
-/// It stalls just before the reference's last event, which falls past the case's end, so every pair agrees and
-/// the list is one short.
+/// It stalls just before the reference's last event, so its own falls past the case's end, every pair agrees
+/// and the list is one short.
 #[test]
 fn a_core_that_stops_firing_differs_from_the_reference_by_its_list_of_events() {
     let whole = ChanceCase::ectopy().expect("a body");
@@ -553,8 +547,6 @@ fn a_core_that_stops_firing_differs_from_the_reference_by_its_list_of_events() {
     );
 }
 
-/// Two rhythms that fire independently, so two unrelated events can share a landing under a coarser policy and
-/// come out in another order. Each is paired by its stream and ordinal.
 #[test]
 fn two_step_policies_may_fire_unrelated_events_in_another_order() {
     let mut swapped = 0;
@@ -739,7 +731,6 @@ impl HistoryStore for Store {
 const HEADER: usize = 128;
 const RAW_DIGEST: core::ops::Range<usize> = 8..40;
 
-/// The image's list of modes, then its list of ordinals, each after a count, then the flag.
 fn chance_fields(body: &CompiledBody) -> (usize, usize, usize) {
     let rows = body.rows();
     let count = |wanted: fn(&RowKind) -> bool| rows.iter().filter(|row| wanted(&row.kind())).count();
@@ -761,7 +752,6 @@ fn forged(saved: &Checkpoint, at: usize, value: u64) -> Checkpoint {
     Checkpoint::from_bytes(bytes)
 }
 
-/// A save at the instant after a firing, the head the resume gate presses because a firing is a breakpoint.
 #[test]
 fn a_head_after_a_firing_resumes_and_rewinds_exactly_and_refuses_forged_chance_state() {
     let case = ChanceCase::ectopy().expect("a body").delivering(Vec::new());
@@ -947,7 +937,7 @@ fn a_refusal_discards_the_reset_the_advance_and_the_mode_together() {
 fn a_forcing_period_the_clock_cannot_hold_is_refused_at_binding() {
     let (body, _) = holds_a_forcing().expect("a body");
     let key = ParameterKey::new("fixture.period");
-    for seconds in [1.5e-9, 1e-12, 1e100] {
+    for seconds in [1.5e-9, 1e-12, 1e100, 0.1 + 0.2] {
         let mut packet = ParameterPacket::<SyntheticFixture>::new();
         let note = "synthetic";
         let scale = Measure::<Dimensionless>::new(3.0).expect("finite");
@@ -975,7 +965,6 @@ fn a_forcing_period_the_clock_cannot_hold_is_refused_at_binding() {
     }
 }
 
-/// A forged period under a good digest: `parse` holds bytes to what `bind` holds a packet to.
 #[test]
 fn a_forcing_period_the_clock_cannot_hold_is_malformed_under_a_good_digest() {
     let case = ChanceCase::ectopy().expect("a body");
@@ -989,10 +978,36 @@ fn a_forcing_period_the_clock_cannot_hold_is_malformed_under_a_good_digest() {
     let at = (0..bytes.len() - 8)
         .find(|&at| bytes[at..at + 8] == held)
         .expect("the bound period");
-    let forged = forged(&saved, at, 1.5e-9_f64.to_bits());
+    for seconds in [1.5e-9_f64, 0.0, 1e100] {
+        let forged = forged(&saved, at, seconds.to_bits());
+        assert_eq!(
+            Session::resume(&forged, &identity, case.body(), &core, &store).err(),
+            Some(CheckpointError::Malformed),
+            "{seconds}"
+        );
+    }
+}
+
+/// Only forged bytes can carry such an identity. The refusal comes before any byte is read, so honest bytes press
+/// it: they would come back as another identity's.
+#[test]
+fn resume_refuses_a_floor_of_zero_as_admission_does() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = reference(SECOND);
+    let session = case.admit(&core).expect("admitted");
+    let mut store = Store::default();
+    let saved = session.checkpoint(&mut store).expect("saved");
+    let known = session.record().identity();
+    let zero = reference(SECOND).with_floor(0);
+    let identity = RunIdentity::new(
+        known.model(),
+        known.packet(),
+        Seed::new([1, 2, 3, 4]),
+        zero.resolution(),
+    );
     assert_eq!(
-        Session::resume(&forged, &identity, case.body(), &core, &store).err(),
-        Some(CheckpointError::Malformed)
+        Session::resume(&saved, &identity, case.body(), &zero, &store).err(),
+        Some(CheckpointError::ZeroMinimumInterval)
     );
 }
 
@@ -1016,7 +1031,6 @@ impl Random {
     }
 }
 
-/// Up to three deliveries at random stamps, each its own span, with a guard firing among them.
 fn random_case(random: &mut Random) -> ChanceCase {
     let names: [&'static [u8]; 3] = [b"a", b"b", b"c"];
     let deliveries = (0..1 + random.below(3))
@@ -1039,9 +1053,8 @@ fn random_case(random: &mut Random) -> ChanceCase {
         .until(at(60))
 }
 
-/// The late-admission gate, on random timelines with a guard firing among the inputs, pressing each input at the
-/// late run's own last head. A fault, an input inside the first step or a case that fired nothing says nothing
-/// about the claim; a divergence breaks it.
+/// A fault, an input inside the first step or a case that fired nothing says nothing about the claim; a
+/// divergence breaks it.
 #[test]
 fn late_inputs_match_the_known_timeline_with_a_guard_among_them() {
     let mut random = Random(0x9E37_79B9_7F4A_7C15);
@@ -1144,8 +1157,8 @@ fn a_dry_verify_fires_nothing_and_shows_no_threshold() {
     assert!(core.checked.get() > fired.len() as u64);
 }
 
-/// One step of each span to one instant: a forcing read at a ticket's start would differ between them, and one
-/// read at the stage's instant agrees to the solve's own rounding.
+/// Two spans to one instant: a forcing read at a ticket's start would differ between them, and one read at
+/// the stage's instant agrees to the solve's own rounding.
 #[test]
 fn a_forcing_is_a_function_of_the_instant_and_not_of_the_step() -> Result<(), InitializationFailure> {
     let (body, held) = holds_a_forcing()?;
@@ -1189,8 +1202,8 @@ fn a_forcing_is_a_function_of_the_instant_and_not_of_the_step() -> Result<(), In
     Ok(())
 }
 
-/// Admission takes no seed, so a draw reads its mean. A body with a stream holds no algebraic row yet, so a law's
-/// own domain shows the value: `ln(draw - p)` has a value at admission only for `p` below one half.
+/// A body with a stream holds no algebraic row yet, so a law's own domain shows the value: `ln(draw - p)` has
+/// a value at admission only for `p` below one half.
 #[test]
 fn admission_holds_a_draw_at_its_mean() -> Result<(), InitializationFailure> {
     let origin = || -> Result<Position, AdmissionError> {

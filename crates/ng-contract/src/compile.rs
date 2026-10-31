@@ -49,7 +49,7 @@ pub(crate) fn compile(
     let (reads, rates) = reads(&rows.rows, &placement.columns, &placement.programs, &instances);
     let modes = modes(&fragments);
     let hazards = hazards(&fragments, &rows, &chance, &modes);
-    let instances = selected(instances, &placement.programs, &modes, &hazards);
+    let instances = marked(instances, &placement.programs, &modes, &hazards);
     let (streams, forcings) = chance.laid_out(&fragments, &parameters);
     match_each_mode(&rows.rows, &placement.programs, &instances, &modes)?;
     let solved_by = solved_by(&rows.rows, &reads)?;
@@ -336,7 +336,6 @@ fn check_guards(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     Ok(())
 }
 
-/// Each names the first offender in canonical order, streams, then integrals, then forcings.
 fn check_chance(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     for fragment in fragments {
         let named = |local| LawName {
@@ -560,7 +559,6 @@ struct Places<'a> {
     chance: &'a ChanceNames,
 }
 
-/// Streams and forcings in canonical order, so a position is the same whatever order fragments arrive in.
 struct ChanceNames {
     streams: Vec<LawName>,
     forcings: Vec<LawName>,
@@ -638,7 +636,6 @@ fn forcing_parameters(fragments: &[FragmentData]) -> Vec<(ParameterKey, Binding)
         .collect()
 }
 
-/// In `LawName` order of the stream, the order firing walks them.
 fn hazards(
     fragments: &[FragmentData],
     rows: &Rows,
@@ -673,8 +670,7 @@ fn hazards(
     hazards
 }
 
-/// Each instance's mode as indices, so evaluation never reads a name.
-fn selected(
+fn marked(
     mut instances: Vec<Instance>,
     programs: &[Program],
     modes: &[ModeLayout],

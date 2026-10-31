@@ -371,8 +371,6 @@ impl StepReceipt {
     pub fn excursions(&self) -> &[ValidityExcursion] {
         &self.excursions
     }
-    /// Each hazard guard that fired at this step's end, in firing order. Replay recreates these from the seed,
-    /// so they are in no event log.
     pub fn fired(&self) -> &[Fired] {
         &self.fired
     }

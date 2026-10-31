@@ -37,8 +37,8 @@ pub enum AdmissionError {
     ModesNotYetRun {
         variable: LawName,
     },
-    /// A value built only from literals, or a parameter divided by itself: a constant no packet entry backs.
-    /// This check is partial. It reads the graph, never a value.
+    /// A nonzero constant built only from literals, or a parameter divided by itself, which no packet entry
+    /// backs. This check is partial: it reads the graph, never a value.
     UnbackedConstant {
         law: LawName,
     },
@@ -47,11 +47,9 @@ pub enum AdmissionError {
     ForcingPeriod {
         key: ParameterKey,
     },
-    /// A mode variable with no starting value in the packet.
     MissingStartMode {
         variable: LawName,
     },
-    /// A starting value of a mode variable or a value the body does not declare.
     UnknownStartMode {
         variable: LawName,
         value: &'static str,
@@ -202,7 +200,7 @@ pub enum CompileDefect {
     /// A second guard on one integral: one reset cannot serve two thresholds, because a firing would erase what
     /// the other guard crossed.
     SecondGuardOnIntegral { integral: LawName },
-    /// A hazard integral not declared nonnegative, so it could not hold the reset or reach a threshold.
+    /// A hazard integral not declared nonnegative, the set that holds the reset and every threshold.
     HazardSet { integral: LawName },
 }
 

@@ -251,8 +251,7 @@ impl DeclaredResolution {
     }
 }
 
-/// The run domain's tag. It enters the seed's word, so equal words in two domains never alias, and ticket 07's
-/// `DomainSeed<D>` keeps this tag for the run domain, so no draw moves when that type lands.
+/// It enters the seed's word, so equal words in two domains never alias.
 const RUN_DOMAIN: &str = "run";
 
 #[derive(Clone, Copy)]

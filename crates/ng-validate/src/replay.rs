@@ -8,8 +8,6 @@ use ng_record::{
     AuthorizedInput, BranchId, CheckpointError, HistoryStore, RecordDigests, Running, Seal, Session, Step,
 };
 
-/// What a gate reads of a case: a compiled body, an end, its timeline inputs, and a session with those inputs
-/// known at admission or left to arrive. A new case is a new implementor, and no gate changes.
 pub trait ReplayCase {
     fn body(&self) -> &CompiledBody;
     fn end(&self) -> SimTime;
@@ -55,12 +53,12 @@ pub trait WallClock {
     fn source(&self) -> ClockSource;
 }
 
-/// What a case with chance is measured against. `reference` is typed so a caller cannot name another core.
+/// `reference` is typed so a caller cannot name another core.
 pub struct ChancePlan<'c> {
     pub second_policy: &'c dyn CoreFactory,
     pub reference: &'c dyn Fn() -> ReferenceIntegrator,
     /// How far from the reference a policy may fire one event: the landing tolerance plus what a quadrature of
-    /// the hazard rate gets wrong. A model default, reported with every result.
+    /// the hazard rate gets wrong. A model default.
     pub event_tolerance_ns: u64,
 }
 
@@ -162,11 +160,9 @@ impl GateEvidence {
     pub fn clock(&self) -> Option<ClockSource> {
         self.clock
     }
-    /// What the reference run fired.
     pub fn fired(&self) -> &[Fired] {
         &self.fired
     }
-    /// The distance a step-policy gate held its events to.
     pub fn tolerance_ns(&self) -> Option<u64> {
         self.tolerance_ns
     }
@@ -505,8 +501,6 @@ fn arrival(rows: &[Row], event: &BoundaryEvent) -> u64 {
     last.unwrap_or(0).max(1) as u64
 }
 
-/// A session with no input known at admission, past the last of `arrivals` it reaches: each input in stamp
-/// order comes through `enqueue` at its own revision, and the inputs past `arrivals` stay withheld.
 fn late_run<'m>(
     gate: ReplayGate,
     case: &'m dyn ReplayCase,
@@ -625,8 +619,7 @@ fn rewind_gate(case: &dyn ReplayCase, cores: &dyn CoreFactory) -> Result<GateEvi
     })
 }
 
-/// Solves every ticket twice and keeps the second, so every evaluation and every value a core derives from
-/// one runs once more. Its resolution is its inner core's, so the run identity holds and seals compare.
+/// Its resolution is its inner core's, so the run identity holds and seals compare.
 struct SolvesTwice<'c> {
     inner: Box<dyn CoupledSolver + 'c>,
 }
@@ -643,7 +636,6 @@ impl CoupledSolver for SolvesTwice<'_> {
     }
 }
 
-/// Compares seals at every row, so a draw or an ordinal that moved shows at the first step it moved.
 fn extra_evaluation_gate(
     case: &dyn ReplayCase,
     cores: &dyn CoreFactory,
@@ -708,8 +700,7 @@ fn same_events(
 }
 
 /// Two policies have two identities, so nothing here compares bits. Each is held to the reference integrator,
-/// because a core that biases every step alike agrees with itself. A case with no hazard guard has no event to
-/// compare, and its evidence says so by holding one run.
+/// because a core that biases every step alike agrees with itself.
 fn step_policy_gate(
     case: &dyn ReplayCase,
     cores: &dyn CoreFactory,

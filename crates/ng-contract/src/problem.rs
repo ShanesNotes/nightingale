@@ -223,9 +223,9 @@ impl StepTicket {
     /// a waiting input past the retry's end, and a retry's end must not.
     ///
     /// A landing's trial takes this rule too. Its retry is a new attempt at a shorter span, which lands in turn
-    /// or steps short of the crossing and loses nothing, since the integral keeps what it gained. Every accepted
-    /// step is then at least the floor or ends at a breakpoint: a retry at a bracket's verified bottom skipped
-    /// that, and crawled an honest core at 1 ns a step.
+    /// or steps short of the crossing and loses nothing, since the integral keeps what it gained. A retried
+    /// step is then at least the floor or ends at a breakpoint: a retry at a bracket's verified bottom
+    /// skipped that, and crawled an honest core at 1 ns a step.
     pub fn refuse(&self, reason: NumericalRefusal) -> TrialFailure {
         let mut retry_ns = self.span_ns / 2;
         while retry_ns >= self.length_ns() {
