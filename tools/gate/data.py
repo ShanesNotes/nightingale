@@ -12,7 +12,6 @@ reads is missing or malformed.
 from __future__ import annotations
 
 import ast
-import copy
 import dataclasses
 import decimal
 import json
@@ -68,9 +67,12 @@ VALUE_FORMS = (
 EVIDENCE_FORMS = {
     "source": ({"source", "locator", "reading", "tier", "certainty"}, {"upgrade"}),
     "derived": ({"derived", "identity"}, set()),
+    "interval": ({"derived_low", "derived_high", "identity"}, set()),
     "inferred": ({"inferred"}, set()),
     "calibrated": ({"calibrated"}, set()),
 }
+FUNCTIONS = {"log10", "exp", "sum"}
+BARE_NAME = re.compile(r"(?<![\w.])[A-Za-z_]\w*")
 
 Dimension = tuple[int, ...]
 DIMENSIONS = ("m", "kg", "s", "mol", "K", "A")
@@ -185,6 +187,8 @@ def parse_expression(text: str) -> tuple[ast.Expression, dict[str, str]]:
         names[f"n{len(names)}"] = m.group(0)
         return f"n{len(names) - 1}"
 
+    if unknown := set(BARE_NAME.findall(NAME.sub(" ", text))) - FUNCTIONS:
+        raise ValueError(f"{sorted(unknown)[0]} is neither a record nor a function")
     return ast.parse(NAME.sub(hold, text), mode="eval"), names
 
 
@@ -247,6 +251,11 @@ def last_digit_tolerance(x: float) -> float:
     return 0.5 * 10.0 ** (exponent if isinstance(exponent, int) else 0)
 
 
+def well_formed(row: dict) -> bool:
+    value = row.get("value")
+    return isinstance(value, dict) and set(value) in VALUE_FORMS and all(map(is_number, value.values()))
+
+
 def evidence_form(evidence: object) -> str | None:
     if isinstance(evidence, dict):
         for form, (required, optional) in EVIDENCE_FORMS.items():
@@ -263,6 +272,8 @@ class Store:
     inferences: list[dict]
     closures: list[dict]
     tickets: dict[str, list[str]]
+    stray: list[str] = dataclasses.field(default_factory=list)
+    not_canonical: list[str] = dataclasses.field(default_factory=list)
 
     @property
     def all_rows(self) -> list[dict]:
@@ -278,6 +289,8 @@ class Store:
 
     def quantity(self, name: str) -> Quantity:
         row = self.rows[name]
+        if not well_formed(row):
+            raise ValueError(f"{name} has no usable value")
         return si(central(row["value"]), row["unit"])
 
 
@@ -285,14 +298,20 @@ def refuse_constant(name: str) -> None:
     raise ValueError(f"{name} is not a number")
 
 
-def read_jsonl(path: pathlib.Path) -> list[dict]:
-    rows = []
+def canonical(item: dict) -> str:
+    return json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def read_jsonl(path: pathlib.Path) -> tuple[list[dict], list[str]]:
+    rows, not_canonical = [], []
     for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         try:
             rows.append(json.loads(line, parse_constant=refuse_constant))
         except ValueError as e:
             raise DataError(f"{path}:{i}: {e}") from e
-    return rows
+        if canonical(rows[-1]) != line:
+            not_canonical.append(f"{path.name}:{i}")
+    return rows, not_canonical
 
 
 def read_tickets(root: pathlib.Path) -> dict[str, list[str]]:
@@ -308,12 +327,15 @@ def read_tickets(root: pathlib.Path) -> dict[str, list[str]]:
 
 
 def load(root: pathlib.Path) -> Store:
-    tables = {}
+    tables, not_canonical = {}, []
     for name in FILES:
         path = root / DATA / f"{name}.jsonl"
         if not path.exists():
             raise DataError(f"{path} is missing")
-        tables[name] = read_jsonl(path)
+        tables[name], flagged = read_jsonl(path)
+        not_canonical += flagged
+    known = {f"{name}.jsonl" for name in FILES}
+    stray = sorted(str(p.relative_to(root)) for p in (root / DATA).rglob("*") if p.is_file() and p.name not in known)
     return Store(
         tables["works"],
         tables["packet-reference-man"],
@@ -321,6 +343,8 @@ def load(root: pathlib.Path) -> Store:
         tables["inferences"],
         tables["closure"],
         read_tickets(root),
+        stray,
+        not_canonical,
     )
 
 
@@ -329,7 +353,9 @@ def rests_on(row: dict) -> set[str]:
     try:
         if "derived" in e:
             return names_in(e["derived"])
-    except SyntaxError:
+        if "derived_low" in e:
+            return names_in(e["derived_low"]) | names_in(e["derived_high"])
+    except (SyntaxError, ValueError):
         return set()
     return set(e.get("calibrated", []))
 
@@ -358,391 +384,23 @@ def strings(item: object) -> Iterator[str]:
         yield item
 
 
-def numbers(item: object) -> Iterator[float]:
-    if isinstance(item, dict):
-        for v in item.values():
-            yield from numbers(v)
-    elif isinstance(item, (int, float)) and not isinstance(item, bool):
-        yield float(item)
+def is_number(x: object) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
 Rule = Callable[[Store], list[Violation]]
-Probe = Callable[[Store], None]
-RULES: list[tuple[str, Rule, tuple[Probe, ...]]] = []
+RULES: list[tuple[str, Rule]] = []
 
 
-def rule(code: str, *probes: Probe):
+def rule(code: str):
     def register(check: Rule) -> Rule:
-        RULES.append((code, check, probes))
+        RULES.append((code, check))
         return check
 
     return register
 
 
-def synthetic_store() -> Store:
-    def row(rid: str, kind: str, unit: str, value: dict, evidence: dict) -> dict:
-        return dict(id=rid, kind=kind, unit=unit, value=value, population="fixture", conditions="fixture",
-                    method="fixture", window="fixture", evidence=evidence)
-
-    def primary() -> dict:
-        return dict(source="fixture-paper", locator="Table 1", reading="full_text", tier="primary_measured",
-                    certainty="low")
-
-    def compiled() -> dict:
-        return dict(source="fixture-review", locator="Table 1", reading="full_text", tier="compiled",
-                    certainty="moderate", upgrade=False)
-
-    def book() -> dict:
-        return dict(source="fixture-book", locator="ch.1 p.1", reading="full_text", tier="textbook",
-                    certainty="moderate", upgrade=True)
-
-    def identity(expr: str) -> dict:
-        return dict(derived=expr, identity="fixture-paper")
-
-    packet = [
-        row("fx.area", "input", "m^2", {"point": 2.0}, primary()),
-        row("fx.base", "input", "L/min/m^2", {"point": 1.5}, book()),
-        row("fx.fitted", "parameter", "mL", {"point": 1.0}, dict(calibrated=["fx.rate"])),
-        row("fx.flow", "anchor", "L/min", {"point": 6.0}, identity("fx.index * fx.area")),
-        row("fx.guess", "parameter", "mL", {"point": 1.5}, dict(inferred="inf.fill")),
-        row("fx.half", "input", "L/min", {"point": 3.0}, identity("fx.flow * fx.share")),
-        row("fx.index", "input", "L/min/m^2", {"point": 3.0}, identity("fx.base * fx.twice")),
-        row("fx.kilojoules", "input", "kJ", {"point": 4.184}, primary()),
-        row("fx.kilocalories", "input", "kcal", {"point": 1.0}, primary()),
-        row("fx.kilopascals", "input", "kPa", {"point": 100.0}, primary()),
-        row("fx.none", "input", "/min", {"point": 0.0}, primary()),
-        row("fx.pressure_cmh2o", "input", "cmH2O", {"point": 1019.716}, primary()),
-        row("fx.pressure_mmhg", "input", "mmHg", {"point": 750.062}, primary()),
-        row("fx.rate", "anchor", "/min", {"mean": 60.0, "sd": 1.0}, primary()),
-        row("fx.share", "input", "%", {"point": 50}, compiled()),
-        row("fx.stroke", "input", "mL", {"low": 90.0, "high": 110.0, "coverage": 0.95}, primary()),
-        row("fx.temp", "input", "degC", {"point": 37.0}, primary()),
-        row("fx.temp_kelvin", "input", "K", {"point": 310.15}, primary()),
-        row("fx.temp_near", "input", "degC", {"point": 37.2}, primary()),
-        row("fx.tiny", "input", "mL", {"point": 2e-06}, identity("fx.stroke * 0.00000002")),
-        row("fx.twice", "constant", "1", {"point": 2.0}, primary()),
-    ]
-    ranges = [
-        row("fx.amount", "within_subject_variation", "mL", {"point": 1.0}, dict(inferred="inf.flows")),
-        row("fx.narrowed", "healthy_range", "L/min", {"low": 5.5, "high": 6.5, "coverage": 0.95}, dict(inferred="inf.adjust")),
-        row("fx.span", "healthy_range", "L/min", {"low": 5.0, "high": 7.0, "coverage": 0.95}, primary()),
-    ]
-    works = [
-        dict(id="fixture-book", kind="textbook", citation="Fixture.", isbn="0", edition="1"),
-        dict(id="fixture-paper", kind="primary", citation="Fixture.", doi="10.0/fixture"),
-        dict(id="fixture-review", kind="review", citation="Fixture.", doi="10.0/review"),
-    ]
-    inferences = [
-        dict(id="inf.adjust", target="fx.narrowed", form="adjust", model="fixture", population="fixture", low=5.5,
-             high=6.5, steps=["a step"], premises=["fx.span", "fx.rate"], search=["a search"]),
-        dict(id="inf.fill", target="fx.guess", form="fill", model="fixture", population="fixture", low=1, high=2,
-             steps=["a step"], premises=["fx.rate"], search=["a search"]),
-        dict(id="inf.flows", target="fx.amount", form="flows", model="fixture", population="fixture", low=0.5, high=1.5,
-             steps=["a step"], premises=["fx.rate"], search=["a search"], unmeasurable="no living-person method"),
-    ]
-    packet.sort(key=lambda r: r["id"])
-    closures = [
-        dict(id="XC-01", level="packet", claim="flow", lhs="fx.flow", rhs="fx.rate * fx.stroke", tol_rel=0.05),
-        dict(id="XC-02", level="source", claim="heat", lhs="fx.temp", rhs="fx.temp_near", tol_abs=0.5, tol_unit="degC"),
-        dict(id="XC-03", level="source", claim="mmHg", lhs="fx.pressure_mmhg", rhs="fx.kilopascals", tol_rel=1e-6),
-        dict(id="XC-04", level="source", claim="cmH2O", lhs="fx.pressure_cmh2o", rhs="fx.kilopascals", tol_rel=1e-6),
-        dict(id="XC-05", level="source", claim="kcal", lhs="fx.kilocalories", rhs="fx.kilojoules", tol_rel=1e-9),
-        dict(id="XC-06", level="source", claim="kelvin", lhs="fx.temp", rhs="fx.temp_kelvin", tol_abs=0.01, tol_unit="K"),
-    ]
-    return Store(works, packet, ranges, inferences, closures, {".scratch/fixture.md": ["fx.*", "fx.rate"]})
-
-
-def on(s: Store, rid: str) -> dict:
-    return s.rows[rid]
-
-
-def inference(s: Store, iid: str) -> dict:
-    return next(i for i in s.inferences if i["id"] == iid)
-
-
-def _extra_field(s: Store) -> None:
-    on(s, "fx.rate")["sentence"] = "a field the language does not have"
-
-
-def _empty_evidence(s: Store) -> None:
-    on(s, "fx.rate")["evidence"] = {}
-
-
-def _evidence_extra(s: Store) -> None:
-    on(s, "fx.rate")["evidence"]["source_text"] = "a passage"
-
-
-def _calibrated_to_input(s: Store) -> None:
-    on(s, "fx.fitted")["evidence"]["calibrated"] = ["fx.stroke"]
-
-
-def _value_form(s: Store) -> None:
-    on(s, "fx.rate")["value"] = {"mean": 60.0}
-
-
-def _kind(s: Store) -> None:
-    on(s, "fx.span")["kind"] = "anchor"
-
-
-def _work_extra(s: Store) -> None:
-    s.works[0]["abstract"] = "a passage"
-
-
-def _closure_extra(s: Store) -> None:
-    s.closures[0]["note"] = "a passage"
-
-
-def _id_first_digit(s: Store) -> None:
-    on(s, "fx.area")["id"] = "1.area"
-
-
-def _unsorted(s: Store) -> None:
-    s.packet.reverse()
-
-
-def _shared_id(s: Store) -> None:
-    s.ranges.append(dict(s.ranges[-1], id="fx.base"))
-    s.ranges.sort(key=lambda r: r["id"])
-
-
-def _long_text(s: Store) -> None:
-    on(s, "fx.rate")["method"] = "x" * 121
-
-
-def _em_dash(s: Store) -> None:
-    on(s, "fx.rate")["method"] = "cuff — arm"
-
-
-def _long_step(s: Store) -> None:
-    inference(s, "inf.fill")["steps"] = ["x" * 241]
-
-
-def _bad_unit(s: Store) -> None:
-    on(s, "fx.rate")["unit"] = "furlong"
-
-
-def _celsius_power(s: Store) -> None:
-    on(s, "fx.temp")["unit"] = "degC^1"
-
-
-def _no_work(s: Store) -> None:
-    on(s, "fx.rate")["evidence"]["source"] = "no-such-work"
-
-
-def _no_identity_work(s: Store) -> None:
-    on(s, "fx.flow")["evidence"]["identity"] = "no-such-work"
-
-
-def _work_without_id(s: Store) -> None:
-    del s.works[1]["doi"]
-
-
-def _capped_high(s: Store) -> None:
-    on(s, "fx.base")["evidence"]["certainty"] = "high"
-
-
-def _tier_relabel(s: Store) -> None:
-    e = on(s, "fx.base")["evidence"]
-    e["tier"] = "primary_measured"
-    del e["upgrade"]
-
-
-def _no_upgrade(s: Store) -> None:
-    del on(s, "fx.share")["evidence"]["upgrade"]
-
-
-def _bad_tier_word(s: Store) -> None:
-    on(s, "fx.rate")["evidence"]["tier"] = "gold"
-
-
-def _book_no_page(s: Store) -> None:
-    on(s, "fx.base")["evidence"]["locator"] = "somewhere"
-
-
-def _book_no_edition(s: Store) -> None:
-    del s.works[0]["edition"]
-
-
-def _compiled_no_table(s: Store) -> None:
-    on(s, "fx.share")["evidence"]["locator"] = "somewhere"
-
-
-def _infinite(s: Store) -> None:
-    on(s, "fx.rate")["value"]["mean"] = float("inf")
-
-
-def _negative_sd(s: Store) -> None:
-    on(s, "fx.rate")["value"]["sd"] = -1.0
-
-
-def _backward_ci(s: Store) -> None:
-    on(s, "fx.rate")["value"] = {"mean": 60.0, "ci_low": 100.0, "ci_high": 1.0}
-
-
-def _backward_range(s: Store) -> None:
-    on(s, "fx.span")["value"]["low"] = 8.0
-
-
-def _range_point(s: Store) -> None:
-    on(s, "fx.span")["value"] = {"point": 6.0}
-
-
-def _range_half(s: Store) -> None:
-    on(s, "fx.span")["value"]["coverage"] = 0.5
-
-
-def _wrong_derived(s: Store) -> None:
-    on(s, "fx.flow")["value"] = {"point": 9.0}
-
-
-def _wrong_percent(s: Store) -> None:
-    on(s, "fx.half")["value"] = {"point": 300.0}
-
-
-def _wrong_tiny(s: Store) -> None:
-    on(s, "fx.tiny")["value"] = {"point": 1e-06}
-
-
-def _derived_range(s: Store) -> None:
-    on(s, "fx.flow")["value"] = {"low": 5.0, "high": 7.0, "coverage": 0.95}
-
-
-def _reads_the_set(s: Store) -> None:
-    e = on(s, "fx.half")["evidence"]
-    e["derived"] = "fx.span * fx.share"
-    on(s, "fx.half")["value"] = {"point": 3.0}
-
-
-def _adds_unlike(s: Store) -> None:
-    on(s, "fx.flow")["evidence"]["derived"] = "fx.index * fx.area + fx.none"
-
-
-def _nonfinite_derived(s: Store) -> None:
-    on(s, "fx.flow")["evidence"]["derived"] = "(1e309 - 1e309) * fx.index * fx.area"
-
-
-def _missing_input(s: Store) -> None:
-    on(s, "fx.flow")["evidence"]["derived"] = "fx.index * fx.nothing"
-
-
-def _wrong_dimension(s: Store) -> None:
-    on(s, "fx.flow")["unit"] = "kg"
-
-
-def _cycle(s: Store) -> None:
-    on(s, "fx.flow")["evidence"]["derived"] = "fx.half / fx.share"
-    on(s, "fx.half")["evidence"]["derived"] = "fx.flow * fx.share"
-
-
-def _self_cycle(s: Store) -> None:
-    on(s, "fx.flow")["evidence"]["derived"] = "fx.flow"
-
-
-def _fitted_to_itself(s: Store) -> None:
-    on(s, "fx.fitted")["evidence"]["calibrated"] = ["fx.flow"]
-    on(s, "fx.flow")["evidence"]["derived"] = "fx.fitted / fx.fitted * fx.index * fx.area"
-
-
-def _inferred_near(s: Store) -> None:
-    on(s, "fx.area")["evidence"] = dict(inferred="inf.fill")
-    inference(s, "inf.fill")["target"] = "fx.area"
-
-
-def _inferred_far(s: Store) -> None:
-    on(s, "fx.base")["evidence"] = dict(inferred="inf.fill")
-    inference(s, "inf.fill")["target"] = "fx.base"
-
-
-def _inferred_calibrated(s: Store) -> None:
-    on(s, "fx.index")["evidence"] = dict(calibrated=["fx.rate"])
-    on(s, "fx.rate")["evidence"] = dict(inferred="inf.fill")
-    inference(s, "inf.fill")["target"] = "fx.rate"
-
-
-def _no_window(s: Store) -> None:
-    on(s, "fx.rate")["window"] = ""
-
-
-def _no_method(s: Store) -> None:
-    on(s, "fx.rate")["method"] = ""
-
-
-def _no_search(s: Store) -> None:
-    inference(s, "inf.fill")["search"] = []
-
-
-def _own_premise(s: Store) -> None:
-    inference(s, "inf.adjust")["premises"] = ["fx.narrowed", "fx.span"]
-
-
-def _inferred_premise(s: Store) -> None:
-    inference(s, "inf.adjust")["premises"] = ["fx.span", "fx.guess"]
-
-
-def _fill_on_range(s: Store) -> None:
-    inference(s, "inf.adjust")["form"] = "fill"
-
-
-def _flows_on_range(s: Store) -> None:
-    inference(s, "inf.adjust").update(form="flows", unmeasurable="no method")
-
-
-def _flows_no_reason(s: Store) -> None:
-    del inference(s, "inf.flows")["unmeasurable"]
-
-
-def _one_premise(s: Store) -> None:
-    inference(s, "inf.adjust")["premises"] = ["fx.span"]
-
-
-def _other_target(s: Store) -> None:
-    inference(s, "inf.fill")["target"] = "fx.area"
-
-
-def _no_such_inference(s: Store) -> None:
-    on(s, "fx.guess")["evidence"]["inferred"] = "inf.nothing"
-
-
-def _relative_gap(s: Store) -> None:
-    on(s, "fx.rate")["value"] = {"mean": 180.0, "sd": 1.0}
-
-
-def _absolute_gap(s: Store) -> None:
-    on(s, "fx.temp_near")["value"] = {"point": 39.0}
-
-
-def _no_tolerance(s: Store) -> None:
-    del s.closures[0]["tol_rel"]
-
-
-def _nonfinite_closure(s: Store) -> None:
-    s.closures[0]["lhs"] = "(1e309 - 1e309) * fx.flow"
-
-
-def _unlike_sides(s: Store) -> None:
-    s.closures[0]["rhs"] = "fx.rate"
-
-
-def _bad_level(s: Store) -> None:
-    s.closures[0]["level"] = "gut"
-
-
-def _unknown_name(s: Store) -> None:
-    s.tickets[".scratch/fixture.md"] = ["no.such.record"]
-
-
-def _unknown_prefix(s: Store) -> None:
-    s.tickets[".scratch/fixture.md"] = ["no.such.*"]
-
-
-def _malformed_name(s: Store) -> None:
-    s.tickets[".scratch/fixture.md"] = ["not an id"]
-
-
-@rule(
-    "data.schema", _extra_field, _empty_evidence, _evidence_extra, _calibrated_to_input, _value_form, _kind, _work_extra,
-    _closure_extra, _id_first_digit,
-)
+@rule("data.schema")
 def schema(s: Store) -> list[Violation]:
     code, out = "data.schema", []
     rows = s.rows
@@ -754,9 +412,13 @@ def schema(s: Store) -> list[Violation]:
             out.append(Violation(code, subject, f"add {' '.join(sorted(missing))}"))
         if extra := row.keys() - ROW_FIELDS - {"n"}:
             out.append(Violation(code, subject, f"drop {' '.join(sorted(extra))}: the language has no such field"))
-        value = row.get("value")
-        if not isinstance(value, dict) or set(value) not in VALUE_FORMS:
-            out.append(Violation(code, subject, f"value {value} is not one of the forms"))
+        if not well_formed(row):
+            out.append(Violation(code, subject, f"value {row.get('value')} is not one of the forms, in numbers"))
+        for field in ("population", "conditions", "method", "window"):
+            if not (isinstance(row.get(field), str) and row[field]):
+                out.append(Violation(code, subject, f"{field} is text, and stated"))
+        if "n" in row and not (isinstance(row["n"], int) and row["n"] > 0):
+            out.append(Violation(code, subject, "n is a positive count"))
         form = evidence_form(row.get("evidence"))
         if form is None:
             out.append(Violation(code, subject, "evidence is one closed form: source, derived, inferred or calibrated"))
@@ -781,11 +443,18 @@ def schema(s: Store) -> list[Violation]:
     return out
 
 
-@rule("data.order", _unsorted, _shared_id)
+@rule("data.order")
 def order(s: Store) -> list[Violation]:
     code, out = "data.order", []
-    for name, rows in (("packet-reference-man", s.packet), ("healthy-range-set", s.ranges)):
-        ids = [r.get("id", "") for r in rows]
+    tables = (
+        ("works", s.works),
+        ("packet-reference-man", s.packet),
+        ("healthy-range-set", s.ranges),
+        ("inferences", s.inferences),
+        ("closure", s.closures),
+    )
+    for name, rows in tables:
+        ids = [str(r.get("id", "")) for r in rows]
         if ids != sorted(set(ids)):
             out.append(Violation(code, name, "sort rows by id and keep ids unique, so a rebuild is byte equal"))
     shared = {r.get("id", "") for r in s.packet} & {r.get("id", "") for r in s.ranges}
@@ -793,7 +462,14 @@ def order(s: Store) -> list[Violation]:
     return out
 
 
-@rule("data.text", _long_text, _em_dash, _long_step)
+@rule("data.files")
+def files(s: Store) -> list[Violation]:
+    out = [Violation("data.files", path, "only the five named files hold data; anything else escapes every rule") for path in s.stray]
+    out += [Violation("data.files", line, "write each row in canonical form, so its digits say its precision") for line in s.not_canonical]
+    return out
+
+
+@rule("data.text")
 def text(s: Store) -> list[Violation]:
     code, out = "data.text", []
     items = [*s.all_rows, *s.works, *s.inferences, *s.closures]
@@ -813,7 +489,7 @@ def text(s: Store) -> list[Violation]:
     return out
 
 
-@rule("data.unit", _bad_unit, _celsius_power)
+@rule("data.unit")
 def unit(s: Store) -> list[Violation]:
     out = []
     for row in s.all_rows:
@@ -821,10 +497,12 @@ def unit(s: Store) -> list[Violation]:
             parse_unit(row.get("unit", ""))
         except ValueError as e:
             out.append(Violation("data.unit", str(row.get("id")), f"{e}; a new unit enters UNITS with its exact factor"))
+        if row.get("kind") == "within_subject_variation" and row.get("unit") == "degC":
+            out.append(Violation("data.unit", str(row.get("id")), "a variation is a difference: write K, which takes no offset"))
     return out
 
 
-@rule("data.work", _no_work, _no_identity_work, _work_without_id)
+@rule("data.work")
 def work(s: Store) -> list[Violation]:
     code, out = "data.work", []
     for w in s.works:
@@ -844,7 +522,7 @@ def work(s: Store) -> list[Violation]:
     return out
 
 
-@rule("data.tier", _capped_high, _tier_relabel, _no_upgrade, _bad_tier_word)
+@rule("data.tier")
 def tier(s: Store) -> list[Violation]:
     code, out = "data.tier", []
     works = s.work_ids
@@ -861,12 +539,12 @@ def tier(s: Store) -> list[Violation]:
         if capped != ("upgrade" in e):
             out.append(Violation(code, subject, "upgrade is on a compiled or textbook record and only there"))
         kind = works.get(e.get("source"), {}).get("kind")
-        if e["reading"] != "secondary_reproduction" and kind in WORK_TIERS and e["tier"] not in WORK_TIERS[kind]:
+        if kind in WORK_TIERS and e["tier"] not in WORK_TIERS[kind]:
             out.append(Violation(code, subject, f"a {kind} work cannot carry tier {e['tier']}"))
     return out
 
 
-@rule("data.locator", _book_no_page, _book_no_edition, _compiled_no_table)
+@rule("data.locator")
 def locator(s: Store) -> list[Violation]:
     code, out = "data.locator", []
     works = s.work_ids
@@ -884,15 +562,17 @@ def locator(s: Store) -> list[Violation]:
     return out
 
 
-@rule("data.number", _infinite, _negative_sd, _backward_ci, _backward_range, _range_point, _range_half)
+@rule("data.number")
 def number(s: Store) -> list[Violation]:
     code, out = "data.number", []
     for row in s.all_rows:
         v, subject = row.get("value", {}), str(row.get("id"))
-        if not all(math.isfinite(x) for x in numbers(v)):
+        if not well_formed(row):
+            continue
+        if not all(math.isfinite(x) for x in v.values()):
             out.append(Violation(code, subject, "every number is finite"))
             continue
-        if any(v.get(k, 0) < 0 for k in ("sd", "se")):
+        if any(v.get(k, 0) < 0 for k in ("sd", "se")) or (row.get("kind") == "within_subject_variation" and central(v) < 0):
             out.append(Violation(code, subject, "a spread is not negative"))
         if "ci_low" in v and not v["ci_low"] <= v["mean"] <= v["ci_high"]:
             out.append(Violation(code, subject, "an interval holds its centre"))
@@ -905,55 +585,59 @@ def number(s: Store) -> list[Violation]:
     return out
 
 
-@rule(
-    "data.derived", _wrong_derived, _wrong_percent, _wrong_tiny, _derived_range, _reads_the_set, _adds_unlike,
-    _nonfinite_derived, _missing_input,
-)
+@rule("data.derived")
 def derived(s: Store) -> list[Violation]:
     code, out = "data.derived", []
     in_packet = {r.get("id") for r in s.packet}
     packet_ids = {id(r) for r in s.packet}
+
+    def compare(row: dict, expression: str, stated: float) -> None:
+        subject = str(row.get("id"))
+        got = value_of(expression, s.quantity)
+        want = si(stated, row["unit"])
+        factor = float(parse_unit(row["unit"])[0])
+        if id(row) in packet_ids and (read := sorted(names_in(expression) - in_packet)):
+            out.append(Violation(code, subject, f"a packet value reads the set through {read[0]} (record 0005)"))
+        if got.dimension == want.dimension and abs(got.value - want.value) > last_digit_tolerance(stated) * factor * (1 + 1e-9):
+            out.append(Violation(code, subject, f"the identity gives {got.value / factor:.6g} {row['unit']}"))
+
     for row in s.all_rows:
-        e, subject = row.get("evidence", {}), str(row.get("id"))
-        if evidence_form(e) != "derived":
+        e, subject, value = row.get("evidence", {}), str(row.get("id")), row.get("value", {})
+        form = evidence_form(e)
+        if form not in ("derived", "interval") or not well_formed(row):
+            continue
+        if ("point" if form == "derived" else "low") not in value:
+            out.append(Violation(code, subject, "a derivation states a point, and an interval derivation its two ends"))
             continue
         try:
-            got = value_of(e["derived"], s.quantity)
-            want = si(central(row["value"]), row["unit"])
-            factor = float(parse_unit(row["unit"])[0])
-            names = names_in(e["derived"])
+            if form == "derived":
+                compare(row, e["derived"], value["point"])
+            else:
+                compare(row, e["derived_low"], value["low"])
+                compare(row, e["derived_high"], value["high"])
         except (KeyError, ValueError, SyntaxError) as err:
             out.append(Violation(code, subject, f"cannot evaluate: {err}"))
-            continue
-        if "point" not in row["value"]:
-            out.append(Violation(code, subject, "a derived value is a point"))
-            continue
-        if id(row) in packet_ids and (read := sorted(names - in_packet)):
-            out.append(Violation(code, subject, f"a packet value reads the set through {read[0]} (record 0005)"))
-        if got.dimension == want.dimension:
-            if abs(got.value - want.value) > last_digit_tolerance(central(row["value"])) * factor * (1 + 1e-9):
-                out.append(Violation(code, subject, f"the identity gives {got.value / factor:.6g} {row['unit']}"))
     return out
 
 
-@rule("data.dimension", _wrong_dimension)
+@rule("data.dimension")
 def dimension(s: Store) -> list[Violation]:
     code, out = "data.dimension", []
     for row in s.all_rows:
         e, subject = row.get("evidence", {}), str(row.get("id"))
-        if evidence_form(e) != "derived":
-            continue
-        try:
-            got = value_of(e["derived"], s.quantity)
-            want = si(central(row["value"]), row["unit"])
-        except (KeyError, ValueError, SyntaxError):
-            continue
-        if got.dimension != want.dimension:
-            out.append(Violation(code, subject, f"the identity has dimension {got.dimension}, the unit {want.dimension}"))
+        expressions = [e[k] for k in ("derived", "derived_low", "derived_high") if k in e]
+        for expression in expressions:
+            try:
+                got = value_of(expression, s.quantity)
+                want = parse_unit(row["unit"])[1]
+            except (KeyError, ValueError, SyntaxError):
+                continue
+            if got.dimension != want:
+                out.append(Violation(code, subject, f"the identity has dimension {got.dimension}, the unit {want}"))
     return out
 
 
-@rule("data.cycle", _cycle, _self_cycle, _fitted_to_itself)
+@rule("data.cycle")
 def cycle(s: Store) -> list[Violation]:
     rows = s.rows
     done: set[str] = set()
@@ -974,7 +658,7 @@ def cycle(s: Store) -> list[Violation]:
     return out
 
 
-@rule("data.anchor", _inferred_near, _inferred_far, _inferred_calibrated)
+@rule("data.anchor")
 def anchor(s: Store) -> list[Violation]:
     out = []
     for row in s.packet:
@@ -983,7 +667,7 @@ def anchor(s: Store) -> list[Violation]:
     return out
 
 
-@rule("data.snapshot", _no_window, _no_method)
+@rule("data.snapshot")
 def snapshot(s: Store) -> list[Violation]:
     out = []
     for row in s.packet:
@@ -992,19 +676,25 @@ def snapshot(s: Store) -> list[Violation]:
     return out
 
 
-@rule(
-    "data.inference", _no_search, _own_premise, _inferred_premise, _fill_on_range, _flows_on_range, _flows_no_reason,
-    _one_premise, _other_target, _no_such_inference,
-)
+@rule("data.inference")
 def inferred(s: Store) -> list[Violation]:
     code, out = "data.inference", []
     rows = s.rows
     by_id = {i.get("id"): i for i in s.inferences}
+    allowed = {
+        "parameter": {"fill"},
+        "day": {"fill"},
+        "healthy_range": {"adjust"},
+        "within_subject_variation": {"adjust", "flows"},
+    }
     for i in s.inferences:
         subject = str(i.get("id"))
         for field in INFERENCE_FIELDS:
             if field not in i or i[field] in ("", [], None):
                 out.append(Violation(code, subject, f"an inference record names its {field}"))
+        low, high = i.get("low"), i.get("high")
+        if not (is_number(low) and is_number(high) and math.isfinite(low) and math.isfinite(high) and low <= high):
+            out.append(Violation(code, subject, "low and high are finite and in order"))
         form = i.get("form")
         if form not in FORMS:
             out.append(Violation(code, subject, f"form {form} is not one of {sorted(FORMS)}"))
@@ -1014,28 +704,36 @@ def inferred(s: Store) -> list[Violation]:
                 out.append(Violation(code, subject, f"premise {p} is not a record"))
             elif inferred_under(s, rows[p]):
                 out.append(Violation(code, subject, f"premise {p} is not sourced"))
-        if form == "adjust" and len(premises) < 2:
-            out.append(Violation(code, subject, "an adjustment rests on a sourced value and a sourced shift"))
+        kind = rows.get(i.get("target"), {}).get("kind")
+        if form == "adjust" and not (
+            len(set(premises)) >= 2 and any(rows.get(p, {}).get("kind") == kind for p in premises)
+        ):
+            out.append(Violation(code, subject, "an adjustment rests on a sourced value of its kind and a separate sourced shift"))
         if form == "flows" and not i.get("unmeasurable"):
             out.append(Violation(code, subject, "state why no method can measure the amount"))
     for row in s.all_rows:
-        ref, subject = row.get("evidence", {}).get("inferred"), str(row.get("id"))
-        if ref is None:
-            continue
-        i = by_id.get(ref)
-        if i is None:
-            out.append(Violation(code, subject, f"{ref} is not in inferences.jsonl"))
-            continue
-        if i.get("target") != subject:
-            out.append(Violation(code, subject, f"{ref} targets {i.get('target')}"))
-        form, kind = i.get("form"), str(row.get("kind"))
-        allowed = {"parameter": {"fill"}, "day": {"fill"}, "healthy_range": {"adjust"}, "within_subject_variation": {"adjust", "flows"}}
-        if form not in allowed.get(kind, set()):
-            out.append(Violation(code, subject, f"a {kind} cannot rest on a {form} inference (rule 16)"))
+        e, subject, kind = row.get("evidence", {}), str(row.get("id")), str(row.get("kind"))
+        if "inferred" in e:
+            i = by_id.get(e["inferred"])
+            if i is None:
+                out.append(Violation(code, subject, f"{e['inferred']} is not in inferences.jsonl"))
+                continue
+            if i.get("target") != subject:
+                out.append(Violation(code, subject, f"{e['inferred']} targets {i.get('target')}"))
+            bounded = is_number(i.get("low")) and is_number(i.get("high")) and well_formed(row)
+            if bounded and not i["low"] <= central(row["value"]) <= i["high"]:
+                out.append(Violation(code, subject, f"the value leaves {e['inferred']}'s range (I16)"))
+            if i.get("form") not in allowed.get(kind, set()):
+                out.append(Violation(code, subject, f"a {kind} cannot rest on a {i.get('form')} inference (rule 16)"))
+    for row in s.ranges:
+        for ref in inferred_under(s, row):
+            form = by_id.get(ref, {}).get("form")
+            if "inferred" not in row.get("evidence", {}) and form not in allowed.get(str(row.get("kind")), set()):
+                out.append(Violation(code, str(row.get("id")), f"a derivation carries a {form} inference into the set (rule 16)"))
     return out
 
 
-@rule("data.closure", _relative_gap, _absolute_gap, _no_tolerance, _nonfinite_closure, _unlike_sides, _bad_level)
+@rule("data.closure")
 def closure(s: Store) -> list[Violation]:
     code, out = "data.closure", []
     for c in s.closures:
@@ -1043,8 +741,9 @@ def closure(s: Store) -> list[Violation]:
         if c.get("level") not in LEVELS:
             out.append(Violation(code, subject, f"level is one of {sorted(LEVELS)}"))
         rel, abs_ = "tol_rel" in c, "tol_abs" in c and "tol_unit" in c
-        if rel == abs_:
-            out.append(Violation(code, subject, "state exactly one tolerance: tol_rel, or tol_abs with tol_unit"))
+        tolerance = c.get("tol_rel" if rel else "tol_abs")
+        if rel == abs_ or not (is_number(tolerance) and math.isfinite(tolerance) and tolerance >= 0):
+            out.append(Violation(code, subject, "state exactly one finite tolerance: tol_rel, or tol_abs with tol_unit"))
             continue
         try:
             lhs = value_of(c["lhs"], s.quantity)
@@ -1060,7 +759,7 @@ def closure(s: Store) -> list[Violation]:
     return out
 
 
-@rule("data.ticket", _unknown_name, _unknown_prefix, _malformed_name)
+@rule("data.ticket")
 def ticket(s: Store) -> list[Violation]:
     code, out = "data.ticket", []
     rows = s.rows
@@ -1076,20 +775,227 @@ def ticket(s: Store) -> list[Violation]:
     return out
 
 
+def synthetic_store() -> Store:
+    def row(rid: str, kind: str, unit: str, value: dict, evidence: dict) -> dict:
+        return dict(id=rid, kind=kind, unit=unit, value=value, population="fixture", conditions="fixture",
+                    method="fixture", window="fixture", evidence=evidence)
+
+    def primary() -> dict:
+        return dict(source="fixture-paper", locator="Table 1", reading="full_text", tier="primary_measured", certainty="low")
+
+    def compiled() -> dict:
+        return dict(source="fixture-review", locator="Table 1", reading="full_text", tier="compiled", certainty="moderate",
+                    upgrade=False)
+
+    def book() -> dict:
+        return dict(source="fixture-book", locator="ch.1 p.1", reading="full_text", tier="textbook", certainty="moderate",
+                    upgrade=True)
+
+    def identity(expr: str) -> dict:
+        return dict(derived=expr, identity="fixture-paper")
+
+    packet = [
+        row("fx.area", "input", "m^2", {"point": 2.0}, primary()),
+        row("fx.base", "input", "L/min/m^2", {"point": 1.5}, book()),
+        row("fx.fitted", "parameter", "mL", {"point": 1.0}, dict(calibrated=["fx.rate"])),
+        row("fx.flow", "anchor", "L/min", {"point": 6.0}, identity("fx.index * fx.area")),
+        row("fx.guess", "parameter", "mL", {"point": 1.5}, dict(inferred="inf.fill")),
+        row("fx.half", "input", "L/min", {"point": 3.0}, identity("fx.flow * fx.share")),
+        row("fx.index", "input", "L/min/m^2", {"point": 3.0}, identity("fx.base * fx.twice")),
+        row("fx.kilocalories", "input", "kcal", {"point": 1.0}, primary()),
+        row("fx.kilojoules", "input", "kJ", {"point": 4.184}, primary()),
+        row("fx.kilopascals", "input", "kPa", {"point": 100.0}, primary()),
+        row("fx.leaf", "anchor", "L/min", {"point": 8.0}, identity("fx.base * fx.area + fx.base * fx.area + fx.leaf_more")),
+        row("fx.leaf_more", "input", "L/min", {"point": 2.0}, primary()),
+        row("fx.median", "input", "mL", {"median": 6.0, "low": 5.0, "high": 7.0, "coverage": 0.5}, primary()),
+        row("fx.none", "input", "/min", {"point": 0.0}, primary()),
+        row("fx.pressure_cmh2o", "input", "cmH2O", {"point": 1019.716}, primary()),
+        row("fx.pressure_mmhg", "input", "mmHg", {"point": 750.062}, primary()),
+        row("fx.rate", "anchor", "/min", {"mean": 60.0, "sd": 1.0}, primary()),
+        row("fx.share", "input", "%", {"point": 50}, compiled()),
+        row("fx.stroke", "input", "mL", {"low": 90.0, "high": 110.0, "coverage": 0.95}, primary()),
+        row("fx.temp", "input", "degC", {"point": 37.0}, primary()),
+        row("fx.temp_kelvin", "input", "K", {"point": 310.15}, primary()),
+        row("fx.temp_near", "input", "degC", {"point": 37.2}, primary()),
+        row("fx.tiny", "input", "mL", {"point": 2e-06}, identity("fx.stroke * 0.00000002")),
+        row("fx.twice", "constant", "1", {"point": 2.0}, primary()),
+    ]
+    ranges = [
+        row("fx.amount", "within_subject_variation", "mL", {"point": 1.0}, dict(inferred="inf.flows")),
+        row("fx.interval", "healthy_range", "/min", {"low": 58.04, "high": 61.96, "coverage": 0.95},
+            dict(derived_low="fx.rate - 1.96 * fx.none_sd", derived_high="fx.rate + 1.96 * fx.none_sd", identity="fixture-paper")),
+        row("fx.narrowed", "healthy_range", "L/min", {"low": 5.5, "high": 6.5, "coverage": 0.95}, dict(inferred="inf.adjust")),
+        row("fx.none_sd", "within_subject_variation", "/min", {"point": 1.0}, primary()),
+        row("fx.span", "healthy_range", "L/min", {"low": 5.0, "high": 7.0, "coverage": 0.95}, primary()),
+    ]
+    works = [
+        dict(id="fixture-book", kind="textbook", citation="Fixture.", isbn="0", edition="1"),
+        dict(id="fixture-paper", kind="primary", citation="Fixture.", doi="10.0/fixture"),
+        dict(id="fixture-review", kind="review", citation="Fixture.", doi="10.0/review"),
+    ]
+    inferences = [
+        dict(id="inf.adjust", target="fx.narrowed", form="adjust", model="fixture", population="fixture", low=5.5, high=6.5,
+             steps=["a step"], premises=["fx.rate", "fx.span"], search=["a search"]),
+        dict(id="inf.fill", target="fx.guess", form="fill", model="fixture", population="fixture", low=1, high=2,
+             steps=["a step"], premises=["fx.rate"], search=["a search"]),
+        dict(id="inf.flows", target="fx.amount", form="flows", model="fixture", population="fixture", low=0.5, high=1.5,
+             steps=["a step"], premises=["fx.rate"], search=["a search"], unmeasurable="no living-person method"),
+    ]
+    closures = [
+        dict(id="XC-01", level="packet", claim="flow", lhs="fx.flow", rhs="fx.rate * fx.stroke", tol_rel=0.05),
+        dict(id="XC-02", level="source", claim="heat", lhs="fx.temp", rhs="fx.temp_near", tol_abs=0.5, tol_unit="degC"),
+        dict(id="XC-03", level="source", claim="mmHg", lhs="fx.pressure_mmhg", rhs="fx.kilopascals", tol_rel=1e-6),
+        dict(id="XC-04", level="source", claim="cmH2O", lhs="fx.pressure_cmh2o", rhs="fx.kilopascals", tol_rel=1e-6),
+        dict(id="XC-05", level="source", claim="kcal", lhs="fx.kilocalories", rhs="fx.kilojoules", tol_rel=1e-9),
+        dict(id="XC-06", level="source", claim="kelvin", lhs="fx.temp", rhs="fx.temp_kelvin", tol_abs=0.01, tol_unit="K"),
+    ]
+    return Store(works, packet, ranges, inferences, closures, {".scratch/fixture.md": ["fx.*", "fx.rate"]})
+
+
+def on(s: Store, rid: str) -> dict:
+    return s.rows[rid]
+
+
+def work_of(s: Store, wid: str) -> dict:
+    return next(w for w in s.works if w["id"] == wid)
+
+
+def inf(s: Store, iid: str) -> dict:
+    return next(i for i in s.inferences if i["id"] == iid)
+
+
+def closure_of(s: Store, cid: str) -> dict:
+    return next(c for c in s.closures if c["id"] == cid)
+
+
+def evidence(s: Store, rid: str, **changes: object) -> None:
+    on(s, rid)["evidence"].update(changes)
+
+
+def infer(s: Store, rid: str) -> None:
+    on(s, rid)["evidence"] = dict(inferred="inf.fill")
+    inf(s, "inf.fill")["target"] = rid
+
+
+def cut(item: dict, key: str) -> None:
+    del item[key]
+
+
+PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
+    ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(sentence="a field the language lacks")),
+    ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(evidence={})),
+    ("data.schema", "fx.rate", lambda s: evidence(s, "fx.rate", source_text="a passage")),
+    ("data.schema", "fx.fitted", lambda s: evidence(s, "fx.fitted", calibrated=["fx.stroke"])),
+    ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 60.0})),
+    ("data.schema", "fx.area", lambda s: on(s, "fx.area").update(value={"point": True})),
+    ("data.schema", "fx.area", lambda s: on(s, "fx.area").update(value={"point": "two"})),
+    ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(population="")),
+    ("data.schema", "fx.area", lambda s: on(s, "fx.area").update(method=123)),
+    ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(n=0)),
+    ("data.schema", "fx.span", lambda s: on(s, "fx.span").update(kind="anchor")),
+    ("data.schema", "fixture-book", lambda s: work_of(s, "fixture-book").update(abstract="a passage")),
+    ("data.schema", "inf.fill", lambda s: inf(s, "inf.fill").update(prose="a passage")),
+    ("data.schema", "XC-01", lambda s: closure_of(s, "XC-01").update(note="a passage")),
+    ("data.schema", "1.area", lambda s: on(s, "fx.area").update(id="1.area")),
+    ("data.order", "packet-reference-man", lambda s: s.packet.reverse()),
+    ("data.order", "works", lambda s: s.works.append(dict(s.works[-1], doi="10.0/other"))),
+    ("data.order", "inferences", lambda s: s.inferences.append(dict(s.inferences[-1], model="another"))),
+    ("data.order", "fx.base", lambda s: s.ranges.insert(0, dict(s.ranges[0], id="fx.base"))),
+    ("data.files", "data/other.jsonl", lambda s: s.stray.append("data/other.jsonl")),
+    ("data.files", "closure.jsonl:1", lambda s: s.not_canonical.append("closure.jsonl:1")),
+    ("data.text", "fx.rate", lambda s: on(s, "fx.rate").update(method="x" * 121)),
+    ("data.text", "fx.rate", lambda s: on(s, "fx.rate").update(method="cuff \u2014 arm")),
+    ("data.text", "inf.fill", lambda s: inf(s, "inf.fill").update(steps=["x" * 241])),
+    ("data.unit", "fx.rate", lambda s: on(s, "fx.rate").update(unit="furlong")),
+    ("data.unit", "fx.temp", lambda s: on(s, "fx.temp").update(unit="degC^1")),
+    ("data.unit", "fx.none_sd", lambda s: on(s, "fx.none_sd").update(unit="degC")),
+    ("data.work", "fx.rate", lambda s: evidence(s, "fx.rate", source="no-such-work")),
+    ("data.work", "fx.flow", lambda s: evidence(s, "fx.flow", identity="no-such-work")),
+    ("data.work", "fixture-paper", lambda s: cut(work_of(s, "fixture-paper"), "doi")),
+    ("data.tier", "fx.base", lambda s: evidence(s, "fx.base", certainty="high")),
+    ("data.tier", "fx.base", lambda s: evidence(s, "fx.base", tier="primary_measured")),
+    ("data.tier", "fx.share", lambda s: cut(on(s, "fx.share")["evidence"], "upgrade")),
+    ("data.tier", "fx.rate", lambda s: evidence(s, "fx.rate", tier="gold")),
+    ("data.tier", "fx.base", lambda s: (
+        cut(on(s, "fx.base")["evidence"], "upgrade"),
+        evidence(s, "fx.base", reading="secondary_reproduction", tier="primary_measured", certainty="low"),
+    )),
+    ("data.locator", "fx.base", lambda s: evidence(s, "fx.base", locator="somewhere")),
+    ("data.locator", "fx.base", lambda s: cut(work_of(s, "fixture-book"), "edition")),
+    ("data.locator", "fx.share", lambda s: evidence(s, "fx.share", locator="somewhere")),
+    ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": float("inf"), "sd": 1.0})),
+    ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 60.0, "sd": -1.0})),
+    ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 60.0, "ci_low": 100.0, "ci_high": 1.0})),
+    ("data.number", "fx.span", lambda s: on(s, "fx.span")["value"].update(low=8.0)),
+    ("data.number", "fx.median", lambda s: on(s, "fx.median")["value"].update(median=9.0)),
+    ("data.number", "fx.span", lambda s: on(s, "fx.span").update(value={"point": 6.0})),
+    ("data.number", "fx.span", lambda s: on(s, "fx.span")["value"].update(coverage=0.5)),
+    ("data.number", "fx.none_sd", lambda s: on(s, "fx.none_sd").update(value={"point": -1.0})),
+    ("data.derived", "fx.leaf", lambda s: on(s, "fx.leaf").update(value={"point": 9.0})),
+    ("data.derived", "fx.half", lambda s: on(s, "fx.half").update(value={"point": 300.0})),
+    ("data.derived", "fx.tiny", lambda s: on(s, "fx.tiny").update(value={"point": 1e-06})),
+    ("data.derived", "fx.flow", lambda s: on(s, "fx.flow").update(value={"low": 5.0, "high": 7.0, "coverage": 0.95})),
+    ("data.derived", "fx.interval", lambda s: on(s, "fx.interval")["value"].update(high=70.0)),
+    ("data.derived", "fx.half", lambda s: evidence(s, "fx.half", derived="fx.span * fx.share")),
+    ("data.derived", "fx.flow", lambda s: evidence(s, "fx.flow", derived="fx.index * fx.area + fx.none")),
+    ("data.derived", "fx.flow", lambda s: evidence(s, "fx.flow", derived="(1e309 - 1e309) * fx.index * fx.area")),
+    ("data.derived", "fx.flow", lambda s: evidence(s, "fx.flow", derived="fx.index * fx.nothing")),
+    ("data.derived", "fx.flow", lambda s: evidence(s, "fx.flow", derived="fx.index * fx.area + n1 * n0 * 0")),
+    ("data.dimension", "fx.flow", lambda s: on(s, "fx.flow").update(unit="kg")),
+    ("data.cycle", "fx.flow", lambda s: (evidence(s, "fx.flow", derived="fx.half / fx.share"))),
+    ("data.cycle", "fx.flow", lambda s: evidence(s, "fx.flow", derived="fx.flow")),
+    ("data.cycle", "fx.fitted", lambda s: (
+        evidence(s, "fx.fitted", calibrated=["fx.flow"]),
+        evidence(s, "fx.flow", derived="fx.fitted / fx.fitted * fx.index * fx.area"),
+    )),
+    ("data.anchor", "fx.flow", lambda s: infer(s, "fx.area")),
+    ("data.anchor", "fx.flow", lambda s: infer(s, "fx.base")),
+    ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(window="")),
+    ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(method="")),
+    ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(search=[])),
+    ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(high=1e309)),
+    ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(low=3, high=2)),
+    ("data.inference", "fx.guess", lambda s: on(s, "fx.guess").update(value={"point": 2000.0})),
+    ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.narrowed", "fx.span"])),
+    ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.guess", "fx.span"])),
+    ("data.inference", "fx.narrowed", lambda s: inf(s, "inf.adjust").update(form="fill")),
+    ("data.inference", "fx.narrowed", lambda s: inf(s, "inf.adjust").update(form="flows", unmeasurable="no method")),
+    ("data.inference", "inf.flows", lambda s: cut(inf(s, "inf.flows"), "unmeasurable")),
+    ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.span"])),
+    ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.span", "fx.span"])),
+    ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.rate", "fx.area"])),
+    ("data.inference", "fx.guess", lambda s: inf(s, "inf.fill").update(target="fx.area")),
+    ("data.inference", "fx.guess", lambda s: evidence(s, "fx.guess", inferred="inf.nothing")),
+    ("data.inference", "fx.guess", lambda s: evidence(s, "fx.guess", inferred=None)),
+    ("data.inference", "fx.none_sd", lambda s: on(s, "fx.none_sd").update(evidence=dict(derived="fx.guess / fx.guess * fx.none_sd_base", identity="fixture-paper"), id="fx.none_sd")),
+    ("data.closure", "XC-01", lambda s: on(s, "fx.rate").update(value={"mean": 180.0, "sd": 1.0})),
+    ("data.closure", "XC-02", lambda s: on(s, "fx.temp_near").update(value={"point": 39.0})),
+    ("data.closure", "XC-01", lambda s: cut(closure_of(s, "XC-01"), "tol_rel")),
+    ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(tol_rel=float("inf"))),
+    ("data.closure", "XC-02", lambda s: closure_of(s, "XC-02").update(tol_abs=float("inf"))),
+    ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(lhs="(1e309 - 1e309) * fx.flow")),
+    ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(rhs="fx.rate")),
+    ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(level="gut")),
+    ("data.ticket", ".scratch/fixture.md", lambda s: s.tickets.update({".scratch/fixture.md": ["no.such.record"]})),
+    ("data.ticket", ".scratch/fixture.md", lambda s: s.tickets.update({".scratch/fixture.md": ["no.such.*"]})),
+    ("data.ticket", ".scratch/fixture.md", lambda s: s.tickets.update({".scratch/fixture.md": ["not an id"]})),
+)
+
+
 def run(s: Store) -> list[Violation]:
-    return [v for _, check, _ in RULES for v in check(s)]
+    return [v for _, check in RULES for v in check(s)]
 
 
 def probes() -> list[Violation]:
     if base := run(synthetic_store()):
         return [Violation("data.probe", "base", "a probe proves nothing on a base that already fails"), *base]
     out = []
-    for code, _, broken_by in RULES:
-        for probe in broken_by:
-            s = copy.deepcopy(synthetic_store())
-            probe(s)
-            if not any(v.code == code for v in run(s)):
-                out.append(Violation("data.probe", f"{code} {probe.__name__}", "the rule did not refuse this record"))
+    for i, (code, subject, breaks) in enumerate(PROBES):
+        s = synthetic_store()
+        breaks(s)
+        if not any(v.code == code and v.subject == subject for v in run(s)):
+            out.append(Violation("data.probe", f"{code} {i}", f"{subject} was not refused"))
+    out += [Violation("data.probe", code, "the rule has no probe") for code, _ in RULES if not any(p[0] == code for p in PROBES)]
     return out
 
 
@@ -1101,8 +1007,7 @@ def main(argv: list[str]) -> int:
         found = probes()
         for v in found:
             print(v)
-        total = sum(len(broken_by) for _, _, broken_by in RULES)
-        print(f"data: {len(RULES)} rules, {total} probes, {len(found)} did not bite")
+        print(f"data: {len(RULES)} rules, {len(PROBES)} probes, {len(found)} did not bite")
         return 1 if found else 0
     try:
         store = load(ROOT)
