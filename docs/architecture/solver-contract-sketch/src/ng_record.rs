@@ -20,12 +20,6 @@ impl Seal {
         todo!()
     }
 }
-/// Each law stream's event ordinal, kept once, in the accepted image (never in the solver's
-/// continuation): a stream's value is a pure function of seed, stream key and ordinal.
-struct StreamPositions {
-    _ordinals: Vec<(Digest, u64)>,
-}
-
 /// No Clone, no public constructor and no setter. One body state per branch.
 pub struct PatientRecord<'m> {
     _body: &'m CompiledBody,
@@ -37,7 +31,6 @@ pub struct PatientRecord<'m> {
     _state: Candidate,
     _continuation: MethodHistory,
     _dense: DenseSegment,
-    _streams: StreamPositions,
     _pending: PendingInputs,
     _history: History,
 }
@@ -113,12 +106,11 @@ pub struct NextImage {
     _revision: u64,
     _time: SimTime,
     _state: Candidate,
-    _fired: ModeChanges,
+    _fired: Vec<Fired>,
     _continuation: MethodHistory,
     _ledger: LedgerChunk,
     _pending: AppliedInputs,
     _dense: DenseSegment,
-    _streams: StreamPositions,
     _seal: Seal,
     _applied: Vec<InputId>,
     _excursions: Vec<ValidityExcursion>,
