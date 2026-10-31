@@ -27,7 +27,7 @@
 
 - **A name for "the agent".** The build order in [Chart the foundation map from SRS section 7](issues/02-roadmap.md#srs-section-7-word-for-word) lists "the agent" with the solver and the contracts as architecture. The SRS defines no such term, and what it names is not yet clear. Once a session finds out, "the agent" gets a glossary term or leaves the build order.
 - **Where the monitor goes.** [SRS section 6](../../docs/srs.md#6-fidelity-aims) keeps the monitor a requirement, and [record 0004](../../docs/adr/0004-first-milestone.md) keeps the monitor's readings in the lens that the milestone checks. So its readings lie on this route, while its display is out of scope. Which readings it carries, and where it is built, are open. [Parking lot](issues/08-parking-lot.md) parks only the monitor's display until after the milestone.
-- **The reference man's reviewed packet and a reviewed healthy-range set.** The destination needs both, along with the healthy-range check and the return check that read them. No ticket yet scopes the sourcing of either one or the build of those two checks. [Contract follow-ups](issues/07-contract.md) adds the day and the healthy-range set to the contract, and the lens decides which readings the set covers.
+- **The reference man's reviewed packet and a reviewed healthy-range set.** The destination needs both, along with the healthy-range check and the return check that read them. The [research wayfinder map](../research/map.md) scopes sourcing both, and no ticket yet scopes the build of those two checks. [Contract follow-ups](issues/07-contract.md) adds the day and the healthy-range set to the contract, and the lens decides which readings the set covers.
 
 ## Out of scope
 
