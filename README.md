@@ -1,6 +1,6 @@
 # Nightingale
 
-Nightingale is a Rust simulation of one patient's body, for teaching. It does not inform the care of a real person. Pressures, flows, lab values and other readings are meant to be computed from conserved amounts (water, salts, gases, heat) and from physics, so illness, chance and treatment would later act on the same body. Numbers in this repository are synthetic. Clinical values may enter only in a reviewed packet, and none is here.
+Nightingale is a Rust simulation of one patient's body, for teaching. It does not inform the care of a real person. Pressures, flows, lab values and other readings are meant to be computed from conserved amounts (water, salts, gases, heat) and from physics, so illness, chance and treatment would later act on the same body. Numbers in the crates are synthetic. Cited clinical records live in `data/`, and no crate reads them yet.
 
 <img src="docs/statecharts/engine.svg" alt="Engine lifecycle statechart: the map is checked, laws compile into a body, a packet binds, admission solves the start state, then each step is accepted whole or refused and retried, and an engine fault stops the run."><br>The chart shows the engine lifecycle the contract defines. The map check, the compiler, binding, a checked start and each step's accept, refuse, retry and fault run today on synthetic bodies. Solving a start state, recovery and death do not. Its TLA+ model, which TLC checks, and the script that redraws it are in [docs/statecharts](docs/statecharts).
 

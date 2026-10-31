@@ -18,3 +18,5 @@ Reading order matters more than row count, since one document answers many rows.
 ## Comments
 
 - The sinus node's `R0`, `m` and `n` are in `data/` from Katona 1982, read from its abstract in 10 nonathletes, and `XC-36` closes them against the heart rate anchor. The abstract names no posture, so this cohort's rest and the anchor's supine rest are only assumed to match.
+- `XC-36` multiplies cohort means from two studies, so it is a consistency check, not an identity in one man.
+- The receptor half of the sinus node law is still open: `S_b`, `S_m` and the `eps` and occupancy behind `E_b1` and `E_m2`. Until then only the product closes at rest. A dry run on main found that wiring this anchor needs them.
