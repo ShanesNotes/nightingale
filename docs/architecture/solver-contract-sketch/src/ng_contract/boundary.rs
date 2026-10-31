@@ -1,8 +1,6 @@
 //! The boundary port: ONE timestamped timeline of the day, partitioned by payload and ordered by
 //! (time, id). Pending events and active continuous deliveries are record state and checkpoint.
-use super::{
-    AdmissionError, CompiledBody, CoupledProblem, Digest, Measure, Refused, SimTime, StepTicket, TrialFailure, Water,
-};
+use super::{AdmissionError, CompiledBody, CoupledProblem, Digest, Measure, Refused, SimTime, StepTicket, TrialFailure, VerifiedStep, Water};
 
 pub struct BoundaryPort {
     _events: Vec<BoundaryEvent>,
