@@ -452,6 +452,7 @@ fn two_guards_racing_for_one_mode_fire_once_and_the_loser_keeps_its_draw() {
         }
         let second = row(&case, SECOND_INTEGRAL);
         let mut session = case.admit(&core).expect("admitted");
+        let mut lost = false;
         while session.record().accepted().time() < case.end() {
             let (next, receipt) = one_step(session);
             session = next;
@@ -459,10 +460,17 @@ fn two_guards_racing_for_one_mode_fire_once_and_the_loser_keeps_its_draw() {
             let Some(event) = receipt.fired().first() else {
                 continue;
             };
-            if event.stream().local == ONSET && draw.at_most(session.record().accepted().value(second)) {
+            if lost && event.stream().local == SECOND_STREAM {
+                let fired = (event.ordinal(), event.threshold().bits());
+                assert_eq!(fired, (0, draw.bits()), "the loser kept its draw");
                 raced += 1;
+                break;
             }
-            break;
+            let kept = session.record().accepted().value(second);
+            lost = lost || (event.stream().local == ONSET && draw.at_most(kept));
+            if !lost {
+                break;
+            }
         }
     }
     assert!(
