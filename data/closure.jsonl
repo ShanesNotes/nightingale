@@ -1,3 +1,5 @@
 {"claim":"CO = HR x SV","id":"XC-01","level":"packet","lhs":"cv.co.supine_rest","rhs":"cv.hr.supine_rest * cv.sv.supine_rest","tol_rel":0.05}
 {"claim":"Henderson-Hasselbalch against measured bicarbonate","id":"XC-04","level":"packet","lhs":"bc.constant.alpha_co2.plasma_37c * rs.paco2.arterial.supine_rest * 10 ** (bc.ph.arterial.supine_rest - bc.constant.pk1.37c)","rhs":"bc.hco3.arterial.measured","tol_abs":0.5,"tol_unit":"mmol/L"}
+{"claim":"Anion gap from the picks sits inside the textbook band","id":"XC-05.packet","level":"packet","lhs":"bc.na.plasma.supine_rest - bc.cl.plasma.supine_rest - bc.hco3.arterial.measured","rhs":"bc.anion_gap.range","tol_abs":4,"tol_unit":"mmol/L"}
+{"claim":"Anion gap from NHANES medians sits inside the textbook band","id":"XC-05.source","level":"source","lhs":"obs.range.na.fasting - obs.range.cl.fasting - obs.range.total_co2.fasting","rhs":"bc.anion_gap.range","tol_abs":4,"tol_unit":"mmol/L"}
 {"claim":"PVR = (mPAP - PCWP) / CO","id":"XC-06","level":"packet","lhs":"(cv.mpap.supine_rest - cv.pcwp.supine_rest) / cv.co.supine_rest","rhs":"cv.pvr.supine_rest","tol_rel":0.1}
