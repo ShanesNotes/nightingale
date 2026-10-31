@@ -9,17 +9,10 @@ pub(crate) const HELD_FACTOR: f64 = 1.0;
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 
-/// The kind enters a key, so a stream and a forcing never share one word sequence.
-#[derive(Clone, Copy)]
-pub(crate) enum ChanceKind {
-    Stream,
-    Forcing,
-}
-
-/// A stable word from owner and name alone, so adding a declaration moves no other key.
-pub(crate) fn key_word(kind: ChanceKind, name: LawName) -> u64 {
+/// A stable word from owner and name alone, so adding a declaration moves no other key. `check_names` keeps a
+/// stream and a forcing of one owner apart, so a name is one key.
+pub(crate) fn key_word(name: LawName) -> u64 {
     let mut out = Canonical::new("ng-contract chance key 1");
-    out.number(kind as u64);
     name.seal(&mut out);
     first_word(out.digest())
 }
@@ -182,4 +175,88 @@ impl Chance {
 /// Finer than the clock is the clock's own nanosecond, and a positive period below it must not divide by zero.
 fn period_ns(seconds: f64) -> u64 {
     ((seconds * NANOSECONDS_PER_SECOND).round() as u64).max(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{knot, open_unit, seed_word, spline, word};
+    use crate::SimTime;
+
+    const KEYED: u64 = 0x0123_4567_89AB_CDEF;
+    const SECOND: u64 = 1_000_000_000;
+
+    // Each from exact rational arithmetic in Python, never from the code under test.
+    const WORDS: [(u64, u64, u64); 5] = [
+        (0, 0xE32D_D5E6_7F3C_0F09, 0x3FEC_65BA_BCCF_E781),
+        (1, 0x09F9_FAF5_939B_AE68, 0x3FA3_F3F5_EB27_3750),
+        (2, 0x4FFD_4892_7355_E500, 0x3FD3_FF52_249C_D57A),
+        (1_000, 0xF10E_C48F_E4CF_37C2, 0x3FEE_21D8_91FC_99E7),
+        (u64::MAX, 0xCCDD_C115_EE93_DCD1, 0x3FE9_9BB8_22BD_D27B),
+    ];
+    const SPLINE: [(u64, u64); 5] = [
+        (0, 0xBFE1_89DF_9207_F54F),
+        (250_000_000, 0xBFE4_29BF_0F53_113B),
+        (999_999_999, 0xBFE1_3B65_1C6C_AE81),
+        (1_000_000_000, 0xBFE1_3B65_1C64_E2BA),
+        (7_300_000_000, 0xBFD4_D559_314E_AC24),
+    ];
+
+    #[test]
+    fn a_word_and_its_draw_match_an_outside_implementation() {
+        for (index, expected, draw) in WORDS {
+            assert_eq!(word(KEYED, index), expected);
+            assert_eq!(open_unit(expected).to_bits(), draw);
+        }
+    }
+
+    #[test]
+    fn a_draw_stays_strictly_inside_the_unit_interval_at_both_ends_of_a_word() {
+        assert_eq!(open_unit(0).to_bits(), 0x3CA0_0000_0000_0000);
+        assert_eq!(open_unit(u64::MAX).to_bits(), 0x3FEF_FFFF_FFFF_FFFF);
+    }
+
+    #[test]
+    fn a_spline_value_matches_exact_arithmetic_to_its_rounding() {
+        for (at, expected) in SPLINE {
+            let value = spline(KEYED, SECOND, SimTime::from_ns(at));
+            let apart = value.to_bits().abs_diff(expected);
+            assert!(apart <= 8, "at {at}: {apart} units in the last place");
+        }
+    }
+
+    #[test]
+    fn a_spline_is_continuous_across_a_knot() {
+        let (before, after) = (
+            spline(KEYED, SECOND, SimTime::from_ns(SECOND - 1)),
+            spline(KEYED, SECOND, SimTime::from_ns(SECOND)),
+        );
+        assert!((before - after).abs() < 1e-8, "{before} and {after}");
+    }
+
+    #[test]
+    fn knots_are_uniform_on_the_open_interval_with_mean_zero() {
+        const COUNT: u32 = 200_000;
+        let (mut sum, mut square) = (0.0, 0.0);
+        for index in 0..COUNT {
+            let value = knot(KEYED, u64::from(index));
+            assert!(-1.0 < value && value < 1.0);
+            sum += value;
+            square += value * value;
+        }
+        let count = f64::from(COUNT);
+        let spread = (1.0 / 3.0 / count).sqrt();
+        assert!((sum / count).abs() < 4.0 * spread, "mean {}", sum / count);
+        assert!(
+            (square / count - 1.0 / 3.0).abs() < 0.005,
+            "variance {}",
+            square / count
+        );
+    }
+
+    #[test]
+    fn equal_words_in_two_domains_never_alias() {
+        let words = [1, 2, 3, 4];
+        assert_ne!(seed_word("run", words), seed_word("observation", words));
+        assert_ne!(seed_word("run", words), seed_word("run", [1, 2, 3, 5]));
+    }
 }

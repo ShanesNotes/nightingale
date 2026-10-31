@@ -3,7 +3,7 @@ use crate::body::{
     HazardLayout, Instance, Layout, ModeLayout, ParameterId, ParameterSlot, Program, ProgramId, Receipt, Row,
     RowId, RowKind, Sparsity, StreamLayout, Target, UnknownId,
 };
-use crate::chance::{ChanceKind, key_word};
+use crate::chance::key_word;
 use crate::conservation::conserved_basis;
 use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
@@ -592,7 +592,7 @@ impl ChanceNames {
         let streams = (self.streams.iter())
             .map(|&name| StreamLayout {
                 name,
-                key: key_word(ChanceKind::Stream, name),
+                key: key_word(name),
             })
             .collect();
         let forcings = (fragments.iter())
@@ -613,7 +613,7 @@ impl ChanceNames {
                 };
                 ForcingLayout {
                     name,
-                    key: key_word(ChanceKind::Forcing, name),
+                    key: key_word(name),
                     period: slot(forcing.period),
                     amplitude: slot(forcing.amplitude),
                 }

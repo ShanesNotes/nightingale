@@ -105,6 +105,18 @@ fn a_streams_ordinals_climb_by_one_per_event_from_zero() {
 }
 
 #[test]
+fn each_stream_and_each_ordinal_has_its_own_draw() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let fired = events(&case, &reference(SECOND));
+    let mut draws: Vec<[u64; 2]> = fired.iter().map(|event| event.threshold().bits()).collect();
+    let count = draws.len();
+    assert!(count >= 4);
+    draws.sort_unstable();
+    draws.dedup();
+    assert_eq!(draws.len(), count);
+}
+
+#[test]
 fn a_rate_holds_where_its_law_says_so_an_integral_keeps_what_a_rate_that_does_not_hold_there_would_add() {
     let case = ChanceCase::ectopy().expect("a body");
     let core = reference(SECOND);
