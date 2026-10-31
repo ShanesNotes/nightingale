@@ -41,7 +41,7 @@ WORK_FIELDS = {"id", "kind", "citation", "doi", "pmid", "pmcid", "isbn", "editio
 INFERENCE_FIELDS = {"id", "target", "form", "model", "population", "low", "high", "steps", "premises", "search"}
 CLOSURE_FIELDS = {"id", "level", "claim", "lhs", "rhs"}
 PACKET_KINDS = {"anchor", "parameter", "day", "constant", "input"}
-SET_KINDS = {"healthy_range", "within_subject_variation", "shift"}
+SET_KINDS = {"healthy_range", "within_subject_variation", "shift", "spread"}
 BASES = {"percentiles", "mean_1_96_sd", "reference_interval"}
 ABSENT = {"none", "n/a", "na", "not applicable", "not stated", "unknown"}
 TIERS = {"primary_measured", "primary_fitted", "compiled", "textbook"}
@@ -368,7 +368,7 @@ def load(root: pathlib.Path) -> Store:
     )
 
 
-def rests_on(row: dict) -> set[str]:
+def reads(row: dict) -> set[str]:
     e = row.get("evidence", {})
     try:
         if "derived" in e:
@@ -376,8 +376,14 @@ def rests_on(row: dict) -> set[str]:
         if "derived_low" in e:
             return names_in(e["derived_low"]) | names_in(e["derived_high"])
     except (SyntaxError, ValueError):
-        return set()
-    return set(e.get("calibrated", []))
+        pass
+    return set()
+
+
+def rests_on(row: dict) -> set[str]:
+    fitted = row.get("evidence", {}).get("calibrated")
+    named = {row["range"]} if is_text(row.get("range")) else set()
+    return reads(row) | named | (set(fitted) if is_text_list(fitted) else set())
 
 
 def inferred_under(s: Store, row: dict) -> set[str]:
@@ -605,7 +611,7 @@ def number(s: Store) -> list[Violation]:
         v, subject = row.get("value", {}), str(row.get("id"))
         if not well_formed(row):
             continue
-        variation = row.get("kind") == "within_subject_variation"
+        variation = row.get("kind") in ("within_subject_variation", "spread")
         lowest = min(central(v), v.get("low", 0), v.get("ci_low", 0))
         if any(v.get(k, 0) < 0 for k in ("sd", "se")) or (variation and lowest < 0):
             out.append(Violation(code, subject, "a spread is not negative"))
@@ -617,14 +623,19 @@ def number(s: Store) -> list[Violation]:
             out.append(Violation(code, subject, "coverage is a fraction"))
         if row.get("kind") == "healthy_range" and v.get("coverage") != 0.95:
             out.append(Violation(code, subject, "a healthy range is a central 95% (record 0004)"))
+        if row.get("basis") == "mean_1_96_sd" and evidence_form(row.get("evidence")) != "interval":
+            out.append(Violation(code, subject, "mean plus or minus 1.96 SD is written as a derived interval (record 0004)"))
         if (row.get("kind") == "healthy_range") != (row.get("basis") in BASES) or (row.get("kind") != "healthy_range" and "basis" in row):
             out.append(Violation(code, subject, f"a healthy range, and only one, states its basis, one of {sorted(BASES)}"))
     return out
 
 
-def is_flow(row: dict) -> bool:
+def is_flow_of(row: dict, amount: dict) -> bool:
+    """A flow's dimension is its amount's per unit time, so a urine volume is no flow of a catecholamine."""
     try:
-        return parse_unit(row.get("unit", ""))[1][DIMENSIONS.index("s")] == -1
+        per_time = list(parse_unit(amount.get("unit", ""))[1])
+        per_time[DIMENSIONS.index("s")] -= 1
+        return parse_unit(row.get("unit", ""))[1] == tuple(per_time)
     except ValueError:
         return False
 
@@ -637,26 +648,26 @@ def has_spread(row: dict) -> bool:
 @rule("data.population")
 def population(s: Store) -> list[Violation]:
     code, out = "data.population", []
-    rows = s.rows
+    in_packet = {r.get("id", ""): r for r in s.packet}
     for row in s.packet:
         subject = str(row.get("id"))
-        if not well_formed(row) or row.get("kind") == "constant" or evidence_form(row.get("evidence")) != "source":
+        if not well_formed(row):
             continue
-        if "range" not in row:
-            if not has_spread(row):
-                out.append(Violation(code, subject, "state a spread with its n, or name a sourced range record (rule 11)"))
-            continue
-        held = rows.get(row["range"], {})
-        if not (well_formed(held) and "coverage" in held["value"] and held.get("unit") == row.get("unit")):
-            out.append(Violation(code, subject, f"range {row['range']} is not an interval in the same unit"))
-        elif not held["value"]["low"] <= central(row["value"]) <= held["value"]["high"]:
-            out.append(Violation(code, subject, f"the value leaves {row['range']} (I16)"))
+        if "range" in row:
+            held = in_packet.get(row["range"], {}) if is_text(row["range"]) else {}
+            if not (well_formed(held) and "coverage" in held["value"] and held.get("unit") == row.get("unit")):
+                out.append(Violation(code, subject, f"range {row['range']} is not a packet interval in the same unit"))
+            elif not held["value"]["low"] <= central(row["value"]) <= held["value"]["high"]:
+                out.append(Violation(code, subject, f"the value leaves {row['range']} (I16)"))
+        elif row.get("kind") != "constant" and evidence_form(row.get("evidence")) == "source" and not has_spread(row):
+            out.append(Violation(code, subject, "state a spread with its n, or name a sourced range record (rule 11)"))
     return out
 
 
 @rule("data.derived")
 def derived(s: Store) -> list[Violation]:
     code, out = "data.derived", []
+    rows = s.rows
     in_packet = {r.get("id") for r in s.packet}
     packet_ids = {id(r) for r in s.packet}
 
@@ -678,9 +689,14 @@ def derived(s: Store) -> list[Violation]:
         if set(value) != ({"point"} if form == "derived" else {"low", "high", "coverage"}):
             out.append(Violation(code, subject, "a derivation states a point, and an interval derivation its two ends"))
             continue
-        if not rests_on(row):
+        if not reads(row):
             out.append(Violation(code, subject, "a derivation rests on records; a literal alone cites nothing"))
             continue
+        kinds = {rows.get(n, {}).get("kind") for n in reads(row)}
+        if row.get("kind") == "healthy_range" and "within_subject_variation" in kinds:
+            out.append(Violation(code, subject, "a healthy range is not built from within-subject variation (record 0004)"))
+        if row.get("basis") == "mean_1_96_sd" and "spread" not in kinds:
+            out.append(Violation(code, subject, "mean plus or minus 1.96 SD reads a population spread record"))
         try:
             if form == "derived":
                 compare(row, e["derived"], value["point"])
@@ -787,7 +803,7 @@ def inferred(s: Store) -> list[Violation]:
         kinds = [rows.get(p, {}).get("kind") for p in set(premises)]
         if form == "adjust" and not (kind in kinds and "shift" in kinds):
             out.append(Violation(code, subject, "an adjustment rests on a sourced value of its kind and a sourced shift"))
-        if form == "flows" and not all(is_flow(rows.get(p, {})) for p in premises):
+        if form == "flows" and not all(is_flow_of(rows.get(p, {}), rows.get(i.get("target"), {})) for p in premises):
             out.append(Violation(code, subject, "a flows inference reasons from sourced rates, in and out of the amount"))
         if (form == "flows") != is_text(i.get("unmeasurable")) or (form != "flows" and "unmeasurable" in i):
             out.append(Violation(code, subject, "a flows inference, and only one, states why no method can measure the amount"))
@@ -887,6 +903,7 @@ def synthetic_store() -> Store:
         dict(row("fx.base", "input", "L/min/m^2", {"mean": 1.5, "se": 0.1}, book()), n=9),
         row("fx.fitted", "parameter", "mL", {"point": 1.0}, dict(calibrated=["fx.rate"])),
         row("fx.flow", "anchor", "L/min", {"point": 6.0}, identity("fx.index * fx.area")),
+        row("fx.flow_band", "input", "L/min", {"low": 1.0, "high": 2.0, "coverage": 0.95}, primary()),
         row("fx.guess", "parameter", "mL", {"point": 1.5}, dict(inferred="inf.fill")),
         row("fx.half", "input", "L/min", {"point": 3.0}, identity("fx.flow * fx.share")),
         row("fx.index", "input", "L/min/m^2", {"point": 3.0}, identity("fx.base * fx.twice")),
@@ -910,14 +927,16 @@ def synthetic_store() -> Store:
     ]
     ranges = [
         row("fx.amount", "within_subject_variation", "mL", {"point": 1.0}, dict(inferred="inf.flows")),
+        dict(row("fx.area_band", "healthy_range", "m^2", {"low": 1.5, "high": 2.5, "coverage": 0.95}, primary()), basis="percentiles"),
         row("fx.dip", "shift", "L/min", {"mean": -0.5, "sd": 0.1}, primary()),
         row("fx.flux", "shift", "mL/d", {"mean": 10.0, "sd": 1.0}, primary()),
         dict(row("fx.interval", "healthy_range", "/min", {"low": 58.04, "high": 61.96, "coverage": 0.95},
-                 dict(derived_low="fx.rate - 1.96 * fx.none_sd", derived_high="fx.rate + 1.96 * fx.none_sd", identity="fixture-paper")),
+                 dict(derived_low="fx.rate - 1.96 * fx.rate_sd", derived_high="fx.rate + 1.96 * fx.rate_sd", identity="fixture-paper")),
              basis="mean_1_96_sd"),
         dict(row("fx.narrowed", "healthy_range", "L/min", {"low": 5.5, "high": 6.5, "coverage": 0.95}, dict(inferred="inf.adjust")),
              basis="reference_interval"),
         row("fx.none_sd", "within_subject_variation", "/min", {"point": 1.0}, primary()),
+        row("fx.rate_sd", "spread", "/min", {"point": 1.0}, primary()),
         dict(row("fx.span", "healthy_range", "L/min", {"low": 5.0, "high": 7.0, "coverage": 0.95}, primary()), basis="percentiles"),
     ]
     works = [
@@ -1048,6 +1067,7 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.number", "fx.span", lambda s: on(s, "fx.span")["value"].update(coverage=0.5)),
     ("data.number", "fx.span", lambda s: cut(on(s, "fx.span"), "basis")),
     ("data.number", "fx.span", lambda s: on(s, "fx.span").update(basis="confidence_interval")),
+    ("data.number", "fx.span", lambda s: on(s, "fx.span").update(basis="mean_1_96_sd")),
     ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(basis="percentiles")),
     ("data.number", "fx.none_sd", lambda s: on(s, "fx.none_sd").update(value={"point": -1.0})),
     ("data.population", "fx.leaf_more", lambda s: on(s, "fx.leaf_more").update(value={"point": 2.0})),
@@ -1056,12 +1076,20 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.population", "fx.area", lambda s: on(s, "fx.area").update(range="fx.rate")),
     ("data.population", "fx.area", lambda s: on(s, "fx.area").update(value={"point": 3.0})),
     ("data.population", "fx.area", lambda s: on(s, "fx.area_range").update(unit="cm^2")),
+    ("data.population", "fx.area", lambda s: on(s, "fx.area").update(range="fx.area_band")),
+    ("data.population", "fx.flow", lambda s: on(s, "fx.flow").update(range="fx.flow_band")),
+    ("data.population", "fx.fitted", lambda s: on(s, "fx.fitted").update(range="fx.area_range", unit="m^2")),
     ("data.derived", "fx.leaf", lambda s: on(s, "fx.leaf").update(value={"point": 9.0})),
     ("data.derived", "fx.half", lambda s: on(s, "fx.half").update(value={"point": 300.0})),
     ("data.derived", "fx.tiny", lambda s: on(s, "fx.tiny").update(value={"point": 1e-06})),
     ("data.derived", "fx.flow", lambda s: on(s, "fx.flow").update(value={"low": 5.0, "high": 7.0, "coverage": 0.95})),
     ("data.derived", "fx.interval", lambda s: on(s, "fx.interval")["value"].update(high=70.0)),
     ("data.derived", "fx.interval", lambda s: on(s, "fx.interval")["value"].update(median=60.0)),
+    ("data.derived", "fx.interval", lambda s: (
+        on(s, "fx.interval").update(basis="reference_interval"),
+        evidence(s, "fx.interval", derived_low="fx.rate - 1.96 * fx.none_sd", derived_high="fx.rate + 1.96 * fx.none_sd"),
+    )),
+    ("data.derived", "fx.interval", lambda s: on(s, "fx.rate_sd").update(kind="shift")),
     ("data.derived", "fx.half", lambda s: evidence(s, "fx.half", derived="fx.flow * fx.share + fx.flow * (9007199254740993 - 9007199254740992)")),
     ("data.derived", "fx.half", lambda s: evidence(s, "fx.half", derived="fx.flow * fx.share + fx.flow * (9007199254740993.0 - 9007199254740992.0)")),
     ("data.derived", "fx.flow", lambda s: evidence(s, "fx.flow", derived="6.0 # fx.index")),
@@ -1082,6 +1110,10 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     )),
     ("data.anchor", "fx.flow", lambda s: infer(s, "fx.area")),
     ("data.anchor", "fx.flow", lambda s: infer(s, "fx.base")),
+    ("data.anchor", "fx.flow", lambda s: (
+        on(s, "fx.area_range").update(kind="parameter", evidence=dict(inferred="inf.fill")),
+        inf(s, "inf.fill").update(target="fx.area_range", high=3),
+    )),
     ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(window="")),
     ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(method="")),
     ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(method=" ")),
@@ -1099,6 +1131,7 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.rate", "fx.span"])),
     ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.dip", "fx.flux"])),
     ("data.inference", "inf.flows", lambda s: inf(s, "inf.flows").update(premises=["fx.area"])),
+    ("data.inference", "inf.flows", lambda s: inf(s, "inf.flows").update(premises=["fx.rate"])),
     ("data.inference", "fx.narrowed", lambda s: on(s, "fx.narrowed").update(value={"low": 1.0, "high": 11.0, "coverage": 0.95})),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(high=1e309)),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(low=3, high=2)),
