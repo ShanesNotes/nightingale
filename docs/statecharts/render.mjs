@@ -4,7 +4,6 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const [chartPath, reportPath, outPath] = process.argv.slice(2);
 const PHOSPHOR = '#9CF2B8';
 const AMBER = '#FFB547';
-const MUTED = '#8FA3B0';
 const SCREEN = '#0F1A24';
 const DEEP = '#05090c';
 const FONT = "'DejaVu Sans Mono', 'Menlo', 'Consolas', 'Liberation Mono', monospace";
@@ -20,7 +19,7 @@ chart = chart.replace(/  state "Legend" as legend \{[\s\S]*?\n  \}\n/, '').repla
 
 const targets = [...chart.matchAll(/^\s*(\S+) --> (\S+?)(?::|$)/gm)].map((m) => m[2]);
 const classOf = Object.fromEntries([...chart.matchAll(/^\s*class (s\d+) (\w+)$/gm)].map((m) => [m[1], m[2]]));
-const tone = (cls) => (cls === 'orange' ? AMBER : cls === 'tan' ? MUTED : PHOSPHOR);
+const tone = (cls) => (cls === 'orange' ? AMBER : PHOSPHOR);
 
 const measurer = { width: (text, size) => [...text].length * size * 0.62 };
 const { svg, width, height } = render(chart, {
@@ -34,9 +33,8 @@ body = body.replace(/<g class="pele-node pele-state (\w+)"([^>]*)>([\s\S]*?)<\/g
   const color = tone(cls);
   const rect = inner.match(/<rect x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"/);
   const [x, y, w, h] = rect.slice(1).map(Number);
-  const dash = cls === 'blue' ? ' stroke-dasharray="8 5"' : cls === 'tan' ? ' stroke-dasharray="2 5" stroke-linecap="round"' : '';
   const fillOpacity = cls === 'teal' ? 0.1 : 0.05;
-  let shape = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="${color}" fill-opacity="${fillOpacity}" stroke="${color}" stroke-width="2"${dash}/>`;
+  let shape = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="${color}" fill-opacity="${fillOpacity}" stroke="${color}" stroke-width="2"/>`;
   if (cls === 'orange') shape += `<rect x="${x + 4}" y="${y + 4}" width="${w - 8}" height="${h - 8}" rx="3" fill="none" stroke="${color}" stroke-width="1.2" stroke-opacity="0.8"/>`;
   const text = inner.replace(/<rect[^>]*\/>/, '').replace(/>([^<]+)</g, (_, t) => `>${t.toUpperCase()}<`)
     .replace('<text ', `<text fill="${color}" letter-spacing="1" `);
@@ -76,16 +74,14 @@ const sy = bezel;
 
 const legendY = sy + header + chartH + inset * 0.6;
 const swatch = (x, y, kind) => {
-  const s = { solid: [PHOSPHOR, ''], dashed: [PHOSPHOR, ' stroke-dasharray="8 5"'], dotted: [MUTED, ' stroke-dasharray="2 5" stroke-linecap="round"'], double: [AMBER, ''] }[kind];
+  const s = { solid: [PHOSPHOR, ''], double: [AMBER, ''] }[kind];
   let r = `<rect x="${x}" y="${y}" width="44" height="22" rx="4" fill="${s[0]}" fill-opacity="0.08" stroke="${s[0]}" stroke-width="2"${s[1]}/>`;
   if (kind === 'double') r += `<rect x="${x + 4}" y="${y + 4}" width="36" height="14" rx="2" fill="none" stroke="${AMBER}" stroke-width="1.2"/>`;
   return r;
 };
 const legendItems = [
-  ['solid', PHOSPHOR, 'RUNS TODAY IN NG-CONTRACT'],
-  ['dashed', PHOSPHOR, 'TYPED IN THE CONTRACT SKETCH, BODIES TODO'],
+  ['solid', PHOSPHOR, 'RUNS TODAY ON SYNTHETIC BODIES'],
   ['double', AMBER, 'NOT ADMITTED, REFUSED OR FAULTED'],
-  ['dotted', MUTED, 'PLANNED, NOT IN THE SKETCH'],
 ];
 const colW = screenW / 2 - inset;
 const legendSvg = legendItems.map(([kind, color, label], i) => {
