@@ -34,8 +34,8 @@ impl Bracket {
     }
     /// The secant's root, half a tolerance toward the end that has not moved, so two trials close a straight
     /// gap. Inside two tolerances the middle closes on either outcome. Past that, a trial stays a tolerance
-    /// from each end, so it closes the bracket or moves an end by a tolerance, and no ticket is shorter than
-    /// the tolerance for a root near the head.
+    /// from each end, so it closes the bracket or moves an end by a tolerance. No ticket is shorter than half
+    /// the tolerance, and one shorter than the tolerance publishes only at its firing.
     pub(crate) fn aim(&self) -> u64 {
         let Self {
             bottom_ns,
@@ -110,7 +110,7 @@ mod tests {
     }
 
     #[test]
-    fn a_root_near_the_head_takes_no_ticket_shorter_than_the_tolerance() {
+    fn a_wide_bracket_lands_a_root_near_the_head_at_the_tolerance() {
         let span = 8_000_000_000_u64;
         let tolerance = 1_000_000;
         let near = |length: u64| length as f64 / 200_000.0 - 1.0;
@@ -120,6 +120,30 @@ mod tests {
             near(length)
         });
         assert_eq!(shortest, tolerance);
+    }
+
+    #[test]
+    fn no_ticket_is_shorter_than_half_the_tolerance() {
+        let mut under = 0;
+        for tolerance in 1..=16_u64 {
+            for span in 1..=64_u64 {
+                for root in 1..=span {
+                    let straight = |length: u64| length as f64 - root as f64;
+                    let curved = |length: u64| length as f64 * length as f64 - (root * root) as f64;
+                    for gap in [&straight as &dyn Fn(u64) -> f64, &curved] {
+                        trials(gap(0), span, gap(span), tolerance, |length| {
+                            assert!(2 * length >= tolerance, "{length} under {tolerance}");
+                            under += u32::from(length < tolerance);
+                            gap(length)
+                        });
+                    }
+                }
+            }
+        }
+        assert!(
+            under > 0,
+            "no ticket went under the tolerance, so this pressed nothing"
+        );
     }
 
     #[test]
