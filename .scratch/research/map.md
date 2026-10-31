@@ -15,6 +15,7 @@ The reference man's reviewed packet and a reviewed healthy-range set exist as ch
 ## Decisions so far
 
 - [Public data and the check over it](issues/01-data-layout-and-check.md): `data/` holds records as sorted JSON lines with closed fields and capped text, and `30-data` runs 18 rules and their must-fail probes over them. No crate reads `data/` yet.
+- [Law forms the slice needs](issues/02-law-forms.md): the valve law is quadratic with inertance, resistance is linear in the alpha-1 effect, the effector's lag belongs to the junction pool, and viscosity takes Pries's in vivo law in discharge hematocrit. Three forms stand on open restatements until their primaries are read.
 
 ## Not yet specified
 
