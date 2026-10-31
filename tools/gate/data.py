@@ -270,6 +270,11 @@ def last_digit_tolerance(x: float) -> float:
     return 0.5 * 10.0 ** (exponent if isinstance(exponent, int) else 0)
 
 
+def stated_values(row: dict) -> list[float]:
+    ends = [row["value"][k] for k in ("low", "high", "ci_low", "ci_high") if k in row["value"]]
+    return [central(row["value"]), *ends]
+
+
 def well_formed(row: dict) -> bool:
     value = row.get("value")
     return isinstance(value, dict) and set(value) in VALUE_FORMS and all(map(is_number, value.values()))
@@ -386,17 +391,20 @@ def rests_on(row: dict) -> set[str]:
     return reads(row) | named | (set(fitted) if is_text_list(fitted) else set())
 
 
-def inferred_under(s: Store, row: dict) -> set[str]:
-    rows, seen, found, todo = s.rows, set(), set(), [row]
+def under(s: Store, row: dict) -> list[dict]:
+    rows, seen, found, todo = s.rows, set(), [], [row]
     while todo:
         r = todo.pop()
-        if "inferred" in r.get("evidence", {}):
-            found.add(r["evidence"]["inferred"])
+        found.append(r)
         for name in rests_on(r) - seen:
             seen.add(name)
             if name in rows:
                 todo.append(rows[name])
     return found
+
+
+def inferred_under(s: Store, row: dict) -> set[str]:
+    return {r["evidence"]["inferred"] for r in under(s, row) if "inferred" in r.get("evidence", {})}
 
 
 def strings(item: object) -> Iterator[str]:
@@ -657,10 +665,14 @@ def population(s: Store) -> list[Violation]:
             held = in_packet.get(row["range"], {}) if is_text(row["range"]) else {}
             if not (well_formed(held) and "coverage" in held["value"] and held.get("unit") == row.get("unit")):
                 out.append(Violation(code, subject, f"range {row['range']} is not a packet interval in the same unit"))
-            elif not held["value"]["low"] <= central(row["value"]) <= held["value"]["high"]:
+            elif not all(held["value"]["low"] <= x <= held["value"]["high"] for x in stated_values(row)):
                 out.append(Violation(code, subject, f"the value leaves {row['range']} (I16)"))
         elif row.get("kind") != "constant" and evidence_form(row.get("evidence")) == "source" and not has_spread(row):
             out.append(Violation(code, subject, "state a spread with its n, or name a sourced range record (rule 11)"))
+        elif evidence_form(row.get("evidence")) == "derived" and not any(
+            r.get("kind") != "constant" and has_spread(r) for r in under(s, row)
+        ):
+            out.append(Violation(code, subject, "no record under this derivation carries a population range (I16)"))
     return out
 
 
@@ -692,11 +704,13 @@ def derived(s: Store) -> list[Violation]:
         if not reads(row):
             out.append(Violation(code, subject, "a derivation rests on records; a literal alone cites nothing"))
             continue
-        kinds = {rows.get(n, {}).get("kind") for n in reads(row)}
-        if row.get("kind") == "healthy_range" and "within_subject_variation" in kinds:
+        if row.get("kind") == "healthy_range" and any(r.get("kind") == "within_subject_variation" for r in under(s, row)):
             out.append(Violation(code, subject, "a healthy range is not built from within-subject variation (record 0004)"))
-        if row.get("basis") == "mean_1_96_sd" and "spread" not in kinds:
-            out.append(Violation(code, subject, "mean plus or minus 1.96 SD reads a population spread record"))
+        spreads = [r for r in map(rows.get, reads(row)) if r and r.get("kind") == "spread" and well_formed(r)]
+        if row.get("basis") == "mean_1_96_sd" and not (
+            len(spreads) == 1 and math.isclose(value["high"] - value["low"], 2 * 1.96 * central(spreads[0]["value"]), rel_tol=0.001)
+        ):
+            out.append(Violation(code, subject, "mean plus or minus 1.96 SD spans 3.92 of one population spread record"))
         try:
             if form == "derived":
                 compare(row, e["derived"], value["point"])
@@ -758,10 +772,10 @@ def anchor(s: Store) -> list[Violation]:
 @rule("data.snapshot")
 def snapshot(s: Store) -> list[Violation]:
     out = []
-    for row in s.packet:
+    for row in s.all_rows:
         stated = [row.get("method"), row.get("window")]
-        if row.get("kind") == "anchor" and not all(is_text(x) and x.strip().lower() not in ABSENT for x in stated):
-            out.append(Violation("data.snapshot", str(row.get("id")), "an anchor states its method and window (rule 17)"))
+        if row.get("kind") in ("anchor", "healthy_range") and not all(is_text(x) and x.strip().lower() not in ABSENT for x in stated):
+            out.append(Violation("data.snapshot", str(row.get("id")), "an anchor or healthy range states its method and window (rule 17, record 0004)"))
     return out
 
 
@@ -817,8 +831,7 @@ def inferred(s: Store) -> list[Violation]:
             if i.get("target") != subject:
                 out.append(Violation(code, subject, f"{e['inferred']} targets {i.get('target')}"))
             bounded = is_number(i.get("low")) and is_number(i.get("high")) and well_formed(row)
-            ends = [row["value"][k] for k in ("low", "high", "ci_low", "ci_high") if k in row.get("value", {})]
-            if bounded and not all(i["low"] <= x <= i["high"] for x in (central(row["value"]), *ends)):
+            if bounded and not all(i["low"] <= x <= i["high"] for x in stated_values(row)):
                 out.append(Violation(code, subject, f"the value leaves {e['inferred']}'s range (I16)"))
             if i.get("form") not in allowed.get(kind, set()):
                 out.append(Violation(code, subject, f"a {kind} cannot rest on a {i.get('form')} inference (rule 16)"))
@@ -1079,6 +1092,11 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.population", "fx.area", lambda s: on(s, "fx.area").update(range="fx.area_band")),
     ("data.population", "fx.flow", lambda s: on(s, "fx.flow").update(range="fx.flow_band")),
     ("data.population", "fx.fitted", lambda s: on(s, "fx.fitted").update(range="fx.area_range", unit="m^2")),
+    ("data.population", "fx.area", lambda s: on(s, "fx.area").update(value={"low": 1.0, "high": 3.0, "coverage": 0.95})),
+    ("data.population", "fx.reference", lambda s: (
+        s.packet.append(dict(on(s, "fx.temp"), id="fx.reference", kind="anchor", evidence=dict(derived="fx.temp_kelvin", identity="fixture-paper"), unit="K", value={"point": 310.15})),
+        s.packet.sort(key=lambda r: r["id"]),
+    )),
     ("data.derived", "fx.leaf", lambda s: on(s, "fx.leaf").update(value={"point": 9.0})),
     ("data.derived", "fx.half", lambda s: on(s, "fx.half").update(value={"point": 300.0})),
     ("data.derived", "fx.tiny", lambda s: on(s, "fx.tiny").update(value={"point": 1e-06})),
@@ -1090,6 +1108,14 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
         evidence(s, "fx.interval", derived_low="fx.rate - 1.96 * fx.none_sd", derived_high="fx.rate + 1.96 * fx.none_sd"),
     )),
     ("data.derived", "fx.interval", lambda s: on(s, "fx.rate_sd").update(kind="shift")),
+    ("data.derived", "fx.interval", lambda s: (
+        on(s, "fx.interval").update(value={"low": 58.355, "high": 61.645, "coverage": 0.95}),
+        evidence(s, "fx.interval", derived_low="fx.rate - 1.645 * fx.rate_sd", derived_high="fx.rate + 1.645 * fx.rate_sd"),
+    )),
+    ("data.derived", "fx.interval", lambda s: (
+        on(s, "fx.rate_sd").update(evidence=dict(derived="fx.none_sd", identity="fixture-paper")),
+        on(s, "fx.none_sd").update(value={"point": 1.0}),
+    )),
     ("data.derived", "fx.half", lambda s: evidence(s, "fx.half", derived="fx.flow * fx.share + fx.flow * (9007199254740993 - 9007199254740992)")),
     ("data.derived", "fx.half", lambda s: evidence(s, "fx.half", derived="fx.flow * fx.share + fx.flow * (9007199254740993.0 - 9007199254740992.0)")),
     ("data.derived", "fx.flow", lambda s: evidence(s, "fx.flow", derived="6.0 # fx.index")),
@@ -1119,6 +1145,7 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(method=" ")),
     ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(window="Not applicable")),
     ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(method="N/A")),
+    ("data.snapshot", "fx.span", lambda s: on(s, "fx.span").update(window="Not stated")),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(search=[])),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(search=False)),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(search=[""])),
