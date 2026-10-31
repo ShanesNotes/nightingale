@@ -41,7 +41,9 @@ WORK_FIELDS = {"id", "kind", "citation", "doi", "pmid", "pmcid", "isbn", "editio
 INFERENCE_FIELDS = {"id", "target", "form", "model", "population", "low", "high", "steps", "premises", "search"}
 CLOSURE_FIELDS = {"id", "level", "claim", "lhs", "rhs"}
 PACKET_KINDS = {"anchor", "parameter", "day", "constant", "input"}
-SET_KINDS = {"healthy_range", "within_subject_variation"}
+SET_KINDS = {"healthy_range", "within_subject_variation", "shift"}
+BASES = {"percentiles", "mean_1_96_sd", "reference_interval"}
+ABSENT = {"none", "n/a", "na", "not applicable", "not stated", "unknown"}
 TIERS = {"primary_measured", "primary_fitted", "compiled", "textbook"}
 CERTAINTY = {"high", "moderate", "low", "very_low"}
 READINGS = {"full_text", "abstract", "secondary_reproduction"}
@@ -439,7 +441,7 @@ def schema(s: Store) -> list[Violation]:
             out.append(Violation(code, subject, "an id is lowercase, dotted, at least two segments, and starts with a letter"))
         if missing := ROW_FIELDS - row.keys():
             out.append(Violation(code, subject, f"add {' '.join(sorted(missing))}"))
-        if extra := row.keys() - ROW_FIELDS - {"n"}:
+        if extra := row.keys() - ROW_FIELDS - {"n", "range", "basis"}:
             out.append(Violation(code, subject, f"drop {' '.join(sorted(extra))}: the language has no such field"))
         if not well_formed(row):
             out.append(Violation(code, subject, f"value {row.get('value')} is not one of the forms, in numbers"))
@@ -615,6 +617,40 @@ def number(s: Store) -> list[Violation]:
             out.append(Violation(code, subject, "coverage is a fraction"))
         if row.get("kind") == "healthy_range" and v.get("coverage") != 0.95:
             out.append(Violation(code, subject, "a healthy range is a central 95% (record 0004)"))
+        if (row.get("kind") == "healthy_range") != (row.get("basis") in BASES) or (row.get("kind") != "healthy_range" and "basis" in row):
+            out.append(Violation(code, subject, f"a healthy range, and only one, states its basis, one of {sorted(BASES)}"))
+    return out
+
+
+def is_flow(row: dict) -> bool:
+    try:
+        return parse_unit(row.get("unit", ""))[1][DIMENSIONS.index("s")] == -1
+    except ValueError:
+        return False
+
+
+def has_spread(row: dict) -> bool:
+    v = row.get("value", {})
+    return "sd" in v or "coverage" in v or (("se" in v or "ci_low" in v) and "n" in row)
+
+
+@rule("data.population")
+def population(s: Store) -> list[Violation]:
+    code, out = "data.population", []
+    rows = s.rows
+    for row in s.packet:
+        subject = str(row.get("id"))
+        if not well_formed(row) or row.get("kind") == "constant" or evidence_form(row.get("evidence")) != "source":
+            continue
+        if "range" not in row:
+            if not has_spread(row):
+                out.append(Violation(code, subject, "state a spread with its n, or name a sourced range record (rule 11)"))
+            continue
+        held = rows.get(row["range"], {})
+        if not (well_formed(held) and "coverage" in held["value"] and held.get("unit") == row.get("unit")):
+            out.append(Violation(code, subject, f"range {row['range']} is not an interval in the same unit"))
+        elif not held["value"]["low"] <= central(row["value"]) <= held["value"]["high"]:
+            out.append(Violation(code, subject, f"the value leaves {row['range']} (I16)"))
     return out
 
 
@@ -707,7 +743,8 @@ def anchor(s: Store) -> list[Violation]:
 def snapshot(s: Store) -> list[Violation]:
     out = []
     for row in s.packet:
-        if row.get("kind") == "anchor" and not (is_text(row.get("method")) and is_text(row.get("window"))):
+        stated = [row.get("method"), row.get("window")]
+        if row.get("kind") == "anchor" and not all(is_text(x) and x.strip().lower() not in ABSENT for x in stated):
             out.append(Violation("data.snapshot", str(row.get("id")), "an anchor states its method and window (rule 17)"))
     return out
 
@@ -747,10 +784,11 @@ def inferred(s: Store) -> list[Violation]:
             elif i.get("target") in in_packet and p not in in_packet:
                 out.append(Violation(code, subject, f"a packet value reads the set through {p} (record 0005)"))
         kind = rows.get(i.get("target"), {}).get("kind")
-        if form == "adjust" and not (
-            len(set(premises)) >= 2 and any(rows.get(p, {}).get("kind") == kind for p in premises)
-        ):
-            out.append(Violation(code, subject, "an adjustment rests on a sourced value of its kind and a separate sourced shift"))
+        kinds = [rows.get(p, {}).get("kind") for p in set(premises)]
+        if form == "adjust" and not (kind in kinds and "shift" in kinds):
+            out.append(Violation(code, subject, "an adjustment rests on a sourced value of its kind and a sourced shift"))
+        if form == "flows" and not all(is_flow(rows.get(p, {})) for p in premises):
+            out.append(Violation(code, subject, "a flows inference reasons from sourced rates, in and out of the amount"))
         if (form == "flows") != is_text(i.get("unmeasurable")) or (form != "flows" and "unmeasurable" in i):
             out.append(Violation(code, subject, "a flows inference, and only one, states why no method can measure the amount"))
     for row in s.all_rows:
@@ -844,38 +882,43 @@ def synthetic_store() -> Store:
         return dict(derived=expr, identity="fixture-paper")
 
     packet = [
-        row("fx.area", "input", "m^2", {"point": 2.0}, primary()),
-        row("fx.base", "input", "L/min/m^2", {"point": 1.5}, book()),
+        dict(row("fx.area", "input", "m^2", {"point": 2.0}, primary()), range="fx.area_range"),
+        row("fx.area_range", "input", "m^2", {"low": 1.5, "high": 2.5, "coverage": 0.95}, primary()),
+        dict(row("fx.base", "input", "L/min/m^2", {"mean": 1.5, "se": 0.1}, book()), n=9),
         row("fx.fitted", "parameter", "mL", {"point": 1.0}, dict(calibrated=["fx.rate"])),
         row("fx.flow", "anchor", "L/min", {"point": 6.0}, identity("fx.index * fx.area")),
         row("fx.guess", "parameter", "mL", {"point": 1.5}, dict(inferred="inf.fill")),
         row("fx.half", "input", "L/min", {"point": 3.0}, identity("fx.flow * fx.share")),
         row("fx.index", "input", "L/min/m^2", {"point": 3.0}, identity("fx.base * fx.twice")),
-        row("fx.kilocalories", "input", "kcal", {"point": 1.0}, primary()),
-        row("fx.kilojoules", "input", "kJ", {"point": 4.184}, primary()),
-        row("fx.kilopascals", "input", "kPa", {"point": 100.0}, primary()),
+        row("fx.kilocalories", "constant", "kcal", {"point": 1.0}, primary()),
+        row("fx.kilojoules", "constant", "kJ", {"point": 4.184}, primary()),
+        row("fx.kilopascals", "constant", "kPa", {"point": 100.0}, primary()),
         row("fx.leaf", "anchor", "L/min", {"point": 8.0}, identity("fx.base * fx.area + fx.base * fx.area + fx.leaf_more")),
-        row("fx.leaf_more", "input", "L/min", {"point": 2.0}, primary()),
+        row("fx.leaf_more", "input", "L/min", {"mean": 2.0, "sd": 0.1}, primary()),
         row("fx.median", "input", "mL", {"median": 6.0, "low": 5.0, "high": 7.0, "coverage": 0.5}, primary()),
-        row("fx.none", "input", "/min", {"point": 0.0}, primary()),
-        row("fx.pressure_cmh2o", "input", "cmH2O", {"point": 1019.716}, primary()),
-        row("fx.pressure_mmhg", "input", "mmHg", {"point": 750.062}, primary()),
+        row("fx.none", "constant", "/min", {"point": 0.0}, primary()),
+        row("fx.pressure_cmh2o", "constant", "cmH2O", {"point": 1019.716}, primary()),
+        row("fx.pressure_mmhg", "constant", "mmHg", {"point": 750.062}, primary()),
         row("fx.rate", "anchor", "/min", {"mean": 60.0, "sd": 1.0}, primary()),
-        row("fx.share", "input", "%", {"point": 50}, compiled()),
+        row("fx.share", "input", "%", {"mean": 50, "sd": 5}, compiled()),
         row("fx.stroke", "input", "mL", {"low": 90.0, "high": 110.0, "coverage": 0.95}, primary()),
-        row("fx.temp", "input", "degC", {"point": 37.0}, primary()),
-        row("fx.temp_kelvin", "input", "K", {"point": 310.15}, primary()),
-        row("fx.temp_near", "input", "degC", {"point": 37.2}, primary()),
+        row("fx.temp", "constant", "degC", {"point": 37.0}, primary()),
+        row("fx.temp_kelvin", "constant", "K", {"point": 310.15}, primary()),
+        row("fx.temp_near", "constant", "degC", {"point": 37.2}, primary()),
         row("fx.tiny", "input", "mL", {"point": 2e-06}, identity("fx.stroke * 0.00000002")),
         row("fx.twice", "constant", "1", {"point": 2.0}, primary()),
     ]
     ranges = [
         row("fx.amount", "within_subject_variation", "mL", {"point": 1.0}, dict(inferred="inf.flows")),
-        row("fx.interval", "healthy_range", "/min", {"low": 58.04, "high": 61.96, "coverage": 0.95},
-            dict(derived_low="fx.rate - 1.96 * fx.none_sd", derived_high="fx.rate + 1.96 * fx.none_sd", identity="fixture-paper")),
-        row("fx.narrowed", "healthy_range", "L/min", {"low": 5.5, "high": 6.5, "coverage": 0.95}, dict(inferred="inf.adjust")),
+        row("fx.dip", "shift", "L/min", {"mean": -0.5, "sd": 0.1}, primary()),
+        row("fx.flux", "shift", "mL/d", {"mean": 10.0, "sd": 1.0}, primary()),
+        dict(row("fx.interval", "healthy_range", "/min", {"low": 58.04, "high": 61.96, "coverage": 0.95},
+                 dict(derived_low="fx.rate - 1.96 * fx.none_sd", derived_high="fx.rate + 1.96 * fx.none_sd", identity="fixture-paper")),
+             basis="mean_1_96_sd"),
+        dict(row("fx.narrowed", "healthy_range", "L/min", {"low": 5.5, "high": 6.5, "coverage": 0.95}, dict(inferred="inf.adjust")),
+             basis="reference_interval"),
         row("fx.none_sd", "within_subject_variation", "/min", {"point": 1.0}, primary()),
-        row("fx.span", "healthy_range", "L/min", {"low": 5.0, "high": 7.0, "coverage": 0.95}, primary()),
+        dict(row("fx.span", "healthy_range", "L/min", {"low": 5.0, "high": 7.0, "coverage": 0.95}, primary()), basis="percentiles"),
     ]
     works = [
         dict(id="fixture-book", kind="textbook", citation="Fixture.", isbn="0", edition="1"),
@@ -884,11 +927,11 @@ def synthetic_store() -> Store:
     ]
     inferences = [
         dict(id="inf.adjust", target="fx.narrowed", form="adjust", model="fixture", population="fixture", low=5.5, high=6.5,
-             steps=["a step"], premises=["fx.rate", "fx.span"], search=["a search"]),
+             steps=["a step"], premises=["fx.dip", "fx.span"], search=["a search"]),
         dict(id="inf.fill", target="fx.guess", form="fill", model="fixture", population="fixture", low=1, high=2,
              steps=["a step"], premises=["fx.rate"], search=["a search"]),
         dict(id="inf.flows", target="fx.amount", form="flows", model="fixture", population="fixture", low=0.5, high=1.5,
-             steps=["a step"], premises=["fx.rate"], search=["a search"], unmeasurable="no living-person method"),
+             steps=["a step"], premises=["fx.flux"], search=["a search"], unmeasurable="no living-person method"),
     ]
     closures = [
         dict(id="XC-01", level="packet", claim="flow", lhs="fx.flow", rhs="fx.rate * fx.stroke", tol_rel=0.05),
@@ -1003,7 +1046,16 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.number", "fx.median", lambda s: on(s, "fx.median")["value"].update(median=9.0)),
     ("data.number", "fx.span", lambda s: on(s, "fx.span").update(value={"point": 6.0})),
     ("data.number", "fx.span", lambda s: on(s, "fx.span")["value"].update(coverage=0.5)),
+    ("data.number", "fx.span", lambda s: cut(on(s, "fx.span"), "basis")),
+    ("data.number", "fx.span", lambda s: on(s, "fx.span").update(basis="confidence_interval")),
+    ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(basis="percentiles")),
     ("data.number", "fx.none_sd", lambda s: on(s, "fx.none_sd").update(value={"point": -1.0})),
+    ("data.population", "fx.leaf_more", lambda s: on(s, "fx.leaf_more").update(value={"point": 2.0})),
+    ("data.population", "fx.base", lambda s: cut(on(s, "fx.base"), "n")),
+    ("data.population", "fx.area", lambda s: cut(on(s, "fx.area"), "range")),
+    ("data.population", "fx.area", lambda s: on(s, "fx.area").update(range="fx.rate")),
+    ("data.population", "fx.area", lambda s: on(s, "fx.area").update(value={"point": 3.0})),
+    ("data.population", "fx.area", lambda s: on(s, "fx.area_range").update(unit="cm^2")),
     ("data.derived", "fx.leaf", lambda s: on(s, "fx.leaf").update(value={"point": 9.0})),
     ("data.derived", "fx.half", lambda s: on(s, "fx.half").update(value={"point": 300.0})),
     ("data.derived", "fx.tiny", lambda s: on(s, "fx.tiny").update(value={"point": 1e-06})),
@@ -1033,6 +1085,8 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(window="")),
     ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(method="")),
     ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(method=" ")),
+    ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(window="Not applicable")),
+    ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(method="N/A")),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(search=[])),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(search=False)),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(search=[""])),
@@ -1041,15 +1095,18 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.inference", "None", lambda s: cut(inf(s, "inf.fill"), "id")),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(population=" ")),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(premises=["fx.nothing"])),
-    ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.nothing", "fx.span"])),
+    ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.nothing", "fx.dip", "fx.span"])),
+    ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.rate", "fx.span"])),
+    ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.dip", "fx.flux"])),
+    ("data.inference", "inf.flows", lambda s: inf(s, "inf.flows").update(premises=["fx.area"])),
     ("data.inference", "fx.narrowed", lambda s: on(s, "fx.narrowed").update(value={"low": 1.0, "high": 11.0, "coverage": 0.95})),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(high=1e309)),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(low=3, high=2)),
     ("data.inference", "fx.guess", lambda s: on(s, "fx.guess").update(value={"point": 2000.0})),
     ("data.inference", "fx.guess", lambda s: on(s, "fx.guess").update(value={"point": 0.5})),
     ("data.inference", "fx.guess", lambda s: on(s, "fx.guess").update(value={"mean": 1.5, "ci_low": 0.0, "ci_high": 4.0})),
-    ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.narrowed", "fx.span"])),
-    ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.guess", "fx.span"])),
+    ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.narrowed", "fx.dip"])),
+    ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.guess", "fx.dip", "fx.span"])),
     ("data.inference", "fx.narrowed", lambda s: inf(s, "inf.adjust").update(form="fill")),
     ("data.inference", "fx.narrowed", lambda s: inf(s, "inf.adjust").update(form="flows", unmeasurable="no method")),
     ("data.inference", "inf.flows", lambda s: cut(inf(s, "inf.flows"), "unmeasurable")),
