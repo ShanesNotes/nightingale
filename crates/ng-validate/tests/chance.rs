@@ -3,9 +3,9 @@ mod chance_cores;
 use chance_cores::{
     CountsEvaluations, DelaysEveryEvent, DrawsPerEvaluation, DrawsPerStep, JittersItsSpan,
     KeepsItsHistoryAcrossAFiring, ReadingClock, RefusesByHash, RefusesEveryLanding, RefusesItsFirstTrial,
-    VerifiesDry,
+    TracesItsTickets, VerifiesDry,
 };
-use core::cell::Cell;
+use core::cell::{Cell, RefCell};
 use ng_contract::*;
 use ng_record::*;
 use ng_validate::*;
@@ -470,18 +470,247 @@ fn a_core_that_delays_every_event_alike_fails_against_a_reference_policy() {
     let case = ChanceCase::ectopy().expect("a body");
     let tone = case.tone_slot();
     let clock = clock();
-    let fine = || reference(SECOND / 4);
-    let plan = plan(&clock, &fine);
-    let cores = move || DelaysEveryEvent {
-        interval_ns: SECOND / 4,
+    let delayed = |interval_ns| DelaysEveryEvent {
+        interval_ns,
         tone,
         by: 0.5,
+        from: at(0),
     };
+    let second = move || delayed(SECOND / 16);
+    let plan = self::plan(&clock, &second);
+    let cores = move || delayed(SECOND / 4);
     let failure = replay_gate(ReplayGate::StepPolicy, &case, &cores, &plan);
     assert!(
         matches!(failure, Err(ReplayFailure::EventMoved { .. })),
         "{failure:?}"
     );
+}
+
+/// It stalls just before the reference's last event, which falls past the case's end, so every pair agrees and
+/// the list is one short.
+#[test]
+fn a_core_that_stops_firing_differs_from_the_reference_by_its_list_of_events() {
+    let whole = ChanceCase::ectopy().expect("a body");
+    let tone = whole.tone_slot();
+    let fired = events(&whole, &reference(SECOND / 16));
+    let last = fired.last().expect("an event").at().nanoseconds();
+    let case = ChanceCase::ectopy()
+        .expect("a body")
+        .until(SimTime::from_ns(last + 5 * SECOND));
+    let clock = clock();
+    let fine = || reference(SECOND / 4);
+    let plan = plan(&clock, &fine);
+    let cores = move || DelaysEveryEvent {
+        interval_ns: SECOND / 8,
+        tone,
+        by: 1.0,
+        from: SimTime::from_ns(last - SECOND),
+    };
+    let failure = replay_gate(ReplayGate::StepPolicy, &case, &cores, &plan);
+    assert!(
+        matches!(failure, Err(ReplayFailure::EventsDiffer { .. })),
+        "{failure:?}"
+    );
+}
+
+#[test]
+fn two_policies_on_one_grid_are_missing_evidence() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let clock = clock();
+    let same = || reference(SECOND);
+    let plan = plan(&clock, &same);
+    let failure = replay_gate(ReplayGate::StepPolicy, &case, &same, &plan);
+    assert_eq!(
+        failure.err(),
+        Some(ReplayFailure::MissingEvidence {
+            gate: ReplayGate::StepPolicy
+        })
+    );
+}
+
+#[test]
+fn a_body_with_a_hazard_and_no_second_policy_is_missing_evidence() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let clock = clock();
+    let fine = || reference(SECOND / 4);
+    let plan = ReplayPlan {
+        chance: None,
+        ..plan(&clock, &fine)
+    };
+    let cores = || reference(SECOND);
+    let failure = replay_gate(ReplayGate::StepPolicy, &case, &cores, &plan);
+    assert_eq!(
+        failure.err(),
+        Some(ReplayFailure::MissingEvidence {
+            gate: ReplayGate::StepPolicy
+        })
+    );
+}
+
+#[test]
+fn a_run_that_fired_nothing_is_missing_evidence_for_every_gate() {
+    let case = ChanceCase::ectopy().expect("a body").until(at(1));
+    let clock = clock();
+    let fine = || reference(SECOND / 4);
+    let plan = plan(&clock, &fine);
+    let cores = || reference(SECOND / 4);
+    let failure = replay_gate(ReplayGate::Pace, &case, &cores, &plan);
+    assert_eq!(
+        failure.err(),
+        Some(ReplayFailure::MissingEvidence {
+            gate: ReplayGate::Pace
+        })
+    );
+}
+
+/// The first firing with no input in play tells where the crossing lies, and each input then sits inside one 64 s
+/// span with it, on one side. The late run takes its input at the last head it can, so every ticket either run
+/// solved, refusals included, must be the same.
+#[test]
+fn a_late_input_on_either_side_of_a_crossing_takes_the_known_runs_tickets_under_refusals() {
+    let core = || TracesItsTickets {
+        inner: RefusesByHash {
+            inner: reference(64 * SECOND),
+            salt: 7,
+        },
+        trace: RefCell::new(Vec::new()),
+    };
+    let quiet = ChanceCase::ectopy().expect("a body").delivering(Vec::new());
+    let crossing = events(&quiet, &core())[0].at().nanoseconds();
+    assert!(crossing > 15 * SECOND, "the crossing lies past the short spans");
+    let mut refusals = 0;
+    for stamp in [crossing - 5 * SECOND, crossing + 5 * SECOND] {
+        let delivery = Delivery {
+            id: b"on one side",
+            from: SimTime::from_ns(stamp),
+            to: at(100),
+            amount: Measure::new(10.0).expect("finite"),
+        };
+        let case = ChanceCase::ectopy()
+            .expect("a body")
+            .delivering(vec![delivery])
+            .until(at(120));
+        let withheld = core();
+        let mut heads = vec![case.admit_withheld(&withheld).expect("admitted")];
+        let mut late = None;
+        let mut stepped = heads.pop().expect("a session");
+        while stepped.record().accepted().time() < case.end() {
+            let (next, _) = one_step(stepped);
+            stepped = next;
+            if stepped.record().earliest_stamp() <= SimTime::from_ns(stamp) {
+                late = Some(stepped.record().revision());
+            }
+        }
+        let arrival = late.expect("a head before the input");
+        let run = |core: &TracesItsTickets, known: bool| {
+            let mut session = if known {
+                case.admit(core)
+            } else {
+                case.admit_withheld(core)
+            }
+            .expect("admitted");
+            let mut rows = Vec::new();
+            while session.record().accepted().time() < case.end() {
+                if !known && session.record().revision() == arrival {
+                    let event = case.events().expect("events").remove(0);
+                    let command = Digest::of_canonical(b"a command");
+                    let input = AuthorizedInput::from_command_receipt(command, event);
+                    session.enqueue(input).expect("it can still arrive");
+                }
+                let (next, _) = one_step(session);
+                session = next;
+                rows.push((session.record().accepted().time(), session.record().seal()));
+            }
+            (rows, session.record().digests())
+        };
+        let (known_core, late_core) = (core(), core());
+        assert_eq!(run(&known_core, true), run(&late_core, false));
+        assert_eq!(*known_core.trace.borrow(), *late_core.trace.borrow());
+        let trace = known_core.trace.borrow();
+        let attempts = trace.iter().map(|ticket| ticket.2).filter(|&attempt| attempt > 0);
+        refusals += attempts.count();
+    }
+    assert!(
+        refusals > 0,
+        "no ticket was refused, so this test pressed nothing"
+    );
+}
+
+#[derive(Default)]
+struct Store(Vec<(Digest, Vec<u8>)>);
+impl HistoryStore for Store {
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+        let link = self.0.iter().find(|known| known.0 == *seal)?;
+        Some(link.1.clone())
+    }
+    fn keep(&mut self, seal: Digest, link: Vec<u8>) -> Result<(), CheckpointError> {
+        self.0.push((seal, link));
+        Ok(())
+    }
+}
+
+const HEADER: usize = 128;
+const RAW_DIGEST: core::ops::Range<usize> = 8..40;
+
+/// The image's list of modes, then its list of ordinals, each after a count, then the flag.
+fn chance_fields(body: &CompiledBody) -> (usize, usize, usize) {
+    let rows = body.rows();
+    let count = |wanted: fn(&RowKind) -> bool| rows.iter().filter(|row| wanted(&row.kind())).count();
+    let amounts = count(|kind| matches!(kind, RowKind::Amount { .. }));
+    let memory = count(|kind| matches!(kind, RowKind::Memory(_)));
+    let algebraic = rows.len() - amounts - memory;
+    let tag = 8 + "ng-contract image 1".len();
+    let lists = (8 + 16 * amounts) + (8 + 8 * memory) + (8 + 8 * algebraic);
+    let modes = HEADER + 8 + tag + 8 + lists + 8;
+    let ordinals = modes + 8 + 8;
+    (modes, ordinals, ordinals + 2 * 8)
+}
+
+fn forged(saved: &Checkpoint, at: usize, value: u64) -> Checkpoint {
+    let mut bytes = saved.as_bytes().to_vec();
+    bytes[at..at + 8].copy_from_slice(&value.to_be_bytes());
+    let raw = Digest::of_canonical(&bytes[RAW_DIGEST.end..]);
+    bytes[RAW_DIGEST].copy_from_slice(raw.as_bytes());
+    Checkpoint::from_bytes(bytes)
+}
+
+/// A save at the instant after a firing, the head the resume gate presses because a firing is a breakpoint.
+#[test]
+fn a_head_after_a_firing_resumes_and_rewinds_exactly_and_refuses_forged_chance_state() {
+    let case = ChanceCase::ectopy().expect("a body").delivering(Vec::new());
+    let (core, fresh) = (reference(SECOND), reference(SECOND));
+    let mut session = case.admit(&core).expect("admitted");
+    loop {
+        let (next, receipt) = one_step(session);
+        session = next;
+        if !receipt.fired().is_empty() {
+            break;
+        }
+    }
+    let mut store = Store::default();
+    let saved = session.checkpoint(&mut store).expect("saved");
+    let identity = session.record().identity().clone();
+    let body = case.body();
+    let (modes, ordinals, flag) = chance_fields(body);
+    for (place, value, expected) in [
+        (modes, 99, CheckpointError::Malformed),
+        (modes, 1, CheckpointError::SealMismatch),
+        (ordinals, 55, CheckpointError::SealMismatch),
+        (flag, 0, CheckpointError::SealMismatch),
+        (flag, 2, CheckpointError::Malformed),
+    ] {
+        let refused = Session::resume(&forged(&saved, place, value), &identity, body, &fresh, &store);
+        assert_eq!(refused.err(), Some(expected), "at {place}, {value}");
+    }
+    let resumed = Session::resume(&saved, &identity, body, &fresh, &store).expect("resumed");
+    let (continued, receipt) = one_step(session);
+    let (resumed, on_resume) = one_step(resumed);
+    let branch = BranchId::new(Digest::of_canonical(b"a fork at a firing"));
+    let forked = continued.rewind(&saved, branch).expect("a fork");
+    let (forked, on_fork) = one_step(forked);
+    assert_eq!(continued.record().digests(), resumed.record().digests());
+    assert_eq!(continued.record().digests(), forked.record().digests());
+    assert!(receipt.after_breakpoint() && on_resume.after_breakpoint() && on_fork.after_breakpoint());
 }
 
 /// A trial shorter than a span that passed can still be refused, because a stage's error over a forcing is not

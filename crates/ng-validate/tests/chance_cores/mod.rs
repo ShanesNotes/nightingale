@@ -1,4 +1,4 @@
-use core::cell::Cell;
+use core::cell::{Cell, RefCell};
 use ng_contract::*;
 use ng_validate::{ClockSource, ReferenceIntegrator, WallClock};
 
@@ -116,6 +116,7 @@ pub struct DelaysEveryEvent {
     pub interval_ns: u64,
     pub tone: usize,
     pub by: f64,
+    pub from: SimTime,
 }
 impl CoupledSolver for DelaysEveryEvent {
     fn resolution(&self) -> DeclaredResolution {
@@ -126,7 +127,9 @@ impl CoupledSolver for DelaysEveryEvent {
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let mut workspace = problem.workspace();
-        workspace.unknowns_mut()[self.tone] -= self.by;
+        if ticket.interval().start() >= self.from {
+            workspace.unknowns_mut()[self.tone] -= self.by;
+        }
         euler(problem, ticket, workspace)
     }
 }
@@ -175,6 +178,32 @@ impl CoupledSolver for RefusesByHash {
         if long && Digest::of_canonical(&bytes).as_bytes()[0].is_multiple_of(7) {
             return Err(ticket.refuse(NumericalRefusal::IterationLimit));
         }
+        self.inner.solve(problem, ticket)
+    }
+}
+
+/// Short spans early, so an input can arrive, then spans that hold a crossing and an input together, with a hash
+/// refusing a seventh of its tickets. It traces every ticket, so two runs compare attempt by attempt.
+pub struct TracesItsTickets {
+    pub inner: RefusesByHash,
+    pub trace: RefCell<Vec<(u64, u64, u32)>>,
+}
+impl CoupledSolver for TracesItsTickets {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        if accepted.time().nanoseconds() < 10_000_000_000 {
+            1_000_000_000
+        } else {
+            64_000_000_000
+        }
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let start = ticket.interval().start().nanoseconds();
+        self.trace
+            .borrow_mut()
+            .push((start, ticket.length_ns(), ticket.attempt()));
         self.inner.solve(problem, ticket)
     }
 }
