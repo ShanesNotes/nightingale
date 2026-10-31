@@ -12,3 +12,10 @@ Blocked by: none
 - [ ] Each identity in `data/closure.jsonl` closes within its stated tolerance
 - [ ] A `Data:` line in a ticket that names no record fails
 - [ ] `docs/governance.md` section 2, the `AGENTS.md` table and the verify skill name the new path and step
+
+## Comments
+
+Follow-ups from review, none blocking:
+
+- A dataset range's recipe lives beside the data files in the local evidence store, and its work row states the query. A later rule could pin a hash of the recipe, so a summary can be rebuilt without reading the prose query.
+- The check holds honest authoring mistakes, not adversarial inputs. Review past that line kept finding new rules without finding wrong data, so a pass reports what would block a merge and lists the rest here.

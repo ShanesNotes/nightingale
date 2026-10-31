@@ -305,7 +305,7 @@ class Store:
 
     @property
     def rows(self) -> dict[str, dict]:
-        return {r.get("id", ""): r for r in self.all_rows}
+        return {str(r.get("id", "")): r for r in self.all_rows}
 
     @property
     def work_ids(self) -> dict[str, dict]:
@@ -333,6 +333,8 @@ def read_jsonl(path: pathlib.Path) -> tuple[list[dict], list[str]]:
             rows.append(json.loads(line, parse_constant=refuse_constant))
         except ValueError as e:
             raise DataError(f"{path}:{i}: {e}") from e
+        if not isinstance(rows[-1], dict):
+            raise DataError(f"{path}:{i}: a row is an object")
         if canonical(rows[-1]) != line:
             not_canonical.append(f"{path.name}:{i}")
     return rows, not_canonical
@@ -463,6 +465,14 @@ def schema(s: Store) -> list[Violation]:
             out.append(Violation(code, subject, f"drop {' '.join(sorted(extra))}: the language has no such field"))
         if not well_formed(row):
             out.append(Violation(code, subject, f"value {row.get('value')} is not one of the forms, in numbers"))
+        if not isinstance(row.get("unit"), str):
+            out.append(Violation(code, subject, "unit is text"))
+        if "range" in row and not is_text(row["range"]):
+            out.append(Violation(code, subject, "range names a record"))
+        e = row.get("evidence")
+        expressions = [e[k] for k in ("derived", "derived_low", "derived_high", "identity") if k in e] if isinstance(e, dict) else []
+        if not all(map(is_text, expressions)):
+            out.append(Violation(code, subject, "a derivation is text"))
         for field in ("conditions", "method", "window"):
             if not is_text(row.get(field)):
                 out.append(Violation(code, subject, f"{field} is text, and stated"))
@@ -491,6 +501,12 @@ def schema(s: Store) -> list[Violation]:
         fields = CLOSURE_FIELDS | {"tol_rel", "tol_abs", "tol_unit"}
         if extra := c.keys() - fields:
             out.append(Violation(code, str(c.get("id")), f"a closure has no field {' '.join(sorted(extra))}"))
+        if not all(is_text(c.get(field)) for field in CLOSURE_FIELDS):
+            out.append(Violation(code, str(c.get("id")), f"a closure states {' '.join(sorted(CLOSURE_FIELDS))} as text"))
+        if "tol_unit" in c and not isinstance(c["tol_unit"], str):
+            out.append(Violation(code, str(c.get("id")), "tol_unit is text"))
+    for table in (s.works, s.inferences):
+        out += [Violation(code, str(item.get("id")), "an id is text") for item in table if not is_text(item.get("id"))]
     return out
 
 
@@ -816,7 +832,7 @@ def inferred(s: Store) -> list[Violation]:
     }
     for i in s.inferences:
         subject = str(i.get("id"))
-        for field in ("id", "model", "population", "target", "form"):
+        for field in ("model", "population", "target", "form"):
             if not is_text(i.get(field)):
                 out.append(Violation(code, subject, f"an inference record names its {field}"))
         for field in ("steps", "premises", "search"):
@@ -875,9 +891,6 @@ def closure(s: Store) -> list[Violation]:
         subject = str(c.get("id"))
         if c.get("level") not in LEVELS:
             out.append(Violation(code, subject, f"level is one of {sorted(LEVELS)}"))
-        for field in ("id", "claim", "lhs", "rhs"):
-            if not is_text(c.get(field)):
-                out.append(Violation(code, subject, f"a closure states its {field}"))
         forms = {"tol_rel", "tol_abs", "tol_unit"} & c.keys()
         rel, abs_ = forms == {"tol_rel"}, forms == {"tol_abs", "tol_unit"}
         tolerance = c.get("tol_rel" if rel else "tol_abs")
@@ -1036,6 +1049,15 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.schema", "fx.rate", lambda s: evidence(s, "fx.rate", source_text="a passage")),
     ("data.schema", "fx.fitted", lambda s: evidence(s, "fx.fitted", calibrated=["fx.stroke"])),
     ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 60.0})),
+    ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(evidence=None)),
+    ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(unit=None)),
+    ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(value=None)),
+    ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(kind=None)),
+    ("data.schema", "fx.area", lambda s: on(s, "fx.area").update(range=5)),
+    ("data.schema", "fx.flow", lambda s: evidence(s, "fx.flow", derived=123)),
+    ("data.schema", "fx.flow", lambda s: evidence(s, "fx.flow", identity=None)),
+    ("data.schema", "XC-02", lambda s: closure_of(s, "XC-02").update(tol_unit=None)),
+    ("data.schema", "None", lambda s: cut(work_of(s, "fixture-book"), "id")),
     ("data.schema", "fx.area", lambda s: on(s, "fx.area").update(value={"point": True})),
     ("data.schema", "fx.area", lambda s: on(s, "fx.area").update(value={"point": "two"})),
     ("data.schema", "fx.area", lambda s: on(s, "fx.area").update(value={"point": 9007199254740993})),
@@ -1177,9 +1199,9 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
         on(s, "fx.area_range").update(kind="parameter", evidence=dict(inferred="inf.fill")),
         inf(s, "inf.fill").update(target="fx.area_range", high=3),
     )),
-    ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(window="")),
-    ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(method="")),
-    ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(method=" ")),
+    ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(window="")),
+    ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(method="")),
+    ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(method=" ")),
     ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(window="Not applicable")),
     ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(method="N/A")),
     ("data.snapshot", "fx.span", lambda s: on(s, "fx.span").update(window="Not stated")),
@@ -1188,7 +1210,7 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(search=[""])),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(steps=False)),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(model=True)),
-    ("data.inference", "None", lambda s: cut(inf(s, "inf.fill"), "id")),
+    ("data.schema", "None", lambda s: cut(inf(s, "inf.fill"), "id")),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(population=" ")),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(premises=["fx.nothing"])),
     ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.nothing", "fx.dip", "fx.span"])),
@@ -1229,9 +1251,9 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(lhs="(1e309 - 1e309) * fx.flow")),
     ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(rhs="fx.rate")),
     ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(level="gut")),
-    ("data.closure", "None", lambda s: cut(closure_of(s, "XC-01"), "id")),
-    ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(claim={"a": [1]})),
-    ("data.closure", "True", lambda s: closure_of(s, "XC-01").update(id=True)),
+    ("data.schema", "None", lambda s: cut(closure_of(s, "XC-01"), "id")),
+    ("data.schema", "XC-01", lambda s: closure_of(s, "XC-01").update(claim={"a": [1]})),
+    ("data.schema", "True", lambda s: closure_of(s, "XC-01").update(id=True)),
     ("data.closure", "XC-05", lambda s: closure_of(s, "XC-05").update(
         lhs="fx.kilojoules * 1e30 * 1e30 * 1e30 * 1e30 * 1e30 * 1e30 * 1e30 * 1e30 * 1e30 * 1e30 * 3.6e4",
         rhs="fx.kilojoules * 1e30 * 1e30 * 1e30 * 1e30 * 1e30 * 1e30 * 1e30 * 1e30 * 1e30 * 1e30 * -3.6e4",
@@ -1270,7 +1292,9 @@ def write_store(s: Store, root: pathlib.Path) -> None:
 
 
 def run(s: Store) -> list[Violation]:
-    return [v for _, check in RULES for v in check(s)]
+    if shapes := RULES[0][1](s):
+        return shapes
+    return [v for _, check in RULES[1:] for v in check(s)]
 
 
 def probes() -> list[Violation]:
