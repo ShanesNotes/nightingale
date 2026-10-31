@@ -322,8 +322,8 @@ impl DenseBasis {
 pub enum BasisFamily {
     Bernstein,
 }
-/// One hazard guard that fired at a step's end, named by its stream, as a receipt says it. The attempt reads a
-/// crossing from a verified state and fires on the step it selects, so a core claims no event and locates none.
+/// One hazard guard that fired at a step's end, named by its stream, as a receipt says it. A landing reads a
+/// crossing from a verified state and fires the step its bracket closes on, so a core claims no event and locates none.
 pub struct Fired {
     _stream: &'static str,
     _at: SimTime,
