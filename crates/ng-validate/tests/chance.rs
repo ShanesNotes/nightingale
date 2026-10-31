@@ -1232,20 +1232,23 @@ fn a_head_after_a_firing_resumes_and_rewinds_exactly_and_refuses_forged_chance_s
 /// A trial shorter than a span that passed can still be refused, because a stage's error over a forcing is not
 /// monotone in its length, so this run must reach its end at spans that alias the knots.
 #[test]
-fn a_long_span_over_a_forcing_lands_every_event_and_never_crawls() {
+fn a_long_span_over_a_forcing_lands_its_events_and_never_crawls() {
     let case = ChanceCase::ectopy().expect("a body");
     let core = reference(64 * SECOND);
     let mut session = case.admit(&core).expect("admitted");
-    let mut steps = 0;
+    let (mut steps, mut fired) = (0, 0);
     while session.record().accepted().time() < case.end() {
         let next = session.record().accepted().time().nanoseconds() + 1;
-        session = finished(session, SimTime::from_ns(next)).0;
+        let (reached, events) = finished(session, SimTime::from_ns(next));
+        session = reached;
+        fired += events.len();
         steps += 1;
         assert!(
             steps < 400,
             "a run of 240 s at 64 s spans crawled at {steps} steps"
         );
     }
+    assert!(fired >= 8, "{fired} events in {steps} steps");
 }
 
 #[test]
