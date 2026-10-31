@@ -19,6 +19,7 @@ import math
 import pathlib
 import re
 import sys
+import tempfile
 from collections.abc import Callable, Iterator
 from fractions import Fraction
 
@@ -72,6 +73,7 @@ EVIDENCE_FORMS = {
     "calibrated": ({"calibrated"}, set()),
 }
 FUNCTIONS = {"log10", "exp", "sum"}
+LARGEST_EXACT = 2**53
 BARE_NAME = re.compile(r"(?<![\w.])[A-Za-z_]\w*")
 
 Dimension = tuple[int, ...]
@@ -197,6 +199,13 @@ def names_in(text: str) -> set[str]:
 
 
 def evaluate(node: ast.AST, names: dict[str, str], env: Callable[[str], Quantity]) -> Quantity:
+    q = step(node, names, env)
+    if not math.isfinite(q.value):
+        raise ValueError("an intermediate value is not finite")
+    return q
+
+
+def step(node: ast.AST, names: dict[str, str], env: Callable[[str], Quantity]) -> Quantity:
     if isinstance(node, ast.Expression):
         return evaluate(node.body, names, env)
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
@@ -221,7 +230,7 @@ def evaluate(node: ast.AST, names: dict[str, str], env: Callable[[str], Quantity
                 return Quantity(a.value**b.value)
             if b.value == int(b.value):
                 return Quantity(a.value**b.value, tuple(x * int(b.value) for x in a.dimension))
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and not node.keywords:
         xs = [evaluate(a, names, env) for a in node.args]
         f = node.func.id
         if f in ("log10", "exp") and len(xs) == 1 and xs[0].dimension == NUMBER:
@@ -233,10 +242,7 @@ def evaluate(node: ast.AST, names: dict[str, str], env: Callable[[str], Quantity
 
 def value_of(text: str, env: Callable[[str], Quantity]) -> Quantity:
     tree, names = parse_expression(text)
-    q = evaluate(tree, names, env)
-    if not math.isfinite(q.value):
-        raise ValueError(f"{text} is not finite")
-    return q
+    return evaluate(tree, names, env)
 
 
 def central(value: dict) -> float:
@@ -334,8 +340,9 @@ def load(root: pathlib.Path) -> Store:
             raise DataError(f"{path} is missing")
         tables[name], flagged = read_jsonl(path)
         not_canonical += flagged
-    known = {f"{name}.jsonl" for name in FILES}
-    stray = sorted(str(p.relative_to(root)) for p in (root / DATA).rglob("*") if p.is_file() and p.name not in known)
+    known = {f"{DATA}/{name}.jsonl" for name in FILES}
+    found = {p.relative_to(root).as_posix() for p in (root / DATA).rglob("*") if p.is_file()}
+    stray = sorted(found - known)
     return Store(
         tables["works"],
         tables["packet-reference-man"],
@@ -385,7 +392,17 @@ def strings(item: object) -> Iterator[str]:
 
 
 def is_number(x: object) -> bool:
-    return isinstance(x, (int, float)) and not isinstance(x, bool)
+    if isinstance(x, int) and not isinstance(x, bool):
+        return abs(x) <= LARGEST_EXACT
+    return isinstance(x, float)
+
+
+def is_text(x: object) -> bool:
+    return isinstance(x, str) and bool(x.strip())
+
+
+def is_text_list(x: object) -> bool:
+    return isinstance(x, list) and bool(x) and all(map(is_text, x))
 
 
 Rule = Callable[[Store], list[Violation]]
@@ -511,7 +528,9 @@ def work(s: Store) -> list[Violation]:
             out.append(Violation(code, subject, "a work id is lowercase and hyphenated"))
         if w.get("kind") not in WORK_TIERS:
             out.append(Violation(code, subject, f"kind {w.get('kind')} is not a work kind"))
-        if not any(w.get(k) for k in WORK_IDS):
+        if not is_text(w.get("citation")):
+            out.append(Violation(code, subject, "a work states its citation"))
+        if not any(is_text(w.get(k)) for k in WORK_IDS):
             out.append(Violation(code, subject, f"name one of {' '.join(WORK_IDS)}"))
     works = s.work_ids
     for row in s.all_rows:
@@ -552,9 +571,10 @@ def locator(s: Store) -> list[Violation]:
         e, subject = row.get("evidence", {}), str(row.get("id"))
         if evidence_form(e) != "source":
             continue
-        at = e.get("locator", "")
-        if not at:
+        at = e.get("locator")
+        if not is_text(at):
             out.append(Violation(code, subject, "a source record names its table or page"))
+            continue
         if e.get("tier") == "textbook" and not (PAGE.search(at) and works.get(e.get("source"), {}).get("edition")):
             out.append(Violation(code, subject, "a textbook record names a page, and its work an edition"))
         if e.get("tier") == "compiled" and not TABLE_OR_PAGE.search(at):
@@ -572,7 +592,8 @@ def number(s: Store) -> list[Violation]:
         if not all(math.isfinite(x) for x in v.values()):
             out.append(Violation(code, subject, "every number is finite"))
             continue
-        if any(v.get(k, 0) < 0 for k in ("sd", "se")) or (row.get("kind") == "within_subject_variation" and central(v) < 0):
+        variation = row.get("kind") == "within_subject_variation"
+        if any(v.get(k, 0) < 0 for k in ("sd", "se")) or (variation and min(central(v), v.get("low", 0)) < 0):
             out.append(Violation(code, subject, "a spread is not negative"))
         if "ci_low" in v and not v["ci_low"] <= v["mean"] <= v["ci_high"]:
             out.append(Violation(code, subject, "an interval holds its centre"))
@@ -606,7 +627,7 @@ def derived(s: Store) -> list[Violation]:
         form = evidence_form(e)
         if form not in ("derived", "interval") or not well_formed(row):
             continue
-        if ("point" if form == "derived" else "low") not in value:
+        if set(value) != ({"point"} if form == "derived" else {"low", "high", "coverage"}):
             out.append(Violation(code, subject, "a derivation states a point, and an interval derivation its two ends"))
             continue
         try:
@@ -689,16 +710,19 @@ def inferred(s: Store) -> list[Violation]:
     }
     for i in s.inferences:
         subject = str(i.get("id"))
-        for field in INFERENCE_FIELDS:
-            if field not in i or i[field] in ("", [], None):
+        for field in ("model", "population", "target", "form"):
+            if not is_text(i.get(field)):
                 out.append(Violation(code, subject, f"an inference record names its {field}"))
+        for field in ("steps", "premises", "search"):
+            if not is_text_list(i.get(field)):
+                out.append(Violation(code, subject, f"an inference record lists its {field}"))
         low, high = i.get("low"), i.get("high")
         if not (is_number(low) and is_number(high) and math.isfinite(low) and math.isfinite(high) and low <= high):
             out.append(Violation(code, subject, "low and high are finite and in order"))
         form = i.get("form")
         if form not in FORMS:
             out.append(Violation(code, subject, f"form {form} is not one of {sorted(FORMS)}"))
-        premises = i.get("premises", [])
+        premises = i.get("premises") if is_text_list(i.get("premises")) else []
         for p in premises:
             if p not in rows:
                 out.append(Violation(code, subject, f"premise {p} is not a record"))
@@ -709,7 +733,7 @@ def inferred(s: Store) -> list[Violation]:
             len(set(premises)) >= 2 and any(rows.get(p, {}).get("kind") == kind for p in premises)
         ):
             out.append(Violation(code, subject, "an adjustment rests on a sourced value of its kind and a separate sourced shift"))
-        if form == "flows" and not i.get("unmeasurable"):
+        if form == "flows" and not is_text(i.get("unmeasurable")):
             out.append(Violation(code, subject, "state why no method can measure the amount"))
     for row in s.all_rows:
         e, subject, kind = row.get("evidence", {}), str(row.get("id")), str(row.get("kind"))
@@ -721,7 +745,8 @@ def inferred(s: Store) -> list[Violation]:
             if i.get("target") != subject:
                 out.append(Violation(code, subject, f"{e['inferred']} targets {i.get('target')}"))
             bounded = is_number(i.get("low")) and is_number(i.get("high")) and well_formed(row)
-            if bounded and not i["low"] <= central(row["value"]) <= i["high"]:
+            ends = [row["value"][k] for k in ("low", "high") if k in row.get("value", {})]
+            if bounded and not all(i["low"] <= x <= i["high"] for x in (central(row["value"]), *ends)):
                 out.append(Violation(code, subject, f"the value leaves {e['inferred']}'s range (I16)"))
             if i.get("form") not in allowed.get(kind, set()):
                 out.append(Violation(code, subject, f"a {kind} cannot rest on a {i.get('form')} inference (rule 16)"))
@@ -740,9 +765,10 @@ def closure(s: Store) -> list[Violation]:
         subject = str(c.get("id"))
         if c.get("level") not in LEVELS:
             out.append(Violation(code, subject, f"level is one of {sorted(LEVELS)}"))
-        rel, abs_ = "tol_rel" in c, "tol_abs" in c and "tol_unit" in c
+        forms = {"tol_rel", "tol_abs", "tol_unit"} & c.keys()
+        rel, abs_ = forms == {"tol_rel"}, forms == {"tol_abs", "tol_unit"}
         tolerance = c.get("tol_rel" if rel else "tol_abs")
-        if rel == abs_ or not (is_number(tolerance) and math.isfinite(tolerance) and tolerance >= 0):
+        if not (rel or abs_) or not (is_number(tolerance) and math.isfinite(tolerance) and tolerance >= 0):
             out.append(Violation(code, subject, "state exactly one finite tolerance: tol_rel, or tol_abs with tol_unit"))
             continue
         try:
@@ -889,6 +915,7 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 60.0})),
     ("data.schema", "fx.area", lambda s: on(s, "fx.area").update(value={"point": True})),
     ("data.schema", "fx.area", lambda s: on(s, "fx.area").update(value={"point": "two"})),
+    ("data.schema", "fx.area", lambda s: on(s, "fx.area").update(value={"point": 9007199254740993})),
     ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(population="")),
     ("data.schema", "fx.area", lambda s: on(s, "fx.area").update(method=123)),
     ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(n=0)),
@@ -901,8 +928,6 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.order", "works", lambda s: s.works.append(dict(s.works[-1], doi="10.0/other"))),
     ("data.order", "inferences", lambda s: s.inferences.append(dict(s.inferences[-1], model="another"))),
     ("data.order", "fx.base", lambda s: s.ranges.insert(0, dict(s.ranges[0], id="fx.base"))),
-    ("data.files", "data/other.jsonl", lambda s: s.stray.append("data/other.jsonl")),
-    ("data.files", "closure.jsonl:1", lambda s: s.not_canonical.append("closure.jsonl:1")),
     ("data.text", "fx.rate", lambda s: on(s, "fx.rate").update(method="x" * 121)),
     ("data.text", "fx.rate", lambda s: on(s, "fx.rate").update(method="cuff \u2014 arm")),
     ("data.text", "inf.fill", lambda s: inf(s, "inf.fill").update(steps=["x" * 241])),
@@ -912,6 +937,9 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.work", "fx.rate", lambda s: evidence(s, "fx.rate", source="no-such-work")),
     ("data.work", "fx.flow", lambda s: evidence(s, "fx.flow", identity="no-such-work")),
     ("data.work", "fixture-paper", lambda s: cut(work_of(s, "fixture-paper"), "doi")),
+    ("data.work", "fixture-paper", lambda s: work_of(s, "fixture-paper").update(doi=True)),
+    ("data.work", "fixture-paper", lambda s: work_of(s, "fixture-paper").update(citation=False)),
+    ("data.work", "fixture-paper", lambda s: work_of(s, "fixture-paper").update(kind="pamphlet")),
     ("data.tier", "fx.base", lambda s: evidence(s, "fx.base", certainty="high")),
     ("data.tier", "fx.base", lambda s: evidence(s, "fx.base", tier="primary_measured")),
     ("data.tier", "fx.share", lambda s: cut(on(s, "fx.share")["evidence"], "upgrade")),
@@ -921,11 +949,16 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
         evidence(s, "fx.base", reading="secondary_reproduction", tier="primary_measured", certainty="low"),
     )),
     ("data.locator", "fx.base", lambda s: evidence(s, "fx.base", locator="somewhere")),
+    ("data.locator", "fx.rate", lambda s: evidence(s, "fx.rate", locator=True)),
     ("data.locator", "fx.base", lambda s: cut(work_of(s, "fixture-book"), "edition")),
     ("data.locator", "fx.share", lambda s: evidence(s, "fx.share", locator="somewhere")),
     ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": float("inf"), "sd": 1.0})),
     ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 60.0, "sd": -1.0})),
     ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 60.0, "ci_low": 100.0, "ci_high": 1.0})),
+    ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 60.0, "se": -1.0})),
+    ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 0.0, "ci_low": 1.0, "ci_high": 2.0})),
+    ("data.number", "fx.rate", lambda s: on(s, "fx.rate").update(value={"mean": 3.0, "ci_low": 1.0, "ci_high": 2.0})),
+    ("data.number", "fx.none_sd", lambda s: on(s, "fx.none_sd").update(value={"low": -1.0, "high": 3.0, "coverage": 0.95})),
     ("data.number", "fx.span", lambda s: on(s, "fx.span")["value"].update(low=8.0)),
     ("data.number", "fx.median", lambda s: on(s, "fx.median")["value"].update(median=9.0)),
     ("data.number", "fx.span", lambda s: on(s, "fx.span").update(value={"point": 6.0})),
@@ -936,6 +969,9 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.derived", "fx.tiny", lambda s: on(s, "fx.tiny").update(value={"point": 1e-06})),
     ("data.derived", "fx.flow", lambda s: on(s, "fx.flow").update(value={"low": 5.0, "high": 7.0, "coverage": 0.95})),
     ("data.derived", "fx.interval", lambda s: on(s, "fx.interval")["value"].update(high=70.0)),
+    ("data.derived", "fx.interval", lambda s: on(s, "fx.interval")["value"].update(median=60.0)),
+    ("data.derived", "fx.half", lambda s: evidence(s, "fx.half", derived="sum(fx.flow * fx.share, sum=500)")),
+    ("data.derived", "fx.half", lambda s: evidence(s, "fx.half", derived="fx.flow * fx.share + 1 / (fx.twice * 1e308 * 1e308) * fx.flow")),
     ("data.derived", "fx.half", lambda s: evidence(s, "fx.half", derived="fx.span * fx.share")),
     ("data.derived", "fx.flow", lambda s: evidence(s, "fx.flow", derived="fx.index * fx.area + fx.none")),
     ("data.derived", "fx.flow", lambda s: evidence(s, "fx.flow", derived="(1e309 - 1e309) * fx.index * fx.area")),
@@ -953,6 +989,13 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(window="")),
     ("data.snapshot", "fx.rate", lambda s: on(s, "fx.rate").update(method="")),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(search=[])),
+    ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(search=False)),
+    ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(search=[""])),
+    ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(steps=False)),
+    ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(model=True)),
+    ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(population=" ")),
+    ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(premises=["fx.nothing"])),
+    ("data.inference", "fx.narrowed", lambda s: on(s, "fx.narrowed").update(value={"low": 1.0, "high": 11.0, "coverage": 0.95})),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(high=1e309)),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(low=3, high=2)),
     ("data.inference", "fx.guess", lambda s: on(s, "fx.guess").update(value={"point": 2000.0})),
@@ -973,13 +1016,41 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.closure", "XC-01", lambda s: cut(closure_of(s, "XC-01"), "tol_rel")),
     ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(tol_rel=float("inf"))),
     ("data.closure", "XC-02", lambda s: closure_of(s, "XC-02").update(tol_abs=float("inf"))),
+    ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(tol_abs=-100)),
     ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(lhs="(1e309 - 1e309) * fx.flow")),
     ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(rhs="fx.rate")),
     ("data.closure", "XC-01", lambda s: closure_of(s, "XC-01").update(level="gut")),
-    ("data.ticket", ".scratch/fixture.md", lambda s: s.tickets.update({".scratch/fixture.md": ["no.such.record"]})),
-    ("data.ticket", ".scratch/fixture.md", lambda s: s.tickets.update({".scratch/fixture.md": ["no.such.*"]})),
-    ("data.ticket", ".scratch/fixture.md", lambda s: s.tickets.update({".scratch/fixture.md": ["not an id"]})),
 )
+
+FILE_PROBES: tuple[tuple[str, str, Callable[[pathlib.Path], object]], ...] = (
+    ("data.files", "data/other.jsonl", lambda root: (root / DATA / "other.jsonl").write_text("{}\n")),
+    ("data.files", "data/notes.txt", lambda root: (root / DATA / "notes.txt").write_text("a passage\n")),
+    ("data.files", "data/archive/works.jsonl", lambda root: (
+        (root / DATA / "archive").mkdir(),
+        (root / DATA / "archive" / "works.jsonl").write_text("a passage\n"),
+    )),
+    ("data.files", "closure.jsonl:1", lambda root: spoil_number(root / DATA / "closure.jsonl")),
+    ("data.ticket", ".scratch/t.md", lambda root: (root / ".scratch" / "t.md").write_text("Data: no.such.record\n")),
+    ("data.ticket", ".scratch/t.md", lambda root: (root / ".scratch" / "t.md").write_text("Data: no.such.*\n")),
+    ("data.ticket", ".scratch/t.md", lambda root: (root / ".scratch" / "t.md").write_text("Data: not an id\n")),
+    ("data.ticket", ".scratch/t.md", lambda root: (root / ".scratch" / "t.md").write_text("Data:no.such.record\n")),
+    ("data.ticket", ".scratch/t.md", lambda root: (root / ".scratch" / "t.md").write_text("Data:\tno.such.record\n")),
+)
+
+
+def spoil_number(path: pathlib.Path) -> None:
+    path.write_text(path.read_text(encoding="utf-8").replace('"tol_rel":0.05', '"tol_rel":0.0500'), encoding="utf-8")
+
+
+def write_store(s: Store, root: pathlib.Path) -> None:
+    (root / DATA).mkdir()
+    (root / ".scratch").mkdir()
+    tables = dict(zip(FILES, (s.works, s.packet, s.ranges, s.inferences, s.closures)))
+    for name, rows in tables.items():
+        lines = "".join(canonical(r) + "\n" for r in rows)
+        (root / DATA / f"{name}.jsonl").write_text(lines, encoding="utf-8")
+    for path, names in s.tickets.items():
+        (root / path).write_text(f"Data: {', '.join(names)}\n", encoding="utf-8")
 
 
 def run(s: Store) -> list[Violation]:
@@ -995,7 +1066,17 @@ def probes() -> list[Violation]:
         breaks(s)
         if not any(v.code == code and v.subject == subject for v in run(s)):
             out.append(Violation("data.probe", f"{code} {i}", f"{subject} was not refused"))
-    out += [Violation("data.probe", code, "the rule has no probe") for code, _ in RULES if not any(p[0] == code for p in PROBES)]
+    for i, (code, subject, breaks) in enumerate(FILE_PROBES):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            write_store(synthetic_store(), root)
+            if read_back := run(load(root)):
+                return [Violation("data.probe", "files", "the base does not survive being written"), *read_back]
+            breaks(root)
+            if not any(v.code == code and v.subject == subject for v in run(load(root))):
+                out.append(Violation("data.probe", f"{code} file {i}", f"{subject} was not refused"))
+    named = {p[0] for p in (*PROBES, *FILE_PROBES)}
+    out += [Violation("data.probe", code, "the rule has no probe") for code, _ in RULES if code not in named]
     return out
 
 
@@ -1007,7 +1088,7 @@ def main(argv: list[str]) -> int:
         found = probes()
         for v in found:
             print(v)
-        print(f"data: {len(RULES)} rules, {len(PROBES)} probes, {len(found)} did not bite")
+        print(f"data: {len(RULES)} rules, {len(PROBES) + len(FILE_PROBES)} probes, {len(found)} did not bite")
         return 1 if found else 0
     try:
         store = load(ROOT)
