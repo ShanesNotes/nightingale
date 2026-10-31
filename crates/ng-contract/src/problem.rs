@@ -36,7 +36,7 @@ impl<'r> CoupledProblem<'r> {
             identity,
             accepted,
             base,
-            chance: Chance::at(body, &parameters.values, identity.seed(), accepted.state()),
+            chance: Chance::at(body, identity.seed(), accepted.state()),
         }
     }
     pub fn accepted(&self) -> AcceptedStateView<'r> {
@@ -131,21 +131,21 @@ impl<'r> CoupledProblem<'r> {
         ticket: &StepTicket,
         state: &Candidate,
     ) -> Result<Vec<Option<f64>>, TrialFailure> {
-        let chance = Chance::at(self.body, &self.parameters.values, self.identity.seed(), state);
+        let chance = Chance::at(self.body, self.identity.seed(), state);
         let inputs = Inputs {
             parameters: &self.parameters.values,
             frame: &ticket.frame,
             unknowns: &state.coordinates(),
             modes: &state.modes,
             draws: chance.draws(),
-            factors: &chance.factors(ticket.interval().end()),
+            factors: &chance.factors(&self.parameters.values, ticket.interval().end()),
         };
         (self.body.instance_values(&inputs)).map_err(|undefined| self.undefined(ticket, undefined))
     }
     fn factors(&self, point: &StagePoint<'_, '_>) -> Vec<f64> {
         let ticket = point.time.ticket;
         let at = SimTime::from_ns(ticket.interval.start().nanoseconds() + point.time.offset_ns);
-        self.chance.factors(at)
+        self.chance.factors(&self.parameters.values, at)
     }
 }
 

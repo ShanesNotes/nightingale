@@ -533,7 +533,7 @@ fn a_cut_that_crosses_lands_short_of_its_input_and_leaves_a_fence() {
 }
 
 #[test]
-fn a_guard_inside_a_span_ends_the_step_at_its_crossing_to_the_landing_tolerance() {
+fn a_guard_inside_a_span_ends_the_step_short_of_the_span() {
     let case = ChanceCase::ectopy().expect("a body");
     let core = reference(64 * SECOND);
     let landed = events(&case, &core);

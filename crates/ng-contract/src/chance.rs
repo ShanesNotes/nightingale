@@ -72,8 +72,8 @@ fn spline(keyed: u64, period_ns: u64, at: SimTime) -> f64 {
 
 struct Knots {
     keyed: u64,
-    period_ns: u64,
-    amplitude: f64,
+    period: usize,
+    amplitude: usize,
 }
 
 /// Modes and ordinals move only when an image publishes, so a draw is constant across a ticket, as a
@@ -84,7 +84,7 @@ pub(crate) struct Chance {
     forcings: Vec<Knots>,
 }
 impl Chance {
-    pub(crate) fn at(body: &CompiledBody, parameters: &[f64], seed: Seed, state: &Candidate) -> Self {
+    pub(crate) fn at(body: &CompiledBody, seed: Seed, state: &Candidate) -> Self {
         let draws: Vec<f64> = (body.layout.streams.iter().zip(&state.ordinals))
             .map(|(stream, &ordinal)| open_unit(word(keyed(seed, stream.key), ordinal)))
             .collect();
@@ -94,8 +94,8 @@ impl Chance {
         let forcings = (body.layout.forcings.iter())
             .map(|forcing| Knots {
                 keyed: keyed(seed, forcing.key),
-                period_ns: period_ns(parameters[forcing.period.index()]),
-                amplitude: parameters[forcing.amplitude.index()],
+                period: forcing.period.index(),
+                amplitude: forcing.amplitude.index(),
             })
             .collect();
         Self {
@@ -107,9 +107,12 @@ impl Chance {
     pub(crate) fn draws(&self) -> &[f64] {
         &self.draws
     }
-    pub(crate) fn factors(&self, at: SimTime) -> Vec<f64> {
+    pub(crate) fn factors(&self, parameters: &[f64], at: SimTime) -> Vec<f64> {
         (self.forcings.iter())
-            .map(|forcing| 1.0 + forcing.amplitude * spline(forcing.keyed, forcing.period_ns, at))
+            .map(|forcing| {
+                let period_ns = period_ns(parameters[forcing.period]);
+                1.0 + parameters[forcing.amplitude] * spline(forcing.keyed, period_ns, at)
+            })
             .collect()
     }
     pub(crate) fn gap(&self, state: &Candidate, hazard: &HazardLayout) -> f64 {

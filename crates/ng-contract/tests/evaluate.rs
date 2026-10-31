@@ -565,6 +565,20 @@ fn a_law_reads_the_stream_and_the_forcing_it_names() -> Result<(), Initializatio
     Ok(())
 }
 
+/// `CoupledProblem::new` takes any values, so a core can build a problem on what it likes and reach nothing, even
+/// on values too few for the forcings of the body it names.
+#[test]
+fn a_problem_on_another_bodys_values_builds() -> Result<(), InitializationFailure> {
+    let own = reservoir_bench([10.0, 4.0], Vec::new())?;
+    let other = reading_chance(&[0, 1])?;
+    let parts = &own.parts;
+    let accepted = AcceptedStateView::new(parts.time, &parts.state, &parts.continuation, &parts.dense);
+    let base = Digest::of_canonical(b"another body");
+    let problem = CoupledProblem::new(&other.body, parts.parameters(), &own.identity, accepted, base);
+    assert!(problem.row(0).is_some());
+    Ok(())
+}
+
 fn forward_euler(bench: &Bench, span_ns: u64) -> Result<VerifiedStep, TrialFailure> {
     let problem = bench.problem();
     let ticket = bench.ticket(span_ns)?;
