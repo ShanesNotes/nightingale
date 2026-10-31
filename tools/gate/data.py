@@ -651,7 +651,7 @@ def number(s: Store) -> list[Violation]:
             out.append(Violation(code, subject, "an interval holds its centre"))
         if "coverage" in v and not 0 < v["coverage"] <= 1:
             out.append(Violation(code, subject, "coverage is a fraction"))
-        if row.get("kind") == "healthy_range" and v.get("coverage") != 0.95:
+        if row.get("kind") == "healthy_range" and (v.get("coverage") != 0.95 or "low" not in v):
             out.append(Violation(code, subject, "a healthy range is a central 95% (record 0004)"))
         if row.get("basis") == "mean_1_96_sd" and evidence_form(row.get("evidence")) != "interval":
             out.append(Violation(code, subject, "mean plus or minus 1.96 SD is written as a derived interval (record 0004)"))
@@ -1126,6 +1126,7 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.number", "fx.none_sd", lambda s: on(s, "fx.none_sd").update(value={"low": -1.0, "high": 3.0, "coverage": 0.95})),
     ("data.number", "fx.none_sd", lambda s: on(s, "fx.none_sd").update(value={"mean": 1.0, "ci_low": -1.0, "ci_high": 3.0, "coverage": 0.95})),
     ("data.number", "fx.median", lambda s: on(s, "fx.median")["value"].update(coverage=1.5)),
+    ("data.number", "fx.span", lambda s: on(s, "fx.span").update(value={"mean": 6.0, "ci_low": 5.0, "ci_high": 7.0, "coverage": 0.95}, n=20)),
     ("data.number", "fx.span", lambda s: on(s, "fx.span")["value"].update(low=8.0)),
     ("data.number", "fx.median", lambda s: on(s, "fx.median")["value"].update(median=9.0)),
     ("data.number", "fx.span", lambda s: on(s, "fx.span").update(value={"point": 6.0})),
