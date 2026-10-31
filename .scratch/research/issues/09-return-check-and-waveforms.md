@@ -14,3 +14,4 @@ Model default: every anchor keeps its return check, read by its own method over 
 ## Comments
 
 - A cycle-mean anchor such as `cv.hr.supine_rest` reads "Read as a cycle mean", with no duration, because Wolsk 2017 states none. A dry run had to guess it. This ticket owes the duration the return check uses for such a window.
+- Model default for what meets an anchor at admission: the solve matches the anchor's central value, within the solver's tolerance, by its method and window. The anchor's spread describes the study or the population, so it is no pass band. The return check's allowance is a separate number (record 0004).
