@@ -1,7 +1,7 @@
 # 03: The anchors
 
 Type: research
-Status: ready-for-agent
+Status: open
 Blocked by: 01
 
 **Question:** What does each of P1 to P26 take, with method and averaging window (SRS rule 17), so that the set closes?

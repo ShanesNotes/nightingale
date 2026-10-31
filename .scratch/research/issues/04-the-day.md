@@ -1,7 +1,7 @@
 # 04: The day
 
 Type: research
-Status: ready-for-agent
+Status: open
 Blocked by: 01
 
 **Question:** What are the numbers of the day the reference man lives (record 0004), so that water, energy and ion balance close?

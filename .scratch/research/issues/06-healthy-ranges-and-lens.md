@@ -1,7 +1,7 @@
 # 06: Healthy ranges and the lens
 
 Type: research
-Status: ready-for-agent
+Status: open
 Blocked by: 01
 
 **Question:** Which readings does the milestone's lens carry, and what is each one's healthy range by activity, method, sex and age where a source shows a shift (record 0004)?

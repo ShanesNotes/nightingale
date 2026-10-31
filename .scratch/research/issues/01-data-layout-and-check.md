@@ -1,7 +1,7 @@
 # 01: Public data and the check over it
 
 Type: task
-Status: ready-for-agent
+Status: open
 Blocked by: none
 
 **What to build:** `data/` holds the records behind the reviewed packet and healthy-range set as sorted JSON lines, and `tools/verify.d/30-data.sh` runs a stdlib check over them. Field sets are closed and text is capped, so a source passage has nowhere to live.

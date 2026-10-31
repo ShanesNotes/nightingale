@@ -1,7 +1,7 @@
 # 08: Validation targets
 
 Type: research
-Status: ready-for-agent
+Status: open
 Blocked by: 03
 
 **Question:** Which published behaviors check the milestone beyond its anchors and ranges, such as the posture step, the nocturnal dip and the meal response?
