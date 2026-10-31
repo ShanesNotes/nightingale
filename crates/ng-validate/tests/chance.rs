@@ -228,10 +228,12 @@ enum Reads {
     LogarithmOfTheIntegral,
     TheIntegral,
     TheDraw,
+    TheClimb,
 }
 
 /// An integral that climbs in the first mode, and a law that holds only in the second, so the law first reads what a
-/// firing leaves. Its range lies above any value it can read there.
+/// firing leaves. Its range lies above any value it can read there. A law on the climb holds only in the first mode,
+/// under a range no climb stays in, so what a firing leaves shows no excursion.
 fn reads_a_reset(reads: Reads) -> Result<(CompiledBody, ParameterPacket<SyntheticFixture>), AdmissionError> {
     let body = assemble(two_vessels()?, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
@@ -253,7 +255,11 @@ fn reads_a_reset(reads: Reads) -> Result<(CompiledBody, ParameterPacket<Syntheti
                 k.finish(rate, holds, class)
             })
         };
-        let (idle_integral, idle_probe) = (still(after.only()), still(before.only()));
+        let (holds, rests, lower, upper) = match reads {
+            Reads::TheClimb => (before.only(), after.only(), 0.0, 0.0),
+            _ => (after.only(), before.only(), 1.0, 2.0),
+        };
+        let (idle_integral, idle_probe) = (still(after.only()), still(rests));
         let climbing = laws.kernel(|mut k| {
             let rate = k.parameter(&pace);
             k.finish(rate, before.only(), class)
@@ -262,17 +268,17 @@ fn reads_a_reset(reads: Reads) -> Result<(CompiledBody, ParameterPacket<Syntheti
             let value = k.state(&integral);
             let factor = match reads {
                 Reads::LogarithmOfTheIntegral => k.ln(value),
-                Reads::TheIntegral => value,
+                Reads::TheIntegral | Reads::TheClimb => value,
                 Reads::TheDraw => k.draw(&dice),
             };
             let pace = k.parameter(&pace);
             let rate = k.scale(pace, factor);
-            k.finish(rate, after.only(), class)
+            k.finish(rate, holds, class)
         });
         if reads != Reads::LogarithmOfTheIntegral {
             let range = ValidityRange::new(
-                Measure::new(1.0)?,
-                Measure::new(2.0)?,
+                Measure::new(lower)?,
+                Measure::new(upper)?,
                 Basis::Fixture("synthetic"),
             )?;
             laws.validity(&reading, range);
@@ -365,6 +371,31 @@ fn a_range_is_judged_on_what_a_firing_leaves() -> Result<(), InitializationFailu
     let (excursion, _) = first_excursion_after_a_firing(Reads::TheIntegral)?;
     assert_eq!(excursion.value().bits(), Compensated::ZERO.bits());
     Ok(())
+}
+
+/// The law stops holding at the firing, so only the end of the climb shows how far it went.
+#[test]
+fn a_firing_keeps_the_excursion_its_step_ended_on() -> Result<(), InitializationFailure> {
+    let (body, packet) = reads_a_reset(Reads::TheClimb)?;
+    let core = reference(SECOND);
+    let mut session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core)?;
+    loop {
+        let (next, receipt) = one_step(session);
+        session = next;
+        let Some(event) = receipt.fired().first() else {
+            continue;
+        };
+        let [excursion] = receipt.excursions() else {
+            panic!("the climb ended past its range: {:?}", receipt.excursions());
+        };
+        assert_eq!((excursion.law(), excursion.side()), (PROBE, ExcursionSide::Above));
+        assert_eq!(excursion.at(), event.at());
+        assert!(
+            event.threshold().at_most(excursion.value()),
+            "it stopped short of the draw"
+        );
+        return Ok(());
+    }
 }
 
 /// The firing spent its draw, so a law read on what it leaves reads the stream's next one.
