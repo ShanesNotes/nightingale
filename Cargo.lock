@@ -26,5 +26,6 @@ name = "ng-validate"
 version = "0.0.0"
 dependencies = [
  "ng-contract",
+ "ng-observe",
  "ng-record",
 ]

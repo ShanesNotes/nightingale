@@ -785,6 +785,7 @@ fn a_core_that_draws_per_step_passes_every_bit_gate_and_fails_the_step_policy_ga
         ReplayGate::LateAdmission,
         ReplayGate::Rewind,
         ReplayGate::ExtraEvaluation,
+        ReplayGate::NonPerturbation,
     ] {
         assert!(replay_gate(gate, &case, &cores, &plan).is_ok(), "{gate:?}");
     }
@@ -1029,6 +1030,7 @@ fn a_run_that_fired_nothing_is_missing_evidence_for_every_gate() {
         ReplayGate::Rewind,
         ReplayGate::ExtraEvaluation,
         ReplayGate::StepPolicy,
+        ReplayGate::NonPerturbation,
     ] {
         let failure = replay_gate(gate, &case, &cores, &plan);
         assert_eq!(failure.err(), Some(ReplayFailure::MissingEvidence { gate }));
@@ -1496,6 +1498,7 @@ fn every_replay_gate_passes_with_a_stream_and_a_forcing_on() {
     let plan = plan(&clock, &fine);
     let evidence = replay_gates(&case, &|| reference(SECOND), &plan).expect("every gate");
     assert!(!evidence.of(ReplayGate::Resume).fired().is_empty());
+    assert!(!evidence.of(ReplayGate::NonPerturbation).fired().is_empty());
 }
 
 struct Random(u64);

@@ -1,6 +1,7 @@
 use crate::chance::seed_word;
 use crate::identity::{Canonical, Seal};
 use crate::{AdmissionError, Digest, Dimensionless, Measure, ModelHash, PacketHash};
+use core::marker::PhantomData;
 
 const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
 
@@ -251,25 +252,57 @@ impl DeclaredResolution {
     }
 }
 
-/// It enters the seed's word, so equal words in two domains never alias.
-const RUN_DOMAIN: &str = "run";
+mod domains {
+    pub trait Sealed {
+        /// It enters the seed's word, so equal words in two domains never alias.
+        const NAME: &'static str;
+    }
+}
+/// A kind of chance. The set is closed.
+pub trait SeedDomain: domains::Sealed {}
+macro_rules! seed_domains {
+    ($($domain:ident = $name:literal),* $(,)?) => {$(
+        #[derive(Clone, Copy)]
+        pub enum $domain {}
+        impl domains::Sealed for $domain {
+            const NAME: &'static str = $name;
+        }
+        impl SeedDomain for $domain {}
+    )*};
+}
+seed_domains!(
+    PacketDomain = "packet",
+    RunDomain = "run",
+    ObservationDomain = "observation"
+);
 
+/// A seed of one domain, so a seed of one kind of chance never type-checks as another.
 #[derive(Clone, Copy)]
-pub struct Seed {
+pub struct DomainSeed<D> {
     words: [u64; 4],
     word: u64,
+    domain: PhantomData<D>,
 }
-impl Seed {
+impl<D: SeedDomain> DomainSeed<D> {
     pub fn new(words: [u64; 4]) -> Self {
         Self {
             words,
-            word: seed_word(RUN_DOMAIN, words),
+            word: seed_word(D::NAME, words),
+            domain: PhantomData,
         }
     }
+}
+impl<D: Copy> DomainSeed<D> {
     pub(crate) fn word(self) -> u64 {
         self.word
     }
 }
+/// Which patient is drawn from a population.
+pub type PacketSeed = DomainSeed<PacketDomain>;
+/// The seed in a run's identity: how the run varies.
+pub type Seed = DomainSeed<RunDomain>;
+/// How observations err. Only an observer takes it.
+pub type ObservationSeed = DomainSeed<ObservationDomain>;
 
 /// The body model's hash, the packet's hash, the run seed and the declared resolution. Nothing else.
 #[derive(Clone)]
@@ -298,7 +331,11 @@ impl RunIdentity {
         let mut out = Canonical::new("ng-contract run identity 1");
         model.digest().seal(&mut out);
         packet.digest().seal(&mut out);
-        let Seed { words, word: _ } = seed;
+        let Seed {
+            words,
+            word: _,
+            domain: _,
+        } = seed;
         for word in words {
             out.number(*word);
         }

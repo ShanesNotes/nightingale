@@ -93,6 +93,22 @@ pub enum AdmissionError {
     StartOutsideSet {
         row: RowKind,
     },
+    /// A channel on a row this body does not hold.
+    UnknownChannel {
+        row: RowKind,
+    },
+    /// A channel's error in a dimension its row is not.
+    ChannelDimension {
+        row: RowKind,
+    },
+    /// A standard deviation below zero.
+    NegativeChannelError {
+        row: RowKind,
+    },
+    /// Two channels that read one row one way, which would share their draws.
+    DuplicateChannel {
+        row: RowKind,
+    },
     /// A delivery ending at or before its event.
     EmptyDelivery {
         id: InputId,
