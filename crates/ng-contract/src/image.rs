@@ -75,6 +75,19 @@ impl<'b> ByteReader<'b> {
         self.exact_count(8, expected)?;
         (0..expected).map(|_| self.float()).collect()
     }
+    fn number_list(&mut self, expected: usize) -> Result<Vec<u64>, Malformed> {
+        self.exact_count(8, expected)?;
+        (0..expected).map(|_| self.number()).collect()
+    }
+    fn mode_list(&mut self, body: &CompiledBody) -> Result<Vec<usize>, Malformed> {
+        let modes = &body.layout.modes;
+        self.exact_count(8, modes.len())?;
+        let read = modes.iter().map(|mode| {
+            let value = usize::try_from(self.number()?).map_err(|_| Malformed)?;
+            mode.values.get(value).map(|_| value).ok_or(Malformed)
+        });
+        read.collect()
+    }
 }
 
 /// What the contract owns of one accepted image. Parts enter a record only through `InitialRevision`,
@@ -108,10 +121,16 @@ impl ImageParts {
             amounts,
             memory,
             algebraic,
+            modes,
+            ordinals,
+            fired,
         } = state;
         amounts.seal(&mut out);
         memory.seal(&mut out);
         algebraic.seal(&mut out);
+        modes.seal(&mut out);
+        ordinals.seal(&mut out);
+        out.number(u64::from(*fired));
         let MethodHistory {
             schema,
             started_at,
@@ -132,11 +151,13 @@ impl ImageParts {
             packet,
             values,
             starts,
+            modes,
         } = parameters;
         out.raw(model.digest().as_bytes());
         out.raw(packet.digest().as_bytes());
         values.seal(&mut out);
         starts.seal(&mut out);
+        modes.seal(&mut out);
         out.into_bytes()
     }
     /// Any bytes give parts or `Malformed`, never a panic.
@@ -153,6 +174,13 @@ impl ImageParts {
             amounts: read.compensated_list(count(|kind| matches!(kind, RowKind::Amount { .. })))?,
             memory: read.float_list(count(|kind| matches!(kind, RowKind::Memory(_))))?,
             algebraic: read.float_list(count(|kind| matches!(kind, RowKind::Algebraic(_))))?,
+            modes: read.mode_list(body)?,
+            ordinals: read.number_list(body.layout.streams.len())?,
+            fired: match read.number()? {
+                0 => false,
+                1 => true,
+                _ => return Err(Malformed),
+            },
         };
         if !rows
             .iter()
@@ -194,11 +222,13 @@ impl ImageParts {
             packet: PacketHash::of_digest(read.digest()?),
             values: read.float_list(body.layout.parameters.len())?,
             starts: read.float_list(rows.len())?,
+            modes: read.mode_list(body)?,
         };
         let inside = |set: AdmissibleSet, value: &f64| set.holds(Compensated::exact(*value));
         if !(body.layout.parameters.iter().zip(&parameters.values))
             .all(|(slot, value)| inside(slot.admissible, value))
             || !(rows.iter().zip(&parameters.starts)).all(|(row, value)| inside(row.admissible(), value))
+            || body.unheld_period(&parameters.values).is_some()
         {
             return Err(Malformed);
         }

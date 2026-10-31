@@ -104,7 +104,13 @@ The length of simulated time a solver core commits to for its next step, before 
 A ticket ended at a waiting input, solved only after the same ticket at the core's span has passed.
 
 **Fence**:
-The earliest stamp a late input may take: the instant of a refused cut, or just past the admission instant.
+The earliest stamp a late input may take: the instant of a cut that did not publish at its own end, because it was refused or landed short, or just past the admission instant.
+
+**Blind step**:
+The step the record would accept as if nothing waited, landing included. An attempt reads the timeline only after it has one.
+
+**Landing**:
+The end of a step at a guard's crossing: a ticket that crosses, and one at most the core's floor shorter that does not. The contract finds it by re-solving ordinary tickets, so no core locates an event.
 
 **Due input**:
 An event whose instant is the start of a step. It is applied when that step is accepted, so a refused step leaves it pending.
@@ -129,10 +135,10 @@ _Avoid_: fatal latch
 ## Chance
 
 **Forcing**:
-Smooth seeded variability tied to simulated time, through seeded knots at a declared period. It changes rates and never adds or removes an amount (I10).
+Smooth seeded variability tied to simulated time, through seeded knots, with a period and an amplitude from the packet. A law reads it as a positive factor with mean one, so it changes rates and never adds or removes an amount (I10).
 
 **Hazard**:
-A risk rate a law integrates until it crosses its stream's draw, which fires an event. Better care lowers the rate, so the same draw gives a later event or none.
+A risk rate a law integrates until it crosses its stream's draw, which fires an event. The contract integrates the rate's positive part, so the integral never falls. Better care lowers the rate, so the same draw gives a later event or none.
 
 ## The body's structure
 
@@ -250,7 +256,7 @@ A declared point where something crosses a boundary: an input from outside the b
 A declared rule that computes a flow or a rate of change from state and parameters. A law holds no time step, no solver and no disease logic.
 
 **Memory**:
-Non-material state a law keeps, such as a filter's value or a set point. It moves only by a declared rate that the contract integrates, and it never holds an amount.
+Non-material state a law keeps, such as a filter's value or a set point. It moves only by a declared rate that the contract integrates, or by the reset its hazard guard fires, and it never holds an amount.
 _Avoid_: organ state
 
 **Set point**:
@@ -450,7 +456,7 @@ _Avoid_: re-anchoring, daily reset
 The arena check that runs a solver core on manufactured cases with known answers and against the reference integrator, because a step can close every ledger and still be wrong.
 
 **Replay gates**:
-The arena checks that pace, resuming, late events, rewinding and attached observers never change physiology bits.
+The arena checks that pace, resuming, late events, rewinding, extra evaluations and attached observers never change physiology bits, and that a step policy moves no event further from the reference integrator than a declared tolerance.
 
 **Pulse**:
 The Pulse Physiology Engine, a reference to compare against and never a pass bar (rule 6). A Pulse diff, a match to published data and clinical validity are three separate claims.

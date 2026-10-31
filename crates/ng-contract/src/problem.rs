@@ -1,11 +1,12 @@
 use crate::body::UnknownId;
 use crate::boundary::DriveFrame;
+use crate::chance::Chance;
 use crate::evaluate::{Inputs, Undefined};
 use crate::identity::{Canonical, Seal};
 use crate::quadrature::StageEvaluation;
 use crate::{
-    AcceptedStateView, BoundParameters, CompiledBody, Digest, EngineFault, EngineFaultKind, InputId,
-    Interval, NumericalRefusal, Ratio, Refused, RowId, RunIdentity, SimTime, TrialFailure,
+    AcceptedStateView, BoundParameters, Candidate, CompiledBody, Digest, EngineFault, EngineFaultKind,
+    InputId, Interval, NumericalRefusal, Ratio, Refused, RowId, RunIdentity, SimTime, TrialFailure,
 };
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
@@ -19,6 +20,7 @@ pub struct CoupledProblem<'r> {
     pub(crate) identity: &'r RunIdentity,
     pub(crate) accepted: AcceptedStateView<'r>,
     pub(crate) base: Digest,
+    pub(crate) chance: Chance,
 }
 impl<'r> CoupledProblem<'r> {
     pub fn new(
@@ -34,6 +36,7 @@ impl<'r> CoupledProblem<'r> {
             identity,
             accepted,
             base,
+            chance: Chance::at(body, identity.seed(), accepted.state()),
         }
     }
     pub fn accepted(&self) -> AcceptedStateView<'r> {
@@ -69,15 +72,20 @@ impl<'r> CoupledProblem<'r> {
             source: self.body.undefined_source(undefined),
         })
     }
-    /// `F(t, y, y')` on every row with the bound values. A drive reads the ticket's frame, never the
-    /// stage's instant.
+    /// `F(t, y, y')` on every row with the bound values, in the head's modes. A drive and a draw read the
+    /// head's, never the stage's instant; a forcing reads the stage's instant, which the witness carries.
     pub fn evaluate(&self, point: &StagePoint<'_, '_>) -> Result<StageEvaluation, TrialFailure> {
         self.check(point)?;
         let ticket = point.time.ticket;
+        let factors = self.factors(point);
+        let modes = &self.accepted.state().modes;
         let inputs = Inputs {
             parameters: &self.parameters.values,
             frame: &ticket.frame,
             unknowns: point.unknowns,
+            modes,
+            draws: self.chance.draws(),
+            factors: &factors,
         };
         let values =
             (self.body.instance_values(&inputs)).map_err(|undefined| self.undefined(ticket, undefined))?;
@@ -99,10 +107,14 @@ impl<'r> CoupledProblem<'r> {
     pub fn linearize(&self, point: &StagePoint<'_, '_>, shift: Shift) -> Result<Jacobian, TrialFailure> {
         self.check(point)?;
         let ticket = point.time.ticket;
+        let factors = self.factors(point);
         let inputs = Inputs {
             parameters: &self.parameters.values,
             frame: &ticket.frame,
             unknowns: point.unknowns,
+            modes: &self.accepted.state().modes,
+            draws: self.chance.draws(),
+            factors: &factors,
         };
         let values = (self.body.jacobian(&inputs, shift.per_second))
             .map_err(|undefined| self.undefined(ticket, undefined))?;
@@ -112,6 +124,28 @@ impl<'r> CoupledProblem<'r> {
             columns: sparsity.unknowns().to_vec(),
             values,
         })
+    }
+    /// Every law on `state` at the ticket's end, in its modes and on its draws.
+    pub(crate) fn values_after_firing(
+        &self,
+        ticket: &StepTicket,
+        state: &Candidate,
+    ) -> Result<Vec<Option<f64>>, TrialFailure> {
+        let chance = Chance::at(self.body, self.identity.seed(), state);
+        let inputs = Inputs {
+            parameters: &self.parameters.values,
+            frame: &ticket.frame,
+            unknowns: &state.coordinates(),
+            modes: &state.modes,
+            draws: chance.draws(),
+            factors: &chance.factors(&self.parameters.values, ticket.interval().end()),
+        };
+        (self.body.instance_values(&inputs)).map_err(|undefined| self.undefined(ticket, undefined))
+    }
+    fn factors(&self, point: &StagePoint<'_, '_>) -> Vec<f64> {
+        let ticket = point.time.ticket;
+        let at = SimTime::from_ns(ticket.interval.start().nanoseconds() + point.time.offset_ns);
+        self.chance.factors(&self.parameters.values, at)
     }
 }
 
@@ -170,8 +204,9 @@ impl StepTicket {
     pub fn attempt(&self) -> u32 {
         self.attempt
     }
-    /// True when a delivery starts or ends at this interval's start. A core restarts its numerical caches
-    /// here, and `verify` checks that the proposal's `MethodHistory` starts at this instant.
+    /// True when a delivery starts or ends at this interval's start, or a guard fired there. A core restarts
+    /// its numerical caches here, and `verify` checks that the proposal's `MethodHistory` starts at this
+    /// instant.
     pub fn after_breakpoint(&self) -> bool {
         self.after_breakpoint
     }
@@ -203,6 +238,11 @@ impl StepTicket {
     /// A refusal of this attempt, or the fault `NoAdmissibleStep` when its retry would go below the floor
     /// or past the budget. The retry halves the committed span, not the interval: a cut's length depends on
     /// a waiting input past the retry's end, and a retry's end must not.
+    ///
+    /// A landing's trial takes this rule too. Its retry is a new attempt at a shorter span, which lands in turn
+    /// or steps short of the crossing and loses nothing, since the integral keeps what it gained. A retried
+    /// step is then at least the floor or ends at a breakpoint: a retry at a bracket's verified bottom
+    /// skipped that, and crawled an honest core at 1 ns a step.
     pub fn refuse(&self, reason: NumericalRefusal) -> TrialFailure {
         let mut retry_ns = self.span_ns / 2;
         while retry_ns >= self.length_ns() {

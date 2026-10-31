@@ -210,8 +210,9 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     pub fn draw(&mut self, _stream: &Stream<'b, O>) -> Expr<'b, 'k, O, Dimensionless> {
         todo!()
     }
-    /// The forcing's value at the stage time: a cubic B-spline over knot values that are a pure
-    /// function of the run seed, the forcing's key and the knot index. Knots are not breakpoints.
+    /// A rate's factor at the stage's instant: `1 + a s(t)`, with `s` a cubic B-spline over knot values that
+    /// are a pure function of the run seed, the forcing's key and the knot index, and `a` the forcing's
+    /// amplitude. It stays positive with mean one, so `scale` needs no literal one. Knots are not breakpoints.
     pub fn forcing(&mut self, _forcing: &Forcing<'b, O>) -> Expr<'b, 'k, O, Dimensionless> {
         todo!()
     }
@@ -314,20 +315,21 @@ impl<'b, O, U: Sensed> Guard<'b, O, U> {
     }
 }
 /// Seeded chance with a rate physiology sets: the guard fires when the integrated hazard (memory
-/// whose rate the owner declares) reaches the stream's exponential draw, `-ln(u)`. On publication
-/// the contract resets the integral, advances the stream and applies the transition together; a
-/// refusal discards all three. Better care lowers the rate, so the same dice give a later event
-/// or none.
+/// whose rate the owner declares) reaches the stream's exponential draw, `-ln(u)`, while its mode
+/// variable holds the value the transition leaves. The contract integrates the rate's positive part,
+/// so an integral never falls. On publication the contract resets the integral, advances the stream
+/// and applies the transition together; a refusal discards all three. Better care lowers the rate,
+/// so the same dice give a later event or none.
 pub struct HazardGuard<'b, O> {
     _integral: u32,
-    _stream: Stream<'b, O>,
+    _stream: u32,
     _transition: ModeTransition<'b, O>,
 }
 impl<'b, O> HazardGuard<'b, O> {
     /// The integral's rate is still declared once with `memory_rate`.
     pub fn new(
         _integral: &StateSlot<'b, O, Dimensionless>,
-        _stream: Stream<'b, O>,
+        _stream: &Stream<'b, O>,
         _transition: ModeTransition<'b, O>,
     ) -> Self {
         todo!()
@@ -341,12 +343,11 @@ pub struct Stream<'b, O> {
     _brand: Brand<'b>,
     _owner: PhantomData<O>,
 }
-/// Smooth variability tied to simulated time: knots every `period_ns` with seeded values,
-/// interpolated by a cubic B-spline. A pure function of seed, key and knot index, so replay at any
-/// pace and step policy is exact; admission holds it at its mean.
+/// Smooth variability tied to simulated time: knots every period with seeded values, interpolated
+/// by a cubic B-spline. A pure function of seed, key and knot index, so replay at any pace is exact;
+/// admission holds it at its mean. Its period and amplitude are packet values.
 pub struct Forcing<'b, O> {
     _key: &'static str,
-    _period_ns: u64,
     _brand: Brand<'b>,
     _owner: PhantomData<O>,
 }
@@ -409,7 +410,8 @@ impl<'b, O> FragmentBuilder<'b, O> {
     pub fn stream(&mut self, _name: &'static str) -> Stream<'b, O> {
         todo!()
     }
-    pub fn forcing(&mut self, _name: &'static str, _period_ns: u64) -> Result<Forcing<'b, O>, AdmissionError> {
+    /// Declares the knots' period, positive, and the amplitude, in the unit interval.
+    pub fn forcing(&mut self, _name: &'static str, _period: ParameterKey, _amplitude: ParameterKey) -> Forcing<'b, O> {
         todo!()
     }
     /// Declares where a kernel's output is trusted. Leaving the range is reported as a

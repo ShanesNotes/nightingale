@@ -129,6 +129,18 @@ pub(crate) struct Inputs<'a> {
     pub(crate) parameters: &'a [f64],
     pub(crate) frame: &'a DriveFrame,
     pub(crate) unknowns: &'a [f64],
+    pub(crate) modes: &'a [usize],
+    pub(crate) draws: &'a [f64],
+    pub(crate) factors: &'a [f64],
+}
+
+/// A law's own value stays what a validity range judges.
+fn positive_part(instance: &Instance, value: f64) -> f64 {
+    if instance.rectified && value <= 0.0 {
+        0.0
+    } else {
+        value
+    }
 }
 
 impl CompiledBody {
@@ -149,6 +161,14 @@ impl CompiledBody {
                 value: inputs.frame.rate(name),
                 slope: 0.0,
             },
+            Bound::Draw(stream) => Dual {
+                value: inputs.draws[stream],
+                slope: 0.0,
+            },
+            Bound::Forcing(forcing) => Dual {
+                value: inputs.factors[forcing],
+                slope: 0.0,
+            },
         };
         instance.inputs.iter().map(read).collect()
     }
@@ -159,21 +179,25 @@ impl CompiledBody {
             domain,
         })
     }
-    pub(crate) fn instance_values(&self, inputs: &Inputs<'_>) -> Result<Vec<f64>, Undefined> {
+    pub(crate) fn instance_values(&self, inputs: &Inputs<'_>) -> Result<Vec<Option<f64>>, Undefined> {
         (self.layout.instances.iter())
             .map(|instance| {
+                if !instance.holds(inputs.modes) {
+                    return Ok(None);
+                }
                 let duals = self.read(instance, inputs, None);
-                Ok(self.walk(instance, &duals)?.value)
+                Ok(Some(self.walk(instance, &duals)?.value))
             })
             .collect()
     }
-    pub(crate) fn targets(&self, values: &[f64]) -> (Vec<f64>, Vec<f64>) {
+    pub(crate) fn targets(&self, values: &[Option<f64>]) -> (Vec<f64>, Vec<f64>) {
         let mut columns = vec![0.0; self.layout.columns.len()];
         let mut rows = vec![0.0; self.layout.rows.len()];
-        for (instance, &value) in self.layout.instances.iter().zip(values) {
+        for (instance, value) in self.layout.instances.iter().zip(values) {
+            let Some(value) = *value else { continue };
             match instance.target {
                 Target::Column(column) => columns[column.index()] = value,
-                Target::Row(row) => rows[row.index()] = value,
+                Target::Row(row) => rows[row.index()] = positive_part(instance, value),
             }
         }
         (columns, rows)
@@ -202,18 +226,20 @@ impl CompiledBody {
             let found = sparsity.unknowns[range.clone()].binary_search(&unknown);
             range.start + found.expect("the compiled sparsity holds every unknown a row's laws read")
         };
-        for instance in &self.layout.instances {
-            let mut read: Vec<UnknownId> = (instance.inputs.iter())
-                .filter_map(|bound| match *bound {
-                    Bound::Unknown(unknown) => Some(unknown),
-                    Bound::Parameter(_) | Bound::Boundary(_) => None,
-                })
-                .collect();
+        for instance in self
+            .layout
+            .instances
+            .iter()
+            .filter(|instance| instance.holds(inputs.modes))
+        {
+            let mut read: Vec<UnknownId> = (instance.inputs.iter()).filter_map(Bound::unknown).collect();
             read.sort_unstable();
             read.dedup();
             for direction in read {
                 let duals = self.read(instance, inputs, Some(direction));
-                let slope = self.walk(instance, &duals)?.slope;
+                let walked = self.walk(instance, &duals)?;
+                let flat = positive_part(instance, walked.value) != walked.value;
+                let slope = if flat { 0.0 } else { walked.slope };
                 if !slope.is_finite() {
                     let program = &self.layout.programs[instance.program.index()];
                     return Err(Undefined {
@@ -244,9 +270,10 @@ impl CompiledBody {
         }
         Ok(values)
     }
-    pub(crate) fn excursions(&self, values: &[f64], at: SimTime) -> Vec<ValidityExcursion> {
+    pub(crate) fn excursions(&self, values: &[Option<f64>], at: SimTime) -> Vec<ValidityExcursion> {
         let mut excursions = Vec::new();
-        for (instance, &value) in self.layout.instances.iter().zip(values) {
+        for (instance, value) in self.layout.instances.iter().zip(values) {
+            let Some(value) = *value else { continue };
             let program = &self.layout.programs[instance.program.index()];
             for &Validity { lower, upper, .. } in &program.code.validity {
                 let side = if value < f64::from_bits(lower) {

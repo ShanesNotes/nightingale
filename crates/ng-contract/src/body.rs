@@ -57,6 +57,9 @@ pub(crate) struct Layout {
     pub(crate) blocks: Vec<Block>,
     pub(crate) modes: Vec<ModeLayout>,
     pub(crate) guards: Vec<GuardLayout>,
+    pub(crate) streams: Vec<StreamLayout>,
+    pub(crate) forcings: Vec<ForcingLayout>,
+    pub(crate) hazards: Vec<HazardLayout>,
     pub(crate) basis: ConservedBasis,
 }
 impl CompiledBody {
@@ -99,6 +102,9 @@ impl CompiledBody {
     pub fn conserved_basis(&self) -> &ConservedBasis {
         &self.layout.basis
     }
+    pub fn hazards(&self) -> impl Iterator<Item = LawName> + '_ {
+        (self.layout.hazards.iter()).map(|hazard| self.layout.streams[hazard.stream].name)
+    }
 }
 impl Seal for Layout {
     fn seal(&self, out: &mut Canonical) {
@@ -113,6 +119,9 @@ impl Seal for Layout {
             blocks,
             modes,
             guards,
+            streams,
+            forcings,
+            hazards,
             basis,
         } = self;
         schema.seal(out);
@@ -125,6 +134,9 @@ impl Seal for Layout {
         blocks.seal(out);
         modes.seal(out);
         guards.seal(out);
+        streams.seal(out);
+        forcings.seal(out);
+        hazards.seal(out);
         basis.seal(out);
     }
 }
@@ -364,6 +376,9 @@ pub struct Instance {
     pub(crate) target: Target,
     pub(crate) parameters: Vec<ParameterId>,
     pub(crate) inputs: Vec<Bound>,
+    /// The compiled sparsity is the union over modes, so selecting by mode moves no entry.
+    pub(crate) mode: Option<(usize, usize)>,
+    pub(crate) rectified: bool,
 }
 impl Instance {
     pub fn program(&self) -> ProgramId {
@@ -379,6 +394,9 @@ impl Instance {
     pub fn parameters(&self) -> &[ParameterId] {
         &self.parameters
     }
+    pub(crate) fn holds(&self, modes: &[usize]) -> bool {
+        self.mode.is_none_or(|(variable, value)| modes[variable] == value)
+    }
 }
 impl Seal for Instance {
     fn seal(&self, out: &mut Canonical) {
@@ -388,12 +406,16 @@ impl Seal for Instance {
             target,
             parameters,
             inputs,
+            mode,
+            rectified,
         } = self;
         program.seal(out);
         context.seal(out);
         target.seal(out);
         parameters.seal(out);
         inputs.seal(out);
+        mode.seal(out);
+        out.number(u64::from(*rectified));
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -401,6 +423,16 @@ pub(crate) enum Bound {
     Parameter(ParameterId),
     Unknown(UnknownId),
     Boundary(&'static str),
+    Draw(usize),
+    Forcing(usize),
+}
+impl Bound {
+    pub(crate) fn unknown(&self) -> Option<UnknownId> {
+        match *self {
+            Bound::Unknown(unknown) => Some(unknown),
+            Bound::Parameter(_) | Bound::Boundary(_) | Bound::Draw(_) | Bound::Forcing(_) => None,
+        }
+    }
 }
 impl Seal for Bound {
     fn seal(&self, out: &mut Canonical) {
@@ -416,6 +448,14 @@ impl Seal for Bound {
             Bound::Boundary(boundary) => {
                 out.number(2);
                 boundary.seal(out);
+            }
+            Bound::Draw(stream) => {
+                out.number(3);
+                stream.seal(out);
+            }
+            Bound::Forcing(forcing) => {
+                out.number(4);
+                forcing.seal(out);
             }
         }
     }
@@ -585,5 +625,64 @@ impl Seal for GuardLayout {
         crossing.seal(out);
         code.seal(out);
         inputs.seal(out);
+    }
+}
+
+/// A key's word derives from the name, so the name is what the model hash covers.
+pub(crate) struct StreamLayout {
+    pub(crate) name: LawName,
+    pub(crate) key: u64,
+}
+impl Seal for StreamLayout {
+    fn seal(&self, out: &mut Canonical) {
+        let Self { name, key: _ } = self;
+        name.seal(out);
+    }
+}
+pub(crate) struct ForcingLayout {
+    pub(crate) name: LawName,
+    pub(crate) key: u64,
+    pub(crate) period: ParameterId,
+    pub(crate) amplitude: ParameterId,
+}
+impl Seal for ForcingLayout {
+    fn seal(&self, out: &mut Canonical) {
+        let Self {
+            name,
+            key: _,
+            period,
+            amplitude,
+        } = self;
+        name.seal(out);
+        period.seal(out);
+        amplitude.seal(out);
+    }
+}
+pub(crate) struct HazardLayout {
+    pub(crate) integral: RowId,
+    pub(crate) stream: usize,
+    pub(crate) variable: usize,
+    pub(crate) leaves: usize,
+    pub(crate) enters: usize,
+}
+impl HazardLayout {
+    pub(crate) fn armed(&self, modes: &[usize]) -> bool {
+        modes[self.variable] == self.leaves
+    }
+}
+impl Seal for HazardLayout {
+    fn seal(&self, out: &mut Canonical) {
+        let Self {
+            integral,
+            stream,
+            variable,
+            leaves,
+            enters,
+        } = self;
+        integral.seal(out);
+        stream.seal(out);
+        variable.seal(out);
+        leaves.seal(out);
+        enters.seal(out);
     }
 }

@@ -80,15 +80,6 @@ impl<'r> CoupledProblem<'r> {
     ) -> Result<Quadrature, EngineFault> {
         todo!()
     }
-    /// Guard localization and simultaneous-event ordering by stable guard identity.
-    pub fn transitions(
-        &self,
-        _before: &StageEvaluation,
-        _after: &StageEvaluation,
-        _ticket: &StepTicket,
-    ) -> Result<ModeChanges, TrialFailure> {
-        todo!()
-    }
     /// Assembles a proposal. Amounts and memory will come from the start plus the increment, never
     /// from the solver's own coordinates, and the dense segment from the published ends; `end`
     /// supplies only algebraic values, which `verify` rechecks at the published state.
@@ -97,7 +88,6 @@ impl<'r> CoupledProblem<'r> {
         _ticket: &StepTicket,
         _increment: Increment,
         _end: &SolveWorkspace,
-        _modes: ModeChanges,
         _history: MethodHistory,
     ) -> StepProposal {
         todo!()
@@ -166,9 +156,6 @@ impl StageEvaluation {
     /// F per row: what a Newton core drives to zero. With the tangent at zero, a differential row's
     /// value is minus its rate, so an explicit core reads its rates here too.
     pub fn residuals(&self) -> &[f64] {
-        todo!()
-    }
-    pub fn guards(&self) -> &[f64] {
         todo!()
     }
 }
@@ -335,11 +322,10 @@ impl DenseBasis {
 pub enum BasisFamily {
     Bernstein,
 }
-pub struct ModeChanges {
-    _events: Vec<EventWitness>,
-}
-pub struct EventWitness {
-    _guard: u32,
+/// One hazard guard that fired at a step's end, named by its stream, as a receipt says it. A landing reads a
+/// crossing from a verified state and fires the step its bracket closes on, so a core claims no event and locates none.
+pub struct Fired {
+    _stream: &'static str,
     _at: SimTime,
     _ordinal: u64,
 }
@@ -414,7 +400,6 @@ pub struct StepProposal {
     _layout: Digest,
     _increment: Increment,
     _algebraic: Vec<f64>,
-    _modes: ModeChanges,
     _history: MethodHistory,
 }
 impl StepProposal {

@@ -1,7 +1,7 @@
 use ng_contract::*;
 
 // The signature walk (docs/architecture/solver-contract-sketch/src/signature_walk.rs): step 0 with only
-// the crate path changed, then steps 1, 1b, 1d and 2, each change marked with the ticket that restores it.
+// the crate path changed, then steps 1, 1b, 1c, 1d and 2, each change marked with the ticket that restores it.
 fn anatomy() -> Result<Schema, AdmissionError> {
     let at = |axial: f64| -> Result<Position, AdmissionError> {
         Ok(Position::new(
@@ -112,7 +112,7 @@ fn valve<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardiovascul
     let closing = Guard::new(head(open.only(), wave()?), Crossing::Falling, open.to(&shut)?);
     laws.event(opening);
     laws.event(closing);
-    // 06 restores step 1c, the seeded ectopy this valve's fragment declares.
+    ectopy(&mut laws)?;
     for (slot, parameter) in [(&chamber, &upstream), (&outflow, &downstream)] {
         let class = wave()?;
         let residual = laws.kernel(|mut k| {
@@ -141,6 +141,32 @@ fn valve<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardiovascul
     });
     laws.transfer_along(&route, zero);
     Ok(laws.finish())
+}
+
+fn ectopy<'b>(laws: &mut FragmentBuilder<'b, Cardiovascular>) -> Result<(), AdmissionError> {
+    let dice = laws.stream("ectopic-beat");
+    let wobble = laws.forcing(
+        "hazard-variability",
+        ParameterKey::new("cv.hazard-period"),
+        ParameterKey::new("cv.hazard-amplitude"),
+    );
+    let hazard = laws.state::<Dimensionless>("ectopy-hazard", Admissible::nonnegative());
+    let ceiling = laws.parameter(ParameterKey::new("cv.ectopy-ceiling"), Admissible::nonnegative());
+    let pace = laws.parameter(ParameterKey::new("cv.ectopy-rate"), Admissible::nonnegative());
+    let [sinus, ectopic] = laws.modes("rhythm", ["sinus", "ectopic"]);
+    let (beat, every) = (RateClass::new(RateBand::Beat, 100_000_000)?, laws.every_mode());
+    let accrue = laws.kernel(|mut k| {
+        let limit = k.parameter(&ceiling);
+        let varied = k.forcing(&wobble);
+        let target = k.scale(limit, varied);
+        let current = k.state(&hazard);
+        let speed = k.parameter(&pace);
+        let rate = k.relax(target, current, speed);
+        k.finish(rate, every, beat)
+    });
+    laws.hazard(HazardGuard::new(&hazard, &dice, sinus.to(&ectopic)?));
+    laws.memory_rate(&hazard, accrue);
+    Ok(())
 }
 
 fn starling<'b>(scope: FluidsScope<'b>) -> Result<Fragment<'b, Fluids>, AdmissionError> {
@@ -203,7 +229,7 @@ fn the_adapted_walk_compiles() -> Result<(), AdmissionError> {
     let compiled = compile()?;
     let count = |kind: fn(&RowKind) -> bool| compiled.rows().iter().filter(|row| kind(&row.kind())).count();
     assert_eq!(count(|kind| matches!(kind, RowKind::Amount { .. })), 7);
-    assert_eq!(count(|kind| matches!(kind, RowKind::Memory(_))), 2);
+    assert_eq!(count(|kind| matches!(kind, RowKind::Memory(_))), 3);
     assert_eq!(count(|kind| matches!(kind, RowKind::Algebraic(_))), 2);
     let columns = |local| {
         (compiled.columns().iter())
@@ -211,6 +237,6 @@ fn the_adapted_walk_compiles() -> Result<(), AdmissionError> {
             .count()
     };
     assert_eq!((columns("circulation"), columns("starling")), (5, 3));
-    assert_eq!(compiled.programs().len(), 7);
+    assert_eq!(compiled.programs().len(), 8);
     Ok(())
 }

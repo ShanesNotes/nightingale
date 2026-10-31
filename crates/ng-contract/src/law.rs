@@ -3,7 +3,7 @@ use crate::quantity::dimension;
 use crate::{
     Admissible, AdmissibleSet, AdmissionError, Basis, Boundary, Class, Conductance, Dimension, Dimensionless,
     NonMaterial, Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reference,
-    SameDimension, Sensed, SiteClass, ValidityRange, Volume, Water,
+    SameDimension, Sensed, SiteClass, Time, ValidityRange, Volume, Water,
 };
 use core::cell::Cell;
 use core::marker::PhantomData;
@@ -116,8 +116,28 @@ pub(crate) enum Input {
     Algebraic(&'static str),
     Amount(Family, End),
     Drive(&'static str),
+    Draw(&'static str),
+    Forcing(&'static str),
 }
 impl Op {
+    pub(crate) fn operands(&self) -> &[usize] {
+        match self {
+            Op::Input(_) | Op::Zero(_) => &[],
+            Op::Add(operands)
+            | Op::Subtract(operands)
+            | Op::Multiply(operands)
+            | Op::Divide(operands)
+            | Op::Scale(operands)
+            | Op::Deviation(operands)
+            | Op::ConductanceFlow(operands) => operands,
+            Op::SmoothMax(operands) | Op::SmoothMin(operands) | Op::Relax(operands) => operands,
+            Op::AsDimension(operands)
+            | Op::Exp(operands)
+            | Op::Logistic(operands)
+            | Op::Ln(operands)
+            | Op::Volume(operands) => operands,
+        }
+    }
     fn map(&self, f: impl FnMut(usize) -> usize) -> Op {
         match self {
             Op::Input(input) => Op::Input(*input),
@@ -210,6 +230,14 @@ impl Seal for Input {
                 out.number(7);
                 out.text(boundary);
             }
+            Input::Draw(stream) => {
+                out.number(8);
+                out.text(stream);
+            }
+            Input::Forcing(forcing) => {
+                out.number(9);
+                out.text(forcing);
+            }
         }
     }
 }
@@ -300,6 +328,17 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     }
     pub fn read<U: Dimension>(&mut self, port: &ReadPort<'b, O, U>) -> Expr<'b, 'k, O, U> {
         self.input(port.source.input())
+    }
+    /// The stream's value at its current ordinal, uniform on (0, 1) and constant until a guard on the stream
+    /// fires. Admission reads its mean, one half.
+    pub fn draw(&mut self, stream: &Stream<'b, O>) -> Expr<'b, 'k, O, Dimensionless> {
+        self.input(Input::Draw(stream.name))
+    }
+    /// A rate's factor at the stage's instant: `1 + a s(t)`, with `s` the cubic B-spline over seeded knots and
+    /// `a` the forcing's amplitude. It stays positive, its mean is exactly one and admission reads exactly
+    /// one, so `scale` by it needs no literal one and no literal can stand in for it.
+    pub fn forcing(&mut self, forcing: &Forcing<'b, O>) -> Expr<'b, 'k, O, Dimensionless> {
+        self.input(Input::Forcing(forcing.name))
     }
     /// The amount's volume, through the schema's fixed partial-volume coefficient; a body whose
     /// schema declares none is refused.
@@ -680,6 +719,44 @@ impl<'b, O, U: Sensed> Guard<'b, O, U> {
     }
 }
 
+/// A named sequence of random draws of one owner, under a stable key: owner and name. Its draws are a pure
+/// function of the run seed, that key and an event ordinal, so adding a stream changes no other.
+pub struct Stream<'b, O> {
+    name: &'static str,
+    brand: Brand<'b>,
+    owner: PhantomData<O>,
+}
+/// Smooth seeded variability of one owner: knots every declared period, under a stable key. A knot is no
+/// breakpoint, so a forcing never cuts a step.
+pub struct Forcing<'b, O> {
+    name: &'static str,
+    brand: Brand<'b>,
+    owner: PhantomData<O>,
+}
+/// Fires when `integral` reaches its stream's exponential draw, `-ln u`, while its mode variable holds the
+/// value the transition leaves. The integral's rate stays a law on its slot, attached with `memory_rate`, and
+/// the contract integrates that rate's positive part, so an integral never falls and a published value below
+/// the draw rules out a crossing at any earlier instant. Firing resets the integral, moves the stream to its
+/// next ordinal and applies the transition, together, when the image publishes.
+pub struct HazardGuard<'b, O> {
+    integral: &'static str,
+    stream: &'static str,
+    transition: ModeTransition<'b, O>,
+}
+impl<'b, O> HazardGuard<'b, O> {
+    pub fn new(
+        integral: &StateSlot<'b, O, Dimensionless>,
+        stream: &Stream<'b, O>,
+        transition: ModeTransition<'b, O>,
+    ) -> Self {
+        Self {
+            integral: integral.name,
+            stream: stream.name,
+            transition,
+        }
+    }
+}
+
 /// One owner's declarations while they are made. Declaring a slot records a law the fragment owes;
 /// attaching a law borrows the slot, so compilation sees every law on a row together.
 pub struct FragmentBuilder<'b, O> {
@@ -854,6 +931,45 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
             owner: PhantomData,
         })
     }
+    /// Records a guard the fragment owes: a stream no guard draws on is refused at compile.
+    pub fn stream(&mut self, name: &'static str) -> Stream<'b, O> {
+        self.data.streams.push(name);
+        Stream {
+            name,
+            brand: PhantomData,
+            owner: PhantomData,
+        }
+    }
+    /// Records a law the fragment owes: a forcing no law reads is refused at compile. Both numbers are packet
+    /// values: the knots' period, positive, and the amplitude, in the unit interval so the factor stays
+    /// positive. Declaring them here means neither can be given another set.
+    pub fn forcing(
+        &mut self,
+        name: &'static str,
+        period: ParameterKey,
+        amplitude: ParameterKey,
+    ) -> Forcing<'b, O> {
+        self.declare_parameter::<Time>(
+            period,
+            ParameterContext::Body,
+            Admissible::<Time>::positive().set(),
+        );
+        self.declare_parameter::<Dimensionless>(
+            amplitude,
+            ParameterContext::Body,
+            Admissible::<Dimensionless>::unit_interval().set(),
+        );
+        self.data.forcings.push(ForcingDeclaration {
+            name,
+            period,
+            amplitude,
+        });
+        Forcing {
+            name,
+            brand: PhantomData,
+            owner: PhantomData,
+        }
+    }
     pub fn every_mode(&self) -> ModeSet<'b, O> {
         ModeSet {
             selector: Selector::Every,
@@ -913,6 +1029,15 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
             enters: guard.transition.to,
         });
     }
+    pub fn hazard(&mut self, guard: HazardGuard<'b, O>) {
+        self.data.hazards.push(HazardDeclaration {
+            integral: guard.integral,
+            stream: guard.stream,
+            variable: guard.transition.variable,
+            leaves: guard.transition.from,
+            enters: guard.transition.to,
+        });
+    }
     pub fn finish(self) -> Fragment<'b, O> {
         Fragment {
             data: self.data,
@@ -936,6 +1061,9 @@ pub(crate) struct FragmentData {
     pub(crate) families: Vec<Family>,
     pub(crate) laws: Vec<LawDeclaration>,
     pub(crate) guards: Vec<GuardDeclaration>,
+    pub(crate) streams: Vec<&'static str>,
+    pub(crate) forcings: Vec<ForcingDeclaration>,
+    pub(crate) hazards: Vec<HazardDeclaration>,
     pub(crate) validity: Vec<(u32, Validity)>,
 }
 impl FragmentData {
@@ -948,6 +1076,9 @@ impl FragmentData {
             families: Vec::new(),
             laws: Vec::new(),
             guards: Vec::new(),
+            streams: Vec::new(),
+            forcings: Vec::new(),
+            hazards: Vec::new(),
             validity: Vec::new(),
         }
     }
@@ -993,6 +1124,18 @@ pub(crate) enum Obligation {
 pub(crate) struct GuardDeclaration {
     pub(crate) zero: KernelData,
     pub(crate) crossing: Crossing,
+    pub(crate) variable: usize,
+    pub(crate) leaves: usize,
+    pub(crate) enters: usize,
+}
+pub(crate) struct ForcingDeclaration {
+    pub(crate) name: &'static str,
+    pub(crate) period: ParameterKey,
+    pub(crate) amplitude: ParameterKey,
+}
+pub(crate) struct HazardDeclaration {
+    pub(crate) integral: &'static str,
+    pub(crate) stream: &'static str,
     pub(crate) variable: usize,
     pub(crate) leaves: usize,
     pub(crate) enters: usize,
