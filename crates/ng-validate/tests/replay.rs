@@ -219,6 +219,69 @@ fn every_gate_passes_the_reference_core_with_one_set_of_digests() {
     }
 }
 
+/// `ReplayCase` lets a run start past zero, where only a clock read from its own start ever reaches the end.
+struct AdmittedAt {
+    inner: TwoReservoirs,
+    origin: SimTime,
+}
+impl AdmittedAt {
+    fn session<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+        events: Vec<BoundaryEvent>,
+    ) -> Result<Session<'m, Running>, InitializationFailure> {
+        let body = self.body();
+        let request = InitializationRequest::consistent_instant(self.origin);
+        let system = body.initialization(self.inner.other_values()?, BoundaryPort::new(events)?, request)?;
+        let solved = system.workspace();
+        let resolution = core.resolution();
+        let start = MethodHistory::new(resolution.policy(), self.origin, Vec::new());
+        let origin = system.admit(solved, start)?;
+        let seed = Seed::new([1, 2, 3, 4]);
+        let identity = RunIdentity::new(body.model_hash(), origin.packet_hash(), seed, resolution);
+        Ok(Session::admit(body, core, origin, identity)?)
+    }
+}
+impl ReplayCase for AdmittedAt {
+    fn body(&self) -> &CompiledBody {
+        self.inner.body()
+    }
+    fn end(&self) -> SimTime {
+        self.inner.end()
+    }
+    fn events(&self) -> Result<Vec<BoundaryEvent>, AdmissionError> {
+        self.inner.events()
+    }
+    fn admit<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+    ) -> Result<Session<'m, Running>, InitializationFailure> {
+        self.session(core, self.events()?)
+    }
+    fn admit_withheld<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+    ) -> Result<Session<'m, Running>, InitializationFailure> {
+        self.session(core, Vec::new())
+    }
+}
+
+#[test]
+fn a_live_pace_counts_from_the_runs_own_start() {
+    let case = AdmittedAt {
+        inner: delivering(vec![delivery(b"past zero", 104, 106)], 110),
+        origin: at(100),
+    };
+    let clock = ScriptedClock::new((0..=10).map(|elapsed| elapsed * SECOND).collect());
+    let plan = ReplayPlan {
+        simulated_per_wall: 1,
+        ..plan(&clock)
+    };
+    let cores = || reference(SECOND);
+    let verdict = replay_gate(ReplayGate::Pace, &case, &cores, &plan);
+    assert!(verdict.is_ok(), "{:?}", verdict.err());
+}
+
 #[test]
 fn an_honest_core_refused_past_an_input_passes_late_admission() {
     let case = delivering(vec![delivery(b"input", 18, 118)], 60);

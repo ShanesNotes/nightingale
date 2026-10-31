@@ -324,13 +324,14 @@ fn traced<'m>(
             clock,
             simulated_per_wall,
         } => {
+            let origin = head(&session).nanoseconds();
             while head(&session) < end {
                 let reading = clock
                     .elapsed_ns()
                     .ok_or(ReplayFailure::MissingEvidence { gate })?;
-                let allowed = SimTime::from_ns(reading.saturating_mul(*simulated_per_wall));
+                let allowed = origin.saturating_add(reading.saturating_mul(*simulated_per_wall));
                 let before = rows.len();
-                session = step_to(gate, session, allowed.min(end), &mut rows)?;
+                session = step_to(gate, session, SimTime::from_ns(allowed).min(end), &mut rows)?;
                 stopped_short |= rows.len() > before && head(&session) < end;
             }
         }
