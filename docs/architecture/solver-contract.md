@@ -567,7 +567,7 @@ Rejected: rejecting algebraic loops, and a quasi-steady reflex. An i64 ledger wi
 - We accept a run that can fault on an attempt past a waiting input where a cut might have passed, because the same run with that input unknown faults there too.
 - We accept a `Checkpoint` that encodes its bytes for an in-process retry too, in exchange for one path behind every restore.
 - We accept a checkpoint digest with no key, in exchange for no key management in a single-patient engine: it detects corruption, not a forger.
-- We accept keyed streams and forcings in the model hash, in exchange for chance that no solver, step policy or added stream can move.
+- We accept keyed streams and forcings in the model hash, in exchange for draws that no solver, step policy or added stream can move. An event's instant is held less tightly: a core's steps decide it to within the plan's distance, and a guard that crosses in another guard's span can move that landing inside the floor, because one landing reads one guard.
 - We accept 3 to 6 extra solves per landing, and a search that a cut may then drop, in exchange for a landing no core can skip and a causal proof with one case less.
 - We accept moving event location out of the solver crate, in exchange for one checked path and a seam a core never has to learn. A core-run search could use its own stages for less, and all of it would need rechecking.
 - We accept that a law's negative hazard rate silently holds flat, in exchange for an event that no step policy can move: a compile refusal cannot read a sign, and a run-time refusal would fault on a seed-dependent dip.

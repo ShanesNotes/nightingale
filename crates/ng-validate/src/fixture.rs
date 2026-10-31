@@ -436,6 +436,7 @@ pub struct ChanceCase {
     deliveries: Vec<Delivery>,
     seed: Seed,
     variant: Variant,
+    amplitude: f64,
     end: SimTime,
 }
 #[derive(Clone, Copy, PartialEq)]
@@ -618,6 +619,7 @@ impl ChanceCase {
             deliveries: vec![delivery],
             seed: Seed::new([1, 2, 3, 4]),
             variant,
+            amplitude: HAZARD_AMPLITUDE,
             end: SimTime::from_ns(240 * SECOND),
         })
     }
@@ -629,6 +631,13 @@ impl ChanceCase {
     }
     pub fn seeded(self, seed: Seed) -> Self {
         Self { seed, ..self }
+    }
+    /// A flat forcing, so a hazard rate is constant and a first crossing is its threshold over that rate.
+    pub fn steady(self) -> Self {
+        Self {
+            amplitude: 0.0,
+            ..self
+        }
     }
     pub fn memory(&self, local: &'static str) -> Option<RowId> {
         let kind = RowKind::Memory(named(local));
@@ -673,7 +682,7 @@ impl ChanceCase {
         packet.synthetic(ParameterKey::new("cv.return-rate"), body, recovery, note)?;
         let period = Measure::<Time>::new(KNOT_PERIOD_SECONDS)?;
         packet.synthetic(ParameterKey::new("cv.knot-period"), body, period, note)?;
-        let amplitude = Measure::<Dimensionless>::new(HAZARD_AMPLITUDE)?;
+        let amplitude = Measure::<Dimensionless>::new(self.amplitude)?;
         packet.synthetic(ParameterKey::new("cv.hazard-amplitude"), body, amplitude, note)?;
         let memory = |local| RowKind::Memory(named(local));
         packet.start(memory(TONE), Measure::<Dimensionless>::new(1.0)?, note)?;

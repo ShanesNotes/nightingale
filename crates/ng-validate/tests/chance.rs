@@ -15,6 +15,7 @@ const MILLISECOND: u64 = 1_000_000;
 /// A model default: the landing tolerance plus what a quadrature books wrong on this case, about a quarter of
 /// the coarser step times the rate's relative swing.
 const EVENT_TOLERANCE_NS: u64 = 500 * MILLISECOND;
+const ONSET_PER_SECOND: f64 = 0.05;
 const ONSET_INTEGRAL: &str = "onset-hazard";
 const RETURN_INTEGRAL: &str = "return-hazard";
 const SECOND_INTEGRAL: &str = "second-hazard";
@@ -547,32 +548,68 @@ fn a_core_that_stops_firing_differs_from_the_reference_by_its_list_of_events() {
     );
 }
 
+/// Two rhythms fire independently, so two unrelated events can share a landing under a coarser policy and come
+/// out in another order, and each still pairs by its stream and ordinal. One seed in 48 shows this.
 #[test]
 fn two_step_policies_may_fire_unrelated_events_in_another_order() {
-    let mut swapped = 0;
-    for word in 0..48 {
+    let case = ChanceCase::two_rhythms()
+        .expect("a body")
+        .delivering(Vec::new())
+        .seeded(Seed::new([37, 8, 9, 10]));
+    let order = |list: &[Fired]| -> Vec<(LawName, u64)> {
+        (list.iter())
+            .map(|event| (event.stream(), event.ordinal()))
+            .collect()
+    };
+    assert_ne!(
+        order(&events(&case, &reference(SECOND))),
+        order(&events(&case, &reference(SECOND / 16))),
+        "no two events swapped, so this test pressed nothing"
+    );
+    let clock = clock();
+    let fine = || reference(SECOND / 4);
+    let plan = plan(&clock, &fine);
+    let cores = || reference(SECOND);
+    let verdict = replay_gate(ReplayGate::StepPolicy, &case, &cores, &plan);
+    assert!(verdict.is_ok(), "{:?}", verdict.err());
+}
+
+/// A landing reads one guard's gap, and another guard can cross first in the same span. With the forcing flat a
+/// first crossing is a threshold over a rate, so this needs no run to compare with.
+#[test]
+fn a_landing_stops_at_the_first_crossing_whichever_guard_it_reads() {
+    let core = reference(64 * SECOND);
+    let floor = core.resolution().minimum_interval_ns() as f64;
+    let mut first_of_a_shared_span = 0;
+    for word in 0..64 {
         let case = ChanceCase::two_rhythms()
             .expect("a body")
+            .steady()
             .delivering(Vec::new())
-            .seeded(Seed::new([word, 8, 9, 10]));
-        let (coarse, known) = (
-            events(&case, &reference(SECOND)),
-            events(&case, &reference(SECOND / 16)),
-        );
-        let order = |list: &[Fired]| -> Vec<(LawName, u64)> {
-            list.iter()
-                .map(|event| (event.stream(), event.ordinal()))
-                .collect()
+            .until(at(64))
+            .seeded(Seed::new([word, 11, 12, 13]));
+        let fired = events(&case, &core);
+        let first = |stream: &str| {
+            (fired.iter()).find(|event| event.stream().local == stream && event.ordinal() == 0)
         };
-        swapped += usize::from(order(&coarse) != order(&known));
-        let clock = clock();
-        let fine = || reference(SECOND / 4);
-        let plan = plan(&clock, &fine);
-        let cores = || reference(SECOND);
-        let verdict = replay_gate(ReplayGate::StepPolicy, &case, &cores, &plan);
-        assert!(verdict.is_ok(), "seed {word}: {:?}", verdict.err());
+        let (read, other) = (first("ectopic-beat"), first("second-there"));
+        for event in [read, other].into_iter().flatten() {
+            let [threshold, _] = event.threshold().bits();
+            let truth = f64::from_bits(threshold) / ONSET_PER_SECOND * SECOND as f64;
+            let apart = event.at().nanoseconds() as f64 - truth;
+            assert!(
+                apart.abs() <= floor + 1.0,
+                "seed {word}: {apart} ns from its crossing"
+            );
+        }
+        if let (Some(read), Some(other)) = (read, other) {
+            first_of_a_shared_span += usize::from(other.at() < read.at());
+        }
     }
-    assert!(swapped > 0, "no two events swapped, so this test pressed nothing");
+    assert!(
+        first_of_a_shared_span >= 8,
+        "{first_of_a_shared_span} shared spans"
+    );
 }
 
 #[test]
