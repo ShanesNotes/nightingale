@@ -429,6 +429,10 @@ def is_text(x: object) -> bool:
     return isinstance(x, str) and bool(x.strip())
 
 
+def is_stated(x: object) -> bool:
+    return is_text(x) and x.strip().lower() not in ABSENT
+
+
 def is_text_list(x: object) -> bool:
     return isinstance(x, list) and bool(x) and all(map(is_text, x))
 
@@ -459,9 +463,11 @@ def schema(s: Store) -> list[Violation]:
             out.append(Violation(code, subject, f"drop {' '.join(sorted(extra))}: the language has no such field"))
         if not well_formed(row):
             out.append(Violation(code, subject, f"value {row.get('value')} is not one of the forms, in numbers"))
-        for field in ("population", "conditions", "method", "window"):
+        for field in ("conditions", "method", "window"):
             if not is_text(row.get(field)):
                 out.append(Violation(code, subject, f"{field} is text, and stated"))
+        if not is_stated(row.get("population")):
+            out.append(Violation(code, subject, "state the population measured (rule 11)"))
         if "n" in row and not (type(row["n"]) is int and row["n"] > 0):
             out.append(Violation(code, subject, "n is a positive count"))
         form = evidence_form(row.get("evidence"))
@@ -602,7 +608,7 @@ def locator(s: Store) -> list[Violation]:
         if evidence_form(e) != "source":
             continue
         at = e.get("locator")
-        if not is_text(at):
+        if not is_stated(at):
             out.append(Violation(code, subject, "a source record names its table or page"))
             continue
         if e.get("tier") == "textbook" and not (PAGE.search(at) and works.get(e.get("source"), {}).get("edition")):
@@ -638,6 +644,13 @@ def number(s: Store) -> list[Violation]:
     return out
 
 
+def same_dimension(a: dict, b: dict) -> bool:
+    try:
+        return parse_unit(a.get("unit", ""))[1] == parse_unit(b.get("unit", ""))[1]
+    except ValueError:
+        return False
+
+
 def is_flow_of(row: dict, amount: dict) -> bool:
     """A flow's dimension is its amount's per unit time, so a urine volume is no flow of a catecholamine."""
     try:
@@ -651,6 +664,17 @@ def is_flow_of(row: dict, amount: dict) -> bool:
 def has_spread(row: dict) -> bool:
     v = row.get("value", {})
     return "sd" in v or "coverage" in v or (("se" in v or "ci_low" in v) and "n" in row)
+
+
+def centred_on_one_mean(s: Store, row: dict) -> bool:
+    read = [r for r in map(s.rows.get, reads(row)) if r and well_formed(r)]
+    spreads = [r for r in read if r.get("kind") == "spread"]
+    means = [r for r in read if r.get("kind") != "spread"]
+    if len(spreads) != 1 or len(means) != 1:
+        return False
+    low, high = (si(row["value"][k], row["unit"]).value for k in ("low", "high"))
+    mean, spread = s.quantity(means[0]["id"]).value, s.quantity(spreads[0]["id"]).value
+    return math.isclose((low + high) / 2, mean, rel_tol=0.001) and math.isclose(high - low, 3.92 * spread, rel_tol=0.001)
 
 
 @rule("data.population")
@@ -669,8 +693,8 @@ def population(s: Store) -> list[Violation]:
                 out.append(Violation(code, subject, f"the value leaves {row['range']} (I16)"))
         elif row.get("kind") != "constant" and evidence_form(row.get("evidence")) == "source" and not has_spread(row):
             out.append(Violation(code, subject, "state a spread with its n, or name a sourced range record (rule 11)"))
-        elif evidence_form(row.get("evidence")) == "derived" and not any(
-            r.get("kind") != "constant" and has_spread(r) for r in under(s, row)
+        elif evidence_form(row.get("evidence")) in ("derived", "interval") and not any(
+            r.get("kind") != "constant" and has_spread(r) for r in under(s, row)[1:]
         ):
             out.append(Violation(code, subject, "no record under this derivation carries a population range (I16)"))
     return out
@@ -706,12 +730,11 @@ def derived(s: Store) -> list[Violation]:
             continue
         if row.get("kind") == "healthy_range" and any(r.get("kind") == "within_subject_variation" for r in under(s, row)):
             out.append(Violation(code, subject, "a healthy range is not built from within-subject variation (record 0004)"))
-        spreads = [r for r in map(rows.get, reads(row)) if r and r.get("kind") == "spread" and well_formed(r)]
-        if row.get("basis") == "mean_1_96_sd" and not (
-            len(spreads) == 1 and math.isclose(value["high"] - value["low"], 2 * 1.96 * central(spreads[0]["value"]), rel_tol=0.001)
-        ):
-            out.append(Violation(code, subject, "mean plus or minus 1.96 SD spans 3.92 of one population spread record"))
+        if row.get("kind") == "within_subject_variation" and any(r.get("kind") == "spread" for r in under(s, row)):
+            out.append(Violation(code, subject, "variation between people is not variation within one (record 0004)"))
         try:
+            if row.get("basis") == "mean_1_96_sd" and not centred_on_one_mean(s, row):
+                out.append(Violation(code, subject, "mean plus or minus 1.96 SD is centred on one mean and spans 3.92 of one spread"))
             if form == "derived":
                 compare(row, e["derived"], value["point"])
             else:
@@ -774,7 +797,7 @@ def snapshot(s: Store) -> list[Violation]:
     out = []
     for row in s.all_rows:
         stated = [row.get("method"), row.get("window")]
-        if row.get("kind") in ("anchor", "healthy_range") and not all(is_text(x) and x.strip().lower() not in ABSENT for x in stated):
+        if row.get("kind") in ("anchor", "healthy_range") and not all(map(is_stated, stated)):
             out.append(Violation("data.snapshot", str(row.get("id")), "an anchor or healthy range states its method and window (rule 17, record 0004)"))
     return out
 
@@ -817,6 +840,8 @@ def inferred(s: Store) -> list[Violation]:
         kinds = [rows.get(p, {}).get("kind") for p in set(premises)]
         if form == "adjust" and not (kind in kinds and "shift" in kinds):
             out.append(Violation(code, subject, "an adjustment rests on a sourced value of its kind and a sourced shift"))
+        if form == "adjust" and not all(same_dimension(rows.get(p, {}), rows.get(i.get("target"), {})) for p in premises):
+            out.append(Violation(code, subject, "an adjustment stays in its target's dimension"))
         if form == "flows" and not all(is_flow_of(rows.get(p, {}), rows.get(i.get("target"), {})) for p in premises):
             out.append(Violation(code, subject, "a flows inference reasons from sourced rates, in and out of the amount"))
         if (form == "flows") != is_text(i.get("unmeasurable")) or (form != "flows" and "unmeasurable" in i):
@@ -1017,6 +1042,7 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.schema", "fx.area", lambda s: on(s, "fx.area").update(value={"point": float("inf")})),
     ("data.schema", "fx.area", lambda s: on(s, "fx.area").update(value={"point": 1e31})),
     ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(population="")),
+    ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(population="Not stated")),
     ("data.schema", "fx.area", lambda s: on(s, "fx.area").update(method=123)),
     ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(n=0)),
     ("data.schema", "fx.rate", lambda s: on(s, "fx.rate").update(n=True)),
@@ -1062,6 +1088,7 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     )),
     ("data.locator", "fx.base", lambda s: evidence(s, "fx.base", locator="somewhere")),
     ("data.locator", "fx.rate", lambda s: evidence(s, "fx.rate", locator=True)),
+    ("data.locator", "fx.rate", lambda s: evidence(s, "fx.rate", locator="Not stated")),
     ("data.locator", "fx.base", lambda s: cut(work_of(s, "fixture-book"), "edition")),
     ("data.locator", "fx.share", lambda s: evidence(s, "fx.share", locator="somewhere")),
     ("data.locator", "fx.share", lambda s: evidence(s, "fx.share", locator="Table")),
@@ -1093,6 +1120,11 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.population", "fx.flow", lambda s: on(s, "fx.flow").update(range="fx.flow_band")),
     ("data.population", "fx.fitted", lambda s: on(s, "fx.fitted").update(range="fx.area_range", unit="m^2")),
     ("data.population", "fx.area", lambda s: on(s, "fx.area").update(value={"low": 1.0, "high": 3.0, "coverage": 0.95})),
+    ("data.population", "fx.bounded", lambda s: (
+        s.packet.append(dict(on(s, "fx.kilopascals"), id="fx.bounded", kind="anchor", value={"low": 90.0, "high": 110.0, "coverage": 0.95},
+                             evidence=dict(derived_low="fx.kilopascals * 0.9", derived_high="fx.kilopascals * 1.1", identity="fixture-paper"))),
+        s.packet.sort(key=lambda r: r["id"]),
+    )),
     ("data.population", "fx.reference", lambda s: (
         s.packet.append(dict(on(s, "fx.temp"), id="fx.reference", kind="anchor", evidence=dict(derived="fx.temp_kelvin", identity="fixture-paper"), unit="K", value={"point": 310.15})),
         s.packet.sort(key=lambda r: r["id"]),
@@ -1108,6 +1140,11 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
         evidence(s, "fx.interval", derived_low="fx.rate - 1.96 * fx.none_sd", derived_high="fx.rate + 1.96 * fx.none_sd"),
     )),
     ("data.derived", "fx.interval", lambda s: on(s, "fx.rate_sd").update(kind="shift")),
+    ("data.derived", "fx.none_sd", lambda s: on(s, "fx.none_sd").update(evidence=dict(derived="fx.rate_sd", identity="fixture-paper"))),
+    ("data.derived", "fx.interval", lambda s: (
+        on(s, "fx.interval").update(value={"low": 60.0, "high": 63.92, "coverage": 0.95}),
+        evidence(s, "fx.interval", derived_low="fx.rate", derived_high="fx.rate + 3.92 * fx.rate_sd"),
+    )),
     ("data.derived", "fx.interval", lambda s: (
         on(s, "fx.interval").update(value={"low": 58.355, "high": 61.645, "coverage": 0.95}),
         evidence(s, "fx.interval", derived_low="fx.rate - 1.645 * fx.rate_sd", derived_high="fx.rate + 1.645 * fx.rate_sd"),
@@ -1155,10 +1192,11 @@ PROBES: tuple[tuple[str, str, Callable[[Store], object]], ...] = (
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(population=" ")),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(premises=["fx.nothing"])),
     ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.nothing", "fx.dip", "fx.span"])),
-    ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.rate", "fx.span"])),
+    ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.leaf_more", "fx.span"])),
     ("data.inference", "inf.adjust", lambda s: inf(s, "inf.adjust").update(premises=["fx.dip", "fx.flux"])),
     ("data.inference", "inf.flows", lambda s: inf(s, "inf.flows").update(premises=["fx.area"])),
     ("data.inference", "inf.flows", lambda s: inf(s, "inf.flows").update(premises=["fx.rate"])),
+    ("data.inference", "inf.adjust", lambda s: on(s, "fx.narrowed").update(unit="mmHg")),
     ("data.inference", "fx.narrowed", lambda s: on(s, "fx.narrowed").update(value={"low": 1.0, "high": 11.0, "coverage": 0.95})),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(high=1e309)),
     ("data.inference", "inf.fill", lambda s: inf(s, "inf.fill").update(low=3, high=2)),
