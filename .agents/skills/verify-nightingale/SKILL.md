@@ -28,6 +28,7 @@ An agent loads this skill before it claims a change works or asks for a merge.
 - `10-rust.sh`: `cargo fmt`, clippy with warnings denied and the tests over the planned crates, then three checks: every doctest rustdoc lists must be one `05-seam`'s host scan read, every `compile_fail` doctest must fail with the error code its marker declares (`gate.py codes`, which reruns the doctests in a copy with the markers removed, since stable rustdoc does not check codes), and the bans probe requires clippy to reject a use of every `clippy.toml` entry and every stable `f64` and `f32` method in the toolchain's rust-src to be banned or named exact.
 - `15-f64.sh`: no bare `f64` or `f32` in the public API of a planned crate unless its `paths.toml` row allows the item with a reason, then a probe crate the scan must flag exactly.
 - `20-sketch.sh`: the solver-contract sketch built with warnings denied, every doctest, the error code of each compile-fail doctest through the same `gate.py codes`, and the coupling census.
+- `30-data.sh`: every rule in `tools/gate/data.py` over `data/` and each `Data:` line in `.scratch/`, then a must-fail probe for every rule on a synthetic base the tool holds.
 
 A new step is an `NN-name.sh` file in `tools/verify.d/`, named in `tools/gate/paths.toml`; `registration.steps` refuses a step that no run selects.
 

@@ -1,0 +1,3 @@
+{"id":"XC-01","level":"packet","claim":"CO = HR x SV","lhs":"cv.co.supine_rest","rhs":"cv.hr.supine_rest * cv.sv.supine_rest","tol_rel":0.05}
+{"id":"XC-04","level":"packet","claim":"Henderson-Hasselbalch against measured bicarbonate","lhs":"bc.constant.alpha_co2.plasma_37c * rs.paco2.arterial.supine_rest * 10 ** (bc.ph.arterial.supine_rest - bc.constant.pk1.37c)","rhs":"bc.hco3.arterial.measured","tol_abs":0.5,"tol_unit":"mmol/L"}
+{"id":"XC-06","level":"packet","claim":"PVR = (mPAP - PCWP) / CO","lhs":"(cv.mpap.supine_rest - cv.pcwp.supine_rest) / cv.co.supine_rest","rhs":"cv.pvr.supine_rest","tol_rel":0.1}

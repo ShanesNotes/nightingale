@@ -24,7 +24,7 @@ ALLOWED = ('README.md', 'AGENTS.md', 'CLAUDE.md', 'GLOSSARY.md', 'docs/srs.md', 
            'docs/architecture/solver-contract-sketch/', '.agents/skills/')
 CORE = ('docs/srs.md', 'docs/architecture/', 'docs/atlas/', 'docs/adr/')
 # First segments that name a repo-root path, here or in pulse. A code span starting with one must exist.
-ROOTS = {'docs', 'tools', 'crates', 'workers', 'apps', 'packages', 'seed', 'evals', 'infra', 'reference',
+ROOTS = {'docs', 'tools', 'crates', 'data', 'workers', 'apps', 'packages', 'seed', 'evals', 'infra', 'reference',
          '.agents', '.claude', '.github', '.scratch'}
 ROOT_FILES = {'AGENTS.md', 'README.md', 'CLAUDE.md', 'GLOSSARY.md', 'CONTEXT.md', 'rust-toolchain.toml',
               'clippy.toml', 'rustfmt.toml', 'Cargo.toml', 'Cargo.lock'}

@@ -27,6 +27,7 @@ The native Rust engine for one simulated patient. Read `docs/srs.md` first: it b
 | No unsafe code, host libm, hash order, wall clock or sockets, through the workspace lints and `clippy.toml` | `tools/verify.d/10-rust.sh`, whose bans probe proves each entry and that every stable float method is banned or exact |
 | No bare `f64` across a crate boundary | `tools/verify.d/15-f64.sh` |
 | A comparison of ledger values fails closed on a NaN: `Compensated` has only `at_most` | the compile-fail doctest in `crates/ng-contract/src/lib.rs` |
+| Records in `data/` hold closed fields and capped text, tier rules and locators; an anchor names a method and window and rests on no inference; a derivation recomputes with dimensions; each identity closes | `tools/verify.d/30-data.sh`, whose probes refuse a record built to break each rule |
 | Comments | the `/no-comments` report |
 
 ## Verify and merge
