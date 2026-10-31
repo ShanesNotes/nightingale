@@ -93,15 +93,12 @@ pub enum AdmissionError {
     StartOutsideSet {
         row: RowKind,
     },
-    /// A channel on a row this body does not hold.
     UnknownChannel {
         row: RowKind,
     },
-    /// A channel's error in a dimension its row is not.
     ChannelDimension {
         row: RowKind,
     },
-    /// A standard deviation below zero.
     NegativeChannelError {
         row: RowKind,
     },

@@ -7,7 +7,6 @@ use ng_validate::*;
 
 const SECOND: u64 = 1_000_000_000;
 const SEED: [u64; 4] = [5, 6, 7, 8];
-/// A synthetic spread, in the amount unit.
 const SYNTHETIC_SD: f64 = 2.0;
 
 fn seed() -> ObservationSeed {
@@ -75,7 +74,6 @@ fn read(
     observer.advance(&view).expect("the next revision")
 }
 
-/// What a run gave: its seal per step, its last digests, its firings and every observation.
 struct Watched {
     seals: Vec<Seal>,
     digests: RecordDigests,
@@ -119,8 +117,6 @@ fn same_run(first: &Watched, second: &Watched) {
     assert_eq!(first.fired, second.fired);
 }
 
-// Check 1.
-
 #[test]
 fn a_new_lens_on_a_finished_replay_gives_the_same_physiology_and_new_observations() {
     let case = water_case();
@@ -138,8 +134,6 @@ fn a_new_lens_on_a_finished_replay_gives_the_same_physiology_and_new_observation
     assert!(!other.observations.is_empty());
     assert_ne!(one.observations, other.observations);
 }
-
-// Check 2.
 
 struct Clock {
     next: Cell<u64>,
@@ -181,7 +175,6 @@ fn physiology_is_identical_with_observers_attached_detached_and_changed() {
     assert!(evidence.runs().iter().all(|run| *run == evidence.runs()[0]));
 }
 
-/// The bug a lens could cause: a caller hands its core the output times, so reading cuts a step.
 struct CutAtTheGrid {
     inner: ReferenceIntegrator,
     period_ns: u64,
@@ -230,7 +223,6 @@ fn a_core_told_the_grid_only_in_a_watched_run_fails_the_gate() {
         .expect("one caller's times in every run");
 }
 
-/// One step ends before the changed lens's first window results, so that run shows an observer read nothing.
 #[test]
 fn a_run_too_short_for_a_reading_to_result_is_missing_evidence() {
     let clock = Clock { next: Cell::new(0) };
@@ -243,8 +235,6 @@ fn a_run_too_short_for_a_reading_to_result_is_missing_evidence() {
         })
     );
 }
-
-// Check 3.
 
 #[test]
 fn an_observer_refuses_a_skipped_revision() {
@@ -317,9 +307,8 @@ fn water(id: &[u8], from: SimTime) -> AuthorizedInput {
     AuthorizedInput::from_command_receipt(Digest::of_canonical(b"a command"), event)
 }
 
-/// Two forks of one parent have a revision 2 each, with different seals.
 #[test]
-fn an_observer_refuses_a_same_numbered_revision_of_another_course() {
+fn an_observer_refuses_the_next_revision_of_another_course() {
     let case = water_case();
     let core = reference();
     let [a, _] = bare(&case);
@@ -478,8 +467,6 @@ fn an_observer_may_attach_to_a_run_under_way_and_reads_from_there() {
     assert!(matches!(observed[0].value(), ObservedValue::Present(_)));
 }
 
-// Check 4.
-
 fn lab(case: &TwoReservoirs) -> ObservationLens {
     let [a, b] = bare(case);
     let sd = measure::<Water>(SYNTHETIC_SD);
@@ -589,8 +576,6 @@ fn a_checkpoint_before_the_first_read_is_a_new_observer() {
     );
 }
 
-// Check 5.
-
 #[test]
 fn measurement_error_leaves_physiology_draws_unchanged() {
     let case = ChanceCase::ectopy().expect("a body").until(at(120));
@@ -658,8 +643,6 @@ fn measurement_error_is_a_function_of_seed_channel_and_instant_with_mean_zero_an
     assert!((sum / count).abs() < 4.0 / count.sqrt(), "mean {}", sum / count);
     assert!((square / count - 1.0).abs() < 0.02, "variance {}", square / count);
 }
-
-// One value at an instant, one rounding, a window, a delay and typed absence.
 
 #[test]
 fn a_channel_reads_what_a_firing_left_at_its_instant() {
@@ -836,7 +819,6 @@ fn huge() -> TwoReservoirs {
         .until(at(40))
 }
 
-/// A sum that overflows part way through a window crosses a checkpoint, and a non-finite pair has no bytes.
 #[test]
 fn a_sum_past_the_finite_range_is_an_invalid_signal_and_survives_a_checkpoint() {
     let case = huge();
@@ -874,8 +856,6 @@ fn an_error_past_the_finite_range_is_an_invalid_signal() {
         other => *other == ObservedValue::InvalidSignal,
     }));
 }
-
-// Refusals.
 
 #[test]
 fn a_lens_digest_covers_its_body_its_grid_and_each_channel() {
@@ -950,7 +930,6 @@ fn a_lens_refuses_two_channels_that_read_the_same_way() {
     assert!(case.body().lens(legal, count(SECOND)).is_ok());
 }
 
-/// Two devices on one row are two methods, each with its own errors.
 #[test]
 fn a_method_names_a_channel_and_keeps_its_draws_apart() {
     let case = water_case();
@@ -982,7 +961,6 @@ fn a_lens_for_another_body_is_refused() {
     );
 }
 
-/// Refuses the first attempt from `from` on, then faults on its retry.
 struct StopsFrom {
     inner: ReferenceIntegrator,
     from: SimTime,
@@ -1093,8 +1071,6 @@ fn any_change_to_checkpoint_bytes_is_refused_and_never_panics() {
     }
 }
 
-/// The bytes after the raw digest: the binding, the last seal's flag and seal, then each channel's window and
-/// queue. A digest has no key, so a file can recompute it.
 fn resealed(saved: &ObserverCheckpoint, edit: impl FnOnce(&mut Vec<u8>)) -> ObserverCheckpoint {
     let mut bytes = saved.as_bytes().to_vec();
     let mut body = bytes.split_off(RAW_DIGEST_END);
@@ -1110,7 +1086,7 @@ fn word_at(body: &mut [u8], at: usize, word: u64) {
 
 const RAW_DIGEST_END: usize = 40;
 const LAST_FLAG: usize = 32;
-const WINDOW: usize = 72;
+const WINDOW: usize = LAST_FLAG + 8 + 32;
 const SUM: usize = WINDOW + 8;
 const SEEN: usize = SUM + 16;
 const COUNT: usize = SEEN + 8;
@@ -1155,6 +1131,21 @@ fn a_resealed_window_is_held_to_what_an_observer_can_leave() {
     assert_eq!(resumed(&|body| word_at(body, WINDOW, 2)), malformed);
     assert_eq!(resumed(&|body| word_at(body, LAST_FLAG, 2)), malformed);
     assert_eq!(resumed(&|body| body.push(0)), malformed);
+}
+
+#[test]
+fn a_resealed_count_short_of_a_huge_window_cannot_overflow() {
+    let case = water_case();
+    let core = reference();
+    let [a, _] = bare(&case);
+    let lens = lens(case.body(), vec![a.averaged(count(u64::MAX))], SECOND);
+    let session = case.admit(&core).expect("admitted");
+    let mut observer = Observer::new(&lens, seed());
+    read(&mut observer, &session, &lens);
+    let forged = resealed(&observer.checkpoint(), |body| word_at(body, SEEN, u64::MAX - 1));
+    let mut resumed = Observer::resume(&lens, seed(), &forged).expect("a count below the window");
+    let (session, _) = step(session);
+    assert_eq!(read(&mut resumed, &session, &lens), Vec::new());
 }
 
 #[test]

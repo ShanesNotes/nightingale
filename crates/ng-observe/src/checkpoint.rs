@@ -36,8 +36,8 @@ fn finite(value: Compensated) -> Result<Compensated, Malformed> {
     }
 }
 
-/// The digest has no key, so a file that recomputes it reaches here: each value is held to what `advance` can
-/// leave, and a window's count stays below the count that would close it.
+/// The digest has no key, so a file that recomputes it reaches here. This refuses what a field alone shows no
+/// observer left. A false value that looks true still passes, as does a reading from the future.
 fn filling(read: &mut ByteReader<'_>, channel: &Channel) -> Result<Filling, Malformed> {
     match read.number()? {
         0 => {
@@ -96,8 +96,8 @@ fn parts(body: &[u8], channels: &[Channel]) -> Result<Parts, Malformed> {
 }
 
 impl<'l> Observer<'l> {
-    /// Windows, held readings and the seal last read. Taken after reading a revision, it stands beside that
-    /// revision's checkpoint and every fork that keeps its seal.
+    /// Taken after reading a revision, it stands beside that revision's checkpoint and every fork that keeps
+    /// its seal.
     pub fn checkpoint(&self) -> ObserverCheckpoint {
         let mut body = self.lens.observer_digest(self.seed).as_bytes().to_vec();
         match self.last {

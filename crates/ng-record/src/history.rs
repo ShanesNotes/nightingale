@@ -262,7 +262,6 @@ impl History {
     pub(crate) fn seal(&self) -> Digest {
         self.links.last().map_or(self.origin.seal, |link| link.seal)
     }
-    /// The seal the head follows; `None` at admission, which follows nothing.
     pub(crate) fn previous(&self) -> Option<Digest> {
         let head = self.links.len().checked_sub(1)?;
         Some(

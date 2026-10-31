@@ -7,8 +7,7 @@ use crate::{
 };
 use core::num::NonZeroU64;
 
-/// One channel to compile: how it is taken and the row it reads, then a window of whole grid periods, a delay
-/// and an error. With none of those it reads every grid instant, as it is, at once.
+/// With no window, delay or error it reads every grid instant, as it is, at once.
 pub struct ChannelSpec {
     method: &'static str,
     row: RowKind,
@@ -46,7 +45,7 @@ impl ChannelSpec {
     }
 }
 
-/// One compiled channel. Its key hashes what it reads and how, so adding a channel moves no other's draws.
+/// Its key hashes what it reads and how, so adding a channel moves no other's draws.
 pub struct Channel {
     method: &'static str,
     row: RowId,
@@ -67,8 +66,8 @@ impl Channel {
     pub fn window(&self) -> u64 {
         self.window
     }
-    /// Whether a window closes at this grid instant. Windows sit on whole multiples of their length, so this is
-    /// a function of the instant and an observer keeps no cursor.
+    /// Whether a window closes at this grid instant. Windows sit on whole multiples of their length, so an
+    /// observer keeps no cursor.
     pub fn closes(&self, at: SimTime) -> bool {
         (at.nanoseconds() / self.period_ns).is_multiple_of(self.window)
     }
@@ -76,7 +75,7 @@ impl Channel {
     pub fn available(&self, collected: SimTime) -> Option<SimTime> {
         collected.plus_ns(self.delay_ns)
     }
-    /// This reading's error, zero for a channel with none. It reads no state, so it moves none.
+    /// This reading's error, zero for a channel with none.
     pub fn error(&self, seed: ObservationSeed, at: SimTime) -> Compensated {
         let Some(sd) = self.sd else {
             return Compensated::ZERO;
@@ -86,7 +85,6 @@ impl Channel {
     }
 }
 
-/// A compiled set of channels and a grid, hashed apart from the body. No run reads it.
 pub struct ObservationLens {
     model: ModelHash,
     period_ns: u64,
@@ -117,7 +115,7 @@ impl ObservationLens {
 }
 
 impl CompiledBody {
-    /// Compiles channels and a grid against this body. A lens applies to any replay, because no run reads it.
+    /// A lens applies to any replay, because no run reads it.
     pub fn lens(
         &self,
         channels: Vec<ChannelSpec>,

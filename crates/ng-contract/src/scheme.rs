@@ -258,7 +258,6 @@ mod domains {
         const NAME: &'static str;
     }
 }
-/// A kind of chance. The set is closed.
 pub trait SeedDomain: domains::Sealed {}
 macro_rules! seed_domains {
     ($($domain:ident = $name:literal),* $(,)?) => {$(
@@ -276,7 +275,6 @@ seed_domains!(
     ObservationDomain = "observation"
 );
 
-/// A seed of one domain, so a seed of one kind of chance never type-checks as another.
 #[derive(Clone, Copy)]
 pub struct DomainSeed<D> {
     words: [u64; 4],
@@ -301,7 +299,7 @@ impl<D: Copy> DomainSeed<D> {
 pub type PacketSeed = DomainSeed<PacketDomain>;
 /// The seed in a run's identity: how the run varies.
 pub type Seed = DomainSeed<RunDomain>;
-/// How observations err. Only an observer takes it.
+/// How observations err.
 pub type ObservationSeed = DomainSeed<ObservationDomain>;
 
 /// The body model's hash, the packet's hash, the run seed and the declared resolution. Nothing else.

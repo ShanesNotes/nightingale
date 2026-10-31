@@ -771,16 +771,17 @@ fn step_policy_gate(
 }
 
 const WATCHING: [u64; 4] = [7, 7, 7, 7];
+const INSTANTS_PER_STEP: u64 = 2;
 const CHANGED_WINDOW: NonZeroU64 = NonZeroU64::MIN.saturating_add(1);
 
-/// Both lenses read every row, so no case can leave one out. Their grids differ and hold about two instants a
-/// step, and the second adds a window and a delay. No error here: a gate cannot name a row's dimension, and an
-/// error reads no state.
+/// Both lenses read every row, so no case can leave one out. No error here: a gate cannot name a row's
+/// dimension, and an error reads no state.
 fn lenses(body: &CompiledBody, rows: &[Row]) -> Result<[ObservationLens; 2], AdmissionError> {
     let every_row = || (body.rows().iter()).map(|row| ChannelSpec::new("every row", row.kind()));
     let span = rows.last().map_or(0, |row| row.time.nanoseconds())
         - rows.first().map_or(0, |row| row.time.nanoseconds());
-    let period_ns = NonZeroU64::new(span / (2 * rows.len() as u64)).unwrap_or(NonZeroU64::MIN);
+    let period_ns =
+        NonZeroU64::new(span / (INSTANTS_PER_STEP * rows.len() as u64)).unwrap_or(NonZeroU64::MIN);
     let changed = every_row().map(|channel| channel.averaged(CHANGED_WINDOW).delayed(period_ns.get()));
     Ok([
         body.lens(every_row().collect(), period_ns)?,
@@ -791,8 +792,7 @@ fn lenses(body: &CompiledBody, rows: &[Row]) -> Result<[ObservationLens; 2], Adm
     ])
 }
 
-/// A run with an observer on it, and the digest of what it observed. One that read no value is no evidence an
-/// observer was there.
+/// A run that read no value is no evidence an observer was there.
 fn watched(
     gate: ReplayGate,
     case: &dyn ReplayCase,
@@ -824,8 +824,8 @@ fn watched(
     Ok((Trace { rows, last, seal }, stream))
 }
 
-/// A view borrows the session and a record holds no `Cell`, so reading moves no bit. What this gate catches is a
-/// core told about the reading, the way an output time once cut a step.
+/// A view borrows the session and a record holds no `Cell`, so reading moves no bit. What this gate catches
+/// is a core told about the reading.
 fn non_perturbation_gate(
     case: &dyn ReplayCase,
     cores: &dyn CoreFactory,

@@ -1,8 +1,7 @@
 use crate::session::Session;
 use ng_contract::{AcceptedStateView, Compensated, Digest, ObservationLens, SimTime};
 
-/// One accepted revision through a lens. It lends values and no reference to the record, and it borrows the
-/// session, so no step can run while it is alive.
+/// One accepted revision through a lens.
 pub struct ObservationView<'r> {
     lens: &'r ObservationLens,
     accepted: AcceptedStateView<'r>,

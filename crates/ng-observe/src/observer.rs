@@ -1,8 +1,8 @@
 use ng_contract::{AdmissibleSet, Compensated, Digest, ObservationLens, ObservationSeed, SimTime};
 use ng_record::{ObservationRefusal, ObservationView};
 
-/// A snapshot an observer took. Its channel in the lens gives its site and method. A reading held by its delay
-/// shows twice, `Pending` when collected and with its value once the head reaches `available`.
+/// Its channel in the lens gives its site and method. A reading held by its delay shows twice, `Pending` when
+/// collected and with its value once the head reaches `available`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Observation {
     channel: usize,
@@ -42,7 +42,7 @@ pub enum ObservedValue {
     InvalidSignal,
 }
 
-/// A non-finite pair has no bytes, because `Compensated::from_bits` refuses it, so one never stays in a window.
+/// A sum that overflows is a NaN pair, which `Compensated::from_bits` refuses, so none stays in a window.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Filling {
     Mean { sum: Compensated, seen: u64 },
@@ -59,7 +59,10 @@ impl Filling {
         };
         let sum = sum.plus(value);
         if AdmissibleSet::Finite.holds(sum) {
-            Self::Mean { sum, seen: seen + 1 }
+            Self::Mean {
+                sum,
+                seen: seen.saturating_add(1),
+            }
         } else {
             Self::Invalid
         }
@@ -75,7 +78,6 @@ impl Filling {
     }
 }
 
-/// A reading its delay holds.
 #[derive(Clone, Copy)]
 pub(crate) struct Held {
     pub(crate) collected: SimTime,
@@ -83,14 +85,13 @@ pub(crate) struct Held {
     pub(crate) value: Compensated,
 }
 
-/// One per channel. A channel's delay is constant, so its queue is in `available` order.
+/// A channel's delay is constant, so its queue is in `available` order.
 pub(crate) struct Reading {
     pub(crate) filling: Filling,
     pub(crate) held: Vec<Held>,
 }
 
-/// Holds its own state, so physiology never depends on it. `last` is the seal it last read and `None` only
-/// before its first read, which attaches it to whatever revision that view holds.
+/// Its first read attaches it to whatever revision that view holds.
 pub struct Observer<'l> {
     pub(crate) lens: &'l ObservationLens,
     pub(crate) seed: ObservationSeed,
@@ -144,7 +145,7 @@ impl<'l> Observer<'l> {
         self.last = Some(view.seal());
         Ok(observed)
     }
-    /// Closes one window. Only a value waits: an absence is known at once.
+    /// Only a value waits: an absence is known at once.
     fn close(&mut self, channel: usize, at: SimTime) -> Observation {
         let settings = &self.lens.channels()[channel];
         let reading = &mut self.readings[channel];

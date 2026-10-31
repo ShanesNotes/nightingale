@@ -72,8 +72,8 @@ fn spline(keyed: u64, period_ns: u64, at: SimTime) -> f64 {
         / 6.0
 }
 
-/// Twelve uniform words less six: mean zero and variance one, inside (-6, 6), from sums alone. A pure function
-/// of seed, channel and instant, so an observer keeps no cursor.
+/// Twelve uniform words less six: mean zero and variance one, inside (-6, 6), from sums alone. Keyed by the
+/// instant, so an observer keeps no cursor.
 pub(crate) fn measurement_error(seed: ObservationSeed, channel: u64, at: SimTime) -> f64 {
     let instant = word(keyed(seed, channel), at.nanoseconds());
     let sum: f64 = (0..12).map(|index| open_unit(word(instant, index))).sum();
