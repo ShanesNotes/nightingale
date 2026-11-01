@@ -3,7 +3,9 @@ use ng_contract::*;
 use ng_record::{Running, Session};
 
 const NEWTON_LIMIT: u32 = 32;
-/// An update this small, in units of rounding, moved nothing a row can show.
+/// Newton stops when no unknown moved by more than this share of itself. Each is read at its own size and no
+/// tolerance is read, so a row or a fit too small for the tolerance to see is solved all the same. An unknown that
+/// solves to zero never gets there, which costs the limit's updates and nothing else.
 const NEWTON_STOP: f64 = 8.0 * f64::EPSILON;
 
 /// A model default reported with every result, for rows near unit size. A packet of far smaller amounts states its
@@ -11,23 +13,6 @@ const NEWTON_STOP: f64 = 8.0 * f64::EPSILON;
 pub fn admission_tolerance() -> ErrorScales {
     let scale = |value| Measure::new(value).expect("a finite constant");
     ErrorScales::uniform(scale(1e-9), scale(1e-12)).expect("positive constants")
-}
-
-/// Whether an update moved each unknown by rounding alone, read against the unknown and the terms of its own row,
-/// each a slope times an unknown, which give a size to an unknown that stands at zero. Only the update can show a fit
-/// or a slow row still moving while every residual is rounding. No tolerance is read and nothing has one scale, so
-/// a row or a fit too small for the tolerance to see is solved all the same.
-fn settled(update: &[f64], jacobian: SparseView<'_>, unknowns: &[f64]) -> bool {
-    (update.iter().zip(unknowns).enumerate()).all(|(row, (change, unknown))| {
-        let entries = jacobian.row_offsets()[row]..jacobian.row_offsets()[row + 1];
-        let terms = jacobian.columns()[entries.clone()]
-            .iter()
-            .zip(&jacobian.values()[entries]);
-        let size: f64 = terms
-            .map(|(column, slope)| (slope * unknowns[column.index()]).abs())
-            .sum();
-        change.abs() <= NEWTON_STOP * (unknown.abs() + size)
-    })
 }
 
 /// The one admission solve, a function of the packet and the window alone, so every core starts from one start
@@ -47,11 +32,13 @@ fn initialize(system: &InitializationSystem<'_>) -> SolveWorkspace {
             break;
         };
         let unknowns = workspace.unknowns_mut();
-        if settled(&update, jacobian.view(), unknowns) {
-            break;
-        }
+        let settled = (update.iter().zip(unknowns.iter()))
+            .all(|(change, unknown)| change.abs() <= NEWTON_STOP * unknown.abs());
         for (unknown, change) in unknowns.iter_mut().zip(update) {
             *unknown -= change;
+        }
+        if settled {
+            break;
         }
     }
     workspace

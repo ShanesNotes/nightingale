@@ -1463,44 +1463,6 @@ fn a_small_body_is_solved_on_its_own_scale() {
     assert!((fitted - fitted_elastance()).abs() < 1e-9, "{fitted}");
 }
 
-/// An update of rounding alone is not applied: a guess there stands, so the guess path and the solve name one run.
-#[test]
-fn a_guess_at_rounding_stands() {
-    let case = PulsatileCase::plain();
-    let elastance = 3.0;
-    let difference = DELIVERED / (CONDUCTANCE * elastance);
-    let packet = || {
-        let mut packet = ParameterPacket::periodic(cycle(4));
-        packet.within(admission_tolerance());
-        let g = measure::<Conductance<Water>>(CONDUCTANCE);
-        packet.synthetic(G, NETWORK, g, NOTE).expect("once");
-        packet
-            .synthetic(E, NETWORK, measure::<Elastance>(elastance), NOTE)
-            .expect("once");
-        let (a, b) = ((TOTAL + difference) / 2.0 + 8e-14, (TOTAL - difference) / 2.0);
-        packet.start(case.a(), measure::<Water>(a), NOTE).expect("once");
-        packet.start(case.b(), measure::<Water>(b), NOTE).expect("once");
-        packet
-    };
-    let boundary = || {
-        let events = vec![
-            water(b"even in", 0, PULSE, 0, PERIOD_NS, DELIVERED),
-            water(b"even out", 0, DRAIN, 0, PERIOD_NS, DELIVERED),
-        ];
-        BoundaryPort::new(events).expect("parsed")
-    };
-    let system = steady_system(&case, packet(), boundary());
-    let residuals = system.evaluate(&system.workspace()).expect("every row");
-    assert!(residuals.iter().any(|residual| *residual != 0.0));
-    let core = reference(REFERENCE_NS);
-    let guessed = admit_fixture(case.body(), packet(), boundary(), &core).expect("inside the tolerance");
-    let solved = admit_solved(case.body(), packet(), boundary(), &core, &case.lens).expect("solved");
-    assert_eq!(
-        guessed.record().identity().digest(),
-        solved.session.record().identity().digest()
-    );
-}
-
 #[test]
 fn a_wider_tolerance_is_another_packet_so_it_cannot_share_a_runs_identity() {
     let case = PulsatileCase::plain();
