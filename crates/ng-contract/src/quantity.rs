@@ -44,6 +44,10 @@ pub struct Quotient<A, B>(PhantomData<(A, B)>);
 /// A set point in the unit of the variable it guards. It is its own dimension, so no law adds,
 /// subtracts or relaxes across the two; `Kernel::deviation` is the one operator that meets them.
 pub struct Reference<U: Sensed>(PhantomData<U>);
+/// How far a sensed value stands from its set point. It is its own dimension, so a set point can never
+/// become the variable it guards: a deviation leaves only over a width in the guarded unit, or as a set
+/// point's drift.
+pub struct Deviation<U: Sensed>(PhantomData<U>);
 /// Volume per amount of a species: a fixed structural coefficient of the schema, not a parameter.
 pub struct PartialVolume<Q>(PhantomData<Q>);
 pub struct PerSite<C: SiteClass, U>(PhantomData<(C, U)>);
@@ -111,6 +115,12 @@ impl<U: Sensed> dimensions::Sealed for Reference<U> {
     }
 }
 impl<U: Sensed> Dimension for Reference<U> {}
+impl<U: Sensed> dimensions::Sealed for Deviation<U> {
+    fn name() -> String {
+        format!("deviation({})", U::name())
+    }
+}
+impl<U: Sensed> Dimension for Deviation<U> {}
 
 impl material::Sealed for Dimensionless {}
 impl NonMaterial for Dimensionless {}
@@ -145,6 +155,8 @@ same_dimension! {
     Quotient<Pressure, Pressure> => Dimensionless;
     Quotient<Volume, Volume> => Dimensionless;
 }
+impl<U: Sensed> identities::Sealed<Dimensionless> for Quotient<Deviation<U>, U> {}
+impl<U: Sensed> SameDimension<Dimensionless> for Quotient<Deviation<U>, U> {}
 
 pub(crate) fn dimension<U: Dimension>() -> String {
     U::name()

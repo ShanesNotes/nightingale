@@ -317,9 +317,28 @@
 //! ```
 //! use ng_contract::*;
 //! fn error<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>, pressure: Expr<'b, 'k, Nervous, Pressure>,
-//!     set_point: &StateSlot<'b, Nervous, Reference<Pressure>>) -> Expr<'b, 'k, Nervous, Pressure> {
+//!     set_point: &StateSlot<'b, Nervous, Reference<Pressure>>) -> Expr<'b, 'k, Nervous, Deviation<Pressure>> {
 //!     let reference = k.state(set_point);
 //!     k.deviation(pressure, reference)
+//! }
+//! ```
+//! A deviation is not the variable either, so a set point cannot come back as one through it.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn as_pressure<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>, pressure: Expr<'b, 'k, Nervous, Pressure>,
+//!     reference: Expr<'b, 'k, Nervous, Reference<Pressure>>) -> Expr<'b, 'k, Nervous, Pressure> {
+//!     let gap = k.deviation(pressure, reference);
+//!     k.subtract(pressure, gap)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn over_width<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>, pressure: Expr<'b, 'k, Nervous, Pressure>,
+//!     reference: Expr<'b, 'k, Nervous, Reference<Pressure>>, width: Expr<'b, 'k, Nervous, Pressure>)
+//!     -> Expr<'b, 'k, Nervous, Dimensionless> {
+//!     let gap = k.deviation(pressure, reference);
+//!     let ratio = k.divide(gap, width);
+//!     k.as_dimension::<_, Dimensionless>(ratio)
 //! }
 //! ```
 //! A product gets a name only through the identity table: volume times volume is not a pressure.

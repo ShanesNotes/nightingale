@@ -52,6 +52,7 @@ fn baroreflex<'b>(scope: NervousScope<'b>) -> Result<Fragment<'b, Nervous>, Admi
         ParameterKey::new("ns.chronic-set-point"),
         Admissible::unit_interval(),
     );
+    let width = laws.parameter::<Dimensionless>(ParameterKey::new("ns.afferent-width"), Admissible::positive());
     let inverse_tau = laws.parameter(ParameterKey::new("ns.afferent-rate"), Admissible::nonnegative());
     let resetting = laws.parameter(ParameterKey::new("ns.resetting-rate"), Admissible::nonnegative());
     let (reflex, slow) = (
@@ -62,7 +63,10 @@ fn baroreflex<'b>(scope: NervousScope<'b>) -> Result<Fragment<'b, Nervous>, Admi
         let stretch = k.read(&afferents.carotid_sinus_stretch);
         let reference = k.state(&set_point);
         let error = k.deviation(stretch, reference);
-        let target = k.logistic(error);
+        let width = k.parameter(&width);
+        let ratio = k.divide(error, width);
+        let ratio = k.as_dimension::<_, Dimensionless>(ratio);
+        let target = k.logistic(ratio);
         let current = k.state(&filter);
         let speed = k.parameter(&inverse_tau);
         let rate = k.relax(target, current, speed);

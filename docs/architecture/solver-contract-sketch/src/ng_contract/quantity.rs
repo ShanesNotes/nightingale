@@ -27,6 +27,10 @@ impl NonMaterial for Phase {}
 /// variable; `Kernel::deviation` is the one operator that compares the two. Only a sensed
 /// dimension has one, and a set point is never itself sensed, so no guard fires on one.
 pub struct Reference<U: Sensed>(PhantomData<U>);
+/// How far a sensed value stands from its set point. It is its own dimension, so a set point can never
+/// become the variable it guards: a deviation leaves only over a width in the guarded unit, or as a set
+/// point's drift.
+pub struct Deviation<U: Sensed>(PhantomData<U>);
 impl<U: Sensed> sealed::NonMaterial for Reference<U> {}
 impl<U: Sensed> NonMaterial for Reference<U> {}
 mod sensed {
@@ -95,6 +99,8 @@ same_dimension! {
     Quotient<Pressure, Pressure> => Dimensionless;
     Quotient<Volume, Volume> => Dimensionless;
 }
+impl<U: Sensed> identities::SameDimension<Dimensionless> for Quotient<Deviation<U>, U> {}
+impl<U: Sensed> SameDimension<Dimensionless> for Quotient<Deviation<U>, U> {}
 
 /// Validated finite value in a declared dimension; wire numbers are parsed outside laws.
 pub struct Measure<U> {

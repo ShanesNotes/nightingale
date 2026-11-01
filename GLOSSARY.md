@@ -268,6 +268,9 @@ _Avoid_: organ state
 **Set point**:
 Slow memory in the unit of the variable it guards, compared with that variable only as a deviation. History and disease move it; nothing writes the guarded variable.
 
+**Deviation**:
+How far a sensed value stands from its set point. It is its own dimension, so a set point can never become the variable it guards.
+
 **Mode**:
 A discrete state of a law, such as a valve open or shut. Only a guard changes it.
 

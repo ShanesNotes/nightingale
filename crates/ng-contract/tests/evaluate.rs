@@ -308,6 +308,9 @@ fn nearly_every_operator() -> Result<(CompiledBody, LawName), AdmissionError> {
             let measured = k.state(&first);
             let reference = k.state(&set_point);
             let error = k.deviation(measured, reference);
+            let spread = k.parameter(&width);
+            let error = k.divide(error, spread);
+            let error = k.as_dimension::<_, Dimensionless>(error);
             let target = k.subtract(log, error);
             let y = k.state(&second);
             let rate = k.parameter(&speed);

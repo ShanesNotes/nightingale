@@ -3,8 +3,8 @@ use crate::identity::{Canonical, Seal};
 use crate::quantity::dimension;
 use crate::scope::ENCLOSURE_PRESSURE;
 use crate::{
-    Admissible, AdmissibleSet, AdmissionError, Basis, Boundary, Class, Conductance, Dimension, Dimensionless,
-    NonMaterial, Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reference,
+    Admissible, AdmissibleSet, AdmissionError, Basis, Boundary, Class, Conductance, Deviation, Dimension,
+    Dimensionless, NonMaterial, Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reference,
     SameDimension, Sensed, SiteClass, Time, ValidityRange, Volume, Water,
 };
 use core::cell::Cell;
@@ -441,8 +441,16 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
         &mut self,
         measured: Expr<'b, 'k, O, U>,
         reference: Expr<'b, 'k, O, Reference<U>>,
-    ) -> Expr<'b, 'k, O, U> {
+    ) -> Expr<'b, 'k, O, Deviation<U>> {
         self.push(Op::Deviation([measured.at, reference.at]))
+    }
+    /// `speed * deviation`: a set point moving toward what it senses, which `relax` cannot write.
+    pub fn drift<U: Sensed>(
+        &mut self,
+        deviation: Expr<'b, 'k, O, Deviation<U>>,
+        speed: Expr<'b, 'k, O, Rate<Dimensionless>>,
+    ) -> Expr<'b, 'k, O, Rate<Reference<U>>> {
+        self.push(Op::Scale([deviation.at, speed.at]))
     }
     /// `speed (target - current)`: relaxation as a rate, which never sees a solver's interval.
     pub fn relax<U>(

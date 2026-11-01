@@ -10,7 +10,7 @@
 use super::catalog::{Coupling, Defines, Reads};
 use super::{
     Admissible, AdmissionError, Brand, Conductance, Digest, Dimensionless, Energy, NonMaterial,
-    ParameterKey, PerSite, PoolRef, Pressure, Product, Quotient, RateClass, Rate, Reference,
+    ParameterKey, PerSite, PoolRef, Pressure, Product, Quotient, RateClass, Rate, Reference, Deviation,
     Representation, SameDimension, Sensed, SiteClass, ValidityRange, Volume,
 };
 use core::marker::PhantomData;
@@ -202,7 +202,15 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
         &mut self,
         _measured: Expr<'b, 'k, O, U>,
         _reference: Expr<'b, 'k, O, Reference<U>>,
-    ) -> Expr<'b, 'k, O, U> {
+    ) -> Expr<'b, 'k, O, Deviation<U>> {
+        todo!()
+    }
+    /// `speed * deviation`: a set point moving toward what it senses, which `relax` cannot write.
+    pub fn drift<U: Sensed>(
+        &mut self,
+        _deviation: Expr<'b, 'k, O, Deviation<U>>,
+        _speed: Expr<'b, 'k, O, Rate<Dimensionless>>,
+    ) -> Expr<'b, 'k, O, Rate<Reference<U>>> {
         todo!()
     }
     /// The stream's value for its current event ordinal, uniform on (0, 1). It stays constant
