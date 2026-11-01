@@ -1,3 +1,4 @@
+use crate::elimination::Factors;
 use crate::{InitializationSystem, Jacobian};
 
 /// A pivot this small beside its row's largest entry is rounding, not a value.
@@ -6,7 +7,12 @@ const ROUNDING: f64 = 8.0 * f64::EPSILON;
 /// `matrix` holds each row with its right side last. A row with no pivot left is named: it has no rank. A pivot is read
 /// beside its row and its column as given, and the smaller of the two: after elimination a row's own largest entry can be
 /// rounding, and a row and a column can each run at a scale of their own.
-pub fn eliminate(mut matrix: Vec<Vec<f64>>) -> Result<Vec<f64>, usize> {
+pub fn eliminate(matrix: Vec<Vec<f64>>) -> Result<Vec<f64>, usize> {
+    Ok(reduced(matrix)?.into_iter().map(|answers| answers[0]).collect())
+}
+
+/// Each row holds its entries and then any number of right sides, and each row of the answer one value per side.
+fn reduced(mut matrix: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>, usize> {
     let size = matrix.len();
     let mut slots: Vec<usize> = (0..size).collect();
     let largest = |most: f64, cell: f64| if cell.abs() > most { cell.abs() } else { most };
@@ -43,14 +49,49 @@ pub fn eliminate(mut matrix: Vec<Vec<f64>>) -> Result<Vec<f64>, usize> {
             }
         }
     }
-    let mut solution = vec![0.0; size];
+    let sides = matrix.first().map_or(0, |row| row.len() - size);
+    let mut answers = vec![vec![0.0; sides]; size];
     for row in (0..size).rev() {
-        let known: f64 = (row + 1..size)
-            .map(|column| matrix[row][column] * solution[column])
-            .sum();
-        solution[row] = (matrix[row][size] - known) / matrix[row][row];
+        for side in 0..sides {
+            let known: f64 = (row + 1..size)
+                .map(|column| matrix[row][column] * answers[column][side])
+                .sum();
+            answers[row][side] = (matrix[row][size + side] - known) / matrix[row][row];
+        }
     }
-    Ok(solution)
+    Ok(answers)
+}
+
+/// One point's block, over the body's fixed elimination or, where that meets a zero pivot, whole.
+enum Block<'b> {
+    Fixed(Factors<'b>),
+    Whole(Vec<Vec<f64>>),
+}
+impl Block<'_> {
+    fn solve(&self, side: &mut [f64]) {
+        match self {
+            Block::Fixed(factors) => factors.solve(side),
+            Block::Whole(inverse) => {
+                let product = |row: &Vec<f64>| row.iter().zip(&*side).map(|(cell, value)| cell * value).sum();
+                let answer: Vec<f64> = inverse.iter().map(product).collect();
+                side.copy_from_slice(&answer);
+            }
+        }
+    }
+}
+
+/// A zero on the fixed path says nothing of rank, so the block is read whole before a row is named.
+fn inverse(block: &Jacobian) -> Result<Vec<Vec<f64>>, usize> {
+    let view = block.view();
+    let size = view.row_offsets().len() - 1;
+    let mut matrix = vec![vec![0.0; 2 * size]; size];
+    for (row, cells) in matrix.iter_mut().enumerate() {
+        for entry in view.row_offsets()[row]..view.row_offsets()[row + 1] {
+            cells[view.columns()[entry].index()] += view.values()[entry];
+        }
+        cells[size + row] = 1.0;
+    }
+    reduced(matrix)
 }
 
 impl InitializationSystem<'_> {
@@ -90,7 +131,11 @@ impl InitializationSystem<'_> {
         let (mut before, mut first) = (Vec::new(), Vec::new());
         let mut anchors = vec![vec![0.0; width]; fits];
         for point in 0..last {
-            let lu = body.factor(&system.block(ring, point))?;
+            let block = system.block(ring, point);
+            let lu = match body.factor(&block) {
+                Ok(factors) => Block::Fixed(factors),
+                Err(_) => Block::Whole(inverse(&block)?),
+            };
             let mut walked = vec![0.0; width * size];
             for (at, column) in walked.chunks_mut(size).enumerate() {
                 for (row, cell) in column.iter_mut().enumerate() {

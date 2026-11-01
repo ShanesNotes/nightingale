@@ -128,7 +128,12 @@ fn route_owner(held: &[HeldCard], route: &'static str) -> &'static str {
 /// Whether a route's columns come from one flow row: a valve's always, and any fluid route's in a body that carries
 /// more than water, where several columns share the rate. A route of water alone is its one column.
 fn flows(family: Family, schema: &Schema) -> bool {
-    family == Family::Valves || (family.fluid() && !schema.carried.is_empty())
+    let beside_water = |pool: &PoolRef| {
+        let fluid = matches!(pool.space, Space::Plasma | Space::Lumen | Space::Interstitium);
+        fluid && pool.species != Species::Water
+    };
+    let carries = !schema.carried.is_empty() || schema.placed.iter().any(beside_water);
+    family == Family::Valves || (family.fluid() && carries)
 }
 
 fn lift_flows(fragments: &mut [FragmentData], schema: &Schema) {

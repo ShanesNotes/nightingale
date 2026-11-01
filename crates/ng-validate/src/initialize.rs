@@ -76,7 +76,7 @@ fn merit(system: &InitializationSystem<'_>, unknowns: &[f64], residuals: &[f64])
     (residuals.iter().zip(unknowns).enumerate()).map(read).sum()
 }
 
-/// Takes as much of a Newton update as the laws allow. A fit moves by at most a quarter of itself and an amount keeps a
+/// Takes as much of a Newton update as the laws allow. A fit moves by at most a quarter of its size and an amount keeps a
 /// tenth of what it held, so a long update cannot throw a body past a place its laws have a value, and a trial that
 /// has no value there or stands further from solved halves. The nearest trial stands when none is nearer than the start.
 fn step(
@@ -94,7 +94,7 @@ fn step(
     let start = workspace.unknowns_mut().to_vec();
     let mut share = (update[fits..].iter().zip(&start[fits..]))
         .filter(|(change, _)| change.abs() > 0.0)
-        .map(|(change, fit)| FIT_REACH * fit.abs() / change.abs())
+        .map(|(change, fit)| FIT_REACH * (1.0 + fit.abs()) / change.abs())
         .fold(1.0, |least, reach| if reach < least { reach } else { least });
     let was = merit(system, &start, residuals);
     let mut best: Option<(f64, Vec<f64>)> = None;
@@ -110,7 +110,7 @@ fn step(
         }
         if let Ok(trial) = system.evaluate(workspace) {
             let unknowns = workspace.unknowns_mut().to_vec();
-            let now = merit(system, &unknowns, &trial);
+            let now = merit(system, &start, &trial);
             if now < was {
                 return true;
             }
