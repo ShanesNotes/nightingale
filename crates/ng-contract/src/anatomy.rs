@@ -2,6 +2,7 @@ use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::{AdmissionError, Digest, Length, Measure, ParameterKey};
 use core::cmp::Reverse;
+use core::iter::successors;
 use core::marker::PhantomData;
 use core::ops::Range;
 
@@ -145,9 +146,9 @@ pub enum AnatomyDefect {
     OrphanSite {
         site: &'static str,
     },
-    /// An enclosure surrounds beds. Naming a tissue site would leave the beds inside it reading no
-    /// enclosure, or a second chain beside their own.
-    EnclosedTissue {
+    /// What contains a site is in an enclosure that does not name the site, so the site would read the
+    /// wrong pressure or none.
+    TwoEnclosureChains {
         site: &'static str,
     },
     EnclosedTwice {
@@ -231,7 +232,7 @@ impl AnatomyBuilder {
         let facts = Facts::resolve(self)?;
         facts.check_relations()?;
         let tree = Tree::of(&facts)?;
-        let enclosure = Enclosure::of(&facts)?;
+        let enclosure = Enclosure::of(&facts, &tree)?;
         facts.check_circulation()?;
         Ok(Anatomy::lay_out(facts, tree, enclosure))
     }
@@ -358,6 +359,10 @@ fn relation<T, U: Ord>(
     Ok(facts)
 }
 
+fn chain(links: &[Option<usize>], site: usize) -> impl Iterator<Item = usize> + '_ {
+    successors(links[site], |&at| links[at])
+}
+
 fn least_on_cycle(next: &[Option<usize>]) -> Option<usize> {
     #[derive(Clone, Copy, PartialEq)]
     enum Mark {
@@ -470,13 +475,7 @@ struct Enclosure {
     compliance: Vec<Option<Compliance>>,
 }
 impl Enclosure {
-    fn of(facts: &Facts) -> Result<Self, AnatomyDefect> {
-        let tissue = |&&(_, site): &&(usize, usize)| facts.class(site) == Class::TissueSite;
-        if let Some(&(_, site)) = facts.encloses.iter().find(tissue) {
-            return Err(AnatomyDefect::EnclosedTissue {
-                site: facts.key(site),
-            });
-        }
+    fn of(facts: &Facts, tree: &Tree) -> Result<Self, AnatomyDefect> {
         let count = facts.sites.len();
         let mut enclosed_by = vec![None; count];
         if let Some(site) = single_valued(
@@ -502,6 +501,18 @@ impl Enclosure {
         if let Some(space) = least_on_cycle(&enclosed_by) {
             return Err(AnatomyDefect::EnclosureCycle {
                 space: facts.key(space),
+            });
+        }
+        let agrees = |site: usize| {
+            chain(&tree.parent, site).all(|up| {
+                let inside = (facts.class(up) == Class::EnclosedSpace).then_some(up);
+                let space = inside.or(enclosed_by[up]);
+                space.is_none_or(|space| chain(&enclosed_by, site).any(|at| at == space))
+            })
+        };
+        if let Some(site) = (0..count).find(|&site| !agrees(site)) {
+            return Err(AnatomyDefect::TwoEnclosureChains {
+                site: facts.key(site),
             });
         }
         Ok(Self {

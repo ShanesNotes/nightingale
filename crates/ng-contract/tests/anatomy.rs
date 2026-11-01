@@ -309,16 +309,86 @@ fn an_anatomy_without_beds_needs_no_circulation() -> Result<(), AdmissionError> 
     Ok(())
 }
 
+/// `body` contains `bed` through `organ`, and the map says which space holds each.
+fn organ_bed(
+    declare: impl FnOnce(&mut AnatomyBuilder, SiteId, SiteId, [Site<EnclosedSpace>; 2]),
+) -> Result<Result<Anatomy, AdmissionError>, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let body = map.site::<TissueSite>("body", at(0.0)?);
+    let organ = map.site::<TissueSite>("organ", at(1.0)?);
+    let vessel = map.site::<VesselSegment>("vessel", at(1.0)?);
+    let bed = map.site::<CapillaryBed>("bed", at(1.0)?);
+    let near = map.site::<EnclosedSpace>("near", at(1.0)?);
+    let far = map.site::<EnclosedSpace>("far", at(1.0)?);
+    for site in [organ.id(), vessel.id(), near.id(), far.id()] {
+        map.contain(body.id(), site);
+    }
+    map.contain(organ.id(), bed.id());
+    map.connect(Network::Vascular, vessel.id(), bed.id());
+    map.connect(Network::Vascular, bed.id(), vessel.id());
+    declare(&mut map, organ.id(), bed.id(), [near, far]);
+    Ok(map.finish())
+}
+
 #[test]
-fn an_enclosure_cannot_name_a_tissue_site() -> Result<(), AdmissionError> {
-    let Manufactured { mut map, body, .. } = manufactured()?;
-    let other = map.site::<EnclosedSpace>("space 2", at(1.0)?);
-    map.contain(body.id(), other.id());
-    map.enclose(&other, &[body.id()], Compliance::Rigid);
+fn a_bed_inside_an_enclosed_tissue_site_has_to_be_named() -> Result<(), AdmissionError> {
+    let found = organ_bed(|map, organ, _, [near, far]| {
+        map.enclose(&near, &[organ], Compliance::Rigid);
+        map.enclose(&far, &[], Compliance::Rigid);
+    })?;
     assert_eq!(
-        map.finish().err(),
-        refused(AnatomyDefect::EnclosedTissue { site: "body" })
+        found.err(),
+        refused(AnatomyDefect::TwoEnclosureChains { site: "bed" })
     );
+    let named = organ_bed(|map, organ, bed, [near, far]| {
+        map.enclose(&near, &[organ, bed], Compliance::Rigid);
+        map.enclose(&far, &[], Compliance::Rigid);
+    })?;
+    assert!(named.is_ok());
+    Ok(())
+}
+
+#[test]
+fn a_bed_cannot_sit_in_one_enclosure_inside_a_site_in_another() -> Result<(), AdmissionError> {
+    let found = organ_bed(|map, organ, bed, [near, far]| {
+        map.enclose(&near, &[bed], Compliance::Rigid);
+        map.enclose(&far, &[organ], Compliance::Rigid);
+    })?;
+    assert_eq!(
+        found.err(),
+        refused(AnatomyDefect::TwoEnclosureChains { site: "bed" })
+    );
+    let nested = organ_bed(|map, organ, bed, [near, far]| {
+        map.enclose(&near, &[bed], Compliance::Rigid);
+        map.enclose(&far, &[organ, near.id()], Compliance::Rigid);
+    })?;
+    assert!(nested.is_ok());
+    Ok(())
+}
+
+#[test]
+fn a_space_that_contains_a_bed_has_to_enclose_it() -> Result<(), AdmissionError> {
+    let spaced = |encloses: bool| -> Result<Result<Anatomy, AdmissionError>, AdmissionError> {
+        let mut map = AnatomyBuilder::new();
+        let body = map.site::<TissueSite>("body", at(0.0)?);
+        let vessel = map.site::<VesselSegment>("vessel", at(1.0)?);
+        let bed = map.site::<CapillaryBed>("bed", at(1.0)?);
+        let space = map.site::<EnclosedSpace>("space", at(1.0)?);
+        for site in [vessel.id(), space.id()] {
+            map.contain(body.id(), site);
+        }
+        map.contain(space.id(), bed.id());
+        map.connect(Network::Vascular, vessel.id(), bed.id());
+        map.connect(Network::Vascular, bed.id(), vessel.id());
+        let inside = if encloses { vec![bed.id()] } else { vec![] };
+        map.enclose(&space, &inside, Compliance::Rigid);
+        Ok(map.finish())
+    };
+    assert_eq!(
+        spaced(false)?.err(),
+        refused(AnatomyDefect::TwoEnclosureChains { site: "bed" })
+    );
+    assert!(spaced(true)?.is_ok());
     Ok(())
 }
 
