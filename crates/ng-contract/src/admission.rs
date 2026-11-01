@@ -482,12 +482,11 @@ impl InitializationSystem<'_> {
         }
         Ok(worst)
     }
-    /// Whether a row behind this fit's anchor feels it anywhere on this workspace: the fit's size, through its slope,
-    /// moves that row's stage past rounding on the row's value. The guess counts, so a fit solved near zero has a size.
+    /// Whether a row behind this fit's anchor feels it anywhere on this workspace: the fit's value, through its slope,
+    /// moves that row's stage past rounding on the row's own value.
     fn felt(&self, unknowns: &[f64], fit: &Fit, value: f64) -> Result<bool, InitializationFailure> {
         let rows = self.body.rows();
         let values = self.values(unknowns);
-        let size = value.abs() + fit.guess.abs();
         for point in 0..self.frames.len() {
             let state = self.point(unknowns, point);
             let inputs = self.inputs(point, state, &values);
@@ -495,7 +494,7 @@ impl InitializationSystem<'_> {
             let felt = |row: &RowId| {
                 let at = row.index();
                 let interval = self.interval.filter(|_| !algebraic(rows[at].kind()));
-                (interval.unwrap_or(1.0) * slopes[at] * size).abs() > ROUNDING * state[at].abs()
+                (interval.unwrap_or(1.0) * slopes[at] * value).abs() > ROUNDING * state[at].abs()
             };
             if fit.rows.iter().any(felt) {
                 return Ok(true);
@@ -524,12 +523,12 @@ impl InitializationSystem<'_> {
             pending,
             anchor_moment: time,
             tolerance,
-            frames,
+            frames: _,
             interval: _,
             draws: _,
             factors: _,
         } = self;
-        parameters.packet = parameters.packet.reading(time, &frames, start, fitted, &history);
+        parameters.packet = parameters.packet.reading(time, start, fitted, &history);
         parameters.values = values;
         let owed = core::mem::take(&mut parameters.owed);
         let value_of = |entry: &(ValueName, ValueProvenance, f64)| {

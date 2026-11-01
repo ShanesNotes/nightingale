@@ -1,5 +1,4 @@
 use crate::body::{Bound, Instance, Layout, ParameterId, Target};
-use crate::boundary::DriveFrame;
 use crate::chance::{holds_a_period, sampled_unit};
 use crate::identity::{Canonical, Seal};
 use crate::law::Op;
@@ -52,13 +51,11 @@ impl PacketHash {
     pub(crate) fn of_digest(digest: Digest) -> Self {
         Self { digest }
     }
-    /// The hash a run names, closed at admission: the packet's, the moment it starts, the drives it read, the start
-    /// and fits it reached and the core's history there, so one identity has one start whatever made it. A timeline's later
-    /// events stay out of it.
+    /// The hash a run names, closed at admission: the packet's, the moment it starts, the start and fits it reached
+    /// and the core's history there, so one identity has one start whatever made it. Events stay out of it.
     pub(crate) fn reading(
         self,
         moment: SimTime,
-        frames: &[DriveFrame],
         start: &[f64],
         fitted: &[f64],
         history: &MethodHistory,
@@ -66,7 +63,6 @@ impl PacketHash {
         let mut out = Canonical::new("ng-contract packet and start 1");
         self.digest.seal(&mut out);
         moment.seal(&mut out);
-        frames.seal(&mut out);
         start.seal(&mut out);
         fitted.seal(&mut out);
         history.digest().seal(&mut out);

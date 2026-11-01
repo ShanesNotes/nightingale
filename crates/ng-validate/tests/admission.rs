@@ -700,6 +700,12 @@ fn an_anchor_no_channel_reads_by_its_method_and_window_is_refused() {
     let half_a_cycle = ChannelSpec::new(GAUGE, case.a()).averaged(count(32));
     let half_a_cycle = case.body().lens(vec![half_a_cycle], grid).expect("a lens");
     assert_eq!(solved(&half_a_cycle), refused);
+    let half_on_a_finer_grid = ChannelSpec::new(GAUGE, case.a()).averaged(count(64));
+    let half_on_a_finer_grid = (case
+        .body()
+        .lens(vec![half_on_a_finer_grid], count(PERIOD_NS / 128)))
+    .expect("a lens");
+    assert_eq!(solved(&half_on_a_finer_grid), refused);
     let other_row = ChannelSpec::new(GAUGE, case.b()).averaged(count(64));
     let other_row = case.body().lens(vec![other_row], grid).expect("a lens");
     assert_eq!(solved(&other_row), refused);
@@ -928,7 +934,7 @@ fn a_net_boundary_flow_over_the_cycle_is_refused_with_its_quantity() {
 #[test]
 fn a_net_flow_spread_over_every_row_is_still_refused_with_its_quantity() {
     let case = PulsatileCase::plain();
-    let (elastance, intervals) = (2.0, 4.0);
+    let (elastance, intervals) = (2.0, 16.0);
     let net = 8e-9;
     let flow = DELIVERED - net / 2.0;
     let difference = flow / (CONDUCTANCE * elastance);
@@ -1366,7 +1372,7 @@ fn a_fit_only_rounding_can_feel_is_refused_by_its_key() {
     let case = PulsatileCase::plain();
     let core = reference(REFERENCE_NS);
     assert_eq!(
-        tiny_flow(&case, &core, 1e-14).err(),
+        tiny_flow(&case, &core, 1e-12).err(),
         Some(InitializationFailure::Admission(AdmissionError::FitUnread {
             key: E,
             binding: NETWORK
@@ -1450,6 +1456,110 @@ fn a_small_body_is_solved_on_its_own_scale() {
     };
     let fitted = hi(record(&solved.provenance, name).value);
     assert!((fitted - fitted_elastance()).abs() < 1e-9, "{fitted}");
+}
+
+/// No fit keeps Newton going here, so only the unknowns' own sizes can: a stop with a floor of its own would end
+/// short of a law that is not linear.
+#[test]
+fn a_small_nonlinear_body_with_no_fit_is_solved_on_its_own_scale() {
+    let case = PulsatileCase::new(Variant::Divided);
+    let small = 1e-16;
+    let floor = measure::<Dimensionless>(1e-30);
+    let mut packet = ParameterPacket::periodic(cycle(4));
+    packet.within(ErrorScales::uniform(floor, measure(1e-12)).expect("positive"));
+    let g = measure::<Conductance<Water>>(CONDUCTANCE);
+    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+    packet
+        .synthetic(E, NETWORK, measure::<Elastance>(2.0), NOTE)
+        .expect("once");
+    packet
+        .start(case.a(), measure::<Water>(START[0] * small), NOTE)
+        .expect("once");
+    packet
+        .start(case.b(), measure::<Water>(START[1] * small), NOTE)
+        .expect("once");
+    let boundary = BoundaryPort::new(vec![
+        water(b"even in", 0, PULSE, 0, PERIOD_NS, DELIVERED * small),
+        water(b"even out", 0, DRAIN, 0, PERIOD_NS, DELIVERED * small),
+    ])
+    .expect("parsed");
+    let core = reference(REFERENCE_NS);
+    assert!(admit_solved(case.body(), packet, boundary, &core, &case.lens).is_ok());
+}
+
+/// Each column of the matrix, against the residual it comes from.
+#[test]
+fn linearize_is_the_slope_of_evaluate() {
+    let case = PulsatileCase::plain().with_intervals(8);
+    let system = case.system(case.packet());
+    let mut workspace = system.workspace();
+    let jacobian = system.linearize(&workspace).expect("a matrix");
+    let view = jacobian.view();
+    let size = workspace.unknowns_mut().len();
+    let step = 1e-6;
+    for column in 0..size {
+        workspace.unknowns_mut()[column] += step;
+        let up = system.evaluate(&workspace).expect("every row");
+        workspace.unknowns_mut()[column] -= 2.0 * step;
+        let down = system.evaluate(&workspace).expect("every row");
+        workspace.unknowns_mut()[column] += step;
+        for row in 0..size {
+            let entries = view.row_offsets()[row]..view.row_offsets()[row + 1];
+            let here = entries.filter(|entry| view.columns()[*entry].index() == column);
+            let slope: f64 = here.map(|entry| view.values()[entry]).sum();
+            let difference = (up[row] - down[row]) / (2.0 * step);
+            assert!((slope - difference).abs() < 1e-6, "{row} {column}");
+        }
+    }
+}
+
+/// The drive reaches the row in one interval of eight, so a single point of the ring feels the gain.
+#[test]
+fn a_fit_felt_at_one_point_of_the_ring_is_solved() {
+    let case = PulsatileCase::new(Variant::Instant);
+    let reading = boundary_row(READING);
+    let step = PERIOD_NS / 8;
+    let channel = ChannelSpec::new(GAUGE, reading).averaged(count(8));
+    let lens = case.body().lens(vec![channel], count(step)).expect("a lens");
+    let mut packet = ParameterPacket::periodic(cycle(8));
+    packet.within(admission_tolerance());
+    packet
+        .synthetic(E, NETWORK, measure::<Elastance>(GUESS), NOTE)
+        .expect("once");
+    let g = measure::<Conductance<Water>>(CONDUCTANCE);
+    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+    packet
+        .start(case.a(), measure::<Water>(START[0]), NOTE)
+        .expect("once");
+    packet
+        .start(case.b(), measure::<Water>(START[1]), NOTE)
+        .expect("once");
+    for local in [READING, ECHO] {
+        packet
+            .start(boundary_row(local), measure::<Rate<Water>>(1.0), NOTE)
+            .expect("once");
+    }
+    let read = Snapshot::new(
+        reading,
+        GAUGE,
+        AnchorStatistic::CycleMean,
+        measure::<Rate<Water>>(2.0 * CHANNEL_FLOW),
+    );
+    packet.anchor(Synthetic::new(MEAN, read, NOTE)).expect("once");
+    let gain = measure::<Dimensionless>(1.0);
+    packet.calibrated(SET, Binding::Body, gain, MEAN).expect("once");
+    let boundary = BoundaryPort::new(vec![
+        water(b"one interval", 0, PULSE, 3 * step, 4 * step, CHANNEL_FLOW),
+        water(b"even out", 0, DRAIN, 0, PERIOD_NS, CHANNEL_FLOW),
+    ])
+    .expect("parsed");
+    let core = reference(step);
+    let solved = admit_solved(case.body(), packet, boundary, &core, &lens).expect("solved");
+    let name = ValueName::Parameter {
+        key: SET,
+        binding: Binding::Body,
+    };
+    assert!((hi(record(&solved.provenance, name).value) - 2.0).abs() < 1e-9);
 }
 
 #[test]
@@ -2549,10 +2659,14 @@ fn finding_15_two_equal_expressions_divided_are_refused_by_name() {
     assert_eq!(floors, refused);
 }
 
-/// No identity reads a quotient of products, so a row of its own dimension holds it as it stands.
-#[test]
-fn finding_15_two_equal_products_divided_are_refused_by_name() {
-    type Ratio = Quotient<Product<Pressure, Pressure>, Product<Pressure, Pressure>>;
+/// No identity reads these ratios, so a row of their own dimension holds them as they stand.
+fn bound_ratio<R: Dimension>(
+    ratio: impl for<'b, 'k> FnOnce(
+        &mut Kernel<'b, 'k, Cardiovascular>,
+        &Parameter<'b, Cardiovascular, Pressure>,
+        &Parameter<'b, Cardiovascular, Pressure>,
+    ) -> Expr<'b, 'k, Cardiovascular, R>,
+) -> Option<AdmissionError> {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", origin());
     let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
@@ -2560,13 +2674,11 @@ fn finding_15_two_equal_products_divided_are_refused_by_name() {
         let (mut laws, _ports) = body.cardiovascular()?.parts();
         let p = laws.parameter::<Pressure>(ParameterKey::new("fixture.p"), Admissible::positive());
         let q = laws.parameter::<Pressure>(ParameterKey::new("fixture.q"), Admissible::positive());
-        let slot = laws.algebraic::<Ratio>("ratio", Admissible::finite());
+        let slot = laws.algebraic::<R>("ratio", Admissible::finite());
         let beat = RateClass::new(RateBand::Beat, 100_000_000)?;
         let kernel = laws.kernel(|mut k| {
             let x = k.algebraic(&slot);
-            let (a, b, c, d) = (k.parameter(&p), k.parameter(&q), k.parameter(&q), k.parameter(&p));
-            let (top, bottom) = (k.multiply(a, b), k.multiply(c, d));
-            let ratio = k.divide(top, bottom);
+            let ratio = ratio(&mut k, &p, &q);
             let residual = k.subtract(x, ratio);
             k.finish(residual, laws.every_mode(), beat)
         });
@@ -2575,8 +2687,33 @@ fn finding_15_two_equal_products_divided_are_refused_by_name() {
         body.compile()
     })
     .expect("compiled");
+    body.bind(ParameterPacket::<SyntheticFixture>::new()).err()
+}
+
+#[test]
+fn finding_15_two_equal_products_divided_are_refused_by_name() {
+    let products = bound_ratio(|k, p, q| {
+        let (a, b, c, d) = (k.parameter(p), k.parameter(q), k.parameter(q), k.parameter(p));
+        let (top, bottom) = (k.multiply(a, b), k.multiply(c, d));
+        k.divide(top, bottom)
+    });
     assert_eq!(
-        body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
+        products,
+        Some(AdmissionError::UnbackedConstant { law: name("ratio") })
+    );
+}
+
+/// `as_dimension` changes a type and computes nothing, so it hides no expression from its own copy.
+#[test]
+fn finding_15_a_value_over_its_own_cast_is_refused_by_name() {
+    let cast = bound_ratio(|k, p, q| {
+        let (a, b, c, d) = (k.parameter(p), k.parameter(q), k.parameter(p), k.parameter(q));
+        let (top, bottom) = (k.divide(a, b), k.divide(c, d));
+        let bottom = k.as_dimension::<_, Dimensionless>(bottom);
+        k.divide(top, bottom)
+    });
+    assert_eq!(
+        cast,
         Some(AdmissionError::UnbackedConstant { law: name("ratio") })
     );
 }
