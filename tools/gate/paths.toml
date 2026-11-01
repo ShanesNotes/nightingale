@@ -76,6 +76,10 @@ item = "quadrature::StageEvaluation::residuals"
 reason = "F per row, in mixed row dimensions: what a Newton core drives to zero and an explicit core reads as rates"
 
 [[crate.f64_allow]]
+item = "elimination::Factors::solve"
+reason = "a right side in, an update out, in mixed row and unknown dimensions, for a core's own Newton step"
+
+[[crate.f64_allow]]
 item = "admission::InitializationSystem::evaluate"
 reason = "one row per unknown of the admission system, in mixed row dimensions: what its Newton solve drives to zero"
 

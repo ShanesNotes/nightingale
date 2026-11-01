@@ -5,6 +5,7 @@ use crate::body::{
 };
 use crate::chance::key_word;
 use crate::conservation::conserved_basis;
+use crate::elimination::Elimination;
 use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::law::{
@@ -60,6 +61,8 @@ pub(crate) fn compile(
     let solved_by = solved_by(&rows.rows, &reads)?;
     let blocks = blocks(&solved_by, &reads, &rates);
     let basis = conserved_basis(rows.amounts.len(), &placement.columns);
+    let sparsity = sparsity(reads);
+    let elimination = Elimination::plan(&sparsity.offsets, &sparsity.unknowns, &solved_by);
     Ok(CompiledBody::seal(Layout {
         schema,
         rows: rows.rows,
@@ -67,7 +70,8 @@ pub(crate) fn compile(
         programs: placement.programs,
         instances,
         parameters,
-        sparsity: sparsity(reads),
+        sparsity,
+        elimination,
         blocks,
         modes,
         guards,

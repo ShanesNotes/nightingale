@@ -103,7 +103,7 @@ fn newton(
             break;
         }
         let jacobian = problem.linearize(&point, shift)?;
-        let update = match solve_dense(jacobian.view(), stage.residuals()) {
+        let update = match solve_sparse(problem, &jacobian, stage.residuals()) {
             Ok(update) => update,
             Err(slot) => {
                 let reason = problem.row(slot).map_or(NumericalRefusal::IterationLimit, |row| {
@@ -122,6 +122,27 @@ fn newton(
         }
     }
     Err(ticket.refuse(NumericalRefusal::IterationLimit))
+}
+
+/// The body's fixed elimination, or a dense solve for a pivot it cannot take, which is where a mode leaves a row
+/// with nothing on its matched unknown.
+fn solve_sparse(
+    problem: &CoupledProblem<'_>,
+    jacobian: &Jacobian,
+    residuals: &[f64],
+) -> Result<Vec<f64>, usize> {
+    match problem.factor(jacobian) {
+        Ok(factors) => {
+            let mut update = residuals.to_vec();
+            factors.solve(&mut update);
+            if update.iter().all(|change| change.is_finite()) {
+                Ok(update)
+            } else {
+                solve_dense(jacobian.view(), residuals)
+            }
+        }
+        Err(_) => solve_dense(jacobian.view(), residuals),
+    }
 }
 
 /// Gaussian elimination with partial pivoting in fixed order: the first largest pivot wins, so a tie is

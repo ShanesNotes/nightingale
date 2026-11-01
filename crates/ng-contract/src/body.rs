@@ -1,3 +1,4 @@
+use crate::elimination::Elimination;
 use crate::identity::{Canonical, Seal};
 use crate::law::{Op, Validity};
 use crate::scope::HeldCard;
@@ -55,6 +56,8 @@ pub(crate) struct Layout {
     pub(crate) instances: Vec<Instance>,
     pub(crate) parameters: Vec<ParameterSlot>,
     pub(crate) sparsity: Sparsity,
+    /// Derived from the sparsity and the matching, so the hash covers it through them.
+    pub(crate) elimination: Elimination,
     pub(crate) blocks: Vec<Block>,
     pub(crate) modes: Vec<ModeLayout>,
     pub(crate) guards: Vec<GuardLayout>,
@@ -122,6 +125,7 @@ impl Seal for Layout {
             instances,
             parameters,
             sparsity,
+            elimination: _,
             blocks,
             modes,
             guards,

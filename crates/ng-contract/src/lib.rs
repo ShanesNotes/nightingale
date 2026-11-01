@@ -912,6 +912,7 @@ mod chance;
 mod compensated;
 mod compile;
 mod conservation;
+mod elimination;
 mod evaluate;
 mod failure;
 mod graph;
@@ -942,6 +943,7 @@ pub use boundary::{
 };
 pub use compensated::*;
 pub use conservation::*;
+pub use elimination::Factors;
 pub use failure::*;
 pub use identity::*;
 pub use image::*;

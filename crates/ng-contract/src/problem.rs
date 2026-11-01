@@ -1,6 +1,7 @@
 use crate::body::UnknownId;
 use crate::boundary::DriveFrame;
 use crate::chance::Chance;
+use crate::elimination::Factors;
 use crate::evaluate::{Inputs, Undefined};
 use crate::identity::{Canonical, Seal};
 use crate::quadrature::StageEvaluation;
@@ -124,6 +125,11 @@ impl<'r> CoupledProblem<'r> {
             columns: sparsity.unknowns().to_vec(),
             values,
         })
+    }
+    /// One Jacobian of this problem factored over the body's elimination, or the row whose pivot it cannot take.
+    /// A pivot never moves, so a core that meets one solves `Jacobian::view` its own way.
+    pub fn factor(&self, jacobian: &Jacobian) -> Result<Factors<'r>, usize> {
+        self.body.layout.elimination.factor(&jacobian.values)
     }
     /// Every law on `state` at the ticket's end, in its modes and on its draws.
     pub(crate) fn values_after_firing(
