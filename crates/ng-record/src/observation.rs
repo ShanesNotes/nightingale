@@ -23,8 +23,9 @@ impl<'r> ObservationView<'r> {
         self.previous
     }
     /// Each grid instant this revision holds, oldest first, with one value per channel. A step holds its end and
-    /// not its start, so an instant falls in one step, and revision 0 holds the admission instant. At the head a
-    /// channel reads the accepted state, which is what a firing left, so one instant has one value.
+    /// not its start, so an instant falls in one step, and revision 0 holds the admission instant when it is on
+    /// the grid. At the head a channel reads the accepted state, which is what a firing left, so one instant has
+    /// one value.
     pub fn samples(&self) -> Vec<(SimTime, Vec<Compensated>)> {
         let head = self.accepted.time();
         let segment = self.accepted.last_segment();

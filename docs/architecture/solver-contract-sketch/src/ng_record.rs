@@ -363,8 +363,8 @@ impl<'r> ObservationView<'r> {
     }
     /// Each grid instant this revision holds, oldest first, with one value per channel. A step holds
     /// its end and not its start, so an instant falls in one step, and revision 0 holds the admission
-    /// instant. At the head a channel reads the accepted state, which is what a firing left, so one
-    /// instant has one value. A read never forces a cut.
+    /// instant when it is on the grid. At the head a channel reads the accepted state, which is what
+    /// a firing left, so one instant has one value. A read never forces a cut.
     pub fn samples(&self) -> Vec<(SimTime, Vec<Compensated>)> {
         todo!()
     }

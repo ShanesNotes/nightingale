@@ -3,9 +3,9 @@
 //! depends on it, and it is not an input to the stability certificate.
 use crate::ng_contract::*;
 use crate::ng_record::{ObservationRefusal, ObservationView};
-/// A snapshot an observer took. Its channel in the lens gives its site and method. A reading held by
-/// its delay shows twice, `Pending` when collected and with its value once the head reaches
-/// `available`.
+/// A snapshot an observer took. Its channel in the lens gives its method and its row, and an amount's
+/// row its site. A reading held by its delay shows twice, `Pending` when collected and with its value
+/// once the head reaches `available`.
 pub struct Observation {
     _channel: usize,
     _collected: SimTime,

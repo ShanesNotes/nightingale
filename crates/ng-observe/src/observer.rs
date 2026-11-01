@@ -1,8 +1,8 @@
 use ng_contract::{AdmissibleSet, Compensated, Digest, ObservationLens, ObservationSeed, SimTime};
 use ng_record::{ObservationRefusal, ObservationView};
 
-/// Its channel in the lens gives its site and method. A reading held by its delay shows twice, `Pending` when
-/// collected and with its value once the head reaches `available`.
+/// Its channel in the lens gives its method and its row, and an amount's row its site. A reading held by its
+/// delay shows twice, `Pending` when collected and with its value once the head reaches `available`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Observation {
     channel: usize,
