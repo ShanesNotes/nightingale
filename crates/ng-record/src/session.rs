@@ -84,9 +84,6 @@ impl<'m, S> Session<'m, S> {
             CheckpointError::HistoryMissing { .. } => CheckpointError::NotOnThisBranch,
             other => other,
         })?;
-        if record.history().origin() != self.record.history().origin() {
-            return Err(CheckpointError::NotOnThisBranch);
-        }
         Ok(Session {
             solver: self.solver,
             record: Box::new(record),

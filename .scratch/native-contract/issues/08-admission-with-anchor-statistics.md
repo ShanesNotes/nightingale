@@ -6,12 +6,66 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 Blocked by: 04
 
-Status: ready-for-agent
+Status: resolved
 
-- [ ] A cycle-mean anchor on a pulsatile output is met as a cycle mean, not an instant
-- [ ] An initializer that returns a guess violating a row or anchor is refused with the row named
-- [ ] Provenance is recorded per value (Derived, Calibrated, Sampled, Authored, Fixture); an Authored value lies inside its population record's range (I16), and no parameter is pinned to an anchor
-- [ ] The fixture packet type is the only one the validation crate accepts
+Claimed by: claude
+
+- [x] A cycle-mean anchor on a pulsatile output is met as a cycle mean, not an instant
+- [x] An initializer that returns a guess violating a row or anchor is refused with the row named
+- [x] Provenance is recorded per value (Derived, Calibrated, Sampled, Authored, Fixture); an Authored value lies inside its population record's range (I16), and no parameter is pinned to an anchor
+- [x] The fixture packet type is the only one the validation crate accepts
+
+## Answer
+
+Admission can now solve a start state, not only take the packet's numbers. It fits a parameter so that an anchor holds as a mean over one beat, checks the result itself, and records where every value came from. All values are synthetic.
+
+**How it works.** A packet can state one beat: how long it lasts, and how many equal steps to cut it into. That is a `Cycle`. Admission sets those steps out as a ring of points in time, so the last joins back to the first. Each point is one backward Euler stage, the same equation a solver core evaluates. All the points and the fitted value are solved together, once, by plain Newton, down to rounding. Then `admit` reads every equation again by itself. It uses no solver and trusts nothing the solver said. The first point becomes the start state, and the others are dropped.
+
+**The test body.** Two vessels joined by one law. Each beat a pulse of water enters the first vessel, and the same amount drains evenly from the second. The amount in the first vessel rises and falls. That amount is the pulsatile output, because no pressure row can read an amount until ticket 10. The fitted value is the vessels' stiffness. Its closed form is at the top of `crates/ng-validate/tests/admission.rs`, where every test below lives unless marked.
+
+**The four checks.**
+
+- **Met as a cycle mean, not an instant.** `a_cycle_mean_anchor_is_met_as_a_cycle_mean_not_an_instant`. The start value is 2.7 from the anchor. A real run's mean over the first beat, read through the anchor's own lens channel, is within 1e-12 of it. The fit matches its closed form to 1e-12 on grids of 4 to 256 steps. A core whose step is off the grid starts a little away from its own orbit: its first beat's mean is off by 3e-3 to 4e-2, and that shrinks six to seven times each beat. On a law that is not linear, or a coarse core with an uneven step, the orbit's own mean sits near the anchor and not on it: 8e-3 off in the worst case measured.
+- **A guess that breaks a row or anchor is refused with the row named.** `an_initializer_that_returns_its_guess_is_refused_with_the_row_named`, and tests for one broken stage at one point, a missed anchor and a moved total. `a_guess_that_already_solves_the_system_is_admitted` is the other side. A refusal names a body row, a conserved total or an anchor.
+- **Provenance per value.** `provenance_is_recorded_per_value_in_all_five_kinds_and_a_solved_start`. `InitialRevision::provenance` gives one record per packet entry and one per row's start, with the value the run starts from. A start value admission moved reads `Solved`, a sixth kind, because calling it `Fixture` would be false. An authored value outside its population range is refused. A derived value is one other entry times a stated scale, and `bind` computes it, so it moves with its source. No parameter can be pinned: no path copies an anchor's value (E0616). A fit no law behind its anchor reads is refused at `bind`. One that moves no row behind its anchor past rounding on the solved start is refused at `admit`. Either could only stamp its guess. A fit on a forcing's period is refused too, because a solved value cannot stay on the clock. An anchor on a row that reads no amount and no drive is refused too, because that row is only a parameter in disguise. These checks are partial, as finding 15's is: a law can read a drive only to dodge the last, or cancel a fit down to rounding on a large guess to dodge the one before, two fits that reach the body only as a product are not told apart, and a fit stands at its guess when a closed edge cuts it off from its anchor or the body's symmetry fixes that anchor. In each of these the anchor still holds.
+- **The fixture packet is the only one validation accepts.** Two compile-fail doctests in `crates/ng-validate/src/lib.rs`, E0308, with a legal twin. `Reviewed`, `Citation` and `Specified` are built only as far as those and the two sketch probes need. Both probes now live in `crates/ng-contract/src/lib.rs`.
+
+**What the brief settled.**
+
+- **The tolerance.** It is an `ErrorScales`, the same reading a core's scales have, and the packet states it with `within`. `ng_validate::admission_tolerance` is the model default, 1e-9 plus 1e-12 of the value. The packet's hash covers it, so an initializer cannot widen it under a run's identity. A packet that states none is held exactly, which is the old rule and leaves every existing fixture as it was. It is reported with the row nearest it. At an instant, an amount or memory row reads its value less the packet's, like any other row, so a value rounding moved inside the tolerance stands.
+- **Finding 15.** `bind` now compares what two sides compute, not the nodes they are, so `(p + p) / (p + p)` from separate reads is refused, and so are `(p + q) / (q + p)`, `(p q) / (q p)`, swapped smooth limits and a value over its own `as_dimension`. It stays partial: a regrouped sum, a swapped `scale` and `p / (p + 0)` still pass.
+- **Method and window.** An anchor is a `Snapshot`: row, method, statistic and value. `bind` matches the window to the row and the packet. `initialization` refuses an anchor no channel of the request's lens reads by that method over that window, reading exactly the ring's points, because a lens is the one place a method meets a row. The run must start on the edge of one of that lens's windows, because windows sit on whole multiples of their length and a run that starts inside one never reads the beat admission matched. A cycle mean is added up the way an observer adds a window, so the two read one number however far the row swings.
+- **The fence.** The solve reads the drives of `[t0, t0 + T)`, so the opening fence is `t0 + T`, the first instant it did not read. An instant's window is one nanosecond, so one rule gives the old value. `a_late_input_inside_the_window_is_refused_and_one_at_its_end_is_taken`, and all seven replay gates pass on this case. A delivery inside the window shaped the start, so every run of a case holds it.
+
+**Choices, each with its reason.**
+
+- **The beat lives in the packet.** It shapes the start, so the packet's hash must cover it, and a run's identity stays four things. `admit` closes the hash a run names over the moment the run starts, the start and fits it reached and the core's history there. So one run identity means one start, whatever made it, and `bind`'s hash and the hash a run names differ. Later events stay out of the hash, as before.
+- **A ring, not shooting through a core.** Shooting makes the start depend on the core, and `admit` would need a core to check it. Run-in would take about a million beats on a slow total, where Newton took four updates in each of 25 runs, from guesses a tenth to ten times the answer.
+- **One conserved total replaces one row.** Around the ring a combination's rows add up to its net boundary flow, so one row says nothing new and the total is free. The total takes that row's place in the solve. `admit` still reads the replaced row at its own scale, and it adds each boundary flow up around the whole ring, one at a time as the ledger books it. So a net flow over the beat is refused as `NetBoundaryFlow`, however thinly it was spread and however small beside the other flows in its row.
+- **A solve that stops is not a failure of its own.** It hands `admit` what it reached, and `admit` is the one judge. The solve stops when no unknown moved by more than rounding on itself, or after 32 updates. It reads no tolerance, so a tolerance only refuses and shapes no bit, and a row or a fit too small for the tolerance to see is solved all the same. Rounding can keep an unknown moving by more than that: one near zero, or a weak fit. Each costs the 32 updates and nothing else.
+- **`admit_fixture` still returns the packet's guess.** That is §7's must-fail row, and 32 sites read it. `admit_solved` is the solve.
+
+**Left out, and what brings each back.** A window mean returns with a check that reads one. A mean and spread, quantiles and correlation groups return with the first source that gives one. `Reading`, `Tier` and an inferred kind return with the first reviewed packet. A mode under a cycle stays refused, a heart that sets its own rate needs a free period, and a body past a few thousand unknowns needs a solve that follows the ring: ticket 10 has all three.
+
+**What the solve costs.** Each update solves one dense matrix, so doubling the unknowns costs eight times as much. In a release build one update took 0.45 s at 1,001 unknowns, 3.8 s at 2,001 and 31 s at 4,001, and a debug build is about ten times slower. Every solve measured took four updates, so a whole solve took 1.8 s, 15 s and 123 s. The exact sum in a cycle mean is part of that. With a plain sum, the fit's own update stayed near 16 rounding units of itself at 4,001 unknowns, over the line of 8, and the solve ran on past nine updates.
+
+**Limits, stated plainly.** Some refuse and some pass, and each line says which.
+
+- A very stiff law: past about `h k` of 1e5 to 1e6 no value passes, because rounding alone is above the tolerance. That is a time constant near a microsecond here, and it is the one place the plain solve runs out. No outside physiology was needed. A row that swings far above a small start meets this limit sooner, near an `h k` of 1e3, because the row a total replaced carries the rounding of the whole ring.
+- A row with no restoring term under a cycle, such as `m' = 0`: the ring has no level for it, so the matrix is singular, the solve stops and `admit` names the first row it finds, not the cause.
+- A Newton trial outside a law's domain stops the solve. There is no step halving, and `admit` gives the verdict.
+- `admit` holds each stage alone, so a guess or a hand-made start can miss closing the ring by the tolerance times the number of steps. The solve's start closes, because it runs to rounding.
+- On a body of amounts far below one, the default's floor of 1e-9 lets `admit` pass almost any guess, until rows have their own scales. The solve is not affected. Such a packet states its own floor.
+- A packet that states no tolerance is held exactly, so rounding alone can refuse a solved start. A packet meant for the solve states one.
+- A net flow inside a wide tolerance can pass on a guess that spreads it and be refused after the solve, which puts it all on one row.
+- Two coupled rows 1e15 apart are past what a float can hold, so the small one wanders and the solve can stop anywhere inside the tolerance.
+- A huge interval count asks for that much memory and ends the process. It is the packet author's number, and no learner or run can reach it.
+- A forged checkpoint can still add a waiting delivery, or name another start, because a seal covers nothing that waits and the digest has no key. That design is older than this ticket, and nothing here has an adversary.
+- `bind`'s anchor and finding 15 checks are partial. A law can read an idle drive to dodge the first, and the second folds nothing.
+- A fit is read step by step, so one whose whole effect on each step is below rounding on its rows is refused, though the sum over the beat might show it. On a ring of 64 that takes a flow near 1e-12 per beat on amounts of 50. A fit that solves to zero is refused the same way.
+- A fit that shows only through a head of a few rounding units of its rows can land far from its closed form, at flows near 1e-11 per beat on amounts of 50. The anchor still holds in the run, so no check can tell.
+
+**Not proven here.** The test body is driven from outside, so it says nothing about a heart that sets its own rate. No judge from another vendor weighed the two designs: Codex ran out of credits and Grok stopped at its free limit, so the base was picked alone and the adversaries were two Opus seats. Codex then came back and read the finished code in five passes. The first three found five defects, all fixed, and the last two found none. See the PR.
 
 ## Comments
 

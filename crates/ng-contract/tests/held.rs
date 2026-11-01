@@ -11,6 +11,7 @@ fn at() -> Result<Position, AdmissionError> {
 const ROUTE: &str = "gut water";
 const SECOND_ROUTE: &str = "second route";
 const THIRD_ROUTE: &str = "third route";
+const SENSOR: &str = "sensor";
 const PRESSURE: &str = "enclosure_pressure";
 
 #[derive(Clone, Copy, PartialEq)]
@@ -45,6 +46,8 @@ enum Defect {
     FluidLeftOut,
     LiverReadsTheGutsDrive,
     OneRouteReadsAnother,
+    OnlyARowReadsTheDrive,
+    ARowAlsoReadsTheDrive,
 }
 
 struct Sites {
@@ -166,10 +169,27 @@ fn gut<'b>(body: &mut Assembly<'b>, defect: Defect) -> Result<(), AdmissionError
         let BoundaryWater { route, drive } = ports.water(name)?;
         let class = slow()?;
         let rate = laws.kernel(|mut k| {
-            let value = k.read(&drive);
+            let value = if defect == Defect::OnlyARowReadsTheDrive {
+                k.zero::<Rate<Water>>()
+            } else {
+                k.read(&drive)
+            };
             k.finish(value, laws.every_mode(), class)
         });
         laws.transfer(Transfer::new(&route, rate));
+        if matches!(
+            defect,
+            Defect::OnlyARowReadsTheDrive | Defect::ARowAlsoReadsTheDrive
+        ) {
+            let sensor = laws.algebraic::<Rate<Water>>(SENSOR, Admissible::finite());
+            let residual = laws.kernel(|mut k| {
+                let seen = k.algebraic(&sensor);
+                let value = k.read(&drive);
+                let gap = k.subtract(seen, value);
+                k.finish(gap, laws.every_mode(), class)
+            });
+            laws.residual(&sensor, residual);
+        }
     }
     body.add(laws.finish());
     Ok(())
@@ -421,9 +441,8 @@ fn a_card_is_held_once() {
     );
 }
 
-#[test]
-fn a_delivery_on_a_held_route_is_admitted_like_any_boundary_delivery() -> Result<(), InitializationFailure> {
-    let body = compiled(Defect::None)?;
+fn delivered(defect: Defect) -> Result<(), InitializationFailure> {
+    let body = compiled(defect)?;
     let mut packet = ParameterPacket::<SyntheticFixture>::new();
     let pressure = || Measure::<Pressure>::new(3.0);
     packet.synthetic(
@@ -437,6 +456,9 @@ fn a_delivery_on_a_held_route_is_admitted_like_any_boundary_delivery() -> Result
     packet.synthetic(ParameterKey::new("fl.kf"), class, kf, "synthetic")?;
     for row in body.rows() {
         match row.kind() {
+            RowKind::Algebraic(Slot { law, .. }) if law.local == SENSOR => {
+                packet.start(row.kind(), Measure::<Rate<Water>>::new(0.0)?, "synthetic")?
+            }
             RowKind::Algebraic(_) => packet.start(row.kind(), pressure()?, "synthetic")?,
             kind => packet.start(kind, Measure::<Water>::new(1.0)?, "synthetic")?,
         }
@@ -451,10 +473,24 @@ fn a_delivery_on_a_held_route_is_admitted_like_any_boundary_delivery() -> Result
         }),
     );
     let parameters = body.bind(packet)?;
-    let request = InitializationRequest::consistent_instant(SimTime::from_ns(0));
-    assert!(
-        body.initialization(parameters, BoundaryPort::new(vec![delivery])?, request)
-            .is_ok()
+    let request = InitializationRequest::at(SimTime::from_ns(0));
+    body.initialization(parameters, BoundaryPort::new(vec![delivery])?, request)?;
+    Ok(())
+}
+
+#[test]
+fn a_delivery_on_a_held_route_is_admitted_like_any_boundary_delivery() -> Result<(), InitializationFailure> {
+    delivered(Defect::None)
+}
+
+#[test]
+fn a_row_may_sense_a_drive_and_a_delivery_needs_the_routes_own_law() -> Result<(), InitializationFailure> {
+    delivered(Defect::ARowAlsoReadsTheDrive)?;
+    assert_eq!(
+        delivered(Defect::OnlyARowReadsTheDrive).err(),
+        Some(InitializationFailure::Admission(AdmissionError::DriveNotRead {
+            name: ROUTE
+        }))
     );
     Ok(())
 }

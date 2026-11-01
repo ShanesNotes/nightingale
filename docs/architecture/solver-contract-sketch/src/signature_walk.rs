@@ -262,32 +262,35 @@
 //!     }
 //! }
 //!
-//! // 3. Initialize once: request, guess and packet go in; provenance comes from the contract.
-//! impl Initializer for Core {
-//!     fn initialize(&self, system: InitializationSystem<'_>) -> Result<InitialRevision, InitializationFailure> {
-//!         let mut workspace = system.workspace();
+//! // 3. Initialize once: the packet states the goal and the anchors, and provenance comes from the contract.
+//! fn initialize(system: &InitializationSystem<'_>) -> Result<SolveWorkspace, InitializationFailure> {
+//!     let mut workspace = system.workspace();
+//!     for _ in 0..32 {
 //!         let residual = system.evaluate(&workspace)?;
 //!         let jacobian = system.linearize(&workspace)?;
-//!         newton_update(jacobian.view(), residual.residuals(), workspace.unknowns_mut());
-//!         system.admit(workspace, MethodHistory::new(self.policy, SimTime::from_ns(0), vec![]))
+//!         newton_update(jacobian.view(), &residual, workspace.unknowns_mut());
 //!     }
+//!     Ok(workspace)
 //! }
-//! fn admit<'m>(body: &'m CompiledBody, core: &'m Core) -> Option<Session<'m, Running>> {
-//!     let mut packet = ParameterPacket::<SyntheticFixture>::new();
+//! fn admit<'m>(body: &'m CompiledBody, core: &'m Core, lens: &ObservationLens, row: RowKind,
+//!     cycle: Cycle, tolerance: ErrorScales) -> Option<Session<'m, Running>> {
+//!     let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
+//!     packet.within(tolerance);
 //!     let anchor = Measure::<Pressure>::new(1.0).ok()?; // synthetic, deliberately not physiological
-//!     let mean = Synthetic::new(AnchorId::P4, anchor, Unit::canonical(), "arena stand-in").over(AnchorStatistic::CycleMean);
-//!     packet.anchor(mean).ok()?;
+//!     let mean = AnchorId::new("fixture.mean-pressure");
+//!     let read = Snapshot::new(row, "a synthetic gauge", AnchorStatistic::CycleMean, anchor);
+//!     packet.anchor(Synthetic::new(mean, read, "arena stand-in")).ok()?;
 //!     let kf = Measure::<Conductance<Water>>::new(1.0).ok()?;
 //!     packet.synthetic(ParameterKey::new("rn.kf"), kf, Unit::canonical(), "arena design value").ok()?;
 //!     let guess = Measure::<Elastance>::new(1.0).ok()?;
-//!     let fitted = Calibrated::new(guess, vec![AnchorId::P4]).ok()?;
-//!     packet.calibrated::<Elastance>(ParameterKey::new("cv.elastance"), fitted).ok()?;
+//!     packet.calibrated(ParameterKey::new("cv.elastance"), guess, mean).ok()?;
 //!     let parameters = body.bind(packet).ok()?;
 //!     let boundary = morning(Digest::of_canonical(b"fixture meal schema")).ok()?;
-//!     let request = InitializationRequest::new(InitializationGoal::ConsistentInstant,
-//!         InitializationBudget::new(50, 0), InitialStateGuess::PacketValues, SimTime::from_ns(0));
+//!     let request = InitializationRequest::at(SimTime::from_ns(0)).reading(lens);
 //!     let system = body.initialization(parameters, boundary, request).ok()?;
-//!     let origin = core.initialize(system).ok()?;
+//!     let solved = initialize(&system).ok()?;
+//!     let start = MethodHistory::new(core.policy, SimTime::from_ns(0), vec![]);
+//!     let origin = system.admit(solved, start).ok()?;
 //!     let _how = origin.provenance();
 //!     let identity = RunIdentity::new(body.model_hash(), origin.packet_hash(),
 //!         Seed::new([1, 2, 3, 4]), core.resolution());

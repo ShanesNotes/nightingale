@@ -1,3 +1,4 @@
+use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::catalog::{
     BaroreceptorAfferents, CapillaryAndVenousPressure, Defines, LungAfferents, Reads, RespiratoryDrive,
 };
@@ -229,6 +230,16 @@ fn packet(
     pleural: f64,
     abdominal: f64,
 ) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+    guessed(body, pleural, abdominal, 0.0)
+}
+
+/// Every pressure row starts `off` from what defines it.
+fn guessed(
+    body: &CompiledBody,
+    pleural: f64,
+    abdominal: f64,
+    off: f64,
+) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
     let mut packet = ParameterPacket::new();
     let class = Binding::Class(Class::CapillaryBed);
     packet.synthetic(
@@ -270,22 +281,240 @@ fn packet(
             }
             RowKind::Algebraic(Slot { law, site }) => match law.local {
                 "enclosure_pressure" if site == Some(pleura) => {
-                    packet.start(row.kind(), Measure::<Pressure>::new(pleural)?, "synthetic")?
+                    packet.start(row.kind(), Measure::<Pressure>::new(pleural + off)?, "synthetic")?
                 }
-                "enclosure_pressure" => {
-                    packet.start(row.kind(), Measure::<Pressure>::new(abdominal)?, "synthetic")?
-                }
-                "capillary_pressure" => {
-                    packet.start(row.kind(), Measure::<Pressure>::new(CAPILLARY)?, "synthetic")?
-                }
+                "enclosure_pressure" => packet.start(
+                    row.kind(),
+                    Measure::<Pressure>::new(abdominal + off)?,
+                    "synthetic",
+                )?,
+                "capillary_pressure" => packet.start(
+                    row.kind(),
+                    Measure::<Pressure>::new(CAPILLARY + off)?,
+                    "synthetic",
+                )?,
                 "venous_pressure" => {
-                    packet.start(row.kind(), Measure::<Pressure>::new(VENOUS)?, "synthetic")?
+                    packet.start(row.kind(), Measure::<Pressure>::new(VENOUS + off)?, "synthetic")?
                 }
                 _ => packet.start(row.kind(), Measure::<Dimensionless>::new(STRETCH)?, "synthetic")?,
             },
         }
     }
     Ok(packet)
+}
+
+fn gauge(body: &CompiledBody, row: RowKind) -> Result<ObservationLens, AdmissionError> {
+    let every = NonZeroU64::new(SECOND).expect("not zero");
+    body.lens(vec![ChannelSpec::new("a synthetic gauge", row)], every)
+}
+
+fn at_admission(
+    session: &ng_record::Session<'_, ng_record::Running>,
+    body: &CompiledBody,
+    kind: RowKind,
+) -> f64 {
+    let row = body.rows().iter().find(|row| row.kind() == kind).expect("a row");
+    f64::from_bits(session.record().accepted().value(row.id()).bits()[0])
+}
+
+#[test]
+fn the_admission_solve_puts_every_row_of_the_map_on_its_definition() -> Result<(), InitializationFailure> {
+    let body = bench()?;
+    let (pleural, abdominal) = (3.0, 5.0);
+    let mut start = guessed(&body, pleural, abdominal, 1.0)?;
+    start.within(admission_tolerance());
+    let cells = RowKind::Amount {
+        site: site::<CapillaryBed>("leg bed")?,
+        space: Space::Cells,
+    };
+    let lens = gauge(&body, cells)?;
+    let core = ReferenceIntegrator::new(SECOND);
+    let port = BoundaryPort::new(Vec::new())?;
+    let session = admit_solved(&body, start, port, &core, &lens)?.session;
+    let value = |kind| at_admission(&session, &body, kind);
+    let bed = site::<CapillaryBed>("pulmonary bed")?;
+    let row = |law: LawName, site| RowKind::Algebraic(Slot { law, site });
+    let cv = LawName {
+        owner: "CV",
+        local: "capillary_pressure",
+    };
+    let rs = LawName {
+        owner: "RS",
+        local: "enclosure_pressure",
+    };
+    let pleura = site::<EnclosedSpace>("pleural space")?;
+    assert_eq!(value(row(cv, Some(bed))), CAPILLARY);
+    assert_eq!(value(row(rs, Some(pleura))), pleural);
+    assert_eq!(value(cells), START);
+    Ok(())
+}
+
+/// A bed that fills until its walls balance a field and its enclosure, so a steady orbit exists, with one
+/// held pool and one held enclosure's fluid beside it.
+fn settling_bed() -> Result<CompiledBody, AdmissionError> {
+    let origin = || -> Result<Position, AdmissionError> {
+        Ok(Position::new(
+            Measure::new(0.0)?,
+            Measure::new(0.0)?,
+            Measure::new(0.0)?,
+        ))
+    };
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin()?);
+    let vessel = map.site::<VesselSegment>("vessel", origin()?);
+    let bed = map.site::<CapillaryBed>("bed", origin()?);
+    let belly = map.site::<EnclosedSpace>("belly", origin()?);
+    for at in [vessel.id(), bed.id(), belly.id()] {
+        map.contain(root.id(), at);
+    }
+    map.connect(Network::Vascular, vessel.id(), bed.id());
+    map.connect(Network::Vascular, bed.id(), vessel.id());
+    let held = Compliance::Held {
+        card: Gastrointestinal::CARD,
+    };
+    map.enclose(&belly, &[bed.id()], held);
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.leave_out(Space::Lumen, "no circulation in this bench");
+    schema.partial_volume(Measure::new(1.0)?)?;
+    assemble(schema, |mut body| {
+        let fast = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let gut = HeldDeclaration::<Gastrointestinal>::new(vec![], vec![], "a synthetic bench");
+        let (mut laws, ports) = body.hold(gut)?.parts();
+        enclosure_law(&mut laws, &ports, ParameterKey::new("gi.abdominal-pressure"))?;
+        body.add(laws.finish());
+        let cells = HeldDeclaration::<BloodChemistry>::new(vec![], vec![Space::Cells], "a synthetic bench");
+        let (laws, _ports) = body.hold(cells)?.parts();
+        body.add(laws.finish());
+        let (mut cv, _ports) = body.cardiovascular()?.parts();
+        let pressures: CapillaryAndVenousPressure<Defines<'_, Cardiovascular>> = cv.emit();
+        let value = cv.site_parameter::<CapillaryBed, Pressure>(
+            ParameterKey::new("bench.capillary"),
+            Admissible::finite(),
+        );
+        for output in [&pressures.capillary_pressure, &pressures.venous_pressure] {
+            let defined = cv.site_kernel(|mut k| {
+                let value = k.site_parameter(&value);
+                k.finish(value, cv.every_mode(), fast)
+            });
+            cv.define_at(output, defined);
+        }
+        body.add(cv.finish());
+        let (mut fl, ports) = body.fluids()?.parts();
+        let route = ports.starling(&mut fl);
+        let pressures: CapillaryAndVenousPressure<Reads<'_, Fluids>> = fl.receive();
+        let e = fl
+            .site_parameter::<CapillaryBed, Elastance>(ParameterKey::new("bench.e"), Admissible::positive());
+        let kf = fl.site_parameter::<CapillaryBed, Conductance<Water>>(
+            ParameterKey::new("bench.kf"),
+            Admissible::positive(),
+        );
+        let flow = fl.site_kernel(|mut k| {
+            let plasma = k.at_site(&route.from_amount());
+            let interstitium = k.at_site(&route.to_amount());
+            let (plasma, interstitium) = (k.volume(plasma), k.volume(interstitium));
+            let stiffness = k.site_parameter(&e);
+            let inside = k.multiply(stiffness, plasma);
+            let stiffness = k.site_parameter(&e);
+            let outside = k.multiply(stiffness, interstitium);
+            let inside = k.as_dimension::<_, Pressure>(inside);
+            let outside = k.as_dimension::<_, Pressure>(outside);
+            let walls = k.subtract(inside, outside);
+            let capillary = k.at_site(&pressures.capillary_pressure);
+            let around = k.at_site(&ports.extravascular_pressure);
+            let drive = k.subtract(capillary, around);
+            let head = k.add(walls, drive);
+            let conductance = k.site_parameter(&kf);
+            let flow = k.conductance_flow(conductance, head);
+            k.finish(flow, fl.every_mode(), fast)
+        });
+        fl.transfer_at(&route, flow);
+        body.add(fl.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn a_cycle_solves_field_rows_at_every_point_and_leaves_held_pools_where_they_are()
+-> Result<(), InitializationFailure> {
+    let body = settling_bed()?;
+    let bed = site::<CapillaryBed>("bed")?;
+    let belly = site::<EnclosedSpace>("belly")?;
+    let cycle = Cycle::new(
+        NonZeroU64::new(SECOND).expect("not zero"),
+        NonZeroU32::new(4).expect("not zero"),
+    )?;
+    let mut packet = ParameterPacket::periodic(cycle);
+    packet.within(admission_tolerance());
+    let class = Binding::Class(Class::CapillaryBed);
+    let one = Measure::<Elastance>::new(1.0)?;
+    packet.synthetic(ParameterKey::new("bench.e"), class, one, "synthetic")?;
+    let kf = Measure::<Conductance<Water>>::new(KF)?;
+    packet.synthetic(ParameterKey::new("bench.kf"), class, kf, "synthetic")?;
+    let capillary = Measure::<Pressure>::new(CAPILLARY)?;
+    packet.synthetic(
+        ParameterKey::new("bench.capillary"),
+        class,
+        capillary,
+        "synthetic",
+    )?;
+    let abdominal = Measure::<Pressure>::new(5.0)?;
+    packet.synthetic(
+        ParameterKey::new("gi.abdominal-pressure"),
+        Binding::Body,
+        abdominal,
+        "synthetic",
+    )?;
+    for row in body.rows() {
+        match row.kind() {
+            RowKind::Algebraic(_) => packet.start(row.kind(), Measure::<Pressure>::new(1.0)?, "synthetic")?,
+            kind => packet.start(kind, Measure::<Water>::new(START)?, "synthetic")?,
+        }
+    }
+    let amount = |space, site| RowKind::Amount { site, space };
+    let lens = gauge(&body, amount(Space::Plasma, bed))?;
+    let core = ReferenceIntegrator::new(SECOND / 4);
+    let port = BoundaryPort::new(Vec::new())?;
+    let session = admit_solved(&body, packet, port, &core, &lens)?.session;
+    let value = |kind| at_admission(&session, &body, kind);
+    let drained = (CAPILLARY - 5.0) / 2.0;
+    let close = |found: f64, wanted: f64| (found - wanted).abs() < 1e-9;
+    assert!(close(value(amount(Space::Plasma, bed)), START - drained));
+    assert!(close(value(amount(Space::Interstitium, bed)), START + drained));
+    assert_eq!(value(amount(Space::Cells, bed)), START);
+    assert_eq!(value(amount(Space::Fluid, belly)), START);
+    let law = LawName {
+        owner: "CV",
+        local: "capillary_pressure",
+    };
+    assert!(close(
+        value(RowKind::Algebraic(Slot { law, site: Some(bed) })),
+        CAPILLARY
+    ));
+    Ok(())
+}
+
+#[test]
+fn an_anchor_on_a_held_pool_is_a_parameters_value() -> Result<(), AdmissionError> {
+    let body = bench()?;
+    let leg = site::<CapillaryBed>("leg bed")?;
+    let id = AnchorId::new("bench.pool");
+    let bound = |space| -> Result<Option<AdmissionError>, AdmissionError> {
+        let row = RowKind::Amount { site: leg, space };
+        let reading = Measure::<Water>::new(START)?;
+        let read = Snapshot::new(row, "a synthetic gauge", AnchorStatistic::Instant, reading);
+        let mut anchored = packet(&body, 3.0, 5.0)?;
+        anchored.anchor(Synthetic::new(id, read, "synthetic"))?;
+        Ok(body.bind(anchored).err())
+    };
+    assert_eq!(
+        bound(Space::Cells)?,
+        Some(AdmissionError::AnchorOnParameters { anchor: id })
+    );
+    assert_eq!(
+        bound(Space::Interstitium)?,
+        Some(AdmissionError::InstantOnPulsatile { anchor: id })
+    );
+    Ok(())
 }
 
 #[test]

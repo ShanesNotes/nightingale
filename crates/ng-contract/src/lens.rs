@@ -105,6 +105,16 @@ impl ObservationLens {
     pub fn period_ns(&self) -> u64 {
         self.period_ns
     }
+    /// Whether a channel reads `row` by `method`, one reading per `window_ns`, each the mean of exactly `points`
+    /// grid instants: a finer grid reads a mean admission did not match.
+    pub(crate) fn reads(&self, method: &str, row: RowId, window_ns: u64, points: u64) -> bool {
+        (self.channels.iter()).any(|channel| {
+            channel.method == method
+                && channel.row == row
+                && channel.window == points
+                && channel.window.checked_mul(self.period_ns) == Some(window_ns)
+        })
+    }
     /// What an observer's checkpoint is bound to: this lens with this seed.
     pub fn observer_digest(&self, seed: ObservationSeed) -> Digest {
         let mut out = Canonical::new("ng-contract observer 1");

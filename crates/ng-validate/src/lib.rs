@@ -35,6 +35,32 @@
 //!     run_until(session, stop)
 //! }
 //! ```
+//! Validation takes only a synthetic fixture, so the arena is nonclinical by type.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! use ng_record::{Running, Session};
+//! use ng_validate::*;
+//! fn clinical<'m>(body: &'m CompiledBody, packet: ParameterPacket<Reviewed>, port: BoundaryPort,
+//!     core: &'m dyn CoupledSolver) -> Result<Session<'m, Running>, InitializationFailure> {
+//!     admit_fixture(body, packet, port, core)
+//! }
+//! ```
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! use ng_validate::*;
+//! fn clinical<'m>(body: &'m CompiledBody, packet: ParameterPacket<Reviewed>, port: BoundaryPort,
+//!     core: &'m dyn CoupledSolver, lens: &ObservationLens) -> Result<Admitted<'m>, InitializationFailure> {
+//!     admit_solved(body, packet, port, core, lens)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! use ng_validate::*;
+//! fn synthetic<'m>(body: &'m CompiledBody, packet: ParameterPacket<SyntheticFixture>, port: BoundaryPort,
+//!     core: &'m dyn CoupledSolver, lens: &ObservationLens) -> Result<Admitted<'m>, InitializationFailure> {
+//!     admit_solved(body, packet, port, core, lens)
+//! }
+//! ```
 //! Evidence comes only from a gate that ran.
 //! ```compile_fail,E0451
 //! use ng_contract::Digest;
@@ -63,6 +89,7 @@
 mod accuracy;
 mod certificate;
 mod fixture;
+mod initialize;
 mod reference;
 mod replay;
 mod run;
@@ -76,6 +103,7 @@ pub use certificate::{
     QuantityResult, Sliding24Hours, certify,
 };
 pub use fixture::{ChanceCase, Delivery, TwoReservoirs, admit_fixture, admit_seeded};
+pub use initialize::{Admitted, admission_tolerance, admit_solved};
 pub use reference::ReferenceIntegrator;
 pub use replay::{
     ChancePlan, ClockSource, CoreFactory, GateEvidence, ReplayCase, ReplayEvidence, ReplayFailure,

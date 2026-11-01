@@ -677,6 +677,100 @@
 //!     laws.forcing("wobble", ParameterKey::new("rn.period"), ParameterKey::new("rn.amplitude"))
 //! }
 //! ```
+//! A reviewed packet's anchor needs a citation.
+//! ```compile_fail,E0061
+//! use ng_contract::*;
+//! fn uncited(id: AnchorId, read: Snapshot<Pressure>) -> Specified<Pressure> {
+//!     Specified::new(id, read)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn cited(id: AnchorId, read: Snapshot<Pressure>, citation: Citation) -> Specified<Pressure> {
+//!     Specified::new(id, read, citation)
+//! }
+//! ```
+//! A synthetic value cannot be an anchor in a reviewed packet.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn launder(packet: &mut ParameterPacket<Reviewed>, fake: Synthetic<Pressure>)
+//!     -> Result<(), AdmissionError> {
+//!     packet.anchor(fake)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn fixture(packet: &mut ParameterPacket<SyntheticFixture>, value: Synthetic<Pressure>)
+//!     -> Result<(), AdmissionError> {
+//!     packet.anchor(value)
+//! }
+//! ```
+//! A fixture value set by hand has no way into a reviewed packet.
+//! ```compile_fail,E0599
+//! use ng_contract::*;
+//! fn launder(packet: &mut ParameterPacket<Reviewed>, key: ParameterKey, value: Measure<Pressure>)
+//!     -> Result<(), AdmissionError> {
+//!     packet.synthetic(key, Binding::Body, value, "synthetic")
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn fixture(packet: &mut ParameterPacket<SyntheticFixture>, key: ParameterKey, value: Measure<Pressure>)
+//!     -> Result<(), AdmissionError> {
+//!     packet.synthetic(key, Binding::Body, value, "synthetic")
+//! }
+//! ```
+//! An anchor states its method and window (rule 17).
+//! ```compile_fail,E0061
+//! use ng_contract::*;
+//! fn silent(row: RowKind, value: Measure<Pressure>) -> Snapshot<Pressure> {
+//!     Snapshot::new(row, value)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn stated(row: RowKind, value: Measure<Pressure>) -> Snapshot<Pressure> {
+//!     Snapshot::new(row, "arterial line", AnchorStatistic::CycleMean, value)
+//! }
+//! ```
+//! An anchor's value does not leave it, so no packet entry can copy one (I14).
+//! ```compile_fail,E0616
+//! use ng_contract::*;
+//! fn pinned(packet: &mut ParameterPacket<SyntheticFixture>, key: ParameterKey, read: Snapshot<Pressure>)
+//!     -> Result<(), AdmissionError> {
+//!     packet.synthetic(key, Binding::Body, read.value, "the anchor")
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn fitted(packet: &mut ParameterPacket<SyntheticFixture>, key: ParameterKey, guess: Measure<Pressure>,
+//!     anchor: AnchorId) -> Result<(), AdmissionError> {
+//!     packet.calibrated(key, Binding::Body, guess, anchor)
+//! }
+//! ```
+//! A fit names its anchor, so it is one unknown with one row.
+//! ```compile_fail,E0061
+//! use ng_contract::*;
+//! fn aimless(packet: &mut ParameterPacket<SyntheticFixture>, key: ParameterKey, guess: Measure<Pressure>)
+//!     -> Result<(), AdmissionError> {
+//!     packet.calibrated(key, Binding::Body, guess)
+//! }
+//! ```
+//! A patient's draw takes the packet seed, never the run's (I9).
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn crossed(packet: &mut ParameterPacket<SyntheticFixture>, key: ParameterKey, seed: Seed)
+//!     -> Result<(), AdmissionError> {
+//!     packet.sampled(key, Binding::Body, seed)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn drawn(packet: &mut ParameterPacket<SyntheticFixture>, key: ParameterKey, seed: PacketSeed)
+//!     -> Result<(), AdmissionError> {
+//!     packet.sampled(key, Binding::Body, seed)
+//! }
+//! ```
 //! A lens is no part of a run's identity, so a new lens reads any replay.
 //! ```compile_fail,E0061
 //! use ng_contract::*;

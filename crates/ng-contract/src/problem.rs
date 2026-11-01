@@ -286,7 +286,7 @@ pub struct StageTime<'t> {
     pub(crate) offset_ns: u64,
 }
 
-/// Solver-writable trial coordinates, row `i` at slot `i`.
+/// Solver-writable trial coordinates. A problem's holds row `i` at slot `i`, and an admission system states its own.
 pub struct SolveWorkspace {
     layout: Digest,
     unknowns: Vec<f64>,
@@ -340,6 +340,13 @@ pub struct Jacobian {
     values: Vec<f64>,
 }
 impl Jacobian {
+    pub(crate) fn of_parts(row_offsets: Vec<usize>, columns: Vec<UnknownId>, values: Vec<f64>) -> Self {
+        Self {
+            row_offsets,
+            columns,
+            values,
+        }
+    }
     pub fn view(&self) -> SparseView<'_> {
         SparseView {
             row_offsets: &self.row_offsets,

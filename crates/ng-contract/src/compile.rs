@@ -817,6 +817,16 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
             }
         };
         for &(_, kernel) in &law.laws {
+            if let Serves::Boundary(water) = law.serves {
+                let carried = kernel.code.iter().find_map(|op| match op {
+                    Op::Input(Input::Drive(route)) if *route != water.name => Some(*route),
+                    _ => None,
+                });
+                if let Some(route) = carried {
+                    let law = law.name;
+                    return Err(CompileDefect::DriveOfAnotherRoute { law, route });
+                }
+            }
             let program = ProgramId::at(placement.programs.len());
             placement.programs.push(Program {
                 id: program,
@@ -956,8 +966,7 @@ fn addresses(
                     Address::Unknown(UnknownId::at(rows.amount(pool).ok_or(left_out(law, pool))?))
                 }
                 (Input::Drive(route), _) => {
-                    let owner = route_owner(held, route);
-                    if law != (LawName { owner, local: route }) {
+                    if route_owner(held, route) != law.owner {
                         return Err(CompileDefect::DriveOfAnotherRoute { law, route });
                     }
                     Address::Boundary(route)
