@@ -651,8 +651,31 @@ fn a_binding_stands_only_on_its_own_set_of_sites() -> Result<(), AdmissionError>
         schema.pool::<Norepinephrine>(site, space)?;
         schema.pool::<Norepinephrine>(site, Space::Bound)?;
     }
-    let compiled = assemble(schema, |mut body| {
+    let into = BoundaryDirection::IntoBody;
+    schema.boundary::<Water>("blood", into, bed.id(), Space::Plasma)?;
+    schema.boundary::<Water>("lumen", into, vessel.id(), Space::Lumen)?;
+    schema.boundary::<Norepinephrine>("free", into, bed.id(), Space::Plasma)?;
+    schema.boundary::<Norepinephrine>("bound", into, bed.id(), Space::Bound)?;
+    let body = assemble(schema, |mut body| {
         let class = fast()?;
+        let (mut laws, ports) = body.boundary()?.parts();
+        for name in ["blood", "lumen"] {
+            let route = ports.route::<Water>(name)?.route;
+            let rate = laws.kernel(|mut k| {
+                let zero = k.zero();
+                k.finish(zero, laws.every_mode(), class)
+            });
+            laws.transfer(Transfer::new(&route, rate));
+        }
+        for name in ["free", "bound"] {
+            let route = ports.route::<Norepinephrine>(name)?.route;
+            let rate = laws.kernel(|mut k| {
+                let zero = k.zero();
+                k.finish(zero, laws.every_mode(), class)
+            });
+            laws.transfer(Transfer::new(&route, rate));
+        }
+        body.add(laws.finish());
         let (mut laws, ports) = body.receptor()?.parts();
         let route = ports.binding::<Junction, Norepinephrine>(&mut laws);
         let rate = laws.site_kernel(|mut k| {
@@ -662,14 +685,11 @@ fn a_binding_stands_only_on_its_own_set_of_sites() -> Result<(), AdmissionError>
         laws.transfer_at(&route, rate);
         body.add(laws.finish());
         body.compile()
-    });
-    assert_eq!(
-        compiled.err(),
-        Some(AdmissionError::Compile(CompileDefect::OrphanPool {
-            site: bed.id(),
-            space: Space::Plasma,
-        }))
-    );
+    })?;
+    let bound = |column: &&Column| column.origin().owner == "Receptor";
+    let bindings: Vec<_> = body.columns().iter().filter(bound).collect();
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].context(), Context::Site(junction.id()));
     Ok(())
 }
 

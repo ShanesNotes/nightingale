@@ -642,6 +642,43 @@ fn a_bolus_gains_on_the_walls_and_takes_nothing_back_from_the_heat(solved: &Solv
     assert!(most_lost < 1e-6 * held, "{most_lost}");
 }
 
+/// The walls' store takes gravity's work on every edge. The wall power closes the store whatever arrives, so a missing
+/// receipt would show nowhere else: a row that balances anything cannot say what it balanced.
+#[test]
+fn a_standing_body_pays_gravitys_work_into_the_walls() -> Result<(), InitializationFailure> {
+    let body = arena_body()?;
+    let (packet, lens) = (arena_packet(&body)?, arena_lens(&body)?);
+    let parameters = body.bind(packet)?;
+    let standing = Posture::new(Measure::new(1.0)?, Legs::Standing)?;
+    let id = InputId::new(Digest::of_canonical(b"stand"));
+    let event = BoundaryEvent::new(id, anchor_moment(), BoundaryInput::Posture(standing));
+    let port = BoundaryPort::new(vec![event])?;
+    let request = InitializationRequest::at(anchor_moment()).reading(&lens);
+    let system = body.initialization(parameters, port, request)?;
+    let workspace = system.workspace();
+    let (_, block) = system.stage(&workspace, 0)?;
+    let view = block.view();
+    let index = |kind: RowKind| {
+        let found = body.rows().iter().find(|row| row.kind() == kind);
+        found.expect("a row").id().index()
+    };
+    let store = index(amount(
+        site::<TissueSite>("body"),
+        Space::Elastic,
+        Species::Energy,
+    ));
+    let (from, to) = (vessel("systemic arteries"), bed("leg bed"));
+    let flow = index(algebraic("CV", "circulation", Context::Edge { from, to }));
+    let entries = view.row_offsets()[store]..view.row_offsets()[store + 1];
+    let slope = entries
+        .into_iter()
+        .find(|&entry| view.columns()[entry].index() == flow)
+        .map_or(0.0, |entry| view.values()[entry]);
+    let (per_metre, metres, stage) = (70.0, 1.0, 0.01);
+    assert!((slope + per_metre * metres * stage).abs() < 1e-9, "{slope}");
+    Ok(())
+}
+
 /// Once the wall has let go, the heat the store sheds is what the flows lose on the way, up to the steps' own error, so
 /// the rate that closes the store is a real account of dissipation and no free number. While it lets go the store sheds
 /// what the stiffer wall held as well.

@@ -676,6 +676,7 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
     for (key, value) in [
         ("cv.rise-speed", 20.0),
         ("cv.fall-speed", 20.0),
+        // Slower, the gain a stand needs rings at a period of about 4.6 s.
         ("ns.filter-speed", 4.0),
         ("ns.set-point-speed", 1e-6),
         ("en.avp-clearance", 2e-3),
@@ -850,8 +851,8 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
     }
     set::<Rate<Sodium>>(packet, "rn.sodium-capacity", edge(duct, peritubular), 12.0, note)?;
 
-    // Norepinephrine clears slowly and acetylcholine fast, so the reflex's arteriolar arm is the slow one and the loop
-    // does not hunt. The gain the stand needs would ring on two lags of a second.
+    // Norepinephrine clears slowly because research 02 has the junction pool supply the lag, and its check has the
+    // conductance low at the sixth cycle. Acetylcholine clears fast, so the rate answers within a beat.
     for (release, reuptake, out, back) in [
         ("ns.release-ne", "ns.reuptake-ne", 0.005, 0.25),
         ("ns.release-ach", "ns.reuptake-ach", 0.04, 2.0),
