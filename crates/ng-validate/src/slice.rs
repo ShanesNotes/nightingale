@@ -690,7 +690,7 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
     set::<Quotient<Volume, Albumin>>(packet, "fl.albumin-volume", body, 0.05, note)?;
     set::<Pressure>(packet, "gi.abdominal-pressure", body, 4.0, note)?;
     set::<Pressure>(packet, "rs.pleural-pressure", body, -3.0, note)?;
-    set::<Deviation<Dimensionless>>(packet, "ns.sympathetic-width", body, 0.04, note)?;
+    set::<Deviation<Dimensionless>>(packet, "ns.sympathetic-width", body, 0.035, note)?;
     set::<Deviation<Dimensionless>>(packet, "ns.vagal-width", body, 0.05, note)?;
     set::<Quotient<Pressure, Concentration<Albumin>>>(packet, "fl.oncotic-slope", body, 20.0, note)?;
     set::<Quotient<Pressure, Concentration<Albumin>>>(packet, "rn.oncotic-slope", body, 20.0, note)?;

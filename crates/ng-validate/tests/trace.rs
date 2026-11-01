@@ -93,15 +93,15 @@ fn the_first_second_of_the_slice_stays_where_it_was() {
         trace.push('\n');
     }
     expect![[r#"
-         100 ms  arterial pressure 128.151085  right atrial pressure 2.468340  heart rate 1.011649  sympathetic traffic 0.574114  filtration 1.734505  urine 0.020000  heat 16144.602433  aortic flow 0.000000
-         200 ms  arterial pressure 122.955330  right atrial pressure 2.872428  heart rate 1.017817  sympathetic traffic 0.506614  filtration 2.212603  urine 0.020000  heat 11928.782110  aortic flow 49.528669
-         300 ms  arterial pressure 116.454963  right atrial pressure 3.258583  heart rate 1.015404  sympathetic traffic 0.459067  filtration 2.450996  urine 0.020000  heat 39299.680503  aortic flow 0.000000
-         400 ms  arterial pressure 108.820732  right atrial pressure 3.137660  heart rate 1.007785  sympathetic traffic 0.433563  filtration 2.494251  urine 0.020000  heat 12340.238971  aortic flow 0.000000
-         500 ms  arterial pressure 101.877960  right atrial pressure 1.425512  heart rate 0.998476  sympathetic traffic 0.427617  filtration 2.403183  urine 0.020000  heat 10477.688584  aortic flow 0.000000
-         600 ms  arterial pressure 95.498083  right atrial pressure 0.913915  heart rate 0.990116  sympathetic traffic 0.437750  filtration 2.224998  urine 0.020000  heat 7595.112154  aortic flow 0.000000
-         700 ms  arterial pressure 89.580991  right atrial pressure 0.906730  heart rate 0.984467  sympathetic traffic 0.461436  filtration 2.004260  urine 0.020000  heat 5638.449065  aortic flow 0.000000
-         800 ms  arterial pressure 84.055823  right atrial pressure 1.127657  heart rate 0.982692  sympathetic traffic 0.496603  filtration 1.776034  urine 0.020000  heat 4603.760304  aortic flow 0.000000
-         900 ms  arterial pressure 78.875293  right atrial pressure 1.387644  heart rate 0.985553  sympathetic traffic 0.541115  filtration 1.561282  urine 0.020000  heat 3926.726190  aortic flow 0.000000
-        1000 ms  arterial pressure 74.008201  right atrial pressure 1.675609  heart rate 0.993509  sympathetic traffic 0.592431  filtration 1.369660  urine 0.020000  heat 3566.027869  aortic flow 0.000000
+         100 ms  arterial pressure 125.258742  right atrial pressure 1.978089  heart rate 1.060493  sympathetic traffic 0.627386  filtration 1.756970  urine 0.020000  heat 13155.804122  aortic flow 0.000000
+         200 ms  arterial pressure 121.183675  right atrial pressure 2.408024  heart rate 1.072032  sympathetic traffic 0.099481  filtration 2.123018  urine 0.020000  heat 10204.418149  aortic flow 43.788682
+         300 ms  arterial pressure 115.204314  right atrial pressure 2.776255  heart rate 1.042310  sympathetic traffic 0.028103  filtration 2.323308  urine 0.020000  heat 29955.960258  aortic flow 0.000000
+         400 ms  arterial pressure 108.377068  right atrial pressure 2.356713  heart rate 1.003951  sympathetic traffic 0.021437  filtration 2.381966  urine 0.020000  heat 10520.718265  aortic flow 0.000000
+         500 ms  arterial pressure 102.058542  right atrial pressure 0.857887  heart rate 0.972383  sympathetic traffic 0.032583  filtration 2.334231  urine 0.020000  heat 9218.926793  aortic flow 0.000000
+         600 ms  arterial pressure 96.168804  right atrial pressure 0.447735  heart rate 0.951028  sympathetic traffic 0.073786  filtration 2.210111  urine 0.020000  heat 6765.565549  aortic flow 0.000000
+         700 ms  arterial pressure 90.643157  right atrial pressure 0.484396  heart rate 0.941722  sympathetic traffic 0.195123  filtration 2.043842  urine 0.020000  heat 5206.714346  aortic flow 0.000000
+         800 ms  arterial pressure 85.442799  right atrial pressure 0.710311  heart rate 0.947048  sympathetic traffic 0.458271  filtration 1.862382  urine 0.020000  heat 4367.848716  aortic flow 0.000000
+         900 ms  arterial pressure 80.556399  right atrial pressure 0.950120  heart rate 0.968386  sympathetic traffic 0.758482  filtration 1.679848  urine 0.020000  heat 3762.393444  aortic flow 0.000000
+        1000 ms  arterial pressure 75.983437  right atrial pressure 1.196615  heart rate 1.003337  sympathetic traffic 0.921870  filtration 1.502752  urine 0.020000  heat 3160.176857  aortic flow 0.000000
     "#]].assert_eq(&trace);
 }
