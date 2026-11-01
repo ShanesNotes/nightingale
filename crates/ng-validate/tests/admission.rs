@@ -61,6 +61,7 @@ const NETWORK: Binding = Binding::Network(Network::Vascular);
 const NOTE: &str = "synthetic";
 const SETTLED: &str = "settled";
 const READING: &str = "reading";
+const ECHO: &str = "echo";
 /// One unit of water over the one second of the instant's delivery.
 const CHANNEL_FLOW: f64 = 3.0;
 
@@ -293,6 +294,14 @@ fn declared(variant: Variant) -> Result<Body, AdmissionError> {
                     k.finish(residual, laws.every_mode(), class)
                 });
                 laws.residual(&reading, closure);
+                let echo = laws.algebraic::<Rate<Water>>(ECHO, Admissible::finite());
+                let copy = laws.kernel(|mut k| {
+                    let x = k.algebraic(&echo);
+                    let read = k.algebraic(&reading);
+                    let residual = k.subtract(x, read);
+                    k.finish(residual, laws.every_mode(), class)
+                });
+                laws.residual(&echo, copy);
             }
         }
         body.add(laws.finish());
@@ -374,6 +383,12 @@ impl PulsatileCase {
     fn row_a(&self) -> RowId {
         (self.body().rows().iter())
             .find(|row| row.kind() == self.a())
+            .expect("the body declares it")
+            .id()
+    }
+    fn row_b(&self) -> RowId {
+        (self.body().rows().iter())
+            .find(|row| row.kind() == self.b())
             .expect("the body declares it")
             .id()
     }
@@ -912,17 +927,28 @@ fn a_forcing_is_held_at_its_mean_around_the_ring_and_a_fitted_period_stays_on_th
     );
 }
 
+/// The drain comes first, so the water falls below zero inside the beat. The start itself is positive, and every
+/// row of the orbit holds.
 #[test]
-fn a_state_outside_its_set_at_any_point_is_refused_with_its_row() {
+fn an_orbit_that_leaves_a_rows_set_inside_the_beat_is_refused_with_its_row() {
     let case = PulsatileCase::plain();
-    let (packet, boundary, _) = steady_packet(&case);
-    let system = steady_system(&case, packet, boundary);
-    let mut solved = system.workspace();
-    let rows = case.body().rows().len();
-    solved.unknowns_mut()[2 * rows] = -1.0;
-    let row = AdmissionRow::Body(case.body().rows()[0].id());
+    let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
+    let g = measure::<Conductance<Water>>(CONDUCTANCE);
+    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+    packet
+        .synthetic(E, NETWORK, measure::<Elastance>(100.0), NOTE)
+        .expect("once");
+    packet.start(case.a(), measure::<Water>(2.0), NOTE).expect("once");
+    packet.start(case.b(), measure::<Water>(2.0), NOTE).expect("once");
+    let events = vec![
+        water(b"even in", 0, PULSE, 0, PERIOD_NS, DELIVERED),
+        water(b"early out", 0, DRAIN, 0, PULSE_NS, DELIVERED),
+    ];
+    let boundary = BoundaryPort::new(events).expect("parsed");
+    let core = reference(REFERENCE_NS);
+    let row = AdmissionRow::Body(case.row_b());
     assert_eq!(
-        system.admit(solved, case.history()).err(),
+        admit_solved(case.body(), packet, boundary, &core, &case.lens).err(),
         Some(InitializationFailure::Inconsistent { row })
     );
 }
@@ -1102,25 +1128,24 @@ fn an_instant_moves_no_amount_by_a_hair_even_inside_the_tolerance() {
 #[test]
 fn a_workspace_of_another_shape_is_refused() {
     let case = PulsatileCase::plain();
+    let refused = Some(InitializationFailure::Admission(AdmissionError::ForeignWorkspace));
     let (packet, boundary, _) = steady_packet(&case);
-    let wide = steady_system(&case, packet, boundary).workspace();
-    let system = case.system(case.packet());
-    assert_eq!(
-        system.admit(wide, case.history()).err(),
-        Some(InitializationFailure::Admission(AdmissionError::ForeignWorkspace))
-    );
+    let small = steady_system(&case, packet, boundary);
+    let large = case.system(case.packet());
+    let (too_short, too_long) = (small.workspace(), large.workspace());
+    assert_eq!(large.admit(too_short, case.history()).err(), refused);
+    assert_eq!(small.admit(too_long, case.history()).err(), refused);
 }
 
-#[test]
-fn a_fit_solves_at_an_instant_on_a_body_with_a_conserved_total() {
-    let case = PulsatileCase::new(Variant::Instant);
-    let reading = RowKind::Algebraic(LawName {
+fn boundary_row(local: &'static str) -> RowKind {
+    RowKind::Algebraic(LawName {
         owner: "Boundary",
-        local: READING,
-    });
-    let held = 2.0 * CHANNEL_FLOW;
-    let bare = ChannelSpec::new(GAUGE, reading);
-    let lens = case.body().lens(vec![bare], count(SECOND)).expect("a lens");
+        local,
+    })
+}
+
+/// The instant case's packet, with one fit on an anchor at `row`.
+fn instant_packet(case: &PulsatileCase, row: RowKind, target: f64) -> ParameterPacket<SyntheticFixture> {
     let mut packet = ParameterPacket::new();
     packet
         .synthetic(E, NETWORK, measure::<Elastance>(GUESS), NOTE)
@@ -1133,18 +1158,30 @@ fn a_fit_solves_at_an_instant_on_a_body_with_a_conserved_total() {
     packet
         .start(case.b(), measure::<Water>(START[1]), NOTE)
         .expect("once");
-    packet
-        .start(reading, measure::<Rate<Water>>(1.0), NOTE)
-        .expect("once");
+    for local in [READING, ECHO] {
+        packet
+            .start(boundary_row(local), measure::<Rate<Water>>(1.0), NOTE)
+            .expect("once");
+    }
     let read = Snapshot::new(
-        reading,
+        row,
         GAUGE,
         AnchorStatistic::Instant,
-        measure::<Rate<Water>>(held),
+        measure::<Rate<Water>>(target),
     );
     packet.anchor(Synthetic::new(MEAN, read, NOTE)).expect("once");
     let gain = measure::<Dimensionless>(1.0);
     packet.calibrated(SET, Binding::Body, gain, MEAN).expect("once");
+    packet
+}
+
+#[test]
+fn a_fit_solves_at_an_instant_on_a_body_with_a_conserved_total() {
+    let case = PulsatileCase::new(Variant::Instant);
+    let reading = boundary_row(READING);
+    let bare = ChannelSpec::new(GAUGE, reading);
+    let lens = case.body().lens(vec![bare], count(SECOND)).expect("a lens");
+    let packet = instant_packet(&case, reading, 2.0 * CHANNEL_FLOW);
     let events = vec![water(b"steady", 0, PULSE, 0, PERIOD_NS, CHANNEL_FLOW)];
     let boundary = BoundaryPort::new(events).expect("parsed");
     let core = reference(SECOND);
@@ -1159,6 +1196,13 @@ fn a_fit_solves_at_an_instant_on_a_body_with_a_conserved_total() {
         ValueProvenance::Calibrated { anchor: MEAN }
     );
     assert!((hi(record(&provenance, name).value) - 2.0).abs() < 1e-12);
+}
+
+#[test]
+fn a_row_that_reaches_a_drive_through_another_row_can_carry_an_anchor() {
+    let case = PulsatileCase::new(Variant::Instant);
+    let packet = instant_packet(&case, boundary_row(ECHO), 2.0 * CHANNEL_FLOW);
+    assert!(case.body().bind(packet).is_ok());
 }
 
 // Check 3: provenance per value, an authored value inside its range, no parameter pinned to an anchor.
@@ -1459,6 +1503,46 @@ fn a_fit_names_one_anchor_its_packet_holds_and_an_anchor_takes_one_fit() {
 }
 
 #[test]
+fn a_fit_on_an_anchor_its_packet_does_not_hold_is_refused_though_others_are_there() {
+    let case = PulsatileCase::plain();
+    let mut packet = case.packet_without_fit();
+    let held = AnchorId::new("fixture.held");
+    packet
+        .anchor(case.mean_anchor(held, case.b(), TOTAL - MEAN_A))
+        .expect("once");
+    packet
+        .calibrated(E, NETWORK, measure::<Elastance>(GUESS), MEAN)
+        .expect("once");
+    assert_eq!(
+        case.body().bind(packet).err(),
+        Some(AdmissionError::UnknownAnchor {
+            key: E,
+            binding: NETWORK
+        })
+    );
+}
+
+#[test]
+fn a_refusal_names_the_same_anchor_however_the_packet_was_built() {
+    let case = PulsatileCase::plain();
+    let (first, second) = (AnchorId::new("fixture.a"), AnchorId::new("fixture.b"));
+    let core = reference(REFERENCE_NS);
+    let refused = |anchors: [AnchorId; 2]| {
+        let mut packet = case.packet();
+        for id in anchors {
+            let row = if id == first { case.a() } else { case.b() };
+            packet.anchor(case.mean_anchor(id, row, 1.0)).expect("once");
+        }
+        admit_solved(case.body(), packet, port(0..1), &core, &case.lens).err()
+    };
+    let named = Some(InitializationFailure::Inconsistent {
+        row: AdmissionRow::Anchor(first),
+    });
+    assert_eq!(refused([first, second]), named);
+    assert_eq!(refused([second, first]), named);
+}
+
+#[test]
 fn an_anchor_id_is_used_once_and_an_anchor_reads_a_row_of_its_own_dimension() {
     let case = PulsatileCase::plain();
     let mut packet = case.packet();
@@ -1492,20 +1576,21 @@ fn a_cycle_refuses_a_grid_that_does_not_divide_it() {
 }
 
 #[test]
-fn a_delivery_edge_between_two_points_is_refused() {
+fn a_delivery_edge_between_two_points_is_refused_and_one_past_the_window_is_taken() {
     let case = PulsatileCase::plain();
-    let edge = PULSE_NS + 1;
-    let events = vec![
-        water(b"off", 0, PULSE, 0, edge, DELIVERED),
-        water(b"drain", 0, DRAIN, 0, PERIOD_NS, DELIVERED),
-    ];
-    let boundary = BoundaryPort::new(events).expect("parsed");
-    let parameters = case.body().bind(case.packet()).expect("bound");
-    let request = InitializationRequest::at(at(0), admission_tolerance()).reading(&case.lens);
-    assert!(matches!(
-        case.body().initialization(parameters, boundary, request).err(),
-        Some(AdmissionError::DeliveryOffGrid { .. })
-    ));
+    let off = PULSE_NS + 1;
+    let system = |event: BoundaryEvent| {
+        let events = vec![event, water(b"drain", 0, DRAIN, 0, PERIOD_NS, DELIVERED)];
+        let boundary = BoundaryPort::new(events).expect("parsed");
+        let parameters = case.body().bind(case.packet()).expect("bound");
+        let request = InitializationRequest::at(at(0), admission_tolerance()).reading(&case.lens);
+        case.body().initialization(parameters, boundary, request).err()
+    };
+    let refused = |error| matches!(error, Some(AdmissionError::DeliveryOffGrid { .. }));
+    assert!(refused(system(water(b"late end", 0, PULSE, 0, off, DELIVERED))));
+    assert!(refused(system(water(b"late stamp", 0, PULSE, off, 2 * off, 1.0))));
+    let past = PERIOD_NS + 1;
+    assert_eq!(system(water(b"past", 0, PULSE, past, past + 1, 1.0)), None);
 }
 
 #[test]
@@ -1608,12 +1693,33 @@ fn two_builds_of_one_packet_start_on_the_same_bits() {
     assert_eq!(parts(true), parts(false));
 }
 
+#[test]
+fn which_anchor_a_fit_names_is_in_the_hash() {
+    let case = PulsatileCase::plain();
+    let (first, second) = (AnchorId::new("fixture.a"), AnchorId::new("fixture.b"));
+    let hash = |target| {
+        let mut packet = case.packet_without_fit();
+        packet
+            .anchor(case.mean_anchor(first, case.a(), MEAN_A))
+            .expect("once");
+        packet
+            .anchor(case.mean_anchor(second, case.b(), TOTAL - MEAN_A))
+            .expect("once");
+        packet
+            .calibrated(E, NETWORK, measure::<Elastance>(GUESS), target)
+            .expect("once");
+        case.body().bind(packet).expect("bound").packet_hash()
+    };
+    assert_ne!(hash(first), hash(second));
+}
+
 #[derive(Clone, Copy)]
 struct Stated {
     method: &'static str,
     value: f64,
     anchor_note: &'static str,
     range: [f64; 2],
+    other_range: [f64; 2],
     record_note: &'static str,
     reason: &'static str,
     identity: &'static str,
@@ -1624,6 +1730,7 @@ const STATED: Stated = Stated {
     value: MEAN_A,
     anchor_note: NOTE,
     range: [1.0, 3.0],
+    other_range: [0.0, 9.0],
     record_note: NOTE,
     reason: "a reason",
     identity: "an identity",
@@ -1656,7 +1763,7 @@ fn stated_hash(case: &PulsatileCase, stated: Stated) -> PacketHash {
         .expect("once");
     let seed = PacketSeed::new([stated.seed, 2, 3, 4]);
     packet.sampled(TONE, Binding::Body, seed).expect("a record");
-    let (low, high) = (measure::<Dimensionless>(0.0), measure::<Dimensionless>(9.0));
+    let [low, high] = stated.other_range.map(measure::<Dimensionless>);
     packet.population(RATIO, low, high, NOTE).expect("once");
     let ratio = measure::<Dimensionless>(4.5);
     packet
@@ -1693,6 +1800,14 @@ fn every_part_of_a_packet_is_in_its_hash() {
         },
         Stated {
             range: [1.0, 3.5],
+            ..STATED
+        },
+        Stated {
+            other_range: [0.0, 10.0],
+            ..STATED
+        },
+        Stated {
+            other_range: [1.0, 9.0],
             ..STATED
         },
         Stated {

@@ -251,7 +251,7 @@ impl<K: PacketKind> ParameterPacket<K> {
             dimension: dimension::<U>(),
             bits: value.bits(),
             provenance: ValueProvenance::Authored { reason },
-            note: reason,
+            note: "",
         })
     }
     /// A value an identity gives from other packet values. `bind` refuses an input with no entry, so the
@@ -270,7 +270,7 @@ impl<K: PacketKind> ParameterPacket<K> {
             dimension: dimension::<U>(),
             bits: value.bits(),
             provenance: ValueProvenance::Derived { identity, inputs },
-            note: identity,
+            note: "",
         })
     }
     /// A parameter admission fits so `anchor` holds. One fit names one anchor and `bind` refuses a second fit
@@ -802,17 +802,15 @@ impl CompiledBody {
 }
 
 /// One number per node, equal for two nodes that compute one expression: the same operation on operands of the
-/// same numbers, in either order for `add`, `multiply` and `scale`. Separate reads of one parameter already compare
-/// equal, so `(p + p) / (p + p)` from four reads gets one number on each side, and so does `(p q) / (q p)`. It
-/// folds nothing: `p - p` stays a law on a parameter, as finding 15's backed test holds it.
+/// same numbers, in either order for `add`, the one operation whose two orders can both name a dimensionless
+/// ratio. Separate reads of one parameter already compare equal, so `(p + p) / (p + p)` from four reads gets one
+/// number on each side. It folds nothing: `p - p` stays a law on a parameter, as finding 15's backed test holds it.
 fn numbered(code: &[Op]) -> Vec<usize> {
     let mut numbers: Vec<usize> = Vec::with_capacity(code.len());
     let mut distinct: Vec<Op> = Vec::with_capacity(code.len());
     for op in code {
         let plain = match op.map(|operand| numbers[operand]) {
             Op::Add([a, b]) => Op::Add([a.min(b), a.max(b)]),
-            Op::Multiply([a, b]) => Op::Multiply([a.min(b), a.max(b)]),
-            Op::Scale([a, b]) => Op::Scale([a.min(b), a.max(b)]),
             other => other,
         };
         let known = distinct.iter().position(|seen| *seen == plain);
