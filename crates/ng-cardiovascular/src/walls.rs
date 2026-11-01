@@ -12,7 +12,7 @@ pub(crate) struct Walls<'b, 'h> {
     albumin: Port<'b, Albumin>,
     room: Parameter<'b, Cardiovascular, Quotient<Volume, Albumin>>,
     pub(crate) outside: Port<'b, Pressure>,
-    alpha: Effect<'b>,
+    adrenergic: Effect<'b>,
     passive: Knob<'b, Elastance>,
     active: Knob<'b, Elastance>,
     inotropy: Knob<'b, Dimensionless>,
@@ -35,7 +35,7 @@ impl<'b, 'h> Walls<'b, 'h> {
             albumin: ports.amount::<Albumin>(),
             room: cv.parameter(ParameterKey::new("cv.albumin-volume"), Admissible::nonnegative()),
             outside: ports.extravascular_pressure(),
-            alpha: ports.effect::<Norepinephrine>(),
+            adrenergic: ports.effect::<Norepinephrine>(),
             passive,
             active,
             inotropy: cv.site_parameter(ParameterKey::new("cv.inotropy"), Admissible::nonnegative()),
@@ -62,7 +62,7 @@ impl<'b, 'h> Walls<'b, 'h> {
         let volume = k.add(solvent, solute);
         let base = k.site_parameter(&self.unstressed);
         let gain = k.site_parameter(&self.unstressed_gain);
-        let effect = k.at_junction(&self.alpha);
+        let effect = k.at_junction(&self.adrenergic);
         let moved = k.scale(gain, effect);
         let unstressed = k.subtract(base, moved);
         let stretched = k.subtract(volume, unstressed);
@@ -75,7 +75,7 @@ impl<'b, 'h> Walls<'b, 'h> {
     ) -> Expr<'b, 'k, Cardiovascular, Elastance> {
         let active = k.site_parameter(&self.active);
         let gain = k.site_parameter(&self.inotropy);
-        let effect = k.at_junction(&self.alpha);
+        let effect = k.at_junction(&self.adrenergic);
         let tuned = k.scale(active, gain);
         let strengthened = k.scale(tuned, effect);
         k.add(active, strengthened)

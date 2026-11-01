@@ -33,7 +33,10 @@ fn the_first_second_of_the_slice_stays_where_it_was() {
     let admitted = admit_at(&body, packet, port, &core, &lens, anchor_moment()).expect("admitted");
     let at = |key| Context::Site(site::<VesselSegment>(key));
     let (arteries, atrium) = (at("systemic arteries"), at("right atrium"));
-    let (ventricle, tubule) = (site::<VesselSegment>("left ventricle"), site::<VesselSegment>("renal tubule"));
+    let (ventricle, tubule) = (
+        site::<VesselSegment>("left ventricle"),
+        site::<VesselSegment>("renal tubule"),
+    );
     let bed = site::<CapillaryBed>("glomerular bed");
     let aortic = Context::Edge {
         from: ventricle,
@@ -43,10 +46,20 @@ fn the_first_second_of_the_slice_stays_where_it_was() {
         ("arterial pressure", field("CV", "blood pressure", arteries)),
         ("right atrial pressure", field("CV", "blood pressure", atrium)),
         ("heart rate", field("CV", "rate", Context::Body)),
-        ("sympathetic traffic", field("NS", "sympathetic traffic", Context::Body)),
+        (
+            "sympathetic traffic",
+            field("NS", "sympathetic traffic", Context::Body),
+        ),
         (
             "filtration",
-            field("RN", "filtration", Context::Edge { from: bed, to: tubule }),
+            field(
+                "RN",
+                "filtration",
+                Context::Edge {
+                    from: bed,
+                    to: tubule,
+                },
+            ),
         ),
         ("urine", field("Boundary", "urine", Context::Body)),
         ("heat", field("CV", "dissipated power", Context::Body)),

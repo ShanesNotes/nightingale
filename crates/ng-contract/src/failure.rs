@@ -296,7 +296,7 @@ pub enum CompileDefect {
     ModeOfAnotherPlace { law: LawName },
     /// A read of a pool this body does not hold there, or of a place the map does not say: a landmark it does not
     /// place, a bed without exactly one drain, or a segment without exactly one urinary edge in.
-    NoPoolRead { law: LawName },
+    NoSuchRead { law: LawName },
     /// A law reads a junction at a site the map neither supplies nor states that no nerve reaches.
     NoSupply { law: LawName, site: SiteId },
     /// A law reads an effect at a junction that holds no such receptor.

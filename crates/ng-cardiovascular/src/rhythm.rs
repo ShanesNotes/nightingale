@@ -4,10 +4,9 @@ pub(crate) struct Heart<'b> {
     pub(crate) activation: StateSlot<'b, Cardiovascular, Dimensionless>,
     pub(crate) peak: Parameter<'b, Cardiovascular, Dimensionless>,
     pub(crate) rise: Parameter<'b, Cardiovascular, Rate<Dimensionless>>,
-    pub(crate) systole: ModeSetSource<'b>,
-    pub(crate) diastole: ModeSetSource<'b>,
+    pub(crate) systole: Mode<'b, Cardiovascular>,
+    pub(crate) diastole: Mode<'b, Cardiovascular>,
 }
-pub(crate) type ModeSetSource<'b> = Mode<'b, Cardiovascular>;
 
 /// A phase runs from zero to the end of the cycle at the pacemaker's rate. Systole lasts to a set phase, and the heart's
 /// activation rises through it and falls after it, first order. A wrap resets the phase and starts the next systole.

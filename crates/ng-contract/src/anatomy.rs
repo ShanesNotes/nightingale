@@ -220,8 +220,12 @@ pub enum AnatomyDefect {
     UndrainedBed {
         bed: &'static str,
     },
-    /// An edge of the wrong classes for its network, or a landmark placed twice.
+    /// An edge of the wrong classes for its network.
     WrongNetwork {
+        site: &'static str,
+    },
+    /// A landmark placed at two sites.
+    LandmarkTwice {
         site: &'static str,
     },
     /// A site two junctions supply, or a site supplied and also stated as `unsupplied`.
@@ -419,7 +423,7 @@ impl Facts {
             return Err(AnatomyDefect::WrongNetwork { site: edge.1.key });
         }
         if let Some(pair) = (self.landmarks.windows(2)).find(|pair| pair[0].0 == pair[1].0) {
-            return Err(AnatomyDefect::WrongNetwork { site: pair[0].1.key });
+            return Err(AnatomyDefect::LandmarkTwice { site: pair[0].1.key });
         }
         let mut supplied: Vec<SiteId> = self.supplies.iter().map(|&(_, site)| site).collect();
         supplied.extend_from_slice(&self.unsupplied);

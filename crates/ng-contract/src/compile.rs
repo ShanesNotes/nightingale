@@ -1164,7 +1164,7 @@ fn fluid_columns(placement: &mut Placement, places: &Places) -> Result<(), Compi
                     let amount = |end, species| -> Result<Address, CompileDefect> {
                         let pool = reach
                             .pool(end, species)
-                            .ok_or(CompileDefect::NoPoolRead { law })?;
+                            .ok_or(CompileDefect::NoSuchRead { law })?;
                         let row = rows.amount(pool).ok_or(left_out(law, pool))?;
                         Ok(Address::Unknown(UnknownId::at(row)))
                     };
@@ -1379,7 +1379,7 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
     }
 }
 
-fn landing(place: Where, context: Context, anatomy: &Anatomy) -> Option<SiteId> {
+fn place_of(place: Where, context: Context, anatomy: &Anatomy) -> Option<SiteId> {
     let ends = match context {
         Context::Edge { from, to } => Some((from, to)),
         _ => None,
@@ -1421,14 +1421,14 @@ fn addresses(
     let site = |end, from, to| if end == End::From { from } else { to };
     let unknown = |row: usize| Address::Unknown(UnknownId::at(row));
     let read = |source: Source, place: Where| -> Result<Address, CompileDefect> {
-        let landed = landing(place, context, anatomy);
+        let landed = place_of(place, context, anatomy);
         let at = landed.map_or(context, Context::Site);
         Ok(match source {
             Source::Field(_) if place == Where::Junction && context == Context::Body => {
-                return Err(CompileDefect::NoPoolRead { law });
+                return Err(CompileDefect::NoSuchRead { law });
             }
             Source::Field(_) if matches!(place, Where::Mark(_)) && landed.is_none() => {
-                return Err(CompileDefect::NoPoolRead { law });
+                return Err(CompileDefect::NoSuchRead { law });
             }
             Source::Field(field) => match (rows.defined(field, at), place) {
                 (Some(row), _) => unknown(row),
@@ -1448,17 +1448,20 @@ fn addresses(
                     owner: law.owner,
                     local: family.name(),
                 };
-                unknown(rows.declared(flow, context))
+                unknown(
+                    rows.slot(flow, context)
+                        .ok_or(CompileDefect::NoSuchRead { law })?,
+                )
             }
             Source::Amount(family, end, species) => {
                 let reach = reaches.reach(family, context);
                 let pool = reach
                     .pool(end, species)
-                    .ok_or(CompileDefect::NoPoolRead { law })?;
+                    .ok_or(CompileDefect::NoSuchRead { law })?;
                 unknown(rows.amount(pool).ok_or(left_out(law, pool))?)
             }
             Source::Pool(species) => {
-                let site = landed.ok_or(CompileDefect::NoPoolRead { law })?;
+                let site = landed.ok_or(CompileDefect::NoSuchRead { law })?;
                 let pool = PoolRef {
                     species,
                     ..flowing(site)
@@ -1472,7 +1475,7 @@ fn addresses(
                     None => (reaches.of_family(Family::Dissipation).first())
                         .and_then(|reach| reach.pool(End::From, species)),
                 };
-                let pool = base.ok_or(CompileDefect::NoPoolRead { law })?;
+                let pool = base.ok_or(CompileDefect::NoSuchRead { law })?;
                 let pool = PoolRef { species, ..pool };
                 unknown(rows.amount(pool).ok_or(left_out(law, pool))?)
             }
@@ -1483,7 +1486,7 @@ fn addresses(
                 Address::Boundary(route)
             }
             Source::Extravascular => {
-                let site = landed.ok_or(CompileDefect::NoPoolRead { law })?;
+                let site = landed.ok_or(CompileDefect::NoSuchRead { law })?;
                 match anatomy.encloser(site) {
                     None => Address::Gauge,
                     Some((space, Compliance::Held { card })) => {
@@ -1510,7 +1513,7 @@ fn addresses(
                 }
                 (Input::Read(source, place), _) => read(source, place)?,
                 (Input::Height(place), _) => {
-                    let site = landing(place, context, anatomy).ok_or(CompileDefect::NoPoolRead { law })?;
+                    let site = place_of(place, context, anatomy).ok_or(CompileDefect::NoSuchRead { law })?;
                     Address::Height(anatomy.axial(site).to_bits())
                 }
                 (Input::EdgeFlow, Context::Edge { from, to }) => {
@@ -1523,14 +1526,17 @@ fn addresses(
                         owner: law.owner,
                         local: family.name(),
                     };
-                    unknown(rows.declared(flow, context))
+                    unknown(
+                        rows.slot(flow, context)
+                            .ok_or(CompileDefect::NoSuchRead { law })?,
+                    )
                 }
                 (Input::Inflow, Context::Edge { from, .. }) => {
                     let into: Vec<(SiteId, SiteId)> = (anatomy.edges(Network::Urinary))
                         .filter(|edge| edge.1 == from)
                         .collect();
                     let [edge] = into[..] else {
-                        return Err(CompileDefect::NoPoolRead { law });
+                        return Err(CompileDefect::NoSuchRead { law });
                     };
                     let family = if edge.0.class() == Class::CapillaryBed {
                         Family::Filtration

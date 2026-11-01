@@ -143,6 +143,7 @@ pub fn declare<'b>(scope: RenalScope<'b>) -> Result<Fragment<'b, Renal>, Admissi
     });
     rn.transfer_along(&filtration, gfr);
 
+    // Flow down the tubule follows the head between lumens. Model default.
     let tubular = ports.tubular(&mut rn);
     let drag = rn.edge_parameter::<TubuleEdge, Resistance>(
         ParameterKey::new("rn.tubule-resistance"),

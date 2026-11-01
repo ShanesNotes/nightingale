@@ -1636,7 +1636,9 @@ fn a_posture_no_run_writes_is_malformed() {
     assert!(resumed.is_ok(), "the bytes a run writes read back");
     let bytes = saved.as_bytes();
     let wanted = 0.75_f64.to_bits().to_be_bytes();
-    let trunk = (128..bytes.len() - 8).rev().find(|&at| bytes[at..at + 8] == wanted);
+    let trunk = (128..bytes.len() - 8)
+        .rev()
+        .find(|&at| bytes[at..at + 8] == wanted);
     let trunk = trunk.expect("the posture's bytes");
     // The trunk, then the end no posture has, then the legs' share.
     for (place, bad) in [(trunk, 1.5_f64), (trunk + 16, 0.25)] {

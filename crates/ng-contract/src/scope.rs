@@ -1,7 +1,7 @@
 use crate::anatomy::Class;
 use crate::compile::compile;
 use crate::identity::{Canonical, Seal};
-use crate::law::{Brand, Family, FragmentData, Over};
+use crate::law::{Brand, Family, FragmentData, Over, SiteField};
 use crate::{
     AdmissionError, Anatomy, Blood, Boundary, BoundaryRoute, CapillaryBed, Cardiovascular, CompiledBody,
     Dimensionless, EdgeRoute, EnclosedSpace, Energy, FilterEdge, Fluids, Fragment, FragmentBuilder, Junction,
@@ -461,14 +461,10 @@ impl<'b> CardiovascularPorts<'b> {
         EdgeRoute::requested(Family::Valves)
     }
     /// The pressure row of every blood site and the read of it. FL reads it as line 80's fields.
-    #[allow(clippy::type_complexity)]
     pub fn blood_pressure(
         &self,
         laws: &mut FragmentBuilder<'b, Cardiovascular>,
-    ) -> (
-        Output<'b, Cardiovascular, PerSite<Blood, Pressure>>,
-        ReadPort<'b, Cardiovascular, PerSite<Blood, Pressure>>,
-    ) {
+    ) -> SiteField<'b, Cardiovascular, Blood, Pressure> {
         laws.site_field(BLOOD_PRESSURE, crate::Admissible::finite())
     }
     /// What each blood site feels from outside: its enclosure's pressure, or zero gauge.

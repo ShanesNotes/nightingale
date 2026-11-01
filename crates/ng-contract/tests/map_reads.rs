@@ -170,7 +170,9 @@ fn a_network_edge_of_the_wrong_classes_and_a_landmark_placed_twice_are_refused()
     );
     assert_eq!(
         build(true)?.err(),
-        Some(AdmissionError::Anatomy(AnatomyDefect::WrongNetwork { site: "a" }))
+        Some(AdmissionError::Anatomy(AnatomyDefect::LandmarkTwice {
+            site: "a"
+        }))
     );
     Ok(())
 }
@@ -304,7 +306,7 @@ fn a_landmark_the_map_does_not_place_is_refused_by_the_law_that_reads_it() -> Re
     };
     assert_eq!(
         compiled.err(),
-        Some(AdmissionError::Compile(CompileDefect::NoPoolRead { law }))
+        Some(AdmissionError::Compile(CompileDefect::NoSuchRead { law }))
     );
     Ok(())
 }
@@ -361,6 +363,49 @@ fn a_kernel_that_holds_by_a_valves_mode_at_a_body_row_is_refused() -> Result<(),
     assert_eq!(
         compiled.err(),
         Some(AdmissionError::Compile(CompileDefect::ModeOfAnotherPlace { law }))
+    );
+    Ok(())
+}
+
+/// In a body of water alone a plain edge's flow is its column and no row, so a read of it is refused by name.
+#[test]
+fn a_read_of_a_flow_that_is_no_row_is_refused_by_name() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let a = map.site::<VesselSegment>("a", at()?);
+    map.contain(root.id(), a.id());
+    map.connect(Network::Vascular, a.id(), a.id());
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.partial_volume(Measure::new(1.0)?)?;
+    schema.pool::<Energy>(root.id(), Space::Elastic)?;
+    let compiled = assemble(schema, |mut body| {
+        let class = fast()?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, still);
+        let fallen = ports.gravity_work(&mut cv);
+        let head = cv.parameter::<Pressure>(ParameterKey::new("cv.head"), Admissible::finite());
+        let power = cv.edge_kernel(|mut k| {
+            let (head, flow) = (k.parameter(&head), k.edge_flow());
+            let product = k.multiply(head, flow);
+            let power = k.as_dimension(product);
+            k.finish(power, cv.every_mode(), class)
+        });
+        cv.transfer_along(&fallen, power);
+        body.add(cv.finish());
+        body.compile()
+    });
+    let law = LawName {
+        owner: "CV",
+        local: "gravity work",
+    };
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::NoSuchRead { law }))
     );
     Ok(())
 }

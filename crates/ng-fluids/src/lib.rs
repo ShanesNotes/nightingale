@@ -127,6 +127,7 @@ pub fn declare<'b>(scope: FluidsScope<'b>) -> Result<Fragment<'b, Fluids>, Admis
     across_the_wall::<Potassium>(&mut fl, &ports, &route, &wall, class);
     across_the_wall::<Chloride>(&mut fl, &ports, &route, &wall, class);
 
+    // Lymph runs when tissue pressure stands past a threshold, softly. Model default.
     let lymph = ports.lymph(&mut fl);
     lymph.keeps_back::<Vasopressin>(&mut fl);
     let conductance = fl.edge_parameter::<LymphEdge, Conductance<Water>>(
