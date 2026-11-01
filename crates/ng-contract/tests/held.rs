@@ -10,6 +10,7 @@ fn at() -> Result<Position, AdmissionError> {
 
 const ROUTE: &str = "gut water";
 const SECOND_ROUTE: &str = "second route";
+const THIRD_ROUTE: &str = "third route";
 const PRESSURE: &str = "enclosure_pressure";
 
 #[derive(Clone, Copy, PartialEq)]
@@ -93,12 +94,9 @@ fn schema(defect: Defect) -> Result<(Schema, Sites), AdmissionError> {
         schema.leave_out(Space::Cells, "a bench with no cell water");
     }
     if defect == Defect::OneRouteReadsAnother {
-        schema.water_boundary(
-            SECOND_ROUTE,
-            BoundaryDirection::IntoBody,
-            vessel.id(),
-            Space::Lumen,
-        )?;
+        for route in [SECOND_ROUTE, THIRD_ROUTE] {
+            schema.water_boundary(route, BoundaryDirection::IntoBody, vessel.id(), Space::Lumen)?;
+        }
     }
     let sites = Sites {
         vessel: vessel.id(),
@@ -241,21 +239,23 @@ fn compiled(defect: Defect) -> Result<CompiledBody, AdmissionError> {
             }
             Defect::OneRouteReadsAnother => {
                 let (mut laws, ports) = body.boundary()?.parts();
-                let BoundaryWater { route, .. } = ports.water(SECOND_ROUTE)?;
-                let BoundaryWater { drive, .. } = ports.water(ROUTE)?;
-                let class = slow()?;
-                let rate = laws.kernel(|mut k| {
-                    let value = k.read(&drive);
-                    k.finish(value, laws.every_mode(), class)
-                });
-                laws.transfer(Transfer::new(&route, rate));
+                let BoundaryWater { route: second, .. } = ports.water(SECOND_ROUTE)?;
+                let BoundaryWater { route: third, drive } = ports.water(THIRD_ROUTE)?;
+                for route in [&second, &third] {
+                    let class = slow()?;
+                    let rate = laws.kernel(|mut k| {
+                        let value = k.read(&drive);
+                        k.finish(value, laws.every_mode(), class)
+                    });
+                    laws.transfer(Transfer::new(route, rate));
+                }
                 body.add(laws.finish());
             }
             Defect::LiverReadsTheGutsDrive => {
                 let declaration = HeldDeclaration::<Hepatic>::new(vec![], vec![], "a synthetic bench");
                 let (mut laws, ports) = body.hold(declaration)?.parts();
                 let BoundaryWater { drive, .. } = ports.water(ROUTE)?;
-                let tap = laws.algebraic::<Rate<Water>>("tap", Admissible::finite());
+                let tap = laws.algebraic::<Rate<Water>>(ROUTE, Admissible::finite());
                 let class = slow()?;
                 let residual = laws.kernel(|mut k| {
                     let seen = k.algebraic(&tap);
@@ -347,7 +347,7 @@ fn a_card_cannot_read_the_drive_of_a_route_it_did_not_declare() {
     assert_eq!(
         refused(Defect::LiverReadsTheGutsDrive),
         defect(CompileDefect::DriveOfAnotherRoute {
-            law: law("HP", "tap"),
+            law: law("HP", ROUTE),
             route: ROUTE
         })
     );
@@ -359,7 +359,7 @@ fn one_routes_law_cannot_read_anothers_drive() {
         refused(Defect::OneRouteReadsAnother),
         defect(CompileDefect::DriveOfAnotherRoute {
             law: law("Boundary", SECOND_ROUTE),
-            route: ROUTE
+            route: THIRD_ROUTE
         })
     );
 }
