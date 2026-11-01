@@ -48,15 +48,17 @@ A chart author compiles a lens against a body, `Session::observation` lends one 
 **Evidence**, all synthetic.
 
 - **No physiology bit moved.** Base and head compiled from one probe, over 52 runs and 24 seeds: every identity, seal, firing and last digest compare equal, 17,352 lines and 1,358 firings. A control that changed the run domain's tag came back different, so the probe can fail.
-- **Mutation sweep.** 71 mutants, one per rule or refusal, each killed by a named test. The first pass left one survivor, a forged reading caught only by the order check of the reading after it. Writing a working mutant for the seventh evidence field showed its test would have passed on another gate's evidence. Both tests are tightened.
+- **Mutation sweep.** 71 mutants, one per rule or refusal, each killed by a named test on the last code. The first pass left one survivor, a forged reading caught only by the order check of the reading after it, and the last pass left one more, a forged queue holding one instant twice. Writing a working mutant for the seventh evidence field showed its test would have passed on another gate's evidence. All three tests are tightened. The mutants are hand-picked, not every line.
 - **Two adversaries, one per vendor.** Each worked alone from the contract and the diff. Both proved the same panic, a resealed count near a huge window, now fixed. Between them they ran an independent oracle over 384 schedules and 23,431 observations, an oracle from the contract's prose over 443,113 observations, 400,000 edited checkpoints, and 1,494 window means in exact rationals outside the code, worst relative error 2.1e-32.
 - **Comments.** Comment Sicko deleted 24 and trimmed 17, and found two that were false.
+- **Two local reviews, Codex Astra at max.** The first found one claim too broad, that a channel holds its site. The second read the answer to that and found nothing.
+- **Cost.** An observer on three channels of a 4 ms grid adds about 0.8 us to a 38 us step, stream digest included, in release on one thread on a machine at a load of about 5. A checkpoint with 10 held readings is 472 bytes.
 
 **Limits.**
 
 - Only the non-perturbation gate attaches an observer. §7 also names observer bits under pace, resume, late admission and rewind, and those are ticket 11's: equal seals give equal views, so they can only catch an impure observer.
 - Windows tumble. Record 0004's sliding healthy-range check reads a bare channel and slides its own mean, and its readings carry no error, so its lens has no `erring`.
-- A digest has no key. A resealed file can hold a false value, a reading from the future or a count no head could leave. It gives an observer that never panics on those, and that observer's next save can be refused.
+- A digest has no key. A resealed file can hold a false value, a reading from the future or a count no head could leave. It gives an observer that never panics on those, though that observer's next save can be refused and a future reading holds back later releases.
 - `Compensated::between` multiplies before it divides, so a chord near 1e304 reads `InvalidSignal` between two finite ends.
 - A grid's cost is its author's. `lens` cannot know a step's length, and a 1 ns grid on an 8 s step asks for 256 GB and ends the process.
 - A reading can leave its row's set: an amount of 1 with an SD of 2 can read negative.
