@@ -232,7 +232,7 @@ impl AdmittedAt {
         events: Vec<BoundaryEvent>,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         let body = self.body();
-        let request = InitializationRequest::consistent_instant(self.origin);
+        let request = InitializationRequest::at(self.origin, admission_tolerance());
         let system = body.initialization(self.inner.other_values()?, BoundaryPort::new(events)?, request)?;
         let solved = system.workspace();
         let resolution = core.resolution();
@@ -1886,7 +1886,7 @@ fn admitted_at<'m>(
     }
     let parameters = case.body().bind(packet).expect("bound");
     let port = BoundaryPort::new(Vec::new()).expect("a port");
-    let request = InitializationRequest::consistent_instant(instant);
+    let request = InitializationRequest::at(instant, admission_tolerance());
     let system = (case.body().initialization(parameters, port, request)).expect("a system");
     let solved = system.workspace();
     let start = MethodHistory::new(core.resolution().policy(), instant, Vec::new());

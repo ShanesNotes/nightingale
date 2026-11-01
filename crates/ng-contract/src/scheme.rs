@@ -141,7 +141,7 @@ impl StageScheme {
     }
 }
 
-/// The absolute and relative scales a stage defect and an error estimate are normalized by.
+/// The absolute and relative scales a stage defect, an error estimate and an admission row are normalized by.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ErrorScales {
     absolute: f64,

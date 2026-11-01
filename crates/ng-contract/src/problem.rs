@@ -340,6 +340,13 @@ pub struct Jacobian {
     values: Vec<f64>,
 }
 impl Jacobian {
+    pub(crate) fn of_parts(row_offsets: Vec<usize>, columns: Vec<UnknownId>, values: Vec<f64>) -> Self {
+        Self {
+            row_offsets,
+            columns,
+            values,
+        }
+    }
     pub fn view(&self) -> SparseView<'_> {
         SparseView {
             row_offsets: &self.row_offsets,

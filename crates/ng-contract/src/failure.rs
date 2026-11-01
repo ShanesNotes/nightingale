@@ -1,6 +1,6 @@
 use crate::{
-    AnatomyDefect, Binding, Digest, InputId, LawName, ModeValue, ParameterKey, Predicate, QuantityId, RowId,
-    RowKind, SimTime, SiteId, SourceId, Space,
+    AnatomyDefect, AnchorId, Binding, Digest, InputId, LawName, ModeValue, ParameterKey, Predicate,
+    QuantityId, RowId, RowKind, SimTime, SiteId, SourceId, Space,
 };
 
 /// A refusal at a construction call, at `AnatomyBuilder::finish`, at `Assembly::compile`, or at admission.
@@ -31,9 +31,9 @@ pub enum AdmissionError {
     ZeroDenominator,
     /// An absolute scale that is not positive, or a relative scale below zero.
     NonPositiveScale,
-    /// A mode variable a plain guard fires or no hazard guard moves, or any mode variable in a body with an
-    /// algebraic row, which a firing could leave false. A guard that silently never fires is worse than a run
-    /// that never starts.
+    /// A mode variable a plain guard fires or no hazard guard moves, any mode variable in a body with an
+    /// algebraic row, which a firing could leave false, and any mode variable under a cycle, whose hazard integral
+    /// never returns. A guard that silently never fires is worse than a run that never starts.
     ModesNotYetRun {
         variable: LawName,
     },
@@ -129,11 +129,68 @@ pub enum AdmissionError {
     EventBeforeHead {
         id: InputId,
     },
-    /// An input stamped behind the fence a cut left by not publishing at its own end, or at the admission
-    /// instant, whose drive initialization has already read.
+    /// An input stamped behind the fence a cut left by not publishing at its own end, or inside the admission
+    /// window, whose drives initialization has already read.
     EventBeforeFence {
         id: InputId,
         fence: SimTime,
+    },
+    /// A period the cycle's interval count does not divide.
+    UnevenCycle,
+    DuplicateAnchor {
+        anchor: AnchorId,
+    },
+    /// An anchor on a row this body does not have, or in another dimension than the row's.
+    AnchorRow {
+        anchor: AnchorId,
+    },
+    /// An anchor on a row that reads no amount and no drive, so its value is a function of parameters alone and
+    /// the anchor would be a parameter's value.
+    AnchorOnParameters {
+        anchor: AnchorId,
+    },
+    /// An instant anchor on a row in the wave or beat band: such a row has no one value to meet.
+    InstantOnPulsatile {
+        anchor: AnchorId,
+    },
+    /// A cycle-mean anchor in a packet with no cycle.
+    NoCycle {
+        anchor: AnchorId,
+    },
+    /// An anchor no channel of the request's lens reads with its method and window (rule 17).
+    AnchorUnread {
+        anchor: AnchorId,
+    },
+    /// A calibrated entry that names an anchor its packet does not hold.
+    UnknownAnchor {
+        key: ParameterKey,
+        binding: Binding,
+    },
+    /// Two calibrated entries on one anchor, which would leave the system with more unknowns than rows.
+    AnchorFittedTwice {
+        anchor: AnchorId,
+    },
+    /// A derived entry whose identity reads a key the packet does not hold, or one admission fits.
+    IdentityInput {
+        key: ParameterKey,
+        input: ParameterKey,
+    },
+    /// A second population record for a key, or a lower bound above the upper bound.
+    PopulationRange {
+        key: ParameterKey,
+    },
+    /// A value that needs a population record its packet does not hold yet.
+    NoPopulation {
+        key: ParameterKey,
+    },
+    /// An authored value outside its population record's range (I16).
+    OutsidePopulation {
+        key: ParameterKey,
+        binding: Binding,
+    },
+    /// A delivery that starts or ends between two nodes of the cycle.
+    DeliveryOffGrid {
+        id: InputId,
     },
     /// Parameters bound on another compiled body.
     ForeignParameters,

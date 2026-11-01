@@ -1,7 +1,8 @@
 use crate::body::HazardLayout;
 use crate::identity::{Canonical, Seal};
 use crate::{
-    Candidate, CompiledBody, Digest, DomainSeed, Fired, LawName, ModeValue, ObservationSeed, Seed, SimTime,
+    Binding, Candidate, CompiledBody, Digest, DomainSeed, Fired, LawName, ModeValue, ObservationSeed,
+    PacketSeed, ParameterKey, Seed, SimTime,
 };
 
 /// Admission holds no seed, so a start state is a function of the packet alone: a draw reads its mean and a
@@ -78,6 +79,14 @@ pub(crate) fn measurement_error(seed: ObservationSeed, channel: u64, at: SimTime
     let instant = word(keyed(seed, channel), at.nanoseconds());
     let sum: f64 = (0..12).map(|index| open_unit(word(instant, index))).sum();
     sum - 6.0
+}
+
+/// One packet entry's draw. It reads no count of earlier draws, so adding a parameter moves no other.
+pub(crate) fn sampled_unit(seed: PacketSeed, key: ParameterKey, binding: Binding) -> f64 {
+    let mut out = Canonical::new("ng-contract sampled value 1");
+    out.text(key.key());
+    binding.seal(&mut out);
+    open_unit(word(keyed(seed, first_word(out.digest())), 0))
 }
 
 struct Knots {

@@ -138,7 +138,7 @@ impl Op {
             | Op::Volume(operands) => operands,
         }
     }
-    fn map(&self, f: impl FnMut(usize) -> usize) -> Op {
+    pub(crate) fn map(&self, f: impl FnMut(usize) -> usize) -> Op {
         match self {
             Op::Input(input) => Op::Input(*input),
             Op::Zero(dimension) => Op::Zero(dimension.clone()),

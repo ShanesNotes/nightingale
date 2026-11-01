@@ -126,7 +126,7 @@ fn newton(
 
 /// Gaussian elimination with partial pivoting in fixed order: the first largest pivot wins, so a tie is
 /// settled the same way on every run.
-fn solve_dense(jacobian: SparseView<'_>, residuals: &[f64]) -> Result<Vec<f64>, usize> {
+pub(crate) fn solve_dense(jacobian: SparseView<'_>, residuals: &[f64]) -> Result<Vec<f64>, usize> {
     let size = residuals.len();
     let mut slots: Vec<usize> = (0..size).collect();
     let mut matrix = vec![vec![0.0; size + 1]; size];
