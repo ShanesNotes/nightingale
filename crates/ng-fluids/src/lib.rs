@@ -65,7 +65,8 @@ fn oncotic<'b, 'k>(
 }
 
 /// `J = g (c_plasma - c_tissue)`. A small ion crosses a capillary wall far faster than water carries it, so tissue fluid
-/// holds the plasma's ions. Model default: linear, one `g` per bed.
+/// holds the plasma's ions. Albumin leaks the same way, far more slowly, so tissue that only ever hands water back still
+/// holds some. Model default: linear, one `g` per bed.
 fn across_the_wall<'b, Q: Substance>(
     fl: &mut FragmentBuilder<'b, Fluids>,
     ports: &FluidsPorts<'b>,
@@ -126,6 +127,11 @@ pub fn declare<'b>(scope: FluidsScope<'b>) -> Result<Fragment<'b, Fluids>, Admis
     across_the_wall::<Sodium>(&mut fl, &ports, &route, &wall, class);
     across_the_wall::<Potassium>(&mut fl, &ports, &route, &wall, class);
     across_the_wall::<Chloride>(&mut fl, &ports, &route, &wall, class);
+    let leak = fl.site_parameter::<CapillaryBed, Rate<Water>>(
+        ParameterKey::new("fl.albumin-leak"),
+        Admissible::positive(),
+    );
+    across_the_wall::<Albumin>(&mut fl, &ports, &route, &leak, class);
 
     // Lymph runs when tissue pressure stands past a threshold, softly. Model default.
     let lymph = ports.lymph(&mut fl);

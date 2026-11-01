@@ -802,6 +802,7 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
     set::<Dimensionless>(packet, "cv.feedback-share", edge(arteries, glomerular), 1.0, note)?;
 
     set::<Rate<Water>>(packet, "fl.ion-exchange", beds, 10.0, note)?;
+    set::<Rate<Water>>(packet, "fl.albumin-leak", beds, 1e-3, note)?;
     set::<Dimensionless>(packet, "fl.albumin-reflection", beds, 0.9, note)?;
     set::<Dimensionless>(
         packet,
