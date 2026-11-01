@@ -1441,7 +1441,7 @@ fn a_small_body_is_solved_on_its_own_scale() {
     assert!((fitted - fitted_elastance()).abs() < 1e-9, "{fitted}");
 }
 
-/// A row at rounding is solved: a guess there stands, so the guess path and the solve name one run.
+/// An update of rounding alone is not applied: a guess there stands, so the guess path and the solve name one run.
 #[test]
 fn a_guess_at_rounding_stands() {
     let case = PulsatileCase::plain();
@@ -1455,7 +1455,7 @@ fn a_guess_at_rounding_stands() {
         packet
             .synthetic(E, NETWORK, measure::<Elastance>(elastance), NOTE)
             .expect("once");
-        let (a, b) = ((TOTAL + difference) / 2.0, (TOTAL - difference) / 2.0);
+        let (a, b) = ((TOTAL + difference) / 2.0 + 8e-14, (TOTAL - difference) / 2.0);
         packet.start(case.a(), measure::<Water>(a), NOTE).expect("once");
         packet.start(case.b(), measure::<Water>(b), NOTE).expect("once");
         packet
