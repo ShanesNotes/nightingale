@@ -621,3 +621,58 @@ fn a_step_stops_at_a_guards_interval_though_no_row_moves_that_fast() -> Result<(
     assert_ne!(session.record().accepted().modes()[0], started);
     Ok(())
 }
+
+/// Two guards on one variable, each resetting a row of its own. Both cross in one step, so a firing that let the second
+/// through as well would reset both rows and land on the second's mode.
+#[test]
+fn of_two_guards_on_one_variable_only_the_first_fires() -> Result<(), InitializationFailure> {
+    let body = assemble(one_site(), |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let m = laws.state::<Dimensionless>("m", Admissible::finite());
+        let rows = ["one", "other"].map(|local| laws.state::<Dimensionless>(local, Admissible::finite()));
+        let [low, first, second] = laws.modes("state", ["low", "first", "second"]);
+        let speed = laws.parameter(ParameterKey::new("ns.speed"), Admissible::finite());
+        let rising = laws.kernel(|mut k| {
+            let value = k.parameter(&speed);
+            k.finish(value, laws.every_mode(), wave())
+        });
+        laws.memory_rate(&m, rising);
+        for row in &rows {
+            let still = laws.kernel(|mut k| {
+                let zero = k.zero::<Rate<Dimensionless>>();
+                k.finish(zero, laws.every_mode(), wave())
+            });
+            laws.memory_rate(row, still);
+        }
+        for (target, row) in [(&first, &rows[0]), (&second, &rows[1])] {
+            let zero = laws.kernel(|mut k| {
+                let value = k.state(&m);
+                k.finish(value, low.only(), wave())
+            });
+            laws.event(Guard::new(zero, Crossing::Rising, low.to(target)?).resetting(row));
+        }
+        body.add(laws.finish());
+        body.compile()
+    })?;
+    let mut packet = ParameterPacket::new();
+    let rate = measure::<Rate<Dimensionless>>(1.0);
+    packet.synthetic(ParameterKey::new("ns.speed"), Binding::Body, rate, "synthetic")?;
+    for (local, value) in [("m", -0.5), ("one", 1.0), ("other", 1.0)] {
+        let row = RowKind::Memory(named(local).into());
+        packet.start(row, measure::<Dimensionless>(value), "synthetic")?;
+    }
+    packet.start_mode(named("state"), "low", "synthetic")?;
+    let core = ReferenceIntegrator::new(SECOND);
+    let session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core)?;
+    let Ok(session) = run_until(session, SimTime::from_ns(SECOND)) else {
+        panic!("a fault");
+    };
+    let accepted = session.record().accepted();
+    let read = |local| {
+        let kind = RowKind::Memory(named(local).into());
+        let row = body.rows().iter().find(|row| row.kind() == kind).expect("a row");
+        f64::from_bits(accepted.value(row.id()).bits()[0])
+    };
+    assert_eq!(read("one") + read("other"), 1.0, "exactly one row was reset");
+    Ok(())
+}
