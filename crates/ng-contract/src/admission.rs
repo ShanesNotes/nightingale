@@ -278,9 +278,10 @@ impl InitializationSystem<'_> {
         let combination = &self.body.conserved_basis().combinations()[quantity.index()];
         let (mut moved, mut packet) = (Compensated::ZERO, Compensated::ZERO);
         for (row, coefficient) in combination.terms() {
-            let start = self.parameters.starts[row.index()];
-            moved = moved.plus(Compensated::exact(unknowns[row.index()] - start).scaled(*coefficient));
-            packet = packet.plus(Compensated::exact(start).scaled(*coefficient));
+            let start = Compensated::exact(self.parameters.starts[row.index()]).scaled(*coefficient);
+            let now = Compensated::exact(unknowns[row.index()]).scaled(*coefficient);
+            moved = moved.plus(now.minus(start));
+            packet = packet.plus(start);
         }
         (moved.rounded(), packet.rounded())
     }
@@ -380,11 +381,12 @@ impl InitializationSystem<'_> {
         }
         Ok(Jacobian::of_parts(row_offsets, columns, entries))
     }
-    /// One defect over its scale, `None` when the tolerance refuses it. `<=` is false on a NaN, so what overflowed
-    /// is refused, and a defect of zero holds even where an overflow leaves no scale.
+    /// One defect over its scale, `None` when the tolerance refuses it. What overflowed is refused, because `<=` is
+    /// false on a NaN but true of two infinities, and a defect of zero holds even where an overflow leaves no scale.
     fn held(&self, defect: f64, read: f64) -> Option<f64> {
         let scale = self.tolerance.at(read);
-        (defect == 0.0 || defect <= scale).then(|| if scale > 0.0 { defect / scale } else { 0.0 })
+        let within = defect == 0.0 || (defect.is_finite() && defect <= scale);
+        within.then(|| if scale > 0.0 { defect / scale } else { 0.0 })
     }
     /// An instant reads its row at point 0. A cycle mean reads its row's mean over the points, the quadrature the
     /// ring's own sum closes, so a linear law's mean is exact at any point count. It sums as an observer sums a

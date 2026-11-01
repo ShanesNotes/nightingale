@@ -933,6 +933,68 @@ fn a_net_boundary_flow_over_the_cycle_is_refused_with_its_quantity() {
     assert_eq!(short_by(1e-10), None);
 }
 
+/// Neither pool's change fits in a float beside the pool, so a difference taken before the sum loses what moved.
+#[test]
+fn a_total_moved_by_less_than_a_pools_rounding_is_refused() {
+    const POOL: f64 = 1_099_511_627_776.0;
+    let case = PulsatileCase::plain().with_intervals(4);
+    let body = case.body();
+    let mut packet = ParameterPacket::periodic(cycle(4));
+    packet.within(ErrorScales::uniform(measure(1e-9), measure(0.0)).expect("scales"));
+    let g = measure::<Conductance<Water>>(0.0);
+    packet
+        .synthetic(E, NETWORK, measure::<Elastance>(1.0), NOTE)
+        .expect("once");
+    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+    for row in [case.a(), case.b()] {
+        packet.start(row, measure::<Water>(POOL), NOTE).expect("once");
+    }
+    let parameters = body.bind(packet).expect("bound");
+    let request = InitializationRequest::at(at(0));
+    let system = (body.initialization(parameters, empty_port(), request)).expect("a system");
+    let mut moved = system.workspace();
+    for point in moved.unknowns_mut().chunks_mut(2) {
+        point[0] = POOL / 4.0 - 1.0 / 32_768.0;
+        point[1] = 7.0 * POOL / 4.0;
+    }
+    let quantity = body.conserved_basis().combinations()[0].id();
+    assert_eq!(
+        system.admit(moved, case.history()).err(),
+        Some(InitializationFailure::Inconsistent {
+            row: AdmissionRow::Total(quantity)
+        })
+    );
+}
+
+/// Two infinities compare equal, so a defect and a scale that both overflow must not stand.
+#[test]
+fn a_defect_that_overflows_is_refused_however_wide_the_tolerance() {
+    let body = filter_body();
+    let mut packet = ParameterPacket::new();
+    packet.within(ErrorScales::uniform(measure(1.0), measure(2.0)).expect("scales"));
+    let slow = measure::<Rate<Dimensionless>>(1e-100);
+    packet.synthetic(PACE, Binding::Body, slow, NOTE).expect("once");
+    let set = measure::<Dimensionless>(0.0);
+    packet.synthetic(SET, Binding::Body, set, NOTE).expect("once");
+    let nervous = |local| LawName { owner: "NS", local };
+    let filter = RowKind::Memory(nervous("filter"));
+    let reading = RowKind::Algebraic(nervous("reading"));
+    (packet.start(filter, measure::<Dimensionless>(1.7e308), NOTE)).expect("once");
+    (packet.start(reading, measure::<Dimensionless>(0.0), NOTE)).expect("once");
+    let parameters = body.bind(packet).expect("bound");
+    let request = InitializationRequest::at(at(0));
+    let system = (body.initialization(parameters, empty_port(), request)).expect("a system");
+    let mut moved = system.workspace();
+    moved.unknowns_mut()[0] = -1e308;
+    let history = MethodHistory::new(Digest::of_canonical(b"a schema"), at(0), Vec::new());
+    assert_eq!(
+        system.admit(moved, history).err(),
+        Some(InitializationFailure::Inconsistent {
+            row: AdmissionRow::Body(body.rows()[0].id())
+        })
+    );
+}
+
 /// Every stage holds to its own scale and all of them lean one way: the flow lands on no one row.
 #[test]
 fn a_net_flow_spread_over_every_row_is_still_refused_with_its_quantity() {
