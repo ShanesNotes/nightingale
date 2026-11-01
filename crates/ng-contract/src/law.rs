@@ -125,9 +125,7 @@ pub(crate) enum Input {
     Drive(&'static str),
     Draw(&'static str),
     Forcing(&'static str),
-    /// A coupling field's row, which its sender owes and any owner the map draws may read.
     Field(LawName),
-    /// The pressure of whatever encloses this bed.
     Extravascular,
 }
 impl Op {
@@ -313,8 +311,7 @@ pub(crate) struct KernelData {
     pub(crate) defines: bool,
 }
 impl KernelData {
-    /// Turns a value into its row's residual, `row - value`, so a coupling is an algebraic row like any
-    /// other and a loop of couplings is a coupled residual.
+    /// `row - value`, so a coupling is a plain algebraic row and a loop of couplings a coupled residual.
     fn defining(mut self, row: &'static str) -> Self {
         let value = self.code.len() - 1;
         self.code.push(Op::Input(Input::Algebraic(row)));
@@ -560,8 +557,7 @@ impl<'b, O> ReadPort<'b, O, PerSite<crate::CapillaryBed, Pressure>> {
     }
 }
 
-/// One field of a coupling or an enclosure's pressure: a row its owner owes one law, through
-/// `FragmentBuilder::define` or `define_at`.
+/// One field of a coupling or an enclosure's pressure, which its owner owes a law.
 pub struct Output<'b, O, U> {
     name: &'static str,
     brand: Brand<'b>,
@@ -576,15 +572,12 @@ impl<'b, O, U> Output<'b, O, U> {
         }
     }
 }
-/// What a row stands over: the whole body, every site of a class, or the enclosures the map says this
-/// owner holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Over {
     Body,
     Every(Class),
     HeldEnclosures,
 }
-/// What a catalog field carries: one value, or one per site of a class.
 pub(crate) trait Carried {
     fn over() -> Over;
     fn dimension() -> String;
@@ -1095,7 +1088,7 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
         for field in fields {
             self.data.slots.push(SlotDeclaration {
                 name: field.name,
-                kind: SlotKind::Field,
+                kind: SlotKind::Defined,
                 dimension: field.dimension,
                 set: AdmissibleSet::Finite,
                 over: field.over,
@@ -1103,31 +1096,29 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
         }
         payload
     }
-    /// Issues the read ports of an arrow the map draws to this owner. Nothing else is readable across
-    /// owners, so every system-to-system signal is a line of the map.
+    /// The only way to read a coupling field, so every such read is a line of the map.
     pub fn receive<P>(&self) -> P
     where
         P: Coupling<To = O, Side = Reads<'b, O>>,
     {
         catalog::issued::<P>().0
     }
-    /// The law on a whole-body output. A validity range on `value` judges the row.
+    /// A validity range on `value` judges the row.
     pub fn define<U: Dimension>(&mut self, output: &Output<'b, O, U>, value: PureKernel<'b, O, U>) {
-        self.attach(Obligation::Field(output.name), value.data.defining(output.name));
+        self.attach(Obligation::Defined(output.name), value.data.defining(output.name));
     }
-    /// The law on a per-site output: one kernel for the class, one row per site.
+    /// One kernel for the class, one row per site.
     pub fn define_at<C: SiteClass, U: Dimension>(
         &mut self,
         output: &Output<'b, O, PerSite<C, U>>,
         value: PureKernel<'b, O, U, C>,
     ) {
-        self.attach(Obligation::Field(output.name), value.data.defining(output.name));
+        self.attach(Obligation::Defined(output.name), value.data.defining(output.name));
     }
-    /// A held enclosure's pressure row, owed because the map names this owner.
     pub(crate) fn owe_enclosure_pressure(&mut self) {
         self.data.slots.push(SlotDeclaration {
             name: ENCLOSURE_PRESSURE,
-            kind: SlotKind::Field,
+            kind: SlotKind::Defined,
             dimension: dimension::<Pressure>(),
             set: AdmissibleSet::Finite,
             over: Over::HeldEnclosures,
@@ -1229,10 +1220,8 @@ pub(crate) struct SlotDeclaration {
 pub(crate) enum SlotKind {
     Memory,
     Algebraic,
-    /// An algebraic row owed through a port: a coupling's `emit`, or a held enclosure's pressure. Only a
-    /// definition serves it and only a read of a field reaches it, so a plain slot that shares its name
-    /// stands in for neither.
-    Field,
+    /// Only a definition serves it and only a port reads it, so a plain slot of its name does neither.
+    Defined,
 }
 pub(crate) struct ModeDeclaration {
     pub(crate) name: &'static str,
@@ -1258,14 +1247,14 @@ pub(crate) struct LawDeclaration {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Obligation {
     Slot(&'static str),
-    Field(&'static str),
+    Defined(&'static str),
     Family(Family),
     Boundary(&'static str),
 }
 impl Obligation {
     pub(crate) fn local(self) -> &'static str {
         match self {
-            Obligation::Slot(name) | Obligation::Field(name) | Obligation::Boundary(name) => name,
+            Obligation::Slot(name) | Obligation::Defined(name) | Obligation::Boundary(name) => name,
             Obligation::Family(family) => family.name(),
         }
     }

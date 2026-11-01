@@ -449,7 +449,6 @@ pub(crate) enum Bound {
     Boundary(&'static str),
     Draw(usize),
     Forcing(usize),
-    /// The zero of the gauge: what a bed nothing encloses reads as its extravascular pressure.
     Gauge,
 }
 impl Bound {
@@ -589,7 +588,8 @@ impl Seal for Sparsity {
 }
 
 /// A strongly connected part of the matched equation graph, with the most restrictive rate class of
-/// the laws in it. Structure only, never permission to lag a dependency.
+/// the laws in it. A held pool's block has no law, so its class limits nothing. Structure only, never
+/// permission to lag a dependency.
 #[derive(Debug, PartialEq)]
 pub struct Block {
     pub(crate) rows: Vec<RowId>,

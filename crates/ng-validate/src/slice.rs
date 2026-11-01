@@ -8,9 +8,8 @@ fn at(axial: f64) -> Result<Position, AdmissionError> {
     ))
 }
 
-/// The slice's map, grouped as record 0002 asks: the regions the anchors and stage 1 checks name, and
-/// nothing finer. Heights are synthetic. An edge into a bed stands for its arterioles, and the edge from
-/// the systemic arteries into the glomerular bed is the renal afferent edge.
+/// Grouped as record 0002 asks. Heights are synthetic. An edge into a bed stands for its arterioles, and the
+/// edge from the systemic arteries into the glomerular bed is the renal afferent edge.
 pub fn arena_anatomy() -> Result<Anatomy, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let body = map.site::<TissueSite>("body", at(0.0)?);
@@ -150,9 +149,8 @@ fn held<S: OutsideSlice>(body: &mut Assembly<'_>, holds: Vec<Space>) -> Result<(
     Ok(())
 }
 
-/// Holds all nine cards outside the slice. RS and GI hold the pleural and abdominal spaces' pressure,
-/// each a packet value under `rs.pleural-pressure` and `gi.abdominal-pressure`. BC holds cell water,
-/// while cell-water shifts stay an open conflict between BC and FL. The other six supply nothing yet.
+/// RS and GI hold their enclosures' pressure, packet values under `rs.pleural-pressure` and
+/// `gi.abdominal-pressure`. BC holds cell water, while cell-water shifts stay an open conflict with FL.
 pub fn hold_outside_slice(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     enclosure::<Respiratory>(body, ParameterKey::new("rs.pleural-pressure"))?;
     enclosure::<Gastrointestinal>(body, ParameterKey::new("gi.abdominal-pressure"))?;

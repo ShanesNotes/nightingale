@@ -94,7 +94,6 @@ fn check_fragments(
         .try_for_each(|fragment| check_names(fragment, schema, held))
 }
 
-/// The card that declared this route, or else the boundary, which every other schema route belongs to.
 fn route_owner(held: &[HeldCard], route: &'static str) -> &'static str {
     (held.iter())
         .find(|card| card.supplies.contains(&route))
@@ -223,7 +222,7 @@ fn obligations<'f>(
     for fragment in fragments {
         for slot in &fragment.slots {
             let obligation = match slot.kind {
-                SlotKind::Field => Obligation::Field(slot.name),
+                SlotKind::Defined => Obligation::Defined(slot.name),
                 SlotKind::Memory | SlotKind::Algebraic => Obligation::Slot(slot.name),
             };
             owed.push(Owed::gather(
@@ -458,7 +457,6 @@ fn check_volume(schema: &Schema, owed: &[Owed], fragments: &[FragmentData]) -> R
     }
 }
 
-/// The site of each row a slot lays out: none for a whole-body slot.
 fn row_sites(anatomy: &Anatomy, owner: &'static str, over: Over) -> Vec<Option<SiteId>> {
     match over {
         Over::Body => vec![None],
@@ -477,7 +475,7 @@ struct Rows {
     rows: Vec<Row>,
     amounts: Vec<PoolRef>,
     slots: Vec<(Slot, usize)>,
-    fields: Vec<LawName>,
+    defined: Vec<LawName>,
 }
 impl Rows {
     fn lay_out(schema: &Schema, fragments: &[FragmentData]) -> Self {
@@ -518,7 +516,7 @@ impl Rows {
         let slot_rows = slots.iter().map(|&(kind, slot, set, dimension)| {
             let kind = match kind {
                 SlotKind::Memory => RowKind::Memory(slot.law),
-                SlotKind::Algebraic | SlotKind::Field => RowKind::Algebraic(slot),
+                SlotKind::Algebraic | SlotKind::Defined => RowKind::Algebraic(slot),
             };
             (kind, set, dimension.clone())
         });
@@ -534,21 +532,20 @@ impl Rows {
             .map(|(at, slot)| (slot.1, amounts.len() + at))
             .collect();
         index.sort_unstable();
-        let fields = (slots.iter())
-            .filter(|slot| slot.0 == SlotKind::Field)
+        let defined = (slots.iter())
+            .filter(|slot| slot.0 == SlotKind::Defined)
             .map(|slot| slot.1.law)
             .collect();
         Self {
             rows,
             amounts,
             slots: index,
-            fields,
+            defined,
         }
     }
     fn amount(&self, pool: PoolRef) -> Option<usize> {
         self.amounts.binary_search(&pool).ok()
     }
-    /// The row of a whole-body slot, or else of a per-site slot at `site`.
     fn slot(&self, law: LawName, site: Option<SiteId>) -> Option<usize> {
         let find = |site| {
             let found = self
@@ -558,8 +555,8 @@ impl Rows {
         };
         find(None).or_else(|| find(site))
     }
-    fn field(&self, law: LawName, site: Option<SiteId>) -> Option<usize> {
-        self.fields.binary_search(&law).ok()?;
+    fn defined(&self, law: LawName, site: Option<SiteId>) -> Option<usize> {
+        self.defined.binary_search(&law).ok()?;
         self.slot(law, site)
     }
     fn declared(&self, law: LawName, site: Option<SiteId>) -> usize {
@@ -939,7 +936,7 @@ fn addresses(
                     Address::Unknown(UnknownId::at(rows.declared(slot, here)))
                 }
                 (Input::Field(field), _) => {
-                    let row = rows.field(field, here);
+                    let row = rows.defined(field, here);
                     let row = row.ok_or(CompileDefect::UnemittedField { law, field })?;
                     Address::Unknown(UnknownId::at(row))
                 }
@@ -995,8 +992,6 @@ fn addresses(
         .collect()
 }
 
-/// The card that stands behind a pool: the one a held enclosure's own fluid names, or one that holds the
-/// pool's space.
 fn holder(schema: &Schema, held: &[HeldCard], pool: PoolRef) -> Result<Option<&'static str>, CompileDefect> {
     let enclosure = match schema.anatomy.compliance(pool.site) {
         Some(Compliance::Held { card }) => Some(card),

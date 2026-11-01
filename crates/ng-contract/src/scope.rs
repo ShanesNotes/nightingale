@@ -9,7 +9,6 @@ use crate::{
 };
 use core::marker::PhantomData;
 
-/// The local name of the row each enclosure a card holds carries its pressure on.
 pub(crate) const ENCLOSURE_PRESSURE: &str = "enclosure_pressure";
 
 /// The anatomy and the composition data laws never see: where water crosses the boundary, the
@@ -207,8 +206,7 @@ impl<'b> Assembly<'b> {
             },
         })
     }
-    /// Scope for a card outside the slice, held by a declaration of what it supplies. Refuses a route the
-    /// schema does not name, and one another card declared.
+    /// Refuses a route the schema does not name, and one another card declared.
     pub fn hold<S: OutsideSlice>(
         &mut self,
         declaration: HeldDeclaration<S>,
@@ -351,8 +349,7 @@ pub struct NervousPorts<'b> {
     brand: Brand<'b>,
 }
 
-/// What a held stand-in answers for. The rest of what it does shows in its fragment: a field it emits, an
-/// enclosure the map says it holds, a row it reads.
+/// What a held stand-in answers for. The rest of what it does shows in its fragment.
 pub struct HeldDeclaration<S> {
     supplies: Vec<&'static str>,
     holds: Vec<Space>,
@@ -360,10 +357,8 @@ pub struct HeldDeclaration<S> {
     card: PhantomData<S>,
 }
 impl<S: OutsideSlice> HeldDeclaration<S> {
-    /// `supplies` names every schema boundary this card moves water on: compile refuses a law on any other,
-    /// and a named route no law serves. `holds` names the spaces whose pools this card stands behind: they
-    /// stay amounts, no law moves them, and a held enclosure's own fluid needs no entry. `validity` says
-    /// where the stand-in is meant to hold.
+    /// `supplies` names every route this card moves water on. `holds` names the spaces whose pools it stands
+    /// behind: no law moves them, and a held enclosure's own fluid needs no entry.
     pub fn new(supplies: Vec<&'static str>, holds: Vec<Space>, validity: &'static str) -> Self {
         Self {
             supplies,
@@ -373,7 +368,7 @@ impl<S: OutsideSlice> HeldDeclaration<S> {
         }
     }
 }
-/// A declaration with its card, normalized so its order reaches nothing.
+/// Normalized, so a declaration's order never reaches the model hash.
 pub(crate) struct HeldCard {
     pub(crate) card: &'static str,
     pub(crate) supplies: Vec<&'static str>,
@@ -418,8 +413,7 @@ pub struct HeldPorts<'b, S> {
     brand: Brand<'b>,
 }
 impl<'b, S> HeldPorts<'b, S> {
-    /// The schema boundary's pair and drive. Refuses a name the schema does not declare. A law on a route
-    /// the declaration omits is refused at compile.
+    /// Refuses a name the schema does not declare. Compile refuses a law on a route the declaration omits.
     pub fn water(&self, name: &'static str) -> Result<BoundaryWater<'b, S>, AdmissionError> {
         match self.names.binary_search(&name) {
             Ok(_) => Ok(BoundaryWater::named(name)),

@@ -52,7 +52,6 @@ struct Sites {
     belly: SiteId,
 }
 
-/// `vessel -> bed -> vessel`, the bed inside a space `card` holds, and one schema route into the vessel.
 fn schema(defect: Defect) -> Result<(Schema, Sites), AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at()?);

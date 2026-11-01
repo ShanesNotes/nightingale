@@ -644,8 +644,6 @@ impl Anatomy {
             .filter(|placed| placed.id == site)
     }
 
-    /// The nearest space that encloses `site`, itself or through a site that contains it, and that
-    /// space's compliance.
     pub(crate) fn encloser(&self, site: SiteId) -> Option<(SiteId, Compliance)> {
         let mut at = self.placed(site)?;
         loop {
@@ -661,7 +659,6 @@ impl Anatomy {
         self.placed(space)?.compliance
     }
 
-    /// Each enclosed space a named card holds, with that card.
     pub(crate) fn held_enclosures(&self) -> impl Iterator<Item = (SiteId, &'static str)> + '_ {
         (self.sites.iter()).filter_map(|site| match site.compliance {
             Some(Compliance::Held { card }) => Some((site.id, card)),

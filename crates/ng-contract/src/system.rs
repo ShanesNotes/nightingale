@@ -6,10 +6,9 @@ mod sealed {
 pub trait Owner: sealed::Owner {
     /// The name a law's name starts with.
     const CARD: &'static str;
-    /// Whether the slice runs this owner's laws.
     const IN_SLICE: bool;
 }
-/// A card the slice does not run: only such a card can be held, never one whose laws run.
+/// Only a card outside the slice can be held.
 pub trait OutsideSlice: Owner {}
 
 macro_rules! owners {

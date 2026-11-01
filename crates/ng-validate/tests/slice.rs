@@ -11,7 +11,7 @@ const VENOUS: f64 = 4.0;
 const STRETCH: f64 = 0.25;
 const START: f64 = 100.0;
 
-/// A site by key and class: every anatomy resolves an id by those two, so no list of ids is kept.
+/// An id is its key and class alone, so a throwaway builder names a site of any anatomy.
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     let origin = Position::new(Measure::new(0.0)?, Measure::new(0.0)?, Measure::new(0.0)?);
     Ok(AnatomyBuilder::new().site::<C>(key, origin).id())
@@ -85,8 +85,6 @@ fn the_slice_map_passes_every_graph_check_and_holds_the_named_sites() -> Result<
     Ok(())
 }
 
-/// A still circulation and Starling at every bed move the vascular pools, CV defines every field the
-/// slice reads, and NS reads the stretch.
 fn slice_laws(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let fast = RateClass::new(RateBand::Wave, 1_000_000)?;
     let (mut cv, ports) = body.cardiovascular()?.parts();
@@ -156,8 +154,6 @@ fn slice_laws(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     Ok(())
 }
 
-/// Every pool of the slice's map, with nothing left out: held cards stand behind cell water and the two
-/// enclosures' fluid.
 fn bench() -> Result<CompiledBody, AdmissionError> {
     assemble(Schema::new(arena_anatomy()?)?, |mut body| {
         hold_outside_slice(&mut body)?;
@@ -183,8 +179,6 @@ fn enclosure_law<'b, S: OutsideSlice>(
     Ok(())
 }
 
-/// The slice's map with one route into the gut's veins, which the gut's stand-in serves under
-/// `supplies`.
 fn gut_stand_in(supplies: Vec<&'static str>) -> Result<CompiledBody, AdmissionError> {
     let mut schema = Schema::new(arena_anatomy()?)?;
     let veins = site::<VesselSegment>("splanchnic veins")?;
@@ -302,13 +296,14 @@ fn the_whole_map_compiles_with_nothing_left_out_and_every_card_held() -> Result<
     let beds = 5;
     let vessels = 10;
     let enclosures = 2;
+    let (pressures_per_bed, stretches) = (2, 2);
     assert_eq!(
         count(|kind| matches!(kind, RowKind::Amount { .. })),
         3 * beds + vessels + enclosures
     );
     assert_eq!(
         count(|kind| matches!(kind, RowKind::Algebraic(_))),
-        2 * beds + 2 + enclosures
+        pressures_per_bed * beds + stretches + enclosures
     );
     let columns = |local| {
         (body.columns().iter())
@@ -319,7 +314,6 @@ fn the_whole_map_compiles_with_nothing_left_out_and_every_card_held() -> Result<
     Ok(())
 }
 
-/// The water in one bed's interstitium after one second, and the row's start.
 fn interstitium_after_a_second(
     body: &CompiledBody,
     pleural: f64,

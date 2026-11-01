@@ -706,8 +706,7 @@
 //!     RunIdentity::new(model, packet, seed, resolution)
 //! }
 //! ```
-//! Only the receiver the coupling map draws reads an arrow: RN cannot read the baroreceptor afferents drawn
-//! from CV to NS.
+//! Only the receiver the coupling map draws reads an arrow: RN cannot read what CV sends NS.
 //! ```compile_fail,E0271
 //! use ng_contract::{catalog::*, *};
 //! fn wire<'b>(laws: &mut FragmentBuilder<'b, Renal>) {
@@ -733,8 +732,7 @@
 //!     laws.emit::<BaroreceptorAfferents<_>>()
 //! }
 //! ```
-//! A coupling's ports come only from `emit` and `receive`: no one outside the contract can make the token that
-//! issues them.
+//! A coupling's ports come only from `emit` and `receive`: no one outside the contract can make the token.
 //! ```compile_fail,E0603
 //! use ng_contract::{catalog::*, *};
 //! fn forged<'b>() -> BaroreceptorAfferents<Reads<'b, Renal>> {

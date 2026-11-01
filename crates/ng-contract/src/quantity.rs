@@ -28,7 +28,6 @@ pub enum Time {}
 pub enum Elastance {}
 /// Water, whose amount is in the canonical amount unit; its volume derives from it.
 pub enum Water {}
-/// Dimensions only the coupling catalog names until a law reads them.
 pub enum Energy {}
 pub enum Temperature {}
 pub enum Phase {}

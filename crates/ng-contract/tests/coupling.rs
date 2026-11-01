@@ -267,7 +267,7 @@ fn a_loop_of_two_couplings_is_one_block_of_coupled_residuals() -> Result<(), Adm
 }
 
 #[test]
-fn a_sink_field_nobody_reads_is_a_row_like_any_other() -> Result<(), AdmissionError> {
+fn a_field_nobody_reads_is_a_row_like_any_other() -> Result<(), AdmissionError> {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", at()?);
     let body = assemble(Schema::new(map.finish()?)?, |mut body| {

@@ -1,18 +1,7 @@
 //! The coupling catalog: one row per arrow of the "Direct couplings" graph in
-//! `docs/atlas/coupling-map.md` (lines 77-114). Each row gives its census entry and, when mapped, a payload
-//! with every field the map's label names, so there is no second list of ports.
+//! `docs/atlas/coupling-map.md` (lines 77-114).
 //!
-//! A payload is generic over a [`Side`]. `FragmentBuilder::emit` gives the map's sender one [`Output`] per
-//! field and records a law owed on each. `FragmentBuilder::receive` gives the map's receiver one [`ReadPort`]
-//! per field. A wire the map does not draw has no sender and no receiver, so it does not type-check.
-//!
-//! Dispositions: `live` (both ends in the slice), `input` (a held stand-in sends into the slice), `sink` (the
-//! slice sends to a held stand-in that consumes no physiology), `relation` (an anatomy relation, not a wire),
-//! `outside` (neither end in the slice) and `unresolved` (an ownership conflict kept visible). Mapped means the
-//! route has a declared home, not that the outside system is simulated.
-//!
-//! The counts are compiler-checked below. `tools/verify` compares these rows with the map and with the
-//! sketch's copy, line by line (`evidence/census-check.py`).
+//! Mapped means the route has a declared home, not that the outside system is simulated.
 use crate::law::{Brand, Output, ReadPort};
 use crate::{
     Ammonia, BloodChemistry, CapillaryBed, Cardiovascular, Concentration, Dimensionless, Endocrine, Energy,
@@ -24,14 +13,13 @@ use core::marker::PhantomData;
 pub(crate) use private::Field;
 use private::Token;
 
-/// Only this module makes a `Token`, so only `emit` and `receive` issue a port, and no type outside the
-/// contract can be a `Side` or a `Coupling`.
+/// Only this module makes a `Token`, so a coupling's ports come only from `emit` and `receive`, and no type
+/// outside the contract can be a `Side` or a `Coupling`.
 mod private {
     use crate::law::{Carried, Over};
 
     #[derive(Clone, Copy)]
     pub struct Token(pub(super) ());
-    /// A field `emit` records: a law owed on one row, or on one row per site.
     pub struct Field {
         pub(crate) name: &'static str,
         pub(crate) over: Over,
@@ -48,14 +36,11 @@ mod private {
     }
 }
 
-/// What a payload field grants on one side of an arrow.
 pub trait Side {
     type Field<U>;
     fn field<U>(token: Token, sender: &'static str, field: &'static str) -> Self::Field<U>;
 }
-/// The receiver's side: one read port per field.
 pub struct Reads<'b, O>(Brand<'b>, PhantomData<O>);
-/// The sender's side: one output per field.
 pub struct Defines<'b, O>(Brand<'b>, PhantomData<O>);
 impl<'b, O> Side for Reads<'b, O> {
     type Field<U> = ReadPort<'b, O, U>;
@@ -70,14 +55,13 @@ impl<'b, O> Side for Defines<'b, O> {
     }
 }
 
-/// A mapped arrow. Only the generated payloads implement it.
+/// Only the generated payloads implement this.
 pub trait Coupling: Sized {
     type From: Owner;
     type To: Owner;
     type Side: Side;
     fn issue(token: Token) -> (Self, Vec<Field>);
 }
-/// The ports of one arrow and the fields its sender owes.
 pub(crate) fn issued<P: Coupling>() -> (P, Vec<Field>) {
     P::issue(Token(()))
 }
@@ -87,8 +71,7 @@ pub enum Disposition {
     Live,
     ExternalInput,
     ExternalSink,
-    /// Realized by an anatomy relation, not a wire: an enclosing space's pressure, or site positions
-    /// under the boundary's posture.
+    /// Realized by an anatomy relation, not a wire.
     AnatomyRelation {
         reason: &'static str,
     },
@@ -110,7 +93,6 @@ impl Disposition {
         )
     }
 }
-/// One arrow of the map and what the slice does with it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CensusRow {
     pub line: u16,
@@ -122,7 +104,6 @@ impl CensusRow {
     const fn incident(&self) -> bool {
         self.sender_in_slice || self.receiver_in_slice
     }
-    /// A disposition says which ends of its arrow run in the slice.
     const fn ends_fit(&self) -> bool {
         let (sender, receiver) = (self.sender_in_slice, self.receiver_in_slice);
         match self.disposition {
@@ -140,7 +121,7 @@ const MAP_EDGES: usize = 38;
 macro_rules! coupling_map {
     ($($line:literal $from:ident => $to:ident, $label:literal, $kind:ident $body:tt;)*) => {
         $(coupling_map!(@payload $kind $body $line $from $to $label);)*
-        /// The census: the only list of the map's arrows. The payloads above come from it.
+        /// The census: the crate's only list of the map's arrows.
         pub const CENSUS: [CensusRow; MAP_EDGES] = [$(
             coupling_map!(@row $kind $body $line $from $to $label),
         )*];

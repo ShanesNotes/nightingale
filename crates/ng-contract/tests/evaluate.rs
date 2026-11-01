@@ -406,7 +406,6 @@ fn derivatives_match_central_differences_on_nearly_nearly_every_operator() -> Re
     Ok(())
 }
 
-/// The analytic Jacobian, checked against central differences of the residual one second in.
 fn differences_agree(bench: &Bench, tangent: &[f64]) -> Vec<Vec<f64>> {
     let problem = bench.problem();
     let ticket = bench.ticket(SECOND).expect("a ticket");

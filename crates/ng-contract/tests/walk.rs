@@ -2,7 +2,7 @@ use ng_contract::catalog::{BaroreceptorAfferents, CapillaryAndVenousPressure, De
 use ng_contract::*;
 
 // The signature walk (docs/architecture/solver-contract-sketch/src/signature_walk.rs): step 0 with only
-// the crate path changed, then steps 1, 1b, 1c, 1d and 2, each change marked with the ticket that restores it.
+// the crate path changed, then steps 1, 1b, 1c, 1d, 1e and 2, each change marked with the ticket that restores it.
 fn anatomy() -> Result<Schema, AdmissionError> {
     let at = |axial: f64| -> Result<Position, AdmissionError> {
         Ok(Position::new(
@@ -121,7 +121,6 @@ fn valve<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardiovascul
         });
         laws.residual(slot, residual);
     }
-    // 10 computes these from the circulation; until then a fixture parameter closes each one.
     let afferents: BaroreceptorAfferents<Defines<'b, Cardiovascular>> = laws.emit();
     let pressures: CapillaryAndVenousPressure<Defines<'b, Cardiovascular>> = laws.emit();
     let stretch = laws.parameter::<Dimensionless>(ParameterKey::new("fixture.stretch"), Admissible::finite());
@@ -212,7 +211,6 @@ fn starling<'b>(scope: FluidsScope<'b>) -> Result<Fragment<'b, Fluids>, Admissio
     Ok(laws.finish())
 }
 
-// RS holds the pleural space's pressure; its fluid comes with it.
 fn pleural_pressure<'b>(body: &mut Assembly<'b>) -> Result<(), AdmissionError> {
     let declaration = HeldDeclaration::<Respiratory>::new(vec![], vec![], "arena fixture: a fixed pressure");
     let (mut laws, ports) = body.hold(declaration)?.parts();

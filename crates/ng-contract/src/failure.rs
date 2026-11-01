@@ -191,8 +191,8 @@ pub enum CompileDefect {
     BadModeVariable { variable: LawName },
     /// An algebraic row that no structural matching pairs with an algebraic unknown it reads.
     StructuralSingularity { law: LawName },
-    /// A pool this body models that no transfer moves. A read never moves a pool, and a transfer whose
-    /// two ends are one pool moves nothing.
+    /// A pool this body models that no transfer moves and no held card answers for. A read never moves a
+    /// pool, and a transfer whose two ends are one pool moves nothing.
     OrphanPool { site: SiteId, space: Space },
     /// A law that moves or reads a pool in a space the schema leaves out.
     LeftOutTouched {
@@ -216,26 +216,21 @@ pub enum CompileDefect {
     SecondGuardOnIntegral { integral: LawName },
     /// A hazard integral not declared nonnegative, the set that holds the reset and every threshold.
     HazardSet { integral: LawName },
-    /// A law on something its owner never claimed: a held card's route its declaration omits, a route a
-    /// held card declared, or an enclosure the map does not say this card holds.
+    /// A law on a route that is not its owner's, or on an enclosure the map does not say it holds.
     UnclaimedLaw { law: LawName },
     /// A read of a coupling field no owner emits. An omitted law is not zero.
     UnemittedField { law: LawName, field: LawName },
     /// A read of a bed's extravascular pressure when its enclosure's compliance has no law yet.
     NoEnclosurePressure { law: LawName, space: SiteId },
-    /// A pool a held declaration stands behind that a transfer moves, so the declaration is stale.
     HeldPoolMoved {
         card: &'static str,
         site: SiteId,
         space: Space,
     },
-    /// A law that reads the drive of a route that is not its own, so a delivery on that route could be
-    /// read and never arrive.
+    /// A law that reads another route's drive, so a delivery could be read and never arrive.
     DriveOfAnotherRoute { law: LawName, route: &'static str },
-    /// A space a held card answers for that has no pool in this body: the map has none or the schema
-    /// leaves it out, so the declaration would promise an amount the ledger does not carry.
+    /// A space a held card answers for that has no pool in this body.
     HeldNothing { card: &'static str, space: Space },
-    /// A pool two cards stand behind: what a stand-in holds has to name one card.
     PoolHeldTwice {
         cards: [&'static str; 2],
         site: SiteId,
