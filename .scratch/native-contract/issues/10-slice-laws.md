@@ -84,7 +84,7 @@ The slice's organ laws compile on the contract. The body starts at the 06:55 anc
 
 **Hard-part check.** No solver redesign was needed: the elimination that follows the ring is a plain one. No validation against Pulse or published physiology was done, and no disease was built.
 
-**Evidence**, all synthetic. No number moved on the old benches: one probe built against main and this branch ran 62 cases at 1 s spans and printed every row's bits, and the two outputs are byte equal. A control that moved the span by 1 ms differs. The mutation sweep, verify and Codex evidence are in the PR.
+**Evidence**, all synthetic. No number moved on the old benches: one probe built against main and this branch ran 62 cases at 1 s spans and printed every row's bits, and on the final laws the two outputs are byte equal. A control that moved the span by 1 ms differs. A sweep of 65 mutants ran: 63 are killed by a test, and 2 do not build, one of them because `Delivered` is no longer public, which is the check itself. The sweep found two tests that could not fail, one rule with no test and one reason given wrongly, and each is fixed. On the final laws, twenty simulated minutes hold rest at 100.9, sitting near 103.3 and standing level with supine at 100.9, with lymph returning three quarters of what the leg filters. A 400 ml bolus, 1.5 L and 2.4 L over five minutes and sodium delivered alone all run. Exactly 14 modes of the beat-to-beat map read near one, matching the 14 quantities nothing crosses, and every other mode decays. Verify and Codex evidence are in the PR.
 
 ## Comments
 
