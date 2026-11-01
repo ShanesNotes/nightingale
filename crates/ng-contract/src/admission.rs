@@ -820,9 +820,10 @@ impl InitializationSystem<'_> {
             draws: _,
             factors: _,
         } = self;
-        parameters.packet = parameters.packet.reading(time, start, fitted, &history);
+        let solved = modes.swap_remove(0);
+        parameters.packet = parameters.packet.reading(time, start, &solved, fitted, &history);
         parameters.values = values;
-        parameters.modes = modes.swap_remove(0);
+        let stated = core::mem::replace(&mut parameters.modes, solved);
         let owed = core::mem::take(&mut parameters.owed);
         let value_of = |entry: &(ValueName, ValueProvenance, f64)| {
             let (name, provenance, value) = *entry;
@@ -845,16 +846,20 @@ impl InitializationSystem<'_> {
                 value: Compensated::exact(value),
             }
         };
-        let mode_of = |(mode, &value): (&ModeLayout, &usize)| ValueRecord {
+        let mode_of = |((mode, &value), &guess): ((&ModeLayout, &usize), &usize)| ValueRecord {
             name: ValueName::Mode {
                 variable: mode.variable,
                 value: mode.values[value],
             },
-            provenance: ValueProvenance::Fixture,
+            provenance: if value == guess {
+                ValueProvenance::Fixture
+            } else {
+                ValueProvenance::Solved
+            },
             value: Compensated::exact(value as f64),
         };
         let starts = body.rows().iter().zip(start).zip(&parameters.starts);
-        let modes = body.layout.modes.iter().zip(&parameters.modes);
+        let modes = body.layout.modes.iter().zip(&parameters.modes).zip(&stated);
         let records = (owed.entries.iter().map(value_of))
             .chain(starts.map(start_of))
             .chain(modes.map(mode_of));

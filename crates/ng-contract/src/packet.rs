@@ -51,19 +51,23 @@ impl PacketHash {
     pub(crate) fn of_digest(digest: Digest) -> Self {
         Self { digest }
     }
-    /// The hash a run names, closed at admission: the packet's, the moment it starts, the start and fits it reached
-    /// and the core's history there, so one identity has one start whatever made it. Events stay out of it.
+    /// The hash a run names, closed at admission: the packet's, the moment it starts, the start, modes and fits it
+    /// reached and the core's history there, so one identity has one start whatever made it. Events stay out of it.
     pub(crate) fn reading(
         self,
         moment: SimTime,
         start: &[f64],
+        modes: &[usize],
         fitted: &[f64],
         history: &MethodHistory,
     ) -> Self {
-        let mut out = Canonical::new("ng-contract packet and start 1");
+        let mut out = Canonical::new("ng-contract packet and start 2");
         self.digest.seal(&mut out);
         moment.seal(&mut out);
         start.seal(&mut out);
+        for &mode in modes {
+            out.number(mode as u64);
+        }
         fitted.seal(&mut out);
         history.digest().seal(&mut out);
         Self { digest: out.digest() }
