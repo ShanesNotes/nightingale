@@ -450,6 +450,10 @@ pub fn arena_body() -> Result<CompiledBody, AdmissionError> {
 }
 
 const SECOND: u64 = 1_000_000_000;
+/// What a pulsing flow swings by, and the power that keeps the elastic store on its sum: that row rests on the store's
+/// change over a stage, so doubled stages part by more than any other row.
+const FLOW_SIZE: f64 = 20.0;
+const POWER_SIZE: f64 = 1e6;
 
 /// 06:55, counted from the midnight the run's clock starts at, so a clock law reads the time of day from the head.
 pub fn anchor_moment() -> SimTime {
@@ -515,7 +519,18 @@ pub fn arena_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixt
     packet.start_mode(valve("right atrium", "right ventricle")?, "open", note)?;
 
     table(&mut packet, note)?;
-    packet.start_rest(body, |row| start_guess(row), note)?;
+    packet.start_rest(body, start_guess, note)?;
+    for row in body.rows() {
+        let kind = row.kind();
+        match kind {
+            RowKind::Memory(slot) | RowKind::Algebraic(slot) => match slot.law.local {
+                "valves" | "circulation" => packet.row_scale(kind, Measure::<Rate<Water>>::new(FLOW_SIZE)?)?,
+                "dissipated power" => packet.row_scale(kind, Measure::<Rate<Energy>>::new(POWER_SIZE)?)?,
+                _ => {}
+            },
+            RowKind::Amount { .. } => {}
+        }
+    }
     Ok(packet)
 }
 

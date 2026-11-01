@@ -7,6 +7,7 @@ const NANOSECONDS_PER_SECOND: f64 = 1e9;
 /// Newton stops at rounding, not at the declared scales: those say what may be accepted, and an accuracy
 /// reference must not stop early merely because it may.
 const NEWTON_STOP: f64 = 8.0 * f64::EPSILON;
+const NOISE: f64 = 1e-12;
 
 /// A model default reported with every result. Measured on the two-reservoir case: the estimate reaches
 /// 4.0 on 64 s steps of amounts near 5e5, so this passes those steps and refuses much longer ones.
@@ -89,6 +90,7 @@ fn newton(
     let per_second = NANOSECONDS_PER_SECOND / span_ns as f64;
     let start = workspace.unknowns_mut().to_vec();
     let mut settled = false;
+    let mut last = f64::INFINITY;
     for updates_left in (0..=NEWTON_LIMIT).rev() {
         let unknowns = workspace.unknowns_mut().to_vec();
         for ((tangent, now), then) in workspace.derivative_mut().iter_mut().zip(&unknowns).zip(&start) {
@@ -115,9 +117,13 @@ fn newton(
         // An update is in each row's own unknown, where a residual is a rate on one row and a kernel's
         // value on another, so this one test fits both. The update still applies: on a stiff row one
         // unit in the last place can be a defect above the scales.
-        settled = (update.iter().zip(&unknowns).enumerate()).all(|(slot, (change, unknown))| {
-            change.abs() <= NEWTON_STOP * (problem.row_size(slot) + unknown.abs())
-        });
+        let moved = (update.iter().zip(&unknowns).enumerate())
+            .map(|(slot, (change, unknown))| change.abs() / (problem.row_size(slot) + unknown.abs()))
+            .fold(0.0, f64::max);
+        // A row that rests on a store's change over a stage keeps a noise of the store's rounding over the stage, so
+        // an update that has stopped shrinking this close to rounding has nothing left to give.
+        settled = moved <= NEWTON_STOP || (moved >= 0.5 * last && moved <= NOISE);
+        last = moved;
         for (unknown, change) in workspace.unknowns_mut().iter_mut().zip(update) {
             *unknown -= change;
         }
