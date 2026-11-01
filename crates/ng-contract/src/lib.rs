@@ -954,6 +954,7 @@ mod problem;
 mod provenance;
 mod quadrature;
 mod quantity;
+mod ring;
 mod scheme;
 mod scope;
 mod seam;
@@ -966,7 +967,8 @@ pub use admission::*;
 pub use anatomy::*;
 pub use body::*;
 pub use boundary::{
-    AppliedInputs, Attempt, BoundaryEvent, BoundaryInput, BoundaryPort, InputId, PendingInputs, WaterDelivery,
+    AppliedInputs, Attempt, BoundaryEvent, BoundaryInput, BoundaryPort, InputId, Legs, PendingInputs,
+    Posture, WaterDelivery,
 };
 pub use compensated::*;
 pub use conservation::*;
@@ -982,6 +984,7 @@ pub use problem::*;
 pub use provenance::*;
 pub use quadrature::*;
 pub use quantity::*;
+pub use ring::eliminate;
 pub use scheme::*;
 pub use scope::*;
 pub use seam::*;

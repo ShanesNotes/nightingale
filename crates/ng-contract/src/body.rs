@@ -130,6 +130,21 @@ impl CompiledBody {
             .unwrap_or(u64::MAX)
     }
 }
+impl Layout {
+    /// One firing, in stable order: each crossed guard still armed on what those before it left moves its mode, so of two
+    /// guards on one variable the first wins, and a guard a firing arms waits for the next step. The run and the ring
+    /// both fire here. `crossed` holds one entry per guard.
+    pub(crate) fn fire(&self, modes: &mut [usize], crossed: &[bool]) -> Vec<&GuardLayout> {
+        let mut fired = Vec::new();
+        for (guard, &crossed) in self.guards.iter().zip(crossed) {
+            if crossed && guard.armed(modes) {
+                modes[guard.variable] = guard.enters;
+                fired.push(guard);
+            }
+        }
+        fired
+    }
+}
 impl Seal for Layout {
     fn seal(&self, out: &mut Canonical) {
         let Self {

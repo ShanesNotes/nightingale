@@ -92,7 +92,6 @@ mod fixture;
 mod initialize;
 mod reference;
 mod replay;
-mod ring;
 mod run;
 mod slice;
 

@@ -196,7 +196,7 @@ pub(crate) fn holds_a_period(seconds: f64) -> bool {
     ns > 0 && ns as f64 / NANOSECONDS_PER_SECOND == seconds
 }
 
-fn period_ns(seconds: f64) -> u64 {
+pub(crate) fn period_ns(seconds: f64) -> u64 {
     (seconds * NANOSECONDS_PER_SECOND).round() as u64
 }
 

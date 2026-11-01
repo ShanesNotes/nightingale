@@ -5,10 +5,10 @@ use crate::evaluate::{Inputs, Undefined};
 use crate::packet::{BoundAnchor, Fit, Owed};
 use crate::problem::{Jacobian, SolveWorkspace};
 use crate::{
-    AdmissionError, AnchorId, AnchorStatistic, Book, BoundParameters, BoundaryPort, Candidate, Compensated,
-    CompiledBody, DenseSegment, ErrorScales, ImageParts, InitializationProvenance, LawName, MethodHistory,
-    ModelHash, ObservationLens, PacketHash, QuantityId, Row, RowId, RowKind, SimTime, UnknownId, ValueName,
-    ValueProvenance, ValueRecord,
+    AdmissionError, AnchorId, AnchorStatistic, Book, BoundParameters, BoundaryPort, Candidate, Combination,
+    Compensated, CompiledBody, DenseSegment, ErrorScales, ImageParts, InitializationProvenance, LawName,
+    MethodHistory, ModelHash, ObservationLens, PacketHash, QuantityId, Row, RowId, RowKind, SimTime,
+    UnknownId, ValueName, ValueProvenance, ValueRecord, eliminate,
 };
 use core::ops::Range;
 
@@ -194,7 +194,7 @@ fn algebraic(kind: RowKind) -> bool {
 /// there would: the next point's stage holds in what it left and starts from its reset. `sweep` reads that off the
 /// workspace, and `admit` runs the same reading and refuses a ring it would change.
 pub struct InitializationSystem<'m> {
-    body: &'m CompiledBody,
+    pub(crate) body: &'m CompiledBody,
     parameters: BoundParameters,
     /// One per point: the modes its stage holds in.
     modes: Vec<Vec<usize>>,
@@ -385,7 +385,9 @@ impl InitializationSystem<'_> {
     /// total's row couple two points, so the matrix is a block ring with a border of fits.
     pub fn linearize(&self, workspace: &SolveWorkspace) -> Result<Jacobian, InitializationFailure> {
         self.check(workspace)?;
-        let unknowns = workspace.coordinates();
+        self.lines(workspace.coordinates())
+    }
+    fn lines(&self, unknowns: &[f64]) -> Result<Jacobian, InitializationFailure> {
         let rows = self.body.rows();
         let (size, points) = (rows.len(), self.frames.len());
         let values = self.values(unknowns);
@@ -586,31 +588,10 @@ impl InitializationSystem<'_> {
                 }
             }
         }
-        let mut rows: Vec<usize> = (0..size).collect();
-        for pivot in 0..size {
-            let best = (pivot..size).fold(pivot, |best, row| {
-                if matrix[row][pivot].abs() > matrix[best][pivot].abs() {
-                    row
-                } else {
-                    best
-                }
-            });
-            let reach = (matrix[best].iter()).fold(0.0_f64, |most, cell| most.max(cell.abs()));
-            if matrix[best][pivot].abs() <= ROUNDING * reach {
-                return Ok(Some(RowId::at(rows[pivot])));
-            }
-            matrix.swap(pivot, best);
-            rows.swap(pivot, best);
-            let (above, below) = matrix.split_at_mut(pivot + 1);
-            let lead = &above[pivot];
-            for row in below {
-                let factor = row[pivot] / lead[pivot];
-                for (cell, value) in row.iter_mut().zip(lead).skip(pivot) {
-                    *cell -= factor * value;
-                }
-            }
+        for row in &mut matrix {
+            row.push(0.0);
         }
-        Ok(None)
+        Ok(eliminate(matrix).err().map(RowId::at))
     }
     /// One defect over its scale, `None` when the tolerance refuses it. What overflowed is refused, because `<=` is
     /// false on a NaN but true of two infinities, and a defect of zero holds even where an overflow leaves no scale.
@@ -698,15 +679,20 @@ impl InitializationSystem<'_> {
         for slot in (0..stages.len()).filter(|slot| !replaced(slot)) {
             note(body_row(slot % size), stage(slot)?);
         }
-        // A net flow lands on the row its total replaced, so the flow is read first, to name it.
-        for (slot, quantity) in self.replaced() {
-            let (_, packet) = self.total(unknowns, quantity);
-            let bulk = self.total_size(quantity);
-            let flow = self.held(self.net_flow(unknowns, quantity)?.abs(), packet, bulk);
+        // Every book, regulated or not: each stage's defect can pass while their sum over the cycle does not. A net flow
+        // lands on the row its total replaced, so the flow is read first, to name it.
+        let combinations = self.body.conserved_basis().combinations();
+        let books = (combinations.iter()).filter(|combination| combination.book() != Book::Charge);
+        for quantity in books.filter(|_| self.interval.is_some()).map(Combination::id) {
+            let (moved, packet) = self.total(unknowns, quantity);
+            let flow = self.net_flow(unknowns, quantity)?.abs();
+            let held = self.held(flow, packet + moved, self.total_size(quantity));
             note(
                 AdmissionRow::Total(quantity),
-                flow.ok_or(InitializationFailure::NetBoundaryFlow { quantity })?,
+                held.ok_or(InitializationFailure::NetBoundaryFlow { quantity })?,
             );
+        }
+        for (slot, _) in self.replaced() {
             note(body_row(slot % size), stage(slot)?);
         }
         let specified = (self.body.conserved_basis().combinations().iter())
@@ -744,6 +730,14 @@ impl InitializationSystem<'_> {
         }
         if let Some(row) = self.rankless(unknowns)? {
             return Err(InitializationFailure::NoRank { row });
+        }
+        // One stage can have rank while the ring has a free level: a total a law seems to regulate but does not.
+        if self.frames.len() > 1 {
+            let ring = self.lines(unknowns)?;
+            if let Err(row) = self.solve(&ring, &vec![0.0; unknowns.len()]) {
+                let row = rows[row % size].id();
+                return Err(InitializationFailure::NoRank { row });
+            }
         }
         Ok(worst)
     }

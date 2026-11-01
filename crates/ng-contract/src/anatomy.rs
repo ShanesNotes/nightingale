@@ -242,6 +242,7 @@ pub struct AnatomyBuilder {
     others: Vec<(Network, SiteId, SiteId)>,
     valves: Vec<(SiteId, SiteId)>,
     supplies: Vec<(SiteId, SiteId)>,
+    unsupplied: Vec<SiteId>,
     landmarks: Vec<(Landmark, SiteId, SiteId)>,
     encloses: Vec<(SiteId, SiteId)>,
     compliances: Vec<(SiteId, Compliance)>,
@@ -278,10 +279,15 @@ impl AnatomyBuilder {
         self.valves.push((from, to));
     }
     /// The sites a junction's nerve reaches. An edge reads the junction of the site it runs into, so an edge into a
-    /// bed reads what its arterioles read. A site no junction supplies reads no effect.
+    /// bed reads what its arterioles read.
     pub fn supply(&mut self, junction: &Site<Junction>, sites: &[SiteId]) {
         self.supplies
             .extend(sites.iter().map(|&site| (junction.id(), site)));
+    }
+    /// The sites no nerve reaches, so a law's read of a junction there is an effect of nothing. It is stated because a
+    /// lost `supply` line would otherwise read the same, and the body would lose its feedback with no refusal.
+    pub fn unsupplied(&mut self, sites: &[SiteId]) {
+        self.unsupplied.extend_from_slice(sites);
     }
     /// Where a landmark stands: the site whose rows a law reads there, and the site whose height it sits at.
     pub fn landmark(&mut self, landmark: Landmark, site: SiteId, height: SiteId) {
@@ -320,6 +326,7 @@ struct Facts {
     others: Vec<(Network, SiteId, SiteId)>,
     valves: Vec<(SiteId, SiteId)>,
     supplies: Vec<(SiteId, SiteId)>,
+    unsupplied: Vec<SiteId>,
     landmarks: Vec<(Landmark, SiteId, SiteId)>,
     encloses: Vec<(usize, usize)>,
     compliances: Vec<(usize, Compliance)>,
@@ -358,6 +365,7 @@ impl Facts {
                 .iter()
                 .flat_map(|&(junction, site)| [junction, site]),
         )
+        .chain(builder.unsupplied.iter().copied())
         .chain(
             builder
                 .landmarks
@@ -376,6 +384,7 @@ impl Facts {
             others: relation(builder.others, same)?,
             valves: relation(builder.valves, same)?,
             supplies: relation(builder.supplies, same)?,
+            unsupplied: relation(builder.unsupplied, same)?,
             landmarks: relation(builder.landmarks, same)?,
             contains: relation(builder.contains, pair)?,
             vascular: relation(builder.vascular, pair)?,
@@ -413,6 +422,7 @@ impl Facts {
             return Err(AnatomyDefect::WrongNetwork { site: pair[0].1.key });
         }
         let mut supplied: Vec<SiteId> = self.supplies.iter().map(|&(_, site)| site).collect();
+        supplied.extend_from_slice(&self.unsupplied);
         supplied.sort_unstable();
         match supplied.windows(2).find(|pair| pair[0] == pair[1]) {
             Some(pair) => Err(AnatomyDefect::SuppliedTwice { site: pair[0].key }),
@@ -659,6 +669,7 @@ pub struct Anatomy {
     others: Vec<(Network, SiteId, SiteId)>,
     valves: Vec<(SiteId, SiteId)>,
     supplies: Vec<(SiteId, SiteId)>,
+    unsupplied: Vec<SiteId>,
     landmarks: Vec<(Landmark, SiteId, SiteId)>,
     served_by: Vec<(usize, usize, Afferent)>,
     regions: Vec<(&'static str, usize)>,
@@ -692,6 +703,7 @@ impl Anatomy {
             others: facts.others,
             valves: facts.valves,
             supplies: facts.supplies,
+            unsupplied: facts.unsupplied,
             landmarks: facts.landmarks,
             served_by: facts.served_by,
             regions: facts.regions,
@@ -707,6 +719,7 @@ impl Anatomy {
             others,
             valves,
             supplies,
+            unsupplied,
             landmarks,
             served_by,
             regions,
@@ -787,6 +800,10 @@ impl Anatomy {
                 first.seal(&mut bytes);
                 second.seal(&mut bytes);
             }
+        }
+        bytes.length(unsupplied.len());
+        for site in unsupplied {
+            site.seal(&mut bytes);
         }
         bytes.length(landmarks.len());
         for (landmark, site, height) in landmarks {
@@ -875,11 +892,16 @@ impl Anatomy {
             .collect()
     }
 
-    /// The junction that supplies `site`. A site none supplies reads no effect.
+    /// The junction that supplies `site`.
     pub(crate) fn junction(&self, site: SiteId) -> Option<SiteId> {
         (self.supplies.iter())
             .find(|supply| supply.1 == site)
             .map(|supply| supply.0)
+    }
+
+    /// Whether the map says no nerve reaches `site`.
+    pub(crate) fn unsupplied(&self, site: SiteId) -> bool {
+        self.unsupplied.contains(&site)
     }
 
     /// The site a landmark's rows stand at and the site whose height it sits at.
@@ -889,7 +911,8 @@ impl Anatomy {
             .map(|mark| (mark.1, mark.2))
     }
 
-    /// A site's height in the body frame, the part posture scales.
+    /// A site's height in the body frame from the hip, the part posture scales: above the hip it turns with the trunk,
+    /// below it with the legs.
     pub(crate) fn axial(&self, site: SiteId) -> f64 {
         self.placed(site)
             .map_or(0.0, |placed| placed.position.axial.value())

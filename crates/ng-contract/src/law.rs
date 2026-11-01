@@ -146,10 +146,6 @@ impl Family {
             Family::Dissipation => "dissipation",
         }
     }
-    /// Whether a row of this name is a route's own flow.
-    pub(crate) fn flows(local: &str) -> bool {
-        ["circulation", "starling", "lymph", "filtration", "tubular flow"].contains(&local)
-    }
     /// Whether this route moves water that can carry what both ends hold. In a body that holds more than water its law
     /// defines one flow row, and the contract writes every column from it. A valve's flow is memory in any body.
     pub(crate) fn fluid(self) -> bool {
@@ -865,6 +861,18 @@ pub struct EdgeRoute<'b, O, Q, E: EdgeKind = VascularEdge> {
     brand: Brand<'b>,
     kind: PhantomData<(O, Q, E)>,
 }
+impl<'b, O, C: SiteSet> SiteRoute<'b, O, C, Water> {
+    /// States that this route's wall stops species `R` whole, so one end holds it and the other does not.
+    pub fn keeps_back<R: Substance>(&self, laws: &mut FragmentBuilder<'b, O>) {
+        laws.data.kept_back.push((self.family, R::SPECIES));
+    }
+}
+impl<'b, O, E: EdgeKind> EdgeRoute<'b, O, Water, E> {
+    /// States that this route's wall stops species `R` whole, so one end holds it and the other does not.
+    pub fn keeps_back<R: Substance>(&self, laws: &mut FragmentBuilder<'b, O>) {
+        laws.data.kept_back.push((self.family, R::SPECIES));
+    }
+}
 impl<'b, O, Q, E: EdgeKind> EdgeRoute<'b, O, Q, E> {
     pub(crate) fn requested(family: Family) -> Self {
         Self {
@@ -1560,6 +1568,7 @@ pub(crate) struct FragmentData {
     pub(crate) validity: Vec<(u32, Validity)>,
     pub(crate) closed: Vec<&'static str>,
     pub(crate) reflections: Vec<(Family, Species, ParameterKey)>,
+    pub(crate) kept_back: Vec<(Family, Species)>,
 }
 impl FragmentData {
     pub(crate) fn owe_flow(&mut self, family: Family) {
@@ -1586,6 +1595,7 @@ impl FragmentData {
             validity: Vec::new(),
             closed: Vec::new(),
             reflections: Vec::new(),
+            kept_back: Vec::new(),
         }
     }
 }

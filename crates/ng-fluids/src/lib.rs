@@ -92,6 +92,7 @@ pub fn declare<'b>(scope: FluidsScope<'b>) -> Result<Fragment<'b, Fluids>, Admis
     );
     let slope = fl.parameter(ParameterKey::new("fl.oncotic-slope"), Admissible::positive());
     let reflected = fl.reflect::<Albumin>(&route, ParameterKey::new("fl.albumin-reflection"));
+    route.keeps_back::<Vasopressin>(&mut fl);
     let exchange = fl.site_kernel(|mut k| {
         let inside = k.at_site(&pressures.capillary_pressure);
         let outside = k.at_site(&interstitial);
@@ -117,6 +118,7 @@ pub fn declare<'b>(scope: FluidsScope<'b>) -> Result<Fragment<'b, Fluids>, Admis
     across_the_wall::<Chloride>(&mut fl, &ports, &route, &wall, class);
 
     let lymph = ports.lymph(&mut fl);
+    lymph.keeps_back::<Vasopressin>(&mut fl);
     let conductance = fl.edge_parameter::<LymphEdge, Conductance<Water>>(
         ParameterKey::new("fl.lymph-conductance"),
         Admissible::positive(),

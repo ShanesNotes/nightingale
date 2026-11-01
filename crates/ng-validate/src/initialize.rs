@@ -1,5 +1,4 @@
 use crate::reference::solve_dense;
-use crate::ring::solve_ring;
 use ng_contract::*;
 use ng_record::{Running, Session};
 
@@ -154,7 +153,7 @@ fn initialize(system: &mut InitializationSystem<'_>, body: &CompiledBody) -> Sol
                 return workspace;
             };
             let update = if system.points() > 1 {
-                solve_ring(system, body, &jacobian, &residuals)
+                system.solve(&jacobian, &residuals)
             } else {
                 solve_dense(jacobian.view(), &residuals)
             };

@@ -315,6 +315,15 @@ impl StepProposal {
         }
         let base = problem.accepted.state();
         let state = next_state(body, base, &extents, &memory, algebraic);
+        // A crossing and a crossing back inside one step leave no mark at its end, so every stage before the end is read.
+        // At the floor no shorter step can look again, so the declared resolution is the limit.
+        let mut inside = false;
+        for stage in (witness.stages.iter()).filter(|stage| stage.offset_ns < ticket.length_ns()) {
+            inside |= problem.crossed_at_stage(&ticket, &stage.unknowns, stage.offset_ns)?;
+        }
+        if inside && ticket.length_ns() > ticket.floor_ns && problem.crossed(&ticket, &state)?.is_none() {
+            return Err(ticket.refuse(NumericalRefusal::GuardInside));
+        }
         let coordinates = state.coordinates();
         let tangent = vec![0.0; coordinates.len()];
         let point = StagePoint {

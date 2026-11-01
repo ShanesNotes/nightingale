@@ -174,9 +174,14 @@ fn valves<'b>(
         k.finish(open_while, open.only(), wave)
     });
     cv.event(Guard::new(falling, Crossing::Falling, open.to(&shut)?).resetting(&flow));
+    // Strictly past zero: a shut valve at no head and no flow stays shut, or a still body would fire at every step.
+    let opening = cv
+        .edge_parameter::<ValveEdge, Pressure>(ParameterKey::new("cv.opening-head"), Admissible::positive());
     let rising = cv.edge_kernel::<ValveEdge, _, _>(|mut k| {
         let head_across = drive(&mut k, pressure, head);
-        k.finish(head_across, shut.only(), wave)
+        let least = k.edge_parameter(&opening);
+        let past = k.subtract(head_across, least);
+        k.finish(past, shut.only(), wave)
     });
     cv.event(Guard::new(rising, Crossing::Rising, shut.to(&open)?));
     Ok(())

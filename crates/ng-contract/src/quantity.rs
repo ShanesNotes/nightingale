@@ -82,6 +82,17 @@ pub enum Species {
     Energy,
 }
 impl Species {
+    /// What water can carry, water first: every species but energy, which no route moves as a share of a flow.
+    pub(crate) const CARRIED: [Species; 8] = [
+        Species::Water,
+        Species::Sodium,
+        Species::Potassium,
+        Species::Chloride,
+        Species::Albumin,
+        Species::Vasopressin,
+        Species::Norepinephrine,
+        Species::Acetylcholine,
+    ];
     /// Charge in units of the amount, zero for what the ledger keeps as no ion.
     pub(crate) const fn charge(self) -> i64 {
         match self {

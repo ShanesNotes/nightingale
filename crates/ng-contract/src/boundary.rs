@@ -38,9 +38,48 @@ pub enum BoundaryInput {
     Sodium(Delivered<Sodium>),
     Potassium(Delivered<Potassium>),
     Chloride(Delivered<Chloride>),
-    /// How much of gravity runs along the body from this instant: 0 lying flat, 1 standing. It holds until the next
-    /// one, so a ramp is a train of events. Each ends a step, and every site's head follows from one number.
-    Posture(Measure<Dimensionless>),
+    /// How the body lies from this instant until the next one. An event is one instant, so a ramp is a train of events.
+    /// Each ends a step, and every site's head follows from its place.
+    Posture(Posture),
+}
+/// A trunk and a leg descriptor. `trunk` is the sine of the trunk's angle from flat: 0 lying flat, 1 sitting up or
+/// standing, a negative value head down.
+pub struct Posture {
+    trunk: f64,
+    legs: Legs,
+}
+impl Posture {
+    /// A trunk past straight up or straight down has no angle.
+    pub fn new(trunk: Measure<Dimensionless>, legs: Legs) -> Result<Self, AdmissionError> {
+        let trunk = trunk.value();
+        if trunk.abs() > 1.0 {
+            return Err(AdmissionError::PostureOutOfRange);
+        }
+        Ok(Self { trunk, legs })
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Legs {
+    Horizontal,
+    SeatedDependent,
+    Standing,
+}
+impl Legs {
+    /// How much of gravity runs along the legs: seated, the thigh lies flat and the shin hangs. Model default.
+    const fn share(self) -> f64 {
+        match self {
+            Legs::Horizontal => 0.0,
+            Legs::SeatedDependent => 0.5,
+            Legs::Standing => 1.0,
+        }
+    }
+    fn of_share(share: f64) -> Result<Self, Malformed> {
+        let found = [Legs::Horizontal, Legs::SeatedDependent, Legs::Standing];
+        (found
+            .into_iter()
+            .find(|legs| legs.share().to_bits() == share.to_bits()))
+        .ok_or(Malformed)
+    }
 }
 pub struct BoundaryEvent {
     id: InputId,
@@ -144,17 +183,18 @@ impl Delivery {
             BoundaryInput::Sodium(delivery) => delivered(id, at, delivery),
             BoundaryInput::Potassium(delivery) => delivered(id, at, delivery),
             BoundaryInput::Chloride(delivery) => delivered(id, at, delivery),
-            BoundaryInput::Posture(upright) => Ok(Self::posture(id, at, upright.value())),
+            BoundaryInput::Posture(Posture { trunk, legs }) => Ok(Self::posture(id, at, trunk, legs)),
         }
     }
-    fn posture(id: InputId, at: SimTime, upright: f64) -> Self {
+    /// A posture's `amount` is its trunk and its `rate` its legs' share.
+    fn posture(id: InputId, at: SimTime, trunk: f64, legs: Legs) -> Self {
         Self {
             id,
             at,
             boundary: POSTURE,
-            amount: upright,
+            amount: trunk,
             ends: SimTime::from_ns(u64::MAX),
-            rate: upright,
+            rate: legs.share(),
             species: None,
         }
     }
@@ -341,8 +381,9 @@ impl PendingInputs {
             last_refusal: None,
         };
         let plan = self.plan(start, problem.accepted.state().fired);
-        // A span past the body's tightest law is capped here, before anything runs, as a running delivery's end is.
-        let capped = span_ns.min(problem.body.longest_step_ns());
+        // A span past the body's tightest law or a forcing's knot is capped here, before anything runs, as a running
+        // delivery's end is.
+        let capped = span_ns.min(problem.longest_span_ns());
         let wanted = start.plus_ns(capped).ok_or(mismatch)?;
         let end = plan.running_end.map_or(wanted, |ends| ends.min(wanted));
         let interval = Interval::new(start, end).ok_or(mismatch)?;
@@ -450,7 +491,7 @@ impl PendingInputs {
                 boundary,
                 amount,
                 ends,
-                rate: _,
+                rate,
                 species,
             } = delivery;
             out.raw(id.digest.as_bytes());
@@ -459,6 +500,9 @@ impl PendingInputs {
             out.text(boundary);
             amount.seal(out);
             ends.seal(out);
+            if species.is_none() {
+                rate.seal(out);
+            }
         }
         cursor.seal(out);
         out.length(active.len());
@@ -483,7 +527,8 @@ impl PendingInputs {
             let amount = read.float()?;
             let ends = read.time()?;
             let delivery = match species {
-                None => Delivery::posture(id, at, amount),
+                None if amount.abs() > 1.0 => return Err(Malformed),
+                None => Delivery::posture(id, at, amount, Legs::of_share(read.float()?)?),
                 Some(species) => {
                     let boundary = body.boundary_name(name).ok_or(Malformed)?;
                     Delivery::checked(id, at, boundary, amount, ends, species).map_err(|_| Malformed)?
@@ -597,18 +642,19 @@ const DELIVERY_BYTES: usize = 32 + 8 + 8 + 8 + 8 + 8;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct DriveFrame {
     drives: Vec<(&'static str, f64)>,
-    upright: f64,
+    trunk: f64,
+    legs: f64,
 }
 impl DriveFrame {
-    /// How much of gravity runs along the body's axis: 0 lying flat, 1 standing. It scales every site's height, so
-    /// posture reaches every law through one read and no law carries gravity.
-    pub(crate) fn upright(&self) -> f64 {
-        self.upright
+    /// A site's height in gravity from its place in the body frame, so posture reaches every law through one read and no
+    /// law carries gravity. The hip is the origin: what lies above it turns with the trunk, what lies below with the legs.
+    pub(crate) fn height(&self, axial: f64) -> f64 {
+        axial * if axial < 0.0 { self.legs } else { self.trunk }
     }
     /// Deliveries add, and a posture replaces the one before it: both arrive here in `(time, id)` order.
     fn take(&mut self, delivery: &Delivery) {
         match delivery.species {
-            None => self.upright = delivery.rate,
+            None => (self.trunk, self.legs) = (delivery.amount, delivery.rate),
             Some(_) => self.add(delivery.boundary, delivery.rate),
         }
     }
@@ -627,12 +673,13 @@ impl DriveFrame {
 }
 impl Seal for DriveFrame {
     fn seal(&self, out: &mut Canonical) {
-        let Self { drives, upright } = self;
+        let Self { drives, trunk, legs } = self;
         out.length(drives.len());
         for (boundary, rate) in drives {
             out.text(boundary);
             rate.seal(out);
         }
-        upright.seal(out);
+        trunk.seal(out);
+        legs.seal(out);
     }
 }

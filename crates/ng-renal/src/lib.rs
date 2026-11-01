@@ -113,6 +113,8 @@ pub fn declare<'b>(scope: RenalScope<'b>) -> Result<Fragment<'b, Renal>, Admissi
     let blood = ports.blood_pressure();
 
     let filtration = ports.filtration(&mut rn);
+    filtration.keeps_back::<Albumin>(&mut rn);
+    filtration.keeps_back::<Vasopressin>(&mut rn);
     let coefficient = rn.edge_parameter::<FilterEdge, Conductance<Water>>(
         ParameterKey::new("rn.filtration"),
         Admissible::positive(),

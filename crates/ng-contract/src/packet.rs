@@ -1,7 +1,7 @@
 use crate::body::{Bound, Column, Instance, Layout, ParameterId, Target};
 use crate::chance::{holds_a_period, sampled_unit};
 use crate::identity::{Canonical, Seal};
-use crate::law::{Family, Op};
+use crate::law::Op;
 use crate::provenance::seal_trace;
 use crate::quantity::dimension;
 use crate::{
@@ -645,10 +645,8 @@ impl BoundParameters {
 impl CompiledBody {
     /// A firing leaves algebraic values as they were and nothing here solves them again, so an algebraic law may not
     /// hold by a fired mode, or read a row a firing resets: then no algebraic row jumps at a firing, and no landing
-    /// needs a solve. A route's own flow row is the one exception: only stages read it, and each stage solves it, so at
-    /// that instant it keeps the left limit the dense segment ends on and no later value rests on it. A variable no
-    /// guard moves never leaves its start, and a hazard integral only grows until it fires, so it never returns over a
-    /// cycle.
+    /// needs a solve. A variable no guard moves never leaves its start, and a hazard integral only grows until it
+    /// fires, so it never returns over a cycle.
     fn unrun_mode(&self, periodic: bool) -> Option<Slot> {
         let Layout {
             rows,
@@ -659,10 +657,7 @@ impl CompiledBody {
             ..
         } = &self.layout;
         let algebraic = |target: Target| match target {
-            Target::Row(row) => match rows[row.index()].kind {
-                RowKind::Algebraic(slot) => !Family::flows(slot.law.local),
-                _ => false,
-            },
+            Target::Row(row) => matches!(rows[row.index()].kind, RowKind::Algebraic(_)),
             Target::Column(_) => false,
         };
         let plain = |at| guards.iter().any(|guard| guard.variable == at);
@@ -673,7 +668,12 @@ impl CompiledBody {
         let reset_reads = |at| {
             let resets = (guards.iter())
                 .filter(|guard| guard.variable == at)
-                .filter_map(|guard| guard.resets);
+                .filter_map(|guard| guard.resets)
+                .chain(
+                    (hazards.iter())
+                        .filter(|hazard| hazard.variable == at)
+                        .map(|hazard| hazard.integral),
+                );
             resets.into_iter().any(|row| {
                 let read = |law: &&Instance| {
                     law.inputs

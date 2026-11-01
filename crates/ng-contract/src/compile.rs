@@ -722,22 +722,24 @@ impl Reaches {
             .find(|reach| reach.context == context)
             .expect("a kernel reads a route's amounts only where a route of its own context applies")
     }
+    fn held(&self, pool: Option<PoolRef>) -> bool {
+        pool.is_some_and(|pool| self.pools.binary_search(&pool).is_ok())
+    }
     /// Every species both of a fluid reach's ends hold, water first, so no list of them exists to keep in step.
     fn carried(&self, reach: &Reach) -> Vec<Species> {
-        let held = |pool: Option<PoolRef>| pool.is_some_and(|pool| self.pools.binary_search(&pool).is_ok());
-        let every = [
-            Species::Water,
-            Species::Sodium,
-            Species::Potassium,
-            Species::Chloride,
-            Species::Albumin,
-            Species::Vasopressin,
-            Species::Norepinephrine,
-            Species::Acetylcholine,
-        ];
-        (every.into_iter())
-            .filter(|&species| held(reach.pool(End::From, species)) && held(reach.pool(End::To, species)))
-            .collect()
+        let both = |&species: &Species| {
+            self.held(reach.pool(End::From, species)) && self.held(reach.pool(End::To, species))
+        };
+        Species::CARRIED.into_iter().filter(both).collect()
+    }
+    /// A species one end holds and the other does not. Flow can reverse, so either end counts.
+    fn stranded(&self, reach: &Reach) -> Vec<Species> {
+        let two_ends = reach.ends.iter().all(|end| matches!(end, Terminal::Pool(_)));
+        let apart = |species: &Species| {
+            let held = |end| self.held(reach.pool(end, *species));
+            two_ends && held(End::From) != held(End::To)
+        };
+        Species::CARRIED.into_iter().filter(apart).collect()
     }
 }
 /// The one table of what each family joins. A new family is one arm here and one port.
@@ -1142,6 +1144,10 @@ fn fluid_columns(placement: &mut Placement, places: &Places) -> Result<(), Compi
                 .find(|known| known.serves.local() == family.name())
                 .map_or(RateClass::UNMOVED, |known| known.kernel.rate);
             for reach in reaches.of_family(family) {
+                let kept = |species: &Species| fragment.kept_back.contains(&(family, *species));
+                if let Some(&species) = reaches.stranded(reach).iter().find(|species| !kept(species)) {
+                    return Err(CompileDefect::CargoStranded { law, species });
+                }
                 let flow = Address::Unknown(UnknownId::at(rows.declared(law, reach.context)));
                 for species in reaches.carried(reach) {
                     let ends = reach.ends.map(|end| match end {
@@ -1424,8 +1430,15 @@ fn addresses(
             }
             Source::Field(field) => match (rows.defined(field, at), place) {
                 (Some(row), _) => unknown(row),
-                // No nerve, or no receptor at the nerve's end, is no effect.
-                (None, Where::Junction) => Address::Gauge,
+                (None, Where::Junction) => match (landed, context) {
+                    (Some(junction), _) => return Err(CompileDefect::NoReceptor { law, junction }),
+                    (None, Context::Site(site) | Context::Edge { to: site, .. })
+                        if !anatomy.unsupplied(site) =>
+                    {
+                        return Err(CompileDefect::NoSupply { law, site });
+                    }
+                    _ => Address::Gauge,
+                },
                 (None, _) => return Err(CompileDefect::UnemittedField { law, field }),
             },
             Source::Flow(family) => {

@@ -9,47 +9,47 @@ fn at(axial: f64) -> Result<Position, AdmissionError> {
     ))
 }
 
-/// Grouped as record 0002 asks. Heights are synthetic. An edge into a bed stands for its arterioles, and the
-/// edge from the systemic arteries into the glomerular bed is the renal afferent edge.
+/// Grouped as record 0002 asks. Heights are synthetic and run from the hip. An edge into a bed stands for its arterioles,
+/// and the edge from the systemic arteries into the glomerular bed is the renal afferent edge.
 pub fn arena_anatomy() -> Result<Anatomy, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let body = map.site::<TissueSite>("body", at(0.0)?);
-    let heart = map.site::<TissueSite>("heart", at(1.0)?);
-    let kidney = map.site::<TissueSite>("kidney", at(0.5)?);
-    let carotid = map.site::<TissueSite>("carotid sinus", at(1.4)?);
-    let arch = map.site::<TissueSite>("aortic arch", at(1.1)?);
+    let heart = map.site::<TissueSite>("heart", at(0.5)?);
+    let kidney = map.site::<TissueSite>("kidney", at(0.2)?);
+    let carotid = map.site::<TissueSite>("carotid sinus", at(0.7)?);
+    let arch = map.site::<TissueSite>("aortic arch", at(0.55)?);
 
-    let right_atrium = map.site::<VesselSegment>("right atrium", at(1.0)?);
-    let right_ventricle = map.site::<VesselSegment>("right ventricle", at(1.0)?);
-    let left_atrium = map.site::<VesselSegment>("left atrium", at(1.0)?);
-    let left_ventricle = map.site::<VesselSegment>("left ventricle", at(1.0)?);
-    let pulmonary_artery = map.site::<VesselSegment>("pulmonary artery", at(1.1)?);
-    let pulmonary_vein = map.site::<VesselSegment>("pulmonary vein", at(1.1)?);
-    let arteries = map.site::<VesselSegment>("systemic arteries", at(1.0)?);
-    let central_veins = map.site::<VesselSegment>("central veins", at(1.0)?);
-    let splanchnic_veins = map.site::<VesselSegment>("splanchnic veins", at(0.6)?);
-    let leg_veins = map.site::<VesselSegment>("leg veins", at(0.2)?);
+    let right_atrium = map.site::<VesselSegment>("right atrium", at(0.5)?);
+    let right_ventricle = map.site::<VesselSegment>("right ventricle", at(0.5)?);
+    let left_atrium = map.site::<VesselSegment>("left atrium", at(0.5)?);
+    let left_ventricle = map.site::<VesselSegment>("left ventricle", at(0.5)?);
+    let pulmonary_artery = map.site::<VesselSegment>("pulmonary artery", at(0.55)?);
+    let pulmonary_vein = map.site::<VesselSegment>("pulmonary vein", at(0.55)?);
+    let arteries = map.site::<VesselSegment>("systemic arteries", at(0.5)?);
+    let central_veins = map.site::<VesselSegment>("central veins", at(0.5)?);
+    let splanchnic_veins = map.site::<VesselSegment>("splanchnic veins", at(0.15)?);
+    let leg_veins = map.site::<VesselSegment>("leg veins", at(-0.5)?);
 
-    let lung = map.site::<CapillaryBed>("pulmonary bed", at(1.2)?);
-    let splanchnic = map.site::<CapillaryBed>("splanchnic bed", at(0.6)?);
-    let leg = map.site::<CapillaryBed>("leg bed", at(0.2)?);
-    let glomerular = map.site::<CapillaryBed>("glomerular bed", at(0.5)?);
-    let peritubular = map.site::<CapillaryBed>("peritubular bed", at(0.5)?);
+    let lung = map.site::<CapillaryBed>("pulmonary bed", at(0.55)?);
+    let splanchnic = map.site::<CapillaryBed>("splanchnic bed", at(0.15)?);
+    let leg = map.site::<CapillaryBed>("leg bed", at(-0.5)?);
+    let glomerular = map.site::<CapillaryBed>("glomerular bed", at(0.2)?);
+    let peritubular = map.site::<CapillaryBed>("peritubular bed", at(0.2)?);
 
-    let pleura = map.site::<EnclosedSpace>("pleural space", at(1.2)?);
-    let abdomen = map.site::<EnclosedSpace>("abdominal space", at(0.6)?);
+    let pleura = map.site::<EnclosedSpace>("pleural space", at(0.55)?);
+    let abdomen = map.site::<EnclosedSpace>("abdominal space", at(0.15)?);
 
-    let sinoatrial = map.site::<Junction>("sinoatrial junction", at(1.0)?);
-    let myocardial = map.site::<Junction>("myocardial junction", at(1.0)?);
-    let arteriolar = map.site::<Junction>("arteriolar junction", at(0.6)?);
-    let venous = map.site::<Junction>("venous junction", at(0.6)?);
-    let renal = map.site::<Junction>("renal junction", at(0.5)?);
+    let sinoatrial = map.site::<Junction>("sinoatrial junction", at(0.5)?);
+    let myocardial = map.site::<Junction>("myocardial junction", at(0.5)?);
+    let arteriolar = map.site::<Junction>("arteriolar junction", at(0.15)?);
+    let venous = map.site::<Junction>("venous junction", at(0.15)?);
+    let renal = map.site::<Junction>("renal junction", at(0.2)?);
 
-    let tubule = map.site::<VesselSegment>("renal tubule", at(0.5)?);
-    let duct = map.site::<VesselSegment>("collecting duct", at(0.5)?);
-    let bladder = map.site::<VesselSegment>("bladder", at(0.3)?);
+    let tubule = map.site::<VesselSegment>("renal tubule", at(0.2)?);
+    let duct = map.site::<VesselSegment>("collecting duct", at(0.2)?);
+    let bladder = map.site::<VesselSegment>("bladder", at(0.05)?);
 
-    let cranial = map.site::<NerveSegment>("cranial segment", at(1.5)?);
+    let cranial = map.site::<NerveSegment>("cranial segment", at(0.8)?);
 
     for site in [
         heart.id(),
@@ -138,6 +138,16 @@ pub fn arena_anatomy() -> Result<Anatomy, AdmissionError> {
     map.supply(&arteriolar, &[splanchnic.id(), leg.id()]);
     map.supply(&venous, &[splanchnic_veins.id(), leg_veins.id()]);
     map.supply(&renal, &[glomerular.id()]);
+    map.unsupplied(&[
+        right_atrium.id(),
+        left_atrium.id(),
+        pulmonary_artery.id(),
+        pulmonary_vein.id(),
+        lung.id(),
+        arteries.id(),
+        central_veins.id(),
+        peritubular.id(),
+    ]);
     map.landmark(Landmark::CarotidSinus, arteries.id(), carotid.id());
     map.landmark(Landmark::AorticArch, arteries.id(), arch.id());
     map.landmark(Landmark::Pacemaker, sinoatrial.id(), sinoatrial.id());
@@ -720,6 +730,7 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
     set::<Inertance>(packet, "cv.inertance", blood, 5e-4, note)?;
     set::<Orifice>(packet, "cv.orifice", blood, 5e-5, note)?;
     set::<Resistance>(packet, "cv.valve-reading", blood, 0.01, note)?;
+    set::<Pressure>(packet, "cv.opening-head", blood, 0.01, note)?;
     fn edge(from: SiteId, to: SiteId) -> Binding {
         Binding::Edge { from, to }
     }

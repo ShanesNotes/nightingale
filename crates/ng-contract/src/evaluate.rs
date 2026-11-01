@@ -67,10 +67,14 @@ fn run(
                 } else {
                     (at(*to), at(*to_water))
                 };
-                if water <= 0.0 {
+                // No flow carries nothing, even out of a dry donor, whose share has no value.
+                if at(*flow) == 0.0 {
+                    0.0
+                } else if water <= 0.0 {
                     return Err(OperatorDomain::Divisor);
+                } else {
+                    at(*flow) * (amount / water)
                 }
-                at(*flow) * (amount / water)
             }
         };
         if !result.is_finite() {
@@ -135,10 +139,12 @@ fn sweep(ops: &[Op], values: &[f64], partial_volume: f64, slopes: &mut Vec<f64>)
                 } else {
                     (*to, *to_water)
                 };
-                let share = values[amount] / values[water];
-                slopes[*flow] += slope * share;
-                slopes[amount] += slope * values[*flow] / values[water];
-                slopes[water] -= slope * values[*flow] * share / values[water];
+                if values[water] > 0.0 {
+                    let share = values[amount] / values[water];
+                    slopes[*flow] += slope * share;
+                    slopes[amount] += slope * values[*flow] / values[water];
+                    slopes[water] -= slope * values[*flow] * share / values[water];
+                }
             }
         }
     }
@@ -190,20 +196,18 @@ impl CompiledBody {
         inputs: &Inputs<'_>,
         tolerance: &ErrorScales,
     ) -> Result<(Vec<usize>, Vec<RowId>), Undefined> {
-        let mut modes = inputs.modes.to_vec();
-        let mut resets = Vec::new();
-        for guard in self
-            .layout
-            .guards
-            .iter()
-            .filter(|guard| guard.armed(inputs.modes))
-        {
-            let gap = self.guard_gap(guard, inputs)?;
-            if gap >= -tolerance.at(gap, 1.0) {
-                modes[guard.variable] = guard.enters;
-                resets.extend(guard.resets);
-            }
+        let mut crossed = Vec::with_capacity(self.layout.guards.len());
+        for guard in &self.layout.guards {
+            crossed.push(
+                guard.armed(inputs.modes) && {
+                    let gap = self.guard_gap(guard, inputs)?;
+                    gap >= -tolerance.at(gap, 1.0)
+                },
+            );
         }
+        let mut modes = inputs.modes.to_vec();
+        let fired = self.layout.fire(&mut modes, &crossed);
+        let resets = fired.iter().filter_map(|guard| guard.resets).collect();
         Ok((modes, resets))
     }
     fn bound(bound: &Bound, inputs: &Inputs<'_>) -> f64 {
@@ -214,7 +218,7 @@ impl CompiledBody {
             Bound::Draw(stream) => inputs.draws[stream],
             Bound::Forcing(forcing) => inputs.factors[forcing],
             Bound::Gauge => 0.0,
-            Bound::Height(axial) => inputs.frame.upright() * f64::from_bits(axial),
+            Bound::Height(axial) => inputs.frame.height(f64::from_bits(axial)),
         }
     }
     fn walk(&self, instance: &Instance, inputs: &Inputs<'_>, stack: &mut Vec<f64>) -> Result<f64, Undefined> {

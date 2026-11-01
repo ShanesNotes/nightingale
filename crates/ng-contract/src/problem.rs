@@ -1,6 +1,6 @@
 use crate::body::UnknownId;
 use crate::boundary::DriveFrame;
-use crate::chance::{Chance, Trigger};
+use crate::chance::{Chance, Trigger, period_ns};
 use crate::evaluate::{Inputs, Undefined};
 use crate::identity::{Canonical, Seal};
 use crate::quadrature::StageEvaluation;
@@ -172,6 +172,29 @@ impl<'r> CoupledProblem<'r> {
         }
         Ok(None)
     }
+    /// Whether a stage of this step stands past an armed plain guard. The stage runs in the base's modes.
+    pub(crate) fn crossed_at_stage(
+        &self,
+        ticket: &StepTicket,
+        unknowns: &[f64],
+        offset_ns: u64,
+    ) -> Result<bool, TrialFailure> {
+        let state = self.accepted.state();
+        let at = ticket
+            .interval()
+            .start()
+            .plus_ns(offset_ns)
+            .ok_or(ticket.mismatch())?;
+        let factors = self.chance.factors(&self.parameters.values, at);
+        let inputs = self.guard_inputs(ticket, state, unknowns, &self.chance, &factors);
+        for guard in (self.body.layout.guards.iter()).filter(|guard| guard.armed(&state.modes)) {
+            let gap = self.body.guard_gap(guard, &inputs);
+            if gap.map_err(|undefined| self.undefined(ticket, undefined))? >= 0.0 {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
     /// How far `state` stands past a guard's crossing, negative before it.
     pub(crate) fn gap(
         &self,
@@ -207,17 +230,21 @@ impl<'r> CoupledProblem<'r> {
             crossed.push(armed && self.gap(ticket, &state, Trigger::Plain(guard))? >= 0.0);
         }
         let (mut state, fired) = self.chance.fired(self.body, state, at);
-        for (guard, crossed) in guards.iter().zip(crossed) {
-            if crossed && guard.armed(&state.modes) {
-                state.modes[guard.variable] = guard.enters;
-                if let Some(row) = guard.resets {
-                    let first_memory = state.amounts.len();
-                    state.memory[row.index() - first_memory] = 0.0;
-                }
-                state.fired = true;
+        for guard in self.body.layout.fire(&mut state.modes, &crossed) {
+            if let Some(row) = guard.resets {
+                let first_memory = state.amounts.len();
+                state.memory[row.index() - first_memory] = 0.0;
             }
+            state.fired = true;
         }
         Ok((state, fired))
+    }
+    /// The longest span the record lets a step run: no law's interval, and no knot of a forcing, because a span past a
+    /// knot reads a forcing's curve at an end and nowhere between.
+    pub(crate) fn longest_span_ns(&self) -> u64 {
+        let knots = (self.body.layout.forcings.iter())
+            .map(|forcing| period_ns(self.parameters.values[forcing.period.index()]));
+        knots.fold(self.body.longest_step_ns(), u64::min)
     }
     /// Every law on `state` at the ticket's end, in its modes and on its draws.
     pub(crate) fn values_after_firing(

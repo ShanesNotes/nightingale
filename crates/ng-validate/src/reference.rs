@@ -165,38 +165,3 @@ pub(crate) fn solve_dense(jacobian: SparseView<'_>, residuals: &[f64]) -> Result
     }
     eliminate(matrix)
 }
-
-/// `matrix` holds each row with its right side last.
-pub(crate) fn eliminate(mut matrix: Vec<Vec<f64>>) -> Result<Vec<f64>, usize> {
-    let size = matrix.len();
-    let mut slots: Vec<usize> = (0..size).collect();
-    for pivot in 0..size {
-        let mut best = pivot;
-        for row in pivot + 1..size {
-            if matrix[row][pivot].abs() > matrix[best][pivot].abs() {
-                best = row;
-            }
-        }
-        if matrix[best][pivot] == 0.0 {
-            return Err(slots[pivot]);
-        }
-        matrix.swap(pivot, best);
-        slots.swap(pivot, best);
-        let (above, below) = matrix.split_at_mut(pivot + 1);
-        let leading = &above[pivot];
-        for row in below {
-            let factor = row[pivot] / leading[pivot];
-            for (cell, lead) in row.iter_mut().zip(leading).skip(pivot) {
-                *cell -= factor * lead;
-            }
-        }
-    }
-    let mut solution = vec![0.0; size];
-    for row in (0..size).rev() {
-        let known: f64 = (row + 1..size)
-            .map(|column| matrix[row][column] * solution[column])
-            .sum();
-        solution[row] = (matrix[row][size] - known) / matrix[row][row];
-    }
-    Ok(solution)
-}

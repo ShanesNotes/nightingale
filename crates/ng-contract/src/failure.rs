@@ -1,6 +1,6 @@
 use crate::{
     AnatomyDefect, AnchorId, Binding, Digest, InputId, LawName, ModeValue, ParameterKey, Predicate,
-    QuantityId, RowId, RowKind, SimTime, SiteId, Slot, SourceId, Space,
+    QuantityId, RowId, RowKind, SimTime, SiteId, Slot, SourceId, Space, Species,
 };
 
 /// A refusal at a construction call, at `AnatomyBuilder::finish`, at `Assembly::compile`, or at admission.
@@ -43,6 +43,8 @@ pub enum AdmissionError {
     UnbackedConstant {
         law: LawName,
     },
+    /// A trunk past straight up or straight down.
+    PostureOutOfRange,
     /// A forcing's period that is no whole number of nanoseconds in the clock's range, which a run could only
     /// round into another period, or a fit on one, which no solve can keep on the clock.
     ForcingPeriod {
@@ -297,6 +299,13 @@ pub enum CompileDefect {
     /// A read of a pool this body does not hold there, or of a place the map does not say: a landmark it does not
     /// place, a bed with more than one drain, or a segment with more than one urinary edge in.
     NoPoolRead { law: LawName },
+    /// A law reads a junction at a site the map neither supplies nor states that no nerve reaches.
+    NoSupply { law: LawName, site: SiteId },
+    /// A law reads an effect at a junction that holds no such receptor.
+    NoReceptor { law: LawName, junction: SiteId },
+    /// A fluid route between a space that holds a species and one that does not, with no statement that it keeps that
+    /// species back. A pool left out of a schema would otherwise stop the species at a wall nobody declared.
+    CargoStranded { law: LawName, species: Species },
     /// A read of a bed's extravascular pressure when its enclosure's compliance has no law yet.
     NoEnclosurePressure { law: LawName, space: SiteId },
     HeldPoolMoved {
@@ -330,6 +339,8 @@ pub enum NumericalRefusal {
     StageResidual { row: RowId },
     /// A conserved sum or a cumulative exchange left the finite range, so the ledger cannot hold the step.
     LedgerOverflow,
+    /// A stage stands past an armed guard that the step's end does not, so a shorter step must look again.
+    GuardInside,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
