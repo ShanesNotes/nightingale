@@ -98,7 +98,7 @@ impl BoundaryPort {
         deliveries.sort_by_key(|delivery| (delivery.at, delivery.id));
         Ok(Self { deliveries })
     }
-    /// The first delivery that starts or ends inside the window between two nodes. A node's frame holds one
+    /// The first delivery that starts or ends inside the window between two points. A point's frame holds one
     /// interval, so such an edge would read a drive the run never gives.
     pub(crate) fn off_grid(&self, start: SimTime, cycle: Cycle) -> Option<InputId> {
         let (start, step) = (start.nanoseconds(), cycle.step_ns());

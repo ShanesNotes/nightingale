@@ -65,7 +65,7 @@ pub struct Cycle {
     intervals: u32,
 }
 impl Cycle {
-    /// Refuses a period `intervals` does not divide, so every node sits on the clock.
+    /// Refuses a period `intervals` does not divide, so every point sits on the clock.
     pub fn new(period_ns: NonZeroU64, intervals: NonZeroU32) -> Result<Self, AdmissionError> {
         let (period_ns, intervals) = (period_ns.get(), intervals.get());
         if !period_ns.is_multiple_of(u64::from(intervals)) {
@@ -151,7 +151,7 @@ impl<K: PacketKind> ParameterPacket<K> {
         }
     }
     /// A packet whose start state returns after `cycle`: the periodic goal. Its start values are the guess
-    /// at every node, and each conserved combination's total over them is what the solve cannot move.
+    /// at every point, and each conserved combination's total over them is what the solve cannot move.
     pub fn periodic(cycle: Cycle) -> Self {
         Self {
             cycle: Some(cycle),

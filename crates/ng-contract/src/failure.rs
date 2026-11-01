@@ -188,7 +188,7 @@ pub enum AdmissionError {
         key: ParameterKey,
         binding: Binding,
     },
-    /// A delivery that starts or ends between two nodes of the cycle.
+    /// A delivery that starts or ends between two points of the cycle.
     DeliveryOffGrid {
         id: InputId,
     },

@@ -15,8 +15,8 @@
 //!
 //!     e = v / (g (2 A - S - H / 2))
 //!
-//! The ring of `N` backward Euler stages keeps both means exactly when the drive's edges sit on nodes. Summing the
-//! stages of `d` around the ring gives the same `v / k`, and on a uniform ring the mean of the nodes of the
+//! The ring of `N` backward Euler stages keeps both means exactly when the drive's edges sit on points. Summing the
+//! stages of `d` around the ring gives the same `v / k`, and on a uniform ring the mean of the points of the
 //! piecewise linear `s` is its integral. Only the wave's shape carries the grid's error: `d` steps by
 //! `r = 1 / (1 + 2 k h)` where the continuous orbit decays by `exp(-2 k h)`, and with `D1 = (P / tau + v) / (2 k)`,
 //! `D2 = v / (2 k)`, `E1 = r^(N tau / T)` and `E2 = r^(N (1 - tau / T))`,
@@ -32,7 +32,7 @@ use ng_validate::*;
 const SECOND: u64 = 1_000_000_000;
 const PERIOD_NS: u64 = SECOND;
 const PULSE_NS: u64 = SECOND / 4;
-/// Half a step of a reference core at `PERIOD_NS / 32` is one interval, so that core's orbit is these nodes'.
+/// Half a step of a reference core at `PERIOD_NS / 32` is one interval, so that core's orbit is these points'.
 const INTERVALS: u32 = 64;
 const REFERENCE_NS: u64 = PERIOD_NS / 32;
 
@@ -530,7 +530,7 @@ fn the_fit_is_its_closed_form_on_any_grid_because_the_ring_keeps_the_means() {
 }
 
 #[test]
-fn the_start_state_is_the_node_of_the_backward_euler_orbit() {
+fn the_start_state_is_the_point_of_the_backward_euler_orbit() {
     let case = PulsatileCase::plain();
     let core = reference(REFERENCE_NS);
     let session = case.admitted(&core).session;
@@ -696,7 +696,7 @@ fn an_initializer_that_returns_its_guess_is_refused_with_the_row_named() {
     );
 }
 
-/// The steady orbit of an even drive: `d = v / k` at every node, so the packet's own values solve the ring.
+/// The steady orbit of an even drive: `d = v / k` at every point, so the packet's own values solve the ring.
 fn steady_packet(case: &PulsatileCase) -> (ParameterPacket<SyntheticFixture>, BoundaryPort, f64) {
     steady_packet_missing(case, 0.0)
 }
@@ -771,7 +771,7 @@ fn a_moved_conserved_total_is_refused_with_its_quantity() {
         let (packet, boundary, _) = steady_packet(&case);
         let system = steady_system(&case, packet, boundary);
         let mut moved = system.workspace();
-        // Both vessels at every node move alike, so every stage still holds and only the total can tell.
+        // Both vessels at every point move alike, so every stage still holds and only the total can tell.
         for unknown in moved.unknowns_mut().iter_mut().take(4 * rows) {
             *unknown += change;
         }
@@ -785,20 +785,20 @@ fn a_moved_conserved_total_is_refused_with_its_quantity() {
 }
 
 #[test]
-fn a_witness_that_breaks_one_stage_at_one_node_is_refused_with_its_row() {
+fn a_witness_that_breaks_one_stage_at_one_point_is_refused_with_its_row() {
     let case = PulsatileCase::plain();
     let rows = case.body().rows().len();
-    for (node, change) in [(1, 1e-3), (2, -1e-3), (3, 1e-3)] {
+    for (point, change) in [(1, 1e-3), (2, -1e-3), (3, 1e-3)] {
         let (packet, boundary, _) = steady_packet(&case);
         let system = steady_system(&case, packet, boundary);
         let mut witness = system.workspace();
-        witness.unknowns_mut()[node * rows] += change;
+        witness.unknowns_mut()[point * rows] += change;
         assert_eq!(
             system.admit(witness, case.history()).err(),
             Some(InitializationFailure::Inconsistent {
                 row: AdmissionRow::Body(case.row_a())
             }),
-            "node {node}"
+            "point {point}"
         );
     }
 }
@@ -913,7 +913,7 @@ fn a_forcing_is_held_at_its_mean_around_the_ring_and_a_fitted_period_stays_on_th
 }
 
 #[test]
-fn a_state_outside_its_set_at_any_node_is_refused_with_its_row() {
+fn a_state_outside_its_set_at_any_point_is_refused_with_its_row() {
     let case = PulsatileCase::plain();
     let (packet, boundary, _) = steady_packet(&case);
     let system = steady_system(&case, packet, boundary);
@@ -928,7 +928,7 @@ fn a_state_outside_its_set_at_any_node_is_refused_with_its_row() {
 }
 
 #[test]
-fn a_law_with_no_value_at_a_later_node_is_refused_by_its_name() {
+fn a_law_with_no_value_at_a_later_point_is_refused_by_its_name() {
     let case = PulsatileCase::new(Variant::Divided);
     let (packet, boundary, _) = steady_packet(&case);
     let system = steady_system(&case, packet, boundary);
@@ -1492,7 +1492,7 @@ fn a_cycle_refuses_a_grid_that_does_not_divide_it() {
 }
 
 #[test]
-fn a_delivery_edge_between_two_nodes_is_refused() {
+fn a_delivery_edge_between_two_points_is_refused() {
     let case = PulsatileCase::plain();
     let edge = PULSE_NS + 1;
     let events = vec![

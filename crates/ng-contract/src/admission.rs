@@ -127,7 +127,7 @@ impl CompiledBody {
                     return Err(AdmissionError::DeliveryOffGrid { id });
                 }
                 let step_ns = cycle.step_ns();
-                let instants = (0..cycle.intervals()).map(|node| node * step_ns);
+                let instants = (0..cycle.intervals()).map(|point| point * step_ns);
                 let instants = instants.map(|offset| start.saturating_add(offset)).collect();
                 let seconds = step_ns as f64 / NANOSECONDS_PER_SECOND;
                 // Saturating fails closed: past the clock's end every late stamp is refused.
@@ -160,13 +160,13 @@ fn algebraic(kind: RowKind) -> bool {
     matches!(kind, RowKind::Algebraic(_))
 }
 
-/// A square system over `N` nodes of the body's rows and one unknown per fit. Node 0 is the start state.
+/// A square system over `N` points of the body's rows and one unknown per fit. Node 0 is the start state.
 ///
-/// In a workspace, node `k` row `i` is slot `k n + i` and fit `j` is slot `N n + j`, for `n` rows. In the
-/// residual, the same slots hold the node's row and then fit `j`'s anchor row. That layout is the band a block
+/// In a workspace, point `k` row `i` is slot `k n + i` and fit `j` is slot `N n + j`, for `n` rows. In the
+/// residual, the same slots hold the point's row and then fit `j`'s anchor row. That layout is the band a block
 /// elimination reads, so a solver for a large body needs no other surface.
 ///
-/// An instant has one node and no ring. A cycle has one backward Euler stage per interval, around the ring, on
+/// An instant has one point and no ring. A cycle has one backward Euler stage per interval, around the ring, on
 /// the surface a core's stage evaluates, so the rows need no second formula and `admit` needs no solver.
 pub struct InitializationSystem<'m> {
     body: &'m CompiledBody,
@@ -174,7 +174,7 @@ pub struct InitializationSystem<'m> {
     pending: PendingInputs,
     anchor_moment: SimTime,
     tolerance: ErrorScales,
-    /// One per interval: the drives frozen at its start, as a ticket's are. The stage at node `k` reads the
+    /// One per interval: the drives frozen at its start, as a ticket's are. The stage at point `k` reads the
     /// interval that ends there.
     frames: Vec<DriveFrame>,
     /// One interval in seconds, and `None` for an instant.
@@ -194,13 +194,13 @@ impl InitializationSystem<'_> {
         }
         Ok(())
     }
-    fn node<'u>(&self, unknowns: &'u [f64], node: usize) -> &'u [f64] {
+    fn point<'u>(&self, unknowns: &'u [f64], point: usize) -> &'u [f64] {
         let rows = self.body.rows().len();
-        &unknowns[node * rows..][..rows]
+        &unknowns[point * rows..][..rows]
     }
-    /// The node before `node`, around the ring. An instant's one node is its own.
-    fn before(&self, node: usize) -> usize {
-        (node + self.frames.len() - 1) % self.frames.len()
+    /// The point before `point`, around the ring. An instant's one point is its own.
+    fn before(&self, point: usize) -> usize {
+        (point + self.frames.len() - 1) % self.frames.len()
     }
     fn fitted<'u>(&self, unknowns: &'u [f64]) -> &'u [f64] {
         &unknowns[self.frames.len() * self.body.rows().len()..]
@@ -215,17 +215,17 @@ impl InitializationSystem<'_> {
         }
         values
     }
-    fn inputs<'a>(&'a self, node: usize, state: &'a [f64], values: &'a [f64]) -> Inputs<'a> {
+    fn inputs<'a>(&'a self, point: usize, state: &'a [f64], values: &'a [f64]) -> Inputs<'a> {
         Inputs {
             parameters: values,
-            frame: &self.frames[self.before(node)],
+            frame: &self.frames[self.before(point)],
             unknowns: state,
             modes: &self.parameters.modes,
             draws: &self.draws,
             factors: &self.factors,
         }
     }
-    /// The total row of a combination replaces its least row at the last node, because the node rows sum to the
+    /// The total row of a combination replaces its least row at the last point, because the point rows sum to the
     /// combination's net boundary flow over the cycle, whatever the state: they alone leave its total free.
     fn replaced(&self) -> impl Iterator<Item = (usize, QuantityId)> + '_ {
         let last = self.frames.len() - 1;
@@ -235,7 +235,7 @@ impl InitializationSystem<'_> {
             .filter(|_| self.interval.is_some())
             .map(move |combination| (last * rows + combination.terms()[0].0.index(), combination.id()))
     }
-    /// Seeded with the packet's start values at every node and each fit's guess.
+    /// Seeded with the packet's start values at every point and each fit's guess.
     pub fn workspace(&self) -> SolveWorkspace {
         let mut unknowns = Vec::with_capacity(self.unknowns());
         for _ in 0..self.frames.len() {
@@ -244,17 +244,17 @@ impl InitializationSystem<'_> {
         unknowns.extend(self.parameters.owed.fits.iter().map(|fit| fit.guess));
         SolveWorkspace::seeded(self.body, unknowns)
     }
-    /// One row per body row at each node, none replaced. Each is in its row's own unit, so one scale reads it:
+    /// One row per body row at each point, none replaced. Each is in its row's own unit, so one scale reads it:
     /// a stage's rate is multiplied by the interval, as `verify` does. An amount or memory row of an instant is
     /// its value less the packet's.
     fn stages(&self, unknowns: &[f64]) -> Result<Vec<f64>, InitializationFailure> {
         let rows = self.body.rows();
         let values = self.values(unknowns);
         let mut out = Vec::with_capacity(self.unknowns());
-        for node in 0..self.frames.len() {
-            let state = self.node(unknowns, node);
-            let before = self.node(unknowns, self.before(node));
-            let inputs = self.inputs(node, state, &values);
+        for point in 0..self.frames.len() {
+            let state = self.point(unknowns, point);
+            let before = self.point(unknowns, self.before(point));
+            let inputs = self.inputs(point, state, &values);
             let laws = self.body.instance_values(&inputs).map_err(undefined)?;
             let (columns, rates) = self.body.targets(&laws);
             let tangent = |seconds: f64| {
@@ -284,7 +284,7 @@ impl InitializationSystem<'_> {
         }
         sums
     }
-    /// One slot per unknown, in the workspace's order: a body row or a total at each node, then each fit's anchor.
+    /// One slot per unknown, in the workspace's order: a body row or a total at each point, then each fit's anchor.
     pub fn evaluate(&self, workspace: &SolveWorkspace) -> Result<Vec<f64>, InitializationFailure> {
         self.check(workspace)?;
         let unknowns = workspace.coordinates();
@@ -301,19 +301,19 @@ impl InitializationSystem<'_> {
         Ok(out)
     }
     /// Over the slots `workspace` holds, a column's `UnknownId::index` is its slot. Nothing but a stage's own
-    /// tangent couples two nodes, so the matrix is a block ring with a border of fits.
+    /// tangent couples two points, so the matrix is a block ring with a border of fits.
     pub fn linearize(&self, workspace: &SolveWorkspace) -> Result<Jacobian, InitializationFailure> {
         self.check(workspace)?;
         let unknowns = workspace.coordinates();
         let rows = self.body.rows();
-        let (size, nodes) = (rows.len(), self.frames.len());
+        let (size, points) = (rows.len(), self.frames.len());
         let values = self.values(unknowns);
         let fits = &self.parameters.owed.fits;
         let shift = self.interval.map_or(0.0, |seconds| 1.0 / seconds);
         let sparsity = self.body.sparsity();
         let mut lines: Vec<Vec<(usize, f64)>> = Vec::with_capacity(self.unknowns());
-        for node in 0..nodes {
-            let inputs = self.inputs(node, self.node(unknowns, node), &values);
+        for point in 0..points {
+            let inputs = self.inputs(point, self.point(unknowns, point), &values);
             let entries = self.body.jacobian(&inputs, shift).map_err(undefined)?;
             let mut slopes = Vec::with_capacity(fits.len());
             for fit in fits {
@@ -328,27 +328,27 @@ impl InitializationSystem<'_> {
                     _ if algebraic(row.kind()) => 1.0,
                     Some(seconds) => seconds,
                     None => {
-                        lines.push(vec![(node * size + at, 1.0)]);
+                        lines.push(vec![(point * size + at, 1.0)]);
                         continue;
                     }
                 };
                 let reads = sparsity.row_offsets()[at]..sparsity.row_offsets()[at + 1];
                 let read = |entry: usize| {
                     (
-                        node * size + sparsity.unknowns()[entry].index(),
+                        point * size + sparsity.unknowns()[entry].index(),
                         scale * entries[entry],
                     )
                 };
                 let mut line: Vec<(usize, f64)> = reads.map(read).collect();
                 if self.interval.is_some() && !algebraic(row.kind()) {
-                    let then = self.before(node) * size + at;
+                    let then = self.before(point) * size + at;
                     match line.iter_mut().find(|(column, _)| *column == then) {
                         Some((_, value)) => *value -= 1.0,
                         None => line.push((then, -1.0)),
                     }
                 }
                 for (fit, slope) in slopes.iter().enumerate() {
-                    line.push((nodes * size + fit, scale * slope[at]));
+                    line.push((points * size + fit, scale * slope[at]));
                 }
                 lines.push(line);
             }
@@ -363,8 +363,8 @@ impl InitializationSystem<'_> {
             lines.push(match self.parameters.owed.anchors[fit.anchor].statistic {
                 AnchorStatistic::Instant => vec![(row, 1.0)],
                 AnchorStatistic::CycleMean => {
-                    let share = 1.0 / nodes as f64;
-                    (0..nodes).map(|node| (node * size + row, share)).collect()
+                    let share = 1.0 / points as f64;
+                    (0..points).map(|point| (point * size + row, share)).collect()
                 }
             });
         }
@@ -386,16 +386,16 @@ impl InitializationSystem<'_> {
         let normalized = defect / self.tolerance.at(read);
         (normalized <= 1.0).then_some(normalized)
     }
-    /// An instant reads its row at node 0. A cycle mean reads its row's mean over the nodes, the quadrature the
-    /// ring's own sum closes, so a linear law's mean is exact at any node count.
+    /// An instant reads its row at point 0. A cycle mean reads its row's mean over the points, the quadrature the
+    /// ring's own sum closes, so a linear law's mean is exact at any point count.
     fn anchor_read(&self, unknowns: &[f64], anchor: &BoundAnchor) -> f64 {
         let row = anchor.row.index();
         match anchor.statistic {
             AnchorStatistic::Instant => unknowns[row],
             AnchorStatistic::CycleMean => {
-                let nodes = self.frames.len();
-                let read = |node| self.node(unknowns, node)[row];
-                (0..nodes).map(read).sum::<f64>() / nodes as f64
+                let points = self.frames.len();
+                let read = |point| self.point(unknowns, point)[row];
+                (0..points).map(read).sum::<f64>() / points as f64
             }
         }
     }
@@ -474,7 +474,7 @@ impl InitializationSystem<'_> {
     }
     /// The only constructor of `InitialRevision`. A workspace from another system is refused. Node 0 becomes the
     /// start state and each fit lands in `BoundParameters::values`, which the chain's first link seals, so a fit is
-    /// bound once and a resume never refits. The other nodes end here: they were this cycle's witness.
+    /// bound once and a resume never refits. The other points end here: they were this cycle's witness.
     pub fn admit(
         self,
         solved: SolveWorkspace,
@@ -484,7 +484,7 @@ impl InitializationSystem<'_> {
         let unknowns = solved.coordinates();
         let worst = self.recheck(unknowns)?;
         let values = self.values(unknowns);
-        let start = self.node(unknowns, 0);
+        let start = self.point(unknowns, 0);
         let fitted = self.fitted(unknowns);
         let Self {
             body,

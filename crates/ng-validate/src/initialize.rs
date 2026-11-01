@@ -22,7 +22,7 @@ fn largest(values: &[f64]) -> f64 {
 }
 
 /// The one admission solve, a function of the packet and the window alone, so every core starts from one start
-/// state. Newton over `solve_dense`, whose cost is the cube of `nodes * rows`, so a few thousand unknowns is its
+/// state. Newton over `solve_dense`, whose cost is the cube of `points * rows`, so a few thousand unknowns is its
 /// reach. A body past that reduces the block ring `InitializationSystem` lays out, behind this one function.
 ///
 /// It judges nothing. A singular update stops it where it stands, and `admit` is the one judge of a start.
