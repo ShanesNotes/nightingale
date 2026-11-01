@@ -400,6 +400,36 @@ fn an_algebraic_law_that_reads_a_reset_stays_refused_by_name() {
     );
 }
 
+/// A hazard's firing resets its integral as a plain guard's resets a row, so an algebraic read of it would go stale too.
+#[test]
+fn an_algebraic_law_that_reads_a_hazards_integral_stays_refused_by_name() {
+    let body = declared(|laws| {
+        let dice = laws.stream("dice");
+        let integral = laws.state::<Dimensionless>("integral", Admissible::nonnegative());
+        let [a, b] = laws.modes("rhythm", ["a", "b"]);
+        laws.hazard(HazardGuard::new(&integral, &dice, a.to(&b)?));
+        let rate = plain_rate(laws)?;
+        laws.memory_rate(&integral, rate);
+        let held = laws.algebraic::<Dimensionless>("held", Admissible::finite());
+        let class = beat()?;
+        let residual = laws.kernel(|mut k| {
+            let seen = k.algebraic(&held);
+            let read = k.state(&integral);
+            let gap = k.subtract(seen, read);
+            k.finish(gap, laws.every_mode(), class)
+        });
+        laws.residual(&held, residual);
+        Ok(())
+    })
+    .expect("compiled");
+    assert_eq!(
+        body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
+        Some(AdmissionError::ModesNotYetRun {
+            variable: name("rhythm").into()
+        })
+    );
+}
+
 #[test]
 fn a_hazard_in_a_body_with_an_algebraic_row_binds_past_the_mode_refusal() {
     let body = hazard_body(|laws| {

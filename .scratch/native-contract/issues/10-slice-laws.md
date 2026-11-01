@@ -6,11 +6,63 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 Blocked by: 08, 09
 
-Status: ready-for-agent
+Status: resolved
 
-- [ ] The slice compiles with no law naming a site and no organ owning a pool
-- [ ] Initialization meets every fixture anchor with recorded provenance
-- [ ] Water, ions, moieties and energy close over the first accepted steps with the reference core
+- [x] The slice compiles with no law naming a site and no organ owning a pool
+- [x] Initialization meets every fixture anchor with recorded provenance
+- [x] Water, ions, moieties and energy close over the first accepted steps with the reference core
+
+## Answer
+
+The slice's organ laws compile on the contract. The body starts at the 06:55 anchor on three anchors, runs on the reference core, closes every book, and answers a stand through its own reflex. All values are synthetic.
+
+- **The slice compiles with no law naming a site and no organ owning a pool.** Five law crates (`ng-cardiovascular`, `ng-fluids`, `ng-renal`, `ng-nervous`, `ng-receptor`) and the held cards give 240 rows and 251 columns. A law reads a port and the map says where. Pools belong to the schema. The E0603 probe lands in `ng-cardiovascular` and the E0451 probe in `ng-receptor`, each with a legal twin. There is no reaction type: a binding is a paired transfer.
+- **Initialization meets every fixture anchor with recorded provenance.** Heart rate, mean arterial pressure and filtration each have a fit: the heart's own rate, the renal afferent resistance and the tubule's sodium capacity. Provenance names the anchor behind each fit, says which start values were solved and which came from the fixture, and gives the row nearest its limit. The solve takes about 26 s in a release build.
+- **Water, ions, moieties and energy close over the first accepted steps with the reference core.** A 2 s run through at least eight valve and rhythm firings closes every book to one part in 1e12 of what crossed it, charge included. The elastic store stays on the sum of the walls. Held pools do not move.
+
+`crates/ng-validate/tests/arena_body.rs` holds these checks in one test on one solve, each from a checkpoint of the start. It also checks that the body regulates itself:
+
+- Every link of every loop shows a slope on the admitted start, 44 pairs in all, so a wrong map fails even where every count passes. The loops are the baroreflex from pressure to transmitter to rate, wall and arteriole, feedback at the kidney, Starling and lymph at every bed with what encloses it, and vasopressin from sodium to water back from the duct.
+- A stand runs through the reflex. Blood falls into the legs, the sinus feels less stretch, traffic rises by more than a fifth and the rate follows. No law reads posture but the heads.
+- In late diastole the heat shed matches what the flows lose to within a tenth, so the rate that closes the store is a real account of dissipation.
+- A checkpoint in mid beat, with a posture input after it, runs on to the same bits.
+
+**Choices, each with its reason.**
+
+- **Two designs were built and judged.** The port kept the smaller one, which already admitted the whole slice. The judge preferred the other design's rules, so each of its counterexamples became a fix here and a test. Those are the next nine lines.
+- **One firing rule.** The run and the ring fire guards through one function. Of two guards on one variable the first in stable order wins, and a guard a firing arms waits for the next step.
+- **A crossing inside a step refuses the step.** A guard crossed and crossed back leaves no mark at the step's end, so every stage before the end is read, and a shorter step lands on it. At the floor the declared resolution is the limit. No check can prove nothing happened between the points a step looks at.
+- **No solve at a landing.** No algebraic law may hold by a mode or read a row a firing resets, hazards' included, so no algebraic row jumps. A valve's flow is its memory, so a reset leaves nothing stale. The dissipated power is the one row that shows a left limit at a firing, because it is a rate.
+- **A valve opens past a small head.** It shuts at or below zero head and flow, as research 02 says, and opens only past `cv.opening-head`, so a still body fires nothing.
+- **A map states what is absent.** A law that reads a junction at a site needs a supply or `AnatomyBuilder::unsupplied`, and a junction needs the receptor. A lost line is `NoSupply` or `NoReceptor`, and never reads as no effect.
+- **A route states what it stops.** A species one end of a fluid route lacks is `CargoStranded` until the route says `keeps_back`.
+- **A total is solved only if the body regulates it.** A boundary law that reads the body makes a total regulated, and admission solves it. That test reads syntax, so `admit` also reads every book's net flow over the cycle and the rank of the whole ring. The ring solve moved into the contract so that `admit` can run it.
+- **Energy has one store for the walls.** The heart's work and gravity's arrive as receipts, and a dissipated power moves the store into heat. That rate is what keeps the store on the sum of the walls, and it stays at or above zero, so heat never runs back. The moving blood's energy and the stretch of tissue and tubule are not in the sum, so they pass through it as heat.
+- **Posture is a trunk and legs.** Heights run from the hip. A ramp is a train of events.
+- **Point 0 is the first stage after the wrap,** so the phase there is one interval past zero. The period stays fixed and a fit on the heart's own rate lands the wrap on the ring's last point, so no period unknown is needed.
+- **Small ions cross a capillary wall on their own,** `fl.ion-exchange`. Water alone left tissue sodium a nearly free level, three times the blood's, and Newton could not find it.
+- **A vessel below its unstressed volume collapses and sucks nothing in, and the leg veins have a valve.** Without them a stand ran a chamber dry.
+- **Sodium reclaim saturates.** A fixed share leaves the sodium the macula densa sees blind to filtration, so the feedback has nothing to read.
+- **The solver's own work.** Admission marches 40 beats, then runs Newton on the ring with a line search, then sweeps the guards. The ring update walks the fixed elimination and solves one dense corner.
+
+**Findings.** Finding 14: `deviation` returns `Deviation<U>`, which leaves only over a width of its own dimension or as a set point's rate. Finding 17: a ticket now stops at the body's tightest rate class and at a forcing's knot. On the slice that cost is less than nothing: asked for 20 ms steps, the capped run took 3.9 s for 5 simulated seconds and an uncapped copy took 4.9 s, because long steps are refused and solved again, and its pressure sat further from the anchor. The cap is 10 ms, the wave class of the heart's laws. A span past a law's interval is also how a core could see past a breakpoint, so the cap narrows that too.
+
+**Speed.** A stage's residual, slopes, factor and solve take about 140 microseconds on 240 rows, and a ring update takes about 150 ms on 24,000 unknowns. The reference core takes 2.2 ms a step at 1 ms steps and runs at 1.3 times real time at 5 to 10 ms steps. The cost is the three stage solves of a doubled step, the landings at about ten firings a beat, and the record's own work. That is a first order reference, not the arena's bar, and it says what a faster core must beat. The reverse sweep and the fixed elimination are what bring it here: forward slopes and a dense solve cost about ten times as much.
+
+**Left for later, each with its reason.**
+
+- **Row 111 stays unresolved.** ICP ownership is not settled here, and nothing built reads it.
+- **`Impulse` and bolus.** A delivery is a rate over a window, and a short window is a bolus. No check here needs an instant jump.
+- **Viscosity and hematocrit.** The slice has no red cell amount, so a resistance is a parameter. Blood chemistry holds its cells.
+- **`Guard::advances`.** The heart's rhythm draws from no stream yet.
+- **An elastic enclosure's wall, sink fields and voiding as an event.** No law here needs them. An elastic or rigid enclosure is still refused by name.
+- **The cell-water conflict between BC and FL** stays open: BC holds the cells.
+
+**Law forms research 02 does not give, all model defaults:** chamber activation, the vessel pressure-volume law, stretch, the central sigmoid, the oncotic term, interstitial compliance, lymph flow, filtration, reabsorption by segment (saturable sodium, potassium with sodium, chloride beside them), vasopressin turnover, bladder drain, gut basal rates, ion exchange and collapse. They are labelled in the code. None needs research before ticket 11, and each needs a reviewed source before a clinical packet.
+
+**Hard-part check.** No solver redesign was needed: the elimination that follows the ring is a plain one. No validation against Pulse or published physiology was done, and no disease was built.
+
+**Evidence**, all synthetic. Mutation sweep, verify and Codex evidence are in the PR.
 
 ## Comments
 

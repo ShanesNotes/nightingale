@@ -1618,6 +1618,37 @@ fn late_inputs_match(case: fn() -> Result<ChanceCase, AdmissionError>) {
     assert!(same > 60, "{same} compared and {said_nothing} said nothing");
 }
 
+/// No run writes a posture past straight up or a leg share with no descriptor, so a resume refuses the bytes.
+#[test]
+fn a_posture_no_run_writes_is_malformed() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = reference(SECOND);
+    let mut session = case.admit(&core).expect("admitted");
+    let posture = Posture::new(Measure::new(0.75).expect("finite"), Legs::SeatedDependent).expect("in range");
+    let id = InputId::new(Digest::of_canonical(b"sit"));
+    let event = BoundaryEvent::new(id, at(200), BoundaryInput::Posture(posture));
+    let command = Digest::of_canonical(b"a command");
+    session
+        .enqueue(AuthorizedInput::from_command_receipt(command, event))
+        .expect("admitted");
+    let mut store = Store::default();
+    let saved = session.checkpoint(&mut store).expect("saved");
+    let identity = session.record().identity().clone();
+    let resumed = Session::resume(&saved, &identity, case.body(), &core, &store);
+    assert!(resumed.is_ok(), "the bytes a run writes read back");
+    let bytes = saved.as_bytes();
+    let wanted = 0.75_f64.to_bits().to_be_bytes();
+    let trunk = (128..bytes.len() - 8).rev().find(|&at| bytes[at..at + 8] == wanted);
+    let trunk = trunk.expect("the posture's bytes");
+    // The trunk, then the end no posture has, then the legs' share.
+    for (place, bad) in [(trunk, 1.5_f64), (trunk + 16, 0.25)] {
+        let mut forged = bytes.to_vec();
+        forged[place..place + 8].copy_from_slice(&bad.to_bits().to_be_bytes());
+        let refused = Session::resume(&resealed(forged), &identity, case.body(), &core, &store);
+        assert_eq!(refused.err(), Some(CheckpointError::Malformed), "at {place}");
+    }
+}
+
 fn two_vessels() -> Result<Schema, AdmissionError> {
     let origin = || -> Result<Position, AdmissionError> {
         Ok(Position::new(
