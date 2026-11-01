@@ -1858,15 +1858,16 @@ fn every_gate_in_one_evidence_measured_one_course() {
     );
 }
 
-/// `case`'s own run, admitted again at `instant`: the same identity from another start.
-fn admitted_at<'m>(
+/// One packet held to a tolerance, admitted on its guess moved by `nudge` inside it: another start under one
+/// identity, which only a hand-made initializer can reach.
+fn admitted_nudged<'m>(
     case: &'m TwoReservoirs,
     core: &'m dyn CoupledSolver,
-    instant: SimTime,
-    identity: &RunIdentity,
+    nudge: f64,
 ) -> Session<'m, Running> {
     let default = Binding::Network(Network::Vascular);
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
+    packet.within(admission_tolerance());
     (packet.synthetic(
         ParameterKey::new("cv.e"),
         default,
@@ -1886,12 +1887,16 @@ fn admitted_at<'m>(
     }
     let parameters = case.body().bind(packet).expect("bound");
     let port = BoundaryPort::new(Vec::new()).expect("a port");
-    let request = InitializationRequest::at(instant);
+    let request = InitializationRequest::at(at(0));
     let system = (case.body().initialization(parameters, port, request)).expect("a system");
-    let solved = system.workspace();
-    let start = MethodHistory::new(core.resolution().policy(), instant, Vec::new());
-    let origin = system.admit(solved, start).expect("admitted");
-    Session::admit(case.body(), core, origin, identity.clone()).expect("the same identity")
+    let mut solved = system.workspace();
+    solved.unknowns_mut()[0] += nudge;
+    let resolution = core.resolution();
+    let start = MethodHistory::new(resolution.policy(), at(0), Vec::new());
+    let origin = system.admit(solved, start).expect("inside the tolerance");
+    let seed = Seed::new([1, 2, 3, 4]);
+    let identity = RunIdentity::new(case.body().model_hash(), origin.packet_hash(), seed, resolution);
+    Session::admit(case.body(), core, origin, identity).expect("this body's identity")
 }
 
 #[test]
@@ -1899,10 +1904,13 @@ fn a_rewind_refuses_the_admission_checkpoint_of_another_start() {
     let case = TwoReservoirs::closed().expect("a body");
     let core = reference(SECOND);
     let mut store = Store::default();
-    let parent = case.admit(&core).expect("admitted");
+    let parent = admitted_nudged(&case, &core, 0.0);
     let own = parent.checkpoint(&mut store).expect("saved");
-    let identity = parent.record().identity().clone();
-    let foreign = admitted_at(&case, &core, at(100), &identity);
+    let foreign = admitted_nudged(&case, &core, 1e-8);
+    assert_eq!(
+        foreign.record().identity().digest(),
+        parent.record().identity().digest()
+    );
     assert_ne!(foreign.record().seal(), parent.record().seal());
     let foreign = foreign.checkpoint(&mut store).expect("saved");
     let parent = to(parent, at(2));
