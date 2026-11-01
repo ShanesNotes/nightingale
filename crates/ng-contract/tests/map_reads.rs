@@ -756,6 +756,88 @@ fn a_drain_takes_a_delivery_its_own_law_reads() -> Result<(), InitializationFail
     Ok(())
 }
 
+fn a_small_loop() -> Result<Schema, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let (a, b) = (
+        map.site::<VesselSegment>("a", at()?),
+        map.site::<VesselSegment>("b", at()?),
+    );
+    map.contain(root.id(), a.id());
+    map.contain(root.id(), b.id());
+    map.connect(Network::Vascular, a.id(), b.id());
+    map.connect(Network::Vascular, b.id(), a.id());
+    Schema::new(map.finish()?)
+}
+
+/// A kernel keeps no place once it is attached, so a site's rate on a whole body's memory reads a site it does not have.
+#[test]
+fn a_site_rate_on_a_body_memory_is_refused_by_name() -> Result<(), AdmissionError> {
+    let compiled = assemble(a_small_loop()?, |mut body| {
+        let class = fast()?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, still);
+        let memory = cv.state::<Dimensionless>("memory", Admissible::finite());
+        let pace = cv
+            .site_parameter::<Blood, Rate<Dimensionless>>(ParameterKey::new("pace"), Admissible::positive());
+        let rate = cv.site_kernel(|mut k| {
+            let value = k.site_parameter(&pace);
+            k.finish(value, cv.every_mode(), class)
+        });
+        cv.memory_rate(&memory, rate);
+        body.add(cv.finish());
+        body.compile()
+    });
+    let law = LawName {
+        owner: "CV",
+        local: "memory",
+    };
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::NoSuchRead { law }))
+    );
+    Ok(())
+}
+
+/// The same for a guard: an edge's zero on a whole body's mode.
+#[test]
+fn an_edge_guard_on_a_body_mode_is_refused_by_name() -> Result<(), AdmissionError> {
+    let compiled = assemble(a_small_loop()?, |mut body| {
+        let class = fast()?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, still);
+        let [first, second] = cv.modes("switch", ["first", "second"]);
+        let threshold = cv
+            .edge_parameter::<VascularEdge, Pressure>(ParameterKey::new("threshold"), Admissible::positive());
+        let zero = cv.edge_kernel(|mut k| {
+            let value = k.edge_parameter(&threshold);
+            k.finish(value, first.only(), class)
+        });
+        cv.event(Guard::new(zero, Crossing::Rising, first.to(&second)?));
+        body.add(cv.finish());
+        body.compile()
+    });
+    let law = LawName {
+        owner: "CV",
+        local: "switch",
+    };
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::NoSuchRead { law }))
+    );
+    Ok(())
+}
+
 /// In a body of water alone a plain edge's flow is its column and no row, so a read of it is refused by name.
 #[test]
 fn a_read_of_a_flow_that_is_no_row_is_refused_by_name() -> Result<(), AdmissionError> {

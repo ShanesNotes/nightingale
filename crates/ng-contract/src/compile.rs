@@ -1598,9 +1598,7 @@ fn addresses(
                     | Input::Inflow
                     | Input::EdgeFlow,
                     _,
-                ) => {
-                    unreachable!("a kernel reads a site or edge entry only in a context of its kind")
-                }
+                ) => return Err(CompileDefect::NoSuchRead { law }),
             })
         })
         .collect()

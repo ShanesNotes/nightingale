@@ -298,7 +298,8 @@ pub enum CompileDefect {
     /// A kernel that holds by a route's mode at a place that route does not stand.
     ModeOfAnotherPlace { law: LawName },
     /// A read of a pool this body does not hold there, or of a place the map does not say: a landmark it does not
-    /// place, a bed without exactly one drain, or a segment without exactly one urinary edge in.
+    /// place, a bed without exactly one drain, a segment without exactly one urinary edge in, or a site's or an edge's
+    /// entry in a kernel attached where neither stands.
     NoSuchRead { law: LawName },
     /// A guard that resets a row whose set does not hold zero, so a firing would publish a state no run can resume.
     ResetOutsideSet { law: LawName },
