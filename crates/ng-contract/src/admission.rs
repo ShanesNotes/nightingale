@@ -156,7 +156,7 @@ fn algebraic(kind: RowKind) -> bool {
     matches!(kind, RowKind::Algebraic(_))
 }
 
-/// A square system over `N` points of the body's rows and one unknown per fit. Node 0 is the start state.
+/// A square system over `N` points of the body's rows and one unknown per fit. Point 0 is the start state.
 ///
 /// In a workspace, point `k` row `i` is slot `k n + i` and fit `j` is slot `N n + j`, for `n` rows. In the
 /// residual, the same slots hold the point's row and then fit `j`'s anchor row. That layout is the band a block
@@ -462,8 +462,11 @@ impl InitializationSystem<'_> {
             // Each stage can pass and the ring still not close, by a sum that grows as a finer ring divides it.
             for (at, row) in rows.iter().enumerate().filter(|(_, row)| !algebraic(row.kind())) {
                 let name = AdmissionRow::Body(row.id());
-                let around = (0..self.frames.len()).map(|point| stages[point * size + at]);
-                let held = self.held(around.sum::<f64>().abs(), unknowns[at]);
+                let points = 0..self.frames.len();
+                let around: f64 = points.clone().map(|point| stages[point * size + at]).sum();
+                let largest = (points.map(|point| unknowns[point * size + at].abs()))
+                    .fold(0.0, |most, value| if value > most { value } else { most });
+                let held = self.held(around.abs(), largest);
                 note(name, held.ok_or(inconsistent(name))?);
             }
         }
@@ -488,20 +491,19 @@ impl InitializationSystem<'_> {
         }
         Ok(worst)
     }
-    /// Whether a moving row feels this fit anywhere on this workspace.
+    /// Whether a row behind this fit's anchor feels it anywhere on this workspace.
     fn felt(&self, unknowns: &[f64], fit: &Fit) -> Result<bool, InitializationFailure> {
         let values = self.values(unknowns);
         for point in 0..self.frames.len() {
             let inputs = self.inputs(point, self.point(unknowns, point), &values);
             let slopes = (self.body.parameter_slopes(&inputs, &fit.slots)).map_err(undefined)?;
-            let moves = |row: &Row| self.interval.is_some() || algebraic(row.kind());
-            if (self.body.rows().iter().zip(&slopes)).any(|(row, slope)| moves(row) && *slope != 0.0) {
+            if fit.rows.iter().any(|row| slopes[row.index()] != 0.0) {
                 return Ok(true);
             }
         }
         Ok(false)
     }
-    /// The only constructor of `InitialRevision`. A workspace from another system is refused. Node 0 becomes the
+    /// The only constructor of `InitialRevision`. A workspace from another system is refused. Point 0 becomes the
     /// start state and each fit lands in `BoundParameters::values`, which the chain's first link seals, so a fit is
     /// bound once and a resume never refits. The other points end here: they were this cycle's witness.
     pub fn admit(
@@ -526,7 +528,7 @@ impl InitializationSystem<'_> {
             draws: _,
             factors: _,
         } = self;
-        parameters.packet = parameters.packet.reading(time, &frames, start, fitted);
+        parameters.packet = parameters.packet.reading(time, &frames, start, fitted, &history);
         parameters.values = values;
         let owed = core::mem::take(&mut parameters.owed);
         let value_of = |entry: &(ValueName, ValueProvenance, f64)| {

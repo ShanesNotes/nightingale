@@ -155,6 +155,8 @@ enum Variant {
     PeriodRead,
     /// An algebraic row in the boundary reads a drive, in the minutes band, so an instant anchor can hold on it.
     Instant,
+    /// A second pair of vessels, joined to nothing else and reached by no drive.
+    Apart,
 }
 
 struct Body {
@@ -171,6 +173,13 @@ fn declared(variant: Variant) -> Result<Body, AdmissionError> {
     map.contain(root.id(), a.id());
     map.contain(root.id(), b.id());
     map.connect(Network::Vascular, a.id(), b.id());
+    if variant == Variant::Apart {
+        let c = map.site::<VesselSegment>("c", origin());
+        let d = map.site::<VesselSegment>("d", origin());
+        map.contain(root.id(), c.id());
+        map.contain(root.id(), d.id());
+        map.connect(Network::Vascular, c.id(), d.id());
+    }
     let mut schema = Schema::new(map.finish()?)?;
     schema.water_boundary(PULSE, BoundaryDirection::IntoBody, a.id(), Space::Lumen)?;
     schema.water_boundary(DRAIN, BoundaryDirection::OutOfBody, b.id(), Space::Lumen)?;
@@ -225,7 +234,8 @@ fn declared(variant: Variant) -> Result<Body, AdmissionError> {
             | Variant::Divided
             | Variant::Forced
             | Variant::PeriodRead
-            | Variant::Instant => {}
+            | Variant::Instant
+            | Variant::Apart => {}
             Variant::Extra => {
                 let tone = laws.parameter::<Dimensionless>(TONE, Admissible::finite());
                 let ratio = laws.parameter::<Dimensionless>(RATIO, Admissible::finite());
@@ -1372,20 +1382,50 @@ fn a_run_that_starts_off_the_lenss_grid_is_refused() {
     );
 }
 
-/// One identity has one start whatever made it: a start moved inside the tolerance names another run.
+/// One identity has one start whatever made it: a start or fit moved inside the tolerance, or another core's
+/// history there, names another run.
 #[test]
-fn a_start_moved_inside_the_tolerance_names_another_run() {
+fn a_start_moved_inside_the_tolerance_or_another_history_names_another_run() {
     let case = PulsatileCase::plain();
-    let named = |change: f64| {
+    let named = |slot: usize, change: f64, history: MethodHistory| {
         let (packet, boundary, _) = steady_packet(&case);
         let system = steady_system(&case, packet, boundary);
         let mut start = system.workspace();
-        start.unknowns_mut()[0] += change;
-        let revision = system.admit(start, case.history());
+        start.unknowns_mut()[slot] += change;
+        let revision = system.admit(start, history);
         revision.expect("inside the tolerance").packet_hash()
     };
-    assert_eq!(named(0.0), named(0.0));
-    assert_ne!(named(0.0), named(1e-10));
+    let last = 2 * 4;
+    let plain = named(0, 0.0, case.history());
+    assert_eq!(plain, named(0, 0.0, case.history()));
+    assert_ne!(plain, named(0, 1e-10, case.history()));
+    assert_ne!(plain, named(last, 1e-10, case.history()));
+    let counted = MethodHistory::new(Digest::of_canonical(b"a core"), at(0), vec![1]);
+    assert_ne!(plain, named(0, 0.0, counted));
+}
+
+/// A row's own swing inside the beat sets what rounding its sum holds, not the value it starts from.
+#[test]
+fn a_row_that_swings_far_above_its_start_still_closes_around_the_ring() {
+    let case = PulsatileCase::plain();
+    let (delivered, stiffness, total) = (1e7, 1e4, 1e4);
+    let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
+    packet.within(admission_tolerance());
+    let g = measure::<Conductance<Water>>(CONDUCTANCE);
+    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+    packet
+        .synthetic(E, NETWORK, measure::<Elastance>(stiffness), NOTE)
+        .expect("once");
+    let (a, b) = (total / 2.0 + 0.5, total / 2.0 - 0.5);
+    packet.start(case.a(), measure::<Water>(a), NOTE).expect("once");
+    packet.start(case.b(), measure::<Water>(b), NOTE).expect("once");
+    let boundary = BoundaryPort::new(vec![
+        water(b"pulse", 0, PULSE, 0, PULSE_NS, delivered),
+        water(b"drain", 0, DRAIN, 0, PERIOD_NS, delivered),
+    ])
+    .expect("parsed");
+    let core = reference(REFERENCE_NS);
+    assert!(admit_solved(case.body(), packet, boundary, &core, &case.lens).is_ok());
 }
 
 /// A head off the orbit by a hair at every point: each stage holds and the ring does not close.
@@ -1997,6 +2037,58 @@ fn a_fit_no_row_feels_at_the_start_is_refused_by_its_key() {
     let core = reference(REFERENCE_NS);
     assert_eq!(
         admit_solved(case.body(), packet, empty_port(), &core, &case.lens).err(),
+        Some(InitializationFailure::Admission(AdmissionError::FitUnread {
+            key: E,
+            binding: NETWORK
+        }))
+    );
+}
+
+/// `E` fills every end. The anchor reads the pair at rest, and only the other pair feels the fit.
+#[test]
+fn a_fit_felt_only_away_from_its_anchor_is_refused_by_its_key() {
+    let case = PulsatileCase::new(Variant::Apart);
+    let kinds = case.body().rows().iter().map(|row| row.kind());
+    let at_rest: Vec<RowKind> = kinds
+        .filter(|kind| *kind != case.a() && *kind != case.b())
+        .collect();
+    let (elastance, even) = (2.0, 50.0);
+    let difference = DELIVERED / (CONDUCTANCE * elastance);
+    let mut packet = ParameterPacket::periodic(cycle(4));
+    packet.within(admission_tolerance());
+    let g = measure::<Conductance<Water>>(CONDUCTANCE);
+    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+    for (row, amount) in [
+        (case.a(), (TOTAL + difference) / 2.0),
+        (case.b(), (TOTAL - difference) / 2.0),
+        (at_rest[0], even),
+        (at_rest[1], even),
+    ] {
+        packet.start(row, measure::<Water>(amount), NOTE).expect("once");
+    }
+    let read = Snapshot::new(
+        at_rest[0],
+        GAUGE,
+        AnchorStatistic::CycleMean,
+        measure::<Water>(even),
+    );
+    packet.anchor(Synthetic::new(MEAN, read, NOTE)).expect("once");
+    packet
+        .calibrated(E, NETWORK, measure::<Elastance>(elastance), MEAN)
+        .expect("once");
+    let channel = ChannelSpec::new(GAUGE, at_rest[0]).averaged(count(4));
+    let lens = case
+        .body()
+        .lens(vec![channel], count(PERIOD_NS / 4))
+        .expect("a lens");
+    let boundary = BoundaryPort::new(vec![
+        water(b"even in", 0, PULSE, 0, PERIOD_NS, DELIVERED),
+        water(b"even out", 0, DRAIN, 0, PERIOD_NS, DELIVERED),
+    ])
+    .expect("parsed");
+    let core = reference(REFERENCE_NS);
+    assert_eq!(
+        admit_solved(case.body(), packet, boundary, &core, &lens).err(),
         Some(InitializationFailure::Admission(AdmissionError::FitUnread {
             key: E,
             binding: NETWORK

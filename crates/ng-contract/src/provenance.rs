@@ -101,7 +101,8 @@ pub type Synthetic<U> = Anchor<SyntheticFixture, U>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ValueProvenance {
     Fixture,
-    /// A named identity: one other entry of this packet, scaled. `bind` computes it, so it is never a free number.
+    /// A named identity: one other entry of this packet times a stated scale. `bind` computes it, so it moves with
+    /// its source.
     Derived {
         identity: &'static str,
         source: ParameterKey,

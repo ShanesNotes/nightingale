@@ -7,8 +7,8 @@ use crate::provenance::seal_trace;
 use crate::quantity::dimension;
 use crate::{
     AdmissionError, Anchor, AnchorId, AnchorStatistic, Binding, Citation, Compensated, CompiledBody, Digest,
-    Dimension, Dimensionless, ErrorScales, LawName, Measure, ModelHash, PacketSeed, ParameterKey, RateBand,
-    RowId, RowKind, SimTime, ValueName, ValueProvenance,
+    Dimension, Dimensionless, ErrorScales, LawName, Measure, MethodHistory, ModelHash, PacketSeed,
+    ParameterKey, RateBand, RowId, RowKind, SimTime, ValueName, ValueProvenance,
 };
 use core::marker::PhantomData;
 use core::num::{NonZeroU32, NonZeroU64};
@@ -52,14 +52,16 @@ impl PacketHash {
     pub(crate) fn of_digest(digest: Digest) -> Self {
         Self { digest }
     }
-    /// The hash a run names, closed at admission: the packet's, the moment it starts, the drives it read and the
-    /// start it reached, so one identity has one start whatever made it. A timeline's later events stay out of it.
+    /// The hash a run names, closed at admission: the packet's, the moment it starts, the drives it read, the start
+    /// it reached and the core's history there, so one identity has one start whatever made it. A timeline's later
+    /// events stay out of it.
     pub(crate) fn reading(
         self,
         moment: SimTime,
         frames: &[DriveFrame],
         start: &[f64],
         fitted: &[f64],
+        history: &MethodHistory,
     ) -> Self {
         let mut out = Canonical::new("ng-contract packet and start 1");
         self.digest.seal(&mut out);
@@ -67,6 +69,7 @@ impl PacketHash {
         frames.seal(&mut out);
         start.seal(&mut out);
         fitted.seal(&mut out);
+        history.digest().seal(&mut out);
         Self { digest: out.digest() }
     }
     pub fn digest(&self) -> Digest {
@@ -527,6 +530,8 @@ pub(crate) struct BoundAnchor {
 /// One calibrated packet entry: one unknown and the anchor row that closes it.
 pub(crate) struct Fit {
     pub(crate) slots: Vec<ParameterId>,
+    /// The rows behind its anchor, the only ones whose answer to the fit can reach it.
+    pub(crate) rows: Vec<RowId>,
     pub(crate) anchor: usize,
     pub(crate) guess: f64,
     pub(crate) key: ParameterKey,
@@ -735,9 +740,9 @@ impl CompiledBody {
             owed,
         })
     }
-    /// Every law a row's value can feel: those that set it and those behind each row they read. At an instant
-    /// only algebraic rows move, so a walk passes through no other.
-    fn laws_behind(&self, row: RowId, moving: bool) -> Vec<&Instance> {
+    /// Every row a row's value can feel and the laws that set them: the row, each row its laws read, and so on
+    /// back. At an instant only algebraic rows move, so a walk passes through no other.
+    fn behind(&self, row: RowId, moving: bool) -> (Vec<RowId>, Vec<&Instance>) {
         let Layout {
             rows,
             columns,
@@ -750,6 +755,7 @@ impl CompiledBody {
         };
         let mut seen = vec![false; rows.len()];
         let mut waiting = vec![row];
+        let mut behind = Vec::new();
         let mut laws = Vec::new();
         while let Some(at) = waiting.pop() {
             let moves = moving || matches!(rows[at.index()].kind, RowKind::Algebraic(_));
@@ -757,20 +763,21 @@ impl CompiledBody {
                 continue;
             }
             seen[at.index()] = true;
+            behind.push(at);
             for instance in instances.iter().filter(|instance| sets(instance, at)) {
                 let reads = instance.inputs.iter().filter_map(Bound::unknown);
                 waiting.extend(reads.map(|unknown| RowId::at(unknown.index())));
                 laws.push(instance);
             }
         }
-        laws
+        (behind, laws)
     }
     /// Whether a row reads the body: it is an amount, or the laws behind it read an amount or a drive. A row that
     /// does not is a function of parameters alone, held forcings and draws included, so an anchor on it would be
     /// a parameter's value (SRS section 2, I14).
     fn reads_the_body(&self, row: RowId) -> bool {
         let amount = |at: usize| matches!(self.layout.rows[at].kind, RowKind::Amount { .. });
-        let laws = self.laws_behind(row, true);
+        let (_, laws) = self.behind(row, true);
         let reads = laws.iter().flat_map(|law| &law.inputs);
         amount(row.index())
             || reads.into_iter().any(|input| match *input {
@@ -842,7 +849,7 @@ impl CompiledBody {
                         .filter(|(_, filled)| **filled == at_entry)
                         .map(|(slot, _)| ParameterId::at(slot))
                         .collect();
-                    let laws = self.laws_behind(anchors[at].row, packet.cycle.is_some());
+                    let (rows, laws) = self.behind(anchors[at].row, packet.cycle.is_some());
                     let reads = |law: &&Instance| law.parameters.iter().any(|read| slots.contains(read));
                     if !laws.iter().any(reads) {
                         return Err(AdmissionError::FitUnread { key, binding });
@@ -852,6 +859,7 @@ impl CompiledBody {
                     }
                     fits.push(Fit {
                         slots,
+                        rows,
                         anchor: at,
                         guess: value,
                         key,

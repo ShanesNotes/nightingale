@@ -74,7 +74,7 @@ The first accepted state of a run, solved at admission from the packet's anchors
 _Avoid_: initial conditions
 
 **Run identity**:
-What makes two runs the same run: the body model's hash, the packet's hash as admission closes it over the moment the run starts, the drives it read and the start it reached, the run seed and the solver core's declared resolution. Pace is not part of it.
+What makes two runs the same run: the body model's hash, the packet's hash as admission closes it over the moment the run starts, the drives it read, the start it reached and the core's history there, the run seed and the solver core's declared resolution. Pace is not part of it.
 
 **Pace**:
 How fast simulated time runs against the wall clock: unbounded, live, paused or fast-forwarded. Every pace gives identical bits (rule 4).
