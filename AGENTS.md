@@ -21,6 +21,7 @@ The native Rust engine for one simulated patient. Read `docs/srs.md` first: it b
 |---|---|
 | Docs hygiene and the line caps | `tools/verify.d/10-docs.sh` |
 | The sketch and its compile-fail doctests | `tools/verify.d/20-sketch.sh` |
+| The census: 38 arrows, 27 mapped and 11 listed unmapped, with the crate's rows matching the coupling map's lines 77 to 114 | the const checks in `crates/ng-contract/src/catalog.rs`, and `docs/architecture/solver-contract-sketch/evidence/census-check.py` from `20-sketch.sh` |
 | Each compile-fail test fails with the error code it declares, in the crates and the sketch | `tools/gate/gate.py codes`, from `10-rust.sh` and `20-sketch.sh` |
 | The pinned toolchain | `tools/verify.d/01-toolchain.sh` |
 | Crate names and allowed dependencies come from the contract's crate table. No crate from outside the workspace enters the physiology closure, no crate names a host service, and no crate has a build script, an include, a feature or its own clippy config | `tools/verify.d/05-seam.sh`, and `10-rust.sh` checks that its scan read every doctest |

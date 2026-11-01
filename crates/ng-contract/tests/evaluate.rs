@@ -379,15 +379,21 @@ fn derivatives_match_central_differences_on_nearly_nearly_every_operator() -> Re
         Measure::<Dimensionless>::new(-0.2)?,
         "synthetic",
     )?;
-    let third = RowKind::Algebraic(LawName {
-        owner: "NS",
-        local: "third",
-    });
+    let third = RowKind::Algebraic(
+        LawName {
+            owner: "NS",
+            local: "third",
+        }
+        .into(),
+    );
     packet.start(third, Measure::<Pressure>::new(1.5)?, "synthetic")?;
-    let pace = RowKind::Algebraic(LawName {
-        owner: "NS",
-        local: "pace",
-    });
+    let pace = RowKind::Algebraic(
+        LawName {
+            owner: "NS",
+            local: "pace",
+        }
+        .into(),
+    );
     packet.start(pace, Measure::<Rate<Dimensionless>>::new(0.7)?, "synthetic")?;
     packet.start(
         memory("set point"),

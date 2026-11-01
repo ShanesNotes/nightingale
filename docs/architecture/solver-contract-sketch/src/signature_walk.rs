@@ -8,14 +8,15 @@
 //! through a lens.
 //!
 //! ```
-//! use solver_contract_sketch::ng_contract::catalog::{BaroreceptorAfferents, CapillaryAndVenousPressure, Reads};
+//! use solver_contract_sketch::ng_contract::catalog::{BaroreceptorAfferents, CapillaryAndVenousPressure, Defines, Reads};
 //! use solver_contract_sketch::ng_contract::*;
 //! use solver_contract_sketch::ng_record::*;
 //! use solver_contract_sketch::ng_validate::*;
 //! use solver_contract_sketch::{ng_observe, ng_receptor, ng_renal};
 //!
 //! // 0. Anatomy as data: sites with positions, containment, a vascular loop with beds in series,
-//! // an enclosure and a served-by edge. The kidney is a region; no law names a site.
+//! // an enclosure a held card prescribes and a served-by edge. The kidney is a region; no law names
+//! // a site.
 //! fn anatomy() -> Result<Schema, AdmissionError> {
 //!     let at = |axial: f64| -> Result<Position, AdmissionError> { // synthetic heights
 //!         Ok(Position::new(Measure::new(axial)?, Measure::new(0.0)?, Measure::new(0.0)?))
@@ -39,9 +40,7 @@
 //!     }
 //!     map.connect(Network::Vascular, heart.id(), lung.id());
 //!     map.connect(Network::Vascular, lung.id(), heart.id());
-//!     let pleural = Compliance::Elastic { elastance: ParameterKey::new("pleura.elastance"),
-//!         unstressed: ParameterKey::new("pleura.unstressed") };
-//!     map.enclose(&pleura, &[lung.id()], pleural);
+//!     map.enclose(&pleura, &[lung.id()], Compliance::Held { card: Respiratory::CARD });
 //!     map.served_by(lung.id(), &thoracic, Afferent::Nociceptive);
 //!     let _kidney: RegionId = map.region("kidney", kidney.id());
 //!     Schema::new(map.finish()?)
@@ -101,7 +100,34 @@
 //!     laws.event(opening);
 //!     laws.event(closing);
 //!     ectopy(&mut laws)?;
+//!     couplings(&mut laws)?;
 //!     Ok(laws.finish())
+//! }
+//!
+//! // 1e. CV sends what the map draws from it: a stretch for NS and a pressure per bed for FL. Each
+//! // field is a row its sender defines once, so a loop of couplings is a coupled residual.
+//! fn couplings<'b>(laws: &mut FragmentBuilder<'b, Cardiovascular>) -> Result<(), AdmissionError> {
+//!     let afferents: BaroreceptorAfferents<Defines<'b, Cardiovascular>> = laws.emit();
+//!     let beds: CapillaryAndVenousPressure<Defines<'b, Cardiovascular>> = laws.emit();
+//!     let stretch = laws.parameter::<Dimensionless>(ParameterKey::new("cv.stretch"), Admissible::finite());
+//!     let pressure = laws.site_parameter::<CapillaryBed, Pressure>(ParameterKey::new("cv.bed-pressure"), Admissible::finite());
+//!     for output in [&afferents.carotid_sinus_stretch, &afferents.aortic_arch_stretch] {
+//!         let beat = RateClass::new(RateBand::Beat, 100_000_000)?;
+//!         let value = laws.kernel(|mut k| {
+//!             let value = k.parameter(&stretch);
+//!             k.finish(value, laws.every_mode(), beat)
+//!         });
+//!         laws.define(output, value);
+//!     }
+//!     for output in [&beds.capillary_pressure, &beds.venous_pressure] {
+//!         let beat = RateClass::new(RateBand::Beat, 100_000_000)?;
+//!         let value = laws.site_kernel(|mut k| {
+//!             let value = k.site_parameter(&pressure);
+//!             k.finish(value, laws.every_mode(), beat)
+//!         });
+//!         laws.define_at(output, value);
+//!     }
+//!     Ok(())
 //! }
 //!
 //! // 1c. Seeded chance in the body: a hazard accrues in memory at a rate the clock-tied forcing
@@ -153,7 +179,7 @@
 //!     Ok(laws.finish())
 //! }
 //!
-//! // 2. Compile: organ crates return fragments; held cards are generated from the catalog.
+//! // 2. Compile: organ crates return fragments, and every card outside the slice is held.
 //! fn compile() -> Result<CompiledBody, AdmissionError> {
 //!     assemble(anatomy()?, |mut body| {
 //!         let kidney = ng_renal::declare(body.renal()?);
@@ -168,26 +194,36 @@
 //!         body.add(receptors);
 //!         let boundary = boundary_routes(body.boundary()?);
 //!         body.add(boundary);
-//!         let surrogates = HeldDeclaration::new(vec![HeldField::signal("surrogate AVP, angiotensin II, aldosterone, ANP release")],
-//!             vec![HeldSupply::new("surrogate ligand secretion", Book::Moiety(Moiety::HeldLigand))],
-//!             vec![79], "arena fixture: fixed gains, no adaptation")?;
-//!         let endocrine = endocrine_stand_in(body.hold::<Endocrine>(surrogates)?);
-//!         body.add(endocrine);
-//!         held::<Respiratory>(&mut body)?;
-//!         held::<Metabolism>(&mut body)?;
-//!         held::<Musculoskeletal>(&mut body)?;
-//!         held::<Hepatic>(&mut body)?;
-//!         held::<Gastrointestinal>(&mut body)?;
-//!         held::<Immune>(&mut body)?;
-//!         held::<Hematology>(&mut body)?;
-//!         held::<BloodChemistry>(&mut body)?;
+//!         pleural_pressure(&mut body)?;
+//!         held::<BloodChemistry>(&mut body, vec![Space::Cells])?;
+//!         held::<Metabolism>(&mut body, vec![])?;
+//!         held::<Musculoskeletal>(&mut body, vec![])?;
+//!         held::<Endocrine>(&mut body, vec![])?;
+//!         held::<Hepatic>(&mut body, vec![])?;
+//!         held::<Gastrointestinal>(&mut body, vec![])?;
+//!         held::<Immune>(&mut body, vec![])?;
+//!         held::<Hematology>(&mut body, vec![])?;
 //!         body.compile()
 //!     })
 //! }
-//! fn held<'b, S: OutsideSlice>(body: &mut Assembly<'b>) -> Result<(), AdmissionError> {
-//!     let declaration = HeldDeclaration::<S>::new(vec![HeldField::signal(S::CARD)], vec![], vec![], "arena fixture")?;
-//!     let fragment = stand_in(body.hold::<S>(declaration)?);
-//!     body.add(fragment);
+//! // RS holds the pleural space's pressure; its fluid comes with it.
+//! fn pleural_pressure<'b>(body: &mut Assembly<'b>) -> Result<(), AdmissionError> {
+//!     let declaration = HeldDeclaration::<Respiratory>::new(vec![], vec![], "arena fixture: a fixed pressure");
+//!     let (mut laws, ports) = body.hold(declaration)?.parts();
+//!     let held = laws.parameter::<Pressure>(ParameterKey::new("fixture.pleural"), Admissible::finite());
+//!     let class = RateClass::new(RateBand::Hours, 3_600_000_000_000)?;
+//!     let pressure = laws.site_kernel(|mut k| {
+//!         let value = k.parameter(&held);
+//!         k.finish(value, laws.every_mode(), class)
+//!     });
+//!     laws.define_at(&ports.enclosure_pressure, pressure);
+//!     body.add(laws.finish());
+//!     Ok(())
+//! }
+//! fn held<'b, S: OutsideSlice>(body: &mut Assembly<'b>, holds: Vec<Space>) -> Result<(), AdmissionError> {
+//!     let declaration = HeldDeclaration::<S>::new(vec![], holds, "arena fixture");
+//!     let (laws, _ports) = body.hold(declaration)?.parts();
+//!     body.add(laws.finish());
 //!     Ok(())
 //! }
 //!
@@ -425,7 +461,7 @@
 //! // 13. Observe through a lens compiled apart from the body: read-only, one revision at a time,
 //! // with the observer's own state checkpointed beside the record's.
 //! fn chart(session: &Session<'_, Running>, body: &CompiledBody) -> Option<Vec<ng_observe::Observation>> {
-//!     let pressure = RowKind::Algebraic { owner: "CV", local: "arterial-pressure" };
+//!     let pressure = RowKind::Algebraic { owner: "CV", local: "arterial-pressure", site: None };
 //!     let channel = ChannelSpec::new("arterial line", pressure);
 //!     let lens = body.lens(vec![channel], core::num::NonZeroU64::new(4_000_000)?).ok()?;
 //!     let view = session.observation(&lens).ok()?;

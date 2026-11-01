@@ -1,5 +1,6 @@
 use crate::identity::{Canonical, Seal};
 use crate::law::{Op, Validity};
+use crate::scope::HeldCard;
 use crate::sources::{RefusalSource, refusal_sources};
 use crate::{
     AdmissibleSet, Class, ConservedBasis, Crossing, Digest, LawName, Network, ParameterKey, Predicate,
@@ -61,6 +62,7 @@ pub(crate) struct Layout {
     pub(crate) forcings: Vec<ForcingLayout>,
     pub(crate) hazards: Vec<HazardLayout>,
     pub(crate) basis: ConservedBasis,
+    pub(crate) held: Vec<HeldCard>,
 }
 impl CompiledBody {
     pub(crate) fn seal(layout: Layout) -> Self {
@@ -105,6 +107,10 @@ impl CompiledBody {
     pub fn hazards(&self) -> impl Iterator<Item = LawName> + '_ {
         (self.layout.hazards.iter()).map(|hazard| self.layout.streams[hazard.stream].name)
     }
+    /// The cards held, in card order.
+    pub fn held(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.layout.held.iter().map(|held| held.card)
+    }
 }
 impl Seal for Layout {
     fn seal(&self, out: &mut Canonical) {
@@ -123,6 +129,7 @@ impl Seal for Layout {
             forcings,
             hazards,
             basis,
+            held,
         } = self;
         schema.seal(out);
         rows.seal(out);
@@ -138,6 +145,7 @@ impl Seal for Layout {
         forcings.seal(out);
         hazards.seal(out);
         basis.seal(out);
+        held.seal(out);
     }
 }
 
@@ -191,7 +199,18 @@ impl Seal for Row {
 pub enum RowKind {
     Amount { site: SiteId, space: Space },
     Memory(LawName),
-    Algebraic(LawName),
+    Algebraic(Slot),
+}
+/// An algebraic row's name: its law and, for a row per site, the site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Slot {
+    pub law: LawName,
+    pub site: Option<SiteId>,
+}
+impl From<LawName> for Slot {
+    fn from(law: LawName) -> Self {
+        Self { law, site: None }
+    }
 }
 impl Seal for RowKind {
     fn seal(&self, out: &mut Canonical) {
@@ -205,9 +224,10 @@ impl Seal for RowKind {
                 out.number(1);
                 name.seal(out);
             }
-            RowKind::Algebraic(name) => {
+            RowKind::Algebraic(Slot { law, site }) => {
                 out.number(2);
-                name.seal(out);
+                law.seal(out);
+                site.seal(out);
             }
         }
     }
@@ -330,6 +350,8 @@ pub(crate) struct Code {
     pub(crate) predicate: Predicate,
     pub(crate) rate: RateClass,
     pub(crate) validity: Vec<Validity>,
+    /// The kernel defines its row, so a range judges the row and not the residual.
+    pub(crate) defines: bool,
 }
 impl Seal for Code {
     fn seal(&self, out: &mut Canonical) {
@@ -339,12 +361,14 @@ impl Seal for Code {
             predicate,
             rate,
             validity,
+            defines,
         } = self;
         ops.seal(out);
         dimension.seal(out);
         predicate.seal(out);
         rate.seal(out);
         validity.seal(out);
+        out.number(u64::from(*defines));
     }
 }
 
@@ -425,12 +449,16 @@ pub(crate) enum Bound {
     Boundary(&'static str),
     Draw(usize),
     Forcing(usize),
+    /// The zero of the gauge: what a bed nothing encloses reads as its extravascular pressure.
+    Gauge,
 }
 impl Bound {
     pub(crate) fn unknown(&self) -> Option<UnknownId> {
         match *self {
             Bound::Unknown(unknown) => Some(unknown),
-            Bound::Parameter(_) | Bound::Boundary(_) | Bound::Draw(_) | Bound::Forcing(_) => None,
+            Bound::Parameter(_) | Bound::Boundary(_) | Bound::Draw(_) | Bound::Forcing(_) | Bound::Gauge => {
+                None
+            }
         }
     }
 }
@@ -457,6 +485,7 @@ impl Seal for Bound {
                 out.number(4);
                 forcing.seal(out);
             }
+            Bound::Gauge => out.number(5),
         }
     }
 }

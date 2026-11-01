@@ -169,6 +169,10 @@ impl CompiledBody {
                 value: inputs.factors[forcing],
                 slope: 0.0,
             },
+            Bound::Gauge => Dual {
+                value: 0.0,
+                slope: 0.0,
+            },
         };
         instance.inputs.iter().map(read).collect()
     }
@@ -270,11 +274,20 @@ impl CompiledBody {
         }
         Ok(values)
     }
-    pub(crate) fn excursions(&self, values: &[Option<f64>], at: SimTime) -> Vec<ValidityExcursion> {
+    pub(crate) fn excursions(
+        &self,
+        values: &[Option<f64>],
+        unknowns: &[f64],
+        at: SimTime,
+    ) -> Vec<ValidityExcursion> {
         let mut excursions = Vec::new();
         for (instance, value) in self.layout.instances.iter().zip(values) {
             let Some(value) = *value else { continue };
             let program = &self.layout.programs[instance.program.index()];
+            let value = match instance.target {
+                Target::Row(row) if program.code.defines => unknowns[row.index()],
+                _ => value,
+            };
             for &Validity { lower, upper, .. } in &program.code.validity {
                 let side = if value < f64::from_bits(lower) {
                     ExcursionSide::Below

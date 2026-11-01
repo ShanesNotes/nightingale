@@ -241,10 +241,16 @@ A named pool outside the body, or behind a held stand-in, that takes what crosse
 Every transfer of one kind the map implies: one per site of a class, such as plasma to interstitium at every capillary bed, or one per vascular edge. A system requests it whole through its scope, so the body owes a law for every one, and no law names a site.
 
 **Left-out space**:
-A space the schema states this body does not model, with its reason, such as cell water in a bench with no cell-water law. Its pools are not amounts, and no law may move or read them. Every other pool is an amount some transfer must move; one that none moves is an orphan pool, which compilation refuses.
+A space the schema states this body does not model, with its reason, such as cell water in a bench with no cell-water law. Its pools are not amounts, and no law may move or read them. Every other pool is an amount some transfer must move or a held declaration holds; one that neither covers is an orphan pool, which compilation refuses.
+
+**Held pool**:
+A pool a held stand-in answers for: an amount in the state and the ledger that no law moves. A law that moves one is refused.
 
 **Partial volume**:
 The volume one unit amount of a species takes up: a fixed coefficient of the schema, not a parameter. A space's volume derives from its amounts through it.
+
+**Coupling field**:
+One value an arrow of the coupling map carries, held as an algebraic row that the map's sender defines and its receiver reads. A per-site field has one row per site.
 
 **Shared substrate**:
 One of the ten resources the systems share (S1 to S10 in the coupling map), such as the vascular registry, or water and osmoles per space.

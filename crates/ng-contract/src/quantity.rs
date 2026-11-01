@@ -28,7 +28,16 @@ pub enum Time {}
 pub enum Elastance {}
 /// Water, whose amount is in the canonical amount unit; its volume derives from it.
 pub enum Water {}
+/// Dimensions only the coupling catalog names until a law reads them.
+pub enum Energy {}
+pub enum Temperature {}
+pub enum Phase {}
+pub enum Viscosity {}
+pub enum Oxygen {}
+pub enum Renin {}
+pub enum Ammonia {}
 pub struct Rate<Q>(PhantomData<Q>);
+pub struct Concentration<Q>(PhantomData<Q>);
 /// Flow per pressure difference.
 pub struct Conductance<Q>(PhantomData<Q>);
 pub struct Product<A, B>(PhantomData<(A, B)>);
@@ -59,6 +68,13 @@ named!(
     Time = "time",
     Elastance = "elastance",
     Water = "water",
+    Energy = "energy",
+    Temperature = "temperature",
+    Phase = "phase",
+    Viscosity = "viscosity",
+    Oxygen = "oxygen",
+    Renin = "renin",
+    Ammonia = "ammonia",
 );
 impl<Q: Dimension> dimensions::Sealed for Rate<Q> {
     fn name() -> String {
@@ -66,6 +82,12 @@ impl<Q: Dimension> dimensions::Sealed for Rate<Q> {
     }
 }
 impl<Q: Dimension> Dimension for Rate<Q> {}
+impl<Q: Dimension> dimensions::Sealed for Concentration<Q> {
+    fn name() -> String {
+        format!("concentration({})", Q::name())
+    }
+}
+impl<Q: Dimension> Dimension for Concentration<Q> {}
 impl<Q: Dimension> dimensions::Sealed for Conductance<Q> {
     fn name() -> String {
         format!("conductance({})", Q::name())

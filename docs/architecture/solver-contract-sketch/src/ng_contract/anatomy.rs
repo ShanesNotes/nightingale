@@ -82,8 +82,8 @@ pub enum Compliance {
     Rigid,
     /// Elastance and unstressed volume, bound by key from the packet.
     Elastic { elastance: ParameterKey, unstressed: ParameterKey },
-    /// Prescribed by the named held card (the arena's chest and belly). Compilation links it to
-    /// that card's `HeldDeclaration` and coverage entry, with exactly one pressure source.
+    /// Prescribed by the named held card (the arena's chest and belly). That card owes one law on
+    /// one pressure row per enclosure, and its own fluid comes with it.
     Held { card: &'static str },
 }
 /// The afferent kind a served-by edge carries. `Nociceptive` names the per-site nociceptive drive

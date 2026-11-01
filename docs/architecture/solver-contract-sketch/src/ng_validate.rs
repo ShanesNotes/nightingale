@@ -276,22 +276,18 @@ pub trait WallClock {
     fn elapsed_ns(&self) -> Option<u64>;
     fn source(&self) -> ClockSource;
 }
-/// The synthetic composition root's anatomy for the CV, FL, RN, NS and receptor slice.
-pub fn arena_schema() -> Schema {
+/// The slice's map, grouped: the regions the anchors and stage 1 checks name, and nothing finer.
+pub fn arena_anatomy() -> Result<Anatomy, AdmissionError> {
     todo!()
 }
 /// Boundary routes: intake staging and absorption, urine exit, evaporative and heat exchange.
 pub fn boundary_routes<'b>(_scope: BoundaryScope<'b>) -> Fragment<'b, Boundary> {
     todo!()
 }
-/// A held card with only its catalog part and receipt pools.
-pub fn stand_in<'b, S: OutsideSlice>(_scope: HeldScope<'b, S>) -> Fragment<'b, S> {
-    todo!()
-}
-/// The held endocrine card: its catalog part plus synthetic AVP, angiotensin II, aldosterone and
-/// ANP surrogate secretion and clearance, with declared clock and osmotic gains. It acts only
-/// through receptors and never sets an output; it does not masquerade as an EN crate.
-pub fn endocrine_stand_in<'b>(_scope: HeldScope<'b, Endocrine>) -> Fragment<'b, Endocrine> {
+/// Holds all nine cards outside the slice. EN gains its synthetic AVP, angiotensin II, aldosterone
+/// and ANP surrogate secretion and clearance with the ligands, with declared clock and osmotic
+/// gains. It acts only through receptors and never sets an output.
+pub fn hold_outside_slice(_body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     todo!()
 }
 /// The reference timeline from the 06:55 admission phase: posture at 07:00 and 23:00, meals and

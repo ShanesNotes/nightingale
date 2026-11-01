@@ -216,6 +216,19 @@ pub enum CompileDefect {
     SecondGuardOnIntegral { integral: LawName },
     /// A hazard integral not declared nonnegative, the set that holds the reset and every threshold.
     HazardSet { integral: LawName },
+    /// A law on something its owner never claimed: a held card's route its declaration omits, a route a
+    /// held card declared, or an enclosure the map does not say this card holds.
+    UnclaimedLaw { law: LawName },
+    /// A read of a coupling field no owner emits. An omitted law is not zero.
+    UnemittedField { law: LawName, field: LawName },
+    /// A read of a bed's extravascular pressure when its enclosure's compliance has no law yet.
+    NoEnclosurePressure { law: LawName, space: SiteId },
+    /// A pool a held declaration stands behind that a transfer moves, so the declaration is stale.
+    HeldPoolMoved {
+        card: &'static str,
+        site: SiteId,
+        space: Space,
+    },
 }
 
 /// Why one attempt cannot stand. A smaller retry of the same base can still succeed. A row or source id

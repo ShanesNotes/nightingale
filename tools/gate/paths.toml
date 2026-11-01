@@ -10,7 +10,7 @@ crate_steps = ["05-seam", "10-rust", "15-f64"]
 [[rule]]
 paths = [
   "rust-toolchain.toml", "Cargo.toml", "Cargo.lock", "clippy.toml", "rustfmt.toml", ".cargo/**",
-  "tools/**", ".agents/skills/verify-nightingale/**", ".claude/**",
+  "tools/**", ".agents/skills/verify-nightingale/**", ".claude/**", "crates/ng-contract/src/catalog.rs",
 ]
 run = "everything"
 

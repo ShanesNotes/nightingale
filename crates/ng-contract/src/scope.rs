@@ -4,9 +4,13 @@ use crate::identity::{Canonical, Seal};
 use crate::law::{Brand, Family, FragmentData};
 use crate::{
     AdmissionError, Anatomy, Boundary, BoundaryWater, CapillaryBed, Cardiovascular, CompiledBody, EdgeRoute,
-    Fluids, Fragment, FragmentBuilder, Measure, Nervous, Owner, PartialVolume, SiteId, SiteRoute, Water,
+    EnclosedSpace, Fluids, Fragment, FragmentBuilder, Measure, Nervous, Output, OutsideSlice, Owner,
+    PartialVolume, PerSite, Pressure, ReadPort, SiteId, SiteRoute, Water,
 };
 use core::marker::PhantomData;
+
+/// The local name of the row each enclosure a card holds carries its pressure on.
+pub(crate) const ENCLOSURE_PRESSURE: &str = "enclosure_pressure";
 
 /// The anatomy and the composition data laws never see: where water crosses the boundary, the
 /// partial-volume coefficient and the spaces this body leaves out.
@@ -160,6 +164,7 @@ impl Space {
 pub struct Assembly<'b> {
     schema: Schema,
     issued: Vec<&'static str>,
+    held: Vec<HeldCard>,
     fragments: Vec<FragmentData>,
     brand: Brand<'b>,
 }
@@ -180,19 +185,73 @@ impl<'b> Assembly<'b> {
     pub fn fluids(&mut self) -> Result<FluidsScope<'b>, AdmissionError> {
         Ok(FluidsScope {
             laws: self.issue()?,
-            ports: FluidsPorts { brand: PhantomData },
+            ports: FluidsPorts {
+                extravascular_pressure: ReadPort::extravascular(),
+                brand: PhantomData,
+            },
         })
+    }
+    fn boundary_names(&self) -> Vec<&'static str> {
+        self.schema
+            .boundaries
+            .iter()
+            .map(|boundary| boundary.name)
+            .collect()
     }
     pub fn boundary(&mut self) -> Result<BoundaryScope<'b>, AdmissionError> {
         Ok(BoundaryScope {
             laws: self.issue()?,
             ports: BoundaryPorts {
-                names: self
-                    .schema
-                    .boundaries
-                    .iter()
-                    .map(|boundary| boundary.name)
-                    .collect(),
+                names: self.boundary_names(),
+                brand: PhantomData,
+            },
+        })
+    }
+    /// Scope for a card outside the slice, held by a declaration of what it supplies. Refuses a route the
+    /// schema does not name, and one another card declared.
+    pub fn hold<S: OutsideSlice>(
+        &mut self,
+        declaration: HeldDeclaration<S>,
+    ) -> Result<HeldScope<'b, S>, AdmissionError> {
+        let names = self.boundary_names();
+        let HeldDeclaration {
+            mut supplies,
+            mut holds,
+            validity,
+            card: _,
+        } = declaration;
+        supplies.sort_unstable();
+        supplies.dedup();
+        holds.sort_unstable();
+        holds.dedup();
+        for &name in &supplies {
+            if names.binary_search(&name).is_err() {
+                return Err(AdmissionError::UnknownBoundary { name });
+            }
+            if self.held.iter().any(|held| held.supplies.contains(&name)) {
+                return Err(AdmissionError::BoundaryNamedTwice { name });
+            }
+        }
+        let mut laws: FragmentBuilder<'b, S> = self.issue()?;
+        if self
+            .schema
+            .anatomy
+            .held_enclosures()
+            .any(|(_, card)| card == S::CARD)
+        {
+            laws.owe_enclosure_pressure();
+        }
+        self.held.push(HeldCard {
+            card: S::CARD,
+            supplies,
+            holds,
+            validity,
+        });
+        Ok(HeldScope {
+            laws,
+            ports: HeldPorts {
+                enclosure_pressure: Output::named(ENCLOSURE_PRESSURE),
+                names,
                 brand: PhantomData,
             },
         })
@@ -209,7 +268,7 @@ impl<'b> Assembly<'b> {
     /// Checks the schema and every fragment into one hashed body. A scope issued here whose fragment
     /// was never added is refused, so dropping a builder never drops what it owed.
     pub fn compile(self) -> Result<CompiledBody, AdmissionError> {
-        compile(self.schema, self.issued, self.fragments)
+        compile(self.schema, self.issued, self.held, self.fragments)
     }
 }
 
@@ -221,6 +280,7 @@ pub fn assemble(
     declare(Assembly {
         schema,
         issued: Vec::new(),
+        held: Vec::new(),
         fragments: Vec::new(),
         brand: PhantomData,
     })
@@ -273,6 +333,8 @@ impl<'b> CardiovascularPorts<'b> {
     }
 }
 pub struct FluidsPorts<'b> {
+    /// Each bed's pressure from outside: its enclosure's, or zero gauge for a bed nothing encloses.
+    pub extravascular_pressure: ReadPort<'b, Fluids, PerSite<CapillaryBed, Pressure>>,
     brand: Brand<'b>,
 }
 impl<'b> FluidsPorts<'b> {
@@ -287,4 +349,81 @@ impl<'b> FluidsPorts<'b> {
 }
 pub struct NervousPorts<'b> {
     brand: Brand<'b>,
+}
+
+/// What a held stand-in answers for. The rest of what it does shows in its fragment: a field it emits, an
+/// enclosure the map says it holds, a row it reads.
+pub struct HeldDeclaration<S> {
+    supplies: Vec<&'static str>,
+    holds: Vec<Space>,
+    validity: &'static str,
+    card: PhantomData<S>,
+}
+impl<S: OutsideSlice> HeldDeclaration<S> {
+    /// `supplies` names every schema boundary this card moves water on: compile refuses a law on any other,
+    /// and a named route no law serves. `holds` names the spaces whose pools this card stands behind: they
+    /// stay amounts, no law moves them, and a held enclosure's own fluid needs no entry. `validity` says
+    /// where the stand-in is meant to hold.
+    pub fn new(supplies: Vec<&'static str>, holds: Vec<Space>, validity: &'static str) -> Self {
+        Self {
+            supplies,
+            holds,
+            validity,
+            card: PhantomData,
+        }
+    }
+}
+/// A declaration with its card, normalized so its order reaches nothing.
+pub(crate) struct HeldCard {
+    pub(crate) card: &'static str,
+    pub(crate) supplies: Vec<&'static str>,
+    pub(crate) holds: Vec<Space>,
+    pub(crate) validity: &'static str,
+}
+impl Seal for HeldCard {
+    fn seal(&self, out: &mut Canonical) {
+        let Self {
+            card,
+            supplies,
+            holds,
+            validity,
+        } = self;
+        out.text(card);
+        out.length(supplies.len());
+        for route in supplies {
+            out.text(route);
+        }
+        out.length(holds.len());
+        for space in holds {
+            out.number(*space as u64);
+        }
+        out.text(validity);
+    }
+}
+
+/// Issued once per assembly, for a card outside the slice.
+pub struct HeldScope<'b, S> {
+    laws: FragmentBuilder<'b, S>,
+    ports: HeldPorts<'b, S>,
+}
+impl<'b, S: OutsideSlice> HeldScope<'b, S> {
+    pub fn parts(self) -> (FragmentBuilder<'b, S>, HeldPorts<'b, S>) {
+        (self.laws, self.ports)
+    }
+}
+pub struct HeldPorts<'b, S> {
+    /// The pressure of each enclosure the map says this card holds, defined once for all of them.
+    pub enclosure_pressure: Output<'b, S, PerSite<EnclosedSpace, Pressure>>,
+    names: Vec<&'static str>,
+    brand: Brand<'b>,
+}
+impl<'b, S> HeldPorts<'b, S> {
+    /// The schema boundary's pair and drive. Refuses a name the schema does not declare. A law on a route
+    /// the declaration omits is refused at compile.
+    pub fn water(&self, name: &'static str) -> Result<BoundaryWater<'b, S>, AdmissionError> {
+        match self.names.binary_search(&name) {
+            Ok(_) => Ok(BoundaryWater::named(name)),
+            Err(_) => Err(AdmissionError::UnknownBoundary { name }),
+        }
+    }
 }

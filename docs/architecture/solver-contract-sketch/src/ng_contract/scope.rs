@@ -62,7 +62,8 @@ impl<'b> Assembly<'b> {
     pub fn boundary(&mut self) -> Result<BoundaryScope<'b>, AdmissionError> {
         todo!()
     }
-    /// Scope for a card outside the slice, held by a labeled stand-in that says what it supplies.
+    /// Scope for a card outside the slice, held by a declaration of what it supplies. Refuses a route
+    /// the schema does not name, and one another card declared.
     pub fn hold<S: OutsideSlice>(&mut self, _declaration: HeldDeclaration<S>) -> Result<HeldScope<'b, S>, AdmissionError> {
         todo!()
     }
@@ -71,10 +72,10 @@ impl<'b> Assembly<'b> {
     }
     /// Resolves ports, dimensions, mode coverage, ownership, PK claims, incidence, structural
     /// matching, Jacobian sparsity, conserved basis, gauges and stable order, then hashes. Refuses a
-    /// held stand-in whose declared supplies are not exactly its fragment's exterior columns, a
-    /// held intensive field tied to a store inside the slice, an orphan pool (one the schema does
-    /// not leave out that no transfer moves and no declaration holds), and a law that moves or
-    /// reads a pool the schema left out.
+    /// held stand-in whose declared supplies are not exactly its fragment's exterior columns, an
+    /// orphan pool (one the schema does not leave out that no transfer moves and no declaration
+    /// holds), a law that moves a pool a declaration holds, and a law that moves or reads a pool the
+    /// schema left out.
     /// Only here is the lifetime brand erased. Missing contributors are errors, not zeroes.
     pub fn compile(self) -> Result<CompiledBody, AdmissionError> {
         todo!()
@@ -106,61 +107,36 @@ pub struct ReceptorScope<'b> {
 pub struct BoundaryScope<'b> {
     _builder: FragmentBuilder<'b, Boundary>,
 }
-/// A held card's builder arrives pre-filled from the catalog: every `input` row from `S` is a
-/// synthetic kernel over fixture parameters and the boundary timeline, every `sink` row to `S` a
-/// labeled receiver that consumes no physiology. The composition root may add fixture laws on
-/// shared substrates (for EN, surrogate ligand secretion and clearance) and must route every
-/// material or energy export to `S` into a receipt pool listed in the coverage manifest.
+/// A held card's builder is plain: it emits, receives and defines like any owner, on the first
+/// ticket that reads a row. The composition root may add fixture laws on shared substrates (for
+/// EN, surrogate ligand secretion and clearance) and must route every material or energy export
+/// to `S` into a receipt pool listed in the coverage manifest.
 pub struct HeldScope<'b, S> {
     _builder: FragmentBuilder<'b, S>,
 }
-/// What a held stand-in prescribes, every route on which it supplies or removes material or
-/// energy, the catalog rows whose physiology it does not feed back, and where it is meant to hold.
-/// It enters the model hash and the coverage manifest, each supply becomes a `HeldRoute` whose
-/// exchange the history keeps apart, and the certificate reports each route's flow per window, so
-/// a run that stays stable only through held support shows it.
+/// What a held stand-in answers for: every route on which it supplies or removes material or
+/// energy, the spaces whose pools it stands behind, and where it is meant to hold. What it
+/// prescribes shows in the rows it defines, and the catalog rows it does not answer are the sink
+/// rows it does not read. It enters the model hash and the coverage manifest, each supply becomes
+/// a `HeldRoute` whose exchange the history keeps apart, and the certificate reports each route's
+/// flow per window, so a run that stays stable only through held support shows it.
 pub struct HeldDeclaration<S> {
-    _prescribes: Vec<HeldField>,
-    _supplies: Vec<HeldSupply>,
-    _absent_feedback: Vec<u16>,
+    _supplies: Vec<&'static str>,
+    _holds: Vec<Space>,
     _validity: &'static str,
     _card: PhantomData<S>,
 }
 impl<S: OutsideSlice> HeldDeclaration<S> {
-    /// `absent_feedback` lists coupling-map lines (as in `catalog`) this stand-in does not answer.
-    pub fn new(
-        _prescribes: Vec<HeldField>,
-        _supplies: Vec<HeldSupply>,
-        _absent_feedback: Vec<u16>,
-        _validity: &'static str,
-    ) -> Result<Self, AdmissionError> {
+    /// `supplies` names every schema route this card moves material on: compile refuses a law on
+    /// any other, and a named route no law serves. `holds` names the spaces whose pools this card
+    /// stands behind: they stay amounts, no law moves them, and a held enclosure's own fluid needs
+    /// no entry.
+    pub fn new(_supplies: Vec<&'static str>, _holds: Vec<Space>, _validity: &'static str) -> Self {
         todo!()
     }
-}
-/// A value a held stand-in prescribes. An intensive field (a concentration, a temperature) that
-/// stands for a conserved store is either derived from that store inside the slice or declared an
-/// external reservoir with its book, so its implicit support is named.
-pub struct HeldField {
-    _name: &'static str,
-    _reservoir: Option<Book>,
-}
-impl HeldField {
-    /// A signal with no conserved store behind it (a gain, a phase, a pressure).
-    pub fn signal(_name: &'static str) -> Self {
-        todo!()
-    }
-    /// An intensive value held as if from an external reservoir of `book`.
-    pub fn reservoir(_name: &'static str, _book: Book) -> Self {
-        todo!()
-    }
-}
-/// One exterior route of a held stand-in and the book it moves.
-pub struct HeldSupply {
-    _route: &'static str,
-    _book: Book,
-}
-impl HeldSupply {
-    pub fn new(_route: &'static str, _book: Book) -> Self {
+    /// An intensive value held as if from an external reservoir of `book`, so its implicit support
+    /// is named. Compile refuses one whose store is inside the slice. It lands with the second book.
+    pub fn reservoir(self, _field: &'static str, _book: Book) -> Self {
         todo!()
     }
 }
@@ -232,12 +208,22 @@ pub struct BoundaryPorts<'b> {
     /// Heat to and from the room: the energy book's exterior route.
     pub heat_exchange: Pair<'b, Boundary, Energy>,
 }
-/// Routes a held stand-in may use: receipts for exports, and secretion and clearance pairs for
-/// the surrogate ligands it releases into the body's shared ligand pools.
+/// Routes a held stand-in may use: the pressure of each enclosure the map says it holds, receipts
+/// for exports, and secretion and clearance pairs for the surrogate ligands it releases into the
+/// body's shared ligand pools.
 pub struct HeldPorts<'b, S> {
+    /// Defined once for all of this card's enclosures, one row per enclosure.
+    pub enclosure_pressure: Output<'b, S, PerSite<EnclosedSpace, Pressure>>,
     pub receipts: FluidRoute<'b, S>,
     pub ligand_secretion: Vec<Pair<'b, S, SurrogateLigand>>,
     pub ligand_clearance: Vec<Pair<'b, S, SurrogateLigand>>,
+}
+impl<'b, S> HeldPorts<'b, S> {
+    /// A schema route's pair. Refuses a name the schema does not declare. A law on a route the
+    /// declaration omits is refused at compile.
+    pub fn water(&self, _name: &'static str) -> Result<Pair<'b, S, Water>, AdmissionError> {
+        todo!()
+    }
 }
 impl<'b, S: OutsideSlice> HeldScope<'b, S> {
     pub fn parts(self) -> (FragmentBuilder<'b, S>, HeldPorts<'b, S>) {

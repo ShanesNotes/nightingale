@@ -66,6 +66,7 @@ mod fixture;
 mod reference;
 mod replay;
 mod run;
+mod slice;
 
 pub use accuracy::{
     AccuracyCase, AccuracyEvidence, AccuracyFailure, AccuracyPolicy, accuracy, observed_order,
@@ -81,3 +82,4 @@ pub use replay::{
     ReplayGate, ReplayPlan, WallClock, replay_gate, replay_gates,
 };
 pub use run::run_until;
+pub use slice::{arena_anatomy, hold_outside_slice};

@@ -637,6 +637,31 @@ impl Anatomy {
         self.sites.iter().map(|site| site.id)
     }
 
+    fn placed(&self, site: SiteId) -> Option<&Placed> {
+        let at = self.sites.binary_search_by_key(&site.key, |placed| placed.id.key);
+        at.ok()
+            .map(|at| &self.sites[at])
+            .filter(|placed| placed.id == site)
+    }
+
+    /// The space that encloses `site` and that space's compliance, for the nearest enclosure only.
+    pub(crate) fn encloser(&self, site: SiteId) -> Option<(SiteId, Compliance)> {
+        let space = &self.sites[self.placed(site)?.enclosed_by?];
+        Some((space.id, space.compliance?))
+    }
+
+    pub(crate) fn compliance(&self, space: SiteId) -> Option<Compliance> {
+        self.placed(space)?.compliance
+    }
+
+    /// Each enclosed space a named card holds, with that card.
+    pub(crate) fn held_enclosures(&self) -> impl Iterator<Item = (SiteId, &'static str)> + '_ {
+        (self.sites.iter()).filter_map(|site| match site.compliance {
+            Some(Compliance::Held { card }) => Some((site.id, card)),
+            _ => None,
+        })
+    }
+
     pub(crate) fn vascular(&self) -> impl Iterator<Item = (SiteId, SiteId)> + '_ {
         (self.vascular.iter()).map(|&(from, to)| (self.sites[from].id, self.sites[to].id))
     }

@@ -1,14 +1,17 @@
-"""Compare the generated coupling catalog (src/ng_contract/catalog.rs) with the
-"Direct couplings" graph of docs/atlas/coupling-map.md, row by row.
+"""Compare the crate's coupling catalog with the "Direct couplings" graph of
+docs/atlas/coupling-map.md, row by row, and hold the sketch's copy of the table to the crate's,
+byte for byte.
 
 Run from solver-contract-sketch/:  python3 -I evidence/census-check.py
-tools/verify (verify.d/20-sketch.sh) runs this as a gate.
+tools/verify (verify.d/20-sketch.sh) runs this as a gate. A change to the crate's catalog runs
+everything (tools/gate/paths.toml), so a change to that file alone reaches this script.
 """
 import re
 import sys
 
 MAP = "../../atlas/coupling-map.md"
-CATALOG = "src/ng_contract/catalog.rs"
+CATALOG = "../../../crates/ng-contract/src/catalog.rs"
+SKETCH_CATALOG = "src/ng_contract/catalog.rs"
 CARD = {
     "Cardiovascular": "CV", "Fluids": "FL", "Renal": "RN", "Nervous": "NS",
     "Respiratory": "RS", "Metabolism": "MT", "Musculoskeletal": "MS", "Endocrine": "EN",
@@ -29,8 +32,14 @@ for number, text in enumerate(open(MAP, encoding="utf-8").read().splitlines(), s
     if in_graph and match:
         arrows.append((number, match.group(1), match.group(3), match.group(2)))
 
-source = open(CATALOG, encoding="utf-8").read()
-body = source[source.index("coupling_map! {"):]
+
+def table(path):
+    source = open(path, encoding="utf-8").read()
+    start = source.index("coupling_map! {\n    77")
+    return source[start:source.index("\n}\n", start) + 3]
+
+
+body = table(CATALOG)
 rows = []
 for match in re.finditer(r'(\d+) (\w+) => (\w+), "([^"]+)",\s*(live|input|sink|relation|outside|unresolved)', body):
     payload = re.match(r'\s*\((\w+) \{([^}]*)\}', body[match.end():])
@@ -39,6 +48,8 @@ for match in re.finditer(r'(\d+) (\w+) => (\w+), "([^"]+)",\s*(live|input|sink|r
                  match.group(5), payload.group(1) if payload else "-", fields))
 
 failures = []
+if body != table(SKETCH_CATALOG):
+    failures.append(f"the tables differ: {CATALOG} and {SKETCH_CATALOG}")
 if len(arrows) != len(rows):
     failures.append(f"count differs: map {len(arrows)}, catalog {len(rows)}")
 for arrow, row in zip(arrows, rows):

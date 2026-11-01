@@ -331,7 +331,7 @@ impl StepProposal {
         }
         let end = ticket.interval().end();
         Ok(VerifiedStep {
-            excursions: body.excursions(&published.values, end),
+            excursions: body.excursions(&published.values, &coordinates, end),
             dense: DenseSegment {
                 interval: Some(ticket.interval()),
                 start: base.values(),
@@ -441,7 +441,7 @@ impl VerifiedStep {
         let (state, fired) = problem.chance.fired(problem.body, self.state, at);
         let values = problem.values_after_firing(&self.ticket, &state)?;
         let mut excursions = self.excursions;
-        excursions.extend(problem.body.excursions(&values, at));
+        excursions.extend(problem.body.excursions(&values, &state.coordinates(), at));
         Ok(Self {
             state,
             fired,
