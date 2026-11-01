@@ -7,7 +7,8 @@ use ng_contract::*;
 const REFLEX_NS: u64 = 1_000_000_000;
 const SET_POINT_NS: u64 = 3_600_000_000_000;
 
-/// Release `q f A_vesicle`, so a store can run down and never below zero, and reuptake first order (research 02).
+/// Research 02's release `q_i f`, linear in traffic, with `q_i = q A_vesicle`, so a store can run down and never below
+/// zero. Model adaptation. Reuptake is first order.
 fn transmitter<'b, Q: Substance>(
     ns: &mut FragmentBuilder<'b, Nervous>,
     ports: &NervousPorts<'b>,

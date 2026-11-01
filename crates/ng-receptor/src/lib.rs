@@ -25,26 +25,50 @@ use ng_contract::*;
 
 const BINDING_NS: u64 = 1_000_000_000;
 
-fn ligand<'b, C: SiteSet, Q: Substance>(
+/// A cleft has no volume of its own, so what a site meets there is the amount. Model default.
+fn in_cleft<'b, 'k, Q: Substance>(
+    k: &mut Kernel<'b, 'k, Receptor, Junction>,
+    route: &SiteRoute<'b, Receptor, Junction, Q>,
+) -> Expr<'b, 'k, Receptor, Q> {
+    k.at_site(&route.from_amount())
+}
+
+/// Mass action reads a concentration (research 02), so blood that pools in a bed moves no receptor.
+fn in_plasma<'b, 'k, Q: Substance>(
+    k: &mut Kernel<'b, 'k, Receptor, Blood>,
+    route: &SiteRoute<'b, Receptor, Blood, Q>,
+) -> Expr<'b, 'k, Receptor, Concentration<Q>>
+where
+    Quotient<Q, Volume>: SameDimension<Concentration<Q>>,
+{
+    let held = k.at_site(&route.from_amount());
+    let water = k.at_site(&route.from_amount());
+    let volume = k.volume(water);
+    let ratio = k.divide(held, volume);
+    k.as_dimension(ratio)
+}
+
+fn ligand<'b, C: SiteSet, Q: Substance, M: Dimension>(
     laws: &mut FragmentBuilder<'b, Receptor>,
     ports: &ReceptorPorts<'b>,
     keys: [&'static str; 4],
     class: RateClass,
-) {
+    meets: for<'k> fn(&mut Kernel<'b, 'k, Receptor, C>, &SiteRoute<'b, Receptor, C, Q>) -> Expr<'b, 'k, Receptor, M>,
+) where
+    Product<Affinity<M>, Product<M, Q>>: SameDimension<Rate<Q>>,
+{
     let [total_key, on_key, off_key, efficacy_key] = keys;
     let route = ports.binding::<C, Q>(laws);
     let total = laws.site_parameter::<C, Q>(ParameterKey::new(total_key), Admissible::positive());
-    let on = laws.site_parameter::<C, Affinity<Q>>(ParameterKey::new(on_key), Admissible::positive());
+    let on = laws.site_parameter::<C, Affinity<M>>(ParameterKey::new(on_key), Admissible::positive());
     let off =
         laws.site_parameter::<C, Rate<Dimensionless>>(ParameterKey::new(off_key), Admissible::positive());
     let efficacy =
         laws.site_parameter::<C, Dimensionless>(ParameterKey::new(efficacy_key), Admissible::positive());
 
     let rate = laws.site_kernel(|mut k| {
-        let (free, bound) = (
-            k.at_site(&route.from_amount::<Q>()),
-            k.at_site(&route.to_amount::<Q>()),
-        );
+        let free = meets(&mut k, &route);
+        let bound = k.at_site(&route.to_amount::<Q>());
         let sites = k.site_parameter(&total);
         let empty = k.subtract(sites, bound);
         let meeting = k.multiply(free, empty);
@@ -77,23 +101,26 @@ fn ligand<'b, C: SiteSet, Q: Substance>(
 pub fn declare<'b>(scope: ReceptorScope<'b>) -> Result<Fragment<'b, Receptor>, AdmissionError> {
     let (mut laws, ports) = scope.parts();
     let class = RateClass::new(RateBand::Reflex, BINDING_NS)?;
-    ligand::<Junction, Norepinephrine>(
+    ligand::<Junction, Norepinephrine, Norepinephrine>(
         &mut laws,
         &ports,
         ["rc.ne-sites", "rc.ne-on", "rc.ne-off", "rc.ne-efficacy"],
         class,
+        in_cleft,
     );
-    ligand::<Junction, Acetylcholine>(
+    ligand::<Junction, Acetylcholine, Acetylcholine>(
         &mut laws,
         &ports,
         ["rc.ach-sites", "rc.ach-on", "rc.ach-off", "rc.ach-efficacy"],
         class,
+        in_cleft,
     );
-    ligand::<Blood, Vasopressin>(
+    ligand::<Blood, Vasopressin, Concentration<Vasopressin>>(
         &mut laws,
         &ports,
         ["rc.avp-sites", "rc.avp-on", "rc.avp-off", "rc.avp-efficacy"],
         class,
+        in_plasma,
     );
     Ok(laws.finish())
 }

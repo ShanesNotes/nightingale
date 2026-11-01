@@ -12,11 +12,11 @@ use crate::law::{
     End, Family, FragmentData, GuardDeclaration, Input, KernelData, ModeDeclaration, Obligation, Op, Over,
     ParameterContext, ParameterDeclaration, Selector, SlotDeclaration, SlotKind, Source, Where,
 };
-use crate::scope::{ENCLOSURE_PRESSURE, HeldCard, PoolRef, RouteBoundary};
+use crate::scope::{BLOOD_PRESSURE, ENCLOSURE_PRESSURE, HeldCard, PoolRef, RouteBoundary};
 use crate::{
-    AdmissibleSet, AdmissionError, Anatomy, Boundary, BoundaryDirection, Class, CompileDefect, Compliance,
-    LawName, ModeValue, Network, Owner, ParameterKey, Predicate, RateClass, Schema, SiteId, Sites, Space,
-    Species,
+    AdmissibleSet, AdmissionError, Anatomy, Boundary, BoundaryDirection, Cardiovascular, Class, CompileDefect,
+    Compliance, LawName, ModeValue, Network, Owner, ParameterKey, Predicate, RateClass, Schema, SiteId,
+    Sites, Space, Species,
 };
 
 pub(crate) fn compile(
@@ -859,6 +859,12 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
                 })
             })
             .collect(),
+        Family::EntryWork => (store(Space::Elastic).into_iter())
+            .map(|elastic| Reach {
+                context: Context::Body,
+                ends: [Terminal::Exterior("delivery"), Terminal::Pool(elastic)],
+            })
+            .collect(),
         Family::Dissipation => (store(Space::Elastic).zip(store(Space::Thermal)).into_iter())
             .map(|(elastic, thermal)| Reach {
                 context: Context::Body,
@@ -1489,6 +1495,18 @@ fn addresses(
                 let pool = base.ok_or(CompileDefect::NoSuchRead { law })?;
                 let pool = PoolRef { species, ..pool };
                 unknown(rows.amount(pool).ok_or(left_out(law, pool))?)
+            }
+            Source::Landing(route) => {
+                let boundary = (schema.boundaries.iter()).find(|known| known.name == route);
+                let site = boundary.ok_or(CompileDefect::NoSuchRead { law })?.pool.site;
+                let pressure = LawName {
+                    owner: Cardiovascular::CARD,
+                    local: BLOOD_PRESSURE,
+                };
+                unknown(
+                    rows.slot(pressure, Context::Site(site))
+                        .ok_or(CompileDefect::NoSuchRead { law })?,
+                )
             }
             Source::Drive(route) => {
                 if route_owner(held, route) != law.owner {

@@ -296,12 +296,37 @@ fn absorption<'b, Q: Substance>(
     Ok(())
 }
 
+/// Water pushed into a stretched vessel adds to the wall, and the push pays: the pressure where it lands times its rate.
+/// Without this a bolus draws the wall's gain out of the heat. Model default.
+fn entry_work<'b, S: OutsideSlice>(
+    laws: &mut FragmentBuilder<'b, S>,
+    ports: &HeldPorts<'b, S>,
+    name: &'static str,
+    key: ParameterKey,
+) -> Result<(), AdmissionError> {
+    let BoundaryRoute { route, drive } = ports.route::<Water>(name)?;
+    let basal = laws.parameter::<Rate<Water>>(key, Admissible::nonnegative());
+    let paid = ports.entry_work(laws);
+    let wave = RateClass::new(RateBand::Wave, WAVE_NS)?;
+    let power = laws.kernel(|mut k| {
+        let (steady, meal) = (k.parameter(&basal), k.read(&drive));
+        let total = k.add(steady, meal);
+        let against = k.read(&route.landing_pressure());
+        let product = k.multiply(against, total);
+        let power = k.as_dimension(product);
+        k.finish(power, laws.every_mode(), wave)
+    });
+    laws.transfer(Transfer::new(&paid, power));
+    Ok(())
+}
+
 fn gut(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let supplies = vec![GUT_WATER, GUT_SODIUM, GUT_POTASSIUM, GUT_CHLORIDE];
     let declaration = HeldDeclaration::<Gastrointestinal>::new(supplies, Vec::new(), FIXED);
     let (mut laws, ports) = body.hold(declaration)?.parts();
     enclosure_law(&mut laws, &ports, ParameterKey::new("gi.abdominal-pressure"))?;
     absorption::<Water>(&mut laws, &ports, GUT_WATER, ParameterKey::new("gi.basal-water"))?;
+    entry_work(&mut laws, &ports, GUT_WATER, ParameterKey::new("gi.basal-water"))?;
     absorption::<Sodium>(
         &mut laws,
         &ports,
@@ -463,6 +488,7 @@ pub fn arena_organs(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
 }
 
 const SECOND: u64 = 1_000_000_000;
+const WAVE_NS: u64 = 10_000_000;
 const POINTS: u32 = 100;
 const FLOW_SIZE: f64 = 20.0;
 /// The power that keeps the elastic store on its sum. That row rests on the store's change over a stage, so doubled
@@ -861,7 +887,7 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
     set::<Rate<Dimensionless>>(packet, "rc.ach-off", junctions, 10.0, note)?;
     set::<Dimensionless>(packet, "rc.ach-efficacy", junctions, 2.0, note)?;
     set::<Vasopressin>(packet, "rc.avp-sites", blood, 1.0, note)?;
-    set::<Affinity<Vasopressin>>(packet, "rc.avp-on", blood, 0.02, note)?;
+    set::<Affinity<Concentration<Vasopressin>>>(packet, "rc.avp-on", blood, 0.6, note)?;
     set::<Rate<Dimensionless>>(packet, "rc.avp-off", blood, 0.1, note)?;
     set::<Dimensionless>(packet, "rc.avp-efficacy", blood, 2.0, note)
 }

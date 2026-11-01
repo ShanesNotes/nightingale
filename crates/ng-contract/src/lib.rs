@@ -969,8 +969,8 @@ pub use admission::*;
 pub use anatomy::*;
 pub use body::*;
 pub use boundary::{
-    AppliedInputs, Attempt, BoundaryEvent, BoundaryInput, BoundaryPort, InputId, Legs, PendingInputs,
-    Posture, WaterDelivery,
+    AppliedInputs, Attempt, BoundaryEvent, BoundaryInput, BoundaryPort, Delivered, InputId, Legs,
+    PendingInputs, Posture, WaterDelivery,
 };
 pub use compensated::*;
 pub use conservation::*;

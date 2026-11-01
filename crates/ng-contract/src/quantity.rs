@@ -362,6 +362,14 @@ impl<P: Substance, Q: Substance> identities::Sealed<Rate<Q>> for Product<Rate<P>
 impl<P: Substance, Q: Substance> SameDimension<Rate<Q>> for Product<Rate<P>, Quotient<Q, P>> {}
 impl<Q: Substance> identities::Sealed<Rate<Q>> for Product<Affinity<Q>, Product<Q, Q>> {}
 impl<Q: Substance> SameDimension<Rate<Q>> for Product<Affinity<Q>, Product<Q, Q>> {}
+impl<Q: Substance> identities::Sealed<Rate<Q>>
+    for Product<Affinity<Concentration<Q>>, Product<Concentration<Q>, Q>>
+{
+}
+impl<Q: Substance> SameDimension<Rate<Q>>
+    for Product<Affinity<Concentration<Q>>, Product<Concentration<Q>, Q>>
+{
+}
 impl<U: Sensed> identities::Sealed<Dimensionless> for Quotient<Deviation<U>, Deviation<U>> {}
 impl<U: Sensed> SameDimension<Dimensionless> for Quotient<Deviation<U>, Deviation<U>> {}
 impl<U: Sensed> identities::Sealed<Rate<Reference<U>>> for Product<Deviation<U>, Rate<Dimensionless>> {}
