@@ -277,6 +277,9 @@ Slow memory in the unit of the variable it guards, compared with that variable o
 **Deviation**:
 How far a sensed value stands from its set point. It is its own dimension, so a set point can never become the variable it guards.
 
+**Wall power**:
+What the walls' elastic store must lose to stay on the sum of the walls. What they shed leaves as heat. What they gain past the heart's work and gravity's is muscle work from chemical energy.
+
 **Regulated total**:
 A conserved total that answers its own flows, because a boundary law reads the body, as water does through urine. Admission solves it, and the packet's value is only a guess.
 
