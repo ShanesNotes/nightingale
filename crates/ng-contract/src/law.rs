@@ -1095,7 +1095,7 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
         for field in fields {
             self.data.slots.push(SlotDeclaration {
                 name: field.name,
-                kind: SlotKind::Algebraic,
+                kind: SlotKind::Field,
                 dimension: field.dimension,
                 set: AdmissibleSet::Finite,
                 over: field.over,
@@ -1113,7 +1113,7 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     }
     /// The law on a whole-body output. A validity range on `value` judges the row.
     pub fn define<U: Dimension>(&mut self, output: &Output<'b, O, U>, value: PureKernel<'b, O, U>) {
-        self.attach(Obligation::Slot(output.name), value.data.defining(output.name));
+        self.attach(Obligation::Field(output.name), value.data.defining(output.name));
     }
     /// The law on a per-site output: one kernel for the class, one row per site.
     pub fn define_at<C: SiteClass, U: Dimension>(
@@ -1121,13 +1121,13 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
         output: &Output<'b, O, PerSite<C, U>>,
         value: PureKernel<'b, O, U, C>,
     ) {
-        self.attach(Obligation::Slot(output.name), value.data.defining(output.name));
+        self.attach(Obligation::Field(output.name), value.data.defining(output.name));
     }
     /// A held enclosure's pressure row, owed because the map names this owner.
     pub(crate) fn owe_enclosure_pressure(&mut self) {
         self.data.slots.push(SlotDeclaration {
             name: ENCLOSURE_PRESSURE,
-            kind: SlotKind::Algebraic,
+            kind: SlotKind::Field,
             dimension: dimension::<Pressure>(),
             set: AdmissibleSet::Finite,
             over: Over::HeldEnclosures,
@@ -1229,6 +1229,10 @@ pub(crate) struct SlotDeclaration {
 pub(crate) enum SlotKind {
     Memory,
     Algebraic,
+    /// An algebraic row owed through a port: a coupling's `emit`, or a held enclosure's pressure. Only a
+    /// definition serves it and only a read of a field reaches it, so a plain slot that shares its name
+    /// stands in for neither.
+    Field,
 }
 pub(crate) struct ModeDeclaration {
     pub(crate) name: &'static str,
@@ -1254,13 +1258,14 @@ pub(crate) struct LawDeclaration {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Obligation {
     Slot(&'static str),
+    Field(&'static str),
     Family(Family),
     Boundary(&'static str),
 }
 impl Obligation {
     pub(crate) fn local(self) -> &'static str {
         match self {
-            Obligation::Slot(name) | Obligation::Boundary(name) => name,
+            Obligation::Slot(name) | Obligation::Field(name) | Obligation::Boundary(name) => name,
             Obligation::Family(family) => family.name(),
         }
     }

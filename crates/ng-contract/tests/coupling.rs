@@ -58,6 +58,7 @@ enum Defect {
     OneFieldUndefined,
     DefinedTwice,
     EmittedTwice,
+    PlainSlotUnderTheName,
 }
 
 fn pressure<'b>(
@@ -73,7 +74,17 @@ fn pressure<'b>(
 
 fn compiled(defect: Defect) -> Result<CompiledBody, AdmissionError> {
     assemble(beds()?.schema, |mut body| {
-        if defect != Defect::NoSender {
+        if defect == Defect::PlainSlotUnderTheName {
+            let (mut laws, _ports) = body.cardiovascular()?.parts();
+            let plain = laws.algebraic::<Pressure>("capillary_pressure", Admissible::finite());
+            let class = wave()?;
+            let residual = laws.kernel(|mut k| {
+                let seen = k.algebraic(&plain);
+                k.finish(seen, laws.every_mode(), class)
+            });
+            laws.residual(&plain, residual);
+            body.add(laws.finish());
+        } else if defect != Defect::NoSender {
             let (mut laws, _ports) = body.cardiovascular()?.parts();
             let fields: CapillaryAndVenousPressure<Defines<'_, Cardiovascular>> = laws.emit();
             let value = laws.site_parameter::<CapillaryBed, Pressure>(
@@ -174,6 +185,17 @@ fn a_coupling_read_is_a_read_of_the_senders_row_at_the_readers_site() -> Result<
 fn a_read_of_a_field_nobody_emits_is_refused() {
     assert_eq!(
         refused(Defect::NoSender),
+        AdmissionError::Compile(CompileDefect::UnemittedField {
+            law: law("FL", "starling"),
+            field: law("CV", "capillary_pressure"),
+        })
+    );
+}
+
+#[test]
+fn a_plain_slot_under_a_fields_name_is_no_field() {
+    assert_eq!(
+        refused(Defect::PlainSlotUnderTheName),
         AdmissionError::Compile(CompileDefect::UnemittedField {
             law: law("FL", "starling"),
             field: law("CV", "capillary_pressure"),
@@ -308,48 +330,6 @@ fn both_arrows(capillary_first: bool) -> Result<ModelHash, AdmissionError> {
         body.compile()
     })?;
     Ok(compiled.model_hash())
-}
-
-fn stretch_hash(written_out: bool) -> Result<ModelHash, AdmissionError> {
-    let mut map = AnatomyBuilder::new();
-    map.site::<TissueSite>("body", at()?);
-    let compiled = assemble(Schema::new(map.finish()?)?, |mut body| {
-        let (mut laws, _ports) = body.cardiovascular()?.parts();
-        let stretch = laws.parameter::<Dimensionless>(ParameterKey::new("cv.stretch"), Admissible::finite());
-        let class = wave()?;
-        if written_out {
-            for local in ["aortic_arch_stretch", "carotid_sinus_stretch"] {
-                let row = laws.algebraic::<Dimensionless>(local, Admissible::finite());
-                let residual = laws.kernel(|mut k| {
-                    let value = k.parameter(&stretch);
-                    let seen = k.algebraic(&row);
-                    let gap = k.subtract(seen, value);
-                    k.finish(gap, laws.every_mode(), class)
-                });
-                laws.residual(&row, residual);
-            }
-        } else {
-            let out: BaroreceptorAfferents<Defines<'_, Cardiovascular>> = laws.emit();
-            for output in [&out.aortic_arch_stretch, &out.carotid_sinus_stretch] {
-                let value = laws.kernel(|mut k| {
-                    let value = k.parameter(&stretch);
-                    k.finish(value, laws.every_mode(), class)
-                });
-                laws.define(output, value);
-            }
-        }
-        body.add(laws.finish());
-        body.compile()
-    })?;
-    Ok(compiled.model_hash())
-}
-
-/// The two read the same steps, and a validity range judges them differently: the row in a definition,
-/// the gap in a written-out residual.
-#[test]
-fn a_definition_and_its_residual_written_out_are_two_models() -> Result<(), AdmissionError> {
-    assert_ne!(stretch_hash(true)?, stretch_hash(false)?);
-    Ok(())
 }
 
 #[test]

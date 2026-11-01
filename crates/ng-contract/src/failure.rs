@@ -229,6 +229,9 @@ pub enum CompileDefect {
         site: SiteId,
         space: Space,
     },
+    /// A space a held card answers for that has no pool in this body: the map has none or the schema
+    /// leaves it out, so the declaration would promise an amount the ledger does not carry.
+    HeldNothing { card: &'static str, space: Space },
     /// A pool two cards stand behind: what a stand-in holds has to name one card.
     PoolHeldTwice {
         cards: [&'static str; 2],

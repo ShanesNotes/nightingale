@@ -39,6 +39,8 @@ enum Defect {
     LiverHoldsEnclosureFluid,
     NamedCardListsItsFluid,
     PortNamesNoRoute,
+    CellsLeftOut,
+    FluidLeftOut,
 }
 
 struct Sites {
@@ -79,8 +81,14 @@ fn schema(defect: Defect) -> Result<(Schema, Sites), AdmissionError> {
     map.enclose(&belly, &[bed.id()], compliance);
     let mut schema = Schema::new(map.finish()?)?;
     schema.water_boundary(ROUTE, BoundaryDirection::IntoBody, vessel.id(), Space::Lumen)?;
-    if matches!(defect, Defect::ElasticEnclosure | Defect::RigidEnclosure) {
+    if matches!(
+        defect,
+        Defect::ElasticEnclosure | Defect::RigidEnclosure | Defect::FluidLeftOut
+    ) {
         schema.leave_out(Space::Fluid, "a bench whose enclosure no card holds");
+    }
+    if defect == Defect::CellsLeftOut {
+        schema.leave_out(Space::Cells, "a bench with no cell water");
     }
     let sites = Sites {
         vessel: vessel.id(),
@@ -446,6 +454,37 @@ fn the_card_an_enclosure_names_must_be_held() {
     );
 }
 
+/// On a map with no enclosure the output owes nothing, so a plain slot can take its name.
+#[test]
+fn a_definition_cannot_land_on_a_plain_slot_that_shares_its_name() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", at()?);
+    let found = assemble(Schema::new(map.finish()?)?, |mut body| {
+        let declaration = HeldDeclaration::<Hepatic>::new(vec![], vec![], "a synthetic bench");
+        let (mut laws, ports) = body.hold(declaration)?.parts();
+        laws.algebraic::<Pressure>(PRESSURE, Admissible::finite());
+        let held = laws.site_parameter::<EnclosedSpace, Pressure>(
+            ParameterKey::new("hp.pressure"),
+            Admissible::finite(),
+        );
+        let class = slow()?;
+        let value = laws.site_kernel(|mut k| {
+            let value = k.site_parameter(&held);
+            k.finish(value, laws.every_mode(), class)
+        });
+        laws.define_at(&ports.enclosure_pressure, value);
+        body.add(laws.finish());
+        body.compile()
+    });
+    assert_eq!(
+        found.err(),
+        Some(defect(CompileDefect::UnclaimedLaw {
+            law: law("HP", PRESSURE)
+        }))
+    );
+    Ok(())
+}
+
 #[test]
 fn a_card_the_map_does_not_name_cannot_define_an_enclosures_pressure() {
     assert_eq!(
@@ -530,6 +569,48 @@ fn a_card_cannot_hold_the_fluid_of_an_enclosure_another_card_is_named_for() -> R
 }
 
 #[test]
+fn a_space_cannot_be_both_held_and_left_out() {
+    assert_eq!(
+        refused(Defect::CellsLeftOut),
+        defect(CompileDefect::HeldNothing {
+            card: "BC",
+            space: Space::Cells
+        })
+    );
+}
+
+#[test]
+fn a_held_enclosures_own_fluid_cannot_be_left_out() {
+    assert_eq!(
+        refused(Defect::FluidLeftOut),
+        defect(CompileDefect::HeldNothing {
+            card: "GI",
+            space: Space::Fluid
+        })
+    );
+}
+
+#[test]
+fn a_held_space_the_map_does_not_have_is_refused() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", at()?);
+    let found = assemble(Schema::new(map.finish()?)?, |mut body| {
+        let declaration = HeldDeclaration::<Hepatic>::new(vec![], vec![Space::Lumen], "a synthetic bench");
+        let (laws, _ports) = body.hold(declaration)?.parts();
+        body.add(laws.finish());
+        body.compile()
+    });
+    assert_eq!(
+        found.err(),
+        Some(defect(CompileDefect::HeldNothing {
+            card: "HP",
+            space: Space::Lumen
+        }))
+    );
+    Ok(())
+}
+
+#[test]
 fn a_held_pool_is_an_amount_in_the_ledger_with_a_combination_of_its_own() -> Result<(), AdmissionError> {
     let body = compiled(Defect::None)?;
     let (_, sites) = schema(Defect::None)?;
@@ -589,12 +670,12 @@ fn a_bed_reads_its_nearest_enclosure_and_a_bed_nothing_encloses_reads_no_row() -
     for (space, reason) in [
         (Space::Lumen, "no circulation in this bench"),
         (Space::Cells, "no cell water in this bench"),
-        (Space::Fluid, "no fluid in this bench"),
     ] {
         schema.leave_out(space, reason);
     }
     let body = assemble(schema, |mut body| {
-        let declaration = HeldDeclaration::<Respiratory>::new(vec![], vec![], "a synthetic bench");
+        let declaration =
+            HeldDeclaration::<Respiratory>::new(vec![], vec![Space::Fluid], "a synthetic bench");
         let (mut laws, ports) = body.hold(declaration)?.parts();
         let held = laws.parameter::<Pressure>(ParameterKey::new("rs.pressure"), Admissible::finite());
         laws.define_at(&ports.enclosure_pressure, pressure_law(&laws, &held)?);

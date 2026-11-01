@@ -45,6 +45,7 @@ pub(crate) fn compile(
         anatomy: &schema.anatomy,
     };
     let placement = place(&owed, &places)?;
+    check_holds(&rows, &schema, &held)?;
     check_orphans(&rows, &placement.columns, &schema, &held)?;
     let guards = guards(&fragments, &places)?;
     let forced = forcing_parameters(&fragments);
@@ -220,11 +221,15 @@ fn obligations<'f>(
     }
     for fragment in fragments {
         for slot in &fragment.slots {
+            let obligation = match slot.kind {
+                SlotKind::Field => Obligation::Field(slot.name),
+                SlotKind::Memory | SlotKind::Algebraic => Obligation::Slot(slot.name),
+            };
             owed.push(Owed::gather(
                 fragment,
                 slot.name,
                 Serves::Slot(slot.over),
-                Obligation::Slot(slot.name),
+                obligation,
             ));
         }
         for &family in &fragment.families {
@@ -471,6 +476,7 @@ struct Rows {
     rows: Vec<Row>,
     amounts: Vec<PoolRef>,
     slots: Vec<(Slot, usize)>,
+    fields: Vec<LawName>,
 }
 impl Rows {
     fn lay_out(schema: &Schema, fragments: &[FragmentData]) -> Self {
@@ -511,7 +517,7 @@ impl Rows {
         let slot_rows = slots.iter().map(|&(kind, slot, set, dimension)| {
             let kind = match kind {
                 SlotKind::Memory => RowKind::Memory(slot.law),
-                SlotKind::Algebraic => RowKind::Algebraic(slot),
+                SlotKind::Algebraic | SlotKind::Field => RowKind::Algebraic(slot),
             };
             (kind, set, dimension.clone())
         });
@@ -527,10 +533,15 @@ impl Rows {
             .map(|(at, slot)| (slot.1, amounts.len() + at))
             .collect();
         index.sort_unstable();
+        let fields = (slots.iter())
+            .filter(|slot| slot.0 == SlotKind::Field)
+            .map(|slot| slot.1.law)
+            .collect();
         Self {
             rows,
             amounts,
             slots: index,
+            fields,
         }
     }
     fn amount(&self, pool: PoolRef) -> Option<usize> {
@@ -545,6 +556,10 @@ impl Rows {
             found.ok().map(|at| self.slots[at].1)
         };
         find(None).or_else(|| find(site))
+    }
+    fn field(&self, law: LawName, site: Option<SiteId>) -> Option<usize> {
+        self.fields.binary_search(&law).ok()?;
+        self.slot(law, site)
     }
     fn declared(&self, law: LawName, site: Option<SiteId>) -> usize {
         self.slot(law, site)
@@ -921,7 +936,7 @@ fn addresses(
                     Address::Unknown(UnknownId::at(rows.declared(slot, here)))
                 }
                 (Input::Field(field), _) => {
-                    let row = rows.slot(field, here);
+                    let row = rows.field(field, here);
                     let row = row.ok_or(CompileDefect::UnemittedField { law, field })?;
                     Address::Unknown(UnknownId::at(row))
                 }
@@ -991,6 +1006,22 @@ fn holder(schema: &Schema, held: &[HeldCard], pool: PoolRef) -> Result<Option<&'
         }),
         _ => Ok(first),
     }
+}
+
+fn check_holds(rows: &Rows, schema: &Schema, held: &[HeldCard]) -> Result<(), CompileDefect> {
+    let claims = (held.iter()).flat_map(|card| card.holds.iter().map(|&space| (card.card, space)));
+    for (card, space) in claims {
+        if !rows.amounts.iter().any(|pool| pool.space == space) {
+            return Err(CompileDefect::HeldNothing { card, space });
+        }
+    }
+    for (site, card) in schema.anatomy.held_enclosures() {
+        if !rows.amounts.iter().any(|pool| pool.site == site) {
+            let space = Space::Fluid;
+            return Err(CompileDefect::HeldNothing { card, space });
+        }
+    }
+    Ok(())
 }
 
 fn check_orphans(

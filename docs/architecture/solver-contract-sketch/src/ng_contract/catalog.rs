@@ -72,9 +72,6 @@ impl Disposition {
 #[derive(Clone, Copy)]
 pub struct CensusRow {
     pub line: u16,
-    pub from: &'static str,
-    pub to: &'static str,
-    pub label: &'static str,
     pub disposition: Disposition,
     pub slice_incident: bool,
 }
@@ -108,24 +105,21 @@ macro_rules! coupling_map {
         }
     };
     (@row relation $why:literal $line:literal $from:ident $to:ident $label:literal) => {
-        coupling_map!(@census $line $from $to $label, Disposition::AnatomyRelation { reason: $why })
+        coupling_map!(@census $line $from $to, Disposition::AnatomyRelation { reason: $why })
     };
     (@row outside $why:literal $line:literal $from:ident $to:ident $label:literal) => {
-        coupling_map!(@census $line $from $to $label, Disposition::OutsideSlice { reason: $why })
+        coupling_map!(@census $line $from $to, Disposition::OutsideSlice { reason: $why })
     };
     (@row unresolved $why:literal $line:literal $from:ident $to:ident $label:literal) => {
-        coupling_map!(@census $line $from $to $label, Disposition::Unresolved { reason: $why })
+        coupling_map!(@census $line $from $to, Disposition::Unresolved { reason: $why })
     };
     (@row $kind:ident ($name:ident { $($field:ident: $unit:ty),+ $(,)? })
         $line:literal $from:ident $to:ident $label:literal) => {
-        coupling_map!(@census $line $from $to $label, coupling_map!(@disposition $kind))
+        coupling_map!(@census $line $from $to, coupling_map!(@disposition $kind))
     };
-    (@census $line:literal $from:ident $to:ident $label:literal, $disposition:expr) => {
+    (@census $line:literal $from:ident $to:ident, $disposition:expr) => {
         CensusRow {
             line: $line,
-            from: <$from as System>::CARD,
-            to: <$to as System>::CARD,
-            label: $label,
             disposition: $disposition,
             slice_incident: <$from as System>::IN_SLICE || <$to as System>::IN_SLICE,
         }
