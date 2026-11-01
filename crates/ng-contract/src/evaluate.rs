@@ -16,113 +16,108 @@ pub(crate) struct Undefined {
     pub(crate) domain: OperatorDomain,
 }
 
-#[derive(Clone, Copy)]
-struct Dual {
-    value: f64,
-    slope: f64,
-}
-
-/// A smooth limit, with `sign` on its root. It is defined where the root is zero, and its derivative term
-/// there is zero, the mean of the two one-sided derivatives, so a Newton step only loses speed.
-fn smooth(a: Dual, b: Dual, width: Dual, sign: f64) -> Dual {
-    let difference = a.value - b.value;
-    let root = (difference * difference + width.value * width.value).sqrt();
-    let term = if root == 0.0 {
-        0.0
+/// A smooth limit, with `sign` on its root, and the root's own terms: the slope in `a - b` and in `w`. Both are
+/// zero where the root is, the mean of the two one-sided derivatives, so a Newton step only loses speed.
+fn smooth(a: f64, b: f64, width: f64, sign: f64) -> (f64, f64, f64) {
+    let difference = a - b;
+    let root = (difference * difference + width * width).sqrt();
+    let (along, across) = if root == 0.0 {
+        (0.0, 0.0)
     } else {
-        (difference * (a.slope - b.slope) + width.value * width.slope) / root
+        (difference / root, width / root)
     };
-    Dual {
-        value: 0.5 * (a.value + b.value + sign * root),
-        slope: 0.5 * (a.slope + b.slope + sign * term),
-    }
+    (0.5 * (a + b + sign * root), along, across)
 }
 
-fn run(ops: &[Op], inputs: &[Dual], partial_volume: f64) -> Result<Dual, OperatorDomain> {
-    let mut stack: Vec<Dual> = Vec::with_capacity(ops.len());
-    let mut next_input = 0;
+/// One kernel's values, in code order. `next_input` hands each `Op::Input` its value in turn.
+fn run(
+    ops: &[Op],
+    mut next_input: impl FnMut() -> f64,
+    partial_volume: f64,
+    stack: &mut Vec<f64>,
+) -> Result<f64, OperatorDomain> {
+    stack.clear();
     for op in ops {
         let at = |index: usize| stack[index];
         let result = match op {
-            Op::Input(_) => {
-                next_input += 1;
-                inputs[next_input - 1]
-            }
-            Op::Zero(_) => Dual {
-                value: 0.0,
-                slope: 0.0,
-            },
-            Op::Add([a, b]) => Dual {
-                value: at(*a).value + at(*b).value,
-                slope: at(*a).slope + at(*b).slope,
-            },
-            Op::Subtract([a, b]) | Op::Deviation([a, b]) => Dual {
-                value: at(*a).value - at(*b).value,
-                slope: at(*a).slope - at(*b).slope,
-            },
-            Op::Multiply([a, b]) | Op::Scale([a, b]) | Op::ConductanceFlow([a, b]) => {
-                let (a, b) = (at(*a), at(*b));
-                Dual {
-                    value: a.value * b.value,
-                    slope: a.slope * b.value + a.value * b.slope,
-                }
-            }
+            Op::Input(_) => next_input(),
+            Op::Zero(_) => 0.0,
+            Op::Add([a, b]) => at(*a) + at(*b),
+            Op::Subtract([a, b]) | Op::Deviation([a, b]) => at(*a) - at(*b),
+            Op::Multiply([a, b]) | Op::Scale([a, b]) | Op::ConductanceFlow([a, b]) => at(*a) * at(*b),
             Op::Divide([a, b]) => {
-                let (a, b) = (at(*a), at(*b));
-                if b.value <= 0.0 {
+                if at(*b) <= 0.0 {
                     return Err(OperatorDomain::Divisor);
                 }
-                Dual {
-                    value: a.value / b.value,
-                    slope: (a.slope * b.value - a.value * b.slope) / (b.value * b.value),
-                }
+                at(*a) / at(*b)
             }
             Op::AsDimension([x]) => at(*x),
-            Op::SmoothMax([a, b, width]) => smooth(at(*a), at(*b), at(*width), 1.0),
-            Op::SmoothMin([a, b, width]) => smooth(at(*a), at(*b), at(*width), -1.0),
-            Op::Exp([x]) => {
-                let x = at(*x);
-                let value = pinned::exp(x.value);
-                Dual {
-                    value,
-                    slope: value * x.slope,
-                }
-            }
-            Op::Logistic([x]) => {
-                let x = at(*x);
-                let value = 1.0 / (1.0 + pinned::exp(-x.value));
-                Dual {
-                    value,
-                    slope: value * (1.0 - value) * x.slope,
-                }
-            }
-            Op::Ln([x]) => {
-                let x = at(*x);
-                let value = pinned::ln(x.value).ok_or(OperatorDomain::LogarithmArgument)?;
-                Dual {
-                    value,
-                    slope: x.slope / x.value,
-                }
-            }
-            Op::Relax([target, current, speed]) => {
-                let (target, current, speed) = (at(*target), at(*current), at(*speed));
-                let gap = target.value - current.value;
-                Dual {
-                    value: speed.value * gap,
-                    slope: speed.slope * gap + speed.value * (target.slope - current.slope),
-                }
-            }
-            Op::Volume([amount]) => Dual {
-                value: at(*amount).value * partial_volume,
-                slope: at(*amount).slope * partial_volume,
-            },
+            Op::SmoothMax([a, b, width]) => smooth(at(*a), at(*b), at(*width), 1.0).0,
+            Op::SmoothMin([a, b, width]) => smooth(at(*a), at(*b), at(*width), -1.0).0,
+            Op::Exp([x]) => pinned::exp(at(*x)),
+            Op::Logistic([x]) => 1.0 / (1.0 + pinned::exp(-at(*x))),
+            Op::Ln([x]) => pinned::ln(at(*x)).ok_or(OperatorDomain::LogarithmArgument)?,
+            Op::Relax([target, current, speed]) => at(*speed) * (at(*target) - at(*current)),
+            Op::Volume([amount]) => at(*amount) * partial_volume,
         };
-        if !result.value.is_finite() {
+        if !result.is_finite() {
             return Err(OperatorDomain::NonFinite);
         }
         stack.push(result);
     }
     Ok(stack[stack.len() - 1])
+}
+
+/// One backward sweep over a finished `run`: the slope of the kernel's result in every operation's value, so one
+/// sweep gives every read's slope at about the cost of the forward run.
+fn sweep(ops: &[Op], values: &[f64], partial_volume: f64, slopes: &mut Vec<f64>) {
+    slopes.clear();
+    slopes.resize(ops.len(), 0.0);
+    slopes[ops.len() - 1] = 1.0;
+    for (at, op) in ops.iter().enumerate().rev() {
+        let slope = slopes[at];
+        if slope == 0.0 {
+            continue;
+        }
+        match op {
+            Op::Input(_) | Op::Zero(_) => {}
+            Op::Add([a, b]) => {
+                slopes[*a] += slope;
+                slopes[*b] += slope;
+            }
+            Op::Subtract([a, b]) | Op::Deviation([a, b]) => {
+                slopes[*a] += slope;
+                slopes[*b] -= slope;
+            }
+            Op::Multiply([a, b]) | Op::Scale([a, b]) | Op::ConductanceFlow([a, b]) => {
+                slopes[*a] += slope * values[*b];
+                slopes[*b] += slope * values[*a];
+            }
+            Op::Divide([a, b]) => {
+                let divisor = values[*b];
+                slopes[*a] += slope / divisor;
+                slopes[*b] -= slope * values[*a] / (divisor * divisor);
+            }
+            Op::AsDimension([x]) => slopes[*x] += slope,
+            Op::SmoothMax([a, b, width]) | Op::SmoothMin([a, b, width]) => {
+                let sign = if matches!(op, Op::SmoothMax(_)) { 1.0 } else { -1.0 };
+                let (_, along, across) = smooth(values[*a], values[*b], values[*width], sign);
+                slopes[*a] += slope * 0.5 * (1.0 + sign * along);
+                slopes[*b] += slope * 0.5 * (1.0 - sign * along);
+                slopes[*width] += slope * 0.5 * sign * across;
+            }
+            Op::Exp([x]) => slopes[*x] += slope * values[at],
+            Op::Logistic([x]) => slopes[*x] += slope * values[at] * (1.0 - values[at]),
+            Op::Ln([x]) => slopes[*x] += slope / values[*x],
+            Op::Relax([target, current, speed]) => {
+                let gap = values[*target] - values[*current];
+                slopes[*target] += slope * values[*speed];
+                slopes[*current] -= slope * values[*speed];
+                slopes[*speed] += slope * gap;
+            }
+            Op::Volume([amount]) => slopes[*amount] += slope * partial_volume,
+        }
+    }
 }
 
 pub(crate) struct Inputs<'a> {
@@ -147,50 +142,30 @@ impl CompiledBody {
     fn partial_volume(&self) -> f64 {
         (self.layout.schema.partial_volume.as_ref()).map_or(0.0, |coefficient| coefficient.value())
     }
-    fn read(&self, instance: &Instance, inputs: &Inputs<'_>, direction: Option<UnknownId>) -> Vec<Dual> {
-        let read = |bound: &Bound| match *bound {
-            Bound::Parameter(parameter) => Dual {
-                value: inputs.parameters[parameter.index()],
-                slope: 0.0,
-            },
-            Bound::Unknown(unknown) => Dual {
-                value: inputs.unknowns[unknown.index()],
-                slope: if direction == Some(unknown) { 1.0 } else { 0.0 },
-            },
-            Bound::Boundary(name) => Dual {
-                value: inputs.frame.rate(name),
-                slope: 0.0,
-            },
-            Bound::Draw(stream) => Dual {
-                value: inputs.draws[stream],
-                slope: 0.0,
-            },
-            Bound::Forcing(forcing) => Dual {
-                value: inputs.factors[forcing],
-                slope: 0.0,
-            },
-            Bound::Gauge => Dual {
-                value: 0.0,
-                slope: 0.0,
-            },
-        };
-        instance.inputs.iter().map(read).collect()
-    }
-    fn walk(&self, instance: &Instance, duals: &[Dual]) -> Result<Dual, Undefined> {
+    fn walk(&self, instance: &Instance, inputs: &Inputs<'_>, stack: &mut Vec<f64>) -> Result<f64, Undefined> {
         let program = &self.layout.programs[instance.program.index()];
-        run(&program.code.ops, duals, self.partial_volume()).map_err(|domain| Undefined {
+        let mut bounds = instance.inputs.iter();
+        let next = || match *bounds.next().expect("one bound per input") {
+            Bound::Parameter(parameter) => inputs.parameters[parameter.index()],
+            Bound::Unknown(unknown) => inputs.unknowns[unknown.index()],
+            Bound::Boundary(name) => inputs.frame.rate(name),
+            Bound::Draw(stream) => inputs.draws[stream],
+            Bound::Forcing(forcing) => inputs.factors[forcing],
+            Bound::Gauge => 0.0,
+        };
+        run(&program.code.ops, next, self.partial_volume(), stack).map_err(|domain| Undefined {
             law: program.law,
             domain,
         })
     }
     pub(crate) fn instance_values(&self, inputs: &Inputs<'_>) -> Result<Vec<Option<f64>>, Undefined> {
+        let mut stack = Vec::new();
         (self.layout.instances.iter())
             .map(|instance| {
                 if !instance.holds(inputs.modes) {
                     return Ok(None);
                 }
-                let duals = self.read(instance, inputs, None);
-                Ok(Some(self.walk(instance, &duals)?.value))
+                Ok(Some(self.walk(instance, inputs, &mut stack)?))
             })
             .collect()
     }
@@ -222,6 +197,28 @@ impl CompiledBody {
         }
         residuals
     }
+    /// Calls `each` once per holding instance with the kernel's value, and each `Bound` read with its slope.
+    fn slopes(
+        &self,
+        inputs: &Inputs<'_>,
+        mut each: impl FnMut(&Instance, &mut dyn Iterator<Item = (&Bound, f64)>) -> Result<(), Undefined>,
+    ) -> Result<(), Undefined> {
+        let (mut stack, mut slopes) = (Vec::new(), Vec::new());
+        let holds = |instance: &&Instance| instance.holds(inputs.modes);
+        for instance in self.layout.instances.iter().filter(holds) {
+            let value = self.walk(instance, inputs, &mut stack)?;
+            let program = &self.layout.programs[instance.program.index()];
+            let ops = &program.code.ops;
+            sweep(ops, &stack, self.partial_volume(), &mut slopes);
+            let flat = positive_part(instance, value) != value;
+            let reads = (ops.iter().zip(&slopes))
+                .filter(|(op, _)| matches!(op, Op::Input(_)))
+                .map(|(_, &slope)| if flat { 0.0 } else { slope });
+            let mut read = instance.inputs.iter().zip(reads);
+            each(instance, &mut read)?;
+        }
+        Ok(())
+    }
     pub(crate) fn jacobian(&self, inputs: &Inputs<'_>, shift: f64) -> Result<Vec<f64>, Undefined> {
         let sparsity = &self.layout.sparsity;
         let mut values = vec![0.0; sparsity.unknowns.len()];
@@ -230,20 +227,9 @@ impl CompiledBody {
             let found = sparsity.unknowns[range.clone()].binary_search(&unknown);
             range.start + found.expect("the compiled sparsity holds every unknown a row's laws read")
         };
-        for instance in self
-            .layout
-            .instances
-            .iter()
-            .filter(|instance| instance.holds(inputs.modes))
-        {
-            let mut read: Vec<UnknownId> = (instance.inputs.iter()).filter_map(Bound::unknown).collect();
-            read.sort_unstable();
-            read.dedup();
-            for direction in read {
-                let duals = self.read(instance, inputs, Some(direction));
-                let walked = self.walk(instance, &duals)?;
-                let flat = positive_part(instance, walked.value) != walked.value;
-                let slope = if flat { 0.0 } else { walked.slope };
+        self.slopes(inputs, |instance, reads| {
+            for (bound, slope) in reads {
+                let Some(unknown) = bound.unknown() else { continue };
                 if !slope.is_finite() {
                     let program = &self.layout.programs[instance.program.index()];
                     return Err(Undefined {
@@ -254,7 +240,7 @@ impl CompiledBody {
                 match instance.target {
                     Target::Column(column) => {
                         for &(row, coefficient) in &self.layout.columns[column.index()].terms {
-                            values[entry(row.index(), direction)] -= coefficient as f64 * slope;
+                            values[entry(row.index(), unknown)] -= coefficient as f64 * slope;
                         }
                     }
                     Target::Row(row) => {
@@ -262,11 +248,12 @@ impl CompiledBody {
                             RowKind::Algebraic(_) => 1.0,
                             RowKind::Amount { .. } | RowKind::Memory(_) => -1.0,
                         };
-                        values[entry(row.index(), direction)] += sign * slope;
+                        values[entry(row.index(), unknown)] += sign * slope;
                     }
                 }
             }
-        }
+            Ok(())
+        })?;
         for (at, row) in self.layout.rows.iter().enumerate() {
             if !matches!(row.kind, RowKind::Algebraic(_)) {
                 values[entry(at, row.unknown)] += shift;
@@ -281,17 +268,9 @@ impl CompiledBody {
         slots: &[ParameterId],
     ) -> Result<Vec<f64>, Undefined> {
         let mut slopes = vec![0.0; self.layout.rows.len()];
-        let holds = |instance: &&Instance| instance.holds(inputs.modes);
-        for instance in self.layout.instances.iter().filter(holds) {
-            let mut duals = self.read(instance, inputs, None);
-            for (dual, input) in duals.iter_mut().zip(&instance.inputs) {
-                if matches!(input, Bound::Parameter(parameter) if slots.contains(parameter)) {
-                    dual.slope = 1.0;
-                }
-            }
-            let walked = self.walk(instance, &duals)?;
-            let flat = positive_part(instance, walked.value) != walked.value;
-            let slope = if flat { 0.0 } else { walked.slope };
+        self.slopes(inputs, |instance, reads| {
+            let fitted = reads.filter(|(bound, _)| matches!(bound, Bound::Parameter(parameter) if slots.contains(parameter)));
+            let slope: f64 = fitted.map(|(_, slope)| slope).sum();
             match instance.target {
                 Target::Column(column) => {
                     for &(row, coefficient) in &self.layout.columns[column.index()].terms {
@@ -306,7 +285,8 @@ impl CompiledBody {
                     slopes[row.index()] += sign * slope;
                 }
             }
-        }
+            Ok(())
+        })?;
         Ok(slopes)
     }
     pub(crate) fn excursions(
