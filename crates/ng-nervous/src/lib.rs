@@ -45,16 +45,19 @@ fn transmitter<'b, Q: Substance>(
     ns.transfer_at(&reuptake, back);
 }
 
+/// A logistic of how far the filter stands from the set point, shifted so the body rests low on the curve and traffic
+/// has room to rise. Model default.
 fn traffic<'b>(
     ns: &mut FragmentBuilder<'b, Nervous>,
     filtered: &StateSlot<'b, Nervous, Dimensionless>,
     set_point: &StateSlot<'b, Nervous, Reference<Dimensionless>>,
-    (name, width_key, falls): (&'static str, &'static str, bool),
+    (name, width_key, rest_key, falls): (&'static str, &'static str, &'static str, bool),
     class: RateClass,
 ) -> AlgebraicSlot<'b, Nervous, Dimensionless> {
     let row = ns.algebraic::<Dimensionless>(name, Admissible::unit_interval());
     let width =
         ns.parameter::<Deviation<Dimensionless>>(ParameterKey::new(width_key), Admissible::positive());
+    let rest = ns.parameter::<Dimensionless>(ParameterKey::new(rest_key), Admissible::finite());
     let residual = ns.kernel(|mut k| {
         let (measured, reference) = (k.state(filtered), k.state(set_point));
         let off = k.deviation(measured, reference);
@@ -63,7 +66,9 @@ fn traffic<'b>(
         let rising = k.as_dimension(ratio);
         let zero = k.zero();
         let drive = if falls { k.subtract(zero, rising) } else { rising };
-        let value = k.logistic(drive);
+        let resting = k.parameter(&rest);
+        let shifted = k.add(drive, resting);
+        let value = k.logistic(shifted);
         let held = k.algebraic(&row);
         let residual = k.subtract(held, value);
         k.finish(residual, ns.every_mode(), class)
@@ -115,14 +120,14 @@ pub fn declare<'b>(scope: NervousScope<'b>) -> Result<Fragment<'b, Nervous>, Adm
         &mut ns,
         &filtered,
         &set_point,
-        ("sympathetic traffic", "ns.sympathetic-width", true),
+        ("sympathetic traffic", "ns.sympathetic-width", "ns.sympathetic-rest", true),
         reflex,
     );
     let vagal = traffic(
         &mut ns,
         &filtered,
         &set_point,
-        ("vagal traffic", "ns.vagal-width", false),
+        ("vagal traffic", "ns.vagal-width", "ns.vagal-rest", false),
         reflex,
     );
     transmitter::<Norepinephrine>(

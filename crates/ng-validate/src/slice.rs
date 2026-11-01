@@ -691,6 +691,8 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
         ("cv.half", 0.5),
         ("ns.carotid-share", 0.5),
         ("ns.arch-share", 0.5),
+        ("ns.sympathetic-rest", 0.0),
+        ("ns.vagal-rest", 0.0),
         ("rn.feedback-rest", 1.0),
         ("rn.feedback-gain", 0.6),
         ("rn.feedback-middle", 0.5),
