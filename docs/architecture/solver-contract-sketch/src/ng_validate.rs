@@ -411,7 +411,6 @@ pub enum ReplayGate {
 pub fn run<'m>(
     _body: &'m CompiledBody,
     _solver: &'m dyn CoupledSolver,
-    _initializer: &dyn Initializer,
     _spec: ArenaSpec,
     _pace: Pace,
 ) -> Result<ArenaRun<'m>, ArenaFailure> {
@@ -423,7 +422,6 @@ pub fn run<'m>(
 pub fn replay_gates(
     _body: &CompiledBody,
     _cores: &dyn CoreFactory,
-    _initializer: &dyn Initializer,
     _spec: &ArenaSpec,
 ) -> Result<ReplayEvidence, ArenaFailure> {
     todo!()

@@ -1,6 +1,6 @@
 //! Failure kinds. Numerical refusal, engine fault and physiological demise have no conversion
 //! between them. `TrialFailure` is only the union a trial step can return.
-use super::{AnchorId, Digest, LawOrigin, RowId, SimTime, SourceId};
+use super::{AdmissionRow, Digest, LawOrigin, QuantityId, RowId, SimTime, SourceId};
 
 /// A retryable numerical attempt; the accepted record is untouched. Only `StepTicket::refuse`
 /// makes one.
@@ -98,13 +98,12 @@ pub struct AdmissionError {
 }
 pub enum InitializationFailure {
     Admission(AdmissionError),
-    NotConverged { iterations: u32 },
-    AnchorUnreachable { anchor: AnchorId },
-    Singular { rows: Vec<RowId> },
-    /// A row the solved workspace leaves inconsistent with the packet, its set or its residual.
-    Inconsistent { row: RowId },
+    /// A row the solved workspace leaves inconsistent with the packet, its set or the tolerance.
+    Inconsistent { row: AdmissionRow },
     /// A law the solved workspace leaves without a value, such as a divisor at zero.
     Undefined { law: LawOrigin },
+    /// A conserved combination whose boundary flows do not net to zero over the cycle: no state returns.
+    NetBoundaryFlow { quantity: QuantityId },
 }
 
 /// Types reserved now; no death-producing operation exists in this sketch.

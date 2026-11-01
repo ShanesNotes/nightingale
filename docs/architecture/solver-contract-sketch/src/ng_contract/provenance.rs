@@ -1,10 +1,10 @@
-//! Where every number comes from. `Specified`, `Derived` and `Calibrated` never convert into each
-//! other. A packet's kind decides what its anchors are: a `Reviewed` packet holds cited
-//! `Specified` anchors; a `SyntheticFixture` holds `Synthetic` ones, which have no citation and no
-//! conversion to `Specified`. The packet keeps real values and their provenance; parameters bind to
-//! the compiled body by key (`CompiledBody::bind`), so evaluation sees the values.
-use super::{AdmissionError, Digest, Measure, PacketHash, PacketSeed, Unit};
+//! Where every number comes from. A packet's kind decides what backs a value: a `Reviewed` packet holds
+//! `Citation`s, and a `SyntheticFixture` holds notes, with no conversion between them. The packet keeps real
+//! values and their provenance; parameters bind to the compiled body by key (`CompiledBody::bind`), so
+//! evaluation sees the values.
+use super::{AdmissionError, Compensated, Digest, Measure, PacketHash, PacketSeed, RowKind, Unit};
 use core::marker::PhantomData;
+use core::num::{NonZeroU32, NonZeroU64};
 
 /// Reading status records evidence actually inspected; there is no FromMemory variant.
 pub enum Reading {
@@ -13,90 +13,69 @@ pub enum Reading {
     Abstract,
     SecondaryReproduction { reproduction: String },
 }
+/// A source and the page or table in it. It cannot prove anyone read the source.
 pub struct Citation {
-    _source: String,
-    _page_or_table: String,
-    _reading: Reading,
-    _tier: Tier,
+    _source: &'static str,
+    _locator: &'static str,
 }
 impl Citation {
-    /// Validates nonempty locators, but cannot prove that a person read a source. The tier says
-    /// how strong the source is; a `Textbook` tier carries an edition and page in the locator and
-    /// whether a primary source would upgrade the anchor.
-    pub fn new(_source: String, _page_or_table: String, _reading: Reading, _tier: Tier)
-        -> Result<Self, AdmissionError> {
+    pub fn new(_source: &'static str, _locator: &'static str) -> Self {
         todo!()
     }
 }
+/// One anchor's stable name in its packet, the id its source record carries in `data/`.
 #[derive(Clone, Copy)]
-pub enum AnchorId {
-    P1,
-    P2,
-    P3,
-    P4,
-    P5,
-    P6,
-    P7,
-    P8,
-    P9,
-    P10,
-    P11,
-    P12,
-    P13,
-    P14,
-    P15,
-    P16,
-    P17,
-    P18,
-    P19,
-    P20,
-    P21,
-    P22,
-    P23,
-    P24,
-    P25,
-    P26,
+pub struct AnchorId {
+    _id: &'static str,
 }
-/// What an anchor's value summarizes. An anchor on a fluctuating output (a pressure that moves
-/// with every beat) states its statistic, and its admission row matches it.
+impl AnchorId {
+    pub const fn new(_id: &'static str) -> Self {
+        Self { _id }
+    }
+}
+/// What an anchor's value summarizes. A cycle mean names no length: the cycle is the packet's, so a cycle a
+/// heart sets for itself moves no anchor.
 pub enum AnchorStatistic {
     Instant,
     CycleMean,
-    WindowMean { window_ns: u64 },
 }
-/// A physiological anchor: value, stated unit and the citation it was read from.
-pub struct Specified<U> {
-    _anchor: AnchorId,
-    _value: Measure<U>,
-    _unit: Unit<U>,
-    _citation: Citation,
+/// What an anchor states (rule 17): the row it reads, the method that reads it, the window and the value.
+pub struct Snapshot<U> {
+    _row: RowKind,
+    _method: &'static str,
     _statistic: AnchorStatistic,
-}
-impl<U> Specified<U> {
-    /// An instant anchor; `over` states another statistic.
-    pub fn new(_anchor: AnchorId, _value: Measure<U>, _unit: Unit<U>, _citation: Citation) -> Self {
-        todo!()
-    }
-    /// What the value summarizes. `bind` refuses an instant anchor on an output whose kernel has
-    /// a wave or beat rate class.
-    pub fn over(self, _statistic: AnchorStatistic) -> Self {
-        todo!()
-    }
-}
-/// An arena stand-in for an anchor: explicitly nonclinical and uncited. No conversion to
-/// `Specified`, `Citation` or clinical admission exists.
-pub struct Synthetic<U> {
-    _anchor: AnchorId,
     _value: Measure<U>,
-    _unit: Unit<U>,
-    _note: &'static str,
-    _statistic: AnchorStatistic,
 }
-impl<U> Synthetic<U> {
-    pub fn new(_anchor: AnchorId, _value: Measure<U>, _unit: Unit<U>, _note: &'static str) -> Self {
+impl<U> Snapshot<U> {
+    pub fn new(_row: RowKind, _method: &'static str, _statistic: AnchorStatistic, _value: Measure<U>) -> Self {
         todo!()
     }
-    pub fn over(self, _statistic: AnchorStatistic) -> Self {
+}
+/// A target a produced quantity must meet at admission. Its trace is what its packet's kind takes.
+pub struct Anchor<K: PacketKind, U> {
+    _id: AnchorId,
+    _snapshot: Snapshot<U>,
+    _trace: K::Trace,
+}
+impl<K: PacketKind, U> Anchor<K, U> {
+    pub fn new(_id: AnchorId, _snapshot: Snapshot<U>, _trace: K::Trace) -> Self {
+        todo!()
+    }
+}
+/// A cited anchor, the one kind a reviewed packet takes.
+pub type Specified<U> = Anchor<Reviewed, U>;
+/// A nonclinical anchor with a note where a citation would be.
+pub type Synthetic<U> = Anchor<SyntheticFixture, U>;
+/// One pass of the periodic goal from the anchor moment, in equal intervals. The packet holds it, because it
+/// shapes the start state and the packet's hash is what a run's identity covers.
+#[derive(Clone, Copy)]
+pub struct Cycle {
+    _period_ns: u64,
+    _intervals: u32,
+}
+impl Cycle {
+    /// Refuses a period `intervals` does not divide.
+    pub fn new(_period_ns: NonZeroU64, _intervals: NonZeroU32) -> Result<Self, AdmissionError> {
         todo!()
     }
 }
@@ -119,39 +98,28 @@ impl<U> Derived<U> {
         todo!()
     }
 }
-/// A parameter the admission solve fits so the named anchors of the SAME packet hold.
-pub struct Calibrated<U> {
-    _initial_guess: Measure<U>,
-    _targets: Vec<AnchorId>,
-}
-impl<U> Calibrated<U> {
-    /// Refuses an empty target set.
-    pub fn new(_initial_guess: Measure<U>, _targets: Vec<AnchorId>) -> Result<Self, AdmissionError> {
-        todo!()
-    }
-}
-
 mod sealed {
     pub trait PacketKind {}
 }
-/// What a packet admits as an anchor. Sealed: exactly two kinds.
+/// What a packet admits. Sealed: exactly two kinds. The one difference between them is what backs a value.
 pub trait PacketKind: sealed::PacketKind {
-    type Anchor<U>;
+    type Trace;
 }
-/// Clinical numbers after source review: anchors carry citations.
+/// Clinical numbers after source review: values carry citations.
 pub enum Reviewed {}
-/// The arena's nonclinical fixture: anchors are synthetic.
+/// The arena's nonclinical fixture: values carry notes.
 pub enum SyntheticFixture {}
 impl sealed::PacketKind for Reviewed {}
 impl sealed::PacketKind for SyntheticFixture {}
 impl PacketKind for Reviewed {
-    type Anchor<U> = Specified<U>;
+    type Trace = Citation;
 }
 impl PacketKind for SyntheticFixture {
-    type Anchor<U> = Synthetic<U>;
+    type Trace = &'static str;
 }
 
 /// Stable key a fragment declares a parameter under; the packet binds values by it.
+#[derive(Clone, Copy)]
 pub struct ParameterKey {
     _key: &'static str,
 }
@@ -160,18 +128,32 @@ impl ParameterKey {
         Self { _key }
     }
 }
-/// How one bound value was obtained, as typed data for the admission record.
+/// How a value was set, as typed data for the admission record. A fixture's records are synthetic, so every
+/// kind can stand in one, and `Fixture` is a synthetic value set by hand.
 pub enum ValueProvenance {
-    Derived,
-    Calibrated(Vec<AnchorId>),
-    /// Drawn from a population record when the packet was built, so the patient's draw is part of
-    /// the packet hash and never of the run seed.
-    Sampled { population: PopulationId, packet_seed: PacketSeed, draw: u64 },
-    /// Set by hand for one patient, outside or inside the record's range, with the reason (a
-    /// disease overlay, a teaching case).
-    Authored { population: PopulationId, reason: &'static str },
-    /// Fixture packets only; never a clinical value.
     Fixture,
+    /// By a named identity over other packet values.
+    Derived { identity: &'static str, inputs: &'static [ParameterKey] },
+    /// Drawn from its key's population record with the packet seed when the packet was built, so the patient's
+    /// draw is part of the packet hash and never of the run seed.
+    Sampled,
+    /// Chosen inside its key's population record, with a reason.
+    Authored { reason: &'static str },
+    /// Fitted at admission so this anchor holds.
+    Calibrated { anchor: AnchorId },
+    /// A start value admission moved off the packet's guess.
+    Solved,
+}
+/// Which packet value a record speaks for: a parameter entry or a row's start.
+pub enum ValueName {
+    Parameter { key: ParameterKey },
+    Start(RowKind),
+}
+/// One value as the run starts from it.
+pub struct ValueRecord {
+    pub name: ValueName,
+    pub provenance: ValueProvenance,
+    pub value: Compensated,
 }
 
 /// One located claim in an admitted source: the repository's source registry span, how it was
@@ -256,28 +238,6 @@ pub enum Certainty {
 pub struct EvidenceId {
     _index: u32,
 }
-/// A parameter's range in a population: its distribution, the evidence behind it, and the
-/// correlation group it varies with (body size scales several values together).
-pub struct PopulationRecord {
-    _parameter: ParameterKey,
-    _distribution: Statistic,
-    _evidence: Vec<EvidenceId>,
-    _correlation_group: Option<&'static str>,
-}
-impl PopulationRecord {
-    pub fn new(
-        _parameter: ParameterKey,
-        _distribution: Statistic,
-        _evidence: Vec<EvidenceId>,
-        _correlation_group: Option<&'static str>,
-    ) -> Result<Self, AdmissionError> {
-        todo!()
-    }
-}
-#[derive(Clone, Copy)]
-pub struct PopulationId {
-    _index: u32,
-}
 /// What a validity range (or any non-fixture range) rests on.
 pub enum Basis {
     Evidence(EvidenceId),
@@ -289,46 +249,62 @@ struct PacketEntry {
     _unit: &'static str,
     _provenance: ValueProvenance,
 }
-/// Every parameter value with its provenance, plus the anchors the admission solve must meet.
+/// A parameter's range in a stated population: an interval and what backs it.
+struct PopulationEntry {
+    _key: &'static str,
+    _lower: f64,
+    _upper: f64,
+}
+/// Every parameter value with its provenance, the anchors the admission solve must meet and its goal.
 /// Its hash is part of the run identity; it is data bound to a model, not part of the model.
 pub struct ParameterPacket<K: PacketKind> {
+    _cycle: Option<Cycle>,
     _anchors: Vec<PacketEntry>,
     _values: Vec<PacketEntry>,
     _evidence: Vec<EvidenceRecord>,
-    _populations: Vec<PopulationRecord>,
+    _populations: Vec<PopulationEntry>,
     _kind: PhantomData<K>,
 }
 impl<K: PacketKind> ParameterPacket<K> {
+    /// A packet whose start state stands at one instant.
     pub fn new() -> Self {
         todo!()
     }
-    /// An anchor of this packet's kind; a second value for one anchor is refused.
-    pub fn anchor<U>(&mut self, _anchor: K::Anchor<U>) -> Result<(), AdmissionError> {
+    /// A packet whose start state returns after `cycle`: the periodic goal.
+    pub fn periodic(_cycle: Cycle) -> Self {
         todo!()
     }
-    /// A value drawn for this patient from one of this packet's population records, with the
-    /// packet seed, when the packet is built. The record's distribution and correlation group come
-    /// from this packet's manifest; the draw is then inside the packet hash.
-    pub fn sampled(&mut self, _key: ParameterKey, _population: PopulationId, _seed: &PacketSeed, _draw: u64)
+    /// An anchor of this packet's kind; a second anchor under one id is refused.
+    pub fn anchor<U>(&mut self, _anchor: Anchor<K, U>) -> Result<(), AdmissionError> {
+        todo!()
+    }
+    /// `key`'s range in the patient's population.
+    pub fn population<U>(&mut self, _key: ParameterKey, _lower: Measure<U>, _upper: Measure<U>, _trace: K::Trace)
         -> Result<(), AdmissionError> {
         todo!()
     }
-    /// A value set by hand for this patient, inside or outside the record's range, with the reason.
-    pub fn authored<U>(&mut self, _key: ParameterKey, _value: Measure<U>, _population: PopulationId,
-        _reason: &'static str) -> Result<(), AdmissionError> {
+    /// A value drawn from `key`'s population record with the packet seed, when the packet is built. The draw is
+    /// then inside the packet hash.
+    pub fn sampled(&mut self, _key: ParameterKey, _seed: PacketSeed) -> Result<(), AdmissionError> {
         todo!()
     }
-    pub fn derived<U>(&mut self, _key: ParameterKey, _value: Derived<U>) -> Result<(), AdmissionError> {
+    /// A value chosen inside `key`'s population record, with the reason. A value outside it is refused.
+    pub fn authored<U>(&mut self, _key: ParameterKey, _value: Measure<U>, _reason: &'static str)
+        -> Result<(), AdmissionError> {
         todo!()
     }
-    pub fn calibrated<U>(&mut self, _key: ParameterKey, _value: Calibrated<U>) -> Result<(), AdmissionError> {
+    /// A value an identity gives from other packet values. `bind` refuses an input with no entry or a fitted one.
+    pub fn derived<U>(&mut self, _key: ParameterKey, _value: Measure<U>, _identity: &'static str,
+        _inputs: &'static [ParameterKey]) -> Result<(), AdmissionError> {
+        todo!()
+    }
+    /// A parameter admission fits so `anchor` holds. One fit names one anchor.
+    pub fn calibrated<U>(&mut self, _key: ParameterKey, _guess: Measure<U>, _anchor: AnchorId)
+        -> Result<(), AdmissionError> {
         todo!()
     }
     /// Adds a record to the packet's evidence manifest, which is hashed into the packet.
     pub fn evidence(&mut self, _record: EvidenceRecord) -> EvidenceId {
-        todo!()
-    }
-    pub fn population(&mut self, _record: PopulationRecord) -> Result<PopulationId, AdmissionError> {
         todo!()
     }
     pub fn hash(&self) -> PacketHash {

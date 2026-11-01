@@ -1,5 +1,5 @@
-//! The numerical seam: contract-B's `CoupledSolver` (and `Initializer`, in admission), revised to
-//! bind a ticket and return typed failure. Every method is required; there are no default
+//! The numerical seam: contract-B's `CoupledSolver`, revised to bind a ticket and return typed
+//! failure. Every method is required; there are no default
 //! bodies. Both arena cores implement these traits directly, importing only this contract.
 use super::*;
 

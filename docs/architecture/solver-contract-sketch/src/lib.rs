@@ -45,8 +45,8 @@
 //! A physiological anchor needs a Citation; provenance cannot be omitted.
 //! ```compile_fail,E0061
 //! use solver_contract_sketch::ng_contract::*;
-//! fn uncited(value: Measure<Pressure>, unit: Unit<Pressure>) -> Specified<Pressure> {
-//!     Specified::new(AnchorId::P4, value, unit)
+//! fn uncited(id: AnchorId, read: Snapshot<Pressure>) -> Specified<Pressure> {
+//!     Specified::new(id, read)
 //! }
 //! ```
 //!

@@ -104,7 +104,7 @@ The length of simulated time a solver core commits to for its next step, before 
 A ticket ended at a waiting input, solved only after the same ticket at the core's span has passed.
 
 **Fence**:
-The earliest stamp a late input may take: the instant of a cut that did not publish at its own end, because it was refused or landed short, or just past the admission instant.
+The earliest stamp a late input may take: the instant of a cut that did not publish at its own end, because it was refused or landed short, or the first instant admission did not read.
 
 **Blind step**:
 The step the record would accept as if nothing waited, landing included. An attempt reads the timeline only after it has one.
@@ -296,6 +296,9 @@ A target a produced quantity must meet when the start state is solved, stated wi
 **Anchor statistic**:
 What an anchor's value summarizes: an instant, a cycle mean or a window mean. An anchor on a pulsatile quantity is a cycle mean.
 
+**Cycle**:
+One pass of a periodic goal from the anchor moment, in equal intervals. The packet states it, so the packet's hash covers it, and a cycle mean reads it.
+
 **Healthy range**:
 The target for one reading, the central 95% of healthy adults over the averaging window their study used, matched to the patient in activity, sex, age or method wherever a source shows that one of these shifts the reading. It comes from a primary study, else a compiled source or a textbook value at its tier (section 6), else an inference record that adjusts a sourced range by a sourced shift (record 0004).
 _Avoid_: normal range, normal limits, reference range
@@ -326,7 +329,7 @@ _Avoid_: estimate, assumed value
 A parameter's range in a stated population (a mean and spread, quantiles or an interval), with the source records behind it and the parameters it varies with.
 
 **Value provenance**:
-How a packet value was set: specified (cited), sampled (drawn from a population record), derived (by an identity), calibrated (fitted at admission), inferred (by a model, through an inference record) or authored (chosen inside a population record's range, with a reason). A synthetic fixture's values are fixture values instead.
+How a packet value was set: specified (cited), sampled (drawn from a population record), derived (by an identity), calibrated (fitted at admission), inferred (by a model, through an inference record) or authored (chosen inside a population record's range, with a reason). In a synthetic fixture a note stands where a source would, and a value set by hand is a fixture value. A start value admission moves is solved.
 
 **Synthetic fixture**:
 A packet or healthy-range set of obviously synthetic test values with no citations. The arena accepts only this kind.
