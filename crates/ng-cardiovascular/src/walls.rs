@@ -110,7 +110,9 @@ impl<'b, 'h> Walls<'b, 'h> {
     /// holds over the sum leaves as heat. That rate is no law's choice: it is what keeps the store equal to the sum,
     /// so closure sits in the stage residual and `verify` judges it with the rest. Gravity's work enters beside the
     /// heart's, so the rate is what the flows lose in any posture. The moving blood's energy and the stretch of tissue
-    /// and tubule are not in the sum, so what they hold passes through this rate as heat.
+    /// and tubule are not in the sum, so what they hold passes through this rate as heat. Water entering a wall and a
+    /// vein's muscle tightening have no receipt, so for that moment the rate reads low. Below zero it is an account past
+    /// its form, reported on the step, and no reason to stop a body.
     pub(crate) fn energy(
         &self,
         cv: &mut FragmentBuilder<'b, Cardiovascular>,
@@ -118,7 +120,7 @@ impl<'b, 'h> Walls<'b, 'h> {
         heart: &Heart<'b>,
         head: &Parameter<'b, Cardiovascular, Quotient<Pressure, Length>>,
         wave: RateClass,
-    ) {
+    ) -> Result<(), AdmissionError> {
         let half = cv.parameter::<Dimensionless>(ParameterKey::new("cv.half"), Admissible::positive());
         let elastic = cv.algebraic::<Energy>("elastic energy", Admissible::nonnegative());
         let row = cv.kernel(|mut k| {
@@ -167,8 +169,7 @@ impl<'b, 'h> Walls<'b, 'h> {
         cv.transfer_along(&fallen, falling);
 
         let store = ports.dissipation(cv);
-        // Heat never runs back into the store, so a stage that needs it to has broken the closure.
-        let dissipation = cv.algebraic::<Rate<Energy>>("dissipated power", Admissible::nonnegative());
+        let dissipation = cv.algebraic::<Rate<Energy>>("dissipated power", Admissible::finite());
         let closing = cv.kernel(|mut k| {
             let held = k.read(&store.amount::<Energy>());
             let sum = k.algebraic(&elastic);
@@ -180,6 +181,13 @@ impl<'b, 'h> Walls<'b, 'h> {
             let value = k.algebraic(&dissipation);
             k.finish(value, cv.every_mode(), wave)
         });
+        let trusted = ValidityRange::new(
+            Measure::new(0.0)?,
+            Measure::new(f64::MAX)?,
+            Basis::Fixture("heat leaves a wall and does not return"),
+        )?;
+        cv.validity(&leaving, trusted);
         cv.transfer(Transfer::new(&store, leaving));
+        Ok(())
     }
 }

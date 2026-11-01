@@ -12,7 +12,7 @@ use crate::{
 use core::marker::PhantomData;
 
 pub(crate) const ENCLOSURE_PRESSURE: &str = "enclosure_pressure";
-pub(crate) const BLOOD_PRESSURE: &str = "blood pressure";
+const BLOOD_PRESSURE: &str = "blood pressure";
 
 /// The anatomy and the composition data laws never see: which species live in which spaces, where a route crosses
 /// the boundary, the partial-volume coefficient and the spaces this body leaves out.
@@ -688,14 +688,5 @@ impl<'b, S> HeldPorts<'b, S> {
     /// Refuses a name the schema does not declare for `Q`. Compile refuses a law on a route the declaration omits.
     pub fn route<Q: Substance>(&self, name: &'static str) -> Result<BoundaryRoute<'b, Q, S>, AdmissionError> {
         named_route(&self.names, name)
-    }
-    /// Work into the elastic store as a route pushes water into a stretched vessel. The far end is a receipt: the walls
-    /// gain what the push pays, and nothing else in the body pays it.
-    pub fn entry_work(&self, laws: &mut FragmentBuilder<'b, S>) -> Pair<'b, S, Energy>
-    where
-        S: Owner,
-    {
-        laws.request(Family::EntryWork);
-        Pair::serving(crate::law::Obligation::Family(Family::EntryWork))
     }
 }

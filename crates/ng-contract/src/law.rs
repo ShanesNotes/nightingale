@@ -127,7 +127,6 @@ pub(crate) enum Family {
     Exchange(Species),
     StrokeWork,
     GravityWork,
-    EntryWork,
     Dissipation,
 }
 impl Family {
@@ -146,7 +145,6 @@ impl Family {
             Family::Exchange(species) => species.names()[5],
             Family::StrokeWork => "stroke work",
             Family::GravityWork => "gravity work",
-            Family::EntryWork => "entry work",
             Family::Dissipation => "dissipation",
         }
     }
@@ -393,10 +391,6 @@ impl Seal for Source {
                 out.text(family.name());
             }
             Source::Extravascular => out.number(6),
-            Source::Landing(route) => {
-                out.number(7);
-                out.text(route);
-            }
         }
     }
 }
@@ -754,7 +748,6 @@ pub(crate) enum Source {
     Amount(Family, End, Species),
     Pool(Species),
     RoutePool(&'static str, Species),
-    Landing(&'static str),
     Drive(&'static str),
     Field(LawName),
     Flow(Family),
@@ -918,10 +911,6 @@ impl<'b, O, Q> Pair<'b, O, Q> {
     /// The amount of any species in the pool this pair leaves or, across the boundary, reaches.
     pub fn amount<R: Substance>(&self) -> ReadPort<'b, O, R> {
         ReadPort::of(Source::RoutePool(self.serves.local(), R::SPECIES))
-    }
-    /// The blood pressure where this pair's boundary lands. Compile refuses a landing that has none.
-    pub fn landing_pressure(&self) -> ReadPort<'b, O, Pressure> {
-        ReadPort::of(Source::Landing(self.serves.local()))
     }
 }
 /// A transfer law on a pair: what leaves one end enters the other.
