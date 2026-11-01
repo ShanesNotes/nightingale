@@ -1549,162 +1549,109 @@ fn the_goal_and_its_grid_are_in_the_packet_hash() {
     );
 }
 
+#[derive(Clone, Copy)]
+struct Stated {
+    method: &'static str,
+    value: f64,
+    anchor_note: &'static str,
+    range: [f64; 2],
+    record_note: &'static str,
+    reason: &'static str,
+    identity: &'static str,
+    seed: u64,
+}
+const STATED: Stated = Stated {
+    method: GAUGE,
+    value: MEAN_A,
+    anchor_note: NOTE,
+    range: [1.0, 3.0],
+    record_note: NOTE,
+    reason: "a reason",
+    identity: "an identity",
+    seed: 1,
+};
+
+fn stated_hash(case: &PulsatileCase, stated: Stated) -> PacketHash {
+    let mut packet = case.packet_without_fit();
+    let speed = measure::<Rate<Dimensionless>>(1.0);
+    packet.synthetic(PACE, Binding::Body, speed, NOTE).expect("once");
+    let settled = RowKind::Memory(name(SETTLED));
+    packet
+        .start(settled, measure::<Dimensionless>(1.0), NOTE)
+        .expect("once");
+    let read = Snapshot::new(
+        case.a(),
+        stated.method,
+        AnchorStatistic::CycleMean,
+        measure::<Water>(stated.value),
+    );
+    packet
+        .anchor(Synthetic::new(MEAN, read, stated.anchor_note))
+        .expect("once");
+    packet
+        .calibrated(E, NETWORK, measure::<Elastance>(GUESS), MEAN)
+        .expect("once");
+    let [low, high] = stated.range.map(measure::<Dimensionless>);
+    packet
+        .population(TONE, low, high, stated.record_note)
+        .expect("once");
+    let seed = PacketSeed::new([stated.seed, 2, 3, 4]);
+    packet.sampled(TONE, Binding::Body, seed).expect("a record");
+    let (low, high) = (measure::<Dimensionless>(0.0), measure::<Dimensionless>(9.0));
+    packet.population(RATIO, low, high, NOTE).expect("once");
+    let ratio = measure::<Dimensionless>(4.5);
+    packet
+        .authored(RATIO, Binding::Body, ratio, stated.reason)
+        .expect("inside");
+    let doubled = measure::<Dimensionless>(9.0);
+    packet
+        .derived(DOUBLED, Binding::Body, doubled, stated.identity, DOUBLED_FROM)
+        .expect("once");
+    case.body().bind(packet).expect("bound").packet_hash()
+}
+
 #[test]
 fn every_part_of_a_packet_is_in_its_hash() {
     let case = PulsatileCase::new(Variant::Extra);
-    let rows = |packet: &mut ParameterPacket<SyntheticFixture>| {
-        let speed = measure::<Rate<Dimensionless>>(1.0);
-        packet.synthetic(PACE, Binding::Body, speed, NOTE).expect("once");
-        let settled = RowKind::Memory(name(SETTLED));
-        packet
-            .start(settled, measure::<Dimensionless>(1.0), NOTE)
-            .expect("once");
-    };
-    let hash = |method: &'static str,
-                value: f64,
-                anchor_note: &'static str,
-                lower: f64,
-                upper: f64,
-                record_note: &'static str,
-                reason: &'static str,
-                identity: &'static str,
-                sampled: u64| {
-        let mut packet = case.packet_without_fit();
-        rows(&mut packet);
-        let read = Snapshot::new(case.a(), method, statistic, measure::<Water>(value));
-        packet
-            .anchor(Synthetic::new(MEAN, read, anchor_note))
-            .expect("once");
-        packet
-            .calibrated(E, NETWORK, measure::<Elastance>(GUESS), MEAN)
-            .expect("once");
-        let (low, high) = (measure::<Dimensionless>(lower), measure::<Dimensionless>(upper));
-        packet.population(TONE, low, high, record_note).expect("once");
-        packet
-            .sampled(TONE, Binding::Body, PacketSeed::new([sampled, 2, 3, 4]))
-            .expect("a record");
-        let (low, high) = (measure::<Dimensionless>(0.0), measure::<Dimensionless>(9.0));
-        packet.population(RATIO, low, high, NOTE).expect("once");
-        packet
-            .authored(RATIO, Binding::Body, measure::<Dimensionless>(4.5), reason)
-            .expect("inside");
-        packet
-            .derived(
-                DOUBLED,
-                Binding::Body,
-                measure::<Dimensionless>(9.0),
-                identity,
-                DOUBLED_FROM,
-            )
-            .expect("once");
-        case.body().bind(packet).expect("bound").packet_hash()
-    };
-    let base = || {
-        hash(
-            CycleMean,
-            GAUGE,
-            MEAN_A,
-            NOTE,
-            1.0,
-            3.0,
-            NOTE,
-            "a reason",
-            "an identity",
-            1,
-        )
-    };
-    assert_eq!(base(), base());
-    let other = [
-        hash(
-            CycleMean,
-            "another",
-            MEAN_A,
-            NOTE,
-            1.0,
-            3.0,
-            NOTE,
-            "a reason",
-            "an identity",
-            1,
-        ),
-        hash(
-            CycleMean,
-            GAUGE,
-            MEAN_A + 1.0,
-            NOTE,
-            1.0,
-            3.0,
-            NOTE,
-            "a reason",
-            "an identity",
-            1,
-        ),
-        hash(
-            CycleMean,
-            GAUGE,
-            MEAN_A,
-            "another",
-            1.0,
-            3.0,
-            NOTE,
-            "a reason",
-            "an identity",
-            1,
-        ),
-        hash(
-            CycleMean,
-            GAUGE,
-            MEAN_A,
-            NOTE,
-            1.0,
-            3.0,
-            "another",
-            "a reason",
-            "an identity",
-            1,
-        ),
-        hash(
-            CycleMean,
-            GAUGE,
-            MEAN_A,
-            NOTE,
-            1.0,
-            3.0,
-            NOTE,
-            "another",
-            "an identity",
-            1,
-        ),
-        hash(
-            CycleMean, GAUGE, MEAN_A, NOTE, 1.0, 3.0, NOTE, "a reason", "another", 1,
-        ),
-        hash(
-            CycleMean,
-            GAUGE,
-            MEAN_A,
-            NOTE,
-            1.0,
-            3.0,
-            NOTE,
-            "a reason",
-            "an identity",
-            2,
-        ),
-        hash(
-            CycleMean,
-            GAUGE,
-            MEAN_A,
-            NOTE,
-            0.5,
-            3.5,
-            NOTE,
-            "a reason",
-            "an identity",
-            1,
-        ),
+    let base = stated_hash(&case, STATED);
+    assert_eq!(base, stated_hash(&case, STATED));
+    let changed = [
+        Stated {
+            method: "another",
+            ..STATED
+        },
+        Stated {
+            value: MEAN_A + 1.0,
+            ..STATED
+        },
+        Stated {
+            anchor_note: "another",
+            ..STATED
+        },
+        Stated {
+            range: [0.5, 3.0],
+            ..STATED
+        },
+        Stated {
+            range: [1.0, 3.5],
+            ..STATED
+        },
+        Stated {
+            record_note: "another",
+            ..STATED
+        },
+        Stated {
+            reason: "another",
+            ..STATED
+        },
+        Stated {
+            identity: "another",
+            ..STATED
+        },
+        Stated { seed: 2, ..STATED },
     ];
-    for (at, hash) in other.iter().enumerate() {
-        assert_ne!(*hash, base(), "change {at}");
+    for (at, stated) in changed.into_iter().enumerate() {
+        assert_ne!(stated_hash(&case, stated), base, "change {at}");
     }
 }
 
