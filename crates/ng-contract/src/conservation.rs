@@ -1,17 +1,20 @@
 use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::quantity::dimension;
-use crate::{Column, Digest, Dimension, RowId, Water};
+use crate::{Column, Digest, Dimension, RowId, Species};
 
-/// The conserved quantity a combination balances.
+/// The conserved quantity a combination balances: what its pools hold, or charge, the sum of every ion by its sign.
+/// A moiety is its species across spaces, because a transfer never changes a species.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Book {
-    Water,
+    Of(Species),
+    Charge,
 }
 impl Book {
     pub fn measures<U: Dimension>(self) -> bool {
         match self {
-            Book::Water => dimension::<U>() == dimension::<Water>(),
+            Book::Of(species) => dimension::<U>() == species.dimension(),
+            Book::Charge => false,
         }
     }
 }
@@ -56,8 +59,15 @@ impl ConservedBasis {
 pub struct Combination {
     id: QuantityId,
     terms: Vec<(RowId, i64)>,
+    regulated: bool,
 }
 impl Combination {
+    /// A boundary law reads the body, so the total answers its own flows: admission solves it, and the packet's is only
+    /// a guess. A total no such law touches stays the packet's. Charge is neither: it follows from the ions, and
+    /// admission holds no row of its own for it.
+    pub fn regulated(&self) -> bool {
+        self.regulated
+    }
     pub fn id(&self) -> QuantityId {
         self.id
     }
@@ -77,13 +87,18 @@ impl Seal for ConservedBasis {
 }
 impl Seal for Combination {
     fn seal(&self, out: &mut Canonical) {
-        let Self { id, terms } = self;
-        out.number(id.book as u64);
+        let Self { id, terms, regulated } = self;
+        match id.book {
+            Book::Of(species) => out.number(species as u64),
+            Book::Charge => out.number(u64::MAX),
+        }
         terms.seal(out);
+        out.number(u64::from(*regulated));
     }
 }
 
-pub(crate) fn conserved_basis(amounts: usize, columns: &[Column]) -> ConservedBasis {
+/// `amounts[row]` is the species a row holds and `reads[column]` says the column's law reads a row.
+pub(crate) fn conserved_basis(amounts: &[Species], columns: &[Column], reads: &[bool]) -> ConservedBasis {
     let mut edges = Vec::new();
     for column in columns {
         match column.terms[..] {
@@ -95,7 +110,7 @@ pub(crate) fn conserved_basis(amounts: usize, columns: &[Column]) -> ConservedBa
             _ => unreachable!("a transfer moves one unit between two amounts, or across the boundary"),
         }
     }
-    let part = Digraph::new(amounts, &edges).strongly_connected_components();
+    let part = Digraph::new(amounts.len(), &edges).strongly_connected_components();
     let mut seen: Vec<usize> = Vec::new();
     let mut combinations: Vec<Combination> = Vec::new();
     for (row, &part) in part.iter().enumerate() {
@@ -106,14 +121,36 @@ pub(crate) fn conserved_basis(amounts: usize, columns: &[Column]) -> ConservedBa
                 combinations.push(Combination {
                     id: QuantityId {
                         index: seen.len() - 1,
-                        book: Book::Water,
+                        book: Book::Of(amounts[row]),
                     },
                     terms: Vec::new(),
+                    regulated: false,
                 });
                 seen.len() - 1
             }
         };
         combinations[at].terms.push((RowId::at(row), 1));
+    }
+    for (column, _) in
+        (columns.iter().zip(reads)).filter(|&(column, reads)| *reads && column.receipt.is_some())
+    {
+        let row = column.terms[0].0;
+        for combination in &mut combinations {
+            combination.regulated |= combination.terms.iter().any(|term| term.0 == row);
+        }
+    }
+    let ions: Vec<(RowId, i64)> = (amounts.iter().enumerate())
+        .filter(|(_, species)| species.charge() != 0)
+        .map(|(row, species)| (RowId::at(row), species.charge()))
+        .collect();
+    if !ions.is_empty() {
+        let index = combinations.len();
+        let book = Book::Charge;
+        combinations.push(Combination {
+            id: QuantityId { index, book },
+            terms: ions,
+            regulated: false,
+        });
     }
     ConservedBasis { combinations }
 }

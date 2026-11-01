@@ -55,14 +55,21 @@ fn baroreflex<'b>(scope: NervousScope<'b>) -> Result<Fragment<'b, Nervous>, Admi
     let inverse_tau = laws.parameter(ParameterKey::new("ns.afferent-rate"), Admissible::nonnegative());
     let resetting = laws.parameter(ParameterKey::new("ns.resetting-rate"), Admissible::nonnegative());
     let (reflex, slow) = (
-        RateClass::new(RateBand::Reflex, 1_000_000_000)?,
+        RateClass::new(RateBand::Reflex, 3_600_000_000_000)?,
         RateClass::new(RateBand::Hours, 3_600_000_000_000)?,
+    );
+    let width = laws.parameter::<Deviation<Dimensionless>>(
+        ParameterKey::new("ns.deviation-width"),
+        Admissible::positive(),
     );
     let relax = laws.kernel(|mut k| {
         let stretch = k.read(&afferents.carotid_sinus_stretch);
         let reference = k.state(&set_point);
         let error = k.deviation(stretch, reference);
-        let target = k.logistic(error);
+        let scale = k.parameter(&width);
+        let ratio = k.divide(error, scale);
+        let drive = k.as_dimension(ratio);
+        let target = k.logistic(drive);
         let current = k.state(&filter);
         let speed = k.parameter(&inverse_tau);
         let rate = k.relax(target, current, speed);
@@ -88,7 +95,7 @@ fn baroreflex<'b>(scope: NervousScope<'b>) -> Result<Fragment<'b, Nervous>, Admi
 
 fn valve<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardiovascular>, AdmissionError> {
     let (mut laws, ports) = scope.parts();
-    let wave = || RateClass::new(RateBand::Wave, 1_000_000);
+    let wave = || RateClass::new(RateBand::Wave, 3_600_000_000_000);
     // 10 restores CV's chamber pressure port; until then the chamber is a local algebraic slot that a
     // fixture parameter closes, like the outflow.
     let chamber = laws.algebraic::<Pressure>("chamber", Admissible::finite());

@@ -23,16 +23,16 @@ fn body() -> Result<(CompiledBody, [SiteId; 2]), AdmissionError> {
     map.contain(root.id(), b.id());
     map.connect(Network::Vascular, a.id(), b.id());
     let mut schema = Schema::new(map.finish()?)?;
-    schema.water_boundary("inflow", BoundaryDirection::IntoBody, a.id(), Space::Lumen)?;
-    schema.water_boundary("unread", BoundaryDirection::IntoBody, b.id(), Space::Lumen)?;
+    schema.boundary::<Water>("inflow", BoundaryDirection::IntoBody, a.id(), Space::Lumen)?;
+    schema.boundary::<Water>("unread", BoundaryDirection::IntoBody, b.id(), Space::Lumen)?;
     schema.partial_volume(measure(1.0))?;
     let body = assemble(schema, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
-        let e = laws.edge_parameter::<Elastance>(ParameterKey::new("cv.e"), Admissible::positive());
-        let g =
-            laws.edge_parameter::<Conductance<Water>>(ParameterKey::new("cv.g"), Admissible::nonnegative());
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let e = laws.edge_parameter::<_, Elastance>(ParameterKey::new("cv.e"), Admissible::positive());
+        let g = laws
+            .edge_parameter::<_, Conductance<Water>>(ParameterKey::new("cv.g"), Admissible::nonnegative());
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let flow = laws.edge_kernel(|mut k| {
             let upstream = k.at_edge(&route.from_amount());
             let downstream = k.at_edge(&route.to_amount());
@@ -49,13 +49,13 @@ fn body() -> Result<(CompiledBody, [SiteId; 2]), AdmissionError> {
         laws.transfer_along(&route, flow);
         body.add(laws.finish());
         let (mut laws, ports) = body.boundary()?.parts();
-        let BoundaryWater { route: pair, drive } = ports.water("inflow")?;
+        let BoundaryRoute { route: pair, drive } = ports.route::<Water>("inflow")?;
         let rate = laws.kernel(|mut k| {
             let value = k.read(&drive);
             k.finish(value, laws.every_mode(), wave)
         });
         laws.transfer(Transfer::new(&pair, rate));
-        let BoundaryWater { route: unread, .. } = ports.water("unread")?;
+        let BoundaryRoute { route: unread, .. } = ports.route::<Water>("unread")?;
         let nothing = laws.kernel(|mut k| {
             let zero = k.zero::<Rate<Water>>();
             k.finish(zero, laws.every_mode(), wave)
@@ -91,6 +91,7 @@ fn image(body: &CompiledBody, sites: [SiteId; 2]) -> ImageParts {
         let row = RowKind::Amount {
             site,
             space: Space::Lumen,
+            species: Species::Water,
         };
         packet
             .start(row, measure::<Water>(3.0), "synthetic")

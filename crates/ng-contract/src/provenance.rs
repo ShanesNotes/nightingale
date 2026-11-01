@@ -1,6 +1,6 @@
 use crate::identity::{Canonical, Seal};
 use crate::{
-    AdmissionRow, Binding, Compensated, ErrorScales, LawName, Measure, PacketKind, Reviewed, RowKind,
+    AdmissionRow, Binding, Compensated, ErrorScales, Measure, PacketKind, Reviewed, RowKind, Slot,
     SyntheticFixture,
 };
 
@@ -155,7 +155,7 @@ impl Seal for ValueProvenance {
 pub enum ValueName {
     Parameter { key: ParameterKey, binding: Binding },
     Start(RowKind),
-    Mode { variable: LawName, value: &'static str },
+    Mode { variable: Slot, value: &'static str },
 }
 
 /// One value as the run starts from it. A first mode's number is its place in the compiled order of its values.
@@ -179,8 +179,8 @@ impl InitializationProvenance {
     pub fn values(&self) -> &[ValueRecord] {
         &self.values
     }
-    pub fn tolerance(&self) -> ErrorScales {
-        self.tolerance
+    pub fn tolerance(&self) -> &ErrorScales {
+        &self.tolerance
     }
     /// The row with the largest defect over its scale, at most one. `None` for a body with no row.
     pub fn worst(&self) -> Option<(AdmissionRow, Compensated)> {

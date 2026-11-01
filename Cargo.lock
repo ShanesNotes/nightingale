@@ -3,8 +3,29 @@
 version = 4
 
 [[package]]
+name = "ng-cardiovascular"
+version = "0.0.0"
+dependencies = [
+ "ng-contract",
+]
+
+[[package]]
 name = "ng-contract"
 version = "0.0.0"
+
+[[package]]
+name = "ng-fluids"
+version = "0.0.0"
+dependencies = [
+ "ng-contract",
+]
+
+[[package]]
+name = "ng-nervous"
+version = "0.0.0"
+dependencies = [
+ "ng-contract",
+]
 
 [[package]]
 name = "ng-observe"
@@ -15,7 +36,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ng-receptor"
+version = "0.0.0"
+dependencies = [
+ "ng-contract",
+]
+
+[[package]]
 name = "ng-record"
+version = "0.0.0"
+dependencies = [
+ "ng-contract",
+]
+
+[[package]]
+name = "ng-renal"
 version = "0.0.0"
 dependencies = [
  "ng-contract",
@@ -25,7 +60,12 @@ dependencies = [
 name = "ng-validate"
 version = "0.0.0"
 dependencies = [
+ "ng-cardiovascular",
  "ng-contract",
+ "ng-fluids",
+ "ng-nervous",
  "ng-observe",
+ "ng-receptor",
  "ng-record",
+ "ng-renal",
 ]

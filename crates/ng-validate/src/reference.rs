@@ -49,7 +49,7 @@ impl CoupledSolver for ReferenceIntegrator {
             RETRY_BUDGET,
             ArithmeticProfile::contract_v1(),
             StageScheme::backward_euler_doubled(),
-            self.scales,
+            self.scales.clone(),
         )
     }
     fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
@@ -113,10 +113,11 @@ fn newton(
             }
         };
         // An update is in each row's own unknown, where a residual is a rate on one row and a kernel's
-        // value on another, so this one test fits both. The update still applies: on a stiff row one
-        // unit in the last place can be a defect above the scales.
-        settled = (update.iter().zip(&unknowns))
-            .all(|(change, unknown)| change.abs() <= NEWTON_STOP * (1.0 + unknown.abs()));
+        // value on another, so this one test fits both, and each row's own scale says what size that unknown
+        // is. The update still applies: on a stiff row one unit in the last place can be a defect above the scales.
+        settled = (update.iter().zip(&unknowns).enumerate()).all(|(slot, (change, unknown))| {
+            change.abs() <= NEWTON_STOP * (problem.scale(slot, *unknown) + unknown.abs())
+        });
         for (unknown, change) in workspace.unknowns_mut().iter_mut().zip(update) {
             *unknown -= change;
         }

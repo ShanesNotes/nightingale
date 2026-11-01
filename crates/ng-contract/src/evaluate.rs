@@ -1,8 +1,10 @@
-use crate::body::{Bound, Instance, ParameterId, RowKind, Target, UnknownId};
+use crate::body::{Bound, GuardLayout, Instance, ParameterId, RowId, RowKind, Target, UnknownId};
 use crate::boundary::DriveFrame;
 use crate::law::{Op, Validity};
 use crate::pinned;
-use crate::{Compensated, CompiledBody, ExcursionSide, LawName, SimTime, ValidityExcursion};
+use crate::{
+    Compensated, CompiledBody, Crossing, ErrorScales, ExcursionSide, LawName, SimTime, ValidityExcursion,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum OperatorDomain {
@@ -116,6 +118,24 @@ fn run(ops: &[Op], inputs: &[Dual], partial_volume: f64) -> Result<Dual, Operato
                 value: at(*amount).value * partial_volume,
                 slope: at(*amount).slope * partial_volume,
             },
+            Op::Upwind([flow, from, from_water, to, to_water]) => {
+                let flow = at(*flow);
+                let (amount, water) = if flow.value >= 0.0 {
+                    (at(*from), at(*from_water))
+                } else {
+                    (at(*to), at(*to_water))
+                };
+                if water.value <= 0.0 {
+                    return Err(OperatorDomain::Divisor);
+                }
+                let share = amount.value / water.value;
+                let turned =
+                    (amount.slope * water.value - amount.value * water.slope) / (water.value * water.value);
+                Dual {
+                    value: flow.value * share,
+                    slope: flow.slope * share + flow.value * turned,
+                }
+            }
         };
         if !result.value.is_finite() {
             return Err(OperatorDomain::NonFinite);
@@ -147,7 +167,52 @@ impl CompiledBody {
     fn partial_volume(&self) -> f64 {
         (self.layout.schema.partial_volume.as_ref()).map_or(0.0, |coefficient| coefficient.value())
     }
+    /// How far a guard stands past its crossing. `Either` reads the crossing as a change of sign, which a landing
+    /// reads off the base, so a guard of it stands at the negative of its size.
+    pub(crate) fn guard_gap(&self, guard: &GuardLayout, inputs: &Inputs<'_>) -> Result<f64, Undefined> {
+        let duals = self.read_bounds(&guard.inputs, inputs, None);
+        let value = run(&guard.code.ops, &duals, self.partial_volume()).map_err(|domain| Undefined {
+            law: LawName {
+                owner: "guard",
+                local: "zero",
+            },
+            domain,
+        })?;
+        Ok(match guard.crossing {
+            Crossing::Rising => value.value,
+            Crossing::Falling => -value.value,
+            Crossing::Either => -value.value.abs(),
+        })
+    }
+    /// Which modes and resets follow a point's state: every plain guard armed in `inputs.modes` and crossed fires,
+    /// holding a gap within `tolerance` of zero crossed, so a point that lands on its guard, as the ring's last point
+    /// lands on the wrap, reads the same on every sweep.
+    pub(crate) fn fired_at(
+        &self,
+        inputs: &Inputs<'_>,
+        tolerance: &ErrorScales,
+    ) -> Result<(Vec<usize>, Vec<RowId>), Undefined> {
+        let scales = tolerance.for_rows(self.rows());
+        let mut modes = inputs.modes.to_vec();
+        let mut resets = Vec::new();
+        for guard in self
+            .layout
+            .guards
+            .iter()
+            .filter(|guard| guard.armed(inputs.modes))
+        {
+            let gap = self.guard_gap(guard, inputs)?;
+            if gap >= -scales.at(0, gap) {
+                modes[guard.variable] = guard.enters;
+                resets.extend(guard.resets);
+            }
+        }
+        Ok((modes, resets))
+    }
     fn read(&self, instance: &Instance, inputs: &Inputs<'_>, direction: Option<UnknownId>) -> Vec<Dual> {
+        self.read_bounds(&instance.inputs, inputs, direction)
+    }
+    fn read_bounds(&self, bounds: &[Bound], inputs: &Inputs<'_>, direction: Option<UnknownId>) -> Vec<Dual> {
         let read = |bound: &Bound| match *bound {
             Bound::Parameter(parameter) => Dual {
                 value: inputs.parameters[parameter.index()],
@@ -173,8 +238,12 @@ impl CompiledBody {
                 value: 0.0,
                 slope: 0.0,
             },
+            Bound::Height(axial) => Dual {
+                value: inputs.frame.upright() * f64::from_bits(axial),
+                slope: 0.0,
+            },
         };
-        instance.inputs.iter().map(read).collect()
+        bounds.iter().map(read).collect()
     }
     fn walk(&self, instance: &Instance, duals: &[Dual]) -> Result<Dual, Undefined> {
         let program = &self.layout.programs[instance.program.index()];
@@ -201,7 +270,8 @@ impl CompiledBody {
             let Some(value) = *value else { continue };
             match instance.target {
                 Target::Column(column) => columns[column.index()] = value,
-                Target::Row(row) => rows[row.index()] = positive_part(instance, value),
+                // A row's laws add, so a sum over sites is one row with one instance per site.
+                Target::Row(row) => rows[row.index()] += positive_part(instance, value),
             }
         }
         (columns, rows)

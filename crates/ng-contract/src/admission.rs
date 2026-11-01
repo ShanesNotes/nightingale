@@ -4,12 +4,14 @@ use crate::chance::{HELD_DRAW, HELD_FACTOR};
 use crate::evaluate::{Inputs, Undefined};
 use crate::packet::{BoundAnchor, Fit, Owed};
 use crate::problem::{Jacobian, SolveWorkspace};
+use crate::scheme::RowScales;
 use crate::{
-    AdmissionError, AnchorId, AnchorStatistic, BoundParameters, BoundaryPort, Candidate, Compensated,
+    AdmissionError, AnchorId, AnchorStatistic, Book, BoundParameters, BoundaryPort, Candidate, Compensated,
     CompiledBody, DenseSegment, ErrorScales, ImageParts, InitializationProvenance, LawName, MethodHistory,
     ModelHash, ObservationLens, PacketHash, QuantityId, Row, RowId, RowKind, SimTime, UnknownId, ValueName,
     ValueProvenance, ValueRecord,
 };
+use core::ops::Range;
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 /// What rounding leaves of a value, past which a change to it can be told from nothing.
@@ -61,14 +63,19 @@ impl CompiledBody {
         delivery: &Delivery,
         earliest: SimTime,
     ) -> Result<(), AdmissionError> {
+        if delivery.at < earliest {
+            return Err(AdmissionError::EventBeforeHead { id: delivery.id });
+        }
+        if delivery.posture_event() {
+            return Ok(());
+        }
         let boundaries = &self.layout.schema.boundaries;
-        if !boundaries.iter().any(|known| known.name == delivery.boundary) {
+        if !(boundaries.iter())
+            .any(|known| known.name == delivery.boundary && delivery.carries(known.pool.species))
+        {
             return Err(AdmissionError::UnknownBoundary {
                 name: delivery.boundary,
             });
-        }
-        if delivery.at < earliest {
-            return Err(AdmissionError::EventBeforeHead { id: delivery.id });
         }
         if !self.reads_drive(delivery.boundary) {
             return Err(AdmissionError::DriveNotRead {
@@ -147,10 +154,16 @@ impl CompiledBody {
         let pending = PendingInputs::opening(boundary, fence);
         let frame_at = |ns: &u64| pending.frame_at(SimTime::from_ns(*ns));
         let frames: Vec<DriveFrame> = instants.iter().map(frame_at).collect();
-        let tolerance = parameters.owed.tolerance.unwrap_or(ErrorScales::EXACT);
+        let tolerance = parameters.owed.tolerance.clone().unwrap_or(ErrorScales::EXACT);
+        let scales = tolerance.for_rows(self.rows());
+        let modes = vec![parameters.modes.clone(); frames.len()];
+        let resets = vec![Vec::new(); frames.len()];
         Ok(InitializationSystem {
             body: self,
             parameters,
+            modes,
+            resets,
+            scales,
             pending,
             anchor_moment,
             tolerance,
@@ -179,9 +192,18 @@ fn algebraic(kind: RowKind) -> bool {
 ///
 /// An instant has one point and no ring. A cycle has one backward Euler stage per interval, around the ring, on
 /// the surface a core's stage evaluates, so the rows need no second formula and `admit` needs no solver.
+///
+/// Each point holds its own modes. A guard crossed at point `k` fires on the way to point `k + 1`, as a step that ends
+/// there would: the next point's stage holds in what it left and starts from its reset. `sweep` reads that off the
+/// workspace, and `admit` runs the same reading and refuses a ring it would change.
 pub struct InitializationSystem<'m> {
     body: &'m CompiledBody,
     parameters: BoundParameters,
+    /// One per point: the modes its stage holds in.
+    modes: Vec<Vec<usize>>,
+    /// One per point: the rows a firing on the way to it set to zero.
+    resets: Vec<Vec<RowId>>,
+    scales: RowScales,
     pending: PendingInputs,
     anchor_moment: SimTime,
     tolerance: ErrorScales,
@@ -230,20 +252,29 @@ impl InitializationSystem<'_> {
             parameters: values,
             frame: &self.frames[self.before(point)],
             unknowns: state,
-            modes: &self.parameters.modes,
+            modes: &self.modes[point],
             draws: &self.draws,
             factors: &self.factors,
         }
     }
+    fn reset(&self, point: usize, row: usize) -> bool {
+        self.resets[point].contains(&RowId::at(row))
+    }
     /// The total row of a combination replaces its least row at the last point, because the point rows sum to the
-    /// combination's net boundary flow over the cycle, whatever the state: they alone leave its total free.
+    /// combination's net boundary flow over the cycle, whatever the state: they alone leave its total free. A regulated
+    /// total answers its own flows, so its point rows pin it and it needs no row. Charge follows from the ions.
     fn replaced(&self) -> impl Iterator<Item = (usize, QuantityId)> + '_ {
         let last = self.frames.len() - 1;
         let rows = self.body.rows().len();
         let combinations = self.body.conserved_basis().combinations();
         (combinations.iter())
+            .filter(|combination| !combination.regulated() && combination.book() != Book::Charge)
             .filter(|_| self.interval.is_some())
             .map(move |combination| (last * rows + combination.terms()[0].0.index(), combination.id()))
+    }
+    /// How many points the ring holds, one for an instant.
+    pub fn points(&self) -> usize {
+        self.frames.len()
     }
     /// Seeded with the packet's start values at every point and each fit's guess.
     pub fn workspace(&self) -> SolveWorkspace {
@@ -258,18 +289,38 @@ impl InitializationSystem<'_> {
     /// a stage's rate is multiplied by the interval, as `verify` does. An amount or memory row of an instant is
     /// its value less the packet's.
     fn stages(&self, unknowns: &[f64]) -> Result<Vec<f64>, InitializationFailure> {
-        let rows = self.body.rows();
         let values = self.values(unknowns);
         let mut out = Vec::with_capacity(self.unknowns());
         for point in 0..self.frames.len() {
+            self.stage_rows(unknowns, &values, point, &mut out)?;
+        }
+        Ok(out)
+    }
+    fn stage_rows(
+        &self,
+        unknowns: &[f64],
+        values: &[f64],
+        point: usize,
+        out: &mut Vec<f64>,
+    ) -> Result<(), InitializationFailure> {
+        let rows = self.body.rows();
+        {
             let state = self.point(unknowns, point);
             let before = self.point(unknowns, self.before(point));
-            let inputs = self.inputs(point, state, &values);
+            let inputs = self.inputs(point, state, values);
             let laws = self.body.instance_values(&inputs).map_err(undefined)?;
             let (columns, rates) = self.body.targets(&laws);
             let tangent = |seconds: f64| {
-                let changes = state.iter().zip(before).map(|(now, then)| (now - then) / seconds);
-                changes.collect::<Vec<f64>>()
+                let change = |(at, (now, then)): (usize, (&f64, &f64))| {
+                    let then = if self.reset(point, at) { 0.0 } else { *then };
+                    (now - then) / seconds
+                };
+                state
+                    .iter()
+                    .zip(before)
+                    .enumerate()
+                    .map(change)
+                    .collect::<Vec<f64>>()
             };
             let derivative = self.interval.map_or(vec![0.0; rows.len()], tangent);
             let residuals = self.body.residuals(&columns, &rates, &derivative);
@@ -281,7 +332,7 @@ impl InitializationSystem<'_> {
                 });
             }
         }
-        Ok(out)
+        Ok(())
     }
     /// How far a combination's sum at the start stands from the packet's, and the packet's sum. The first is summed
     /// term by term, so a total too large to hold still reads as unmoved.
@@ -352,7 +403,7 @@ impl InitializationSystem<'_> {
                     )
                 };
                 let mut line: Vec<(usize, f64)> = reads.map(read).collect();
-                if self.interval.is_some() && !algebraic(row.kind()) {
+                if self.interval.is_some() && !algebraic(row.kind()) && !self.reset(point, at) {
                     let then = self.before(point) * size + at;
                     match line.iter_mut().find(|(column, _)| *column == then) {
                         Some((_, value)) => *value -= 1.0,
@@ -392,10 +443,116 @@ impl InitializationSystem<'_> {
         }
         Ok(Jacobian::of_parts(row_offsets, columns, entries))
     }
+    /// One point's stage on its own, in the workspace's slots: each row's residual, as `evaluate` gives it, and the block
+    /// of the point's own unknowns, whose view has one row and one column per body row. An admission solver marches
+    /// the ring with this and `sweep`, to reach a guess Newton can start from. Nothing here is judged: `admit` is.
+    pub fn stage(
+        &self,
+        workspace: &SolveWorkspace,
+        point: usize,
+    ) -> Result<(Vec<f64>, Jacobian), InitializationFailure> {
+        self.check(workspace)?;
+        let unknowns = workspace.coordinates();
+        let shift = self.interval.map_or(0.0, |seconds| 1.0 / seconds);
+        let values = self.values(unknowns);
+        let inputs = self.inputs(point, self.point(unknowns, point), &values);
+        let entries = self.body.jacobian(&inputs, shift).map_err(undefined)?;
+        let sparsity = self.body.sparsity();
+        let block = Jacobian::of_parts(
+            sparsity.row_offsets().to_vec(),
+            sparsity.unknowns().to_vec(),
+            entries,
+        );
+        let mut rows = Vec::with_capacity(self.body.rows().len());
+        self.stage_rows(unknowns, &values, point, &mut rows)?;
+        Ok((rows, block))
+    }
+    /// Reads, from each point in `points`, the modes and resets the next point starts with: every armed guard crossed
+    /// there fires, and the point after it holds what that left. Returns how many points changed, so a solver alternates
+    /// it with Newton until it returns zero. It reads the same surface `admit` does, on the workspace alone.
+    pub fn sweep(
+        &mut self,
+        workspace: &SolveWorkspace,
+        points: Range<usize>,
+    ) -> Result<usize, InitializationFailure> {
+        self.check(workspace)?;
+        let unknowns = workspace.coordinates();
+        let mut changed = 0;
+        for point in points {
+            let (modes, resets) = self.next(unknowns, point)?;
+            let next = (point + 1) % self.frames.len();
+            if modes != self.modes[next] || resets != self.resets[next] {
+                changed += 1;
+                self.modes[next] = modes;
+                self.resets[next] = resets;
+            }
+        }
+        Ok(changed)
+    }
+    fn next(
+        &self,
+        unknowns: &[f64],
+        point: usize,
+    ) -> Result<(Vec<usize>, Vec<RowId>), InitializationFailure> {
+        let values = self.values(unknowns);
+        let inputs = self.inputs(point, self.point(unknowns, point), &values);
+        self.body.fired_at(&inputs, &self.tolerance).map_err(undefined)
+    }
+    /// The first row whose stage has no pivot at the start state: a coupling loop such as `x = y`, `y = x`, a pressure
+    /// with no gauge, or a closed row where no cycle gives its tangent. Structural matching cannot see these, and a
+    /// run from a consistent start would hold whatever the packet gave them. One dense elimination, once a run.
+    fn rankless(&self, unknowns: &[f64]) -> Result<Option<RowId>, InitializationFailure> {
+        let size = self.body.rows().len();
+        let shift = self.interval.map_or(0.0, |seconds| 1.0 / seconds);
+        let values = self.values(unknowns);
+        let inputs = self.inputs(0, self.point(unknowns, 0), &values);
+        let entries = self.body.jacobian(&inputs, shift).map_err(undefined)?;
+        let sparsity = self.body.sparsity();
+        let mut matrix = vec![vec![0.0; size]; size];
+        for (row, cells) in matrix.iter_mut().enumerate() {
+            for entry in sparsity.row_offsets()[row]..sparsity.row_offsets()[row + 1] {
+                cells[sparsity.unknowns()[entry].index()] = entries[entry];
+            }
+        }
+        // At an instant an amount or a memory row states the packet's value, so it pivots on itself.
+        if self.interval.is_none() {
+            for (at, row) in self.body.rows().iter().enumerate() {
+                if !algebraic(row.kind()) {
+                    matrix[at].fill(0.0);
+                    matrix[at][at] = 1.0;
+                }
+            }
+        }
+        let mut rows: Vec<usize> = (0..size).collect();
+        for pivot in 0..size {
+            let best = (pivot..size).fold(pivot, |best, row| {
+                if matrix[row][pivot].abs() > matrix[best][pivot].abs() {
+                    row
+                } else {
+                    best
+                }
+            });
+            let reach = (matrix[best].iter()).fold(0.0_f64, |most, cell| most.max(cell.abs()));
+            if matrix[best][pivot].abs() <= ROUNDING * reach {
+                return Ok(Some(RowId::at(rows[pivot])));
+            }
+            matrix.swap(pivot, best);
+            rows.swap(pivot, best);
+            let (above, below) = matrix.split_at_mut(pivot + 1);
+            let lead = &above[pivot];
+            for row in below {
+                let factor = row[pivot] / lead[pivot];
+                for (cell, value) in row.iter_mut().zip(lead).skip(pivot) {
+                    *cell -= factor * value;
+                }
+            }
+        }
+        Ok(None)
+    }
     /// One defect over its scale, `None` when the tolerance refuses it. What overflowed is refused, because `<=` is
     /// false on a NaN but true of two infinities, and a defect of zero holds even where an overflow leaves no scale.
-    fn held(&self, defect: f64, read: f64) -> Option<f64> {
-        let scale = self.tolerance.at(read);
+    fn held(&self, row: usize, defect: f64, read: f64) -> Option<f64> {
+        let scale = self.scales.at(row, read);
         let within = defect == 0.0 || (defect.is_finite() && defect <= scale);
         within.then(|| if scale > 0.0 { defect / scale } else { 0.0 })
     }
@@ -470,7 +627,7 @@ impl InitializationSystem<'_> {
         };
         let stages = self.stages(unknowns)?;
         let stage = |slot: usize| {
-            let held = self.held(stages[slot].abs(), unknowns[slot]);
+            let held = self.held(slot % size, stages[slot].abs(), unknowns[slot]);
             held.ok_or(inconsistent(body_row(slot % size)))
         };
         let replaced = |slot: &usize| self.replaced().any(|(known, _)| known == *slot);
@@ -480,21 +637,26 @@ impl InitializationSystem<'_> {
         // A net flow lands on the row its total replaced, so the flow is read first, to name it.
         for (slot, quantity) in self.replaced() {
             let (_, packet) = self.total(unknowns, quantity);
-            let flow = self.held(self.net_flow(unknowns, quantity)?.abs(), packet);
+            let flow = self.held(slot % size, self.net_flow(unknowns, quantity)?.abs(), packet);
             note(
                 AdmissionRow::Total(quantity),
                 flow.ok_or(InitializationFailure::NetBoundaryFlow { quantity })?,
             );
             note(body_row(slot % size), stage(slot)?);
         }
-        for quantity in self.body.conserved_basis().ids() {
+        for (slot, quantity) in self.replaced() {
             let row = AdmissionRow::Total(quantity);
             let (moved, packet) = self.total(unknowns, quantity);
-            note(row, self.held(moved.abs(), packet).ok_or(inconsistent(row))?);
+            note(
+                row,
+                self.held(slot % size, moved.abs(), packet)
+                    .ok_or(inconsistent(row))?,
+            );
         }
         for anchor in &owed.anchors {
             let row = AdmissionRow::Anchor(anchor.id);
             let held = self.held(
+                anchor.row.index(),
                 (self.anchor_read(unknowns, anchor) - anchor.value).abs(),
                 anchor.value,
             );
@@ -505,6 +667,16 @@ impl InitializationSystem<'_> {
                 let (key, binding) = (fit.key, fit.binding);
                 return Err(AdmissionError::FitUnread { key, binding }.into());
             }
+        }
+        for point in 0..self.frames.len() {
+            let next = (point + 1) % self.frames.len();
+            let (modes, resets) = self.next(unknowns, point)?;
+            if modes != self.modes[next] || resets != self.resets[next] {
+                return Err(InitializationFailure::GuardSweep { point: next });
+            }
+        }
+        if let Some(row) = self.rankless(unknowns)? {
+            return Err(InitializationFailure::NoRank { row });
         }
         Ok(worst)
     }
@@ -546,6 +718,9 @@ impl InitializationSystem<'_> {
         let Self {
             body,
             mut parameters,
+            mut modes,
+            resets: _,
+            scales: _,
             pending,
             anchor_moment: time,
             tolerance,
@@ -556,6 +731,7 @@ impl InitializationSystem<'_> {
         } = self;
         parameters.packet = parameters.packet.reading(time, start, fitted, &history);
         parameters.values = values;
+        parameters.modes = modes.swap_remove(0);
         let owed = core::mem::take(&mut parameters.owed);
         let value_of = |entry: &(ValueName, ValueProvenance, f64)| {
             let (name, provenance, value) = *entry;
@@ -651,6 +827,14 @@ pub enum InitializationFailure {
     /// A conserved combination whose boundary flows do not net to zero over the cycle: no state returns.
     NetBoundaryFlow {
         quantity: QuantityId,
+    },
+    /// A guard that crossed on the way to this point and not in the modes the workspace was solved in.
+    GuardSweep {
+        point: usize,
+    },
+    /// A row whose stage has no pivot at the start state, which structural matching cannot see.
+    NoRank {
+        row: RowId,
     },
 }
 impl From<AdmissionError> for InitializationFailure {

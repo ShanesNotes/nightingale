@@ -1,4 +1,5 @@
-use crate::body::{HazardLayout, RowKind};
+use crate::body::RowKind;
+use crate::chance::Trigger;
 use crate::problem::{SolveWorkspace, StagePoint};
 use crate::scheme::Stage;
 use crate::{
@@ -266,7 +267,7 @@ impl StepProposal {
             return Err(mismatch(&ticket).into());
         }
         let body = problem.body;
-        let scales = resolution.scales();
+        let scales = resolution.scales().for_rows(body.rows());
         let start = problem.accepted.state().coordinates();
         let mut stage_defect = Worst::NONE;
         for ((stage, seen), evaluation) in stages.iter().zip(&witness.stages).zip(&evaluations) {
@@ -286,7 +287,7 @@ impl StepProposal {
                         if position > rate { position } else { rate }
                     }
                 };
-                stage_defect.note(defect / scales.at(value), row.id());
+                stage_defect.note(defect / scales.at(at, value), row.id());
             }
         }
         if let Some(row) = stage_defect.above_one() {
@@ -296,7 +297,7 @@ impl StepProposal {
             let (fine, coarse) = (&witness.stages[fine].unknowns, &witness.stages[coarse].unknowns);
             let mut error = Worst::NONE;
             for (at, row) in body.rows().iter().enumerate() {
-                error.note((fine[at] - coarse[at]).abs() / scales.at(fine[at]), row.id());
+                error.note((fine[at] - coarse[at]).abs() / scales.at(at, fine[at]), row.id());
             }
             if let Some(row) = error.above_one() {
                 return Err(ticket.refuse(NumericalRefusal::Accuracy { row }));
@@ -322,7 +323,7 @@ impl StepProposal {
         let mut algebraic_defect = Worst::NONE;
         for (at, row) in body.rows().iter().enumerate() {
             if matches!(row.kind(), RowKind::Algebraic(_)) {
-                let normalized = published.residuals[at].abs() / scales.at(coordinates[at]);
+                let normalized = published.residuals[at].abs() / scales.at(at, coordinates[at]);
                 algebraic_defect.note(normalized, row.id());
             }
         }
@@ -427,18 +428,23 @@ impl VerifiedStep {
     pub fn applied(&self) -> &[InputId] {
         &self.ticket.due
     }
-    pub(crate) fn crossed<'b>(&self, problem: &CoupledProblem<'b>) -> Option<&'b HazardLayout> {
-        problem.chance.crossed(problem.body, &self.state)
+    /// The first guard in stable order this step's end has crossed, hazards first. The search reads only that guard's
+    /// gap, and any crossing moves the bracket's top, so a landing closes on the earliest crossing of any guard.
+    pub(crate) fn crossed<'b>(
+        &self,
+        problem: &CoupledProblem<'b>,
+    ) -> Result<Option<Trigger<'b>>, TrialFailure> {
+        problem.crossed(&self.ticket, &self.state)
     }
-    pub(crate) fn gap(&self, problem: &CoupledProblem<'_>, guard: &HazardLayout) -> f64 {
-        problem.chance.gap(&self.state, guard)
+    pub(crate) fn gap(&self, problem: &CoupledProblem<'_>, guard: Trigger<'_>) -> Result<f64, TrialFailure> {
+        problem.gap(&self.ticket, &self.state, guard)
     }
     /// The dense segment keeps the left limit, so a chord never runs through a reset and the next segment
     /// starts at the reset. A firing moves a mode, a draw and an integral, so what it leaves is read again: a law
     /// with no value there refuses the trial, and a range is judged on both sides of the instant.
     pub(crate) fn fire(self, problem: &CoupledProblem<'_>) -> Result<Self, TrialFailure> {
         let at = self.ticket.interval().end();
-        let (state, fired) = problem.chance.fired(problem.body, self.state, at);
+        let (state, fired) = problem.fired(&self.ticket, self.state, at)?;
         let values = problem.values_after_firing(&self.ticket, &state)?;
         let mut excursions = self.excursions;
         excursions.extend(problem.body.excursions(&values, &state.coordinates(), at));

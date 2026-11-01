@@ -1,9 +1,10 @@
 use crate::body::UnknownId;
 use crate::boundary::DriveFrame;
-use crate::chance::Chance;
+use crate::chance::{Chance, Trigger};
 use crate::evaluate::{Inputs, Undefined};
 use crate::identity::{Canonical, Seal};
 use crate::quadrature::StageEvaluation;
+use crate::scheme::RowScales;
 use crate::{
     AcceptedStateView, BoundParameters, Candidate, CompiledBody, Digest, EngineFault, EngineFaultKind,
     InputId, Interval, NumericalRefusal, Ratio, Refused, RowId, RunIdentity, SimTime, TrialFailure,
@@ -21,6 +22,7 @@ pub struct CoupledProblem<'r> {
     pub(crate) accepted: AcceptedStateView<'r>,
     pub(crate) base: Digest,
     pub(crate) chance: Chance,
+    scales: RowScales,
 }
 impl<'r> CoupledProblem<'r> {
     pub fn new(
@@ -37,6 +39,7 @@ impl<'r> CoupledProblem<'r> {
             accepted,
             base,
             chance: Chance::at(body, identity.seed(), accepted.state()),
+            scales: identity.resolution().scales().for_rows(body.rows()),
         }
     }
     pub fn accepted(&self) -> AcceptedStateView<'r> {
@@ -124,6 +127,97 @@ impl<'r> CoupledProblem<'r> {
             columns: sparsity.unknowns().to_vec(),
             values,
         })
+    }
+    /// A row's scale at `value`, the scale `verify` reads, so a core stops where it will be judged and no sooner.
+    pub fn scale(&self, slot: usize, value: f64) -> f64 {
+        self.scales.at(slot, value)
+    }
+    /// Every law's frame at the ticket's end on `state`.
+    fn guard_inputs<'a>(
+        &'a self,
+        ticket: &'a StepTicket,
+        state: &'a Candidate,
+        unknowns: &'a [f64],
+        chance: &'a Chance,
+        factors: &'a [f64],
+    ) -> Inputs<'a> {
+        Inputs {
+            parameters: &self.parameters.values,
+            frame: &ticket.frame,
+            unknowns,
+            modes: &state.modes,
+            draws: chance.draws(),
+            factors,
+        }
+    }
+    /// The first crossed guard in stable order, hazards before plain ones.
+    pub(crate) fn crossed(
+        &self,
+        ticket: &StepTicket,
+        state: &Candidate,
+    ) -> Result<Option<Trigger<'r>>, TrialFailure> {
+        if let Some(hazard) = self.chance.crossed(self.body, state) {
+            return Ok(Some(Trigger::Hazard(hazard)));
+        }
+        for guard in self
+            .body
+            .layout
+            .guards
+            .iter()
+            .filter(|guard| guard.armed(&state.modes))
+        {
+            if self.gap(ticket, state, Trigger::Plain(guard))? >= 0.0 {
+                return Ok(Some(Trigger::Plain(guard)));
+            }
+        }
+        Ok(None)
+    }
+    /// How far `state` stands past a guard's crossing, negative before it.
+    pub(crate) fn gap(
+        &self,
+        ticket: &StepTicket,
+        state: &Candidate,
+        guard: Trigger<'_>,
+    ) -> Result<f64, TrialFailure> {
+        match guard {
+            Trigger::Hazard(hazard) => Ok(self.chance.gap(state, hazard)),
+            Trigger::Plain(guard) => {
+                let factors = self
+                    .chance
+                    .factors(&self.parameters.values, ticket.interval().end());
+                let unknowns = state.coordinates();
+                let inputs = self.guard_inputs(ticket, state, &unknowns, &self.chance, &factors);
+                (self.body.guard_gap(guard, &inputs)).map_err(|undefined| self.undefined(ticket, undefined))
+            }
+        }
+    }
+    /// A firing's whole effect: hazards as `Chance::fired` has them, then every plain guard armed before any fired and
+    /// crossed here sets its mode and resets its row. Plain firings are no chance event, so they make no `Fired`, and
+    /// `fired` on the state is what the next ticket reads as a breakpoint.
+    pub(crate) fn fired(
+        &self,
+        ticket: &StepTicket,
+        state: Candidate,
+        at: SimTime,
+    ) -> Result<(Candidate, Vec<crate::Fired>), TrialFailure> {
+        let guards = &self.body.layout.guards;
+        let armed: Vec<bool> = guards.iter().map(|guard| guard.armed(&state.modes)).collect();
+        let mut crossed = Vec::with_capacity(guards.len());
+        for (guard, armed) in guards.iter().zip(armed) {
+            crossed.push(armed && self.gap(ticket, &state, Trigger::Plain(guard))? >= 0.0);
+        }
+        let (mut state, fired) = self.chance.fired(self.body, state, at);
+        for (guard, crossed) in guards.iter().zip(crossed) {
+            if crossed && guard.armed(&state.modes) {
+                state.modes[guard.variable] = guard.enters;
+                if let Some(row) = guard.resets {
+                    let first_memory = state.amounts.len();
+                    state.memory[row.index() - first_memory] = 0.0;
+                }
+                state.fired = true;
+            }
+        }
+        Ok((state, fired))
     }
     /// Every law on `state` at the ticket's end, in its modes and on its draws.
     pub(crate) fn values_after_firing(

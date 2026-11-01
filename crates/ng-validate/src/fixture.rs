@@ -105,16 +105,18 @@ impl TwoReservoirs {
         map.connect(Network::Vascular, a.id(), b.id());
         let mut schema = Schema::new(map.finish()?)?;
         if let Some(direction) = boundary {
-            schema.water_boundary(EXTERIOR, direction, a.id(), Space::Lumen)?;
+            schema.boundary::<Water>(EXTERIOR, direction, a.id(), Space::Lumen)?;
         }
         schema.partial_volume(Measure::new(1.0)?)?;
         let body = assemble(schema, |mut body| {
             let (mut laws, ports) = body.cardiovascular()?.parts();
             let route = ports.circulation(&mut laws);
             let e = laws.end_parameter::<Elastance>(ParameterKey::new("cv.e"), Admissible::positive());
-            let g = laws
-                .edge_parameter::<Conductance<Water>>(ParameterKey::new("cv.g"), Admissible::nonnegative());
-            let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+            let g = laws.edge_parameter::<_, Conductance<Water>>(
+                ParameterKey::new("cv.g"),
+                Admissible::nonnegative(),
+            );
+            let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
             let flow = laws.edge_kernel(|mut k| {
                 let upstream = k.at_edge(&route.from_amount());
                 let downstream = k.at_edge(&route.to_amount());
@@ -138,7 +140,7 @@ impl TwoReservoirs {
             body.add(laws.finish());
             if boundary.is_some() {
                 let (mut laws, ports) = body.boundary()?.parts();
-                let BoundaryWater { route: pair, drive } = ports.water(EXTERIOR)?;
+                let BoundaryRoute { route: pair, drive } = ports.route::<Water>(EXTERIOR)?;
                 let rate = laws.kernel(|mut k| {
                     let value = k.read(&drive);
                     k.finish(value, laws.every_mode(), wave)
@@ -176,6 +178,7 @@ impl TwoReservoirs {
             let lumen = RowKind::Amount {
                 site,
                 space: Space::Lumen,
+                species: Species::Water,
             };
             (self.body.rows().iter())
                 .find(|row| row.kind() == lumen)
@@ -217,9 +220,26 @@ impl TwoReservoirs {
             let row = RowKind::Amount {
                 site,
                 space: Space::Lumen,
+                species: Species::Water,
             };
             packet.start(row, Measure::<Water>::new(amount)?, "synthetic")?;
         }
+        let flow = Slot {
+            law: LawName {
+                owner: "CV",
+                local: "circulation",
+            },
+            at: Context::Edge {
+                from: self.a,
+                to: self.b,
+            },
+        };
+        let rate = conductance * (self.start[0] - self.start[1]);
+        packet.start(
+            RowKind::Algebraic(flow),
+            Measure::<Rate<Water>>::new(rate)?,
+            "synthetic",
+        )?;
         Ok(packet)
     }
     /// The same packet with a doubled conductance: what a core reads if it evaluates on other values.
@@ -494,15 +514,17 @@ impl ChanceCase {
         map.contain(root.id(), b.id());
         map.connect(Network::Vascular, a.id(), b.id());
         let mut schema = Schema::new(map.finish()?)?;
-        schema.water_boundary(EXTERIOR, BoundaryDirection::IntoBody, a.id(), Space::Lumen)?;
+        schema.boundary::<Water>(EXTERIOR, BoundaryDirection::IntoBody, a.id(), Space::Lumen)?;
         schema.partial_volume(Measure::new(1.0)?)?;
         let body = assemble(schema, |mut body| {
             let (mut laws, ports) = body.cardiovascular()?.parts();
             let route = ports.circulation(&mut laws);
             let e = laws.end_parameter::<Elastance>(ParameterKey::new("cv.e"), Admissible::positive());
-            let g = laws
-                .edge_parameter::<Conductance<Water>>(ParameterKey::new("cv.g"), Admissible::nonnegative());
-            let slowed = laws.edge_parameter::<Conductance<Water>>(
+            let g = laws.edge_parameter::<_, Conductance<Water>>(
+                ParameterKey::new("cv.g"),
+                Admissible::nonnegative(),
+            );
+            let slowed = laws.edge_parameter::<_, Conductance<Water>>(
                 ParameterKey::new("cv.g-ectopic"),
                 Admissible::nonnegative(),
             );
@@ -522,7 +544,7 @@ impl ChanceCase {
             let return_hazard = laws.state::<Dimensionless>(RETURN_INTEGRAL, Admissible::nonnegative());
             let [sinus, ectopic] = laws.modes(RHYTHM, ["sinus", "ectopic"]);
             let (wave, beat) = (
-                RateClass::new(RateBand::Wave, 1_000_000)?,
+                RateClass::new(RateBand::Wave, 3_600_000_000_000)?,
                 RateClass::new(RateBand::Beat, 100_000_000)?,
             );
             laws.transfer_along(&route, flow(&laws, &route, &e, &g, sinus.only(), wave));
@@ -608,7 +630,7 @@ impl ChanceCase {
             }
             body.add(laws.finish());
             let (mut laws, ports) = body.boundary()?.parts();
-            let BoundaryWater { route: pair, drive } = ports.water(EXTERIOR)?;
+            let BoundaryRoute { route: pair, drive } = ports.route::<Water>(EXTERIOR)?;
             let rate = laws.kernel(|mut k| {
                 let value = k.read(&drive);
                 k.finish(value, laws.every_mode(), wave)
@@ -651,7 +673,7 @@ impl ChanceCase {
         }
     }
     pub fn memory(&self, local: &'static str) -> Option<RowId> {
-        let kind = RowKind::Memory(named(local));
+        let kind = RowKind::Memory(named(local).into());
         (self.body.rows().iter())
             .find(|row| row.kind() == kind)
             .map(Row::id)
@@ -664,6 +686,7 @@ impl ChanceCase {
             let lumen = RowKind::Amount {
                 site,
                 space: Space::Lumen,
+                species: Species::Water,
             };
             (self.body.rows().iter())
                 .find(|row| row.kind() == lumen)
@@ -695,7 +718,7 @@ impl ChanceCase {
         packet.synthetic(ParameterKey::new("cv.knot-period"), body, period, note)?;
         let amplitude = Measure::<Dimensionless>::new(self.amplitude)?;
         packet.synthetic(ParameterKey::new("cv.hazard-amplitude"), body, amplitude, note)?;
-        let memory = |local| RowKind::Memory(named(local));
+        let memory = |local| RowKind::Memory(named(local).into());
         packet.start(memory(TONE), Measure::<Dimensionless>::new(1.0)?, note)?;
         packet.start(memory(ONSET_INTEGRAL), zero()?, note)?;
         packet.start(memory(RETURN_INTEGRAL), zero()?, note)?;
@@ -719,9 +742,22 @@ impl ChanceCase {
             let row = RowKind::Amount {
                 site,
                 space: Space::Lumen,
+                species: Species::Water,
             };
             packet.start(row, Measure::<Water>::new(amount)?, note)?;
         }
+        let flow = Slot {
+            law: LawName {
+                owner: "CV",
+                local: "circulation",
+            },
+            at: Context::Edge {
+                from: self.a,
+                to: self.b,
+            },
+        };
+        let rate = CONDUCTANCE * (START[0] - START[1]);
+        packet.start(RowKind::Algebraic(flow), Measure::<Rate<Water>>::new(rate)?, note)?;
         Ok(packet)
     }
 }

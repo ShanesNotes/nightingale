@@ -101,7 +101,7 @@
 //! ```
 //! use ng_contract::*;
 //! fn granted<'b>(ports: &BoundaryPorts<'b>) -> Result<Pair<'b, Boundary, Water>, AdmissionError> {
-//!     Ok(ports.water("inflow")?.route)
+//!     Ok(ports.route::<Water>("inflow")?.route)
 //! }
 //! ```
 //! A transfer takes a pair, never its donor alone.
@@ -317,9 +317,55 @@
 //! ```
 //! use ng_contract::*;
 //! fn error<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>, pressure: Expr<'b, 'k, Nervous, Pressure>,
-//!     set_point: &StateSlot<'b, Nervous, Reference<Pressure>>) -> Expr<'b, 'k, Nervous, Pressure> {
+//!     set_point: &StateSlot<'b, Nervous, Reference<Pressure>>) -> Expr<'b, 'k, Nervous, Deviation<Pressure>> {
 //!     let reference = k.state(set_point);
 //!     k.deviation(pressure, reference)
+//! }
+//! ```
+//! A deviation is its own dimension, so a set point can never become the variable it guards (finding 14).
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn as_variable<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>, pressure: Expr<'b, 'k, Nervous, Pressure>,
+//!     off: Expr<'b, 'k, Nervous, Deviation<Pressure>>) -> Expr<'b, 'k, Nervous, Pressure> {
+//!     k.add(pressure, off)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn drive<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>, off: Expr<'b, 'k, Nervous, Deviation<Pressure>>,
+//!     width: Expr<'b, 'k, Nervous, Deviation<Pressure>>) -> Expr<'b, 'k, Nervous, Dimensionless> {
+//!     let ratio = k.divide(off, width);
+//!     k.as_dimension(ratio)
+//! }
+//! ```
+//! A route comes from a scope, whole. A binding is a transfer of one ligand between two pools, so nothing can write a
+//! reaction from raw stoichiometry: a hand-made route does not compile.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn forged<'b>() -> SiteRoute<'b, Receptor, Junction, Norepinephrine> {
+//!     SiteRoute { family: todo!(), brand: todo!(), kind: todo!() }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn granted<'b>(ports: &ReceptorPorts<'b>, laws: &mut FragmentBuilder<'b, Receptor>)
+//!     -> SiteRoute<'b, Receptor, Junction, Norepinephrine> {
+//!     ports.binding(laws)
+//! }
+//! ```
+//! A flow row belongs to its own kind of edge: a plain edge's law cannot read a valve's.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn crossed<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>,
+//!     route: &EdgeRoute<'b, Cardiovascular, Water, ValveEdge>) -> Expr<'b, 'k, Cardiovascular, Rate<Water>> {
+//!     k.at_edge(&route.flow())
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn own<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, ValveEdge>, route: &EdgeRoute<'b, Cardiovascular, Water, ValveEdge>)
+//!     -> Expr<'b, 'k, Cardiovascular, Rate<Water>> {
+//!     k.at_edge(&route.flow())
 //! }
 //! ```
 //! A product gets a name only through the identity table: volume times volume is not a pressure.
@@ -411,7 +457,7 @@
 //! }
 //! ```
 //! An edge kernel is not declared for a site class, so it reads no site's entry; it reads its edge's.
-//! ```compile_fail,E0599
+//! ```compile_fail,E0277
 //! use ng_contract::*;
 //! fn edge<'b>(laws: &FragmentBuilder<'b, Cardiovascular>, lumens: &ReadPort<'b, Cardiovascular, PerSite<VesselSegment, Water>>,
 //!     class: RateClass) -> PureKernel<'b, Cardiovascular, Water, VascularEdge> {

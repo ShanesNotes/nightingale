@@ -1,13 +1,13 @@
 use crate::body::{Bound, Column, Instance, Layout, ParameterId, Target};
 use crate::chance::{holds_a_period, sampled_unit};
 use crate::identity::{Canonical, Seal};
-use crate::law::Op;
+use crate::law::{Family, Op};
 use crate::provenance::seal_trace;
 use crate::quantity::dimension;
 use crate::{
     AdmissionError, Anchor, AnchorId, AnchorStatistic, Binding, Citation, Compensated, CompiledBody, Digest,
     Dimension, Dimensionless, ErrorScales, LawName, Measure, MethodHistory, ModelHash, PacketSeed,
-    ParameterKey, RateBand, RowId, RowKind, SimTime, ValueName, ValueProvenance,
+    ParameterKey, RateBand, RowId, RowKind, SimTime, Slot, UnknownId, ValueName, ValueProvenance,
 };
 use core::marker::PhantomData;
 use core::num::{NonZeroU32, NonZeroU64};
@@ -123,7 +123,7 @@ struct StartEntry {
     note: &'static str,
 }
 struct ModeEntry {
-    variable: LawName,
+    variable: Slot,
     value: &'static str,
     note: &'static str,
 }
@@ -496,12 +496,36 @@ impl ParameterPacket<SyntheticFixture> {
         });
         Ok(())
     }
+    /// A whole-body variable takes its name; a route's takes a `Slot` at its edge.
+    /// Every row the packet has not started yet, at `guess`. A guess at an algebraic row is only where the solve begins,
+    /// and each row's dimension comes from the row, so a fixture of hundreds of rows states only those that matter.
+    pub fn start_rest(
+        &mut self,
+        body: &CompiledBody,
+        guess: impl Fn(RowKind) -> f64,
+        note: &'static str,
+    ) -> Result<(), AdmissionError> {
+        for row in body.rows() {
+            if self.starts.iter().any(|entry| entry.row == row.kind) {
+                continue;
+            }
+            let value = Measure::<Dimensionless>::new(guess(row.kind))?;
+            self.starts.push(StartEntry {
+                row: row.kind,
+                dimension: row.dimension.clone(),
+                bits: value.bits(),
+                note,
+            });
+        }
+        Ok(())
+    }
     pub fn start_mode(
         &mut self,
-        variable: LawName,
+        variable: impl Into<Slot>,
         value: &'static str,
         note: &'static str,
     ) -> Result<(), AdmissionError> {
+        let variable = variable.into();
         if self.modes.iter().any(|entry| entry.variable == variable) {
             return Err(AdmissionError::DuplicateStartMode { variable });
         }
@@ -584,21 +608,53 @@ impl BoundParameters {
 }
 
 impl CompiledBody {
-    /// A firing leaves algebraic values as they were, and nothing here solves them again. A hazard integral only
-    /// grows until it fires, so it never returns over a cycle.
-    fn unrun_mode(&self, periodic: bool) -> Option<LawName> {
+    /// A firing leaves algebraic values as they were and nothing here solves them again, so an algebraic law may not
+    /// hold by a fired mode, or read a row a firing resets: then no algebraic row jumps at a firing, and no landing
+    /// needs a solve. A route's own flow row is the one exception: only stages read it, and each stage solves it, so at
+    /// that instant it keeps the left limit the dense segment ends on and no later value rests on it. A variable no
+    /// guard moves never leaves its start, and a hazard integral only grows until it fires, so it never returns over a
+    /// cycle.
+    fn unrun_mode(&self, periodic: bool) -> Option<Slot> {
         let Layout {
             rows,
             modes,
             guards,
             hazards,
+            instances,
             ..
         } = &self.layout;
-        let algebraic = rows.iter().any(|row| matches!(row.kind, RowKind::Algebraic(_)));
-        let plain = |variable| guards.iter().any(|guard| guard.variable == variable);
-        let moved = |at| hazards.iter().any(|hazard| hazard.variable == at);
+        let algebraic = |target: Target| match target {
+            Target::Row(row) => match rows[row.index()].kind {
+                RowKind::Algebraic(slot) => !Family::flows(slot.law.local),
+                _ => false,
+            },
+            Target::Column(_) => false,
+        };
+        let plain = |at| guards.iter().any(|guard| guard.variable == at);
+        let hazard = |at| hazards.iter().any(|hazard| hazard.variable == at);
+        let selects = |at| {
+            (instances.iter()).any(|law| algebraic(law.target) && law.mode.is_some_and(|mode| mode.0 == at))
+        };
+        let reset_reads = |at| {
+            let resets = (guards.iter())
+                .filter(|guard| guard.variable == at)
+                .filter_map(|guard| guard.resets);
+            resets.into_iter().any(|row| {
+                let read = |law: &&Instance| {
+                    law.inputs
+                        .iter()
+                        .any(|input| input.unknown() == Some(UnknownId::at(row.index())))
+                };
+                instances
+                    .iter()
+                    .filter(|law| algebraic(law.target))
+                    .any(|law| read(&law))
+            })
+        };
         (modes.iter().enumerate())
-            .find(|&(at, mode)| periodic || algebraic || plain(mode.variable) || !moved(at))
+            .find(|&(at, _)| {
+                !(plain(at) || hazard(at)) || (periodic && hazard(at)) || selects(at) || reset_reads(at)
+            })
             .map(|(_, mode)| mode.variable)
     }
     /// Finding 15's partial check. A literal is zero, so only `exp` and `logistic` make a nonzero constant from
@@ -780,7 +836,11 @@ impl CompiledBody {
             || reads.into_iter().any(|input| match *input {
                 Bound::Boundary(_) => true,
                 Bound::Unknown(unknown) => moved(unknown.index()),
-                Bound::Parameter(_) | Bound::Draw(_) | Bound::Forcing(_) | Bound::Gauge => false,
+                Bound::Parameter(_)
+                | Bound::Draw(_)
+                | Bound::Forcing(_)
+                | Bound::Gauge
+                | Bound::Height(_) => false,
             })
     }
     /// A pulsatile row is one its block's rate class puts in the wave or beat band.
@@ -874,7 +934,7 @@ impl CompiledBody {
         }
         Ok(Owed {
             cycle: packet.cycle,
-            tolerance: packet.tolerance,
+            tolerance: packet.tolerance.clone(),
             anchors,
             fits,
             entries,

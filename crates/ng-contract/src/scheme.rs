@@ -1,6 +1,7 @@
 use crate::chance::seed_word;
 use crate::identity::{Canonical, Seal};
-use crate::{AdmissionError, Digest, Dimensionless, Measure, ModelHash, PacketHash};
+use crate::quantity::dimension;
+use crate::{AdmissionError, Digest, Dimension, Dimensionless, Measure, ModelHash, PacketHash, Row};
 use core::marker::PhantomData;
 
 const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
@@ -141,17 +142,31 @@ impl StageScheme {
     }
 }
 
-/// The absolute and relative scales a stage defect, an error estimate and an admission row are normalized by.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// The absolute and relative scales a stage defect, an error estimate and an admission row are normalized by. A
+/// dimension may state its own absolute scale, so a transmitter's small amounts and a blood volume's large one are
+/// each read at their own size.
+#[derive(Clone, Debug, PartialEq)]
 pub struct ErrorScales {
     absolute: f64,
     relative: f64,
+    by_dimension: Vec<(String, f64)>,
+}
+/// One scale per row, resolved once per attempt, because a stage reads it for every row.
+pub(crate) struct RowScales {
+    absolute: Vec<f64>,
+    relative: f64,
+}
+impl RowScales {
+    pub(crate) fn at(&self, row: usize, value: f64) -> f64 {
+        self.absolute[row] + self.relative * value.abs()
+    }
 }
 impl ErrorScales {
     /// What a packet that states no tolerance is held to.
     pub(crate) const EXACT: Self = Self {
         absolute: 0.0,
         relative: 0.0,
+        by_dimension: Vec::new(),
     };
     /// Refuses an absolute scale that is not positive and a relative scale below zero.
     pub fn uniform(
@@ -164,17 +179,45 @@ impl ErrorScales {
         Ok(Self {
             absolute: absolute.value(),
             relative: relative.value(),
+            by_dimension: Vec::new(),
         })
     }
-    pub(crate) fn at(self, value: f64) -> f64 {
-        self.absolute + self.relative * value.abs()
+    /// Every row of dimension `U` takes this absolute scale. Refuses one that is not positive.
+    pub fn of<U: Dimension>(mut self, absolute: Measure<U>) -> Result<Self, AdmissionError> {
+        if absolute.value() <= 0.0 {
+            return Err(AdmissionError::NonPositiveScale);
+        }
+        let name = dimension::<U>();
+        self.by_dimension.retain(|entry| entry.0 != name);
+        self.by_dimension.push((name, absolute.value()));
+        self.by_dimension.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(self)
+    }
+    pub(crate) fn for_rows(&self, rows: &[Row]) -> RowScales {
+        let absolute = rows.iter().map(|row| {
+            let found = self.by_dimension.iter().find(|entry| entry.0 == row.dimension);
+            found.map_or(self.absolute, |entry| entry.1)
+        });
+        RowScales {
+            absolute: absolute.collect(),
+            relative: self.relative,
+        }
     }
 }
 impl Seal for ErrorScales {
     fn seal(&self, out: &mut Canonical) {
-        let Self { absolute, relative } = self;
+        let Self {
+            absolute,
+            relative,
+            by_dimension,
+        } = self;
         absolute.seal(out);
         relative.seal(out);
+        out.length(by_dimension.len());
+        for (name, scale) in by_dimension {
+            out.text(name);
+            scale.seal(out);
+        }
     }
 }
 
@@ -257,8 +300,8 @@ impl DeclaredResolution {
     pub(crate) fn scheme(&self) -> StageScheme {
         self.scheme
     }
-    pub(crate) fn scales(&self) -> ErrorScales {
-        self.scales
+    pub(crate) fn scales(&self) -> &ErrorScales {
+        &self.scales
     }
 }
 
