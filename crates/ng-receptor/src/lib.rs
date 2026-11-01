@@ -1,6 +1,25 @@
 //! Binding of a transmitter or hormone at the sites that hold it, and the effect that binding has. A receptor is a site
 //! parameter, its total, so binding is a two-ended transfer of the ligand and its moiety closes by pairing. The schema's
 //! `Bound` pools say where each ligand binds, so beta-1, alpha-1, M2 and V2 are one law read at different sites.
+//!
+//! # Type rules
+//!
+//! A binding is no reaction written from raw terms: a transfer takes its pair from a scope, so a law cannot forge one.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn forged<'b>(rate: PureKernel<'b, Receptor, Rate<Norepinephrine>>) -> Transfer<'b, Receptor, Norepinephrine> {
+//!     Transfer { rate }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn paired<'b>(
+//!     pair: &Pair<'b, Receptor, Norepinephrine>,
+//!     rate: PureKernel<'b, Receptor, Rate<Norepinephrine>>,
+//! ) -> Transfer<'b, Receptor, Norepinephrine> {
+//!     Transfer::new(pair, rate)
+//! }
+//! ```
 
 use ng_contract::*;
 

@@ -205,6 +205,12 @@ _Avoid_: organ compartment, compartment
 **System**:
 One of the 13 body systems in the atlas, such as cardiovascular, fluids, renal or nervous. A system's code declares laws per site class and owns no pool.
 
+**Landmark**:
+A place a whole-body law reads by what it is, such as the carotid sinus or the macula densa. The map says where it stands, so the law names no site.
+
+**Supply**:
+Which junction's nerve reaches a site. The map states it, or states that no nerve reaches the site, so a lost line is refused and never reads as no effect.
+
 **Enclosure**:
 A bounded space (the skull, the pericardium, the chest, the abdomen, a limb compartment) whose pressure, set by the volume inside it and the stiffness of its wall, is felt by every tissue bed inside it.
 _Avoid_: pressure wire
@@ -247,7 +253,7 @@ A space the schema states this body does not model, with its reason, such as cel
 A pool a held stand-in answers for: an amount in the state and the ledger that no law moves. One card holds it, and a law that moves it is refused.
 
 **Partial volume**:
-The volume one unit amount of a species takes up: a fixed coefficient of the schema, not a parameter. A space's volume derives from its amounts through it.
+The volume one unit amount of a species takes up. A space's volume derives from its amounts through it. Water's is a fixed coefficient of the schema. Albumin's is a parameter a wall's law reads, and a small ion takes up none.
 
 **Coupling field**:
 One value an arrow of the coupling map carries, held as an algebraic row that the map's sender defines and its receiver reads. A per-site field has one row per site.
@@ -271,6 +277,9 @@ Slow memory in the unit of the variable it guards, compared with that variable o
 **Deviation**:
 How far a sensed value stands from its set point. It is its own dimension, so a set point can never become the variable it guards.
 
+**Regulated total**:
+A conserved total that answers its own flows, because a boundary law reads the body, as water does through urine. Admission solves it, and the packet's value is only a guess.
+
 **Mode**:
 A discrete state of a law, such as a valve open or shut. Only a guard changes it.
 
@@ -278,7 +287,10 @@ A discrete state of a law, such as a valve open or shut. Only a guard changes it
 A crossing of a computed value, such as a valve's pressure head passing zero, that ends a step and fires a declared change: a mode transition, a stream's next draw or a hazard's event.
 
 **Rate class**:
-How fast a process moves: wave, beat, reflex, minutes or hours. It constrains scheduling and never makes an organ lane.
+How fast a process moves: wave, beat, reflex, minutes or hours, with the longest step its law tolerates. A step stops at the body's tightest class. It constrains scheduling and never makes an organ lane.
+
+**Natural size**:
+The size a row's values run at, which the packet may state. A row is held to its tolerance at that size, so a tiny ligand and a large water pool can both pass.
 
 **Rung**:
 One level of detail of a system. Rung 0 is its simplest working version.

@@ -448,3 +448,50 @@ fn a_delivery_only_one_modes_law_reads_is_refused() {
     assert_eq!(delivered(&body_of(false)), unread);
     assert_eq!(delivered(&body_of(true)), None);
 }
+
+/// A share of nothing has no value, but no flow carries nothing, so a route at rest out of a dry pool is no refusal.
+#[test]
+fn no_flow_out_of_a_dry_pool_carries_nothing() {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin());
+    let (a, b) = (
+        map.site::<VesselSegment>("a", origin()),
+        map.site::<VesselSegment>("b", origin()),
+    );
+    map.contain(root.id(), a.id());
+    map.contain(root.id(), b.id());
+    map.connect(Network::Vascular, a.id(), b.id());
+    map.connect(Network::Vascular, b.id(), a.id());
+    let mut schema = Schema::new(map.finish().expect("a map")).expect("a schema");
+    schema.partial_volume(measure(1.0)).expect("once");
+    schema.carry::<Sodium, Blood>(Space::Lumen);
+    let body = assemble(schema, |mut body| {
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), wave())
+        });
+        cv.transfer_along(&route, still);
+        body.add(cv.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let dry = a.id();
+    let mut packet = ParameterPacket::new();
+    packet
+        .start_rest(
+            &body,
+            |row| match row {
+                RowKind::Amount { site, .. } if site == dry => 0.0,
+                RowKind::Amount { .. } => 1.0,
+                _ => 0.0,
+            },
+            "synthetic",
+        )
+        .expect("every row");
+    let core = ReferenceIntegrator::new(SECOND);
+    let port = BoundaryPort::new(Vec::new()).expect("no event");
+    let session = admit_fixture(&body, packet, port, &core).expect("admitted");
+    assert!(run_until(session, SimTime::from_ns(SECOND)).is_ok());
+}

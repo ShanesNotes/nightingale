@@ -351,6 +351,7 @@ same_dimension! {
     Product<Pressure, Volume> => Energy;
     Product<Energy, Rate<Dimensionless>> => Rate<Energy>;
     Product<Pressure, Rate<Water>> => Rate<Energy>;
+    Product<Quotient<Volume, Albumin>, Albumin> => Volume;
     Rate<Sodium> => Rate<Chloride>;
     Rate<Potassium> => Rate<Chloride>;
 }

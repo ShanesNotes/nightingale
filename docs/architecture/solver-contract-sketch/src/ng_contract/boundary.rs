@@ -85,14 +85,15 @@ impl Composition {
         todo!()
     }
 }
-/// Continuous trunk angle plus a leg descriptor and subject bed offsets; never a two-value enum.
+/// A continuous trunk tilt plus a leg descriptor and subject bed offsets; never a two-value enum.
 pub struct Posture {
-    _trunk_angle: f64,
+    _trunk: f64,
     _legs: Legs,
 }
 impl Posture {
-    /// The angle may be negative (head down); only a non-finite one is refused here.
-    pub fn new(_trunk_angle: f64, _legs: Legs) -> Result<Self, AdmissionError> {
+    /// `trunk` is the sine of the trunk's angle from flat, so it may be negative (head down); one past 1
+    /// has no angle and is refused here.
+    pub fn new(_trunk: f64, _legs: Legs) -> Result<Self, AdmissionError> {
         todo!()
     }
 }

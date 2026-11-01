@@ -28,8 +28,8 @@ impl NonMaterial for Phase {}
 /// dimension has one, and a set point is never itself sensed, so no guard fires on one.
 pub struct Reference<U: Sensed>(PhantomData<U>);
 /// How far a sensed value stands from its set point. It is its own dimension, so a set point can never
-/// become the variable it guards: a deviation leaves only over a width in the guarded unit, or as a set
-/// point's drift.
+/// become the variable it guards: a deviation leaves only over a width of its own dimension, or as a set
+/// point's rate, both through the identity table.
 pub struct Deviation<U: Sensed>(PhantomData<U>);
 impl<U: Sensed> sealed::NonMaterial for Reference<U> {}
 impl<U: Sensed> NonMaterial for Reference<U> {}
@@ -99,8 +99,10 @@ same_dimension! {
     Quotient<Pressure, Pressure> => Dimensionless;
     Quotient<Volume, Volume> => Dimensionless;
 }
-impl<U: Sensed> identities::SameDimension<Dimensionless> for Quotient<Deviation<U>, U> {}
-impl<U: Sensed> SameDimension<Dimensionless> for Quotient<Deviation<U>, U> {}
+impl<U: Sensed> identities::SameDimension<Dimensionless> for Quotient<Deviation<U>, Deviation<U>> {}
+impl<U: Sensed> SameDimension<Dimensionless> for Quotient<Deviation<U>, Deviation<U>> {}
+impl<U: Sensed> identities::SameDimension<Rate<Reference<U>>> for Product<Deviation<U>, Rate<Dimensionless>> {}
+impl<U: Sensed> SameDimension<Rate<Reference<U>>> for Product<Deviation<U>, Rate<Dimensionless>> {}
 
 /// Validated finite value in a declared dimension; wire numbers are parsed outside laws.
 pub struct Measure<U> {

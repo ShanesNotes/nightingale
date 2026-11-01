@@ -205,14 +205,6 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     ) -> Expr<'b, 'k, O, Deviation<U>> {
         todo!()
     }
-    /// `speed * deviation`: a set point moving toward what it senses, which `relax` cannot write.
-    pub fn drift<U: Sensed>(
-        &mut self,
-        _deviation: Expr<'b, 'k, O, Deviation<U>>,
-        _speed: Expr<'b, 'k, O, Rate<Dimensionless>>,
-    ) -> Expr<'b, 'k, O, Rate<Reference<U>>> {
-        todo!()
-    }
     /// The stream's value for its current event ordinal, uniform on (0, 1). It stays constant
     /// until a guard drawing on the stream fires, which advances the ordinal on publication.
     pub fn draw(&mut self, _stream: &Stream<'b, O>) -> Expr<'b, 'k, O, Dimensionless> {

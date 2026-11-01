@@ -317,6 +317,25 @@ fn an_anchor_on_a_held_pool_is_a_parameters_value() -> Result<(), AdmissionError
         bound(Space::Interstitium)?,
         Some(AdmissionError::InstantOnPulsatile { anchor: id })
     );
+    let read = Snapshot::new(
+        RowKind::Algebraic(Slot {
+            law: LawName {
+                owner: "GI",
+                local: "enclosure_pressure",
+            },
+            at: Context::Site(site::<EnclosedSpace>("abdominal space")?),
+        }),
+        "a synthetic gauge",
+        AnchorStatistic::Instant,
+        Measure::<Pressure>::new(START)?,
+    );
+    let mut anchored = arena_packet(&body)?;
+    anchored.anchor(Synthetic::new(id, read, "synthetic"))?;
+    assert_eq!(
+        body.bind(anchored).err(),
+        Some(AdmissionError::AnchorOnParameters { anchor: id }),
+        "what a held card prescribes is a parameter's value too"
+    );
     Ok(())
 }
 

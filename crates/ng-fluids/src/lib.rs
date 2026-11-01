@@ -6,7 +6,8 @@ use ng_contract::*;
 
 const EXCHANGE_NS: u64 = 1_000_000_000;
 
-/// `P = E (V - V_0)` on the interstitium's own volume, on top of what encloses the bed. Model default: linear.
+/// `P = E (V - V_0)` on the interstitium's own volume, water and albumin, on top of what encloses the bed. Model default:
+/// linear.
 fn interstitial_pressure<'b>(
     fl: &mut FragmentBuilder<'b, Fluids>,
     ports: &FluidsPorts<'b>,
@@ -22,9 +23,18 @@ fn interstitial_pressure<'b>(
         ParameterKey::new("fl.interstitial-volume"),
         Admissible::positive(),
     );
+    let room = fl.parameter::<Quotient<Volume, Albumin>>(
+        ParameterKey::new("fl.albumin-volume"),
+        Admissible::nonnegative(),
+    );
     let value = fl.site_kernel(|mut k| {
         let water = k.at_site(&route.to_amount::<Water>());
-        let volume = k.volume(water);
+        let solvent = k.volume(water);
+        let held = k.at_site(&route.to_amount::<Albumin>());
+        let per = k.parameter(&room);
+        let product = k.multiply(per, held);
+        let solute: Expr<'_, '_, _, Volume> = k.as_dimension(product);
+        let volume = k.add(solvent, solute);
         let rest = k.site_parameter(&resting);
         let stretched = k.subtract(volume, rest);
         let wall = k.site_parameter(&stiffness);

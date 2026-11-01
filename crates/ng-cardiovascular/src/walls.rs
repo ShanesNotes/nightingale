@@ -9,6 +9,8 @@ type Knob<'b, U> = SiteParameter<'b, Cardiovascular, Blood, U>;
 /// supplies reads no effect.
 pub(crate) struct Walls<'b, 'h> {
     water: Port<'b, Water>,
+    albumin: Port<'b, Albumin>,
+    room: Parameter<'b, Cardiovascular, Quotient<Volume, Albumin>>,
     pub(crate) outside: Port<'b, Pressure>,
     alpha: Effect<'b>,
     passive: Knob<'b, Elastance>,
@@ -30,6 +32,8 @@ impl<'b, 'h> Walls<'b, 'h> {
         let (passive, active) = (knob("cv.elastance"), knob("cv.active-elastance"));
         Self {
             water: ports.amount::<Water>(),
+            albumin: ports.amount::<Albumin>(),
+            room: cv.parameter(ParameterKey::new("cv.albumin-volume"), Admissible::nonnegative()),
             outside: ports.extravascular_pressure(),
             alpha: ports.effect::<Norepinephrine>(),
             passive,
@@ -42,14 +46,19 @@ impl<'b, 'h> Walls<'b, 'h> {
             activation: &heart.activation,
         }
     }
-    /// `V - V_u`, with `V_u = V_u_base - S E_a1`, and no less than zero: a vessel below its unstressed volume collapses
+    /// `V - V_u`, with `V` the water's volume and the albumin's, `V_u = V_u_base - S E_a1`, and no less than zero: a vessel below its unstressed volume collapses
     /// and sucks nothing in, so a chamber cannot pull itself dry. Model default.
     pub(crate) fn stressed<'k>(
         &self,
         k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
     ) -> Expr<'b, 'k, Cardiovascular, Volume> {
         let water = k.at_site(&self.water);
-        let volume = k.volume(water);
+        let solvent = k.volume(water);
+        let held = k.at_site(&self.albumin);
+        let per = k.parameter(&self.room);
+        let product = k.multiply(per, held);
+        let solute: Expr<'_, '_, _, Volume> = k.as_dimension(product);
+        let volume = k.add(solvent, solute);
         let base = k.site_parameter(&self.unstressed);
         let gain = k.site_parameter(&self.unstressed_gain);
         let effect = k.at_junction(&self.alpha);
