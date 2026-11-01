@@ -2,7 +2,7 @@ use crate::body::{Bound, ModeLayout};
 use crate::boundary::{Delivery, DriveFrame, PendingInputs};
 use crate::chance::{HELD_DRAW, HELD_FACTOR};
 use crate::evaluate::{Inputs, Undefined};
-use crate::packet::{BoundAnchor, Owed};
+use crate::packet::{BoundAnchor, Fit, Owed};
 use crate::problem::{Jacobian, SolveWorkspace};
 use crate::{
     AdmissionError, AnchorId, AnchorStatistic, BoundParameters, BoundaryPort, Candidate, Compensated,
@@ -126,7 +126,7 @@ impl CompiledBody {
         let pending = PendingInputs::opening(boundary, fence);
         let frame_at = |ns: &u64| pending.frame_at(SimTime::from_ns(*ns));
         let frames: Vec<DriveFrame> = instants.iter().map(frame_at).collect();
-        parameters.packet = parameters.packet.reading(&frames);
+        parameters.packet = parameters.packet.reading(anchor_moment, &frames);
         let tolerance = parameters.owed.tolerance.unwrap_or(ErrorScales::EXACT);
         Ok(InitializationSystem {
             body: self,
@@ -439,7 +439,7 @@ impl InitializationSystem<'_> {
             }
         };
         let stages = self.stages(unknowns)?;
-        for (_, quantity) in self.replaced() {
+        for quantity in self.body.conserved_basis().ids() {
             let row = AdmissionRow::Total(quantity);
             let (now, packet) = self.totals(unknowns, quantity);
             let moved = self.held(now.minus(packet).abs().rounded(), packet.rounded());
@@ -463,7 +463,26 @@ impl InitializationSystem<'_> {
             );
             note(row, held.ok_or(inconsistent(row))?);
         }
+        for fit in &owed.fits {
+            if !self.felt(unknowns, fit)? {
+                let (key, binding) = (fit.key, fit.binding);
+                return Err(AdmissionError::FitUnread { key, binding }.into());
+            }
+        }
         Ok(worst)
+    }
+    /// Whether a moving row feels this fit anywhere on this workspace.
+    fn felt(&self, unknowns: &[f64], fit: &Fit) -> Result<bool, InitializationFailure> {
+        let values = self.values(unknowns);
+        for point in 0..self.frames.len() {
+            let inputs = self.inputs(point, self.point(unknowns, point), &values);
+            let slopes = (self.body.parameter_slopes(&inputs, &fit.slots)).map_err(undefined)?;
+            let moves = |row: &Row| self.interval.is_some() || algebraic(row.kind());
+            if (self.body.rows().iter().zip(&slopes)).any(|(row, slope)| moves(row) && *slope != 0.0) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
     /// The only constructor of `InitialRevision`. A workspace from another system is refused. Node 0 becomes the
     /// start state and each fit lands in `BoundParameters::values`, which the chain's first link seals, so a fit is

@@ -175,7 +175,8 @@ pub enum AdmissionError {
         key: ParameterKey,
         source: ParameterKey,
     },
-    /// A calibrated entry no law behind its anchor's row reads, so the fit could only stamp its guess.
+    /// A calibrated entry no law behind its anchor's row reads, or no row feels at the start, so the fit could only
+    /// stamp its guess.
     FitUnread {
         key: ParameterKey,
         binding: Binding,

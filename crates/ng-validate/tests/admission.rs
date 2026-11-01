@@ -811,6 +811,39 @@ fn a_moved_conserved_total_is_refused_with_its_quantity() {
     }
 }
 
+/// Each row moves inside its own scale at an instant, and together they move the total past its own.
+#[test]
+fn an_instant_moves_no_conserved_total_past_its_scale() {
+    let case = PulsatileCase::new(Variant::Slow);
+    let lens = case.body().lens(Vec::new(), count(SECOND)).expect("a lens");
+    let mut packet = ParameterPacket::new();
+    packet.within(admission_tolerance());
+    packet
+        .synthetic(E, NETWORK, measure::<Elastance>(GUESS), NOTE)
+        .expect("once");
+    let g = measure::<Conductance<Water>>(CONDUCTANCE);
+    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+    packet
+        .start(case.a(), measure::<Water>(START[0]), NOTE)
+        .expect("once");
+    packet
+        .start(case.b(), measure::<Water>(START[1]), NOTE)
+        .expect("once");
+    let parameters = case.body().bind(packet).expect("bound");
+    let request = InitializationRequest::at(at(0)).reading(&lens);
+    let system = (case.body().initialization(parameters, empty_port(), request)).expect("a system");
+    let mut moved = system.workspace();
+    moved.unknowns_mut()[0] += 9e-10;
+    moved.unknowns_mut()[1] += 9e-10;
+    let quantity = case.body().conserved_basis().combinations()[0].id();
+    assert_eq!(
+        system.admit(moved, case.history()).err(),
+        Some(InitializationFailure::Inconsistent {
+            row: AdmissionRow::Total(quantity)
+        })
+    );
+}
+
 #[test]
 fn a_witness_that_breaks_one_stage_at_one_point_is_refused_with_its_row() {
     let case = PulsatileCase::plain();
@@ -1799,6 +1832,36 @@ fn a_delivery_edge_between_two_points_is_refused_and_one_past_the_window_is_take
 }
 
 #[test]
+fn a_fit_no_row_feels_at_the_start_is_refused_by_its_key() {
+    let case = PulsatileCase::plain();
+    let even = 50.0;
+    let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
+    packet.within(admission_tolerance());
+    let g = measure::<Conductance<Water>>(CONDUCTANCE);
+    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+    packet
+        .start(case.a(), measure::<Water>(even), NOTE)
+        .expect("once");
+    packet
+        .start(case.b(), measure::<Water>(even), NOTE)
+        .expect("once");
+    packet
+        .anchor(case.mean_anchor(MEAN, case.a(), even))
+        .expect("once");
+    packet
+        .calibrated(E, NETWORK, measure::<Elastance>(1234.5), MEAN)
+        .expect("once");
+    let core = reference(REFERENCE_NS);
+    assert_eq!(
+        admit_solved(case.body(), packet, empty_port(), &core, &case.lens).err(),
+        Some(InitializationFailure::Admission(AdmissionError::FitUnread {
+            key: E,
+            binding: NETWORK
+        }))
+    );
+}
+
+#[test]
 fn a_first_mode_has_a_record() {
     let case = PulsatileCase::new(Variant::Hazard);
     let mut packet = ParameterPacket::new();
@@ -2046,6 +2109,32 @@ fn a_delivery_inside_the_window_is_in_the_hash_a_run_names_and_one_past_it_is_no
     let base = named(vec![pulse(0), drain()]);
     assert_ne!(base, named(vec![pulse(PERIOD_NS / 2), drain()]));
     assert_eq!(base, named(vec![pulse(0), drain(), later()]));
+}
+
+#[test]
+fn the_moment_a_run_starts_is_in_the_hash_it_names() {
+    let case = PulsatileCase::new(Variant::Slow);
+    let named = |moment: u64| {
+        let mut packet = ParameterPacket::new();
+        packet
+            .synthetic(E, NETWORK, measure::<Elastance>(GUESS), NOTE)
+            .expect("once");
+        let g = measure::<Conductance<Water>>(CONDUCTANCE);
+        packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+        packet
+            .start(case.a(), measure::<Water>(START[0]), NOTE)
+            .expect("once");
+        packet
+            .start(case.b(), measure::<Water>(START[1]), NOTE)
+            .expect("once");
+        let parameters = case.body().bind(packet).expect("bound");
+        let request = InitializationRequest::at(at(moment));
+        let system = (case.body().initialization(parameters, empty_port(), request)).expect("a system");
+        let guess = system.workspace();
+        system.admit(guess, case.history()).expect("exact").packet_hash()
+    };
+    assert_eq!(named(0), named(0));
+    assert_ne!(named(0), named(5 * SECOND));
 }
 
 #[test]

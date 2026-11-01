@@ -1263,11 +1263,19 @@ fn a_session_refuses_an_identity_of_another_body_origin_or_solver_and_a_zero_flo
         Some(AdmissionError::IdentityMismatch)
     );
 
-    let foreign_packet = body
-        .bind(reservoir_packet(body, 1.0, 0.25))
-        .expect("bound")
-        .packet_hash();
+    let foreign_packet = {
+        let parameters = body.bind(reservoir_packet(body, 1.0, 0.25)).expect("bound");
+        let origin = SimTime::from_ns(0);
+        let request = InitializationRequest::at(origin);
+        let port = BoundaryPort::new(Vec::new()).expect("no event");
+        let system = body.initialization(parameters, port, request).expect("a system");
+        let solved = system.workspace();
+        let history = MethodHistory::new(core.resolution().policy(), origin, Vec::new());
+        system.admit(solved, history).expect("admitted").packet_hash()
+    };
     let origin = revision(&case);
+    let own_packet = origin.packet_hash();
+    assert_ne!(foreign_packet, own_packet);
     let wrong_packet = RunIdentity::new(body.model_hash(), foreign_packet, seed, core.resolution());
     assert_eq!(
         admit(origin, wrong_packet),

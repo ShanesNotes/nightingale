@@ -8,7 +8,7 @@ use crate::quantity::dimension;
 use crate::{
     AdmissionError, Anchor, AnchorId, AnchorStatistic, Binding, Citation, Compensated, CompiledBody, Digest,
     Dimension, Dimensionless, ErrorScales, LawName, Measure, ModelHash, PacketSeed, ParameterKey, RateBand,
-    RowId, RowKind, ValueName, ValueProvenance,
+    RowId, RowKind, SimTime, ValueName, ValueProvenance,
 };
 use core::marker::PhantomData;
 use core::num::{NonZeroU32, NonZeroU64};
@@ -52,11 +52,12 @@ impl PacketHash {
     pub(crate) fn of_digest(digest: Digest) -> Self {
         Self { digest }
     }
-    /// The hash a run names: the packet's and the drives its admission read, since those shape the start too. A
-    /// timeline's later events stay out of it.
-    pub(crate) fn reading(self, frames: &[DriveFrame]) -> Self {
+    /// The hash a run names, fixed at admission: the packet's, the moment it starts and the drives it read, since
+    /// those shape the course too. A timeline's later events stay out of it.
+    pub(crate) fn reading(self, moment: SimTime, frames: &[DriveFrame]) -> Self {
         let mut out = Canonical::new("ng-contract packet and window 1");
         self.digest.seal(&mut out);
+        moment.seal(&mut out);
         frames.seal(&mut out);
         Self { digest: out.digest() }
     }
@@ -866,9 +867,11 @@ impl CompiledBody {
 }
 
 /// One number per node, equal for two nodes that compute one expression: the same operation on operands of the
-/// same numbers, in either order where the order does not matter, and with `as_dimension` no operation at all.
-/// Separate reads of one parameter already compare equal, so `(p + p) / (p + p)` from four reads gets one number on
-/// each side. It folds nothing: `p - p` stays a law on a parameter, as finding 15's backed test holds it.
+/// same numbers, with `as_dimension` no operation at all, and in either order for `add` and a smooth limit's two
+/// sides, the forms that can name a dimensionless ratio. Products stay in order: a ratio of two has no dimension a
+/// law can use. Separate reads of one parameter already compare equal, so `(p + p) / (p + p)` from four reads gets
+/// one number on each side. It folds nothing: `p - p` stays a law on a parameter, as finding 15's backed test
+/// holds it.
 fn numbered(code: &[Op]) -> Vec<usize> {
     let mut numbers: Vec<usize> = Vec::with_capacity(code.len());
     let mut distinct: Vec<Op> = Vec::with_capacity(code.len());
