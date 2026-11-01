@@ -268,6 +268,15 @@ impl InitializationSystem<'_> {
             .filter(|_| self.interval.is_some())
             .map(move |combination| (last * rows + combination.terms()[0].0.index(), combination.id()))
     }
+    /// A slot's natural size, so a solver reads a small row at its own size. A fit reads as one.
+    pub fn size(&self, slot: usize) -> f64 {
+        let rows = self.body.rows().len();
+        if slot < self.frames.len() * rows {
+            self.parameters.sizes[slot % rows]
+        } else {
+            1.0
+        }
+    }
     /// How many rows a point holds.
     pub fn rows(&self) -> usize {
         self.body.rows().len()
@@ -530,15 +539,6 @@ impl InitializationSystem<'_> {
         }
         Ok(changed)
     }
-    pub fn debug_modes(&self) {
-        for (variable, mode) in self.body.layout.modes.iter().enumerate() {
-            let line: String = self.modes.iter().map(|modes| char::from(b'0' + modes[variable] as u8)).collect();
-            #[allow(clippy::print_stderr)]
-            {
-                eprintln!("MODE {line} {:?}", mode.variable.at);
-            }
-        }
-    }
     /// Puts point 0 back on the packet's modes, as if every guard that enters them fired on the way there. A pass of a
     /// march ends where its guess leaves it, so the next pass starts the cycle where the packet says it starts.
     pub fn restart(&mut self) {
@@ -566,7 +566,10 @@ impl InitializationSystem<'_> {
         let shift = self.interval.map_or(0.0, |seconds| 1.0 / seconds);
         let values = self.values(unknowns);
         let inputs = self.inputs(0, self.point(unknowns, 0), &values);
-        let entries = self.body.jacobian(&inputs, shift).map_err(undefined)?;
+        // A law with no slope here says nothing of rank. The first stage that needs one refuses it.
+        let Ok(entries) = self.body.jacobian(&inputs, shift) else {
+            return Ok(None);
+        };
         let sparsity = self.body.sparsity();
         let mut matrix = vec![vec![0.0; size]; size];
         for (row, cells) in matrix.iter_mut().enumerate() {
@@ -706,7 +709,9 @@ impl InitializationSystem<'_> {
             );
             note(body_row(slot % size), stage(slot)?);
         }
-        for (_, quantity) in self.replaced() {
+        let specified = (self.body.conserved_basis().combinations().iter())
+            .filter(|combination| !combination.regulated() && combination.book() != Book::Charge);
+        for quantity in specified.map(|combination| combination.id()) {
             let row = AdmissionRow::Total(quantity);
             let (moved, packet) = self.total(unknowns, quantity);
             let bulk = self.total_size(quantity);

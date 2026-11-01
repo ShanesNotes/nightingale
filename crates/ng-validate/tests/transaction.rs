@@ -2572,6 +2572,7 @@ fn singular_body() -> CompiledBody {
         let rate =
             laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.rate"), Admissible::positive());
         let held = laws.parameter::<Dimensionless>(ParameterKey::new("ns.held"), Admissible::finite());
+        let first = laws.parameter::<Dimensionless>(ParameterKey::new("ns.first"), Admissible::finite());
         let reflex = RateClass::new(RateBand::Reflex, SECOND)?;
         let rise = laws.kernel(|mut k| {
             let value = k.parameter(&rate);
@@ -2580,12 +2581,14 @@ fn singular_body() -> CompiledBody {
         laws.memory_rate(&memory, rise);
         let closure = laws.kernel(|mut k| {
             let x = k.algebraic(&reading);
-            let again = k.algebraic(&reading);
-            let nothing = k.subtract(x, again);
             let m = k.state(&memory);
             let c = k.parameter(&held);
             let off = k.subtract(m, c);
-            let residual = k.add(nothing, off);
+            let scaled = k.scale(x, off);
+            let again = k.state(&memory);
+            let once = k.parameter(&first);
+            let moved = k.subtract(again, once);
+            let residual = k.add(scaled, moved);
             k.finish(residual, laws.every_mode(), reflex)
         });
         laws.residual(&reading, closure);
@@ -2597,8 +2600,8 @@ fn singular_body() -> CompiledBody {
 
 #[test]
 fn a_singular_row_is_named_by_the_fault_that_ends_the_run() {
-    // `(x - x) + (m - c)` reads `x`, so it matches structurally, and it has no slope in `x`, so the
-    // stage's Jacobian has no pivot on that row.
+    // `x (m - c) + (m - f)` has a slope in `x` at the start, so admission finds its rank. A stage reaches `m = c`,
+    // where the row has no slope in `x` and still a residual, so the stage's Jacobian has no pivot on it.
     let body = singular_body();
     let name = |local| LawName { owner: "NS", local };
     let mut packet = ParameterPacket::new();
@@ -2607,9 +2610,17 @@ fn a_singular_row_is_named_by_the_fault_that_ends_the_run() {
     packet
         .synthetic(ParameterKey::new("ns.rate"), bind, rate, "synthetic")
         .expect("once");
-    let held = measure::<Dimensionless>(1.0);
+    let held = measure::<Dimensionless>(1.5);
     packet
         .synthetic(ParameterKey::new("ns.held"), bind, held, "synthetic")
+        .expect("once");
+    packet
+        .synthetic(
+            ParameterKey::new("ns.first"),
+            bind,
+            measure::<Dimensionless>(1.0),
+            "synthetic",
+        )
         .expect("once");
     for (row, start) in [
         (RowKind::Memory(name("memory").into()), 1.0),
@@ -2768,44 +2779,57 @@ fn newton_applies_a_correction_too_small_to_read_as_a_change() {
 
 #[test]
 fn a_stage_already_solved_needs_no_factorization() {
-    // `x x = 0` from `x = 0` is solved, and its one Jacobian entry is zero.
+    // `x (x - m) = 0` from `x = 0` has a slope while `m` holds 1. The memory falls to zero within the step, and there the
+    // stage is solved with a Jacobian that has no pivot, so a core that factored it would refuse a solved stage.
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", origin());
     let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
     let body = assemble(schema, |mut body| {
         let (mut laws, _ports) = body.nervous()?.parts();
         let reading = laws.algebraic::<Dimensionless>("reading", Admissible::finite());
+        let memory = laws.state::<Dimensionless>("memory", Admissible::finite());
         let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let root = laws.kernel(|mut k| {
             let x = k.algebraic(&reading);
             let again = k.algebraic(&reading);
-            let square = k.scale(x, again);
-            k.finish(square, laws.every_mode(), wave)
+            let m = k.state(&memory);
+            let apart = k.subtract(again, m);
+            let product = k.scale(x, apart);
+            k.finish(product, laws.every_mode(), wave)
         });
         laws.residual(&reading, root);
+        let speed =
+            laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.speed"), Admissible::positive());
+        let fall = laws.kernel(|mut k| {
+            let rate = k.parameter(&speed);
+            let zero = k.zero::<Rate<Dimensionless>>();
+            let rate = k.subtract(zero, rate);
+            k.finish(rate, laws.every_mode(), wave)
+        });
+        laws.memory_rate(&memory, fall);
         body.add(laws.finish());
         body.compile()
     })
     .expect("compiled");
     let mut packet = ParameterPacket::new();
-    let row = RowKind::Algebraic(
-        LawName {
-            owner: "NS",
-            local: "reading",
-        }
-        .into(),
-    );
+    let name = |local| LawName { owner: "NS", local };
     packet
-        .start(row, measure::<Dimensionless>(0.0), "synthetic")
+        .synthetic(
+            ParameterKey::new("ns.speed"),
+            Binding::Body,
+            measure::<Rate<Dimensionless>>(1.0),
+            "synthetic",
+        )
         .expect("once");
+    for (row, start) in [
+        (RowKind::Algebraic(name("reading").into()), 0.0),
+        (RowKind::Memory(name("memory").into()), 1.0),
+    ] {
+        packet
+            .start(row, measure::<Dimensionless>(start), "synthetic")
+            .expect("once");
+    }
     let core = reference(SECOND);
     let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
     accepted(session.step());
-}
-
-#[test]
-fn a_case_that_never_steps_is_refused_as_no_case() {
-    let cases = vec![AccuracyCase::TwoReservoir(stepped().until(SimTime::from_ns(0)))];
-    let empty = AccuracyPolicy::new(cases, measure(5.0), measure(0.0), SECOND).err();
-    assert_eq!(empty, Some(AdmissionError::EmptyAccuracyPolicy));
 }

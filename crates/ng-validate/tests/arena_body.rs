@@ -53,8 +53,7 @@ fn debug_admit() {
 fn row_of(body: &CompiledBody, name: &str, place: Option<&str>) -> RowId {
     let found = body.rows().iter().find(|row| match row.kind() {
         RowKind::Algebraic(slot) => {
-            slot.law.local == name
-                && place.is_none_or(|place| format!("{:?}", slot.at).contains(place))
+            slot.law.local == name && place.is_none_or(|place| format!("{:?}", slot.at).contains(place))
         }
         RowKind::Memory(slot) => slot.law.local == name,
         _ => false,
@@ -65,7 +64,10 @@ fn row_of(body: &CompiledBody, name: &str, place: Option<&str>) -> RowId {
 #[test]
 fn debug_run() {
     let body = arena_body().expect("compiled");
-    let (packet, lens) = (arena_packet(&body).expect("packet"), arena_lens(&body).expect("lens"));
+    let (packet, lens) = (
+        arena_packet(&body).expect("packet"),
+        arena_lens(&body).expect("lens"),
+    );
     let port = BoundaryPort::new(Vec::new()).expect("port");
     let unit = |value| Measure::<Dimensionless>::new(value).expect("finite");
     let core = ReferenceIntegrator::new(1_000_000)
@@ -88,18 +90,18 @@ fn debug_run() {
     loop {
         session = match session.step() {
             ng_record::Step::Accepted(next, _) => next,
-            ng_record::Step::Refused(mut refused) => {
-                loop {
-                    match refused.retry() {
-                        ng_record::Step::Accepted(next, _) => break next,
-                        ng_record::Step::Refused(again) => refused = again,
-                        ng_record::Step::Faulted(stopped) => panic!("{:?}", stopped.fault()),
-                    }
+            ng_record::Step::Refused(mut refused) => loop {
+                match refused.retry() {
+                    ng_record::Step::Accepted(next, _) => break next,
+                    ng_record::Step::Refused(again) => refused = again,
+                    ng_record::Step::Faulted(stopped) => panic!("{:?}", stopped.fault()),
                 }
-            }
+            },
             ng_record::Step::Faulted(stopped) => {
                 let fault = stopped.fault();
-                if let Some(NumericalRefusal::Accuracy { row } | NumericalRefusal::StageResidual { row }) = fault.last_refusal() {
+                if let Some(NumericalRefusal::Accuracy { row } | NumericalRefusal::StageResidual { row }) =
+                    fault.last_refusal()
+                {
                     println!("ROW {:?}", body.rows()[row.index()].kind());
                 }
                 panic!("fault {fault:?}")

@@ -124,6 +124,7 @@ pub(crate) enum Family {
     Release(Species),
     Reuptake(Species),
     Binding(Species),
+    Exchange(Species),
     StrokeWork,
     Dissipation,
 }
@@ -140,6 +141,7 @@ impl Family {
             Family::Release(species) => species.names()[1],
             Family::Reuptake(species) => species.names()[2],
             Family::Binding(species) => species.names()[3],
+            Family::Exchange(species) => species.names()[5],
             Family::StrokeWork => "stroke work",
             Family::Dissipation => "dissipation",
         }

@@ -518,6 +518,15 @@ impl<'b> FluidsPorts<'b> {
         laws.request(Family::Starling);
         SiteRoute::requested(Family::Starling)
     }
+    /// `Q` across the wall of every capillary bed, apart from what the water carries.
+    pub fn exchange<Q: Substance>(
+        &self,
+        laws: &mut FragmentBuilder<'b, Fluids>,
+    ) -> SiteRoute<'b, Fluids, CapillaryBed, Q> {
+        let family = Family::Exchange(Q::SPECIES);
+        laws.request(family);
+        SiteRoute::requested(family)
+    }
     /// Every lymph edge.
     pub fn lymph(&self, laws: &mut FragmentBuilder<'b, Fluids>) -> EdgeRoute<'b, Fluids, Water, LymphEdge> {
         laws.request(Family::Lymph);

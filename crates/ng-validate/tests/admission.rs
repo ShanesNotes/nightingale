@@ -1138,8 +1138,9 @@ fn the_row_a_total_replaced_is_read_at_its_own_scale() {
     );
 }
 
+/// A march writes the pulse into the ring first, so a flat guess no longer leaves the fit nothing to move.
 #[test]
-fn a_guess_with_no_head_gives_the_fit_nothing_to_move() {
+fn a_march_gives_a_guess_with_no_head_a_head_to_fit() {
     let case = PulsatileCase::plain();
     let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
     packet.within(admission_tolerance());
@@ -1158,10 +1159,8 @@ fn a_guess_with_no_head_gives_the_fit_nothing_to_move() {
         .calibrated(E, NETWORK, measure::<Elastance>(GUESS), MEAN)
         .expect("once");
     let core = reference(REFERENCE_NS);
-    assert!(matches!(
-        admit_solved(case.body(), packet, port(0..1), &core, &case.lens).err(),
-        Some(InitializationFailure::Inconsistent { .. })
-    ));
+    let admitted = admit_solved(case.body(), packet, port(0..1), &core, &case.lens);
+    assert!(admitted.is_ok());
 }
 
 #[test]

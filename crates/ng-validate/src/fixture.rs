@@ -116,7 +116,7 @@ impl TwoReservoirs {
                 ParameterKey::new("cv.g"),
                 Admissible::nonnegative(),
             );
-            let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
+            let wave = RateClass::new(RateBand::Wave, u64::MAX)?;
             let flow = laws.edge_kernel(|mut k| {
                 let upstream = k.at_edge(&route.from_amount());
                 let downstream = k.at_edge(&route.to_amount());
@@ -528,8 +528,8 @@ impl ChanceCase {
             let return_hazard = laws.state::<Dimensionless>(RETURN_INTEGRAL, Admissible::nonnegative());
             let [sinus, ectopic] = laws.modes(RHYTHM, ["sinus", "ectopic"]);
             let (wave, beat) = (
-                RateClass::new(RateBand::Wave, 3_600_000_000_000)?,
-                RateClass::new(RateBand::Beat, 100_000_000)?,
+                RateClass::new(RateBand::Wave, u64::MAX)?,
+                RateClass::new(RateBand::Beat, u64::MAX)?,
             );
             laws.transfer_along(&route, flow(&laws, &route, &e, &g, sinus.only(), wave));
             laws.transfer_along(&route, flow(&laws, &route, &e, &slowed, ectopic.only(), wave));

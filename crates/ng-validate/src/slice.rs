@@ -450,6 +450,7 @@ pub fn arena_body() -> Result<CompiledBody, AdmissionError> {
 }
 
 const SECOND: u64 = 1_000_000_000;
+const POINTS: u32 = 100;
 /// What a pulsing flow swings by, and the power that keeps the elastic store on its sum: that row rests on the store's
 /// change over a stage, so doubled stages part by more than any other row.
 const FLOW_SIZE: f64 = 20.0;
@@ -466,35 +467,59 @@ pub fn arena_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixt
     let note = "arena fixture: synthetic";
     let cycle = Cycle::new(
         NonZeroU64::MIN.saturating_add(SECOND - 1),
-        NonZeroU32::MIN.saturating_add(99),
+        NonZeroU32::MIN.saturating_add(POINTS - 1),
     )?;
     let mut packet = ParameterPacket::periodic(cycle);
     let unit = |value| Measure::<Dimensionless>::new(value);
     let scales = ErrorScales::uniform(unit(1e-9)?, unit(1e-10)?)?;
     packet.within(scales);
 
-    let rate = LawName {
-        owner: Cardiovascular::CARD,
-        local: "rate",
-    };
-    let rate_row = RowKind::Algebraic(rate.into());
-    let heart_rate = AnchorId::new("heart rate");
-    packet.anchor(Anchor::new(
-        heart_rate,
-        Snapshot::new(
-            rate_row,
-            "synthetic monitor",
-            AnchorStatistic::CycleMean,
-            Measure::<Rate<Dimensionless>>::new(1.0)?,
-        ),
-        note,
+    let (arteries, glomerular) = (
+        site::<VesselSegment>("systemic arteries")?,
+        site::<CapillaryBed>("glomerular bed")?,
+    );
+    let rate = AnchorId::new("heart rate");
+    packet.anchor(mean_anchor(
+        rate,
+        heart_rate(),
+        Measure::<Rate<Dimensionless>>::new(1.0)?,
     ))?;
-    let intrinsic = ParameterKey::new("cv.intrinsic-rate");
     packet.calibrated(
-        intrinsic,
+        ParameterKey::new("cv.intrinsic-rate"),
         Binding::Body,
         Measure::<Rate<Dimensionless>>::new(1.125)?,
-        heart_rate,
+        rate,
+    )?;
+    let pressure = AnchorId::new("mean arterial pressure");
+    packet.anchor(mean_anchor(
+        pressure,
+        arterial_pressure()?,
+        Measure::<Pressure>::new(100.0)?,
+    ))?;
+    packet.calibrated(
+        ParameterKey::new("cv.resistance"),
+        Binding::Edge {
+            from: arteries,
+            to: glomerular,
+        },
+        Measure::<Resistance>::new(1.8)?,
+        pressure,
+    )?;
+    let filtered = AnchorId::new("filtration");
+    packet.anchor(mean_anchor(
+        filtered,
+        filtration_flow()?,
+        Measure::<Rate<Water>>::new(2.0)?,
+    ))?;
+    // Salt balance fixes filtration at what the tubule can take back, so that capacity is what this anchor fits.
+    packet.calibrated(
+        ParameterKey::new("rn.sodium-capacity"),
+        Binding::Edge {
+            from: site::<VesselSegment>("renal tubule")?,
+            to: site::<CapillaryBed>("peritubular bed")?,
+        },
+        Measure::<Rate<Sodium>>::new(250.0)?,
+        filtered,
     )?;
 
     let valve = |from: &'static str, to: &'static str| -> Result<Slot, AdmissionError> {
@@ -524,7 +549,9 @@ pub fn arena_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixt
         let kind = row.kind();
         match kind {
             RowKind::Memory(slot) | RowKind::Algebraic(slot) => match slot.law.local {
-                "valves" | "circulation" => packet.row_scale(kind, Measure::<Rate<Water>>::new(FLOW_SIZE)?)?,
+                "valves" | "circulation" => {
+                    packet.row_scale(kind, Measure::<Rate<Water>>::new(FLOW_SIZE)?)?
+                }
                 "dissipated power" => packet.row_scale(kind, Measure::<Rate<Energy>>::new(POWER_SIZE)?)?,
                 _ => {}
             },
@@ -539,7 +566,8 @@ fn start_guess(row: RowKind) -> f64 {
     match row {
         RowKind::Amount { species, space, .. } => {
             let water = match space {
-                Space::Lumen | Space::Plasma => 300.0,
+                Space::Plasma => 270.0,
+                Space::Lumen => 300.0,
                 Space::Interstitium => 2_000.0,
                 _ => 1_000.0,
             };
@@ -562,8 +590,8 @@ fn start_guess(row: RowKind) -> f64 {
                 _ => 0.5,
             }
         }
-        RowKind::Memory(slot) if slot.law.local == "afferent filter" => 1.3,
-        RowKind::Memory(slot) if slot.law.local == "baroreflex set point" => 1.3,
+        RowKind::Memory(slot) if slot.law.local == "afferent filter" => 1.0,
+        RowKind::Memory(slot) if slot.law.local == "baroreflex set point" => 1.0,
         RowKind::Memory(_) => 0.0,
         RowKind::Algebraic(_) => 1.0,
     }
@@ -715,24 +743,32 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
     for (from, to, resistance) in [
         (artery, lung, 0.06),
         (lung, pulmonary_vein, 0.03),
-        (splanchnic, splanchnic_veins, 0.1),
+        (splanchnic, splanchnic_veins, 0.5),
         (splanchnic_veins, veins, 0.03),
-        (leg, leg_veins, 0.1),
+        (leg, leg_veins, 0.5),
         (leg_veins, veins, 0.03),
         (glomerular, peritubular, 2.0),
         (peritubular, veins, 0.2),
     ] {
         set::<Resistance>(packet, "cv.resistance", edge(from, to), resistance, note)?;
     }
-    for (to, resistance, tone) in [(splanchnic, 2.0, 1.0), (leg, 2.5, 1.0), (glomerular, 3.0, 0.5)] {
+    set::<Dimensionless>(packet, "cv.tone-gain", edge(arteries, glomerular), 0.5, note)?;
+    for (to, resistance) in [(splanchnic, 2.0), (leg, 2.5)] {
         let at = edge(arteries, to);
         set::<Resistance>(packet, "cv.resistance", at, resistance, note)?;
-        set::<Dimensionless>(packet, "cv.tone-gain", at, tone, note)?;
+        set::<Dimensionless>(packet, "cv.tone-gain", at, 1.0, note)?;
     }
     set::<Dimensionless>(packet, "cv.feedback-share", edge(arteries, glomerular), 1.0, note)?;
 
+    set::<Rate<Water>>(packet, "fl.ion-exchange", beds, 10.0, note)?;
     set::<Dimensionless>(packet, "fl.albumin-reflection", beds, 0.9, note)?;
-    set::<Dimensionless>(packet, "fl.albumin-reflection", Binding::Site(peritubular), 0.5, note)?;
+    set::<Dimensionless>(
+        packet,
+        "fl.albumin-reflection",
+        Binding::Site(peritubular),
+        0.5,
+        note,
+    )?;
     set::<Conductance<Water>>(packet, "fl.lymph-conductance", lymph, 0.01, note)?;
     set::<Conductance<Water>>(
         packet,
@@ -762,15 +798,13 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
     }
     set::<Conductance<Water>>(packet, "rn.filtration", urinary, 0.12, note)?;
     set::<Resistance>(packet, "rn.tubule-resistance", urinary, 5.0, note)?;
-    for (from, water_least, water_most, capacity, half) in
-        [(tubule, 0.8, 0.8, 250.0, 200.0), (duct, 0.5, 0.99, 12.0, 20.0)]
-    {
+    for (from, water_least, water_most, half) in [(tubule, 0.8, 0.8, 200.0), (duct, 0.5, 0.99, 20.0)] {
         let at = edge(from, peritubular);
         set::<Dimensionless>(packet, "rn.water-least", at, water_least, note)?;
         set::<Dimensionless>(packet, "rn.water-most", at, water_most, note)?;
-        set::<Rate<Sodium>>(packet, "rn.sodium-capacity", at, capacity, note)?;
         set::<Sodium>(packet, "rn.sodium-half", at, half, note)?;
     }
+    set::<Rate<Sodium>>(packet, "rn.sodium-capacity", edge(duct, peritubular), 12.0, note)?;
 
     for (release, reuptake) in [
         ("ns.release-ne", "ns.reuptake-ne"),
@@ -793,13 +827,49 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
     set::<Dimensionless>(packet, "rc.avp-efficacy", blood, 2.0, note)
 }
 
-/// One cycle-mean channel per anchor, on the grid of the cycle's points.
-pub fn arena_lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError> {
-    let rate = LawName {
+fn heart_rate() -> RowKind {
+    let law = LawName {
         owner: Cardiovascular::CARD,
         local: "rate",
     };
-    let channel = ChannelSpec::new("synthetic monitor", RowKind::Algebraic(rate.into()))
-        .averaged(NonZeroU64::MIN.saturating_add(99));
-    body.lens(vec![channel], NonZeroU64::MIN.saturating_add(SECOND / 100 - 1))
+    RowKind::Algebraic(law.into())
+}
+
+fn arterial_pressure() -> Result<RowKind, AdmissionError> {
+    Ok(RowKind::Algebraic(Slot {
+        law: LawName {
+            owner: Cardiovascular::CARD,
+            local: "blood pressure",
+        },
+        at: Context::Site(site::<VesselSegment>("systemic arteries")?),
+    }))
+}
+
+fn filtration_flow() -> Result<RowKind, AdmissionError> {
+    Ok(RowKind::Algebraic(Slot {
+        law: LawName {
+            owner: Renal::CARD,
+            local: "filtration",
+        },
+        at: Context::Edge {
+            from: site::<CapillaryBed>("glomerular bed")?,
+            to: site::<VesselSegment>("renal tubule")?,
+        },
+    }))
+}
+
+const METHOD: &str = "a synthetic monitor";
+
+fn mean_anchor<U: Dimension>(id: AnchorId, row: RowKind, value: Measure<U>) -> Anchor<SyntheticFixture, U> {
+    let read = Snapshot::new(row, METHOD, AnchorStatistic::CycleMean, value);
+    Synthetic::new(id, read, "arena fixture: synthetic")
+}
+
+/// One cycle-mean channel per anchor, on the grid of the cycle's points.
+pub fn arena_lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError> {
+    let window = NonZeroU64::MIN.saturating_add(u64::from(POINTS) - 1);
+    let channels = [heart_rate(), arterial_pressure()?, filtration_flow()?]
+        .map(|row| ChannelSpec::new(METHOD, row).averaged(window));
+    let grid = NonZeroU64::MIN.saturating_add(SECOND / u64::from(POINTS) - 1);
+    body.lens(channels.into(), grid)
 }

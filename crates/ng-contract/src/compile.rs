@@ -826,6 +826,17 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
                 )
             })
             .collect(),
+        Family::Exchange(species) => (anatomy.in_set(Sites::Class(Class::CapillaryBed)).into_iter())
+            .map(|bed| {
+                at(
+                    bed,
+                    [
+                        species_at(bed, Space::Plasma, species),
+                        species_at(bed, Space::Interstitium, species),
+                    ],
+                )
+            })
+            .collect(),
         Family::StrokeWork => (anatomy.in_set(Sites::Blood).into_iter())
             .filter_map(|site| {
                 Some(Reach {

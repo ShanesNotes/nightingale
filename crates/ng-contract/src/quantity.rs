@@ -90,8 +90,9 @@ impl Species {
             _ => 0,
         }
     }
-    /// The local name of each per-species route and of its receptor effect: reclaim, release, reuptake, binding, effect.
-    pub(crate) const fn names(self) -> [&'static str; 5] {
+    /// The local name of each per-species route and of its receptor effect: reclaim, release, reuptake, binding, effect,
+    /// exchange.
+    pub(crate) const fn names(self) -> [&'static str; 6] {
         match self {
             Species::Water => [
                 "reclaim water",
@@ -99,6 +100,7 @@ impl Species {
                 "reuptake water",
                 "binding water",
                 "effect water",
+                "exchange water",
             ],
             Species::Sodium => [
                 "reclaim sodium",
@@ -106,6 +108,7 @@ impl Species {
                 "reuptake sodium",
                 "binding sodium",
                 "effect sodium",
+                "exchange sodium",
             ],
             Species::Potassium => [
                 "reclaim potassium",
@@ -113,6 +116,7 @@ impl Species {
                 "reuptake potassium",
                 "binding potassium",
                 "effect potassium",
+                "exchange potassium",
             ],
             Species::Chloride => [
                 "reclaim chloride",
@@ -120,6 +124,7 @@ impl Species {
                 "reuptake chloride",
                 "binding chloride",
                 "effect chloride",
+                "exchange chloride",
             ],
             Species::Albumin => [
                 "reclaim albumin",
@@ -127,6 +132,7 @@ impl Species {
                 "reuptake albumin",
                 "binding albumin",
                 "effect albumin",
+                "exchange albumin",
             ],
             Species::Vasopressin => [
                 "reclaim vasopressin",
@@ -134,6 +140,7 @@ impl Species {
                 "reuptake vasopressin",
                 "binding vasopressin",
                 "effect vasopressin",
+                "exchange vasopressin",
             ],
             Species::Norepinephrine => [
                 "reclaim norepinephrine",
@@ -141,6 +148,7 @@ impl Species {
                 "reuptake norepinephrine",
                 "binding norepinephrine",
                 "effect norepinephrine",
+                "exchange norepinephrine",
             ],
             Species::Acetylcholine => [
                 "reclaim acetylcholine",
@@ -148,6 +156,7 @@ impl Species {
                 "reuptake acetylcholine",
                 "binding acetylcholine",
                 "effect acetylcholine",
+                "exchange acetylcholine",
             ],
             Species::Energy => [
                 "reclaim energy",
@@ -155,6 +164,7 @@ impl Species {
                 "reuptake energy",
                 "binding energy",
                 "effect energy",
+                "exchange energy",
             ],
         }
     }

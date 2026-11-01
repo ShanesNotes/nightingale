@@ -277,8 +277,10 @@ fn nearly_every_operator() -> Result<(CompiledBody, LawName), AdmissionError> {
         let speed =
             laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.speed"), Admissible::positive());
         let reach = laws.parameter::<Pressure>(ParameterKey::new("ns.reach"), Admissible::positive());
-        let deviation_width =
-            laws.parameter::<Deviation<Dimensionless>>(ParameterKey::new("ns.width"), Admissible::positive());
+        let deviation_width = laws.parameter::<Deviation<Dimensionless>>(
+            ParameterKey::new("ns.deviation-width"),
+            Admissible::positive(),
+        );
         let divisor = laws.parameter::<Pressure>(ParameterKey::new("ns.divisor"), Admissible::positive());
         let width = laws.parameter::<Dimensionless>(ParameterKey::new("ns.width"), Admissible::positive());
         let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;

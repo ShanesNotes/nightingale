@@ -54,6 +54,32 @@ fn oncotic<'b, 'k>(
     k.as_dimension(product)
 }
 
+/// `J = g (c_plasma - c_tissue)`. A small ion crosses a capillary wall far faster than water carries it, so tissue fluid
+/// holds the plasma's ions. Model default: linear, one `g` per bed.
+fn across_the_wall<'b, Q: Substance>(
+    fl: &mut FragmentBuilder<'b, Fluids>,
+    ports: &FluidsPorts<'b>,
+    water: &SiteRoute<'b, Fluids, CapillaryBed, Water>,
+    wall: &SiteParameter<'b, Fluids, CapillaryBed, Rate<Water>>,
+    class: RateClass,
+) where
+    Product<Rate<Water>, Quotient<Q, Water>>: SameDimension<Rate<Q>>,
+{
+    let route = ports.exchange::<Q>(fl);
+    let rate = fl.site_kernel(|mut k| {
+        let (held, solvent) = (k.at_site(&route.from_amount()), k.at_site(&water.from_amount()));
+        let inside = k.divide(held, solvent);
+        let (held, solvent) = (k.at_site(&route.to_amount()), k.at_site(&water.to_amount()));
+        let outside = k.divide(held, solvent);
+        let difference = k.subtract(inside, outside);
+        let open = k.site_parameter(wall);
+        let product = k.multiply(open, difference);
+        let rate = k.as_dimension(product);
+        k.finish(rate, fl.every_mode(), class)
+    });
+    fl.transfer_at(&route, rate);
+}
+
 pub fn declare<'b>(scope: FluidsScope<'b>) -> Result<Fragment<'b, Fluids>, AdmissionError> {
     let (mut fl, ports) = scope.parts();
     let class = RateClass::new(RateBand::Reflex, EXCHANGE_NS)?;
@@ -81,6 +107,14 @@ pub fn declare<'b>(scope: FluidsScope<'b>) -> Result<Fragment<'b, Fluids>, Admis
         k.finish(flow, fl.every_mode(), class)
     });
     fl.transfer_at(&route, exchange);
+
+    let wall = fl.site_parameter::<CapillaryBed, Rate<Water>>(
+        ParameterKey::new("fl.ion-exchange"),
+        Admissible::positive(),
+    );
+    across_the_wall::<Sodium>(&mut fl, &ports, &route, &wall, class);
+    across_the_wall::<Potassium>(&mut fl, &ports, &route, &wall, class);
+    across_the_wall::<Chloride>(&mut fl, &ports, &route, &wall, class);
 
     let lymph = ports.lymph(&mut fl);
     let conductance = fl.edge_parameter::<LymphEdge, Conductance<Water>>(
