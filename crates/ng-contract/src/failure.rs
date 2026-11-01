@@ -170,12 +170,17 @@ pub enum AdmissionError {
     AnchorFittedTwice {
         anchor: AnchorId,
     },
-    /// A derived entry whose identity reads a key the packet does not hold, or one admission fits.
-    IdentityInput {
+    /// A derived entry whose source the packet does not hold, or one that is itself derived or fitted.
+    IdentitySource {
         key: ParameterKey,
-        input: ParameterKey,
+        source: ParameterKey,
     },
-    /// A second population record for a key, or a lower bound above the upper bound.
+    /// A calibrated entry no law behind its anchor's row reads, so the fit could only stamp its guess.
+    FitUnread {
+        key: ParameterKey,
+        binding: Binding,
+    },
+    /// A second population record for a key, a lower bound above the upper bound, or a width past the finite range.
     PopulationRange {
         key: ParameterKey,
     },

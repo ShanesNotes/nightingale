@@ -3,9 +3,6 @@ use ng_contract::*;
 use ng_record::{Running, Session};
 
 const NEWTON_LIMIT: u32 = 32;
-/// A row within this share of the largest unknown is rounding. The stop reads no tolerance, so what a tolerance
-/// passes shapes no bit of a start state.
-const ROWS_AT_ROUNDING: f64 = 64.0 * f64::EPSILON;
 
 /// A model default reported with every result. Newton leaves the pulsatile case's rows near 1e-14 on amounts near
 /// 100, about 1e-5 of this, so a guess passes only if it was solved.
@@ -14,25 +11,19 @@ pub fn admission_tolerance() -> ErrorScales {
     ErrorScales::uniform(scale(1e-9), scale(1e-12)).expect("positive constants")
 }
 
-fn largest(values: &[f64]) -> f64 {
-    values.iter().fold(
-        0.0,
-        |most, value| if value.abs() > most { value.abs() } else { most },
-    )
-}
-
 /// The one admission solve, a function of the packet and the window alone, so every core starts from one start
 /// state. Newton over `solve_dense`, whose cost is the cube of `points * rows`, so a few thousand unknowns is its
 /// reach. A body past that reduces the block ring `InitializationSystem` lays out, behind this one function.
 ///
-/// It judges nothing. A singular update stops it where it stands, and `admit` is the one judge of a start.
+/// It stops where `admit` would pass it, so a guess that already holds stands. A singular update stops it where it
+/// stands, and `admit` is the one judge of a start.
 fn initialize(system: &InitializationSystem<'_>) -> Result<SolveWorkspace, InitializationFailure> {
     let mut workspace = system.workspace();
     for _ in 0..NEWTON_LIMIT {
-        let residuals = system.evaluate(&workspace)?;
-        if largest(&residuals) <= ROWS_AT_ROUNDING * (1.0 + largest(workspace.unknowns_mut())) {
+        if system.holds(&workspace) {
             break;
         }
+        let residuals = system.evaluate(&workspace)?;
         let jacobian = system.linearize(&workspace)?;
         let Ok(update) = solve_dense(jacobian.view(), &residuals) else {
             break;
@@ -62,7 +53,7 @@ pub fn admit_solved<'m>(
 ) -> Result<Admitted<'m>, InitializationFailure> {
     let origin = SimTime::from_ns(0);
     let parameters = body.bind(packet)?;
-    let request = InitializationRequest::at(origin, admission_tolerance()).reading(lens);
+    let request = InitializationRequest::at(origin).reading(lens);
     let system = body.initialization(parameters, boundary, request)?;
     let solved = initialize(&system)?;
     let resolution = core.resolution();

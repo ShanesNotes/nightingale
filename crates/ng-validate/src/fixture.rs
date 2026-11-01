@@ -1,5 +1,4 @@
 use crate::ReplayCase;
-use crate::initialize::admission_tolerance;
 use ng_contract::*;
 use ng_record::{Running, Session};
 
@@ -774,7 +773,7 @@ pub fn admit_seeded<'m>(
 ) -> Result<Session<'m, Running>, InitializationFailure> {
     let origin = SimTime::from_ns(0);
     let parameters = body.bind(packet)?;
-    let request = InitializationRequest::at(origin, admission_tolerance());
+    let request = InitializationRequest::at(origin);
     let system = body.initialization(parameters, boundary, request)?;
     let solved = system.workspace();
     let resolution = core.resolution();

@@ -1,4 +1,5 @@
-use crate::body::{Bound, Layout, ParameterId, Target};
+use crate::body::{Bound, Instance, Layout, ParameterId, Target};
+use crate::boundary::DriveFrame;
 use crate::chance::{holds_a_period, sampled_unit};
 use crate::identity::{Canonical, Seal};
 use crate::law::Op;
@@ -6,8 +7,8 @@ use crate::provenance::seal_trace;
 use crate::quantity::dimension;
 use crate::{
     AdmissionError, Anchor, AnchorId, AnchorStatistic, Binding, Citation, Compensated, CompiledBody, Digest,
-    Dimension, LawName, Measure, ModelHash, PacketSeed, ParameterKey, RateBand, RowId, RowKind, ValueName,
-    ValueProvenance,
+    Dimension, Dimensionless, ErrorScales, LawName, Measure, ModelHash, PacketSeed, ParameterKey, RateBand,
+    RowId, RowKind, ValueName, ValueProvenance,
 };
 use core::marker::PhantomData;
 use core::num::{NonZeroU32, NonZeroU64};
@@ -50,6 +51,14 @@ pub struct PacketHash {
 impl PacketHash {
     pub(crate) fn of_digest(digest: Digest) -> Self {
         Self { digest }
+    }
+    /// The hash a run names: the packet's and the drives its admission read, since those shape the start too. A
+    /// timeline's later events stay out of it.
+    pub(crate) fn reading(self, frames: &[DriveFrame]) -> Self {
+        let mut out = Canonical::new("ng-contract packet and window 1");
+        self.digest.seal(&mut out);
+        frames.seal(&mut out);
+        Self { digest: out.digest() }
     }
     pub fn digest(&self) -> Digest {
         self.digest
@@ -130,6 +139,7 @@ struct PopulationEntry {
 }
 pub struct ParameterPacket<K: PacketKind> {
     cycle: Option<Cycle>,
+    tolerance: Option<ErrorScales>,
     parameters: Vec<ParameterEntry>,
     starts: Vec<StartEntry>,
     modes: Vec<ModeEntry>,
@@ -142,6 +152,7 @@ impl<K: PacketKind> ParameterPacket<K> {
     pub fn new() -> Self {
         Self {
             cycle: None,
+            tolerance: None,
             parameters: Vec::new(),
             starts: Vec::new(),
             modes: Vec::new(),
@@ -157,6 +168,11 @@ impl<K: PacketKind> ParameterPacket<K> {
             cycle: Some(cycle),
             ..Self::new()
         }
+    }
+    /// How near every row of the admission system must come. The hash covers it, so no initializer can widen it
+    /// under a run's identity. A packet that states none is held exactly.
+    pub fn within(&mut self, tolerance: ErrorScales) {
+        self.tolerance = Some(tolerance);
     }
     /// An anchor of this packet's kind. Refuses a second anchor under one id.
     pub fn anchor<U: Dimension>(&mut self, anchor: Anchor<K, U>) -> Result<(), AdmissionError> {
@@ -184,7 +200,8 @@ impl<K: PacketKind> ParameterPacket<K> {
         trace: K::Trace,
     ) -> Result<(), AdmissionError> {
         let repeated = self.populations.iter().any(|entry| entry.key == key);
-        if repeated || lower.value() > upper.value() {
+        let width = upper.value() - lower.value();
+        if repeated || width < 0.0 || !width.is_finite() {
             return Err(AdmissionError::PopulationRange { key });
         }
         self.populations.push(PopulationEntry {
@@ -254,22 +271,28 @@ impl<K: PacketKind> ParameterPacket<K> {
             note: "",
         })
     }
-    /// A value an identity gives from other packet values. `bind` refuses an input with no entry, so the
-    /// trace holds, and `30-data` recomputes a clinical identity.
-    pub fn derived<U: Dimension>(
+    /// A value an identity gives: `scale` times the entry at `source`, computed at `bind`, so it is never a free
+    /// number. `bind` refuses a source the packet does not hold, or one derived or fitted, since no identity runs
+    /// again when a fit moves.
+    pub fn derived(
         &mut self,
         key: ParameterKey,
         binding: Binding,
-        value: Measure<U>,
         identity: &'static str,
-        inputs: &'static [ParameterKey],
+        source: (ParameterKey, Binding),
+        scale: Measure<Dimensionless>,
     ) -> Result<(), AdmissionError> {
+        let (source, source_binding) = source;
         self.entry(ParameterEntry {
             key,
             binding,
-            dimension: dimension::<U>(),
-            bits: value.bits(),
-            provenance: ValueProvenance::Derived { identity, inputs },
+            dimension: String::new(),
+            bits: scale.bits(),
+            provenance: ValueProvenance::Derived {
+                identity,
+                source,
+                binding: source_binding,
+            },
             note: "",
         })
     }
@@ -292,9 +315,37 @@ impl<K: PacketKind> ParameterPacket<K> {
             note: "",
         })
     }
+    /// Each entry's value and dimension, as a law reads them: a derived entry's are its source's, scaled.
+    fn settled(&self) -> Result<Vec<(f64, &str)>, AdmissionError> {
+        let mut settled = Vec::with_capacity(self.parameters.len());
+        for entry in &self.parameters {
+            let own = f64::from_bits(entry.bits);
+            settled.push(match entry.provenance {
+                ValueProvenance::Derived { source, binding, .. } => {
+                    let found = |known: &&ParameterEntry| known.key == source && known.binding == binding;
+                    let usable = |known: &&ParameterEntry| {
+                        !matches!(
+                            known.provenance,
+                            ValueProvenance::Calibrated { .. } | ValueProvenance::Derived { .. }
+                        )
+                    };
+                    let Some(known) = self.parameters.iter().find(found).filter(usable) else {
+                        return Err(AdmissionError::IdentitySource {
+                            key: entry.key,
+                            source,
+                        });
+                    };
+                    (own * f64::from_bits(known.bits), known.dimension.as_str())
+                }
+                _ => (own, entry.dimension.as_str()),
+            });
+        }
+        Ok(settled)
+    }
     fn hash(&self) -> PacketHash {
         let Self {
             cycle,
+            tolerance,
             parameters,
             starts,
             modes,
@@ -309,6 +360,7 @@ impl<K: PacketKind> ParameterPacket<K> {
         let mut out = Canonical::new("ng-contract packet 2");
         out.number(<K as sealed::PacketKind>::TAG);
         cycle.seal(&mut out);
+        tolerance.seal(&mut out);
         out.length(parameters.len());
         for entry in parameters {
             let ParameterEntry {
@@ -484,6 +536,7 @@ impl Fit {
 #[derive(Default)]
 pub(crate) struct Owed {
     pub(crate) cycle: Option<Cycle>,
+    pub(crate) tolerance: Option<ErrorScales>,
     pub(crate) anchors: Vec<BoundAnchor>,
     pub(crate) fits: Vec<Fit>,
     /// One per parameter entry, as the packet wrote it.
@@ -605,6 +658,7 @@ impl CompiledBody {
                 value: entry.value,
             });
         }
+        let settled = packet.settled()?;
         let mut read = vec![false; packet.parameters.len()];
         let mut filled_by = Vec::with_capacity(self.layout.parameters.len());
         let mut values = Vec::with_capacity(self.layout.parameters.len());
@@ -619,11 +673,10 @@ impl CompiledBody {
             };
             read[at] = true;
             filled_by.push(at);
-            let entry = &packet.parameters[at];
-            if entry.dimension != slot.dimension {
+            let (value, dimension) = settled[at];
+            if dimension != slot.dimension {
                 return Err(AdmissionError::ParameterDimension { key, binding });
             }
-            let value = f64::from_bits(entry.bits);
             if !slot.admissible.holds(Compensated::exact(value)) {
                 return Err(AdmissionError::ParameterOutsideSet { key, binding });
             }
@@ -663,7 +716,7 @@ impl CompiledBody {
         {
             return Err(AdmissionError::UnknownStart { row: entry.row });
         }
-        let owed = self.owed(&packet, &filled_by)?;
+        let owed = self.owed(&packet, &settled, &filled_by)?;
         Ok(BoundParameters {
             model: self.model_hash(),
             packet: packet.hash(),
@@ -673,33 +726,49 @@ impl CompiledBody {
             owed,
         })
     }
-    /// Whether a row reads the body: it is an amount, or its laws reach an amount or a drive through memory and
-    /// algebraic rows. A row that does not is a function of parameters alone, held forcings and draws included,
-    /// so an anchor on it would be a parameter's value (SRS section 2, I14).
-    fn reads_the_body(&self, row: RowId) -> bool {
-        let Layout { rows, instances, .. } = &self.layout;
+    /// Every law a row's value can feel: those that set it and those behind each row they read. At an instant
+    /// only algebraic rows move, so a walk passes through no other.
+    fn laws_behind(&self, row: RowId, moving: bool) -> Vec<&Instance> {
+        let Layout {
+            rows,
+            columns,
+            instances,
+            ..
+        } = &self.layout;
+        let sets = |instance: &Instance, at: RowId| match instance.target {
+            Target::Row(target) => target == at,
+            Target::Column(column) => (columns[column.index()].terms.iter()).any(|(row, _)| *row == at),
+        };
         let mut seen = vec![false; rows.len()];
         let mut waiting = vec![row];
+        let mut laws = Vec::new();
         while let Some(at) = waiting.pop() {
-            if seen[at.index()] {
+            let moves = moving || matches!(rows[at.index()].kind, RowKind::Algebraic(_));
+            if seen[at.index()] || !moves {
                 continue;
             }
             seen[at.index()] = true;
-            if matches!(rows[at.index()].kind, RowKind::Amount { .. }) {
-                return true;
-            }
-            for input in (instances.iter())
-                .filter(|instance| instance.target == Target::Row(at))
-                .flat_map(|instance| &instance.inputs)
-            {
-                match *input {
-                    Bound::Boundary(_) => return true,
-                    Bound::Unknown(unknown) => waiting.push(RowId::at(unknown.index())),
-                    Bound::Parameter(_) | Bound::Draw(_) | Bound::Forcing(_) => {}
-                }
+            for instance in instances.iter().filter(|instance| sets(instance, at)) {
+                let reads = instance.inputs.iter().filter_map(Bound::unknown);
+                waiting.extend(reads.map(|unknown| RowId::at(unknown.index())));
+                laws.push(instance);
             }
         }
-        false
+        laws
+    }
+    /// Whether a row reads the body: it is an amount, or the laws behind it read an amount or a drive. A row that
+    /// does not is a function of parameters alone, held forcings and draws included, so an anchor on it would be
+    /// a parameter's value (SRS section 2, I14).
+    fn reads_the_body(&self, row: RowId) -> bool {
+        let amount = |at: usize| matches!(self.layout.rows[at].kind, RowKind::Amount { .. });
+        let laws = self.laws_behind(row, true);
+        let reads = laws.iter().flat_map(|law| &law.inputs);
+        amount(row.index())
+            || reads.into_iter().any(|input| match *input {
+                Bound::Boundary(_) => true,
+                Bound::Unknown(unknown) => amount(unknown.index()),
+                Bound::Parameter(_) | Bound::Draw(_) | Bound::Forcing(_) => false,
+            })
     }
     /// A pulsatile row is one its block's rate class puts in the wave or beat band.
     fn pulsatile(&self, row: RowId) -> bool {
@@ -712,6 +781,7 @@ impl CompiledBody {
     fn owed<K: PacketKind>(
         &self,
         packet: &ParameterPacket<K>,
+        settled: &[(f64, &str)],
         filled_by: &[usize],
     ) -> Result<Owed, AdmissionError> {
         // In key order, as the hash reads them, so two builds of one packet solve with the same bits.
@@ -750,7 +820,7 @@ impl CompiledBody {
         let mut entries = Vec::with_capacity(ordered.len());
         for (at_entry, entry) in ordered {
             let ParameterEntry { key, binding, .. } = *entry;
-            let value = f64::from_bits(entry.bits);
+            let (value, _) = settled[at_entry];
             match entry.provenance {
                 ValueProvenance::Calibrated { anchor } => {
                     let Some(at) = anchors.iter().position(|bound| bound.id == anchor) else {
@@ -759,10 +829,15 @@ impl CompiledBody {
                     if fits.iter().any(|fit: &Fit| fit.anchor == at) {
                         return Err(AdmissionError::AnchorFittedTwice { anchor });
                     }
-                    let slots = (filled_by.iter().enumerate())
+                    let slots: Vec<ParameterId> = (filled_by.iter().enumerate())
                         .filter(|(_, filled)| **filled == at_entry)
                         .map(|(slot, _)| ParameterId::at(slot))
                         .collect();
+                    let laws = self.laws_behind(anchors[at].row, packet.cycle.is_some());
+                    let reads = |law: &&Instance| law.parameters.iter().any(|read| slots.contains(read));
+                    if !laws.iter().any(|law| reads(law)) {
+                        return Err(AdmissionError::FitUnread { key, binding });
+                    }
                     fits.push(Fit {
                         slots,
                         anchor: at,
@@ -771,20 +846,8 @@ impl CompiledBody {
                         binding,
                     });
                 }
-                ValueProvenance::Derived { inputs, .. } => {
-                    // A fit moves at admission and no identity runs again, so resting on one would leave it false.
-                    let settled = |input: &&ParameterKey| {
-                        let known = || packet.parameters.iter().filter(|known| known.key == **input);
-                        let fitted = |known: &ParameterEntry| {
-                            matches!(known.provenance, ValueProvenance::Calibrated { .. })
-                        };
-                        known().count() > 0 && !known().any(fitted)
-                    };
-                    if let Some(input) = inputs.iter().find(|input| !settled(input)) {
-                        return Err(AdmissionError::IdentityInput { key, input: *input });
-                    }
-                }
                 ValueProvenance::Fixture
+                | ValueProvenance::Derived { .. }
                 | ValueProvenance::Sampled
                 | ValueProvenance::Authored { .. }
                 | ValueProvenance::Solved => {}
@@ -794,6 +857,7 @@ impl CompiledBody {
         }
         Ok(Owed {
             cycle: packet.cycle,
+            tolerance: packet.tolerance,
             anchors,
             fits,
             entries,
@@ -802,15 +866,21 @@ impl CompiledBody {
 }
 
 /// One number per node, equal for two nodes that compute one expression: the same operation on operands of the
-/// same numbers, in either order for `add`, the one operation whose two orders can both name a dimensionless
-/// ratio. Separate reads of one parameter already compare equal, so `(p + p) / (p + p)` from four reads gets one
-/// number on each side. It folds nothing: `p - p` stays a law on a parameter, as finding 15's backed test holds it.
+/// same numbers, in either order where the order does not matter, and with `as_dimension` no operation at all.
+/// Separate reads of one parameter already compare equal, so `(p + p) / (p + p)` from four reads gets one number on
+/// each side. It folds nothing: `p - p` stays a law on a parameter, as finding 15's backed test holds it.
 fn numbered(code: &[Op]) -> Vec<usize> {
     let mut numbers: Vec<usize> = Vec::with_capacity(code.len());
     let mut distinct: Vec<Op> = Vec::with_capacity(code.len());
     for op in code {
         let plain = match op.map(|operand| numbers[operand]) {
+            Op::AsDimension([x]) => {
+                numbers.push(x);
+                continue;
+            }
             Op::Add([a, b]) => Op::Add([a.min(b), a.max(b)]),
+            Op::SmoothMax([a, b, width]) => Op::SmoothMax([a.min(b), a.max(b), width]),
+            Op::SmoothMin([a, b, width]) => Op::SmoothMin([a.min(b), a.max(b), width]),
             other => other,
         };
         let known = distinct.iter().position(|seen| *seen == plain);

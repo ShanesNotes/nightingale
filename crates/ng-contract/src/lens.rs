@@ -105,11 +105,13 @@ impl ObservationLens {
     pub fn period_ns(&self) -> u64 {
         self.period_ns
     }
-    /// Whether a channel reads `row` by `method`, one reading per `window_ns`.
-    pub(crate) fn reads(&self, method: &str, row: RowId, window_ns: u64) -> bool {
+    /// Whether a channel reads `row` by `method`, one reading per `window_ns`, each the mean of at least `samples`
+    /// grid instants.
+    pub(crate) fn reads(&self, method: &str, row: RowId, window_ns: u64, samples: u64) -> bool {
         (self.channels.iter()).any(|channel| {
             channel.method == method
                 && channel.row == row
+                && channel.window >= samples
                 && channel.window.checked_mul(self.period_ns) == Some(window_ns)
         })
     }

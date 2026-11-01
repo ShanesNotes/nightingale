@@ -1,6 +1,7 @@
 use crate::identity::{Canonical, Seal};
 use crate::{
-    AdmissionRow, Binding, Compensated, ErrorScales, Measure, PacketKind, Reviewed, RowKind, SyntheticFixture,
+    AdmissionRow, Binding, Compensated, ErrorScales, LawName, Measure, PacketKind, Reviewed, RowKind,
+    SyntheticFixture,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -100,11 +101,11 @@ pub type Synthetic<U> = Anchor<SyntheticFixture, U>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ValueProvenance {
     Fixture,
-    /// By a named identity over other packet values. `30-data` recomputes a clinical identity; this keeps the
-    /// trace.
+    /// A named identity: one other entry of this packet, scaled. `bind` computes it, so it is never a free number.
     Derived {
         identity: &'static str,
-        inputs: &'static [ParameterKey],
+        source: ParameterKey,
+        binding: Binding,
     },
     /// Drawn from its key's population record with the packet seed.
     Sampled,
@@ -124,13 +125,15 @@ impl Seal for ValueProvenance {
     fn seal(&self, out: &mut Canonical) {
         match self {
             Self::Fixture => out.number(0),
-            Self::Derived { identity, inputs } => {
+            Self::Derived {
+                identity,
+                source,
+                binding,
+            } => {
                 out.number(1);
                 out.text(identity);
-                out.length(inputs.len());
-                for input in *inputs {
-                    out.text(input.key());
-                }
+                out.text(source.key());
+                binding.seal(out);
             }
             Self::Sampled => out.number(2),
             Self::Authored { reason } => {
@@ -146,14 +149,15 @@ impl Seal for ValueProvenance {
     }
 }
 
-/// Which packet value a record speaks for: an entry as the packet wrote it, or a row's start.
+/// Which packet value a record speaks for: an entry as the packet wrote it, a row's start or a first mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ValueName {
     Parameter { key: ParameterKey, binding: Binding },
     Start(RowKind),
+    Mode { variable: LawName, value: &'static str },
 }
 
-/// One value as the run starts from it.
+/// One value as the run starts from it. A first mode's number is its place in the compiled order of its values.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ValueRecord {
     pub name: ValueName,
@@ -170,7 +174,7 @@ pub struct InitializationProvenance {
     pub(crate) worst: Option<(AdmissionRow, Compensated)>,
 }
 impl InitializationProvenance {
-    /// One per packet parameter entry, then one per row.
+    /// One per packet parameter entry, then one per row, then one per mode variable.
     pub fn values(&self) -> &[ValueRecord] {
         &self.values
     }

@@ -101,11 +101,7 @@ fn image(body: &CompiledBody, sites: [SiteId; 2]) -> ImageParts {
         water(b"running", at(0), at(2)),
         water(b"waiting", at(5), at(9)),
     ]);
-    let tolerance = ErrorScales::uniform(
-        Measure::new(1e-9).expect("finite"),
-        Measure::new(1e-12).expect("finite"),
-    );
-    let request = InitializationRequest::at(at(0), tolerance.expect("positive"));
+    let request = InitializationRequest::at(at(0));
     let system = body
         .initialization(parameters, port.expect("a port"), request)
         .expect("a system");

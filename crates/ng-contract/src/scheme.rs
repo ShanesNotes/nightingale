@@ -148,6 +148,11 @@ pub struct ErrorScales {
     relative: f64,
 }
 impl ErrorScales {
+    /// What a packet that states no tolerance is held to.
+    pub(crate) const EXACT: Self = Self {
+        absolute: 0.0,
+        relative: 0.0,
+    };
     /// Refuses an absolute scale that is not positive and a relative scale below zero.
     pub fn uniform(
         absolute: Measure<Dimensionless>,
@@ -163,6 +168,13 @@ impl ErrorScales {
     }
     pub(crate) fn at(self, value: f64) -> f64 {
         self.absolute + self.relative * value.abs()
+    }
+}
+impl Seal for ErrorScales {
+    fn seal(&self, out: &mut Canonical) {
+        let Self { absolute, relative } = self;
+        absolute.seal(out);
+        relative.seal(out);
     }
 }
 
@@ -230,9 +242,7 @@ impl DeclaredResolution {
         digest.seal(&mut out);
         let StageScheme { method } = scheme;
         out.number(*method as u64);
-        let ErrorScales { absolute, relative } = scales;
-        absolute.seal(&mut out);
-        relative.seal(&mut out);
+        scales.seal(&mut out);
         out.digest()
     }
     pub fn policy(&self) -> Digest {

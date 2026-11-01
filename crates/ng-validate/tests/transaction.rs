@@ -1150,7 +1150,7 @@ fn each_bad_timeline_is_refused_by_name() {
     let case = stepped();
     let body = case.body();
     let bound = || body.bind(reservoir_packet(body, 1.0, 0.5)).expect("bound");
-    let at = |ns| InitializationRequest::at(SimTime::from_ns(ns), admission_tolerance());
+    let at = |ns| InitializationRequest::at(SimTime::from_ns(ns));
     let unknown = BoundaryPort::new(vec![water_event(b"x", "outflow", 5, 6, 1.0)]).expect("parsed");
     assert_eq!(
         body.initialization(bound(), unknown, at(0)).err(),
@@ -1188,7 +1188,7 @@ fn admission_refuses_a_workspace_that_moved_a_start_or_came_from_another_body() 
     let history = || MethodHistory::new(Digest::of_canonical(b"a schema"), at, Vec::new());
     let system = || {
         let parameters = body.bind(reservoir_packet(body, 1.0, 0.5)).expect("bound");
-        let request = InitializationRequest::at(at, admission_tolerance());
+        let request = InitializationRequest::at(at);
         let port = BoundaryPort::new(Vec::new()).expect("no event");
         body.initialization(parameters, port, request).expect("a system")
     };
@@ -1206,7 +1206,7 @@ fn admission_refuses_a_workspace_that_moved_a_start_or_came_from_another_body() 
         .body()
         .bind(reservoir_packet(other.body(), 1.0, 0.5))
         .expect("bound");
-    let request = InitializationRequest::at(at, admission_tolerance());
+    let request = InitializationRequest::at(at);
     let port = BoundaryPort::new(Vec::new()).expect("no event");
     let foreign = other
         .body()
@@ -1222,7 +1222,7 @@ fn admission_refuses_a_workspace_that_moved_a_start_or_came_from_another_body() 
         .body()
         .bind(reservoir_packet(other.body(), 1.0, 0.5))
         .expect("bound");
-    let request = InitializationRequest::at(at, admission_tolerance());
+    let request = InitializationRequest::at(at);
     let port = BoundaryPort::new(Vec::new()).expect("no event");
     assert_eq!(
         body.initialization(parameters, port, request).err(),
@@ -1239,7 +1239,7 @@ fn a_session_refuses_an_identity_of_another_body_origin_or_solver_and_a_zero_flo
         let body = target.body();
         let parameters = body.bind(reservoir_packet(body, 1.0, 0.5)).expect("bound");
         let at = SimTime::from_ns(0);
-        let request = InitializationRequest::at(at, admission_tolerance());
+        let request = InitializationRequest::at(at);
         let port = BoundaryPort::new(Vec::new()).expect("no event");
         let system = body.initialization(parameters, port, request).expect("a system");
         let solved = system.workspace();
@@ -1735,7 +1735,7 @@ fn a_solved_algebraic_value_outside_its_set_is_refused_with_its_row() {
         .expect("once");
     let at = SimTime::from_ns(0);
     let parameters = body.bind(packet).expect("the guess is in its set");
-    let request = InitializationRequest::at(at, admission_tolerance());
+    let request = InitializationRequest::at(at);
     let system = body
         .initialization(parameters, no_events(), request)
         .expect("a system");

@@ -1,4 +1,4 @@
-use crate::body::Bound;
+use crate::body::{Bound, ModeLayout};
 use crate::boundary::{Delivery, DriveFrame, PendingInputs};
 use crate::chance::{HELD_DRAW, HELD_FACTOR};
 use crate::evaluate::{Inputs, Undefined};
@@ -13,34 +13,26 @@ use crate::{
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 
-/// When the start stands, how near every row must come and what reads the anchors. The goal is the packet's.
+/// When the start stands and what reads the anchors. The goal and the tolerance are the packet's.
 pub struct InitializationRequest<'l> {
     anchor_moment: SimTime,
-    tolerance: ErrorScales,
     lens: Option<&'l ObservationLens>,
 }
 impl InitializationRequest<'static> {
-    /// Every row of the system is held to `tolerance`, and a packet with an anchor needs `reading` too. Neither
-    /// shapes a bit of the start, because `admit` only refuses, so neither is in the run's identity.
-    pub fn at(anchor_moment: SimTime, tolerance: ErrorScales) -> Self {
+    /// A packet with an anchor needs `reading` too.
+    pub fn at(anchor_moment: SimTime) -> Self {
         Self {
             anchor_moment,
-            tolerance,
             lens: None,
         }
     }
 }
 impl InitializationRequest<'_> {
-    /// Every anchor must be read by a channel of `lens` with its method and window (rule 17).
+    /// Every anchor must be read by a channel of `lens` with its method and window (rule 17). A lens only refuses,
+    /// so it shapes no bit of the start and stays out of the run's identity.
     pub fn reading(self, lens: &ObservationLens) -> InitializationRequest<'_> {
-        let Self {
-            anchor_moment,
-            tolerance,
-            lens: _,
-        } = self;
         InitializationRequest {
-            anchor_moment,
-            tolerance,
+            anchor_moment: self.anchor_moment,
             lens: Some(lens),
         }
     }
@@ -84,11 +76,11 @@ impl CompiledBody {
     fn check_readings(&self, owed: &Owed, lens: Option<&ObservationLens>) -> Result<(), AdmissionError> {
         for anchor in &owed.anchors {
             let read = lens.is_some_and(|lens| {
-                let window_ns = match (anchor.statistic, owed.cycle) {
-                    (AnchorStatistic::CycleMean, Some(cycle)) => cycle.period_ns(),
-                    _ => lens.period_ns(),
+                let (window_ns, samples) = match (anchor.statistic, owed.cycle) {
+                    (AnchorStatistic::CycleMean, Some(cycle)) => (cycle.period_ns(), cycle.intervals()),
+                    _ => (lens.period_ns(), 1),
                 };
-                lens.model() == self.model_hash() && lens.reads(anchor.method, anchor.row, window_ns)
+                lens.model() == self.model_hash() && lens.reads(anchor.method, anchor.row, window_ns, samples)
             });
             if !read {
                 return Err(AdmissionError::AnchorUnread { anchor: anchor.id });
@@ -100,15 +92,11 @@ impl CompiledBody {
     /// at the anchor moment, an anchor no channel reads and a delivery edge off the cycle's grid.
     pub fn initialization<'m>(
         &'m self,
-        parameters: BoundParameters,
+        mut parameters: BoundParameters,
         boundary: BoundaryPort,
         request: InitializationRequest<'_>,
     ) -> Result<InitializationSystem<'m>, AdmissionError> {
-        let InitializationRequest {
-            anchor_moment,
-            tolerance,
-            lens,
-        } = request;
+        let InitializationRequest { anchor_moment, lens } = request;
         if parameters.model != self.model_hash() {
             return Err(AdmissionError::ForeignParameters);
         }
@@ -137,7 +125,9 @@ impl CompiledBody {
         };
         let pending = PendingInputs::opening(boundary, fence);
         let frame_at = |ns: &u64| pending.frame_at(SimTime::from_ns(*ns));
-        let frames = instants.iter().map(frame_at).collect();
+        let frames: Vec<DriveFrame> = instants.iter().map(frame_at).collect();
+        parameters.packet = parameters.packet.reading(&frames);
+        let tolerance = parameters.owed.tolerance.unwrap_or(ErrorScales::EXACT);
         Ok(InitializationSystem {
             body: self,
             parameters,
@@ -380,11 +370,16 @@ impl InitializationSystem<'_> {
         }
         Ok(Jacobian::of_parts(row_offsets, columns, entries))
     }
-    /// One defect over its scale, `None` when the tolerance refuses it. `normalized <= 1.0` is false on a NaN, so
-    /// what overflowed is refused.
+    /// One defect over its scale, `None` when the tolerance refuses it. `<=` is false on a NaN, so what overflowed
+    /// is refused, and an exact packet's scale of zero passes only a defect of zero.
     fn held(&self, defect: f64, read: f64) -> Option<f64> {
-        let normalized = defect / self.tolerance.at(read);
-        (normalized <= 1.0).then_some(normalized)
+        let scale = self.tolerance.at(read);
+        (defect <= scale).then(|| if scale > 0.0 { defect / scale } else { 0.0 })
+    }
+    /// Whether `admit` would pass this workspace, so a solve stops where the judge would, and a guess that already
+    /// holds stands.
+    pub fn holds(&self, workspace: &SolveWorkspace) -> bool {
+        self.check(workspace).is_ok() && self.recheck(workspace.coordinates()).is_ok()
     }
     /// An instant reads its row at point 0. A cycle mean reads its row's mean over the points, the quadrature the
     /// ring's own sum closes, so a linear law's mean is exact at any point count.
@@ -431,9 +426,6 @@ impl InitializationSystem<'_> {
                 let (key, binding) = (fit.key, fit.binding);
                 return Err(AdmissionError::ParameterOutsideSet { key, binding }.into());
             }
-        }
-        if let Some(key) = self.body.unheld_period(&self.values(unknowns)) {
-            return Err(AdmissionError::ForcingPeriod { key }.into());
         }
         let mut worst: Option<(AdmissionRow, f64)> = None;
         let mut note = |row, normalized: f64| {
@@ -520,8 +512,19 @@ impl InitializationSystem<'_> {
                 value: Compensated::exact(value),
             }
         };
+        let mode_of = |(mode, &value): (&ModeLayout, &usize)| ValueRecord {
+            name: ValueName::Mode {
+                variable: mode.variable,
+                value: mode.values[value],
+            },
+            provenance: ValueProvenance::Fixture,
+            value: Compensated::exact(value as f64),
+        };
         let starts = body.rows().iter().zip(start).zip(&parameters.starts);
-        let records = owed.entries.iter().map(value_of).chain(starts.map(start_of));
+        let modes = body.layout.modes.iter().zip(&parameters.modes);
+        let records = (owed.entries.iter().map(value_of))
+            .chain(starts.map(start_of))
+            .chain(modes.map(mode_of));
         let provenance = InitializationProvenance {
             values: records.collect(),
             tolerance,
