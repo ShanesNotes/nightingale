@@ -320,6 +320,7 @@ same_dimension! {
     Quotient<Pressure, Pressure> => Dimensionless;
     Quotient<Volume, Volume> => Dimensionless;
     Quotient<Pressure, Resistance> => Rate<Water>;
+    Product<Resistance, Rate<Water>> => Pressure;
     Quotient<Pressure, Inertance> => Rate<Rate<Water>>;
     Product<Orifice, Product<Rate<Water>, Rate<Water>>> => Pressure;
     Product<Quotient<Pressure, Length>, Length> => Pressure;
@@ -340,8 +341,8 @@ impl<Q: Substance> identities::Sealed<Dimensionless> for Quotient<Q, Q> {}
 impl<Q: Substance> SameDimension<Dimensionless> for Quotient<Q, Q> {}
 impl<Q: Substance> identities::Sealed<Concentration<Q>> for Quotient<Q, Volume> {}
 impl<Q: Substance> SameDimension<Concentration<Q>> for Quotient<Q, Volume> {}
-impl<Q: Substance> identities::Sealed<Rate<Q>> for Product<Rate<Water>, Quotient<Q, Water>> {}
-impl<Q: Substance> SameDimension<Rate<Q>> for Product<Rate<Water>, Quotient<Q, Water>> {}
+impl<P: Substance, Q: Substance> identities::Sealed<Rate<Q>> for Product<Rate<P>, Quotient<Q, P>> {}
+impl<P: Substance, Q: Substance> SameDimension<Rate<Q>> for Product<Rate<P>, Quotient<Q, P>> {}
 impl<Q: Substance> identities::Sealed<Rate<Q>> for Product<Affinity<Q>, Product<Q, Q>> {}
 impl<Q: Substance> SameDimension<Rate<Q>> for Product<Affinity<Q>, Product<Q, Q>> {}
 impl<U: Sensed> identities::Sealed<Dimensionless> for Quotient<Deviation<U>, Deviation<U>> {}

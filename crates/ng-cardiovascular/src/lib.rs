@@ -157,9 +157,21 @@ fn valves<'b>(
     });
     cv.memory_rate(&flow, held);
 
+    // Research 02: open while the head or the flow is positive, so a shut needs both at or below zero. A flow that
+    // reaches zero against a forward head does not shut, or the valve would flutter through every quiet filling.
+    let reading = cv.edge_parameter::<ValveEdge, Resistance>(
+        ParameterKey::new("cv.valve-reading"),
+        Admissible::positive(),
+    );
     let falling = cv.edge_kernel::<ValveEdge, _, _>(|mut k| {
+        let head_across = drive(&mut k, pressure, head);
         let q = k.state(&flow);
-        k.finish(q, open.only(), wave)
+        let per = k.edge_parameter(&reading);
+        let product = k.multiply(per, q);
+        let flowing: Expr<'_, '_, _, Pressure> = k.as_dimension(product);
+        let zero = k.zero();
+        let open_while = k.smooth_max(head_across, flowing, zero);
+        k.finish(open_while, open.only(), wave)
     });
     cv.event(Guard::new(falling, Crossing::Falling, open.to(&shut)?).resetting(&flow));
     let rising = cv.edge_kernel::<ValveEdge, _, _>(|mut k| {

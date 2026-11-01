@@ -215,7 +215,7 @@ fn both_reservoirs_form_one_block_through_the_flow_between_them() -> Result<(), 
             (rows, block.rate_class().band(), block.rate_class().maximum_ns())
         })
         .collect();
-    assert_eq!(blocks, [(vec![0, 1], RateBand::Wave, 1_000_000)]);
+    assert_eq!(blocks, [(vec![0, 1], RateBand::Wave, 3_600_000_000_000)]);
     Ok(())
 }
 

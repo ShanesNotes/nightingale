@@ -149,8 +149,21 @@ pub fn arena_anatomy() -> Result<Anatomy, AdmissionError> {
     let abdominal = Compliance::Held {
         card: Gastrointestinal::CARD,
     };
-    map.enclose(&pleura, &[lung.id()], pleural);
-    map.enclose(&abdomen, &[splanchnic.id()], abdominal);
+    map.enclose(
+        &pleura,
+        &[
+            lung.id(),
+            right_atrium.id(),
+            right_ventricle.id(),
+            left_atrium.id(),
+            left_ventricle.id(),
+            pulmonary_artery.id(),
+            pulmonary_vein.id(),
+            central_veins.id(),
+        ],
+        pleural,
+    );
+    map.enclose(&abdomen, &[splanchnic.id(), splanchnic_veins.id()], abdominal);
 
     map.served_by(carotid.id(), &cranial, Afferent::Stretch);
     map.served_by(arch.id(), &cranial, Afferent::Stretch);
@@ -304,18 +317,18 @@ fn gut(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     Ok(())
 }
 
-/// Secretion rises with plasma sodium, clearance is first order. Both held, because EN is outside the slice.
+/// Secretion follows plasma sodium on a logistic, clearance is first order. Both held, because EN is outside the slice.
 fn vasopressin(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let declaration = HeldDeclaration::<Endocrine>::new(vec![SECRETION, CLEARANCE], Vec::new(), FIXED);
     let (mut laws, ports) = body.hold(declaration)?.parts();
     let class = RateClass::new(RateBand::Minutes, 60_000_000_000)?;
     let secretion = ports.route::<Vasopressin>(SECRETION)?.route;
     let clearance = ports.route::<Vasopressin>(CLEARANCE)?.route;
-    let base =
-        laws.parameter::<Rate<Vasopressin>>(ParameterKey::new("en.avp-basal"), Admissible::nonnegative());
-    let gain = laws.parameter::<Dimensionless>(ParameterKey::new("en.avp-gain"), Admissible::nonnegative());
+    let most = laws.parameter::<Rate<Vasopressin>>(ParameterKey::new("en.avp-most"), Admissible::positive());
     let set =
         laws.parameter::<Concentration<Sodium>>(ParameterKey::new("en.avp-sodium"), Admissible::positive());
+    let width =
+        laws.parameter::<Concentration<Sodium>>(ParameterKey::new("en.avp-width"), Admissible::positive());
     let speed =
         laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("en.avp-clearance"), Admissible::positive());
     let rate = laws.kernel(|mut k| {
@@ -325,16 +338,16 @@ fn vasopressin(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
         );
         let volume = k.volume(water);
         let ratio = k.divide(sodium, volume);
-        let seen = k.as_dimension(ratio);
+        let seen: Expr<'_, '_, _, Concentration<Sodium>> = k.as_dimension(ratio);
         let center = k.parameter(&set);
-        let ratio = k.divide(seen, center);
-        let relative: Expr<'_, '_, _, Dimensionless> = k.as_dimension(ratio);
-        let basal = k.parameter(&base);
-        let tuned = k.parameter(&gain);
-        let raised = k.scale(basal, tuned);
-        let added = k.scale(raised, relative);
-        let total = k.add(basal, added);
-        k.finish(total, laws.every_mode(), class)
+        let above = k.subtract(seen, center);
+        let spread = k.parameter(&width);
+        let ratio = k.divide(above, spread);
+        let drive = k.as_dimension(ratio);
+        let share = k.logistic(drive);
+        let full = k.parameter(&most);
+        let rate = k.scale(full, share);
+        k.finish(rate, laws.every_mode(), class)
     });
     laws.transfer(Transfer::new(&secretion, rate));
     let rate = laws.kernel(|mut k| {
@@ -476,7 +489,7 @@ pub fn arena_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixt
     packet.calibrated(
         intrinsic,
         Binding::Body,
-        Measure::<Rate<Dimensionless>>::new(1.0)?,
+        Measure::<Rate<Dimensionless>>::new(1.125)?,
         heart_rate,
     )?;
 
@@ -509,21 +522,40 @@ pub fn arena_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixt
 /// A flat guess, about right in size for each kind of row. The march and the ring do the rest.
 fn start_guess(row: RowKind) -> f64 {
     match row {
-        RowKind::Amount { species, space, .. } => match (species, space) {
-            (Species::Water, Space::Lumen | Space::Plasma) => 300.0,
-            (Species::Water, _) => 1_000.0,
-            (Species::Sodium | Species::Chloride, _) => 40.0,
-            (Species::Potassium, _) => 1.5,
-            (Species::Albumin, _) => 3.0,
-            (Species::Energy, _) => 1_000.0,
-            _ => 1.0,
-        },
-        _ => 0.5,
+        RowKind::Amount { species, space, .. } => {
+            let water = match space {
+                Space::Lumen | Space::Plasma => 300.0,
+                Space::Interstitium => 2_000.0,
+                _ => 1_000.0,
+            };
+            let holds = match space {
+                Space::Lumen | Space::Plasma | Space::Interstitium => water,
+                _ => 1.0,
+            };
+            match (species, space) {
+                (Species::Water, _) => water,
+                (Species::Sodium, _) => 100.0 * holds,
+                (Species::Potassium, _) => 5.0 * holds,
+                (Species::Chloride, _) => 105.0 * holds,
+                (Species::Albumin, Space::Interstitium) => 0.1 * holds,
+                (Species::Albumin, _) => holds,
+                (Species::Vasopressin, Space::Bound) => 0.8,
+                (Species::Vasopressin, _) => 0.4 * holds,
+                (Species::Energy, Space::Thermal) => 2e7,
+                (Species::Energy, _) => 16_000.0,
+                (_, Space::Vesicle) => 100.0,
+                _ => 0.5,
+            }
+        }
+        RowKind::Memory(slot) if slot.law.local == "afferent filter" => 1.3,
+        RowKind::Memory(slot) if slot.law.local == "baroreflex set point" => 1.3,
+        RowKind::Memory(_) => 0.0,
+        RowKind::Algebraic(_) => 1.0,
     }
 }
 
-/// Every parameter of the fixture: rounded numbers from prototype P1, nobody's physiology. A key's default binds at its
-/// class or network, and a site or an edge that differs says so.
+/// Every parameter of the fixture: rounded numbers from prototype P1 and P5, nobody's physiology. A key's default binds
+/// at its class or network, and a site or an edge that differs says so.
 fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> Result<(), AdmissionError> {
     fn set<U: Dimension>(
         packet: &mut ParameterPacket<SyntheticFixture>,
@@ -545,10 +577,10 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
         Binding::Class(Class::CapillaryBed),
         Binding::Class(Class::Junction),
     );
-    set::<Quotient<Pressure, Length>>(packet, "cv.head-per-length", body, 40.0, note)?;
+    set::<Quotient<Pressure, Length>>(packet, "cv.head-per-length", body, 70.0, note)?;
     for (key, value) in [
         ("cv.beta-gain", 1.0),
-        ("cv.vagal-gain", 0.5),
+        ("cv.vagal-gain", 0.7),
         ("cv.systole-end", 0.3),
         ("cv.cycle-end", 1.0),
         ("cv.activation-peak", 1.0),
@@ -556,9 +588,8 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
         ("ns.carotid-share", 0.5),
         ("ns.arch-share", 0.5),
         ("rn.feedback-rest", 1.0),
-        ("rn.feedback-gain", 0.4),
+        ("rn.feedback-gain", 0.6),
         ("rn.feedback-middle", 0.5),
-        ("en.avp-gain", 1.0),
     ] {
         set::<Dimensionless>(packet, key, body, value, note)?;
     }
@@ -566,93 +597,185 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
         ("cv.rise-speed", 20.0),
         ("cv.fall-speed", 20.0),
         ("ns.filter-speed", 1.0),
-        ("ns.set-point-speed", 1e-3),
-        ("en.avp-clearance", 1e-2),
+        ("ns.set-point-speed", 1e-6),
+        ("en.avp-clearance", 2e-3),
         ("bd.bladder-speed", 1e-3),
         ("bd.heat-speed", 1e-3),
     ] {
         set::<Rate<Dimensionless>>(packet, key, body, value, note)?;
     }
     set::<Pressure>(packet, "cv.stretch-reference", body, 100.0, note)?;
-    set::<Pressure>(packet, "gi.abdominal-pressure", body, 1.0, note)?;
-    set::<Pressure>(packet, "rs.pleural-pressure", body, -4.0, note)?;
+    set::<Pressure>(packet, "gi.abdominal-pressure", body, 4.0, note)?;
+    set::<Pressure>(packet, "rs.pleural-pressure", body, -3.0, note)?;
     set::<Deviation<Dimensionless>>(packet, "ns.sympathetic-width", body, 0.1, note)?;
     set::<Deviation<Dimensionless>>(packet, "ns.vagal-width", body, 0.1, note)?;
-    set::<Quotient<Pressure, Concentration<Albumin>>>(packet, "fl.oncotic-slope", body, 500.0, note)?;
-    set::<Quotient<Pressure, Concentration<Albumin>>>(packet, "rn.oncotic-slope", body, 500.0, note)?;
-    set::<Concentration<Sodium>>(packet, "rn.feedback-sodium", body, 0.1, note)?;
-    set::<Concentration<Sodium>>(packet, "rn.feedback-width", body, 0.02, note)?;
-    set::<Concentration<Sodium>>(packet, "en.avp-sodium", body, 0.14, note)?;
-    set::<Rate<Vasopressin>>(packet, "en.avp-basal", body, 1e-2, note)?;
+    set::<Quotient<Pressure, Concentration<Albumin>>>(packet, "fl.oncotic-slope", body, 20.0, note)?;
+    set::<Quotient<Pressure, Concentration<Albumin>>>(packet, "rn.oncotic-slope", body, 20.0, note)?;
+    set::<Concentration<Sodium>>(packet, "rn.feedback-sodium", body, 30.0, note)?;
+    set::<Concentration<Sodium>>(packet, "rn.feedback-width", body, 5.0, note)?;
+    set::<Concentration<Sodium>>(packet, "en.avp-sodium", body, 100.0, note)?;
+    set::<Concentration<Sodium>>(packet, "en.avp-width", body, 2.0, note)?;
+    set::<Rate<Vasopressin>>(packet, "en.avp-most", body, 2.0, note)?;
     set::<Rate<Water>>(packet, "gi.basal-water", body, 0.03, note)?;
-    set::<Rate<Sodium>>(packet, "gi.basal-sodium", body, 0.002, note)?;
-    set::<Rate<Potassium>>(packet, "gi.basal-potassium", body, 0.001, note)?;
-    set::<Rate<Chloride>>(packet, "gi.basal-chloride", body, 0.003, note)?;
+    set::<Rate<Sodium>>(packet, "gi.basal-sodium", body, 1.0, note)?;
+    set::<Rate<Potassium>>(packet, "gi.basal-potassium", body, 0.05, note)?;
+    set::<Rate<Chloride>>(packet, "gi.basal-chloride", body, 1.05, note)?;
     set::<Rate<Water>>(packet, "ms.skin-water", body, 0.01, note)?;
-    set::<Water>(packet, "bd.bladder-rest", body, 100.0, note)?;
-    set::<Rate<Water>>(packet, "bd.bladder-width", body, 0.01, note)?;
+    set::<Water>(packet, "bd.bladder-rest", body, 0.0, note)?;
+    set::<Rate<Water>>(packet, "bd.bladder-width", body, 1e-3, note)?;
 
-    set::<Elastance>(packet, "cv.elastance", blood, 0.5, note)?;
-    set::<Elastance>(packet, "cv.active-elastance", blood, 0.0, note)?;
     set::<Dimensionless>(packet, "cv.inotropy", blood, 0.5, note)?;
-    set::<Volume>(packet, "cv.unstressed", blood, 100.0, note)?;
+    set::<Elastance>(packet, "cv.active-elastance", blood, 0.0, note)?;
     set::<Volume>(packet, "cv.unstressed-gain", blood, 0.0, note)?;
-    for (key, elastance, active, unstressed) in [
-        ("right ventricle", 0.05, 0.75, 40.0),
-        ("left ventricle", 0.1, 3.0, 20.0),
-        ("systemic arteries", 1.0, 0.0, 700.0),
-    ] {
-        let at = Binding::Site(site::<VesselSegment>(key)?);
+    fn wall(
+        packet: &mut ParameterPacket<SyntheticFixture>,
+        at: Binding,
+        (elastance, active, unstressed, gain): (f64, f64, f64, f64),
+        note: &'static str,
+    ) -> Result<(), AdmissionError> {
         set::<Elastance>(packet, "cv.elastance", at, elastance, note)?;
-        set::<Elastance>(packet, "cv.active-elastance", at, active, note)?;
+        if active > 0.0 {
+            set::<Elastance>(packet, "cv.active-elastance", at, active, note)?;
+        }
         set::<Volume>(packet, "cv.unstressed", at, unstressed, note)?;
+        if gain > 0.0 {
+            set::<Volume>(packet, "cv.unstressed-gain", at, gain, note)?;
+        }
+        Ok(())
     }
-    set::<Resistance>(packet, "cv.resistance", blood, 0.1, note)?;
-    set::<Dimensionless>(packet, "cv.tone-gain", blood, 0.5, note)?;
+    for (key, values) in [
+        ("right atrium", (0.25, 0.0, 30.0, 0.0)),
+        ("right ventricle", (0.05, 0.75, 40.0, 0.0)),
+        ("pulmonary artery", (0.5, 0.0, 90.0, 0.0)),
+        ("pulmonary vein", (0.1, 0.0, 180.0, 0.0)),
+        ("left atrium", (0.25, 0.0, 30.0, 0.0)),
+        ("left ventricle", (0.1, 3.0, 20.0, 0.0)),
+        ("systemic arteries", (1.0, 0.0, 700.0, 0.0)),
+        ("splanchnic veins", (0.02, 0.0, 800.0, 200.0)),
+        ("leg veins", (0.1, 0.0, 500.0, 50.0)),
+        ("central veins", (0.1, 0.0, 300.0, 0.0)),
+    ] {
+        wall(packet, Binding::Site(site::<VesselSegment>(key)?), values, note)?;
+    }
+    for (key, values, filtration, stiffness, rest) in [
+        ("pulmonary bed", (0.25, 0.0, 120.0, 0.0), 0.002, 0.05, 420.0),
+        ("splanchnic bed", (2.0, 0.0, 100.0, 0.0), 0.004, 0.002, 4_500.0),
+        ("leg bed", (2.0, 0.0, 100.0, 0.0), 0.003, 0.002, 3_500.0),
+        ("glomerular bed", (4.0, 0.0, 30.0, 0.0), 0.0005, 0.05, 40.0),
+        ("peritubular bed", (4.0, 0.0, 30.0, 0.0), 0.002, 0.01, 200.0),
+    ] {
+        let at = Binding::Site(site::<CapillaryBed>(key)?);
+        wall(packet, at, values, note)?;
+        set::<Conductance<Water>>(packet, "fl.filtration", at, filtration, note)?;
+        set::<Elastance>(packet, "fl.interstitial-elastance", at, stiffness, note)?;
+        set::<Volume>(packet, "fl.interstitial-volume", at, rest, note)?;
+    }
+
+    set::<Resistance>(packet, "cv.resistance", blood, 0.01, note)?;
+    set::<Dimensionless>(packet, "cv.tone-gain", blood, 0.0, note)?;
     set::<Dimensionless>(packet, "cv.feedback-share", blood, 0.0, note)?;
     set::<Inertance>(packet, "cv.inertance", blood, 5e-4, note)?;
     set::<Orifice>(packet, "cv.orifice", blood, 5e-5, note)?;
+    set::<Resistance>(packet, "cv.valve-reading", blood, 0.01, note)?;
+    fn edge(from: SiteId, to: SiteId) -> Binding {
+        Binding::Edge { from, to }
+    }
+    let (arteries, veins) = (
+        site::<VesselSegment>("systemic arteries")?,
+        site::<VesselSegment>("central veins")?,
+    );
+    let (lung, splanchnic, leg, glomerular, peritubular) = (
+        site::<CapillaryBed>("pulmonary bed")?,
+        site::<CapillaryBed>("splanchnic bed")?,
+        site::<CapillaryBed>("leg bed")?,
+        site::<CapillaryBed>("glomerular bed")?,
+        site::<CapillaryBed>("peritubular bed")?,
+    );
+    let (artery, pulmonary_vein, splanchnic_veins, leg_veins) = (
+        site::<VesselSegment>("pulmonary artery")?,
+        site::<VesselSegment>("pulmonary vein")?,
+        site::<VesselSegment>("splanchnic veins")?,
+        site::<VesselSegment>("leg veins")?,
+    );
+    for (from, to, resistance) in [
+        (artery, lung, 0.06),
+        (lung, pulmonary_vein, 0.03),
+        (splanchnic, splanchnic_veins, 0.1),
+        (splanchnic_veins, veins, 0.03),
+        (leg, leg_veins, 0.1),
+        (leg_veins, veins, 0.03),
+        (glomerular, peritubular, 2.0),
+        (peritubular, veins, 0.2),
+    ] {
+        set::<Resistance>(packet, "cv.resistance", edge(from, to), resistance, note)?;
+    }
+    for (to, resistance, tone) in [(splanchnic, 2.0, 1.0), (leg, 2.5, 1.0), (glomerular, 3.0, 0.5)] {
+        let at = edge(arteries, to);
+        set::<Resistance>(packet, "cv.resistance", at, resistance, note)?;
+        set::<Dimensionless>(packet, "cv.tone-gain", at, tone, note)?;
+    }
+    set::<Dimensionless>(packet, "cv.feedback-share", edge(arteries, glomerular), 1.0, note)?;
 
-    set::<Elastance>(packet, "fl.interstitial-elastance", beds, 0.05, note)?;
-    set::<Volume>(packet, "fl.interstitial-volume", beds, 900.0, note)?;
-    set::<Conductance<Water>>(packet, "fl.filtration", beds, 0.1, note)?;
     set::<Dimensionless>(packet, "fl.albumin-reflection", beds, 0.9, note)?;
-    set::<Conductance<Water>>(packet, "fl.lymph-conductance", lymph, 0.05, note)?;
-    set::<Pressure>(packet, "fl.lymph-threshold", lymph, 0.0, note)?;
+    set::<Dimensionless>(packet, "fl.albumin-reflection", Binding::Site(peritubular), 0.5, note)?;
+    set::<Conductance<Water>>(packet, "fl.lymph-conductance", lymph, 0.01, note)?;
+    set::<Conductance<Water>>(
+        packet,
+        "fl.lymph-conductance",
+        edge(glomerular, veins),
+        0.002,
+        note,
+    )?;
+    set::<Conductance<Water>>(
+        packet,
+        "fl.lymph-conductance",
+        edge(peritubular, veins),
+        0.005,
+        note,
+    )?;
+    set::<Pressure>(packet, "fl.lymph-threshold", lymph, -2.0, note)?;
     set::<Pressure>(packet, "fl.lymph-width", lymph, 0.5, note)?;
 
-    set::<Elastance>(packet, "rn.lumen-elastance", urinary, 0.5, note)?;
-    set::<Volume>(packet, "rn.lumen-volume", urinary, 100.0, note)?;
-    set::<Conductance<Water>>(packet, "rn.filtration", urinary, 0.1, note)?;
-    set::<Resistance>(packet, "rn.tubule-resistance", urinary, 1.0, note)?;
-    for (key, value) in [
-        ("rn.water-least", 0.8),
-        ("rn.water-most", 0.95),
-        ("rn.sodium-share", 0.9),
-        ("rn.potassium-share", 0.8),
-    ] {
-        set::<Dimensionless>(packet, key, reclaim, value, note)?;
+    let (tubule, duct, bladder) = (
+        site::<VesselSegment>("renal tubule")?,
+        site::<VesselSegment>("collecting duct")?,
+        site::<VesselSegment>("bladder")?,
+    );
+    for (at, stiffness, rest) in [(tubule, 0.5, 10.0), (duct, 1.0, 5.0), (bladder, 1e-3, 0.0)] {
+        set::<Elastance>(packet, "rn.lumen-elastance", Binding::Site(at), stiffness, note)?;
+        set::<Volume>(packet, "rn.lumen-volume", Binding::Site(at), rest, note)?;
+    }
+    set::<Conductance<Water>>(packet, "rn.filtration", urinary, 0.12, note)?;
+    set::<Resistance>(packet, "rn.tubule-resistance", urinary, 5.0, note)?;
+    for (from, water_least, water_most, capacity, half) in
+        [(tubule, 0.8, 0.8, 250.0, 200.0), (duct, 0.5, 0.99, 12.0, 20.0)]
+    {
+        let at = edge(from, peritubular);
+        set::<Dimensionless>(packet, "rn.water-least", at, water_least, note)?;
+        set::<Dimensionless>(packet, "rn.water-most", at, water_most, note)?;
+        set::<Rate<Sodium>>(packet, "rn.sodium-capacity", at, capacity, note)?;
+        set::<Sodium>(packet, "rn.sodium-half", at, half, note)?;
     }
 
     for (release, reuptake) in [
         ("ns.release-ne", "ns.reuptake-ne"),
         ("ns.release-ach", "ns.reuptake-ach"),
     ] {
-        set::<Rate<Dimensionless>>(packet, release, junctions, 0.1, note)?;
-        set::<Rate<Dimensionless>>(packet, reuptake, junctions, 1.0, note)?;
+        set::<Rate<Dimensionless>>(packet, release, junctions, 0.04, note)?;
+        set::<Rate<Dimensionless>>(packet, reuptake, junctions, 2.0, note)?;
     }
     set::<Norepinephrine>(packet, "rc.ne-sites", junctions, 1.0, note)?;
-    set::<Affinity<Norepinephrine>>(packet, "rc.ne-on", junctions, 1.0, note)?;
-    set::<Rate<Dimensionless>>(packet, "rc.ne-off", junctions, 1.0, note)?;
-    set::<Dimensionless>(packet, "rc.ne-efficacy", junctions, 3.0, note)?;
+    set::<Affinity<Norepinephrine>>(packet, "rc.ne-on", junctions, 10.0, note)?;
+    set::<Rate<Dimensionless>>(packet, "rc.ne-off", junctions, 10.0, note)?;
+    set::<Dimensionless>(packet, "rc.ne-efficacy", junctions, 2.0, note)?;
     set::<Acetylcholine>(packet, "rc.ach-sites", junctions, 1.0, note)?;
-    set::<Affinity<Acetylcholine>>(packet, "rc.ach-on", junctions, 1.0, note)?;
-    set::<Rate<Dimensionless>>(packet, "rc.ach-off", junctions, 1.0, note)?;
-    set::<Dimensionless>(packet, "rc.ach-efficacy", junctions, 3.0, note)?;
+    set::<Affinity<Acetylcholine>>(packet, "rc.ach-on", junctions, 10.0, note)?;
+    set::<Rate<Dimensionless>>(packet, "rc.ach-off", junctions, 10.0, note)?;
+    set::<Dimensionless>(packet, "rc.ach-efficacy", junctions, 2.0, note)?;
     set::<Vasopressin>(packet, "rc.avp-sites", blood, 1.0, note)?;
-    set::<Affinity<Vasopressin>>(packet, "rc.avp-on", blood, 1.0, note)?;
-    set::<Rate<Dimensionless>>(packet, "rc.avp-off", blood, 1.0, note)?;
-    set::<Dimensionless>(packet, "rc.avp-efficacy", blood, 3.0, note)
+    set::<Affinity<Vasopressin>>(packet, "rc.avp-on", blood, 0.02, note)?;
+    set::<Rate<Dimensionless>>(packet, "rc.avp-off", blood, 0.1, note)?;
+    set::<Dimensionless>(packet, "rc.avp-efficacy", blood, 2.0, note)
 }
 
 /// One cycle-mean channel per anchor, on the grid of the cycle's points.

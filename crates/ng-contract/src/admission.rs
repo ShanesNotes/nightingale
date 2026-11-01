@@ -530,6 +530,25 @@ impl InitializationSystem<'_> {
         }
         Ok(changed)
     }
+    pub fn debug_modes(&self) {
+        for (variable, mode) in self.body.layout.modes.iter().enumerate() {
+            let line: String = self.modes.iter().map(|modes| char::from(b'0' + modes[variable] as u8)).collect();
+            #[allow(clippy::print_stderr)]
+            {
+                eprintln!("MODE {line} {:?}", mode.variable.at);
+            }
+        }
+    }
+    /// Puts point 0 back on the packet's modes, as if every guard that enters them fired on the way there. A pass of a
+    /// march ends where its guess leaves it, so the next pass starts the cycle where the packet says it starts.
+    pub fn restart(&mut self) {
+        let last = &self.modes[self.modes.len() - 1];
+        let start = &self.parameters.modes;
+        let entering = (self.body.layout.guards.iter())
+            .filter(|guard| start[guard.variable] == guard.enters && last[guard.variable] == guard.leaves);
+        self.resets[0] = entering.filter_map(|guard| guard.resets).collect();
+        self.modes[0].clone_from(start);
+    }
     fn next(
         &self,
         unknowns: &[f64],

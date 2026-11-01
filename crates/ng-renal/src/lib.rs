@@ -60,24 +60,50 @@ impl<'b> Fraction<'b> {
     }
 }
 
-/// `f q A_s / A_w`: the ion's share of what reaches the segment.
-fn delivered<'b, 'k, Q: Substance>(
+/// Sodium crosses by a transporter that saturates, `J A / (K + A)`, so a greater load leaves more of it in the lumen.
+/// A fixed share would leave the sodium the macula densa sees blind to filtration, and the feedback with nothing to
+/// read. Model default.
+struct Saturable<'b> {
+    capacity: EdgeParameter<'b, Renal, Rate<Sodium>, ReclaimEdge>,
+    half: EdgeParameter<'b, Renal, Sodium, ReclaimEdge>,
+}
+impl<'b> Saturable<'b> {
+    fn declare(rn: &mut FragmentBuilder<'b, Renal>) -> Self {
+        Self {
+            capacity: rn.edge_parameter(ParameterKey::new("rn.sodium-capacity"), Admissible::positive()),
+            half: rn.edge_parameter(ParameterKey::new("rn.sodium-half"), Admissible::positive()),
+        }
+    }
+    fn sodium<'k>(
+        &self,
+        k: &mut Kernel<'b, 'k, Renal, ReclaimEdge>,
+        route: &EdgeRoute<'b, Renal, Sodium, ReclaimEdge>,
+    ) -> Expr<'b, 'k, Renal, Rate<Sodium>> {
+        let held = k.at_edge(&route.from_amount::<Sodium>());
+        let half = k.edge_parameter(&self.half);
+        let reach = k.add(held, half);
+        let held = k.at_edge(&route.from_amount::<Sodium>());
+        let ratio = k.divide(held, reach);
+        let share = k.as_dimension(ratio);
+        let capacity = k.edge_parameter(&self.capacity);
+        k.scale(capacity, share)
+    }
+}
+
+/// What crosses beside sodium, in the proportion the lumen holds them. Model default.
+fn alongside<'b, 'k>(
     k: &mut Kernel<'b, 'k, Renal, ReclaimEdge>,
-    route: &EdgeRoute<'b, Renal, Q, ReclaimEdge>,
-    fraction: Expr<'b, 'k, Renal, Dimensionless>,
-) -> Expr<'b, 'k, Renal, Rate<Q>>
-where
-    Quotient<Q, Water>: Dimension,
-{
-    let inflow = k.inflow();
-    let reached = k.scale(inflow, fraction);
-    let (amount, water) = (
-        k.at_edge(&route.from_amount::<Q>()),
-        k.at_edge(&route.from_amount::<Water>()),
+    rate: Expr<'b, 'k, Renal, Rate<Sodium>>,
+    sodium: &EdgeRoute<'b, Renal, Sodium, ReclaimEdge>,
+    other: &EdgeRoute<'b, Renal, Potassium, ReclaimEdge>,
+) -> Expr<'b, 'k, Renal, Rate<Potassium>> {
+    let (beside, held) = (
+        k.at_edge(&other.from_amount::<Potassium>()),
+        k.at_edge(&sodium.from_amount::<Sodium>()),
     );
-    let share = k.divide(amount, water);
-    let rate = k.multiply(reached, share);
-    k.as_dimension(rate)
+    let ratio = k.divide(beside, held);
+    let product = k.multiply(rate, ratio);
+    k.as_dimension(product)
 }
 
 pub fn declare<'b>(scope: RenalScope<'b>) -> Result<Fragment<'b, Renal>, AdmissionError> {
@@ -144,30 +170,26 @@ pub fn declare<'b>(scope: RenalScope<'b>) -> Result<Fragment<'b, Renal>, Admissi
     let sodium = ports.reclaim::<Sodium>(&mut rn);
     let potassium = ports.reclaim::<Potassium>(&mut rn);
     let chloride = ports.reclaim::<Chloride>(&mut rn);
-    let sodium_share = Fraction::declare(&mut rn, "rn.sodium-share", "rn.sodium-share");
-    let potassium_share = Fraction::declare(&mut rn, "rn.potassium-share", "rn.potassium-share");
+    let transport = Saturable::declare(&mut rn);
     let back = rn.edge_kernel(|mut k| {
-        let share = sodium_share.read(&mut k, &v2);
-        let rate = delivered(&mut k, &sodium, share);
+        let rate = transport.sodium(&mut k, &sodium);
         k.finish(rate, rn.every_mode(), class)
     });
     rn.transfer_along(&sodium, back);
     let back = rn.edge_kernel(|mut k| {
-        let share = potassium_share.read(&mut k, &v2);
-        let rate = delivered(&mut k, &potassium, share);
+        let rate = transport.sodium(&mut k, &sodium);
+        let rate = alongside(&mut k, rate, &sodium, &potassium);
         k.finish(rate, rn.every_mode(), class)
     });
     rn.transfer_along(&potassium, back);
     // Chloride follows the cations, one for one, so reclaiming moves no charge. Model default.
     let back = rn.edge_kernel(|mut k| {
-        let (share_na, share_k) = (sodium_share.read(&mut k, &v2), potassium_share.read(&mut k, &v2));
-        let (na, potassium_load) = (
-            delivered(&mut k, &sodium, share_na),
-            delivered(&mut k, &potassium, share_k),
-        );
-        let (na, potassium_load): (Expr<'_, '_, _, Rate<Chloride>>, Expr<'_, '_, _, Rate<Chloride>>) =
-            (k.as_dimension(na), k.as_dimension(potassium_load));
-        let rate = k.add(na, potassium_load);
+        let na = transport.sodium(&mut k, &sodium);
+        let beside = alongside(&mut k, na, &sodium, &potassium);
+        let na = transport.sodium(&mut k, &sodium);
+        let (na, beside): (Expr<'_, '_, _, Rate<Chloride>>, Expr<'_, '_, _, Rate<Chloride>>) =
+            (k.as_dimension(na), k.as_dimension(beside));
+        let rate = k.add(na, beside);
         k.finish(rate, rn.every_mode(), class)
     });
     rn.transfer_along(&chloride, back);

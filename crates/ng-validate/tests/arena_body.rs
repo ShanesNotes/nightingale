@@ -25,3 +25,27 @@ fn the_slice_compiles_binds_and_lays_out_its_ring() -> Result<(), AdmissionError
     assert_eq!(system.points(), 100);
     Ok(())
 }
+
+#[test]
+fn debug_admit() {
+    let body = arena_body().expect("compiled");
+    let (packet, lens) = (
+        arena_packet(&body).expect("packet"),
+        arena_lens(&body).expect("lens"),
+    );
+    let port = BoundaryPort::new(Vec::new()).expect("port");
+    let core = ReferenceIntegrator::new(1_000_000);
+    let result = admit_at(&body, packet, port, &core, &lens, anchor_moment());
+    match result {
+        Ok(_) => println!("ADMITTED"),
+        Err(failure) => {
+            if let InitializationFailure::Inconsistent {
+                row: AdmissionRow::Body(row),
+            } = failure
+            {
+                println!("ROW {:?}", body.rows()[row.index()].kind());
+            }
+            panic!("{failure:?}")
+        }
+    }
+}
