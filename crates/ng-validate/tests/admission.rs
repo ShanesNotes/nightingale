@@ -1588,7 +1588,14 @@ fn a_delivery_edge_between_two_points_is_refused_and_one_past_the_window_is_take
     };
     let refused = |error| matches!(error, Some(AdmissionError::DeliveryOffGrid { .. }));
     assert!(refused(system(water(b"late end", 0, PULSE, 0, off, DELIVERED))));
-    assert!(refused(system(water(b"late stamp", 0, PULSE, off, 2 * off, 1.0))));
+    assert!(refused(system(water(
+        b"late stamp",
+        0,
+        PULSE,
+        off,
+        PERIOD_NS / 2,
+        1.0
+    ))));
     let past = PERIOD_NS + 1;
     assert_eq!(system(water(b"past", 0, PULSE, past, past + 1, 1.0)), None);
 }
