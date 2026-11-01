@@ -1164,6 +1164,13 @@ fn a_resealed_queue_is_held_to_what_an_observer_can_leave() {
     let last = QUEUE + (held - 1) * HELD_BYTES;
     assert_eq!(resumed(&|_| ()), None, "the same bytes, resealed, are good");
     assert_eq!(resumed(&|body| word_at(body, last, 0)), malformed, "out of order");
+    let before = body[last - HELD_BYTES..].first_chunk().expect("eight bytes");
+    let before = u64::from_be_bytes(*before);
+    assert_eq!(
+        resumed(&|body| word_at(body, last, before)),
+        malformed,
+        "one instant twice"
+    );
     assert_eq!(
         resumed(&|body| word_at(body, last, u64::MAX)),
         malformed,
