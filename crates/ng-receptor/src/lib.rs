@@ -25,6 +25,10 @@ use ng_contract::*;
 
 const BINDING_NS: u64 = 1_000_000_000;
 
+/// What an empty site meets, read from its binding route.
+type Meets<'b, C, Q, M> =
+    for<'k> fn(&mut Kernel<'b, 'k, Receptor, C>, &SiteRoute<'b, Receptor, C, Q>) -> Expr<'b, 'k, Receptor, M>;
+
 /// A cleft has no volume of its own, so what a site meets there is the amount. Model default.
 fn in_cleft<'b, 'k, Q: Substance>(
     k: &mut Kernel<'b, 'k, Receptor, Junction>,
@@ -50,10 +54,7 @@ fn ligand<'b, C: SiteSet, Q: Substance, M: Dimension>(
     ports: &ReceptorPorts<'b>,
     keys: [&'static str; 4],
     class: RateClass,
-    meets: for<'k> fn(
-        &mut Kernel<'b, 'k, Receptor, C>,
-        &SiteRoute<'b, Receptor, C, Q>,
-    ) -> Expr<'b, 'k, Receptor, M>,
+    meets: Meets<'b, C, Q, M>,
 ) where
     Product<Affinity<M>, Product<M, Q>>: SameDimension<Rate<Q>>,
 {
