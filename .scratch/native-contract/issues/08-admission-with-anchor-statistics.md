@@ -49,7 +49,7 @@ Admission can now solve a start state, not only take the packet's numbers. It fi
 
 **What the solve costs.** Each update solves one dense matrix, so doubling the unknowns costs eight times as much. In a release build one update took 0.45 s at 1,001 unknowns, 3.8 s at 2,001 and 31 s at 4,001, and a debug build is about ten times slower. A whole solve took 2.7 s at 1,001 and 19 s at 2,001. At 4,001 the fit's own update stayed near 16 rounding units of itself, over the line of 8, so that solve should use all 32 updates, about 16 minutes. That figure is worked out from a run cut off after nine updates.
 
-**Limits that refuse, stated plainly.** Each fails closed.
+**Limits, stated plainly.** Some refuse and some pass, and each line says which.
 
 - A very stiff law: past about `h k` of 1e5 to 1e6 no value passes, because rounding alone is above the tolerance. That is a time constant near a microsecond here, and it is the one place the plain solve runs out. No outside physiology was needed. A row that swings far above a small start meets this limit sooner, near an `h k` of 1e3, because the row a total replaced carries the rounding of the whole ring.
 - A row with no restoring term under a cycle, such as `m' = 0`: the ring has no level for it, so the matrix is singular, the solve stops and `admit` names the first row it finds, not the cause.
@@ -65,7 +65,7 @@ Admission can now solve a start state, not only take the packet's numbers. It fi
 - A fit is read step by step, so one whose whole effect on each step is below rounding on its rows is refused, though the sum over the beat might show it. On a ring of 64 that takes a flow near 1e-12 per beat on amounts of 50. A fit that solves to zero is refused the same way.
 - A fit that shows only through a head of a few rounding units of its rows can land far from its closed form, at flows near 1e-11 per beat on amounts of 50. The anchor still holds in the run, so no check can tell.
 
-**Not proven here.** The test body is driven from outside, so it says nothing about a heart that sets its own rate. No reader from another vendor has seen this design or code: Codex ran out of credits and Grok stopped at its free limit, so the base was picked alone and the adversaries were two Opus seats. See the PR.
+**Not proven here.** The test body is driven from outside, so it says nothing about a heart that sets its own rate. No judge from another vendor weighed the two designs: Codex ran out of credits and Grok stopped at its free limit, so the base was picked alone and the adversaries were two Opus seats. Codex then came back and read the finished code in four passes, which found five defects, all fixed, and the last pass found none. See the PR.
 
 ## Comments
 

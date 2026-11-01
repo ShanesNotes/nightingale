@@ -1715,7 +1715,6 @@ fn a_small_nonlinear_body_with_no_fit_is_solved_on_its_own_scale() {
     assert!(admit_solved(case.body(), packet, boundary, &core, &case.lens).is_ok());
 }
 
-/// Each column of the matrix, against the residual it comes from.
 #[test]
 fn linearize_is_the_slope_of_evaluate() {
     let case = PulsatileCase::plain().with_intervals(8);
