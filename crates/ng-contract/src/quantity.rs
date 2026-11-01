@@ -114,6 +114,8 @@ impl<U: Sensed> Dimension for Reference<U> {}
 
 impl material::Sealed for Dimensionless {}
 impl NonMaterial for Dimensionless {}
+impl material::Sealed for Phase {}
+impl NonMaterial for Phase {}
 impl<U: Sensed> material::Sealed for Reference<U> {}
 impl<U: Sensed> NonMaterial for Reference<U> {}
 
@@ -123,7 +125,7 @@ macro_rules! sensed {
         impl Sensed for $dimension {}
     )*};
 }
-sensed!(Dimensionless, Pressure, Volume, Length);
+sensed!(Dimensionless, Pressure, Volume, Temperature, Length);
 
 mod identities {
     pub trait Sealed<U> {}

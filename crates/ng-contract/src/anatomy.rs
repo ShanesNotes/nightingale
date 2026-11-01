@@ -145,6 +145,11 @@ pub enum AnatomyDefect {
     OrphanSite {
         site: &'static str,
     },
+    /// An enclosure surrounds beds. Naming a tissue site would leave the beds inside it reading no
+    /// enclosure, or a second chain beside their own.
+    EnclosedTissue {
+        site: &'static str,
+    },
     EnclosedTwice {
         site: &'static str,
     },
@@ -466,6 +471,12 @@ struct Enclosure {
 }
 impl Enclosure {
     fn of(facts: &Facts) -> Result<Self, AnatomyDefect> {
+        let tissue = |&&(_, site): &&(usize, usize)| facts.class(site) == Class::TissueSite;
+        if let Some(&(_, site)) = facts.encloses.iter().find(tissue) {
+            return Err(AnatomyDefect::EnclosedTissue {
+                site: facts.key(site),
+            });
+        }
         let count = facts.sites.len();
         let mut enclosed_by = vec![None; count];
         if let Some(site) = single_valued(
@@ -645,14 +656,8 @@ impl Anatomy {
     }
 
     pub(crate) fn encloser(&self, site: SiteId) -> Option<(SiteId, Compliance)> {
-        let mut at = self.placed(site)?;
-        loop {
-            if let Some(space) = at.enclosed_by {
-                let space = &self.sites[space];
-                return Some((space.id, space.compliance?));
-            }
-            at = &self.sites[at.parent?];
-        }
+        let space = &self.sites[self.placed(site)?.enclosed_by?];
+        Some((space.id, space.compliance?))
     }
 
     pub(crate) fn compliance(&self, space: SiteId) -> Option<Compliance> {

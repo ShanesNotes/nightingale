@@ -182,6 +182,31 @@ fn a_coupling_read_is_a_read_of_the_senders_row_at_the_readers_site() -> Result<
 }
 
 #[test]
+fn a_temperature_has_a_set_point_and_a_phase_is_memory() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", at()?);
+    assemble(Schema::new(map.finish()?)?, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let set_point = laws.set_point::<Temperature>("thermostat", Admissible::finite());
+        let phase = laws.state::<Phase>("circadian", Admissible::finite());
+        let class = wave()?;
+        let still = laws.kernel(|mut k| {
+            let zero = k.zero::<Rate<Reference<Temperature>>>();
+            k.finish(zero, laws.every_mode(), class)
+        });
+        laws.memory_rate(&set_point, still);
+        let turning = laws.kernel(|mut k| {
+            let zero = k.zero::<Rate<Phase>>();
+            k.finish(zero, laws.every_mode(), class)
+        });
+        laws.memory_rate(&phase, turning);
+        body.add(laws.finish());
+        body.compile()
+    })?;
+    Ok(())
+}
+
+#[test]
 fn a_read_of_a_field_nobody_emits_is_refused() {
     assert_eq!(
         refused(Defect::NoSender),

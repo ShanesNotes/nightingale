@@ -310,6 +310,19 @@ fn an_anatomy_without_beds_needs_no_circulation() -> Result<(), AdmissionError> 
 }
 
 #[test]
+fn an_enclosure_cannot_name_a_tissue_site() -> Result<(), AdmissionError> {
+    let Manufactured { mut map, body, .. } = manufactured()?;
+    let other = map.site::<EnclosedSpace>("space 2", at(1.0)?);
+    map.contain(body.id(), other.id());
+    map.enclose(&other, &[body.id()], Compliance::Rigid);
+    assert_eq!(
+        map.finish().err(),
+        refused(AnatomyDefect::EnclosedTissue { site: "body" })
+    );
+    Ok(())
+}
+
+#[test]
 fn a_site_enclosed_twice_is_refused() -> Result<(), AdmissionError> {
     let Manufactured {
         mut map,

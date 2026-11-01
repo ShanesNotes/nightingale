@@ -707,28 +707,16 @@ fn a_bed_reads_its_nearest_enclosure_and_a_bed_nothing_encloses_reads_no_row() -
     let vessel = map.site::<VesselSegment>("vessel", at()?);
     let inner_bed = map.site::<CapillaryBed>("inner bed", at()?);
     let open_bed = map.site::<CapillaryBed>("open bed", at()?);
-    let organ = map.site::<TissueSite>("organ", at()?);
-    let organ_bed = map.site::<CapillaryBed>("organ bed", at()?);
     let outer = map.site::<EnclosedSpace>("outer", at()?);
     let inner = map.site::<EnclosedSpace>("inner", at()?);
-    for site in [
-        vessel.id(),
-        inner_bed.id(),
-        open_bed.id(),
-        organ.id(),
-        outer.id(),
-        inner.id(),
-    ] {
+    for site in [vessel.id(), inner_bed.id(), open_bed.id(), outer.id(), inner.id()] {
         map.contain(root.id(), site);
     }
-    map.contain(organ.id(), organ_bed.id());
     for (from, to) in [
         (vessel.id(), inner_bed.id()),
         (inner_bed.id(), vessel.id()),
         (vessel.id(), open_bed.id()),
         (open_bed.id(), vessel.id()),
-        (vessel.id(), organ_bed.id()),
-        (organ_bed.id(), vessel.id()),
     ] {
         map.connect(Network::Vascular, from, to);
     }
@@ -736,7 +724,7 @@ fn a_bed_reads_its_nearest_enclosure_and_a_bed_nothing_encloses_reads_no_row() -
     let held = Compliance::Held {
         card: Respiratory::CARD,
     };
-    map.enclose(&inner, &[inner_bed.id(), organ.id()], held);
+    map.enclose(&inner, &[inner_bed.id()], held);
     let mut schema = Schema::new(map.finish()?)?;
     for (space, reason) in [
         (Space::Lumen, "no circulation in this bench"),
@@ -782,7 +770,6 @@ fn a_bed_reads_its_nearest_enclosure_and_a_bed_nothing_encloses_reads_no_row() -
         sparsity.unknowns()[sparsity.row_offsets()[at]..sparsity.row_offsets()[at + 1]].contains(&pressure)
     };
     assert!(reads(inner_bed.id()));
-    assert!(reads(organ_bed.id()));
     assert!(!reads(open_bed.id()));
     Ok(())
 }
