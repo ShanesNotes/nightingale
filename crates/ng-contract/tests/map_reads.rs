@@ -498,6 +498,138 @@ fn a_kernel_that_holds_by_a_valves_mode_at_a_body_row_is_refused() -> Result<(),
     Ok(())
 }
 
+fn with_a_valve<F>(extra: F) -> Result<CompiledBody, AdmissionError>
+where
+    F: for<'b> FnOnce(
+        &mut FragmentBuilder<'b, Cardiovascular>,
+        &StateSlot<'b, Cardiovascular, Rate<Water>>,
+    ) -> Result<(), AdmissionError>,
+{
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let (a, b) = (
+        map.site::<VesselSegment>("a", at()?),
+        map.site::<VesselSegment>("b", at()?),
+    );
+    map.contain(root.id(), a.id());
+    map.contain(root.id(), b.id());
+    map.connect(Network::Vascular, a.id(), b.id());
+    map.valve(b.id(), a.id());
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.partial_volume(Measure::new(1.0)?)?;
+    assemble(schema, |mut body| {
+        let class = fast()?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, still);
+        let valves = ports.valves(&mut cv);
+        let flow = valves.flow_memory();
+        let rate = cv.edge_kernel::<ValveEdge, _, _>(|mut k| {
+            let zero = k.zero::<Rate<Rate<Water>>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.memory_rate(&flow, rate);
+        extra(&mut cv, &flow)?;
+        body.add(cv.finish());
+        body.compile()
+    })
+}
+
+/// A valve's flow stands on its edge, so a law of the whole body has no such row to read.
+#[test]
+fn a_body_law_that_reads_an_edges_memory_is_refused_by_name() -> Result<(), AdmissionError> {
+    let compiled = with_a_valve(|cv, flow| {
+        let class = fast()?;
+        let mark = cv.algebraic::<Rate<Water>>("marked", Admissible::finite());
+        let held = cv.kernel(|mut k| {
+            let (value, read) = (k.algebraic(&mark), k.state(flow));
+            let gap = k.subtract(value, read);
+            k.finish(gap, cv.every_mode(), class)
+        });
+        cv.residual(&mark, held);
+        Ok(())
+    });
+    let law = LawName {
+        owner: "CV",
+        local: "marked",
+    };
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::NoSuchRead { law }))
+    );
+    Ok(())
+}
+
+/// A mode of the whole body has no edge, so a firing of it cannot reset what stands on one.
+#[test]
+fn a_body_guard_that_resets_an_edges_memory_is_refused_by_name() -> Result<(), AdmissionError> {
+    let compiled = with_a_valve(|cv, flow| {
+        let class = fast()?;
+        let [on, off] = cv.modes("switch", ["on", "off"]);
+        let zero = cv.parameter::<Dimensionless>(ParameterKey::new("zero"), Admissible::finite());
+        let gap = cv.kernel(|mut k| {
+            let value = k.parameter(&zero);
+            k.finish(value, on.only(), class)
+        });
+        cv.event(Guard::new(gap, Crossing::Rising, on.to(&off)?).resetting(flow));
+        Ok(())
+    });
+    let law = LawName {
+        owner: "CV",
+        local: "switch",
+    };
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::NoSuchRead { law }))
+    );
+    Ok(())
+}
+
+/// A route stands only where its pools do, so a law over every junction has nothing to read at one that holds none.
+#[test]
+fn a_read_of_a_route_that_does_not_reach_a_site_is_refused_by_name() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let holding = map.site::<Junction>("holding", at()?);
+    let bare = map.site::<Junction>("bare", at()?);
+    map.contain(root.id(), holding.id());
+    map.contain(root.id(), bare.id());
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.pool::<Norepinephrine>(holding.id(), Space::Vesicle)?;
+    schema.pool::<Norepinephrine>(holding.id(), Space::Cleft)?;
+    let compiled = assemble(schema, |mut body| {
+        let class = fast()?;
+        let (mut ns, ports) = body.nervous()?.parts();
+        let release = ports.release::<Norepinephrine>(&mut ns);
+        let still = ns.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Norepinephrine>>();
+            k.finish(zero, ns.every_mode(), class)
+        });
+        ns.transfer_at(&release, still);
+        let (row, _) = ns.site_field::<Junction, Norepinephrine>("stored", Admissible::finite());
+        let value = ns.site_kernel(|mut k| {
+            let held = k.at_site(&release.from_amount::<Norepinephrine>());
+            k.finish(held, ns.every_mode(), class)
+        });
+        ns.define_at(&row, value);
+        body.add(ns.finish());
+        body.compile()
+    });
+    let law = LawName {
+        owner: "NS",
+        local: "stored",
+    };
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::NoSuchRead { law }))
+    );
+    Ok(())
+}
+
 /// In a body of water alone a plain edge's flow is its column and no row, so a read of it is refused by name.
 #[test]
 fn a_read_of_a_flow_that_is_no_row_is_refused_by_name() -> Result<(), AdmissionError> {
@@ -522,7 +654,8 @@ fn a_read_of_a_flow_that_is_no_row_is_refused_by_name() -> Result<(), AdmissionE
         let head = cv.parameter::<Pressure>(ParameterKey::new("cv.head"), Admissible::finite());
         let power = cv.edge_kernel(|mut k| {
             let (head, flow) = (k.parameter(&head), k.edge_flow());
-            let product = k.multiply(head, flow);
+            let moved = k.volume_flow(flow);
+            let product = k.multiply(head, moved);
             let power = k.as_dimension(product);
             k.finish(power, cv.every_mode(), class)
         });

@@ -170,7 +170,8 @@ impl<'b, 'h> Walls<'b, 'h> {
             let product = k.multiply(per_length, fall);
             let head: Expr<'_, '_, _, Pressure> = k.as_dimension(product);
             let flow = k.edge_flow();
-            let product = k.multiply(head, flow);
+            let moved = k.volume_flow(flow);
+            let product = k.multiply(head, moved);
             let power = k.as_dimension(product);
             k.finish(power, cv.every_mode(), wave)
         });

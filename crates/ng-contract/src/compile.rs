@@ -717,10 +717,8 @@ impl Reaches {
             .find(|route| route.0 == family)
             .map_or(&[], |route| route.1.as_slice())
     }
-    fn reach(&self, family: Family, context: Context) -> &Reach {
-        (self.of_family(family).iter())
-            .find(|reach| reach.context == context)
-            .expect("a kernel reads a route's amounts only where a route of its own context applies")
+    fn reach(&self, family: Family, context: Context) -> Option<&Reach> {
+        (self.of_family(family).iter()).find(|reach| reach.context == context)
     }
     fn held(&self, pool: Option<PoolRef>) -> bool {
         pool.is_some_and(|pool| self.pools.binary_search(&pool).is_ok())
@@ -1472,6 +1470,7 @@ fn addresses(
             }
             Source::Amount(family, end, species) => {
                 let reach = reaches.reach(family, context);
+                let reach = reach.ok_or(CompileDefect::NoSuchRead { law })?;
                 let pool = reach
                     .pool(end, species)
                     .ok_or(CompileDefect::NoSuchRead { law })?;
@@ -1526,7 +1525,10 @@ fn addresses(
                         owner: law.owner,
                         local,
                     };
-                    unknown(rows.declared(slot, context))
+                    unknown(
+                        rows.slot(slot, context)
+                            .ok_or(CompileDefect::NoSuchRead { law })?,
+                    )
                 }
                 (Input::Read(source, place), _) => read(source, place)?,
                 (Input::Height(place), _) => {
@@ -1701,8 +1703,10 @@ fn guards(
             for at in places_of(anatomy, reaches, schema, fragment.owner, mode.over) {
                 let reset = resets.map(|local| {
                     let owner = fragment.owner;
-                    RowId::at(rows.declared(LawName { owner, local }, at))
+                    let row = rows.slot(LawName { owner, local }, at).map(RowId::at);
+                    row.ok_or(CompileDefect::NoSuchRead { law })
                 });
+                let reset = reset.transpose()?;
                 let variable = Slot { law, at };
                 let layout = GuardLayout {
                     variable: modes.partition_point(|mode| mode.variable < variable),

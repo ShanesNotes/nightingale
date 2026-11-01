@@ -534,6 +534,10 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     pub fn volume(&mut self, amount: Expr<'b, 'k, O, Water>) -> Expr<'b, 'k, O, Volume> {
         self.push(Op::Volume([amount.at]))
     }
+    /// The same coefficient on a flow, for work done on a volume.
+    pub fn volume_flow(&mut self, flow: Expr<'b, 'k, O, Rate<Water>>) -> Expr<'b, 'k, O, Rate<Volume>> {
+        self.push(Op::Volume([flow.at]))
+    }
     /// The one literal is the additive identity; a physical value enters as a declared parameter.
     pub fn zero<U: Dimension>(&mut self) -> Expr<'b, 'k, O, U> {
         self.push(Op::Zero(dimension::<U>()))

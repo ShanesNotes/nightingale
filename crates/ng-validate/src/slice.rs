@@ -846,6 +846,7 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
         set::<Dimensionless>(packet, "rn.water-least", at, water_least, note)?;
         set::<Dimensionless>(packet, "rn.water-most", at, water_most, note)?;
         set::<Sodium>(packet, "rn.sodium-half", at, half, note)?;
+        set::<Chloride>(packet, "rn.chloride-half", at, 1.0, note)?;
     }
     set::<Rate<Sodium>>(packet, "rn.sodium-capacity", edge(duct, peritubular), 12.0, note)?;
 

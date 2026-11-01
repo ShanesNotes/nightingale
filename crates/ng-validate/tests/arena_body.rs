@@ -781,6 +781,14 @@ fn a_ramp_to_sitting() -> Vec<AuthorizedInput> {
         .collect()
 }
 
+fn lumen_ion(row: &Row, ions: &[Species]) -> bool {
+    matches!(
+        row.kind(),
+        RowKind::Amount { site, space: Space::Lumen, species }
+            if site == vessel("renal tubule") && ions.contains(&species)
+    )
+}
+
 /// A lumen of water alone holds nothing to reclaim, so its ion laws read zero and stay defined.
 #[test]
 fn a_tubule_with_no_ions_reclaims_none() -> Result<(), InitializationFailure> {
@@ -791,18 +799,46 @@ fn a_tubule_with_no_ions_reclaims_none() -> Result<(), InitializationFailure> {
     let request = InitializationRequest::at(anchor_moment()).reading(&lens);
     let system = body.initialization(parameters, port, request)?;
     let mut workspace = system.workspace();
-    for row in body.rows() {
-        if let RowKind::Amount {
-            site,
-            space: Space::Lumen,
-            species: Species::Sodium | Species::Potassium | Species::Chloride,
-        } = row.kind()
-            && site == vessel("renal tubule")
-        {
-            workspace.unknowns_mut()[row.id().index()] = 0.0;
-        }
+    let ions = [Species::Sodium, Species::Potassium, Species::Chloride];
+    for row in body.rows().iter().filter(|row| lumen_ion(row, &ions)) {
+        workspace.unknowns_mut()[row.id().index()] = 0.0;
     }
     assert!(system.stage(&workspace, 0).is_ok());
+    Ok(())
+}
+
+/// Sodium delivered alone can leave a lumen short of chloride. A rate that did not read chloride would take it below zero
+/// at any step, so reclaim stops with it.
+#[test]
+fn a_lumen_with_no_chloride_gives_none_back() -> Result<(), InitializationFailure> {
+    let body = arena_body()?;
+    let (packet, lens) = (arena_packet(&body)?, arena_lens(&body)?);
+    let parameters = body.bind(packet)?;
+    let port = BoundaryPort::new(Vec::new())?;
+    let request = InitializationRequest::at(anchor_moment()).reading(&lens);
+    let system = body.initialization(parameters, port, request)?;
+    let mut workspace = system.workspace();
+    let chloride = |row: &Row| {
+        matches!(
+            row.kind(),
+            RowKind::Amount {
+                species: Species::Chloride,
+                ..
+            }
+        )
+    };
+    for point in 0..system.points() {
+        for row in body.rows().iter().filter(|row| chloride(row)) {
+            workspace.unknowns_mut()[point * system.rows() + row.id().index()] = 0.0;
+        }
+    }
+    let (residuals, _) = system.stage(&workspace, 0)?;
+    let tubule = body
+        .rows()
+        .iter()
+        .find(|row| lumen_ion(row, &[Species::Chloride]));
+    let tubule = tubule.expect("a tubule holds chloride");
+    assert!(residuals[tubule.id().index()] <= 0.0);
     Ok(())
 }
 
