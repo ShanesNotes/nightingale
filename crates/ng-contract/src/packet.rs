@@ -219,7 +219,6 @@ impl<K: PacketKind> ParameterPacket<K> {
     ) -> Result<(), AdmissionError> {
         let record = self.population_of(key)?;
         let value = record.lower + sampled_unit(seed, key, binding) * (record.upper - record.lower);
-        let value = if value > record.upper { record.upper } else { value };
         let dimension = record.dimension.clone();
         self.entry(ParameterEntry {
             key,
@@ -798,24 +797,17 @@ impl CompiledBody {
 }
 
 /// One number per node, equal for two nodes that compute one expression: the same operation on operands of the
-/// same numbers, in either order for `add` and a product, and with `as_dimension` no operation at all. Separate
-/// reads of one parameter already compare equal, so `(p + p) / (p + p)` from four reads gets one number on each
-/// side, and so does `(p q) / (q p)`. It folds nothing: `p - p` stays a law on a parameter, as finding 15's
-/// backed test holds it.
+/// same numbers, in either order for `add`, `multiply` and `scale`. Separate reads of one parameter already compare
+/// equal, so `(p + p) / (p + p)` from four reads gets one number on each side, and so does `(p q) / (q p)`. It
+/// folds nothing: `p - p` stays a law on a parameter, as finding 15's backed test holds it.
 fn numbered(code: &[Op]) -> Vec<usize> {
     let mut numbers: Vec<usize> = Vec::with_capacity(code.len());
     let mut distinct: Vec<Op> = Vec::with_capacity(code.len());
     for op in code {
         let plain = match op.map(|operand| numbers[operand]) {
-            Op::AsDimension([x]) => {
-                numbers.push(x);
-                continue;
-            }
             Op::Add([a, b]) => Op::Add([a.min(b), a.max(b)]),
-            Op::Multiply([a, b]) | Op::Scale([a, b]) | Op::ConductanceFlow([a, b]) => {
-                Op::Multiply([a.min(b), a.max(b)])
-            }
-            Op::Deviation(operands) => Op::Subtract(operands),
+            Op::Multiply([a, b]) => Op::Multiply([a.min(b), a.max(b)]),
+            Op::Scale([a, b]) => Op::Scale([a.min(b), a.max(b)]),
             other => other,
         };
         let known = distinct.iter().position(|seen| *seen == plain);

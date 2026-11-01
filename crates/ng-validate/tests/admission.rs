@@ -60,6 +60,9 @@ const MEAN: AnchorId = AnchorId::new("fixture.mean-a");
 const NETWORK: Binding = Binding::Network(Network::Vascular);
 const NOTE: &str = "synthetic";
 const SETTLED: &str = "settled";
+const READING: &str = "reading";
+/// One unit of water over the one second of the instant's delivery.
+const CHANNEL_FLOW: f64 = 3.0;
 
 fn at(ns: u64) -> SimTime {
     SimTime::from_ns(ns)
@@ -147,6 +150,8 @@ enum Variant {
     Divided,
     /// A forcing scales the flow.
     Forced,
+    /// An algebraic row in the boundary reads a drive, in the minutes band, so an instant anchor can hold on it.
+    Instant,
 }
 
 struct Body {
@@ -173,7 +178,7 @@ fn declared(variant: Variant) -> Result<Body, AdmissionError> {
         let e = laws.end_parameter::<Elastance>(E, Admissible::positive());
         let g = laws.edge_parameter::<Conductance<Water>>(G, Admissible::nonnegative());
         let class = match variant {
-            Variant::Slow => RateClass::new(RateBand::Minutes, 60 * SECOND)?,
+            Variant::Slow | Variant::Instant => RateClass::new(RateBand::Minutes, 60 * SECOND)?,
             _ => RateClass::new(RateBand::Wave, 1_000_000)?,
         };
         let wobble = (variant == Variant::Forced).then(|| laws.forcing("wobble", KNOTS, WOBBLE));
@@ -211,7 +216,7 @@ fn declared(variant: Variant) -> Result<Body, AdmissionError> {
         laws.transfer_along(&route, flow);
         let beat = RateClass::new(RateBand::Beat, 100_000_000)?;
         match variant {
-            Variant::Plain | Variant::Slow | Variant::Divided | Variant::Forced => {}
+            Variant::Plain | Variant::Slow | Variant::Divided | Variant::Forced | Variant::Instant => {}
             Variant::Extra => {
                 let tone = laws.parameter::<Dimensionless>(TONE, Admissible::finite());
                 let ratio = laws.parameter::<Dimensionless>(RATIO, Admissible::finite());
@@ -276,6 +281,19 @@ fn declared(variant: Variant) -> Result<Body, AdmissionError> {
                 k.finish(value, laws.every_mode(), class)
             });
             laws.transfer(Transfer::new(&pair, rate));
+            if variant == Variant::Instant && boundary == PULSE {
+                let gain = laws.parameter::<Dimensionless>(SET, Admissible::positive());
+                let reading = laws.algebraic::<Rate<Water>>(READING, Admissible::finite());
+                let closure = laws.kernel(|mut k| {
+                    let x = k.algebraic(&reading);
+                    let drive = k.read(&drive);
+                    let gain = k.parameter(&gain);
+                    let scaled = k.scale(drive, gain);
+                    let residual = k.subtract(x, scaled);
+                    k.finish(residual, laws.every_mode(), class)
+                });
+                laws.residual(&reading, closure);
+            }
         }
         body.add(laws.finish());
         body.compile()
@@ -638,6 +656,8 @@ fn an_anchor_no_channel_reads_by_its_method_and_window_is_refused() {
     let other_row = ChannelSpec::new(GAUGE, case.b()).averaged(count(64));
     let other_row = case.body().lens(vec![other_row], grid).expect("a lens");
     assert_eq!(solved(&other_row), refused);
+    let other_body = PulsatileCase::new(Variant::Slow);
+    assert_eq!(solved(&other_body.lens), refused);
     let parameters = case.body().bind(case.packet()).expect("bound");
     let unread = InitializationRequest::at(at(0), admission_tolerance());
     assert_eq!(
@@ -1002,17 +1022,21 @@ fn under_an_instant_only_algebraic_rows_move() {
 
 // The tolerance.
 
+/// The model default's scale at a value near 3.
+const NEAR_THREE: f64 = 1e-9 + 3e-12;
+
 #[test]
 fn the_tolerance_decides_a_near_row_and_is_reported_with_the_worst_row() {
     let body = filter_body();
     let core = reference(SECOND);
     let row = AdmissionRow::Body(body.rows()[1].id());
-    let far = admit_fixture(&body, filter_packet(3.0 + 1e-8), empty_port(), &core).err();
-    assert_eq!(far, Some(InitializationFailure::Inconsistent { row }));
+    let far = 3.0 + 1.1 * NEAR_THREE;
+    let refused = admit_fixture(&body, filter_packet(far), empty_port(), &core).err();
+    assert_eq!(refused, Some(InitializationFailure::Inconsistent { row }));
 
     let tolerance = admission_tolerance();
     let lens = body.lens(Vec::new(), count(SECOND)).expect("a lens");
-    let parameters = body.bind(filter_packet(3.0 + 1e-10)).expect("bound");
+    let parameters = body.bind(filter_packet(3.0 + 0.9 * NEAR_THREE)).expect("bound");
     let request = InitializationRequest::at(at(0), tolerance).reading(&lens);
     let system = body
         .initialization(parameters, empty_port(), request)
@@ -1023,7 +1047,118 @@ fn the_tolerance_decides_a_near_row_and_is_reported_with_the_worst_row() {
     assert_eq!(origin.provenance().tolerance(), tolerance);
     let (worst, normalized) = origin.provenance().worst().expect("a body with rows");
     assert_eq!(worst, row);
-    assert!(hi(normalized) > 0.05 && hi(normalized) <= 1.0, "{normalized:?}");
+    assert!(hi(normalized) > 0.8 && hi(normalized) <= 1.0, "{normalized:?}");
+}
+
+#[test]
+fn a_stage_is_read_in_its_rows_own_unit_not_as_a_rate() {
+    let case = PulsatileCase::plain();
+    let rows = case.body().rows().len();
+    let (a, b) = {
+        let (_, _, a) = steady_packet(&case);
+        (a, TOTAL - a)
+    };
+    let scale = 1e-9 + 1e-12 * a;
+    let admitted = |nudge: f64| {
+        let (packet, boundary, _) = steady_packet(&case);
+        let system = steady_system(&case, packet, boundary);
+        let mut witness = system.workspace();
+        witness.unknowns_mut()[rows] = a + nudge;
+        witness.unknowns_mut()[rows + 1] = b - nudge;
+        system.admit(witness, case.history()).err()
+    };
+    assert_eq!(admitted(0.2 * scale), None);
+    assert!(admitted(3.0 * scale).is_some());
+}
+
+#[test]
+fn an_instant_moves_no_amount_by_a_hair_even_inside_the_tolerance() {
+    let case = PulsatileCase::new(Variant::Slow);
+    let lens = case.body().lens(Vec::new(), count(SECOND)).expect("a lens");
+    let mut packet = ParameterPacket::new();
+    packet
+        .synthetic(E, NETWORK, measure::<Elastance>(GUESS), NOTE)
+        .expect("once");
+    let g = measure::<Conductance<Water>>(CONDUCTANCE);
+    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+    packet
+        .start(case.a(), measure::<Water>(START[0]), NOTE)
+        .expect("once");
+    packet
+        .start(case.b(), measure::<Water>(START[1]), NOTE)
+        .expect("once");
+    let parameters = case.body().bind(packet).expect("bound");
+    let request = InitializationRequest::at(at(0), admission_tolerance()).reading(&lens);
+    let system = (case.body().initialization(parameters, empty_port(), request)).expect("a system");
+    let mut moved = system.workspace();
+    moved.unknowns_mut()[0] += 1e-13;
+    let row = AdmissionRow::Body(case.row_a());
+    assert_eq!(
+        system.admit(moved, case.history()).err(),
+        Some(InitializationFailure::Inconsistent { row })
+    );
+}
+
+#[test]
+fn a_workspace_of_another_shape_is_refused() {
+    let case = PulsatileCase::plain();
+    let (packet, boundary, _) = steady_packet(&case);
+    let wide = steady_system(&case, packet, boundary).workspace();
+    let system = case.system(case.packet());
+    assert_eq!(
+        system.admit(wide, case.history()).err(),
+        Some(InitializationFailure::Admission(AdmissionError::ForeignWorkspace))
+    );
+}
+
+#[test]
+fn a_fit_solves_at_an_instant_on_a_body_with_a_conserved_total() {
+    let case = PulsatileCase::new(Variant::Instant);
+    let reading = RowKind::Algebraic(LawName {
+        owner: "Boundary",
+        local: READING,
+    });
+    let held = 2.0 * CHANNEL_FLOW;
+    let bare = ChannelSpec::new(GAUGE, reading);
+    let lens = case.body().lens(vec![bare], count(SECOND)).expect("a lens");
+    let mut packet = ParameterPacket::new();
+    packet
+        .synthetic(E, NETWORK, measure::<Elastance>(GUESS), NOTE)
+        .expect("once");
+    let g = measure::<Conductance<Water>>(CONDUCTANCE);
+    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+    packet
+        .start(case.a(), measure::<Water>(START[0]), NOTE)
+        .expect("once");
+    packet
+        .start(case.b(), measure::<Water>(START[1]), NOTE)
+        .expect("once");
+    packet
+        .start(reading, measure::<Rate<Water>>(1.0), NOTE)
+        .expect("once");
+    let read = Snapshot::new(
+        reading,
+        GAUGE,
+        AnchorStatistic::Instant,
+        measure::<Rate<Water>>(held),
+    );
+    packet.anchor(Synthetic::new(MEAN, read, NOTE)).expect("once");
+    let gain = measure::<Dimensionless>(1.0);
+    packet.calibrated(SET, Binding::Body, gain, MEAN).expect("once");
+    let events = vec![water(b"steady", 0, PULSE, 0, PERIOD_NS, CHANNEL_FLOW)];
+    let boundary = BoundaryPort::new(events).expect("parsed");
+    let core = reference(SECOND);
+    let Admitted { provenance, .. } =
+        admit_solved(case.body(), packet, boundary, &core, &lens).expect("solved");
+    let name = ValueName::Parameter {
+        key: SET,
+        binding: Binding::Body,
+    };
+    assert_eq!(
+        record(&provenance, name).provenance,
+        ValueProvenance::Calibrated { anchor: MEAN }
+    );
+    assert!((hi(record(&provenance, name).value) - 2.0).abs() < 1e-12);
 }
 
 // Check 3: provenance per value, an authored value inside its range, no parameter pinned to an anchor.
@@ -1398,6 +1533,179 @@ fn the_goal_and_its_grid_are_in_the_packet_hash() {
     };
     assert_eq!(hash(64), hash(64));
     assert_ne!(hash(64), hash(32));
+    let slow = PulsatileCase::new(Variant::Slow);
+    let read_as = |statistic| {
+        let read = Snapshot::new(slow.a(), GAUGE, statistic, measure::<Water>(MEAN_A));
+        let mut packet = slow.packet_without_fit();
+        packet
+            .synthetic(E, NETWORK, measure::<Elastance>(GUESS), NOTE)
+            .expect("once");
+        packet.anchor(Synthetic::new(MEAN, read, NOTE)).expect("once");
+        slow.body().bind(packet).expect("bound").packet_hash()
+    };
+    assert_ne!(
+        read_as(AnchorStatistic::Instant),
+        read_as(AnchorStatistic::CycleMean)
+    );
+}
+
+#[test]
+fn every_part_of_a_packet_is_in_its_hash() {
+    let case = PulsatileCase::new(Variant::Extra);
+    let rows = |packet: &mut ParameterPacket<SyntheticFixture>| {
+        let speed = measure::<Rate<Dimensionless>>(1.0);
+        packet.synthetic(PACE, Binding::Body, speed, NOTE).expect("once");
+        let settled = RowKind::Memory(name(SETTLED));
+        packet
+            .start(settled, measure::<Dimensionless>(1.0), NOTE)
+            .expect("once");
+    };
+    let hash = |method: &'static str,
+                value: f64,
+                anchor_note: &'static str,
+                lower: f64,
+                upper: f64,
+                record_note: &'static str,
+                reason: &'static str,
+                identity: &'static str,
+                sampled: u64| {
+        let mut packet = case.packet_without_fit();
+        rows(&mut packet);
+        let read = Snapshot::new(case.a(), method, statistic, measure::<Water>(value));
+        packet
+            .anchor(Synthetic::new(MEAN, read, anchor_note))
+            .expect("once");
+        packet
+            .calibrated(E, NETWORK, measure::<Elastance>(GUESS), MEAN)
+            .expect("once");
+        let (low, high) = (measure::<Dimensionless>(lower), measure::<Dimensionless>(upper));
+        packet.population(TONE, low, high, record_note).expect("once");
+        packet
+            .sampled(TONE, Binding::Body, PacketSeed::new([sampled, 2, 3, 4]))
+            .expect("a record");
+        let (low, high) = (measure::<Dimensionless>(0.0), measure::<Dimensionless>(9.0));
+        packet.population(RATIO, low, high, NOTE).expect("once");
+        packet
+            .authored(RATIO, Binding::Body, measure::<Dimensionless>(4.5), reason)
+            .expect("inside");
+        packet
+            .derived(
+                DOUBLED,
+                Binding::Body,
+                measure::<Dimensionless>(9.0),
+                identity,
+                DOUBLED_FROM,
+            )
+            .expect("once");
+        case.body().bind(packet).expect("bound").packet_hash()
+    };
+    let base = || {
+        hash(
+            CycleMean,
+            GAUGE,
+            MEAN_A,
+            NOTE,
+            1.0,
+            3.0,
+            NOTE,
+            "a reason",
+            "an identity",
+            1,
+        )
+    };
+    assert_eq!(base(), base());
+    let other = [
+        hash(
+            CycleMean,
+            "another",
+            MEAN_A,
+            NOTE,
+            1.0,
+            3.0,
+            NOTE,
+            "a reason",
+            "an identity",
+            1,
+        ),
+        hash(
+            CycleMean,
+            GAUGE,
+            MEAN_A + 1.0,
+            NOTE,
+            1.0,
+            3.0,
+            NOTE,
+            "a reason",
+            "an identity",
+            1,
+        ),
+        hash(
+            CycleMean,
+            GAUGE,
+            MEAN_A,
+            "another",
+            1.0,
+            3.0,
+            NOTE,
+            "a reason",
+            "an identity",
+            1,
+        ),
+        hash(
+            CycleMean,
+            GAUGE,
+            MEAN_A,
+            NOTE,
+            1.0,
+            3.0,
+            "another",
+            "a reason",
+            "an identity",
+            1,
+        ),
+        hash(
+            CycleMean,
+            GAUGE,
+            MEAN_A,
+            NOTE,
+            1.0,
+            3.0,
+            NOTE,
+            "another",
+            "an identity",
+            1,
+        ),
+        hash(
+            CycleMean, GAUGE, MEAN_A, NOTE, 1.0, 3.0, NOTE, "a reason", "another", 1,
+        ),
+        hash(
+            CycleMean,
+            GAUGE,
+            MEAN_A,
+            NOTE,
+            1.0,
+            3.0,
+            NOTE,
+            "a reason",
+            "an identity",
+            2,
+        ),
+        hash(
+            CycleMean,
+            GAUGE,
+            MEAN_A,
+            NOTE,
+            0.5,
+            3.5,
+            NOTE,
+            "a reason",
+            "an identity",
+            1,
+        ),
+    ];
+    for (at, hash) in other.iter().enumerate() {
+        assert_ne!(*hash, base(), "change {at}");
+    }
 }
 
 // The fence.
