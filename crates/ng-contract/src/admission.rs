@@ -74,7 +74,8 @@ impl CompiledBody {
             .map(|known| known.name)
     }
     /// Rule 17's other half: `bind` matched the window to the row and the packet, and this matches the method and
-    /// window to a reading the body can give. A lens is the one place a method meets a row.
+    /// window to a reading the body can give. A lens is the one place a method meets a row, and its windows sit on
+    /// whole multiples of their length, so a run that starts inside one never reads the beat admission matched.
     fn check_readings(
         &self,
         owed: &Owed,
@@ -88,7 +89,7 @@ impl CompiledBody {
                     _ => (lens.period_ns(), 1),
                 };
                 lens.model() == self.model_hash()
-                    && moment.nanoseconds().is_multiple_of(lens.period_ns())
+                    && moment.nanoseconds().is_multiple_of(window_ns)
                     && lens.reads(anchor.method, anchor.row, window_ns, points)
             });
             if !read {
@@ -386,15 +387,17 @@ impl InitializationSystem<'_> {
         (defect == 0.0 || defect <= scale).then(|| if scale > 0.0 { defect / scale } else { 0.0 })
     }
     /// An instant reads its row at point 0. A cycle mean reads its row's mean over the points, the quadrature the
-    /// ring's own sum closes, so a linear law's mean is exact at any point count.
+    /// ring's own sum closes, so a linear law's mean is exact at any point count. It sums as an observer sums a
+    /// window, so the two read one number however far the row swings.
     fn anchor_read(&self, unknowns: &[f64], anchor: &BoundAnchor) -> f64 {
         let row = anchor.row.index();
         match anchor.statistic {
             AnchorStatistic::Instant => unknowns[row],
             AnchorStatistic::CycleMean => {
                 let points = self.frames.len();
-                let read = |point| self.point(unknowns, point)[row];
-                (0..points).map(read).sum::<f64>() / points as f64
+                let read = |point| Compensated::exact(self.point(unknowns, point)[row]);
+                let sum = (0..points).map(read).fold(Compensated::ZERO, Compensated::plus);
+                Compensated::between(Compensated::ZERO, sum, 1, points as u64).rounded()
             }
         }
     }

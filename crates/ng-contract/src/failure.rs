@@ -157,7 +157,7 @@ pub enum AdmissionError {
     NoCycle {
         anchor: AnchorId,
     },
-    /// An anchor no channel of the request's lens reads with its method and window (rule 17).
+    /// An anchor no channel of the request's lens reads with its method and window from this start (rule 17).
     AnchorUnread {
         anchor: AnchorId,
     },

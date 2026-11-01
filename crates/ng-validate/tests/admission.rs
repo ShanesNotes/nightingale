@@ -1380,9 +1380,10 @@ fn a_fit_only_rounding_can_feel_is_refused_by_its_key() {
     );
 }
 
-/// A ring whose first point sits between a lens's instants is read at no point of it.
+/// A lens's windows sit on whole multiples of their length, so a run that starts inside one, on the lens's grid or
+/// off it, never reads the beat admission matched.
 #[test]
-fn a_run_that_starts_off_the_lenss_grid_is_refused() {
+fn a_run_that_starts_inside_a_lens_window_is_refused() {
     let case = PulsatileCase::plain();
     let lens = gauges(&case.declared, GAUGE, 4);
     let reading = |moment| {
@@ -1392,10 +1393,104 @@ fn a_run_that_starts_off_the_lenss_grid_is_refused() {
         (case.body().initialization(parameters, empty_port(), request)).err()
     };
     let step = PERIOD_NS / 4;
-    assert_eq!(reading(7 * step), None);
+    assert_eq!(reading(8 * step), None);
+    for moment in [7 * step, 8 * step + 1] {
+        assert_eq!(
+            reading(moment),
+            Some(AdmissionError::AnchorUnread { anchor: MEAN })
+        );
+    }
+}
+
+const SWING: &str = "swing";
+const RISE: [&str; 2] = ["rise in", "rise out"];
+const FALL: [&str; 2] = ["fall in", "fall out"];
+
+/// One vessel two pairs of drives pass straight through, and a row that reads the first pair less the second.
+fn swinging_body() -> (CompiledBody, SiteId) {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin());
+    let vessel = map.site::<VesselSegment>("vessel", origin());
+    map.contain(root.id(), vessel.id());
+    let mut schema = Schema::new(map.finish().expect("a map")).expect("a schema");
+    let boundary = |schema: &mut Schema, name, direction| {
+        let lumen = (vessel.id(), Space::Lumen);
+        (schema.water_boundary(name, direction, lumen.0, lumen.1)).expect("a boundary");
+    };
+    for [into, out] in [RISE, FALL] {
+        boundary(&mut schema, into, BoundaryDirection::IntoBody);
+        boundary(&mut schema, out, BoundaryDirection::OutOfBody);
+    }
+    let body = assemble(schema, |mut body| {
+        let (mut laws, ports) = body.boundary()?.parts();
+        let class = RateClass::new(RateBand::Wave, SECOND)?;
+        for name in RISE.into_iter().chain(FALL) {
+            let BoundaryWater { route, drive } = ports.water(name)?;
+            let rate = laws.kernel(|mut k| {
+                let value = k.read(&drive);
+                k.finish(value, laws.every_mode(), class)
+            });
+            laws.transfer(Transfer::new(&route, rate));
+        }
+        let rise = ports.water(RISE[0])?.drive;
+        let fall = ports.water(FALL[0])?.drive;
+        let swing = laws.algebraic::<Rate<Water>>(SWING, Admissible::finite());
+        let closure = laws.kernel(|mut k| {
+            let x = k.algebraic(&swing);
+            let rise = k.read(&rise);
+            let fall = k.read(&fall);
+            let signal = k.subtract(rise, fall);
+            let residual = k.subtract(x, signal);
+            k.finish(residual, laws.every_mode(), class)
+        });
+        laws.residual(&swing, closure);
+        body.add(laws.finish());
+        body.compile()
+    });
+    (body.expect("a body"), vessel.id())
+}
+
+/// The observer sums a window exactly, so admission must too: this row swings `1e12` each way around a mean of about
+/// a third, where a plain sum lands `8e-6` off, far past the tolerance.
+#[test]
+fn a_cycle_mean_is_summed_as_the_observer_sums_it() {
+    const WIDE: f64 = 1e12;
+    const SMALL: f64 = 1.1;
+    let (body, vessel) = swinging_body();
+    let row = boundary_row(SWING);
+    let spec = ChannelSpec::new(GAUGE, row).averaged(count(3));
+    let lens = body.lens(vec![spec], count(SECOND)).expect("a lens");
+    let core = reference(SECOND);
+    let solved = |target: f64| {
+        let beat = NonZeroU32::new(3).expect("not zero");
+        let mut packet = ParameterPacket::periodic(Cycle::new(count(3 * SECOND), beat).expect("even"));
+        packet.within(admission_tolerance());
+        (packet.start(lumen(vessel), measure::<Water>(1e6), NOTE)).expect("once");
+        (packet.start(row, measure::<Rate<Water>>(WIDE), NOTE)).expect("once");
+        let mean = measure::<Rate<Water>>(target);
+        let read = Snapshot::new(row, GAUGE, AnchorStatistic::CycleMean, mean);
+        packet.anchor(Synthetic::new(MEAN, read, NOTE)).expect("once");
+        let mut events = Vec::new();
+        for (index, amount, pair) in [(0, SMALL, RISE), (1, WIDE, FALL), (2, WIDE, RISE)] {
+            for name in pair {
+                let (from, to) = (index * SECOND, (index + 1) * SECOND);
+                events.push(water(name.as_bytes(), index, name, from, to, amount));
+            }
+        }
+        let boundary = BoundaryPort::new(events).expect("parsed");
+        admit_solved(&body, packet, boundary, &core, &lens)
+    };
+    let true_mean = SMALL / 3.0;
+    let Admitted { session, .. } = solved(true_mean).expect("the mean the observer reads");
+    let (means, _) = cycle_means(session, &lens, 3);
+    assert_eq!(means.len(), 1);
+    assert!((means[0] - true_mean).abs() < 1e-15);
+    let plain = (WIDE + SMALL - WIDE) / 3.0;
     assert_eq!(
-        reading(7 * step + 1),
-        Some(AdmissionError::AnchorUnread { anchor: MEAN })
+        solved(plain).err(),
+        Some(InitializationFailure::Inconsistent {
+            row: AdmissionRow::Anchor(MEAN)
+        })
     );
 }
 
