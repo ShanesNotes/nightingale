@@ -263,16 +263,17 @@ impl InitializationSystem<'_> {
         }
         Ok(out)
     }
-    /// A combination's sum at the start, in the workspace and in the packet.
-    fn totals(&self, unknowns: &[f64], quantity: QuantityId) -> (Compensated, Compensated) {
+    /// How far a combination's sum at the start stands from the packet's, and the packet's sum. The first is summed
+    /// term by term, so a total too large to hold still reads as unmoved.
+    fn total(&self, unknowns: &[f64], quantity: QuantityId) -> (f64, f64) {
         let combination = &self.body.conserved_basis().combinations()[quantity.index()];
-        let mut sums = (Compensated::ZERO, Compensated::ZERO);
+        let (mut moved, mut packet) = (Compensated::ZERO, Compensated::ZERO);
         for (row, coefficient) in combination.terms() {
-            let term = |value: f64| Compensated::exact(value).scaled(*coefficient);
-            sums.0 = sums.0.plus(term(unknowns[row.index()]));
-            sums.1 = sums.1.plus(term(self.parameters.starts[row.index()]));
+            let start = self.parameters.starts[row.index()];
+            moved = moved.plus(Compensated::exact(unknowns[row.index()] - start).scaled(*coefficient));
+            packet = packet.plus(Compensated::exact(start).scaled(*coefficient));
         }
-        sums
+        (moved.rounded(), packet.rounded())
     }
     /// One slot per unknown, in the workspace's order: a body row or a total at each point, then each fit's anchor.
     pub fn evaluate(&self, workspace: &SolveWorkspace) -> Result<Vec<f64>, InitializationFailure> {
@@ -280,8 +281,7 @@ impl InitializationSystem<'_> {
         let unknowns = workspace.coordinates();
         let mut out = self.stages(unknowns)?;
         for (slot, quantity) in self.replaced() {
-            let (now, packet) = self.totals(unknowns, quantity);
-            out[slot] = now.minus(packet).rounded();
+            out[slot] = self.total(unknowns, quantity).0;
         }
         let owed = &self.parameters.owed;
         for fit in &owed.fits {
@@ -371,10 +371,10 @@ impl InitializationSystem<'_> {
         Ok(Jacobian::of_parts(row_offsets, columns, entries))
     }
     /// One defect over its scale, `None` when the tolerance refuses it. `<=` is false on a NaN, so what overflowed
-    /// is refused, and an exact packet's scale of zero passes only a defect of zero.
+    /// is refused, and a defect of zero holds even where an overflow leaves no scale.
     fn held(&self, defect: f64, read: f64) -> Option<f64> {
         let scale = self.tolerance.at(read);
-        (defect <= scale).then(|| if scale > 0.0 { defect / scale } else { 0.0 })
+        (defect == 0.0 || defect <= scale).then(|| if scale > 0.0 { defect / scale } else { 0.0 })
     }
     /// Whether `admit` would pass this workspace, so a solve stops where the judge would, and a guess that already
     /// holds stands.
@@ -439,14 +439,11 @@ impl InitializationSystem<'_> {
             }
         };
         let stages = self.stages(unknowns)?;
-        for quantity in self.body.conserved_basis().ids() {
-            let row = AdmissionRow::Total(quantity);
-            let (now, packet) = self.totals(unknowns, quantity);
-            let moved = self.held(now.minus(packet).abs().rounded(), packet.rounded());
-            note(row, moved.ok_or(inconsistent(row))?);
-            let flow = self.held(self.net_flow(&stages, quantity).abs(), packet.rounded());
+        for (_, quantity) in self.replaced() {
+            let (_, packet) = self.total(unknowns, quantity);
+            let flow = self.held(self.net_flow(&stages, quantity).abs(), packet);
             note(
-                row,
+                AdmissionRow::Total(quantity),
                 flow.ok_or(InitializationFailure::NetBoundaryFlow { quantity })?,
             );
         }
@@ -454,6 +451,11 @@ impl InitializationSystem<'_> {
             let row = body_row(slot % size);
             let held = self.held(defect.abs(), unknowns[slot]);
             note(row, held.ok_or(inconsistent(row))?);
+        }
+        for quantity in self.body.conserved_basis().ids() {
+            let row = AdmissionRow::Total(quantity);
+            let (moved, packet) = self.total(unknowns, quantity);
+            note(row, self.held(moved.abs(), packet).ok_or(inconsistent(row))?);
         }
         for anchor in &owed.anchors {
             let row = AdmissionRow::Anchor(anchor.id);
