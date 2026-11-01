@@ -474,7 +474,12 @@ fn a_loop_of_two_couplings_is_solved_as_one_coupled_step() -> Result<(), Initial
         packet.synthetic(ParameterKey::new(key), Binding::Body, value, "synthetic")?;
     }
     let slope = Measure::<Rate<Dimensionless>>::new(3.0)?;
-    packet.synthetic(ParameterKey::new("bench.slope"), Binding::Body, slope, "synthetic")?;
+    packet.synthetic(
+        ParameterKey::new("bench.slope"),
+        Binding::Body,
+        slope,
+        "synthetic",
+    )?;
     for (row, start) in [(climbing, 3.0), (stretch, 4.0), (drive, 2.0)] {
         packet.start(row, Measure::<Dimensionless>::new(start)?, "synthetic")?;
     }

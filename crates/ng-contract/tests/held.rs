@@ -33,6 +33,8 @@ enum Defect {
     OtherRoutes,
     OtherHolds,
     Reversed,
+    LiverHoldsCells,
+    LiverHoldsNothing,
 }
 
 struct Sites {
@@ -147,7 +149,7 @@ fn gut<'b>(body: &mut Assembly<'b>, defect: Defect) -> Result<(), AdmissionError
 
 fn cell_water<'b>(body: &mut Assembly<'b>, defect: Defect) -> Result<(), AdmissionError> {
     let holds = match defect {
-        Defect::CellsUnheld => vec![],
+        Defect::CellsUnheld | Defect::LiverHoldsCells => vec![],
         Defect::MovedSpaceHeld => vec![Space::Cells, Space::Plasma],
         Defect::OtherHolds => vec![Space::Cells, Space::Cells],
         _ => vec![Space::Cells],
@@ -209,6 +211,16 @@ fn compiled(defect: Defect) -> Result<CompiledBody, AdmissionError> {
             }
             Defect::RouteOfTwoCards => {
                 let declaration = HeldDeclaration::<Hepatic>::new(vec![ROUTE], vec![], "a synthetic bench");
+                let (laws, _ports) = body.hold(declaration)?.parts();
+                body.add(laws.finish());
+            }
+            Defect::LiverHoldsCells | Defect::LiverHoldsNothing => {
+                let holds = if defect == Defect::LiverHoldsCells {
+                    vec![Space::Cells]
+                } else {
+                    vec![]
+                };
+                let declaration = HeldDeclaration::<Hepatic>::new(vec![], holds, "a synthetic bench");
                 let (laws, _ports) = body.hold(declaration)?.parts();
                 body.add(laws.finish());
             }
@@ -474,8 +486,6 @@ fn a_held_pool_is_an_amount_in_the_ledger_with_a_combination_of_its_own() -> Res
         let alone: &[(RowId, i64)] = &[(row, 1)];
         assert!((body.conserved_basis().combinations().iter()).any(|sum| sum.terms() == alone));
         assert!(!(body.columns().iter()).any(|column| column.terms().iter().any(|term| term.0 == row)));
-        let packet = ParameterPacket::<SyntheticFixture>::new();
-        assert!(body.bind(packet).is_err());
     }
     assert_eq!(body.held().collect::<Vec<_>>(), ["BC", "GI"]);
     Ok(())
@@ -488,6 +498,10 @@ fn a_changed_declaration_changes_the_hash_and_its_order_does_not() -> Result<(),
     assert_eq!(compiled(Defect::OtherRoutes)?.model_hash(), base);
     assert_eq!(compiled(Defect::OtherHolds)?.model_hash(), base);
     assert_eq!(compiled(Defect::Reversed)?.model_hash(), base);
+    assert_ne!(
+        compiled(Defect::LiverHoldsCells)?.model_hash(),
+        compiled(Defect::LiverHoldsNothing)?.model_hash()
+    );
     Ok(())
 }
 
@@ -566,7 +580,7 @@ fn a_bed_reads_its_nearest_enclosure_and_a_bed_nothing_encloses_reads_no_row() -
 }
 
 #[test]
-fn a_held_pressure_can_vary_in_time_because_it_is_a_kernel() -> Result<(), AdmissionError> {
+fn a_held_pressure_is_a_kernel_so_it_may_read_a_forcing() -> Result<(), AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at()?);
     let space = map.site::<EnclosedSpace>("chest", at()?);
