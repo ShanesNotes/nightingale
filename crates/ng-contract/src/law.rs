@@ -1,5 +1,7 @@
+use crate::catalog::{self, Coupling, Defines, Reads};
 use crate::identity::{Canonical, Seal};
 use crate::quantity::dimension;
+use crate::scope::ENCLOSURE_PRESSURE;
 use crate::{
     Admissible, AdmissibleSet, AdmissionError, Basis, Boundary, Class, Conductance, Dimension, Dimensionless,
     NonMaterial, Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reference,
@@ -38,6 +40,11 @@ pub struct RateClass {
     maximum_ns: u64,
 }
 impl RateClass {
+    /// A block no law moves: a held pool, which tolerates any interval.
+    pub(crate) const UNMOVED: Self = Self {
+        band: RateBand::Hours,
+        maximum_ns: u64::MAX,
+    };
     /// Refuses a zero interval.
     pub fn new(band: RateBand, maximum_ns: u64) -> Result<Self, AdmissionError> {
         if maximum_ns == 0 {
@@ -118,6 +125,8 @@ pub(crate) enum Input {
     Drive(&'static str),
     Draw(&'static str),
     Forcing(&'static str),
+    Field(LawName),
+    Extravascular,
 }
 impl Op {
     pub(crate) fn operands(&self) -> &[usize] {
@@ -238,6 +247,11 @@ impl Seal for Input {
                 out.number(9);
                 out.text(forcing);
             }
+            Input::Field(name) => {
+                out.number(10);
+                name.seal(out);
+            }
+            Input::Extravascular => out.number(11),
         }
     }
 }
@@ -294,6 +308,17 @@ pub(crate) struct KernelData {
     pub(crate) dimension: String,
     pub(crate) modes: Selector,
     pub(crate) rate: RateClass,
+    pub(crate) defines: bool,
+}
+impl KernelData {
+    /// `row - value`, so a coupling is a plain algebraic row and a loop of couplings a coupled residual.
+    fn defining(mut self, row: &'static str) -> Self {
+        let value = self.code.len() - 1;
+        self.code.push(Op::Input(Input::Algebraic(row)));
+        self.code.push(Op::Subtract([value + 1, value]));
+        self.defines = true;
+        self
+    }
 }
 
 impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
@@ -501,12 +526,16 @@ pub struct ReadPort<'b, O, U> {
 enum Source {
     Amount(Family, End),
     Drive(&'static str),
+    Field(LawName),
+    Extravascular,
 }
 impl Source {
     fn input(self) -> Input {
         match self {
             Source::Amount(family, end) => Input::Amount(family, end),
             Source::Drive(boundary) => Input::Drive(boundary),
+            Source::Field(name) => Input::Field(name),
+            Source::Extravascular => Input::Extravascular,
         }
     }
 }
@@ -517,6 +546,56 @@ impl<'b, O, U> ReadPort<'b, O, U> {
             brand: PhantomData,
             kind: PhantomData,
         }
+    }
+    pub(crate) fn field(name: LawName) -> Self {
+        Self::of(Source::Field(name))
+    }
+}
+impl<'b, O> ReadPort<'b, O, PerSite<crate::CapillaryBed, Pressure>> {
+    pub(crate) fn extravascular() -> Self {
+        Self::of(Source::Extravascular)
+    }
+}
+
+/// One field of a coupling or an enclosure's pressure, which its owner owes a law.
+pub struct Output<'b, O, U> {
+    name: &'static str,
+    brand: Brand<'b>,
+    kind: PhantomData<(O, U)>,
+}
+impl<'b, O, U> Output<'b, O, U> {
+    pub(crate) fn named(name: &'static str) -> Self {
+        Self {
+            name,
+            brand: PhantomData,
+            kind: PhantomData,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Over {
+    Body,
+    Every(Class),
+    HeldEnclosures,
+}
+pub(crate) trait Carried {
+    fn over() -> Over;
+    fn dimension() -> String;
+}
+impl<U: Dimension> Carried for U {
+    fn over() -> Over {
+        Over::Body
+    }
+    fn dimension() -> String {
+        dimension::<U>()
+    }
+}
+impl<C: SiteClass, U: Dimension> Carried for PerSite<C, U> {
+    fn over() -> Over {
+        Over::Every(C::CLASS)
+    }
+    fn dimension() -> String {
+        dimension::<U>()
     }
 }
 /// A route family at every site of class `C`: one column per site, from one space to another.
@@ -587,11 +666,11 @@ impl<'b, O, Q> Transfer<'b, O, Q> {
     }
 }
 /// A schema boundary's pair and the drive the boundary port supplies at each stage.
-pub struct BoundaryWater<'b> {
-    pub route: Pair<'b, Boundary, Water>,
-    pub drive: ReadPort<'b, Boundary, Rate<Water>>,
+pub struct BoundaryWater<'b, O = Boundary> {
+    pub route: Pair<'b, O, Water>,
+    pub drive: ReadPort<'b, O, Rate<Water>>,
 }
-impl<'b> BoundaryWater<'b> {
+impl<'b, O> BoundaryWater<'b, O> {
     pub(crate) fn named(boundary: &'static str) -> Self {
         Self {
             route: Pair {
@@ -784,6 +863,7 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
                 dimension: finished.dimension,
                 modes: finished.modes.selector,
                 rate: finished.rate,
+                defines: false,
             },
             brand: PhantomData,
             kind: PhantomData,
@@ -874,6 +954,7 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
             kind,
             dimension: dimension::<U>(),
             set,
+            over: Over::Body,
         });
     }
     pub fn state<U: NonMaterial>(
@@ -998,6 +1079,51 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     pub fn residual<U: Dimension>(&mut self, slot: &AlgebraicSlot<'b, O, U>, residual: PureKernel<'b, O, U>) {
         self.attach(Obligation::Slot(slot.name), residual.data);
     }
+    /// Issues the outputs of an arrow the map draws from this owner, and records a law owed on each.
+    pub fn emit<P>(&mut self) -> P
+    where
+        P: Coupling<From = O, Side = Defines<'b, O>>,
+    {
+        let (payload, fields) = catalog::issued::<P>();
+        for field in fields {
+            self.data.slots.push(SlotDeclaration {
+                name: field.name,
+                kind: SlotKind::Defined,
+                dimension: field.dimension,
+                set: AdmissibleSet::Finite,
+                over: field.over,
+            });
+        }
+        payload
+    }
+    /// The only way to read a coupling field, so every such read is a line of the map.
+    pub fn receive<P>(&self) -> P
+    where
+        P: Coupling<To = O, Side = Reads<'b, O>>,
+    {
+        catalog::issued::<P>().0
+    }
+    /// A validity range on `value` judges the row.
+    pub fn define<U: Dimension>(&mut self, output: &Output<'b, O, U>, value: PureKernel<'b, O, U>) {
+        self.attach(Obligation::Defined(output.name), value.data.defining(output.name));
+    }
+    /// One kernel for the class, one row per site.
+    pub fn define_at<C: SiteClass, U: Dimension>(
+        &mut self,
+        output: &Output<'b, O, PerSite<C, U>>,
+        value: PureKernel<'b, O, U, C>,
+    ) {
+        self.attach(Obligation::Defined(output.name), value.data.defining(output.name));
+    }
+    pub(crate) fn owe_enclosure_pressure(&mut self) {
+        self.data.slots.push(SlotDeclaration {
+            name: ENCLOSURE_PRESSURE,
+            kind: SlotKind::Defined,
+            dimension: dimension::<Pressure>(),
+            set: AdmissibleSet::Finite,
+            over: Over::HeldEnclosures,
+        });
+    }
     pub fn transfer_at<C: SiteClass, Q>(
         &mut self,
         route: &SiteRoute<'b, O, C, Q>,
@@ -1088,11 +1214,14 @@ pub(crate) struct SlotDeclaration {
     pub(crate) kind: SlotKind,
     pub(crate) dimension: String,
     pub(crate) set: AdmissibleSet,
+    pub(crate) over: Over,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum SlotKind {
     Memory,
     Algebraic,
+    /// Only a definition serves it and only a port reads it, so a plain slot of its name does neither.
+    Defined,
 }
 pub(crate) struct ModeDeclaration {
     pub(crate) name: &'static str,
@@ -1118,8 +1247,17 @@ pub(crate) struct LawDeclaration {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Obligation {
     Slot(&'static str),
+    Defined(&'static str),
     Family(Family),
     Boundary(&'static str),
+}
+impl Obligation {
+    pub(crate) fn local(self) -> &'static str {
+        match self {
+            Obligation::Slot(name) | Obligation::Defined(name) | Obligation::Boundary(name) => name,
+            Obligation::Family(family) => family.name(),
+        }
+    }
 }
 pub(crate) struct GuardDeclaration {
     pub(crate) zero: KernelData,

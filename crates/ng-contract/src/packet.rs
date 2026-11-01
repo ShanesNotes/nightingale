@@ -1,4 +1,4 @@
-use crate::body::{Bound, Instance, Layout, ParameterId, Target};
+use crate::body::{Bound, Column, Instance, Layout, ParameterId, Target};
 use crate::chance::{holds_a_period, sampled_unit};
 use crate::identity::{Canonical, Seal};
 use crate::law::Op;
@@ -766,18 +766,21 @@ impl CompiledBody {
         }
         (behind, laws)
     }
-    /// Whether a row reads the body: it is an amount, or the laws behind it read an amount or a drive. A row that
-    /// does not is a function of parameters alone, held forcings and draws included, so an anchor on it would be
-    /// a parameter's value (SRS section 2, I14).
+    /// Whether a row reads the body: it is an amount a law moves, or the laws behind it read one or a drive. A row
+    /// that does not is a function of parameters alone, held forcings and draws included, and a held pool is the
+    /// packet's own start, so an anchor on either would be a parameter's value (SRS section 2, I14).
     fn reads_the_body(&self, row: RowId) -> bool {
-        let amount = |at: usize| matches!(self.layout.rows[at].kind, RowKind::Amount { .. });
+        let moved = |at: usize| {
+            let moves = |column: &Column| column.terms.iter().any(|(row, _)| row.index() == at);
+            self.layout.columns.iter().any(moves)
+        };
         let (_, laws) = self.behind(row, true);
         let reads = laws.iter().flat_map(|law| &law.inputs);
-        amount(row.index())
+        moved(row.index())
             || reads.into_iter().any(|input| match *input {
                 Bound::Boundary(_) => true,
-                Bound::Unknown(unknown) => amount(unknown.index()),
-                Bound::Parameter(_) | Bound::Draw(_) | Bound::Forcing(_) => false,
+                Bound::Unknown(unknown) => moved(unknown.index()),
+                Bound::Parameter(_) | Bound::Draw(_) | Bound::Forcing(_) | Bound::Gauge => false,
             })
     }
     /// A pulsatile row is one its block's rate class puts in the wave or beat band.

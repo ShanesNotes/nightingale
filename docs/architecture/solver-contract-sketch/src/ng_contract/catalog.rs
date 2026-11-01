@@ -14,8 +14,9 @@
 //! the route has a declared home, not that the outside system is simulated.
 //!
 //! The counts are compiler-checked below. `tools/verify` reruns `evidence/census-check.py`,
-//! which compares these rows line by line with `docs/atlas/coupling-map.md`, so an added,
-//! removed or relabelled arrow fails the build rather than waiting for a review.
+//! which compares the crate's rows line by line with `docs/atlas/coupling-map.md` and these rows
+//! with the crate's byte for byte, so an added, removed or relabelled arrow fails the build
+//! rather than waiting for a review.
 //!
 use super::*;
 use core::marker::PhantomData;
@@ -43,9 +44,6 @@ pub trait Coupling: sealed::Coupling {
     type From: System;
     type To: System;
     type Side: Side;
-    const LINE: u16;
-    const LABEL: &'static str;
-    const DISPOSITION: Disposition;
 }
 
 #[derive(Clone, Copy)]
@@ -70,17 +68,29 @@ impl Disposition {
         )
     }
 }
-/// One census row: a map arrow and its disposition, with the payload's field names.
+/// One census row: a map arrow and its disposition.
 #[derive(Clone, Copy)]
 pub struct CensusRow {
     pub line: u16,
-    pub from: &'static str,
-    pub to: &'static str,
-    pub label: &'static str,
     pub disposition: Disposition,
-    pub payload: Option<&'static str>,
-    pub fields: &'static [&'static str],
-    pub slice_incident: bool,
+    pub sender_in_slice: bool,
+    pub receiver_in_slice: bool,
+}
+impl CensusRow {
+    const fn incident(&self) -> bool {
+        self.sender_in_slice || self.receiver_in_slice
+    }
+    /// A disposition says which ends of its arrow run in the slice.
+    const fn ends_fit(&self) -> bool {
+        let (sender, receiver) = (self.sender_in_slice, self.receiver_in_slice);
+        match self.disposition {
+            Disposition::Live => sender && receiver,
+            Disposition::ExternalInput => !sender && receiver,
+            Disposition::ExternalSink => sender && !receiver,
+            Disposition::OutsideSlice { .. } => !sender && !receiver,
+            Disposition::AnatomyRelation { .. } | Disposition::Unresolved { .. } => self.incident(),
+        }
+    }
 }
 
 /// Arrows in the map's "Direct couplings" graph. The census array's type has this length.
@@ -109,35 +119,27 @@ macro_rules! coupling_map {
             type From = $from;
             type To = $to;
             type Side = S;
-            const LINE: u16 = $line;
-            const LABEL: &'static str = $label;
-            const DISPOSITION: Disposition = coupling_map!(@disposition $kind);
         }
     };
     (@row relation $why:literal $line:literal $from:ident $to:ident $label:literal) => {
-        coupling_map!(@census $line $from $to $label, Disposition::AnatomyRelation { reason: $why }, None, &[])
+        coupling_map!(@census $line $from $to, Disposition::AnatomyRelation { reason: $why })
     };
     (@row outside $why:literal $line:literal $from:ident $to:ident $label:literal) => {
-        coupling_map!(@census $line $from $to $label, Disposition::OutsideSlice { reason: $why }, None, &[])
+        coupling_map!(@census $line $from $to, Disposition::OutsideSlice { reason: $why })
     };
     (@row unresolved $why:literal $line:literal $from:ident $to:ident $label:literal) => {
-        coupling_map!(@census $line $from $to $label, Disposition::Unresolved { reason: $why }, None, &[])
+        coupling_map!(@census $line $from $to, Disposition::Unresolved { reason: $why })
     };
     (@row $kind:ident ($name:ident { $($field:ident: $unit:ty),+ $(,)? })
         $line:literal $from:ident $to:ident $label:literal) => {
-        coupling_map!(@census $line $from $to $label, coupling_map!(@disposition $kind),
-            Some(stringify!($name)), &[$(stringify!($field)),+])
+        coupling_map!(@census $line $from $to, coupling_map!(@disposition $kind))
     };
-    (@census $line:literal $from:ident $to:ident $label:literal, $disposition:expr, $payload:expr, $fields:expr) => {
+    (@census $line:literal $from:ident $to:ident, $disposition:expr) => {
         CensusRow {
             line: $line,
-            from: <$from as System>::CARD,
-            to: <$to as System>::CARD,
-            label: $label,
             disposition: $disposition,
-            payload: $payload,
-            fields: $fields,
-            slice_incident: <$from as System>::IN_SLICE || <$to as System>::IN_SLICE,
+            sender_in_slice: <$from as System>::IN_SLICE,
+            receiver_in_slice: <$to as System>::IN_SLICE,
         }
     };
     (@disposition live) => { Disposition::Live };
@@ -223,7 +225,7 @@ const fn count(mapped: bool, slice_only: bool) -> usize {
     let mut n = 0;
     while i < MAP_EDGES {
         let row = &CENSUS[i];
-        if row.disposition.is_mapped() == mapped && (row.slice_incident || !slice_only) {
+        if row.disposition.is_mapped() == mapped && (row.incident() || !slice_only) {
             n += 1;
         }
         i += 1;
@@ -243,6 +245,7 @@ const _: () = {
     let mut i = 0;
     while i < MAP_EDGES {
         assert!(CENSUS[i].line as usize == 77 + i);
+        assert!(CENSUS[i].ends_fit());
         i += 1;
     }
 };

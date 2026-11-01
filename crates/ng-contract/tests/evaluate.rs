@@ -1,3 +1,4 @@
+use ng_contract::catalog::{CapillaryAndVenousPressure, Defines, Reads};
 use ng_contract::*;
 
 fn at() -> Result<Position, AdmissionError> {
@@ -379,15 +380,21 @@ fn derivatives_match_central_differences_on_nearly_nearly_every_operator() -> Re
         Measure::<Dimensionless>::new(-0.2)?,
         "synthetic",
     )?;
-    let third = RowKind::Algebraic(LawName {
-        owner: "NS",
-        local: "third",
-    });
+    let third = RowKind::Algebraic(
+        LawName {
+            owner: "NS",
+            local: "third",
+        }
+        .into(),
+    );
     packet.start(third, Measure::<Pressure>::new(1.5)?, "synthetic")?;
-    let pace = RowKind::Algebraic(LawName {
-        owner: "NS",
-        local: "pace",
-    });
+    let pace = RowKind::Algebraic(
+        LawName {
+            owner: "NS",
+            local: "pace",
+        }
+        .into(),
+    );
     packet.start(pace, Measure::<Rate<Dimensionless>>::new(0.7)?, "synthetic")?;
     packet.start(
         memory("set point"),
@@ -395,14 +402,18 @@ fn derivatives_match_central_differences_on_nearly_nearly_every_operator() -> Re
         "synthetic",
     )?;
     let bench = Bench::admitted(body, packet, BoundaryPort::new(Vec::new())?)?;
+    differences_agree(&bench, &[0.3, -0.1, 0.2, 0.0, 0.0]);
+    Ok(())
+}
+
+fn differences_agree(bench: &Bench, tangent: &[f64]) -> Vec<Vec<f64>> {
     let problem = bench.problem();
     let ticket = bench.ticket(SECOND).expect("a ticket");
     let time = ticket.at(SECOND).expect("an offset");
     let shift = ticket.shift(SECOND).expect("a shift");
     let rows = bench.body.rows().len();
     let mut workspace = problem.workspace();
-    let tangent = [0.3, -0.1, 0.2, 0.0, 0.0];
-    workspace.derivative_mut().copy_from_slice(&tangent);
+    workspace.derivative_mut().copy_from_slice(tangent);
     let start = workspace.unknowns_mut().to_vec();
     let analytic = dense(
         problem
@@ -415,7 +426,7 @@ fn derivatives_match_central_differences_on_nearly_nearly_every_operator() -> Re
     for unknown in 0..rows {
         let mut residual_at = |offset: f64, tangent_offset: f64| -> Vec<f64> {
             workspace.unknowns_mut().copy_from_slice(&start);
-            workspace.derivative_mut().copy_from_slice(&tangent);
+            workspace.derivative_mut().copy_from_slice(tangent);
             workspace.unknowns_mut()[unknown] += offset;
             workspace.derivative_mut()[unknown] += tangent_offset;
             let stage = problem.evaluate(&workspace.point(time)).expect("evaluated");
@@ -432,6 +443,116 @@ fn derivatives_match_central_differences_on_nearly_nearly_every_operator() -> Re
             );
         }
     }
+    analytic
+}
+
+fn two_beds() -> Result<(CompiledBody, [SiteId; 2]), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let vessel = map.site::<VesselSegment>("vessel", at()?);
+    let a = map.site::<CapillaryBed>("a", at()?);
+    let b = map.site::<CapillaryBed>("b", at()?);
+    for site in [vessel.id(), a.id(), b.id()] {
+        map.contain(root.id(), site);
+    }
+    for (from, to) in [(vessel.id(), a.id()), (a.id(), b.id()), (b.id(), vessel.id())] {
+        map.connect(Network::Vascular, from, to);
+    }
+    let mut schema = Schema::new(map.finish()?)?;
+    for space in [Space::Lumen, Space::Cells] {
+        schema.leave_out(space, "not in this bench");
+    }
+    let body = assemble(schema, |mut body| {
+        let class = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let (mut cv, _ports) = body.cardiovascular()?.parts();
+        let out: CapillaryAndVenousPressure<Defines<'_, Cardiovascular>> = cv.emit();
+        let held =
+            cv.site_parameter::<CapillaryBed, Pressure>(ParameterKey::new("pressure"), Admissible::finite());
+        for output in [&out.capillary_pressure, &out.venous_pressure] {
+            let value = cv.site_kernel(|mut k| {
+                let value = k.site_parameter(&held);
+                k.finish(value, cv.every_mode(), class)
+            });
+            cv.define_at(output, value);
+        }
+        body.add(cv.finish());
+        let (mut fl, ports) = body.fluids()?.parts();
+        let route = ports.starling(&mut fl);
+        let read: CapillaryAndVenousPressure<Reads<'_, Fluids>> = fl.receive();
+        let kf = fl.site_parameter::<CapillaryBed, Conductance<Water>>(
+            ParameterKey::new("kf"),
+            Admissible::nonnegative(),
+        );
+        let flow = fl.site_kernel(|mut k| {
+            let pressure = k.at_site(&read.capillary_pressure);
+            let conductance = k.site_parameter(&kf);
+            let flow = k.conductance_flow(conductance, pressure);
+            k.finish(flow, fl.every_mode(), class)
+        });
+        fl.transfer_at(&route, flow);
+        body.add(fl.finish());
+        body.compile()
+    })?;
+    Ok((body, [a.id(), b.id()]))
+}
+
+#[test]
+fn a_coupling_field_leans_on_its_own_beds_row_alone() -> Result<(), InitializationFailure> {
+    let (body, [a, b]) = two_beds()?;
+    let mut packet = ParameterPacket::new();
+    let bed_values = [(a, 2.0, 3.0), (b, 5.0, 7.0)];
+    for (site, kf, pressure) in bed_values {
+        let site_binding = Binding::Site(site);
+        let conductance = Measure::<Conductance<Water>>::new(kf)?;
+        packet.synthetic(ParameterKey::new("kf"), site_binding, conductance, "synthetic")?;
+        let pressure = Measure::<Pressure>::new(pressure)?;
+        packet.synthetic(ParameterKey::new("pressure"), site_binding, pressure, "synthetic")?;
+    }
+    let field = |local, site| {
+        let law = LawName { owner: "CV", local };
+        RowKind::Algebraic(Slot {
+            law,
+            site: Some(site),
+        })
+    };
+    let plasma = |site| RowKind::Amount {
+        site,
+        space: Space::Plasma,
+    };
+    let interstitium = |site| RowKind::Amount {
+        site,
+        space: Space::Interstitium,
+    };
+    for (site, _, pressure) in bed_values {
+        for local in ["capillary_pressure", "venous_pressure"] {
+            packet.start(
+                field(local, site),
+                Measure::<Pressure>::new(pressure)?,
+                "synthetic",
+            )?;
+        }
+        for pool in [plasma(site), interstitium(site)] {
+            packet.start(pool, Measure::<Water>::new(100.0)?, "synthetic")?;
+        }
+    }
+    let bench = Bench::admitted(body, packet, BoundaryPort::new(Vec::new())?)?;
+    let at = |kind: RowKind| {
+        let row = bench.body.rows().iter().find(|row| row.kind() == kind);
+        row.expect("a row").unknown().index()
+    };
+    let tangent = vec![0.0; bench.body.rows().len()];
+    let jacobian = differences_agree(&bench, &tangent);
+    let wall = |pool, local, site| jacobian[at(pool)][at(field(local, site))];
+    for (site, kf, _) in bed_values {
+        assert_eq!(wall(plasma(site), "capillary_pressure", site), kf);
+        assert_eq!(wall(interstitium(site), "capillary_pressure", site), -kf);
+        assert_eq!(
+            wall(field("capillary_pressure", site), "capillary_pressure", site),
+            1.0
+        );
+    }
+    assert_eq!(wall(plasma(a), "capillary_pressure", b), 0.0);
+    assert_eq!(wall(plasma(b), "capillary_pressure", a), 0.0);
     Ok(())
 }
 

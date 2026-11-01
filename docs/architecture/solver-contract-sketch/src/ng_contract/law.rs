@@ -446,11 +446,17 @@ impl<'b, O> FragmentBuilder<'b, O> {
     pub fn residual<U>(&mut self, _slot: &AlgebraicSlot<'b, O, U>, _residual: PureKernel<'b, O, U>) {
         todo!()
     }
-    /// Defines one published coupling field.
+    /// The law on a whole-body output: its row minus `value`, so a loop of couplings is a coupled
+    /// residual. A validity range on `value` judges the row.
     pub fn define<U>(&mut self, _output: &Output<'b, O, U>, _value: PureKernel<'b, O, U>) {
         todo!()
     }
-    /// Issues the definition capabilities of a coupling-map edge this owner emits.
+    /// The law on a per-site output: one kernel for the class, one row per site.
+    pub fn define_at<C: SiteClass, U>(&mut self, _output: &Output<'b, O, PerSite<C, U>>, _value: PureKernel<'b, O, U, C>) {
+        todo!()
+    }
+    /// Issues the definition capabilities of a coupling-map edge this owner emits, and records a law
+    /// owed on each field.
     pub fn emit<P>(&mut self) -> P
     where
         P: Coupling<From = O, Side = Defines<'b, O>>,
@@ -459,7 +465,7 @@ impl<'b, O> FragmentBuilder<'b, O> {
     }
     /// Issues read capabilities for a coupling-map edge drawn TO this owner. Nothing else is readable
     /// across owners, so every system-to-system signal is a line of the map.
-    pub fn receive<P>(&mut self) -> P
+    pub fn receive<P>(&self) -> P
     where
         P: Coupling<To = O, Side = Reads<'b, O>>,
     {

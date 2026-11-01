@@ -800,11 +800,95 @@
 //!     RunIdentity::new(model, packet, seed, resolution)
 //! }
 //! ```
+//! Only the receiver the coupling map draws reads an arrow: RN cannot read what CV sends NS.
+//! ```compile_fail,E0271
+//! use ng_contract::{catalog::*, *};
+//! fn wire<'b>(laws: &mut FragmentBuilder<'b, Renal>) {
+//!     let _stretch = laws.receive::<BaroreceptorAfferents<_>>();
+//! }
+//! ```
+//! ```
+//! use ng_contract::{catalog::*, *};
+//! fn wire<'b>(laws: &mut FragmentBuilder<'b, Nervous>) -> BaroreceptorAfferents<Reads<'b, Nervous>> {
+//!     laws.receive::<BaroreceptorAfferents<_>>()
+//! }
+//! ```
+//! Only the sender the coupling map draws emits an arrow: NS cannot define what CV sends.
+//! ```compile_fail,E0271
+//! use ng_contract::{catalog::*, *};
+//! fn wire<'b>(laws: &mut FragmentBuilder<'b, Nervous>) {
+//!     let _stretch = laws.emit::<BaroreceptorAfferents<_>>();
+//! }
+//! ```
+//! ```
+//! use ng_contract::{catalog::*, *};
+//! fn wire<'b>(laws: &mut FragmentBuilder<'b, Cardiovascular>) -> BaroreceptorAfferents<Defines<'b, Cardiovascular>> {
+//!     laws.emit::<BaroreceptorAfferents<_>>()
+//! }
+//! ```
+//! A coupling's ports come only from `emit` and `receive`: no one outside the contract can make the token.
+//! ```compile_fail,E0603
+//! use ng_contract::{catalog::*, *};
+//! fn forged<'b>() -> BaroreceptorAfferents<Reads<'b, Renal>> {
+//!     BaroreceptorAfferents::issue(ng_contract::catalog::private::Token(())).0
+//! }
+//! ```
+//! ```
+//! use ng_contract::{catalog::*, *};
+//! fn granted<'b>(laws: &FragmentBuilder<'b, Nervous>) -> BaroreceptorAfferents<Reads<'b, Nervous>> {
+//!     laws.receive()
+//! }
+//! ```
+//! A per-site field takes a kernel of its site class.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn flat<'b>(laws: &mut FragmentBuilder<'b, Cardiovascular>,
+//!     field: &Output<'b, Cardiovascular, PerSite<CapillaryBed, Pressure>>,
+//!     value: PureKernel<'b, Cardiovascular, Pressure>) {
+//!     laws.define_at(field, value);
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn per_bed<'b>(laws: &mut FragmentBuilder<'b, Cardiovascular>,
+//!     field: &Output<'b, Cardiovascular, PerSite<CapillaryBed, Pressure>>,
+//!     value: PureKernel<'b, Cardiovascular, Pressure, CapillaryBed>) {
+//!     laws.define_at(field, value);
+//! }
+//! ```
+//! A held stand-in cannot enter the body without declaring what it supplies.
+//! ```compile_fail,E0061
+//! use ng_contract::*;
+//! fn undeclared<'b>(body: &mut Assembly<'b>) -> Result<HeldScope<'b, Endocrine>, AdmissionError> {
+//!     body.hold::<Endocrine>()
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn declared<'b>(body: &mut Assembly<'b>) -> Result<HeldScope<'b, Endocrine>, AdmissionError> {
+//!     body.hold(HeldDeclaration::new(vec![], vec![], "no surrogate route yet"))
+//! }
+//! ```
+//! A card the slice runs is never held.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn stood_in<'b>(body: &mut Assembly<'b>, declaration: HeldDeclaration<Cardiovascular>)
+//!     -> Result<HeldScope<'b, Cardiovascular>, AdmissionError> {
+//!     body.hold(declaration)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn run<'b>(body: &mut Assembly<'b>) -> Result<CardiovascularScope<'b>, AdmissionError> {
+//!     body.cardiovascular()
+//! }
+//! ```
 
 mod admission;
 mod anatomy;
 mod body;
 mod boundary;
+pub mod catalog;
 mod chance;
 mod compensated;
 mod compile;

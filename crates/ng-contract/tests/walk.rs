@@ -1,7 +1,8 @@
+use ng_contract::catalog::{BaroreceptorAfferents, CapillaryAndVenousPressure, Defines, Reads};
 use ng_contract::*;
 
 // The signature walk (docs/architecture/solver-contract-sketch/src/signature_walk.rs): step 0 with only
-// the crate path changed, then steps 1, 1b, 1c, 1d and 2, each change marked with the ticket that restores it.
+// the crate path changed, then steps 1, 1b, 1c, 1d, 1e and 2, each change marked with the ticket that restores it.
 fn anatomy() -> Result<Schema, AdmissionError> {
     let at = |axial: f64| -> Result<Position, AdmissionError> {
         Ok(Position::new(
@@ -33,9 +34,8 @@ fn anatomy() -> Result<Schema, AdmissionError> {
     }
     map.connect(Network::Vascular, heart.id(), lung.id());
     map.connect(Network::Vascular, lung.id(), heart.id());
-    let pleural = Compliance::Elastic {
-        elastance: ParameterKey::new("pleura.elastance"),
-        unstressed: ParameterKey::new("pleura.unstressed"),
+    let pleural = Compliance::Held {
+        card: Respiratory::CARD,
     };
     map.enclose(&pleura, &[lung.id()], pleural);
     map.served_by(lung.id(), &thoracic, Afferent::Nociceptive);
@@ -45,9 +45,7 @@ fn anatomy() -> Result<Schema, AdmissionError> {
 
 fn baroreflex<'b>(scope: NervousScope<'b>) -> Result<Fragment<'b, Nervous>, AdmissionError> {
     let (mut laws, _transmitters) = scope.parts();
-    // 09 restores the catalog's carotid sinus stretch; a fixture parameter stands in for it.
-    let stretch_input =
-        laws.parameter::<Dimensionless>(ParameterKey::new("fixture.stretch"), Admissible::finite());
+    let afferents: BaroreceptorAfferents<Reads<'b, Nervous>> = laws.receive();
     let filter = laws.state::<Dimensionless>("afferent-filter", Admissible::unit_interval());
     let set_point = laws.set_point::<Dimensionless>("stretch-set-point", Admissible::unit_interval());
     let chronic = laws.parameter(
@@ -61,7 +59,7 @@ fn baroreflex<'b>(scope: NervousScope<'b>) -> Result<Fragment<'b, Nervous>, Admi
         RateClass::new(RateBand::Hours, 3_600_000_000_000)?,
     );
     let relax = laws.kernel(|mut k| {
-        let stretch = k.parameter(&stretch_input);
+        let stretch = k.read(&afferents.carotid_sinus_stretch);
         let reference = k.state(&set_point);
         let error = k.deviation(stretch, reference);
         let target = k.logistic(error);
@@ -123,6 +121,29 @@ fn valve<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardiovascul
         });
         laws.residual(slot, residual);
     }
+    let afferents: BaroreceptorAfferents<Defines<'b, Cardiovascular>> = laws.emit();
+    let pressures: CapillaryAndVenousPressure<Defines<'b, Cardiovascular>> = laws.emit();
+    let stretch = laws.parameter::<Dimensionless>(ParameterKey::new("fixture.stretch"), Admissible::finite());
+    let pressure = laws.site_parameter::<CapillaryBed, Pressure>(
+        ParameterKey::new("fixture.bed-pressure"),
+        Admissible::finite(),
+    );
+    for output in [&afferents.carotid_sinus_stretch, &afferents.aortic_arch_stretch] {
+        let class = wave()?;
+        let value = laws.kernel(|mut k| {
+            let value = k.parameter(&stretch);
+            k.finish(value, laws.every_mode(), class)
+        });
+        laws.define(output, value);
+    }
+    for output in [&pressures.capillary_pressure, &pressures.venous_pressure] {
+        let class = wave()?;
+        let value = laws.site_kernel(|mut k| {
+            let value = k.site_parameter(&pressure);
+            k.finish(value, laws.every_mode(), class)
+        });
+        laws.define_at(output, value);
+    }
     let route = ports.circulation(&mut laws);
     let class = wave()?;
     let flow = laws.edge_kernel(|mut k| {
@@ -172,26 +193,15 @@ fn ectopy<'b>(laws: &mut FragmentBuilder<'b, Cardiovascular>) -> Result<(), Admi
 fn starling<'b>(scope: FluidsScope<'b>) -> Result<Fragment<'b, Fluids>, AdmissionError> {
     let (mut laws, ports) = scope.parts();
     let route = ports.starling(&mut laws);
+    let pressures: CapillaryAndVenousPressure<Reads<'b, Fluids>> = laws.receive();
     let kf = laws.site_parameter::<CapillaryBed, Conductance<Water>>(
         ParameterKey::new("fl.kf"),
         Admissible::nonnegative(),
     );
-    // 09 restores the catalog's capillary pressure and the enclosure's extravascular pressure; until
-    // then each side's pressure derives from its own water through a fixture elastance.
-    let e = laws
-        .site_parameter::<CapillaryBed, Elastance>(ParameterKey::new("fixture.e"), Admissible::positive());
     let minutes = RateClass::new(RateBand::Minutes, 60_000_000_000)?;
     let filtration = laws.site_kernel(|mut k| {
-        let plasma = k.at_site(&route.from_amount());
-        let interstitial = k.at_site(&route.to_amount());
-        let pv = k.volume(plasma);
-        let iv = k.volume(interstitial);
-        let pe = k.site_parameter(&e);
-        let ie = k.site_parameter(&e);
-        let inside = k.multiply(pe, pv);
-        let outside = k.multiply(ie, iv);
-        let inside = k.as_dimension::<_, Pressure>(inside);
-        let outside = k.as_dimension::<_, Pressure>(outside);
+        let inside = k.at_site(&pressures.capillary_pressure);
+        let outside = k.at_site(&ports.extravascular_pressure);
         let head = k.subtract(inside, outside);
         let conductance = k.site_parameter(&kf);
         let flow = k.conductance_flow(conductance, head);
@@ -201,20 +211,45 @@ fn starling<'b>(scope: FluidsScope<'b>) -> Result<Fragment<'b, Fluids>, Admissio
     Ok(laws.finish())
 }
 
-// 09 adds the held stand-ins and 10 the renal, receptor and boundary fragments; until then the bench
-// leaves out the spaces no law here moves.
+fn pleural_pressure<'b>(body: &mut Assembly<'b>) -> Result<(), AdmissionError> {
+    let declaration = HeldDeclaration::<Respiratory>::new(vec![], vec![], "arena fixture: a fixed pressure");
+    let (mut laws, ports) = body.hold(declaration)?.parts();
+    let held = laws.parameter::<Pressure>(ParameterKey::new("fixture.pleural"), Admissible::finite());
+    let class = RateClass::new(RateBand::Hours, 3_600_000_000_000)?;
+    let pressure = laws.site_kernel(|mut k| {
+        let value = k.parameter(&held);
+        k.finish(value, laws.every_mode(), class)
+    });
+    laws.define_at(&ports.enclosure_pressure, pressure);
+    body.add(laws.finish());
+    Ok(())
+}
+
+fn held<'b, S: OutsideSlice>(body: &mut Assembly<'b>, holds: Vec<Space>) -> Result<(), AdmissionError> {
+    let declaration = HeldDeclaration::<S>::new(vec![], holds, "arena fixture");
+    let (laws, _ports) = body.hold(declaration)?.parts();
+    body.add(laws.finish());
+    Ok(())
+}
+
+// 10 adds the renal, receptor and boundary fragments.
 fn compile() -> Result<CompiledBody, AdmissionError> {
-    let mut schema = anatomy()?;
-    schema.partial_volume(Measure::new(1.0)?)?;
-    schema.leave_out(Space::Cells, "no cell-water law before 10");
-    schema.leave_out(Space::Fluid, "no pleural law before 10");
-    assemble(schema, |mut body| {
+    assemble(anatomy()?, |mut body| {
         let heart = valve(body.cardiovascular()?)?;
         body.add(heart);
         let fluids = starling(body.fluids()?)?;
         body.add(fluids);
         let nerves = baroreflex(body.nervous()?)?;
         body.add(nerves);
+        pleural_pressure(&mut body)?;
+        held::<BloodChemistry>(&mut body, vec![Space::Cells])?;
+        held::<Metabolism>(&mut body, vec![])?;
+        held::<Musculoskeletal>(&mut body, vec![])?;
+        held::<Endocrine>(&mut body, vec![])?;
+        held::<Hepatic>(&mut body, vec![])?;
+        held::<Gastrointestinal>(&mut body, vec![])?;
+        held::<Immune>(&mut body, vec![])?;
+        held::<Hematology>(&mut body, vec![])?;
         body.compile()
     })
 }
@@ -228,15 +263,16 @@ fn the_walks_anatomy_passes_every_check() {
 fn the_adapted_walk_compiles() -> Result<(), AdmissionError> {
     let compiled = compile()?;
     let count = |kind: fn(&RowKind) -> bool| compiled.rows().iter().filter(|row| kind(&row.kind())).count();
-    assert_eq!(count(|kind| matches!(kind, RowKind::Amount { .. })), 7);
+    assert_eq!(count(|kind| matches!(kind, RowKind::Amount { .. })), 11);
     assert_eq!(count(|kind| matches!(kind, RowKind::Memory(_))), 3);
-    assert_eq!(count(|kind| matches!(kind, RowKind::Algebraic(_))), 2);
+    assert_eq!(count(|kind| matches!(kind, RowKind::Algebraic(_))), 11);
     let columns = |local| {
         (compiled.columns().iter())
             .filter(|column| column.origin().local == local)
             .count()
     };
     assert_eq!((columns("circulation"), columns("starling")), (5, 3));
-    assert_eq!(compiled.programs().len(), 8);
+    assert_eq!(compiled.programs().len(), 13);
+    assert_eq!(compiled.held().count(), OUTSIDE_SLICE);
     Ok(())
 }

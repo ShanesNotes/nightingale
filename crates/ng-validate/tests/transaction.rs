@@ -1500,7 +1500,7 @@ fn filter_packet() -> ParameterPacket<SyntheticFixture> {
         .expect("once");
     packet
         .start(
-            RowKind::Algebraic(name("reading")),
+            RowKind::Algebraic(name("reading").into()),
             measure::<Dimensionless>(3.0),
             "synthetic",
         )
@@ -1603,7 +1603,7 @@ fn an_algebraic_start_that_does_not_solve_is_refused_with_its_row() {
         .expect("once");
     packet
         .start(
-            RowKind::Algebraic(name("reading")),
+            RowKind::Algebraic(name("reading").into()),
             measure::<Dimensionless>(4.0),
             "synthetic",
         )
@@ -1677,14 +1677,14 @@ fn a_law_undefined_at_the_start_is_refused_by_its_name_at_admission() {
     }
     packet
         .start(
-            RowKind::Algebraic(name("level")),
+            RowKind::Algebraic(name("level").into()),
             measure::<Pressure>(0.0),
             "synthetic",
         )
         .expect("once");
     packet
         .start(
-            RowKind::Algebraic(name("reading")),
+            RowKind::Algebraic(name("reading").into()),
             measure::<Dimensionless>(1.0),
             "synthetic",
         )
@@ -1733,7 +1733,7 @@ fn a_solved_algebraic_value_outside_its_set_is_refused_with_its_row() {
         .expect("once");
     let (filter, reading) = (
         RowKind::Memory(name("filter")),
-        RowKind::Algebraic(name("reading")),
+        RowKind::Algebraic(name("reading").into()),
     );
     packet
         .start(filter, measure::<Dimensionless>(1.0), "synthetic")
@@ -2267,7 +2267,7 @@ fn newton_reaches_the_root(rate: f64, interval_ns: u64) {
         .expect("once");
     for start in [
         RowKind::Memory(name("memory")),
-        RowKind::Algebraic(name("reading")),
+        RowKind::Algebraic(name("reading").into()),
     ] {
         packet
             .start(start, measure::<Dimensionless>(1.0), "synthetic")
@@ -2482,7 +2482,7 @@ fn two_slot_packet() -> ParameterPacket<SyntheticFixture> {
     for slot in ["first", "second"] {
         packet
             .start(
-                RowKind::Algebraic(name(slot)),
+                RowKind::Algebraic(name(slot).into()),
                 measure::<Dimensionless>(0.0),
                 "synthetic",
             )
@@ -2600,7 +2600,7 @@ fn a_singular_row_is_named_by_the_fault_that_ends_the_run() {
         .expect("once");
     for (row, start) in [
         (RowKind::Memory(name("memory")), 1.0),
-        (RowKind::Algebraic(name("reading")), 0.0),
+        (RowKind::Algebraic(name("reading").into()), 0.0),
     ] {
         packet
             .start(row, measure::<Dimensionless>(start), "synthetic")
@@ -2742,7 +2742,7 @@ fn newton_applies_a_correction_too_small_to_read_as_a_change() {
     let name = |local| LawName { owner: "NS", local };
     for start in [
         RowKind::Memory(name("filter")),
-        RowKind::Algebraic(name("reading")),
+        RowKind::Algebraic(name("reading").into()),
     ] {
         packet
             .start(start, measure::<Dimensionless>(1.0), "synthetic")
@@ -2775,10 +2775,13 @@ fn a_stage_already_solved_needs_no_factorization() {
     })
     .expect("compiled");
     let mut packet = ParameterPacket::new();
-    let row = RowKind::Algebraic(LawName {
-        owner: "NS",
-        local: "reading",
-    });
+    let row = RowKind::Algebraic(
+        LawName {
+            owner: "NS",
+            local: "reading",
+        }
+        .into(),
+    );
     packet
         .start(row, measure::<Dimensionless>(0.0), "synthetic")
         .expect("once");

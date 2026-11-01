@@ -192,7 +192,7 @@ fn the_valid_body_lays_out_memory_then_algebraic_rows() -> Result<(), AdmissionE
         [
             RowKind::Memory(named("filter")),
             RowKind::Memory(named("gate")),
-            RowKind::Algebraic(named("pressure")),
+            RowKind::Algebraic(named("pressure").into()),
         ]
     );
     let unknowns: Vec<usize> = compiled.rows().iter().map(|row| row.unknown().index()).collect();

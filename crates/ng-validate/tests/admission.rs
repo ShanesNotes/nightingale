@@ -978,7 +978,7 @@ fn a_defect_that_overflows_is_refused_however_wide_the_tolerance() {
     packet.synthetic(SET, Binding::Body, set, NOTE).expect("once");
     let nervous = |local| LawName { owner: "NS", local };
     let filter = RowKind::Memory(nervous("filter"));
-    let reading = RowKind::Algebraic(nervous("reading"));
+    let reading = RowKind::Algebraic(nervous("reading").into());
     (packet.start(filter, measure::<Dimensionless>(1.7e308), NOTE)).expect("once");
     (packet.start(reading, measure::<Dimensionless>(0.0), NOTE)).expect("once");
     let parameters = body.bind(packet).expect("bound");
@@ -1265,7 +1265,7 @@ fn filter_packet(reading: f64) -> ParameterPacket<SyntheticFixture> {
     packet
         .start(filter, measure::<Dimensionless>(1.0), NOTE)
         .expect("once");
-    let row = RowKind::Algebraic(nervous("reading"));
+    let row = RowKind::Algebraic(nervous("reading").into());
     packet
         .start(row, measure::<Dimensionless>(reading), NOTE)
         .expect("once");
@@ -1280,7 +1280,7 @@ fn under_an_instant_only_algebraic_rows_move() {
     let Admitted { session, provenance } =
         admit_solved(&body, filter_packet(4.0), empty_port(), &core, &lens).expect("solved");
     let nervous = |local| LawName { owner: "NS", local };
-    let reading = RowKind::Algebraic(nervous("reading"));
+    let reading = RowKind::Algebraic(nervous("reading").into());
     assert_eq!(
         record(&provenance, ValueName::Start(reading)).provenance,
         ValueProvenance::Solved
@@ -1373,7 +1373,7 @@ fn an_instant_solve_stands_though_rounding_moves_a_row_inside_the_tolerance() {
             .expect("once");
         packet
             .start(
-                RowKind::Algebraic(nervous("reading")),
+                RowKind::Algebraic(nervous("reading").into()),
                 measure::<Dimensionless>(reading),
                 NOTE,
             )
@@ -1851,10 +1851,13 @@ fn a_workspace_of_another_shape_is_refused() {
 }
 
 fn boundary_row(local: &'static str) -> RowKind {
-    RowKind::Algebraic(LawName {
-        owner: "Boundary",
-        local,
-    })
+    RowKind::Algebraic(
+        LawName {
+            owner: "Boundary",
+            local,
+        }
+        .into(),
+    )
 }
 
 fn instant_packet(case: &PulsatileCase, row: RowKind, target: f64) -> ParameterPacket<SyntheticFixture> {
@@ -2171,7 +2174,7 @@ fn a_law_whose_row_is_a_parameter_read_cannot_carry_an_anchor() {
     };
     let refused = Some(AdmissionError::AnchorOnParameters { anchor: MEAN });
     assert_eq!(
-        core(Variant::PinnedRead, RowKind::Algebraic(name("read"))),
+        core(Variant::PinnedRead, RowKind::Algebraic(name("read").into())),
         refused
     );
     assert_eq!(

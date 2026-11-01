@@ -2,6 +2,7 @@ use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::{AdmissionError, Digest, Length, Measure, ParameterKey};
 use core::cmp::Reverse;
+use core::iter::successors;
 use core::marker::PhantomData;
 use core::ops::Range;
 
@@ -145,6 +146,11 @@ pub enum AnatomyDefect {
     OrphanSite {
         site: &'static str,
     },
+    /// What contains a site is in an enclosure that does not name the site, so the site would read the
+    /// wrong pressure or none.
+    TwoEnclosureChains {
+        site: &'static str,
+    },
     EnclosedTwice {
         site: &'static str,
     },
@@ -226,7 +232,7 @@ impl AnatomyBuilder {
         let facts = Facts::resolve(self)?;
         facts.check_relations()?;
         let tree = Tree::of(&facts)?;
-        let enclosure = Enclosure::of(&facts)?;
+        let enclosure = Enclosure::of(&facts, &tree)?;
         facts.check_circulation()?;
         Ok(Anatomy::lay_out(facts, tree, enclosure))
     }
@@ -465,7 +471,7 @@ struct Enclosure {
     compliance: Vec<Option<Compliance>>,
 }
 impl Enclosure {
-    fn of(facts: &Facts) -> Result<Self, AnatomyDefect> {
+    fn of(facts: &Facts, tree: &Tree) -> Result<Self, AnatomyDefect> {
         let count = facts.sites.len();
         let mut enclosed_by = vec![None; count];
         if let Some(site) = single_valued(
@@ -491,6 +497,20 @@ impl Enclosure {
         if let Some(space) = least_on_cycle(&enclosed_by) {
             return Err(AnatomyDefect::EnclosureCycle {
                 space: facts.key(space),
+            });
+        }
+        let agrees = |site: usize| {
+            let holder = tree.parent[site].and_then(|up| {
+                let inside = (facts.class(up) == Class::EnclosedSpace).then_some(up);
+                inside.or(enclosed_by[up])
+            });
+            holder.is_none_or(|space| {
+                successors(enclosed_by[site], |&at| enclosed_by[at]).any(|at| at == space)
+            })
+        };
+        if let Some(site) = (0..count).find(|&site| !agrees(site)) {
+            return Err(AnatomyDefect::TwoEnclosureChains {
+                site: facts.key(site),
             });
         }
         Ok(Self {
@@ -635,6 +655,29 @@ impl Anatomy {
 
     pub(crate) fn sites(&self) -> impl Iterator<Item = SiteId> + '_ {
         self.sites.iter().map(|site| site.id)
+    }
+
+    fn placed(&self, site: SiteId) -> Option<&Placed> {
+        let at = self.sites.binary_search_by_key(&site.key, |placed| placed.id.key);
+        at.ok()
+            .map(|at| &self.sites[at])
+            .filter(|placed| placed.id == site)
+    }
+
+    pub(crate) fn encloser(&self, site: SiteId) -> Option<(SiteId, Compliance)> {
+        let space = &self.sites[self.placed(site)?.enclosed_by?];
+        Some((space.id, space.compliance?))
+    }
+
+    pub(crate) fn compliance(&self, space: SiteId) -> Option<Compliance> {
+        self.placed(space)?.compliance
+    }
+
+    pub(crate) fn held_enclosures(&self) -> impl Iterator<Item = (SiteId, &'static str)> + '_ {
+        (self.sites.iter()).filter_map(|site| match site.compliance {
+            Some(Compliance::Held { card }) => Some((site.id, card)),
+            _ => None,
+        })
     }
 
     pub(crate) fn vascular(&self) -> impl Iterator<Item = (SiteId, SiteId)> + '_ {

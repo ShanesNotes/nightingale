@@ -1,4 +1,4 @@
-use crate::body::{Bound, ModeLayout};
+use crate::body::{Bound, Instance, ModeLayout, Target};
 use crate::boundary::{Delivery, DriveFrame, PendingInputs};
 use crate::chance::{HELD_DRAW, HELD_FACTOR};
 use crate::evaluate::{Inputs, Undefined};
@@ -41,9 +41,20 @@ impl InitializationRequest<'_> {
 }
 
 impl CompiledBody {
+    /// Whether the route's own law reads its drive. Another row may sense a drive, and moves nothing.
     fn reads_drive(&self, boundary: &str) -> bool {
-        (self.layout.instances.iter().flat_map(|instance| &instance.inputs))
-            .any(|input| matches!(input, Bound::Boundary(name) if *name == boundary))
+        let own = |instance: &&Instance| match instance.target {
+            Target::Column(column) => (self.layout.columns[column.index()].receipt)
+                .is_some_and(|receipt| receipt.boundary == boundary),
+            Target::Row(_) => false,
+        };
+        (self
+            .layout
+            .instances
+            .iter()
+            .filter(own)
+            .flat_map(|instance| &instance.inputs))
+        .any(|input| matches!(input, Bound::Boundary(name) if *name == boundary))
     }
     pub(crate) fn check_delivery(
         &self,

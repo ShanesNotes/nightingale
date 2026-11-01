@@ -34,6 +34,10 @@ impl CompiledBody {
     ) -> Result<ObservationLens, AdmissionError> {
         todo!()
     }
+    /// The cards held, in card order.
+    pub fn held(&self) -> Vec<&'static str> {
+        todo!()
+    }
     /// Conserved combinations derived from incidence and balanced reactions (see `ConservedBasis`).
     pub fn conserved_basis(&self) -> &ConservedBasis {
         todo!()
@@ -109,7 +113,7 @@ pub struct ColumnId {
 pub enum RowKind {
     Amount { site: SiteId, space: Space },
     Memory { owner: &'static str, local: &'static str },
-    Algebraic { owner: &'static str, local: &'static str },
+    Algebraic { owner: &'static str, local: &'static str, site: Option<SiteId> },
 }
 /// Stable row identity in the compiled equation layout.
 #[derive(Clone, Copy)]

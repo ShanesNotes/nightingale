@@ -1,34 +1,36 @@
 use crate::body::{
     Binding, Block, Bound, Code, Column, ColumnId, CompiledBody, Context, ForcingLayout, GuardLayout,
     HazardLayout, Instance, Layout, ModeLayout, ParameterId, ParameterSlot, Program, ProgramId, Receipt, Row,
-    RowId, RowKind, Sparsity, StreamLayout, Target, UnknownId,
+    RowId, RowKind, Slot, Sparsity, StreamLayout, Target, UnknownId,
 };
 use crate::chance::key_word;
 use crate::conservation::conserved_basis;
 use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::law::{
-    End, Family, FragmentData, GuardDeclaration, Input, KernelData, ModeDeclaration, Obligation, Op,
+    End, Family, FragmentData, GuardDeclaration, Input, KernelData, ModeDeclaration, Obligation, Op, Over,
     ParameterContext, ParameterDeclaration, Selector, SlotDeclaration, SlotKind,
 };
 use crate::quantity::dimension;
-use crate::scope::{PoolRef, WaterBoundary};
+use crate::scope::{ENCLOSURE_PRESSURE, HeldCard, PoolRef, WaterBoundary};
 use crate::{
-    AdmissibleSet, AdmissionError, Anatomy, Boundary, BoundaryDirection, Class, CompileDefect, LawName,
-    ModeValue, Network, Owner, ParameterKey, Predicate, RateClass, Schema, Space, Water,
+    AdmissibleSet, AdmissionError, Anatomy, Boundary, BoundaryDirection, Class, CompileDefect, Compliance,
+    LawName, ModeValue, Network, Owner, ParameterKey, Predicate, RateClass, Schema, SiteId, Space, Water,
 };
 
 pub(crate) fn compile(
     schema: Schema,
     issued: Vec<&'static str>,
+    mut held: Vec<HeldCard>,
     mut fragments: Vec<FragmentData>,
 ) -> Result<CompiledBody, AdmissionError> {
     fragments.sort_by_key(|fragment| fragment.owner);
-    check_fragments(&issued, &fragments, &schema)?;
+    held.sort_by_key(|card| card.card);
+    check_fragments(&issued, &fragments, &schema, &held)?;
     check_boundaries(&schema)?;
     let declarations = declarations(&fragments)?;
     let unissued = FragmentData::empty(Boundary::CARD);
-    let owed = obligations(&fragments, &schema, &unissued)?;
+    let owed = obligations(&fragments, &schema, &held, &unissued)?;
     check_guards(&fragments)?;
     check_chance(&fragments)?;
     check_volume(&schema, &owed, &fragments)?;
@@ -40,9 +42,12 @@ pub(crate) fn compile(
         rows: &rows,
         reaches: &reaches,
         chance: &chance,
+        anatomy: &schema.anatomy,
+        held: &held,
     };
     let placement = place(&owed, &places)?;
-    check_orphans(&rows, &placement.columns)?;
+    check_holds(&rows, &schema, &held)?;
+    check_orphans(&rows, &placement.columns, &schema, &held)?;
     let guards = guards(&fragments, &places)?;
     let forced = forcing_parameters(&fragments);
     let (parameters, instances, guards) = bind(placement.instances, guards, &forced, &declarations);
@@ -70,6 +75,7 @@ pub(crate) fn compile(
         forcings,
         hazards,
         basis,
+        held,
     }))
 }
 
@@ -77,6 +83,7 @@ fn check_fragments(
     issued: &[&'static str],
     fragments: &[FragmentData],
     schema: &Schema,
+    held: &[HeldCard],
 ) -> Result<(), CompileDefect> {
     let added = |owner: &&'static str| fragments.iter().any(|fragment| fragment.owner == *owner);
     if let Some(&owner) = issued.iter().filter(|owner| !added(owner)).min() {
@@ -84,10 +91,16 @@ fn check_fragments(
     }
     fragments
         .iter()
-        .try_for_each(|fragment| check_names(fragment, schema))
+        .try_for_each(|fragment| check_names(fragment, schema, held))
 }
 
-fn check_names(fragment: &FragmentData, schema: &Schema) -> Result<(), CompileDefect> {
+fn route_owner(held: &[HeldCard], route: &'static str) -> &'static str {
+    (held.iter())
+        .find(|card| card.supplies.contains(&route))
+        .map_or(Boundary::CARD, |card| card.card)
+}
+
+fn check_names(fragment: &FragmentData, schema: &Schema, held: &[HeldCard]) -> Result<(), CompileDefect> {
     let named = |local| LawName {
         owner: fragment.owner,
         local,
@@ -99,7 +112,7 @@ fn check_names(fragment: &FragmentData, schema: &Schema) -> Result<(), CompileDe
         .chain(fragment.families.iter().map(|family| family.name()))
         .chain(
             (schema.boundaries.iter())
-                .filter(|_| fragment.owner == Boundary::CARD)
+                .filter(|boundary| route_owner(held, boundary.name) == fragment.owner)
                 .map(|boundary| boundary.name),
         )
         .collect();
@@ -167,11 +180,12 @@ struct Owed<'f> {
     name: LawName,
     fragment: &'f FragmentData,
     serves: Serves<'f>,
+    obligation: Obligation,
     laws: Vec<(Predicate, &'f KernelData)>,
 }
 #[derive(Clone, Copy)]
 enum Serves<'f> {
-    Slot,
+    Slot(Over),
     Family(Family),
     Boundary(&'f WaterBoundary),
 }
@@ -179,15 +193,27 @@ enum Serves<'f> {
 fn obligations<'f>(
     fragments: &'f [FragmentData],
     schema: &'f Schema,
+    held: &[HeldCard],
     unissued: &'f FragmentData,
 ) -> Result<Vec<Owed<'f>>, CompileDefect> {
+    let unheld = (schema.anatomy.held_enclosures())
+        .map(|(_, card)| card)
+        .filter(|card| !held.iter().any(|held| held.card == *card))
+        .min();
+    if let Some(owner) = unheld {
+        let local = ENCLOSURE_PRESSURE;
+        return Err(CompileDefect::OmittedLaw {
+            law: LawName { owner, local },
+        });
+    }
     let mut owed = Vec::new();
-    let boundary = (fragments.iter())
-        .find(|fragment| fragment.owner == Boundary::CARD)
-        .unwrap_or(unissued);
     for water in &schema.boundaries {
+        let owner = route_owner(held, water.name);
+        let fragment = (fragments.iter())
+            .find(|fragment| fragment.owner == owner)
+            .unwrap_or(unissued);
         owed.push(Owed::gather(
-            boundary,
+            fragment,
             water.name,
             Serves::Boundary(water),
             Obligation::Boundary(water.name),
@@ -195,11 +221,15 @@ fn obligations<'f>(
     }
     for fragment in fragments {
         for slot in &fragment.slots {
+            let obligation = match slot.kind {
+                SlotKind::Defined => Obligation::Defined(slot.name),
+                SlotKind::Memory | SlotKind::Algebraic => Obligation::Slot(slot.name),
+            };
             owed.push(Owed::gather(
                 fragment,
                 slot.name,
-                Serves::Slot,
-                Obligation::Slot(slot.name),
+                Serves::Slot(slot.over),
+                obligation,
             ));
         }
         for &family in &fragment.families {
@@ -210,6 +240,19 @@ fn obligations<'f>(
                 Obligation::Family(family),
             ));
         }
+    }
+    let unclaimed = (fragments.iter())
+        .flat_map(|fragment| fragment.laws.iter().map(|law| (fragment.owner, law.serves)))
+        .filter(|&(owner, serves)| {
+            !(owed.iter()).any(|owed| owed.name.owner == owner && owed.obligation == serves)
+        })
+        .map(|(owner, serves)| LawName {
+            owner,
+            local: serves.local(),
+        })
+        .min();
+    if let Some(law) = unclaimed {
+        return Err(CompileDefect::UnclaimedLaw { law });
     }
     owed.sort_by_key(|owed| owed.name);
     for owed in &owed {
@@ -237,6 +280,7 @@ impl<'f> Owed<'f> {
             },
             fragment,
             serves,
+            obligation,
             laws,
         }
     }
@@ -413,10 +457,25 @@ fn check_volume(schema: &Schema, owed: &[Owed], fragments: &[FragmentData]) -> R
     }
 }
 
+fn row_sites(anatomy: &Anatomy, owner: &'static str, over: Over) -> Vec<Option<SiteId>> {
+    match over {
+        Over::Body => vec![None],
+        Over::Every(class) => (anatomy.sites())
+            .filter(|site| site.class() == class)
+            .map(Some)
+            .collect(),
+        Over::HeldEnclosures => (anatomy.held_enclosures())
+            .filter(|&(_, card)| card == owner)
+            .map(|(site, _)| Some(site))
+            .collect(),
+    }
+}
+
 struct Rows {
     rows: Vec<Row>,
     amounts: Vec<PoolRef>,
-    slots: Vec<(LawName, usize)>,
+    slots: Vec<(Slot, usize)>,
+    defined: Vec<LawName>,
 }
 impl Rows {
     fn lay_out(schema: &Schema, fragments: &[FragmentData]) -> Self {
@@ -425,20 +484,24 @@ impl Rows {
             .filter(|&(_, space)| !left_out(space))
             .map(|(site, space)| PoolRef { site, space })
             .collect();
-        let mut slots: Vec<(SlotKind, LawName, AdmissibleSet, &String)> = (fragments.iter())
+        let mut slots: Vec<(SlotKind, Slot, AdmissibleSet, &String)> = (fragments.iter())
             .flat_map(|fragment| {
-                fragment.slots.iter().map(|slot| {
+                fragment.slots.iter().flat_map(|slot| {
                     let SlotDeclaration {
                         name,
                         kind,
                         dimension,
                         set,
+                        over,
                     } = slot;
-                    let name = LawName {
+                    let law = LawName {
                         owner: fragment.owner,
                         local: name,
                     };
-                    (*kind, name, *set, dimension)
+                    let sites = row_sites(&schema.anatomy, fragment.owner, *over);
+                    sites
+                        .into_iter()
+                        .map(move |site| (*kind, Slot { law, site }, *set, dimension))
                 })
             })
             .collect();
@@ -450,10 +513,10 @@ impl Rows {
             };
             (kind, AdmissibleSet::Nonnegative, dimension::<Water>())
         });
-        let slot_rows = slots.iter().map(|&(kind, name, set, dimension)| {
+        let slot_rows = slots.iter().map(|&(kind, slot, set, dimension)| {
             let kind = match kind {
-                SlotKind::Memory => RowKind::Memory(name),
-                SlotKind::Algebraic => RowKind::Algebraic(name),
+                SlotKind::Memory => RowKind::Memory(slot.law),
+                SlotKind::Algebraic | SlotKind::Defined => RowKind::Algebraic(slot),
             };
             (kind, set, dimension.clone())
         });
@@ -465,21 +528,40 @@ impl Rows {
                 dimension,
             })
             .collect();
-        let mut index: Vec<(LawName, usize)> = (slots.iter().enumerate())
+        let mut index: Vec<(Slot, usize)> = (slots.iter().enumerate())
             .map(|(at, slot)| (slot.1, amounts.len() + at))
             .collect();
         index.sort_unstable();
+        let defined = (slots.iter())
+            .filter(|slot| slot.0 == SlotKind::Defined)
+            .map(|slot| slot.1.law)
+            .collect();
         Self {
             rows,
             amounts,
             slots: index,
+            defined,
         }
     }
     fn amount(&self, pool: PoolRef) -> Option<usize> {
         self.amounts.binary_search(&pool).ok()
     }
-    fn slot(&self, name: LawName) -> usize {
-        self.slots[self.slots.partition_point(|entry| entry.0 < name)].1
+    fn slot(&self, law: LawName, site: Option<SiteId>) -> Option<usize> {
+        let find = |site| {
+            let found = self
+                .slots
+                .binary_search_by_key(&Slot { law, site }, |entry| entry.0);
+            found.ok().map(|at| self.slots[at].1)
+        };
+        find(None).or_else(|| find(site))
+    }
+    fn defined(&self, law: LawName, site: Option<SiteId>) -> Option<usize> {
+        self.defined.binary_search(&law).ok()?;
+        self.slot(law, site)
+    }
+    fn declared(&self, law: LawName, site: Option<SiteId>) -> usize {
+        self.slot(law, site)
+            .expect("a slot a law serves or reads is laid out at every site it stands over")
     }
 }
 
@@ -551,12 +633,15 @@ enum Address {
     Boundary(&'static str),
     Draw(usize),
     Forcing(usize),
+    Gauge,
 }
 
 struct Places<'a> {
     rows: &'a Rows,
     reaches: &'a Reaches,
     chance: &'a ChanceNames,
+    anatomy: &'a Anatomy,
+    held: &'a [HeldCard],
 }
 
 struct ChanceNames {
@@ -658,7 +743,7 @@ fn hazards(
                 sorted.partition_point(|known| *known < wanted)
             };
             hazards.push(HazardLayout {
-                integral: RowId::at(rows.slot(named(hazard.integral))),
+                integral: RowId::at(rows.declared(named(hazard.integral), None)),
                 stream: chance.stream(named(hazard.stream)),
                 variable: at,
                 leaves: value(hazard.leaves),
@@ -694,7 +779,12 @@ fn marked(
 }
 
 fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
-    let Places { rows, reaches, .. } = *places;
+    let Places {
+        rows,
+        reaches,
+        anatomy,
+        ..
+    } = *places;
     let mut placement = Placement {
         columns: Vec::new(),
         programs: Vec::new(),
@@ -702,7 +792,13 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
     };
     for law in owed {
         let targets = match law.serves {
-            Serves::Slot => vec![(Context::Body, Target::Row(RowId::at(rows.slot(law.name))))],
+            Serves::Slot(over) => row_sites(anatomy, law.name.owner, over)
+                .into_iter()
+                .map(|site| {
+                    let row = RowId::at(rows.declared(law.name, site));
+                    (site.map_or(Context::Body, Context::Site), Target::Row(row))
+                })
+                .collect(),
             Serves::Boundary(water) => {
                 let target = Target::Column(ColumnId::at(placement.columns.len()));
                 placement.columns.push(exterior(law.name, water, rows)?);
@@ -721,6 +817,16 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
             }
         };
         for &(_, kernel) in &law.laws {
+            if let Serves::Boundary(water) = law.serves {
+                let carried = kernel.code.iter().find_map(|op| match op {
+                    Op::Input(Input::Drive(route)) if *route != water.name => Some(*route),
+                    _ => None,
+                });
+                if let Some(route) = carried {
+                    let law = law.name;
+                    return Err(CompileDefect::DriveOfAnotherRoute { law, route });
+                }
+            }
             let program = ProgramId::at(placement.programs.len());
             placement.programs.push(Program {
                 id: program,
@@ -790,6 +896,7 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
         dimension,
         modes,
         rate,
+        defines,
     } = kernel;
     let mut validity: Vec<_> = (fragment.validity.iter())
         .filter(|(kernel, _)| kernel == id)
@@ -802,6 +909,7 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
         predicate: predicate(fragment, *modes),
         rate: *rate,
         validity,
+        defines: *defines,
     }
 }
 
@@ -815,12 +923,18 @@ fn addresses(
         rows,
         reaches,
         chance,
+        anatomy,
+        held,
     } = *places;
     let inputs = kernel.code.iter().filter_map(|op| match op {
         Op::Input(input) => Some(*input),
         _ => None,
     });
     let site = |end, from, to| if end == End::From { from } else { to };
+    let here = match context {
+        Context::Site(site) => Some(site),
+        Context::Body | Context::Edge { .. } => None,
+    };
     inputs
         .map(|input| {
             Ok(match (input, context) {
@@ -829,13 +943,34 @@ fn addresses(
                         owner: law.owner,
                         local,
                     };
-                    Address::Unknown(UnknownId::at(rows.slot(slot)))
+                    Address::Unknown(UnknownId::at(rows.declared(slot, here)))
                 }
+                (Input::Field(field), _) => {
+                    let row = rows.defined(field, here);
+                    let row = row.ok_or(CompileDefect::UnemittedField { law, field })?;
+                    Address::Unknown(UnknownId::at(row))
+                }
+                (Input::Extravascular, Context::Site(bed)) => match anatomy.encloser(bed) {
+                    None => Address::Gauge,
+                    Some((space, Compliance::Held { card })) => {
+                        let pressure = LawName {
+                            owner: card,
+                            local: ENCLOSURE_PRESSURE,
+                        };
+                        Address::Unknown(UnknownId::at(rows.declared(pressure, Some(space))))
+                    }
+                    Some((space, _)) => return Err(CompileDefect::NoEnclosurePressure { law, space }),
+                },
                 (Input::Amount(family, end), _) => {
                     let pool = reaches.pool(family, end, context);
                     Address::Unknown(UnknownId::at(rows.amount(pool).ok_or(left_out(law, pool))?))
                 }
-                (Input::Drive(name), _) => Address::Boundary(name),
+                (Input::Drive(route), _) => {
+                    if route_owner(held, route) != law.owner {
+                        return Err(CompileDefect::DriveOfAnotherRoute { law, route });
+                    }
+                    Address::Boundary(route)
+                }
                 (Input::Draw(local), _) => Address::Draw(chance.stream(LawName {
                     owner: law.owner,
                     local,
@@ -852,26 +987,75 @@ fn addresses(
                 (Input::EndParameter(key, end), Context::Edge { from, to }) => {
                     Address::Parameter(key, Binding::Site(site(end, from, to)))
                 }
-                (Input::SiteParameter(_) | Input::EdgeParameter(_) | Input::EndParameter(..), _) => {
-                    unreachable!("a kernel reads a site or edge parameter only in a context of its kind")
+                (
+                    Input::SiteParameter(_)
+                    | Input::EdgeParameter(_)
+                    | Input::EndParameter(..)
+                    | Input::Extravascular,
+                    _,
+                ) => {
+                    unreachable!("a kernel reads a site or edge entry only in a context of its kind")
                 }
             })
         })
         .collect()
 }
 
-fn check_orphans(rows: &Rows, columns: &[Column]) -> Result<(), CompileDefect> {
+fn holder(schema: &Schema, held: &[HeldCard], pool: PoolRef) -> Result<Option<&'static str>, CompileDefect> {
+    let enclosure = match schema.anatomy.compliance(pool.site) {
+        Some(Compliance::Held { card }) => Some(card),
+        _ => None,
+    };
+    let declared = (held.iter())
+        .filter(|card| card.holds.contains(&pool.space))
+        .map(|card| card.card);
+    let mut cards = enclosure.into_iter().chain(declared);
+    let first = cards.next();
+    match (first, cards.find(|&card| Some(card) != first)) {
+        (Some(first), Some(second)) => Err(CompileDefect::PoolHeldTwice {
+            cards: [first, second],
+            site: pool.site,
+            space: pool.space,
+        }),
+        _ => Ok(first),
+    }
+}
+
+fn check_holds(rows: &Rows, schema: &Schema, held: &[HeldCard]) -> Result<(), CompileDefect> {
+    let claims = (held.iter()).flat_map(|card| card.holds.iter().map(|&space| (card.card, space)));
+    for (card, space) in claims {
+        if !rows.amounts.iter().any(|pool| pool.space == space) {
+            return Err(CompileDefect::HeldNothing { card, space });
+        }
+    }
+    for (site, card) in schema.anatomy.held_enclosures() {
+        if !rows.amounts.iter().any(|pool| pool.site == site) {
+            let space = Space::Fluid;
+            return Err(CompileDefect::HeldNothing { card, space });
+        }
+    }
+    Ok(())
+}
+
+fn check_orphans(
+    rows: &Rows,
+    columns: &[Column],
+    schema: &Schema,
+    held: &[HeldCard],
+) -> Result<(), CompileDefect> {
     let mut moved = vec![false; rows.amounts.len()];
     for &(row, _) in columns.iter().flat_map(|column| &column.terms) {
         moved[row.index()] = true;
     }
-    match rows.amounts.iter().zip(&moved).find(|(_, moved)| !**moved) {
-        Some((pool, _)) => Err(CompileDefect::OrphanPool {
-            site: pool.site,
-            space: pool.space,
-        }),
-        None => Ok(()),
+    for (pool, moved) in rows.amounts.iter().zip(moved) {
+        let (site, space) = (pool.site, pool.space);
+        match (holder(schema, held, *pool)?, moved) {
+            (Some(card), true) => return Err(CompileDefect::HeldPoolMoved { card, site, space }),
+            (None, false) => return Err(CompileDefect::OrphanPool { site, space }),
+            _ => {}
+        }
     }
+    Ok(())
 }
 
 fn guards(
@@ -919,7 +1103,11 @@ fn bind(
         .flatten()
         .filter_map(|address| match *address {
             Address::Parameter(key, binding) => Some((key, binding)),
-            Address::Unknown(_) | Address::Boundary(_) | Address::Draw(_) | Address::Forcing(_) => None,
+            Address::Unknown(_)
+            | Address::Boundary(_)
+            | Address::Draw(_)
+            | Address::Forcing(_)
+            | Address::Gauge => None,
         })
         .chain(forced.iter().copied())
         .collect();
@@ -956,6 +1144,7 @@ fn bind(
         Address::Boundary(boundary) => Bound::Boundary(boundary),
         Address::Draw(stream) => Bound::Draw(stream),
         Address::Forcing(forcing) => Bound::Forcing(forcing),
+        Address::Gauge => Bound::Gauge,
     };
     let instances = (placed.into_iter())
         .map(|placed| {
@@ -1037,7 +1226,7 @@ fn sparsity(reads: Vec<Vec<UnknownId>>) -> Sparsity {
 fn algebraic_laws(rows: &[Row]) -> Vec<LawName> {
     (rows.iter())
         .filter_map(|row| match row.kind {
-            RowKind::Algebraic(law) => Some(law),
+            RowKind::Algebraic(slot) => Some(slot.law),
             _ => None,
         })
         .collect()
@@ -1253,7 +1442,7 @@ fn blocks(solved_by: &[RowId], reads: &[Vec<UnknownId>], rates: &[Vec<RateClass>
             let rate = (rows.iter().flat_map(|&row| &rates[row]))
                 .copied()
                 .min_by_key(|rate| (rate.maximum_ns(), rate.band()))
-                .expect("coverage and the orphan rule give every row at least one law");
+                .unwrap_or(RateClass::UNMOVED);
             Block {
                 rows: rows.into_iter().map(RowId::at).collect(),
                 unknowns,

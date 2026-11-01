@@ -294,13 +294,13 @@
 //!     body.hold::<Endocrine>()
 //! }
 //! ```
-//! Legal twin: the declaration names its supply routes and the feedback it does not answer.
+//! Legal twin: the declaration names its supply routes, the spaces it holds and where it holds.
 //! ```
 //! use solver_contract_sketch::ng_contract::*;
 //! fn declared<'b>(body: &mut Assembly<'b>) -> Result<HeldScope<'b, Endocrine>, AdmissionError> {
-//!     let declaration = HeldDeclaration::new(vec![HeldField::signal("surrogate AVP, angiotensin II, aldosterone, ANP release")],
-//!         vec![HeldSupply::new("surrogate ligand secretion", Book::Moiety(Moiety::HeldLigand))],
-//!         vec![79], "arena fixture: fixed gains, no adaptation")?;
+//!     let declaration = HeldDeclaration::new(
+//!         vec!["surrogate ligand secretion"], vec![],
+//!         "arena fixture: fixed gains, no adaptation");
 //!     body.hold::<Endocrine>(declaration)
 //! }
 //! ```

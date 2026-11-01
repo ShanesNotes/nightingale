@@ -95,7 +95,7 @@ pub struct CoverageManifest {
     _external_physiology: Vec<&'static str>,
 }
 impl CoverageManifest {
-    /// Every route on which a held stand-in supplies or removes material or energy (`HeldSupply`),
+    /// Every route on which a held stand-in supplies or removes material or energy (its `supplies`),
     /// in declaration order.
     pub fn held_routes(&self) -> &[HeldRoute] {
         todo!()
