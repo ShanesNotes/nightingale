@@ -49,6 +49,17 @@ The slice's organ laws compile on the contract. The body starts at the 06:55 anc
 
 **Speed.** A stage's residual, slopes, factor and solve take about 140 microseconds on 240 rows, and a ring update takes about 150 ms on 24,000 unknowns. The reference core takes 2.2 ms a step at 1 ms steps and runs at 1.3 times real time at 5 to 10 ms steps. The cost is the three stage solves of a doubled step, the landings at about ten firings a beat, and the record's own work. That is a first order reference, not the arena's bar, and it says what a faster core must beat. The reverse sweep and the fixed elimination are what bring it here: forward slopes and a dense solve cost about ten times as much.
 
+**The comments below, each answered.**
+
+- **03.** The renal scope, per-edge modes and edge guards are built. A pressure with no gauge shows as no rank. Solutes are carried, albumin takes up room, and a small ion takes up none. The crate's shapes stand: `EdgeRoute` with `transfer_along`, and boundaries named in the schema.
+- **04.** Each row has a natural size, which the packet may state, and the reference's Newton stop reads it. Nonlinear energy closure sits in `verify` as a stage residual. These are the first steps of a body with modes.
+- **05.** Sodium, potassium, chloride and posture have their own payload tags. Modes were already in the image, and a checkpoint in mid beat proves them.
+- **06.** `ModesNotYetRun` now passes a valve. A plain guard's gap is its zero with the sign `Crossing` gives it. The late input fuzz ran 120 more rounds with a hazard an input can move, through a field, and every run that compared matched. A span now stops at a forcing's knot, and a hazard row can state a natural size.
+- **07.** A pressure is a row with its site. A flow is a row too: a plain edge's flow row, or a valve's memory. A firing's instant reads the accepted state, which no algebraic row left stale.
+- **08.** A mode stands per point. The period stays fixed. Boundary flows net to zero through regulated totals, with no route held. The ring has its own elimination. Newton stops when its update stops shrinking near rounding.
+- **09.** The tubule, duct, bladder and their networks are on the map. CV reads an amount through its ports. GI, EN and the skin take their routes in `hold_outside_slice`. A delivery now needs its route's law to read the drive in every mode. A rigid or elastic enclosure is still refused. Rank is read on the whole ring. A held card's prescribed value can be no anchor, so I14 exempts nothing.
+- **Research 02.** Every law form here is in use, and viscosity is the one left out, as below. Its constants stay synthetic.
+
 **Left for later, each with its reason.**
 
 - **Row 111 stays unresolved.** ICP ownership is not settled here, and nothing built reads it.
@@ -62,7 +73,7 @@ The slice's organ laws compile on the contract. The body starts at the 06:55 anc
 
 **Hard-part check.** No solver redesign was needed: the elimination that follows the ring is a plain one. No validation against Pulse or published physiology was done, and no disease was built.
 
-**Evidence**, all synthetic. Mutation sweep, verify and Codex evidence are in the PR.
+**Evidence**, all synthetic. No number moved on the old benches: one probe built against main and this branch ran 62 cases at 1 s spans and printed every row's bits, and the two outputs are byte equal. A control that moved the span by 1 ms differs. The mutation sweep, verify and Codex evidence are in the PR.
 
 ## Comments
 
