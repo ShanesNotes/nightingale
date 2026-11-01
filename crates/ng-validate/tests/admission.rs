@@ -918,16 +918,19 @@ fn a_witness_that_holds_every_row_and_misses_its_anchor_is_refused_with_the_anch
 fn a_net_boundary_flow_over_the_cycle_is_refused_with_its_quantity() {
     let case = PulsatileCase::plain();
     let core = reference(REFERENCE_NS);
-    let boundary = BoundaryPort::new(vec![
-        water(b"pulse", 0, PULSE, 0, PULSE_NS, DELIVERED),
-        water(b"short drain", 0, DRAIN, 0, PERIOD_NS, DELIVERED - 1.0),
-    ])
-    .expect("parsed");
+    let short_by = |short: f64| {
+        let boundary = BoundaryPort::new(vec![
+            water(b"pulse", 0, PULSE, 0, PULSE_NS, DELIVERED),
+            water(b"short drain", 0, DRAIN, 0, PERIOD_NS, DELIVERED - short),
+        ])
+        .expect("parsed");
+        admit_solved(case.body(), case.packet(), boundary, &core, &case.lens).err()
+    };
     let quantity = case.body().conserved_basis().combinations()[0].id();
-    assert_eq!(
-        admit_solved(case.body(), case.packet(), boundary, &core, &case.lens).err(),
-        Some(InitializationFailure::NetBoundaryFlow { quantity })
-    );
+    let refused = Some(InitializationFailure::NetBoundaryFlow { quantity });
+    assert_eq!(short_by(1.0), refused);
+    assert_eq!(short_by(1e-8), refused);
+    assert_eq!(short_by(1e-10), None);
 }
 
 /// Every stage holds to its own scale and all of them lean one way: the flow lands on no one row.
@@ -1413,13 +1416,9 @@ fn swinging_body() -> (CompiledBody, SiteId) {
     let vessel = map.site::<VesselSegment>("vessel", origin());
     map.contain(root.id(), vessel.id());
     let mut schema = Schema::new(map.finish().expect("a map")).expect("a schema");
-    let boundary = |schema: &mut Schema, name, direction| {
-        let lumen = (vessel.id(), Space::Lumen);
-        (schema.water_boundary(name, direction, lumen.0, lumen.1)).expect("a boundary");
-    };
     for [into, out] in [RISE, FALL] {
-        boundary(&mut schema, into, BoundaryDirection::IntoBody);
-        boundary(&mut schema, out, BoundaryDirection::OutOfBody);
+        (schema.water_boundary(into, BoundaryDirection::IntoBody, vessel.id(), Space::Lumen)).expect("in");
+        (schema.water_boundary(out, BoundaryDirection::OutOfBody, vessel.id(), Space::Lumen)).expect("out");
     }
     let body = assemble(schema, |mut body| {
         let (mut laws, ports) = body.boundary()?.parts();
@@ -1470,6 +1469,55 @@ fn a_net_flow_a_row_cannot_hold_is_still_refused() {
     assert!(
         matches!(refused, Some(InitializationFailure::NetBoundaryFlow { .. })),
         "{refused:?}"
+    );
+}
+
+/// Two vessels with no path between them: one takes water in and the other lets it out.
+fn parted_body() -> (CompiledBody, [SiteId; 2]) {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", origin());
+    let filling = map.site::<VesselSegment>("filling", origin());
+    let emptying = map.site::<VesselSegment>("emptying", origin());
+    map.contain(root.id(), filling.id());
+    map.contain(root.id(), emptying.id());
+    let mut schema = Schema::new(map.finish().expect("a map")).expect("a schema");
+    (schema.water_boundary(PULSE, BoundaryDirection::IntoBody, filling.id(), Space::Lumen)).expect("in");
+    (schema.water_boundary(DRAIN, BoundaryDirection::OutOfBody, emptying.id(), Space::Lumen)).expect("out");
+    let body = assemble(schema, |mut body| {
+        let (mut laws, ports) = body.boundary()?.parts();
+        let class = RateClass::new(RateBand::Wave, SECOND)?;
+        for name in [PULSE, DRAIN] {
+            let BoundaryWater { route, drive } = ports.water(name)?;
+            let rate = laws.kernel(|mut k| {
+                let value = k.read(&drive);
+                k.finish(value, laws.every_mode(), class)
+            });
+            laws.transfer(Transfer::new(&route, rate));
+        }
+        body.add(laws.finish());
+        body.compile()
+    });
+    (body.expect("a body"), [filling.id(), emptying.id()])
+}
+
+/// Each pool's beat closes on its own: one filling as fast as the other empties is two net flows, not none.
+#[test]
+fn a_net_flow_is_read_pool_by_pool() {
+    let (body, [filling, emptying]) = parted_body();
+    let bare = ChannelSpec::new(GAUGE, lumen(filling));
+    let lens = body.lens(vec![bare], count(SECOND)).expect("a lens");
+    let mut packet = ParameterPacket::periodic(cycle(4));
+    packet.within(admission_tolerance());
+    for site in [filling, emptying] {
+        (packet.start(lumen(site), measure::<Water>(10.0), NOTE)).expect("once");
+    }
+    let flows = [PULSE, DRAIN].map(|name| water(name.as_bytes(), 0, name, 0, SECOND, 1.0));
+    let boundary = BoundaryPort::new(flows.into()).expect("parsed");
+    let core = reference(SECOND / 2);
+    let quantity = body.conserved_basis().combinations()[0].id();
+    assert_eq!(
+        admit_solved(&body, packet, boundary, &core, &lens).err(),
+        Some(InitializationFailure::NetBoundaryFlow { quantity })
     );
 }
 
