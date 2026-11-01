@@ -630,6 +630,132 @@ fn a_read_of_a_route_that_does_not_reach_a_site_is_refused_by_name() -> Result<(
     Ok(())
 }
 
+/// A binding declared for junctions must not run at a bed that happens to hold the same pools: a cleft's law on plasma
+/// would pass every orphan check.
+#[test]
+fn a_binding_stands_only_on_its_own_set_of_sites() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let vessel = map.site::<VesselSegment>("vessel", at()?);
+    let bed = map.site::<CapillaryBed>("bed", at()?);
+    let junction = map.site::<Junction>("junction", at()?);
+    for site in [vessel.id(), bed.id(), junction.id()] {
+        map.contain(root.id(), site);
+    }
+    map.connect(Network::Vascular, vessel.id(), bed.id());
+    map.connect(Network::Vascular, bed.id(), vessel.id());
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.leave_out(Space::Cells, "a bench with no tissue");
+    schema.leave_out(Space::Interstitium, "a bench with no tissue");
+    for (site, space) in [(bed.id(), Space::Plasma), (junction.id(), Space::Cleft)] {
+        schema.pool::<Norepinephrine>(site, space)?;
+        schema.pool::<Norepinephrine>(site, Space::Bound)?;
+    }
+    let compiled = assemble(schema, |mut body| {
+        let class = fast()?;
+        let (mut laws, ports) = body.receptor()?.parts();
+        let route = ports.binding::<Junction, Norepinephrine>(&mut laws);
+        let rate = laws.site_kernel(|mut k| {
+            let zero = k.zero();
+            k.finish(zero, laws.every_mode(), class)
+        });
+        laws.transfer_at(&route, rate);
+        body.add(laws.finish());
+        body.compile()
+    });
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::OrphanPool {
+            site: bed.id(),
+            space: Space::Plasma,
+        }))
+    );
+    Ok(())
+}
+
+fn a_lumen_read_at_a_mark(on_tract: bool) -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let vessel = map.site::<VesselSegment>("vessel", at()?);
+    if on_tract {
+        map.connect(Network::Urinary, vessel.id(), vessel.id());
+    }
+    map.landmark(Landmark::MaculaDensa, vessel.id(), vessel.id());
+    let mut schema = Schema::new(map.finish()?)?;
+    let into = BoundaryDirection::IntoBody;
+    schema.boundary::<Water>("water", into, vessel.id(), Space::Lumen)?;
+    assemble(schema, |mut body| {
+        let class = fast()?;
+        let (mut laws, ports) = body.boundary()?.parts();
+        let route = ports.route::<Water>("water")?.route;
+        let rate = laws.kernel(|mut k| {
+            let zero = k.zero();
+            k.finish(zero, laws.every_mode(), class)
+        });
+        laws.transfer(Transfer::new(&route, rate));
+        body.add(laws.finish());
+        let (mut rn, ports) = body.renal()?.parts();
+        let lumen = ports.lumen::<Water>();
+        let row = rn.algebraic::<Water>("reading", Admissible::finite());
+        let residual = rn.kernel(|mut k| {
+            let (read, held) = (k.at_landmark(Landmark::MaculaDensa, &lumen), k.algebraic(&row));
+            let gap = k.subtract(held, read);
+            k.finish(gap, rn.every_mode(), class)
+        });
+        rn.residual(&row, residual);
+        body.add(rn.finish());
+        body.compile()
+    })
+}
+
+/// A mark off the urinary network would feed the kidney's feedback another space's sodium, so the port's own set refuses it.
+#[test]
+fn a_landmark_off_a_ports_set_is_refused_by_name() -> Result<(), AdmissionError> {
+    assert!(a_lumen_read_at_a_mark(true).is_ok());
+    let law = LawName {
+        owner: "RN",
+        local: "reading",
+    };
+    assert_eq!(
+        a_lumen_read_at_a_mark(false).err(),
+        Some(AdmissionError::Compile(CompileDefect::NoSuchRead { law }))
+    );
+    Ok(())
+}
+
+/// A drain's law holds its flow row and its columns read the row, so its own read of a drive is what carries a delivery.
+#[test]
+fn a_drain_takes_a_delivery_its_own_law_reads() -> Result<(), InitializationFailure> {
+    let mut map = AnatomyBuilder::new();
+    let vessel = map.site::<VesselSegment>("vessel", at()?);
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.drain("outlet", vessel.id(), Space::Lumen)?;
+    let body = assemble(schema, |mut body| {
+        let class = fast()?;
+        let (mut laws, ports) = body.boundary()?.parts();
+        let BoundaryRoute { route, drive } = ports.route::<Water>("outlet")?;
+        let rate = laws.kernel(|mut k| {
+            let value = k.read(&drive);
+            k.finish(value, laws.every_mode(), class)
+        });
+        laws.transfer(Transfer::new(&route, rate));
+        body.add(laws.finish());
+        body.compile()
+    })?;
+    let mut packet = ParameterPacket::new();
+    packet.start_rest(&body, |_| 1.0, "synthetic")?;
+    let parameters = body.bind(packet)?;
+    let water = BoundaryInput::Water(Delivered {
+        boundary: "outlet",
+        amount: Measure::new(1.0)?,
+        ends: SimTime::from_ns(1_000_000_000),
+    });
+    let id = InputId::new(Digest::of_canonical(b"withdrawal"));
+    let event = BoundaryEvent::new(id, SimTime::from_ns(0), water);
+    let request = InitializationRequest::at(SimTime::from_ns(0));
+    body.initialization(parameters, BoundaryPort::new(vec![event])?, request)?;
+    Ok(())
+}
+
 /// In a body of water alone a plain edge's flow is its column and no row, so a read of it is refused by name.
 #[test]
 fn a_read_of_a_flow_that_is_no_row_is_refused_by_name() -> Result<(), AdmissionError> {

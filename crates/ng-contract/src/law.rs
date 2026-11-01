@@ -123,7 +123,7 @@ pub(crate) enum Family {
     Reclaim(Species),
     Release(Species),
     Reuptake(Species),
-    Binding(Species),
+    Binding(Sites, Species),
     Exchange(Species),
     StrokeWork,
     GravityWork,
@@ -142,7 +142,7 @@ impl Family {
             Family::Reclaim(species) => species.names()[0],
             Family::Release(species) => species.names()[1],
             Family::Reuptake(species) => species.names()[2],
-            Family::Binding(species) => species.names()[3],
+            Family::Binding(_, species) => species.names()[3],
             Family::Exchange(species) => species.names()[5],
             Family::StrokeWork => "stroke work",
             Family::GravityWork => "gravity work",
@@ -371,7 +371,7 @@ impl Seal for Source {
                 out.number(end as u64);
                 out.number(species as u64);
             }
-            Source::Pool(species) => {
+            Source::Pool(_, species) => {
                 out.number(1);
                 out.number(species as u64);
             }
@@ -752,7 +752,7 @@ pub struct ReadPort<'b, O, U> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Source {
     Amount(Family, End, Species),
-    Pool(Species),
+    Pool(Sites, Species),
     RoutePool(&'static str, Species),
     Drive(&'static str),
     Field(LawName),
@@ -770,8 +770,8 @@ impl<'b, O, U> ReadPort<'b, O, U> {
     pub(crate) fn field(name: LawName) -> Self {
         Self::of(Source::Field(name))
     }
-    pub(crate) fn pool(species: Species) -> Self {
-        Self::of(Source::Pool(species))
+    pub(crate) fn pool(set: Sites, species: Species) -> Self {
+        Self::of(Source::Pool(set, species))
     }
 }
 impl<'b, O, C: SiteSet> ReadPort<'b, O, PerSite<C, Pressure>> {

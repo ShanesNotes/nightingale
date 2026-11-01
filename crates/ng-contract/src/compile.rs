@@ -807,7 +807,7 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
                 )
             })
             .collect(),
-        Family::Binding(species) => (anatomy.sites())
+        Family::Binding(set, species) => (anatomy.in_set(set).into_iter())
             .filter(|site| matches!(site.class(), Class::Junction | Class::CapillaryBed))
             .map(|site| {
                 let free = if site.class() == Class::Junction {
@@ -1476,8 +1476,11 @@ fn addresses(
                     .ok_or(CompileDefect::NoSuchRead { law })?;
                 unknown(rows.amount(pool).ok_or(left_out(law, pool))?)
             }
-            Source::Pool(species) => {
+            Source::Pool(set, species) => {
                 let site = landed.ok_or(CompileDefect::NoSuchRead { law })?;
+                if !anatomy.in_set(set).contains(&site) {
+                    return Err(CompileDefect::NoSuchRead { law });
+                }
                 let pool = PoolRef {
                     species,
                     ..flowing(site)

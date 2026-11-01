@@ -48,7 +48,11 @@ impl CompiledBody {
         let own = |instance: &&Instance| match instance.target {
             Target::Column(column) => (self.layout.columns[column.index()].receipt)
                 .is_some_and(|receipt| receipt.boundary == boundary),
-            Target::Row(_) => false,
+            // A drain's law holds its flow row, and the columns read that.
+            Target::Row(row) => matches!(
+                self.rows()[row.index()].kind(),
+                RowKind::Algebraic(slot) if slot.law.local == boundary
+            ),
         };
         let reads = |instance: &&Instance| {
             let read = |input: &Bound| matches!(input, Bound::Boundary(name) if *name == boundary);
