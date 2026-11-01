@@ -382,6 +382,12 @@ fn derivatives_match_central_differences_on_nearly_nearly_every_operator() -> Re
         Measure::<Dimensionless>::new(0.3)?,
         "synthetic",
     )?;
+    packet.synthetic(
+        ParameterKey::new("ns.deviation-width"),
+        bind,
+        Measure::<Deviation<Dimensionless>>::new(0.3)?,
+        "synthetic",
+    )?;
     packet.start(memory("first"), Measure::<Dimensionless>::new(0.4)?, "synthetic")?;
     packet.start(
         memory("second"),

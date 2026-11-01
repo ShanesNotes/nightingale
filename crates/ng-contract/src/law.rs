@@ -126,6 +126,7 @@ pub(crate) enum Family {
     Binding(Species),
     Exchange(Species),
     StrokeWork,
+    GravityWork,
     Dissipation,
 }
 impl Family {
@@ -143,6 +144,7 @@ impl Family {
             Family::Binding(species) => species.names()[3],
             Family::Exchange(species) => species.names()[5],
             Family::StrokeWork => "stroke work",
+            Family::GravityWork => "gravity work",
             Family::Dissipation => "dissipation",
         }
     }
@@ -203,6 +205,8 @@ pub(crate) enum Input {
     Height(Where),
     /// The flow row of the one urinary edge into this edge's upstream site.
     Inflow,
+    /// A vascular edge's own flow: its flow row, or a valve's memory.
+    EdgeFlow,
 }
 /// Where a read lands, from the kernel's own place. The compiler resolves it against the map, so a law says what it
 /// reads and never where that is.
@@ -343,6 +347,7 @@ impl Seal for Input {
                 place.seal(out);
             }
             Input::Inflow => out.number(13),
+            Input::EdgeFlow => out.number(14),
         }
     }
 }
@@ -726,6 +731,10 @@ impl<'b, 'k, O, E: EdgeKind> Kernel<'b, 'k, O, E> {
     /// The flow row of the one urinary edge into this edge's upstream site. Compile refuses a site with more or fewer.
     pub fn inflow(&mut self) -> Expr<'b, 'k, O, Rate<Water>> {
         self.input(Input::Inflow)
+    }
+    /// The flow along this vascular edge, whatever law holds it.
+    pub fn edge_flow(&mut self) -> Expr<'b, 'k, O, Rate<Water>> {
+        self.input(Input::EdgeFlow)
     }
     /// The value bound at this edge, or else at the vascular network.
     pub fn edge_parameter<U: Dimension>(

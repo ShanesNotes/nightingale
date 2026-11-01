@@ -95,6 +95,9 @@ impl SiteId {
     pub(crate) fn class(&self) -> Class {
         self.class
     }
+    pub fn key(&self) -> &'static str {
+        self.key
+    }
 }
 impl Seal for SiteId {
     fn seal(&self, out: &mut Canonical) {

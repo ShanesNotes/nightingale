@@ -42,20 +42,28 @@ impl InitializationRequest<'_> {
 }
 
 impl CompiledBody {
-    /// Whether the route's own law reads its drive. Another row may sense a drive, and moves nothing.
+    /// Whether the route's own law reads its drive in every mode. Another row may sense a drive, and moves nothing, and
+    /// a law of one mode alone would leave a delivery's amount waiting on that mode.
     fn reads_drive(&self, boundary: &str) -> bool {
         let own = |instance: &&Instance| match instance.target {
             Target::Column(column) => (self.layout.columns[column.index()].receipt)
                 .is_some_and(|receipt| receipt.boundary == boundary),
             Target::Row(_) => false,
         };
-        (self
-            .layout
-            .instances
-            .iter()
+        let reads = |instance: &&Instance| {
+            let read = |input: &Bound| matches!(input, Bound::Boundary(name) if *name == boundary);
+            instance.inputs.iter().any(read)
+        };
+        let held: Vec<Option<(usize, usize)>> = (self.layout.instances.iter())
             .filter(own)
-            .flat_map(|instance| &instance.inputs))
-        .any(|input| matches!(input, Bound::Boundary(name) if *name == boundary))
+            .filter(reads)
+            .map(|instance| instance.mode)
+            .collect();
+        let every_value = |&(variable, _): &(usize, usize)| {
+            let values = self.layout.modes[variable].values.len();
+            (0..values).all(|value| held.contains(&Some((variable, value))))
+        };
+        held.contains(&None) || held.iter().flatten().any(every_value)
     }
     pub(crate) fn check_delivery(
         &self,

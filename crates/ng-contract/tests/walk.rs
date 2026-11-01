@@ -52,8 +52,6 @@ fn baroreflex<'b>(scope: NervousScope<'b>) -> Result<Fragment<'b, Nervous>, Admi
         ParameterKey::new("ns.chronic-set-point"),
         Admissible::unit_interval(),
     );
-    let width =
-        laws.parameter::<Dimensionless>(ParameterKey::new("ns.afferent-width"), Admissible::positive());
     let inverse_tau = laws.parameter(ParameterKey::new("ns.afferent-rate"), Admissible::nonnegative());
     let resetting = laws.parameter(ParameterKey::new("ns.resetting-rate"), Admissible::nonnegative());
     let (reflex, slow) = (

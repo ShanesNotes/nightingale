@@ -195,7 +195,6 @@ fn reflexes(
     let reflex = RateClass::new(RateBand::Reflex, 3_600_000_000_000)?;
     let hours = RateClass::new(RateBand::Hours, 3_600_000_000_000)?;
     let speed_key = ParameterKey::new("ns.speed");
-    let width = laws.parameter::<Dimensionless>(ParameterKey::new("ns.width"), Admissible::positive());
     let level_key = ParameterKey::new("ns.level");
     let (speed, level) = if order == Order::Forward {
         let speed = laws.parameter::<Rate<Dimensionless>>(speed_key, Admissible::nonnegative());

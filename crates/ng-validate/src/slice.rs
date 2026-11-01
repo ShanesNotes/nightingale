@@ -27,17 +27,17 @@ pub fn arena_anatomy() -> Result<Anatomy, AdmissionError> {
     let pulmonary_vein = map.site::<VesselSegment>("pulmonary vein", at(0.55)?);
     let arteries = map.site::<VesselSegment>("systemic arteries", at(0.5)?);
     let central_veins = map.site::<VesselSegment>("central veins", at(0.5)?);
-    let splanchnic_veins = map.site::<VesselSegment>("splanchnic veins", at(0.15)?);
+    let splanchnic_veins = map.site::<VesselSegment>("splanchnic veins", at(0.25)?);
     let leg_veins = map.site::<VesselSegment>("leg veins", at(-0.5)?);
 
     let lung = map.site::<CapillaryBed>("pulmonary bed", at(0.55)?);
-    let splanchnic = map.site::<CapillaryBed>("splanchnic bed", at(0.15)?);
+    let splanchnic = map.site::<CapillaryBed>("splanchnic bed", at(0.25)?);
     let leg = map.site::<CapillaryBed>("leg bed", at(-0.5)?);
     let glomerular = map.site::<CapillaryBed>("glomerular bed", at(0.2)?);
     let peritubular = map.site::<CapillaryBed>("peritubular bed", at(0.2)?);
 
     let pleura = map.site::<EnclosedSpace>("pleural space", at(0.55)?);
-    let abdomen = map.site::<EnclosedSpace>("abdominal space", at(0.15)?);
+    let abdomen = map.site::<EnclosedSpace>("abdominal space", at(0.25)?);
 
     let sinoatrial = map.site::<Junction>("sinoatrial junction", at(0.5)?);
     let myocardial = map.site::<Junction>("myocardial junction", at(0.5)?);
@@ -99,6 +99,7 @@ pub fn arena_anatomy() -> Result<Anatomy, AdmissionError> {
         (right_ventricle.id(), pulmonary_artery.id()),
         (left_atrium.id(), left_ventricle.id()),
         (left_ventricle.id(), arteries.id()),
+        (leg_veins.id(), central_veins.id()),
     ] {
         map.valve(from, to);
     }
@@ -111,7 +112,6 @@ pub fn arena_anatomy() -> Result<Anatomy, AdmissionError> {
         (splanchnic_veins.id(), central_veins.id()),
         (arteries.id(), leg.id()),
         (leg.id(), leg_veins.id()),
-        (leg_veins.id(), central_veins.id()),
         (arteries.id(), glomerular.id()),
         (glomerular.id(), peritubular.id()),
         (peritubular.id(), central_veins.id()),
@@ -444,19 +444,25 @@ fn exits(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
 pub fn arena_body() -> Result<CompiledBody, AdmissionError> {
     assemble(arena_schema()?, |mut body| {
         hold_outside_slice(&mut body)?;
-        exits(&mut body)?;
-        let fragment = ng_cardiovascular::declare(body.cardiovascular()?)?;
-        body.add(fragment);
-        let fragment = ng_fluids::declare(body.fluids()?)?;
-        body.add(fragment);
-        let fragment = ng_renal::declare(body.renal()?)?;
-        body.add(fragment);
-        let fragment = ng_nervous::declare(body.nervous()?)?;
-        body.add(fragment);
-        let fragment = ng_receptor::declare(body.receptor()?)?;
-        body.add(fragment);
+        arena_organs(&mut body)?;
         body.compile()
     })
+}
+
+/// The five organ fragments the slice compiles, each behind its own crate's `declare`, and the body's own exits.
+pub fn arena_organs(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
+    exits(body)?;
+    let fragment = ng_cardiovascular::declare(body.cardiovascular()?)?;
+    body.add(fragment);
+    let fragment = ng_fluids::declare(body.fluids()?)?;
+    body.add(fragment);
+    let fragment = ng_renal::declare(body.renal()?)?;
+    body.add(fragment);
+    let fragment = ng_nervous::declare(body.nervous()?)?;
+    body.add(fragment);
+    let fragment = ng_receptor::declare(body.receptor()?)?;
+    body.add(fragment);
+    Ok(())
 }
 
 const SECOND: u64 = 1_000_000_000;
@@ -552,6 +558,7 @@ pub fn arena_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixt
     packet.start_mode(valve("left atrium", "left ventricle")?, "open", note)?;
     packet.start_mode(valve("right ventricle", "pulmonary artery")?, "shut", note)?;
     packet.start_mode(valve("right atrium", "right ventricle")?, "open", note)?;
+    packet.start_mode(valve("leg veins", "central veins")?, "open", note)?;
 
     table(&mut packet, note)?;
     packet.start_rest(body, start_guess, note)?;
@@ -572,19 +579,41 @@ pub fn arena_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixt
 }
 
 /// A flat guess, about right in size for each kind of row. The march and the ring do the rest.
+/// Water near the orbit at each site, so the march starts with a heart that has something to pump.
+const WATER_GUESS: [(&str, Space, f64); 23] = [
+    ("right atrium", Space::Lumen, 54.0),
+    ("right ventricle", Space::Lumen, 100.0),
+    ("pulmonary artery", Space::Lumen, 126.0),
+    ("pulmonary vein", Space::Lumen, 300.0),
+    ("left atrium", Space::Lumen, 74.0),
+    ("left ventricle", Space::Lumen, 100.0),
+    ("systemic arteries", Space::Lumen, 800.0),
+    ("splanchnic veins", Space::Lumen, 800.0),
+    ("leg veins", Space::Lumen, 500.0),
+    ("central veins", Space::Lumen, 370.0),
+    ("pulmonary bed", Space::Plasma, 180.0),
+    ("splanchnic bed", Space::Plasma, 108.0),
+    ("leg bed", Space::Plasma, 110.0),
+    ("glomerular bed", Space::Plasma, 41.0),
+    ("peritubular bed", Space::Plasma, 32.0),
+    ("pulmonary bed", Space::Interstitium, 430.0),
+    ("splanchnic bed", Space::Interstitium, 2_200.0),
+    ("leg bed", Space::Interstitium, 2_700.0),
+    ("glomerular bed", Space::Interstitium, 100.0),
+    ("peritubular bed", Space::Interstitium, 160.0),
+    ("renal tubule", Space::Lumen, 14.0),
+    ("collecting duct", Space::Lumen, 5.0),
+    ("bladder", Space::Lumen, 20.0),
+];
+
 fn start_guess(row: RowKind) -> f64 {
     match row {
-        RowKind::Amount { species, space, .. } => {
-            let water = match space {
-                Space::Plasma => 270.0,
-                Space::Lumen => 300.0,
-                Space::Interstitium => 2_000.0,
-                _ => 1_000.0,
-            };
-            let holds = match space {
-                Space::Lumen | Space::Plasma | Space::Interstitium => water,
-                _ => 1.0,
-            };
+        RowKind::Amount { site, species, space } => {
+            let guess = WATER_GUESS
+                .iter()
+                .find(|guess| guess.0 == site.key() && guess.1 == space);
+            let water = guess.map_or(1_000.0, |guess| guess.2);
+            let holds = if guess.is_some() { water } else { 1.0 };
             match (species, space) {
                 (Species::Water, _) => water,
                 (Species::Sodium, _) => 100.0 * holds,
@@ -620,10 +649,9 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
         packet.synthetic(ParameterKey::new(key), binding, Measure::<U>::new(value)?, note)
     }
     let blood = Binding::Network(Network::Vascular);
-    let (urinary, lymph, reclaim) = (
+    let (urinary, lymph) = (
         Binding::Network(Network::Urinary),
         Binding::Network(Network::Lymph),
-        Binding::Network(Network::Reclaim),
     );
     let (body, beds, junctions) = (
         Binding::Body,
@@ -658,6 +686,7 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
         set::<Rate<Dimensionless>>(packet, key, body, value, note)?;
     }
     set::<Pressure>(packet, "cv.stretch-reference", body, 100.0, note)?;
+    set::<Volume>(packet, "cv.collapse-width", body, 1.0, note)?;
     set::<Pressure>(packet, "gi.abdominal-pressure", body, 4.0, note)?;
     set::<Pressure>(packet, "rs.pleural-pressure", body, -3.0, note)?;
     set::<Deviation<Dimensionless>>(packet, "ns.sympathetic-width", body, 0.1, note)?;
@@ -704,8 +733,8 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
         ("left atrium", (0.25, 0.0, 30.0, 0.0)),
         ("left ventricle", (0.1, 3.0, 20.0, 0.0)),
         ("systemic arteries", (1.0, 0.0, 700.0, 0.0)),
-        ("splanchnic veins", (0.02, 0.0, 800.0, 200.0)),
-        ("leg veins", (0.1, 0.0, 500.0, 50.0)),
+        ("splanchnic veins", (0.1, 0.0, 800.0, 200.0)),
+        ("leg veins", (0.4, 0.0, 500.0, 100.0)),
         ("central veins", (0.1, 0.0, 300.0, 0.0)),
     ] {
         wall(packet, Binding::Site(site::<VesselSegment>(key)?), values, note)?;
@@ -715,7 +744,7 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
         ("splanchnic bed", (2.0, 0.0, 100.0, 0.0), 0.004, 0.002, 4_500.0),
         ("leg bed", (2.0, 0.0, 100.0, 0.0), 0.003, 0.002, 3_500.0),
         ("glomerular bed", (4.0, 0.0, 30.0, 0.0), 0.0005, 0.05, 40.0),
-        ("peritubular bed", (4.0, 0.0, 30.0, 0.0), 0.002, 0.01, 200.0),
+        ("peritubular bed", (4.0, 0.0, 30.0, 0.0), 0.002, 0.05, 200.0),
     ] {
         let at = Binding::Site(site::<CapillaryBed>(key)?);
         wall(packet, at, values, note)?;
@@ -751,23 +780,23 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
         site::<VesselSegment>("splanchnic veins")?,
         site::<VesselSegment>("leg veins")?,
     );
+    set::<Orifice>(packet, "cv.orifice", edge(leg_veins, veins), 1e-3, note)?;
     for (from, to, resistance) in [
         (artery, lung, 0.06),
         (lung, pulmonary_vein, 0.03),
         (splanchnic, splanchnic_veins, 0.5),
-        (splanchnic_veins, veins, 0.03),
+        (splanchnic_veins, veins, 0.1),
         (leg, leg_veins, 0.5),
-        (leg_veins, veins, 0.03),
         (glomerular, peritubular, 2.0),
         (peritubular, veins, 0.2),
     ] {
         set::<Resistance>(packet, "cv.resistance", edge(from, to), resistance, note)?;
     }
     set::<Dimensionless>(packet, "cv.tone-gain", edge(arteries, glomerular), 0.5, note)?;
-    for (to, resistance) in [(splanchnic, 2.0), (leg, 2.5)] {
+    for (to, resistance) in [(splanchnic, 1.4), (leg, 1.8)] {
         let at = edge(arteries, to);
         set::<Resistance>(packet, "cv.resistance", at, resistance, note)?;
-        set::<Dimensionless>(packet, "cv.tone-gain", at, 1.0, note)?;
+        set::<Dimensionless>(packet, "cv.tone-gain", at, 2.0, note)?;
     }
     set::<Dimensionless>(packet, "cv.feedback-share", edge(arteries, glomerular), 1.0, note)?;
 

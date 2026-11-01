@@ -495,6 +495,15 @@ impl<'b> CardiovascularPorts<'b> {
         laws.request(Family::StrokeWork);
         SiteRoute::requested(Family::StrokeWork)
     }
+    /// Work into the elastic store along each vascular edge as blood falls, out of it as blood climbs. The far end is a
+    /// receipt: the store holds no potential of its own, so a posture moves nothing at its instant.
+    pub fn gravity_work(
+        &self,
+        laws: &mut FragmentBuilder<'b, Cardiovascular>,
+    ) -> EdgeRoute<'b, Cardiovascular, Energy> {
+        laws.request(Family::GravityWork);
+        EdgeRoute::requested(Family::GravityWork)
+    }
     /// The elastic store to the thermal store: one transfer.
     pub fn dissipation(
         &self,

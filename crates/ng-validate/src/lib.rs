@@ -111,5 +111,6 @@ pub use replay::{
 };
 pub use run::run_until;
 pub use slice::{
-    anchor_moment, arena_anatomy, arena_body, arena_lens, arena_packet, arena_schema, hold_outside_slice,
+    anchor_moment, arena_anatomy, arena_body, arena_lens, arena_organs, arena_packet, arena_schema,
+    hold_outside_slice,
 };

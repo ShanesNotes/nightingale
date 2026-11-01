@@ -850,6 +850,17 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
                 })
             })
             .collect(),
+        Family::GravityWork => (anatomy.vascular())
+            .filter_map(|(from, to)| {
+                Some(Reach {
+                    context: Context::Edge { from, to },
+                    ends: [
+                        Terminal::Exterior("gravity"),
+                        Terminal::Pool(store(Space::Elastic)?),
+                    ],
+                })
+            })
+            .collect(),
         Family::Dissipation => (store(Space::Elastic).zip(store(Space::Thermal)).into_iter())
             .map(|(elastic, thermal)| Reach {
                 context: Context::Body,
@@ -1511,6 +1522,18 @@ fn addresses(
                     let site = landing(place, context, anatomy).ok_or(CompileDefect::NoPoolRead { law })?;
                     Address::Height(anatomy.axial(site).to_bits())
                 }
+                (Input::EdgeFlow, Context::Edge { from, to }) => {
+                    let family = if anatomy.is_valve((from, to)) {
+                        Family::Valves
+                    } else {
+                        Family::Circulation
+                    };
+                    let flow = LawName {
+                        owner: law.owner,
+                        local: family.name(),
+                    };
+                    unknown(rows.declared(flow, context))
+                }
                 (Input::Inflow, Context::Edge { from, .. }) => {
                     let into: Vec<(SiteId, SiteId)> = (anatomy.edges(Network::Urinary))
                         .filter(|edge| edge.1 == from)
@@ -1553,7 +1576,8 @@ fn addresses(
                     Input::SiteParameter(_)
                     | Input::EdgeParameter(_)
                     | Input::EndParameter(..)
-                    | Input::Inflow,
+                    | Input::Inflow
+                    | Input::EdgeFlow,
                     _,
                 ) => {
                     unreachable!("a kernel reads a site or edge entry only in a context of its kind")

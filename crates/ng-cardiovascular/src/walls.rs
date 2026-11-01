@@ -16,6 +16,7 @@ pub(crate) struct Walls<'b, 'h> {
     inotropy: Knob<'b, Dimensionless>,
     unstressed: Knob<'b, Volume>,
     unstressed_gain: Knob<'b, Volume>,
+    collapse: Parameter<'b, Cardiovascular, Volume>,
     activation: &'h StateSlot<'b, Cardiovascular, Dimensionless>,
 }
 impl<'b, 'h> Walls<'b, 'h> {
@@ -37,10 +38,12 @@ impl<'b, 'h> Walls<'b, 'h> {
             unstressed: cv.site_parameter(ParameterKey::new("cv.unstressed"), Admissible::nonnegative()),
             unstressed_gain: cv
                 .site_parameter(ParameterKey::new("cv.unstressed-gain"), Admissible::nonnegative()),
+            collapse: cv.parameter(ParameterKey::new("cv.collapse-width"), Admissible::positive()),
             activation: &heart.activation,
         }
     }
-    /// `V - V_u`, with `V_u = V_u_base - S E_a1`.
+    /// `V - V_u`, with `V_u = V_u_base - S E_a1`, and no less than zero: a vessel below its unstressed volume collapses
+    /// and sucks nothing in, so a chamber cannot pull itself dry. Model default.
     pub(crate) fn stressed<'k>(
         &self,
         k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
@@ -52,7 +55,9 @@ impl<'b, 'h> Walls<'b, 'h> {
         let effect = k.at_junction(&self.alpha);
         let moved = k.scale(gain, effect);
         let unstressed = k.subtract(base, moved);
-        k.subtract(volume, unstressed)
+        let stretched = k.subtract(volume, unstressed);
+        let (zero, soft) = (k.zero(), k.parameter(&self.collapse));
+        k.smooth_max(stretched, zero, soft)
     }
     /// The active part of the wall's stiffness at full activation: `E_active (1 + S E_b1)`.
     fn contractile<'k>(
@@ -95,12 +100,15 @@ impl<'b, 'h> Walls<'b, 'h> {
     /// One mechanical store and one thermal store. Each blood site's wall holds `E s^2 / 2`, and the store is held to
     /// their sum. Work enters where activation stiffens a stretched wall, in systole only, and what the store then
     /// holds over the sum leaves as heat. That rate is no law's choice: it is what keeps the store equal to the sum,
-    /// so closure sits in the stage residual and `verify` judges it with the rest.
+    /// so closure sits in the stage residual and `verify` judges it with the rest. Gravity's work enters beside the heart's, so
+    /// the rate is what the flows lose in any posture. The moving blood's energy and the stretch of tissue and tubule are
+    /// not in the sum, so what they hold passes through this rate as heat.
     pub(crate) fn energy(
         &self,
         cv: &mut FragmentBuilder<'b, Cardiovascular>,
         ports: &CardiovascularPorts<'b>,
         heart: &Heart<'b>,
+        head: &Parameter<'b, Cardiovascular, Quotient<Pressure, Length>>,
         wave: RateClass,
     ) {
         let half = cv.parameter::<Dimensionless>(ParameterKey::new("cv.half"), Admissible::positive());
@@ -137,8 +145,22 @@ impl<'b, 'h> Walls<'b, 'h> {
         });
         cv.transfer_at(&work, none);
 
+        let fallen = ports.gravity_work(cv);
+        let falling = cv.edge_kernel(|mut k| {
+            let per_length = k.parameter(head);
+            let fall = k.fall();
+            let product = k.multiply(per_length, fall);
+            let head: Expr<'_, '_, _, Pressure> = k.as_dimension(product);
+            let flow = k.edge_flow();
+            let product = k.multiply(head, flow);
+            let power = k.as_dimension(product);
+            k.finish(power, cv.every_mode(), wave)
+        });
+        cv.transfer_along(&fallen, falling);
+
         let store = ports.dissipation(cv);
-        let dissipation = cv.algebraic::<Rate<Energy>>("dissipated power", Admissible::finite());
+        // Heat never runs back into the store, so a stage that needs it to has broken the closure.
+        let dissipation = cv.algebraic::<Rate<Energy>>("dissipated power", Admissible::nonnegative());
         let closing = cv.kernel(|mut k| {
             let held = k.read(&store.amount::<Energy>());
             let sum = k.algebraic(&elastic);

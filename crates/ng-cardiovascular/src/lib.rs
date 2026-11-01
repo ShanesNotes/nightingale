@@ -50,7 +50,7 @@ pub fn declare<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardio
     valves(&mut cv, &ports, &pressure, &head, wave)?;
     afferents(&mut cv, &pressure, &head, wave)?;
     capillary_fields(&mut cv, &pressure, wave);
-    walls.energy(&mut cv, &ports, &heart, wave);
+    walls.energy(&mut cv, &ports, &heart, &head, wave);
     Ok(cv.finish())
 }
 

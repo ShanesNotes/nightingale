@@ -245,6 +245,10 @@ impl<'r> AcceptedStateView<'r> {
     pub(crate) fn state(self) -> &'r Candidate {
         self.state
     }
+    /// Each mode variable's value, in compiled order.
+    pub fn modes(self) -> &'r [usize] {
+        &self.state.modes
+    }
     pub fn method_history(self) -> &'r MethodHistory {
         self.history
     }
