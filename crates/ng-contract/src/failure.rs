@@ -210,6 +210,9 @@ pub enum AdmissionError {
     /// A run identity that is not this body's, this origin's and this solver's.
     IdentityMismatch,
     ZeroMinimumInterval,
+    SiteOffTheMap {
+        site: SiteId,
+    },
     SpaceOfAnotherClass {
         site: SiteId,
         space: Space,

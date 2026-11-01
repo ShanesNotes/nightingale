@@ -55,8 +55,11 @@ impl Schema {
     }
 
     /// `Q` lives in this space of one site, the composition data that says which junction holds which receptor.
-    /// Refuses a space the site's class does not have.
+    /// Refuses a site the map does not hold and a space the site's class does not have.
     pub fn pool<Q: Substance>(&mut self, site: SiteId, space: Space) -> Result<(), AdmissionError> {
+        if !self.anatomy.sites().any(|known| known == site) {
+            return Err(AdmissionError::SiteOffTheMap { site });
+        }
         if !Space::of(site.class()).contains(&space) {
             return Err(AdmissionError::SpaceOfAnotherClass { site, space });
         }
@@ -494,6 +497,14 @@ impl<'b> CardiovascularPorts<'b> {
     ) -> EdgeRoute<'b, Cardiovascular, Energy> {
         laws.request(Family::GravityWork);
         EdgeRoute::requested(Family::GravityWork)
+    }
+    /// Work into the elastic store past what the heart and gravity pay, from the chemical energy MT stands behind.
+    pub fn wall_work(
+        &self,
+        laws: &mut FragmentBuilder<'b, Cardiovascular>,
+    ) -> Pair<'b, Cardiovascular, Energy> {
+        laws.request(Family::WallWork);
+        Pair::serving(crate::law::Obligation::Family(Family::WallWork))
     }
     /// The elastic store to the thermal store: one transfer.
     pub fn dissipation(

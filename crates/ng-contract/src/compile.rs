@@ -859,6 +859,12 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
                 })
             })
             .collect(),
+        Family::WallWork => (store(Space::Elastic).into_iter())
+            .map(|elastic| Reach {
+                context: Context::Body,
+                ends: [Terminal::Exterior("chemical energy"), Terminal::Pool(elastic)],
+            })
+            .collect(),
         Family::Dissipation => (store(Space::Elastic).zip(store(Space::Thermal)).into_iter())
             .map(|(elastic, thermal)| Reach {
                 context: Context::Body,

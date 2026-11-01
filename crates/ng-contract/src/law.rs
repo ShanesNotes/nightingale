@@ -127,6 +127,7 @@ pub(crate) enum Family {
     Exchange(Species),
     StrokeWork,
     GravityWork,
+    WallWork,
     Dissipation,
 }
 impl Family {
@@ -145,6 +146,7 @@ impl Family {
             Family::Exchange(species) => species.names()[5],
             Family::StrokeWork => "stroke work",
             Family::GravityWork => "gravity work",
+            Family::WallWork => "wall work",
             Family::Dissipation => "dissipation",
         }
     }

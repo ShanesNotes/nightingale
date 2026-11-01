@@ -1,5 +1,5 @@
 use ng_contract::*;
-use ng_record::{AuthorizedInput, Checkpoint, CheckpointError, HistoryStore, Running, Session, Step};
+use ng_record::{AuthorizedInput, Checkpoint, CheckpointError, HistoryStore, Running, Session};
 use ng_validate::*;
 
 const SECOND: u64 = 1_000_000_000;
@@ -138,8 +138,8 @@ fn rate_row() -> RowKind {
 fn sympathetic() -> RowKind {
     algebraic("NS", "sympathetic traffic", Context::Body)
 }
-fn dissipated() -> RowKind {
-    algebraic("CV", "dissipated power", Context::Body)
+fn wall_power() -> RowKind {
+    algebraic("CV", "wall power", Context::Body)
 }
 fn valve_flow(from: SiteId, to: SiteId) -> RowKind {
     memory("CV", "valves", Context::Edge { from, to })
@@ -180,7 +180,7 @@ fn the_slice_compiles_binds_and_lays_out_its_ring(solved: &Solved) -> Result<(),
     assert_eq!(count(|kind| matches!(kind, RowKind::Amount { .. })), 155);
     assert_eq!(count(|kind| matches!(kind, RowKind::Memory(_))), 9);
     assert_eq!(count(|kind| matches!(kind, RowKind::Algebraic(_))), 76);
-    assert_eq!(body.columns().len(), 256);
+    assert_eq!(body.columns().len(), 257);
     assert_eq!(body.longest_step_ns(), 10 * MILLISECOND);
     assert_eq!(body.held().count(), OUTSIDE_SLICE);
     let (packet, lens) = (arena_packet(body)?, arena_lens(body)?);
@@ -273,7 +273,7 @@ fn water_ions_moieties_and_energy_close_over_the_first_accepted_steps(solved: &S
     let run = steps(run, 2 * SECOND, |session| {
         let closure = (solved.value(session, store) - solved.value(session, sum)).abs();
         assert!(closure <= 1e-6 * solved.value(session, store), "{closure}");
-        assert!(solved.value(session, dissipated()) >= 0.0);
+        assert!(solved.value(session, wall_power()) >= 0.0);
         let modes = session.record().accepted().modes();
         if modes != last {
             mode_changes += 1;
@@ -613,9 +613,9 @@ fn a_meal_delivers_sodium_potassium_and_chloride(solved: &Solved) {
     }
 }
 
-/// A short window is a bolus. The wall's gain has no receipt, so a push this hard takes the heat past zero, and the step
-/// reports that and the body runs on.
-fn a_bolus_keeps_the_body_running_and_the_step_reports_the_heat(solved: &Solved) {
+/// A short window is a bolus. The walls gain faster than they shed, and that is work from outside, so the heat already
+/// shed stays shed: the thermal store loses only what leaves the body, and the body runs on.
+fn a_bolus_gains_on_the_walls_and_takes_nothing_back_from_the_heat(solved: &Solved) {
     let ends = SimTime::from_ns(anchor_moment().nanoseconds() + 2200 * MILLISECOND);
     let water = WaterDelivery {
         boundary: "gut water",
@@ -625,22 +625,21 @@ fn a_bolus_keeps_the_body_running_and_the_step_reports_the_heat(solved: &Solved)
     let mut run = solved.session();
     run.enqueue(input(1200 * MILLISECOND, b"bolus", BoundaryInput::Water(water)))
         .expect("enqueued");
-    let end = anchor_moment().nanoseconds() + 3 * SECOND;
-    let mut reported = 0;
-    while run.record().accepted().time().nanoseconds() < end {
-        let mut attempt = run.step();
-        run = loop {
-            match attempt {
-                Step::Accepted(next, receipt) => {
-                    reported += receipt.excursions().len();
-                    break next;
-                }
-                Step::Refused(retrying) => attempt = retrying.retry(),
-                Step::Faulted(stopped) => panic!("{:?}", stopped.fault()),
-            }
-        };
-    }
-    assert!(reported > 0);
+    let thermal = amount(site::<TissueSite>("body"), Space::Thermal, Species::Energy);
+    let held = solved.value(&run, thermal);
+    let (mut last, mut then) = (held, anchor_moment().nanoseconds());
+    let (mut most_lost, mut least_power) = (0.0_f64, f64::INFINITY);
+    steps(run, 3 * SECOND, |session| {
+        let (now, seconds) = (solved.value(session, thermal), session.record().accepted().time());
+        let span = (seconds.nanoseconds() - then) as f64 / 1e9;
+        let lost = last - now - 1e-3 * now * span;
+        most_lost = if lost > most_lost { lost } else { most_lost };
+        (last, then) = (now, seconds.nanoseconds());
+        let power = solved.value(session, wall_power());
+        least_power = if power < least_power { power } else { least_power };
+    });
+    assert!(least_power < 0.0, "{least_power}");
+    assert!(most_lost < 1e-6 * held, "{most_lost}");
 }
 
 /// Once the wall has let go, the heat the store sheds is what the flows lose on the way, up to the steps' own error, so
@@ -666,7 +665,7 @@ fn the_heat_shed_in_late_diastole_is_what_the_flows_lose(solved: &Solved) {
     steps(solved.session(), 3 * SECOND, |session| {
         if solved.value(session, activation) < 1e-3 {
             read += 1;
-            heat += solved.value(session, dissipated());
+            heat += solved.value(session, wall_power());
             for &(flow, from, to) in &edges {
                 let head = solved.value(session, pressure(from)) - solved.value(session, pressure(to));
                 losses += solved.value(session, flow) * head;
@@ -802,7 +801,7 @@ fn the_slice_compiles_initializes_closes_and_regulates_itself() {
     a_shut_valve_with_no_head_stays_shut(&solved).expect("it holds");
     the_body_answers_a_stand_through_its_own_baroreflex(&solved);
     a_meal_delivers_sodium_potassium_and_chloride(&solved);
-    a_bolus_keeps_the_body_running_and_the_step_reports_the_heat(&solved);
+    a_bolus_gains_on_the_walls_and_takes_nothing_back_from_the_heat(&solved);
     the_heat_shed_in_late_diastole_is_what_the_flows_lose(&solved);
     a_checkpoint_of_a_run_mid_beat_holds_its_modes_and_runs_on_the_same_bits(&solved);
 }

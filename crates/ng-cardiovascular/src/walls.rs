@@ -5,6 +5,15 @@ type Port<'b, U> = ReadPort<'b, Cardiovascular, PerSite<Blood, U>>;
 type Effect<'b> = ReadPort<'b, Cardiovascular, PerSite<Junction, Dimensionless>>;
 type Knob<'b, U> = SiteParameter<'b, Cardiovascular, Blood, U>;
 
+fn shed<'b, 'k>(
+    k: &mut Kernel<'b, 'k, Cardiovascular>,
+    net: Expr<'b, 'k, Cardiovascular, Rate<Energy>>,
+    soft: &Parameter<'b, Cardiovascular, Rate<Energy>>,
+) -> Expr<'b, 'k, Cardiovascular, Rate<Energy>> {
+    let (zero, soft) = (k.zero(), k.parameter(soft));
+    k.smooth_max(net, zero, soft)
+}
+
 /// One wall law for a vein, a bed and a ventricle: a site with no active elastance is passive, and a site no nerve
 /// reaches reads no effect.
 pub(crate) struct Walls<'b, 'h> {
@@ -106,13 +115,12 @@ impl<'b, 'h> Walls<'b, 'h> {
         k.scale(doubled, share)
     }
     /// One mechanical store and one thermal store. Each blood site's wall holds `E s^2 / 2`, and the store is held to
-    /// their sum. Work enters where activation stiffens a stretched wall, in systole only, and what the store then
-    /// holds over the sum leaves as heat. That rate is no law's choice: it is what keeps the store equal to the sum,
-    /// so closure sits in the stage residual and `verify` judges it with the rest. Gravity's work enters beside the
-    /// heart's, so the rate is what the flows lose in any posture. The moving blood's energy and the stretch of tissue
-    /// and tubule are not in the sum, so what they hold passes through this rate as heat. Water entering a wall and a
-    /// vein's muscle tightening have no receipt, so for that moment the rate reads low. Below zero it is an account past
-    /// its form, reported on the step, and no reason to stop a body.
+    /// their sum. Work enters where activation stiffens a stretched wall, in systole only, and gravity's enters beside
+    /// it. The wall power is what the store must lose to stay on the sum: no law's choice, so closure sits in the stage
+    /// residual and `verify` judges it with the rest. What the walls shed leaves as heat, and heat never comes back. What
+    /// they gain past those receipts, as a vein's muscle tightens or water enters, is muscle work from the chemical
+    /// energy the heart draws on. So the account can run no pool dry. The moving blood's energy and the stretch of tissue
+    /// and tubule are not in the sum, so what they hold passes through this rate.
     pub(crate) fn energy(
         &self,
         cv: &mut FragmentBuilder<'b, Cardiovascular>,
@@ -169,25 +177,29 @@ impl<'b, 'h> Walls<'b, 'h> {
         cv.transfer_along(&fallen, falling);
 
         let store = ports.dissipation(cv);
-        let dissipation = cv.algebraic::<Rate<Energy>>("dissipated power", Admissible::finite());
+        let power = cv.algebraic::<Rate<Energy>>("wall power", Admissible::finite());
         let closing = cv.kernel(|mut k| {
             let held = k.read(&store.amount::<Energy>());
             let sum = k.algebraic(&elastic);
             let gap = k.subtract(held, sum);
             k.finish(gap, cv.every_mode(), wave)
         });
-        cv.closes(&dissipation, closing);
+        cv.closes(&power, closing);
+        let soft = cv.parameter::<Rate<Energy>>(ParameterKey::new("cv.heat-width"), Admissible::positive());
         let leaving = cv.kernel(|mut k| {
-            let value = k.algebraic(&dissipation);
-            k.finish(value, cv.every_mode(), wave)
+            let net = k.algebraic(&power);
+            let heat = shed(&mut k, net, &soft);
+            k.finish(heat, cv.every_mode(), wave)
         });
-        let trusted = ValidityRange::new(
-            Measure::new(0.0)?,
-            Measure::new(f64::MAX)?,
-            Basis::Fixture("heat leaves a wall and does not return"),
-        )?;
-        cv.validity(&leaving, trusted);
         cv.transfer(Transfer::new(&store, leaving));
+        let paid = ports.wall_work(cv);
+        let gaining = cv.kernel(|mut k| {
+            let net = k.algebraic(&power);
+            let heat = shed(&mut k, net, &soft);
+            let gain = k.subtract(heat, net);
+            k.finish(gain, cv.every_mode(), wave)
+        });
+        cv.transfer(Transfer::new(&paid, gaining));
         Ok(())
     }
 }

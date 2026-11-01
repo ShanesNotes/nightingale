@@ -566,7 +566,7 @@ pub fn arena_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixt
                 "valves" | "circulation" => {
                     packet.row_scale(kind, Measure::<Rate<Water>>::new(FLOW_SIZE)?)?
                 }
-                "dissipated power" => packet.row_scale(kind, Measure::<Rate<Energy>>::new(POWER_SIZE)?)?,
+                "wall power" => packet.row_scale(kind, Measure::<Rate<Energy>>::new(POWER_SIZE)?)?,
                 _ => {}
             },
             RowKind::Amount { .. } => {}
@@ -686,6 +686,7 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
     }
     set::<Pressure>(packet, "cv.stretch-reference", body, 100.0, note)?;
     set::<Volume>(packet, "cv.collapse-width", body, 1.0, note)?;
+    set::<Rate<Energy>>(packet, "cv.heat-width", body, 100.0, note)?;
     set::<Quotient<Volume, Albumin>>(packet, "cv.albumin-volume", body, 0.05, note)?;
     set::<Quotient<Volume, Albumin>>(packet, "fl.albumin-volume", body, 0.05, note)?;
     set::<Pressure>(packet, "gi.abdominal-pressure", body, 4.0, note)?;

@@ -177,6 +177,24 @@ fn a_network_edge_of_the_wrong_classes_and_a_landmark_placed_twice_are_refused()
     Ok(())
 }
 
+/// A map's edges, regions and enclosures all read its sites, so a pool at a site it does not hold would stand outside
+/// every check.
+#[test]
+fn a_pool_at_a_site_the_map_does_not_hold_is_refused() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("root", at()?);
+    map.region("whole", root.id());
+    let mut schema = Schema::new(map.finish()?)?;
+    let elsewhere = AnatomyBuilder::new()
+        .site::<VesselSegment>("a misspelled vein", at()?)
+        .id();
+    assert_eq!(
+        schema.pool::<Sodium>(elsewhere, Space::Lumen).err(),
+        Some(AdmissionError::SiteOffTheMap { site: elsewhere })
+    );
+    Ok(())
+}
+
 #[test]
 fn a_pool_in_a_space_its_site_has_not_is_refused() -> Result<(), AdmissionError> {
     let mut map = AnatomyBuilder::new();
