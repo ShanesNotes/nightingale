@@ -12,6 +12,8 @@ use crate::{
 };
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
+/// What rounding leaves of a value, past which a change to it can be told from nothing.
+const ROUNDING: f64 = 8.0 * f64::EPSILON;
 
 /// When the start stands and what reads the anchors. The goal and the tolerance are the packet's.
 pub struct InitializationRequest<'l> {
@@ -471,21 +473,30 @@ impl InitializationSystem<'_> {
             );
             note(row, held.ok_or(inconsistent(row))?);
         }
-        for fit in &owed.fits {
-            if !self.felt(unknowns, fit)? {
+        for (fit, &value) in owed.fits.iter().zip(self.fitted(unknowns)) {
+            if !self.felt(unknowns, fit, value)? {
                 let (key, binding) = (fit.key, fit.binding);
                 return Err(AdmissionError::FitUnread { key, binding }.into());
             }
         }
         Ok(worst)
     }
-    /// Whether a row behind this fit's anchor feels it anywhere on this workspace.
-    fn felt(&self, unknowns: &[f64], fit: &Fit) -> Result<bool, InitializationFailure> {
+    /// Whether a row behind this fit's anchor feels it anywhere on this workspace: the whole of the fit, through its
+    /// slope, moves that row's stage past rounding on the row's value.
+    fn felt(&self, unknowns: &[f64], fit: &Fit, value: f64) -> Result<bool, InitializationFailure> {
+        let rows = self.body.rows();
         let values = self.values(unknowns);
+        let size = value.abs() + fit.guess.abs();
         for point in 0..self.frames.len() {
-            let inputs = self.inputs(point, self.point(unknowns, point), &values);
+            let state = self.point(unknowns, point);
+            let inputs = self.inputs(point, state, &values);
             let slopes = (self.body.parameter_slopes(&inputs, &fit.slots)).map_err(undefined)?;
-            if fit.rows.iter().any(|row| slopes[row.index()] != 0.0) {
+            let felt = |row: &RowId| {
+                let at = row.index();
+                let interval = self.interval.filter(|_| !algebraic(rows[at].kind()));
+                (interval.unwrap_or(1.0) * slopes[at] * size).abs() > ROUNDING * state[at].abs()
+            };
+            if fit.rows.iter().any(felt) {
                 return Ok(true);
             }
         }

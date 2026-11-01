@@ -1324,12 +1324,12 @@ fn an_instant_solve_stands_though_rounding_moves_a_row_inside_the_tolerance() {
     }
 }
 
-/// The solve runs to rounding, so a guess inside the tolerance is polished, and a flow too small for the rows to
-/// speak for still sets the fit.
-#[test]
-fn a_fit_the_rows_could_not_see_is_still_solved() {
-    let case = PulsatileCase::plain();
-    let tiny = 1e-7;
+/// A flow this small on amounts this large, at the true anchor, from a guess of half the fit.
+fn tiny_flow<'m>(
+    case: &'m PulsatileCase,
+    core: &'m ReferenceIntegrator,
+    tiny: f64,
+) -> Result<Admitted<'m>, InitializationFailure> {
     let (v, tau) = (tiny / seconds(PERIOD_NS), seconds(PULSE_NS));
     let mean = TOTAL / 2.0 + tiny * (1.0 - tau) / 4.0 + v / (2.0 * 2.0 * CONDUCTANCE) / 2.0 * 2.0;
     let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
@@ -1353,14 +1353,36 @@ fn a_fit_the_rows_could_not_see_is_still_solved() {
         water(b"tiny drain", 0, DRAIN, 0, PERIOD_NS, tiny),
     ])
     .expect("parsed");
-    let core = reference(REFERENCE_NS);
-    let solved = admit_solved(case.body(), packet, boundary, &core, &case.lens).expect("solved");
+    admit_solved(case.body(), packet, boundary, core, &case.lens)
+}
+
+/// The solve runs to rounding and reads no tolerance, so a flow too small for the rows to speak for at the
+/// tolerance still sets the fit.
+#[test]
+fn a_fit_the_tolerance_could_not_see_is_still_solved() {
+    let case = PulsatileCase::plain();
     let name = ValueName::Parameter {
         key: E,
         binding: NETWORK,
     };
+    let core = reference(REFERENCE_NS);
+    let solved = tiny_flow(&case, &core, 1e-7).expect("solved");
     let fitted = hi(record(&solved.provenance, name).value);
     assert!((fitted - 2.0).abs() < 1e-5, "{fitted}");
+}
+
+/// Past rounding on the rows no value of the fit can be told from another, so it is refused, not stamped.
+#[test]
+fn a_fit_only_rounding_can_feel_is_refused_by_its_key() {
+    let case = PulsatileCase::plain();
+    let core = reference(REFERENCE_NS);
+    assert_eq!(
+        tiny_flow(&case, &core, 1e-14).err(),
+        Some(InitializationFailure::Admission(AdmissionError::FitUnread {
+            key: E,
+            binding: NETWORK
+        }))
+    );
 }
 
 /// A ring whose first point sits between a lens's instants is read at no point of it.
