@@ -49,7 +49,7 @@ impl CoupledSolver for ReferenceIntegrator {
             RETRY_BUDGET,
             ArithmeticProfile::contract_v1(),
             StageScheme::backward_euler_doubled(),
-            self.scales,
+            self.scales.clone(),
         )
     }
     fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
@@ -132,7 +132,7 @@ fn solve_sparse(
     jacobian: &Jacobian,
     residuals: &[f64],
 ) -> Result<Vec<f64>, usize> {
-    match problem.factor(jacobian) {
+    match problem.body().factor(jacobian) {
         Ok(factors) => {
             let mut update = residuals.to_vec();
             factors.solve(&mut update);
@@ -150,14 +150,20 @@ fn solve_sparse(
 /// settled the same way on every run.
 pub(crate) fn solve_dense(jacobian: SparseView<'_>, residuals: &[f64]) -> Result<Vec<f64>, usize> {
     let size = residuals.len();
-    let mut slots: Vec<usize> = (0..size).collect();
     let mut matrix = vec![vec![0.0; size + 1]; size];
     for (row, cells) in matrix.iter_mut().enumerate() {
         for entry in jacobian.row_offsets()[row]..jacobian.row_offsets()[row + 1] {
-            cells[jacobian.columns()[entry].index()] = jacobian.values()[entry];
+            cells[jacobian.columns()[entry].index()] += jacobian.values()[entry];
         }
         cells[size] = residuals[row];
     }
+    eliminate(matrix)
+}
+
+/// `matrix` holds each row with its right side last.
+pub(crate) fn eliminate(mut matrix: Vec<Vec<f64>>) -> Result<Vec<f64>, usize> {
+    let size = matrix.len();
+    let mut slots: Vec<usize> = (0..size).collect();
     for pivot in 0..size {
         let mut best = pivot;
         for row in pivot + 1..size {

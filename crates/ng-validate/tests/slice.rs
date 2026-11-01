@@ -87,7 +87,7 @@ fn the_slice_map_passes_every_graph_check_and_holds_the_named_sites() -> Result<
 }
 
 fn slice_laws(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
-    let fast = RateClass::new(RateBand::Wave, 1_000_000)?;
+    let fast = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
     let (mut cv, ports) = body.cardiovascular()?.parts();
     let route = ports.circulation(&mut cv);
     let afferents: BaroreceptorAfferents<Defines<'_, Cardiovascular>> = cv.emit();
@@ -183,13 +183,13 @@ fn enclosure_law<'b, S: OutsideSlice>(
 fn gut_stand_in(supplies: Vec<&'static str>) -> Result<CompiledBody, AdmissionError> {
     let mut schema = Schema::new(arena_anatomy()?)?;
     let veins = site::<VesselSegment>("splanchnic veins")?;
-    schema.water_boundary(GUT_WATER, BoundaryDirection::IntoBody, veins, Space::Lumen)?;
+    schema.boundary::<Water>(GUT_WATER, BoundaryDirection::IntoBody, veins, Space::Lumen)?;
     assemble(schema, |mut body| {
         slice_laws(&mut body)?;
         let gut = HeldDeclaration::<Gastrointestinal>::new(supplies, vec![], "a synthetic bench");
         let (mut laws, ports) = body.hold(gut)?.parts();
         enclosure_law(&mut laws, &ports, ParameterKey::new("gi.abdominal-pressure"))?;
-        let BoundaryWater { route, drive } = ports.water(GUT_WATER)?;
+        let BoundaryRoute { route, drive } = ports.route::<Water>(GUT_WATER)?;
         let slow = RateClass::new(RateBand::Hours, 3_600_000_000_000)?;
         let rate = laws.kernel(|mut k| {
             let value = k.read(&drive);
@@ -279,8 +279,8 @@ fn guessed(
             RowKind::Memory(_) => {
                 packet.start(row.kind(), Measure::<Dimensionless>::new(0.0)?, "synthetic")?
             }
-            RowKind::Algebraic(Slot { law, site }) => match law.local {
-                "enclosure_pressure" if site == Some(pleura) => {
+            RowKind::Algebraic(Slot { law, at }) => match law.local {
+                "enclosure_pressure" if at == Context::Site(pleura) => {
                     packet.start(row.kind(), Measure::<Pressure>::new(pleural + off)?, "synthetic")?
                 }
                 "enclosure_pressure" => packet.start(
@@ -326,6 +326,7 @@ fn the_admission_solve_puts_every_row_of_the_map_on_its_definition() -> Result<(
     let cells = RowKind::Amount {
         site: site::<CapillaryBed>("leg bed")?,
         space: Space::Cells,
+        species: Species::Water,
     };
     let lens = gauge(&body, cells)?;
     let core = ReferenceIntegrator::new(SECOND);
@@ -333,7 +334,10 @@ fn the_admission_solve_puts_every_row_of_the_map_on_its_definition() -> Result<(
     let session = admit_solved(&body, start, port, &core, &lens)?.session;
     let value = |kind| at_admission(&session, &body, kind);
     let bed = site::<CapillaryBed>("pulmonary bed")?;
-    let row = |law: LawName, site| RowKind::Algebraic(Slot { law, site });
+    let row = |law: LawName, site: Option<SiteId>| {
+        let at = site.map_or(Context::Body, Context::Site);
+        RowKind::Algebraic(Slot { law, at })
+    };
     let cv = LawName {
         owner: "CV",
         local: "capillary_pressure",
@@ -377,7 +381,7 @@ fn settling_bed() -> Result<CompiledBody, AdmissionError> {
     schema.leave_out(Space::Lumen, "no circulation in this bench");
     schema.partial_volume(Measure::new(1.0)?)?;
     assemble(schema, |mut body| {
-        let fast = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let fast = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let gut = HeldDeclaration::<Gastrointestinal>::new(vec![], vec![], "a synthetic bench");
         let (mut laws, ports) = body.hold(gut)?.parts();
         enclosure_law(&mut laws, &ports, ParameterKey::new("gi.abdominal-pressure"))?;
@@ -470,7 +474,11 @@ fn a_cycle_solves_field_rows_at_every_point_and_leaves_held_pools_where_they_are
             kind => packet.start(kind, Measure::<Water>::new(START)?, "synthetic")?,
         }
     }
-    let amount = |space, site| RowKind::Amount { site, space };
+    let amount = |space, site| RowKind::Amount {
+        site,
+        space,
+        species: Species::Water,
+    };
     let lens = gauge(&body, amount(Space::Plasma, bed))?;
     let core = ReferenceIntegrator::new(SECOND / 4);
     let port = BoundaryPort::new(Vec::new())?;
@@ -487,7 +495,10 @@ fn a_cycle_solves_field_rows_at_every_point_and_leaves_held_pools_where_they_are
         local: "capillary_pressure",
     };
     assert!(close(
-        value(RowKind::Algebraic(Slot { law, site: Some(bed) })),
+        value(RowKind::Algebraic(Slot {
+            law,
+            at: Context::Site(bed)
+        })),
         CAPILLARY
     ));
     Ok(())
@@ -499,7 +510,11 @@ fn an_anchor_on_a_held_pool_is_a_parameters_value() -> Result<(), AdmissionError
     let leg = site::<CapillaryBed>("leg bed")?;
     let id = AnchorId::new("bench.pool");
     let bound = |space| -> Result<Option<AdmissionError>, AdmissionError> {
-        let row = RowKind::Amount { site: leg, space };
+        let row = RowKind::Amount {
+            site: leg,
+            space,
+            species: Species::Water,
+        };
         let reading = Measure::<Water>::new(START)?;
         let read = Snapshot::new(row, "a synthetic gauge", AnchorStatistic::Instant, reading);
         let mut anchored = packet(&body, 3.0, 5.0)?;
@@ -558,6 +573,7 @@ fn interstitium_after_a_second(
     let kind = RowKind::Amount {
         site: bed,
         space: Space::Interstitium,
+        species: Species::Water,
     };
     let row = body.rows().iter().find(|row| row.kind() == kind).expect("a row");
     Ok(f64::from_bits(
@@ -605,10 +621,13 @@ fn the_baroreflex_reads_the_stretch_cv_defines() -> Result<(), InitializationFai
     let Ok(session) = run_until(session, SimTime::from_ns(SECOND)) else {
         panic!("the bench faulted");
     };
-    let filter = RowKind::Memory(LawName {
-        owner: "NS",
-        local: "afferent-filter",
-    });
+    let filter = RowKind::Memory(
+        LawName {
+            owner: "NS",
+            local: "afferent-filter",
+        }
+        .into(),
+    );
     let row = body
         .rows()
         .iter()
@@ -635,10 +654,12 @@ fn a_held_pool_stays_where_it_is_and_stays_in_the_ledger() -> Result<(), Initial
     let cells = RowKind::Amount {
         site: site::<CapillaryBed>("leg bed")?,
         space: Space::Cells,
+        species: Species::Water,
     };
     let fluid = RowKind::Amount {
         site: site::<EnclosedSpace>("pleural space")?,
         space: Space::Fluid,
+        species: Species::Water,
     };
     assert_eq!((value(cells), value(fluid)), (START, START));
     Ok(())
@@ -666,7 +687,7 @@ fn a_validity_range_on_a_definition_judges_the_row() -> Result<(), Initializatio
         let (mut laws, _ports) = body.cardiovascular()?.parts();
         let out: BaroreceptorAfferents<Defines<'_, Cardiovascular>> = laws.emit();
         let stretch = laws.parameter::<Dimensionless>(ParameterKey::new("cv.stretch"), Admissible::finite());
-        let fast = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let fast = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let judged = stretch_law(&laws, &stretch, fast);
         let range = ValidityRange::new(
             Measure::new(0.0)?,
@@ -710,7 +731,7 @@ fn coupled_loop() -> Result<CompiledBody, AdmissionError> {
     let origin = Position::new(Measure::new(0.0)?, Measure::new(0.0)?, Measure::new(0.0)?);
     map.site::<TissueSite>("body", origin);
     assemble(Schema::new(map.finish()?)?, |mut body| {
-        let fast = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let fast = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let (mut laws, _ports) = body.nervous()?.parts();
         let out: RespiratoryDrive<Defines<'_, Nervous>> = laws.emit();
         let back: LungAfferents<Reads<'_, Nervous>> = laws.receive();
@@ -755,7 +776,7 @@ fn coupled_loop() -> Result<CompiledBody, AdmissionError> {
 fn a_loop_of_two_couplings_is_solved_as_one_coupled_step() -> Result<(), InitializationFailure> {
     let body = coupled_loop()?;
     let named = |owner, local| LawName { owner, local };
-    let climbing = RowKind::Memory(named("RS", "climbing"));
+    let climbing = RowKind::Memory(named("RS", "climbing").into());
     let stretch = RowKind::Algebraic(named("RS", "pulmonary_stretch").into());
     let drive = RowKind::Algebraic(named("NS", "respiratory_drive").into());
     let mut packet = ParameterPacket::new();

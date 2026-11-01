@@ -1,8 +1,10 @@
-use crate::body::{Bound, Instance, ParameterId, RowKind, Target, UnknownId};
+use crate::body::{Bound, GuardLayout, Instance, ParameterId, RowId, RowKind, Target, UnknownId};
 use crate::boundary::DriveFrame;
 use crate::law::{Op, Validity};
 use crate::pinned;
-use crate::{Compensated, CompiledBody, ExcursionSide, LawName, SimTime, ValidityExcursion};
+use crate::{
+    Compensated, CompiledBody, Crossing, ErrorScales, ExcursionSide, LawName, SimTime, ValidityExcursion,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum OperatorDomain {
@@ -59,6 +61,17 @@ fn run(
             Op::Ln([x]) => pinned::ln(at(*x)).ok_or(OperatorDomain::LogarithmArgument)?,
             Op::Relax([target, current, speed]) => at(*speed) * (at(*target) - at(*current)),
             Op::Volume([amount]) => at(*amount) * partial_volume,
+            Op::Upwind([flow, from, from_water, to, to_water]) => {
+                let (amount, water) = if at(*flow) >= 0.0 {
+                    (at(*from), at(*from_water))
+                } else {
+                    (at(*to), at(*to_water))
+                };
+                if water <= 0.0 {
+                    return Err(OperatorDomain::Divisor);
+                }
+                at(*flow) * (amount / water)
+            }
         };
         if !result.is_finite() {
             return Err(OperatorDomain::NonFinite);
@@ -116,6 +129,17 @@ fn sweep(ops: &[Op], values: &[f64], partial_volume: f64, slopes: &mut Vec<f64>)
                 slopes[*speed] += slope * gap;
             }
             Op::Volume([amount]) => slopes[*amount] += slope * partial_volume,
+            Op::Upwind([flow, from, from_water, to, to_water]) => {
+                let (amount, water) = if values[*flow] >= 0.0 {
+                    (*from, *from_water)
+                } else {
+                    (*to, *to_water)
+                };
+                let share = values[amount] / values[water];
+                slopes[*flow] += slope * share;
+                slopes[amount] += slope * values[*flow] / values[water];
+                slopes[water] -= slope * values[*flow] * share / values[water];
+            }
         }
     }
 }
@@ -142,17 +166,61 @@ impl CompiledBody {
     fn partial_volume(&self) -> f64 {
         (self.layout.schema.partial_volume.as_ref()).map_or(0.0, |coefficient| coefficient.value())
     }
-    fn walk(&self, instance: &Instance, inputs: &Inputs<'_>, stack: &mut Vec<f64>) -> Result<f64, Undefined> {
-        let program = &self.layout.programs[instance.program.index()];
-        let mut bounds = instance.inputs.iter();
-        let next = || match *bounds.next().expect("one bound per input") {
+    /// How far a guard stands past its crossing. `Either` reads the crossing as a change of sign, which a landing
+    /// reads off the base, so a guard of it stands at the negative of its size.
+    pub(crate) fn guard_gap(&self, guard: &GuardLayout, inputs: &Inputs<'_>) -> Result<f64, Undefined> {
+        let mut bounds = guard.inputs.iter();
+        let next = || Self::bound(bounds.next().expect("one bound per input"), inputs);
+        let mut stack = Vec::new();
+        let value = run(&guard.code.ops, next, self.partial_volume(), &mut stack).map_err(|domain| {
+            let law = self.layout.modes[guard.variable].variable.law;
+            Undefined { law, domain }
+        })?;
+        Ok(match guard.crossing {
+            Crossing::Rising => value,
+            Crossing::Falling => -value,
+            Crossing::Either => -value.abs(),
+        })
+    }
+    /// Which modes and resets follow a point's state: every plain guard armed in `inputs.modes` and crossed fires,
+    /// holding a gap within `tolerance` of zero crossed, so a point that lands on its guard, as the ring's last point
+    /// lands on the wrap, reads the same on every sweep.
+    pub(crate) fn fired_at(
+        &self,
+        inputs: &Inputs<'_>,
+        tolerance: &ErrorScales,
+    ) -> Result<(Vec<usize>, Vec<RowId>), Undefined> {
+        let mut modes = inputs.modes.to_vec();
+        let mut resets = Vec::new();
+        for guard in self
+            .layout
+            .guards
+            .iter()
+            .filter(|guard| guard.armed(inputs.modes))
+        {
+            let gap = self.guard_gap(guard, inputs)?;
+            if gap >= -tolerance.at(gap, 1.0) {
+                modes[guard.variable] = guard.enters;
+                resets.extend(guard.resets);
+            }
+        }
+        Ok((modes, resets))
+    }
+    fn bound(bound: &Bound, inputs: &Inputs<'_>) -> f64 {
+        match *bound {
             Bound::Parameter(parameter) => inputs.parameters[parameter.index()],
             Bound::Unknown(unknown) => inputs.unknowns[unknown.index()],
             Bound::Boundary(name) => inputs.frame.rate(name),
             Bound::Draw(stream) => inputs.draws[stream],
             Bound::Forcing(forcing) => inputs.factors[forcing],
             Bound::Gauge => 0.0,
-        };
+            Bound::Height(axial) => inputs.frame.upright() * f64::from_bits(axial),
+        }
+    }
+    fn walk(&self, instance: &Instance, inputs: &Inputs<'_>, stack: &mut Vec<f64>) -> Result<f64, Undefined> {
+        let program = &self.layout.programs[instance.program.index()];
+        let mut bounds = instance.inputs.iter();
+        let next = || Self::bound(bounds.next().expect("one bound per input"), inputs);
         run(&program.code.ops, next, self.partial_volume(), stack).map_err(|domain| Undefined {
             law: program.law,
             domain,
@@ -176,7 +244,8 @@ impl CompiledBody {
             let Some(value) = *value else { continue };
             match instance.target {
                 Target::Column(column) => columns[column.index()] = value,
-                Target::Row(row) => rows[row.index()] = positive_part(instance, value),
+                // A row's laws add, so a sum over sites is one row with one instance per site.
+                Target::Row(row) => rows[row.index()] += positive_part(instance, value),
             }
         }
         (columns, rows)

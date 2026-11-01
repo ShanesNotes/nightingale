@@ -1,11 +1,12 @@
-use crate::elimination::Elimination;
+use crate::elimination::{Elimination, Factors};
 use crate::identity::{Canonical, Seal};
 use crate::law::{Op, Validity};
+use crate::problem::Jacobian;
 use crate::scope::HeldCard;
 use crate::sources::{RefusalSource, refusal_sources};
 use crate::{
     AdmissibleSet, Class, ConservedBasis, Crossing, Digest, LawName, Network, ParameterKey, Predicate,
-    RateClass, Schema, SiteId, Space,
+    RateClass, Schema, SiteId, Space, Species,
 };
 
 macro_rules! index {
@@ -110,9 +111,23 @@ impl CompiledBody {
     pub fn hazards(&self) -> impl Iterator<Item = LawName> + '_ {
         (self.layout.hazards.iter()).map(|hazard| self.layout.streams[hazard.stream].name)
     }
+    /// One Jacobian of this body factored over its elimination, or the row whose pivot it cannot take. A pivot never
+    /// moves, so a core that meets one solves `Jacobian::view` its own way.
+    pub fn factor(&self, jacobian: &Jacobian) -> Result<Factors<'_>, usize> {
+        self.layout.elimination.factor(&jacobian.values)
+    }
     /// The cards held, in card order.
     pub fn held(&self) -> impl Iterator<Item = &'static str> + '_ {
         self.layout.held.iter().map(|held| held.card)
+    }
+    /// The longest step this body's laws tolerate: the tightest class of any block a law moves. `attempt` caps a ticket
+    /// here, as a running delivery's end caps one, so no step runs past a law's interval. A held pool's block limits
+    /// nothing. A core reads it, so it need not commit to a span the record will cap.
+    pub fn longest_step_ns(&self) -> u64 {
+        (self.layout.blocks.iter())
+            .map(|block| block.rate.maximum_ns())
+            .min()
+            .unwrap_or(u64::MAX)
     }
 }
 impl Seal for Layout {
@@ -201,37 +216,51 @@ impl Seal for Row {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RowKind {
-    Amount { site: SiteId, space: Space },
-    Memory(LawName),
+    Amount {
+        site: SiteId,
+        space: Space,
+        species: Species,
+    },
+    Memory(Slot),
     Algebraic(Slot),
 }
-/// An algebraic row's name: its law and, for a row per site, the site.
+/// A law's row or mode variable and the place it stands: the body, a site or an edge, so one name serves all three.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Slot {
     pub law: LawName,
-    pub site: Option<SiteId>,
+    pub at: Context,
 }
 impl From<LawName> for Slot {
     fn from(law: LawName) -> Self {
-        Self { law, site: None }
+        Self {
+            law,
+            at: Context::Body,
+        }
+    }
+}
+impl Seal for Slot {
+    fn seal(&self, out: &mut Canonical) {
+        let Self { law, at } = self;
+        law.seal(out);
+        at.seal(out);
     }
 }
 impl Seal for RowKind {
     fn seal(&self, out: &mut Canonical) {
         match self {
-            RowKind::Amount { site, space } => {
+            RowKind::Amount { site, space, species } => {
                 out.number(0);
                 site.seal(out);
                 out.number(*space as u64);
+                out.number(*species as u64);
             }
-            RowKind::Memory(name) => {
+            RowKind::Memory(slot) => {
                 out.number(1);
-                name.seal(out);
+                slot.seal(out);
             }
-            RowKind::Algebraic(Slot { law, site }) => {
+            RowKind::Algebraic(slot) => {
                 out.number(2);
-                law.seal(out);
-                site.seal(out);
+                slot.seal(out);
             }
         }
     }
@@ -454,14 +483,19 @@ pub(crate) enum Bound {
     Draw(usize),
     Forcing(usize),
     Gauge,
+    /// A site's axial position, as its bits: the head's posture scales it.
+    Height(u64),
 }
 impl Bound {
     pub(crate) fn unknown(&self) -> Option<UnknownId> {
         match *self {
             Bound::Unknown(unknown) => Some(unknown),
-            Bound::Parameter(_) | Bound::Boundary(_) | Bound::Draw(_) | Bound::Forcing(_) | Bound::Gauge => {
-                None
-            }
+            Bound::Parameter(_)
+            | Bound::Boundary(_)
+            | Bound::Draw(_)
+            | Bound::Forcing(_)
+            | Bound::Gauge
+            | Bound::Height(_) => None,
         }
     }
 }
@@ -489,6 +523,10 @@ impl Seal for Bound {
                 forcing.seal(out);
             }
             Bound::Gauge => out.number(5),
+            Bound::Height(axial) => {
+                out.number(6);
+                out.number(*axial);
+            }
         }
     }
 }
@@ -620,8 +658,9 @@ impl Seal for Block {
     }
 }
 
+/// One per variable and place, so a valve's mode is one more entry of one `Vec<usize>`.
 pub(crate) struct ModeLayout {
-    pub(crate) variable: LawName,
+    pub(crate) variable: Slot,
     pub(crate) values: Vec<&'static str>,
 }
 impl Seal for ModeLayout {
@@ -634,13 +673,21 @@ impl Seal for ModeLayout {
         }
     }
 }
+/// One instance per place of its mode variable. `leaves` and `enters` index the variable's sorted values, as a
+/// hazard's do, so a firing is the same two writes for both.
 pub(crate) struct GuardLayout {
-    pub(crate) variable: LawName,
-    pub(crate) leaves: &'static str,
-    pub(crate) enters: &'static str,
+    pub(crate) variable: usize,
+    pub(crate) leaves: usize,
+    pub(crate) enters: usize,
     pub(crate) crossing: Crossing,
     pub(crate) code: Code,
     pub(crate) inputs: Vec<Bound>,
+    pub(crate) resets: Option<RowId>,
+}
+impl GuardLayout {
+    pub(crate) fn armed(&self, modes: &[usize]) -> bool {
+        modes[self.variable] == self.leaves
+    }
 }
 impl Seal for GuardLayout {
     fn seal(&self, out: &mut Canonical) {
@@ -651,6 +698,7 @@ impl Seal for GuardLayout {
             crossing,
             code,
             inputs,
+            resets,
         } = self;
         variable.seal(out);
         leaves.seal(out);
@@ -658,6 +706,7 @@ impl Seal for GuardLayout {
         crossing.seal(out);
         code.seal(out);
         inputs.seal(out);
+        resets.seal(out);
     }
 }
 

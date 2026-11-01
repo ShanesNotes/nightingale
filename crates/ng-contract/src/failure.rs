@@ -1,6 +1,6 @@
 use crate::{
     AnatomyDefect, AnchorId, Binding, Digest, InputId, LawName, ModeValue, ParameterKey, Predicate,
-    QuantityId, RowId, RowKind, SimTime, SiteId, SourceId, Space,
+    QuantityId, RowId, RowKind, SimTime, SiteId, Slot, SourceId, Space,
 };
 
 /// A refusal at a construction call, at `AnatomyBuilder::finish`, at `Assembly::compile`, or at admission.
@@ -31,11 +31,11 @@ pub enum AdmissionError {
     ZeroDenominator,
     /// An absolute scale that is not positive, or a relative scale below zero.
     NonPositiveScale,
-    /// A mode variable a plain guard fires or no hazard guard moves, any mode variable in a body with an
-    /// algebraic row, which a firing could leave false, and any mode variable under a cycle, whose hazard integral
-    /// never returns. A guard that silently never fires is worse than a run that never starts.
+    /// A mode variable no guard moves, one an algebraic law holds by or whose reset an algebraic law reads, which a
+    /// firing could leave false, and one a hazard moves under a cycle, whose integral never returns. A guard that
+    /// silently never fires is worse than a run that never starts.
     ModesNotYetRun {
-        variable: LawName,
+        variable: Slot,
     },
     /// A nonzero constant built only from literals, or a division of two equal expressions, which no packet entry
     /// backs. This check is partial: it reads the graph, never a value, so a regrouped sum, a swapped `scale` or
@@ -49,14 +49,14 @@ pub enum AdmissionError {
         key: ParameterKey,
     },
     MissingStartMode {
-        variable: LawName,
+        variable: Slot,
     },
     UnknownStartMode {
-        variable: LawName,
+        variable: Slot,
         value: &'static str,
     },
     DuplicateStartMode {
-        variable: LawName,
+        variable: Slot,
     },
     UnboundParameter {
         key: ParameterKey,
@@ -209,6 +209,11 @@ pub enum AdmissionError {
     /// A run identity that is not this body's, this origin's and this solver's.
     IdentityMismatch,
     ZeroMinimumInterval,
+    /// A pool in a space its site's class does not have.
+    SpaceOfAnotherClass {
+        site: SiteId,
+        space: Space,
+    },
     /// A policy limit in a dimension the combination does not balance.
     QuantityDimension {
         quantity: QuantityId,
@@ -287,6 +292,11 @@ pub enum CompileDefect {
     UnclaimedLaw { law: LawName },
     /// A read of a coupling field no owner emits. An omitted law is not zero.
     UnemittedField { law: LawName, field: LawName },
+    /// A kernel that holds by a route's mode at a place that route does not stand.
+    ModeOfAnotherPlace { law: LawName },
+    /// A read of a pool this body does not hold there, or of a place the map does not say: a landmark it does not
+    /// place, a bed with more than one drain, or a segment with more than one urinary edge in.
+    NoPoolRead { law: LawName },
     /// A read of a bed's extravascular pressure when its enclosure's compliance has no law yet.
     NoEnclosurePressure { law: LawName, space: SiteId },
     HeldPoolMoved {

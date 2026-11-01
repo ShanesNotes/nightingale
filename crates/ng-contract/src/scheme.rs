@@ -258,8 +258,8 @@ impl DeclaredResolution {
     pub(crate) fn scheme(&self) -> StageScheme {
         self.scheme
     }
-    pub(crate) fn scales(&self) -> ErrorScales {
-        self.scales
+    pub(crate) fn scales(&self) -> &ErrorScales {
+        &self.scales
     }
 }
 

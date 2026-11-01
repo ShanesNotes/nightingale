@@ -108,15 +108,15 @@ fn reservoirs() -> Result<(CompiledBody, SiteId, SiteId), AdmissionError> {
     map.contain(root.id(), b.id());
     map.connect(Network::Vascular, a.id(), b.id());
     let mut schema = Schema::new(map.finish()?)?;
-    schema.water_boundary("inflow", BoundaryDirection::IntoBody, a.id(), Space::Lumen)?;
+    schema.boundary::<Water>("inflow", BoundaryDirection::IntoBody, a.id(), Space::Lumen)?;
     schema.partial_volume(Measure::new(3.0)?)?;
     let body = assemble(schema, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
         let e = laws.end_parameter::<Elastance>(ParameterKey::new("cv.e"), Admissible::positive());
-        let g =
-            laws.edge_parameter::<Conductance<Water>>(ParameterKey::new("cv.g"), Admissible::nonnegative());
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let g = laws
+            .edge_parameter::<_, Conductance<Water>>(ParameterKey::new("cv.g"), Admissible::nonnegative());
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let flow = laws.edge_kernel(|mut k| {
             let upstream = k.at_edge(&route.from_amount());
             let downstream = k.at_edge(&route.to_amount());
@@ -136,7 +136,7 @@ fn reservoirs() -> Result<(CompiledBody, SiteId, SiteId), AdmissionError> {
         laws.transfer_along(&route, flow);
         body.add(laws.finish());
         let (mut laws, ports) = body.boundary()?.parts();
-        let BoundaryWater { route: pair, drive } = ports.water("inflow")?;
+        let BoundaryRoute { route: pair, drive } = ports.route::<Water>("inflow")?;
         let rate = laws.kernel(|mut k| {
             let value = k.read(&drive);
             k.finish(value, laws.every_mode(), wave)
@@ -152,6 +152,7 @@ fn lumen(site: SiteId) -> RowKind {
     RowKind::Amount {
         site,
         space: Space::Lumen,
+        species: Species::Water,
     }
 }
 
@@ -276,9 +277,11 @@ fn nearly_every_operator() -> Result<(CompiledBody, LawName), AdmissionError> {
         let speed =
             laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.speed"), Admissible::positive());
         let reach = laws.parameter::<Pressure>(ParameterKey::new("ns.reach"), Admissible::positive());
+        let deviation_width =
+            laws.parameter::<Deviation<Dimensionless>>(ParameterKey::new("ns.width"), Admissible::positive());
         let divisor = laws.parameter::<Pressure>(ParameterKey::new("ns.divisor"), Admissible::positive());
         let width = laws.parameter::<Dimensionless>(ParameterKey::new("ns.width"), Admissible::positive());
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let first_rate = laws.kernel(|mut k| {
             let x = k.state(&first);
             let y = k.state(&second);
@@ -308,9 +311,9 @@ fn nearly_every_operator() -> Result<(CompiledBody, LawName), AdmissionError> {
             let measured = k.state(&first);
             let reference = k.state(&set_point);
             let error = k.deviation(measured, reference);
-            let spread = k.parameter(&width);
-            let error = k.divide(error, spread);
-            let error = k.as_dimension::<_, Dimensionless>(error);
+            let width = k.parameter(&deviation_width);
+            let ratio = k.divide(error, width);
+            let error: Expr<'_, '_, _, Dimensionless> = k.as_dimension(ratio);
             let target = k.subtract(log, error);
             let y = k.state(&second);
             let rate = k.parameter(&speed);
@@ -344,7 +347,7 @@ fn nearly_every_operator() -> Result<(CompiledBody, LawName), AdmissionError> {
 }
 
 fn memory(local: &'static str) -> RowKind {
-    RowKind::Memory(LawName { owner: "NS", local })
+    RowKind::Memory(LawName { owner: "NS", local }.into())
 }
 
 #[test]
@@ -466,7 +469,7 @@ fn two_beds() -> Result<(CompiledBody, [SiteId; 2]), AdmissionError> {
         schema.leave_out(space, "not in this bench");
     }
     let body = assemble(schema, |mut body| {
-        let class = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let class = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let (mut cv, _ports) = body.cardiovascular()?.parts();
         let out: CapillaryAndVenousPressure<Defines<'_, Cardiovascular>> = cv.emit();
         let held =
@@ -515,16 +518,18 @@ fn a_coupling_field_leans_on_its_own_beds_row_alone() -> Result<(), Initializati
         let law = LawName { owner: "CV", local };
         RowKind::Algebraic(Slot {
             law,
-            site: Some(site),
+            at: Context::Site(site),
         })
     };
     let plasma = |site| RowKind::Amount {
         site,
         space: Space::Plasma,
+        species: Species::Water,
     };
     let interstitium = |site| RowKind::Amount {
         site,
         space: Space::Interstitium,
+        species: Species::Water,
     };
     for (site, _, pressure) in bed_values {
         for local in ["capillary_pressure", "venous_pressure"] {
@@ -568,7 +573,7 @@ fn a_smooth_limit_is_defined_where_its_root_is_zero() -> Result<(), Initializati
         let (mut laws, _ports) = body.nervous()?.parts();
         let first = laws.state::<Dimensionless>("first", Admissible::finite());
         let width = laws.parameter::<Dimensionless>(ParameterKey::new("ns.width"), Admissible::nonnegative());
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let rate = laws.kernel(|mut k| {
             let x = k.state(&first);
             let zero = k.zero::<Dimensionless>();
@@ -616,7 +621,7 @@ fn reading_chance(entries: &[usize]) -> Result<Bench, InitializationFailure> {
     let schema = Schema::new(map.finish()?)?;
     let body = assemble(schema, |mut body| {
         let (mut laws, _ports) = body.nervous()?.parts();
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let [a, b] = laws.modes("rhythm", ["a", "b"]);
         let pace = laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.pace"), Admissible::finite());
         for &entry in entries {

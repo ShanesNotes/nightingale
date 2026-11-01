@@ -29,6 +29,37 @@ macro_rules! site_classes {
 
 pub trait SiteClass: sealed::SiteClass {}
 
+/// Which sites a per-site row, kernel or read stands over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Sites {
+    Class(sealed::Class),
+    /// Every site on the vascular network: each holds blood in its plasma or its lumen.
+    Blood,
+    /// Every vessel segment on the urinary network.
+    Urinary,
+}
+mod sets {
+    pub trait Sealed {}
+}
+/// A site class, or the sites of one network, which cross classes. A law on a set is still one law.
+pub trait SiteSet: sets::Sealed {
+    const SET: Sites;
+}
+impl<C: SiteClass> sets::Sealed for C {}
+impl<C: SiteClass> SiteSet for C {
+    const SET: Sites = Sites::Class(C::CLASS);
+}
+pub enum Blood {}
+pub enum Urinary {}
+impl sets::Sealed for Blood {}
+impl sets::Sealed for Urinary {}
+impl SiteSet for Blood {
+    const SET: Sites = Sites::Blood;
+}
+impl SiteSet for Urinary {
+    const SET: Sites = Sites::Urinary;
+}
+
 site_classes!(
     CapillaryBed,
     VesselSegment,
@@ -91,6 +122,21 @@ impl Position {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Network {
     Vascular,
+    /// From a bed's interstitium to a vessel's lumen.
+    Lymph,
+    /// From a bed's plasma, or a lumen, to a lumen.
+    Urinary,
+    /// From a lumen back to a bed's plasma: what a tubule wall takes back.
+    Reclaim,
+}
+
+/// A place a whole-body law reads by what it is, so the law names no site and a refined map moves the mark.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Landmark {
+    CarotidSinus,
+    AorticArch,
+    Pacemaker,
+    MaculaDensa,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -172,6 +218,14 @@ pub enum AnatomyDefect {
     UndrainedBed {
         bed: &'static str,
     },
+    /// An edge of the wrong classes for its network, a valve on no vascular edge, or a landmark placed twice.
+    WrongNetwork {
+        site: &'static str,
+    },
+    /// A site two junctions supply.
+    SuppliedTwice {
+        site: &'static str,
+    },
 }
 
 struct Declared {
@@ -185,6 +239,10 @@ pub struct AnatomyBuilder {
     sites: Vec<Declared>,
     contains: Vec<(SiteId, SiteId)>,
     vascular: Vec<(SiteId, SiteId)>,
+    others: Vec<(Network, SiteId, SiteId)>,
+    valves: Vec<(SiteId, SiteId)>,
+    supplies: Vec<(SiteId, SiteId)>,
+    landmarks: Vec<(Landmark, SiteId, SiteId)>,
     encloses: Vec<(SiteId, SiteId)>,
     compliances: Vec<(SiteId, Compliance)>,
     served_by: Vec<(SiteId, SiteId, Afferent)>,
@@ -211,7 +269,23 @@ impl AnatomyBuilder {
     pub fn connect(&mut self, network: Network, from: SiteId, to: SiteId) {
         match network {
             Network::Vascular => self.vascular.push((from, to)),
+            other => self.others.push((other, from, to)),
         }
+    }
+    /// A vascular edge with a valve on it: its flow is memory and its law holds by mode. A plain edge has no valve.
+    pub fn valve(&mut self, from: SiteId, to: SiteId) {
+        self.vascular.push((from, to));
+        self.valves.push((from, to));
+    }
+    /// The sites a junction's nerve reaches. An edge reads the junction of the site it runs into, so an edge into a
+    /// bed reads what its arterioles read. A site no junction supplies reads no effect.
+    pub fn supply(&mut self, junction: &Site<Junction>, sites: &[SiteId]) {
+        self.supplies
+            .extend(sites.iter().map(|&site| (junction.id(), site)));
+    }
+    /// Where a landmark stands: the site whose rows a law reads there, and the site whose height it sits at.
+    pub fn landmark(&mut self, landmark: Landmark, site: SiteId, height: SiteId) {
+        self.landmarks.push((landmark, site, height));
     }
     /// A repeat with the same compliance adds to what the space encloses.
     pub fn enclose(&mut self, space: &Site<EnclosedSpace>, sites: &[SiteId], compliance: Compliance) {
@@ -231,6 +305,7 @@ impl AnatomyBuilder {
     pub fn finish(self) -> Result<Anatomy, AdmissionError> {
         let facts = Facts::resolve(self)?;
         facts.check_relations()?;
+        facts.check_networks()?;
         let tree = Tree::of(&facts)?;
         let enclosure = Enclosure::of(&facts, &tree)?;
         facts.check_circulation()?;
@@ -242,6 +317,10 @@ struct Facts {
     sites: Vec<Declared>,
     contains: Vec<(usize, usize)>,
     vascular: Vec<(usize, usize)>,
+    others: Vec<(Network, SiteId, SiteId)>,
+    valves: Vec<(SiteId, SiteId)>,
+    supplies: Vec<(SiteId, SiteId)>,
+    landmarks: Vec<(Landmark, SiteId, SiteId)>,
     encloses: Vec<(usize, usize)>,
     compliances: Vec<(usize, Compliance)>,
     served_by: Vec<(usize, usize, Afferent)>,
@@ -271,7 +350,20 @@ impl Facts {
                 .iter()
                 .flat_map(|&(site, segment, _)| [site, segment]),
         )
-        .chain(builder.regions.iter().map(|&(_, root)| root));
+        .chain(builder.regions.iter().map(|&(_, root)| root))
+        .chain(builder.others.iter().flat_map(|&(_, from, to)| [from, to]))
+        .chain(
+            builder
+                .supplies
+                .iter()
+                .flat_map(|&(junction, site)| [junction, site]),
+        )
+        .chain(
+            builder
+                .landmarks
+                .iter()
+                .flat_map(|&(_, site, height)| [site, height]),
+        );
         if let Some(site) = named.filter(|&id| place(id).is_err()).map(|id| id.key).min() {
             return Err(AnatomyDefect::Undeclared { site });
         }
@@ -281,6 +373,10 @@ impl Facts {
             return Err(AnatomyDefect::RegionTwice { region: pair[0].0 });
         }
         Ok(Self {
+            others: relation(builder.others, same)?,
+            valves: relation(builder.valves, same)?,
+            supplies: relation(builder.supplies, same)?,
+            landmarks: relation(builder.landmarks, same)?,
             contains: relation(builder.contains, pair)?,
             vascular: relation(builder.vascular, pair)?,
             encloses: relation(builder.encloses, pair)?,
@@ -299,6 +395,29 @@ impl Facts {
 
     fn class(&self, site: usize) -> Class {
         self.sites[site].class
+    }
+
+    /// A lymph edge runs from a bed to a vessel segment, a urinary edge into a vessel segment and a reclaim edge from
+    /// a vessel segment to a bed. A site has one junction, and a landmark one place.
+    fn check_networks(&self) -> Result<(), AnatomyDefect> {
+        let fits = |&(network, from, to): &(Network, SiteId, SiteId)| match network {
+            Network::Vascular => true,
+            Network::Lymph => from.class == Class::CapillaryBed && to.class == Class::VesselSegment,
+            Network::Urinary => to.class == Class::VesselSegment,
+            Network::Reclaim => from.class == Class::VesselSegment && to.class == Class::CapillaryBed,
+        };
+        if let Some(edge) = self.others.iter().find(|edge| !fits(edge)) {
+            return Err(AnatomyDefect::WrongNetwork { site: edge.1.key });
+        }
+        if let Some(pair) = (self.landmarks.windows(2)).find(|pair| pair[0].0 == pair[1].0) {
+            return Err(AnatomyDefect::WrongNetwork { site: pair[0].1.key });
+        }
+        let mut supplied: Vec<SiteId> = self.supplies.iter().map(|&(_, site)| site).collect();
+        supplied.sort_unstable();
+        match supplied.windows(2).find(|pair| pair[0] == pair[1]) {
+            Some(pair) => Err(AnatomyDefect::SuppliedTwice { site: pair[0].key }),
+            None => Ok(()),
+        }
     }
 
     fn check_relations(&self) -> Result<(), AnatomyDefect> {
@@ -347,6 +466,10 @@ impl Facts {
             None => Ok(()),
         }
     }
+}
+
+fn same<T>(fact: T) -> Result<T, AnatomyDefect> {
+    Ok(fact)
 }
 
 fn relation<T, U: Ord>(
@@ -533,6 +656,10 @@ pub struct Anatomy {
     sites: Vec<Placed>,
     preorder: Vec<SiteId>,
     vascular: Vec<(usize, usize)>,
+    others: Vec<(Network, SiteId, SiteId)>,
+    valves: Vec<(SiteId, SiteId)>,
+    supplies: Vec<(SiteId, SiteId)>,
+    landmarks: Vec<(Landmark, SiteId, SiteId)>,
     served_by: Vec<(usize, usize, Afferent)>,
     regions: Vec<(&'static str, usize)>,
 }
@@ -562,6 +689,10 @@ impl Anatomy {
             sites: placed.collect(),
             preorder,
             vascular: facts.vascular,
+            others: facts.others,
+            valves: facts.valves,
+            supplies: facts.supplies,
+            landmarks: facts.landmarks,
             served_by: facts.served_by,
             regions: facts.regions,
         }
@@ -573,6 +704,10 @@ impl Anatomy {
             sites,
             preorder: _,
             vascular,
+            others,
+            valves,
+            supplies,
+            landmarks,
             served_by,
             regions,
         } = self;
@@ -640,6 +775,25 @@ impl Anatomy {
             bytes.text(key);
             index(&mut bytes, root);
         }
+        bytes.length(others.len());
+        for (network, from, to) in others {
+            bytes.number(*network as u64);
+            from.seal(&mut bytes);
+            to.seal(&mut bytes);
+        }
+        for pairs in [valves, supplies] {
+            bytes.length(pairs.len());
+            for (first, second) in pairs {
+                first.seal(&mut bytes);
+                second.seal(&mut bytes);
+            }
+        }
+        bytes.length(landmarks.len());
+        for (landmark, site, height) in landmarks {
+            bytes.number(*landmark as u64);
+            site.seal(&mut bytes);
+            height.seal(&mut bytes);
+        }
         bytes.digest()
     }
 
@@ -682,5 +836,62 @@ impl Anatomy {
 
     pub(crate) fn vascular(&self) -> impl Iterator<Item = (SiteId, SiteId)> + '_ {
         (self.vascular.iter()).map(|&(from, to)| (self.sites[from].id, self.sites[to].id))
+    }
+
+    pub(crate) fn is_valve(&self, edge: (SiteId, SiteId)) -> bool {
+        self.valves.binary_search(&edge).is_ok()
+    }
+
+    /// Every edge of a network other than the vascular one, in key order.
+    pub(crate) fn edges(&self, network: Network) -> impl Iterator<Item = (SiteId, SiteId)> + '_ {
+        (self.others.iter())
+            .filter(move |edge| edge.0 == network)
+            .map(|edge| (edge.1, edge.2))
+    }
+
+    /// The one site a bed drains to. Compile refuses a read of it at a bed with more or fewer.
+    pub(crate) fn drain(&self, bed: SiteId) -> Option<SiteId> {
+        let mut out = self.vascular().filter(|edge| edge.0 == bed).map(|edge| edge.1);
+        let first = out.next();
+        first.filter(|_| out.next().is_none())
+    }
+
+    /// The members of a set, in key order.
+    pub(crate) fn in_set(&self, set: Sites) -> Vec<SiteId> {
+        let vascular: Vec<(SiteId, SiteId)> = self.vascular().collect();
+        let on_network = |site: SiteId| vascular.iter().any(|edge| edge.0 == site || edge.1 == site);
+        let on_tract = |site: SiteId| {
+            site.class == Class::VesselSegment
+                && self
+                    .edges(Network::Urinary)
+                    .any(|edge| edge.0 == site || edge.1 == site)
+        };
+        (self.sites())
+            .filter(|&site| match set {
+                Sites::Class(class) => site.class == class,
+                Sites::Blood => on_network(site),
+                Sites::Urinary => on_tract(site),
+            })
+            .collect()
+    }
+
+    /// The junction that supplies `site`. A site none supplies reads no effect.
+    pub(crate) fn junction(&self, site: SiteId) -> Option<SiteId> {
+        (self.supplies.iter())
+            .find(|supply| supply.1 == site)
+            .map(|supply| supply.0)
+    }
+
+    /// The site a landmark's rows stand at and the site whose height it sits at.
+    pub(crate) fn landmark(&self, landmark: Landmark) -> Option<(SiteId, SiteId)> {
+        (self.landmarks.iter())
+            .find(|mark| mark.0 == landmark)
+            .map(|mark| (mark.1, mark.2))
+    }
+
+    /// A site's height in the body frame, the part posture scales.
+    pub(crate) fn axial(&self, site: SiteId) -> f64 {
+        self.placed(site)
+            .map_or(0.0, |placed| placed.position.axial.value())
     }
 }

@@ -1597,7 +1597,7 @@ fn holds_a_forcing() -> Result<(CompiledBody, RowId), AdmissionError> {
     let body = assemble(two_vessels()?, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let flow = laws.edge_kernel(|mut k| {
             let zero = k.zero::<Rate<Water>>();
             k.finish(zero, laws.every_mode(), wave)
@@ -1695,7 +1695,7 @@ fn admission_holds_a_draw_at_its_mean() -> Result<(), InitializationFailure> {
     let body = assemble(two_vessels()?, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let flow = laws.edge_kernel(|mut k| {
             let zero = k.zero::<Rate<Water>>();
             k.finish(zero, laws.every_mode(), wave)

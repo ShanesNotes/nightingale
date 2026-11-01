@@ -879,10 +879,13 @@ fn a_lens_digest_covers_its_body_its_grid_and_each_channel() {
 #[test]
 fn a_lens_refuses_a_row_the_body_does_not_hold() {
     let case = water_case();
-    let row = RowKind::Memory(LawName {
-        owner: "CV",
-        local: "no such slot",
-    });
+    let row = RowKind::Memory(
+        LawName {
+            owner: "CV",
+            local: "no such slot",
+        }
+        .into(),
+    );
     let refused = case
         .body()
         .lens(vec![ChannelSpec::new("a synthetic method", row)], count(SECOND));

@@ -26,7 +26,7 @@ fn declared(
     assemble(two_vessels()?, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let flow = laws.edge_kernel(|mut k| {
             let zero = k.zero::<Rate<Water>>();
             k.finish(zero, laws.every_mode(), wave)
@@ -284,13 +284,18 @@ fn a_start_mode_is_refused_when_it_is_missing_unknown_or_given_twice() {
     let variable = name("rhythm");
     assert_eq!(
         body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
-        Some(AdmissionError::MissingStartMode { variable })
+        Some(AdmissionError::MissingStartMode {
+            variable: variable.into()
+        })
     );
     let mut wrong = ParameterPacket::<SyntheticFixture>::new();
     wrong.start_mode(variable, "c", "synthetic").expect("one entry");
     assert_eq!(
         body.bind(wrong).err(),
-        Some(AdmissionError::UnknownStartMode { variable, value: "c" })
+        Some(AdmissionError::UnknownStartMode {
+            variable: variable.into(),
+            value: "c"
+        })
     );
     let mut other = ParameterPacket::<SyntheticFixture>::new();
     other.start_mode(variable, "a", "synthetic").expect("one entry");
@@ -299,7 +304,7 @@ fn a_start_mode_is_refused_when_it_is_missing_unknown_or_given_twice() {
     assert_eq!(
         body.bind(other).err(),
         Some(AdmissionError::UnknownStartMode {
-            variable: unknown,
+            variable: unknown.into(),
             value: "a"
         })
     );
@@ -307,7 +312,9 @@ fn a_start_mode_is_refused_when_it_is_missing_unknown_or_given_twice() {
     twice.start_mode(variable, "a", "synthetic").expect("one entry");
     assert_eq!(
         twice.start_mode(variable, "b", "synthetic").err(),
-        Some(AdmissionError::DuplicateStartMode { variable })
+        Some(AdmissionError::DuplicateStartMode {
+            variable: variable.into()
+        })
     );
 }
 
@@ -326,7 +333,7 @@ fn a_mode_variable_a_plain_guard_fires_stays_refused_by_name() {
     assert_eq!(
         body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
         Some(AdmissionError::ModesNotYetRun {
-            variable: name("valve")
+            variable: name("valve").into()
         })
     );
 }
@@ -352,7 +359,7 @@ fn a_mode_variable_a_hazard_and_a_plain_guard_share_stays_refused_by_name() {
     assert_eq!(
         body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
         Some(AdmissionError::ModesNotYetRun {
-            variable: name("rhythm")
+            variable: name("rhythm").into()
         })
     );
 }
@@ -372,7 +379,7 @@ fn a_hazard_in_a_body_with_an_algebraic_row_stays_refused_by_name() {
     assert_eq!(
         body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
         Some(AdmissionError::ModesNotYetRun {
-            variable: name("rhythm")
+            variable: name("rhythm").into()
         })
     );
 }

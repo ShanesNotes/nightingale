@@ -43,9 +43,9 @@ fn reservoirs(defect: Defect) -> Result<Reservoirs, AdmissionError> {
         ),
         _ => (a.id(), Space::Lumen),
     };
-    schema.water_boundary("inflow", BoundaryDirection::IntoBody, site, space)?;
+    schema.boundary::<Water>("inflow", BoundaryDirection::IntoBody, site, space)?;
     if defect == Defect::InflowNamedTwice {
-        schema.water_boundary("inflow", BoundaryDirection::OutOfBody, b.id(), Space::Lumen)?;
+        schema.boundary::<Water>("inflow", BoundaryDirection::OutOfBody, b.id(), Space::Lumen)?;
     }
     if defect == Defect::LumenLeftOut {
         schema.leave_out(Space::Lumen, "a defect: the inflow and the circulation move it");
@@ -55,9 +55,9 @@ fn reservoirs(defect: Defect) -> Result<Reservoirs, AdmissionError> {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
         let e = laws.end_parameter::<Elastance>(ParameterKey::new("cv.e"), Admissible::positive());
-        let g =
-            laws.edge_parameter::<Conductance<Water>>(ParameterKey::new("cv.g"), Admissible::nonnegative());
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let g = laws
+            .edge_parameter::<_, Conductance<Water>>(ParameterKey::new("cv.g"), Admissible::nonnegative());
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let flow = laws.edge_kernel(|mut k| {
             let upstream = k.at_edge(&route.from_amount());
             let downstream = k.at_edge(&route.to_amount());
@@ -83,7 +83,7 @@ fn reservoirs(defect: Defect) -> Result<Reservoirs, AdmissionError> {
             } else {
                 "inflow"
             };
-            let BoundaryWater { route: pair, drive } = ports.water(name)?;
+            let BoundaryRoute { route: pair, drive } = ports.route::<Water>(name)?;
             if defect == Defect::BoundarySlotNamedLikeInflow {
                 laws.state::<Dimensionless>("inflow", Admissible::finite());
             }
@@ -142,6 +142,7 @@ fn the_two_reservoir_body_has_the_hand_derived_incidence_and_basis() -> Result<(
     let lumen = |site| RowKind::Amount {
         site,
         space: Space::Lumen,
+        species: Species::Water,
     };
     let kinds: Vec<RowKind> = compiled.rows().iter().map(Row::kind).collect();
     assert_eq!(kinds, [lumen(a), lumen(b)]);
@@ -167,7 +168,7 @@ fn the_two_reservoir_body_has_the_hand_derived_incidence_and_basis() -> Result<(
             (combination.book(), terms)
         })
         .collect();
-    assert_eq!(basis, [(Book::Water, vec![(0, 1), (1, 1)])]);
+    assert_eq!(basis, [(Book::Of(Species::Water), vec![(0, 1), (1, 1)])]);
     Ok(())
 }
 
@@ -297,9 +298,9 @@ fn one_end(reads: Reads) -> Result<(SiteId, SiteId, CompiledBody), AdmissionErro
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
         let e = laws.end_parameter::<Elastance>(ParameterKey::new("cv.e"), Admissible::positive());
-        let g =
-            laws.edge_parameter::<Conductance<Water>>(ParameterKey::new("cv.g"), Admissible::nonnegative());
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let g = laws
+            .edge_parameter::<_, Conductance<Water>>(ParameterKey::new("cv.g"), Admissible::nonnegative());
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let flow = laws.edge_kernel(|mut k| {
             let elastance = match reads {
                 Reads::Upstream => k.upstream_parameter(&e),

@@ -10,13 +10,13 @@ use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::law::{
     End, Family, FragmentData, GuardDeclaration, Input, KernelData, ModeDeclaration, Obligation, Op, Over,
-    ParameterContext, ParameterDeclaration, Selector, SlotDeclaration, SlotKind,
+    ParameterContext, ParameterDeclaration, Selector, SlotDeclaration, SlotKind, Source, Where,
 };
-use crate::quantity::dimension;
-use crate::scope::{ENCLOSURE_PRESSURE, HeldCard, PoolRef, WaterBoundary};
+use crate::scope::{ENCLOSURE_PRESSURE, HeldCard, PoolRef, RouteBoundary};
 use crate::{
     AdmissibleSet, AdmissionError, Anatomy, Boundary, BoundaryDirection, Class, CompileDefect, Compliance,
-    LawName, ModeValue, Network, Owner, ParameterKey, Predicate, RateClass, Schema, SiteId, Space, Water,
+    LawName, ModeValue, Network, Owner, ParameterKey, Predicate, RateClass, Schema, SiteId, Sites, Space,
+    Species,
 };
 
 pub(crate) fn compile(
@@ -26,6 +26,7 @@ pub(crate) fn compile(
     mut fragments: Vec<FragmentData>,
 ) -> Result<CompiledBody, AdmissionError> {
     fragments.sort_by_key(|fragment| fragment.owner);
+    lift_flows(&mut fragments, &schema);
     held.sort_by_key(|card| card.card);
     check_fragments(&issued, &fragments, &schema, &held)?;
     check_boundaries(&schema)?;
@@ -36,33 +37,51 @@ pub(crate) fn compile(
     check_chance(&fragments)?;
     check_volume(&schema, &owed, &fragments)?;
 
-    let rows = Rows::lay_out(&schema, &fragments);
-    let reaches = Reaches::of(&schema.anatomy);
+    let reaches = Reaches::of(&schema, &fragments);
+    let rows = Rows::lay_out(&schema, &fragments, &reaches, &held);
     let chance = ChanceNames::of(&fragments);
     let places = Places {
         rows: &rows,
         reaches: &reaches,
         chance: &chance,
         anatomy: &schema.anatomy,
+        schema: &schema,
+        fragments: &fragments,
         held: &held,
     };
     let placement = place(&owed, &places)?;
     check_holds(&rows, &schema, &held)?;
     check_orphans(&rows, &placement.columns, &schema, &held)?;
-    let guards = guards(&fragments, &places)?;
+    let modes = modes(&fragments, &places);
+    let guards = guards(&fragments, &places, &modes)?;
     let forced = forcing_parameters(&fragments);
     let (parameters, instances, guards) = bind(placement.instances, guards, &forced, &declarations);
-    let (reads, rates) = reads(&rows.rows, &placement.columns, &placement.programs, &instances);
-    let modes = modes(&fragments);
+    let closed = closed_rows(&fragments, &rows);
+    let (reads, rates) = reads(
+        &rows.rows,
+        &placement.columns,
+        &placement.programs,
+        &instances,
+        &closed,
+    );
     let hazards = hazards(&fragments, &rows, &chance, &modes);
-    let instances = marked(instances, &placement.programs, &modes, &hazards);
+    let instances = marked(instances, &placement.programs, &modes, &hazards)?;
     let (streams, forcings) = chance.laid_out(&fragments, &parameters);
-    match_each_mode(&rows.rows, &placement.programs, &instances, &modes)?;
+    match_each_mode(&rows.rows, &placement.programs, &instances, &modes, &closed)?;
     let solved_by = solved_by(&rows.rows, &reads)?;
     let blocks = blocks(&solved_by, &reads, &rates);
-    let basis = conserved_basis(rows.amounts.len(), &placement.columns);
+    let species: Vec<Species> = rows.amounts.iter().map(|pool| pool.species).collect();
+    let read_by = |column: usize| {
+        let target = Target::Column(ColumnId::at(column));
+        (instances.iter())
+            .filter(|instance| instance.target == target)
+            .any(|instance| instance.inputs.iter().any(|input| input.unknown().is_some()))
+    };
+    let column_reads: Vec<bool> = (0..placement.columns.len()).map(read_by).collect();
+    let basis = conserved_basis(&species, &placement.columns, &column_reads);
+    let pivots = pivots(solved_by.clone(), &reads, &closed);
     let sparsity = sparsity(reads);
-    let elimination = Elimination::plan(&sparsity.offsets, &sparsity.unknowns, &solved_by);
+    let elimination = Elimination::plan(&sparsity.offsets, &sparsity.unknowns, &pivots);
     Ok(CompiledBody::seal(Layout {
         schema,
         rows: rows.rows,
@@ -104,6 +123,31 @@ fn route_owner(held: &[HeldCard], route: &'static str) -> &'static str {
         .map_or(Boundary::CARD, |card| card.card)
 }
 
+/// Whether a route's columns come from one flow row: a valve's always, and any fluid route's in a body that carries
+/// more than water, where several columns share the rate. A route of water alone is its one column.
+fn flows(family: Family, schema: &Schema) -> bool {
+    family == Family::Valves || (family.fluid() && !schema.carried.is_empty())
+}
+
+/// Turns each flowing route's law into the definition of its flow row, once the schema says which routes flow.
+fn lift_flows(fragments: &mut [FragmentData], schema: &Schema) {
+    for fragment in fragments {
+        for law in &mut fragment.laws {
+            if let Obligation::Family(family) = law.serves
+                && flows(family, schema)
+            {
+                law.serves = Obligation::Defined(family.name());
+                law.kernel = law.kernel.clone().defining(family.name());
+            }
+        }
+        for family in fragment.families.clone() {
+            if flows(family, schema) && family != Family::Valves {
+                fragment.owe_flow(family);
+            }
+        }
+    }
+}
+
 fn check_names(fragment: &FragmentData, schema: &Schema, held: &[HeldCard]) -> Result<(), CompileDefect> {
     let named = |local| LawName {
         owner: fragment.owner,
@@ -113,7 +157,11 @@ fn check_names(fragment: &FragmentData, schema: &Schema, held: &[HeldCard]) -> R
         .chain(fragment.modes.iter().map(|mode| mode.name))
         .chain(fragment.streams.iter().copied())
         .chain(fragment.forcings.iter().map(|forcing| forcing.name))
-        .chain(fragment.families.iter().map(|family| family.name()))
+        .chain(
+            (fragment.families.iter())
+                .filter(|family| !flows(**family, schema))
+                .map(|family| family.name()),
+        )
         .chain(
             (schema.boundaries.iter())
                 .filter(|boundary| route_owner(held, boundary.name) == fragment.owner)
@@ -144,7 +192,7 @@ fn check_names(fragment: &FragmentData, schema: &Schema, held: &[HeldCard]) -> R
 fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
     let pools: Vec<PoolRef> = schema
         .pools()
-        .map(|(site, space)| PoolRef { site, space })
+        .map(|(site, space, species)| PoolRef { site, space, species })
         .collect();
     match schema
         .boundaries
@@ -191,7 +239,9 @@ struct Owed<'f> {
 enum Serves<'f> {
     Slot(Over),
     Family(Family),
-    Boundary(&'f WaterBoundary),
+    Boundary(&'f RouteBoundary),
+    /// One body row's other laws, one instance at every site of a set.
+    Sum(Sites),
 }
 
 fn obligations<'f>(
@@ -236,13 +286,20 @@ fn obligations<'f>(
                 obligation,
             ));
         }
-        for &family in &fragment.families {
+        for &family in fragment.families.iter().filter(|family| !flows(**family, schema)) {
             owed.push(Owed::gather(
                 fragment,
                 family.name(),
                 Serves::Family(family),
                 Obligation::Family(family),
             ));
+        }
+        for law in &fragment.laws {
+            if let Obligation::Sum(name, set) = law.serves
+                && !owed.iter().any(|known| known.obligation == law.serves)
+            {
+                owed.push(Owed::gather(fragment, name, Serves::Sum(set), law.serves));
+            }
         }
     }
     let unclaimed = (fragments.iter())
@@ -461,16 +518,29 @@ fn check_volume(schema: &Schema, owed: &[Owed], fragments: &[FragmentData]) -> R
     }
 }
 
-fn row_sites(anatomy: &Anatomy, owner: &'static str, over: Over) -> Vec<Option<SiteId>> {
+/// Every place a row, a mode variable or a law stands.
+fn places_of(
+    anatomy: &Anatomy,
+    reaches: &Reaches,
+    schema: &Schema,
+    owner: &'static str,
+    over: Over,
+) -> Vec<Context> {
     match over {
-        Over::Body => vec![None],
-        Over::Every(class) => (anatomy.sites())
-            .filter(|site| site.class() == class)
-            .map(Some)
-            .collect(),
+        Over::Body => vec![Context::Body],
+        Over::Every(set) => anatomy.in_set(set).into_iter().map(Context::Site).collect(),
         Over::HeldEnclosures => (anatomy.held_enclosures())
             .filter(|&(_, card)| card == owner)
-            .map(|(site, _)| Some(site))
+            .map(|(site, _)| Context::Site(site))
+            .collect(),
+        Over::Route(family) => reaches
+            .of_family(family)
+            .iter()
+            .map(|reach| reach.context)
+            .collect(),
+        Over::WherePool(set, space, species) => (anatomy.in_set(set).into_iter())
+            .filter(|&site| schema.pools().any(|pool| pool == (site, space, species)))
+            .map(Context::Site)
             .collect(),
     }
 }
@@ -482,11 +552,11 @@ struct Rows {
     defined: Vec<LawName>,
 }
 impl Rows {
-    fn lay_out(schema: &Schema, fragments: &[FragmentData]) -> Self {
+    fn lay_out(schema: &Schema, fragments: &[FragmentData], reaches: &Reaches, held: &[HeldCard]) -> Self {
         let left_out = |space| schema.left_out.iter().any(|&(out, _)| out == space);
         let amounts: Vec<PoolRef> = (schema.pools())
-            .filter(|&(_, space)| !left_out(space))
-            .map(|(site, space)| PoolRef { site, space })
+            .filter(|&(_, space, _)| !left_out(space))
+            .map(|(site, space, species)| PoolRef { site, space, species })
             .collect();
         let mut slots: Vec<(SlotKind, Slot, AdmissibleSet, &String)> = (fragments.iter())
             .flat_map(|fragment| {
@@ -502,24 +572,33 @@ impl Rows {
                         owner: fragment.owner,
                         local: name,
                     };
-                    let sites = row_sites(&schema.anatomy, fragment.owner, *over);
-                    sites
+                    let places = places_of(&schema.anatomy, reaches, schema, fragment.owner, *over);
+                    places
                         .into_iter()
-                        .map(move |site| (*kind, Slot { law, site }, *set, dimension))
+                        .map(move |at| (*kind, Slot { law, at }, *set, dimension))
                 })
             })
             .collect();
+        let rate = crate::quantity::dimension::<crate::Rate<crate::Water>>();
+        for boundary in schema.boundaries.iter().filter(|boundary| boundary.drains) {
+            let law = LawName {
+                owner: route_owner(held, boundary.name),
+                local: boundary.name,
+            };
+            slots.push((SlotKind::Defined, Slot::from(law), AdmissibleSet::Finite, &rate));
+        }
         slots.sort_unstable_by_key(|slot| (slot.0, slot.1));
         let amount_rows = amounts.iter().map(|pool| {
             let kind = RowKind::Amount {
                 site: pool.site,
                 space: pool.space,
+                species: pool.species,
             };
-            (kind, AdmissibleSet::Nonnegative, dimension::<Water>())
+            (kind, AdmissibleSet::Nonnegative, pool.species.dimension())
         });
         let slot_rows = slots.iter().map(|&(kind, slot, set, dimension)| {
             let kind = match kind {
-                SlotKind::Memory => RowKind::Memory(slot.law),
+                SlotKind::Memory => RowKind::Memory(slot),
                 SlotKind::Algebraic | SlotKind::Defined => RowKind::Algebraic(slot),
             };
             (kind, set, dimension.clone())
@@ -550,72 +629,220 @@ impl Rows {
     fn amount(&self, pool: PoolRef) -> Option<usize> {
         self.amounts.binary_search(&pool).ok()
     }
-    fn slot(&self, law: LawName, site: Option<SiteId>) -> Option<usize> {
-        let find = |site| {
+    /// A body row answers at every place; a row of a place answers at that place.
+    fn slot(&self, law: LawName, at: Context) -> Option<usize> {
+        let find = |at| {
             let found = self
                 .slots
-                .binary_search_by_key(&Slot { law, site }, |entry| entry.0);
+                .binary_search_by_key(&Slot { law, at }, |entry| entry.0);
             found.ok().map(|at| self.slots[at].1)
         };
-        find(None).or_else(|| find(site))
+        find(Context::Body).or_else(|| find(at))
     }
-    fn defined(&self, law: LawName, site: Option<SiteId>) -> Option<usize> {
+    fn defined(&self, law: LawName, at: Context) -> Option<usize> {
         self.defined.binary_search(&law).ok()?;
-        self.slot(law, site)
+        self.slot(law, at)
     }
-    fn declared(&self, law: LawName, site: Option<SiteId>) -> usize {
-        self.slot(law, site)
-            .expect("a slot a law serves or reads is laid out at every site it stands over")
+    fn declared(&self, law: LawName, at: Context) -> usize {
+        self.slot(law, at)
+            .expect("a slot a law serves or reads is laid out at every place it stands over")
     }
 }
 
+#[derive(Clone, Copy)]
+enum Terminal {
+    Pool(PoolRef),
+    /// The far end of a route out of the body, named for its receipt.
+    Exterior(&'static str),
+}
 struct Reach {
     context: Context,
-    ends: [PoolRef; 2],
+    ends: [Terminal; 2],
+}
+impl Reach {
+    fn pool(&self, end: End, species: Species) -> Option<PoolRef> {
+        match self.ends[end as usize] {
+            Terminal::Pool(pool) => Some(PoolRef { species, ..pool }),
+            Terminal::Exterior(_) => None,
+        }
+    }
 }
 struct Reaches {
-    circulation: Vec<Reach>,
-    starling: Vec<Reach>,
+    routes: Vec<(Family, Vec<Reach>)>,
+    pools: Vec<PoolRef>,
+}
+fn water(site: SiteId, space: Space) -> PoolRef {
+    PoolRef {
+        site,
+        space,
+        species: Species::Water,
+    }
+}
+/// A vessel's blood or a bed's plasma, the space an edge of a flow network meets.
+fn flowing(site: SiteId) -> PoolRef {
+    let space = if site.class() == Class::CapillaryBed {
+        Space::Plasma
+    } else {
+        Space::Lumen
+    };
+    water(site, space)
 }
 impl Reaches {
-    fn of(anatomy: &Anatomy) -> Self {
-        let vascular = |site: crate::SiteId| PoolRef {
-            site,
-            space: if site.class() == Class::CapillaryBed {
-                Space::Plasma
-            } else {
-                Space::Lumen
-            },
-        };
-        let circulation = (anatomy.vascular())
-            .map(|(from, to)| Reach {
-                context: Context::Edge { from, to },
-                ends: [vascular(from), vascular(to)],
+    /// A route stands wherever both its pools exist, so the schema's pools say where every law reaches.
+    fn of(schema: &Schema, fragments: &[FragmentData]) -> Self {
+        let mut pools: Vec<PoolRef> = (schema.pools())
+            .map(|(site, space, species)| PoolRef { site, space, species })
+            .collect();
+        pools.sort_unstable();
+        let families = fragments
+            .iter()
+            .flat_map(|fragment| fragment.families.iter().copied());
+        let routes = families
+            .map(|family| {
+                let held = |reach: &Reach| {
+                    reach.ends.iter().all(|end| match end {
+                        Terminal::Pool(pool) => pools.binary_search(pool).is_ok(),
+                        Terminal::Exterior(_) => true,
+                    })
+                };
+                let mut reaches = reaches_of(family, schema);
+                reaches.retain(held);
+                (family, reaches)
             })
             .collect();
-        let starling = (anatomy.sites())
-            .filter(|site| site.class() == Class::CapillaryBed)
-            .map(|site| Reach {
-                context: Context::Site(site),
-                ends: [Space::Plasma, Space::Interstitium].map(|space| PoolRef { site, space }),
-            })
-            .collect();
-        Self {
-            circulation,
-            starling,
-        }
+        Self { routes, pools }
     }
     fn of_family(&self, family: Family) -> &[Reach] {
-        match family {
-            Family::Circulation => &self.circulation,
-            Family::Starling => &self.starling,
-        }
+        (self.routes.iter())
+            .find(|route| route.0 == family)
+            .map_or(&[], |route| route.1.as_slice())
     }
-    fn pool(&self, family: Family, end: End, context: Context) -> PoolRef {
-        let reach = (self.of_family(family).iter())
+    fn reach(&self, family: Family, context: Context) -> &Reach {
+        (self.of_family(family).iter())
             .find(|reach| reach.context == context)
-            .expect("a kernel reads a route's amounts only where a route of its own context applies");
-        reach.ends[end as usize]
+            .expect("a kernel reads a route's amounts only where a route of its own context applies")
+    }
+    /// Every species both of a fluid reach's ends hold, water first, so no list of them exists to keep in step.
+    fn carried(&self, reach: &Reach) -> Vec<Species> {
+        let held = |pool: Option<PoolRef>| pool.is_some_and(|pool| self.pools.binary_search(&pool).is_ok());
+        let every = [
+            Species::Water,
+            Species::Sodium,
+            Species::Potassium,
+            Species::Chloride,
+            Species::Albumin,
+            Species::Vasopressin,
+            Species::Norepinephrine,
+            Species::Acetylcholine,
+        ];
+        (every.into_iter())
+            .filter(|&species| held(reach.pool(End::From, species)) && held(reach.pool(End::To, species)))
+            .collect()
+    }
+}
+/// The one table of what each family joins. A new family is one arm here and one port.
+fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
+    let anatomy = &schema.anatomy;
+    let edge = |(from, to): (SiteId, SiteId), ends: [PoolRef; 2]| Reach {
+        context: Context::Edge { from, to },
+        ends: ends.map(Terminal::Pool),
+    };
+    let at = |site: SiteId, ends: [PoolRef; 2]| Reach {
+        context: Context::Site(site),
+        ends: ends.map(Terminal::Pool),
+    };
+    let blood = |pair: (SiteId, SiteId)| edge(pair, [flowing(pair.0), flowing(pair.1)]);
+    let species_at = |site, space, species| PoolRef { site, space, species };
+    let junctions = || anatomy.in_set(Sites::Class(Class::Junction)).into_iter();
+    let store = |space: Space| {
+        let found = schema.pools().find(|pool| pool.1 == space);
+        found.map(|(site, space, species)| PoolRef { site, space, species })
+    };
+    match family {
+        Family::Circulation => (anatomy.vascular())
+            .filter(|&pair| !anatomy.is_valve(pair))
+            .map(blood)
+            .collect(),
+        Family::Valves => (anatomy.vascular())
+            .filter(|&pair| anatomy.is_valve(pair))
+            .map(blood)
+            .collect(),
+        Family::Starling => (anatomy.in_set(Sites::Class(Class::CapillaryBed)).into_iter())
+            .map(|bed| at(bed, [water(bed, Space::Plasma), water(bed, Space::Interstitium)]))
+            .collect(),
+        Family::Lymph => (anatomy.edges(Network::Lymph))
+            .map(|pair| edge(pair, [water(pair.0, Space::Interstitium), flowing(pair.1)]))
+            .collect(),
+        Family::Filtration => (anatomy.edges(Network::Urinary))
+            .filter(|pair| pair.0.class() == Class::CapillaryBed)
+            .map(blood)
+            .collect(),
+        Family::Tubular => (anatomy.edges(Network::Urinary))
+            .filter(|pair| pair.0.class() != Class::CapillaryBed)
+            .map(blood)
+            .collect(),
+        Family::Reclaim(species) => (anatomy.edges(Network::Reclaim))
+            .map(|pair| {
+                let (from, to) = (flowing(pair.0), flowing(pair.1));
+                edge(pair, [PoolRef { species, ..from }, PoolRef { species, ..to }])
+            })
+            .collect(),
+        Family::Release(species) => junctions()
+            .map(|site| {
+                at(
+                    site,
+                    [
+                        species_at(site, Space::Vesicle, species),
+                        species_at(site, Space::Cleft, species),
+                    ],
+                )
+            })
+            .collect(),
+        Family::Reuptake(species) => junctions()
+            .map(|site| {
+                at(
+                    site,
+                    [
+                        species_at(site, Space::Cleft, species),
+                        species_at(site, Space::Vesicle, species),
+                    ],
+                )
+            })
+            .collect(),
+        Family::Binding(species) => (anatomy.sites())
+            .filter(|site| matches!(site.class(), Class::Junction | Class::CapillaryBed))
+            .map(|site| {
+                let free = if site.class() == Class::Junction {
+                    Space::Cleft
+                } else {
+                    Space::Plasma
+                };
+                at(
+                    site,
+                    [
+                        species_at(site, free, species),
+                        species_at(site, Space::Bound, species),
+                    ],
+                )
+            })
+            .collect(),
+        Family::StrokeWork => (anatomy.in_set(Sites::Blood).into_iter())
+            .filter_map(|site| {
+                Some(Reach {
+                    context: Context::Site(site),
+                    ends: [
+                        Terminal::Exterior("chemical energy"),
+                        Terminal::Pool(store(Space::Elastic)?),
+                    ],
+                })
+            })
+            .collect(),
+        Family::Dissipation => (store(Space::Elastic).zip(store(Space::Thermal)).into_iter())
+            .map(|(elastic, thermal)| Reach {
+                context: Context::Body,
+                ends: [Terminal::Pool(elastic), Terminal::Pool(thermal)],
+            })
+            .collect(),
     }
 }
 
@@ -638,6 +865,7 @@ enum Address {
     Draw(usize),
     Forcing(usize),
     Gauge,
+    Height(u64),
 }
 
 struct Places<'a> {
@@ -645,6 +873,8 @@ struct Places<'a> {
     reaches: &'a Reaches,
     chance: &'a ChanceNames,
     anatomy: &'a Anatomy,
+    schema: &'a Schema,
+    fragments: &'a [FragmentData],
     held: &'a [HeldCard],
 }
 
@@ -739,7 +969,7 @@ fn hazards(
                 local,
             };
             let declared = &fragment.modes[hazard.variable];
-            let variable = named(declared.name);
+            let variable = Slot::from(named(declared.name));
             let at = modes.partition_point(|mode| mode.variable < variable);
             let value = |index: usize| {
                 let wanted = declared.values[index];
@@ -747,7 +977,7 @@ fn hazards(
                 sorted.partition_point(|known| *known < wanted)
             };
             hazards.push(HazardLayout {
-                integral: RowId::at(rows.declared(named(hazard.integral), None)),
+                integral: RowId::at(rows.declared(named(hazard.integral), Context::Body)),
                 stream: chance.stream(named(hazard.stream)),
                 variable: at,
                 leaves: value(hazard.leaves),
@@ -764,22 +994,29 @@ fn marked(
     programs: &[Program],
     modes: &[ModeLayout],
     hazards: &[HazardLayout],
-) -> Vec<Instance> {
+) -> Result<Vec<Instance>, CompileDefect> {
     for instance in &mut instances {
         let program = &programs[instance.program.index()];
         if let Predicate::Only(mode) = program.code.predicate {
-            let variable = LawName {
+            let law = LawName {
                 owner: program.law.owner,
                 local: mode.variable,
             };
-            let at = modes.partition_point(|known| known.variable < variable);
+            // A route's mode answers at its own edge, a whole-body mode at every place.
+            let found = |at| {
+                modes
+                    .binary_search_by_key(&Slot { law, at }, |known| known.variable)
+                    .ok()
+            };
+            let at = found(Context::Body).or_else(|| found(instance.context));
+            let at = at.ok_or(CompileDefect::ModeOfAnotherPlace { law })?;
             let value = modes[at].values.partition_point(|known| *known < mode.value);
             instance.mode = Some((at, value));
         }
         instance.rectified = matches!(instance.target, Target::Row(row)
             if hazards.iter().any(|hazard| hazard.integral == row));
     }
-    instances
+    Ok(instances)
 }
 
 fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
@@ -787,6 +1024,7 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
         rows,
         reaches,
         anatomy,
+        schema,
         ..
     } = *places;
     let mut placement = Placement {
@@ -796,13 +1034,24 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
     };
     for law in owed {
         let targets = match law.serves {
-            Serves::Slot(over) => row_sites(anatomy, law.name.owner, over)
+            Serves::Slot(over) => places_of(anatomy, reaches, schema, law.name.owner, over)
                 .into_iter()
-                .map(|site| {
-                    let row = RowId::at(rows.declared(law.name, site));
-                    (site.map_or(Context::Body, Context::Site), Target::Row(row))
+                .map(|at| {
+                    let row = RowId::at(rows.declared(law.name, at));
+                    (at, Target::Row(row))
                 })
                 .collect(),
+            Serves::Sum(set) => {
+                let row = RowId::at(rows.declared(law.name, Context::Body));
+                let sites = anatomy.in_set(set).into_iter();
+                sites
+                    .map(|site| (Context::Site(site), Target::Row(row)))
+                    .collect()
+            }
+            Serves::Boundary(water) if water.drains => {
+                let row = RowId::at(rows.declared(law.name, Context::Body));
+                vec![(Context::Body, Target::Row(row))]
+            }
             Serves::Boundary(water) => {
                 let target = Target::Column(ColumnId::at(placement.columns.len()));
                 placement.columns.push(exterior(law.name, water, rows)?);
@@ -823,13 +1072,21 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
         for &(_, kernel) in &law.laws {
             if let Serves::Boundary(water) = law.serves {
                 let carried = kernel.code.iter().find_map(|op| match op {
-                    Op::Input(Input::Drive(route)) if *route != water.name => Some(*route),
+                    Op::Input(Input::Read(Source::Drive(route), _)) if *route != water.name => Some(*route),
                     _ => None,
                 });
                 if let Some(route) = carried {
                     let law = law.name;
                     return Err(CompileDefect::DriveOfAnotherRoute { law, route });
                 }
+            }
+            let defined;
+            let mut kernel = kernel;
+            if let Serves::Boundary(water) = law.serves
+                && water.drains
+            {
+                defined = kernel.clone().defining(water.name);
+                kernel = &defined;
             }
             let program = ProgramId::at(placement.programs.len());
             placement.programs.push(Program {
@@ -847,28 +1104,216 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
             }
         }
     }
+    fluid_columns(&mut placement, places)?;
     Ok(placement)
 }
 
-fn column(law: LawName, reach: &Reach, rows: &Rows) -> Result<Column, CompileDefect> {
-    let [from, to] = reach.ends;
-    let mut terms = Vec::new();
-    if from != to {
-        for (pool, coefficient) in [(from, -1), (to, 1)] {
-            let row = rows.amount(pool).ok_or(left_out(law, pool))?;
-            terms.push((RowId::at(row), coefficient));
+/// Every column of every fluid route, written here and not by a law: water reads the flow row, and each species a
+/// reach carries reads the flow and both ends' amounts through one `Op::Upwind` program, less its reflection. A drain
+/// does the same at its one pool. So a law states one flow, a species added to the schema needs no line in any
+/// system crate, and each column is an ordinary instance the Jacobian and the witness already read.
+fn fluid_columns(placement: &mut Placement, places: &Places) -> Result<(), CompileDefect> {
+    let Places {
+        rows,
+        reaches,
+        schema,
+        fragments,
+        held,
+        ..
+    } = *places;
+    for fragment in fragments {
+        for &family in fragment.families.iter().filter(|family| flows(**family, schema)) {
+            let law = LawName {
+                owner: fragment.owner,
+                local: family.name(),
+            };
+            let class = (fragment.laws.iter())
+                .find(|known| known.serves.local() == family.name())
+                .map_or(RateClass::UNMOVED, |known| known.kernel.rate);
+            for reach in reaches.of_family(family) {
+                let flow = Address::Unknown(UnknownId::at(rows.declared(law, reach.context)));
+                for species in reaches.carried(reach) {
+                    let ends = reach.ends.map(|end| match end {
+                        Terminal::Pool(pool) => Terminal::Pool(PoolRef { species, ..pool }),
+                        other => other,
+                    });
+                    let one = Reach {
+                        context: reach.context,
+                        ends,
+                    };
+                    let target = Target::Column(ColumnId::at(placement.columns.len()));
+                    placement.columns.push(column(law, &one, rows)?);
+                    let amount = |end, species| -> Result<Address, CompileDefect> {
+                        let pool = reach
+                            .pool(end, species)
+                            .ok_or(CompileDefect::NoPoolRead { law })?;
+                        let row = rows.amount(pool).ok_or(left_out(law, pool))?;
+                        Ok(Address::Unknown(UnknownId::at(row)))
+                    };
+                    let reflection = (fragment.reflections.iter())
+                        .find(|known| known.0 == family && known.1 == species)
+                        .map(|known| known.2);
+                    let mut addresses = vec![flow];
+                    if species != Species::Water {
+                        addresses.extend([
+                            amount(End::From, species)?,
+                            amount(End::From, Species::Water)?,
+                            amount(End::To, species)?,
+                            amount(End::To, Species::Water)?,
+                        ]);
+                    }
+                    if let (Some(key), Context::Site(site)) = (reflection, reach.context) {
+                        addresses.push(Address::Parameter(key, Binding::Site(site)));
+                    }
+                    let end = |end, held| Source::Amount(family, end, held);
+                    let ends = [
+                        end(End::From, species),
+                        end(End::From, Species::Water),
+                        end(End::To, species),
+                        end(End::To, Species::Water),
+                    ];
+                    let ops = carried_ops(Source::Flow(family), ends, species, reflection);
+                    let program = fluid_program(placement, law, ops, class, species.dimension());
+                    placement.instances.push(Placed {
+                        program,
+                        context: reach.context,
+                        target,
+                        addresses,
+                    });
+                }
+            }
         }
-        terms.sort_unstable();
+    }
+    for boundary in schema.boundaries.iter().filter(|boundary| boundary.drains) {
+        let law = LawName {
+            owner: route_owner(held, boundary.name),
+            local: boundary.name,
+        };
+        let flow = Address::Unknown(UnknownId::at(rows.declared(law, Context::Body)));
+        let spaces = (reaches.pools.iter())
+            .filter(|pool| pool.site == boundary.pool.site && pool.space == boundary.pool.space);
+        for pool in spaces {
+            let target = Target::Column(ColumnId::at(placement.columns.len()));
+            let row = rows.amount(*pool).ok_or(left_out(law, *pool))?;
+            let water = rows.amount(boundary.pool).ok_or(left_out(law, boundary.pool))?;
+            placement.columns.push(Column {
+                terms: vec![(RowId::at(row), -1)],
+                origin: law,
+                context: Context::Body,
+                receipt: Some(Receipt {
+                    boundary: boundary.name,
+                    coefficient: 1,
+                }),
+            });
+            let (amount, solvent) = (
+                Address::Unknown(UnknownId::at(row)),
+                Address::Unknown(UnknownId::at(water)),
+            );
+            let addresses = if pool.species == Species::Water {
+                vec![flow]
+            } else {
+                vec![flow, amount, solvent, amount, solvent]
+            };
+            let held = Source::RoutePool(boundary.name, pool.species);
+            let solvent_read = Source::RoutePool(boundary.name, Species::Water);
+            let ops = carried_ops(
+                Source::Field(law),
+                [held, solvent_read, held, solvent_read],
+                pool.species,
+                None,
+            );
+            let program = fluid_program(placement, law, ops, RateClass::UNMOVED, pool.species.dimension());
+            placement.instances.push(Placed {
+                program,
+                context: Context::Body,
+                target,
+                addresses,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Water is the flow itself. A species takes its upstream share, and `sigma` of that stays behind.
+fn carried_ops(
+    flow: Source,
+    ends: [Source; 4],
+    species: Species,
+    reflection: Option<ParameterKey>,
+) -> Vec<Op> {
+    let read = |source| Op::Input(Input::Read(source, Where::Here));
+    if species == Species::Water {
+        return vec![read(flow)];
+    }
+    let mut ops = vec![read(flow)];
+    ops.extend(ends.map(read));
+    ops.push(Op::Upwind([0, 1, 2, 3, 4]));
+    if let Some(key) = reflection {
+        ops.push(Op::Input(Input::SiteParameter(key)));
+        ops.push(Op::Scale([5, 6]));
+        ops.push(Op::Subtract([5, 7]));
+    }
+    ops
+}
+
+/// One program for each shape of carried column, so a route's columns share it as a law's instances do.
+fn fluid_program(
+    placement: &mut Placement,
+    law: LawName,
+    ops: Vec<Op>,
+    rate: RateClass,
+    dimension: String,
+) -> ProgramId {
+    let known = (placement.programs.iter()).find(|program| program.law == law && program.code.ops == ops);
+    if let Some(program) = known {
+        return program.id;
+    }
+    let id = ProgramId::at(placement.programs.len());
+    placement.programs.push(Program {
+        id,
+        law,
+        code: Code {
+            ops,
+            dimension,
+            predicate: Predicate::EveryMode,
+            rate,
+            validity: Vec::new(),
+            defines: false,
+        },
+    });
+    id
+}
+
+fn column(law: LawName, reach: &Reach, rows: &Rows) -> Result<Column, CompileDefect> {
+    let mut terms = Vec::new();
+    let mut receipt = None;
+    match reach.ends {
+        [Terminal::Pool(from), Terminal::Pool(to)] if from != to => {
+            for (pool, coefficient) in [(from, -1), (to, 1)] {
+                let row = rows.amount(pool).ok_or(left_out(law, pool))?;
+                terms.push((RowId::at(row), coefficient));
+            }
+            terms.sort_unstable();
+        }
+        [Terminal::Exterior(boundary), Terminal::Pool(to)] => {
+            let row = rows.amount(to).ok_or(left_out(law, to))?;
+            terms.push((RowId::at(row), 1));
+            receipt = Some(Receipt {
+                boundary,
+                coefficient: -1,
+            });
+        }
+        _ => {}
     }
     Ok(Column {
         terms,
         origin: law,
         context: reach.context,
-        receipt: None,
+        receipt,
     })
 }
 
-fn exterior(law: LawName, water: &WaterBoundary, rows: &Rows) -> Result<Column, CompileDefect> {
+fn exterior(law: LawName, water: &RouteBoundary, rows: &Rows) -> Result<Column, CompileDefect> {
     let row = rows.amount(water.pool).ok_or(left_out(law, water.pool))?;
     let coefficient = match water.direction {
         BoundaryDirection::IntoBody => 1,
@@ -917,6 +1362,27 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
     }
 }
 
+/// The site a read lands on, from the kernel's place. `None` only for a read of the place itself.
+fn landing(place: Where, context: Context, anatomy: &Anatomy) -> Option<SiteId> {
+    let ends = match context {
+        Context::Edge { from, to } => Some((from, to)),
+        _ => None,
+    };
+    let here = match context {
+        Context::Site(site) => Some(site),
+        _ => None,
+    };
+    match place {
+        Where::Here => here,
+        Where::Up => ends.map(|end| end.0),
+        Where::Down => ends.map(|end| end.1),
+        Where::Junction => anatomy.junction(here.or(ends.map(|end| end.1))?),
+        Where::Drain => anatomy.drain(here?),
+        Where::Mark(landmark) => anatomy.landmark(landmark).map(|mark| mark.0),
+        Where::Sensor(landmark) => anatomy.landmark(landmark).map(|mark| mark.1),
+    }
+}
+
 fn addresses(
     law: LawName,
     kernel: &KernelData,
@@ -928,16 +1394,83 @@ fn addresses(
         reaches,
         chance,
         anatomy,
+        schema,
         held,
+        ..
     } = *places;
     let inputs = kernel.code.iter().filter_map(|op| match op {
         Op::Input(input) => Some(*input),
         _ => None,
     });
     let site = |end, from, to| if end == End::From { from } else { to };
-    let here = match context {
-        Context::Site(site) => Some(site),
-        Context::Body | Context::Edge { .. } => None,
+    let unknown = |row: usize| Address::Unknown(UnknownId::at(row));
+    let read = |source: Source, place: Where| -> Result<Address, CompileDefect> {
+        let landed = landing(place, context, anatomy);
+        let at = landed.map_or(context, Context::Site);
+        Ok(match source {
+            Source::Field(_) if place == Where::Junction && context == Context::Body => {
+                return Err(CompileDefect::NoPoolRead { law });
+            }
+            Source::Field(field) => match (rows.defined(field, at), place) {
+                (Some(row), _) => unknown(row),
+                // No nerve, or no receptor at the nerve's end, is no effect.
+                (None, Where::Junction) => Address::Gauge,
+                (None, _) => return Err(CompileDefect::UnemittedField { law, field }),
+            },
+            Source::Flow(family) => {
+                let flow = LawName {
+                    owner: law.owner,
+                    local: family.name(),
+                };
+                unknown(rows.declared(flow, context))
+            }
+            Source::Amount(family, end, species) => {
+                let reach = reaches.reach(family, context);
+                let pool = reach
+                    .pool(end, species)
+                    .ok_or(CompileDefect::NoPoolRead { law })?;
+                unknown(rows.amount(pool).ok_or(left_out(law, pool))?)
+            }
+            Source::Pool(species) => {
+                let site = landed.ok_or(CompileDefect::NoPoolRead { law })?;
+                let pool = PoolRef {
+                    species,
+                    ..flowing(site)
+                };
+                unknown(rows.amount(pool).ok_or(left_out(law, pool))?)
+            }
+            Source::RoutePool(route, species) => {
+                let boundary = (schema.boundaries.iter()).find(|known| known.name == route);
+                let base = match boundary {
+                    Some(boundary) => Some(boundary.pool),
+                    None => (reaches.of_family(Family::Dissipation).first())
+                        .and_then(|reach| reach.pool(End::From, species)),
+                };
+                let pool = base.ok_or(CompileDefect::NoPoolRead { law })?;
+                let pool = PoolRef { species, ..pool };
+                unknown(rows.amount(pool).ok_or(left_out(law, pool))?)
+            }
+            Source::Drive(route) => {
+                if route_owner(held, route) != law.owner {
+                    return Err(CompileDefect::DriveOfAnotherRoute { law, route });
+                }
+                Address::Boundary(route)
+            }
+            Source::Extravascular => {
+                let site = landed.ok_or(CompileDefect::NoPoolRead { law })?;
+                match anatomy.encloser(site) {
+                    None => Address::Gauge,
+                    Some((space, Compliance::Held { card })) => {
+                        let pressure = LawName {
+                            owner: card,
+                            local: ENCLOSURE_PRESSURE,
+                        };
+                        unknown(rows.declared(pressure, Context::Site(space)))
+                    }
+                    Some((space, _)) => return Err(CompileDefect::NoEnclosurePressure { law, space }),
+                }
+            }
+        })
     };
     inputs
         .map(|input| {
@@ -947,33 +1480,34 @@ fn addresses(
                         owner: law.owner,
                         local,
                     };
-                    Address::Unknown(UnknownId::at(rows.declared(slot, here)))
+                    unknown(rows.declared(slot, context))
                 }
-                (Input::Field(field), _) => {
-                    let row = rows.defined(field, here);
-                    let row = row.ok_or(CompileDefect::UnemittedField { law, field })?;
-                    Address::Unknown(UnknownId::at(row))
+                (Input::Read(source, place), _) => read(source, place)?,
+                (Input::Height(place), _) => {
+                    let site = landing(place, context, anatomy).ok_or(CompileDefect::NoPoolRead { law })?;
+                    Address::Height(anatomy.axial(site).to_bits())
                 }
-                (Input::Extravascular, Context::Site(bed)) => match anatomy.encloser(bed) {
-                    None => Address::Gauge,
-                    Some((space, Compliance::Held { card })) => {
-                        let pressure = LawName {
-                            owner: card,
-                            local: ENCLOSURE_PRESSURE,
-                        };
-                        Address::Unknown(UnknownId::at(rows.declared(pressure, Some(space))))
-                    }
-                    Some((space, _)) => return Err(CompileDefect::NoEnclosurePressure { law, space }),
-                },
-                (Input::Amount(family, end), _) => {
-                    let pool = reaches.pool(family, end, context);
-                    Address::Unknown(UnknownId::at(rows.amount(pool).ok_or(left_out(law, pool))?))
-                }
-                (Input::Drive(route), _) => {
-                    if route_owner(held, route) != law.owner {
-                        return Err(CompileDefect::DriveOfAnotherRoute { law, route });
-                    }
-                    Address::Boundary(route)
+                (Input::Inflow, Context::Edge { from, .. }) => {
+                    let into: Vec<(SiteId, SiteId)> = (anatomy.edges(Network::Urinary))
+                        .filter(|edge| edge.1 == from)
+                        .collect();
+                    let [edge] = into[..] else {
+                        return Err(CompileDefect::NoPoolRead { law });
+                    };
+                    let family = if edge.0.class() == Class::CapillaryBed {
+                        Family::Filtration
+                    } else {
+                        Family::Tubular
+                    };
+                    let flow = LawName {
+                        owner: law.owner,
+                        local: family.name(),
+                    };
+                    let at = Context::Edge {
+                        from: edge.0,
+                        to: edge.1,
+                    };
+                    unknown(rows.declared(flow, at))
                 }
                 (Input::Draw(local), _) => Address::Draw(chance.stream(LawName {
                     owner: law.owner,
@@ -995,7 +1529,7 @@ fn addresses(
                     Input::SiteParameter(_)
                     | Input::EdgeParameter(_)
                     | Input::EndParameter(..)
-                    | Input::Extravascular,
+                    | Input::Inflow,
                     _,
                 ) => {
                     unreachable!("a kernel reads a site or edge entry only in a context of its kind")
@@ -1062,10 +1596,19 @@ fn check_orphans(
     Ok(())
 }
 
+/// One instance per place of the guard's mode variable, in stable order by the hash of what it is.
 fn guards(
     fragments: &[FragmentData],
     places: &Places,
+    modes: &[ModeLayout],
 ) -> Result<Vec<(GuardLayout, Vec<Address>)>, CompileDefect> {
+    let Places {
+        rows,
+        reaches,
+        anatomy,
+        schema,
+        ..
+    } = *places;
     let mut guards = Vec::new();
     for fragment in fragments {
         for guard in &fragment.guards {
@@ -1075,22 +1618,35 @@ fn guards(
                 variable,
                 leaves,
                 enters,
+                resets,
             } = guard;
             let mode = &fragment.modes[*variable];
-            let variable = LawName {
+            let law = LawName {
                 owner: fragment.owner,
                 local: mode.name,
             };
-            let layout = GuardLayout {
-                variable,
-                leaves: mode.values[*leaves],
-                enters: mode.values[*enters],
-                crossing: *crossing,
-                code: code(fragment, zero),
-                inputs: Vec::new(),
+            let sorted = |index: usize| {
+                let mut values = mode.values.clone();
+                values.sort_unstable();
+                values.partition_point(|known| *known < mode.values[index])
             };
-            let addresses = addresses(variable, zero, Context::Body, places)?;
-            guards.push((layout, addresses));
+            for at in places_of(anatomy, reaches, schema, fragment.owner, mode.over) {
+                let reset = resets.map(|local| {
+                    let owner = fragment.owner;
+                    RowId::at(rows.declared(LawName { owner, local }, at))
+                });
+                let variable = Slot { law, at };
+                let layout = GuardLayout {
+                    variable: modes.partition_point(|mode| mode.variable < variable),
+                    leaves: sorted(*leaves),
+                    enters: sorted(*enters),
+                    crossing: *crossing,
+                    code: code(fragment, zero),
+                    inputs: Vec::new(),
+                    resets: reset,
+                };
+                guards.push((layout, addresses(law, zero, at, places)?));
+            }
         }
     }
     Ok(guards)
@@ -1111,7 +1667,8 @@ fn bind(
             | Address::Boundary(_)
             | Address::Draw(_)
             | Address::Forcing(_)
-            | Address::Gauge => None,
+            | Address::Gauge
+            | Address::Height(_) => None,
         })
         .chain(forced.iter().copied())
         .collect();
@@ -1130,10 +1687,10 @@ fn bind(
                 binding,
                 default: match context {
                     ParameterContext::Body => None,
-                    ParameterContext::Site(class) => Some(Binding::Class(*class)),
-                    ParameterContext::Edge | ParameterContext::End => {
-                        Some(Binding::Network(Network::Vascular))
-                    }
+                    ParameterContext::Site(Sites::Class(class)) => Some(Binding::Class(*class)),
+                    ParameterContext::Site(Sites::Blood) => Some(Binding::Network(Network::Vascular)),
+                    ParameterContext::Site(Sites::Urinary) => Some(Binding::Network(Network::Urinary)),
+                    ParameterContext::Edge(network) => Some(Binding::Network(*network)),
                 },
                 admissible: *set,
                 dimension: dimension.clone(),
@@ -1149,6 +1706,7 @@ fn bind(
         Address::Draw(stream) => Bound::Draw(stream),
         Address::Forcing(forcing) => Bound::Forcing(forcing),
         Address::Gauge => Bound::Gauge,
+        Address::Height(axial) => Bound::Height(axial),
     };
     let instances = (placed.into_iter())
         .map(|placed| {
@@ -1186,11 +1744,21 @@ fn bind(
     (parameters, instances, guards)
 }
 
+/// Each row `close` declares and the unknown it closes, its own.
+fn closed_rows(fragments: &[FragmentData], rows: &Rows) -> Vec<usize> {
+    let names = fragments.iter().flat_map(|fragment| {
+        let owner = fragment.owner;
+        fragment.closed.iter().map(move |&local| LawName { owner, local })
+    });
+    names.map(|law| rows.declared(law, Context::Body)).collect()
+}
+
 fn reads(
     rows: &[Row],
     columns: &[Column],
     programs: &[Program],
     instances: &[Instance],
+    closed: &[usize],
 ) -> (Vec<Vec<UnknownId>>, Vec<Vec<RateClass>>) {
     let mut reads: Vec<Vec<UnknownId>> = vec![Vec::new(); rows.len()];
     let mut rates: Vec<Vec<RateClass>> = vec![Vec::new(); rows.len()];
@@ -1206,7 +1774,8 @@ fn reads(
         }
     }
     for (at, row) in rows.iter().enumerate() {
-        if !matches!(row.kind, RowKind::Algebraic(_)) {
+        // A closed row's unknown reaches it through a tangent. Its slot stays zero, and it is what the matching reads.
+        if !matches!(row.kind, RowKind::Algebraic(_)) || closed.contains(&at) {
             reads[at].push(UnknownId::at(at));
         }
         reads[at].sort_unstable();
@@ -1268,13 +1837,33 @@ fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, Compi
     Ok(solved_by)
 }
 
+/// Each unknown's pivot row. A closed row reads no unknown of its own, so it pivots on the amount it reads whose rate
+/// reads that unknown, and that amount's row takes the unknown.
+fn pivots(mut pivots: Vec<RowId>, reads: &[Vec<UnknownId>], closed: &[usize]) -> Vec<RowId> {
+    for &row in closed {
+        let unknown = (pivots.iter()).position(|pivot| pivot.index() == row);
+        let unknown = UnknownId::at(unknown.expect("a closed row is matched to its unknown"));
+        let carries = |amount: &&UnknownId| reads[amount.index()].contains(&unknown);
+        if let Some(amount) = reads[row].iter().find(carries) {
+            pivots[unknown.index()] = RowId::at(amount.index());
+            pivots[amount.index()] = RowId::at(row);
+        }
+    }
+    pivots
+}
+
 struct AlgebraicLaw {
     row: usize,
     reads: Vec<usize>,
     holds: Option<(LawName, &'static str)>,
 }
 
-fn laws_on_algebraic_rows(first: usize, programs: &[Program], instances: &[Instance]) -> Vec<AlgebraicLaw> {
+fn laws_on_algebraic_rows(
+    first: usize,
+    programs: &[Program],
+    instances: &[Instance],
+    closed: &[usize],
+) -> Vec<AlgebraicLaw> {
     (instances.iter())
         .filter_map(|instance| match instance.target {
             Target::Row(row) if row.index() >= first => {
@@ -1283,6 +1872,9 @@ fn laws_on_algebraic_rows(first: usize, programs: &[Program], instances: &[Insta
                     .filter_map(Bound::unknown)
                     .filter_map(|unknown| unknown.index().checked_sub(first))
                     .collect();
+                if closed.contains(&row.index()) {
+                    reads.push(row.index() - first);
+                }
                 reads.sort_unstable();
                 reads.dedup();
                 let holds = match program.code.predicate {
@@ -1338,10 +1930,11 @@ fn match_each_mode(
     programs: &[Program],
     instances: &[Instance],
     modes: &[ModeLayout],
+    closed: &[usize],
 ) -> Result<(), CompileDefect> {
     let algebraic = algebraic_laws(rows);
     let count = algebraic.len();
-    let laws = laws_on_algebraic_rows(rows.len() - count, programs, instances);
+    let laws = laws_on_algebraic_rows(rows.len() - count, programs, instances, closed);
     let mut variables: Vec<LawName> = (laws.iter())
         .filter_map(|law| law.holds.map(|holds| holds.0))
         .collect();
@@ -1375,7 +1968,7 @@ fn match_each_mode(
                     .any(|law| law.holds.is_some_and(|holds| holds.0 == name))
             })
             .map(|&name| {
-                let values = &modes[modes.partition_point(|mode| mode.variable < name)].values;
+                let values = &modes[modes.partition_point(|mode| mode.variable.law < name)].values;
                 (name, values_with_distinct_reads(&laws, name, values))
             })
             .collect();
@@ -1456,20 +2049,31 @@ fn blocks(solved_by: &[RowId], reads: &[Vec<UnknownId>], rates: &[Vec<RateClass>
         .collect()
 }
 
-fn modes(fragments: &[FragmentData]) -> Vec<ModeLayout> {
+fn modes(fragments: &[FragmentData], places: &Places) -> Vec<ModeLayout> {
+    let Places {
+        reaches,
+        anatomy,
+        schema,
+        ..
+    } = *places;
     let mut modes: Vec<ModeLayout> = (fragments.iter())
         .flat_map(|fragment| {
-            fragment.modes.iter().map(|ModeDeclaration { name, values }| {
-                let mut values = values.clone();
-                values.sort_unstable();
-                ModeLayout {
-                    variable: LawName {
+            fragment
+                .modes
+                .iter()
+                .flat_map(move |ModeDeclaration { name, values, over }| {
+                    let mut values = values.clone();
+                    values.sort_unstable();
+                    let law = LawName {
                         owner: fragment.owner,
                         local: name,
-                    },
-                    values,
-                }
-            })
+                    };
+                    let at = places_of(anatomy, reaches, schema, fragment.owner, *over);
+                    at.into_iter().map(move |at| ModeLayout {
+                        variable: Slot { law, at },
+                        values: values.clone(),
+                    })
+                })
         })
         .collect();
     modes.sort_by_key(|mode| mode.variable);

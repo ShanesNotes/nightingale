@@ -93,6 +93,7 @@ fn lumen(site: SiteId) -> RowKind {
     RowKind::Amount {
         site,
         space: Space::Lumen,
+        species: Species::Water,
     }
 }
 
@@ -180,17 +181,17 @@ fn declared(variant: Variant) -> Result<Body, AdmissionError> {
         map.connect(Network::Vascular, c.id(), d.id());
     }
     let mut schema = Schema::new(map.finish()?)?;
-    schema.water_boundary(PULSE, BoundaryDirection::IntoBody, a.id(), Space::Lumen)?;
-    schema.water_boundary(DRAIN, BoundaryDirection::OutOfBody, b.id(), Space::Lumen)?;
+    schema.boundary::<Water>(PULSE, BoundaryDirection::IntoBody, a.id(), Space::Lumen)?;
+    schema.boundary::<Water>(DRAIN, BoundaryDirection::OutOfBody, b.id(), Space::Lumen)?;
     schema.partial_volume(Measure::new(1.0)?)?;
     let body = assemble(schema, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
         let e = laws.end_parameter::<Elastance>(E, Admissible::positive());
-        let g = laws.edge_parameter::<Conductance<Water>>(G, Admissible::nonnegative());
+        let g = laws.edge_parameter::<_, Conductance<Water>>(G, Admissible::nonnegative());
         let class = match variant {
             Variant::Slow | Variant::Instant => RateClass::new(RateBand::Minutes, 60 * SECOND)?,
-            _ => RateClass::new(RateBand::Wave, 1_000_000)?,
+            _ => RateClass::new(RateBand::Wave, 3_600_000_000_000)?,
         };
         let forced = variant == Variant::Forced || variant == Variant::PeriodRead;
         let wobble = forced.then(|| laws.forcing("wobble", KNOTS, WOBBLE));
@@ -293,7 +294,7 @@ fn declared(variant: Variant) -> Result<Body, AdmissionError> {
         body.add(laws.finish());
         let (mut laws, ports) = body.boundary()?.parts();
         for boundary in [PULSE, DRAIN] {
-            let BoundaryWater { route: pair, drive } = ports.water(boundary)?;
+            let BoundaryRoute { route: pair, drive } = ports.route::<Water>(boundary)?;
             let rate = laws.kernel(|mut k| {
                 let value = k.read(&drive);
                 k.finish(value, laws.every_mode(), class)
@@ -900,10 +901,13 @@ fn a_row_size_that_names_no_row_or_is_not_a_size_is_refused() {
         packet.row_scale(case.a(), measure::<Water>(2.0)).err(),
         refused(case.a())
     );
-    let elsewhere = RowKind::Memory(LawName {
-        owner: "NS",
-        local: "no such row",
-    });
+    let elsewhere = RowKind::Memory(
+        LawName {
+            owner: "NS",
+            local: "no such row",
+        }
+        .into(),
+    );
     let mut packet = sized_packet(&case);
     packet.row_scale(elsewhere, measure::<Water>(1.0)).expect("once");
     assert_eq!(case.body().bind(packet).err(), refused(elsewhere));
@@ -1050,7 +1054,7 @@ fn a_defect_that_overflows_is_refused_however_wide_the_tolerance() {
     let set = measure::<Dimensionless>(0.0);
     packet.synthetic(SET, Binding::Body, set, NOTE).expect("once");
     let nervous = |local| LawName { owner: "NS", local };
-    let filter = RowKind::Memory(nervous("filter"));
+    let filter = RowKind::Memory(nervous("filter").into());
     let reading = RowKind::Algebraic(nervous("reading").into());
     (packet.start(filter, measure::<Dimensionless>(1.7e308), NOTE)).expect("once");
     (packet.start(reading, measure::<Dimensionless>(0.0), NOTE)).expect("once");
@@ -1334,7 +1338,7 @@ fn filter_packet(reading: f64) -> ParameterPacket<SyntheticFixture> {
     packet
         .synthetic(SET, Binding::Body, measure::<Dimensionless>(3.0), NOTE)
         .expect("once");
-    let filter = RowKind::Memory(nervous("filter"));
+    let filter = RowKind::Memory(nervous("filter").into());
     packet
         .start(filter, measure::<Dimensionless>(1.0), NOTE)
         .expect("once");
@@ -1358,7 +1362,7 @@ fn under_an_instant_only_algebraic_rows_move() {
         record(&provenance, ValueName::Start(reading)).provenance,
         ValueProvenance::Solved
     );
-    let filter = RowKind::Memory(nervous("filter"));
+    let filter = RowKind::Memory(nervous("filter").into());
     assert_eq!(
         record(&provenance, ValueName::Start(filter)).provenance,
         ValueProvenance::Fixture
@@ -1377,7 +1381,7 @@ fn the_tolerance_decides_a_near_row_and_is_reported_with_the_worst_row() {
     let tolerance = admission_tolerance();
     let within = |reading| {
         let mut packet = filter_packet(reading);
-        packet.within(tolerance);
+        packet.within(tolerance.clone());
         packet
     };
     let far = 3.0 + 1.1 * NEAR_THREE;
@@ -1393,7 +1397,7 @@ fn the_tolerance_decides_a_near_row_and_is_reported_with_the_worst_row() {
     let guess = system.workspace();
     let history = MethodHistory::new(Digest::of_canonical(b"a schema"), at(0), Vec::new());
     let origin = system.admit(guess, history).expect("within the tolerance");
-    assert_eq!(origin.provenance().tolerance(), tolerance);
+    assert_eq!(*origin.provenance().tolerance(), tolerance);
     let (worst, normalized) = origin.provenance().worst().expect("a body with rows");
     assert_eq!(worst, row);
     assert!(hi(normalized) > 0.8 && hi(normalized) <= 1.0, "{normalized:?}");
@@ -1439,7 +1443,7 @@ fn an_instant_solve_stands_though_rounding_moves_a_row_inside_the_tolerance() {
         let nervous = |local| LawName { owner: "NS", local };
         packet
             .start(
-                RowKind::Memory(nervous("filter")),
+                RowKind::Memory(nervous("filter").into()),
                 measure::<Dimensionless>(filter),
                 NOTE,
             )
@@ -1552,22 +1556,23 @@ fn swinging_body() -> (CompiledBody, SiteId) {
     map.contain(root.id(), vessel.id());
     let mut schema = Schema::new(map.finish().expect("a map")).expect("a schema");
     for [into, out] in [RISE, FALL] {
-        (schema.water_boundary(into, BoundaryDirection::IntoBody, vessel.id(), Space::Lumen)).expect("in");
-        (schema.water_boundary(out, BoundaryDirection::OutOfBody, vessel.id(), Space::Lumen)).expect("out");
+        (schema.boundary::<Water>(into, BoundaryDirection::IntoBody, vessel.id(), Space::Lumen)).expect("in");
+        (schema.boundary::<Water>(out, BoundaryDirection::OutOfBody, vessel.id(), Space::Lumen))
+            .expect("out");
     }
     let body = assemble(schema, |mut body| {
         let (mut laws, ports) = body.boundary()?.parts();
         let class = RateClass::new(RateBand::Wave, SECOND)?;
         for name in RISE.into_iter().chain(FALL) {
-            let BoundaryWater { route, drive } = ports.water(name)?;
+            let BoundaryRoute { route, drive } = ports.route::<Water>(name)?;
             let rate = laws.kernel(|mut k| {
                 let value = k.read(&drive);
                 k.finish(value, laws.every_mode(), class)
             });
             laws.transfer(Transfer::new(&route, rate));
         }
-        let rise = ports.water(RISE[0])?.drive;
-        let fall = ports.water(FALL[0])?.drive;
+        let rise = ports.route::<Water>(RISE[0])?.drive;
+        let fall = ports.route::<Water>(FALL[0])?.drive;
         let swing = laws.algebraic::<Rate<Water>>(SWING, Admissible::finite());
         let closure = laws.kernel(|mut k| {
             let x = k.algebraic(&swing);
@@ -1616,13 +1621,14 @@ fn parted_body() -> (CompiledBody, [SiteId; 2]) {
     map.contain(root.id(), filling.id());
     map.contain(root.id(), emptying.id());
     let mut schema = Schema::new(map.finish().expect("a map")).expect("a schema");
-    (schema.water_boundary(PULSE, BoundaryDirection::IntoBody, filling.id(), Space::Lumen)).expect("in");
-    (schema.water_boundary(DRAIN, BoundaryDirection::OutOfBody, emptying.id(), Space::Lumen)).expect("out");
+    (schema.boundary::<Water>(PULSE, BoundaryDirection::IntoBody, filling.id(), Space::Lumen)).expect("in");
+    (schema.boundary::<Water>(DRAIN, BoundaryDirection::OutOfBody, emptying.id(), Space::Lumen))
+        .expect("out");
     let body = assemble(schema, |mut body| {
         let (mut laws, ports) = body.boundary()?.parts();
         let class = RateClass::new(RateBand::Wave, SECOND)?;
         for name in [PULSE, DRAIN] {
-            let BoundaryWater { route, drive } = ports.water(name)?;
+            let BoundaryRoute { route, drive } = ports.route::<Water>(name)?;
             let rate = laws.kernel(|mut k| {
                 let value = k.read(&drive);
                 k.finish(value, laws.every_mode(), class)
@@ -1886,7 +1892,7 @@ fn a_wider_tolerance_is_another_packet_so_it_cannot_share_a_runs_identity() {
         packet.within(tolerance);
         case.body().bind(packet).expect("bound").packet_hash()
     };
-    assert_ne!(hash(wide), hash(admission_tolerance()));
+    assert_ne!(hash(wide.clone()), hash(admission_tolerance()));
     assert!(run(Some(wide)).is_ok());
 }
 
@@ -2006,7 +2012,7 @@ fn extra_packet(seed: PacketSeed) -> Result<ParameterPacket<SyntheticFixture>, A
     let speed = measure::<Rate<Dimensionless>>(1.0);
     packet.synthetic(PACE, Binding::Body, speed, NOTE)?;
     packet.start(
-        RowKind::Memory(name(SETTLED)),
+        RowKind::Memory(name(SETTLED).into()),
         measure::<Dimensionless>(1.0),
         NOTE,
     )?;
@@ -2173,7 +2179,7 @@ fn drawn(seed: PacketSeed, tone_first: bool) -> [f64; 2] {
     let mut packet = case.packet();
     let speed = measure::<Rate<Dimensionless>>(1.0);
     packet.synthetic(PACE, Binding::Body, speed, NOTE).expect("once");
-    let settled = RowKind::Memory(name(SETTLED));
+    let settled = RowKind::Memory(name(SETTLED).into());
     packet
         .start(settled, measure::<Dimensionless>(1.0), NOTE)
         .expect("once");
@@ -2251,7 +2257,7 @@ fn a_law_whose_row_is_a_parameter_read_cannot_carry_an_anchor() {
         refused
     );
     assert_eq!(
-        core(Variant::PinnedRelax, RowKind::Memory(name(SETTLED))),
+        core(Variant::PinnedRelax, RowKind::Memory(name(SETTLED).into())),
         refused
     );
 }
@@ -2518,7 +2524,7 @@ fn a_first_mode_has_a_record() {
         .expect("once");
     packet
         .start(
-            RowKind::Memory(name("hazard")),
+            RowKind::Memory(name("hazard").into()),
             measure::<Dimensionless>(0.0),
             NOTE,
         )
@@ -2528,7 +2534,7 @@ fn a_first_mode_has_a_record() {
     let lens = case.body().lens(Vec::new(), count(SECOND)).expect("a lens");
     let solved = admit_solved(case.body(), packet, empty_port(), &core, &lens).expect("solved");
     let mode = ValueName::Mode {
-        variable: name("rhythm"),
+        variable: name("rhythm").into(),
         value: "ectopic",
     };
     assert_eq!(
@@ -2548,7 +2554,7 @@ fn a_mode_variable_is_refused_under_a_cycle() {
     assert_eq!(
         case.body().bind(packet).err(),
         Some(AdmissionError::ModesNotYetRun {
-            variable: name("rhythm")
+            variable: name("rhythm").into()
         })
     );
 }
@@ -2691,7 +2697,7 @@ fn stated_hash(case: &PulsatileCase, stated: Stated) -> PacketHash {
     packet.within(tolerance);
     let speed = measure::<Rate<Dimensionless>>(1.0);
     packet.synthetic(PACE, Binding::Body, speed, NOTE).expect("once");
-    let settled = RowKind::Memory(name(SETTLED));
+    let settled = RowKind::Memory(name(SETTLED).into());
     packet
         .start(settled, measure::<Dimensionless>(1.0), NOTE)
         .expect("once");

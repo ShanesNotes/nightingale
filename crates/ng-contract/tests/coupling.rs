@@ -16,7 +16,7 @@ fn law(owner: &'static str, local: &'static str) -> LawName {
 }
 
 fn wave() -> Result<RateClass, AdmissionError> {
-    RateClass::new(RateBand::Wave, 1_000_000)
+    RateClass::new(RateBand::Wave, 3_600_000_000_000)
 }
 
 struct Beds {
@@ -134,7 +134,7 @@ fn a_per_site_field_has_one_row_per_site_named_by_its_site() -> Result<(), Admis
     let slot = |local, site| {
         RowKind::Algebraic(Slot {
             law: law("CV", local),
-            site: Some(site),
+            at: Context::Site(site),
         })
     };
     let kinds: Vec<RowKind> = (body.rows().iter())
@@ -165,6 +165,7 @@ fn a_coupling_read_is_a_read_of_the_senders_row_at_the_readers_site() -> Result<
         let at = row(RowKind::Amount {
             site,
             space: Space::Plasma,
+            species: Species::Water,
         })
         .index();
         let sparsity = body.sparsity();
@@ -173,7 +174,7 @@ fn a_coupling_read_is_a_read_of_the_senders_row_at_the_readers_site() -> Result<
     let field = |site| {
         row(RowKind::Algebraic(Slot {
             law: law("CV", "capillary_pressure"),
-            site: Some(site),
+            at: Context::Site(site),
         }))
     };
     assert!(reads(a).contains(&field(a)) && !reads(a).contains(&field(b)));

@@ -23,7 +23,7 @@ fn gap<'b>(
     level: &Parameter<'b, Nervous, Pressure>,
     modes: ModeSet<'b, Nervous>,
 ) -> Result<PureKernel<'b, Nervous, Pressure>, AdmissionError> {
-    let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+    let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
     Ok(laws.kernel(|mut k| {
         let mut left = k.parameter(level);
         for slot in reads {

@@ -1,4 +1,5 @@
-use crate::body::{HazardLayout, RowKind};
+use crate::body::RowKind;
+use crate::chance::Trigger;
 use crate::problem::{SolveWorkspace, StagePoint};
 use crate::scheme::Stage;
 use crate::{
@@ -431,18 +432,23 @@ impl VerifiedStep {
     pub fn applied(&self) -> &[InputId] {
         &self.ticket.due
     }
-    pub(crate) fn crossed<'b>(&self, problem: &CoupledProblem<'b>) -> Option<&'b HazardLayout> {
-        problem.chance.crossed(problem.body, &self.state)
+    /// The first guard in stable order this step's end has crossed, hazards first. The search reads only that guard's
+    /// gap, and any crossing moves the bracket's top, so a landing closes on the earliest crossing of any guard.
+    pub(crate) fn crossed<'b>(
+        &self,
+        problem: &CoupledProblem<'b>,
+    ) -> Result<Option<Trigger<'b>>, TrialFailure> {
+        problem.crossed(&self.ticket, &self.state)
     }
-    pub(crate) fn gap(&self, problem: &CoupledProblem<'_>, guard: &HazardLayout) -> f64 {
-        problem.chance.gap(&self.state, guard)
+    pub(crate) fn gap(&self, problem: &CoupledProblem<'_>, guard: Trigger<'_>) -> Result<f64, TrialFailure> {
+        problem.gap(&self.ticket, &self.state, guard)
     }
     /// The dense segment keeps the left limit, so a chord never runs through a reset and the next segment
     /// starts at the reset. A firing moves a mode, a draw and an integral, so what it leaves is read again: a law
     /// with no value there refuses the trial, and a range is judged on both sides of the instant.
     pub(crate) fn fire(self, problem: &CoupledProblem<'_>) -> Result<Self, TrialFailure> {
         let at = self.ticket.interval().end();
-        let (state, fired) = problem.chance.fired(problem.body, self.state, at);
+        let (state, fired) = problem.fired(&self.ticket, self.state, at)?;
         let values = problem.values_after_firing(&self.ticket, &state)?;
         let mut excursions = self.excursions;
         excursions.extend(problem.body.excursions(&values, &state.coordinates(), at));
