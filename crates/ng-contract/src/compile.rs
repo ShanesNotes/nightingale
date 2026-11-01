@@ -1568,7 +1568,7 @@ fn addresses(
                         from: edge.0,
                         to: edge.1,
                     };
-                    unknown(rows.declared(flow, at))
+                    unknown(rows.slot(flow, at).ok_or(CompileDefect::NoSuchRead { law })?)
                 }
                 (Input::Draw(local), _) => Address::Draw(chance.stream(LawName {
                     owner: law.owner,

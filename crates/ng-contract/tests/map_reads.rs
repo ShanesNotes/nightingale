@@ -227,6 +227,69 @@ fn an_energy_route_takes_no_pool_of_another_species() -> Result<(), AdmissionErr
     Ok(())
 }
 
+/// A route of water alone is its one column, with no flow row, so a read of that flow has nothing to land on.
+#[test]
+fn a_read_of_an_inflow_that_is_no_row_is_refused_by_name() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let vessel = map.site::<VesselSegment>("vessel", at()?);
+    let bed = map.site::<CapillaryBed>("bed", at()?);
+    let tubule = map.site::<VesselSegment>("tubule", at()?);
+    let duct = map.site::<VesselSegment>("duct", at()?);
+    for site in [vessel.id(), bed.id(), tubule.id(), duct.id()] {
+        map.contain(root.id(), site);
+    }
+    map.connect(Network::Vascular, vessel.id(), bed.id());
+    map.connect(Network::Vascular, bed.id(), vessel.id());
+    map.connect(Network::Urinary, bed.id(), tubule.id());
+    map.connect(Network::Urinary, tubule.id(), duct.id());
+    map.connect(Network::Reclaim, duct.id(), bed.id());
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.leave_out(Space::Interstitium, "a bench of water alone");
+    schema.leave_out(Space::Cells, "a bench of water alone");
+    let compiled = assemble(schema, |mut body| {
+        let class = fast()?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, still);
+        body.add(cv.finish());
+        let (mut rn, ports) = body.renal()?.parts();
+        let filter = ports.filtration(&mut rn);
+        let still = rn.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, rn.every_mode(), class)
+        });
+        rn.transfer_along(&filter, still);
+        let tubular = ports.tubular(&mut rn);
+        let still = rn.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, rn.every_mode(), class)
+        });
+        rn.transfer_along(&tubular, still);
+        let reclaim = ports.reclaim::<Water>(&mut rn);
+        let incoming = rn.edge_kernel(|mut k| {
+            let value = k.inflow();
+            k.finish(value, rn.every_mode(), class)
+        });
+        rn.transfer_along(&reclaim, incoming);
+        body.add(rn.finish());
+        body.compile()
+    });
+    let law = LawName {
+        owner: "RN",
+        local: "reclaim water",
+    };
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::NoSuchRead { law }))
+    );
+    Ok(())
+}
+
 /// A map's edges, regions and enclosures all read its sites, so a pool at a site it does not hold would stand outside
 /// every check.
 #[test]

@@ -64,7 +64,7 @@ The slice's organ laws compile on the contract. The body starts at the 06:55 anc
 - **07.** A pressure is a row with its site. A flow is a row too: a plain edge's flow row, or a valve's memory. A firing's instant reads the accepted state, which no algebraic row left stale.
 - **08.** A mode stands per point. The period stays fixed. Boundary flows net to zero through regulated totals, with no route held. The ring has its own elimination. Newton stops when its update stops shrinking near rounding.
 - **09.** The tubule, duct, bladder and their networks are on the map. CV reads an amount through its ports. GI, EN and the skin take their routes in `hold_outside_slice`. A delivery now needs its route's law to read the drive in every mode. A rigid or elastic enclosure is still refused. Rank is read on the whole ring. A held card's prescribed value can be no anchor, so I14 exempts nothing.
-- **Research 02.** Every law form here is in use, and viscosity is the one left out, as below. Two read beyond the table. Release is `q_i f` with `q_i = q A_vesicle`, so a store can run down and never below zero. Binding reads a concentration in plasma, as mass action does, and an amount in a cleft, which has no volume of its own. Its constants stay synthetic.
+- **Research 02.** Every law form here is in use, and viscosity is the one left out, as below. Two read beyond the table. Release is `q_i f` with `q_i = q A_vesicle`, so a store can run down and never below zero. Binding reads a concentration in plasma water, as mass action does, and an amount in a cleft, which has no volume of its own. Its constants stay synthetic.
 
 **Left for later, each with its reason.**
 
