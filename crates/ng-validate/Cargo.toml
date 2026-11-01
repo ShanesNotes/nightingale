@@ -15,5 +15,8 @@ ng-receptor = { path = "../ng-receptor" }
 ng-record = { path = "../ng-record" }
 ng-renal = { path = "../ng-renal" }
 
+[dev-dependencies]
+expect-test = "=1.5.1"
+
 [lints]
 workspace = true

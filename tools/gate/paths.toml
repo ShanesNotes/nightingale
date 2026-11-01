@@ -134,3 +134,5 @@ name = "ng-observe"
 
 [[crate]]
 name = "ng-validate"
+smoke = ["trace"]
+dev_external = { expect-test = "=1.5.1" }
