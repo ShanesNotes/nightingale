@@ -65,7 +65,7 @@ Admission can now solve a start state, not only take the packet's numbers. It fi
 - A fit is read step by step, so one whose whole effect on each step is below rounding on its rows is refused, though the sum over the beat might show it. On a ring of 64 that takes a flow near 1e-12 per beat on amounts of 50. A fit that solves to zero is refused the same way.
 - A fit that shows only through a head of a few rounding units of its rows can land far from its closed form, at flows near 1e-11 per beat on amounts of 50. The anchor still holds in the run, so no check can tell.
 
-**Not proven here.** The test body is driven from outside, so it says nothing about a heart that sets its own rate. No judge from another vendor weighed the two designs: Codex ran out of credits and Grok stopped at its free limit, so the base was picked alone and the adversaries were two Opus seats. Codex then came back and read the finished code in four passes, which found five defects, all fixed, and the last pass found none. See the PR.
+**Not proven here.** The test body is driven from outside, so it says nothing about a heart that sets its own rate. No judge from another vendor weighed the two designs: Codex ran out of credits and Grok stopped at its free limit, so the base was picked alone and the adversaries were two Opus seats. Codex then came back and read the finished code in five passes. The first three found five defects, all fixed, and the last two found none. See the PR.
 
 ## Comments
 
