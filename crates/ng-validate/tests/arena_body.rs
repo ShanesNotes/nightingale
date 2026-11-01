@@ -563,7 +563,6 @@ fn the_body_answers_a_stand_through_its_own_baroreflex(solved: &Solved) {
     );
 }
 
-/// What a route delivers reaches the blood: each payload a meal carries, from outside the contract.
 fn a_meal_delivers_sodium_potassium_and_chloride(solved: &Solved) {
     fn delivered<Q>(boundary: &'static str, amount: f64) -> Delivered<Q> {
         let ends = SimTime::from_ns(anchor_moment().nanoseconds() + 2500 * MILLISECOND);
@@ -703,7 +702,6 @@ fn a_checkpoint_of_a_run_mid_beat_holds_its_modes_and_runs_on_the_same_bits(solv
     }
 }
 
-/// The means from the twentieth second to the thirtieth, and how far beat means swing there.
 fn settled(solved: &Solved, posture: Vec<AuthorizedInput>) -> ([f64; 5], f64) {
     let output = valve_flow(vessel("left ventricle"), vessel("systemic arteries"));
     let filtration = algebraic(
