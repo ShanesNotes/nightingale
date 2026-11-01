@@ -1,8 +1,8 @@
 use crate::identity::{Canonical, Seal};
 use crate::landing::Bracket;
 use crate::{
-    AdmissionError, ByteReader, CompiledBody, CoupledProblem, Digest, EngineFault, EngineFaultKind, Interval,
-    Malformed, Measure, Refused, SimTime, StepTicket, TrialFailure, VerifiedStep, Water,
+    AdmissionError, ByteReader, CompiledBody, CoupledProblem, Cycle, Digest, EngineFault, EngineFaultKind,
+    Interval, Malformed, Measure, Refused, SimTime, StepTicket, TrialFailure, VerifiedStep, Water,
 };
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
@@ -97,6 +97,18 @@ impl BoundaryPort {
         }
         deliveries.sort_by_key(|delivery| (delivery.at, delivery.id));
         Ok(Self { deliveries })
+    }
+    /// The first delivery that starts or ends inside the window between two points. A point's frame holds one
+    /// interval, so such an edge would read a drive the run never gives.
+    pub(crate) fn off_grid(&self, start: SimTime, cycle: Cycle) -> Option<InputId> {
+        let (start, step) = (start.nanoseconds(), cycle.step_ns());
+        let off = |edge: SimTime| {
+            let reached = edge.nanoseconds().saturating_sub(start);
+            edge.nanoseconds() > start && reached < cycle.period_ns() && !reached.is_multiple_of(step)
+        };
+        (self.deliveries.iter())
+            .find(|delivery| off(delivery.at) || off(delivery.ends))
+            .map(|delivery| delivery.id)
     }
 }
 impl Delivery {
@@ -202,18 +214,29 @@ fn chained(chain: Digest, delivery: &Delivery) -> Digest {
 }
 
 impl PendingInputs {
-    /// The fence opens one nanosecond past `head`, because initialization has read `head`'s drive: an input
-    /// stamped there cannot arrive after the start state that read it.
-    pub(crate) fn opening(port: BoundaryPort, head: SimTime) -> Self {
+    /// The fence opens at the first instant admission did not read: an input stamped before it cannot arrive
+    /// after the start state that read its drive.
+    pub(crate) fn opening(port: BoundaryPort, fence: SimTime) -> Self {
         Self {
             timeline: port.deliveries,
             past: AppliedInputs {
                 cursor: 0,
                 active: Vec::new(),
                 chain: Digest::of_canonical(b"ng-contract no input applied"),
-                fence: head.plus_ns(1).unwrap_or(head),
+                fence,
             },
         }
+    }
+    /// The drives running across `[at, at + 1 ns)`, as a ticket starting at `at` would freeze them. Unlike `plan`
+    /// it reads the whole timeline, because nothing has applied yet and a delivery can end inside a window.
+    pub(crate) fn frame_at(&self, at: SimTime) -> DriveFrame {
+        let mut frame = DriveFrame::default();
+        for delivery in &self.timeline {
+            if delivery.at <= at && at < delivery.ends {
+                frame.add(delivery.boundary, delivery.rate);
+            }
+        }
+        frame
     }
     fn due_at(&self, start: SimTime) -> &[Delivery] {
         let waiting = &self.timeline[self.past.cursor..];

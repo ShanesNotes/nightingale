@@ -1,5 +1,6 @@
 use crate::boundary::PendingInputs;
 use crate::identity::{Canonical, Seal};
+use crate::packet::Owed;
 use crate::{
     AdmissibleSet, BoundParameters, Candidate, Compensated, CompiledBody, DenseSegment, Digest, Interval,
     MethodHistory, PacketHash, RowKind, SimTime,
@@ -152,6 +153,7 @@ impl ImageParts {
             values,
             starts,
             modes,
+            owed: _,
         } = parameters;
         out.raw(model.digest().as_bytes());
         out.raw(packet.digest().as_bytes());
@@ -223,6 +225,7 @@ impl ImageParts {
             values: read.float_list(body.layout.parameters.len())?,
             starts: read.float_list(rows.len())?,
             modes: read.mode_list(body)?,
+            owed: Owed::default(),
         };
         let inside = |set: AdmissibleSet, value: &f64| set.holds(Compensated::exact(*value));
         if !(body.layout.parameters.iter().zip(&parameters.values))

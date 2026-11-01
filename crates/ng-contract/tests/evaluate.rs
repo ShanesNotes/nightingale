@@ -34,7 +34,7 @@ impl Bench {
         boundary: BoundaryPort,
     ) -> Result<Self, InitializationFailure> {
         let parameters = body.bind(packet)?;
-        let request = InitializationRequest::consistent_instant(SimTime::from_ns(0));
+        let request = InitializationRequest::at(SimTime::from_ns(0));
         let system = body.initialization(parameters, boundary, request)?;
         let solved = system.workspace();
         let schema = Digest::of_canonical(b"evaluator test");

@@ -1,6 +1,6 @@
 use crate::{
-    AnatomyDefect, Binding, Digest, InputId, LawName, ModeValue, ParameterKey, Predicate, QuantityId, RowId,
-    RowKind, SimTime, SiteId, SourceId, Space,
+    AnatomyDefect, AnchorId, Binding, Digest, InputId, LawName, ModeValue, ParameterKey, Predicate,
+    QuantityId, RowId, RowKind, SimTime, SiteId, SourceId, Space,
 };
 
 /// A refusal at a construction call, at `AnatomyBuilder::finish`, at `Assembly::compile`, or at admission.
@@ -31,20 +31,20 @@ pub enum AdmissionError {
     ZeroDenominator,
     /// An absolute scale that is not positive, or a relative scale below zero.
     NonPositiveScale,
-    /// A mode variable a plain guard fires or no hazard guard moves, or any mode variable in a body with an
-    /// algebraic row, which a firing could leave false. A guard that silently never fires is worse than a run
-    /// that never starts.
+    /// A mode variable a plain guard fires or no hazard guard moves, any mode variable in a body with an
+    /// algebraic row, which a firing could leave false, and any mode variable under a cycle, whose hazard integral
+    /// never returns. A guard that silently never fires is worse than a run that never starts.
     ModesNotYetRun {
         variable: LawName,
     },
-    /// A nonzero constant built only from literals, or a division of two equal nodes, which no packet entry
-    /// backs. This check is partial: it reads the graph, never a value, so a copy built from separate reads
-    /// passes.
+    /// A nonzero constant built only from literals, or a division of two equal expressions, which no packet entry
+    /// backs. This check is partial: it reads the graph, never a value, so a regrouped sum, a swapped `scale` or
+    /// `p / (p + 0)` passes.
     UnbackedConstant {
         law: LawName,
     },
     /// A forcing's period that is no whole number of nanoseconds in the clock's range, which a run could only
-    /// round into another period.
+    /// round into another period, or a fit on one, which no solve can keep on the clock.
     ForcingPeriod {
         key: ParameterKey,
     },
@@ -129,15 +129,78 @@ pub enum AdmissionError {
     EventBeforeHead {
         id: InputId,
     },
-    /// An input stamped behind the fence a cut left by not publishing at its own end, or at the admission
-    /// instant, whose drive initialization has already read.
+    /// An input stamped behind the fence a cut left by not publishing at its own end, or inside the admission
+    /// window, whose drives initialization has already read.
     EventBeforeFence {
         id: InputId,
         fence: SimTime,
     },
+    /// A period the cycle's interval count does not divide.
+    UnevenCycle,
+    DuplicateAnchor {
+        anchor: AnchorId,
+    },
+    /// An anchor on a row this body does not have, or in another dimension than the row's.
+    AnchorRow {
+        anchor: AnchorId,
+    },
+    /// An anchor on a row that reads no amount and no drive, so its value is a function of parameters alone and
+    /// the anchor would be a parameter's value.
+    AnchorOnParameters {
+        anchor: AnchorId,
+    },
+    /// An instant anchor on a row in the wave or beat band: such a row has no one value to meet.
+    InstantOnPulsatile {
+        anchor: AnchorId,
+    },
+    /// A cycle-mean anchor in a packet with no cycle.
+    NoCycle {
+        anchor: AnchorId,
+    },
+    /// An anchor no channel of the request's lens reads with its method and window from this start (rule 17).
+    AnchorUnread {
+        anchor: AnchorId,
+    },
+    /// A calibrated entry that names an anchor its packet does not hold.
+    UnknownAnchor {
+        key: ParameterKey,
+        binding: Binding,
+    },
+    /// Two calibrated entries on one anchor: two unknowns for one condition.
+    AnchorFittedTwice {
+        anchor: AnchorId,
+    },
+    /// A derived entry whose source the packet does not hold, or one that is itself derived or fitted.
+    IdentitySource {
+        key: ParameterKey,
+        source: ParameterKey,
+    },
+    /// A calibrated entry no law behind its anchor's row reads, or that moves no row behind that anchor past rounding,
+    /// so the fit could only stamp its guess.
+    FitUnread {
+        key: ParameterKey,
+        binding: Binding,
+    },
+    /// A second population record for a key, a lower bound above the upper bound, or a width past the finite range.
+    PopulationRange {
+        key: ParameterKey,
+    },
+    /// A value that needs a population record its packet does not hold yet.
+    NoPopulation {
+        key: ParameterKey,
+    },
+    /// An authored value outside its population record's range (I16).
+    OutsidePopulation {
+        key: ParameterKey,
+        binding: Binding,
+    },
+    /// A delivery that starts or ends between two points of the cycle.
+    DeliveryOffGrid {
+        id: InputId,
+    },
     /// Parameters bound on another compiled body.
     ForeignParameters,
-    /// A workspace from another compiled body.
+    /// A workspace from another compiled body, or of another shape.
     ForeignWorkspace,
     /// A run identity that is not this body's, this origin's and this solver's.
     IdentityMismatch,

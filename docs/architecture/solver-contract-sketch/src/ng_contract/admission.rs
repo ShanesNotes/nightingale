@@ -1,55 +1,34 @@
-//! The admission solve: once, through `Initializer`, yielding the only `InitialRevision` a session
-//! can be admitted from. The request, the guess and the provenance all have public producers;
-//! provenance is computed by the contract from the bound packet, never supplied by the solver.
+//! The admission solve: once, yielding the only `InitialRevision` a session can be admitted from. The goal, the
+//! tolerance and the anchors come from the packet; provenance is computed by the contract from the packet, never
+//! supplied by a solver.
 use super::*;
 
-pub enum InitializationGoal {
-    ConsistentInstant,
-    /// Adds periodicity rows over one period (multiple shooting on the same evaluation surface).
-    Periodic { period_ns: u64 },
-}
-pub struct InitializationBudget {
-    _iterations: u32,
-    _maximum_span_ns: u64,
-}
-impl InitializationBudget {
-    pub fn new(_iterations: u32, _maximum_span_ns: u64) -> Self {
-        todo!()
-    }
-}
-/// Where the admission workspace starts.
-pub enum InitialStateGuess {
-    /// The bound packet's anchor and design values.
-    PacketValues,
-}
-pub struct InitializationRequest {
-    _goal: InitializationGoal,
-    _budget: InitializationBudget,
-    _guess: InitialStateGuess,
+/// When the start stands and what reads the anchors.
+pub struct InitializationRequest<'l> {
     _anchor_moment: SimTime,
+    _lens: Option<&'l ObservationLens>,
 }
-impl InitializationRequest {
-    pub fn new(
-        _goal: InitializationGoal,
-        _budget: InitializationBudget,
-        _guess: InitialStateGuess,
-        _anchor_moment: SimTime,
-    ) -> Self {
+impl InitializationRequest<'static> {
+    /// A packet with an anchor needs `reading` too.
+    pub fn at(_anchor_moment: SimTime) -> Self {
         todo!()
     }
-    /// Consistent at the anchor moment from the packet's start values, with no calibration.
-    pub fn consistent_instant(_anchor_moment: SimTime) -> Self {
+}
+impl InitializationRequest<'_> {
+    /// Every anchor must be read by a channel of `lens` with its method and window (rule 17).
+    pub fn reading(self, _lens: &ObservationLens) -> InitializationRequest<'_> {
         todo!()
     }
 }
 impl CompiledBody {
-    /// The square admission system: state unknowns plus calibrated parameters; consistency
-    /// residuals plus one row per calibration target anchor (plus periodicity rows if asked).
+    /// The square admission system: `N` points of the rows plus one unknown per fit. Each point is one backward
+    /// Euler stage around the ring of the packet's `Cycle`, one conserved total replaces one row of each
+    /// combination, and each fit adds its anchor's row. An instant is one point with no ring.
     pub fn initialization<'m>(
         &'m self,
         _parameters: BoundParameters,
         _boundary: BoundaryPort,
-        _request: InitializationRequest,
+        _request: InitializationRequest<'_>,
     ) -> Result<InitializationSystem<'m>, AdmissionError> {
         todo!()
     }
@@ -58,24 +37,30 @@ pub struct InitializationSystem<'m> {
     _body: &'m CompiledBody,
     _parameters: BoundParameters,
     _pending: PendingInputs,
-    _request: InitializationRequest,
+    _anchor_moment: SimTime,
 }
 impl InitializationSystem<'_> {
     pub fn workspace(&self) -> SolveWorkspace {
         todo!()
     }
-    pub fn evaluate(&self, _workspace: &SolveWorkspace) -> Result<StageEvaluation, InitializationFailure> {
+    /// One row per unknown, in the workspace's order.
+    pub fn evaluate(&self, _workspace: &SolveWorkspace) -> Result<Vec<f64>, InitializationFailure> {
         todo!()
     }
     pub fn linearize(&self, _workspace: &SolveWorkspace) -> Result<Jacobian, InitializationFailure> {
         todo!()
     }
-    /// The only constructor of `InitialRevision`: rechecks every row and anchor, writes fitted
-    /// values into the bound parameters, and records Specified/Derived/Calibrated/Fixture
-    /// provenance per value from the packet. Specified conserved totals cannot move.
+    /// The only constructor of `InitialRevision`: rechecks every row, total and anchor on the workspace alone,
+    /// with no core and no solver, writes fitted values into the bound parameters and reports provenance.
     pub fn admit(self, _solved: SolveWorkspace, _history: MethodHistory) -> Result<InitialRevision, InitializationFailure> {
         todo!()
     }
+}
+/// What a refusal names: a body row, a conserved total or an anchor.
+pub enum AdmissionRow {
+    Body(RowId),
+    Total(QuantityId),
+    Anchor(AnchorId),
 }
 /// The first accepted revision: the continuation point, never re-imposed (no daily reset).
 pub struct InitialRevision {
@@ -127,10 +112,9 @@ impl ImageParts {
     }
 }
 pub struct Malformed;
+/// Where every value of an admitted start came from, the tolerance it was held to and the row nearest it.
 pub struct InitializationProvenance {
-    _values: Vec<(ParameterKey, ValueProvenance)>,
-    _anchors_met: Vec<AnchorId>,
-}
-pub trait Initializer {
-    fn initialize(&self, system: InitializationSystem<'_>) -> Result<InitialRevision, InitializationFailure>;
+    _values: Vec<ValueRecord>,
+    _tolerance: ErrorScales,
+    _worst: Option<(AdmissionRow, Compensated)>,
 }

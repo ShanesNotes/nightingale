@@ -145,7 +145,7 @@ fn admitted<'m>(
     let system = body.initialization(
         parameters,
         BoundaryPort::new(vec![delivery])?,
-        InitializationRequest::consistent_instant(origin),
+        InitializationRequest::at(origin),
     )?;
     let solved = system.workspace();
     let history = MethodHistory::new(core.resolution().policy(), origin, Vec::new());

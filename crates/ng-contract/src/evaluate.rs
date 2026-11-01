@@ -1,4 +1,4 @@
-use crate::body::{Bound, Instance, RowKind, Target, UnknownId};
+use crate::body::{Bound, Instance, ParameterId, RowKind, Target, UnknownId};
 use crate::boundary::DriveFrame;
 use crate::law::{Op, Validity};
 use crate::pinned;
@@ -269,6 +269,41 @@ impl CompiledBody {
             }
         }
         Ok(values)
+    }
+    /// `dF/dp` per row, for one fit: every slot it fills moves together.
+    pub(crate) fn parameter_slopes(
+        &self,
+        inputs: &Inputs<'_>,
+        slots: &[ParameterId],
+    ) -> Result<Vec<f64>, Undefined> {
+        let mut slopes = vec![0.0; self.layout.rows.len()];
+        let holds = |instance: &&Instance| instance.holds(inputs.modes);
+        for instance in self.layout.instances.iter().filter(holds) {
+            let mut duals = self.read(instance, inputs, None);
+            for (dual, input) in duals.iter_mut().zip(&instance.inputs) {
+                if matches!(input, Bound::Parameter(parameter) if slots.contains(parameter)) {
+                    dual.slope = 1.0;
+                }
+            }
+            let walked = self.walk(instance, &duals)?;
+            let flat = positive_part(instance, walked.value) != walked.value;
+            let slope = if flat { 0.0 } else { walked.slope };
+            match instance.target {
+                Target::Column(column) => {
+                    for &(row, coefficient) in &self.layout.columns[column.index()].terms {
+                        slopes[row.index()] -= coefficient as f64 * slope;
+                    }
+                }
+                Target::Row(row) => {
+                    let sign = match self.layout.rows[row.index()].kind {
+                        RowKind::Algebraic(_) => 1.0,
+                        RowKind::Amount { .. } | RowKind::Memory(_) => -1.0,
+                    };
+                    slopes[row.index()] += sign * slope;
+                }
+            }
+        }
+        Ok(slopes)
     }
     pub(crate) fn excursions(&self, values: &[Option<f64>], at: SimTime) -> Vec<ValidityExcursion> {
         let mut excursions = Vec::new();

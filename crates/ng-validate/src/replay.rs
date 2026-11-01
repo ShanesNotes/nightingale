@@ -13,12 +13,14 @@ use ng_record::{
 pub trait ReplayCase {
     fn body(&self) -> &CompiledBody;
     fn end(&self) -> SimTime;
+    /// Every input that can arrive late. One inside the admission window shaped the start state, so it is no
+    /// event here: every run of the case knows it.
     fn events(&self) -> Result<Vec<BoundaryEvent>, AdmissionError>;
     fn admit<'m>(
         &'m self,
         core: &'m dyn CoupledSolver,
     ) -> Result<Session<'m, Running>, InitializationFailure>;
-    /// The same run with no timeline input known at admission, so each must come through `Session::enqueue`.
+    /// The same run with no input from `events` known at admission, so each must come through `Session::enqueue`.
     fn admit_withheld<'m>(
         &'m self,
         core: &'m dyn CoupledSolver,

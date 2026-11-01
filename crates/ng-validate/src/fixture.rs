@@ -751,9 +751,9 @@ impl ReplayCase for ChanceCase {
     }
 }
 
-/// Binds a fixture packet, initializes once and admits a session: the path every composition root writes.
-/// Only a synthetic fixture enters, so validation is nonclinical by type. A core's declared policy tags its
-/// continuation.
+/// Binds a fixture packet and admits a session on the packet's own values: an initializer that returns its guess,
+/// so a packet they do not solve is refused with the row named. `admit_solved` solves one. Only a synthetic fixture
+/// enters, so validation is nonclinical by type. A core's declared policy tags its continuation.
 pub fn admit_fixture<'m>(
     body: &'m CompiledBody,
     packet: ParameterPacket<SyntheticFixture>,
@@ -773,7 +773,7 @@ pub fn admit_seeded<'m>(
 ) -> Result<Session<'m, Running>, InitializationFailure> {
     let origin = SimTime::from_ns(0);
     let parameters = body.bind(packet)?;
-    let request = InitializationRequest::consistent_instant(origin);
+    let request = InitializationRequest::at(origin);
     let system = body.initialization(parameters, boundary, request)?;
     let solved = system.workspace();
     let resolution = core.resolution();

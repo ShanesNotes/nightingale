@@ -101,7 +101,7 @@ fn image(body: &CompiledBody, sites: [SiteId; 2]) -> ImageParts {
         water(b"running", at(0), at(2)),
         water(b"waiting", at(5), at(9)),
     ]);
-    let request = InitializationRequest::consistent_instant(at(0));
+    let request = InitializationRequest::at(at(0));
     let system = body
         .initialization(parameters, port.expect("a port"), request)
         .expect("a system");

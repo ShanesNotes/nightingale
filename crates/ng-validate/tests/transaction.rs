@@ -1150,7 +1150,7 @@ fn each_bad_timeline_is_refused_by_name() {
     let case = stepped();
     let body = case.body();
     let bound = || body.bind(reservoir_packet(body, 1.0, 0.5)).expect("bound");
-    let at = |ns| InitializationRequest::consistent_instant(SimTime::from_ns(ns));
+    let at = |ns| InitializationRequest::at(SimTime::from_ns(ns));
     let unknown = BoundaryPort::new(vec![water_event(b"x", "outflow", 5, 6, 1.0)]).expect("parsed");
     assert_eq!(
         body.initialization(bound(), unknown, at(0)).err(),
@@ -1188,7 +1188,7 @@ fn admission_refuses_a_workspace_that_moved_a_start_or_came_from_another_body() 
     let history = || MethodHistory::new(Digest::of_canonical(b"a schema"), at, Vec::new());
     let system = || {
         let parameters = body.bind(reservoir_packet(body, 1.0, 0.5)).expect("bound");
-        let request = InitializationRequest::consistent_instant(at);
+        let request = InitializationRequest::at(at);
         let port = BoundaryPort::new(Vec::new()).expect("no event");
         body.initialization(parameters, port, request).expect("a system")
     };
@@ -1199,13 +1199,14 @@ fn admission_refuses_a_workspace_that_moved_a_start_or_came_from_another_body() 
         system.admit(solved, history()).err()
     };
     let row = body.rows()[1].id();
+    let row = AdmissionRow::Body(row);
     assert_eq!(moved, Some(InitializationFailure::Inconsistent { row }));
 
     let parameters = other
         .body()
         .bind(reservoir_packet(other.body(), 1.0, 0.5))
         .expect("bound");
-    let request = InitializationRequest::consistent_instant(at);
+    let request = InitializationRequest::at(at);
     let port = BoundaryPort::new(Vec::new()).expect("no event");
     let foreign = other
         .body()
@@ -1221,7 +1222,7 @@ fn admission_refuses_a_workspace_that_moved_a_start_or_came_from_another_body() 
         .body()
         .bind(reservoir_packet(other.body(), 1.0, 0.5))
         .expect("bound");
-    let request = InitializationRequest::consistent_instant(at);
+    let request = InitializationRequest::at(at);
     let port = BoundaryPort::new(Vec::new()).expect("no event");
     assert_eq!(
         body.initialization(parameters, port, request).err(),
@@ -1238,7 +1239,7 @@ fn a_session_refuses_an_identity_of_another_body_origin_or_solver_and_a_zero_flo
         let body = target.body();
         let parameters = body.bind(reservoir_packet(body, 1.0, 0.5)).expect("bound");
         let at = SimTime::from_ns(0);
-        let request = InitializationRequest::consistent_instant(at);
+        let request = InitializationRequest::at(at);
         let port = BoundaryPort::new(Vec::new()).expect("no event");
         let system = body.initialization(parameters, port, request).expect("a system");
         let solved = system.workspace();
@@ -1262,11 +1263,19 @@ fn a_session_refuses_an_identity_of_another_body_origin_or_solver_and_a_zero_flo
         Some(AdmissionError::IdentityMismatch)
     );
 
-    let foreign_packet = body
-        .bind(reservoir_packet(body, 1.0, 0.25))
-        .expect("bound")
-        .packet_hash();
+    let foreign_packet = {
+        let parameters = body.bind(reservoir_packet(body, 1.0, 0.25)).expect("bound");
+        let origin = SimTime::from_ns(0);
+        let request = InitializationRequest::at(origin);
+        let port = BoundaryPort::new(Vec::new()).expect("no event");
+        let system = body.initialization(parameters, port, request).expect("a system");
+        let solved = system.workspace();
+        let history = MethodHistory::new(core.resolution().policy(), origin, Vec::new());
+        system.admit(solved, history).expect("admitted").packet_hash()
+    };
     let origin = revision(&case);
+    let own_packet = origin.packet_hash();
+    assert_ne!(foreign_packet, own_packet);
     let wrong_packet = RunIdentity::new(body.model_hash(), foreign_packet, seed, core.resolution());
     assert_eq!(
         admit(origin, wrong_packet),
@@ -1602,7 +1611,7 @@ fn an_algebraic_start_that_does_not_solve_is_refused_with_its_row() {
     let core = reference(SECOND);
     let port = BoundaryPort::new(Vec::new()).expect("no event");
     let refused = admit_fixture(&body, packet, port, &core).err();
-    let row = body.rows()[1].id();
+    let row = AdmissionRow::Body(body.rows()[1].id());
     assert_eq!(refused, Some(InitializationFailure::Inconsistent { row }));
 }
 
@@ -1734,7 +1743,7 @@ fn a_solved_algebraic_value_outside_its_set_is_refused_with_its_row() {
         .expect("once");
     let at = SimTime::from_ns(0);
     let parameters = body.bind(packet).expect("the guess is in its set");
-    let request = InitializationRequest::consistent_instant(at);
+    let request = InitializationRequest::at(at);
     let system = body
         .initialization(parameters, no_events(), request)
         .expect("a system");
@@ -1742,7 +1751,7 @@ fn a_solved_algebraic_value_outside_its_set_is_refused_with_its_row() {
     solved.unknowns_mut()[1] = -3.0;
     let history = MethodHistory::new(Digest::of_canonical(b"a schema"), at, Vec::new());
     let refused = system.admit(solved, history).err();
-    let row = body.rows()[1].id();
+    let row = AdmissionRow::Body(body.rows()[1].id());
     assert_eq!(refused, Some(InitializationFailure::Inconsistent { row }));
 }
 

@@ -232,7 +232,7 @@ impl AdmittedAt {
         events: Vec<BoundaryEvent>,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         let body = self.body();
-        let request = InitializationRequest::consistent_instant(self.origin);
+        let request = InitializationRequest::at(self.origin);
         let system = body.initialization(self.inner.other_values()?, BoundaryPort::new(events)?, request)?;
         let solved = system.workspace();
         let resolution = core.resolution();
@@ -1858,52 +1858,18 @@ fn every_gate_in_one_evidence_measured_one_course() {
     );
 }
 
-/// `case`'s own run, admitted again at `instant`: the same identity from another start.
-fn admitted_at<'m>(
-    case: &'m TwoReservoirs,
-    core: &'m dyn CoupledSolver,
-    instant: SimTime,
-    identity: &RunIdentity,
-) -> Session<'m, Running> {
-    let default = Binding::Network(Network::Vascular);
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
-    (packet.synthetic(
-        ParameterKey::new("cv.e"),
-        default,
-        measure::<Elastance>(1.0),
-        "synthetic",
-    ))
-    .expect("a value");
-    (packet.synthetic(
-        ParameterKey::new("cv.g"),
-        default,
-        measure::<Conductance<Water>>(0.001),
-        "synthetic",
-    ))
-    .expect("a value");
-    for (row, amount) in case.body().rows().iter().zip([500_500.0, 499_500.0]) {
-        (packet.start(row.kind(), measure::<Water>(amount), "synthetic")).expect("a start");
-    }
-    let parameters = case.body().bind(packet).expect("bound");
-    let port = BoundaryPort::new(Vec::new()).expect("a port");
-    let request = InitializationRequest::consistent_instant(instant);
-    let system = (case.body().initialization(parameters, port, request)).expect("a system");
-    let solved = system.workspace();
-    let start = MethodHistory::new(core.resolution().policy(), instant, Vec::new());
-    let origin = system.admit(solved, start).expect("admitted");
-    Session::admit(case.body(), core, origin, identity.clone()).expect("the same identity")
-}
-
 #[test]
 fn a_rewind_refuses_the_admission_checkpoint_of_another_start() {
     let case = TwoReservoirs::closed().expect("a body");
+    let elsewhere = AdmittedAt {
+        inner: TwoReservoirs::closed().expect("a body"),
+        origin: at(100),
+    };
     let core = reference(SECOND);
     let mut store = Store::default();
     let parent = case.admit(&core).expect("admitted");
     let own = parent.checkpoint(&mut store).expect("saved");
-    let identity = parent.record().identity().clone();
-    let foreign = admitted_at(&case, &core, at(100), &identity);
-    assert_ne!(foreign.record().seal(), parent.record().seal());
+    let foreign = elsewhere.session(&core, Vec::new()).expect("admitted");
     let foreign = foreign.checkpoint(&mut store).expect("saved");
     let parent = to(parent, at(2));
     let first = BranchId::new(Digest::of_canonical(b"own origin"));
@@ -1914,7 +1880,7 @@ fn a_rewind_refuses_the_admission_checkpoint_of_another_start() {
     );
     assert_eq!(
         parent.rewind(&foreign, second).err(),
-        Some(CheckpointError::NotOnThisBranch)
+        Some(CheckpointError::IdentityMismatch)
     );
 }
 
