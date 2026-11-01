@@ -24,7 +24,8 @@ impl HistoryStore for Links {
 
 fn reference(step: u64) -> ReferenceIntegrator {
     let scale = |value| Measure::<Dimensionless>::new(value).expect("finite");
-    ReferenceIntegrator::new(step).with_scales(ErrorScales::uniform(scale(1.0), scale(1e-3)).expect("positive"))
+    ReferenceIntegrator::new(step)
+        .with_scales(ErrorScales::uniform(scale(1.0), scale(1e-3)).expect("positive"))
 }
 
 /// One admission costs about as much as everything else here, so one solve serves every check, each from a checkpoint
@@ -466,8 +467,16 @@ fn every_link_of_every_loop_moves_the_row_that_reads_it_the_right_way(
         (tissue(gut), abdomen, rises),
         (pressure(lung), pleura, rises),
         (pressure(gut), abdomen, rises),
-        (blood(veins, Species::Vasopressin), blood(veins, Species::Sodium), rises),
-        (blood(veins, Species::Vasopressin), blood(veins, Species::Water), falls),
+        (
+            blood(veins, Species::Vasopressin),
+            blood(veins, Species::Sodium),
+            rises,
+        ),
+        (
+            blood(veins, Species::Vasopressin),
+            blood(veins, Species::Water),
+            falls,
+        ),
         (bound_v2, plasma(reclaim, Species::Vasopressin), rises),
         (bound_v2, plasma(reclaim, Species::Water), falls),
         (v2, bound_v2, rises),
@@ -548,7 +557,10 @@ fn the_body_answers_a_stand_through_its_own_baroreflex(solved: &Solved) {
     );
     assert_eq!(solved.value(&flat, sinus), solved.value(&flat, arch));
     let gap = solved.value(&standing, arch) - solved.value(&standing, sinus);
-    assert!((gap - 0.105).abs() < 1e-9, "{gap}: 70 per metre over the 0.15 m between them, on a reference of 100");
+    assert!(
+        (gap - 0.105).abs() < 1e-9,
+        "{gap}: 70 per metre over the 0.15 m between them, on a reference of 100"
+    );
 }
 
 /// What a route delivers reaches the blood: each payload a meal carries, from outside the contract.
@@ -556,21 +568,37 @@ fn a_meal_delivers_sodium_potassium_and_chloride(solved: &Solved) {
     fn delivered<Q>(boundary: &'static str, amount: f64) -> Delivered<Q> {
         let ends = SimTime::from_ns(anchor_moment().nanoseconds() + 2500 * MILLISECOND);
         let amount = Measure::new(amount).expect("finite");
-        Delivered { boundary, amount, ends }
+        Delivered {
+            boundary,
+            amount,
+            ends,
+        }
     }
     let total = |session: &Session<'_, Running>, species: Species| {
-        let held = |row: &&Row| matches!(row.kind(), RowKind::Amount { species: found, .. } if found == species);
+        let held =
+            |row: &&Row| matches!(row.kind(), RowKind::Amount { species: found, .. } if found == species);
         let rows = solved.body.rows().iter().filter(held);
-        rows.map(|row| number(session.record().accepted().value(row.id()))).sum::<f64>()
+        rows.map(|row| number(session.record().accepted().value(row.id())))
+            .sum::<f64>()
     };
     let (quiet, _) = solved.mean_over(solved.session(), 3 * SECOND, rate_row());
     let mut fed = solved.session();
     for (tag, payload) in [
-        (&b"sodium"[..], BoundaryInput::Sodium(delivered("gut sodium", 50.0))),
-        (b"potassium", BoundaryInput::Potassium(delivered("gut potassium", 2.0))),
-        (b"chloride", BoundaryInput::Chloride(delivered("gut chloride", 52.0))),
+        (
+            &b"sodium"[..],
+            BoundaryInput::Sodium(delivered("gut sodium", 50.0)),
+        ),
+        (
+            b"potassium",
+            BoundaryInput::Potassium(delivered("gut potassium", 2.0)),
+        ),
+        (
+            b"chloride",
+            BoundaryInput::Chloride(delivered("gut chloride", 52.0)),
+        ),
     ] {
-        fed.enqueue(input(1200 * MILLISECOND, tag, payload)).expect("enqueued");
+        fed.enqueue(input(1200 * MILLISECOND, tag, payload))
+            .expect("enqueued");
     }
     let (fed, _) = solved.mean_over(fed, 3 * SECOND, rate_row());
     for (species, amount) in [
@@ -579,7 +607,10 @@ fn a_meal_delivers_sodium_potassium_and_chloride(solved: &Solved) {
         (Species::Chloride, 52.0),
     ] {
         let more = total(&fed, species) - total(&quiet, species);
-        assert!((more / amount - 1.0).abs() < 0.01, "{species:?}: {more} of {amount}");
+        assert!(
+            (more / amount - 1.0).abs() < 0.01,
+            "{species:?}: {more} of {amount}"
+        );
     }
 }
 
@@ -672,12 +703,9 @@ fn a_checkpoint_of_a_run_mid_beat_holds_its_modes_and_runs_on_the_same_bits(solv
     }
 }
 
-/// What the contract's 07:00 case checks, by direction, because magnitudes wait for a reviewed packet: at heart level
-/// the pressure settles above supine, the rate rises, stroke volume and output fall, and filtration falls a little.
-/// The reflex holds that with traffic to spare and does not hunt, so a body past that point has room left.
-fn a_settled_posture_reads_the_way_the_contract_checks(solved: &Solved, name: &str, posture: Vec<AuthorizedInput>) {
-    let arteries = vessel("systemic arteries");
-    let output = valve_flow(vessel("left ventricle"), arteries);
+/// The means from the twentieth second to the thirtieth, and how far beat means swing there.
+fn settled(solved: &Solved, posture: Vec<AuthorizedInput>) -> ([f64; 5], f64) {
+    let output = valve_flow(vessel("left ventricle"), vessel("systemic arteries"));
     let filtration = algebraic(
         "RN",
         "filtration",
@@ -686,42 +714,46 @@ fn a_settled_posture_reads_the_way_the_contract_checks(solved: &Solved, name: &s
             to: vessel("renal tubule"),
         },
     );
-    let settled = |posture: Vec<AuthorizedInput>| {
-        let mut run = solved.session();
-        for input in posture {
-            run.enqueue(input).expect("enqueued");
+    let mut run = solved.session();
+    for input in posture {
+        run.enqueue(input).expect("enqueued");
+    }
+    let run = steps(run, 20 * SECOND, |_| {});
+    let mut then = run.record().accepted().time().nanoseconds();
+    let (mut sums, mut beat, mut length, mut last) = ([0.0; 5], 0.0, 0.0, 0.0);
+    let (mut least, mut most, mut total, mut whole) = (f64::INFINITY, 0.0_f64, 0.0, false);
+    steps(run, 30 * SECOND, |session| {
+        let now = session.record().accepted().time().nanoseconds();
+        let span = (now - then) as f64;
+        then = now;
+        total += span;
+        let reading = [pressure_channel(), rate_row(), output, filtration, sympathetic()]
+            .map(|kind| solved.value(session, kind));
+        for (sum, value) in sums.iter_mut().zip(reading) {
+            *sum += span * value;
         }
-        let run = steps(run, 20 * SECOND, |_| {});
-        let mut then = run.record().accepted().time().nanoseconds();
-        let (mut sums, mut beat, mut length, mut last) = ([0.0; 5], 0.0, 0.0, 0.0);
-        let (mut least, mut most, mut total, mut whole) = (f64::INFINITY, 0.0_f64, 0.0, false);
-        steps(run, 30 * SECOND, |session| {
-            let now = session.record().accepted().time().nanoseconds();
-            let span = (now - then) as f64;
-            then = now;
-            total += span;
-            let reading = [pressure_channel(), rate_row(), output, filtration, sympathetic()]
-                .map(|kind| solved.value(session, kind));
-            for (sum, value) in sums.iter_mut().zip(reading) {
-                *sum += span * value;
+        beat += span * reading[0];
+        length += span;
+        let phase = solved.value(session, memory("CV", "phase", Context::Body));
+        if phase < last {
+            let mean = beat / length;
+            if whole {
+                least = if mean < least { mean } else { least };
+                most = if mean > most { mean } else { most };
             }
-            beat += span * reading[0];
-            length += span;
-            let phase = solved.value(session, memory("CV", "phase", Context::Body));
-            if phase < last {
-                let mean = beat / length;
-                if whole {
-                    least = if mean < least { mean } else { least };
-                    most = if mean > most { mean } else { most };
-                }
-                (beat, length, whole) = (0.0, 0.0, true);
-            }
-            last = phase;
-        });
-        (sums.map(|sum| sum / total), most - least)
-    };
-    let ([flat_pressure, flat_rate, flat_output, flat_filtered, flat_traffic], flat_swing) = settled(Vec::new());
-    let ([pressure, rate, output, filtered, traffic], swing) = settled(posture);
+            (beat, length, whole) = (0.0, 0.0, true);
+        }
+        last = phase;
+    });
+    (sums.map(|sum| sum / total), most - least)
+}
+
+/// What the contract's 07:00 case checks, by direction, because magnitudes wait for a reviewed packet: at heart level
+/// the pressure settles above supine, the rate rises, stroke volume and output fall, and filtration falls a little.
+/// The reflex holds that with traffic to spare and does not hunt, so a body past that point has room left.
+fn reads_the_way_the_contract_checks(name: &str, flat: ([f64; 5], f64), posture: ([f64; 5], f64)) {
+    let ([flat_pressure, flat_rate, flat_output, flat_filtered, flat_traffic], flat_swing) = flat;
+    let ([pressure, rate, output, filtered, traffic], swing) = posture;
     let (stroke, flat_stroke) = (output / rate, flat_output / flat_rate);
     let read = format!(
         "{name}: pressure {pressure} of {flat_pressure}, rate {rate} of {flat_rate}, output {output} of {flat_output}, \
@@ -730,7 +762,10 @@ fn a_settled_posture_reads_the_way_the_contract_checks(solved: &Solved, name: &s
     assert!(pressure > flat_pressure, "{read}");
     assert!(rate > flat_rate, "{read}");
     assert!(output < flat_output && stroke < flat_stroke, "{read}");
-    assert!(filtered < flat_filtered && filtered > 0.95 * flat_filtered, "{read}");
+    assert!(
+        filtered < flat_filtered && filtered > 0.95 * flat_filtered,
+        "{read}"
+    );
     assert!(traffic > flat_traffic && traffic < 0.8, "{read}");
     assert!(swing < 1.0 && flat_swing < 1.0, "{read}");
 }
@@ -752,9 +787,10 @@ fn a_ramp_to_sitting() -> Vec<AuthorizedInput> {
 #[test]
 fn a_stand_and_a_sit_settle_the_way_the_contract_checks() {
     let solved = Solved::new(5 * MILLISECOND);
+    let flat = settled(&solved, Vec::new());
     let stand = vec![posture_at(5 * SECOND, b"stand", 1.0, Legs::Standing)];
-    a_settled_posture_reads_the_way_the_contract_checks(&solved, "standing", stand);
-    a_settled_posture_reads_the_way_the_contract_checks(&solved, "seated", a_ramp_to_sitting());
+    reads_the_way_the_contract_checks("standing", flat, settled(&solved, stand));
+    reads_the_way_the_contract_checks("seated", flat, settled(&solved, a_ramp_to_sitting()));
 }
 
 #[test]

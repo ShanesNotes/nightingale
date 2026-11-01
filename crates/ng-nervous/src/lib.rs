@@ -120,7 +120,12 @@ pub fn declare<'b>(scope: NervousScope<'b>) -> Result<Fragment<'b, Nervous>, Adm
         &mut ns,
         &filtered,
         &set_point,
-        ("sympathetic traffic", "ns.sympathetic-width", "ns.sympathetic-rest", true),
+        (
+            "sympathetic traffic",
+            "ns.sympathetic-width",
+            "ns.sympathetic-rest",
+            true,
+        ),
         reflex,
     );
     let vagal = traffic(

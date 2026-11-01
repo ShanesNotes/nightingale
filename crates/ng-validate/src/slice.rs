@@ -663,8 +663,8 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
         ("cv.cycle-end", 1.0),
         ("cv.activation-peak", 1.0),
         ("cv.half", 0.5),
-        ("ns.carotid-share", 0.5),
-        ("ns.arch-share", 0.5),
+        ("ns.carotid-share", 0.7),
+        ("ns.arch-share", 0.3),
         ("ns.sympathetic-rest", -1.1),
         ("ns.vagal-rest", 0.0),
         ("rn.feedback-rest", 1.0),
@@ -690,7 +690,7 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
     set::<Quotient<Volume, Albumin>>(packet, "fl.albumin-volume", body, 0.05, note)?;
     set::<Pressure>(packet, "gi.abdominal-pressure", body, 4.0, note)?;
     set::<Pressure>(packet, "rs.pleural-pressure", body, -3.0, note)?;
-    set::<Deviation<Dimensionless>>(packet, "ns.sympathetic-width", body, 0.05, note)?;
+    set::<Deviation<Dimensionless>>(packet, "ns.sympathetic-width", body, 0.04, note)?;
     set::<Deviation<Dimensionless>>(packet, "ns.vagal-width", body, 0.05, note)?;
     set::<Quotient<Pressure, Concentration<Albumin>>>(packet, "fl.oncotic-slope", body, 20.0, note)?;
     set::<Quotient<Pressure, Concentration<Albumin>>>(packet, "rn.oncotic-slope", body, 20.0, note)?;
@@ -742,8 +742,8 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
     }
     for (key, values, filtration, stiffness, rest) in [
         ("pulmonary bed", (0.25, 0.0, 120.0, 0.0), 0.002, 0.05, 420.0),
-        ("splanchnic bed", (2.0, 0.0, 100.0, 0.0), 0.004, 0.04, 2_250.0),
-        ("leg bed", (2.0, 0.0, 100.0, 0.0), 0.003, 0.04, 2_750.0),
+        ("splanchnic bed", (2.0, 0.0, 100.0, 0.0), 0.003, 0.04, 2_250.0),
+        ("leg bed", (2.0, 0.0, 100.0, 0.0), 0.002, 0.04, 2_750.0),
         ("glomerular bed", (4.0, 0.0, 30.0, 0.0), 0.0005, 0.05, 40.0),
         ("peritubular bed", (4.0, 0.0, 30.0, 0.0), 0.002, 0.05, 200.0),
     ] {

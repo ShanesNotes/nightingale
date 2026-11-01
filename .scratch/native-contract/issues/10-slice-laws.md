@@ -22,7 +22,7 @@ The slice's organ laws compile on the contract. The body starts at the 06:55 anc
 
 `crates/ng-validate/tests/arena_body.rs` holds these checks in one test on one solve, each from a checkpoint of the start. It also checks that the body regulates itself:
 
-- Every link of every loop must move its reader the way the loop needs, on the admitted start, LINKS links in all. A reversed law closes every conserved quantity and still admits, so a slope is not enough. The loops are the baroreflex from pressure to transmitter to rate, wall and arteriole in both ventricles, feedback at the kidney, Starling and lymph at every bed with what encloses it, and vasopressin from sodium to water back from the duct.
+- Every link of every loop must move its reader the way the loop needs, on the admitted start, 49 links in all. A reversed law closes every conserved quantity and still admits, so a slope is not enough. The loops are the baroreflex from pressure to transmitter to rate, wall and arteriole in both ventricles, feedback at the kidney, Starling and lymph at every bed with what encloses it, and vasopressin from sodium to water back from the duct.
 - A stand runs through the reflex. Blood falls into the legs, the sinus feels less stretch, traffic rises by more than a fifth and the rate follows. No law reads posture but the heads. Each sensor feels the column up to its own height.
 - A stand and a sit settle the way the contract's 07:00 case checks, by direction: at heart level the pressure settles above supine, the rate rises, stroke volume and output fall, and filtration falls a little. Traffic stays under 0.8, so the reflex has room left, and beat means swing under 1, so the loop does not hunt.
 - A meal's sodium, potassium and chloride reach the blood. A 400 ml bolus over a second keeps the body running.
@@ -79,7 +79,7 @@ The slice's organ laws compile on the contract. The body starts at the 06:55 anc
 - **An elastic enclosure's wall, sink fields and voiding as an event.** No law here needs them. An elastic or rigid enclosure is still refused by name.
 - **The cell-water conflict between BC and FL** stays open: BC holds the cells.
 
-**Law forms research 02 does not give, all model defaults:** chamber activation, the vessel pressure-volume law, stretch, the central sigmoid, the oncotic term, interstitial compliance, lymph flow, filtration, reabsorption by segment (saturable sodium, potassium with sodium, chloride beside them), vasopressin turnover, bladder drain, gut basal rates, ion exchange and collapse. They are labelled in the code. None needs research before ticket 11, and each needs a reviewed source before a clinical packet.
+**Law forms research 02 does not give, all model defaults:** chamber activation, the vessel pressure-volume law, stretch, the central sigmoid, the oncotic term, interstitial compliance, lymph flow, filtration, reabsorption by segment (saturable sodium, potassium with sodium, chloride beside them), vasopressin turnover, bladder drain, gut basal rates, ion and albumin exchange and collapse. They are labelled in the code. None needs research before ticket 11, and each needs a reviewed source before a clinical packet.
 
 **Hard-part check.** No solver redesign was needed: the elimination that follows the ring is a plain one. No validation against Pulse or published physiology was done, and no disease was built.
 

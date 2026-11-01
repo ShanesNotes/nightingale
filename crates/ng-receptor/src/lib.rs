@@ -53,7 +53,10 @@ fn ligand<'b, C: SiteSet, Q: Substance, M: Dimension>(
     ports: &ReceptorPorts<'b>,
     keys: [&'static str; 4],
     class: RateClass,
-    meets: for<'k> fn(&mut Kernel<'b, 'k, Receptor, C>, &SiteRoute<'b, Receptor, C, Q>) -> Expr<'b, 'k, Receptor, M>,
+    meets: for<'k> fn(
+        &mut Kernel<'b, 'k, Receptor, C>,
+        &SiteRoute<'b, Receptor, C, Q>,
+    ) -> Expr<'b, 'k, Receptor, M>,
 ) where
     Product<Affinity<M>, Product<M, Q>>: SameDimension<Rate<Q>>,
 {
