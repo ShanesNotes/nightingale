@@ -3,7 +3,7 @@ use ng_contract::*;
 use ng_record::{Running, Session};
 
 const NEWTON_LIMIT: u32 = 32;
-/// A row is solved at this much rounding on its own terms.
+/// An update this small, in units of rounding, moved nothing a row can show.
 const NEWTON_STOP: f64 = 8.0 * f64::EPSILON;
 
 /// A model default reported with every result, for rows near unit size. A packet of far smaller amounts states its
@@ -13,10 +13,12 @@ pub fn admission_tolerance() -> ErrorScales {
     ErrorScales::uniform(scale(1e-9), scale(1e-12)).expect("positive constants")
 }
 
-/// Whether every row stands at rounding on its own terms, each a slope times its unknown. Each row is read at its
-/// own size and no tolerance is read, so a row or a fit too small for the tolerance to see is solved all the same.
-fn at_rounding(residuals: &[f64], jacobian: SparseView<'_>, unknowns: &[f64]) -> bool {
-    (residuals.iter().enumerate()).all(|(row, residual)| {
+/// Whether an update moved each unknown by rounding alone, read against the unknown and the terms of its own row,
+/// each a slope times an unknown, which give a size to an unknown that stands at zero. Only the update can show a fit
+/// or a slow row still moving while every residual is rounding. No tolerance is read and nothing has one scale, so
+/// a row or a fit too small for the tolerance to see is solved all the same.
+fn settled(update: &[f64], jacobian: SparseView<'_>, unknowns: &[f64]) -> bool {
+    (update.iter().zip(unknowns).enumerate()).all(|(row, (change, unknown))| {
         let entries = jacobian.row_offsets()[row]..jacobian.row_offsets()[row + 1];
         let terms = jacobian.columns()[entries.clone()]
             .iter()
@@ -24,7 +26,7 @@ fn at_rounding(residuals: &[f64], jacobian: SparseView<'_>, unknowns: &[f64]) ->
         let size: f64 = terms
             .map(|(column, slope)| (slope * unknowns[column.index()]).abs())
             .sum();
-        residual.abs() <= NEWTON_STOP * size
+        change.abs() <= NEWTON_STOP * (unknown.abs() + size)
     })
 }
 
@@ -41,13 +43,14 @@ fn initialize(system: &InitializationSystem<'_>) -> SolveWorkspace {
         else {
             break;
         };
-        if at_rounding(&residuals, jacobian.view(), workspace.unknowns_mut()) {
-            break;
-        }
         let Ok(update) = solve_dense(jacobian.view(), &residuals) else {
             break;
         };
-        for (unknown, change) in workspace.unknowns_mut().iter_mut().zip(update) {
+        let unknowns = workspace.unknowns_mut();
+        if settled(&update, jacobian.view(), unknowns) {
+            break;
+        }
+        for (unknown, change) in unknowns.iter_mut().zip(update) {
             *unknown -= change;
         }
     }
