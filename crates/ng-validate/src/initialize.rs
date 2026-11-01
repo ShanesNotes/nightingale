@@ -41,7 +41,7 @@ fn initialize(system: &InitializationSystem<'_>) -> SolveWorkspace {
         else {
             break;
         };
-        if at_rounding(&residuals, jacobian.view(), workspace.coordinates()) {
+        if at_rounding(&residuals, jacobian.view(), workspace.unknowns_mut()) {
             break;
         }
         let Ok(update) = solve_dense(jacobian.view(), &residuals) else {
