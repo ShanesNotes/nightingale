@@ -61,6 +61,7 @@ Admission can now solve a start state, not only take the packet's numbers. It fi
 - A forged checkpoint can still add a waiting delivery, or name another start, because a seal covers nothing that waits and the digest has no key. That design is older than this ticket, and nothing here has an adversary.
 - `bind`'s anchor and finding 15 checks are partial. A law can read an idle drive to dodge the first, and the second folds nothing.
 - A fit is read step by step, so one whose whole effect on each step is below rounding on its rows is refused, though the sum over the beat might show it. On a ring of 64 that takes a flow near 1e-12 per beat on amounts of 50. A fit that solves to zero is refused the same way.
+- A fit that shows only through a head of a few rounding units of its rows can land far from its closed form, at flows near 1e-11 per beat on amounts of 50. The anchor still holds in the run, so no check can tell.
 
 **Not proven here.** The test body is driven from outside, so it says nothing about a heart that sets its own rate. No reader from another vendor has seen this design or code: Codex ran out of credits and Grok stopped at its free limit, so the base was picked alone and the adversaries were two Opus seats. See the PR.
 
