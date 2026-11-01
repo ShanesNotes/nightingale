@@ -267,6 +267,7 @@ impl StepProposal {
         }
         let body = problem.body;
         let scales = resolution.scales();
+        let sizes = &problem.parameters.sizes;
         let start = problem.accepted.state().coordinates();
         let mut stage_defect = Worst::NONE;
         for ((stage, seen), evaluation) in stages.iter().zip(&witness.stages).zip(&evaluations) {
@@ -286,7 +287,7 @@ impl StepProposal {
                         if position > rate { position } else { rate }
                     }
                 };
-                stage_defect.note(defect / scales.at(value), row.id());
+                stage_defect.note(defect / scales.at(value, sizes[at]), row.id());
             }
         }
         if let Some(row) = stage_defect.above_one() {
@@ -296,7 +297,10 @@ impl StepProposal {
             let (fine, coarse) = (&witness.stages[fine].unknowns, &witness.stages[coarse].unknowns);
             let mut error = Worst::NONE;
             for (at, row) in body.rows().iter().enumerate() {
-                error.note((fine[at] - coarse[at]).abs() / scales.at(fine[at]), row.id());
+                error.note(
+                    (fine[at] - coarse[at]).abs() / scales.at(fine[at], sizes[at]),
+                    row.id(),
+                );
             }
             if let Some(row) = error.above_one() {
                 return Err(ticket.refuse(NumericalRefusal::Accuracy { row }));
@@ -322,7 +326,7 @@ impl StepProposal {
         let mut algebraic_defect = Worst::NONE;
         for (at, row) in body.rows().iter().enumerate() {
             if matches!(row.kind(), RowKind::Algebraic(_)) {
-                let normalized = published.residuals[at].abs() / scales.at(coordinates[at]);
+                let normalized = published.residuals[at].abs() / scales.at(coordinates[at], sizes[at]);
                 algebraic_defect.note(normalized, row.id());
             }
         }

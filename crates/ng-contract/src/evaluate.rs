@@ -269,7 +269,9 @@ impl CompiledBody {
     ) -> Result<Vec<f64>, Undefined> {
         let mut slopes = vec![0.0; self.layout.rows.len()];
         self.slopes(inputs, |instance, reads| {
-            let fitted = reads.filter(|(bound, _)| matches!(bound, Bound::Parameter(parameter) if slots.contains(parameter)));
+            let fitted = reads.filter(
+                |(bound, _)| matches!(bound, Bound::Parameter(parameter) if slots.contains(parameter)),
+            );
             let slope: f64 = fitted.map(|(_, slope)| slope).sum();
             match instance.target {
                 Target::Column(column) => {

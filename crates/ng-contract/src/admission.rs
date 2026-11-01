@@ -296,6 +296,15 @@ impl InitializationSystem<'_> {
         }
         (moved.rounded(), packet.rounded())
     }
+    /// A total's natural size: its largest row's.
+    fn total_size(&self, quantity: QuantityId) -> f64 {
+        let combination = &self.body.conserved_basis().combinations()[quantity.index()];
+        let sizes = combination
+            .terms()
+            .iter()
+            .map(|(row, _)| self.parameters.sizes[row.index()]);
+        sizes.fold(0.0, f64::max)
+    }
     /// One slot per unknown, in the workspace's order: each point's body rows, a total in one row of the last point
     /// under a cycle, then each fit's anchor.
     pub fn evaluate(&self, workspace: &SolveWorkspace) -> Result<Vec<f64>, InitializationFailure> {
@@ -394,8 +403,8 @@ impl InitializationSystem<'_> {
     }
     /// One defect over its scale, `None` when the tolerance refuses it. What overflowed is refused, because `<=` is
     /// false on a NaN but true of two infinities, and a defect of zero holds even where an overflow leaves no scale.
-    fn held(&self, defect: f64, read: f64) -> Option<f64> {
-        let scale = self.tolerance.at(read);
+    fn held(&self, defect: f64, read: f64, size: f64) -> Option<f64> {
+        let scale = self.tolerance.at(read, size);
         let within = defect == 0.0 || (defect.is_finite() && defect <= scale);
         within.then(|| if scale > 0.0 { defect / scale } else { 0.0 })
     }
@@ -469,8 +478,9 @@ impl InitializationSystem<'_> {
             }
         };
         let stages = self.stages(unknowns)?;
+        let sizes = &self.parameters.sizes;
         let stage = |slot: usize| {
-            let held = self.held(stages[slot].abs(), unknowns[slot]);
+            let held = self.held(stages[slot].abs(), unknowns[slot], sizes[slot % size]);
             held.ok_or(inconsistent(body_row(slot % size)))
         };
         let replaced = |slot: &usize| self.replaced().any(|(known, _)| known == *slot);
@@ -480,7 +490,8 @@ impl InitializationSystem<'_> {
         // A net flow lands on the row its total replaced, so the flow is read first, to name it.
         for (slot, quantity) in self.replaced() {
             let (_, packet) = self.total(unknowns, quantity);
-            let flow = self.held(self.net_flow(unknowns, quantity)?.abs(), packet);
+            let bulk = self.total_size(quantity);
+            let flow = self.held(self.net_flow(unknowns, quantity)?.abs(), packet, bulk);
             note(
                 AdmissionRow::Total(quantity),
                 flow.ok_or(InitializationFailure::NetBoundaryFlow { quantity })?,
@@ -490,13 +501,18 @@ impl InitializationSystem<'_> {
         for quantity in self.body.conserved_basis().ids() {
             let row = AdmissionRow::Total(quantity);
             let (moved, packet) = self.total(unknowns, quantity);
-            note(row, self.held(moved.abs(), packet).ok_or(inconsistent(row))?);
+            let bulk = self.total_size(quantity);
+            note(
+                row,
+                self.held(moved.abs(), packet, bulk).ok_or(inconsistent(row))?,
+            );
         }
         for anchor in &owed.anchors {
             let row = AdmissionRow::Anchor(anchor.id);
             let held = self.held(
                 (self.anchor_read(unknowns, anchor) - anchor.value).abs(),
                 anchor.value,
+                sizes[anchor.row.index()],
             );
             note(row, held.ok_or(inconsistent(row))?);
         }

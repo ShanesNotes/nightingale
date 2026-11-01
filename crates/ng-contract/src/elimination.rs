@@ -250,7 +250,12 @@ mod tests {
 
     #[test]
     fn a_zero_pivot_names_its_row() {
-        let unknowns = [UnknownId::at(0), UnknownId::at(1), UnknownId::at(0), UnknownId::at(1)];
+        let unknowns = [
+            UnknownId::at(0),
+            UnknownId::at(1),
+            UnknownId::at(0),
+            UnknownId::at(1),
+        ];
         let matching = [RowId::at(0), RowId::at(1)];
         let plan = Elimination::plan(&[0, 2, 4], &unknowns, &matching);
         assert!(matches!(plan.factor(&[1.0, 1.0, 1.0, 1.0]), Err(_)));

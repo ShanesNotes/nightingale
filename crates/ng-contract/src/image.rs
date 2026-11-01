@@ -152,6 +152,7 @@ impl ImageParts {
             packet,
             values,
             starts,
+            sizes,
             modes,
             owed: _,
         } = parameters;
@@ -159,6 +160,7 @@ impl ImageParts {
         out.raw(packet.digest().as_bytes());
         values.seal(&mut out);
         starts.seal(&mut out);
+        sizes.seal(&mut out);
         modes.seal(&mut out);
         out.into_bytes()
     }
@@ -224,6 +226,7 @@ impl ImageParts {
             packet: PacketHash::of_digest(read.digest()?),
             values: read.float_list(body.layout.parameters.len())?,
             starts: read.float_list(rows.len())?,
+            sizes: read.float_list(rows.len())?,
             modes: read.mode_list(body)?,
             owed: Owed::default(),
         };
@@ -231,6 +234,7 @@ impl ImageParts {
         if !(body.layout.parameters.iter().zip(&parameters.values))
             .all(|(slot, value)| inside(slot.admissible, value))
             || !(rows.iter().zip(&parameters.starts)).all(|(row, value)| inside(row.admissible(), value))
+            || !(parameters.sizes.iter()).all(|size| inside(AdmissibleSet::Positive, size))
             || body.unheld_period(&parameters.values).is_some()
         {
             return Err(Malformed);

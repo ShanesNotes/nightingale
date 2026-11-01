@@ -122,6 +122,12 @@ struct StartEntry {
     bits: u64,
     note: &'static str,
 }
+/// A row's natural size, in its own unit.
+struct ScaleEntry {
+    row: RowKind,
+    dimension: String,
+    bits: u64,
+}
 struct ModeEntry {
     variable: LawName,
     value: &'static str,
@@ -149,6 +155,7 @@ pub struct ParameterPacket<K: PacketKind> {
     tolerance: Option<ErrorScales>,
     parameters: Vec<ParameterEntry>,
     starts: Vec<StartEntry>,
+    scales: Vec<ScaleEntry>,
     modes: Vec<ModeEntry>,
     anchors: Vec<AnchorEntry>,
     populations: Vec<PopulationEntry>,
@@ -162,6 +169,7 @@ impl<K: PacketKind> ParameterPacket<K> {
             tolerance: None,
             parameters: Vec::new(),
             starts: Vec::new(),
+            scales: Vec::new(),
             modes: Vec::new(),
             anchors: Vec::new(),
             populations: Vec::new(),
@@ -180,6 +188,20 @@ impl<K: PacketKind> ParameterPacket<K> {
     /// under a run's identity. A packet that states none is held exactly.
     pub fn within(&mut self, tolerance: ErrorScales) {
         self.tolerance = Some(tolerance);
+    }
+    /// A row's natural size, where the tolerance and a core's scales read their absolute term. A row with none is
+    /// one unit in size, so a fixture near unit size states none, and rows of mixed units state their own. `bind`
+    /// refuses one on no row, in another dimension or not positive.
+    pub fn row_scale<U: Dimension>(&mut self, row: RowKind, size: Measure<U>) -> Result<(), AdmissionError> {
+        if self.scales.iter().any(|entry| entry.row == row) {
+            return Err(AdmissionError::RowScale { row });
+        }
+        self.scales.push(ScaleEntry {
+            row,
+            dimension: dimension::<U>(),
+            bits: size.bits(),
+        });
+        Ok(())
     }
     /// An anchor of this packet's kind. Refuses a second anchor under one id.
     pub fn anchor<U: Dimension>(&mut self, anchor: Anchor<K, U>) -> Result<(), AdmissionError> {
@@ -355,6 +377,7 @@ impl<K: PacketKind> ParameterPacket<K> {
             tolerance,
             parameters,
             starts,
+            scales,
             modes,
             anchors,
             populations,
@@ -397,6 +420,14 @@ impl<K: PacketKind> ParameterPacket<K> {
             out.text(dimension);
             out.number(*bits);
             out.text(note);
+        }
+        let mut scales: Vec<&ScaleEntry> = scales.iter().collect();
+        scales.sort_by_key(|entry| entry.row);
+        out.length(scales.len());
+        for ScaleEntry { row, dimension, bits } in scales {
+            row.seal(&mut out);
+            out.text(dimension);
+            out.number(*bits);
         }
         let mut modes: Vec<&ModeEntry> = modes.iter().collect();
         modes.sort_by_key(|entry| entry.variable);
@@ -557,6 +588,8 @@ pub struct BoundParameters {
     pub(crate) packet: PacketHash,
     pub(crate) values: Vec<f64>,
     pub(crate) starts: Vec<f64>,
+    /// One per row: its natural size, one unit unless the packet says.
+    pub(crate) sizes: Vec<f64>,
     pub(crate) modes: Vec<usize>,
     pub(crate) owed: Owed,
 }
@@ -570,6 +603,7 @@ impl BoundParameters {
             packet,
             values,
             starts,
+            sizes,
             modes,
             owed: _,
         } = self;
@@ -578,6 +612,7 @@ impl BoundParameters {
         packet.digest().seal(&mut out);
         values.seal(&mut out);
         starts.seal(&mut out);
+        sizes.seal(&mut out);
         modes.seal(&mut out);
         out.digest()
     }
@@ -724,15 +759,32 @@ impl CompiledBody {
         {
             return Err(AdmissionError::UnknownStart { row: entry.row });
         }
+        let sizes = self.sizes(&packet)?;
         let owed = self.owed(&packet, &settled, &filled_by)?;
         Ok(BoundParameters {
             model: self.model_hash(),
             packet: packet.hash(),
             values,
             starts,
+            sizes,
             modes,
             owed,
         })
+    }
+    fn sizes<K: PacketKind>(&self, packet: &ParameterPacket<K>) -> Result<Vec<f64>, AdmissionError> {
+        let rows = &self.layout.rows;
+        let mut sizes = vec![1.0; rows.len()];
+        for entry in &packet.scales {
+            let row = entry.row;
+            let found = rows.iter().position(|known| known.kind == row);
+            let at = found.ok_or(AdmissionError::RowScale { row })?;
+            let size = f64::from_bits(entry.bits);
+            if rows[at].dimension != entry.dimension || size <= 0.0 {
+                return Err(AdmissionError::RowScale { row });
+            }
+            sizes[at] = size;
+        }
+        Ok(sizes)
     }
     /// Every row a row's value can feel and the laws that set them: the row, each row its laws read, and so on
     /// back. At an instant only algebraic rows move, so a walk passes through no other.

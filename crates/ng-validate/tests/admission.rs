@@ -846,6 +846,79 @@ fn a_moved_conserved_total_is_refused_with_its_quantity() {
     }
 }
 
+fn sized_packet(case: &PulsatileCase) -> ParameterPacket<SyntheticFixture> {
+    let mut packet = ParameterPacket::new();
+    packet.within(admission_tolerance());
+    packet
+        .synthetic(E, NETWORK, measure::<Elastance>(GUESS), NOTE)
+        .expect("once");
+    let g = measure::<Conductance<Water>>(CONDUCTANCE);
+    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+    packet
+        .start(case.a(), measure::<Water>(START[0]), NOTE)
+        .expect("once");
+    packet
+        .start(case.b(), measure::<Water>(START[1]), NOTE)
+        .expect("once");
+    packet
+}
+
+/// A row of a large natural size is read at that size, and a total at its largest row's: the move a unit row
+/// refuses stands on rows a thousand units wide.
+#[test]
+fn a_rows_natural_size_scales_what_it_is_held_to() {
+    let case = PulsatileCase::new(Variant::Slow);
+    let moved_by = |sizes: f64| {
+        let mut packet = sized_packet(&case);
+        for row in [case.a(), case.b()] {
+            packet.row_scale(row, measure::<Water>(sizes)).expect("once");
+        }
+        let parameters = case.body().bind(packet).expect("bound");
+        let request = InitializationRequest::at(at(0));
+        let system = (case.body().initialization(parameters, empty_port(), request)).expect("a system");
+        let mut moved = system.workspace();
+        moved.unknowns_mut()[0] += 2e-9;
+        moved.unknowns_mut()[1] += 2e-9;
+        system.admit(moved, case.history()).err()
+    };
+    assert_eq!(
+        moved_by(1.0),
+        Some(InitializationFailure::Inconsistent {
+            row: AdmissionRow::Body(case.body().rows()[0].id())
+        })
+    );
+    assert_eq!(moved_by(1_000.0), None);
+}
+
+#[test]
+fn a_row_size_that_names_no_row_or_is_not_a_size_is_refused() {
+    let case = PulsatileCase::new(Variant::Slow);
+    let refused = |row: RowKind| Some(AdmissionError::RowScale { row });
+    let mut packet = sized_packet(&case);
+    packet.row_scale(case.a(), measure::<Water>(1.0)).expect("once");
+    assert_eq!(
+        packet.row_scale(case.a(), measure::<Water>(2.0)).err(),
+        refused(case.a())
+    );
+    let elsewhere = RowKind::Memory(LawName {
+        owner: "NS",
+        local: "no such row",
+    });
+    let mut packet = sized_packet(&case);
+    packet.row_scale(elsewhere, measure::<Water>(1.0)).expect("once");
+    assert_eq!(case.body().bind(packet).err(), refused(elsewhere));
+    let mut packet = sized_packet(&case);
+    packet
+        .row_scale(case.a(), measure::<Pressure>(1.0))
+        .expect("once");
+    assert_eq!(case.body().bind(packet).err(), refused(case.a()));
+    for size in [0.0, -1.0] {
+        let mut packet = sized_packet(&case);
+        packet.row_scale(case.a(), measure::<Water>(size)).expect("once");
+        assert_eq!(case.body().bind(packet).err(), refused(case.a()));
+    }
+}
+
 /// Each row moves inside its own scale at an instant, and together they move the total past its own.
 #[test]
 fn an_instant_moves_no_conserved_total_past_its_scale() {

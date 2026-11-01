@@ -115,8 +115,9 @@ fn newton(
         // An update is in each row's own unknown, where a residual is a rate on one row and a kernel's
         // value on another, so this one test fits both. The update still applies: on a stiff row one
         // unit in the last place can be a defect above the scales.
-        settled = (update.iter().zip(&unknowns))
-            .all(|(change, unknown)| change.abs() <= NEWTON_STOP * (1.0 + unknown.abs()));
+        settled = (update.iter().zip(&unknowns).enumerate()).all(|(slot, (change, unknown))| {
+            change.abs() <= NEWTON_STOP * (problem.row_size(slot) + unknown.abs())
+        });
         for (unknown, change) in workspace.unknowns_mut().iter_mut().zip(update) {
             *unknown -= change;
         }

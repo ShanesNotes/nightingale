@@ -4,8 +4,8 @@ use crate::quantity::dimension;
 use crate::scope::ENCLOSURE_PRESSURE;
 use crate::{
     Admissible, AdmissibleSet, AdmissionError, Basis, Boundary, Class, Conductance, Deviation, Dimension,
-    Dimensionless, NonMaterial, Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reference,
-    SameDimension, Sensed, SiteClass, Time, ValidityRange, Volume, Water,
+    Dimensionless, NonMaterial, Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate,
+    Reference, SameDimension, Sensed, SiteClass, Time, ValidityRange, Volume, Water,
 };
 use core::cell::Cell;
 use core::marker::PhantomData;

@@ -93,6 +93,10 @@ pub enum AdmissionError {
     StartOutsideSet {
         row: RowKind,
     },
+    /// A row size stated twice, on no row, in another dimension than the row's or not positive.
+    RowScale {
+        row: RowKind,
+    },
     UnknownChannel {
         row: RowKind,
     },

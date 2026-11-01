@@ -166,8 +166,9 @@ impl ErrorScales {
             relative: relative.value(),
         })
     }
-    pub(crate) fn at(self, value: f64) -> f64 {
-        self.absolute + self.relative * value.abs()
+    /// The scale at `value` of a row of natural size `size`.
+    pub(crate) fn at(self, value: f64, size: f64) -> f64 {
+        self.absolute * size + self.relative * value.abs()
     }
 }
 impl Seal for ErrorScales {

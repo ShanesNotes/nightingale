@@ -47,6 +47,10 @@ impl<'r> CoupledProblem<'r> {
     pub fn row(&self, slot: usize) -> Option<RowId> {
         self.body.rows().get(slot).map(|row| row.id())
     }
+    /// The natural size of the row at a workspace slot, for a Newton stop that reads each row in its own unit.
+    pub fn row_size(&self, slot: usize) -> f64 {
+        self.parameters.sizes[slot]
+    }
     /// Numerical scratch seeded from the accepted state: each amount rounded once, the tangent at zero.
     pub fn workspace(&self) -> SolveWorkspace {
         SolveWorkspace::seeded(self.body, self.accepted.state().coordinates())
