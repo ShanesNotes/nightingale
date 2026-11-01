@@ -1,5 +1,5 @@
 use crate::body::{RowId, UnknownId};
-use std::collections::BTreeSet;
+use alloc::collections::BTreeSet;
 
 /// A fixed elimination over one sparsity. Each pivot pairs an unknown with the row the structural matching gave it,
 /// in least-degree order, ties to the least unknown, so a sparse body factors in about its nonzeros and every run

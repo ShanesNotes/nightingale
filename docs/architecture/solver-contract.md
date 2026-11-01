@@ -191,7 +191,7 @@ The forbidden moves fail to compile (`src/lib.rs`; each probe added since the fi
 | `ng-solver` | Newton or beat algorithm, scratch, error control | `ng-contract` | yes |
 | `ng-record` | Accepted image, validate and publish, session latch, history, checkpoint, observation view | `ng-contract` | yes |
 | `ng-observe` | Observers: windows, delays, measurement error and observations through a lens, one revision at a time | `ng-contract`, `ng-record` (read only) | no |
-| `ng-validate` | Synthetic composition root and stand-ins, reference integrator, certificate, arena | `ng-contract`, `ng-record`, `ng-observe` | no |
+| `ng-validate` | Synthetic composition root and stand-ins, reference integrator, certificate, arena | `ng-contract`, `ng-record`, `ng-observe`, `ng-cardiovascular`, `ng-fluids`, `ng-renal`, `ng-nervous`, `ng-receptor` | no |
 
 The sketch is a standalone crate outside the workspace. No workspace crate names a host service, so none does I/O, starts a thread or reads the clock. The physiology closure (the rows marked yes) admits no crate from outside the workspace, so no Pulse, pulse-io, prost or provider SDK. Unsafe code and host libm are forbidden in every crate. `tools/verify.d/05-seam.sh` holds this table.
 

@@ -930,6 +930,8 @@
 //! }
 //! ```
 
+extern crate alloc;
+
 mod admission;
 mod anatomy;
 mod body;

@@ -92,6 +92,21 @@ item = "problem::SparseView::values"
 reason = "Jacobian entries in mixed row and column dimensions, for a core's own linear solve"
 
 [[crate]]
+name = "ng-cardiovascular"
+
+[[crate]]
+name = "ng-fluids"
+
+[[crate]]
+name = "ng-renal"
+
+[[crate]]
+name = "ng-nervous"
+
+[[crate]]
+name = "ng-receptor"
+
+[[crate]]
 name = "ng-record"
 
 [[crate]]
