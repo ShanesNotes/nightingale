@@ -126,12 +126,15 @@ impl CompiledBody {
     pub(crate) fn judged_at(&self, row: usize) -> usize {
         self.layout.judged[row] as usize
     }
-    /// The longest step this body's laws tolerate: the tightest class of any block a law moves. `attempt` caps a ticket
-    /// here, as a running delivery's end caps one, so no step runs past a law's interval. A held pool's block limits
-    /// nothing. A core reads it, so it need not commit to a span the record will cap.
+    /// The longest step this body's laws tolerate: the tightest class of any block a law moves and of any guard, which
+    /// a longer step could cross and leave behind. `attempt` caps a ticket here, as a running delivery's end caps one, so
+    /// no step runs past a law's interval. A held pool's block limits nothing. A core reads it, so it need not commit to
+    /// a span the record will cap.
     pub fn longest_step_ns(&self) -> u64 {
-        (self.layout.blocks.iter())
-            .map(|block| block.rate.maximum_ns())
+        let blocks = self.layout.blocks.iter().map(|block| block.rate);
+        let guards = self.layout.guards.iter().map(|guard| guard.code.rate);
+        (blocks.chain(guards))
+            .map(|rate| rate.maximum_ns())
             .min()
             .unwrap_or(u64::MAX)
     }

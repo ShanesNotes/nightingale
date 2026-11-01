@@ -556,3 +556,68 @@ fn a_reset_of_a_row_that_cannot_hold_zero_is_refused() {
         }))
     );
 }
+
+/// `x` stands in the guard's window for a tenth of a second, and a step of one second has no stage there, so only the
+/// guard's own class can stop a step leaving it behind.
+#[test]
+fn a_step_stops_at_a_guards_interval_though_no_row_moves_that_fast() -> Result<(), InitializationFailure> {
+    let tight = SECOND / 100;
+    let body = assemble(one_site(), |mut body| {
+        let (mut laws, _) = body.nervous()?.parts();
+        let x = laws.state::<Dimensionless>("x", Admissible::finite());
+        let slope = laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("slope"), Admissible::positive());
+        let middle = laws.parameter::<Dimensionless>(ParameterKey::new("middle"), Admissible::positive());
+        let reach = laws.parameter::<Dimensionless>(ParameterKey::new("reach"), Admissible::positive());
+        let (slow, fast) = (
+            RateClass::new(RateBand::Reflex, SECOND)?,
+            RateClass::new(RateBand::Wave, tight)?,
+        );
+        let rate = laws.kernel(|mut k| {
+            let value = k.parameter(&slope);
+            k.finish(value, laws.every_mode(), slow)
+        });
+        laws.memory_rate(&x, rate);
+        let [before, after] = laws.modes("state", ["before", "after"]);
+        let window = laws.kernel(|mut k| {
+            let (value, middle) = (k.state(&x), k.parameter(&middle));
+            let off = k.subtract(value, middle);
+            let square = k.scale(off, off);
+            let reach = k.parameter(&reach);
+            let gap = k.subtract(reach, square);
+            k.finish(gap, before.only(), fast)
+        });
+        laws.event(Guard::new(window, Crossing::Rising, before.to(&after)?));
+        body.add(laws.finish());
+        body.compile()
+    })?;
+    assert_eq!(body.longest_step_ns(), tight);
+    let mut packet = ParameterPacket::new();
+    packet.synthetic(
+        ParameterKey::new("slope"),
+        Binding::Body,
+        measure::<Rate<Dimensionless>>(1.0),
+        "synthetic",
+    )?;
+    for (key, value) in [("middle", 0.15), ("reach", 0.0025)] {
+        packet.synthetic(
+            ParameterKey::new(key),
+            Binding::Body,
+            measure::<Dimensionless>(value),
+            "synthetic",
+        )?;
+    }
+    packet.start(
+        RowKind::Memory(named("x").into()),
+        measure::<Dimensionless>(0.0),
+        "synthetic",
+    )?;
+    packet.start_mode(named("state"), "before", "synthetic")?;
+    let core = ReferenceIntegrator::new(SECOND).with_floor(1_000);
+    let session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core)?;
+    let started = session.record().accepted().modes()[0];
+    let Ok(session) = run_until(session, SimTime::from_ns(SECOND / 4)) else {
+        panic!("a fault");
+    };
+    assert_ne!(session.record().accepted().modes()[0], started);
+    Ok(())
+}
