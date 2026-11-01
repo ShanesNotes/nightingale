@@ -835,7 +835,7 @@ impl CompiledBody {
                         .collect();
                     let laws = self.laws_behind(anchors[at].row, packet.cycle.is_some());
                     let reads = |law: &&Instance| law.parameters.iter().any(|read| slots.contains(read));
-                    if !laws.iter().any(|law| reads(law)) {
+                    if !laws.iter().any(reads) {
                         return Err(AdmissionError::FitUnread { key, binding });
                     }
                     fits.push(Fit {

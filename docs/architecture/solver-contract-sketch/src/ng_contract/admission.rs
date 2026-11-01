@@ -1,17 +1,16 @@
-//! The admission solve: once, yielding the only `InitialRevision` a session can be admitted from. The goal and
-//! the anchors come from the packet; provenance is computed by the contract from the packet, never supplied by
-//! a solver.
+//! The admission solve: once, yielding the only `InitialRevision` a session can be admitted from. The goal, the
+//! tolerance and the anchors come from the packet; provenance is computed by the contract from the packet, never
+//! supplied by a solver.
 use super::*;
 
-/// When the start stands, how near every row must come and what reads the anchors.
+/// When the start stands and what reads the anchors.
 pub struct InitializationRequest<'l> {
     _anchor_moment: SimTime,
-    _tolerance: ErrorScales,
     _lens: Option<&'l ObservationLens>,
 }
 impl InitializationRequest<'static> {
-    /// Every row of the system is held to `tolerance`, and a packet with an anchor needs `reading` too.
-    pub fn at(_anchor_moment: SimTime, _tolerance: ErrorScales) -> Self {
+    /// A packet with an anchor needs `reading` too.
+    pub fn at(_anchor_moment: SimTime) -> Self {
         todo!()
     }
 }
@@ -39,10 +38,13 @@ pub struct InitializationSystem<'m> {
     _parameters: BoundParameters,
     _pending: PendingInputs,
     _anchor_moment: SimTime,
-    _tolerance: ErrorScales,
 }
 impl InitializationSystem<'_> {
     pub fn workspace(&self) -> SolveWorkspace {
+        todo!()
+    }
+    /// Whether `admit` would pass this workspace, so a solve stops where the judge would.
+    pub fn holds(&self, _workspace: &SolveWorkspace) -> bool {
         todo!()
     }
     /// One row per unknown, in the workspace's order.

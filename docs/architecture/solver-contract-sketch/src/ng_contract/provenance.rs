@@ -2,7 +2,9 @@
 //! `Citation`s, and a `SyntheticFixture` holds notes, with no conversion between them. The packet keeps real
 //! values and their provenance; parameters bind to the compiled body by key (`CompiledBody::bind`), so
 //! evaluation sees the values.
-use super::{AdmissionError, Compensated, Digest, Measure, PacketHash, PacketSeed, RowKind, Unit};
+use super::{
+    AdmissionError, Compensated, Digest, Dimensionless, ErrorScales, Measure, PacketHash, PacketSeed, RowKind, Unit,
+};
 use core::marker::PhantomData;
 use core::num::{NonZeroU32, NonZeroU64};
 
@@ -132,8 +134,8 @@ impl ParameterKey {
 /// kind can stand in one, and `Fixture` is a synthetic value set by hand.
 pub enum ValueProvenance {
     Fixture,
-    /// By a named identity over other packet values.
-    Derived { identity: &'static str, inputs: &'static [ParameterKey] },
+    /// A named identity: one other entry of this packet, scaled. `bind` computes it.
+    Derived { identity: &'static str, source: ParameterKey },
     /// Drawn from its key's population record with the packet seed when the packet was built, so the patient's
     /// draw is part of the packet hash and never of the run seed.
     Sampled,
@@ -144,10 +146,11 @@ pub enum ValueProvenance {
     /// A start value admission moved off the packet's guess.
     Solved,
 }
-/// Which packet value a record speaks for: a parameter entry or a row's start.
+/// Which packet value a record speaks for: a parameter entry, a row's start or a first mode.
 pub enum ValueName {
     Parameter { key: ParameterKey },
     Start(RowKind),
+    Mode { value: &'static str },
 }
 /// One value as the run starts from it.
 pub struct ValueRecord {
@@ -255,10 +258,11 @@ struct PopulationEntry {
     _lower: f64,
     _upper: f64,
 }
-/// Every parameter value with its provenance, the anchors the admission solve must meet and its goal.
+/// Every parameter value with its provenance, the anchors the admission solve must meet, its goal and its tolerance.
 /// Its hash is part of the run identity; it is data bound to a model, not part of the model.
 pub struct ParameterPacket<K: PacketKind> {
     _cycle: Option<Cycle>,
+    _tolerance: Option<ErrorScales>,
     _anchors: Vec<PacketEntry>,
     _values: Vec<PacketEntry>,
     _evidence: Vec<EvidenceRecord>,
@@ -272,6 +276,11 @@ impl<K: PacketKind> ParameterPacket<K> {
     }
     /// A packet whose start state returns after `cycle`: the periodic goal.
     pub fn periodic(_cycle: Cycle) -> Self {
+        todo!()
+    }
+    /// How near every row of the admission system must come. The hash covers it, and a packet that states none is
+    /// held exactly.
+    pub fn within(&mut self, _tolerance: ErrorScales) {
         todo!()
     }
     /// An anchor of this packet's kind; a second anchor under one id is refused.
@@ -293,9 +302,10 @@ impl<K: PacketKind> ParameterPacket<K> {
         -> Result<(), AdmissionError> {
         todo!()
     }
-    /// A value an identity gives from other packet values. `bind` refuses an input with no entry or a fitted one.
-    pub fn derived<U>(&mut self, _key: ParameterKey, _value: Measure<U>, _identity: &'static str,
-        _inputs: &'static [ParameterKey]) -> Result<(), AdmissionError> {
+    /// A value an identity gives: `scale` times the entry at `source`, computed at `bind`. A source the packet does
+    /// not hold, or one derived or fitted, is refused.
+    pub fn derived(&mut self, _key: ParameterKey, _identity: &'static str, _source: ParameterKey,
+        _scale: Measure<Dimensionless>) -> Result<(), AdmissionError> {
         todo!()
     }
     /// A parameter admission fits so `anchor` holds. One fit names one anchor.
