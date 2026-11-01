@@ -310,6 +310,48 @@ fn both_arrows(capillary_first: bool) -> Result<ModelHash, AdmissionError> {
     Ok(compiled.model_hash())
 }
 
+fn stretch_hash(written_out: bool) -> Result<ModelHash, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", at()?);
+    let compiled = assemble(Schema::new(map.finish()?)?, |mut body| {
+        let (mut laws, _ports) = body.cardiovascular()?.parts();
+        let stretch = laws.parameter::<Dimensionless>(ParameterKey::new("cv.stretch"), Admissible::finite());
+        let class = wave()?;
+        if written_out {
+            for local in ["aortic_arch_stretch", "carotid_sinus_stretch"] {
+                let row = laws.algebraic::<Dimensionless>(local, Admissible::finite());
+                let residual = laws.kernel(|mut k| {
+                    let value = k.parameter(&stretch);
+                    let seen = k.algebraic(&row);
+                    let gap = k.subtract(seen, value);
+                    k.finish(gap, laws.every_mode(), class)
+                });
+                laws.residual(&row, residual);
+            }
+        } else {
+            let out: BaroreceptorAfferents<Defines<'_, Cardiovascular>> = laws.emit();
+            for output in [&out.aortic_arch_stretch, &out.carotid_sinus_stretch] {
+                let value = laws.kernel(|mut k| {
+                    let value = k.parameter(&stretch);
+                    k.finish(value, laws.every_mode(), class)
+                });
+                laws.define(output, value);
+            }
+        }
+        body.add(laws.finish());
+        body.compile()
+    })?;
+    Ok(compiled.model_hash())
+}
+
+/// The two read the same steps, and a validity range judges them differently: the row in a definition,
+/// the gap in a written-out residual.
+#[test]
+fn a_definition_and_its_residual_written_out_are_two_models() -> Result<(), AdmissionError> {
+    assert_ne!(stretch_hash(true)?, stretch_hash(false)?);
+    Ok(())
+}
+
 #[test]
 fn the_order_of_two_arrows_reaches_nothing() -> Result<(), AdmissionError> {
     assert_eq!(both_arrows(true)?, both_arrows(false)?);

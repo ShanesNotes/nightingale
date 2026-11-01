@@ -35,6 +35,10 @@ enum Defect {
     Reversed,
     LiverHoldsCells,
     LiverHoldsNothing,
+    LiverAlsoHoldsCells,
+    LiverHoldsEnclosureFluid,
+    NamedCardListsItsFluid,
+    PortNamesNoRoute,
 }
 
 struct Sites {
@@ -113,11 +117,14 @@ fn gut<'b>(body: &mut Assembly<'b>, defect: Defect) -> Result<(), AdmissionError
     } else {
         "a synthetic bench"
     };
+    let holds = if defect == Defect::NamedCardListsItsFluid {
+        vec![Space::Fluid]
+    } else {
+        vec![]
+    };
     let (mut laws, ports) = body
         .hold(HeldDeclaration::<Gastrointestinal>::new(
-            supplies,
-            vec![],
-            validity,
+            supplies, holds, validity,
         ))?
         .parts();
     let held = laws.parameter::<Pressure>(ParameterKey::new("gi.pressure"), Admissible::finite());
@@ -135,7 +142,12 @@ fn gut<'b>(body: &mut Assembly<'b>, defect: Defect) -> Result<(), AdmissionError
         laws.state::<Dimensionless>(ROUTE, Admissible::finite());
     }
     if defect != Defect::RouteUnserved {
-        let BoundaryWater { route, drive } = ports.water(ROUTE)?;
+        let name = if defect == Defect::PortNamesNoRoute {
+            "no such route"
+        } else {
+            ROUTE
+        };
+        let BoundaryWater { route, drive } = ports.water(name)?;
         let class = slow()?;
         let rate = laws.kernel(|mut k| {
             let value = k.read(&drive);
@@ -214,11 +226,14 @@ fn compiled(defect: Defect) -> Result<CompiledBody, AdmissionError> {
                 let (laws, _ports) = body.hold(declaration)?.parts();
                 body.add(laws.finish());
             }
-            Defect::LiverHoldsCells | Defect::LiverHoldsNothing => {
-                let holds = if defect == Defect::LiverHoldsCells {
-                    vec![Space::Cells]
-                } else {
-                    vec![]
+            Defect::LiverHoldsCells
+            | Defect::LiverHoldsNothing
+            | Defect::LiverAlsoHoldsCells
+            | Defect::LiverHoldsEnclosureFluid => {
+                let holds = match defect {
+                    Defect::LiverHoldsNothing => vec![],
+                    Defect::LiverHoldsEnclosureFluid => vec![Space::Fluid],
+                    _ => vec![Space::Cells],
                 };
                 let declaration = HeldDeclaration::<Hepatic>::new(vec![], holds, "a synthetic bench");
                 let (laws, _ports) = body.hold(declaration)?.parts();
@@ -286,6 +301,16 @@ fn a_boundary_scope_cannot_serve_a_route_a_held_card_declared() {
 fn a_declared_route_the_schema_does_not_name_is_refused() {
     assert_eq!(
         refused(Defect::RouteUnknown),
+        AdmissionError::UnknownBoundary {
+            name: "no such route"
+        }
+    );
+}
+
+#[test]
+fn a_held_card_cannot_ask_for_a_route_the_schema_does_not_name() {
+    assert_eq!(
+        refused(Defect::PortNamesNoRoute),
         AdmissionError::UnknownBoundary {
             name: "no such route"
         }
@@ -471,6 +496,36 @@ fn a_space_a_law_moves_cannot_be_held() -> Result<(), AdmissionError> {
             space: Space::Plasma,
         })
     );
+    Ok(())
+}
+
+#[test]
+fn two_cards_cannot_hold_one_pool() -> Result<(), AdmissionError> {
+    let (_, Sites { bed, .. }) = schema(Defect::None)?;
+    assert_eq!(
+        refused(Defect::LiverAlsoHoldsCells),
+        defect(CompileDefect::PoolHeldTwice {
+            cards: ["BC", "HP"],
+            site: bed,
+            space: Space::Cells,
+        })
+    );
+    compiled(Defect::LiverHoldsCells)?;
+    Ok(())
+}
+
+#[test]
+fn a_card_cannot_hold_the_fluid_of_an_enclosure_another_card_is_named_for() -> Result<(), AdmissionError> {
+    let (_, Sites { belly, .. }) = schema(Defect::None)?;
+    assert_eq!(
+        refused(Defect::LiverHoldsEnclosureFluid),
+        defect(CompileDefect::PoolHeldTwice {
+            cards: ["GI", "HP"],
+            site: belly,
+            space: Space::Fluid,
+        })
+    );
+    compiled(Defect::NamedCardListsItsFluid)?;
     Ok(())
 }
 

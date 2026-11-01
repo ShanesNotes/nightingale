@@ -973,16 +973,24 @@ fn addresses(
 
 /// The card that stands behind a pool: the one a held enclosure's own fluid names, or one that holds the
 /// pool's space.
-fn holder(schema: &Schema, held: &[HeldCard], pool: PoolRef) -> Option<&'static str> {
+fn holder(schema: &Schema, held: &[HeldCard], pool: PoolRef) -> Result<Option<&'static str>, CompileDefect> {
     let enclosure = match schema.anatomy.compliance(pool.site) {
         Some(Compliance::Held { card }) => Some(card),
         _ => None,
     };
-    enclosure.or_else(|| {
-        (held.iter())
-            .find(|card| card.holds.contains(&pool.space))
-            .map(|card| card.card)
-    })
+    let declared = (held.iter())
+        .filter(|card| card.holds.contains(&pool.space))
+        .map(|card| card.card);
+    let mut cards = enclosure.into_iter().chain(declared);
+    let first = cards.next();
+    match (first, cards.find(|&card| Some(card) != first)) {
+        (Some(first), Some(second)) => Err(CompileDefect::PoolHeldTwice {
+            cards: [first, second],
+            site: pool.site,
+            space: pool.space,
+        }),
+        _ => Ok(first),
+    }
 }
 
 fn check_orphans(
@@ -997,7 +1005,7 @@ fn check_orphans(
     }
     for (pool, moved) in rows.amounts.iter().zip(moved) {
         let (site, space) = (pool.site, pool.space);
-        match (holder(schema, held, *pool), moved) {
+        match (holder(schema, held, *pool)?, moved) {
             (Some(card), true) => return Err(CompileDefect::HeldPoolMoved { card, site, space }),
             (None, false) => return Err(CompileDefect::OrphanPool { site, space }),
             _ => {}

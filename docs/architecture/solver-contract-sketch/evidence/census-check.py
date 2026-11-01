@@ -35,7 +35,7 @@ for number, text in enumerate(open(MAP, encoding="utf-8").read().splitlines(), s
 
 def table(path):
     source = open(path, encoding="utf-8").read()
-    start = source.index("coupling_map! {\n    77")
+    start = source.index("coupling_map! {\n")
     return source[start:source.index("\n}\n", start) + 3]
 
 

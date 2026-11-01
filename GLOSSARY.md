@@ -244,7 +244,7 @@ Every transfer of one kind the map implies: one per site of a class, such as pla
 A space the schema states this body does not model, with its reason, such as cell water in a bench with no cell-water law. Its pools are not amounts, and no law may move or read them. Every other pool is an amount some transfer must move or a held declaration holds; one that neither covers is an orphan pool, which compilation refuses.
 
 **Held pool**:
-A pool a held stand-in answers for: an amount in the state and the ledger that no law moves. A law that moves one is refused.
+A pool a held stand-in answers for: an amount in the state and the ledger that no law moves. One card holds it, and a law that moves it is refused.
 
 **Partial volume**:
 The volume one unit amount of a species takes up: a fixed coefficient of the schema, not a parameter. A space's volume derives from its amounts through it.

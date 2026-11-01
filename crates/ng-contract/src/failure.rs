@@ -229,6 +229,12 @@ pub enum CompileDefect {
         site: SiteId,
         space: Space,
     },
+    /// A pool two cards stand behind: what a stand-in holds has to name one card.
+    PoolHeldTwice {
+        cards: [&'static str; 2],
+        site: SiteId,
+        space: Space,
+    },
 }
 
 /// Why one attempt cannot stand. A smaller retry of the same base can still succeed. A row or source id

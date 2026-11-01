@@ -85,82 +85,149 @@ fn the_slice_map_passes_every_graph_check_and_holds_the_named_sites() -> Result<
     Ok(())
 }
 
-/// Every pool of the slice's map, with nothing left out: a still circulation and Starling at every bed
-/// move the vascular pools, and held cards stand behind cell water and the two enclosures' fluid.
+/// A still circulation and Starling at every bed move the vascular pools, CV defines every field the
+/// slice reads, and NS reads the stretch.
+fn slice_laws(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
+    let fast = RateClass::new(RateBand::Wave, 1_000_000)?;
+    let (mut cv, ports) = body.cardiovascular()?.parts();
+    let route = ports.circulation(&mut cv);
+    let afferents: BaroreceptorAfferents<Defines<'_, Cardiovascular>> = cv.emit();
+    let pressures: CapillaryAndVenousPressure<Defines<'_, Cardiovascular>> = cv.emit();
+    let stretch = cv.parameter::<Dimensionless>(ParameterKey::new("bench.stretch"), Admissible::finite());
+    let capillary = cv
+        .site_parameter::<CapillaryBed, Pressure>(ParameterKey::new("bench.capillary"), Admissible::finite());
+    let venous =
+        cv.site_parameter::<CapillaryBed, Pressure>(ParameterKey::new("bench.venous"), Admissible::finite());
+    let still = cv.edge_kernel(|mut k| {
+        let zero = k.zero::<Rate<Water>>();
+        k.finish(zero, cv.every_mode(), fast)
+    });
+    cv.transfer_along(&route, still);
+    for output in [&afferents.carotid_sinus_stretch, &afferents.aortic_arch_stretch] {
+        let value = cv.kernel(|mut k| {
+            let value = k.parameter(&stretch);
+            k.finish(value, cv.every_mode(), fast)
+        });
+        cv.define(output, value);
+    }
+    for (output, parameter) in [
+        (&pressures.capillary_pressure, &capillary),
+        (&pressures.venous_pressure, &venous),
+    ] {
+        let value = cv.site_kernel(|mut k| {
+            let value = k.site_parameter(parameter);
+            k.finish(value, cv.every_mode(), fast)
+        });
+        cv.define_at(output, value);
+    }
+    body.add(cv.finish());
+
+    let (mut fl, ports) = body.fluids()?.parts();
+    let route = ports.starling(&mut fl);
+    let pressures: CapillaryAndVenousPressure<Reads<'_, Fluids>> = fl.receive();
+    let kf = fl.site_parameter::<CapillaryBed, Conductance<Water>>(
+        ParameterKey::new("bench.kf"),
+        Admissible::nonnegative(),
+    );
+    let filtration = fl.site_kernel(|mut k| {
+        let inside = k.at_site(&pressures.capillary_pressure);
+        let outside = k.at_site(&ports.extravascular_pressure);
+        let head = k.subtract(inside, outside);
+        let conductance = k.site_parameter(&kf);
+        let flow = k.conductance_flow(conductance, head);
+        k.finish(flow, fl.every_mode(), fast)
+    });
+    fl.transfer_at(&route, filtration);
+    body.add(fl.finish());
+
+    let (mut ns, _ports) = body.nervous()?.parts();
+    let afferents: BaroreceptorAfferents<Reads<'_, Nervous>> = ns.receive();
+    let filter = ns.state::<Dimensionless>("afferent-filter", Admissible::finite());
+    let pace = ns.parameter(ParameterKey::new("bench.pace"), Admissible::nonnegative());
+    let relax = ns.kernel(|mut k| {
+        let target = k.read(&afferents.carotid_sinus_stretch);
+        let current = k.state(&filter);
+        let speed = k.parameter(&pace);
+        let rate = k.relax(target, current, speed);
+        k.finish(rate, ns.every_mode(), fast)
+    });
+    ns.memory_rate(&filter, relax);
+    body.add(ns.finish());
+    Ok(())
+}
+
+/// Every pool of the slice's map, with nothing left out: held cards stand behind cell water and the two
+/// enclosures' fluid.
 fn bench() -> Result<CompiledBody, AdmissionError> {
     assemble(Schema::new(arena_anatomy()?)?, |mut body| {
         hold_outside_slice(&mut body)?;
-        let fast = RateClass::new(RateBand::Wave, 1_000_000)?;
-        let (mut cv, ports) = body.cardiovascular()?.parts();
-        let route = ports.circulation(&mut cv);
-        let afferents: BaroreceptorAfferents<Defines<'_, Cardiovascular>> = cv.emit();
-        let pressures: CapillaryAndVenousPressure<Defines<'_, Cardiovascular>> = cv.emit();
-        let stretch = cv.parameter::<Dimensionless>(ParameterKey::new("bench.stretch"), Admissible::finite());
-        let capillary = cv.site_parameter::<CapillaryBed, Pressure>(
-            ParameterKey::new("bench.capillary"),
-            Admissible::finite(),
-        );
-        let venous = cv.site_parameter::<CapillaryBed, Pressure>(
-            ParameterKey::new("bench.venous"),
-            Admissible::finite(),
-        );
-        let still = cv.edge_kernel(|mut k| {
-            let zero = k.zero::<Rate<Water>>();
-            k.finish(zero, cv.every_mode(), fast)
-        });
-        cv.transfer_along(&route, still);
-        for output in [&afferents.carotid_sinus_stretch, &afferents.aortic_arch_stretch] {
-            let value = cv.kernel(|mut k| {
-                let value = k.parameter(&stretch);
-                k.finish(value, cv.every_mode(), fast)
-            });
-            cv.define(output, value);
-        }
-        for (output, parameter) in [
-            (&pressures.capillary_pressure, &capillary),
-            (&pressures.venous_pressure, &venous),
-        ] {
-            let value = cv.site_kernel(|mut k| {
-                let value = k.site_parameter(parameter);
-                k.finish(value, cv.every_mode(), fast)
-            });
-            cv.define_at(output, value);
-        }
-        body.add(cv.finish());
-
-        let (mut fl, ports) = body.fluids()?.parts();
-        let route = ports.starling(&mut fl);
-        let pressures: CapillaryAndVenousPressure<Reads<'_, Fluids>> = fl.receive();
-        let kf = fl.site_parameter::<CapillaryBed, Conductance<Water>>(
-            ParameterKey::new("bench.kf"),
-            Admissible::nonnegative(),
-        );
-        let filtration = fl.site_kernel(|mut k| {
-            let inside = k.at_site(&pressures.capillary_pressure);
-            let outside = k.at_site(&ports.extravascular_pressure);
-            let head = k.subtract(inside, outside);
-            let conductance = k.site_parameter(&kf);
-            let flow = k.conductance_flow(conductance, head);
-            k.finish(flow, fl.every_mode(), fast)
-        });
-        fl.transfer_at(&route, filtration);
-        body.add(fl.finish());
-
-        let (mut ns, _ports) = body.nervous()?.parts();
-        let afferents: BaroreceptorAfferents<Reads<'_, Nervous>> = ns.receive();
-        let filter = ns.state::<Dimensionless>("afferent-filter", Admissible::finite());
-        let pace = ns.parameter(ParameterKey::new("bench.pace"), Admissible::nonnegative());
-        let relax = ns.kernel(|mut k| {
-            let target = k.read(&afferents.carotid_sinus_stretch);
-            let current = k.state(&filter);
-            let speed = k.parameter(&pace);
-            let rate = k.relax(target, current, speed);
-            k.finish(rate, ns.every_mode(), fast)
-        });
-        ns.memory_rate(&filter, relax);
-        body.add(ns.finish());
+        slice_laws(&mut body)?;
         body.compile()
     })
+}
+
+const GUT_WATER: &str = "gut water";
+
+fn enclosure_law<'b, S: OutsideSlice>(
+    laws: &mut FragmentBuilder<'b, S>,
+    ports: &HeldPorts<'b, S>,
+    key: ParameterKey,
+) -> Result<(), AdmissionError> {
+    let held = laws.parameter::<Pressure>(key, Admissible::finite());
+    let slow = RateClass::new(RateBand::Hours, 3_600_000_000_000)?;
+    let pressure = laws.site_kernel(|mut k| {
+        let value = k.parameter(&held);
+        k.finish(value, laws.every_mode(), slow)
+    });
+    laws.define_at(&ports.enclosure_pressure, pressure);
+    Ok(())
+}
+
+/// The slice's map with one route into the gut's veins, which the gut's stand-in serves under
+/// `supplies`.
+fn gut_stand_in(supplies: Vec<&'static str>) -> Result<CompiledBody, AdmissionError> {
+    let mut schema = Schema::new(arena_anatomy()?)?;
+    let veins = site::<VesselSegment>("splanchnic veins")?;
+    schema.water_boundary(GUT_WATER, BoundaryDirection::IntoBody, veins, Space::Lumen)?;
+    assemble(schema, |mut body| {
+        slice_laws(&mut body)?;
+        let gut = HeldDeclaration::<Gastrointestinal>::new(supplies, vec![], "a synthetic bench");
+        let (mut laws, ports) = body.hold(gut)?.parts();
+        enclosure_law(&mut laws, &ports, ParameterKey::new("gi.abdominal-pressure"))?;
+        let BoundaryWater { route, drive } = ports.water(GUT_WATER)?;
+        let slow = RateClass::new(RateBand::Hours, 3_600_000_000_000)?;
+        let rate = laws.kernel(|mut k| {
+            let value = k.read(&drive);
+            k.finish(value, laws.every_mode(), slow)
+        });
+        laws.transfer(Transfer::new(&route, rate));
+        body.add(laws.finish());
+        let lungs = HeldDeclaration::<Respiratory>::new(vec![], vec![], "a synthetic bench");
+        let (mut laws, ports) = body.hold(lungs)?.parts();
+        enclosure_law(&mut laws, &ports, ParameterKey::new("rs.pleural-pressure"))?;
+        body.add(laws.finish());
+        let cells = HeldDeclaration::<BloodChemistry>::new(vec![], vec![Space::Cells], "a synthetic bench");
+        let (laws, _ports) = body.hold(cells)?.parts();
+        body.add(laws.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn on_the_slices_map_a_route_a_stand_in_omits_is_refused_at_compile() -> Result<(), AdmissionError> {
+    let served = gut_stand_in(vec![GUT_WATER])?;
+    let column = (served.columns().iter()).find(|column| column.origin().local == GUT_WATER);
+    assert_eq!(column.map(|column| column.origin().owner), Some("GI"));
+    assert_eq!(
+        gut_stand_in(vec![]).err(),
+        Some(AdmissionError::Compile(CompileDefect::UnclaimedLaw {
+            law: LawName {
+                owner: "GI",
+                local: GUT_WATER
+            }
+        }))
+    );
+    Ok(())
 }
 
 fn packet(
