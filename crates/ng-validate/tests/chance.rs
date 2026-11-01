@@ -1284,6 +1284,23 @@ fn a_long_span_over_a_forcing_lands_its_events_and_never_crawls() {
     assert!(fired >= 8, "{fired} events in {steps} steps");
 }
 
+/// A span past a knot reads a forcing's curve at its two ends and nowhere between, so it stops at the knot, as it stops
+/// at a law's longest interval.
+#[test]
+fn a_span_stops_at_a_forcings_knot() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = reference(1_000 * SECOND);
+    let mut session = case.admit(&core).expect("admitted");
+    let mut longest = 0;
+    while session.record().accepted().time() < SimTime::from_ns(120 * SECOND) {
+        let from = session.record().accepted().time().nanoseconds();
+        let (reached, _) = finished(session, SimTime::from_ns(from + 1));
+        session = reached;
+        longest = longest.max(session.record().accepted().time().nanoseconds() - from);
+    }
+    assert!(longest <= 10 * SECOND, "a span of {longest} ns");
+}
+
 #[test]
 fn a_core_that_refuses_every_landing_faults_and_publishes_nothing_past_the_crossing() {
     let case = ChanceCase::ectopy().expect("a body");
@@ -1514,7 +1531,7 @@ impl Random {
     }
 }
 
-fn random_case(random: &mut Random) -> ChanceCase {
+fn random_case(random: &mut Random, case: ChanceCase) -> ChanceCase {
     let names: [&'static [u8]; 3] = [b"a", b"b", b"c"];
     let deliveries = (0..1 + random.below(3))
         .map(|name| {
@@ -1529,21 +1546,47 @@ fn random_case(random: &mut Random) -> ChanceCase {
         })
         .collect();
     let words = [random.below(1 << 40), random.below(1 << 40), 3, 4];
-    ChanceCase::ectopy()
-        .expect("a body")
-        .delivering(deliveries)
-        .seeded(Seed::new(words))
-        .until(at(60))
+    case.delivering(deliveries).seeded(Seed::new(words)).until(at(60))
 }
 
 /// A fault, an input inside the first step or a case that fired nothing says nothing about the claim; a
 /// divergence breaks it.
 #[test]
 fn late_inputs_match_the_known_timeline_with_a_guard_among_them() {
+    late_inputs_match(ChanceCase::ectopy);
+}
+
+/// An input that moves a crossing, which ticket 06 had no body for: the hazard reads a lumen through a field.
+#[test]
+fn late_inputs_match_the_known_timeline_when_an_input_moves_a_crossing() {
+    late_inputs_match(ChanceCase::fed);
+}
+
+#[test]
+fn a_delivery_moves_when_a_fed_hazard_crosses() {
+    let events = |case: ChanceCase| {
+        let case = case.until(at(120));
+        let core = reference(SECOND);
+        let mut session = case.admit(&core).expect("admitted");
+        let mut fired = Vec::new();
+        while session.record().accepted().time() < case.end() {
+            let next = session.record().accepted().time().nanoseconds() + 1;
+            let (reached, events) = finished(session, SimTime::from_ns(next));
+            session = reached;
+            fired.extend(events.iter().map(Fired::at));
+        }
+        fired
+    };
+    let quiet = events(ChanceCase::fed().expect("a body").delivering(Vec::new()));
+    let fed = events(ChanceCase::fed().expect("a body"));
+    assert_ne!(quiet, fed);
+}
+
+fn late_inputs_match(case: fn() -> Result<ChanceCase, AdmissionError>) {
     let mut random = Random(0x9E37_79B9_7F4A_7C15);
     let (mut same, mut said_nothing) = (0, 0);
     for round in 0..120 {
-        let case = random_case(&mut random);
+        let case = random_case(&mut random, case().expect("a body"));
         let interval_ns = (1 + random.below(40)) * SECOND / 2;
         let salt = random.below(u64::MAX);
         let clock = clock();

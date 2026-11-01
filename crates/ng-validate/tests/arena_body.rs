@@ -483,6 +483,39 @@ fn every_link_of_every_loop_moves_the_row_that_reads_it() -> Result<(), Initiali
     Ok(())
 }
 
+/// A shut valve with no head across it and no flow stays shut, or a still body would fire at every step. The shut law holds
+/// the flow where it stands, and an opened law would move it.
+#[test]
+fn a_shut_valve_with_no_head_stays_shut() -> Result<(), InitializationFailure> {
+    let Solved { body, .. } = solved();
+    let (packet, lens) = (arena_packet(body)?, arena_lens(body)?);
+    let parameters = body.bind(packet)?;
+    let port = BoundaryPort::new(Vec::new())?;
+    let request = InitializationRequest::at(anchor_moment()).reading(&lens);
+    let mut system = body.initialization(parameters, port, request)?;
+    let mut workspace = system.workspace();
+    let (arteries, left) = (vessel("systemic arteries"), vessel("left ventricle"));
+    let size = system.rows();
+    let flow = row(memory(
+        "CV",
+        "valves",
+        Context::Edge {
+            from: left,
+            to: arteries,
+        },
+    ))
+    .index();
+    for point in 0..2 {
+        workspace.unknowns_mut()[point * size + row(pressure(left)).index()] = 50.0;
+        workspace.unknowns_mut()[point * size + row(pressure(arteries)).index()] = 50.0;
+        workspace.unknowns_mut()[point * size + flow] = -5.0;
+    }
+    system.sweep(&workspace, 0..1)?;
+    let (residuals, _) = system.stage(&workspace, 1)?;
+    assert_eq!(residuals[flow], 0.0);
+    Ok(())
+}
+
 /// Standing drops the blood into the legs, the sinus feels less stretch, and the reflex raises traffic and rate within
 /// seconds, with no law that reads posture but the heads.
 #[test]

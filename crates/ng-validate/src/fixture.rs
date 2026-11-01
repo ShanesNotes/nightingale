@@ -350,6 +350,8 @@ fn events_of(deliveries: &[Delivery]) -> Result<Vec<BoundaryEvent>, AdmissionErr
 }
 
 const KNOT_PERIOD_SECONDS: f64 = 10.0;
+const FED: &str = "fed";
+const FED_VOLUME: f64 = 500_000.0;
 const HAZARD_AMPLITUDE: f64 = 0.5;
 const ECTOPY_PER_SECOND: f64 = 0.05;
 const RETURN_PER_SECOND: f64 = 0.2;
@@ -451,6 +453,7 @@ enum Variant {
     Relaxing,
     TwoRhythms,
     Echoing,
+    Fed,
 }
 impl ChanceCase {
     pub fn ectopy() -> Result<Self, AdmissionError> {
@@ -483,6 +486,11 @@ impl ChanceCase {
     pub fn two_rhythms() -> Result<Self, AdmissionError> {
         Self::declared(Variant::TwoRhythms)
     }
+    /// The ectopy rate reads a lumen through a field, so a delivery moves when a hazard crosses and no input is only
+    /// water any more.
+    pub fn fed() -> Result<Self, AdmissionError> {
+        Self::declared(Variant::Fed)
+    }
     fn declared(variant: Variant) -> Result<Self, AdmissionError> {
         Self::declared_within(variant, None)
     }
@@ -497,6 +505,9 @@ impl ChanceCase {
         map.contain(root.id(), a.id());
         map.contain(root.id(), b.id());
         map.connect(Network::Vascular, a.id(), b.id());
+        if variant == Variant::Fed {
+            map.landmark(Landmark::Pacemaker, a.id(), a.id());
+        }
         let mut schema = Schema::new(map.finish()?)?;
         schema.boundary::<Water>(EXTERIOR, BoundaryDirection::IntoBody, a.id(), Space::Lumen)?;
         schema.partial_volume(Measure::new(1.0)?)?;
@@ -541,10 +552,36 @@ impl ChanceCase {
                 k.finish(rate, laws.every_mode(), beat)
             });
             laws.memory_rate(&tone, settling);
-            let onset_rate = if variant == Variant::Relaxing {
-                relaxing_rate(&laws, &onset, &onset_hazard, &tone, &wobble, sinus.only(), beat)
-            } else {
-                hazard_rate(&laws, &onset, &tone, &wobble, sinus.only(), beat)
+            let onset_rate = match variant {
+                Variant::Relaxing => {
+                    relaxing_rate(&laws, &onset, &onset_hazard, &tone, &wobble, sinus.only(), beat)
+                }
+                Variant::Fed => {
+                    let (row, read) = laws.site_field::<Blood, Dimensionless>(FED, Admissible::finite());
+                    let scale =
+                        laws.parameter::<Volume>(ParameterKey::new("cv.fed-volume"), Admissible::positive());
+                    let held = ports.amount::<Water>();
+                    let share = laws.site_kernel(|mut k| {
+                        let water = k.at_site(&held);
+                        let volume = k.volume(water);
+                        let whole = k.parameter(&scale);
+                        let ratio = k.divide(volume, whole);
+                        let share = k.as_dimension(ratio);
+                        k.finish(share, laws.every_mode(), wave)
+                    });
+                    laws.define_at(&row, share);
+                    laws.kernel(|mut k| {
+                        let pace = k.parameter(&onset);
+                        let tone = k.state(&tone);
+                        let toned = k.scale(pace, tone);
+                        let varied = k.forcing(&wobble);
+                        let moved = k.scale(toned, varied);
+                        let fed = k.at_landmark(Landmark::Pacemaker, &read);
+                        let rate = k.scale(moved, fed);
+                        k.finish(rate, sinus.only(), beat)
+                    })
+                }
+                _ => hazard_rate(&laws, &onset, &tone, &wobble, sinus.only(), beat),
             };
             if let Some(range) = trusted {
                 laws.validity(&onset_rate, range);
@@ -610,7 +647,7 @@ impl ChanceCase {
                     laws.hazard(HazardGuard::new(&out, &there, quiet.to(&stirred)?));
                     laws.hazard(HazardGuard::new(&back_again, &home, stirred.to(&quiet)?));
                 }
-                Variant::Plain | Variant::Relaxing => {}
+                Variant::Plain | Variant::Relaxing | Variant::Fed => {}
             }
             body.add(laws.finish());
             let (mut laws, ports) = body.boundary()?.parts();
@@ -720,6 +757,10 @@ impl ChanceCase {
                 packet.start(memory(THIRD_INTEGRAL), zero()?, note)?;
                 packet.start_mode(named(BYSTANDER), "quiet", note)?;
             }
+            Variant::Fed => {
+                let whole = Measure::<Volume>::new(FED_VOLUME)?;
+                packet.synthetic(ParameterKey::new("cv.fed-volume"), body, whole, note)?;
+            }
             Variant::Plain | Variant::Relaxing => {}
         }
         for (site, amount) in [self.a, self.b].into_iter().zip(START) {
@@ -729,6 +770,12 @@ impl ChanceCase {
                 species: Species::Water,
             };
             packet.start(row, Measure::<Water>::new(amount)?, note)?;
+            if self.variant == Variant::Fed {
+                let law = named(FED);
+                let at = Context::Site(site);
+                let fed = RowKind::Algebraic(Slot { law, at });
+                packet.start(fed, Measure::<Dimensionless>::new(amount / FED_VOLUME)?, note)?;
+            }
         }
         Ok(packet)
     }

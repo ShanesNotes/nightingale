@@ -1439,6 +1439,9 @@ fn addresses(
             Source::Field(_) if place == Where::Junction && context == Context::Body => {
                 return Err(CompileDefect::NoPoolRead { law });
             }
+            Source::Field(_) if matches!(place, Where::Mark(_)) && landed.is_none() => {
+                return Err(CompileDefect::NoPoolRead { law });
+            }
             Source::Field(field) => match (rows.defined(field, at), place) {
                 (Some(row), _) => unknown(row),
                 (None, Where::Junction) => match (landed, context) {
