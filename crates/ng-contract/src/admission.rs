@@ -394,6 +394,20 @@ impl InitializationSystem<'_> {
             }
         }
     }
+    /// A combination's rows summed around the ring. The tangents cancel, so this is its net boundary flow over the
+    /// cycle, whichever rows the workspace spread it over.
+    fn net_flow(&self, stages: &[f64], quantity: QuantityId) -> f64 {
+        let combination = &self.body.conserved_basis().combinations()[quantity.index()];
+        let size = self.body.rows().len();
+        let mut net = Compensated::ZERO;
+        for point in 0..self.frames.len() {
+            for (row, coefficient) in combination.terms() {
+                let stage = stages[point * size + row.index()];
+                net = net.plus(Compensated::exact(stage).scaled(*coefficient));
+            }
+        }
+        net.rounded()
+    }
     /// Every row of the system again, on this workspace alone: no core, no solver and nothing the initializer
     /// said. The first failure in this order names its row, so a test can name it too. Returns the row nearest
     /// the tolerance, with its defect over its scale.
@@ -401,15 +415,6 @@ impl InitializationSystem<'_> {
         let rows = self.body.rows();
         let inconsistent = |row| InitializationFailure::Inconsistent { row };
         let body_row = |at: usize| AdmissionRow::Body(rows[at].id());
-        if self.interval.is_none() {
-            let moved = |(at, row): (usize, &Row)| {
-                let same = unknowns[at].to_bits() == self.parameters.starts[at].to_bits();
-                !same && !algebraic(row.kind())
-            };
-            if let Some((at, _)) = rows.iter().enumerate().find(|entry| moved(*entry)) {
-                return Err(inconsistent(body_row(at)));
-            }
-        }
         let size = rows.len();
         for (slot, &value) in unknowns[..self.frames.len() * size].iter().enumerate() {
             if !rows[slot % size].admissible().holds(Compensated::exact(value)) {
@@ -434,25 +439,21 @@ impl InitializationSystem<'_> {
             }
         };
         let stages = self.stages(unknowns)?;
-        let replaced: Vec<(usize, QuantityId)> = self.replaced().collect();
-        for (slot, &defect) in stages.iter().enumerate() {
-            if !replaced.iter().any(|(known, _)| *known == slot) {
-                let row = body_row(slot % size);
-                let held = self.held(defect.abs(), unknowns[slot]);
-                note(row, held.ok_or(inconsistent(row))?);
-            }
-        }
-        for (slot, quantity) in replaced {
+        for (_, quantity) in self.replaced() {
             let row = AdmissionRow::Total(quantity);
             let (now, packet) = self.totals(unknowns, quantity);
             let moved = self.held(now.minus(packet).abs().rounded(), packet.rounded());
             note(row, moved.ok_or(inconsistent(row))?);
-            // Every other row of the ring holds this one to the whole cycle's net flow.
-            let flow = self.held(stages[slot].abs(), packet.rounded());
+            let flow = self.held(self.net_flow(&stages, quantity).abs(), packet.rounded());
             note(
                 row,
                 flow.ok_or(InitializationFailure::NetBoundaryFlow { quantity })?,
             );
+        }
+        for (slot, &defect) in stages.iter().enumerate() {
+            let row = body_row(slot % size);
+            let held = self.held(defect.abs(), unknowns[slot]);
+            note(row, held.ok_or(inconsistent(row))?);
         }
         for anchor in &owed.anchors {
             let row = AdmissionRow::Anchor(anchor.id);

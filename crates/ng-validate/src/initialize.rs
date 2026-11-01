@@ -4,8 +4,8 @@ use ng_record::{Running, Session};
 
 const NEWTON_LIMIT: u32 = 32;
 
-/// A model default reported with every result. Newton leaves the pulsatile case's rows near 1e-14 on amounts near
-/// 100, about 1e-5 of this, so a guess passes only if it was solved.
+/// A model default reported with every result, for rows near unit size. A packet of far smaller amounts states its
+/// own, because one scale cannot read both until rows have their own.
 pub fn admission_tolerance() -> ErrorScales {
     let scale = |value| Measure::new(value).expect("a finite constant");
     ErrorScales::uniform(scale(1e-9), scale(1e-12)).expect("positive constants")
@@ -15,16 +15,18 @@ pub fn admission_tolerance() -> ErrorScales {
 /// state. Newton over `solve_dense`, whose cost is the cube of `points * rows`, so a few thousand unknowns is its
 /// reach. A body past that reduces the block ring `InitializationSystem` lays out, behind this one function.
 ///
-/// It stops where `admit` would pass it, so a guess that already holds stands. A singular update stops it where it
-/// stands, and `admit` is the one judge of a start.
-fn initialize(system: &InitializationSystem<'_>) -> Result<SolveWorkspace, InitializationFailure> {
+/// It judges nothing. It stops where `admit` would pass it, so a guess that already holds stands, and it stops where
+/// it stands on a singular update or a trial outside a law's domain. `admit` is the one judge of a start.
+fn initialize(system: &InitializationSystem<'_>) -> SolveWorkspace {
     let mut workspace = system.workspace();
     for _ in 0..NEWTON_LIMIT {
         if system.holds(&workspace) {
             break;
         }
-        let residuals = system.evaluate(&workspace)?;
-        let jacobian = system.linearize(&workspace)?;
+        let (Ok(residuals), Ok(jacobian)) = (system.evaluate(&workspace), system.linearize(&workspace))
+        else {
+            break;
+        };
         let Ok(update) = solve_dense(jacobian.view(), &residuals) else {
             break;
         };
@@ -32,7 +34,7 @@ fn initialize(system: &InitializationSystem<'_>) -> Result<SolveWorkspace, Initi
             *unknown -= change;
         }
     }
-    Ok(workspace)
+    workspace
 }
 
 /// A solved admission: the run and where each of its values came from.
@@ -55,7 +57,7 @@ pub fn admit_solved<'m>(
     let parameters = body.bind(packet)?;
     let request = InitializationRequest::at(origin).reading(lens);
     let system = body.initialization(parameters, boundary, request)?;
-    let solved = initialize(&system)?;
+    let solved = initialize(&system);
     let resolution = core.resolution();
     let start = MethodHistory::new(resolution.policy(), origin, Vec::new());
     let revision = system.admit(solved, start)?;

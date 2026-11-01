@@ -571,7 +571,7 @@ fn a_core_on_the_grids_own_step_closes_the_first_cycle_to_rounding() {
 }
 
 #[test]
-fn a_core_off_the_grid_starts_near_its_own_orbit_and_settles_onto_the_anchor() {
+fn a_core_off_the_grid_starts_near_its_own_orbit_and_closes_on_it() {
     let case = PulsatileCase::plain();
     for interval_ns in [PERIOD_NS / 128, PERIOD_NS / 16, PERIOD_NS / 4] {
         let core = reference(interval_ns);
@@ -862,6 +862,72 @@ fn a_net_boundary_flow_over_the_cycle_is_refused_with_its_quantity() {
     );
 }
 
+/// Every stage holds to its own scale and all of them lean one way: the flow lands on no one row.
+#[test]
+fn a_net_flow_spread_over_every_row_is_still_refused_with_its_quantity() {
+    let case = PulsatileCase::plain();
+    let (elastance, intervals) = (2.0, 4.0);
+    let net = 8e-9;
+    let flow = DELIVERED - net / 2.0;
+    let difference = flow / (CONDUCTANCE * elastance);
+    let (a, b) = ((TOTAL + difference) / 2.0, (TOTAL - difference) / 2.0);
+    let mut packet = ParameterPacket::periodic(cycle(intervals as u32));
+    packet.within(admission_tolerance());
+    let g = measure::<Conductance<Water>>(CONDUCTANCE);
+    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+    packet
+        .synthetic(E, NETWORK, measure::<Elastance>(elastance), NOTE)
+        .expect("once");
+    packet.start(case.a(), measure::<Water>(a), NOTE).expect("once");
+    packet.start(case.b(), measure::<Water>(b), NOTE).expect("once");
+    let boundary = BoundaryPort::new(vec![
+        water(b"even in", 0, PULSE, 0, PERIOD_NS, DELIVERED),
+        water(b"short out", 0, DRAIN, 0, PERIOD_NS, DELIVERED - net),
+    ])
+    .expect("parsed");
+    let quantity = case.body().conserved_basis().combinations()[0].id();
+    let core = reference(REFERENCE_NS);
+    assert_eq!(
+        admit_fixture(case.body(), packet, boundary, &core).err(),
+        Some(InitializationFailure::NetBoundaryFlow { quantity })
+    );
+}
+
+/// The small vessel's last stage is the row the total replaced. A defect far past that row's own scale must be
+/// read there, though the total beside it is large.
+#[test]
+fn the_row_a_total_replaced_is_read_at_its_own_scale() {
+    let case = PulsatileCase::plain();
+    let (small, large) = (1.0, 1e9);
+    let mut packet = ParameterPacket::periodic(cycle(4));
+    packet.within(admission_tolerance());
+    let g = measure::<Conductance<Water>>(4.0);
+    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+    let (at_a, at_b) = (Binding::Site(case.declared.a), Binding::Site(case.declared.b));
+    let stiff = measure::<Elastance>(large / small);
+    packet.synthetic(E, at_a, stiff, NOTE).expect("once");
+    packet
+        .synthetic(E, at_b, measure::<Elastance>(1.0), NOTE)
+        .expect("once");
+    packet
+        .start(case.a(), measure::<Water>(small), NOTE)
+        .expect("once");
+    packet
+        .start(case.b(), measure::<Water>(large), NOTE)
+        .expect("once");
+    let parameters = case.body().bind(packet).expect("bound");
+    let request = InitializationRequest::at(at(0)).reading(&case.lens);
+    let system = (case.body().initialization(parameters, empty_port(), request)).expect("a system");
+    let mut witness = system.workspace();
+    let last = 3 * case.body().rows().len();
+    witness.unknowns_mut()[last + 1] += 5e-4;
+    let row = AdmissionRow::Body(case.row_a());
+    assert_eq!(
+        system.admit(witness, case.history()).err(),
+        Some(InitializationFailure::Inconsistent { row })
+    );
+}
+
 #[test]
 fn a_guess_with_no_head_gives_the_fit_nothing_to_move() {
     let case = PulsatileCase::plain();
@@ -1140,6 +1206,53 @@ fn a_packet_that_states_no_tolerance_is_held_exactly() {
     let near = 3.0 + 4.0 * f64::EPSILON;
     let refused = admit_fixture(&body, filter_packet(near), empty_port(), &core).err();
     assert_eq!(refused, Some(InitializationFailure::Inconsistent { row }));
+    let parameters = body.bind(filter_packet(3.0)).expect("bound");
+    let system = body
+        .initialization(parameters, empty_port(), InitializationRequest::at(at(0)))
+        .expect("a system");
+    let mut moved = system.workspace();
+    moved.unknowns_mut()[0] += 1e-13;
+    let history = MethodHistory::new(Digest::of_canonical(b"a schema"), at(0), Vec::new());
+    let row = AdmissionRow::Body(body.rows()[0].id());
+    assert_eq!(
+        system.admit(moved, history).err(),
+        Some(InitializationFailure::Inconsistent { row })
+    );
+}
+
+/// Pivoting can move a memory row by rounding while it solves the algebraic row beside it.
+#[test]
+fn an_instant_solve_stands_though_rounding_moves_a_row_inside_the_tolerance() {
+    let body = filter_body();
+    let core = reference(SECOND);
+    let lens = body.lens(Vec::new(), count(SECOND)).expect("a lens");
+    for (filter, gain, reading) in [(1e-3, 1.5, 1.0), (1e-3, 3.0, 4.0), (7e-3, 1.5, 1.0)] {
+        let mut packet = ParameterPacket::new();
+        packet.within(admission_tolerance());
+        let speed = measure::<Rate<Dimensionless>>(1.0);
+        packet.synthetic(PACE, Binding::Body, speed, NOTE).expect("once");
+        packet
+            .synthetic(SET, Binding::Body, measure::<Dimensionless>(gain), NOTE)
+            .expect("once");
+        let nervous = |local| LawName { owner: "NS", local };
+        packet
+            .start(
+                RowKind::Memory(nervous("filter")),
+                measure::<Dimensionless>(filter),
+                NOTE,
+            )
+            .expect("once");
+        packet
+            .start(
+                RowKind::Algebraic(nervous("reading")),
+                measure::<Dimensionless>(reading),
+                NOTE,
+            )
+            .expect("once");
+        let solved = admit_solved(&body, packet, empty_port(), &core, &lens).expect("solved");
+        let read = hi(solved.session.record().accepted().value(body.rows()[1].id()));
+        assert!((read - gain * filter).abs() < 1e-12, "{read}");
+    }
 }
 
 /// The two paths' run on one packet, whose guess holds inside its tolerance: a solve stops where the judge would.
@@ -1205,34 +1318,6 @@ fn a_stage_is_read_in_its_rows_own_unit_not_as_a_rate() {
     };
     assert_eq!(admitted(0.2 * scale), None);
     assert!(admitted(3.0 * scale).is_some());
-}
-
-#[test]
-fn an_instant_moves_no_amount_by_a_hair_even_inside_the_tolerance() {
-    let case = PulsatileCase::new(Variant::Slow);
-    let lens = case.body().lens(Vec::new(), count(SECOND)).expect("a lens");
-    let mut packet = ParameterPacket::new();
-    packet
-        .synthetic(E, NETWORK, measure::<Elastance>(GUESS), NOTE)
-        .expect("once");
-    let g = measure::<Conductance<Water>>(CONDUCTANCE);
-    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
-    packet
-        .start(case.a(), measure::<Water>(START[0]), NOTE)
-        .expect("once");
-    packet
-        .start(case.b(), measure::<Water>(START[1]), NOTE)
-        .expect("once");
-    let parameters = case.body().bind(packet).expect("bound");
-    let request = InitializationRequest::at(at(0)).reading(&lens);
-    let system = (case.body().initialization(parameters, empty_port(), request)).expect("a system");
-    let mut moved = system.workspace();
-    moved.unknowns_mut()[0] += 1e-13;
-    let row = AdmissionRow::Body(case.row_a());
-    assert_eq!(
-        system.admit(moved, case.history()).err(),
-        Some(InitializationFailure::Inconsistent { row })
-    );
 }
 
 #[test]
