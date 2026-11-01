@@ -1450,6 +1450,29 @@ fn swinging_body() -> (CompiledBody, SiteId) {
     (body.expect("a body"), vessel.id())
 }
 
+/// A flow of 1 is lost to rounding beside flows of `1e16` inside one row, so every stage holds. The ledger books each
+/// flow on its own and keeps it, so the beat would not close.
+#[test]
+fn a_net_flow_a_row_cannot_hold_is_still_refused() {
+    const WIDE: f64 = 1e16;
+    let (body, vessel) = swinging_body();
+    let row = boundary_row(SWING);
+    let spec = ChannelSpec::new(GAUGE, row).averaged(count(4));
+    let lens = body.lens(vec![spec], count(SECOND / 4)).expect("a lens");
+    let mut packet = ParameterPacket::periodic(cycle(4));
+    (packet.start(lumen(vessel), measure::<Water>(1.0), NOTE)).expect("once");
+    (packet.start(row, measure::<Rate<Water>>(WIDE), NOTE)).expect("once");
+    let flows = [(RISE[0], WIDE), (FALL[0], 1.0), (FALL[1], WIDE)];
+    let events = flows.map(|(name, amount)| water(name.as_bytes(), 0, name, 0, SECOND, amount));
+    let boundary = BoundaryPort::new(events.into()).expect("parsed");
+    let core = reference(SECOND / 2);
+    let refused = admit_solved(&body, packet, boundary, &core, &lens).err();
+    assert!(
+        matches!(refused, Some(InitializationFailure::NetBoundaryFlow { .. })),
+        "{refused:?}"
+    );
+}
+
 /// The observer sums a window exactly, so admission must too: this row swings `1e12` each way around a mean of about
 /// a third, where a plain sum lands `8e-6` off, far past the tolerance.
 #[test]

@@ -401,19 +401,29 @@ impl InitializationSystem<'_> {
             }
         }
     }
-    /// A combination's rows summed around the ring. The tangents cancel, so this is its net boundary flow over the
-    /// cycle, whichever rows the workspace spread it over.
-    fn net_flow(&self, stages: &[f64], quantity: QuantityId) -> f64 {
+    /// A combination's net boundary flow over the cycle, one column at a time as the ledger books it, whichever rows
+    /// the workspace spread it over. A row's own sum can lose a small flow beside large ones, and the ledger keeps it.
+    fn net_flow(&self, unknowns: &[f64], quantity: QuantityId) -> Result<f64, InitializationFailure> {
         let combination = &self.body.conserved_basis().combinations()[quantity.index()];
-        let size = self.body.rows().len();
+        let crossing = |terms: &[(RowId, i64)]| match *terms {
+            [(row, sign)] => (combination.terms().iter())
+                .filter(|(known, _)| *known == row)
+                .map(|(_, coefficient)| sign * coefficient)
+                .sum(),
+            _ => 0,
+        };
+        let seconds = self.interval.unwrap_or(1.0);
+        let values = self.values(unknowns);
         let mut net = Compensated::ZERO;
         for point in 0..self.frames.len() {
-            for (row, coefficient) in combination.terms() {
-                let stage = stages[point * size + row.index()];
-                net = net.plus(Compensated::exact(stage).scaled(*coefficient));
+            let inputs = self.inputs(point, self.point(unknowns, point), &values);
+            let laws = self.body.instance_values(&inputs).map_err(undefined)?;
+            let (rates, _) = self.body.targets(&laws);
+            for (column, rate) in self.body.columns().iter().zip(rates) {
+                net = net.plus(Compensated::exact(seconds * rate).scaled(crossing(&column.terms)));
             }
         }
-        net.rounded()
+        Ok(net.rounded())
     }
     /// Every row of the system again, on this workspace alone: no core, no solver and nothing the initializer
     /// said. The first failure in this order names its row, so a test can name it too. Returns the row nearest
@@ -457,7 +467,7 @@ impl InitializationSystem<'_> {
         // A net flow lands on the row its total replaced, so the flow is read first, to name it.
         for (slot, quantity) in self.replaced() {
             let (_, packet) = self.total(unknowns, quantity);
-            let flow = self.held(self.net_flow(&stages, quantity).abs(), packet);
+            let flow = self.held(self.net_flow(unknowns, quantity)?.abs(), packet);
             note(
                 AdmissionRow::Total(quantity),
                 flow.ok_or(InitializationFailure::NetBoundaryFlow { quantity })?,
