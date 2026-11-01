@@ -144,8 +144,8 @@ pub enum AdmissionError {
     AnchorRow {
         anchor: AnchorId,
     },
-    /// An anchor on a row that reads no amount and no drive, so its value is a function of parameters alone and
-    /// the anchor would be a parameter's value.
+    /// An anchor on a row that reads no amount a law moves and no drive, or on a held pool, so its value is the
+    /// packet's own and the anchor would be a parameter's value.
     AnchorOnParameters {
         anchor: AnchorId,
     },
