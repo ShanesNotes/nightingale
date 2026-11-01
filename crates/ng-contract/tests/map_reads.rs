@@ -177,6 +177,56 @@ fn a_network_edge_of_the_wrong_classes_and_a_landmark_placed_twice_are_refused()
     Ok(())
 }
 
+/// A tissue has no lumen, so a route from one would lose its flow with nothing said.
+#[test]
+fn a_urinary_edge_out_of_a_site_with_no_lumen_is_refused() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let tract = map.site::<VesselSegment>("tract", at()?);
+    map.contain(root.id(), tract.id());
+    map.connect(Network::Urinary, root.id(), tract.id());
+    assert_eq!(
+        map.finish().err(),
+        Some(AdmissionError::Anatomy(AnatomyDefect::WrongNetwork {
+            site: "body"
+        }))
+    );
+    Ok(())
+}
+
+/// An energy route that took any pool in its space would turn water into energy, and the conserved total that joined the
+/// two would hide it.
+#[test]
+fn an_energy_route_takes_no_pool_of_another_species() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    map.region("whole", root.id());
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.pool::<Water>(root.id(), Space::Elastic)?;
+    schema.pool::<Energy>(root.id(), Space::Thermal)?;
+    let compiled = assemble(schema, |mut body| {
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.dissipation(&mut cv);
+        let power = cv.parameter::<Rate<Energy>>(ParameterKey::new("power"), Admissible::positive());
+        let class = RateClass::new(RateBand::Wave, 1_000_000_000)?;
+        let law = cv.kernel(|mut k| {
+            let value = k.parameter(&power);
+            k.finish(value, cv.every_mode(), class)
+        });
+        cv.transfer(Transfer::new(&route, law));
+        body.add(cv.finish());
+        body.compile()
+    });
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::OrphanPool {
+            site: root.id(),
+            space: Space::Elastic,
+        }))
+    );
+    Ok(())
+}
+
 /// A map's edges, regions and enclosures all read its sites, so a pool at a site it does not hold would stand outside
 /// every check.
 #[test]

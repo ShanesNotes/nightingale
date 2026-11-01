@@ -755,7 +755,7 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
     let species_at = |site, space, species| PoolRef { site, space, species };
     let junctions = || anatomy.in_set(Sites::Class(Class::Junction)).into_iter();
     let store = |space: Space| {
-        let found = schema.pools().find(|pool| pool.1 == space);
+        let found = (schema.pools()).find(|pool| pool.1 == space && pool.2 == Species::Energy);
         found.map(|(site, space, species)| PoolRef { site, space, species })
     };
     match family {

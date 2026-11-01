@@ -62,7 +62,8 @@ impl<'b> Fraction<'b> {
 
 /// Sodium crosses by a transporter that saturates, `J A / (K + A)`, so a greater load leaves more of it in the lumen.
 /// A fixed share would leave the sodium the macula densa sees blind to filtration, and the feedback with nothing to
-/// read. Model default.
+/// read. What crosses beside it goes in the proportion the lumen holds them, `J A_q / (K + A)`, so a lumen with no ions
+/// reclaims none. Model default.
 struct Saturable<'b> {
     capacity: EdgeParameter<'b, Renal, Rate<Sodium>, ReclaimEdge>,
     half: EdgeParameter<'b, Renal, Sodium, ReclaimEdge>,
@@ -74,36 +75,23 @@ impl<'b> Saturable<'b> {
             half: rn.edge_parameter(ParameterKey::new("rn.sodium-half"), Admissible::positive()),
         }
     }
-    fn sodium<'k>(
+    fn crossing<'k, Q: Substance>(
         &self,
         k: &mut Kernel<'b, 'k, Renal, ReclaimEdge>,
-        route: &EdgeRoute<'b, Renal, Sodium, ReclaimEdge>,
-    ) -> Expr<'b, 'k, Renal, Rate<Sodium>> {
-        let held = k.at_edge(&route.from_amount::<Sodium>());
-        let half = k.edge_parameter(&self.half);
-        let reach = k.add(held, half);
-        let held = k.at_edge(&route.from_amount::<Sodium>());
+        sodium: &EdgeRoute<'b, Renal, Sodium, ReclaimEdge>,
+        route: &EdgeRoute<'b, Renal, Q, ReclaimEdge>,
+    ) -> Expr<'b, 'k, Renal, Rate<Q>> {
+        let held = k.at_edge(&route.from_amount::<Q>());
+        let (load, half) = (
+            k.at_edge(&sodium.from_amount::<Sodium>()),
+            k.edge_parameter(&self.half),
+        );
+        let reach = k.add(load, half);
         let ratio = k.divide(held, reach);
-        let share = k.as_dimension(ratio);
         let capacity = k.edge_parameter(&self.capacity);
-        k.scale(capacity, share)
+        let product = k.multiply(capacity, ratio);
+        k.as_dimension(product)
     }
-}
-
-/// What crosses beside sodium, in the proportion the lumen holds them. Model default.
-fn alongside<'b, 'k>(
-    k: &mut Kernel<'b, 'k, Renal, ReclaimEdge>,
-    rate: Expr<'b, 'k, Renal, Rate<Sodium>>,
-    sodium: &EdgeRoute<'b, Renal, Sodium, ReclaimEdge>,
-    other: &EdgeRoute<'b, Renal, Potassium, ReclaimEdge>,
-) -> Expr<'b, 'k, Renal, Rate<Potassium>> {
-    let (beside, held) = (
-        k.at_edge(&other.from_amount::<Potassium>()),
-        k.at_edge(&sodium.from_amount::<Sodium>()),
-    );
-    let ratio = k.divide(beside, held);
-    let product = k.multiply(rate, ratio);
-    k.as_dimension(product)
 }
 
 pub fn declare<'b>(scope: RenalScope<'b>) -> Result<Fragment<'b, Renal>, AdmissionError> {
@@ -175,21 +163,19 @@ pub fn declare<'b>(scope: RenalScope<'b>) -> Result<Fragment<'b, Renal>, Admissi
     let chloride = ports.reclaim::<Chloride>(&mut rn);
     let transport = Saturable::declare(&mut rn);
     let back = rn.edge_kernel(|mut k| {
-        let rate = transport.sodium(&mut k, &sodium);
+        let rate = transport.crossing(&mut k, &sodium, &sodium);
         k.finish(rate, rn.every_mode(), class)
     });
     rn.transfer_along(&sodium, back);
     let back = rn.edge_kernel(|mut k| {
-        let rate = transport.sodium(&mut k, &sodium);
-        let rate = alongside(&mut k, rate, &sodium, &potassium);
+        let rate = transport.crossing(&mut k, &sodium, &potassium);
         k.finish(rate, rn.every_mode(), class)
     });
     rn.transfer_along(&potassium, back);
     // Chloride follows the cations, one for one, so reclaiming moves no charge. Model default.
     let back = rn.edge_kernel(|mut k| {
-        let na = transport.sodium(&mut k, &sodium);
-        let beside = alongside(&mut k, na, &sodium, &potassium);
-        let na = transport.sodium(&mut k, &sodium);
+        let na = transport.crossing(&mut k, &sodium, &sodium);
+        let beside = transport.crossing(&mut k, &sodium, &potassium);
         let (na, beside): (Expr<'_, '_, _, Rate<Chloride>>, Expr<'_, '_, _, Rate<Chloride>>) =
             (k.as_dimension(na), k.as_dimension(beside));
         let rate = k.add(na, beside);

@@ -781,6 +781,31 @@ fn a_ramp_to_sitting() -> Vec<AuthorizedInput> {
         .collect()
 }
 
+/// A lumen of water alone holds nothing to reclaim, so its ion laws read zero and stay defined.
+#[test]
+fn a_tubule_with_no_ions_reclaims_none() -> Result<(), InitializationFailure> {
+    let body = arena_body()?;
+    let (packet, lens) = (arena_packet(&body)?, arena_lens(&body)?);
+    let parameters = body.bind(packet)?;
+    let port = BoundaryPort::new(Vec::new())?;
+    let request = InitializationRequest::at(anchor_moment()).reading(&lens);
+    let system = body.initialization(parameters, port, request)?;
+    let mut workspace = system.workspace();
+    for row in body.rows() {
+        if let RowKind::Amount {
+            site,
+            space: Space::Lumen,
+            species: Species::Sodium | Species::Potassium | Species::Chloride,
+        } = row.kind()
+            && site == vessel("renal tubule")
+        {
+            workspace.unknowns_mut()[row.id().index()] = 0.0;
+        }
+    }
+    assert!(system.stage(&workspace, 0).is_ok());
+    Ok(())
+}
+
 #[test]
 fn a_stand_and_a_sit_settle_the_way_the_contract_checks() {
     let solved = Solved::new(5 * MILLISECOND);

@@ -416,7 +416,10 @@ impl Facts {
         let fits = |&(network, from, to): &(Network, SiteId, SiteId)| match network {
             Network::Vascular => true,
             Network::Lymph => from.class == Class::CapillaryBed && to.class == Class::VesselSegment,
-            Network::Urinary => to.class == Class::VesselSegment,
+            Network::Urinary => {
+                matches!(from.class, Class::CapillaryBed | Class::VesselSegment)
+                    && to.class == Class::VesselSegment
+            }
             Network::Reclaim => from.class == Class::VesselSegment && to.class == Class::CapillaryBed,
         };
         if let Some(edge) = self.others.iter().find(|edge| !fits(edge)) {
