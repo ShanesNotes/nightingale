@@ -52,13 +52,21 @@ impl PacketHash {
     pub(crate) fn of_digest(digest: Digest) -> Self {
         Self { digest }
     }
-    /// The hash a run names, fixed at admission: the packet's, the moment it starts and the drives it read, since
-    /// those shape the course too. A timeline's later events stay out of it.
-    pub(crate) fn reading(self, moment: SimTime, frames: &[DriveFrame]) -> Self {
-        let mut out = Canonical::new("ng-contract packet and window 1");
+    /// The hash a run names, closed at admission: the packet's, the moment it starts, the drives it read and the
+    /// start it reached, so one identity has one start whatever made it. A timeline's later events stay out of it.
+    pub(crate) fn reading(
+        self,
+        moment: SimTime,
+        frames: &[DriveFrame],
+        start: &[f64],
+        fitted: &[f64],
+    ) -> Self {
+        let mut out = Canonical::new("ng-contract packet and start 1");
         self.digest.seal(&mut out);
         moment.seal(&mut out);
         frames.seal(&mut out);
+        start.seal(&mut out);
+        fitted.seal(&mut out);
         Self { digest: out.digest() }
     }
     pub fn digest(&self) -> Digest {
@@ -839,6 +847,9 @@ impl CompiledBody {
                     if !laws.iter().any(reads) {
                         return Err(AdmissionError::FitUnread { key, binding });
                     }
+                    if (self.layout.forcings.iter()).any(|forcing| slots.contains(&forcing.period)) {
+                        return Err(AdmissionError::ForcingPeriod { key });
+                    }
                     fits.push(Fit {
                         slots,
                         anchor: at,
@@ -867,10 +878,9 @@ impl CompiledBody {
 }
 
 /// One number per node, equal for two nodes that compute one expression: the same operation on operands of the
-/// same numbers, with `as_dimension` no operation at all, and in either order for `add` and a smooth limit's two
-/// sides, the forms that can name a dimensionless ratio. Products stay in order: a ratio of two has no dimension a
-/// law can use. Separate reads of one parameter already compare equal, so `(p + p) / (p + p)` from four reads gets
-/// one number on each side. It folds nothing: `p - p` stays a law on a parameter, as finding 15's backed test
+/// same numbers, with `as_dimension` no operation at all, and in either order for `add`, `multiply` and a smooth
+/// limit's two sides. Separate reads of one parameter already compare equal, so `(p + p) / (p + p)` from four reads
+/// gets one number on each side. It folds nothing: `p - p` stays a law on a parameter, as finding 15's backed test
 /// holds it.
 fn numbered(code: &[Op]) -> Vec<usize> {
     let mut numbers: Vec<usize> = Vec::with_capacity(code.len());
@@ -882,6 +892,7 @@ fn numbered(code: &[Op]) -> Vec<usize> {
                 continue;
             }
             Op::Add([a, b]) => Op::Add([a.min(b), a.max(b)]),
+            Op::Multiply([a, b]) => Op::Multiply([a.min(b), a.max(b)]),
             Op::SmoothMax([a, b, width]) => Op::SmoothMax([a.min(b), a.max(b), width]),
             Op::SmoothMin([a, b, width]) => Op::SmoothMin([a.min(b), a.max(b), width]),
             other => other,

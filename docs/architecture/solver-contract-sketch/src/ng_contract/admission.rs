@@ -43,10 +43,6 @@ impl InitializationSystem<'_> {
     pub fn workspace(&self) -> SolveWorkspace {
         todo!()
     }
-    /// Whether `admit` would pass this workspace, so a solve stops where the judge would.
-    pub fn holds(&self, _workspace: &SolveWorkspace) -> bool {
-        todo!()
-    }
     /// One row per unknown, in the workspace's order.
     pub fn evaluate(&self, _workspace: &SolveWorkspace) -> Result<Vec<f64>, InitializationFailure> {
         todo!()

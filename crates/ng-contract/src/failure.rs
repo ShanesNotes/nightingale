@@ -44,7 +44,7 @@ pub enum AdmissionError {
         law: LawName,
     },
     /// A forcing's period that is no whole number of nanoseconds in the clock's range, which a run could only
-    /// round into another period.
+    /// round into another period, or a fit on one, which no solve can keep on the clock.
     ForcingPeriod {
         key: ParameterKey,
     },

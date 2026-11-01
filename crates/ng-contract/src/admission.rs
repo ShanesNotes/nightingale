@@ -73,14 +73,21 @@ impl CompiledBody {
     }
     /// Rule 17's other half: `bind` matched the window to the row and the packet, and this matches the method and
     /// window to a reading the body can give. A lens is the one place a method meets a row.
-    fn check_readings(&self, owed: &Owed, lens: Option<&ObservationLens>) -> Result<(), AdmissionError> {
+    fn check_readings(
+        &self,
+        owed: &Owed,
+        moment: SimTime,
+        lens: Option<&ObservationLens>,
+    ) -> Result<(), AdmissionError> {
         for anchor in &owed.anchors {
             let read = lens.is_some_and(|lens| {
-                let (window_ns, samples) = match (anchor.statistic, owed.cycle) {
+                let (window_ns, points) = match (anchor.statistic, owed.cycle) {
                     (AnchorStatistic::CycleMean, Some(cycle)) => (cycle.period_ns(), cycle.intervals()),
                     _ => (lens.period_ns(), 1),
                 };
-                lens.model() == self.model_hash() && lens.reads(anchor.method, anchor.row, window_ns, samples)
+                lens.model() == self.model_hash()
+                    && moment.nanoseconds().is_multiple_of(lens.period_ns())
+                    && lens.reads(anchor.method, anchor.row, window_ns, points)
             });
             if !read {
                 return Err(AdmissionError::AnchorUnread { anchor: anchor.id });
@@ -92,7 +99,7 @@ impl CompiledBody {
     /// at the anchor moment, an anchor no channel reads and a delivery edge off the cycle's grid.
     pub fn initialization<'m>(
         &'m self,
-        mut parameters: BoundParameters,
+        parameters: BoundParameters,
         boundary: BoundaryPort,
         request: InitializationRequest<'_>,
     ) -> Result<InitializationSystem<'m>, AdmissionError> {
@@ -103,7 +110,7 @@ impl CompiledBody {
         for delivery in &boundary.deliveries {
             self.check_delivery(delivery, anchor_moment)?;
         }
-        self.check_readings(&parameters.owed, lens)?;
+        self.check_readings(&parameters.owed, anchor_moment, lens)?;
         let start = anchor_moment.nanoseconds();
         let (instants, interval, fence) = match parameters.owed.cycle {
             None => {
@@ -126,7 +133,6 @@ impl CompiledBody {
         let pending = PendingInputs::opening(boundary, fence);
         let frame_at = |ns: &u64| pending.frame_at(SimTime::from_ns(*ns));
         let frames: Vec<DriveFrame> = instants.iter().map(frame_at).collect();
-        parameters.packet = parameters.packet.reading(anchor_moment, &frames);
         let tolerance = parameters.owed.tolerance.unwrap_or(ErrorScales::EXACT);
         Ok(InitializationSystem {
             body: self,
@@ -376,11 +382,6 @@ impl InitializationSystem<'_> {
         let scale = self.tolerance.at(read);
         (defect == 0.0 || defect <= scale).then(|| if scale > 0.0 { defect / scale } else { 0.0 })
     }
-    /// Whether `admit` would pass this workspace, so a solve stops where the judge would, and a guess that already
-    /// holds stands.
-    pub fn holds(&self, workspace: &SolveWorkspace) -> bool {
-        self.check(workspace).is_ok() && self.recheck(workspace.coordinates()).is_ok()
-    }
     /// An instant reads its row at point 0. A cycle mean reads its row's mean over the points, the quadrature the
     /// ring's own sum closes, so a linear law's mean is exact at any point count.
     fn anchor_read(&self, unknowns: &[f64], anchor: &BoundAnchor) -> f64 {
@@ -439,18 +440,32 @@ impl InitializationSystem<'_> {
             }
         };
         let stages = self.stages(unknowns)?;
-        for (_, quantity) in self.replaced() {
+        let stage = |slot: usize| {
+            let held = self.held(stages[slot].abs(), unknowns[slot]);
+            held.ok_or(inconsistent(body_row(slot % size)))
+        };
+        let replaced = |slot: &usize| self.replaced().any(|(known, _)| known == *slot);
+        for slot in (0..stages.len()).filter(|slot| !replaced(slot)) {
+            note(body_row(slot % size), stage(slot)?);
+        }
+        // A net flow lands on the row its total replaced, so the flow is read first, to name it.
+        for (slot, quantity) in self.replaced() {
             let (_, packet) = self.total(unknowns, quantity);
             let flow = self.held(self.net_flow(&stages, quantity).abs(), packet);
             note(
                 AdmissionRow::Total(quantity),
                 flow.ok_or(InitializationFailure::NetBoundaryFlow { quantity })?,
             );
+            note(body_row(slot % size), stage(slot)?);
         }
-        for (slot, &defect) in stages.iter().enumerate() {
-            let row = body_row(slot % size);
-            let held = self.held(defect.abs(), unknowns[slot]);
-            note(row, held.ok_or(inconsistent(row))?);
+        if self.interval.is_some() {
+            // Each stage can pass and the ring still not close, by a sum that grows as a finer ring divides it.
+            for (at, row) in rows.iter().enumerate().filter(|(_, row)| !algebraic(row.kind())) {
+                let name = AdmissionRow::Body(row.id());
+                let around = (0..self.frames.len()).map(|point| stages[point * size + at]);
+                let held = self.held(around.sum::<f64>().abs(), unknowns[at]);
+                note(name, held.ok_or(inconsistent(name))?);
+            }
         }
         for quantity in self.body.conserved_basis().ids() {
             let row = AdmissionRow::Total(quantity);
@@ -506,11 +521,12 @@ impl InitializationSystem<'_> {
             pending,
             anchor_moment: time,
             tolerance,
-            frames: _,
+            frames,
             interval: _,
             draws: _,
             factors: _,
         } = self;
+        parameters.packet = parameters.packet.reading(time, &frames, start, fitted);
         parameters.values = values;
         let owed = core::mem::take(&mut parameters.owed);
         let value_of = |entry: &(ValueName, ValueProvenance, f64)| {

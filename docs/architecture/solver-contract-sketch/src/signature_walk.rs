@@ -229,7 +229,7 @@
 //! // 3. Initialize once: the packet states the goal and the anchors, and provenance comes from the contract.
 //! fn initialize(system: &InitializationSystem<'_>) -> Result<SolveWorkspace, InitializationFailure> {
 //!     let mut workspace = system.workspace();
-//!     while !system.holds(&workspace) {
+//!     for _ in 0..32 {
 //!         let residual = system.evaluate(&workspace)?;
 //!         let jacobian = system.linearize(&workspace)?;
 //!         newton_update(jacobian.view(), &residual, workspace.unknowns_mut());

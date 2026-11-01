@@ -3,6 +3,9 @@ use ng_contract::*;
 use ng_record::{Running, Session};
 
 const NEWTON_LIMIT: u32 = 32;
+/// Newton stops at rounding, unknown by unknown. The stop reads no tolerance and no row, so what a tolerance passes
+/// shapes no bit of a start state, and a row too small for the tolerance to see is solved all the same.
+const NEWTON_STOP: f64 = 8.0 * f64::EPSILON;
 
 /// A model default reported with every result, for rows near unit size. A packet of far smaller amounts states its
 /// own, because one scale cannot read both until rows have their own.
@@ -15,14 +18,11 @@ pub fn admission_tolerance() -> ErrorScales {
 /// state. Newton over `solve_dense`, whose cost is the cube of `points * rows`, so a few thousand unknowns is its
 /// reach. A body past that reduces the block ring `InitializationSystem` lays out, behind this one function.
 ///
-/// It judges nothing. It stops where `admit` would pass it, so a guess that already holds stands, and it stops where
-/// it stands on a singular update or a trial outside a law's domain. `admit` is the one judge of a start.
+/// It judges nothing. It stops where it stands on a singular update or a trial outside a law's domain, and `admit`
+/// is the one judge of a start.
 fn initialize(system: &InitializationSystem<'_>) -> SolveWorkspace {
     let mut workspace = system.workspace();
     for _ in 0..NEWTON_LIMIT {
-        if system.holds(&workspace) {
-            break;
-        }
         let (Ok(residuals), Ok(jacobian)) = (system.evaluate(&workspace), system.linearize(&workspace))
         else {
             break;
@@ -30,8 +30,14 @@ fn initialize(system: &InitializationSystem<'_>) -> SolveWorkspace {
         let Ok(update) = solve_dense(jacobian.view(), &residuals) else {
             break;
         };
-        for (unknown, change) in workspace.unknowns_mut().iter_mut().zip(update) {
+        let unknowns = workspace.unknowns_mut();
+        let settled = (update.iter().zip(unknowns.iter()))
+            .all(|(change, unknown)| change.abs() <= NEWTON_STOP * (1.0 + unknown.abs()));
+        for (unknown, change) in unknowns.iter_mut().zip(update) {
             *unknown -= change;
+        }
+        if settled {
+            break;
         }
     }
     workspace
