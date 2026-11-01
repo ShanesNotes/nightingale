@@ -359,10 +359,6 @@ fn relation<T, U: Ord>(
     Ok(facts)
 }
 
-fn chain(links: &[Option<usize>], site: usize) -> impl Iterator<Item = usize> + '_ {
-    successors(links[site], |&at| links[at])
-}
-
 fn least_on_cycle(next: &[Option<usize>]) -> Option<usize> {
     #[derive(Clone, Copy, PartialEq)]
     enum Mark {
@@ -504,10 +500,12 @@ impl Enclosure {
             });
         }
         let agrees = |site: usize| {
-            chain(&tree.parent, site).all(|up| {
+            let holder = tree.parent[site].and_then(|up| {
                 let inside = (facts.class(up) == Class::EnclosedSpace).then_some(up);
-                let space = inside.or(enclosed_by[up]);
-                space.is_none_or(|space| chain(&enclosed_by, site).any(|at| at == space))
+                inside.or(enclosed_by[up])
+            });
+            holder.is_none_or(|space| {
+                successors(enclosed_by[site], |&at| enclosed_by[at]).any(|at| at == space)
             })
         };
         if let Some(site) = (0..count).find(|&site| !agrees(site)) {
