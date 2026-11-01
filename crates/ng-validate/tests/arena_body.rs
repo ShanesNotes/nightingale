@@ -150,8 +150,10 @@ fn steps<'s>(
     let end = anchor_moment().nanoseconds() + until;
     while session.record().accepted().time().nanoseconds() < end {
         let next = SimTime::from_ns(session.record().accepted().time().nanoseconds() + 1);
-        session =
-            run_until(session, next).map_or_else(|stopped| panic!("{:?}", stopped.fault()), |next| next);
+        session = match run_until(session, next) {
+            Ok(reached) => reached,
+            Err(stopped) => panic!("{:?}", stopped.fault()),
+        };
         each(&session);
     }
     session

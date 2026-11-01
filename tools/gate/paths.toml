@@ -88,6 +88,26 @@ item = "admission::InitializationSystem::evaluate"
 reason = "one row per unknown of the admission system, in mixed row dimensions: what its Newton solve drives to zero"
 
 [[crate.f64_allow]]
+item = "admission::InitializationSystem::size"
+reason = "a slot's natural size, in that row's own unit, which an admission solver's stop reads beside the slot"
+
+[[crate.f64_allow]]
+item = "admission::InitializationSystem::solve"
+reason = "one Newton update on the ring, in mixed row dimensions: a right side in, an update out"
+
+[[crate.f64_allow]]
+item = "admission::InitializationSystem::stage"
+reason = "one point's rows in mixed dimensions, for a march to the orbit that admit then judges"
+
+[[crate.f64_allow]]
+item = "ring::eliminate"
+reason = "a dense solve in mixed row and unknown dimensions, which a core and the rank check share"
+
+[[crate.f64_allow]]
+item = "packet::ParameterPacket::start_rest"
+reason = "a synthetic guess for every row a fixture does not state, in that row's own unit; the solve moves it"
+
+[[crate.f64_allow]]
 item = "problem::SparseView::values"
 reason = "Jacobian entries in mixed row and column dimensions, for a core's own linear solve"
 

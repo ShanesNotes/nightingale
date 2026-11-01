@@ -14,7 +14,13 @@ pub fn eliminate(mut matrix: Vec<Vec<f64>>) -> Result<Vec<f64>, usize> {
                 best = row;
             }
         }
-        let reach = (matrix[best][..size].iter()).fold(0.0_f64, |most, cell| most.max(cell.abs()));
+        let reach =
+            (matrix[best][..size].iter()).fold(
+                0.0,
+                |most: f64, cell| {
+                    if cell.abs() > most { cell.abs() } else { most }
+                },
+            );
         if matrix[best][pivot].abs() <= ROUNDING * reach {
             return Err(slots[pivot]);
         }
@@ -79,7 +85,7 @@ impl InitializationSystem<'_> {
             let lu = body.factor(&system.block(ring, point))?;
             let mut walked = vec![0.0; width * size];
             for (at, column) in walked.chunks_mut(size).enumerate() {
-                for row in 0..size {
+                for (row, cell) in column.iter_mut().enumerate() {
                     let slot = point * size + row;
                     let mut side = if at == seeds { right[slot] } else { 0.0 };
                     for (place, value) in line(slot).filter(|(place, _)| !own(point).contains(place)) {
@@ -94,7 +100,7 @@ impl InitializationSystem<'_> {
                                 earlier[at * size + place - (point - 1) * size]
                             };
                     }
-                    column[row] = side;
+                    *cell = side;
                 }
                 lu.solve(column);
             }
@@ -122,9 +128,8 @@ impl InitializationSystem<'_> {
             }
             cells[corner] -= value * source[seeds * size + place];
         };
-        for row in 0..size {
+        for (row, cells) in matrix.iter_mut().enumerate().take(size) {
             let slot = last * size + row;
-            let cells = &mut matrix[row];
             cells[corner] = right[slot];
             for (place, value) in line(slot) {
                 if own(last).contains(&place) {

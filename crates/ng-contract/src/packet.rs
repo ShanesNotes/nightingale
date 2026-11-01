@@ -986,7 +986,7 @@ impl CompiledBody {
         }
         Ok(Owed {
             cycle: packet.cycle,
-            tolerance: packet.tolerance.clone(),
+            tolerance: packet.tolerance,
             anchors,
             fits,
             entries,

@@ -89,8 +89,6 @@ fn the_slice_map_passes_every_graph_check_and_holds_the_named_sites() -> Result<
     Ok(())
 }
 
-const GUT_WATER: &str = "gut water";
-
 fn enclosure_law<'b, S: OutsideSlice>(
     laws: &mut FragmentBuilder<'b, S>,
     ports: &HeldPorts<'b, S>,

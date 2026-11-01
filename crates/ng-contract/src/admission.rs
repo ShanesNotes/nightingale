@@ -161,7 +161,7 @@ impl CompiledBody {
         let pending = PendingInputs::opening(boundary, fence);
         let frame_at = |ns: &u64| pending.frame_at(SimTime::from_ns(*ns));
         let frames: Vec<DriveFrame> = instants.iter().map(frame_at).collect();
-        let tolerance = parameters.owed.tolerance.clone().unwrap_or(ErrorScales::EXACT);
+        let tolerance = parameters.owed.tolerance.unwrap_or(ErrorScales::EXACT);
         let modes = vec![parameters.modes.clone(); frames.len()];
         let resets = vec![Vec::new(); frames.len()];
         Ok(InitializationSystem {
@@ -371,7 +371,7 @@ impl InitializationSystem<'_> {
             .terms()
             .iter()
             .map(|(row, _)| self.parameters.sizes[row.index()]);
-        sizes.fold(0.0, f64::max)
+        sizes.fold(0.0, |most, size| if size > most { size } else { most })
     }
     /// One slot per unknown, in the workspace's order: each point's body rows, a total in one row of the last point
     /// under a cycle, then each fit's anchor.

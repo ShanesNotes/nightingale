@@ -1380,7 +1380,7 @@ fn the_tolerance_decides_a_near_row_and_is_reported_with_the_worst_row() {
     let tolerance = admission_tolerance();
     let within = |reading| {
         let mut packet = filter_packet(reading);
-        packet.within(tolerance.clone());
+        packet.within(tolerance);
         packet
     };
     let far = 3.0 + 1.1 * NEAR_THREE;
@@ -1891,7 +1891,7 @@ fn a_wider_tolerance_is_another_packet_so_it_cannot_share_a_runs_identity() {
         packet.within(tolerance);
         case.body().bind(packet).expect("bound").packet_hash()
     };
-    assert_ne!(hash(wide.clone()), hash(admission_tolerance()));
+    assert_ne!(hash(wide), hash(admission_tolerance()));
     assert!(run(Some(wide)).is_ok());
 }
 

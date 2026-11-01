@@ -842,6 +842,8 @@ impl<C: SiteSet, U: Dimension> Carried for PerSite<C, U> {
         dimension::<U>()
     }
 }
+/// A per-site row to define and the read of it.
+pub type SiteField<'b, O, C, U> = (Output<'b, O, PerSite<C, U>>, ReadPort<'b, O, PerSite<C, U>>);
 /// A route family at every site of class `C`: one column per site, from one space to another.
 pub struct SiteRoute<'b, O, C, Q> {
     family: Family,
@@ -1289,7 +1291,7 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
         &mut self,
         name: &'static str,
         domain: Admissible<U>,
-    ) -> (Output<'b, O, PerSite<C, U>>, ReadPort<'b, O, PerSite<C, U>>) {
+    ) -> SiteField<'b, O, C, U> {
         self.data.slots.push(SlotDeclaration {
             name,
             kind: SlotKind::Defined,

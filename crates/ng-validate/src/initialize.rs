@@ -95,9 +95,8 @@ fn step(
     let start = workspace.unknowns_mut().to_vec();
     let mut share = (update[fits..].iter().zip(&start[fits..]))
         .filter(|(change, _)| change.abs() > 0.0)
-        .fold(1.0_f64, |share, (change, fit)| {
-            share.min(FIT_REACH * fit.abs() / change.abs())
-        });
+        .map(|(change, fit)| FIT_REACH * fit.abs() / change.abs())
+        .fold(1.0, |least, reach| if reach < least { reach } else { least });
     let was = merit(system, &start, residuals);
     let mut best: Option<(f64, Vec<f64>)> = None;
     for _ in 0..HALVINGS {
@@ -162,7 +161,7 @@ fn initialize(system: &mut InitializationSystem<'_>, body: &CompiledBody) -> Sol
             };
             let moved = (update.iter().zip(workspace.unknowns_mut().iter()).enumerate())
                 .map(|(slot, (change, unknown))| change.abs() / (system.size(slot) + unknown.abs()))
-                .fold(0.0, f64::max);
+                .fold(0.0, |most, share| if share > most { share } else { most });
             if !step(system, body, &mut workspace, &residuals, &update) {
                 return workspace;
             }

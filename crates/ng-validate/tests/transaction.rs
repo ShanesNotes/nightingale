@@ -1578,7 +1578,7 @@ impl CoupledSolver for ForwardEulerWithScale {
             12,
             ArithmeticProfile::contract_v1(),
             StageScheme::forward_euler(),
-            self.scales.clone(),
+            self.scales,
         )
     }
     fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {

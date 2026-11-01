@@ -198,9 +198,9 @@ mod tests {
             b.swap(pivot, best);
             for row in pivot + 1..size {
                 let factor = a[row][pivot] / a[pivot][pivot];
-                for column in pivot..size {
-                    let lead = a[pivot][column];
-                    a[row][column] -= factor * lead;
+                let (above, below) = a.split_at_mut(row);
+                for (cell, lead) in below[0].iter_mut().zip(&above[pivot]).skip(pivot) {
+                    *cell -= factor * lead;
                 }
                 b[row] -= factor * b[pivot];
             }
@@ -258,6 +258,6 @@ mod tests {
         ];
         let matching = [RowId::at(0), RowId::at(1)];
         let plan = Elimination::plan(&[0, 2, 4], &unknowns, &matching);
-        assert!(matches!(plan.factor(&[1.0, 1.0, 1.0, 1.0]), Err(_)));
+        assert!(plan.factor(&[1.0, 1.0, 1.0, 1.0]).is_err());
     }
 }

@@ -50,7 +50,7 @@ impl CoupledSolver for ReferenceIntegrator {
             RETRY_BUDGET,
             ArithmeticProfile::contract_v1(),
             StageScheme::backward_euler_doubled(),
-            self.scales.clone(),
+            self.scales,
         )
     }
     fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
@@ -119,7 +119,7 @@ fn newton(
         // unit in the last place can be a defect above the scales.
         let moved = (update.iter().zip(&unknowns).enumerate())
             .map(|(slot, (change, unknown))| change.abs() / (problem.row_size(slot) + unknown.abs()))
-            .fold(0.0, f64::max);
+            .fold(0.0, |most, share| if share > most { share } else { most });
         // A row that rests on a store's change over a stage keeps a noise of the store's rounding over the stage, so
         // an update that has stopped shrinking this close to rounding has nothing left to give.
         settled = moved <= NEWTON_STOP || (moved >= 0.5 * last && moved <= NOISE);
