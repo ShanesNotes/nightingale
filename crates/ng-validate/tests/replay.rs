@@ -11,12 +11,13 @@ use replay_cores::{
 };
 
 const SECOND: u64 = 1_000_000_000;
-const GATES: [ReplayGate; 5] = [
+const GATES: [ReplayGate; 6] = [
     ReplayGate::Pace,
     ReplayGate::Resume,
     ReplayGate::LateAdmission,
     ReplayGate::Rewind,
     ReplayGate::ExtraEvaluation,
+    ReplayGate::NonPerturbation,
 ];
 
 fn measure<U>(value: f64) -> Measure<U> {

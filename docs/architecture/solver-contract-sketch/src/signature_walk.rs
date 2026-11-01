@@ -424,21 +424,15 @@
 //!
 //! // 13. Observe through a lens compiled apart from the body: read-only, one revision at a time,
 //! // with the observer's own state checkpointed beside the record's.
-//! fn chart(session: &Session<'_, Running>, body: &CompiledBody) -> Option<Vec<(SimTime, Vec<f64>)>> {
-//!     let pressure = ChannelSpec::new("arterial pressure", "cv.arterial-pressure", None, Access::Device)
-//!         .transformed(Transform::new(0, 0));
-//!     let lens = body.lens(ObservationCatalog::new(vec![pressure], OutputGrid::new(4_000_000).ok()?).ok()?).ok()?;
+//! fn chart(session: &Session<'_, Running>, body: &CompiledBody) -> Option<Vec<ng_observe::Observation>> {
+//!     let pressure = RowKind::Algebraic { owner: "CV", local: "arterial-pressure" };
+//!     let channel = ChannelSpec::new("arterial line", pressure);
+//!     let lens = body.lens(vec![channel], core::num::NonZeroU64::new(4_000_000)?).ok()?;
 //!     let view = session.observation(&lens).ok()?;
+//!     let _samples: Vec<(SimTime, Vec<Compensated>)> = view.samples();
 //!     let mut monitor = ng_observe::Observer::new(&lens, ObservationSeed::new([5, 6, 7, 8]));
-//!     let _findings = monitor.advance(&view).ok()?;
+//!     let observations = monitor.advance(&view).ok()?;
 //!     let _saved = monitor.checkpoint();
-//!     let channels: Vec<ChannelId> = view.channels().iter().map(|channel| channel.id()).collect();
-//!     let _now = channels.iter().map(|&channel| view.value(channel)).collect::<Result<Vec<_>, _>>().ok()?;
-//!     let mut samples = Vec::new();
-//!     for at in view.grid() {
-//!         let row = channels.iter().map(|&channel| view.sample(channel, at)).collect::<Result<_, _>>().ok()?;
-//!         samples.push((at, row));
-//!     }
-//!     Some(samples)
+//!     Some(observations)
 //! }
 //! ```

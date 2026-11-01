@@ -1,9 +1,11 @@
 use crate::ReferenceIntegrator;
+use core::num::NonZeroU64;
 use ng_contract::{
-    AcceptedStateView, AdmissionError, BoundaryEvent, CompiledBody, CoupledProblem, CoupledSolver,
-    DeclaredResolution, Digest, EngineFault, Fired, InitializationFailure, InputId, LawName, SimTime,
-    StepProposal, StepTicket, TrialFailure,
+    AcceptedStateView, AdmissionError, BoundaryEvent, ChannelSpec, CompiledBody, CoupledProblem,
+    CoupledSolver, DeclaredResolution, Digest, EngineFault, Fired, InitializationFailure, InputId, LawName,
+    ObservationLens, ObservationSeed, SimTime, StepProposal, StepTicket, TrialFailure,
 };
+use ng_observe::{Observation, ObservedValue, Observer, chained};
 use ng_record::{
     AuthorizedInput, BranchId, CheckpointError, HistoryStore, RecordDigests, Running, Seal, Session, Step,
 };
@@ -95,6 +97,8 @@ pub enum ReplayGate {
     ExtraEvaluation,
     /// Two step policies, each the same events as the reference within the plan's distance (I8).
     StepPolicy,
+    /// One run detached, one attached and one with a changed lens: same bits, and new observations (I7).
+    NonPerturbation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,7 +135,8 @@ pub enum ReplayFailure {
     EventsDiffer { reference: usize, policy: usize },
     /// A plan or a case that gives the gate nothing to compare, a pace that never stopped a run short of its
     /// end, a clock that stopped before it, a gate that measured another run or another course, a body with a
-    /// hazard guard whose run fired nothing, or two step policies on one grid.
+    /// hazard guard whose run fired nothing, two step policies on one grid, or an observer that read no value or
+    /// was refused.
     MissingEvidence { gate: ReplayGate },
 }
 
@@ -145,6 +150,7 @@ pub struct GateEvidence {
     course: Seal,
     fired: Vec<Fired>,
     tolerance_ns: Option<u64>,
+    observed: Vec<Digest>,
 }
 impl GateEvidence {
     pub fn gate(&self) -> ReplayGate {
@@ -166,6 +172,10 @@ impl GateEvidence {
     pub fn tolerance_ns(&self) -> Option<u64> {
         self.tolerance_ns
     }
+    /// The digest of each watched run's observations, for the non-perturbation gate.
+    pub fn observed(&self) -> &[Digest] {
+        &self.observed
+    }
 }
 
 /// No public constructor, so evidence comes only from `replay_gates`.
@@ -178,6 +188,7 @@ pub struct ReplayEvidence {
     rewind: GateEvidence,
     extra_evaluation: GateEvidence,
     step_policy: GateEvidence,
+    non_perturbation: GateEvidence,
 }
 impl ReplayEvidence {
     pub fn run(&self) -> Digest {
@@ -191,6 +202,7 @@ impl ReplayEvidence {
             ReplayGate::Rewind => &self.rewind,
             ReplayGate::ExtraEvaluation => &self.extra_evaluation,
             ReplayGate::StepPolicy => &self.step_policy,
+            ReplayGate::NonPerturbation => &self.non_perturbation,
         }
     }
 }
@@ -412,6 +424,7 @@ fn pace_gate(
         course: reference.seal,
         fired: fired(&reference.rows),
         tolerance_ns: None,
+        observed: Vec::new(),
     })
 }
 
@@ -492,6 +505,7 @@ fn resume_gate(
         course: reference.seal,
         fired: fired(&reference.rows),
         tolerance_ns: None,
+        observed: Vec::new(),
     })
 }
 
@@ -571,6 +585,7 @@ fn late_admission_gate(
         course: reference.seal,
         fired: fired(&reference.rows),
         tolerance_ns: None,
+        observed: Vec::new(),
     })
 }
 
@@ -619,6 +634,7 @@ fn rewind_gate(case: &dyn ReplayCase, cores: &dyn CoreFactory) -> Result<GateEvi
         course: reference.seal,
         fired: fired(&reference.rows),
         tolerance_ns: None,
+        observed: Vec::new(),
     })
 }
 
@@ -658,6 +674,7 @@ fn extra_evaluation_gate(
         course: reference.seal,
         fired: fired(&reference.rows),
         tolerance_ns: None,
+        observed: Vec::new(),
     })
 }
 
@@ -723,6 +740,7 @@ fn step_policy_gate(
             course: first.seal,
             fired: Vec::new(),
             tolerance_ns: None,
+            observed: Vec::new(),
         });
     };
     let (second, _) = reference(gate, case, chance.second_policy)?;
@@ -748,6 +766,90 @@ fn step_policy_gate(
         course: first.seal,
         fired: fired(&first.rows),
         tolerance_ns: Some(chance.event_tolerance_ns),
+        observed: Vec::new(),
+    })
+}
+
+const WATCHING: [u64; 4] = [7, 7, 7, 7];
+const INSTANTS_PER_STEP: u64 = 2;
+const CHANGED_WINDOW: NonZeroU64 = NonZeroU64::MIN.saturating_add(1);
+
+/// Both lenses read every row, so no case can leave one out. No error here: a gate cannot name a row's
+/// dimension, and an error reads no state.
+fn lenses(body: &CompiledBody, rows: &[Row]) -> Result<[ObservationLens; 2], AdmissionError> {
+    let every_row = || (body.rows().iter()).map(|row| ChannelSpec::new("every row", row.kind()));
+    let span = rows.last().map_or(0, |row| row.time.nanoseconds())
+        - rows.first().map_or(0, |row| row.time.nanoseconds());
+    let period_ns =
+        NonZeroU64::new(span / (INSTANTS_PER_STEP * rows.len() as u64)).unwrap_or(NonZeroU64::MIN);
+    let changed = every_row().map(|channel| channel.averaged(CHANGED_WINDOW).delayed(period_ns.get()));
+    Ok([
+        body.lens(every_row().collect(), period_ns)?,
+        body.lens(
+            changed.collect(),
+            period_ns.saturating_mul(CHANGED_WINDOW).saturating_add(1),
+        )?,
+    ])
+}
+
+/// A run that read no value is no evidence an observer was there.
+fn watched(
+    gate: ReplayGate,
+    case: &dyn ReplayCase,
+    cores: &dyn CoreFactory,
+    lens: &ObservationLens,
+) -> Result<(Trace, Digest), ReplayFailure> {
+    let missing = |_| ReplayFailure::MissingEvidence { gate };
+    let core = cores.fresh();
+    let mut session = admitted(gate, case.admit(&*core))?;
+    let mut observer = Observer::new(lens, ObservationSeed::new(WATCHING));
+    let mut stream = Digest::of_canonical(b"observed run");
+    let mut read_a_value = false;
+    let mut rows = vec![Row::of(&session, false)];
+    loop {
+        let view = session.observation(lens).map_err(missing)?;
+        let observed = observer.advance(&view).map_err(missing)?;
+        let present = |seen: &Observation| matches!(seen.value(), ObservedValue::Present(_));
+        read_a_value |= observed.iter().any(present);
+        stream = chained(stream, &observed);
+        if session.record().accepted().time() >= case.end() {
+            break;
+        }
+        session = advance(gate, session, &mut rows)?;
+    }
+    if !read_a_value {
+        return Err(ReplayFailure::MissingEvidence { gate });
+    }
+    let (last, seal) = (session.record().digests(), session.record().seal());
+    Ok((Trace { rows, last, seal }, stream))
+}
+
+/// A view borrows the session and a record holds no `Cell`, so reading moves no bit. What this gate catches
+/// is a core told about the reading.
+fn non_perturbation_gate(
+    case: &dyn ReplayCase,
+    cores: &dyn CoreFactory,
+) -> Result<GateEvidence, ReplayFailure> {
+    let gate = ReplayGate::NonPerturbation;
+    let (reference, run) = reference(gate, case, cores)?;
+    let lenses = lenses(case.body(), &reference.rows).map_err(|_| ReplayFailure::MissingEvidence { gate })?;
+    let mut runs = vec![reference.last];
+    let mut observed = Vec::new();
+    for lens in &lenses {
+        let (trace, stream) = watched(gate, case, cores, lens)?;
+        same_or_diverged(gate, &reference.rows, &reference.last, &trace)?;
+        runs.push(trace.last);
+        observed.push(stream);
+    }
+    Ok(GateEvidence {
+        gate,
+        run,
+        runs,
+        clock: None,
+        course: reference.seal,
+        fired: fired(&reference.rows),
+        tolerance_ns: None,
+        observed,
     })
 }
 
@@ -764,6 +866,7 @@ pub fn replay_gate(
         ReplayGate::Rewind => rewind_gate(case, cores),
         ReplayGate::ExtraEvaluation => extra_evaluation_gate(case, cores),
         ReplayGate::StepPolicy => step_policy_gate(case, cores, plan),
+        ReplayGate::NonPerturbation => non_perturbation_gate(case, cores),
     }
 }
 
@@ -790,6 +893,7 @@ pub fn replay_gates(
         rewind: of_this_run(ReplayGate::Rewind)?,
         extra_evaluation: of_this_run(ReplayGate::ExtraEvaluation)?,
         step_policy: of_this_run(ReplayGate::StepPolicy)?,
+        non_perturbation: of_this_run(ReplayGate::NonPerturbation)?,
     })
 }
 

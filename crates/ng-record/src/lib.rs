@@ -125,13 +125,54 @@
 //!     record.attempt(core, Attempt::First { span_ns })
 //! }
 //! ```
+//! A view reads one revision: it borrows the session, so no step runs while it is alive.
+//! ```compile_fail,E0505
+//! use ng_contract::*;
+//! use ng_record::*;
+//! fn stale<'m>(session: Session<'m, Running>, lens: &ObservationLens) -> Result<SimTime, ObservationRefusal> {
+//!     let view = session.observation(lens)?;
+//!     let _next = session.step();
+//!     Ok(view.time())
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! use ng_record::*;
+//! fn read_then_step<'m>(session: Session<'m, Running>, lens: &ObservationLens)
+//!     -> Result<(SimTime, Step<'m>), ObservationRefusal> {
+//!     let at = session.observation(lens)?.time();
+//!     Ok((at, session.step()))
+//! }
+//! ```
+//! A view lends values and never the state behind them.
+//! ```compile_fail,E0616
+//! use ng_contract::*;
+//! use ng_record::*;
+//! fn reach<'r>(view: &ObservationView<'r>) -> AcceptedStateView<'r> { view.accepted }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! use ng_record::*;
+//! fn read(view: &ObservationView<'_>) -> Vec<(SimTime, Vec<Compensated>)> { view.samples() }
+//! ```
+//! A shared read moves no bit: a record is `Sync`, so nothing in it hides a `Cell`.
+//! ```compile_fail,E0277
+//! fn read_only<T: Sync>() {}
+//! read_only::<core::cell::Cell<u64>>();
+//! ```
+//! ```
+//! fn read_only<T: Sync>() {}
+//! read_only::<ng_record::PatientRecord<'static>>();
+//! ```
 
 mod checkpoint;
 mod history;
+mod observation;
 mod record;
 mod session;
 
 pub use checkpoint::{BranchFork, BranchId, Checkpoint, CheckpointError, HistoryStore};
 pub use history::{ConservationView, Curve, HistorySeal, HistorySegment, Segments};
+pub use observation::{ObservationRefusal, ObservationView};
 pub use record::{AuthorizedInput, InputReceipt, NextImage, PatientRecord, RecordDigests, Seal, StepReceipt};
 pub use session::{FaultReport, Faulted, Retrying, Running, Session, Step};

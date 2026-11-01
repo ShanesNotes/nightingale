@@ -47,7 +47,8 @@
 //!         late_admission: pace.clone(),
 //!         rewind: pace.clone(),
 //!         extra_evaluation: pace.clone(),
-//!         step_policy: pace,
+//!         step_policy: pace.clone(),
+//!         non_perturbation: pace,
 //!     }
 //! }
 //! ```

@@ -24,9 +24,14 @@ impl CompiledBody {
     pub fn bind<K: PacketKind>(&self, _packet: ParameterPacket<K>) -> Result<BoundParameters, AdmissionError> {
         todo!()
     }
-    /// Compiles an observation catalog against this body into a lens. The lens is versioned and
-    /// hashed apart from the model, so a new lens applies to any replay of this body.
-    pub fn lens(&self, _catalog: ObservationCatalog) -> Result<ObservationLens, AdmissionError> {
+    /// Compiles channels and a grid against this body into a lens, hashed apart from the model, so a
+    /// new lens applies to any replay of this body. Refuses a row the body does not hold, an error in
+    /// another dimension, a negative error and two channels that read one row one way.
+    pub fn lens(
+        &self,
+        _channels: Vec<ChannelSpec>,
+        _period_ns: core::num::NonZeroU64,
+    ) -> Result<ObservationLens, AdmissionError> {
         todo!()
     }
     /// Conserved combinations derived from incidence and balanced reactions (see `ConservedBasis`).
@@ -98,6 +103,13 @@ impl BoundParameters {
 #[derive(Clone, Copy)]
 pub struct ColumnId {
     _index: u32,
+}
+/// What a row holds, by key. A channel names a row this way, never by its slot.
+#[derive(Clone, Copy)]
+pub enum RowKind {
+    Amount { site: SiteId, space: Space },
+    Memory { owner: &'static str, local: &'static str },
+    Algebraic { owner: &'static str, local: &'static str },
 }
 /// Stable row identity in the compiled equation layout.
 #[derive(Clone, Copy)]

@@ -677,6 +677,35 @@
 //!     laws.forcing("wobble", ParameterKey::new("rn.period"), ParameterKey::new("rn.amplitude"))
 //! }
 //! ```
+//! A lens is no part of a run's identity, so a new lens reads any replay.
+//! ```compile_fail,E0061
+//! use ng_contract::*;
+//! fn watched(model: ModelHash, packet: PacketHash, seed: Seed, resolution: DeclaredResolution,
+//!     lens: &ObservationLens) -> RunIdentity {
+//!     RunIdentity::new(model, packet, seed, resolution, lens.digest())
+//! }
+//! ```
+//! Seed domains never mix: only the run's seed goes in a run's identity.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn crossed(model: ModelHash, packet: PacketHash, seed: ObservationSeed, resolution: DeclaredResolution)
+//!     -> RunIdentity {
+//!     RunIdentity::new(model, packet, seed, resolution)
+//! }
+//! ```
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn crossed(model: ModelHash, packet: PacketHash, seed: PacketSeed, resolution: DeclaredResolution)
+//!     -> RunIdentity {
+//!     RunIdentity::new(model, packet, seed, resolution)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn run(model: ModelHash, packet: PacketHash, seed: Seed, resolution: DeclaredResolution) -> RunIdentity {
+//!     RunIdentity::new(model, packet, seed, resolution)
+//! }
+//! ```
 
 mod admission;
 mod anatomy;
@@ -693,6 +722,7 @@ mod identity;
 mod image;
 mod landing;
 mod law;
+mod lens;
 mod packet;
 mod pinned;
 mod problem;
@@ -719,6 +749,7 @@ pub use failure::*;
 pub use identity::*;
 pub use image::*;
 pub use law::*;
+pub use lens::{Channel, ChannelSpec, ObservationLens};
 pub use packet::*;
 pub use pinned::exp;
 pub use problem::*;

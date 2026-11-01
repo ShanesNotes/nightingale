@@ -350,7 +350,10 @@ _Avoid_: finding
 A compiled set of readings (channels and an output grid), hashed apart from the body, so a new lens applies to any replay without changing physiology (I7).
 
 **Channel**:
-One reading in a lens: the produced quantity and site it reads, its window and delay, its measurement error, and its access class (device, examination, laboratory, imaging or teaching).
+One reading in a lens: the method that takes it, the produced quantity and site it reads, its window and delay, and its measurement error.
+
+**Output grid**:
+The instants a lens reads: every whole multiple of one period. No law reads it and it never cuts a step.
 
 **Reference interval**:
 A range an observer may flag a reading against, with its evidence. Physiology never reads it.

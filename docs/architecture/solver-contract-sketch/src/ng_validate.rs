@@ -322,8 +322,9 @@ pub struct GateEvidence {
     _run: Digest,
     _runs: Vec<RecordDigests>,
     _clock: Option<ClockSource>,
+    _observed: Vec<Digest>,
 }
-/// Digests of accepted state, ledger, events and observer findings under each replay gate. Every
+/// Digests of accepted state, ledger, events and observations under each replay gate. Every
 /// gate compares against the same uninterrupted run:
 /// - pace: unbounded, live wall clock and irregular chunks;
 /// - resume: each checkpoint loaded into a freshly built core;
@@ -331,7 +332,8 @@ pub struct GateEvidence {
 ///   can still take it, instead of at admission (the causal step rule);
 /// - rewind: a branch rewound in the same process after the parent ran ahead, against the same
 ///   branch loaded into a fresh core;
-/// - non-perturbation: physiology bits with observers attached, detached and changed.
+/// - non-perturbation: physiology bits with observers attached, detached and changed, each observer
+///   reading a value.
 pub struct ReplayEvidence {
     _run: Digest,
     _pace: GateEvidence,

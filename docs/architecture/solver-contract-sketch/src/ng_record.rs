@@ -339,50 +339,44 @@ impl<'m, S> Session<'m, S> {
         todo!()
     }
 }
-/// Read-only observation of one accepted image. It has no write path: nothing read here reaches a
-/// law, the record or the certificate.
+/// One accepted revision through a lens. It has no write path: nothing read here reaches a law, the
+/// record or the certificate, and it borrows the session, so no step runs while it is alive.
 pub struct ObservationView<'r> {
     _lens: &'r ObservationLens,
-    _parameters: &'r BoundParameters,
-    _revision: u64,
-    _time: SimTime,
-    _state: &'r Candidate,
-    _dense: &'r DenseSegment,
+    _accepted: AcceptedStateView<'r>,
+    _seal: Digest,
+    _previous: Option<Digest>,
 }
 impl<'r> ObservationView<'r> {
+    pub fn lens(&self) -> &'r ObservationLens {
+        todo!()
+    }
     pub fn time(&self) -> SimTime {
         todo!()
     }
-    /// The accepted revision this view reads; an observer advances one revision at a time.
-    pub fn revision(&self) -> u64 {
+    pub fn seal(&self) -> Digest {
         todo!()
     }
-    /// The lens's channels, in stable order.
-    pub fn channels(&self) -> &'r [Channel] {
+    /// The seal this revision follows; `None` at admission.
+    pub fn previous(&self) -> Option<Digest> {
         todo!()
     }
-    /// A channel at the accepted instant: its program over accepted state and bound parameters,
-    /// before any window, delay or error the observer applies.
-    pub fn value(&self, _channel: ChannelId) -> Result<f64, ObservationRefusal> {
-        todo!()
-    }
-    /// The lens grid's instants in the last accepted segment, start excluded and end included.
-    /// Each instant falls in exactly one segment, so reading every step sees every sample once.
-    pub fn grid(&self) -> Vec<SimTime> {
-        todo!()
-    }
-    /// A channel on the last accepted dense segment at `at`. A read never forces a cut.
-    pub fn sample(&self, _channel: ChannelId, _at: SimTime) -> Result<f64, ObservationRefusal> {
+    /// Each grid instant this revision holds, oldest first, with one value per channel. A step holds
+    /// its end and not its start, so an instant falls in one step, and revision 0 holds the admission
+    /// instant when it is on the grid. At the head a channel reads the accepted state, which is what
+    /// a firing left, so one instant has one value. A read never forces a cut.
+    pub fn samples(&self) -> Vec<(SimTime, Vec<Compensated>)> {
         todo!()
     }
 }
 pub enum ObservationRefusal {
-    /// The lens was compiled for another body, or the channel belongs to another lens.
+    /// A lens compiled for another body, a view through another lens, or a checkpoint of another
+    /// lens or seed.
     OtherLens,
-    /// The instant lies outside the last accepted dense segment.
-    OutsideSegment,
-    /// An observer read a revision other than the one after its last.
-    Gap { expected: u64, found: u64 },
+    /// A view that does not follow the last revision read: skipped, repeated or of another course.
+    Gap { expected: Digest, found: Option<Digest> },
+    /// Checkpoint bytes that are not an observer's, or that changed.
+    Malformed,
 }
 impl<'m> Session<'m, Running> {
     /// Checks model, packet and resolution identity against the body, origin and solver, and

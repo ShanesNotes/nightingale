@@ -262,6 +262,13 @@ impl History {
     pub(crate) fn seal(&self) -> Digest {
         self.links.last().map_or(self.origin.seal, |link| link.seal)
     }
+    pub(crate) fn previous(&self) -> Option<Digest> {
+        let head = self.links.len().checked_sub(1)?;
+        Some(
+            head.checked_sub(1)
+                .map_or(self.origin.seal, |before| self.links[before].seal),
+        )
+    }
     pub(crate) fn head_image(&self) -> Digest {
         self.links.last().map_or(self.origin.image, |link| link.image)
     }

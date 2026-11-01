@@ -1,6 +1,8 @@
 use crate::body::HazardLayout;
 use crate::identity::{Canonical, Seal};
-use crate::{Candidate, CompiledBody, Digest, Fired, LawName, ModeValue, Seed, SimTime};
+use crate::{
+    Candidate, CompiledBody, Digest, DomainSeed, Fired, LawName, ModeValue, ObservationSeed, Seed, SimTime,
+};
 
 /// Admission holds no seed, so a start state is a function of the packet alone: a draw reads its mean and a
 /// forcing its factor's.
@@ -25,7 +27,7 @@ pub(crate) fn seed_word(domain: &str, words: [u64; 4]) -> u64 {
     first_word(out.digest())
 }
 
-fn first_word(digest: Digest) -> u64 {
+pub(crate) fn first_word(digest: Digest) -> u64 {
     let bytes = digest.as_bytes().first_chunk().expect("thirty-two bytes");
     u64::from_be_bytes(*bytes)
 }
@@ -38,7 +40,7 @@ fn mix(z: u64) -> u64 {
     z ^ (z >> 31)
 }
 
-fn keyed(seed: Seed, key: u64) -> u64 {
+fn keyed<D: Copy>(seed: DomainSeed<D>, key: u64) -> u64 {
     mix(seed.word() ^ key)
 }
 
@@ -68,6 +70,14 @@ fn spline(keyed: u64, period_ns: u64, at: SimTime) -> f64 {
         + (-3.0 * u * u * u + 3.0 * u * u + 3.0 * u + 1.0) * c[2]
         + u * u * u * c[3])
         / 6.0
+}
+
+/// Twelve uniform words less six: mean zero and variance one, inside (-6, 6), from sums alone. Keyed by the
+/// instant, so an observer keeps no cursor.
+pub(crate) fn measurement_error(seed: ObservationSeed, channel: u64, at: SimTime) -> f64 {
+    let instant = word(keyed(seed, channel), at.nanoseconds());
+    let sum: f64 = (0..12).map(|index| open_unit(word(instant, index))).sum();
+    sum - 6.0
 }
 
 struct Knots {
@@ -176,8 +186,8 @@ fn period_ns(seconds: f64) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{holds_a_period, knot, open_unit, period_ns, seed_word, spline, word};
-    use crate::SimTime;
+    use super::{holds_a_period, knot, measurement_error, open_unit, period_ns, seed_word, spline, word};
+    use crate::{ObservationSeed, PacketSeed, Seed, SimTime};
 
     const KEYED: u64 = 0x0123_4567_89AB_CDEF;
     const SECOND: u64 = 1_000_000_000;
@@ -196,6 +206,14 @@ mod tests {
         (999_999_999, 0xBFE1_3B65_1C6C_AE81),
         (1_000_000_000, 0xBFE1_3B65_1C64_E2BA),
         (7_300_000_000, 0xBFD4_D559_314E_AC24),
+    ];
+
+    const ERRORS: [(u64, u64); 5] = [
+        (0, 0x3FE7_FC4F_3669_13C8),
+        (1, 0xBFE1_52C2_35F0_CE60),
+        (4_000_000, 0xBFD7_C504_0505_C6D0),
+        (7_300_000_000, 0x3FE3_9AE4_12A1_D518),
+        (u64::MAX, 0x3FFB_E9F3_0202_DB48),
     ];
 
     #[test]
@@ -255,6 +273,45 @@ mod tests {
         let words = [1, 2, 3, 4];
         assert_ne!(seed_word("run", words), seed_word("observation", words));
         assert_ne!(seed_word("run", words), seed_word("run", [1, 2, 3, 5]));
+    }
+
+    #[test]
+    fn a_measurement_error_matches_an_outside_implementation() {
+        let seed = ObservationSeed::new([1, 2, 3, 4]);
+        for (at, expected) in ERRORS {
+            let error = measurement_error(seed, KEYED, SimTime::from_ns(at));
+            assert_eq!(error.to_bits(), expected, "at {at}");
+        }
+    }
+
+    #[test]
+    fn measurement_errors_have_mean_zero_and_variance_one() {
+        const COUNT: u32 = 200_000;
+        let seed = ObservationSeed::new([1, 2, 3, 4]);
+        let (mut sum, mut square) = (0.0, 0.0);
+        for at in 0..COUNT {
+            let error = measurement_error(seed, KEYED, SimTime::from_ns(u64::from(at)));
+            assert!(-6.0 < error && error < 6.0);
+            sum += error;
+            square += error * error;
+        }
+        let count = f64::from(COUNT);
+        assert!((sum / count).abs() < 4.0 / count.sqrt(), "mean {}", sum / count);
+        assert!((square / count - 1.0).abs() < 0.02, "variance {}", square / count);
+    }
+
+    #[test]
+    fn the_run_domain_keeps_its_word_and_each_other_domain_has_its_own() {
+        let words = [1, 2, 3, 4];
+        let (run, packet, observation) = (
+            Seed::new(words).word(),
+            PacketSeed::new(words).word(),
+            ObservationSeed::new(words).word(),
+        );
+        assert_eq!(run, seed_word("run", words));
+        assert_eq!(packet, seed_word("packet", words));
+        assert_eq!(observation, seed_word("observation", words));
+        assert!(run != packet && run != observation && packet != observation);
     }
 
     #[test]
