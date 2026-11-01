@@ -132,7 +132,6 @@ impl<'r> CoupledProblem<'r> {
             values,
         })
     }
-    /// Every law's frame at the ticket's end on `state`.
     fn guard_inputs<'a>(
         &'a self,
         ticket: &'a StepTicket,
@@ -150,7 +149,6 @@ impl<'r> CoupledProblem<'r> {
             factors,
         }
     }
-    /// The first crossed guard in stable order, hazards before plain ones.
     pub(crate) fn crossed(
         &self,
         ticket: &StepTicket,
@@ -172,7 +170,7 @@ impl<'r> CoupledProblem<'r> {
         }
         Ok(None)
     }
-    /// Whether a stage of this step stands past an armed plain guard. The stage runs in the base's modes.
+    /// The stage runs in the base's modes.
     pub(crate) fn crossed_at_stage(
         &self,
         ticket: &StepTicket,
@@ -195,7 +193,6 @@ impl<'r> CoupledProblem<'r> {
         }
         Ok(false)
     }
-    /// How far `state` stands past a guard's crossing, negative before it.
     pub(crate) fn gap(
         &self,
         ticket: &StepTicket,

@@ -129,7 +129,6 @@ fn flows(family: Family, schema: &Schema) -> bool {
     family == Family::Valves || (family.fluid() && !schema.carried.is_empty())
 }
 
-/// Turns each flowing route's law into the definition of its flow row, once the schema says which routes flow.
 fn lift_flows(fragments: &mut [FragmentData], schema: &Schema) {
     for fragment in fragments {
         for law in &mut fragment.laws {
@@ -240,7 +239,6 @@ enum Serves<'f> {
     Slot(Over),
     Family(Family),
     Boundary(&'f RouteBoundary),
-    /// One body row's other laws, one instance at every site of a set.
     Sum(Sites),
 }
 
@@ -518,7 +516,6 @@ fn check_volume(schema: &Schema, owed: &[Owed], fragments: &[FragmentData]) -> R
     }
 }
 
-/// Every place a row, a mode variable or a law stands.
 fn places_of(
     anatomy: &Anatomy,
     reaches: &Reaches,
@@ -629,7 +626,6 @@ impl Rows {
     fn amount(&self, pool: PoolRef) -> Option<usize> {
         self.amounts.binary_search(&pool).ok()
     }
-    /// A body row answers at every place; a row of a place answers at that place.
     fn slot(&self, law: LawName, at: Context) -> Option<usize> {
         let find = |at| {
             let found = self
@@ -652,7 +648,6 @@ impl Rows {
 #[derive(Clone, Copy)]
 enum Terminal {
     Pool(PoolRef),
-    /// The far end of a route out of the body, named for its receipt.
     Exterior(&'static str),
 }
 struct Reach {
@@ -678,7 +673,6 @@ fn water(site: SiteId, space: Space) -> PoolRef {
         species: Species::Water,
     }
 }
-/// A vessel's blood or a bed's plasma, the space an edge of a flow network meets.
 fn flowing(site: SiteId) -> PoolRef {
     let space = if site.class() == Class::CapillaryBed {
         Space::Plasma
@@ -688,7 +682,6 @@ fn flowing(site: SiteId) -> PoolRef {
     water(site, space)
 }
 impl Reaches {
-    /// A route stands wherever both its pools exist, so the schema's pools say where every law reaches.
     fn of(schema: &Schema, fragments: &[FragmentData]) -> Self {
         let mut pools: Vec<PoolRef> = (schema.pools())
             .map(|(site, space, species)| PoolRef { site, space, species })
@@ -725,7 +718,6 @@ impl Reaches {
     fn held(&self, pool: Option<PoolRef>) -> bool {
         pool.is_some_and(|pool| self.pools.binary_search(&pool).is_ok())
     }
-    /// Every species both of a fluid reach's ends hold, water first, so no list of them exists to keep in step.
     fn carried(&self, reach: &Reach) -> Vec<Species> {
         let both = |&species: &Species| {
             self.held(reach.pool(End::From, species)) && self.held(reach.pool(End::To, species))
@@ -742,7 +734,6 @@ impl Reaches {
         Species::CARRIED.into_iter().filter(apart).collect()
     }
 }
-/// The one table of what each family joins. A new family is one arm here and one port.
 fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
     let anatomy = &schema.anatomy;
     let edge = |(from, to): (SiteId, SiteId), ends: [PoolRef; 2]| Reach {
@@ -1026,7 +1017,6 @@ fn marked(
                 owner: program.law.owner,
                 local: mode.variable,
             };
-            // A route's mode answers at its own edge, a whole-body mode at every place.
             let found = |at| {
                 modes
                     .binary_search_by_key(&Slot { law, at }, |known| known.variable)
@@ -1284,7 +1274,6 @@ fn carried_ops(
     ops
 }
 
-/// One program for each shape of carried column, so a route's columns share it as a law's instances do.
 fn fluid_program(
     placement: &mut Placement,
     law: LawName,
@@ -1390,7 +1379,6 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
     }
 }
 
-/// The site a read lands on, from the kernel's place. `None` only for a read of the place itself.
 fn landing(place: Where, context: Context, anatomy: &Anatomy) -> Option<SiteId> {
     let ends = match context {
         Context::Edge { from, to } => Some((from, to)),
@@ -1647,7 +1635,6 @@ fn check_orphans(
     Ok(())
 }
 
-/// One instance per place of the guard's mode variable, in stable order by the hash of what it is.
 fn guards(
     fragments: &[FragmentData],
     places: &Places,
@@ -1795,7 +1782,6 @@ fn bind(
     (parameters, instances, guards)
 }
 
-/// Each row `close` declares and the unknown it closes, its own.
 fn closed_rows(fragments: &[FragmentData], rows: &Rows) -> Vec<usize> {
     let names = fragments.iter().flat_map(|fragment| {
         let owner = fragment.owner;

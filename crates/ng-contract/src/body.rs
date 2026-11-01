@@ -133,7 +133,7 @@ impl CompiledBody {
 impl Layout {
     /// One firing, in stable order: each crossed guard still armed on what those before it left moves its mode, so of two
     /// guards on one variable the first wins, and a guard a firing arms waits for the next step. The run and the ring
-    /// both fire here. `crossed` holds one entry per guard.
+    /// both fire here.
     pub(crate) fn fire(&self, modes: &mut [usize], crossed: &[bool]) -> Vec<&GuardLayout> {
         let mut fired = Vec::new();
         for (guard, &crossed) in self.guards.iter().zip(crossed) {
@@ -498,7 +498,6 @@ pub(crate) enum Bound {
     Draw(usize),
     Forcing(usize),
     Gauge,
-    /// A site's axial position, as its bits: the head's posture scales it.
     Height(u64),
 }
 impl Bound {

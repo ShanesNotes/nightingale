@@ -29,7 +29,6 @@ macro_rules! site_classes {
 
 pub trait SiteClass: sealed::SiteClass {}
 
-/// Which sites a per-site row, kernel or read stands over.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Sites {
     Class(sealed::Class),
@@ -221,11 +220,11 @@ pub enum AnatomyDefect {
     UndrainedBed {
         bed: &'static str,
     },
-    /// An edge of the wrong classes for its network, a valve on no vascular edge, or a landmark placed twice.
+    /// An edge of the wrong classes for its network, or a landmark placed twice.
     WrongNetwork {
         site: &'static str,
     },
-    /// A site two junctions supply.
+    /// A site two junctions supply, or a site supplied and also stated as `unsupplied`.
     SuppliedTwice {
         site: &'static str,
     },
@@ -276,7 +275,7 @@ impl AnatomyBuilder {
             other => self.others.push((other, from, to)),
         }
     }
-    /// A vascular edge with a valve on it: its flow is memory and its law holds by mode. A plain edge has no valve.
+    /// A vascular edge with a valve on it: its flow is memory and its law holds by mode.
     pub fn valve(&mut self, from: SiteId, to: SiteId) {
         self.vascular.push((from, to));
         self.valves.push((from, to));
@@ -409,8 +408,6 @@ impl Facts {
         self.sites[site].class
     }
 
-    /// A lymph edge runs from a bed to a vessel segment, a urinary edge into a vessel segment and a reclaim edge from
-    /// a vessel segment to a bed. A site has one junction, and a landmark one place.
     fn check_networks(&self) -> Result<(), AnatomyDefect> {
         let fits = |&(network, from, to): &(Network, SiteId, SiteId)| match network {
             Network::Vascular => true,
@@ -862,21 +859,18 @@ impl Anatomy {
         self.valves.binary_search(&edge).is_ok()
     }
 
-    /// Every edge of a network other than the vascular one, in key order.
     pub(crate) fn edges(&self, network: Network) -> impl Iterator<Item = (SiteId, SiteId)> + '_ {
         (self.others.iter())
             .filter(move |edge| edge.0 == network)
             .map(|edge| (edge.1, edge.2))
     }
 
-    /// The one site a bed drains to. Compile refuses a read of it at a bed with more or fewer.
     pub(crate) fn drain(&self, bed: SiteId) -> Option<SiteId> {
         let mut out = self.vascular().filter(|edge| edge.0 == bed).map(|edge| edge.1);
         let first = out.next();
         first.filter(|_| out.next().is_none())
     }
 
-    /// The members of a set, in key order.
     pub(crate) fn in_set(&self, set: Sites) -> Vec<SiteId> {
         let vascular: Vec<(SiteId, SiteId)> = self.vascular().collect();
         let on_network = |site: SiteId| vascular.iter().any(|edge| edge.0 == site || edge.1 == site);
@@ -895,27 +889,22 @@ impl Anatomy {
             .collect()
     }
 
-    /// The junction that supplies `site`.
     pub(crate) fn junction(&self, site: SiteId) -> Option<SiteId> {
         (self.supplies.iter())
             .find(|supply| supply.1 == site)
             .map(|supply| supply.0)
     }
 
-    /// Whether the map says no nerve reaches `site`.
     pub(crate) fn unsupplied(&self, site: SiteId) -> bool {
         self.unsupplied.contains(&site)
     }
 
-    /// The site a landmark's rows stand at and the site whose height it sits at.
     pub(crate) fn landmark(&self, landmark: Landmark) -> Option<(SiteId, SiteId)> {
         (self.landmarks.iter())
             .find(|mark| mark.0 == landmark)
             .map(|mark| (mark.1, mark.2))
     }
 
-    /// A site's height in the body frame from the hip, the part posture scales: above the hip it turns with the trunk,
-    /// below it with the legs.
     pub(crate) fn axial(&self, site: SiteId) -> f64 {
         self.placed(site)
             .map_or(0.0, |placed| placed.position.axial.value())

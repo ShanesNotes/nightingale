@@ -1284,8 +1284,6 @@ fn a_long_span_over_a_forcing_lands_its_events_and_never_crawls() {
     assert!(fired >= 8, "{fired} events in {steps} steps");
 }
 
-/// A span past a knot reads a forcing's curve at its two ends and nowhere between, so it stops at the knot, as it stops
-/// at a law's longest interval.
 #[test]
 fn a_span_stops_at_a_forcings_knot() {
     let case = ChanceCase::ectopy().expect("a body");
@@ -1556,7 +1554,7 @@ fn late_inputs_match_the_known_timeline_with_a_guard_among_them() {
     late_inputs_match(ChanceCase::ectopy);
 }
 
-/// An input that moves a crossing, which ticket 06 had no body for: the hazard reads a lumen through a field.
+/// The hazard reads a lumen through a field, so an input moves its crossing.
 #[test]
 fn late_inputs_match_the_known_timeline_when_an_input_moves_a_crossing() {
     late_inputs_match(ChanceCase::fed);

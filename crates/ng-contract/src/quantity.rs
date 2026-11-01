@@ -36,11 +36,8 @@ pub enum Albumin {}
 pub enum Vasopressin {}
 pub enum Norepinephrine {}
 pub enum Acetylcholine {}
-/// Pressure per flow.
 pub enum Resistance {}
-/// Pressure per rate of change of flow.
 pub enum Inertance {}
-/// Pressure per flow squared: a valve's orifice loss.
 pub enum Orifice {}
 pub enum Temperature {}
 pub enum Phase {}
@@ -68,7 +65,7 @@ pub struct Affinity<Q>(PhantomData<Q>);
 pub struct PerSite<C: SiteSet, U>(PhantomData<(C, U)>);
 pub struct PerEdge<U, E: EdgeKind = VascularEdge>(PhantomData<(U, E)>);
 
-/// What a pool holds. One closed list, so a row, a route's carried columns and a book all read one name.
+/// What a pool holds. One closed list, so a row, a route's carried columns and a `Book` all read one name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Species {
     Water,
@@ -101,8 +98,6 @@ impl Species {
             _ => 0,
         }
     }
-    /// The local name of each per-species route and of its receptor effect: reclaim, release, reuptake, binding, effect,
-    /// exchange.
     pub(crate) const fn names(self) -> [&'static str; 6] {
         match self {
             Species::Water => [
@@ -355,7 +350,6 @@ same_dimension! {
     Rate<Sodium> => Rate<Chloride>;
     Rate<Potassium> => Rate<Chloride>;
 }
-/// Each holds for every amount, every sensed variable and every binding, so the table needs one line each.
 impl<U: Dimension> identities::Sealed<U> for Quotient<U, Dimensionless> {}
 impl<U: Dimension> SameDimension<U> for Quotient<U, Dimensionless> {}
 impl<Q: Substance> identities::Sealed<Dimensionless> for Quotient<Concentration<Q>, Concentration<Q>> {}

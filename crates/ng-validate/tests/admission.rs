@@ -864,8 +864,6 @@ fn sized_packet(case: &PulsatileCase) -> ParameterPacket<SyntheticFixture> {
     packet
 }
 
-/// A row of a large natural size is read at that size, and a total at its largest row's: the move a unit row
-/// refuses stands on rows a thousand units wide.
 #[test]
 fn a_rows_natural_size_scales_what_it_is_held_to() {
     let case = PulsatileCase::new(Variant::Slow);
@@ -1138,7 +1136,7 @@ fn the_row_a_total_replaced_is_read_at_its_own_scale() {
     );
 }
 
-/// A march writes the pulse into the ring first, so a flat guess no longer leaves the fit nothing to move.
+/// A march writes the pulse into the ring first, so a flat guess leaves the fit something to move.
 #[test]
 fn a_march_gives_a_guess_with_no_head_a_head_to_fit() {
     let case = PulsatileCase::plain();

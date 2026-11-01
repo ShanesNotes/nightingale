@@ -417,7 +417,6 @@ fn every_link_of_every_loop_moves_the_row_that_reads_it(
     let stored = |site| amount(site, Space::Vesicle, Species::Norepinephrine);
     let bound = |site| amount(site, Space::Bound, Species::Norepinephrine);
     for (reader, read) in [
-        // The baroreflex: pressure to stretch, to traffic, to transmitter, to receptor, to rate, wall and arteriole.
         (stretch, pressure(arteries)),
         (arch, pressure(arteries)),
         (filter, stretch),
@@ -439,14 +438,12 @@ fn every_link_of_every_loop_moves_the_row_that_reads_it(
         (rate_row(), effect(sinoatrial)),
         (rate_row(), vagal_effect),
         (flow(arteries, kidney), effect(junction("renal junction"))),
-        // Feedback at the kidney: what the macula densa reads to the afferent edge, and that edge to filtration.
         (tone, amount(tubule, Space::Lumen, Species::Sodium)),
         (tone, amount(tubule, Space::Lumen, Species::Water)),
         (flow(arteries, kidney), tone),
         (filtered, pressure(kidney)),
         (filtered, lumen(tubule)),
         (filtered, plasma(kidney, Species::Albumin)),
-        // Starling and lymph at every bed, with what encloses it.
         (starling(leg), capillary(leg)),
         (starling(leg), tissue(leg)),
         (starling(leg), plasma(leg, Species::Albumin)),
@@ -459,7 +456,6 @@ fn every_link_of_every_loop_moves_the_row_that_reads_it(
         (tissue(gut), abdomen),
         (pressure(lung), pleura),
         (pressure(gut), abdomen),
-        // Vasopressin: sodium to secretion, to the V2 receptor, to water back from the duct.
         (blood(veins, Species::Vasopressin), blood(veins, Species::Sodium)),
         (blood(veins, Species::Vasopressin), blood(veins, Species::Water)),
         (
@@ -468,7 +464,6 @@ fn every_link_of_every_loop_moves_the_row_that_reads_it(
         ),
         (v2, amount(reclaim, Space::Bound, Species::Vasopressin)),
         (urine(duct, Species::Water), v2),
-        // A valve open at the start reads the head across it.
         (valve(atrium, left), pressure(left)),
         (valve(atrium, left), pressure(atrium)),
     ] {

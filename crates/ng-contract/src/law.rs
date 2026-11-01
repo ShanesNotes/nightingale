@@ -95,7 +95,7 @@ macro_rules! edge_kinds {
     )*};
 }
 edge_kinds! {
-    /// Every vascular edge with no valve: its flow is an algebraic row.
+    /// Every vascular edge with no valve: in a body that carries more than water, its flow is an algebraic row.
     VascularEdge: Blood => Blood, Vascular;
     /// Every vascular edge with a valve: its flow is memory and its laws hold by mode.
     ValveEdge: Blood => Blood, Vascular;
@@ -109,9 +109,9 @@ edge_kinds! {
     ReclaimEdge: Urinary => Blood, Reclaim;
 }
 
-/// One kind of transfer the map implies. A fluid route's water rate is a row and it carries every species both ends
-/// hold; any other moves its one species. A route stands wherever its two pools exist, so the schema's pools say
-/// where a law reaches and no law names a site.
+/// One kind of transfer the map implies. In a body that carries more than water, a fluid route's water rate is a row
+/// and it carries every species both ends hold; any other route moves its one species. A route stands wherever its
+/// two pools exist, so the schema's pools say where a law reaches and no law names a site.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Family {
     Circulation,
@@ -148,8 +148,6 @@ impl Family {
             Family::Dissipation => "dissipation",
         }
     }
-    /// Whether this route moves water that can carry what both ends hold. In a body that holds more than water its law
-    /// defines one flow row, and the contract writes every column from it. A valve's flow is memory in any body.
     pub(crate) fn fluid(self) -> bool {
         matches!(
             self,
@@ -187,7 +185,6 @@ pub(crate) enum Op {
     Relax([usize; 3]),
     ConductanceFlow([usize; 2]),
     Volume([usize; 1]),
-    /// The species a water flow carries: `q s_from / w_from` for a forward flow, `q s_to / w_to` for a reverse one.
     Upwind([usize; 5]),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -201,11 +198,8 @@ pub(crate) enum Input {
     Read(Source, Where),
     Draw(&'static str),
     Forcing(&'static str),
-    /// A site's height in the body frame under the head's posture.
     Height(Where),
-    /// The flow row of the one urinary edge into this edge's upstream site.
     Inflow,
-    /// A vascular edge's own flow: its flow row, or a valve's memory.
     EdgeFlow,
 }
 /// Where a read lands, from the kernel's own place. The compiler resolves it against the map, so a law says what it
@@ -215,13 +209,9 @@ pub(crate) enum Where {
     Here,
     Up,
     Down,
-    /// The junction that supplies this site, or the site an edge runs into.
     Junction,
-    /// The one site this bed drains to.
     Drain,
-    /// The site a landmark's rows stand at.
     Mark(Landmark),
-    /// The site whose height a landmark sits at.
     Sensor(Landmark),
 }
 impl Op {
@@ -517,9 +507,9 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     pub fn read<U: Dimension>(&mut self, port: &ReadPort<'b, O, U>) -> Expr<'b, 'k, O, U> {
         self.input(Input::Read(port.source, Where::Here))
     }
-    /// The entry at the junction that supplies this site, or the site this edge runs into. A place no junction
-    /// supplies, or a junction with no such entry, reads zero: no nerve, or no receptor, has no effect. A whole-body
-    /// kernel has no such place, and compile refuses it.
+    /// The entry at the junction that supplies this site, or the site this edge runs into. A site the map says no
+    /// nerve reaches reads zero: no nerve has no effect. Compile refuses a site the map says nothing of, a junction
+    /// with no such entry and a whole-body kernel, which has no such place.
     pub fn at_junction<U: Dimension>(
         &mut self,
         port: &ReadPort<'b, O, PerSite<crate::Junction, U>>,
@@ -660,7 +650,7 @@ impl<'b, 'k, O> Kernel<'b, 'k, O> {
     ) -> Expr<'b, 'k, O, U> {
         self.input(Input::Read(port.source, Where::Mark(landmark)))
     }
-    /// How far a landmark sits above the site its rows stand at, under the head's posture.
+    /// How far a landmark sits above the site its rows stand at, under the drive frame's posture.
     pub fn rise(&mut self, landmark: Landmark) -> Expr<'b, 'k, O, Length> {
         let sensor = self.input(Input::Height(Where::Sensor(landmark)));
         let site = self.input(Input::Height(Where::Mark(landmark)));
@@ -668,7 +658,6 @@ impl<'b, 'k, O> Kernel<'b, 'k, O> {
     }
 }
 impl<'b, 'k, O> Kernel<'b, 'k, O, CapillaryBed> {
-    /// This bed's entry of a value every blood site has.
     pub fn in_blood<U: Dimension>(
         &mut self,
         port: &ReadPort<'b, O, PerSite<Blood, U>>,
@@ -684,7 +673,7 @@ impl<'b, 'k, O, C: SiteSet> Kernel<'b, 'k, O, C> {
     pub fn at_site<U: Dimension>(&mut self, port: &ReadPort<'b, O, PerSite<C, U>>) -> Expr<'b, 'k, O, U> {
         self.input(Input::Read(port.source, Where::Here))
     }
-    /// This site's height in the body frame under the head's posture.
+    /// This site's height in gravity under the drive frame's posture.
     pub fn height(&mut self) -> Expr<'b, 'k, O, Length> {
         self.input(Input::Height(Where::Here))
     }
@@ -700,21 +689,19 @@ impl<'b, 'k, O, E: EdgeKind> Kernel<'b, 'k, O, E> {
     pub fn at_edge<U: Dimension>(&mut self, port: &ReadPort<'b, O, PerEdge<U, E>>) -> Expr<'b, 'k, O, U> {
         self.input(Input::Read(port.source, Where::Here))
     }
-    /// The entry at this edge's upstream site.
     pub fn upstream<U: Dimension>(
         &mut self,
         port: &ReadPort<'b, O, PerSite<E::From, U>>,
     ) -> Expr<'b, 'k, O, U> {
         self.input(Input::Read(port.source, Where::Up))
     }
-    /// The entry at this edge's downstream site.
     pub fn downstream<U: Dimension>(
         &mut self,
         port: &ReadPort<'b, O, PerSite<E::To, U>>,
     ) -> Expr<'b, 'k, O, U> {
         self.input(Input::Read(port.source, Where::Down))
     }
-    /// How far this edge falls in the body frame under the head's posture: the upstream height less the downstream.
+    /// How far this edge falls in gravity under the drive frame's posture: the upstream height less the downstream.
     pub fn fall(&mut self) -> Expr<'b, 'k, O, Length> {
         let up = self.input(Input::Height(Where::Up));
         let down = self.input(Input::Height(Where::Down));
@@ -759,9 +746,7 @@ pub struct ReadPort<'b, O, U> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Source {
     Amount(Family, End, Species),
-    /// A species in the blood or lumen pool of a site, not through a route.
     Pool(Species),
-    /// A species in the pool a boundary route reaches.
     RoutePool(&'static str, Species),
     Drive(&'static str),
     Field(LawName),
@@ -809,9 +794,7 @@ pub(crate) enum Over {
     Body,
     Every(Sites),
     HeldEnclosures,
-    /// Every place of one route, as a valve's flow and mode stand.
     Route(Family),
-    /// Every site of a class where a pool exists, as a receptor's effect stands where its bound pool does.
     WherePool(Sites, Space, Species),
 }
 pub(crate) trait Carried {
@@ -834,7 +817,6 @@ impl<C: SiteSet, U: Dimension> Carried for PerSite<C, U> {
         dimension::<U>()
     }
 }
-/// A per-site row to define and the read of it.
 pub type SiteField<'b, O, C, U> = (Output<'b, O, PerSite<C, U>>, ReadPort<'b, O, PerSite<C, U>>);
 /// A route family at every site of class `C`: one column per site, from one space to another.
 pub struct SiteRoute<'b, O, C, Q> {
@@ -890,7 +872,8 @@ impl<'b, O, Q, E: EdgeKind> EdgeRoute<'b, O, Q, E> {
     pub fn to_amount<R: Substance>(&self) -> ReadPort<'b, O, PerEdge<R, E>> {
         ReadPort::of(Source::Amount(self.family, End::To, R::SPECIES))
     }
-    /// The water rate along each edge, a row of its own, so a lens or another law reads a flow as it reads anything.
+    /// In a body that carries more than water, the water rate along each edge, a row of its own, so a lens or another
+    /// law reads a flow as it reads anything.
     pub fn flow(&self) -> ReadPort<'b, O, PerEdge<Rate<Water>, E>> {
         ReadPort::of(Source::Flow(self.family))
     }
@@ -1454,7 +1437,6 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     pub fn define<U: Dimension>(&mut self, output: &Output<'b, O, U>, value: PureKernel<'b, O, U>) {
         self.attach(Obligation::Defined(output.name), value.data.defining(output.name));
     }
-    /// One kernel for the set, one row per site.
     pub fn define_at<C: SiteSet, U: Dimension>(
         &mut self,
         output: &Output<'b, O, PerSite<C, U>>,
@@ -1504,7 +1486,6 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
         }
         self.data.families.push(family);
     }
-    /// A valve's flow memory is owed by requesting its route.
     pub(crate) fn owe_flow_memory(&mut self, family: Family) {
         self.data.slots.push(SlotDeclaration {
             name: family.name(),
@@ -1643,7 +1624,6 @@ pub(crate) enum Obligation {
     Defined(&'static str),
     Family(Family),
     Boundary(&'static str),
-    /// A body row's other laws: one kernel at every site of a set.
     Sum(&'static str, Sites),
 }
 impl Obligation {

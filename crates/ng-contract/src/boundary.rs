@@ -106,7 +106,6 @@ pub(crate) struct Delivery {
     amount: f64,
     pub(crate) ends: SimTime,
     rate: f64,
-    /// `None` for a posture, whose value holds until the next one.
     species: Option<Species>,
 }
 impl Seal for Delivery {
@@ -186,7 +185,6 @@ impl Delivery {
             BoundaryInput::Posture(Posture { trunk, legs }) => Ok(Self::posture(id, at, trunk, legs)),
         }
     }
-    /// A posture's `amount` is its trunk and its `rate` its legs' share.
     fn posture(id: InputId, at: SimTime, trunk: f64, legs: Legs) -> Self {
         Self {
             id,
@@ -381,8 +379,6 @@ impl PendingInputs {
             last_refusal: None,
         };
         let plan = self.plan(start, problem.accepted.state().fired);
-        // A span past the body's tightest law or a forcing's knot is capped here, before anything runs, as a running
-        // delivery's end is.
         let capped = span_ns.min(problem.longest_span_ns());
         let wanted = start.plus_ns(capped).ok_or(mismatch)?;
         let end = plan.running_end.map_or(wanted, |ends| ends.min(wanted));

@@ -122,7 +122,6 @@ struct StartEntry {
     bits: u64,
     note: &'static str,
 }
-/// A row's natural size, in its own unit.
 struct ScaleEntry {
     row: RowKind,
     dimension: String,
@@ -527,7 +526,6 @@ impl ParameterPacket<SyntheticFixture> {
         });
         Ok(())
     }
-    /// A whole-body variable takes its name; a route's takes a `Slot` at its edge.
     /// Every row the packet has not started yet, at `guess`. A guess at an algebraic row is only where the solve begins,
     /// and each row's dimension comes from the row, so a fixture of hundreds of rows states only those that matter.
     pub fn start_rest(
@@ -550,6 +548,7 @@ impl ParameterPacket<SyntheticFixture> {
         }
         Ok(())
     }
+    /// A whole-body variable takes its name; a route's takes a `Slot` at its edge.
     pub fn start_mode(
         &mut self,
         variable: impl Into<Slot>,
@@ -612,7 +611,6 @@ pub struct BoundParameters {
     pub(crate) packet: PacketHash,
     pub(crate) values: Vec<f64>,
     pub(crate) starts: Vec<f64>,
-    /// One per row: its natural size, one unit unless the packet says.
     pub(crate) sizes: Vec<f64>,
     pub(crate) modes: Vec<usize>,
     pub(crate) owed: Owed,

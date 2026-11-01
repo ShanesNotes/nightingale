@@ -11,7 +11,6 @@ pub(crate) struct Elimination {
     starts: Vec<u32>,
     columns: Vec<u32>,
     diagonals: Vec<u32>,
-    /// One per Jacobian entry: where it lands in the pattern.
     places: Vec<u32>,
 }
 
@@ -136,7 +135,6 @@ impl Elimination {
         Ok(Factors { plan: self, lu })
     }
 }
-/// One Jacobian, factored over its body's elimination.
 pub struct Factors<'b> {
     plan: &'b Elimination,
     lu: Vec<f64>,

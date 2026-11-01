@@ -31,7 +31,6 @@ fn smooth(a: f64, b: f64, width: f64, sign: f64) -> (f64, f64, f64) {
     (0.5 * (a + b + sign * root), along, across)
 }
 
-/// One kernel's values, in code order. `next_input` hands each `Op::Input` its value in turn.
 fn run(
     ops: &[Op],
     mut next_input: impl FnMut() -> f64,
@@ -270,7 +269,6 @@ impl CompiledBody {
         }
         residuals
     }
-    /// Calls `each` once per holding instance with the kernel's value, and each `Bound` read with its slope.
     fn slopes(
         &self,
         inputs: &Inputs<'_>,

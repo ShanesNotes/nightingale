@@ -97,7 +97,6 @@ impl Seal for Combination {
     }
 }
 
-/// `amounts[row]` is the species a row holds and `reads[column]` says the column's law reads a row.
 pub(crate) fn conserved_basis(amounts: &[Species], columns: &[Column], reads: &[bool]) -> ConservedBasis {
     let mut edges = Vec::new();
     for column in columns {

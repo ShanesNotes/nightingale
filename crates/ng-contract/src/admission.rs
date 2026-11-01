@@ -204,9 +204,7 @@ fn algebraic(kind: RowKind) -> bool {
 pub struct InitializationSystem<'m> {
     pub(crate) body: &'m CompiledBody,
     parameters: BoundParameters,
-    /// One per point: the modes its stage holds in.
     modes: Vec<Vec<usize>>,
-    /// One per point: the rows a firing on the way to it set to zero.
     resets: Vec<Vec<RowId>>,
     pending: PendingInputs,
     anchor_moment: SimTime,
@@ -364,7 +362,6 @@ impl InitializationSystem<'_> {
         }
         (moved.rounded(), packet.rounded())
     }
-    /// A total's natural size: its largest row's.
     fn total_size(&self, quantity: QuantityId) -> f64 {
         let combination = &self.body.conserved_basis().combinations()[quantity.index()];
         let sizes = combination
@@ -687,8 +684,8 @@ impl InitializationSystem<'_> {
         for slot in (0..stages.len()).filter(|slot| !replaced(slot)) {
             note(body_row(slot % size), stage(slot)?);
         }
-        // Every book, regulated or not: each stage's defect can pass while their sum over the cycle does not. A net flow
-        // lands on the row its total replaced, so the flow is read first, to name it.
+        // Every conserved total but charge, regulated or not: each stage's defect can pass while their sum over the
+        // cycle does not. A net flow lands on the row its total replaced, so the flow is read first, to name it.
         let combinations = self.body.conserved_basis().combinations();
         let books = (combinations.iter()).filter(|combination| combination.book() != Book::Charge);
         for quantity in books.filter(|_| self.interval.is_some()).map(Combination::id) {
@@ -900,7 +897,7 @@ pub enum InitializationFailure {
     GuardSweep {
         point: usize,
     },
-    /// A row whose stage has no pivot at the start state, which structural matching cannot see.
+    /// A row with no pivot at the start state, in its own stage or on the ring, which structural matching cannot see.
     NoRank {
         row: RowId,
     },

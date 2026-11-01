@@ -43,7 +43,6 @@ pub enum AdmissionError {
     UnbackedConstant {
         law: LawName,
     },
-    /// A trunk past straight up or straight down.
     PostureOutOfRange,
     /// A forcing's period that is no whole number of nanoseconds in the clock's range, which a run could only
     /// round into another period, or a fit on one, which no solve can keep on the clock.
@@ -211,7 +210,6 @@ pub enum AdmissionError {
     /// A run identity that is not this body's, this origin's and this solver's.
     IdentityMismatch,
     ZeroMinimumInterval,
-    /// A pool in a space its site's class does not have.
     SpaceOfAnotherClass {
         site: SiteId,
         space: Space,
@@ -297,7 +295,7 @@ pub enum CompileDefect {
     /// A kernel that holds by a route's mode at a place that route does not stand.
     ModeOfAnotherPlace { law: LawName },
     /// A read of a pool this body does not hold there, or of a place the map does not say: a landmark it does not
-    /// place, a bed with more than one drain, or a segment with more than one urinary edge in.
+    /// place, a bed without exactly one drain, or a segment without exactly one urinary edge in.
     NoPoolRead { law: LawName },
     /// A law reads a junction at a site the map neither supplies nor states that no nerve reaches.
     NoSupply { law: LawName, site: SiteId },

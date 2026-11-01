@@ -486,8 +486,7 @@ impl ChanceCase {
     pub fn two_rhythms() -> Result<Self, AdmissionError> {
         Self::declared(Variant::TwoRhythms)
     }
-    /// The ectopy rate reads a lumen through a field, so a delivery moves when a hazard crosses and no input is only
-    /// water any more.
+    /// The ectopy rate reads a lumen through a field, so a delivery moves when a hazard crosses.
     pub fn fed() -> Result<Self, AdmissionError> {
         Self::declared(Variant::Fed)
     }

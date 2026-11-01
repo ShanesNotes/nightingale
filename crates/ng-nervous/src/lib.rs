@@ -44,7 +44,6 @@ fn transmitter<'b, Q: Substance>(
     ns.transfer_at(&reuptake, back);
 }
 
-/// One traffic row: a logistic of the deviation over its width, rising with stretch or falling with it.
 fn traffic<'b>(
     ns: &mut FragmentBuilder<'b, Nervous>,
     filtered: &StateSlot<'b, Nervous, Dimensionless>,

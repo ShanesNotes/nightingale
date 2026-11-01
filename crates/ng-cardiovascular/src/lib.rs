@@ -54,8 +54,6 @@ pub fn declare<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardio
     Ok(cv.finish())
 }
 
-/// The head between an edge's ends, what drives every flow in the circulation: their pressures and how far the edge
-/// falls under the head's posture.
 fn drive<'b, 'k, E>(
     k: &mut Kernel<'b, 'k, Cardiovascular, E>,
     pressure: &ReadPort<'b, Cardiovascular, PerSite<Blood, Pressure>>,
@@ -117,8 +115,8 @@ fn plain_edges<'b>(
     Ok(())
 }
 
-/// Open: `L dq/dt = dp - B q |q|`. Shut: `q` holds at zero. A valve shuts when its flow falls through zero and opens
-/// when its head rises through zero, and shutting resets the flow, so no column ever carries blood through it.
+/// Open: `L dq/dt = dp - B q |q|` (research 02). Shut: `q` holds at zero. Shutting resets the flow, so no column ever
+/// carries blood through a shut valve.
 fn valves<'b>(
     cv: &mut FragmentBuilder<'b, Cardiovascular>,
     ports: &CardiovascularPorts<'b>,
@@ -188,6 +186,7 @@ fn valves<'b>(
 }
 
 /// What a sensor feels is the pressure of the vessel it sits on, less the column of blood up to its own height.
+/// Model default.
 fn afferents<'b>(
     cv: &mut FragmentBuilder<'b, Cardiovascular>,
     pressure: &ReadPort<'b, Cardiovascular, PerSite<Blood, Pressure>>,

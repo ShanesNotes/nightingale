@@ -355,7 +355,6 @@ fn a_trunk_past_straight_up_is_refused() {
     assert!(Posture::new(measure(-1.0), Legs::Horizontal).is_ok());
 }
 
-/// A route whose law reads its drive only while one mode holds would keep a delivery's amount waiting on that mode.
 #[test]
 fn a_delivery_only_one_modes_law_reads_is_refused() {
     let tank = AnatomyBuilder::new().site::<VesselSegment>("tank", origin()).id();
@@ -449,7 +448,6 @@ fn a_delivery_only_one_modes_law_reads_is_refused() {
     assert_eq!(delivered(&body_of(true)), None);
 }
 
-/// A share of nothing has no value, but no flow carries nothing, so a route at rest out of a dry pool is no refusal.
 #[test]
 fn no_flow_out_of_a_dry_pool_carries_nothing() {
     let mut map = AnatomyBuilder::new();

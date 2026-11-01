@@ -29,7 +29,6 @@ pub(crate) struct RouteBoundary {
     pub(crate) name: &'static str,
     pub(crate) direction: BoundaryDirection,
     pub(crate) pool: PoolRef,
-    /// A drain: its law sets the water rate, a row, and its columns carry what the pool holds.
     pub(crate) drains: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -228,9 +227,7 @@ pub enum Space {
     Cells,
     Lumen,
     Fluid,
-    /// A nerve ending's store of transmitter.
     Vesicle,
-    /// The gap a transmitter is released into, where its receptors sit.
     Cleft,
     /// Ligand held on its receptors, at a junction or a bed.
     Bound,
@@ -424,7 +421,6 @@ fn named_route<'b, Q: Substance, O>(
         _ => Err(AdmissionError::UnknownBoundary { name }),
     }
 }
-/// What every system reads of the receptor layer: the effect of a species at the junction or bed that holds it.
 fn effect<'b, O, C: SiteSet, Q: Substance>() -> ReadPort<'b, O, PerSite<C, Dimensionless>> {
     ReadPort::field(LawName {
         owner: Receptor::CARD,
@@ -464,7 +460,7 @@ impl<'b> CardiovascularPorts<'b> {
         laws.owe_flow_memory(Family::Valves);
         EdgeRoute::requested(Family::Valves)
     }
-    /// The pressure row of every blood site: the one law CV owes, and the read of it. FL reads it as line 80's fields.
+    /// The pressure row of every blood site and the read of it. FL reads it as line 80's fields.
     #[allow(clippy::type_complexity)]
     pub fn blood_pressure(
         &self,
@@ -479,7 +475,6 @@ impl<'b> CardiovascularPorts<'b> {
     pub fn extravascular_pressure(&self) -> ReadPort<'b, Cardiovascular, PerSite<Blood, Pressure>> {
         ReadPort::extravascular()
     }
-    /// `Q` in each blood site's own pool.
     pub fn amount<Q: Substance>(&self) -> ReadPort<'b, Cardiovascular, PerSite<Blood, Q>> {
         ReadPort::pool(Q::SPECIES)
     }
@@ -536,7 +531,6 @@ impl<'b> FluidsPorts<'b> {
         laws.request(family);
         SiteRoute::requested(family)
     }
-    /// Every lymph edge.
     pub fn lymph(&self, laws: &mut FragmentBuilder<'b, Fluids>) -> EdgeRoute<'b, Fluids, Water, LymphEdge> {
         laws.request(Family::Lymph);
         EdgeRoute::requested(Family::Lymph)
@@ -592,18 +586,15 @@ impl<'b> RenalPorts<'b> {
         laws.request(family);
         EdgeRoute::requested(family)
     }
-    /// `Q` in each urinary segment's own pool.
     pub fn lumen<Q: Substance>(&self) -> ReadPort<'b, Renal, PerSite<Urinary, Q>> {
         ReadPort::pool(Q::SPECIES)
     }
-    /// The pressure row of every blood site, which a bed's filtration reads.
     pub fn blood_pressure(&self) -> ReadPort<'b, Renal, PerSite<Blood, Pressure>> {
         ReadPort::field(LawName {
             owner: Cardiovascular::CARD,
             local: BLOOD_PRESSURE,
         })
     }
-    /// A receptor's effect where the bed holds it.
     pub fn effect<Q: Substance>(&self) -> ReadPort<'b, Renal, PerSite<Blood, Dimensionless>> {
         effect::<_, _, Q>()
     }

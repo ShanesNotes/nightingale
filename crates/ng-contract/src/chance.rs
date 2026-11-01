@@ -182,7 +182,6 @@ impl Chance {
     }
 }
 
-/// What a landing searches on: a hazard's integral against its draw, or a plain guard's zero.
 #[derive(Clone, Copy)]
 pub(crate) enum Trigger<'b> {
     Hazard(&'b HazardLayout),

@@ -194,7 +194,6 @@ const HEAT: &str = "heat";
 const SECRETION: &str = "vasopressin secretion";
 const CLEARANCE: &str = "vasopressin clearance";
 
-/// The one site key the schema needs beyond the map's own handles. A site id is its key and class.
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     Ok(AnatomyBuilder::new().site::<C>(key, at(0.0)?).id())
 }
@@ -279,8 +278,6 @@ fn held<S: OutsideSlice>(body: &mut Assembly<'_>, holds: Vec<Space>) -> Result<(
     Ok(())
 }
 
-/// What the gut holds reaches the blood at a steady rate, and a meal adds to it. Stability this buys shows in the
-/// held route's flow, which the certificate reports per window.
 fn absorption<'b, Q: Substance>(
     laws: &mut FragmentBuilder<'b, Gastrointestinal>,
     ports: &HeldPorts<'b, Gastrointestinal>,
@@ -328,6 +325,7 @@ fn gut(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
 }
 
 /// Secretion follows plasma sodium on a logistic, clearance is first order. Both held, because EN is outside the slice.
+/// Model default.
 fn vasopressin(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let declaration = HeldDeclaration::<Endocrine>::new(vec![SECRETION, CLEARANCE], Vec::new(), FIXED);
     let (mut laws, ports) = body.hold(declaration)?.parts();
@@ -449,7 +447,6 @@ pub fn arena_body() -> Result<CompiledBody, AdmissionError> {
     })
 }
 
-/// The five organ fragments the slice compiles, each behind its own crate's `declare`, and the body's own exits.
 pub fn arena_organs(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     exits(body)?;
     let fragment = ng_cardiovascular::declare(body.cardiovascular()?)?;
@@ -467,9 +464,9 @@ pub fn arena_organs(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
 
 const SECOND: u64 = 1_000_000_000;
 const POINTS: u32 = 100;
-/// What a pulsing flow swings by, and the power that keeps the elastic store on its sum: that row rests on the store's
-/// change over a stage, so doubled stages part by more than any other row.
 const FLOW_SIZE: f64 = 20.0;
+/// The power that keeps the elastic store on its sum. That row rests on the store's change over a stage, so doubled
+/// stages part by more than any other row.
 const POWER_SIZE: f64 = 1e6;
 
 /// 06:55, counted from the midnight the run's clock starts at, so a clock law reads the time of day from the head.
@@ -578,7 +575,6 @@ pub fn arena_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixt
     Ok(packet)
 }
 
-/// A flat guess, about right in size for each kind of row. The march and the ring do the rest.
 /// Water near the orbit at each site, so the march starts with a heart that has something to pump.
 const WATER_GUESS: [(&str, Space, f64); 23] = [
     ("right atrium", Space::Lumen, 54.0),
@@ -606,6 +602,7 @@ const WATER_GUESS: [(&str, Space, f64); 23] = [
     ("bladder", Space::Lumen, 20.0),
 ];
 
+/// A flat guess, about right in size for each kind of row. The march and the ring do the rest.
 fn start_guess(row: RowKind) -> f64 {
     match row {
         RowKind::Amount { site, species, space } => {
@@ -636,7 +633,7 @@ fn start_guess(row: RowKind) -> f64 {
     }
 }
 
-/// Every parameter of the fixture: rounded numbers from prototype P1 and P5, nobody's physiology. A key's default binds
+/// Every parameter of the fixture: rounded numbers from the prototype, nobody's physiology. A key's default binds
 /// at its class or network, and a site or an edge that differs says so.
 fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> Result<(), AdmissionError> {
     fn set<U: Dimension>(
@@ -907,7 +904,6 @@ fn mean_anchor<U: Dimension>(id: AnchorId, row: RowKind, value: Measure<U>) -> A
     Synthetic::new(id, read, "arena fixture: synthetic")
 }
 
-/// One cycle-mean channel per anchor, on the grid of the cycle's points.
 pub fn arena_lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError> {
     let window = NonZeroU64::MIN.saturating_add(u64::from(POINTS) - 1);
     let channels = [heart_rate(), arterial_pressure()?, filtration_flow()?]

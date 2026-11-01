@@ -48,7 +48,7 @@ pub fn eliminate(mut matrix: Vec<Vec<f64>>) -> Result<Vec<f64>, usize> {
 impl InitializationSystem<'_> {
     /// One Newton update on the ring `linearize` lays out: `points` blocks of `size` rows, each coupled to the block
     /// before it by its stage's tangent alone, totals in the last block reading point 0, and fits along the border.
-    /// Dense, that is the cube of 24,000 unknowns.
+    /// Dense, that is the cube of `points` times `size` unknowns.
     ///
     /// Each point but the last factors over the body's elimination. Walking forward from point 0, every point becomes a
     /// linear function of the last point's rows that point 0 reads and of the fits, so the ring shrinks to one dense

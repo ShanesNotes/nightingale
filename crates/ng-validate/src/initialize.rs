@@ -8,7 +8,7 @@ const FIT_REACH: f64 = 0.25;
 const NOISE: f64 = 1e-11;
 const FLOOR: f64 = 0.1;
 const HALVINGS: u32 = 12;
-/// How many passes of the ring's own stages a guess marches before Newton. P2 reached a settled beat in 40.
+/// The prototype reached a settled beat in 40 passes of the ring's own stages.
 const MARCH_BEATS: u32 = 40;
 /// Newton stops when no unknown moved by more than this share of itself. Each is read at its own size and no
 /// tolerance is read, so a row or a fit too small for the tolerance to see is solved all the same. An unknown that
@@ -68,7 +68,6 @@ fn solve_block(body: &CompiledBody, block: &Jacobian, residuals: &[f64]) -> Resu
     }
 }
 
-/// How far the rows stand from solved, each at its own size.
 fn merit(system: &InitializationSystem<'_>, unknowns: &[f64], residuals: &[f64]) -> f64 {
     let read = |(slot, (residual, unknown)): (usize, (&f64, &f64))| {
         let share = residual / (system.size(slot) + unknown.abs());
@@ -134,8 +133,7 @@ fn step(
 }
 
 /// The one admission solve, a function of the packet and the window alone, so every core starts from one start
-/// state. A march to a guess, then Newton over the block ring at fixed modes, then a sweep of the guards, until a
-/// sweep moves nothing.
+/// state.
 ///
 /// It judges nothing. It stops where it stands on a singular update or a trial outside a law's domain, and `admit`
 /// is the one judge of a start.
@@ -199,7 +197,6 @@ pub fn admit_solved<'m>(
     admit_at(body, packet, boundary, core, lens, SimTime::from_ns(0))
 }
 
-/// `admit_solved` at a moment of the day, as the slice admits at 06:55.
 pub fn admit_at<'m>(
     body: &'m CompiledBody,
     packet: ParameterPacket<SyntheticFixture>,

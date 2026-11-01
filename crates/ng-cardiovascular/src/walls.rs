@@ -5,8 +5,8 @@ type Port<'b, U> = ReadPort<'b, Cardiovascular, PerSite<Blood, U>>;
 type Effect<'b> = ReadPort<'b, Cardiovascular, PerSite<Junction, Dimensionless>>;
 type Knob<'b, U> = SiteParameter<'b, Cardiovascular, Blood, U>;
 
-/// One wall law for a vein, a bed and a ventricle: a site with no active elastance is passive, and a site no junction
-/// supplies reads no effect.
+/// One wall law for a vein, a bed and a ventricle: a site with no active elastance is passive, and a site no nerve
+/// reaches reads no effect.
 pub(crate) struct Walls<'b, 'h> {
     water: Port<'b, Water>,
     albumin: Port<'b, Albumin>,
@@ -46,8 +46,9 @@ impl<'b, 'h> Walls<'b, 'h> {
             activation: &heart.activation,
         }
     }
-    /// `V - V_u`, with `V` the water's volume and the albumin's, `V_u = V_u_base - S E_a1`, and no less than zero: a vessel below its unstressed volume collapses
-    /// and sucks nothing in, so a chamber cannot pull itself dry. Model default.
+    /// `V - V_u`, with `V` the water's volume and the albumin's, `V_u = V_u_base - S E_a1`, and no less than zero: a
+    /// vessel below its unstressed volume collapses and sucks nothing in, so a chamber cannot pull itself dry. Model
+    /// default.
     pub(crate) fn stressed<'k>(
         &self,
         k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
@@ -68,7 +69,6 @@ impl<'b, 'h> Walls<'b, 'h> {
         let (zero, soft) = (k.zero(), k.parameter(&self.collapse));
         k.smooth_max(stretched, zero, soft)
     }
-    /// The active part of the wall's stiffness at full activation: `E_active (1 + S E_b1)`.
     fn contractile<'k>(
         &self,
         k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
@@ -80,7 +80,7 @@ impl<'b, 'h> Walls<'b, 'h> {
         let strengthened = k.scale(tuned, effect);
         k.add(active, strengthened)
     }
-    /// `E_passive + a E_active (1 + S E_b1)`.
+    /// `E_passive + a E_active (1 + S E_b1)`. Model default.
     pub(crate) fn elastance<'k>(
         &self,
         k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
@@ -91,7 +91,6 @@ impl<'b, 'h> Walls<'b, 'h> {
         let driven = k.scale(contractile, activation);
         k.add(passive, driven)
     }
-    /// `E s^2 / 2`.
     fn stored<'k>(
         &self,
         k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
@@ -109,9 +108,9 @@ impl<'b, 'h> Walls<'b, 'h> {
     /// One mechanical store and one thermal store. Each blood site's wall holds `E s^2 / 2`, and the store is held to
     /// their sum. Work enters where activation stiffens a stretched wall, in systole only, and what the store then
     /// holds over the sum leaves as heat. That rate is no law's choice: it is what keeps the store equal to the sum,
-    /// so closure sits in the stage residual and `verify` judges it with the rest. Gravity's work enters beside the heart's, so
-    /// the rate is what the flows lose in any posture. The moving blood's energy and the stretch of tissue and tubule are
-    /// not in the sum, so what they hold passes through this rate as heat.
+    /// so closure sits in the stage residual and `verify` judges it with the rest. Gravity's work enters beside the
+    /// heart's, so the rate is what the flows lose in any posture. The moving blood's energy and the stretch of tissue
+    /// and tubule are not in the sum, so what they hold passes through this rate as heat.
     pub(crate) fn energy(
         &self,
         cv: &mut FragmentBuilder<'b, Cardiovascular>,

@@ -1,6 +1,5 @@
 use ng_contract::*;
 
-/// What the walls read of the beat: how contracted the heart is, and the modes its rate of contraction holds in.
 pub(crate) struct Heart<'b> {
     pub(crate) activation: StateSlot<'b, Cardiovascular, Dimensionless>,
     pub(crate) peak: Parameter<'b, Cardiovascular, Dimensionless>,
@@ -8,12 +7,11 @@ pub(crate) struct Heart<'b> {
     pub(crate) systole: ModeSetSource<'b>,
     pub(crate) diastole: ModeSetSource<'b>,
 }
-/// A mode value kept to ask for its `ModeSet` as often as a law needs one.
 pub(crate) type ModeSetSource<'b> = Mode<'b, Cardiovascular>;
 
 /// A phase runs from zero to the end of the cycle at the pacemaker's rate. Systole lasts to a set phase, and the heart's
 /// activation rises through it and falls after it, first order. A wrap resets the phase and starts the next systole.
-/// No operator is periodic: the beat is two guards and a reset, so its rate can move beat to beat.
+/// No operator is periodic: the beat is two guards and a reset, so its rate can move beat to beat. Model default.
 pub(crate) fn declare<'b>(
     cv: &mut FragmentBuilder<'b, Cardiovascular>,
     ports: &CardiovascularPorts<'b>,
