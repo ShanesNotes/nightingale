@@ -714,8 +714,11 @@ impl CompiledBody {
         packet: &ParameterPacket<K>,
         filled_by: &[usize],
     ) -> Result<Owed, AdmissionError> {
-        let mut anchors = Vec::with_capacity(packet.anchors.len());
-        for entry in &packet.anchors {
+        // In key order, as the hash reads them, so two builds of one packet solve with the same bits.
+        let mut ordered: Vec<&AnchorEntry> = packet.anchors.iter().collect();
+        ordered.sort_by_key(|entry| entry.id);
+        let mut anchors = Vec::with_capacity(ordered.len());
+        for entry in ordered {
             let anchor = entry.id;
             let row = (self.layout.rows.iter())
                 .find(|row| row.kind == entry.row && row.dimension == entry.dimension)
@@ -742,8 +745,10 @@ impl CompiledBody {
             });
         }
         let mut fits = Vec::new();
-        let mut entries = Vec::with_capacity(packet.parameters.len());
-        for (at_entry, entry) in packet.parameters.iter().enumerate() {
+        let mut ordered: Vec<(usize, &ParameterEntry)> = packet.parameters.iter().enumerate().collect();
+        ordered.sort_by_key(|(_, entry)| (entry.key, entry.binding));
+        let mut entries = Vec::with_capacity(ordered.len());
+        for (at_entry, entry) in ordered {
             let ParameterEntry { key, binding, .. } = *entry;
             let value = f64::from_bits(entry.bits);
             match entry.provenance {

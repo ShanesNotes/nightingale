@@ -1549,6 +1549,65 @@ fn the_goal_and_its_grid_are_in_the_packet_hash() {
     );
 }
 
+#[test]
+fn two_builds_of_one_packet_start_on_the_same_bits() {
+    let case = PulsatileCase::new(Variant::Forced);
+    let second = AnchorId::new("fixture.mean-b");
+    let mean = |id, row, value| case.mean_anchor(id, row, value);
+    let build = |fits_first: bool| {
+        let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
+        if fits_first {
+            packet
+                .anchor(mean(second, case.b(), TOTAL - MEAN_A))
+                .expect("once");
+            packet.anchor(mean(MEAN, case.a(), MEAN_A)).expect("once");
+            let g = measure::<Conductance<Water>>(CONDUCTANCE);
+            packet.calibrated(G, NETWORK, g, second).expect("once");
+            let e = measure::<Elastance>(GUESS);
+            packet.calibrated(E, NETWORK, e, MEAN).expect("once");
+        } else {
+            packet.anchor(mean(MEAN, case.a(), MEAN_A)).expect("once");
+            packet
+                .anchor(mean(second, case.b(), TOTAL - MEAN_A))
+                .expect("once");
+            let e = measure::<Elastance>(GUESS);
+            packet.calibrated(E, NETWORK, e, MEAN).expect("once");
+            let g = measure::<Conductance<Water>>(CONDUCTANCE);
+            packet.calibrated(G, NETWORK, g, second).expect("once");
+        }
+        let period = measure::<Time>(1.0);
+        packet
+            .synthetic(KNOTS, Binding::Body, period, NOTE)
+            .expect("once");
+        let amplitude = measure::<Dimensionless>(0.5);
+        packet
+            .synthetic(WOBBLE, Binding::Body, amplitude, NOTE)
+            .expect("once");
+        packet
+            .start(case.a(), measure::<Water>(START[0]), NOTE)
+            .expect("once");
+        packet
+            .start(case.b(), measure::<Water>(START[1]), NOTE)
+            .expect("once");
+        packet
+    };
+    let hash = |packet| case.body().bind(packet).expect("bound").packet_hash();
+    assert_eq!(hash(build(true)), hash(build(false)));
+    let parts = |fits_first| {
+        let system = case.system(build(fits_first));
+        let mut workspace = system.workspace();
+        let residuals = system.evaluate(&workspace).expect("rows");
+        let jacobian = system.linearize(&workspace).expect("a matrix");
+        let bits = |values: &[f64]| values.iter().map(|value| value.to_bits()).collect::<Vec<_>>();
+        (
+            bits(workspace.unknowns_mut()),
+            bits(&residuals),
+            bits(jacobian.view().values()),
+        )
+    };
+    assert_eq!(parts(true), parts(false));
+}
+
 #[derive(Clone, Copy)]
 struct Stated {
     method: &'static str,
