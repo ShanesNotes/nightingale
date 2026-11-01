@@ -37,10 +37,7 @@ fn in_cleft<'b, 'k, Q: Substance>(
 fn in_plasma<'b, 'k, Q: Substance>(
     k: &mut Kernel<'b, 'k, Receptor, Blood>,
     route: &SiteRoute<'b, Receptor, Blood, Q>,
-) -> Expr<'b, 'k, Receptor, Concentration<Q>>
-where
-    Quotient<Q, Volume>: SameDimension<Concentration<Q>>,
-{
+) -> Expr<'b, 'k, Receptor, Concentration<Q>> {
     let held = k.at_site(&route.from_amount());
     let water = k.at_site(&route.from_amount());
     let volume = k.volume(water);
