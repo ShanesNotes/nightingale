@@ -289,7 +289,6 @@ pub struct ModeTransition<'b, O> {
 pub enum Crossing {
     Rising,
     Falling,
-    Either,
 }
 /// A zero function, the direction of crossing that counts and the transition it fires. The
 /// zero kernel keeps its own dimension; compilation requires it to hold in the mode it leaves.

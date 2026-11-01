@@ -79,6 +79,7 @@ pub(crate) fn compile(
     };
     let column_reads: Vec<bool> = (0..placement.columns.len()).map(read_by).collect();
     let basis = conserved_basis(&species, &placement.columns, &column_reads);
+    let judged = judged_rows(&solved_by, &reads, &closed);
     let pivots = pivots(solved_by.clone(), &reads, &closed);
     let sparsity = sparsity(reads);
     let elimination = Elimination::plan(&sparsity.offsets, &sparsity.unknowns, &pivots);
@@ -91,6 +92,7 @@ pub(crate) fn compile(
         parameters,
         sparsity,
         elimination,
+        judged,
         blocks,
         modes,
         guards,
@@ -1150,7 +1152,11 @@ fn fluid_columns(placement: &mut Placement, places: &Places) -> Result<(), Compi
                     return Err(CompileDefect::CargoStranded { law, species });
                 }
                 let flow = Address::Unknown(UnknownId::at(rows.declared(law, reach.context)));
-                for species in reaches.carried(reach) {
+                for species in reaches
+                    .carried(reach)
+                    .into_iter()
+                    .filter(|species| !kept(species))
+                {
                     let ends = reach.ends.map(|end| match end {
                         Terminal::Pool(pool) => Terminal::Pool(PoolRef { species, ..pool }),
                         other => other,
@@ -1674,6 +1680,13 @@ fn guards(
                 values.sort_unstable();
                 values.partition_point(|known| *known < mode.values[index])
             };
+            let positive = |local: &&str| {
+                let slot = fragment.slots.iter().find(|slot| slot.name == *local);
+                slot.is_some_and(|slot| slot.set == AdmissibleSet::Positive)
+            };
+            if resets.as_ref().is_some_and(positive) {
+                return Err(CompileDefect::ResetOutsideSet { law });
+            }
             for at in places_of(anatomy, reaches, schema, fragment.owner, mode.over) {
                 let reset = resets.map(|local| {
                     let owner = fragment.owner;
@@ -1882,6 +1895,21 @@ fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, Compi
 
 /// Each unknown's pivot row. A closed row reads no unknown of its own, so it pivots on the amount it reads whose rate
 /// reads that unknown, and that amount's row takes the unknown.
+/// The row each row's residual is judged at: its own, or for a closed row the store it holds, whose unit its residual
+/// has.
+fn judged_rows(solved_by: &[RowId], reads: &[Vec<UnknownId>], closed: &[usize]) -> Vec<u32> {
+    let mut judged: Vec<u32> = (0..reads.len() as u32).collect();
+    for &row in closed {
+        let unknown = (solved_by.iter()).position(|pivot| pivot.index() == row);
+        let unknown = UnknownId::at(unknown.expect("a closed row is matched to its unknown"));
+        let carries = |amount: &&UnknownId| reads[amount.index()].contains(&unknown);
+        if let Some(amount) = reads[row].iter().find(carries) {
+            judged[row] = amount.index() as u32;
+        }
+    }
+    judged
+}
+
 fn pivots(mut pivots: Vec<RowId>, reads: &[Vec<UnknownId>], closed: &[usize]) -> Vec<RowId> {
     for &row in closed {
         let unknown = (pivots.iter()).position(|pivot| pivot.index() == row);

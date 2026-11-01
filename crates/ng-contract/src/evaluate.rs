@@ -171,8 +171,7 @@ impl CompiledBody {
     fn partial_volume(&self) -> f64 {
         (self.layout.schema.partial_volume.as_ref()).map_or(0.0, |coefficient| coefficient.value())
     }
-    /// How far a guard stands past its crossing. `Either` reads the crossing as a change of sign, which a landing
-    /// reads off the base, so a guard of it stands at the negative of its size.
+    /// How far a guard stands past its crossing.
     pub(crate) fn guard_gap(&self, guard: &GuardLayout, inputs: &Inputs<'_>) -> Result<f64, Undefined> {
         let mut bounds = guard.inputs.iter();
         let next = || Self::bound(bounds.next().expect("one bound per input"), inputs);
@@ -184,7 +183,6 @@ impl CompiledBody {
         Ok(match guard.crossing {
             Crossing::Rising => value,
             Crossing::Falling => -value,
-            Crossing::Either => -value.abs(),
         })
     }
     /// Which modes and resets follow a point's state: every plain guard armed in `inputs.modes` and crossed fires,

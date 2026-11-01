@@ -170,24 +170,29 @@ impl<'r> CoupledProblem<'r> {
         }
         Ok(None)
     }
-    /// The stage runs in the base's modes.
-    pub(crate) fn crossed_at_stage(
+    /// Whether an armed plain guard stands past its crossing at a stage before the end and not at the end. Each guard is
+    /// read alone, so another guard's crossing at the end hides nothing. Stages run in the base's modes.
+    pub(crate) fn crossed_inside<'s>(
         &self,
         ticket: &StepTicket,
-        unknowns: &[f64],
-        offset_ns: u64,
+        stages: impl Iterator<Item = (&'s [f64], u64)> + Clone,
+        end: &Candidate,
     ) -> Result<bool, TrialFailure> {
-        let state = self.accepted.state();
-        let at = ticket
-            .interval()
-            .start()
-            .plus_ns(offset_ns)
-            .ok_or(ticket.mismatch())?;
-        let factors = self.chance.factors(&self.parameters.values, at);
-        let inputs = self.guard_inputs(ticket, state, unknowns, &self.chance, &factors);
-        for guard in (self.body.layout.guards.iter()).filter(|guard| guard.armed(&state.modes)) {
-            let gap = self.body.guard_gap(guard, &inputs);
-            if gap.map_err(|undefined| self.undefined(ticket, undefined))? >= 0.0 {
+        let base = self.accepted.state();
+        for guard in (self.body.layout.guards.iter()).filter(|guard| guard.armed(&base.modes)) {
+            let mut seen = false;
+            for (unknowns, offset_ns) in stages.clone() {
+                let at = ticket
+                    .interval()
+                    .start()
+                    .plus_ns(offset_ns)
+                    .ok_or(ticket.mismatch())?;
+                let factors = self.chance.factors(&self.parameters.values, at);
+                let inputs = self.guard_inputs(ticket, base, unknowns, &self.chance, &factors);
+                let gap = self.body.guard_gap(guard, &inputs);
+                seen |= gap.map_err(|undefined| self.undefined(ticket, undefined))? >= 0.0;
+            }
+            if seen && self.gap(ticket, end, Trigger::Plain(guard))? < 0.0 {
                 return Ok(true);
             }
         }

@@ -288,7 +288,13 @@ impl StepProposal {
                         if position > rate { position } else { rate }
                     }
                 };
-                stage_defect.note(defect / scales.at(value, sizes[at]), row.id());
+                let judge = body.judged_at(at);
+                let scale = if judge == at {
+                    scales.at(value, sizes[at])
+                } else {
+                    scales.at(seen.unknowns[judge], sizes[judge])
+                };
+                stage_defect.note(defect / scale, row.id());
             }
         }
         if let Some(row) = stage_defect.above_one() {
@@ -317,11 +323,10 @@ impl StepProposal {
         let state = next_state(body, base, &extents, &memory, algebraic);
         // A crossing and a crossing back inside one step leave no mark at its end, so every stage before the end is read.
         // At the floor no shorter step can look again, so the declared resolution is the limit.
-        let mut inside = false;
-        for stage in (witness.stages.iter()).filter(|stage| stage.offset_ns < ticket.length_ns()) {
-            inside |= problem.crossed_at_stage(&ticket, &stage.unknowns, stage.offset_ns)?;
-        }
-        if inside && ticket.length_ns() > ticket.floor_ns && problem.crossed(&ticket, &state)?.is_none() {
+        let before_the_end = (witness.stages.iter())
+            .filter(|stage| stage.offset_ns < ticket.length_ns())
+            .map(|stage| (stage.unknowns.as_slice(), stage.offset_ns));
+        if ticket.length_ns() > ticket.floor_ns && problem.crossed_inside(&ticket, before_the_end, &state)? {
             return Err(ticket.refuse(NumericalRefusal::GuardInside));
         }
         let coordinates = state.coordinates();
@@ -336,7 +341,8 @@ impl StepProposal {
         let mut algebraic_defect = Worst::NONE;
         for (at, row) in body.rows().iter().enumerate() {
             if matches!(row.kind(), RowKind::Algebraic(_)) {
-                let normalized = published.residuals[at].abs() / scales.at(coordinates[at], sizes[at]);
+                let judge = body.judged_at(at);
+                let normalized = published.residuals[at].abs() / scales.at(coordinates[judge], sizes[judge]);
                 algebraic_defect.note(normalized, row.id());
             }
         }

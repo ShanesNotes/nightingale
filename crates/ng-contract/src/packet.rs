@@ -642,8 +642,8 @@ impl BoundParameters {
 
 impl CompiledBody {
     /// A firing leaves algebraic values as they were and nothing here solves them again, so an algebraic law may not
-    /// hold by a fired mode, or read a row a firing resets: then no algebraic row jumps at a firing, and no landing
-    /// needs a solve. A variable no guard moves never leaves its start, and a hazard integral only grows until it
+    /// hold by a fired mode, read a row a firing resets, or read a draw a firing moves: then no algebraic row jumps at a
+    /// firing, and no landing needs a solve. A variable no guard moves never leaves its start, and a hazard integral only grows until it
     /// fires, so it never returns over a cycle.
     fn unrun_mode(&self, periodic: bool) -> Option<Slot> {
         let Layout {
@@ -684,9 +684,22 @@ impl CompiledBody {
                     .any(|law| read(&law))
             })
         };
+        let draw_reads = |at| {
+            let advanced = (hazards.iter()).filter(|hazard| hazard.variable == at);
+            advanced.into_iter().any(|hazard| {
+                let read = |input: &Bound| matches!(input, Bound::Draw(stream) if *stream == hazard.stream);
+                (instances.iter())
+                    .filter(|law| algebraic(law.target))
+                    .any(|law| law.inputs.iter().any(read))
+            })
+        };
         (modes.iter().enumerate())
             .find(|&(at, _)| {
-                !(plain(at) || hazard(at)) || (periodic && hazard(at)) || selects(at) || reset_reads(at)
+                !(plain(at) || hazard(at))
+                    || (periodic && hazard(at))
+                    || selects(at)
+                    || reset_reads(at)
+                    || draw_reads(at)
             })
             .map(|(_, mode)| mode.variable)
     }

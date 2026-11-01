@@ -598,6 +598,18 @@ impl InitializationSystem<'_> {
         }
         Ok(eliminate(matrix).err().map(RowId::at))
     }
+    /// A system small enough to read whole: each row with a zero right side, as `eliminate` takes it.
+    fn dense(&self, lines: &Jacobian) -> Vec<Vec<f64>> {
+        let view = lines.view();
+        let size = view.row_offsets().len() - 1;
+        let mut matrix = vec![vec![0.0; size + 1]; size];
+        for (row, cells) in matrix.iter_mut().enumerate() {
+            for entry in view.row_offsets()[row]..view.row_offsets()[row + 1] {
+                cells[view.columns()[entry].index()] += view.values()[entry];
+            }
+        }
+        matrix
+    }
     /// One defect over its scale, `None` when the tolerance refuses it. What overflowed is refused, because `<=` is
     /// false on a NaN but true of two infinities, and a defect of zero holds even where an overflow leaves no scale.
     fn held(&self, defect: f64, read: f64, size: f64) -> Option<f64> {
@@ -677,8 +689,10 @@ impl InitializationSystem<'_> {
         let stages = self.stages(unknowns)?;
         let sizes = &self.parameters.sizes;
         let stage = |slot: usize| {
-            let held = self.held(stages[slot].abs(), unknowns[slot], sizes[slot % size]);
-            held.ok_or(inconsistent(body_row(slot % size)))
+            let (point, row) = (slot / size, slot % size);
+            let judge = self.body.judged_at(row);
+            let held = self.held(stages[slot].abs(), unknowns[point * size + judge], sizes[judge]);
+            held.ok_or(inconsistent(body_row(row)))
         };
         let replaced = |slot: &usize| self.replaced().any(|(known, _)| known == *slot);
         for slot in (0..stages.len()).filter(|slot| !replaced(slot)) {
@@ -736,13 +750,22 @@ impl InitializationSystem<'_> {
         if let Some(row) = self.rankless(unknowns)? {
             return Err(InitializationFailure::NoRank { row });
         }
-        // One stage can have rank while the ring has a free level: a total a law seems to regulate but does not.
-        if self.frames.len() > 1 {
-            let ring = self.lines(unknowns)?;
-            if let Err(row) = self.solve(&ring, &vec![0.0; unknowns.len()]) {
-                let row = rows[row % size].id();
-                return Err(InitializationFailure::NoRank { row });
-            }
+        // One stage can have rank while the whole system has a free level: a total nothing truly regulates, or two fits
+        // of one anchor's worth of information.
+        let Ok(lines) = self.lines(unknowns) else {
+            return Ok(worst);
+        };
+        let free = if self.frames.len() > 1 {
+            self.solve(&lines, &vec![0.0; unknowns.len()]).err()
+        } else {
+            eliminate(self.dense(&lines)).err()
+        };
+        if let Some(slot) = free {
+            let row = match slot.checked_sub(size) {
+                None => rows[slot].id(),
+                Some(fit) => rows[owed.anchors[owed.fits[fit].anchor].row.index()].id(),
+            };
+            return Err(InitializationFailure::NoRank { row });
         }
         Ok(worst)
     }

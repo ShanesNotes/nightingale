@@ -29,15 +29,15 @@ The slice's organ laws compile on the contract. The body starts at the 06:55 anc
 
 **Choices, each with its reason.**
 
-- **Two designs were built and judged.** The port kept the smaller one, which already admitted the whole slice. The judge preferred the other design's rules, so each of its counterexamples became a fix here and a test. Those are the next nine lines.
+- **Two designs were built and judged.** The port kept the smaller one, which already admitted the whole slice. The judge preferred the other design's rules, so each of its counterexamples became a fix here and a test, and so did each of the Codex adversarial pass's eight. The lines below say what stands now.
 - **One firing rule.** The run and the ring fire guards through one function. Of two guards on one variable the first in stable order wins, and a guard a firing arms waits for the next step.
-- **A crossing inside a step refuses the step.** A guard crossed and crossed back leaves no mark at the step's end, so every stage before the end is read, and a shorter step lands on it. At the floor the declared resolution is the limit. No check can prove nothing happened between the points a step looks at.
-- **No solve at a landing.** No algebraic law may hold by a mode or read a row a firing resets, hazards' included, so no algebraic row jumps. A valve's flow is its memory, so a reset leaves nothing stale. The dissipated power is the one row that shows a left limit at a firing, because it is a rate.
+- **A crossing inside a step refuses the step.** A guard crossed and crossed back leaves no mark at the step's end, so every stage before the end is read, one guard at a time, and a shorter step lands on it. Another guard's crossing at the end hides nothing. At the floor the declared resolution is the limit. No check can prove nothing happened between the points a step looks at.
+- **No solve at a landing.** No algebraic law may hold by a mode, read a row a firing resets, hazards' included, or read a draw a firing moves, so no algebraic row jumps. A valve's flow is its memory, so a reset leaves nothing stale, and a reset's row must hold zero. The dissipated power is the one row that shows a left limit at a firing, because it is a rate.
 - **A valve opens past a small head.** It shuts at or below zero head and flow, as research 02 says, and opens only past `cv.opening-head`, so a still body fires nothing.
 - **A map states what is absent.** A law that reads a junction at a site needs a supply or `AnatomyBuilder::unsupplied`, and a junction needs the receptor. A lost line is `NoSupply` or `NoReceptor`, and never reads as no effect.
-- **A route states what it stops.** A species one end of a fluid route lacks is `CargoStranded` until the route says `keeps_back`.
-- **A total is solved only if the body regulates it.** A boundary law that reads the body makes a total regulated, and admission solves it. That test reads syntax, so `admit` also reads every conserved quantity's net flow over the cycle and the rank of the whole ring. The ring solve moved into the contract so that `admit` can run it.
-- **Energy has one store for the walls.** The heart's work and gravity's arrive as receipts, and a dissipated power moves the store into heat. That rate is what keeps the store on the sum of the walls, and it stays at or above zero, so heat never runs back. The moving blood's energy and the stretch of tissue and tubule are not in the sum, so they pass through it as heat.
+- **A route states what it stops.** A species one end of a fluid route lacks is `CargoStranded` until the route says `keeps_back`, and a species a route keeps back stays back even when both ends hold it.
+- **A total is solved only if the body regulates it.** A boundary law that reads the body makes a total regulated, and admission solves it. That test reads syntax, so `admit` also reads every conserved quantity's net flow over the cycle and the rank of the whole system, fits included. The ring solve moved into the contract so that `admit` can run it. A pivot is read beside its row and column as given, because after elimination a row's own largest entry can be rounding.
+- **Energy has one store for the walls.** The heart's work and gravity's arrive as receipts, and a dissipated power moves the store into heat. That rate is what keeps the store on the sum of the walls, its closure is judged at the store's own scale, and it stays at or above zero, so heat never runs back. The moving blood's energy and the stretch of tissue and tubule are not in the sum, so they pass through it as heat.
 - **Posture is a trunk and legs.** Heights run from the hip. A ramp is a train of events.
 - **Point 0 is the first stage after the wrap,** so the phase there is one interval past zero. The period stays fixed and a fit on the heart's own rate lands the wrap on the ring's last point, so no period unknown is needed.
 - **Small ions cross a capillary wall on their own,** `fl.ion-exchange`. Water alone left tissue sodium a nearly free level, three times the blood's, and Newton could not find it.
@@ -66,6 +66,8 @@ The slice's organ laws compile on the contract. The body starts at the 06:55 anc
 - **`Impulse` and bolus.** A delivery is a rate over a window, and a short window is a bolus. No check here needs an instant jump.
 - **Viscosity and hematocrit.** The slice has no red cell amount, so a resistance is a parameter. Blood chemistry holds its cells.
 - **`Guard::advances`.** The heart's rhythm draws from no stream yet.
+- **`Crossing::Either` is gone.** It could never fire on a sign change, and nothing used it.
+- **A steep head-down tilt can fault.** Gravity keeps pouring a collapsed vessel out until it runs dry, and a dry pool stops the run as an engine fault. A flow that falls as a vessel collapses is a law research 02 does not give. Lying, sitting and standing all run.
 - **An elastic enclosure's wall, sink fields and voiding as an event.** No law here needs them. An elastic or rigid enclosure is still refused by name.
 - **The cell-water conflict between BC and FL** stays open: BC holds the cells.
 

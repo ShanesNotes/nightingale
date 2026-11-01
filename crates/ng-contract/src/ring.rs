@@ -3,10 +3,19 @@ use crate::{InitializationSystem, Jacobian};
 /// A pivot this small beside its row's largest entry is rounding, not a value.
 const ROUNDING: f64 = 8.0 * f64::EPSILON;
 
-/// `matrix` holds each row with its right side last. A row with no pivot left is named: it has no rank.
+/// `matrix` holds each row with its right side last. A row with no pivot left is named: it has no rank. A pivot is read
+/// beside its row and its column as given, and the smaller of the two: after elimination a row's own largest entry can be
+/// rounding, and a row and a column can each run at a scale of their own.
 pub fn eliminate(mut matrix: Vec<Vec<f64>>) -> Result<Vec<f64>, usize> {
     let size = matrix.len();
     let mut slots: Vec<usize> = (0..size).collect();
+    let largest = |most: f64, cell: f64| if cell.abs() > most { cell.abs() } else { most };
+    let mut across: Vec<f64> = (matrix.iter())
+        .map(|row| row[..size].iter().copied().fold(0.0, largest))
+        .collect();
+    let down: Vec<f64> = (0..size)
+        .map(|column| matrix.iter().map(|row| row[column]).fold(0.0, largest))
+        .collect();
     for pivot in 0..size {
         let mut best = pivot;
         for row in pivot + 1..size {
@@ -14,18 +23,17 @@ pub fn eliminate(mut matrix: Vec<Vec<f64>>) -> Result<Vec<f64>, usize> {
                 best = row;
             }
         }
-        let reach =
-            (matrix[best][..size].iter()).fold(
-                0.0,
-                |most: f64, cell| {
-                    if cell.abs() > most { cell.abs() } else { most }
-                },
-            );
+        let reach = if across[best] < down[pivot] {
+            across[best]
+        } else {
+            down[pivot]
+        };
         if matrix[best][pivot].abs() <= ROUNDING * reach {
             return Err(slots[pivot]);
         }
         matrix.swap(pivot, best);
         slots.swap(pivot, best);
+        across.swap(pivot, best);
         let (above, below) = matrix.split_at_mut(pivot + 1);
         let leading = &above[pivot];
         for row in below {

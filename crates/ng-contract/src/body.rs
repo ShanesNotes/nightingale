@@ -59,6 +59,8 @@ pub(crate) struct Layout {
     pub(crate) sparsity: Sparsity,
     /// Derived from the sparsity and the matching, so the hash covers it through them.
     pub(crate) elimination: Elimination,
+    /// Derived from the sparsity and the closed rows, so the hash covers it through them.
+    pub(crate) judged: Vec<u32>,
     pub(crate) blocks: Vec<Block>,
     pub(crate) modes: Vec<ModeLayout>,
     pub(crate) guards: Vec<GuardLayout>,
@@ -120,6 +122,10 @@ impl CompiledBody {
     pub fn held(&self) -> impl Iterator<Item = &'static str> + '_ {
         self.layout.held.iter().map(|held| held.card)
     }
+    /// The row whose value and size a row's residual is judged at: its own, or the store a closed row holds.
+    pub(crate) fn judged_at(&self, row: usize) -> usize {
+        self.layout.judged[row] as usize
+    }
     /// The longest step this body's laws tolerate: the tightest class of any block a law moves. `attempt` caps a ticket
     /// here, as a running delivery's end caps one, so no step runs past a law's interval. A held pool's block limits
     /// nothing. A core reads it, so it need not commit to a span the record will cap.
@@ -156,6 +162,7 @@ impl Seal for Layout {
             parameters,
             sparsity,
             elimination: _,
+            judged: _,
             blocks,
             modes,
             guards,

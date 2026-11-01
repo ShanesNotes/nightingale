@@ -493,3 +493,66 @@ fn no_flow_out_of_a_dry_pool_carries_nothing() {
     let session = admit_fixture(&body, packet, port, &core).expect("admitted");
     assert!(run_until(session, SimTime::from_ns(SECOND)).is_ok());
 }
+
+/// A hazard's firing moves its stream's draw, and a landing solves nothing, so an algebraic read of that draw would be
+/// published stale.
+#[test]
+fn an_algebraic_law_that_reads_a_draw_a_firing_moves_is_refused() {
+    let body = assemble(one_site(), |mut body| {
+        let (mut laws, _) = body.nervous()?.parts();
+        let integral = laws.state::<Dimensionless>("integral", Admissible::nonnegative());
+        let reading = laws.algebraic::<Dimensionless>("reading", Admissible::finite());
+        let stream = laws.stream("draw");
+        let [before, after] = laws.modes("state", ["before", "after"]);
+        let rate = laws.kernel(|mut k| {
+            let zero = k.zero();
+            k.finish(zero, laws.every_mode(), wave())
+        });
+        laws.memory_rate(&integral, rate);
+        let equation = laws.kernel(|mut k| {
+            let (value, draw) = (k.algebraic(&reading), k.draw(&stream));
+            let gap = k.subtract(value, draw);
+            k.finish(gap, laws.every_mode(), wave())
+        });
+        laws.residual(&reading, equation);
+        laws.hazard(HazardGuard::new(&integral, &stream, before.to(&after)?));
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    assert_eq!(
+        body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
+        Some(AdmissionError::ModesNotYetRun {
+            variable: named("state").into()
+        })
+    );
+}
+
+/// A reset sets a row to zero, so a row whose set leaves zero out would be published outside it, and no checkpoint of that
+/// state could resume.
+#[test]
+fn a_reset_of_a_row_that_cannot_hold_zero_is_refused() {
+    let compiled = assemble(one_site(), |mut body| {
+        let (mut laws, _) = body.nervous()?.parts();
+        let x = laws.state::<Dimensionless>("positive", Admissible::positive());
+        let rate = laws.kernel(|mut k| {
+            let zero = k.zero();
+            k.finish(zero, laws.every_mode(), wave())
+        });
+        laws.memory_rate(&x, rate);
+        let [before, after] = laws.modes("state", ["before", "after"]);
+        let guard = laws.kernel(|mut k| {
+            let value = k.state(&x);
+            k.finish(value, before.only(), wave())
+        });
+        laws.event(Guard::new(guard, Crossing::Rising, before.to(&after)?).resetting(&x));
+        body.add(laws.finish());
+        body.compile()
+    });
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::ResetOutsideSet {
+            law: named("state")
+        }))
+    );
+}
