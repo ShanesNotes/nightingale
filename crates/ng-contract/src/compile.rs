@@ -64,7 +64,7 @@ pub(crate) fn compile(
         &instances,
         &closed,
     );
-    let hazards = hazards(&fragments, &rows, &chance, &modes);
+    let hazards = hazards(&fragments, &rows, &chance, &modes)?;
     let instances = marked(instances, &placement.programs, &modes, &hazards)?;
     let (streams, forcings) = chance.laid_out(&fragments, &parameters);
     match_each_mode(&rows.rows, &placement.programs, &instances, &modes, &closed)?;
@@ -986,7 +986,7 @@ fn hazards(
     rows: &Rows,
     chance: &ChanceNames,
     modes: &[ModeLayout],
-) -> Vec<HazardLayout> {
+) -> Result<Vec<HazardLayout>, CompileDefect> {
     let mut hazards: Vec<HazardLayout> = Vec::new();
     for fragment in fragments {
         for hazard in &fragment.hazards {
@@ -996,7 +996,9 @@ fn hazards(
             };
             let declared = &fragment.modes[hazard.variable];
             let variable = Slot::from(named(declared.name));
-            let at = modes.partition_point(|mode| mode.variable < variable);
+            let law = named(declared.name);
+            let at = (modes.binary_search_by_key(&variable, |mode| mode.variable))
+                .map_err(|_| CompileDefect::ModeOfAnotherPlace { law })?;
             let value = |index: usize| {
                 let wanted = declared.values[index];
                 let sorted = &modes[at].values;
@@ -1012,7 +1014,7 @@ fn hazards(
         }
     }
     hazards.sort_unstable_by_key(|hazard| hazard.stream);
-    hazards
+    Ok(hazards)
 }
 
 fn marked(
@@ -1409,7 +1411,7 @@ fn place_of(place: Where, context: Context, anatomy: &Anatomy) -> Option<SiteId>
         Where::Down => ends.map(|end| end.1),
         Where::Junction => anatomy.junction(here.or(ends.map(|end| end.1))?),
         Where::Drain => anatomy.drain(here?),
-        Where::Mark(landmark) => anatomy.landmark(landmark).map(|mark| mark.0),
+        Where::Mark(landmark) | Where::MarkOn(_, landmark) => anatomy.landmark(landmark).map(|mark| mark.0),
         Where::Sensor(landmark) => anatomy.landmark(landmark).map(|mark| mark.1),
     }
 }
@@ -1437,12 +1439,14 @@ fn addresses(
     let unknown = |row: usize| Address::Unknown(UnknownId::at(row));
     let read = |source: Source, place: Where| -> Result<Address, CompileDefect> {
         let landed = place_of(place, context, anatomy);
+        if let Where::MarkOn(set, _) = place
+            && !landed.is_some_and(|site| anatomy.in_set(set).contains(&site))
+        {
+            return Err(CompileDefect::NoSuchRead { law });
+        }
         let at = landed.map_or(context, Context::Site);
         Ok(match source {
             Source::Field(_) if place == Where::Junction && context == Context::Body => {
-                return Err(CompileDefect::NoSuchRead { law });
-            }
-            Source::Field(_) if matches!(place, Where::Mark(_)) && landed.is_none() => {
                 return Err(CompileDefect::NoSuchRead { law });
             }
             Source::Field(field) => match (rows.defined(field, at), place) {
@@ -1476,11 +1480,8 @@ fn addresses(
                     .ok_or(CompileDefect::NoSuchRead { law })?;
                 unknown(rows.amount(pool).ok_or(left_out(law, pool))?)
             }
-            Source::Pool(set, species) => {
+            Source::Pool(species) => {
                 let site = landed.ok_or(CompileDefect::NoSuchRead { law })?;
-                if !anatomy.in_set(set).contains(&site) {
-                    return Err(CompileDefect::NoSuchRead { law });
-                }
                 let pool = PoolRef {
                     species,
                     ..flowing(site)

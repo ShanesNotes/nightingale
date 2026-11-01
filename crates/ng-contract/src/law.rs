@@ -214,6 +214,7 @@ pub(crate) enum Where {
     Junction,
     Drain,
     Mark(Landmark),
+    MarkOn(Sites, Landmark),
     Sensor(Landmark),
 }
 impl Op {
@@ -351,7 +352,7 @@ impl Seal for Where {
             Where::Down => out.number(2),
             Where::Junction => out.number(3),
             Where::Drain => out.number(4),
-            Where::Mark(landmark) => {
+            Where::Mark(landmark) | Where::MarkOn(_, landmark) => {
                 out.number(5);
                 out.number(landmark as u64);
             }
@@ -371,7 +372,7 @@ impl Seal for Source {
                 out.number(end as u64);
                 out.number(species as u64);
             }
-            Source::Pool(_, species) => {
+            Source::Pool(species) => {
                 out.number(1);
                 out.number(species as u64);
             }
@@ -654,7 +655,7 @@ impl<'b, 'k, O> Kernel<'b, 'k, O> {
         landmark: Landmark,
         port: &ReadPort<'b, O, PerSite<C, U>>,
     ) -> Expr<'b, 'k, O, U> {
-        self.input(Input::Read(port.source, Where::Mark(landmark)))
+        self.input(Input::Read(port.source, Where::MarkOn(C::SET, landmark)))
     }
     /// How far a landmark sits above the site its rows stand at, under the drive frame's posture.
     pub fn rise(&mut self, landmark: Landmark) -> Expr<'b, 'k, O, Length> {
@@ -752,7 +753,7 @@ pub struct ReadPort<'b, O, U> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Source {
     Amount(Family, End, Species),
-    Pool(Sites, Species),
+    Pool(Species),
     RoutePool(&'static str, Species),
     Drive(&'static str),
     Field(LawName),
@@ -770,8 +771,8 @@ impl<'b, O, U> ReadPort<'b, O, U> {
     pub(crate) fn field(name: LawName) -> Self {
         Self::of(Source::Field(name))
     }
-    pub(crate) fn pool(set: Sites, species: Species) -> Self {
-        Self::of(Source::Pool(set, species))
+    pub(crate) fn pool(species: Species) -> Self {
+        Self::of(Source::Pool(species))
     }
 }
 impl<'b, O, C: SiteSet> ReadPort<'b, O, PerSite<C, Pressure>> {

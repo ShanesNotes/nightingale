@@ -475,7 +475,7 @@ impl<'b> CardiovascularPorts<'b> {
         ReadPort::extravascular()
     }
     pub fn amount<Q: Substance>(&self) -> ReadPort<'b, Cardiovascular, PerSite<Blood, Q>> {
-        ReadPort::pool(Blood::SET, Q::SPECIES)
+        ReadPort::pool(Q::SPECIES)
     }
     /// A receptor's effect at its junction, the only way a transmitter changes a CV law.
     pub fn effect<Q: Substance>(&self) -> ReadPort<'b, Cardiovascular, PerSite<Junction, Dimensionless>> {
@@ -594,7 +594,7 @@ impl<'b> RenalPorts<'b> {
         EdgeRoute::requested(family)
     }
     pub fn lumen<Q: Substance>(&self) -> ReadPort<'b, Renal, PerSite<Urinary, Q>> {
-        ReadPort::pool(Urinary::SET, Q::SPECIES)
+        ReadPort::pool(Q::SPECIES)
     }
     pub fn blood_pressure(&self) -> ReadPort<'b, Renal, PerSite<Blood, Pressure>> {
         ReadPort::field(LawName {

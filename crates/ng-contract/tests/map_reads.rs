@@ -838,6 +838,74 @@ fn an_edge_guard_on_a_body_mode_is_refused_by_name() -> Result<(), AdmissionErro
     Ok(())
 }
 
+/// A hazard's draw stands for the whole body, so a route's mode, one per edge, has no one place for it.
+#[test]
+fn a_hazard_on_a_routes_mode_is_refused_by_name() -> Result<(), AdmissionError> {
+    let compiled = assemble(a_small_loop()?, |mut body| {
+        let class = fast()?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, still);
+        let [first, second] = cv.modes_along(&route, "switch", ["first", "second"]);
+        let integral = cv.state::<Dimensionless>("integral", Admissible::nonnegative());
+        let stream = cv.stream("draw");
+        let rate = cv.kernel(|mut k| {
+            let zero = k.zero::<Rate<Dimensionless>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.memory_rate(&integral, rate);
+        cv.hazard(HazardGuard::new(&integral, &stream, first.to(&second)?));
+        body.add(cv.finish());
+        body.compile()
+    });
+    let law = LawName {
+        owner: "CV",
+        local: "switch",
+    };
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::ModeOfAnotherPlace { law }))
+    );
+    Ok(())
+}
+
+/// A field read at a mark is held to the port's set as a pool read is.
+#[test]
+fn a_field_read_at_a_mark_off_its_ports_set_is_refused_by_name() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let junction = map.site::<Junction>("junction", at()?);
+    map.contain(root.id(), junction.id());
+    map.landmark(Landmark::MaculaDensa, junction.id(), junction.id());
+    let compiled = assemble(Schema::new(map.finish()?)?, |mut body| {
+        let class = fast()?;
+        let (mut rn, ports) = body.renal()?.parts();
+        let blood = ports.blood_pressure();
+        let row = rn.algebraic::<Pressure>("reading", Admissible::finite());
+        let residual = rn.kernel(|mut k| {
+            let (read, held) = (k.at_landmark(Landmark::MaculaDensa, &blood), k.algebraic(&row));
+            let gap = k.subtract(held, read);
+            k.finish(gap, rn.every_mode(), class)
+        });
+        rn.residual(&row, residual);
+        body.add(rn.finish());
+        body.compile()
+    });
+    let law = LawName {
+        owner: "RN",
+        local: "reading",
+    };
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::NoSuchRead { law }))
+    );
+    Ok(())
+}
+
 /// In a body of water alone a plain edge's flow is its column and no row, so a read of it is refused by name.
 #[test]
 fn a_read_of_a_flow_that_is_no_row_is_refused_by_name() -> Result<(), AdmissionError> {

@@ -295,7 +295,8 @@ pub enum CompileDefect {
     UnclaimedLaw { law: LawName },
     /// A read of a coupling field no owner emits. An omitted law is not zero.
     UnemittedField { law: LawName, field: LawName },
-    /// A kernel that holds by a route's mode at a place that route does not stand.
+    /// A kernel that holds by a route's mode at a place that route does not stand, or a hazard on a mode with no one
+    /// place: a hazard's draw stands for the whole body.
     ModeOfAnotherPlace { law: LawName },
     /// A read of a pool this body does not hold there, or of a place the map does not say: a landmark it does not
     /// place, a bed without exactly one drain, a segment without exactly one urinary edge in, or a site's or an edge's
