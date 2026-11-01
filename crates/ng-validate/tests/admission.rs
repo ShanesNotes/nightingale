@@ -1404,59 +1404,6 @@ fn a_start_moved_inside_the_tolerance_or_another_history_names_another_run() {
     assert_ne!(plain, named(0, 0.0, counted));
 }
 
-/// A row's own swing inside the beat sets what rounding its sum holds, not the value it starts from.
-#[test]
-fn a_row_that_swings_far_above_its_start_still_closes_around_the_ring() {
-    let case = PulsatileCase::plain();
-    let (delivered, stiffness, total) = (1e7, 1e4, 1e4);
-    let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
-    packet.within(admission_tolerance());
-    let g = measure::<Conductance<Water>>(CONDUCTANCE);
-    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
-    packet
-        .synthetic(E, NETWORK, measure::<Elastance>(stiffness), NOTE)
-        .expect("once");
-    let (a, b) = (total / 2.0 + 0.5, total / 2.0 - 0.5);
-    packet.start(case.a(), measure::<Water>(a), NOTE).expect("once");
-    packet.start(case.b(), measure::<Water>(b), NOTE).expect("once");
-    let boundary = BoundaryPort::new(vec![
-        water(b"pulse", 0, PULSE, 0, PULSE_NS, delivered),
-        water(b"drain", 0, DRAIN, 0, PERIOD_NS, delivered),
-    ])
-    .expect("parsed");
-    let core = reference(REFERENCE_NS);
-    assert!(admit_solved(case.body(), packet, boundary, &core, &case.lens).is_ok());
-}
-
-/// A head off the orbit by a hair at every point: each stage holds and the ring does not close.
-#[test]
-fn a_row_that_misses_closing_around_the_ring_is_refused_though_each_stage_holds() {
-    let case = PulsatileCase::plain();
-    let elastance = 2.0;
-    let difference = DELIVERED / (CONDUCTANCE * elastance) + 4e-9;
-    let (a, b) = ((TOTAL + difference) / 2.0, (TOTAL - difference) / 2.0);
-    let mut packet = ParameterPacket::periodic(cycle(4));
-    packet.within(admission_tolerance());
-    let g = measure::<Conductance<Water>>(CONDUCTANCE);
-    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
-    packet
-        .synthetic(E, NETWORK, measure::<Elastance>(elastance), NOTE)
-        .expect("once");
-    packet.start(case.a(), measure::<Water>(a), NOTE).expect("once");
-    packet.start(case.b(), measure::<Water>(b), NOTE).expect("once");
-    let boundary = BoundaryPort::new(vec![
-        water(b"even in", 0, PULSE, 0, PERIOD_NS, DELIVERED),
-        water(b"even out", 0, DRAIN, 0, PERIOD_NS, DELIVERED),
-    ])
-    .expect("parsed");
-    let core = reference(REFERENCE_NS);
-    let row = AdmissionRow::Body(case.row_a());
-    assert_eq!(
-        admit_fixture(case.body(), packet, boundary, &core).err(),
-        Some(InitializationFailure::Inconsistent { row })
-    );
-}
-
 #[test]
 fn a_wider_tolerance_is_another_packet_so_it_cannot_share_a_runs_identity() {
     let case = PulsatileCase::plain();

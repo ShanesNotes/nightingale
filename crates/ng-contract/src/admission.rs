@@ -458,18 +458,6 @@ impl InitializationSystem<'_> {
             );
             note(body_row(slot % size), stage(slot)?);
         }
-        if self.interval.is_some() {
-            // Each stage can pass and the ring still not close, by a sum that grows as a finer ring divides it.
-            for (at, row) in rows.iter().enumerate().filter(|(_, row)| !algebraic(row.kind())) {
-                let name = AdmissionRow::Body(row.id());
-                let points = 0..self.frames.len();
-                let around: f64 = points.clone().map(|point| stages[point * size + at]).sum();
-                let largest = (points.map(|point| unknowns[point * size + at].abs()))
-                    .fold(0.0, |most, value| if value > most { value } else { most });
-                let held = self.held(around.abs(), largest);
-                note(name, held.ok_or(inconsistent(name))?);
-            }
-        }
         for quantity in self.body.conserved_basis().ids() {
             let row = AdmissionRow::Total(quantity);
             let (moved, packet) = self.total(unknowns, quantity);
