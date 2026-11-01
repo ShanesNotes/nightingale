@@ -14,11 +14,11 @@ Status: resolved
 
 ## Answer
 
-The slice's organ laws compile on the contract. The body starts at the 06:55 anchor on three anchors, runs on the reference core, closes every book, and answers a stand through its own reflex. All values are synthetic.
+The slice's organ laws compile on the contract. The body starts at the 06:55 anchor on three anchors, runs on the reference core, closes every conserved quantity, and answers a stand through its own reflex. All values are synthetic.
 
 - **The slice compiles with no law naming a site and no organ owning a pool.** Five law crates (`ng-cardiovascular`, `ng-fluids`, `ng-renal`, `ng-nervous`, `ng-receptor`) and the held cards give 240 rows and 251 columns. A law reads a port and the map says where. Pools belong to the schema. The E0603 probe lands in `ng-cardiovascular` and the E0451 probe in `ng-receptor`, each with a legal twin. There is no reaction type: a binding is a paired transfer.
 - **Initialization meets every fixture anchor with recorded provenance.** Heart rate, mean arterial pressure and filtration each have a fit: the heart's own rate, the renal afferent resistance and the tubule's sodium capacity. Provenance names the anchor behind each fit, says which start values were solved and which came from the fixture, and gives the row nearest its limit. The solve takes about 26 s in a release build.
-- **Water, ions, moieties and energy close over the first accepted steps with the reference core.** A 2 s run through at least eight valve and rhythm firings closes every book to one part in 1e12 of what crossed it, charge included. The elastic store stays on the sum of the walls. Held pools do not move.
+- **Water, ions, moieties and energy close over the first accepted steps with the reference core.** A 2 s run through at least eight valve and rhythm firings closes every conserved quantity to one part in 1e12 of what crossed it, charge included. The elastic store stays on the sum of the walls. Held pools do not move.
 
 `crates/ng-validate/tests/arena_body.rs` holds these checks in one test on one solve, each from a checkpoint of the start. It also checks that the body regulates itself:
 
@@ -36,7 +36,7 @@ The slice's organ laws compile on the contract. The body starts at the 06:55 anc
 - **A valve opens past a small head.** It shuts at or below zero head and flow, as research 02 says, and opens only past `cv.opening-head`, so a still body fires nothing.
 - **A map states what is absent.** A law that reads a junction at a site needs a supply or `AnatomyBuilder::unsupplied`, and a junction needs the receptor. A lost line is `NoSupply` or `NoReceptor`, and never reads as no effect.
 - **A route states what it stops.** A species one end of a fluid route lacks is `CargoStranded` until the route says `keeps_back`.
-- **A total is solved only if the body regulates it.** A boundary law that reads the body makes a total regulated, and admission solves it. That test reads syntax, so `admit` also reads every book's net flow over the cycle and the rank of the whole ring. The ring solve moved into the contract so that `admit` can run it.
+- **A total is solved only if the body regulates it.** A boundary law that reads the body makes a total regulated, and admission solves it. That test reads syntax, so `admit` also reads every conserved quantity's net flow over the cycle and the rank of the whole ring. The ring solve moved into the contract so that `admit` can run it.
 - **Energy has one store for the walls.** The heart's work and gravity's arrive as receipts, and a dissipated power moves the store into heat. That rate is what keeps the store on the sum of the walls, and it stays at or above zero, so heat never runs back. The moving blood's energy and the stretch of tissue and tubule are not in the sum, so they pass through it as heat.
 - **Posture is a trunk and legs.** Heights run from the hip. A ramp is a train of events.
 - **Point 0 is the first stage after the wrap,** so the phase there is one interval past zero. The period stays fixed and a fit on the heart's own rate lands the wrap on the ring's last point, so no period unknown is needed.
@@ -51,7 +51,7 @@ The slice's organ laws compile on the contract. The body starts at the 06:55 anc
 
 **The comments below, each answered.**
 
-- **03.** The renal scope, per-edge modes and edge guards are built. A pressure with no gauge shows as no rank. Solutes are carried, albumin takes up room, and a small ion takes up none. The crate's shapes stand: `EdgeRoute` with `transfer_along`, and boundaries named in the schema.
+- **03.** The renal scope, per-edge modes and edge guards are built. A pressure with no gauge shows as no rank. Solutes are carried, albumin takes up room, and a small ion takes up none. The crate's shapes stand: `EdgeRoute` with `transfer_along`, and boundaries named in the schema. The sketch keeps its older names, which no probe reads.
 - **04.** Each row has a natural size, which the packet may state, and the reference's Newton stop reads it. Nonlinear energy closure sits in `verify` as a stage residual. These are the first steps of a body with modes.
 - **05.** Sodium, potassium, chloride and posture have their own payload tags. Modes were already in the image, and a checkpoint in mid beat proves them.
 - **06.** `ModesNotYetRun` now passes a valve. A plain guard's gap is its zero with the sign `Crossing` gives it. The late input fuzz ran 120 more rounds with a hazard an input can move, through a field, and every run that compared matched. A span now stops at a forcing's knot, and a hazard row can state a natural size.
