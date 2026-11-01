@@ -906,6 +906,39 @@ fn a_field_read_at_a_mark_off_its_ports_set_is_refused_by_name() -> Result<(), A
     Ok(())
 }
 
+fn a_sum<'b, O: Owner>(laws: &mut FragmentBuilder<'b, O>, name: &'static str) -> Result<(), AdmissionError> {
+    let row = laws.algebraic::<Dimensionless>(name, Admissible::finite());
+    let class = fast()?;
+    let own = laws.kernel(|mut k| {
+        let value = k.algebraic(&row);
+        k.finish(value, laws.every_mode(), class)
+    });
+    let each = laws.site_kernel::<TissueSite, _, _>(|mut k| {
+        let zero = k.zero();
+        k.finish(zero, laws.every_mode(), class)
+    });
+    laws.sum_at(&row, own, each);
+    Ok(())
+}
+
+/// A law's name is its owner's and its own, so two systems may each hold a sum of one name.
+#[test]
+fn two_systems_may_each_hold_a_sum_of_one_name() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", at()?);
+    let body = assemble(Schema::new(map.finish()?)?, |mut body| {
+        let (mut cv, _) = body.cardiovascular()?.parts();
+        a_sum(&mut cv, "total")?;
+        body.add(cv.finish());
+        let (mut ns, _) = body.nervous()?.parts();
+        a_sum(&mut ns, "total")?;
+        body.add(ns.finish());
+        body.compile()
+    })?;
+    assert_eq!(body.rows().len(), 2);
+    Ok(())
+}
+
 /// In a body of water alone a plain edge's flow is its column and no row, so a read of it is refused by name.
 #[test]
 fn a_read_of_a_flow_that_is_no_row_is_refused_by_name() -> Result<(), AdmissionError> {

@@ -252,3 +252,30 @@ fn two_fits_of_one_anchors_worth_of_information_have_no_rank() {
         "two copies of one reading cannot determine two parameters"
     );
 }
+
+/// At an instant a memory's row is its value less its start, so its slope on itself is one, whatever its rate. A slope of
+/// the rate would read as no rank on a row that has one.
+#[test]
+fn an_instants_stage_reads_the_row_it_returns() -> Result<(), InitializationFailure> {
+    let body = assemble(schema(), |mut body| {
+        let (mut ns, _) = body.nervous()?.parts();
+        let held = ns.state::<Dimensionless>("held", Admissible::finite());
+        let class = rate_class();
+        let still = ns.kernel(|mut k| {
+            let zero = k.zero::<Rate<Dimensionless>>();
+            k.finish(zero, ns.every_mode(), class)
+        });
+        ns.memory_rate(&held, still);
+        body.add(ns.finish());
+        body.compile()
+    })?;
+    let mut packet = ParameterPacket::new();
+    packet.start_rest(&body, |_| 1.0, "synthetic")?;
+    let parameters = body.bind(packet)?;
+    let request = InitializationRequest::at(SimTime::from_ns(0));
+    let system = body.initialization(parameters, BoundaryPort::new(Vec::new())?, request)?;
+    let workspace = system.workspace();
+    let (_, stage) = system.stage(&workspace, 0)?;
+    assert_eq!(stage.view().values()[0], 1.0);
+    Ok(())
+}

@@ -301,7 +301,8 @@ fn obligations<'f>(
         }
         for law in &fragment.laws {
             if let Obligation::Sum(name, set) = law.serves
-                && !owed.iter().any(|known| known.obligation == law.serves)
+                && !(owed.iter())
+                    .any(|known| known.name.owner == fragment.owner && known.obligation == law.serves)
             {
                 owed.push(Owed::gather(fragment, name, Serves::Sum(set), law.serves));
             }

@@ -487,18 +487,17 @@ impl InitializationSystem<'_> {
         let inputs = self.inputs(point, self.point(unknowns, point), &values);
         let mut entries = self.body.jacobian(&inputs, shift).map_err(undefined)?;
         let sparsity = self.body.sparsity();
-        if let Some(seconds) = self.interval {
-            for (at, row) in self
-                .body
-                .rows()
-                .iter()
-                .enumerate()
-                .filter(|(_, row)| !algebraic(row.kind()))
-            {
-                let _ = row;
-                entries[sparsity.row_offsets()[at]..sparsity.row_offsets()[at + 1]]
-                    .iter_mut()
-                    .for_each(|entry| *entry *= seconds);
+        for (at, row) in self.body.rows().iter().enumerate() {
+            if algebraic(row.kind()) {
+                continue;
+            }
+            let line = sparsity.row_offsets()[at]..sparsity.row_offsets()[at + 1];
+            for (entry, unknown) in entries[line.clone()].iter_mut().zip(&sparsity.unknowns()[line]) {
+                *entry = match self.interval {
+                    Some(seconds) => *entry * seconds,
+                    None if unknown.index() == at => 1.0,
+                    None => 0.0,
+                };
             }
         }
         let block = Jacobian::of_parts(
