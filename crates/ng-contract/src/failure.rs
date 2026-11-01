@@ -37,9 +37,9 @@ pub enum AdmissionError {
     ModesNotYetRun {
         variable: LawName,
     },
-    /// A nonzero constant built only from literals, or a division of two equal nodes, which no packet entry
-    /// backs. This check is partial: it reads the graph, never a value, so a copy built from separate reads
-    /// passes.
+    /// A nonzero constant built only from literals, or a division of two equal expressions, which no packet entry
+    /// backs. This check is partial: it reads the graph, never a value, so a regrouped sum, a swapped `scale` or
+    /// `p / (p + 0)` passes.
     UnbackedConstant {
         law: LawName,
     },
@@ -166,7 +166,7 @@ pub enum AdmissionError {
         key: ParameterKey,
         binding: Binding,
     },
-    /// Two calibrated entries on one anchor, which would leave the system with more unknowns than rows.
+    /// Two calibrated entries on one anchor: two unknowns for one condition.
     AnchorFittedTwice {
         anchor: AnchorId,
     },
@@ -200,7 +200,7 @@ pub enum AdmissionError {
     },
     /// Parameters bound on another compiled body.
     ForeignParameters,
-    /// A workspace from another compiled body.
+    /// A workspace from another compiled body, or of another shape.
     ForeignWorkspace,
     /// A run identity that is not this body's, this origin's and this solver's.
     IdentityMismatch,

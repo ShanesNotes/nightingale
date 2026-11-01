@@ -16,7 +16,7 @@ use core::num::{NonZeroU32, NonZeroU64};
 mod sealed {
     pub trait PacketKind {
         const TAG: u64;
-        /// What backs a value in this kind of packet. It is the one difference between the kinds.
+        /// What backs a value in this kind of packet.
         type Trace;
         fn words(trace: &Self::Trace) -> [&'static str; 2];
     }
@@ -53,7 +53,7 @@ impl PacketHash {
         Self { digest }
     }
     /// The hash a run names, closed at admission: the packet's, the moment it starts, the drives it read, the start
-    /// it reached and the core's history there, so one identity has one start whatever made it. A timeline's later
+    /// and fits it reached and the core's history there, so one identity has one start whatever made it. A timeline's later
     /// events stay out of it.
     pub(crate) fn reading(
         self,
@@ -140,8 +140,7 @@ struct AnchorEntry {
     bits: u64,
     trace: [&'static str; 2],
 }
-/// A parameter's range in a stated population: an interval, the form `authored` and `sampled` read. A mean and
-/// spread or quantiles are one more constructor on `ParameterPacket::population` when a source gives one.
+/// A parameter's range in a stated population: an interval, the form `authored` and `sampled` read.
 struct PopulationEntry {
     key: ParameterKey,
     dimension: String,
@@ -239,7 +238,7 @@ impl<K: PacketKind> ParameterPacket<K> {
         Ok(())
     }
     /// A value drawn from `key`'s population record. The draw is a pure function of the seed, the key and the
-    /// binding, so adding a parameter moves no other draw (I9). Reads the record, so it follows `population`.
+    /// binding, so adding a parameter moves no other draw. Reads the record, so it follows `population`.
     pub fn sampled(
         &mut self,
         key: ParameterKey,
@@ -519,7 +518,6 @@ impl ParameterPacket<SyntheticFixture> {
     }
 }
 
-/// One anchor in compiled terms.
 pub(crate) struct BoundAnchor {
     pub(crate) id: AnchorId,
     pub(crate) row: RowId,
@@ -553,7 +551,7 @@ pub(crate) struct Owed {
     pub(crate) tolerance: Option<ErrorScales>,
     pub(crate) anchors: Vec<BoundAnchor>,
     pub(crate) fits: Vec<Fit>,
-    /// One per parameter entry, as the packet wrote it.
+    /// One per parameter entry: its name, its provenance and its settled value.
     pub(crate) entries: Vec<(ValueName, ValueProvenance, f64)>,
 }
 

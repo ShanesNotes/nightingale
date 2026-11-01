@@ -103,7 +103,7 @@ impl<U> Derived<U> {
 mod sealed {
     pub trait PacketKind {}
 }
-/// What a packet admits. Sealed: exactly two kinds. The one difference between them is what backs a value.
+/// What a packet admits. Sealed: exactly two kinds.
 pub trait PacketKind: sealed::PacketKind {
     type Trace;
 }
@@ -252,7 +252,7 @@ struct PacketEntry {
     _unit: &'static str,
     _provenance: ValueProvenance,
 }
-/// A parameter's range in a stated population: an interval and what backs it.
+/// A parameter's range in a stated population: an interval.
 struct PopulationEntry {
     _key: &'static str,
     _lower: f64,

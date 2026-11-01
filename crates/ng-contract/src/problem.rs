@@ -286,7 +286,7 @@ pub struct StageTime<'t> {
     pub(crate) offset_ns: u64,
 }
 
-/// Solver-writable trial coordinates, row `i` at slot `i`.
+/// Solver-writable trial coordinates. A problem's holds row `i` at slot `i`, and an admission system states its own.
 pub struct SolveWorkspace {
     layout: Digest,
     unknowns: Vec<f64>,

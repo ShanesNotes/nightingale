@@ -270,7 +270,7 @@ impl CompiledBody {
         }
         Ok(values)
     }
-    /// `dF/dp` per row at zero tangent, for one fit: every slot it fills moves together.
+    /// `dF/dp` per row, for one fit: every slot it fills moves together.
     pub(crate) fn parameter_slopes(
         &self,
         inputs: &Inputs<'_>,

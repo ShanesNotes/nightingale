@@ -161,8 +161,9 @@ fn algebraic(kind: RowKind) -> bool {
 /// A square system over `N` points of the body's rows and one unknown per fit. Point 0 is the start state.
 ///
 /// In a workspace, point `k` row `i` is slot `k n + i` and fit `j` is slot `N n + j`, for `n` rows. In the
-/// residual, the same slots hold the point's row and then fit `j`'s anchor row. That layout is the band a block
-/// elimination reads, so a solver for a large body needs no other surface.
+/// residual, the same slots hold the point's row, with a total in one row of the last point under a cycle, and
+/// then fit `j`'s anchor row. That layout is the block ring an elimination reads, so a solver for a large body
+/// needs no other surface.
 ///
 /// An instant has one point and no ring. A cycle has one backward Euler stage per interval, around the ring, on
 /// the surface a core's stage evaluates, so the rows need no second formula and `admit` needs no solver.
@@ -172,8 +173,8 @@ pub struct InitializationSystem<'m> {
     pending: PendingInputs,
     anchor_moment: SimTime,
     tolerance: ErrorScales,
-    /// One per interval: the drives frozen at its start, as a ticket's are. The stage at point `k` reads the
-    /// interval that ends there.
+    /// One per point: the drives frozen at the start of the interval it opens, as a ticket's are. The stage at
+    /// point `k` reads the interval that ends there.
     frames: Vec<DriveFrame>,
     /// One interval in seconds, and `None` for an instant.
     interval: Option<f64>,
@@ -203,7 +204,6 @@ impl InitializationSystem<'_> {
     fn fitted<'u>(&self, unknowns: &'u [f64]) -> &'u [f64] {
         &unknowns[self.frames.len() * self.body.rows().len()..]
     }
-    /// The bound values with each fit's unknown in every slot it fills.
     fn values(&self, unknowns: &[f64]) -> Vec<f64> {
         let mut values = self.parameters.values.clone();
         for (fit, &value) in self.parameters.owed.fits.iter().zip(self.fitted(unknowns)) {
@@ -283,7 +283,8 @@ impl InitializationSystem<'_> {
         }
         (moved.rounded(), packet.rounded())
     }
-    /// One slot per unknown, in the workspace's order: a body row or a total at each point, then each fit's anchor.
+    /// One slot per unknown, in the workspace's order: each point's body rows, a total in one row of the last point
+    /// under a cycle, then each fit's anchor.
     pub fn evaluate(&self, workspace: &SolveWorkspace) -> Result<Vec<f64>, InitializationFailure> {
         self.check(workspace)?;
         let unknowns = workspace.coordinates();
@@ -298,8 +299,8 @@ impl InitializationSystem<'_> {
         }
         Ok(out)
     }
-    /// Over the slots `workspace` holds, a column's `UnknownId::index` is its slot. Nothing but a stage's own
-    /// tangent couples two points, so the matrix is a block ring with a border of fits.
+    /// Over the slots `workspace` holds, a column's `UnknownId::index` is its slot. Only a stage's own tangent and a
+    /// total's row couple two points, so the matrix is a block ring with a border of fits.
     pub fn linearize(&self, workspace: &SolveWorkspace) -> Result<Jacobian, InitializationFailure> {
         self.check(workspace)?;
         let unknowns = workspace.coordinates();
@@ -481,8 +482,8 @@ impl InitializationSystem<'_> {
         }
         Ok(worst)
     }
-    /// Whether a row behind this fit's anchor feels it anywhere on this workspace: the whole of the fit, through its
-    /// slope, moves that row's stage past rounding on the row's value.
+    /// Whether a row behind this fit's anchor feels it anywhere on this workspace: the fit's size, through its slope,
+    /// moves that row's stage past rounding on the row's value. The guess counts, so a fit solved near zero has a size.
     fn felt(&self, unknowns: &[f64], fit: &Fit, value: f64) -> Result<bool, InitializationFailure> {
         let rows = self.body.rows();
         let values = self.values(unknowns);
@@ -502,9 +503,10 @@ impl InitializationSystem<'_> {
         }
         Ok(false)
     }
-    /// The only constructor of `InitialRevision`. A workspace from another system is refused. Point 0 becomes the
-    /// start state and each fit lands in `BoundParameters::values`, which the chain's first link seals, so a fit is
-    /// bound once and a resume never refits. The other points end here: they were this cycle's witness.
+    /// The only constructor of `InitialRevision`. A workspace from another body or of another shape is refused.
+    /// Point 0 becomes the start state and each fit lands in `BoundParameters::values`, which the chain's first link
+    /// seals, so a fit is bound once and a resume never refits. The other points end here: they were this cycle's
+    /// witness.
     pub fn admit(
         self,
         solved: SolveWorkspace,

@@ -5,7 +5,7 @@ use crate::{
     PacketSeed, ParameterKey, Seed, SimTime,
 };
 
-/// Admission holds no seed, so a start state is a function of the packet alone: a draw reads its mean and a
+/// Admission holds no seed, so a start state is a function of the packet and its window: a draw reads its mean and a
 /// forcing its factor's.
 pub(crate) const HELD_DRAW: f64 = 0.5;
 pub(crate) const HELD_FACTOR: f64 = 1.0;

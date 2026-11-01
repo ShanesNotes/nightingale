@@ -1,5 +1,5 @@
-//! Ticket 08: its four checks and every refusal its design adds, through the public API only. Check 4 is a
-//! compile-fail doctest in `src/lib.rs`, because it is a type rule.
+//! Ticket 08: its four checks and every refusal its design adds, through the public API only. Check 4 is
+//! compile-fail doctests in `src/lib.rs`, because it is a type rule.
 //!
 //! The manufactured case. Two vessels `a -> b` hold water, `q = k (a - b)` with `k = g e`. A pulse of `P` enters
 //! `a` over `[0, tau)` of each period `T`, and `P` leaves `b` evenly over the whole period, so
@@ -62,7 +62,7 @@ const NOTE: &str = "synthetic";
 const SETTLED: &str = "settled";
 const READING: &str = "reading";
 const ECHO: &str = "echo";
-/// One unit of water over the one second of the instant's delivery.
+/// Three units of water over the one second of the instant's delivery.
 const CHANNEL_FLOW: f64 = 3.0;
 
 fn at(ns: u64) -> SimTime {
@@ -120,7 +120,6 @@ fn fitted_elastance() -> f64 {
     steady_k() / CONDUCTANCE
 }
 
-/// `a(0) = (S + d(0)) / 2` on a ring of `intervals` stages.
 fn start_a(intervals: u32) -> f64 {
     let (k, period, tau) = (steady_k(), seconds(PERIOD_NS), seconds(PULSE_NS));
     let v = DELIVERED / period;
@@ -139,7 +138,7 @@ enum Variant {
     Plain,
     /// Its laws in the minutes band, so an instant anchor on an amount is legal.
     Slow,
-    /// A memory row that reads three more parameters, for the provenance kinds the flow has no slot for.
+    /// A memory row that reads four more parameters, for the provenance kinds the flow has no slot for.
     Extra,
     /// A hazard guard on a mode variable.
     Hazard,
@@ -360,7 +359,6 @@ fn water(tag: &[u8], index: u64, boundary: &'static str, from: u64, to: u64, amo
     )
 }
 
-/// One pulse and one even drain per cycle.
 fn deliveries(cycles: core::ops::Range<u64>) -> Vec<BoundaryEvent> {
     let mut events = Vec::new();
     for index in cycles {
@@ -470,7 +468,6 @@ impl PulsatileCase {
         admit_solved(self.body(), self.packet(), port(0..self.cycles), core, &self.lens).expect("solved")
     }
 }
-/// Only what can arrive late. A delivery inside the window shaped the start state, so every run knows it.
 impl ReplayCase for PulsatileCase {
     fn body(&self) -> &CompiledBody {
         &self.declared.body
@@ -542,8 +539,6 @@ fn record(provenance: &InitializationProvenance, name: ValueName) -> ValueRecord
         .find(|record| record.name == name)
         .expect("every value has a record")
 }
-
-// Check 1: a cycle-mean anchor on a pulsatile output is met as a cycle mean, not an instant.
 
 #[test]
 fn a_cycle_mean_anchor_is_met_as_a_cycle_mean_not_an_instant() {
@@ -743,8 +738,6 @@ fn the_lens_that_reads_an_anchor_moves_no_bit_of_the_start() {
     assert_eq!(one.record().seal(), other.record().seal());
 }
 
-// Check 2: an initializer that returns a guess violating a row or anchor is refused with the row named.
-
 #[test]
 fn an_initializer_that_returns_its_guess_is_refused_with_the_row_named() {
     let case = PulsatileCase::plain();
@@ -834,7 +827,7 @@ fn a_moved_conserved_total_is_refused_with_its_quantity() {
         let (packet, boundary, _) = steady_packet(&case);
         let system = steady_system(&case, packet, boundary);
         let mut moved = system.workspace();
-        // Both vessels at every point move alike, so every stage still holds and only the total can tell.
+        // Both vessels at every point move alike, so every stage still holds and the total speaks first.
         for unknown in moved.unknowns_mut().iter_mut().take(4 * rows) {
             *unknown += change;
         }
@@ -1155,8 +1148,6 @@ fn a_law_with_no_value_at_a_later_point_is_refused_by_its_name() {
     );
 }
 
-// Under an instant, only algebraic rows move.
-
 fn filter_body() -> CompiledBody {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", origin());
@@ -1230,8 +1221,6 @@ fn under_an_instant_only_algebraic_rows_move() {
     );
     assert_eq!(hi(session.record().accepted().value(body.rows()[1].id())), 3.0);
 }
-
-// The tolerance.
 
 /// The model default's scale at a value near 3.
 const NEAR_THREE: f64 = 1e-9 + 3e-12;
@@ -1331,7 +1320,7 @@ fn tiny_flow<'m>(
     tiny: f64,
 ) -> Result<Admitted<'m>, InitializationFailure> {
     let (v, tau) = (tiny / seconds(PERIOD_NS), seconds(PULSE_NS));
-    let mean = TOTAL / 2.0 + tiny * (1.0 - tau) / 4.0 + v / (2.0 * 2.0 * CONDUCTANCE) / 2.0 * 2.0;
+    let mean = TOTAL / 2.0 + tiny * (1.0 - tau) / 4.0 + v / (2.0 * 2.0 * CONDUCTANCE);
     let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
     packet.within(admission_tolerance());
     let g = measure::<Conductance<Water>>(CONDUCTANCE);
@@ -1531,7 +1520,6 @@ fn boundary_row(local: &'static str) -> RowKind {
     })
 }
 
-/// The instant case's packet, with one fit on an anchor at `row`.
 fn instant_packet(case: &PulsatileCase, row: RowKind, target: f64) -> ParameterPacket<SyntheticFixture> {
     let mut packet = ParameterPacket::new();
     packet.within(admission_tolerance());
@@ -1592,8 +1580,6 @@ fn a_row_that_reaches_a_drive_through_another_row_can_carry_an_anchor() {
     let packet = instant_packet(&case, boundary_row(ECHO), 2.0 * CHANNEL_FLOW);
     assert!(case.body().bind(packet).is_ok());
 }
-
-// Check 3: provenance per value, an authored value inside its range, no parameter pinned to an anchor.
 
 const OF_THE_RATIO: (ParameterKey, Binding) = (RATIO, Binding::Body);
 
@@ -1953,8 +1939,6 @@ fn an_anchor_id_is_used_once_and_an_anchor_reads_a_row_of_its_own_dimension() {
         Some(AdmissionError::AnchorRow { anchor: second })
     );
 }
-
-// The cycle and the run's identity.
 
 #[test]
 fn a_cycle_refuses_a_grid_that_does_not_divide_it() {
@@ -2436,8 +2420,6 @@ fn every_part_of_a_packet_is_in_its_hash() {
     }
 }
 
-// The fence.
-
 #[test]
 fn a_late_input_inside_the_window_is_refused_and_one_at_its_end_is_taken() {
     let case = PulsatileCase::plain();
@@ -2491,8 +2473,6 @@ fn every_replay_gate_passes_with_deliveries_inside_the_window() {
     };
     assert!(replay_gates(&case, &cores, &plan).is_ok());
 }
-
-// Finding 15's extension.
 
 fn bound_rate(
     rate: impl for<'b, 'k> FnOnce(

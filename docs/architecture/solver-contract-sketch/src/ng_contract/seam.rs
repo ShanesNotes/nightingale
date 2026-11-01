@@ -1,6 +1,6 @@
 //! The numerical seam: contract-B's `CoupledSolver`, revised to bind a ticket and return typed
-//! failure. Every method is required; there are no default
-//! bodies. Both arena cores implement these traits directly, importing only this contract.
+//! failure. Every method is required; there are no default bodies. Both arena cores implement
+//! this trait directly, importing only this contract.
 use super::*;
 
 /// An immutable implementor holding algorithm configuration, never accepted continuation. Rust

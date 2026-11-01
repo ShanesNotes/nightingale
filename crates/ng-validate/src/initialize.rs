@@ -5,7 +5,7 @@ use ng_record::{Running, Session};
 const NEWTON_LIMIT: u32 = 32;
 /// Newton stops when no unknown moved by more than this share of itself. Each is read at its own size and no
 /// tolerance is read, so a row or a fit too small for the tolerance to see is solved all the same. An unknown that
-/// solves to zero never gets there, which costs the limit's updates and nothing else.
+/// rounding keeps near zero never gets there, which costs the limit's updates and nothing else.
 const NEWTON_STOP: f64 = 8.0 * f64::EPSILON;
 
 /// A model default reported with every result, for rows near unit size. A packet of far smaller amounts states its
