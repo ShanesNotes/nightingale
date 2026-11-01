@@ -1293,6 +1293,7 @@ PLAN_CASES = (
     PlanCase("changed", "crates/ng-record/src/lib.rs", "affected", frozenset({"ng-record"})),
     PlanCase("merge", "crates/ng-contract/src/lib.rs", "affected", reaches=RECORD_USERS | {"ng-contract"}),
     PlanCase("merge", "crates/ng-contract/src/catalog.rs", "everything"),
+    PlanCase("merge", "crates/ng-contract/src/system.rs", "everything"),
     PlanCase("merge", "Cargo.lock", "everything"),
     PlanCase("merge", "tools/verify", "everything"),
     PlanCase("merge", "notes.txt", "everything"),

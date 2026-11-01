@@ -43,6 +43,7 @@ pub(crate) fn compile(
         reaches: &reaches,
         chance: &chance,
         anatomy: &schema.anatomy,
+        held: &held,
     };
     let placement = place(&owed, &places)?;
     check_holds(&rows, &schema, &held)?;
@@ -643,6 +644,7 @@ struct Places<'a> {
     reaches: &'a Reaches,
     chance: &'a ChanceNames,
     anatomy: &'a Anatomy,
+    held: &'a [HeldCard],
 }
 
 struct ChanceNames {
@@ -915,6 +917,7 @@ fn addresses(
         reaches,
         chance,
         anatomy,
+        held,
     } = *places;
     let inputs = kernel.code.iter().filter_map(|op| match op {
         Op::Input(input) => Some(*input),
@@ -955,7 +958,13 @@ fn addresses(
                     let pool = reaches.pool(family, end, context);
                     Address::Unknown(UnknownId::at(rows.amount(pool).ok_or(left_out(law, pool))?))
                 }
-                (Input::Drive(name), _) => Address::Boundary(name),
+                (Input::Drive(route), _) => {
+                    let owner = route_owner(held, route);
+                    if law != (LawName { owner, local: route }) {
+                        return Err(CompileDefect::DriveOfAnotherRoute { law, route });
+                    }
+                    Address::Boundary(route)
+                }
                 (Input::Draw(local), _) => Address::Draw(chance.stream(LawName {
                     owner: law.owner,
                     local,

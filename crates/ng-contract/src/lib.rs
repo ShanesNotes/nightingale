@@ -747,7 +747,7 @@
 //!     laws.receive()
 //! }
 //! ```
-//! A per-site field takes a kernel of its site class, so it is never one value for every bed.
+//! A per-site field takes a kernel of its site class.
 //! ```compile_fail,E0308
 //! use ng_contract::*;
 //! fn flat<'b>(laws: &mut FragmentBuilder<'b, Cardiovascular>,

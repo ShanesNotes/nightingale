@@ -73,7 +73,24 @@ impl Disposition {
 pub struct CensusRow {
     pub line: u16,
     pub disposition: Disposition,
-    pub slice_incident: bool,
+    pub sender_in_slice: bool,
+    pub receiver_in_slice: bool,
+}
+impl CensusRow {
+    const fn incident(&self) -> bool {
+        self.sender_in_slice || self.receiver_in_slice
+    }
+    /// A disposition says which ends of its arrow run in the slice.
+    const fn ends_fit(&self) -> bool {
+        let (sender, receiver) = (self.sender_in_slice, self.receiver_in_slice);
+        match self.disposition {
+            Disposition::Live => sender && receiver,
+            Disposition::ExternalInput => !sender && receiver,
+            Disposition::ExternalSink => sender && !receiver,
+            Disposition::OutsideSlice { .. } => !sender && !receiver,
+            Disposition::AnatomyRelation { .. } | Disposition::Unresolved { .. } => self.incident(),
+        }
+    }
 }
 
 /// Arrows in the map's "Direct couplings" graph. The census array's type has this length.
@@ -121,7 +138,8 @@ macro_rules! coupling_map {
         CensusRow {
             line: $line,
             disposition: $disposition,
-            slice_incident: <$from as System>::IN_SLICE || <$to as System>::IN_SLICE,
+            sender_in_slice: <$from as System>::IN_SLICE,
+            receiver_in_slice: <$to as System>::IN_SLICE,
         }
     };
     (@disposition live) => { Disposition::Live };
@@ -207,7 +225,7 @@ const fn count(mapped: bool, slice_only: bool) -> usize {
     let mut n = 0;
     while i < MAP_EDGES {
         let row = &CENSUS[i];
-        if row.disposition.is_mapped() == mapped && (row.slice_incident || !slice_only) {
+        if row.disposition.is_mapped() == mapped && (row.incident() || !slice_only) {
             n += 1;
         }
         i += 1;
@@ -227,6 +245,7 @@ const _: () = {
     let mut i = 0;
     while i < MAP_EDGES {
         assert!(CENSUS[i].line as usize == 77 + i);
+        assert!(CENSUS[i].ends_fit());
         i += 1;
     }
 };

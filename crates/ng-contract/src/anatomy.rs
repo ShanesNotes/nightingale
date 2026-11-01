@@ -644,10 +644,17 @@ impl Anatomy {
             .filter(|placed| placed.id == site)
     }
 
-    /// The space that encloses `site` and that space's compliance, for the nearest enclosure only.
+    /// The nearest space that encloses `site`, itself or through a site that contains it, and that
+    /// space's compliance.
     pub(crate) fn encloser(&self, site: SiteId) -> Option<(SiteId, Compliance)> {
-        let space = &self.sites[self.placed(site)?.enclosed_by?];
-        Some((space.id, space.compliance?))
+        let mut at = self.placed(site)?;
+        loop {
+            if let Some(space) = at.enclosed_by {
+                let space = &self.sites[space];
+                return Some((space.id, space.compliance?));
+            }
+            at = &self.sites[at.parent?];
+        }
     }
 
     pub(crate) fn compliance(&self, space: SiteId) -> Option<Compliance> {

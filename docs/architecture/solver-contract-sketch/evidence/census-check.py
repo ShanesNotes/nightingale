@@ -3,8 +3,8 @@ docs/atlas/coupling-map.md, row by row, and hold the sketch's copy of the table 
 byte for byte.
 
 Run from solver-contract-sketch/:  python3 -I evidence/census-check.py
-tools/verify (verify.d/20-sketch.sh) runs this as a gate. A change to the crate's catalog runs
-everything (tools/gate/paths.toml), so a change to that file alone reaches this script.
+tools/verify (verify.d/20-sketch.sh) runs this as a gate. A change to the crate's catalog or owner
+table runs everything (tools/gate/paths.toml), so a change to either file alone reaches this script.
 """
 import re
 import sys
@@ -12,14 +12,12 @@ import sys
 MAP = "../../atlas/coupling-map.md"
 CATALOG = "../../../crates/ng-contract/src/catalog.rs"
 SKETCH_CATALOG = "src/ng_contract/catalog.rs"
-CARD = {
-    "Cardiovascular": "CV", "Fluids": "FL", "Renal": "RN", "Nervous": "NS",
-    "Respiratory": "RS", "Metabolism": "MT", "Musculoskeletal": "MS", "Endocrine": "EN",
-    "Hepatic": "HP", "Gastrointestinal": "GI", "Immune": "IM", "Hematology": "HC",
-    "BloodChemistry": "BC",
-}
-SLICE = {"CV", "FL", "RN", "NS"}
+OWNERS = "../../../crates/ng-contract/src/system.rs"
 MAPPED = {"live", "input", "sink", "relation"}
+
+owners = re.findall(r'^\s*(\w+) = "(\w+)", (slice|held);$', open(OWNERS, encoding="utf-8").read(), re.M)
+CARD = {name: card for name, card, _ in owners}
+SLICE = {card for _, card, place in owners if place == "slice"}
 
 arrows = []
 in_graph = False
@@ -40,9 +38,10 @@ def table(path):
 
 
 body = table(CATALOG)
+code = re.sub(r'//[^\n]*|/\*.*?\*/', '', body, flags=re.S)
 rows = []
-for match in re.finditer(r'(\d+) (\w+) => (\w+), "([^"]+)",\s*(live|input|sink|relation|outside|unresolved)', body):
-    payload = re.match(r'\s*\((\w+) \{([^}]*)\}', body[match.end():])
+for match in re.finditer(r'(\d+)\s+(\w+)\s*=>\s*(\w+),\s*"([^"]+)",\s*(live|input|sink|relation|outside|unresolved)', code):
+    payload = re.match(r'\s*\((\w+) \{([^}]*)\}', code[match.end():])
     fields = re.findall(r'(\w+):', payload.group(2)) if payload else []
     rows.append((int(match.group(1)), CARD[match.group(2)], CARD[match.group(3)], match.group(4),
                  match.group(5), payload.group(1) if payload else "-", fields))

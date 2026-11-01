@@ -229,6 +229,9 @@ pub enum CompileDefect {
         site: SiteId,
         space: Space,
     },
+    /// A law that reads the drive of a route that is not its own, so a delivery on that route could be
+    /// read and never arrive.
+    DriveOfAnotherRoute { law: LawName, route: &'static str },
     /// A space a held card answers for that has no pool in this body: the map has none or the schema
     /// leaves it out, so the declaration would promise an amount the ledger does not carry.
     HeldNothing { card: &'static str, space: Space },
