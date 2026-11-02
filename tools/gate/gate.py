@@ -1429,7 +1429,7 @@ def comment_changes(was: Source, now: Source) -> list[tuple[str, int, str]]:
         if len(was.fences) != len(now.fences):
             out.append(("doctest fence", line, f"{len(was.fences)} doctests became {len(now.fences)}"))
         else:
-            out.append(("doctest fence", line, f"`{was.fences[k]}` became `{now.fences[k]}`"))
+            out.append(("doctest fence", line, f"{was.fences[k]!r} became {now.fences[k]!r}"))
     return out
 
 
