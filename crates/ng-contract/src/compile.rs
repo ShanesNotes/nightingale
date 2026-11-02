@@ -79,7 +79,7 @@ pub(crate) fn compile(
     };
     let column_reads: Vec<bool> = (0..placement.columns.len()).map(read_by).collect();
     let basis = conserved_basis(&species, &placement.columns, &column_reads);
-    let stores = closing_stores(&solved_by, &reads, &closed).map_err(|row| {
+    let stores = closing_stores(&rows.rows, &solved_by, &reads, &closed).map_err(|row| {
         let RowKind::Algebraic(slot) = rows.rows[row].kind else {
             unreachable!("a closed row is algebraic")
         };
@@ -1952,6 +1952,7 @@ fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, Compi
 }
 
 fn closing_stores(
+    rows: &[Row],
     solved_by: &[RowId],
     reads: &[Vec<UnknownId>],
     closed: &[usize],
@@ -1964,7 +1965,10 @@ fn closing_stores(
             let unknown = (solved_by.iter()).position(|pivot| pivot.index() == row);
             let unknown = UnknownId::at(unknown.expect("a closed row is matched to its unknown"));
             (reads[row].iter())
-                .filter(|amount| **amount != unknown && reads[amount.index()].contains(&unknown))
+                .filter(|amount| {
+                    let store = &rows[amount.index()];
+                    !matches!(store.kind, RowKind::Algebraic(_)) && reads[amount.index()].contains(&unknown)
+                })
                 .map(|amount| amount.index())
                 .collect()
         })

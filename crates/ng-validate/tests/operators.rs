@@ -126,7 +126,8 @@ fn every_operator() -> Result<(CompiledBody, SiteId), AdmissionError> {
             let (x, y, w) = (k.state(&first), k.state(&second), k.parameter(&width));
             let low = k.smooth_min(x, y, w);
             let sum = k.add(high, low);
-            let exponential = k.exp(sum);
+            let tilted = k.add(sum, high);
+            let exponential = k.exp(tilted);
             let y = k.state(&second);
             let logistic = k.logistic(y);
             let target = k.scale(exponential, logistic);
@@ -280,14 +281,14 @@ fn every_operators_value_stays_on_the_accepted_bits() {
         writeln!(trace, "{high:016x} {low:016x}  {:?}", row.kind()).expect("a string takes it");
     }
     expect![[r#"
-        identity fb09198feebf77771e01b2ef868baaaea76f74ec7260ec8b2c7e40ffa9ce4a74
-        revision 8 at 4000000000 ns, seal 9a29b2dce771725575e993946ca2d634af654f479f6685d68abeca8585407a6d
+        identity 062cd83bbbcf5813381324753ed2b1d64686e6d8b92ae9f2f50288975f07b457
+        revision 8 at 4000000000 ns, seal 857253110d24b3237775a8c2be58fc26a6436c5ae753b7ffe4cdec35172f088b
         4005b2ad2c18a5b3 bca0800000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Water }
         3ff5b2ad2c18a5b3 bc90800000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Albumin }
         40024d52d3e75a4d 3ca0800000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Water }
         3ff24d52d3e75a4d 3c90800000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Albumin }
-        3fd4af13c21a63bd 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "first" }, at: Body })
-        bfe00db112d88532 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "second" }, at: Body })
+        3fd7876fa4a4e37b 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "first" }, at: Body })
+        bfe6f58337f6b021 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "second" }, at: Body })
         3fb999999999999a 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "set point" }, at: Body })
         3fe6666666666666 0000000000000000  Algebraic(Slot { law: LawName { owner: "NS", local: "pace" }, at: Body })
         3ff8000000000000 0000000000000000  Algebraic(Slot { law: LawName { owner: "NS", local: "third" }, at: Body })
@@ -316,5 +317,6 @@ fn every_operators_slope_stays_on_the_bits_of_a_rings_matrix() {
         .collect();
     let digest = hex(Digest::of_canonical(&bits));
     let trace = format!("ring slopes {digest} over {} entries", slopes.len());
-    expect!["ring slopes 740d3866878d8d0ff4645bb8ddc3aec94338bba2c30fe992ecf9fce44be60611 over 63 entries"].assert_eq(&trace);
+    expect!["ring slopes 82d43c3b9eeac9eef0a809ad877d29d52013ed44e609bb55a4927650c4d14ba3 over 63 entries"]
+        .assert_eq(&trace);
 }
