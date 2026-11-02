@@ -446,3 +446,47 @@ fn a_validity_range_stays_with_its_kernel_however_alike_two_kernels_are() -> Res
     assert_eq!(twins(true, true)?, twins(true, false)?);
     Ok(())
 }
+
+/// `x` relaxes through the flow `p`, and the row that holds `p` reads `p` itself, so stating it closed or as a plain
+/// residual lays out the same reads.
+fn held_through(closed: bool) -> Result<ModelHash, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", position(0.0)?);
+    let body = assemble(Schema::new(map.finish()?)?, |mut assembly| {
+        let (mut ns, _) = assembly.nervous()?.parts();
+        let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let x = ns.state::<Dimensionless>("x", Admissible::finite());
+        let p = ns.algebraic::<Rate<Dimensionless>>("p", Admissible::finite());
+        let target = ns.parameter::<Dimensionless>(ParameterKey::new("target"), Admissible::finite());
+        let speed = ns.parameter::<Rate<Dimensionless>>(ParameterKey::new("speed"), Admissible::positive());
+        let flow = ns.kernel(|mut k| {
+            let own = k.algebraic(&p);
+            k.finish(own, ns.every_mode(), class)
+        });
+        ns.memory_rate(&x, flow);
+        let holding = ns.kernel(|mut k| {
+            let own = k.algebraic(&p);
+            let (goal, now, speed) = (k.parameter(&target), k.state(&x), k.parameter(&speed));
+            let pull = k.relax(goal, now, speed);
+            let gap = k.subtract(own, pull);
+            k.finish(gap, ns.every_mode(), class)
+        });
+        if closed {
+            ns.closes(&p, holding);
+        } else {
+            ns.residual(&p, holding);
+        }
+        assembly.add(ns.finish());
+        assembly.compile()
+    })?;
+    Ok(body.model_hash())
+}
+
+/// A closed row is judged on its store's scale, so admission can pass it where a plain residual is refused: the two
+/// are two bodies.
+#[test]
+fn a_closed_row_and_a_plain_residual_are_two_models() -> Result<(), AdmissionError> {
+    assert_eq!(held_through(true)?, held_through(true)?);
+    assert_ne!(held_through(true)?, held_through(false)?);
+    Ok(())
+}
