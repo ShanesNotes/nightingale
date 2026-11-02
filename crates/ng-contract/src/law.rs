@@ -440,7 +440,6 @@ struct Pruned {
     unreached: Vec<UnreachedRead>,
 }
 
-/// A read a law wrote that its result never reaches: its program drops it, and compile refuses it as a kept one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct UnreachedRead {
     pub(crate) input: Input,
@@ -496,8 +495,6 @@ pub(crate) struct KernelData {
     /// Beside `code` and never in it: a program reads the same whichever way a law spelled a read, so nothing that
     /// reads programs can tell two spellings apart.
     pub(crate) accepts_no_nerve: Vec<usize>,
-    /// The dimension each field read in `code` expects. Compile finds a field by name, so it holds the row it finds to
-    /// this.
     pub(crate) fields: Vec<(usize, String)>,
     pub(crate) unreached: Vec<UnreachedRead>,
     pub(crate) dimension: String,

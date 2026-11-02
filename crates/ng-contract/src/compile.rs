@@ -1949,8 +1949,6 @@ fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, Compi
     Ok(solved_by)
 }
 
-/// A closed row's law reads no unknown of its own, so it pivots through a store whose rate reads that unknown, matched
-/// a store to each in row order, so no declaration order reaches the choice.
 fn closing_stores(solved_by: &[RowId], reads: &[Vec<UnknownId>], closed: &[usize]) -> Vec<(usize, usize)> {
     let carriers: Vec<Vec<usize>> = (closed.iter())
         .map(|&row| {

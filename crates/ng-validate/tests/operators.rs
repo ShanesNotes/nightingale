@@ -245,8 +245,6 @@ fn hex(digest: Digest) -> String {
         .collect()
 }
 
-/// To show a change and never to judge it. The ring's matrix is pinned beside the run, because a change to an
-/// operator's slope can leave a run's accepted bits alone.
 #[test]
 fn a_body_that_runs_every_operator_stays_on_its_bits() {
     let (body, a) = every_operator().expect("compiled");
