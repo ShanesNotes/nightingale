@@ -447,8 +447,6 @@ fn a_validity_range_stays_with_its_kernel_however_alike_two_kernels_are() -> Res
     Ok(())
 }
 
-/// `x` relaxes through the flow `p`, and the row that holds `p` reads `p` itself, so stating it closed or as a plain
-/// residual lays out the same reads.
 fn held_through(closed: bool) -> Result<ModelHash, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", position(0.0)?);
@@ -482,8 +480,6 @@ fn held_through(closed: bool) -> Result<ModelHash, AdmissionError> {
     Ok(body.model_hash())
 }
 
-/// A closed row is judged on its store's scale, so admission can pass it where a plain residual is refused: the two
-/// are two bodies.
 #[test]
 fn a_closed_row_and_a_plain_residual_are_two_models() -> Result<(), AdmissionError> {
     assert_eq!(held_through(true)?, held_through(true)?);

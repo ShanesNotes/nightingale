@@ -43,7 +43,6 @@ fn algebraic(local: &'static str) -> RowKind {
     RowKind::Algebraic(LawName { owner: "NS", local }.into())
 }
 
-/// The operators every program of `body` runs, read from its listing.
 fn operators(body: &CompiledBody) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     for program in body.programs() {
@@ -67,8 +66,6 @@ fn operators(body: &CompiledBody) -> BTreeSet<String> {
     names
 }
 
-/// Water and albumin move from `a` to `b` down a head, and the nervous system's laws read every other operator, each
-/// at a smooth point.
 fn every_operator() -> Result<(CompiledBody, SiteId), AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", origin());
@@ -248,9 +245,6 @@ fn hex(digest: Digest) -> String {
         .collect()
 }
 
-/// Every operator's value reaches the accepted bits and every operator's slope the bits of a two-point ring's matrix,
-/// to show a change and never to judge it: a change to how one evaluates or differentiates moves them under the same
-/// run identity, and the PR that moves them updates this file and says why.
 #[test]
 fn a_body_that_runs_every_operator_stays_on_its_bits() {
     let (body, a) = every_operator().expect("compiled");

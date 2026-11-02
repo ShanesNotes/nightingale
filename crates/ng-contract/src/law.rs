@@ -481,11 +481,7 @@ pub(crate) struct KernelData {
     /// Beside `code` and never in it: a program reads the same whichever way a law spelled a read, so nothing that
     /// reads programs can tell two spellings apart.
     pub(crate) accepts_no_nerve: Vec<usize>,
-    /// The dimension each field read in `code` expects, also beside it: compile finds a field by name and holds its
-    /// row to this.
     pub(crate) fields: Vec<(usize, String)>,
-    /// Each read the law wrote and its result never reaches, whether it accepts no nerve and the dimension a field
-    /// read expects. Also beside `code`: a program holds what a law reaches, and compile refuses on what it wrote.
     pub(crate) unreached: Vec<(Input, bool, Option<String>)>,
     pub(crate) dimension: String,
     pub(crate) modes: Selector,

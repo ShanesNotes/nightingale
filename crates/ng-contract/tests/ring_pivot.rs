@@ -86,8 +86,6 @@ fn a_ring_with_a_zero_on_its_fixed_path_is_read_whole_and_admitted() {
     admit(true).expect("identity Jacobian at every point");
 }
 
-/// `e1` pays out `p1 + p2` and `e2` pays out `p2`. `p1` closes on `e1`, and `p2` on `e1 + e2` when `shared`, so both
-/// closed rows read `e1`.
 fn two_closed_rows(shared: bool) -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>(
@@ -134,7 +132,6 @@ fn two_closed_rows(shared: bool) -> Result<CompiledBody, AdmissionError> {
     })
 }
 
-/// Each closed row takes a store of its own, so two that read one store still factor over the body's elimination.
 #[test]
 fn two_closed_rows_that_read_one_store_factor_over_the_bodys_elimination() -> Result<(), InitializationFailure>
 {

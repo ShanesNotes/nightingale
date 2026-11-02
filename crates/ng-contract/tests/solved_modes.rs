@@ -15,8 +15,6 @@ fn reading() -> RowKind {
     )
 }
 
-/// `x` decays to zero in either mode, twice as fast in `b`, so a body at rest is a start in both. Heat leaves toward
-/// `level`, which is fitted to an anchor on a reading of the heat.
 fn body() -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let origin = Position::new(measure(0.0), measure(0.0), measure(0.0));
@@ -81,7 +79,6 @@ fn body() -> Result<CompiledBody, AdmissionError> {
     })
 }
 
-/// One admission of one packet. Each field but the base's moves one part of the start alone.
 #[derive(Clone, Copy)]
 struct Start {
     moment_ns: u64,
@@ -98,8 +95,6 @@ const BASE: Start = Start {
     history: b"one history",
 };
 
-/// The packet states `a`. A ring that sweeps through `b` and comes back to rest is admitted in `b`. A start or a fit
-/// one unit in the last place up stays inside the packet's tolerance.
 fn admitted(body: &CompiledBody, start: Start) -> Result<InitialRevision, InitializationFailure> {
     let period = NonZeroU64::new(2_000_000_000).expect("not zero");
     let cycle = Cycle::new(period, NonZeroU32::new(2).expect("not zero"))?;
@@ -172,7 +167,6 @@ fn admitted(body: &CompiledBody, start: Start) -> Result<InitialRevision, Initia
     system.admit(workspace, history)
 }
 
-/// Which kinds of recorded value `start` moves from the base's, by name, provenance or bits.
 fn moved(body: &CompiledBody, start: Start) -> Result<Vec<&'static str>, InitializationFailure> {
     let records = |start| -> Result<Vec<_>, InitializationFailure> {
         let revision = admitted(body, start)?;
@@ -195,8 +189,6 @@ fn moved(body: &CompiledBody, start: Start) -> Result<Vec<&'static str>, Initial
     Ok(kinds)
 }
 
-/// One identity has one start, so the moment, the start, the modes the ring reached, the fits and the core's history
-/// there each move the hash a run names, each on its own.
 #[test]
 fn each_part_of_an_admitted_start_moves_the_hash_a_run_names() -> Result<(), InitializationFailure> {
     let body = body()?;

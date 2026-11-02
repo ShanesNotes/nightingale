@@ -212,7 +212,6 @@ fn a_site_a_law_reads_a_junction_at_must_be_supplied_or_stated_bare() -> Result<
     Ok(())
 }
 
-/// A read the law's result never reaches leaves its program, and its refusal stays: compile reads what a law wrote.
 #[test]
 fn a_read_a_law_discards_is_refused_as_one_it_keeps() {
     let nerves = [
@@ -232,7 +231,6 @@ fn a_read_a_law_discards_is_refused_as_one_it_keeps() {
     }
 }
 
-/// A field another scope wrote by the name an effect port reads, in the dimension `U`.
 fn an_effect_written_in<U: Dimension>() -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at()?);
@@ -270,7 +268,6 @@ fn an_effect_written_in<U: Dimension>() -> Result<CompiledBody, AdmissionError> 
     })
 }
 
-/// A field is found by name, so the dimension its reader expects is held to the field's own.
 #[test]
 fn a_field_read_in_another_dimension_than_its_own_is_refused_by_name() -> Result<(), AdmissionError> {
     an_effect_written_in::<Dimensionless>()?;

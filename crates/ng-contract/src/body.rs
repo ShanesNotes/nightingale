@@ -57,10 +57,7 @@ pub(crate) struct Layout {
     pub(crate) instances: Vec<Instance>,
     pub(crate) parameters: Vec<ParameterSlot>,
     pub(crate) sparsity: Sparsity,
-    /// Derived from the sparsity, the matching and the closed rows, so the hash covers it through the sparsity and
-    /// `judged`.
     pub(crate) elimination: Elimination,
-    /// Each row's store, which the closed rows decide and nothing else seals, so the hash seals it.
     pub(crate) judged: Vec<u32>,
     pub(crate) blocks: Vec<Block>,
     pub(crate) modes: Vec<ModeLayout>,

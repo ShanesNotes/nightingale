@@ -1947,12 +1947,6 @@ fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, Compi
     Ok(solved_by)
 }
 
-/// Each unknown's pivot row. A closed row reads no unknown of its own, so it pivots on the amount it reads whose rate
-/// reads that unknown, and that amount's row takes the unknown.
-/// The row each row's residual is judged at: its own, or for a closed row the store it holds, whose unit its residual
-/// has.
-/// The store each closed row is judged on and pivots through: the first it reads that carries its unknown and no
-/// closed row before it took, so no store pivots two.
 fn closing_stores(solved_by: &[RowId], reads: &[Vec<UnknownId>], closed: &[usize]) -> Vec<(usize, usize)> {
     let mut stores: Vec<(usize, usize)> = Vec::with_capacity(closed.len());
     for &row in closed {
