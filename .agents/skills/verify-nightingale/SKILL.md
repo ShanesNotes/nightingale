@@ -24,7 +24,7 @@ Speed is in none of these runs, because a wall clock cannot gate a merge. `pytho
 
 A mutation sweep is in none of them either, because its table is written for one change. `python3 -I tools/mutate.py TABLE` breaks one rule at a time on a commit and reports whether a test notices, and its header says how to write a table and read the verdicts.
 
-A comment pass proves itself apart from them: `python3 -I tools/gate/gate.py comments-only [--base REV]` passes only when every changed path is a Rust file whose code tokens, and each doctest's tokens and fence, match the base, by default the merge-base with `origin/main`. A local Codex pass is recorded in its rollout: `python3 -I tools/codex-provenance.py LOG...` prints the model and effort each pass ran with, and its header says what it reads.
+A comment pass proves itself apart from them: `python3 -I tools/gate/gate.py comments-only [--base REV]` passes only when every changed path is a Rust file whose code tokens, and each doctest's tokens and fences, match the base, by default the merge-base with `origin/main`. It reads doctests as `05-seam`'s host scan does, and `10-rust` refuses a doctest that scan cannot read. A local Codex pass is recorded in its rollout: `python3 -I tools/codex-provenance.py LOG...` prints the model and effort each pass ran with, and its header says what it reads and when it fails.
 
 ## The steps
 

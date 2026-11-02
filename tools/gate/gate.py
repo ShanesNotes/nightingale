@@ -285,6 +285,18 @@ def _joins(text: str, i: int) -> bool:
     return text[i : i + 2] in OPERATOR_PAIRS
 
 
+def _suffixed(text: str, j: int) -> bool:
+    """rustc reads an identifier touching a literal as its suffix, so `"a"tag` and `"a" tag` differ."""
+    return j < len(text) and (text[j] == "_" or text[j].isalpha())
+
+
+def _float_dot(text: str, i: int, j: int) -> bool:
+    """rustc reads `1.` as one float where `1 .` is two tokens."""
+    after = text[j + 1 : j + 2]
+    decimal = text[i:j].replace("_", "").isdigit()
+    return decimal and text[j : j + 1] == "." and not (after in (".", "_") or after.isalpha())
+
+
 def _skip_quoted(text: str, i: int, quote: str) -> int:
     while i < len(text):
         if text[i] == "\\":
@@ -336,18 +348,19 @@ def lex(text: str, first_line: int = 1) -> tuple[list[Token], list[tuple[int, st
             j = text.find(close, m.end())
             if j < 0:
                 raise LexError(f"line {line}: unterminated raw string")
-            tokens.append(Token("literal", text[m.end() : j], start_line, text[i : j + len(close)]))
+            end = j + len(close)
+            tokens.append(Token("literal", text[m.end() : j], start_line, text[i:end], _suffixed(text, end)))
             line += text.count("\n", i, j)
-            i = j + len(close)
+            i = end
         elif m := QUOTED.match(text, i):
             j = _skip_quoted(text, m.end(), '"')
-            tokens.append(Token("literal", text[m.end() : j - 1], start_line, text[i:j]))
+            tokens.append(Token("literal", text[m.end() : j - 1], start_line, text[i:j], _suffixed(text, j)))
             line += text.count("\n", i, j)
             i = j
         elif text.startswith("b'", i) or (c == "'" and (text.startswith("\\", i + 1) or text.startswith("'", i + 2))):
             q = i + 1 if c == "b" else i
             j = _skip_quoted(text, q + 1, "'")
-            tokens.append(Token("literal", text[q + 1 : j - 1], start_line, text[i:j]))
+            tokens.append(Token("literal", text[q + 1 : j - 1], start_line, text[i:j], _suffixed(text, j)))
             i = j
         elif c == "'":
             j = i + 1
@@ -371,7 +384,7 @@ def lex(text: str, first_line: int = 1) -> tuple[list[Token], list[tuple[int, st
             j = i + 1
             while j < n and (text[j] == "_" or text[j].isalnum() or (text[j] == "." and text[j + 1 : j + 2].isdigit())):
                 j += 1
-            tokens.append(Token("literal", text[i:j], start_line))
+            tokens.append(Token("literal", text[i:j], start_line, joint=_float_dot(text, i, j)))
             i = j
         elif text.startswith("::", i):
             tokens.append(Token("punct", "::", start_line, joint=_joins(text, i + 1)))
@@ -449,7 +462,7 @@ def rust_blocks(docs: list[tuple[int, str]]) -> list[tuple[int, int, str, str]]:
             if fence is not None:
                 if ln.strip().startswith(fence) and not ln.strip().strip(fence[0]):
                     if rust:
-                        blocks.append((start - 1, start, "\n".join(body), opening))
+                        blocks.append((start - 1, start, "\n".join(body), f"{opening}\n{ln.strip()}"))
                     fence, body = None, []
                 else:
                     body.append(ln)
@@ -1422,7 +1435,7 @@ def _first_moved(was: list[Token] | tuple[Token, ...], now: list[Token] | tuple[
         if _key(a)[:2] != _key(b)[:2]:
             return b.line, f"`{_key(a)[1][:40]}` became `{_key(b)[1][:40]}`"
         if a.joint != b.joint:
-            return b.line, f"the spacing after `{b.value}` changed"
+            return b.line, f"the spacing after `{_key(b)[1][:40]}` changed"
     if len(now) > len(was):
         return now[len(was)].line, f"`{_key(now[len(was)])[1][:40]}` added"
     if len(was) > len(now):
@@ -1502,6 +1515,14 @@ COMMENT_CASES: tuple[tuple[str, str, frozenset[str]], ...] = (
     ),
     ("fn f(a: bool, b: bool) -> bool { a && b }", "fn f(a: bool, b: bool) -> bool { a & &b }", MOVED_CODE),
     ("fn f() { x.iter().map(g); }", "fn f() {\n    x.iter()\n        .map(g);\n}", frozenset()),
+    ('fn f() { m!("a"tag); }', 'fn f() { m!("a" tag); }', MOVED_CODE),
+    ("fn f() { m!(1.); }", "fn f() { m!(1 .); }", MOVED_CODE),
+    ("fn f() -> u32 { 1.max(2) }", "fn f() -> u32 {\n    1\n        .max(2)\n}", frozenset()),
+    (
+        "/// ```\n/// let x = 1;\n/// ```\npub fn f() {}",
+        "/// ```\n/// let x = 1;\n/// ````\npub fn f() {}",
+        MOVED_FENCE,
+    ),
     ("fn f(a: u8) -> u8 { a >/* c */>= 1 }", "fn f(a: u8) -> u8 { a >>= 1 }", MOVED_CODE),
     (
         "/// ```\n/// let x = 1;\n/// assert_eq!(x, 1);\n/// ```\n///\n/// ```\n/// let y = 2;\n/// ```\npub fn f() {}",

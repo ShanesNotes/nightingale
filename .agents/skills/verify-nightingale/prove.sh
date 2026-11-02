@@ -76,6 +76,14 @@ else
   reason="exit 0 and final line verify: OK"
 fi
 
+public() {
+  local text=$1
+  case "${CARGO_TARGET_DIR:-}" in /?*) text=${text//"$CARGO_TARGET_DIR"/<target>} ;; esac
+  text=${text//"$ROOT"/.}
+  case "${HOME:-}" in /?*) text=${text//"$HOME"/"~"} ;; esac
+  printf '%s\n' "$text"
+}
+
 proof="${log}.proof"
 {
   echo "### Verify proof"
@@ -85,7 +93,7 @@ proof="${log}.proof"
   echo "- gate_scope: ${gate_scope:-none}"
   echo "- gate_base: ${gate_base:-none}"
   echo "- verify_exit: ${verify_exit}"
-  echo "- final_line: ${final}"
+  echo "- final_line: $(public "$final")"
   echo "- wall_time_s: ${wall}"
   echo "- started_utc: ${start_utc}"
   echo "- finished_utc: ${end_utc}"
@@ -95,15 +103,10 @@ proof="${log}.proof"
   echo "- head_unchanged: ${head_unchanged}"
   echo "- cargo_target_dir: ${cargo_target}"
   echo "- full_proof: ${full}"
-  echo "- reason: ${reason}"
+  echo "- reason: $(public "$reason")"
   echo
   echo '```'
-  tail -n 40 "$log" | while IFS= read -r line || [ -n "$line" ]; do
-    case "${CARGO_TARGET_DIR:-}" in /?*) line=${line//"$CARGO_TARGET_DIR"/<target>} ;; esac
-    line=${line//"$ROOT"/.}
-    case "${HOME:-}" in /?*) line=${line//"$HOME"/"~"} ;; esac
-    printf '%s\n' "$line"
-  done
+  tail -n 40 "$log" | while IFS= read -r line || [ -n "$line" ]; do public "$line"; done
   echo '```'
 } | tee "$proof"
 
