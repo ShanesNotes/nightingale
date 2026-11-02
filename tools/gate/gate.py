@@ -274,11 +274,15 @@ RAW_STRING = re.compile(r'[bc]?r(#*)"')
 QUOTED = re.compile(r'[bc]?"')
 
 
-def _joins(text: str, j: int) -> bool:
-    """Punctuation that touches more punctuation may be one operator to rustc, as in `>>=` against `> >=`."""
-    return j < len(text) and not (
-        text[j].isspace() or text[j].isalnum() or text[j] in "_\"'" or text.startswith(("//", "/*"), j)
-    )
+OPERATOR_PAIRS = frozenset(
+    {"::", "->", "=>", "==", "!=", "<=", ">=", "&&", "||", "+=", "-=", "*=", "/=", "%=", "^=", "&=", "|=", "<<", ">>",
+     "..", ".="}
+)
+
+
+def _joins(text: str, i: int) -> bool:
+    """rustc reads touching punctuation that begins an operator as one token, so `>>=` and `> >=` differ."""
+    return text[i : i + 2] in OPERATOR_PAIRS
 
 
 def _skip_quoted(text: str, i: int, quote: str) -> int:
@@ -370,10 +374,10 @@ def lex(text: str, first_line: int = 1) -> tuple[list[Token], list[tuple[int, st
             tokens.append(Token("literal", text[i:j], start_line))
             i = j
         elif text.startswith("::", i):
-            tokens.append(Token("punct", "::", start_line, joint=_joins(text, i + 2)))
+            tokens.append(Token("punct", "::", start_line, joint=_joins(text, i + 1)))
             i += 2
         else:
-            tokens.append(Token("punct", c, start_line, joint=_joins(text, i + 1)))
+            tokens.append(Token("punct", c, start_line, joint=_joins(text, i)))
             i += 1
     return tokens, docs
 
@@ -1497,6 +1501,7 @@ COMMENT_CASES: tuple[tuple[str, str, frozenset[str]], ...] = (
         MOVED_COUNT,
     ),
     ("fn f(a: bool, b: bool) -> bool { a && b }", "fn f(a: bool, b: bool) -> bool { a & &b }", MOVED_CODE),
+    ("fn f() { x.iter().map(g); }", "fn f() {\n    x.iter()\n        .map(g);\n}", frozenset()),
     ("fn f(a: u8) -> u8 { a >/* c */>= 1 }", "fn f(a: u8) -> u8 { a >>= 1 }", MOVED_CODE),
     (
         "/// ```\n/// let x = 1;\n/// assert_eq!(x, 1);\n/// ```\n///\n/// ```\n/// let y = 2;\n/// ```\npub fn f() {}",
