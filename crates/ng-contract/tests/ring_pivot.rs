@@ -305,3 +305,42 @@ fn two_closed_rows_either_store_could_hold_take_the_same_stores_in_either_order(
     }
     Ok(())
 }
+
+#[test]
+fn a_closed_row_whose_unknown_only_another_algebraic_row_reads_is_refused() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>(
+        "synthetic body",
+        Position::new(measure(0.0), measure(0.0), measure(0.0)),
+    );
+    let compiled = assemble(Schema::new(map.finish()?)?, |mut body| {
+        let (mut ns, _) = body.nervous()?.parts();
+        let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let p = ns.algebraic::<Dimensionless>("p", Admissible::finite());
+        let q = ns.algebraic::<Dimensionless>("q", Admissible::finite());
+        let both = ns.kernel(|mut k| {
+            let (one, two) = (k.algebraic(&p), k.algebraic(&q));
+            let sum = k.add(one, two);
+            k.finish(sum, ns.every_mode(), class)
+        });
+        ns.closes(&p, both);
+        let one = ns.kernel(|mut k| {
+            let value = k.algebraic(&p);
+            k.finish(value, ns.every_mode(), class)
+        });
+        ns.residual(&q, one);
+        body.add(ns.finish());
+        body.compile()
+    });
+    let law = LawName {
+        owner: "NS",
+        local: "p",
+    };
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::StructuralSingularity {
+            law
+        }))
+    );
+    Ok(())
+}
