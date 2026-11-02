@@ -71,7 +71,7 @@ impl<'b, 'h> Walls<'b, 'h> {
         let volume = k.add(solvent, solute);
         let base = k.site_parameter(&self.unstressed);
         let gain = k.site_parameter(&self.unstressed_gain);
-        let effect = k.at_junction(&self.adrenergic);
+        let effect = k.at_junction_if_supplied(&self.adrenergic);
         let moved = k.scale(gain, effect);
         let unstressed = k.subtract(base, moved);
         let stretched = k.subtract(volume, unstressed);
@@ -84,7 +84,7 @@ impl<'b, 'h> Walls<'b, 'h> {
     ) -> Expr<'b, 'k, Cardiovascular, Elastance> {
         let active = k.site_parameter(&self.active);
         let gain = k.site_parameter(&self.inotropy);
-        let effect = k.at_junction(&self.adrenergic);
+        let effect = k.at_junction_if_supplied(&self.adrenergic);
         let tuned = k.scale(active, gain);
         let strengthened = k.scale(tuned, effect);
         k.add(active, strengthened)

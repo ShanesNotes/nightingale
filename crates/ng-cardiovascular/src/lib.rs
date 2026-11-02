@@ -93,7 +93,7 @@ fn plain_edges<'b>(
         let head_across = drive(&mut k, pressure, head);
         let base = k.edge_parameter(&resistance);
         let gain = k.edge_parameter(&tone);
-        let effect = k.at_junction(&alpha);
+        let effect = k.at_junction_if_supplied(&alpha);
         let tuned = k.scale(base, gain);
         let toned = k.scale(tuned, effect);
         let with_tone = k.add(base, toned);

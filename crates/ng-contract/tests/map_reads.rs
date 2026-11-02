@@ -21,9 +21,42 @@ enum Nerve {
     Stated,
     Lost,
     NoReceptor,
+    Bare,
 }
 
-fn wall_law(nerve: Nerve) -> Result<CompiledBody, AdmissionError> {
+#[derive(Clone, Copy, PartialEq)]
+enum Spelling {
+    Plain,
+    Accepting,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Reader {
+    Site,
+    Edge,
+    Sum,
+    Guard,
+    Whole,
+    OverItself,
+    Twice,
+}
+
+fn felt<'b, 'k, S>(
+    k: &mut Kernel<'b, 'k, Cardiovascular, S>,
+    port: &ReadPort<'b, Cardiovascular, PerSite<Junction, Dimensionless>>,
+    spelling: Spelling,
+) -> Expr<'b, 'k, Cardiovascular, Dimensionless> {
+    match spelling {
+        Spelling::Plain => k.at_junction(port),
+        Spelling::Accepting => k.at_junction_if_supplied(port),
+    }
+}
+
+fn wall_law(nerve: Nerve, spelling: Spelling) -> Result<CompiledBody, AdmissionError> {
+    read_in(Reader::Site, nerve, spelling)
+}
+
+fn read_in(reader: Reader, nerve: Nerve, spelling: Spelling) -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at()?);
     let a = map.site::<VesselSegment>("a", at()?);
@@ -41,6 +74,7 @@ fn wall_law(nerve: Nerve) -> Result<CompiledBody, AdmissionError> {
             map.unsupplied(&[b.id()]);
         }
         Nerve::Supplied => map.supply(&junction, &[a.id(), b.id()]),
+        Nerve::Bare => map.unsupplied(&[a.id(), b.id()]),
     }
     let mut schema = Schema::new(map.finish()?)?;
     schema.partial_volume(Measure::new(1.0)?)?;
@@ -52,18 +86,78 @@ fn wall_law(nerve: Nerve) -> Result<CompiledBody, AdmissionError> {
         let class = fast()?;
         let (mut cv, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut cv);
-        let still = cv.edge_kernel(|mut k| {
-            let zero = k.zero::<Rate<Water>>();
-            k.finish(zero, cv.every_mode(), class)
-        });
-        cv.transfer_along(&route, still);
         let alpha = ports.effect::<Norepinephrine>();
-        let (row, _) = cv.site_field::<Blood, Dimensionless>("felt", Admissible::finite());
-        let felt = cv.site_kernel(|mut k| {
-            let effect = k.at_junction(&alpha);
-            k.finish(effect, cv.every_mode(), class)
+        let flow = cv.edge_kernel(|mut k| {
+            let rate = if reader == Reader::Edge {
+                let effect = felt(&mut k, &alpha, spelling);
+                let zero = k.zero::<Rate<Water>>();
+                k.scale(zero, effect)
+            } else {
+                k.zero()
+            };
+            k.finish(rate, cv.every_mode(), class)
         });
-        cv.define_at(&row, felt);
+        cv.transfer_along(&route, flow);
+        match reader {
+            Reader::Site => {
+                let (row, _) = cv.site_field::<Blood, Dimensionless>("felt", Admissible::finite());
+                let value = cv.site_kernel(|mut k| {
+                    let effect = felt(&mut k, &alpha, spelling);
+                    k.finish(effect, cv.every_mode(), class)
+                });
+                cv.define_at(&row, value);
+            }
+            Reader::Edge => {}
+            Reader::Sum => {
+                let total = cv.algebraic::<Dimensionless>("total", Admissible::finite());
+                let own = cv.kernel(|mut k| {
+                    let value = k.algebraic(&total);
+                    k.finish(value, cv.every_mode(), class)
+                });
+                let each = cv.site_kernel::<Blood, _, _>(|mut k| {
+                    let effect = felt(&mut k, &alpha, spelling);
+                    k.finish(effect, cv.every_mode(), class)
+                });
+                cv.sum_at(&total, own, each);
+            }
+            Reader::Guard => {
+                let [on, off] = cv.modes_along(&route, "switch", ["on", "off"]);
+                let gap = cv.edge_kernel::<VascularEdge, _, _>(|mut k| {
+                    let effect = felt(&mut k, &alpha, spelling);
+                    k.finish(effect, on.only(), class)
+                });
+                cv.event(Guard::new(gap, Crossing::Rising, on.to(&off)?));
+            }
+            Reader::OverItself => {
+                let (row, _) = cv.site_field::<Blood, Dimensionless>("felt", Admissible::finite());
+                let value = cv.site_kernel(|mut k| {
+                    let (over, under) = (felt(&mut k, &alpha, spelling), k.at_junction(&alpha));
+                    let ratio = k.divide(over, under);
+                    let one = k.as_dimension(ratio);
+                    k.finish(one, cv.every_mode(), class)
+                });
+                cv.define_at(&row, value);
+            }
+            Reader::Twice => {
+                let (row, _) = cv.site_field::<Blood, Dimensionless>("felt", Admissible::finite());
+                let value = cv.site_kernel(|mut k| {
+                    let (first, second) = (felt(&mut k, &alpha, spelling), k.at_junction(&alpha));
+                    let both = k.add(first, second);
+                    k.finish(both, cv.every_mode(), class)
+                });
+                cv.define_at(&row, value);
+            }
+            Reader::Whole => {
+                let mark = cv.algebraic::<Dimensionless>("marked", Admissible::finite());
+                let held = cv.kernel(|mut k| {
+                    let effect = felt(&mut k, &alpha, spelling);
+                    let own = k.algebraic(&mark);
+                    let gap = k.subtract(own, effect);
+                    k.finish(gap, cv.every_mode(), class)
+                });
+                cv.residual(&mark, held);
+            }
+        }
         body.add(cv.finish());
         if nerve != Nerve::NoReceptor {
             let (mut laws, ports) = body.receptor()?.parts();
@@ -91,17 +185,20 @@ fn wall_law(nerve: Nerve) -> Result<CompiledBody, AdmissionError> {
 
 #[test]
 fn a_site_a_law_reads_a_junction_at_must_be_supplied_or_stated_bare() -> Result<(), AdmissionError> {
-    assert!(wall_law(Nerve::Supplied).is_ok());
-    assert!(wall_law(Nerve::Stated).is_ok());
+    assert!(wall_law(Nerve::Supplied, Spelling::Plain).is_ok());
+    assert!(wall_law(Nerve::Supplied, Spelling::Accepting).is_ok());
+    assert!(wall_law(Nerve::Stated, Spelling::Accepting).is_ok());
     let site = AnatomyBuilder::new().site::<VesselSegment>("b", at()?).id();
     let law = LawName {
         owner: "CV",
         local: "felt",
     };
-    assert_eq!(
-        wall_law(Nerve::Lost).err(),
-        Some(AdmissionError::Compile(CompileDefect::NoSupply { law, site }))
-    );
+    for spelling in [Spelling::Plain, Spelling::Accepting] {
+        assert_eq!(
+            wall_law(Nerve::Lost, spelling).err(),
+            Some(AdmissionError::Compile(CompileDefect::NoSupply { law, site }))
+        );
+    }
     Ok(())
 }
 
@@ -112,11 +209,280 @@ fn a_junction_with_no_such_receptor_is_refused_not_read_as_nothing() -> Result<(
         owner: "CV",
         local: "felt",
     };
-    assert_eq!(
-        wall_law(Nerve::NoReceptor).err(),
-        Some(AdmissionError::Compile(CompileDefect::NoReceptor {
+    for spelling in [Spelling::Plain, Spelling::Accepting] {
+        assert_eq!(
+            wall_law(Nerve::NoReceptor, spelling).err(),
+            Some(AdmissionError::Compile(CompileDefect::NoReceptor {
+                law,
+                junction
+            }))
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn a_plain_read_of_a_nerve_no_site_has_is_refused_wherever_the_law_stands() -> Result<(), AdmissionError> {
+    let site = AnatomyBuilder::new().site::<VesselSegment>("b", at()?).id();
+    for (reader, local) in [
+        (Reader::Site, "felt"),
+        (Reader::Edge, "circulation"),
+        (Reader::Sum, "total"),
+        (Reader::Guard, "switch"),
+    ] {
+        let law = LawName { owner: "CV", local };
+        assert_eq!(
+            read_in(reader, Nerve::Stated, Spelling::Plain).err(),
+            Some(AdmissionError::Compile(CompileDefect::UnsuppliedRead {
+                law,
+                site
+            }))
+        );
+        assert!(read_in(reader, Nerve::Stated, Spelling::Accepting).is_ok());
+    }
+    Ok(())
+}
+
+#[test]
+fn a_whole_body_law_has_no_site_for_either_read() {
+    let law = LawName {
+        owner: "CV",
+        local: "marked",
+    };
+    for spelling in [Spelling::Plain, Spelling::Accepting] {
+        assert_eq!(
+            read_in(Reader::Whole, Nerve::Supplied, spelling).err(),
+            Some(AdmissionError::Compile(CompileDefect::NoSuchRead { law }))
+        );
+    }
+}
+
+fn felt_residuals<const N: usize>(
+    body: &CompiledBody,
+    share: Binding,
+    sites: [SiteId; N],
+) -> Result<[f64; N], InitializationFailure> {
+    let mut packet = ParameterPacket::new();
+    let value = Measure::<Dimensionless>::new(0.25)?;
+    packet.synthetic(ParameterKey::new("re.share"), share, value, "synthetic")?;
+    let start = |row| match row {
+        RowKind::Algebraic(Slot { law, .. }) if law.owner == "Receptor" => 0.25,
+        _ => 0.0,
+    };
+    packet.start_rest(body, start, "synthetic")?;
+    let port = BoundaryPort::new(Vec::new())?;
+    let request = InitializationRequest::at(SimTime::from_ns(0));
+    let system = body.initialization(body.bind(packet)?, port, request)?;
+    let residuals = system.evaluate(&system.workspace())?;
+    Ok(sites.map(|site| {
+        let law = LawName {
+            owner: "CV",
+            local: "felt",
+        };
+        let row = RowKind::Algebraic(Slot {
             law,
-            junction
+            at: Context::Site(site),
+        });
+        let found = (body.rows().iter()).find(|known| known.kind() == row);
+        residuals[found.expect("a row at each blood site").id().index()]
+    }))
+}
+
+#[test]
+fn an_accepting_read_is_its_junctions_entry_or_zero() -> Result<(), InitializationFailure> {
+    let body = wall_law(Nerve::Stated, Spelling::Accepting)?;
+    let junction = AnatomyBuilder::new().site::<Junction>("junction", at()?).id();
+    let vessel = |key| Ok::<_, AdmissionError>(AnatomyBuilder::new().site::<VesselSegment>(key, at()?).id());
+    let residuals = felt_residuals(&body, Binding::Site(junction), [vessel("a")?, vessel("b")?])?;
+    assert_eq!(residuals, [-0.25, 0.0]);
+    Ok(())
+}
+
+fn a_read_beside_a_row(spelling: Spelling) -> Result<(CompiledBody, SiteId), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let vessel = map.site::<VesselSegment>("vessel", at()?);
+    let bed = map.site::<CapillaryBed>("bed", at()?);
+    map.contain(root.id(), vessel.id());
+    map.contain(root.id(), bed.id());
+    map.connect(Network::Vascular, vessel.id(), bed.id());
+    map.connect(Network::Vascular, bed.id(), vessel.id());
+    map.unsupplied(&[vessel.id(), bed.id()]);
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.partial_volume(Measure::new(1.0)?)?;
+    schema.leave_out(Space::Interstitium, "a bench with no tissue");
+    schema.leave_out(Space::Cells, "a bench with no tissue");
+    schema.carry::<Vasopressin, Blood>(Space::Plasma);
+    schema.carry::<Vasopressin, Blood>(Space::Lumen);
+    schema.pool::<Vasopressin>(bed.id(), Space::Bound)?;
+    let body = assemble(schema, |mut body| {
+        let class = fast()?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, still);
+        let port = ports.effect::<Vasopressin>();
+        let (row, _) = cv.site_field::<Blood, Dimensionless>("felt", Admissible::finite());
+        let value = cv.site_kernel(|mut k| {
+            let effect = felt(&mut k, &port, spelling);
+            k.finish(effect, cv.every_mode(), class)
+        });
+        cv.define_at(&row, value);
+        body.add(cv.finish());
+        let (mut laws, ports) = body.receptor()?.parts();
+        let binding = ports.binding::<Blood, Vasopressin>(&mut laws);
+        let none = laws.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Vasopressin>>();
+            k.finish(zero, laws.every_mode(), class)
+        });
+        laws.transfer_at(&binding, none);
+        let output = ports.effect::<Blood, Vasopressin>(&mut laws);
+        let share =
+            laws.site_parameter::<Blood, Dimensionless>(ParameterKey::new("re.share"), Admissible::finite());
+        let effect = laws.site_kernel(|mut k| {
+            let value = k.site_parameter(&share);
+            k.finish(value, laws.every_mode(), class)
+        });
+        laws.define_at(&output, effect);
+        body.add(laws.finish());
+        body.compile()
+    })?;
+    Ok((body, bed.id()))
+}
+
+#[test]
+fn a_row_of_that_name_at_the_reads_own_site_is_no_junctions_entry() -> Result<(), InitializationFailure> {
+    let site = AnatomyBuilder::new().site::<CapillaryBed>("bed", at()?).id();
+    let law = LawName {
+        owner: "CV",
+        local: "felt",
+    };
+    assert_eq!(
+        a_read_beside_a_row(Spelling::Plain).err(),
+        Some(AdmissionError::Compile(CompileDefect::UnsuppliedRead {
+            law,
+            site
+        }))
+    );
+    let (body, bed) = a_read_beside_a_row(Spelling::Accepting)?;
+    assert_eq!(felt_residuals(&body, Binding::Site(bed), [bed])?, [0.0]);
+    Ok(())
+}
+
+fn a_junction_reading_itself<U: Dimension, F>(read: F) -> Result<CompiledBody, AdmissionError>
+where
+    F: for<'b, 'k> FnOnce(
+        &mut Kernel<'b, 'k, Nervous, Junction>,
+        &ReadPort<'b, Nervous, PerSite<Junction, Dimensionless>>,
+        &ReadPort<'b, Nervous, PerSite<Junction, Norepinephrine>>,
+    ) -> Expr<'b, 'k, Nervous, U>,
+{
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let junction = map.site::<Junction>("junction", at()?);
+    map.contain(root.id(), junction.id());
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.pool::<Norepinephrine>(junction.id(), Space::Vesicle)?;
+    schema.pool::<Norepinephrine>(junction.id(), Space::Cleft)?;
+    assemble(schema, |mut body| {
+        let class = fast()?;
+        let (mut ns, ports) = body.nervous()?.parts();
+        let release = ports.release::<Norepinephrine>(&mut ns);
+        let still = ns.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Norepinephrine>>();
+            k.finish(zero, ns.every_mode(), class)
+        });
+        ns.transfer_at(&release, still);
+        let (own, entry) = ns.site_field::<Junction, Dimensionless>("own", Admissible::finite());
+        let quiet = ns.site_kernel(|mut k| {
+            let zero = k.zero();
+            k.finish(zero, ns.every_mode(), class)
+        });
+        ns.define_at(&own, quiet);
+        let (copy, _) = ns.site_field::<Junction, U>("copy", Admissible::finite());
+        let held = release.from_amount::<Norepinephrine>();
+        let value = ns.site_kernel(|mut k| {
+            let value = read(&mut k, &entry, &held);
+            k.finish(value, ns.every_mode(), class)
+        });
+        ns.define_at(&copy, value);
+        body.add(ns.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn a_junction_reads_its_own_entry_with_at_site_not_at_junction() -> Result<(), AdmissionError> {
+    assert!(a_junction_reading_itself(|k, entry, _| k.at_site(entry)).is_ok());
+    let site = AnatomyBuilder::new().site::<Junction>("junction", at()?).id();
+    let law = LawName {
+        owner: "NS",
+        local: "copy",
+    };
+    assert_eq!(
+        a_junction_reading_itself(|k, entry, _| k.at_junction(entry)).err(),
+        Some(AdmissionError::Compile(CompileDefect::NoSupply { law, site }))
+    );
+    Ok(())
+}
+
+#[test]
+fn a_junction_read_of_a_routes_amount_is_refused_by_name() {
+    assert!(a_junction_reading_itself(|k, _, held| k.at_site(held)).is_ok());
+    let law = LawName {
+        owner: "NS",
+        local: "copy",
+    };
+    assert_eq!(
+        a_junction_reading_itself(|k, _, held| k.at_junction(held)).err(),
+        Some(AdmissionError::Compile(CompileDefect::NoSuchRead { law }))
+    );
+}
+
+/// A spelling is a statement the compiler checks and nothing a run does, so it must not reach a run's identity or the
+/// order guards fire in, which follows their sealed bytes.
+#[test]
+fn both_spellings_of_a_supplied_read_are_one_model() -> Result<(), AdmissionError> {
+    for reader in [Reader::Site, Reader::Edge, Reader::Sum, Reader::Guard] {
+        let plain = read_in(reader, Nerve::Supplied, Spelling::Plain)?;
+        let accepting = read_in(reader, Nerve::Supplied, Spelling::Accepting)?;
+        assert_eq!(plain.model_hash(), accepting.model_hash());
+        assert_eq!(plain.programs(), accepting.programs());
+    }
+    Ok(())
+}
+
+#[test]
+fn a_spelling_cannot_hide_an_entry_over_itself() -> Result<(), AdmissionError> {
+    let law = LawName {
+        owner: "CV",
+        local: "felt",
+    };
+    for spelling in [Spelling::Plain, Spelling::Accepting] {
+        let body = read_in(Reader::OverItself, Nerve::Supplied, spelling)?;
+        assert_eq!(
+            body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
+            Some(AdmissionError::UnbackedConstant { law })
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn a_read_that_accepts_no_nerve_says_nothing_of_the_read_beside_it() -> Result<(), AdmissionError> {
+    let site = AnatomyBuilder::new().site::<VesselSegment>("a", at()?).id();
+    let law = LawName {
+        owner: "CV",
+        local: "felt",
+    };
+    assert_eq!(
+        read_in(Reader::Twice, Nerve::Bare, Spelling::Accepting).err(),
+        Some(AdmissionError::Compile(CompileDefect::UnsuppliedRead {
+            law,
+            site
         }))
     );
     Ok(())
@@ -286,6 +652,92 @@ fn a_read_of_an_inflow_that_is_no_row_is_refused_by_name() -> Result<(), Admissi
     assert_eq!(
         compiled.err(),
         Some(AdmissionError::Compile(CompileDefect::NoSuchRead { law }))
+    );
+    Ok(())
+}
+
+#[test]
+fn a_reclaim_law_that_reads_a_nerve_at_a_bed_no_nerve_reaches_is_refused_by_name()
+-> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let vessel = map.site::<VesselSegment>("vessel", at()?);
+    let filter = map.site::<CapillaryBed>("filter", at()?);
+    let bed = map.site::<CapillaryBed>("bed", at()?);
+    let tubule = map.site::<VesselSegment>("tubule", at()?);
+    let duct = map.site::<VesselSegment>("duct", at()?);
+    let renal = map.site::<Junction>("renal", at()?);
+    for site in [
+        vessel.id(),
+        filter.id(),
+        bed.id(),
+        tubule.id(),
+        duct.id(),
+        renal.id(),
+    ] {
+        map.contain(root.id(), site);
+    }
+    map.connect(Network::Vascular, vessel.id(), filter.id());
+    map.connect(Network::Vascular, filter.id(), bed.id());
+    map.connect(Network::Vascular, bed.id(), vessel.id());
+    map.connect(Network::Urinary, filter.id(), tubule.id());
+    map.connect(Network::Urinary, tubule.id(), duct.id());
+    map.connect(Network::Reclaim, duct.id(), bed.id());
+    map.supply(&renal, &[filter.id()]);
+    map.unsupplied(&[bed.id()]);
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.leave_out(Space::Interstitium, "a bench of water alone");
+    schema.leave_out(Space::Cells, "a bench of water alone");
+    let compiled = assemble(schema, |mut body| {
+        let class = fast()?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, still);
+        body.add(cv.finish());
+        let (mut rn, ports) = body.renal()?.parts();
+        let filtered = ports.filtration(&mut rn);
+        let still = rn.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, rn.every_mode(), class)
+        });
+        rn.transfer_along(&filtered, still);
+        let tubular = ports.tubular(&mut rn);
+        let still = rn.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, rn.every_mode(), class)
+        });
+        rn.transfer_along(&tubular, still);
+        let (drive, nerve) = rn.site_field::<Junction, Dimensionless>("drive", Admissible::finite());
+        let quiet = rn.site_kernel(|mut k| {
+            let zero = k.zero();
+            k.finish(zero, rn.every_mode(), class)
+        });
+        rn.define_at(&drive, quiet);
+        let reclaim = ports.reclaim::<Water>(&mut rn);
+        let driven = rn.edge_kernel(|mut k| {
+            let nerve = k.at_junction(&nerve);
+            let zero = k.zero::<Rate<Water>>();
+            let rate = k.scale(zero, nerve);
+            k.finish(rate, rn.every_mode(), class)
+        });
+        rn.transfer_along(&reclaim, driven);
+        body.add(rn.finish());
+        body.compile()
+    });
+    let law = LawName {
+        owner: "RN",
+        local: "reclaim water",
+    };
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::UnsuppliedRead {
+            law,
+            site: bed.id()
+        }))
     );
     Ok(())
 }
