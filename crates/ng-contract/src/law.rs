@@ -212,9 +212,6 @@ pub(crate) enum Where {
     Up,
     Down,
     Junction,
-    /// `Junction`, and a site no nerve reaches reads zero. Only compile reads the difference, so it seals as `Junction`:
-    /// a spelling must not reorder guards, which sort by their sealed bytes.
-    JunctionIfSupplied,
     Drain,
     Mark(Landmark),
     MarkOn(Sites, Landmark),
@@ -353,7 +350,7 @@ impl Seal for Where {
             Where::Here => out.number(0),
             Where::Up => out.number(1),
             Where::Down => out.number(2),
-            Where::Junction | Where::JunctionIfSupplied => out.number(3),
+            Where::Junction => out.number(3),
             Where::Drain => out.number(4),
             Where::Mark(landmark) | Where::MarkOn(_, landmark) => {
                 out.number(5);
@@ -420,6 +417,7 @@ fn reachable(code: &[Op], result: usize) -> Vec<Op> {
 /// one graph; `S` is what the kernel is declared for: the body, a site class or a vascular edge.
 pub struct Kernel<'b, 'k, O, S = Body> {
     code: Vec<Op>,
+    accepts_no_nerve: Vec<Source>,
     brand: Brand<'b>,
     kernel: Brand<'k>,
     kind: PhantomData<(O, S)>,
@@ -439,6 +437,7 @@ impl<O, U> Clone for Expr<'_, '_, O, U> {
 impl<O, U> Copy for Expr<'_, '_, O, U> {}
 pub struct Finished<'b, 'k, O, U, S = Body> {
     code: Vec<Op>,
+    accepts_no_nerve: Vec<Source>,
     result: usize,
     dimension: String,
     modes: ModeSet<'b, O>,
@@ -457,6 +456,9 @@ pub struct PureKernel<'b, O, U, S = Body> {
 pub(crate) struct KernelData {
     pub(crate) id: u32,
     pub(crate) code: Vec<Op>,
+    /// Beside `code` and never in it: a program reads the same whichever way a law spelled a read, so nothing that
+    /// reads programs can tell two spellings apart.
+    pub(crate) accepts_no_nerve: Vec<Source>,
     pub(crate) dimension: String,
     pub(crate) modes: Selector,
     pub(crate) rate: RateClass,
@@ -484,6 +486,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     fn open() -> Self {
         Self {
             code: Vec::new(),
+            accepts_no_nerve: Vec::new(),
             brand: PhantomData,
             kernel: PhantomData,
             kind: PhantomData,
@@ -514,7 +517,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
         self.input(Input::Read(port.source, Where::Here))
     }
     /// The entry at the junction that supplies this site, or the site this edge runs into. Compile refuses a site the
-    /// map says no nerve reaches, a site it says nothing of, a junction with no such entry and a whole-body kernel,
+    /// map says no nerve reaches, a site it says nothing of, a junction with no such entry and a law of the whole body,
     /// which has no such place.
     pub fn at_junction<U: Dimension>(
         &mut self,
@@ -641,6 +644,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     ) -> Finished<'b, 'k, O, U, S> {
         Finished {
             code: self.code,
+            accepts_no_nerve: self.accepts_no_nerve,
             result: value.at,
             dimension: dimension::<U>(),
             modes,
@@ -652,13 +656,14 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
 }
 
 impl<'b, 'k, S> Kernel<'b, 'k, crate::Cardiovascular, S> {
-    /// `at_junction` for a law that runs at every vessel, with a nerve or without: a site the map says no nerve reaches
-    /// reads zero. Every other refusal stands. The circulation's laws alone run over both.
+    /// `at_junction` for a law that reads a nerve at every vessel, with one or without: a site the map says no nerve
+    /// reaches reads zero. Every other refusal stands. It speaks for this kernel's reads of this port.
     pub fn at_junction_if_supplied<U: Dimension>(
         &mut self,
         port: &ReadPort<'b, crate::Cardiovascular, PerSite<crate::Junction, U>>,
     ) -> Expr<'b, 'k, crate::Cardiovascular, U> {
-        self.input(Input::Read(port.source, Where::JunctionIfSupplied))
+        self.accepts_no_nerve.push(port.source);
+        self.at_junction(port)
     }
 }
 impl<'b, 'k, O> Kernel<'b, 'k, O> {
@@ -1150,6 +1155,7 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
             data: KernelData {
                 id,
                 code: reachable(&finished.code, finished.result),
+                accepts_no_nerve: finished.accepts_no_nerve,
                 dimension: finished.dimension,
                 modes: finished.modes.selector,
                 rate: finished.rate,

@@ -1377,6 +1377,7 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
     let KernelData {
         id,
         code,
+        accepts_no_nerve: _,
         dimension,
         modes,
         rate,
@@ -1410,7 +1411,7 @@ fn place_of(place: Where, context: Context, anatomy: &Anatomy) -> Option<SiteId>
         Where::Here => here,
         Where::Up => ends.map(|end| end.0),
         Where::Down => ends.map(|end| end.1),
-        Where::Junction | Where::JunctionIfSupplied => anatomy.junction(here.or(ends.map(|end| end.1))?),
+        Where::Junction => anatomy.junction(here.or(ends.map(|end| end.1))?),
         Where::Drain => anatomy.drain(here?),
         Where::Mark(landmark) | Where::MarkOn(_, landmark) => anatomy.landmark(landmark).map(|mark| mark.0),
         Where::Sensor(landmark) => anatomy.landmark(landmark).map(|mark| mark.1),
@@ -1446,9 +1447,8 @@ fn addresses(
             return Err(CompileDefect::NoSuchRead { law });
         }
         let at = landed.map_or(context, Context::Site);
-        let junction_read = matches!(place, Where::Junction | Where::JunctionIfSupplied);
         Ok(match source {
-            Source::Field(field) if junction_read => {
+            Source::Field(field) if place == Where::Junction => {
                 let (Context::Site(site) | Context::Edge { to: site, .. }) = context else {
                     return Err(CompileDefect::NoSuchRead { law });
                 };
@@ -1458,7 +1458,7 @@ fn addresses(
                         unknown(row.ok_or(CompileDefect::NoReceptor { law, junction })?)
                     }
                     None if !anatomy.unsupplied(site) => return Err(CompileDefect::NoSupply { law, site }),
-                    None if place == Where::Junction => {
+                    None if !kernel.accepts_no_nerve.contains(&source) => {
                         return Err(CompileDefect::UnsuppliedRead { law, site });
                     }
                     None => Address::Gauge,
@@ -1478,7 +1478,7 @@ fn addresses(
                         .ok_or(CompileDefect::NoSuchRead { law })?,
                 )
             }
-            Source::Amount(..) if junction_read => return Err(CompileDefect::NoSuchRead { law }),
+            Source::Amount(..) if place == Where::Junction => return Err(CompileDefect::NoSuchRead { law }),
             Source::Amount(family, end, species) => {
                 let reach = reaches.reach(family, context);
                 let reach = reach.ok_or(CompileDefect::NoSuchRead { law })?;

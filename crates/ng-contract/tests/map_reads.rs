@@ -21,6 +21,7 @@ enum Nerve {
     Stated,
     Lost,
     NoReceptor,
+    Bare,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -36,6 +37,8 @@ enum Reader {
     Sum,
     Guard,
     Whole,
+    OverItself,
+    BesideAnother,
 }
 
 fn felt<'b, 'k, S>(
@@ -71,6 +74,7 @@ fn read_in(reader: Reader, nerve: Nerve, spelling: Spelling) -> Result<CompiledB
             map.unsupplied(&[b.id()]);
         }
         Nerve::Supplied => map.supply(&junction, &[a.id(), b.id()]),
+        Nerve::Bare => map.unsupplied(&[a.id(), b.id()]),
     }
     let mut schema = Schema::new(map.finish()?)?;
     schema.partial_volume(Measure::new(1.0)?)?;
@@ -123,6 +127,26 @@ fn read_in(reader: Reader, nerve: Nerve, spelling: Spelling) -> Result<CompiledB
                     k.finish(effect, on.only(), class)
                 });
                 cv.event(Guard::new(gap, Crossing::Rising, on.to(&off)?));
+            }
+            Reader::OverItself => {
+                let (row, _) = cv.site_field::<Blood, Dimensionless>("felt", Admissible::finite());
+                let value = cv.site_kernel(|mut k| {
+                    let (over, under) = (felt(&mut k, &alpha, spelling), k.at_junction(&alpha));
+                    let ratio = k.divide(over, under);
+                    let one = k.as_dimension(ratio);
+                    k.finish(one, cv.every_mode(), class)
+                });
+                cv.define_at(&row, value);
+            }
+            Reader::BesideAnother => {
+                let beta = ports.effect::<Acetylcholine>();
+                let (row, _) = cv.site_field::<Blood, Dimensionless>("felt", Admissible::finite());
+                let value = cv.site_kernel(|mut k| {
+                    let (first, second) = (felt(&mut k, &alpha, spelling), k.at_junction(&beta));
+                    let both = k.add(first, second);
+                    k.finish(both, cv.every_mode(), class)
+                });
+                cv.define_at(&row, value);
             }
             Reader::Whole => {
                 let mark = cv.algebraic::<Dimensionless>("marked", Admissible::finite());
@@ -353,8 +377,7 @@ fn a_row_of_that_name_at_the_reads_own_site_is_no_junctions_entry() -> Result<()
     Ok(())
 }
 
-/// One junction whose nerve laws read its own entries. `read` writes the read under test, because a junction's own entry
-/// is `at_site`'s and no junction supplies itself.
+/// One junction whose nerve laws read its own entries. `read` writes the read under test.
 fn a_junction_reading_itself<U: Dimension, F>(read: F) -> Result<CompiledBody, AdmissionError>
 where
     F: for<'b, 'k> FnOnce(
@@ -431,11 +454,43 @@ fn a_junction_read_of_a_routes_amount_is_refused_by_name() {
 #[test]
 fn both_spellings_of_a_supplied_read_are_one_model() -> Result<(), AdmissionError> {
     for reader in [Reader::Site, Reader::Edge, Reader::Sum, Reader::Guard] {
+        let plain = read_in(reader, Nerve::Supplied, Spelling::Plain)?;
+        let accepting = read_in(reader, Nerve::Supplied, Spelling::Accepting)?;
+        assert_eq!(plain.model_hash(), accepting.model_hash());
+        assert_eq!(plain.programs(), accepting.programs());
+    }
+    Ok(())
+}
+
+/// One read is one read however it is spelled, so an entry over itself is the literal one `bind` refuses. Two spellings
+/// of it would pass, under the hash of a body that is refused.
+#[test]
+fn a_spelling_cannot_hide_an_entry_over_itself() -> Result<(), AdmissionError> {
+    let law = LawName {
+        owner: "CV",
+        local: "felt",
+    };
+    for spelling in [Spelling::Plain, Spelling::Accepting] {
+        let body = read_in(Reader::OverItself, Nerve::Supplied, spelling)?;
         assert_eq!(
-            read_in(reader, Nerve::Supplied, Spelling::Plain)?.model_hash(),
-            read_in(reader, Nerve::Supplied, Spelling::Accepting)?.model_hash()
+            body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
+            Some(AdmissionError::UnbackedConstant { law })
         );
     }
+    Ok(())
+}
+
+#[test]
+fn accepting_no_nerve_on_one_port_says_nothing_of_another() -> Result<(), AdmissionError> {
+    let site = AnatomyBuilder::new().site::<VesselSegment>("a", at()?).id();
+    let law = LawName {
+        owner: "CV",
+        local: "felt",
+    };
+    assert_eq!(
+        read_in(Reader::BesideAnother, Nerve::Bare, Spelling::Accepting).err(),
+        Some(AdmissionError::Compile(CompileDefect::UnsuppliedRead { law, site }))
+    );
     Ok(())
 }
 
