@@ -736,7 +736,6 @@ impl Reaches {
         };
         Species::CARRIED.into_iter().filter(both).collect()
     }
-    /// A species one end holds and the other does not. Flow can reverse, so either end counts.
     fn stranded(&self, reach: &Reach) -> Vec<Species> {
         let two_ends = reach.ends.iter().all(|end| matches!(end, Terminal::Pool(_)));
         let apart = |species: &Species| {
@@ -1282,7 +1281,6 @@ fn fluid_columns(placement: &mut Placement, places: &Places) -> Result<(), Compi
     Ok(())
 }
 
-/// Water is the flow itself. A species takes its upstream share, and `sigma` of that stays behind.
 fn carried_ops(
     flow: Source,
     ends: [Source; 4],

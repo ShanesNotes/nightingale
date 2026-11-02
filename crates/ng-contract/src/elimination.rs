@@ -100,8 +100,6 @@ impl Elimination {
         }
     }
 
-    /// Factors `values`, one per Jacobian entry. A pivot of zero or past the finite range names its row: the
-    /// elimination never moves a pivot, so a caller that needs one moved solves densely.
     pub(crate) fn factor(&self, values: &[f64]) -> Result<Factors<'_>, usize> {
         let mut lu = vec![0.0; self.columns.len()];
         for (&place, &value) in self.places.iter().zip(values) {
@@ -178,7 +176,6 @@ mod tests {
     use super::Elimination;
     use crate::body::{RowId, UnknownId};
 
-    /// A fixed mixer over a seed, so the matrices are a function of this file.
     fn next(state: &mut u64) -> f64 {
         *state ^= *state << 13;
         *state ^= *state >> 7;

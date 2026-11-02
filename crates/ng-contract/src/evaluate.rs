@@ -18,8 +18,8 @@ pub(crate) struct Undefined {
     pub(crate) domain: OperatorDomain,
 }
 
-/// A smooth limit, with `sign` on its root, and the root's own terms: the slope in `a - b` and in `w`. Both are
-/// zero where the root is, the mean of the two one-sided derivatives, so a Newton step only loses speed.
+/// A smooth limit, with `sign` on its root, and the root's slopes in `a - b` and in `width`. Both slopes are zero
+/// where the root is zero, the mean of the two one-sided derivatives, so a Newton step only loses speed.
 fn smooth(a: f64, b: f64, width: f64, sign: f64) -> (f64, f64, f64) {
     let difference = a - b;
     let root = (difference * difference + width * width).sqrt();
@@ -66,7 +66,6 @@ fn run(
                 } else {
                     (at(*to), at(*to_water))
                 };
-                // No flow carries nothing, even out of a dry donor, whose share has no value.
                 if at(*flow) == 0.0 {
                     0.0
                 } else if water <= 0.0 {
@@ -171,7 +170,6 @@ impl CompiledBody {
     fn partial_volume(&self) -> f64 {
         (self.layout.schema.partial_volume.as_ref()).map_or(0.0, |coefficient| coefficient.value())
     }
-    /// How far a guard stands past its crossing.
     pub(crate) fn guard_gap(&self, guard: &GuardLayout, inputs: &Inputs<'_>) -> Result<f64, Undefined> {
         let mut bounds = guard.inputs.iter();
         let next = || Self::bound(bounds.next().expect("one bound per input"), inputs);
@@ -185,8 +183,7 @@ impl CompiledBody {
             Crossing::Falling => -value,
         })
     }
-    /// Which modes and resets follow a point's state: every plain guard armed in `inputs.modes` and crossed fires,
-    /// holding a gap within `tolerance` of zero crossed, so a point that lands on its guard, as the ring's last point
+    /// A gap within `tolerance` of zero counts as crossed, so a point that lands on its guard, as the ring's last point
     /// lands on the wrap, reads the same on every sweep.
     pub(crate) fn fired_at(
         &self,
@@ -245,7 +242,6 @@ impl CompiledBody {
             let Some(value) = *value else { continue };
             match instance.target {
                 Target::Column(column) => columns[column.index()] = value,
-                // A row's laws add, so a sum over sites is one row with one instance per site.
                 Target::Row(row) => rows[row.index()] += positive_part(instance, value),
             }
         }
