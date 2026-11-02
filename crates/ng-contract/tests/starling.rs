@@ -170,7 +170,11 @@ fn basis(compiled: &CompiledBody) -> Vec<(Book, Vec<(usize, i64)>)> {
 fn the_starling_law_has_the_hand_derived_incidence_and_basis() -> Result<(), AdmissionError> {
     let Beds { a, b, .. } = beds()?;
     let compiled = starling(Defect::None)?;
-    let amount = |site, space| RowKind::Amount { site, space };
+    let amount = |site, space| RowKind::Amount {
+        site,
+        space,
+        species: Species::Water,
+    };
     let kinds: Vec<RowKind> = compiled.rows().iter().map(Row::kind).collect();
     assert_eq!(
         kinds,
@@ -196,8 +200,8 @@ fn the_starling_law_has_the_hand_derived_incidence_and_basis() -> Result<(), Adm
     assert_eq!(
         basis(&compiled),
         [
-            (Book::Water, vec![(0, 1), (1, 1)]),
-            (Book::Water, vec![(2, 1), (3, 1)]),
+            (Book::Of(Species::Water), vec![(0, 1), (1, 1)]),
+            (Book::Of(Species::Water), vec![(2, 1), (3, 1)]),
         ]
     );
     Ok(())
@@ -453,7 +457,7 @@ fn looped(lumen: Option<&'static str>, reads_amount: bool) -> Result<CompiledBod
         let route = ports.circulation(&mut laws);
         let speed =
             laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("cv.speed"), Admissible::nonnegative());
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let rate = laws.edge_kernel(|mut k| {
             let rate = if reads_amount {
                 let empty = k.zero::<Water>();

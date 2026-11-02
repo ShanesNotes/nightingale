@@ -190,8 +190,8 @@ fn the_valid_body_lays_out_memory_then_algebraic_rows() -> Result<(), AdmissionE
     assert_eq!(
         kinds,
         [
-            RowKind::Memory(named("filter")),
-            RowKind::Memory(named("gate")),
+            RowKind::Memory(named("filter").into()),
+            RowKind::Memory(named("gate").into()),
             RowKind::Algebraic(named("pressure").into()),
         ]
     );
@@ -518,7 +518,7 @@ fn blocks(compiled: &CompiledBody) -> Vec<(Vec<usize>, Vec<usize>, RateBand)> {
 fn a_block_comes_after_the_blocks_it_depends_on() -> Result<(), AdmissionError> {
     let compiled = assemble(schema()?, |mut body| {
         let (mut laws, _ports) = body.nervous()?.parts();
-        let reflex = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let reflex = RateClass::new(RateBand::Reflex, 3_600_000_000_000)?;
         let hours = RateClass::new(RateBand::Hours, 3_600_000_000_000)?;
         let speed =
             laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.speed"), Admissible::nonnegative());
@@ -554,7 +554,7 @@ fn a_block_comes_after_the_blocks_it_depends_on() -> Result<(), AdmissionError> 
 fn the_matching_pairs_each_residual_with_an_unknown_it_reads() -> Result<(), AdmissionError> {
     let compiled = assemble(schema()?, |mut body| {
         let (mut laws, _ports) = body.nervous()?.parts();
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let level = laws.parameter::<Pressure>(ParameterKey::new("ns.level"), Admissible::finite());
         let p = laws.algebraic::<Pressure>("p", Admissible::finite());
         let q = laws.algebraic::<Pressure>("q", Admissible::finite());
@@ -604,7 +604,7 @@ fn volume_guard(partial_volume: bool) -> Result<CompiledBody, AdmissionError> {
         let (mut laws, _ports) = body.nervous()?.parts();
         let held = laws.parameter::<Water>(ParameterKey::new("ns.held"), Admissible::nonnegative());
         let [low, high] = laws.modes("level", ["low", "high"]);
-        let reflex = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let reflex = RateClass::new(RateBand::Reflex, 3_600_000_000_000)?;
         let zero = laws.kernel(|mut k| {
             let amount = k.parameter(&held);
             let volume = k.volume(amount);
@@ -633,7 +633,7 @@ fn a_guard_that_reads_a_volume_needs_the_schemas_partial_volume() -> Result<(), 
 fn singular_while_off() -> Result<CompiledBody, AdmissionError> {
     assemble(schema()?, |mut body| {
         let (mut laws, _ports) = body.nervous()?.parts();
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let level = laws.parameter::<Pressure>(ParameterKey::new("ns.level"), Admissible::finite());
         let p = laws.algebraic::<Pressure>("p", Admissible::finite());
         let q = laws.algebraic::<Pressure>("q", Admissible::finite());
@@ -678,7 +678,7 @@ fn a_mode_in_which_a_residual_reads_no_unknown_of_its_own_is_structurally_singul
 fn an_uncovered_mode_is_named_by_its_least_value_whatever_the_declared_order() -> Result<(), AdmissionError> {
     let refused = assemble(schema()?, |mut body| {
         let (mut laws, _ports) = body.nervous()?.parts();
-        let reflex = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let reflex = RateClass::new(RateBand::Reflex, 3_600_000_000_000)?;
         let filter = laws.state::<Dimensionless>("filter", Admissible::unit_interval());
         let [_c, b, _a] = laws.modes("phase", ["c", "b", "a"]);
         let still = laws.kernel(|mut k| {

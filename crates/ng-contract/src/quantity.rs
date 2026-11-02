@@ -1,4 +1,4 @@
-use crate::{AdmissionError, Basis, SiteClass};
+use crate::{AdmissionError, Basis, EdgeKind, SiteSet, VascularEdge};
 use core::marker::PhantomData;
 
 mod dimensions {
@@ -29,6 +29,16 @@ pub enum Elastance {}
 /// Water, whose amount is in the canonical amount unit; its volume derives from it.
 pub enum Water {}
 pub enum Energy {}
+pub enum Sodium {}
+pub enum Potassium {}
+pub enum Chloride {}
+pub enum Albumin {}
+pub enum Vasopressin {}
+pub enum Norepinephrine {}
+pub enum Acetylcholine {}
+pub enum Resistance {}
+pub enum Inertance {}
+pub enum Orifice {}
 pub enum Temperature {}
 pub enum Phase {}
 pub enum Viscosity {}
@@ -46,8 +56,164 @@ pub struct Quotient<A, B>(PhantomData<(A, B)>);
 pub struct Reference<U: Sensed>(PhantomData<U>);
 /// Volume per amount of a species: a fixed structural coefficient of the schema, not a parameter.
 pub struct PartialVolume<Q>(PhantomData<Q>);
-pub struct PerSite<C: SiteClass, U>(PhantomData<(C, U)>);
-pub struct PerEdge<U>(PhantomData<U>);
+/// How far a measured value stands from its set point. It is its own dimension, so a deviation can never be
+/// added to the variable it was read from (finding 14). A law turns it into a dimensionless drive by dividing by
+/// a declared width, or into a set point's rate by multiplying by a speed.
+pub struct Deviation<U: Sensed>(PhantomData<U>);
+/// A second-order binding constant: rate per amount of ligand per amount of free receptor.
+pub struct Affinity<Q>(PhantomData<Q>);
+pub struct PerSite<C: SiteSet, U>(PhantomData<(C, U)>);
+pub struct PerEdge<U, E: EdgeKind = VascularEdge>(PhantomData<(U, E)>);
+
+/// What a pool holds. One closed list, so a row, a route's carried columns and a `Book` all read one name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Species {
+    Water,
+    Sodium,
+    Potassium,
+    Chloride,
+    Albumin,
+    Vasopressin,
+    Norepinephrine,
+    Acetylcholine,
+    Energy,
+}
+impl Species {
+    /// What water can carry, water first: every species but energy, which no route moves as a share of a flow.
+    pub(crate) const CARRIED: [Species; 8] = [
+        Species::Water,
+        Species::Sodium,
+        Species::Potassium,
+        Species::Chloride,
+        Species::Albumin,
+        Species::Vasopressin,
+        Species::Norepinephrine,
+        Species::Acetylcholine,
+    ];
+    /// Charge in units of the amount, zero for what the ledger keeps as no ion.
+    pub(crate) const fn charge(self) -> i64 {
+        match self {
+            Species::Sodium | Species::Potassium => 1,
+            Species::Chloride => -1,
+            _ => 0,
+        }
+    }
+    pub(crate) const fn names(self) -> [&'static str; 6] {
+        match self {
+            Species::Water => [
+                "reclaim water",
+                "release water",
+                "reuptake water",
+                "binding water",
+                "effect water",
+                "exchange water",
+            ],
+            Species::Sodium => [
+                "reclaim sodium",
+                "release sodium",
+                "reuptake sodium",
+                "binding sodium",
+                "effect sodium",
+                "exchange sodium",
+            ],
+            Species::Potassium => [
+                "reclaim potassium",
+                "release potassium",
+                "reuptake potassium",
+                "binding potassium",
+                "effect potassium",
+                "exchange potassium",
+            ],
+            Species::Chloride => [
+                "reclaim chloride",
+                "release chloride",
+                "reuptake chloride",
+                "binding chloride",
+                "effect chloride",
+                "exchange chloride",
+            ],
+            Species::Albumin => [
+                "reclaim albumin",
+                "release albumin",
+                "reuptake albumin",
+                "binding albumin",
+                "effect albumin",
+                "exchange albumin",
+            ],
+            Species::Vasopressin => [
+                "reclaim vasopressin",
+                "release vasopressin",
+                "reuptake vasopressin",
+                "binding vasopressin",
+                "effect vasopressin",
+                "exchange vasopressin",
+            ],
+            Species::Norepinephrine => [
+                "reclaim norepinephrine",
+                "release norepinephrine",
+                "reuptake norepinephrine",
+                "binding norepinephrine",
+                "effect norepinephrine",
+                "exchange norepinephrine",
+            ],
+            Species::Acetylcholine => [
+                "reclaim acetylcholine",
+                "release acetylcholine",
+                "reuptake acetylcholine",
+                "binding acetylcholine",
+                "effect acetylcholine",
+                "exchange acetylcholine",
+            ],
+            Species::Energy => [
+                "reclaim energy",
+                "release energy",
+                "reuptake energy",
+                "binding energy",
+                "effect energy",
+                "exchange energy",
+            ],
+        }
+    }
+    pub(crate) fn dimension(self) -> String {
+        match self {
+            Species::Water => dimension::<Water>(),
+            Species::Sodium => dimension::<Sodium>(),
+            Species::Potassium => dimension::<Potassium>(),
+            Species::Chloride => dimension::<Chloride>(),
+            Species::Albumin => dimension::<Albumin>(),
+            Species::Vasopressin => dimension::<Vasopressin>(),
+            Species::Norepinephrine => dimension::<Norepinephrine>(),
+            Species::Acetylcholine => dimension::<Acetylcholine>(),
+            Species::Energy => dimension::<Energy>(),
+        }
+    }
+}
+mod substances {
+    pub trait Sealed {}
+}
+/// A dimension a pool can hold: the type a law reads, tied to the name a row carries.
+pub trait Substance: substances::Sealed + Dimension {
+    const SPECIES: Species;
+}
+macro_rules! substances {
+    ($($name:ident),*) => {$(
+        impl substances::Sealed for $name {}
+        impl Substance for $name {
+            const SPECIES: Species = Species::$name;
+        }
+    )*};
+}
+substances!(
+    Water,
+    Sodium,
+    Potassium,
+    Chloride,
+    Albumin,
+    Vasopressin,
+    Norepinephrine,
+    Acetylcholine,
+    Energy
+);
 
 macro_rules! named {
     ($($dimension:ident = $name:literal),* $(,)?) => {$(
@@ -68,6 +234,16 @@ named!(
     Elastance = "elastance",
     Water = "water",
     Energy = "energy",
+    Sodium = "sodium",
+    Potassium = "potassium",
+    Chloride = "chloride",
+    Albumin = "albumin",
+    Vasopressin = "vasopressin",
+    Norepinephrine = "norepinephrine",
+    Acetylcholine = "acetylcholine",
+    Resistance = "resistance",
+    Inertance = "inertance",
+    Orifice = "orifice",
     Temperature = "temperature",
     Phase = "phase",
     Viscosity = "viscosity",
@@ -111,6 +287,18 @@ impl<U: Sensed> dimensions::Sealed for Reference<U> {
     }
 }
 impl<U: Sensed> Dimension for Reference<U> {}
+impl<U: Sensed> dimensions::Sealed for Deviation<U> {
+    fn name() -> String {
+        format!("deviation({})", U::name())
+    }
+}
+impl<U: Sensed> Dimension for Deviation<U> {}
+impl<Q: Dimension> dimensions::Sealed for Affinity<Q> {
+    fn name() -> String {
+        format!("affinity({})", Q::name())
+    }
+}
+impl<Q: Dimension> Dimension for Affinity<Q> {}
 
 impl material::Sealed for Dimensionless {}
 impl NonMaterial for Dimensionless {}
@@ -118,6 +306,9 @@ impl material::Sealed for Phase {}
 impl NonMaterial for Phase {}
 impl<U: Sensed> material::Sealed for Reference<U> {}
 impl<U: Sensed> NonMaterial for Reference<U> {}
+/// A valve's flow is memory: a rate of an amount, never an amount, and no column reads it but its own edge's.
+impl material::Sealed for Rate<Water> {}
+impl NonMaterial for Rate<Water> {}
 
 macro_rules! sensed {
     ($($dimension:ty),*) => {$(
@@ -125,7 +316,7 @@ macro_rules! sensed {
         impl Sensed for $dimension {}
     )*};
 }
-sensed!(Dimensionless, Pressure, Volume, Temperature, Length);
+sensed!(Dimensionless, Pressure, Volume, Temperature, Length, Rate<Water>);
 
 mod identities {
     pub trait Sealed<U> {}
@@ -144,7 +335,45 @@ same_dimension! {
     Quotient<Pressure, Elastance> => Volume;
     Quotient<Pressure, Pressure> => Dimensionless;
     Quotient<Volume, Volume> => Dimensionless;
+    Quotient<Pressure, Resistance> => Rate<Water>;
+    Product<Resistance, Rate<Water>> => Pressure;
+    Quotient<Pressure, Inertance> => Rate<Rate<Water>>;
+    Product<Orifice, Product<Rate<Water>, Rate<Water>>> => Pressure;
+    Product<Quotient<Pressure, Length>, Length> => Pressure;
+    Product<Rate<Water>, Dimensionless> => Rate<Water>;
+    Product<Pressure, Quotient<Dimensionless, Pressure>> => Dimensionless;
+    Product<Quotient<Pressure, Concentration<Albumin>>, Concentration<Albumin>> => Pressure;
+    Product<Pressure, Volume> => Energy;
+    Product<Energy, Rate<Dimensionless>> => Rate<Energy>;
+    Product<Pressure, Rate<Volume>> => Rate<Energy>;
+    Product<Quotient<Volume, Albumin>, Albumin> => Volume;
+    Rate<Sodium> => Rate<Chloride>;
+    Rate<Potassium> => Rate<Chloride>;
 }
+impl<U: Dimension> identities::Sealed<U> for Quotient<U, Dimensionless> {}
+impl<U: Dimension> SameDimension<U> for Quotient<U, Dimensionless> {}
+impl<Q: Substance> identities::Sealed<Dimensionless> for Quotient<Concentration<Q>, Concentration<Q>> {}
+impl<Q: Substance> SameDimension<Dimensionless> for Quotient<Concentration<Q>, Concentration<Q>> {}
+impl<Q: Substance> identities::Sealed<Dimensionless> for Quotient<Q, Q> {}
+impl<Q: Substance> SameDimension<Dimensionless> for Quotient<Q, Q> {}
+impl<Q: Substance> identities::Sealed<Concentration<Q>> for Quotient<Q, Volume> {}
+impl<Q: Substance> SameDimension<Concentration<Q>> for Quotient<Q, Volume> {}
+impl<P: Substance, Q: Substance> identities::Sealed<Rate<Q>> for Product<Rate<P>, Quotient<Q, P>> {}
+impl<P: Substance, Q: Substance> SameDimension<Rate<Q>> for Product<Rate<P>, Quotient<Q, P>> {}
+impl<Q: Substance> identities::Sealed<Rate<Q>> for Product<Affinity<Q>, Product<Q, Q>> {}
+impl<Q: Substance> SameDimension<Rate<Q>> for Product<Affinity<Q>, Product<Q, Q>> {}
+impl<Q: Substance> identities::Sealed<Rate<Q>>
+    for Product<Affinity<Concentration<Q>>, Product<Concentration<Q>, Q>>
+{
+}
+impl<Q: Substance> SameDimension<Rate<Q>>
+    for Product<Affinity<Concentration<Q>>, Product<Concentration<Q>, Q>>
+{
+}
+impl<U: Sensed> identities::Sealed<Dimensionless> for Quotient<Deviation<U>, Deviation<U>> {}
+impl<U: Sensed> SameDimension<Dimensionless> for Quotient<Deviation<U>, Deviation<U>> {}
+impl<U: Sensed> identities::Sealed<Rate<Reference<U>>> for Product<Deviation<U>, Rate<Dimensionless>> {}
+impl<U: Sensed> SameDimension<Rate<Reference<U>>> for Product<Deviation<U>, Rate<Dimensionless>> {}
 
 pub(crate) fn dimension<U: Dimension>() -> String {
     U::name()

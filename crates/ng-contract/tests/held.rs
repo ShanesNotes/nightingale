@@ -86,7 +86,7 @@ fn schema(defect: Defect) -> Result<(Schema, Sites), AdmissionError> {
     };
     map.enclose(&belly, &[bed.id()], compliance);
     let mut schema = Schema::new(map.finish()?)?;
-    schema.water_boundary(ROUTE, BoundaryDirection::IntoBody, vessel.id(), Space::Lumen)?;
+    schema.boundary::<Water>(ROUTE, BoundaryDirection::IntoBody, vessel.id(), Space::Lumen)?;
     if matches!(
         defect,
         Defect::ElasticEnclosure | Defect::RigidEnclosure | Defect::FluidLeftOut
@@ -98,7 +98,7 @@ fn schema(defect: Defect) -> Result<(Schema, Sites), AdmissionError> {
     }
     if defect == Defect::OneRouteReadsAnother {
         for route in [SECOND_ROUTE, THIRD_ROUTE] {
-            schema.water_boundary(route, BoundaryDirection::IntoBody, vessel.id(), Space::Lumen)?;
+            schema.boundary::<Water>(route, BoundaryDirection::IntoBody, vessel.id(), Space::Lumen)?;
         }
     }
     let sites = Sites {
@@ -166,7 +166,7 @@ fn gut<'b>(body: &mut Assembly<'b>, defect: Defect) -> Result<(), AdmissionError
         } else {
             ROUTE
         };
-        let BoundaryWater { route, drive } = ports.water(name)?;
+        let BoundaryRoute { route, drive } = ports.route::<Water>(name)?;
         let class = slow()?;
         let rate = laws.kernel(|mut k| {
             let value = if defect == Defect::OnlyARowReadsTheDrive {
@@ -248,7 +248,7 @@ fn compiled(defect: Defect) -> Result<CompiledBody, AdmissionError> {
         match defect {
             Defect::BoundaryLawOnHeldRoute => {
                 let (mut laws, ports) = body.boundary()?.parts();
-                let BoundaryWater { route, drive } = ports.water(ROUTE)?;
+                let BoundaryRoute { route, drive } = ports.route::<Water>(ROUTE)?;
                 let class = slow()?;
                 let rate = laws.kernel(|mut k| {
                     let value = k.read(&drive);
@@ -259,8 +259,8 @@ fn compiled(defect: Defect) -> Result<CompiledBody, AdmissionError> {
             }
             Defect::OneRouteReadsAnother => {
                 let (mut laws, ports) = body.boundary()?.parts();
-                let BoundaryWater { route: second, .. } = ports.water(SECOND_ROUTE)?;
-                let BoundaryWater { route: third, drive } = ports.water(THIRD_ROUTE)?;
+                let BoundaryRoute { route: second, .. } = ports.route::<Water>(SECOND_ROUTE)?;
+                let BoundaryRoute { route: third, drive } = ports.route::<Water>(THIRD_ROUTE)?;
                 for route in [&second, &third] {
                     let class = slow()?;
                     let rate = laws.kernel(|mut k| {
@@ -274,7 +274,7 @@ fn compiled(defect: Defect) -> Result<CompiledBody, AdmissionError> {
             Defect::LiverReadsTheGutsDrive => {
                 let declaration = HeldDeclaration::<Hepatic>::new(vec![], vec![], "a synthetic bench");
                 let (mut laws, ports) = body.hold(declaration)?.parts();
-                let BoundaryWater { drive, .. } = ports.water(ROUTE)?;
+                let BoundaryRoute { drive, .. } = ports.route::<Water>(ROUTE)?;
                 let tap = laws.algebraic::<Rate<Water>>(ROUTE, Admissible::finite());
                 let class = slow()?;
                 let residual = laws.kernel(|mut k| {
@@ -503,6 +503,7 @@ fn a_held_route_is_a_column_of_its_card_with_a_receipt() -> Result<(), Admission
     let lumen = row(RowKind::Amount {
         site: sites.vessel,
         space: Space::Lumen,
+        species: Species::Water,
     });
     let column = body.columns().iter().find(|column| column.receipt().is_some());
     let column = column.expect("the route's column");
@@ -709,7 +710,11 @@ fn a_held_space_the_map_does_not_have_is_refused() -> Result<(), AdmissionError>
 fn a_held_pool_is_an_amount_in_the_ledger_with_a_combination_of_its_own() -> Result<(), AdmissionError> {
     let body = compiled(Defect::None)?;
     let (_, sites) = schema(Defect::None)?;
-    let amount = |site, space| RowKind::Amount { site, space };
+    let amount = |site, space| RowKind::Amount {
+        site,
+        space,
+        species: Species::Water,
+    };
     let held = [amount(sites.bed, Space::Cells), amount(sites.belly, Space::Fluid)];
     for kind in held {
         let row = (body.rows().iter()).find(|row| row.kind() == kind);
@@ -794,12 +799,13 @@ fn a_bed_reads_its_nearest_enclosure_and_a_bed_nothing_encloses_reads_no_row() -
     };
     let pressure = row(RowKind::Algebraic(Slot {
         law: law("RS", PRESSURE),
-        site: Some(inner.id()),
+        at: Context::Site(inner.id()),
     }));
     let reads = |site| {
         let at = row(RowKind::Amount {
             site,
             space: Space::Interstitium,
+            species: Species::Water,
         })
         .index();
         let sparsity = body.sparsity();

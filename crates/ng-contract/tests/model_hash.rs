@@ -48,7 +48,7 @@ fn schema(order: Order, change: Change) -> Result<Schema, AdmissionError> {
         map.connect(Network::Vascular, from, to);
     }
     let mut schema = Schema::new(map.finish()?)?;
-    schema.water_boundary("inflow", BoundaryDirection::IntoBody, vessel.id(), Space::Lumen)?;
+    schema.boundary::<Water>("inflow", BoundaryDirection::IntoBody, vessel.id(), Space::Lumen)?;
     schema.partial_volume(Measure::new(1.0)?)?;
     let reason = if change == Change::LeftOutReason {
         "cell water waits for its law"
@@ -104,10 +104,10 @@ fn circulation<'b>(
     let g_key = ParameterKey::new("cv.g");
     let (e, g) = if order == Order::Forward {
         let e = laws.end_parameter::<Elastance>(e_key, Admissible::positive());
-        let g = laws.edge_parameter::<Conductance<Water>>(g_key, Admissible::nonnegative());
+        let g = laws.edge_parameter::<_, Conductance<Water>>(g_key, Admissible::nonnegative());
         (e, g)
     } else {
-        let g = laws.edge_parameter::<Conductance<Water>>(g_key, Admissible::nonnegative());
+        let g = laws.edge_parameter::<_, Conductance<Water>>(g_key, Admissible::nonnegative());
         let e = laws.end_parameter::<Elastance>(e_key, Admissible::positive());
         (e, g)
     };
@@ -176,8 +176,8 @@ fn starling(scope: FluidsScope<'_>, order: Order) -> Result<Fragment<'_, Fluids>
 
 fn inflow(scope: BoundaryScope<'_>) -> Result<Fragment<'_, Boundary>, AdmissionError> {
     let (mut laws, ports) = scope.parts();
-    let BoundaryWater { route: pair, drive } = ports.water("inflow")?;
-    let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+    let BoundaryRoute { route: pair, drive } = ports.route::<Water>("inflow")?;
+    let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
     let rate = laws.kernel(|mut k| {
         let value = k.read(&drive);
         k.finish(value, laws.every_mode(), wave)
@@ -192,7 +192,7 @@ fn reflexes(
     change: Change,
 ) -> Result<Fragment<'_, Nervous>, AdmissionError> {
     let (mut laws, _ports) = scope.parts();
-    let reflex = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+    let reflex = RateClass::new(RateBand::Reflex, 3_600_000_000_000)?;
     let hours = RateClass::new(RateBand::Hours, 3_600_000_000_000)?;
     let speed_key = ParameterKey::new("ns.speed");
     let level_key = ParameterKey::new("ns.level");
@@ -231,11 +231,18 @@ fn reflexes(
         (on, off)
     };
     let gate = laws.state::<Dimensionless>("gate", Admissible::unit_interval());
+    let width = laws.parameter::<Deviation<Dimensionless>>(
+        ParameterKey::new("ns.deviation-width"),
+        Admissible::positive(),
+    );
     let relax = laws.kernel(|mut k| {
         let reference = k.state(&set_point);
         let now = k.state(&filter);
         let error = k.deviation(now, reference);
-        let target = k.logistic(error);
+        let scale = k.parameter(&width);
+        let ratio = k.divide(error, scale);
+        let drive = k.as_dimension(ratio);
+        let target = k.logistic(drive);
         let now = k.state(&filter);
         let pace = k.parameter(&speed);
         let rate = k.relax(target, now, pace);
@@ -403,7 +410,7 @@ fn twins(range_on_first: bool, first_built_first: bool) -> Result<ModelHash, Adm
     map.site::<TissueSite>("body", position(0.0)?);
     let compiled = assemble(Schema::new(map.finish()?)?, |mut body| {
         let (mut laws, _ports) = body.nervous()?.parts();
-        let reflex = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let reflex = RateClass::new(RateBand::Reflex, 3_600_000_000_000)?;
         let first = laws.state::<Dimensionless>("first", Admissible::finite());
         let second = laws.state::<Dimensionless>("second", Admissible::finite());
         let still = || {

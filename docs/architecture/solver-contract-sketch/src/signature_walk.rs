@@ -54,6 +54,7 @@
 //!     let filter = laws.state::<Dimensionless>("afferent-filter", Admissible::unit_interval());
 //!     let set_point = laws.set_point::<Dimensionless>("stretch-set-point", Admissible::unit_interval());
 //!     let chronic = laws.parameter(ParameterKey::new("ns.chronic-set-point"), Admissible::unit_interval());
+//!     let width = laws.parameter::<Deviation<Dimensionless>>(ParameterKey::new("ns.afferent-width"), Admissible::positive());
 //!     let inverse_tau = laws.parameter(ParameterKey::new("ns.afferent-rate"), Admissible::nonnegative());
 //!     let resetting = laws.parameter(ParameterKey::new("ns.resetting-rate"), Admissible::nonnegative());
 //!     let (reflex, slow) = (RateClass::new(RateBand::Reflex, 1_000_000_000)?, RateClass::new(RateBand::Hours, 3_600_000_000_000)?);
@@ -61,7 +62,10 @@
 //!         let stretch = k.read(&afferents.carotid_sinus_stretch);
 //!         let reference = k.state(&set_point);
 //!         let error = k.deviation(stretch, reference);
-//!         let target = k.logistic(error);
+//!         let width = k.parameter(&width);
+//!         let ratio = k.divide(error, width);
+//!         let ratio = k.as_dimension::<_, Dimensionless>(ratio);
+//!         let target = k.logistic(ratio);
 //!         let current = k.state(&filter);
 //!         let speed = k.parameter(&inverse_tau);
 //!         let rate = k.relax(target, current, speed);
@@ -233,7 +237,7 @@
 //!     let id = |name: &[u8]| InputId::new(Digest::of_canonical(name));
 //!     let day = ClockPhase::new(0, 86_400_000_000_000)?;
 //!     let room = Environment::new(1.0, 1.0, 0.5, 0.0, 1.0, 1.0, 1.0, vec![1.0])?; // synthetic
-//!     let seated = Posture::new(90.0, Legs::SeatedDependent)?;
+//!     let seated = Posture::new(1.0, Legs::SeatedDependent)?;
 //!     let meal = Composition::new(meal_schema, vec![1.0, 1.0])?; // synthetic, not physiological
 //!     let breakfast = Intake::new(IntakeRoute::Oral, meal, Delivery::Continuous { ends: at(65) });
 //!     BoundaryPort::new(vec![

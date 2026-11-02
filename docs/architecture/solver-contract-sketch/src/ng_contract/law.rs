@@ -10,7 +10,7 @@
 use super::catalog::{Coupling, Defines, Reads};
 use super::{
     Admissible, AdmissionError, Brand, Conductance, Digest, Dimensionless, Energy, NonMaterial,
-    ParameterKey, PerSite, PoolRef, Pressure, Product, Quotient, RateClass, Rate, Reference,
+    ParameterKey, PerSite, PoolRef, Pressure, Product, Quotient, RateClass, Rate, Reference, Deviation,
     Representation, SameDimension, Sensed, SiteClass, ValidityRange, Volume,
 };
 use core::marker::PhantomData;
@@ -202,7 +202,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
         &mut self,
         _measured: Expr<'b, 'k, O, U>,
         _reference: Expr<'b, 'k, O, Reference<U>>,
-    ) -> Expr<'b, 'k, O, U> {
+    ) -> Expr<'b, 'k, O, Deviation<U>> {
         todo!()
     }
     /// The stream's value for its current event ordinal, uniform on (0, 1). It stays constant
@@ -289,7 +289,6 @@ pub struct ModeTransition<'b, O> {
 pub enum Crossing {
     Rising,
     Falling,
-    Either,
 }
 /// A zero function, the direction of crossing that counts and the transition it fires. The
 /// zero kernel keeps its own dimension; compilation requires it to hold in the mode it leaves.

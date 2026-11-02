@@ -9,6 +9,11 @@ edition = "2024"
 rust-version = "1.98.1"
 publish = false
 
+# One optimized pass over a body of about 240 rows, so a test that admits it runs in seconds. Float results do not
+# depend on this: no profile here relaxes IEEE arithmetic.
+[profile.test]
+opt-level = 2
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

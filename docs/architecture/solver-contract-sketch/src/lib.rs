@@ -410,7 +410,7 @@
 //! ```
 //! use solver_contract_sketch::ng_contract::*;
 //! fn error<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>, pressure: Expr<'b, 'k, Nervous, Pressure>,
-//!     set_point: &StateSlot<'b, Nervous, Reference<Pressure>>) -> Expr<'b, 'k, Nervous, Pressure> {
+//!     set_point: &StateSlot<'b, Nervous, Reference<Pressure>>) -> Expr<'b, 'k, Nervous, Deviation<Pressure>> {
 //!     let reference = k.state(set_point);
 //!     k.deviation(pressure, reference)
 //! }

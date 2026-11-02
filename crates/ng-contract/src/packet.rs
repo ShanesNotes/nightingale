@@ -7,7 +7,7 @@ use crate::quantity::dimension;
 use crate::{
     AdmissionError, Anchor, AnchorId, AnchorStatistic, Binding, Citation, Compensated, CompiledBody, Digest,
     Dimension, Dimensionless, ErrorScales, LawName, Measure, MethodHistory, ModelHash, PacketSeed,
-    ParameterKey, RateBand, RowId, RowKind, SimTime, ValueName, ValueProvenance,
+    ParameterKey, RateBand, RowId, RowKind, SimTime, Slot, UnknownId, ValueName, ValueProvenance,
 };
 use core::marker::PhantomData;
 use core::num::{NonZeroU32, NonZeroU64};
@@ -51,19 +51,23 @@ impl PacketHash {
     pub(crate) fn of_digest(digest: Digest) -> Self {
         Self { digest }
     }
-    /// The hash a run names, closed at admission: the packet's, the moment it starts, the start and fits it reached
-    /// and the core's history there, so one identity has one start whatever made it. Events stay out of it.
+    /// The hash a run names, closed at admission: the packet's, the moment it starts, the start, modes and fits it
+    /// reached and the core's history there, so one identity has one start whatever made it. Events stay out of it.
     pub(crate) fn reading(
         self,
         moment: SimTime,
         start: &[f64],
+        modes: &[usize],
         fitted: &[f64],
         history: &MethodHistory,
     ) -> Self {
-        let mut out = Canonical::new("ng-contract packet and start 1");
+        let mut out = Canonical::new("ng-contract packet and start 2");
         self.digest.seal(&mut out);
         moment.seal(&mut out);
         start.seal(&mut out);
+        for &mode in modes {
+            out.number(mode as u64);
+        }
         fitted.seal(&mut out);
         history.digest().seal(&mut out);
         Self { digest: out.digest() }
@@ -122,8 +126,13 @@ struct StartEntry {
     bits: u64,
     note: &'static str,
 }
+struct ScaleEntry {
+    row: RowKind,
+    dimension: String,
+    bits: u64,
+}
 struct ModeEntry {
-    variable: LawName,
+    variable: Slot,
     value: &'static str,
     note: &'static str,
 }
@@ -149,6 +158,7 @@ pub struct ParameterPacket<K: PacketKind> {
     tolerance: Option<ErrorScales>,
     parameters: Vec<ParameterEntry>,
     starts: Vec<StartEntry>,
+    scales: Vec<ScaleEntry>,
     modes: Vec<ModeEntry>,
     anchors: Vec<AnchorEntry>,
     populations: Vec<PopulationEntry>,
@@ -162,6 +172,7 @@ impl<K: PacketKind> ParameterPacket<K> {
             tolerance: None,
             parameters: Vec::new(),
             starts: Vec::new(),
+            scales: Vec::new(),
             modes: Vec::new(),
             anchors: Vec::new(),
             populations: Vec::new(),
@@ -180,6 +191,20 @@ impl<K: PacketKind> ParameterPacket<K> {
     /// under a run's identity. A packet that states none is held exactly.
     pub fn within(&mut self, tolerance: ErrorScales) {
         self.tolerance = Some(tolerance);
+    }
+    /// A row's natural size, where the tolerance and a core's scales read their absolute term. A row with none is
+    /// one unit in size, so a fixture near unit size states none, and rows of mixed units state their own. `bind`
+    /// refuses one on no row, in another dimension or not positive.
+    pub fn row_scale<U: Dimension>(&mut self, row: RowKind, size: Measure<U>) -> Result<(), AdmissionError> {
+        if self.scales.iter().any(|entry| entry.row == row) {
+            return Err(AdmissionError::RowScale { row });
+        }
+        self.scales.push(ScaleEntry {
+            row,
+            dimension: dimension::<U>(),
+            bits: size.bits(),
+        });
+        Ok(())
     }
     /// An anchor of this packet's kind. Refuses a second anchor under one id.
     pub fn anchor<U: Dimension>(&mut self, anchor: Anchor<K, U>) -> Result<(), AdmissionError> {
@@ -355,6 +380,7 @@ impl<K: PacketKind> ParameterPacket<K> {
             tolerance,
             parameters,
             starts,
+            scales,
             modes,
             anchors,
             populations,
@@ -397,6 +423,14 @@ impl<K: PacketKind> ParameterPacket<K> {
             out.text(dimension);
             out.number(*bits);
             out.text(note);
+        }
+        let mut scales: Vec<&ScaleEntry> = scales.iter().collect();
+        scales.sort_by_key(|entry| entry.row);
+        out.length(scales.len());
+        for ScaleEntry { row, dimension, bits } in scales {
+            row.seal(&mut out);
+            out.text(dimension);
+            out.number(*bits);
         }
         let mut modes: Vec<&ModeEntry> = modes.iter().collect();
         modes.sort_by_key(|entry| entry.variable);
@@ -496,12 +530,36 @@ impl ParameterPacket<SyntheticFixture> {
         });
         Ok(())
     }
+    /// Every row the packet has not started yet, at `guess`. A guess at an algebraic row is only where the solve begins,
+    /// and each row's dimension comes from the row, so a fixture of hundreds of rows states only those that matter.
+    pub fn start_rest(
+        &mut self,
+        body: &CompiledBody,
+        guess: impl Fn(RowKind) -> f64,
+        note: &'static str,
+    ) -> Result<(), AdmissionError> {
+        for row in body.rows() {
+            if self.starts.iter().any(|entry| entry.row == row.kind) {
+                continue;
+            }
+            let value = Measure::<Dimensionless>::new(guess(row.kind))?;
+            self.starts.push(StartEntry {
+                row: row.kind,
+                dimension: row.dimension.clone(),
+                bits: value.bits(),
+                note,
+            });
+        }
+        Ok(())
+    }
+    /// A whole-body variable takes its name; a route's takes a `Slot` at its edge.
     pub fn start_mode(
         &mut self,
-        variable: LawName,
+        variable: impl Into<Slot>,
         value: &'static str,
         note: &'static str,
     ) -> Result<(), AdmissionError> {
+        let variable = variable.into();
         if self.modes.iter().any(|entry| entry.variable == variable) {
             return Err(AdmissionError::DuplicateStartMode { variable });
         }
@@ -557,6 +615,7 @@ pub struct BoundParameters {
     pub(crate) packet: PacketHash,
     pub(crate) values: Vec<f64>,
     pub(crate) starts: Vec<f64>,
+    pub(crate) sizes: Vec<f64>,
     pub(crate) modes: Vec<usize>,
     pub(crate) owed: Owed,
 }
@@ -570,6 +629,7 @@ impl BoundParameters {
             packet,
             values,
             starts,
+            sizes,
             modes,
             owed: _,
         } = self;
@@ -578,27 +638,73 @@ impl BoundParameters {
         packet.digest().seal(&mut out);
         values.seal(&mut out);
         starts.seal(&mut out);
+        sizes.seal(&mut out);
         modes.seal(&mut out);
         out.digest()
     }
 }
 
 impl CompiledBody {
-    /// A firing leaves algebraic values as they were, and nothing here solves them again. A hazard integral only
-    /// grows until it fires, so it never returns over a cycle.
-    fn unrun_mode(&self, periodic: bool) -> Option<LawName> {
+    /// A firing leaves algebraic values as they were and nothing here solves them again, so an algebraic law may not
+    /// hold by a fired mode, read a row a firing resets, or read a draw a firing moves: then no algebraic row jumps at a
+    /// firing, and no landing needs a solve. A variable no guard moves never leaves its start, and a hazard integral only grows until it
+    /// fires, so it never returns over a cycle.
+    fn unrun_mode(&self, periodic: bool) -> Option<Slot> {
         let Layout {
             rows,
             modes,
             guards,
             hazards,
+            instances,
             ..
         } = &self.layout;
-        let algebraic = rows.iter().any(|row| matches!(row.kind, RowKind::Algebraic(_)));
-        let plain = |variable| guards.iter().any(|guard| guard.variable == variable);
-        let moved = |at| hazards.iter().any(|hazard| hazard.variable == at);
+        let algebraic = |target: Target| match target {
+            Target::Row(row) => matches!(rows[row.index()].kind, RowKind::Algebraic(_)),
+            Target::Column(_) => false,
+        };
+        let plain = |at| guards.iter().any(|guard| guard.variable == at);
+        let hazard = |at| hazards.iter().any(|hazard| hazard.variable == at);
+        let selects = |at| {
+            (instances.iter()).any(|law| algebraic(law.target) && law.mode.is_some_and(|mode| mode.0 == at))
+        };
+        let reset_reads = |at| {
+            let resets = (guards.iter())
+                .filter(|guard| guard.variable == at)
+                .filter_map(|guard| guard.resets)
+                .chain(
+                    (hazards.iter())
+                        .filter(|hazard| hazard.variable == at)
+                        .map(|hazard| hazard.integral),
+                );
+            resets.into_iter().any(|row| {
+                let read = |law: &&Instance| {
+                    law.inputs
+                        .iter()
+                        .any(|input| input.unknown() == Some(UnknownId::at(row.index())))
+                };
+                instances
+                    .iter()
+                    .filter(|law| algebraic(law.target))
+                    .any(|law| read(&law))
+            })
+        };
+        let draw_reads = |at| {
+            let advanced = (hazards.iter()).filter(|hazard| hazard.variable == at);
+            advanced.into_iter().any(|hazard| {
+                let read = |input: &Bound| matches!(input, Bound::Draw(stream) if *stream == hazard.stream);
+                (instances.iter())
+                    .filter(|law| algebraic(law.target))
+                    .any(|law| law.inputs.iter().any(read))
+            })
+        };
         (modes.iter().enumerate())
-            .find(|&(at, mode)| periodic || algebraic || plain(mode.variable) || !moved(at))
+            .find(|&(at, _)| {
+                !(plain(at) || hazard(at))
+                    || (periodic && hazard(at))
+                    || selects(at)
+                    || reset_reads(at)
+                    || draw_reads(at)
+            })
             .map(|(_, mode)| mode.variable)
     }
     /// Finding 15's partial check. A literal is zero, so only `exp` and `logistic` make a nonzero constant from
@@ -724,15 +830,32 @@ impl CompiledBody {
         {
             return Err(AdmissionError::UnknownStart { row: entry.row });
         }
+        let sizes = self.sizes(&packet)?;
         let owed = self.owed(&packet, &settled, &filled_by)?;
         Ok(BoundParameters {
             model: self.model_hash(),
             packet: packet.hash(),
             values,
             starts,
+            sizes,
             modes,
             owed,
         })
+    }
+    fn sizes<K: PacketKind>(&self, packet: &ParameterPacket<K>) -> Result<Vec<f64>, AdmissionError> {
+        let rows = &self.layout.rows;
+        let mut sizes = vec![1.0; rows.len()];
+        for entry in &packet.scales {
+            let row = entry.row;
+            let found = rows.iter().position(|known| known.kind == row);
+            let at = found.ok_or(AdmissionError::RowScale { row })?;
+            let size = f64::from_bits(entry.bits);
+            if rows[at].dimension != entry.dimension || size <= 0.0 {
+                return Err(AdmissionError::RowScale { row });
+            }
+            sizes[at] = size;
+        }
+        Ok(sizes)
     }
     /// Every row a row's value can feel and the laws that set them: the row, each row its laws read, and so on
     /// back. At an instant only algebraic rows move, so a walk passes through no other.
@@ -780,7 +903,11 @@ impl CompiledBody {
             || reads.into_iter().any(|input| match *input {
                 Bound::Boundary(_) => true,
                 Bound::Unknown(unknown) => moved(unknown.index()),
-                Bound::Parameter(_) | Bound::Draw(_) | Bound::Forcing(_) | Bound::Gauge => false,
+                Bound::Parameter(_)
+                | Bound::Draw(_)
+                | Bound::Forcing(_)
+                | Bound::Gauge
+                | Bound::Height(_) => false,
             })
     }
     /// A pulsatile row is one its block's rate class puts in the wave or beat band.

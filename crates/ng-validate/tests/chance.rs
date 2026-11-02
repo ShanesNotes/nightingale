@@ -1285,6 +1285,21 @@ fn a_long_span_over_a_forcing_lands_its_events_and_never_crawls() {
 }
 
 #[test]
+fn a_span_stops_at_a_forcings_knot() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = reference(1_000 * SECOND);
+    let mut session = case.admit(&core).expect("admitted");
+    let mut longest = 0;
+    while session.record().accepted().time() < SimTime::from_ns(120 * SECOND) {
+        let from = session.record().accepted().time().nanoseconds();
+        let (reached, _) = finished(session, SimTime::from_ns(from + 1));
+        session = reached;
+        longest = longest.max(session.record().accepted().time().nanoseconds() - from);
+    }
+    assert!(longest <= 10 * SECOND, "a span of {longest} ns");
+}
+
+#[test]
 fn a_core_that_refuses_every_landing_faults_and_publishes_nothing_past_the_crossing() {
     let case = ChanceCase::ectopy().expect("a body");
     let honest = events(&case, &reference(SECOND));
@@ -1514,7 +1529,7 @@ impl Random {
     }
 }
 
-fn random_case(random: &mut Random) -> ChanceCase {
+fn random_case(random: &mut Random, case: ChanceCase) -> ChanceCase {
     let names: [&'static [u8]; 3] = [b"a", b"b", b"c"];
     let deliveries = (0..1 + random.below(3))
         .map(|name| {
@@ -1529,21 +1544,47 @@ fn random_case(random: &mut Random) -> ChanceCase {
         })
         .collect();
     let words = [random.below(1 << 40), random.below(1 << 40), 3, 4];
-    ChanceCase::ectopy()
-        .expect("a body")
-        .delivering(deliveries)
-        .seeded(Seed::new(words))
-        .until(at(60))
+    case.delivering(deliveries).seeded(Seed::new(words)).until(at(60))
 }
 
 /// A fault, an input inside the first step or a case that fired nothing says nothing about the claim; a
 /// divergence breaks it.
 #[test]
 fn late_inputs_match_the_known_timeline_with_a_guard_among_them() {
+    late_inputs_match(ChanceCase::ectopy);
+}
+
+/// The hazard reads a lumen through a field, so an input moves its crossing.
+#[test]
+fn late_inputs_match_the_known_timeline_when_an_input_moves_a_crossing() {
+    late_inputs_match(ChanceCase::fed);
+}
+
+#[test]
+fn a_delivery_moves_when_a_fed_hazard_crosses() {
+    let events = |case: ChanceCase| {
+        let case = case.until(at(120));
+        let core = reference(SECOND);
+        let mut session = case.admit(&core).expect("admitted");
+        let mut fired = Vec::new();
+        while session.record().accepted().time() < case.end() {
+            let next = session.record().accepted().time().nanoseconds() + 1;
+            let (reached, events) = finished(session, SimTime::from_ns(next));
+            session = reached;
+            fired.extend(events.iter().map(Fired::at));
+        }
+        fired
+    };
+    let quiet = events(ChanceCase::fed().expect("a body").delivering(Vec::new()));
+    let fed = events(ChanceCase::fed().expect("a body"));
+    assert_ne!(quiet, fed);
+}
+
+fn late_inputs_match(case: fn() -> Result<ChanceCase, AdmissionError>) {
     let mut random = Random(0x9E37_79B9_7F4A_7C15);
     let (mut same, mut said_nothing) = (0, 0);
     for round in 0..120 {
-        let case = random_case(&mut random);
+        let case = random_case(&mut random, case().expect("a body"));
         let interval_ns = (1 + random.below(40)) * SECOND / 2;
         let salt = random.below(u64::MAX);
         let clock = clock();
@@ -1575,6 +1616,39 @@ fn late_inputs_match_the_known_timeline_with_a_guard_among_them() {
     assert!(same > 60, "{same} compared and {said_nothing} said nothing");
 }
 
+/// No run writes a posture past straight up or a leg share with no descriptor, so a resume refuses the bytes.
+#[test]
+fn a_posture_no_run_writes_is_malformed() {
+    let case = ChanceCase::ectopy().expect("a body");
+    let core = reference(SECOND);
+    let mut session = case.admit(&core).expect("admitted");
+    let posture = Posture::new(Measure::new(0.75).expect("finite"), Legs::SeatedDependent).expect("in range");
+    let id = InputId::new(Digest::of_canonical(b"sit"));
+    let event = BoundaryEvent::new(id, at(200), BoundaryInput::Posture(posture));
+    let command = Digest::of_canonical(b"a command");
+    session
+        .enqueue(AuthorizedInput::from_command_receipt(command, event))
+        .expect("admitted");
+    let mut store = Store::default();
+    let saved = session.checkpoint(&mut store).expect("saved");
+    let identity = session.record().identity().clone();
+    let resumed = Session::resume(&saved, &identity, case.body(), &core, &store);
+    assert!(resumed.is_ok(), "the bytes a run writes read back");
+    let bytes = saved.as_bytes();
+    let wanted = 0.75_f64.to_bits().to_be_bytes();
+    let trunk = (128..bytes.len() - 8)
+        .rev()
+        .find(|&at| bytes[at..at + 8] == wanted);
+    let trunk = trunk.expect("the posture's bytes");
+    // The trunk, then the end no posture has, then the legs' share.
+    for (place, bad) in [(trunk, 1.5_f64), (trunk + 16, 0.25)] {
+        let mut forged = bytes.to_vec();
+        forged[place..place + 8].copy_from_slice(&bad.to_bits().to_be_bytes());
+        let refused = Session::resume(&resealed(forged), &identity, case.body(), &core, &store);
+        assert_eq!(refused.err(), Some(CheckpointError::Malformed), "at {place}");
+    }
+}
+
 fn two_vessels() -> Result<Schema, AdmissionError> {
     let origin = || -> Result<Position, AdmissionError> {
         Ok(Position::new(
@@ -1597,7 +1671,7 @@ fn holds_a_forcing() -> Result<(CompiledBody, RowId), AdmissionError> {
     let body = assemble(two_vessels()?, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let flow = laws.edge_kernel(|mut k| {
             let zero = k.zero::<Rate<Water>>();
             k.finish(zero, laws.every_mode(), wave)
@@ -1695,7 +1769,7 @@ fn admission_holds_a_draw_at_its_mean() -> Result<(), InitializationFailure> {
     let body = assemble(two_vessels()?, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let flow = laws.edge_kernel(|mut k| {
             let zero = k.zero::<Rate<Water>>();
             k.finish(zero, laws.every_mode(), wave)

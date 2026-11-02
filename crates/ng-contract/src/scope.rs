@@ -1,29 +1,35 @@
 use crate::anatomy::Class;
 use crate::compile::compile;
 use crate::identity::{Canonical, Seal};
-use crate::law::{Brand, Family, FragmentData};
+use crate::law::{Brand, Family, FragmentData, Over, SiteField};
 use crate::{
-    AdmissionError, Anatomy, Boundary, BoundaryWater, CapillaryBed, Cardiovascular, CompiledBody, EdgeRoute,
-    EnclosedSpace, Fluids, Fragment, FragmentBuilder, Measure, Nervous, Output, OutsideSlice, Owner,
-    PartialVolume, PerSite, Pressure, ReadPort, SiteId, SiteRoute, Water,
+    AdmissionError, Anatomy, Blood, Boundary, BoundaryRoute, CapillaryBed, Cardiovascular, CompiledBody,
+    Dimensionless, EdgeRoute, EnclosedSpace, Energy, FilterEdge, Fluids, Fragment, FragmentBuilder, Junction,
+    LawName, LymphEdge, Measure, Nervous, Output, OutsideSlice, Owner, Pair, PartialVolume, PerSite,
+    Pressure, ReadPort, Receptor, ReclaimEdge, Renal, SiteId, SiteRoute, SiteSet, Sites, Species, Substance,
+    TubuleEdge, Urinary, ValveEdge, Water,
 };
 use core::marker::PhantomData;
 
 pub(crate) const ENCLOSURE_PRESSURE: &str = "enclosure_pressure";
+const BLOOD_PRESSURE: &str = "blood pressure";
 
-/// The anatomy and the composition data laws never see: where water crosses the boundary, the
-/// partial-volume coefficient and the spaces this body leaves out.
+/// The anatomy and the composition data laws never see: which species live in which spaces, where a route crosses
+/// the boundary, the partial-volume coefficient and the spaces this body leaves out.
 pub struct Schema {
     pub(crate) anatomy: Anatomy,
-    pub(crate) boundaries: Vec<WaterBoundary>,
+    pub(crate) carried: Vec<(Sites, Space, Species)>,
+    pub(crate) placed: Vec<PoolRef>,
+    pub(crate) boundaries: Vec<RouteBoundary>,
     pub(crate) partial_volume: Option<Measure<PartialVolume<Water>>>,
     pub(crate) left_out: Vec<(Space, &'static str)>,
 }
 #[derive(Clone, Copy)]
-pub(crate) struct WaterBoundary {
+pub(crate) struct RouteBoundary {
     pub(crate) name: &'static str,
     pub(crate) direction: BoundaryDirection,
     pub(crate) pool: PoolRef,
+    pub(crate) drains: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BoundaryDirection {
@@ -31,42 +37,82 @@ pub enum BoundaryDirection {
     OutOfBody,
 }
 impl Schema {
+    /// Water lives in every watery space of every site; anything else lives where `carry` or `pool` puts it.
     pub fn new(anatomy: Anatomy) -> Result<Self, AdmissionError> {
         Ok(Self {
             anatomy,
+            carried: Vec::new(),
+            placed: Vec::new(),
             boundaries: Vec::new(),
             partial_volume: None,
             left_out: Vec::new(),
         })
     }
 
-    /// Names where water crosses the boundary: composition data may name a site, a law never does.
-    /// Its law is owed whether or not a boundary scope is issued. Refuses a name declared twice.
-    pub fn water_boundary(
+    /// `Q` lives in this space of every site of a set, so blood and urine can hold different things in a lumen.
+    pub fn carry<Q: Substance, C: SiteSet>(&mut self, space: Space) {
+        self.carried.push((C::SET, space, Q::SPECIES));
+    }
+
+    /// `Q` lives in this space of one site, the composition data that says which junction holds which receptor.
+    /// Refuses a site the map does not hold and a space the site's class does not have.
+    pub fn pool<Q: Substance>(&mut self, site: SiteId, space: Space) -> Result<(), AdmissionError> {
+        if !self.anatomy.sites().any(|known| known == site) {
+            return Err(AdmissionError::SiteOffTheMap { site });
+        }
+        if !Space::of(site.class()).contains(&space) {
+            return Err(AdmissionError::SpaceOfAnotherClass { site, space });
+        }
+        self.placed.push(PoolRef {
+            site,
+            space,
+            species: Q::SPECIES,
+        });
+        Ok(())
+    }
+
+    fn named(&mut self, boundary: RouteBoundary) -> Result<(), AdmissionError> {
+        let name = boundary.name;
+        match self.boundaries.binary_search_by_key(&name, |known| known.name) {
+            Ok(_) => Err(AdmissionError::BoundaryNamedTwice { name }),
+            Err(at) => {
+                self.boundaries.insert(at, boundary);
+                Ok(())
+            }
+        }
+    }
+
+    /// Names where `Q` crosses the boundary: composition data may name a site, a law never does. Its law is owed
+    /// whether or not a boundary scope is issued. Refuses a name declared twice.
+    pub fn boundary<Q: Substance>(
         &mut self,
         name: &'static str,
         direction: BoundaryDirection,
         site: SiteId,
         space: Space,
     ) -> Result<(), AdmissionError> {
-        match self
-            .boundaries
-            .binary_search_by_key(&name, |boundary| boundary.name)
-        {
-            Ok(_) => Err(AdmissionError::BoundaryNamedTwice { name }),
-            Err(at) => {
-                let pool = PoolRef { site, space };
-                self.boundaries.insert(
-                    at,
-                    WaterBoundary {
-                        name,
-                        direction,
-                        pool,
-                    },
-                );
-                Ok(())
-            }
-        }
+        let species = Q::SPECIES;
+        let pool = PoolRef { site, space, species };
+        let drains = false;
+        self.named(RouteBoundary {
+            name,
+            direction,
+            pool,
+            drains,
+        })
+    }
+
+    /// Names a way out of the body for a space's water and everything in it, such as the urine. Its law sets the water
+    /// rate, a row, and it carries every species the pool holds, so no list of them exists to keep in step.
+    pub fn drain(&mut self, name: &'static str, site: SiteId, space: Space) -> Result<(), AdmissionError> {
+        let species = Species::Water;
+        let pool = PoolRef { site, space, species };
+        self.named(RouteBoundary {
+            name,
+            direction: BoundaryDirection::OutOfBody,
+            pool,
+            drains: true,
+        })
     }
 
     /// The volume per amount of water, a fixed structural coefficient `Kernel::volume` reads. Refuses
@@ -95,33 +141,68 @@ impl Schema {
         self.left_out.push((space, reason));
     }
 
-    /// One water pool per space of every site, sites in key order and each class's spaces in the
-    /// order [`Space`] declares them.
-    pub fn pools(&self) -> impl Iterator<Item = (SiteId, Space)> + '_ {
+    /// Every pool in key order: by site, then space, then species.
+    pub fn pools(&self) -> impl Iterator<Item = (SiteId, Space, Species)> + '_ {
         let sites = self.anatomy.sites();
-        sites.flat_map(|site| Space::of(site.class()).iter().map(move |&space| (site, space)))
+        let classed = sites.flat_map(|site| {
+            let spaces = Space::of(site.class()).iter();
+            spaces.flat_map(move |&space| {
+                let water = space.holds_water().then_some(Species::Water);
+                let more = (self.carried.iter())
+                    .filter(move |carried| {
+                        carried.1 == space && self.anatomy.in_set(carried.0).contains(&site)
+                    })
+                    .map(|carried| carried.2);
+                water
+                    .into_iter()
+                    .chain(more)
+                    .map(move |species| (site, space, species))
+            })
+        });
+        let named = self
+            .placed
+            .iter()
+            .map(|pool| (pool.site, pool.space, pool.species));
+        let mut pools: Vec<(SiteId, Space, Species)> = classed.chain(named).collect();
+        pools.sort_unstable();
+        pools.dedup();
+        pools.into_iter()
     }
 }
 impl Seal for Schema {
     fn seal(&self, out: &mut Canonical) {
         let Self {
             anatomy,
+            carried,
+            placed,
             boundaries,
             partial_volume,
             left_out,
         } = self;
         anatomy.digest().seal(out);
+        let mut pools: Vec<(SiteId, Space, Species)> = self.pools().collect();
+        pools.sort_unstable();
+        let _ = (carried, placed);
+        out.length(pools.len());
+        for (site, space, species) in pools {
+            site.seal(out);
+            out.number(space as u64);
+            out.number(species as u64);
+        }
         out.length(boundaries.len());
-        for WaterBoundary {
+        for RouteBoundary {
             name,
             direction,
-            pool: PoolRef { site, space },
+            pool: PoolRef { site, space, species },
+            drains,
         } in boundaries
         {
             out.text(name);
             out.number(*direction as u64);
             site.seal(out);
             out.number(*space as u64);
+            out.number(*species as u64);
+            out.number(u64::from(*drains));
         }
         partial_volume.as_ref().map(Measure::bits).seal(out);
         let mut left_out = left_out.clone();
@@ -139,6 +220,7 @@ impl Seal for Schema {
 pub(crate) struct PoolRef {
     pub(crate) site: SiteId,
     pub(crate) space: Space,
+    pub(crate) species: Species,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -148,15 +230,31 @@ pub enum Space {
     Cells,
     Lumen,
     Fluid,
+    Vesicle,
+    Cleft,
+    /// Ligand held on its receptors, at a junction or a bed.
+    Bound,
+    /// The mechanical energy held in stretched walls: one store, on the tissue site that stands for the body.
+    Elastic,
+    /// Heat: one store, on the same site.
+    Thermal,
 }
 impl Space {
     fn of(class: Class) -> &'static [Space] {
         match class {
-            Class::CapillaryBed => &[Space::Plasma, Space::Interstitium, Space::Cells],
+            Class::CapillaryBed => &[Space::Plasma, Space::Interstitium, Space::Cells, Space::Bound],
             Class::VesselSegment => &[Space::Lumen],
             Class::EnclosedSpace => &[Space::Fluid],
-            Class::Junction | Class::TissueSite | Class::NerveSegment => &[],
+            Class::Junction => &[Space::Vesicle, Space::Cleft, Space::Bound],
+            Class::TissueSite => &[Space::Elastic, Space::Thermal],
+            Class::NerveSegment => &[],
         }
+    }
+    fn holds_water(self) -> bool {
+        matches!(
+            self,
+            Space::Plasma | Space::Interstitium | Space::Cells | Space::Lumen | Space::Fluid
+        )
     }
 }
 
@@ -190,12 +288,24 @@ impl<'b> Assembly<'b> {
             },
         })
     }
-    fn boundary_names(&self) -> Vec<&'static str> {
+    fn boundary_names(&self) -> Vec<(&'static str, Species)> {
         self.schema
             .boundaries
             .iter()
-            .map(|boundary| boundary.name)
+            .map(|boundary| (boundary.name, boundary.pool.species))
             .collect()
+    }
+    pub fn renal(&mut self) -> Result<RenalScope<'b>, AdmissionError> {
+        Ok(RenalScope {
+            laws: self.issue()?,
+            ports: RenalPorts { brand: PhantomData },
+        })
+    }
+    pub fn receptor(&mut self) -> Result<ReceptorScope<'b>, AdmissionError> {
+        Ok(ReceptorScope {
+            laws: self.issue()?,
+            ports: ReceptorPorts { brand: PhantomData },
+        })
     }
     pub fn boundary(&mut self) -> Result<BoundaryScope<'b>, AdmissionError> {
         Ok(BoundaryScope {
@@ -223,7 +333,7 @@ impl<'b> Assembly<'b> {
         holds.sort_unstable();
         holds.dedup();
         for &name in &supplies {
-            if names.binary_search(&name).is_err() {
+            if !names.iter().any(|known| known.0 == name) {
                 return Err(AdmissionError::UnknownBoundary { name });
             }
             if self.held.iter().any(|held| held.supplies.contains(&name)) {
@@ -302,25 +412,40 @@ scope!(BoundaryScope, Boundary, BoundaryPorts);
 scope!(CardiovascularScope, Cardiovascular, CardiovascularPorts);
 scope!(FluidsScope, Fluids, FluidsPorts);
 scope!(NervousScope, Nervous, NervousPorts);
+scope!(RenalScope, Renal, RenalPorts);
+scope!(ReceptorScope, Receptor, ReceptorPorts);
+
+fn named_route<'b, Q: Substance, O>(
+    names: &[(&'static str, Species)],
+    name: &'static str,
+) -> Result<BoundaryRoute<'b, Q, O>, AdmissionError> {
+    match names.iter().find(|known| known.0 == name) {
+        Some(known) if known.1 == Q::SPECIES => Ok(BoundaryRoute::named(name)),
+        _ => Err(AdmissionError::UnknownBoundary { name }),
+    }
+}
+fn effect<'b, O, C: SiteSet, Q: Substance>() -> ReadPort<'b, O, PerSite<C, Dimensionless>> {
+    ReadPort::field(LawName {
+        owner: Receptor::CARD,
+        local: Q::SPECIES.names()[4],
+    })
+}
 
 pub struct BoundaryPorts<'b> {
-    names: Vec<&'static str>,
+    names: Vec<(&'static str, Species)>,
     brand: Brand<'b>,
 }
 impl<'b> BoundaryPorts<'b> {
-    /// The schema boundary's pair and drive. Refuses a name the schema does not declare.
-    pub fn water(&self, name: &'static str) -> Result<BoundaryWater<'b>, AdmissionError> {
-        match self.names.binary_search(&name) {
-            Ok(_) => Ok(BoundaryWater::named(name)),
-            Err(_) => Err(AdmissionError::UnknownBoundary { name }),
-        }
+    /// The schema boundary's pair and drive. Refuses a name the schema does not declare for `Q`.
+    pub fn route<Q: Substance>(&self, name: &'static str) -> Result<BoundaryRoute<'b, Q>, AdmissionError> {
+        named_route(&self.names, name)
     }
 }
 pub struct CardiovascularPorts<'b> {
     brand: Brand<'b>,
 }
 impl<'b> CardiovascularPorts<'b> {
-    /// Records a law owed for every vascular edge before returning the route, so dropping the route
+    /// Records a law owed for every plain vascular edge before returning the route, so dropping the route
     /// never drops what the fragment owes.
     pub fn circulation(
         &self,
@@ -328,6 +453,66 @@ impl<'b> CardiovascularPorts<'b> {
     ) -> EdgeRoute<'b, Cardiovascular, Water> {
         laws.request(Family::Circulation);
         EdgeRoute::requested(Family::Circulation)
+    }
+    /// Every valved edge. Its flow is memory, owed here with its route.
+    pub fn valves(
+        &self,
+        laws: &mut FragmentBuilder<'b, Cardiovascular>,
+    ) -> EdgeRoute<'b, Cardiovascular, Water, ValveEdge> {
+        laws.request(Family::Valves);
+        laws.owe_flow_memory(Family::Valves);
+        EdgeRoute::requested(Family::Valves)
+    }
+    /// The pressure row of every blood site and the read of it. CV emits line 80's fields from it.
+    pub fn blood_pressure(
+        &self,
+        laws: &mut FragmentBuilder<'b, Cardiovascular>,
+    ) -> SiteField<'b, Cardiovascular, Blood, Pressure> {
+        laws.site_field(BLOOD_PRESSURE, crate::Admissible::finite())
+    }
+    /// What each blood site feels from outside: its enclosure's pressure, or zero gauge.
+    pub fn extravascular_pressure(&self) -> ReadPort<'b, Cardiovascular, PerSite<Blood, Pressure>> {
+        ReadPort::extravascular()
+    }
+    pub fn amount<Q: Substance>(&self) -> ReadPort<'b, Cardiovascular, PerSite<Blood, Q>> {
+        ReadPort::pool(Q::SPECIES)
+    }
+    /// A receptor's effect at its junction, the only way a transmitter changes a CV law.
+    pub fn effect<Q: Substance>(&self) -> ReadPort<'b, Cardiovascular, PerSite<Junction, Dimensionless>> {
+        effect::<_, _, Q>()
+    }
+    /// Work into the elastic store at each blood site. The far end is a receipt: the chemical energy MT stands behind.
+    pub fn stroke_work(
+        &self,
+        laws: &mut FragmentBuilder<'b, Cardiovascular>,
+    ) -> SiteRoute<'b, Cardiovascular, Blood, Energy> {
+        laws.request(Family::StrokeWork);
+        SiteRoute::requested(Family::StrokeWork)
+    }
+    /// Work into the elastic store along each vascular edge as blood falls, out of it as blood climbs. The far end is a
+    /// receipt: the store holds no potential of its own, so a posture moves nothing at its instant.
+    pub fn gravity_work(
+        &self,
+        laws: &mut FragmentBuilder<'b, Cardiovascular>,
+    ) -> EdgeRoute<'b, Cardiovascular, Energy> {
+        laws.request(Family::GravityWork);
+        EdgeRoute::requested(Family::GravityWork)
+    }
+    /// Work into the elastic store past what the heart and gravity pay, from the chemical energy MT stands behind.
+    pub fn wall_work(
+        &self,
+        laws: &mut FragmentBuilder<'b, Cardiovascular>,
+    ) -> Pair<'b, Cardiovascular, Energy> {
+        laws.request(Family::WallWork);
+        Pair::serving(crate::law::Obligation::Family(Family::WallWork))
+    }
+    /// The elastic store to the thermal store: one transfer.
+    pub fn dissipation(
+        &self,
+        laws: &mut FragmentBuilder<'b, Cardiovascular>,
+    ) -> Pair<'b, Cardiovascular, Energy> {
+        laws.request(Family::Dissipation);
+        Pair::serving(crate::law::Obligation::Family(Family::Dissipation))
     }
 }
 pub struct FluidsPorts<'b> {
@@ -344,9 +529,107 @@ impl<'b> FluidsPorts<'b> {
         laws.request(Family::Starling);
         SiteRoute::requested(Family::Starling)
     }
+    /// `Q` across the wall of every capillary bed, apart from what the water carries.
+    pub fn exchange<Q: Substance>(
+        &self,
+        laws: &mut FragmentBuilder<'b, Fluids>,
+    ) -> SiteRoute<'b, Fluids, CapillaryBed, Q> {
+        let family = Family::Exchange(Q::SPECIES);
+        laws.request(family);
+        SiteRoute::requested(family)
+    }
+    pub fn lymph(&self, laws: &mut FragmentBuilder<'b, Fluids>) -> EdgeRoute<'b, Fluids, Water, LymphEdge> {
+        laws.request(Family::Lymph);
+        EdgeRoute::requested(Family::Lymph)
+    }
 }
 pub struct NervousPorts<'b> {
     brand: Brand<'b>,
+}
+impl<'b> NervousPorts<'b> {
+    /// Vesicle to cleft at every junction that holds `Q`.
+    pub fn release<Q: Substance>(
+        &self,
+        laws: &mut FragmentBuilder<'b, Nervous>,
+    ) -> SiteRoute<'b, Nervous, Junction, Q> {
+        let family = Family::Release(Q::SPECIES);
+        laws.request(family);
+        SiteRoute::requested(family)
+    }
+    /// Cleft to vesicle at every junction that holds `Q`.
+    pub fn reuptake<Q: Substance>(
+        &self,
+        laws: &mut FragmentBuilder<'b, Nervous>,
+    ) -> SiteRoute<'b, Nervous, Junction, Q> {
+        let family = Family::Reuptake(Q::SPECIES);
+        laws.request(family);
+        SiteRoute::requested(family)
+    }
+}
+pub struct RenalPorts<'b> {
+    brand: Brand<'b>,
+}
+impl<'b> RenalPorts<'b> {
+    /// Every urinary edge out of a bed. It carries what plasma and lumen both hold, so a space with no albumin keeps
+    /// albumin back by having none.
+    pub fn filtration(
+        &self,
+        laws: &mut FragmentBuilder<'b, Renal>,
+    ) -> EdgeRoute<'b, Renal, Water, FilterEdge> {
+        laws.request(Family::Filtration);
+        EdgeRoute::requested(Family::Filtration)
+    }
+    /// Every urinary edge between two lumens.
+    pub fn tubular(&self, laws: &mut FragmentBuilder<'b, Renal>) -> EdgeRoute<'b, Renal, Water, TubuleEdge> {
+        laws.request(Family::Tubular);
+        EdgeRoute::requested(Family::Tubular)
+    }
+    /// `Q` back from a lumen to a bed along every reclaim edge. One species, so each has its own rate.
+    pub fn reclaim<Q: Substance>(
+        &self,
+        laws: &mut FragmentBuilder<'b, Renal>,
+    ) -> EdgeRoute<'b, Renal, Q, ReclaimEdge> {
+        let family = Family::Reclaim(Q::SPECIES);
+        laws.request(family);
+        EdgeRoute::requested(family)
+    }
+    pub fn lumen<Q: Substance>(&self) -> ReadPort<'b, Renal, PerSite<Urinary, Q>> {
+        ReadPort::pool(Q::SPECIES)
+    }
+    pub fn blood_pressure(&self) -> ReadPort<'b, Renal, PerSite<Blood, Pressure>> {
+        ReadPort::field(LawName {
+            owner: Cardiovascular::CARD,
+            local: BLOOD_PRESSURE,
+        })
+    }
+    pub fn effect<Q: Substance>(&self) -> ReadPort<'b, Renal, PerSite<Blood, Dimensionless>> {
+        effect::<_, _, Q>()
+    }
+}
+pub struct ReceptorPorts<'b> {
+    brand: Brand<'b>,
+}
+impl<'b> ReceptorPorts<'b> {
+    /// Free ligand to bound at every site of `C` that holds `Q` bound: a two-ended transfer, so the ligand's moiety
+    /// closes by pairing and no reaction type is needed. A receptor is a site parameter, not a pool.
+    pub fn binding<C: SiteSet, Q: Substance>(
+        &self,
+        laws: &mut FragmentBuilder<'b, Receptor>,
+    ) -> SiteRoute<'b, Receptor, C, Q> {
+        let family = Family::Binding(C::SET, Q::SPECIES);
+        laws.request(family);
+        SiteRoute::requested(family)
+    }
+    /// The effect of `Q` at every site of `C` that holds it bound. One row per such site, and every law reads it through
+    /// its own scope's `effect`, so no law says which junction.
+    pub fn effect<C: SiteSet, Q: Substance>(
+        &self,
+        laws: &mut FragmentBuilder<'b, Receptor>,
+    ) -> Output<'b, Receptor, PerSite<C, Dimensionless>> {
+        let name = Q::SPECIES.names()[4];
+        laws.owe_defined::<Dimensionless>(name, Over::WherePool(C::SET, Space::Bound, Q::SPECIES));
+        Output::named(name)
+    }
 }
 
 /// What a held stand-in answers for. The rest of what it does shows in its fragment.
@@ -409,15 +692,12 @@ impl<'b, S: OutsideSlice> HeldScope<'b, S> {
 pub struct HeldPorts<'b, S> {
     /// The pressure of each enclosure the map says this card holds, defined once for all of them.
     pub enclosure_pressure: Output<'b, S, PerSite<EnclosedSpace, Pressure>>,
-    names: Vec<&'static str>,
+    names: Vec<(&'static str, Species)>,
     brand: Brand<'b>,
 }
 impl<'b, S> HeldPorts<'b, S> {
-    /// Refuses a name the schema does not declare. Compile refuses a law on a route the declaration omits.
-    pub fn water(&self, name: &'static str) -> Result<BoundaryWater<'b, S>, AdmissionError> {
-        match self.names.binary_search(&name) {
-            Ok(_) => Ok(BoundaryWater::named(name)),
-            Err(_) => Err(AdmissionError::UnknownBoundary { name }),
-        }
+    /// Refuses a name the schema does not declare for `Q`. Compile refuses a law on a route the declaration omits.
+    pub fn route<Q: Substance>(&self, name: &'static str) -> Result<BoundaryRoute<'b, Q, S>, AdmissionError> {
+        named_route(&self.names, name)
     }
 }

@@ -1,4 +1,4 @@
-use crate::body::HazardLayout;
+use crate::body::{GuardLayout, HazardLayout};
 use crate::identity::{Canonical, Seal};
 use crate::{
     Binding, Candidate, CompiledBody, Digest, DomainSeed, Fired, LawName, ModeValue, ObservationSeed,
@@ -173,13 +173,19 @@ impl Chance {
                 ordinal,
                 threshold_bits: self.thresholds[hazard.stream].to_bits(),
                 entered: ModeValue {
-                    variable: mode.variable.local,
+                    variable: mode.variable.law.local,
                     value: mode.values[hazard.enters],
                 },
             });
         }
         (state, fired)
     }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Trigger<'b> {
+    Hazard(&'b HazardLayout),
+    Plain(&'b GuardLayout),
 }
 
 /// Whether a period is a count of the clock's nanoseconds, so a run reads the period the packet gave. The count
@@ -189,7 +195,7 @@ pub(crate) fn holds_a_period(seconds: f64) -> bool {
     ns > 0 && ns as f64 / NANOSECONDS_PER_SECOND == seconds
 }
 
-fn period_ns(seconds: f64) -> u64 {
+pub(crate) fn period_ns(seconds: f64) -> u64 {
     (seconds * NANOSECONDS_PER_SECOND).round() as u64
 }
 

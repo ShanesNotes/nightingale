@@ -103,11 +103,14 @@ pub use certificate::{
     QuantityResult, Sliding24Hours, certify,
 };
 pub use fixture::{ChanceCase, Delivery, TwoReservoirs, admit_fixture, admit_seeded};
-pub use initialize::{Admitted, admission_tolerance, admit_solved};
+pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved};
 pub use reference::ReferenceIntegrator;
 pub use replay::{
     ChancePlan, ClockSource, CoreFactory, GateEvidence, ReplayCase, ReplayEvidence, ReplayFailure,
     ReplayGate, ReplayPlan, WallClock, replay_gate, replay_gates,
 };
 pub use run::run_until;
-pub use slice::{arena_anatomy, hold_outside_slice};
+pub use slice::{
+    anchor_moment, arena_anatomy, arena_body, arena_lens, arena_organs, arena_packet, arena_schema,
+    hold_outside_slice,
+};

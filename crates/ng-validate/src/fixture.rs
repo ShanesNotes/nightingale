@@ -105,16 +105,18 @@ impl TwoReservoirs {
         map.connect(Network::Vascular, a.id(), b.id());
         let mut schema = Schema::new(map.finish()?)?;
         if let Some(direction) = boundary {
-            schema.water_boundary(EXTERIOR, direction, a.id(), Space::Lumen)?;
+            schema.boundary::<Water>(EXTERIOR, direction, a.id(), Space::Lumen)?;
         }
         schema.partial_volume(Measure::new(1.0)?)?;
         let body = assemble(schema, |mut body| {
             let (mut laws, ports) = body.cardiovascular()?.parts();
             let route = ports.circulation(&mut laws);
             let e = laws.end_parameter::<Elastance>(ParameterKey::new("cv.e"), Admissible::positive());
-            let g = laws
-                .edge_parameter::<Conductance<Water>>(ParameterKey::new("cv.g"), Admissible::nonnegative());
-            let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+            let g = laws.edge_parameter::<_, Conductance<Water>>(
+                ParameterKey::new("cv.g"),
+                Admissible::nonnegative(),
+            );
+            let wave = RateClass::new(RateBand::Wave, u64::MAX)?;
             let flow = laws.edge_kernel(|mut k| {
                 let upstream = k.at_edge(&route.from_amount());
                 let downstream = k.at_edge(&route.to_amount());
@@ -138,7 +140,7 @@ impl TwoReservoirs {
             body.add(laws.finish());
             if boundary.is_some() {
                 let (mut laws, ports) = body.boundary()?.parts();
-                let BoundaryWater { route: pair, drive } = ports.water(EXTERIOR)?;
+                let BoundaryRoute { route: pair, drive } = ports.route::<Water>(EXTERIOR)?;
                 let rate = laws.kernel(|mut k| {
                     let value = k.read(&drive);
                     k.finish(value, laws.every_mode(), wave)
@@ -176,6 +178,7 @@ impl TwoReservoirs {
             let lumen = RowKind::Amount {
                 site,
                 space: Space::Lumen,
+                species: Species::Water,
             };
             (self.body.rows().iter())
                 .find(|row| row.kind() == lumen)
@@ -217,6 +220,7 @@ impl TwoReservoirs {
             let row = RowKind::Amount {
                 site,
                 space: Space::Lumen,
+                species: Species::Water,
             };
             packet.start(row, Measure::<Water>::new(amount)?, "synthetic")?;
         }
@@ -346,6 +350,8 @@ fn events_of(deliveries: &[Delivery]) -> Result<Vec<BoundaryEvent>, AdmissionErr
 }
 
 const KNOT_PERIOD_SECONDS: f64 = 10.0;
+const FED: &str = "fed";
+const FED_VOLUME: f64 = 500_000.0;
 const HAZARD_AMPLITUDE: f64 = 0.5;
 const ECTOPY_PER_SECOND: f64 = 0.05;
 const RETURN_PER_SECOND: f64 = 0.2;
@@ -447,6 +453,7 @@ enum Variant {
     Relaxing,
     TwoRhythms,
     Echoing,
+    Fed,
 }
 impl ChanceCase {
     pub fn ectopy() -> Result<Self, AdmissionError> {
@@ -479,6 +486,10 @@ impl ChanceCase {
     pub fn two_rhythms() -> Result<Self, AdmissionError> {
         Self::declared(Variant::TwoRhythms)
     }
+    /// The ectopy rate reads a lumen through a field, so a delivery moves when a hazard crosses.
+    pub fn fed() -> Result<Self, AdmissionError> {
+        Self::declared(Variant::Fed)
+    }
     fn declared(variant: Variant) -> Result<Self, AdmissionError> {
         Self::declared_within(variant, None)
     }
@@ -493,16 +504,21 @@ impl ChanceCase {
         map.contain(root.id(), a.id());
         map.contain(root.id(), b.id());
         map.connect(Network::Vascular, a.id(), b.id());
+        if variant == Variant::Fed {
+            map.landmark(Landmark::Pacemaker, a.id(), a.id());
+        }
         let mut schema = Schema::new(map.finish()?)?;
-        schema.water_boundary(EXTERIOR, BoundaryDirection::IntoBody, a.id(), Space::Lumen)?;
+        schema.boundary::<Water>(EXTERIOR, BoundaryDirection::IntoBody, a.id(), Space::Lumen)?;
         schema.partial_volume(Measure::new(1.0)?)?;
         let body = assemble(schema, |mut body| {
             let (mut laws, ports) = body.cardiovascular()?.parts();
             let route = ports.circulation(&mut laws);
             let e = laws.end_parameter::<Elastance>(ParameterKey::new("cv.e"), Admissible::positive());
-            let g = laws
-                .edge_parameter::<Conductance<Water>>(ParameterKey::new("cv.g"), Admissible::nonnegative());
-            let slowed = laws.edge_parameter::<Conductance<Water>>(
+            let g = laws.edge_parameter::<_, Conductance<Water>>(
+                ParameterKey::new("cv.g"),
+                Admissible::nonnegative(),
+            );
+            let slowed = laws.edge_parameter::<_, Conductance<Water>>(
                 ParameterKey::new("cv.g-ectopic"),
                 Admissible::nonnegative(),
             );
@@ -522,8 +538,8 @@ impl ChanceCase {
             let return_hazard = laws.state::<Dimensionless>(RETURN_INTEGRAL, Admissible::nonnegative());
             let [sinus, ectopic] = laws.modes(RHYTHM, ["sinus", "ectopic"]);
             let (wave, beat) = (
-                RateClass::new(RateBand::Wave, 1_000_000)?,
-                RateClass::new(RateBand::Beat, 100_000_000)?,
+                RateClass::new(RateBand::Wave, u64::MAX)?,
+                RateClass::new(RateBand::Beat, u64::MAX)?,
             );
             laws.transfer_along(&route, flow(&laws, &route, &e, &g, sinus.only(), wave));
             laws.transfer_along(&route, flow(&laws, &route, &e, &slowed, ectopic.only(), wave));
@@ -535,10 +551,36 @@ impl ChanceCase {
                 k.finish(rate, laws.every_mode(), beat)
             });
             laws.memory_rate(&tone, settling);
-            let onset_rate = if variant == Variant::Relaxing {
-                relaxing_rate(&laws, &onset, &onset_hazard, &tone, &wobble, sinus.only(), beat)
-            } else {
-                hazard_rate(&laws, &onset, &tone, &wobble, sinus.only(), beat)
+            let onset_rate = match variant {
+                Variant::Relaxing => {
+                    relaxing_rate(&laws, &onset, &onset_hazard, &tone, &wobble, sinus.only(), beat)
+                }
+                Variant::Fed => {
+                    let (row, read) = laws.site_field::<Blood, Dimensionless>(FED, Admissible::finite());
+                    let scale =
+                        laws.parameter::<Volume>(ParameterKey::new("cv.fed-volume"), Admissible::positive());
+                    let held = ports.amount::<Water>();
+                    let share = laws.site_kernel(|mut k| {
+                        let water = k.at_site(&held);
+                        let volume = k.volume(water);
+                        let whole = k.parameter(&scale);
+                        let ratio = k.divide(volume, whole);
+                        let share = k.as_dimension(ratio);
+                        k.finish(share, laws.every_mode(), wave)
+                    });
+                    laws.define_at(&row, share);
+                    laws.kernel(|mut k| {
+                        let pace = k.parameter(&onset);
+                        let tone = k.state(&tone);
+                        let toned = k.scale(pace, tone);
+                        let varied = k.forcing(&wobble);
+                        let moved = k.scale(toned, varied);
+                        let fed = k.at_landmark(Landmark::Pacemaker, &read);
+                        let rate = k.scale(moved, fed);
+                        k.finish(rate, sinus.only(), beat)
+                    })
+                }
+                _ => hazard_rate(&laws, &onset, &tone, &wobble, sinus.only(), beat),
             };
             if let Some(range) = trusted {
                 laws.validity(&onset_rate, range);
@@ -604,11 +646,11 @@ impl ChanceCase {
                     laws.hazard(HazardGuard::new(&out, &there, quiet.to(&stirred)?));
                     laws.hazard(HazardGuard::new(&back_again, &home, stirred.to(&quiet)?));
                 }
-                Variant::Plain | Variant::Relaxing => {}
+                Variant::Plain | Variant::Relaxing | Variant::Fed => {}
             }
             body.add(laws.finish());
             let (mut laws, ports) = body.boundary()?.parts();
-            let BoundaryWater { route: pair, drive } = ports.water(EXTERIOR)?;
+            let BoundaryRoute { route: pair, drive } = ports.route::<Water>(EXTERIOR)?;
             let rate = laws.kernel(|mut k| {
                 let value = k.read(&drive);
                 k.finish(value, laws.every_mode(), wave)
@@ -651,7 +693,7 @@ impl ChanceCase {
         }
     }
     pub fn memory(&self, local: &'static str) -> Option<RowId> {
-        let kind = RowKind::Memory(named(local));
+        let kind = RowKind::Memory(named(local).into());
         (self.body.rows().iter())
             .find(|row| row.kind() == kind)
             .map(Row::id)
@@ -664,6 +706,7 @@ impl ChanceCase {
             let lumen = RowKind::Amount {
                 site,
                 space: Space::Lumen,
+                species: Species::Water,
             };
             (self.body.rows().iter())
                 .find(|row| row.kind() == lumen)
@@ -695,7 +738,7 @@ impl ChanceCase {
         packet.synthetic(ParameterKey::new("cv.knot-period"), body, period, note)?;
         let amplitude = Measure::<Dimensionless>::new(self.amplitude)?;
         packet.synthetic(ParameterKey::new("cv.hazard-amplitude"), body, amplitude, note)?;
-        let memory = |local| RowKind::Memory(named(local));
+        let memory = |local| RowKind::Memory(named(local).into());
         packet.start(memory(TONE), Measure::<Dimensionless>::new(1.0)?, note)?;
         packet.start(memory(ONSET_INTEGRAL), zero()?, note)?;
         packet.start(memory(RETURN_INTEGRAL), zero()?, note)?;
@@ -713,14 +756,25 @@ impl ChanceCase {
                 packet.start(memory(THIRD_INTEGRAL), zero()?, note)?;
                 packet.start_mode(named(BYSTANDER), "quiet", note)?;
             }
+            Variant::Fed => {
+                let whole = Measure::<Volume>::new(FED_VOLUME)?;
+                packet.synthetic(ParameterKey::new("cv.fed-volume"), body, whole, note)?;
+            }
             Variant::Plain | Variant::Relaxing => {}
         }
         for (site, amount) in [self.a, self.b].into_iter().zip(START) {
             let row = RowKind::Amount {
                 site,
                 space: Space::Lumen,
+                species: Species::Water,
             };
             packet.start(row, Measure::<Water>::new(amount)?, note)?;
+            if self.variant == Variant::Fed {
+                let law = named(FED);
+                let at = Context::Site(site);
+                let fed = RowKind::Algebraic(Slot { law, at });
+                packet.start(fed, Measure::<Dimensionless>::new(amount / FED_VOLUME)?, note)?;
+            }
         }
         Ok(packet)
     }

@@ -1,8 +1,9 @@
 use crate::identity::{Canonical, Seal};
 use crate::landing::Bracket;
 use crate::{
-    AdmissionError, ByteReader, CompiledBody, CoupledProblem, Cycle, Digest, EngineFault, EngineFaultKind,
-    Interval, Malformed, Measure, Refused, SimTime, StepTicket, TrialFailure, VerifiedStep, Water,
+    AdmissionError, ByteReader, Chloride, CompiledBody, CoupledProblem, Cycle, Digest, Dimensionless,
+    EngineFault, EngineFaultKind, Interval, Malformed, Measure, Potassium, Refused, SimTime, Sodium, Species,
+    StepTicket, Substance, TrialFailure, VerifiedStep, Water,
 };
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
@@ -23,15 +24,62 @@ impl Seal for InputId {
     }
 }
 
-/// `amount` of water through the named boundary, from the event's instant until `ends`, at the constant
-/// rate that delivers it: "applied once" shows as a total received. Overlapping deliveries add.
-pub struct WaterDelivery {
+/// `amount` through the named boundary, from the event's instant until `ends`, at the constant rate that delivers
+/// it: "applied once" shows as a total received. Overlapping deliveries add. `check_delivery` refuses a boundary that
+/// carries another species.
+pub struct Delivered<Q> {
     pub boundary: &'static str,
-    pub amount: Measure<Water>,
+    pub amount: Measure<Q>,
     pub ends: SimTime,
 }
+pub type WaterDelivery = Delivered<Water>;
 pub enum BoundaryInput {
     Water(WaterDelivery),
+    Sodium(Delivered<Sodium>),
+    Potassium(Delivered<Potassium>),
+    Chloride(Delivered<Chloride>),
+    /// How the body lies from this instant until the next one. An event is one instant, so a ramp is a train of events.
+    /// Each ends a step, and every site's head follows from its place.
+    Posture(Posture),
+}
+/// A trunk and a leg descriptor. `trunk` is the sine of the trunk's angle from flat: 0 lying flat, 1 sitting up or
+/// standing, a negative value head down.
+pub struct Posture {
+    trunk: f64,
+    legs: Legs,
+}
+impl Posture {
+    /// A trunk past straight up or straight down has no angle.
+    pub fn new(trunk: Measure<Dimensionless>, legs: Legs) -> Result<Self, AdmissionError> {
+        let trunk = trunk.value();
+        if trunk.abs() > 1.0 {
+            return Err(AdmissionError::PostureOutOfRange);
+        }
+        Ok(Self { trunk, legs })
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Legs {
+    Horizontal,
+    SeatedDependent,
+    Standing,
+}
+impl Legs {
+    /// How much of gravity runs along the legs: seated, the thigh lies flat and the shin hangs. Model default.
+    const fn share(self) -> f64 {
+        match self {
+            Legs::Horizontal => 0.0,
+            Legs::SeatedDependent => 0.5,
+            Legs::Standing => 1.0,
+        }
+    }
+    fn of_share(share: f64) -> Result<Self, Malformed> {
+        let found = [Legs::Horizontal, Legs::SeatedDependent, Legs::Standing];
+        (found
+            .into_iter()
+            .find(|legs| legs.share().to_bits() == share.to_bits()))
+        .ok_or(Malformed)
+    }
 }
 pub struct BoundaryEvent {
     id: InputId,
@@ -58,6 +106,7 @@ pub(crate) struct Delivery {
     amount: f64,
     pub(crate) ends: SimTime,
     rate: f64,
+    species: Option<Species>,
 }
 impl Seal for Delivery {
     fn seal(&self, out: &mut Canonical) {
@@ -68,6 +117,7 @@ impl Seal for Delivery {
             amount,
             ends,
             rate,
+            species,
         } = self;
         id.seal(out);
         at.seal(out);
@@ -75,6 +125,7 @@ impl Seal for Delivery {
         amount.seal(out);
         ends.seal(out);
         rate.seal(out);
+        out.number(payload_tag(*species));
     }
 }
 
@@ -113,17 +164,37 @@ impl BoundaryPort {
 }
 impl Delivery {
     fn parsed(event: BoundaryEvent) -> Result<Self, AdmissionError> {
-        let BoundaryEvent {
+        let BoundaryEvent { id, at, payload } = event;
+        fn delivered<Q: Substance>(
+            id: InputId,
+            at: SimTime,
+            delivery: Delivered<Q>,
+        ) -> Result<Delivery, AdmissionError> {
+            let Delivered {
+                boundary,
+                amount,
+                ends,
+            } = delivery;
+            Delivery::checked(id, at, boundary, amount.value(), ends, Q::SPECIES)
+        }
+        match payload {
+            BoundaryInput::Water(delivery) => delivered(id, at, delivery),
+            BoundaryInput::Sodium(delivery) => delivered(id, at, delivery),
+            BoundaryInput::Potassium(delivery) => delivered(id, at, delivery),
+            BoundaryInput::Chloride(delivery) => delivered(id, at, delivery),
+            BoundaryInput::Posture(Posture { trunk, legs }) => Ok(Self::posture(id, at, trunk, legs)),
+        }
+    }
+    fn posture(id: InputId, at: SimTime, trunk: f64, legs: Legs) -> Self {
+        Self {
             id,
             at,
-            payload:
-                BoundaryInput::Water(WaterDelivery {
-                    boundary,
-                    amount,
-                    ends,
-                }),
-        } = event;
-        Self::checked(id, at, boundary, amount.value(), ends)
+            boundary: POSTURE,
+            amount: trunk,
+            ends: SimTime::from_ns(u64::MAX),
+            rate: legs.share(),
+            species: None,
+        }
     }
     fn checked(
         id: InputId,
@@ -131,6 +202,7 @@ impl Delivery {
         boundary: &'static str,
         amount: f64,
         ends: SimTime,
+        species: Species,
     ) -> Result<Self, AdmissionError> {
         if ends <= at {
             return Err(AdmissionError::EmptyDelivery { id });
@@ -150,7 +222,14 @@ impl Delivery {
             amount,
             ends,
             rate,
+            species: Some(species),
         })
+    }
+    pub(crate) fn posture_event(&self) -> bool {
+        self.species.is_none()
+    }
+    pub(crate) fn carries(&self, species: Species) -> bool {
+        self.species == Some(species)
     }
     fn payload(&self) -> Digest {
         let mut out = Canonical::new("ng-contract delivery 1");
@@ -233,7 +312,7 @@ impl PendingInputs {
         let mut frame = DriveFrame::default();
         for delivery in &self.timeline {
             if delivery.at <= at && at < delivery.ends {
-                frame.add(delivery.boundary, delivery.rate);
+                frame.take(delivery);
             }
         }
         frame
@@ -251,7 +330,7 @@ impl PendingInputs {
         let ended = self.past.active.iter().any(|delivery| delivery.ends == start);
         let mut frame = DriveFrame::default();
         for delivery in self.running_at(start) {
-            frame.add(delivery.boundary, delivery.rate);
+            frame.take(delivery);
         }
         Plan {
             due: due.iter().map(|delivery| delivery.id).collect(),
@@ -300,7 +379,8 @@ impl PendingInputs {
             last_refusal: None,
         };
         let plan = self.plan(start, problem.accepted.state().fired);
-        let wanted = start.plus_ns(span_ns).ok_or(mismatch)?;
+        let capped = span_ns.min(problem.longest_span_ns());
+        let wanted = start.plus_ns(capped).ok_or(mismatch)?;
         let end = plan.running_end.map_or(wanted, |ends| ends.min(wanted));
         let interval = Interval::new(start, end).ok_or(mismatch)?;
         let resolution = problem.identity.resolution();
@@ -407,14 +487,18 @@ impl PendingInputs {
                 boundary,
                 amount,
                 ends,
-                rate: _,
+                rate,
+                species,
             } = delivery;
             out.raw(id.digest.as_bytes());
             at.seal(out);
-            out.number(WATER_PAYLOAD);
+            out.number(payload_tag(*species));
             out.text(boundary);
             amount.seal(out);
             ends.seal(out);
+            if species.is_none() {
+                rate.seal(out);
+            }
         }
         cursor.seal(out);
         out.length(active.len());
@@ -434,13 +518,18 @@ impl PendingInputs {
         for _ in 0..read.count(DELIVERY_BYTES)? {
             let id = InputId::new(read.digest()?);
             let at = read.time()?;
-            if read.number()? != WATER_PAYLOAD {
-                return Err(Malformed);
-            }
-            let boundary = body.boundary_name(read.text()?).ok_or(Malformed)?;
+            let species = payload_species(read.number()?)?;
+            let name = read.text()?;
             let amount = read.float()?;
             let ends = read.time()?;
-            let delivery = Delivery::checked(id, at, boundary, amount, ends).map_err(|_| Malformed)?;
+            let delivery = match species {
+                None if amount.abs() > 1.0 => return Err(Malformed),
+                None => Delivery::posture(id, at, amount, Legs::of_share(read.float()?)?),
+                Some(species) => {
+                    let boundary = body.boundary_name(name).ok_or(Malformed)?;
+                    Delivery::checked(id, at, boundary, amount, ends, species).map_err(|_| Malformed)?
+                }
+            };
             let start_of_time = SimTime::from_ns(0);
             body.check_delivery(&delivery, start_of_time)
                 .map_err(|_| Malformed)?;
@@ -491,13 +580,13 @@ fn land<T>(
     solved: &mut impl FnMut(&StepTicket) -> Result<(VerifiedStep, T), TrialFailure>,
 ) -> Result<(VerifiedStep, T), TrialFailure> {
     let start = ticket.interval().start();
-    let Some(guard) = passed.0.crossed(problem) else {
+    let Some(guard) = passed.0.crossed(problem)? else {
         return Ok(passed);
     };
     let floor = problem.identity.resolution().minimum_interval_ns();
     let identity = problem.identity.digest();
-    let base = problem.chance.gap(problem.accepted.state(), guard);
-    let mut bracket = Bracket::new(base, ticket.length_ns(), passed.0.gap(problem, guard), floor);
+    let base = problem.gap(ticket, problem.accepted.state(), guard)?;
+    let mut bracket = Bracket::new(base, ticket.length_ns(), passed.0.gap(problem, guard)?, floor);
     let mut top = passed;
     while !bracket.closed() {
         let length = bracket.aim();
@@ -508,8 +597,8 @@ fn land<T>(
         // A refusal drops the bracket: a shorter ticket can be the refused one, because a stage's error is
         // not monotone in its length.
         let step = solved(&trial)?;
-        let crossed = step.0.crossed(problem).is_some();
-        bracket.note(length, step.0.gap(problem, guard), crossed);
+        let crossed = step.0.crossed(problem)?.is_some();
+        bracket.note(length, step.0.gap(problem, guard)?, crossed);
         if crossed {
             top = step;
         }
@@ -517,15 +606,54 @@ fn land<T>(
     Ok((top.0.fire(problem)?, top.1))
 }
 
+const POSTURE: &str = "posture";
 const WATER_PAYLOAD: u64 = 0;
+const SODIUM_PAYLOAD: u64 = 1;
+const POTASSIUM_PAYLOAD: u64 = 2;
+const CHLORIDE_PAYLOAD: u64 = 3;
+const POSTURE_PAYLOAD: u64 = 4;
+
+fn payload_tag(species: Option<Species>) -> u64 {
+    match species {
+        Some(Species::Sodium) => SODIUM_PAYLOAD,
+        Some(Species::Potassium) => POTASSIUM_PAYLOAD,
+        Some(Species::Chloride) => CHLORIDE_PAYLOAD,
+        Some(_) => WATER_PAYLOAD,
+        None => POSTURE_PAYLOAD,
+    }
+}
+fn payload_species(tag: u64) -> Result<Option<Species>, Malformed> {
+    match tag {
+        WATER_PAYLOAD => Ok(Some(Species::Water)),
+        SODIUM_PAYLOAD => Ok(Some(Species::Sodium)),
+        POTASSIUM_PAYLOAD => Ok(Some(Species::Potassium)),
+        CHLORIDE_PAYLOAD => Ok(Some(Species::Chloride)),
+        POSTURE_PAYLOAD => Ok(None),
+        _ => Err(Malformed),
+    }
+}
 /// An id, a stamp, a tag, a name's length, an amount and an end.
 const DELIVERY_BYTES: usize = 32 + 8 + 8 + 8 + 8 + 8;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct DriveFrame {
     drives: Vec<(&'static str, f64)>,
+    trunk: f64,
+    legs: f64,
 }
 impl DriveFrame {
+    /// A site's height in gravity from its place in the body frame, so posture reaches every law through one read and no
+    /// law carries gravity. The hip is the origin: what lies above it turns with the trunk, what lies below with the legs.
+    pub(crate) fn height(&self, axial: f64) -> f64 {
+        axial * if axial < 0.0 { self.legs } else { self.trunk }
+    }
+    /// Deliveries add, and a posture replaces the one before it: both arrive here in `(time, id)` order.
+    fn take(&mut self, delivery: &Delivery) {
+        match delivery.species {
+            None => (self.trunk, self.legs) = (delivery.amount, delivery.rate),
+            Some(_) => self.add(delivery.boundary, delivery.rate),
+        }
+    }
     fn add(&mut self, boundary: &'static str, rate: f64) {
         match self.drives.binary_search_by_key(&boundary, |drive| drive.0) {
             Ok(at) => self.drives[at].1 += rate,
@@ -541,11 +669,13 @@ impl DriveFrame {
 }
 impl Seal for DriveFrame {
     fn seal(&self, out: &mut Canonical) {
-        let Self { drives } = self;
+        let Self { drives, trunk, legs } = self;
         out.length(drives.len());
         for (boundary, rate) in drives {
             out.text(boundary);
             rate.seal(out);
         }
+        trunk.seal(out);
+        legs.seal(out);
     }
 }

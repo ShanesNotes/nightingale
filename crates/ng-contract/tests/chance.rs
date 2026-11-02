@@ -26,7 +26,7 @@ fn declared(
     assemble(two_vessels()?, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let flow = laws.edge_kernel(|mut k| {
             let zero = k.zero::<Rate<Water>>();
             k.finish(zero, laws.every_mode(), wave)
@@ -284,13 +284,18 @@ fn a_start_mode_is_refused_when_it_is_missing_unknown_or_given_twice() {
     let variable = name("rhythm");
     assert_eq!(
         body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
-        Some(AdmissionError::MissingStartMode { variable })
+        Some(AdmissionError::MissingStartMode {
+            variable: variable.into()
+        })
     );
     let mut wrong = ParameterPacket::<SyntheticFixture>::new();
     wrong.start_mode(variable, "c", "synthetic").expect("one entry");
     assert_eq!(
         body.bind(wrong).err(),
-        Some(AdmissionError::UnknownStartMode { variable, value: "c" })
+        Some(AdmissionError::UnknownStartMode {
+            variable: variable.into(),
+            value: "c"
+        })
     );
     let mut other = ParameterPacket::<SyntheticFixture>::new();
     other.start_mode(variable, "a", "synthetic").expect("one entry");
@@ -299,7 +304,7 @@ fn a_start_mode_is_refused_when_it_is_missing_unknown_or_given_twice() {
     assert_eq!(
         body.bind(other).err(),
         Some(AdmissionError::UnknownStartMode {
-            variable: unknown,
+            variable: unknown.into(),
             value: "a"
         })
     );
@@ -307,12 +312,15 @@ fn a_start_mode_is_refused_when_it_is_missing_unknown_or_given_twice() {
     twice.start_mode(variable, "a", "synthetic").expect("one entry");
     assert_eq!(
         twice.start_mode(variable, "b", "synthetic").err(),
-        Some(AdmissionError::DuplicateStartMode { variable })
+        Some(AdmissionError::DuplicateStartMode {
+            variable: variable.into()
+        })
     );
 }
 
+/// A plain guard's variable runs. What stops a body is the start it still owes.
 #[test]
-fn a_mode_variable_a_plain_guard_fires_stays_refused_by_name() {
+fn a_mode_variable_a_plain_guard_fires_binds_past_the_mode_refusal() {
     let body = hazard_body(|laws| {
         let [shut, open] = laws.modes("valve", ["shut", "open"]);
         let class = beat()?;
@@ -323,16 +331,78 @@ fn a_mode_variable_a_plain_guard_fires_stays_refused_by_name() {
         laws.event(Guard::new(head, Crossing::Rising, shut.to(&open)?));
         Ok(())
     });
+    assert!(matches!(
+        body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
+        Some(AdmissionError::MissingStartMode { .. })
+    ));
+}
+
+/// With no solve at a landing, a firing must leave every algebraic value true.
+#[test]
+fn an_algebraic_law_a_mode_selects_stays_refused_by_name() {
+    let body = hazard_body(|laws| {
+        let [off, on] = laws.modes("valve", ["off", "on"]);
+        let held = laws.algebraic::<Dimensionless>("held", Admissible::finite());
+        let class = beat()?;
+        for holds in [off.only(), on.only()] {
+            let residual = laws.kernel(|mut k| {
+                let seen = k.algebraic(&held);
+                k.finish(seen, holds, class)
+            });
+            laws.residual(&held, residual);
+        }
+        let head = laws.kernel(|mut k| {
+            let zero = k.zero::<Pressure>();
+            k.finish(zero, off.only(), class)
+        });
+        laws.event(Guard::new(head, Crossing::Rising, off.to(&on)?));
+        Ok(())
+    });
     assert_eq!(
         body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
         Some(AdmissionError::ModesNotYetRun {
-            variable: name("valve")
+            variable: name("valve").into()
         })
     );
 }
 
 #[test]
-fn a_mode_variable_a_hazard_and_a_plain_guard_share_stays_refused_by_name() {
+fn an_algebraic_law_that_reads_a_reset_stays_refused_by_name() {
+    let body = hazard_body(|laws| {
+        let [off, on] = laws.modes("valve", ["off", "on"]);
+        let flow = laws.state::<Dimensionless>("flow", Admissible::finite());
+        let held = laws.algebraic::<Dimensionless>("held", Admissible::finite());
+        let class = beat()?;
+        let still = laws.kernel(|mut k| {
+            let zero = k.zero::<Rate<Dimensionless>>();
+            k.finish(zero, laws.every_mode(), class)
+        });
+        laws.memory_rate(&flow, still);
+        let residual = laws.kernel(|mut k| {
+            let seen = k.algebraic(&held);
+            let read = k.state(&flow);
+            let gap = k.subtract(seen, read);
+            k.finish(gap, laws.every_mode(), class)
+        });
+        laws.residual(&held, residual);
+        let head = laws.kernel(|mut k| {
+            let zero = k.zero::<Pressure>();
+            k.finish(zero, off.only(), class)
+        });
+        laws.event(Guard::new(head, Crossing::Rising, off.to(&on)?).resetting(&flow));
+        Ok(())
+    });
+    assert_eq!(
+        body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
+        Some(AdmissionError::ModesNotYetRun {
+            variable: name("valve").into()
+        })
+    );
+}
+
+/// A hazard's firing resets its integral as a plain guard's resets a row, so an algebraic read of it would go stale too.
+#[test]
+fn an_algebraic_law_that_reads_a_hazards_integral_stays_refused_by_name() {
     let body = declared(|laws| {
         let dice = laws.stream("dice");
         let integral = laws.state::<Dimensionless>("integral", Admissible::nonnegative());
@@ -340,25 +410,28 @@ fn a_mode_variable_a_hazard_and_a_plain_guard_share_stays_refused_by_name() {
         laws.hazard(HazardGuard::new(&integral, &dice, a.to(&b)?));
         let rate = plain_rate(laws)?;
         laws.memory_rate(&integral, rate);
+        let held = laws.algebraic::<Dimensionless>("held", Admissible::finite());
         let class = beat()?;
-        let head = laws.kernel(|mut k| {
-            let zero = k.zero::<Pressure>();
-            k.finish(zero, b.only(), class)
+        let residual = laws.kernel(|mut k| {
+            let seen = k.algebraic(&held);
+            let read = k.state(&integral);
+            let gap = k.subtract(seen, read);
+            k.finish(gap, laws.every_mode(), class)
         });
-        laws.event(Guard::new(head, Crossing::Rising, b.to(&a)?));
+        laws.residual(&held, residual);
         Ok(())
     })
     .expect("compiled");
     assert_eq!(
         body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
         Some(AdmissionError::ModesNotYetRun {
-            variable: name("rhythm")
+            variable: name("rhythm").into()
         })
     );
 }
 
 #[test]
-fn a_hazard_in_a_body_with_an_algebraic_row_stays_refused_by_name() {
+fn a_hazard_in_a_body_with_an_algebraic_row_binds_past_the_mode_refusal() {
     let body = hazard_body(|laws| {
         let held = laws.algebraic::<Dimensionless>("held", Admissible::finite());
         let class = beat()?;
@@ -369,32 +442,10 @@ fn a_hazard_in_a_body_with_an_algebraic_row_stays_refused_by_name() {
         laws.residual(&held, residual);
         Ok(())
     });
-    assert_eq!(
+    assert!(matches!(
         body.bind(ParameterPacket::<SyntheticFixture>::new()).err(),
-        Some(AdmissionError::ModesNotYetRun {
-            variable: name("rhythm")
-        })
-    );
-}
-
-#[test]
-fn a_start_mode_enters_the_packet_hash() {
-    let body = hazard_body(|_| Ok(()));
-    let hash = |value| -> Result<PacketHash, AdmissionError> {
-        let mut packet = ParameterPacket::<SyntheticFixture>::new();
-        packet.start_mode(name("rhythm"), value, "synthetic")?;
-        for row in body.rows() {
-            match row.kind() {
-                RowKind::Memory(_) => {
-                    packet.start(row.kind(), Measure::<Dimensionless>::new(0.0)?, "synthetic")?
-                }
-                _ => packet.start(row.kind(), Measure::<Water>::new(100.0)?, "synthetic")?,
-            }
-        }
-        Ok(body.bind(packet)?.packet_hash())
-    };
-    assert_eq!(hash("a"), hash("a"));
-    assert_ne!(hash("a"), hash("b"));
+        Some(AdmissionError::MissingStartMode { .. })
+    ));
 }
 
 fn hash_of(declare: impl for<'b> FnOnce(&mut Heart<'b>) -> Result<(), AdmissionError>) -> ModelHash {

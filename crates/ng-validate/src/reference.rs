@@ -7,6 +7,7 @@ const NANOSECONDS_PER_SECOND: f64 = 1e9;
 /// Newton stops at rounding, not at the declared scales: those say what may be accepted, and an accuracy
 /// reference must not stop early merely because it may.
 const NEWTON_STOP: f64 = 8.0 * f64::EPSILON;
+const NOISE: f64 = 1e-12;
 
 /// A model default reported with every result. Measured on the two-reservoir case: the estimate reaches
 /// 4.0 on 64 s steps of amounts near 5e5, so this passes those steps and refuses much longer ones.
@@ -89,6 +90,7 @@ fn newton(
     let per_second = NANOSECONDS_PER_SECOND / span_ns as f64;
     let start = workspace.unknowns_mut().to_vec();
     let mut settled = false;
+    let mut last = f64::INFINITY;
     for updates_left in (0..=NEWTON_LIMIT).rev() {
         let unknowns = workspace.unknowns_mut().to_vec();
         for ((tangent, now), then) in workspace.derivative_mut().iter_mut().zip(&unknowns).zip(&start) {
@@ -103,7 +105,7 @@ fn newton(
             break;
         }
         let jacobian = problem.linearize(&point, shift)?;
-        let update = match solve_dense(jacobian.view(), stage.residuals()) {
+        let update = match solve_sparse(problem, &jacobian, stage.residuals()) {
             Ok(update) => update,
             Err(slot) => {
                 let reason = problem.row(slot).map_or(NumericalRefusal::IterationLimit, |row| {
@@ -115,8 +117,13 @@ fn newton(
         // An update is in each row's own unknown, where a residual is a rate on one row and a kernel's
         // value on another, so this one test fits both. The update still applies: on a stiff row one
         // unit in the last place can be a defect above the scales.
-        settled = (update.iter().zip(&unknowns))
-            .all(|(change, unknown)| change.abs() <= NEWTON_STOP * (1.0 + unknown.abs()));
+        let moved = (update.iter().zip(&unknowns).enumerate())
+            .map(|(slot, (change, unknown))| change.abs() / (problem.row_size(slot) + unknown.abs()))
+            .fold(0.0, |most, share| if share > most { share } else { most });
+        // A row that rests on a store's change over a stage keeps a noise of the store's rounding over the stage, so
+        // an update that has stopped shrinking this close to rounding has nothing left to give.
+        settled = moved <= NEWTON_STOP || (moved >= 0.5 * last && moved <= NOISE);
+        last = moved;
         for (unknown, change) in workspace.unknowns_mut().iter_mut().zip(update) {
             *unknown -= change;
         }
@@ -124,45 +131,37 @@ fn newton(
     Err(ticket.refuse(NumericalRefusal::IterationLimit))
 }
 
+/// The body's fixed elimination, or a dense solve for a pivot it cannot take, which is where a mode leaves a row
+/// with nothing on its matched unknown.
+fn solve_sparse(
+    problem: &CoupledProblem<'_>,
+    jacobian: &Jacobian,
+    residuals: &[f64],
+) -> Result<Vec<f64>, usize> {
+    match problem.body().factor(jacobian) {
+        Ok(factors) => {
+            let mut update = residuals.to_vec();
+            factors.solve(&mut update);
+            if update.iter().all(|change| change.is_finite()) {
+                Ok(update)
+            } else {
+                solve_dense(jacobian.view(), residuals)
+            }
+        }
+        Err(_) => solve_dense(jacobian.view(), residuals),
+    }
+}
+
 /// Gaussian elimination with partial pivoting in fixed order: the first largest pivot wins, so a tie is
 /// settled the same way on every run.
 pub(crate) fn solve_dense(jacobian: SparseView<'_>, residuals: &[f64]) -> Result<Vec<f64>, usize> {
     let size = residuals.len();
-    let mut slots: Vec<usize> = (0..size).collect();
     let mut matrix = vec![vec![0.0; size + 1]; size];
     for (row, cells) in matrix.iter_mut().enumerate() {
         for entry in jacobian.row_offsets()[row]..jacobian.row_offsets()[row + 1] {
-            cells[jacobian.columns()[entry].index()] = jacobian.values()[entry];
+            cells[jacobian.columns()[entry].index()] += jacobian.values()[entry];
         }
         cells[size] = residuals[row];
     }
-    for pivot in 0..size {
-        let mut best = pivot;
-        for row in pivot + 1..size {
-            if matrix[row][pivot].abs() > matrix[best][pivot].abs() {
-                best = row;
-            }
-        }
-        if matrix[best][pivot] == 0.0 {
-            return Err(slots[pivot]);
-        }
-        matrix.swap(pivot, best);
-        slots.swap(pivot, best);
-        let (above, below) = matrix.split_at_mut(pivot + 1);
-        let leading = &above[pivot];
-        for row in below {
-            let factor = row[pivot] / leading[pivot];
-            for (cell, lead) in row.iter_mut().zip(leading).skip(pivot) {
-                *cell -= factor * lead;
-            }
-        }
-    }
-    let mut solution = vec![0.0; size];
-    for row in (0..size).rev() {
-        let known: f64 = (row + 1..size)
-            .map(|column| matrix[row][column] * solution[column])
-            .sum();
-        solution[row] = (matrix[row][size] - known) / matrix[row][row];
-    }
-    Ok(solution)
+    eliminate(matrix)
 }

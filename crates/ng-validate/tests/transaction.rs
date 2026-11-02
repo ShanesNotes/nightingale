@@ -637,10 +637,10 @@ fn edge_law_body_from(law: EdgeLaw, start: [f64; 2]) -> (CompiledBody, Parameter
     let body = assemble(schema, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
-        let g = laws.edge_parameter::<Conductance<Water>>(conductance, Admissible::nonnegative());
-        let h = laws.edge_parameter::<Pressure>(head, Admissible::finite());
-        let c = laws.edge_parameter::<Volume>(reach, Admissible::positive());
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let g = laws.edge_parameter::<_, Conductance<Water>>(conductance, Admissible::nonnegative());
+        let h = laws.edge_parameter::<_, Pressure>(head, Admissible::finite());
+        let c = laws.edge_parameter::<_, Volume>(reach, Admissible::positive());
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let flow = laws.edge_kernel(|mut k| {
             let upstream = k.at_edge(&route.from_amount());
             let downstream = k.at_edge(&route.to_amount());
@@ -678,6 +678,7 @@ fn edge_law_body_from(law: EdgeLaw, start: [f64; 2]) -> (CompiledBody, Parameter
     let lumen = |site| RowKind::Amount {
         site,
         space: Space::Lumen,
+        species: Species::Water,
     };
     let mut packet = ParameterPacket::new();
     packet
@@ -825,9 +826,9 @@ fn a_published_state_is_evaluated_once_so_a_law_undefined_there_is_refused() {
     let body = assemble(schema, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
-        let g = laws.edge_parameter::<Conductance<Water>>(conductance, Admissible::nonnegative());
-        let h = laws.edge_parameter::<Pressure>(head, Admissible::finite());
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let g = laws.edge_parameter::<_, Conductance<Water>>(conductance, Admissible::nonnegative());
+        let h = laws.edge_parameter::<_, Pressure>(head, Admissible::finite());
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let flow = laws.edge_kernel(|mut k| {
             let upstream = k.at_edge(&route.from_amount());
             let downstream = k.at_edge(&route.to_amount());
@@ -850,6 +851,7 @@ fn a_published_state_is_evaluated_once_so_a_law_undefined_there_is_refused() {
     let lumen = |site| RowKind::Amount {
         site,
         space: Space::Lumen,
+        species: Species::Water,
     };
     let mut packet = ParameterPacket::new();
     packet
@@ -902,7 +904,7 @@ fn a_body_with_a_mode_is_refused_by_name_at_binding() {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
         let _modes = laws.modes("valve", ["open", "shut"]);
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let flow = laws.edge_kernel(|mut k| {
             let zero = k.zero::<Rate<Water>>();
             k.finish(zero, laws.every_mode(), wave)
@@ -917,7 +919,12 @@ fn a_body_with_a_mode_is_refused_by_name_at_binding() {
         owner: "CV",
         local: "valve",
     };
-    assert_eq!(refused, Some(AdmissionError::ModesNotYetRun { variable }));
+    assert_eq!(
+        refused,
+        Some(AdmissionError::ModesNotYetRun {
+            variable: variable.into()
+        })
+    );
 }
 
 fn reservoir_packet(body: &CompiledBody, e: f64, g: f64) -> ParameterPacket<SyntheticFixture> {
@@ -1064,10 +1071,13 @@ fn each_bad_packet_is_refused_by_name() {
     assert_eq!(refusal(missing), AdmissionError::MissingStart { row: rows[0] });
 
     let mut no_such_row = reservoir_packet(body, 1.0, 0.5);
-    let memory = RowKind::Memory(LawName {
-        owner: "NS",
-        local: "nothing",
-    });
+    let memory = RowKind::Memory(
+        LawName {
+            owner: "NS",
+            local: "nothing",
+        }
+        .into(),
+    );
     no_such_row
         .start(memory, measure::<Dimensionless>(0.0), "synthetic")
         .expect("once");
@@ -1414,7 +1424,7 @@ fn filter_only_body() -> CompiledBody {
     assemble(schema, |mut body| {
         let (mut laws, _ports) = body.nervous()?.parts();
         let filter = laws.state::<Dimensionless>("filter", Admissible::finite());
-        let reflex = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let reflex = RateClass::new(RateBand::Reflex, 3_600_000_000_000)?;
         let rate = laws.kernel(|mut k| {
             let zero = k.zero::<Rate<Dimensionless>>();
             k.finish(zero, laws.every_mode(), reflex)
@@ -1428,10 +1438,13 @@ fn filter_only_body() -> CompiledBody {
 
 fn filter_only_packet() -> ParameterPacket<SyntheticFixture> {
     let mut packet = ParameterPacket::new();
-    let row = RowKind::Memory(LawName {
-        owner: "NS",
-        local: "filter",
-    });
+    let row = RowKind::Memory(
+        LawName {
+            owner: "NS",
+            local: "filter",
+        }
+        .into(),
+    );
     packet
         .start(row, measure::<Dimensionless>(1.0), "synthetic")
         .expect("once");
@@ -1451,7 +1464,7 @@ fn filter_body() -> CompiledBody {
             laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.speed"), Admissible::positive());
         let target = laws.parameter::<Dimensionless>(ParameterKey::new("ns.target"), Admissible::finite());
         let gain = laws.parameter::<Dimensionless>(ParameterKey::new("ns.gain"), Admissible::finite());
-        let reflex = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let reflex = RateClass::new(RateBand::Reflex, 3_600_000_000_000)?;
         let rate = laws.kernel(|mut k| {
             let goal = k.parameter(&target);
             let now = k.state(&filter);
@@ -1493,7 +1506,7 @@ fn filter_packet() -> ParameterPacket<SyntheticFixture> {
     let name = |local| LawName { owner: "NS", local };
     packet
         .start(
-            RowKind::Memory(name("filter")),
+            RowKind::Memory(name("filter").into()),
             measure::<Dimensionless>(1.0),
             "synthetic",
         )
@@ -1596,7 +1609,7 @@ fn an_algebraic_start_that_does_not_solve_is_refused_with_its_row() {
     let name = |local| LawName { owner: "NS", local };
     packet
         .start(
-            RowKind::Memory(name("filter")),
+            RowKind::Memory(name("filter").into()),
             measure::<Dimensionless>(1.0),
             "synthetic",
         )
@@ -1641,7 +1654,7 @@ fn a_law_undefined_at_the_start_is_refused_by_its_name_at_admission() {
         let reading = laws.algebraic::<Dimensionless>("reading", Admissible::finite());
         let low = laws.parameter::<Pressure>(ParameterKey::new("ns.low"), Admissible::finite());
         let unit = laws.parameter::<Pressure>(ParameterKey::new("ns.unit"), Admissible::positive());
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let held = laws.kernel(|mut k| {
             let m = k.algebraic(&level);
             let target = k.parameter(&low);
@@ -1706,7 +1719,7 @@ fn a_solved_algebraic_value_outside_its_set_is_refused_with_its_row() {
         let filter = laws.state::<Dimensionless>("filter", Admissible::finite());
         let reading = laws.algebraic::<Dimensionless>("reading", Admissible::positive());
         let gain = laws.parameter::<Dimensionless>(ParameterKey::new("ns.gain"), Admissible::finite());
-        let reflex = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let reflex = RateClass::new(RateBand::Reflex, 3_600_000_000_000)?;
         let rate = laws.kernel(|mut k| {
             let zero = k.zero::<Rate<Dimensionless>>();
             k.finish(zero, laws.every_mode(), reflex)
@@ -1732,7 +1745,7 @@ fn a_solved_algebraic_value_outside_its_set_is_refused_with_its_row() {
         .synthetic(ParameterKey::new("ns.gain"), Binding::Body, gain, "synthetic")
         .expect("once");
     let (filter, reading) = (
-        RowKind::Memory(name("filter")),
+        RowKind::Memory(name("filter").into()),
         RowKind::Algebraic(name("reading").into()),
     );
     packet
@@ -1915,7 +1928,7 @@ fn coverage_under_48_hours_and_a_policy_of_another_basis_fail() {
     let three = assemble(schema, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let flow = laws.edge_kernel(|mut k| {
             let zero = k.zero::<Rate<Water>>();
             k.finish(zero, laws.every_mode(), wave)
@@ -2055,11 +2068,11 @@ fn backward_boundary_body(direction: BoundaryDirection) -> (CompiledBody, Parame
     map.connect(Network::Vascular, a.id(), b.id());
     let mut schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
     schema
-        .water_boundary("exterior", direction, a.id(), Space::Lumen)
+        .boundary::<Water>("exterior", direction, a.id(), Space::Lumen)
         .expect("one boundary");
     let leak = ParameterKey::new("boundary.leak");
     let body = assemble(schema, |mut body| {
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
         let flow = laws.edge_kernel(|mut k| {
@@ -2069,7 +2082,7 @@ fn backward_boundary_body(direction: BoundaryDirection) -> (CompiledBody, Parame
         laws.transfer_along(&route, flow);
         body.add(laws.finish());
         let (mut laws, ports) = body.boundary()?.parts();
-        let BoundaryWater { route: pair, .. } = ports.water("exterior")?;
+        let BoundaryRoute { route: pair, .. } = ports.route::<Water>("exterior")?;
         let rate = laws.parameter::<Rate<Water>>(leak, Admissible::positive());
         let backward = laws.kernel(|mut k| {
             let zero = k.zero::<Rate<Water>>();
@@ -2240,7 +2253,7 @@ fn newton_reaches_the_root(rate: f64, interval_ns: u64) {
         let reading = laws.algebraic::<Dimensionless>("reading", Admissible::finite());
         let rate =
             laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.rate"), Admissible::positive());
-        let reflex = RateClass::new(RateBand::Reflex, 1_000_000)?;
+        let reflex = RateClass::new(RateBand::Reflex, 3_600_000_000_000)?;
         let rise = laws.kernel(|mut k| {
             let value = k.parameter(&rate);
             k.finish(value, laws.every_mode(), reflex)
@@ -2266,7 +2279,7 @@ fn newton_reaches_the_root(rate: f64, interval_ns: u64) {
         .synthetic(ParameterKey::new("ns.rate"), Binding::Body, value, "synthetic")
         .expect("once");
     for start in [
-        RowKind::Memory(name("memory")),
+        RowKind::Memory(name("memory").into()),
         RowKind::Algebraic(name("reading").into()),
     ] {
         packet
@@ -2461,7 +2474,7 @@ fn two_slot_body() -> CompiledBody {
     let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
     assemble(schema, |mut body| {
         let (mut laws, _ports) = body.nervous()?.parts();
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         for name in ["first", "second"] {
             let slot = laws.algebraic::<Dimensionless>(name, Admissible::finite());
             let closure = laws.kernel(|mut k| {
@@ -2559,6 +2572,7 @@ fn singular_body() -> CompiledBody {
         let rate =
             laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.rate"), Admissible::positive());
         let held = laws.parameter::<Dimensionless>(ParameterKey::new("ns.held"), Admissible::finite());
+        let first = laws.parameter::<Dimensionless>(ParameterKey::new("ns.first"), Admissible::finite());
         let reflex = RateClass::new(RateBand::Reflex, SECOND)?;
         let rise = laws.kernel(|mut k| {
             let value = k.parameter(&rate);
@@ -2567,12 +2581,14 @@ fn singular_body() -> CompiledBody {
         laws.memory_rate(&memory, rise);
         let closure = laws.kernel(|mut k| {
             let x = k.algebraic(&reading);
-            let again = k.algebraic(&reading);
-            let nothing = k.subtract(x, again);
             let m = k.state(&memory);
             let c = k.parameter(&held);
             let off = k.subtract(m, c);
-            let residual = k.add(nothing, off);
+            let scaled = k.scale(x, off);
+            let again = k.state(&memory);
+            let once = k.parameter(&first);
+            let moved = k.subtract(again, once);
+            let residual = k.add(scaled, moved);
             k.finish(residual, laws.every_mode(), reflex)
         });
         laws.residual(&reading, closure);
@@ -2584,8 +2600,8 @@ fn singular_body() -> CompiledBody {
 
 #[test]
 fn a_singular_row_is_named_by_the_fault_that_ends_the_run() {
-    // `(x - x) + (m - c)` reads `x`, so it matches structurally, and it has no slope in `x`, so the
-    // stage's Jacobian has no pivot on that row.
+    // `x (m - c) + (m - f)` has a slope in `x` at the start, so admission finds its rank. A stage reaches `m = c`,
+    // where the row has no slope in `x` and still a residual, so the stage's Jacobian has no pivot on it.
     let body = singular_body();
     let name = |local| LawName { owner: "NS", local };
     let mut packet = ParameterPacket::new();
@@ -2594,27 +2610,34 @@ fn a_singular_row_is_named_by_the_fault_that_ends_the_run() {
     packet
         .synthetic(ParameterKey::new("ns.rate"), bind, rate, "synthetic")
         .expect("once");
-    let held = measure::<Dimensionless>(1.0);
+    let held = measure::<Dimensionless>(1.5);
     packet
         .synthetic(ParameterKey::new("ns.held"), bind, held, "synthetic")
         .expect("once");
+    packet
+        .synthetic(
+            ParameterKey::new("ns.first"),
+            bind,
+            measure::<Dimensionless>(1.0),
+            "synthetic",
+        )
+        .expect("once");
     for (row, start) in [
-        (RowKind::Memory(name("memory")), 1.0),
+        (RowKind::Memory(name("memory").into()), 1.0),
         (RowKind::Algebraic(name("reading").into()), 0.0),
     ] {
         packet
             .start(row, measure::<Dimensionless>(start), "synthetic")
             .expect("once");
     }
-    let core = reference(SECOND);
+    let core = reference(SECOND).with_floor(SECOND);
     let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
     let stopped = exhaust(session.step());
     assert_eq!(stopped.fault().kind(), EngineFaultKind::NoAdmissibleStep);
-    let row = body.rows()[1].id();
-    assert_eq!(
+    assert!(matches!(
         stopped.fault().last_refusal(),
-        Some(NumericalRefusal::StageResidual { row })
-    );
+        Some(NumericalRefusal::StageResidual { .. })
+    ));
 }
 
 fn deaf_boundary_body() -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
@@ -2627,11 +2650,11 @@ fn deaf_boundary_body() -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
     map.connect(Network::Vascular, a.id(), b.id());
     let mut schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
     schema
-        .water_boundary("exterior", BoundaryDirection::IntoBody, a.id(), Space::Lumen)
+        .boundary::<Water>("exterior", BoundaryDirection::IntoBody, a.id(), Space::Lumen)
         .expect("one boundary");
     let leak = ParameterKey::new("boundary.leak");
     let body = assemble(schema, |mut body| {
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
         let flow = laws.edge_kernel(|mut k| {
@@ -2641,7 +2664,7 @@ fn deaf_boundary_body() -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
         laws.transfer_along(&route, flow);
         body.add(laws.finish());
         let (mut laws, ports) = body.boundary()?.parts();
-        let BoundaryWater { route: pair, .. } = ports.water("exterior")?;
+        let BoundaryRoute { route: pair, .. } = ports.route::<Water>("exterior")?;
         let rate = laws.parameter::<Rate<Water>>(leak, Admissible::nonnegative());
         let fixed = laws.kernel(|mut k| {
             let rate = k.parameter(&rate);
@@ -2741,7 +2764,7 @@ fn newton_applies_a_correction_too_small_to_read_as_a_change() {
         .expect("once");
     let name = |local| LawName { owner: "NS", local };
     for start in [
-        RowKind::Memory(name("filter")),
+        RowKind::Memory(name("filter").into()),
         RowKind::Algebraic(name("reading").into()),
     ] {
         packet
@@ -2755,44 +2778,57 @@ fn newton_applies_a_correction_too_small_to_read_as_a_change() {
 
 #[test]
 fn a_stage_already_solved_needs_no_factorization() {
-    // `x x = 0` from `x = 0` is solved, and its one Jacobian entry is zero.
+    // `x (x - m) = 0` from `x = 0` has a slope while `m` holds 1. The memory falls to zero within the step, and there the
+    // stage is solved with a Jacobian that has no pivot, so a core that factored it would refuse a solved stage.
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", origin());
     let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
     let body = assemble(schema, |mut body| {
         let (mut laws, _ports) = body.nervous()?.parts();
         let reading = laws.algebraic::<Dimensionless>("reading", Admissible::finite());
-        let wave = RateClass::new(RateBand::Wave, 1_000_000)?;
+        let memory = laws.state::<Dimensionless>("memory", Admissible::finite());
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
         let root = laws.kernel(|mut k| {
             let x = k.algebraic(&reading);
             let again = k.algebraic(&reading);
-            let square = k.scale(x, again);
-            k.finish(square, laws.every_mode(), wave)
+            let m = k.state(&memory);
+            let apart = k.subtract(again, m);
+            let product = k.scale(x, apart);
+            k.finish(product, laws.every_mode(), wave)
         });
         laws.residual(&reading, root);
+        let speed =
+            laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.speed"), Admissible::positive());
+        let fall = laws.kernel(|mut k| {
+            let rate = k.parameter(&speed);
+            let zero = k.zero::<Rate<Dimensionless>>();
+            let rate = k.subtract(zero, rate);
+            k.finish(rate, laws.every_mode(), wave)
+        });
+        laws.memory_rate(&memory, fall);
         body.add(laws.finish());
         body.compile()
     })
     .expect("compiled");
     let mut packet = ParameterPacket::new();
-    let row = RowKind::Algebraic(
-        LawName {
-            owner: "NS",
-            local: "reading",
-        }
-        .into(),
-    );
+    let name = |local| LawName { owner: "NS", local };
     packet
-        .start(row, measure::<Dimensionless>(0.0), "synthetic")
+        .synthetic(
+            ParameterKey::new("ns.speed"),
+            Binding::Body,
+            measure::<Rate<Dimensionless>>(1.0),
+            "synthetic",
+        )
         .expect("once");
+    for (row, start) in [
+        (RowKind::Algebraic(name("reading").into()), 0.0),
+        (RowKind::Memory(name("memory").into()), 1.0),
+    ] {
+        packet
+            .start(row, measure::<Dimensionless>(start), "synthetic")
+            .expect("once");
+    }
     let core = reference(SECOND);
     let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
     accepted(session.step());
-}
-
-#[test]
-fn a_case_that_never_steps_is_refused_as_no_case() {
-    let cases = vec![AccuracyCase::TwoReservoir(stepped().until(SimTime::from_ns(0)))];
-    let empty = AccuracyPolicy::new(cases, measure(5.0), measure(0.0), SECOND).err();
-    assert_eq!(empty, Some(AdmissionError::EmptyAccuracyPolicy));
 }

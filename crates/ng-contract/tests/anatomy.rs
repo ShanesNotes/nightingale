@@ -183,7 +183,7 @@ fn the_registry_holds_a_water_pool_for_each_space() -> Result<(), AdmissionError
         ..
     } = manufactured()?;
     let schema = Schema::new(map.finish()?)?;
-    let pools: Vec<(SiteId, Space)> = schema.pools().collect();
+    let pools: Vec<(SiteId, Space)> = schema.pools().map(|(site, space, _)| (site, space)).collect();
     let expected = [
         (first.id(), Space::Plasma),
         (first.id(), Space::Interstitium),

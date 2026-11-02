@@ -166,8 +166,8 @@ impl ErrorScales {
             relative: relative.value(),
         })
     }
-    pub(crate) fn at(self, value: f64) -> f64 {
-        self.absolute + self.relative * value.abs()
+    pub(crate) fn at(self, value: f64, size: f64) -> f64 {
+        self.absolute * size + self.relative * value.abs()
     }
 }
 impl Seal for ErrorScales {
@@ -257,8 +257,8 @@ impl DeclaredResolution {
     pub(crate) fn scheme(&self) -> StageScheme {
         self.scheme
     }
-    pub(crate) fn scales(&self) -> ErrorScales {
-        self.scales
+    pub(crate) fn scales(&self) -> &ErrorScales {
+        &self.scales
     }
 }
 
