@@ -1,0 +1,11 @@
+[package]
+name = "engine-bench"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+ng-contract = { path = "../../crates/ng-contract" }
+ng-validate = { path = "../../crates/ng-validate" }

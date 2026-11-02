@@ -20,6 +20,8 @@ An agent loads this skill before it claims a change works or asks for a merge.
 
 `--base REV` sets the base of a merge or changed run.
 
+Speed is in none of these runs, because a wall clock cannot gate a merge. `python3 -I tools/bench/run.py` times the engine on demand, and its header says how to read and compare the numbers.
+
 ## The steps
 
 - `01-toolchain.sh`: rustc and cargo match the channel in `rust-toolchain.toml`, rustfmt and clippy answer, rust-src is installed, and python3 is 3.11 or newer.
