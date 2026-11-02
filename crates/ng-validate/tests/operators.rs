@@ -6,6 +6,8 @@ use ng_validate::*;
 use std::collections::BTreeSet;
 
 const SECOND: u64 = 1_000_000_000;
+const ELASTANCE: f64 = 1.3;
+const PARTIAL_VOLUME: f64 = 0.8;
 const OPERATORS: [&str; 18] = [
     "Input",
     "Zero",
@@ -75,7 +77,7 @@ fn every_operator() -> Result<(CompiledBody, SiteId), AdmissionError> {
     map.contain(root.id(), b.id());
     map.connect(Network::Vascular, a.id(), b.id());
     let mut schema = Schema::new(map.finish()?)?;
-    schema.partial_volume(measure(1.0))?;
+    schema.partial_volume(measure(PARTIAL_VOLUME))?;
     schema.carry::<Albumin, Blood>(Space::Lumen);
     let body = assemble(schema, |mut body| {
         let (mut cv, ports) = body.cardiovascular()?.parts();
@@ -183,7 +185,7 @@ fn packet(
     packet.synthetic(
         ParameterKey::new("cv.e"),
         vascular,
-        measure::<Elastance>(1.0),
+        measure::<Elastance>(ELASTANCE),
         "synthetic",
     )?;
     let g = measure::<Conductance<Water>>(0.25);
@@ -226,7 +228,7 @@ fn packet(
             RowKind::Algebraic(Slot {
                 law: LawName { owner: "CV", .. },
                 ..
-            }) => 0.75,
+            }) => 0.25 * (ELASTANCE * (4.0 * PARTIAL_VOLUME) - ELASTANCE * (1.0 * PARTIAL_VOLUME)),
             kind => {
                 let start = starts.iter().find(|(row, _)| *row == kind);
                 start.unwrap_or_else(|| panic!("no start for {kind:?}")).1
@@ -246,19 +248,15 @@ fn hex(digest: Digest) -> String {
 }
 
 #[test]
-fn a_body_that_runs_every_operator_stays_on_its_bits() {
+fn the_pinned_body_runs_every_operator_and_every_one_the_slice_runs() {
+    let ran = operators(&every_operator().expect("compiled").0);
+    assert_eq!(ran, OPERATORS.map(String::from).into());
+    assert!(operators(&arena_body().expect("compiled")).is_subset(&ran));
+}
+
+#[test]
+fn every_operators_value_stays_on_the_accepted_bits() {
     let (body, a) = every_operator().expect("compiled");
-    let ran = operators(&body);
-    assert_eq!(
-        ran,
-        OPERATORS.map(String::from).into(),
-        "the body runs every operator"
-    );
-    let slice = arena_body().expect("compiled");
-    assert!(
-        operators(&slice).is_subset(&ran),
-        "an operator the slice runs is pinned here"
-    );
     let core = ReferenceIntegrator::new(SECOND / 2);
     let port = BoundaryPort::new(Vec::new()).expect("no event");
     let session =
@@ -270,6 +268,36 @@ fn a_body_that_runs_every_operator_stays_on_its_bits() {
     let view = record.accepted();
     let mut trace = String::new();
     writeln!(trace, "identity {}", hex(record.identity().digest())).expect("a string takes it");
+    let (revision, time) = (record.revision(), view.time().nanoseconds());
+    writeln!(
+        trace,
+        "revision {revision} at {time} ns, seal {}",
+        hex(record.seal().digest())
+    )
+    .expect("a string takes it");
+    for row in body.rows() {
+        let [high, low] = view.value(row.id()).bits();
+        writeln!(trace, "{high:016x} {low:016x}  {:?}", row.kind()).expect("a string takes it");
+    }
+    expect![[r#"
+        identity fb09198feebf77771e01b2ef868baaaea76f74ec7260ec8b2c7e40ffa9ce4a74
+        revision 8 at 4000000000 ns, seal 9a29b2dce771725575e993946ca2d634af654f479f6685d68abeca8585407a6d
+        4005b2ad2c18a5b3 bca0800000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Water }
+        3ff5b2ad2c18a5b3 bc90800000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Albumin }
+        40024d52d3e75a4d 3ca0800000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Water }
+        3ff24d52d3e75a4d 3c90800000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Albumin }
+        3fd4af13c21a63bd 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "first" }, at: Body })
+        bfe00db112d88532 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "second" }, at: Body })
+        3fb999999999999a 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "set point" }, at: Body })
+        3fe6666666666666 0000000000000000  Algebraic(Slot { law: LawName { owner: "NS", local: "pace" }, at: Body })
+        3ff8000000000000 0000000000000000  Algebraic(Slot { law: LawName { owner: "NS", local: "third" }, at: Body })
+        3fbc410425712b9c 0000000000000000  Algebraic(Slot { law: LawName { owner: "CV", local: "circulation" }, at: Edge { from: SiteId { key: "a", class: VesselSegment }, to: SiteId { key: "b", class: VesselSegment } } })
+    "#]].assert_eq(&trace);
+}
+
+#[test]
+fn every_operators_slope_stays_on_the_bits_of_a_rings_matrix() {
+    let (body, a) = every_operator().expect("compiled");
     let two = Cycle::new(
         NonZeroU64::new(SECOND).expect("not zero"),
         NonZeroU32::new(2).expect("not zero"),
@@ -287,31 +315,6 @@ fn a_body_that_runs_every_operator_stays_on_its_bits() {
         .flat_map(|slope| slope.to_bits().to_be_bytes())
         .collect();
     let digest = hex(Digest::of_canonical(&bits));
-    writeln!(trace, "ring slopes {digest} over {} entries", slopes.len()).expect("a string takes it");
-    let (revision, time) = (record.revision(), view.time().nanoseconds());
-    writeln!(
-        trace,
-        "revision {revision} at {time} ns, seal {}",
-        hex(record.seal().digest())
-    )
-    .expect("a string takes it");
-    for row in body.rows() {
-        let [high, low] = view.value(row.id()).bits();
-        writeln!(trace, "{high:016x} {low:016x}  {:?}", row.kind()).expect("a string takes it");
-    }
-    expect![[r#"
-        identity 0991f122cf6841895a48d4596a8f327ece2f7eee146c2e5503bb933c5a4468db
-        ring slopes cf796856f085ec25c776dae6e90129f6b5c8d98b6633b75eb0dc373186a176c9 over 63 entries
-        revision 8 at 4000000000 ns, seal 670dd1981d3bc61b5feeeeef333a7bfbd35babed3417fcd40ad0a36d11ebbf54
-        4005d2a388ca9094 3ca9800000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Water }
-        3ff5d2a388ca9094 3c99800000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Albumin }
-        40022d5c77356f6c bca9800000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Water }
-        3ff22d5c77356f6c bc99800000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Albumin }
-        3fd4af13c21a63bd 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "first" }, at: Body })
-        bfe00db112d88532 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "second" }, at: Body })
-        3fb999999999999a 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "set point" }, at: Body })
-        3fe6666666666666 0000000000000000  Algebraic(Slot { law: LawName { owner: "NS", local: "pace" }, at: Body })
-        3ff8000000000000 0000000000000000  Algebraic(Slot { law: LawName { owner: "NS", local: "third" }, at: Body })
-        3fbd2a388ca90947 0000000000000000  Algebraic(Slot { law: LawName { owner: "CV", local: "circulation" }, at: Edge { from: SiteId { key: "a", class: VesselSegment }, to: SiteId { key: "b", class: VesselSegment } } })
-    "#]].assert_eq(&trace);
+    let trace = format!("ring slopes {digest} over {} entries", slopes.len());
+    expect!["ring slopes 740d3866878d8d0ff4645bb8ddc3aec94338bba2c30fe992ecf9fce44be60611 over 63 entries"].assert_eq(&trace);
 }
