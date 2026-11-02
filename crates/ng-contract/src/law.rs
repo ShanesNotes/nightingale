@@ -398,7 +398,7 @@ impl Seal for Source {
     }
 }
 
-fn reachable(code: &[Op], result: usize, accepting: &[usize]) -> (Vec<Op>, Vec<usize>, Vec<(Input, bool)>) {
+fn reachable(code: &[Op], result: usize, accepting: &[usize], fields: &[(usize, String)]) -> Reached {
     fn place(code: &[Op], at: usize, placed: &mut [Option<usize>], out: &mut Vec<Op>) -> usize {
         if let Some(done) = placed[at] {
             return done;
@@ -410,22 +410,35 @@ fn reachable(code: &[Op], result: usize, accepting: &[usize]) -> (Vec<Op>, Vec<u
     }
     let (mut out, mut placed) = (Vec::new(), vec![None; code.len()]);
     place(code, result, &mut placed, &mut out);
+    let expects =
+        |at: usize| (fields.iter().find(|(read, _)| *read == at)).map(|(_, dimension)| dimension.clone());
     let unreached = (code.iter().enumerate())
         .filter(|&(at, _)| placed[at].is_none())
         .filter_map(|(at, op)| match op {
-            Op::Input(input) => Some((*input, accepting.contains(&at))),
+            Op::Input(input) => Some((*input, accepting.contains(&at), expects(at))),
             _ => None,
         })
         .collect();
     let accepting = accepting.iter().filter_map(|&at| placed[at]).collect();
-    (out, accepting, unreached)
+    let fields = (fields.iter())
+        .filter_map(|(at, dimension)| placed[*at].map(|placed| (placed, dimension.clone())))
+        .collect();
+    (out, accepting, fields, unreached)
 }
+
+type Reached = (
+    Vec<Op>,
+    Vec<usize>,
+    Vec<(usize, String)>,
+    Vec<(Input, bool, Option<String>)>,
+);
 
 /// One kernel's graph while it is built. `'k` is fresh for every kernel, so an expression belongs to
 /// one graph; `S` is what the kernel is declared for: the body, a site class or a vascular edge.
 pub struct Kernel<'b, 'k, O, S = Body> {
     code: Vec<Op>,
     accepts_no_nerve: Vec<usize>,
+    fields: Vec<(usize, String)>,
     brand: Brand<'b>,
     kernel: Brand<'k>,
     kind: PhantomData<(O, S)>,
@@ -446,6 +459,7 @@ impl<O, U> Copy for Expr<'_, '_, O, U> {}
 pub struct Finished<'b, 'k, O, U, S = Body> {
     code: Vec<Op>,
     accepts_no_nerve: Vec<usize>,
+    fields: Vec<(usize, String)>,
     result: usize,
     dimension: String,
     modes: ModeSet<'b, O>,
@@ -467,9 +481,12 @@ pub(crate) struct KernelData {
     /// Beside `code` and never in it: a program reads the same whichever way a law spelled a read, so nothing that
     /// reads programs can tell two spellings apart.
     pub(crate) accepts_no_nerve: Vec<usize>,
-    /// Each read the law wrote and its result never reaches, and whether it accepts no nerve. Also beside `code`: a
-    /// program holds what a law reaches, and compile refuses on what it wrote.
-    pub(crate) unreached: Vec<(Input, bool)>,
+    /// The dimension each field read in `code` expects, also beside it: compile finds a field by name and holds its
+    /// row to this.
+    pub(crate) fields: Vec<(usize, String)>,
+    /// Each read the law wrote and its result never reaches, whether it accepts no nerve and the dimension a field
+    /// read expects. Also beside `code`: a program holds what a law reaches, and compile refuses on what it wrote.
+    pub(crate) unreached: Vec<(Input, bool, Option<String>)>,
     pub(crate) dimension: String,
     pub(crate) modes: Selector,
     pub(crate) rate: RateClass,
@@ -498,6 +515,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
         Self {
             code: Vec::new(),
             accepts_no_nerve: Vec::new(),
+            fields: Vec::new(),
             brand: PhantomData,
             kernel: PhantomData,
             kind: PhantomData,
@@ -515,6 +533,13 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     fn input<U>(&mut self, input: Input) -> Expr<'b, 'k, O, U> {
         self.push(Op::Input(input))
     }
+    fn read_at<U: Dimension>(&mut self, source: Source, place: Where) -> Expr<'b, 'k, O, U> {
+        let read = self.input(Input::Read(source, place));
+        if let Source::Field(_) = source {
+            self.fields.push((read.at, dimension::<U>()));
+        }
+        read
+    }
     pub fn parameter<U: Dimension>(&mut self, parameter: &Parameter<'b, O, U>) -> Expr<'b, 'k, O, U> {
         self.input(Input::Parameter(parameter.key))
     }
@@ -525,7 +550,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
         self.input(Input::Algebraic(slot.name))
     }
     pub fn read<U: Dimension>(&mut self, port: &ReadPort<'b, O, U>) -> Expr<'b, 'k, O, U> {
-        self.input(Input::Read(port.source, Where::Here))
+        self.read_at(port.source, Where::Here)
     }
     /// The entry at the junction that supplies this site, or the site this edge runs into. Compile refuses a site the
     /// map says no nerve reaches, a site it says nothing of, a junction with no such entry and a law of the whole body,
@@ -534,7 +559,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
         &mut self,
         port: &ReadPort<'b, O, PerSite<crate::Junction, U>>,
     ) -> Expr<'b, 'k, O, U> {
-        self.input(Input::Read(port.source, Where::Junction))
+        self.read_at(port.source, Where::Junction)
     }
     /// The stream's value at its current ordinal, uniform on (0, 1) and constant until a guard on the stream
     /// fires. Admission reads its mean, one half.
@@ -656,6 +681,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
         Finished {
             code: self.code,
             accepts_no_nerve: self.accepts_no_nerve,
+            fields: self.fields,
             result: value.at,
             dimension: dimension::<U>(),
             modes,
@@ -685,7 +711,7 @@ impl<'b, 'k, O> Kernel<'b, 'k, O> {
         landmark: Landmark,
         port: &ReadPort<'b, O, PerSite<C, U>>,
     ) -> Expr<'b, 'k, O, U> {
-        self.input(Input::Read(port.source, Where::MarkOn(C::SET, landmark)))
+        self.read_at(port.source, Where::MarkOn(C::SET, landmark))
     }
     /// How far a landmark sits above the site its rows stand at, under the drive frame's posture.
     pub fn rise(&mut self, landmark: Landmark) -> Expr<'b, 'k, O, Length> {
@@ -699,16 +725,16 @@ impl<'b, 'k, O> Kernel<'b, 'k, O, CapillaryBed> {
         &mut self,
         port: &ReadPort<'b, O, PerSite<Blood, U>>,
     ) -> Expr<'b, 'k, O, U> {
-        self.input(Input::Read(port.source, Where::Here))
+        self.read_at(port.source, Where::Here)
     }
     /// The entry at the one site this bed drains to. Compile refuses a bed with more or fewer.
     pub fn drained<U: Dimension>(&mut self, port: &ReadPort<'b, O, PerSite<Blood, U>>) -> Expr<'b, 'k, O, U> {
-        self.input(Input::Read(port.source, Where::Drain))
+        self.read_at(port.source, Where::Drain)
     }
 }
 impl<'b, 'k, O, C: SiteSet> Kernel<'b, 'k, O, C> {
     pub fn at_site<U: Dimension>(&mut self, port: &ReadPort<'b, O, PerSite<C, U>>) -> Expr<'b, 'k, O, U> {
-        self.input(Input::Read(port.source, Where::Here))
+        self.read_at(port.source, Where::Here)
     }
     /// This site's height in gravity under the drive frame's posture.
     pub fn height(&mut self) -> Expr<'b, 'k, O, Length> {
@@ -724,19 +750,19 @@ impl<'b, 'k, O, C: SiteSet> Kernel<'b, 'k, O, C> {
 }
 impl<'b, 'k, O, E: EdgeKind> Kernel<'b, 'k, O, E> {
     pub fn at_edge<U: Dimension>(&mut self, port: &ReadPort<'b, O, PerEdge<U, E>>) -> Expr<'b, 'k, O, U> {
-        self.input(Input::Read(port.source, Where::Here))
+        self.read_at(port.source, Where::Here)
     }
     pub fn upstream<U: Dimension>(
         &mut self,
         port: &ReadPort<'b, O, PerSite<E::From, U>>,
     ) -> Expr<'b, 'k, O, U> {
-        self.input(Input::Read(port.source, Where::Up))
+        self.read_at(port.source, Where::Up)
     }
     pub fn downstream<U: Dimension>(
         &mut self,
         port: &ReadPort<'b, O, PerSite<E::To, U>>,
     ) -> Expr<'b, 'k, O, U> {
-        self.input(Input::Read(port.source, Where::Down))
+        self.read_at(port.source, Where::Down)
     }
     /// How far this edge falls in gravity under the drive frame's posture: the upstream height less the downstream.
     pub fn fall(&mut self) -> Expr<'b, 'k, O, Length> {
@@ -1163,13 +1189,18 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     fn close<U, S>(&self, finished: Finished<'b, '_, O, U, S>) -> PureKernel<'b, O, U, S> {
         let id = self.kernels.get();
         self.kernels.set(id + 1);
-        let (code, accepts_no_nerve, unreached) =
-            reachable(&finished.code, finished.result, &finished.accepts_no_nerve);
+        let (code, accepts_no_nerve, fields, unreached) = reachable(
+            &finished.code,
+            finished.result,
+            &finished.accepts_no_nerve,
+            &finished.fields,
+        );
         PureKernel {
             data: KernelData {
                 id,
                 code,
                 accepts_no_nerve,
+                fields,
                 unreached,
                 dimension: finished.dimension,
                 modes: finished.modes.selector,

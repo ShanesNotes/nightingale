@@ -1104,7 +1104,7 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                         Op::Input(input) => Some(input),
                         _ => None,
                     })
-                    .chain(kernel.unreached.iter().map(|(input, _)| input));
+                    .chain(kernel.unreached.iter().map(|(input, _, _)| input));
                 let carried = written.into_iter().find_map(|input| match input {
                     Input::Read(Source::Drive(route), _) if *route != water.name => Some(*route),
                     _ => None,
@@ -1384,6 +1384,7 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
         id,
         code,
         accepts_no_nerve: _,
+        fields: _,
         unreached: _,
         dimension,
         modes,
@@ -1450,7 +1451,17 @@ fn addresses(
         });
     let site = |end, from, to| if end == End::From { from } else { to };
     let unknown = |row: usize| Address::Unknown(UnknownId::at(row));
-    let read = |source: Source, place: Where, accepts_no_nerve: bool| -> Result<Address, CompileDefect> {
+    let read = |source: Source,
+                place: Where,
+                accepts_no_nerve: bool,
+                expects: Option<&str>|
+     -> Result<Address, CompileDefect> {
+        let checked = |field: LawName, row: usize| match expects {
+            Some(expected) if rows.rows[row].dimension != expected => {
+                Err(CompileDefect::FieldDimension { law, field })
+            }
+            _ => Ok(unknown(row)),
+        };
         let landed = place_of(place, context, anatomy);
         if let Where::MarkOn(set, _) = place
             && !landed.is_some_and(|site| anatomy.in_set(set).contains(&site))
@@ -1466,7 +1477,7 @@ fn addresses(
                 match landed {
                     Some(junction) => {
                         let row = rows.defined(field, at);
-                        unknown(row.ok_or(CompileDefect::NoReceptor { law, junction })?)
+                        checked(field, row.ok_or(CompileDefect::NoReceptor { law, junction })?)?
                     }
                     None if !anatomy.unsupplied(site) => return Err(CompileDefect::NoSupply { law, site }),
                     None if !accepts_no_nerve => {
@@ -1477,7 +1488,7 @@ fn addresses(
             }
             Source::Field(field) => {
                 let row = rows.defined(field, at);
-                unknown(row.ok_or(CompileDefect::UnemittedField { law, field })?)
+                checked(field, row.ok_or(CompileDefect::UnemittedField { law, field })?)?
             }
             Source::Flow(family) => {
                 let flow = LawName {
@@ -1539,7 +1550,7 @@ fn addresses(
             }
         })
     };
-    let resolve = |input: Input, accepts_no_nerve: bool| -> Result<Address, CompileDefect> {
+    let resolve = |input: Input, accepts: bool, expects: Option<&str>| -> Result<Address, CompileDefect> {
         Ok(match (input, context) {
             (Input::Memory(local) | Input::Algebraic(local), _) => {
                 let slot = LawName {
@@ -1551,7 +1562,7 @@ fn addresses(
                         .ok_or(CompileDefect::NoSuchRead { law })?,
                 )
             }
-            (Input::Read(source, place), _) => read(source, place, accepts_no_nerve)?,
+            (Input::Read(source, place), _) => read(source, place, accepts, expects)?,
             (Input::Height(place), _) => {
                 let site = place_of(place, context, anatomy).ok_or(CompileDefect::NoSuchRead { law })?;
                 Address::Height(anatomy.axial(site).to_bits())
@@ -1619,11 +1630,14 @@ fn addresses(
             ) => return Err(CompileDefect::NoSuchRead { law }),
         })
     };
-    for &(input, accepts_no_nerve) in &kernel.unreached {
-        resolve(input, accepts_no_nerve)?;
+    for (input, accepts_no_nerve, expects) in &kernel.unreached {
+        resolve(*input, *accepts_no_nerve, expects.as_deref())?;
     }
+    let expects = |op: usize| {
+        (kernel.fields.iter().find(|(read, _)| *read == op)).map(|(_, dimension)| dimension.as_str())
+    };
     inputs
-        .map(|(op, input)| resolve(input, kernel.accepts_no_nerve.contains(&op)))
+        .map(|(op, input)| resolve(input, kernel.accepts_no_nerve.contains(&op), expects(op)))
         .collect()
 }
 
