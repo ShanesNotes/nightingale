@@ -8,7 +8,8 @@ prints every model and effort its turns ran with, its session, start, Codex vers
 start, then the models and efforts of the helper sessions it spawned. Nothing else of a rollout prints: no prompt,
 path or account.
 
-Exit 0 when every pass names a rollout whose every turn records a model and an effort; 1 otherwise; 2 usage.
+Exit 0 when every pass names a rollout with at least one turn, and every turn of it and of its helper sessions
+records a model and an effort; 1 otherwise; 2 usage.
 """
 import json
 import os

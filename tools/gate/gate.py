@@ -3,7 +3,7 @@
 Python 3.11 stdlib only. Run as `python3 -I tools/gate/gate.py <command>`; it finds the repo from its own path.
 
     plan <merge|changed|full> [--base REV]   the run's plan as key=value lines
-    seam                                     the workspace rules, every rule's probe, the plan and scan cases
+    seam                                     the workspace rules, every rule's probe, the plan, scan and comment cases
     bans                                     clippy rejects a probe built from clippy.toml, entry by entry
     f64                                      no bare f64 or f32 in a public API outside its row's allow list
     nightly-record <exit> <log>              record a nightly full run (tools/gate/nightly.sh)
