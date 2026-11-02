@@ -1099,8 +1099,14 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
         };
         for &(_, kernel) in &law.laws {
             if let Serves::Boundary(water) = law.serves {
-                let carried = kernel.code.iter().find_map(|op| match op {
-                    Op::Input(Input::Read(Source::Drive(route), _)) if *route != water.name => Some(*route),
+                let written = (kernel.code.iter())
+                    .filter_map(|op| match op {
+                        Op::Input(input) => Some(input),
+                        _ => None,
+                    })
+                    .chain(kernel.unreached.iter().map(|(input, _)| input));
+                let carried = written.into_iter().find_map(|input| match input {
+                    Input::Read(Source::Drive(route), _) if *route != water.name => Some(*route),
                     _ => None,
                 });
                 if let Some(route) = carried {
@@ -1378,6 +1384,7 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
         id,
         code,
         accepts_no_nerve: _,
+        unreached: _,
         dimension,
         modes,
         rate,
@@ -1443,7 +1450,7 @@ fn addresses(
         });
     let site = |end, from, to| if end == End::From { from } else { to };
     let unknown = |row: usize| Address::Unknown(UnknownId::at(row));
-    let read = |source: Source, place: Where, op: usize| -> Result<Address, CompileDefect> {
+    let read = |source: Source, place: Where, accepts_no_nerve: bool| -> Result<Address, CompileDefect> {
         let landed = place_of(place, context, anatomy);
         if let Where::MarkOn(set, _) = place
             && !landed.is_some_and(|site| anatomy.in_set(set).contains(&site))
@@ -1462,7 +1469,7 @@ fn addresses(
                         unknown(row.ok_or(CompileDefect::NoReceptor { law, junction })?)
                     }
                     None if !anatomy.unsupplied(site) => return Err(CompileDefect::NoSupply { law, site }),
-                    None if !kernel.accepts_no_nerve.contains(&op) => {
+                    None if !accepts_no_nerve => {
                         return Err(CompileDefect::UnsuppliedRead { law, site });
                     }
                     None => Address::Gauge,
@@ -1532,87 +1539,91 @@ fn addresses(
             }
         })
     };
-    inputs
-        .map(|(op, input)| {
-            Ok(match (input, context) {
-                (Input::Memory(local) | Input::Algebraic(local), _) => {
-                    let slot = LawName {
-                        owner: law.owner,
-                        local,
-                    };
-                    unknown(
-                        rows.slot(slot, context)
-                            .ok_or(CompileDefect::NoSuchRead { law })?,
-                    )
-                }
-                (Input::Read(source, place), _) => read(source, place, op)?,
-                (Input::Height(place), _) => {
-                    let site = place_of(place, context, anatomy).ok_or(CompileDefect::NoSuchRead { law })?;
-                    Address::Height(anatomy.axial(site).to_bits())
-                }
-                (Input::EdgeFlow, Context::Edge { from, to }) => {
-                    let family = if anatomy.is_valve((from, to)) {
-                        Family::Valves
-                    } else {
-                        Family::Circulation
-                    };
-                    let flow = LawName {
-                        owner: law.owner,
-                        local: family.name(),
-                    };
-                    unknown(
-                        rows.slot(flow, context)
-                            .ok_or(CompileDefect::NoSuchRead { law })?,
-                    )
-                }
-                (Input::Inflow, Context::Edge { from, .. }) => {
-                    let into: Vec<(SiteId, SiteId)> = (anatomy.edges(Network::Urinary))
-                        .filter(|edge| edge.1 == from)
-                        .collect();
-                    let [edge] = into[..] else {
-                        return Err(CompileDefect::NoSuchRead { law });
-                    };
-                    let family = if edge.0.class() == Class::CapillaryBed {
-                        Family::Filtration
-                    } else {
-                        Family::Tubular
-                    };
-                    let flow = LawName {
-                        owner: law.owner,
-                        local: family.name(),
-                    };
-                    let at = Context::Edge {
-                        from: edge.0,
-                        to: edge.1,
-                    };
-                    unknown(rows.slot(flow, at).ok_or(CompileDefect::NoSuchRead { law })?)
-                }
-                (Input::Draw(local), _) => Address::Draw(chance.stream(LawName {
+    let resolve = |input: Input, accepts_no_nerve: bool| -> Result<Address, CompileDefect> {
+        Ok(match (input, context) {
+            (Input::Memory(local) | Input::Algebraic(local), _) => {
+                let slot = LawName {
                     owner: law.owner,
                     local,
-                })),
-                (Input::Forcing(local), _) => Address::Forcing(chance.forcing(LawName {
+                };
+                unknown(
+                    rows.slot(slot, context)
+                        .ok_or(CompileDefect::NoSuchRead { law })?,
+                )
+            }
+            (Input::Read(source, place), _) => read(source, place, accepts_no_nerve)?,
+            (Input::Height(place), _) => {
+                let site = place_of(place, context, anatomy).ok_or(CompileDefect::NoSuchRead { law })?;
+                Address::Height(anatomy.axial(site).to_bits())
+            }
+            (Input::EdgeFlow, Context::Edge { from, to }) => {
+                let family = if anatomy.is_valve((from, to)) {
+                    Family::Valves
+                } else {
+                    Family::Circulation
+                };
+                let flow = LawName {
                     owner: law.owner,
-                    local,
-                })),
-                (Input::Parameter(key), _) => Address::Parameter(key, Binding::Body),
-                (Input::SiteParameter(key), Context::Site(at)) => Address::Parameter(key, Binding::Site(at)),
-                (Input::EdgeParameter(key), Context::Edge { from, to }) => {
-                    Address::Parameter(key, Binding::Edge { from, to })
-                }
-                (Input::EndParameter(key, end), Context::Edge { from, to }) => {
-                    Address::Parameter(key, Binding::Site(site(end, from, to)))
-                }
-                (
-                    Input::SiteParameter(_)
-                    | Input::EdgeParameter(_)
-                    | Input::EndParameter(..)
-                    | Input::Inflow
-                    | Input::EdgeFlow,
-                    _,
-                ) => return Err(CompileDefect::NoSuchRead { law }),
-            })
+                    local: family.name(),
+                };
+                unknown(
+                    rows.slot(flow, context)
+                        .ok_or(CompileDefect::NoSuchRead { law })?,
+                )
+            }
+            (Input::Inflow, Context::Edge { from, .. }) => {
+                let into: Vec<(SiteId, SiteId)> = (anatomy.edges(Network::Urinary))
+                    .filter(|edge| edge.1 == from)
+                    .collect();
+                let [edge] = into[..] else {
+                    return Err(CompileDefect::NoSuchRead { law });
+                };
+                let family = if edge.0.class() == Class::CapillaryBed {
+                    Family::Filtration
+                } else {
+                    Family::Tubular
+                };
+                let flow = LawName {
+                    owner: law.owner,
+                    local: family.name(),
+                };
+                let at = Context::Edge {
+                    from: edge.0,
+                    to: edge.1,
+                };
+                unknown(rows.slot(flow, at).ok_or(CompileDefect::NoSuchRead { law })?)
+            }
+            (Input::Draw(local), _) => Address::Draw(chance.stream(LawName {
+                owner: law.owner,
+                local,
+            })),
+            (Input::Forcing(local), _) => Address::Forcing(chance.forcing(LawName {
+                owner: law.owner,
+                local,
+            })),
+            (Input::Parameter(key), _) => Address::Parameter(key, Binding::Body),
+            (Input::SiteParameter(key), Context::Site(at)) => Address::Parameter(key, Binding::Site(at)),
+            (Input::EdgeParameter(key), Context::Edge { from, to }) => {
+                Address::Parameter(key, Binding::Edge { from, to })
+            }
+            (Input::EndParameter(key, end), Context::Edge { from, to }) => {
+                Address::Parameter(key, Binding::Site(site(end, from, to)))
+            }
+            (
+                Input::SiteParameter(_)
+                | Input::EdgeParameter(_)
+                | Input::EndParameter(..)
+                | Input::Inflow
+                | Input::EdgeFlow,
+                _,
+            ) => return Err(CompileDefect::NoSuchRead { law }),
         })
+    };
+    for &(input, accepts_no_nerve) in &kernel.unreached {
+        resolve(input, accepts_no_nerve)?;
+    }
+    inputs
+        .map(|(op, input)| resolve(input, kernel.accepts_no_nerve.contains(&op)))
         .collect()
 }
 

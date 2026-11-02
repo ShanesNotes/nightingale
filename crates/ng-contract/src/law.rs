@@ -398,7 +398,7 @@ impl Seal for Source {
     }
 }
 
-fn reachable(code: &[Op], result: usize, accepting: &[usize]) -> (Vec<Op>, Vec<usize>) {
+fn reachable(code: &[Op], result: usize, accepting: &[usize]) -> (Vec<Op>, Vec<usize>, Vec<(Input, bool)>) {
     fn place(code: &[Op], at: usize, placed: &mut [Option<usize>], out: &mut Vec<Op>) -> usize {
         if let Some(done) = placed[at] {
             return done;
@@ -410,7 +410,15 @@ fn reachable(code: &[Op], result: usize, accepting: &[usize]) -> (Vec<Op>, Vec<u
     }
     let (mut out, mut placed) = (Vec::new(), vec![None; code.len()]);
     place(code, result, &mut placed, &mut out);
-    (out, accepting.iter().filter_map(|&at| placed[at]).collect())
+    let unreached = (code.iter().enumerate())
+        .filter(|&(at, _)| placed[at].is_none())
+        .filter_map(|(at, op)| match op {
+            Op::Input(input) => Some((*input, accepting.contains(&at))),
+            _ => None,
+        })
+        .collect();
+    let accepting = accepting.iter().filter_map(|&at| placed[at]).collect();
+    (out, accepting, unreached)
 }
 
 /// One kernel's graph while it is built. `'k` is fresh for every kernel, so an expression belongs to
@@ -459,6 +467,9 @@ pub(crate) struct KernelData {
     /// Beside `code` and never in it: a program reads the same whichever way a law spelled a read, so nothing that
     /// reads programs can tell two spellings apart.
     pub(crate) accepts_no_nerve: Vec<usize>,
+    /// Each read the law wrote and its result never reaches, and whether it accepts no nerve. Also beside `code`: a
+    /// program holds what a law reaches, and compile refuses on what it wrote.
+    pub(crate) unreached: Vec<(Input, bool)>,
     pub(crate) dimension: String,
     pub(crate) modes: Selector,
     pub(crate) rate: RateClass,
@@ -1152,12 +1163,14 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     fn close<U, S>(&self, finished: Finished<'b, '_, O, U, S>) -> PureKernel<'b, O, U, S> {
         let id = self.kernels.get();
         self.kernels.set(id + 1);
-        let (code, accepts_no_nerve) = reachable(&finished.code, finished.result, &finished.accepts_no_nerve);
+        let (code, accepts_no_nerve, unreached) =
+            reachable(&finished.code, finished.result, &finished.accepts_no_nerve);
         PureKernel {
             data: KernelData {
                 id,
                 code,
                 accepts_no_nerve,
+                unreached,
                 dimension: finished.dimension,
                 modes: finished.modes.selector,
                 rate: finished.rate,
