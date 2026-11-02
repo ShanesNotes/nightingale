@@ -85,3 +85,80 @@ fn a_body_with_a_zero_on_its_fixed_path_is_admitted_at_an_instant() {
 fn a_ring_with_a_zero_on_its_fixed_path_is_read_whole_and_admitted() {
     admit(true).expect("identity Jacobian at every point");
 }
+
+/// `e1` pays out `p1 + p2` and `e2` pays out `p2`. `p1` closes on `e1`, and `p2` on `e1 + e2` when `shared`, so both
+/// closed rows read `e1`.
+fn two_closed_rows(shared: bool) -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>(
+        "synthetic body",
+        Position::new(measure(0.0), measure(0.0), measure(0.0)),
+    );
+    assemble(Schema::new(map.finish()?)?, |mut body| {
+        let (mut ns, _) = body.nervous()?.parts();
+        let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let e1 = ns.state::<Dimensionless>("e1", Admissible::finite());
+        let e2 = ns.state::<Dimensionless>("e2", Admissible::finite());
+        let p1 = ns.algebraic::<Rate<Dimensionless>>("p1", Admissible::finite());
+        let p2 = ns.algebraic::<Rate<Dimensionless>>("p2", Admissible::finite());
+        let t1 = ns.parameter::<Dimensionless>(ParameterKey::new("t1"), Admissible::finite());
+        let t2 = ns.parameter::<Dimensionless>(ParameterKey::new("t2"), Admissible::finite());
+        let first = ns.kernel(|mut k| {
+            let (one, two, zero) = (k.algebraic(&p1), k.algebraic(&p2), k.zero());
+            let both = k.add(one, two);
+            let out = k.subtract(zero, both);
+            k.finish(out, ns.every_mode(), class)
+        });
+        ns.memory_rate(&e1, first);
+        let second = ns.kernel(|mut k| {
+            let (two, zero) = (k.algebraic(&p2), k.zero());
+            let out = k.subtract(zero, two);
+            k.finish(out, ns.every_mode(), class)
+        });
+        ns.memory_rate(&e2, second);
+        let hold_one = ns.kernel(|mut k| {
+            let (held, goal) = (k.state(&e1), k.parameter(&t1));
+            let gap = k.subtract(held, goal);
+            k.finish(gap, ns.every_mode(), class)
+        });
+        ns.closes(&p1, hold_one);
+        let hold_two = ns.kernel(|mut k| {
+            let (one, two, goal) = (k.state(&e1), k.state(&e2), k.parameter(&t2));
+            let held = if shared { k.add(one, two) } else { two };
+            let gap = k.subtract(held, goal);
+            k.finish(gap, ns.every_mode(), class)
+        });
+        ns.closes(&p2, hold_two);
+        body.add(ns.finish());
+        body.compile()
+    })
+}
+
+/// Each closed row takes a store of its own, so two that read one store still factor over the body's elimination.
+#[test]
+fn two_closed_rows_that_read_one_store_factor_over_the_bodys_elimination() -> Result<(), InitializationFailure>
+{
+    for shared in [false, true] {
+        let body = two_closed_rows(shared)?;
+        let cycle = Cycle::new(
+            NonZeroU64::new(2_000_000_000).unwrap(),
+            NonZeroU32::new(2).unwrap(),
+        )?;
+        let mut packet = ParameterPacket::periodic(cycle);
+        for key in ["t1", "t2"] {
+            packet.synthetic(
+                ParameterKey::new(key),
+                Binding::Body,
+                measure::<Dimensionless>(0.5),
+                "synthetic",
+            )?;
+        }
+        packet.start_rest(&body, |_| 1.0, "synthetic")?;
+        let port = BoundaryPort::new(Vec::new())?;
+        let request = InitializationRequest::at(SimTime::from_ns(0));
+        let system = body.initialization(body.bind(packet)?, port, request)?;
+        let (_, block) = system.stage(&system.workspace(), 0)?;
+        assert!(body.factor(&block).is_ok(), "shared {shared}");
+    }
+    Ok(())
+}
