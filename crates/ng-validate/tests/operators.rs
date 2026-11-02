@@ -306,9 +306,9 @@ fn a_body_that_runs_every_operator_stays_on_its_bits() {
         writeln!(trace, "{high:016x} {low:016x}  {:?}", row.kind()).expect("a string takes it");
     }
     expect![[r#"
-        identity 40b89c6884545cb88681063ecd4bee5d1ed616756db79dca9b67e9adcb90272e
+        identity 0991f122cf6841895a48d4596a8f327ece2f7eee146c2e5503bb933c5a4468db
         ring slopes cf796856f085ec25c776dae6e90129f6b5c8d98b6633b75eb0dc373186a176c9 over 63 entries
-        revision 8 at 4000000000 ns, seal f41fa84a448eaeea6566c67ce05a00ed8b08bd920fd76584ee92332ca0fb8535
+        revision 8 at 4000000000 ns, seal 670dd1981d3bc61b5feeeeef333a7bfbd35babed3417fcd40ad0a36d11ebbf54
         4005d2a388ca9094 3ca9800000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Water }
         3ff5d2a388ca9094 3c99800000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Albumin }
         40022d5c77356f6c bca9800000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Water }

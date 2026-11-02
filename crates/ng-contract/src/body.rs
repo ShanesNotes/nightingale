@@ -57,9 +57,10 @@ pub(crate) struct Layout {
     pub(crate) instances: Vec<Instance>,
     pub(crate) parameters: Vec<ParameterSlot>,
     pub(crate) sparsity: Sparsity,
-    /// Derived from the sparsity and the matching, so the hash covers it through them.
+    /// Derived from the sparsity, the matching and the closed rows, so the hash covers it through the sparsity and
+    /// `judged`.
     pub(crate) elimination: Elimination,
-    /// Derived from the sparsity and the closed rows, so the hash covers it through them.
+    /// Each row's store, which the closed rows decide and nothing else seals, so the hash seals it.
     pub(crate) judged: Vec<u32>,
     pub(crate) blocks: Vec<Block>,
     pub(crate) modes: Vec<ModeLayout>,
@@ -72,7 +73,7 @@ pub(crate) struct Layout {
 }
 impl CompiledBody {
     pub(crate) fn seal(layout: Layout) -> Self {
-        let mut out = Canonical::new("ng-contract model 1");
+        let mut out = Canonical::new("ng-contract model 2");
         layout.seal(&mut out);
         Self {
             hash: ModelHash { digest: out.digest() },
@@ -165,7 +166,7 @@ impl Seal for Layout {
             parameters,
             sparsity,
             elimination: _,
-            judged: _,
+            judged,
             blocks,
             modes,
             guards,
@@ -182,6 +183,10 @@ impl Seal for Layout {
         instances.seal(out);
         parameters.seal(out);
         sparsity.seal(out);
+        out.length(judged.len());
+        for &store in judged {
+            out.number(u64::from(store));
+        }
         blocks.seal(out);
         modes.seal(out);
         guards.seal(out);
