@@ -1,7 +1,6 @@
 use crate::elimination::Factors;
 use crate::{InitializationSystem, Jacobian};
 
-/// A pivot this small beside its row's largest entry is rounding, not a value.
 const ROUNDING: f64 = 8.0 * f64::EPSILON;
 
 /// `matrix` holds each row with its right side last. A row with no pivot left is named: it has no rank. A pivot is read
@@ -62,7 +61,6 @@ fn reduced(mut matrix: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>, usize> {
     Ok(answers)
 }
 
-/// One point's block, over the body's fixed elimination or, where that meets a zero pivot, whole.
 enum Block<'b> {
     Fixed(Factors<'b>),
     Whole(Vec<Vec<f64>>),
@@ -102,7 +100,8 @@ impl InitializationSystem<'_> {
     /// Each point but the last factors over the body's elimination. Walking forward from point 0, every point becomes a
     /// linear function of the last point's rows that point 0 reads and of the fits, so the ring shrinks to one dense
     /// corner of the last point's rows and the fits' anchors. A second walk fills every point from the corner's answer.
-    /// A row with no rank is named, and `admit` reads that the same way, on the whole ring.
+    /// A row is named where its point's block or the corner has no pivot, and `admit` reads that the same
+    /// way, on the whole ring.
     pub fn solve(&self, ring: &Jacobian, right: &[f64]) -> Result<Vec<f64>, usize> {
         let (system, body) = (self, self.body);
         let view = ring.view();

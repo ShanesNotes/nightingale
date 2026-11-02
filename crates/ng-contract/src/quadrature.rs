@@ -108,7 +108,6 @@ pub struct Increment {
     memory: Vec<f64>,
     witness: StageWitness,
 }
-/// Integrated gross extents per compiled column.
 pub struct Extents {
     layout: Digest,
     forward: Vec<Compensated>,
@@ -146,8 +145,8 @@ impl CoupledProblem<'_> {
             stages: Vec::new(),
         }
     }
-    /// Assembles a proposal. Amounts and memory will come from the start plus the increment, and the dense
-    /// segment from the published ends, so `end` supplies only algebraic values.
+    /// `verify` takes amounts and memory from the start plus the increment, and the dense segment from the
+    /// ends, so `end` supplies only algebraic values.
     pub fn propose(
         &self,
         ticket: &StepTicket,

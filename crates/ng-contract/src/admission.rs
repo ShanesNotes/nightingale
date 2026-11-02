@@ -16,7 +16,8 @@ const NANOSECONDS_PER_SECOND: f64 = 1e9;
 /// What rounding leaves of a value, past which a change to it can be told from nothing.
 const ROUNDING: f64 = 8.0 * f64::EPSILON;
 
-/// When the start stands and what reads the anchors. The goal and the tolerance are the packet's.
+/// When the start stands and what reads the anchors. The anchors themselves and the tolerance are the
+/// packet's.
 pub struct InitializationRequest<'l> {
     anchor_moment: SimTime,
     lens: Option<&'l ObservationLens>,
@@ -237,7 +238,6 @@ impl InitializationSystem<'_> {
         let rows = self.body.rows().len();
         &unknowns[point * rows..][..rows]
     }
-    /// The point before `point`, around the ring. An instant's one point is its own.
     fn before(&self, point: usize) -> usize {
         (point + self.frames.len() - 1) % self.frames.len()
     }
@@ -472,9 +472,10 @@ impl InitializationSystem<'_> {
         }
         Ok(Jacobian::of_parts(row_offsets, columns, entries))
     }
-    /// One point's stage on its own, in the workspace's slots: each row's residual, as `evaluate` gives it, and the block
-    /// of the point's own unknowns, whose view has one row and one column per body row. An admission solver marches
-    /// the ring with this and `sweep`, to reach a guess Newton can start from. Nothing here is judged: `admit` is.
+    /// One point's stage on its own: each body row's residual, as `evaluate` gives it before a total
+    /// replaces a row, and the block of the point's own unknowns, whose view has one row and one column per
+    /// body row. An admission solver marches the ring with this and `sweep`, to reach a guess Newton can
+    /// start from. Nothing here is judged: `admit` is.
     pub fn stage(
         &self,
         workspace: &SolveWorkspace,
@@ -635,7 +636,7 @@ impl InitializationSystem<'_> {
             }
         }
     }
-    /// A combination's net boundary flow over the cycle, one column at a time as the ledger books it, whichever rows
+    /// A combination's net boundary flow over the cycle, one column at a time as the ledger sums it, whichever rows
     /// the workspace spread it over. A row's own sum can lose a small flow beside large ones, and the ledger keeps it.
     fn net_flow(&self, unknowns: &[f64], quantity: QuantityId) -> Result<f64, InitializationFailure> {
         let combination = &self.body.conserved_basis().combinations()[quantity.index()];
@@ -772,8 +773,6 @@ impl InitializationSystem<'_> {
         }
         Ok(worst)
     }
-    /// Whether a row behind this fit's anchor feels it anywhere on this workspace: the fit's value, through its slope,
-    /// moves that row's stage past rounding on the row's own value.
     fn felt(&self, unknowns: &[f64], fit: &Fit, value: f64) -> Result<bool, InitializationFailure> {
         let rows = self.body.rows();
         let values = self.values(unknowns);
@@ -901,7 +900,6 @@ impl InitialRevision {
     }
 }
 
-/// What a refusal names: a body row, a conserved total or an anchor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdmissionRow {
     Body(RowId),
@@ -916,7 +914,7 @@ pub enum InitializationFailure {
     Inconsistent {
         row: AdmissionRow,
     },
-    /// A law the solved workspace leaves without a value, such as a divisor at zero.
+    /// A law a workspace leaves without a value, such as a divisor at zero.
     Undefined {
         law: LawName,
     },
@@ -928,7 +926,8 @@ pub enum InitializationFailure {
     GuardSweep {
         point: usize,
     },
-    /// A row with no pivot at the start state, in its own stage or on the ring, which structural matching cannot see.
+    /// A row with no pivot on the solved workspace, in its own stage or on the ring, which structural
+    /// matching cannot see.
     NoRank {
         row: RowId,
     },

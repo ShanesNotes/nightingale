@@ -42,8 +42,8 @@ pub enum BoundaryInput {
     /// Each ends a step, and every site's head follows from its place.
     Posture(Posture),
 }
-/// A trunk and a leg descriptor. `trunk` is the sine of the trunk's angle from flat: 0 lying flat, 1 sitting up or
-/// standing, a negative value head down.
+/// `trunk` is the sine of the trunk's angle from flat: 0 lying flat, 1 sitting up or standing, a negative
+/// value head down.
 pub struct Posture {
     trunk: f64,
     legs: Legs,
@@ -344,13 +344,8 @@ impl PendingInputs {
     /// a waiting input lies inside the blind step, it drops that result and hands `solved` the same ticket
     /// ended at that input. A cut can be refused like any ticket, and a cut that crosses lands in turn.
     ///
-    /// This order is the causal step rule. Every ticket of the blind step is a function of the sealed past,
-    /// the span, the refusals of this base and published integrals, so it is the same ticket whatever waits.
-    /// A waiting input shows only to a step the record would have accepted past it, and then no late input
-    /// can still arrive before it, except behind the fence a cut leaves when it does not publish at its own
-    /// end. An input past the landing shows to no one, so a run that takes it at the landing's head equals the
-    /// run that knew it. A zero span, or one past the end of time, is `BindingMismatch`, as is a refusal of
-    /// another base.
+    /// This order is the causal step rule. A zero span, or one past the end of time, is `BindingMismatch`, as
+    /// is a refusal of another base.
     pub fn attempt<T>(
         &self,
         problem: &CoupledProblem<'_>,
@@ -470,7 +465,7 @@ impl PendingInputs {
         self.timeline[self.past.cursor..].seal(&mut out);
         out.digest()
     }
-    /// `rate` and `chain` are derived, so `read` never takes them on trust.
+    /// `chain` and every `rate` but a posture's are derived, so `read` never takes them on trust.
     pub(crate) fn write(&self, out: &mut Canonical) {
         let Self { timeline, past } = self;
         let AppliedInputs {
@@ -508,7 +503,6 @@ impl PendingInputs {
         }
         fence.seal(out);
     }
-    /// Refuses bytes no run writes.
     pub(crate) fn read(
         read: &mut ByteReader<'_>,
         body: &CompiledBody,
@@ -571,8 +565,8 @@ impl PendingInputs {
 }
 
 /// A cut's ticket carries its fence into every trial, so a landing short of a shown input leaves that fence
-/// when it publishes. What comes back has fired, so a firing with no state to publish refuses before anything
-/// reads the timeline, in a run that knows an input as in one that does not.
+/// when it publishes. A landing comes back fired, so a firing with no state to publish refuses before
+/// anything reads the timeline, in a run that knows an input as in one that does not.
 fn land<T>(
     problem: &CoupledProblem<'_>,
     ticket: &StepTicket,
@@ -632,7 +626,6 @@ fn payload_species(tag: u64) -> Result<Option<Species>, Malformed> {
         _ => Err(Malformed),
     }
 }
-/// An id, a stamp, a tag, a name's length, an amount and an end.
 const DELIVERY_BYTES: usize = 32 + 8 + 8 + 8 + 8 + 8;
 
 #[derive(Clone, Debug, Default, PartialEq)]

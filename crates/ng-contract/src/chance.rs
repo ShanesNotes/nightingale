@@ -189,7 +189,7 @@ pub(crate) enum Trigger<'b> {
 }
 
 /// Whether a period is a count of the clock's nanoseconds, so a run reads the period the packet gave. The count
-/// is read back because the product is inexact: 1.001 s multiplies to an ulp past 1,001,000,000.
+/// is read back because the product is inexact: 1.001 s multiplies to an ulp short of 1,001,000,000.
 pub(crate) fn holds_a_period(seconds: f64) -> bool {
     let ns = period_ns(seconds);
     ns > 0 && ns as f64 / NANOSECONDS_PER_SECOND == seconds
