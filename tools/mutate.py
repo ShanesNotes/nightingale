@@ -24,8 +24,6 @@ pass there before any row runs. Each row prints as it ends, so a killed sweep ke
 
 Exit 0 only when every row is CAUGHT. --check lists the NOT APPLIED rows and stops before any build. Each command runs
 in its own process group, and that group dies with the command and with this script, however this script dies.
-
-A table is written for a change and goes stale with the next one, so tools/verify never runs this.
 """
 import argparse
 import collections
@@ -89,11 +87,9 @@ def matches(sha, row):
 
 
 def cargo_test(test, env, budget):
-    """Returns the exit code, None if over budget, and the output.
-
-    The keeper leads the group and waits on a pipe only this process holds open. Closing it kills the group, and so does
-    this process dying, even by SIGKILL. A group of cargo alone would lose its id when cargo exits, and killing cargo
-    alone leaves the test binary running.
+    """The keeper leads the group and waits on a pipe only this process holds open. Closing it kills the group, and so
+    does this process dying, even by SIGKILL. A group of cargo alone would lose its id when cargo exits, and killing
+    cargo alone leaves the test binary running.
     """
     read_end, write_end = os.pipe()
     keeper = subprocess.Popen(
