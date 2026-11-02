@@ -39,6 +39,7 @@ enum Reader {
     Whole,
     OverItself,
     Twice,
+    Discarded,
 }
 
 fn felt<'b, 'k, S>(
@@ -147,6 +148,15 @@ fn read_in(reader: Reader, nerve: Nerve, spelling: Spelling) -> Result<CompiledB
                 });
                 cv.define_at(&row, value);
             }
+            Reader::Discarded => {
+                let (row, _) = cv.site_field::<Blood, Dimensionless>("felt", Admissible::finite());
+                let value = cv.site_kernel(|mut k| {
+                    felt(&mut k, &alpha, spelling);
+                    let zero = k.zero();
+                    k.finish(zero, cv.every_mode(), class)
+                });
+                cv.define_at(&row, value);
+            }
             Reader::Whole => {
                 let mark = cv.algebraic::<Dimensionless>("marked", Admissible::finite());
                 let held = cv.kernel(|mut k| {
@@ -200,6 +210,26 @@ fn a_site_a_law_reads_a_junction_at_must_be_supplied_or_stated_bare() -> Result<
         );
     }
     Ok(())
+}
+
+/// A read the law's result never reaches leaves its program, and its refusal stays: compile reads what a law wrote.
+#[test]
+fn a_read_a_law_discards_is_refused_as_one_it_keeps() {
+    let nerves = [
+        Nerve::Supplied,
+        Nerve::Stated,
+        Nerve::Lost,
+        Nerve::NoReceptor,
+        Nerve::Bare,
+    ];
+    for nerve in nerves {
+        for spelling in [Spelling::Plain, Spelling::Accepting] {
+            assert_eq!(
+                read_in(Reader::Discarded, nerve, spelling).err(),
+                read_in(Reader::Site, nerve, spelling).err(),
+            );
+        }
+    }
 }
 
 #[test]
