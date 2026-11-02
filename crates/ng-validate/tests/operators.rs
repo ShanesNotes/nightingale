@@ -227,7 +227,7 @@ fn packet(
                 species: Species::Water,
                 ..
             } => [1.0, 4.0][usize::from(site == a)],
-            RowKind::Amount { site, .. } => [0.5, 2.0][usize::from(site == a)],
+            RowKind::Amount { site, .. } => [0.3, 2.0][usize::from(site == a)],
             RowKind::Algebraic(Slot {
                 law: LawName { owner: "CV", .. },
                 at: Context::Edge { from, .. },
@@ -286,12 +286,12 @@ fn every_operators_value_stays_on_the_accepted_bits() {
         writeln!(trace, "{high:016x} {low:016x}  {:?}", row.kind()).expect("a string takes it");
     }
     expect![[r#"
-        identity a2ef46498bc47342cb0d3fe19e9665ea6f2046a133033e0cd6c6e9b88e1d048d
-        revision 8 at 4000000000 ns, seal 6d1ae4e1dbc99b7a4d4b3e790c5e25a361927ad984536c9ca37c2ade617c49d3
+        identity 064be8bb1ee0d7f65008786c21903b8c3b1e2b01c696188ef193f2edf2a30ea9
+        revision 8 at 4000000000 ns, seal 42bddce38e3124c4ebcf2ce7ef955c83f5258a1a7342fa5e974f97de64cc74bd
         40044c1e7011589f bcacc00000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Water }
         3ff44c1e7011589f bc9cc00000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Albumin }
         4003b3e18feea761 3cacc00000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Water }
-        3ff3b3e18feea761 3c9cc00000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Albumin }
+        3ff080ae5cbb742e 3c89800000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Albumin }
         3fd765bb838e1f0b 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "first" }, at: Body })
         bfe6a57ac474d34e 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "second" }, at: Body })
         3fb999999999999a 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "set point" }, at: Body })
