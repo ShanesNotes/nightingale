@@ -16,11 +16,11 @@ exactly once. `test` is what follows `cargo test`, and a row's own `test` replac
 A sweep extracts REV, default HEAD, to target/mutate/ in this checkout, so it never edits your files. Each `test` must
 pass there before any row runs. Each row prints as it ends, so a killed sweep keeps its lines:
 
-    CAUGHT           a test failed, named on the line
+    CAUGHT           a test failed, named on the line, or a test binary crashed
     CAUGHT at build  the mutant does not compile; read the error, because a mistyped mutant proves nothing
     SURVIVED         every test passed, so ask what the test could not see
     NOT APPLIED      `old` did not match exactly once, so nothing ran
-    UNCLEAR          over budget, or failed with no test named: neither a catch nor a survivor
+    UNCLEAR          over budget, killed from outside, or failed with no test named: neither a catch nor a survivor
 
 Exit 0 only when every row is CAUGHT. --check lists the NOT APPLIED rows and stops before any build. Each command runs
 in its own process group, and that group dies with the command and with this script, however this script dies.
@@ -32,6 +32,7 @@ import pathlib
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -43,7 +44,8 @@ TREE = WORK / "tree"
 PASSED = re.compile(r"^test .+ \.\.\. ok$", re.M)
 FAILED = re.compile(r"^test (.+) \.\.\. FAILED$", re.M)
 ERROR = re.compile(r"^error.*$", re.M)
-DIED = re.compile(r"process didn't exit successfully: .*\((signal: .*)\)$", re.M)
+DIED = re.compile(r"process didn't exit successfully: .*\((signal: (\d+), .*)\)$", re.M)
+FAULTS = {signal.SIGABRT, signal.SIGILL, signal.SIGSEGV, signal.SIGBUS, signal.SIGFPE}
 SHOWN = 3
 ROW_KEYS = {"name", "path", "old", "new", "test"}
 
@@ -134,7 +136,9 @@ def judge(code, output, budget):
     if len(errors) > 1 and errors[-1].startswith("error: could not compile "):
         return "CAUGHT at build", errors[0]
     if "error: test failed" in output and (died := DIED.search(output)):
-        return "CAUGHT", f"a test binary died, {died[1]}"
+        if int(died[2]) in FAULTS:
+            return "CAUGHT", f"a test binary crashed, {died[1]}"
+        return "UNCLEAR", f"a test binary was killed from outside, {died[1]}"
     return "UNCLEAR", f"exit {code} with no test named"
 
 
