@@ -344,3 +344,54 @@ fn a_closed_row_whose_unknown_only_another_algebraic_row_reads_is_refused() -> R
     );
     Ok(())
 }
+
+#[test]
+fn a_closed_row_keeps_its_own_unknown_when_another_row_could_take_it() -> Result<(), InitializationFailure> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>(
+        "synthetic body",
+        Position::new(measure(0.0), measure(0.0), measure(0.0)),
+    );
+    let body = assemble(Schema::new(map.finish()?)?, |mut body| {
+        let (mut ns, _) = body.nervous()?.parts();
+        let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let e = ns.state::<Dimensionless>("e", Admissible::finite());
+        let p = ns.algebraic::<Dimensionless>("p", Admissible::finite());
+        let q = ns.algebraic::<Dimensionless>("q", Admissible::finite());
+        let s = ns.parameter::<Rate<Dimensionless>>(ParameterKey::new("s"), Admissible::positive());
+        let pays = ns.kernel(|mut k| {
+            let (speed, held) = (k.parameter(&s), k.algebraic(&p));
+            let rate = k.scale(speed, held);
+            k.finish(rate, ns.every_mode(), class)
+        });
+        ns.memory_rate(&e, pays);
+        let hold = ns.kernel(|mut k| {
+            let (store, other) = (k.state(&e), k.algebraic(&q));
+            let sum = k.add(store, other);
+            k.finish(sum, ns.every_mode(), class)
+        });
+        ns.closes(&p, hold);
+        let follows = ns.kernel(|mut k| {
+            let (own, held) = (k.algebraic(&q), k.algebraic(&p));
+            let gap = k.subtract(own, held);
+            k.finish(gap, ns.every_mode(), class)
+        });
+        ns.residual(&q, follows);
+        body.add(ns.finish());
+        body.compile()
+    })?;
+    let cycle = Cycle::new(
+        NonZeroU64::new(2_000_000_000).unwrap(),
+        NonZeroU32::new(2).unwrap(),
+    )?;
+    let mut packet = ParameterPacket::periodic(cycle);
+    let speed = measure::<Rate<Dimensionless>>(0.5);
+    packet.synthetic(ParameterKey::new("s"), Binding::Body, speed, "synthetic")?;
+    packet.start_rest(&body, |_| 0.0, "synthetic")?;
+    let port = BoundaryPort::new(Vec::new())?;
+    let request = InitializationRequest::at(SimTime::from_ns(0));
+    let system = body.initialization(body.bind(packet)?, port, request)?;
+    let (_, block) = system.stage(&system.workspace(), 0)?;
+    assert!(body.factor(&block).is_ok());
+    Ok(())
+}
