@@ -79,8 +79,9 @@ pub(crate) fn compile(
     };
     let column_reads: Vec<bool> = (0..placement.columns.len()).map(read_by).collect();
     let basis = conserved_basis(&species, &placement.columns, &column_reads);
-    let judged = judged_rows(&solved_by, &reads, &closed);
-    let pivots = pivots(solved_by.clone(), &reads, &closed);
+    let stores = closing_stores(&solved_by, &reads, &closed);
+    let judged = judged_rows(reads.len(), &stores);
+    let pivots = pivots(solved_by.clone(), &stores);
     let sparsity = sparsity(reads);
     let elimination = Elimination::plan(&sparsity.offsets, &sparsity.unknowns, &pivots);
     Ok(CompiledBody::seal(Layout {
@@ -1950,28 +1951,38 @@ fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, Compi
 /// reads that unknown, and that amount's row takes the unknown.
 /// The row each row's residual is judged at: its own, or for a closed row the store it holds, whose unit its residual
 /// has.
-fn judged_rows(solved_by: &[RowId], reads: &[Vec<UnknownId>], closed: &[usize]) -> Vec<u32> {
-    let mut judged: Vec<u32> = (0..reads.len() as u32).collect();
+/// The store each closed row is judged on and pivots through: the first it reads that carries its unknown and no
+/// closed row before it took, so no store pivots two.
+fn closing_stores(solved_by: &[RowId], reads: &[Vec<UnknownId>], closed: &[usize]) -> Vec<(usize, usize)> {
+    let mut stores: Vec<(usize, usize)> = Vec::with_capacity(closed.len());
     for &row in closed {
         let unknown = (solved_by.iter()).position(|pivot| pivot.index() == row);
         let unknown = UnknownId::at(unknown.expect("a closed row is matched to its unknown"));
-        let carries = |amount: &&UnknownId| reads[amount.index()].contains(&unknown);
-        if let Some(amount) = reads[row].iter().find(carries) {
-            judged[row] = amount.index() as u32;
+        let free = |amount: &&UnknownId| {
+            reads[amount.index()].contains(&unknown)
+                && !stores.iter().any(|&(_, store)| store == amount.index())
+        };
+        if let Some(amount) = reads[row].iter().find(free) {
+            stores.push((row, amount.index()));
         }
+    }
+    stores
+}
+
+fn judged_rows(rows: usize, stores: &[(usize, usize)]) -> Vec<u32> {
+    let mut judged: Vec<u32> = (0..rows as u32).collect();
+    for &(row, store) in stores {
+        judged[row] = store as u32;
     }
     judged
 }
 
-fn pivots(mut pivots: Vec<RowId>, reads: &[Vec<UnknownId>], closed: &[usize]) -> Vec<RowId> {
-    for &row in closed {
+fn pivots(mut pivots: Vec<RowId>, stores: &[(usize, usize)]) -> Vec<RowId> {
+    for &(row, store) in stores {
         let unknown = (pivots.iter()).position(|pivot| pivot.index() == row);
-        let unknown = UnknownId::at(unknown.expect("a closed row is matched to its unknown"));
-        let carries = |amount: &&UnknownId| reads[amount.index()].contains(&unknown);
-        if let Some(amount) = reads[row].iter().find(carries) {
-            pivots[unknown.index()] = RowId::at(amount.index());
-            pivots[amount.index()] = RowId::at(row);
-        }
+        let unknown = unknown.expect("a closed row is matched to its unknown");
+        pivots[unknown] = RowId::at(store);
+        pivots[store] = RowId::at(row);
     }
     pivots
 }
