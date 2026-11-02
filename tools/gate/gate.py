@@ -297,8 +297,8 @@ def _float_dot(text: str, i: int, j: int) -> bool:
 
 
 def _block_doc(text: str) -> str:
-    """rustc trims a block doc's `*` margin only when every line has one in the same column, and then drops the `*`
-    only before a space or another `*`, so a line such as `*b;` stays code."""
+    """rustc trims a block doc's `*` margin only when every line has one in the same column, and then drops a `*`
+    that stands alone or comes before a space or another `*`, so a line such as `*b;` stays code."""
     lines = text.split("\n")
     k, end = (0 if lines[0].lstrip().startswith("*") else 1), len(lines)
     while k < end and not lines[k].strip():
