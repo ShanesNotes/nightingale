@@ -76,6 +76,7 @@ fn every_operator() -> Result<(CompiledBody, SiteId), AdmissionError> {
     map.contain(root.id(), a.id());
     map.contain(root.id(), b.id());
     map.connect(Network::Vascular, a.id(), b.id());
+    map.connect(Network::Vascular, b.id(), a.id());
     let mut schema = Schema::new(map.finish()?)?;
     schema.partial_volume(measure(PARTIAL_VOLUME))?;
     schema.carry::<Albumin, Blood>(Space::Lumen);
@@ -122,8 +123,9 @@ fn every_operator() -> Result<(CompiledBody, SiteId), AdmissionError> {
         let width = ns.parameter::<Dimensionless>(ParameterKey::new("ns.width"), Admissible::positive());
         let first_rate = ns.kernel(|mut k| {
             let (x, y, w) = (k.state(&first), k.state(&second), k.parameter(&width));
+            let share = k.logistic(y);
+            let w = k.scale(w, share);
             let high = k.smooth_max(x, y, w);
-            let (x, y, w) = (k.state(&first), k.state(&second), k.parameter(&width));
             let low = k.smooth_min(x, y, w);
             let sum = k.add(high, low);
             let tilted = k.add(sum, high);
@@ -228,8 +230,11 @@ fn packet(
             RowKind::Amount { site, .. } => [0.5, 2.0][usize::from(site == a)],
             RowKind::Algebraic(Slot {
                 law: LawName { owner: "CV", .. },
-                ..
-            }) => 0.25 * (ELASTANCE * (4.0 * PARTIAL_VOLUME) - ELASTANCE * (1.0 * PARTIAL_VOLUME)),
+                at: Context::Edge { from, .. },
+            }) => {
+                let [here, there] = if from == a { [4.0, 1.0] } else { [1.0, 4.0] };
+                0.25 * (ELASTANCE * (here * PARTIAL_VOLUME) - ELASTANCE * (there * PARTIAL_VOLUME))
+            }
             kind => {
                 let start = starts.iter().find(|(row, _)| *row == kind);
                 start.unwrap_or_else(|| panic!("no start for {kind:?}")).1
@@ -281,18 +286,19 @@ fn every_operators_value_stays_on_the_accepted_bits() {
         writeln!(trace, "{high:016x} {low:016x}  {:?}", row.kind()).expect("a string takes it");
     }
     expect![[r#"
-        identity 062cd83bbbcf5813381324753ed2b1d64686e6d8b92ae9f2f50288975f07b457
-        revision 8 at 4000000000 ns, seal 857253110d24b3237775a8c2be58fc26a6436c5ae753b7ffe4cdec35172f088b
-        4005b2ad2c18a5b3 bca0800000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Water }
-        3ff5b2ad2c18a5b3 bc90800000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Albumin }
-        40024d52d3e75a4d 3ca0800000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Water }
-        3ff24d52d3e75a4d 3c90800000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Albumin }
-        3fd7876fa4a4e37b 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "first" }, at: Body })
-        bfe6f58337f6b021 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "second" }, at: Body })
+        identity a2ef46498bc47342cb0d3fe19e9665ea6f2046a133033e0cd6c6e9b88e1d048d
+        revision 8 at 4000000000 ns, seal 6d1ae4e1dbc99b7a4d4b3e790c5e25a361927ad984536c9ca37c2ade617c49d3
+        40044c1e7011589f bcacc00000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Water }
+        3ff44c1e7011589f bc9cc00000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Albumin }
+        4003b3e18feea761 3cacc00000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Water }
+        3ff3b3e18feea761 3c9cc00000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Albumin }
+        3fd765bb838e1f0b 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "first" }, at: Body })
+        bfe6a57ac474d34e 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "second" }, at: Body })
         3fb999999999999a 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "set point" }, at: Body })
         3fe6666666666666 0000000000000000  Algebraic(Slot { law: LawName { owner: "NS", local: "pace" }, at: Body })
         3ff8000000000000 0000000000000000  Algebraic(Slot { law: LawName { owner: "NS", local: "third" }, at: Body })
-        3fbc410425712b9c 0000000000000000  Algebraic(Slot { law: LawName { owner: "CV", local: "circulation" }, at: Edge { from: SiteId { key: "a", class: VesselSegment }, to: SiteId { key: "b", class: VesselSegment } } })
+        3f93ca794c30a433 0000000000000000  Algebraic(Slot { law: LawName { owner: "CV", local: "circulation" }, at: Edge { from: SiteId { key: "a", class: VesselSegment }, to: SiteId { key: "b", class: VesselSegment } } })
+        bf93ca794c30a433 0000000000000000  Algebraic(Slot { law: LawName { owner: "CV", local: "circulation" }, at: Edge { from: SiteId { key: "b", class: VesselSegment }, to: SiteId { key: "a", class: VesselSegment } } })
     "#]].assert_eq(&trace);
 }
 
@@ -317,6 +323,6 @@ fn every_operators_slope_stays_on_the_bits_of_a_rings_matrix() {
         .collect();
     let digest = hex(Digest::of_canonical(&bits));
     let trace = format!("ring slopes {digest} over {} entries", slopes.len());
-    expect!["ring slopes 82d43c3b9eeac9eef0a809ad877d29d52013ed44e609bb55a4927650c4d14ba3 over 63 entries"]
+    expect!["ring slopes 4d06e209f25395075849604857fe1126582ca89fcc45a154083d9dda5f56f4aa over 75 entries"]
         .assert_eq(&trace);
 }
