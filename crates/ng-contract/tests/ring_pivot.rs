@@ -86,7 +86,7 @@ fn a_ring_with_a_zero_on_its_fixed_path_is_read_whole_and_admitted() {
     admit(true).expect("identity Jacobian at every point");
 }
 
-fn two_closed_rows(shared: bool) -> Result<CompiledBody, AdmissionError> {
+fn two_closed_rows(shared: bool, second_first: bool) -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>(
         "synthetic body",
@@ -119,14 +119,19 @@ fn two_closed_rows(shared: bool) -> Result<CompiledBody, AdmissionError> {
             let gap = k.subtract(held, goal);
             k.finish(gap, ns.every_mode(), class)
         });
-        ns.closes(&p1, hold_one);
         let hold_two = ns.kernel(|mut k| {
             let (one, two, goal) = (k.state(&e1), k.state(&e2), k.parameter(&t2));
             let held = if shared { k.add(one, two) } else { two };
             let gap = k.subtract(held, goal);
             k.finish(gap, ns.every_mode(), class)
         });
-        ns.closes(&p2, hold_two);
+        if second_first {
+            ns.closes(&p2, hold_two);
+            ns.closes(&p1, hold_one);
+        } else {
+            ns.closes(&p1, hold_one);
+            ns.closes(&p2, hold_two);
+        }
         body.add(ns.finish());
         body.compile()
     })
@@ -135,8 +140,14 @@ fn two_closed_rows(shared: bool) -> Result<CompiledBody, AdmissionError> {
 #[test]
 fn two_closed_rows_that_read_one_store_factor_over_the_bodys_elimination() -> Result<(), InitializationFailure>
 {
-    for shared in [false, true] {
-        let body = two_closed_rows(shared)?;
+    for (shared, second_first) in [(false, false), (false, true), (true, false), (true, true)] {
+        let body = two_closed_rows(shared, second_first)?;
+        let declared_first = two_closed_rows(shared, false)?.model_hash();
+        assert_eq!(
+            body.model_hash(),
+            declared_first,
+            "shared {shared}, second first {second_first}"
+        );
         let cycle = Cycle::new(
             NonZeroU64::new(2_000_000_000).unwrap(),
             NonZeroU32::new(2).unwrap(),
@@ -155,7 +166,10 @@ fn two_closed_rows_that_read_one_store_factor_over_the_bodys_elimination() -> Re
         let request = InitializationRequest::at(SimTime::from_ns(0));
         let system = body.initialization(body.bind(packet)?, port, request)?;
         let (_, block) = system.stage(&system.workspace(), 0)?;
-        assert!(body.factor(&block).is_ok(), "shared {shared}");
+        assert!(
+            body.factor(&block).is_ok(),
+            "shared {shared}, second first {second_first}"
+        );
     }
     Ok(())
 }
