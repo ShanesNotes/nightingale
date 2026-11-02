@@ -71,9 +71,16 @@ pub enum Disposition {
     Live,
     ExternalInput,
     ExternalSink,
-    AnatomyRelation { reason: &'static str },
-    OutsideSlice { reason: &'static str },
-    Unresolved { reason: &'static str },
+    /// Realized by an anatomy relation, not a wire.
+    AnatomyRelation {
+        reason: &'static str,
+    },
+    OutsideSlice {
+        reason: &'static str,
+    },
+    Unresolved {
+        reason: &'static str,
+    },
 }
 impl Disposition {
     pub const fn is_mapped(&self) -> bool {
