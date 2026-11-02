@@ -1,6 +1,7 @@
 use crate::{AcceptedStateView, CoupledProblem, DeclaredResolution, StepProposal, StepTicket, TrialFailure};
 
-/// An implementor holds algorithm configuration, never accepted continuation.
+/// An implementor holds algorithm configuration, never accepted continuation. Rust cannot forbid a hidden
+/// counter or cache, so the resume gate, which decodes into a freshly built core, catches one.
 pub trait CoupledSolver {
     fn resolution(&self) -> DeclaredResolution;
     /// The span this core commits to for its next step, in ns, from the accepted view alone, so its step

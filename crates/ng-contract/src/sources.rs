@@ -49,7 +49,8 @@ pub(crate) fn refusal_sources(layout: &Layout) -> Vec<RefusalSource> {
 }
 
 impl CompiledBody {
-    /// In row order, then in law name order. Derived from the rows and programs, so not hashed apart.
+    /// Rows first, in row order, then laws, in the order of their programs. Derived from the rows and
+    /// programs, so not hashed apart.
     pub fn refusal_sources(&self) -> &[RefusalSource] {
         &self.sources
     }

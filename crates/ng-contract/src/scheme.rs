@@ -148,7 +148,6 @@ pub struct ErrorScales {
     relative: f64,
 }
 impl ErrorScales {
-    /// What a packet that states no tolerance is held to.
     pub(crate) const EXACT: Self = Self {
         absolute: 0.0,
         relative: 0.0,

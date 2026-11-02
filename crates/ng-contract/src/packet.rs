@@ -145,7 +145,6 @@ struct AnchorEntry {
     bits: u64,
     trace: [&'static str; 2],
 }
-/// A parameter's range in a stated population: an interval, the form `authored` and `sampled` read.
 struct PopulationEntry {
     key: ParameterKey,
     dimension: String,
@@ -180,7 +179,7 @@ impl<K: PacketKind> ParameterPacket<K> {
         }
     }
     /// A packet whose start state returns after `cycle`: the periodic goal. Its start values are the guess
-    /// at every point, and each conserved combination's total over them is what the solve cannot move.
+    /// at every point.
     pub fn periodic(cycle: Cycle) -> Self {
         Self {
             cycle: Some(cycle),
@@ -347,7 +346,6 @@ impl<K: PacketKind> ParameterPacket<K> {
             note: "",
         })
     }
-    /// Each entry's value and dimension, as a law reads them: a derived entry's are its source's, scaled.
     fn settled(&self) -> Result<Vec<(f64, &str)>, AdmissionError> {
         let mut settled = Vec::with_capacity(self.parameters.len());
         for entry in &self.parameters {
@@ -579,7 +577,6 @@ pub(crate) struct BoundAnchor {
     pub(crate) statistic: AnchorStatistic,
     pub(crate) value: f64,
 }
-/// One calibrated packet entry: one unknown and the anchor row that closes it.
 pub(crate) struct Fit {
     pub(crate) slots: Vec<ParameterId>,
     /// The rows behind its anchor, the only ones whose answer to the fit can reach it.
@@ -597,15 +594,15 @@ impl Fit {
         }
     }
 }
-/// What this packet asks of admission, read from the packet at `bind`. The packet hash covers all of it, so
-/// neither `digest` nor an image holds it, and a revision's parameters owe nothing: a resume never refits.
+/// What this packet asks of admission, read from the packet at `bind`. The packet and model hashes cover all
+/// of it, so neither `digest` nor an image holds it, and a revision's parameters owe nothing: a resume never
+/// refits.
 #[derive(Default)]
 pub(crate) struct Owed {
     pub(crate) cycle: Option<Cycle>,
     pub(crate) tolerance: Option<ErrorScales>,
     pub(crate) anchors: Vec<BoundAnchor>,
     pub(crate) fits: Vec<Fit>,
-    /// One per parameter entry: its name, its provenance and its settled value.
     pub(crate) entries: Vec<(ValueName, ValueProvenance, f64)>,
 }
 
@@ -707,8 +704,8 @@ impl CompiledBody {
             })
             .map(|(_, mode)| mode.variable)
     }
-    /// Finding 15's partial check. A literal is zero, so only `exp` and `logistic` make a nonzero constant from
-    /// literals, and `divide` makes one from two equal expressions. Equal means one number from `numbered`.
+    /// A literal is zero, so only `exp` and `logistic` make a nonzero constant from literals, and `divide`
+    /// makes one from two equal expressions. Equal means one number from `numbered`.
     fn unbacked_constant(&self) -> Option<LawName> {
         let unbacked = |code: &[Op]| {
             let numbers = numbered(code);
@@ -736,8 +733,9 @@ impl CompiledBody {
             .find(|period| !holds_a_period(values[period.index()]))
             .map(|period| self.layout.parameters[period.index()].key)
     }
-    /// Parses a packet against the compiled layout. Each refusal is by name. What cannot run yet is refused
-    /// first, and a mode's start next, because which laws hold decides what every later value means.
+    /// Parses a packet against the compiled layout. Each refusal is by name. What cannot run yet and a
+    /// constant no packet entry backs are refused first, and a mode's start next, because which laws hold
+    /// decides what every later value means.
     pub fn bind<K: PacketKind>(&self, packet: ParameterPacket<K>) -> Result<BoundParameters, AdmissionError> {
         if let Some(variable) = self.unrun_mode(packet.cycle.is_some()) {
             return Err(AdmissionError::ModesNotYetRun { variable });
@@ -910,14 +908,13 @@ impl CompiledBody {
                 | Bound::Height(_) => false,
             })
     }
-    /// A pulsatile row is one its block's rate class puts in the wave or beat band.
     fn pulsatile(&self, row: RowId) -> bool {
         (self.layout.blocks.iter())
             .find(|block| block.rows.contains(&row))
             .is_some_and(|block| block.rate.band() <= RateBand::Beat)
     }
-    /// Parses what the packet asks of admission against the compiled layout. `bind` holds rule 17's window here:
-    /// a statistic the row or the packet cannot give is refused before anything solves.
+    /// `bind` holds rule 17's window here: a statistic the row or the packet cannot give is refused before
+    /// anything solves.
     fn owed<K: PacketKind>(
         &self,
         packet: &ParameterPacket<K>,
@@ -1012,8 +1009,7 @@ impl CompiledBody {
 /// One number per node, equal for two nodes that compute one expression: the same operation on operands of the
 /// same numbers, with `as_dimension` no operation at all, and in either order for `add`, `multiply` and a smooth
 /// limit's two sides. Separate reads of one parameter already compare equal, so `(p + p) / (p + p)` from four reads
-/// gets one number on each side. It folds nothing: `p - p` stays a law on a parameter, as finding 15's backed test
-/// holds it.
+/// gets one number on each side. It folds nothing: `p - p` stays a law on a parameter.
 fn numbered(code: &[Op]) -> Vec<usize> {
     let mut numbers: Vec<usize> = Vec::with_capacity(code.len());
     let mut distinct: Vec<Op> = Vec::with_capacity(code.len());

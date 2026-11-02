@@ -166,7 +166,8 @@ pub struct RegionId {
     key: &'static str,
 }
 
-/// Each names the least key that shows it.
+/// Each names the first offender in canonical order: a site or a region by key, an edge by network and then
+/// its source's key, and a landmark by kind and then its site's key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnatomyDefect {
     DeclaredTwice {
@@ -224,7 +225,7 @@ pub enum AnatomyDefect {
     WrongNetwork {
         site: &'static str,
     },
-    /// A landmark placed at two sites.
+    /// A landmark placed twice, at another site or height.
     LandmarkTwice {
         site: &'static str,
     },
@@ -312,9 +313,8 @@ impl AnatomyBuilder {
         self.regions.push((key, root));
         RegionId { key }
     }
-    /// Runs every check in [`AnatomyDefect`]'s order and refuses at the first that fails. An
-    /// identical repeat of a relation is one fact, so neither repeats nor declaration order change
-    /// the result.
+    /// Runs every check and refuses at the first that fails. An identical repeat of a relation is one
+    /// fact, so neither repeats nor declaration order change the result.
     pub fn finish(self) -> Result<Anatomy, AdmissionError> {
         let facts = Facts::resolve(self)?;
         facts.check_relations()?;
