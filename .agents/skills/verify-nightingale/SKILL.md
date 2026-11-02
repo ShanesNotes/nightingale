@@ -22,6 +22,8 @@ An agent loads this skill before it claims a change works or asks for a merge.
 
 Speed is in none of these runs, because a wall clock cannot gate a merge. `python3 -I tools/bench/run.py` times the engine on demand, and its header says how to read and compare the numbers.
 
+A mutation sweep is in none of them either, because its table is written for one change. `python3 -I tools/mutate.py TABLE` breaks one rule at a time on a commit and reports whether a test notices, and its header says how to write a table and read the verdicts.
+
 ## The steps
 
 - `01-toolchain.sh`: rustc and cargo match the channel in `rust-toolchain.toml`, rustfmt and clippy answer, rust-src is installed, and python3 is 3.11 or newer.
