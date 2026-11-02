@@ -299,13 +299,15 @@ pub enum CompileDefect {
     /// place: a hazard's draw stands for the whole body.
     ModeOfAnotherPlace { law: LawName },
     /// A read of a pool this body does not hold there, or of a place the map does not say: a landmark it does not
-    /// place, a bed without exactly one drain, a segment without exactly one urinary edge in, or a site's or an edge's
-    /// entry in a kernel attached where neither stands.
+    /// place, a bed without exactly one drain, a segment without exactly one urinary edge in, a junction read of a
+    /// route's amount, or a site's or an edge's entry in a kernel attached where neither stands.
     NoSuchRead { law: LawName },
     /// A guard that resets a row whose set does not hold zero, so a firing would publish a state no run can resume.
     ResetOutsideSet { law: LawName },
     /// A law reads a junction at a site the map neither supplies nor states that no nerve reaches.
     NoSupply { law: LawName, site: SiteId },
+    /// An `at_junction` read at a site the map says no nerve reaches.
+    UnsuppliedRead { law: LawName, site: SiteId },
     /// A law reads an effect at a junction that holds no such receptor.
     NoReceptor { law: LawName, junction: SiteId },
     /// A fluid route between a space that holds a species and one that does not, with no statement that it keeps that

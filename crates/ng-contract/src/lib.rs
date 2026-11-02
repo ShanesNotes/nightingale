@@ -284,7 +284,7 @@
 //! }
 //! ```
 //! A law declared for one site class reads only that class's entries: a capillary-bed law cannot read
-//! a junction's value.
+//! a junction's value as its own.
 //! ```compile_fail,E0308
 //! use ng_contract::*;
 //! fn crossed<'b>(laws: &FragmentBuilder<'b, Fluids>, released: &ReadPort<'b, Fluids, PerSite<Junction, Dimensionless>>,
@@ -336,6 +336,23 @@
 //!     width: Expr<'b, 'k, Nervous, Deviation<Pressure>>) -> Expr<'b, 'k, Nervous, Dimensionless> {
 //!     let ratio = k.divide(off, width);
 //!     k.as_dimension(ratio)
+//! }
+//! ```
+//! Only the circulation reads a nerve across sites with one and without, so only its laws may accept no nerve. A renal
+//! arm that read a bare bed would do nothing and pass every test.
+//! ```compile_fail,E0599
+//! use ng_contract::*;
+//! fn bare<'b, 'k>(k: &mut Kernel<'b, 'k, Renal, ReclaimEdge>,
+//!     nerve: &ReadPort<'b, Renal, PerSite<Junction, Dimensionless>>) -> Expr<'b, 'k, Renal, Dimensionless> {
+//!     k.at_junction_if_supplied(nerve)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn vessel<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>,
+//!     nerve: &ReadPort<'b, Cardiovascular, PerSite<Junction, Dimensionless>>)
+//!     -> Expr<'b, 'k, Cardiovascular, Dimensionless> {
+//!     k.at_junction_if_supplied(nerve)
 //! }
 //! ```
 //! A route comes from a scope, whole. A binding is a transfer of one ligand between two pools, so nothing can write a
