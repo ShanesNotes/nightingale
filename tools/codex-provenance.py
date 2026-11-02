@@ -109,7 +109,7 @@ def main(args):
             print(f"{os.path.basename(arg)}: neither a file nor a session id", file=sys.stderr)
             return 2
         if session is None or session not in rollouts:
-            print(f"{label}: no `session id:` line" if session is None else f"{label}: session {session} has no rollout")
+            print(f"{label}: " + ("no `session id:` line" if session is None else f"session {session} has no rollout"))
             failed = True
             continue
         helpers, todo = [], list(children.get(session, []))
@@ -133,7 +133,8 @@ def main(args):
         line += f"; {len(missing)} spawned helpers have no rollout" if missing else ""
         line += "" if whole else "; a record does not parse"
         print(line)
-        failed |= bool(missing) or not whole or not (pairs + helper_pairs) or any(None in p for p in pairs + helper_pairs)
+        turns = pairs + helper_pairs
+        failed |= bool(missing) or not whole or not turns or any(None in pair for pair in turns)
     return 1 if failed else 0
 
 
