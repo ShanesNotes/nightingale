@@ -1433,13 +1433,13 @@ fn addresses(
         held,
         ..
     } = *places;
-    let inputs = kernel.code.iter().filter_map(|op| match op {
-        Op::Input(input) => Some(*input),
+    let inputs = kernel.code.iter().enumerate().filter_map(|(op, code)| match code {
+        Op::Input(input) => Some((op, *input)),
         _ => None,
     });
     let site = |end, from, to| if end == End::From { from } else { to };
     let unknown = |row: usize| Address::Unknown(UnknownId::at(row));
-    let read = |source: Source, place: Where| -> Result<Address, CompileDefect> {
+    let read = |source: Source, place: Where, op: usize| -> Result<Address, CompileDefect> {
         let landed = place_of(place, context, anatomy);
         if let Where::MarkOn(set, _) = place
             && !landed.is_some_and(|site| anatomy.in_set(set).contains(&site))
@@ -1458,7 +1458,7 @@ fn addresses(
                         unknown(row.ok_or(CompileDefect::NoReceptor { law, junction })?)
                     }
                     None if !anatomy.unsupplied(site) => return Err(CompileDefect::NoSupply { law, site }),
-                    None if !kernel.accepts_no_nerve.contains(&source) => {
+                    None if !kernel.accepts_no_nerve.contains(&op) => {
                         return Err(CompileDefect::UnsuppliedRead { law, site });
                     }
                     None => Address::Gauge,
@@ -1529,7 +1529,7 @@ fn addresses(
         })
     };
     inputs
-        .map(|input| {
+        .map(|(op, input)| {
             Ok(match (input, context) {
                 (Input::Memory(local) | Input::Algebraic(local), _) => {
                     let slot = LawName {
@@ -1541,7 +1541,7 @@ fn addresses(
                             .ok_or(CompileDefect::NoSuchRead { law })?,
                     )
                 }
-                (Input::Read(source, place), _) => read(source, place)?,
+                (Input::Read(source, place), _) => read(source, place, op)?,
                 (Input::Height(place), _) => {
                     let site = place_of(place, context, anatomy).ok_or(CompileDefect::NoSuchRead { law })?;
                     Address::Height(anatomy.axial(site).to_bits())

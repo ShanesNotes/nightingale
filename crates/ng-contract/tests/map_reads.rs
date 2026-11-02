@@ -38,7 +38,7 @@ enum Reader {
     Guard,
     Whole,
     OverItself,
-    BesideAnother,
+    Twice,
 }
 
 fn felt<'b, 'k, S>(
@@ -88,12 +88,12 @@ fn read_in(reader: Reader, nerve: Nerve, spelling: Spelling) -> Result<CompiledB
         let route = ports.circulation(&mut cv);
         let alpha = ports.effect::<Norepinephrine>();
         let flow = cv.edge_kernel(|mut k| {
-            let zero = k.zero::<Rate<Water>>();
             let rate = if reader == Reader::Edge {
                 let effect = felt(&mut k, &alpha, spelling);
+                let zero = k.zero::<Rate<Water>>();
                 k.scale(zero, effect)
             } else {
-                zero
+                k.zero()
             };
             k.finish(rate, cv.every_mode(), class)
         });
@@ -138,11 +138,10 @@ fn read_in(reader: Reader, nerve: Nerve, spelling: Spelling) -> Result<CompiledB
                 });
                 cv.define_at(&row, value);
             }
-            Reader::BesideAnother => {
-                let beta = ports.effect::<Acetylcholine>();
+            Reader::Twice => {
                 let (row, _) = cv.site_field::<Blood, Dimensionless>("felt", Admissible::finite());
                 let value = cv.site_kernel(|mut k| {
-                    let (first, second) = (felt(&mut k, &alpha, spelling), k.at_junction(&beta));
+                    let (first, second) = (felt(&mut k, &alpha, spelling), k.at_junction(&alpha));
                     let both = k.add(first, second);
                     k.finish(both, cv.every_mode(), class)
                 });
@@ -480,15 +479,16 @@ fn a_spelling_cannot_hide_an_entry_over_itself() -> Result<(), AdmissionError> {
     Ok(())
 }
 
+/// One read's statement is that read's, so a plain read beside it in one kernel stays a plain read.
 #[test]
-fn accepting_no_nerve_on_one_port_says_nothing_of_another() -> Result<(), AdmissionError> {
+fn a_read_that_accepts_no_nerve_says_nothing_of_the_read_beside_it() -> Result<(), AdmissionError> {
     let site = AnatomyBuilder::new().site::<VesselSegment>("a", at()?).id();
     let law = LawName {
         owner: "CV",
         local: "felt",
     };
     assert_eq!(
-        read_in(Reader::BesideAnother, Nerve::Bare, Spelling::Accepting).err(),
+        read_in(Reader::Twice, Nerve::Bare, Spelling::Accepting).err(),
         Some(AdmissionError::Compile(CompileDefect::UnsuppliedRead { law, site }))
     );
     Ok(())

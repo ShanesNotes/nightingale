@@ -398,7 +398,8 @@ impl Seal for Source {
     }
 }
 
-fn reachable(code: &[Op], result: usize) -> Vec<Op> {
+/// `code` less what `result` does not reach, and where each of `accepting` landed in it.
+fn reachable(code: &[Op], result: usize, accepting: &[usize]) -> (Vec<Op>, Vec<usize>) {
     fn place(code: &[Op], at: usize, placed: &mut [Option<usize>], out: &mut Vec<Op>) -> usize {
         if let Some(done) = placed[at] {
             return done;
@@ -408,16 +409,16 @@ fn reachable(code: &[Op], result: usize) -> Vec<Op> {
         placed[at] = Some(out.len() - 1);
         out.len() - 1
     }
-    let mut out = Vec::new();
-    place(code, result, &mut vec![None; code.len()], &mut out);
-    out
+    let (mut out, mut placed) = (Vec::new(), vec![None; code.len()]);
+    place(code, result, &mut placed, &mut out);
+    (out, accepting.iter().filter_map(|&at| placed[at]).collect())
 }
 
 /// One kernel's graph while it is built. `'k` is fresh for every kernel, so an expression belongs to
 /// one graph; `S` is what the kernel is declared for: the body, a site class or a vascular edge.
 pub struct Kernel<'b, 'k, O, S = Body> {
     code: Vec<Op>,
-    accepts_no_nerve: Vec<Source>,
+    accepts_no_nerve: Vec<usize>,
     brand: Brand<'b>,
     kernel: Brand<'k>,
     kind: PhantomData<(O, S)>,
@@ -437,7 +438,7 @@ impl<O, U> Clone for Expr<'_, '_, O, U> {
 impl<O, U> Copy for Expr<'_, '_, O, U> {}
 pub struct Finished<'b, 'k, O, U, S = Body> {
     code: Vec<Op>,
-    accepts_no_nerve: Vec<Source>,
+    accepts_no_nerve: Vec<usize>,
     result: usize,
     dimension: String,
     modes: ModeSet<'b, O>,
@@ -456,9 +457,9 @@ pub struct PureKernel<'b, O, U, S = Body> {
 pub(crate) struct KernelData {
     pub(crate) id: u32,
     pub(crate) code: Vec<Op>,
-    /// Beside `code` and never in it: a program reads the same whichever way a law spelled a read, so nothing that
-    /// reads programs can tell two spellings apart.
-    pub(crate) accepts_no_nerve: Vec<Source>,
+    /// Which of `code`'s reads accept no nerve. Beside `code` and never in it: a program reads the same whichever way a
+    /// law spelled a read, so nothing that reads programs can tell two spellings apart.
+    pub(crate) accepts_no_nerve: Vec<usize>,
     pub(crate) dimension: String,
     pub(crate) modes: Selector,
     pub(crate) rate: RateClass,
@@ -657,13 +658,14 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
 
 impl<'b, 'k, S> Kernel<'b, 'k, crate::Cardiovascular, S> {
     /// `at_junction` for a law that reads a nerve at every vessel, with one or without: a site the map says no nerve
-    /// reaches reads zero. Every other refusal stands. It speaks for this kernel's reads of this port.
+    /// reaches reads zero. Every other refusal stands.
     pub fn at_junction_if_supplied<U: Dimension>(
         &mut self,
         port: &ReadPort<'b, crate::Cardiovascular, PerSite<crate::Junction, U>>,
     ) -> Expr<'b, 'k, crate::Cardiovascular, U> {
-        self.accepts_no_nerve.push(port.source);
-        self.at_junction(port)
+        let read = self.at_junction(port);
+        self.accepts_no_nerve.push(read.at);
+        read
     }
 }
 impl<'b, 'k, O> Kernel<'b, 'k, O> {
@@ -1151,11 +1153,13 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     fn close<U, S>(&self, finished: Finished<'b, '_, O, U, S>) -> PureKernel<'b, O, U, S> {
         let id = self.kernels.get();
         self.kernels.set(id + 1);
+        let (code, accepts_no_nerve) =
+            reachable(&finished.code, finished.result, &finished.accepts_no_nerve);
         PureKernel {
             data: KernelData {
                 id,
-                code: reachable(&finished.code, finished.result),
-                accepts_no_nerve: finished.accepts_no_nerve,
+                code,
+                accepts_no_nerve,
                 dimension: finished.dimension,
                 modes: finished.modes.selector,
                 rate: finished.rate,
