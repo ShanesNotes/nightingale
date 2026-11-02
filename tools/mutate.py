@@ -45,9 +45,9 @@ WORK = ROOT / "target" / "mutate"
 TREE = WORK / "tree"
 PASSED = re.compile(r"^test .+ \.\.\. ok$", re.M)
 FAILED = re.compile(r"^test (.+) \.\.\. FAILED$", re.M)
-ERROR = re.compile(r"^error.*$", re.M)
-# rustc's own errors end cargo's line with "due to N previous errors"; a rustc killed from outside leaves it bare.
-NO_BUILD = re.compile(r"^error: could not compile .* due to \d+ previous errors?", re.M)
+# Only an error with a code is the mutant's. A compiler or linker killed from outside, or a full disk, fails the build
+# with none.
+NO_BUILD = re.compile(r"^.*\berror\[E\d{4}\].*$", re.M)
 DIED = re.compile(r"process didn't exit successfully: .*\((signal: (\d+), .*)\)$", re.M)
 FAULTS = {signal.SIGABRT, signal.SIGILL, signal.SIGSEGV, signal.SIGBUS, signal.SIGFPE}
 SHOWN = 3
@@ -144,8 +144,8 @@ def judge(code, output, budget):
     if failed := FAILED.findall(output):
         more = f", {len(failed) - SHOWN} more" if len(failed) > SHOWN else ""
         return "CAUGHT", ", ".join(failed[:SHOWN]) + more
-    if NO_BUILD.search(output):
-        return "CAUGHT at build", ERROR.search(output)[0]
+    if coded := NO_BUILD.search(output):
+        return "CAUGHT at build", coded[0]
     if "error: test failed" in output and (died := DIED.search(output)):
         if int(died[2]) in FAULTS:
             return "CAUGHT", f"a test binary crashed, {died[1]}"
