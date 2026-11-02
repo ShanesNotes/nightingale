@@ -241,8 +241,8 @@ impl<'r> CoupledProblem<'r> {
         }
         Ok((state, fired))
     }
-    /// The longest span the record lets a step run: no law's interval, and no knot of a forcing, because a span past a
-    /// knot reads a forcing's curve at an end and nowhere between.
+    /// The longest span the record lets a step run: no law's interval and no forcing's knot period, because a
+    /// span past a knot period aliases the forcing: its stages read the curve and nothing between them.
     pub(crate) fn longest_span_ns(&self) -> u64 {
         let knots = (self.body.layout.forcings.iter())
             .map(|forcing| period_ns(self.parameters.values[forcing.period.index()]));
@@ -272,8 +272,7 @@ impl<'r> CoupledProblem<'r> {
     }
 }
 
-/// Binds one attempt: its base, the identity, the exact interval, the span it came from, the due inputs, the
-/// frozen drives, the attempt number and the fence, all in its digest.
+/// Binds one attempt: its digest covers the run identity and every other field.
 #[derive(Clone, Debug)]
 pub struct StepTicket {
     pub(crate) base: Digest,
@@ -364,8 +363,7 @@ impl StepTicket {
     ///
     /// A landing's trial takes this rule too. Its retry is a new attempt at a shorter span, which lands in turn
     /// or steps short of the crossing and loses nothing, since the integral keeps what it gained. A retried
-    /// step is then at least the floor or ends at a breakpoint: a retry at a bracket's verified bottom
-    /// skipped that, and crawled an honest core at 1 ns a step.
+    /// step is then at least the floor or ends at a breakpoint.
     pub fn refuse(&self, reason: NumericalRefusal) -> TrialFailure {
         let mut retry_ns = self.span_ns / 2;
         while retry_ns >= self.length_ns() {
@@ -391,7 +389,6 @@ impl StepTicket {
             fence: self.fence,
         })
     }
-    /// A `BindingMismatch` naming this attempt.
     pub fn mismatch(&self) -> EngineFault {
         EngineFault {
             kind: EngineFaultKind::BindingMismatch,
@@ -402,7 +399,6 @@ impl StepTicket {
     }
 }
 
-/// An offset inside one ticket.
 #[derive(Clone, Copy)]
 pub struct StageTime<'t> {
     pub(crate) ticket: &'t StepTicket,

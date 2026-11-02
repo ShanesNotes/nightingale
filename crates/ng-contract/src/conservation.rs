@@ -34,14 +34,15 @@ impl QuantityId {
     }
 }
 
-/// Every conserved combination of the body's amounts: a complete basis of the left null space of the
-/// internal incidence, in exact integers.
+/// The conserved combinations of the body's amounts: one per set of amounts internal transfers join, a
+/// basis of the left null space of the internal incidence in exact integers, then charge, which that
+/// basis spans.
 #[derive(Debug, PartialEq)]
 pub struct ConservedBasis {
     combinations: Vec<Combination>,
 }
 impl ConservedBasis {
-    /// Ordered by each combination's least row.
+    /// Ordered by each combination's least row, with charge last.
     pub fn combinations(&self) -> &[Combination] {
         &self.combinations
     }

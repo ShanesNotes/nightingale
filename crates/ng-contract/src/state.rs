@@ -2,10 +2,9 @@ use crate::body::RowKind;
 use crate::identity::{Canonical, Seal};
 use crate::{Compensated, CompiledBody, Digest, Interval, RowId, SimTime};
 
-/// A full state in one compiled layout: amounts stay compensated, memory and algebraic values are
-/// coordinates. `fired` says this head ended at a firing, so a fresh session here reaches the ticket a
-/// running one would. No public constructor: admission makes the first, `verify` every other, and
-/// `ImageParts::parse` one a checkpoint saved.
+/// A full state in one compiled layout. `fired` says this head ended at a firing, so a run resumed here
+/// issues the ticket the running one would. No public constructor: admission makes the first, `verify`
+/// every other, and `ImageParts::parse` one from image bytes.
 pub struct Candidate {
     pub(crate) amounts: Vec<Compensated>,
     pub(crate) memory: Vec<f64>,
@@ -105,8 +104,9 @@ impl Candidate {
     }
 }
 
-/// One accepted interval of every row, degree 1: the chord between the base and the published values,
-/// derived, so no core can publish a curve its stages did not make. The admission segment has no interval.
+/// One accepted interval of every row: the chord from the base's values to the step's end before any
+/// firing. `verify` derives it, so no core can publish a curve its stages did not make. The admission
+/// segment has no interval.
 pub struct DenseSegment {
     pub(crate) interval: Option<Interval>,
     pub(crate) start: Vec<Compensated>,
@@ -147,7 +147,6 @@ impl DenseSegment {
     }
 }
 
-/// The polynomial family and degree of every dense curve: the chord, degree 1, in Bernstein form.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DenseBasis {
     family: BasisFamily,
@@ -212,8 +211,6 @@ impl MethodHistory {
     }
 }
 
-/// What a problem reads of the accepted image. The record builds one per attempt; a core reads the head's
-/// time, values and continuation here.
 #[derive(Clone, Copy)]
 pub struct AcceptedStateView<'r> {
     time: SimTime,
@@ -245,7 +242,7 @@ impl<'r> AcceptedStateView<'r> {
     pub(crate) fn state(self) -> &'r Candidate {
         self.state
     }
-    /// Each mode variable's value, in compiled order.
+    /// Each mode variable's value index, in compiled order.
     pub fn modes(self) -> &'r [usize] {
         &self.state.modes
     }
