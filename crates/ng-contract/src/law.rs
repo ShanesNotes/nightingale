@@ -398,7 +398,6 @@ impl Seal for Source {
     }
 }
 
-/// `code` less what `result` does not reach, and where each of `accepting` landed in it.
 fn reachable(code: &[Op], result: usize, accepting: &[usize]) -> (Vec<Op>, Vec<usize>) {
     fn place(code: &[Op], at: usize, placed: &mut [Option<usize>], out: &mut Vec<Op>) -> usize {
         if let Some(done) = placed[at] {
@@ -457,8 +456,8 @@ pub struct PureKernel<'b, O, U, S = Body> {
 pub(crate) struct KernelData {
     pub(crate) id: u32,
     pub(crate) code: Vec<Op>,
-    /// Which of `code`'s reads accept no nerve. Beside `code` and never in it: a program reads the same whichever way a
-    /// law spelled a read, so nothing that reads programs can tell two spellings apart.
+    /// Beside `code` and never in it: a program reads the same whichever way a law spelled a read, so nothing that
+    /// reads programs can tell two spellings apart.
     pub(crate) accepts_no_nerve: Vec<usize>,
     pub(crate) dimension: String,
     pub(crate) modes: Selector,
@@ -1153,8 +1152,7 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     fn close<U, S>(&self, finished: Finished<'b, '_, O, U, S>) -> PureKernel<'b, O, U, S> {
         let id = self.kernels.get();
         self.kernels.set(id + 1);
-        let (code, accepts_no_nerve) =
-            reachable(&finished.code, finished.result, &finished.accepts_no_nerve);
+        let (code, accepts_no_nerve) = reachable(&finished.code, finished.result, &finished.accepts_no_nerve);
         PureKernel {
             data: KernelData {
                 id,

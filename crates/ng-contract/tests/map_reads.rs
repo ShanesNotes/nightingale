@@ -221,7 +221,6 @@ fn a_junction_with_no_such_receptor_is_refused_not_read_as_nothing() -> Result<(
     Ok(())
 }
 
-/// Every kind of law reaches the same refusal, because a law that names no site cannot say which of them it is.
 #[test]
 fn a_plain_read_of_a_nerve_no_site_has_is_refused_wherever_the_law_stands() -> Result<(), AdmissionError> {
     let site = AnatomyBuilder::new().site::<VesselSegment>("b", at()?).id();
@@ -234,7 +233,10 @@ fn a_plain_read_of_a_nerve_no_site_has_is_refused_wherever_the_law_stands() -> R
         let law = LawName { owner: "CV", local };
         assert_eq!(
             read_in(reader, Nerve::Stated, Spelling::Plain).err(),
-            Some(AdmissionError::Compile(CompileDefect::UnsuppliedRead { law, site }))
+            Some(AdmissionError::Compile(CompileDefect::UnsuppliedRead {
+                law,
+                site
+            }))
         );
         assert!(read_in(reader, Nerve::Stated, Spelling::Accepting).is_ok());
     }
@@ -255,9 +257,7 @@ fn a_whole_body_law_has_no_site_for_either_read() {
     }
 }
 
-/// What `felt` read at each of `sites`, as its row's residual with every receptor's entry started at a quarter and
-/// `felt` at zero.
-fn felt_at<const N: usize>(
+fn felt_residuals<const N: usize>(
     body: &CompiledBody,
     share: Binding,
     sites: [SiteId; N],
@@ -288,19 +288,16 @@ fn felt_at<const N: usize>(
     }))
 }
 
-/// An accepting read that read zero everywhere would compile the same body shape, so the values are what tell.
 #[test]
 fn an_accepting_read_is_its_junctions_entry_or_zero() -> Result<(), InitializationFailure> {
     let body = wall_law(Nerve::Stated, Spelling::Accepting)?;
     let junction = AnatomyBuilder::new().site::<Junction>("junction", at()?).id();
     let vessel = |key| Ok::<_, AdmissionError>(AnatomyBuilder::new().site::<VesselSegment>(key, at()?).id());
-    let read = felt_at(&body, Binding::Site(junction), [vessel("a")?, vessel("b")?])?;
-    assert_eq!(read, [-0.25, 0.0]);
+    let residuals = felt_residuals(&body, Binding::Site(junction), [vessel("a")?, vessel("b")?])?;
+    assert_eq!(residuals, [-0.25, 0.0]);
     Ok(())
 }
 
-/// A read through a port no junction holds, at a bed that holds a row of that name, as the arena's peritubular bed holds
-/// vasopressin's. The map says no nerve reaches the bed.
 fn a_read_beside_a_row(spelling: Spelling) -> Result<(CompiledBody, SiteId), AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at()?);
@@ -343,10 +340,8 @@ fn a_read_beside_a_row(spelling: Spelling) -> Result<(CompiledBody, SiteId), Adm
         });
         laws.transfer_at(&binding, none);
         let output = ports.effect::<Blood, Vasopressin>(&mut laws);
-        let share = laws.site_parameter::<Blood, Dimensionless>(
-            ParameterKey::new("re.share"),
-            Admissible::finite(),
-        );
+        let share =
+            laws.site_parameter::<Blood, Dimensionless>(ParameterKey::new("re.share"), Admissible::finite());
         let effect = laws.site_kernel(|mut k| {
             let value = k.site_parameter(&share);
             k.finish(value, laws.every_mode(), class)
@@ -358,8 +353,6 @@ fn a_read_beside_a_row(spelling: Spelling) -> Result<(CompiledBody, SiteId), Adm
     Ok((body, bed.id()))
 }
 
-/// A site kernel at the bed would have read the row and an edge kernel into the same bed nothing, so a junction read
-/// never takes a row at its own place.
 #[test]
 fn a_row_of_that_name_at_the_reads_own_site_is_no_junctions_entry() -> Result<(), InitializationFailure> {
     let site = AnatomyBuilder::new().site::<CapillaryBed>("bed", at()?).id();
@@ -369,14 +362,16 @@ fn a_row_of_that_name_at_the_reads_own_site_is_no_junctions_entry() -> Result<()
     };
     assert_eq!(
         a_read_beside_a_row(Spelling::Plain).err(),
-        Some(AdmissionError::Compile(CompileDefect::UnsuppliedRead { law, site }))
+        Some(AdmissionError::Compile(CompileDefect::UnsuppliedRead {
+            law,
+            site
+        }))
     );
     let (body, bed) = a_read_beside_a_row(Spelling::Accepting)?;
-    assert_eq!(felt_at(&body, Binding::Site(bed), [bed])?, [0.0]);
+    assert_eq!(felt_residuals(&body, Binding::Site(bed), [bed])?, [0.0]);
     Ok(())
 }
 
-/// One junction whose nerve laws read its own entries. `read` writes the read under test.
 fn a_junction_reading_itself<U: Dimension, F>(read: F) -> Result<CompiledBody, AdmissionError>
 where
     F: for<'b, 'k> FnOnce(
@@ -434,7 +429,6 @@ fn a_junction_reads_its_own_entry_with_at_site_not_at_junction() -> Result<(), A
     Ok(())
 }
 
-/// A route's amount stands where the route does, so a read of one names no junction, and `at_site` is its spelling.
 #[test]
 fn a_junction_read_of_a_routes_amount_is_refused_by_name() {
     assert!(a_junction_reading_itself(|k, _, held| k.at_site(held)).is_ok());
@@ -461,8 +455,6 @@ fn both_spellings_of_a_supplied_read_are_one_model() -> Result<(), AdmissionErro
     Ok(())
 }
 
-/// One read is one read however it is spelled, so an entry over itself is the literal one `bind` refuses. Two spellings
-/// of it would pass, under the hash of a body that is refused.
 #[test]
 fn a_spelling_cannot_hide_an_entry_over_itself() -> Result<(), AdmissionError> {
     let law = LawName {
@@ -479,7 +471,6 @@ fn a_spelling_cannot_hide_an_entry_over_itself() -> Result<(), AdmissionError> {
     Ok(())
 }
 
-/// One read's statement is that read's, so a plain read beside it in one kernel stays a plain read.
 #[test]
 fn a_read_that_accepts_no_nerve_says_nothing_of_the_read_beside_it() -> Result<(), AdmissionError> {
     let site = AnatomyBuilder::new().site::<VesselSegment>("a", at()?).id();
@@ -489,7 +480,10 @@ fn a_read_that_accepts_no_nerve_says_nothing_of_the_read_beside_it() -> Result<(
     };
     assert_eq!(
         read_in(Reader::Twice, Nerve::Bare, Spelling::Accepting).err(),
-        Some(AdmissionError::Compile(CompileDefect::UnsuppliedRead { law, site }))
+        Some(AdmissionError::Compile(CompileDefect::UnsuppliedRead {
+            law,
+            site
+        }))
     );
     Ok(())
 }
@@ -662,10 +656,9 @@ fn a_read_of_an_inflow_that_is_no_row_is_refused_by_name() -> Result<(), Admissi
     Ok(())
 }
 
-/// Renal drive on reclaim, read at the bed the reclaim edge runs into. The map says no nerve reaches that bed, so the
-/// read would be zero at every step, the arm would do nothing and every test would pass.
 #[test]
-fn a_reclaim_law_that_reads_a_nerve_at_a_bed_no_nerve_reaches_is_refused_by_name() -> Result<(), AdmissionError> {
+fn a_reclaim_law_that_reads_a_nerve_at_a_bed_no_nerve_reaches_is_refused_by_name()
+-> Result<(), AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at()?);
     let vessel = map.site::<VesselSegment>("vessel", at()?);

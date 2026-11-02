@@ -1433,10 +1433,14 @@ fn addresses(
         held,
         ..
     } = *places;
-    let inputs = kernel.code.iter().enumerate().filter_map(|(op, code)| match code {
-        Op::Input(input) => Some((op, *input)),
-        _ => None,
-    });
+    let inputs = kernel
+        .code
+        .iter()
+        .enumerate()
+        .filter_map(|(op, code)| match code {
+            Op::Input(input) => Some((op, *input)),
+            _ => None,
+        });
     let site = |end, from, to| if end == End::From { from } else { to };
     let unknown = |row: usize| Address::Unknown(UnknownId::at(row));
     let read = |source: Source, place: Where, op: usize| -> Result<Address, CompileDefect> {

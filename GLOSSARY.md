@@ -209,7 +209,7 @@ One of the 13 body systems in the atlas, such as cardiovascular, fluids, renal o
 A place a whole-body law reads by what it is, such as the carotid sinus or the macula densa. The map says where it stands, so the law names no site.
 
 **Supply**:
-Which junction's nerve reaches a site. The map states it, or states that no nerve reaches the site, so a lost line is refused and never reads as no effect. A law's read of a junction at a site no nerve reaches is refused too, unless the law says it accepts no nerve.
+Which junction's nerve reaches a site. The map states it, or states that no nerve reaches the site, so a lost line is refused and never reads as no effect. A read of a junction at a site no nerve reaches is refused too, unless that read says it accepts no nerve.
 
 **Enclosure**:
 A bounded space (the skull, the pericardium, the chest, the abdomen, a limb compartment) whose pressure, set by the volume inside it and the stiffness of its wall, is felt by every tissue bed inside it.

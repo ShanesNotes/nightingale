@@ -290,9 +290,9 @@ impl AnatomyBuilder {
         self.supplies
             .extend(sites.iter().map(|&site| (junction.id(), site)));
     }
-    /// The sites no nerve reaches. A law's read of a junction there is refused unless the law accepts an effect of
-    /// nothing. It is stated because a lost `supply` line would otherwise read the same, and the body would lose its
-    /// feedback with no refusal.
+    /// The sites no nerve reaches. A read of a junction there is refused unless that read accepts an effect of nothing.
+    /// It is stated because a lost `supply` line would otherwise read the same, and the body would lose its feedback
+    /// with no refusal.
     pub fn unsupplied(&mut self, sites: &[SiteId]) {
         self.unsupplied.extend_from_slice(sites);
     }

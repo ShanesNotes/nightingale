@@ -306,7 +306,7 @@ pub enum CompileDefect {
     ResetOutsideSet { law: LawName },
     /// A law reads a junction at a site the map neither supplies nor states that no nerve reaches.
     NoSupply { law: LawName, site: SiteId },
-    /// A law reads a junction at a site the map says no nerve reaches, and has not said it accepts no nerve.
+    /// An `at_junction` read at a site the map says no nerve reaches.
     UnsuppliedRead { law: LawName, site: SiteId },
     /// A law reads an effect at a junction that holds no such receptor.
     NoReceptor { law: LawName, junction: SiteId },
