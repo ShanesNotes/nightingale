@@ -3,7 +3,8 @@
     python3 -I tools/mutate.py TABLE [--rev REV] [--only NAME ...] [--budget SECONDS] [--check]
 
 Python 3.11 stdlib only. TABLE is TOML with one [[mutant]] per rule, aimed at the test that holds it. `old` must match
-exactly once. `test` is what follows `cargo test`, and a row's own `test` replaces the table's.
+exactly once. `test` is what follows `cargo test`, and a row's own `test` replaces the table's. It may not pass
+--manifest-path, --target-dir or --config, which can point cargo outside the sweep's tree.
 
     test = "--release -p ng-contract --test map_reads"
 
@@ -27,6 +28,7 @@ in its own process group, and that group dies with the command and with this scr
 """
 import argparse
 import collections
+import fcntl
 import os
 import pathlib
 import re
@@ -44,10 +46,13 @@ TREE = WORK / "tree"
 PASSED = re.compile(r"^test .+ \.\.\. ok$", re.M)
 FAILED = re.compile(r"^test (.+) \.\.\. FAILED$", re.M)
 ERROR = re.compile(r"^error.*$", re.M)
+# rustc's own errors end cargo's line with "due to N previous errors"; a rustc killed from outside leaves it bare.
+NO_BUILD = re.compile(r"^error: could not compile .* due to \d+ previous errors?", re.M)
 DIED = re.compile(r"process didn't exit successfully: .*\((signal: (\d+), .*)\)$", re.M)
 FAULTS = {signal.SIGABRT, signal.SIGILL, signal.SIGSEGV, signal.SIGBUS, signal.SIGFPE}
 SHOWN = 3
 ROW_KEYS = {"name", "path", "old", "new", "test"}
+MOVES = {"--manifest-path", "--target-dir", "--config"}
 
 
 def refuse(why):
@@ -64,6 +69,8 @@ def load_rows(path, only):
         row.setdefault("test", table.get("test"))
         if set(row) != ROW_KEYS or not row["test"]:
             refuse(f"row {row.get('name')} needs exactly {sorted(ROW_KEYS)}")
+        if moved := MOVES & {arg.split("=")[0] for arg in shlex.split(row["test"])}:
+            refuse(f"row {row['name']} passes {sorted(moved)}, which can point cargo outside the sweep's tree")
     names = [row["name"] for row in rows]
     if len(set(names)) != len(names):
         refuse("two rows share a name")
@@ -72,23 +79,7 @@ def load_rows(path, only):
     return [row for row in rows if not only or row["name"] in only]
 
 
-def extract(sha):
-    if TREE.exists():
-        shutil.rmtree(TREE)
-    TREE.mkdir(parents=True)
-    archive = WORK / "tree.tar"
-    subprocess.run(["git", "archive", "--output", archive, sha], cwd=ROOT, check=True)
-    # -m dates each file now. By its commit date a file can read older than target/'s last build, and cargo then links
-    # a stale library.
-    subprocess.run(["tar", "-x", "-m", "-C", TREE, "-f", archive], check=True)
-
-
-def matches(sha, row):
-    blob = subprocess.run(["git", "cat-file", "blob", f"{sha}:{row['path']}"], cwd=ROOT, capture_output=True)
-    return blob.stdout.count(row["old"].encode()) if blob.returncode == 0 else 0
-
-
-def cargo_test(test, env, budget):
+def run(argv, budget=None, **popen):
     """The keeper leads the group and waits on a pipe only this process holds open. Closing it kills the group, and so
     does this process dying, even by SIGKILL. A group of cargo alone would lose its id when cargo exits, and killing
     cargo alone leaves the test binary running.
@@ -102,26 +93,46 @@ def cargo_test(test, env, budget):
         process_group=0,
     )
     os.close(read_end)
-    run = subprocess.Popen(
-        ["cargo", "test", *shlex.split(test)],
-        cwd=TREE,
-        env=env,
+    child = subprocess.Popen(
+        argv,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        encoding="utf-8",
-        errors="replace",
         process_group=keeper.pid,
+        **popen,
     )
     try:
-        output, _ = run.communicate(timeout=budget)
-        return run.returncode, output
+        output, _ = child.communicate(timeout=budget)
+        return child.returncode, output
     except subprocess.TimeoutExpired:
-        return None, ""
+        return None, b""
     finally:
         os.close(write_end)
         keeper.wait()
-        run.wait()
+        child.wait()
+
+
+def extract(sha):
+    if TREE.exists():
+        shutil.rmtree(TREE)
+    TREE.mkdir(parents=True)
+    archive = WORK / "tree.tar"
+    # -m dates each file now. By its commit date a file can read older than target/'s last build, and cargo then links
+    # a stale library.
+    for argv in (["git", "archive", "--output", archive, sha], ["tar", "-x", "-m", "-C", TREE, "-f", archive]):
+        code, output = run(argv, cwd=ROOT)
+        if code != 0:
+            refuse(f"{argv[0]} failed:\n{output.decode(errors='replace')}")
+
+
+def matches(sha, row):
+    code, blob = run(["git", "cat-file", "blob", f"{sha}:{row['path']}"], cwd=ROOT)
+    return blob.count(row["old"].encode()) if code == 0 else 0
+
+
+def cargo_test(test, env, budget):
+    code, output = run(["cargo", "test", *shlex.split(test)], budget, cwd=TREE, env=env)
+    return code, output.decode(errors="replace")
 
 
 def judge(code, output, budget):
@@ -132,9 +143,8 @@ def judge(code, output, budget):
     if failed := FAILED.findall(output):
         more = f", {len(failed) - SHOWN} more" if len(failed) > SHOWN else ""
         return "CAUGHT", ", ".join(failed[:SHOWN]) + more
-    errors = ERROR.findall(output)
-    if len(errors) > 1 and errors[-1].startswith("error: could not compile "):
-        return "CAUGHT at build", errors[0]
+    if NO_BUILD.search(output):
+        return "CAUGHT at build", ERROR.search(output)[0]
     if "error: test failed" in output and (died := DIED.search(output)):
         if int(died[2]) in FAULTS:
             return "CAUGHT", f"a test binary crashed, {died[1]}"
@@ -152,11 +162,10 @@ def main():
     args = parser.parse_args()
 
     rows = load_rows(args.table, args.only)
-    resolve = ["git", "rev-parse", "--verify", "--quiet", f"{args.rev}^{{commit}}"]
-    found = subprocess.run(resolve, cwd=ROOT, stdout=subprocess.PIPE, text=True)
-    if found.returncode != 0:
+    code, found = run(["git", "rev-parse", "--verify", "--quiet", f"{args.rev}^{{commit}}"], cwd=ROOT)
+    if code != 0:
         refuse(f"{args.rev} is no commit here")
-    sha = found.stdout.strip()
+    sha = found.decode().strip()
     print(f"sweep of {sha}, {len(rows)} rows, budget {args.budget} s", flush=True)
 
     tally = collections.Counter()
@@ -176,9 +185,23 @@ def main():
         print(f"{len(applied)} of {len(rows)} rows apply")
         sys.exit(0 if len(applied) == len(rows) else 1)
 
+    WORK.mkdir(parents=True, exist_ok=True)
+    lock = open(WORK / "lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        refuse(f"another sweep is running in {ROOT}")
     extract(sha)
-    # An inherited target links another checkout's crates, and UPDATE_EXPECT rewrites a trace where it should fail.
-    env = dict(os.environ, CARGO_TARGET_DIR=str(WORK / "target"), CARGO_TERM_COLOR="never", CARGO_NET_OFFLINE="true")
+    target = str(WORK / "target")
+    # An inherited target or build dir links another checkout's crates, and UPDATE_EXPECT rewrites a trace where it
+    # should fail.
+    env = dict(
+        os.environ,
+        CARGO_TARGET_DIR=target,
+        CARGO_BUILD_BUILD_DIR=target,
+        CARGO_TERM_COLOR="never",
+        CARGO_NET_OFFLINE="true",
+    )
     env.pop("UPDATE_EXPECT", None)
 
     for test in dict.fromkeys(row["test"] for row in applied):
