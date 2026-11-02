@@ -463,7 +463,7 @@ impl<'b> CardiovascularPorts<'b> {
         laws.owe_flow_memory(Family::Valves);
         EdgeRoute::requested(Family::Valves)
     }
-    /// The pressure row of every blood site and the read of it. CV emits line 80's fields from it.
+    /// The pressure row of every blood site and the read of it.
     pub fn blood_pressure(
         &self,
         laws: &mut FragmentBuilder<'b, Cardiovascular>,

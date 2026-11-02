@@ -82,11 +82,14 @@ impl CompiledBody {
     pub fn model_hash(&self) -> ModelHash {
         self.hash
     }
-    /// Amounts first, in registry order, then memory and then algebraic rows, each by law name.
+    /// Amounts first, in registry order, then memory rows, then the rows of algebraic slots and last the rows a
+    /// definition serves, each by law name and then place.
     pub fn rows(&self) -> &[Row] {
         &self.layout.rows
     }
-    /// One per instance of each transfer, in law-name order and then site or edge key order.
+    /// One per instance of each transfer and per species a fluid route carries. A law's own columns come first, in
+    /// law-name order and then site or edge key order; the columns of routes whose rate is a flow row, and of drains,
+    /// follow.
     pub fn columns(&self) -> &[Column] {
         &self.layout.columns
     }
@@ -307,7 +310,7 @@ impl Column {
     pub fn terms(&self) -> &[(RowId, i64)] {
         &self.terms
     }
-    /// The route family's law name, shared by every instance of the route.
+    /// The law name of the route family or boundary, shared by every instance of the route.
     pub fn origin(&self) -> LawName {
         self.origin
     }
@@ -410,7 +413,6 @@ pub(crate) struct Code {
     pub(crate) predicate: Predicate,
     pub(crate) rate: RateClass,
     pub(crate) validity: Vec<Validity>,
-    /// The kernel defines its row, so a range judges the row and not the residual.
     pub(crate) defines: bool,
 }
 impl Seal for Code {
@@ -460,7 +462,6 @@ pub struct Instance {
     pub(crate) target: Target,
     pub(crate) parameters: Vec<ParameterId>,
     pub(crate) inputs: Vec<Bound>,
-    /// The compiled sparsity is the union over modes, so selecting by mode moves no entry.
     pub(crate) mode: Option<(usize, usize)>,
     pub(crate) rectified: bool,
 }
@@ -684,7 +685,6 @@ impl Seal for Block {
     }
 }
 
-/// One per variable and place, so a valve's mode is one more entry of one `Vec<usize>`.
 pub(crate) struct ModeLayout {
     pub(crate) variable: Slot,
     pub(crate) values: Vec<&'static str>,

@@ -41,7 +41,6 @@ pub struct RateClass {
     maximum_ns: u64,
 }
 impl RateClass {
-    /// A block no law moves: a held pool, which tolerates any interval.
     pub(crate) const UNMOVED: Self = Self {
         band: RateBand::Hours,
         maximum_ns: u64::MAX,
@@ -670,7 +669,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
         self.push(Op::Ln([x.at]))
     }
     /// `measured - reference`: the one way a set point meets the variable it guards. The result is its own
-    /// dimension, so it can never stand for the variable (finding 14).
+    /// dimension, so it can never stand for the variable.
     pub fn deviation<U: Sensed>(
         &mut self,
         measured: Expr<'b, 'k, O, U>,
@@ -762,7 +761,7 @@ impl<'b, 'k, O, C: SiteSet> Kernel<'b, 'k, O, C> {
     pub fn height(&mut self) -> Expr<'b, 'k, O, Length> {
         self.input(Input::Height(Where::Here))
     }
-    /// The value bound at this site, or else at its class.
+    /// The value bound at this site, or else at its class, or at its network for a set of blood or urinary sites.
     pub fn site_parameter<U: Dimension>(
         &mut self,
         parameter: &SiteParameter<'b, O, C, U>,
@@ -800,7 +799,7 @@ impl<'b, 'k, O, E: EdgeKind> Kernel<'b, 'k, O, E> {
     pub fn edge_flow(&mut self) -> Expr<'b, 'k, O, Rate<Water>> {
         self.input(Input::EdgeFlow)
     }
-    /// The value bound at this edge, or else at the vascular network.
+    /// The value bound at this edge, or else at its network.
     pub fn edge_parameter<U: Dimension>(
         &mut self,
         parameter: &EdgeParameter<'b, O, U, E>,
@@ -859,7 +858,8 @@ impl<'b, O, C: SiteSet> ReadPort<'b, O, PerSite<C, Pressure>> {
     }
 }
 
-/// One field of a coupling or an enclosure's pressure, which its owner owes a law.
+/// A row its owner owes a law that defines it: a coupling's field, a site field, a receptor's effect or an
+/// enclosure's pressure.
 pub struct Output<'b, O, U> {
     name: &'static str,
     brand: Brand<'b>,
@@ -903,7 +903,7 @@ impl<C: SiteSet, U: Dimension> Carried for PerSite<C, U> {
     }
 }
 pub type SiteField<'b, O, C, U> = (Output<'b, O, PerSite<C, U>>, ReadPort<'b, O, PerSite<C, U>>);
-/// A route family at every site of class `C`: one column per site, from one space to another.
+/// A route family at every site of the set `C`: one column per site and per species carried.
 pub struct SiteRoute<'b, O, C, Q> {
     family: Family,
     brand: Brand<'b>,
@@ -978,8 +978,8 @@ pub struct Endpoint<'b, O, Q> {
     brand: Brand<'b>,
     kind: PhantomData<(O, Q)>,
 }
-/// Both ends of one transfer, the same species at each, one of them the receipt pool outside the
-/// body. The schema names where it reaches into the body.
+/// Both ends of one transfer, the same species at each. A boundary's pair has the receipt pool outside the body as
+/// one end, and the schema names where it reaches in.
 pub struct Pair<'b, O, Q> {
     serves: Obligation,
     brand: Brand<'b>,
@@ -1042,7 +1042,8 @@ pub struct AlgebraicSlot<'b, O, U> {
     brand: Brand<'b>,
     kind: PhantomData<(O, U)>,
 }
-/// A parameter of every site of class `C`, bound per site with the class as default.
+/// A parameter of every site of the set `C`, bound per site with the class as default, or the network for a set of
+/// blood or urinary sites.
 pub struct SiteParameter<'b, O, C, U> {
     key: ParameterKey,
     brand: Brand<'b>,
