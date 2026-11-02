@@ -1,7 +1,7 @@
 use crate::identity::{Canonical, Seal};
 use crate::{Dimensionless, Measure};
 
-/// An amount as a compensated pair: `hi` the rounded sum and `lo` what rounding left out, normalized so
+/// A value as a compensated pair: `hi` the rounded sum and `lo` what rounding left out, normalized so
 /// `at_most` reads the order of the exact values.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Compensated {
@@ -50,8 +50,8 @@ impl Compensated {
     pub(crate) fn exact(value: f64) -> Self {
         Self { hi: value, lo: 0.0 }
     }
-    /// Whether this is no more than `limit`, and false when either side is not finite. It is the one
-    /// comparison: `<` and `>` read false on a NaN, so a check written with them passes what overflowed.
+    /// Whether this is no more than `limit`, and false when either side is not finite. It is the type's
+    /// only order: `<` and `>` read false on a NaN, so a check written with them passes what overflowed.
     pub fn at_most(self, limit: Self) -> bool {
         self.is_finite()
             && limit.is_finite()
@@ -110,7 +110,8 @@ impl Compensated {
     pub fn bits(self) -> [u64; 2] {
         [self.hi.to_bits(), self.lo.to_bits()]
     }
-    /// `None` for a pair no sum leaves: `at_most` reads `hi` first, so `lo` must round away against it.
+    /// `None` unless `hi + lo` rounds to `hi`: `at_most` reads `hi` first, so `lo` must round away against
+    /// it. An infinite `hi` with a finite `lo` passes.
     pub fn from_bits(bits: [u64; 2]) -> Option<Self> {
         let [hi, lo] = bits.map(f64::from_bits);
         (hi + lo == hi).then_some(Self { hi, lo })

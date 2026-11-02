@@ -31,9 +31,9 @@ pub enum AdmissionError {
     ZeroDenominator,
     /// An absolute scale that is not positive, or a relative scale below zero.
     NonPositiveScale,
-    /// A mode variable no guard moves, one an algebraic law holds by or whose reset an algebraic law reads, which a
-    /// firing could leave false, and one a hazard moves under a cycle, whose integral never returns. A guard that
-    /// silently never fires is worse than a run that never starts.
+    /// A mode variable no guard moves; one an algebraic law holds by, or whose firing resets a row or moves a
+    /// draw an algebraic law reads, which the firing could leave false; and one a hazard moves under a cycle,
+    /// whose integral never returns. A guard that silently never fires is worse than a run that never starts.
     ModesNotYetRun {
         variable: Slot,
     },
@@ -243,8 +243,8 @@ impl From<CompileDefect> for AdmissionError {
 /// and then space.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompileDefect {
-    /// A declared slot, a requested route family or a declared boundary that no law defines. An
-    /// omitted law is not zero.
+    /// A declared slot, a requested route family, a declared boundary or a held enclosure's pressure that
+    /// no law defines. An omitted law is not zero.
     OmittedLaw { law: LawName },
     /// Two laws on one row that hold in one mode.
     SecondOwner {
@@ -258,7 +258,8 @@ pub enum CompileDefect {
     GuardOutsideMode { variable: LawName, leaves: &'static str },
     /// A scope this assembly issued whose fragment was never added.
     MissingFragment { owner: &'static str },
-    /// Two slots, mode variables, route families or schema boundaries under one name in one owner.
+    /// Two slots, mode variables, streams, forcings, route families or schema boundaries under one name in
+    /// one owner.
     NamedTwice { law: LawName },
     /// One parameter key declared with two dimensions, contexts or admissible sets.
     ParameterConflict { key: ParameterKey },
@@ -279,7 +280,8 @@ pub enum CompileDefect {
     /// A law or a guard that reads a volume when the schema declares no partial-volume coefficient. A
     /// guard is named by its mode variable.
     MissingPartialVolume { law: LawName },
-    /// A water boundary at a space its site does not have, or at a site the anatomy does not declare.
+    /// A boundary at a pool this body does not hold: a space its site does not have, a species that space
+    /// does not carry, or a site the anatomy does not declare.
     BoundaryEndpoint { law: LawName },
     /// A stream no guard draws on, so its ordinal would never move.
     UndrawnStream { stream: LawName },
@@ -388,7 +390,8 @@ impl EngineFault {
     }
 }
 
-/// A retryable attempt with the record untouched. Only `StepTicket::refuse` makes one.
+/// A retryable attempt that leaves state, ledger, pending events and stream positions unchanged (I4).
+/// Only `StepTicket::refuse` makes one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Refused {
     pub(crate) reason: NumericalRefusal,

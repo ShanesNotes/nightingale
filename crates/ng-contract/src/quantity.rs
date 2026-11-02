@@ -52,13 +52,14 @@ pub struct Conductance<Q>(PhantomData<Q>);
 pub struct Product<A, B>(PhantomData<(A, B)>);
 pub struct Quotient<A, B>(PhantomData<(A, B)>);
 /// A set point in the unit of the variable it guards. It is its own dimension, so no law adds,
-/// subtracts or relaxes across the two; `Kernel::deviation` is the one operator that meets them.
+/// subtracts or relaxes across the two; `Kernel::deviation` is the one operator that takes their difference.
 pub struct Reference<U: Sensed>(PhantomData<U>);
-/// Volume per amount of a species: a fixed structural coefficient of the schema, not a parameter.
+/// Volume per amount of a species, as the schema's fixed coefficient. It is no `Dimension`, so no parameter
+/// takes it: albumin's partial volume, a parameter a wall's law reads, is a `Quotient<Volume, Albumin>`.
 pub struct PartialVolume<Q>(PhantomData<Q>);
 /// How far a measured value stands from its set point. It is its own dimension, so a deviation can never be
-/// added to the variable it was read from (finding 14). A law turns it into a dimensionless drive by dividing by
-/// a declared width, or into a set point's rate by multiplying by a speed.
+/// added to the variable it was read from. A law turns it into a dimensionless drive by dividing by a
+/// declared width, or into a set point's rate by multiplying by a speed.
 pub struct Deviation<U: Sensed>(PhantomData<U>);
 /// A second-order binding constant: rate per amount of ligand per amount of free receptor.
 pub struct Affinity<Q>(PhantomData<Q>);
@@ -403,8 +404,8 @@ impl<U> Measure<U> {
     }
 }
 
-/// Where a value is mathematically admissible, the only set a trial is refused against. Where a law
-/// is trusted is a `ValidityRange`, which only reports.
+/// Where a value is mathematically admissible. A trial that leaves it is refused, while a
+/// `ValidityRange`, where a law is trusted, only reports.
 pub struct Admissible<U> {
     set: AdmissibleSet,
     unit: PhantomData<U>,

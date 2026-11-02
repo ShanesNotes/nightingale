@@ -125,7 +125,8 @@ impl ObservationLens {
 }
 
 impl CompiledBody {
-    /// A lens applies to any replay, because no run reads it.
+    /// A lens applies to any replay, because no bit of a run depends on it: admission reads one only to
+    /// refuse.
     pub fn lens(
         &self,
         channels: Vec<ChannelSpec>,

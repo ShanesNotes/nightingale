@@ -1,6 +1,6 @@
 use crate::identity::{Canonical, Seal};
 
-/// Simulated time, in integer nanoseconds from the run's origin.
+/// Simulated time, in integer nanoseconds from the clock's zero, which need not be when the run starts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SimTime {
     ns: u64,

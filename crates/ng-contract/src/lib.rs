@@ -1,5 +1,5 @@
-//! Anatomy, declaration language, compiler, catalog, units, PK claims, problem and seam, admission system,
-//! split measurement and observation lenses.
+//! Anatomy, declaration language, compiler, catalog, units, problem and seam, chance and event location,
+//! admission system, split measurement and observation lenses.
 //!
 //! # Type rules
 //!
@@ -322,7 +322,7 @@
 //!     k.deviation(pressure, reference)
 //! }
 //! ```
-//! A deviation is its own dimension, so a set point can never become the variable it guards (finding 14).
+//! A deviation is its own dimension, so a set point can never become the variable it guards.
 //! ```compile_fail,E0308
 //! use ng_contract::*;
 //! fn as_variable<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>, pressure: Expr<'b, 'k, Nervous, Pressure>,
@@ -727,7 +727,7 @@
 //!     k.scale(rate, factor)
 //! }
 //! ```
-//! A forcing's period and amplitude are packet values, never numbers in a fragment (finding 15).
+//! A forcing's period and amplitude are packet values, never numbers in a fragment.
 //! ```compile_fail,E0308
 //! use ng_contract::*;
 //! fn literal<'b>(laws: &mut FragmentBuilder<'b, Renal>) -> Forcing<'b, Renal> {
