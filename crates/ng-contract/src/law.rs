@@ -398,7 +398,7 @@ impl Seal for Source {
     }
 }
 
-fn reachable(code: &[Op], result: usize, accepting: &[usize], fields: &[(usize, String)]) -> Pruned {
+fn reachable(code: &[Op], result: usize, accepting: &[usize], fields: &[FieldRead]) -> Pruned {
     fn place(code: &[Op], at: usize, placed: &mut [Option<usize>], out: &mut Vec<Op>) -> usize {
         if let Some(done) = placed[at] {
             return done;
@@ -410,8 +410,7 @@ fn reachable(code: &[Op], result: usize, accepting: &[usize], fields: &[(usize, 
     }
     let (mut out, mut placed) = (Vec::new(), vec![None; code.len()]);
     place(code, result, &mut placed, &mut out);
-    let expects =
-        |at: usize| (fields.iter().find(|(read, _)| *read == at)).map(|(_, dimension)| dimension.clone());
+    let expects = |at: usize| (fields.iter().find(|read| read.at == at)).map(|read| read.expects.clone());
     let unreached = (code.iter().enumerate())
         .filter(|&(at, _)| placed[at].is_none())
         .filter_map(|(at, op)| match op {
@@ -427,7 +426,11 @@ fn reachable(code: &[Op], result: usize, accepting: &[usize], fields: &[(usize, 
         code: out,
         accepts_no_nerve: accepting.iter().filter_map(|&at| placed[at]).collect(),
         fields: (fields.iter())
-            .filter_map(|(at, dimension)| placed[*at].map(|placed| (placed, dimension.clone())))
+            .filter_map(|read| {
+                let at = placed[read.at]?;
+                let expects = read.expects.clone();
+                Some(FieldRead { at, expects })
+            })
             .collect(),
         unreached,
     }
@@ -436,8 +439,14 @@ fn reachable(code: &[Op], result: usize, accepting: &[usize], fields: &[(usize, 
 struct Pruned {
     code: Vec<Op>,
     accepts_no_nerve: Vec<usize>,
-    fields: Vec<(usize, String)>,
+    fields: Vec<FieldRead>,
     unreached: Vec<UnreachedRead>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FieldRead {
+    pub(crate) at: usize,
+    pub(crate) expects: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -452,7 +461,7 @@ pub(crate) struct UnreachedRead {
 pub struct Kernel<'b, 'k, O, S = Body> {
     code: Vec<Op>,
     accepts_no_nerve: Vec<usize>,
-    fields: Vec<(usize, String)>,
+    fields: Vec<FieldRead>,
     brand: Brand<'b>,
     kernel: Brand<'k>,
     kind: PhantomData<(O, S)>,
@@ -473,7 +482,7 @@ impl<O, U> Copy for Expr<'_, '_, O, U> {}
 pub struct Finished<'b, 'k, O, U, S = Body> {
     code: Vec<Op>,
     accepts_no_nerve: Vec<usize>,
-    fields: Vec<(usize, String)>,
+    fields: Vec<FieldRead>,
     result: usize,
     dimension: String,
     modes: ModeSet<'b, O>,
@@ -495,7 +504,7 @@ pub(crate) struct KernelData {
     /// Beside `code` and never in it: a program reads the same whichever way a law spelled a read, so nothing that
     /// reads programs can tell two spellings apart.
     pub(crate) accepts_no_nerve: Vec<usize>,
-    pub(crate) fields: Vec<(usize, String)>,
+    pub(crate) fields: Vec<FieldRead>,
     pub(crate) unreached: Vec<UnreachedRead>,
     pub(crate) dimension: String,
     pub(crate) modes: Selector,
@@ -546,7 +555,10 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     fn read_at<U: Dimension>(&mut self, source: Source, place: Where) -> Expr<'b, 'k, O, U> {
         let read = self.input(Input::Read(source, place));
         if let Source::Field(_) = source {
-            self.fields.push((read.at, dimension::<U>()));
+            self.fields.push(FieldRead {
+                at: read.at,
+                expects: dimension::<U>(),
+            });
         }
         read
     }

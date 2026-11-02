@@ -264,7 +264,8 @@ pub enum CompileDefect {
     ParameterConflict { key: ParameterKey },
     /// A mode variable with no values, or with one value twice.
     BadModeVariable { variable: LawName },
-    /// An algebraic row that no structural matching pairs with an algebraic unknown it reads.
+    /// An algebraic row that no structural matching pairs with an algebraic unknown it reads, or a closed row with no
+    /// store of its own to hold it.
     StructuralSingularity { law: LawName },
     /// A pool this body models that no transfer moves and no held card answers for. A read never moves a
     /// pool, and a transfer whose two ends are one pool moves nothing.

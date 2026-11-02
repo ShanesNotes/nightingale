@@ -79,7 +79,12 @@ pub(crate) fn compile(
     };
     let column_reads: Vec<bool> = (0..placement.columns.len()).map(read_by).collect();
     let basis = conserved_basis(&species, &placement.columns, &column_reads);
-    let stores = closing_stores(&solved_by, &reads, &closed);
+    let stores = closing_stores(&solved_by, &reads, &closed).map_err(|row| {
+        let RowKind::Algebraic(slot) = rows.rows[row].kind else {
+            unreachable!("a closed row is algebraic")
+        };
+        CompileDefect::StructuralSingularity { law: slot.law }
+    })?;
     let judged = judged_rows(reads.len(), &stores);
     let pivots = pivots(solved_by.clone(), &stores);
     let sparsity = sparsity(reads);
@@ -1634,9 +1639,8 @@ fn addresses(
     for read in &kernel.unreached {
         resolve(read.input, read.accepts_no_nerve, read.expects.as_deref())?;
     }
-    let expects = |op: usize| {
-        (kernel.fields.iter().find(|(read, _)| *read == op)).map(|(_, dimension)| dimension.as_str())
-    };
+    let expects =
+        |op: usize| (kernel.fields.iter().find(|read| read.at == op)).map(|read| read.expects.as_str());
     inputs
         .map(|(op, input)| resolve(input, kernel.accepts_no_nerve.contains(&op), expects(op)))
         .collect()
@@ -1860,9 +1864,7 @@ fn closed_rows(fragments: &[FragmentData], rows: &Rows) -> Vec<usize> {
         let owner = fragment.owner;
         fragment.closed.iter().map(move |&local| LawName { owner, local })
     });
-    let mut closed: Vec<usize> = names.map(|law| rows.declared(law, Context::Body)).collect();
-    closed.sort_unstable();
-    closed
+    names.map(|law| rows.declared(law, Context::Body)).collect()
 }
 
 fn reads(
@@ -1949,7 +1951,14 @@ fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, Compi
     Ok(solved_by)
 }
 
-fn closing_stores(solved_by: &[RowId], reads: &[Vec<UnknownId>], closed: &[usize]) -> Vec<(usize, usize)> {
+fn closing_stores(
+    solved_by: &[RowId],
+    reads: &[Vec<UnknownId>],
+    closed: &[usize],
+) -> Result<Vec<(usize, usize)>, usize> {
+    let mut closed = closed.to_vec();
+    closed.sort_unstable();
+    closed.dedup();
     let carriers: Vec<Vec<usize>> = (closed.iter())
         .map(|&row| {
             let unknown = (solved_by.iter()).position(|pivot| pivot.index() == row);
@@ -1961,12 +1970,14 @@ fn closing_stores(solved_by: &[RowId], reads: &[Vec<UnknownId>], closed: &[usize
         })
         .collect();
     let mut held = vec![None; reads.len()];
-    for at in 0..closed.len() {
-        augment(&carriers, at, &mut vec![false; reads.len()], &mut held);
+    for (at, &row) in closed.iter().enumerate() {
+        if !augment(&carriers, at, &mut vec![false; reads.len()], &mut held) {
+            return Err(row);
+        }
     }
-    (held.iter().enumerate())
+    Ok((held.iter().enumerate())
         .filter_map(|(store, at)| at.map(|at| (closed[at], store)))
-        .collect()
+        .collect())
 }
 
 fn judged_rows(rows: usize, stores: &[(usize, usize)]) -> Vec<u32> {
