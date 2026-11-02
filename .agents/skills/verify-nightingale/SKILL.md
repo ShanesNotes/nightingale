@@ -24,7 +24,7 @@ Speed is in none of these runs, because a wall clock cannot gate a merge. `pytho
 
 A mutation sweep is in none of them either, because its table is written for one change. `python3 -I tools/mutate.py TABLE` breaks one rule at a time on a commit and reports whether a test notices, and its header says how to write a table and read the verdicts.
 
-A comment pass proves itself apart from them: `python3 -I tools/gate/gate.py comments-only [--base REV]` passes only when every changed path is a Rust file whose code tokens, and each doctest's tokens and fences, match the base, by default the merge-base with `origin/main`. It reads doctests as `05-seam`'s host scan does, and `10-rust` refuses a doctest that scan cannot read. A local Codex pass is recorded in its rollout: `python3 -I tools/codex-provenance.py LOG...` prints the model and effort each pass ran with, and its header says what it reads and when it fails.
+A comment pass proves itself apart from them: `python3 -I tools/gate/gate.py comments-only [--base REV]` passes only when every changed path is a Rust file whose code tokens, and each doctest's tokens and fences, match the base, by default the merge-base with `origin/main`. It reads tokens with `gate.py`'s lexer, which follows rustc where a space or a comment could move a token's edge but is not rustc, and doctests as `05-seam`'s host scan and rustdoc's hidden lines do; `10-rust` refuses a doctest that scan cannot read, and a comment PR still runs the whole gate. A local Codex pass is recorded in its rollout: `python3 -I tools/codex-provenance.py LOG...` prints the model and effort each pass ran with, and its header says what it reads and when it fails.
 
 ## The steps
 
@@ -59,7 +59,7 @@ The scope is `docs-only` when every changed path is a regular file under `docs/`
 
 ## Read the proof block
 
-`full_proof: yes` needs `verify_exit: 0`, the final line `verify: OK`, a `gate: mode=merge` plan line, `worktree: clean` and `head_unchanged: yes`. So a block can go in a public PR, it names the log by file name, says only whether a target dir was set, and shows the log's last 40 lines with the checkout, an absolute target dir and the home directory written as `.`, `<target>` and `~`; the hash covers the log as written. The `gate_scope` and `gate_base` lines copy the plan line, and `gate_scope: docs-only` marks the docs-only proof that `AGENTS.md` names. Exit 2 means `tools/verify` passed but the run is not proof; the `reason` line says why.
+`full_proof: yes` needs `verify_exit: 0`, the final line `verify: OK`, a `gate: mode=merge` plan line, `worktree: clean` and `head_unchanged: yes`. So a block can go in a public PR, it names the log by file name, says only whether a target dir was set, and shows its final line, its reason and the log's last 40 lines with the checkout, the target dir and the home directory, as given and as resolved, written as `.`, `<target>` and `~`; the hash covers the log as written. The `gate_scope` and `gate_base` lines copy the plan line, and `gate_scope: docs-only` marks the docs-only proof that `AGENTS.md` names. Exit 2 means `tools/verify` passed but the run is not proof; the `reason` line says why.
 
 ## Fail closed
 

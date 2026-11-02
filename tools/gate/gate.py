@@ -287,14 +287,35 @@ def _joins(text: str, i: int) -> bool:
 
 def _suffixed(text: str, j: int) -> bool:
     """rustc reads an identifier touching a literal as its suffix, so `"a"tag` and `"a" tag` differ."""
-    return j < len(text) and (text[j] == "_" or text[j].isalpha())
+    return text[j : j + 1].isidentifier()
 
 
 def _float_dot(text: str, i: int, j: int) -> bool:
     """rustc reads `1.` as one float where `1 .` is two tokens."""
     after = text[j + 1 : j + 2]
     decimal = text[i:j].replace("_", "").isdigit()
-    return decimal and text[j : j + 1] == "." and not (after in (".", "_") or after.isalpha())
+    return decimal and text[j : j + 1] == "." and not (after == "." or after.isidentifier())
+
+
+def _block_doc(text: str) -> str:
+    """rustc trims a block doc's `*` margin only when every line has one in the same column, and then drops the `*`
+    only before a space or another `*`, so a line such as `*b;` stays code."""
+    lines = text.split("\n")
+    k, end = (0 if lines[0].lstrip().startswith("*") else 1), len(lines)
+    while k < end and not lines[k].strip():
+        k += 1
+    while end > k and not lines[end - 1].strip():
+        end -= 1
+    margins = [m.group(1) for ln in lines[k:end] if (m := re.match(r"([ \t]*)\*", ln))]
+    if k == end or len(margins) != end - k or len(set(margins)) != 1:
+        return text
+    prefix, out = margins[0], []
+    for ln in lines:
+        if ln.startswith(prefix):
+            ln = ln[len(prefix) :]
+            ln = ln[1:] if ln == "*" or ln.startswith(("* ", "**")) else ln
+        out.append(ln)
+    return "\n".join(out)
 
 
 def _skip_quoted(text: str, i: int, quote: str) -> int:
@@ -340,7 +361,7 @@ def lex(text: str, first_line: int = 1) -> tuple[list[Token], list[tuple[int, st
                 raise LexError(f"line {line}: unterminated block comment")
             body = text[i + 2 : j - 2]
             if (body.startswith("*") and not body.startswith("**") and body != "*") or body.startswith("!"):
-                docs.append((line, "\n".join(re.sub(r"^\s*\*? ?", "", ln) for ln in body[1:].split("\n"))))
+                docs.append((line, _block_doc(body[1:])))
             line += text.count("\n", i, j)
             i = j
         elif m := RAW_STRING.match(text, i):
@@ -363,7 +384,7 @@ def lex(text: str, first_line: int = 1) -> tuple[list[Token], list[tuple[int, st
             tokens.append(Token("literal", text[q + 1 : j - 1], start_line, text[i:j], _suffixed(text, j)))
             i = j
         elif c == "'":
-            j = i + 1
+            j = i + 3 if text.startswith("r#", i + 1) and text[i + 3 : i + 4].isidentifier() else i + 1
             while j < n and (text[j] == "_" or text[j].isalnum()):
                 j += 1
             tokens.append(Token("lifetime", text[i:j], start_line))
@@ -1443,11 +1464,20 @@ def _first_moved(was: list[Token] | tuple[Token, ...], now: list[Token] | tuple[
     return None
 
 
+def _compiled(line: str) -> str:
+    """rustdoc compiles a hidden `# ` line without its mark, a lone `#` as nothing, and `##` as `#`."""
+    trimmed = line.strip()
+    if trimmed.startswith("##"):
+        return trimmed[1:]
+    return trimmed[2:] if trimmed.startswith("# ") or trimmed == "#" else line
+
+
 def _doctest_code(block: tuple[int, int, str, str]) -> list[Token] | str:
+    code = "\n".join(_compiled(line) for line in block[2].split("\n"))
     try:
-        return lex(block[2], block[1])[0]
+        return lex(code, block[1])[0]
     except LexError:
-        return block[2]
+        return code
 
 
 def comment_changes(was: Source, now: Source) -> list[tuple[str, int, str]]:
@@ -1516,6 +1546,19 @@ COMMENT_CASES: tuple[tuple[str, str, frozenset[str]], ...] = (
     ("fn f(a: bool, b: bool) -> bool { a && b }", "fn f(a: bool, b: bool) -> bool { a & &b }", MOVED_CODE),
     ("fn f() { x.iter().map(g); }", "fn f() {\n    x.iter()\n        .map(g);\n}", frozenset()),
     ('fn f() { m!("a"tag); }', 'fn f() { m!("a" tag); }', MOVED_CODE),
+    ('fn f() { m!("a"℘); }', 'fn f() { m!("a" ℘); }', MOVED_CODE),
+    ("fn f() { m!('r#foo); }", "fn f() { m!('r #foo); }", MOVED_CODE),
+    ("/// ```\n/// #x\n/// ```\npub fn f() {}", "/// ```\n/// # x\n/// ```\npub fn f() {}", MOVED_DOCTEST),
+    (
+        "/// ```\n/// # // why\n/// let x = 1;\n/// ```\npub fn f() {}",
+        "/// ```\n/// let x = 1;\n/// ```\npub fn f() {}",
+        frozenset(),
+    ),
+    (
+        "/**\n```\nlet b = &1;\nlet r =\n*b;\n```\n*/\npub fn f() {}",
+        "/**\n```\nlet b = &1;\nlet r =\nb;\n```\n*/\npub fn f() {}",
+        MOVED_DOCTEST,
+    ),
     ("fn f() { m!(1.); }", "fn f() { m!(1 .); }", MOVED_CODE),
     ("fn f() -> u32 { 1.max(2) }", "fn f() -> u32 {\n    1\n        .max(2)\n}", frozenset()),
     (

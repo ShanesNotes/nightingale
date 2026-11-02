@@ -76,11 +76,22 @@ else
   reason="exit 0 and final line verify: OK"
 fi
 
+spellings() {
+  [ -n "$1" ] || return 0
+  printf '%s\n' "$1"
+  realpath -m -- "$1" 2>/dev/null || true
+}
+targets=$(spellings "${CARGO_TARGET_DIR:-}")
+homes=$(spellings "${HOME:-}")
 public() {
-  local text=$1
-  case "${CARGO_TARGET_DIR:-}" in /?*) text=${text//"$CARGO_TARGET_DIR"/<target>} ;; esac
+  local text=$1 dir
+  while IFS= read -r dir; do
+    case "$dir" in /?*) text=${text//"$dir"/<target>} ;; esac
+  done <<<"$targets"
   text=${text//"$ROOT"/.}
-  case "${HOME:-}" in /?*) text=${text//"$HOME"/"~"} ;; esac
+  while IFS= read -r dir; do
+    case "$dir" in /?*) text=${text//"$dir"/"~"} ;; esac
+  done <<<"$homes"
   printf '%s\n' "$text"
 }
 

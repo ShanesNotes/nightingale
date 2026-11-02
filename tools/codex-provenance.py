@@ -2,17 +2,17 @@
 
     python3 -I tools/codex-provenance.py PASS [PASS ...]
 
-Python 3.11 stdlib only. A PASS is one Codex run's saved output, whose header names its `session id:`, or that id;
-an id quoted later in the log is not read. Its rollout is the file under $CODEX_HOME/sessions, default
-~/.codex/sessions, whose name ends in the id. Each pass prints every model and effort its turns ran with, its session,
-start, Codex version and the commit Codex saw at the start, then the models and efforts of its helper sessions: the
-rollouts that name it, or one of its helpers, as parent. `codex review` runs its turns in a helper, so its own session
-shows no turn. A forked session's rollout repeats the turns of the session it forked from, and only its own count.
-Nothing else of a rollout prints: no prompt, path or account.
+Python 3.11 stdlib only. A PASS is one Codex run's saved output, whose header at the top names its `session id:`,
+or that id; an id quoted anywhere else in the log is not read. Its rollout is the file under $CODEX_HOME/sessions,
+default ~/.codex/sessions, whose name ends in the id. Each pass prints every model and effort its turns ran with, its
+session, start, Codex version and the commit Codex saw at the start, then the models and efforts of its helper
+sessions: the rollouts that name it, or one of its helpers, as parent. `codex review` runs its turns in a helper, so
+its own session shows no turn. A forked session's rollout repeats the turns of the session it forked from, and only
+its own count. Nothing else of a rollout prints: no prompt, path or account.
 
-Exit 0 when every pass's session or helpers record a turn, every turn records a model and an effort, every rollout
-reads whole, every forked session's source rollout is there, and every helper the pass spawned has a rollout;
-1 otherwise; 2 usage.
+Exit 0 when every pass's session or helpers record a turn, every turn records an id, a model and an effort, every
+rollout reads whole, every forked session's source rollout is there and whole, and every helper the pass spawned has a
+rollout; 1 otherwise; 2 usage.
 """
 import json
 import os
@@ -34,12 +34,22 @@ def first_meta(path):
     return payload if isinstance(payload, dict) else {}
 
 
+def text_of(value):
+    return value if isinstance(value, str) and value else None
+
+
+def dict_of(value):
+    return value if isinstance(value, dict) else {}
+
+
 def header_session(text):
     lines = text.splitlines()
-    start = next((k for k, line in enumerate(lines) if line.startswith("OpenAI Codex v")), None)
-    if start is None or lines[start + 1 : start + 2] != ["--------"]:
+    k = 0
+    while k < len(lines) and lines[k] in ("", "Reading additional input from stdin..."):
+        k += 1
+    if not lines[k : k + 1] or not lines[k].startswith("OpenAI Codex v") or lines[k + 1 : k + 2] != ["--------"]:
         return None
-    for line in lines[start + 2 :]:
+    for line in lines[k + 2 :]:
         if line == "--------":
             return None
         if found := re.fullmatch(r"session id: (" + SESSION_ID.pattern + ")", line):
@@ -70,26 +80,28 @@ def read(path):
             if kind == "session_meta" and meta is None:
                 meta = payload
             elif kind == "turn_context":
-                settings = (payload.get("collaboration_mode") or {}).get("settings") or {}
-                model = payload.get("model") or settings.get("model")
-                turns.append((payload.get("turn_id"), model, payload.get("effort") or settings.get("reasoning_effort")))
+                settings = dict_of(dict_of(payload.get("collaboration_mode")).get("settings"))
+                turn_id = text_of(payload.get("turn_id"))
+                model = text_of(payload.get("model")) or text_of(settings.get("model"))
+                effort = text_of(payload.get("effort")) or text_of(settings.get("reasoning_effort"))
+                whole = whole and turn_id is not None
+                turns.append((turn_id, model, effort))
             elif payload.get("type") == "function_call" and payload.get("name") == "spawn_agent":
-                calls.add(payload.get("call_id"))
-            elif payload.get("type") == "function_call_output" and payload.get("call_id") in calls:
+                calls.add(text_of(payload.get("call_id")))
+            elif payload.get("type") == "function_call_output" and text_of(payload.get("call_id")) in calls:
                 output = payload.get("output")
                 try:
                     task = json.loads(output) if isinstance(output, str) else output
                 except ValueError:
                     task = None
-                if isinstance(task, dict) and task.get("task_name"):
-                    spawned.add(task["task_name"])
+                if name := text_of(dict_of(task).get("task_name")):
+                    spawned.add(name)
     return meta or {}, turns, spawned, whole
 
 
 def agent_path(meta):
-    source = meta.get("source")
-    spawn = source.get("subagent") if isinstance(source, dict) else None
-    return (spawn.get("thread_spawn") or {}).get("agent_path") if isinstance(spawn, dict) else None
+    spawn = dict_of(dict_of(meta.get("source")).get("subagent"))
+    return text_of(dict_of(spawn.get("thread_spawn")).get("agent_path"))
 
 
 def shown(pairs):
@@ -104,7 +116,7 @@ def main(args):
     metas = {session: first_meta(path) for session, path in rollouts.items()}
     children = {}
     for session, meta in metas.items():
-        children.setdefault(meta.get("parent_thread_id"), []).append(session)
+        children.setdefault(text_of(meta.get("parent_thread_id")), []).append(session)
     cache = {}
 
     def load(session):
@@ -113,8 +125,8 @@ def main(args):
         return cache[session]
 
     def own_pairs(session):
-        source = metas[session].get("forked_from_id")
-        if source and source not in rollouts:
+        source = text_of(metas[session].get("forked_from_id"))
+        if source and (source not in rollouts or not load(source)[3]):
             return None
         inherited = {turn[0] for turn in load(source)[1]} if source else set()
         return [(model, effort) for turn_id, model, effort in load(session)[1] if turn_id not in inherited]
@@ -152,15 +164,15 @@ def main(args):
         helper_pairs = list(dict.fromkeys(pair for helper in helpers for pair in own[helper] or []))
         spawned = spawned.union(*(load(helper)[2] for helper in helpers))
         whole = whole and all(load(helper)[3] for helper in helpers)
-        family = {session, metas[session].get("parent_thread_id"), *helpers}
+        family = {session, text_of(metas[session].get("parent_thread_id")), *helpers}
         missing = spawned - {agent_path(metas[child]) for parent in family for child in children.get(parent, [])}
-        started = re.sub(r"\.\d+Z$", "Z", str(meta.get("timestamp")))
-        commit = (meta.get("git") or {}).get("commit_hash") or "unknown"
-        line = f"{label}: {shown(pairs)}; session {session}, started {started}, codex {meta.get('cli_version')}, "
-        line += f"commit {commit}"
+        started = re.sub(r"\.\d+Z$", "Z", text_of(meta.get("timestamp")) or "unknown")
+        commit = text_of(dict_of(meta.get("git")).get("commit_hash")) or "unknown"
+        line = f"{label}: {shown(pairs)}; session {session}, started {started}, "
+        line += f"codex {text_of(meta.get('cli_version')) or 'unknown'}, commit {commit}"
         line += f"; {len(helpers)} helper sessions: {shown(helper_pairs)}" if helpers else "; no helper rollouts"
         line += f"; {len(missing)} spawned helpers have no rollout" if missing else ""
-        line += f"; {len(orphaned)} forked sessions lack the rollout they forked from" if orphaned else ""
+        line += f"; {len(orphaned)} forked sessions lack a whole rollout to fork from" if orphaned else ""
         line += "" if whole else "; a rollout does not read whole"
         print(line)
         turns = pairs + helper_pairs
