@@ -295,6 +295,9 @@ pub enum CompileDefect {
     UnclaimedLaw { law: LawName },
     /// A read of a coupling field no owner emits. An omitted law is not zero.
     UnemittedField { law: LawName, field: LawName },
+    /// A read of a field in another dimension than the field's own. A field is found by name, so the port a reader
+    /// holds says what dimension it expects.
+    FieldDimension { law: LawName, field: LawName },
     /// A kernel that holds by a route's mode at a place that route does not stand, or a hazard on a mode with no one
     /// place: a hazard's draw stands for the whole body.
     ModeOfAnotherPlace { law: LawName },
