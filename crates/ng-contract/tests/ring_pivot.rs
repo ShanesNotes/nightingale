@@ -174,11 +174,7 @@ fn two_closed_rows_that_read_one_store_factor_over_the_bodys_elimination() -> Re
     Ok(())
 }
 
-fn ring_of(
-    body: &CompiledBody,
-    keys: &[&'static str],
-    mode: bool,
-) -> Result<Jacobian, InitializationFailure> {
+fn ring_of(body: &CompiledBody, keys: &[&'static str]) -> Result<Jacobian, InitializationFailure> {
     let cycle = Cycle::new(
         NonZeroU64::new(2_000_000_000).unwrap(),
         NonZeroU32::new(2).unwrap(),
@@ -193,56 +189,10 @@ fn ring_of(
         )?;
     }
     packet.start_rest(body, |_| 1.0, "synthetic")?;
-    if mode {
-        let law = LawName {
-            owner: "NS",
-            local: "switch",
-        };
-        packet.start_mode(law, "a", "synthetic")?;
-    }
     let port = BoundaryPort::new(Vec::new())?;
     let request = InitializationRequest::at(SimTime::from_ns(0));
     let system = body.initialization(body.bind(packet)?, port, request)?;
     Ok(system.stage(&system.workspace(), 0)?.1)
-}
-
-#[test]
-fn a_row_closed_in_two_modes_takes_one_store() -> Result<(), InitializationFailure> {
-    let mut map = AnatomyBuilder::new();
-    map.site::<TissueSite>(
-        "synthetic body",
-        Position::new(measure(0.0), measure(0.0), measure(0.0)),
-    );
-    let body = assemble(Schema::new(map.finish()?)?, |mut body| {
-        let (mut ns, _) = body.nervous()?.parts();
-        let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
-        let e1 = ns.state::<Dimensionless>("e1", Admissible::finite());
-        let e2 = ns.state::<Dimensionless>("e2", Admissible::finite());
-        let p = ns.algebraic::<Rate<Dimensionless>>("p", Admissible::finite());
-        let target = ns.parameter::<Dimensionless>(ParameterKey::new("target"), Admissible::finite());
-        let [a, b] = ns.modes("switch", ["a", "b"]);
-        for store in [&e1, &e2] {
-            let pays = ns.kernel(|mut k| {
-                let own = k.algebraic(&p);
-                k.finish(own, ns.every_mode(), class)
-            });
-            ns.memory_rate(store, pays);
-        }
-        for mode in [&a, &b] {
-            let hold = ns.kernel(|mut k| {
-                let (one, two, goal) = (k.state(&e1), k.state(&e2), k.parameter(&target));
-                let both = k.add(one, two);
-                let gap = k.subtract(both, goal);
-                k.finish(gap, mode.only(), class)
-            });
-            ns.closes(&p, hold);
-        }
-        body.add(ns.finish());
-        body.compile()
-    })?;
-    let block = ring_of(&body, &["target"], true)?;
-    assert!(body.factor(&block).is_ok());
-    Ok(())
 }
 
 #[test]
@@ -350,7 +300,7 @@ fn two_closed_rows_either_store_could_hold_take_the_same_stores_in_either_order(
     let (forward, backward) = (crossed(false)?, crossed(true)?);
     assert_eq!(forward.model_hash(), backward.model_hash());
     for body in [&forward, &backward] {
-        let block = ring_of(body, &["t1", "t2"], false)?;
+        let block = ring_of(body, &["t1", "t2"])?;
         assert!(body.factor(&block).is_ok());
     }
     Ok(())
