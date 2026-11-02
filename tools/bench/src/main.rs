@@ -1,5 +1,3 @@
-//! One timed run for `run.py`: one admission of the arena body, then 5 simulated seconds on the reference core.
-//! A `work` line says what the run did, which must match across runs. A `time` line may differ and gets a median.
 use ng_contract::*;
 use ng_validate::*;
 use std::hint::black_box;
@@ -9,7 +7,6 @@ const MS: u64 = 1_000_000;
 const SIMULATED_NS: u64 = 5_000 * MS;
 const UPDATES: u32 = 2_000;
 
-/// One residual, Jacobian, sparse factor and solve on the flat start guess: one Newton update, not a whole stage.
 fn newton_update_us(body: &CompiledBody) -> f64 {
     let (packet, lens) = (
         arena_packet(body).expect("packet"),
