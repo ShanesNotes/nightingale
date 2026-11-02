@@ -1968,7 +1968,8 @@ fn closing_stores(
             (reads[row].iter())
                 .filter(|amount| {
                     let store = &rows[amount.index()];
-                    !matches!(store.kind, RowKind::Algebraic(_)) && reads[amount.index()].contains(&unknown)
+                    !matches!(store.kind, RowKind::Algebraic(_))
+                        && moves(rows, reads, amount.index(), unknown)
                 })
                 .map(|amount| amount.index())
                 .collect()
@@ -1983,6 +1984,24 @@ fn closing_stores(
     Ok((held.iter().enumerate())
         .filter_map(|(store, at)| at.map(|at| (closed[at], store)))
         .collect())
+}
+
+fn moves(rows: &[Row], reads: &[Vec<UnknownId>], store: usize, unknown: UnknownId) -> bool {
+    let mut seen = vec![false; reads.len()];
+    let mut waiting = vec![store];
+    while let Some(row) = waiting.pop() {
+        for &read in &reads[row] {
+            if read == unknown {
+                return true;
+            }
+            let at = read.index();
+            if matches!(rows[at].kind, RowKind::Algebraic(_)) && !seen[at] {
+                seen[at] = true;
+                waiting.push(at);
+            }
+        }
+    }
+    false
 }
 
 fn judged_rows(rows: usize, stores: &[(usize, usize)]) -> Vec<u32> {

@@ -307,7 +307,7 @@ fn two_closed_rows_either_store_could_hold_take_the_same_stores_in_either_order(
 }
 
 #[test]
-fn a_closed_row_whose_unknown_only_another_algebraic_row_reads_is_refused() -> Result<(), AdmissionError> {
+fn a_closed_row_that_reads_no_store_is_refused() -> Result<(), AdmissionError> {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>(
         "synthetic body",
@@ -446,5 +446,49 @@ fn a_closed_row_whose_store_reads_its_unknown_through_an_algebraic_row_is_admitt
         vec![],
     );
     system.admit(exact, history)?;
+    Ok(())
+}
+
+#[test]
+fn a_closed_row_whose_unknown_moves_no_store_it_reads_is_refused() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>(
+        "synthetic body",
+        Position::new(measure(0.0), measure(0.0), measure(0.0)),
+    );
+    let compiled = assemble(Schema::new(map.finish()?)?, |mut body| {
+        let (mut ns, _) = body.nervous()?.parts();
+        let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let e = ns.state::<Dimensionless>("e", Admissible::finite());
+        let p = ns.algebraic::<Rate<Dimensionless>>("p", Admissible::finite());
+        let q = ns.algebraic::<Rate<Dimensionless>>("q", Admissible::finite());
+        let pays = ns.kernel(|mut k| {
+            let flow = k.algebraic(&q);
+            k.finish(flow, ns.every_mode(), class)
+        });
+        ns.memory_rate(&e, pays);
+        let rests = ns.kernel(|mut k| {
+            let own = k.algebraic(&q);
+            k.finish(own, ns.every_mode(), class)
+        });
+        ns.residual(&q, rests);
+        let hold = ns.kernel(|mut k| {
+            let store = k.state(&e);
+            k.finish(store, ns.every_mode(), class)
+        });
+        ns.closes(&p, hold);
+        body.add(ns.finish());
+        body.compile()
+    });
+    let law = LawName {
+        owner: "NS",
+        local: "p",
+    };
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::StructuralSingularity {
+            law
+        }))
+    );
     Ok(())
 }
