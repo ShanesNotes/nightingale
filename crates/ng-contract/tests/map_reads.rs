@@ -39,6 +39,7 @@ enum Reader {
     Whole,
     OverItself,
     Twice,
+    Discarded,
 }
 
 fn felt<'b, 'k, S>(
@@ -147,6 +148,15 @@ fn read_in(reader: Reader, nerve: Nerve, spelling: Spelling) -> Result<CompiledB
                 });
                 cv.define_at(&row, value);
             }
+            Reader::Discarded => {
+                let (row, _) = cv.site_field::<Blood, Dimensionless>("felt", Admissible::finite());
+                let value = cv.site_kernel(|mut k| {
+                    felt(&mut k, &alpha, spelling);
+                    let zero = k.zero();
+                    k.finish(zero, cv.every_mode(), class)
+                });
+                cv.define_at(&row, value);
+            }
             Reader::Whole => {
                 let mark = cv.algebraic::<Dimensionless>("marked", Admissible::finite());
                 let held = cv.kernel(|mut k| {
@@ -199,6 +209,83 @@ fn a_site_a_law_reads_a_junction_at_must_be_supplied_or_stated_bare() -> Result<
             Some(AdmissionError::Compile(CompileDefect::NoSupply { law, site }))
         );
     }
+    Ok(())
+}
+
+#[test]
+fn a_read_a_law_discards_is_refused_as_one_it_keeps() {
+    let nerves = [
+        Nerve::Supplied,
+        Nerve::Stated,
+        Nerve::Lost,
+        Nerve::NoReceptor,
+        Nerve::Bare,
+    ];
+    for nerve in nerves {
+        for spelling in [Spelling::Plain, Spelling::Accepting] {
+            assert_eq!(
+                read_in(Reader::Discarded, nerve, spelling).err(),
+                read_in(Reader::Site, nerve, spelling).err(),
+            );
+        }
+    }
+}
+
+fn an_effect_written_in<U: Dimension>() -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let vessel = map.site::<VesselSegment>("vessel", at()?);
+    let other = map.site::<VesselSegment>("other", at()?);
+    let junction = map.site::<Junction>("junction", at()?);
+    for site in [vessel.id(), other.id(), junction.id()] {
+        map.contain(root.id(), site);
+    }
+    map.connect(Network::Vascular, vessel.id(), other.id());
+    map.connect(Network::Vascular, other.id(), vessel.id());
+    map.supply(&junction, &[vessel.id(), other.id()]);
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.leave_out(Space::Lumen, "a bench of fields alone");
+    assemble(schema, |mut body| {
+        let class = fast()?;
+        let (mut receptor, _) = body.receptor()?.parts();
+        let (output, _) = receptor.site_field::<Junction, U>("effect norepinephrine", Admissible::finite());
+        let value = receptor.site_kernel(|mut k| {
+            let zero = k.zero::<U>();
+            k.finish(zero, receptor.every_mode(), class)
+        });
+        receptor.define_at(&output, value);
+        body.add(receptor.finish());
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let (output, _) = cv.site_field::<Blood, Dimensionless>("felt", Admissible::finite());
+        let alpha = ports.effect::<Norepinephrine>();
+        let value = cv.site_kernel(|mut k| {
+            let value = k.at_junction(&alpha);
+            k.finish(value, cv.every_mode(), class)
+        });
+        cv.define_at(&output, value);
+        body.add(cv.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn a_field_read_in_another_dimension_than_its_own_is_refused_by_name() -> Result<(), AdmissionError> {
+    an_effect_written_in::<Dimensionless>()?;
+    let law = LawName {
+        owner: "CV",
+        local: "felt",
+    };
+    let field = LawName {
+        owner: "Receptor",
+        local: "effect norepinephrine",
+    };
+    assert_eq!(
+        an_effect_written_in::<Pressure>().err(),
+        Some(AdmissionError::Compile(CompileDefect::FieldDimension {
+            law,
+            field
+        }))
+    );
     Ok(())
 }
 

@@ -47,6 +47,7 @@ index!(
 pub struct CompiledBody {
     hash: ModelHash,
     pub(crate) layout: Layout,
+    elimination: Elimination,
     pub(crate) sources: Vec<RefusalSource>,
 }
 pub(crate) struct Layout {
@@ -57,9 +58,6 @@ pub(crate) struct Layout {
     pub(crate) instances: Vec<Instance>,
     pub(crate) parameters: Vec<ParameterSlot>,
     pub(crate) sparsity: Sparsity,
-    /// Derived from the sparsity and the matching, so the hash covers it through them.
-    pub(crate) elimination: Elimination,
-    /// Derived from the sparsity and the closed rows, so the hash covers it through them.
     pub(crate) judged: Vec<u32>,
     pub(crate) blocks: Vec<Block>,
     pub(crate) modes: Vec<ModeLayout>,
@@ -71,13 +69,14 @@ pub(crate) struct Layout {
     pub(crate) held: Vec<HeldCard>,
 }
 impl CompiledBody {
-    pub(crate) fn seal(layout: Layout) -> Self {
-        let mut out = Canonical::new("ng-contract model 1");
+    pub(crate) fn seal(layout: Layout, elimination: Elimination) -> Self {
+        let mut out = Canonical::new("ng-contract model 2");
         layout.seal(&mut out);
         Self {
             hash: ModelHash { digest: out.digest() },
             sources: refusal_sources(&layout),
             layout,
+            elimination,
         }
     }
     pub fn model_hash(&self) -> ModelHash {
@@ -116,7 +115,7 @@ impl CompiledBody {
     /// One Jacobian of this body factored over its elimination, or the row whose pivot it cannot take. A pivot never
     /// moves, so a core that meets one solves `Jacobian::view` its own way.
     pub fn factor(&self, jacobian: &Jacobian) -> Result<Factors<'_>, usize> {
-        self.layout.elimination.factor(&jacobian.values)
+        self.elimination.factor(&jacobian.values)
     }
     /// The cards held, in card order.
     pub fn held(&self) -> impl Iterator<Item = &'static str> + '_ {
@@ -164,8 +163,7 @@ impl Seal for Layout {
             instances,
             parameters,
             sparsity,
-            elimination: _,
-            judged: _,
+            judged,
             blocks,
             modes,
             guards,
@@ -182,6 +180,10 @@ impl Seal for Layout {
         instances.seal(out);
         parameters.seal(out);
         sparsity.seal(out);
+        out.length(judged.len());
+        for &store in judged {
+            out.number(u64::from(store));
+        }
         blocks.seal(out);
         modes.seal(out);
         guards.seal(out);

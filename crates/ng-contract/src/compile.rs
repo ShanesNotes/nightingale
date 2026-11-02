@@ -68,7 +68,13 @@ pub(crate) fn compile(
     let instances = marked(instances, &placement.programs, &modes, &hazards)?;
     let (streams, forcings) = chance.laid_out(&fragments, &parameters);
     match_each_mode(&rows.rows, &placement.programs, &instances, &modes, &closed)?;
-    let solved_by = solved_by(&rows.rows, &reads)?;
+    let stores = closing_stores(&rows.rows, &reads, &closed).map_err(|row| {
+        let RowKind::Algebraic(slot) = rows.rows[row].kind else {
+            unreachable!("a closed row is algebraic")
+        };
+        CompileDefect::StructuralSingularity { law: slot.law }
+    })?;
+    let solved_by = solved_by(&rows.rows, &reads, &closed)?;
     let blocks = blocks(&solved_by, &reads, &rates);
     let species: Vec<Species> = rows.amounts.iter().map(|pool| pool.species).collect();
     let read_by = |column: usize| {
@@ -79,11 +85,11 @@ pub(crate) fn compile(
     };
     let column_reads: Vec<bool> = (0..placement.columns.len()).map(read_by).collect();
     let basis = conserved_basis(&species, &placement.columns, &column_reads);
-    let judged = judged_rows(&solved_by, &reads, &closed);
-    let pivots = pivots(solved_by.clone(), &reads, &closed);
+    let judged = judged_rows(reads.len(), &stores);
+    let pivots = pivots(solved_by.clone(), &stores);
     let sparsity = sparsity(reads);
     let elimination = Elimination::plan(&sparsity.offsets, &sparsity.unknowns, &pivots);
-    Ok(CompiledBody::seal(Layout {
+    let layout = Layout {
         schema,
         rows: rows.rows,
         columns: placement.columns,
@@ -91,7 +97,6 @@ pub(crate) fn compile(
         instances,
         parameters,
         sparsity,
-        elimination,
         judged,
         blocks,
         modes,
@@ -101,7 +106,8 @@ pub(crate) fn compile(
         hazards,
         basis,
         held,
-    }))
+    };
+    Ok(CompiledBody::seal(layout, elimination))
 }
 
 fn check_fragments(
@@ -1099,8 +1105,14 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
         };
         for &(_, kernel) in &law.laws {
             if let Serves::Boundary(water) = law.serves {
-                let carried = kernel.code.iter().find_map(|op| match op {
-                    Op::Input(Input::Read(Source::Drive(route), _)) if *route != water.name => Some(*route),
+                let written = (kernel.code.iter())
+                    .filter_map(|op| match op {
+                        Op::Input(input) => Some(input),
+                        _ => None,
+                    })
+                    .chain(kernel.unreached.iter().map(|read| &read.input));
+                let carried = written.into_iter().find_map(|input| match input {
+                    Input::Read(Source::Drive(route), _) if *route != water.name => Some(*route),
                     _ => None,
                 });
                 if let Some(route) = carried {
@@ -1378,6 +1390,8 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
         id,
         code,
         accepts_no_nerve: _,
+        fields: _,
+        unreached: _,
         dimension,
         modes,
         rate,
@@ -1443,7 +1457,17 @@ fn addresses(
         });
     let site = |end, from, to| if end == End::From { from } else { to };
     let unknown = |row: usize| Address::Unknown(UnknownId::at(row));
-    let read = |source: Source, place: Where, op: usize| -> Result<Address, CompileDefect> {
+    let read = |source: Source,
+                place: Where,
+                accepts_no_nerve: bool,
+                expects: Option<&str>|
+     -> Result<Address, CompileDefect> {
+        let checked = |field: LawName, row: usize| match expects {
+            Some(expected) if rows.rows[row].dimension != expected => {
+                Err(CompileDefect::FieldDimension { law, field })
+            }
+            _ => Ok(unknown(row)),
+        };
         let landed = place_of(place, context, anatomy);
         if let Where::MarkOn(set, _) = place
             && !landed.is_some_and(|site| anatomy.in_set(set).contains(&site))
@@ -1459,10 +1483,10 @@ fn addresses(
                 match landed {
                     Some(junction) => {
                         let row = rows.defined(field, at);
-                        unknown(row.ok_or(CompileDefect::NoReceptor { law, junction })?)
+                        checked(field, row.ok_or(CompileDefect::NoReceptor { law, junction })?)?
                     }
                     None if !anatomy.unsupplied(site) => return Err(CompileDefect::NoSupply { law, site }),
-                    None if !kernel.accepts_no_nerve.contains(&op) => {
+                    None if !accepts_no_nerve => {
                         return Err(CompileDefect::UnsuppliedRead { law, site });
                     }
                     None => Address::Gauge,
@@ -1470,7 +1494,7 @@ fn addresses(
             }
             Source::Field(field) => {
                 let row = rows.defined(field, at);
-                unknown(row.ok_or(CompileDefect::UnemittedField { law, field })?)
+                checked(field, row.ok_or(CompileDefect::UnemittedField { law, field })?)?
             }
             Source::Flow(family) => {
                 let flow = LawName {
@@ -1532,87 +1556,93 @@ fn addresses(
             }
         })
     };
-    inputs
-        .map(|(op, input)| {
-            Ok(match (input, context) {
-                (Input::Memory(local) | Input::Algebraic(local), _) => {
-                    let slot = LawName {
-                        owner: law.owner,
-                        local,
-                    };
-                    unknown(
-                        rows.slot(slot, context)
-                            .ok_or(CompileDefect::NoSuchRead { law })?,
-                    )
-                }
-                (Input::Read(source, place), _) => read(source, place, op)?,
-                (Input::Height(place), _) => {
-                    let site = place_of(place, context, anatomy).ok_or(CompileDefect::NoSuchRead { law })?;
-                    Address::Height(anatomy.axial(site).to_bits())
-                }
-                (Input::EdgeFlow, Context::Edge { from, to }) => {
-                    let family = if anatomy.is_valve((from, to)) {
-                        Family::Valves
-                    } else {
-                        Family::Circulation
-                    };
-                    let flow = LawName {
-                        owner: law.owner,
-                        local: family.name(),
-                    };
-                    unknown(
-                        rows.slot(flow, context)
-                            .ok_or(CompileDefect::NoSuchRead { law })?,
-                    )
-                }
-                (Input::Inflow, Context::Edge { from, .. }) => {
-                    let into: Vec<(SiteId, SiteId)> = (anatomy.edges(Network::Urinary))
-                        .filter(|edge| edge.1 == from)
-                        .collect();
-                    let [edge] = into[..] else {
-                        return Err(CompileDefect::NoSuchRead { law });
-                    };
-                    let family = if edge.0.class() == Class::CapillaryBed {
-                        Family::Filtration
-                    } else {
-                        Family::Tubular
-                    };
-                    let flow = LawName {
-                        owner: law.owner,
-                        local: family.name(),
-                    };
-                    let at = Context::Edge {
-                        from: edge.0,
-                        to: edge.1,
-                    };
-                    unknown(rows.slot(flow, at).ok_or(CompileDefect::NoSuchRead { law })?)
-                }
-                (Input::Draw(local), _) => Address::Draw(chance.stream(LawName {
+    let resolve = |input: Input, accepts: bool, expects: Option<&str>| -> Result<Address, CompileDefect> {
+        Ok(match (input, context) {
+            (Input::Memory(local) | Input::Algebraic(local), _) => {
+                let slot = LawName {
                     owner: law.owner,
                     local,
-                })),
-                (Input::Forcing(local), _) => Address::Forcing(chance.forcing(LawName {
+                };
+                unknown(
+                    rows.slot(slot, context)
+                        .ok_or(CompileDefect::NoSuchRead { law })?,
+                )
+            }
+            (Input::Read(source, place), _) => read(source, place, accepts, expects)?,
+            (Input::Height(place), _) => {
+                let site = place_of(place, context, anatomy).ok_or(CompileDefect::NoSuchRead { law })?;
+                Address::Height(anatomy.axial(site).to_bits())
+            }
+            (Input::EdgeFlow, Context::Edge { from, to }) => {
+                let family = if anatomy.is_valve((from, to)) {
+                    Family::Valves
+                } else {
+                    Family::Circulation
+                };
+                let flow = LawName {
                     owner: law.owner,
-                    local,
-                })),
-                (Input::Parameter(key), _) => Address::Parameter(key, Binding::Body),
-                (Input::SiteParameter(key), Context::Site(at)) => Address::Parameter(key, Binding::Site(at)),
-                (Input::EdgeParameter(key), Context::Edge { from, to }) => {
-                    Address::Parameter(key, Binding::Edge { from, to })
-                }
-                (Input::EndParameter(key, end), Context::Edge { from, to }) => {
-                    Address::Parameter(key, Binding::Site(site(end, from, to)))
-                }
-                (
-                    Input::SiteParameter(_)
-                    | Input::EdgeParameter(_)
-                    | Input::EndParameter(..)
-                    | Input::Inflow
-                    | Input::EdgeFlow,
-                    _,
-                ) => return Err(CompileDefect::NoSuchRead { law }),
-            })
+                    local: family.name(),
+                };
+                unknown(
+                    rows.slot(flow, context)
+                        .ok_or(CompileDefect::NoSuchRead { law })?,
+                )
+            }
+            (Input::Inflow, Context::Edge { from, .. }) => {
+                let into: Vec<(SiteId, SiteId)> = (anatomy.edges(Network::Urinary))
+                    .filter(|edge| edge.1 == from)
+                    .collect();
+                let [edge] = into[..] else {
+                    return Err(CompileDefect::NoSuchRead { law });
+                };
+                let family = if edge.0.class() == Class::CapillaryBed {
+                    Family::Filtration
+                } else {
+                    Family::Tubular
+                };
+                let flow = LawName {
+                    owner: law.owner,
+                    local: family.name(),
+                };
+                let at = Context::Edge {
+                    from: edge.0,
+                    to: edge.1,
+                };
+                unknown(rows.slot(flow, at).ok_or(CompileDefect::NoSuchRead { law })?)
+            }
+            (Input::Draw(local), _) => Address::Draw(chance.stream(LawName {
+                owner: law.owner,
+                local,
+            })),
+            (Input::Forcing(local), _) => Address::Forcing(chance.forcing(LawName {
+                owner: law.owner,
+                local,
+            })),
+            (Input::Parameter(key), _) => Address::Parameter(key, Binding::Body),
+            (Input::SiteParameter(key), Context::Site(at)) => Address::Parameter(key, Binding::Site(at)),
+            (Input::EdgeParameter(key), Context::Edge { from, to }) => {
+                Address::Parameter(key, Binding::Edge { from, to })
+            }
+            (Input::EndParameter(key, end), Context::Edge { from, to }) => {
+                Address::Parameter(key, Binding::Site(site(end, from, to)))
+            }
+            (
+                Input::SiteParameter(_)
+                | Input::EdgeParameter(_)
+                | Input::EndParameter(..)
+                | Input::Inflow
+                | Input::EdgeFlow,
+                _,
+            ) => return Err(CompileDefect::NoSuchRead { law }),
         })
+    };
+    for read in &kernel.unreached {
+        resolve(read.input, read.accepts_no_nerve, read.expects.as_deref())?;
+    }
+    let expects =
+        |op: usize| (kernel.fields.iter().find(|read| read.at == op)).map(|read| read.expects.as_str());
+    inputs
+        .map(|(op, input)| resolve(input, kernel.accepts_no_nerve.contains(&op), expects(op)))
         .collect()
 }
 
@@ -1899,11 +1929,14 @@ fn matching(adjacency: &[Vec<usize>], rows: &[usize]) -> Result<Vec<Option<usize
     Ok(matched)
 }
 
-fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, CompileDefect> {
+fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>], closed: &[usize]) -> Result<Vec<RowId>, CompileDefect> {
     let algebraic = algebraic_laws(rows);
     let first = rows.len() - algebraic.len();
     let adjacency: Vec<Vec<usize>> = (first..rows.len())
         .map(|row| {
+            if closed.contains(&row) {
+                return vec![row - first];
+            }
             (reads[row].iter())
                 .filter_map(|unknown| unknown.index().checked_sub(first))
                 .collect()
@@ -1921,32 +1954,70 @@ fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, Compi
     Ok(solved_by)
 }
 
-/// Each unknown's pivot row. A closed row reads no unknown of its own, so it pivots on the amount it reads whose rate
-/// reads that unknown, and that amount's row takes the unknown.
-/// The row each row's residual is judged at: its own, or for a closed row the store it holds, whose unit its residual
-/// has.
-fn judged_rows(solved_by: &[RowId], reads: &[Vec<UnknownId>], closed: &[usize]) -> Vec<u32> {
-    let mut judged: Vec<u32> = (0..reads.len() as u32).collect();
-    for &row in closed {
-        let unknown = (solved_by.iter()).position(|pivot| pivot.index() == row);
-        let unknown = UnknownId::at(unknown.expect("a closed row is matched to its unknown"));
-        let carries = |amount: &&UnknownId| reads[amount.index()].contains(&unknown);
-        if let Some(amount) = reads[row].iter().find(carries) {
-            judged[row] = amount.index() as u32;
+fn closing_stores(
+    rows: &[Row],
+    reads: &[Vec<UnknownId>],
+    closed: &[usize],
+) -> Result<Vec<(usize, usize)>, usize> {
+    let mut closed = closed.to_vec();
+    closed.sort_unstable();
+    closed.dedup();
+    let carriers: Vec<Vec<usize>> = (closed.iter())
+        .map(|&row| {
+            let unknown = UnknownId::at(row);
+            (reads[row].iter())
+                .filter(|amount| {
+                    let store = &rows[amount.index()];
+                    !matches!(store.kind, RowKind::Algebraic(_))
+                        && moves(rows, reads, amount.index(), unknown)
+                })
+                .map(|amount| amount.index())
+                .collect()
+        })
+        .collect();
+    let mut held = vec![None; reads.len()];
+    for (at, &row) in closed.iter().enumerate() {
+        if !augment(&carriers, at, &mut vec![false; reads.len()], &mut held) {
+            return Err(row);
         }
+    }
+    Ok((held.iter().enumerate())
+        .filter_map(|(store, at)| at.map(|at| (closed[at], store)))
+        .collect())
+}
+
+fn moves(rows: &[Row], reads: &[Vec<UnknownId>], store: usize, unknown: UnknownId) -> bool {
+    let mut seen = vec![false; reads.len()];
+    let mut waiting = vec![store];
+    while let Some(row) = waiting.pop() {
+        for &read in &reads[row] {
+            if read == unknown {
+                return true;
+            }
+            let at = read.index();
+            if matches!(rows[at].kind, RowKind::Algebraic(_)) && !seen[at] {
+                seen[at] = true;
+                waiting.push(at);
+            }
+        }
+    }
+    false
+}
+
+fn judged_rows(rows: usize, stores: &[(usize, usize)]) -> Vec<u32> {
+    let mut judged: Vec<u32> = (0..rows as u32).collect();
+    for &(row, store) in stores {
+        judged[row] = store as u32;
     }
     judged
 }
 
-fn pivots(mut pivots: Vec<RowId>, reads: &[Vec<UnknownId>], closed: &[usize]) -> Vec<RowId> {
-    for &row in closed {
+fn pivots(mut pivots: Vec<RowId>, stores: &[(usize, usize)]) -> Vec<RowId> {
+    for &(row, store) in stores {
         let unknown = (pivots.iter()).position(|pivot| pivot.index() == row);
-        let unknown = UnknownId::at(unknown.expect("a closed row is matched to its unknown"));
-        let carries = |amount: &&UnknownId| reads[amount.index()].contains(&unknown);
-        if let Some(amount) = reads[row].iter().find(carries) {
-            pivots[unknown.index()] = RowId::at(amount.index());
-            pivots[amount.index()] = RowId::at(row);
-        }
+        let unknown = unknown.expect("a closed row is matched to its unknown");
+        pivots[unknown] = RowId::at(store);
+        pivots[store] = RowId::at(row);
     }
     pivots
 }

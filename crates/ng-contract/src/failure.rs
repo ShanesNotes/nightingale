@@ -264,7 +264,8 @@ pub enum CompileDefect {
     ParameterConflict { key: ParameterKey },
     /// A mode variable with no values, or with one value twice.
     BadModeVariable { variable: LawName },
-    /// An algebraic row that no structural matching pairs with an algebraic unknown it reads.
+    /// An algebraic row that no structural matching pairs with an algebraic unknown it reads, or a closed row with no
+    /// store of its own to hold it.
     StructuralSingularity { law: LawName },
     /// A pool this body models that no transfer moves and no held card answers for. A read never moves a
     /// pool, and a transfer whose two ends are one pool moves nothing.
@@ -295,6 +296,8 @@ pub enum CompileDefect {
     UnclaimedLaw { law: LawName },
     /// A read of a coupling field no owner emits. An omitted law is not zero.
     UnemittedField { law: LawName, field: LawName },
+    /// A read of a field in another dimension than the field's own.
+    FieldDimension { law: LawName, field: LawName },
     /// A kernel that holds by a route's mode at a place that route does not stand, or a hazard on a mode with no one
     /// place: a hazard's draw stands for the whole body.
     ModeOfAnotherPlace { law: LawName },

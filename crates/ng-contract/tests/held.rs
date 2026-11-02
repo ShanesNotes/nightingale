@@ -46,6 +46,7 @@ enum Defect {
     FluidLeftOut,
     LiverReadsTheGutsDrive,
     OneRouteReadsAnother,
+    OneRouteDiscardsAnothers,
     OnlyARowReadsTheDrive,
     ARowAlsoReadsTheDrive,
 }
@@ -96,7 +97,10 @@ fn schema(defect: Defect) -> Result<(Schema, Sites), AdmissionError> {
     if defect == Defect::CellsLeftOut {
         schema.leave_out(Space::Cells, "a bench with no cell water");
     }
-    if defect == Defect::OneRouteReadsAnother {
+    if matches!(
+        defect,
+        Defect::OneRouteReadsAnother | Defect::OneRouteDiscardsAnothers
+    ) {
         for route in [SECOND_ROUTE, THIRD_ROUTE] {
             schema.boundary::<Water>(route, BoundaryDirection::IntoBody, vessel.id(), Space::Lumen)?;
         }
@@ -271,6 +275,24 @@ fn compiled(defect: Defect) -> Result<CompiledBody, AdmissionError> {
                 }
                 body.add(laws.finish());
             }
+            Defect::OneRouteDiscardsAnothers => {
+                let (mut laws, ports) = body.boundary()?.parts();
+                let BoundaryRoute { route: second, .. } = ports.route::<Water>(SECOND_ROUTE)?;
+                let BoundaryRoute { route: third, drive } = ports.route::<Water>(THIRD_ROUTE)?;
+                let class = slow()?;
+                let discarding = laws.kernel(|mut k| {
+                    k.read(&drive);
+                    let zero = k.zero();
+                    k.finish(zero, laws.every_mode(), class)
+                });
+                laws.transfer(Transfer::new(&second, discarding));
+                let own = laws.kernel(|mut k| {
+                    let value = k.read(&drive);
+                    k.finish(value, laws.every_mode(), class)
+                });
+                laws.transfer(Transfer::new(&third, own));
+                body.add(laws.finish());
+            }
             Defect::LiverReadsTheGutsDrive => {
                 let declaration = HeldDeclaration::<Hepatic>::new(vec![], vec![], "a synthetic bench");
                 let (mut laws, ports) = body.hold(declaration)?.parts();
@@ -377,6 +399,17 @@ fn a_card_cannot_read_the_drive_of_a_route_it_did_not_declare() {
 fn one_routes_law_cannot_read_anothers_drive() {
     assert_eq!(
         refused(Defect::OneRouteReadsAnother),
+        defect(CompileDefect::DriveOfAnotherRoute {
+            law: law("Boundary", SECOND_ROUTE),
+            route: THIRD_ROUTE
+        })
+    );
+}
+
+#[test]
+fn one_routes_law_cannot_read_anothers_drive_even_to_discard_it() {
+    assert_eq!(
+        refused(Defect::OneRouteDiscardsAnothers),
         defect(CompileDefect::DriveOfAnotherRoute {
             law: law("Boundary", SECOND_ROUTE),
             route: THIRD_ROUTE

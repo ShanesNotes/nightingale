@@ -446,3 +446,44 @@ fn a_validity_range_stays_with_its_kernel_however_alike_two_kernels_are() -> Res
     assert_eq!(twins(true, true)?, twins(true, false)?);
     Ok(())
 }
+
+fn held_through(closed: bool) -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("body", position(0.0)?);
+    assemble(Schema::new(map.finish()?)?, |mut assembly| {
+        let (mut ns, _) = assembly.nervous()?.parts();
+        let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let x = ns.state::<Dimensionless>("x", Admissible::finite());
+        let p = ns.algebraic::<Rate<Dimensionless>>("p", Admissible::finite());
+        let target = ns.parameter::<Dimensionless>(ParameterKey::new("target"), Admissible::finite());
+        let speed = ns.parameter::<Rate<Dimensionless>>(ParameterKey::new("speed"), Admissible::positive());
+        let flow = ns.kernel(|mut k| {
+            let own = k.algebraic(&p);
+            k.finish(own, ns.every_mode(), class)
+        });
+        ns.memory_rate(&x, flow);
+        let holding = ns.kernel(|mut k| {
+            let own = k.algebraic(&p);
+            let (goal, now, speed) = (k.parameter(&target), k.state(&x), k.parameter(&speed));
+            let pull = k.relax(goal, now, speed);
+            let gap = k.subtract(own, pull);
+            k.finish(gap, ns.every_mode(), class)
+        });
+        if closed {
+            ns.closes(&p, holding);
+        } else {
+            ns.residual(&p, holding);
+        }
+        assembly.add(ns.finish());
+        assembly.compile()
+    })
+}
+
+#[test]
+fn a_closed_row_and_a_plain_residual_are_two_models() -> Result<(), AdmissionError> {
+    let (closed, plain) = (held_through(true)?, held_through(false)?);
+    assert_eq!(closed.sparsity(), plain.sparsity());
+    assert_eq!(closed.model_hash(), held_through(true)?.model_hash());
+    assert_ne!(closed.model_hash(), plain.model_hash());
+    Ok(())
+}
