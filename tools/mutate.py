@@ -4,7 +4,7 @@
 
 Python 3.11 stdlib only. TABLE is TOML with one [[mutant]] per rule, aimed at the test that holds it. `old` must match
 exactly once. `test` is what follows `cargo test`, and a row's own `test` replaces the table's. It may not pass
---manifest-path, --target-dir or --config, which can point cargo outside the sweep's tree.
+--manifest-path, --target-dir or --config.
 
     test = "--release -p ng-contract --test map_reads"
 
@@ -18,10 +18,11 @@ A sweep extracts REV, default HEAD, to target/mutate/ in this checkout, so it ne
 pass there before any row runs. Each row prints as it ends, so a killed sweep keeps its lines:
 
     CAUGHT           a test failed, named on the line, or a test binary crashed
-    CAUGHT at build  the mutant does not compile; read the error, because a mistyped mutant proves nothing
+    CAUGHT at build  rustc refused the mutant with a coded error; read it, because a mistyped mutant proves nothing
     SURVIVED         every test passed, so ask what the test could not see
     NOT APPLIED      `old` did not match exactly once, so nothing ran
-    UNCLEAR          over budget, killed from outside, or failed with no test named: neither a catch nor a survivor
+    UNCLEAR          over budget, killed from outside, or failed with no test or coded error named: neither a catch
+                     nor a survivor
 
 Exit 0 only when every row is CAUGHT. --check lists the NOT APPLIED rows and stops before any build. Each command runs
 in its own process group, and that group dies with the command and with this script, however this script dies.
@@ -45,9 +46,7 @@ WORK = ROOT / "target" / "mutate"
 TREE = WORK / "tree"
 PASSED = re.compile(r"^test .+ \.\.\. ok$", re.M)
 FAILED = re.compile(r"^test (.+) \.\.\. FAILED$", re.M)
-# Only an error with a code is the mutant's. A compiler or linker killed from outside, or a full disk, fails the build
-# with none.
-NO_BUILD = re.compile(r"^.*\berror\[E\d{4}\].*$", re.M)
+CODED_ERROR = re.compile(r"^.*\berror\[E\d{4}\].*$", re.M)
 DIED = re.compile(r"process didn't exit successfully: .*\((signal: (\d+), .*)\)$", re.M)
 FAULTS = {signal.SIGABRT, signal.SIGILL, signal.SIGSEGV, signal.SIGBUS, signal.SIGFPE}
 SHOWN = 3
@@ -79,11 +78,7 @@ def load_rows(path, only):
     return [row for row in rows if not only or row["name"] in only]
 
 
-def run(argv, budget=None, **popen):
-    """The keeper leads the group and waits on a pipe only this process holds open. Closing it kills the group, and so
-    does this process dying, even by SIGKILL. A group of cargo alone would lose its id when cargo exits, and killing
-    cargo alone leaves the test binary running.
-    """
+def run_tethered(argv, budget=None, **popen):
     read_end, write_end = os.pipe()
     keeper = subprocess.Popen(
         ["sh", "-c", "read line; kill -KILL 0"],
@@ -120,19 +115,19 @@ def extract(sha):
     # -m dates each file now. By its commit date a file can read older than target/'s last build, and cargo then links
     # a stale library.
     for argv in (["git", "archive", "--output", archive, sha], ["tar", "-x", "-m", "-C", TREE, "-f", archive]):
-        code, output = run(argv, cwd=ROOT)
+        code, output = run_tethered(argv, cwd=ROOT)
         if code != 0:
             refuse(f"{argv[0]} failed:\n{output.decode(errors='replace')}")
 
 
 def matches(sha, row):
-    code, blob = run(["git", "cat-file", "blob", f"{sha}:{row['path']}"], cwd=ROOT)
+    code, blob = run_tethered(["git", "cat-file", "blob", f"{sha}:{row['path']}"], cwd=ROOT)
     return blob.count(row["old"].encode()) if code == 0 else 0
 
 
 def cargo_test(test, env, budget):
     argv = ["cargo", "test", "--manifest-path", TREE / "Cargo.toml", *shlex.split(test)]
-    code, output = run(argv, budget, cwd=TREE, env=env)
+    code, output = run_tethered(argv, budget, cwd=TREE, env=env)
     return code, output.decode(errors="replace")
 
 
@@ -144,7 +139,7 @@ def judge(code, output, budget):
     if failed := FAILED.findall(output):
         more = f", {len(failed) - SHOWN} more" if len(failed) > SHOWN else ""
         return "CAUGHT", ", ".join(failed[:SHOWN]) + more
-    if coded := NO_BUILD.search(output):
+    if coded := CODED_ERROR.search(output):
         return "CAUGHT at build", coded[0]
     if "error: test failed" in output and (died := DIED.search(output)):
         if int(died[2]) in FAULTS:
@@ -163,7 +158,7 @@ def main():
     args = parser.parse_args()
 
     rows = load_rows(args.table, args.only)
-    code, found = run(["git", "rev-parse", "--verify", "--quiet", f"{args.rev}^{{commit}}"], cwd=ROOT)
+    code, found = run_tethered(["git", "rev-parse", "--verify", "--quiet", f"{args.rev}^{{commit}}"], cwd=ROOT)
     if code != 0:
         refuse(f"{args.rev} is no commit here")
     sha = found.decode().strip()
@@ -194,8 +189,7 @@ def main():
         refuse(f"another sweep is running in {ROOT}")
     extract(sha)
     target = str(WORK / "target")
-    # An inherited target or build dir links another checkout's crates, and UPDATE_EXPECT rewrites a trace where it
-    # should fail.
+    # An inherited target or build dir links another checkout's crates.
     env = dict(
         os.environ,
         CARGO_TARGET_DIR=target,
@@ -203,6 +197,7 @@ def main():
         CARGO_TERM_COLOR="never",
         CARGO_NET_OFFLINE="true",
     )
+    # UPDATE_EXPECT rewrites a trace where it should fail.
     env.pop("UPDATE_EXPECT", None)
 
     for test in dict.fromkeys(row["test"] for row in applied):
