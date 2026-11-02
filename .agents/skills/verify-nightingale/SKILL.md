@@ -59,7 +59,7 @@ The scope is `docs-only` when every changed path is a regular file under `docs/`
 
 ## Read the proof block
 
-`full_proof: yes` needs `verify_exit: 0`, the final line `verify: OK`, a `gate: mode=merge` plan line, `worktree: clean` and `head_unchanged: yes`. So a block can go in a public PR, it names the log by file name, says only whether a target dir was set, and shows its final line, its reason and the log's last 40 lines with the checkout, the target dir and the home directory, as given and as resolved, written as `.`, `<target>` and `~`; the hash covers the log as written. The `gate_scope` and `gate_base` lines copy the plan line, and `gate_scope: docs-only` marks the docs-only proof that `AGENTS.md` names. Exit 2 means `tools/verify` passed but the run is not proof; the `reason` line says why.
+`full_proof: yes` needs `verify_exit: 0`, the final line `verify: OK`, a `gate: mode=merge` plan line, `worktree: clean` and `head_unchanged: yes`. So a block can go in a public PR, it names the log by file name, says only whether a target dir was set, and shows its final line, its reason and the log's last 40 lines with the checkout written as `.`, and the target dir and the home directory, as given and as resolved, as `<target>` and `~`; the hash covers the log as written. The `gate_scope` and `gate_base` lines copy the plan line, and `gate_scope: docs-only` marks the docs-only proof that `AGENTS.md` names. Exit 2 means `tools/verify` passed but the run is not proof; the `reason` line says why.
 
 ## Fail closed
 

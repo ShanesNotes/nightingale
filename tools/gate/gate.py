@@ -281,7 +281,6 @@ OPERATOR_PAIRS = frozenset(
 
 
 def _joins(text: str, i: int) -> bool:
-    """rustc reads touching punctuation that begins an operator as one token, so `>>=` and `> >=` differ."""
     return text[i : i + 2] in OPERATOR_PAIRS
 
 
