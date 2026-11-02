@@ -3,7 +3,7 @@
 Python 3.11 stdlib only. Run as `python3 -I tools/gate/gate.py <command>`; it finds the repo from its own path.
 
     plan <merge|changed|full> [--base REV]   the run's plan as key=value lines
-    seam                                     the workspace rules, every rule's probe, the plan and scan cases
+    seam                                     the workspace rules, every rule's probe, the plan, scan and comment cases
     bans                                     clippy rejects a probe built from clippy.toml, entry by entry
     f64                                      no bare f64 or f32 in a public API outside its row's allow list
     nightly-record <exit> <log>              record a nightly full run (tools/gate/nightly.sh)
@@ -11,6 +11,9 @@ Python 3.11 stdlib only. Run as `python3 -I tools/gate/gate.py <command>`; it fi
     doctests                                 every doctest rustdoc lists is one the host scan read
     codes [DIR]                              every compile_fail doctest fails with the error code it declares,
                                              in the planned crates or in the standalone crate at DIR
+    comments-only [--base REV]               only comments changed against REV, by default the merge-base with
+                                             origin/main: each changed path is a Rust file whose code tokens,
+                                             doctest tokens and doctest fences are unchanged
 
 Exit codes: 0 pass; 1 violations, one per line as `<code>: <subject>: <what to do>`; 2 an input the gate
 reads is missing or malformed.
@@ -250,6 +253,8 @@ class Token:
     kind: Literal["ident", "punct", "literal", "lifetime"]
     value: str
     line: int
+    written: str = ""
+    joint: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -258,6 +263,7 @@ class Source:
     code: tuple[Token, ...]
     doctests: tuple[Token, ...]
     blocks: tuple[int, ...]
+    docblocks: tuple[tuple[int, int, str, str], ...]
 
 
 class LexError(Exception):
@@ -266,6 +272,49 @@ class LexError(Exception):
 
 RAW_STRING = re.compile(r'[bc]?r(#*)"')
 QUOTED = re.compile(r'[bc]?"')
+
+
+OPERATOR_PAIRS = frozenset(
+    {"::", "->", "=>", "==", "!=", "<=", ">=", "&&", "||", "+=", "-=", "*=", "/=", "%=", "^=", "&=", "|=", "<<", ">>",
+     "..", ".="}
+)
+
+
+def _joins(text: str, i: int) -> bool:
+    return text[i : i + 2] in OPERATOR_PAIRS
+
+
+def _suffixed(text: str, j: int) -> bool:
+    """rustc reads an identifier touching a literal as its suffix, so `"a"tag` and `"a" tag` differ."""
+    return text[j : j + 1].isidentifier()
+
+
+def _float_dot(text: str, i: int, j: int) -> bool:
+    """rustc reads `1.` as one float where `1 .` is two tokens."""
+    after = text[j + 1 : j + 2]
+    decimal = text[i:j].replace("_", "").isdigit()
+    return decimal and text[j : j + 1] == "." and not (after == "." or after.isidentifier())
+
+
+def _block_doc(text: str) -> str:
+    """rustc trims a block doc's `*` margin only when every line has one in the same column, and then drops a `*`
+    that stands alone or comes before a space or another `*`, so a line such as `*b;` stays code."""
+    lines = text.split("\n")
+    k, end = (0 if lines[0].lstrip().startswith("*") else 1), len(lines)
+    while k < end and not lines[k].strip():
+        k += 1
+    while end > k and not lines[end - 1].strip():
+        end -= 1
+    margins = [m.group(1) for ln in lines[k:end] if (m := re.match(r"([ \t]*)\*", ln))]
+    if k == end or len(margins) != end - k or len(set(margins)) != 1:
+        return text
+    prefix, out = margins[0], []
+    for ln in lines:
+        if ln.startswith(prefix):
+            ln = ln[len(prefix) :]
+            ln = ln[1:] if ln == "*" or ln.startswith(("* ", "**")) else ln
+        out.append(ln)
+    return "\n".join(out)
 
 
 def _skip_quoted(text: str, i: int, quote: str) -> int:
@@ -311,7 +360,7 @@ def lex(text: str, first_line: int = 1) -> tuple[list[Token], list[tuple[int, st
                 raise LexError(f"line {line}: unterminated block comment")
             body = text[i + 2 : j - 2]
             if (body.startswith("*") and not body.startswith("**") and body != "*") or body.startswith("!"):
-                docs.append((line, "\n".join(re.sub(r"^\s*\*? ?", "", ln) for ln in body[1:].split("\n"))))
+                docs.append((line, _block_doc(body[1:])))
             line += text.count("\n", i, j)
             i = j
         elif m := RAW_STRING.match(text, i):
@@ -319,21 +368,22 @@ def lex(text: str, first_line: int = 1) -> tuple[list[Token], list[tuple[int, st
             j = text.find(close, m.end())
             if j < 0:
                 raise LexError(f"line {line}: unterminated raw string")
-            tokens.append(Token("literal", text[m.end() : j], start_line))
+            end = j + len(close)
+            tokens.append(Token("literal", text[m.end() : j], start_line, text[i:end], _suffixed(text, end)))
             line += text.count("\n", i, j)
-            i = j + len(close)
+            i = end
         elif m := QUOTED.match(text, i):
             j = _skip_quoted(text, m.end(), '"')
-            tokens.append(Token("literal", text[m.end() : j - 1], start_line))
+            tokens.append(Token("literal", text[m.end() : j - 1], start_line, text[i:j], _suffixed(text, j)))
             line += text.count("\n", i, j)
             i = j
         elif text.startswith("b'", i) or (c == "'" and (text.startswith("\\", i + 1) or text.startswith("'", i + 2))):
             q = i + 1 if c == "b" else i
             j = _skip_quoted(text, q + 1, "'")
-            tokens.append(Token("literal", text[q + 1 : j - 1], start_line))
+            tokens.append(Token("literal", text[q + 1 : j - 1], start_line, text[i:j], _suffixed(text, j)))
             i = j
         elif c == "'":
-            j = i + 1
+            j = i + 3 if text.startswith("r#", i + 1) and text[i + 3 : i + 4].isidentifier() else i + 1
             while j < n and (text[j] == "_" or text[j].isalnum()):
                 j += 1
             tokens.append(Token("lifetime", text[i:j], start_line))
@@ -342,7 +392,7 @@ def lex(text: str, first_line: int = 1) -> tuple[list[Token], list[tuple[int, st
             j = i + 2
             while j < n and (text[j] == "_" or text[j].isalnum()):
                 j += 1
-            tokens.append(Token("ident", text[i + 2 : j], start_line))
+            tokens.append(Token("ident", text[i + 2 : j], start_line, text[i:j]))
             i = j
         elif c == "_" or c.isalpha():
             j = i + 1
@@ -354,13 +404,13 @@ def lex(text: str, first_line: int = 1) -> tuple[list[Token], list[tuple[int, st
             j = i + 1
             while j < n and (text[j] == "_" or text[j].isalnum() or (text[j] == "." and text[j + 1 : j + 2].isdigit())):
                 j += 1
-            tokens.append(Token("literal", text[i:j], start_line))
+            tokens.append(Token("literal", text[i:j], start_line, joint=_float_dot(text, i, j)))
             i = j
         elif text.startswith("::", i):
-            tokens.append(Token("punct", "::", start_line))
+            tokens.append(Token("punct", "::", start_line, joint=_joins(text, i + 1)))
             i += 2
         else:
-            tokens.append(Token("punct", c, start_line))
+            tokens.append(Token("punct", c, start_line, joint=_joins(text, i)))
             i += 1
     return tokens, docs
 
@@ -419,20 +469,20 @@ def _doc_groups(docs: list[tuple[int, str]]) -> list[list[tuple[int, str]]]:
     return groups
 
 
-def rust_blocks(docs: list[tuple[int, str]]) -> list[tuple[int, int, str]]:
+def rust_blocks(docs: list[tuple[int, str]]) -> list[tuple[int, int, str, str]]:
     """The code blocks rustdoc runs: fenced blocks it reads as Rust, and lines indented four past the docs'
     own indent after a blank line. That second rule also takes a list item's indented paragraph, which
     rustdoc does not run: an over-reach, never a miss."""
     blocks = []
     for group in _doc_groups(docs):
         base = min((len(t) - len(t.lstrip()) for _, t in group if t.strip()), default=0)
-        fence, rust, start, body, blank = None, False, 0, [], True
+        fence, rust, start, body, blank, opening = None, False, 0, [], True, ""
         for n, ln in group:
             indented = bool(ln.strip()) and len(ln) - len(ln.lstrip()) >= base + 4
             if fence is not None:
                 if ln.strip().startswith(fence) and not ln.strip().strip(fence[0]):
                     if rust:
-                        blocks.append((start - 1, start, "\n".join(body)))
+                        blocks.append((start - 1, start, "\n".join(body), f"{opening}\n{ln.strip()}"))
                     fence, body = None, []
                 else:
                     body.append(ln)
@@ -440,15 +490,15 @@ def rust_blocks(docs: list[tuple[int, str]]) -> list[tuple[int, int, str]]:
                 body.append(ln)
             else:
                 if body:
-                    blocks.append((start, start, "\n".join(body)))
+                    blocks.append((start, start, "\n".join(body), ""))
                     body = []
                 if indented and blank:
                     start, body = n, [ln]
                 elif m := FENCE.match(ln):
-                    fence, start, rust = m.group(1), n + 1, _is_rust_fence(m.group(2))
+                    fence, start, rust, opening = m.group(1), n + 1, _is_rust_fence(m.group(2)), ln.strip()
             blank = not ln.strip()
         if body and (fence is None or rust):
-            blocks.append((start - 1 if fence else start, start, "\n".join(body)))
+            blocks.append((start - 1 if fence else start, start, "\n".join(body), opening if fence else ""))
     return blocks
 
 
@@ -468,12 +518,12 @@ def parse_source(path: str, text: str) -> Source:
                 docs.append((attr[k].line, attr[k + 2].value.replace("\\n", "\n").replace('\\"', '"')))
     doctests: list[Token] = []
     blocks = rust_blocks(docs)
-    for _, start, block in blocks:
+    for _, start, block, _ in blocks:
         try:
             doctests += lex(block, start)[0]
         except LexError:
             doctests += [Token("ident", w, start) for w in re.findall(r"[A-Za-z_]\w*", block)]
-    return Source(path, tuple(code), tuple(doctests), tuple(b[0] for b in blocks))
+    return Source(path, tuple(code), tuple(doctests), tuple(b[0] for b in blocks), tuple(blocks))
 
 
 HOST_NAMES = frozenset({"std", "atomic", "env", "option_env", "thread_local"})
@@ -1396,6 +1446,191 @@ def scan_cases() -> list[Violation]:
     return out
 
 
+def _key(t: Token) -> tuple[str, str, bool]:
+    return t.kind, t.written or t.value, t.joint
+
+
+def _first_moved(was: list[Token] | tuple[Token, ...], now: list[Token] | tuple[Token, ...]) -> tuple[int, str] | None:
+    for a, b in zip(was, now):
+        if _key(a)[:2] != _key(b)[:2]:
+            return b.line, f"`{_key(a)[1][:40]}` became `{_key(b)[1][:40]}`"
+        if a.joint != b.joint:
+            return b.line, f"the spacing after `{_key(b)[1][:40]}` changed"
+    if len(now) > len(was):
+        return now[len(was)].line, f"`{_key(now[len(was)])[1][:40]}` added"
+    if len(was) > len(now):
+        return (now[-1].line if now else 1), f"`{_key(was[len(now)])[1][:40]}` removed"
+    return None
+
+
+def _compiled(line: str) -> str:
+    """rustdoc compiles a hidden `# ` line without its mark, a lone `#` as nothing, and `##` as `#`."""
+    trimmed = line.strip()
+    if trimmed.startswith("##"):
+        return trimmed[1:]
+    return trimmed[2:] if trimmed.startswith("# ") or trimmed == "#" else line
+
+
+def _doctest_code(block: tuple[int, int, str, str]) -> list[Token] | str:
+    code = "\n".join(_compiled(line) for line in block[2].split("\n"))
+    try:
+        return lex(code, block[1])[0]
+    except LexError:
+        return code
+
+
+def comment_changes(was: Source, now: Source) -> list[tuple[str, int, str]]:
+    out = []
+    if moved := _first_moved(was.code, now.code):
+        out.append(("code token", *moved))
+    pairs = list(zip(was.docblocks, now.docblocks))
+    if len(was.docblocks) != len(now.docblocks):
+        line = next((b[0] for a, b in pairs if a[2:] != b[2:]), now.docblocks[-1][0] if now.docblocks else 1)
+        return out + [("doctests", line, f"{len(was.docblocks)} doctests became {len(now.docblocks)}")]
+    if fence := next(((b[0], f"{a[3]!r} became {b[3]!r}") for a, b in pairs if a[3] != b[3]), None):
+        out.append(("doctest fence", *fence))
+    for a, b in pairs:
+        x, y = _doctest_code(a), _doctest_code(b)
+        if isinstance(x, list) and isinstance(y, list):
+            moved = _first_moved(x, y)
+        else:
+            moved = None if x == y else (b[0], "changed, and it does not lex, so its text was compared")
+        if moved:
+            out.append(("doctest code", *moved))
+            break
+    return out
+
+
+MOVED_CODE, MOVED_DOCTEST, MOVED_FENCE, MOVED_COUNT = (
+    frozenset({"code token"}),
+    frozenset({"doctest code"}),
+    frozenset({"doctest fence"}),
+    frozenset({"doctests"}),
+)
+COMMENT_CASES: tuple[tuple[str, str, frozenset[str]], ...] = (
+    ("// why\nfn f() {}", "// another why\nfn f() {}", frozenset()),
+    ("/* a /* nested */ */ fn f() {}", "fn f() {}", frozenset()),
+    ("/// Doc.\npub fn f() {}", "pub fn f() {}", frozenset()),
+    ("fn f() { let x = 1; }", "fn f() {\n    let x = 1;\n}", frozenset()),
+    (
+        "/// ```\n/// // a\n/// let x = 1;\n/// ```\npub fn f() {}",
+        "/// ```\n/// let x = 1;\n/// ```\npub fn f() {}",
+        frozenset(),
+    ),
+    ("fn f() -> u8 { 1 }", "fn f() -> u8 { 2 }", MOVED_CODE),
+    ('const S: &str = "// a";', 'const S: &str = "// b";', MOVED_CODE),
+    ('fn f() -> usize { "a".len() }', 'fn f() -> usize { b"a".len() }', MOVED_CODE),
+    ('fn f() -> usize { "\\n".len() }', 'fn f() -> usize { r"\\n".len() }', MOVED_CODE),
+    ('#[doc = "a"]\npub fn f() {}', '#[doc = "b"]\npub fn f() {}', MOVED_CODE),
+    (
+        '/// ```compile_fail,E0308\n/// let _: u8 = "x";\n/// ```\npub fn f() {}',
+        '/// ```compile_fail,E0277\n/// let _: u8 = "x";\n/// ```\npub fn f() {}',
+        MOVED_FENCE,
+    ),
+    (
+        "/// ```\n/// let x = 1;\n/// ```\npub fn f() {}",
+        "/// ```\n/// let x = 2;\n/// ```\npub fn f() {}",
+        MOVED_DOCTEST,
+    ),
+    (
+        "/// Doc.\n///\n/// ```\n/// let x = 1;\n/// ```\npub fn f() {}",
+        "/// Doc.\npub fn f() {}",
+        MOVED_COUNT,
+    ),
+    (
+        "/// ```\n/// let x = 1;\n/// ```\npub fn f() {}",
+        "/// ```text\n/// let x = 1;\n/// ```\npub fn f() {}",
+        MOVED_COUNT,
+    ),
+    ("fn f(a: bool, b: bool) -> bool { a && b }", "fn f(a: bool, b: bool) -> bool { a & &b }", MOVED_CODE),
+    ("fn f() { x.iter().map(g); }", "fn f() {\n    x.iter()\n        .map(g);\n}", frozenset()),
+    ('fn f() { m!("a"tag); }', 'fn f() { m!("a" tag); }', MOVED_CODE),
+    ('fn f() { m!("a"℘); }', 'fn f() { m!("a" ℘); }', MOVED_CODE),
+    ("fn f() { m!('r#foo); }", "fn f() { m!('r #foo); }", MOVED_CODE),
+    ("/// ```\n/// #x\n/// ```\npub fn f() {}", "/// ```\n/// # x\n/// ```\npub fn f() {}", MOVED_DOCTEST),
+    (
+        "/// ```\n/// # // why\n/// let x = 1;\n/// ```\npub fn f() {}",
+        "/// ```\n/// let x = 1;\n/// ```\npub fn f() {}",
+        frozenset(),
+    ),
+    (
+        "/**\n```\nlet b = &1;\nlet r =\n*b;\n```\n*/\npub fn f() {}",
+        "/**\n```\nlet b = &1;\nlet r =\nb;\n```\n*/\npub fn f() {}",
+        MOVED_DOCTEST,
+    ),
+    ("fn f() { m!(1.); }", "fn f() { m!(1 .); }", MOVED_CODE),
+    ("fn f() -> u32 { 1.max(2) }", "fn f() -> u32 {\n    1\n        .max(2)\n}", frozenset()),
+    (
+        "/// ```\n/// let x = 1;\n/// ```\npub fn f() {}",
+        "/// ```\n/// let x = 1;\n/// ````\npub fn f() {}",
+        MOVED_FENCE,
+    ),
+    ("fn f(a: u8) -> u8 { a >/* c */>= 1 }", "fn f(a: u8) -> u8 { a >>= 1 }", MOVED_CODE),
+    (
+        "/// ```\n/// let x = 1;\n/// assert_eq!(x, 1);\n/// ```\n///\n/// ```\n/// let y = 2;\n/// ```\npub fn f() {}",
+        "/// ```\n/// let x = 1;\n/// ```\n///\n/// ```\n/// assert_eq!(x, 1);\n/// let y = 2;\n/// ```\npub fn f() {}",
+        MOVED_DOCTEST,
+    ),
+    (
+        '/// ```compile_fail\n/// let x = 1; let s = "\n/// ```\npub fn f() {}',
+        '/// ```compile_fail\n/// let x = 2; let s = "\n/// ```\npub fn f() {}',
+        MOVED_DOCTEST,
+    ),
+)
+
+
+def comment_cases() -> list[Violation]:
+    out = []
+    for old, new, want in COMMENT_CASES:
+        path = "crates/ng-case/src/case.rs"
+        got = {kind for kind, _, _ in comment_changes(parse_source(path, old), parse_source(path, new))}
+        if got != want:
+            out.append(
+                Violation(
+                    "comments",
+                    f"{old[:30]!r} to {new[:30]!r}",
+                    f"found {sorted(got) or 'nothing'}, the rules say {sorted(want) or 'nothing'}",
+                )
+            )
+    return out
+
+
+def _blob(rev: str, path: str) -> str:
+    r = subprocess.run(["git", "-C", str(ROOT), "cat-file", "blob", f"{rev}:{path}"], capture_output=True)
+    if r.returncode != 0:
+        raise GateError(f"{rev}:{path}: {r.stderr.decode(errors='replace').strip()}")
+    return r.stdout.decode("utf-8")
+
+
+def comments_only(base_arg: str | None) -> int:
+    base = resolve_base(ROOT, base_arg)[0] if base_arg else git(ROOT, "merge-base", "HEAD", "refs/remotes/origin/main")
+    if base is None:
+        raise GateError("no base: HEAD shares no history with origin/main; name one with --base")
+    changes = changed_paths(ROOT, base)
+    found = []
+    if not changes:
+        found.append(Violation("comments-only", base, "nothing changed; name the commit the change starts from"))
+    rust = doctests = 0
+    for path, (was, now) in sorted(changes.items()):
+        if not path.endswith(".rs"):
+            found.append(Violation("comments-only", path, "not a Rust file; the token proof covers .rs files only"))
+        elif (was, now) != (REGULAR, REGULAR):
+            found.append(
+                Violation("comments-only", path, f"mode {was or 'absent'} became {now or 'absent'}; a comment edit "
+                          "changes a file in place")
+            )
+        else:
+            old, new = parse_source(path, _blob(base, path)), parse_source(path, _read(ROOT / path))
+            found += [Violation("comments-only", f"{path}:{line}", f"{kind} {what}") for kind, line, what in
+                      comment_changes(old, new)]
+            rust, doctests = rust + 1, doctests + len(new.docblocks)
+    for v in found:
+        print(v)
+    print(f"comments-only: {len(changes)} changed paths against {base}; {rust} Rust files compared, {doctests} "
+          "doctests in them")
+    return 1 if found else 0
+
+
 PROBE_LOCK = (
     "# This file is automatically @generated by Cargo.\n# It is not intended for manual editing.\nversion = 4\n"
 )
@@ -2158,12 +2393,12 @@ def seam() -> int:
     for v in found:
         print(v)
     probes, bites = run_probes(ws, tree_passes=not found)
-    cases = plan_cases(ws) + scan_cases()
+    cases = plan_cases(ws) + scan_cases() + comment_cases()
     for v in probes + cases:
         print(v)
     print(
         f"05-seam: {len(ws.members)} members against the crate table; {len(RULES)} rules, {bites} probes bite; "
-        f"{len(PLAN_CASES)} plan cases; {len(SCAN_CASES)} scan cases"
+        f"{len(PLAN_CASES)} plan cases; {len(SCAN_CASES)} scan cases; {len(COMMENT_CASES)} comment cases"
     )
     return 1 if found or probes or cases else 0
 
@@ -2194,6 +2429,10 @@ def main(argv: list[str]) -> int:
                 return codes(None)
             case ["codes", sketch]:
                 return codes(sketch)
+            case ["comments-only"]:
+                return comments_only(None)
+            case ["comments-only", "--base", base]:
+                return comments_only(base)
             case ["nightly-record", status, log] if status.isdigit():
                 return nightly_record(int(status), pathlib.Path(log))
             case ["nightly-passed", sha]:

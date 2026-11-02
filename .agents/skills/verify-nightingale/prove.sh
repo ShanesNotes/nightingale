@@ -50,7 +50,7 @@ else
   head_unchanged=no
 fi
 if [ -n "${CARGO_TARGET_DIR:-}" ]; then
-  cargo_target="$CARGO_TARGET_DIR"
+  cargo_target=set
 else
   cargo_target=default
 fi
@@ -76,6 +76,25 @@ else
   reason="exit 0 and final line verify: OK"
 fi
 
+spellings() {
+  [ -n "$1" ] || return 0
+  printf '%s\n' "$1"
+  realpath -m -- "$1" 2>/dev/null || true
+}
+targets=$(spellings "${CARGO_TARGET_DIR:-}")
+homes=$(spellings "${HOME:-}")
+public() {
+  local text=$1 dir
+  while IFS= read -r dir; do
+    case "$dir" in /?*) text=${text//"$dir"/<target>} ;; esac
+  done <<<"$targets"
+  text=${text//"$ROOT"/.}
+  while IFS= read -r dir; do
+    case "$dir" in /?*) text=${text//"$dir"/"~"} ;; esac
+  done <<<"$homes"
+  printf '%s\n' "$text"
+}
+
 proof="${log}.proof"
 {
   echo "### Verify proof"
@@ -85,20 +104,20 @@ proof="${log}.proof"
   echo "- gate_scope: ${gate_scope:-none}"
   echo "- gate_base: ${gate_base:-none}"
   echo "- verify_exit: ${verify_exit}"
-  echo "- final_line: ${final}"
+  echo "- final_line: $(public "$final")"
   echo "- wall_time_s: ${wall}"
   echo "- started_utc: ${start_utc}"
   echo "- finished_utc: ${end_utc}"
-  echo "- log: ${log}"
+  echo "- log: $(basename "$log")"
   echo "- log_sha256: ${log_sha}"
   echo "- worktree: ${worktree}"
   echo "- head_unchanged: ${head_unchanged}"
   echo "- cargo_target_dir: ${cargo_target}"
   echo "- full_proof: ${full}"
-  echo "- reason: ${reason}"
+  echo "- reason: $(public "$reason")"
   echo
   echo '```'
-  tail -n 40 "$log"
+  tail -n 40 "$log" | while IFS= read -r line || [ -n "$line" ]; do public "$line"; done
   echo '```'
 } | tee "$proof"
 

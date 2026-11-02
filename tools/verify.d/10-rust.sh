@@ -33,3 +33,4 @@ done
 python3 -I tools/gate/gate.py doctests
 python3 -I tools/gate/gate.py codes
 [ "${NG_GATE_MODE:-}" = changed ] || python3 -I tools/gate/gate.py bans
+[ "${NG_GATE_MODE:-}" = changed ] || cargo check --locked --manifest-path tools/bench/Cargo.toml
