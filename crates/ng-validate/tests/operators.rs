@@ -1,4 +1,5 @@
 use core::fmt::Write;
+use core::num::{NonZeroU32, NonZeroU64};
 use expect_test::expect;
 use ng_contract::*;
 use ng_validate::*;
@@ -118,7 +119,7 @@ fn every_operator() -> Result<(CompiledBody, SiteId), AdmissionError> {
             ParameterKey::new("ns.deviation-width"),
             Admissible::positive(),
         );
-        let divisor = ns.parameter::<Pressure>(ParameterKey::new("ns.divisor"), Admissible::positive());
+        let numerator = ns.parameter::<Pressure>(ParameterKey::new("ns.numerator"), Admissible::positive());
         let width = ns.parameter::<Dimensionless>(ParameterKey::new("ns.width"), Admissible::positive());
         let first_rate = ns.kernel(|mut k| {
             let (x, y, w) = (k.state(&first), k.state(&second), k.parameter(&width));
@@ -137,8 +138,8 @@ fn every_operator() -> Result<(CompiledBody, SiteId), AdmissionError> {
         });
         ns.memory_rate(&first, first_rate);
         let second_rate = ns.kernel(|mut k| {
-            let (p, r) = (k.algebraic(&third), k.parameter(&divisor));
-            let ratio = k.divide(p, r);
+            let (p, r) = (k.algebraic(&third), k.parameter(&numerator));
+            let ratio = k.divide(r, p);
             let ratio = k.as_dimension::<_, Dimensionless>(ratio);
             let log = k.ln(ratio);
             let (measured, reference) = (k.state(&first), k.state(&set_point));
@@ -175,8 +176,12 @@ fn every_operator() -> Result<(CompiledBody, SiteId), AdmissionError> {
     Ok((body, a.id()))
 }
 
-fn packet(body: &CompiledBody, a: SiteId) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
-    let mut packet = ParameterPacket::new();
+fn packet(
+    body: &CompiledBody,
+    a: SiteId,
+    cycle: Option<Cycle>,
+) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+    let mut packet = cycle.map_or_else(ParameterPacket::new, ParameterPacket::periodic);
     let vascular = Binding::Network(Network::Vascular);
     packet.synthetic(
         ParameterKey::new("cv.e"),
@@ -186,7 +191,7 @@ fn packet(body: &CompiledBody, a: SiteId) -> Result<ParameterPacket<SyntheticFix
     )?;
     let g = measure::<Conductance<Water>>(0.25);
     packet.synthetic(ParameterKey::new("cv.g"), vascular, g, "synthetic")?;
-    for (key, value) in [("ns.reach", 1.5), ("ns.divisor", 2.0)] {
+    for (key, value) in [("ns.reach", 1.5), ("ns.numerator", 2.0)] {
         packet.synthetic(
             ParameterKey::new(key),
             Binding::Body,
@@ -243,9 +248,9 @@ fn hex(digest: Digest) -> String {
         .collect()
 }
 
-/// Every operator's value and slope reaches these bits, to show a change and never to judge it: a change to how one
-/// evaluates or differentiates moves them under the same run identity, and the PR that moves them updates this file
-/// and says why.
+/// Every operator's value reaches the accepted bits and every operator's slope the bits of a two-point ring's matrix,
+/// to show a change and never to judge it: a change to how one evaluates or differentiates moves them under the same
+/// run identity, and the PR that moves them updates this file and says why.
 #[test]
 fn a_body_that_runs_every_operator_stays_on_its_bits() {
     let (body, a) = every_operator().expect("compiled");
@@ -262,7 +267,8 @@ fn a_body_that_runs_every_operator_stays_on_its_bits() {
     );
     let core = ReferenceIntegrator::new(SECOND / 2);
     let port = BoundaryPort::new(Vec::new()).expect("no event");
-    let session = admit_fixture(&body, packet(&body, a).expect("a packet"), port, &core).expect("admitted");
+    let session =
+        admit_fixture(&body, packet(&body, a, None).expect("a packet"), port, &core).expect("admitted");
     let Ok(session) = run_until(session, SimTime::from_ns(4 * SECOND)) else {
         panic!("the bench faulted");
     };
@@ -270,6 +276,24 @@ fn a_body_that_runs_every_operator_stays_on_its_bits() {
     let view = record.accepted();
     let mut trace = String::new();
     writeln!(trace, "identity {}", hex(record.identity().digest())).expect("a string takes it");
+    let two = Cycle::new(
+        NonZeroU64::new(SECOND).expect("not zero"),
+        NonZeroU32::new(2).expect("not zero"),
+    );
+    let parameters = body.bind(packet(&body, a, Some(two.expect("a cycle"))).expect("a packet"));
+    let port = BoundaryPort::new(Vec::new()).expect("no event");
+    let request = InitializationRequest::at(SimTime::from_ns(0));
+    let ring = body
+        .initialization(parameters.expect("bound"), port, request)
+        .expect("a ring");
+    let matrix = ring.linearize(&ring.workspace()).expect("a matrix");
+    let slopes = matrix.view().values();
+    let bits: Vec<u8> = slopes
+        .iter()
+        .flat_map(|slope| slope.to_bits().to_be_bytes())
+        .collect();
+    let digest = hex(Digest::of_canonical(&bits));
+    writeln!(trace, "ring slopes {digest} over {} entries", slopes.len()).expect("a string takes it");
     let (revision, time) = (record.revision(), view.time().nanoseconds());
     writeln!(
         trace,
@@ -282,14 +306,15 @@ fn a_body_that_runs_every_operator_stays_on_its_bits() {
         writeln!(trace, "{high:016x} {low:016x}  {:?}", row.kind()).expect("a string takes it");
     }
     expect![[r#"
-        identity a15f8c0277ead37033f4bd258631ce1824a9fb5f9ee06767970e89472a4c509d
-        revision 8 at 4000000000 ns, seal 1fa7603d23c5720202021dc1d0175f954c2270b5b7f7ca1b70d994f927206e86
+        identity 40b89c6884545cb88681063ecd4bee5d1ed616756db79dca9b67e9adcb90272e
+        ring slopes cf796856f085ec25c776dae6e90129f6b5c8d98b6633b75eb0dc373186a176c9 over 63 entries
+        revision 8 at 4000000000 ns, seal f41fa84a448eaeea6566c67ce05a00ed8b08bd920fd76584ee92332ca0fb8535
         4005d2a388ca9094 3ca9800000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Water }
         3ff5d2a388ca9094 3c99800000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Albumin }
         40022d5c77356f6c bca9800000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Water }
         3ff22d5c77356f6c bc99800000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Albumin }
-        3fcacc969b64c378 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "first" }, at: Body })
-        bfe77a5e5c94b48a 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "second" }, at: Body })
+        3fd4af13c21a63bd 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "first" }, at: Body })
+        bfe00db112d88532 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "second" }, at: Body })
         3fb999999999999a 0000000000000000  Memory(Slot { law: LawName { owner: "NS", local: "set point" }, at: Body })
         3fe6666666666666 0000000000000000  Algebraic(Slot { law: LawName { owner: "NS", local: "pace" }, at: Body })
         3ff8000000000000 0000000000000000  Algebraic(Slot { law: LawName { owner: "NS", local: "third" }, at: Body })
