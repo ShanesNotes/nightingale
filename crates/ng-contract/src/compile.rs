@@ -68,7 +68,13 @@ pub(crate) fn compile(
     let instances = marked(instances, &placement.programs, &modes, &hazards)?;
     let (streams, forcings) = chance.laid_out(&fragments, &parameters);
     match_each_mode(&rows.rows, &placement.programs, &instances, &modes, &closed)?;
-    let solved_by = solved_by(&rows.rows, &reads)?;
+    let stores = closing_stores(&rows.rows, &reads, &closed).map_err(|row| {
+        let RowKind::Algebraic(slot) = rows.rows[row].kind else {
+            unreachable!("a closed row is algebraic")
+        };
+        CompileDefect::StructuralSingularity { law: slot.law }
+    })?;
+    let solved_by = solved_by(&rows.rows, &reads, &closed)?;
     let blocks = blocks(&solved_by, &reads, &rates);
     let species: Vec<Species> = rows.amounts.iter().map(|pool| pool.species).collect();
     let read_by = |column: usize| {
@@ -79,12 +85,6 @@ pub(crate) fn compile(
     };
     let column_reads: Vec<bool> = (0..placement.columns.len()).map(read_by).collect();
     let basis = conserved_basis(&species, &placement.columns, &column_reads);
-    let stores = closing_stores(&rows.rows, &solved_by, &reads, &closed).map_err(|row| {
-        let RowKind::Algebraic(slot) = rows.rows[row].kind else {
-            unreachable!("a closed row is algebraic")
-        };
-        CompileDefect::StructuralSingularity { law: slot.law }
-    })?;
     let judged = judged_rows(reads.len(), &stores);
     let pivots = pivots(solved_by.clone(), &stores);
     let sparsity = sparsity(reads);
@@ -1929,11 +1929,14 @@ fn matching(adjacency: &[Vec<usize>], rows: &[usize]) -> Result<Vec<Option<usize
     Ok(matched)
 }
 
-fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, CompileDefect> {
+fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>], closed: &[usize]) -> Result<Vec<RowId>, CompileDefect> {
     let algebraic = algebraic_laws(rows);
     let first = rows.len() - algebraic.len();
     let adjacency: Vec<Vec<usize>> = (first..rows.len())
         .map(|row| {
+            if closed.contains(&row) {
+                return vec![row - first];
+            }
             (reads[row].iter())
                 .filter_map(|unknown| unknown.index().checked_sub(first))
                 .collect()
@@ -1953,7 +1956,6 @@ fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, Compi
 
 fn closing_stores(
     rows: &[Row],
-    solved_by: &[RowId],
     reads: &[Vec<UnknownId>],
     closed: &[usize],
 ) -> Result<Vec<(usize, usize)>, usize> {
@@ -1962,8 +1964,7 @@ fn closing_stores(
     closed.dedup();
     let carriers: Vec<Vec<usize>> = (closed.iter())
         .map(|&row| {
-            let unknown = (solved_by.iter()).position(|pivot| pivot.index() == row);
-            let unknown = UnknownId::at(unknown.expect("a closed row is matched to its unknown"));
+            let unknown = UnknownId::at(row);
             (reads[row].iter())
                 .filter(|amount| {
                     let store = &rows[amount.index()];
