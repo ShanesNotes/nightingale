@@ -98,7 +98,12 @@ proof="${log}.proof"
   echo "- reason: ${reason}"
   echo
   echo '```'
-  tail -n 40 "$log"
+  tail -n 40 "$log" | while IFS= read -r line || [ -n "$line" ]; do
+    case "${CARGO_TARGET_DIR:-}" in /?*) line=${line//"$CARGO_TARGET_DIR"/<target>} ;; esac
+    line=${line//"$ROOT"/.}
+    case "${HOME:-}" in /?*) line=${line//"$HOME"/"~"} ;; esac
+    printf '%s\n' "$line"
+  done
   echo '```'
 } | tee "$proof"
 

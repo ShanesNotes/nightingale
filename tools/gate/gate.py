@@ -254,6 +254,7 @@ class Token:
     value: str
     line: int
     written: str = ""
+    joint: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -262,7 +263,7 @@ class Source:
     code: tuple[Token, ...]
     doctests: tuple[Token, ...]
     blocks: tuple[int, ...]
-    fences: tuple[str, ...]
+    docblocks: tuple[tuple[int, int, str, str], ...]
 
 
 class LexError(Exception):
@@ -271,6 +272,13 @@ class LexError(Exception):
 
 RAW_STRING = re.compile(r'[bc]?r(#*)"')
 QUOTED = re.compile(r'[bc]?"')
+
+
+def _joins(text: str, j: int) -> bool:
+    """Punctuation that touches more punctuation may be one operator to rustc, as in `>>=` against `> >=`."""
+    return j < len(text) and not (
+        text[j].isspace() or text[j].isalnum() or text[j] in "_\"'" or text.startswith(("//", "/*"), j)
+    )
 
 
 def _skip_quoted(text: str, i: int, quote: str) -> int:
@@ -362,10 +370,10 @@ def lex(text: str, first_line: int = 1) -> tuple[list[Token], list[tuple[int, st
             tokens.append(Token("literal", text[i:j], start_line))
             i = j
         elif text.startswith("::", i):
-            tokens.append(Token("punct", "::", start_line))
+            tokens.append(Token("punct", "::", start_line, joint=_joins(text, i + 2)))
             i += 2
         else:
-            tokens.append(Token("punct", c, start_line))
+            tokens.append(Token("punct", c, start_line, joint=_joins(text, i + 1)))
             i += 1
     return tokens, docs
 
@@ -478,7 +486,7 @@ def parse_source(path: str, text: str) -> Source:
             doctests += lex(block, start)[0]
         except LexError:
             doctests += [Token("ident", w, start) for w in re.findall(r"[A-Za-z_]\w*", block)]
-    return Source(path, tuple(code), tuple(doctests), tuple(b[0] for b in blocks), tuple(b[3] for b in blocks))
+    return Source(path, tuple(code), tuple(doctests), tuple(b[0] for b in blocks), tuple(blocks))
 
 
 HOST_NAMES = frozenset({"std", "atomic", "env", "option_env", "thread_local"})
@@ -1401,42 +1409,57 @@ def scan_cases() -> list[Violation]:
     return out
 
 
-def _as_written(t: Token) -> str:
-    return t.written or t.value
+def _key(t: Token) -> tuple[str, str, bool]:
+    return t.kind, t.written or t.value, t.joint
 
 
-def _first_moved(was: tuple[Token, ...], now: tuple[Token, ...]) -> tuple[int, str] | None:
+def _first_moved(was: list[Token] | tuple[Token, ...], now: list[Token] | tuple[Token, ...]) -> tuple[int, str] | None:
     for a, b in zip(was, now):
-        if (a.kind, _as_written(a)) != (b.kind, _as_written(b)):
-            return b.line, f"`{_as_written(a)[:40]}` became `{_as_written(b)[:40]}`"
+        if _key(a)[:2] != _key(b)[:2]:
+            return b.line, f"`{_key(a)[1][:40]}` became `{_key(b)[1][:40]}`"
+        if a.joint != b.joint:
+            return b.line, f"the spacing after `{b.value}` changed"
     if len(now) > len(was):
-        return now[len(was)].line, f"`{_as_written(now[len(was)])[:40]}` added"
+        return now[len(was)].line, f"`{_key(now[len(was)])[1][:40]}` added"
     if len(was) > len(now):
-        return (now[-1].line if now else 1), f"`{_as_written(was[len(now)])[:40]}` removed"
+        return (now[-1].line if now else 1), f"`{_key(was[len(now)])[1][:40]}` removed"
     return None
 
 
+def _doctest_code(block: tuple[int, int, str, str]) -> list[Token] | str:
+    try:
+        return lex(block[2], block[1])[0]
+    except LexError:
+        return block[2]
+
+
 def comment_changes(was: Source, now: Source) -> list[tuple[str, int, str]]:
-    out = [
-        (kind, *moved)
-        for kind, a, b in (("code token", was.code, now.code), ("doctest token", was.doctests, now.doctests))
-        if (moved := _first_moved(a, b))
-    ]
-    if was.fences != now.fences:
-        pairs = zip(was.fences, now.fences)
-        k = next((k for k, (a, b) in enumerate(pairs) if a != b), min(len(was.fences), len(now.fences)))
-        line = now.blocks[min(k, len(now.blocks) - 1)] if now.blocks else 1
-        if len(was.fences) != len(now.fences):
-            out.append(("doctest fence", line, f"{len(was.fences)} doctests became {len(now.fences)}"))
+    out = []
+    if moved := _first_moved(was.code, now.code):
+        out.append(("code token", *moved))
+    pairs = list(zip(was.docblocks, now.docblocks))
+    if len(was.docblocks) != len(now.docblocks):
+        line = next((b[0] for a, b in pairs if a[2:] != b[2:]), now.docblocks[-1][0] if now.docblocks else 1)
+        return out + [("doctests", line, f"{len(was.docblocks)} doctests became {len(now.docblocks)}")]
+    if fence := next(((b[0], f"{a[3]!r} became {b[3]!r}") for a, b in pairs if a[3] != b[3]), None):
+        out.append(("doctest fence", *fence))
+    for a, b in pairs:
+        x, y = _doctest_code(a), _doctest_code(b)
+        if isinstance(x, list) and isinstance(y, list):
+            moved = _first_moved(x, y)
         else:
-            out.append(("doctest fence", line, f"{was.fences[k]!r} became {now.fences[k]!r}"))
+            moved = None if x == y else (b[0], "changed, and it does not lex, so its text was compared")
+        if moved:
+            out.append(("doctest code", *moved))
+            break
     return out
 
 
-MOVED_CODE, MOVED_DOCTEST, MOVED_FENCE = (
+MOVED_CODE, MOVED_DOCTEST, MOVED_FENCE, MOVED_COUNT = (
     frozenset({"code token"}),
-    frozenset({"doctest token"}),
+    frozenset({"doctest code"}),
     frozenset({"doctest fence"}),
+    frozenset({"doctests"}),
 )
 COMMENT_CASES: tuple[tuple[str, str, frozenset[str]], ...] = (
     ("// why\nfn f() {}", "// another why\nfn f() {}", frozenset()),
@@ -1466,12 +1489,24 @@ COMMENT_CASES: tuple[tuple[str, str, frozenset[str]], ...] = (
     (
         "/// Doc.\n///\n/// ```\n/// let x = 1;\n/// ```\npub fn f() {}",
         "/// Doc.\npub fn f() {}",
-        MOVED_DOCTEST | MOVED_FENCE,
+        MOVED_COUNT,
     ),
     (
         "/// ```\n/// let x = 1;\n/// ```\npub fn f() {}",
         "/// ```text\n/// let x = 1;\n/// ```\npub fn f() {}",
-        MOVED_DOCTEST | MOVED_FENCE,
+        MOVED_COUNT,
+    ),
+    ("fn f(a: bool, b: bool) -> bool { a && b }", "fn f(a: bool, b: bool) -> bool { a & &b }", MOVED_CODE),
+    ("fn f(a: u8) -> u8 { a >/* c */>= 1 }", "fn f(a: u8) -> u8 { a >>= 1 }", MOVED_CODE),
+    (
+        "/// ```\n/// let x = 1;\n/// assert_eq!(x, 1);\n/// ```\n///\n/// ```\n/// let y = 2;\n/// ```\npub fn f() {}",
+        "/// ```\n/// let x = 1;\n/// ```\n///\n/// ```\n/// assert_eq!(x, 1);\n/// let y = 2;\n/// ```\npub fn f() {}",
+        MOVED_DOCTEST,
+    ),
+    (
+        '/// ```compile_fail\n/// let x = 1; let s = "\n/// ```\npub fn f() {}',
+        '/// ```compile_fail\n/// let x = 2; let s = "\n/// ```\npub fn f() {}',
+        MOVED_DOCTEST,
     ),
 )
 
@@ -1500,9 +1535,9 @@ def _blob(rev: str, path: str) -> str:
 
 
 def comments_only(base_arg: str | None) -> int:
-    base, why = resolve_base(ROOT, base_arg)
+    base = resolve_base(ROOT, base_arg)[0] if base_arg else git(ROOT, "merge-base", "HEAD", "refs/remotes/origin/main")
     if base is None:
-        raise GateError(why)
+        raise GateError("no base: HEAD shares no history with origin/main; name one with --base")
     changes = changed_paths(ROOT, base)
     found = []
     if not changes:
@@ -1520,7 +1555,7 @@ def comments_only(base_arg: str | None) -> int:
             old, new = parse_source(path, _blob(base, path)), parse_source(path, _read(ROOT / path))
             found += [Violation("comments-only", f"{path}:{line}", f"{kind} {what}") for kind, line, what in
                       comment_changes(old, new)]
-            rust, doctests = rust + 1, doctests + len(new.fences)
+            rust, doctests = rust + 1, doctests + len(new.docblocks)
     for v in found:
         print(v)
     print(f"comments-only: {len(changes)} changed paths against {base}; {rust} Rust files compared, {doctests} "
