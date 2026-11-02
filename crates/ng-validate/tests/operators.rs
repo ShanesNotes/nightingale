@@ -3,7 +3,6 @@ use core::num::{NonZeroU32, NonZeroU64};
 use expect_test::expect;
 use ng_contract::*;
 use ng_validate::*;
-use std::collections::BTreeSet;
 
 const SECOND: u64 = 1_000_000_000;
 const ELASTANCE: f64 = 1.3;
@@ -45,8 +44,8 @@ fn algebraic(local: &'static str) -> RowKind {
     RowKind::Algebraic(LawName { owner: "NS", local }.into())
 }
 
-fn operators(body: &CompiledBody) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
+fn operators(body: &CompiledBody) -> Vec<String> {
+    let mut names = Vec::new();
     for program in body.programs() {
         let listing = format!("{program:?}");
         let start = listing.find("ops: [").expect("a program lists its operations") + "ops: [".len();
@@ -54,7 +53,7 @@ fn operators(body: &CompiledBody) -> BTreeSet<String> {
         for c in listing[start..].chars() {
             match c {
                 '(' | '[' if depth == 0 => {
-                    names.insert(core::mem::take(&mut name));
+                    names.push(core::mem::take(&mut name));
                     depth += 1;
                 }
                 '(' | '[' => depth += 1,
@@ -65,6 +64,8 @@ fn operators(body: &CompiledBody) -> BTreeSet<String> {
             }
         }
     }
+    names.sort_unstable();
+    names.dedup();
     names
 }
 
@@ -256,8 +257,11 @@ fn hex(digest: Digest) -> String {
 #[test]
 fn the_pinned_body_runs_every_operator_and_every_one_the_slice_runs() {
     let ran = operators(&every_operator().expect("compiled").0);
-    assert_eq!(ran, OPERATORS.map(String::from).into());
-    assert!(operators(&arena_body().expect("compiled")).is_subset(&ran));
+    let mut every = OPERATORS.map(String::from).to_vec();
+    every.sort_unstable();
+    assert_eq!(ran, every);
+    let slice = operators(&arena_body().expect("compiled"));
+    assert!(slice.iter().all(|name| ran.contains(name)));
 }
 
 #[test]
