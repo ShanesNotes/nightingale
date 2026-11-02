@@ -395,3 +395,56 @@ fn a_closed_row_keeps_its_own_unknown_when_another_row_could_take_it() -> Result
     assert!(body.factor(&block).is_ok());
     Ok(())
 }
+
+#[test]
+fn a_closed_row_whose_store_reads_its_unknown_through_an_algebraic_row_is_admitted()
+-> Result<(), InitializationFailure> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>(
+        "synthetic body",
+        Position::new(measure(0.0), measure(0.0), measure(0.0)),
+    );
+    let body = assemble(Schema::new(map.finish()?)?, |mut body| {
+        let (mut ns, _) = body.nervous()?.parts();
+        let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let e = ns.state::<Dimensionless>("e", Admissible::finite());
+        let p = ns.algebraic::<Rate<Dimensionless>>("p", Admissible::finite());
+        let q = ns.algebraic::<Rate<Dimensionless>>("q", Admissible::finite());
+        let pays = ns.kernel(|mut k| {
+            let flow = k.algebraic(&q);
+            k.finish(flow, ns.every_mode(), class)
+        });
+        ns.memory_rate(&e, pays);
+        let follows = ns.kernel(|mut k| {
+            let (own, held) = (k.algebraic(&q), k.algebraic(&p));
+            let gap = k.subtract(own, held);
+            k.finish(gap, ns.every_mode(), class)
+        });
+        ns.residual(&q, follows);
+        let hold = ns.kernel(|mut k| {
+            let store = k.state(&e);
+            k.finish(store, ns.every_mode(), class)
+        });
+        ns.closes(&p, hold);
+        body.add(ns.finish());
+        body.compile()
+    })?;
+    let cycle = Cycle::new(
+        NonZeroU64::new(2_000_000_000).unwrap(),
+        NonZeroU32::new(2).unwrap(),
+    )?;
+    let mut packet = ParameterPacket::periodic(cycle);
+    packet.start_rest(&body, |_| 0.0, "synthetic exact root")?;
+    let port = BoundaryPort::new(Vec::new())?;
+    let request = InitializationRequest::at(SimTime::from_ns(0));
+    let system = body.initialization(body.bind(packet)?, port, request)?;
+    let exact = system.workspace();
+    assert!(system.evaluate(&exact)?.iter().all(|value| *value == 0.0));
+    let history = MethodHistory::new(
+        Digest::of_canonical(b"synthetic history"),
+        SimTime::from_ns(0),
+        vec![],
+    );
+    system.admit(exact, history)?;
+    Ok(())
+}
