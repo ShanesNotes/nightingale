@@ -212,6 +212,9 @@ pub(crate) enum Where {
     Up,
     Down,
     Junction,
+    /// `Junction`, and a site no nerve reaches reads zero. Only compile reads the difference, so it seals as `Junction`:
+    /// a spelling must not reorder guards, which sort by their sealed bytes.
+    JunctionIfSupplied,
     Drain,
     Mark(Landmark),
     MarkOn(Sites, Landmark),
@@ -350,7 +353,7 @@ impl Seal for Where {
             Where::Here => out.number(0),
             Where::Up => out.number(1),
             Where::Down => out.number(2),
-            Where::Junction => out.number(3),
+            Where::Junction | Where::JunctionIfSupplied => out.number(3),
             Where::Drain => out.number(4),
             Where::Mark(landmark) | Where::MarkOn(_, landmark) => {
                 out.number(5);
@@ -510,9 +513,9 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     pub fn read<U: Dimension>(&mut self, port: &ReadPort<'b, O, U>) -> Expr<'b, 'k, O, U> {
         self.input(Input::Read(port.source, Where::Here))
     }
-    /// The entry at the junction that supplies this site, or the site this edge runs into. A site the map says no
-    /// nerve reaches reads zero: no nerve has no effect. Compile refuses a site the map says nothing of, a junction
-    /// with no such entry and a whole-body kernel, which has no such place.
+    /// The entry at the junction that supplies this site, or the site this edge runs into. Compile refuses a site the
+    /// map says no nerve reaches, a site it says nothing of, a junction with no such entry and a whole-body kernel,
+    /// which has no such place.
     pub fn at_junction<U: Dimension>(
         &mut self,
         port: &ReadPort<'b, O, PerSite<crate::Junction, U>>,
@@ -648,6 +651,16 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     }
 }
 
+impl<'b, 'k, S> Kernel<'b, 'k, crate::Cardiovascular, S> {
+    /// `at_junction` for a law that runs at every vessel, with a nerve or without: a site the map says no nerve reaches
+    /// reads zero. Every other refusal stands. The circulation's laws alone run over both.
+    pub fn at_junction_if_supplied<U: Dimension>(
+        &mut self,
+        port: &ReadPort<'b, crate::Cardiovascular, PerSite<crate::Junction, U>>,
+    ) -> Expr<'b, 'k, crate::Cardiovascular, U> {
+        self.input(Input::Read(port.source, Where::JunctionIfSupplied))
+    }
+}
 impl<'b, 'k, O> Kernel<'b, 'k, O> {
     /// A per-site value at a landmark. Compile refuses a landmark the map does not place, or one placed off the port.
     pub fn at_landmark<C: SiteSet, U: Dimension>(

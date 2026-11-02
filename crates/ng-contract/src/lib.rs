@@ -338,6 +338,23 @@
 //!     k.as_dimension(ratio)
 //! }
 //! ```
+//! Only the circulation's laws run at sites with a nerve and without, so only they may accept no nerve. A renal arm that
+//! read a bare bed would do nothing and pass every test.
+//! ```compile_fail,E0599
+//! use ng_contract::*;
+//! fn bare<'b, 'k>(k: &mut Kernel<'b, 'k, Renal, ReclaimEdge>,
+//!     nerve: &ReadPort<'b, Renal, PerSite<Junction, Dimensionless>>) -> Expr<'b, 'k, Renal, Dimensionless> {
+//!     k.at_junction_if_supplied(nerve)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn vessel<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VascularEdge>,
+//!     nerve: &ReadPort<'b, Cardiovascular, PerSite<Junction, Dimensionless>>)
+//!     -> Expr<'b, 'k, Cardiovascular, Dimensionless> {
+//!     k.at_junction_if_supplied(nerve)
+//! }
+//! ```
 //! A route comes from a scope, whole. A binding is a transfer of one ligand between two pools, so nothing can write a
 //! reaction from raw stoichiometry: a hand-made route does not compile.
 //! ```compile_fail,E0451

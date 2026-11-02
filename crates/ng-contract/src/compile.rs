@@ -1410,7 +1410,7 @@ fn place_of(place: Where, context: Context, anatomy: &Anatomy) -> Option<SiteId>
         Where::Here => here,
         Where::Up => ends.map(|end| end.0),
         Where::Down => ends.map(|end| end.1),
-        Where::Junction => anatomy.junction(here.or(ends.map(|end| end.1))?),
+        Where::Junction | Where::JunctionIfSupplied => anatomy.junction(here.or(ends.map(|end| end.1))?),
         Where::Drain => anatomy.drain(here?),
         Where::Mark(landmark) | Where::MarkOn(_, landmark) => anatomy.landmark(landmark).map(|mark| mark.0),
         Where::Sensor(landmark) => anatomy.landmark(landmark).map(|mark| mark.1),
@@ -1446,23 +1446,28 @@ fn addresses(
             return Err(CompileDefect::NoSuchRead { law });
         }
         let at = landed.map_or(context, Context::Site);
+        let junction_read = matches!(place, Where::Junction | Where::JunctionIfSupplied);
         Ok(match source {
-            Source::Field(_) if place == Where::Junction && context == Context::Body => {
-                return Err(CompileDefect::NoSuchRead { law });
-            }
-            Source::Field(field) => match (rows.defined(field, at), place) {
-                (Some(row), _) => unknown(row),
-                (None, Where::Junction) => match (landed, context) {
-                    (Some(junction), _) => return Err(CompileDefect::NoReceptor { law, junction }),
-                    (None, Context::Site(site) | Context::Edge { to: site, .. })
-                        if !anatomy.unsupplied(site) =>
-                    {
-                        return Err(CompileDefect::NoSupply { law, site });
+            Source::Field(field) if junction_read => {
+                let (Context::Site(site) | Context::Edge { to: site, .. }) = context else {
+                    return Err(CompileDefect::NoSuchRead { law });
+                };
+                match landed {
+                    Some(junction) => {
+                        let row = rows.defined(field, at);
+                        unknown(row.ok_or(CompileDefect::NoReceptor { law, junction })?)
                     }
-                    _ => Address::Gauge,
-                },
-                (None, _) => return Err(CompileDefect::UnemittedField { law, field }),
-            },
+                    None if !anatomy.unsupplied(site) => return Err(CompileDefect::NoSupply { law, site }),
+                    None if place == Where::Junction => {
+                        return Err(CompileDefect::UnsuppliedRead { law, site });
+                    }
+                    None => Address::Gauge,
+                }
+            }
+            Source::Field(field) => {
+                let row = rows.defined(field, at);
+                unknown(row.ok_or(CompileDefect::UnemittedField { law, field })?)
+            }
             Source::Flow(family) => {
                 let flow = LawName {
                     owner: law.owner,
@@ -1473,6 +1478,7 @@ fn addresses(
                         .ok_or(CompileDefect::NoSuchRead { law })?,
                 )
             }
+            Source::Amount(..) if junction_read => return Err(CompileDefect::NoSuchRead { law }),
             Source::Amount(family, end, species) => {
                 let reach = reaches.reach(family, context);
                 let reach = reach.ok_or(CompileDefect::NoSuchRead { law })?;
