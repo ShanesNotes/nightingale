@@ -173,3 +173,185 @@ fn two_closed_rows_that_read_one_store_factor_over_the_bodys_elimination() -> Re
     }
     Ok(())
 }
+
+fn ring_of(
+    body: &CompiledBody,
+    keys: &[&'static str],
+    mode: bool,
+) -> Result<Jacobian, InitializationFailure> {
+    let cycle = Cycle::new(
+        NonZeroU64::new(2_000_000_000).unwrap(),
+        NonZeroU32::new(2).unwrap(),
+    )?;
+    let mut packet = ParameterPacket::periodic(cycle);
+    for &key in keys {
+        packet.synthetic(
+            ParameterKey::new(key),
+            Binding::Body,
+            measure::<Dimensionless>(0.5),
+            "synthetic",
+        )?;
+    }
+    packet.start_rest(body, |_| 1.0, "synthetic")?;
+    if mode {
+        let law = LawName {
+            owner: "NS",
+            local: "switch",
+        };
+        packet.start_mode(law, "a", "synthetic")?;
+    }
+    let port = BoundaryPort::new(Vec::new())?;
+    let request = InitializationRequest::at(SimTime::from_ns(0));
+    let system = body.initialization(body.bind(packet)?, port, request)?;
+    Ok(system.stage(&system.workspace(), 0)?.1)
+}
+
+#[test]
+fn a_row_closed_in_two_modes_takes_one_store() -> Result<(), InitializationFailure> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>(
+        "synthetic body",
+        Position::new(measure(0.0), measure(0.0), measure(0.0)),
+    );
+    let body = assemble(Schema::new(map.finish()?)?, |mut body| {
+        let (mut ns, _) = body.nervous()?.parts();
+        let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let e1 = ns.state::<Dimensionless>("e1", Admissible::finite());
+        let e2 = ns.state::<Dimensionless>("e2", Admissible::finite());
+        let p = ns.algebraic::<Rate<Dimensionless>>("p", Admissible::finite());
+        let target = ns.parameter::<Dimensionless>(ParameterKey::new("target"), Admissible::finite());
+        let [a, b] = ns.modes("switch", ["a", "b"]);
+        for store in [&e1, &e2] {
+            let pays = ns.kernel(|mut k| {
+                let own = k.algebraic(&p);
+                k.finish(own, ns.every_mode(), class)
+            });
+            ns.memory_rate(store, pays);
+        }
+        for mode in [&a, &b] {
+            let hold = ns.kernel(|mut k| {
+                let (one, two, goal) = (k.state(&e1), k.state(&e2), k.parameter(&target));
+                let both = k.add(one, two);
+                let gap = k.subtract(both, goal);
+                k.finish(gap, mode.only(), class)
+            });
+            ns.closes(&p, hold);
+        }
+        body.add(ns.finish());
+        body.compile()
+    })?;
+    let block = ring_of(&body, &["target"], true)?;
+    assert!(body.factor(&block).is_ok());
+    Ok(())
+}
+
+#[test]
+fn two_closed_rows_only_one_store_can_hold_are_refused() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>(
+        "synthetic body",
+        Position::new(measure(0.0), measure(0.0), measure(0.0)),
+    );
+    let compiled = assemble(Schema::new(map.finish()?)?, |mut body| {
+        let (mut ns, _) = body.nervous()?.parts();
+        let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let e = ns.state::<Dimensionless>("e", Admissible::finite());
+        let p1 = ns.algebraic::<Rate<Dimensionless>>("p1", Admissible::finite());
+        let p2 = ns.algebraic::<Rate<Dimensionless>>("p2", Admissible::finite());
+        let pays = ns.kernel(|mut k| {
+            let (one, two, zero) = (k.algebraic(&p1), k.algebraic(&p2), k.zero());
+            let both = k.add(one, two);
+            let out = k.subtract(zero, both);
+            k.finish(out, ns.every_mode(), class)
+        });
+        ns.memory_rate(&e, pays);
+        for (row, key) in [(&p1, "t1"), (&p2, "t2")] {
+            let goal = ns.parameter::<Dimensionless>(ParameterKey::new(key), Admissible::finite());
+            let hold = ns.kernel(|mut k| {
+                let (held, goal) = (k.state(&e), k.parameter(&goal));
+                let gap = k.subtract(held, goal);
+                k.finish(gap, ns.every_mode(), class)
+            });
+            ns.closes(row, hold);
+        }
+        body.add(ns.finish());
+        body.compile()
+    });
+    let law = LawName {
+        owner: "NS",
+        local: "p2",
+    };
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::StructuralSingularity {
+            law
+        }))
+    );
+    Ok(())
+}
+
+fn crossed(second_first: bool) -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>(
+        "synthetic body",
+        Position::new(measure(0.0), measure(0.0), measure(0.0)),
+    );
+    assemble(Schema::new(map.finish()?)?, |mut body| {
+        let (mut ns, _) = body.nervous()?.parts();
+        let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+        let e1 = ns.state::<Dimensionless>("e1", Admissible::finite());
+        let e2 = ns.state::<Dimensionless>("e2", Admissible::finite());
+        let p1 = ns.algebraic::<Rate<Dimensionless>>("p1", Admissible::finite());
+        let p2 = ns.algebraic::<Rate<Dimensionless>>("p2", Admissible::finite());
+        let t1 = ns.parameter::<Dimensionless>(ParameterKey::new("t1"), Admissible::finite());
+        let t2 = ns.parameter::<Dimensionless>(ParameterKey::new("t2"), Admissible::finite());
+        for (store, apart) in [(&e1, false), (&e2, true)] {
+            let pays = ns.kernel(|mut k| {
+                let (one, two, zero) = (k.algebraic(&p1), k.algebraic(&p2), k.zero());
+                let out = if apart {
+                    k.subtract(two, one)
+                } else {
+                    k.add(one, two)
+                };
+                let out = if apart { out } else { k.subtract(zero, out) };
+                k.finish(out, ns.every_mode(), class)
+            });
+            ns.memory_rate(store, pays);
+        }
+        let mut holds = Vec::new();
+        for (goal, apart) in [(&t1, false), (&t2, true)] {
+            holds.push(ns.kernel(|mut k| {
+                let (one, two, goal) = (k.state(&e1), k.state(&e2), k.parameter(goal));
+                let held = if apart {
+                    k.subtract(one, two)
+                } else {
+                    k.add(one, two)
+                };
+                let gap = k.subtract(held, goal);
+                k.finish(gap, ns.every_mode(), class)
+            }));
+        }
+        let [first, second] = <[_; 2]>::try_from(holds).ok().expect("two holds");
+        if second_first {
+            ns.closes(&p2, second);
+            ns.closes(&p1, first);
+        } else {
+            ns.closes(&p1, first);
+            ns.closes(&p2, second);
+        }
+        body.add(ns.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn two_closed_rows_either_store_could_hold_take_the_same_stores_in_either_order()
+-> Result<(), InitializationFailure> {
+    let (forward, backward) = (crossed(false)?, crossed(true)?);
+    assert_eq!(forward.model_hash(), backward.model_hash());
+    for body in [&forward, &backward] {
+        let block = ring_of(body, &["t1", "t2"], false)?;
+        assert!(body.factor(&block).is_ok());
+    }
+    Ok(())
+}
