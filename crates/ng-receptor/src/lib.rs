@@ -8,7 +8,7 @@
 //! ```compile_fail,E0451
 //! use ng_contract::*;
 //! fn forged<'b>(rate: PureKernel<'b, Receptor, Rate<Norepinephrine>>) -> Transfer<'b, Receptor, Norepinephrine> {
-//!     Transfer { rate }
+//!     Transfer { serves: todo!(), rate }
 //! }
 //! ```
 //! ```
