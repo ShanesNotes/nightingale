@@ -5,11 +5,11 @@
 Python 3.11 stdlib only. A PASS is a Codex run's saved output, whose header names its `session id:`, or that id.
 Its rollout is the file under $CODEX_HOME/sessions, default ~/.codex/sessions, whose name ends in the id. Each pass
 prints every model and effort its turns ran with, its session, start, Codex version and the commit Codex saw at the
-start, then the models and efforts of the helper sessions it spawned. Nothing else of a rollout prints: no prompt,
-path or account.
+start, then the models and efforts of the helper sessions it spawned. `codex review` runs its turns in a helper,
+so its own session shows no turn. Nothing else of a rollout prints: no prompt, path or account.
 
-Exit 0 when every pass names a rollout with at least one turn, and every turn of it and of its helper sessions
-records a model and an effort; 1 otherwise; 2 usage.
+Exit 0 when every pass's session or its helpers record a turn, and every turn records a model and an effort;
+1 otherwise; 2 usage.
 """
 import json
 import os
@@ -48,11 +48,6 @@ def turns(path):
     return out
 
 
-def parent(meta):
-    spawn = (meta.get("source") or {}).get("subagent") if isinstance(meta.get("source"), dict) else None
-    return (spawn.get("thread_spawn") or {}).get("parent_thread_id") if isinstance(spawn, dict) else None
-
-
 def shown(pairs):
     return " and ".join(f"{model or '?'} {effort or '?'}" for model, effort in pairs) or "no turn"
 
@@ -64,7 +59,7 @@ def main(args):
     rollouts = {p.name[-42:-6]: p for p in sorted(SESSIONS.rglob("rollout-*.jsonl"))}
     children = {}
     for session, path in rollouts.items():
-        children.setdefault(parent(session_meta(path)), []).append(session)
+        children.setdefault(session_meta(path).get("parent_thread_id"), []).append(session)
     failed = False
     for arg in args:
         if os.path.isfile(arg):
@@ -87,8 +82,10 @@ def main(args):
             meta, pairs = session_meta(rollouts[session]), turns(rollouts[session])
             helpers, todo = [], list(children.get(session, []))
             while todo:
-                helpers.append(todo.pop())
-                todo += children.get(helpers[-1], [])
+                helper = todo.pop()
+                if helper != session and helper not in helpers:
+                    helpers.append(helper)
+                    todo += children.get(helper, [])
             helper_pairs = list(dict.fromkeys(p for h in helpers for p in turns(rollouts[h])))
             started = re.sub(r"\.\d+Z$", "Z", str(meta.get("timestamp")))
             commit = (meta.get("git") or {}).get("commit_hash") or "unknown"
@@ -96,7 +93,7 @@ def main(args):
             line += f"commit {commit}"
             line += f"; {len(helpers)} helper sessions: {shown(helper_pairs)}" if helpers else "; no helper sessions"
             print(line)
-            failed |= not pairs or any(None in p for p in pairs + helper_pairs)
+            failed |= not (pairs + helper_pairs) or any(None in p for p in pairs + helper_pairs)
     return 1 if failed else 0
 
 
