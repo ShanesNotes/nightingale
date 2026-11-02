@@ -398,7 +398,7 @@ impl Seal for Source {
     }
 }
 
-fn reachable(code: &[Op], result: usize, accepting: &[usize], fields: &[(usize, String)]) -> Reached {
+fn reachable(code: &[Op], result: usize, accepting: &[usize], fields: &[(usize, String)]) -> Pruned {
     fn place(code: &[Op], at: usize, placed: &mut [Option<usize>], out: &mut Vec<Op>) -> usize {
         if let Some(done) = placed[at] {
             return done;
@@ -415,23 +415,38 @@ fn reachable(code: &[Op], result: usize, accepting: &[usize], fields: &[(usize, 
     let unreached = (code.iter().enumerate())
         .filter(|&(at, _)| placed[at].is_none())
         .filter_map(|(at, op)| match op {
-            Op::Input(input) => Some((*input, accepting.contains(&at), expects(at))),
+            Op::Input(input) => Some(UnreachedRead {
+                input: *input,
+                accepts_no_nerve: accepting.contains(&at),
+                expects: expects(at),
+            }),
             _ => None,
         })
         .collect();
-    let accepting = accepting.iter().filter_map(|&at| placed[at]).collect();
-    let fields = (fields.iter())
-        .filter_map(|(at, dimension)| placed[*at].map(|placed| (placed, dimension.clone())))
-        .collect();
-    (out, accepting, fields, unreached)
+    Pruned {
+        code: out,
+        accepts_no_nerve: accepting.iter().filter_map(|&at| placed[at]).collect(),
+        fields: (fields.iter())
+            .filter_map(|(at, dimension)| placed[*at].map(|placed| (placed, dimension.clone())))
+            .collect(),
+        unreached,
+    }
 }
 
-type Reached = (
-    Vec<Op>,
-    Vec<usize>,
-    Vec<(usize, String)>,
-    Vec<(Input, bool, Option<String>)>,
-);
+struct Pruned {
+    code: Vec<Op>,
+    accepts_no_nerve: Vec<usize>,
+    fields: Vec<(usize, String)>,
+    unreached: Vec<UnreachedRead>,
+}
+
+/// A read a law wrote that its result never reaches: its program drops it, and compile refuses it as a kept one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct UnreachedRead {
+    pub(crate) input: Input,
+    pub(crate) accepts_no_nerve: bool,
+    pub(crate) expects: Option<String>,
+}
 
 /// One kernel's graph while it is built. `'k` is fresh for every kernel, so an expression belongs to
 /// one graph; `S` is what the kernel is declared for: the body, a site class or a vascular edge.
@@ -481,8 +496,10 @@ pub(crate) struct KernelData {
     /// Beside `code` and never in it: a program reads the same whichever way a law spelled a read, so nothing that
     /// reads programs can tell two spellings apart.
     pub(crate) accepts_no_nerve: Vec<usize>,
+    /// The dimension each field read in `code` expects. Compile finds a field by name, so it holds the row it finds to
+    /// this.
     pub(crate) fields: Vec<(usize, String)>,
-    pub(crate) unreached: Vec<(Input, bool, Option<String>)>,
+    pub(crate) unreached: Vec<UnreachedRead>,
     pub(crate) dimension: String,
     pub(crate) modes: Selector,
     pub(crate) rate: RateClass,
@@ -1185,7 +1202,12 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     fn close<U, S>(&self, finished: Finished<'b, '_, O, U, S>) -> PureKernel<'b, O, U, S> {
         let id = self.kernels.get();
         self.kernels.set(id + 1);
-        let (code, accepts_no_nerve, fields, unreached) = reachable(
+        let Pruned {
+            code,
+            accepts_no_nerve,
+            fields,
+            unreached,
+        } = reachable(
             &finished.code,
             finished.result,
             &finished.accepts_no_nerve,

@@ -84,7 +84,7 @@ pub(crate) fn compile(
     let pivots = pivots(solved_by.clone(), &stores);
     let sparsity = sparsity(reads);
     let elimination = Elimination::plan(&sparsity.offsets, &sparsity.unknowns, &pivots);
-    Ok(CompiledBody::seal(Layout {
+    let layout = Layout {
         schema,
         rows: rows.rows,
         columns: placement.columns,
@@ -92,7 +92,6 @@ pub(crate) fn compile(
         instances,
         parameters,
         sparsity,
-        elimination,
         judged,
         blocks,
         modes,
@@ -102,7 +101,8 @@ pub(crate) fn compile(
         hazards,
         basis,
         held,
-    }))
+    };
+    Ok(CompiledBody::seal(layout, elimination))
 }
 
 fn check_fragments(
@@ -1105,7 +1105,7 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                         Op::Input(input) => Some(input),
                         _ => None,
                     })
-                    .chain(kernel.unreached.iter().map(|(input, _, _)| input));
+                    .chain(kernel.unreached.iter().map(|read| &read.input));
                 let carried = written.into_iter().find_map(|input| match input {
                     Input::Read(Source::Drive(route), _) if *route != water.name => Some(*route),
                     _ => None,
@@ -1631,8 +1631,8 @@ fn addresses(
             ) => return Err(CompileDefect::NoSuchRead { law }),
         })
     };
-    for (input, accepts_no_nerve, expects) in &kernel.unreached {
-        resolve(*input, *accepts_no_nerve, expects.as_deref())?;
+    for read in &kernel.unreached {
+        resolve(read.input, read.accepts_no_nerve, read.expects.as_deref())?;
     }
     let expects = |op: usize| {
         (kernel.fields.iter().find(|(read, _)| *read == op)).map(|(_, dimension)| dimension.as_str())
@@ -1860,7 +1860,9 @@ fn closed_rows(fragments: &[FragmentData], rows: &Rows) -> Vec<usize> {
         let owner = fragment.owner;
         fragment.closed.iter().map(move |&local| LawName { owner, local })
     });
-    names.map(|law| rows.declared(law, Context::Body)).collect()
+    let mut closed: Vec<usize> = names.map(|law| rows.declared(law, Context::Body)).collect();
+    closed.sort_unstable();
+    closed
 }
 
 fn reads(
@@ -1947,20 +1949,26 @@ fn solved_by(rows: &[Row], reads: &[Vec<UnknownId>]) -> Result<Vec<RowId>, Compi
     Ok(solved_by)
 }
 
+/// A closed row's law reads no unknown of its own, so it pivots through a store whose rate reads that unknown, matched
+/// a store to each in row order, so no declaration order reaches the choice.
 fn closing_stores(solved_by: &[RowId], reads: &[Vec<UnknownId>], closed: &[usize]) -> Vec<(usize, usize)> {
-    let mut stores: Vec<(usize, usize)> = Vec::with_capacity(closed.len());
-    for &row in closed {
-        let unknown = (solved_by.iter()).position(|pivot| pivot.index() == row);
-        let unknown = UnknownId::at(unknown.expect("a closed row is matched to its unknown"));
-        let free = |amount: &&UnknownId| {
-            reads[amount.index()].contains(&unknown)
-                && !stores.iter().any(|&(_, store)| store == amount.index())
-        };
-        if let Some(amount) = reads[row].iter().find(free) {
-            stores.push((row, amount.index()));
-        }
+    let carriers: Vec<Vec<usize>> = (closed.iter())
+        .map(|&row| {
+            let unknown = (solved_by.iter()).position(|pivot| pivot.index() == row);
+            let unknown = UnknownId::at(unknown.expect("a closed row is matched to its unknown"));
+            (reads[row].iter())
+                .filter(|amount| **amount != unknown && reads[amount.index()].contains(&unknown))
+                .map(|amount| amount.index())
+                .collect()
+        })
+        .collect();
+    let mut held = vec![None; reads.len()];
+    for at in 0..closed.len() {
+        augment(&carriers, at, &mut vec![false; reads.len()], &mut held);
     }
-    stores
+    (held.iter().enumerate())
+        .filter_map(|(store, at)| at.map(|at| (closed[at], store)))
+        .collect()
 }
 
 fn judged_rows(rows: usize, stores: &[(usize, usize)]) -> Vec<u32> {
