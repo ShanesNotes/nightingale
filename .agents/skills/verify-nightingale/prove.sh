@@ -50,7 +50,7 @@ else
   head_unchanged=no
 fi
 if [ -n "${CARGO_TARGET_DIR:-}" ]; then
-  cargo_target="$CARGO_TARGET_DIR"
+  cargo_target=set
 else
   cargo_target=default
 fi
@@ -89,7 +89,7 @@ proof="${log}.proof"
   echo "- wall_time_s: ${wall}"
   echo "- started_utc: ${start_utc}"
   echo "- finished_utc: ${end_utc}"
-  echo "- log: ${log}"
+  echo "- log: $(basename "$log")"
   echo "- log_sha256: ${log_sha}"
   echo "- worktree: ${worktree}"
   echo "- head_unchanged: ${head_unchanged}"
