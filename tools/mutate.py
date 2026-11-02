@@ -131,7 +131,8 @@ def matches(sha, row):
 
 
 def cargo_test(test, env, budget):
-    code, output = run(["cargo", "test", *shlex.split(test)], budget, cwd=TREE, env=env)
+    argv = ["cargo", "test", "--manifest-path", TREE / "Cargo.toml", *shlex.split(test)]
+    code, output = run(argv, budget, cwd=TREE, env=env)
     return code, output.decode(errors="replace")
 
 
