@@ -170,8 +170,7 @@ The forbidden moves fail to compile (`src/lib.rs`; each probe added since the fi
 | Book extents as one sampled rate times the step | E0451 |
 | Write a reaction from raw stoichiometry | E0451 |
 | Call host math on an expression | E0599 |
-| Read a junction's entry as a capillary-bed law's own | E0308 |
-| Accept no nerve in a law outside the circulation | E0599 |
+| Read a junction's entry in a capillary-bed law | E0308 |
 | Use a set point as the variable it guards | E0308 |
 | Name a product by cast (volume times volume as a pressure) | E0277 |
 | See the boundary timeline from a core | E0599 |
