@@ -1211,7 +1211,8 @@ def seal_scopes(src: Source) -> list[tuple[str, tuple[Token, ...]]]:
         while impls and i > impls[-1][0]:
             impls.pop()
         t = code[i]
-        if t.kind == "ident" and t.value in ("impl", "fn"):
+        named_fn = t.value == "fn" and i + 1 < len(code) and code[i + 1].kind == "ident"
+        if t.kind == "ident" and (t.value == "impl" or named_fn):
             j = i + 1
             while j < len(code) and code[j].value not in ("{", ";"):
                 j += 1
@@ -1611,6 +1612,11 @@ SEAL_CASES: tuple[tuple[str, frozenset[str]], ...] = (
     ),
     ('fn digest(&self) -> D { let o = Canonical::new("t"); let x = T { a, ..base }; o.digest() }', frozenset()),
     ("fn copy(d: D) -> S { let D { key: _, value } = d; S { value } }", frozenset()),
+    (
+        "struct F { read: fn(&R) -> bool }\nimpl Seal for G { fn seal(&self, out: &mut Canonical) { "
+        "let Self { a: _ } = self; } }",
+        frozenset({"case::G::seal a"}),
+    ),
     ('fn tag(d: D) -> Digest { let D { key: _, v } = d; Digest::of_canonical(b"tag") }', frozenset()),
 )
 
