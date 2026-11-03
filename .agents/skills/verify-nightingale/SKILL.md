@@ -20,7 +20,7 @@ An agent loads this skill before it claims a change works or asks for a merge.
 
 `--base REV` sets the base of a merge or changed run.
 
-Speed is in none of these runs, because a wall clock cannot gate a merge. `python3 -I tools/bench/run.py` times the engine on demand, and its header says how to read and compare the numbers.
+The engine's speed is in none of these runs, because a wall clock cannot gate a merge. `python3 -I tools/bench/run.py` times the engine on demand, and its header says how to read and compare the numbers.
 
 A ticket's own mutation sweep is in none of them, because its table is written for one change. `python3 -I tools/mutate.py TABLE` breaks one rule at a time on a commit and reports whether a test notices, and its header says how to write a table and read the verdicts. A row that once survived a sweep and is caught now belongs in `tools/gate/mutants.toml`, which `40-mutants` replays.
 
@@ -37,7 +37,7 @@ A comment pass proves itself apart from them: `python3 -I tools/gate/gate.py com
 - `30-data.sh`: every rule in `tools/gate/data.py` over `data/` and each `Data:` line in `.scratch/`, then a must-fail probe for every rule on a synthetic base the tool holds.
 - `40-mutants.sh`: every row of `tools/gate/mutants.toml` still applies, then `tools/mutate.py` replays the rows: all of them in a full or everything run, and in a merge run the rows whose path, or any file under their test crate's `tests/`, changed since the base. The changed run only checks that the rows apply.
 
-A new step is an `NN-name.sh` file in `tools/verify.d/`, named in `tools/gate/paths.toml`; `registration.steps` refuses a step that no run selects.
+A new step is an `NN-name.sh` file in `tools/verify.d/`, named in `tools/gate/paths.toml`; `registration.steps` refuses a step that no run selects. A step times its own phases by appending `time: <step> <phase> <n> s` lines to the file that `$NG_GATE_TIMES` names, as `10-rust.sh` does.
 
 ## Read the gate lines
 
@@ -47,7 +47,7 @@ Every log opens with the plan:
     gate: crates=ng-observe ng-record ng-validate smoke=none
     gate: steps=01-toolchain 05-seam 10-rust 15-f64
 
-The scope is `docs-only` when every changed path is a regular file under `docs/`, a root Markdown file or a Markdown file under `.scratch/`. It is `everything` when there is no base, nothing changed, or a path runs everything, such as a toolchain, Cargo, gate or skill file or a path no rule names. Otherwise it is `affected`. The `reason` field says what decided the scope. Each step prints `== <step>`, or `== <step> (not selected)` when the plan skips it, and a failing step ends the log with `verify: <step> failed`.
+The scope is `docs-only` when every changed path is a regular file under `docs/`, a root Markdown file or a Markdown file under `.scratch/`. It is `everything` when there is no base, nothing changed, or a path runs everything, such as a toolchain, Cargo, gate or skill file or a path no rule names. Otherwise it is `affected`. The `reason` field says what decided the scope. Each step prints `== <step>`, or `== <step> (not selected)` when the plan skips it, and a failing step ends the log with `verify: <step> failed`. Just before its final line, a run that passes lists the whole seconds each step took as `time: <step> <n> s`. Ahead of its own line, 10-rust lists its phases as `time: 10-rust <phase> <n> s`: fmt, clippy, test, each smoke test, doctests, codes, and outside the changed run bans and bench. The times only report and gate nothing.
 
 ## How to run
 
