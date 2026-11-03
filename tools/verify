@@ -46,17 +46,23 @@ echo "gate: mode=$mode scope=$scope base=$base reason=$reason"
 echo "gate: crates=${crates:-none} smoke=${smoke:-none}"
 echo "gate: steps=$steps"
 export NG_GATE_MODE="$mode" NG_GATE_SCOPE="$scope" NG_GATE_BASE="$base" NG_GATE_CRATES="$crates" NG_GATE_SMOKE="$smoke"
+times=$(mktemp)
+trap 'rm -f "$times"' EXIT
+export NG_GATE_TIMES="$times"
 
 for step in tools/verify.d/*.sh; do
   name=$(basename "$step")
   case " $steps " in
     *" ${name%.sh} "*)
       echo "== $name"
+      start=$SECONDS
       bash "$step" || { echo "verify: $name failed"; exit 1; }
+      echo "${name%.sh} $((SECONDS - start)) s" >>"$times"
       ;;
     *) echo "== $name (not selected)" ;;
   esac
 done
+sed 's/^/time: /' "$times"
 if [ "$mode" = changed ]; then
   echo "verify: OK for changed paths only"
 else

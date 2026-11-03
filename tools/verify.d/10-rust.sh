@@ -11,26 +11,31 @@ if [ -z "${NG_GATE_CRATES+set}" ]; then
   plan=$(python3 -I tools/gate/gate.py plan full) || { printf '%s\n' "$plan"; exit 1; }
   NG_GATE_CRATES=$(sed -n 's/^crates=//p' <<<"$plan")
 fi
-cargo fmt --all --check
+phase() {
+  local start=$SECONDS
+  "${@:2}" || return
+  echo "10-rust $1 $((SECONDS - start)) s" >>"${NG_GATE_TIMES:-/dev/stdout}"
+}
+phase fmt cargo fmt --all --check
 pkgs=()
 for crate in $NG_GATE_CRATES; do
   pkgs+=(-p "$crate")
 done
 if [ ${#pkgs[@]} -gt 0 ]; then
-  cargo clippy --locked --all-targets "${pkgs[@]}" -- -D warnings
+  phase clippy cargo clippy --locked --all-targets "${pkgs[@]}" -- -D warnings
   if [ "${NG_GATE_MODE:-}" = full ]; then
-    cargo test --locked "${pkgs[@]}" -- --include-ignored
+    phase test cargo test --locked "${pkgs[@]}" -- --include-ignored
   else
-    cargo test --locked "${pkgs[@]}"
+    phase test cargo test --locked "${pkgs[@]}"
   fi
 fi
 for smoke in ${NG_GATE_SMOKE:-}; do
   case " $NG_GATE_CRATES " in
     *" ${smoke%%:*} "*) ;;
-    *) cargo test --locked -p "${smoke%%:*}" --test "${smoke#*:}" ;;
+    *) phase "smoke $smoke" cargo test --locked -p "${smoke%%:*}" --test "${smoke#*:}" ;;
   esac
 done
-python3 -I tools/gate/gate.py doctests
-python3 -I tools/gate/gate.py codes
-[ "${NG_GATE_MODE:-}" = changed ] || python3 -I tools/gate/gate.py bans
-[ "${NG_GATE_MODE:-}" = changed ] || cargo check --locked --manifest-path tools/bench/Cargo.toml
+phase doctests python3 -I tools/gate/gate.py doctests
+phase codes python3 -I tools/gate/gate.py codes
+[ "${NG_GATE_MODE:-}" = changed ] || phase bans python3 -I tools/gate/gate.py bans
+[ "${NG_GATE_MODE:-}" = changed ] || phase bench cargo check --locked --manifest-path tools/bench/Cargo.toml
