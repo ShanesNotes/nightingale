@@ -1,0 +1,17 @@
+# 22: The score binds one run's evidence
+
+Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-build-slice-spec)
+
+**What to build:** `score` takes one run's certificate, accuracy evidence, run evidence and replay evidence and returns an `ArenaScore`, as the sketch's `score` does (`docs/architecture/solver-contract-sketch/src/ng_validate.rs:428`). Evidence from another run, or from a gate that did not run, is `ArenaFailure::MissingEvidence`, never a pass. `replay_gates` returns evidence bound to the run's identity. The score reports every policy value that its parts rest on.
+
+Blocked by: 12, 13
+
+Status: ready-for-agent
+
+- [ ] `score` returns an `ArenaScore` for one run's certificate, accuracy, run and replay evidence, and refuses each kind taken from another run
+
+## Comments
+
+From 05: `ReplayFailure::Diverged` maps to `ArenaFailure::Replay`, and `ReplayEvidence` has no public constructor.
+
+From the split of ticket 11: the contract says policy values are reported with every result (`docs/architecture/solver-contract.md:652`), but the reference's scales reach a result only through the resolution digest (`crates/ng-contract/src/scheme.rs:260`). The score is where each policy value shows. Ticket 21's checks report beside the score, and if they join `ArenaScore`, the sketch changes in the same PR.

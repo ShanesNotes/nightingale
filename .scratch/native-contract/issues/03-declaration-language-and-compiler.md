@@ -12,7 +12,7 @@ Claimed by: claude
 
 - [x] A two-reservoir manufactured body compiles; its incidence and conserved basis match the hand-derived ones
 - [x] A site-class Starling law over the two beds compiles to one program applied at both sites, with per-site parameters
-- [ ] Every compile-fail doctest in the sketch has a compile-fail test here with the same error code, and each legal twin compiles. Answered, not ticked: the 14 whose types this ticket builds are here; the other 17 need types tickets 04 to 11 build, and each now lists its own (the table below)
+- [ ] Every compile-fail doctest in the sketch has a compile-fail test here with the same error code, and each legal twin compiles. Answered, not ticked: the 14 whose types this ticket builds are here; the other 17 need types tickets 04 to 10 and 20 build, and each now lists its own (the table below)
 - [x] Compilation refuses an omitted law, a second owner of a row, and a mode without law coverage, each naming the law
 
 ## Answer
@@ -71,8 +71,8 @@ Choices, from a pstack `architect` arena: a Claude runner and a Codex runner, ju
 | 177 | A lent record is read-only | E0596 | 04 |
 | 186 | Only the map's receiver reads an edge | E0271 | 09 |
 | 201 | A synthetic value cannot be an anchor | E0308 | 08 |
-| 218 | A split qualification is not bytes | E0308 | 11 |
-| 232 | No split trace from invented samples | E0599 | 11 |
+| 218 | A split qualification is not bytes | E0308 | 20 |
+| 232 | No split trace from invented samples | E0599 | 20 |
 | 250 | An admissible set takes no bounds | E0599 | here |
 | 259 | A kernel's result takes no admissible set | E0061 | here |
 | 291 | A held stand-in declares its supplies | E0061 | 09 |
