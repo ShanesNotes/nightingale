@@ -22,7 +22,7 @@ An agent loads this skill before it claims a change works or asks for a merge.
 
 Speed is in none of these runs, because a wall clock cannot gate a merge. `python3 -I tools/bench/run.py` times the engine on demand, and its header says how to read and compare the numbers.
 
-A mutation sweep is in none of them either, because its table is written for one change. `python3 -I tools/mutate.py TABLE` breaks one rule at a time on a commit and reports whether a test notices, and its header says how to write a table and read the verdicts.
+A ticket's own mutation sweep is in none of them, because its table is written for one change. `python3 -I tools/mutate.py TABLE` breaks one rule at a time on a commit and reports whether a test notices, and its header says how to write a table and read the verdicts. A row that once survived a sweep and is caught now belongs in `tools/gate/mutants.toml`, which `40-mutants` replays.
 
 A comment pass proves itself apart from them: `python3 -I tools/gate/gate.py comments-only [--base REV]` passes only when every changed path is a Rust file whose code tokens, and each doctest's tokens and fences, match the base, by default the merge-base with `origin/main`. It reads tokens with `gate.py`'s lexer, which follows rustc where a space or a comment could move a token's edge but is not rustc, and doctests as `05-seam`'s host scan and rustdoc's hidden lines do; `10-rust` refuses a doctest that scan cannot read, and a comment PR still runs the whole gate. A local Codex pass is recorded in its rollout: `python3 -I tools/codex-provenance.py LOG...` prints the model and effort each pass ran with, and its header says what it reads and when it fails.
 
@@ -35,6 +35,7 @@ A comment pass proves itself apart from them: `python3 -I tools/gate/gate.py com
 - `15-f64.sh`: no bare `f64` or `f32` in the public API of a planned crate unless its `paths.toml` row allows the item with a reason, then a probe crate the scan must flag exactly.
 - `20-sketch.sh`: the solver-contract sketch built with warnings denied, every doctest, the error code of each compile-fail doctest through the same `gate.py codes`, and the coupling census.
 - `30-data.sh`: every rule in `tools/gate/data.py` over `data/` and each `Data:` line in `.scratch/`, then a must-fail probe for every rule on a synthetic base the tool holds.
+- `40-mutants.sh`: every row of `tools/gate/mutants.toml` still applies, then `tools/mutate.py` replays the rows: all of them in a full or everything run, and in a merge run the rows whose path, test file or shared test modules changed since the base. The changed run only checks that the rows apply.
 
 A new step is an `NN-name.sh` file in `tools/verify.d/`, named in `tools/gate/paths.toml`; `registration.steps` refuses a step that no run selects.
 
