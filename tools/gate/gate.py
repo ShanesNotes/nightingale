@@ -1203,33 +1203,49 @@ def _opens_identity(body: tuple[Token, ...]) -> bool:
     return False
 
 
+def _signature_end(code: tuple[Token, ...], start: int) -> int:
+    depth = 0
+    for k in range(start, len(code)):
+        v = code[k].value
+        if v in ("(", "["):
+            depth += 1
+        elif v in (")", "]"):
+            depth -= 1
+        elif depth == 0 and v in ("{", ";"):
+            return k
+    return len(code)
+
+
 def seal_scopes(src: Source) -> list[tuple[str, tuple[Token, ...]]]:
-    code, stem, out = src.code, pathlib.PurePosixPath(src.path).stem, []
-    impls: list[tuple[int, str, bool]] = []
-    i = 0
-    while i < len(code):
-        while impls and i > impls[-1][0]:
-            impls.pop()
-        t = code[i]
-        named_fn = t.value == "fn" and i + 1 < len(code) and code[i + 1].kind == "ident"
-        if t.kind == "ident" and (t.value == "impl" or named_fn):
-            j = i + 1
-            while j < len(code) and code[j].value not in ("{", ";"):
-                j += 1
-            if j == len(code) or code[j].value == ";":
-                i = j + 1
-                continue
-            end = _closing(code, j)
-            if t.value == "impl":
-                impls.append((end, *_impl_target(code[i + 1 : j])))
-                i = j + 1
-                continue
-            name, owner, body = code[i + 1].value, impls[-1] if impls else None, code[j : end + 1]
-            if (owner is not None and owner[2] and name == "seal") or _opens_identity(body):
-                out.append(("::".join([stem, *([owner[1]] if owner else []), name]), body))
-            i = end + 1
+    code, stem = src.code, pathlib.PurePosixPath(src.path).stem
+    items: list[tuple[int, int, int, str, bool, bool]] = []
+    for i, t in enumerate(code):
+        if t.kind != "ident":
             continue
-        i += 1
+        an_impl = t.value == "impl"
+        named_fn = t.value == "fn" and i + 1 < len(code) and code[i + 1].kind == "ident"
+        if not (an_impl or named_fn):
+            continue
+        j = _signature_end(code, i + 1)
+        if j == len(code) or code[j].value == ";":
+            continue
+        if an_impl:
+            items.append((i, j, _closing(code, j), *_impl_target(code[i + 1 : j]), True))
+        else:
+            items.append((i, j, _closing(code, j), code[i + 1].value, False, False))
+    out = []
+    for start, opening, close, name, _, is_impl in items:
+        if is_impl:
+            continue
+        around = [item for item in items if item[1] < start <= item[2]]
+        owner = max(around, key=lambda item: item[1], default=None)
+        inner = [item for item in items if opening < item[0] <= close]
+        own = tuple(
+            code[k] for k in range(start, close + 1) if not any(item[0] <= k <= item[2] for item in inner)
+        )
+        method = owner is not None and owner[5]
+        if (method and owner[4] and name == "seal") or _opens_identity(own):
+            out.append(("::".join([stem, *([owner[3]] if method else []), name]), own))
     return out
 
 
@@ -1617,7 +1633,27 @@ SEAL_CASES: tuple[tuple[str, frozenset[str]], ...] = (
         "let Self { a: _ } = self; } }",
         frozenset({"case::G::seal a"}),
     ),
+    (
+        'fn digest(t: &T, salt: &[u8; 32]) -> D { let T { a, .. } = t; let o = Canonical::new("t"); o.digest() }',
+        frozenset({"case::digest .."}),
+    ),
+    (
+        'fn digest(T { a, b: _ }: T) -> D { let o = Canonical::new("t"); a.seal(&mut o); o.digest() }',
+        frozenset({"case::digest b"}),
+    ),
+    (
+        "fn make() -> impl Seal { struct L { a: u64, b: u64 } impl Seal for L { fn seal(&self, out: &mut Canonical) "
+        "{ let Self { a, b: _ } = self; } } L { a: 1, b: 2 } }",
+        frozenset({"case::L::seal b"}),
+    ),
+    (
+        'fn read(t: &T) -> (u64, D) { fn tag() -> D { Canonical::new("t").digest() } '
+        "let T { a, .. } = t; (*a, tag()) }",
+        frozenset(),
+    ),
+    ('fn digest(&self) -> impl Sized { let Self { a: _ } = self; Canonical::new("t") }', frozenset({"case::digest a"})),
     ('fn tag(d: D) -> Digest { let D { key: _, v } = d; Digest::of_canonical(b"tag") }', frozenset()),
+    ("impl R { fn seal(&mut self, d: D) { let D { a: _, b } = d; self.b = b; } }", frozenset()),
 )
 
 

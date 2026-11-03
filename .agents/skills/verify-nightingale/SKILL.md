@@ -35,7 +35,7 @@ A comment pass proves itself apart from them: `python3 -I tools/gate/gate.py com
 - `15-f64.sh`: no bare `f64` or `f32` in the public API of a planned crate unless its `paths.toml` row allows the item with a reason, then a probe crate the scan must flag exactly.
 - `20-sketch.sh`: the solver-contract sketch built with warnings denied, every doctest, the error code of each compile-fail doctest through the same `gate.py codes`, and the coupling census.
 - `30-data.sh`: every rule in `tools/gate/data.py` over `data/` and each `Data:` line in `.scratch/`, then a must-fail probe for every rule on a synthetic base the tool holds.
-- `40-mutants.sh`: every row of `tools/gate/mutants.toml` still applies, then `tools/mutate.py` replays the rows: all of them in a full or everything run, and in a merge run the rows whose path, test file or shared test modules changed since the base. The changed run only checks that the rows apply.
+- `40-mutants.sh`: every row of `tools/gate/mutants.toml` still applies, then `tools/mutate.py` replays the rows: all of them in a full or everything run, and in a merge run the rows whose path, or any file under their test crate's `tests/`, changed since the base. The changed run only checks that the rows apply.
 
 A new step is an `NN-name.sh` file in `tools/verify.d/`, named in `tools/gate/paths.toml`; `registration.steps` refuses a step that no run selects.
 

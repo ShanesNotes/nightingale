@@ -25,7 +25,7 @@ pass there before any row runs. Each row prints as it ends, so a killed sweep ke
                      nor a survivor
 
 Exit 0 only when every row is CAUGHT. --check lists the NOT APPLIED rows and stops before any build. --since keeps the
-rows whose path, or whose test's file or shared test modules, changed after REV. Each command runs in its own process
+rows whose path, or any file under their test crate's tests/, changed after REV. Each command runs in its own process
 group, and that group dies with the command and with this script, however this script dies.
 """
 import argparse
@@ -81,15 +81,11 @@ def load_rows(path, only):
 
 def touched(row, changed):
     args = shlex.split(row["test"])
-    crate = next((b for a, b in zip(args, args[1:]) if a in ("-p", "--package")), None)
-    target = next((b for a, b in zip(args, args[1:]) if a == "--test"), None)
-    tests = f"crates/{crate}/tests/"
-
-    def held_by(path):
-        rest = path.removeprefix(tests)
-        return crate is not None and rest != path and (rest == f"{target}.rs" or "/" in rest)
-
-    return row["path"] in changed or any(held_by(path) for path in changed)
+    crates = [b for a, b in zip(args, args[1:]) if a in ("-p", "--package")]
+    crates += [a.removeprefix("--package=") for a in args if a.startswith("--package=")]
+    crates += [a[2:] for a in args if a.startswith("-p") and len(a) > 2]
+    tests = [f"crates/{crate}/tests/" for crate in crates] or ["crates/"]
+    return row["path"] in changed or any(path.startswith(t) and "/tests/" in path for t in tests for path in changed)
 
 
 def run_tethered(argv, budget=None, **popen):
