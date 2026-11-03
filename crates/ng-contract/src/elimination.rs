@@ -137,9 +137,21 @@ pub struct Factors<'b> {
     plan: &'b Elimination,
     lu: Vec<f64>,
 }
+/// Sides one pass carries. Eight keep four chains of subtractions in flight, so a pass of eight costs about one alone.
+const LANES: usize = 8;
+
 impl Factors<'_> {
     /// Replaces a right side, one slot per row, with the update, one slot per unknown.
     pub fn solve(&self, side: &mut [f64]) {
+        self.substitute::<1>(side, 1);
+    }
+    /// `solve` on `width` sides held row by row: side `k` of row `r` is slot `r * width + k`, and its update for
+    /// unknown `u` lands in slot `u * width + k`.
+    pub(crate) fn solve_sides(&self, sides: &mut [f64], width: usize) {
+        self.substitute::<LANES>(sides, width);
+    }
+    /// Each side meets the operations it meets alone, in the same order, so carrying sides together moves no bit.
+    fn substitute<const L: usize>(&self, sides: &mut [f64], width: usize) {
         let Elimination {
             rows,
             unknowns,
@@ -148,25 +160,44 @@ impl Factors<'_> {
             diagonals,
             ..
         } = self.plan;
-        let mut pivoted: Vec<f64> = rows.iter().map(|&row| side[index(row)]).collect();
-        for at in 0..rows.len() {
-            let line = index(starts[at])..index(diagonals[at]);
-            let mut sum = pivoted[at];
-            for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
-                sum -= cell * pivoted[index(column)];
-            }
-            pivoted[at] = sum;
+        let stride = width.div_ceil(L) * L;
+        let mut pivoted = vec![0.0; rows.len() * stride];
+        for (at, &row) in rows.iter().enumerate() {
+            pivoted[at * stride..][..width].copy_from_slice(&sides[index(row) * width..][..width]);
         }
-        for at in (0..rows.len()).rev() {
-            let line = index(diagonals[at]) + 1..index(starts[at + 1]);
-            let mut sum = pivoted[at];
-            for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
-                sum -= cell * pivoted[index(column)];
+        for group in (0..stride).step_by(L) {
+            let lanes = |pivoted: &[f64], at: usize| {
+                let mut lanes = [0.0; L];
+                lanes.copy_from_slice(&pivoted[at * stride + group..][..L]);
+                lanes
+            };
+            for at in 0..rows.len() {
+                let line = index(starts[at])..index(diagonals[at]);
+                let mut sum = lanes(&pivoted, at);
+                for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
+                    for (value, read) in sum.iter_mut().zip(lanes(&pivoted, index(column))) {
+                        *value -= cell * read;
+                    }
+                }
+                pivoted[at * stride + group..][..L].copy_from_slice(&sum);
             }
-            pivoted[at] = sum / self.lu[index(diagonals[at])];
+            for at in (0..rows.len()).rev() {
+                let line = index(diagonals[at]) + 1..index(starts[at + 1]);
+                let mut sum = lanes(&pivoted, at);
+                for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
+                    for (value, read) in sum.iter_mut().zip(lanes(&pivoted, index(column))) {
+                        *value -= cell * read;
+                    }
+                }
+                let pivot = self.lu[index(diagonals[at])];
+                for value in &mut sum {
+                    *value /= pivot;
+                }
+                pivoted[at * stride + group..][..L].copy_from_slice(&sum);
+            }
         }
-        for (&unknown, value) in unknowns.iter().zip(pivoted) {
-            side[index(unknown)] = value;
+        for (at, &unknown) in unknowns.iter().enumerate() {
+            sides[index(unknown) * width..][..width].copy_from_slice(&pivoted[at * stride..][..width]);
         }
     }
 }
@@ -275,21 +306,28 @@ mod tests {
     }
 
     #[test]
-    fn each_side_keeps_the_bits_it_had() {
+    fn each_side_keeps_the_bits_it_had_alone_or_beside_others() {
         let mut state = 0x2545_F491_4F6C_DD1D;
-        let mut alone = Vec::new();
+        let (mut alone, mut together) = (Vec::new(), Vec::new());
         for size in [1, 2, 5, 17, 40] {
             let (_, plan, values) = shuffled(size, &mut state);
             let factors = plan.factor(&values).expect("a pivot");
-            for mut side in sides(size, &mut state) {
+            let sides = sides(size, &mut state);
+            let width = sides.len();
+            let mut rows: Vec<f64> = (0..size * width)
+                .map(|slot| sides[slot % width][slot / width])
+                .collect();
+            factors.solve_sides(&mut rows, width);
+            for (at, mut side) in sides.into_iter().enumerate() {
                 factors.solve(&mut side);
                 alone.extend(side.iter().flat_map(|value| value.to_bits().to_be_bytes()));
+                let column = rows.iter().skip(at).step_by(width);
+                together.extend(column.flat_map(|value| value.to_bits().to_be_bytes()));
             }
         }
-        assert_eq!(
-            hex(&alone),
-            "9c64d90d69b25c98bf72b65448a978ef42f6406db1317f7541e070b3d7eb3478"
-        );
+        let had = "9c64d90d69b25c98bf72b65448a978ef42f6406db1317f7541e070b3d7eb3478";
+        assert_eq!(hex(&alone), had);
+        assert_eq!(hex(&together), had);
     }
 
     #[test]

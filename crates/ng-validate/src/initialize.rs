@@ -12,7 +12,7 @@ const MARCH_BEATS: u32 = 40;
 /// Newton stops when no unknown moved by more than this share of itself, or in `initialize` of its slot's
 /// natural size plus itself. Neither reads a tolerance. In `march` a row too small for the tolerance to see
 /// is solved all the same, and an unknown that rounding keeps near zero never gets there, which costs the
-/// limit's updates and nothing else.
+/// updates until the point's state repeats, at most the limit's, and nothing else.
 const NEWTON_STOP: f64 = 8.0 * f64::EPSILON;
 
 /// A model default reported with every result. A packet of far smaller amounts states its rows' natural sizes.
@@ -26,12 +26,15 @@ pub fn admission_tolerance() -> ErrorScales {
 /// nothing but the stages, so it reaches a guess with the modes in their places. `admit` still judges all of it.
 fn march(system: &mut InitializationSystem<'_>, body: &CompiledBody, workspace: &mut SolveWorkspace) {
     let (size, points) = (system.rows(), system.points());
+    let mut held = Vec::with_capacity(NEWTON_LIMIT as usize * size);
     for _ in 0..MARCH_BEATS {
         for point in 0..points {
             let before = (point + points - 1) % points;
             let (from, to) = (before * size, point * size);
             workspace.unknowns_mut().copy_within(from..from + size, to);
+            held.clear();
             for _ in 0..NEWTON_LIMIT {
+                held.extend_from_slice(&workspace.unknowns_mut()[to..to + size]);
                 let Ok((residuals, block)) = system.stage(workspace, point) else {
                     return;
                 };
@@ -47,6 +50,10 @@ fn march(system: &mut InitializationSystem<'_>, body: &CompiledBody, workspace: 
                 if settled {
                     break;
                 }
+                if let Some(state) = landing(&held, unknowns) {
+                    unknowns.copy_from_slice(state);
+                    break;
+                }
             }
             if system.sweep(workspace, point..point + 1).is_err() {
                 return;
@@ -54,6 +61,22 @@ fn march(system: &mut InitializationSystem<'_>, body: &CompiledBody, workspace: 
         }
         system.restart();
     }
+}
+
+/// Where the limit's last update leaves a point whose state repeats one it held. An update reads nothing else the march
+/// moves at that point, so from the state's first time its updates cycle, none settling, up to the limit.
+fn landing<'h>(held: &'h [f64], now: &[f64]) -> Option<&'h [f64]> {
+    let size = now.len();
+    let same = |state: &[f64]| {
+        state
+            .iter()
+            .zip(now)
+            .all(|(was, is)| was.to_bits() == is.to_bits())
+    };
+    let first = held.chunks(size).position(same)?;
+    let period = held.len() / size - first;
+    let last = first + (NEWTON_LIMIT as usize - first) % period;
+    Some(&held[last * size..][..size])
 }
 
 fn solve_block(body: &CompiledBody, block: &Jacobian, residuals: &[f64]) -> Result<Vec<f64>, usize> {

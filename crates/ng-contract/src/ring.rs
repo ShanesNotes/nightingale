@@ -66,13 +66,21 @@ enum Block<'b> {
     Whole(Vec<Vec<f64>>),
 }
 impl Block<'_> {
-    fn solve(&self, side: &mut [f64]) {
+    /// Replaces `width` sides held row by row, as `Factors::solve_sides` holds them, with their answers.
+    fn solve(&self, sides: &mut [f64], width: usize) {
         match self {
-            Block::Fixed(factors) => factors.solve(side),
+            Block::Fixed(factors) => factors.solve_sides(sides, width),
             Block::Whole(inverse) => {
-                let product = |row: &Vec<f64>| row.iter().zip(&*side).map(|(cell, value)| cell * value).sum();
-                let answer: Vec<f64> = inverse.iter().map(product).collect();
-                side.copy_from_slice(&answer);
+                let answer = |slot: usize| -> f64 {
+                    let side = sides.iter().skip(slot % width).step_by(width);
+                    inverse[slot / width]
+                        .iter()
+                        .zip(side)
+                        .map(|(cell, value)| cell * value)
+                        .sum()
+                };
+                let answers: Vec<f64> = (0..sides.len()).map(answer).collect();
+                sides.copy_from_slice(&answers);
             }
         }
     }
@@ -135,31 +143,35 @@ impl InitializationSystem<'_> {
                 Ok(factors) => Block::Fixed(factors),
                 Err(_) => Block::Whole(inverse(&block)?),
             };
-            let mut walked = vec![0.0; width * size];
-            for (at, column) in walked.chunks_mut(size).enumerate() {
-                for (row, cell) in column.iter_mut().enumerate() {
-                    let slot = point * size + row;
-                    let mut side = if at == seeds { right[slot] } else { 0.0 };
-                    for (place, value) in line(slot).filter(|(place, _)| !own(point).contains(place)) {
-                        side -= value
-                            * if place >= border {
-                                f64::from(at == read.len() + place - border)
-                            } else if point == 0 {
-                                let seed = read.binary_search(&(place - last * size));
-                                f64::from(seed == Ok(at))
-                            } else {
-                                let earlier: &Vec<f64> = &before;
-                                earlier[at * size + place - (point - 1) * size]
-                            };
+            let mut walked = vec![0.0; size * width];
+            for (row, sides) in walked.chunks_mut(width).enumerate() {
+                let slot = point * size + row;
+                sides[seeds] = right[slot];
+                for (place, value) in line(slot).filter(|(place, _)| !own(point).contains(place)) {
+                    if place >= border {
+                        let fit = read.len() + place - border;
+                        for (at, side) in sides.iter_mut().enumerate() {
+                            *side -= value * f64::from(at == fit);
+                        }
+                    } else if point == 0 {
+                        let seed = read.binary_search(&(place - last * size));
+                        for (at, side) in sides.iter_mut().enumerate() {
+                            *side -= value * f64::from(seed == Ok(at));
+                        }
+                    } else {
+                        let earlier = &before[(place - (point - 1) * size) * width..][..width];
+                        for (side, earlier) in sides.iter_mut().zip(earlier) {
+                            *side -= value * earlier;
+                        }
                     }
-                    *cell = side;
                 }
-                lu.solve(column);
             }
+            lu.solve(&mut walked, width);
             for (fit, row) in anchors.iter_mut().enumerate() {
                 for (place, value) in line(border + fit).filter(|(place, _)| own(point).contains(place)) {
-                    for (at, cell) in row.iter_mut().enumerate() {
-                        *cell += value * walked[at * size + place - point * size];
+                    let walked = &walked[(place - point * size) * width..][..width];
+                    for (cell, walked) in row.iter_mut().zip(walked) {
+                        *cell += value * walked;
                     }
                 }
             }
@@ -172,13 +184,14 @@ impl InitializationSystem<'_> {
         let corner = size + fits;
         let mut matrix = vec![vec![0.0; corner + 1]; corner];
         let add = |cells: &mut Vec<f64>, source: &[f64], place: usize, value: f64| {
+            let sides = &source[place * width..][..width];
             for (at, &seed) in read.iter().enumerate() {
-                cells[seed] += value * source[at * size + place];
+                cells[seed] += value * sides[at];
             }
             for fit in 0..fits {
-                cells[size + fit] += value * source[(read.len() + fit) * size + place];
+                cells[size + fit] += value * sides[read.len() + fit];
             }
-            cells[corner] -= value * source[seeds * size + place];
+            cells[corner] -= value * sides[seeds];
         };
         for (row, cells) in matrix.iter_mut().enumerate().take(size) {
             let slot = last * size + row;
@@ -219,9 +232,50 @@ impl InitializationSystem<'_> {
                 let foreign = line(slot).filter(|(place, _)| !own(point).contains(place));
                 *cell = right[slot] - foreign.map(|(place, value)| value * update[place]).sum::<f64>();
             }
-            lu.solve(&mut side);
+            lu.solve(&mut side, 1);
             update[point * size..(point + 1) * size].copy_from_slice(&side);
         }
         Ok(update)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Block, inverse};
+    use crate::{Jacobian, UnknownId};
+
+    #[test]
+    fn a_whole_block_reads_each_side_as_it_reads_it_alone() {
+        let size = 4;
+        let (mut offsets, mut columns, mut values) = (vec![0], Vec::new(), Vec::new());
+        for row in 0..size {
+            for column in 0..size {
+                columns.push(UnknownId::at(column));
+                let off = 0.25 * (row as f64 - column as f64);
+                values.push(if row == column { 3.0 + row as f64 } else { off });
+            }
+            offsets.push(columns.len());
+        }
+        let block = Jacobian::of_parts(offsets, columns, values);
+        let whole = Block::Whole(inverse(&block).expect("a pivot"));
+        let width = 5;
+        let value = |side: usize, row: usize| match (side + row) % 3 {
+            0 => -0.0,
+            1 => 0.1 * (side + 1) as f64,
+            _ => -(row as f64) - 0.5,
+        };
+        let sides: Vec<Vec<f64>> = (0..width)
+            .map(|side| (0..size).map(|row| value(side, row)).collect())
+            .collect();
+        let mut together: Vec<f64> = (0..size * width)
+            .map(|slot| sides[slot % width][slot / width])
+            .collect();
+        whole.solve(&mut together, width);
+        for (at, mut alone) in sides.into_iter().enumerate() {
+            whole.solve(&mut alone, 1);
+            for (row, value) in alone.iter().enumerate() {
+                assert_eq!(value.to_bits(), together[row * width + at].to_bits());
+            }
+        }
     }
 }
