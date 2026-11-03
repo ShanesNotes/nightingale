@@ -2,6 +2,7 @@ pub mod forced_refusal;
 pub mod must_fail;
 pub mod stages;
 
+use core::num::NonZeroU64;
 use ng_contract::*;
 
 const MILLISECOND: u64 = 1_000_000;
@@ -11,7 +12,7 @@ pub fn resolution(scheme: StageScheme, tag: &[u8], budget: u32) -> DeclaredResol
     let scales = ErrorScales::uniform(measure(1.0), measure(1e-5)).expect("positive");
     DeclaredResolution::new(
         Digest::of_canonical(tag),
-        MILLISECOND,
+        NonZeroU64::new(MILLISECOND).expect("a floor"),
         budget,
         ArithmeticProfile::contract_v1(),
         scheme,

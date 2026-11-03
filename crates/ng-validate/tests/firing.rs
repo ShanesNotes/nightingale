@@ -98,7 +98,7 @@ fn a_guard_crossed_and_crossed_back_inside_a_step_refuses_it_and_lands() {
     packet
         .start_mode(named("state"), "before", "synthetic")
         .expect("once");
-    let core = ReferenceIntegrator::new(SECOND).with_floor(SECOND / 1024);
+    let core = ReferenceIntegrator::new(SECOND).with_floor(NonZeroU64::new(SECOND / 1024).expect("a floor"));
     let port = BoundaryPort::new(Vec::new()).expect("no event");
     let session = admit_fixture(&body, packet, port, &core).expect("admitted");
     let Ok(session) = run_until(session, SimTime::from_ns(SECOND)) else {
@@ -604,7 +604,7 @@ fn a_step_stops_at_a_guards_interval_though_no_row_moves_that_fast() -> Result<(
         "synthetic",
     )?;
     packet.start_mode(named("state"), "before", "synthetic")?;
-    let core = ReferenceIntegrator::new(SECOND).with_floor(1_000);
+    let core = ReferenceIntegrator::new(SECOND).with_floor(NonZeroU64::new(1_000).expect("a floor"));
     let session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core)?;
     let started = session.record().accepted().modes()[0];
     let Ok(session) = run_until(session, SimTime::from_ns(SECOND / 4)) else {

@@ -1,3 +1,4 @@
+use core::num::NonZeroU64;
 use ng_contract::*;
 
 const SECOND: u64 = 1_000_000_000;
@@ -117,7 +118,7 @@ fn image(body: &CompiledBody, sites: [SiteId; 2]) -> ImageParts {
     let scales = ErrorScales::uniform(measure_of(1.0), measure_of(0.0)).expect("scales");
     let resolution = DeclaredResolution::new(
         digest,
-        1,
+        NonZeroU64::MIN,
         4,
         ArithmeticProfile::contract_v1(),
         StageScheme::forward_euler(),

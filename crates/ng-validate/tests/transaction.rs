@@ -1,6 +1,7 @@
 mod cores;
 
 use core::cell::RefCell;
+use core::num::NonZeroU64;
 use cores::forced_refusal::{ForcedRefusal, Refuser};
 use cores::must_fail::{
     EarlierAttempt, ForeignBody, ForeignHistory, ForeignProposal, ForeignRefusal, ForeignWorkspace,
@@ -498,7 +499,7 @@ fn an_estimate_above_one_at_the_floor_faults_and_never_publishes() {
     let case = stepped();
     let core = reference(8 * SECOND)
         .with_scales(scales(1e-3, 0.0))
-        .with_floor(4 * SECOND);
+        .with_floor(NonZeroU64::new(4 * SECOND).expect("a floor"));
     let session = case.admit(&core).expect("admitted");
     let before = session.record().digests();
     let stopped = exhaust(session.step());
@@ -1240,7 +1241,7 @@ fn admission_refuses_a_workspace_that_moved_a_start_or_came_from_another_body() 
 }
 
 #[test]
-fn a_session_refuses_an_identity_of_another_body_origin_or_solver_and_a_zero_floor() {
+fn a_session_refuses_an_identity_of_another_body_origin_or_solver() {
     let (case, other) = (stepped(), TwoReservoirs::closed().expect("a body"));
     let body = case.body();
     let core = reference(8 * SECOND);
@@ -1296,13 +1297,6 @@ fn a_session_refuses_an_identity_of_another_body_origin_or_solver_and_a_zero_flo
     let foreign_core = reference(4 * SECOND);
     let wrong_core = RunIdentity::new(body.model_hash(), packet, seed, foreign_core.resolution());
     assert_eq!(admit(origin, wrong_core), Some(AdmissionError::IdentityMismatch));
-
-    let bottomless = reference(8 * SECOND).with_floor(0);
-    let origin = revision(&case);
-    let packet = origin.packet_hash();
-    let identity = RunIdentity::new(body.model_hash(), packet, seed, bottomless.resolution());
-    let refused = Session::admit(body, &bottomless, origin, identity).err();
-    assert_eq!(refused, Some(AdmissionError::ZeroMinimumInterval));
 }
 
 #[test]
@@ -1314,7 +1308,10 @@ fn two_settings_of_one_core_never_share_an_identity() {
         .resolution()
         .digest();
     assert_ne!(tight, digest(8 * SECOND));
-    let floored = reference(8 * SECOND).with_floor(SECOND).resolution().digest();
+    let floored = reference(8 * SECOND)
+        .with_floor(NonZeroU64::new(SECOND).expect("a floor"))
+        .resolution()
+        .digest();
     assert_ne!(floored, digest(8 * SECOND));
     let identity = |seed: Seed| {
         let case = stepped();
@@ -1573,7 +1570,7 @@ impl CoupledSolver for ForwardEulerWithScale {
     fn resolution(&self) -> DeclaredResolution {
         DeclaredResolution::new(
             Digest::of_canonical(b"forward euler, tight"),
-            MILLISECOND,
+            NonZeroU64::new(MILLISECOND).expect("a floor"),
             12,
             ArithmeticProfile::contract_v1(),
             StageScheme::forward_euler(),
@@ -1976,16 +1973,6 @@ fn an_accuracy_policy_needs_a_case_and_a_grid() {
 }
 
 #[test]
-fn a_core_that_cannot_be_admitted_has_not_failed_on_accuracy() {
-    let core = reference(8 * SECOND).with_floor(0);
-    let failure = accuracy(&core, &gate(stepped()));
-    assert!(
-        matches!(failure, Err(AccuracyFailure::Admission(_))),
-        "{failure:?}"
-    );
-}
-
-#[test]
 fn a_core_that_cannot_finish_a_case_has_not_failed_on_accuracy() {
     let core = NeverConverges {
         interval_ns: 8 * SECOND,
@@ -2285,7 +2272,7 @@ fn newton_reaches_the_root(rate: f64, interval_ns: u64) {
             .expect("once");
     }
     let core = reference(interval_ns)
-        .with_floor(1)
+        .with_floor(NonZeroU64::MIN)
         .with_scales(scales(1e-14, 0.0));
     let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
     let (session, _) = accepted(session.step());
@@ -2628,7 +2615,7 @@ fn a_singular_row_is_named_by_the_fault_that_ends_the_run() {
             .start(row, measure::<Dimensionless>(start), "synthetic")
             .expect("once");
     }
-    let core = reference(SECOND).with_floor(SECOND);
+    let core = reference(SECOND).with_floor(NonZeroU64::new(SECOND).expect("a floor"));
     let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
     let stopped = exhaust(session.step());
     assert_eq!(stopped.fault().kind(), EngineFaultKind::NoAdmissibleStep);

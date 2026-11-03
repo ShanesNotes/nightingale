@@ -1,6 +1,7 @@
 //! Identity and time. Identity carries schema and version, never process addresses or `Debug`
 //! text. All physical and event boundaries are integer nanoseconds.
 use super::{AdmissionError, Dimensionless, Measure};
+use core::num::NonZeroU64;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Digest {
@@ -106,7 +107,7 @@ pub enum RateBand {
 /// resolution.
 pub struct DeclaredResolution {
     _policy: Digest,
-    _minimum_interval_ns: u64,
+    _minimum_interval_ns: NonZeroU64,
     _retry_budget: u32,
     _arithmetic: ArithmeticProfile,
     _scheme: StageScheme,
@@ -117,11 +118,10 @@ impl DeclaredResolution {
     /// settings of one core never share an identity. `minimum_interval_ns` is the floor: a refusal
     /// whose retry would go below it, or past `retry_budget`, is the fault `NoAdmissibleStep`, so a
     /// core cannot accept excess error there. A breakpoint may still end an interval shorter than
-    /// the floor. Session admission refuses a zero floor. The value is policy, chosen per core
-    /// before the arena.
+    /// the floor. The value is policy, chosen per core before the arena.
     pub fn new(
         _policy: Digest,
-        _minimum_interval_ns: u64,
+        _minimum_interval_ns: NonZeroU64,
         _retry_budget: u32,
         _arithmetic: ArithmeticProfile,
         _scheme: StageScheme,

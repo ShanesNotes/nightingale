@@ -92,7 +92,7 @@ impl<'m, S> Session<'m, S> {
     }
 }
 impl<'m> Session<'m, Running> {
-    /// Refuses an identity that is not this body's, this origin's and this solver's, and a zero floor.
+    /// Refuses an identity that is not this body's, this origin's and this solver's.
     pub fn admit(
         body: &'m CompiledBody,
         solver: &'m dyn CoupledSolver,
@@ -106,9 +106,6 @@ impl<'m> Session<'m, Running> {
             || identity.resolution().digest() != resolution.digest()
         {
             return Err(AdmissionError::IdentityMismatch);
-        }
-        if resolution.minimum_interval_ns() == 0 {
-            return Err(AdmissionError::ZeroMinimumInterval);
         }
         Ok(Self {
             solver,
@@ -129,9 +126,6 @@ impl<'m> Session<'m, Running> {
             || expected.resolution().digest() != solver.resolution().digest()
         {
             return Err(CheckpointError::IdentityMismatch);
-        }
-        if solver.resolution().minimum_interval_ns() == 0 {
-            return Err(CheckpointError::ZeroMinimumInterval);
         }
         let resolve = |seal: &_| store.resolve(seal);
         let record = restore(saved, expected, body, &resolve, Continuing::Resume)?;

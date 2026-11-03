@@ -1,3 +1,4 @@
+use core::num::NonZeroU64;
 use ng_contract::*;
 use ng_validate::*;
 
@@ -74,7 +75,7 @@ fn a_guard_at_the_end_of_a_step_hides_no_earlier_crossing_at_a_stage() {
     packet
         .start_mode(name("state"), "before", "synthetic")
         .expect("mode");
-    let core = ReferenceIntegrator::new(SECOND).with_floor(SECOND / 1000);
+    let core = ReferenceIntegrator::new(SECOND).with_floor(NonZeroU64::new(SECOND / 1000).expect("a floor"));
     let port = BoundaryPort::new(Vec::new()).expect("empty timeline");
     let session = admit_fixture(&body, packet, port, &core).expect("admitted");
     let Ok(session) = run_until(session, SimTime::from_ns(1)) else {

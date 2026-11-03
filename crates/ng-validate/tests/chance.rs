@@ -6,6 +6,7 @@ use chance_cores::{
     RefusesEveryLanding, RefusesItsFirstTrial, TracesItsTickets, VerifiesDry,
 };
 use core::cell::{Cell, RefCell};
+use core::num::NonZeroU64;
 use ng_contract::*;
 use ng_record::*;
 use ng_validate::*;
@@ -467,7 +468,7 @@ fn two_guards_racing_for_one_mode_fire_once_and_the_loser_keeps_its_draw() {
             .delivering(Vec::new())
             .seeded(Seed::new([seed, 1, 2, 3]))
             .until(at(120));
-        let core = reference(16 * SECOND).with_floor(300 * SECOND);
+        let core = reference(16 * SECOND).with_floor(NonZeroU64::new(300 * SECOND).expect("a floor"));
         let thresholds = events(&case, &reference(SECOND));
         let Some(loser) = (thresholds.iter()).find(|event| event.stream().local == SECOND_STREAM) else {
             continue;
@@ -1471,29 +1472,6 @@ fn a_forcing_period_the_clock_cannot_hold_is_malformed_under_a_good_digest() {
             "{seconds}"
         );
     }
-}
-
-/// Only forged bytes can carry such an identity. The refusal comes before any byte is read, so honest bytes press
-/// it: they would come back as another identity's.
-#[test]
-fn resume_refuses_a_floor_of_zero_as_admission_does() {
-    let case = ChanceCase::ectopy().expect("a body");
-    let core = reference(SECOND);
-    let session = case.admit(&core).expect("admitted");
-    let mut store = Store::default();
-    let saved = session.checkpoint(&mut store).expect("saved");
-    let known = session.record().identity();
-    let zero = reference(SECOND).with_floor(0);
-    let identity = RunIdentity::new(
-        known.model(),
-        known.packet(),
-        Seed::new([1, 2, 3, 4]),
-        zero.resolution(),
-    );
-    assert_eq!(
-        Session::resume(&saved, &identity, case.body(), &zero, &store).err(),
-        Some(CheckpointError::ZeroMinimumInterval)
-    );
 }
 
 #[test]
