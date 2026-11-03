@@ -27,8 +27,9 @@ pub trait ReplayCase {
     ) -> Result<Session<'m, Running>, InitializationFailure>;
 }
 
-/// Builds a core with no state from earlier runs. A gate calls it once per run, its reference run first, so
-/// a core that must differ between two runs can differ only through what its factory gives it.
+/// Builds a core with no state from earlier runs. A gate calls it for every run but a rewind's forks, which
+/// keep the parent's core, and for its reference run first. Two fresh runs can differ only through what the
+/// factory gives each.
 pub trait CoreFactory {
     fn fresh(&self) -> Box<dyn CoupledSolver + '_>;
 }
@@ -44,7 +45,7 @@ where
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClockSource {
-    /// A list of readings, which proves pace cannot reach a run and is no live clock.
+    /// A list of readings, not a live clock.
     Scripted,
     Host,
 }
@@ -99,7 +100,7 @@ pub enum ReplayGate {
     ExtraEvaluation,
     /// Two step policies, each the same events as the reference within the plan's distance (I8).
     StepPolicy,
-    /// One run detached, one attached and one with a changed lens: same bits, and new observations (I7).
+    /// One run detached, one attached and one with a changed lens: same bits (I7).
     NonPerturbation,
 }
 
@@ -448,7 +449,7 @@ impl HistoryStore for MemoryStore {
 }
 
 /// Each side of a step that started at a breakpoint, met a refusal or fired is a boundary a resume is likeliest
-/// to lose. Neighbouring revisions are never both multiples of a hidden state's period, whatever `every` is.
+/// to lose. Neighbouring revisions are never both multiples of a hidden period over one, whatever `every` is.
 fn boundaries(rows: &[Row], every: u64) -> Vec<u64> {
     let last = rows.len() as u64 - 1;
     let mut revisions = Vec::new();
@@ -551,8 +552,8 @@ fn stamped(gate: ReplayGate, case: &dyn ReplayCase) -> Result<Vec<BoundaryEvent>
     Ok(events)
 }
 
-/// Costs one run per input and one more: each input's arrival is read off the run that holds every input
-/// before it at its own arrival.
+/// Costs the reference run, one run per input and one more: each input's arrival is read off the run that
+/// holds every input before it at its own arrival.
 fn late_admission_gate(
     case: &dyn ReplayCase,
     cores: &dyn CoreFactory,
@@ -592,7 +593,7 @@ fn late_admission_gate(
 }
 
 /// The rewind keeps the parent's core object on purpose: a state it kept while the parent ran ahead has
-/// nowhere to hide. It runs from two neighbouring revisions, so a hidden period cannot land on both.
+/// nowhere to hide. It runs from two neighbouring revisions, so no hidden period over one lands on both.
 fn rewind_gate(case: &dyn ReplayCase, cores: &dyn CoreFactory) -> Result<GateEvidence, ReplayFailure> {
     let gate = ReplayGate::Rewind;
     let checkpointed = |error| ReplayFailure::Checkpoint { gate, error };
@@ -826,8 +827,8 @@ fn watched(
     Ok((Trace { rows, last, seal }, stream))
 }
 
-/// A view borrows the session and a record holds no `Cell`, so reading moves no bit. What this gate catches
-/// is a core told about the reading.
+/// A view borrows the session, and a record is `Sync`, so nothing in it hides a `Cell` that reading could
+/// move. What this gate catches is a core told about the reading.
 fn non_perturbation_gate(
     case: &dyn ReplayCase,
     cores: &dyn CoreFactory,

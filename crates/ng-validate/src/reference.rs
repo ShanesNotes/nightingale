@@ -9,14 +9,15 @@ const NANOSECONDS_PER_SECOND: f64 = 1e9;
 const NEWTON_STOP: f64 = 8.0 * f64::EPSILON;
 const NOISE: f64 = 1e-12;
 
-/// A model default reported with every result. Measured on the two-reservoir case: the estimate reaches
-/// 4.0 on 64 s steps of amounts near 5e5, so this passes those steps and refuses much longer ones.
+/// A model default. Measured on the two-reservoir case: the estimate reaches 4.0 on 64 s steps of amounts
+/// near 5e5, so this passes those steps and refuses much longer ones.
 fn default_scales() -> ErrorScales {
     let scale = |value| Measure::new(value).expect("a finite constant");
     ErrorScales::uniform(scale(1.0), scale(1e-5)).expect("positive constants")
 }
 
-/// One fixed interval, cut short only at breakpoints and by refusals.
+/// One fixed interval. A ticket stops short of it at a breakpoint, at the body's tightest rate class and at a
+/// forcing's knot period, and a refusal halves it.
 pub struct ReferenceIntegrator {
     interval_ns: u64,
     minimum_interval_ns: u64,
@@ -131,8 +132,8 @@ fn newton(
     Err(ticket.refuse(NumericalRefusal::IterationLimit))
 }
 
-/// The body's fixed elimination, or a dense solve for a pivot it cannot take, which is where a mode leaves a row
-/// with nothing on its matched unknown.
+/// The body's fixed elimination, or a dense solve for a pivot it cannot take or an update it leaves not
+/// finite. A mode that leaves a row with nothing on its matched unknown gives such a pivot.
 fn solve_sparse(
     problem: &CoupledProblem<'_>,
     jacobian: &Jacobian,

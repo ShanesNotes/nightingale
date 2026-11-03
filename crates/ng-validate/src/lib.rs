@@ -1,4 +1,5 @@
-//! Synthetic composition root and stand-ins, reference integrator, certificate and arena.
+//! Synthetic fixtures, the slice's composition root and held stand-ins, the admission solve, the reference
+//! integrator, the accuracy gate, the certificate and the replay gates.
 //!
 //! # Type rules
 //!
@@ -20,7 +21,7 @@
 //!     certify(&record.conservation(), policy)
 //! }
 //! ```
-//! A pace is when a host calls `step`, and `step` takes nothing, so a caller's stop cannot reach a core.
+//! A pace is when a host calls `step`, and `step` takes nothing, so a caller's stop cannot cut a step.
 //! ```compile_fail,E0061
 //! use ng_contract::SimTime;
 //! use ng_record::*;
@@ -35,7 +36,7 @@
 //!     run_until(session, stop)
 //! }
 //! ```
-//! Validation takes only a synthetic fixture, so the arena is nonclinical by type.
+//! Admission here takes only a synthetic fixture, so a run it admits is nonclinical by type.
 //! ```compile_fail,E0308
 //! use ng_contract::*;
 //! use ng_record::{Running, Session};

@@ -59,8 +59,7 @@ pub struct TwoReservoirs {
     end: SimTime,
 }
 impl TwoReservoirs {
-    /// `1 / k` is 1000 s; start `(500500, 499500)`; 20,000 units delivered over 2,000 to 6,000 s; the case
-    /// ends at 12,000 s, long after the difference has settled again.
+    /// The case ends long after the difference has settled again.
     pub fn stepped_inflow() -> Result<Self, AdmissionError> {
         let delivery = Delivery {
             id: b"stepped inflow",
@@ -76,16 +75,14 @@ impl TwoReservoirs {
     pub fn closed() -> Result<Self, AdmissionError> {
         Self::declared(None, None, START, Vec::new())
     }
-    /// The open body with no delivery, the circulation law trusted only inside `range`.
     pub fn trusted_within(range: ValidityRange<Rate<Water>>) -> Result<Self, AdmissionError> {
         Self::declared(Some(BoundaryDirection::IntoBody), Some(range), START, Vec::new())
     }
-    /// The open body from `start`, with these deliveries into `a`.
     pub fn delivering(start: [Measure<Water>; 2], deliveries: Vec<Delivery>) -> Result<Self, AdmissionError> {
         let start = start.map(|amount| number(&amount));
         Self::declared(Some(BoundaryDirection::IntoBody), None, start, deliveries)
     }
-    /// The same body with the boundary running out of `a`: these deliveries leave it.
+    /// The open body with the boundary running out of `a`: these deliveries leave it.
     pub fn draining(start: [Measure<Water>; 2], deliveries: Vec<Delivery>) -> Result<Self, AdmissionError> {
         let start = start.map(|amount| number(&amount));
         Self::declared(Some(BoundaryDirection::OutOfBody), None, start, deliveries)
@@ -167,12 +164,10 @@ impl TwoReservoirs {
     pub fn relaxation_ns(&self) -> u64 {
         RELAXATION_SECONDS * SECOND
     }
-    /// The instant of the first delivery, and that event's id.
     pub fn delivery(&self) -> Option<(SimTime, InputId)> {
         let delivery = self.deliveries.first()?;
         Some((delivery.from, input_of(delivery.id)))
     }
-    /// Both amount rows, `a` first.
     pub fn rows(&self) -> [RowId; 2] {
         let row = |site| {
             let lumen = RowKind::Amount {
@@ -474,7 +469,7 @@ impl ChanceCase {
     pub fn echoing() -> Result<Self, AdmissionError> {
         Self::declared(Variant::Echoing)
     }
-    /// The walk's relaxing law on the ectopy rate, which goes negative.
+    /// The signature walk's relaxing law on the ectopy rate, which goes negative.
     pub fn relaxing() -> Result<Self, AdmissionError> {
         Self::declared(Variant::Relaxing)
     }
@@ -806,8 +801,7 @@ impl ReplayCase for ChanceCase {
 }
 
 /// Binds a fixture packet and admits a session on the packet's own values: an initializer that returns its guess,
-/// so a packet they do not solve is refused with the row named. `admit_solved` solves one. Only a synthetic fixture
-/// enters, so validation is nonclinical by type. A core's declared policy tags its continuation.
+/// so a packet whose own values do not solve it is refused with the row named. `admit_solved` solves one.
 pub fn admit_fixture<'m>(
     body: &'m CompiledBody,
     packet: ParameterPacket<SyntheticFixture>,

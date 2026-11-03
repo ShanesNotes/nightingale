@@ -8,15 +8,14 @@ const FIT_REACH: f64 = 0.25;
 const NOISE: f64 = 1e-11;
 const FLOOR: f64 = 0.1;
 const HALVINGS: u32 = 12;
-/// The prototype reached a settled beat in 40 passes of the ring's own stages.
 const MARCH_BEATS: u32 = 40;
-/// Newton stops when no unknown moved by more than this share of itself. Each is read at its own size and no
-/// tolerance is read, so a row or a fit too small for the tolerance to see is solved all the same. An unknown that
-/// rounding keeps near zero never gets there, which costs the limit's updates and nothing else.
+/// Newton stops when no unknown moved by more than this share of itself, or in `initialize` of its slot's
+/// natural size plus itself. Neither reads a tolerance. In `march` a row too small for the tolerance to see
+/// is solved all the same, and an unknown that rounding keeps near zero never gets there, which costs the
+/// limit's updates and nothing else.
 const NEWTON_STOP: f64 = 8.0 * f64::EPSILON;
 
-/// A model default reported with every result, for rows near unit size. A packet of far smaller amounts states its
-/// own, because one scale cannot read both until rows have their own.
+/// A model default reported with every result. A packet of far smaller amounts states its rows' natural sizes.
 pub fn admission_tolerance() -> ErrorScales {
     let scale = |value| Measure::new(value).expect("a finite constant");
     ErrorScales::uniform(scale(1e-9), scale(1e-12)).expect("positive constants")
@@ -132,11 +131,10 @@ fn step(
     }
 }
 
-/// The one admission solve, a function of the packet and the window alone, so every core starts from one start
-/// state.
+/// The one admission solve. No core reaches it, so every core starts from one start state.
 ///
-/// It judges nothing. It stops where it stands on a singular update or a trial outside a law's domain, and `admit`
-/// is the one judge of a start.
+/// It judges nothing. It stops where it stands at a point outside a law's domain, on a singular update or when no
+/// trial of an update has a value, and `admit` is the one judge of a start.
 fn initialize(system: &mut InitializationSystem<'_>, body: &CompiledBody) -> SolveWorkspace {
     let mut workspace = system.workspace();
     if system.points() > 1 {
@@ -163,7 +161,7 @@ fn initialize(system: &mut InitializationSystem<'_>, body: &CompiledBody) -> Sol
             if !step(system, body, &mut workspace, &residuals, &update) {
                 return workspace;
             }
-            // Rounding keeps a store of 1e7 moving past where any row can improve, so an update that has stopped
+            // Rounding keeps a store moving past where any row can improve, so an update that has stopped
             // shrinking this close to rounding has nothing left to give.
             if moved <= NEWTON_STOP || (moved >= 0.5 * last && moved <= NOISE) {
                 break;
@@ -178,7 +176,6 @@ fn initialize(system: &mut InitializationSystem<'_>, body: &CompiledBody) -> Sol
     workspace
 }
 
-/// A solved admission: the run and where each of its values came from.
 pub struct Admitted<'m> {
     pub session: Session<'m, Running>,
     pub provenance: InitializationProvenance,
