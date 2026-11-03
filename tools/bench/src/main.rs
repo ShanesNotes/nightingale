@@ -1,3 +1,4 @@
+use core::num::NonZeroU64;
 use ng_contract::*;
 use ng_validate::*;
 use std::hint::black_box;
@@ -49,7 +50,7 @@ fn main() {
 
     let scale = |value| Measure::<Dimensionless>::new(value).expect("finite");
     let core = ReferenceIntegrator::new(interval_ms * MS)
-        .with_floor(MS / 10)
+        .with_floor(NonZeroU64::new(MS / 10).expect("a floor"))
         .with_scales(ErrorScales::uniform(scale(1.0), scale(1e-3)).expect("positive"));
     let (packet, lens) = (
         arena_packet(&body).expect("packet"),

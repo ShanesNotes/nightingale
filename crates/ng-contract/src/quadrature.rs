@@ -325,7 +325,9 @@ impl StepProposal {
         let before_the_end = (witness.stages.iter())
             .filter(|stage| stage.offset_ns < ticket.length_ns())
             .map(|stage| (stage.unknowns.as_slice(), stage.offset_ns));
-        if ticket.length_ns() > ticket.floor_ns && problem.crossed_inside(&ticket, before_the_end, &state)? {
+        if ticket.length_ns() > ticket.floor_ns.get()
+            && problem.crossed_inside(&ticket, before_the_end, &state)?
+        {
             return Err(ticket.refuse(NumericalRefusal::GuardInside));
         }
         let coordinates = state.coordinates();

@@ -28,6 +28,9 @@ The native Rust engine for one simulated patient. Read `docs/srs.md` first: it b
 | No unsafe code, host libm, hash order, wall clock or sockets, through the workspace lints and `clippy.toml` | `tools/verify.d/10-rust.sh`, whose bans probe proves each entry and that every stable float method is banned or exact |
 | No bare `f64` across a crate boundary | `tools/verify.d/15-f64.sh` |
 | A comparison of ledger values fails closed on a NaN: `Compensated` has only `at_most` | the compile-fail doctest in `crates/ng-contract/src/lib.rs` |
+| A core's floor is a `NonZeroU64`, so no door refuses a zero one | the compile-fail doctest in `crates/ng-contract/src/lib.rs` |
+| A seal or digest names every field it holds: one it leaves out with `name: _` has a `seal_skip` entry and its reason in `tools/gate/paths.toml`, and `..` hides none | `tools/verify.d/05-seam.sh` (`seam.seal`), whose probe replays the layout's skipped `judged` |
+| A test that once missed a mistake keeps seeing it: each row of `tools/gate/mutants.toml` still applies, and a change to a row's code or test replays the row | `tools/verify.d/40-mutants.sh` |
 | Records in `data/` hold closed fields and capped text, tier rules and locators; an anchor names a method and window and rests on no inference; a derivation recomputes with dimensions; each identity closes | `tools/verify.d/30-data.sh`, whose probes refuse a record built to break each rule |
 | Comments | the `/no-comments` report |
 

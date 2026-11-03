@@ -45,7 +45,7 @@ done <<<"$plan"
 echo "gate: mode=$mode scope=$scope base=$base reason=$reason"
 echo "gate: crates=${crates:-none} smoke=${smoke:-none}"
 echo "gate: steps=$steps"
-export NG_GATE_MODE="$mode" NG_GATE_SCOPE="$scope" NG_GATE_CRATES="$crates" NG_GATE_SMOKE="$smoke"
+export NG_GATE_MODE="$mode" NG_GATE_SCOPE="$scope" NG_GATE_BASE="$base" NG_GATE_CRATES="$crates" NG_GATE_SMOKE="$smoke"
 
 for step in tools/verify.d/*.sh; do
   name=$(basename "$step")

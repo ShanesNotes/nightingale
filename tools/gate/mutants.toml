@@ -1,0 +1,90 @@
+[[mutant]]
+name = "binding-set"
+path = "crates/ng-contract/src/compile.rs"
+old = '''Family::Binding(set, species) => (anatomy.in_set(set).into_iter())'''
+new = '''Family::Binding(_, species) => (anatomy.sites())'''
+test = "-p ng-contract --test map_reads a_binding_stands_only_on_its_own_set_of_sites"
+
+[[mutant]]
+name = "first-wins"
+path = "crates/ng-contract/src/body.rs"
+old = '''if crossed && guard.armed(modes) {'''
+new = '''if crossed {'''
+test = "-p ng-validate --test firing of_two_guards_on_one_variable_only_the_first_fires"
+
+[[mutant]]
+name = "quotient-slope"
+path = "crates/ng-contract/src/evaluate.rs"
+old = '''slopes[*b] -= slope * values[*a] / (divisor * divisor);'''
+new = '''slopes[*b] -= slope * values[at] / divisor;'''
+test = "-p ng-validate --test operators every_operators_slope_stays_on_the_bits_of_a_rings_matrix"
+
+[[mutant]]
+name = "start-hashes-stated-modes"
+path = "crates/ng-contract/src/admission.rs"
+old = '''parameters.packet.reading(time, start, &solved, fitted, &history);'''
+new = '''parameters.packet.reading(time, start, &parameters.modes, fitted, &history);'''
+test = "-p ng-contract --test solved_modes each_part_of_an_admitted_start_moves_the_hash_a_run_names"
+
+[[mutant]]
+name = "start-hashes-no-history"
+path = "crates/ng-contract/src/packet.rs"
+old = '''
+        history.digest().seal(&mut out);
+        Self { digest: out.digest() }
+'''
+new = '''
+        Self { digest: out.digest() }
+'''
+test = "-p ng-contract --test solved_modes each_part_of_an_admitted_start_moves_the_hash_a_run_names"
+
+[[mutant]]
+name = "layout-skips-judged"
+path = "crates/ng-contract/src/body.rs"
+old = '''
+        out.length(judged.len());
+        for &store in judged {
+            out.number(u64::from(store));
+        }
+'''
+new = '''
+        let _ = judged;
+'''
+test = "-p ng-contract --test model_hash a_closed_row_and_a_plain_residual_are_two_models"
+
+[[mutant]]
+name = "left-out-reason-unhashed"
+path = "crates/ng-contract/src/scope.rs"
+old = '''
+            out.number(space as u64);
+            out.text(reason);
+'''
+new = '''
+            out.number(space as u64);
+'''
+test = "-p ng-contract --test model_hash a_changed_rate_class_law_left_out_space_or_reason_anatomy_or_validity_changes_the_hash"
+
+[[mutant]]
+name = "applied-fence-unsealed"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''
+        chain.seal(&mut out);
+        fence.seal(&mut out);
+'''
+new = '''
+        chain.seal(&mut out);
+        let _ = fence;
+'''
+test = "-p ng-contract --test image the_applied_digest_covers_the_fence_and_an_input_no_list_still_holds"
+
+[[mutant]]
+name = "decoded-delivery-unchecked"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''
+            body.check_delivery(&delivery, start_of_time)
+                .map_err(|_| Malformed)?;
+'''
+new = '''
+            let _ = start_of_time;
+'''
+test = "-p ng-contract --test image each_field_a_run_never_writes_is_malformed"

@@ -1,3 +1,5 @@
+use core::num::NonZeroU64;
+
 #[derive(Clone, Copy, PartialEq)]
 enum End {
     Bottom,
@@ -9,7 +11,7 @@ pub(crate) struct Bracket {
     bottom: f64,
     top_ns: u64,
     top: f64,
-    tolerance_ns: u64,
+    tolerance_ns: NonZeroU64,
     moved: End,
     /// A first trial near the root rarely halves a bracket, and calling that a stall sends the second trial to
     /// the middle, far from the root and into a longer ticket's refusals.
@@ -17,7 +19,7 @@ pub(crate) struct Bracket {
     stalled: bool,
 }
 impl Bracket {
-    pub(crate) fn new(base: f64, top_ns: u64, top: f64, tolerance_ns: u64) -> Self {
+    pub(crate) fn new(base: f64, top_ns: u64, top: f64, tolerance_ns: NonZeroU64) -> Self {
         Self {
             bottom_ns: 0,
             bottom: base,
@@ -30,7 +32,7 @@ impl Bracket {
         }
     }
     pub(crate) fn closed(&self) -> bool {
-        self.top_ns - self.bottom_ns <= self.tolerance_ns
+        self.top_ns - self.bottom_ns <= self.tolerance_ns.get()
     }
     /// The secant's root, half a tolerance toward the end that has not moved, so two trials close a straight
     /// gap. Inside two tolerances the middle closes on either outcome. Past that, a trial stays a tolerance
@@ -47,6 +49,7 @@ impl Bracket {
             stalled,
             ..
         } = *self;
+        let tolerance_ns = tolerance_ns.get();
         let width = top_ns - bottom_ns;
         let slope = top - bottom;
         if stalled || width / 2 <= tolerance_ns || !(slope > 0.0 && slope.is_finite()) {
@@ -61,9 +64,6 @@ impl Bracket {
         };
         (aim as u64).clamp(bottom_ns + tolerance_ns, top_ns - tolerance_ns)
     }
-    /// Two trials that together failed to halve the bracket make the next one bisect, so its width halves at
-    /// least every three trials, and a span below 2^64 ns takes at most 192 trials at any floor above zero,
-    /// the only kind admission and `resume` take.
     pub(crate) fn note(&mut self, length_ns: u64, gap: f64, crossed: bool) {
         let width = self.top_ns - self.bottom_ns;
         if crossed {
@@ -83,9 +83,12 @@ impl Bracket {
 #[cfg(test)]
 mod tests {
     use super::Bracket;
+    use core::num::NonZeroU64;
+
+    const MOST_TRIALS: u32 = 3 * u64::BITS;
 
     fn trials(base: f64, top_ns: u64, top: f64, tolerance_ns: u64, mut gap: impl FnMut(u64) -> f64) -> u32 {
-        let mut bracket = Bracket::new(base, top_ns, top, tolerance_ns);
+        let mut bracket = Bracket::new(base, top_ns, top, NonZeroU64::new(tolerance_ns).expect("a floor"));
         let mut spent = 0;
         while !bracket.closed() {
             let length = bracket.aim();
@@ -162,7 +165,7 @@ mod tests {
         };
         for _ in 0..1_000 {
             let spent = trials(-1.0, u64::MAX, 1.0, 1, &mut jagged);
-            assert!(spent <= 192, "{spent} trials");
+            assert!(spent <= MOST_TRIALS, "{spent} trials");
         }
     }
 
@@ -171,21 +174,21 @@ mod tests {
     #[test]
     fn a_crossing_the_gap_does_not_show_still_closes_on_it() {
         let (span, root, tolerance) = (1_u64 << 40, (1_u64 << 40) / 3, 1_000);
-        let mut bracket = Bracket::new(-2.0, span, -1.0, tolerance);
+        let mut bracket = Bracket::new(-2.0, span, -1.0, NonZeroU64::new(tolerance).expect("a floor"));
         let mut spent = 0;
         while !bracket.closed() {
             let length = bracket.aim();
             bracket.note(length, -1.0, length >= root);
             spent += 1;
         }
-        assert!(spent <= 192, "{spent} trials");
+        assert!(spent <= MOST_TRIALS, "{spent} trials");
         assert!(bracket.bottom_ns < root && root <= bracket.top_ns);
     }
 
     #[test]
     fn a_gap_that_is_no_number_closes_and_panics_nothing() {
-        assert!(trials(-1.0, 1 << 40, f64::INFINITY, 1, |_| f64::NAN) <= 192);
-        assert!(trials(f64::NAN, 1 << 40, f64::NAN, 1, |_| 1.0) <= 192);
-        assert!(trials(5.0, 1 << 40, 5.0, 1_000, |_| 5.0) <= 192);
+        assert!(trials(-1.0, 1 << 40, f64::INFINITY, 1, |_| f64::NAN) <= MOST_TRIALS);
+        assert!(trials(f64::NAN, 1 << 40, f64::NAN, 1, |_| 1.0) <= MOST_TRIALS);
+        assert!(trials(5.0, 1 << 40, 5.0, 1_000, |_| 5.0) <= MOST_TRIALS);
     }
 }

@@ -1,8 +1,9 @@
+use core::num::NonZeroU64;
 use ng_contract::*;
 
 const NEWTON_LIMIT: u32 = 8;
 const RETRY_BUDGET: u32 = 12;
-const MILLISECOND: u64 = 1_000_000;
+const MILLISECOND: NonZeroU64 = NonZeroU64::MIN.saturating_add(999_999);
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 /// Newton stops at rounding, not at the declared scales: those say what may be accepted, and an accuracy
 /// reference must not stop early merely because it may.
@@ -20,7 +21,7 @@ fn default_scales() -> ErrorScales {
 /// forcing's knot period, and a refusal halves it.
 pub struct ReferenceIntegrator {
     interval_ns: u64,
-    minimum_interval_ns: u64,
+    minimum_interval_ns: NonZeroU64,
     scales: ErrorScales,
 }
 impl ReferenceIntegrator {
@@ -34,7 +35,7 @@ impl ReferenceIntegrator {
     pub fn with_scales(self, scales: ErrorScales) -> Self {
         Self { scales, ..self }
     }
-    pub fn with_floor(self, minimum_interval_ns: u64) -> Self {
+    pub fn with_floor(self, minimum_interval_ns: NonZeroU64) -> Self {
         Self {
             minimum_interval_ns,
             ..self

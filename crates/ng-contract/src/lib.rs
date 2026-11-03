@@ -606,6 +606,20 @@
 //! use ng_contract::*;
 //! fn read(ticket: &StepTicket) -> Interval { ticket.interval() }
 //! ```
+//! A core's floor is never zero.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn bottomless(policy: Digest, scheme: StageScheme, scales: ErrorScales) -> DeclaredResolution {
+//!     DeclaredResolution::new(policy, 0, 12, ArithmeticProfile::contract_v1(), scheme, scales)
+//! }
+//! ```
+//! ```
+//! use core::num::NonZeroU64;
+//! use ng_contract::*;
+//! fn floored(policy: Digest, floor: NonZeroU64, scheme: StageScheme, scales: ErrorScales) -> DeclaredResolution {
+//!     DeclaredResolution::new(policy, floor, 12, ArithmeticProfile::contract_v1(), scheme, scales)
+//! }
+//! ```
 //! Bound values in a parsed image are lent to a record and never move into a new admission.
 //! ```compile_fail,E0616
 //! use ng_contract::*;

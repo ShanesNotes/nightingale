@@ -1,3 +1,4 @@
+use core::num::NonZeroU64;
 use ng_contract::catalog::{CapillaryAndVenousPressure, Defines, Reads};
 use ng_contract::*;
 
@@ -15,7 +16,7 @@ fn resolution(scheme: StageScheme) -> Result<DeclaredResolution, AdmissionError>
     let scales = ErrorScales::uniform(Measure::new(1.0)?, Measure::new(0.0)?)?;
     Ok(DeclaredResolution::new(
         Digest::of_canonical(b"evaluator test"),
-        1,
+        NonZeroU64::MIN,
         4,
         ArithmeticProfile::contract_v1(),
         scheme,

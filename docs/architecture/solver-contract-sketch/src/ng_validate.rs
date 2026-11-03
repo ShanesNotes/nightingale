@@ -3,6 +3,7 @@
 //! vital, observation, waveform or record parameter. It proves conservation and drift, not accuracy:
 //! a core can close every ledger and still compute the wrong trajectory, which the accuracy gate
 //! checks.
+use core::num::NonZeroU64;
 use crate::ng_contract::*;
 use crate::ng_record::{ConservationView, FaultReport, HistorySeal, PatientRecord, RecordDigests, Running, Session};
 
@@ -166,7 +167,7 @@ pub enum AccuracyCase {
 /// gate and split measurement only and is never scored.
 pub struct ReferenceIntegrator {
     _interval_ns: u64,
-    _minimum_interval_ns: u64,
+    _minimum_interval_ns: NonZeroU64,
     _scales: ErrorScales,
 }
 impl ReferenceIntegrator {
@@ -177,7 +178,7 @@ impl ReferenceIntegrator {
     pub fn with_scales(self, _scales: ErrorScales) -> Self {
         todo!()
     }
-    pub fn with_floor(self, _minimum_interval_ns: u64) -> Self {
+    pub fn with_floor(self, _minimum_interval_ns: NonZeroU64) -> Self {
         todo!()
     }
 }

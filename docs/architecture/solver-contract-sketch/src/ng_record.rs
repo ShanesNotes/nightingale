@@ -379,8 +379,7 @@ pub enum ObservationRefusal {
     Malformed,
 }
 impl<'m> Session<'m, Running> {
-    /// Checks model, packet and resolution identity against the body, origin and solver, and
-    /// refuses a zero floor.
+    /// Checks model, packet and resolution identity against the body, origin and solver.
     pub fn admit(
         _body: &'m CompiledBody,
         _solver: &'m dyn CoupledSolver,

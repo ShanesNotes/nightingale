@@ -2,6 +2,7 @@ use crate::chance::seed_word;
 use crate::identity::{Canonical, Seal};
 use crate::{AdmissionError, Digest, Dimensionless, Measure, ModelHash, PacketHash};
 use core::marker::PhantomData;
+use core::num::NonZeroU64;
 
 const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
 
@@ -196,7 +197,7 @@ impl ArithmeticProfile {
 #[derive(Clone)]
 pub struct DeclaredResolution {
     policy: Digest,
-    minimum_interval_ns: u64,
+    minimum_interval_ns: NonZeroU64,
     retry_budget: u32,
     arithmetic: ArithmeticProfile,
     scheme: StageScheme,
@@ -206,10 +207,10 @@ impl DeclaredResolution {
     /// `policy` hashes everything else a core is configured by, such as its interval, so two settings of
     /// one core never share an identity. `minimum_interval_ns` is the floor and `retry_budget` the refusals
     /// one step may spend. The floor is also this core's event rule: a guard's crossing is located to within
-    /// it. `Session::admit` refuses a zero floor.
+    /// it.
     pub fn new(
         policy: Digest,
-        minimum_interval_ns: u64,
+        minimum_interval_ns: NonZeroU64,
         retry_budget: u32,
         arithmetic: ArithmeticProfile,
         scheme: StageScheme,
@@ -235,7 +236,7 @@ impl DeclaredResolution {
         } = self;
         let mut out = Canonical::new("ng-contract resolution 1");
         policy.seal(&mut out);
-        out.number(*minimum_interval_ns);
+        out.number(minimum_interval_ns.get());
         out.number(u64::from(*retry_budget));
         let ArithmeticProfile { digest } = arithmetic;
         digest.seal(&mut out);
@@ -247,7 +248,7 @@ impl DeclaredResolution {
     pub fn policy(&self) -> Digest {
         self.policy
     }
-    pub fn minimum_interval_ns(&self) -> u64 {
+    pub fn minimum_interval_ns(&self) -> NonZeroU64 {
         self.minimum_interval_ns
     }
     pub(crate) fn retry_budget(&self) -> u32 {

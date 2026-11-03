@@ -1,4 +1,5 @@
 use core::cell::{Cell, RefCell};
+use core::num::NonZeroU64;
 use ng_contract::*;
 use ng_validate::{ClockSource, ReferenceIntegrator, WallClock};
 
@@ -9,7 +10,7 @@ fn explicit_resolution(tag: &[u8]) -> DeclaredResolution {
     let scales = ErrorScales::uniform(measure(1.0), measure(1e-5)).expect("positive");
     DeclaredResolution::new(
         Digest::of_canonical(tag),
-        MILLISECOND,
+        NonZeroU64::new(MILLISECOND).expect("a floor"),
         12,
         ArithmeticProfile::contract_v1(),
         StageScheme::forward_euler(),

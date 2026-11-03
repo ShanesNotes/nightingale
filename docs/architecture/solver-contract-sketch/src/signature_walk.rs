@@ -8,6 +8,7 @@
 //! through a lens.
 //!
 //! ```
+//! use core::num::NonZeroU64;
 //! use solver_contract_sketch::ng_contract::catalog::{BaroreceptorAfferents, CapillaryAndVenousPressure, Defines, Reads};
 //! use solver_contract_sketch::ng_contract::*;
 //! use solver_contract_sketch::ng_record::*;
@@ -305,7 +306,8 @@
 //!     fn resolution(&self) -> DeclaredResolution {
 //!         let scale = |value| Measure::<Dimensionless>::new(value).unwrap_or_else(|_| panic!("a scale"));
 //!         let scales = ErrorScales::uniform(scale(1e-9), scale(1e-6)).unwrap_or_else(|_| panic!("scales"));
-//!         DeclaredResolution::new(self.policy, 1_000, 12, ArithmeticProfile::contract_v1(),
+//!         let floor = NonZeroU64::MIN.saturating_add(999);
+//!         DeclaredResolution::new(self.policy, floor, 12, ArithmeticProfile::contract_v1(),
 //!             StageScheme::backward_euler_doubled(), scales)
 //!     }
 //!     fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {

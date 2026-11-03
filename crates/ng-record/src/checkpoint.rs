@@ -32,9 +32,6 @@ pub enum CheckpointError {
     /// A checkpoint whose raw digest holds, for another run, or an expected identity that names another body
     /// or another solver's resolution.
     IdentityMismatch,
-    /// A resolution with a floor of zero, which no admission takes, so only forged bytes can hold one, and a
-    /// landing's search would never close on it.
-    ZeroMinimumInterval,
     /// A fault's last image. It continues only through `recover`, on a new branch.
     Latched,
     /// A checkpoint whose raw digest holds, for this run, with a body that is not the canonical form of an

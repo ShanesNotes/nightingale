@@ -1,3 +1,4 @@
+use core::num::NonZeroU64;
 use ng_contract::*;
 use ng_record::*;
 
@@ -77,7 +78,7 @@ impl CoupledSolver for Explicit {
             .expect("positive scales");
         DeclaredResolution::new(
             Digest::of_canonical(b"explicit test core"),
-            SECOND / 4,
+            NonZeroU64::new(SECOND / 4).expect("a floor"),
             4,
             ArithmeticProfile::contract_v1(),
             StageScheme::forward_euler(),
