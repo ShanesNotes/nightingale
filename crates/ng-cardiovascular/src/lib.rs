@@ -97,7 +97,7 @@ fn plain_edges<'b>(
         let tuned = k.scale(base, gain);
         let toned = k.scale(tuned, effect);
         let with_tone = k.add(base, toned);
-        // f^-4 on the one edge whose share is one, because feedback acts on diameter (research 02).
+        // f^-4 where the edge's feedback share is one, because feedback acts on diameter (research 02).
         let f = k.read(&feedback.afferent_tone);
         let square = k.scale(f, f);
         let fourth = k.scale(square, square);
@@ -172,7 +172,8 @@ fn valves<'b>(
         k.finish(open_while, open.only(), wave)
     });
     cv.event(Guard::new(falling, Crossing::Falling, open.to(&shut)?).resetting(&flow));
-    // Strictly past zero: a shut valve at no head and no flow stays shut, or a still body would fire at every step.
+    // A positive opening head: a shut valve at no head and no flow stays shut, or a still body would fire at
+    // every step.
     let opening = cv
         .edge_parameter::<ValveEdge, Pressure>(ParameterKey::new("cv.opening-head"), Admissible::positive());
     let rising = cv.edge_kernel::<ValveEdge, _, _>(|mut k| {

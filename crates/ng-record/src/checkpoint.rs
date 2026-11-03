@@ -5,7 +5,7 @@ use ng_contract::{
     ByteReader, Compensated, CompiledBody, Digest, ImageParts, Malformed, RunIdentity, SimTime,
 };
 
-/// A checkpoint's only form: the envelope's bytes, so an in-process retry and a loaded save are one path.
+/// A checkpoint's only form: the envelope's bytes, so a rewind, a recover and a resume take one path.
 /// `from_bytes` checks nothing.
 pub struct Checkpoint {
     bytes: Vec<u8>,
@@ -29,14 +29,16 @@ pub enum CheckpointError {
     TrailingContent,
     /// The raw digest does not match the bytes: corruption, caught with no body field decoded.
     Corrupt,
-    /// Well sealed, for another run, another body or another solver's resolution.
+    /// A checkpoint whose raw digest holds, for another run, or an expected identity that names another body
+    /// or another solver's resolution.
     IdentityMismatch,
     /// A resolution with a floor of zero, which no admission takes, so only forged bytes can hold one, and a
     /// landing's search would never close on it.
     ZeroMinimumInterval,
     /// A fault's last image. It continues only through `recover`, on a new branch.
     Latched,
-    /// Well sealed and for this run, and not the canonical form of an image.
+    /// A checkpoint whose raw digest holds, for this run, with a body that is not the canonical form of an
+    /// image, its ancestry, its opening values and its origin.
     Malformed,
     /// The parts parsed, and they are not the image the chain recorded for this head.
     SealMismatch,

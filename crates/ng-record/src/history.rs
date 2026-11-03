@@ -465,7 +465,7 @@ impl<'r> HistorySegment<'r> {
         }
     }
 }
-/// One quantity's curve over one segment, compensated, in Bernstein form.
+/// One quantity's or one column's curve over one segment, compensated, in Bernstein form.
 pub struct Curve<'r> {
     interval: Interval,
     coefficients: &'r [Compensated; 2],

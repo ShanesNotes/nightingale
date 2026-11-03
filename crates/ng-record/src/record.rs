@@ -9,8 +9,9 @@ use ng_contract::{
     ValidityExcursion, VerifiedParts, VerifiedStep,
 };
 
-/// The chained seal of one accepted revision: the previous seal, the image's digests and the ledger chunk.
-/// It covers the past and nothing that waits, so a ticket's digest built on it reads no later input.
+/// The chained seal of one accepted revision: the previous seal, the revision, the image's digests and the
+/// ledger chunk. It covers the past and nothing that waits, so a ticket's digest built on it reads no later
+/// input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Seal {
     digest: Digest,

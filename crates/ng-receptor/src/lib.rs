@@ -38,7 +38,7 @@ fn in_cleft<'b, 'k, Q: Substance>(
 }
 
 /// Mass action reads a concentration (research 02), so blood that pools in a bed moves no receptor. A ligand dissolves in
-/// plasma water, the volume every concentration in the slice is read on.
+/// plasma water.
 fn in_plasma<'b, 'k, Q: Substance>(
     k: &mut Kernel<'b, 'k, Receptor, Blood>,
     route: &SiteRoute<'b, Receptor, Blood, Q>,

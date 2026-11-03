@@ -34,8 +34,8 @@ fn lumen_pressure<'b>(
     read
 }
 
-/// The fraction of what reaches a segment that crosses back: `f_min + (f_max - f_min) E_v2`, so the same law serves a
-/// tubule that ignores V2, with its two limits equal, and a duct whose limits differ (research 02).
+/// The fraction of what reaches a segment that crosses back: `f_min + (f_max - f_min) E_v2`, research 02's form for
+/// collecting duct water. With its two limits equal, the same law serves a tubule that ignores V2.
 struct Fraction<'b> {
     least: EdgeParameter<'b, Renal, Dimensionless, ReclaimEdge>,
     most: EdgeParameter<'b, Renal, Dimensionless, ReclaimEdge>,
@@ -198,8 +198,8 @@ pub fn declare<'b>(scope: RenalScope<'b>) -> Result<Fragment<'b, Renal>, Admissi
     Ok(rn.finish())
 }
 
-/// `f = f0 + S (1 / (1 + exp((x - x0) / m)) - 0.5)` on the sodium the macula densa sees (research 02). Line 97 carries
-/// it to the afferent edge, and no law here says which edge.
+/// `f = f0 + S (1 / (1 + exp((x - x0) / m)) - h)` on the sodium the macula densa sees: research 02's form with
+/// `f0` at 1 and `h` at 0.5. Line 97 carries it to the afferent edge, and no law here says which edge.
 fn feedback<'b>(
     rn: &mut FragmentBuilder<'b, Renal>,
     ports: &RenalPorts<'b>,

@@ -146,7 +146,6 @@ impl<'m> Session<'m, Running> {
     pub fn enqueue(&mut self, input: AuthorizedInput) -> Result<InputReceipt, AdmissionError> {
         self.record.admit_input(input)
     }
-    /// `next_step`, `solve`, `validate`, then `publish`. A fault from any of them latches.
     pub fn step(self) -> Step<'m> {
         let Self {
             solver,
@@ -213,7 +212,6 @@ impl<'m> Session<'m, Faulted> {
     }
 }
 
-/// What a latched session leaves for diagnosis.
 pub struct FaultReport {
     last_accepted: Checkpoint,
     fault: EngineFault,
