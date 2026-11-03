@@ -143,62 +143,67 @@ const LANES: usize = 8;
 impl Factors<'_> {
     /// Replaces a right side, one slot per row, with the update, one slot per unknown.
     pub fn solve(&self, side: &mut [f64]) {
-        self.substitute::<1>(side, 1);
+        let Elimination { rows, unknowns, .. } = self.plan;
+        let mut pivoted: Vec<[f64; 1]> = rows.iter().map(|&row| [side[index(row)]]).collect();
+        self.substitute(&mut pivoted);
+        for (&unknown, [value]) in unknowns.iter().zip(pivoted) {
+            side[index(unknown)] = value;
+        }
     }
     /// `solve` on `width` sides held row by row: side `k` of row `r` is slot `r * width + k`, and its update for
     /// unknown `u` lands in slot `u * width + k`.
     pub(crate) fn solve_sides(&self, sides: &mut [f64], width: usize) {
-        self.substitute::<LANES>(sides, width);
-    }
-    /// Each side meets the operations it meets alone, in the same order, so carrying sides together moves no bit.
-    fn substitute<const L: usize>(&self, sides: &mut [f64], width: usize) {
-        let Elimination {
-            rows,
-            unknowns,
-            starts,
-            columns,
-            diagonals,
-            ..
-        } = self.plan;
-        let mut pivoted = vec![[0.0; L]; rows.len()];
-        for group in (0..width).step_by(L) {
-            let lanes = L.min(width - group);
+        let Elimination { rows, unknowns, .. } = self.plan;
+        let mut pivoted = vec![[0.0; LANES]; rows.len()];
+        for group in (0..width).step_by(LANES) {
+            let lanes = LANES.min(width - group);
             for (pivot, &row) in pivoted.iter_mut().zip(rows) {
                 let side = &sides[index(row) * width + group..][..lanes];
                 for (lane, &value) in pivot.iter_mut().zip(side.iter().chain(core::iter::repeat(&0.0))) {
                     *lane = value;
                 }
             }
-            for at in 0..rows.len() {
-                let line = index(starts[at])..index(diagonals[at]);
-                let mut sum = pivoted[at];
-                for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
-                    for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
-                        *value -= cell * read;
-                    }
-                }
-                pivoted[at] = sum;
-            }
-            for at in (0..rows.len()).rev() {
-                let line = index(diagonals[at]) + 1..index(starts[at + 1]);
-                let mut sum = pivoted[at];
-                for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
-                    for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
-                        *value -= cell * read;
-                    }
-                }
-                let pivot = self.lu[index(diagonals[at])];
-                for value in &mut sum {
-                    *value /= pivot;
-                }
-                pivoted[at] = sum;
-            }
+            self.substitute(&mut pivoted);
             for (pivot, &unknown) in pivoted.iter().zip(unknowns) {
                 let side = &mut sides[index(unknown) * width + group..][..lanes];
                 for (value, &lane) in side.iter_mut().zip(pivot) {
                     *value = lane;
                 }
             }
+        }
+    }
+    /// The forward and back passes over sides in pivot order. Each side meets the operations it meets alone, in the
+    /// same order, so carrying sides together moves no bit.
+    fn substitute<const L: usize>(&self, pivoted: &mut [[f64; L]]) {
+        let Elimination {
+            starts,
+            columns,
+            diagonals,
+            ..
+        } = self.plan;
+        for at in 0..pivoted.len() {
+            let line = index(starts[at])..index(diagonals[at]);
+            let mut sum = pivoted[at];
+            for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
+                for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
+                    *value -= cell * read;
+                }
+            }
+            pivoted[at] = sum;
+        }
+        for at in (0..pivoted.len()).rev() {
+            let line = index(diagonals[at]) + 1..index(starts[at + 1]);
+            let mut sum = pivoted[at];
+            for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
+                for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
+                    *value -= cell * read;
+                }
+            }
+            let pivot = self.lu[index(diagonals[at])];
+            for value in &mut sum {
+                *value /= pivot;
+            }
+            pivoted[at] = sum;
         }
     }
 }
