@@ -606,7 +606,7 @@
 //! use ng_contract::*;
 //! fn read(ticket: &StepTicket) -> Interval { ticket.interval() }
 //! ```
-//! A core's floor is never zero, because a landing's search never closes on one.
+//! A core's floor is never zero.
 //! ```compile_fail,E0308
 //! use ng_contract::*;
 //! fn bottomless(policy: Digest, scheme: StageScheme, scales: ErrorScales) -> DeclaredResolution {

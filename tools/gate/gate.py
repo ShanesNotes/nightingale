@@ -1267,8 +1267,7 @@ def seal_holes(body: tuple[Token, ...]) -> list[tuple[int, str]]:
     edit("crates/ng-contract/src/body.rs", r"^            judged,$", "            judged: _,"),
 )
 def seals_name_every_field(ws: Workspace) -> list[Violation]:
-    """A destructure makes a new field E0027 until a seal names it, and `name: _` names it without sealing it,
-    as the layout's `judged: _` did under a false reason. A skip is listed, so a reviewer reads its reason."""
+    """A destructure makes a new field E0027 until a seal names it, and `name: _` names it without sealing it."""
     code, out = "seam.seal", []
     for m in sorted(ws.members.values(), key=lambda m: m.name):
         row = ws.registry.row(m.name)
