@@ -40,6 +40,7 @@ fn main() {
         .nth(1)
         .and_then(|given| given.parse().ok())
         .expect("a step interval in ms");
+    let named = std::env::args().nth(2).unwrap_or_else(|| "reference".to_string());
     let started = Instant::now();
     let body = arena_body().expect("compiled");
     println!("time compile_ms {:.1}", 1e3 * started.elapsed().as_secs_f64());
@@ -49,16 +50,23 @@ fn main() {
     println!("time newton_update_us {:.1}", newton_update_us(&body));
 
     let scale = |value| Measure::<Dimensionless>::new(value).expect("finite");
-    let core = ReferenceIntegrator::new(interval_ms * MS)
-        .with_floor(NonZeroU64::new(MS / 10).expect("a floor"))
-        .with_scales(ErrorScales::uniform(scale(1.0), scale(1e-3)).expect("positive"));
+    let core: Box<dyn CoupledSolver> = match named.as_str() {
+        "reference" => Box::new(
+            ReferenceIntegrator::new(interval_ms * MS)
+                .with_floor(NonZeroU64::new(MS / 10).expect("a floor"))
+                .with_scales(ErrorScales::uniform(scale(1.0), scale(1e-3)).expect("positive")),
+        ),
+        "ng-solver" => Box::new(ng_solver::Core::new(interval_ms * MS)),
+        other => panic!("no core named {other}"),
+    };
+    println!("work core {named}");
     let (packet, lens) = (
         arena_packet(&body).expect("packet"),
         arena_lens(&body).expect("lens"),
     );
     let port = BoundaryPort::new(Vec::new()).expect("port");
     let started = Instant::now();
-    let admitted = admit_at(&body, packet, port, &core, &lens, anchor_moment()).expect("admitted");
+    let admitted = admit_at(&body, packet, port, core.as_ref(), &lens, anchor_moment()).expect("admitted");
     println!("time admission_s {:.2}", started.elapsed().as_secs_f64());
 
     let origin = anchor_moment().nanoseconds();

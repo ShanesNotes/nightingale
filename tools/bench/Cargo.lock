@@ -7,6 +7,7 @@ name = "engine-bench"
 version = "0.0.0"
 dependencies = [
  "ng-contract",
+ "ng-solver",
  "ng-validate",
 ]
 
@@ -59,6 +60,13 @@ dependencies = [
 
 [[package]]
 name = "ng-renal"
+version = "0.0.0"
+dependencies = [
+ "ng-contract",
+]
+
+[[package]]
+name = "ng-solver"
 version = "0.0.0"
 dependencies = [
  "ng-contract",
