@@ -92,6 +92,7 @@ dependencies = [
  "ng-receptor",
  "ng-record",
  "ng-renal",
+ "ng-solver",
 ]
 
 [[package]]

@@ -17,6 +17,7 @@ ng-renal = { path = "../ng-renal" }
 
 [dev-dependencies]
 expect-test = "=1.5.1"
+ng-solver = { path = "../ng-solver" }
 
 [lints]
 workspace = true
