@@ -1653,6 +1653,10 @@ SEAL_CASES: tuple[tuple[str, frozenset[str]], ...] = (
     ('fn digest(&self) -> impl Sized { let Self { a: _ } = self; Canonical::new("t") }', frozenset({"case::digest a"})),
     ('fn tag(d: D) -> Digest { let D { key: _, v } = d; Digest::of_canonical(b"tag") }', frozenset()),
     ("impl R { fn seal(&mut self, d: D) { let D { a: _, b } = d; self.b = b; } }", frozenset()),
+    (
+        "fn outer() -> u8 { fn inner(d: D) -> Digest { let D { k: _, v } = d; Digest::of_canonical(&v) } 0 }",
+        frozenset({"case::inner k"}),
+    ),
 )
 
 
