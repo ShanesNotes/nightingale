@@ -137,7 +137,7 @@ pub struct Factors<'b> {
     plan: &'b Elimination,
     lu: Vec<f64>,
 }
-/// Sides one pass carries. Eight keep four chains of subtractions in flight, so a pass of eight costs about one alone.
+/// Sides one pass of the factors carries, each its own chain of subtractions.
 const LANES: usize = 8;
 
 impl Factors<'_> {
