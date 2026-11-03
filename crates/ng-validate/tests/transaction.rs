@@ -601,7 +601,6 @@ enum EdgeLaw {
     Exponentiates,
 }
 
-/// `q = g h f(a, b)`, where `f` reads the downstream or the upstream amount through one operator.
 /// A start inside the law's domain, so admission passes it.
 fn edge_law_body(law: EdgeLaw) -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
     let start = match law {
@@ -2057,7 +2056,6 @@ fn a_boundary_out_of_the_body_counts_as_outflow_and_the_ledger_closes() {
     );
 }
 
-/// Two reservoirs with no flow between them and a boundary law that runs backward at a fixed rate.
 fn backward_boundary_body(direction: BoundaryDirection) -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", origin());
@@ -2306,7 +2304,7 @@ fn newton_solves_an_algebraic_row_to_rounding_on_a_short_step() {
 
 #[test]
 fn newton_reads_the_stage_its_last_update_reaches() {
-    // From `x = 1` each of these roots takes all eight updates. Some square back to their target exactly and
+    // From `x = 1` some of these roots take all eight updates. Some square back to their target exactly and
     // stop on a zero residual, so only the run of them shows the last update is read.
     for rate in 15..36 {
         newton_reaches_the_root(f64::from(rate), SECOND);

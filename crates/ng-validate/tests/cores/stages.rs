@@ -54,8 +54,7 @@ impl CoupledSolver for ForwardEuler {
     }
 }
 
-/// An honest Heun core: the start and the Euler-predicted end, a half each. The legal twin of every
-/// must-fail core that declares this scheme.
+/// The legal twin of every must-fail core that declares this scheme.
 pub struct Heun {
     pub interval_ns: u64,
 }

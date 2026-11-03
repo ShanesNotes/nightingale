@@ -1,7 +1,7 @@
 use ng_contract::*;
 
-/// The product over this many two-valued variables would never finish, so each test below passes only if
-/// compilation does not enumerate it.
+/// Enumerating the product over this many two-valued variables would take hours, so a test that reads this
+/// stalls if compilation enumerates it.
 const VARIABLES: usize = 30;
 
 fn schema() -> Result<Schema, AdmissionError> {

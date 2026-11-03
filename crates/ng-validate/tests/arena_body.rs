@@ -335,9 +335,9 @@ fn water_ions_moieties_and_energy_close_over_the_first_accepted_steps(solved: &S
     }
 }
 
-/// A wrong map reads zero or names the wrong row, and a reversed law closes every conserved total and still admits, so
-/// each link of each loop must move its reader the way the loop needs on the admitted start. A stage's row is its value
-/// less its law, so a law that rises with what it reads shows a falling slope.
+/// A wrong map reads zero or names the wrong row, and a reversed law closes every conserved quantity and
+/// still admits, so each link of each loop must move its reader the way the loop needs on the admitted start.
+/// A stage's row is its value less its law, so a law that rises with what it reads shows a falling slope.
 fn every_link_of_every_loop_moves_the_row_that_reads_it_the_right_way(
     solved: &Solved,
 ) -> Result<(), InitializationFailure> {
@@ -497,8 +497,8 @@ fn every_link_of_every_loop_moves_the_row_that_reads_it_the_right_way(
     Ok(())
 }
 
-/// A shut valve with no head across it and no flow stays shut, or a still body would fire at every step. The shut law holds
-/// the flow where it stands, and an opened law would move it.
+/// A shut valve with no head across it stays shut, or a still body would fire at every step. The shut law
+/// holds the flow where it stands, and an opened law would move it.
 fn a_shut_valve_with_no_head_stays_shut(solved: &Solved) -> Result<(), InitializationFailure> {
     let Solved { body, .. } = solved;
     let (packet, lens) = (arena_packet(body)?, arena_lens(body)?);
@@ -535,8 +535,6 @@ fn posture_at(after: u64, tag: &[u8], trunk: f64, legs: Legs) -> AuthorizedInput
     input(after, tag, BoundaryInput::Posture(posture))
 }
 
-/// Standing drops the blood into the legs, the sinus feels less stretch, and the reflex raises traffic and rate within
-/// seconds, with no law that reads posture but the heads. Each sensor feels the column up to its own height.
 fn the_body_answers_a_stand_through_its_own_baroreflex(solved: &Solved) {
     let (flat, flat_traffic) = solved.mean_over(solved.session(), 6 * SECOND, sympathetic());
     let flat_rate = solved.value(&flat, rate_row());
@@ -782,9 +780,10 @@ fn settled(solved: &Solved, posture: Vec<AuthorizedInput>) -> ([f64; 5], f64) {
     (sums.map(|sum| sum / total), most - least)
 }
 
-/// What the contract's 07:00 case checks, by direction, because magnitudes wait for a reviewed packet: at heart level
-/// the pressure settles above supine, the rate rises, stroke volume and output fall, and filtration falls a little.
-/// The reflex holds that with traffic to spare and does not hunt, so a body past that point has room left.
+/// What the contract's 07:00 case checks, by direction, because magnitudes wait for a reviewed packet: at
+/// heart level the pressure reads above supine, the rate rises, stroke volume and cardiac output fall, and
+/// filtration falls a little. The reflex holds that with traffic to spare and does not hunt, so a body past
+/// that point has room left.
 fn reads_the_way_the_contract_checks(name: &str, flat: ([f64; 5], f64), posture: ([f64; 5], f64)) {
     let ([flat_pressure, flat_rate, flat_output, flat_filtered, flat_traffic], flat_swing) = flat;
     let ([pressure, rate, output, filtered, traffic], swing) = posture;
@@ -826,7 +825,6 @@ fn lumen_ion(row: &Row, ions: &[Species]) -> bool {
     )
 }
 
-/// A lumen of water alone holds nothing to reclaim, so its ion laws read zero and stay defined.
 #[test]
 fn a_tubule_with_no_ions_reclaims_none() -> Result<(), InitializationFailure> {
     let body = arena_body()?;

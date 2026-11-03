@@ -257,8 +257,8 @@ fn overlapping_deliveries_add_and_no_delivery_means_zero() -> Result<(), Initial
     Ok(())
 }
 
-/// Memory and algebraic rows that read every operator but `multiply`, `conductance_flow` and `volume`,
-/// which the reservoir body reads, each at a smooth point.
+/// Memory and algebraic rows that read every operator a law can use but `multiply`, `conductance_flow` and
+/// `volume`, which the reservoir body reads, each at a smooth point.
 fn nearly_every_operator() -> Result<(CompiledBody, LawName), AdmissionError> {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", at()?);
@@ -689,8 +689,6 @@ fn rate_of(bench: &Bench, entry: usize) -> f64 {
     -stage.residuals()[row.expect("the row")]
 }
 
-/// A draw and a factor are functions of the seed and a name, so a law reads the same value alone in a body as
-/// beside the other's, whatever place the compiled order gives each.
 #[test]
 fn a_law_reads_the_stream_and_the_forcing_it_names() -> Result<(), InitializationFailure> {
     let both = reading_chance(&[0, 1])?;
