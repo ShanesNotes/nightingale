@@ -137,7 +137,6 @@ pub struct Factors<'b> {
     plan: &'b Elimination,
     lu: Vec<f64>,
 }
-/// Sides one pass of the factors carries, each its own chain of subtractions.
 const LANES: usize = 8;
 
 impl Factors<'_> {
@@ -150,8 +149,6 @@ impl Factors<'_> {
             side[index(unknown)] = value;
         }
     }
-    /// `solve` on `width` sides held row by row: side `k` of row `r` is slot `r * width + k`, and its update for
-    /// unknown `u` lands in slot `u * width + k`.
     pub(crate) fn solve_sides(&self, sides: &mut [f64], width: usize) {
         let Elimination { rows, unknowns, .. } = self.plan;
         let mut pivoted = vec![[0.0; LANES]; rows.len()];
@@ -172,8 +169,6 @@ impl Factors<'_> {
             }
         }
     }
-    /// The forward and back passes over sides in pivot order. Each side meets the operations it meets alone, in the
-    /// same order, so carrying sides together moves no bit.
     fn substitute<const L: usize>(&self, pivoted: &mut [[f64; L]]) {
         let Elimination {
             starts,
@@ -244,7 +239,6 @@ mod tests {
         b
     }
 
-    /// The dense matrix, the plan and the values of a sparse system with a shuffled matching.
     fn shuffled(size: usize, state: &mut u64) -> (Vec<Vec<f64>>, Elimination, Vec<f64>) {
         let shuffle: Vec<usize> = (0..size).map(|at| (at * 7 + 3) % size).collect();
         let mut a = vec![vec![0.0; size]; size];
@@ -272,7 +266,6 @@ mod tests {
         (a, plan, values)
     }
 
-    /// Thirteen sides: all of one zero, all of the other, then zeros of both signs among values of three scales.
     fn sides(size: usize, state: &mut u64) -> Vec<Vec<f64>> {
         let value = |side: usize, row: usize, state: &mut u64| match (side, (side + row) % 5) {
             (0, _) => -0.0,

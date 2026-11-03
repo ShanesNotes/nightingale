@@ -63,8 +63,6 @@ fn march(system: &mut InitializationSystem<'_>, body: &CompiledBody, workspace: 
     }
 }
 
-/// Where the limit's last update leaves a point whose state repeats one it held. An update reads nothing else the march
-/// moves at that point, so from the state's first time its updates cycle, none settling, up to the limit.
 fn landing<'h>(held: &'h [f64], now: &[f64]) -> Option<&'h [f64]> {
     let size = now.len();
     let same = |state: &[f64]| {

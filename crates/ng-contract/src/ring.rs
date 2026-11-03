@@ -66,7 +66,6 @@ enum Block<'b> {
     Whole(Vec<Vec<f64>>),
 }
 impl Block<'_> {
-    /// Replaces `width` sides held row by row, as `Factors::solve_sides` holds them, with their answers.
     fn solve(&self, sides: &mut [f64], width: usize) {
         match self {
             Block::Fixed(factors) => factors.solve_sides(sides, width),

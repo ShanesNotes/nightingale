@@ -25,7 +25,6 @@ fn hex(digest: Digest) -> String {
         .collect()
 }
 
-/// The hash the run names, which closes over the admitted start's bits, modes and fits, and the trace.
 fn first_second(core: &dyn CoupledSolver) -> (String, String) {
     let body = arena_body().expect("compiled");
     let (packet, lens) = (
