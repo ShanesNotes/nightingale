@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Checks the step model. Every rule holds for the design on main, and each past step design breaks the rule
-# its history records. Redraws step.mmd from the small run. Needs the pstack statechart skill's
-# scripts/statechart command, which runs TLC (installed with mise on its first run):
-#   STATECHART=<skill dir>/scripts/statechart bash docs/statecharts/check-step.sh
 set -euo pipefail
 cd "$(dirname "$0")"
 : "${STATECHART:?set STATECHART to scripts/statechart in the statechart skill}"
