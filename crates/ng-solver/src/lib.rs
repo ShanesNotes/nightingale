@@ -77,7 +77,7 @@ impl Core {
         Self { longest_step_ns }
     }
     fn bounded(&self, span_ns: u64) -> u64 {
-        let longest = self.longest_step_ns.max(1);
+        let longest = self.longest_step_ns;
         span_ns.clamp(SHORTEST_NS.min(longest), longest)
     }
     fn next_span(&self, ticket: &StepTicket, committed_ns: u64, estimate: f64) -> u64 {
