@@ -29,6 +29,7 @@ The native Rust engine for one simulated patient. Read `docs/srs.md` first: it b
 | No bare `f64` across a crate boundary | `tools/verify.d/15-f64.sh` |
 | A comparison of ledger values fails closed on a NaN: `Compensated` has only `at_most` | the compile-fail doctest in `crates/ng-contract/src/lib.rs` |
 | A core's floor is a `NonZeroU64`, so no door refuses a zero one | the compile-fail doctest in `crates/ng-contract/src/lib.rs` |
+| A seal or digest names every field it holds: one it leaves out with `name: _` has a `seal_skip` entry and its reason in `tools/gate/paths.toml`, and `..` hides none | `tools/verify.d/05-seam.sh` (`seam.seal`), whose probe replays the layout's skipped `judged` |
 | Records in `data/` hold closed fields and capped text, tier rules and locators; an anchor names a method and window and rests on no inference; a derivation recomputes with dimensions; each identity closes | `tools/verify.d/30-data.sh`, whose probes refuse a record built to break each rule |
 | Comments | the `/no-comments` report |
 

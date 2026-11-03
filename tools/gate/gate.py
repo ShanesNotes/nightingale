@@ -114,11 +114,19 @@ class F64Allow:
 
 
 @dataclasses.dataclass(frozen=True)
+class SealSkip:
+    item: str
+    field: str
+    reason: str
+
+
+@dataclasses.dataclass(frozen=True)
 class CrateRow:
     name: str
     smoke: tuple[str, ...] = ()
     dev_external: Mapping[str, str] = dataclasses.field(default_factory=dict)
     f64_allow: tuple[F64Allow, ...] = ()
+    seal_skip: tuple[SealSkip, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -180,7 +188,7 @@ def parse_registry(text: str) -> Registry:
     crates = []
     for i, c in enumerate(raw.get("crate", [])):
         where = f"{PATHS}: crate {i + 1}"
-        _table(c, where, {"name"}, {"smoke", "dev_external", "f64_allow"})
+        _table(c, where, {"name"}, {"smoke", "dev_external", "f64_allow", "seal_skip"})
         dev = c.get("dev_external", {})
         if not isinstance(dev, dict) or not all(
             isinstance(v, str) and re.fullmatch(r"=\d+\.\d+\.\d+", v) for v in dev.values()
@@ -192,7 +200,17 @@ def parse_registry(text: str) -> Registry:
             if not all(isinstance(a[k], str) and a[k].strip() for k in ("item", "reason")):
                 raise GateError(f"{where}: f64_allow {j + 1}: item and reason must be non-empty")
             allows.append(F64Allow(a["item"], a["reason"]))
-        crates.append(CrateRow(c["name"], _strings(c.get("smoke", []), f"{where}: smoke"), dict(dev), tuple(allows)))
+        skips = []
+        for j, a in enumerate(c.get("seal_skip", [])):
+            a = _table(a, f"{where}: seal_skip {j + 1}", {"item", "field", "reason"})
+            if not all(isinstance(a[k], str) and a[k].strip() for k in ("item", "field", "reason")):
+                raise GateError(f"{where}: seal_skip {j + 1}: item, field and reason must be non-empty")
+            skips.append(SealSkip(a["item"], a["field"], a["reason"]))
+        crates.append(
+            CrateRow(
+                c["name"], _strings(c.get("smoke", []), f"{where}: smoke"), dict(dev), tuple(allows), tuple(skips)
+            )
+        )
     return Registry(
         _strings(raw["always"], f"{PATHS}: always"),
         _strings(raw["crate_steps"], f"{PATHS}: crate_steps"),
@@ -1139,6 +1157,133 @@ def no_cargo_config(ws: Workspace) -> list[Violation]:
     ]
 
 
+def _closing(code: tuple[Token, ...], opening: int) -> int:
+    depth = 0
+    for k in range(opening, len(code)):
+        if code[k].value == "{":
+            depth += 1
+        elif code[k].value == "}":
+            depth -= 1
+            if depth == 0:
+                return k
+    return len(code) - 1
+
+
+def _impl_target(head: tuple[Token, ...]) -> tuple[str, bool]:
+    values = [t.value for t in head]
+    start = 0
+    if values[:1] == ["<"]:
+        depth = 0
+        for start, v in enumerate(values):
+            depth += (v == "<") - (v == ">")
+            if depth == 0:
+                break
+        start += 1
+    rest = values[start:]
+    if "where" in rest:
+        rest = rest[: rest.index("where")]
+    seal = False
+    if "for" in rest:
+        at = rest.index("for")
+        seal = "Seal" in rest[:at]
+        rest = rest[at + 1 :]
+    path = rest[: rest.index("<")] if "<" in rest else rest
+    return next((v for v in reversed(path) if v[:1].isalpha() or v[:1] == "_"), "?"), seal
+
+
+def _opens_identity(body: tuple[Token, ...]) -> bool:
+    for k in range(len(body) - 3):
+        if body[k + 1].value != "::":
+            continue
+        if body[k].value == "Canonical" and body[k + 2].value == "new":
+            return True
+        if body[k].value == "Digest" and body[k + 2].value == "of_canonical" and body[k + 3].value == "(":
+            if k + 4 < len(body) and body[k + 4].kind != "literal":
+                return True
+    return False
+
+
+def seal_scopes(src: Source) -> list[tuple[str, tuple[Token, ...]]]:
+    code, stem, out = src.code, pathlib.PurePosixPath(src.path).stem, []
+    impls: list[tuple[int, str, bool]] = []
+    i = 0
+    while i < len(code):
+        while impls and i > impls[-1][0]:
+            impls.pop()
+        t = code[i]
+        if t.kind == "ident" and t.value in ("impl", "fn"):
+            j = i + 1
+            while j < len(code) and code[j].value not in ("{", ";"):
+                j += 1
+            if j == len(code) or code[j].value == ";":
+                i = j + 1
+                continue
+            end = _closing(code, j)
+            if t.value == "impl":
+                impls.append((end, *_impl_target(code[i + 1 : j])))
+                i = j + 1
+                continue
+            name, owner, body = code[i + 1].value, impls[-1] if impls else None, code[j : end + 1]
+            if (owner is not None and owner[2] and name == "seal") or _opens_identity(body):
+                out.append(("::".join([stem, *([owner[1]] if owner else []), name]), body))
+            i = end + 1
+            continue
+        i += 1
+    return out
+
+
+def seal_holes(body: tuple[Token, ...]) -> list[tuple[int, str]]:
+    out = []
+    for k in range(len(body) - 2):
+        a, b, c = body[k], body[k + 1], body[k + 2]
+        if a.value == "." and b.value == "." and c.value == "}":
+            out.append((a.line, ".."))
+        elif a.kind == "ident" and b.value == ":" and c.value == "_" and k + 3 < len(body):
+            if body[k + 3].value in (",", "}"):
+                out.append((a.line, a.value))
+    return out
+
+
+@rule(
+    "seam.seal",
+    "seam",
+    edit("crates/ng-contract/src/body.rs", r"^            judged,$", "            judged: _,"),
+)
+def seals_name_every_field(ws: Workspace) -> list[Violation]:
+    """A destructure makes a new field E0027 until a seal names it, and `name: _` names it without sealing it,
+    as the layout's `judged: _` did under a false reason. A skip is listed, so a reviewer reads its reason."""
+    code, out = "seam.seal", []
+    for m in sorted(ws.members.values(), key=lambda m: m.name):
+        row = ws.registry.row(m.name)
+        listed = {(s.item, s.field) for s in row.seal_skip} if row else set()
+        seen: set[tuple[str, str]] = set()
+        for src in m.sources:
+            if not src.path.startswith(f"{m.dir}/src/"):
+                continue
+            for item, body in seal_scopes(src):
+                for line, hole in seal_holes(body):
+                    if hole == "..":
+                        out.append(
+                            Violation(code, f"{src.path}:{line}", f"`..` leaves fields out of {item}; name each one")
+                        )
+                        continue
+                    seen.add((item, hole))
+                    if (item, hole) not in listed:
+                        out.append(
+                            Violation(
+                                code,
+                                f"{src.path}:{line}",
+                                f"`{hole}: _` leaves a field out of {item}; seal it, move it out of what is sealed, "
+                                f"or list it as a seal_skip of {m.name} in {PATHS} with its reason",
+                            )
+                        )
+        out += [
+            Violation(code, f"{item} {field} in {m.name}", "the seal_skip entry matches no field left out; drop it")
+            for item, field in sorted(listed - seen)
+        ]
+    return out
+
+
 PROBE_COPY = ("Cargo.toml", "Cargo.lock", "clippy.toml", "rustfmt.toml", "rust-toolchain.toml", PATHS, CONTRACT)
 
 
@@ -1441,6 +1586,46 @@ def scan_cases() -> list[Violation]:
                     "scan",
                     repr(text[:50]),
                     f"found {sorted(got) or 'nothing'}, the rules say {sorted(want) or 'nothing'}",
+                )
+            )
+    return out
+
+
+SEAL_CASES: tuple[tuple[str, frozenset[str]], ...] = (
+    (
+        "impl Seal for T { fn seal(&self, out: &mut Canonical) { let Self { a, b: _ } = self; a.seal(out); } }",
+        frozenset({"case::T::seal b"}),
+    ),
+    (
+        'impl T { fn digest(&self) -> D { let Self { a, .. } = self; let o = Canonical::new("t"); o.digest() } }',
+        frozenset({"case::T::digest .."}),
+    ),
+    (
+        "impl<K: P> Q<K> where for<'a> K: R<'a> { fn hash(&self) -> H { let Self { kind: _, x } = self; "
+        'Canonical::new("q"); } }',
+        frozenset({"case::Q::hash kind"}),
+    ),
+    (
+        "impl S { fn case(&self) -> D { let Self { a, b: _ } = self; Digest::of_canonical(&bytes) } }",
+        frozenset({"case::S::case b"}),
+    ),
+    ('fn digest(&self) -> D { let o = Canonical::new("t"); let x = T { a, ..base }; o.digest() }', frozenset()),
+    ("fn copy(d: D) -> S { let D { key: _, value } = d; S { value } }", frozenset()),
+    ('fn tag(d: D) -> Digest { let D { key: _, v } = d; Digest::of_canonical(b"tag") }', frozenset()),
+)
+
+
+def seal_cases() -> list[Violation]:
+    out = []
+    for text, want in SEAL_CASES:
+        src = parse_source("crates/ng-case/src/case.rs", text)
+        got = frozenset(f"{item} {hole}" for item, body in seal_scopes(src) for _, hole in seal_holes(body))
+        if got != want:
+            out.append(
+                Violation(
+                    "scan",
+                    repr(text[:50]),
+                    f"found {sorted(got) or 'nothing'}, the seal rule says {sorted(want) or 'nothing'}",
                 )
             )
     return out
@@ -2393,12 +2578,13 @@ def seam() -> int:
     for v in found:
         print(v)
     probes, bites = run_probes(ws, tree_passes=not found)
-    cases = plan_cases(ws) + scan_cases() + comment_cases()
+    cases = plan_cases(ws) + scan_cases() + comment_cases() + seal_cases()
     for v in probes + cases:
         print(v)
     print(
         f"05-seam: {len(ws.members)} members against the crate table; {len(RULES)} rules, {bites} probes bite; "
-        f"{len(PLAN_CASES)} plan cases; {len(SCAN_CASES)} scan cases; {len(COMMENT_CASES)} comment cases"
+        f"{len(PLAN_CASES)} plan cases; {len(SCAN_CASES)} scan cases; {len(COMMENT_CASES)} comment cases; "
+        f"{len(SEAL_CASES)} seal cases"
     )
     return 1 if found or probes or cases else 0
 

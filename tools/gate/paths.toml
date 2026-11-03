@@ -52,6 +52,10 @@ run = ["30-data"]
 #   [[crate.f64_allow]]                        a public item allowed a bare f64 or f32, as
 #   item = "quantity::Measure::new"            15-f64 names it; an entry that matches no
 #   reason = "..."                             item fails
+#   [[crate.seal_skip]]                        a field a seal or digest leaves out with `name: _`,
+#   item = "packet::ParameterPacket::hash"     as 05-seam names it, and why the identity still
+#   field = "kind"                             covers it; an entry that matches no skip fails
+#   reason = "..."
 [[crate]]
 name = "ng-contract"
 
@@ -111,6 +115,71 @@ reason = "a synthetic guess for every row a fixture does not state, in that row'
 item = "problem::SparseView::values"
 reason = "Jacobian entries in mixed row and column dimensions, for a core's own linear solve"
 
+[[crate.seal_skip]]
+item = "anatomy::Anatomy::digest"
+field = "preorder"
+reason = "an order the constructor derives from each site's parent, which the digest seals"
+
+[[crate.seal_skip]]
+item = "anatomy::Anatomy::digest"
+field = "subtree"
+reason = "ranges over the preorder, derived from the sealed parents as the preorder is"
+
+[[crate.seal_skip]]
+item = "body::StreamLayout::seal"
+field = "key"
+reason = "key_word of the name, which the seal covers"
+
+[[crate.seal_skip]]
+item = "body::ForcingLayout::seal"
+field = "key"
+reason = "key_word of the name, which the seal covers"
+
+[[crate.seal_skip]]
+item = "compile::bind"
+field = "key"
+reason = "a declaration found by this key, copied into its slot; the digest in this function orders guards and reads no declaration"
+
+[[crate.seal_skip]]
+item = "image::ImageParts::canonical"
+field = "owed"
+reason = "empty in every image: admission takes it, and parse writes the empty one"
+
+[[crate.seal_skip]]
+item = "packet::ParameterPacket::hash"
+field = "kind"
+reason = "a marker with no value; the kind's TAG is sealed first"
+
+[[crate.seal_skip]]
+item = "packet::BoundParameters::digest"
+field = "owed"
+reason = "what admission still owes, built by bind from the packet and the body that the packet and model hashes seal, and empty once admission takes it"
+
+[[crate.seal_skip]]
+item = "problem::StepTicket::sealed"
+field = "floor_ns"
+reason = "copied from the run identity's resolution, and the seal covers the identity"
+
+[[crate.seal_skip]]
+item = "problem::StepTicket::sealed"
+field = "budget"
+reason = "copied from the run identity's resolution, and the seal covers the identity"
+
+[[crate.seal_skip]]
+item = "problem::StepTicket::sealed"
+field = "digest"
+reason = "this seal's own output, which the ticket keeps"
+
+[[crate.seal_skip]]
+item = "scheme::RunIdentity::digest"
+field = "word"
+reason = "seed_word of the domain's name and the words, and the words are sealed"
+
+[[crate.seal_skip]]
+item = "scheme::RunIdentity::digest"
+field = "domain"
+reason = "a marker with no value; a run identity takes only the run domain's seed"
+
 [[crate]]
 name = "ng-cardiovascular"
 
@@ -129,6 +198,12 @@ name = "ng-receptor"
 [[crate]]
 name = "ng-record"
 
+
+[[crate.seal_skip]]
+item = "history::History::digest"
+field = "origin"
+reason = "this digest names the books; the origin's image and seal are the record seal's, which every link chains from"
+
 [[crate]]
 name = "ng-observe"
 
@@ -136,3 +211,23 @@ name = "ng-observe"
 name = "ng-validate"
 smoke = ["trace"]
 dev_external = { expect-test = "=1.5.1" }
+
+[[crate.seal_skip]]
+item = "certificate::CertificatePolicy::digest"
+field = "quantity"
+reason = "new holds the entries to the basis's quantities in basis order, and the basis digest is sealed"
+
+[[crate.seal_skip]]
+item = "fixture::TwoReservoirs::digest"
+field = "a"
+reason = "a site of the body, whose model hash the digest seals first"
+
+[[crate.seal_skip]]
+item = "fixture::TwoReservoirs::digest"
+field = "b"
+reason = "a site of the body, whose model hash the digest seals first"
+
+[[crate.seal_skip]]
+item = "fixture::TwoReservoirs::digest"
+field = "direction"
+reason = "the boundary's direction, which the body's schema holds and its model hash seals"
