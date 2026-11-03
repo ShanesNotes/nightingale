@@ -7,8 +7,8 @@ use ng_record::{ConservationView, Curve, HistorySeal, HistorySegment};
 const DAY_NS: u64 = 86_400_000_000_000;
 
 /// One combination's limits. `absolute + relative * gross exchange in the window` bounds closure, so a tiny
-/// exchange needs a tiny residual. `drift` stands in for 1.96 times the within-subject variation until a
-/// healthy-range set exists: it is fixture data, not a policy value.
+/// exchange needs a tiny residual. `drift` stands in for 1.96 times the within-subject variation until the
+/// healthy-range set holds that variation: it is fixture data, not a policy value.
 pub struct QuantityPolicy {
     quantity: QuantityId,
     absolute: Compensated,
@@ -34,7 +34,6 @@ impl QuantityPolicy {
         })
     }
 }
-/// What drift is compared with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExpectedDrift {
     Zero,
@@ -155,7 +154,7 @@ impl Certificate {
     pub fn results(&self) -> &[QuantityResult] {
         &self.results
     }
-    /// How many stretches of window starts the walk covered, so a run that checked nothing shows zero.
+    /// How many stretches of window starts the walk covered.
     pub fn pieces(&self) -> u64 {
         self.pieces
     }
@@ -242,7 +241,7 @@ fn differences(
 }
 
 /// Closure failures win over drift, so a `Drift` failure says the ledger closed everywhere and the body
-/// still moved. Everything is compensated and nothing is rounded.
+/// still moved.
 pub fn certify(
     view: &ConservationView<'_>,
     policy: &CertificatePolicy,

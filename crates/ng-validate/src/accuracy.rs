@@ -12,7 +12,7 @@ pub enum AccuracyCase {
     TwoReservoir(TwoReservoirs),
 }
 
-/// `absolute + relative * exact` bounds the error at each compared instant, and `grid_ns` spaces the
+/// `absolute + relative * |exact|` bounds the error at each compared instant, and `grid_ns` spaces the
 /// instants compared inside a segment.
 pub struct AccuracyPolicy {
     cases: Vec<AccuracyCase>,
@@ -82,15 +82,14 @@ pub enum AccuracyFailure {
         at: SimTime,
         error: Compensated,
     },
-    /// The core could not finish the case.
     Faulted(EngineFault),
     Admission(InitializationFailure),
-    /// Adjacent refinements' errors are outside the band.
+    /// Adjacent refinements' errors are outside the band, or the finer error is zero.
     Order {
         case: usize,
         refinement: usize,
     },
-    /// Adjacent refinements ran under different policies, so they compare no one case.
+    /// Adjacent refinements ran under different policies.
     MixedEvidence {
         refinement: usize,
     },
@@ -145,9 +144,9 @@ fn comparisons(
     pairs
 }
 
-/// Runs each case with the same core. After every accepted step it compares the accepted dense segment
-/// with the closed form: both amounts, the circulation exchange and the gross inflow. A core that
-/// diverges fails here at its first bad instant, before positivity can intervene.
+/// Runs each case with the same core. After every accepted step it compares the accepted segment with the
+/// closed form: both amounts, the circulation exchange and any boundary exchange. A core that diverges fails
+/// here at its first bad instant, before positivity can intervene.
 pub fn accuracy(
     solver: &dyn CoupledSolver,
     policy: &AccuracyPolicy,

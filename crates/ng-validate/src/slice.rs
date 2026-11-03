@@ -324,8 +324,8 @@ fn gut(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     Ok(())
 }
 
-/// Secretion follows plasma sodium on a logistic, clearance is first order. Both held, because EN is outside the slice.
-/// Model default.
+/// Secretion follows the central veins' sodium concentration on a logistic, clearance is first order. Both held,
+/// because EN is outside the slice. Model default.
 fn vasopressin(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let declaration = HeldDeclaration::<Endocrine>::new(vec![SECRETION, CLEARANCE], Vec::new(), FIXED);
     let (mut laws, ports) = body.hold(declaration)?.parts();
@@ -403,8 +403,8 @@ pub fn hold_outside_slice(body: &mut Assembly<'_>) -> Result<(), AdmissionError>
 }
 
 /// Urine and heat leave by a law on what the pool holds, so water and energy answer their own flows: admission solves
-/// their totals. Model defaults: the bladder drains in proportion to what it holds past a rest, and voiding as an
-/// event is outside the grouped map.
+/// their totals. Model defaults: the bladder drains in proportion to what it holds past a rest, and voiding is no
+/// event, since no law here needs one.
 fn exits(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let (mut laws, ports) = body.boundary()?.parts();
     let urine = ports.route::<Water>(URINE)?.route;
@@ -438,7 +438,7 @@ fn exits(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     Ok(())
 }
 
-/// The composition root: the one place every system meets the schema.
+/// The composition root, where every system meets the slice's schema.
 pub fn arena_body() -> Result<CompiledBody, AdmissionError> {
     assemble(arena_schema()?, |mut body| {
         hold_outside_slice(&mut body)?;
@@ -633,8 +633,8 @@ fn start_guess(row: RowKind) -> f64 {
     }
 }
 
-/// Every parameter of the fixture: rounded numbers from the prototype, nobody's physiology. A key's default binds
-/// at its class or network, and a site or an edge that differs says so.
+/// Every parameter the fixture sets by hand: synthetic values, nobody's physiology. A key's default binds at the
+/// body, a class or a network, and a site or an edge that differs says so.
 fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> Result<(), AdmissionError> {
     fn set<U: Dimension>(
         packet: &mut ParameterPacket<SyntheticFixture>,
