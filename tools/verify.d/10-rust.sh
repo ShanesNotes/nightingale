@@ -14,7 +14,8 @@ fi
 phase() {
   local start=$SECONDS
   "${@:2}" || return
-  echo "10-rust $1 $((SECONDS - start)) s" >>"${NG_GATE_TIMES:-/dev/stdout}"
+  local line="time: 10-rust $1 $((SECONDS - start)) s"
+  if [ -n "${NG_GATE_TIMES:-}" ]; then echo "$line" >>"$NG_GATE_TIMES"; else echo "$line"; fi
 }
 phase fmt cargo fmt --all --check
 pkgs=()

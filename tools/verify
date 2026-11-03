@@ -57,12 +57,12 @@ for step in tools/verify.d/*.sh; do
       echo "== $name"
       start=$SECONDS
       bash "$step" || { echo "verify: $name failed"; exit 1; }
-      echo "${name%.sh} $((SECONDS - start)) s" >>"$times"
+      echo "time: ${name%.sh} $((SECONDS - start)) s" >>"$times"
       ;;
     *) echo "== $name (not selected)" ;;
   esac
 done
-sed 's/^/time: /' "$times"
+cat "$times"
 if [ "$mode" = changed ]; then
   echo "verify: OK for changed paths only"
 else

@@ -37,7 +37,7 @@ A comment pass proves itself apart from them: `python3 -I tools/gate/gate.py com
 - `30-data.sh`: every rule in `tools/gate/data.py` over `data/` and each `Data:` line in `.scratch/`, then a must-fail probe for every rule on a synthetic base the tool holds.
 - `40-mutants.sh`: every row of `tools/gate/mutants.toml` still applies, then `tools/mutate.py` replays the rows: all of them in a full or everything run, and in a merge run the rows whose path, or any file under their test crate's `tests/`, changed since the base. The changed run only checks that the rows apply.
 
-A new step is an `NN-name.sh` file in `tools/verify.d/`, named in `tools/gate/paths.toml`; `registration.steps` refuses a step that no run selects. A step times its own phases by appending `<step> <phase> <n> s` lines to the file that `$NG_GATE_TIMES` names, as `10-rust.sh` does.
+A new step is an `NN-name.sh` file in `tools/verify.d/`, named in `tools/gate/paths.toml`; `registration.steps` refuses a step that no run selects. A step times its own phases by appending `time: <step> <phase> <n> s` lines to the file that `$NG_GATE_TIMES` names, as `10-rust.sh` does.
 
 ## Read the gate lines
 
