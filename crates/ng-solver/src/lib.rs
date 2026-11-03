@@ -141,7 +141,6 @@ impl CoupledSolver for Core {
     }
 }
 
-/// The Jacobian stays beside its factors, so a pivot the body's elimination cannot take falls back to a dense solve.
 struct Linear<'b> {
     per_second: f64,
     jacobian: Jacobian,
