@@ -50,7 +50,7 @@ fn march(system: &mut InitializationSystem<'_>, body: &CompiledBody, workspace: 
                 if settled {
                     break;
                 }
-                if let Some(state) = landing(&held, unknowns) {
+                if let Some(state) = state_at_limit(&held, unknowns) {
                     unknowns.copy_from_slice(state);
                     break;
                 }
@@ -63,7 +63,7 @@ fn march(system: &mut InitializationSystem<'_>, body: &CompiledBody, workspace: 
     }
 }
 
-fn landing<'h>(held: &'h [f64], now: &[f64]) -> Option<&'h [f64]> {
+fn state_at_limit<'h>(held: &'h [f64], now: &[f64]) -> Option<&'h [f64]> {
     let size = now.len();
     let same = |state: &[f64]| {
         state

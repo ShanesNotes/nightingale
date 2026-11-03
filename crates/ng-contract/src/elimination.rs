@@ -205,7 +205,7 @@ impl Factors<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::Elimination;
+    use super::{Elimination, LANES};
     use crate::body::{RowId, UnknownId};
 
     fn next(state: &mut u64) -> f64 {
@@ -276,7 +276,7 @@ mod tests {
             (_, 3) => 1e150 * (next(state) - 0.5),
             _ => next(state) - 0.5,
         };
-        (0..13)
+        (0..LANES + 5)
             .map(|side| (0..size).map(|row| value(side, row, state)).collect())
             .collect()
     }
