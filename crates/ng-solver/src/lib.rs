@@ -43,7 +43,7 @@ fn scale(value: f64, size: f64) -> f64 {
     ABSOLUTE * size + RELATIVE * value.abs()
 }
 
-/// The accepted step's first stage rides along because, with the segment's ends, it puts the next guess on
+/// The accepted step's first half rides along because, with the segment's ends, it puts the next guess on
 /// three points.
 struct Carried {
     span_ns: u64,
@@ -189,7 +189,6 @@ struct Trend {
     points: Vec<(f64, Vec<f64>)>,
 }
 impl Trend {
-    /// None after a breakpoint: what ran before it says nothing about what runs after.
     fn of(problem: &CoupledProblem<'_>, ticket: &StepTicket, midpoint: Vec<f64>) -> Self {
         let segment = problem.accepted().last_segment();
         let Some(interval) = segment.interval().filter(|_| !ticket.after_breakpoint()) else {
@@ -292,7 +291,6 @@ impl<'a, 'p> Stages<'a, 'p> {
         }
     }
 
-    /// The scheme's three stages, solved fine first so the coarse stage starts from what the halves reached.
     fn solve(&self, midpoint: Vec<f64>) -> Result<Solved, TrialFailure> {
         let (problem, ticket) = (self.problem, self.ticket);
         let length = ticket.length_ns();
@@ -553,7 +551,6 @@ impl<'a, 'p> Stages<'a, 'p> {
             .then_some(correction)
     }
 
-    /// A correction that leaves an operator's domain is halved before the stage is given up.
     fn update(
         &self,
         workspace: &mut SolveWorkspace,

@@ -22,8 +22,6 @@ fn hi(value: Compensated) -> f64 {
     f64::from_bits(value.bits()[0])
 }
 
-/// Two vessel segments joined by one conductance, with a water boundary into the first, as the arena's
-/// accuracy case has them: the difference relaxes at twice the conductance and the sum takes the inflow.
 struct Reservoirs {
     body: CompiledBody,
     a: SiteId,
@@ -157,7 +155,6 @@ impl Reservoirs {
         };
         [row(self.a), row(self.b)]
     }
-    /// The closed form of `d' = -2 k d + u` and `s' = u` on each constant stretch of the inflow.
     fn exact(&self, until: SimTime) -> [f64; 2] {
         let mut sum = self.start[0] + self.start[1];
         let mut difference = self.start[0] - self.start[1];
@@ -190,8 +187,6 @@ struct Taken {
     interval: Interval,
 }
 
-/// A run driven by hand through the contract alone: each attempt's ticket comes from the timeline, each proposal
-/// is verified on the problem built from the accepted image, and only a verified step moves the image.
 struct Run<'m> {
     body: &'m CompiledBody,
     identity: RunIdentity,
@@ -380,8 +375,6 @@ fn the_history_starts_at_each_breakpoint() {
     assert_eq!(breakpoints, [at(100), at(200), at(250), at(300)]);
 }
 
-/// Every call reads only what the seam hands it, so a run that changes core object at every step, as a resume
-/// into a freshly built core does, takes the same steps to the same bits.
 #[test]
 fn a_fresh_core_at_every_step_takes_the_same_steps_to_the_same_bits() {
     let case = Reservoirs::new(
@@ -438,8 +431,6 @@ fn the_declared_resolution_is_the_arenas() {
     assert_eq!(expected.digest(), resolution.digest());
 }
 
-/// Two algebraic rows that each read the other and one memory. With no coupling, the fixed elimination matches
-/// a row to an unknown it has no pivot on; with a rate that reads `x`, each stage is a quadratic.
 fn coupled_memory(nonlinear: bool) -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("synthetic body", origin());
@@ -509,8 +500,6 @@ fn coupled_memory(nonlinear: bool) -> (CompiledBody, ParameterPacket<SyntheticFi
     (body, packet)
 }
 
-/// A decaying memory and its logarithm, so a guess carried past zero leaves the logarithm's domain while the
-/// stage's own solution stays inside it.
 fn logarithm() -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("synthetic body", origin());
