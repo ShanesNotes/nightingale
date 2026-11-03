@@ -21,3 +21,5 @@ From 10: the fence refuses a posture input inside the first cycle, so a window t
 From 04 and 10: row scales were left to tickets 10 and 11. Ticket 10 gave each row its natural size, which the reference's Newton stop reads. The per-row error scales that this gate compares at are this ticket's. The slice's are uniform today (`crates/ng-validate/src/slice.rs:487`).
 
 From the split of ticket 11: §7's other slice windows, sleep onset and the second day's waking, need sleep and clock payloads, and no ticket builds those yet.
+
+From the solver arena (in this PR): the two candidate cores agreed on every body-response verdict and on the two-reservoir accuracy errors, but per-beat cardiac output in the first beats after 07:00 differed between them by up to about 0.6 mL/s, about 1 percent. Only this ticket's window against the reference integrator can say which is closer.

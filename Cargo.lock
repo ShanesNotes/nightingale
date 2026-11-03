@@ -73,6 +73,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ng-solver"
+version = "0.0.0"
+dependencies = [
+ "ng-contract",
+]
+
+[[package]]
 name = "ng-validate"
 version = "0.0.0"
 dependencies = [
@@ -85,6 +92,7 @@ dependencies = [
  "ng-receptor",
  "ng-record",
  "ng-renal",
+ "ng-solver",
 ]
 
 [[package]]

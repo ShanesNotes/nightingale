@@ -19,3 +19,5 @@ From the engine bench (nightingale#31): peak memory read 26.3 MB at 1154 accepte
 From 04 and 05: ticket 04's 19 GB for 48 h at a 2 ms step was for its two-row body. One link per accepted step adds 64 bytes to each chunk, about 5.5 GB more. Fixed-time chunks do not answer it, because grouping moves no bytes and merged chords do not bound the curve, so measure on the slice before choosing a store. A resume reads every link, so the resume gate's cost grows with the number of loads.
 
 From the split of ticket 11: the certificate reads one sealed history (contract §5), and a resume walks the chain link by link, so both keep working through the store.
+
+From the solver arena (in this PR): at the arena's scales (0.1, 1e-3) and a 10 ms cap, 06:55 to 07:30 took about 446,000 accepted steps, about 212 a simulated second, and a history link took 15.6 to 18.5 KB, so about 7 GB for that window. A meal check needs runs to 11:30 with and without the meal, about 4.6 simulated hours each and 55 GB or more each at that rate, so rows 9 and 10 wait on this ticket.

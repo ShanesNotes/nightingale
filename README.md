@@ -13,12 +13,12 @@ A monitor and a chart can both describe one patient and still disagree. The desi
 Rust 1.98.1, edition 2024, one Cargo workspace, `unsafe` code forbidden. Laws are data. One time step is meant to run in this order:
 
 1. `ng-contract` compiles anatomy and laws into one body.
-2. A solver proposes the next state and sees only that body. The one core so far is a test reference in `ng-validate`, and the solver crate does not exist yet.
+2. A solver proposes the next state and sees only that body. `ng-solver` holds the core the solver arena picked first, and `ng-validate` holds the reference core it is measured against.
 3. `ng-record` accepts or refuses the whole step and keeps the ledger.
 4. `ng-observe` would read the accepted step and would not write.
 5. `ng-validate` checks conservation and accuracy, and would compare solvers. It sits outside that path.
 
-The four crates under `crates/` compile. `ng-contract` holds the anatomy, the language laws are declared in, the compiler and the solver interface. `ng-record` holds the accepted state, the step check and the ledger. `ng-validate` holds a synthetic two-reservoir body, a backward Euler reference core, the certificate and the accuracy gate. `ng-observe` is still only a comment naming its role. The type sketch they are meant to grow into is [solver-contract-sketch](docs/architecture/solver-contract-sketch), and its function bodies are `todo!()`. Heart and vessels, fluids, kidney, nerves, receptors and the solver are modules there, not workspace crates. Read [the requirements](docs/srs.md), [decision records](docs/adr), [the 13-system atlas](docs/atlas), [the glossary](GLOSSARY.md) and [the solver contract](docs/architecture/solver-contract.md). nightingale-pulse is a private reference implementation. This tree does not build or run against it.
+The ten crates under `crates/` compile. `ng-contract` holds the anatomy, the language laws are declared in, the compiler and the solver interface. `ng-cardiovascular`, `ng-fluids`, `ng-renal`, `ng-nervous` and `ng-receptor` declare the laws of heart and vessels, fluids, kidney, nerves and receptors. `ng-solver` holds the solver core. `ng-record` holds the accepted state, the step check and the ledger, and `ng-observe` reads accepted steps through a lens. `ng-validate` holds the synthetic bodies and the slice, a backward Euler reference core, the certificate, the accuracy gate and the replay gates. The type sketch the crates grew from is [solver-contract-sketch](docs/architecture/solver-contract-sketch), and its function bodies are `todo!()`. Read [the requirements](docs/srs.md), [decision records](docs/adr), [the 13-system atlas](docs/atlas), [the glossary](GLOSSARY.md) and [the solver contract](docs/architecture/solver-contract.md). nightingale-pulse is a private reference implementation. This tree does not build or run against it.
 
 ## Build
 

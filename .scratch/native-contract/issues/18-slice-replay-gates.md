@@ -25,3 +25,5 @@ From 10: one admission takes about 17 s in a release build (`tools/bench/run.py`
 From 04, in ticket 09's comments: a ticket cut below the floor by a breakpoint faults at its first refusal, so the slice's closely spaced events need a floor below their gaps.
 
 From the split of ticket 11: the live pace reads the host clock that ticket 12 passes in. Each core's minimum interval is a policy value. It takes a model default, set in the validation crate and reported with every result (foundation 07).
+
+From the solver arena (in this PR), a lead not yet tested on the slice: the step-policy gate needs two policies on two grids, and an error-controlled core runs both caps on one grid wherever both caps exceed the span its error allows, so the gate would report missing evidence. The picked core passes the gate on the chance case at caps of 1 s and 0.25 s. On the slice, choose two policies whose grids differ.
