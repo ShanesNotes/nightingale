@@ -1,5 +1,6 @@
 //! The minimal baroreflex: stretch through a filter, a set point that follows it slowly, traffic out by a logistic, and
-//! transmitter released and taken back at every junction that holds it. No law writes a rate or a resistance.
+//! transmitter released and taken back at every junction that holds it. No law writes a heart rate or a
+//! resistance.
 
 use ng_contract::catalog::{BaroreceptorAfferents, Reads};
 use ng_contract::*;
@@ -45,8 +46,8 @@ fn transmitter<'b, Q: Substance>(
     ns.transfer_at(&reuptake, back);
 }
 
-/// A logistic of how far the filter stands from the set point, shifted so the body rests low on the curve and traffic
-/// has room to rise. Model default.
+/// A logistic of how far the filter stands from the set point, shifted so the body can rest low on the curve and
+/// leave traffic room to rise. Model default.
 fn traffic<'b>(
     ns: &mut FragmentBuilder<'b, Nervous>,
     filtered: &StateSlot<'b, Nervous, Dimensionless>,

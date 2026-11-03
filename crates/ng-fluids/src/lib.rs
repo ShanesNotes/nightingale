@@ -48,7 +48,7 @@ fn interstitial_pressure<'b>(
     read
 }
 
-/// `pi = slope c`, with `c` albumin over the space's own volume. Model default: linear.
+/// `pi = slope c`, with `c` albumin over the volume of the space's own water. Model default: linear.
 fn oncotic<'b, 'k>(
     k: &mut Kernel<'b, 'k, Fluids, CapillaryBed>,
     albumin: &ReadPort<'b, Fluids, PerSite<CapillaryBed, Albumin>>,

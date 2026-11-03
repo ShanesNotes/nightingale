@@ -59,7 +59,7 @@ pub enum ObservationRefusal {
     OtherLens,
     /// A view that does not follow the last revision read: skipped, repeated or of another course.
     Gap { expected: Digest, found: Option<Digest> },
-    /// Checkpoint bytes that are not an observer's, or that changed.
+    /// Checkpoint bytes that are not an observer's, or that fail their raw digest.
     Malformed,
 }
 

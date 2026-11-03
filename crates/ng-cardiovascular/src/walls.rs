@@ -55,9 +55,9 @@ impl<'b, 'h> Walls<'b, 'h> {
             activation: &heart.activation,
         }
     }
-    /// `V - V_u`, with `V` the water's volume and the albumin's, `V_u = V_u_base - S E_a1`, and no less than zero: a
-    /// vessel below its unstressed volume collapses and sucks nothing in, so a chamber cannot pull itself dry. Model
-    /// default.
+    /// `V - V_u`, with `V` the water's volume and the albumin's, `V_u = V_u_base - S E_a1` (research 02), and no
+    /// less than zero: a vessel below its unstressed volume collapses and sucks nothing in, so a chamber cannot pull
+    /// itself dry. Model default.
     pub(crate) fn stressed<'k>(
         &self,
         k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,

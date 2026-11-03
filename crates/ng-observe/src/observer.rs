@@ -42,7 +42,6 @@ pub enum ObservedValue {
     InvalidSignal,
 }
 
-/// A sum that overflows is a NaN pair, which `Compensated::from_bits` refuses, so none stays in a window.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Filling {
     Mean { sum: Compensated, seen: u64 },

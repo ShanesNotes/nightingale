@@ -41,7 +41,8 @@
 //! use ng_record::*;
 //! fn legal(session: Session<'_, Running>) -> Step<'_> { session.step() }
 //! ```
-//! A refused session is mid-step and a faulted one has no next step, so neither takes an input or a save.
+//! A refused session is mid-step and a faulted one has no next step, so neither takes an input, and a refused
+//! one takes no checkpoint.
 //! ```compile_fail,E0599
 //! use ng_record::*;
 //! fn late(refused: &mut Session<'_, Retrying>, input: AuthorizedInput) -> Result<InputReceipt, ng_contract::AdmissionError> {
@@ -69,7 +70,7 @@
 //!     running.checkpoint(store)
 //! }
 //! ```
-//! A lent record takes no input: the one path from a clinician to the body goes through the session.
+//! A lent session takes no input: the one path from a clinician to the body needs exclusive use of it.
 //! ```compile_fail,E0596
 //! use ng_record::*;
 //! fn sneak(session: &Session<'_, Running>, input: AuthorizedInput) -> Result<InputReceipt, ng_contract::AdmissionError> {
@@ -155,7 +156,7 @@
 //! use ng_record::*;
 //! fn read(view: &ObservationView<'_>) -> Vec<(SimTime, Vec<Compensated>)> { view.samples() }
 //! ```
-//! A shared read moves no bit: a record is `Sync`, so nothing in it hides a `Cell`.
+//! A record is `Sync`, so nothing in it hides a `Cell` that a shared read could move.
 //! ```compile_fail,E0277
 //! fn read_only<T: Sync>() {}
 //! read_only::<core::cell::Cell<u64>>();
