@@ -1,6 +1,6 @@
 """Breaks one rule at a time on a commit and reports whether a test notices.
 
-    python3 -I tools/mutate.py TABLE [--rev REV] [--only NAME ...] [--budget SECONDS] [--check]
+    python3 -I tools/mutate.py TABLE [--rev REV] [--only NAME ...] [--since REV] [--budget SECONDS] [--check]
 
 Python 3.11 stdlib only. TABLE is TOML with one [[mutant]] per rule, aimed at the test that holds it. `old` must match
 exactly once. `test` is what follows `cargo test`, and a row's own `test` replaces the table's. It may not pass
@@ -24,8 +24,9 @@ pass there before any row runs. Each row prints as it ends, so a killed sweep ke
     UNCLEAR          over budget, killed from outside, or failed with no test or coded error named: neither a catch
                      nor a survivor
 
-Exit 0 only when every row is CAUGHT. --check lists the NOT APPLIED rows and stops before any build. Each command runs
-in its own process group, and that group dies with the command and with this script, however this script dies.
+Exit 0 only when every row is CAUGHT. --check lists the NOT APPLIED rows and stops before any build. --since keeps the
+rows whose path, or whose test's file or shared test modules, changed after REV. Each command runs in its own process
+group, and that group dies with the command and with this script, however this script dies.
 """
 import argparse
 import collections
@@ -76,6 +77,19 @@ def load_rows(path, only):
     if unknown := set(only) - set(names):
         refuse(f"--only names no row: {sorted(unknown)}")
     return [row for row in rows if not only or row["name"] in only]
+
+
+def touched(row, changed):
+    args = shlex.split(row["test"])
+    crate = next((b for a, b in zip(args, args[1:]) if a in ("-p", "--package")), None)
+    target = next((b for a, b in zip(args, args[1:]) if a == "--test"), None)
+    tests = f"crates/{crate}/tests/"
+
+    def held_by(path):
+        rest = path.removeprefix(tests)
+        return crate is not None and rest != path and (rest == f"{target}.rs" or "/" in rest)
+
+    return row["path"] in changed or any(held_by(path) for path in changed)
 
 
 def run_tethered(argv, budget=None, **popen):
@@ -154,6 +168,7 @@ def main():
     parser.add_argument("--rev", default="HEAD")
     parser.add_argument("--only", nargs="+", default=[], metavar="NAME")
     parser.add_argument("--budget", type=int, default=420, metavar="SECONDS", help="limit on one cargo test")
+    parser.add_argument("--since", metavar="REV", help="only rows whose path or test changed after REV")
     parser.add_argument("--check", action="store_true", help="stop before any build")
     args = parser.parse_args()
 
@@ -162,6 +177,18 @@ def main():
     if code != 0:
         refuse(f"{args.rev} is no commit here")
     sha = found.decode().strip()
+    if args.since is not None:
+        code, found = run_tethered(["git", "rev-parse", "--verify", "--quiet", f"{args.since}^{{commit}}"], cwd=ROOT)
+        if code != 0:
+            refuse(f"{args.since} is no commit here")
+        code, found = run_tethered(["git", "diff", "--name-only", "-z", found.decode().strip(), sha], cwd=ROOT)
+        if code != 0:
+            refuse(f"git diff failed:\n{found.decode(errors='replace')}")
+        changed = set(found.decode().split("\0")) - {""}
+        rows = [row for row in rows if touched(row, changed)]
+        if not rows:
+            print(f"no row is touched after {args.since}")
+            sys.exit(0)
     print(f"sweep of {sha}, {len(rows)} rows, budget {args.budget} s", flush=True)
 
     tally = collections.Counter()

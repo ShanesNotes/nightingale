@@ -5,7 +5,7 @@ schema = 1
 
 always = ["01-toolchain"]
 
-crate_steps = ["05-seam", "10-rust", "15-f64"]
+crate_steps = ["05-seam", "10-rust", "15-f64", "40-mutants"]
 
 [[rule]]
 paths = [
