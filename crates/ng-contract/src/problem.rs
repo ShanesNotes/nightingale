@@ -8,6 +8,7 @@ use crate::{
     AcceptedStateView, BoundParameters, Candidate, CompiledBody, Digest, EngineFault, EngineFaultKind,
     InputId, Interval, NumericalRefusal, Ratio, Refused, RowId, RunIdentity, SimTime, TrialFailure,
 };
+use core::num::NonZeroU64;
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 
@@ -283,7 +284,7 @@ pub struct StepTicket {
     pub(crate) after_breakpoint: bool,
     pub(crate) attempt: u32,
     pub(crate) fence: SimTime,
-    pub(crate) floor_ns: u64,
+    pub(crate) floor_ns: NonZeroU64,
     pub(crate) budget: u32,
     pub(crate) digest: Digest,
 }
@@ -370,7 +371,7 @@ impl StepTicket {
             retry_ns /= 2;
         }
         let at = self.interval.start();
-        if self.attempt >= self.budget || retry_ns < self.floor_ns {
+        if self.attempt >= self.budget || retry_ns < self.floor_ns.get() {
             return TrialFailure::EngineFault(EngineFault {
                 kind: EngineFaultKind::NoAdmissibleStep,
                 at,

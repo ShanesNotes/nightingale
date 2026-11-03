@@ -1239,13 +1239,13 @@ def seal_scopes(src: Source) -> list[tuple[str, tuple[Token, ...]]]:
             continue
         around = [item for item in items if item[1] < start <= item[2]]
         owner = max(around, key=lambda item: item[1], default=None)
+        impl = owner if owner is not None and owner[5] else None
         inner = [item for item in items if opening < item[0] <= close]
         own = tuple(
             code[k] for k in range(start, close + 1) if not any(item[0] <= k <= item[2] for item in inner)
         )
-        method = owner is not None and owner[5]
-        if (method and owner[4] and name == "seal") or _opens_identity(own):
-            out.append(("::".join([stem, *([owner[3]] if method else []), name]), own))
+        if (impl is not None and impl[4] and name == "seal") or _opens_identity(own):
+            out.append(("::".join([stem, *([impl[3]] if impl is not None else []), name]), own))
     return out
 
 

@@ -198,7 +198,6 @@ name = "ng-receptor"
 [[crate]]
 name = "ng-record"
 
-
 [[crate.seal_skip]]
 item = "history::History::digest"
 field = "origin"

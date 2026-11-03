@@ -903,7 +903,7 @@ fn two_step_policies_may_fire_unrelated_events_in_another_order() {
 #[test]
 fn a_landing_stops_at_the_first_crossing_whichever_guard_it_reads() {
     let core = reference(64 * SECOND);
-    let floor = core.resolution().minimum_interval_ns() as f64;
+    let floor = core.resolution().minimum_interval_ns().get() as f64;
     let mut first_of_a_shared_span = 0;
     for word in 0..64 {
         let case = ChanceCase::two_rhythms()

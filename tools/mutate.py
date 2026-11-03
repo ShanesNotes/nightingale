@@ -164,7 +164,7 @@ def main():
     parser.add_argument("--rev", default="HEAD")
     parser.add_argument("--only", nargs="+", default=[], metavar="NAME")
     parser.add_argument("--budget", type=int, default=420, metavar="SECONDS", help="limit on one cargo test")
-    parser.add_argument("--since", metavar="REV", help="only rows whose path or test changed after REV")
+    parser.add_argument("--since", metavar="REV", help="only rows whose path or test crate's tests/ changed after REV")
     parser.add_argument("--check", action="store_true", help="stop before any build")
     args = parser.parse_args()
 

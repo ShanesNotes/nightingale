@@ -248,8 +248,8 @@ impl DeclaredResolution {
     pub fn policy(&self) -> Digest {
         self.policy
     }
-    pub fn minimum_interval_ns(&self) -> u64 {
-        self.minimum_interval_ns.get()
+    pub fn minimum_interval_ns(&self) -> NonZeroU64 {
+        self.minimum_interval_ns
     }
     pub(crate) fn retry_budget(&self) -> u32 {
         self.retry_budget

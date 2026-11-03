@@ -132,7 +132,7 @@ impl DeclaredResolution {
     pub fn policy(&self) -> Digest {
         todo!()
     }
-    pub fn minimum_interval_ns(&self) -> u64 {
+    pub fn minimum_interval_ns(&self) -> NonZeroU64 {
         todo!()
     }
 }
