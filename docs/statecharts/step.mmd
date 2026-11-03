@@ -1,0 +1,37 @@
+---
+title: "One step of a run"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: accepted
+    lg1: attention
+  }
+  class lg0 teal
+  class lg1 orange
+  s0: Accepted, nothing waiting
+  s1: Accepted, an input waiting
+  s2: Step refused, retry pending
+  s3: Engine fault, run stopped
+  s4: Accepted, an input due
+  s5: Accepted, a fence ahead
+  [*] --> s0
+  s0 --> s1: an input arrives
+  s0 --> s2: refused whole, nothing changes
+  s0 --> s3: no shorter span is left
+  s1 --> s2: refused whole, nothing changes or the cut at the input is refused
+  s1 --> s4: stops at the waiting input or lands on a guard and fires
+  s1 --> s3: no shorter span is left
+  s2 --> s0: the shorter retry is accepted or lands on a guard and fires
+  s2 --> s3: no shorter span is left
+  s0 --> s4: an input arrives
+  s2 --> s4: the shorter retry is accepted or lands on a guard and fires
+  s2 --> s1: the shorter retry is accepted or lands on a guard and fires
+  s2 --> s5: the shorter retry is accepted
+  s4 --> s0: accepted whole
+  s5 --> s4: stops at the waiting input
+  class s0 teal
+  class s1 teal
+  class s2 orange
+  class s3 orange
+  class s4 teal
+  class s5 teal
