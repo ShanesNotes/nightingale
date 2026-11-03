@@ -2,7 +2,7 @@
 
 Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-build-slice-spec)
 
-**What to build:** `RunEvidence` carries a `NumericalHealth` report beside the certificate, as the sketch has it (`docs/architecture/solver-contract-sketch/src/ng_validate.rs:348`). The report counts refusals by reason and by refusal source, faults at the minimum interval and validity excursions. A step's receipt and the session's refusals feed it.
+**What to build:** `RunEvidence` carries a `NumericalHealth` report beside the certificate, as the sketch has it (`docs/architecture/solver-contract-sketch/src/ng_validate.rs:348`). The report counts refusals by reason and by refusal source, faults at the minimum interval and validity excursions. A step's receipt and the refusals a `Session` records feed it.
 
 Blocked by: 12
 
@@ -12,7 +12,7 @@ Status: ready-for-agent
 
 ## Comments
 
-From 04: `NumericalHealth` is not built. A receipt's excursions and a session's refusals feed it.
+From 04: `NumericalHealth` is not built. A receipt's excursions and a `Session`'s refusals feed it.
 
 From 10: a stage past a guard is `GuardInside`, a new refusal that the report counts.
 

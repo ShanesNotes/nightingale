@@ -2,7 +2,7 @@
 
 Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-build-slice-spec)
 
-**What to build:** `accuracy` runs every manufactured case that §7 lists, not only `AccuracyCase::TwoReservoir`. The new cases are drain and refill to the admissible bound, zero flow and restore, and controlled removal with every removed amount in its receipt. The last is evaluation independence: one stage gives identical residual and Jacobian bits before and after refused evaluations. Each case has a closed form or an exact identity, and each ships with a core built to fail it.
+**What to build:** `accuracy` runs every manufactured case that §7 lists, not only `AccuracyCase::TwoReservoir`. The new cases are drain and refill to the admissible bound, zero flow and restore, controlled removal with every removed amount in its receipt, and evaluation independence, where one stage gives identical residual and Jacobian bits before and after refused evaluations. Each case has a closed form or an exact identity, and each ships with a core built to fail it.
 
 Blocked by: None (can start immediately)
 

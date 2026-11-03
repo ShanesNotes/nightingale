@@ -2,7 +2,7 @@
 
 Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-build-slice-spec)
 
-**What to build:** The validation crate runs the checks in the contract's day table (§6, "Checks, never forcings", `docs/architecture/solver-contract.md:329`) on a run's trace, as deterministic tests with no judge opinion. Each check reads one quantity around one event. It compares the mean over a window after the event with the mean over a baseline before it, and reports pass, fail or "not available yet". The rows, which of them score, and how each one is computed are in the comments below.
+**What to build:** The validation crate runs checks drawn from the contract's day table (§6, `docs/architecture/solver-contract.md:329`) on a run's trace, as deterministic tests with no judge opinion. Each check reads one quantity around one event. It compares the mean over a window after the event with the mean over a baseline before it, and reports pass, fail or "not available yet". The rows, which of them score, and how each one is computed are in the comments below.
 
 Blocked by: 11, 12
 
@@ -60,7 +60,7 @@ How each check is computed:
 Open before these scores enter the arena's pick:
 
 - The SRS defines the arena's pick on conservation, accuracy, replay and speed (`docs/srs.md` section 2, and "Arena" in `GLOSSARY.md`). That definition changes before these scores decide a pick.
-- AGENTS.md's behavior rule lets only checks drawn from anchors and requirements judge physiology. The directions are the contract's own (§6). The timing windows are not yet an anchor or a requirement.
+- AGENTS.md's behavior rule lets only checks drawn from anchors and requirements judge physiology. The directions come from the contract's day table, except row 4's brief rise. The timing windows are not yet an anchor or a requirement.
 - Row 8's direction is disputed. The contract says filtration falls slightly on sitting, and `crates/ng-validate/tests/arena_body.rs:799` asserts that it falls, by under 5 percent. The one source found reports no change from supine to sitting.
 - Day one starts at 06:55, so its 07:00 checks have 5 min of baseline, not 10. Day two has the full 10 min.
 - Rows 14 to 17 need sleep onset and offset, and no ticket builds sleep or clock payloads yet.

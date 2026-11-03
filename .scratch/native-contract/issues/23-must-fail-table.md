@@ -8,7 +8,7 @@ Blocked by: 13, 14, 15, 16, 18, 19, 20, 22
 
 Status: ready-for-agent
 
-- [ ] Each row of §7's must-fail table names the test in which its gate rejects that core or model
+- [ ] Every row of §7's must-fail table has a test in which its named gate rejects that core or model
 
 ## Comments
 
