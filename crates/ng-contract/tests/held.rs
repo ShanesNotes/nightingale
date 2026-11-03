@@ -583,7 +583,7 @@ fn the_card_an_enclosure_names_must_be_held() {
     );
 }
 
-/// On a map with no enclosure the output owes nothing, so a plain slot can take its name.
+/// On a map with no enclosure the card owes no enclosure pressure, so a plain slot can take its name.
 #[test]
 fn a_definition_cannot_land_on_a_plain_slot_that_shares_its_name() -> Result<(), AdmissionError> {
     let mut map = AnatomyBuilder::new();

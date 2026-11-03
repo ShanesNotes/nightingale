@@ -647,8 +647,8 @@ fn a_urinary_edge_out_of_a_site_with_no_lumen_is_refused() -> Result<(), Admissi
     Ok(())
 }
 
-/// An energy route that took any pool in its space would turn water into energy, and the conserved total that joined the
-/// two would hide it.
+/// An energy route that took any pool in its space would turn water into energy, and the conserved
+/// combination that joined the two would hide it.
 #[test]
 fn an_energy_route_takes_no_pool_of_another_species() -> Result<(), AdmissionError> {
     let mut map = AnatomyBuilder::new();
@@ -829,8 +829,6 @@ fn a_reclaim_law_that_reads_a_nerve_at_a_bed_no_nerve_reaches_is_refused_by_name
     Ok(())
 }
 
-/// A map's edges, regions and enclosures all read its sites, so a pool at a site it does not hold would stand outside
-/// every check.
 #[test]
 fn a_pool_at_a_site_the_map_does_not_hold_is_refused() -> Result<(), AdmissionError> {
     let mut map = AnatomyBuilder::new();
@@ -865,7 +863,6 @@ fn a_pool_in_a_space_its_site_has_not_is_refused() -> Result<(), AdmissionError>
     Ok(())
 }
 
-/// One bed with a vessel around it, so Starling joins a plasma that holds albumin to a tissue space that may not.
 fn cargo(tissue_holds: bool, kept_back: bool) -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at()?);
@@ -1078,7 +1075,6 @@ where
     })
 }
 
-/// A valve's flow stands on its edge, so a law of the whole body has no such row to read.
 #[test]
 fn a_body_law_that_reads_an_edges_memory_is_refused_by_name() -> Result<(), AdmissionError> {
     let compiled = with_a_valve(|cv, flow| {
@@ -1103,7 +1099,6 @@ fn a_body_law_that_reads_an_edges_memory_is_refused_by_name() -> Result<(), Admi
     Ok(())
 }
 
-/// A mode of the whole body has no edge, so a firing of it cannot reset what stands on one.
 #[test]
 fn a_body_guard_that_resets_an_edges_memory_is_refused_by_name() -> Result<(), AdmissionError> {
     let compiled = with_a_valve(|cv, flow| {
@@ -1128,7 +1123,6 @@ fn a_body_guard_that_resets_an_edges_memory_is_refused_by_name() -> Result<(), A
     Ok(())
 }
 
-/// A route stands only where its pools do, so a law over every junction has nothing to read at one that holds none.
 #[test]
 fn a_read_of_a_route_that_does_not_reach_a_site_is_refused_by_name() -> Result<(), AdmissionError> {
     let mut map = AnatomyBuilder::new();
@@ -1169,8 +1163,8 @@ fn a_read_of_a_route_that_does_not_reach_a_site_is_refused_by_name() -> Result<(
     Ok(())
 }
 
-/// A binding declared for junctions must not run at a bed that happens to hold the same pools: a cleft's law on plasma
-/// would pass every orphan check.
+/// A binding declared for junctions must not run at a bed that happens to hold its species free and bound: a
+/// cleft's law on plasma would pass every orphan check.
 #[test]
 fn a_binding_stands_only_on_its_own_set_of_sites() -> Result<(), AdmissionError> {
     let mut map = AnatomyBuilder::new();
@@ -1281,7 +1275,6 @@ fn a_landmark_off_a_ports_set_is_refused_by_name() -> Result<(), AdmissionError>
     Ok(())
 }
 
-/// A drain's law holds its flow row and its columns read the row, so its own read of a drive is what carries a delivery.
 #[test]
 fn a_drain_takes_a_delivery_its_own_law_reads() -> Result<(), InitializationFailure> {
     let mut map = AnatomyBuilder::new();
@@ -1329,7 +1322,6 @@ fn a_small_loop() -> Result<Schema, AdmissionError> {
     Schema::new(map.finish()?)
 }
 
-/// A kernel keeps no place once it is attached, so a site's rate on a whole body's memory reads a site it does not have.
 #[test]
 fn a_site_rate_on_a_body_memory_is_refused_by_name() -> Result<(), AdmissionError> {
     let compiled = assemble(a_small_loop()?, |mut body| {
@@ -1363,7 +1355,6 @@ fn a_site_rate_on_a_body_memory_is_refused_by_name() -> Result<(), AdmissionErro
     Ok(())
 }
 
-/// The same for a guard: an edge's zero on a whole body's mode.
 #[test]
 fn an_edge_guard_on_a_body_mode_is_refused_by_name() -> Result<(), AdmissionError> {
     let compiled = assemble(a_small_loop()?, |mut body| {
@@ -1397,7 +1388,6 @@ fn an_edge_guard_on_a_body_mode_is_refused_by_name() -> Result<(), AdmissionErro
     Ok(())
 }
 
-/// A hazard's draw stands for the whole body, so a route's mode, one per edge, has no one place for it.
 #[test]
 fn a_hazard_on_a_routes_mode_is_refused_by_name() -> Result<(), AdmissionError> {
     let compiled = assemble(a_small_loop()?, |mut body| {
@@ -1432,7 +1422,6 @@ fn a_hazard_on_a_routes_mode_is_refused_by_name() -> Result<(), AdmissionError> 
     Ok(())
 }
 
-/// A field read at a mark is held to the port's set as a pool read is.
 #[test]
 fn a_field_read_at_a_mark_off_its_ports_set_is_refused_by_name() -> Result<(), AdmissionError> {
     let mut map = AnatomyBuilder::new();
@@ -1480,7 +1469,6 @@ fn a_sum<'b, O: Owner>(laws: &mut FragmentBuilder<'b, O>, name: &'static str) ->
     Ok(())
 }
 
-/// A law's name is its owner's and its own, so two systems may each hold a sum of one name.
 #[test]
 fn two_systems_may_each_hold_a_sum_of_one_name() -> Result<(), AdmissionError> {
     let mut map = AnatomyBuilder::new();
@@ -1498,7 +1486,8 @@ fn two_systems_may_each_hold_a_sum_of_one_name() -> Result<(), AdmissionError> {
     Ok(())
 }
 
-/// In a body of water alone a plain edge's flow is its column and no row, so a read of it is refused by name.
+/// In a body that carries water alone a plain edge's flow is its column and no row, so a read of it is
+/// refused by name.
 #[test]
 fn a_read_of_a_flow_that_is_no_row_is_refused_by_name() -> Result<(), AdmissionError> {
     let mut map = AnatomyBuilder::new();

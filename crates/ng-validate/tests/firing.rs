@@ -1,6 +1,3 @@
-//! What a firing does and what admission holds a ring to. Each bench is the smallest body that shows one rule, and the
-//! interior crossing and the two free levels are the design review's own counterexamples.
-
 use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::*;
 use ng_validate::*;
@@ -118,7 +115,6 @@ fn a_guard_crossed_and_crossed_back_inside_a_step_refuses_it_and_lands() {
     assert!(landed.abs_diff(SECOND / 4) <= SECOND / 512, "landed at {landed}");
 }
 
-/// Two guards on one variable, with `m` over both thresholds: the first in stable order wins, in the ring as in a run.
 fn two_guards() -> CompiledBody {
     assemble(one_site(), |mut body| {
         let (mut laws, _ports) = body.nervous()?.parts();
@@ -494,8 +490,6 @@ fn no_flow_out_of_a_dry_pool_carries_nothing() {
     assert!(run_until(session, SimTime::from_ns(SECOND)).is_ok());
 }
 
-/// A hazard's firing moves its stream's draw, and a landing solves nothing, so an algebraic read of that draw would be
-/// published stale.
 #[test]
 fn an_algebraic_law_that_reads_a_draw_a_firing_moves_is_refused() {
     let body = assemble(one_site(), |mut body| {
@@ -528,8 +522,6 @@ fn an_algebraic_law_that_reads_a_draw_a_firing_moves_is_refused() {
     );
 }
 
-/// A reset sets a row to zero, so a row whose set leaves zero out would be published outside it, and no checkpoint of that
-/// state could resume.
 #[test]
 fn a_reset_of_a_row_that_cannot_hold_zero_is_refused() {
     let compiled = assemble(one_site(), |mut body| {

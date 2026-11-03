@@ -24,7 +24,6 @@ fn measure<U>(value: f64) -> Measure<U> {
     Measure::new(value).expect("finite")
 }
 
-/// What a core and its test both hold, for the length of the test.
 fn shared<T>(value: T) -> &'static T {
     Box::leak(Box::new(value))
 }

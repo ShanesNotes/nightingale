@@ -309,7 +309,6 @@ fn an_anatomy_without_beds_needs_no_circulation() -> Result<(), AdmissionError> 
     Ok(())
 }
 
-/// `body` contains `bed` through `organ`, and the map says which space holds each.
 fn organ_bed(
     declare: impl FnOnce(&mut AnatomyBuilder, SiteId, SiteId, [Site<EnclosedSpace>; 2]),
 ) -> Result<Result<Anatomy, AdmissionError>, AdmissionError> {

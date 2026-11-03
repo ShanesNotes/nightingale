@@ -165,8 +165,6 @@ fn an_integral_past_its_draw_when_its_guard_arms_fires_within_a_floor() {
     );
 }
 
-/// A rate that holds in every mode climbs past its draw while its guard is not armed, and only an armed guard ends
-/// a step.
 #[test]
 fn an_integral_past_its_draw_stops_no_step_while_its_guard_is_disarmed() {
     let case = ChanceCase::racing()
@@ -197,7 +195,6 @@ fn an_integral_past_its_draw_stops_no_step_while_its_guard_is_disarmed() {
     );
 }
 
-/// Only a guard armed before any guard fires can fire, so a guard a firing arms waits for the next step.
 #[test]
 fn a_guard_a_firing_arms_fires_on_the_next_step_within_a_floor() {
     let case = ChanceCase::echoing().expect("a body").until(at(2_400));
@@ -315,7 +312,6 @@ fn reads_a_reset(reads: Reads) -> Result<(CompiledBody, ParameterPacket<Syntheti
     Ok((body, packet))
 }
 
-/// A crossing nothing can move, into a state one law cannot read: the run must stop short of it and say why.
 #[test]
 fn a_firing_no_law_can_read_faults_short_of_its_crossing_and_names_the_law()
 -> Result<(), InitializationFailure> {
@@ -398,7 +394,6 @@ fn a_firing_keeps_the_excursion_its_step_ended_on() -> Result<(), Initialization
     }
 }
 
-/// The firing spent its draw, so a law read on what it leaves reads the stream's next one.
 #[test]
 fn what_a_firing_leaves_reads_the_next_draw() -> Result<(), InitializationFailure> {
     let (excursion, event) = first_excursion_after_a_firing(Reads::TheDraw)?;
@@ -510,8 +505,6 @@ fn two_guards_racing_for_one_mode_fire_once_and_the_loser_keeps_its_draw() {
     );
 }
 
-/// The landing stops short of an input the core has been shown, so a late stamp between them would give two
-/// schedules of one input set two heads: the same reason a refused cut leaves a fence.
 #[test]
 fn a_cut_that_crosses_lands_short_of_its_input_and_leaves_a_fence() {
     let mut found = 0;
@@ -1262,8 +1255,6 @@ fn a_head_after_a_firing_resumes_and_rewinds_exactly_and_refuses_forged_chance_s
     assert!(receipt.after_breakpoint() && on_resume.after_breakpoint() && on_fork.after_breakpoint());
 }
 
-/// A trial shorter than a span that passed can still be refused, because a stage's error over a forcing is not
-/// monotone in its length, so this run must reach its end at spans that alias the knots.
 #[test]
 fn a_long_span_over_a_forcing_lands_its_events_and_never_crawls() {
     let case = ChanceCase::ectopy().expect("a body");
@@ -1547,14 +1538,11 @@ fn random_case(random: &mut Random, case: ChanceCase) -> ChanceCase {
     case.delivering(deliveries).seeded(Seed::new(words)).until(at(60))
 }
 
-/// A fault, an input inside the first step or a case that fired nothing says nothing about the claim; a
-/// divergence breaks it.
 #[test]
 fn late_inputs_match_the_known_timeline_with_a_guard_among_them() {
     late_inputs_match(ChanceCase::ectopy);
 }
 
-/// The hazard reads a lumen through a field, so an input moves its crossing.
 #[test]
 fn late_inputs_match_the_known_timeline_when_an_input_moves_a_crossing() {
     late_inputs_match(ChanceCase::fed);
@@ -1703,8 +1691,6 @@ fn holds_a_forcing() -> Result<(CompiledBody, RowId), AdmissionError> {
     Ok((body, row))
 }
 
-/// `verify` is public, so a core can run it on its own proposal. It says nothing of a guard there: only an
-/// attempt reads a crossing, and only the step an attempt selects fires.
 #[test]
 fn a_dry_verify_fires_nothing_and_shows_no_threshold() {
     let case = ChanceCase::ectopy().expect("a body");
@@ -1762,8 +1748,8 @@ fn a_forcing_is_a_function_of_the_instant_and_not_of_the_step() -> Result<(), In
     Ok(())
 }
 
-/// A body with a stream holds no algebraic row yet, so a law's own domain shows the value: `ln(draw - p)` has
-/// a value at admission only for `p` below one half.
+/// An algebraic law may not read a draw a firing moves, so a law's own domain shows the value: `ln(draw - p)`
+/// has a value at admission only for `p` below one half.
 #[test]
 fn admission_holds_a_draw_at_its_mean() -> Result<(), InitializationFailure> {
     let body = assemble(two_vessels()?, |mut body| {

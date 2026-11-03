@@ -318,7 +318,6 @@ fn a_start_mode_is_refused_when_it_is_missing_unknown_or_given_twice() {
     );
 }
 
-/// A plain guard's variable runs. What stops a body is the start it still owes.
 #[test]
 fn a_mode_variable_a_plain_guard_fires_binds_past_the_mode_refusal() {
     let body = hazard_body(|laws| {
@@ -337,7 +336,6 @@ fn a_mode_variable_a_plain_guard_fires_binds_past_the_mode_refusal() {
     ));
 }
 
-/// With no solve at a landing, a firing must leave every algebraic value true.
 #[test]
 fn an_algebraic_law_a_mode_selects_stays_refused_by_name() {
     let body = hazard_body(|laws| {
@@ -400,7 +398,6 @@ fn an_algebraic_law_that_reads_a_reset_stays_refused_by_name() {
     );
 }
 
-/// A hazard's firing resets its integral as a plain guard's resets a row, so an algebraic read of it would go stale too.
 #[test]
 fn an_algebraic_law_that_reads_a_hazards_integral_stays_refused_by_name() {
     let body = declared(|laws| {

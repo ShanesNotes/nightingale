@@ -1,8 +1,8 @@
 use ng_contract::catalog::{BaroreceptorAfferents, CapillaryAndVenousPressure, Defines, Reads};
 use ng_contract::*;
 
-// The signature walk (docs/architecture/solver-contract-sketch/src/signature_walk.rs): step 0 with only
-// the crate path changed, then steps 1, 1b, 1c, 1d, 1e and 2, each change marked with the ticket that restores it.
+// Steps 0, 1, 1b, 1c, 1d, 1e and 2 of the signature walk
+// (docs/architecture/solver-contract-sketch/src/signature_walk.rs), adapted to the crate.
 fn anatomy() -> Result<Schema, AdmissionError> {
     let at = |axial: f64| -> Result<Position, AdmissionError> {
         Ok(Position::new(
@@ -96,8 +96,8 @@ fn baroreflex<'b>(scope: NervousScope<'b>) -> Result<Fragment<'b, Nervous>, Admi
 fn valve<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardiovascular>, AdmissionError> {
     let (mut laws, ports) = scope.parts();
     let wave = || RateClass::new(RateBand::Wave, 3_600_000_000_000);
-    // 10 restores CV's chamber pressure port; until then the chamber is a local algebraic slot that a
-    // fixture parameter closes, like the outflow.
+    // The sketch reads a chamber pressure port that CV's ports do not have, so the chamber is a local
+    // algebraic slot that a fixture parameter closes, like the outflow.
     let chamber = laws.algebraic::<Pressure>("chamber", Admissible::finite());
     let outflow = laws.algebraic::<Pressure>("valve-outflow", Admissible::finite());
     let upstream = laws.parameter::<Pressure>(ParameterKey::new("fixture.upstream"), Admissible::finite());
@@ -239,7 +239,7 @@ fn held<'b, S: OutsideSlice>(body: &mut Assembly<'b>, holds: Vec<Space>) -> Resu
     Ok(())
 }
 
-// 10 adds the renal, receptor and boundary fragments.
+// Step 2's renal, receptor and boundary fragments come from crates ng-contract may not depend on.
 fn compile() -> Result<CompiledBody, AdmissionError> {
     assemble(anatomy()?, |mut body| {
         let heart = valve(body.cardiovascular()?)?;

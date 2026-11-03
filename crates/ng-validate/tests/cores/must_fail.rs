@@ -356,7 +356,7 @@ impl CoupledSolver for Spans {
 }
 
 /// Solves honestly and first asks its ticket for what it must refuse: the instant past its end and a zero
-/// shift, each beside a legal read, so a refusal here is the check's and not a broken ticket's.
+/// shift, beside a legal read, so a refusal here is the check's and not a broken ticket's.
 pub struct ReadsItsTicket {
     pub inner: ForwardEuler,
     pub reads: RefCell<Vec<TicketReads>>,

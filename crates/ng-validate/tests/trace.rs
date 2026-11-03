@@ -17,8 +17,6 @@ fn field(owner: &'static str, local: &'static str, at: Context) -> RowKind {
     RowKind::Algebraic(Slot { law, at })
 }
 
-/// The slice's first second, to show a change and never to judge it: a PR that moves it updates this file and says why.
-/// Only checks drawn from anchors and requirements judge physiology.
 #[test]
 fn the_first_second_of_the_slice_stays_where_it_was() {
     let body = arena_body().expect("compiled");

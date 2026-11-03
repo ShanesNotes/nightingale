@@ -41,10 +41,6 @@ fn dice_of(digest: Digest) -> f64 {
     f64::from(digest.as_bytes()[0]) / 255.0 - 0.5
 }
 
-/// Draws per step where the seam leaves room: a hash of each ticket, its private dice, tilts a row the hazard
-/// rate reads, inside the declared scales. `verify` re-adds the rates at the tilted point and passes. It is a
-/// pure function of what the seam hands it, so it replays bit for bit and every bit gate passes it. Only
-/// another step policy shows the event moved.
 pub struct DrawsPerStep {
     pub interval_ns: u64,
     pub tone: usize,
@@ -108,8 +104,6 @@ impl CoupledSolver for DrawsPerEvaluation {
     }
 }
 
-/// Holds the same row low on every step, so its own two step policies agree and an event simply comes late.
-/// Only the reference integrator shows it, which is why the gate compares against that and not each other.
 pub struct DelaysEveryEvent {
     pub interval_ns: u64,
     pub tone: usize,
@@ -311,8 +305,6 @@ impl CoupledSolver for LosesItsWayIfResumedAt {
     }
 }
 
-/// Holds `linearize` to a forward difference of `evaluate` at the base of every ticket, so a slope is the slope of
-/// what a run integrates, in whichever mode the run is in and on either side of a rate's zero.
 pub struct DifferencesItsJacobian {
     pub inner: ReferenceIntegrator,
     pub compared: Cell<u64>,

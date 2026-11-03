@@ -1,6 +1,3 @@
-//! Ticket 08: its four checks and every refusal its design adds, through the public API only. Check 4 is
-//! compile-fail doctests in `src/lib.rs`, because it is a type rule.
-//!
 //! The manufactured case. Two vessels `a -> b` hold water, `q = k (a - b)` with `k = g e`. A pulse of `P` enters
 //! `a` over `[0, tau)` of each period `T`, and `P` leaves `b` evenly over the whole period, so
 //!
@@ -41,7 +38,6 @@ const CONDUCTANCE: f64 = 0.5;
 const TOTAL: f64 = 100.0;
 const MEAN_A: f64 = 55.5;
 const GUESS: f64 = 1.0;
-/// Unequal, because `q` reads `e (a - b)`: a guess with no head leaves the fit nothing to move.
 const START: [f64; 2] = [53.0, 47.0];
 
 const PULSE: &str = "pulse";
@@ -116,7 +112,6 @@ fn seconds(ns: u64) -> f64 {
     ns as f64 / SECOND as f64
 }
 
-/// `e = v / (g (2 A - S - H / 2))`.
 fn fitted_elastance() -> f64 {
     steady_k() / CONDUCTANCE
 }
@@ -141,21 +136,14 @@ enum Variant {
     Slow,
     /// A memory row that reads four more parameters, for the provenance kinds the flow has no slot for.
     Extra,
-    /// A hazard guard on a mode variable.
     Hazard,
-    /// An algebraic row that is `x - p`.
     PinnedRead,
-    /// A memory row that relaxes to `p`.
     PinnedRelax,
-    /// The flow divides by `b`.
     Divided,
-    /// A forcing scales the flow.
     Forced,
-    /// A forcing scales the flow, and a row reads the forcing's period as a parameter.
     PeriodRead,
     /// An algebraic row in the boundary reads a drive, in the minutes band, so an instant anchor can hold on it.
     Instant,
-    /// A second pair of vessels, joined to nothing else and reached by no drive.
     Apart,
 }
 
@@ -444,7 +432,6 @@ impl PulsatileCase {
             .expect("once");
         packet
     }
-    /// A cycle-mean anchor on `a`, and `cv.e` fitted to it: one entry that fills both ends' slots.
     fn packet(&self) -> ParameterPacket<SyntheticFixture> {
         let mut packet = self.packet_without_fit();
         packet
@@ -495,7 +482,6 @@ impl ReplayCase for PulsatileCase {
     }
 }
 
-/// A channel on each vessel by `method`, one reading per `samples` grid instants, on a grid of a cycle's `samples`.
 fn gauges(body: &Body, method: &'static str, samples: u64) -> ObservationLens {
     let channels =
         [body.a, body.b].map(|site| ChannelSpec::new(method, lumen(site)).averaged(count(samples)));
@@ -513,7 +499,6 @@ fn step<'m>(session: Session<'m, Running>) -> Session<'m, Running> {
     }
 }
 
-/// `a`'s reading per whole cycle, through the anchor's own channel, and the head after them.
 fn cycle_means<'m>(
     mut session: Session<'m, Running>,
     lens: &ObservationLens,
@@ -1008,7 +993,7 @@ fn a_net_boundary_flow_over_the_cycle_is_refused_with_its_quantity() {
     assert_eq!(short_by(1e-10), None);
 }
 
-/// Neither pool's change fits in a float beside the pool, so a difference taken before the sum loses what moved.
+/// One pool's change does not fit in a float, so a difference taken before the sum loses what moved.
 #[test]
 fn a_total_moved_by_less_than_a_pools_rounding_is_refused() {
     const POOL: f64 = 1_099_511_627_776.0;
@@ -1136,7 +1121,6 @@ fn the_row_a_total_replaced_is_read_at_its_own_scale() {
     );
 }
 
-/// A march writes the pulse into the ring first, so a flat guess leaves the fit something to move.
 #[test]
 fn a_march_gives_a_guess_with_no_head_a_head_to_fit() {
     let case = PulsatileCase::plain();
@@ -1490,8 +1474,6 @@ fn tiny_flow<'m>(
     admit_solved(case.body(), packet, boundary, core, &case.lens)
 }
 
-/// The solve runs to rounding and reads no tolerance, so a flow too small for the rows to speak for at the
-/// tolerance still sets the fit.
 #[test]
 fn a_fit_the_tolerance_could_not_see_is_still_solved() {
     let case = PulsatileCase::plain();
@@ -1505,7 +1487,6 @@ fn a_fit_the_tolerance_could_not_see_is_still_solved() {
     assert!((fitted - 2.0).abs() < 1e-5, "{fitted}");
 }
 
-/// Past rounding on the rows no value of the fit can be told from another, so it is refused, not stamped.
 #[test]
 fn a_fit_only_rounding_can_feel_is_refused_by_its_key() {
     let case = PulsatileCase::plain();
@@ -1545,7 +1526,6 @@ const SWING: &str = "swing";
 const RISE: [&str; 2] = ["rise in", "rise out"];
 const FALL: [&str; 2] = ["fall in", "fall out"];
 
-/// One vessel two pairs of drives pass straight through, and a row that reads the first pair less the second.
 fn swinging_body() -> (CompiledBody, SiteId) {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", origin());
@@ -1609,7 +1589,6 @@ fn a_net_flow_a_row_cannot_hold_is_still_refused() {
     );
 }
 
-/// Two vessels with no path between them: one takes water in and the other lets it out.
 fn parted_body() -> (CompiledBody, [SiteId; 2]) {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", origin());
@@ -1703,8 +1682,6 @@ fn a_cycle_mean_is_summed_as_the_observer_sums_it() {
     );
 }
 
-/// One identity has one start whatever made it: a start or fit moved inside the tolerance, or another core's
-/// history there, names another run.
 #[test]
 fn a_start_moved_inside_the_tolerance_or_another_history_names_another_run() {
     let case = PulsatileCase::plain();
@@ -1762,8 +1739,8 @@ fn a_small_body_is_solved_on_its_own_scale() {
     assert!((fitted - fitted_elastance()).abs() < 1e-9, "{fitted}");
 }
 
-/// No fit keeps Newton going here, so only the unknowns' own sizes can: a stop with a floor of its own would end
-/// short of a law that is not linear.
+/// No fit keeps Newton going here, so only the unknowns' own sizes in `march`'s stop can: a stop with a floor
+/// of its own would end short of a law that is not linear.
 #[test]
 fn a_small_nonlinear_body_with_no_fit_is_solved_on_its_own_scale() {
     let case = PulsatileCase::new(Variant::Divided);
@@ -2965,7 +2942,6 @@ fn finding_15_two_equal_expressions_divided_are_refused_by_name() {
     assert_eq!(floors, refused);
 }
 
-/// No identity reads these ratios, so a row of their own dimension holds them as they stand.
 fn bound_ratio<R: Dimension>(
     ratio: impl for<'b, 'k> FnOnce(
         &mut Kernel<'b, 'k, Cardiovascular>,
@@ -3009,7 +2985,6 @@ fn finding_15_two_equal_products_divided_are_refused_by_name() {
     );
 }
 
-/// `as_dimension` changes a type and computes nothing, so it hides no expression from its own copy.
 #[test]
 fn finding_15_a_value_over_its_own_cast_is_refused_by_name() {
     let cast = bound_ratio(|k, p, q| {

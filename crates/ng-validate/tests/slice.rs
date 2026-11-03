@@ -10,7 +10,6 @@ const KF: f64 = 2.0;
 const CAPILLARY: f64 = 11.0;
 const START: f64 = 100.0;
 
-/// An id is its key and class alone, so a throwaway builder names a site of any anatomy.
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     let origin = Position::new(Measure::new(0.0)?, Measure::new(0.0)?, Measure::new(0.0)?);
     Ok(AnatomyBuilder::new().site::<C>(key, origin).id())

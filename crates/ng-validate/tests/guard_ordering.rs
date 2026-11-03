@@ -1,5 +1,3 @@
-//! Synthetic guards whose crossings are visible to the declared step's stages.
-
 use ng_contract::*;
 use ng_validate::*;
 
