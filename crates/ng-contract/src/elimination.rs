@@ -207,33 +207,64 @@ mod tests {
         b
     }
 
+    /// The dense matrix, the plan and the values of a sparse system with a shuffled matching.
+    fn shuffled(size: usize, state: &mut u64) -> (Vec<Vec<f64>>, Elimination, Vec<f64>) {
+        let shuffle: Vec<usize> = (0..size).map(|at| (at * 7 + 3) % size).collect();
+        let mut a = vec![vec![0.0; size]; size];
+        for (unknown, &row) in shuffle.iter().enumerate() {
+            a[row][unknown] = 4.0 + next(state);
+            for _ in 0..3 {
+                let other = (next(state) * size as f64) as usize;
+                if other != unknown {
+                    a[row][other] = next(state) - 0.5;
+                }
+            }
+        }
+        let (mut offsets, mut unknowns, mut values) = (vec![0], Vec::new(), Vec::new());
+        for line in &a {
+            for (column, &value) in line.iter().enumerate() {
+                if value != 0.0 {
+                    unknowns.push(UnknownId::at(column));
+                    values.push(value);
+                }
+            }
+            offsets.push(unknowns.len());
+        }
+        let matching: Vec<RowId> = shuffle.iter().map(|&row| RowId::at(row)).collect();
+        let plan = Elimination::plan(&offsets, &unknowns, &matching);
+        (a, plan, values)
+    }
+
+    /// Thirteen sides: all of one zero, all of the other, then zeros of both signs among values of three scales.
+    fn sides(size: usize, state: &mut u64) -> Vec<Vec<f64>> {
+        let value = |side: usize, row: usize, state: &mut u64| match (side, (side + row) % 5) {
+            (0, _) => -0.0,
+            (1, _) => 0.0,
+            (_, 0) => -0.0,
+            (_, 1) => 0.0,
+            (_, 2) => 1e-300 * (next(state) - 0.5),
+            (_, 3) => 1e150 * (next(state) - 0.5),
+            _ => next(state) - 0.5,
+        };
+        (0..13)
+            .map(|side| (0..size).map(|row| value(side, row, state)).collect())
+            .collect()
+    }
+
+    fn hex(bits: &[u8]) -> String {
+        let digest = crate::Digest::of_canonical(bits);
+        digest
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
     #[test]
     fn it_gives_the_dense_answer_on_sparse_systems_with_a_shuffled_matching() {
         let mut state = 0x9E37_79B9_7F4A_7C15;
         for size in [1, 2, 5, 17, 40] {
-            let shuffle: Vec<usize> = (0..size).map(|at| (at * 7 + 3) % size).collect();
-            let mut a = vec![vec![0.0; size]; size];
-            for (unknown, &row) in shuffle.iter().enumerate() {
-                a[row][unknown] = 4.0 + next(&mut state);
-                for _ in 0..3 {
-                    let other = (next(&mut state) * size as f64) as usize;
-                    if other != unknown {
-                        a[row][other] = next(&mut state) - 0.5;
-                    }
-                }
-            }
-            let (mut offsets, mut unknowns, mut values) = (vec![0], Vec::new(), Vec::new());
-            for line in &a {
-                for (column, &value) in line.iter().enumerate() {
-                    if value != 0.0 {
-                        unknowns.push(UnknownId::at(column));
-                        values.push(value);
-                    }
-                }
-                offsets.push(unknowns.len());
-            }
-            let matching: Vec<RowId> = shuffle.iter().map(|&row| RowId::at(row)).collect();
-            let plan = Elimination::plan(&offsets, &unknowns, &matching);
+            let (a, plan, values) = shuffled(size, &mut state);
             let side: Vec<f64> = (0..size).map(|_| next(&mut state) - 0.5).collect();
             let mut found = side.clone();
             plan.factor(&values).expect("a pivot").solve(&mut found);
@@ -241,6 +272,24 @@ mod tests {
                 assert!((one - other).abs() < 1e-11, "{one} against {other}");
             }
         }
+    }
+
+    #[test]
+    fn each_side_keeps_the_bits_it_had() {
+        let mut state = 0x2545_F491_4F6C_DD1D;
+        let mut alone = Vec::new();
+        for size in [1, 2, 5, 17, 40] {
+            let (_, plan, values) = shuffled(size, &mut state);
+            let factors = plan.factor(&values).expect("a pivot");
+            for mut side in sides(size, &mut state) {
+                factors.solve(&mut side);
+                alone.extend(side.iter().flat_map(|value| value.to_bits().to_be_bytes()));
+            }
+        }
+        assert_eq!(
+            hex(&alone),
+            "9c64d90d69b25c98bf72b65448a978ef42f6406db1317f7541e070b3d7eb3478"
+        );
     }
 
     #[test]

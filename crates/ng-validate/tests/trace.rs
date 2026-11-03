@@ -17,7 +17,16 @@ fn field(owner: &'static str, local: &'static str, at: Context) -> RowKind {
     RowKind::Algebraic(Slot { law, at })
 }
 
-fn first_second(core: &dyn CoupledSolver) -> String {
+fn hex(digest: Digest) -> String {
+    digest
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The hash the run names, which closes over the admitted start's bits, modes and fits, and the trace.
+fn first_second(core: &dyn CoupledSolver) -> (String, String) {
     let body = arena_body().expect("compiled");
     let (packet, lens) = (
         arena_packet(&body).expect("a packet"),
@@ -25,6 +34,7 @@ fn first_second(core: &dyn CoupledSolver) -> String {
     );
     let port = BoundaryPort::new(Vec::new()).expect("no event");
     let admitted = admit_at(&body, packet, port, core, &lens, anchor_moment()).expect("admitted");
+    let named = hex(admitted.session.record().identity().packet().digest());
     let at = |key| Context::Site(site::<VesselSegment>(key));
     let (arteries, atrium) = (at("systemic arteries"), at("right atrium"));
     let (ventricle, tubule) = (
@@ -87,7 +97,7 @@ fn first_second(core: &dyn CoupledSolver) -> String {
         }
         trace.push('\n');
     }
-    trace
+    (named, trace)
 }
 
 #[test]
@@ -95,7 +105,8 @@ fn the_first_second_of_the_slice_stays_where_it_was() {
     let scale = |value| Measure::<Dimensionless>::new(value).expect("finite");
     let core = ReferenceIntegrator::new(MILLISECOND)
         .with_scales(ErrorScales::uniform(scale(1.0), scale(1e-3)).expect("positive"));
-    let trace = first_second(&core);
+    let (named, trace) = first_second(&core);
+    expect!["76102706f42e42535b0dbe928b8b37f327f73211741352bd572ad36ad56ca998"].assert_eq(&named);
     expect![[r#"
          100.000000 ms  arterial pressure 125.258703  right atrial pressure 1.978090  heart rate 1.060493  sympathetic traffic 0.627398  filtration 1.756965  urine 0.020000  wall power 13155.465232  aortic flow 0.000000
          200.000000 ms  arterial pressure 121.183896  right atrial pressure 2.408025  heart rate 1.072033  sympathetic traffic 0.099483  filtration 2.122865  urine 0.020000  wall power 10204.160071  aortic flow 43.787660
@@ -112,7 +123,8 @@ fn the_first_second_of_the_slice_stays_where_it_was() {
 
 #[test]
 fn the_first_second_of_the_slice_on_ng_solver_stays_where_it_was() {
-    let trace = first_second(&ng_solver::Core::new(10 * MILLISECOND));
+    let (named, trace) = first_second(&ng_solver::Core::new(10 * MILLISECOND));
+    expect!["0ec011d81366c367549a2fcdfe72146eb4c00ac911c7610dd2572dcf6b732887"].assert_eq(&named);
     expect![[r#"
          101.886157 ms  arterial pressure 125.610022  right atrial pressure 1.972744  heart rate 1.060968  sympathetic traffic 0.603080  filtration 1.770138  urine 0.020000  wall power 13182.602061  aortic flow 0.000000
          201.324380 ms  arterial pressure 121.641644  right atrial pressure 2.401322  heart rate 1.070452  sympathetic traffic 0.092120  filtration 2.133878  urine 0.020000  wall power 10260.466255  aortic flow 34.425720
