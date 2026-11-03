@@ -6,7 +6,7 @@ The reference man's reviewed packet and a reviewed healthy-range set exist as ch
 
 ## Notes
 
-- Tickets here are ordered by what each blocks first. Tickets 07 to 11 of native-contract run on synthetic numbers by type, so a missing number never holds them up. Only a law form can.
+- Tickets here are ordered by what each blocks first. Tickets 07 to 24 of native-contract run on synthetic numbers by type, so a missing number never holds them up. Only a law form can.
 - Evidence ranks by SRS section 6: primary data from the target population, a compiled source, a textbook value, then inference. A value goes in at the best tier on hand, and its row says whether a primary source would upgrade it.
 - A cross-check runs at two levels: inside one source for integrity, and across the packet's picks for fitness. A failure is explained by method, population or scale, or the value changes. Source strength never excuses a failed identity.
 - Source text stays local. Only numbers and citations enter the repo.

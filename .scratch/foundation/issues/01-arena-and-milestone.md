@@ -2,7 +2,7 @@
 
 Type: task
 Status: ready-for-agent
-Blocked by: `.scratch/native-contract/issues/11-arena-harness-ready.md`
+Blocked by: `.scratch/native-contract/issues/24-arena-ready-to-dispatch.md`
 
 The path after the arena harness:
 

@@ -56,7 +56,7 @@ A chart author compiles a lens against a body, `Session::observation` lends one 
 
 **Limits.**
 
-- Only the non-perturbation gate attaches an observer. §7 also names observer bits under pace, resume, late admission and rewind, and those are ticket 11's: equal seals give equal views, so they can only catch an impure observer.
+- Only the non-perturbation gate attaches an observer. §7 also names observer bits under pace, resume, late admission and rewind, and those are ticket 19's: equal seals give equal views, so they can only catch an impure observer.
 - Windows tumble. Record 0004's sliding healthy-range check reads a bare channel and slides its own mean, and its readings carry no error, so its lens has no `erring`.
 - A digest has no key. A resealed file can hold a false value, a reading from the future or a count no head could leave. It gives an observer that never panics on those, though that observer's next save can be refused and a future reading holds back later releases.
 - `Compensated::between` multiplies before it divides, so a chord near 1e304 reads `InvalidSignal` between two finite ends.
