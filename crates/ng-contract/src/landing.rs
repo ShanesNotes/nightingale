@@ -64,8 +64,6 @@ impl Bracket {
         };
         (aim as u64).clamp(bottom_ns + tolerance_ns, top_ns - tolerance_ns)
     }
-    /// Two trials that together failed to halve the bracket make the next one bisect, so its width halves at
-    /// least every three trials, and a span below 2^64 ns takes at most 192 trials whatever the floor.
     pub(crate) fn note(&mut self, length_ns: u64, gap: f64, crossed: bool) {
         let width = self.top_ns - self.bottom_ns;
         if crossed {
@@ -86,6 +84,8 @@ impl Bracket {
 mod tests {
     use super::Bracket;
     use core::num::NonZeroU64;
+
+    const MOST_TRIALS: u32 = 3 * u64::BITS;
 
     fn trials(base: f64, top_ns: u64, top: f64, tolerance_ns: u64, mut gap: impl FnMut(u64) -> f64) -> u32 {
         let mut bracket = Bracket::new(base, top_ns, top, NonZeroU64::new(tolerance_ns).expect("a floor"));
@@ -165,7 +165,7 @@ mod tests {
         };
         for _ in 0..1_000 {
             let spent = trials(-1.0, u64::MAX, 1.0, 1, &mut jagged);
-            assert!(spent <= 192, "{spent} trials");
+            assert!(spent <= MOST_TRIALS, "{spent} trials");
         }
     }
 
@@ -181,14 +181,14 @@ mod tests {
             bracket.note(length, -1.0, length >= root);
             spent += 1;
         }
-        assert!(spent <= 192, "{spent} trials");
+        assert!(spent <= MOST_TRIALS, "{spent} trials");
         assert!(bracket.bottom_ns < root && root <= bracket.top_ns);
     }
 
     #[test]
     fn a_gap_that_is_no_number_closes_and_panics_nothing() {
-        assert!(trials(-1.0, 1 << 40, f64::INFINITY, 1, |_| f64::NAN) <= 192);
-        assert!(trials(f64::NAN, 1 << 40, f64::NAN, 1, |_| 1.0) <= 192);
-        assert!(trials(5.0, 1 << 40, 5.0, 1_000, |_| 5.0) <= 192);
+        assert!(trials(-1.0, 1 << 40, f64::INFINITY, 1, |_| f64::NAN) <= MOST_TRIALS);
+        assert!(trials(f64::NAN, 1 << 40, f64::NAN, 1, |_| 1.0) <= MOST_TRIALS);
+        assert!(trials(5.0, 1 << 40, 5.0, 1_000, |_| 5.0) <= MOST_TRIALS);
     }
 }
