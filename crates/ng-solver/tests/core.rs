@@ -311,7 +311,7 @@ fn worst_error(case: &Reservoirs, cap_ns: u64, end: SimTime) -> f64 {
 }
 
 #[test]
-fn every_step_passes_the_records_check_and_halving_the_cap_halves_the_error() {
+fn the_error_against_the_closed_form_halves_with_the_cap() {
     let case = Reservoirs::stepped();
     let end = at(12_000);
     let errors = [16, 8, 4].map(|seconds| worst_error(&case, seconds * SECOND, end));
