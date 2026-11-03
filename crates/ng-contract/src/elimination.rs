@@ -160,32 +160,30 @@ impl Factors<'_> {
             diagonals,
             ..
         } = self.plan;
-        let stride = width.div_ceil(L) * L;
-        let mut pivoted = vec![0.0; rows.len() * stride];
-        for (at, &row) in rows.iter().enumerate() {
-            pivoted[at * stride..][..width].copy_from_slice(&sides[index(row) * width..][..width]);
-        }
-        for group in (0..stride).step_by(L) {
-            let lanes = |pivoted: &[f64], at: usize| {
-                let mut lanes = [0.0; L];
-                lanes.copy_from_slice(&pivoted[at * stride + group..][..L]);
-                lanes
-            };
+        let mut pivoted = vec![[0.0; L]; rows.len()];
+        for group in (0..width).step_by(L) {
+            let lanes = L.min(width - group);
+            for (pivot, &row) in pivoted.iter_mut().zip(rows) {
+                let side = &sides[index(row) * width + group..][..lanes];
+                for (lane, &value) in pivot.iter_mut().zip(side.iter().chain(core::iter::repeat(&0.0))) {
+                    *lane = value;
+                }
+            }
             for at in 0..rows.len() {
                 let line = index(starts[at])..index(diagonals[at]);
-                let mut sum = lanes(&pivoted, at);
+                let mut sum = pivoted[at];
                 for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
-                    for (value, read) in sum.iter_mut().zip(lanes(&pivoted, index(column))) {
+                    for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
                         *value -= cell * read;
                     }
                 }
-                pivoted[at * stride + group..][..L].copy_from_slice(&sum);
+                pivoted[at] = sum;
             }
             for at in (0..rows.len()).rev() {
                 let line = index(diagonals[at]) + 1..index(starts[at + 1]);
-                let mut sum = lanes(&pivoted, at);
+                let mut sum = pivoted[at];
                 for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
-                    for (value, read) in sum.iter_mut().zip(lanes(&pivoted, index(column))) {
+                    for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
                         *value -= cell * read;
                     }
                 }
@@ -193,11 +191,14 @@ impl Factors<'_> {
                 for value in &mut sum {
                     *value /= pivot;
                 }
-                pivoted[at * stride + group..][..L].copy_from_slice(&sum);
+                pivoted[at] = sum;
             }
-        }
-        for (at, &unknown) in unknowns.iter().enumerate() {
-            sides[index(unknown) * width..][..width].copy_from_slice(&pivoted[at * stride..][..width]);
+            for (pivot, &unknown) in pivoted.iter().zip(unknowns) {
+                let side = &mut sides[index(unknown) * width + group..][..lanes];
+                for (value, &lane) in side.iter_mut().zip(pivot) {
+                    *value = lane;
+                }
+            }
         }
     }
 }
