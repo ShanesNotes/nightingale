@@ -158,13 +158,8 @@ impl<'r> CoupledProblem<'r> {
         if let Some(hazard) = self.chance.crossed(self.body, state) {
             return Ok(Some(Trigger::Hazard(hazard)));
         }
-        for guard in self
-            .body
-            .layout
-            .guards
-            .iter()
-            .filter(|guard| guard.armed(&state.modes))
-        {
+        let guards = self.body.layout.guards.iter().enumerate();
+        for (guard, _) in guards.filter(|(_, layout)| layout.armed(&state.modes)) {
             if self.gap(ticket, state, Trigger::Plain(guard))? >= 0.0 {
                 return Ok(Some(Trigger::Plain(guard)));
             }
@@ -180,7 +175,8 @@ impl<'r> CoupledProblem<'r> {
         end: &Candidate,
     ) -> Result<bool, TrialFailure> {
         let base = self.accepted.state();
-        for guard in (self.body.layout.guards.iter()).filter(|guard| guard.armed(&base.modes)) {
+        let guards = self.body.layout.guards.iter().enumerate();
+        for (guard, _) in guards.filter(|(_, layout)| layout.armed(&base.modes)) {
             let mut seen = false;
             for (unknowns, offset_ns) in stages.clone() {
                 let at = ticket
@@ -229,7 +225,7 @@ impl<'r> CoupledProblem<'r> {
         let guards = &self.body.layout.guards;
         let armed: Vec<bool> = guards.iter().map(|guard| guard.armed(&state.modes)).collect();
         let mut crossed = Vec::with_capacity(guards.len());
-        for (guard, armed) in guards.iter().zip(armed) {
+        for (guard, armed) in armed.into_iter().enumerate() {
             crossed.push(armed && self.gap(ticket, &state, Trigger::Plain(guard))? >= 0.0);
         }
         let (mut state, fired) = self.chance.fired(self.body, state, at);

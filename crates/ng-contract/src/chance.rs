@@ -1,4 +1,4 @@
-use crate::body::{GuardLayout, HazardLayout};
+use crate::body::HazardLayout;
 use crate::identity::{Canonical, Seal};
 use crate::{
     Binding, Candidate, CompiledBody, Digest, DomainSeed, Fired, LawName, ModeValue, ObservationSeed,
@@ -185,7 +185,7 @@ impl Chance {
 #[derive(Clone, Copy)]
 pub(crate) enum Trigger<'b> {
     Hazard(&'b HazardLayout),
-    Plain(&'b GuardLayout),
+    Plain(usize),
 }
 
 /// Whether a period is a count of the clock's nanoseconds, so a run reads the period the packet gave. The count

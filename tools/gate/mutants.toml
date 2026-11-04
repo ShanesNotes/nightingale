@@ -15,9 +15,57 @@ test = "-p ng-validate --test firing of_two_guards_on_one_variable_only_the_firs
 [[mutant]]
 name = "quotient-slope"
 path = "crates/ng-contract/src/evaluate.rs"
-old = '''slopes[*b] -= slope * values[*a] / (divisor * divisor);'''
-new = '''slopes[*b] -= slope * values[at] / divisor;'''
+old = '''slopes[b] -= slope * values[a] / (divisor * divisor);'''
+new = '''slopes[b] -= slope * values[at] / divisor;'''
 test = "-p ng-validate --test operators every_operators_slope_stays_on_the_bits_of_a_rings_matrix"
+
+[[mutant]]
+name = "read-is-checked"
+path = "crates/ng-contract/src/evaluate.rs"
+old = '''
+                    values[slot] = value;
+                    clean &= value.is_finite();
+                }
+                None => clean = false,
+            }
+        }
+        for &(slot, bound) in self.others {
+'''
+new = '''
+                    values[slot] = value;
+                }
+                None => clean = false,
+            }
+        }
+        for &(slot, bound) in self.others {
+'''
+test = "-p ng-contract --lib evaluate::tests::a_value_that_is_not_finite_fails_at_the_read_that_takes_it"
+
+[[mutant]]
+name = "stop-at-the-read"
+path = "crates/ng-contract/src/evaluate.rs"
+old = '''&arithmetic.steps[..arithmetic.steps.partition_point(|&(at, _)| at < slot)]'''
+new = '''arithmetic.steps'''
+test = "-p ng-contract --lib evaluate::tests::a_value_that_is_not_finite_fails_at_the_read_that_takes_it"
+
+[[mutant]]
+name = "lowest-read-across-kinds"
+path = "crates/ng-contract/src/evaluate.rs"
+old = '''.min_by_key(|&(slot, _)| slot)'''
+new = '''.min_by_key(|_| 0)'''
+test = "-p ng-contract --lib evaluate::tests::a_value_that_is_not_finite_fails_at_the_read_that_takes_it"
+
+[[mutant]]
+name = "zero-slope-skip"
+path = "crates/ng-contract/src/evaluate.rs"
+old = '''
+        if slope == 0.0 {
+            continue;
+        }
+'''
+new = '''
+'''
+test = "-p ng-contract --lib evaluate::tests::a_value_that_is_not_finite_fails_at_the_read_that_takes_it"
 
 [[mutant]]
 name = "start-hashes-stated-modes"

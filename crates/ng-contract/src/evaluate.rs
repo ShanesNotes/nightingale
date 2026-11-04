@@ -1,10 +1,11 @@
-use crate::body::{Bound, GuardLayout, Instance, ParameterId, RowId, RowKind, Target, UnknownId};
+use crate::body::{Bound, Instance, Layout, ParameterId, ProgramId, RowId, RowKind, Target, UnknownId};
 use crate::boundary::DriveFrame;
 use crate::law::{Op, Validity};
 use crate::pinned;
 use crate::{
     Compensated, CompiledBody, Crossing, ErrorScales, ExcursionSide, LawName, SimTime, ValidityExcursion,
 };
+use core::ops::Range;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum OperatorDomain {
@@ -31,117 +32,389 @@ fn smooth(a: f64, b: f64, width: f64, sign: f64) -> (f64, f64, f64) {
     (0.5 * (a + b + sign * root), along, across)
 }
 
-fn run(
-    ops: &[Op],
-    mut next_input: impl FnMut() -> f64,
-    partial_volume: f64,
-    stack: &mut Vec<f64>,
-) -> Result<f64, OperatorDomain> {
-    stack.clear();
-    for op in ops {
-        let at = |index: usize| stack[index];
-        let result = match op {
-            Op::Input(_) => next_input(),
-            Op::Zero(_) => 0.0,
-            Op::Add([a, b]) => at(*a) + at(*b),
-            Op::Subtract([a, b]) | Op::Deviation([a, b]) => at(*a) - at(*b),
-            Op::Multiply([a, b]) | Op::Scale([a, b]) | Op::ConductanceFlow([a, b]) => at(*a) * at(*b),
-            Op::Divide([a, b]) => {
-                if at(*b) <= 0.0 {
-                    return Err(OperatorDomain::Divisor);
-                }
-                at(*a) / at(*b)
-            }
-            Op::AsDimension([x]) => at(*x),
-            Op::SmoothMax([a, b, width]) => smooth(at(*a), at(*b), at(*width), 1.0).0,
-            Op::SmoothMin([a, b, width]) => smooth(at(*a), at(*b), at(*width), -1.0).0,
-            Op::Exp([x]) => pinned::exp(at(*x)),
-            Op::Logistic([x]) => 1.0 / (1.0 + pinned::exp(-at(*x))),
-            Op::Ln([x]) => pinned::ln(at(*x)).ok_or(OperatorDomain::LogarithmArgument)?,
-            Op::Relax([target, current, speed]) => at(*speed) * (at(*target) - at(*current)),
-            Op::Volume([amount]) => at(*amount) * partial_volume,
-            Op::Upwind([flow, from, from_water, to, to_water]) => {
-                let (amount, water) = if at(*flow) >= 0.0 {
-                    (at(*from), at(*from_water))
-                } else {
-                    (at(*to), at(*to_water))
-                };
-                if at(*flow) == 0.0 {
-                    0.0
-                } else if water <= 0.0 {
-                    return Err(OperatorDomain::Divisor);
-                } else {
-                    at(*flow) * (amount / water)
-                }
-            }
-        };
-        if !result.is_finite() {
-            return Err(OperatorDomain::NonFinite);
-        }
-        stack.push(result);
-    }
-    Ok(stack[stack.len() - 1])
+/// An op of a kernel that is not a read: arithmetic over the kernel's slots, slot `i` holding op `i`'s value.
+#[derive(Clone, Copy)]
+enum Instr {
+    Zero,
+    Add([usize; 2]),
+    Subtract([usize; 2]),
+    Multiply([usize; 2]),
+    Divide([usize; 2]),
+    Copy([usize; 1]),
+    SmoothMax([usize; 3]),
+    SmoothMin([usize; 3]),
+    Exp([usize; 1]),
+    Logistic([usize; 1]),
+    Ln([usize; 1]),
+    Relax([usize; 3]),
+    Volume([usize; 1]),
+    Upwind([usize; 5]),
 }
 
-/// One backward sweep over a finished `run`: the slope of the kernel's result in every operation's value, so one
-/// sweep gives every read's slope at about the cost of the forward run.
-fn sweep(ops: &[Op], values: &[f64], partial_volume: f64, slopes: &mut Vec<f64>) {
-    slopes.clear();
-    slopes.resize(ops.len(), 0.0);
-    slopes[ops.len() - 1] = 1.0;
-    for (at, op) in ops.iter().enumerate().rev() {
+/// Every kernel of one layout with its reads taken out, and every read that fills a kernel's slots where it runs,
+/// derived when the body is sealed from the layout alone. Kernels are the programs, then the guards; rows of reads are
+/// the instances, then the guards. A read is split by where its value comes from, so a parameter or unknown is copied
+/// from the caller's slice with no dispatch.
+pub(crate) struct Tape {
+    kernels: Vec<Kernel>,
+    rows: Vec<Row>,
+    steps: Vec<(usize, Instr)>,
+    parameters: Vec<(usize, usize)>,
+    unknowns: Vec<(usize, usize)>,
+    others: Vec<(usize, Bound)>,
+    /// Each unknown read's entries, one per term of a column target, in read order.
+    entries: Vec<usize>,
+    /// Each differential row's own entry, in row order.
+    diagonals: Vec<usize>,
+    programs: usize,
+    instances: usize,
+    longest: usize,
+}
+struct Kernel {
+    length: usize,
+    steps: Range<usize>,
+}
+struct Row {
+    parameters: Range<usize>,
+    unknowns: Range<usize>,
+    others: Range<usize>,
+    entries: Range<usize>,
+}
+impl Tape {
+    pub(crate) fn of(layout: &Layout) -> Self {
+        let mut tape = Self {
+            kernels: Vec::new(),
+            rows: Vec::new(),
+            steps: Vec::new(),
+            parameters: Vec::new(),
+            unknowns: Vec::new(),
+            others: Vec::new(),
+            entries: Vec::new(),
+            diagonals: Vec::new(),
+            programs: layout.programs.len(),
+            instances: layout.instances.len(),
+            longest: 0,
+        };
+        let codes = (layout.programs.iter().map(|program| &program.code))
+            .chain(layout.guards.iter().map(|guard| &guard.code));
+        for code in codes {
+            tape.lower(&code.ops);
+        }
+        let sparsity = &layout.sparsity;
+        let entry = |row: usize, unknown: UnknownId| {
+            let range = sparsity.offsets[row]..sparsity.offsets[row + 1];
+            let found = sparsity.unknowns[range.clone()].binary_search(&unknown);
+            range.start + found.expect("the compiled sparsity holds every unknown a row's laws read")
+        };
+        for instance in &layout.instances {
+            let start = tape.entries.len();
+            for unknown in instance.inputs.iter().filter_map(Bound::unknown) {
+                match instance.target {
+                    Target::Column(column) => {
+                        for &(row, _) in &layout.columns[column.index()].terms {
+                            tape.entries.push(entry(row.index(), unknown));
+                        }
+                    }
+                    Target::Row(row) => tape.entries.push(entry(row.index(), unknown)),
+                }
+            }
+            let entries = start..tape.entries.len();
+            tape.bind(
+                &layout.programs[instance.program.index()].code.ops,
+                &instance.inputs,
+                entries,
+            );
+        }
+        for guard in &layout.guards {
+            let none = tape.entries.len()..tape.entries.len();
+            tape.bind(&guard.code.ops, &guard.inputs, none);
+        }
+        tape.diagonals = (layout.rows.iter().enumerate())
+            .filter(|(_, row)| !matches!(row.kind, RowKind::Algebraic(_)))
+            .map(|(at, row)| entry(at, row.unknown))
+            .collect();
+        tape
+    }
+    fn lower(&mut self, ops: &[Op]) {
+        let start = self.steps.len();
+        for (at, op) in ops.iter().enumerate() {
+            let instr = match op {
+                Op::Input(_) => continue,
+                Op::Zero(_) => Instr::Zero,
+                Op::Add(operands) => Instr::Add(*operands),
+                Op::Subtract(operands) | Op::Deviation(operands) => Instr::Subtract(*operands),
+                Op::Multiply(operands) | Op::Scale(operands) | Op::ConductanceFlow(operands) => {
+                    Instr::Multiply(*operands)
+                }
+                Op::Divide(operands) => Instr::Divide(*operands),
+                Op::AsDimension(operand) => Instr::Copy(*operand),
+                Op::SmoothMax(operands) => Instr::SmoothMax(*operands),
+                Op::SmoothMin(operands) => Instr::SmoothMin(*operands),
+                Op::Exp(operand) => Instr::Exp(*operand),
+                Op::Logistic(operand) => Instr::Logistic(*operand),
+                Op::Ln(operand) => Instr::Ln(*operand),
+                Op::Relax(operands) => Instr::Relax(*operands),
+                Op::Volume(operand) => Instr::Volume(*operand),
+                Op::Upwind(operands) => Instr::Upwind(*operands),
+            };
+            self.steps.push((at, instr));
+        }
+        self.kernels.push(Kernel {
+            length: ops.len(),
+            steps: start..self.steps.len(),
+        });
+        self.longest = self.longest.max(ops.len());
+    }
+    fn bind(&mut self, ops: &[Op], inputs: &[Bound], entries: Range<usize>) {
+        let (parameters, unknowns, others) = (self.parameters.len(), self.unknowns.len(), self.others.len());
+        let mut bounds = inputs.iter();
+        for (at, _) in (ops.iter().enumerate()).filter(|(_, op)| matches!(op, Op::Input(_))) {
+            match *bounds.next().expect("one bound per input") {
+                Bound::Parameter(parameter) => self.parameters.push((at, parameter.index())),
+                Bound::Unknown(unknown) => self.unknowns.push((at, unknown.index())),
+                other => self.others.push((at, other)),
+            }
+        }
+        self.rows.push(Row {
+            parameters: parameters..self.parameters.len(),
+            unknowns: unknowns..self.unknowns.len(),
+            others: others..self.others.len(),
+            entries,
+        });
+    }
+    fn kernel(&self, at: usize) -> Arithmetic<'_> {
+        let kernel = &self.kernels[at];
+        Arithmetic {
+            length: kernel.length,
+            steps: &self.steps[kernel.steps.clone()],
+        }
+    }
+    fn program(&self, program: ProgramId) -> Arithmetic<'_> {
+        self.kernel(program.index())
+    }
+    fn reads(&self, at: usize) -> Reads<'_> {
+        let row = &self.rows[at];
+        Reads {
+            parameters: &self.parameters[row.parameters.clone()],
+            unknowns: &self.unknowns[row.unknowns.clone()],
+            others: &self.others[row.others.clone()],
+        }
+    }
+    fn entries(&self, at: usize) -> &[usize] {
+        &self.entries[self.rows[at].entries.clone()]
+    }
+    fn guard(&self, guard: usize) -> (Arithmetic<'_>, Reads<'_>) {
+        (
+            self.kernel(self.programs + guard),
+            self.reads(self.instances + guard),
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Arithmetic<'t> {
+    length: usize,
+    steps: &'t [(usize, Instr)],
+}
+
+#[derive(Clone, Copy)]
+struct Reads<'t> {
+    parameters: &'t [(usize, usize)],
+    unknowns: &'t [(usize, usize)],
+    others: &'t [(usize, Bound)],
+}
+impl Reads<'_> {
+    /// Writes each read into its slot. True when every read was inside its slice and finite, so none can fail.
+    fn fill(&self, inputs: &Inputs<'_>, values: &mut [f64]) -> bool {
+        let mut clean = true;
+        for &(slot, index) in self.parameters {
+            match inputs.parameters.get(index) {
+                Some(&value) => {
+                    values[slot] = value;
+                    clean &= value.is_finite();
+                }
+                None => clean = false,
+            }
+        }
+        for &(slot, index) in self.unknowns {
+            match inputs.unknowns.get(index) {
+                Some(&value) => {
+                    values[slot] = value;
+                    clean &= value.is_finite();
+                }
+                None => clean = false,
+            }
+        }
+        for &(slot, bound) in self.others {
+            match read(&bound, inputs) {
+                Some(value) => {
+                    values[slot] = value;
+                    clean &= value.is_finite();
+                }
+                None => clean = false,
+            }
+        }
+        clean
+    }
+    /// The read at the lowest slot that is past the end of its slice or not finite: the op an op-by-op run stops at.
+    fn first_failure(&self, inputs: &Inputs<'_>) -> (usize, Bound) {
+        let fails = |value: Option<f64>| value.is_none_or(|value| !value.is_finite());
+        let parameters = (self.parameters.iter())
+            .find(|&&(_, index)| fails(inputs.parameters.get(index).copied()))
+            .map(|&(slot, index)| (slot, Bound::Parameter(ParameterId::at(index))));
+        let unknowns = (self.unknowns.iter())
+            .find(|&&(_, index)| fails(inputs.unknowns.get(index).copied()))
+            .map(|&(slot, index)| (slot, Bound::Unknown(UnknownId::at(index))));
+        let others = (self.others.iter())
+            .find(|(_, bound)| fails(read(bound, inputs)))
+            .copied();
+        (parameters.into_iter().chain(unknowns).chain(others))
+            .min_by_key(|&(slot, _)| slot)
+            .expect("a read that is not clean")
+    }
+}
+
+/// A read's value, or `None` past the end of its slice.
+fn read(bound: &Bound, inputs: &Inputs<'_>) -> Option<f64> {
+    match *bound {
+        Bound::Parameter(parameter) => inputs.parameters.get(parameter.index()).copied(),
+        Bound::Unknown(unknown) => inputs.unknowns.get(unknown.index()).copied(),
+        Bound::Draw(stream) => inputs.draws.get(stream).copied(),
+        Bound::Forcing(forcing) => inputs.factors.get(forcing).copied(),
+        Bound::Boundary(_) | Bound::Gauge | Bound::Height(_) => Some(CompiledBody::bound(bound, inputs)),
+    }
+}
+
+fn apply(instr: Instr, values: &[f64], partial_volume: f64) -> Result<f64, OperatorDomain> {
+    let at = |slot: usize| values[slot];
+    let result = match instr {
+        Instr::Zero => 0.0,
+        Instr::Add([a, b]) => at(a) + at(b),
+        Instr::Subtract([a, b]) => at(a) - at(b),
+        Instr::Multiply([a, b]) => at(a) * at(b),
+        Instr::Divide([a, b]) => {
+            if at(b) <= 0.0 {
+                return Err(OperatorDomain::Divisor);
+            }
+            at(a) / at(b)
+        }
+        Instr::Copy([x]) => at(x),
+        Instr::SmoothMax([a, b, width]) => smooth(at(a), at(b), at(width), 1.0).0,
+        Instr::SmoothMin([a, b, width]) => smooth(at(a), at(b), at(width), -1.0).0,
+        Instr::Exp([x]) => pinned::exp(at(x)),
+        Instr::Logistic([x]) => 1.0 / (1.0 + pinned::exp(-at(x))),
+        Instr::Ln([x]) => pinned::ln(at(x)).ok_or(OperatorDomain::LogarithmArgument)?,
+        Instr::Relax([target, current, speed]) => at(speed) * (at(target) - at(current)),
+        Instr::Volume([amount]) => at(amount) * partial_volume,
+        Instr::Upwind([flow, from, from_water, to, to_water]) => {
+            let (amount, water) = if at(flow) >= 0.0 {
+                (at(from), at(from_water))
+            } else {
+                (at(to), at(to_water))
+            };
+            if at(flow) == 0.0 {
+                0.0
+            } else if water <= 0.0 {
+                return Err(OperatorDomain::Divisor);
+            } else {
+                at(flow) * (amount / water)
+            }
+        }
+    };
+    if !result.is_finite() {
+        return Err(OperatorDomain::NonFinite);
+    }
+    Ok(result)
+}
+
+/// A read counts as the op at its own slot: only the arithmetic below the lowest failing read runs, then the read fails as
+/// `bound` fails, a panic past the end of its slice and `NonFinite` otherwise.
+fn forward(
+    arithmetic: Arithmetic<'_>,
+    reads: Reads<'_>,
+    inputs: &Inputs<'_>,
+    partial_volume: f64,
+    values: &mut [f64],
+) -> Result<f64, OperatorDomain> {
+    let failed = (!reads.fill(inputs, values)).then(|| reads.first_failure(inputs));
+    let steps = failed.map_or(arithmetic.steps, |(slot, _)| {
+        &arithmetic.steps[..arithmetic.steps.partition_point(|&(at, _)| at < slot)]
+    });
+    for &(at, instr) in steps {
+        let value = apply(instr, values, partial_volume)?;
+        values[at] = value;
+    }
+    match failed {
+        None => Ok(values[arithmetic.length - 1]),
+        Some((_, bound)) => {
+            CompiledBody::bound(&bound, inputs);
+            Err(OperatorDomain::NonFinite)
+        }
+    }
+}
+
+/// The slope of a finished `forward`'s result in every slot. A read or zero adds into no slot, so only arithmetic is
+/// visited.
+fn backward(arithmetic: Arithmetic<'_>, values: &[f64], partial_volume: f64, slopes: &mut [f64]) {
+    slopes[..arithmetic.length].fill(0.0);
+    slopes[arithmetic.length - 1] = 1.0;
+    for &(at, instr) in arithmetic.steps.iter().rev() {
         let slope = slopes[at];
         if slope == 0.0 {
             continue;
         }
-        match op {
-            Op::Input(_) | Op::Zero(_) => {}
-            Op::Add([a, b]) => {
-                slopes[*a] += slope;
-                slopes[*b] += slope;
+        match instr {
+            Instr::Zero => {}
+            Instr::Add([a, b]) => {
+                slopes[a] += slope;
+                slopes[b] += slope;
             }
-            Op::Subtract([a, b]) | Op::Deviation([a, b]) => {
-                slopes[*a] += slope;
-                slopes[*b] -= slope;
+            Instr::Subtract([a, b]) => {
+                slopes[a] += slope;
+                slopes[b] -= slope;
             }
-            Op::Multiply([a, b]) | Op::Scale([a, b]) | Op::ConductanceFlow([a, b]) => {
-                slopes[*a] += slope * values[*b];
-                slopes[*b] += slope * values[*a];
+            Instr::Multiply([a, b]) => {
+                slopes[a] += slope * values[b];
+                slopes[b] += slope * values[a];
             }
-            Op::Divide([a, b]) => {
-                let divisor = values[*b];
-                slopes[*a] += slope / divisor;
-                slopes[*b] -= slope * values[*a] / (divisor * divisor);
+            Instr::Divide([a, b]) => {
+                let divisor = values[b];
+                slopes[a] += slope / divisor;
+                slopes[b] -= slope * values[a] / (divisor * divisor);
             }
-            Op::AsDimension([x]) => slopes[*x] += slope,
-            Op::SmoothMax([a, b, width]) | Op::SmoothMin([a, b, width]) => {
-                let sign = if matches!(op, Op::SmoothMax(_)) { 1.0 } else { -1.0 };
-                let (_, along, across) = smooth(values[*a], values[*b], values[*width], sign);
-                slopes[*a] += slope * 0.5 * (1.0 + sign * along);
-                slopes[*b] += slope * 0.5 * (1.0 - sign * along);
-                slopes[*width] += slope * 0.5 * sign * across;
-            }
-            Op::Exp([x]) => slopes[*x] += slope * values[at],
-            Op::Logistic([x]) => slopes[*x] += slope * values[at] * (1.0 - values[at]),
-            Op::Ln([x]) => slopes[*x] += slope / values[*x],
-            Op::Relax([target, current, speed]) => {
-                let gap = values[*target] - values[*current];
-                slopes[*target] += slope * values[*speed];
-                slopes[*current] -= slope * values[*speed];
-                slopes[*speed] += slope * gap;
-            }
-            Op::Volume([amount]) => slopes[*amount] += slope * partial_volume,
-            Op::Upwind([flow, from, from_water, to, to_water]) => {
-                let (amount, water) = if values[*flow] >= 0.0 {
-                    (*from, *from_water)
+            Instr::Copy([x]) => slopes[x] += slope,
+            Instr::SmoothMax([a, b, width]) | Instr::SmoothMin([a, b, width]) => {
+                let sign = if matches!(instr, Instr::SmoothMax(_)) {
+                    1.0
                 } else {
-                    (*to, *to_water)
+                    -1.0
+                };
+                let (_, along, across) = smooth(values[a], values[b], values[width], sign);
+                slopes[a] += slope * 0.5 * (1.0 + sign * along);
+                slopes[b] += slope * 0.5 * (1.0 - sign * along);
+                slopes[width] += slope * 0.5 * sign * across;
+            }
+            Instr::Exp([x]) => slopes[x] += slope * values[at],
+            Instr::Logistic([x]) => slopes[x] += slope * values[at] * (1.0 - values[at]),
+            Instr::Ln([x]) => slopes[x] += slope / values[x],
+            Instr::Relax([target, current, speed]) => {
+                let gap = values[target] - values[current];
+                slopes[target] += slope * values[speed];
+                slopes[current] -= slope * values[speed];
+                slopes[speed] += slope * gap;
+            }
+            Instr::Volume([amount]) => slopes[amount] += slope * partial_volume,
+            Instr::Upwind([flow, from, from_water, to, to_water]) => {
+                let (amount, water) = if values[flow] >= 0.0 {
+                    (from, from_water)
+                } else {
+                    (to, to_water)
                 };
                 if values[water] > 0.0 {
                     let share = values[amount] / values[water];
-                    slopes[*flow] += slope * share;
-                    slopes[amount] += slope * values[*flow] / values[water];
-                    slopes[water] -= slope * values[*flow] * share / values[water];
+                    slopes[flow] += slope * share;
+                    slopes[amount] += slope * values[flow] / values[water];
+                    slopes[water] -= slope * values[flow] * share / values[water];
                 }
             }
         }
@@ -166,19 +439,34 @@ fn positive_part(instance: &Instance, value: f64) -> f64 {
     }
 }
 
+/// One holding instance after its backward pass.
+struct Swept<'a> {
+    at: usize,
+    instance: &'a Instance,
+    reads: Reads<'a>,
+    slopes: &'a [f64],
+    flat: bool,
+}
+impl Swept<'_> {
+    fn slope(&self, slot: usize) -> f64 {
+        if self.flat { 0.0 } else { self.slopes[slot] }
+    }
+}
+
 impl CompiledBody {
     fn partial_volume(&self) -> f64 {
         (self.layout.schema.partial_volume.as_ref()).map_or(0.0, |coefficient| coefficient.value())
     }
-    pub(crate) fn guard_gap(&self, guard: &GuardLayout, inputs: &Inputs<'_>) -> Result<f64, Undefined> {
-        let mut bounds = guard.inputs.iter();
-        let next = || Self::bound(bounds.next().expect("one bound per input"), inputs);
-        let mut stack = Vec::new();
-        let value = run(&guard.code.ops, next, self.partial_volume(), &mut stack).map_err(|domain| {
-            let law = self.layout.modes[guard.variable].variable.law;
-            Undefined { law, domain }
-        })?;
-        Ok(match guard.crossing {
+    pub(crate) fn guard_gap(&self, guard: usize, inputs: &Inputs<'_>) -> Result<f64, Undefined> {
+        let layout = &self.layout.guards[guard];
+        let (arithmetic, reads) = self.tape.guard(guard);
+        let mut values = vec![0.0; arithmetic.length];
+        let value =
+            forward(arithmetic, reads, inputs, self.partial_volume(), &mut values).map_err(|domain| {
+                let law = self.layout.modes[layout.variable].variable.law;
+                Undefined { law, domain }
+            })?;
+        Ok(match layout.crossing {
             Crossing::Rising => value,
             Crossing::Falling => -value,
         })
@@ -191,10 +479,10 @@ impl CompiledBody {
         tolerance: &ErrorScales,
     ) -> Result<(Vec<usize>, Vec<RowId>), Undefined> {
         let mut crossed = Vec::with_capacity(self.layout.guards.len());
-        for guard in &self.layout.guards {
+        for (at, guard) in self.layout.guards.iter().enumerate() {
             crossed.push(
                 guard.armed(inputs.modes) && {
-                    let gap = self.guard_gap(guard, inputs)?;
+                    let gap = self.guard_gap(at, inputs)?;
                     gap >= -tolerance.at(gap, 1.0)
                 },
             );
@@ -215,25 +503,111 @@ impl CompiledBody {
             Bound::Height(axial) => inputs.frame.height(f64::from_bits(axial)),
         }
     }
-    fn walk(&self, instance: &Instance, inputs: &Inputs<'_>, stack: &mut Vec<f64>) -> Result<f64, Undefined> {
-        let program = &self.layout.programs[instance.program.index()];
-        let mut bounds = instance.inputs.iter();
-        let next = || Self::bound(bounds.next().expect("one bound per input"), inputs);
-        run(&program.code.ops, next, self.partial_volume(), stack).map_err(|domain| Undefined {
-            law: program.law,
-            domain,
-        })
+    fn undefined(&self, instance: &Instance, domain: OperatorDomain) -> Undefined {
+        let law = self.layout.programs[instance.program.index()].law;
+        Undefined { law, domain }
     }
     pub(crate) fn instance_values(&self, inputs: &Inputs<'_>) -> Result<Vec<Option<f64>>, Undefined> {
-        let mut stack = Vec::new();
-        (self.layout.instances.iter())
-            .map(|instance| {
-                if !instance.holds(inputs.modes) {
-                    return Ok(None);
+        let mut values = vec![0.0; self.tape.longest];
+        let partial_volume = self.partial_volume();
+        let mut out = Vec::with_capacity(self.layout.instances.len());
+        for (at, instance) in self.layout.instances.iter().enumerate() {
+            if !instance.holds(inputs.modes) {
+                out.push(None);
+                continue;
+            }
+            let (arithmetic, reads) = (self.tape.program(instance.program), self.tape.reads(at));
+            let value = forward(arithmetic, reads, inputs, partial_volume, &mut values);
+            out.push(Some(value.map_err(|domain| self.undefined(instance, domain))?));
+        }
+        Ok(out)
+    }
+    fn slopes(
+        &self,
+        inputs: &Inputs<'_>,
+        mut each: impl FnMut(&Swept<'_>) -> Result<(), Undefined>,
+    ) -> Result<(), Undefined> {
+        let (mut values, mut slopes) = (vec![0.0; self.tape.longest], vec![0.0; self.tape.longest]);
+        let partial_volume = self.partial_volume();
+        for (at, instance) in self.layout.instances.iter().enumerate() {
+            if !instance.holds(inputs.modes) {
+                continue;
+            }
+            let (arithmetic, reads) = (self.tape.program(instance.program), self.tape.reads(at));
+            let value = forward(arithmetic, reads, inputs, partial_volume, &mut values)
+                .map_err(|domain| self.undefined(instance, domain))?;
+            backward(arithmetic, &values, partial_volume, &mut slopes);
+            let flat = positive_part(instance, value) != value;
+            each(&Swept {
+                at,
+                instance,
+                reads,
+                slopes: &slopes,
+                flat,
+            })?;
+        }
+        Ok(())
+    }
+    pub(crate) fn jacobian(&self, inputs: &Inputs<'_>, shift: f64) -> Result<Vec<f64>, Undefined> {
+        let mut values = vec![0.0; self.layout.sparsity.unknowns.len()];
+        self.slopes(inputs, |swept| {
+            let mut entries = self.tape.entries(swept.at).iter();
+            let mut next = || *entries.next().expect("an entry per unknown read and term");
+            for &(slot, _) in swept.reads.unknowns {
+                let slope = swept.slope(slot);
+                if !slope.is_finite() {
+                    return Err(self.undefined(swept.instance, OperatorDomain::NonFinite));
                 }
-                Ok(Some(self.walk(instance, inputs, &mut stack)?))
-            })
-            .collect()
+                match swept.instance.target {
+                    Target::Column(column) => {
+                        for &(_, coefficient) in &self.layout.columns[column.index()].terms {
+                            values[next()] -= coefficient as f64 * slope;
+                        }
+                    }
+                    Target::Row(row) => {
+                        let sign = match self.layout.rows[row.index()].kind {
+                            RowKind::Algebraic(_) => 1.0,
+                            RowKind::Amount { .. } | RowKind::Memory(_) => -1.0,
+                        };
+                        values[next()] += sign * slope;
+                    }
+                }
+            }
+            Ok(())
+        })?;
+        for &entry in &self.tape.diagonals {
+            values[entry] += shift;
+        }
+        Ok(values)
+    }
+    /// `dF/dp` per row, for one fit: every slot it fills moves together.
+    pub(crate) fn parameter_slopes(
+        &self,
+        inputs: &Inputs<'_>,
+        slots: &[ParameterId],
+    ) -> Result<Vec<f64>, Undefined> {
+        let mut slopes = vec![0.0; self.layout.rows.len()];
+        self.slopes(inputs, |swept| {
+            let fitted = (swept.reads.parameters.iter())
+                .filter(|&&(_, parameter)| slots.contains(&ParameterId::at(parameter)));
+            let slope: f64 = fitted.map(|&(slot, _)| swept.slope(slot)).sum();
+            match swept.instance.target {
+                Target::Column(column) => {
+                    for &(row, coefficient) in &self.layout.columns[column.index()].terms {
+                        slopes[row.index()] -= coefficient as f64 * slope;
+                    }
+                }
+                Target::Row(row) => {
+                    let sign = match self.layout.rows[row.index()].kind {
+                        RowKind::Algebraic(_) => 1.0,
+                        RowKind::Amount { .. } | RowKind::Memory(_) => -1.0,
+                    };
+                    slopes[row.index()] += sign * slope;
+                }
+            }
+            Ok(())
+        })?;
+        Ok(slopes)
     }
     pub(crate) fn targets(&self, values: &[Option<f64>]) -> (Vec<f64>, Vec<f64>) {
         let mut columns = vec![0.0; self.layout.columns.len()];
@@ -262,99 +636,6 @@ impl CompiledBody {
             }
         }
         residuals
-    }
-    fn slopes(
-        &self,
-        inputs: &Inputs<'_>,
-        mut each: impl FnMut(&Instance, &mut dyn Iterator<Item = (&Bound, f64)>) -> Result<(), Undefined>,
-    ) -> Result<(), Undefined> {
-        let (mut stack, mut slopes) = (Vec::new(), Vec::new());
-        let holds = |instance: &&Instance| instance.holds(inputs.modes);
-        for instance in self.layout.instances.iter().filter(holds) {
-            let value = self.walk(instance, inputs, &mut stack)?;
-            let program = &self.layout.programs[instance.program.index()];
-            let ops = &program.code.ops;
-            sweep(ops, &stack, self.partial_volume(), &mut slopes);
-            let flat = positive_part(instance, value) != value;
-            let reads = (ops.iter().zip(&slopes))
-                .filter(|(op, _)| matches!(op, Op::Input(_)))
-                .map(|(_, &slope)| if flat { 0.0 } else { slope });
-            let mut read = instance.inputs.iter().zip(reads);
-            each(instance, &mut read)?;
-        }
-        Ok(())
-    }
-    pub(crate) fn jacobian(&self, inputs: &Inputs<'_>, shift: f64) -> Result<Vec<f64>, Undefined> {
-        let sparsity = &self.layout.sparsity;
-        let mut values = vec![0.0; sparsity.unknowns.len()];
-        let entry = |row: usize, unknown: UnknownId| {
-            let range = sparsity.offsets[row]..sparsity.offsets[row + 1];
-            let found = sparsity.unknowns[range.clone()].binary_search(&unknown);
-            range.start + found.expect("the compiled sparsity holds every unknown a row's laws read")
-        };
-        self.slopes(inputs, |instance, reads| {
-            for (bound, slope) in reads {
-                let Some(unknown) = bound.unknown() else { continue };
-                if !slope.is_finite() {
-                    let program = &self.layout.programs[instance.program.index()];
-                    return Err(Undefined {
-                        law: program.law,
-                        domain: OperatorDomain::NonFinite,
-                    });
-                }
-                match instance.target {
-                    Target::Column(column) => {
-                        for &(row, coefficient) in &self.layout.columns[column.index()].terms {
-                            values[entry(row.index(), unknown)] -= coefficient as f64 * slope;
-                        }
-                    }
-                    Target::Row(row) => {
-                        let sign = match self.layout.rows[row.index()].kind {
-                            RowKind::Algebraic(_) => 1.0,
-                            RowKind::Amount { .. } | RowKind::Memory(_) => -1.0,
-                        };
-                        values[entry(row.index(), unknown)] += sign * slope;
-                    }
-                }
-            }
-            Ok(())
-        })?;
-        for (at, row) in self.layout.rows.iter().enumerate() {
-            if !matches!(row.kind, RowKind::Algebraic(_)) {
-                values[entry(at, row.unknown)] += shift;
-            }
-        }
-        Ok(values)
-    }
-    /// `dF/dp` per row, for one fit: every slot it fills moves together.
-    pub(crate) fn parameter_slopes(
-        &self,
-        inputs: &Inputs<'_>,
-        slots: &[ParameterId],
-    ) -> Result<Vec<f64>, Undefined> {
-        let mut slopes = vec![0.0; self.layout.rows.len()];
-        self.slopes(inputs, |instance, reads| {
-            let fitted = reads.filter(
-                |(bound, _)| matches!(bound, Bound::Parameter(parameter) if slots.contains(parameter)),
-            );
-            let slope: f64 = fitted.map(|(_, slope)| slope).sum();
-            match instance.target {
-                Target::Column(column) => {
-                    for &(row, coefficient) in &self.layout.columns[column.index()].terms {
-                        slopes[row.index()] -= coefficient as f64 * slope;
-                    }
-                }
-                Target::Row(row) => {
-                    let sign = match self.layout.rows[row.index()].kind {
-                        RowKind::Algebraic(_) => 1.0,
-                        RowKind::Amount { .. } | RowKind::Memory(_) => -1.0,
-                    };
-                    slopes[row.index()] += sign * slope;
-                }
-            }
-            Ok(())
-        })?;
-        Ok(slopes)
     }
     pub(crate) fn excursions(
         &self,
@@ -393,8 +674,10 @@ impl CompiledBody {
 
 #[cfg(test)]
 mod tests {
-    use super::Inputs;
+    use super::{Inputs, Instr};
+    use crate::body::{Bound, Target};
     use crate::boundary::DriveFrame;
+    use crate::law::Op;
     use crate::*;
     use core::fmt::Write;
 
@@ -689,5 +972,172 @@ mod tests {
             factors: &[],
         };
         let _ = body.instance_values(&inputs);
+    }
+    /// One mode variable with a guard into each mode, so the tape's guard kernels and reads are read back too.
+    fn switching() -> CompiledBody {
+        let mut map = AnatomyBuilder::new();
+        map.site::<TissueSite>("body", Position::new(measure(0.0), measure(0.0), measure(0.0)));
+        let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+        assemble(schema, |mut body| {
+            let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+            let (mut ns, _) = body.nervous()?.parts();
+            let x = ns.state::<Dimensionless>("x", Admissible::finite());
+            let threshold =
+                ns.parameter::<Dimensionless>(ParameterKey::new("threshold"), Admissible::positive());
+            let speed =
+                ns.parameter::<Rate<Dimensionless>>(ParameterKey::new("speed"), Admissible::positive());
+            let [a, b] = ns.modes("switch", ["a", "b"]);
+            for mode in [&a, &b] {
+                let rate = ns.kernel(|mut k| {
+                    let (zero, current, speed) = (k.zero(), k.state(&x), k.parameter(&speed));
+                    let rate = k.relax(zero, current, speed);
+                    k.finish(rate, mode.only(), class)
+                });
+                ns.memory_rate(&x, rate);
+            }
+            let entering = ns.kernel(|mut k| {
+                let (value, threshold) = (k.state(&x), k.parameter(&threshold));
+                let gap = k.subtract(value, threshold);
+                k.finish(gap, a.only(), class)
+            });
+            ns.event(Guard::new(entering, Crossing::Rising, a.to(&b)?));
+            let leaving = ns.kernel(|mut k| {
+                let (zero, value, threshold) = (k.zero(), k.state(&x), k.parameter(&threshold));
+                let negative = k.subtract(zero, value);
+                let gap = k.subtract(negative, threshold);
+                k.finish(gap, b.only(), class)
+            });
+            ns.event(Guard::new(leaving, Crossing::Rising, b.to(&a)?));
+            body.add(ns.finish());
+            body.compile()
+        })
+        .expect("compiled")
+    }
+
+    fn lowered(op: &Op) -> Option<(&'static str, Vec<usize>)> {
+        Some(match op {
+            Op::Input(_) => return None,
+            Op::Zero(_) => ("zero", Vec::new()),
+            Op::Add(operands) => ("add", operands.to_vec()),
+            Op::Subtract(operands) | Op::Deviation(operands) => ("subtract", operands.to_vec()),
+            Op::Multiply(operands) | Op::Scale(operands) | Op::ConductanceFlow(operands) => {
+                ("multiply", operands.to_vec())
+            }
+            Op::Divide(operands) => ("divide", operands.to_vec()),
+            Op::AsDimension(operand) => ("copy", operand.to_vec()),
+            Op::SmoothMax(operands) => ("smooth max", operands.to_vec()),
+            Op::SmoothMin(operands) => ("smooth min", operands.to_vec()),
+            Op::Exp(operand) => ("exp", operand.to_vec()),
+            Op::Logistic(operand) => ("logistic", operand.to_vec()),
+            Op::Ln(operand) => ("ln", operand.to_vec()),
+            Op::Relax(operands) => ("relax", operands.to_vec()),
+            Op::Volume(operand) => ("volume", operand.to_vec()),
+            Op::Upwind(operands) => ("upwind", operands.to_vec()),
+        })
+    }
+
+    fn named(instr: Instr) -> (&'static str, Vec<usize>) {
+        match instr {
+            Instr::Zero => ("zero", Vec::new()),
+            Instr::Add(operands) => ("add", operands.to_vec()),
+            Instr::Subtract(operands) => ("subtract", operands.to_vec()),
+            Instr::Multiply(operands) => ("multiply", operands.to_vec()),
+            Instr::Divide(operands) => ("divide", operands.to_vec()),
+            Instr::Copy(operand) => ("copy", operand.to_vec()),
+            Instr::SmoothMax(operands) => ("smooth max", operands.to_vec()),
+            Instr::SmoothMin(operands) => ("smooth min", operands.to_vec()),
+            Instr::Exp(operand) => ("exp", operand.to_vec()),
+            Instr::Logistic(operand) => ("logistic", operand.to_vec()),
+            Instr::Ln(operand) => ("ln", operand.to_vec()),
+            Instr::Relax(operands) => ("relax", operands.to_vec()),
+            Instr::Volume(operand) => ("volume", operand.to_vec()),
+            Instr::Upwind(operands) => ("upwind", operands.to_vec()),
+        }
+    }
+
+    fn reads_back(body: &CompiledBody) {
+        let (layout, tape) = (&body.layout, &body.tape);
+        let codes = (layout.programs.iter().map(|program| &program.code))
+            .chain(layout.guards.iter().map(|guard| &guard.code));
+        for (at, code) in codes.enumerate() {
+            let kernel = tape.kernel(at);
+            assert_eq!(kernel.length, code.ops.len());
+            let expected: Vec<_> = (code.ops.iter().enumerate())
+                .filter_map(|(slot, op)| Some((slot, lowered(op)?)))
+                .collect();
+            let found: Vec<_> = kernel
+                .steps
+                .iter()
+                .map(|&(slot, instr)| (slot, named(instr)))
+                .collect();
+            assert_eq!(found, expected);
+        }
+        let rows = (layout.instances.iter())
+            .map(|instance| {
+                (
+                    &layout.programs[instance.program.index()].code.ops,
+                    &instance.inputs,
+                )
+            })
+            .chain(layout.guards.iter().map(|guard| (&guard.code.ops, &guard.inputs)));
+        for (at, (ops, inputs)) in rows.enumerate() {
+            let reads = tape.reads(at);
+            let parameters = (reads.parameters.iter())
+                .map(|&(slot, index)| (slot, Bound::Parameter(ParameterId::at(index))));
+            let unknowns =
+                (reads.unknowns.iter()).map(|&(slot, index)| (slot, Bound::Unknown(UnknownId::at(index))));
+            let mut found: Vec<(usize, Bound)> = parameters
+                .chain(unknowns)
+                .chain(reads.others.iter().copied())
+                .collect();
+            found.sort_by_key(|&(slot, _)| slot);
+            let slots = (ops.iter().enumerate()).filter(|(_, op)| matches!(op, Op::Input(_)));
+            let expected: Vec<(usize, Bound)> =
+                slots.map(|(slot, _)| slot).zip(inputs.iter().copied()).collect();
+            assert_eq!(found, expected);
+        }
+        let sparsity = &layout.sparsity;
+        let holds = |entry: usize, row: usize, unknown: UnknownId| {
+            (sparsity.offsets[row]..sparsity.offsets[row + 1]).contains(&entry)
+                && sparsity.unknowns[entry] == unknown
+        };
+        for (at, instance) in layout.instances.iter().enumerate() {
+            let targets: Vec<usize> = match instance.target {
+                Target::Column(column) => (layout.columns[column.index()].terms.iter())
+                    .map(|(row, _)| row.index())
+                    .collect(),
+                Target::Row(row) => vec![row.index()],
+            };
+            let reads = instance.inputs.iter().filter_map(Bound::unknown);
+            let expected: Vec<(usize, UnknownId)> = reads
+                .flat_map(|unknown| targets.iter().map(move |&row| (row, unknown)))
+                .collect();
+            let entries = tape.entries(at);
+            assert_eq!(entries.len(), expected.len());
+            for (&entry, &(row, unknown)) in entries.iter().zip(&expected) {
+                assert!(
+                    holds(entry, row, unknown),
+                    "instance {at}: entry {entry} is not row {row}'s {unknown:?}"
+                );
+            }
+        }
+        let differential =
+            (layout.rows.iter().enumerate()).filter(|(_, row)| !matches!(row.kind, RowKind::Algebraic(_)));
+        let expected: Vec<(usize, UnknownId)> = differential.map(|(at, row)| (at, row.unknown)).collect();
+        assert_eq!(tape.diagonals.len(), expected.len());
+        for (&entry, &(row, unknown)) in tape.diagonals.iter().zip(&expected) {
+            assert!(
+                holds(entry, row, unknown),
+                "diagonal {entry} is not row {row}'s own entry"
+            );
+        }
+    }
+
+    #[test]
+    fn the_tape_reads_back_its_layout() {
+        reads_back(&reads_before_a_divide().0);
+        let switching = switching();
+        assert_eq!(switching.layout.guards.len(), 2);
+        reads_back(&switching);
     }
 }
