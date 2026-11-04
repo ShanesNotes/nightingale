@@ -416,9 +416,14 @@ mod tests {
         RowKind::Memory(LawName { owner: "NS", local }.into())
     }
 
-    /// `x`'s rate reads `x` before it divides by `y`, `y`'s takes the log of `y`, and `q`'s residual is a bare read, so a
-    /// read that is not finite is told apart from the first op that consumes it. `z`'s rate reads `y` and `x` once each
-    /// and uses each read twice, so the sweep's two updates of one slot keep their order.
+    fn algebraic(local: &'static str) -> RowKind {
+        RowKind::Algebraic(LawName { owner: "NS", local }.into())
+    }
+
+    /// Each law puts a read where a reordered evaluator would show it. `x` reads `x` before it divides by `y`, and `u`
+    /// reads `u`, divides by `y`, then reads the parameter that sorts last; `y` takes the log of `y`; `q`'s residual is
+    /// a bare read; `z` uses one read of `y` and one of `x` twice each; `v` subtracts a quotient from itself, so its
+    /// slope there is zero while the quotient's divisor can square to zero.
     fn reads_before_a_divide() -> (CompiledBody, BoundParameters) {
         let mut map = AnatomyBuilder::new();
         map.site::<TissueSite>("body", Position::new(measure(0.0), measure(0.0), measure(0.0)));
@@ -428,10 +433,13 @@ mod tests {
             let x = laws.state::<Dimensionless>("x", Admissible::finite());
             let y = laws.state::<Dimensionless>("y", Admissible::finite());
             let z = laws.state::<Dimensionless>("z", Admissible::finite());
+            let u = laws.state::<Dimensionless>("u", Admissible::finite());
+            let v = laws.state::<Dimensionless>("v", Admissible::finite());
             let q = laws.algebraic::<Dimensionless>("q", Admissible::finite());
             let p = laws.parameter::<Dimensionless>(ParameterKey::new("ns.p"), Admissible::positive());
             let speed =
                 laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.speed"), Admissible::positive());
+            let tail = laws.parameter::<Dimensionless>(ParameterKey::new("ns.tail"), Admissible::positive());
             let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
             let x_rate = laws.kernel(|mut k| {
                 let rate = k.parameter(&speed);
@@ -465,6 +473,31 @@ mod tests {
                 k.finish(sum, laws.every_mode(), wave)
             });
             laws.memory_rate(&z, z_rate);
+            let u_rate = laws.kernel(|mut k| {
+                let rate = k.parameter(&speed);
+                let held = k.state(&u);
+                let numerator = k.parameter(&p);
+                let divisor = k.state(&y);
+                let quotient = k.divide(numerator, divisor);
+                let quotient = k.as_dimension::<_, Dimensionless>(quotient);
+                let late = k.parameter(&tail);
+                let inner = k.add(quotient, late);
+                let sum = k.add(held, inner);
+                let scaled = k.scale(rate, sum);
+                k.finish(scaled, laws.every_mode(), wave)
+            });
+            laws.memory_rate(&u, u_rate);
+            let v_rate = laws.kernel(|mut k| {
+                let rate = k.parameter(&speed);
+                let numerator = k.parameter(&p);
+                let divisor = k.state(&v);
+                let quotient = k.divide(numerator, divisor);
+                let quotient = k.as_dimension::<_, Dimensionless>(quotient);
+                let nothing = k.subtract(quotient, quotient);
+                let scaled = k.scale(rate, nothing);
+                k.finish(scaled, laws.every_mode(), wave)
+            });
+            laws.memory_rate(&v, v_rate);
             let q_residual = laws.kernel(|mut k| {
                 let read = k.algebraic(&q);
                 k.finish(read, laws.every_mode(), wave)
@@ -476,26 +509,27 @@ mod tests {
         .expect("compiled");
         let mut packet: ParameterPacket<SyntheticFixture> = ParameterPacket::new();
         let synthetic = "synthetic";
+        let dimensionless = |value| measure::<Dimensionless>(value);
         (packet.synthetic(
             ParameterKey::new("ns.p"),
             Binding::Body,
-            measure::<Dimensionless>(0.5),
+            dimensionless(0.5),
             synthetic,
         ))
         .expect("once");
         let speed = measure::<Rate<Dimensionless>>(0.7);
         (packet.synthetic(ParameterKey::new("ns.speed"), Binding::Body, speed, synthetic)).expect("once");
-        (packet.start(memory("x"), measure::<Dimensionless>(0.4), synthetic)).expect("once");
-        (packet.start(memory("y"), measure::<Dimensionless>(1.5), synthetic)).expect("once");
-        (packet.start(memory("z"), measure::<Dimensionless>(-0.75), synthetic)).expect("once");
-        let q = RowKind::Algebraic(
-            LawName {
-                owner: "NS",
-                local: "q",
-            }
-            .into(),
-        );
-        (packet.start(q, measure::<Dimensionless>(0.25), synthetic)).expect("once");
+        (packet.synthetic(
+            ParameterKey::new("ns.tail"),
+            Binding::Body,
+            dimensionless(0.3),
+            synthetic,
+        ))
+        .expect("once");
+        for (local, start) in [("x", 0.4), ("y", 1.5), ("z", -0.75), ("u", 0.6), ("v", 2.0)] {
+            (packet.start(memory(local), dimensionless(start), synthetic)).expect("once");
+        }
+        (packet.start(algebraic("q"), dimensionless(0.25), synthetic)).expect("once");
         let bound = body.bind(packet).expect("bound");
         (body, bound)
     }
@@ -511,6 +545,13 @@ mod tests {
             factors: &[],
         };
         let hex = |value: f64| format!("{:016x}", value.to_bits());
+        let listed = |values: &[f64]| {
+            values
+                .iter()
+                .map(|value| hex(*value))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
         let values = match body.instance_values(&inputs) {
             Ok(values) => (values.iter())
                 .map(|value| value.map_or_else(|| "none".to_string(), hex))
@@ -519,20 +560,12 @@ mod tests {
             Err(undefined) => format!("{undefined:?}"),
         };
         let jacobian = match body.jacobian(&inputs, 2.0) {
-            Ok(values) => values
-                .iter()
-                .map(|value| hex(*value))
-                .collect::<Vec<_>>()
-                .join(","),
+            Ok(values) => listed(&values),
             Err(undefined) => format!("{undefined:?}"),
         };
         let fits = (0..parameters.len()).map(|slot| {
             match body.parameter_slopes(&inputs, &[ParameterId::at(slot)]) {
-                Ok(values) => values
-                    .iter()
-                    .map(|value| hex(*value))
-                    .collect::<Vec<_>>()
-                    .join(","),
+                Ok(values) => listed(&values),
                 Err(undefined) => format!("{undefined:?}"),
             }
         });
@@ -542,60 +575,89 @@ mod tests {
         )
     }
 
+    fn failed(law: &str, domain: &str) -> String {
+        format!("values Undefined {{ law: LawName {{ owner: \"NS\", local: \"{law}\" }}, domain: {domain} }}")
+    }
+
     #[test]
     fn a_value_that_is_not_finite_fails_at_the_read_that_takes_it() {
         let (body, bound) = reads_before_a_divide();
         let rows = body.rows();
         let slot = |kind: RowKind| rows.iter().position(|row| row.kind() == kind).expect("a row");
-        let (x, y) = (slot(memory("x")), slot(memory("y")));
+        let (u, v, y, q) = (
+            slot(memory("u")),
+            slot(memory("v")),
+            slot(memory("y")),
+            slot(algebraic("q")),
+        );
         let start: Vec<f64> = rows.iter().map(|row| bound.starts[row.id().index()]).collect();
         let (modes, parameters) = (&bound.modes, &bound.values);
+        let tail = parameters.len() - 1;
         let mut trace = String::new();
-        writeln!(trace, "start {}", outcome(&body, modes, parameters, &start)).expect("a string takes it");
+        let mut named = |label: &str, parameters: &[f64], unknowns: &[f64]| {
+            let seen = outcome(&body, modes, parameters, unknowns);
+            writeln!(trace, "{label}: {seen}").expect("a string takes it");
+            seen
+        };
+        named("start", parameters, &start);
         for at in 0..start.len() {
             for value in NOT_FINITE_OR_EDGE {
                 let mut unknowns = start.clone();
                 unknowns[at] = value;
-                let seen = outcome(&body, modes, parameters, &unknowns);
-                writeln!(trace, "unknown {at} {:016x}: {seen}", value.to_bits()).expect("a string takes it");
+                named(
+                    &format!("unknown {at} {:016x}", value.to_bits()),
+                    parameters,
+                    &unknowns,
+                );
             }
             for other in (0..start.len()).filter(|other| *other != at) {
                 let mut unknowns = start.clone();
                 (unknowns[at], unknowns[other]) = (f64::NAN, -1.0);
-                let seen = outcome(&body, modes, parameters, &unknowns);
-                writeln!(trace, "unknown {at} nan, {other} -1: {seen}").expect("a string takes it");
+                named(&format!("unknown {at} nan, {other} -1"), parameters, &unknowns);
             }
         }
         for at in 0..parameters.len() {
             for value in NOT_FINITE_OR_EDGE {
                 let mut changed = parameters.clone();
                 changed[at] = value;
-                let seen = outcome(&body, modes, &changed, &start);
-                writeln!(trace, "parameter {at} {:016x}: {seen}", value.to_bits())
-                    .expect("a string takes it");
+                named(
+                    &format!("parameter {at} {:016x}", value.to_bits()),
+                    &changed,
+                    &start,
+                );
             }
         }
         let mut unknowns = start.clone();
-        (unknowns[x], unknowns[y]) = (f64::NAN, -1.0);
-        let seen = outcome(&body, modes, parameters, &unknowns);
-        assert!(
-            seen.starts_with("values Undefined") && seen.contains("domain: NonFinite"),
-            "{seen}"
-        );
-        let q = slot(RowKind::Algebraic(
-            LawName {
-                owner: "NS",
-                local: "q",
-            }
-            .into(),
-        ));
+        (unknowns[u], unknowns[y]) = (f64::NAN, -1.0);
+        let seen = named("a read before a failing divide", parameters, &unknowns);
+        assert!(seen.starts_with(&failed("u", "NonFinite")), "{seen}");
+        let (mut changed, mut unknowns) = (parameters.clone(), start.clone());
+        (changed[tail], unknowns[y]) = (f64::NAN, -1.0);
+        let seen = named("a failing divide before a read", &changed, &unknowns);
+        assert!(seen.starts_with(&failed("u", "Divisor")), "{seen}");
+        unknowns[u] = f64::NAN;
+        let seen = named("the lowest failing read, whatever its kind", &changed, &unknowns);
+        assert!(seen.starts_with(&failed("u", "NonFinite")), "{seen}");
         let mut unknowns = start.clone();
         unknowns[q] = f64::NAN;
-        let seen = outcome(&body, modes, parameters, &unknowns);
-        assert!(
-            seen.starts_with("values Undefined") && seen.contains("local: \"q\""),
-            "{seen}"
+        let seen = named("a bare read", parameters, &unknowns);
+        assert!(seen.starts_with(&failed("q", "NonFinite")), "{seen}");
+        let mut unknowns = start.clone();
+        unknowns[v] = 1e-200;
+        let seen = named(
+            "a zero slope over a divisor that squares to zero",
+            parameters,
+            &unknowns,
         );
+        assert!(!seen.contains("jacobian Undefined"), "{seen}");
+        let mut unknowns = start.clone();
+        unknowns[y] = -1.0;
+        let seen = named(
+            "a missing read after a failing divide",
+            &parameters[..tail],
+            &unknowns,
+        );
+        assert!(seen.starts_with(&failed("u", "Divisor")), "{seen}");
         let digest = Digest::of_canonical(trace.as_bytes());
         let hex: String = digest
             .as_bytes()
@@ -603,8 +665,29 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect();
         assert_eq!(
-            hex, "1fe2a75674a19112a16252a3a6b55dfc50c780124a9b155c00495e2d228cbbe3",
+            hex, "8453b3441150be769319c476693feb6df57840ddda2117f3954bd6b7158db5d8",
             "{trace}"
         );
+    }
+
+    #[test]
+    #[should_panic]
+    fn a_missing_read_with_nothing_failing_before_it_panics() {
+        let (body, bound) = reads_before_a_divide();
+        let start: Vec<f64> = body
+            .rows()
+            .iter()
+            .map(|row| bound.starts[row.id().index()])
+            .collect();
+        let frame = DriveFrame::default();
+        let inputs = Inputs {
+            parameters: &bound.values[..bound.values.len() - 1],
+            frame: &frame,
+            unknowns: &start,
+            modes: &bound.modes,
+            draws: &[],
+            factors: &[],
+        };
+        let _ = body.instance_values(&inputs);
     }
 }
