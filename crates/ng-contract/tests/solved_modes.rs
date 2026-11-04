@@ -260,7 +260,6 @@ fn a_mode_the_ring_moved_is_reported_as_solved() -> Result<(), InitializationFai
     Ok(())
 }
 
-/// A guard charges a failure to its mode variable's law, which names no program.
 #[test]
 fn a_guard_that_reads_no_value_names_its_mode() -> Result<(), InitializationFailure> {
     let body = body()?;

@@ -32,7 +32,6 @@ fn smooth(a: f64, b: f64, width: f64, sign: f64) -> (f64, f64, f64) {
     (0.5 * (a + b + sign * root), along, across)
 }
 
-/// An op of a kernel that is not a read: arithmetic over the kernel's slots, slot `i` holding op `i`'s value.
 #[derive(Clone, Copy)]
 enum Instr {
     Zero,
@@ -51,10 +50,8 @@ enum Instr {
     Upwind([usize; 5]),
 }
 
-/// Every kernel of one layout with its reads taken out, and every read that fills a kernel's slots where it runs,
-/// derived when the body is sealed from the layout alone. Kernels are the programs, then the guards; rows of reads are
-/// the instances, then the guards. A read is split by where its value comes from, so a parameter or unknown is copied
-/// from the caller's slice with no dispatch.
+/// A read is split by where its value comes from, so a parameter or unknown is copied from the caller's slice with no
+/// dispatch.
 pub(crate) struct Tape {
     kernels: Vec<Kernel>,
     rows: Vec<Row>,
@@ -62,9 +59,7 @@ pub(crate) struct Tape {
     parameters: Vec<(usize, usize)>,
     unknowns: Vec<(usize, usize)>,
     others: Vec<(usize, Bound)>,
-    /// Each unknown read's entries, one per term of a column target, in read order.
     entries: Vec<usize>,
-    /// Each differential row's own entry, in row order.
     diagonals: Vec<usize>,
     programs: usize,
     instances: usize,
@@ -224,7 +219,6 @@ struct Reads<'t> {
     others: &'t [(usize, Bound)],
 }
 impl Reads<'_> {
-    /// Writes each read into its slot. True when every read was inside its slice and finite, so none can fail.
     fn fill(&self, inputs: &Inputs<'_>, values: &mut [f64]) -> bool {
         let mut clean = true;
         for &(slot, index) in self.parameters {
@@ -256,7 +250,6 @@ impl Reads<'_> {
         }
         clean
     }
-    /// The read at the lowest slot that is past the end of its slice or not finite: the op an op-by-op run stops at.
     fn first_failure(&self, inputs: &Inputs<'_>) -> (usize, Bound) {
         let fails = |value: Option<f64>| value.is_none_or(|value| !value.is_finite());
         let parameters = (self.parameters.iter())
@@ -274,7 +267,6 @@ impl Reads<'_> {
     }
 }
 
-/// A read's value, or `None` past the end of its slice.
 fn read(bound: &Bound, inputs: &Inputs<'_>) -> Option<f64> {
     match *bound {
         Bound::Parameter(parameter) => inputs.parameters.get(parameter.index()).copied(),
@@ -327,8 +319,6 @@ fn apply(instr: Instr, values: &[f64], partial_volume: f64) -> Result<f64, Opera
     Ok(result)
 }
 
-/// A read counts as the op at its own slot: only the arithmetic below the lowest failing read runs, then the read fails as
-/// `bound` fails, a panic past the end of its slice and `NonFinite` otherwise.
 fn forward(
     arithmetic: Arithmetic<'_>,
     reads: Reads<'_>,
@@ -353,8 +343,6 @@ fn forward(
     }
 }
 
-/// The slope of a finished `forward`'s result in every slot. A read or zero adds into no slot, so only arithmetic is
-/// visited.
 fn backward(arithmetic: Arithmetic<'_>, values: &[f64], partial_volume: f64, slopes: &mut [f64]) {
     slopes[..arithmetic.length].fill(0.0);
     slopes[arithmetic.length - 1] = 1.0;
@@ -439,7 +427,6 @@ fn positive_part(instance: &Instance, value: f64) -> f64 {
     }
 }
 
-/// One holding instance after its backward pass.
 struct Swept<'a> {
     at: usize,
     instance: &'a Instance,
@@ -703,10 +690,6 @@ mod tests {
         RowKind::Algebraic(LawName { owner: "NS", local }.into())
     }
 
-    /// Each law puts a read where a reordered evaluator would show it. `x` reads `x` before it divides by `y`, and `u`
-    /// reads `u`, divides by `y`, then reads the parameter that sorts last; `y` takes the log of `y`; `q`'s residual is
-    /// a bare read; `z` uses one read of `y` and one of `x` twice each; `v` subtracts a quotient from itself, so its
-    /// slope there is zero while the quotient's divisor can square to zero.
     fn reads_before_a_divide() -> (CompiledBody, BoundParameters) {
         let mut map = AnatomyBuilder::new();
         map.site::<TissueSite>("body", Position::new(measure(0.0), measure(0.0), measure(0.0)));
@@ -973,7 +956,6 @@ mod tests {
         };
         let _ = body.instance_values(&inputs);
     }
-    /// One mode variable with a guard into each mode, so the tape's guard kernels and reads are read back too.
     fn switching() -> CompiledBody {
         let mut map = AnatomyBuilder::new();
         map.site::<TissueSite>("body", Position::new(measure(0.0), measure(0.0), measure(0.0)));
