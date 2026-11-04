@@ -417,7 +417,8 @@ mod tests {
     }
 
     /// `x`'s rate reads `x` before it divides by `y`, `y`'s takes the log of `y`, and `q`'s residual is a bare read, so a
-    /// read that is not finite is told apart from the first op that consumes it.
+    /// read that is not finite is told apart from the first op that consumes it. `z`'s rate reads `y` and `x` once each
+    /// and uses each read twice, so the sweep's two updates of one slot keep their order.
     fn reads_before_a_divide() -> (CompiledBody, BoundParameters) {
         let mut map = AnatomyBuilder::new();
         map.site::<TissueSite>("body", Position::new(measure(0.0), measure(0.0), measure(0.0)));
@@ -426,6 +427,7 @@ mod tests {
             let (mut laws, _ports) = body.nervous()?.parts();
             let x = laws.state::<Dimensionless>("x", Admissible::finite());
             let y = laws.state::<Dimensionless>("y", Admissible::finite());
+            let z = laws.state::<Dimensionless>("z", Admissible::finite());
             let q = laws.algebraic::<Dimensionless>("q", Admissible::finite());
             let p = laws.parameter::<Dimensionless>(ParameterKey::new("ns.p"), Admissible::positive());
             let speed =
@@ -451,6 +453,18 @@ mod tests {
                 k.finish(scaled, laws.every_mode(), wave)
             });
             laws.memory_rate(&y, y_rate);
+            let z_rate = laws.kernel(|mut k| {
+                let rate = k.parameter(&speed);
+                let held = k.state(&y);
+                let relaxed = k.relax(held, held, rate);
+                let read = k.state(&x);
+                let square = k.scale(read, read);
+                let rate = k.parameter(&speed);
+                let scaled = k.scale(rate, square);
+                let sum = k.add(relaxed, scaled);
+                k.finish(sum, laws.every_mode(), wave)
+            });
+            laws.memory_rate(&z, z_rate);
             let q_residual = laws.kernel(|mut k| {
                 let read = k.algebraic(&q);
                 k.finish(read, laws.every_mode(), wave)
@@ -473,6 +487,7 @@ mod tests {
         (packet.synthetic(ParameterKey::new("ns.speed"), Binding::Body, speed, synthetic)).expect("once");
         (packet.start(memory("x"), measure::<Dimensionless>(0.4), synthetic)).expect("once");
         (packet.start(memory("y"), measure::<Dimensionless>(1.5), synthetic)).expect("once");
+        (packet.start(memory("z"), measure::<Dimensionless>(-0.75), synthetic)).expect("once");
         let q = RowKind::Algebraic(
             LawName {
                 owner: "NS",
@@ -588,7 +603,7 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect();
         assert_eq!(
-            hex, "5016151d90876a5311bb3260a7e299fe9d3976297b5f1a2b1d488a4337e1cf2f",
+            hex, "1fe2a75674a19112a16252a3a6b55dfc50c780124a9b155c00495e2d228cbbe3",
             "{trace}"
         );
     }
