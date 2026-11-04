@@ -55,14 +55,13 @@ enum Instr {
 pub(crate) struct Tape {
     kernels: Vec<Kernel>,
     rows: Vec<Row>,
+    guards: Vec<(Kernel, Row)>,
     steps: Vec<(usize, Instr)>,
     parameters: Vec<(usize, usize)>,
     unknowns: Vec<(usize, usize)>,
     others: Vec<(usize, Bound)>,
     entries: Vec<usize>,
     diagonals: Vec<usize>,
-    programs: usize,
-    instances: usize,
     longest: usize,
 }
 struct Kernel {
@@ -80,20 +79,18 @@ impl Tape {
         let mut tape = Self {
             kernels: Vec::new(),
             rows: Vec::new(),
+            guards: Vec::new(),
             steps: Vec::new(),
             parameters: Vec::new(),
             unknowns: Vec::new(),
             others: Vec::new(),
             entries: Vec::new(),
             diagonals: Vec::new(),
-            programs: layout.programs.len(),
-            instances: layout.instances.len(),
             longest: 0,
         };
-        let codes = (layout.programs.iter().map(|program| &program.code))
-            .chain(layout.guards.iter().map(|guard| &guard.code));
-        for code in codes {
-            tape.lower(&code.ops);
+        for program in &layout.programs {
+            let kernel = tape.lower(&program.code.ops);
+            tape.kernels.push(kernel);
         }
         let sparsity = &layout.sparsity;
         let entry = |row: usize, unknown: UnknownId| {
@@ -114,15 +111,15 @@ impl Tape {
                 }
             }
             let entries = start..tape.entries.len();
-            tape.bind(
-                &layout.programs[instance.program.index()].code.ops,
-                &instance.inputs,
-                entries,
-            );
+            let ops = &layout.programs[instance.program.index()].code.ops;
+            let row = tape.bind(ops, &instance.inputs, entries);
+            tape.rows.push(row);
         }
         for guard in &layout.guards {
+            let kernel = tape.lower(&guard.code.ops);
             let none = tape.entries.len()..tape.entries.len();
-            tape.bind(&guard.code.ops, &guard.inputs, none);
+            let row = tape.bind(&guard.code.ops, &guard.inputs, none);
+            tape.guards.push((kernel, row));
         }
         tape.diagonals = (layout.rows.iter().enumerate())
             .filter(|(_, row)| !matches!(row.kind, RowKind::Algebraic(_)))
@@ -130,7 +127,7 @@ impl Tape {
             .collect();
         tape
     }
-    fn lower(&mut self, ops: &[Op]) {
+    fn lower(&mut self, ops: &[Op]) -> Kernel {
         let start = self.steps.len();
         for (at, op) in ops.iter().enumerate() {
             let instr = match op {
@@ -154,13 +151,13 @@ impl Tape {
             };
             self.steps.push((at, instr));
         }
-        self.kernels.push(Kernel {
+        self.longest = self.longest.max(ops.len());
+        Kernel {
             length: ops.len(),
             steps: start..self.steps.len(),
-        });
-        self.longest = self.longest.max(ops.len());
+        }
     }
-    fn bind(&mut self, ops: &[Op], inputs: &[Bound], entries: Range<usize>) {
+    fn bind(&mut self, ops: &[Op], inputs: &[Bound], entries: Range<usize>) -> Row {
         let (parameters, unknowns, others) = (self.parameters.len(), self.unknowns.len(), self.others.len());
         let mut bounds = inputs.iter();
         for (at, _) in (ops.iter().enumerate()).filter(|(_, op)| matches!(op, Op::Input(_))) {
@@ -170,39 +167,38 @@ impl Tape {
                 other => self.others.push((at, other)),
             }
         }
-        self.rows.push(Row {
+        Row {
             parameters: parameters..self.parameters.len(),
             unknowns: unknowns..self.unknowns.len(),
             others: others..self.others.len(),
             entries,
-        });
+        }
     }
-    fn kernel(&self, at: usize) -> Arithmetic<'_> {
-        let kernel = &self.kernels[at];
+    fn arithmetic(&self, kernel: &Kernel) -> Arithmetic<'_> {
         Arithmetic {
             length: kernel.length,
             steps: &self.steps[kernel.steps.clone()],
         }
     }
-    fn program(&self, program: ProgramId) -> Arithmetic<'_> {
-        self.kernel(program.index())
-    }
-    fn reads(&self, at: usize) -> Reads<'_> {
-        let row = &self.rows[at];
+    fn reads(&self, row: &Row) -> Reads<'_> {
         Reads {
             parameters: &self.parameters[row.parameters.clone()],
             unknowns: &self.unknowns[row.unknowns.clone()],
             others: &self.others[row.others.clone()],
         }
     }
+    fn program(&self, program: ProgramId) -> Arithmetic<'_> {
+        self.arithmetic(&self.kernels[program.index()])
+    }
+    fn instance(&self, at: usize) -> Reads<'_> {
+        self.reads(&self.rows[at])
+    }
     fn entries(&self, at: usize) -> &[usize] {
         &self.entries[self.rows[at].entries.clone()]
     }
     fn guard(&self, guard: usize) -> (Arithmetic<'_>, Reads<'_>) {
-        (
-            self.kernel(self.programs + guard),
-            self.reads(self.instances + guard),
-        )
+        let (kernel, row) = &self.guards[guard];
+        (self.arithmetic(kernel), self.reads(row))
     }
 }
 
@@ -219,7 +215,7 @@ struct Reads<'t> {
     others: &'t [(usize, Bound)],
 }
 impl Reads<'_> {
-    fn fill(&self, inputs: &Inputs<'_>, values: &mut [f64]) -> bool {
+    fn fill(&self, inputs: &Inputs<'_>, values: &mut [f64]) -> Option<(usize, Bound)> {
         let mut clean = true;
         for &(slot, index) in self.parameters {
             match inputs.parameters.get(index) {
@@ -248,7 +244,7 @@ impl Reads<'_> {
                 None => clean = false,
             }
         }
-        clean
+        (!clean).then(|| self.first_failure(inputs))
     }
     fn first_failure(&self, inputs: &Inputs<'_>) -> (usize, Bound) {
         let fails = |value: Option<f64>| value.is_none_or(|value| !value.is_finite());
@@ -326,7 +322,7 @@ fn forward(
     partial_volume: f64,
     values: &mut [f64],
 ) -> Result<f64, OperatorDomain> {
-    let failed = (!reads.fill(inputs, values)).then(|| reads.first_failure(inputs));
+    let failed = reads.fill(inputs, values);
     let steps = failed.map_or(arithmetic.steps, |(slot, _)| {
         &arithmetic.steps[..arithmetic.steps.partition_point(|&(at, _)| at < slot)]
     });
@@ -337,7 +333,11 @@ fn forward(
     match failed {
         None => Ok(values[arithmetic.length - 1]),
         Some((_, bound)) => {
-            CompiledBody::bound(&bound, inputs);
+            let value = CompiledBody::bound(&bound, inputs);
+            assert!(
+                !value.is_finite(),
+                "a read that failed is past its slice or not finite"
+            );
             Err(OperatorDomain::NonFinite)
         }
     }
@@ -503,7 +503,7 @@ impl CompiledBody {
                 out.push(None);
                 continue;
             }
-            let (arithmetic, reads) = (self.tape.program(instance.program), self.tape.reads(at));
+            let (arithmetic, reads) = (self.tape.program(instance.program), self.tape.instance(at));
             let value = forward(arithmetic, reads, inputs, partial_volume, &mut values);
             out.push(Some(value.map_err(|domain| self.undefined(instance, domain))?));
         }
@@ -520,7 +520,7 @@ impl CompiledBody {
             if !instance.holds(inputs.modes) {
                 continue;
             }
-            let (arithmetic, reads) = (self.tape.program(instance.program), self.tape.reads(at));
+            let (arithmetic, reads) = (self.tape.program(instance.program), self.tape.instance(at));
             let value = forward(arithmetic, reads, inputs, partial_volume, &mut values)
                 .map_err(|domain| self.undefined(instance, domain))?;
             backward(arithmetic, &values, partial_volume, &mut slopes);
@@ -1039,10 +1039,14 @@ mod tests {
 
     fn reads_back(body: &CompiledBody) {
         let (layout, tape) = (&body.layout, &body.tape);
-        let codes = (layout.programs.iter().map(|program| &program.code))
-            .chain(layout.guards.iter().map(|guard| &guard.code));
-        for (at, code) in codes.enumerate() {
-            let kernel = tape.kernel(at);
+        assert_eq!(tape.kernels.len(), layout.programs.len());
+        assert_eq!(tape.rows.len(), layout.instances.len());
+        assert_eq!(tape.guards.len(), layout.guards.len());
+        let programs = (layout.programs.iter().map(|program| &program.code)).zip(&tape.kernels);
+        let guards =
+            (layout.guards.iter().map(|guard| &guard.code)).zip(tape.guards.iter().map(|(kernel, _)| kernel));
+        for (code, kernel) in programs.chain(guards) {
+            let kernel = tape.arithmetic(kernel);
             assert_eq!(kernel.length, code.ops.len());
             let expected: Vec<_> = (code.ops.iter().enumerate())
                 .filter_map(|(slot, op)| Some((slot, lowered(op)?)))
@@ -1054,16 +1058,18 @@ mod tests {
                 .collect();
             assert_eq!(found, expected);
         }
-        let rows = (layout.instances.iter())
+        let instances = (layout.instances.iter())
             .map(|instance| {
                 (
                     &layout.programs[instance.program.index()].code.ops,
                     &instance.inputs,
                 )
             })
-            .chain(layout.guards.iter().map(|guard| (&guard.code.ops, &guard.inputs)));
-        for (at, (ops, inputs)) in rows.enumerate() {
-            let reads = tape.reads(at);
+            .zip(&tape.rows);
+        let guards = (layout.guards.iter().map(|guard| (&guard.code.ops, &guard.inputs)))
+            .zip(tape.guards.iter().map(|(_, row)| row));
+        for ((ops, inputs), row) in instances.chain(guards) {
+            let reads = tape.reads(row);
             let parameters = (reads.parameters.iter())
                 .map(|&(slot, index)| (slot, Bound::Parameter(ParameterId::at(index))));
             let unknowns =
