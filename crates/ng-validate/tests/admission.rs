@@ -1793,6 +1793,27 @@ fn linearize_is_the_slope_of_evaluate() {
     }
 }
 
+#[test]
+fn a_ring_update_stays_on_its_bits() {
+    let case = PulsatileCase::plain();
+    let system = case.system(case.packet());
+    let workspace = system.workspace();
+    let residuals = system.evaluate(&workspace).expect("every row");
+    let matrix = system.linearize(&workspace).expect("a matrix");
+    let update = system.solve(&matrix, &residuals).expect("a pivot");
+    let bits: Vec<u8> = (update.iter())
+        .flat_map(|change| change.to_bits().to_be_bytes())
+        .collect();
+    let digest = Digest::of_canonical(&bits);
+    let digest: String = digest
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    expect_test::expect!["6fc2e75f8537c38e80d96ff138446fcfe6dca8d8d332790ec1b06748870c51e7 over 129 slots"]
+        .assert_eq(&format!("{digest} over {} slots", update.len()));
+}
+
 /// The drive reaches the row in one interval of eight, so a single point of the ring feels the gain.
 #[test]
 fn a_fit_felt_at_one_point_of_the_ring_is_solved() {

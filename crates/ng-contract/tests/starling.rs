@@ -1,3 +1,4 @@
+use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::*;
 
 fn at() -> Result<Position, AdmissionError> {
@@ -517,5 +518,22 @@ fn a_read_never_moves_a_pool() -> Result<(), AdmissionError> {
             space: Space::Lumen
         }))
     );
+    Ok(())
+}
+
+#[test]
+fn an_empty_ring_solves_to_no_update() -> Result<(), InitializationFailure> {
+    let body = looped(Some("the loop moves no water"), false)?;
+    let cycle = Cycle::new(
+        NonZeroU64::new(2).expect("not zero"),
+        NonZeroU32::new(2).expect("not zero"),
+    )?;
+    let packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
+    let port = BoundaryPort::new(Vec::new())?;
+    let request = InitializationRequest::at(SimTime::from_ns(0));
+    let system = body.initialization(body.bind(packet)?, port, request)?;
+    let workspace = system.workspace();
+    let (matrix, right) = (system.linearize(&workspace)?, system.evaluate(&workspace)?);
+    assert_eq!(system.solve(&matrix, &right), Ok(Vec::new()));
     Ok(())
 }
