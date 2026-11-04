@@ -390,3 +390,206 @@ impl CompiledBody {
         excursions
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Inputs;
+    use crate::boundary::DriveFrame;
+    use crate::*;
+    use core::fmt::Write;
+
+    const NOT_FINITE_OR_EDGE: [f64; 7] = [
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        0.0,
+        -0.0,
+        -1.0,
+        1e-310,
+    ];
+
+    fn measure<U: Dimension>(value: f64) -> Measure<U> {
+        Measure::new(value).expect("finite")
+    }
+
+    fn memory(local: &'static str) -> RowKind {
+        RowKind::Memory(LawName { owner: "NS", local }.into())
+    }
+
+    /// `x`'s rate reads `x` before it divides by `y`, `y`'s takes the log of `y`, and `q`'s residual is a bare read, so a
+    /// read that is not finite is told apart from the first op that consumes it.
+    fn reads_before_a_divide() -> (CompiledBody, BoundParameters) {
+        let mut map = AnatomyBuilder::new();
+        map.site::<TissueSite>("body", Position::new(measure(0.0), measure(0.0), measure(0.0)));
+        let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+        let body = assemble(schema, |mut body| {
+            let (mut laws, _ports) = body.nervous()?.parts();
+            let x = laws.state::<Dimensionless>("x", Admissible::finite());
+            let y = laws.state::<Dimensionless>("y", Admissible::finite());
+            let q = laws.algebraic::<Dimensionless>("q", Admissible::finite());
+            let p = laws.parameter::<Dimensionless>(ParameterKey::new("ns.p"), Admissible::positive());
+            let speed =
+                laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.speed"), Admissible::positive());
+            let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
+            let x_rate = laws.kernel(|mut k| {
+                let rate = k.parameter(&speed);
+                let read = k.state(&x);
+                let numerator = k.parameter(&p);
+                let divisor = k.state(&y);
+                let quotient = k.divide(numerator, divisor);
+                let quotient = k.as_dimension::<_, Dimensionless>(quotient);
+                let sum = k.add(read, quotient);
+                let scaled = k.scale(rate, sum);
+                k.finish(scaled, laws.every_mode(), wave)
+            });
+            laws.memory_rate(&x, x_rate);
+            let y_rate = laws.kernel(|mut k| {
+                let rate = k.parameter(&speed);
+                let read = k.state(&y);
+                let log = k.ln(read);
+                let scaled = k.scale(rate, log);
+                k.finish(scaled, laws.every_mode(), wave)
+            });
+            laws.memory_rate(&y, y_rate);
+            let q_residual = laws.kernel(|mut k| {
+                let read = k.algebraic(&q);
+                k.finish(read, laws.every_mode(), wave)
+            });
+            laws.residual(&q, q_residual);
+            body.add(laws.finish());
+            body.compile()
+        })
+        .expect("compiled");
+        let mut packet: ParameterPacket<SyntheticFixture> = ParameterPacket::new();
+        let synthetic = "synthetic";
+        (packet.synthetic(
+            ParameterKey::new("ns.p"),
+            Binding::Body,
+            measure::<Dimensionless>(0.5),
+            synthetic,
+        ))
+        .expect("once");
+        let speed = measure::<Rate<Dimensionless>>(0.7);
+        (packet.synthetic(ParameterKey::new("ns.speed"), Binding::Body, speed, synthetic)).expect("once");
+        (packet.start(memory("x"), measure::<Dimensionless>(0.4), synthetic)).expect("once");
+        (packet.start(memory("y"), measure::<Dimensionless>(1.5), synthetic)).expect("once");
+        let q = RowKind::Algebraic(
+            LawName {
+                owner: "NS",
+                local: "q",
+            }
+            .into(),
+        );
+        (packet.start(q, measure::<Dimensionless>(0.25), synthetic)).expect("once");
+        let bound = body.bind(packet).expect("bound");
+        (body, bound)
+    }
+
+    fn outcome(body: &CompiledBody, modes: &[usize], parameters: &[f64], unknowns: &[f64]) -> String {
+        let frame = DriveFrame::default();
+        let inputs = Inputs {
+            parameters,
+            frame: &frame,
+            unknowns,
+            modes,
+            draws: &[],
+            factors: &[],
+        };
+        let hex = |value: f64| format!("{:016x}", value.to_bits());
+        let values = match body.instance_values(&inputs) {
+            Ok(values) => (values.iter())
+                .map(|value| value.map_or_else(|| "none".to_string(), hex))
+                .collect::<Vec<_>>()
+                .join(","),
+            Err(undefined) => format!("{undefined:?}"),
+        };
+        let jacobian = match body.jacobian(&inputs, 2.0) {
+            Ok(values) => values
+                .iter()
+                .map(|value| hex(*value))
+                .collect::<Vec<_>>()
+                .join(","),
+            Err(undefined) => format!("{undefined:?}"),
+        };
+        let fits = (0..parameters.len()).map(|slot| {
+            match body.parameter_slopes(&inputs, &[ParameterId::at(slot)]) {
+                Ok(values) => values
+                    .iter()
+                    .map(|value| hex(*value))
+                    .collect::<Vec<_>>()
+                    .join(","),
+                Err(undefined) => format!("{undefined:?}"),
+            }
+        });
+        format!(
+            "values {values}; jacobian {jacobian}; fits {}",
+            fits.collect::<Vec<_>>().join(" | ")
+        )
+    }
+
+    #[test]
+    fn a_value_that_is_not_finite_fails_at_the_read_that_takes_it() {
+        let (body, bound) = reads_before_a_divide();
+        let rows = body.rows();
+        let slot = |kind: RowKind| rows.iter().position(|row| row.kind() == kind).expect("a row");
+        let (x, y) = (slot(memory("x")), slot(memory("y")));
+        let start: Vec<f64> = rows.iter().map(|row| bound.starts[row.id().index()]).collect();
+        let (modes, parameters) = (&bound.modes, &bound.values);
+        let mut trace = String::new();
+        writeln!(trace, "start {}", outcome(&body, modes, parameters, &start)).expect("a string takes it");
+        for at in 0..start.len() {
+            for value in NOT_FINITE_OR_EDGE {
+                let mut unknowns = start.clone();
+                unknowns[at] = value;
+                let seen = outcome(&body, modes, parameters, &unknowns);
+                writeln!(trace, "unknown {at} {:016x}: {seen}", value.to_bits()).expect("a string takes it");
+            }
+            for other in (0..start.len()).filter(|other| *other != at) {
+                let mut unknowns = start.clone();
+                (unknowns[at], unknowns[other]) = (f64::NAN, -1.0);
+                let seen = outcome(&body, modes, parameters, &unknowns);
+                writeln!(trace, "unknown {at} nan, {other} -1: {seen}").expect("a string takes it");
+            }
+        }
+        for at in 0..parameters.len() {
+            for value in NOT_FINITE_OR_EDGE {
+                let mut changed = parameters.clone();
+                changed[at] = value;
+                let seen = outcome(&body, modes, &changed, &start);
+                writeln!(trace, "parameter {at} {:016x}: {seen}", value.to_bits())
+                    .expect("a string takes it");
+            }
+        }
+        let mut unknowns = start.clone();
+        (unknowns[x], unknowns[y]) = (f64::NAN, -1.0);
+        let seen = outcome(&body, modes, parameters, &unknowns);
+        assert!(
+            seen.starts_with("values Undefined") && seen.contains("domain: NonFinite"),
+            "{seen}"
+        );
+        let q = slot(RowKind::Algebraic(
+            LawName {
+                owner: "NS",
+                local: "q",
+            }
+            .into(),
+        ));
+        let mut unknowns = start.clone();
+        unknowns[q] = f64::NAN;
+        let seen = outcome(&body, modes, parameters, &unknowns);
+        assert!(
+            seen.starts_with("values Undefined") && seen.contains("local: \"q\""),
+            "{seen}"
+        );
+        let digest = Digest::of_canonical(trace.as_bytes());
+        let hex: String = digest
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        assert_eq!(
+            hex, "5016151d90876a5311bb3260a7e299fe9d3976297b5f1a2b1d488a4337e1cf2f",
+            "{trace}"
+        );
+    }
+}
