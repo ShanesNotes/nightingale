@@ -2,8 +2,8 @@ use crate::boundary::PendingInputs;
 use crate::identity::{Canonical, Seal};
 use crate::packet::Owed;
 use crate::{
-    AdmissibleSet, BoundParameters, Candidate, Compensated, CompiledBody, DenseSegment, Digest, Interval,
-    MethodHistory, PacketHash, RowKind, SimTime,
+    AdmissibleSet, AppliedInputs, BoundParameters, Candidate, Compensated, CompiledBody, DenseSegment,
+    Digest, Interval, MethodHistory, PacketHash, RecordHash, RowKind, SimTime,
 };
 
 const IMAGE_FORMAT: &str = "ng-contract image 1";
@@ -88,6 +88,28 @@ impl<'b> ByteReader<'b> {
             mode.values.get(value).map(|_| value).ok_or(Malformed)
         });
         read.collect()
+    }
+}
+
+impl RecordHash {
+    pub fn image(
+        self,
+        time: SimTime,
+        state: &Candidate,
+        continuation: &MethodHistory,
+        dense: &DenseSegment,
+        applied: &AppliedInputs,
+    ) -> Digest {
+        let mut bytes = time.nanoseconds().to_be_bytes().to_vec();
+        for part in [
+            state.canonical(),
+            continuation.canonical(),
+            dense.canonical(),
+            applied.canonical(),
+        ] {
+            bytes.extend_from_slice(Digest::for_record(&part.into_bytes(), self).as_bytes());
+        }
+        Digest::for_record(&bytes, self)
     }
 }
 

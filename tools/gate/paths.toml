@@ -206,6 +206,11 @@ item = "history::History::digest"
 field = "origin"
 reason = "this digest names the books; the origin's image and seal are the record seal's, which every link chains from"
 
+[[crate.seal_skip]]
+item = "history::History::digest"
+field = "format"
+reason = "this digest names the books whichever hash seals their chain, so one course loaded in either format reports one digest"
+
 [[crate]]
 name = "ng-observe"
 

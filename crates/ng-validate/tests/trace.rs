@@ -113,7 +113,7 @@ fn the_first_second_of_the_slice_stays_where_it_was() {
         .with_scales(ErrorScales::uniform(scale(1.0), scale(1e-3)).expect("positive"));
     let FirstSecond { named, trace, sealed } = first_second(&core);
     expect!["76102706f42e42535b0dbe928b8b37f327f73211741352bd572ad36ad56ca998"].assert_eq(&named);
-    expect!["37c32c2faa03b9be4e6f8c7b21d3d598679f8bf35441a1072a0141f050abc658"].assert_eq(&sealed);
+    expect!["bb1a0267617032f65a742d712499535376356e65f6e91d30bd841778ca1561ac"].assert_eq(&sealed);
     expect![[r#"
          100.000000 ms  arterial pressure 125.258703  right atrial pressure 1.978090  heart rate 1.060493  sympathetic traffic 0.627398  filtration 1.756965  urine 0.020000  wall power 13155.465232  aortic flow 0.000000
          200.000000 ms  arterial pressure 121.183896  right atrial pressure 2.408025  heart rate 1.072033  sympathetic traffic 0.099483  filtration 2.122865  urine 0.020000  wall power 10204.160071  aortic flow 43.787660
@@ -132,7 +132,7 @@ fn the_first_second_of_the_slice_stays_where_it_was() {
 fn the_first_second_of_the_slice_on_ng_solver_stays_where_it_was() {
     let FirstSecond { named, trace, sealed } = first_second(&ng_solver::Core::new(10 * MILLISECOND));
     expect!["0ec011d81366c367549a2fcdfe72146eb4c00ac911c7610dd2572dcf6b732887"].assert_eq(&named);
-    expect!["5ec15539788f8c56202e46224ebc84e72e58c5b357a5b3704610065a4d3e1711"].assert_eq(&sealed);
+    expect!["28249b2e9c8e26915452d7caa96cbae0d834f5f60837b99c9a340b6feeb8729b"].assert_eq(&sealed);
     expect![[r#"
          101.886157 ms  arterial pressure 125.610022  right atrial pressure 1.972744  heart rate 1.060968  sympathetic traffic 0.603080  filtration 1.770138  urine 0.020000  wall power 13182.602061  aortic flow 0.000000
          201.324380 ms  arterial pressure 121.641644  right atrial pressure 2.401322  heart rate 1.070452  sympathetic traffic 0.092120  filtration 2.133878  urine 0.020000  wall power 10260.466255  aortic flow 34.425720

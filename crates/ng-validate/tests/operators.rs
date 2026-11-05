@@ -291,7 +291,7 @@ fn every_operators_value_stays_on_the_accepted_bits() {
     }
     expect![[r#"
         identity 064be8bb1ee0d7f65008786c21903b8c3b1e2b01c696188ef193f2edf2a30ea9
-        revision 8 at 4000000000 ns, seal 42bddce38e3124c4ebcf2ce7ef955c83f5258a1a7342fa5e974f97de64cc74bd
+        revision 8 at 4000000000 ns, seal 31fa2756f31fc183ab102b9c8f41fde5b38d2b80603120a121a9fa00791921b0
         40044c1e7011589f bcacc00000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Water }
         3ff44c1e7011589f bc9cc00000000000  Amount { site: SiteId { key: "a", class: VesselSegment }, space: Lumen, species: Albumin }
         4003b3e18feea761 3cacc00000000000  Amount { site: SiteId { key: "b", class: VesselSegment }, space: Lumen, species: Water }

@@ -270,6 +270,9 @@ pub struct AppliedInputs {
 }
 impl AppliedInputs {
     pub fn digest(&self) -> Digest {
+        self.canonical().digest()
+    }
+    pub(crate) fn canonical(&self) -> Canonical {
         let Self {
             cursor,
             active,
@@ -281,7 +284,7 @@ impl AppliedInputs {
         active.seal(&mut out);
         chain.seal(&mut out);
         fence.seal(&mut out);
-        out.digest()
+        out
     }
 }
 

@@ -1,12 +1,13 @@
 use crate::checkpoint::{
-    BranchAncestry, BranchFork, Checkpoint, CheckpointError, HistoryStore, Restored, Sections, write,
+    BranchAncestry, BranchFork, Checkpoint, CheckpointError, HistoryStore, RecordFormat, Restored, Sections,
+    write,
 };
 use crate::history::{ConservationView, History, HistorySeal, LedgerChunk, Link};
 use ng_contract::{
     AcceptedStateView, AdmissionError, AppliedInputs, Attempt, BoundaryEvent, Candidate, CompiledBody,
     CoupledProblem, CoupledSolver, DenseSegment, Digest, Fired, ImageParts, InitialRevision, InputId,
-    MethodHistory, NumericalRefusal, RunIdentity, SimTime, StepProposal, StepTicket, TrialFailure,
-    ValidityExcursion, VerifiedParts, VerifiedStep,
+    MethodHistory, NumericalRefusal, RecordHash, RunIdentity, SimTime, StepProposal, StepTicket,
+    TrialFailure, ValidityExcursion, VerifiedParts, VerifiedStep,
 };
 
 /// The chained seal of one accepted revision: the previous seal, the revision, the image's digests and the
@@ -32,40 +33,14 @@ pub struct PatientRecord<'m> {
     history: History,
 }
 
-struct Image<'a> {
-    time: SimTime,
-    state: &'a Candidate,
-    continuation: &'a MethodHistory,
-    dense: &'a DenseSegment,
-    applied: &'a AppliedInputs,
-}
-fn image_digest(image: Image<'_>) -> Digest {
-    let Image {
-        time,
-        state,
-        continuation,
-        dense,
-        applied,
-    } = image;
-    let mut bytes = time.nanoseconds().to_be_bytes().to_vec();
-    for digest in [
-        state.digest(),
-        continuation.digest(),
-        dense.digest(),
-        applied.digest(),
-    ] {
-        bytes.extend_from_slice(digest.as_bytes());
-    }
-    Digest::of_canonical(&bytes)
-}
-fn digest_of(image: &ImageParts) -> Digest {
-    image_digest(Image {
-        time: image.time,
-        state: &image.state,
-        continuation: &image.continuation,
-        dense: &image.dense,
-        applied: image.pending.applied(),
-    })
+fn digest_of(image: &ImageParts, hash: RecordHash) -> Digest {
+    hash.image(
+        image.time,
+        &image.state,
+        &image.continuation,
+        &image.dense,
+        image.pending.applied(),
+    )
 }
 
 impl<'m> PatientRecord<'m> {
@@ -73,8 +48,9 @@ impl<'m> PatientRecord<'m> {
         let image = origin.into_parts();
         let run = identity.digest();
         let accepted = AcceptedStateView::new(image.time, &image.state, &image.continuation, &image.dense);
-        let opened = digest_of(&image);
-        let history = History::opening(body, accepted, run, opened, image.parameters().digest());
+        let format = RecordFormat::ADMISSION;
+        let opened = digest_of(&image, format.hash());
+        let history = History::opening(format, body, accepted, run, opened, image.parameters().digest());
         Self {
             body,
             identity,
@@ -95,7 +71,7 @@ impl<'m> PatientRecord<'m> {
             image,
             history,
         } = parts;
-        if digest_of(&image) != history.head_image() {
+        if digest_of(&image, history.format().hash()) != history.head_image() {
             return Err(CheckpointError::SealMismatch);
         }
         Ok(Self {
@@ -205,13 +181,11 @@ impl<'m> PatientRecord<'m> {
             fired,
         } = step.into_parts();
         let revision = self.revision + 1;
-        let image = image_digest(Image {
-            time,
-            state: &state,
-            continuation: &continuation,
-            dense: &dense,
-            applied: &pending,
-        });
+        let image = self
+            .history
+            .format()
+            .hash()
+            .image(time, &state, &continuation, &dense, &pending);
         let link = self.history.linked(chunk, revision, image);
         NextImage {
             revision,
