@@ -185,8 +185,7 @@ fn blake2b_block(state: &mut [u64; 8], block: &[u8; 128], counted: u128, last: b
     }
 }
 
-/// Inlined by force, with `mix`: left to itself the compiler keeps a block's 96 mixes out of line, slower than
-/// SHA-256.
+/// Inlined by force, with `mix`: left to the compiler, these rounds hash slower than SHA-256.
 #[inline(always)]
 fn round<const R: usize>(work: &mut [u64; 16], words: &[u64; 16]) {
     let s = &SIGMA[R];
