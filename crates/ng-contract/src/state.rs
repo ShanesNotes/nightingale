@@ -75,6 +75,9 @@ impl Candidate {
             .collect()
     }
     pub fn digest(&self) -> Digest {
+        self.canonical().digest()
+    }
+    pub(crate) fn canonical(&self) -> Canonical {
         let Self {
             amounts,
             memory,
@@ -90,7 +93,7 @@ impl Candidate {
         modes.seal(&mut out);
         ordinals.seal(&mut out);
         out.number(u64::from(*fired));
-        out.digest()
+        out
     }
     pub fn modes_digest(&self) -> Digest {
         let mut out = Canonical::new("ng-contract modes 1");
@@ -137,13 +140,16 @@ impl DenseSegment {
         ))
     }
     pub fn digest(&self) -> Digest {
+        self.canonical().digest()
+    }
+    pub(crate) fn canonical(&self) -> Canonical {
         let Self { interval, start, end } = self;
         let mut out = Canonical::new("ng-contract dense segment 1");
         let ends = interval.map(|interval| (interval.start(), interval.end()));
         ends.seal(&mut out);
         start.seal(&mut out);
         end.seal(&mut out);
-        out.digest()
+        out
     }
 }
 
@@ -198,6 +204,9 @@ impl MethodHistory {
         &self.counters
     }
     pub fn digest(&self) -> Digest {
+        self.canonical().digest()
+    }
+    pub(crate) fn canonical(&self) -> Canonical {
         let Self {
             schema,
             started_at,
@@ -207,7 +216,7 @@ impl MethodHistory {
         schema.seal(&mut out);
         started_at.seal(&mut out);
         counters.seal(&mut out);
-        out.digest()
+        out
     }
 }
 

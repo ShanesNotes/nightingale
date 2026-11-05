@@ -1247,8 +1247,8 @@ fn relinked(store: &mut Store, saved: &Checkpoint, image: &[u8], chunk: &[u8]) -
     let mut chained = link[..32].to_vec();
     chained.extend_from_slice(&revision.to_be_bytes());
     chained.extend_from_slice(image);
-    chained.extend_from_slice(Digest::of_canonical(chunk).as_bytes());
-    let seal = Digest::of_canonical(&chained);
+    chained.extend_from_slice(Digest::for_record(chunk, RecordHash::Blake2b).as_bytes());
+    let seal = Digest::for_record(&chained, RecordHash::Blake2b);
     let stored = [&link[..32], image, chunk].concat();
     store.replace(seal, stored);
     let mut named = saved.as_bytes().to_vec();
@@ -1269,6 +1269,8 @@ fn a_link_that_chains_true_and_holds_no_chunk_is_altered() {
     let empty_interval: Vec<u8> = [&good[8..16], &good[8..16], &good[16..]].concat();
     let mut not_finite = good.clone();
     not_finite[16..24].copy_from_slice(&f64::INFINITY.to_bits().to_be_bytes());
+    let (_, same) = relinked(&mut store, &saved, &image, &good);
+    assert!(Session::resume(&same, identity, case.body(), &core, &store).is_ok());
     for chunk in [Vec::new(), long, empty_interval, not_finite] {
         let (seal, named) = relinked(&mut store, &saved, &image, &chunk);
         assert_eq!(

@@ -2,7 +2,7 @@ use crate::history::{History, Start, push_bits};
 use crate::record::PatientRecord;
 use core::cmp::Ordering;
 use ng_contract::{
-    ByteReader, Compensated, CompiledBody, Digest, ImageParts, Malformed, RunIdentity, SimTime,
+    ByteReader, Compensated, CompiledBody, Digest, ImageParts, Malformed, RecordHash, RunIdentity, SimTime,
 };
 
 /// A checkpoint's only form: the envelope's bytes, so a rewind, a recover and a resume take one path.
@@ -153,13 +153,35 @@ impl BranchAncestry {
     }
 }
 
-const MAGIC: [u8; 8] = *b"ngcheck1";
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecordFormat {
+    V1,
+    V2,
+}
+impl RecordFormat {
+    pub(crate) const ADMISSION: Self = Self::V2;
+    fn magic(self) -> [u8; MAGIC_LENGTH] {
+        match self {
+            Self::V1 => *b"ngcheck1",
+            Self::V2 => *b"ngcheck2",
+        }
+    }
+    pub(crate) fn hash(self) -> RecordHash {
+        match self {
+            Self::V1 => RecordHash::Sha256,
+            Self::V2 => RecordHash::Blake2b,
+        }
+    }
+}
+
+const MAGIC_LENGTH: usize = 8;
 /// The raw digest covers every byte after it, so checking it decodes no body field.
-const RAW_DIGEST_END: usize = MAGIC.len() + 32;
+const RAW_DIGEST_END: usize = MAGIC_LENGTH + 32;
 /// The body's length, the run identity, the revision, the seal and the latch.
 const HEADER: usize = RAW_DIGEST_END + 8 + 32 + 8 + 32 + 8;
 
 struct Header<'b> {
+    format: RecordFormat,
     identity: Digest,
     revision: u64,
     seal: Digest,
@@ -171,9 +193,11 @@ fn opened(bytes: &[u8]) -> Result<Header<'_>, CheckpointError> {
     let (header, body) = bytes.split_at_checked(HEADER).ok_or(CheckpointError::Truncated)?;
     let mut read = ByteReader::new(header);
     let short = |_: Malformed| CheckpointError::Truncated;
-    if read.take(MAGIC.len()).map_err(short)? != MAGIC {
-        return Err(CheckpointError::UnknownFormat);
-    }
+    let magic = read.take(MAGIC_LENGTH).map_err(short)?;
+    let format = [RecordFormat::V1, RecordFormat::V2]
+        .into_iter()
+        .find(|format| magic == format.magic())
+        .ok_or(CheckpointError::UnknownFormat)?;
     let digest = read.digest().map_err(short)?;
     let stated = read.number().map_err(short)?;
     match usize::try_from(stated).map_or(Ordering::Greater, |stated| stated.cmp(&body.len())) {
@@ -193,6 +217,7 @@ fn opened(bytes: &[u8]) -> Result<Header<'_>, CheckpointError> {
         _ => return Err(CheckpointError::UnknownFormat),
     };
     Ok(Header {
+        format,
         identity,
         revision,
         seal,
@@ -236,7 +261,7 @@ pub(crate) fn write(
         push_bits(&mut body, *value);
     }
     body.extend_from_slice(history.origin().image.as_bytes());
-    let mut bytes = MAGIC.to_vec();
+    let mut bytes = history.format().magic().to_vec();
     bytes.extend_from_slice(&[0; 32]);
     bytes.extend_from_slice(&(body.len() as u64).to_be_bytes());
     bytes.extend_from_slice(identity.digest().as_bytes());
@@ -245,7 +270,7 @@ pub(crate) fn write(
     bytes.extend_from_slice(&u64::from(latched).to_be_bytes());
     bytes.extend_from_slice(&body);
     let raw = Digest::of_canonical(&bytes[RAW_DIGEST_END..]);
-    bytes[MAGIC.len()..RAW_DIGEST_END].copy_from_slice(raw.as_bytes());
+    bytes[MAGIC_LENGTH..RAW_DIGEST_END].copy_from_slice(raw.as_bytes());
     Checkpoint { bytes }
 }
 
@@ -273,6 +298,7 @@ pub(crate) fn restore<'m>(
         origin,
     } = parts;
     let start = Start {
+        format: header.format,
         run: expected.digest(),
         opening,
         image: origin,

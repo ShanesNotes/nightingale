@@ -1,8 +1,8 @@
-use crate::checkpoint::CheckpointError;
+use crate::checkpoint::{CheckpointError, RecordFormat};
 use core::cell::Cell;
 use ng_contract::{
     AcceptedStateView, AdmissibleSet, ByteReader, ColumnId, Compensated, CompiledBody, ConservedBasis,
-    DenseBasis, Digest, Interval, Malformed, QuantityId, SimTime, VerifiedStep,
+    DenseBasis, Digest, Interval, Malformed, QuantityId, RecordHash, SimTime, VerifiedStep,
 };
 
 pub(crate) fn push_bits(bytes: &mut Vec<u8>, value: Compensated) {
@@ -127,9 +127,6 @@ impl LedgerChunk {
         }
         bytes
     }
-    fn digest(&self) -> Digest {
-        Digest::of_canonical(&self.bytes())
-    }
     fn read(read: &mut ByteReader<'_>, quantities: usize, columns: usize) -> Result<Self, Malformed> {
         let interval = Interval::new(read.time()?, read.time()?).ok_or(Malformed)?;
         let quantities = (0..quantities)
@@ -162,13 +159,13 @@ impl LedgerChunk {
     }
 }
 
-fn linked(previous: Digest, revision: u64, image: Digest, ledger: Digest) -> Digest {
+fn linked(hash: RecordHash, previous: Digest, revision: u64, image: Digest, ledger: &[u8]) -> Digest {
     let mut bytes = Vec::with_capacity(104);
     bytes.extend_from_slice(previous.as_bytes());
     bytes.extend_from_slice(&revision.to_be_bytes());
     bytes.extend_from_slice(image.as_bytes());
-    bytes.extend_from_slice(ledger.as_bytes());
-    Digest::of_canonical(&bytes)
+    bytes.extend_from_slice(Digest::for_record(ledger, hash).as_bytes());
+    Digest::for_record(&bytes, hash)
 }
 
 pub(crate) struct Link {
@@ -190,6 +187,7 @@ pub(crate) struct Origin {
 }
 
 pub(crate) struct History {
+    format: RecordFormat,
     opening: Vec<Compensated>,
     incidence: Vec<Vec<i64>>,
     origin: Origin,
@@ -197,6 +195,7 @@ pub(crate) struct History {
 }
 impl History {
     pub(crate) fn opening(
+        format: RecordFormat,
         body: &CompiledBody,
         accepted: AcceptedStateView<'_>,
         run: Digest,
@@ -211,9 +210,10 @@ impl History {
                 })
             })
             .collect();
-        Self::from_opening(body, opening, run, image, parameters)
+        Self::from_opening(format, body, opening, run, image, parameters)
     }
     fn from_opening(
+        format: RecordFormat,
         body: &CompiledBody,
         opening: Vec<Compensated>,
         run: Digest,
@@ -245,13 +245,17 @@ impl History {
             bytes.extend_from_slice(&coefficient.to_be_bytes());
         }
         bytes.extend_from_slice(parameters.as_bytes());
-        let seal = linked(run, 0, image, Digest::of_canonical(&bytes));
+        let seal = linked(format.hash(), run, 0, image, &bytes);
         Self {
+            format,
             opening,
             incidence,
             origin: Origin { image, seal },
             links: Vec::new(),
         }
+    }
+    pub(crate) fn format(&self) -> RecordFormat {
+        self.format
     }
     pub(crate) fn opening_values(&self) -> &[Compensated] {
         &self.opening
@@ -273,7 +277,7 @@ impl History {
         self.links.last().map_or(self.origin.image, |link| link.image)
     }
     pub(crate) fn linked(&self, chunk: LedgerChunk, revision: u64, image: Digest) -> Link {
-        let seal = linked(self.seal(), revision, image, chunk.digest());
+        let seal = linked(self.format.hash(), self.seal(), revision, image, &chunk.bytes());
         Link { chunk, image, seal }
     }
     pub(crate) fn push(&mut self, link: Link) {
@@ -314,12 +318,13 @@ impl History {
         resolve: &dyn Fn(&Digest) -> Option<Vec<u8>>,
     ) -> Result<Self, CheckpointError> {
         let Start {
+            format,
             run,
             opening,
             image,
             parameters,
         } = start;
-        let mut history = Self::from_opening(body, opening, run, image, parameters);
+        let mut history = Self::from_opening(format, body, opening, run, image, parameters);
         let quantities = body.conserved_basis().combinations().len();
         let columns = body.columns().len();
         let mut links = Vec::new();
@@ -331,7 +336,7 @@ impl History {
             let (image, bytes) = rest.split_at_checked(32).ok_or(altered)?;
             let previous = Digest::from_bytes(*previous.first_chunk().ok_or(altered)?);
             let image = Digest::from_bytes(*image.first_chunk().ok_or(altered)?);
-            if linked(previous, revision, image, Digest::of_canonical(bytes)) != at {
+            if linked(format.hash(), previous, revision, image, bytes) != at {
                 return Err(altered);
             }
             let mut read = ByteReader::new(bytes);
@@ -353,6 +358,7 @@ impl History {
     }
     pub(crate) fn digest(&self) -> Digest {
         let Self {
+            format: _,
             opening,
             incidence,
             origin: _,
@@ -366,13 +372,14 @@ impl History {
             bytes.extend_from_slice(&coefficient.to_be_bytes());
         }
         for link in links {
-            bytes.extend_from_slice(link.chunk.digest().as_bytes());
+            bytes.extend_from_slice(Digest::of_canonical(&link.chunk.bytes()).as_bytes());
         }
         Digest::of_canonical(&bytes)
     }
 }
 
 pub(crate) struct Start {
+    pub(crate) format: RecordFormat,
     pub(crate) run: Digest,
     pub(crate) opening: Vec<Compensated>,
     pub(crate) image: Digest,

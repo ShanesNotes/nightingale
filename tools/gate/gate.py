@@ -1197,7 +1197,8 @@ def _opens_identity(body: tuple[Token, ...]) -> bool:
             continue
         if body[k].value == "Canonical" and body[k + 2].value == "new":
             return True
-        if body[k].value == "Digest" and body[k + 2].value == "of_canonical" and body[k + 3].value == "(":
+        constructor = body[k + 2].value in ("of_canonical", "for_record")
+        if body[k].value == "Digest" and constructor and body[k + 3].value == "(":
             if k + 4 < len(body) and body[k + 4].kind != "literal":
                 return True
     return False
@@ -1625,6 +1626,11 @@ SEAL_CASES: tuple[tuple[str, frozenset[str]], ...] = (
         "impl S { fn case(&self) -> D { let Self { a, b: _ } = self; Digest::of_canonical(&bytes) } }",
         frozenset({"case::S::case b"}),
     ),
+    (
+        "impl S { fn case(&self) -> D { let Self { a, b: _ } = self; Digest::for_record(&bytes, hash) } }",
+        frozenset({"case::S::case b"}),
+    ),
+    ('fn tag(d: D) -> Digest { let D { key: _, v } = d; Digest::for_record(b"tag", hash) }', frozenset()),
     ('fn digest(&self) -> D { let o = Canonical::new("t"); let x = T { a, ..base }; o.digest() }', frozenset()),
     ("fn copy(d: D) -> S { let D { key: _, value } = d; S { value } }", frozenset()),
     (
