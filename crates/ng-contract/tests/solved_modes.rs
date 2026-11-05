@@ -95,7 +95,7 @@ const BASE: Start = Start {
     history: b"one history",
 };
 
-fn admitted(body: &CompiledBody, start: Start) -> Result<InitialRevision, InitializationFailure> {
+fn system(body: &CompiledBody, moment_ns: u64) -> Result<InitializationSystem<'_>, InitializationFailure> {
     let period = NonZeroU64::new(2_000_000_000).expect("not zero");
     let cycle = Cycle::new(period, NonZeroU32::new(2).expect("not zero"))?;
     let mut packet = ParameterPacket::periodic(cycle);
@@ -144,8 +144,12 @@ fn admitted(body: &CompiledBody, start: Start) -> Result<InitialRevision, Initia
         NonZeroU64::new(1_000_000_000).expect("not zero"),
     )?;
     let port = BoundaryPort::new(Vec::new())?;
-    let request = InitializationRequest::at(SimTime::from_ns(start.moment_ns)).reading(&lens);
-    let mut system = body.initialization(body.bind(packet)?, port, request)?;
+    let request = InitializationRequest::at(SimTime::from_ns(moment_ns)).reading(&lens);
+    Ok(body.initialization(body.bind(packet)?, port, request)?)
+}
+
+fn admitted(body: &CompiledBody, start: Start) -> Result<InitialRevision, InitializationFailure> {
+    let mut system = system(body, start.moment_ns)?;
     let mut workspace = system.workspace();
     if start.through_b {
         let rest = workspace.unknowns_mut().to_vec();
@@ -253,5 +257,23 @@ fn a_mode_the_ring_moved_is_reported_as_solved() -> Result<(), InitializationFai
     };
     assert_eq!(provenance_of(false)?, ValueProvenance::Fixture);
     assert_eq!(provenance_of(true)?, ValueProvenance::Solved);
+    Ok(())
+}
+
+#[test]
+fn a_guard_that_reads_no_value_names_its_mode() -> Result<(), InitializationFailure> {
+    let body = body()?;
+    let mut system = system(&body, 0)?;
+    let mut workspace = system.workspace();
+    workspace.unknowns_mut().fill(f64::NAN);
+    let law = LawName {
+        owner: "NS",
+        local: "switch",
+    };
+    let swept = system.sweep(&workspace, 0..2);
+    assert!(
+        matches!(swept, Err(InitializationFailure::Undefined { law: failed }) if failed == law),
+        "{swept:?}"
+    );
     Ok(())
 }

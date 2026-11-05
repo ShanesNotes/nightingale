@@ -1,4 +1,5 @@
 use crate::elimination::{Elimination, Factors};
+use crate::evaluate::Tape;
 use crate::identity::{Canonical, Seal};
 use crate::law::{Op, Validity};
 use crate::problem::Jacobian;
@@ -49,6 +50,7 @@ pub struct CompiledBody {
     pub(crate) layout: Layout,
     elimination: Elimination,
     pub(crate) sources: Vec<RefusalSource>,
+    pub(crate) tape: Tape,
 }
 pub(crate) struct Layout {
     pub(crate) schema: Schema,
@@ -75,6 +77,7 @@ impl CompiledBody {
         Self {
             hash: ModelHash { digest: out.digest() },
             sources: refusal_sources(&layout),
+            tape: Tape::of(&layout),
             layout,
             elimination,
         }
