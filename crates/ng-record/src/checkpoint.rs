@@ -153,7 +153,6 @@ impl BranchAncestry {
     }
 }
 
-/// The magic's version names the hash of the record's images and seals; a loaded run keeps it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RecordFormat {
     V1,

@@ -23,8 +23,6 @@ impl Digest {
     }
 }
 
-/// The hash a record's images and seal chain take. A checkpoint's magic names it and a run keeps the one it
-/// was admitted with. What names a run, keys a draw or orders a guard is `of_canonical`'s whatever a record takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecordHash {
     Sha256,
@@ -121,7 +119,7 @@ const BLAKE2B_INITIAL: [u64; 8] = [
     0x1f83d9abfb41bd6b,
     0x5be0cd19137e2179,
 ];
-/// RFC 7693, section 2.7; rounds 10 and 11 take rows 0 and 1 again.
+/// RFC 7693, section 2.7.
 const SIGMA: [[usize; 16]; 12] = [
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
     [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],

@@ -1,6 +1,4 @@
-//! Bytes the base f43d49e8 wrote, which every later build must load: checkpoints, store links, a fault's export
-//! and observer checkpoints of three courses, with what the base did next. A test appended to tests/observation.rs
-//! in a detached worktree of the base printed them; a test reads no file, so they are inline.
+//! Bytes the base f43d49e8 wrote, which every later build must load.
 use core::num::NonZeroU64;
 use ng_contract::*;
 use ng_observe::*;
