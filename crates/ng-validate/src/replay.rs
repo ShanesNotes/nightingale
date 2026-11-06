@@ -215,8 +215,6 @@ impl ReplayEvidence {
     }
 }
 
-/// Equal seals give equal views, and `ng_observe::Observer` is a function of the views it read, so only an
-/// observer a test builds can change what is observed while the seals hold.
 trait Observers {
     fn fresh<'l>(&self, lens: &'l ObservationLens) -> Box<dyn Observe + 'l>;
     fn resume<'l>(
@@ -256,9 +254,7 @@ impl Observers for Honest {
     }
 }
 
-/// An observer's continuation and the digest of all it has returned, which a host keeps because an observer
-/// keeps no log.
-struct Saved {
+struct WatchCheckpoint {
     observer: ObserverCheckpoint,
     observed: Digest,
 }
@@ -282,7 +278,7 @@ impl<'l> Watch<'l> {
         gate: ReplayGate,
         lens: &'l ObservationLens,
         observers: &dyn Observers,
-        saved: &Saved,
+        saved: &WatchCheckpoint,
     ) -> Result<Self, ReplayFailure> {
         let observer =
             (observers.resume(lens, &saved.observer)).map_err(|_| ReplayFailure::MissingEvidence { gate })?;
@@ -302,8 +298,8 @@ impl<'l> Watch<'l> {
         self.observed = chained(self.observed, &observed);
         Ok(())
     }
-    fn saved(&self) -> Saved {
-        Saved {
+    fn saved(&self) -> WatchCheckpoint {
+        WatchCheckpoint {
             observer: self.observer.checkpoint(),
             observed: self.observed,
         }
@@ -348,8 +344,7 @@ impl Trace {
     }
 }
 
-/// Two runs to one end with equal seals have equal rows, so a shared prefix is the whole of each. A detached
-/// run read nothing, so against one only the seals compare.
+/// Two runs to one end with equal seals have equal rows, so a shared prefix is the whole of each.
 fn first_difference(reference: &[Row], run: &[Row]) -> Option<SimTime> {
     let drifted = |known: &Row, seen: &Row| known.observed.zip(seen.observed).is_some_and(|(a, b)| a != b);
     (reference.iter().zip(run))
@@ -483,8 +478,7 @@ fn admitted<'m>(
     session.map_err(|failure| ReplayFailure::Admission { gate, failure })
 }
 
-/// A fresh run's first row. An observer reads the admitted revision before any step.
-fn opened(
+fn first_row(
     gate: ReplayGate,
     session: &Session<'_, Running>,
     mut watch: Option<&mut Watch<'_>>,
@@ -495,14 +489,13 @@ fn opened(
     Ok(vec![Row::of(session, false, watch.as_deref())])
 }
 
-/// A run that read no value is no evidence an observer was there.
 fn uninterrupted(
     gate: ReplayGate,
     case: &dyn ReplayCase,
     session: Session<'_, Running>,
     mut watch: Option<&mut Watch<'_>>,
 ) -> Result<(Trace, Digest), ReplayFailure> {
-    let rows = opened(gate, &session, watch.as_deref_mut())?;
+    let rows = first_row(gate, &session, watch.as_deref_mut())?;
     let (session, trace) = traced(
         gate,
         session,
@@ -530,7 +523,6 @@ fn reference(
     uninterrupted(gate, case, session, None)
 }
 
-/// The reference run of a gate that compares observer bits, and the lens every run of that gate reads.
 fn watched_reference(
     gate: ReplayGate,
     case: &dyn ReplayCase,
@@ -540,7 +532,7 @@ fn watched_reference(
     let core = cores.fresh();
     let store = MemoryStore::default();
     let session = admitted(gate, case.admit(&*core, &store))?;
-    let lens = lens_over(gate, case, session.record().accepted().time())?;
+    let lens = holding_lens(gate, case, session.record().accepted().time())?;
     let (trace, run) = uninterrupted(gate, case, session, Some(&mut Watch::fresh(&lens, observers)))?;
     Ok((trace, run, lens))
 }
@@ -582,7 +574,7 @@ fn pace_gate(
         let store = MemoryStore::default();
         let session = admitted(gate, case.admit(&*core, &store))?;
         let mut watch = Watch::fresh(&lens, observers);
-        let rows = opened(gate, &session, Some(&mut watch))?;
+        let rows = first_row(gate, &session, Some(&mut watch))?;
         let (_, paced) = traced(gate, session, rows, case.end(), &pace, Some(&mut watch))?;
         same_or_diverged(gate, &reference.rows, &reference.last, &paced)?;
         runs.push(paced.last);
@@ -657,7 +649,7 @@ fn resume_gate(
     let core = cores.fresh();
     let mut session = admitted(gate, case.admit(&*core, &store))?;
     let mut watch = Watch::fresh(&lens, observers);
-    let mut rows = opened(gate, &session, Some(&mut watch))?;
+    let mut rows = first_row(gate, &session, Some(&mut watch))?;
     let mut saved = Vec::new();
     for revision in boundaries(&reference.rows, plan.resume_every) {
         session = revision_to(gate, session, revision, &mut rows, Some(&mut watch))?;
@@ -720,7 +712,7 @@ fn late_run<'m>(
     mut watch: Option<&mut Watch<'_>>,
 ) -> Result<Session<'m, Running>, ReplayFailure> {
     let mut session = admitted(gate, case.admit_withheld(core, store))?;
-    rows.extend(opened(gate, &session, watch.as_deref_mut())?);
+    rows.extend(first_row(gate, &session, watch.as_deref_mut())?);
     let events = stamped(gate, case)?;
     for (revision, event) in arrivals.iter().zip(events) {
         session = revision_to(gate, session, *revision, rows, watch.as_deref_mut())?;
@@ -812,7 +804,7 @@ fn rewind_gate(
     let core = cores.fresh();
     let session = admitted(gate, case.admit(&*core, &store))?;
     let mut watch = Watch::fresh(&lens, observers);
-    let mut rows = opened(gate, &session, Some(&mut watch))?;
+    let mut rows = first_row(gate, &session, Some(&mut watch))?;
     let session = revision_to(gate, session, middle as u64, &mut rows, Some(&mut watch))?;
     let first = (session.checkpoint().map_err(checkpointed)?, watch.saved());
     let session = revision_to(gate, session, middle as u64 + 1, &mut rows, Some(&mut watch))?;
@@ -1000,9 +992,8 @@ const INSTANTS_PER_STEP: u64 = 2;
 const INSTANTS_PER_RUN: u64 = 256;
 const CHANGED_WINDOW: NonZeroU64 = NonZeroU64::MIN.saturating_add(1);
 const HELD_PERIODS: u64 = 3;
+const _: () = assert!(HELD_PERIODS > CHANGED_WINDOW.get());
 
-/// Every lens here reads every row, so no case can leave one out. No error here: a gate cannot name a row's
-/// dimension, and an error reads no state.
 fn every_row(body: &CompiledBody) -> impl Iterator<Item = ChannelSpec> + '_ {
     (body.rows().iter()).map(|row| ChannelSpec::new("every row", row.kind()))
 }
@@ -1022,10 +1013,7 @@ fn lenses(body: &CompiledBody, rows: &[Row]) -> Result<[ObservationLens; 2], Adm
     ])
 }
 
-/// A grid over the run's own span, so its cost does not grow with the steps. A delay longer than the window
-/// leaves a reading collected and not yet resulted at every head past the first window, and a head between
-/// a window's instants leaves it part filled, so a checkpoint must carry both.
-fn lens_over(
+fn holding_lens(
     gate: ReplayGate,
     case: &dyn ReplayCase,
     start: SimTime,
@@ -1242,7 +1230,6 @@ mod tests {
         ObservationSeed::new(WATCHING)
     }
 
-    /// Hears nothing collected from `deaf_from` on.
     struct Deaf<'l> {
         inner: Observer<'l>,
         deaf_from: Option<SimTime>,
@@ -1260,8 +1247,6 @@ mod tests {
         }
     }
 
-    /// The first observer it builds is honest, and every later one goes deaf at `from`: a count kept outside
-    /// every observer.
     struct GoesDeaf {
         built: Cell<u64>,
         from: SimTime,
@@ -1312,7 +1297,6 @@ mod tests {
         }
     }
 
-    /// Resumes as a new observer, so it loses its windows and the readings it held.
     struct Forgets;
     impl Observers for Forgets {
         fn fresh<'l>(&self, lens: &'l ObservationLens) -> Box<dyn Observe + 'l> {

@@ -19,3 +19,5 @@ From 10: a core that breaks the elastic store's closure fails the stage residual
 From 03: ticket 03's third box waits on the two split probes in ticket 20.
 
 From foundation 07: before either 48 h core runs, the build proves incidence and energy closure, validate-then-publish refusal with nonempty pending inputs, the generated census gate and the replay gates.
+
+From 19: §7's table has no observer row. The observer gates' must-fail observers are in-crate tests, because only a test can build an observer that is not a function of its views: `replay::tests::an_observer_that_drifts_while_the_accepted_state_matches_fails_pace_resume_late_admission_and_rewind` and `an_observer_that_forgets_its_state_on_resume_fails_resume_and_rewind_and_passes_the_rest`.

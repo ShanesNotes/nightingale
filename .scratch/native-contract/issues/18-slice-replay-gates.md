@@ -29,3 +29,5 @@ From the split of ticket 11: the live pace reads the host clock that ticket 12 p
 From the solver arena (in this PR), a lead not yet tested on the slice: the step-policy gate needs two policies on two grids, and an error-controlled core runs both caps on one grid wherever both caps exceed the span its error allows, so the gate would report missing evidence. The picked core passes the gate on the chance case at caps of 1 s and 0.25 s. On the slice, choose two policies whose grids differ.
 
 From ticket 11: every gate admits with its own `MemoryStore`, and the resume and rewind gates share one store between the parent and its loads and forks. A resume walks every link newest first, so the resume gate's cost still grows with the number of loads.
+
+From 19: pace, resume, late admission and rewind now watch every run they compare through a lens on every row with 256 instants over the run's span, so a slice run reads about 256 instants whatever its step. A body whose rows `CompiledBody::lens` refuses makes those gates `MissingEvidence`, as non-perturbation already is.
