@@ -21,7 +21,14 @@ fn peak_kb() -> u64 {
         .expect("a VmHWM line in kB")
 }
 
+unsafe extern "C" {
+    safe fn malloc_trim(pad: usize) -> i32;
+}
+
+/// Freed heap stays resident and would hide growth into it from the mark, so its free pages go back to the
+/// kernel first.
 fn reset_peak() {
+    malloc_trim(0);
     std::fs::write("/proc/self/clear_refs", "5").expect("the kernel resets the peak resident set");
 }
 
