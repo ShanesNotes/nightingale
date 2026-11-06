@@ -1,17 +1,23 @@
 use ng_contract::SimTime;
-use ng_record::{Faulted, Running, Session, Step};
+use ng_record::{Faulted, Running, Session, Step, StepReceipt};
 
-pub(crate) fn advance<'m>(
+pub(crate) fn accept<'m>(
     session: Session<'m, Running>,
-) -> Result<Session<'m, Running>, Session<'m, Faulted>> {
+) -> Result<(Session<'m, Running>, StepReceipt), Session<'m, Faulted>> {
     let mut attempt = session.step();
     loop {
         match attempt {
-            Step::Accepted(session, _) => return Ok(session),
+            Step::Accepted(session, receipt) => return Ok((session, receipt)),
             Step::Refused(session) => attempt = session.retry(),
             Step::Faulted(session) => return Err(session),
         }
     }
+}
+
+pub(crate) fn advance<'m>(
+    session: Session<'m, Running>,
+) -> Result<Session<'m, Running>, Session<'m, Faulted>> {
+    accept(session).map(|(session, _)| session)
 }
 
 /// Steps until the accepted head reaches `end`, retrying every refusal. A fault ends it with the latch.

@@ -453,7 +453,13 @@ The amount a transfer moved over one step, kept as gross forward and reverse par
 The record of each numerical stage a step used (its time, point and weight), which the contract re-evaluates on the record crate's own values before the step can be accepted.
 
 **Reference integrator**:
-The fully coupled backward Euler core in `ng-validate`, run at three refinements, against which the accuracy gate measures each solver core.
+The fully coupled backward Euler core in `ng-validate`, run at three refinements, against which the accuracy gate and the split measurement measure each solver core.
+
+**Split measurement**:
+How a core that evaluates some blocks apart within a step earns trust: its split trace and the reference integrator's, on one grid of one case, are compared family by family, and the reference's own error, from a run at half its interval, counts against the same budget. Only a split measurement qualifies a split, and no run it measures is scored.
+
+**Split trace**:
+One run's state, exchange integrals, observations and event times on a grid, drawn from each accepted head in turn with the extents the contract verified for its step, never from samples a caller supplies.
 
 **Bench integrator**:
 An explicit Heun integrator that serves only as a test bench, never as a solver core (rule 8).

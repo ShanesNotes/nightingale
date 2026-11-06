@@ -960,6 +960,31 @@
 //!     body.cardiovascular()
 //! }
 //! ```
+//! A split qualification is not a byte array.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn unsupported_split() -> EvaluationPlan<'static> { EvaluationPlan::QualifiedSplit(&[0; 32]) }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn split(qualification: &SplitQualification) -> EvaluationPlan<'_> {
+//!     EvaluationPlan::QualifiedSplit(qualification)
+//! }
+//! ```
+//! Only a measurement qualifies a split: no one writes a qualification by hand.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn forged(plan: Digest, model: ModelHash, packet: PacketHash, domain: Digest, assessment: SplitAssessment)
+//!     -> SplitQualification {
+//!     SplitQualification { plan, model, packet, domain, assessment }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn measured(measurement: SplitMeasurement) -> Result<SplitQualification, SplitRejected> {
+//!     measurement.qualify()
+//! }
+//! ```
 
 extern crate alloc;
 
@@ -992,6 +1017,7 @@ mod scheme;
 mod scope;
 mod seam;
 mod sources;
+mod split;
 mod state;
 mod system;
 mod time;
@@ -1022,6 +1048,7 @@ pub use scheme::*;
 pub use scope::*;
 pub use seam::*;
 pub use sources::{ExcursionSide, RefusalSource, SourceId, ValidityExcursion};
+pub use split::*;
 pub use state::*;
 pub use system::*;
 pub use time::*;

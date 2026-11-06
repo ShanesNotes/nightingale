@@ -226,6 +226,10 @@ pub enum AdmissionError {
     ShortCoverage,
     /// An accuracy policy with no case, a case that never steps or a zero grid.
     EmptyAccuracyPolicy,
+    /// A trace grid of fewer than two instants, or one that ends past the clock.
+    EmptyTraceGrid,
+    /// A split budget whose reference share is not between zero and one.
+    ReferenceShare,
 }
 impl From<AnatomyDefect> for AdmissionError {
     fn from(defect: AnatomyDefect) -> Self {

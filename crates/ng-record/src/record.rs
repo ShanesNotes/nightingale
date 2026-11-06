@@ -6,8 +6,8 @@ use crate::history::{ConservationView, History, HistorySeal, LedgerChunk, Link};
 use ng_contract::{
     AcceptedStateView, AdmissionError, AppliedInputs, Attempt, BoundaryEvent, Candidate, CompiledBody,
     CoupledProblem, CoupledSolver, DenseSegment, Digest, Fired, ImageParts, InitialRevision, InputId,
-    MethodHistory, NumericalRefusal, RecordHash, RunIdentity, SimTime, StepProposal, StepTicket,
-    TrialFailure, ValidityExcursion, VerifiedParts, VerifiedStep,
+    MethodHistory, NumericalRefusal, RecordHash, RunIdentity, SimTime, SplitRejected, StepExtents, StepProposal,
+    StepTicket, TraceDraw, TrialFailure, ValidityExcursion, VerifiedParts, VerifiedStep,
 };
 
 /// The chained seal of one accepted revision: the previous seal, the revision, the image's digests and the
@@ -175,6 +175,7 @@ impl<'m> PatientRecord<'m> {
             dense,
             excursions,
             fired,
+            extents,
         } = step.into_parts();
         let image = self
             .history
@@ -193,6 +194,7 @@ impl<'m> PatientRecord<'m> {
             after_breakpoint,
             excursions,
             fired,
+            extents,
         }
     }
     /// The one path that changes accepted state. Installs every part of the image together and cannot fail. A
@@ -209,6 +211,7 @@ impl<'m> PatientRecord<'m> {
             after_breakpoint,
             excursions,
             fired,
+            extents,
         } = next;
         self.image.time = time;
         self.image.state = state;
@@ -224,7 +227,17 @@ impl<'m> PatientRecord<'m> {
             after_breakpoint,
             excursions,
             fired,
+            extents,
         }
+    }
+    /// Reads this head into a split trace. With no receipt it is the head the draw opens on; with one it is the
+    /// head that receipt's step made, so a receipt of any other head is refused.
+    pub fn split_trace(&self, draw: &mut TraceDraw, receipt: Option<&StepReceipt>) -> Result<(), SplitRejected> {
+        if receipt.is_some_and(|receipt| receipt.seal != self.seal()) {
+            return Err(SplitRejected::OtherHead);
+        }
+        let step = receipt.map(|receipt| (&receipt.extents, receipt.fired.as_slice()));
+        draw.read(&self.identity, self.accepted(), self.history.seal(), step)
     }
     pub(crate) fn admit_input(&mut self, input: AuthorizedInput) -> Result<InputReceipt, AdmissionError> {
         let AuthorizedInput { command: _, event } = input;
@@ -306,6 +319,7 @@ pub struct NextImage {
     after_breakpoint: bool,
     excursions: Vec<ValidityExcursion>,
     fired: Vec<Fired>,
+    extents: StepExtents,
 }
 
 #[derive(Debug)]
@@ -316,6 +330,7 @@ pub struct StepReceipt {
     after_breakpoint: bool,
     excursions: Vec<ValidityExcursion>,
     fired: Vec<Fired>,
+    extents: StepExtents,
 }
 impl StepReceipt {
     pub fn revision(&self) -> u64 {

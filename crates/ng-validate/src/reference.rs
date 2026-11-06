@@ -41,6 +41,13 @@ impl ReferenceIntegrator {
             ..self
         }
     }
+    /// The same reference at half the interval, against which its own error is measured.
+    pub(crate) fn refined(&self) -> Self {
+        Self {
+            interval_ns: self.interval_ns / 2,
+            ..*self
+        }
+    }
 }
 impl CoupledSolver for ReferenceIntegrator {
     fn resolution(&self) -> DeclaredResolution {
