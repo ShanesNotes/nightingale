@@ -11,6 +11,7 @@ fn measure<U>(value: f64) -> Measure<U> {
 }
 
 fn fitted(guess: f64) -> Result<f64, InitializationFailure> {
+    let store = MemoryStore::default();
     let mut map = AnatomyBuilder::new();
     let site = map.site::<VesselSegment>(
         "synthetic vessel",
@@ -86,7 +87,7 @@ fn fitted(guess: f64) -> Result<f64, InitializationFailure> {
     );
     let boundary = BoundaryPort::new(vec![event])?;
     let core = ReferenceIntegrator::new(SECOND);
-    let admitted = admit_solved(&body, packet, boundary, &core, &lens)?;
+    let admitted = admit_solved(&body, packet, boundary, &core, &lens, &store)?;
     let record = admitted
         .provenance
         .values()

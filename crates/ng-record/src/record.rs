@@ -28,7 +28,6 @@ pub struct PatientRecord<'m> {
     body: &'m CompiledBody,
     identity: RunIdentity,
     branch: BranchAncestry,
-    revision: u64,
     image: ImageParts,
     history: History,
 }
@@ -55,7 +54,6 @@ impl<'m> PatientRecord<'m> {
             body,
             identity,
             branch: BranchAncestry::of_run(run),
-            revision: 0,
             image,
             history,
         }
@@ -67,7 +65,6 @@ impl<'m> PatientRecord<'m> {
     ) -> Result<Self, CheckpointError> {
         let Restored {
             branch,
-            revision,
             image,
             history,
         } = parts;
@@ -78,7 +75,6 @@ impl<'m> PatientRecord<'m> {
             body,
             identity,
             branch,
-            revision,
             image,
             history,
         })
@@ -96,7 +92,7 @@ impl<'m> PatientRecord<'m> {
         &self.identity
     }
     pub fn revision(&self) -> u64 {
-        self.revision
+        self.history.revision()
     }
     pub fn seal(&self) -> Seal {
         Seal {
@@ -180,15 +176,13 @@ impl<'m> PatientRecord<'m> {
             excursions,
             fired,
         } = step.into_parts();
-        let revision = self.revision + 1;
         let image = self
             .history
             .format()
             .hash()
             .image(time, &state, &continuation, &dense, &pending);
-        let link = self.history.linked(chunk, revision, image);
+        let link = self.history.linked(chunk, image);
         NextImage {
-            revision,
             time,
             state,
             continuation,
@@ -201,10 +195,10 @@ impl<'m> PatientRecord<'m> {
             fired,
         }
     }
-    /// The one path that changes accepted state. Installs every part of the image together and cannot fail.
-    pub fn publish(&mut self, next: NextImage) -> StepReceipt {
+    /// The one path that changes accepted state. Installs every part of the image together and cannot fail. A
+    /// link `store` refuses waits in the record, and no checkpoint exists until a later step's store keeps it.
+    pub fn publish(&mut self, next: NextImage, store: &dyn HistoryStore) -> StepReceipt {
         let NextImage {
-            revision,
             time,
             state,
             continuation,
@@ -216,16 +210,15 @@ impl<'m> PatientRecord<'m> {
             excursions,
             fired,
         } = next;
-        self.revision = revision;
         self.image.time = time;
         self.image.state = state;
         self.image.continuation = continuation;
         self.image.dense = dense;
         self.image.pending.advance(pending);
         let digest = link.seal();
-        self.history.push(link);
+        self.history.push(link, store);
         StepReceipt {
-            revision,
+            revision: self.history.revision(),
             seal: Seal { digest },
             applied,
             after_breakpoint,
@@ -239,24 +232,21 @@ impl<'m> PatientRecord<'m> {
         let payload = self.image.pending.admit(self.body, self.image.time, event)?;
         Ok(InputReceipt { id, payload, at })
     }
-    pub(crate) fn checkpoint(
-        &self,
-        store: &mut dyn HistoryStore,
-        latched: bool,
-    ) -> Result<Checkpoint, CheckpointError> {
-        for (seal, link) in self.history.unkept(&|seal| store.resolve(seal).is_some()) {
-            store.keep(seal, link)?;
+    pub(crate) fn checkpoint(&self, latched: bool) -> Result<Checkpoint, CheckpointError> {
+        if let Some(seal) = self.history.oldest_unkept() {
+            return Err(CheckpointError::StoreFailed { seal });
         }
         let sections = Sections {
             image: &self.image,
             branch: &self.branch,
             history: &self.history,
         };
-        Ok(write(&self.identity, self.revision, latched, sections))
+        Ok(write(&self.identity, self.history.revision(), latched, sections))
     }
-    pub fn conservation(&self) -> ConservationView<'_> {
+    pub(crate) fn conservation<'r>(&'r self, store: &'r dyn HistoryStore) -> ConservationView<'r> {
         ConservationView {
             history: &self.history,
+            store,
             basis: self.body.conserved_basis(),
             seal: HistorySeal {
                 run: self.identity.digest(),
@@ -271,12 +261,11 @@ impl<'m> PatientRecord<'m> {
             body: _,
             identity: _,
             branch: _,
-            revision,
             image,
             history,
         } = self;
         RecordDigests {
-            revision: *revision,
+            revision: history.revision(),
             time: image.time,
             state: image.state.digest(),
             continuation: image.continuation.digest(),
@@ -307,7 +296,6 @@ pub struct RecordDigests {
 
 /// The entire next accepted image, validated and not yet visible.
 pub struct NextImage {
-    revision: u64,
     time: SimTime,
     state: Candidate,
     continuation: MethodHistory,

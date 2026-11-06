@@ -73,7 +73,8 @@ fn finished<'m>(session: Session<'m, Running>, end: SimTime) -> (Session<'m, Run
 }
 
 fn events(case: &dyn ReplayCase, core: &dyn CoupledSolver) -> Vec<Fired> {
-    finished(case.admit(core).expect("admitted"), case.end()).1
+    let store = MemoryStore::default();
+    finished(case.admit(core, &store).expect("admitted"), case.end()).1
 }
 
 fn one_step<'m>(session: Session<'m, Running>) -> (Session<'m, Running>, StepReceipt) {
@@ -121,11 +122,12 @@ fn each_stream_and_each_ordinal_has_its_own_draw() {
 
 #[test]
 fn a_rate_runs_only_in_the_mode_its_law_holds_in() {
+    let store = MemoryStore::default();
     let case = ChanceCase::ectopy().expect("a body");
     let core = reference(SECOND);
     let (onset, recovery) = (row(&case, ONSET_INTEGRAL), row(&case, RETURN_INTEGRAL));
     let bits = |session: &Session<'_, Running>, row| session.record().accepted().value(row).bits();
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut idle = recovery;
     let (mut moved, mut held) = (0, 0);
     while session.record().accepted().time() < case.end() {
@@ -168,12 +170,13 @@ fn an_integral_past_its_draw_when_its_guard_arms_fires_within_a_floor() {
 
 #[test]
 fn an_integral_past_its_draw_stops_no_step_while_its_guard_is_disarmed() {
+    let store = MemoryStore::default();
     let case = ChanceCase::racing()
         .expect("a body")
         .delivering(Vec::new())
         .until(at(2_400));
     let core = reference(SECOND);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut fired = Vec::new();
     while session.record().accepted().time() < case.end() {
         let before = session.record().accepted().time().nanoseconds();
@@ -316,9 +319,10 @@ fn reads_a_reset(reads: Reads) -> Result<(CompiledBody, ParameterPacket<Syntheti
 #[test]
 fn a_firing_no_law_can_read_faults_short_of_its_crossing_and_names_the_law()
 -> Result<(), InitializationFailure> {
+    let store = MemoryStore::default();
     let (body, packet) = reads_a_reset(Reads::LogarithmOfTheIntegral)?;
     let core = reference(SECOND);
-    let mut session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core)?;
+    let mut session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core, &store)?;
     loop {
         let mut attempt = session.step();
         session = loop {
@@ -346,9 +350,10 @@ fn a_firing_no_law_can_read_faults_short_of_its_crossing_and_names_the_law()
 }
 
 fn first_excursion_after_a_firing(reads: Reads) -> Result<(ValidityExcursion, Fired), InitializationFailure> {
+    let store = MemoryStore::default();
     let (body, packet) = reads_a_reset(reads)?;
     let core = reference(SECOND);
-    let mut session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core)?;
+    let mut session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core, &store)?;
     loop {
         let (next, receipt) = one_step(session);
         session = next;
@@ -373,9 +378,10 @@ fn a_range_is_judged_on_what_a_firing_leaves() -> Result<(), InitializationFailu
 /// The law stops holding at the firing, so only the end of the climb shows how far it went.
 #[test]
 fn a_firing_keeps_the_excursion_its_step_ended_on() -> Result<(), InitializationFailure> {
+    let store = MemoryStore::default();
     let (body, packet) = reads_a_reset(Reads::TheClimb)?;
     let core = reference(SECOND);
-    let mut session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core)?;
+    let mut session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core, &store)?;
     loop {
         let (next, receipt) = one_step(session);
         session = next;
@@ -408,10 +414,11 @@ fn what_a_firing_leaves_reads_the_next_draw() -> Result<(), InitializationFailur
 
 #[test]
 fn a_rate_that_falls_below_zero_never_lowers_its_integral() {
+    let store = MemoryStore::default();
     let case = ChanceCase::relaxing().expect("a body");
     let core = reference(SECOND / 4);
     let integral = row(&case, ONSET_INTEGRAL);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut last = Compensated::ZERO;
     let mut held = 0;
     while session.record().accepted().time() < case.end() {
@@ -432,10 +439,11 @@ fn a_rate_that_falls_below_zero_never_lowers_its_integral() {
 
 #[test]
 fn a_segment_ends_at_the_left_limit_of_a_reset() {
+    let store = MemoryStore::default();
     let case = ChanceCase::ectopy().expect("a body");
     let core = reference(SECOND);
     let integral = row(&case, ONSET_INTEGRAL);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     loop {
         let (next, receipt) = one_step(session);
         session = next;
@@ -461,6 +469,7 @@ fn a_segment_ends_at_the_left_limit_of_a_reset() {
 /// A floor past the span lands a guard at the first ticket that crosses, so two can cross in one landing.
 #[test]
 fn two_guards_racing_for_one_mode_fire_once_and_the_loser_keeps_its_draw() {
+    let store = MemoryStore::default();
     let mut raced = 0;
     for seed in 0..64 {
         let case = ChanceCase::racing()
@@ -478,7 +487,7 @@ fn two_guards_racing_for_one_mode_fire_once_and_the_loser_keeps_its_draw() {
             continue;
         }
         let second = row(&case, SECOND_INTEGRAL);
-        let mut session = case.admit(&core).expect("admitted");
+        let mut session = case.admit(&core, &store).expect("admitted");
         let mut lost = false;
         while session.record().accepted().time() < case.end() {
             let (next, receipt) = one_step(session);
@@ -508,6 +517,7 @@ fn two_guards_racing_for_one_mode_fire_once_and_the_loser_keeps_its_draw() {
 
 #[test]
 fn a_cut_that_crosses_lands_short_of_its_input_and_leaves_a_fence() {
+    let store = MemoryStore::default();
     let mut found = 0;
     for seed in 0..400 {
         let base = ChanceCase::ectopy().expect("a body");
@@ -525,7 +535,7 @@ fn a_cut_that_crosses_lands_short_of_its_input_and_leaves_a_fence() {
             tone,
             reach: 1.5,
         };
-        let mut session = case.admit(&core).expect("admitted");
+        let mut session = case.admit(&core, &store).expect("admitted");
         while session.record().accepted().time() < stamp {
             let (next, receipt) = one_step(session);
             session = next;
@@ -607,6 +617,7 @@ fn adding_a_second_stream_leaves_the_first_streams_events_unchanged() {
 
 #[test]
 fn a_hazard_rate_outside_its_range_is_reported_though_it_holds_flat() {
+    let store = MemoryStore::default();
     let case = ChanceCase::relaxing_within(
         ValidityRange::new(
             Measure::new(0.0).expect("finite"),
@@ -617,7 +628,7 @@ fn a_hazard_rate_outside_its_range_is_reported_though_it_holds_flat() {
     )
     .expect("a body");
     let core = reference(SECOND / 4);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut below = 0;
     while session.record().accepted().time() < case.end() {
         let (next, receipt) = one_step(session);
@@ -649,9 +660,10 @@ fn a_slope_is_the_slope_of_what_a_run_integrates_in_each_mode_and_past_a_rates_z
 /// Ordinals keep climbing where a mode comes back, so one list cannot stand in for the other.
 #[test]
 fn the_modes_digest_reads_modes_and_the_streams_digest_reads_ordinals() {
+    let store = MemoryStore::default();
     let case = ChanceCase::ectopy().expect("a body");
     let core = reference(SECOND);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let start = session.record().digests();
     let mut fired = 0;
     while fired < 2 {
@@ -1036,6 +1048,7 @@ fn a_run_that_fired_nothing_is_missing_evidence_for_every_gate() {
 /// solved, refusals included, must be the same.
 #[test]
 fn a_late_input_on_either_side_of_a_crossing_takes_the_known_runs_tickets_under_refusals() {
+    let store = MemoryStore::default();
     let core = || TracesItsTickets {
         inner: RefusesByHash {
             inner: reference(64 * SECOND),
@@ -1065,7 +1078,7 @@ fn a_late_input_on_either_side_of_a_crossing_takes_the_known_runs_tickets_under_
         };
         let case = seeded(word).delivering(vec![delivery]).until(at(120));
         let withheld = core();
-        let mut heads = vec![case.admit_withheld(&withheld).expect("admitted")];
+        let mut heads = vec![case.admit_withheld(&withheld, &store).expect("admitted")];
         let mut late = None;
         let mut stepped = heads.pop().expect("a session");
         while stepped.record().accepted().time() < case.end() {
@@ -1078,9 +1091,9 @@ fn a_late_input_on_either_side_of_a_crossing_takes_the_known_runs_tickets_under_
         let arrival = late.expect("a head before the input");
         let run = |core: &TracesItsTickets, known: bool| {
             let mut session = if known {
-                case.admit(core)
+                case.admit(core, &store)
             } else {
-                case.admit_withheld(core)
+                case.admit_withheld(core, &store)
             }
             .expect("admitted");
             let mut rows = Vec::new();
@@ -1114,9 +1127,10 @@ fn a_late_input_on_either_side_of_a_crossing_takes_the_known_runs_tickets_under_
 /// `resume_every` is what picks it here.
 #[test]
 fn the_resume_gate_presses_the_head_just_before_a_firing() {
+    let store = MemoryStore::default();
     let case = ChanceCase::ectopy().expect("a body").delivering(Vec::new());
     let honest = reference(SECOND);
-    let mut session = case.admit(&honest).expect("admitted");
+    let mut session = case.admit(&honest, &store).expect("admitted");
     let head = loop {
         let head = session.record().accepted().time();
         let (next, receipt) = one_step(session);
@@ -1142,19 +1156,6 @@ fn the_resume_gate_presses_the_head_just_before_a_firing() {
         matches!(failure, Err(ReplayFailure::Faulted { .. })),
         "{failure:?}"
     );
-}
-
-#[derive(Default)]
-struct Store(Vec<(Digest, Vec<u8>)>);
-impl HistoryStore for Store {
-    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
-        let link = self.0.iter().find(|known| known.0 == *seal)?;
-        Some(link.1.clone())
-    }
-    fn keep(&mut self, seal: Digest, link: Vec<u8>) -> Result<(), CheckpointError> {
-        self.0.push((seal, link));
-        Ok(())
-    }
 }
 
 const HEADER: usize = 128;
@@ -1210,9 +1211,10 @@ fn short_of_an_ordinal(saved: &Checkpoint, ordinals: usize) -> Checkpoint {
 
 #[test]
 fn a_head_after_a_firing_resumes_and_rewinds_exactly_and_refuses_forged_chance_state() {
+    let store = MemoryStore::default();
     let case = ChanceCase::ectopy().expect("a body").delivering(Vec::new());
     let (core, fresh) = (reference(SECOND), reference(SECOND));
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     loop {
         let (next, receipt) = one_step(session);
         session = next;
@@ -1220,8 +1222,7 @@ fn a_head_after_a_firing_resumes_and_rewinds_exactly_and_refuses_forged_chance_s
             break;
         }
     }
-    let mut store = Store::default();
-    let saved = session.checkpoint(&mut store).expect("saved");
+    let saved = session.checkpoint().expect("saved");
     let identity = session.record().identity().clone();
     let body = case.body();
     let (modes, ordinals, flag) = chance_fields(body);
@@ -1258,9 +1259,10 @@ fn a_head_after_a_firing_resumes_and_rewinds_exactly_and_refuses_forged_chance_s
 
 #[test]
 fn a_long_span_over_a_forcing_lands_its_events_and_never_crawls() {
+    let store = MemoryStore::default();
     let case = ChanceCase::ectopy().expect("a body");
     let core = reference(64 * SECOND);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let (mut steps, mut fired) = (0, 0);
     while session.record().accepted().time() < case.end() {
         let next = session.record().accepted().time().nanoseconds() + 1;
@@ -1278,9 +1280,10 @@ fn a_long_span_over_a_forcing_lands_its_events_and_never_crawls() {
 
 #[test]
 fn a_span_stops_at_a_forcings_knot() {
+    let store = MemoryStore::default();
     let case = ChanceCase::ectopy().expect("a body");
     let core = reference(1_000 * SECOND);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut longest = 0;
     while session.record().accepted().time() < SimTime::from_ns(120 * SECOND) {
         let from = session.record().accepted().time().nanoseconds();
@@ -1293,13 +1296,14 @@ fn a_span_stops_at_a_forcings_knot() {
 
 #[test]
 fn a_core_that_refuses_every_landing_faults_and_publishes_nothing_past_the_crossing() {
+    let store = MemoryStore::default();
     let case = ChanceCase::ectopy().expect("a body");
     let honest = events(&case, &reference(SECOND));
     let core = RefusesEveryLanding {
         inner: reference(SECOND),
         interval_ns: SECOND,
     };
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let stopped = loop {
         let mut attempt = session.step();
         session = loop {
@@ -1340,10 +1344,11 @@ fn a_refused_landing_trial_retries_at_a_halved_span_and_loses_nothing() {
 
 #[test]
 fn a_core_that_keeps_its_history_across_a_firing_is_a_method_mismatch() {
+    let store = MemoryStore::default();
     // No delivery, so a firing is the only breakpoint that can catch it.
     let case = ChanceCase::ectopy().expect("a body").delivering(Vec::new());
     let core = KeepsItsHistoryAcrossAFiring { interval_ns: SECOND };
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let fault = loop {
         let mut attempt = session.step();
         session = loop {
@@ -1365,9 +1370,10 @@ fn a_core_that_keeps_its_history_across_a_firing_is_a_method_mismatch() {
 
 #[test]
 fn a_firing_is_a_breakpoint_a_fresh_session_reaches_from_sealed_state() {
+    let store = MemoryStore::default();
     let case = ChanceCase::ectopy().expect("a body").delivering(Vec::new());
     let core = reference(SECOND);
-    let session = case.admit(&core).expect("admitted");
+    let session = case.admit(&core, &store).expect("admitted");
     let (session, fired) = finished(session, at(1));
     let first = events(&case, &core)[0];
     assert!(fired.is_empty(), "no event yet");
@@ -1399,13 +1405,14 @@ fn a_firing_is_a_breakpoint_a_fresh_session_reaches_from_sealed_state() {
 
 #[test]
 fn a_refusal_discards_the_reset_the_advance_and_the_mode_together() {
+    let store = MemoryStore::default();
     let case = ChanceCase::ectopy().expect("a body");
     let core = RefusesItsFirstTrial {
         inner: reference(SECOND),
         interval_ns: SECOND,
         seen: Cell::new(None),
     };
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     loop {
         let before = session.record().digests();
         match session.step() {
@@ -1453,11 +1460,11 @@ fn a_forcing_period_the_clock_cannot_hold_is_refused_at_binding() {
 
 #[test]
 fn a_forcing_period_the_clock_cannot_hold_is_malformed_under_a_good_digest() {
+    let store = MemoryStore::default();
     let case = ChanceCase::ectopy().expect("a body");
     let core = reference(SECOND);
-    let session = case.admit(&core).expect("admitted");
-    let mut store = Store::default();
-    let saved = session.checkpoint(&mut store).expect("saved");
+    let session = case.admit(&core, &store).expect("admitted");
+    let saved = session.checkpoint().expect("saved");
     let identity = session.record().identity().clone();
     let held = 10.0_f64.to_bits().to_be_bytes();
     let bytes = saved.as_bytes();
@@ -1528,10 +1535,11 @@ fn late_inputs_match_the_known_timeline_when_an_input_moves_a_crossing() {
 
 #[test]
 fn a_delivery_moves_when_a_fed_hazard_crosses() {
+    let store = MemoryStore::default();
     let events = |case: ChanceCase| {
         let case = case.until(at(120));
         let core = reference(SECOND);
-        let mut session = case.admit(&core).expect("admitted");
+        let mut session = case.admit(&core, &store).expect("admitted");
         let mut fired = Vec::new();
         while session.record().accepted().time() < case.end() {
             let next = session.record().accepted().time().nanoseconds() + 1;
@@ -1585,9 +1593,10 @@ fn late_inputs_match(case: fn() -> Result<ChanceCase, AdmissionError>) {
 /// No run writes a posture past straight up or a leg share with no descriptor, so a resume refuses the bytes.
 #[test]
 fn a_posture_no_run_writes_is_malformed() {
+    let store = MemoryStore::default();
     let case = ChanceCase::ectopy().expect("a body");
     let core = reference(SECOND);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let posture = Posture::new(Measure::new(0.75).expect("finite"), Legs::SeatedDependent).expect("in range");
     let id = InputId::new(Digest::of_canonical(b"sit"));
     let event = BoundaryEvent::new(id, at(200), BoundaryInput::Posture(posture));
@@ -1595,8 +1604,7 @@ fn a_posture_no_run_writes_is_malformed() {
     session
         .enqueue(AuthorizedInput::from_command_receipt(command, event))
         .expect("admitted");
-    let mut store = Store::default();
-    let saved = session.checkpoint(&mut store).expect("saved");
+    let saved = session.checkpoint().expect("saved");
     let identity = session.record().identity().clone();
     let resumed = Session::resume(&saved, &identity, case.body(), &core, &store);
     assert!(resumed.is_ok(), "the bytes a run writes read back");
@@ -1685,6 +1693,7 @@ fn a_dry_verify_fires_nothing_and_shows_no_threshold() {
 /// the stage's instant agrees to the solve's own rounding.
 #[test]
 fn a_forcing_is_a_function_of_the_instant_and_not_of_the_step() -> Result<(), InitializationFailure> {
+    let store = MemoryStore::default();
     let (body, held) = holds_a_forcing()?;
     let packet = || -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
         let mut packet = ParameterPacket::new();
@@ -1713,7 +1722,7 @@ fn a_forcing_is_a_function_of_the_instant_and_not_of_the_step() -> Result<(), In
     };
     let value_at_one_second = |interval: u64| -> Result<Compensated, InitializationFailure> {
         let core = reference(interval);
-        let session = admit_fixture(&body, packet()?, BoundaryPort::new(Vec::new())?, &core)?;
+        let session = admit_fixture(&body, packet()?, BoundaryPort::new(Vec::new())?, &core, &store)?;
         let (session, _) = finished(session, at(1));
         Ok(session.record().accepted().value(held))
     };
@@ -1730,6 +1739,7 @@ fn a_forcing_is_a_function_of_the_instant_and_not_of_the_step() -> Result<(), In
 /// has a value at admission only for `p` below one half.
 #[test]
 fn admission_holds_a_draw_at_its_mean() -> Result<(), InitializationFailure> {
+    let store = MemoryStore::default();
     let body = assemble(two_vessels()?, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
         let route = ports.circulation(&mut laws);
@@ -1780,8 +1790,8 @@ fn admission_holds_a_draw_at_its_mean() -> Result<(), InitializationFailure> {
     };
     let core = reference(SECOND);
     let port = || BoundaryPort::new(Vec::new());
-    assert!(admit_fixture(&body, start(0.4999)?, port()?, &core).is_ok());
-    let past = admit_fixture(&body, start(0.5001)?, port()?, &core).err();
+    assert!(admit_fixture(&body, start(0.4999)?, port()?, &core, &store).is_ok());
+    let past = admit_fixture(&body, start(0.5001)?, port()?, &core, &store).err();
     assert!(matches!(past, Some(InitializationFailure::Undefined { .. })));
     Ok(())
 }
@@ -1790,6 +1800,7 @@ fn admission_holds_a_draw_at_its_mean() -> Result<(), InitializationFailure> {
 /// only if it read exactly the mean.
 #[test]
 fn admission_holds_the_forcing_at_its_mean() -> Result<(), InitializationFailure> {
+    let store = MemoryStore::default();
     let (body, _) = holds_a_forcing()?;
     let start = |held: f64| -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
         let mut packet = ParameterPacket::new();
@@ -1824,8 +1835,8 @@ fn admission_holds_the_forcing_at_its_mean() -> Result<(), InitializationFailure
     };
     let core = reference(SECOND);
     let port = || BoundaryPort::new(Vec::new());
-    assert!(admit_fixture(&body, start(3.0)?, port()?, &core).is_ok());
-    let off = admit_fixture(&body, start(3.0001)?, port()?, &core).err();
+    assert!(admit_fixture(&body, start(3.0)?, port()?, &core, &store).is_ok());
+    let off = admit_fixture(&body, start(3.0001)?, port()?, &core, &store).err();
     assert!(matches!(off, Some(InitializationFailure::Inconsistent { .. })));
     Ok(())
 }

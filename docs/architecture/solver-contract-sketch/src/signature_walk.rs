@@ -278,7 +278,7 @@
 //!     Ok(workspace)
 //! }
 //! fn admit<'m>(body: &'m CompiledBody, core: &'m Core, lens: &ObservationLens, row: RowKind,
-//!     cycle: Cycle, tolerance: ErrorScales) -> Option<Session<'m, Running>> {
+//!     cycle: Cycle, tolerance: ErrorScales, store: &'m dyn HistoryStore) -> Option<Session<'m, Running>> {
 //!     let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
 //!     packet.within(tolerance);
 //!     let anchor = Measure::<Pressure>::new(1.0).ok()?; // synthetic, deliberately not physiological
@@ -299,7 +299,7 @@
 //!     let _how = origin.provenance();
 //!     let identity = RunIdentity::new(body.model_hash(), origin.packet_hash(),
 //!         Seed::new([1, 2, 3, 4]), core.resolution());
-//!     Session::admit(body, core, origin, identity).ok()
+//!     Session::admit(body, core, origin, identity, store).ok()
 //! }
 //!
 //! impl CoupledSolver for Core {
@@ -388,7 +388,7 @@
 //! }
 //!
 //! // 8. Step: accept, refuse and retry smaller, or latch on a fault and recover on a new branch.
-//! fn advance<'m>(session: Session<'m, Running>, earlier: &Checkpoint, history: &mut dyn HistoryStore)
+//! fn advance<'m>(session: Session<'m, Running>, earlier: &Checkpoint)
 //!     -> Result<Session<'m, Running>, CheckpointError> {
 //!     let mut attempt = session.step();
 //!     loop {
@@ -399,7 +399,7 @@
 //!                 retrying.retry()
 //!             }
 //!             Step::Faulted(stopped) => {
-//!                 let _report: FaultReport = stopped.export(history)?;
+//!                 let _report: FaultReport = stopped.export()?;
 //!                 return stopped.recover(earlier, BranchId::new(Digest::of_canonical(b"b1")));
 //!             }
 //!         };
@@ -408,8 +408,8 @@
 //!
 //! // 9. Checkpoint and resume: state, continuation and the last dense segment together.
 //! fn resume<'m>(session: &Session<'m, Running>, body: &'m CompiledBody, core: &'m Core,
-//!     history: &mut dyn HistoryStore) -> Result<Session<'m, Running>, CheckpointError> {
-//!     let saved = session.checkpoint(history)?;
+//!     history: &'m dyn HistoryStore) -> Result<Session<'m, Running>, CheckpointError> {
+//!     let saved = session.checkpoint()?;
 //!     let stored: Vec<u8> = saved.as_bytes().to_vec(); // to durable storage and back
 //!     let bytes = Checkpoint::from_bytes(stored);
 //!     let resumed = Session::resume(&bytes, session.record().identity(), body, core, history)?;
@@ -429,7 +429,7 @@
 //!
 //! // 11. Certificate: one sealed view of one record, with the segment queries it needs.
 //! fn certify_run(session: &Session<'_, Running>, body: &CompiledBody) -> Option<Certificate> {
-//!     let view = session.record().conservation();
+//!     let view = session.conservation();
 //!     let _sealed: HistorySeal = view.seal();
 //!     let limit = |value| Measure::<Water>::new(value).ok();
 //!     let mut quantities = Vec::new();
@@ -441,7 +441,8 @@
 //!     let policy = CertificatePolicy::new(body.conserved_basis(), quantities, ExpectedDrift::Zero, windows).ok()?;
 //!     let first = view.basis().combinations().first()?.id();
 //!     let held = view.basis().coverage().held_routes();
-//!     for segment in view.segments() {
+//!     for segment in view.newest_first() {
+//!         let segment = segment.ok()?;
 //!         let piece = segment.interval();
 //!         let _shape = (piece.start(), segment.basis().family(), segment.basis().degree());
 //!         let _inventory = segment.inventory(first).on(piece);

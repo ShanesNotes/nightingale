@@ -73,10 +73,6 @@ impl PatientRecord<'_> {
     pub fn publish(&mut self, _next: NextImage) -> StepReceipt {
         todo!()
     }
-    /// The one history object the certificate reads.
-    pub fn conservation(&self) -> ConservationView<'_> {
-        todo!()
-    }
     /// One digest per part, recomputed from the live fields on every call. It reads no seal, because
     /// a seal would still match if a field changed underneath it.
     pub fn digests(&self) -> RecordDigests {
@@ -205,7 +201,7 @@ impl Impulse {
 struct History {
     _basis: Digest,
     _opening: Vec<Compensated>,
-    _chunks: Vec<LedgerChunk>,
+    _head: Option<LedgerChunk>,
 }
 /// Run identity, branch and the accepted base this view was lent at.
 #[derive(Clone, Copy)]
@@ -214,10 +210,12 @@ pub struct HistorySeal {
     pub branch: Digest,
     pub base: Digest,
 }
-/// One immutable, sealed view of one record's history over one conserved basis. There is no way
-/// to pair one record's inventories with another's exchanges.
+/// One immutable, sealed view of one record's history over one conserved basis: the head from memory
+/// and every older segment through the session's store. There is no way to pair one record's
+/// inventories with another's exchanges.
 pub struct ConservationView<'r> {
     _history: &'r History,
+    _store: &'r dyn HistoryStore,
     _basis: &'r ConservedBasis,
     _seal: HistorySeal,
 }
@@ -232,29 +230,28 @@ impl<'r> ConservationView<'r> {
     pub fn span(&self) -> Option<Interval> {
         todo!()
     }
-    /// Every accepted segment in time order, each ending where the next starts.
-    pub fn segments(&self) -> Segments<'r> {
+    /// The last accepted segment; `None` before the first accepted step.
+    pub fn head(&self) -> Option<HistorySegment> {
+        todo!()
+    }
+    /// Every accepted segment, newest first, each starting where the one before it in time ends.
+    pub fn newest_first(&self) -> NewestFirst<'r> {
         todo!()
     }
 }
-pub struct Segments<'r> {
-    _chunks: core::slice::Iter<'r, LedgerChunk>,
+pub struct NewestFirst<'r> {
+    _store: &'r dyn HistoryStore,
 }
-impl<'r> Iterator for Segments<'r> {
-    type Item = HistorySegment<'r>;
-    fn next(&mut self) -> Option<HistorySegment<'r>> {
+impl Iterator for NewestFirst<'_> {
+    type Item = Result<HistorySegment, CheckpointError>;
+    fn next(&mut self) -> Option<Self::Item> {
         todo!()
     }
 }
-impl<'r> DoubleEndedIterator for Segments<'r> {
-    fn next_back(&mut self) -> Option<HistorySegment<'r>> {
-        todo!()
-    }
+pub struct HistorySegment {
+    _chunk: LedgerChunk,
 }
-pub struct HistorySegment<'r> {
-    _chunk: &'r LedgerChunk,
-}
-impl<'r> HistorySegment<'r> {
+impl HistorySegment {
     pub fn interval(&self) -> Interval {
         todo!()
     }
@@ -262,30 +259,30 @@ impl<'r> HistorySegment<'r> {
     pub fn basis(&self) -> DenseBasis {
         todo!()
     }
-    pub fn inventory(&self, _quantity: QuantityId) -> Curve<'r> {
+    pub fn inventory(&self, _quantity: QuantityId) -> Curve<'_> {
         todo!()
     }
     /// Cumulative gross inflow since admission.
-    pub fn inflow(&self, _quantity: QuantityId) -> Curve<'r> {
+    pub fn inflow(&self, _quantity: QuantityId) -> Curve<'_> {
         todo!()
     }
     /// Cumulative gross outflow since admission.
-    pub fn outflow(&self, _quantity: QuantityId) -> Curve<'r> {
+    pub fn outflow(&self, _quantity: QuantityId) -> Curve<'_> {
         todo!()
     }
     /// One column's cumulative gross forward and reverse extents since admission.
-    pub fn exchange(&self, _column: ColumnId) -> (Curve<'r>, Curve<'r>) {
+    pub fn exchange(&self, _column: ColumnId) -> (Curve<'_>, Curve<'_>) {
         todo!()
     }
     /// Gross exchange on one held route (`CoverageManifest::held_routes`), summed from its columns,
     /// apart from its combination's totals.
-    pub fn held_inflow(&self, _route: HeldRouteId) -> Curve<'r> {
+    pub fn held_inflow(&self, _route: HeldRouteId) -> Curve<'_> {
         todo!()
     }
-    pub fn held_outflow(&self, _route: HeldRouteId) -> Curve<'r> {
+    pub fn held_outflow(&self, _route: HeldRouteId) -> Curve<'_> {
         todo!()
     }
-    pub fn impulses(&self) -> &'r [Impulse] {
+    pub fn impulses(&self) -> &[Impulse] {
         todo!()
     }
 }
@@ -303,9 +300,11 @@ impl Curve<'_> {
     }
 }
 
-/// The host's session over one record, bound at admission to one compiled body and one solver.
+/// The host's session over one record, bound at admission to one compiled body, one solver and
+/// one history store.
 pub struct Session<'m, S> {
     _solver: &'m dyn CoupledSolver,
+    _store: &'m dyn HistoryStore,
     _record: Box<PatientRecord<'m>>,
     _status: S,
 }
@@ -330,6 +329,11 @@ pub enum Step<'m> {
 }
 impl<'m, S> Session<'m, S> {
     pub fn record(&self) -> &PatientRecord<'m> {
+        todo!()
+    }
+    /// The one history object the certificate reads: the head from memory and every older segment
+    /// through this session's store.
+    pub fn conservation(&self) -> ConservationView<'_> {
         todo!()
     }
     /// Reads the last accepted image through a lens, also after a fault. A lens compiled for
@@ -385,6 +389,7 @@ impl<'m> Session<'m, Running> {
         _solver: &'m dyn CoupledSolver,
         _origin: InitialRevision,
         _identity: RunIdentity,
+        _store: &'m dyn HistoryStore,
     ) -> Result<Self, AdmissionError> {
         todo!()
     }
@@ -395,7 +400,7 @@ impl<'m> Session<'m, Running> {
         _expected: &RunIdentity,
         _body: &'m CompiledBody,
         _solver: &'m dyn CoupledSolver,
-        _store: &dyn HistoryStore,
+        _store: &'m dyn HistoryStore,
     ) -> Result<Self, CheckpointError> {
         todo!()
     }
@@ -408,13 +413,13 @@ impl<'m> Session<'m, Running> {
     pub fn step(self) -> Step<'m> {
         todo!()
     }
-    /// Saves the latest accepted boundary; never cuts an interval. `store` takes the links it lacks
-    /// first, so the bytes this returns are complete with that store.
-    pub fn checkpoint(&self, _store: &mut dyn HistoryStore) -> Result<Checkpoint, CheckpointError> {
+    /// Saves the latest accepted boundary; never cuts an interval. It is refused while a link the
+    /// store refused waits, so the bytes this returns are complete with that store.
+    pub fn checkpoint(&self) -> Result<Checkpoint, CheckpointError> {
         todo!()
     }
     /// A new branch from a checkpoint on this branch's own chain, with ancestry, through the path a
-    /// load takes. The parent is untouched, and the solver is this session's.
+    /// load takes. The parent is untouched, and the solver and store are this session's.
     pub fn rewind(&self, _saved: &Checkpoint, _branch: BranchId) -> Result<Session<'m, Running>, CheckpointError> {
         todo!()
     }
@@ -438,7 +443,7 @@ impl<'m> Session<'m, Faulted> {
         todo!()
     }
     /// The image is marked, so `resume` refuses it: a faulted run goes on only through `recover`.
-    pub fn export(&self, _store: &mut dyn HistoryStore) -> Result<FaultReport, CheckpointError> {
+    pub fn export(&self) -> Result<FaultReport, CheckpointError> {
         todo!()
     }
     /// The only way on: a NEW branch from a checkpoint on this branch's own chain, with ancestry.
@@ -506,9 +511,10 @@ pub enum CheckpointError {
     NotOnThisBranch,
 }
 /// Durable storage for the chain's links, addressed by seal. It is host code and trusted for nothing:
-/// a walk chains what comes back to the seal it asked for. A checkpoint is complete only with a store
-/// that keeps what it took.
+/// a walk chains what comes back to the seal it asked for. A session hands it each link as its step
+/// is accepted, and a store that loses a link fails the next walk that needs it, by that link's seal.
 pub trait HistoryStore {
     fn resolve(&self, seal: &Digest) -> Option<Vec<u8>>;
-    fn keep(&mut self, seal: Digest, link: Vec<u8>) -> Result<(), CheckpointError>;
+    /// Keeping a seal it holds changes nothing, so every session of a run may share one store.
+    fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError>;
 }

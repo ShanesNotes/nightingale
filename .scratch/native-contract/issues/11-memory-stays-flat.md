@@ -6,9 +6,19 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 Blocked by: None (can start immediately)
 
-Status: ready-for-agent
+Status: resolved
 
-- [ ] `tools/bench` reads the same peak memory, within its stated margin, for two slice runs of different lengths, and reports the history's bytes per accepted step
+- [x] `tools/bench` reads the same peak memory, within its stated margin, for two slice runs of different lengths, and reports the history's bytes per accepted step
+
+## Answer
+
+A run's resident memory no longer grows with its accepted steps. Each accepted step hands its link to the session's history store, and the record keeps only the chain's head.
+
+- **`tools/bench` reads the same peak memory, within its stated margin, for two slice runs of different lengths, and reports the history's bytes per accepted step.** `python3 -I tools/bench/run.py memory` runs the slice on the reference core at 5 ms for 5 s (1154 accepted steps) and 50 s (11578), five fresh processes each, taking turns. Measured on the tower: run peaks of 4808 kB and 4816 kB (medians), 8 kB apart against a 512 kB margin, eight times the 64 kB run-to-run spread. That is a slope of 1 byte a step. The history is 18584 bytes a step on disk, so by arithmetic a 48 h slice run at the arena's 212 steps a simulated second writes about 680 GB, and a meal check to 11:30 about 65 GB. A resume from the long run's checkpoint peaks at 4748 kB and lands on the run's seal. Main at b8990a5 read 26968 kB at 1154 steps and 103912 kB at 5046 (whole-process peak), 19.8 KB a step. The bench resets the high-water mark after admission and returns free heap first, because freed heap that stays resident hid a planted 256-byte-a-step leak until it did.
+- The session holds the store from admission (`Session::admit`, `admit_at` and every fixture take one), beside its solver, so the record stays `Sync`. A link the store refuses waits in the record, and `checkpoint` and `export` refuse with `StoreFailed` until a later step's store keeps it.
+- Resume, rewind, recover and the certificate read older links newest first through one checked walk. A fork proves the checkpoint is on its parent's chain by walking that chain through the store. `certify` walks backward with two cursors a day apart, and today's forward walk stays in the tests as an oracle every certificate test agrees with.
+- `RecordDigests.ledger` now digests the opening, the incidence and the head chunk, the ledger's account at the head; the seal still covers every chunk. The ledger pins in `WATER_DIGESTS`, `SOLVER_DIGESTS` and `CHANCE_DIGESTS` moved, and a run resumed from main's own checkpoint and links reports the new `WATER_DIGESTS`.
+- Inside the workspace every store holds its links in memory (`MemoryStore`), because no workspace crate names `std`. Flat memory needs a host whose store is outside the process, as the bench's `LinkLog` is.
 
 ## Comments
 

@@ -1,4 +1,5 @@
 use crate::checkpoint::{BranchId, Checkpoint, CheckpointError, Continuing, HistoryStore, restore};
+use crate::history::ConservationView;
 use crate::record::{AuthorizedInput, InputReceipt, NextImage, PatientRecord, StepReceipt};
 use ng_contract::{
     AdmissionError, Attempt, CompiledBody, CoupledSolver, EngineFault, InitialRevision, Refused, RunIdentity,
@@ -7,6 +8,7 @@ use ng_contract::{
 
 pub struct Session<'m, S> {
     solver: &'m dyn CoupledSolver,
+    store: &'m dyn HistoryStore,
     record: Box<PatientRecord<'m>>,
     status: S,
 }
@@ -29,17 +31,19 @@ pub enum Step<'m> {
 
 fn settle<'m>(
     solver: &'m dyn CoupledSolver,
+    store: &'m dyn HistoryStore,
     mut record: Box<PatientRecord<'m>>,
     refusals: Vec<Refused>,
     outcome: Result<NextImage, TrialFailure>,
 ) -> Step<'m> {
     match outcome {
         Ok(next) => {
-            let receipt = record.publish(next);
+            let receipt = record.publish(next, store);
             let status = Running;
             Step::Accepted(
                 Session {
                     solver,
+                    store,
                     record,
                     status,
                 },
@@ -48,6 +52,7 @@ fn settle<'m>(
         }
         Err(TrialFailure::Refused(refused)) => Step::Refused(Session {
             solver,
+            store,
             record,
             status: Retrying {
                 refused,
@@ -56,6 +61,7 @@ fn settle<'m>(
         }),
         Err(TrialFailure::EngineFault(fault)) => Step::Faulted(Session {
             solver,
+            store,
             record,
             status: Faulted { fault, refusals },
         }),
@@ -66,29 +72,23 @@ impl<'m, S> Session<'m, S> {
     pub fn record(&self) -> &PatientRecord<'m> {
         &self.record
     }
-    /// The solver is this session's, so a core that kept state while the parent ran ahead carries it into
-    /// the fork.
+    pub fn conservation(&self) -> ConservationView<'_> {
+        self.record.conservation(self.store)
+    }
     fn fork(
         &self,
         saved: &Checkpoint,
         branch: BranchId,
-        continuing: Continuing,
+        continuing: Continuing<'_>,
     ) -> Result<Session<'m, Running>, CheckpointError> {
         if self.record.branch().uses(branch.digest()) {
             return Err(CheckpointError::BranchInUse);
         }
-        let resolve = self.record.history().resolver();
         let identity = self.record.identity();
-        let body = self.record.body();
-        let record = restore(saved, identity, body, &resolve, continuing).map_err(|error| match error {
-            CheckpointError::HistoryMissing { .. } => CheckpointError::NotOnThisBranch,
-            other => other,
-        })?;
-        if record.history().format() != self.record.history().format() {
-            return Err(CheckpointError::NotOnThisBranch);
-        }
+        let record = restore(saved, identity, self.record.body(), self.store, continuing)?;
         Ok(Session {
             solver: self.solver,
+            store: self.store,
             record: Box::new(record),
             status: Running,
         })
@@ -101,6 +101,7 @@ impl<'m> Session<'m, Running> {
         solver: &'m dyn CoupledSolver,
         origin: InitialRevision,
         identity: RunIdentity,
+        store: &'m dyn HistoryStore,
     ) -> Result<Self, AdmissionError> {
         let resolution = solver.resolution();
         if identity.model() != body.model_hash()
@@ -112,6 +113,7 @@ impl<'m> Session<'m, Running> {
         }
         Ok(Self {
             solver,
+            store,
             record: Box::new(PatientRecord::admit(body, identity, origin)),
             status: Running,
         })
@@ -123,17 +125,17 @@ impl<'m> Session<'m, Running> {
         expected: &RunIdentity,
         body: &'m CompiledBody,
         solver: &'m dyn CoupledSolver,
-        store: &dyn HistoryStore,
+        store: &'m dyn HistoryStore,
     ) -> Result<Self, CheckpointError> {
         if expected.model() != body.model_hash()
             || expected.resolution().digest() != solver.resolution().digest()
         {
             return Err(CheckpointError::IdentityMismatch);
         }
-        let resolve = |seal: &_| store.resolve(seal);
-        let record = restore(saved, expected, body, &resolve, Continuing::Resume)?;
+        let record = restore(saved, expected, body, store, Continuing::Resume)?;
         Ok(Self {
             solver,
+            store,
             record: Box::new(record),
             status: Running,
         })
@@ -146,17 +148,18 @@ impl<'m> Session<'m, Running> {
     pub fn step(self) -> Step<'m> {
         let Self {
             solver,
+            store,
             record,
             status: Running,
         } = self;
         let span_ns = solver.next_step(record.accepted());
         let outcome = record.attempt(solver, Attempt::First { span_ns });
-        settle(solver, record, Vec::new(), outcome)
+        settle(solver, store, record, Vec::new(), outcome)
     }
-    /// A checkpoint of the accepted head, which never cuts an interval. `store` takes the links it lacks
-    /// first, so the bytes this returns are complete with that store.
-    pub fn checkpoint(&self, store: &mut dyn HistoryStore) -> Result<Checkpoint, CheckpointError> {
-        self.record.checkpoint(store, false)
+    /// A checkpoint of the accepted head, which never cuts an interval. It is refused while the store has not
+    /// kept every link, so the bytes it returns are complete with that store.
+    pub fn checkpoint(&self) -> Result<Checkpoint, CheckpointError> {
+        self.record.checkpoint(false)
     }
     /// A new branch from a checkpoint on this branch's own chain, with ancestry.
     pub fn rewind(
@@ -164,7 +167,8 @@ impl<'m> Session<'m, Running> {
         saved: &Checkpoint,
         branch: BranchId,
     ) -> Result<Session<'m, Running>, CheckpointError> {
-        self.fork(saved, branch, Continuing::Rewind(branch))
+        let parent = self.record.history();
+        self.fork(saved, branch, Continuing::Rewind(branch, parent))
     }
 }
 impl<'m> Session<'m, Retrying> {
@@ -175,12 +179,13 @@ impl<'m> Session<'m, Retrying> {
     pub fn retry(self) -> Step<'m> {
         let Self {
             solver,
+            store,
             record,
             status: Retrying { refused, mut earlier },
         } = self;
         let outcome = record.attempt(solver, Attempt::After(&refused));
         earlier.push(refused);
-        settle(solver, record, earlier, outcome)
+        settle(solver, store, record, earlier, outcome)
     }
 }
 impl<'m> Session<'m, Faulted> {
@@ -192,9 +197,9 @@ impl<'m> Session<'m, Faulted> {
         &self.status.refusals
     }
     /// The image is marked, so `resume` refuses it: a faulted run goes on only through `recover`.
-    pub fn export(&self, store: &mut dyn HistoryStore) -> Result<FaultReport, CheckpointError> {
+    pub fn export(&self) -> Result<FaultReport, CheckpointError> {
         Ok(FaultReport {
-            last_accepted: self.record.checkpoint(store, true)?,
+            last_accepted: self.record.checkpoint(true)?,
             fault: self.status.fault,
             refusals: self.status.refusals.clone(),
         })
@@ -205,7 +210,8 @@ impl<'m> Session<'m, Faulted> {
         earlier: &Checkpoint,
         branch: BranchId,
     ) -> Result<Session<'m, Running>, CheckpointError> {
-        self.fork(earlier, branch, Continuing::Recover(branch))
+        let parent = self.record.history();
+        self.fork(earlier, branch, Continuing::Recover(branch, parent))
     }
 }
 

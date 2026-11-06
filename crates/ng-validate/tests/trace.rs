@@ -32,13 +32,14 @@ struct FirstSecond {
 }
 
 fn first_second(core: &dyn CoupledSolver) -> FirstSecond {
+    let store = MemoryStore::default();
     let body = arena_body().expect("compiled");
     let (packet, lens) = (
         arena_packet(&body).expect("a packet"),
         arena_lens(&body).expect("a lens"),
     );
     let port = BoundaryPort::new(Vec::new()).expect("no event");
-    let admitted = admit_at(&body, packet, port, core, &lens, anchor_moment()).expect("admitted");
+    let admitted = admit_at(&body, packet, port, core, &lens, anchor_moment(), &store).expect("admitted");
     let named = hex(admitted.session.record().identity().packet().digest());
     let at = |key| Context::Site(site::<VesselSegment>(key));
     let (arteries, atrium) = (at("systemic arteries"), at("right atrium"));

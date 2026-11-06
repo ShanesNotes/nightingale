@@ -153,12 +153,12 @@
 //!     certify(first.inventory_history(), second.ledger(), policy)
 //! }
 //! ```
-//! Legal twin: one sealed view of one record.
+//! Legal twin: one sealed view of one record, lent by its session.
 //! ```
-//! use solver_contract_sketch::{ng_record::PatientRecord, ng_validate::*};
-//! fn one(record: &PatientRecord, policy: &CertificatePolicy)
+//! use solver_contract_sketch::{ng_record::{Running, Session}, ng_validate::*};
+//! fn one(session: &Session<'_, Running>, policy: &CertificatePolicy)
 //!     -> Result<Certificate, CertificateFailure> {
-//!     certify(&record.conservation(), policy)
+//!     certify(&session.conservation(), policy)
 //! }
 //! ```
 //!
