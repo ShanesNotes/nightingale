@@ -231,7 +231,7 @@ reason = "new holds the entries to the basis's quantities in basis order, and th
 
 [[crate.seal_skip]]
 item = "accuracy::AccuracyPolicy::digest"
-field = "identity"
+field = "check"
 reason = "the refusing values, bound from the fixture the digest seals by a rule the case's kind names"
 
 [[crate.seal_skip]]

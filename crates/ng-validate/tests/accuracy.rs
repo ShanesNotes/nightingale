@@ -36,7 +36,6 @@ fn amount_slots(problem: &CoupledProblem<'_>) -> Vec<usize> {
         .collect()
 }
 
-/// Refuses any head where one amount holds under a tenth of another: a reference range kept in a core.
 struct RefusesNearEmpty {
     inner: ReferenceIntegrator,
 }
@@ -63,7 +62,6 @@ impl CoupledSolver for RefusesNearEmpty {
     }
 }
 
-/// Takes a falling total for a leak and refuses the step.
 struct LeakGuard {
     inner: ReferenceIntegrator,
 }
@@ -77,12 +75,11 @@ impl CoupledSolver for LeakGuard {
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let workspace = problem.workspace();
         let head = problem.evaluate(&workspace.point(ticket.at(0)?))?;
-        // At a zero tangent each amount's residual is minus its rate.
-        let falling: f64 = amount_slots(problem)
+        let total_rate: f64 = amount_slots(problem)
             .into_iter()
-            .map(|slot| head.residuals()[slot])
+            .map(|slot| -head.residuals()[slot])
             .sum();
-        if falling > 0.0 {
+        if total_rate < 0.0 {
             return Err(ticket.refuse(NumericalRefusal::IterationLimit));
         }
         self.inner.solve(problem, ticket)
@@ -91,27 +88,32 @@ impl CoupledSolver for LeakGuard {
 
 #[derive(Clone, Copy)]
 enum Stop {
-    /// Settles when an update moves each unknown by no more than rounding, as the reference does.
     Rounding,
-    /// Settles when the residual falls a thousandfold from the stage's first, which is 0 / 0 at rest.
-    Relative,
+    RatioToFirst,
 }
 
-/// Doubled backward Euler with its own Newton. With the reference's stop it remembers a refused evaluation.
 struct Newton {
     stop: Stop,
-    /// One until an evaluation is refused, and a half after.
+    remembers_refusal: bool,
     damping: Cell<f64>,
 }
 impl Newton {
-    fn new(stop: Stop) -> Self {
+    fn relative_stop() -> Self {
         Self {
-            stop,
+            stop: Stop::RatioToFirst,
+            remembers_refusal: false,
+            damping: Cell::new(1.0),
+        }
+    }
+    fn remembering_refusals() -> Self {
+        Self {
+            stop: Stop::Rounding,
+            remembers_refusal: true,
             damping: Cell::new(1.0),
         }
     }
     fn refused<T>(&self, outcome: Result<T, TrialFailure>) -> Result<T, TrialFailure> {
-        if outcome.is_err() && matches!(self.stop, Stop::Rounding) {
+        if outcome.is_err() && self.remembers_refusal {
             self.damping.set(0.5);
         }
         outcome
@@ -145,7 +147,8 @@ impl Newton {
                     },
                 );
             let first = *first.get_or_insert(size);
-            settled |= matches!(self.stop, Stop::Relative) && size / first <= 1e-3;
+            let reduction = size / first;
+            settled |= matches!(self.stop, Stop::RatioToFirst) && reduction <= 1e-3;
             if settled {
                 return Ok(stage);
             }
@@ -172,7 +175,7 @@ impl CoupledSolver for Newton {
     fn resolution(&self) -> DeclaredResolution {
         match self.stop {
             Stop::Rounding => resolution(b"keeps its damping"),
-            Stop::Relative => resolution(b"relative stop"),
+            Stop::RatioToFirst => resolution(b"relative stop"),
         }
     }
     fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
@@ -195,11 +198,10 @@ impl CoupledSolver for Newton {
     }
 }
 
-/// Refuses its first attempt at admission without evaluating anything.
-struct RefusesUnseen {
+struct RefusesBeforeEvaluating {
     inner: ReferenceIntegrator,
 }
-impl CoupledSolver for RefusesUnseen {
+impl CoupledSolver for RefusesBeforeEvaluating {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
@@ -222,7 +224,6 @@ fn alone(case: AccuracyCase) -> AccuracyPolicy {
     AccuracyPolicy::new(vec![case], measure(5.0), measure(0.0), 100 * SECOND).expect("a policy")
 }
 
-/// Which failure a case gave, by name, so one table holds the whole matrix.
 fn verdict(core: &dyn CoupledSolver, case: AccuracyCase) -> &'static str {
     match accuracy(core, &alone(case)) {
         Ok(_) => "pass",
@@ -262,12 +263,12 @@ fn each_case_rejects_the_core_built_to_fail_it_and_the_stepped_inflow_passes_the
         ),
         (
             "relative stop",
-            &Newton::new(Stop::Relative),
+            &Newton::relative_stop(),
             ["pass", "pass", "no step", "pass", "pass"],
         ),
         (
             "keeps its damping",
-            &Newton::new(Stop::Rounding),
+            &Newton::remembering_refusals(),
             ["pass", "pass", "pass", "pass", "dependent"],
         ),
     ];
@@ -282,7 +283,7 @@ fn each_case_rejects_the_core_built_to_fail_it_and_the_stepped_inflow_passes_the
 
 #[test]
 fn a_core_that_remembers_a_refusal_still_meets_the_closed_form() {
-    let core = Newton::new(Stop::Rounding);
+    let core = Newton::remembering_refusals();
     let closed = TwoReservoirs::closed()
         .expect("a body")
         .until(SimTime::from_ns(2_000 * SECOND));
@@ -296,7 +297,7 @@ fn a_core_that_remembers_a_refusal_still_meets_the_closed_form() {
 
 #[test]
 fn an_independence_case_whose_core_evaluated_nothing_tested_nothing() {
-    let core = RefusesUnseen { inner: reference() };
+    let core = RefusesBeforeEvaluating { inner: reference() };
     let closed = TwoReservoirs::closed()
         .expect("a body")
         .until(SimTime::from_ns(2_000 * SECOND));

@@ -87,7 +87,6 @@ impl TwoReservoirs {
         let start = start.map(|amount| number(&amount));
         Self::declared(Some(BoundaryDirection::OutOfBody), None, start, deliveries)
     }
-    /// One removal takes `a` below one percent of its start, then `b` refills it once the removal stops.
     pub(crate) fn drain_and_refill() -> Result<Self, AdmissionError> {
         let removal = Delivery {
             id: b"drain",
@@ -98,7 +97,6 @@ impl TwoReservoirs {
         let start = [Measure::new(5_050.0)?, Measure::new(4_950.0)?];
         Ok(Self::draining(start, vec![removal])?.until(SimTime::from_ns(6_000 * SECOND)))
     }
-    /// Equal amounts hold the route at exactly zero flow until an inflow into `a` restores it.
     pub(crate) fn zero_flow_restore() -> Result<Self, AdmissionError> {
         let inflow = Delivery {
             id: b"restoring inflow",
@@ -109,7 +107,6 @@ impl TwoReservoirs {
         let start = [Measure::new(500_000.0)?, Measure::new(500_000.0)?];
         Ok(Self::delivering(start, vec![inflow])?.until(SimTime::from_ns(6_000 * SECOND)))
     }
-    /// Two removals overlap and a third starts as the first ends.
     pub(crate) fn controlled_removal() -> Result<Self, AdmissionError> {
         let removal = |id, from, to, amount| -> Result<Delivery, AdmissionError> {
             Ok(Delivery {
@@ -265,9 +262,7 @@ impl TwoReservoirs {
     pub fn other_values(&self) -> Result<BoundParameters, AdmissionError> {
         self.body.bind(self.packet(2.0 * CONDUCTANCE)?)
     }
-    /// A conductance so large that the flow at any unequal amounts is not finite, so each evaluation off rest
-    /// is refused.
-    pub(crate) fn refusing_values(&self) -> Result<BoundParameters, AdmissionError> {
+    pub(crate) fn overflowing_values(&self) -> Result<BoundParameters, AdmissionError> {
         self.body.bind(self.packet(f64::MAX)?)
     }
     /// Everything that makes this case this case, so two cases on one body never share an identity.

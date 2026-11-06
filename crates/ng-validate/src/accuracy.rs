@@ -38,24 +38,22 @@ impl AccuracyCase {
     }
 }
 
-/// What a case checks beside its closed form.
-enum Identity {
-    None,
-    /// The values the core is handed for its refused evaluations.
-    Independence(Box<BoundParameters>),
+enum Check {
+    ClosedForm,
+    Independence { refusing: Box<BoundParameters> },
 }
 
 struct Manufactured {
     kind: u8,
     fixture: TwoReservoirs,
-    identity: Identity,
+    check: Check,
 }
 impl Manufactured {
     fn of(case: AccuracyCase) -> Result<Self, AdmissionError> {
         let plain = |kind, fixture| Self {
             kind,
             fixture,
-            identity: Identity::None,
+            check: Check::ClosedForm,
         };
         Ok(match case {
             AccuracyCase::TwoReservoir(fixture) => plain(0, *fixture),
@@ -66,7 +64,9 @@ impl Manufactured {
                 let fixture = TwoReservoirs::closed()?.until(SimTime::from_ns(2_000 * SECOND));
                 Self {
                     kind: 4,
-                    identity: Identity::Independence(Box::new(fixture.refusing_values()?)),
+                    check: Check::Independence {
+                        refusing: Box::new(fixture.overflowing_values()?),
+                    },
                     fixture,
                 }
             }
@@ -105,8 +105,7 @@ impl AccuracyPolicy {
             grid_ns,
         })
     }
-    /// Every manufactured case under the model defaults. The reference's worst error on them at 16 s steps is
-    /// 3.81, on the drain, so an absolute limit of 5 passes it and refuses forward Euler past RC.
+    /// Every manufactured case under the model defaults.
     pub fn manufactured() -> Result<Self, AdmissionError> {
         let absolute = Measure::new(5.0)?;
         Self::new(
@@ -134,7 +133,7 @@ impl AccuracyPolicy {
         for Manufactured {
             kind,
             fixture,
-            identity: _,
+            check: _,
         } in cases
         {
             bytes.push(*kind);
@@ -244,7 +243,7 @@ pub fn accuracy(
 ) -> Result<AccuracyEvidence, AccuracyFailure> {
     let mut worst = Vec::with_capacity(policy.cases.len());
     for (index, case) in policy.cases.iter().enumerate() {
-        if let Identity::Independence(refusing) = &case.identity {
+        if let Check::Independence { refusing } = &case.check {
             independent(solver, &case.fixture, refusing, index)?;
         }
         worst.push(closed_form(solver, &case.fixture, policy, index)?);
@@ -294,8 +293,6 @@ fn closed_form(
     Ok(largest)
 }
 
-/// Two admissions of one case meet the same head. On the second, the core's evaluations are refused there
-/// first, and the first step from each must publish the same bits.
 fn independent(
     solver: &dyn CoupledSolver,
     case: &TwoReservoirs,
@@ -332,7 +329,6 @@ fn independent(
     Ok(())
 }
 
-/// Hands the core a problem on values whose evaluations the contract refuses.
 struct Refusing<'c> {
     core: &'c dyn CoupledSolver,
     values: &'c BoundParameters,
@@ -357,13 +353,11 @@ impl CoupledSolver for Refusing<'_> {
     }
 }
 
-/// Reads one stage at the head, the accepted state at the ticket's end with a zero tangent, and publishes
-/// nothing.
-struct Probe<'c> {
+struct StageAtHead<'c> {
     core: &'c dyn CoupledSolver,
     bits: RefCell<Option<Vec<u64>>>,
 }
-impl CoupledSolver for Probe<'_> {
+impl CoupledSolver for StageAtHead<'_> {
     fn resolution(&self) -> DeclaredResolution {
         self.core.resolution()
     }
@@ -383,7 +377,7 @@ impl CoupledSolver for Probe<'_> {
 }
 
 fn stage_bits(core: &dyn CoupledSolver, record: &PatientRecord<'_>) -> Option<Vec<u64>> {
-    let probe = Probe {
+    let probe = StageAtHead {
         core,
         bits: RefCell::new(None),
     };
