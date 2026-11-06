@@ -6,9 +6,20 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 Blocked by: 11
 
-Status: ready-for-agent
+Status: resolved
 
-- [ ] A short slice window's `run` returns throughput beside the record, timed by a clock that a host outside the workspace passes in, with compilation and admission timed apart
+- [x] A short slice window's `run` returns throughput beside the record, timed by a clock that a host outside the workspace passes in, with compilation and admission timed apart
+
+## Answer
+
+`ng_validate::run(body, solver, spec, clock, store)` returns an `ArenaRun`: the session at the window's end, and `RunEvidence` that binds `ThroughputEvidence` to the run identity's digest.
+
+- **A short slice window's `run` returns throughput beside the record, timed by a clock that a host outside the workspace passes in, with compilation and admission timed apart.** `a_short_slice_window_reports_throughput_beside_the_record` (`crates/ng-validate/tests/throughput.rs`) runs the slice's 2 s from 06:55 on the reference core at 5 ms, twice. The scripted readings give admission 7 s and the repeats 2 s and 3 s. The evidence also holds the simulated span, the accepted steps, the clock's source and 6 waveform samples, which are two one-second means on each of three channels. `run` compiles nothing, so its host times compilation with the same clock. `tools/bench`'s `arena` mode is that host: `HostClock` wraps `Instant`, times `arena_body()`, passes the clock to `run` and prints the evidence.
+- `ArenaSpec` holds the window, the synthetic packet, the lens, the boundary, the seed and the number of repeats. `run` admits once with the spec's seed and checkpoints the start. Each repeat resumes that checkpoint, then reads the clock, runs the window with an observer on the lens, and reads the clock again. So a repeat's time holds its steps and its waveform, and neither admission nor the resume. Every repeat's time is kept in order. A repeat that ends on another seal or waveform count than the first is `RepeatDiffered`.
+- A clock with no reading left, one that runs backward, one that stands still over a repeat, or a repeat whose observer released no value is `MissingThroughput`. An absence is no sample, and a delayed reading counts once.
+- The certificate's inputs are unchanged. A compile-fail doctest shows that `certify` refuses the run's evidence, and `ThroughputEvidence` has no public constructor.
+- The sketch's `run` takes the clock where it took a `Pace`, and `Pace` is gone from the sketch: the replay gates vary pace, and a paced speed run would time the pace.
+- Not in this ticket: the slowest steps' wall time (SRS section 5, foundation 09), §7's checkpoint cadence inside the timed run, and a named machine.
 
 ## Comments
 

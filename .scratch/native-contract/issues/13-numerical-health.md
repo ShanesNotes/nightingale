@@ -19,3 +19,5 @@ From 10: a stage past a guard is `GuardInside`, a new refusal that the report co
 From 09 and 10, on finding 17: a step stops at the body's tightest rate class and at a forcing's knot, and the record enforces both, so the report can list the recorded classes. An unmoved row's rate class is the slowest band with no limit, so a list of longest intervals skips it.
 
 From the engine bench (nightingale#31): on the slice at 5 ms, 29 percent of attempts were refused and an accepted step took 20 Newton updates, so the refusal counts are worth reading beside throughput.
+
+From ticket 12: `NumericalHealth` joins `RunEvidence` beside `throughput` (`crates/ng-validate/src/run.rs`). `run` steps through the crate's `advance`, which retries each refusal and keeps no count, so the report needs a loop that counts them. Every repeat must end on repeat 0's seal, so one repeat's counts stand for all of them.

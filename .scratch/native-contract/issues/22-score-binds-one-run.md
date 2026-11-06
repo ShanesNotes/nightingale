@@ -15,3 +15,5 @@ Status: ready-for-agent
 From 05: `ReplayFailure::Diverged` maps to `ArenaFailure::Replay`, and `ReplayEvidence` has no public constructor.
 
 From the split of ticket 11: the contract says policy values are reported with every result (`docs/architecture/solver-contract.md:652`), but the reference's scales reach a result only through the resolution digest (`crates/ng-contract/src/scheme.rs:260`). The score is where each policy value shows. Ticket 21's checks report beside the score, and if they join `ArenaScore`, the sketch changes in the same PR.
+
+From ticket 12: `RunEvidence::run()` is the digest of the run identity that `run` admitted, so `score` can compare it with the replay evidence's run. `ArenaFailure` derives nothing, because `FaultReport` has no `Debug`.
