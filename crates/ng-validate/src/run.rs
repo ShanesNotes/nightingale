@@ -111,7 +111,7 @@ impl NumericalHealth {
     pub fn refusals(&self) -> &[(NumericalRefusal, u64)] {
         &self.refusals
     }
-    /// The refusals that left a refusal source's set or domain, in `CompiledBody::refusal_sources` order.
+    /// The `TrialDomain` refusals per source, in `CompiledBody::refusal_sources` order.
     pub fn by_source(&self) -> Vec<(SourceId, u64)> {
         let mut sources: Vec<(SourceId, u64)> = (self.refusals.iter())
             .filter_map(|&(reason, count)| match reason {
@@ -122,8 +122,7 @@ impl NumericalHealth {
         sources.sort_unstable();
         sources
     }
-    /// `NoAdmissibleStep`: a refusal at the minimum interval, or past the retry budget. It ends the run, so
-    /// only a faulted run's health counts one.
+    /// The `NoAdmissibleStep` faults: at most one, and only in `ArenaFailure::Faulted`.
     pub fn floor_faults(&self) -> u64 {
         self.floor_faults
     }
@@ -174,7 +173,7 @@ pub enum ArenaFailure {
     Initialization(InitializationFailure),
     /// A latched session, exported for diagnosis, with the health of its repeat up to the fault.
     Faulted {
-        report: FaultReport,
+        report: Box<FaultReport>,
         health: NumericalHealth,
     },
     /// A start the store would not checkpoint or resume, or a fault it would not export.
@@ -198,7 +197,10 @@ fn read(clock: &dyn WallClock) -> Result<u64, ArenaFailure> {
 
 fn exported(stopped: Session<'_, Faulted>, health: NumericalHealth) -> ArenaFailure {
     match stopped.export() {
-        Ok(report) => ArenaFailure::Faulted { report, health },
+        Ok(report) => ArenaFailure::Faulted {
+            report: Box::new(report),
+            health,
+        },
         Err(error) => ArenaFailure::Checkpoint(error),
     }
 }

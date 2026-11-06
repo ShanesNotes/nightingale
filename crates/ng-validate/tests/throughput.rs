@@ -100,13 +100,12 @@ struct OneVessel {
 }
 impl OneVessel {
     fn new(vessel: &'static str) -> Self {
-        Self::built(vessel, None)
+        Self::built(vessel, false)
     }
-    /// The drive stays at zero, so a range that leaves zero out trusts no accepted flow.
-    fn trusted_over(vessel: &'static str, lower: f64, upper: f64) -> Self {
-        Self::built(vessel, Some((lower, upper)))
+    fn distrusting_zero(vessel: &'static str) -> Self {
+        Self::built(vessel, true)
     }
-    fn built(vessel: &'static str, trusted: Option<(f64, f64)>) -> Self {
+    fn built(vessel: &'static str, distrusting_zero: bool) -> Self {
         let mut map = AnatomyBuilder::new();
         let at = Position::new(measure(0.0), measure(0.0), measure(0.0));
         let site = map.site::<VesselSegment>(vessel, at);
@@ -121,8 +120,8 @@ impl OneVessel {
                 let value = k.read(&drive);
                 k.finish(value, laws.every_mode(), class)
             });
-            if let Some((lower, upper)) = trusted {
-                let range = ValidityRange::new(measure(lower), measure(upper), Basis::Fixture("synthetic"))?;
+            if distrusting_zero {
+                let range = ValidityRange::new(measure(1.0), measure(2.0), Basis::Fixture("synthetic"))?;
                 laws.validity(&flow, range);
             }
             laws.transfer(Transfer::new(&route, flow));
@@ -355,7 +354,6 @@ fn slice_spec(body: &CompiledBody, end: SimTime, repeats: u32) -> ArenaSpec {
     }
 }
 
-/// One accepted step through the session's own typestate, outside `run`.
 fn stepped<'m>(
     session: Session<'m, Running>,
     refused: &mut Vec<NumericalRefusal>,
@@ -427,8 +425,6 @@ fn a_short_slice_window_reports_what_its_session_refused_once_per_repeat() {
     assert_eq!(health.floor_faults(), 0);
 }
 
-/// Refuses every attempt from `from` on, naming the first source on even attempts and the second on odd
-/// ones, so the first step there ends in a floor fault.
 struct RefusingFrom<'c> {
     inner: &'c dyn CoupledSolver,
     from: SimTime,
@@ -523,7 +519,7 @@ fn a_fault_off_the_floor_is_no_floor_fault() {
 
 #[test]
 fn every_accepted_step_outside_a_validity_range_is_one_excursion() {
-    let small = OneVessel::trusted_over("synthetic vessel", 1.0, 2.0);
+    let small = OneVessel::distrusting_zero("synthetic vessel");
     let (core, store, clock) = (small_core(), MemoryStore::default(), Scripted::ticking());
     let evidence = ran(run(
         &small.body,
@@ -541,13 +537,13 @@ fn every_accepted_step_outside_a_validity_range_is_one_excursion() {
     assert!(evidence.health().refusals().is_empty());
 }
 
-/// Refuses the first attempt at `at` for another reason each time, so every repeat accepts the same steps.
-struct RenamedRefusal {
+struct RefusedAt {
     inner: ReferenceIntegrator,
     at: SimTime,
     refused: Cell<u32>,
+    renamed: bool,
 }
-impl CoupledSolver for RenamedRefusal {
+impl CoupledSolver for RefusedAt {
     fn resolution(&self) -> DeclaredResolution {
         self.inner.resolution()
     }
@@ -559,9 +555,9 @@ impl CoupledSolver for RenamedRefusal {
             return self.inner.solve(problem, ticket);
         }
         self.refused.set(self.refused.get() + 1);
-        let reason = match self.refused.get() {
-            1 => NumericalRefusal::IterationLimit,
-            _ => NumericalRefusal::GuardInside,
+        let reason = match (self.renamed, self.refused.get()) {
+            (true, 2..) => NumericalRefusal::GuardInside,
+            _ => NumericalRefusal::IterationLimit,
         };
         Err(ticket.refuse(reason))
     }
@@ -570,22 +566,28 @@ impl CoupledSolver for RenamedRefusal {
 #[test]
 fn a_repeat_that_refused_for_another_reason_differed() {
     let small = OneVessel::new("synthetic vessel");
-    let core = RenamedRefusal {
-        inner: small_core(),
-        at: SimTime::from_ns(500 * MILLISECOND),
-        refused: Cell::new(0),
+    let repeated = |renamed| {
+        let core = RefusedAt {
+            inner: small_core(),
+            at: SimTime::from_ns(500 * MILLISECOND),
+            refused: Cell::new(0),
+            renamed,
+        };
+        let (store, clock) = (MemoryStore::default(), Scripted::ticking());
+        let outcome = run(
+            &small.body,
+            &core,
+            small.spec(small.lens(), 0, 1000, 2),
+            &clock,
+            &store,
+        );
+        assert_eq!(core.refused.get(), 2);
+        outcome.map(|arena| arena.into_evidence())
     };
-    let (store, clock) = (MemoryStore::default(), Scripted::ticking());
-    let differed = run(
-        &small.body,
-        &core,
-        small.spec(small.lens(), 0, 1000, 2),
-        &clock,
-        &store,
-    );
-    assert_eq!(core.refused.get(), 2);
+    let same = repeated(false).unwrap_or_else(|failure| panic!("{}", told(&failure)));
+    assert_eq!(same.health().refusals(), [(NumericalRefusal::IterationLimit, 1)]);
     assert!(matches!(
-        differed,
+        repeated(true),
         Err(ArenaFailure::RepeatDiffered { repeat: 1 })
     ));
 }

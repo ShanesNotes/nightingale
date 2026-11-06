@@ -344,8 +344,7 @@ pub struct ThroughputEvidence {
     _waveform_samples: u64,
 }
 /// What the run cost numerically, beside the certificate: refusals by reason and by refusal
-/// source, faults at the minimum interval, and validity excursions, over one repeat. A faulted run
-/// reports it up to the fault.
+/// source, floor faults, and validity excursions, over one repeat.
 pub struct NumericalHealth {
     _refusals: Vec<(NumericalRefusal, u64)>,
     _by_source: Vec<(SourceId, u64)>,
