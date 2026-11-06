@@ -211,6 +211,11 @@ item = "history::History::digest"
 field = "format"
 reason = "this digest names the books whichever hash seals their chain, so one course loaded in either format reports one digest"
 
+[[crate.seal_skip]]
+item = "history::History::digest"
+field = "unkept"
+reason = "links of this chain waiting for a store that refused them; the head chunk this digest reads is the ledger's account however many wait"
+
 [[crate]]
 name = "ng-observe"
 

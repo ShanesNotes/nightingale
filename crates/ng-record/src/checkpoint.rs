@@ -43,7 +43,8 @@ pub enum CheckpointError {
     HistoryMissing { seal: Digest },
     /// A link that does not chain to its seal, does not parse or does not reach the opening.
     HistoryAltered { seal: Digest },
-    /// A store that could not keep a link. No checkpoint exists until it does.
+    /// The oldest link the session's store has not kept. No checkpoint exists until a later step's store
+    /// keeps it.
     StoreFailed { seal: Digest },
     /// `rewind` or `recover` given a branch id this branch or an ancestor already uses.
     BranchInUse,
@@ -52,11 +53,12 @@ pub enum CheckpointError {
 }
 
 /// Durable storage for the chain's links, addressed by seal. It is host code and trusted for nothing: a
-/// walk chains what comes back to the seal it asked for. A checkpoint is complete only with a store that
-/// keeps what it took, and a store that loses a link fails at `resume`, by that link's seal.
+/// walk chains what comes back to the seal it asked for. A session hands it each link as its step is
+/// accepted, and a store that loses a link fails the next walk that needs it, by that link's seal.
 pub trait HistoryStore {
     fn resolve(&self, seal: &Digest) -> Option<Vec<u8>>;
-    fn keep(&mut self, seal: Digest, link: Vec<u8>) -> Result<(), CheckpointError>;
+    /// Keeping a seal it holds changes nothing, so every session of a run may share one store.
+    fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,12 +228,13 @@ fn opened(bytes: &[u8]) -> Result<Header<'_>, CheckpointError> {
     })
 }
 
-/// What a restored record goes on as. Only `Recover` goes past a latch, and it opens a new branch.
+/// What a restored record goes on as. Only `Recover` goes past a latch, and a fork opens a new branch from
+/// a revision its parent's chain holds.
 #[derive(Clone, Copy)]
-pub(crate) enum Continuing {
+pub(crate) enum Continuing<'p> {
     Resume,
-    Rewind(BranchId),
-    Recover(BranchId),
+    Rewind(BranchId, &'p History),
+    Recover(BranchId, &'p History),
 }
 
 pub(crate) struct Sections<'r> {
@@ -274,20 +277,20 @@ pub(crate) fn write(
     Checkpoint { bytes }
 }
 
-/// Any bytes, from a host's store on a load or this branch's chain on a rewind, give a record or an error,
-/// never a panic.
+/// Any bytes, from a host's store, give a record or an error, never a panic. A fork reads its parent's chain
+/// through the same store, so a rewind and a load take one path.
 pub(crate) fn restore<'m>(
     saved: &Checkpoint,
     expected: &RunIdentity,
     body: &'m CompiledBody,
-    resolve: &dyn Fn(&Digest) -> Option<Vec<u8>>,
-    continuing: Continuing,
+    store: &dyn HistoryStore,
+    continuing: Continuing<'_>,
 ) -> Result<PatientRecord<'m>, CheckpointError> {
     let header = opened(saved.as_bytes())?;
     if header.identity != expected.digest() {
         return Err(CheckpointError::IdentityMismatch);
     }
-    if header.latched && !matches!(continuing, Continuing::Recover(_)) {
+    if header.latched && !matches!(continuing, Continuing::Recover(..)) {
         return Err(CheckpointError::Latched);
     }
     let parts = Parts::read(header.body, body).map_err(|_| CheckpointError::Malformed)?;
@@ -297,6 +300,11 @@ pub(crate) fn restore<'m>(
         opening,
         origin,
     } = parts;
+    if let Continuing::Rewind(_, parent) | Continuing::Recover(_, parent) = continuing
+        && (header.format != parent.format() || !parent.holds(header.seal, header.revision, store)?)
+    {
+        return Err(CheckpointError::NotOnThisBranch);
+    }
     let start = Start {
         format: header.format,
         run: expected.digest(),
@@ -304,16 +312,15 @@ pub(crate) fn restore<'m>(
         image: origin,
         parameters: image.parameters().digest(),
     };
-    let history = History::walked(body, start, header.seal, header.revision, resolve)?;
+    let history = History::walked(body, start, header.seal, header.revision, store)?;
     let branch = match continuing {
         Continuing::Resume => branch,
-        Continuing::Rewind(fork) | Continuing::Recover(fork) => {
+        Continuing::Rewind(fork, _) | Continuing::Recover(fork, _) => {
             branch.forked(fork, header.revision, image.time)?
         }
     };
     let parts = Restored {
         branch,
-        revision: header.revision,
         image,
         history,
     };
@@ -322,7 +329,6 @@ pub(crate) fn restore<'m>(
 
 pub(crate) struct Restored {
     pub(crate) branch: BranchAncestry,
-    pub(crate) revision: u64,
     pub(crate) image: ImageParts,
     pub(crate) history: History,
 }

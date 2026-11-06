@@ -33,8 +33,8 @@
 //! A lent record is read-only, so publication happens only inside the session.
 //! ```compile_fail,E0596
 //! use ng_record::*;
-//! fn sneak(session: &Session<'_, Running>, next: NextImage) -> StepReceipt {
-//!     session.record().publish(next)
+//! fn sneak(session: &Session<'_, Running>, next: NextImage, store: &dyn HistoryStore) -> StepReceipt {
+//!     session.record().publish(next, store)
 //! }
 //! ```
 //! ```
@@ -57,8 +57,8 @@
 //! ```
 //! ```compile_fail,E0599
 //! use ng_record::*;
-//! fn save(refused: &Session<'_, Retrying>, store: &mut dyn HistoryStore) -> Result<Checkpoint, CheckpointError> {
-//!     refused.checkpoint(store)
+//! fn save(refused: &Session<'_, Retrying>) -> Result<Checkpoint, CheckpointError> {
+//!     refused.checkpoint()
 //! }
 //! ```
 //! ```
@@ -66,8 +66,8 @@
 //! fn late(running: &mut Session<'_, Running>, input: AuthorizedInput) -> Result<InputReceipt, ng_contract::AdmissionError> {
 //!     running.enqueue(input)
 //! }
-//! fn save(running: &Session<'_, Running>, store: &mut dyn HistoryStore) -> Result<Checkpoint, CheckpointError> {
-//!     running.checkpoint(store)
+//! fn save(running: &Session<'_, Running>) -> Result<Checkpoint, CheckpointError> {
+//!     running.checkpoint()
 //! }
 //! ```
 //! A lent session takes no input: the one path from a clinician to the body needs exclusive use of it.
@@ -173,7 +173,7 @@ mod record;
 mod session;
 
 pub use checkpoint::{BranchFork, BranchId, Checkpoint, CheckpointError, HistoryStore};
-pub use history::{ConservationView, Curve, HistorySeal, HistorySegment, Segments};
+pub use history::{ConservationView, Curve, HistorySeal, HistorySegment, NewestFirst};
 pub use observation::{ObservationRefusal, ObservationView};
 pub use record::{AuthorizedInput, InputReceipt, NextImage, PatientRecord, RecordDigests, Seal, StepReceipt};
 pub use session::{FaultReport, Faulted, Retrying, Running, Session, Step};
