@@ -239,6 +239,17 @@ fn every_gate_passes_the_reference_core_with_one_set_of_digests() {
             assert!(of.runs().len() >= 2, "{gate:?} compared {} runs", of.runs().len());
             assert_eq!(of.runs()[0], reference_digests, "{gate:?}");
         }
+        let watched = evidence.of(ReplayGate::Pace).observed()[0];
+        for gate in [
+            ReplayGate::Pace,
+            ReplayGate::Resume,
+            ReplayGate::LateAdmission,
+            ReplayGate::Rewind,
+        ] {
+            let observed = evidence.of(gate).observed();
+            assert_eq!(observed.len(), evidence.of(gate).runs().len(), "{gate:?}");
+            assert!(observed.iter().all(|stream| *stream == watched), "{gate:?}");
+        }
         for gate in [ReplayGate::Pace, ReplayGate::LateAdmission, ReplayGate::Rewind] {
             assert!(
                 evidence
