@@ -33,7 +33,6 @@ fn seconds(window: Interval) -> f64 {
     window.length_ns() as f64 / SECOND as f64
 }
 
-/// Two seconds of the slice from admission.
 fn two_seconds(certify: impl FnOnce(&CompiledBody, &ConservationView<'_>)) {
     let body = arena_body().expect("compiled");
     let scale = |value| Measure::<Dimensionless>::new(value).expect("finite");
@@ -59,8 +58,6 @@ fn two_seconds(certify: impl FnOnce(&CompiledBody, &ConservationView<'_>)) {
 #[test]
 fn a_short_slice_window_passes_closure_and_drift_and_states_its_coverage_and_held_support() {
     two_seconds(|body, view| {
-        // Closure holds to a relative 1e-12 of each window's gross exchange with no absolute allowance. The drift
-        // limit is synthetic: the slice's energy moves about 2.3e3 in a second as the heart works.
         let ledger = Ledger::sliding(view.basis(), SECOND, 2 * SECOND, 0.0, 1e-12, 1e4);
         let certificate = certified(view, &ledger).expect("the slice passes closure and drift");
         assert_eq!(certificate.span().start(), anchor_moment());
@@ -143,14 +140,12 @@ fn a_short_slice_window_passes_closure_and_drift_and_states_its_coverage_and_hel
                 _ => None,
             };
             match (card, name, basal) {
-                // A basal absorption with no meal moves its packet rate for one second in every window.
                 ("GI", _, Some((species, rate))) => {
                     assert_eq!((book, forward), (Book::Of(species), IntoBody), "{name}");
                     assert!(near(inflow, rate) && outflow == 0.0, "{name} {inflow} {outflow}");
                 }
                 ("MS", "skin water", None) => {
                     assert_eq!((book, forward), (Book::Of(Species::Water), OutOfBody));
-                    // 0.01 a second, scaled by a forcing of amplitude 0.5.
                     assert!(inflow == 0.0 && (0.005..=0.015).contains(&outflow), "{outflow}");
                 }
                 ("EN", "vasopressin secretion", None) => {

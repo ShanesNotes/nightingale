@@ -37,14 +37,14 @@ impl QuantityPolicy {
 pub enum ExpectedDrift {
     Zero,
 }
-/// Every sliding window of `window_ns` over at least `coverage_ns` of history. The arena's window is 24 h.
+/// Every sliding window of `window_ns` over at least `coverage_ns` of history.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SlidingWindows {
     window_ns: NonZeroU64,
     coverage_ns: u64,
 }
 impl SlidingWindows {
-    /// Refuses a coverage that does not exceed one window, which could slide nowhere.
+    /// Refuses a coverage that does not exceed one window.
     pub fn new(window_ns: NonZeroU64, coverage_ns: u64) -> Result<Self, AdmissionError> {
         if coverage_ns <= window_ns.get() {
             return Err(AdmissionError::ShortCoverage);
@@ -194,7 +194,6 @@ impl Certificate {
     pub fn results(&self) -> &[QuantityResult] {
         &self.results
     }
-    /// The held declarations, routes and pools the basis rests on.
     pub fn coverage(&self) -> &CoverageManifest {
         &self.coverage
     }
@@ -393,7 +392,6 @@ fn pair(
     })
 }
 
-/// `carried` came earlier in time than every window `most` has seen, so a tie replaces.
 fn keep_the_earliest_most(most: &mut [Option<HeldSupport>], routes: &[HeldRoute], carried: Vec<Carried>) {
     for window in carried.into_iter().rev() {
         let Carried {

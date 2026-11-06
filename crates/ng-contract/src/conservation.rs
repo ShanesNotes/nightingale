@@ -128,8 +128,7 @@ impl Seal for CoverageManifest {
         declarations.seal(out);
     }
 }
-/// One column of a route a held stand-in supplies. The history keeps its exchange apart from its combination's
-/// totals, so support from a stand-in stays visible beside ordinary intake.
+/// One column of a route a held stand-in supplies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HeldRoute {
     card: &'static str,
@@ -186,7 +185,6 @@ impl Seal for Combination {
     }
 }
 
-/// `held` is in card order, and `pools` names the card holding each held pool, in row order.
 pub(crate) fn conserved_basis(
     amounts: &[Species],
     columns: &[Column],

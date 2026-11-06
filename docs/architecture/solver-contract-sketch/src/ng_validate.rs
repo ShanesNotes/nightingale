@@ -63,7 +63,7 @@ pub struct DriftCurve {
     _coefficients: Vec<f64>,
 }
 /// Every sliding window of one length over at least the coverage, from integral segments, never vital
-/// samples. The arena's are 24 h windows over at least 48 h.
+/// samples.
 pub struct SlidingWindows {
     _window_ns: NonZeroU64,
     _coverage_ns: u64,

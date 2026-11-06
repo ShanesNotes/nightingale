@@ -3,7 +3,6 @@ use ng_contract::*;
 use ng_record::{ConservationView, Curve, HistorySegment};
 use ng_validate::*;
 
-/// The same number in each combination's own unit.
 fn limits(quantity: QuantityId, absolute: f64, relative: f64, drift: f64) -> QuantityPolicy {
     fn of<U: Dimension>(quantity: QuantityId, absolute: f64, relative: f64, drift: f64) -> QuantityPolicy {
         let measure = |value| Measure::<U>::new(value).expect("finite");
