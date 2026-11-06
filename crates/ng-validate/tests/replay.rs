@@ -176,13 +176,32 @@ impl HistoryStore for Store {
     }
 }
 
-struct RefusesToKeep;
-impl HistoryStore for RefusesToKeep {
-    fn resolve(&self, _seal: &Digest) -> Option<Vec<u8>> {
-        None
+/// Every link offered to it, in order, and each it kept; it refuses while `refusing` is set.
+#[derive(Default)]
+struct Recording {
+    offered: RefCell<Vec<Digest>>,
+    kept: RefCell<Vec<(Digest, Vec<u8>)>>,
+    refusing: Cell<bool>,
+}
+impl Recording {
+    fn kept(&self) -> Vec<Digest> {
+        self.kept.borrow().iter().map(|link| link.0).collect()
     }
-    fn keep(&self, seal: Digest, _link: &[u8]) -> Result<(), CheckpointError> {
-        Err(CheckpointError::StoreFailed { seal })
+}
+impl HistoryStore for Recording {
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+        let kept = self.kept.borrow();
+        kept.iter()
+            .find(|link| link.0 == *seal)
+            .map(|link| link.1.clone())
+    }
+    fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
+        self.offered.borrow_mut().push(seal);
+        if self.refusing.get() {
+            return Err(CheckpointError::StoreFailed { seal });
+        }
+        self.kept.borrow_mut().push((seal, link.to_vec()));
+        Ok(())
     }
 }
 
@@ -1341,27 +1360,26 @@ fn a_chain_that_misses_the_opening_is_refused() {
 }
 
 #[test]
-fn a_store_that_cannot_keep_a_link_leaves_no_checkpoint() {
-    let case = busy();
-    let core = reference(8 * SECOND);
-    let session = to(case.admit(&core, &RefusesToKeep).expect("admitted"), at(8));
-    let refused = session.checkpoint();
-    assert!(matches!(refused.err(), Some(CheckpointError::StoreFailed { .. })));
-}
-
-#[test]
 fn each_accepted_step_keeps_one_link_oldest_first_and_a_checkpoint_keeps_none() {
     let case = delivering(Vec::new(), 40);
     let core = reference(8 * SECOND);
-    let store = Store::default();
-    let session = to(case.admit(&core, &store).expect("admitted"), at(16));
-    assert_eq!(store.links.borrow().len(), 2);
+    let store = Recording::default();
+    let mut session = case.admit(&core, &store).expect("admitted");
     session.checkpoint().expect("saved");
-    assert_eq!(store.links.borrow().len(), 2, "a checkpoint keeps nothing");
-    let session = to(session, at(40));
-    let kept = store.links.borrow().clone();
-    assert_eq!(kept.len(), 5);
-    assert_eq!(kept[4].0, session.record().seal().digest());
+    let mut seals = Vec::new();
+    while session.record().accepted().time() < at(40) {
+        session = advance(session);
+        seals.push(session.record().seal().digest());
+        session.checkpoint().expect("saved");
+    }
+    assert_eq!(seals.len(), 5);
+    assert_eq!(
+        *store.offered.borrow(),
+        seals,
+        "one offer a step, none at a checkpoint"
+    );
+    assert_eq!(store.kept(), seals, "oldest first");
+    let kept = store.kept.borrow();
     for pair in kept.windows(2) {
         assert_eq!(
             pair[1].1[..32],
@@ -1369,6 +1387,74 @@ fn each_accepted_step_keeps_one_link_oldest_first_and_a_checkpoint_keeps_none() 
             "each link follows the one before"
         );
     }
+}
+
+#[test]
+fn a_refused_step_keeps_nothing() {
+    let store = Recording::default();
+    let core = refusing(5, shared(RefCell::default()));
+    let case = delivering(vec![delivery(b"input", 5, 100)], 200);
+    let Step::Refused(session) = case.admit(&core, &store).expect("admitted").step() else {
+        panic!("the cut at the input is refused");
+    };
+    assert!(store.offered.borrow().is_empty());
+    let Step::Accepted(_, receipt) = session.retry() else {
+        panic!("the retry is accepted");
+    };
+    assert_eq!(store.kept(), [receipt.seal().digest()]);
+}
+
+#[test]
+fn a_store_that_cannot_keep_a_link_leaves_no_checkpoint() {
+    let case = busy();
+    let core = reference(8 * SECOND);
+    let store = Recording::default();
+    store.refusing.set(true);
+    let session = case.admit(&core, &store).expect("admitted");
+    session.checkpoint().expect("nothing waits at admission");
+    let session = advance(session);
+    let oldest = session.record().seal().digest();
+    let session = to(session, at(40));
+    let revision = session.record().revision();
+    assert!(revision > 1, "the run steps on");
+    let refused = session.checkpoint().err();
+    assert_eq!(refused, Some(CheckpointError::StoreFailed { seal: oldest }));
+    assert!(store.kept.borrow().is_empty());
+    let offered = store.offered.borrow();
+    assert!(
+        offered.iter().all(|seal| *seal == oldest),
+        "each step offers the oldest and stops at its refusal"
+    );
+    assert_eq!(offered.len() as u64, revision);
+}
+
+#[test]
+fn a_store_that_refuses_and_then_keeps_takes_every_waiting_link_at_the_next_step() {
+    let case = busy();
+    let (core, fresh) = (reference(8 * SECOND), reference(8 * SECOND));
+    let store = Recording::default();
+    store.refusing.set(true);
+    let mut session = case.admit(&core, &store).expect("admitted");
+    let mut heads = Vec::new();
+    while session.record().revision() < 2 {
+        session = advance(session);
+        heads.push(session.record().seal().digest());
+    }
+    let refused = session.checkpoint().err();
+    assert_eq!(refused, Some(CheckpointError::StoreFailed { seal: heads[0] }));
+    store.refusing.set(false);
+    let session = advance(session);
+    heads.push(session.record().seal().digest());
+    assert_eq!(
+        store.kept(),
+        heads,
+        "oldest first, the waiting ones before the new one"
+    );
+    let saved = session.checkpoint().expect("every link kept");
+    let identity = session.record().identity();
+    let resumed = Session::resume(&saved, identity, case.body(), &fresh, &store).expect("resumed");
+    assert_eq!(resumed.record().digests(), session.record().digests());
+    assert_eq!(seals(resumed, case.end()), seals(session, case.end()));
 }
 
 #[test]
