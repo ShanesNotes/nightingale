@@ -180,6 +180,16 @@ item = "scheme::RunIdentity::digest"
 field = "domain"
 reason = "a marker with no value; a run identity takes only the run domain's seed"
 
+[[crate.seal_skip]]
+item = "conservation::CoverageManifest::seal"
+field = "routes"
+reason = "found from the sealed declarations' routes, the columns and the combinations, which the model hash seals"
+
+[[crate.seal_skip]]
+item = "conservation::CoverageManifest::seal"
+field = "pools"
+reason = "found from the sealed declarations' spaces, the anatomy's held enclosures and the rows, which the model hash seals"
+
 [[crate]]
 name = "ng-cardiovascular"
 

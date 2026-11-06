@@ -6,9 +6,17 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 Blocked by: 12
 
-Status: ready-for-agent
+Status: resolved
 
-- [ ] A short slice window passes closure and drift with the reference core, and the result states its coverage and its held support per window
+- [x] A short slice window passes closure and drift with the reference core, and the result states its coverage and its held support per window
+
+## Answer
+
+`crates/ng-validate/tests/slice_certificate.rs` runs two seconds of the slice from admission with the reference core through `run` and certifies `arena.session().conservation()` over every 1 s window. All 21 combinations close to a relative 1e-12 of each window's gross exchange with no absolute allowance; the worst residual is 1.5e-25, on energy. The same walk fails closure with no allowance and drift under a 1e-3 bound. The certificate oracle walks the slice in time order and agrees bit for bit.
+
+The window length is now policy data: `SlidingWindows::new(window, coverage)` replaces `Sliding24Hours`, so a short window passes with its coverage stated, and the arena keeps 24 h over 48 h. A charge combination now takes a policy, in the new `Charge` dimension.
+
+The basis carries a `CoverageManifest` (`ConservedBasis::coverage`): each held declaration as a public `HeldCard` (routes, spaces, validity), one `HeldRoute` per column a held route moves, with its combination and the way its forward extent crosses, and each `HeldPool` with its own combination. The declarations moved there from the layout, so the model hash is unchanged and the basis digest now covers them. The certificate returns its span, the manifest, and `HeldSupport` per held route: the most it carried into and out of the body over any window, each named by window.
 
 ## Comments
 

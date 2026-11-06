@@ -36,6 +36,8 @@ pub enum Albumin {}
 pub enum Vasopressin {}
 pub enum Norepinephrine {}
 pub enum Acetylcholine {}
+/// The sum of every ion's amount by its sign, in the amount unit.
+pub enum Charge {}
 pub enum Resistance {}
 pub enum Inertance {}
 pub enum Orifice {}
@@ -242,6 +244,7 @@ named!(
     Vasopressin = "vasopressin",
     Norepinephrine = "norepinephrine",
     Acetylcholine = "acetylcholine",
+    Charge = "charge",
     Resistance = "resistance",
     Inertance = "inertance",
     Orifice = "orifice",

@@ -19,6 +19,7 @@ use ng_validate::*;
 const SECOND: u64 = 1_000_000_000;
 const MILLISECOND: u64 = 1_000_000;
 const HOUR: u64 = 3600 * SECOND;
+const DAY: u64 = 24 * HOUR;
 
 fn measure<U>(value: f64) -> Measure<U> {
     Measure::new(value).expect("finite")
@@ -95,11 +96,11 @@ fn gate(case: TwoReservoirs) -> AccuracyPolicy {
 }
 
 fn ledger_policy(basis: &ConservedBasis, drift: f64) -> Ledger {
-    Ledger::new(basis, 1e-24, 1e-9, drift)
+    Ledger::sliding(basis, DAY, 2 * DAY, 1e-24, 1e-9, drift)
 }
 
 fn ledger_policy_with(basis: &ConservedBasis, absolute: f64, relative: f64, drift: f64) -> Ledger {
-    Ledger::new(basis, absolute, relative, drift)
+    Ledger::sliding(basis, DAY, 2 * DAY, absolute, relative, drift)
 }
 
 fn total_received<S>(session: &Session<'_, S>, column: ColumnId) -> Compensated {
@@ -2097,11 +2098,12 @@ fn a_certificate_policy_is_checked_when_it_is_built() {
     let quantity = basis.ids().next().expect("one combination");
     let wrong = QuantityPolicy::new::<Pressure>(quantity, measure(1.0), measure(0.0), measure(1.0)).err();
     assert_eq!(wrong, Some(AdmissionError::QuantityDimension { quantity }));
-    let windows = Sliding24Hours::covering(48 * HOUR).expect("a coverage");
+    let day = NonZeroU64::new(24 * HOUR).expect("positive");
+    let windows = SlidingWindows::new(day, 48 * HOUR).expect("a coverage");
     let short = CertificatePolicy::new(basis, Vec::new(), ExpectedDrift::Zero, windows).err();
     assert_eq!(short, Some(AdmissionError::PolicyCoverage));
     assert_eq!(
-        Sliding24Hours::covering(24 * HOUR).err(),
+        SlidingWindows::new(day, 24 * HOUR).err(),
         Some(AdmissionError::ShortCoverage)
     );
 }

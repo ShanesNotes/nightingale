@@ -1,33 +1,63 @@
+use core::num::NonZeroU64;
 use ng_contract::*;
 use ng_record::{ConservationView, Curve, HistorySegment};
 use ng_validate::*;
 
-const DAY_NS: u64 = 86_400_000_000_000;
-const COVERAGE_NS: u64 = 2 * DAY_NS;
+/// The same number in each combination's own unit.
+fn limits(quantity: QuantityId, absolute: f64, relative: f64, drift: f64) -> QuantityPolicy {
+    fn of<U: Dimension>(quantity: QuantityId, absolute: f64, relative: f64, drift: f64) -> QuantityPolicy {
+        let measure = |value| Measure::<U>::new(value).expect("finite");
+        let ratio = Measure::<Dimensionless>::new(relative).expect("finite");
+        QuantityPolicy::new(quantity, measure(absolute), ratio, measure(drift)).expect("its own dimension")
+    }
+    let build = match quantity.book() {
+        Book::Of(Species::Water) => of::<Water>,
+        Book::Of(Species::Sodium) => of::<Sodium>,
+        Book::Of(Species::Potassium) => of::<Potassium>,
+        Book::Of(Species::Chloride) => of::<Chloride>,
+        Book::Of(Species::Albumin) => of::<Albumin>,
+        Book::Of(Species::Vasopressin) => of::<Vasopressin>,
+        Book::Of(Species::Norepinephrine) => of::<Norepinephrine>,
+        Book::Of(Species::Acetylcholine) => of::<Acetylcholine>,
+        Book::Of(Species::Energy) => of::<Energy>,
+        Book::Charge => of::<Charge>,
+    };
+    build(quantity, absolute, relative, drift)
+}
 
 pub struct Ledger {
     policy: CertificatePolicy,
     basis: Digest,
+    window_ns: u64,
+    coverage_ns: u64,
     absolute: Compensated,
     relative: Measure<Dimensionless>,
     drift: Compensated,
 }
 impl Ledger {
-    pub fn new(basis: &ConservedBasis, absolute: f64, relative: f64, drift: f64) -> Self {
-        let water = |value| Measure::<Water>::new(value).expect("finite");
-        let ratio = || Measure::<Dimensionless>::new(relative).expect("finite");
+    pub fn sliding(
+        basis: &ConservedBasis,
+        window_ns: u64,
+        coverage_ns: u64,
+        absolute: f64,
+        relative: f64,
+        drift: f64,
+    ) -> Self {
         let quantities = (basis.ids())
-            .map(|quantity| QuantityPolicy::new(quantity, water(absolute), ratio(), water(drift)))
-            .collect::<Result<Vec<_>, _>>()
-            .expect("a policy of water");
-        let windows = Sliding24Hours::covering(COVERAGE_NS).expect("a coverage");
+            .map(|quantity| limits(quantity, absolute, relative, drift))
+            .collect();
+        let window = NonZeroU64::new(window_ns).expect("positive");
+        let windows = SlidingWindows::new(window, coverage_ns).expect("a coverage");
+        let plain = |value| Compensated::of(&Measure::<Water>::new(value).expect("finite"));
         Self {
             policy: CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows)
                 .expect("a policy"),
             basis: basis.digest(),
-            absolute: Compensated::of(&water(absolute)),
-            relative: ratio(),
-            drift: Compensated::of(&water(drift)),
+            window_ns,
+            coverage_ns,
+            absolute: plain(absolute),
+            relative: Measure::<Dimensionless>::new(relative).expect("finite"),
+            drift: plain(drift),
         }
     }
     pub fn digest(&self) -> Digest {
@@ -45,6 +75,15 @@ struct Worst {
 }
 
 #[derive(Debug, PartialEq)]
+struct Most {
+    route: HeldRoute,
+    inflow: [u64; 2],
+    inflow_window: Interval,
+    outflow: [u64; 2],
+    outflow_window: Interval,
+}
+
+#[derive(Debug, PartialEq)]
 struct Failed {
     check: CertificateCheck,
     quantity: Option<QuantityId>,
@@ -58,6 +97,8 @@ pub fn certified(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Certifi
         assert_eq!(certificate.seal(), view.seal());
         assert_eq!(certificate.basis(), ledger.basis);
         assert_eq!(certificate.policy(), ledger.digest());
+        assert_eq!(Some(certificate.span()), view.span());
+        assert_eq!(certificate.coverage(), view.basis().coverage());
         let worst = (certificate.results().iter()).map(|result| Worst {
             quantity: result.quantity(),
             closure: result.worst_closure().bits(),
@@ -65,7 +106,14 @@ pub fn certified(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Certifi
             drift: result.worst_drift().bits(),
             drift_window: result.drift_window(),
         });
-        (worst.collect(), certificate.pieces())
+        let most = (certificate.support().iter()).map(|support| Most {
+            route: support.route(),
+            inflow: support.most_inflow().bits(),
+            inflow_window: support.inflow_window(),
+            outflow: support.most_outflow().bits(),
+            outflow_window: support.outflow_window(),
+        });
+        (worst.collect(), most.collect(), certificate.pieces())
     });
     let seen = seen.map_err(|failure| Failed {
         check: failure.check(),
@@ -90,7 +138,7 @@ fn failed(check: CertificateCheck) -> Failed {
     }
 }
 
-fn window_starts(segments: &[HistorySegment], first: u64, last: u64) -> Vec<u64> {
+fn window_starts(segments: &[HistorySegment], first: u64, last: u64, length: u64) -> Vec<u64> {
     let mut boundaries = vec![first];
     boundaries.extend(
         segments
@@ -101,7 +149,7 @@ fn window_starts(segments: &[HistorySegment], first: u64, last: u64) -> Vec<u64>
     let mut starts: Vec<u64> = Vec::with_capacity(boundaries.len());
     loop {
         let plain = boundaries.get(direct).copied();
-        let moved = (boundaries.get(shifted)).map(|boundary| boundary.saturating_sub(DAY_NS));
+        let moved = (boundaries.get(shifted)).map(|boundary| boundary.saturating_sub(length));
         let next = match (plain, moved) {
             (Some(plain), Some(moved)) if plain <= moved => {
                 direct += 1;
@@ -140,30 +188,35 @@ fn differences(
     )
 }
 
-fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<(Vec<Worst>, u64), Failed> {
+type Walked = (Vec<Worst>, Vec<Most>, u64);
+
+fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked, Failed> {
     let coverage = || failed(CertificateCheck::Coverage);
     if ledger.basis != view.basis().digest() {
         return Err(coverage());
     }
     let span = view.span().ok_or_else(coverage)?;
-    if span.length_ns() < COVERAGE_NS {
+    if span.length_ns() < ledger.coverage_ns {
         return Err(coverage());
     }
+    let length = ledger.window_ns;
     let mut segments = (view.newest_first().collect::<Result<Vec<_>, _>>())
         .map_err(|error| failed(CertificateCheck::History(error)))?;
     segments.reverse();
     let first = span.start().nanoseconds();
-    let last = span.end().nanoseconds() - DAY_NS;
-    let starts = window_starts(&segments, first, last);
+    let last = span.end().nanoseconds() - length;
+    let starts = window_starts(&segments, first, last, length);
     let quantities: Vec<QuantityId> = view.basis().ids().collect();
+    let routes = view.basis().coverage().held_routes();
     let mut worst: Vec<Option<(Compensated, Interval, Compensated, Interval)>> = vec![None; quantities.len()];
+    let mut most: Vec<Option<(Compensated, Interval, Compensated, Interval)>> = vec![None; routes.len()];
     let mut drifted: Option<Failed> = None;
     let (mut trail, mut lead) = (0, 0);
     let mut pieces = 0;
     for pair in starts.windows(2) {
         let [from, to] = [pair[0], pair[1]];
         let early = Interval::new(SimTime::from_ns(from), SimTime::from_ns(to)).ok_or_else(coverage)?;
-        let late = Interval::new(SimTime::from_ns(from + DAY_NS), SimTime::from_ns(to + DAY_NS))
+        let late = Interval::new(SimTime::from_ns(from + length), SimTime::from_ns(to + length))
             .ok_or_else(coverage)?;
         while segments[trail].interval().end() <= early.start() {
             trail += 1;
@@ -181,7 +234,7 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<(Vec<Wo
             let inflow = pick(HistorySegment::inflow).ok_or_else(coverage)?;
             let outflow = pick(HistorySegment::outflow).ok_or_else(coverage)?;
             for (index, &start) in pair.iter().enumerate() {
-                let window = Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + DAY_NS))
+                let window = Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + length))
                     .ok_or_else(coverage)?;
                 let closure = change[index].minus(inflow[index].minus(outflow[index])).abs();
                 let gross = inflow[index].plus(outflow[index]);
@@ -213,6 +266,31 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<(Vec<Wo
                 }
             }
         }
+        for (route, held) in routes.iter().zip(&mut most) {
+            let ((forward, reverse), (forward_before, reverse_before)) = (
+                leading.exchange(route.column()),
+                trailing.exchange(route.column()),
+            );
+            let forward = differences(&forward, late, &forward_before, early).ok_or_else(coverage)?;
+            let reverse = differences(&reverse, late, &reverse_before, early).ok_or_else(coverage)?;
+            let (inflow, outflow) = match route.forward() {
+                BoundaryDirection::IntoBody => (forward, reverse),
+                BoundaryDirection::OutOfBody => (reverse, forward),
+            };
+            for (index, &start) in pair.iter().enumerate() {
+                let window = Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + length))
+                    .ok_or_else(coverage)?;
+                let (into, out_of) = (inflow[index], outflow[index]);
+                let (most_in, in_window, most_out, out_window) =
+                    held.get_or_insert((into, window, out_of, window));
+                if !into.at_most(*most_in) {
+                    (*most_in, *in_window) = (into, window);
+                }
+                if !out_of.at_most(*most_out) {
+                    (*most_out, *out_window) = (out_of, window);
+                }
+            }
+        }
     }
     if let Some(failure) = drifted {
         return Err(failure);
@@ -230,5 +308,18 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<(Vec<Wo
         })
         .collect::<Option<Vec<_>>>()
         .ok_or_else(coverage)?;
-    Ok((results, pieces))
+    let support = (routes.iter().zip(most))
+        .map(|(&route, held)| {
+            let (inflow, inflow_window, outflow, outflow_window) = held?;
+            Some(Most {
+                route,
+                inflow: inflow.bits(),
+                inflow_window,
+                outflow: outflow.bits(),
+                outflow_window,
+            })
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(coverage)?;
+    Ok((results, support, pieces))
 }

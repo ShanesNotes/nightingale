@@ -161,8 +161,8 @@ pub use accuracy::{
     AccuracyCase, AccuracyEvidence, AccuracyFailure, AccuracyPolicy, accuracy, observed_order,
 };
 pub use certificate::{
-    Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, ExpectedDrift, QuantityPolicy,
-    QuantityResult, Sliding24Hours, certify,
+    Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, ExpectedDrift, HeldSupport,
+    QuantityPolicy, QuantityResult, SlidingWindows, certify,
 };
 pub use fixture::{ChanceCase, Delivery, TwoReservoirs, admit_fixture, admit_seeded};
 pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved};
