@@ -34,6 +34,10 @@ fn seconds(window: Interval) -> f64 {
 }
 
 fn two_seconds(certify: impl FnOnce(&CompiledBody, &ConservationView<'_>)) {
+    two_seconds_with(Vec::new(), certify);
+}
+
+fn two_seconds_with(events: Vec<BoundaryEvent>, certify: impl FnOnce(&CompiledBody, &ConservationView<'_>)) {
     let body = arena_body().expect("compiled");
     let scale = |value| Measure::<Dimensionless>::new(value).expect("finite");
     let core = ReferenceIntegrator::new(5 * MILLISECOND)
@@ -44,7 +48,7 @@ fn two_seconds(certify: impl FnOnce(&CompiledBody, &ConservationView<'_>)) {
         window: Interval::new(anchor_moment(), end).expect("an interval"),
         packet: arena_packet(&body).expect("a packet"),
         lens: arena_lens(&body).expect("a lens"),
-        boundary: BoundaryPort::new(Vec::new()).expect("no event"),
+        boundary: BoundaryPort::new(events).expect("parsed"),
         seed: Seed::new([1, 2, 3, 4]),
         repeats: NonZeroU32::MIN,
     };
@@ -203,5 +207,23 @@ fn the_slice_fails_closure_with_no_allowance_and_drift_under_a_tighter_bound() {
         assert_eq!(failure.check(), CertificateCheck::Drift);
         assert_eq!(failure.window().map(seconds), Some(1.0));
         assert!(number(failure.residual()) > 1e-3);
+    });
+}
+
+#[test]
+fn a_slice_that_closes_its_ledger_but_gains_charge_is_not_certified() {
+    let after = |ms: u64| SimTime::from_ns(anchor_moment().nanoseconds() + ms * MILLISECOND);
+    let sodium = BoundaryInput::Sodium(Delivered {
+        boundary: "gut sodium",
+        amount: Measure::new(0.5).expect("finite"),
+        ends: after(900),
+    });
+    let id = InputId::new(Digest::of_canonical(b"synthetic sodium alone"));
+    two_seconds_with(vec![BoundaryEvent::new(id, after(400), sodium)], |_, view| {
+        let ledger = Ledger::sliding(view.basis(), SECOND, 2 * SECOND, 0.0, 1e-12, 1e4);
+        let failure = certified(view, &ledger).expect_err("charge holds to the closure floor");
+        assert_eq!(failure.check(), CertificateCheck::Drift);
+        assert_eq!(failure.quantity().map(QuantityId::book), Some(Book::Charge));
+        assert!(number(failure.residual()) > 0.0);
     });
 }

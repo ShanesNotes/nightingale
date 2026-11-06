@@ -4,7 +4,7 @@ use ng_record::{ConservationView, Curve, HistorySegment};
 use ng_validate::*;
 
 fn limits(quantity: QuantityId, absolute: f64, relative: f64, drift: f64) -> QuantityPolicy {
-    fn of<U: Dimension>(quantity: QuantityId, absolute: f64, relative: f64, drift: f64) -> QuantityPolicy {
+    fn of<U: Substance>(quantity: QuantityId, absolute: f64, relative: f64, drift: f64) -> QuantityPolicy {
         let measure = |value| Measure::<U>::new(value).expect("finite");
         let ratio = Measure::<Dimensionless>::new(relative).expect("finite");
         QuantityPolicy::new(quantity, measure(absolute), ratio, measure(drift)).expect("its own dimension")
@@ -19,7 +19,11 @@ fn limits(quantity: QuantityId, absolute: f64, relative: f64, drift: f64) -> Qua
         Book::Of(Species::Norepinephrine) => of::<Norepinephrine>,
         Book::Of(Species::Acetylcholine) => of::<Acetylcholine>,
         Book::Of(Species::Energy) => of::<Energy>,
-        Book::Charge => of::<Charge>,
+        Book::Charge => {
+            let floor = Measure::<Charge>::new(absolute).expect("finite");
+            let ratio = Measure::<Dimensionless>::new(relative).expect("finite");
+            return QuantityPolicy::charge(quantity, floor, ratio).expect("charge");
+        }
     };
     build(quantity, absolute, relative, drift)
 }
@@ -247,7 +251,11 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
                     });
                 }
                 let drift = change[index].abs();
-                if !drift.at_most(ledger.drift) && drifted.is_none() {
+                let bound = match quantity.book() {
+                    Book::Charge => allowed,
+                    Book::Of(_) => ledger.drift,
+                };
+                if !drift.at_most(bound) && drifted.is_none() {
                     drifted = Some(Failed {
                         check: CertificateCheck::Drift,
                         quantity: Some(quantity),

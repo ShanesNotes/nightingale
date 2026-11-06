@@ -2,7 +2,7 @@ use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::quantity::dimension;
 use crate::scope::HeldCard;
-use crate::{BoundaryDirection, Charge, Column, ColumnId, Digest, Dimension, RowId, Species};
+use crate::{BoundaryDirection, Column, ColumnId, Digest, Dimension, RowId, Species};
 
 /// The conserved quantity a combination balances: what its pools hold, or charge, the sum of every ion by its sign.
 /// A moiety is its species across spaces, because a transfer never changes a species.
@@ -15,7 +15,7 @@ impl Book {
     pub fn measures<U: Dimension>(self) -> bool {
         match self {
             Book::Of(species) => dimension::<U>() == species.dimension(),
-            Book::Charge => dimension::<U>() == dimension::<Charge>(),
+            Book::Charge => false,
         }
     }
 }
@@ -54,9 +54,17 @@ impl ConservedBasis {
     pub fn ids(&self) -> impl Iterator<Item = QuantityId> + '_ {
         self.combinations.iter().map(Combination::id)
     }
+    /// Also seals the held routes and pools, which the model hash covers through the layout they come from.
     pub fn digest(&self) -> Digest {
         let mut out = Canonical::new("ng-contract conserved basis 1");
         self.seal(&mut out);
+        let CoverageManifest {
+            declarations: _,
+            routes,
+            pools,
+        } = &self.coverage;
+        routes.seal(&mut out);
+        pools.seal(&mut out);
         out.digest()
     }
 }
@@ -155,6 +163,22 @@ impl HeldRoute {
         self.forward
     }
 }
+impl Seal for HeldRoute {
+    fn seal(&self, out: &mut Canonical) {
+        let Self {
+            card,
+            name,
+            column,
+            quantity,
+            forward,
+        } = self;
+        out.text(card);
+        out.text(name);
+        column.seal(out);
+        out.length(quantity.index);
+        out.number(*forward as u64);
+    }
+}
 /// A pool a held stand-in answers for. No law moves it, so it is a combination of its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HeldPool {
@@ -171,6 +195,14 @@ impl HeldPool {
     }
     pub fn quantity(&self) -> QuantityId {
         self.quantity
+    }
+}
+impl Seal for HeldPool {
+    fn seal(&self, out: &mut Canonical) {
+        let Self { card, row, quantity } = self;
+        out.text(card);
+        row.seal(out);
+        out.length(quantity.index);
     }
 }
 impl Seal for Combination {

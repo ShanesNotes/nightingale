@@ -2096,8 +2096,10 @@ fn a_certificate_policy_is_checked_when_it_is_built() {
     let case = stepped();
     let basis = case.body().conserved_basis();
     let quantity = basis.ids().next().expect("one combination");
-    let wrong = QuantityPolicy::new::<Pressure>(quantity, measure(1.0), measure(0.0), measure(1.0)).err();
+    let wrong = QuantityPolicy::new::<Sodium>(quantity, measure(1.0), measure(0.0), measure(1.0)).err();
     assert_eq!(wrong, Some(AdmissionError::QuantityDimension { quantity }));
+    let charge = QuantityPolicy::charge(quantity, measure(1.0), measure(0.0)).err();
+    assert_eq!(charge, Some(AdmissionError::QuantityDimension { quantity }));
     let day = NonZeroU64::new(24 * HOUR).expect("positive");
     let windows = SlidingWindows::new(day, 48 * HOUR).expect("a coverage");
     let short = CertificatePolicy::new(basis, Vec::new(), ExpectedDrift::Zero, windows).err();

@@ -1,22 +1,23 @@
 use core::num::NonZeroU64;
 use ng_contract::{
-    AdmissionError, BoundaryDirection, Compensated, ConservedBasis, CoverageManifest, Digest, Dimension,
-    Dimensionless, HeldRoute, Interval, Measure, QuantityId, SimTime,
+    AdmissionError, Book, BoundaryDirection, Charge, Compensated, ConservedBasis, CoverageManifest, Digest,
+    Dimensionless, HeldRoute, Interval, Measure, QuantityId, SimTime, Substance,
 };
 use ng_record::{CheckpointError, ConservationView, Curve, HistorySeal, HistorySegment, NewestFirst};
 
 /// One combination's limits. `absolute + relative * gross exchange in the window` bounds closure, so a tiny
 /// exchange needs a tiny residual. `drift` stands in for 1.96 times the within-subject variation until the
-/// healthy-range set holds that variation: it is fixture data, not a policy value.
+/// healthy-range set holds that variation: it is fixture data, not a policy value. Charge has none: its drift
+/// holds to the closure bound (record 0004).
 pub struct QuantityPolicy {
     quantity: QuantityId,
     absolute: Compensated,
     relative: Measure<Dimensionless>,
-    drift: Compensated,
+    drift: Option<Compensated>,
 }
 impl QuantityPolicy {
     /// Refuses a dimension that is not what the combination balances.
-    pub fn new<U: Dimension>(
+    pub fn new<U: Substance>(
         quantity: QuantityId,
         absolute: Measure<U>,
         relative: Measure<Dimensionless>,
@@ -29,7 +30,23 @@ impl QuantityPolicy {
             quantity,
             absolute: Compensated::of(&absolute),
             relative,
-            drift: Compensated::of(&drift),
+            drift: Some(Compensated::of(&drift)),
+        })
+    }
+    /// Refuses a combination that is not charge.
+    pub fn charge(
+        quantity: QuantityId,
+        absolute: Measure<Charge>,
+        relative: Measure<Dimensionless>,
+    ) -> Result<Self, AdmissionError> {
+        if quantity.book() != Book::Charge {
+            return Err(AdmissionError::QuantityDimension { quantity });
+        }
+        Ok(Self {
+            quantity,
+            absolute: Compensated::of(&absolute),
+            relative,
+            drift: None,
         })
     }
 }
@@ -102,7 +119,8 @@ impl CertificatePolicy {
                 relative,
                 drift,
             } = quantity;
-            for value in [*absolute, Compensated::of(relative), *drift] {
+            // Only charge has no drift bound, and the basis digest says which combination that is.
+            for value in [*absolute, Compensated::of(relative)].into_iter().chain(*drift) {
                 for limb in value.bits() {
                     bytes.extend_from_slice(&limb.to_be_bytes());
                 }
@@ -348,7 +366,7 @@ fn pair(
                 });
             }
             let drift = change[index].abs();
-            if !drift.at_most(limits.drift) && drifted.is_none() {
+            if !drift.at_most(limits.drift.unwrap_or(allowed)) && drifted.is_none() {
                 drifted = Some(CertificateFailure {
                     check: CertificateCheck::Drift,
                     quantity: Some(quantity),

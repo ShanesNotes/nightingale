@@ -21,6 +21,23 @@
 //!     certify(&session.conservation(), policy)
 //! }
 //! ```
+//! Charge's drift holds to its closure bound, so a policy cannot give charge a drift bound of its own.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! use ng_validate::QuantityPolicy;
+//! fn bounded(quantity: QuantityId, floor: Measure<Charge>, relative: Measure<Dimensionless>, drift: Measure<Charge>)
+//!     -> Result<QuantityPolicy, AdmissionError> {
+//!     QuantityPolicy::new(quantity, floor, relative, drift)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! use ng_validate::QuantityPolicy;
+//! fn held(quantity: QuantityId, floor: Measure<Charge>, relative: Measure<Dimensionless>)
+//!     -> Result<QuantityPolicy, AdmissionError> {
+//!     QuantityPolicy::charge(quantity, floor, relative)
+//! }
+//! ```
 //! A pace is when a host calls `step`, and `step` takes nothing, so a caller's stop cannot cut a step.
 //! ```compile_fail,E0061
 //! use ng_contract::SimTime;
