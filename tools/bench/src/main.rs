@@ -1,6 +1,6 @@
 mod link_log;
 
-use core::num::NonZeroU64;
+use core::num::{NonZeroU32, NonZeroU64};
 use link_log::LinkLog;
 use ng_contract::*;
 use ng_record::Session;
@@ -79,7 +79,78 @@ fn newton_update_us(body: &CompiledBody) -> f64 {
     1e6 * seconds / f64::from(UPDATES)
 }
 
+/// The wall clock the workspace may not read, passed to `run` from here.
+struct HostClock(Instant);
+impl WallClock for HostClock {
+    fn elapsed_ns(&self) -> Option<u64> {
+        u64::try_from(self.0.elapsed().as_nanos()).ok()
+    }
+    fn source(&self) -> ClockSource {
+        ClockSource::Host
+    }
+}
+
+fn told(failure: &ArenaFailure) -> String {
+    match failure {
+        ArenaFailure::Initialization(failure) => format!("{failure:?}"),
+        ArenaFailure::Faulted(report) => format!("fault {:?}", report.fault()),
+        ArenaFailure::Checkpoint(error) => format!("{error:?}"),
+        ArenaFailure::Observation(refusal) => format!("{refusal:?}"),
+        ArenaFailure::MissingThroughput => "missing throughput".to_string(),
+        ArenaFailure::RepeatDiffered { repeat } => format!("repeat {repeat} differed"),
+    }
+}
+
+/// `arena <interval ms> <core> <simulated s> <repeats>`: ng-validate's own `run` with full waveform, timed by
+/// this host's clock, which also times the compilation `run` leaves to its host. run.py does not call it.
+fn arena(arguments: &[String]) {
+    let number = |at: usize, what: &str| -> u64 {
+        let given = arguments.get(at).and_then(|given| given.parse().ok());
+        given.unwrap_or_else(|| panic!("{what}"))
+    };
+    let (interval_ms, simulated_s) = (number(0, "a step interval in ms"), number(2, "simulated seconds"));
+    let named = arguments.get(1).expect("a core");
+    let repeats = u32::try_from(number(3, "repeats")).ok().and_then(NonZeroU32::new);
+    let clock = HostClock(Instant::now());
+    let body = arena_body().expect("compiled");
+    let compiled = clock.elapsed_ns().expect("a reading");
+    println!("time compile_ms {:.1}", compiled as f64 / 1e6);
+    let core = solver(named, interval_ms);
+    println!("work core {named}");
+    let origin = anchor_moment();
+    let end = SimTime::from_ns(origin.nanoseconds() + simulated_s * 1_000 * MS);
+    let spec = ArenaSpec {
+        window: Interval::new(origin, end).expect("a window"),
+        packet: arena_packet(&body).expect("packet"),
+        lens: arena_lens(&body).expect("lens"),
+        boundary: BoundaryPort::new(Vec::new()).expect("port"),
+        seed: Seed::new([1, 2, 3, 4]),
+        repeats: repeats.expect("at least one repeat"),
+    };
+    let log = LinkLog::create();
+    let arena = run(&body, core.as_ref(), spec, &clock, &log).unwrap_or_else(|failure| panic!("{}", told(&failure)));
+    println!("work seal {}", hex(arena.session().record().seal().digest()));
+    let evidence = arena.into_evidence();
+    let throughput = evidence.throughput();
+    println!("work run {}", hex(evidence.run()));
+    println!("work clock {:?}", throughput.clock());
+    println!("work accepted_steps {}", throughput.accepted_steps());
+    println!("work simulated_ns {}", throughput.simulated_ns());
+    println!("work waveform_samples {}", throughput.waveform_samples());
+    println!("time admission_s {:.2}", throughput.admission_wall_ns() as f64 / 1e9);
+    let simulated = throughput.simulated_ns() as f64 / 1e9;
+    for (repeat, wall) in throughput.runs_wall_ns().iter().enumerate() {
+        let seconds = wall.get() as f64 / 1e9;
+        println!("time repeat_{repeat}_x_real_time {:.3}", simulated / seconds);
+        println!("time repeat_{repeat}_ms_a_step {:.3}", 1e3 * seconds / throughput.accepted_steps() as f64);
+    }
+}
+
 fn main() {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(("arena", rest)) = arguments.split_first().map(|(mode, rest)| (mode.as_str(), rest)) {
+        return arena(rest);
+    }
     let interval_ms: u64 = std::env::args()
         .nth(1)
         .and_then(|given| given.parse().ok())
