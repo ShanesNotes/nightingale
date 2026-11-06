@@ -77,18 +77,18 @@ use solver_contract_sketch::ng_record::HistoryStore;
 use solver_contract_sketch::ng_validate::*;
 
 fn measure(body: &CompiledBody, solver: &dyn CoupledSolver, cores: &dyn CoreFactory,
-    spec: ArenaSpec, policy: &CertificatePolicy, cases: &AccuracyPolicy, store: &dyn HistoryStore)
-    -> Result<ArenaScore, ArenaFailure> {
+    spec: ArenaSpec, policy: &CertificatePolicy, cases: &AccuracyPolicy, store: &dyn HistoryStore,
+    clock: &dyn WallClock) -> Result<ArenaScore, ArenaFailure> {
     let checked = accuracy(solver, cases).map_err(ArenaFailure::Accuracy)?;
     let replay = replay_gates(body, cores, &spec)?;
-    let run = run(body, solver, spec, Pace::Unbounded, store)?;
+    let run = run(body, solver, spec, clock, store)?;
     let certificate = certify(&run.session().conservation(), policy)
         .map_err(ArenaFailure::Certificate)?;
     score(certificate, checked, run.into_evidence(), replay)
 }
 ```
 
-`ArenaSpec` accepts only a `ParameterPacket<SyntheticFixture>`, so the arena is nonclinical by type. `accuracy` runs the same core on manufactured cases with known answers and against the reference integrator, because a step can close every ledger and still be wrong; a score needs its evidence. `certify` takes one `ConservationView` lent by one session and policy data; it cannot take a vital, a waveform or two histories. Wall time and replay evidence are collected beside the record, never inside the certificate. Both cores receive the same compiled body, fixture packet, boundary timeline and protocol.
+`ArenaSpec` accepts only a `ParameterPacket<SyntheticFixture>`, so the arena is nonclinical by type. `accuracy` runs the same core on manufactured cases with known answers and against the reference integrator, because a step can close every ledger and still be wrong; a score needs its evidence. `certify` takes one `ConservationView` lent by one session and policy data; it cannot take a vital, a waveform or two histories. Wall time, read from a clock the host passes in, and replay evidence are collected beside the record, never inside the certificate. Both cores receive the same compiled body, fixture packet, boundary timeline and protocol.
 
 ## Shape
 
