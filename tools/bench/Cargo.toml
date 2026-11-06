@@ -8,5 +8,6 @@ publish = false
 
 [dependencies]
 ng-contract = { path = "../../crates/ng-contract" }
+ng-record = { path = "../../crates/ng-record" }
 ng-solver = { path = "../../crates/ng-solver" }
 ng-validate = { path = "../../crates/ng-validate" }
