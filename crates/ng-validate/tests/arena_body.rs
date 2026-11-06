@@ -1,5 +1,5 @@
 use ng_contract::*;
-use ng_record::{AuthorizedInput, Checkpoint, Running, Session};
+use ng_record::{AuthorizedInput, Checkpoint, Running, Session, Step, StepReceipt};
 use ng_validate::*;
 
 const SECOND: u64 = 1_000_000_000;
@@ -161,7 +161,7 @@ fn the_slice_compiles_binds_and_lays_out_its_ring(solved: &Solved) -> Result<(),
     let rows = body.rows();
     let count = |kind: fn(&RowKind) -> bool| rows.iter().filter(|row| kind(&row.kind())).count();
     assert_eq!(count(|kind| matches!(kind, RowKind::Amount { .. })), 155);
-    assert_eq!(count(|kind| matches!(kind, RowKind::Memory(_))), 9);
+    assert_eq!(count(|kind| matches!(kind, RowKind::Memory(_))), 10);
     assert_eq!(count(|kind| matches!(kind, RowKind::Algebraic(_))), 76);
     assert_eq!(body.columns().len(), 257);
     assert_eq!(body.longest_step_ns(), 10 * MILLISECOND);
@@ -724,6 +724,84 @@ fn a_checkpoint_of_a_run_mid_beat_holds_its_modes_and_runs_on_the_same_bits(solv
     }
 }
 
+fn accept<'s>(session: Session<'s, Running>) -> (Session<'s, Running>, StepReceipt) {
+    let mut attempt = session.step();
+    loop {
+        attempt = match attempt {
+            Step::Accepted(session, receipt) => return (session, receipt),
+            Step::Refused(session) => session.retry(),
+            Step::Faulted(session) => panic!("{:?}", session.fault()),
+        };
+    }
+}
+
+/// The skin's loss is a stage rate times the forcing, so a step's loss over its length and the basal rate is the factor
+/// its stages read.
+fn a_seeded_run_stirs_once_and_reads_the_skins_forcing(solved: &Solved) {
+    let (pace, basal, amplitude) = (2.0, 0.01, 0.5);
+    let body = &solved.body;
+    let skin = (body.instances().iter())
+        .find_map(|law| match law.target() {
+            Target::Column(column)
+                if body.columns()[column.index()].origin().owner == Musculoskeletal::CARD =>
+            {
+                Some(column)
+            }
+            _ => None,
+        })
+        .expect("the skin's loss");
+    let lost = |session: &Session<'_, Running>| {
+        let view = session.conservation();
+        let segment = view.head().expect("a segment");
+        let (forward, _) = segment.exchange(skin);
+        number(forward.on(segment.interval()).expect("its own interval")[1])
+    };
+    let start = anchor_moment().nanoseconds();
+    let mut session = solved.session();
+    let (mut fired, mut factors, mut before) = (Vec::new(), Vec::new(), 0.0);
+    let mut reached = start;
+    while fired.is_empty() || reached < start + 2 * SECOND {
+        assert!(reached < start + 10 * SECOND, "no stir in 10 s");
+        let (next, receipt) = accept(session);
+        session = next;
+        let now = session.record().accepted().time().nanoseconds();
+        let after = lost(&session);
+        factors.push((after - before) / (basal * (now - reached) as f64 / 1e9));
+        (before, reached) = (after, now);
+        fired.extend_from_slice(receipt.fired());
+    }
+    let [stir] = fired[..] else {
+        panic!("{} stirs", fired.len());
+    };
+    let stirred = ModeValue {
+        variable: "stirring",
+        value: "stirred",
+    };
+    assert_eq!(
+        (stir.stream(), stir.ordinal(), stir.entered()),
+        (
+            LawName {
+                owner: Musculoskeletal::CARD,
+                local: "stir"
+            },
+            0,
+            stirred
+        )
+    );
+    let floor = solved.core.resolution().minimum_interval_ns().get() as f64 / 1e9;
+    let past = pace * (stir.at().nanoseconds() - start) as f64 / 1e9 - number(stir.threshold());
+    assert!((-1e-12..=pace * floor).contains(&past), "{past} past the draw");
+    assert_eq!(
+        solved.value(&session, memory("MS", "stir hazard", Context::Body)),
+        0.0
+    );
+    let within = |factor: &f64| (1.0 - amplitude..=1.0 + amplitude).contains(factor);
+    assert!(factors.iter().all(within), "{factors:?}");
+    let apart = |from: f64| factors.iter().any(|factor| (factor - from).abs() > 1e-6);
+    assert!(apart(factors[0]), "the factor stayed at {}", factors[0]);
+    assert!(apart(1.0), "the factor held at one");
+}
+
 fn settled(solved: &Solved, posture: Vec<AuthorizedInput>) -> ([f64; 5], f64) {
     let output = valve_flow(vessel("left ventricle"), vessel("systemic arteries"));
     let filtration = algebraic(
@@ -888,4 +966,5 @@ fn the_slice_compiles_initializes_closes_and_regulates_itself() {
     a_bolus_gains_on_the_walls_and_takes_nothing_back_from_the_heat(&solved);
     the_heat_shed_in_late_diastole_is_what_the_flows_lose(&solved);
     a_checkpoint_of_a_run_mid_beat_holds_its_modes_and_runs_on_the_same_bits(&solved);
+    a_seeded_run_stirs_once_and_reads_the_skins_forcing(&solved);
 }
