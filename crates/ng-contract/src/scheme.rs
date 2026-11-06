@@ -362,9 +362,8 @@ impl RunIdentity {
     pub(crate) fn seed(&self) -> Seed {
         self.seed
     }
-    /// The same patient and seed, whatever the resolution.
-    pub(crate) fn same_course(&self, other: &Self) -> bool {
-        (self.model, self.packet, self.seed.words) == (other.model, other.packet, other.seed.words)
+    pub(crate) fn same_seed(&self, other: &Self) -> bool {
+        self.seed.words == other.seed.words
     }
 }
 

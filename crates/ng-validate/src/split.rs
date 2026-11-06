@@ -17,9 +17,8 @@ impl From<SplitRejected> for SplitFailure {
     }
 }
 
-/// The split gate (contract §7): a core under measurement against `reference`, whose own error comes from a run
-/// of it at half its interval, all three drawn from accepted history on one grid of one case. It returns the
-/// qualification and nothing else, so no run it measured is ever scored.
+/// The split gate (contract §7). The reference's own error comes from the gate's run of it at half its interval,
+/// and the gate returns the qualification and nothing else, so no run it measured is ever scored.
 pub fn split_gate(
     case: &dyn ReplayCase,
     split: &dyn CoupledSolver,
@@ -35,7 +34,6 @@ pub fn split_gate(
     Ok(SplitMeasurement::new(expected, measured, error, budget)?.qualify()?)
 }
 
-/// Admits `case` on `core` and draws its trace from admission through the grid's last instant.
 pub fn draw_split_trace(
     case: &dyn ReplayCase,
     core: &dyn CoupledSolver,

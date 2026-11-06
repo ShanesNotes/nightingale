@@ -4,8 +4,8 @@ use crate::problem::{SolveWorkspace, StagePoint};
 use crate::scheme::Stage;
 use crate::{
     Candidate, Compensated, CompiledBody, CoupledProblem, DenseSegment, Digest, EngineFault, EngineFaultKind,
-    InputId, LawName, MethodHistory, ModeValue, NumericalRefusal, Ratio, RowId, SimTime, StepExtents, StepTicket,
-    TrialFailure, ValidityExcursion,
+    InputId, LawName, MethodHistory, ModeValue, NumericalRefusal, Ratio, RowId, SimTime, StepExtents,
+    StepTicket, TrialFailure, ValidityExcursion,
 };
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
@@ -431,7 +431,6 @@ pub struct VerifiedParts {
     pub continuation: MethodHistory,
     pub dense: DenseSegment,
     pub excursions: Vec<ValidityExcursion>,
-    pub fired: Vec<Fired>,
     pub extents: StepExtents,
 }
 impl VerifiedStep {
@@ -492,11 +491,11 @@ impl VerifiedStep {
             continuation,
             dense,
             excursions,
-            fired,
             extents: StepExtents {
-                ticket,
+                applied: ticket.due,
                 forward,
                 reverse,
+                fired,
             },
         }
     }

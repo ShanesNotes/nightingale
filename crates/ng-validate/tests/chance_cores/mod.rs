@@ -278,7 +278,7 @@ impl CoupledSolver for VerifiesDry {
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         let parts = self.inner.solve(problem, ticket)?.verify(problem)?.into_parts();
-        assert!(parts.fired.is_empty(), "a dry verify fired");
+        assert!(parts.extents.fired().is_empty(), "a dry verify fired");
         self.checked.set(self.checked.get() + 1);
         self.inner.solve(problem, ticket)
     }

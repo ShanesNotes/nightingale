@@ -23,6 +23,7 @@ impl sealed::MetricFamily for EventTimeFamily {}
 impl MetricFamily for EventTimeFamily {}
 
 /// A shared physical sample grid; both traces of a comparison must use the same one.
+#[derive(Clone, Copy)]
 pub struct TraceGrid {
     _start: SimTime,
     _period_ns: NonZeroU64,

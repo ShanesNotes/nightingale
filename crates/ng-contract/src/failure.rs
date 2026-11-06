@@ -227,7 +227,7 @@ pub enum AdmissionError {
     /// An accuracy policy with no case, a case that never steps or a zero grid.
     EmptyAccuracyPolicy,
     /// A trace grid of fewer than two instants, or one that ends past the clock.
-    EmptyTraceGrid,
+    TraceGridOutOfRange,
     /// A split budget whose reference share is not between zero and one.
     ReferenceShare,
 }

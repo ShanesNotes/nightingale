@@ -6,8 +6,8 @@ use crate::history::{ConservationView, History, HistorySeal, LedgerChunk, Link};
 use ng_contract::{
     AcceptedStateView, AdmissionError, AppliedInputs, Attempt, BoundaryEvent, Candidate, CompiledBody,
     CoupledProblem, CoupledSolver, DenseSegment, Digest, Fired, ImageParts, InitialRevision, InputId,
-    MethodHistory, NumericalRefusal, RecordHash, RunIdentity, SimTime, SplitRejected, StepExtents, StepProposal,
-    StepTicket, TraceDraw, TrialFailure, ValidityExcursion, VerifiedParts, VerifiedStep,
+    MethodHistory, NumericalRefusal, RecordHash, RunIdentity, SimTime, SplitRejected, StepExtents,
+    StepProposal, StepTicket, TraceDraw, TrialFailure, ValidityExcursion, VerifiedParts, VerifiedStep,
 };
 
 /// The chained seal of one accepted revision: the previous seal, the revision, the image's digests and the
@@ -168,13 +168,11 @@ impl<'m> PatientRecord<'m> {
         let pending = self.image.pending.after(step.ticket());
         let time = step.ticket().interval().end();
         let after_breakpoint = step.ticket().after_breakpoint();
-        let applied = step.applied().to_vec();
         let VerifiedParts {
             state,
             continuation,
             dense,
             excursions,
-            fired,
             extents,
         } = step.into_parts();
         let image = self
@@ -190,10 +188,8 @@ impl<'m> PatientRecord<'m> {
             dense,
             pending,
             link,
-            applied,
             after_breakpoint,
             excursions,
-            fired,
             extents,
         }
     }
@@ -207,10 +203,8 @@ impl<'m> PatientRecord<'m> {
             dense,
             pending,
             link,
-            applied,
             after_breakpoint,
             excursions,
-            fired,
             extents,
         } = next;
         self.image.time = time;
@@ -223,21 +217,26 @@ impl<'m> PatientRecord<'m> {
         StepReceipt {
             revision: self.history.revision(),
             seal: Seal { digest },
-            applied,
             after_breakpoint,
             excursions,
-            fired,
             extents,
         }
     }
     /// Reads this head into a split trace. With no receipt it is the head the draw opens on; with one it is the
     /// head that receipt's step made, so a receipt of any other head is refused.
-    pub fn split_trace(&self, draw: &mut TraceDraw, receipt: Option<&StepReceipt>) -> Result<(), SplitRejected> {
-        if receipt.is_some_and(|receipt| receipt.seal != self.seal()) {
-            return Err(SplitRejected::OtherHead);
+    pub fn split_trace(
+        &self,
+        draw: &mut TraceDraw,
+        receipt: Option<&StepReceipt>,
+    ) -> Result<(), SplitRejected> {
+        let seal = self.history.seal();
+        match (receipt, self.history.previous()) {
+            (None, _) => draw.open(&self.identity, self.image.parameters(), self.accepted(), seal),
+            (Some(receipt), Some(previous)) if receipt.seal == self.seal() => {
+                draw.read(&self.identity, self.accepted(), seal, previous, &receipt.extents)
+            }
+            (Some(_), _) => Err(SplitRejected::OtherHead),
         }
-        let step = receipt.map(|receipt| (&receipt.extents, receipt.fired.as_slice()));
-        draw.read(&self.identity, self.accepted(), self.history.seal(), step)
     }
     pub(crate) fn admit_input(&mut self, input: AuthorizedInput) -> Result<InputReceipt, AdmissionError> {
         let AuthorizedInput { command: _, event } = input;
@@ -315,10 +314,8 @@ pub struct NextImage {
     dense: DenseSegment,
     pending: AppliedInputs,
     link: Link,
-    applied: Vec<InputId>,
     after_breakpoint: bool,
     excursions: Vec<ValidityExcursion>,
-    fired: Vec<Fired>,
     extents: StepExtents,
 }
 
@@ -326,10 +323,8 @@ pub struct NextImage {
 pub struct StepReceipt {
     revision: u64,
     seal: Seal,
-    applied: Vec<InputId>,
     after_breakpoint: bool,
     excursions: Vec<ValidityExcursion>,
-    fired: Vec<Fired>,
     extents: StepExtents,
 }
 impl StepReceipt {
@@ -341,7 +336,7 @@ impl StepReceipt {
     }
     /// Each input this step applied, once, in `(time, id)` order.
     pub fn applied(&self) -> &[InputId] {
-        &self.applied
+        self.extents.applied()
     }
     pub fn after_breakpoint(&self) -> bool {
         self.after_breakpoint
@@ -350,7 +345,7 @@ impl StepReceipt {
         &self.excursions
     }
     pub fn fired(&self) -> &[Fired] {
-        &self.fired
+        self.extents.fired()
     }
 }
 

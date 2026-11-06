@@ -1,12 +1,9 @@
-//! A split is trusted only on measurement. `SplitMeasurement::qualify` is the only producer of a
-//! `SplitQualification`, over the four-family metric (state, exchange integral, observable, event time;
-//! CB numerics.rs 122-260) with the reference's own self-convergence error included. A `SplitTrace` comes
-//! only from a draw over accepted heads, each step read through the extents `verify` made for it.
 use crate::body::RowKind;
 use crate::identity::{Canonical, Seal};
 use crate::{
-    AcceptedStateView, AdmissionError, Compensated, CompiledBody, Digest, Dimensionless, ErrorScales, Fired,
-    InputId, Measure, ModelHash, ObservationLens, PacketHash, RowId, RunIdentity, SimTime, StepTicket,
+    AcceptedStateView, AdmissionError, BoundParameters, Compensated, CompiledBody, Digest, Dimensionless,
+    ErrorScales, Fired, InputId, Measure, ModelHash, ObservationLens, PacketHash, RowId, RunIdentity,
+    SimTime, Time,
 };
 use core::marker::PhantomData;
 use core::num::NonZeroU64;
@@ -14,23 +11,33 @@ use core::num::NonZeroU64;
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 
 mod sealed {
-    pub trait MetricFamily {}
+    pub trait MetricFamily {
+        const INDEX: usize;
+    }
 }
 pub trait MetricFamily: sealed::MetricFamily {}
 pub enum StateFamily {}
 pub enum ExchangeFamily {}
 pub enum ObservableFamily {}
 pub enum EventTimeFamily {}
-impl sealed::MetricFamily for StateFamily {}
+impl sealed::MetricFamily for StateFamily {
+    const INDEX: usize = 0;
+}
 impl MetricFamily for StateFamily {}
-impl sealed::MetricFamily for ExchangeFamily {}
+impl sealed::MetricFamily for ExchangeFamily {
+    const INDEX: usize = 1;
+}
 impl MetricFamily for ExchangeFamily {}
-impl sealed::MetricFamily for ObservableFamily {}
+impl sealed::MetricFamily for ObservableFamily {
+    const INDEX: usize = 2;
+}
 impl MetricFamily for ObservableFamily {}
-impl sealed::MetricFamily for EventTimeFamily {}
+impl sealed::MetricFamily for EventTimeFamily {
+    const INDEX: usize = 3;
+}
 impl MetricFamily for EventTimeFamily {}
 
-/// Instants `start + k * period` for `k` below `samples`; both traces of a comparison use the same one.
+/// Instants `start + k * period` for `k` below `samples`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TraceGrid {
     start: SimTime,
@@ -47,7 +54,7 @@ impl TraceGrid {
                 period_ns,
                 samples,
             }),
-            _ => Err(AdmissionError::EmptyTraceGrid),
+            _ => Err(AdmissionError::TraceGridOutOfRange),
         }
     }
     pub fn end(&self) -> SimTime {
@@ -70,8 +77,8 @@ impl Seal for TraceGrid {
     }
 }
 
-/// One family's keys and values. A grid family holds one value per key at each instant, instant by
-/// instant; the event family one firing time per key, in seconds.
+/// One family's keys and values: a grid family's are instant by instant, and the event family's are one firing
+/// time per key, in seconds.
 pub struct FamilySamples<F: MetricFamily> {
     keys: Vec<Digest>,
     values: Vec<Compensated>,
@@ -85,32 +92,53 @@ impl<F: MetricFamily> FamilySamples<F> {
             family: PhantomData,
         }
     }
+    fn parts(&self) -> (&[Digest], &[Compensated]) {
+        (&self.keys, &self.values)
+    }
+}
+
+fn indexed(tag: &str, count: usize) -> Vec<Digest> {
+    (0..count)
+        .map(|index| {
+            let mut key = Canonical::new(tag);
+            key.length(index);
+            key.digest()
+        })
+        .collect()
 }
 impl<F: MetricFamily> Seal for FamilySamples<F> {
     fn seal(&self, out: &mut Canonical) {
         let Self {
             keys,
             values,
-            family: _,
+            family: PhantomData,
         } = self;
         keys.seal(out);
         values.seal(out);
     }
 }
 
-/// One verified step's gross extents per column and the ticket they were made for. Only `verify` makes one,
-/// so a trace's exchanges are a solve's own.
+/// Only `verify` makes one, so a trace's exchanges and events are a solve's own, and none can be left out.
 #[derive(Debug)]
 pub struct StepExtents {
-    pub(crate) ticket: StepTicket,
+    pub(crate) applied: Vec<InputId>,
     pub(crate) forward: Vec<Compensated>,
     pub(crate) reverse: Vec<Compensated>,
+    pub(crate) fired: Vec<Fired>,
+}
+impl StepExtents {
+    /// Each input this step applied, once, in `(time, id)` order.
+    pub fn applied(&self) -> &[InputId] {
+        &self.applied
+    }
+    pub fn fired(&self) -> &[Fired] {
+        &self.fired
+    }
 }
 
-/// One run's four families on a grid, bound to its identity, its lens and the inputs it applied inside the
-/// grid. There is no constructor from samples: `TraceDraw::finish` makes one from accepted heads.
 pub struct SplitTrace {
     identity: RunIdentity,
+    patient: Digest,
     grid: TraceGrid,
     lens: Digest,
     schedule: Vec<(SimTime, InputId)>,
@@ -123,6 +151,7 @@ impl SplitTrace {
     pub fn digest(&self) -> Digest {
         let Self {
             identity,
+            patient,
             grid,
             lens,
             schedule,
@@ -133,6 +162,7 @@ impl SplitTrace {
         } = self;
         let mut out = Canonical::new("ng-contract split trace 1");
         identity.digest().seal(&mut out);
+        patient.seal(&mut out);
         grid.seal(&mut out);
         lens.seal(&mut out);
         seal_schedule(&mut out, schedule);
@@ -144,15 +174,14 @@ impl SplitTrace {
     }
     fn families(&self) -> [(&[Digest], &[Compensated]); 4] {
         [
-            (&self.state.keys, &self.state.values),
-            (&self.exchange.keys, &self.exchange.values),
-            (&self.observable.keys, &self.observable.values),
-            (&self.event_time.keys, &self.event_time.values),
+            self.state.parts(),
+            self.exchange.parts(),
+            self.observable.parts(),
+            self.event_time.parts(),
         ]
     }
-    /// The same patient, seed, grid, lens, inputs and events under another resolution.
     fn comparable(&self, other: &Self) -> Result<(), SplitRejected> {
-        if !self.identity.same_course(&other.identity) {
+        if self.patient != other.patient || !self.identity.same_seed(&other.identity) {
             return Err(SplitRejected::OtherCourse);
         }
         if self.identity.resolution().digest() == other.identity.resolution().digest() {
@@ -174,6 +203,18 @@ impl SplitTrace {
     }
 }
 
+/// The bound patient whatever core runs it. The packet hash also covers the core's method history at admission, so
+/// two cores' runs of one patient never share it.
+fn patient(parameters: &BoundParameters) -> Digest {
+    let mut out = Canonical::new("ng-contract split patient 1");
+    parameters.model.digest().seal(&mut out);
+    parameters.values.seal(&mut out);
+    parameters.starts.seal(&mut out);
+    parameters.sizes.seal(&mut out);
+    parameters.modes.seal(&mut out);
+    out.digest()
+}
+
 fn seal_schedule(out: &mut Canonical, schedule: &[(SimTime, InputId)]) {
     out.length(schedule.len());
     for (at, input) in schedule {
@@ -185,6 +226,7 @@ fn seal_schedule(out: &mut Canonical, schedule: &[(SimTime, InputId)]) {
 struct Opened {
     identity: RunIdentity,
     run: Digest,
+    patient: Digest,
     head: SimTime,
     seal: Digest,
     net: Vec<Compensated>,
@@ -204,7 +246,13 @@ struct Layout {
     channels: Vec<RowId>,
 }
 impl Layout {
-    fn open(&self, identity: &RunIdentity, head: AcceptedStateView<'_>, seal: Digest) -> Result<Opened, SplitRejected> {
+    fn open(
+        &self,
+        identity: &RunIdentity,
+        parameters: &BoundParameters,
+        head: AcceptedStateView<'_>,
+        seal: Digest,
+    ) -> Result<Opened, SplitRejected> {
         let time = head.time();
         if self.grid.start < time {
             return Err(SplitRejected::PastStart);
@@ -212,6 +260,7 @@ impl Layout {
         let mut opened = Opened {
             identity: identity.clone(),
             run: identity.digest(),
+            patient: patient(parameters),
             head: time,
             seal,
             net: vec![Compensated::ZERO; self.columns],
@@ -229,36 +278,39 @@ impl Layout {
         }
         Ok(opened)
     }
-    /// Checks everything before it changes anything, so a refused head leaves the draw as it was.
+    /// A refused head leaves the draw as it was, so every check comes first.
     fn advance(
         &self,
         opened: &mut Opened,
         identity: &RunIdentity,
         head: AcceptedStateView<'_>,
         seal: Digest,
-        (extents, fired): (&StepExtents, &[Fired]),
+        previous: Digest,
+        extents: &StepExtents,
     ) -> Result<(), SplitRejected> {
-        let ticket = &extents.ticket;
-        let run = opened.run;
-        if identity.digest() != run || ticket.sealed(run) != ticket.digest() {
+        if identity.digest() != opened.run {
             return Err(SplitRejected::OtherRun);
         }
-        let interval = ticket.interval();
-        let follows = ticket.base == opened.seal
-            && interval.start() == opened.head
-            && interval.end() == head.time()
-            && head.last_segment().interval() == Some(interval);
-        if !follows {
+        let interval = head.last_segment().interval();
+        let Some(interval) =
+            interval.filter(|interval| previous == opened.seal && interval.start() == opened.head)
+        else {
             return Err(SplitRejected::Gap);
-        }
+        };
         let end: Vec<Compensated> = (opened.net.iter().zip(&extents.forward).zip(&extents.reverse))
             .map(|((net, forward), reverse)| net.plus(*forward).minus(*reverse))
             .collect();
         let (first, last) = (self.grid.start, self.grid.end());
         if first <= interval.start() && interval.start() < last {
-            opened.schedule.extend(ticket.due.iter().map(|input| (interval.start(), *input)));
+            opened
+                .schedule
+                .extend(extents.applied.iter().map(|input| (interval.start(), *input)));
         }
-        for firing in fired.iter().filter(|firing| first <= firing.at() && firing.at() <= last) {
+        for firing in extents
+            .fired
+            .iter()
+            .filter(|firing| first <= firing.at() && firing.at() <= last)
+        {
             let mut key = Canonical::new("ng-contract split event 1");
             firing.stream().seal(&mut key);
             key.number(firing.ordinal());
@@ -279,7 +331,9 @@ impl Layout {
             } else {
                 let segment = head.last_segment();
                 self.sample(opened, net, |row| {
-                    segment.sample(row, at).expect("a grid instant inside the step lies on its chord")
+                    segment
+                        .sample(row, at)
+                        .expect("a grid instant inside the step lies on its chord")
                 });
             }
         }
@@ -293,15 +347,17 @@ impl Layout {
         let exchanges = net.iter().zip(origin.iter()).map(|(at, from)| at.minus(*from));
         opened.exchange.extend(exchanges);
         opened.state.extend(self.rows.iter().map(|row| value(*row)));
-        opened.observable.extend(self.channels.iter().map(|row| value(*row)));
+        opened
+            .observable
+            .extend(self.channels.iter().map(|row| value(*row)));
         opened.filled += 1;
     }
 }
 
-/// Reads one course's accepted heads in order and keeps the grid's samples. `PatientRecord::split_trace`
-/// feeds it: the head a draw opens on, then each accepted step with the extents and firings `verify` made.
-/// An instant between two heads reads the step's chord; one at a head reads what the head holds, after any
-/// firing there.
+/// Reads one course's heads in order and keeps the grid's samples. It takes only what `verify` made: a head's
+/// state and its step's extents and firings. `PatientRecord::split_trace` pairs each accepted head with its own
+/// step. An instant between two heads reads the step's chord; one at a head reads what the head holds, after
+/// any firing there.
 pub struct TraceDraw {
     lens: Digest,
     model: ModelHash,
@@ -310,8 +366,8 @@ pub struct TraceDraw {
 }
 impl TraceDraw {
     /// The state family is every amount and memory row, the exchange family every column's net extent since
-    /// the grid's first instant and the observable family every channel of `lens`, so a body with no column or
-    /// a lens with no channel is refused.
+    /// the grid's first instant and the observable family every channel of `lens`. Refuses a lens of another
+    /// body and a family that would be empty.
     pub fn new(body: &CompiledBody, lens: &ObservationLens, grid: TraceGrid) -> Result<Self, SplitRejected> {
         if lens.model() != body.model_hash() {
             return Err(SplitRejected::OtherBody);
@@ -336,26 +392,36 @@ impl TraceDraw {
             opened: None,
         })
     }
-    /// A head with no step opens the draw and must not be past the grid's first instant; every later head comes
-    /// with the step that made it, from the head read last, of the same run.
+    /// Opens the draw, once, on a head that is not past the grid's first instant.
+    pub fn open(
+        &mut self,
+        identity: &RunIdentity,
+        parameters: &BoundParameters,
+        head: AcceptedStateView<'_>,
+        seal: Digest,
+    ) -> Result<(), SplitRejected> {
+        if identity.model() != self.model {
+            return Err(SplitRejected::OtherBody);
+        }
+        if self.opened.is_some() {
+            return Err(SplitRejected::Gap);
+        }
+        self.opened = Some(self.layout.open(identity, parameters, head, seal)?);
+        Ok(())
+    }
+    /// Reads the head a step made, of the same run, which must follow the seal read last.
     pub fn read(
         &mut self,
         identity: &RunIdentity,
         head: AcceptedStateView<'_>,
         seal: Digest,
-        step: Option<(&StepExtents, &[Fired])>,
+        previous: Digest,
+        step: &StepExtents,
     ) -> Result<(), SplitRejected> {
-        if identity.model() != self.model {
-            return Err(SplitRejected::OtherBody);
-        }
-        match (&mut self.opened, step) {
-            (None, None) => {
-                self.opened = Some(self.layout.open(identity, head, seal)?);
-                Ok(())
-            }
-            (Some(opened), Some(step)) => self.layout.advance(opened, identity, head, seal, step),
-            _ => Err(SplitRejected::Gap),
-        }
+        let Some(opened) = &mut self.opened else {
+            return Err(SplitRejected::Gap);
+        };
+        self.layout.advance(opened, identity, head, seal, previous, step)
     }
     /// Refuses a draw that has not reached the grid's last instant.
     pub fn finish(self) -> Result<SplitTrace, SplitRejected> {
@@ -370,6 +436,7 @@ impl TraceDraw {
         };
         let Opened {
             identity,
+            patient,
             mut events,
             schedule,
             state,
@@ -377,15 +444,6 @@ impl TraceDraw {
             observable,
             ..
         } = opened;
-        let keyed = |tag: &str, count: usize| -> Vec<Digest> {
-            (0..count)
-                .map(|index| {
-                    let mut key = Canonical::new(tag);
-                    key.length(index);
-                    key.digest()
-                })
-                .collect()
-        };
         events.sort_by_key(|(key, _)| *key.as_bytes());
         let (event_keys, times) = events.into_iter().unzip();
         let Layout {
@@ -396,20 +454,23 @@ impl TraceDraw {
         } = layout;
         Ok(SplitTrace {
             identity,
+            patient,
             grid,
             lens,
             schedule,
-            state: FamilySamples::new(keyed("ng-contract split state 1", rows.len()), state),
-            exchange: FamilySamples::new(keyed("ng-contract split exchange 1", columns), exchange),
-            observable: FamilySamples::new(keyed("ng-contract split observable 1", channels.len()), observable),
+            state: FamilySamples::new(indexed("ng-contract split state 1", rows.len()), state),
+            exchange: FamilySamples::new(indexed("ng-contract split exchange 1", columns), exchange),
+            observable: FamilySamples::new(
+                indexed("ng-contract split observable 1", channels.len()),
+                observable,
+            ),
             event_time: FamilySamples::new(event_keys, times),
         })
     }
 }
 
-/// The coupled reference's own error, measured against a refined run of it on the same grid; never assumed
-/// zero. It keeps the digest of the reference trace it was measured on, so an easier run's small error cannot
-/// stand in for this reference's.
+/// The coupled reference's own error, measured against a second run of it on the same grid and never assumed
+/// zero. The split gate runs the second at half the interval.
 pub struct ReferenceError {
     reference: Digest,
     differences: [Vec<Compensated>; 4],
@@ -429,21 +490,22 @@ impl ReferenceError {
     }
 }
 
-/// One error scale per family, in each key's own unit (seconds for event times), and the share of the budget
-/// the reference's own error may take.
+/// A grid family's scales are in each key's own unit.
 pub struct SplitBudget {
     scales: [ErrorScales; 4],
     reference_fraction: Measure<Dimensionless>,
 }
 impl SplitBudget {
-    /// Refuses a reference share outside zero to one, open at both ends.
+    /// Refuses an event time scale that is not positive and a reference share outside zero to one, open at both
+    /// ends.
     pub fn new(
         state: ErrorScales,
         exchange: ErrorScales,
         observable: ErrorScales,
-        event_time: ErrorScales,
+        event_time: Measure<Time>,
         reference_fraction: Measure<Dimensionless>,
     ) -> Result<Self, AdmissionError> {
+        let event_time = ErrorScales::uniform(Measure::new(event_time.value())?, Measure::new(0.0)?)?;
         let fraction = reference_fraction.value();
         if !(0.0 < fraction && fraction < 1.0) {
             return Err(AdmissionError::ReferenceShare);
@@ -455,7 +517,6 @@ impl SplitBudget {
     }
 }
 
-/// A split run's trace against the coupled reference's on one grid, with the reference's own error.
 pub struct SplitMeasurement {
     reference: SplitTrace,
     split: SplitTrace,
@@ -482,9 +543,8 @@ impl SplitMeasurement {
             budget,
         })
     }
-    /// The only producer of `SplitQualification`: each family's worst normalized error plus the reference's
-    /// own must fit the budget, and the reference's own must fit its share. Each error is normalized by its
-    /// family's scales at the reference's value.
+    /// Each family's worst normalized error plus the reference's own must fit the budget, and the reference's
+    /// own must fit its share. Each error is normalized by its family's scales at the reference's value.
     pub fn qualify(self) -> Result<SplitQualification, SplitRejected> {
         let Self {
             reference,
@@ -511,7 +571,10 @@ impl SplitMeasurement {
                 }
             }
         }
-        let worst = (maxima.iter()).fold(0.0, |worst, &maximum| if worst < maximum { maximum } else { worst });
+        let worst = (maxima.iter()).fold(
+            0.0,
+            |worst, &maximum| if worst < maximum { maximum } else { worst },
+        );
         let assessment = SplitAssessment {
             maxima: maxima.map(Compensated::exact),
             reference_error: Compensated::exact(own),
@@ -542,11 +605,14 @@ impl SplitMeasurement {
 
 fn normalized(difference: Compensated, scale: f64) -> Result<f64, SplitRejected> {
     let error = difference.abs().rounded() / scale;
-    if error.is_finite() { Ok(error) } else { Err(SplitRejected::NotFinite) }
+    if error.is_finite() {
+        Ok(error)
+    } else {
+        Err(SplitRejected::NotFinite)
+    }
 }
 
-/// Each family's worst normalized error in family order (state, exchange integral, observable, event time),
-/// the reference's own, and the worst family plus the reference's own.
+/// The worst total is the worst family's error plus the reference's own.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SplitAssessment {
     maxima: [Compensated; 4],
@@ -554,8 +620,8 @@ pub struct SplitAssessment {
     worst_total: Compensated,
 }
 impl SplitAssessment {
-    pub fn maxima(&self) -> [Compensated; 4] {
-        self.maxima
+    pub fn maximum<F: MetricFamily>(&self) -> Compensated {
+        self.maxima[F::INDEX]
     }
     pub fn reference_error(&self) -> Compensated {
         self.reference_error
@@ -595,41 +661,29 @@ impl SplitQualification {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SplitRejected {
-    /// A lens or a run of another body.
     OtherBody,
-    /// A body with no column or a lens with no channel, so a family would be empty.
     MissingFamily,
-    /// The head a draw opens on is past the grid's first instant.
     PastStart,
-    /// A head that does not follow the last one read, or that comes without its step.
+    /// A head that does not follow the seal read last, a read before the draw opened, or a second opening.
     Gap,
-    /// A head or a step of another run.
     OtherRun,
-    /// A receipt of another head than the record's own.
     OtherHead,
-    /// A draw that has not reached the grid's last instant.
     Unfinished,
-    /// Another patient, packet or seed.
+    /// Another patient or seed.
     OtherCourse,
-    /// A run compared with itself.
     SameRun,
     OtherGrid,
     OtherSchedule,
-    /// The two runs fired different events.
     OtherEvents,
-    /// A reference error measured on another reference trace.
     OtherReference,
     NotFinite,
     ReferenceTooCoarse(SplitAssessment),
     OverBudget(SplitAssessment),
 }
 
-/// Which blocks a stepper evaluates apart. A split plan holds the qualification its measurement made.
+/// Which blocks a stepper evaluates apart.
 #[derive(Clone, Copy)]
 pub enum EvaluationPlan<'a> {
     Coupled,
     QualifiedSplit(&'a SplitQualification),
-    /// Only in a run whose declared resolution is a split measurement; such runs feed `SplitMeasurement` and
-    /// are never scored by the arena.
-    UnderMeasurement,
 }
