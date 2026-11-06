@@ -225,16 +225,35 @@ pub fn admit_at<'m>(
     origin: SimTime,
     store: &'m dyn HistoryStore,
 ) -> Result<Admitted<'m>, InitializationFailure> {
+    let start = solved_start(body, packet, boundary, core, lens, origin)?;
+    let provenance = start.provenance().clone();
+    let session = admit_start(body, core, start, Seed::new([1, 2, 3, 4]), store)?;
+    Ok(Admitted { session, provenance })
+}
+
+pub(crate) fn solved_start(
+    body: &CompiledBody,
+    packet: ParameterPacket<SyntheticFixture>,
+    boundary: BoundaryPort,
+    core: &dyn CoupledSolver,
+    lens: &ObservationLens,
+    origin: SimTime,
+) -> Result<InitialRevision, InitializationFailure> {
     let parameters = body.bind(packet)?;
     let request = InitializationRequest::at(origin).reading(lens);
     let mut system = body.initialization(parameters, boundary, request)?;
     let solved = initialize(&mut system, body);
-    let resolution = core.resolution();
-    let start = MethodHistory::new(resolution.policy(), origin, Vec::new());
-    let revision = system.admit(solved, start)?;
-    let provenance = revision.provenance().clone();
-    let seed = Seed::new([1, 2, 3, 4]);
-    let identity = RunIdentity::new(body.model_hash(), revision.packet_hash(), seed, resolution);
-    let session = Session::admit(body, core, revision, identity, store)?;
-    Ok(Admitted { session, provenance })
+    let start = MethodHistory::new(core.resolution().policy(), origin, Vec::new());
+    system.admit(solved, start)
+}
+
+pub(crate) fn admit_start<'m>(
+    body: &'m CompiledBody,
+    core: &'m dyn CoupledSolver,
+    start: InitialRevision,
+    seed: Seed,
+    store: &'m dyn HistoryStore,
+) -> Result<Session<'m, Running>, InitializationFailure> {
+    let identity = RunIdentity::new(body.model_hash(), start.packet_hash(), seed, core.resolution());
+    Ok(Session::admit(body, core, start, identity, store)?)
 }
