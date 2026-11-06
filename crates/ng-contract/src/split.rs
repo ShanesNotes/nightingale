@@ -264,7 +264,6 @@ struct Opened {
     identity: RunIdentity,
     patient: Digest,
     head: SimTime,
-    revision: u64,
     unconfirmed: Digest,
     net: Vec<Compensated>,
     filled: u32,
@@ -297,7 +296,6 @@ impl Layout {
             identity: identity.clone(),
             patient: patient(head.parts.parameters()),
             head: time,
-            revision: 0,
             unconfirmed: head.seal(),
             net: vec![Compensated::ZERO; self.columns],
             filled: 0,
@@ -323,9 +321,7 @@ impl Layout {
         extents: &StepExtents,
     ) -> Result<(), SplitRejected> {
         let view = head.view();
-        let follows = extents.base == opened.unconfirmed
-            && head.previous == opened.unconfirmed
-            && head.revision == opened.revision + 1;
+        let follows = extents.base == opened.unconfirmed;
         let interval = (view.last_segment().interval()).filter(|interval| interval.start() == opened.head);
         let Some(interval) = interval.filter(|_| follows) else {
             return Err(SplitRejected::Gap);
@@ -368,7 +364,6 @@ impl Layout {
         }
         opened.net = end;
         opened.head = view.time();
-        opened.revision = head.revision;
         opened.unconfirmed = head.seal();
         Ok(())
     }

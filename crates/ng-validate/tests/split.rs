@@ -611,3 +611,31 @@ fn a_draw_refuses_a_grid_that_starts_before_admission() {
         Err(SplitRejected::PastStart)
     );
 }
+
+/// A head's samples count only once the next step names its seal, so the draw needs one step past the grid.
+#[test]
+fn a_draw_is_done_once_the_step_after_its_last_instant_names_that_head() {
+    let case = stepped();
+    let lens = gauge(case.body(), case.rows()[0]);
+    let (core, store) = (reference(), MemoryStore::default());
+    let grid = TraceGrid::new(SimTime::from_ns(0), every(REFERENCE_STEP), 2).expect("a grid");
+    let mut draw = TraceDraw::new(case.body(), &lens, grid).expect("a draw");
+    let session = case.admit(&core, &store).expect("admitted");
+    session
+        .record()
+        .split_trace(&mut draw, None)
+        .expect("opens at admission");
+    let session = drawn_from(session, &mut draw, grid.end());
+    assert_eq!(session.record().accepted().time(), grid.end());
+    assert!(
+        !draw.done(),
+        "the head at the last instant waits for its next step"
+    );
+    let (session, receipt) = accepted(session.step());
+    session
+        .record()
+        .split_trace(&mut draw, Some(&receipt))
+        .expect("the next head");
+    assert!(draw.done());
+    draw.finish().expect("a trace");
+}

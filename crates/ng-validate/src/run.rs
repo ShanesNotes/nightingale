@@ -7,7 +7,8 @@ use ng_contract::{
 };
 use ng_observe::{Observation, ObservedValue, Observer};
 use ng_record::{
-    CheckpointError, FaultReport, Faulted, HistoryStore, ObservationRefusal, Running, Session, Step, StepReceipt,
+    CheckpointError, FaultReport, Faulted, HistoryStore, ObservationRefusal, Running, Session, Step,
+    StepReceipt,
 };
 
 pub(crate) fn accept<'m>(
