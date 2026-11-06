@@ -149,3 +149,10 @@ new = '''
             for held in &held[..0] {
 '''
 test = "--release -p ng-validate --test replay every_gate_passes_the_reference_core_with_one_set_of_digests"
+
+[[mutant]]
+name = "backward-admission-scored"
+path = "crates/ng-validate/src/run.rs"
+old = '''(read(clock)?.checked_sub(opened)).ok_or(ArenaFailure::MissingThroughput)?'''
+new = '''Some(read(clock)?.wrapping_sub(opened)).ok_or(ArenaFailure::MissingThroughput)?'''
+test = "-p ng-validate --test throughput a_throughput_that_measured_nothing_is_missing"
