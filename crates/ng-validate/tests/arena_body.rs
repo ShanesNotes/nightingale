@@ -970,7 +970,6 @@ fn the_slice_compiles_initializes_closes_and_regulates_itself() {
     a_seeded_run_stirs_once_and_reads_the_skins_forcing(&solved);
 }
 
-/// A scripted clock, because no crate reads the host's.
 struct Ticks(Cell<u64>);
 impl WallClock for Ticks {
     fn elapsed_ns(&self) -> Option<u64> {
@@ -982,15 +981,13 @@ impl WallClock for Ticks {
     }
 }
 
-/// The cores are the reference integrator, so the step-policy gate's reference is the first policy. The stir's rate is a
-/// constant, so every policy lands it within one floor after it crosses its draw, and the floor is the distance that gate
-/// holds.
+/// The stir's rate is a constant, so every policy lands it within one floor after it crosses its draw.
 #[test]
 fn a_slice_window_passes_every_replay_gate_with_the_reference_core() {
     let (step, second_step) = (3 * MILLISECOND, 6 * MILLISECOND);
     let case = SliceCase::new().expect("compiled");
     let clock = Ticks(Cell::new(0));
-    let second = || reference(second_step);
+    let (first, second) = (|| reference(step), || reference(second_step));
     let floor = reference(step).resolution().minimum_interval_ns().get();
     let plan = ReplayPlan {
         clock: &clock,
@@ -999,11 +996,11 @@ fn a_slice_window_passes_every_replay_gate_with_the_reference_core() {
         resume_every: 1000,
         chance: Some(ChancePlan {
             second_policy: &second,
-            reference: &|| reference(step),
+            reference: &first,
             event_tolerance_ns: floor,
         }),
     };
-    let evidence = replay_gates(&case, &|| reference(step), &plan).expect("every gate");
+    let evidence = replay_gates(&case, &first, &plan).expect("every gate");
     let store = MemoryStore::default();
     let core = reference(step);
     let known = case.admit(&core, &store).expect("admitted");

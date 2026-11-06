@@ -962,13 +962,11 @@ pub fn arena_lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError
     body.lens(channels.into(), grid)
 }
 
-/// How far past the fence the window runs, so each input waiting there has steps left to apply it.
 const PAST_THE_FENCE_NS: u64 = 50_000_000;
 
 /// The slice from 06:55 until just past its first cycle. The stir fires inside it, and a stand and a gut water bolus wait
-/// at the fence, the first instant a late input may take. An admission solve costs about ten runs of the window, so each
-/// core's resolution admits the start once, with the inputs and without, and every run resumes from a checkpoint of that
-/// start.
+/// at the fence. Each core resolution's start is admitted once, with the inputs and without, and every run resumes from a
+/// checkpoint of it.
 pub struct SliceCase {
     body: CompiledBody,
     starts: RefCell<Vec<Start>>,
@@ -1024,7 +1022,8 @@ fn fence() -> SimTime {
     SimTime::from_ns(anchor_moment().nanoseconds() + SECOND)
 }
 
-/// A start's checkpoint holds no link, so it is refused only to a core whose resolution moved after admission.
+/// At admission no link exists for a checkpoint or a resume to miss, so the one refusal left is a core whose resolution
+/// moved.
 fn moved(_: CheckpointError) -> InitializationFailure {
     InitializationFailure::Admission(AdmissionError::IdentityMismatch)
 }
