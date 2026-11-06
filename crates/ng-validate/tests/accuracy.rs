@@ -296,6 +296,13 @@ fn a_core_that_remembers_a_refusal_still_meets_the_closed_form() {
 }
 
 #[test]
+fn a_domain_refusal_at_the_floor_still_counts_as_refused() {
+    let floor = NonZeroU64::new(INTERVAL_NS).expect("a floor");
+    let core = reference().with_floor(floor);
+    assert_eq!(verdict(&core, AccuracyCase::EvaluationIndependence), "pass");
+}
+
+#[test]
 fn an_independence_case_whose_core_evaluated_nothing_tested_nothing() {
     let core = RefusesBeforeEvaluating { inner: reference() };
     let closed = TwoReservoirs::closed()

@@ -315,10 +315,13 @@ fn independent(
         identity: record.identity().clone(),
     };
     let span_ns = solver.next_step(record.accepted());
-    match record.attempt(&refused, Attempt::First { span_ns }) {
-        Err(TrialFailure::Refused(refusal))
-            if matches!(refusal.reason(), NumericalRefusal::TrialDomain { .. }) => {}
-        _ => return Err(AccuracyFailure::NothingRefused { case: index }),
+    let reason = match record.attempt(&refused, Attempt::First { span_ns }) {
+        Err(TrialFailure::Refused(refusal)) => Some(refusal.reason()),
+        Err(TrialFailure::EngineFault(fault)) => fault.last_refusal(),
+        Ok(_) => None,
+    };
+    if !matches!(reason, Some(NumericalRefusal::TrialDomain { .. })) {
+        return Err(AccuracyFailure::NothingRefused { case: index });
     }
     let stage_after = stage_bits(solver, record);
     let session = advance(session).map_err(faulted)?;
