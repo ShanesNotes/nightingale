@@ -518,16 +518,25 @@ impl InitializationSystem<'_> {
         Ok((rows, block))
     }
     /// One point's own block of a `linearize`, in the body's pattern, so a ring elimination factors it over the body's
-    /// elimination. A cycle's last point holds totals in place of rows, so its block is not this.
+    /// elimination. A cycle's last point holds totals in place of rows, so its block is not this. Each entry is read by
+    /// its column, because a row that states the packet's value holds fewer entries than the body's pattern.
     pub fn block(&self, ring: &Jacobian, point: usize) -> Jacobian {
         let sparsity = self.body.sparsity();
         let size = self.body.rows().len();
         let view = ring.view();
         let mut entries = Vec::with_capacity(sparsity.unknowns().len());
         for row in 0..size {
-            let count = sparsity.row_offsets()[row + 1] - sparsity.row_offsets()[row];
-            let start = view.row_offsets()[point * size + row];
-            entries.extend_from_slice(&view.values()[start..start + count]);
+            let line = view.row_offsets()[point * size + row]..view.row_offsets()[point * size + row + 1];
+            let read = |unknown: &UnknownId| {
+                let column = point * size + unknown.index();
+                (view.columns()[line.clone()]
+                    .iter()
+                    .zip(&view.values()[line.clone()]))
+                .find(|(at, _)| at.index() == column)
+                .map_or(0.0, |(_, value)| *value)
+            };
+            let pattern = sparsity.row_offsets()[row]..sparsity.row_offsets()[row + 1];
+            entries.extend(sparsity.unknowns()[pattern].iter().map(read));
         }
         Jacobian::of_parts(
             sparsity.row_offsets().to_vec(),
