@@ -38,7 +38,7 @@ event = rule.react(beat)                            # at a beat's end; None, or 
 
 **Measurement error.** One table per case, made by `gp-driver errors` from a lens of two channels, heart rate with a synthetic SD of 0.02 per s and arterial pressure with 2.0, through the public `Channel::error` (`crates/ng-contract/src/lens.rs:79-85`). The k-th beat of a case takes the error the engine gives at instant k ns. That is a host convention, recorded in FROZEN, and it gives the teacher's k-th beat and every model's k-th beat the same error. The study adds it after a reading is made; no model's evolution and no teacher state ever sees it.
 
-**Seeds.** A schedule's draws are a SHA-256 counter over `("gp schedule 1", partition, history, schedule, draw)`, so a schedule replays without a random-number library, and the stored spec is what counts. A case's observation seed is `ObservationSeed::new([0x6770_0001, partition, case, 0])` (`crates/ng-contract/src/scheme.rs:295, 313`). Partitions are an enum, so training and evaluation seeds never meet. The engine's run seed stays `admit_at`'s fixed one (`crates/ng-validate/src/initialize.rs:234`).
+**Seeds.** A schedule's draws are a SHA-256 counter over `("gp schedule 1", partition, history, schedule, draw)`, so a schedule replays without a random-number library, and the stored spec is what counts. A case's observation seed is `ObservationSeed::new([0x6770_0001, partition, case, 0])` (`crates/ng-contract/src/scheme.rs:295, 313`). Partitions are an enum, so training and evaluation seeds never meet. The engine's run seed stays `admit_at`'s fixed one (`crates/ng-validate/src/initialize.rs:236`).
 
 ## Types and signatures
 
@@ -95,7 +95,7 @@ The frozen constants live in one module, `spec.py`: the reaction delay (2 s), th
 - [ ] The requirements file pins every package with its wheel hash, the environment installs from it on the heavy-run machine, and the Answer records its digest and the Python version.
 - [ ] `gp.py export` writes the training views with the reduction's digest and a manifest digest, and the Answer records both, with the time and memory the runs took.
 
-Each run lasts its start history plus the encounter: 900 s with a 10-minute encounter and 1,200 s with a 15-minute one, 300 s more if histories grow to 600 s. The plan is 256 runs, 64 to 85 simulated hours: 13 to 34 process-hours at the audit's assumed speed, 3.3 to 8.5 hours of wall time at 4 workers (or at the 3 the workers rule picks for 1,200 s runs), 16 to 22 GB at once and about 7 to 9 GB on disk. The audit's measured speed replaces these figures before the runs start.
+Each run lasts its start history plus the encounter: 900 s with a 10-minute encounter and 1,200 s with a 15-minute one, 300 s more if histories grow to 600 s. The plan is 256 runs, 64 to 85 simulated hours: 13 to 34 process-hours at the audit's assumed speed, 3.3 to 8.5 hours of wall time at 4 workers, flat memory, 3.6 to 4.8 GB of transient links per run while it runs, and about 4 to 6 GB of kept captures. The audit's measured speed replaces these figures before the runs start.
 
 ## Non-goals
 

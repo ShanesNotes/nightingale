@@ -44,7 +44,7 @@ Model defaults from [the architecture pass](issues/02-first-build-architecture.m
 
 ## Not yet specified
 
-- **The fluid-delivery experiment.** A deferred line ([ticket 13](issues/13-fluids-line-deferred.md)); two of its prerequisites are questions for the engine's process: where varied packet values come from, and whether hour-scale horizons wait for history that stays flat.
+- **The fluid-delivery experiment.** A deferred line ([ticket 13](issues/13-fluids-line-deferred.md)); one of its prerequisites is a question for the engine's process: where varied packet values come from. Hour-scale runs no longer wait on the engine, because a run's memory stays flat since native-contract ticket 11.
 - **The planted-discrepancy experiment,** which follows a first experiment that earns the next step.
 - **The runtime relationship,** and the provenance fitted weights would need under SRS rule 12.
 - **The verify path rule for research tooling,** a question for the developer reviewer ([ticket 03](issues/03-teacher-driver.md)).

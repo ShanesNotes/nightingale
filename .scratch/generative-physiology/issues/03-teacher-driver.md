@@ -5,7 +5,7 @@ Status: open
 Blocked by: 02
 Runs on: written on the workstation; every build, test and run happens on the heavy-run machine
 
-**What it builds:** `tools/generative-physiology/driver/`, a Rust program outside the workspace members, as `tools/bench` is (`tools/bench/Cargo.toml:7-12`). It has its own empty `[workspace]`, its own `Cargo.lock`, and path dependencies on `ng-contract`, `ng-record`, `ng-observe`, `ng-solver` and `ng-validate` only, so a locked build needs no network. It makes one teacher run per process from a run spec, through public items only, and writes the run's directory whole or not at all. It never chooses a schedule, applies measurement error or judges a result.
+**What it builds:** `tools/generative-physiology/driver/`, a Rust program outside the workspace members, as `tools/bench` is (`tools/bench/Cargo.toml:7-13`). It has its own empty `[workspace]`, its own `Cargo.lock`, and path dependencies on `ng-contract`, `ng-record`, `ng-observe`, `ng-solver` and `ng-validate` only, so a locked build needs no network. It makes one teacher run per process from a run spec, through public items only, and writes the run's directory whole or not at all. Each run keeps its history links in a file store of its own, as the bench's link log does (`tools/bench/src/link_log.rs:10-37`), so its memory stays flat (native-contract ticket 11); the file is deleted once the run's directory is complete. It never chooses a schedule, applies measurement error or judges a result.
 
 ## Usage
 
@@ -104,8 +104,8 @@ impl RunSpec {
 pub struct Teacher { body: CompiledBody, core: Box<dyn CoupledSolver>, catalogue: Catalogue }
 impl Teacher {
     pub fn new(core: &CoreChoice) -> Result<Self, TeachError> { todo!() }
-    // admit_at(arena_packet, a port holding every event, arena_lens, anchor_moment()); about 17 s
-    // (crates/ng-validate/src/initialize.rs:218-237). Then step by hand, as validate/run.rs:4-15 does:
+    // admit_at(arena_packet, a port holding every event, arena_lens, anchor_moment(), &links); about 17 s
+    // (crates/ng-validate/src/initialize.rs:219-240). Then step by hand, as validate/run.rs:4-15 does:
     //   Accepted: add each row's chord integral; log the seal; when the CV phase row falls, write an edge
     //     and the beat that ended there; advance the diagnostic observer.
     //   Refused: retry and count.
@@ -117,6 +117,10 @@ impl Teacher {
     pub fn interact(&self, spec: &RunSpec, link: &mut dyn PolicyLink, cap: MemoryCap, out: &Path)
         -> Result<RunSummary, TeachError> { todo!() }
 }
+/// The run's history store: one append-only file of links, read back by seal, deleted when the run's
+/// directory is complete. The session keeps it from admission to the end (crates/ng-record/src/checkpoint.rs:58-62).
+pub struct LinkFile { /* the file, its end and a seal index */ }
+impl HistoryStore for LinkFile { /* resolve, keep */ }
 /// The resident-memory limit a run stops at; the summary records it, and the run id does not cover it.
 pub struct MemoryCap(u64);
 impl MemoryCap {
@@ -175,12 +179,12 @@ A run writes `<out>/<run id>.partial-<pid>/` and renames it to `<out>/<run id>/`
 | `summary.txt` | the fields of `RunSummary`, one per line |
 | `realized.txt` | closed-loop runs only: the run's actions as an open-loop spec |
 
-Extents and integrals are read only at edges, from the newest segment, `conservation().segments().next_back()`: `let (forward, reverse) = segment.exchange(id)` returns two curves (`crates/ng-record/src/history.rs:464-467`), and the last coefficient of each curve's `on(segment.interval())` is its cumulative value at the step's end (`history.rs:484-487`). So a beat's extent is an exact difference of cumulative values, taken in `Compensated` before rounding. Column ids come from deduplicated `Target::Column` instances (`crates/ng-contract/src/body.rs:442-445, 478`), because `ColumnId::at` is crate-private (`body.rs:21`). Rows are stored as both limbs of `Compensated::bits()` (`crates/ng-contract/src/compensated.rs:110`).
+Extents and integrals are read only at edges, from the newest segment, `session.conservation().head()` (`crates/ng-record/src/session.rs:75-77`, `crates/ng-record/src/history.rs:575-579`): `let (forward, reverse) = segment.exchange(id)` returns two curves (`history.rs:624-628`), and the last coefficient of each curve's `on(segment.interval())` is its cumulative value at the step's end (`history.rs:642-648`). A checkpoint for an audit variant is `session.checkpoint()`, with no store argument (`crates/ng-record/src/session.rs:159-163`). So a beat's extent is an exact difference of cumulative values, taken in `Compensated` before rounding. Column ids come from deduplicated `Target::Column` instances (`crates/ng-contract/src/body.rs:442-445, 478`), because `ColumnId::at` is crate-private (`body.rs:21`). Rows are stored as both limbs of `Compensated::bits()` (`crates/ng-contract/src/compensated.rs:110`).
 
 ## Acceptance
 
 - [ ] On the heavy-run machine, `cargo build --release --locked --manifest-path tools/generative-physiology/driver/Cargo.toml` succeeds.
-- [ ] `gp-driver smoke` (a stand at 10 s, ending at 20 s) writes one complete run. Its packet digest and the seal at the head at 1001.309992 ms equal the values `crates/ng-validate/tests/trace.rs:134-135` pins for Core at a 10 ms cap; it has at least 15 beats, no fault, and the stand in `applied.npy`.
+- [ ] `gp-driver smoke` (a stand at 10 s, ending at 20 s) writes one complete run. Its packet digest and the seal at the head at 1001.309992 ms equal the values `crates/ng-validate/tests/trace.rs:135-136` pins for Core at a 10 ms cap; it has at least 15 beats, no fault, and the stand in `applied.npy`.
 - [ ] A second `gp-driver run` with the same spec and `--out` writes nothing and reports the run present.
 - [ ] A driver killed with SIGKILL leaves only a partial directory, which the next run of that spec removes and redoes.
 - [ ] A run forced past a small memory cap ends as a `.fault` directory, which `status` reports and a second `run` leaves alone.
