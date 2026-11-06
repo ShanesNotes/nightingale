@@ -308,7 +308,6 @@ impl History {
     pub(crate) fn previous(&self) -> Option<Digest> {
         self.chain.head().map(|head| head.previous)
     }
-    /// The digest of the ledger bytes the head's seal covers: the opening's at admission, else the head chunk's.
     pub(crate) fn ledger_digest(&self, parameters: Digest) -> Digest {
         let bytes = match self.chain.head() {
             None => opening_bytes(&self.opening, &self.incidence, parameters),

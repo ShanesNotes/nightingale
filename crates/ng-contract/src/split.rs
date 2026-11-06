@@ -118,8 +118,7 @@ impl<F: MetricFamily> Seal for FamilySamples<F> {
     }
 }
 
-/// Only `verify` makes one, so a trace's exchanges and events are a solve's own, and none can be left out. It
-/// names the seal of the head its step started from.
+/// Only `verify` makes one, so a trace's exchanges and events are a solve's own, and none can be left out.
 #[derive(Debug)]
 pub struct StepExtents {
     pub(crate) base: Digest,
@@ -138,8 +137,9 @@ impl StepExtents {
     }
 }
 
-/// One head and what its seal covers: the image, its revision, the seal before it and the digest of its ledger
-/// chunk. Nothing here is trusted: the draw recomputes the head's seal, and the next step's extents must name it.
+/// The draw recomputes this head's seal from its image and the given revision, seal before and ledger digest, and
+/// keeps it only once the next step's extents name that seal. The bound values a draw reads at admission reach the
+/// seal only through the ledger digest given here.
 pub struct TraceHead<'r> {
     parts: &'r ImageParts,
     revision: u64,
@@ -367,6 +367,9 @@ impl Layout {
         opened.unconfirmed = head.seal();
         Ok(())
     }
+    fn confirmed(&self, opened: &Opened) -> bool {
+        opened.confirmed == self.grid.samples
+    }
     fn sample(&self, opened: &mut Opened, net: Vec<Compensated>, value: impl Fn(RowId) -> Compensated) {
         opened.exchange.extend(net);
         opened.state.extend(self.rows.iter().map(|row| value(*row)));
@@ -377,10 +380,10 @@ impl Layout {
     }
 }
 
-/// Reads one run's heads in order from admission and keeps the grid's samples. It recomputes each head's seal,
-/// and keeps a head's samples only once the next step's extents, which only `verify` makes, name that seal.
-/// `PatientRecord::split_trace` hands it each accepted head with its own step. An instant between two heads reads
-/// the step's chord; one at a head reads what the head holds, after any firing there.
+/// It recomputes each head's seal, and keeps a head's samples only once the next step's extents, which only
+/// `verify` makes, name that seal. It cannot tell which step made a head: `PatientRecord::split_trace` pairs each
+/// accepted head with its own step's receipt. An instant between two heads reads the step's chord; one at a head
+/// reads what the head holds, after any firing there.
 pub struct TraceDraw {
     lens: Digest,
     model: ModelHash,
@@ -415,7 +418,8 @@ impl TraceDraw {
             opened: None,
         })
     }
-    /// Opens the draw, once, on the run's admission head, which must not be past the grid's first instant.
+    /// Opens the draw, once, on a head that names itself the run's admission and is not past the grid's first
+    /// instant. The first read proves the claim.
     pub fn open(&mut self, identity: &RunIdentity, head: TraceHead<'_>) -> Result<(), SplitRejected> {
         if identity.model() != self.model {
             return Err(SplitRejected::OtherBody);
@@ -426,7 +430,7 @@ impl TraceDraw {
         self.opened = Some(self.layout.open(identity, &head)?);
         Ok(())
     }
-    /// Reads the head a step made, which must follow the head read last.
+    /// Reads a head with the extents of the step before it, which must name the seal of the head read last.
     pub fn read(&mut self, head: TraceHead<'_>, step: &StepExtents) -> Result<(), SplitRejected> {
         let Some(opened) = &mut self.opened else {
             return Err(SplitRejected::Gap);
@@ -435,20 +439,17 @@ impl TraceDraw {
     }
     /// Every instant is drawn and its head confirmed by the step after it.
     pub fn done(&self) -> bool {
-        (self.opened.as_ref()).is_some_and(|opened| opened.confirmed == self.layout.grid.samples)
+        (self.opened.as_ref()).is_some_and(|opened| self.layout.confirmed(opened))
     }
     /// Refuses a draw that is not done.
     pub fn finish(self) -> Result<SplitTrace, SplitRejected> {
-        if !self.done() {
-            return Err(SplitRejected::Unfinished);
-        }
         let Self {
             lens,
             model: _,
             layout,
             opened,
         } = self;
-        let Some(opened) = opened else {
+        let Some(opened) = opened.filter(|opened| layout.confirmed(opened)) else {
             return Err(SplitRejected::Unfinished);
         };
         let Opened {
@@ -487,7 +488,7 @@ impl TraceDraw {
 }
 
 /// The coupled reference's own error, measured against a second run of it on the same grid and never assumed
-/// zero: a second run that moved no sample measured nothing. The split gate runs the second at half the interval.
+/// zero.
 pub struct ReferenceError {
     reference: Digest,
     differences: [Vec<Compensated>; 4],
@@ -688,7 +689,6 @@ impl SplitQualification {
 pub enum SplitRejected {
     OtherBody,
     MissingFamily,
-    /// A head other than the run's admission head, where every draw opens.
     NotAdmission,
     PastStart,
     /// A head that does not follow the head read last, a step that does not name its seal, a read before the draw

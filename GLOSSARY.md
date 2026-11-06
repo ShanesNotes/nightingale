@@ -459,7 +459,7 @@ The fully coupled backward Euler core in `ng-validate`, run at three refinements
 How a core that evaluates some blocks apart within a step earns trust: its split trace and the reference integrator's, on one grid of one case, are compared family by family, and the reference's own error, from a run at half its interval, counts against the same budget. Only a split measurement qualifies a split, and no run it measures is scored.
 
 **Split trace**:
-One run's state, exchange integrals, observations and event times on a grid, drawn from each accepted head in turn with the extents the contract verified for its step, never from samples a caller supplies.
+One run's state, exchange integrals, observations and event times on a grid, drawn from admission one accepted head at a time, each head kept only once the extents the contract verified for the next step name its seal. It never rests on samples a caller supplies.
 
 **Bench integrator**:
 An explicit Heun integrator that serves only as a test bench, never as a solver core (rule 8).

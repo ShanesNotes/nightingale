@@ -564,7 +564,6 @@ fn a_firing_at_the_first_instant_is_in_no_trace() {
     ReferenceError::self_convergence(&expected, &measured).expect("neither trace holds the firing");
 }
 
-/// An image admitted outside the record has a seal no step of the run names.
 #[test]
 fn a_draw_refuses_a_head_no_step_of_its_run_follows() {
     let case = stepped();
@@ -612,7 +611,6 @@ fn a_draw_refuses_a_grid_that_starts_before_admission() {
     );
 }
 
-/// A head's samples count only once the next step names its seal, so the draw needs one step past the grid.
 #[test]
 fn a_draw_is_done_once_the_step_after_its_last_instant_names_that_head() {
     let case = stepped();

@@ -92,7 +92,6 @@ impl<'b> ByteReader<'b> {
 }
 
 impl RecordHash {
-    /// One link of the seal chain: the seal before, the revision, the image's digest and the ledger chunk's.
     pub fn link(self, previous: Digest, revision: u64, image: Digest, ledger: Digest) -> Digest {
         let mut bytes = Vec::with_capacity(104);
         bytes.extend_from_slice(previous.as_bytes());
