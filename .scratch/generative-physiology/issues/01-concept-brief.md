@@ -143,7 +143,7 @@ Timescale separation decides what is state. The slice spans a 10 ms longest step
 Three direct tests:
 
 - *Split*: apply one input, and the same input in back-to-back pieces. The physiology should match up to integration error.
-- *Refinement*: halve the integration step twice. The error against the teacher should fall at the scheme's order. A model accurate only at its training step has learned a step map, not a rate.
+- *Refinement*: halve the learned model's integration step twice. Its error against a tightly integrated reference of the same learned dynamics should fall at the scheme's order. Error against the teacher is measured separately, because it falls only to the model's own modelling-error floor and can even rise as the step shrinks. A model that matches the teacher at its training step but whose converged flow does not has learned a step map, not a rate.
 - *Cadence*: change how often and which readings are taken. The state-separated model's physiology should stay bit-identical, as I7 requires of the engine.
 
 | Property | Kind in the first experiment | How |
@@ -322,7 +322,7 @@ Levels, each with its first-experiment test:
 | Paired branches from one start state: none, a stand, a sit, a stand delayed, a stand split into a ramp, a head-down setting, a setting held out of training | causal response, nonlinearity, temporal consistency | teacher branches | the same packet, seed and event prefix give identical bits (rule 4), so branches differ only in later events; a counterfactual of the teacher, not of a person |
 | Out-of-policy schedules: flat when pressure reads high, sit when it reads low, faster ramps, back-to-back changes | what policy-coupled training misses | teacher | state-independent by design |
 | Closed loop, with each arm's event log replayed through the teacher | compounding error under feedback | teacher in the same loop | same rule and start state |
-| Split, refinement, cadence and observation-seed changes | temporal inconsistency; noise entering physiology | the model itself and the teacher | the change should leave physiology unchanged |
+| Split, refinement, cadence and observation-seed changes | temporal inconsistency; noise entering physiology | the model's own tightly integrated flow, and the teacher | split, cadence and seed changes should leave physiology unchanged, and refinement should change it only by integration error that falls at the scheme's order |
 | Balance, nonnegative amounts, ranges | impossible trajectories | arithmetic | exact by construction, or diagnostic |
 | Across-patient order and spread of response features | lost diversity | paired teacher runs | same start histories |
 | Seed spread against actual error, and the support signal against large errors | honest uncertainty | teacher | held-out start histories and branches |
