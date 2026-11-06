@@ -21,3 +21,5 @@ From 15: `AccuracyPolicy::manufactured()` is the model-default policy with every
 From ticket 12: `RunEvidence::run()` is the digest of the run identity that `run` admitted, so `score` can compare it with the replay evidence's run. `ArenaFailure` derives nothing, because `FaultReport` has no `Debug`.
 
 From 13: `RunEvidence::health()` is the run's `NumericalHealth`, counted over one repeat, and a repeat whose health differs is `RepeatDiffered`. It has no public constructor. `ArenaFailure::Faulted` is now `{ report: Box<FaultReport>, health }`, so a faulted run also shows its refusals up to the fault. A floor fault counts every `NoAdmissibleStep`, whether the floor or the retry budget ended it.
+
+From 18: `SliceCase` admits `arena_packet` at `anchor_moment` with seed [1, 2, 3, 4] through the same solve and admission as `run`, and the run identity reads no boundary port. So `run` on that packet, start, seed and core should name the run that `replay_gates` on `SliceCase` returns (inferred from the code, not run). Every gate's evidence on the slice names one run (`a_slice_window_passes_every_replay_gate_with_the_reference_core`).
