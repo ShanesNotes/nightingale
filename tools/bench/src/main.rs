@@ -92,7 +92,7 @@ impl WallClock for HostClock {
 fn told(failure: &ArenaFailure) -> String {
     match failure {
         ArenaFailure::Initialization(failure) => format!("{failure:?}"),
-        ArenaFailure::Faulted { report, .. } => format!("fault {:?}", report.fault()),
+        ArenaFailure::Faulted { report, health } => format!("fault {:?} health {health:?}", report.fault()),
         ArenaFailure::Checkpoint(error) => format!("{error:?}"),
         ArenaFailure::Observation(refusal) => format!("{refusal:?}"),
         ArenaFailure::MissingThroughput => "missing throughput".to_string(),
