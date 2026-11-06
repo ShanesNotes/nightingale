@@ -36,8 +36,8 @@ import sys
 RUNS = 5
 INTERVALS_MS = {"reference": (5, 1), "ng-solver": (10, 5)}
 SECONDS = (5, 50)
-# TODO(margin): set from the measured run-to-run spread of run_peak_kb.
-MARGIN_KB = 0
+# Six times the 88 kB spread of run peaks measured on the tower, and 50 bytes a step over 10424 steps.
+MARGIN_KB = 512
 HERE = pathlib.Path(__file__).resolve().parent
 
 
