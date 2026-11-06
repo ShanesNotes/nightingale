@@ -1,3 +1,4 @@
+use core::cell::Cell;
 use ng_contract::*;
 use ng_record::{AuthorizedInput, Checkpoint, Running, Session, Step, StepReceipt};
 use ng_validate::*;
@@ -967,4 +968,80 @@ fn the_slice_compiles_initializes_closes_and_regulates_itself() {
     the_heat_shed_in_late_diastole_is_what_the_flows_lose(&solved);
     a_checkpoint_of_a_run_mid_beat_holds_its_modes_and_runs_on_the_same_bits(&solved);
     a_seeded_run_stirs_once_and_reads_the_skins_forcing(&solved);
+}
+
+/// A scripted clock, because no crate reads the host's.
+struct Ticks(Cell<u64>);
+impl WallClock for Ticks {
+    fn elapsed_ns(&self) -> Option<u64> {
+        self.0.set(self.0.get() + 90 * MILLISECOND);
+        Some(self.0.get())
+    }
+    fn source(&self) -> ClockSource {
+        ClockSource::Scripted
+    }
+}
+
+/// The cores are the reference integrator, so the step-policy gate's reference is the first policy. The stir's rate is a
+/// constant, so every policy lands it within one floor after it crosses its draw, and the floor is the distance that gate
+/// holds.
+#[test]
+fn a_slice_window_passes_every_replay_gate_with_the_reference_core() {
+    let (step, second_step) = (3 * MILLISECOND, 6 * MILLISECOND);
+    let case = SliceCase::new().expect("compiled");
+    let clock = Ticks(Cell::new(0));
+    let second = || reference(second_step);
+    let floor = reference(step).resolution().minimum_interval_ns().get();
+    let plan = ReplayPlan {
+        clock: &clock,
+        simulated_per_wall: 1,
+        chunks: vec![70 * MILLISECOND, 130 * MILLISECOND + 1],
+        resume_every: 1000,
+        chance: Some(ChancePlan {
+            second_policy: &second,
+            reference: &|| reference(step),
+            event_tolerance_ns: floor,
+        }),
+    };
+    let evidence = replay_gates(&case, &|| reference(step), &plan).expect("every gate");
+    let store = MemoryStore::default();
+    let core = reference(step);
+    let known = case.admit(&core, &store).expect("admitted");
+    let withheld = case.admit_withheld(&core, &store).expect("admitted");
+    assert_eq!(evidence.run(), known.record().identity().digest());
+    assert_eq!(withheld.record().identity().digest(), evidence.run());
+    assert_ne!(
+        known.record().digests().waiting,
+        withheld.record().digests().waiting,
+        "the withheld start knows no input"
+    );
+    let fence = anchor_moment().nanoseconds() + SECOND;
+    let events = case.events().expect("the inputs");
+    assert_eq!(events.len(), 2);
+    assert!(events.iter().all(|event| event.at().nanoseconds() == fence));
+    assert!(case.end().nanoseconds() > fence);
+    let stream = LawName {
+        owner: Musculoskeletal::CARD,
+        local: "stir",
+    };
+    for gate in [
+        ReplayGate::Pace,
+        ReplayGate::Resume,
+        ReplayGate::LateAdmission,
+        ReplayGate::Rewind,
+        ReplayGate::ExtraEvaluation,
+        ReplayGate::StepPolicy,
+        ReplayGate::NonPerturbation,
+    ] {
+        let of = evidence.of(gate);
+        assert_eq!((of.gate(), of.run()), (gate, evidence.run()));
+        assert!(of.runs().len() >= 2, "{gate:?} compared {} runs", of.runs().len());
+        let [stir] = of.fired() else {
+            panic!("{gate:?} fired {:?}", of.fired());
+        };
+        assert_eq!((stir.stream(), stir.ordinal()), (stream, 0), "{gate:?}");
+        assert!(stir.at().nanoseconds() < fence, "{gate:?}");
+    }
+    assert_eq!(evidence.of(ReplayGate::Pace).clock(), Some(ClockSource::Scripted));
+    assert_eq!(evidence.of(ReplayGate::StepPolicy).tolerance_ns(), Some(floor));
 }
