@@ -216,7 +216,7 @@ impl ReplayEvidence {
 }
 
 /// Equal seals give equal views, and `ng_observe::Observer` is a function of the views it read, so only an
-/// observer a test builds can move a stream while the seals hold.
+/// observer a test builds can change what is observed while the seals hold.
 trait Observers {
     fn fresh<'l>(&self, lens: &'l ObservationLens) -> Box<dyn Observe + 'l>;
     fn resume<'l>(
@@ -256,17 +256,17 @@ impl Observers for Honest {
     }
 }
 
-/// An observer's continuation and the stream it has returned so far, which a host keeps because an observer
+/// An observer's continuation and the digest of all it has returned, which a host keeps because an observer
 /// keeps no log.
 struct Saved {
     observer: ObserverCheckpoint,
-    stream: Digest,
+    observed: Digest,
 }
 
 struct Watch<'l> {
     lens: &'l ObservationLens,
     observer: Box<dyn Observe + 'l>,
-    stream: Digest,
+    observed: Digest,
     read_a_value: bool,
 }
 impl<'l> Watch<'l> {
@@ -274,7 +274,7 @@ impl<'l> Watch<'l> {
         Self {
             lens,
             observer: observers.fresh(lens),
-            stream: Digest::of_canonical(b"observed run"),
+            observed: Digest::of_canonical(b"observed run"),
             read_a_value: false,
         }
     }
@@ -289,7 +289,7 @@ impl<'l> Watch<'l> {
         Ok(Self {
             lens,
             observer,
-            stream: saved.stream,
+            observed: saved.observed,
             read_a_value: false,
         })
     }
@@ -299,13 +299,13 @@ impl<'l> Watch<'l> {
         let observed = self.observer.advance(&view).map_err(missing)?;
         let present = |seen: &Observation| matches!(seen.value(), ObservedValue::Present(_));
         self.read_a_value |= observed.iter().any(present);
-        self.stream = chained(self.stream, &observed);
+        self.observed = chained(self.observed, &observed);
         Ok(())
     }
     fn saved(&self) -> Saved {
         Saved {
             observer: self.observer.checkpoint(),
-            stream: self.stream,
+            observed: self.observed,
         }
     }
 }
@@ -325,7 +325,7 @@ impl Row {
         Self {
             time: record.accepted().time(),
             seal: record.seal(),
-            observed: watch.map(|watch| watch.stream),
+            observed: watch.map(|watch| watch.observed),
             earliest: record.earliest_stamp(),
             near_a_break,
             fired: Vec::new(),
@@ -349,7 +349,7 @@ impl Trace {
 }
 
 /// Two runs to one end with equal seals have equal rows, so a shared prefix is the whole of each. A detached
-/// run has no stream, so against one only the seals compare.
+/// run read nothing, so against one only the seals compare.
 fn first_difference(reference: &[Row], run: &[Row]) -> Option<SimTime> {
     let drifted = |known: &Row, seen: &Row| known.observed.zip(seen.observed).is_some_and(|(a, b)| a != b);
     (reference.iter().zip(run))
