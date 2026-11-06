@@ -529,11 +529,13 @@ fn watched_reference(
     cores: &dyn CoreFactory,
     observers: &dyn Observers,
 ) -> Result<(Trace, Digest, ObservationLens), ReplayFailure> {
+    let (detached, _) = reference(gate, case, cores)?;
+    let lens = holding_lens(gate, case.body(), &detached.rows)?;
     let core = cores.fresh();
     let store = MemoryStore::default();
     let session = admitted(gate, case.admit(&*core, &store))?;
-    let lens = holding_lens(gate, case, session.record().accepted().time())?;
     let (trace, run) = uninterrupted(gate, case, session, Some(&mut Watch::fresh(&lens, observers)))?;
+    same_or_diverged(gate, &detached.rows, &detached.last, &trace)?;
     Ok((trace, run, lens))
 }
 
@@ -1013,16 +1015,18 @@ fn lenses(body: &CompiledBody, rows: &[Row]) -> Result<[ObservationLens; 2], Adm
     ])
 }
 
+/// The grid spans what the run accepted, not the case, because a last step can land far past the case's end.
 fn holding_lens(
     gate: ReplayGate,
-    case: &dyn ReplayCase,
-    start: SimTime,
+    body: &CompiledBody,
+    rows: &[Row],
 ) -> Result<ObservationLens, ReplayFailure> {
-    let span = case.end().nanoseconds().saturating_sub(start.nanoseconds());
+    let span = rows.last().map_or(0, |row| row.time.nanoseconds())
+        - rows.first().map_or(0, |row| row.time.nanoseconds());
     let period_ns = NonZeroU64::new(span / INSTANTS_PER_RUN).unwrap_or(NonZeroU64::MIN);
     let held = period_ns.get().saturating_mul(HELD_PERIODS);
-    let channels = every_row(case.body()).map(|channel| channel.averaged(CHANGED_WINDOW).delayed(held));
-    (case.body().lens(channels.collect(), period_ns)).map_err(|_| ReplayFailure::MissingEvidence { gate })
+    let channels = every_row(body).map(|channel| channel.averaged(CHANGED_WINDOW).delayed(held));
+    (body.lens(channels.collect(), period_ns)).map_err(|_| ReplayFailure::MissingEvidence { gate })
 }
 
 fn watched(

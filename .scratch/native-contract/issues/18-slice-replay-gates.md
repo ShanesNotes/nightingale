@@ -30,4 +30,4 @@ From the solver arena (in this PR), a lead not yet tested on the slice: the step
 
 From ticket 11: every gate admits with its own `MemoryStore`, and the resume and rewind gates share one store between the parent and its loads and forks. A resume walks every link newest first, so the resume gate's cost still grows with the number of loads.
 
-From 19: pace, resume, late admission and rewind now watch every run they compare through a lens on every row with 256 instants over the run's span, so a slice run reads about 256 instants whatever its step. A body whose rows `CompiledBody::lens` refuses makes those gates `MissingEvidence`, as non-perturbation already is.
+From 19: pace, resume, late admission and rewind now watch every run they compare through a lens on every row with 256 instants over the span a detached reference accepted, so a slice run reads about 256 instants whatever its step. Each of those gates runs its reference twice, detached and watched, so budget one more slice run per gate. A body whose rows `CompiledBody::lens` refuses makes those gates `MissingEvidence`, as non-perturbation already is.
