@@ -5,7 +5,9 @@
 //! checks.
 use core::num::NonZeroU64;
 use crate::ng_contract::*;
-use crate::ng_record::{ConservationView, FaultReport, HistorySeal, PatientRecord, RecordDigests, Running, Session};
+use crate::ng_record::{
+    CheckpointError, ConservationView, FaultReport, HistorySeal, HistoryStore, RecordDigests, Running, Session,
+};
 
 /// One combination's limits. `absolute + relative * gross exchange in the window` bounds closure, so
 /// a tiny exchange needs a tiny residual. `drift` is 1.96 times the combination's within-subject
@@ -114,6 +116,8 @@ pub enum CertificateCheck {
     Drift,
     /// segments do not cover the window, or the policy's basis is not the view's
     Coverage,
+    /// a link the store did not give, or one that does not chain to the seal that asked for it
+    History(CheckpointError),
 }
 pub struct CertificateFailure {
     _check: CertificateCheck,
@@ -124,7 +128,9 @@ pub struct CertificateFailure {
 /// Pure by construction of its inputs: one sealed history view and policy data. Window starts
 /// include every accepted segment boundary and its 24 h shift; inside a segment the Bernstein
 /// coefficients bound interior extrema of the closure and drift differences. Closure failures win
-/// over drift, so a `Drift` failure says the ledger closed everywhere and the body still moved.
+/// over drift, so a `Drift` failure says the ledger closed everywhere and the body still moved. It
+/// walks the store newest first and reports what a walk in time order would: the earliest failing
+/// window, and the earliest of equal worst windows.
 pub fn certify(_view: &ConservationView<'_>, _policy: &CertificatePolicy) -> Result<Certificate, CertificateFailure> {
     todo!()
 }
@@ -369,7 +375,7 @@ pub struct ArenaRun<'m> {
     _evidence: RunEvidence,
 }
 impl<'m> ArenaRun<'m> {
-    pub fn record(&self) -> &PatientRecord<'m> {
+    pub fn session(&self) -> &Session<'m, Running> {
         todo!()
     }
     pub fn into_evidence(self) -> RunEvidence {
@@ -410,6 +416,7 @@ pub fn run<'m>(
     _solver: &'m dyn CoupledSolver,
     _spec: ArenaSpec,
     _pace: Pace,
+    _store: &'m dyn HistoryStore,
 ) -> Result<ArenaRun<'m>, ArenaFailure> {
     todo!()
 }
