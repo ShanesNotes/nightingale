@@ -90,7 +90,7 @@ fn hi(value: Compensated) -> f64 {
 }
 
 fn gate(case: TwoReservoirs) -> AccuracyPolicy {
-    let cases = vec![AccuracyCase::TwoReservoir(case)];
+    let cases = vec![AccuracyCase::TwoReservoir(Box::new(case))];
     AccuracyPolicy::new(cases, measure(5.0), measure(0.0), 100 * SECOND).expect("a policy")
 }
 
@@ -2110,11 +2110,11 @@ fn a_certificate_policy_is_checked_when_it_is_built() {
 fn an_accuracy_policy_needs_a_case_and_a_grid() {
     let no_case = AccuracyPolicy::new(Vec::new(), measure(5.0), measure(0.0), SECOND).err();
     assert_eq!(no_case, Some(AdmissionError::EmptyAccuracyPolicy));
-    let cases = vec![AccuracyCase::TwoReservoir(stepped())];
+    let cases = vec![AccuracyCase::TwoReservoir(Box::new(stepped()))];
     let no_grid = AccuracyPolicy::new(cases, measure(5.0), measure(0.0), 0).err();
     assert_eq!(no_grid, Some(AdmissionError::EmptyAccuracyPolicy));
     let limit = |absolute| {
-        let cases = vec![AccuracyCase::TwoReservoir(stepped())];
+        let cases = vec![AccuracyCase::TwoReservoir(Box::new(stepped()))];
         AccuracyPolicy::new(cases, measure(absolute), measure(0.0), SECOND).expect("a policy")
     };
     assert_eq!(limit(5.0).digest(), limit(5.0).digest());
@@ -2308,7 +2308,7 @@ fn a_segment_samples_only_its_own_interval() {
 #[test]
 fn a_relative_accuracy_limit_reads_the_exact_value() {
     let case = |relative| {
-        let cases = vec![AccuracyCase::TwoReservoir(stepped())];
+        let cases = vec![AccuracyCase::TwoReservoir(Box::new(stepped()))];
         AccuracyPolicy::new(cases, measure(1e-300), measure(relative), 100 * SECOND).expect("a policy")
     };
     let core = reference(8 * SECOND);
@@ -2324,7 +2324,7 @@ fn a_relative_accuracy_limit_reads_the_exact_value() {
 fn a_relative_limit_holds_the_exchange_to_its_own_size() {
     // Amounts near 5e5 carry at most 2 in error, four parts in a million. The first step's error of about
     // 0.03 sits on an exchange near 8, about 0.4%, so only reading the exchange can reject this.
-    let cases = vec![AccuracyCase::TwoReservoir(stepped())];
+    let cases = vec![AccuracyCase::TwoReservoir(Box::new(stepped()))];
     let policy = AccuracyPolicy::new(cases, measure(1e-300), measure(1e-4), 100 * SECOND).expect("a policy");
     let failure = accuracy(&reference(8 * SECOND), &policy);
     let Err(AccuracyFailure::Exceeded { at, .. }) = failure else {
@@ -2373,7 +2373,7 @@ fn a_certificate_does_not_pass_on_a_value_that_overflowed() {
 #[test]
 fn the_accuracy_gate_does_not_pass_on_a_value_that_overflowed() {
     let (case, core) = overflowing();
-    let cases = vec![AccuracyCase::TwoReservoir(case)];
+    let cases = vec![AccuracyCase::TwoReservoir(Box::new(case))];
     let policy = AccuracyPolicy::new(cases, measure(1e299), measure(0.0), 100 * SECOND).expect("a policy");
     let failure = accuracy(&core, &policy);
     assert!(
@@ -2499,8 +2499,8 @@ fn a_ladder_of_two_policies_states_no_order() {
     let short = TwoReservoirs::closed().expect("a body");
     let short = short.until(SimTime::from_ns(1_000 * SECOND));
     let cases = vec![
-        AccuracyCase::TwoReservoir(stepped()),
-        AccuracyCase::TwoReservoir(short),
+        AccuracyCase::TwoReservoir(Box::new(stepped())),
+        AccuracyCase::TwoReservoir(Box::new(short)),
     ];
     let wider = AccuracyPolicy::new(cases, measure(5.0), measure(0.0), 100 * SECOND).expect("a policy");
     let (coarse, medium, fine) = (
