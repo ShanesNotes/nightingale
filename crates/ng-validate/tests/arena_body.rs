@@ -735,8 +735,8 @@ fn accept<'s>(session: Session<'s, Running>) -> (Session<'s, Running>, StepRecei
     }
 }
 
-/// The stir's rate is constant, so its integral reaches the draw at the draw over the rate. The skin's loss is a
-/// stage rate times the forcing, so a step's loss over its length and the basal rate is the factor its stages read.
+/// The skin's loss is a stage rate times the forcing, so a step's loss over its length and the basal rate is the factor
+/// its stages read.
 fn a_seeded_run_stirs_once_and_reads_the_skins_forcing(solved: &Solved) {
     let (pace, basal, amplitude) = (2.0, 0.01, 0.5);
     let body = &solved.body;

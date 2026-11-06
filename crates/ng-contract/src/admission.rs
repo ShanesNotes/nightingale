@@ -267,8 +267,8 @@ impl InitializationSystem<'_> {
         self.resets[point].contains(&RowId::at(row))
     }
     /// The interval an amount or memory row's stage spans, and `None` for a row that states the packet's value: every
-    /// such row of an instant, and a hazard integral, because chance is held here and a hazard accrues from the anchor
-    /// moment.
+    /// such row of an instant, and a hazard integral, which only grows until it fires, so it never returns over a cycle
+    /// and accrues from the anchor moment.
     fn stage_interval(&self, row: usize) -> Option<f64> {
         let hazard = (self.body.layout.hazards.iter()).any(|hazard| hazard.integral.index() == row);
         self.interval.filter(|_| !hazard)

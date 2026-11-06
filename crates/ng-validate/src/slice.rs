@@ -373,8 +373,9 @@ fn vasopressin(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     Ok(())
 }
 
-/// Water leaves the skin at a rate that wanders smoothly with time, and the patient stirs once, at random. Both model
-/// defaults. MS is held, so the stir moves no law in the slice: it is the slice's stochastic fixture (§7).
+/// Water leaves the skin at a rate that wanders smoothly with time, and the patient stirs once, at random. Model
+/// defaults. MS is held, so the stir moves no law in the slice: it is the slice's stochastic fixture (solver contract
+/// §7).
 fn skin(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let declaration = HeldDeclaration::<Musculoskeletal>::new(vec![SKIN_WATER], Vec::new(), FIXED);
     let (mut laws, ports) = body.hold(declaration)?.parts();
