@@ -230,6 +230,11 @@ field = "quantity"
 reason = "new holds the entries to the basis's quantities in basis order, and the basis digest is sealed"
 
 [[crate.seal_skip]]
+item = "accuracy::AccuracyPolicy::digest"
+field = "identity"
+reason = "the refusing values, bound from the fixture the digest seals by a rule the case's kind names"
+
+[[crate.seal_skip]]
 item = "fixture::TwoReservoirs::digest"
 field = "a"
 reason = "a site of the body, whose model hash the digest seals first"

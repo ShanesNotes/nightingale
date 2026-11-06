@@ -19,3 +19,5 @@ From 10: a core that breaks the elastic store's closure fails the stage residual
 From 03: ticket 03's third box waits on the two split probes in ticket 20.
 
 From foundation 07: before either 48 h core runs, the build proves incidence and energy closure, validate-then-publish refusal with nonempty pending inputs, the generated census gate and the replay gates.
+
+From 15: the four new accuracy cases are not rows of §7's table, and each has its must-fail core in `crates/ng-validate/tests/accuracy.rs`, in `each_case_rejects_the_core_built_to_fail_it_and_the_stepped_inflow_passes_them_all`: refuses near empty (drain), leak guard (drain and removal), relative Newton stop (zero flow), damping kept after a refused evaluation (independence). `an_independence_case_whose_core_evaluated_nothing_tested_nothing` holds `NothingRefused`.

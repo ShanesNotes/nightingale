@@ -46,12 +46,20 @@ fn to<'m>(session: Session<'m, Running>, end: SimTime) -> Session<'m, Running> {
 #[test]
 fn the_stepped_inflow_meets_its_closed_form_at_first_order_over_three_caps() {
     let policy = || {
-        let cases = vec![AccuracyCase::TwoReservoir(
+        let cases = vec![AccuracyCase::TwoReservoir(Box::new(
             TwoReservoirs::stepped_inflow().expect("a body"),
-        )];
+        ))];
         AccuracyPolicy::new(cases, measure(5.0), measure(0.0), 100 * SECOND).expect("a policy")
     };
     let error = |cap| accuracy(&Core::new(cap), &policy()).expect("within the policy");
+    let (coarse, medium, fine) = (error(16 * SECOND), error(8 * SECOND), error(4 * SECOND));
+    observed_order([&coarse, &medium, &fine], measure(1.9), measure(2.1)).expect("first order");
+}
+
+#[test]
+fn the_core_meets_every_manufactured_case_at_first_order() {
+    let policy = AccuracyPolicy::manufactured().expect("the model default");
+    let error = |cap| accuracy(&Core::new(cap), &policy).expect("within the policy");
     let (coarse, medium, fine) = (error(16 * SECOND), error(8 * SECOND), error(4 * SECOND));
     observed_order([&coarse, &medium, &fine], measure(1.9), measure(2.1)).expect("first order");
 }

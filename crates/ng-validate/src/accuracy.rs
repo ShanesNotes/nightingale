@@ -1,20 +1,83 @@
 use crate::run::advance;
 use crate::{MemoryStore, ReplayCase, TwoReservoirs};
+use core::cell::RefCell;
 use ng_contract::{
-    AdmissionError, ColumnId, Compensated, CoupledSolver, Digest, Dimensionless, EngineFault,
-    InitializationFailure, Interval, Measure, SimTime, Water,
+    AcceptedStateView, AdmissionError, Attempt, BoundParameters, ColumnId, Compensated, CoupledProblem,
+    CoupledSolver, DeclaredResolution, Digest, Dimensionless, EngineFault, InitializationFailure, Interval,
+    Measure, NumericalRefusal, RunIdentity, SimTime, StepProposal, StepTicket, TrialFailure, Water,
 };
-use ng_record::{Curve, HistorySegment, PatientRecord};
+use ng_record::{Curve, Faulted, HistorySegment, PatientRecord, Session};
 
-/// A manufactured case with a closed form.
+const SECOND: u64 = 1_000_000_000;
+
+/// A manufactured case: a two-reservoir body with a closed form, and for some an exact identity beside it.
 pub enum AccuracyCase {
-    TwoReservoir(TwoReservoirs),
+    TwoReservoir(Box<TwoReservoirs>),
+    /// `a` drained to within one percent of empty and refilled from `b`: a core keeps publishing down to the
+    /// admissible bound.
+    DrainAndRefill,
+    /// The route holds exactly zero flow until an inflow restores it, so a core stays defined at rest.
+    ZeroFlowRestore,
+    /// Overlapping and back-to-back removals, each compared on the boundary's column, so every removed amount
+    /// shows in the ledger its receipt seals.
+    ControlledRemoval,
+    /// After evaluations the contract refused, the same core on the same head publishes the same bits, and one
+    /// stage there gives the same residual and Jacobian bits.
+    EvaluationIndependence,
+}
+impl AccuracyCase {
+    /// Every manufactured case §7 lists, in its order.
+    pub fn manufactured() -> Result<Vec<Self>, AdmissionError> {
+        Ok(vec![
+            Self::TwoReservoir(Box::new(TwoReservoirs::stepped_inflow()?)),
+            Self::DrainAndRefill,
+            Self::ZeroFlowRestore,
+            Self::ControlledRemoval,
+            Self::EvaluationIndependence,
+        ])
+    }
+}
+
+/// What a case checks beside its closed form.
+enum Identity {
+    None,
+    /// The values the core is handed for its refused evaluations.
+    Independence(Box<BoundParameters>),
+}
+
+struct Manufactured {
+    kind: u8,
+    fixture: TwoReservoirs,
+    identity: Identity,
+}
+impl Manufactured {
+    fn of(case: AccuracyCase) -> Result<Self, AdmissionError> {
+        let plain = |kind, fixture| Self {
+            kind,
+            fixture,
+            identity: Identity::None,
+        };
+        Ok(match case {
+            AccuracyCase::TwoReservoir(fixture) => plain(0, *fixture),
+            AccuracyCase::DrainAndRefill => plain(1, TwoReservoirs::drain_and_refill()?),
+            AccuracyCase::ZeroFlowRestore => plain(2, TwoReservoirs::zero_flow_restore()?),
+            AccuracyCase::ControlledRemoval => plain(3, TwoReservoirs::controlled_removal()?),
+            AccuracyCase::EvaluationIndependence => {
+                let fixture = TwoReservoirs::closed()?.until(SimTime::from_ns(2_000 * SECOND));
+                Self {
+                    kind: 4,
+                    identity: Identity::Independence(Box::new(fixture.refusing_values()?)),
+                    fixture,
+                }
+            }
+        })
+    }
 }
 
 /// `absolute + relative * |exact|` bounds the error at each compared instant, and `grid_ns` spaces the
 /// instants compared inside a segment.
 pub struct AccuracyPolicy {
-    cases: Vec<AccuracyCase>,
+    cases: Vec<Manufactured>,
     absolute: Compensated,
     relative: Measure<Dimensionless>,
     grid_ns: u64,
@@ -27,7 +90,11 @@ impl AccuracyPolicy {
         relative: Measure<Dimensionless>,
         grid_ns: u64,
     ) -> Result<Self, AdmissionError> {
-        let never_steps = |AccuracyCase::TwoReservoir(case): &AccuracyCase| case.end() == SimTime::from_ns(0);
+        let cases = cases
+            .into_iter()
+            .map(Manufactured::of)
+            .collect::<Result<Vec<_>, _>>()?;
+        let never_steps = |case: &Manufactured| case.fixture.end() == SimTime::from_ns(0);
         if grid_ns == 0 || cases.is_empty() || cases.iter().any(never_steps) {
             return Err(AdmissionError::EmptyAccuracyPolicy);
         }
@@ -37,6 +104,17 @@ impl AccuracyPolicy {
             relative,
             grid_ns,
         })
+    }
+    /// Every manufactured case under the model defaults. The reference's worst error on them at 16 s steps is
+    /// 3.81, on the drain, so an absolute limit of 5 passes it and refuses forward Euler past RC.
+    pub fn manufactured() -> Result<Self, AdmissionError> {
+        let absolute = Measure::new(5.0)?;
+        Self::new(
+            AccuracyCase::manufactured()?,
+            absolute,
+            Measure::new(0.0)?,
+            100 * SECOND,
+        )
     }
     pub fn digest(&self) -> Digest {
         let Self {
@@ -53,8 +131,14 @@ impl AccuracyPolicy {
         {
             bytes.extend_from_slice(&limb.to_be_bytes());
         }
-        for AccuracyCase::TwoReservoir(case) in cases {
-            bytes.extend_from_slice(case.digest().as_bytes());
+        for Manufactured {
+            kind,
+            fixture,
+            identity: _,
+        } in cases
+        {
+            bytes.push(*kind);
+            bytes.extend_from_slice(fixture.digest().as_bytes());
         }
         Digest::of_canonical(&bytes)
     }
@@ -91,6 +175,15 @@ pub enum AccuracyFailure {
     /// Adjacent refinements ran under different policies.
     MixedEvidence {
         refinement: usize,
+    },
+    /// The core's attempt on refusing values was not refused for its domain, so no evaluation was refused.
+    NothingRefused {
+        case: usize,
+    },
+    /// After refused evaluations, the head published other bits, or its stage gave other residual or Jacobian
+    /// bits.
+    Dependent {
+        case: usize,
     },
 }
 
@@ -150,39 +243,153 @@ pub fn accuracy(
     policy: &AccuracyPolicy,
 ) -> Result<AccuracyEvidence, AccuracyFailure> {
     let mut worst = Vec::with_capacity(policy.cases.len());
-    for (index, AccuracyCase::TwoReservoir(case)) in policy.cases.iter().enumerate() {
-        let store = MemoryStore::default();
-        let mut session = case.admit(solver, &store).map_err(AccuracyFailure::Admission)?;
-        let mut largest = Compensated::ZERO;
-        while session.record().accepted().time() < case.end() {
-            session = advance(session).map_err(|stopped| AccuracyFailure::Faulted(*stopped.fault()))?;
-            let record = session.record();
-            let Some(interval) = record.accepted().last_segment().interval() else {
-                continue;
-            };
-            let segment = session.conservation().head().expect("a step was accepted");
-            for at in compared_instants(interval, policy.grid_ns) {
-                for (value, exact) in comparisons(case, record, &segment, at) {
-                    let error = value.minus(exact).abs();
-                    if !error.at_most(policy.absolute.plus(exact.abs().times(&policy.relative))) {
-                        return Err(AccuracyFailure::Exceeded {
-                            case: index,
-                            at,
-                            error,
-                        });
-                    }
-                    if !error.at_most(largest) {
-                        largest = error;
-                    }
-                }
-            }
+    for (index, case) in policy.cases.iter().enumerate() {
+        if let Identity::Independence(refusing) = &case.identity {
+            independent(solver, &case.fixture, refusing, index)?;
         }
-        worst.push(largest);
+        worst.push(closed_form(solver, &case.fixture, policy, index)?);
     }
     Ok(AccuracyEvidence {
         policy: policy.digest(),
         worst,
     })
+}
+
+fn faulted(stopped: Session<'_, Faulted>) -> AccuracyFailure {
+    AccuracyFailure::Faulted(*stopped.fault())
+}
+
+fn closed_form(
+    solver: &dyn CoupledSolver,
+    case: &TwoReservoirs,
+    policy: &AccuracyPolicy,
+    index: usize,
+) -> Result<Compensated, AccuracyFailure> {
+    let store = MemoryStore::default();
+    let mut session = case.admit(solver, &store).map_err(AccuracyFailure::Admission)?;
+    let mut largest = Compensated::ZERO;
+    while session.record().accepted().time() < case.end() {
+        session = advance(session).map_err(faulted)?;
+        let record = session.record();
+        let Some(interval) = record.accepted().last_segment().interval() else {
+            continue;
+        };
+        let segment = session.conservation().head().expect("a step was accepted");
+        for at in compared_instants(interval, policy.grid_ns) {
+            for (value, exact) in comparisons(case, record, &segment, at) {
+                let error = value.minus(exact).abs();
+                if !error.at_most(policy.absolute.plus(exact.abs().times(&policy.relative))) {
+                    return Err(AccuracyFailure::Exceeded {
+                        case: index,
+                        at,
+                        error,
+                    });
+                }
+                if !error.at_most(largest) {
+                    largest = error;
+                }
+            }
+        }
+    }
+    Ok(largest)
+}
+
+/// Two admissions of one case meet the same head. On the second, the core's evaluations are refused there
+/// first, and the first step from each must publish the same bits.
+fn independent(
+    solver: &dyn CoupledSolver,
+    case: &TwoReservoirs,
+    refusing: &BoundParameters,
+    index: usize,
+) -> Result<(), AccuracyFailure> {
+    let clean_store = MemoryStore::default();
+    let clean = case
+        .admit(solver, &clean_store)
+        .map_err(AccuracyFailure::Admission)?;
+    let stage_before = stage_bits(solver, clean.record());
+    let clean = advance(clean).map_err(faulted)?;
+
+    let store = MemoryStore::default();
+    let session = case.admit(solver, &store).map_err(AccuracyFailure::Admission)?;
+    let record = session.record();
+    let refused = Refusing {
+        core: solver,
+        values: refusing,
+        identity: record.identity().clone(),
+    };
+    let span_ns = solver.next_step(record.accepted());
+    match record.attempt(&refused, Attempt::First { span_ns }) {
+        Err(TrialFailure::Refused(refusal))
+            if matches!(refusal.reason(), NumericalRefusal::TrialDomain { .. }) => {}
+        _ => return Err(AccuracyFailure::NothingRefused { case: index }),
+    }
+    let stage_after = stage_bits(solver, record);
+    let session = advance(session).map_err(faulted)?;
+    let same_stage = stage_before.is_some() && stage_before == stage_after;
+    if !same_stage || clean.record().seal() != session.record().seal() {
+        return Err(AccuracyFailure::Dependent { case: index });
+    }
+    Ok(())
+}
+
+/// Hands the core a problem on values whose evaluations the contract refuses.
+struct Refusing<'c> {
+    core: &'c dyn CoupledSolver,
+    values: &'c BoundParameters,
+    identity: RunIdentity,
+}
+impl CoupledSolver for Refusing<'_> {
+    fn resolution(&self) -> DeclaredResolution {
+        self.core.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.core.next_step(accepted)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let refusing = CoupledProblem::new(
+            problem.body(),
+            self.values,
+            &self.identity,
+            problem.accepted(),
+            ticket.digest(),
+        );
+        self.core.solve(&refusing, ticket)
+    }
+}
+
+/// Reads one stage at the head, the accepted state at the ticket's end with a zero tangent, and publishes
+/// nothing.
+struct Probe<'c> {
+    core: &'c dyn CoupledSolver,
+    bits: RefCell<Option<Vec<u64>>>,
+}
+impl CoupledSolver for Probe<'_> {
+    fn resolution(&self) -> DeclaredResolution {
+        self.core.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.core.next_step(accepted)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let length = ticket.length_ns();
+        let workspace = problem.workspace();
+        let point = workspace.point(ticket.at(length)?);
+        let stage = problem.evaluate(&point)?;
+        let jacobian = problem.linearize(&point, ticket.shift(length)?)?;
+        let values = stage.residuals().iter().chain(jacobian.view().values());
+        *self.bits.borrow_mut() = Some(values.map(|value| value.to_bits()).collect());
+        Err(ticket.refuse(NumericalRefusal::IterationLimit))
+    }
+}
+
+fn stage_bits(core: &dyn CoupledSolver, record: &PatientRecord<'_>) -> Option<Vec<u64>> {
+    let probe = Probe {
+        core,
+        bits: RefCell::new(None),
+    };
+    let span_ns = core.next_step(record.accepted());
+    let _published_nothing = record.attempt(&probe, Attempt::First { span_ns });
+    probe.bits.into_inner()
 }
 
 /// The ratio test for a core's observed order: for a refinement by two and order `p`, each error over the
