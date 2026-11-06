@@ -233,7 +233,7 @@ impl<'m> PatientRecord<'m> {
         Ok(InputReceipt { id, payload, at })
     }
     pub(crate) fn checkpoint(&self, latched: bool) -> Result<Checkpoint, CheckpointError> {
-        if let Some(seal) = self.history.waiting() {
+        if let Some(seal) = self.history.oldest_unkept() {
             return Err(CheckpointError::StoreFailed { seal });
         }
         let sections = Sections {

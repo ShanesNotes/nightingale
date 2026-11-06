@@ -172,11 +172,8 @@ fn linked(hash: RecordHash, previous: Digest, revision: u64, image: Digest, ledg
     Digest::for_record(&bytes, hash)
 }
 
-/// The previous seal and the image's digest, which a stored link holds before its chunk.
-const LINK_HEAD: usize = 64;
+const LINK_HEAD: usize = 2 * size_of::<Digest>();
 
-/// One accepted step's link before it is published. `stored` is what a store keeps, and the seal hashes its
-/// chunk bytes in place, so a step serializes its chunk once.
 pub(crate) struct Link {
     chunk: LedgerChunk,
     image: Digest,
@@ -220,7 +217,6 @@ struct Head {
     previous: Digest,
 }
 
-/// Every link but the head is in the store, or waits in `unkept`, oldest first, for a store that refused it.
 pub(crate) struct History {
     format: RecordFormat,
     opening: Vec<Compensated>,
@@ -315,8 +311,7 @@ impl History {
     pub(crate) fn head_image(&self) -> Digest {
         self.chain.head().map_or(self.origin.image, |head| head.image)
     }
-    /// The oldest link the store has not kept.
-    pub(crate) fn waiting(&self) -> Option<Digest> {
+    pub(crate) fn oldest_unkept(&self) -> Option<Digest> {
         self.unkept.first().map(|(seal, _)| *seal)
     }
     pub(crate) fn linked(&self, chunk: LedgerChunk, image: Digest) -> Link {
@@ -339,8 +334,6 @@ impl History {
             stored,
         }
     }
-    /// Makes `link` the head, then offers `store` every waiting link oldest first and stops at the first it
-    /// refuses, so the store never holds a link whose predecessor it lacks.
     pub(crate) fn push(&mut self, link: Link, store: &dyn HistoryStore) {
         let Link {
             chunk,
@@ -371,7 +364,6 @@ impl History {
             .unwrap_or(self.unkept.len());
         self.unkept.drain(..kept);
     }
-    /// The links before the head, newest first, through `store`.
     fn before_head<'s>(&self, store: &'s dyn HistoryStore) -> Option<Walk<'s>> {
         let Chain::Grown { revision, head, .. } = &self.chain else {
             return None;
@@ -386,7 +378,6 @@ impl History {
             done: false,
         })
     }
-    /// Whether this chain holds `seal` at `revision`, reading through `store` each link between it and the head.
     pub(crate) fn holds(
         &self,
         seal: Digest,
@@ -408,8 +399,6 @@ impl History {
         }
         Ok(at == seal)
     }
-    /// The first link becomes the head and the last link's start is when the chain opened, so a load holds
-    /// one chunk whatever the revision.
     pub(crate) fn walked(
         body: &CompiledBody,
         start: Start,
@@ -483,8 +472,6 @@ impl History {
     }
 }
 
-/// Newest first from one seal, each link checked against the seal that asked for it and, past revision 1,
-/// the origin's seal. It ends after an error.
 pub(crate) struct Walk<'s> {
     store: &'s dyn HistoryStore,
     format: RecordFormat,

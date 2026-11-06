@@ -176,7 +176,6 @@ impl HistoryStore for Store {
     }
 }
 
-/// Every link offered to it, in order, and each it kept; it refuses while `refusing` is set.
 #[derive(Default)]
 struct Recording {
     offered: RefCell<Vec<Digest>>,

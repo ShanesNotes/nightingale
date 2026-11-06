@@ -1,5 +1,3 @@
-//! The certificate's walk in time order over a history collected whole, kept as the oracle the newest-first
-//! walk must agree with on every field.
 use ng_contract::*;
 use ng_record::{ConservationView, Curve, HistorySegment};
 use ng_validate::*;
@@ -7,7 +5,6 @@ use ng_validate::*;
 const DAY_NS: u64 = 86_400_000_000_000;
 const COVERAGE_NS: u64 = 2 * DAY_NS;
 
-/// One water policy for every combination of a basis, with the numbers the oracle reads.
 pub struct Ledger {
     policy: CertificatePolicy,
     basis: Digest,
@@ -55,7 +52,6 @@ struct Failed {
     residual: [u64; 2],
 }
 
-/// `certify`, after asserting that the walk in time order gives the same certificate or the same failure.
 pub fn certified(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Certificate, CertificateFailure> {
     let walked = certify(view, &ledger.policy);
     let seen = walked.as_ref().map(|certificate| {

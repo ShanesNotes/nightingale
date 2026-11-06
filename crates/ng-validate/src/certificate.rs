@@ -201,8 +201,6 @@ fn of_history(check: CertificateCheck) -> CertificateFailure {
     }
 }
 
-/// A newest-first walk that stops at the segment holding an instant, `start < instant <= end`. The instants
-/// asked of it only fall, so it reads each segment once.
 struct Holding<'r> {
     walk: NewestFirst<'r>,
     at: Option<HistorySegment>,
@@ -243,10 +241,6 @@ struct Window {
     drift: Compensated,
 }
 
-/// Neighbouring window starts `from < to`, which `trailing` holds and `leading` holds a day later, so each
-/// difference is one polynomial between them. `Err` is the pair's first coverage or closure failure in
-/// quantity then endpoint order; `Ok` is its first drift failure in that order and every window it checked,
-/// in that order.
 fn pair(
     policy: &CertificatePolicy,
     trailing: &HistorySegment,
@@ -312,6 +306,37 @@ fn pair(
     Ok((drifted, windows))
 }
 
+/// `windows` came earlier in time than every window `worst` has seen, so a tie replaces.
+fn keep_the_earliest_worst(
+    worst: &mut [Option<QuantityResult>],
+    policy: &CertificatePolicy,
+    windows: Vec<Window>,
+) {
+    for window in windows.into_iter().rev() {
+        let Window {
+            quantity,
+            interval,
+            closure,
+            drift,
+        } = window;
+        let result = worst[quantity].get_or_insert(QuantityResult {
+            quantity: policy.quantities[quantity].quantity,
+            worst_closure: closure,
+            closure_window: interval,
+            worst_drift: drift,
+            drift_window: interval,
+        });
+        if result.worst_closure.at_most(closure) {
+            result.worst_closure = closure;
+            result.closure_window = interval;
+        }
+        if result.worst_drift.at_most(drift) {
+            result.worst_drift = drift;
+            result.drift_window = interval;
+        }
+    }
+}
+
 /// Closure failures win over drift, so a `Drift` failure says the ledger closed everywhere and the body
 /// still moved. It walks the store newest first and reports what a walk in time order would: the earliest
 /// failing window, and the earliest of equal worst windows.
@@ -344,30 +369,7 @@ pub fn certify(
             Err(failure) => failed = Some(failure),
             Ok((drift, windows)) => {
                 drifted = drift.or(drifted);
-                // The exact reverse of time order, replaced on ties, so the earliest of equal windows stays.
-                for window in windows.into_iter().rev() {
-                    let Window {
-                        quantity,
-                        interval,
-                        closure,
-                        drift,
-                    } = window;
-                    let result = worst[quantity].get_or_insert(QuantityResult {
-                        quantity: policy.quantities[quantity].quantity,
-                        worst_closure: closure,
-                        closure_window: interval,
-                        worst_drift: drift,
-                        drift_window: interval,
-                    });
-                    if result.worst_closure.at_most(closure) {
-                        result.worst_closure = closure;
-                        result.closure_window = interval;
-                    }
-                    if result.worst_drift.at_most(drift) {
-                        result.worst_drift = drift;
-                        result.drift_window = interval;
-                    }
-                }
+                keep_the_earliest_worst(&mut worst, policy, windows);
             }
         }
         to = from;

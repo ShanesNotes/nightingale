@@ -1949,8 +1949,6 @@ fn a_ledger_that_does_not_close_fails_closure_before_drift() {
     assert!(failure.window().is_some());
 }
 
-/// Every window tied at zero, a steady rate whose windows tie, steps that do not divide a day, and closure
-/// failing beside drift: `certified` holds the walk newest first to the walk in time order on each.
 #[test]
 fn the_certificate_walked_newest_first_is_the_certificate_walked_in_time_order() {
     let rested = || [measure(1_000.0), measure(1_000.0)];

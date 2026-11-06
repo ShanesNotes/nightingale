@@ -7,9 +7,6 @@ use std::path::PathBuf;
 
 const TAIL: u64 = 32 + 8;
 
-/// One append-only file of records `link ‖ seal ‖ u64 length`, holding no link and no seal in memory. Each
-/// cursor is the start of the record a newest-first walk last got, where its next record ends, so a walk
-/// reads each record once and two interleaved walks keep their places.
 pub struct LinkLog {
     path: PathBuf,
     file: File,

@@ -6,7 +6,6 @@ use ng_contract::{
     TrialFailure,
 };
 
-/// The store sits beside the solver, never in the record, so a record stays `Sync`.
 pub struct Session<'m, S> {
     solver: &'m dyn CoupledSolver,
     store: &'m dyn HistoryStore,
@@ -73,12 +72,9 @@ impl<'m, S> Session<'m, S> {
     pub fn record(&self) -> &PatientRecord<'m> {
         &self.record
     }
-    /// The head from memory and every older segment through this session's store.
     pub fn conservation(&self) -> ConservationView<'_> {
         self.record.conservation(self.store)
     }
-    /// The solver and the store are this session's, so a core that kept state while the parent ran ahead
-    /// carries it into the fork, and the fork's links join the parent's.
     fn fork(
         &self,
         saved: &Checkpoint,

@@ -228,8 +228,6 @@ fn opened(bytes: &[u8]) -> Result<Header<'_>, CheckpointError> {
     })
 }
 
-/// What a restored record goes on as. Only `Recover` goes past a latch, and a fork opens a new branch from
-/// a revision its parent's chain holds.
 #[derive(Clone, Copy)]
 pub(crate) enum Continuing<'p> {
     Resume,
@@ -277,8 +275,6 @@ pub(crate) fn write(
     Checkpoint { bytes }
 }
 
-/// Any bytes, from a host's store, give a record or an error, never a panic. A fork reads its parent's chain
-/// through the same store, so a rewind and a load take one path.
 pub(crate) fn restore<'m>(
     saved: &Checkpoint,
     expected: &RunIdentity,
