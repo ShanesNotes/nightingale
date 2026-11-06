@@ -2598,19 +2598,52 @@ fn a_first_mode_has_a_record() {
 }
 
 #[test]
-fn a_mode_variable_is_refused_under_a_cycle() {
+fn a_hazard_under_a_cycle_starts_where_the_packet_puts_it_and_accrues_from_the_anchor_moment() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::new(Variant::Hazard);
     let mut packet = case.packet_without_fit();
     packet
         .synthetic(E, NETWORK, measure::<Elastance>(GUESS), NOTE)
         .expect("once");
+    let pace = 4.0;
+    let rate = measure::<Rate<Dimensionless>>(pace);
+    packet.synthetic(PACE, Binding::Body, rate, NOTE).expect("once");
+    let hazard = RowKind::Memory(name("hazard").into());
+    let start = 0.25;
+    packet
+        .start(hazard, measure::<Dimensionless>(start), NOTE)
+        .expect("once");
     packet.start_mode(name("rhythm"), "sinus", NOTE).expect("once");
-    assert_eq!(
-        case.body().bind(packet).err(),
-        Some(AdmissionError::ModesNotYetRun {
-            variable: name("rhythm").into()
-        })
-    );
+    let core = reference(REFERENCE_NS);
+    let solved = admit_solved(
+        case.body(),
+        packet,
+        port(0..case.cycles),
+        &core,
+        &case.lens,
+        &store,
+    )
+    .expect("solved");
+    let row = (case.body().rows().iter())
+        .find(|row| row.kind() == hazard)
+        .expect("the body declares it")
+        .id();
+    let mut session = solved.session;
+    assert_eq!(hi(session.record().accepted().value(row)), start);
+    let fired = loop {
+        let Step::Accepted(next, receipt) = session.step() else {
+            panic!("a step was not accepted");
+        };
+        if let Some(event) = receipt.fired().first() {
+            break *event;
+        }
+        session = next;
+    };
+    let reached = start + pace * seconds(fired.at().nanoseconds());
+    let floor = pace * seconds(core.resolution().minimum_interval_ns().get());
+    let threshold = hi(fired.threshold());
+    let past = reached - threshold;
+    assert!((-1e-12..=floor).contains(&past), "{past} past the draw");
 }
 
 #[test]

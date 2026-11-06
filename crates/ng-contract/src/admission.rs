@@ -266,6 +266,13 @@ impl InitializationSystem<'_> {
     fn reset(&self, point: usize, row: usize) -> bool {
         self.resets[point].contains(&RowId::at(row))
     }
+    /// The interval an amount or memory row's stage spans, and `None` for a row that states the packet's value: every
+    /// such row of an instant, and a hazard integral, because chance is held here and a hazard accrues from the anchor
+    /// moment.
+    fn stage_interval(&self, row: usize) -> Option<f64> {
+        let hazard = (self.body.layout.hazards.iter()).any(|hazard| hazard.integral.index() == row);
+        self.interval.filter(|_| !hazard)
+    }
     /// The total row of a combination replaces its least row at the last point, because the point rows sum to the
     /// combination's net boundary flow over the cycle, whatever the state: they alone leave its total free. A regulated
     /// total answers its own flows, so its point rows pin it and it needs no row. Charge follows from the ions.
@@ -305,8 +312,8 @@ impl InitializationSystem<'_> {
         SolveWorkspace::seeded(self.body, unknowns)
     }
     /// One row per body row at each point, none replaced. Each is in its row's own unit, so one scale reads it:
-    /// a stage's rate is multiplied by the interval, as `verify` does. An amount or memory row of an instant is
-    /// its value less the packet's.
+    /// a stage's rate is multiplied by the interval, as `verify` does. A row that states the packet's value is its
+    /// value less the packet's.
     fn stages(&self, unknowns: &[f64]) -> Result<Vec<f64>, InitializationFailure> {
         let values = self.values(unknowns);
         let mut out = Vec::with_capacity(self.unknowns());
@@ -344,7 +351,7 @@ impl InitializationSystem<'_> {
             let derivative = self.interval.map_or(vec![0.0; rows.len()], tangent);
             let residuals = self.body.residuals(&columns, &rates, &derivative);
             for (at, row) in rows.iter().enumerate() {
-                out.push(match self.interval {
+                out.push(match self.stage_interval(at) {
                     _ if algebraic(row.kind()) => residuals[at],
                     Some(seconds) => seconds * residuals[at],
                     None => state[at] - self.parameters.starts[at],
@@ -416,7 +423,7 @@ impl InitializationSystem<'_> {
                 );
             }
             for (at, row) in rows.iter().enumerate() {
-                let scale = match self.interval {
+                let scale = match self.stage_interval(at) {
                     _ if algebraic(row.kind()) => 1.0,
                     Some(seconds) => seconds,
                     None => {
@@ -494,7 +501,7 @@ impl InitializationSystem<'_> {
             }
             let line = sparsity.row_offsets()[at]..sparsity.row_offsets()[at + 1];
             for (entry, unknown) in entries[line.clone()].iter_mut().zip(&sparsity.unknowns()[line]) {
-                *entry = match self.interval {
+                *entry = match self.stage_interval(at) {
                     Some(seconds) => *entry * seconds,
                     None if unknown.index() == at => 1.0,
                     None => 0.0,
@@ -588,13 +595,11 @@ impl InitializationSystem<'_> {
                 cells[sparsity.unknowns()[entry].index()] = entries[entry];
             }
         }
-        // At an instant an amount or a memory row states the packet's value, so it pivots on itself.
-        if self.interval.is_none() {
-            for (at, row) in self.body.rows().iter().enumerate() {
-                if !algebraic(row.kind()) {
-                    matrix[at].fill(0.0);
-                    matrix[at][at] = 1.0;
-                }
+        // A row that states the packet's value pivots on itself.
+        for (at, row) in self.body.rows().iter().enumerate() {
+            if !algebraic(row.kind()) && self.stage_interval(at).is_none() {
+                matrix[at].fill(0.0);
+                matrix[at][at] = 1.0;
             }
         }
         for row in &mut matrix {

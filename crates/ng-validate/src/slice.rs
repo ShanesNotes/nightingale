@@ -193,6 +193,10 @@ const URINE: &str = "urine";
 const HEAT: &str = "heat";
 const SECRETION: &str = "vasopressin secretion";
 const CLEARANCE: &str = "vasopressin clearance";
+const SKIN_VARIABILITY: &str = "skin water variability";
+const STIR: &str = "stir";
+const STIR_HAZARD: &str = "stir hazard";
+const STIRRING: &str = "stirring";
 
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     Ok(AnatomyBuilder::new().site::<C>(key, at(0.0)?).id())
@@ -369,17 +373,41 @@ fn vasopressin(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     Ok(())
 }
 
+/// Water leaves the skin at a rate that wanders smoothly with time, and the patient stirs once, at random. Both model
+/// defaults. MS is held, so the stir moves no law in the slice: it is the slice's stochastic fixture (§7).
 fn skin(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let declaration = HeldDeclaration::<Musculoskeletal>::new(vec![SKIN_WATER], Vec::new(), FIXED);
     let (mut laws, ports) = body.hold(declaration)?.parts();
     let BoundaryRoute { route, .. } = ports.route::<Water>(SKIN_WATER)?;
     let steady = laws.parameter::<Rate<Water>>(ParameterKey::new("ms.skin-water"), Admissible::nonnegative());
+    let wandering = laws.forcing(
+        SKIN_VARIABILITY,
+        ParameterKey::new("ms.skin-water-period"),
+        ParameterKey::new("ms.skin-water-amplitude"),
+    );
     let class = hours()?;
     let rate = laws.kernel(|mut k| {
-        let value = k.parameter(&steady);
-        k.finish(value, laws.every_mode(), class)
+        let (value, factor) = (k.parameter(&steady), k.forcing(&wandering));
+        let varied = k.scale(value, factor);
+        k.finish(varied, laws.every_mode(), class)
     });
     laws.transfer(Transfer::new(&route, rate));
+    let pace =
+        laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ms.stir-rate"), Admissible::nonnegative());
+    let dice = laws.stream(STIR);
+    let integral = laws.state::<Dimensionless>(STIR_HAZARD, Admissible::nonnegative());
+    let [still, stirred] = laws.modes(STIRRING, ["still", "stirred"]);
+    let accruing = laws.kernel(|mut k| {
+        let rate = k.parameter(&pace);
+        k.finish(rate, still.only(), class)
+    });
+    let spent = laws.kernel(|mut k| {
+        let rate = k.zero();
+        k.finish(rate, stirred.only(), class)
+    });
+    laws.memory_rate(&integral, accruing);
+    laws.memory_rate(&integral, spent);
+    laws.hazard(HazardGuard::new(&integral, &dice, still.to(&stirred)?));
     body.add(laws.finish());
     Ok(())
 }
@@ -556,6 +584,11 @@ pub fn arena_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixt
     packet.start_mode(valve("right ventricle", "pulmonary artery")?, "shut", note)?;
     packet.start_mode(valve("right atrium", "right ventricle")?, "open", note)?;
     packet.start_mode(valve("leg veins", "central veins")?, "open", note)?;
+    let stirring = LawName {
+        owner: Musculoskeletal::CARD,
+        local: STIRRING,
+    };
+    packet.start_mode(stirring, "still", note)?;
 
     table(&mut packet, note)?;
     packet.start_rest(body, start_guess, note)?;
@@ -682,6 +715,7 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
         ("en.avp-clearance", 2e-3),
         ("bd.bladder-speed", 1e-3),
         ("bd.heat-speed", 1e-3),
+        ("ms.stir-rate", 2.0),
     ] {
         set::<Rate<Dimensionless>>(packet, key, body, value, note)?;
     }
@@ -706,6 +740,8 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
     set::<Rate<Potassium>>(packet, "gi.basal-potassium", body, 0.05, note)?;
     set::<Rate<Chloride>>(packet, "gi.basal-chloride", body, 1.05, note)?;
     set::<Rate<Water>>(packet, "ms.skin-water", body, 0.01, note)?;
+    set::<Time>(packet, "ms.skin-water-period", body, 300.0, note)?;
+    set::<Dimensionless>(packet, "ms.skin-water-amplitude", body, 0.5, note)?;
     set::<Water>(packet, "bd.bladder-rest", body, 0.0, note)?;
     set::<Rate<Water>>(packet, "bd.bladder-width", body, 1e-3, note)?;
 

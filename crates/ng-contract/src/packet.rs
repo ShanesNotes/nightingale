@@ -644,9 +644,8 @@ impl BoundParameters {
 impl CompiledBody {
     /// A firing leaves algebraic values as they were and nothing here solves them again, so an algebraic law may not
     /// hold by a fired mode, read a row a firing resets, or read a draw a firing moves: then no algebraic row jumps at a
-    /// firing, and no landing needs a solve. A variable no guard moves never leaves its start, and a hazard integral only grows until it
-    /// fires, so it never returns over a cycle.
-    fn unrun_mode(&self, periodic: bool) -> Option<Slot> {
+    /// firing, and no landing needs a solve. A variable no guard moves never leaves its start.
+    fn unrun_mode(&self) -> Option<Slot> {
         let Layout {
             rows,
             modes,
@@ -695,13 +694,7 @@ impl CompiledBody {
             })
         };
         (modes.iter().enumerate())
-            .find(|&(at, _)| {
-                !(plain(at) || hazard(at))
-                    || (periodic && hazard(at))
-                    || selects(at)
-                    || reset_reads(at)
-                    || draw_reads(at)
-            })
+            .find(|&(at, _)| !(plain(at) || hazard(at)) || selects(at) || reset_reads(at) || draw_reads(at))
             .map(|(_, mode)| mode.variable)
     }
     /// A literal is zero, so only `exp` and `logistic` make a nonzero constant from literals, and `divide`
@@ -737,7 +730,7 @@ impl CompiledBody {
     /// constant no packet entry backs are refused first, and a mode's start next, because which laws hold
     /// decides what every later value means.
     pub fn bind<K: PacketKind>(&self, packet: ParameterPacket<K>) -> Result<BoundParameters, AdmissionError> {
-        if let Some(variable) = self.unrun_mode(packet.cycle.is_some()) {
+        if let Some(variable) = self.unrun_mode() {
             return Err(AdmissionError::ModesNotYetRun { variable });
         }
         if let Some(law) = self.unbacked_constant() {
