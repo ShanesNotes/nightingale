@@ -136,3 +136,16 @@ new = '''
             let _ = start_of_time;
 '''
 test = "-p ng-contract --test image each_field_a_run_never_writes_is_malformed"
+
+[[mutant]]
+name = "observer-checkpoint-drops-held"
+path = "crates/ng-observe/src/checkpoint.rs"
+old = '''
+            body.extend_from_slice(&(held.len() as u64).to_be_bytes());
+            for held in held {
+'''
+new = '''
+            body.extend_from_slice(&0_u64.to_be_bytes());
+            for held in &held[..0] {
+'''
+test = "--release -p ng-validate --test replay every_gate_passes_the_reference_core_with_one_set_of_digests"

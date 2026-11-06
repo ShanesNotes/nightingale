@@ -32,8 +32,8 @@ pub enum AdmissionError {
     /// An absolute scale that is not positive, or a relative scale below zero.
     NonPositiveScale,
     /// A mode variable no guard moves; one an algebraic law holds by, or whose firing resets a row or moves a
-    /// draw an algebraic law reads, which the firing could leave false; and one a hazard moves under a cycle,
-    /// whose integral never returns. A guard that silently never fires is worse than a run that never starts.
+    /// draw an algebraic law reads, which the firing could leave false. A guard that silently never fires is worse
+    /// than a run that never starts.
     ModesNotYetRun {
         variable: Slot,
     },

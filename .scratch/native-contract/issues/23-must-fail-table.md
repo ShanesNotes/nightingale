@@ -20,4 +20,6 @@ From 03: ticket 03's third box waits on the two split probes in ticket 20.
 
 From foundation 07: before either 48 h core runs, the build proves incidence and energy closure, validate-then-publish refusal with nonempty pending inputs, the generated census gate and the replay gates.
 
+From 19: §7's table has no observer row. The observer gates' must-fail observers are in-crate tests, because only a test can build an observer that is not a function of its views: `replay::tests::an_observer_that_drifts_while_the_accepted_state_matches_fails_pace_resume_late_admission_and_rewind` and `an_observer_that_forgets_its_state_on_resume_fails_resume_and_rewind_and_passes_the_rest`.
+
 From 20: §7's row "Qualifies a split from invented samples" is the compile-fail doctest on `SplitTrace::new` (E0599) in `crates/ng-record/src/lib.rs`. The split gate's must-fail core is `a_split_over_its_budget_is_refused` in `crates/ng-validate/tests/split.rs`, a coupled core at 32 times the reference's interval. Both split probes that ticket 03's third box waited on now hold in the crates.
