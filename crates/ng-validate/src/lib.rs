@@ -1,5 +1,5 @@
 //! Synthetic fixtures, the slice's composition root and held stand-ins, the admission solve, the reference
-//! integrator, the accuracy gate, the certificate and the replay gates.
+//! integrator, the accuracy gate, the certificate, the replay gates and the arena run.
 //!
 //! # Type rules
 //!
@@ -67,6 +67,38 @@
 //!     admit_solved(body, packet, port, core, lens, store)
 //! }
 //! ```
+//! The arena takes only a synthetic fixture, so a run it times is nonclinical by type.
+//! ```compile_fail,E0308
+//! use core::num::NonZeroU32;
+//! use ng_contract::*;
+//! use ng_validate::*;
+//! fn clinical(window: Interval, packet: ParameterPacket<Reviewed>, lens: ObservationLens, boundary: BoundaryPort,
+//!     seed: Seed, repeats: NonZeroU32) -> ArenaSpec {
+//!     ArenaSpec { window, packet, lens, boundary, seed, repeats }
+//! }
+//! ```
+//! ```
+//! use core::num::NonZeroU32;
+//! use ng_contract::*;
+//! use ng_validate::*;
+//! fn synthetic(window: Interval, packet: ParameterPacket<SyntheticFixture>, lens: ObservationLens,
+//!     boundary: BoundaryPort, seed: Seed, repeats: NonZeroU32) -> ArenaSpec {
+//!     ArenaSpec { window, packet, lens, boundary, seed, repeats }
+//! }
+//! ```
+//! No throughput number enters the certificate: the run's evidence stands beside the record.
+//! ```compile_fail,E0308
+//! use ng_validate::*;
+//! fn timed(run: ArenaRun<'_>, policy: &CertificatePolicy) -> Result<Certificate, CertificateFailure> {
+//!     certify(&run.into_evidence(), policy)
+//! }
+//! ```
+//! ```
+//! use ng_validate::*;
+//! fn conserved(run: &ArenaRun<'_>, policy: &CertificatePolicy) -> Result<Certificate, CertificateFailure> {
+//!     certify(&run.session().conservation(), policy)
+//! }
+//! ```
 //! Evidence comes only from a gate that ran.
 //! ```compile_fail,E0451
 //! use ng_contract::Digest;
@@ -89,6 +121,30 @@
 //! fn ran(case: &TwoReservoirs, cores: &dyn CoreFactory, plan: &ReplayPlan<'_>)
 //!     -> Result<ReplayEvidence, ReplayFailure> {
 //!     replay_gates(case, cores, plan)
+//! }
+//! ```
+//! Throughput evidence comes only from a run that the host's clock timed.
+//! ```compile_fail,E0451
+//! use core::num::NonZeroU64;
+//! use ng_validate::*;
+//! fn forged(clock: ClockSource, wall: NonZeroU64) -> ThroughputEvidence {
+//!     ThroughputEvidence {
+//!         clock,
+//!         admission_wall_ns: 0,
+//!         runs_wall_ns: vec![wall],
+//!         simulated_ns: 1,
+//!         accepted_steps: 1,
+//!         waveform_samples: 1,
+//!     }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! use ng_record::HistoryStore;
+//! use ng_validate::*;
+//! fn timed<'m>(body: &'m CompiledBody, core: &'m dyn CoupledSolver, spec: ArenaSpec, clock: &dyn WallClock,
+//!     store: &'m dyn HistoryStore) -> Result<ThroughputEvidence, ArenaFailure> {
+//!     Ok(run(body, core, spec, clock, store)?.into_evidence().throughput().clone())
 //! }
 //! ```
 
@@ -115,7 +171,7 @@ pub use replay::{
     ChancePlan, ClockSource, CoreFactory, GateEvidence, MemoryStore, ReplayCase, ReplayEvidence,
     ReplayFailure, ReplayGate, ReplayPlan, WallClock, replay_gate, replay_gates,
 };
-pub use run::run_until;
+pub use run::{ArenaFailure, ArenaRun, ArenaSpec, RunEvidence, ThroughputEvidence, run, run_until};
 pub use slice::{
     anchor_moment, arena_anatomy, arena_body, arena_lens, arena_organs, arena_packet, arena_schema,
     hold_outside_slice,
