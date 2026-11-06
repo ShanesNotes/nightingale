@@ -1,6 +1,5 @@
-use crate::ReplayCase;
-use crate::TwoReservoirs;
 use crate::run::advance;
+use crate::{MemoryStore, ReplayCase, TwoReservoirs};
 use ng_contract::{
     AdmissionError, ColumnId, Compensated, CoupledSolver, Digest, Dimensionless, EngineFault,
     InitializationFailure, Interval, Measure, SimTime, Water,
@@ -99,7 +98,7 @@ fn water(value: f64) -> Compensated {
     Compensated::of(&Measure::<Water>::new(value).expect("the closed form of finite constants is finite"))
 }
 
-fn net_at(segment: &HistorySegment<'_>, column: ColumnId, at: SimTime) -> Compensated {
+fn net_at(segment: &HistorySegment, column: ColumnId, at: SimTime) -> Compensated {
     let piece = Interval::new(segment.interval().start(), at).expect("a compared instant is after the start");
     let reached = |curve: Curve<'_>| {
         let ends = curve.on(piece).expect("a compared instant is inside the segment");
@@ -123,12 +122,11 @@ fn compared_instants(interval: Interval, grid_ns: u64) -> Vec<SimTime> {
 fn comparisons(
     case: &TwoReservoirs,
     record: &PatientRecord<'_>,
+    segment: &HistorySegment,
     at: SimTime,
 ) -> Vec<(Compensated, Compensated)> {
     let exact = case.exact(at);
     let dense = record.accepted().last_segment();
-    let view = record.conservation();
-    let segment = view.segments().next_back().expect("a step was accepted");
     let mut pairs = Vec::with_capacity(4);
     for (row, amount) in case.rows().into_iter().zip(exact.amounts) {
         let value = dense
@@ -137,9 +135,9 @@ fn comparisons(
         pairs.push((value, water(amount)));
     }
     let circulation = case.circulation().expect("the body circulates");
-    pairs.push((net_at(&segment, circulation, at), water(exact.circulated)));
+    pairs.push((net_at(segment, circulation, at), water(exact.circulated)));
     if let Some(exterior) = case.exterior() {
-        pairs.push((net_at(&segment, exterior, at), water(exact.received)));
+        pairs.push((net_at(segment, exterior, at), water(exact.received)));
     }
     pairs
 }
@@ -153,7 +151,8 @@ pub fn accuracy(
 ) -> Result<AccuracyEvidence, AccuracyFailure> {
     let mut worst = Vec::with_capacity(policy.cases.len());
     for (index, AccuracyCase::TwoReservoir(case)) in policy.cases.iter().enumerate() {
-        let mut session = case.admit(solver).map_err(AccuracyFailure::Admission)?;
+        let store = MemoryStore::default();
+        let mut session = case.admit(solver, &store).map_err(AccuracyFailure::Admission)?;
         let mut largest = Compensated::ZERO;
         while session.record().accepted().time() < case.end() {
             session = advance(session).map_err(|stopped| AccuracyFailure::Faulted(*stopped.fault()))?;
@@ -161,8 +160,9 @@ pub fn accuracy(
             let Some(interval) = record.accepted().last_segment().interval() else {
                 continue;
             };
+            let segment = session.conservation().head().expect("a step was accepted");
             for at in compared_instants(interval, policy.grid_ns) {
-                for (value, exact) in comparisons(case, record, at) {
+                for (value, exact) in comparisons(case, record, &segment, at) {
                     let error = value.minus(exact).abs();
                     if !error.at_most(policy.absolute.plus(exact.abs().times(&policy.relative))) {
                         return Err(AccuracyFailure::Exceeded {

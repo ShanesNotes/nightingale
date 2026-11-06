@@ -1,4 +1,5 @@
 use crate::ReferenceIntegrator;
+use core::cell::RefCell;
 use core::num::NonZeroU64;
 use ng_contract::{
     AcceptedStateView, AdmissionError, BoundaryEvent, ChannelSpec, CompiledBody, CoupledProblem,
@@ -19,11 +20,13 @@ pub trait ReplayCase {
     fn admit<'m>(
         &'m self,
         core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure>;
     /// The same run with no input from `events` known at admission, so each must come through `Session::enqueue`.
     fn admit_withheld<'m>(
         &'m self,
         core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure>;
 }
 
@@ -371,7 +374,8 @@ fn reference(
     cores: &dyn CoreFactory,
 ) -> Result<(Trace, Digest), ReplayFailure> {
     let core = cores.fresh();
-    let session = admitted(gate, case.admit(&*core))?;
+    let store = MemoryStore::default();
+    let session = admitted(gate, case.admit(&*core, &store))?;
     let rows = vec![Row::of(&session, false)];
     let (session, trace) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
     let fired_nothing = case.body().hazards().next().is_some() && fired(&trace.rows).is_empty();
@@ -413,7 +417,8 @@ fn pace_gate(
     };
     for pace in [Pace::Chunked(&plan.chunks), live] {
         let core = cores.fresh();
-        let session = admitted(gate, case.admit(&*core))?;
+        let store = MemoryStore::default();
+        let session = admitted(gate, case.admit(&*core, &store))?;
         let rows = vec![Row::of(&session, false)];
         let (_, paced) = traced(gate, session, rows, case.end(), &pace)?;
         same_or_diverged(gate, &reference.rows, &reference.last, &paced)?;
@@ -431,18 +436,22 @@ fn pace_gate(
     })
 }
 
+/// Every link in memory, sorted by seal, for tests and short runs. A long run's host keeps its links outside
+/// the process.
 #[derive(Default)]
-struct MemoryStore {
-    links: Vec<(Digest, Vec<u8>)>,
+pub struct MemoryStore {
+    links: RefCell<Vec<(Digest, Vec<u8>)>>,
 }
 impl HistoryStore for MemoryStore {
     fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
-        let at = self.links.binary_search_by_key(seal, |link| link.0).ok()?;
-        Some(self.links[at].1.clone())
+        let links = self.links.borrow();
+        let at = links.binary_search_by_key(seal, |link| link.0).ok()?;
+        Some(links[at].1.clone())
     }
-    fn keep(&mut self, seal: Digest, link: Vec<u8>) -> Result<(), CheckpointError> {
-        if let Err(at) = self.links.binary_search_by_key(&seal, |link| link.0) {
-            self.links.insert(at, (seal, link));
+    fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
+        let mut links = self.links.borrow_mut();
+        if let Err(at) = links.binary_search_by_key(&seal, |link| link.0) {
+            links.insert(at, (seal, link.to_vec()));
         }
         Ok(())
     }
@@ -479,14 +488,14 @@ fn resume_gate(
         return Err(ReplayFailure::MissingEvidence { gate });
     }
     let (reference, run) = reference(gate, case, cores)?;
+    let store = MemoryStore::default();
     let core = cores.fresh();
-    let mut store = MemoryStore::default();
-    let mut session = admitted(gate, case.admit(&*core))?;
+    let mut session = admitted(gate, case.admit(&*core, &store))?;
     let mut rows = Vec::new();
     let mut saved = Vec::new();
     for revision in boundaries(&reference.rows, plan.resume_every) {
         session = revision_to(gate, session, revision, &mut rows)?;
-        saved.push((revision, session.checkpoint(&mut store).map_err(checkpointed)?));
+        saved.push((revision, session.checkpoint().map_err(checkpointed)?));
     }
     let identity = session.record().identity();
     let mut runs = vec![reference.last];
@@ -525,10 +534,11 @@ fn late_run<'m>(
     gate: ReplayGate,
     case: &'m dyn ReplayCase,
     core: &'m dyn CoupledSolver,
+    store: &'m dyn HistoryStore,
     arrivals: &[u64],
     rows: &mut Vec<Row>,
 ) -> Result<Session<'m, Running>, ReplayFailure> {
-    let mut session = admitted(gate, case.admit_withheld(core))?;
+    let mut session = admitted(gate, case.admit_withheld(core, store))?;
     rows.push(Row::of(&session, false));
     let events = stamped(gate, case)?;
     for (revision, event) in arrivals.iter().zip(events) {
@@ -570,14 +580,16 @@ fn late_admission_gate(
             return Err(ReplayFailure::NoLateBoundary { id: event.id() });
         }
         let core = cores.fresh();
+        let store = MemoryStore::default();
         let mut rows = Vec::new();
-        let session = late_run(gate, case, &*core, &arrivals, &mut rows)?;
+        let session = late_run(gate, case, &*core, &store, &arrivals, &mut rows)?;
         let (_, withheld) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
         arrivals.push(arrival(&withheld.rows, event));
     }
     let core = cores.fresh();
+    let store = MemoryStore::default();
     let mut rows = Vec::new();
-    let session = late_run(gate, case, &*core, &arrivals, &mut rows)?;
+    let session = late_run(gate, case, &*core, &store, &arrivals, &mut rows)?;
     let (_, late) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
     same_or_diverged(gate, &reference.rows, &reference.last, &late)?;
     Ok(GateEvidence {
@@ -599,14 +611,14 @@ fn rewind_gate(case: &dyn ReplayCase, cores: &dyn CoreFactory) -> Result<GateEvi
     let checkpointed = |error| ReplayFailure::Checkpoint { gate, error };
     let (reference, run) = reference(gate, case, cores)?;
     let middle = (reference.rows.len() - 1) / 2;
+    let store = MemoryStore::default();
     let core = cores.fresh();
-    let mut store = MemoryStore::default();
-    let session = admitted(gate, case.admit(&*core))?;
+    let session = admitted(gate, case.admit(&*core, &store))?;
     let mut rows = vec![Row::of(&session, false)];
     let session = revision_to(gate, session, middle as u64, &mut rows)?;
-    let first = session.checkpoint(&mut store).map_err(checkpointed)?;
+    let first = session.checkpoint().map_err(checkpointed)?;
     let session = revision_to(gate, session, middle as u64 + 1, &mut rows)?;
-    let second = session.checkpoint(&mut store).map_err(checkpointed)?;
+    let second = session.checkpoint().map_err(checkpointed)?;
     let (parent, ahead) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
     same_or_diverged(gate, &reference.rows, &reference.last, &ahead)?;
     let identity = parent.record().identity();
@@ -665,7 +677,8 @@ fn extra_evaluation_gate(
     let gate = ReplayGate::ExtraEvaluation;
     let (reference, run) = reference(gate, case, cores)?;
     let forced = SolvesTwice { inner: cores.fresh() };
-    let session = admitted(gate, case.admit(&forced))?;
+    let store = MemoryStore::default();
+    let session = admitted(gate, case.admit(&forced, &store))?;
     let rows = vec![Row::of(&session, false)];
     let (_, twice) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
     same_or_diverged(gate, &reference.rows, &reference.last, &twice)?;
@@ -804,7 +817,8 @@ fn watched(
 ) -> Result<(Trace, Digest), ReplayFailure> {
     let missing = |_| ReplayFailure::MissingEvidence { gate };
     let core = cores.fresh();
-    let mut session = admitted(gate, case.admit(&*core))?;
+    let store = MemoryStore::default();
+    let mut session = admitted(gate, case.admit(&*core, &store))?;
     let mut observer = Observer::new(lens, ObservationSeed::new(WATCHING));
     let mut stream = Digest::of_canonical(b"observed run");
     let mut read_a_value = false;
@@ -917,8 +931,9 @@ mod tests {
         let start = || Measure::new(1_000.0).expect("finite");
         let case = TwoReservoirs::delivering([start(), start()], vec![delivery]).expect("a body");
         let core = ReferenceIntegrator::new(1_000_000_000);
-        let session = case.admit(&core).expect("admitted");
-        let withheld = case.admit_withheld(&core).expect("admitted");
+        let store = MemoryStore::default();
+        let session = case.admit(&core, &store).expect("admitted");
+        let withheld = case.admit_withheld(&core, &store).expect("admitted");
         let trace = |session: &Session<'_, Running>| Trace {
             rows: vec![Row::of(session, false)],
             last: session.record().digests(),
@@ -935,7 +950,8 @@ mod tests {
         let start = || Measure::new(1_000.0).expect("finite");
         let case = TwoReservoirs::delivering([start(), start()], Vec::new()).expect("a body");
         let core = ReferenceIntegrator::new(1_000_000_000);
-        let session = case.admit(&core).expect("admitted");
+        let store = MemoryStore::default();
+        let session = case.admit(&core, &store).expect("admitted");
         let head = |earliest| Row {
             earliest: SimTime::from_ns(earliest),
             ..Row::of(&session, false)

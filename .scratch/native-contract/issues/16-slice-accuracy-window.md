@@ -23,3 +23,5 @@ From 04 and 10: row scales were left to tickets 10 and 11. Ticket 10 gave each r
 From the split of ticket 11: §7's other slice windows, sleep onset and the second day's waking, need sleep and clock payloads, and no ticket builds those yet.
 
 From the solver arena (in this PR): the two candidate cores agreed on every body-response verdict and on the two-reservoir accuracy errors, but per-beat cardiac output in the first beats after 07:00 differed between them by up to about 0.6 mL/s, about 1 percent. Only this ticket's window against the reference integrator can say which is closer.
+
+From ticket 11: `accuracy` reads the last segment from `session.conservation().head()` and admits each case with its own `MemoryStore`. A slice window run through admission and the first posture change and meal is short enough for that store; a longer one needs a host store outside the process.

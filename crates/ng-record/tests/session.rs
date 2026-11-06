@@ -1,8 +1,27 @@
+use core::cell::RefCell;
 use core::num::NonZeroU64;
 use ng_contract::*;
 use ng_record::*;
 
 const SECOND: u64 = 1_000_000_000;
+
+#[derive(Default)]
+struct Kept {
+    links: RefCell<Vec<(Digest, Vec<u8>)>>,
+}
+impl HistoryStore for Kept {
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+        let links = self.links.borrow();
+        links
+            .iter()
+            .find(|link| link.0 == *seal)
+            .map(|link| link.1.clone())
+    }
+    fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
+        self.links.borrow_mut().push((seal, link.to_vec()));
+        Ok(())
+    }
+}
 
 fn measure<U>(value: f64) -> Result<Measure<U>, AdmissionError> {
     Measure::new(value)
@@ -110,6 +129,7 @@ impl CoupledSolver for Explicit {
 fn admitted<'m>(
     fixture: &'m Reservoirs,
     core: &'m Explicit,
+    store: &'m Kept,
 ) -> Result<Session<'m, Running>, InitializationFailure> {
     let Reservoirs { body, a, b } = fixture;
     let network = Binding::Network(Network::Vascular);
@@ -158,7 +178,7 @@ fn admitted<'m>(
         Seed::new([1, 2, 3, 4]),
         core.resolution(),
     );
-    Ok(Session::admit(body, core, revision, identity)?)
+    Ok(Session::admit(body, core, revision, identity, store)?)
 }
 
 fn accepted(step: Step<'_>) -> (Session<'_, Running>, StepReceipt) {
@@ -176,7 +196,8 @@ fn an_accepted_step_moves_every_part_and_chains_its_seal() -> Result<(), Initial
         interval_ns: SECOND,
         refuse_at: None,
     };
-    let session = admitted(&fixture, &core)?;
+    let store = Kept::default();
+    let session = admitted(&fixture, &core, &store)?;
     let before = session.record().digests();
     let seal = session.record().seal();
     let (session, receipt) = accepted(session.step());
@@ -207,7 +228,8 @@ fn a_refused_session_keeps_the_record_and_retries_smaller() -> Result<(), Initia
         interval_ns: SECOND,
         refuse_at: Some(SimTime::from_ns(SECOND)),
     };
-    let (session, _) = accepted(admitted(&fixture, &core)?.step());
+    let store = Kept::default();
+    let (session, _) = accepted(admitted(&fixture, &core, &store)?.step());
     let before = session.record().digests();
     let Step::Refused(session) = session.step() else {
         panic!("not refused");
@@ -230,7 +252,8 @@ fn a_refusal_whose_retry_passes_the_floor_latches_a_fault() -> Result<(), Initia
         interval_ns: SECOND / 4,
         refuse_at: Some(SimTime::from_ns(0)),
     };
-    let Step::Faulted(stopped) = admitted(&fixture, &core)?.step() else {
+    let store = Kept::default();
+    let Step::Faulted(stopped) = admitted(&fixture, &core, &store)?.step() else {
         panic!("not faulted");
     };
     assert_eq!(stopped.fault().kind(), EngineFaultKind::NoAdmissibleStep);

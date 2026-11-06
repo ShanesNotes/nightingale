@@ -14,11 +14,11 @@
 //! }
 //! ```
 //! ```
-//! use ng_record::PatientRecord;
+//! use ng_record::{Running, Session};
 //! use ng_validate::*;
-//! fn one(record: &PatientRecord, policy: &CertificatePolicy)
+//! fn one(session: &Session<'_, Running>, policy: &CertificatePolicy)
 //!     -> Result<Certificate, CertificateFailure> {
-//!     certify(&record.conservation(), policy)
+//!     certify(&session.conservation(), policy)
 //! }
 //! ```
 //! A pace is when a host calls `step`, and `step` takes nothing, so a caller's stop cannot cut a step.
@@ -39,27 +39,32 @@
 //! Admission here takes only a synthetic fixture, so a run it admits is nonclinical by type.
 //! ```compile_fail,E0308
 //! use ng_contract::*;
-//! use ng_record::{Running, Session};
+//! use ng_record::{HistoryStore, Running, Session};
 //! use ng_validate::*;
 //! fn clinical<'m>(body: &'m CompiledBody, packet: ParameterPacket<Reviewed>, port: BoundaryPort,
-//!     core: &'m dyn CoupledSolver) -> Result<Session<'m, Running>, InitializationFailure> {
-//!     admit_fixture(body, packet, port, core)
+//!     core: &'m dyn CoupledSolver, store: &'m dyn HistoryStore)
+//!     -> Result<Session<'m, Running>, InitializationFailure> {
+//!     admit_fixture(body, packet, port, core, store)
 //! }
 //! ```
 //! ```compile_fail,E0308
 //! use ng_contract::*;
+//! use ng_record::HistoryStore;
 //! use ng_validate::*;
 //! fn clinical<'m>(body: &'m CompiledBody, packet: ParameterPacket<Reviewed>, port: BoundaryPort,
-//!     core: &'m dyn CoupledSolver, lens: &ObservationLens) -> Result<Admitted<'m>, InitializationFailure> {
-//!     admit_solved(body, packet, port, core, lens)
+//!     core: &'m dyn CoupledSolver, lens: &ObservationLens, store: &'m dyn HistoryStore)
+//!     -> Result<Admitted<'m>, InitializationFailure> {
+//!     admit_solved(body, packet, port, core, lens, store)
 //! }
 //! ```
 //! ```
 //! use ng_contract::*;
+//! use ng_record::HistoryStore;
 //! use ng_validate::*;
 //! fn synthetic<'m>(body: &'m CompiledBody, packet: ParameterPacket<SyntheticFixture>, port: BoundaryPort,
-//!     core: &'m dyn CoupledSolver, lens: &ObservationLens) -> Result<Admitted<'m>, InitializationFailure> {
-//!     admit_solved(body, packet, port, core, lens)
+//!     core: &'m dyn CoupledSolver, lens: &ObservationLens, store: &'m dyn HistoryStore)
+//!     -> Result<Admitted<'m>, InitializationFailure> {
+//!     admit_solved(body, packet, port, core, lens, store)
 //! }
 //! ```
 //! Evidence comes only from a gate that ran.
@@ -107,8 +112,8 @@ pub use fixture::{ChanceCase, Delivery, TwoReservoirs, admit_fixture, admit_seed
 pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved};
 pub use reference::ReferenceIntegrator;
 pub use replay::{
-    ChancePlan, ClockSource, CoreFactory, GateEvidence, ReplayCase, ReplayEvidence, ReplayFailure,
-    ReplayGate, ReplayPlan, WallClock, replay_gate, replay_gates,
+    ChancePlan, ClockSource, CoreFactory, GateEvidence, MemoryStore, ReplayCase, ReplayEvidence,
+    ReplayFailure, ReplayGate, ReplayPlan, WallClock, replay_gate, replay_gates,
 };
 pub use run::run_until;
 pub use slice::{

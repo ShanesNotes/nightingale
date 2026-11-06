@@ -1,6 +1,6 @@
 use crate::reference::solve_dense;
 use ng_contract::*;
-use ng_record::{Running, Session};
+use ng_record::{HistoryStore, Running, Session};
 
 const NEWTON_LIMIT: u32 = 32;
 const SWEEP_LIMIT: u32 = 32;
@@ -211,8 +211,9 @@ pub fn admit_solved<'m>(
     boundary: BoundaryPort,
     core: &'m dyn CoupledSolver,
     lens: &ObservationLens,
+    store: &'m dyn HistoryStore,
 ) -> Result<Admitted<'m>, InitializationFailure> {
-    admit_at(body, packet, boundary, core, lens, SimTime::from_ns(0))
+    admit_at(body, packet, boundary, core, lens, SimTime::from_ns(0), store)
 }
 
 pub fn admit_at<'m>(
@@ -222,6 +223,7 @@ pub fn admit_at<'m>(
     core: &'m dyn CoupledSolver,
     lens: &ObservationLens,
     origin: SimTime,
+    store: &'m dyn HistoryStore,
 ) -> Result<Admitted<'m>, InitializationFailure> {
     let parameters = body.bind(packet)?;
     let request = InitializationRequest::at(origin).reading(lens);
@@ -233,6 +235,6 @@ pub fn admit_at<'m>(
     let provenance = revision.provenance().clone();
     let seed = Seed::new([1, 2, 3, 4]);
     let identity = RunIdentity::new(body.model_hash(), revision.packet_hash(), seed, resolution);
-    let session = Session::admit(body, core, revision, identity)?;
+    let session = Session::admit(body, core, revision, identity, store)?;
     Ok(Admitted { session, provenance })
 }

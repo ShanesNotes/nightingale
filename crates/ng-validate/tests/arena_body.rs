@@ -1,26 +1,9 @@
 use ng_contract::*;
-use ng_record::{AuthorizedInput, Checkpoint, CheckpointError, HistoryStore, Running, Session};
+use ng_record::{AuthorizedInput, Checkpoint, Running, Session};
 use ng_validate::*;
 
 const SECOND: u64 = 1_000_000_000;
 const MILLISECOND: u64 = 1_000_000;
-
-#[derive(Default)]
-struct Links {
-    links: Vec<(Digest, Vec<u8>)>,
-}
-impl HistoryStore for Links {
-    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
-        let at = self.links.binary_search_by_key(seal, |link| link.0).ok()?;
-        Some(self.links[at].1.clone())
-    }
-    fn keep(&mut self, seal: Digest, link: Vec<u8>) -> Result<(), CheckpointError> {
-        if let Err(at) = self.links.binary_search_by_key(&seal, |link| link.0) {
-            self.links.insert(at, (seal, link));
-        }
-        Ok(())
-    }
-}
 
 fn reference(step: u64) -> ReferenceIntegrator {
     let scale = |value| Measure::<Dimensionless>::new(value).expect("finite");
@@ -36,23 +19,23 @@ struct Solved {
     provenance: InitializationProvenance,
     saved: Checkpoint,
     identity: RunIdentity,
-    links: Links,
+    links: MemoryStore,
 }
 impl Solved {
     fn new(step: u64) -> Self {
+        let links = MemoryStore::default();
         let body = arena_body().expect("compiled");
         let core = reference(step);
-        let (saved, identity, provenance, links) = {
+        let (saved, identity, provenance) = {
             let (packet, lens) = (
                 arena_packet(&body).expect("a packet"),
                 arena_lens(&body).expect("a lens"),
             );
             let port = BoundaryPort::new(Vec::new()).expect("no event");
-            let admitted = admit_at(&body, packet, port, &core, &lens, anchor_moment()).expect("admitted");
-            let mut links = Links::default();
-            let saved = admitted.session.checkpoint(&mut links).expect("a checkpoint");
-            let identity = admitted.session.record().identity().clone();
-            (saved, identity, admitted.provenance, links)
+            let Admitted { session, provenance } =
+                admit_at(&body, packet, port, &core, &lens, anchor_moment(), &links).expect("admitted");
+            let saved = session.checkpoint().expect("a checkpoint");
+            (saved, session.record().identity().clone(), provenance)
         };
         Self {
             body,
@@ -282,9 +265,11 @@ fn water_ions_moieties_and_energy_close_over_the_first_accepted_steps(solved: &S
         }
     });
     assert!(firings >= 8, "{firings} firings in {mode_changes} changes");
-    let view = run.record().conservation();
-    let segments: Vec<_> = view.segments().collect();
-    let (first, final_one) = (segments[0], segments[segments.len() - 1]);
+    let view = run.conservation();
+    let final_one = view.head().expect("a step");
+    let first = (view.newest_first().last())
+        .expect("a segment")
+        .expect("kept and chained");
     let book = |quantity: QuantityId| {
         let (start, end) = (first.interval(), final_one.interval());
         let read = |curve: ng_record::Curve<'_>, piece, at: usize| curve.on(piece).expect("own segment")[at];
@@ -713,14 +698,17 @@ fn the_heat_shed_in_late_diastole_is_what_the_flows_lose(solved: &Solved) {
 
 fn a_checkpoint_of_a_run_mid_beat_holds_its_modes_and_runs_on_the_same_bits(solved: &Solved) {
     let Solved {
-        body, core, identity, ..
+        body,
+        core,
+        identity,
+        links,
+        ..
     } = solved;
     let mut run = steps(solved.session(), 1250 * MILLISECOND, |_| {});
-    let mut links = Links::default();
-    let saved = run.checkpoint(&mut links).expect("a checkpoint");
+    let saved = run.checkpoint().expect("a checkpoint");
     stand(&mut run, 1300 * MILLISECOND);
     let reached = steps(run, 1400 * MILLISECOND, |_| {});
-    let mut resumed = Session::resume(&saved, identity, body, core, &links).expect("resumed");
+    let mut resumed = Session::resume(&saved, identity, body, core, links).expect("resumed");
     stand(&mut resumed, 1300 * MILLISECOND);
     let again = steps(resumed, 1400 * MILLISECOND, |_| {});
     assert_eq!(

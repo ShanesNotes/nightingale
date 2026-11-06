@@ -1,6 +1,6 @@
 use crate::ReplayCase;
 use ng_contract::*;
-use ng_record::{Running, Session};
+use ng_record::{HistoryStore, Running, Session};
 
 const SECOND: u64 = 1_000_000_000;
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
@@ -309,17 +309,19 @@ impl ReplayCase for TwoReservoirs {
     fn admit<'m>(
         &'m self,
         core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         let boundary = BoundaryPort::new(self.events()?)?;
-        admit_fixture(&self.body, self.packet(CONDUCTANCE)?, boundary, core)
+        admit_fixture(&self.body, self.packet(CONDUCTANCE)?, boundary, core, store)
     }
     /// The timeline is not part of the run identity, so this is the same run.
     fn admit_withheld<'m>(
         &'m self,
         core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         let boundary = BoundaryPort::new(Vec::new())?;
-        admit_fixture(&self.body, self.packet(CONDUCTANCE)?, boundary, core)
+        admit_fixture(&self.body, self.packet(CONDUCTANCE)?, boundary, core, store)
     }
 }
 
@@ -787,16 +789,18 @@ impl ReplayCase for ChanceCase {
     fn admit<'m>(
         &'m self,
         core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         let boundary = BoundaryPort::new(self.events()?)?;
-        admit_seeded(&self.body, self.packet()?, boundary, core, self.seed)
+        admit_seeded(&self.body, self.packet()?, boundary, core, self.seed, store)
     }
     fn admit_withheld<'m>(
         &'m self,
         core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         let boundary = BoundaryPort::new(Vec::new())?;
-        admit_seeded(&self.body, self.packet()?, boundary, core, self.seed)
+        admit_seeded(&self.body, self.packet()?, boundary, core, self.seed, store)
     }
 }
 
@@ -807,8 +811,9 @@ pub fn admit_fixture<'m>(
     packet: ParameterPacket<SyntheticFixture>,
     boundary: BoundaryPort,
     core: &'m dyn CoupledSolver,
+    store: &'m dyn HistoryStore,
 ) -> Result<Session<'m, Running>, InitializationFailure> {
-    admit_seeded(body, packet, boundary, core, Seed::new([1, 2, 3, 4]))
+    admit_seeded(body, packet, boundary, core, Seed::new([1, 2, 3, 4]), store)
 }
 
 /// Admission reads no seed, so only the identity and the course move with it.
@@ -818,6 +823,7 @@ pub fn admit_seeded<'m>(
     boundary: BoundaryPort,
     core: &'m dyn CoupledSolver,
     seed: Seed,
+    store: &'m dyn HistoryStore,
 ) -> Result<Session<'m, Running>, InitializationFailure> {
     let origin = SimTime::from_ns(0);
     let parameters = body.bind(packet)?;
@@ -828,5 +834,5 @@ pub fn admit_seeded<'m>(
     let start = MethodHistory::new(resolution.policy(), origin, Vec::new());
     let origin = system.admit(solved, start)?;
     let identity = RunIdentity::new(body.model_hash(), origin.packet_hash(), seed, resolution);
-    Ok(Session::admit(body, core, origin, identity)?)
+    Ok(Session::admit(body, core, origin, identity, store)?)
 }

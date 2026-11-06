@@ -10,6 +10,7 @@ fn measure<U>(value: f64) -> Measure<U> {
 
 #[test]
 fn a_guard_at_the_end_of_a_step_hides_no_earlier_crossing_at_a_stage() {
+    let store = MemoryStore::default();
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", Position::new(measure(0.0), measure(0.0), measure(0.0)));
     let schema = Schema::new(map.finish().expect("map")).expect("schema");
@@ -77,7 +78,7 @@ fn a_guard_at_the_end_of_a_step_hides_no_earlier_crossing_at_a_stage() {
         .expect("mode");
     let core = ReferenceIntegrator::new(SECOND).with_floor(NonZeroU64::new(SECOND / 1000).expect("a floor"));
     let port = BoundaryPort::new(Vec::new()).expect("empty timeline");
-    let session = admit_fixture(&body, packet, port, &core).expect("admitted");
+    let session = admit_fixture(&body, packet, port, &core, &store).expect("admitted");
     let Ok(session) = run_until(session, SimTime::from_ns(1)) else {
         panic!("synthetic run faulted");
     };
