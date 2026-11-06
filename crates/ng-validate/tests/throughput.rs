@@ -87,8 +87,8 @@ fn a_short_slice_window_reports_throughput_beside_the_record() {
     assert!(head >= end);
     assert!((2 * SECOND..2 * SECOND + 5 * MILLISECOND).contains(&throughput.simulated_ns()));
     assert_eq!(throughput.accepted_steps(), revision);
-    // Each of the lens's three channels closes a one-second mean at admission, of its one instant there, and at
-    // each of the two whole seconds after it.
+    // Each of the lens's three channels closes a one-second window at admission, which saw only that instant and
+    // reads as not collected, and one at each of the two whole seconds after it.
     assert_eq!(throughput.waveform_samples(), 3 * 3);
     assert_eq!(evidence.run(), identity);
 }
@@ -284,4 +284,30 @@ fn a_lens_compiled_on_another_body_is_refused() {
         refused,
         Err(ArenaFailure::Observation(ObservationRefusal::OtherLens))
     ));
+}
+
+#[test]
+fn the_specs_seed_names_the_run_it_times() {
+    let small = Small::new("synthetic vessel");
+    let named = |seed| {
+        let (core, store, clock) = (small_core(), MemoryStore::default(), Scripted::ticking());
+        let mut spec = small.spec(small.lens(), 0, 1000, 1);
+        spec.seed = seed;
+        ran(run(&small.body, &core, spec, &clock, &store)).into_evidence().run()
+    };
+    let first = named(Seed::new([1, 2, 3, 4]));
+    assert_eq!(first, named(Seed::new([1, 2, 3, 4])));
+    assert_ne!(first, named(Seed::new([4, 3, 2, 1])));
+}
+
+/// The clock opens before admission and closes after it, so a refused admission has read it once.
+#[test]
+fn a_refused_admission_reads_the_clock_once() {
+    let small = Small::new("synthetic vessel");
+    let (core, store, clock) = (small_core(), MemoryStore::default(), Scripted::ticking());
+    let mut spec = small.spec(small.lens(), 0, 1000, 1);
+    spec.packet = ParameterPacket::new();
+    let refused = run(&small.body, &core, spec, &clock, &store);
+    assert!(matches!(refused, Err(ArenaFailure::Initialization(_))));
+    assert_eq!(clock.reads.get(), 1);
 }
