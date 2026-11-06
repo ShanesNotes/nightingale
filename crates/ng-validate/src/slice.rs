@@ -1,5 +1,8 @@
+use crate::{Admitted, MemoryStore, ReplayCase, admit_at};
+use core::cell::RefCell;
 use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::*;
+use ng_record::{Checkpoint, CheckpointError, HistoryStore, Running, Session};
 
 fn at(axial: f64) -> Result<Position, AdmissionError> {
     Ok(Position::new(
@@ -957,4 +960,107 @@ pub fn arena_lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError
         .map(|row| ChannelSpec::new(METHOD, row).averaged(window));
     let grid = NonZeroU64::MIN.saturating_add(SECOND / u64::from(POINTS) - 1);
     body.lens(channels.into(), grid)
+}
+
+const PAST_THE_FENCE_NS: u64 = 50_000_000;
+
+/// The slice from 06:55 until just past its first cycle. The stir fires inside it, and a stand and a gut water bolus wait
+/// at the fence. Each core resolution's start is admitted once, with the inputs and without, and every run resumes from a
+/// checkpoint of it.
+pub struct SliceCase {
+    body: CompiledBody,
+    starts: RefCell<Vec<Start>>,
+}
+struct Start {
+    withheld: bool,
+    saved: Checkpoint,
+    identity: RunIdentity,
+}
+impl SliceCase {
+    pub fn new() -> Result<Self, AdmissionError> {
+        Ok(Self {
+            body: arena_body()?,
+            starts: RefCell::default(),
+        })
+    }
+    fn start<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
+        withheld: bool,
+    ) -> Result<Session<'m, Running>, InitializationFailure> {
+        let resolution = core.resolution().digest();
+        let found =
+            |start: &Start| start.withheld == withheld && start.identity.resolution().digest() == resolution;
+        let known = self.starts.borrow().iter().position(found);
+        let at = match known {
+            Some(at) => at,
+            None => {
+                let inputs = if withheld { Vec::new() } else { self.events()? };
+                let (packet, lens) = (arena_packet(&self.body)?, arena_lens(&self.body)?);
+                let port = BoundaryPort::new(inputs)?;
+                let links = MemoryStore::default();
+                let Admitted { session, .. } =
+                    admit_at(&self.body, packet, port, core, &lens, anchor_moment(), &links)?;
+                let start = Start {
+                    withheld,
+                    saved: session.checkpoint().map_err(moved)?,
+                    identity: session.record().identity().clone(),
+                };
+                let mut starts = self.starts.borrow_mut();
+                starts.push(start);
+                starts.len() - 1
+            }
+        };
+        let starts = self.starts.borrow();
+        let Start { saved, identity, .. } = &starts[at];
+        Session::resume(saved, identity, &self.body, core, store).map_err(moved)
+    }
+}
+
+fn fence() -> SimTime {
+    SimTime::from_ns(anchor_moment().nanoseconds() + SECOND)
+}
+
+/// At admission no link exists for a checkpoint or a resume to miss, so the one refusal left is a core whose resolution
+/// moved.
+fn moved(_: CheckpointError) -> InitializationFailure {
+    InitializationFailure::Admission(AdmissionError::IdentityMismatch)
+}
+
+impl ReplayCase for SliceCase {
+    fn body(&self) -> &CompiledBody {
+        &self.body
+    }
+    fn end(&self) -> SimTime {
+        SimTime::from_ns(fence().nanoseconds() + PAST_THE_FENCE_NS)
+    }
+    fn events(&self) -> Result<Vec<BoundaryEvent>, AdmissionError> {
+        let at = fence();
+        let id = |name: &[u8]| InputId::new(Digest::of_canonical(name));
+        let stand = Posture::new(Measure::new(1.0)?, Legs::Standing)?;
+        let bolus = WaterDelivery {
+            boundary: GUT_WATER,
+            amount: Measure::new(400.0)?,
+            ends: SimTime::from_ns(at.nanoseconds() + SECOND),
+        };
+        Ok(vec![
+            BoundaryEvent::new(id(b"slice stand"), at, BoundaryInput::Posture(stand)),
+            BoundaryEvent::new(id(b"slice bolus"), at, BoundaryInput::Water(bolus)),
+        ])
+    }
+    fn admit<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
+    ) -> Result<Session<'m, Running>, InitializationFailure> {
+        self.start(core, store, false)
+    }
+    fn admit_withheld<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
+    ) -> Result<Session<'m, Running>, InitializationFailure> {
+        self.start(core, store, true)
+    }
 }

@@ -192,6 +192,6 @@ pub use run::{
     ArenaFailure, ArenaRun, ArenaSpec, NumericalHealth, RunEvidence, ThroughputEvidence, run, run_until,
 };
 pub use slice::{
-    anchor_moment, arena_anatomy, arena_body, arena_lens, arena_organs, arena_packet, arena_schema,
-    hold_outside_slice,
+    SliceCase, anchor_moment, arena_anatomy, arena_body, arena_lens, arena_organs, arena_packet,
+    arena_schema, hold_outside_slice,
 };
