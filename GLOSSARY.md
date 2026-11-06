@@ -494,6 +494,9 @@ The arena check that runs a solver core on manufactured cases with known answers
 **Replay gates**:
 The arena checks that pace, resuming, late events, rewinding, extra evaluations and attached observers never change physiology bits, and that a step policy moves no event further from the reference integrator than a declared tolerance.
 
+**Throughput**:
+The arena's speed evidence for one run: the wall time of each repeat of its window with full waveform, read from a wall clock the host passes in, with admission timed apart. Every repeat is kept, each must end on the same seal, and none of it enters the certificate.
+
 **Pulse**:
 The Pulse Physiology Engine, a reference to compare against and never a pass bar (rule 6). A Pulse diff, a match to published data and clinical validity are three separate claims.
 _Avoid_: oracle
@@ -513,3 +516,20 @@ The 13 atlas systems by id: CV cardiovascular, RS respiratory, NS nervous, RN re
 
 **Receptor layer**:
 `ng-receptor`: the binding of transmitters and hormones to receptors at each site, and the effect that binding has on the laws that read it. It owns laws, like a system, but is not one of the 13.
+
+## Learned models
+
+**Generative physiology model**:
+A learned, action-conditioned model of one patient's physiology that carries its own state through an encounter, outside the engine. The engine teaches it offline through public interfaces, and what it predicts is never a source or a target (rule 16).
+_Avoid_: learned engine
+
+**Teacher run**:
+A run of the slice that a program outside the workspace makes through public interfaces, to train or judge a generative physiology model. It is a reference for the learned model, never a target.
+_Avoid_: ground truth
+
+**Named total**:
+The sum of a fixed set of pools of one species that a generative physiology model carries as its state. It changes only through transfers derived from the engine's columns, so it balances by construction.
+
+**Beat edge**:
+The accepted step end at which the rhythm's phase resets, where a guard's landing puts it. A teacher run reads its state and ledger at beat edges, where both are exact.
+_Avoid_: cycle boundary

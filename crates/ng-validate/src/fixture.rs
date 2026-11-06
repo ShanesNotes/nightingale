@@ -87,6 +87,43 @@ impl TwoReservoirs {
         let start = start.map(|amount| number(&amount));
         Self::declared(Some(BoundaryDirection::OutOfBody), None, start, deliveries)
     }
+    pub(crate) fn drain_and_refill() -> Result<Self, AdmissionError> {
+        let removal = Delivery {
+            id: b"drain",
+            from: SimTime::from_ns(500 * SECOND),
+            to: SimTime::from_ns(2_010 * SECOND),
+            amount: Measure::new(7_550.0)?,
+        };
+        let start = [Measure::new(5_050.0)?, Measure::new(4_950.0)?];
+        Ok(Self::draining(start, vec![removal])?.until(SimTime::from_ns(6_000 * SECOND)))
+    }
+    pub(crate) fn zero_flow_restore() -> Result<Self, AdmissionError> {
+        let inflow = Delivery {
+            id: b"restoring inflow",
+            from: SimTime::from_ns(1_000 * SECOND),
+            to: SimTime::from_ns(3_000 * SECOND),
+            amount: Measure::new(10_000.0)?,
+        };
+        let start = [Measure::new(500_000.0)?, Measure::new(500_000.0)?];
+        Ok(Self::delivering(start, vec![inflow])?.until(SimTime::from_ns(6_000 * SECOND)))
+    }
+    pub(crate) fn controlled_removal() -> Result<Self, AdmissionError> {
+        let removal = |id, from, to, amount| -> Result<Delivery, AdmissionError> {
+            Ok(Delivery {
+                id,
+                from: SimTime::from_ns(from * SECOND),
+                to: SimTime::from_ns(to * SECOND),
+                amount: Measure::new(amount)?,
+            })
+        };
+        let removals = vec![
+            removal(b"first removal", 1_000, 3_000, 6_000.0)?,
+            removal(b"second removal", 2_000, 2_500, 1_000.0)?,
+            removal(b"third removal", 3_000, 4_000, 2_000.0)?,
+        ];
+        let start = [Measure::new(START[0])?, Measure::new(START[1])?];
+        Ok(Self::draining(start, removals)?.until(SimTime::from_ns(8_000 * SECOND)))
+    }
     fn declared(
         boundary: Option<BoundaryDirection>,
         trusted: Option<ValidityRange<Rate<Water>>>,
@@ -224,6 +261,9 @@ impl TwoReservoirs {
     /// The same packet with a doubled conductance: what a core reads if it evaluates on other values.
     pub fn other_values(&self) -> Result<BoundParameters, AdmissionError> {
         self.body.bind(self.packet(2.0 * CONDUCTANCE)?)
+    }
+    pub(crate) fn overflowing_values(&self) -> Result<BoundParameters, AdmissionError> {
+        self.body.bind(self.packet(f64::MAX)?)
     }
     /// Everything that makes this case this case, so two cases on one body never share an identity.
     pub fn digest(&self) -> Digest {

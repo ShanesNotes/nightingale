@@ -3,7 +3,7 @@
 //! vital, observation, waveform or record parameter. It proves conservation and drift, not accuracy:
 //! a core can close every ledger and still compute the wrong trajectory, which the accuracy gate
 //! checks.
-use core::num::NonZeroU64;
+use core::num::{NonZeroU32, NonZeroU64};
 use crate::ng_contract::*;
 use crate::ng_record::{
     CheckpointError, ConservationView, FaultReport, HistorySeal, HistoryStore, RecordDigests, Running, Session,
@@ -264,12 +264,6 @@ pub fn observed_order(
     todo!()
 }
 
-/// External scheduling only. It cannot enter a compiled body, a ticket or a run identity.
-pub enum Pace {
-    Unbounded,
-    WallClock,
-    Chunked,
-}
 #[derive(Clone, Copy)]
 pub enum ClockSource {
     /// A list of readings, which proves pace cannot reach a run and is no live clock.
@@ -302,22 +296,16 @@ pub fn hold_outside_slice(_body: &mut Assembly<'_>) -> Result<(), AdmissionError
 pub fn reference_days(_days: u32) -> BoundaryPort {
     todo!()
 }
-/// Only a synthetic fixture packet is accepted: the arena is nonclinical by type.
+/// Only a synthetic fixture packet is accepted: the arena is nonclinical by type. Admission reads the
+/// anchors through `lens`, and each repeat's waveform comes through it.
 pub struct ArenaSpec {
-    _duration_ns: u64,
-    _packet: ParameterPacket<SyntheticFixture>,
-    _boundary: BoundaryPort,
-    _seed: Seed,
-}
-impl ArenaSpec {
-    pub fn new(
-        _duration_ns: u64,
-        _packet: ParameterPacket<SyntheticFixture>,
-        _boundary: BoundaryPort,
-        _seed: Seed,
-    ) -> Result<Self, AdmissionError> {
-        todo!()
-    }
+    /// Admission at its start; each repeat runs from that start until the head reaches its end.
+    pub window: Interval,
+    pub packet: ParameterPacket<SyntheticFixture>,
+    pub lens: ObservationLens,
+    pub boundary: BoundaryPort,
+    pub seed: Seed,
+    pub repeats: NonZeroU32,
 }
 /// Digests of the reference run first, then each run the gate compared.
 pub struct GateEvidence {
@@ -345,8 +333,14 @@ pub struct ReplayEvidence {
     _rewind: GateEvidence,
     _non_perturbation: GateEvidence,
 }
+/// Wall time from the host's clock, beside the record and never in the certificate: admission once,
+/// then every repeat of the window. `run` compiles nothing, so its host times compilation.
 pub struct ThroughputEvidence {
-    _elapsed_wall_ns: u64,
+    _clock: ClockSource,
+    _admission_wall_ns: u64,
+    _runs_wall_ns: Vec<NonZeroU64>,
+    _simulated_ns: u64,
+    _accepted_steps: u64,
     _waveform_samples: u64,
 }
 /// What the run cost numerically, beside the certificate: refusals by reason and by refusal
@@ -401,6 +395,11 @@ pub enum ArenaFailure {
     NoLateBoundary { id: InputId },
     /// A gate that did not run, or evidence from another run: never scored as a pass.
     MissingEvidence { gate: ReplayGate },
+    /// A clock with no reading left, one that ran backward or stood still over a repeat, or a repeat
+    /// with no waveform sample: a throughput that measured nothing.
+    MissingThroughput,
+    /// A repeat that ended on another seal or waveform count than the first, so it timed other work.
+    RepeatDiffered { repeat: u32 },
 }
 pub enum ReplayGate {
     Pace,
@@ -409,13 +408,14 @@ pub enum ReplayGate {
     Rewind,
     NonPerturbation,
 }
-/// Compiles nothing: binds the fixture, initializes once, admits a session, runs the declared span
-/// with full waveform under `pace`, and collects replay and wall-time evidence beside the record.
+/// Compiles nothing: binds the fixture, initializes once, admits a session, and runs the window
+/// `repeats` times from that start with full waveform, keeping each repeat's wall time from `clock`
+/// beside the record. Pace is the replay gates' to vary; a paced run would time the pace.
 pub fn run<'m>(
     _body: &'m CompiledBody,
     _solver: &'m dyn CoupledSolver,
     _spec: ArenaSpec,
-    _pace: Pace,
+    _clock: &dyn WallClock,
     _store: &'m dyn HistoryStore,
 ) -> Result<ArenaRun<'m>, ArenaFailure> {
     todo!()
