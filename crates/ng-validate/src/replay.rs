@@ -6,9 +6,10 @@ use ng_contract::{
     CoupledSolver, DeclaredResolution, Digest, EngineFault, Fired, InitializationFailure, InputId, LawName,
     ObservationLens, ObservationSeed, SimTime, StepProposal, StepTicket, TrialFailure,
 };
-use ng_observe::{Observation, ObservedValue, Observer, chained};
+use ng_observe::{Observation, ObservedValue, Observer, ObserverCheckpoint, chained};
 use ng_record::{
-    AuthorizedInput, BranchId, CheckpointError, HistoryStore, RecordDigests, Running, Seal, Session, Step,
+    AuthorizedInput, BranchId, CheckpointError, HistoryStore, ObservationRefusal, ObservationView,
+    RecordDigests, Running, Seal, Session, Step,
 };
 
 pub trait ReplayCase {
@@ -178,7 +179,8 @@ impl GateEvidence {
     pub fn tolerance_ns(&self) -> Option<u64> {
         self.tolerance_ns
     }
-    /// The digest of each watched run's observations, for the non-perturbation gate.
+    /// The digest of each watched run's observations: one per run in `runs`, in its order, for pace, resume,
+    /// late admission and rewind, and one per lens for non-perturbation.
     pub fn observed(&self) -> &[Digest] {
         &self.observed
     }
@@ -213,20 +215,113 @@ impl ReplayEvidence {
     }
 }
 
+trait Observers {
+    fn fresh<'l>(&self, lens: &'l ObservationLens) -> Box<dyn Observe + 'l>;
+    fn resume<'l>(
+        &self,
+        lens: &'l ObservationLens,
+        saved: &ObserverCheckpoint,
+    ) -> Result<Box<dyn Observe + 'l>, ObservationRefusal>;
+}
+trait Observe {
+    fn advance(&mut self, view: &ObservationView<'_>) -> Result<Vec<Observation>, ObservationRefusal>;
+    fn checkpoint(&self) -> ObserverCheckpoint;
+}
+impl Observe for Observer<'_> {
+    fn advance(&mut self, view: &ObservationView<'_>) -> Result<Vec<Observation>, ObservationRefusal> {
+        Observer::advance(self, view)
+    }
+    fn checkpoint(&self) -> ObserverCheckpoint {
+        Observer::checkpoint(self)
+    }
+}
+
+struct Honest;
+impl Observers for Honest {
+    fn fresh<'l>(&self, lens: &'l ObservationLens) -> Box<dyn Observe + 'l> {
+        Box::new(Observer::new(lens, ObservationSeed::new(WATCHING)))
+    }
+    fn resume<'l>(
+        &self,
+        lens: &'l ObservationLens,
+        saved: &ObserverCheckpoint,
+    ) -> Result<Box<dyn Observe + 'l>, ObservationRefusal> {
+        Ok(Box::new(Observer::resume(
+            lens,
+            ObservationSeed::new(WATCHING),
+            saved,
+        )?))
+    }
+}
+
+struct WatchCheckpoint {
+    observer: ObserverCheckpoint,
+    observed: Digest,
+}
+
+struct Watch<'l> {
+    lens: &'l ObservationLens,
+    observer: Box<dyn Observe + 'l>,
+    observed: Digest,
+    read_a_value: bool,
+}
+impl<'l> Watch<'l> {
+    fn fresh(lens: &'l ObservationLens, observers: &dyn Observers) -> Self {
+        Self {
+            lens,
+            observer: observers.fresh(lens),
+            observed: Digest::of_canonical(b"observed run"),
+            read_a_value: false,
+        }
+    }
+    fn resumed(
+        gate: ReplayGate,
+        lens: &'l ObservationLens,
+        observers: &dyn Observers,
+        saved: &WatchCheckpoint,
+    ) -> Result<Self, ReplayFailure> {
+        let observer =
+            (observers.resume(lens, &saved.observer)).map_err(|_| ReplayFailure::MissingEvidence { gate })?;
+        Ok(Self {
+            lens,
+            observer,
+            observed: saved.observed,
+            read_a_value: false,
+        })
+    }
+    fn read(&mut self, gate: ReplayGate, session: &Session<'_, Running>) -> Result<(), ReplayFailure> {
+        let missing = |_| ReplayFailure::MissingEvidence { gate };
+        let view = session.observation(self.lens).map_err(missing)?;
+        let observed = self.observer.advance(&view).map_err(missing)?;
+        let present = |seen: &Observation| matches!(seen.value(), ObservedValue::Present(_));
+        self.read_a_value |= observed.iter().any(present);
+        self.observed = chained(self.observed, &observed);
+        Ok(())
+    }
+    fn saved(&self) -> WatchCheckpoint {
+        WatchCheckpoint {
+            observer: self.observer.checkpoint(),
+            observed: self.observed,
+        }
+    }
+}
+
 /// A seal covers every accepted part, so comparing seals per step needs no rehash of the ledger.
 struct Row {
     time: SimTime,
     seal: Seal,
+    observed: Option<Digest>,
     earliest: SimTime,
     near_a_break: bool,
     fired: Vec<Fired>,
 }
 impl Row {
-    fn of(session: &Session<'_, Running>, near_a_break: bool) -> Self {
+    fn of(session: &Session<'_, Running>, near_a_break: bool, watch: Option<&Watch<'_>>) -> Self {
         let record = session.record();
         Self {
             time: record.accepted().time(),
             seal: record.seal(),
+            observed: watch.map(|watch| watch.observed),
             earliest: record.earliest_stamp(),
             near_a_break,
             fired: Vec::new(),
@@ -243,11 +338,17 @@ struct Trace {
     last: RecordDigests,
     seal: Seal,
 }
+impl Trace {
+    fn observed(&self) -> Option<Digest> {
+        self.rows.last().and_then(|row| row.observed)
+    }
+}
 
 /// Two runs to one end with equal seals have equal rows, so a shared prefix is the whole of each.
 fn first_difference(reference: &[Row], run: &[Row]) -> Option<SimTime> {
+    let drifted = |known: &Row, seen: &Row| known.observed.zip(seen.observed).is_some_and(|(a, b)| a != b);
     (reference.iter().zip(run))
-        .find(|(known, seen)| known.seal != seen.seal)
+        .find(|(known, seen)| known.seal != seen.seal || drifted(known, seen))
         .map(|(known, seen)| known.time.min(seen.time))
 }
 
@@ -266,15 +367,19 @@ fn advance<'m>(
     gate: ReplayGate,
     session: Session<'m, Running>,
     rows: &mut Vec<Row>,
+    mut watch: Option<&mut Watch<'_>>,
 ) -> Result<Session<'m, Running>, ReplayFailure> {
     let mut refused = false;
     let mut attempt = session.step();
     loop {
         attempt = match attempt {
             Step::Accepted(session, receipt) => {
+                if let Some(watch) = &mut watch {
+                    watch.read(gate, &session)?;
+                }
                 let fired = receipt.fired().to_vec();
                 let near_a_break = refused || receipt.after_breakpoint() || !fired.is_empty();
-                let mut row = Row::of(&session, near_a_break);
+                let mut row = Row::of(&session, near_a_break, watch.as_deref());
                 row.fired = fired;
                 rows.push(row);
                 return Ok(session);
@@ -296,9 +401,10 @@ fn step_to<'m>(
     mut session: Session<'m, Running>,
     until: SimTime,
     rows: &mut Vec<Row>,
+    mut watch: Option<&mut Watch<'_>>,
 ) -> Result<Session<'m, Running>, ReplayFailure> {
     while session.record().accepted().time() < until {
-        session = advance(gate, session, rows)?;
+        session = advance(gate, session, rows, watch.as_deref_mut())?;
     }
     Ok(session)
 }
@@ -308,9 +414,10 @@ fn revision_to<'m>(
     mut session: Session<'m, Running>,
     revision: u64,
     rows: &mut Vec<Row>,
+    mut watch: Option<&mut Watch<'_>>,
 ) -> Result<Session<'m, Running>, ReplayFailure> {
     while session.record().revision() < revision {
-        session = advance(gate, session, rows)?;
+        session = advance(gate, session, rows, watch.as_deref_mut())?;
     }
     Ok(session)
 }
@@ -321,11 +428,12 @@ fn traced<'m>(
     mut rows: Vec<Row>,
     end: SimTime,
     pace: &Pace<'_>,
+    mut watch: Option<&mut Watch<'_>>,
 ) -> Result<(Session<'m, Running>, Trace), ReplayFailure> {
     let head = |session: &Session<'_, Running>| session.record().accepted().time();
     let mut stopped_short = false;
     match pace {
-        Pace::Unbounded => session = step_to(gate, session, end, &mut rows)?,
+        Pace::Unbounded => session = step_to(gate, session, end, &mut rows, watch)?,
         Pace::Chunked(lengths) => {
             let mut stop = head(&session).nanoseconds();
             for length in lengths.iter().cycle() {
@@ -334,7 +442,8 @@ fn traced<'m>(
                 }
                 stop = stop.saturating_add(*length);
                 let before = rows.len();
-                session = step_to(gate, session, SimTime::from_ns(stop).min(end), &mut rows)?;
+                let until = SimTime::from_ns(stop).min(end);
+                session = step_to(gate, session, until, &mut rows, watch.as_deref_mut())?;
                 stopped_short |= rows.len() > before && head(&session) < end;
             }
         }
@@ -349,7 +458,8 @@ fn traced<'m>(
                     .ok_or(ReplayFailure::MissingEvidence { gate })?;
                 let allowed = origin.saturating_add(reading.saturating_mul(*simulated_per_wall));
                 let before = rows.len();
-                session = step_to(gate, session, SimTime::from_ns(allowed).min(end), &mut rows)?;
+                let until = SimTime::from_ns(allowed).min(end);
+                session = step_to(gate, session, until, &mut rows, watch.as_deref_mut())?;
                 stopped_short |= rows.len() > before && head(&session) < end;
             }
         }
@@ -368,6 +478,40 @@ fn admitted<'m>(
     session.map_err(|failure| ReplayFailure::Admission { gate, failure })
 }
 
+fn first_row(
+    gate: ReplayGate,
+    session: &Session<'_, Running>,
+    mut watch: Option<&mut Watch<'_>>,
+) -> Result<Vec<Row>, ReplayFailure> {
+    if let Some(watch) = &mut watch {
+        watch.read(gate, session)?;
+    }
+    Ok(vec![Row::of(session, false, watch.as_deref())])
+}
+
+fn uninterrupted(
+    gate: ReplayGate,
+    case: &dyn ReplayCase,
+    session: Session<'_, Running>,
+    mut watch: Option<&mut Watch<'_>>,
+) -> Result<(Trace, Digest), ReplayFailure> {
+    let rows = first_row(gate, &session, watch.as_deref_mut())?;
+    let (session, trace) = traced(
+        gate,
+        session,
+        rows,
+        case.end(),
+        &Pace::Unbounded,
+        watch.as_deref_mut(),
+    )?;
+    let fired_nothing = case.body().hazards().next().is_some() && fired(&trace.rows).is_empty();
+    let read_nothing = watch.is_some_and(|watch| !watch.read_a_value);
+    if trace.rows.len() < 2 || fired_nothing || read_nothing {
+        return Err(ReplayFailure::MissingEvidence { gate });
+    }
+    Ok((trace, session.record().identity().digest()))
+}
+
 fn reference(
     gate: ReplayGate,
     case: &dyn ReplayCase,
@@ -376,13 +520,23 @@ fn reference(
     let core = cores.fresh();
     let store = MemoryStore::default();
     let session = admitted(gate, case.admit(&*core, &store))?;
-    let rows = vec![Row::of(&session, false)];
-    let (session, trace) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
-    let fired_nothing = case.body().hazards().next().is_some() && fired(&trace.rows).is_empty();
-    if trace.rows.len() < 2 || fired_nothing {
-        return Err(ReplayFailure::MissingEvidence { gate });
-    }
-    Ok((trace, session.record().identity().digest()))
+    uninterrupted(gate, case, session, None)
+}
+
+fn watched_reference(
+    gate: ReplayGate,
+    case: &dyn ReplayCase,
+    cores: &dyn CoreFactory,
+    observers: &dyn Observers,
+) -> Result<(Trace, Digest, ObservationLens), ReplayFailure> {
+    let (detached, _) = reference(gate, case, cores)?;
+    let lens = holding_lens(gate, case.body(), &detached.rows)?;
+    let core = cores.fresh();
+    let store = MemoryStore::default();
+    let session = admitted(gate, case.admit(&*core, &store))?;
+    let (trace, run) = uninterrupted(gate, case, session, Some(&mut Watch::fresh(&lens, observers)))?;
+    same_or_diverged(gate, &detached.rows, &detached.last, &trace)?;
+    Ok((trace, run, lens))
 }
 
 fn same_or_diverged(
@@ -404,13 +558,15 @@ fn pace_gate(
     case: &dyn ReplayCase,
     cores: &dyn CoreFactory,
     plan: &ReplayPlan<'_>,
+    observers: &dyn Observers,
 ) -> Result<GateEvidence, ReplayFailure> {
     let gate = ReplayGate::Pace;
     if plan.chunks.is_empty() || plan.chunks.contains(&0) || plan.simulated_per_wall == 0 {
         return Err(ReplayFailure::MissingEvidence { gate });
     }
-    let (reference, run) = reference(gate, case, cores)?;
+    let (reference, run, lens) = watched_reference(gate, case, cores, observers)?;
     let mut runs = vec![reference.last];
+    let mut observed = Vec::from_iter(reference.observed());
     let live = Pace::Live {
         clock: plan.clock,
         simulated_per_wall: plan.simulated_per_wall,
@@ -419,10 +575,12 @@ fn pace_gate(
         let core = cores.fresh();
         let store = MemoryStore::default();
         let session = admitted(gate, case.admit(&*core, &store))?;
-        let rows = vec![Row::of(&session, false)];
-        let (_, paced) = traced(gate, session, rows, case.end(), &pace)?;
+        let mut watch = Watch::fresh(&lens, observers);
+        let rows = first_row(gate, &session, Some(&mut watch))?;
+        let (_, paced) = traced(gate, session, rows, case.end(), &pace, Some(&mut watch))?;
         same_or_diverged(gate, &reference.rows, &reference.last, &paced)?;
         runs.push(paced.last);
+        observed.extend(paced.observed());
     }
     Ok(GateEvidence {
         gate,
@@ -432,7 +590,7 @@ fn pace_gate(
         course: reference.seal,
         fired: fired(&reference.rows),
         tolerance_ns: None,
-        observed: Vec::new(),
+        observed,
     })
 }
 
@@ -481,33 +639,49 @@ fn resume_gate(
     case: &dyn ReplayCase,
     cores: &dyn CoreFactory,
     plan: &ReplayPlan<'_>,
+    observers: &dyn Observers,
 ) -> Result<GateEvidence, ReplayFailure> {
     let gate = ReplayGate::Resume;
     let checkpointed = |error| ReplayFailure::Checkpoint { gate, error };
     if plan.resume_every == 0 {
         return Err(ReplayFailure::MissingEvidence { gate });
     }
-    let (reference, run) = reference(gate, case, cores)?;
+    let (reference, run, lens) = watched_reference(gate, case, cores, observers)?;
     let store = MemoryStore::default();
     let core = cores.fresh();
     let mut session = admitted(gate, case.admit(&*core, &store))?;
-    let mut rows = Vec::new();
+    let mut watch = Watch::fresh(&lens, observers);
+    let mut rows = first_row(gate, &session, Some(&mut watch))?;
     let mut saved = Vec::new();
     for revision in boundaries(&reference.rows, plan.resume_every) {
-        session = revision_to(gate, session, revision, &mut rows)?;
-        saved.push((revision, session.checkpoint().map_err(checkpointed)?));
+        session = revision_to(gate, session, revision, &mut rows, Some(&mut watch))?;
+        saved.push((
+            revision,
+            session.checkpoint().map_err(checkpointed)?,
+            watch.saved(),
+        ));
     }
     let identity = session.record().identity();
     let mut runs = vec![reference.last];
-    for (revision, checkpoint) in &saved {
+    let mut observed = Vec::from_iter(reference.observed());
+    for (revision, checkpoint, beside) in &saved {
         let fresh = cores.fresh();
         let resumed = Session::resume(checkpoint, identity, case.body(), &*fresh, &store);
         let resumed = resumed.map_err(checkpointed)?;
-        let rows = vec![Row::of(&resumed, false)];
-        let (_, rest) = traced(gate, resumed, rows, case.end(), &Pace::Unbounded)?;
+        let mut watch = Watch::resumed(gate, &lens, observers, beside)?;
+        let rows = vec![Row::of(&resumed, false, Some(&watch))];
+        let (_, rest) = traced(
+            gate,
+            resumed,
+            rows,
+            case.end(),
+            &Pace::Unbounded,
+            Some(&mut watch),
+        )?;
         let known = &reference.rows[*revision as usize..];
         same_or_diverged(gate, known, &reference.last, &rest)?;
         runs.push(rest.last);
+        observed.extend(rest.observed());
     }
     Ok(GateEvidence {
         gate,
@@ -517,7 +691,7 @@ fn resume_gate(
         course: reference.seal,
         fired: fired(&reference.rows),
         tolerance_ns: None,
-        observed: Vec::new(),
+        observed,
     })
 }
 
@@ -537,12 +711,13 @@ fn late_run<'m>(
     store: &'m dyn HistoryStore,
     arrivals: &[u64],
     rows: &mut Vec<Row>,
+    mut watch: Option<&mut Watch<'_>>,
 ) -> Result<Session<'m, Running>, ReplayFailure> {
     let mut session = admitted(gate, case.admit_withheld(core, store))?;
-    rows.push(Row::of(&session, false));
+    rows.extend(first_row(gate, &session, watch.as_deref_mut())?);
     let events = stamped(gate, case)?;
     for (revision, event) in arrivals.iter().zip(events) {
-        session = revision_to(gate, session, *revision, rows)?;
+        session = revision_to(gate, session, *revision, rows, watch.as_deref_mut())?;
         if session.record().earliest_stamp() > event.at() {
             return Err(ReplayFailure::NoLateBoundary { id: event.id() });
         }
@@ -567,9 +742,10 @@ fn stamped(gate: ReplayGate, case: &dyn ReplayCase) -> Result<Vec<BoundaryEvent>
 fn late_admission_gate(
     case: &dyn ReplayCase,
     cores: &dyn CoreFactory,
+    observers: &dyn Observers,
 ) -> Result<GateEvidence, ReplayFailure> {
     let gate = ReplayGate::LateAdmission;
-    let (reference, run) = reference(gate, case, cores)?;
+    let (reference, run, lens) = watched_reference(gate, case, cores, observers)?;
     let events = stamped(gate, case)?;
     if events.is_empty() {
         return Err(ReplayFailure::MissingEvidence { gate });
@@ -582,15 +758,23 @@ fn late_admission_gate(
         let core = cores.fresh();
         let store = MemoryStore::default();
         let mut rows = Vec::new();
-        let session = late_run(gate, case, &*core, &store, &arrivals, &mut rows)?;
-        let (_, withheld) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
+        let session = late_run(gate, case, &*core, &store, &arrivals, &mut rows, None)?;
+        let (_, withheld) = traced(gate, session, rows, case.end(), &Pace::Unbounded, None)?;
         arrivals.push(arrival(&withheld.rows, event));
     }
     let core = cores.fresh();
     let store = MemoryStore::default();
     let mut rows = Vec::new();
-    let session = late_run(gate, case, &*core, &store, &arrivals, &mut rows)?;
-    let (_, late) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
+    let mut watch = Watch::fresh(&lens, observers);
+    let session = late_run(gate, case, &*core, &store, &arrivals, &mut rows, Some(&mut watch))?;
+    let (_, late) = traced(
+        gate,
+        session,
+        rows,
+        case.end(),
+        &Pace::Unbounded,
+        Some(&mut watch),
+    )?;
     same_or_diverged(gate, &reference.rows, &reference.last, &late)?;
     Ok(GateEvidence {
         gate,
@@ -600,46 +784,65 @@ fn late_admission_gate(
         course: reference.seal,
         fired: fired(&reference.rows),
         tolerance_ns: None,
-        observed: Vec::new(),
+        observed: [reference.observed(), late.observed()]
+            .into_iter()
+            .flatten()
+            .collect(),
     })
 }
 
 /// The rewind keeps the parent's core object on purpose: a state it kept while the parent ran ahead has
 /// nowhere to hide. It runs from two neighbouring revisions, so no hidden period over one lands on both.
-fn rewind_gate(case: &dyn ReplayCase, cores: &dyn CoreFactory) -> Result<GateEvidence, ReplayFailure> {
+fn rewind_gate(
+    case: &dyn ReplayCase,
+    cores: &dyn CoreFactory,
+    observers: &dyn Observers,
+) -> Result<GateEvidence, ReplayFailure> {
     let gate = ReplayGate::Rewind;
     let checkpointed = |error| ReplayFailure::Checkpoint { gate, error };
-    let (reference, run) = reference(gate, case, cores)?;
+    let (reference, run, lens) = watched_reference(gate, case, cores, observers)?;
     let middle = (reference.rows.len() - 1) / 2;
     let store = MemoryStore::default();
     let core = cores.fresh();
     let session = admitted(gate, case.admit(&*core, &store))?;
-    let mut rows = vec![Row::of(&session, false)];
-    let session = revision_to(gate, session, middle as u64, &mut rows)?;
-    let first = session.checkpoint().map_err(checkpointed)?;
-    let session = revision_to(gate, session, middle as u64 + 1, &mut rows)?;
-    let second = session.checkpoint().map_err(checkpointed)?;
-    let (parent, ahead) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
+    let mut watch = Watch::fresh(&lens, observers);
+    let mut rows = first_row(gate, &session, Some(&mut watch))?;
+    let session = revision_to(gate, session, middle as u64, &mut rows, Some(&mut watch))?;
+    let first = (session.checkpoint().map_err(checkpointed)?, watch.saved());
+    let session = revision_to(gate, session, middle as u64 + 1, &mut rows, Some(&mut watch))?;
+    let second = (session.checkpoint().map_err(checkpointed)?, watch.saved());
+    let (parent, ahead) = traced(
+        gate,
+        session,
+        rows,
+        case.end(),
+        &Pace::Unbounded,
+        Some(&mut watch),
+    )?;
     same_or_diverged(gate, &reference.rows, &reference.last, &ahead)?;
     let identity = parent.record().identity();
     let mut runs = vec![reference.last, ahead.last];
+    let mut observed = Vec::from_iter([reference.observed(), ahead.observed()].into_iter().flatten());
     let forks: [(&[u8], _, _); 2] = [
         (b"replay gate fork", &first, middle),
         (b"replay gate later fork", &second, middle + 1),
     ];
-    for (name, saved, revision) in forks {
+    for (name, (saved, beside), revision) in forks {
         let branch = BranchId::new(Digest::of_canonical(name));
         let forked = parent.rewind(saved, branch).map_err(checkpointed)?;
-        let rows = vec![Row::of(&forked, false)];
-        let (_, fork) = traced(gate, forked, rows, case.end(), &Pace::Unbounded)?;
+        let mut watch = Watch::resumed(gate, &lens, observers, beside)?;
+        let rows = vec![Row::of(&forked, false, Some(&watch))];
+        let (_, fork) = traced(gate, forked, rows, case.end(), &Pace::Unbounded, Some(&mut watch))?;
         let fresh = cores.fresh();
         let loaded = Session::resume(saved, identity, case.body(), &*fresh, &store);
         let loaded = loaded.map_err(checkpointed)?;
-        let rows = vec![Row::of(&loaded, false)];
-        let (_, load) = traced(gate, loaded, rows, case.end(), &Pace::Unbounded)?;
+        let mut watch = Watch::resumed(gate, &lens, observers, beside)?;
+        let rows = vec![Row::of(&loaded, false, Some(&watch))];
+        let (_, load) = traced(gate, loaded, rows, case.end(), &Pace::Unbounded, Some(&mut watch))?;
         same_or_diverged(gate, &load.rows, &load.last, &fork)?;
         same_or_diverged(gate, &ahead.rows[revision..], &ahead.last, &fork)?;
         runs.extend([fork.last, load.last]);
+        observed.extend([fork.observed(), load.observed()].into_iter().flatten());
     }
     Ok(GateEvidence {
         gate,
@@ -649,7 +852,7 @@ fn rewind_gate(case: &dyn ReplayCase, cores: &dyn CoreFactory) -> Result<GateEvi
         course: reference.seal,
         fired: fired(&reference.rows),
         tolerance_ns: None,
-        observed: Vec::new(),
+        observed,
     })
 }
 
@@ -679,8 +882,8 @@ fn extra_evaluation_gate(
     let forced = SolvesTwice { inner: cores.fresh() };
     let store = MemoryStore::default();
     let session = admitted(gate, case.admit(&forced, &store))?;
-    let rows = vec![Row::of(&session, false)];
-    let (_, twice) = traced(gate, session, rows, case.end(), &Pace::Unbounded)?;
+    let rows = vec![Row::of(&session, false, None)];
+    let (_, twice) = traced(gate, session, rows, case.end(), &Pace::Unbounded, None)?;
     same_or_diverged(gate, &reference.rows, &reference.last, &twice)?;
     Ok(GateEvidence {
         gate,
@@ -788,19 +991,23 @@ fn step_policy_gate(
 
 const WATCHING: [u64; 4] = [7, 7, 7, 7];
 const INSTANTS_PER_STEP: u64 = 2;
+const INSTANTS_PER_RUN: u64 = 256;
 const CHANGED_WINDOW: NonZeroU64 = NonZeroU64::MIN.saturating_add(1);
+const HELD_PERIODS: u64 = 3;
+const _: () = assert!(HELD_PERIODS > CHANGED_WINDOW.get());
 
-/// Both lenses read every row, so no case can leave one out. No error here: a gate cannot name a row's
-/// dimension, and an error reads no state.
+fn every_row(body: &CompiledBody) -> impl Iterator<Item = ChannelSpec> + '_ {
+    (body.rows().iter()).map(|row| ChannelSpec::new("every row", row.kind()))
+}
+
 fn lenses(body: &CompiledBody, rows: &[Row]) -> Result<[ObservationLens; 2], AdmissionError> {
-    let every_row = || (body.rows().iter()).map(|row| ChannelSpec::new("every row", row.kind()));
     let span = rows.last().map_or(0, |row| row.time.nanoseconds())
         - rows.first().map_or(0, |row| row.time.nanoseconds());
     let period_ns =
         NonZeroU64::new(span / (INSTANTS_PER_STEP * rows.len() as u64)).unwrap_or(NonZeroU64::MIN);
-    let changed = every_row().map(|channel| channel.averaged(CHANGED_WINDOW).delayed(period_ns.get()));
+    let changed = every_row(body).map(|channel| channel.averaged(CHANGED_WINDOW).delayed(period_ns.get()));
     Ok([
-        body.lens(every_row().collect(), period_ns)?,
+        body.lens(every_row(body).collect(), period_ns)?,
         body.lens(
             changed.collect(),
             period_ns.saturating_mul(CHANGED_WINDOW).saturating_add(1),
@@ -808,37 +1015,32 @@ fn lenses(body: &CompiledBody, rows: &[Row]) -> Result<[ObservationLens; 2], Adm
     ])
 }
 
-/// A run that read no value is no evidence an observer was there.
+/// The grid spans what the run accepted, not the case, because a last step can land far past the case's end.
+fn holding_lens(
+    gate: ReplayGate,
+    body: &CompiledBody,
+    rows: &[Row],
+) -> Result<ObservationLens, ReplayFailure> {
+    let span = rows.last().map_or(0, |row| row.time.nanoseconds())
+        - rows.first().map_or(0, |row| row.time.nanoseconds());
+    let period_ns = NonZeroU64::new(span / INSTANTS_PER_RUN).unwrap_or(NonZeroU64::MIN);
+    let held = period_ns.get().saturating_mul(HELD_PERIODS);
+    let channels = every_row(body).map(|channel| channel.averaged(CHANGED_WINDOW).delayed(held));
+    (body.lens(channels.collect(), period_ns)).map_err(|_| ReplayFailure::MissingEvidence { gate })
+}
+
 fn watched(
     gate: ReplayGate,
     case: &dyn ReplayCase,
     cores: &dyn CoreFactory,
     lens: &ObservationLens,
-) -> Result<(Trace, Digest), ReplayFailure> {
-    let missing = |_| ReplayFailure::MissingEvidence { gate };
+    observers: &dyn Observers,
+) -> Result<Trace, ReplayFailure> {
     let core = cores.fresh();
     let store = MemoryStore::default();
-    let mut session = admitted(gate, case.admit(&*core, &store))?;
-    let mut observer = Observer::new(lens, ObservationSeed::new(WATCHING));
-    let mut stream = Digest::of_canonical(b"observed run");
-    let mut read_a_value = false;
-    let mut rows = vec![Row::of(&session, false)];
-    loop {
-        let view = session.observation(lens).map_err(missing)?;
-        let observed = observer.advance(&view).map_err(missing)?;
-        let present = |seen: &Observation| matches!(seen.value(), ObservedValue::Present(_));
-        read_a_value |= observed.iter().any(present);
-        stream = chained(stream, &observed);
-        if session.record().accepted().time() >= case.end() {
-            break;
-        }
-        session = advance(gate, session, &mut rows)?;
-    }
-    if !read_a_value {
-        return Err(ReplayFailure::MissingEvidence { gate });
-    }
-    let (last, seal) = (session.record().digests(), session.record().seal());
-    Ok((Trace { rows, last, seal }, stream))
+    let session = admitted(gate, case.admit(&*core, &store))?;
+    let (trace, _) = uninterrupted(gate, case, session, Some(&mut Watch::fresh(lens, observers)))?;
+    Ok(trace)
 }
 
 /// A view borrows the session, and a record is `Sync`, so nothing in it hides a `Cell` that reading could
@@ -846,6 +1048,7 @@ fn watched(
 fn non_perturbation_gate(
     case: &dyn ReplayCase,
     cores: &dyn CoreFactory,
+    observers: &dyn Observers,
 ) -> Result<GateEvidence, ReplayFailure> {
     let gate = ReplayGate::NonPerturbation;
     let (reference, run) = reference(gate, case, cores)?;
@@ -853,10 +1056,10 @@ fn non_perturbation_gate(
     let mut runs = vec![reference.last];
     let mut observed = Vec::new();
     for lens in &lenses {
-        let (trace, stream) = watched(gate, case, cores, lens)?;
+        let trace = watched(gate, case, cores, lens, observers)?;
         same_or_diverged(gate, &reference.rows, &reference.last, &trace)?;
         runs.push(trace.last);
-        observed.push(stream);
+        observed.extend(trace.observed());
     }
     Ok(GateEvidence {
         gate,
@@ -876,14 +1079,24 @@ pub fn replay_gate(
     cores: &dyn CoreFactory,
     plan: &ReplayPlan<'_>,
 ) -> Result<GateEvidence, ReplayFailure> {
+    watched_gate(gate, case, cores, plan, &Honest)
+}
+
+fn watched_gate(
+    gate: ReplayGate,
+    case: &dyn ReplayCase,
+    cores: &dyn CoreFactory,
+    plan: &ReplayPlan<'_>,
+    observers: &dyn Observers,
+) -> Result<GateEvidence, ReplayFailure> {
     match gate {
-        ReplayGate::Pace => pace_gate(case, cores, plan),
-        ReplayGate::Resume => resume_gate(case, cores, plan),
-        ReplayGate::LateAdmission => late_admission_gate(case, cores),
-        ReplayGate::Rewind => rewind_gate(case, cores),
+        ReplayGate::Pace => pace_gate(case, cores, plan, observers),
+        ReplayGate::Resume => resume_gate(case, cores, plan, observers),
+        ReplayGate::LateAdmission => late_admission_gate(case, cores, observers),
+        ReplayGate::Rewind => rewind_gate(case, cores, observers),
         ReplayGate::ExtraEvaluation => extra_evaluation_gate(case, cores),
         ReplayGate::StepPolicy => step_policy_gate(case, cores, plan),
-        ReplayGate::NonPerturbation => non_perturbation_gate(case, cores),
+        ReplayGate::NonPerturbation => non_perturbation_gate(case, cores, observers),
     }
 }
 
@@ -918,6 +1131,7 @@ pub fn replay_gates(
 mod tests {
     use super::*;
     use crate::{Delivery, ReferenceIntegrator, TwoReservoirs};
+    use core::cell::Cell;
     use ng_contract::{BoundaryInput, Measure, WaterDelivery};
 
     #[test]
@@ -935,7 +1149,7 @@ mod tests {
         let session = case.admit(&core, &store).expect("admitted");
         let withheld = case.admit_withheld(&core, &store).expect("admitted");
         let trace = |session: &Session<'_, Running>| Trace {
-            rows: vec![Row::of(session, false)],
+            rows: vec![Row::of(session, false, None)],
             last: session.record().digests(),
             seal: session.record().seal(),
         };
@@ -954,7 +1168,7 @@ mod tests {
         let session = case.admit(&core, &store).expect("admitted");
         let head = |earliest| Row {
             earliest: SimTime::from_ns(earliest),
-            ..Row::of(&session, false)
+            ..Row::of(&session, false, None)
         };
         let rows = [head(1), head(10), head(20)];
         let event = |stamp| {
@@ -968,5 +1182,152 @@ mod tests {
         };
         let arrivals = [1, 9, 10, 19, 20, 21].map(|stamp| arrival(&rows, &event(stamp)));
         assert_eq!(arrivals, [1, 1, 1, 1, 2, 2]);
+    }
+
+    const SECOND: u64 = 1_000_000_000;
+    const OBSERVER_GATES: [ReplayGate; 4] = [
+        ReplayGate::Pace,
+        ReplayGate::Resume,
+        ReplayGate::LateAdmission,
+        ReplayGate::Rewind,
+    ];
+
+    struct Ticks(Cell<u64>);
+    impl WallClock for Ticks {
+        fn elapsed_ns(&self) -> Option<u64> {
+            self.0.set(self.0.get() + 1);
+            Some(self.0.get() * 16 * SECOND)
+        }
+        fn source(&self) -> ClockSource {
+            ClockSource::Scripted
+        }
+    }
+
+    fn plan(clock: &Ticks) -> ReplayPlan<'_> {
+        ReplayPlan {
+            clock,
+            simulated_per_wall: 1,
+            chunks: vec![3 * SECOND, 11 * SECOND + 1, SECOND / 2],
+            resume_every: 5,
+            chance: None,
+        }
+    }
+
+    fn water() -> TwoReservoirs {
+        let measure = |value| Measure::new(value).expect("finite");
+        let delivery = Delivery {
+            id: b"input",
+            from: SimTime::from_ns(40 * SECOND),
+            to: SimTime::from_ns(60 * SECOND),
+            amount: measure(100.0),
+        };
+        let start = [measure(500_500.0), measure(499_500.0)];
+        let case = TwoReservoirs::delivering(start, vec![delivery]).expect("a body");
+        case.until(SimTime::from_ns(100 * SECOND))
+    }
+
+    fn cores() -> ReferenceIntegrator {
+        ReferenceIntegrator::new(8 * SECOND)
+    }
+
+    fn seed() -> ObservationSeed {
+        ObservationSeed::new(WATCHING)
+    }
+
+    struct Deaf<'l> {
+        inner: Observer<'l>,
+        deaf_from: Option<SimTime>,
+    }
+    impl Observe for Deaf<'_> {
+        fn advance(&mut self, view: &ObservationView<'_>) -> Result<Vec<Observation>, ObservationRefusal> {
+            let mut heard = self.inner.advance(view)?;
+            if let Some(from) = self.deaf_from {
+                heard.retain(|seen| seen.collected() < from);
+            }
+            Ok(heard)
+        }
+        fn checkpoint(&self) -> ObserverCheckpoint {
+            self.inner.checkpoint()
+        }
+    }
+
+    struct GoesDeaf {
+        built: Cell<u64>,
+        from: SimTime,
+    }
+    impl Observers for GoesDeaf {
+        fn fresh<'l>(&self, lens: &'l ObservationLens) -> Box<dyn Observe + 'l> {
+            self.built.set(self.built.get() + 1);
+            let deaf_from = (self.built.get() > 1).then_some(self.from);
+            Box::new(Deaf {
+                inner: Observer::new(lens, seed()),
+                deaf_from,
+            })
+        }
+        fn resume<'l>(
+            &self,
+            lens: &'l ObservationLens,
+            saved: &ObserverCheckpoint,
+        ) -> Result<Box<dyn Observe + 'l>, ObservationRefusal> {
+            Ok(Box::new(Deaf {
+                inner: Observer::resume(lens, seed(), saved)?,
+                deaf_from: Some(self.from),
+            }))
+        }
+    }
+
+    #[test]
+    fn an_observer_that_drifts_while_the_accepted_state_matches_fails_pace_resume_late_admission_and_rewind()
+    {
+        let case = water();
+        let clock = Ticks(Cell::new(0));
+        let from = SimTime::from_ns(50 * SECOND);
+        for gate in OBSERVER_GATES {
+            let evidence = replay_gate(gate, &case, &cores, &plan(&clock)).expect("an honest observer");
+            assert!(
+                evidence.runs().iter().all(|run| *run == evidence.runs()[0]),
+                "{gate:?}"
+            );
+            let drifts = GoesDeaf {
+                built: Cell::new(0),
+                from,
+            };
+            let failure = watched_gate(gate, &case, &cores, &plan(&clock), &drifts);
+            assert!(
+                matches!(failure, Err(ReplayFailure::Diverged { gate: failed, first_divergence })
+                    if failed == gate && first_divergence >= from),
+                "{gate:?}: {failure:?}"
+            );
+        }
+    }
+
+    struct Forgets;
+    impl Observers for Forgets {
+        fn fresh<'l>(&self, lens: &'l ObservationLens) -> Box<dyn Observe + 'l> {
+            Box::new(Observer::new(lens, seed()))
+        }
+        fn resume<'l>(
+            &self,
+            lens: &'l ObservationLens,
+            _: &ObserverCheckpoint,
+        ) -> Result<Box<dyn Observe + 'l>, ObservationRefusal> {
+            Ok(Box::new(Observer::new(lens, seed())))
+        }
+    }
+
+    #[test]
+    fn an_observer_that_forgets_its_state_on_resume_fails_resume_and_rewind_and_passes_the_rest() {
+        let case = water();
+        let clock = Ticks(Cell::new(0));
+        for gate in OBSERVER_GATES {
+            let verdict = watched_gate(gate, &case, &cores, &plan(&clock), &Forgets);
+            match gate {
+                ReplayGate::Resume | ReplayGate::Rewind => assert!(
+                    matches!(verdict, Err(ReplayFailure::Diverged { gate: failed, .. }) if failed == gate),
+                    "{gate:?}: {verdict:?}"
+                ),
+                _ => assert!(verdict.is_ok(), "{gate:?}: {verdict:?}"),
+            }
+        }
     }
 }

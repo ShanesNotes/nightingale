@@ -78,4 +78,6 @@ From the solver arena (in this PR): a scoring script applied the method above to
 
 From ticket 11: a run long enough for the meal rows (to 11:30, about 4.6 simulated hours) can now hold its history outside memory. `tools/bench` measured the slice flat at about 4.8 MB resident from 1154 to 11578 accepted steps, with 18584 bytes a step on disk, so a meal run needs about 65 GB of disk at the arena's 212 steps a simulated second, by arithmetic.
 
+From 17: the skin's water loss of 0.01 mL/s now varies by up to half its size through a seeded forcing with a 300 s period. That changes plasma volume by under 0.005 mL/s (arithmetic), so a trace's baseline window now holds that much seeded variation. The stir hazard moves no law in the slice.
+
 From ticket 12: `run` counts the waveform's released values and keeps no observation, under a constant observation seed (`WAVEFORM` in `crates/ng-validate/src/run.rs`). A check that reads the trace reads the returned session or extends `run`.
