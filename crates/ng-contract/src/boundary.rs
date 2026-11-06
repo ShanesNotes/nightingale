@@ -272,6 +272,10 @@ impl AppliedInputs {
     pub fn digest(&self) -> Digest {
         self.canonical().digest()
     }
+    /// Every input applied so far, payload and time, in order: equal for two runs of one timeline.
+    pub(crate) fn chain(&self) -> Digest {
+        self.chain
+    }
     pub(crate) fn canonical(&self) -> Canonical {
         let Self {
             cursor,

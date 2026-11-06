@@ -7,7 +7,8 @@ use ng_contract::{
     AcceptedStateView, AdmissionError, AppliedInputs, Attempt, BoundaryEvent, Candidate, CompiledBody,
     CoupledProblem, CoupledSolver, DenseSegment, Digest, Fired, ImageParts, InitialRevision, InputId,
     MethodHistory, NumericalRefusal, RecordHash, RunIdentity, SimTime, SplitRejected, StepExtents,
-    StepProposal, StepTicket, TraceDraw, TrialFailure, ValidityExcursion, VerifiedParts, VerifiedStep,
+    StepProposal, StepTicket, TraceDraw, TraceHead, TrialFailure, ValidityExcursion, VerifiedParts,
+    VerifiedStep,
 };
 
 /// The chained seal of one accepted revision: the previous seal, the revision, the image's digests and the
@@ -229,13 +230,20 @@ impl<'m> PatientRecord<'m> {
         draw: &mut TraceDraw,
         receipt: Option<&StepReceipt>,
     ) -> Result<(), SplitRejected> {
-        let seal = self.history.seal();
-        match (receipt, self.history.previous()) {
-            (None, _) => draw.open(&self.identity, self.image.parameters(), self.accepted(), seal),
-            (Some(receipt), Some(previous)) if receipt.seal == self.seal() => {
-                draw.read(&self.identity, self.accepted(), seal, previous, &receipt.extents)
-            }
-            (Some(_), _) => Err(SplitRejected::OtherHead),
+        let history = &self.history;
+        let previous = history.previous().unwrap_or_else(|| self.identity.digest());
+        let ledger = history.ledger_digest(self.image.parameters().digest());
+        let head = TraceHead::new(
+            &self.image,
+            history.revision(),
+            previous,
+            ledger,
+            history.format().hash(),
+        );
+        match receipt {
+            None => draw.open(&self.identity, head),
+            Some(receipt) if receipt.seal == self.seal() => draw.read(head, &receipt.extents),
+            Some(_) => Err(SplitRejected::OtherHead),
         }
     }
     pub(crate) fn admit_input(&mut self, input: AuthorizedInput) -> Result<InputReceipt, AdmissionError> {

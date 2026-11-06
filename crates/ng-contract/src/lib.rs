@@ -988,9 +988,9 @@
 //! A trace's exchanges and firings come only from `verify`, so none can be invented or left out.
 //! ```compile_fail,E0451
 //! use ng_contract::*;
-//! fn forged(applied: Vec<InputId>, forward: Vec<Compensated>, reverse: Vec<Compensated>, fired: Vec<Fired>)
-//!     -> StepExtents {
-//!     StepExtents { applied, forward, reverse, fired }
+//! fn forged(base: Digest, applied: Vec<InputId>, forward: Vec<Compensated>, reverse: Vec<Compensated>,
+//!     fired: Vec<Fired>) -> StepExtents {
+//!     StepExtents { base, applied, forward, reverse, fired }
 //! }
 //! ```
 //! ```

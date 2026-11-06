@@ -492,6 +492,7 @@ impl VerifiedStep {
             dense,
             excursions,
             extents: StepExtents {
+                base: ticket.base,
                 applied: ticket.due,
                 forward,
                 reverse,

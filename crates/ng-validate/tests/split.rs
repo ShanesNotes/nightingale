@@ -1,6 +1,8 @@
 use core::num::NonZeroU64;
 use ng_contract::*;
 use ng_record::{Running, Session, Step, StepReceipt};
+
+const ONE_MILLISECOND: u64 = 1_000_000;
 use ng_validate::*;
 
 const SECOND: u64 = 1_000_000_000;
@@ -337,27 +339,6 @@ fn drawn_from<'m>(
 }
 
 #[test]
-fn a_draw_opened_on_a_later_head_draws_the_same_trace() {
-    let case = stepped();
-    let lens = gauge(case.body(), case.rows()[0]);
-    let core = reference();
-    let late = TraceGrid::new(SimTime::from_ns(3_000 * SECOND), every(OFF_STEP), 100).expect("a grid");
-    let early = trace(&case, &core, &lens, late);
-    let store = MemoryStore::default();
-    let mut session = case.admit(&core, &store).expect("admitted");
-    while session.record().accepted().time() < SimTime::from_ns(2_500 * SECOND) {
-        session = accepted(session.step()).0;
-    }
-    let mut draw = TraceDraw::new(case.body(), &lens, late).expect("a draw");
-    session
-        .record()
-        .split_trace(&mut draw, None)
-        .expect("opens before the grid");
-    drawn_from(session, &mut draw, late.end());
-    assert_eq!(draw.finish().expect("finished").digest(), early.digest());
-}
-
-#[test]
 fn a_draw_refuses_a_head_of_another_course_of_the_same_run() {
     let start = || [measure(500_500.0), measure(499_500.0)];
     let intake = |amount| Delivery {
@@ -418,7 +399,7 @@ fn a_draw_reads_each_accepted_head_once_and_in_order() {
     assert_eq!(refused, Err(SplitRejected::Gap), "a step before the draw opened");
     assert_eq!(
         first.record().split_trace(&mut draw, None),
-        Err(SplitRejected::PastStart)
+        Err(SplitRejected::NotAdmission)
     );
 
     let session = case.admit(&core, &store).expect("admitted");
@@ -448,7 +429,7 @@ fn a_draw_reads_each_accepted_head_once_and_in_order() {
     let (foreign, three) = accepted(foreign.step());
     assert_eq!(
         foreign.record().split_trace(&mut draw, Some(&three)),
-        Err(SplitRejected::OtherRun)
+        Err(SplitRejected::Gap)
     );
 
     let (session, one) = accepted(case.admit(&core, &store).expect("admitted").step());
@@ -482,4 +463,151 @@ fn a_draw_needs_every_family_on_a_grid_of_two_instants_or_more() {
     assert!(matches!(past, Err(AdmissionError::TraceGridOutOfRange)));
     let whole = SplitBudget::new(scales(1.0), scales(1.0), scales(1.0), measure(1.0), measure(1.0));
     assert!(matches!(whole, Err(AdmissionError::ReferenceShare)));
+}
+
+#[test]
+fn inputs_of_another_payload_under_one_id_are_not_compared() {
+    let start = || [measure(500_500.0), measure(499_500.0)];
+    let intake = |amount| Delivery {
+        id: b"a synthetic intake",
+        from: SimTime::from_ns(80 * SECOND),
+        to: SimTime::from_ns(160 * SECOND),
+        amount: measure(amount),
+    };
+    let one = TwoReservoirs::delivering(start(), vec![intake(100.0)]).expect("a synthetic case");
+    let other = TwoReservoirs::delivering(start(), vec![intake(200.0)]).expect("a synthetic case");
+    let lens = gauge(one.body(), one.rows()[0]);
+    let expected = trace(&one, &reference(), &lens, off_step_grid());
+    let measured = trace(
+        &other,
+        &ReferenceIntegrator::new(2 * REFERENCE_STEP),
+        &lens,
+        off_step_grid(),
+    );
+    let refused = ReferenceError::self_convergence(&expected, &measured);
+    assert!(
+        matches!(refused, Err(SplitRejected::OtherSchedule)),
+        "{:?}",
+        refused.err()
+    );
+}
+
+#[test]
+fn a_draw_opens_only_at_admission() {
+    let case = ChanceCase::ectopy().expect("a synthetic case");
+    let lens = gauge(case.body(), case.rows()[0]);
+    let (core, store) = (ReferenceIntegrator::new(SECOND / 10), MemoryStore::default());
+    let mut session = case.admit(&core, &store).expect("admitted");
+    let fired = loop {
+        let (next, receipt) = accepted(session.step());
+        session = next;
+        if let Some(firing) = receipt.fired().first() {
+            break firing.at();
+        }
+    };
+    assert_eq!(
+        session.record().accepted().time(),
+        fired,
+        "a firing ends its step"
+    );
+    let grid = TraceGrid::new(fired, every(SECOND), 2).expect("a grid");
+    let mut draw = TraceDraw::new(case.body(), &lens, grid).expect("a draw");
+    assert_eq!(
+        session.record().split_trace(&mut draw, None),
+        Err(SplitRejected::NotAdmission)
+    );
+}
+
+/// A forcing's knot period caps every step of this case, so a 100 s reference and its half take one course.
+#[test]
+fn a_reference_its_refinement_cannot_move_is_refused() {
+    let case = ChanceCase::ectopy().expect("a synthetic case");
+    let lens = gauge(case.body(), case.rows()[0]);
+    let grid = TraceGrid::new(SimTime::from_ns(0), every(SECOND), 61).expect("a grid");
+    let loose = || ErrorScales::uniform(measure(1e6), measure(0.0)).expect("a positive scale");
+    let reference = ReferenceIntegrator::new(100 * SECOND).with_scales(loose());
+    let split = ReferenceIntegrator::new(400 * SECOND).with_scales(loose());
+    let outcome = split_gate(&case, &split, &reference, &lens, grid, budget([1e-6; 4], 0.5));
+    assert!(
+        matches!(outcome, Err(SplitFailure::Rejected(SplitRejected::NotRefined))),
+        "{outcome:?}"
+    );
+}
+
+fn first_firing(case: &ChanceCase, core: &ReferenceIntegrator) -> SimTime {
+    let store = MemoryStore::default();
+    let mut session = case.admit(core, &store).expect("admitted");
+    loop {
+        let (next, receipt) = accepted(session.step());
+        session = next;
+        if let Some(firing) = receipt.fired().first() {
+            return firing.at();
+        }
+    }
+}
+
+/// A firing at the grid's first instant belongs to the step that ends there, so it is in no trace on that grid.
+#[test]
+fn a_firing_at_the_first_instant_is_in_no_trace() {
+    let case = ChanceCase::ectopy().expect("a synthetic case");
+    let lens = gauge(case.body(), case.rows()[0]);
+    let (reference, refined) = (
+        ReferenceIntegrator::new(SECOND / 10),
+        ReferenceIntegrator::new(SECOND / 20),
+    );
+    let (one, other) = (first_firing(&case, &reference), first_firing(&case, &refined));
+    assert_ne!(one, other, "two cores place the firing apart");
+    let later = if one < other { other } else { one };
+    let grid = TraceGrid::new(later, every(ONE_MILLISECOND), 2).expect("a grid");
+    let expected = trace(&case, &reference, &lens, grid);
+    let measured = trace(&case, &refined, &lens, grid);
+    ReferenceError::self_convergence(&expected, &measured).expect("neither trace holds the firing");
+}
+
+/// An image admitted outside the record has a seal no step of the run names.
+#[test]
+fn a_draw_refuses_a_head_no_step_of_its_run_follows() {
+    let case = stepped();
+    let lens = gauge(case.body(), case.rows()[0]);
+    let (core, store) = (reference(), MemoryStore::default());
+    let origin = SimTime::from_ns(0);
+    let request = InitializationRequest::at(origin);
+    let port = BoundaryPort::new(Vec::new()).expect("no event");
+    let other = case.other_values().expect("bound");
+    let system = case
+        .body()
+        .initialization(other, port, request)
+        .expect("a system");
+    let start = MethodHistory::new(core.resolution().policy(), origin, Vec::new());
+    let solved = system.workspace();
+    let forged = system.admit(solved, start).expect("admitted").into_parts();
+
+    let session = case.admit(&core, &store).expect("admitted");
+    let identity = session.record().identity().clone();
+    let mut draw = TraceDraw::new(case.body(), &lens, off_step_grid()).expect("a draw");
+    let made_up = Digest::of_canonical(b"a synthetic ledger");
+    let head = TraceHead::new(&forged, 0, identity.digest(), made_up, RecordHash::Blake2b);
+    draw.open(&identity, head).expect("an admission head opens");
+    let (session, receipt) = accepted(session.step());
+    assert_eq!(
+        session.record().split_trace(&mut draw, Some(&receipt)),
+        Err(SplitRejected::Gap)
+    );
+    assert!(!draw.done());
+}
+
+#[test]
+fn a_draw_refuses_a_grid_that_starts_before_admission() {
+    let body = arena_body().expect("compiled");
+    let (lens, store) = (arena_lens(&body).expect("a lens"), MemoryStore::default());
+    let core = ReferenceIntegrator::new(SECOND / 1_000);
+    let port = BoundaryPort::new(Vec::new()).expect("no event");
+    let packet = arena_packet(&body).expect("a packet");
+    let admitted = admit_at(&body, packet, port, &core, &lens, anchor_moment(), &store).expect("admitted");
+    let grid = TraceGrid::new(SimTime::from_ns(0), every(SECOND), 2).expect("a grid");
+    let mut draw = TraceDraw::new(&body, &lens, grid).expect("a draw");
+    assert_eq!(
+        admitted.session.record().split_trace(&mut draw, None),
+        Err(SplitRejected::PastStart)
+    );
 }
