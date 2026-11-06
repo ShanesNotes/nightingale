@@ -79,7 +79,6 @@ fn newton_update_us(body: &CompiledBody) -> f64 {
     1e6 * seconds / f64::from(UPDATES)
 }
 
-/// The wall clock the workspace may not read, passed to `run` from here.
 struct HostClock(Instant);
 impl WallClock for HostClock {
     fn elapsed_ns(&self) -> Option<u64> {
@@ -101,8 +100,6 @@ fn told(failure: &ArenaFailure) -> String {
     }
 }
 
-/// `arena <interval ms> <core> <simulated s> <repeats>`: ng-validate's own `run` with full waveform, timed by
-/// this host's clock, which also times the compilation `run` leaves to its host. run.py does not call it.
 fn arena(arguments: &[String]) {
     let number = |at: usize, what: &str| -> u64 {
         let given = arguments.get(at).and_then(|given| given.parse().ok());
@@ -128,7 +125,8 @@ fn arena(arguments: &[String]) {
         repeats: repeats.expect("at least one repeat"),
     };
     let log = LinkLog::create();
-    let arena = run(&body, core.as_ref(), spec, &clock, &log).unwrap_or_else(|failure| panic!("{}", told(&failure)));
+    let arena =
+        run(&body, core.as_ref(), spec, &clock, &log).unwrap_or_else(|failure| panic!("{}", told(&failure)));
     println!("work seal {}", hex(arena.session().record().seal().digest()));
     let evidence = arena.into_evidence();
     let throughput = evidence.throughput();
@@ -137,12 +135,18 @@ fn arena(arguments: &[String]) {
     println!("work accepted_steps {}", throughput.accepted_steps());
     println!("work simulated_ns {}", throughput.simulated_ns());
     println!("work waveform_samples {}", throughput.waveform_samples());
-    println!("time admission_s {:.2}", throughput.admission_wall_ns() as f64 / 1e9);
+    println!(
+        "time admission_s {:.2}",
+        throughput.admission_wall_ns() as f64 / 1e9
+    );
     let simulated = throughput.simulated_ns() as f64 / 1e9;
     for (repeat, wall) in throughput.runs_wall_ns().iter().enumerate() {
         let seconds = wall.get() as f64 / 1e9;
         println!("time repeat_{repeat}_x_real_time {:.3}", simulated / seconds);
-        println!("time repeat_{repeat}_ms_a_step {:.3}", 1e3 * seconds / throughput.accepted_steps() as f64);
+        println!(
+            "time repeat_{repeat}_ms_a_step {:.3}",
+            1e3 * seconds / throughput.accepted_steps() as f64
+        );
     }
 }
 

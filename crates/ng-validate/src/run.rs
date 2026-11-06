@@ -5,7 +5,7 @@ use ng_contract::{
     BoundaryPort, CompiledBody, CoupledSolver, Digest, InitializationFailure, Interval, ObservationLens,
     ObservationSeed, ParameterPacket, Seed, SimTime, SyntheticFixture,
 };
-use ng_observe::Observer;
+use ng_observe::{Observation, ObservedValue, Observer};
 use ng_record::{
     CheckpointError, FaultReport, Faulted, HistoryStore, ObservationRefusal, Running, Session, Step,
 };
@@ -34,8 +34,7 @@ pub fn run_until<'m>(
     Ok(session)
 }
 
-/// The arena takes only a synthetic fixture. Admission checks the packet's anchors against `lens`, and each
-/// repeat's observer reads through it.
+/// Admission checks the packet's anchors against `lens`.
 pub struct ArenaSpec {
     /// Admission at its start; each repeat runs from that start until the head reaches its end.
     pub window: Interval,
@@ -46,8 +45,7 @@ pub struct ArenaSpec {
     pub repeats: NonZeroU32,
 }
 
-/// Wall time from the host's clock, beside the record and never in the certificate. `run` compiles nothing,
-/// so its host times compilation with the same clock.
+/// `run` compiles nothing, so its host times compilation with the same clock.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ThroughputEvidence {
     clock: ClockSource,
@@ -72,17 +70,16 @@ impl ThroughputEvidence {
     pub fn simulated_ns(&self) -> u64 {
         self.simulated_ns
     }
-    /// The record's revision at the end of a repeat.
     pub fn accepted_steps(&self) -> u64 {
         self.accepted_steps
     }
-    /// The observations the observer returned over one repeat.
+    /// The values the observer released over one repeat. An absence is no sample, and a reading its delay
+    /// held counts once, when its value arrives.
     pub fn waveform_samples(&self) -> u64 {
         self.waveform_samples
     }
 }
 
-/// Bound to the run identity it measured, so evidence from another run cannot be scored with it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunEvidence {
     run: Digest,
@@ -112,17 +109,13 @@ impl<'m> ArenaRun<'m> {
 
 pub enum ArenaFailure {
     Initialization(InitializationFailure),
-    /// A latched session, exported for diagnosis.
     Faulted(FaultReport),
     /// A start the store would not checkpoint or resume, or a fault it would not export.
     Checkpoint(CheckpointError),
-    /// A lens the record or its observer would not read.
     Observation(ObservationRefusal),
     /// A clock with no reading left, one that ran backward, one that stood still over a repeat, or a repeat
-    /// whose observer returned nothing: a throughput that measured nothing, never a number.
+    /// whose observer released no value: a throughput that measured nothing.
     MissingThroughput,
-    /// The first repeat, counting the first as 0, that ended on another seal or waveform count than repeat 0,
-    /// so the wall times would time different work.
     RepeatDiffered {
         repeat: u32,
     },
@@ -159,7 +152,8 @@ fn timed<'m>(
     loop {
         let view = session.observation(lens).map_err(ArenaFailure::Observation)?;
         let observed = observer.advance(&view).map_err(ArenaFailure::Observation)?;
-        samples += observed.len() as u64;
+        let present = |seen: &&Observation| matches!(seen.value(), ObservedValue::Present(_));
+        samples += observed.iter().filter(present).count() as u64;
         if session.record().accepted().time() >= end {
             break;
         }
@@ -176,9 +170,7 @@ fn timed<'m>(
     }
 }
 
-/// Compiles nothing: binds the fixture, solves its start once, admits a session, and runs the window `repeats`
-/// times from that start with an observer on the lens, keeping each repeat's wall time beside the record. Each
-/// repeat resumes from the start before its clock reads, so its wall time holds its steps and its observer.
+/// Each repeat resumes from the start before its clock reads, so its wall time holds its steps and its observer.
 pub fn run<'m>(
     body: &'m CompiledBody,
     solver: &'m dyn CoupledSolver,

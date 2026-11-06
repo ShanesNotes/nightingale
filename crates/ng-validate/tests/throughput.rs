@@ -87,19 +87,18 @@ fn a_short_slice_window_reports_throughput_beside_the_record() {
     assert!(head >= end);
     assert!((2 * SECOND..2 * SECOND + 5 * MILLISECOND).contains(&throughput.simulated_ns()));
     assert_eq!(throughput.accepted_steps(), revision);
-    // Each of the lens's three channels closes a one-second window at admission, which saw only that instant and
-    // reads as not collected, and one at each of the two whole seconds after it.
-    assert_eq!(throughput.waveform_samples(), 3 * 3);
+    // Each of the lens's three channels gives a one-second mean at each of the two whole seconds after admission.
+    // The window that closes at admission saw only that instant, so it gives an absence, which is no sample.
+    assert_eq!(throughput.waveform_samples(), 3 * 2);
     assert_eq!(evidence.run(), identity);
 }
 
-/// One vessel fed by a water boundary that nothing drives, read by a lens on a 100 ms grid.
-struct Small {
+struct OneVessel {
     body: CompiledBody,
     amount: RowKind,
     reading: RowKind,
 }
-impl Small {
+impl OneVessel {
     fn new(vessel: &'static str) -> Self {
         let mut map = AnatomyBuilder::new();
         let at = Position::new(measure(0.0), measure(0.0), measure(0.0));
@@ -144,6 +143,10 @@ impl Small {
         let channels = vec![ChannelSpec::new("synthetic gauge", self.reading)];
         (self.body.lens(channels, wall(100 * MILLISECOND))).expect("a lens")
     }
+    fn averaged_lens(&self, points: u64) -> ObservationLens {
+        let channels = vec![ChannelSpec::new("synthetic gauge", self.reading).averaged(wall(points))];
+        (self.body.lens(channels, wall(100 * MILLISECOND))).expect("a lens")
+    }
     fn spec(&self, lens: ObservationLens, from_ms: u64, to_ms: u64, repeats: u32) -> ArenaSpec {
         let mut packet = ParameterPacket::new();
         packet.within(admission_tolerance());
@@ -182,7 +185,6 @@ impl CoupledSolver for Counted<'_> {
     }
 }
 
-/// Wall time that moves only when the core solves.
 struct BySolve<'c> {
     solves: &'c Cell<u64>,
 }
@@ -197,7 +199,7 @@ impl WallClock for BySolve<'_> {
 
 #[test]
 fn every_solve_of_a_repeat_falls_inside_its_wall_time_and_none_inside_admission() {
-    let small = Small::new("synthetic vessel");
+    let small = OneVessel::new("synthetic vessel");
     let solves = Cell::new(0);
     let core = Counted {
         inner: small_core(),
@@ -218,11 +220,11 @@ fn every_solve_of_a_repeat_falls_inside_its_wall_time_and_none_inside_admission(
 
 #[test]
 fn a_throughput_that_measured_nothing_is_missing() {
-    let small = Small::new("synthetic vessel");
+    let small = OneVessel::new("synthetic vessel");
     let clocks: [(&str, &[u64]); 5] = [
         ("no reading", &[]),
         ("stops after admission", &[0, 1]),
-        ("runs backward over admission", &[2, 1]),
+        ("runs backward over admission", &[2, 1, 2, 3]),
         ("stands still over a repeat", &[0, 1, 2, 2]),
         ("runs backward over a repeat", &[0, 1, 3, 2]),
     ];
@@ -236,10 +238,15 @@ fn a_throughput_that_measured_nothing_is_missing() {
     let between_grid_instants = small.spec(small.lens(), 10, 60, 1);
     let unread = run(&small.body, &core, between_grid_instants, &clock, &store);
     assert!(matches!(unread, Err(ArenaFailure::MissingThroughput)));
+    let (core, store, clock) = (small_core(), MemoryStore::default(), Scripted::ticking());
+    let inside_one_second_mean = small.spec(small.averaged_lens(10), 0, 500, 1);
+    let absent = run(&small.body, &core, inside_one_second_mean, &clock, &store);
+    assert!(matches!(absent, Err(ArenaFailure::MissingThroughput)));
 }
 
-/// Its resolution stays its inner core's, so every repeat resumes; its span halves once the first repeat's ten
-/// steps are taken.
+const STEPS_IN_REPEAT_ZERO: u64 = 10;
+
+/// Its resolution stays its inner core's, so every repeat resumes instead of failing its checkpoint.
 struct Shifting {
     inner: ReferenceIntegrator,
     steps: Cell<u64>,
@@ -251,7 +258,11 @@ impl CoupledSolver for Shifting {
     fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
         self.steps.set(self.steps.get() + 1);
         let span = self.inner.next_step(accepted);
-        if self.steps.get() > 10 { span / 2 } else { span }
+        if self.steps.get() > STEPS_IN_REPEAT_ZERO {
+            span / 2
+        } else {
+            span
+        }
     }
     fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
         self.inner.solve(problem, ticket)
@@ -260,7 +271,7 @@ impl CoupledSolver for Shifting {
 
 #[test]
 fn the_first_repeat_on_another_course_than_repeat_zero_is_named() {
-    let small = Small::new("synthetic vessel");
+    let small = OneVessel::new("synthetic vessel");
     let core = Shifting {
         inner: ReferenceIntegrator::new(100 * MILLISECOND),
         steps: Cell::new(0),
@@ -276,7 +287,10 @@ fn the_first_repeat_on_another_course_than_repeat_zero_is_named() {
 
 #[test]
 fn a_lens_compiled_on_another_body_is_refused() {
-    let (small, other) = (Small::new("synthetic vessel"), Small::new("another vessel"));
+    let (small, other) = (
+        OneVessel::new("synthetic vessel"),
+        OneVessel::new("another vessel"),
+    );
     let (core, store, clock) = (small_core(), MemoryStore::default(), Scripted::ticking());
     let spec = small.spec(other.lens(), 0, 1000, 1);
     let refused = run(&small.body, &core, spec, &clock, &store);
@@ -288,22 +302,23 @@ fn a_lens_compiled_on_another_body_is_refused() {
 
 #[test]
 fn the_specs_seed_names_the_run_it_times() {
-    let small = Small::new("synthetic vessel");
+    let small = OneVessel::new("synthetic vessel");
     let named = |seed| {
         let (core, store, clock) = (small_core(), MemoryStore::default(), Scripted::ticking());
         let mut spec = small.spec(small.lens(), 0, 1000, 1);
         spec.seed = seed;
-        ran(run(&small.body, &core, spec, &clock, &store)).into_evidence().run()
+        ran(run(&small.body, &core, spec, &clock, &store))
+            .into_evidence()
+            .run()
     };
     let first = named(Seed::new([1, 2, 3, 4]));
     assert_eq!(first, named(Seed::new([1, 2, 3, 4])));
     assert_ne!(first, named(Seed::new([4, 3, 2, 1])));
 }
 
-/// The clock opens before admission and closes after it, so a refused admission has read it once.
 #[test]
-fn a_refused_admission_reads_the_clock_once() {
-    let small = Small::new("synthetic vessel");
+fn the_clock_opens_before_admission_so_a_refused_one_has_read_it_once() {
+    let small = OneVessel::new("synthetic vessel");
     let (core, store, clock) = (small_core(), MemoryStore::default(), Scripted::ticking());
     let mut spec = small.spec(small.lens(), 0, 1000, 1);
     spec.packet = ParameterPacket::new();
