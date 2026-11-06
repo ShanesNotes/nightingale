@@ -21,3 +21,5 @@ From 15: `AccuracyPolicy::manufactured()` is the model-default policy with every
 From ticket 14: the certificate's closure floor still has no model default: each caller builds `QuantityPolicy` per combination, and the slice passes at absolute 0 and relative 1e-12, with a worst residual of 1.5e-25. The policy names its window and coverage only through `CertificatePolicy::digest`. `Certificate` returns its span, `coverage()` and `support()`, so the score can show the held support each part rests on.
 
 From ticket 12: `RunEvidence::run()` is the digest of the run identity that `run` admitted, so `score` can compare it with the replay evidence's run. `ArenaFailure` derives nothing, because `FaultReport` has no `Debug`.
+
+From 13: `RunEvidence::health()` is the run's `NumericalHealth`, counted over one repeat, and a repeat whose health differs is `RepeatDiffered`. It has no public constructor. `ArenaFailure::Faulted` is now `{ report: Box<FaultReport>, health }`, so a faulted run also shows its refusals up to the fault. A floor fault counts every `NoAdmissibleStep`, whether the floor or the retry budget ended it.
