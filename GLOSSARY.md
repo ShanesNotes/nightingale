@@ -510,3 +510,20 @@ The 13 atlas systems by id: CV cardiovascular, RS respiratory, NS nervous, RN re
 
 **Receptor layer**:
 `ng-receptor`: the binding of transmitters and hormones to receptors at each site, and the effect that binding has on the laws that read it. It owns laws, like a system, but is not one of the 13.
+
+## Learned models
+
+**Generative physiology model**:
+A learned, action-conditioned model of one patient's physiology that carries its own state through an encounter, outside the engine. The engine teaches it offline through public interfaces, and what it predicts is never a source or a target (rule 16).
+_Avoid_: learned engine
+
+**Teacher run**:
+A run of the slice that a program outside the workspace makes through public interfaces, to train or judge a generative physiology model. It is a reference for the learned model, never a target.
+_Avoid_: ground truth
+
+**Named total**:
+The sum of a fixed set of pools of one species that a generative physiology model carries as its state. It changes only through transfers derived from the engine's columns, so it balances by construction.
+
+**Beat edge**:
+The accepted step end at which the rhythm's phase resets, where a guard's landing puts it. A teacher run reads its state and ledger at beat edges, where both are exact.
+_Avoid_: cycle boundary
