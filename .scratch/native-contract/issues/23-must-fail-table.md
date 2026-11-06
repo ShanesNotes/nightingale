@@ -19,3 +19,5 @@ From 10: a core that breaks the elastic store's closure fails the stage residual
 From 03: ticket 03's third box waits on the two split probes in ticket 20.
 
 From foundation 07: before either 48 h core runs, the build proves incidence and energy closure, validate-then-publish refusal with nonempty pending inputs, the generated census gate and the replay gates.
+
+From 20: §7's row "Qualifies a split from invented samples" is the compile-fail doctest on `SplitTrace::new` (E0599) in `crates/ng-record/src/lib.rs`. The split gate's must-fail core is `a_split_over_its_budget_is_refused` in `crates/ng-validate/tests/split.rs`, a coupled core at 32 times the reference's interval. Both split probes that ticket 03's third box waited on now hold in the crates.
