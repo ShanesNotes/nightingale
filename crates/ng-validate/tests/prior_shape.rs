@@ -37,29 +37,12 @@ fn branch(name: &[u8]) -> BranchId {
     BranchId::new(Digest::of_canonical(name))
 }
 
-#[derive(Default)]
-struct Store {
-    links: Vec<(Digest, Vec<u8>)>,
-}
-impl Store {
-    fn of(links: &[(&str, &str)]) -> Self {
-        Self {
-            links: (links.iter())
-                .map(|(seal, link)| (digest(seal), bytes(link)))
-                .collect(),
-        }
+fn kept(links: &[(&str, &str)]) -> MemoryStore {
+    let store = MemoryStore::default();
+    for (seal, link) in links {
+        store.keep(digest(seal), &bytes(link)).expect("kept");
     }
-}
-impl HistoryStore for Store {
-    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
-        (self.links.iter())
-            .find(|link| link.0 == *seal)
-            .map(|link| link.1.clone())
-    }
-    fn keep(&mut self, seal: Digest, link: Vec<u8>) -> Result<(), CheckpointError> {
-        self.links.push((seal, link));
-        Ok(())
-    }
+    store
 }
 
 fn at(seconds: u64) -> SimTime {
@@ -186,7 +169,12 @@ fn named(digests: RecordDigests) -> [Digest; 8] {
 }
 
 fn identity_of(case: &dyn ReplayCase, core: &dyn CoupledSolver) -> RunIdentity {
-    case.admit(core).expect("admitted").record().identity().clone()
+    let store = MemoryStore::default();
+    case.admit(core, &store)
+        .expect("admitted")
+        .record()
+        .identity()
+        .clone()
 }
 
 #[test]
@@ -196,22 +184,16 @@ fn a_checkpoint_main_wrote_resumes_and_goes_on_as_main_did() {
     let identity = identity_of(&case, &core);
     assert_eq!(identity.digest(), digest(WATER_IDENTITY));
     let zero = checkpoint(WATER_CHECKPOINT_0);
-    let mut empty = Store::default();
+    let empty = MemoryStore::default();
     let opened = Session::resume(&zero, &identity, case.body(), &fresh, &empty).expect("resumed");
     assert_eq!(opened.record().seal().digest(), digest(WATER_SEALS[0]));
-    assert_eq!(
-        opened.checkpoint(&mut empty).expect("saved").as_bytes(),
-        zero.as_bytes()
-    );
+    assert_eq!(opened.checkpoint().expect("saved").as_bytes(), zero.as_bytes());
 
-    let mut store = Store::of(&WATER_LINKS);
+    let store = kept(&WATER_LINKS);
     let saved = checkpoint(WATER_CHECKPOINT_6);
     let mut session = Session::resume(&saved, &identity, case.body(), &fresh, &store).expect("resumed");
     assert_eq!(session.record().seal().digest(), digest(WATER_SEALS[6]));
-    assert_eq!(
-        session.checkpoint(&mut store).expect("saved").as_bytes(),
-        saved.as_bytes()
-    );
+    assert_eq!(session.checkpoint().expect("saved").as_bytes(), saved.as_bytes());
     let stopped = loop {
         session = match step(session) {
             Next::Accepted(next) => next,
@@ -225,8 +207,27 @@ fn a_checkpoint_main_wrote_resumes_and_goes_on_as_main_did() {
         );
     };
     assert_eq!(stopped.record().revision(), 9);
-    let report = stopped.export(&mut store).expect("exported");
+    let report = stopped.export().expect("exported");
     assert_eq!(report.last_accepted().as_bytes(), bytes(WATER_EXPORT_9));
+}
+
+#[test]
+fn a_course_main_wrote_reports_the_ledger_a_run_admitted_now_reports() {
+    let case = water_case();
+    let (core, fresh) = (faulting(), faulting());
+    let identity = identity_of(&case, &core);
+    let store = kept(&WATER_LINKS);
+    let saved = checkpoint(WATER_CHECKPOINT_6);
+    let mut session = Session::resume(&saved, &identity, case.body(), &fresh, &store).expect("resumed");
+    let stopped = loop {
+        session = match step(session) {
+            Next::Accepted(next) => next,
+            Next::Stopped(stopped) => break stopped,
+        };
+    };
+    let digests = stopped.record().digests();
+    assert_eq!((digests.revision, digests.time), (9, at(68)));
+    assert_eq!(named(digests), WATER_DIGESTS.map(digest));
 }
 
 #[test]
@@ -235,21 +236,15 @@ fn a_run_resumed_from_main_rewinds_to_a_later_checkpoint_main_wrote() {
     let (core, fresh) = (faulting(), faulting());
     let identity = identity_of(&case, &core);
     let earlier = checkpoint(WATER_CHECKPOINT_3);
-    let mut session = Session::resume(
-        &earlier,
-        &identity,
-        case.body(),
-        &core,
-        &Store::of(&WATER_LINKS[..3]),
-    )
-    .expect("resumed");
+    let (first_three, every) = (kept(&WATER_LINKS[..3]), kept(&WATER_LINKS));
+    let mut session =
+        Session::resume(&earlier, &identity, case.body(), &core, &first_three).expect("resumed");
     while session.record().revision() < 7 {
         session = accepted(session);
     }
     let later = checkpoint(WATER_CHECKPOINT_6);
     let fork = session.rewind(&later, branch(b"at six")).expect("on this branch");
-    let loaded =
-        Session::resume(&later, &identity, case.body(), &fresh, &Store::of(&WATER_LINKS)).expect("resumed");
+    let loaded = Session::resume(&later, &identity, case.body(), &fresh, &every).expect("resumed");
     assert_eq!(fork.record().seal().digest(), digest(WATER_SEALS[6]));
     assert_eq!(fork.record().digests(), loaded.record().digests());
     assert_eq!(accepted(fork).record().seal().digest(), digest(WATER_SEALS[7]));
@@ -264,7 +259,7 @@ fn a_fault_main_exported_goes_on_only_through_recover() {
     let case = water_case();
     let (core, fresh) = (faulting(), faulting());
     let identity = identity_of(&case, &core);
-    let store = Store::of(&WATER_LINKS);
+    let store = kept(&WATER_LINKS);
     let export = checkpoint(WATER_EXPORT_9);
     let refused = Session::resume(&export, &identity, case.body(), &fresh, &store);
     assert_eq!(refused.err(), Some(CheckpointError::Latched));
@@ -299,7 +294,7 @@ fn an_observer_main_checkpointed_reads_on_beside_the_run_it_watched() {
     let lens = lab(&case);
     let (core, fresh) = (faulting(), faulting());
     let identity = identity_of(&case, &core);
-    let store = Store::of(&WATER_LINKS);
+    let store = kept(&WATER_LINKS);
     let saved = ObserverCheckpoint::from_bytes(bytes(WATER_OBSERVER_6));
     let mut observer = Observer::resume(&lens, seed(), &saved).expect("resumed");
     let mut session = Session::resume(
@@ -317,7 +312,7 @@ fn an_observer_main_checkpointed_reads_on_beside_the_run_it_watched() {
     ));
     assert_eq!(observer.checkpoint().as_bytes(), saved.as_bytes());
 
-    let mut admitted = case.admit(&core).expect("admitted");
+    let mut admitted = case.admit(&core, &store).expect("admitted");
     while admitted.record().revision() < 7 {
         admitted = accepted(admitted);
     }
@@ -348,15 +343,15 @@ fn a_run_admitted_now_seals_in_blake2b_and_reaches_mains_state_ledger_and_observ
     let case = water_case();
     let lens = lab(&case);
     let (core, fresh) = (faulting(), faulting());
-    let mut store = Store::default();
-    let mut session = case.admit(&core).expect("admitted");
+    let store = MemoryStore::default();
+    let mut session = case.admit(&core, &store).expect("admitted");
     let identity = session.record().identity().clone();
     let mut observer = Observer::new(&lens, seed());
     let mut stream = chained(
         Digest::of_canonical(b"prior shape"),
         &read(&mut observer, &session, &lens),
     );
-    let zero = session.checkpoint(&mut store).expect("saved");
+    let zero = session.checkpoint().expect("saved");
     assert_eq!(&zero.as_bytes()[..8], b"ngcheck2");
     assert_ne!(session.record().seal().digest(), digest(WATER_SEALS[0]));
     let stopped = loop {
@@ -371,12 +366,12 @@ fn a_run_admitted_now_seals_in_blake2b_and_reaches_mains_state_ledger_and_observ
     assert_eq!((digests.revision, digests.time), (9, at(68)));
     assert_eq!(named(digests), WATER_DIGESTS.map(digest));
     assert_ne!(stopped.record().seal().digest(), digest(WATER_SEALS[9]));
-    let report = stopped.export(&mut store).expect("exported");
+    let report = stopped.export().expect("exported");
     assert_eq!(&report.last_accepted().as_bytes()[..8], b"ngcheck2");
     let resumed = Session::resume(&zero, &identity, case.body(), &fresh, &store).expect("resumed");
     assert_eq!(
         resumed.record().digests(),
-        case.admit(&core).expect("admitted").record().digests()
+        case.admit(&core, &store).expect("admitted").record().digests()
     );
 }
 
@@ -385,8 +380,8 @@ fn a_magic_that_names_the_other_hash_is_refused() {
     let case = water_case();
     let (core, fresh) = (faulting(), faulting());
     let identity = identity_of(&case, &core);
-    let main = Store::of(&WATER_LINKS);
-    let refused = |saved: &Checkpoint, store: &Store| {
+    let main = kept(&WATER_LINKS);
+    let refused = |saved: &Checkpoint, store: &MemoryStore| {
         Session::resume(saved, &identity, case.body(), &fresh, store).err()
     };
     let swapped = relabelled(WATER_CHECKPOINT_6, b"ngcheck2");
@@ -402,12 +397,12 @@ fn a_magic_that_names_the_other_hash_is_refused() {
     let unknown = relabelled(WATER_CHECKPOINT_6, b"ngcheck3");
     assert_eq!(refused(&unknown, &main), Some(CheckpointError::UnknownFormat));
 
-    let mut store = Store::default();
-    let mut session = case.admit(&core).expect("admitted");
+    let store = MemoryStore::default();
+    let mut session = case.admit(&core, &store).expect("admitted");
     while session.record().revision() < 3 {
         session = accepted(session);
     }
-    let mut now = session.checkpoint(&mut store).expect("saved").as_bytes().to_vec();
+    let mut now = session.checkpoint().expect("saved").as_bytes().to_vec();
     now[..8].copy_from_slice(b"ngcheck1");
     let swapped = Checkpoint::from_bytes(now);
     assert!(matches!(
@@ -418,17 +413,17 @@ fn a_magic_that_names_the_other_hash_is_refused() {
 
 #[test]
 fn a_fork_refuses_a_checkpoint_of_the_other_format_even_at_revision_zero() {
+    let store = MemoryStore::default();
     let case = water_case();
     let (core, fresh) = (faulting(), faulting());
     let identity = identity_of(&case, &core);
     let main_zero = checkpoint(WATER_CHECKPOINT_0);
-    let admitted = case.admit(&core).expect("admitted");
+    let admitted = case.admit(&core, &store).expect("admitted");
     let refused = admitted.rewind(&main_zero, branch(b"main's start")).err();
     assert_eq!(refused, Some(CheckpointError::NotOnThisBranch));
 
-    let now_zero = admitted.checkpoint(&mut Store::default()).expect("saved");
-    let loaded =
-        Session::resume(&main_zero, &identity, case.body(), &fresh, &Store::default()).expect("resumed");
+    let now_zero = admitted.checkpoint().expect("saved");
+    let loaded = Session::resume(&main_zero, &identity, case.body(), &fresh, &store).expect("resumed");
     let refused = loaded.rewind(&now_zero, branch(b"this build's start")).err();
     assert_eq!(refused, Some(CheckpointError::NotOnThisBranch));
     assert!(loaded.rewind(&main_zero, branch(b"its own start")).is_ok());
@@ -476,7 +471,7 @@ fn checkpoints_main_wrote_with_a_continuation_and_with_a_firing_resume_as_main_d
     for course in courses {
         let identity = identity_of(course.case, course.core);
         assert_eq!(identity.digest(), digest(course.identity));
-        let store = Store::of(course.links);
+        let store = kept(course.links);
         let saved = checkpoint(course.saved);
         let mut session =
             (Session::resume(&saved, &identity, course.case.body(), course.fresh, &store)).expect("resumed");
@@ -678,7 +673,7 @@ const WATER_DIGESTS: [&str; 8] = [
     "5cacdd2ba9f61b20e549284c7d8b4516403793e7e2032020a4d40df40fa39d47",
     "dce03cecfcf179e28ff98d78d8c825bd31ea49722ec7a0d5a3778ff6431ed8aa",
     "5f082c678c10735da3eca62c0845c41577c4c795d714ee466845c1b378533e07",
-    "bb16314c7064935be82504eaf88101c4442a7c97d1e7fa970598682073bf93bf",
+    "5c245d83cc8022169508917bbcc138009410cdab8cef5b5c5954ad24936d6802",
 ];
 const WATER_STREAM_WHOLE: &str = "67357de59fd948e6e3a2c961119d629430417a5a7eb82b5818af4f77f0cf123c";
 const WATER_STREAM_AFTER_6: &str = "fd694728b90a14a4c63801351757491d6ea6b29a79262df4b51a0d90b8f180bf";
@@ -755,7 +750,7 @@ const SOLVER_DIGESTS: [&str; 8] = [
     "5cacdd2ba9f61b20e549284c7d8b4516403793e7e2032020a4d40df40fa39d47",
     "4047983876882802329ec69dce7a00b8af10033f62330bfe12de014d42d8ec64",
     "5f082c678c10735da3eca62c0845c41577c4c795d714ee466845c1b378533e07",
-    "17a911744fe9df11072a2b0b443ddfd6d3508333b00fd87b7dd39e5400833af0",
+    "560641cc2d75a21572f0ec4930afe4cbbc4e82d926cd3ec293ec57e6929f7ec1",
 ];
 const CHANCE_IDENTITY: &str = "24201c9444b8b3c7aefa9123fe01e4056569e2b9006c35dde243709044aaf74c";
 const CHANCE_CHECKPOINT_7: &str = concat!(
@@ -883,5 +878,5 @@ const CHANCE_DIGESTS: [&str; 8] = [
     "836fad37ba0d48cfa58758c71e2c381f77f0d5131be291bd4156fa76a542f87d",
     "61495ea10689af74f18d2cb585d3cdcd203d4c50d88841e16c5c11d3ab57eb97",
     "c0dbaac603be4a3bbed664fb7b41ba97aed36facadcec14cb9fc8edc82e778bd",
-    "53aa3543c51bee9c6798bb85bd7fbaeb78dddc0b4d24069373b28adf127effcb",
+    "b252e4ca3bc05f611a5c0c7a23d0f027edf553209dcb9f0ef3c779d19796e349",
 ];

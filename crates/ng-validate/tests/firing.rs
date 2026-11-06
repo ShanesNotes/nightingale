@@ -68,6 +68,7 @@ fn crossing_inside() -> CompiledBody {
 
 #[test]
 fn a_guard_crossed_and_crossed_back_inside_a_step_refuses_it_and_lands() {
+    let store = MemoryStore::default();
     let body = crossing_inside();
     let mut packet = ParameterPacket::new();
     for (key, value) in [("ns.slope", 2.0), ("ns.quarter", 0.25)] {
@@ -100,7 +101,7 @@ fn a_guard_crossed_and_crossed_back_inside_a_step_refuses_it_and_lands() {
         .expect("once");
     let core = ReferenceIntegrator::new(SECOND).with_floor(NonZeroU64::new(SECOND / 1024).expect("a floor"));
     let port = BoundaryPort::new(Vec::new()).expect("no event");
-    let session = admit_fixture(&body, packet, port, &core).expect("admitted");
+    let session = admit_fixture(&body, packet, port, &core, &store).expect("admitted");
     let Ok(session) = run_until(session, SimTime::from_ns(SECOND)) else {
         panic!("the bench faulted");
     };
@@ -110,8 +111,10 @@ fn a_guard_crossed_and_crossed_back_inside_a_step_refuses_it_and_lands() {
         &[0],
         "values sort by name, so `after`, and the mode moved at the first root"
     );
-    let segments: Vec<_> = session.record().conservation().segments().collect();
-    let landed = segments[0].interval().end().nanoseconds();
+    let first = (session.conservation().newest_first().last())
+        .expect("a segment")
+        .expect("kept and chained");
+    let landed = first.interval().end().nanoseconds();
     assert!(landed.abs_diff(SECOND / 4) <= SECOND / 512, "landed at {landed}");
 }
 
@@ -176,11 +179,18 @@ fn guarded_packet(
 
 #[test]
 fn of_two_guards_on_one_variable_the_same_one_wins_on_the_ring_and_in_a_run() {
+    let store = MemoryStore::default();
     let body = two_guards();
     let core = ReferenceIntegrator::new(SECOND);
     let port = BoundaryPort::new(Vec::new()).expect("no event");
-    let session =
-        admit_fixture(&body, guarded_packet(ParameterPacket::new(), -0.5), port, &core).expect("admitted");
+    let session = admit_fixture(
+        &body,
+        guarded_packet(ParameterPacket::new(), -0.5),
+        port,
+        &core,
+        &store,
+    )
+    .expect("admitted");
     let Ok(session) = run_until(session, SimTime::from_ns(1)) else {
         panic!("the bench faulted");
     };
@@ -406,6 +416,7 @@ fn a_delivery_only_one_modes_law_reads_is_refused() {
         })
         .expect("compiled")
     };
+    let history = MemoryStore::default();
     let delivered = |body: &CompiledBody| {
         let mut packet = ParameterPacket::new();
         let store = RowKind::Amount {
@@ -435,7 +446,7 @@ fn a_delivery_only_one_modes_law_reads_is_refused() {
         let event = BoundaryEvent::new(id, SimTime::from_ns(0), BoundaryInput::Water(delivery));
         let port = BoundaryPort::new(vec![event]).expect("parsed");
         let core = ReferenceIntegrator::new(SECOND);
-        admit_fixture(body, packet, port, &core).err()
+        admit_fixture(body, packet, port, &core, &history).err()
     };
     let unread = Some(InitializationFailure::Admission(AdmissionError::DriveNotRead {
         name: INTAKE,
@@ -446,6 +457,7 @@ fn a_delivery_only_one_modes_law_reads_is_refused() {
 
 #[test]
 fn no_flow_out_of_a_dry_pool_carries_nothing() {
+    let store = MemoryStore::default();
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", origin());
     let (a, b) = (
@@ -486,7 +498,7 @@ fn no_flow_out_of_a_dry_pool_carries_nothing() {
         .expect("every row");
     let core = ReferenceIntegrator::new(SECOND);
     let port = BoundaryPort::new(Vec::new()).expect("no event");
-    let session = admit_fixture(&body, packet, port, &core).expect("admitted");
+    let session = admit_fixture(&body, packet, port, &core, &store).expect("admitted");
     assert!(run_until(session, SimTime::from_ns(SECOND)).is_ok());
 }
 
@@ -553,6 +565,7 @@ fn a_reset_of_a_row_that_cannot_hold_zero_is_refused() {
 /// guard's own class can stop a step leaving it behind.
 #[test]
 fn a_step_stops_at_a_guards_interval_though_no_row_moves_that_fast() -> Result<(), InitializationFailure> {
+    let store = MemoryStore::default();
     let tight = SECOND / 100;
     let body = assemble(one_site(), |mut body| {
         let (mut laws, _) = body.nervous()?.parts();
@@ -605,7 +618,7 @@ fn a_step_stops_at_a_guards_interval_though_no_row_moves_that_fast() -> Result<(
     )?;
     packet.start_mode(named("state"), "before", "synthetic")?;
     let core = ReferenceIntegrator::new(SECOND).with_floor(NonZeroU64::new(1_000).expect("a floor"));
-    let session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core)?;
+    let session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core, &store)?;
     let started = session.record().accepted().modes()[0];
     let Ok(session) = run_until(session, SimTime::from_ns(SECOND / 4)) else {
         panic!("a fault");
@@ -618,6 +631,7 @@ fn a_step_stops_at_a_guards_interval_though_no_row_moves_that_fast() -> Result<(
 /// through as well would reset both rows and land on the second's mode.
 #[test]
 fn of_two_guards_on_one_variable_only_the_first_fires() -> Result<(), InitializationFailure> {
+    let store = MemoryStore::default();
     let body = assemble(one_site(), |mut body| {
         let (mut laws, _ports) = body.nervous()?.parts();
         let m = laws.state::<Dimensionless>("m", Admissible::finite());
@@ -655,7 +669,7 @@ fn of_two_guards_on_one_variable_only_the_first_fires() -> Result<(), Initializa
     }
     packet.start_mode(named("state"), "low", "synthetic")?;
     let core = ReferenceIntegrator::new(SECOND);
-    let session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core)?;
+    let session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core, &store)?;
     let Ok(session) = run_until(session, SimTime::from_ns(SECOND)) else {
         panic!("a fault");
     };

@@ -1,3 +1,6 @@
+mod certificate_oracle;
+
+use certificate_oracle::{Ledger, certified};
 use core::cell::Cell;
 use ng_contract::*;
 use ng_record::*;
@@ -53,29 +56,28 @@ fn the_stepped_inflow_meets_its_closed_form_at_first_order_over_three_caps() {
     observed_order([&coarse, &medium, &fine], measure(1.9), measure(2.1)).expect("first order");
 }
 
-fn ledger_policy(basis: &ConservedBasis, drift: f64) -> CertificatePolicy {
-    let quantities = (basis.ids())
-        .map(|quantity| QuantityPolicy::new::<Water>(quantity, measure(1e-24), measure(1e-9), measure(drift)))
-        .collect::<Result<Vec<_>, _>>()
-        .expect("a policy of water");
-    let windows = Sliding24Hours::covering(48 * HOUR).expect("a coverage");
-    CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows).expect("a policy")
+fn ledger_policy(basis: &ConservedBasis, drift: f64) -> Ledger {
+    Ledger::new(basis, 1e-24, 1e-9, drift)
 }
 
 #[test]
 fn over_48_hours_a_closed_body_holds_still_and_an_open_one_closes() {
+    let store = MemoryStore::default();
     let core = Core::new(60 * SECOND);
     let closed = TwoReservoirs::closed().expect("a body");
     let session = to(
-        closed.admit(&core).expect("admitted"),
+        closed.admit(&core, &store).expect("admitted"),
         SimTime::from_ns(48 * HOUR),
     );
-    let view = session.record().conservation();
-    certify(&view, &ledger_policy(view.basis(), 1e-6)).expect("a closed body holds still");
+    let view = session.conservation();
+    certified(&view, &ledger_policy(view.basis(), 1e-6)).expect("a closed body holds still");
     let open = TwoReservoirs::stepped_inflow().expect("a body");
-    let session = to(open.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
-    let view = session.record().conservation();
-    certify(&view, &ledger_policy(view.basis(), 1e12)).expect("an open body's ledger still closes");
+    let session = to(
+        open.admit(&core, &store).expect("admitted"),
+        SimTime::from_ns(48 * HOUR),
+    );
+    let view = session.conservation();
+    certified(&view, &ledger_policy(view.basis(), 1e12)).expect("an open body's ledger still closes");
 }
 
 fn delivery(id: &'static [u8], from: u64, to: u64) -> Delivery {
@@ -95,6 +97,7 @@ fn delivering(deliveries: Vec<Delivery>, end: u64) -> TwoReservoirs {
 
 #[test]
 fn every_replay_gate_passes_on_the_two_reservoir_cases() {
+    let store = MemoryStore::default();
     let off_the_grid = Delivery {
         id: b"off the grid",
         from: SimTime::from_ns(45 * SECOND + 500_000_000),
@@ -131,7 +134,12 @@ fn every_replay_gate_passes_on_the_two_reservoir_cases() {
         };
         let evidence = replay_gates(&case, &|| Core::new(8 * SECOND), &plan).expect("every gate");
         let core = Core::new(8 * SECOND);
-        let run = case.admit(&core).expect("admitted").record().identity().digest();
+        let run = case
+            .admit(&core, &store)
+            .expect("admitted")
+            .record()
+            .identity()
+            .digest();
         assert_eq!(evidence.run(), run);
     }
 }

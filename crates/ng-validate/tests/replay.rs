@@ -147,26 +147,31 @@ fn seals(mut session: Session<'_, Running>, end: SimTime) -> Vec<(SimTime, Seal)
 
 #[derive(Default, Clone)]
 struct Store {
-    links: Vec<(Digest, Vec<u8>)>,
+    links: RefCell<Vec<(Digest, Vec<u8>)>>,
 }
 impl Store {
-    fn replace(&mut self, seal: Digest, link: Vec<u8>) {
-        self.links.retain(|known| known.0 != seal);
-        self.links.push((seal, link));
+    fn replace(&self, seal: Digest, link: Vec<u8>) {
+        let mut links = self.links.borrow_mut();
+        links.retain(|known| known.0 != seal);
+        links.push((seal, link));
     }
     fn without(&self, seal: Digest) -> Self {
-        let mut store = self.clone();
-        store.links.retain(|known| known.0 != seal);
+        let store = self.clone();
+        store.links.borrow_mut().retain(|known| known.0 != seal);
         store
+    }
+    fn link(&self, at: usize) -> (Digest, Vec<u8>) {
+        self.links.borrow()[at].clone()
     }
 }
 impl HistoryStore for Store {
     fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
-        let link = self.links.iter().find(|known| known.0 == *seal)?;
+        let links = self.links.borrow();
+        let link = links.iter().find(|known| known.0 == *seal)?;
         Some(link.1.clone())
     }
-    fn keep(&mut self, seal: Digest, link: Vec<u8>) -> Result<(), CheckpointError> {
-        self.replace(seal, link);
+    fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
+        self.replace(seal, link.to_vec());
         Ok(())
     }
 }
@@ -176,13 +181,14 @@ impl HistoryStore for RefusesToKeep {
     fn resolve(&self, _seal: &Digest) -> Option<Vec<u8>> {
         None
     }
-    fn keep(&mut self, seal: Digest, _link: Vec<u8>) -> Result<(), CheckpointError> {
+    fn keep(&self, seal: Digest, _link: &[u8]) -> Result<(), CheckpointError> {
         Err(CheckpointError::StoreFailed { seal })
     }
 }
 
 #[test]
 fn every_gate_passes_the_reference_core_with_one_set_of_digests() {
+    let store = MemoryStore::default();
     for case in [delivering(vec![delivery(b"input", 2_000, 6_000)], 7_000), busy()] {
         let clock = script();
         let plan = ReplayPlan {
@@ -191,14 +197,23 @@ fn every_gate_passes_the_reference_core_with_one_set_of_digests() {
         };
         let evidence = replay_gates(&case, &|| reference(8 * SECOND), &plan).expect("every gate");
         let core = reference(8 * SECOND);
-        let run = case.admit(&core).expect("admitted").record().identity().digest();
+        let run = case
+            .admit(&core, &store)
+            .expect("admitted")
+            .record()
+            .identity()
+            .digest();
         assert_eq!(evidence.run(), run);
-        let reference_digests = to(case.admit(&core).expect("admitted"), case.end())
+        let reference_digests = to(case.admit(&core, &store).expect("admitted"), case.end())
             .record()
             .digests();
         assert_ne!(
             reference_digests.applied,
-            case.admit(&core).expect("admitted").record().digests().applied
+            case.admit(&core, &store)
+                .expect("admitted")
+                .record()
+                .digests()
+                .applied
         );
         for gate in GATES {
             let of = evidence.of(gate);
@@ -229,6 +244,7 @@ impl AdmittedAt {
         &'m self,
         core: &'m dyn CoupledSolver,
         events: Vec<BoundaryEvent>,
+        store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         let body = self.body();
         let request = InitializationRequest::at(self.origin);
@@ -239,7 +255,7 @@ impl AdmittedAt {
         let origin = system.admit(solved, start)?;
         let seed = Seed::new([1, 2, 3, 4]);
         let identity = RunIdentity::new(body.model_hash(), origin.packet_hash(), seed, resolution);
-        Ok(Session::admit(body, core, origin, identity)?)
+        Ok(Session::admit(body, core, origin, identity, store)?)
     }
 }
 impl ReplayCase for AdmittedAt {
@@ -255,14 +271,16 @@ impl ReplayCase for AdmittedAt {
     fn admit<'m>(
         &'m self,
         core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
-        self.session(core, self.events()?)
+        self.session(core, self.events()?, store)
     }
     fn admit_withheld<'m>(
         &'m self,
         core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
-        self.session(core, Vec::new())
+        self.session(core, Vec::new(), store)
     }
 }
 
@@ -284,9 +302,10 @@ fn a_live_pace_counts_from_the_runs_own_start() {
 
 #[test]
 fn an_honest_core_refused_past_an_input_passes_late_admission() {
+    let store = MemoryStore::default();
     let case = delivering(vec![delivery(b"input", 18, 118)], 60);
     let core = refused_past_the_input();
-    let heads: Vec<u64> = (seals(case.admit(&core).expect("admitted"), case.end()).iter())
+    let heads: Vec<u64> = (seals(case.admit(&core, &store).expect("admitted"), case.end()).iter())
         .map(|row| row.0.nanoseconds() / SECOND)
         .collect();
     assert_eq!(heads, [0, 8, 16, 18, 34, 50, 66]);
@@ -298,7 +317,7 @@ fn an_honest_core_refused_past_an_input_passes_late_admission() {
         &plan(&clock),
     );
     assert_eq!(gate.expect("the gate").runs().len(), 2);
-    let mut late = case.admit_withheld(&core).expect("admitted");
+    let mut late = case.admit_withheld(&core, &store).expect("admitted");
     late = to(late, at(16));
     assert_eq!(
         late.record().accepted().time(),
@@ -309,30 +328,32 @@ fn an_honest_core_refused_past_an_input_passes_late_admission() {
         .expect("admitted at head 16");
     assert_eq!(
         seals(late, case.end()),
-        seals(case.admit(&core).expect("admitted"), case.end())[2..]
+        seals(case.admit(&core, &store).expect("admitted"), case.end())[2..]
     );
 }
 
 #[test]
 fn an_input_stamped_at_the_head_matches_the_same_input_known_from_the_start() {
+    let store = MemoryStore::default();
     let case = delivering(vec![delivery(b"input", 16, 116)], 60);
     let core = reference(8 * SECOND);
-    let mut late = to(case.admit_withheld(&core).expect("admitted"), at(16));
+    let mut late = to(case.admit_withheld(&core, &store).expect("admitted"), at(16));
     late.enqueue(authorized(b"input", 16, 116))
         .expect("stamped at the head");
-    let known = to(case.admit(&core).expect("admitted"), at(16));
+    let known = to(case.admit(&core, &store).expect("admitted"), at(16));
     assert_eq!(late.record().seal(), known.record().seal());
     assert_eq!(seals(late, case.end()), seals(known, case.end()));
 }
 
 #[test]
 fn inputs_admitted_at_one_head_in_any_order_match_the_timeline_known_from_the_start() {
+    let store = MemoryStore::default();
     let case = delivering(vec![delivery(b"later", 40, 50), delivery(b"sooner", 30, 50)], 60);
     let core = reference(8 * SECOND);
-    let mut late = to(case.admit_withheld(&core).expect("admitted"), at(24));
+    let mut late = to(case.admit_withheld(&core, &store).expect("admitted"), at(24));
     late.enqueue(authorized(b"later", 40, 50)).expect("admitted");
     late.enqueue(authorized(b"sooner", 30, 50)).expect("admitted");
-    let known = to(case.admit(&core).expect("admitted"), at(24));
+    let known = to(case.admit(&core, &store).expect("admitted"), at(24));
     assert_eq!(late.record().digests(), known.record().digests());
 }
 
@@ -509,9 +530,10 @@ fn tickets_until_the_fault(
     span_ns: u64,
     refuses_over_ns: u64,
 ) -> (Vec<Seen>, EngineFault) {
+    let store = MemoryStore::default();
     let seen = shared(RefCell::default());
     let core = reader(span_ns, refuses_over_ns, seen);
-    let mut attempt = case.admit(&core).expect("admitted").step();
+    let mut attempt = case.admit(&core, &store).expect("admitted").step();
     loop {
         attempt = match attempt {
             Step::Accepted(..) => panic!("no fault"),
@@ -541,6 +563,7 @@ fn a_span_of_any_size_reads_no_breakpoint_while_it_does_not_pass() {
 
 #[test]
 fn a_ticket_shows_no_waiting_input_until_a_span_past_it_has_passed() {
+    let store = MemoryStore::default();
     let run = |case: &TwoReservoirs| -> Vec<Seen> {
         let seen = shared(RefCell::default());
         let core = ReadsPastTheBreakpoint {
@@ -549,7 +572,7 @@ fn a_ticket_shows_no_waiting_input_until_a_span_past_it_has_passed() {
             refuses_over_ns: u64::MAX,
             seen,
         };
-        to(case.admit(&core).expect("admitted"), at(18));
+        to(case.admit(&core, &store).expect("admitted"), at(18));
         seen.take()
     };
     let known = run(&delivering(vec![delivery(b"input", 18, 118)], 60));
@@ -604,18 +627,19 @@ fn at_rest_with(deliveries: Vec<Delivery>) -> TwoReservoirs {
 
 #[test]
 fn a_cut_shows_only_after_its_span_has_passed() {
+    let store = MemoryStore::default();
     let span = 1 << 50;
     let seen = shared(RefCell::default());
     let core = reader(span, u64::MAX, seen);
     let case = at_rest_with(vec![delivery(b"input", 2_000, 6_000)]);
-    let session = advance(case.admit(&core).expect("admitted"));
+    let session = advance(case.admit(&core, &store).expect("admitted"));
     assert_eq!(session.record().accepted().time(), at(2_000));
     let read = seen.take();
     let lengths: Vec<u64> = read.iter().map(|seen| seen.interval.length_ns()).collect();
     assert_eq!(lengths, [span, 2_000 * SECOND]);
     assert_eq!((read[0].attempt, read[1].attempt), (0, 0));
     let quiet = at_rest_with(Vec::new());
-    let session = advance(quiet.admit(&core).expect("admitted"));
+    let session = advance(quiet.admit(&core, &store).expect("admitted"));
     assert_eq!(session.record().accepted().time(), SimTime::from_ns(span));
     assert_eq!(seen.take().len(), 1, "with nothing waiting no second solve");
 }
@@ -656,11 +680,12 @@ fn refusing(cut: u64, seen: Seeing) -> RefusesOne {
 
 #[test]
 fn the_retry_of_a_cut_halves_the_span_and_not_the_cut() {
+    let store = MemoryStore::default();
     for (cut, retry) in [(5, 4), (7, 4), (3, 2)] {
         let seen = shared(RefCell::default());
         let core = refusing(cut, seen);
         let case = delivering(vec![delivery(b"input", cut, 100)], 200);
-        let session = advance(case.admit(&core).expect("admitted"));
+        let session = advance(case.admit(&core, &store).expect("admitted"));
         let read = seen.take();
         let lengths: Vec<u64> = read
             .iter()
@@ -674,10 +699,11 @@ fn the_retry_of_a_cut_halves_the_span_and_not_the_cut() {
 
 #[test]
 fn a_refused_cut_leaves_a_fence_and_the_stamp_behind_it_is_refused() {
+    let store = MemoryStore::default();
     let seen = shared(RefCell::default());
     let core = refusing(6, seen);
     let case = delivering(vec![delivery(b"input", 6, 100)], 200);
-    let mut session = advance(case.admit(&core).expect("admitted"));
+    let mut session = advance(case.admit(&core, &store).expect("admitted"));
     assert_eq!(session.record().accepted().time(), at(4));
     assert_eq!(session.record().earliest_stamp(), at(6));
     let behind = water(b"behind", at(5), at(100), 1.0);
@@ -697,12 +723,13 @@ fn a_refused_cut_leaves_a_fence_and_the_stamp_behind_it_is_refused() {
 
 #[test]
 fn a_fence_stands_until_the_head_passes_it() {
+    let store = MemoryStore::default();
     let core = RefusesOne {
         later_ns: SECOND,
         ..refusing(6, shared(RefCell::default()))
     };
     let case = delivering(vec![delivery(b"input", 6, 100)], 200);
-    let session = advance(advance(case.admit(&core).expect("admitted")));
+    let session = advance(advance(case.admit(&core, &store).expect("admitted")));
     assert_eq!(session.record().accepted().time(), at(5));
     assert_eq!(
         session.record().earliest_stamp(),
@@ -718,6 +745,7 @@ fn a_fence_stands_until_the_head_passes_it() {
 
 #[test]
 fn a_late_input_at_the_fence_matches_the_same_input_known_from_the_start() {
+    let store = MemoryStore::default();
     let seen = shared(RefCell::default());
     let core = refusing(6, seen);
     let late = delivering(vec![delivery(b"input", 6, 100)], 40);
@@ -725,29 +753,31 @@ fn a_late_input_at_the_fence_matches_the_same_input_known_from_the_start() {
         vec![delivery(b"input", 6, 100), delivery(b"at the fence", 6, 100)],
         40,
     );
-    let mut session = advance(late.admit(&core).expect("admitted"));
+    let mut session = advance(late.admit(&core, &store).expect("admitted"));
     session
         .enqueue(authorized(b"at the fence", 6, 100))
         .expect("admitted");
     let rows = seals(session, known.end());
-    let all = seals(known.admit(&core).expect("admitted"), known.end());
+    let all = seals(known.admit(&core, &store).expect("admitted"), known.end());
     assert_eq!(rows, all[1..]);
 }
 
 #[test]
 fn a_cut_that_publishes_leaves_the_head_as_the_earliest_stamp() {
+    let store = MemoryStore::default();
     let case = delivering(vec![delivery(b"input", 5, 100)], 200);
     let core = reference(8 * SECOND);
-    let session = advance(case.admit(&core).expect("admitted"));
+    let session = advance(case.admit(&core, &store).expect("admitted"));
     assert_eq!(session.record().accepted().time(), at(5));
     assert_eq!(session.record().earliest_stamp(), at(5));
 }
 
 #[test]
 fn enqueue_refuses_a_stamp_before_the_head_and_moves_nothing_it_takes() {
+    let store = MemoryStore::default();
     let case = delivering(Vec::new(), 100);
     let core = reference(8 * SECOND);
-    let mut session = to(case.admit(&core).expect("admitted"), at(16));
+    let mut session = to(case.admit(&core, &store).expect("admitted"), at(16));
     let before = session.record().digests();
     let seal = session.record().seal();
     assert_eq!(
@@ -775,9 +805,10 @@ fn enqueue_refuses_a_stamp_before_the_head_and_moves_nothing_it_takes() {
 
 #[test]
 fn enqueue_refuses_a_stamp_at_the_admission_instant_whose_drive_was_already_read() {
+    let store = MemoryStore::default();
     let case = delivering(Vec::new(), 100);
     let core = reference(8 * SECOND);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     assert_eq!(session.record().earliest_stamp(), SimTime::from_ns(1));
     assert_eq!(
         session.enqueue(authorized(b"at admission", 0, 50)).err(),
@@ -794,8 +825,8 @@ fn enqueue_refuses_a_stamp_at_the_admission_instant_whose_drive_was_already_read
 
 fn total_received(session: &Session<'_, Running>, case: &TwoReservoirs) -> f64 {
     let column = case.exterior().expect("an open body");
-    let view = session.record().conservation();
-    let segment = view.segments().next_back().expect("a segment");
+    let view = session.conservation();
+    let segment = view.head().expect("a segment");
     let (forward, _) = segment.exchange(column);
     let total = forward
         .on(segment.interval())
@@ -805,9 +836,10 @@ fn total_received(session: &Session<'_, Running>, case: &TwoReservoirs) -> f64 {
 
 #[test]
 fn enqueue_is_idempotent_on_id_and_payload_even_after_the_input_applied() {
+    let store = MemoryStore::default();
     let case = delivering(Vec::new(), 100);
     let core = reference(8 * SECOND);
-    let mut session = to(case.admit(&core).expect("admitted"), at(16));
+    let mut session = to(case.admit(&core, &store).expect("admitted"), at(16));
     let receipt = session.enqueue(authorized(b"input", 20, 40)).expect("admitted");
     assert_eq!(receipt.id(), InputId::new(Digest::of_canonical(b"input")));
     assert_eq!(receipt.at(), at(20));
@@ -831,9 +863,10 @@ fn enqueue_is_idempotent_on_id_and_payload_even_after_the_input_applied() {
 
 #[test]
 fn enqueue_takes_the_checks_admission_takes() {
+    let store = MemoryStore::default();
     let case = delivering(vec![delivery(b"known", 40, 50)], 100);
     let core = reference(8 * SECOND);
-    let mut session = to(case.admit(&core).expect("admitted"), at(16));
+    let mut session = to(case.admit(&core, &store).expect("admitted"), at(16));
     let id = |name: &[u8]| InputId::new(Digest::of_canonical(name));
     let command = Digest::of_canonical(b"a command");
     let input = |event| AuthorizedInput::from_command_receipt(command, event);
@@ -869,13 +902,9 @@ fn enqueue_takes_the_checks_admission_takes() {
     }
 }
 
-fn saved_at<'m>(
-    session: Session<'m, Running>,
-    head: SimTime,
-    store: &mut Store,
-) -> (Session<'m, Running>, Checkpoint) {
+fn saved_at<'m>(session: Session<'m, Running>, head: SimTime) -> (Session<'m, Running>, Checkpoint) {
     let session = to(session, head);
-    let saved = session.checkpoint(store).expect("saved");
+    let saved = session.checkpoint().expect("saved");
     (session, saved)
 }
 
@@ -888,15 +917,15 @@ fn stored_bytes_resume_into_a_fresh_core_at_the_same_seal() {
     let case = busy();
     let core = reference(8 * SECOND);
     let fresh = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = saved_at(case.admit(&core).expect("admitted"), at(40), &mut store);
+    let store = Store::default();
+    let (session, saved) = saved_at(case.admit(&core, &store).expect("admitted"), at(40));
     let identity = session.record().identity();
     let resumed = Session::resume(&stored(&saved), identity, case.body(), &fresh, &store).expect("resumed");
     assert_eq!(resumed.record().seal(), session.record().seal());
     assert_eq!(resumed.record().digests(), session.record().digests());
     assert_eq!(resumed.record().revision(), session.record().revision());
-    let view = resumed.record().conservation();
-    let parent = session.record().conservation();
+    let view = resumed.conservation();
+    let parent = session.conservation();
     assert_eq!(view.span(), parent.span());
     assert_eq!(view.seal(), parent.seal());
     assert_eq!(seals(resumed, case.end()), seals(session, case.end()));
@@ -906,10 +935,10 @@ fn stored_bytes_resume_into_a_fresh_core_at_the_same_seal() {
 fn a_checkpoint_at_admission_resumes_with_no_history() {
     let case = busy();
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let session = case.admit(&core).expect("admitted");
-    let saved = session.checkpoint(&mut store).expect("saved");
-    assert!(store.links.is_empty());
+    let store = Store::default();
+    let session = case.admit(&core, &store).expect("admitted");
+    let saved = session.checkpoint().expect("saved");
+    assert!(store.links.borrow().is_empty());
     let identity = session.record().identity();
     let resumed = Session::resume(&saved, identity, case.body(), &core, &store).expect("resumed");
     assert_eq!(resumed.record().digests(), session.record().digests());
@@ -919,13 +948,13 @@ fn a_checkpoint_at_admission_resumes_with_no_history() {
 fn a_checkpoint_does_not_depend_on_when_it_was_taken() {
     let case = busy();
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, first) = saved_at(case.admit(&core).expect("admitted"), at(40), &mut store);
-    let second = session.checkpoint(&mut Store::default()).expect("saved");
+    let store = Store::default();
+    let (session, first) = saved_at(case.admit(&core, &store).expect("admitted"), at(40));
+    let second = session.checkpoint().expect("saved");
     assert_eq!(first.as_bytes(), second.as_bytes());
     let identity = session.record().identity();
     let resumed = Session::resume(&first, identity, case.body(), &core, &store).expect("resumed");
-    let again = resumed.checkpoint(&mut Store::default()).expect("saved");
+    let again = resumed.checkpoint().expect("saved");
     assert_eq!(
         again.as_bytes(),
         first.as_bytes(),
@@ -937,10 +966,10 @@ fn a_checkpoint_does_not_depend_on_when_it_was_taken() {
 fn a_waiting_input_survives_a_resume() {
     let case = delivering(Vec::new(), 100);
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let mut session = to(case.admit(&core).expect("admitted"), at(16));
+    let store = Store::default();
+    let mut session = to(case.admit(&core, &store).expect("admitted"), at(16));
     session.enqueue(authorized(b"input", 40, 60)).expect("admitted");
-    let saved = session.checkpoint(&mut store).expect("saved");
+    let saved = session.checkpoint().expect("saved");
     let identity = session.record().identity();
     let resumed = Session::resume(&saved, identity, case.body(), &core, &store).expect("resumed");
     assert_eq!(resumed.record().digests(), session.record().digests());
@@ -951,8 +980,8 @@ fn a_waiting_input_survives_a_resume() {
 fn a_delivery_ending_at_the_head_survives_a_resume() {
     let case = delivering(vec![delivery(b"input", 8, 16)], 100);
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = saved_at(case.admit(&core).expect("admitted"), at(16), &mut store);
+    let store = Store::default();
+    let (session, saved) = saved_at(case.admit(&core, &store).expect("admitted"), at(16));
     assert_eq!(
         session.record().accepted().time(),
         at(16),
@@ -969,9 +998,9 @@ fn a_fence_survives_a_resume() {
     let seen = shared(RefCell::default());
     let core = refusing(6, seen);
     let case = delivering(vec![delivery(b"input", 6, 100)], 200);
-    let mut store = Store::default();
-    let session = advance(case.admit(&core).expect("admitted"));
-    let saved = session.checkpoint(&mut store).expect("saved");
+    let store = Store::default();
+    let session = advance(case.admit(&core, &store).expect("admitted"));
+    let saved = session.checkpoint().expect("saved");
     let identity = session.record().identity();
     let resumed = Session::resume(&saved, identity, case.body(), &core, &store).expect("resumed");
     assert_eq!(resumed.record().earliest_stamp(), at(6));
@@ -990,17 +1019,16 @@ fn resealed(mut bytes: Vec<u8>) -> Checkpoint {
 fn past_every_input<'m>(
     session: Session<'m, Running>,
     case: &TwoReservoirs,
-    store: &mut Store,
 ) -> (Session<'m, Running>, Checkpoint) {
-    saved_at(session, case.end(), store)
+    saved_at(session, case.end())
 }
 
 #[test]
 fn corrupted_bytes_are_refused_before_any_body_byte_is_decoded() {
     let case = delivering(vec![delivery(b"input", 8, 16)], 40);
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = past_every_input(case.admit(&core).expect("admitted"), &case, &mut store);
+    let store = Store::default();
+    let (session, saved) = past_every_input(case.admit(&core, &store).expect("admitted"), &case);
     let identity = session.record().identity();
     for position in 0..saved.as_bytes().len() {
         let mut bytes = saved.as_bytes().to_vec();
@@ -1026,8 +1054,8 @@ fn corrupted_bytes_are_refused_before_any_body_byte_is_decoded() {
 fn each_header_refusal_is_named() {
     let case = delivering(vec![delivery(b"input", 8, 16)], 40);
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = past_every_input(case.admit(&core).expect("admitted"), &case, &mut store);
+    let store = Store::default();
+    let (session, saved) = past_every_input(case.admit(&core, &store).expect("admitted"), &case);
     let identity = session.record().identity();
     let refused = |bytes: Vec<u8>| {
         let saved = Checkpoint::from_bytes(bytes);
@@ -1068,8 +1096,8 @@ fn bytes_of_another_run_body_or_core_are_refused_before_their_body() {
     let case = delivering(vec![delivery(b"input", 8, 16)], 40);
     let core = reference(8 * SECOND);
     let other_interval = reference(4 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = past_every_input(case.admit(&core).expect("admitted"), &case, &mut store);
+    let store = Store::default();
+    let (session, saved) = past_every_input(case.admit(&core, &store).expect("admitted"), &case);
     let identity = session.record().identity();
     let mismatch = Some(CheckpointError::IdentityMismatch);
     let other = other_interval.resolution();
@@ -1100,8 +1128,8 @@ fn bytes_of_another_run_body_or_core_are_refused_before_their_body() {
 fn a_well_sealed_malformed_body_is_refused_and_never_panics() {
     let case = delivering(vec![delivery(b"input", 8, 16)], 40);
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = past_every_input(case.admit(&core).expect("admitted"), &case, &mut store);
+    let store = Store::default();
+    let (session, saved) = past_every_input(case.admit(&core, &store).expect("admitted"), &case);
     let identity = session.record().identity();
     let (digests, earliest) = (session.record().digests(), session.record().earliest_stamp());
     let bytes = saved.as_bytes();
@@ -1136,8 +1164,8 @@ fn a_well_sealed_malformed_body_is_refused_and_never_panics() {
 fn a_bound_value_changed_under_a_good_digest_is_refused() {
     let case = delivering(vec![delivery(b"input", 8, 16)], 40);
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = past_every_input(case.admit(&core).expect("admitted"), &case, &mut store);
+    let store = Store::default();
+    let (session, saved) = past_every_input(case.admit(&core, &store).expect("admitted"), &case);
     let identity = session.record().identity();
     let mut bytes = saved.as_bytes().to_vec();
     let image = u64::from_be_bytes(*bytes[HEADER..].first_chunk().expect("a length")) as usize;
@@ -1154,8 +1182,8 @@ fn a_bound_value_changed_under_a_good_digest_is_refused() {
 fn arbitrary_bodies_are_refused_and_never_panic() {
     let case = delivering(vec![delivery(b"input", 8, 16)], 40);
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = past_every_input(case.admit(&core).expect("admitted"), &case, &mut store);
+    let store = Store::default();
+    let (session, saved) = past_every_input(case.admit(&core, &store).expect("admitted"), &case);
     let identity = session.record().identity();
     let header = &saved.as_bytes()[..HEADER];
     let mut word = 0x9E37_79B9_7F4A_7C15_u64;
@@ -1193,10 +1221,10 @@ fn with_first_ordinal(saved: &Checkpoint, ordinal: u64, body: &CompiledBody) -> 
 fn a_stream_ordinal_changed_under_a_good_digest_is_a_seal_mismatch() {
     let case = ChanceCase::ectopy().expect("a body");
     let core = reference(SECOND);
-    let mut store = Store::default();
-    let session = case.admit(&core).expect("admitted");
+    let store = Store::default();
+    let session = case.admit(&core, &store).expect("admitted");
     let session = to(session, at(10));
-    let saved = session.checkpoint(&mut store).expect("saved");
+    let saved = session.checkpoint().expect("saved");
     let identity = session.record().identity();
     let forged = with_first_ordinal(&saved, 5, case.body());
     assert_eq!(
@@ -1210,18 +1238,18 @@ fn a_stream_ordinal_changed_under_a_good_digest_is_a_seal_mismatch() {
 fn a_missing_or_altered_link_is_refused_by_its_seal() {
     let case = delivering(vec![delivery(b"input", 8, 16)], 40);
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = past_every_input(case.admit(&core).expect("admitted"), &case, &mut store);
+    let store = Store::default();
+    let (session, saved) = past_every_input(case.admit(&core, &store).expect("admitted"), &case);
     let identity = session.record().identity();
     let body = case.body();
-    let (seal, link) = store.links[0].clone();
+    let (seal, link) = store.link(0);
     assert_eq!(
         Session::resume(&saved, identity, body, &core, &store.without(seal)).err(),
         Some(CheckpointError::HistoryMissing { seal })
     );
     let altered = Some(CheckpointError::HistoryAltered { seal });
     for (position, length) in [(70, link.len()), (40, link.len()), (0, link.len()), (70, 70)] {
-        let mut changed = store.clone();
+        let changed = store.clone();
         let mut bytes = link.clone();
         bytes[position] ^= 1;
         bytes.truncate(length);
@@ -1232,7 +1260,7 @@ fn a_missing_or_altered_link_is_refused_by_its_seal() {
         );
     }
     for short in [31, 63] {
-        let mut changed = store.clone();
+        let changed = store.clone();
         changed.replace(seal, vec![0; short]);
         assert_eq!(
             Session::resume(&saved, identity, body, &core, &changed).err(),
@@ -1241,8 +1269,8 @@ fn a_missing_or_altered_link_is_refused_by_its_seal() {
     }
 }
 
-fn relinked(store: &mut Store, saved: &Checkpoint, image: &[u8], chunk: &[u8]) -> (Digest, Checkpoint) {
-    let (_, link) = store.links[0].clone();
+fn relinked(store: &Store, saved: &Checkpoint, image: &[u8], chunk: &[u8]) -> (Digest, Checkpoint) {
+    let (_, link) = store.link(0);
     let revision = u64::from_be_bytes(*saved.as_bytes()[80..].first_chunk().expect("a revision"));
     let mut chained = link[..32].to_vec();
     chained.extend_from_slice(&revision.to_be_bytes());
@@ -1260,19 +1288,19 @@ fn relinked(store: &mut Store, saved: &Checkpoint, image: &[u8], chunk: &[u8]) -
 fn a_link_that_chains_true_and_holds_no_chunk_is_altered() {
     let case = delivering(vec![delivery(b"input", 8, 16)], 16);
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = saved_at(case.admit(&core).expect("admitted"), at(8), &mut store);
+    let store = Store::default();
+    let (session, saved) = saved_at(case.admit(&core, &store).expect("admitted"), at(8));
     let identity = session.record().identity();
-    let (image, good) = (store.links[0].1[32..64].to_vec(), store.links[0].1[64..].to_vec());
+    let (image, good) = (store.link(0).1[32..64].to_vec(), store.link(0).1[64..].to_vec());
     let mut long = good.clone();
     long.push(0);
     let empty_interval: Vec<u8> = [&good[8..16], &good[8..16], &good[16..]].concat();
     let mut not_finite = good.clone();
     not_finite[16..24].copy_from_slice(&f64::INFINITY.to_bits().to_be_bytes());
-    let (_, same) = relinked(&mut store, &saved, &image, &good);
+    let (_, same) = relinked(&store, &saved, &image, &good);
     assert!(Session::resume(&same, identity, case.body(), &core, &store).is_ok());
     for chunk in [Vec::new(), long, empty_interval, not_finite] {
-        let (seal, named) = relinked(&mut store, &saved, &image, &chunk);
+        let (seal, named) = relinked(&store, &saved, &image, &chunk);
         assert_eq!(
             Session::resume(&named, identity, case.body(), &core, &store).err(),
             Some(CheckpointError::HistoryAltered { seal })
@@ -1284,11 +1312,11 @@ fn a_link_that_chains_true_and_holds_no_chunk_is_altered() {
 fn a_chain_that_records_another_image_for_the_head_is_a_seal_mismatch() {
     let case = delivering(vec![delivery(b"input", 8, 16)], 16);
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = saved_at(case.admit(&core).expect("admitted"), at(8), &mut store);
+    let store = Store::default();
+    let (session, saved) = saved_at(case.admit(&core, &store).expect("admitted"), at(8));
     let identity = session.record().identity();
-    let good = store.links[0].1[64..].to_vec();
-    let (_, named) = relinked(&mut store, &saved, &[7; 32], &good);
+    let good = store.link(0).1[64..].to_vec();
+    let (_, named) = relinked(&store, &saved, &[7; 32], &good);
     assert_eq!(
         Session::resume(&named, identity, case.body(), &core, &store).err(),
         Some(CheckpointError::SealMismatch)
@@ -1299,8 +1327,8 @@ fn a_chain_that_records_another_image_for_the_head_is_a_seal_mismatch() {
 fn a_chain_that_misses_the_opening_is_refused() {
     let case = delivering(vec![delivery(b"input", 8, 16)], 16);
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = saved_at(case.admit(&core).expect("admitted"), at(8), &mut store);
+    let store = Store::default();
+    let (session, saved) = saved_at(case.admit(&core, &store).expect("admitted"), at(8));
     let identity = session.record().identity();
     let mut bytes = saved.as_bytes().to_vec();
     let opening_end = bytes.len() - 32;
@@ -1316,41 +1344,28 @@ fn a_chain_that_misses_the_opening_is_refused() {
 fn a_store_that_cannot_keep_a_link_leaves_no_checkpoint() {
     let case = busy();
     let core = reference(8 * SECOND);
-    let session = to(case.admit(&core).expect("admitted"), at(8));
-    let refused = session.checkpoint(&mut RefusesToKeep);
+    let session = to(case.admit(&core, &RefusesToKeep).expect("admitted"), at(8));
+    let refused = session.checkpoint();
     assert!(matches!(refused.err(), Some(CheckpointError::StoreFailed { .. })));
 }
 
 #[test]
-fn a_store_keeps_each_link_once_oldest_first() {
-    struct Counting {
-        kept: Vec<Digest>,
-    }
-    impl HistoryStore for Counting {
-        fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
-            self.kept.contains(seal).then(Vec::new)
-        }
-        fn keep(&mut self, seal: Digest, _link: Vec<u8>) -> Result<(), CheckpointError> {
-            self.kept.push(seal);
-            Ok(())
-        }
-    }
+fn each_accepted_step_keeps_one_link_oldest_first_and_a_checkpoint_keeps_none() {
     let case = delivering(Vec::new(), 40);
     let core = reference(8 * SECOND);
-    let mut store = Counting { kept: Vec::new() };
-    let session = to(case.admit(&core).expect("admitted"), at(16));
-    session.checkpoint(&mut store).expect("saved");
-    assert_eq!(store.kept.len(), 2);
+    let store = Store::default();
+    let session = to(case.admit(&core, &store).expect("admitted"), at(16));
+    assert_eq!(store.links.borrow().len(), 2);
+    session.checkpoint().expect("saved");
+    assert_eq!(store.links.borrow().len(), 2, "a checkpoint keeps nothing");
     let session = to(session, at(40));
-    session.checkpoint(&mut store).expect("saved");
-    assert_eq!(store.kept.len(), 5, "the first two were not kept again");
-    let mut fresh = Store::default();
-    session.checkpoint(&mut fresh).expect("saved");
-    for pair in store.kept.windows(2) {
-        let link = fresh.resolve(&pair[1]).expect("a link");
+    let kept = store.links.borrow().clone();
+    assert_eq!(kept.len(), 5);
+    assert_eq!(kept[4].0, session.record().seal().digest());
+    for pair in kept.windows(2) {
         assert_eq!(
-            link[..32],
-            *pair[0].as_bytes(),
+            pair[1].1[..32],
+            *pair[0].0.as_bytes(),
             "each link follows the one before"
         );
     }
@@ -1360,8 +1375,8 @@ fn a_store_keeps_each_link_once_oldest_first() {
 fn a_rewind_after_the_parent_ran_ahead_leaves_the_parent_and_shares_its_seals() {
     let case = busy();
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = saved_at(case.admit(&core).expect("admitted"), at(40), &mut store);
+    let store = Store::default();
+    let (session, saved) = saved_at(case.admit(&core, &store).expect("admitted"), at(40));
     let (fork_revision, fork_at) = (session.record().revision(), session.record().accepted().time());
     let parent = to(session, at(80));
     let before = parent.record().digests();
@@ -1372,13 +1387,13 @@ fn a_rewind_after_the_parent_ran_ahead_leaves_the_parent_and_shares_its_seals() 
     assert_eq!(parent.record().digests(), before, "the parent stays as it is");
     let ancestry = fork.record().ancestry();
     assert_eq!(ancestry.len(), 1);
-    assert_eq!(ancestry[0].parent(), parent.record().conservation().seal().branch);
+    assert_eq!(ancestry[0].parent(), parent.conservation().seal().branch);
     assert_eq!(
         (ancestry[0].revision(), ancestry[0].at()),
         (fork_revision, fork_at)
     );
     assert_eq!(
-        fork.record().conservation().seal().branch,
+        fork.conservation().seal().branch,
         Digest::of_canonical(b"try again")
     );
     let fork = to(fork, at(80));
@@ -1388,7 +1403,7 @@ fn a_rewind_after_the_parent_ran_ahead_leaves_the_parent_and_shares_its_seals() 
         "one course, one seal"
     );
     assert_eq!(fork.record().digests(), before);
-    let saved_fork = fork.checkpoint(&mut store).expect("saved");
+    let saved_fork = fork.checkpoint().expect("saved");
     let identity = fork.record().identity();
     let loaded = Session::resume(&saved_fork, identity, case.body(), &core, &store).expect("loaded");
     assert_eq!(loaded.record().ancestry(), fork.record().ancestry());
@@ -1398,9 +1413,9 @@ fn a_rewind_after_the_parent_ran_ahead_leaves_the_parent_and_shares_its_seals() 
 fn a_rewind_refuses_a_branch_on_its_line_another_run_and_a_checkpoint_off_its_chain() {
     let case = busy();
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = saved_at(case.admit(&core).expect("admitted"), at(40), &mut store);
-    let own = session.record().conservation().seal().branch;
+    let store = Store::default();
+    let (session, saved) = saved_at(case.admit(&core, &store).expect("admitted"), at(40));
+    let own = session.conservation().seal().branch;
     assert_eq!(
         session.rewind(&saved, BranchId::new(own)).err(),
         Some(CheckpointError::BranchInUse)
@@ -1418,12 +1433,8 @@ fn a_rewind_refuses_a_branch_on_its_line_another_run_and_a_checkpoint_off_its_ch
     );
     let other = delivering(vec![delivery(b"first", 30, 90)], 120);
     let foreign = reference(16 * SECOND);
-    let mut foreign_store = Store::default();
-    let (run, bytes) = saved_at(
-        other.admit(&foreign).expect("admitted"),
-        at(32),
-        &mut foreign_store,
-    );
+    let foreign_store = Store::default();
+    let (run, bytes) = saved_at(other.admit(&foreign, &foreign_store).expect("admitted"), at(32));
     assert_eq!(
         session.rewind(&bytes, first).err(),
         Some(CheckpointError::IdentityMismatch)
@@ -1433,7 +1444,7 @@ fn a_rewind_refuses_a_branch_on_its_line_another_run_and_a_checkpoint_off_its_ch
         Some(CheckpointError::IdentityMismatch)
     );
     let parted = delivering(vec![delivery(b"sibling", 16, 90)], 120);
-    let (_, off_the_chain) = saved_at(parted.admit(&core).expect("admitted"), at(40), &mut store);
+    let (_, off_the_chain) = saved_at(parted.admit(&core, &store).expect("admitted"), at(40));
     assert_eq!(
         session.rewind(&off_the_chain, first).err(),
         Some(CheckpointError::NotOnThisBranch)
@@ -1444,8 +1455,8 @@ fn a_rewind_refuses_a_branch_on_its_line_another_run_and_a_checkpoint_off_its_ch
 fn a_rewind_refuses_a_sibling_with_one_ledger_and_another_accepted_image() {
     let case = delivering(Vec::new(), 40);
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = saved_at(case.admit(&core).expect("admitted"), at(8), &mut store);
+    let store = Store::default();
+    let (session, saved) = saved_at(case.admit(&core, &store).expect("admitted"), at(8));
     let branch = BranchId::new(Digest::of_canonical(b"sibling"));
     let mut sibling = session.rewind(&saved, branch).expect("a fork");
     let nothing = water(b"nothing", at(8), at(24), 0.0);
@@ -1459,7 +1470,7 @@ fn a_rewind_refuses_a_sibling_with_one_ledger_and_another_accepted_image() {
         parent.record().digests().ledger
     );
     assert_ne!(sibling.record().seal(), parent.record().seal());
-    let off_the_chain = sibling.checkpoint(&mut store).expect("saved");
+    let off_the_chain = sibling.checkpoint().expect("saved");
     let other = BranchId::new(Digest::of_canonical(b"other"));
     assert_eq!(
         parent.rewind(&off_the_chain, other).err(),
@@ -1471,16 +1482,16 @@ fn a_rewind_refuses_a_sibling_with_one_ledger_and_another_accepted_image() {
 fn a_fork_may_not_take_the_name_of_a_branch_it_came_from() {
     let case = busy();
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let session = to(case.admit(&core).expect("admitted"), at(16));
-    let saved = session.checkpoint(&mut store).expect("saved");
+    let store = Store::default();
+    let session = to(case.admit(&core, &store).expect("admitted"), at(16));
+    let saved = session.checkpoint().expect("saved");
     let first = BranchId::new(Digest::of_canonical(b"first"));
     let second = BranchId::new(Digest::of_canonical(b"second"));
     let middle = session.rewind(&saved, first).expect("a fork");
-    let on_middle = middle.checkpoint(&mut store).expect("saved");
+    let on_middle = middle.checkpoint().expect("saved");
     let last = middle.rewind(&on_middle, second).expect("a fork of a fork");
     assert_eq!(last.record().ancestry().len(), 2);
-    let on_last = last.checkpoint(&mut store).expect("saved");
+    let on_last = last.checkpoint().expect("saved");
     assert_eq!(
         last.rewind(&on_last, first).err(),
         Some(CheckpointError::BranchInUse)
@@ -1491,9 +1502,9 @@ fn a_fork_may_not_take_the_name_of_a_branch_it_came_from() {
 fn an_opening_of_another_length_is_malformed_whatever_a_forged_chain_says() {
     let case = delivering(Vec::new(), 40);
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let session = case.admit(&core).expect("admitted");
-    let saved = session.checkpoint(&mut store).expect("saved");
+    let store = Store::default();
+    let session = case.admit(&core, &store).expect("admitted");
+    let saved = session.checkpoint().expect("saved");
     let identity = session.record().identity();
     let values = case.body().conserved_basis().combinations().len();
     let mut bytes = saved.as_bytes().to_vec();
@@ -1512,8 +1523,8 @@ fn an_opening_of_another_length_is_malformed_whatever_a_forged_chain_says() {
 fn a_byte_left_over_after_the_parts_is_malformed() {
     let case = delivering(vec![delivery(b"input", 8, 16)], 40);
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let (session, saved) = past_every_input(case.admit(&core).expect("admitted"), &case, &mut store);
+    let store = Store::default();
+    let (session, saved) = past_every_input(case.admit(&core, &store).expect("admitted"), &case);
     let mut bytes = saved.as_bytes().to_vec();
     bytes.push(0);
     let body = (bytes.len() - HEADER) as u64;
@@ -1529,13 +1540,13 @@ fn a_byte_left_over_after_the_parts_is_malformed() {
 fn a_fork_named_after_the_branch_it_saved_from_is_refused() {
     let case = busy();
     let core = reference(8 * SECOND);
-    let mut store = Store::default();
-    let session = to(case.admit(&core).expect("admitted"), at(16));
+    let store = Store::default();
+    let session = to(case.admit(&core, &store).expect("admitted"), at(16));
     let (fork_id, saved) = {
-        let start = session.checkpoint(&mut store).expect("saved");
+        let start = session.checkpoint().expect("saved");
         let id = BranchId::new(Digest::of_canonical(b"twin"));
         let twin = to(session.rewind(&start, id).expect("a fork"), at(24));
-        (id, twin.checkpoint(&mut store).expect("saved"))
+        (id, twin.checkpoint().expect("saved"))
     };
     let parent = to(session, at(24));
     assert_eq!(
@@ -1571,16 +1582,16 @@ fn a_latched_session_exports_an_image_only_recover_continues() {
         inner: reference(8 * SECOND),
         at: at(16),
     };
-    let mut store = Store::default();
-    let session = to(case.admit(&core).expect("admitted"), at(16));
+    let store = Store::default();
+    let session = to(case.admit(&core, &store).expect("admitted"), at(16));
     let earlier = {
-        let parked = session.checkpoint(&mut store).expect("saved");
+        let parked = session.checkpoint().expect("saved");
         Checkpoint::from_bytes(parked.as_bytes().to_vec())
     };
     let Step::Faulted(stopped) = session.step() else {
         panic!("not faulted");
     };
-    let report = stopped.export(&mut store).expect("exported");
+    let report = stopped.export().expect("exported");
     assert_eq!(report.fault().kind(), EngineFaultKind::BindingMismatch);
     assert_eq!(report.refusals(), stopped.refusals());
     let identity = stopped.record().identity();
@@ -1606,10 +1617,7 @@ fn a_latched_session_exports_an_image_only_recover_continues() {
     assert_eq!(from_earlier.record().digests(), stopped.record().digests());
     assert_eq!(
         stopped
-            .recover(
-                &earlier,
-                BranchId::new(stopped.record().conservation().seal().branch)
-            )
+            .recover(&earlier, BranchId::new(stopped.conservation().seal().branch))
             .err(),
         Some(CheckpointError::BranchInUse)
     );
@@ -1619,10 +1627,10 @@ fn save_resume_rewind<'m>(
     session: &Session<'m, Running>,
     body: &'m CompiledBody,
     solver: &'m dyn CoupledSolver,
-    store: &mut dyn HistoryStore,
+    store: &'m dyn HistoryStore,
     fork: BranchId,
 ) -> Result<(Session<'m, Running>, Session<'m, Running>), CheckpointError> {
-    let saved = session.checkpoint(store)?;
+    let saved = session.checkpoint()?;
     let stored: Vec<u8> = saved.as_bytes().to_vec();
     let bytes = Checkpoint::from_bytes(stored);
     let resumed = Session::resume(&bytes, session.record().identity(), body, solver, store)?;
@@ -1635,11 +1643,11 @@ fn the_contracts_call_site_saves_resumes_and_rewinds() {
     let case = busy();
     let core = reference(8 * SECOND);
     let fresh = reference(8 * SECOND);
-    let mut store = Store::default();
-    let session = to(case.admit(&core).expect("admitted"), at(40));
+    let store = Store::default();
+    let session = to(case.admit(&core, &store).expect("admitted"), at(40));
     let fork = BranchId::new(Digest::of_canonical(b"fork"));
     let (resumed, forked) =
-        save_resume_rewind(&session, case.body(), &fresh, &mut store, fork).expect("the call site");
+        save_resume_rewind(&session, case.body(), &fresh, &store, fork).expect("the call site");
     assert_eq!(resumed.record().digests(), session.record().digests());
     assert_eq!(forked.record().digests(), session.record().digests());
 }
@@ -1835,11 +1843,12 @@ fn a_lost_count_that_shows_steps_after_the_load_fails_resume() {
 
 #[test]
 fn every_gate_in_one_evidence_measured_one_course() {
+    let store = MemoryStore::default();
     let case = delivering(vec![delivery(b"nothing", 4, 6)], 10);
     let (one, two) = (MarksItsFirstSteps { marker: 1 }, MarksItsFirstSteps { marker: 2 });
     let (one, two) = (
-        to(case.admit(&one).expect("admitted"), case.end()),
-        to(case.admit(&two).expect("admitted"), case.end()),
+        to(case.admit(&one, &store).expect("admitted"), case.end()),
+        to(case.admit(&two, &store).expect("admitted"), case.end()),
     );
     assert_eq!(one.record().digests(), two.record().digests());
     assert_ne!(one.record().seal(), two.record().seal());
@@ -1867,11 +1876,11 @@ fn a_rewind_refuses_the_admission_checkpoint_of_another_start() {
         origin: at(100),
     };
     let core = reference(SECOND);
-    let mut store = Store::default();
-    let parent = case.admit(&core).expect("admitted");
-    let own = parent.checkpoint(&mut store).expect("saved");
-    let foreign = elsewhere.session(&core, Vec::new()).expect("admitted");
-    let foreign = foreign.checkpoint(&mut store).expect("saved");
+    let store = Store::default();
+    let parent = case.admit(&core, &store).expect("admitted");
+    let own = parent.checkpoint().expect("saved");
+    let foreign = elsewhere.session(&core, Vec::new(), &store).expect("admitted");
+    let foreign = foreign.checkpoint().expect("saved");
     let parent = to(parent, at(2));
     let first = BranchId::new(Digest::of_canonical(b"own origin"));
     let second = BranchId::new(Digest::of_canonical(b"another origin"));
@@ -1945,9 +1954,10 @@ fn a_cache_that_shows_only_at_a_deliverys_end_fails_resume() {
 
 #[test]
 fn a_receipt_says_when_its_step_started_at_a_breakpoint() {
+    let store = MemoryStore::default();
     let case = delivering(vec![delivery(b"input", 8, 16)], 40);
     let core = reference(8 * SECOND);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut started_at_one = Vec::new();
     while session.record().accepted().time() < at(32) {
         let Step::Accepted(next, receipt) = session.step() else {
@@ -1994,6 +2004,7 @@ impl Random {
 
 /// Returns `None` when the known run faults, which says nothing about a late one.
 fn late_against_known(core: &dyn CoupledSolver, random: &mut Random) -> Option<u64> {
+    let store = MemoryStore::default();
     let names: [&[u8]; 4] = [b"a", b"b", b"c", b"d"];
     let inputs: Vec<(&[u8], SimTime, SimTime)> = (0..1 + random.below(4))
         .map(|name| {
@@ -2011,7 +2022,7 @@ fn late_against_known(core: &dyn CoupledSolver, random: &mut Random) -> Option<u
         })
         .collect();
     let case = delivering(deliveries, 120);
-    let mut known = case.admit(core).expect("admitted");
+    let mut known = case.admit(core, &store).expect("admitted");
     let mut rows = vec![(
         known.record().accepted().time(),
         known.record().seal(),
@@ -2035,7 +2046,7 @@ fn late_against_known(core: &dyn CoupledSolver, random: &mut Random) -> Option<u
         arrivals.push((random.below(last + 1), event));
     }
     arrivals.sort_by_key(|arrival| arrival.0);
-    let mut late = case.admit_withheld(core).expect("admitted");
+    let mut late = case.admit_withheld(core, &store).expect("admitted");
     let mut seen = vec![(late.record().accepted().time(), late.record().seal())];
     for (revision, event) in arrivals {
         while late.record().revision() < revision {

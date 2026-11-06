@@ -266,11 +266,18 @@ fn the_pinned_body_runs_every_operator_and_every_one_the_slice_runs() {
 
 #[test]
 fn every_operators_value_stays_on_the_accepted_bits() {
+    let store = MemoryStore::default();
     let (body, a) = every_operator().expect("compiled");
     let core = ReferenceIntegrator::new(SECOND / 2);
     let port = BoundaryPort::new(Vec::new()).expect("no event");
-    let session =
-        admit_fixture(&body, packet(&body, a, None).expect("a packet"), port, &core).expect("admitted");
+    let session = admit_fixture(
+        &body,
+        packet(&body, a, None).expect("a packet"),
+        port,
+        &core,
+        &store,
+    )
+    .expect("admitted");
     let Ok(session) = run_until(session, SimTime::from_ns(4 * SECOND)) else {
         panic!("the bench faulted");
     };

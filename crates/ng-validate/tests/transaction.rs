@@ -1,6 +1,8 @@
+mod certificate_oracle;
 mod cores;
 
-use core::cell::RefCell;
+use certificate_oracle::{Ledger, certified};
+use core::cell::{Cell, RefCell};
 use core::num::NonZeroU64;
 use cores::forced_refusal::{ForcedRefusal, Refuser};
 use cores::must_fail::{
@@ -92,24 +94,17 @@ fn gate(case: TwoReservoirs) -> AccuracyPolicy {
     AccuracyPolicy::new(cases, measure(5.0), measure(0.0), 100 * SECOND).expect("a policy")
 }
 
-fn ledger_policy(basis: &ConservedBasis, drift: f64) -> CertificatePolicy {
-    ledger_policy_with(basis, 1e-24, 1e-9, drift)
+fn ledger_policy(basis: &ConservedBasis, drift: f64) -> Ledger {
+    Ledger::new(basis, 1e-24, 1e-9, drift)
 }
 
-fn ledger_policy_with(basis: &ConservedBasis, absolute: f64, relative: f64, drift: f64) -> CertificatePolicy {
-    let quantities = (basis.ids())
-        .map(|quantity| {
-            QuantityPolicy::new::<Water>(quantity, measure(absolute), measure(relative), measure(drift))
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .expect("a policy of water");
-    let windows = Sliding24Hours::covering(48 * HOUR).expect("a coverage");
-    CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows).expect("a policy")
+fn ledger_policy_with(basis: &ConservedBasis, absolute: f64, relative: f64, drift: f64) -> Ledger {
+    Ledger::new(basis, absolute, relative, drift)
 }
 
-fn total_received(record: &PatientRecord<'_>, column: ColumnId) -> Compensated {
-    let view = record.conservation();
-    let segment = view.segments().next_back().expect("an accepted step");
+fn total_received<S>(session: &Session<'_, S>, column: ColumnId) -> Compensated {
+    let view = session.conservation();
+    let segment = view.head().expect("an accepted step");
     let (forward, reverse) = segment.exchange(column);
     let piece = segment.interval();
     forward.on(piece).expect("its own segment")[1].minus(reverse.on(piece).expect("its own segment")[1])
@@ -128,15 +123,16 @@ fn the_stepped_inflow_matches_its_closed_form_at_first_order_over_three_refineme
 
 #[test]
 fn forward_euler_past_rc_closes_every_ledger_and_fails_the_accuracy_gate() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = euler(case.relaxation_ns() * 102 / 100);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     while session.record().accepted().time() < SimTime::from_ns(48 * HOUR) {
         (session, _) = accepted(session.step());
     }
-    let view = session.record().conservation();
+    let view = session.conservation();
     let unbounded = ledger_policy(view.basis(), 1e12);
-    certify(&view, &unbounded).expect("the ledger closes though the difference grows");
+    certified(&view, &unbounded).expect("the ledger closes though the difference grows");
 
     let failure = accuracy(&core, &gate(stepped()));
     let Err(AccuracyFailure::Exceeded { at, .. }) = failure else {
@@ -147,7 +143,7 @@ fn forward_euler_past_rc_closes_every_ledger_and_fails_the_accuracy_gate() {
         SimTime::from_ns(100 * SECOND),
         "the first grid instant inside the first step"
     );
-    let (first, _) = accepted(case.admit(&core).expect("admitted").step());
+    let (first, _) = accepted(case.admit(&core, &store).expect("admitted").step());
     for row in case.rows() {
         assert!(!first.record().accepted().value(row).at_most(Compensated::ZERO));
     }
@@ -155,6 +151,7 @@ fn forward_euler_past_rc_closes_every_ledger_and_fails_the_accuracy_gate() {
 
 #[test]
 fn a_forced_refusal_changes_nothing_and_the_retry_applies_the_delivery_once() {
+    let store = MemoryStore::default();
     for by in [Refuser::Record, Refuser::Core] {
         let case = stepped();
         let (instant, delivery) = case.delivery().expect("a delivery");
@@ -164,7 +161,7 @@ fn a_forced_refusal_changes_nothing_and_the_retry_applies_the_delivery_once() {
             at: instant,
             by,
         };
-        let session = to(case.admit(&core).expect("admitted"), instant);
+        let session = to(case.admit(&core, &store).expect("admitted"), instant);
         let before = session.record().digests();
         let seal = session.record().seal();
         let session = refused(session.step());
@@ -180,18 +177,19 @@ fn a_forced_refusal_changes_nothing_and_the_retry_applies_the_delivery_once() {
         let (session, next) = accepted(session.step());
         assert_eq!(next.applied(), []);
         let session = to(session, SimTime::from_ns(7_000 * SECOND));
-        let received = total_received(session.record(), case.exterior().expect("an open body"));
+        let received = total_received(&session, case.exterior().expect("an open body"));
         assert!((hi(received) - 20_000.0).abs() < 1e-7, "{received:?}");
     }
 }
 
 #[test]
 fn a_core_that_books_one_sample_while_its_endpoint_came_from_other_stages_faults() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = OneSample {
         interval_ns: 8 * SECOND,
     };
-    let session = case.admit(&core).expect("admitted");
+    let session = case.admit(&core, &store).expect("admitted");
     let before = session.record().digests();
     let Step::Faulted(stopped) = session.step() else {
         panic!("not faulted");
@@ -202,12 +200,13 @@ fn a_core_that_books_one_sample_while_its_endpoint_came_from_other_stages_faults
 
 #[test]
 fn an_honest_heun_core_passes_what_its_broken_twins_fail() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = Heun {
         interval_ns: 8 * SECOND,
     };
     let session = to(
-        case.admit(&core).expect("admitted"),
+        case.admit(&core, &store).expect("admitted"),
         SimTime::from_ns(80 * SECOND),
     );
     assert_eq!(session.record().accepted().time(), SimTime::from_ns(80 * SECOND));
@@ -215,6 +214,7 @@ fn an_honest_heun_core_passes_what_its_broken_twins_fail() {
 
 #[test]
 fn the_certificate_reads_compensated_amounts_where_a_plain_ledger_loses_the_exchange() {
+    let store = MemoryStore::default();
     const RATE: f64 = 1e-18;
     const STEP_SECONDS: u64 = 60;
     const STEPS: u64 = 48 * 3600 / STEP_SECONDS;
@@ -227,9 +227,12 @@ fn the_certificate_reads_compensated_amounts_where_a_plain_ledger_loses_the_exch
     };
     let case = TwoReservoirs::delivering([measure(1.0), measure(1.0)], vec![delivery]).expect("a body");
     let core = reference(STEP_SECONDS * SECOND);
-    let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
-    let view = session.record().conservation();
-    let certificate = certify(&view, &ledger_policy(view.basis(), 1.0)).expect("it closes");
+    let session = to(
+        case.admit(&core, &store).expect("admitted"),
+        SimTime::from_ns(48 * HOUR),
+    );
+    let view = session.conservation();
+    let certificate = certified(&view, &ledger_policy(view.basis(), 1.0)).expect("it closes");
     assert!(certificate.pieces() > 0);
 
     let (mut inventory, mut exchange) = (2.0_f64, 0.0_f64);
@@ -242,29 +245,32 @@ fn the_certificate_reads_compensated_amounts_where_a_plain_ledger_loses_the_exch
     assert!(plain_closure > allowed, "a plain f64 ledger fails this same body");
 
     let scaled = ledger_policy_with(view.basis(), 1e-40, 1e-9, 1.0);
-    certify(&view, &scaled).expect("the residual is small against this window's own exchange");
+    certified(&view, &scaled).expect("the residual is small against this window's own exchange");
     let unscaled = ledger_policy_with(view.basis(), 1e-40, 0.0, 1.0);
-    let failure = certify(&view, &unscaled).expect_err("the same residual is above the absolute floor alone");
+    let failure =
+        certified(&view, &unscaled).expect_err("the same residual is above the absolute floor alone");
     assert_eq!(failure.check(), CertificateCheck::Closure);
 }
 
 #[test]
 fn a_misplaced_stage_and_a_wrong_weight_fault_with_method_mismatch() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = MisplacedStage {
         interval_ns: 8 * SECOND,
     };
-    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    let fault = fault_of(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(fault.kind(), EngineFaultKind::MethodMismatch);
     let core = WrongWeight {
         interval_ns: 8 * SECOND,
     };
-    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    let fault = fault_of(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(fault.kind(), EngineFaultKind::MethodMismatch);
 }
 
 #[test]
 fn a_stage_evaluated_on_other_values_faults_with_method_mismatch() {
+    let store = MemoryStore::default();
     let case = stepped();
     let values = case.other_values().expect("bound");
     let inner = reference(8 * SECOND);
@@ -280,12 +286,13 @@ fn a_stage_evaluated_on_other_values_faults_with_method_mismatch() {
         identity: &identity,
         inner,
     };
-    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    let fault = fault_of(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(fault.kind(), EngineFaultKind::MethodMismatch);
 }
 
 #[test]
 fn a_history_kept_across_a_breakpoint_faults_with_method_mismatch() {
+    let store = MemoryStore::default();
     let case = stepped();
     let (start, _) = case.delivery().expect("a delivery");
     let end = SimTime::from_ns(6_000 * SECOND);
@@ -294,7 +301,7 @@ fn a_history_kept_across_a_breakpoint_faults_with_method_mismatch() {
             inner: euler(8 * SECOND),
             keeps_after,
         };
-        let session = to(case.admit(&core).expect("admitted"), breakpoint);
+        let session = to(case.admit(&core, &store).expect("admitted"), breakpoint);
         let fault = fault_of(session.step());
         assert_eq!(fault.kind(), EngineFaultKind::MethodMismatch);
         assert_eq!(
@@ -307,79 +314,86 @@ fn a_history_kept_across_a_breakpoint_faults_with_method_mismatch() {
 
 #[test]
 fn a_continuation_of_another_core_faults_with_binding_mismatch() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = ForeignHistory {
         inner: euler(8 * SECOND),
     };
-    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    let fault = fault_of(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
 }
 
 #[test]
 fn a_stale_proposal_is_a_binding_mismatch_not_a_refusal() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = StaleProposal {
         inner: euler(8 * SECOND),
         kept: RefCell::new(None),
     };
-    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
+    let (session, _) = accepted(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
 }
 
 #[test]
 fn an_increment_finished_for_an_earlier_ticket_is_a_binding_mismatch() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = StaleIncrement {
         inner: euler(SECOND),
         kept: RefCell::new(None),
     };
-    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
+    let (session, _) = accepted(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
 }
 
 #[test]
 fn an_evaluation_from_an_earlier_attempt_is_a_binding_mismatch() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = EarlierAttempt {
         inner: euler(8 * SECOND),
         kept: RefCell::new(None),
     };
-    let session = refused(case.admit(&core).expect("admitted").step());
+    let session = refused(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(fault_of(session.retry()).kind(), EngineFaultKind::BindingMismatch);
 }
 
 #[test]
 fn a_kept_ticket_swapped_for_the_issued_one_is_a_binding_mismatch() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = SwappedTicket {
         inner: euler(8 * SECOND),
         kept: RefCell::new(None),
     };
-    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
+    let (session, _) = accepted(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
 }
 
 #[test]
 fn a_refusal_of_another_ticket_is_a_binding_mismatch_so_no_core_resets_its_budget() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = ForeignRefusal {
         inner: euler(8 * SECOND),
         kept: RefCell::new(None),
     };
-    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
+    let (session, _) = accepted(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
 }
 
 #[test]
 fn a_refusal_of_a_foreign_base_cannot_be_retried() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = euler(8 * SECOND);
     let foreign = NeverConverges {
         interval_ns: 8 * SECOND,
         budget: 12,
     };
-    let session = refused(case.admit(&foreign).expect("admitted").step());
-    let (moved, _) = accepted(case.admit(&core).expect("admitted").step());
+    let session = refused(case.admit(&foreign, &store).expect("admitted").step());
+    let (moved, _) = accepted(case.admit(&core, &store).expect("admitted").step());
     let fault = moved.record().attempt(&core, Attempt::After(session.refused()));
     let Err(TrialFailure::EngineFault(fault)) = fault.map(|_| ()) else {
         panic!("not a fault");
@@ -389,29 +403,32 @@ fn a_refusal_of_a_foreign_base_cannot_be_retried() {
 
 #[test]
 fn weights_that_do_not_sum_to_one_are_a_binding_mismatch_at_finish() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = UnevenWeights {
         interval_ns: 8 * SECOND,
     };
-    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    let fault = fault_of(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
 }
 
 #[test]
 fn weights_whose_sum_does_not_fit_in_lowest_terms_are_a_binding_mismatch() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = UnfitWeights {
         interval_ns: 8 * SECOND,
     };
-    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    let fault = fault_of(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
 }
 
 #[test]
 fn another_bodys_stage_workspace_or_proposal_is_a_binding_mismatch() {
+    let store = MemoryStore::default();
     let (case, other) = (stepped(), TwoReservoirs::closed().expect("a body"));
     let inner = euler(8 * SECOND);
-    let host = other.admit(&inner).expect("admitted");
+    let host = other.admit(&inner, &store).expect("admitted");
     let values = other.other_values().expect("bound");
     let (body, identity) = (other.body(), host.record().identity());
     let accepted = host.record().accepted();
@@ -422,12 +439,12 @@ fn another_bodys_stage_workspace_or_proposal_is_a_binding_mismatch() {
         identity,
         accepted,
     };
-    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    let fault = fault_of(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
     {
         // One row where the record's body has two, so a read past its end would panic, not refuse.
         let lone = filter_only_body();
-        let host = admit_fixture(&lone, filter_only_packet(), no_events(), &inner).expect("admitted");
+        let host = admit_fixture(&lone, filter_only_packet(), no_events(), &inner, &store).expect("admitted");
         let values = lone.bind(filter_only_packet()).expect("bound");
         let core = ForeignWorkspace {
             inner: euler(8 * SECOND),
@@ -436,7 +453,7 @@ fn another_bodys_stage_workspace_or_proposal_is_a_binding_mismatch() {
             identity: host.record().identity(),
             accepted: host.record().accepted(),
         };
-        let fault = fault_of(case.admit(&core).expect("admitted").step());
+        let fault = fault_of(case.admit(&core, &store).expect("admitted").step());
         assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
     }
     let core = ForeignProposal {
@@ -446,35 +463,37 @@ fn another_bodys_stage_workspace_or_proposal_is_a_binding_mismatch() {
         identity,
         accepted,
     };
-    let fault = fault_of(case.admit(&core).expect("admitted").step());
+    let fault = fault_of(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(fault.kind(), EngineFaultKind::BindingMismatch);
 }
 
 #[test]
 fn a_zero_span_and_a_span_past_the_end_of_time_are_binding_mismatches() {
+    let store = MemoryStore::default();
     let case = stepped();
     let zero = Spans {
         inner: euler(8 * SECOND),
         then_ns: 0,
     };
-    let (session, _) = accepted(case.admit(&zero).expect("admitted").step());
+    let (session, _) = accepted(case.admit(&zero, &store).expect("admitted").step());
     assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
     let past = Spans {
         inner: euler(8 * SECOND),
         then_ns: u64::MAX,
     };
-    let (session, _) = accepted(case.admit(&past).expect("admitted").step());
+    let (session, _) = accepted(case.admit(&past, &store).expect("admitted").step());
     assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
 }
 
 #[test]
 fn a_ticket_refuses_an_offset_past_its_end_and_a_zero_shift() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = ReadsItsTicket {
         inner: euler(8 * SECOND),
         reads: RefCell::new(Vec::new()),
     };
-    accepted(case.admit(&core).expect("admitted").step());
+    accepted(case.admit(&core, &store).expect("admitted").step());
     let reads = core.reads.borrow();
     let mismatch = Some(EngineFaultKind::BindingMismatch);
     assert_eq!(*reads, [(None, mismatch, mismatch)]);
@@ -482,9 +501,10 @@ fn a_ticket_refuses_an_offset_past_its_end_and_a_zero_shift() {
 
 #[test]
 fn an_estimate_above_one_is_refused_and_the_retry_is_accepted() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = reference(8 * SECOND).with_scales(scales(0.01, 0.0));
-    let session = refused(case.admit(&core).expect("admitted").step());
+    let session = refused(case.admit(&core, &store).expect("admitted").step());
     assert!(matches!(
         session.refused().reason(),
         NumericalRefusal::Accuracy { .. }
@@ -496,11 +516,12 @@ fn an_estimate_above_one_is_refused_and_the_retry_is_accepted() {
 
 #[test]
 fn an_estimate_above_one_at_the_floor_faults_and_never_publishes() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = reference(8 * SECOND)
         .with_scales(scales(1e-3, 0.0))
         .with_floor(NonZeroU64::new(4 * SECOND).expect("a floor"));
-    let session = case.admit(&core).expect("admitted");
+    let session = case.admit(&core, &store).expect("admitted");
     let before = session.record().digests();
     let stopped = exhaust(session.step());
     let fault = stopped.fault();
@@ -517,12 +538,13 @@ fn an_estimate_above_one_at_the_floor_faults_and_never_publishes() {
 
 #[test]
 fn an_exhausted_retry_budget_faults_with_no_admissible_step() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = NeverConverges {
         interval_ns: 8 * SECOND,
         budget: 3,
     };
-    let stopped = exhaust(case.admit(&core).expect("admitted").step());
+    let stopped = exhaust(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(stopped.fault().kind(), EngineFaultKind::NoAdmissibleStep);
     assert_eq!(
         stopped.fault().last_refusal(),
@@ -533,12 +555,13 @@ fn an_exhausted_retry_budget_faults_with_no_admissible_step() {
 
 #[test]
 fn a_fault_keeps_the_refusals_before_it() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = NeverConverges {
         interval_ns: 8 * SECOND,
         budget: 2,
     };
-    let stopped = exhaust(case.admit(&core).expect("admitted").step());
+    let stopped = exhaust(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(stopped.refusals().len(), 2);
     assert_eq!(stopped.refusals()[0].attempted_ns(), 8 * SECOND);
     assert_eq!(stopped.refusals()[1].attempted_ns(), 4 * SECOND);
@@ -547,11 +570,12 @@ fn a_fault_keeps_the_refusals_before_it() {
 
 #[test]
 fn a_stage_that_does_not_reach_the_value_its_tangent_says_is_refused() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = UnreachedStage {
         inner: reference(8 * SECOND),
     };
-    let session = refused(case.admit(&core).expect("admitted").step());
+    let session = refused(case.admit(&core, &store).expect("admitted").step());
     assert!(matches!(
         session.refused().reason(),
         NumericalRefusal::StageResidual { .. }
@@ -560,12 +584,13 @@ fn a_stage_that_does_not_reach_the_value_its_tangent_says_is_refused() {
 
 #[test]
 fn a_negative_amount_is_refused_on_the_row_it_left() {
+    let store = MemoryStore::default();
     // A step of 20 RC multiplies the difference by -39: from 1,000 to -39,000, then to 1,521,000, which
     // is more than the sum of 1,000,000, so `b` would go negative on the second step.
     let case =
         TwoReservoirs::delivering([measure(500_500.0), measure(499_500.0)], Vec::new()).expect("a body");
     let core = euler(20 * case.relaxation_ns());
-    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
+    let (session, _) = accepted(case.admit(&core, &store).expect("admitted").step());
     let session = refused(session.step());
     let NumericalRefusal::TrialDomain { source } = session.refused().reason() else {
         panic!("not a trial domain");
@@ -579,11 +604,12 @@ fn a_negative_amount_is_refused_on_the_row_it_left() {
 
 #[test]
 fn a_non_finite_coordinate_is_refused_on_its_row() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = PoisonedPoint {
         inner: euler(8 * SECOND),
     };
-    let session = refused(case.admit(&core).expect("admitted").step());
+    let session = refused(case.admit(&core, &store).expect("admitted").step());
     let NumericalRefusal::TrialDomain { source } = session.refused().reason() else {
         panic!("not a trial domain");
     };
@@ -707,6 +733,7 @@ fn edge_law_body_from(law: EdgeLaw, start: [f64; 2]) -> (CompiledBody, Parameter
 }
 
 fn refused_source_at_the_floor(law: EdgeLaw) -> RefusalSource {
+    let store = MemoryStore::default();
     let (body, packet) = edge_law_body(law);
     let boundary = BoundaryPort::new(Vec::new()).expect("no event");
     let inner = reference(4 * MILLISECOND);
@@ -714,7 +741,7 @@ fn refused_source_at_the_floor(law: EdgeLaw) -> RefusalSource {
         inner: &inner,
         amounts: refused_amounts(law),
     };
-    let session = admit_fixture(&body, packet, boundary, &core).expect("admitted");
+    let session = admit_fixture(&body, packet, boundary, &core, &store).expect("admitted");
     let stopped = exhaust(session.step());
     assert_eq!(stopped.fault().kind(), EngineFaultKind::NoAdmissibleStep);
     assert_eq!(
@@ -763,6 +790,7 @@ fn a_finite_value_with_a_non_finite_slope_is_refused_where_it_linearizes() {
 
 #[test]
 fn a_non_finite_value_is_refused_at_its_law_not_at_the_row_it_reaches() {
+    let store = MemoryStore::default();
     // Forward Euler never linearizes, so only the operator's own check can name the law.
     let (body, packet) = edge_law_body(EdgeLaw::Exponentiates);
     let inner = euler(4 * MILLISECOND);
@@ -770,7 +798,7 @@ fn a_non_finite_value_is_refused_at_its_law_not_at_the_row_it_reaches() {
         inner: &inner,
         amounts: refused_amounts(EdgeLaw::Exponentiates),
     };
-    let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
+    let session = admit_fixture(&body, packet, no_events(), &core, &store).expect("admitted");
     let session = refused(session.step());
     let NumericalRefusal::TrialDomain { source } = session.refused().reason() else {
         panic!("not a trial domain");
@@ -811,6 +839,7 @@ fn the_refusal_sources_list_each_rows_set_and_each_laws_operators() {
 
 #[test]
 fn a_published_state_is_evaluated_once_so_a_law_undefined_there_is_refused() {
+    let store = MemoryStore::default();
     // The stage at the start is fine; one second of a forward Euler flow of one empties `a` exactly, so
     // only the published state divides by zero, and the retry's half step stops short of it.
     let mut map = AnatomyBuilder::new();
@@ -873,7 +902,7 @@ fn a_published_state_is_evaluated_once_so_a_law_undefined_there_is_refused() {
         .expect("once");
     let boundary = BoundaryPort::new(Vec::new()).expect("no event");
     let core = euler(SECOND);
-    let session = admit_fixture(&body, packet, boundary, &core).expect("admitted");
+    let session = admit_fixture(&body, packet, boundary, &core, &store).expect("admitted");
     let session = refused(session.step());
     let NumericalRefusal::TrialDomain { source } = session.refused().reason() else {
         panic!("not a trial domain");
@@ -1175,6 +1204,7 @@ fn each_bad_timeline_is_refused_by_name() {
 
 #[test]
 fn one_id_with_one_payload_collapses_and_applies_once() {
+    let store = MemoryStore::default();
     let open = TwoReservoirs::delivering([measure(10.0), measure(10.0)], Vec::new()).expect("a body");
     let body = open.body();
     let port = BoundaryPort::new(vec![
@@ -1184,9 +1214,9 @@ fn one_id_with_one_payload_collapses_and_applies_once() {
     .expect("collapsed");
     let core = reference(SECOND);
     let packet = reservoir_packet(body, 1.0, 0.001);
-    let session = admit_fixture(body, packet, port, &core).expect("admitted");
+    let session = admit_fixture(body, packet, port, &core, &store).expect("admitted");
     let session = to(session, SimTime::from_ns(3 * SECOND));
-    let received = total_received(session.record(), open.exterior().expect("an open body"));
+    let received = total_received(&session, open.exterior().expect("an open body"));
     assert!((hi(received) - 3.0).abs() < 1e-12, "{received:?}");
 }
 
@@ -1242,6 +1272,7 @@ fn admission_refuses_a_workspace_that_moved_a_start_or_came_from_another_body() 
 
 #[test]
 fn a_session_refuses_an_identity_of_another_body_origin_or_solver() {
+    let store = MemoryStore::default();
     let (case, other) = (stepped(), TwoReservoirs::closed().expect("a body"));
     let body = case.body();
     let core = reference(8 * SECOND);
@@ -1257,8 +1288,9 @@ fn a_session_refuses_an_identity_of_another_body_origin_or_solver() {
         system.admit(solved, history).expect("admitted")
     };
     let seed = Seed::new([1, 2, 3, 4]);
-    let admit =
-        |origin: InitialRevision, identity: RunIdentity| Session::admit(body, &core, origin, identity).err();
+    let admit = |origin: InitialRevision, identity: RunIdentity| {
+        Session::admit(body, &core, origin, identity, &store).err()
+    };
 
     let origin = revision(&case);
     let packet = origin.packet_hash();
@@ -1336,11 +1368,12 @@ fn two_settings_of_one_core_never_share_an_identity() {
 
 #[test]
 fn a_step_is_the_cores_own_interval_cut_short_only_at_the_next_breakpoint() {
+    let store = MemoryStore::default();
     // 2,000 s is no multiple of 7 s, so the step that would cross the delivery's start stops at it.
     let case = stepped();
     let (instant, _) = case.delivery().expect("a delivery");
     let core = reference(7 * SECOND);
-    let session = to(case.admit(&core).expect("admitted"), instant);
+    let session = to(case.admit(&core, &store).expect("admitted"), instant);
     assert_eq!(session.record().accepted().time(), instant);
     let last = session
         .record()
@@ -1368,6 +1401,7 @@ fn a_step_is_the_cores_own_interval_cut_short_only_at_the_next_breakpoint() {
 
 #[test]
 fn the_ending_interval_sees_the_left_value_and_the_next_the_new_one() {
+    let store = MemoryStore::default();
     let breakpoint = 7 * SECOND + 1;
     let end = breakpoint + 3 * SECOND;
     let first = 7.000000001;
@@ -1395,17 +1429,20 @@ fn the_ending_interval_sees_the_left_value_and_the_next_the_new_one() {
         by: Refuser::Core,
     };
     let inflow = case.exterior().expect("an open body");
-    let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(breakpoint));
+    let session = to(
+        case.admit(&core, &store).expect("admitted"),
+        SimTime::from_ns(breakpoint),
+    );
     assert_eq!(session.record().accepted().time(), SimTime::from_ns(breakpoint));
-    let received = hi(total_received(session.record(), inflow));
+    let received = hi(total_received(&session, inflow));
     assert!((received - first).abs() < 1e-12, "{received}");
     let session = to(session, SimTime::from_ns(end));
-    let received = hi(total_received(session.record(), inflow));
+    let received = hi(total_received(&session, inflow));
     assert!((received - (first + second)).abs() < 1e-12, "{received}");
     let (session, receipt) = accepted(session.step());
     assert_eq!(session.record().accepted().time(), SimTime::from_ns(end + 1));
     assert_eq!(receipt.applied().len(), 1);
-    let received = hi(total_received(session.record(), inflow));
+    let received = hi(total_received(&session, inflow));
     assert!((received - (first + second + last)).abs() < 1e-12, "{received}");
 }
 
@@ -1519,12 +1556,13 @@ fn filter_packet() -> ParameterPacket<SyntheticFixture> {
 
 #[test]
 fn memory_and_algebraic_rows_run_against_their_closed_form() {
+    let store = MemoryStore::default();
     const END: u64 = 100 * SECOND;
     let body = filter_body();
     let error = |interval| {
         let core = reference(interval);
         let port = BoundaryPort::new(Vec::new()).expect("no event");
-        let session = admit_fixture(&body, filter_packet(), port, &core).expect("admitted");
+        let session = admit_fixture(&body, filter_packet(), port, &core, &store).expect("admitted");
         let session = to(session, SimTime::from_ns(END));
         let accepted = session.record().accepted();
         let (filter, reading) = (body.rows()[0].id(), body.rows()[1].id());
@@ -1545,6 +1583,7 @@ fn memory_and_algebraic_rows_run_against_their_closed_form() {
 
 #[test]
 fn an_unsolved_closure_at_the_published_state_is_refused_on_its_row() {
+    let store = MemoryStore::default();
     // The stage solves the closure at the start, and the end keeps that reading while the filter moved
     // by 0.01 * 1 * 1 s, so the published residual is 0.03, above a scale of 1e-3.
     let body = filter_body();
@@ -1553,7 +1592,7 @@ fn an_unsolved_closure_at_the_published_state_is_refused_on_its_row() {
         scales: scales(1e-3, 0.0),
     };
     let port = BoundaryPort::new(Vec::new()).expect("no event");
-    let session = admit_fixture(&body, filter_packet(), port, &core).expect("admitted");
+    let session = admit_fixture(&body, filter_packet(), port, &core, &store).expect("admitted");
     let session = refused(session.step());
     let reading = body.rows()[1].id();
     assert_eq!(
@@ -1587,6 +1626,7 @@ impl CoupledSolver for ForwardEulerWithScale {
 
 #[test]
 fn an_algebraic_start_that_does_not_solve_is_refused_with_its_row() {
+    let store = MemoryStore::default();
     let body = filter_body();
     let mut packet = ParameterPacket::new();
     let bind = Binding::Body;
@@ -1619,13 +1659,14 @@ fn an_algebraic_start_that_does_not_solve_is_refused_with_its_row() {
         .expect("once");
     let core = reference(SECOND);
     let port = BoundaryPort::new(Vec::new()).expect("no event");
-    let refused = admit_fixture(&body, packet, port, &core).err();
+    let refused = admit_fixture(&body, packet, port, &core, &store).err();
     let row = AdmissionRow::Body(body.rows()[1].id());
     assert_eq!(refused, Some(InitializationFailure::Inconsistent { row }));
 }
 
 #[test]
 fn a_rate_law_undefined_at_the_start_is_refused_by_its_name_at_admission() {
+    let store = MemoryStore::default();
     let law = LawName {
         owner: "CV",
         local: "circulation",
@@ -1633,13 +1674,14 @@ fn a_rate_law_undefined_at_the_start_is_refused_by_its_name_at_admission() {
     for edge in [EdgeLaw::Divides, EdgeLaw::TakesTheLog, EdgeLaw::Exponentiates] {
         let (body, packet) = edge_law_body_from(edge, refused_amounts(edge));
         let core = reference(SECOND);
-        let refused = admit_fixture(&body, packet, no_events(), &core).err();
+        let refused = admit_fixture(&body, packet, no_events(), &core, &store).err();
         assert_eq!(refused, Some(InitializationFailure::Undefined { law }));
     }
 }
 
 #[test]
 fn a_law_undefined_at_the_start_is_refused_by_its_name_at_admission() {
+    let store = MemoryStore::default();
     // `x = u / m` has no value at `m = 0`, and `m`'s own row, the first algebraic row, is solved.
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", origin());
@@ -1699,7 +1741,7 @@ fn a_law_undefined_at_the_start_is_refused_by_its_name_at_admission() {
         )
         .expect("once");
     let core = reference(SECOND);
-    let refused = admit_fixture(&body, packet, no_events(), &core).err();
+    let refused = admit_fixture(&body, packet, no_events(), &core, &store).err();
     let law = name("reading");
     assert_eq!(refused, Some(InitializationFailure::Undefined { law }));
 }
@@ -1766,12 +1808,13 @@ fn a_solved_algebraic_value_outside_its_set_is_refused_with_its_row() {
 
 #[test]
 fn a_validity_excursion_is_published_and_named_never_refused() {
+    let store = MemoryStore::default();
     let flow =
         |lower, upper| ValidityRange::new(measure(lower), measure(upper), Basis::Fixture("synthetic range"));
     let excursions = |range| {
         let case = TwoReservoirs::trusted_within(range).expect("a body");
         let core = reference(8 * SECOND);
-        let (_, receipt) = accepted(case.admit(&core).expect("admitted").step());
+        let (_, receipt) = accepted(case.admit(&core, &store).expect("admitted").step());
         receipt.excursions().to_vec()
     };
     // `q` starts at k (a - b) = 1 and decays slowly, so these ranges sit either side of it.
@@ -1804,15 +1847,16 @@ fn delivery(id: &'static [u8], from_s: u64, to_s: u64, rate: f64) -> Delivery {
 
 #[test]
 fn closure_holds_over_every_window_and_drift_tells_a_closed_body_from_an_open_one() {
+    let store = MemoryStore::default();
     let closed = TwoReservoirs::closed().expect("a body");
     let core = reference(60 * SECOND);
     let session = to(
-        closed.admit(&core).expect("admitted"),
+        closed.admit(&core, &store).expect("admitted"),
         SimTime::from_ns(48 * HOUR),
     );
-    let view = session.record().conservation();
+    let view = session.conservation();
     let policy = ledger_policy(view.basis(), 1e-6);
-    let certificate = certify(&view, &policy).expect("a closed body holds still");
+    let certificate = certified(&view, &policy).expect("a closed body holds still");
     assert_eq!(
         certificate.pieces(),
         1440,
@@ -1839,10 +1883,13 @@ fn closure_holds_over_every_window_and_drift_tells_a_closed_body_from_an_open_on
     );
 
     let open = stepped();
-    let session = to(open.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
-    let view = session.record().conservation();
-    certify(&view, &ledger_policy(view.basis(), 1e12)).expect("an open body's ledger still closes");
-    let failure = certify(&view, &ledger_policy(view.basis(), 1.0)).expect_err("it does not hold still");
+    let session = to(
+        open.admit(&core, &store).expect("admitted"),
+        SimTime::from_ns(48 * HOUR),
+    );
+    let view = session.conservation();
+    certified(&view, &ledger_policy(view.basis(), 1e12)).expect("an open body's ledger still closes");
+    let failure = certified(&view, &ledger_policy(view.basis(), 1.0)).expect_err("it does not hold still");
     assert_eq!(failure.check(), CertificateCheck::Drift);
     assert!(failure.window().is_some() && failure.quantity().is_some());
     assert!(hi(failure.residual()) > 1.0);
@@ -1850,6 +1897,7 @@ fn closure_holds_over_every_window_and_drift_tells_a_closed_body_from_an_open_on
 
 #[test]
 fn the_worst_window_can_start_inside_a_segment() {
+    let store = MemoryStore::default();
     // The change over a day peaks with the window ending where the high rate stops: 96,400 + 20,000 s,
     // so the window starts at 30,000 s, between the 70 s grid's 29,960 and 30,030.
     let case = TwoReservoirs::delivering(
@@ -1861,9 +1909,12 @@ fn the_worst_window_can_start_inside_a_segment() {
     )
     .expect("a body");
     let core = reference(70 * SECOND);
-    let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
-    let view = session.record().conservation();
-    let certificate = certify(&view, &ledger_policy(view.basis(), 1e12)).expect("it closes");
+    let session = to(
+        case.admit(&core, &store).expect("admitted"),
+        SimTime::from_ns(48 * HOUR),
+    );
+    let view = session.conservation();
+    let certificate = certified(&view, &ledger_policy(view.basis(), 1e12)).expect("it closes");
     let result = certificate.results()[0];
     assert_eq!(result.drift_window().start(), SimTime::from_ns(30_000 * SECOND));
     assert!(
@@ -1875,6 +1926,7 @@ fn the_worst_window_can_start_inside_a_segment() {
 
 #[test]
 fn a_ledger_that_does_not_close_fails_closure_before_drift() {
+    let store = MemoryStore::default();
     // The bulk fills the low limb of `a`, about 16 on a high limb of 1e18, and a 6e-17 extent is then
     // below that limb's rounding, so the inventory stands still while the exchange grows. Only an extent
     // this far below an amount can leave a compensated ledger open.
@@ -1887,25 +1939,121 @@ fn a_ledger_that_does_not_close_fails_closure_before_drift() {
     };
     let case = TwoReservoirs::delivering([measure(1e18), measure(1e18)], vec![bulk, tiny]).expect("a body");
     let core = reference(60 * SECOND);
-    let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
-    let view = session.record().conservation();
-    let failure = certify(&view, &ledger_policy(view.basis(), 0.0)).expect_err("it does not close");
+    let session = to(
+        case.admit(&core, &store).expect("admitted"),
+        SimTime::from_ns(48 * HOUR),
+    );
+    let view = session.conservation();
+    let failure = certified(&view, &ledger_policy(view.basis(), 0.0)).expect_err("it does not close");
     assert_eq!(failure.check(), CertificateCheck::Closure);
     assert!(failure.window().is_some());
 }
 
+/// Every window tied at zero, a steady rate whose windows tie, steps that do not divide a day, and closure
+/// failing beside drift: `certified` holds the walk newest first to the walk in time order on each.
 #[test]
-fn coverage_under_48_hours_and_a_policy_of_another_basis_fail() {
+fn the_certificate_walked_newest_first_is_the_certificate_walked_in_time_order() {
+    let rested = || [measure(1_000.0), measure(1_000.0)];
+    let below_precision = vec![
+        delivery(b"bulk", 0, 3_600, 1.0),
+        Delivery {
+            id: b"below the pair's precision",
+            from: SimTime::from_ns(3_600 * SECOND),
+            to: SimTime::from_ns(48 * HOUR),
+            amount: measure(1e-18 * 169_200.0),
+        },
+    ];
+    let cases = [
+        (TwoReservoirs::delivering(rested(), Vec::new()), 3_600),
+        (
+            TwoReservoirs::delivering(rested(), vec![delivery(b"steady", 0, 180_000, 1.0)]),
+            600,
+        ),
+        (
+            TwoReservoirs::delivering(
+                [measure(500_500.0), measure(499_500.0)],
+                vec![
+                    delivery(b"baseline", 0, 96_400, 1.0),
+                    delivery(b"high", 96_400, 116_400, 5.0),
+                ],
+            ),
+            70,
+        ),
+        (
+            TwoReservoirs::delivering([measure(1e18), measure(1e18)], below_precision),
+            60,
+        ),
+    ];
+    let limits = [
+        (1e-24, 1e-9, 1e12),
+        (1e-24, 1e-9, 1.0),
+        (0.0, 0.0, 0.0),
+        (1e300, 1.0, 1e300),
+    ];
+    for (case, step_s) in cases {
+        let case = case.expect("a body");
+        let store = MemoryStore::default();
+        let core = reference(step_s * SECOND);
+        let end = SimTime::from_ns(48 * HOUR + 1_234 * SECOND);
+        let session = to(case.admit(&core, &store).expect("admitted"), end);
+        let view = session.conservation();
+        for (absolute, relative, drift) in limits {
+            let _ = certified(
+                &view,
+                &ledger_policy_with(view.basis(), absolute, relative, drift),
+            );
+        }
+    }
+}
+
+#[derive(Default)]
+struct Forgets {
+    kept: MemoryStore,
+    lost: Cell<Option<Digest>>,
+}
+impl HistoryStore for Forgets {
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+        (self.lost.get() != Some(*seal)).then(|| self.kept.resolve(seal))?
+    }
+    fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
+        self.kept.keep(seal, link)
+    }
+}
+
+#[test]
+fn a_certificate_over_a_link_the_store_lost_fails_by_that_link() {
+    let store = Forgets::default();
     let core = reference(60 * SECOND);
     let case = stepped();
-    let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(30 * HOUR));
-    let view = session.record().conservation();
-    let failure = certify(&view, &ledger_policy(view.basis(), 1e12)).expect_err("too short");
+    let session = to(
+        case.admit(&core, &store).expect("admitted"),
+        SimTime::from_ns(24 * HOUR),
+    );
+    let lost = session.record().seal().digest();
+    let session = to(session, SimTime::from_ns(48 * HOUR));
+    store.lost.set(Some(lost));
+    let view = session.conservation();
+    let failure = certified(&view, &ledger_policy(view.basis(), 1e12)).expect_err("a link is gone");
+    let missing = CheckpointError::HistoryMissing { seal: lost };
+    assert_eq!(failure.check(), CertificateCheck::History(missing));
+}
+
+#[test]
+fn coverage_under_48_hours_and_a_policy_of_another_basis_fail() {
+    let store = MemoryStore::default();
+    let core = reference(60 * SECOND);
+    let case = stepped();
+    let session = to(
+        case.admit(&core, &store).expect("admitted"),
+        SimTime::from_ns(30 * HOUR),
+    );
+    let view = session.conservation();
+    let failure = certified(&view, &ledger_policy(view.basis(), 1e12)).expect_err("too short");
     assert_eq!(failure.check(), CertificateCheck::Coverage);
 
-    let session = case.admit(&core).expect("admitted");
-    let view = session.record().conservation();
-    let failure = certify(&view, &ledger_policy(view.basis(), 1e12)).expect_err("no step yet");
+    let session = case.admit(&core, &store).expect("admitted");
+    let view = session.conservation();
+    let failure = certified(&view, &ledger_policy(view.basis(), 1e12)).expect_err("no step yet");
     assert_eq!(failure.check(), CertificateCheck::Coverage);
 
     let mut map = AnatomyBuilder::new();
@@ -1934,10 +2082,13 @@ fn coverage_under_48_hours_and_a_policy_of_another_basis_fail() {
         body.compile()
     })
     .expect("compiled");
-    let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
-    let view = session.record().conservation();
+    let session = to(
+        case.admit(&core, &store).expect("admitted"),
+        SimTime::from_ns(48 * HOUR),
+    );
+    let view = session.conservation();
     let foreign = ledger_policy(three.conserved_basis(), 1e12);
-    let failure = certify(&view, &foreign).expect_err("another basis");
+    let failure = certified(&view, &foreign).expect_err("another basis");
     assert_eq!(failure.check(), CertificateCheck::Coverage);
 }
 
@@ -1984,18 +2135,19 @@ fn a_core_that_cannot_finish_a_case_has_not_failed_on_accuracy() {
 
 #[test]
 fn a_flow_that_runs_backward_keeps_its_gross_reverse_apart() {
+    let store = MemoryStore::default();
     // `b` starts above `a`, so the circulation's rate is negative throughout.
     let case = TwoReservoirs::delivering([measure(400.0), measure(600.0)], Vec::new()).expect("a body");
     let core = reference(SECOND);
-    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
+    let (session, _) = accepted(case.admit(&core, &store).expect("admitted").step());
     let circulation = (case.body().instances().iter())
         .find_map(|instance| match (instance.context(), instance.target()) {
             (Context::Edge { .. }, Target::Column(column)) => Some(column),
             _ => None,
         })
         .expect("the body circulates");
-    let view = session.record().conservation();
-    let segment = view.segments().next_back().expect("an accepted step");
+    let view = session.conservation();
+    let segment = view.head().expect("an accepted step");
     let (forward, reverse) = segment.exchange(circulation);
     let piece = segment.interval();
     assert_eq!(forward.on(piece).expect("its own segment")[1], Compensated::ZERO);
@@ -2017,6 +2169,7 @@ fn a_flow_that_runs_backward_keeps_its_gross_reverse_apart() {
 
 #[test]
 fn a_boundary_out_of_the_body_counts_as_outflow_and_the_ledger_closes() {
+    let store = MemoryStore::default();
     let drained = 30.0;
     let case = TwoReservoirs::draining(
         [measure(100.0), measure(100.0)],
@@ -2025,12 +2178,12 @@ fn a_boundary_out_of_the_body_counts_as_outflow_and_the_ledger_closes() {
     .expect("a body");
     let core = reference(8 * SECOND);
     let session = to(
-        case.admit(&core).expect("admitted"),
+        case.admit(&core, &store).expect("admitted"),
         SimTime::from_ns(120 * SECOND),
     );
-    let view = session.record().conservation();
+    let view = session.conservation();
     let quantity = view.basis().ids().next().expect("one combination");
-    let segment = view.segments().next_back().expect("an accepted step");
+    let segment = view.head().expect("an accepted step");
     let piece = segment.interval();
     assert!((hi(segment.outflow(quantity).on(piece).expect("its own segment")[1]) - drained).abs() < 1e-9);
     assert_eq!(
@@ -2094,6 +2247,7 @@ fn backward_boundary_body(direction: BoundaryDirection) -> (CompiledBody, Parame
 
 #[test]
 fn a_boundary_flow_that_runs_backward_counts_on_the_side_it_moves() {
+    let store = MemoryStore::default();
     // Against an inward boundary a reverse flow leaves the body; against an outward one it enters.
     for (direction, gained, lost) in [
         (BoundaryDirection::IntoBody, 0.0, 5.0),
@@ -2101,11 +2255,11 @@ fn a_boundary_flow_that_runs_backward_counts_on_the_side_it_moves() {
     ] {
         let (body, packet) = backward_boundary_body(direction);
         let core = reference(SECOND);
-        let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
+        let session = admit_fixture(&body, packet, no_events(), &core, &store).expect("admitted");
         let session = to(session, SimTime::from_ns(10 * SECOND));
-        let view = session.record().conservation();
+        let view = session.conservation();
         let quantity = view.basis().ids().next().expect("one combination");
-        let segment = view.segments().next_back().expect("an accepted step");
+        let segment = view.head().expect("an accepted step");
         let piece = segment.interval();
         assert_eq!(
             hi(segment.inflow(quantity).on(piece).expect("its own segment")[1]),
@@ -2124,9 +2278,10 @@ fn a_boundary_flow_that_runs_backward_counts_on_the_side_it_moves() {
 
 #[test]
 fn a_segment_samples_only_its_own_interval() {
+    let store = MemoryStore::default();
     let case = stepped();
     let core = reference(8 * SECOND);
-    let session = case.admit(&core).expect("admitted");
+    let session = case.admit(&core, &store).expect("admitted");
     let row = case.rows()[0];
     let opening = session.record().accepted().last_segment();
     assert_eq!(opening.interval(), None);
@@ -2140,13 +2295,10 @@ fn a_segment_samples_only_its_own_interval() {
     let halfway = segment.sample(row, SimTime::from_ns(4 * SECOND)).expect("inside");
     assert!(!start.at_most(halfway) && !halfway.at_most(end));
     assert_eq!(segment.sample(row, SimTime::from_ns(8 * SECOND + 1)), None);
-    let view = session.record().conservation();
+    let view = session.conservation();
     let quantity = view.basis().ids().next().expect("one combination");
-    let curve = view
-        .segments()
-        .next_back()
-        .expect("an accepted step")
-        .inventory(quantity);
+    let head = view.head().expect("an accepted step");
+    let curve = head.inventory(quantity);
     let piece = |from, to| {
         Interval::new(SimTime::from_ns(from * SECOND), SimTime::from_ns(to * SECOND)).expect("an interval")
     };
@@ -2185,10 +2337,11 @@ fn a_relative_limit_holds_the_exchange_to_its_own_size() {
 
 #[test]
 fn the_same_inputs_give_the_same_digests_and_seal_twice() {
+    let store = MemoryStore::default();
     let run = || {
         let case = stepped();
         let core = reference(64 * SECOND);
-        let session = to(case.admit(&core).expect("admitted"), case.end());
+        let session = to(case.admit(&core, &store).expect("admitted"), case.end());
         (session.record().digests(), session.record().seal())
     };
     assert_eq!(run(), run());
@@ -2208,10 +2361,14 @@ fn overflowing() -> (TwoReservoirs, ReferenceIntegrator) {
 
 #[test]
 fn a_certificate_does_not_pass_on_a_value_that_overflowed() {
+    let store = MemoryStore::default();
     let (case, core) = overflowing();
-    let session = to(case.admit(&core).expect("admitted"), SimTime::from_ns(48 * HOUR));
-    let view = session.record().conservation();
-    let failure = certify(&view, &ledger_policy_with(view.basis(), 1e280, 0.0, 0.0)).expect_err("a NaN");
+    let session = to(
+        case.admit(&core, &store).expect("admitted"),
+        SimTime::from_ns(48 * HOUR),
+    );
+    let view = session.conservation();
+    let failure = certified(&view, &ledger_policy_with(view.basis(), 1e280, 0.0, 0.0)).expect_err("a NaN");
     assert_eq!(failure.check(), CertificateCheck::Closure);
 }
 
@@ -2229,6 +2386,7 @@ fn the_accuracy_gate_does_not_pass_on_a_value_that_overflowed() {
 
 /// One step of `m' = r` and `x x = m` from `(1, 1)`, under scales that leave no room to stop early.
 fn newton_reaches_the_root(rate: f64, interval_ns: u64) {
+    let store = MemoryStore::default();
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", origin());
     let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
@@ -2274,7 +2432,7 @@ fn newton_reaches_the_root(rate: f64, interval_ns: u64) {
     let core = reference(interval_ns)
         .with_floor(NonZeroU64::MIN)
         .with_scales(scales(1e-14, 0.0));
-    let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
+    let session = admit_fixture(&body, packet, no_events(), &core, &store).expect("admitted");
     let (session, _) = accepted(session.step());
     let root = (1.0 + rate * interval_ns as f64 / 1e9).sqrt();
     let solved = hi(session.record().accepted().value(body.rows()[1].id()));
@@ -2395,13 +2553,14 @@ fn exact_answers_show_no_order() {
 
 #[test]
 fn an_amount_past_the_split_limit_still_balances_in_the_ledger() {
+    let store = MemoryStore::default();
     let start = [measure::<Water>(1e301), measure::<Water>(1e301)];
     let case = TwoReservoirs::delivering(start, Vec::new()).expect("a body");
     let core = reference(SECOND);
-    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
-    let view = session.record().conservation();
+    let (session, _) = accepted(case.admit(&core, &store).expect("admitted").step());
+    let view = session.conservation();
     let quantity = view.basis().ids().next().expect("one combination");
-    let segment = view.segments().next().expect("one step");
+    let segment = view.head().expect("one step");
     let inventory = segment.inventory(quantity).on(segment.interval());
     let total = Compensated::of(&measure::<Water>(2e301));
     assert_eq!(inventory, Some(vec![total, total]));
@@ -2409,10 +2568,11 @@ fn an_amount_past_the_split_limit_still_balances_in_the_ledger() {
 
 #[test]
 fn a_ledger_past_the_finite_range_is_refused_before_it_publishes() {
+    let store = MemoryStore::default();
     let start = [measure::<Water>(1.5e308), measure::<Water>(1.5e308)];
     let case = TwoReservoirs::delivering(start, Vec::new()).expect("a body");
     let core = reference(SECOND);
-    let stopped = exhaust(case.admit(&core).expect("admitted").step());
+    let stopped = exhaust(case.admit(&core, &store).expect("admitted").step());
     assert_eq!(stopped.fault().kind(), EngineFaultKind::NoAdmissibleStep);
     assert_eq!(
         stopped.fault().last_refusal(),
@@ -2423,9 +2583,10 @@ fn a_ledger_past_the_finite_range_is_refused_before_it_publishes() {
 
 #[test]
 fn a_core_reads_back_the_continuation_it_wrote() {
+    let store = MemoryStore::default();
     let case = TwoReservoirs::closed().expect("a body");
     let core = KeepsItsSpan { first_ns: SECOND };
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     for span in [SECOND, 2 * SECOND, 4 * SECOND] {
         session = accepted(session.step()).0;
         let segment = session.record().accepted().last_segment();
@@ -2436,14 +2597,15 @@ fn a_core_reads_back_the_continuation_it_wrote() {
 
 #[test]
 fn the_certificate_walk_reads_each_combination_and_each_segments_basis() {
+    let store = MemoryStore::default();
     let case = TwoReservoirs::closed().expect("a body");
     let core = reference(SECOND);
-    let (session, _) = accepted(case.admit(&core).expect("admitted").step());
-    let view = session.record().conservation();
+    let (session, _) = accepted(case.admit(&core, &store).expect("admitted").step());
+    let view = session.conservation();
     let ids: Vec<QuantityId> = view.basis().ids().collect();
     let named: Vec<QuantityId> = view.basis().combinations().iter().map(Combination::id).collect();
     assert_eq!(named, ids);
-    let segment = view.segments().next().expect("one step");
+    let segment = view.head().expect("one step");
     let basis = segment.basis();
     assert_eq!(basis.family(), BasisFamily::Bernstein);
     let curve = segment
@@ -2491,9 +2653,10 @@ fn two_slot_packet() -> ParameterPacket<SyntheticFixture> {
 
 #[test]
 fn a_proposal_short_of_algebraic_values_is_a_binding_mismatch() {
+    let store = MemoryStore::default();
     let foreign_case = TwoReservoirs::closed().expect("a body");
     let inner = euler(SECOND);
-    let host = foreign_case.admit(&inner).expect("admitted");
+    let host = foreign_case.admit(&inner, &store).expect("admitted");
     let values = foreign_case.other_values().expect("bound");
     let core = ProposesThroughAnotherBody {
         inner: euler(SECOND),
@@ -2504,15 +2667,16 @@ fn a_proposal_short_of_algebraic_values_is_a_binding_mismatch() {
         stash: None,
     };
     let body = filter_body();
-    let session = admit_fixture(&body, filter_packet(), no_events(), &core).expect("admitted");
+    let session = admit_fixture(&body, filter_packet(), no_events(), &core, &store).expect("admitted");
     assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
 }
 
 #[test]
 fn a_core_cannot_stash_numbers_in_the_accepted_state() {
+    let store = MemoryStore::default();
     let foreign = two_slot_body();
     let inner = euler(SECOND);
-    let host = admit_fixture(&foreign, two_slot_packet(), no_events(), &inner).expect("admitted");
+    let host = admit_fixture(&foreign, two_slot_packet(), no_events(), &inner, &store).expect("admitted");
     let values = foreign.bind(two_slot_packet()).expect("bound");
     let core = ProposesThroughAnotherBody {
         inner: euler(SECOND),
@@ -2523,18 +2687,19 @@ fn a_core_cannot_stash_numbers_in_the_accepted_state() {
         stash: Some([1234.5, 6789.25]),
     };
     let case = TwoReservoirs::closed().expect("a body");
-    let session = case.admit(&core).expect("admitted");
+    let session = case.admit(&core, &store).expect("admitted");
     assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
 }
 
 #[test]
 fn a_workspace_of_another_length_is_a_binding_mismatch() {
+    let store = MemoryStore::default();
     let case = TwoReservoirs::closed().expect("a body");
     let inner = euler(SECOND);
-    let host = case.admit(&inner).expect("admitted");
+    let host = case.admit(&inner, &store).expect("admitted");
     let values = case.other_values().expect("bound");
     let lone = filter_only_body();
-    let small = admit_fixture(&lone, filter_only_packet(), no_events(), &inner).expect("admitted");
+    let small = admit_fixture(&lone, filter_only_packet(), no_events(), &inner, &store).expect("admitted");
     let core = ShortWorkspace {
         inner: euler(SECOND),
         body: case.body(),
@@ -2542,7 +2707,7 @@ fn a_workspace_of_another_length_is_a_binding_mismatch() {
         identity: host.record().identity(),
         accepted: small.record().accepted(),
     };
-    let session = case.admit(&core).expect("admitted");
+    let session = case.admit(&core, &store).expect("admitted");
     assert_eq!(fault_of(session.step()).kind(), EngineFaultKind::BindingMismatch);
 }
 
@@ -2585,6 +2750,7 @@ fn singular_body() -> CompiledBody {
 
 #[test]
 fn a_singular_row_is_named_by_the_fault_that_ends_the_run() {
+    let store = MemoryStore::default();
     // `x (m - c) + (m - f)` has a slope in `x` at the start, so admission finds its rank. A stage reaches `m = c`,
     // where the row has no slope in `x` and still a residual, so the stage's Jacobian has no pivot on it.
     let body = singular_body();
@@ -2616,7 +2782,7 @@ fn a_singular_row_is_named_by_the_fault_that_ends_the_run() {
             .expect("once");
     }
     let core = reference(SECOND).with_floor(NonZeroU64::new(SECOND).expect("a floor"));
-    let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
+    let session = admit_fixture(&body, packet, no_events(), &core, &store).expect("admitted");
     let stopped = exhaust(session.step());
     assert_eq!(stopped.fault().kind(), EngineFaultKind::NoAdmissibleStep);
     assert!(matches!(
@@ -2674,6 +2840,7 @@ fn deaf_boundary_body() -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
 
 #[test]
 fn a_delivery_no_law_reads_is_refused_at_admission() {
+    let store = MemoryStore::default();
     let (body, packet) = deaf_boundary_body();
     let delivery = WaterDelivery {
         boundary: "exterior",
@@ -2684,7 +2851,7 @@ fn a_delivery_no_law_reads_is_refused_at_admission() {
     let event = BoundaryEvent::new(id, SimTime::from_ns(0), BoundaryInput::Water(delivery));
     let port = BoundaryPort::new(vec![event]).expect("parsed");
     let core = reference(SECOND);
-    let refused = admit_fixture(&body, packet, port, &core).err();
+    let refused = admit_fixture(&body, packet, port, &core, &store).err();
     assert_eq!(
         refused,
         Some(InitializationFailure::Admission(AdmissionError::DriveNotRead {
@@ -2695,10 +2862,11 @@ fn a_delivery_no_law_reads_is_refused_at_admission() {
 
 #[test]
 fn a_late_delivery_no_law_reads_is_refused_at_enqueue() {
+    let store = MemoryStore::default();
     let (body, packet) = deaf_boundary_body();
     let core = reference(SECOND);
     let port = BoundaryPort::new(Vec::new()).expect("no event");
-    let mut session = admit_fixture(&body, packet, port, &core).expect("admitted");
+    let mut session = admit_fixture(&body, packet, port, &core, &store).expect("admitted");
     let delivery = WaterDelivery {
         boundary: "exterior",
         amount: measure(30.0),
@@ -2730,6 +2898,7 @@ fn a_delivery_whose_rate_leaves_the_finite_range_is_refused_when_it_is_stated() 
 
 #[test]
 fn newton_applies_a_correction_too_small_to_read_as_a_change() {
+    let store = MemoryStore::default();
     // A rate of 1e6 per second makes a change of one ulp in the filter a defect far above these scales, so
     // a stage that stopped before its last correction fails its own equation.
     let body = filter_body();
@@ -2757,12 +2926,13 @@ fn newton_applies_a_correction_too_small_to_read_as_a_change() {
             .expect("once");
     }
     let core = reference(MILLISECOND).with_scales(scales(1e-14, 0.0));
-    let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
+    let session = admit_fixture(&body, packet, no_events(), &core, &store).expect("admitted");
     accepted(session.step());
 }
 
 #[test]
 fn a_stage_already_solved_needs_no_factorization() {
+    let store = MemoryStore::default();
     // `x (x - m) = 0` from `x = 0` has a slope while `m` holds 1. The memory falls to zero within the step, and there the
     // stage is solved with a Jacobian that has no pivot, so a core that factored it would refuse a solved stage.
     let mut map = AnatomyBuilder::new();
@@ -2814,6 +2984,6 @@ fn a_stage_already_solved_needs_no_factorization() {
             .expect("once");
     }
     let core = reference(SECOND);
-    let session = admit_fixture(&body, packet, no_events(), &core).expect("admitted");
+    let session = admit_fixture(&body, packet, no_events(), &core, &store).expect("admitted");
     accepted(session.step());
 }

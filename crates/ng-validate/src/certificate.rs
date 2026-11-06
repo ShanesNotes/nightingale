@@ -2,7 +2,7 @@ use ng_contract::{
     AdmissionError, Compensated, ConservedBasis, Digest, Dimension, Dimensionless, Interval, Measure,
     QuantityId, SimTime,
 };
-use ng_record::{ConservationView, Curve, HistorySeal, HistorySegment};
+use ng_record::{CheckpointError, ConservationView, Curve, HistorySeal, HistorySegment, NewestFirst};
 
 const DAY_NS: u64 = 86_400_000_000_000;
 
@@ -167,6 +167,8 @@ pub enum CertificateCheck {
     Drift,
     /// the history is shorter than the coverage, or the policy's basis is not the view's
     Coverage,
+    /// a link the store did not give, or one that does not chain to the seal that asked for it
+    History(CheckpointError),
 }
 #[derive(Clone, Copy, Debug)]
 pub struct CertificateFailure {
@@ -190,43 +192,37 @@ impl CertificateFailure {
     }
 }
 
-/// Window starts: every segment boundary and its 24 h shift, inside `[first, last]`, ascending and without
-/// repeats. A window `[a, a + 24 h]` depends on `a` only through which segment holds each end, so its
-/// differences are one polynomial between consecutive members of this list.
-fn window_starts(segments: &[HistorySegment<'_>], first: u64, last: u64) -> Vec<u64> {
-    let mut boundaries = vec![first];
-    boundaries.extend(
-        segments
-            .iter()
-            .map(|segment| segment.interval().end().nanoseconds()),
-    );
-    let (mut direct, mut shifted) = (0, 0);
-    let mut starts: Vec<u64> = Vec::with_capacity(boundaries.len());
-    loop {
-        let plain = boundaries.get(direct).copied();
-        let moved = boundaries
-            .get(shifted)
-            .map(|boundary| boundary.saturating_sub(DAY_NS));
-        let next = match (plain, moved) {
-            (Some(plain), Some(moved)) if plain <= moved => {
-                direct += 1;
-                plain
-            }
-            (_, Some(moved)) => {
-                shifted += 1;
-                moved
-            }
-            (Some(plain), None) => {
-                direct += 1;
-                plain
-            }
-            (None, None) => break,
-        };
-        if (first..=last).contains(&next) && starts.last() != Some(&next) {
-            starts.push(next);
+fn of_history(check: CertificateCheck) -> CertificateFailure {
+    CertificateFailure {
+        check,
+        quantity: None,
+        window: None,
+        residual: Compensated::ZERO,
+    }
+}
+
+/// A newest-first walk that stops at the segment holding an instant, `start < instant <= end`. The instants
+/// asked of it only fall, so it reads each segment once.
+struct Holding<'r> {
+    walk: NewestFirst<'r>,
+    at: Option<HistorySegment>,
+}
+impl<'r> Holding<'r> {
+    fn new(view: &ConservationView<'r>) -> Self {
+        Self {
+            walk: view.newest_first(),
+            at: None,
         }
     }
-    starts
+    fn holding(&mut self, instant: u64) -> Result<&HistorySegment, CertificateFailure> {
+        let before = |segment: &HistorySegment| segment.interval().start().nanoseconds() < instant;
+        while !self.at.as_ref().is_some_and(before) {
+            let next = self.walk.next().ok_or(of_history(CertificateCheck::Coverage))?;
+            let read = |error| of_history(CertificateCheck::History(error));
+            self.at = Some(next.map_err(read)?);
+        }
+        self.at.as_ref().ok_or(of_history(CertificateCheck::Coverage))
+    }
 }
 
 fn differences(
@@ -240,18 +236,90 @@ fn differences(
     Some(later.iter().zip(&earlier).map(difference).collect())
 }
 
+struct Window {
+    quantity: usize,
+    interval: Interval,
+    closure: Compensated,
+    drift: Compensated,
+}
+
+/// Neighbouring window starts `from < to`, which `trailing` holds and `leading` holds a day later, so each
+/// difference is one polynomial between them. `Err` is the pair's first coverage or closure failure in
+/// quantity then endpoint order; `Ok` is its first drift failure in that order and every window it checked,
+/// in that order.
+fn pair(
+    policy: &CertificatePolicy,
+    trailing: &HistorySegment,
+    leading: &HistorySegment,
+    from: u64,
+    to: u64,
+) -> Result<(Option<CertificateFailure>, Vec<Window>), CertificateFailure> {
+    let coverage = of_history(CertificateCheck::Coverage);
+    let early = Interval::new(SimTime::from_ns(from), SimTime::from_ns(to)).ok_or(coverage)?;
+    let late =
+        Interval::new(SimTime::from_ns(from + DAY_NS), SimTime::from_ns(to + DAY_NS)).ok_or(coverage)?;
+    let mut drifted = None;
+    let mut windows = Vec::with_capacity(2 * policy.quantities.len());
+    for (at, limits) in policy.quantities.iter().enumerate() {
+        let quantity = limits.quantity;
+        let change = differences(
+            &leading.inventory(quantity),
+            late,
+            &trailing.inventory(quantity),
+            early,
+        )
+        .ok_or(coverage)?;
+        let inflow = differences(&leading.inflow(quantity), late, &trailing.inflow(quantity), early)
+            .ok_or(coverage)?;
+        let outflow = differences(
+            &leading.outflow(quantity),
+            late,
+            &trailing.outflow(quantity),
+            early,
+        )
+        .ok_or(coverage)?;
+        for (index, start) in [from, to].into_iter().enumerate() {
+            let interval =
+                Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + DAY_NS)).ok_or(coverage)?;
+            let closure = change[index].minus(inflow[index].minus(outflow[index])).abs();
+            let gross = inflow[index].plus(outflow[index]);
+            let allowed = limits.absolute.plus(gross.times(&limits.relative));
+            if !closure.at_most(allowed) {
+                return Err(CertificateFailure {
+                    check: CertificateCheck::Closure,
+                    quantity: Some(quantity),
+                    window: Some(interval),
+                    residual: closure,
+                });
+            }
+            let drift = change[index].abs();
+            if !drift.at_most(limits.drift) && drifted.is_none() {
+                drifted = Some(CertificateFailure {
+                    check: CertificateCheck::Drift,
+                    quantity: Some(quantity),
+                    window: Some(interval),
+                    residual: drift,
+                });
+            }
+            windows.push(Window {
+                quantity: at,
+                interval,
+                closure,
+                drift,
+            });
+        }
+    }
+    Ok((drifted, windows))
+}
+
 /// Closure failures win over drift, so a `Drift` failure says the ledger closed everywhere and the body
-/// still moved.
+/// still moved. It walks the store newest first and reports what a walk in time order would: the earliest
+/// failing window, and the earliest of equal worst windows.
 pub fn certify(
     view: &ConservationView<'_>,
     policy: &CertificatePolicy,
 ) -> Result<Certificate, CertificateFailure> {
-    let coverage = CertificateFailure {
-        check: CertificateCheck::Coverage,
-        quantity: None,
-        window: None,
-        residual: Compensated::ZERO,
-    };
+    let coverage = of_history(CertificateCheck::Coverage);
     if policy.basis != view.basis().digest() {
         return Err(coverage);
     }
@@ -260,87 +328,51 @@ pub fn certify(
         return Err(coverage);
     }
     let ExpectedDrift::Zero = policy.expected;
-    let segments: Vec<HistorySegment<'_>> = view.segments().collect();
     let first = span.start().nanoseconds();
-    let last = span.end().nanoseconds() - DAY_NS;
-    let starts = window_starts(&segments, first, last);
+    let (mut early, mut late) = (Holding::new(view), Holding::new(view));
     let mut worst: Vec<Option<QuantityResult>> = vec![None; policy.quantities.len()];
-    let mut drifted: Option<CertificateFailure> = None;
-    let (mut trail, mut lead) = (0, 0);
+    let (mut failed, mut drifted) = (None, None);
     let mut pieces = 0;
-    for pair in starts.windows(2) {
-        let [from, to] = [pair[0], pair[1]];
-        let early = Interval::new(SimTime::from_ns(from), SimTime::from_ns(to)).ok_or(coverage)?;
-        let late =
-            Interval::new(SimTime::from_ns(from + DAY_NS), SimTime::from_ns(to + DAY_NS)).ok_or(coverage)?;
-        while segments[trail].interval().end() <= early.start() {
-            trail += 1;
-        }
-        while segments[lead].interval().end() <= late.start() {
-            lead += 1;
-        }
-        let (trailing, leading) = (&segments[trail], &segments[lead]);
+    let mut to = span.end().nanoseconds() - DAY_NS;
+    while to > first {
+        let trailing = early.holding(to)?;
+        let leading = late.holding(to + DAY_NS)?;
+        let start = |segment: &HistorySegment| segment.interval().start().nanoseconds();
+        let from = start(trailing).max(start(leading).saturating_sub(DAY_NS));
         pieces += 1;
-        for (limits, held) in policy.quantities.iter().zip(&mut worst) {
-            let quantity = limits.quantity;
-            let change = differences(
-                &leading.inventory(quantity),
-                late,
-                &trailing.inventory(quantity),
-                early,
-            )
-            .ok_or(coverage)?;
-            let inflow = differences(&leading.inflow(quantity), late, &trailing.inflow(quantity), early)
-                .ok_or(coverage)?;
-            let outflow = differences(
-                &leading.outflow(quantity),
-                late,
-                &trailing.outflow(quantity),
-                early,
-            )
-            .ok_or(coverage)?;
-            for (index, &start) in pair.iter().enumerate() {
-                let window = Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + DAY_NS))
-                    .ok_or(coverage)?;
-                let closure = change[index].minus(inflow[index].minus(outflow[index])).abs();
-                let gross = inflow[index].plus(outflow[index]);
-                let allowed = limits.absolute.plus(gross.times(&limits.relative));
-                if !closure.at_most(allowed) {
-                    return Err(CertificateFailure {
-                        check: CertificateCheck::Closure,
-                        quantity: Some(quantity),
-                        window: Some(window),
-                        residual: closure,
+        match pair(policy, trailing, leading, from, to) {
+            Err(failure) => failed = Some(failure),
+            Ok((drift, windows)) => {
+                drifted = drift.or(drifted);
+                // The exact reverse of time order, replaced on ties, so the earliest of equal windows stays.
+                for window in windows.into_iter().rev() {
+                    let Window {
+                        quantity,
+                        interval,
+                        closure,
+                        drift,
+                    } = window;
+                    let result = worst[quantity].get_or_insert(QuantityResult {
+                        quantity: policy.quantities[quantity].quantity,
+                        worst_closure: closure,
+                        closure_window: interval,
+                        worst_drift: drift,
+                        drift_window: interval,
                     });
-                }
-                let drift = change[index].abs();
-                if !drift.at_most(limits.drift) && drifted.is_none() {
-                    drifted = Some(CertificateFailure {
-                        check: CertificateCheck::Drift,
-                        quantity: Some(quantity),
-                        window: Some(window),
-                        residual: drift,
-                    });
-                }
-                let result = held.get_or_insert(QuantityResult {
-                    quantity,
-                    worst_closure: closure,
-                    closure_window: window,
-                    worst_drift: drift,
-                    drift_window: window,
-                });
-                if !closure.at_most(result.worst_closure) {
-                    result.worst_closure = closure;
-                    result.closure_window = window;
-                }
-                if !drift.at_most(result.worst_drift) {
-                    result.worst_drift = drift;
-                    result.drift_window = window;
+                    if result.worst_closure.at_most(closure) {
+                        result.worst_closure = closure;
+                        result.closure_window = interval;
+                    }
+                    if result.worst_drift.at_most(drift) {
+                        result.worst_drift = drift;
+                        result.drift_window = interval;
+                    }
                 }
             }
         }
+        to = from;
     }
-    if let Some(failure) = drifted {
+    if let Some(failure) = failed.or(drifted) {
         return Err(failure);
     }
     let results = worst.into_iter().collect::<Option<Vec<_>>>().ok_or(coverage)?;

@@ -452,8 +452,16 @@ impl PulsatileCase {
     fn history(&self) -> MethodHistory {
         MethodHistory::new(Digest::of_canonical(b"a schema"), at(0), Vec::new())
     }
-    fn admitted<'m>(&'m self, core: &'m dyn CoupledSolver) -> Admitted<'m> {
-        admit_solved(self.body(), self.packet(), port(0..self.cycles), core, &self.lens).expect("solved")
+    fn admitted<'m>(&'m self, core: &'m dyn CoupledSolver, store: &'m dyn HistoryStore) -> Admitted<'m> {
+        admit_solved(
+            self.body(),
+            self.packet(),
+            port(0..self.cycles),
+            core,
+            &self.lens,
+            store,
+        )
+        .expect("solved")
     }
 }
 impl ReplayCase for PulsatileCase {
@@ -469,16 +477,18 @@ impl ReplayCase for PulsatileCase {
     fn admit<'m>(
         &'m self,
         core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         let boundary = BoundaryPort::new(deliveries(0..self.cycles))?;
-        Ok(admit_solved(self.body(), self.packet(), boundary, core, &self.lens)?.session)
+        Ok(admit_solved(self.body(), self.packet(), boundary, core, &self.lens, store)?.session)
     }
     fn admit_withheld<'m>(
         &'m self,
         core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         let boundary = BoundaryPort::new(deliveries(0..1))?;
-        Ok(admit_solved(self.body(), self.packet(), boundary, core, &self.lens)?.session)
+        Ok(admit_solved(self.body(), self.packet(), boundary, core, &self.lens, store)?.session)
     }
 }
 
@@ -528,9 +538,10 @@ fn record(provenance: &InitializationProvenance, name: ValueName) -> ValueRecord
 
 #[test]
 fn a_cycle_mean_anchor_is_met_as_a_cycle_mean_not_an_instant() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let core = reference(REFERENCE_NS);
-    let Admitted { session, provenance } = case.admitted(&core);
+    let Admitted { session, provenance } = case.admitted(&core, &store);
     let name = ValueName::Parameter {
         key: E,
         binding: NETWORK,
@@ -547,6 +558,7 @@ fn a_cycle_mean_anchor_is_met_as_a_cycle_mean_not_an_instant() {
 
 #[test]
 fn the_fit_is_its_closed_form_on_any_grid_because_the_ring_keeps_the_means() {
+    let store = MemoryStore::default();
     for intervals in [4, 8, 64, 256] {
         let case = PulsatileCase::plain().with_intervals(intervals);
         let core = reference(REFERENCE_NS);
@@ -554,7 +566,7 @@ fn the_fit_is_its_closed_form_on_any_grid_because_the_ring_keeps_the_means() {
             key: E,
             binding: NETWORK,
         };
-        let solved = hi(record(&case.admitted(&core).provenance, name).value);
+        let solved = hi(record(&case.admitted(&core, &store).provenance, name).value);
         assert!(
             (solved - fitted_elastance()).abs() < 1e-12,
             "{intervals}: {solved}"
@@ -564,18 +576,20 @@ fn the_fit_is_its_closed_form_on_any_grid_because_the_ring_keeps_the_means() {
 
 #[test]
 fn the_start_state_is_the_point_of_the_backward_euler_orbit() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let core = reference(REFERENCE_NS);
-    let session = case.admitted(&core).session;
+    let session = case.admitted(&core, &store).session;
     let start = hi(session.record().accepted().value(case.row_a()));
     assert!((start - start_a(INTERVALS)).abs() < 1e-11, "{start}");
 }
 
 #[test]
 fn a_core_on_the_grids_own_step_closes_the_first_cycle_to_rounding() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let core = reference(REFERENCE_NS);
-    let session = case.admitted(&core).session;
+    let session = case.admitted(&core, &store).session;
     let start = hi(session.record().accepted().value(case.row_a()));
     let (_, session) = cycle_means(session, &case.lens, 1);
     let end = hi(session.record().accepted().value(case.row_a()));
@@ -584,10 +598,11 @@ fn a_core_on_the_grids_own_step_closes_the_first_cycle_to_rounding() {
 
 #[test]
 fn a_core_off_the_grid_starts_near_its_own_orbit_and_closes_on_it() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     for interval_ns in [PERIOD_NS / 128, PERIOD_NS / 16, PERIOD_NS / 4] {
         let core = reference(interval_ns);
-        let (means, _) = cycle_means(case.admitted(&core).session, &case.lens, 4);
+        let (means, _) = cycle_means(case.admitted(&core, &store).session, &case.lens, 4);
         let (first, last) = ((means[0] - MEAN_A).abs(), (means[3] - MEAN_A).abs());
         assert!(first < 0.05 && last < first / 100.0, "{interval_ns}: {means:?}");
     }
@@ -595,6 +610,7 @@ fn a_core_off_the_grid_starts_near_its_own_orbit_and_closes_on_it() {
 
 #[test]
 fn an_instant_anchor_on_a_pulsatile_row_is_refused_and_on_a_slow_row_is_read() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let read = Snapshot::new(
         case.a(),
@@ -638,9 +654,17 @@ fn an_instant_anchor_on_a_pulsatile_row_is_refused_and_on_a_slow_row_is_read() {
         packet
     };
     let core = reference(SECOND);
-    assert!(admit_solved(&slow.body, packet(START[0]), empty_port(), &core, &lens).is_ok());
+    assert!(admit_solved(&slow.body, packet(START[0]), empty_port(), &core, &lens, &store).is_ok());
     assert_eq!(
-        admit_solved(&slow.body, packet(START[0] + 1.0), empty_port(), &core, &lens).err(),
+        admit_solved(
+            &slow.body,
+            packet(START[0] + 1.0),
+            empty_port(),
+            &core,
+            &lens,
+            &store
+        )
+        .err(),
         Some(InitializationFailure::Inconsistent {
             row: AdmissionRow::Anchor(MEAN)
         })
@@ -673,13 +697,15 @@ fn a_cycle_mean_anchor_needs_a_cycle() {
 
 #[test]
 fn an_anchor_no_channel_reads_by_its_method_and_window_is_refused() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let core = reference(REFERENCE_NS);
     let refused = Some(InitializationFailure::Admission(AdmissionError::AnchorUnread {
         anchor: MEAN,
     }));
-    let solved =
-        |lens: &ObservationLens| admit_solved(case.body(), case.packet(), port(0..1), &core, lens).err();
+    let solved = |lens: &ObservationLens| {
+        admit_solved(case.body(), case.packet(), port(0..1), &core, lens, &store).err()
+    };
     let other_method = gauges(&case.declared, "another method", u64::from(INTERVALS));
     assert_eq!(solved(&other_method), refused);
     let grid = count(PERIOD_NS / u64::from(INTERVALS));
@@ -716,6 +742,7 @@ fn an_anchor_no_channel_reads_by_its_method_and_window_is_refused() {
 
 #[test]
 fn the_lens_that_reads_an_anchor_moves_no_bit_of_the_start() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let core = reference(REFERENCE_NS);
     let wider = {
@@ -723,10 +750,17 @@ fn the_lens_that_reads_an_anchor_moves_no_bit_of_the_start() {
         let channels = vec![ChannelSpec::new(GAUGE, case.a()).averaged(count(64)), extra];
         (case.body().lens(channels, count(PERIOD_NS / 64))).expect("a lens")
     };
-    let one = case.admitted(&core).session;
-    let other = admit_solved(case.body(), case.packet(), port(0..case.cycles), &core, &wider)
-        .expect("solved")
-        .session;
+    let one = case.admitted(&core, &store).session;
+    let other = admit_solved(
+        case.body(),
+        case.packet(),
+        port(0..case.cycles),
+        &core,
+        &wider,
+        &store,
+    )
+    .expect("solved")
+    .session;
     assert_eq!(one.record().seal(), other.record().seal());
 }
 
@@ -795,6 +829,7 @@ fn a_guess_that_already_solves_the_system_is_admitted() {
 
 #[test]
 fn a_solved_orbit_that_misses_a_second_anchor_is_refused_with_that_anchor_named() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let second = AnchorId::new("fixture.mean-b");
     let mut packet = case.packet();
@@ -803,7 +838,7 @@ fn a_solved_orbit_that_misses_a_second_anchor_is_refused_with_that_anchor_named(
         .expect("once");
     let core = reference(REFERENCE_NS);
     assert_eq!(
-        admit_solved(case.body(), packet, port(0..1), &core, &case.lens).err(),
+        admit_solved(case.body(), packet, port(0..1), &core, &case.lens, &store).err(),
         Some(InitializationFailure::Inconsistent {
             row: AdmissionRow::Anchor(second)
         })
@@ -976,6 +1011,7 @@ fn a_witness_that_holds_every_row_and_misses_its_anchor_is_refused_with_the_anch
 
 #[test]
 fn a_net_boundary_flow_over_the_cycle_is_refused_with_its_quantity() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let core = reference(REFERENCE_NS);
     let short_by = |short: f64| {
@@ -984,7 +1020,7 @@ fn a_net_boundary_flow_over_the_cycle_is_refused_with_its_quantity() {
             water(b"short drain", 0, DRAIN, 0, PERIOD_NS, DELIVERED - short),
         ])
         .expect("parsed");
-        admit_solved(case.body(), case.packet(), boundary, &core, &case.lens).err()
+        admit_solved(case.body(), case.packet(), boundary, &core, &case.lens, &store).err()
     };
     let quantity = case.body().conserved_basis().combinations()[0].id();
     let refused = Some(InitializationFailure::NetBoundaryFlow { quantity });
@@ -1058,6 +1094,7 @@ fn a_defect_that_overflows_is_refused_however_wide_the_tolerance() {
 /// Every stage holds to its own scale and all of them lean one way: the flow lands on no one row.
 #[test]
 fn a_net_flow_spread_over_every_row_is_still_refused_with_its_quantity() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let (elastance, intervals) = (2.0, 16.0);
     let net = 8e-9;
@@ -1081,7 +1118,7 @@ fn a_net_flow_spread_over_every_row_is_still_refused_with_its_quantity() {
     let quantity = case.body().conserved_basis().combinations()[0].id();
     let core = reference(REFERENCE_NS);
     assert_eq!(
-        admit_fixture(case.body(), packet, boundary, &core).err(),
+        admit_fixture(case.body(), packet, boundary, &core, &store).err(),
         Some(InitializationFailure::NetBoundaryFlow { quantity })
     );
 }
@@ -1123,6 +1160,7 @@ fn the_row_a_total_replaced_is_read_at_its_own_scale() {
 
 #[test]
 fn a_march_gives_a_guess_with_no_head_a_head_to_fit() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
     packet.within(admission_tolerance());
@@ -1141,7 +1179,7 @@ fn a_march_gives_a_guess_with_no_head_a_head_to_fit() {
         .calibrated(E, NETWORK, measure::<Elastance>(GUESS), MEAN)
         .expect("once");
     let core = reference(REFERENCE_NS);
-    let admitted = admit_solved(case.body(), packet, port(0..1), &core, &case.lens);
+    let admitted = admit_solved(case.body(), packet, port(0..1), &core, &case.lens, &store);
     assert!(admitted.is_ok());
 }
 
@@ -1237,6 +1275,7 @@ fn a_fit_no_law_behind_its_anchor_reads_is_refused_by_its_key() {
 /// row of the orbit holds.
 #[test]
 fn an_orbit_that_leaves_a_rows_set_inside_the_beat_is_refused_with_its_row() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
     packet.within(admission_tolerance());
@@ -1255,7 +1294,7 @@ fn an_orbit_that_leaves_a_rows_set_inside_the_beat_is_refused_with_its_row() {
     let core = reference(REFERENCE_NS);
     let row = AdmissionRow::Body(case.row_b());
     assert_eq!(
-        admit_solved(case.body(), packet, boundary, &core, &case.lens).err(),
+        admit_solved(case.body(), packet, boundary, &core, &case.lens, &store).err(),
         Some(InitializationFailure::Inconsistent { row })
     );
 }
@@ -1332,11 +1371,12 @@ fn filter_packet(reading: f64) -> ParameterPacket<SyntheticFixture> {
 
 #[test]
 fn under_an_instant_only_algebraic_rows_move() {
+    let store = MemoryStore::default();
     let body = filter_body();
     let core = reference(SECOND);
     let lens = body.lens(Vec::new(), count(SECOND)).expect("a lens");
     let Admitted { session, provenance } =
-        admit_solved(&body, filter_packet(4.0), empty_port(), &core, &lens).expect("solved");
+        admit_solved(&body, filter_packet(4.0), empty_port(), &core, &lens, &store).expect("solved");
     let nervous = |local| LawName { owner: "NS", local };
     let reading = RowKind::Algebraic(nervous("reading").into());
     assert_eq!(
@@ -1356,6 +1396,7 @@ const NEAR_THREE: f64 = 1e-9 + 3e-12;
 
 #[test]
 fn the_tolerance_decides_a_near_row_and_is_reported_with_the_worst_row() {
+    let store = MemoryStore::default();
     let body = filter_body();
     let core = reference(SECOND);
     let row = AdmissionRow::Body(body.rows()[1].id());
@@ -1366,7 +1407,7 @@ fn the_tolerance_decides_a_near_row_and_is_reported_with_the_worst_row() {
         packet
     };
     let far = 3.0 + 1.1 * NEAR_THREE;
-    let refused = admit_fixture(&body, within(far), empty_port(), &core).err();
+    let refused = admit_fixture(&body, within(far), empty_port(), &core, &store).err();
     assert_eq!(refused, Some(InitializationFailure::Inconsistent { row }));
 
     let lens = body.lens(Vec::new(), count(SECOND)).expect("a lens");
@@ -1386,12 +1427,13 @@ fn the_tolerance_decides_a_near_row_and_is_reported_with_the_worst_row() {
 
 #[test]
 fn a_packet_that_states_no_tolerance_is_held_exactly() {
+    let store = MemoryStore::default();
     let body = filter_body();
     let core = reference(SECOND);
     let row = AdmissionRow::Body(body.rows()[1].id());
-    assert!(admit_fixture(&body, filter_packet(3.0), empty_port(), &core).is_ok());
+    assert!(admit_fixture(&body, filter_packet(3.0), empty_port(), &core, &store).is_ok());
     let near = 3.0 + 4.0 * f64::EPSILON;
-    let refused = admit_fixture(&body, filter_packet(near), empty_port(), &core).err();
+    let refused = admit_fixture(&body, filter_packet(near), empty_port(), &core, &store).err();
     assert_eq!(refused, Some(InitializationFailure::Inconsistent { row }));
     let parameters = body.bind(filter_packet(3.0)).expect("bound");
     let system = body
@@ -1410,6 +1452,7 @@ fn a_packet_that_states_no_tolerance_is_held_exactly() {
 /// Pivoting can move a memory row by rounding while it solves the algebraic row beside it.
 #[test]
 fn an_instant_solve_stands_though_rounding_moves_a_row_inside_the_tolerance() {
+    let store = MemoryStore::default();
     let body = filter_body();
     let core = reference(SECOND);
     let lens = body.lens(Vec::new(), count(SECOND)).expect("a lens");
@@ -1436,7 +1479,7 @@ fn an_instant_solve_stands_though_rounding_moves_a_row_inside_the_tolerance() {
                 NOTE,
             )
             .expect("once");
-        let solved = admit_solved(&body, packet, empty_port(), &core, &lens).expect("solved");
+        let solved = admit_solved(&body, packet, empty_port(), &core, &lens, &store).expect("solved");
         let read = hi(solved.session.record().accepted().value(body.rows()[1].id()));
         assert!((read - gain * filter).abs() < 1e-12, "{read}");
     }
@@ -1447,6 +1490,7 @@ fn tiny_flow<'m>(
     case: &'m PulsatileCase,
     core: &'m ReferenceIntegrator,
     tiny: f64,
+    store: &'m dyn HistoryStore,
 ) -> Result<Admitted<'m>, InitializationFailure> {
     let (v, tau) = (tiny / seconds(PERIOD_NS), seconds(PULSE_NS));
     let mean = TOTAL / 2.0 + tiny * (1.0 - tau) / 4.0 + v / (2.0 * 2.0 * CONDUCTANCE);
@@ -1471,28 +1515,30 @@ fn tiny_flow<'m>(
         water(b"tiny drain", 0, DRAIN, 0, PERIOD_NS, tiny),
     ])
     .expect("parsed");
-    admit_solved(case.body(), packet, boundary, core, &case.lens)
+    admit_solved(case.body(), packet, boundary, core, &case.lens, store)
 }
 
 #[test]
 fn a_fit_the_tolerance_could_not_see_is_still_solved() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let name = ValueName::Parameter {
         key: E,
         binding: NETWORK,
     };
     let core = reference(REFERENCE_NS);
-    let solved = tiny_flow(&case, &core, 1e-7).expect("solved");
+    let solved = tiny_flow(&case, &core, 1e-7, &store).expect("solved");
     let fitted = hi(record(&solved.provenance, name).value);
     assert!((fitted - 2.0).abs() < 1e-5, "{fitted}");
 }
 
 #[test]
 fn a_fit_only_rounding_can_feel_is_refused_by_its_key() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let core = reference(REFERENCE_NS);
     assert_eq!(
-        tiny_flow(&case, &core, 1e-12).err(),
+        tiny_flow(&case, &core, 1e-12, &store).err(),
         Some(InitializationFailure::Admission(AdmissionError::FitUnread {
             key: E,
             binding: NETWORK
@@ -1570,6 +1616,7 @@ fn swinging_body() -> (CompiledBody, SiteId) {
 /// flow on its own and keeps it, so the beat would not close.
 #[test]
 fn a_net_flow_a_row_cannot_hold_is_still_refused() {
+    let store = MemoryStore::default();
     const WIDE: f64 = 1e16;
     let (body, vessel) = swinging_body();
     let row = boundary_row(SWING);
@@ -1582,7 +1629,7 @@ fn a_net_flow_a_row_cannot_hold_is_still_refused() {
     let events = flows.map(|(name, amount)| water(name.as_bytes(), 0, name, 0, SECOND, amount));
     let boundary = BoundaryPort::new(events.into()).expect("parsed");
     let core = reference(SECOND / 2);
-    let refused = admit_solved(&body, packet, boundary, &core, &lens).err();
+    let refused = admit_solved(&body, packet, boundary, &core, &lens, &store).err();
     assert!(
         matches!(refused, Some(InitializationFailure::NetBoundaryFlow { .. })),
         "{refused:?}"
@@ -1620,6 +1667,7 @@ fn parted_body() -> (CompiledBody, [SiteId; 2]) {
 /// Each pool's beat closes on its own: one filling as fast as the other empties is two net flows, not none.
 #[test]
 fn a_net_flow_is_read_pool_by_pool() {
+    let store = MemoryStore::default();
     let (body, [filling, emptying]) = parted_body();
     let bare = ChannelSpec::new(GAUGE, lumen(filling));
     let lens = body.lens(vec![bare], count(SECOND)).expect("a lens");
@@ -1633,7 +1681,7 @@ fn a_net_flow_is_read_pool_by_pool() {
     let core = reference(SECOND / 2);
     let quantity = body.conserved_basis().combinations()[0].id();
     assert_eq!(
-        admit_solved(&body, packet, boundary, &core, &lens).err(),
+        admit_solved(&body, packet, boundary, &core, &lens, &store).err(),
         Some(InitializationFailure::NetBoundaryFlow { quantity })
     );
 }
@@ -1642,6 +1690,7 @@ fn a_net_flow_is_read_pool_by_pool() {
 /// a third, where a plain sum lands `8e-6` off, far past the tolerance.
 #[test]
 fn a_cycle_mean_is_summed_as_the_observer_sums_it() {
+    let store = MemoryStore::default();
     const WIDE: f64 = 1e12;
     const SMALL: f64 = 1.1;
     let (body, vessel) = swinging_body();
@@ -1666,7 +1715,7 @@ fn a_cycle_mean_is_summed_as_the_observer_sums_it() {
             }
         }
         let boundary = BoundaryPort::new(events).expect("parsed");
-        admit_solved(&body, packet, boundary, &core, &lens)
+        admit_solved(&body, packet, boundary, &core, &lens, &store)
     };
     let true_mean = SMALL / 3.0;
     let Admitted { session, .. } = solved(true_mean).expect("the mean the observer reads");
@@ -1705,6 +1754,7 @@ fn a_start_moved_inside_the_tolerance_or_another_history_names_another_run() {
 /// Every amount is far below the default's floor, and the rows still speak for the fit on their own scale.
 #[test]
 fn a_small_body_is_solved_on_its_own_scale() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let small = 1e-16;
     let floor = measure::<Dimensionless>(1e-30);
@@ -1730,7 +1780,7 @@ fn a_small_body_is_solved_on_its_own_scale() {
     ])
     .expect("parsed");
     let core = reference(REFERENCE_NS);
-    let solved = admit_solved(case.body(), packet, boundary, &core, &case.lens).expect("solved");
+    let solved = admit_solved(case.body(), packet, boundary, &core, &case.lens, &store).expect("solved");
     let name = ValueName::Parameter {
         key: E,
         binding: NETWORK,
@@ -1743,6 +1793,7 @@ fn a_small_body_is_solved_on_its_own_scale() {
 /// of its own would end short of a law that is not linear.
 #[test]
 fn a_small_nonlinear_body_with_no_fit_is_solved_on_its_own_scale() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::new(Variant::Divided);
     let small = 1e-16;
     let floor = measure::<Dimensionless>(1e-30);
@@ -1765,7 +1816,7 @@ fn a_small_nonlinear_body_with_no_fit_is_solved_on_its_own_scale() {
     ])
     .expect("parsed");
     let core = reference(REFERENCE_NS);
-    assert!(admit_solved(case.body(), packet, boundary, &core, &case.lens).is_ok());
+    assert!(admit_solved(case.body(), packet, boundary, &core, &case.lens, &store).is_ok());
 }
 
 #[test]
@@ -1817,6 +1868,7 @@ fn a_ring_update_stays_on_its_bits() {
 /// The drive reaches the row in one interval of eight, so a single point of the ring feels the gain.
 #[test]
 fn a_fit_felt_at_one_point_of_the_ring_is_solved() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::new(Variant::Instant);
     let reading = boundary_row(READING);
     let step = PERIOD_NS / 8;
@@ -1855,7 +1907,7 @@ fn a_fit_felt_at_one_point_of_the_ring_is_solved() {
     ])
     .expect("parsed");
     let core = reference(step);
-    let solved = admit_solved(case.body(), packet, boundary, &core, &lens).expect("solved");
+    let solved = admit_solved(case.body(), packet, boundary, &core, &lens, &store).expect("solved");
     let name = ValueName::Parameter {
         key: SET,
         binding: Binding::Body,
@@ -1967,6 +2019,7 @@ fn instant_packet(case: &PulsatileCase, row: RowKind, target: f64) -> ParameterP
 
 #[test]
 fn a_fit_solves_at_an_instant_on_a_body_with_a_conserved_total() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::new(Variant::Instant);
     let reading = boundary_row(READING);
     let bare = ChannelSpec::new(GAUGE, reading);
@@ -1976,7 +2029,7 @@ fn a_fit_solves_at_an_instant_on_a_body_with_a_conserved_total() {
     let boundary = BoundaryPort::new(events).expect("parsed");
     let core = reference(SECOND);
     let Admitted { provenance, .. } =
-        admit_solved(case.body(), packet, boundary, &core, &lens).expect("solved");
+        admit_solved(case.body(), packet, boundary, &core, &lens, &store).expect("solved");
     let name = ValueName::Parameter {
         key: SET,
         binding: Binding::Body,
@@ -2027,6 +2080,7 @@ fn extra_packet(seed: PacketSeed) -> Result<ParameterPacket<SyntheticFixture>, A
 
 #[test]
 fn provenance_is_recorded_per_value_in_all_five_kinds_and_a_solved_start() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::new(Variant::Extra);
     let mut packet = extra_packet(PacketSeed::new([9, 9, 9, 9])).expect("a packet");
     packet
@@ -2034,7 +2088,7 @@ fn provenance_is_recorded_per_value_in_all_five_kinds_and_a_solved_start() {
         .expect("once");
     let core = reference(REFERENCE_NS);
     let Admitted { provenance, .. } =
-        admit_solved(case.body(), packet, port(0..1), &core, &case.lens).expect("solved");
+        admit_solved(case.body(), packet, port(0..1), &core, &case.lens, &store).expect("solved");
     let entry = |key, binding| ValueName::Parameter { key, binding };
     let kinds = [
         (entry(E, NETWORK), ValueProvenance::Calibrated { anchor: MEAN }),
@@ -2170,6 +2224,7 @@ fn a_sampled_value_needs_a_record_and_moves_only_with_the_packet_seed() {
 }
 
 fn drawn(seed: PacketSeed, tone_first: bool) -> [f64; 2] {
+    let store = MemoryStore::default();
     let case = PulsatileCase::new(Variant::Extra).with_intervals(4);
     let mut packet = case.packet();
     let speed = measure::<Rate<Dimensionless>>(1.0);
@@ -2189,7 +2244,7 @@ fn drawn(seed: PacketSeed, tone_first: bool) -> [f64; 2] {
         packet.sampled(key, Binding::Body, seed).expect("a record");
     }
     let core = reference(REFERENCE_NS);
-    let solved = admit_solved(case.body(), packet, port(0..1), &core, &case.lens).expect("solved");
+    let solved = admit_solved(case.body(), packet, port(0..1), &core, &case.lens, &store).expect("solved");
     [TONE, RATIO].map(|key| {
         let binding = Binding::Body;
         let name = ValueName::Parameter { key, binding };
@@ -2314,6 +2369,7 @@ fn a_fit_on_an_anchor_its_packet_does_not_hold_is_refused_though_others_are_ther
 
 #[test]
 fn a_refusal_names_the_same_anchor_however_the_packet_was_built() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let (first, second) = (AnchorId::new("fixture.a"), AnchorId::new("fixture.b"));
     let core = reference(REFERENCE_NS);
@@ -2323,7 +2379,7 @@ fn a_refusal_names_the_same_anchor_however_the_packet_was_built() {
             let row = if id == first { case.a() } else { case.b() };
             packet.anchor(case.mean_anchor(id, row, 1.0)).expect("once");
         }
-        admit_solved(case.body(), packet, port(0..1), &core, &case.lens).err()
+        admit_solved(case.body(), packet, port(0..1), &core, &case.lens, &store).err()
     };
     let named = Some(InitializationFailure::Inconsistent {
         row: AdmissionRow::Anchor(first),
@@ -2420,6 +2476,7 @@ fn a_fit_on_a_forcings_period_is_refused_though_a_law_reads_it() {
 
 #[test]
 fn a_fit_no_row_feels_at_the_start_is_refused_by_its_key() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let even = 50.0;
     let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
@@ -2440,7 +2497,7 @@ fn a_fit_no_row_feels_at_the_start_is_refused_by_its_key() {
         .expect("once");
     let core = reference(REFERENCE_NS);
     assert_eq!(
-        admit_solved(case.body(), packet, empty_port(), &core, &case.lens).err(),
+        admit_solved(case.body(), packet, empty_port(), &core, &case.lens, &store).err(),
         Some(InitializationFailure::Admission(AdmissionError::FitUnread {
             key: E,
             binding: NETWORK
@@ -2451,6 +2508,7 @@ fn a_fit_no_row_feels_at_the_start_is_refused_by_its_key() {
 /// `E` fills every end. The anchor reads the pair at rest, and only the other pair feels the fit.
 #[test]
 fn a_fit_felt_only_away_from_its_anchor_is_refused_by_its_key() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::new(Variant::Apart);
     let kinds = case.body().rows().iter().map(|row| row.kind());
     let at_rest: Vec<RowKind> = kinds
@@ -2492,7 +2550,7 @@ fn a_fit_felt_only_away_from_its_anchor_is_refused_by_its_key() {
     .expect("parsed");
     let core = reference(REFERENCE_NS);
     assert_eq!(
-        admit_solved(case.body(), packet, boundary, &core, &lens).err(),
+        admit_solved(case.body(), packet, boundary, &core, &lens, &store).err(),
         Some(InitializationFailure::Admission(AdmissionError::FitUnread {
             key: E,
             binding: NETWORK
@@ -2502,6 +2560,7 @@ fn a_fit_felt_only_away_from_its_anchor_is_refused_by_its_key() {
 
 #[test]
 fn a_first_mode_has_a_record() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::new(Variant::Hazard);
     let mut packet = ParameterPacket::new();
     let g = measure::<Conductance<Water>>(CONDUCTANCE);
@@ -2527,7 +2586,7 @@ fn a_first_mode_has_a_record() {
     packet.start_mode(name("rhythm"), "ectopic", NOTE).expect("once");
     let core = reference(SECOND);
     let lens = case.body().lens(Vec::new(), count(SECOND)).expect("a lens");
-    let solved = admit_solved(case.body(), packet, empty_port(), &core, &lens).expect("solved");
+    let solved = admit_solved(case.body(), packet, empty_port(), &core, &lens, &store).expect("solved");
     let mode = ValueName::Mode {
         variable: name("rhythm").into(),
         value: "ectopic",
@@ -2734,11 +2793,12 @@ fn stated_hash(case: &PulsatileCase, stated: Stated) -> PacketHash {
 
 #[test]
 fn a_delivery_inside_the_window_is_in_the_hash_a_run_names_and_one_past_it_is_not() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let core = reference(REFERENCE_NS);
     let named = |events: Vec<BoundaryEvent>| {
         let boundary = BoundaryPort::new(events).expect("parsed");
-        let solved = admit_solved(case.body(), case.packet(), boundary, &core, &case.lens);
+        let solved = admit_solved(case.body(), case.packet(), boundary, &core, &case.lens, &store);
         let session = solved.expect("solved").session;
         session.record().identity().digest()
     };
@@ -2836,9 +2896,10 @@ fn every_part_of_a_packet_is_in_its_hash() {
 
 #[test]
 fn a_late_input_inside_the_window_is_refused_and_one_at_its_end_is_taken() {
+    let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let core = reference(REFERENCE_NS);
-    let mut session = admit_solved(case.body(), case.packet(), port(0..1), &core, &case.lens)
+    let mut session = admit_solved(case.body(), case.packet(), port(0..1), &core, &case.lens, &store)
         .expect("solved")
         .session;
     assert_eq!(session.record().earliest_stamp(), at(PERIOD_NS));

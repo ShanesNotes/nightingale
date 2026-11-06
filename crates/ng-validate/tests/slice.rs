@@ -227,6 +227,7 @@ fn settling_bed() -> Result<CompiledBody, AdmissionError> {
 #[test]
 fn a_cycle_solves_field_rows_at_every_point_and_leaves_held_pools_where_they_are()
 -> Result<(), InitializationFailure> {
+    let store = MemoryStore::default();
     let body = settling_bed()?;
     let bed = site::<CapillaryBed>("bed")?;
     let belly = site::<EnclosedSpace>("belly")?;
@@ -269,7 +270,7 @@ fn a_cycle_solves_field_rows_at_every_point_and_leaves_held_pools_where_they_are
     let lens = gauge(&body, amount(Space::Plasma, bed))?;
     let core = ReferenceIntegrator::new(SECOND / 4);
     let port = BoundaryPort::new(Vec::new())?;
-    let session = admit_solved(&body, packet, port, &core, &lens)?.session;
+    let session = admit_solved(&body, packet, port, &core, &lens, &store)?.session;
     let value = |kind| at_admission(&session, &body, kind);
     let drained = (CAPILLARY - 5.0) / 2.0;
     let close = |found: f64, wanted: f64| (found - wanted).abs() < 1e-9;
@@ -369,6 +370,7 @@ fn stretch_law<'b>(
 
 #[test]
 fn a_validity_range_on_a_definition_judges_the_row() -> Result<(), InitializationFailure> {
+    let store = MemoryStore::default();
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>(
         "body",
@@ -404,7 +406,7 @@ fn a_validity_range_on_a_definition_judges_the_row() -> Result<(), Initializatio
         packet.start(row.kind(), Measure::<Dimensionless>::new(4.0)?, "synthetic")?;
     }
     let core = ReferenceIntegrator::new(SECOND);
-    let session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core)?;
+    let session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core, &store)?;
     let ng_record::Step::Accepted(_, receipt) = session.step() else {
         panic!("the step was not accepted");
     };
@@ -465,6 +467,7 @@ fn coupled_loop() -> Result<CompiledBody, AdmissionError> {
 
 #[test]
 fn a_loop_of_two_couplings_is_solved_as_one_coupled_step() -> Result<(), InitializationFailure> {
+    let store = MemoryStore::default();
     let body = coupled_loop()?;
     let named = |owner, local| LawName { owner, local };
     let climbing = RowKind::Memory(named("RS", "climbing").into());
@@ -486,7 +489,7 @@ fn a_loop_of_two_couplings_is_solved_as_one_coupled_step() -> Result<(), Initial
         packet.start(row, Measure::<Dimensionless>::new(start)?, "synthetic")?;
     }
     let core = ReferenceIntegrator::new(SECOND);
-    let session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core)?;
+    let session = admit_fixture(&body, packet, BoundaryPort::new(Vec::new())?, &core, &store)?;
     let Ok(session) = run_until(session, SimTime::from_ns(SECOND)) else {
         panic!("the bench faulted");
     };

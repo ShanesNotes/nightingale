@@ -86,7 +86,8 @@ fn watched(
     core: &dyn CoupledSolver,
     lens: Option<(&ObservationLens, ObservationSeed)>,
 ) -> Watched {
-    let mut session = case.admit(core).expect("admitted");
+    let store = MemoryStore::default();
+    let mut session = case.admit(core, &store).expect("admitted");
     let mut observer = lens.map(|(lens, seed)| (lens, Observer::new(lens, seed)));
     let mut seals = vec![session.record().seal()];
     let (mut fired, mut observations) = (Vec::new(), Vec::new());
@@ -238,11 +239,12 @@ fn a_run_too_short_for_a_reading_to_result_is_missing_evidence() {
 
 #[test]
 fn an_observer_refuses_a_skipped_revision() {
+    let store = MemoryStore::default();
     let case = water_case();
     let core = reference();
     let [a, _] = bare(&case);
     let lens = lens(case.body(), vec![a], SECOND);
-    let session = case.admit(&core).expect("admitted");
+    let session = case.admit(&core, &store).expect("admitted");
     let mut observer = Observer::new(&lens, seed());
     let expected = session.observation(&lens).expect("a view").seal();
     read(&mut observer, &session, &lens);
@@ -260,11 +262,12 @@ fn an_observer_refuses_a_skipped_revision() {
 
 #[test]
 fn an_observer_refuses_a_repeated_revision_and_a_refused_read_changes_nothing() {
+    let store = MemoryStore::default();
     let case = water_case();
     let core = reference();
     let [a, _] = bare(&case);
     let lens = lens(case.body(), vec![a], SECOND);
-    let session = case.admit(&core).expect("admitted");
+    let session = case.admit(&core, &store).expect("admitted");
     let mut observer = Observer::new(&lens, seed());
     read(&mut observer, &session, &lens);
     let (session, _) = step(session);
@@ -276,22 +279,6 @@ fn an_observer_refuses_a_repeated_revision_and_a_refused_read_changes_nothing() 
         Err(ObservationRefusal::Gap { .. })
     ));
     assert_eq!(observer.checkpoint().as_bytes(), before.as_bytes());
-}
-
-#[derive(Default)]
-struct Store {
-    links: Vec<(Digest, Vec<u8>)>,
-}
-impl HistoryStore for Store {
-    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
-        (self.links.iter())
-            .find(|link| link.0 == *seal)
-            .map(|link| link.1.clone())
-    }
-    fn keep(&mut self, seal: Digest, link: Vec<u8>) -> Result<(), CheckpointError> {
-        self.links.push((seal, link));
-        Ok(())
-    }
 }
 
 fn water(id: &[u8], from: SimTime) -> AuthorizedInput {
@@ -313,12 +300,12 @@ fn an_observer_refuses_the_next_revision_of_another_course() {
     let core = reference();
     let [a, _] = bare(&case);
     let lens = lens(case.body(), vec![a], SECOND);
-    let mut store = Store::default();
-    let mut session = case.admit(&core).expect("admitted");
+    let store = MemoryStore::default();
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut observer = Observer::new(&lens, seed());
     read(&mut observer, &session, &lens);
     (session, _) = step(session);
-    let saved = session.checkpoint(&mut store).expect("a checkpoint");
+    let saved = session.checkpoint().expect("a checkpoint");
     let fork = |name: &[u8]| {
         session
             .rewind(&saved, BranchId::new(Digest::of_canonical(name)))
@@ -344,12 +331,13 @@ fn an_observer_refuses_the_next_revision_of_another_course() {
 
 #[test]
 fn each_grid_instant_appears_in_exactly_one_step() {
+    let store = MemoryStore::default();
     let case = water_case();
     let core = reference();
     let [a, b] = bare(&case);
     let period_ns = 3 * SECOND;
     let lens = lens(case.body(), vec![a, b], period_ns);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut instants = Vec::new();
     loop {
         let view = session.observation(&lens).expect("a view");
@@ -424,11 +412,12 @@ fn each_grid_instant_reaches_an_observer_once_across_refusals_and_a_firing() {
 
 #[test]
 fn an_input_admitted_between_reads_leaves_no_gap() {
+    let store = MemoryStore::default();
     let case = water_case();
     let core = reference();
     let [a, _] = bare(&case);
     let lens = lens(case.body(), vec![a], SECOND);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut observer = Observer::new(&lens, seed());
     read(&mut observer, &session, &lens);
     let seal = session.observation(&lens).expect("a view").seal();
@@ -442,11 +431,12 @@ fn an_input_admitted_between_reads_leaves_no_gap() {
 
 #[test]
 fn an_observer_may_attach_to_a_run_under_way_and_reads_from_there() {
+    let store = MemoryStore::default();
     let case = water_case();
     let core = reference();
     let [a, _] = bare(&case);
     let lens = lens(case.body(), vec![a.averaged(count(12))], SECOND);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     (session, _) = step(session);
     (session, _) = step(session);
     (session, _) = step(session);
@@ -483,8 +473,8 @@ fn an_observer_checkpoint_restores_its_observations_after_a_resume() {
     let lens = lab(&case);
     let core = reference();
     let whole = watched(&case, &core, Some((&lens, seed())));
-    let mut store = Store::default();
-    let mut session = case.admit(&core).expect("admitted");
+    let store = MemoryStore::default();
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut observer = Observer::new(&lens, seed());
     let mut observed = read(&mut observer, &session, &lens);
     let mut pending = 0;
@@ -492,8 +482,7 @@ fn an_observer_checkpoint_restores_its_observations_after_a_resume() {
         (session, _) = step(session);
         observed.extend(read(&mut observer, &session, &lens));
         pending += 1;
-        let record =
-            Checkpoint::from_bytes(session.checkpoint(&mut store).expect("saved").as_bytes().to_vec());
+        let record = Checkpoint::from_bytes(session.checkpoint().expect("saved").as_bytes().to_vec());
         let bytes = observer.checkpoint().as_bytes().to_vec();
         let stored = ObserverCheckpoint::from_bytes(bytes);
         let fresh = reference();
@@ -515,15 +504,15 @@ fn an_observer_checkpoint_stays_valid_across_a_rewind() {
     let lens = lab(&case);
     let core = reference();
     let whole = watched(&case, &core, Some((&lens, seed())));
-    let mut store = Store::default();
-    let mut session = case.admit(&core).expect("admitted");
+    let store = MemoryStore::default();
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut observer = Observer::new(&lens, seed());
     let mut observed = read(&mut observer, &session, &lens);
     for _ in 0..6 {
         (session, _) = step(session);
         observed.extend(read(&mut observer, &session, &lens));
     }
-    let saved = session.checkpoint(&mut store).expect("saved");
+    let saved = session.checkpoint().expect("saved");
     let kept = observer.checkpoint();
     let mut parent = session;
     while parent.record().accepted().time() < at(150) {
@@ -543,10 +532,11 @@ fn an_observer_checkpoint_stays_valid_across_a_rewind() {
 
 #[test]
 fn a_resumed_observer_refuses_a_record_it_does_not_stand_beside() {
+    let store = MemoryStore::default();
     let case = water_case();
     let lens = lab(&case);
     let core = reference();
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut observer = Observer::new(&lens, seed());
     read(&mut observer, &session, &lens);
     let saved = observer.checkpoint();
@@ -562,12 +552,13 @@ fn a_resumed_observer_refuses_a_record_it_does_not_stand_beside() {
 
 #[test]
 fn a_checkpoint_before_the_first_read_is_a_new_observer() {
+    let store = MemoryStore::default();
     let case = water_case();
     let lens = lab(&case);
     let core = reference();
     let saved = Observer::new(&lens, seed()).checkpoint();
     let mut resumed = Observer::resume(&lens, seed(), &saved).expect("resumed");
-    let session = case.admit(&core).expect("admitted");
+    let session = case.admit(&core, &store).expect("admitted");
     let (session, _) = step(session);
     let mut new = Observer::new(&lens, seed());
     assert_eq!(
@@ -646,6 +637,7 @@ fn measurement_error_is_a_function_of_seed_channel_and_instant_with_mean_zero_an
 
 #[test]
 fn a_channel_reads_what_a_firing_left_at_its_instant() {
+    let store = MemoryStore::default();
     let case = ChanceCase::ectopy().expect("a body").until(at(120));
     let core = reference();
     let fired = watched(&case, &core, None).fired;
@@ -656,7 +648,7 @@ fn a_channel_reads_what_a_firing_left_at_its_instant() {
         vec![ChannelSpec::new("a synthetic method", kind(case.body(), row))],
         firing.at().nanoseconds(),
     );
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     while session.record().accepted().time() < firing.at() {
         (session, _) = step(session);
     }
@@ -678,12 +670,13 @@ fn a_channel_reads_what_a_firing_left_at_its_instant() {
 /// The mean's reference comes straight from the view, so a rounding anywhere past the view moves a bit of it.
 #[test]
 fn a_window_keeps_every_low_part() {
+    let store = MemoryStore::default();
     let case = water_case();
     let core = reference();
     let [a, _] = bare(&case);
     let window = 4;
     let lens = lens(case.body(), vec![a.averaged(count(window))], SECOND);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut observer = Observer::new(&lens, seed());
     let (mut read_from_view, mut windows) = (Vec::new(), Vec::new());
     loop {
@@ -731,12 +724,13 @@ fn a_window_that_did_not_fill_reports_not_collected_never_a_partial_mean() {
 
 #[test]
 fn a_delayed_reading_is_pending_until_the_step_that_reaches_its_exact_instant() {
+    let store = MemoryStore::default();
     let case = water_case();
     let core = reference();
     let [a, _] = bare(&case);
     let delay = 11 * SECOND + 1;
     let lens = lens(case.body(), vec![a.delayed(delay)], 2 * SECOND);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut observer = Observer::new(&lens, seed());
     let mut steps = vec![read(&mut observer, &session, &lens)];
     let mut heads = vec![session.record().accepted().time()];
@@ -796,11 +790,12 @@ fn a_window_closes_on_its_own_multiples_whatever_its_length() {
 
 #[test]
 fn a_reading_due_at_a_head_is_released_at_that_head() {
+    let store = MemoryStore::default();
     let case = water_case();
     let core = reference();
     let [a, _] = bare(&case);
     let lens = lens(case.body(), vec![a.delayed(6 * SECOND)], 2 * SECOND);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut observer = Observer::new(&lens, seed());
     read(&mut observer, &session, &lens);
     (session, _) = step(session);
@@ -821,11 +816,12 @@ fn huge() -> TwoReservoirs {
 
 #[test]
 fn a_sum_past_the_finite_range_is_an_invalid_signal_and_survives_a_checkpoint() {
+    let store = MemoryStore::default();
     let case = huge();
     let core = reference();
     let [a, _] = bare(&case);
     let lens = lens(case.body(), vec![a.averaged(count(20))], SECOND);
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut observer = Observer::new(&lens, seed());
     let mut observed = read(&mut observer, &session, &lens);
     for _ in 0..3 {
@@ -953,11 +949,12 @@ fn a_method_names_a_channel_and_keeps_its_draws_apart() {
 
 #[test]
 fn a_lens_for_another_body_is_refused() {
+    let store = MemoryStore::default();
     let (case, other) = (water_case(), TwoReservoirs::closed().expect("a body"));
     let core = reference();
     let [a, _] = bare(&other);
     let foreign = lens(other.body(), vec![a], SECOND);
-    let session = case.admit(&core).expect("admitted");
+    let session = case.admit(&core, &store).expect("admitted");
     assert_eq!(
         session.observation(&foreign).err(),
         Some(ObservationRefusal::OtherLens)
@@ -988,6 +985,7 @@ impl CoupledSolver for StopsFrom {
 
 #[test]
 fn a_view_reads_the_last_accepted_revision_during_a_retry_and_after_a_fault() {
+    let store = MemoryStore::default();
     let case = water_case();
     let core = StopsFrom {
         inner: reference(),
@@ -995,7 +993,7 @@ fn a_view_reads_the_last_accepted_revision_during_a_retry_and_after_a_fault() {
     };
     let [a, _] = bare(&case);
     let lens = lens(case.body(), vec![a], SECOND);
-    let (session, _) = step(case.admit(&core).expect("admitted"));
+    let (session, _) = step(case.admit(&core, &store).expect("admitted"));
     let head = session.record().seal().digest();
     let samples = session.observation(&lens).expect("a view").samples();
     assert_eq!(samples.len(), 8);
@@ -1013,6 +1011,7 @@ fn a_view_reads_the_last_accepted_revision_during_a_retry_and_after_a_fault() {
 
 #[test]
 fn a_view_through_another_lens_is_refused() {
+    let store = MemoryStore::default();
     let case = water_case();
     let core = reference();
     let [a, b] = bare(&case);
@@ -1020,7 +1019,7 @@ fn a_view_through_another_lens_is_refused() {
         lens(case.body(), vec![a], SECOND),
         lens(case.body(), vec![b], SECOND),
     );
-    let session = case.admit(&core).expect("admitted");
+    let session = case.admit(&core, &store).expect("admitted");
     let view = session.observation(&other).expect("a view");
     let mut observer = Observer::new(&own, seed());
     assert_eq!(observer.advance(&view).err(), Some(ObservationRefusal::OtherLens));
@@ -1049,10 +1048,11 @@ fn resume_refuses_another_lens_and_another_seed() {
 
 #[test]
 fn any_change_to_checkpoint_bytes_is_refused_and_never_panics() {
+    let store = MemoryStore::default();
     let case = water_case();
     let lens = lab(&case);
     let core = reference();
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut observer = Observer::new(&lens, seed());
     read(&mut observer, &session, &lens);
     for _ in 0..3 {
@@ -1097,8 +1097,9 @@ const QUEUE: usize = COUNT + 8;
 const HELD_BYTES: usize = 24;
 
 fn saved_after_reads(case: &TwoReservoirs, lens: &ObservationLens) -> ObserverCheckpoint {
+    let store = MemoryStore::default();
     let core = reference();
-    let mut session = case.admit(&core).expect("admitted");
+    let mut session = case.admit(&core, &store).expect("admitted");
     let mut observer = Observer::new(lens, seed());
     read(&mut observer, &session, lens);
     for _ in 0..2 {
@@ -1138,11 +1139,12 @@ fn a_resealed_window_is_held_to_what_an_observer_can_leave() {
 
 #[test]
 fn a_resealed_count_short_of_a_huge_window_cannot_overflow() {
+    let store = MemoryStore::default();
     let case = water_case();
     let core = reference();
     let [a, _] = bare(&case);
     let lens = lens(case.body(), vec![a.averaged(count(u64::MAX))], SECOND);
-    let session = case.admit(&core).expect("admitted");
+    let session = case.admit(&core, &store).expect("admitted");
     let mut observer = Observer::new(&lens, seed());
     read(&mut observer, &session, &lens);
     let forged = resealed(&observer.checkpoint(), |body| word_at(body, SEEN, u64::MAX - 1));
