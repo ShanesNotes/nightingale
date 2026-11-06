@@ -6,9 +6,21 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 Blocked by: 12
 
-Status: ready-for-agent
+Status: resolved
 
-- [ ] A short slice window's `run` reports refusals by reason and by source, floor faults and validity excursions, apart from the certificate
+- [x] A short slice window's `run` reports refusals by reason and by source, floor faults and validity excursions, apart from the certificate
+
+## Answer
+
+`RunEvidence::health()` returns the run's `NumericalHealth`, beside `throughput()` and never in the certificate. `ArenaFailure::Faulted` is now `{ report, health }`, so a faulted run reports its health up to the fault.
+
+- **A short slice window's `run` reports refusals by reason and by source, floor faults and validity excursions, apart from the certificate.** In `crates/ng-validate/tests/throughput.rs`, `a_short_slice_window_reports_what_its_session_refused_once_per_repeat` runs the slice's 2 s from 06:55 on the reference core at 5 ms, twice. It steps a second session from the same start through `Session::step` and `retry`, outside `run`. The two agree on every refusal reason and count and on the excursion count, with no floor fault. `a_slice_window_that_faults_at_the_floor_reports_its_health_up_to_the_fault` plants a core that refuses every attempt from 50 ms on, naming two row sources in turn. The run faults with `NoAdmissibleStep`. Its health holds one floor fault, the planted refusals per source in `refusal_sources` order, and the earlier natural refusals.
+- `refusals()` lists each `NumericalRefusal` with the row or source it names, in the order each first refused. `by_source()` derives the `TrialDomain` refusals per `SourceId`. A reason that names a row, such as `Accuracy`, is not a refusal source's set or domain, so it is counted by reason only. The sketch keyed `by_source` on `RowId`, and it now keys on `SourceId`.
+- A floor fault is `NoAdmissibleStep`. The contract cannot tell a refusal at the floor from one past the retry budget, because `retry_budget` is crate-private, so the count includes both, as the glossary says. Another fault, such as `BindingMismatch`, is no floor fault (`a_fault_off_the_floor_is_no_floor_fault`).
+- Excursions count each `ValidityExcursion` on each accepted step's receipt. A one-vessel body whose trusted range leaves out its zero flow has one per accepted step over each of three repeats.
+- Health is counted over one repeat. A repeat whose health differs from repeat 0's is `RepeatDiffered`, even when it ends on the same seal (`a_repeat_that_refused_for_another_reason_differed`). So one repeat's counts stand for all of them by check, not by assumption.
+- `tools/bench`'s `arena` mode prints the health under `health` lines.
+- Not in this ticket: listing the recorded rate classes (the comment from 09 and 10), and telling a floor fault from a budget fault.
 
 ## Comments
 

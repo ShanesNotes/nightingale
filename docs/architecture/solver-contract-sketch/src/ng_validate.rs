@@ -344,10 +344,11 @@ pub struct ThroughputEvidence {
     _waveform_samples: u64,
 }
 /// What the run cost numerically, beside the certificate: refusals by reason and by refusal
-/// source, faults at the minimum interval, and validity excursions.
+/// source, faults at the minimum interval, and validity excursions, over one repeat. A faulted run
+/// reports it up to the fault.
 pub struct NumericalHealth {
     _refusals: Vec<(NumericalRefusal, u64)>,
-    _by_source: Vec<(RowId, u64)>,
+    _by_source: Vec<(SourceId, u64)>,
     _floor_faults: u64,
     _excursions: u64,
 }
@@ -385,8 +386,8 @@ pub struct ArenaScore {
 pub enum ArenaFailure {
     Admission(AdmissionError),
     Initialization(InitializationFailure),
-    /// A latched session, exported for diagnosis.
-    Faulted(FaultReport),
+    /// A latched session, exported for diagnosis, with its repeat's health up to the fault.
+    Faulted { report: FaultReport, health: NumericalHealth },
     Certificate(CertificateFailure),
     Accuracy(AccuracyFailure),
     Replay { gate: ReplayGate, first_divergence: SimTime },
@@ -398,7 +399,8 @@ pub enum ArenaFailure {
     /// A clock with no reading left, one that ran backward or stood still over a repeat, or a repeat
     /// with no waveform sample: a throughput that measured nothing.
     MissingThroughput,
-    /// A repeat that ended on another seal or waveform count than the first, so it timed other work.
+    /// A repeat that ended on another seal, waveform count or numerical health than the first, so it
+    /// timed other work.
     RepeatDiffered { repeat: u32 },
 }
 pub enum ReplayGate {
