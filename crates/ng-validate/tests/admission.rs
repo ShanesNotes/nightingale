@@ -2687,6 +2687,9 @@ fn a_points_block_of_the_ring_is_its_own_stage_where_a_hazard_reads_a_row() {
         packet.start_mode(name("rhythm"), "sinus", NOTE).expect("once");
         packet
     };
+    let core = reference(REFERENCE_NS);
+    let port = port(0..case.cycles);
+    admit_solved(case.body(), packet(), port, &core, &case.lens, &store).expect("solved");
     let system = case.system(packet());
     let workspace = system.workspace();
     let ring = system.linearize(&workspace).expect("a matrix");
@@ -2695,9 +2698,6 @@ fn a_points_block_of_the_ring_is_its_own_stage_where_a_hazard_reads_a_row() {
         let block = system.block(&ring, point);
         assert_eq!(block.view().values(), own.view().values(), "point {point}");
     }
-    let core = reference(REFERENCE_NS);
-    let port = port(0..case.cycles);
-    admit_solved(case.body(), packet(), port, &core, &case.lens, &store).expect("solved");
 }
 
 #[test]
