@@ -7,7 +7,7 @@ Runs on: the code is written on the workstation; the audit runs only on the heav
 
 **What it builds and answers:** `gp.py audit`, the audit plan below as `tools/generative-physiology/spec/audit-v1.txt`, and the report that turns the runs into verdicts. Then it runs the audit and records the filled template as this ticket's Answer. Before any training data exists, the audit answers one question. Is the slice on `ng_solver::Core` a usable and informative teacher for posture runs?
 
-The program does not exist at c3f9783. Ticket 03 builds the driver, and this ticket adds `gp.py audit`, standard-library Python that runs `gp-driver` once per run and reads the run directories, and the audit's closed-loop rule. The code PR merges first. The audit then runs from main's merge commit C of that PR, and a second, docs-only PR adds the Answer.
+The program does not exist at 84744af. Ticket 03 builds the driver, and this ticket adds `gp.py audit`, standard-library Python that runs `gp-driver` once per run and reads the run directories, and the audit's closed-loop rule. The code PR merges first. The audit then runs from main's merge commit C of that PR, and a second, docs-only PR adds the Answer.
 
 ## Usage
 
@@ -16,10 +16,10 @@ On the workstation, with git only:
 ```text
 C=<main's merge commit of this ticket's code PR>
 git rev-parse "$C:crates"                       # the teaching engine's crates tree; the Answer records it
-git diff --quiet c3f9783bde2ac63b9bcfeb2a846d715ac8b3d7eb "$C" -- crates Cargo.toml Cargo.lock rust-toolchain.toml clippy.toml rustfmt.toml \
+git diff --quiet 84744af86ae9feac3a90e610ce21b741990f9cae "$C" -- crates Cargo.toml Cargo.lock rust-toolchain.toml clippy.toml rustfmt.toml \
   && echo engine-as-designed || echo engine-moved-since-design
-git show "$C:crates/ng-validate/tests/trace.rs" | grep -c -e 0ec011d81366c367549a2fcdfe72146eb4c00ac911c7610dd2572dcf6b732887 \
-  -e 28249b2e9c8e26915452d7caa96cbae0d834f5f60837b99c9a340b6feeb8729b   # 2: A0's pins still hold at C
+git show "$C:crates/ng-validate/tests/trace.rs" | grep -c -e 6d709479f0b103cadc1972febf6437a2dde172e19242eb76908b9dabde5bb752 \
+  -e 58233f790617a4f1bf5122b47fc44efaeface2ebb7d4c3652567bb44ba176ecf   # 2: A0's pins still hold at C
 git archive --format=tar --prefix="nightingale-$C/" -o "nightingale-$C.tar" "$C"
 sha256sum "nightingale-$C.tar" > "nightingale-$C.tar.sha256"
 ```
@@ -43,11 +43,11 @@ sha256sum DATA/audit/*/summary.txt > DATA/audit/summaries.sha256 && sha256sum DA
 
 ## Inputs and identities
 
-- **Engine input.** The engine the audit approves is the crates tree at C, which the Answer records, and every later teacher run (tickets 06, 09 and 12) must come from a commit whose engine inputs equal C's: the same `git diff --quiet` from C to that commit exits 0, or the audit runs again. At c3f9783, the commit this design read, the crates tree is `7120b6a06fc829eeef6b5c11fbd93b755f638161`; `engine-moved-since-design` means the Answer lists what changed before trusting the plan. For a check without git, `Cargo.lock` has SHA-256 `24b7896024353dc8a9f8d81bebd8aeee4c1a3ceb7eefdf8bb3245cf041083f07` and `rust-toolchain.toml` has `41ab86880726126e91a8f858567213dcf5332b624151ba8a6ed3b691e611f5d9` at c3f9783.
+- **Engine input.** The engine the audit approves is the crates tree at C, which the Answer records, and every later teacher run (tickets 06, 09 and 12) must come from a commit whose engine inputs equal C's: the same `git diff --quiet` from C to that commit exits 0, or the audit runs again. At 84744af, the commit this design last read, the crates tree is `23cbe1846b8d98cefc6f462214360b690a8843af`; `engine-moved-since-design` means the Answer lists what changed before trusting the plan. For a check without git, `Cargo.lock` has SHA-256 `24b7896024353dc8a9f8d81bebd8aeee4c1a3ceb7eefdf8bb3245cf041083f07` and `rust-toolchain.toml` has `41ab86880726126e91a8f858567213dcf5332b624151ba8a6ed3b691e611f5d9` at 84744af.
 - **Snapshot.** The archive's SHA-256, recorded on both machines; every `summary.txt` records C.
 - **Toolchain.** rustc and cargo 1.98.1 (`rust-toolchain.toml:2`). Whether rustup on the heavy-run machine honors the pin with rust-src is unconfirmed; the audit needs only rustc and cargo.
-- **The engine's bits on that machine.** A0 must reproduce what `crates/ng-validate/tests/trace.rs:135-136` pins for Core at a 10 ms cap: packet digest `0ec011d81366c367549a2fcdfe72146eb4c00ac911c7610dd2572dcf6b732887` and seal `28249b2e9c8e26915452d7caa96cbae0d834f5f60837b99c9a340b6feeb8729b` at the first head at or after 1 s, which is at 1001.309992 ms (`trace.rs:147`).
-- **Seeds.** None of the audit's own. The run seed is `admit_at`'s fixed `[1, 2, 3, 4]` (`crates/ng-validate/src/initialize.rs:236`), the slice has no stream, forcing or hazard, the arena lens has no measurement error (`crates/ng-validate/src/slice.rs:917-923`), every event is written out, and B7's rule is deterministic.
+- **The engine's bits on that machine.** A0 must reproduce what `crates/ng-validate/tests/trace.rs:135-136` pins for Core at a 10 ms cap: packet digest `6d709479f0b103cadc1972febf6437a2dde172e19242eb76908b9dabde5bb752` and seal `58233f790617a4f1bf5122b47fc44efaeface2ebb7d4c3652567bb44ba176ecf` at the first head at or after 1 s, which is at 1000.079707 ms (`trace.rs:147`).
+- **Seeds.** None of the audit's own. The slice carries one forcing on the skin's water loss and one stir hazard (`crates/ng-validate/src/slice.rs:376-414`), and both read the run seed, which `admit_at` fixes at `[1, 2, 3, 4]` (`crates/ng-validate/src/initialize.rs:236`). So every run shares one forcing course and one stir instant, and a replica repeats them. The arena lens has no measurement error (`crates/ng-validate/src/slice.rs:954-960`), every event is written out, and B7's rule is deterministic.
 
 ## Runs
 
@@ -60,7 +60,7 @@ Times are seconds after 06:55:00, and every stamp is at or after the fence at 1 
 | A2, A3 | none; stand at 1.2 | 6 | | the stand reaches the reflex on Core |
 | A4 | stand 1, flat 120, stand 240, flat 300, stand 330, flat 390 | 420 | checkpoint at the first head at or after 290 s; later events go to the original and the resumed copy | a late checkpoint: seals, and the resume's time through the store |
 | A5 | A4's events | 420 | the parent runs to the end; a branch rewound to the first head at or after 290 s then takes the same later events | a rewound branch equals the parent's own continuation |
-| B1 | stand 1, flat 180, stand 330, flat 400, a sit ramp from 420 to 430 (21 events: trunk 0 to 1 in steps of 0.05, horizontal legs, seated from the 11th, as `crates/ng-validate/tests/arena_body.rs:794-806`), head-down 480, stand 510, flat 700 | 900 | | the base of the prefix checks |
+| B1 | stand 1, flat 180, stand 330, flat 400, a sit ramp from 420 to 430 (21 events: trunk 0 to 1 in steps of 0.05, horizontal legs, seated from the 11th, as `crates/ng-validate/tests/arena_body.rs:872-884`), head-down 480, stand 510, flat 700 | 900 | | the base of the prefix checks |
 | B2 | B1 with sit at 510 | 900 | | one instant, another payload |
 | B3 | B1 with its 510 event at 540 | 900 | | divergence at another instant |
 | B4 | B1 | 900 | replica 1 | another process and another admission |
@@ -107,7 +107,7 @@ The informativeness gate decides whether the experiment can test anything. Both 
 
 **The four response features.** Defined here, and used unchanged by ticket 09's metrics and ticket 12's order test: (1) the heart-rate rise at its peak within 30 s of a posture change; (2) the arterial-pressure fall at its 3-beat-mean nadir within the same 30 s; (3) the heart-rate change averaged over 240 to 300 s after the change; (4) the same for arterial pressure. Each is measured against a baseline: here, the mean of the 30 s before the change; in ticket 09's paired branches, the run without the change over the same times.
 
-Measurements, with no verdict: the time to 63% of the change in stroke and in heart rate after tilt-up and after tilt-back, for F1 and F2 (the teacher's column of ticket 09's outside check); the largest difference in beat-mean pressure and heart rate between G3 and G4, flagged when it exceeds 2% of G4's stand response; the ripple, as the root-mean-square difference between the lens's one-second pressure and the beats' time-weighted mean over the same windows in C1 to C6; C7's wall time per simulated second against C3's; A4's resume time, because a resume walks the whole chain through the store; and every run's admission time, step wall time, accepted steps, refusals, peak memory and bytes of links.
+Measurements, with no verdict: the time to 63% of the change in stroke and in heart rate after tilt-up and after tilt-back, for F1 and F2 (the teacher's column of ticket 09's outside check); the largest difference in beat-mean pressure and heart rate between G3 and G4, flagged when it exceeds 2% of G4's stand response; the ripple, as the root-mean-square difference between the lens's one-second pressure and the beats' time-weighted mean over the same windows in C1 to C6; C7's wall time per simulated second against C3's; A4's resume time, because a resume walks the whole chain through the store; the stir's instant and the range of the skin's forcing factor in every run, read from the skin column's extent per beat over its basal rate; and every run's admission time, step wall time, accepted steps, refusals, peak memory and bytes of links.
 
 ## What the audit decides
 
@@ -143,7 +143,7 @@ In all: 29 runs, about 6.5 simulated hours, 2 to 4 process-hours, about 1 to 2 h
 The Answer copies this block and fills every field.
 
 ```text
-Input: commit C <..>; archive sha256 <..>; crates tree <..>; engine as designed (against c3f9783): <yes/no, and what moved>
+Input: commit C <..>; archive sha256 <..>; crates tree <..>; engine as designed (against 84744af): <yes/no, and what moved>
 Toolchain: rustc <..>, cargo <..>, python3 <..>; rust-src present: <yes/no/unknown>
 Machine: the heavy-run machine; logical processors <..>; memory limit <..>; swap limit <..>
 

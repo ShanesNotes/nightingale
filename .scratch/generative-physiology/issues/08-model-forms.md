@@ -29,7 +29,7 @@ Every named model carries the named totals, plus any named memory the screen add
 | C1 linear | `softplus(a + b . u)`: the drive u alone, so the model is linear in its state for any fixed posture | affine in the standardized totals and the drive | whether the tested range needs nonlinearity |
 | C4a named | `softplus` of one network per transfer origin, which reads the standardized totals, the drive and a learned per-transfer embedding: two hidden layers of 16 to 64 with tanh | a network of the totals and the drive | the candidate |
 | C2 readings only | none: a recurrent network over beats, 32 to 64 hidden units. Each beat it reads its own previous noiseless reading, the drive at the beat's start and the beat's mean drive, and it predicts the next beat's log heart rate and pressure | its own predictions | access to named state |
-| R richer state | C4a's form on the each-row reduction (ticket 05) with the nine memories carried by learned rates | as C4a | whether the named totals discard what matters |
+| R richer state | C4a's form on the each-row reduction (ticket 05), with every memory row carried by a learned rate | as C4a | whether the named totals discard what matters |
 
 The drive u is the public posture payload, the trunk's sine and two leg indicators. No engine law form is copied into any model. Every rate, its dependence on state and drive, and every reading is learned. The parameter count of every model stays at most 100,000; R stays inside it because its networks are shared per origin.
 

@@ -38,7 +38,7 @@ event = rule.react(beat)                            # at a beat's end; None, or 
 
 **Measurement error.** One table per case, made by `gp-driver errors` from a lens of two channels, heart rate with a synthetic SD of 0.02 per s and arterial pressure with 2.0, through the public `Channel::error` (`crates/ng-contract/src/lens.rs:79-85`). The k-th beat of a case takes the error the engine gives at instant k ns. That is a host convention, recorded in FROZEN, and it gives the teacher's k-th beat and every model's k-th beat the same error. The study adds it after a reading is made; no model's evolution and no teacher state ever sees it.
 
-**Seeds.** A schedule's draws are a SHA-256 counter over `("gp schedule 1", partition, history, schedule, draw)`, so a schedule replays without a random-number library, and the stored spec is what counts. A case's observation seed is `ObservationSeed::new([0x6770_0001, partition, case, 0])` (`crates/ng-contract/src/scheme.rs:295, 313`). Partitions are an enum, so training and evaluation seeds never meet. The engine's run seed stays `admit_at`'s fixed one (`crates/ng-validate/src/initialize.rs:236`).
+**Seeds.** A schedule's draws are a SHA-256 counter over `("gp schedule 1", partition, history, schedule, draw)`, so a schedule replays without a random-number library, and the stored spec is what counts. A case's observation seed is `ObservationSeed::new([0x6770_0001, partition, case, 0])` (`crates/ng-contract/src/scheme.rs:295, 313`). Partitions are an enum, so training and evaluation seeds never meet. The engine's run seed stays `admit_at`'s fixed one (`crates/ng-validate/src/initialize.rs:236`), so every teacher run shares the slice's one forcing course and one stir instant (ticket 04).
 
 ## Types and signatures
 

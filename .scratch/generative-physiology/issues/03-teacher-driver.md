@@ -18,7 +18,7 @@ gp-driver status --out DIR --identity A0-SUMMARY SPEC...   # one process: presen
 
 `run` and `interact` take `--memory-cap-gb N`, which stays outside the run id.
 
-A run spec is one canonical text. Stamps are whole ms after the anchor, 06:55 (`crates/ng-validate/src/slice.rs:472-475`), and the trunk is its sine in thousandths:
+A run spec is one canonical text. Stamps are whole ms after the anchor, 06:55 (`crates/ng-validate/src/slice.rs:501-504`), and the trunk is its sine in thousandths:
 
 ```text
 gp-run 1
@@ -184,7 +184,7 @@ Extents and integrals are read only at edges, from the newest segment, `session.
 ## Acceptance
 
 - [ ] On the heavy-run machine, `cargo build --release --locked --manifest-path tools/generative-physiology/driver/Cargo.toml` succeeds.
-- [ ] `gp-driver smoke` (a stand at 10 s, ending at 20 s) writes one complete run. Its packet digest and the seal at the head at 1001.309992 ms equal the values `crates/ng-validate/tests/trace.rs:135-136` pins for Core at a 10 ms cap; it has at least 15 beats, no fault, and the stand in `applied.npy`.
+- [ ] `gp-driver smoke` (a stand at 10 s, ending at 20 s) writes one complete run. Its packet digest and the seal at the head at 1000.079707 ms equal the values `crates/ng-validate/tests/trace.rs:135-136` pins for Core at a 10 ms cap; it has at least 15 beats, no fault, and the stand in `applied.npy`.
 - [ ] A second `gp-driver run` with the same spec and `--out` writes nothing and reports the run present.
 - [ ] A driver killed with SIGKILL leaves only a partial directory, which the next run of that spec removes and redoes.
 - [ ] A run forced past a small memory cap ends as a `.fault` directory, which `status` reports and a second `run` leaves alone.

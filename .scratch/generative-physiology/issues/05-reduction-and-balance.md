@@ -21,7 +21,7 @@ view = beats_view(RunData.open(run_dir), reduction)          # totals at edges, 
 report = balance(RunData.open(run_dir), reduction)            # both identities on every beat, with residuals
 ```
 
-The schema, one line per named total, in the words the code uses for sites and spaces (`crates/ng-validate/src/slice.rs:14-50, 202-254`):
+The schema, one line per named total, in the words the code uses for sites and spaces (`crates/ng-validate/src/slice.rs:14-50, 206-258`):
 
 ```text
 gp-schema 1
@@ -45,9 +45,9 @@ total "acetylcholine released" acetylcholine: "sinoatrial junction" Cleft, Bound
 held water: Cells at every capillary bed, Fluid at every enclosed space
 ```
 
-R's schema is `gp-schema 1`, `mode each-row`, `memories all`. Every amount row of every species is its own total, and the nine memory rows are carried (five valve flows, the rhythm's phase and activation, the afferent filter and the baroreflex set point, as `crates/ng-validate/tests/arena_body.rs:128, 164, 369-370, 683, 757` names them).
+R's schema is `gp-schema 1`, `mode each-row`, `memories all`. Every amount row of every species is its own total, and the ten memory rows are carried: five valve flows, the rhythm's phase and activation, the afferent filter, the baroreflex set point and the stir hazard's integral (`crates/ng-validate/tests/arena_body.rs:128, 164, 369-370, 683, 835`, `crates/ng-validate/src/slice.rs:399`).
 
-**Why these sixteen.** Pools that relax within a beat are merged, and pools whose walls, heights or rates differ stay apart. Capillary plasma joins its bed's veins, and cleft joins bound, because binding settles in about 0.1 s while reuptake takes 4 s (`crates/ng-validate/src/slice.rs:857, 864-865`). Leg and splanchnic veins stay apart, because their walls differ (0.4 against 0.1, unstressed volume 566 against 1,064) and they sit on opposite sides of the hip (`slice.rs:30-31, 739-740`). The renal junction stays apart because its `rc.ne-off` is 40 where the other junctions' is 10 (`slice.rs:865-867`). Each junction is closed, because release and reuptake are its only transmitter transfers (`crates/ng-nervous/src/lib.rs:13-46`), so stored and released totals close where a bound-only total would not. Sodium, potassium, chloride, albumin, vasopressin and energy ride the same columns but stay outside the named model's balance claim.
+**Why these sixteen.** Pools that relax within a beat are merged, and pools whose walls, heights or rates differ stay apart. Capillary plasma joins its bed's veins, and cleft joins bound, because binding settles in about 0.1 s while reuptake takes 4 s (`crates/ng-validate/src/slice.rs:894, 901-902`). Leg and splanchnic veins stay apart, because their walls differ (0.4 against 0.1, unstressed volume 566 against 1,064) and they sit on opposite sides of the hip (`slice.rs:30-31, 776-777`). The renal junction stays apart because its `rc.ne-off` is 40 where the other junctions' is 10 (`slice.rs:902-904`). Each junction is closed, because release and reuptake are its only transmitter transfers (`crates/ng-nervous/src/lib.rs:13-46`), so stored and released totals close where a bound-only total would not. Sodium, potassium, chloride, albumin, vasopressin and energy ride the same columns but stay outside the named model's balance claim.
 
 ## Types and signatures
 
