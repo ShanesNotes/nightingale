@@ -239,6 +239,17 @@ fn every_gate_passes_the_reference_core_with_one_set_of_digests() {
             assert!(of.runs().len() >= 2, "{gate:?} compared {} runs", of.runs().len());
             assert_eq!(of.runs()[0], reference_digests, "{gate:?}");
         }
+        let watched = evidence.of(ReplayGate::Pace).observed()[0];
+        for gate in [
+            ReplayGate::Pace,
+            ReplayGate::Resume,
+            ReplayGate::LateAdmission,
+            ReplayGate::Rewind,
+        ] {
+            let observed = evidence.of(gate).observed();
+            assert_eq!(observed.len(), evidence.of(gate).runs().len(), "{gate:?}");
+            assert!(observed.iter().all(|digest| *digest == watched), "{gate:?}");
+        }
         for gate in [ReplayGate::Pace, ReplayGate::LateAdmission, ReplayGate::Rewind] {
             assert!(
                 evidence
@@ -249,6 +260,18 @@ fn every_gate_passes_the_reference_core_with_one_set_of_digests() {
                 "{gate:?}"
             );
         }
+    }
+}
+
+#[test]
+fn a_case_that_ends_inside_the_first_step_is_watched_on_a_grid_over_what_was_accepted() {
+    let case = TwoReservoirs::delivering(start(), Vec::new())
+        .expect("a body")
+        .until(SimTime::from_ns(1));
+    let clock = script();
+    for gate in [ReplayGate::Resume, ReplayGate::Rewind] {
+        let evidence = replay_gate(gate, &case, &|| reference(8 * SECOND), &plan(&clock)).expect("a verdict");
+        assert_eq!(evidence.observed().len(), evidence.runs().len(), "{gate:?}");
     }
 }
 
@@ -1893,7 +1916,7 @@ fn every_gate_in_one_evidence_measured_one_run() {
     let calls = Cell::new(0);
     let cores = || {
         calls.set(calls.get() + 1);
-        reference(if calls.get() <= 3 { 8 } else { 4 } * SECOND)
+        reference(if calls.get() <= 4 { 8 } else { 4 } * SECOND)
     };
     let clock = script();
     assert_eq!(
@@ -1941,7 +1964,7 @@ fn every_gate_in_one_evidence_measured_one_course() {
     let cores = || {
         calls.set(calls.get() + 1);
         MarksItsFirstSteps {
-            marker: if calls.get() <= 3 { 1 } else { 2 },
+            marker: if calls.get() <= 4 { 1 } else { 2 },
         }
     };
     let clock = script();
