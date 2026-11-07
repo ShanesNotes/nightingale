@@ -36,9 +36,9 @@ stateDiagram-v2
   s1 --> s0: resume a checkpoint in a fresh solver core or recover on a new branch
   s3 --> s0: resume a checkpoint in a fresh solver core or rewind on a new branch
   s6 --> s5: no shorter interval is left
-  s0 --> s4: the solver core or the model cannot go on
   s5 --> s0: resume a checkpoint in a fresh solver core or recover on a new branch
   s6 --> s0: resume a checkpoint in a fresh solver core
+  s0 --> s4: the solver core or the model cannot go on
   s2 --> s4: no shorter interval is left
   classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
   classDef mayBreak fill:#fff3e6,stroke:#e8730c,stroke-width:2.5px,color:#b85a06

@@ -2,7 +2,7 @@ const same = (a: any, b: any) => a.branch === b.branch && a.revision === b.revis
 const links = (v: any) => Object.values(v.chain);
 const kept = (v: any) => links(v).every((link: any) => v.kept.some((k: any) => same(k, link)));
 const exported = (v: any) =>
-  v.report.held && JSON.stringify(Object.values(v.report.chain)) === JSON.stringify(links(v));
+  v.report.held && v.report.branch === v.branch && JSON.stringify(Object.values(v.report.chain)) === JSON.stringify(links(v));
 
 export const state = (v: any) => {
   const waits = !kept(v);
@@ -26,7 +26,7 @@ const becomes: Record<string, string> = {
 export const step = (action: string, from: any, to: any) => {
   if (action === "TakeCheckpoint") return "a checkpoint is taken";
   if (action === "Export") return "the fault is exported, latched";
-  if (links(to).length > links(from).length) {
+  if (["Accept", "RetryAccepted", "Publish"].includes(action)) {
     if (kept(from) && !kept(to)) return "accepted, the store refuses its link";
     if (!kept(from) && kept(to)) return "accepted, the store keeps every link";
     return from.status === "running" ? "accepted whole" : "the shorter retry is accepted";
