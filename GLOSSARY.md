@@ -491,6 +491,29 @@ The arena checks that pace, resuming, late events, rewinding, extra evaluations 
 **Throughput**:
 The arena's speed evidence for one run: the wall time of each repeat of its window with full waveform, read from a wall clock the host passes in, with admission timed apart. Every repeat is kept, each must end on the same seal, and none of it enters the certificate.
 
+**Day check**:
+A deterministic check drawn from the contract's day table that reads one produced quantity around one event of the day plan. It compares the mean over a window after the event with the mean over a baseline before it, or for a meal with a counterfactual run's same window, and reports pass, fail or not available yet. A response is a change of more than three noise floors and at least the declared tolerance. It shows that the engine's structure answers the way the table says, never clinical validity.
+_Avoid_: body check, judge
+
+**Day plan**:
+The schedule day checks read around: sitting up at 07:00, meals at 07:30, 12:30 and 18:30, lying down to sleep at 23:00 and waking at 06:30, from the 06:55 admission. One plan makes both a run's boundary events and the occurrences its checks read. An event no payload carries yet, such as sleep, leaves its checks not available yet.
+
+**Beat**:
+The accepted steps from one beat edge to the next, one cardiac cycle of a run. A day check reads each quantity as one mean per beat, timed at its end.
+_Avoid_: cycle (the packet's equal-interval pass)
+
+**Day trace**:
+One mean per beat of each quantity the day checks read, folded from each accepted step while a run steps, with which of the plan's events applied. It is never rebuilt from history or taken from a previous run.
+
+**Counterfactual run**:
+A run from the same start with one meal of its day plan removed. That meal's day checks read against it, so the posture change and earlier meals cancel.
+
+**Noise floor**:
+The sample standard deviation of a quantity's beat means over its baseline window.
+
+**Declared tolerance**:
+What a core's declared error scales allow a row at a value: the absolute scale times the row's natural size plus the relative scale times the value, carried through a sum, ratio or product of rows.
+
 **Pulse**:
 The Pulse Physiology Engine, a reference to compare against and never a pass bar (rule 6). A Pulse diff, a match to published data and clinical validity are three separate claims.
 _Avoid_: oracle

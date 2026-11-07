@@ -150,10 +150,56 @@ fn arena(arguments: &[String]) {
     }
 }
 
+fn told_day(failure: &DayFailure) -> String {
+    match failure {
+        DayFailure::Initialization(failure) => format!("{failure:?}"),
+        DayFailure::Faulted(report) => format!("fault {:?}", report.fault()),
+        DayFailure::Checkpoint(error) => format!("{error:?}"),
+        DayFailure::Input(error) => format!("input {error:?}"),
+        DayFailure::MissingRow(kind) => format!("no row {kind:?}"),
+    }
+}
+
+fn day(arguments: &[String]) {
+    let number = |at: usize, what: &str| -> u64 {
+        let given = arguments.get(at).and_then(|given| given.parse().ok());
+        given.unwrap_or_else(|| panic!("{what}"))
+    };
+    let (interval_ms, simulated_s) = (number(0, "a step interval in ms"), number(2, "simulated seconds"));
+    let named = arguments.get(1).expect("a core");
+    let started = Instant::now();
+    let body = arena_body().expect("compiled");
+    println!("time compile_ms {:.1}", 1e3 * started.elapsed().as_secs_f64());
+    let core = solver(named, interval_ms);
+    println!("work core {named}");
+    let origin = anchor_moment();
+    let end = SimTime::from_ns(origin.nanoseconds() + simulated_s * 1_000 * MS);
+    let days = u32::try_from(simulated_s / 86_400 + 1)
+        .ok()
+        .and_then(NonZeroU32::new);
+    let spec = DaySpec {
+        window: Interval::new(origin, end).expect("a window"),
+        packet: arena_packet(&body).expect("packet"),
+        lens: arena_lens(&body).expect("lens"),
+        seed: Seed::new([1, 2, 3, 4]),
+        plan: DayPlan::reference(days.expect("a day")),
+    };
+    let log = LinkLog::create();
+    let started = Instant::now();
+    let report = day_checks(&body, core.as_ref(), spec, &log)
+        .unwrap_or_else(|failure| panic!("{}", told_day(&failure)));
+    let seconds = started.elapsed().as_secs_f64();
+    println!("{report}");
+    println!("work history_bytes {}", log.bytes());
+    println!("time day_checks_s {seconds:.1}");
+}
+
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
-    if let Some(("arena", rest)) = arguments.split_first().map(|(mode, rest)| (mode.as_str(), rest)) {
-        return arena(rest);
+    match arguments.split_first().map(|(mode, rest)| (mode.as_str(), rest)) {
+        Some(("arena", rest)) => return arena(rest),
+        Some(("day", rest)) => return day(rest),
+        _ => {}
     }
     let interval_ms: u64 = std::env::args()
         .nth(1)
