@@ -456,7 +456,7 @@ The record of each numerical stage a step used (its time, point and weight), whi
 The fully coupled backward Euler core in `ng-validate`, run at three refinements, against which the accuracy gate and the split measurement measure each solver core.
 
 **Split measurement**:
-How a core that evaluates some blocks apart within a step earns trust: its split trace and the reference integrator's, on one grid of one case, are compared family by family, and the reference's own error, from a run at half its interval, counts against the same budget. Only a split measurement qualifies a split, and no run it measures is scored.
+How a core that evaluates some blocks apart within a step earns trust: its split trace and the reference integrator's, on one grid of one case, are compared family by family, and the reference's own error, its distance from a run with steps twice as long, counts against the same budget. Only a split measurement qualifies a split, and no run it measures is scored.
 
 **Split trace**:
 One run's state, exchange integrals, observations and event times on a grid, drawn from admission one accepted head at a time, each head kept only once the extents the contract verified for the next step name its seal. It never rests on samples a caller supplies.

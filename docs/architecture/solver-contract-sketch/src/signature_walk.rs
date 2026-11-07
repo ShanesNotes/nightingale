@@ -430,9 +430,9 @@
 //!     }
 //!     draw.finish().ok()
 //! }
-//! fn qualify(reference: SplitTrace, refined: SplitTrace, split: SplitTrace, scales: ErrorScales)
+//! fn qualify(coarse: SplitTrace, reference: SplitTrace, split: SplitTrace, scales: ErrorScales)
 //!     -> Option<SplitQualification> {
-//!     let error = ReferenceError::self_convergence(&reference, &refined).ok()?;
+//!     let error = ReferenceError::self_convergence(&coarse, &reference).ok()?;
 //!     let budget = SplitBudget::new(scales, scales, scales, scales, Measure::new(0.25).ok()?).ok()?;
 //!     SplitMeasurement::new(reference, split, error, budget).ok()?.qualify().ok()
 //! }

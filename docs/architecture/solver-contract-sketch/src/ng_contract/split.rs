@@ -68,15 +68,15 @@ impl TraceDraw {
         todo!()
     }
 }
-/// The coupled reference's own error, measured against a refined reference; never assumed zero.
-/// It keeps the binding (identity, grid and samples digest) of the reference trace it was measured
-/// on, so an easier run's small error cannot stand in for this reference's.
+/// The coupled reference's own error, its distance from a run with steps at least twice as long;
+/// never assumed zero. It keeps the binding (identity, grid and samples digest) of the reference
+/// trace it was measured on, so an easier run's small error cannot stand in for this reference's.
 pub struct ReferenceError {
     _reference: Digest,
     _per_family: [f64; 4],
 }
 impl ReferenceError {
-    pub fn self_convergence(_reference: &SplitTrace, _refined: &SplitTrace) -> Result<Self, SplitRejected> {
+    pub fn self_convergence(_coarse: &SplitTrace, _reference: &SplitTrace) -> Result<Self, SplitRejected> {
         todo!()
     }
 }
