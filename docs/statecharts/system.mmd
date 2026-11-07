@@ -1,0 +1,66 @@
+---
+title: "Nightingale system: who hands what to whom"
+---
+stateDiagram-v2
+  direction LR
+  state "At the same time" as all {
+    state "Contract and admission" as r0 {
+      s0: Map and laws declared
+      s1: Body compiled
+      s2: Not admitted
+      s3: Packet bound
+      s4: Start state admitted
+      [*] --> s0
+      s0 --> s1: the map passes its checks and the laws compile
+      s0 --> s2: a check refuses the map, a law or the packet
+      s1 --> s2: a check refuses the map, a law or the packet
+      s1 --> s3: a packet binds to the body
+      s3 --> s2: a check refuses the map, a law or the packet
+      s3 --> s4: admission solves the start state
+    }
+    --
+    state "Record crate and solver core" as r1 {
+      s5: No run
+      s6: Run at its accepted head
+      s7: Engine fault, run stopped
+      s8: Step refused, retry pending
+      [*] --> s5
+      s5 --> s6: admission solves the start state [when Contract and admission is Packet bound]
+      s6 --> s7: the solver core or the model cannot go on
+      s6 --> s8: the record crate refuses the step whole
+      s7 --> s6: recover on a new branch from a checkpoint
+      s8 --> s7: no shorter interval is left
+      s8 --> s6: the record crate accepts the step whole
+    }
+    --
+    state "Boundary port" as r2 {
+      s9: No input waiting
+      s10: A command's input waiting
+      [*] --> s9
+      s9 --> s10: an authorized command enters at the boundary port [when Contract and admission is Start state admitted and Record crate and solver core is Run at its accepted head]
+      s10 --> s9: the record crate accepts the step whole [when Record crate and solver core is not Engine fault, run stopped]
+    }
+    --
+    state "Observers" as r3 {
+      s11: Observers at the head
+      s12: An accepted step not yet read
+      [*] --> s11
+      s11 --> s12: the record crate accepts the step whole [when Contract and admission is Start state admitted and Record crate and solver core is one of Run at its accepted head, Step refused, retry pending]
+      s12 --> s11: an observer reads the accepted step
+      s12 --> s11: recover on a new branch from a checkpoint [when Record crate and solver core is Engine fault, run stopped]
+    }
+    --
+    state "Chart (placeholder)" as r4 {
+      s13: No chart entry (placeholder)
+      s14: Chart entries kept (placeholder)
+      [*] --> s13
+      s13 --> s14: a clinician writes a chart entry (placeholder)
+    }
+    --
+    state "Validation" as r5 {
+      s15: No score yet
+      s16: Arena score kept
+      [*] --> s15
+      s15 --> s16: the arena scores a solver core
+    }
+  }

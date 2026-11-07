@@ -1,0 +1,15 @@
+---
+title: "The chart, clinicians' documentation (placeholder)"
+---
+stateDiagram-v2
+  s0: Chart open (placeholder)
+  s1: Intervention awaiting authorization (placeholder)
+  s2: Chart entry written (placeholder)
+  s3: Command waiting at the boundary port (placeholder)
+  [*] --> s0
+  s0 --> s1: a clinician chooses an intervention (placeholder)
+  s0 --> s2: a clinician documents an assessment or a note (placeholder) or a clinician charts an observer's reading (placeholder)
+  s1 --> s0: an intervention not authorized never reaches the body (placeholder)
+  s1 --> s3: the authorized intervention enters as a timestamped command
+  s2 --> s0: the entry is kept, never state (placeholder)
+  s3 --> s0: an accepted step applies it
