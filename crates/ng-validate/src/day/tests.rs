@@ -293,6 +293,35 @@ fn the_registry_holds_the_ticket_rows_in_order() {
     assert_eq!(against, scored_meals.collect::<Vec<u8>>());
 }
 
+/// The reversal test builds each trace from the registry, so the ticket's directions and bounds are pinned here, as
+/// the ticket's table states them.
+#[test]
+fn the_registry_states_the_tickets_directions_and_bounds() {
+    let stated = [
+        "SitUp Scored(HeartRate, OneWay(Up, Under(Seconds(15))))",
+        "SitUp Scored(ArterialPressure, DipThenBack { dip: By(Seconds(10)), back: Under(Seconds(30)), held_from: Seconds(30) })",
+        "SitUp Scored(StrokeVolume, OneWay(Down, By(Seconds(30))))",
+        "SitUp Scored(CardiacOutput, RiseThenFall { rise: By(Seconds(30)), fall_from: Minutes(5), fall: By(Minutes(20)) })",
+        "SitUp Scored(PlasmaVolume, OneWay(Down, By(Minutes(20))))",
+        "SitUp Scored(PlasmaAlbumin, OneWay(Up, By(Minutes(20))))",
+        "SitUp Scored(SodiumExcretion, OneWay(Down, By(Minutes(30))))",
+        "SitUp Unscored([Filtration], \"direction disputed\")",
+        "Meal Scored(PlasmaOsmolality, AgainstControl(Up, By(Hours(4))))",
+        "Meal Scored(PlasmaSodium, AgainstControl(Up, By(Hours(4))))",
+        "Meal Unscored([Vasopressin], \"unsourced\")",
+        "Meal Unscored([SodiumExcretion, PotassiumExcretion, ChlorideExcretion], \"unsourced\")",
+        "Meal Unscored([PlasmaPotassium], \"unsourced\")",
+        "LieDownToSleep Scored(PlasmaVolume, OneWay(Up, By(Minutes(35))))",
+        "LieDownToSleep DirectionOnly([ArterialPressure, HeartRate], Down)",
+        "LieDownToSleep DirectionOnly([UrineFlow, SodiumExcretion], Down)",
+        "Wake DirectionOnly([ArterialPressure, HeartRate], UpAfterNightDip)",
+    ];
+    for (row, stated) in ROWS.iter().zip(stated) {
+        let found = format!("{:?} {:?}", row.event, row.scoring);
+        assert_eq!(found, stated, "row {}", row.number);
+    }
+}
+
 #[test]
 fn each_scored_row_passes_its_way_and_fails_with_the_move_reversed() {
     let mut exercised = Vec::new();
