@@ -150,6 +150,7 @@
 
 mod accuracy;
 mod certificate;
+mod day;
 mod fixture;
 mod initialize;
 mod reference;
@@ -164,6 +165,7 @@ pub use certificate::{
     Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, ExpectedDrift, QuantityPolicy,
     QuantityResult, Sliding24Hours, certify,
 };
+pub use day::{DayCheck, DayFailure, DayPlan, DayQuantity, DayReport, DaySpec, Miss, Unavailable, Verdict};
 pub use fixture::{ChanceCase, Delivery, TwoReservoirs, admit_fixture, admit_seeded};
 pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved};
 pub use reference::ReferenceIntegrator;
