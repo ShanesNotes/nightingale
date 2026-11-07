@@ -231,6 +231,28 @@ pub fn admit_at<'m>(
     Ok(Admitted { session, provenance })
 }
 
+fn system<'m>(
+    body: &'m CompiledBody,
+    packet: ParameterPacket<SyntheticFixture>,
+    boundary: BoundaryPort,
+    lens: &ObservationLens,
+    origin: SimTime,
+) -> Result<InitializationSystem<'m>, InitializationFailure> {
+    let parameters = body.bind(packet)?;
+    let request = InitializationRequest::at(origin).reading(lens);
+    Ok(body.initialization(parameters, boundary, request)?)
+}
+
+fn started(
+    system: InitializationSystem<'_>,
+    solved: SolveWorkspace,
+    core: &dyn CoupledSolver,
+    origin: SimTime,
+) -> Result<InitialRevision, InitializationFailure> {
+    let start = MethodHistory::new(core.resolution().policy(), origin, Vec::new());
+    system.admit(solved, start)
+}
+
 pub(crate) fn solved_start(
     body: &CompiledBody,
     packet: ParameterPacket<SyntheticFixture>,
@@ -239,12 +261,42 @@ pub(crate) fn solved_start(
     lens: &ObservationLens,
     origin: SimTime,
 ) -> Result<InitialRevision, InitializationFailure> {
-    let parameters = body.bind(packet)?;
-    let request = InitializationRequest::at(origin).reading(lens);
-    let mut system = body.initialization(parameters, boundary, request)?;
+    let mut system = system(body, packet, boundary, lens, origin)?;
     let solved = initialize(&mut system, body);
-    let start = MethodHistory::new(core.resolution().policy(), origin, Vec::new());
-    system.admit(solved, start)
+    started(system, solved, core, origin)
+}
+
+pub(crate) fn solution(
+    body: &CompiledBody,
+    packet: ParameterPacket<SyntheticFixture>,
+    boundary: BoundaryPort,
+    lens: &ObservationLens,
+    origin: SimTime,
+) -> Result<Vec<f64>, InitializationFailure> {
+    let mut system = system(body, packet, boundary, lens, origin)?;
+    Ok(initialize(&mut system, body).unknowns_mut().to_vec())
+}
+
+/// A fresh system holds the packet's modes at every point, so sweeps carry the solution's own modes round the ring
+/// first.
+pub(crate) fn start_from(
+    body: &CompiledBody,
+    packet: ParameterPacket<SyntheticFixture>,
+    boundary: BoundaryPort,
+    core: &dyn CoupledSolver,
+    lens: &ObservationLens,
+    origin: SimTime,
+    solution: &[f64],
+) -> Result<InitialRevision, InitializationFailure> {
+    let mut system = system(body, packet, boundary, lens, origin)?;
+    let mut solved = system.workspace();
+    solved.unknowns_mut().copy_from_slice(solution);
+    for _ in 0..SWEEP_LIMIT {
+        if !matches!(system.sweep(&solved, 0..system.points()), Ok(1..)) {
+            break;
+        }
+    }
+    started(system, solved, core, origin)
 }
 
 pub(crate) fn admit_start<'m>(

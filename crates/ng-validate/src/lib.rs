@@ -173,6 +173,7 @@ mod reference;
 mod replay;
 mod run;
 mod slice;
+mod window;
 
 pub use accuracy::{
     AccuracyCase, AccuracyEvidence, AccuracyFailure, AccuracyPolicy, accuracy, observed_order,
@@ -195,3 +196,4 @@ pub use slice::{
     SliceCase, anchor_moment, arena_anatomy, arena_body, arena_lens, arena_organs, arena_packet,
     arena_schema, hold_outside_slice,
 };
+pub use window::{Compared, SliceWindow};

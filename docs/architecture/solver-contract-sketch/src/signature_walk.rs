@@ -460,9 +460,8 @@
 //!
 //! // 12. Accuracy: the core on manufactured cases and against the contract's reference integrator.
 //! fn accuracy_gate(body: &CompiledBody, core: &Core) -> Option<AccuracyEvidence> {
-//!     let reference = ReferenceIntegrator::new(100_000);
 //!     let cases = vec![AccuracyCase::TwoReservoir(TwoReservoirs::stepped_inflow().ok()?),
-//!         AccuracyCase::DrainAndRefill, AccuracyCase::SliceReference { reference, factor: 100 }];
+//!         AccuracyCase::DrainAndRefill, AccuracyCase::SliceWindow(SliceWindow::first().ok()?)];
 //!     let _sources: &[RefusalSource] = body.refusal_sources();
 //!     let policy = AccuracyPolicy::new(cases, Measure::new(1e-9).ok()?, Measure::new(1e-6).ok()?, 1_000_000).ok()?;
 //!     accuracy(core, &policy).ok()
