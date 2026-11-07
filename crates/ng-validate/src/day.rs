@@ -41,8 +41,7 @@ enum Nutrient {
     Chloride,
 }
 impl Nutrient {
-    /// A synthetic fixture: half a litre of water with the sodium, potassium and chloride of the arena body test's
-    /// meal, through the slice's gut boundaries.
+    /// Synthetic fixture amounts.
     fn delivered(self, ends: SimTime) -> Result<BoundaryInput, AdmissionError> {
         Ok(match self {
             Nutrient::Water => BoundaryInput::Water(Delivered {
@@ -75,8 +74,7 @@ enum Payload {
     Gut { nutrient: Nutrient, ends: SimTime },
 }
 
-/// A boundary event is not `Clone`, and a counterfactual run enqueues the plan again, so the plan keeps what
-/// builds each event.
+/// A boundary event is not `Clone`, and each counterfactual run enqueues the plan again.
 #[derive(Clone, Copy, Debug)]
 struct Planned {
     id: InputId,
@@ -207,8 +205,8 @@ pub struct DayPlan {
     occurrences: Vec<Occurrence>,
 }
 impl DayPlan {
-    /// Sitting up is main's 21-event ramp from the arena body test, moved to 07:00, and lying down is that ramp
-    /// reversed. No payload carries sleep onset or offset yet.
+    /// Sitting up is a 21-event posture ramp, and lying down is that ramp reversed. No payload carries sleep
+    /// onset or offset yet.
     pub fn reference(days: NonZeroU32) -> Self {
         let meals = [
             7 * HOUR + 30 * MINUTE,
@@ -238,7 +236,6 @@ impl DayPlan {
         let later = self.occurrences.iter().map(|occurrence| occurrence.at);
         later.filter(|&later| later > at).min()
     }
-    /// A meal's window ends 4 h after it, or at the next occurrence when that comes first.
     fn meal_end(&self, at: SimTime) -> SimTime {
         let cap = SimTime::from_ns(at.nanoseconds().saturating_add(MEAL_WINDOW));
         self.next_after(at).map_or(cap, |next| next.min(cap))
@@ -325,7 +322,6 @@ pub enum Unavailable {
 pub struct DayCheck {
     row: &'static Row,
     quantity: DayQuantity,
-    /// The occurrence's day and instant.
     occurrence: Option<(NonZeroU32, SimTime)>,
     verdict: Verdict,
     shown: Shown,
@@ -364,7 +360,6 @@ fn exported(stopped: Session<'_, Faulted>) -> DayFailure {
     }
 }
 
-/// The admitted start every run of the day resumes from, and what each run's trace reads.
 struct Start<'m> {
     saved: Checkpoint,
     identity: RunIdentity,
@@ -376,7 +371,6 @@ struct Start<'m> {
     sizes: Reading,
 }
 impl Start<'_> {
-    /// Enqueues every input of `plan` from the head on, then steps until the head reaches `end`.
     fn run(&self, plan: &DayPlan, end: SimTime) -> Result<DayTrace, DayFailure> {
         let Self { saved, identity, .. } = self;
         let resumed = Session::resume(saved, identity, self.body, self.core, self.store);
@@ -509,7 +503,6 @@ impl fmt::Display for Clock {
     }
 }
 
-/// The clock time, with its day after the first.
 struct When(SimTime);
 impl fmt::Display for When {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -520,7 +513,6 @@ impl fmt::Display for When {
     }
 }
 
-/// Four significant figures.
 struct Figures(f64);
 impl fmt::Display for Figures {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

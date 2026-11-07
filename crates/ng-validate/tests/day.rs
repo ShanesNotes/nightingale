@@ -14,7 +14,6 @@ fn told(failure: &DayFailure) -> String {
     }
 }
 
-/// Every row is checked on a real slice run, and none scores: the 07:00 windows run to 07:30.
 #[test]
 fn a_slice_run_checks_every_row_and_scores_none_before_a_window_closes() {
     let body = arena_body().expect("compiled");

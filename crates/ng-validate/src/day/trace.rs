@@ -20,7 +20,6 @@ pub(super) enum Series {
 }
 pub(super) const SERIES: usize = 9;
 
-/// A value and the declared tolerance carried through its recipe.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Sample {
     pub(super) value: f64,
@@ -43,7 +42,6 @@ impl Measured {
     }
 }
 
-/// From one beat edge to the next. Each series holds its step-end values' means, weighted by step length.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Beat {
     pub(super) start: SimTime,
@@ -51,7 +49,6 @@ pub(super) struct Beat {
     pub(super) means: [Sample; SERIES],
 }
 impl Beat {
-    /// Stroke volume is the beat's integral of aortic flow; cardiac output is its mean.
     pub(super) fn reading(&self, quantity: Measured) -> Sample {
         let mean = self.means[quantity.series() as usize];
         if quantity != Measured::StrokeVolume {
@@ -65,7 +62,6 @@ impl Beat {
     }
 }
 
-/// Folded while the run stepped, never rebuilt from history. `applied` holds one entry per plan occurrence.
 #[derive(Clone, Debug)]
 pub(super) struct DayTrace {
     pub(super) run: Digest,
@@ -76,7 +72,6 @@ pub(super) struct DayTrace {
     pub(super) applied: Vec<bool>,
 }
 
-/// What the trace reads at each accepted step's end, besides the cardiovascular phase. The blood rows are sums.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Read {
     Rate,
@@ -94,7 +89,6 @@ pub(super) enum Read {
 pub(super) const READS: usize = 11;
 pub(super) type Reading = [f64; READS];
 
-/// `reading` at one step end and the tolerance the declared scales allow each of its rows.
 fn series(reading: &Reading, allowed: &Reading) -> [Sample; SERIES] {
     let at = |read: Read| (reading[read as usize], allowed[read as usize]);
     let plain = |read: Read| {
@@ -163,8 +157,6 @@ impl Open {
     }
 }
 
-/// Keeps one mean per beat and nothing per step. The steps before the first beat edge and after the last are
-/// dropped.
 pub(super) struct Fold {
     scales: ErrorScales,
     sizes: Reading,
@@ -176,13 +168,12 @@ pub(super) struct Fold {
     remaining: Vec<usize>,
 }
 impl Fold {
-    /// `phase` is the head's at `start`, the end of the step before the first this fold takes.
     pub(super) fn new(
         plan: &DayPlan,
         scales: ErrorScales,
         sizes: Reading,
         start: SimTime,
-        phase: f64,
+        phase_at_start: f64,
     ) -> Self {
         let occurrences = plan.occurrences.iter().enumerate();
         let planned = occurrences
@@ -193,7 +184,7 @@ impl Fold {
             scales,
             sizes,
             start,
-            phase,
+            phase: phase_at_start,
             open: None,
             beats: Vec::new(),
             inputs,
@@ -204,8 +195,6 @@ impl Fold {
                 .collect(),
         }
     }
-    /// One accepted step: its end, its length and what it reads at its end. The step whose phase falls below the
-    /// last step end's is the last of the closing beat, and its end is the beat edge.
     pub(super) fn step(&mut self, end: SimTime, length_ns: u64, phase: f64, reading: &Reading) {
         let allowed = core::array::from_fn(|read| self.scales.at(reading[read], self.sizes[read]));
         let samples = series(reading, &allowed);
@@ -221,7 +210,6 @@ impl Fold {
             self.open = Some(Open::at(end));
         }
     }
-    /// An occurrence has applied once every one of its inputs has.
     pub(super) fn applied(&mut self, ids: &[InputId]) {
         for id in ids {
             if let Ok(found) = self.inputs.binary_search_by_key(id, |&(id, _)| id) {
@@ -255,7 +243,7 @@ fn law(owner: &'static str, local: &'static str, at: Context) -> Slot {
     }
 }
 
-/// Every place an amount of albumin sits in blood: the vessels' lumens and the beds' plasma, not the interstitium.
+/// Albumin marks blood: the urinary lumens hold water and ions but no albumin.
 pub(super) fn blood_spaces(body: &CompiledBody) -> Vec<(SiteId, Space)> {
     let blood = |kind: RowKind| match kind {
         RowKind::Amount {
@@ -272,7 +260,6 @@ fn number(held: Compensated) -> f64 {
     f64::from_bits(held.bits()[0])
 }
 
-/// The rows the trace reads, bound once from the body, each with its workspace slot for its natural size.
 pub(super) struct Readings {
     phase: RowId,
     rows: [Vec<(RowId, usize)>; READS],
@@ -335,7 +322,6 @@ impl Readings {
             ],
         })
     }
-    /// A sum's natural size is the sum of its rows'.
     pub(super) fn sizes(&self, problem: &CoupledProblem<'_>) -> Reading {
         core::array::from_fn(|read| {
             self.rows[read]

@@ -6,7 +6,6 @@ use EventKind::{LieDownToSleep, Meal, SitUp, Wake};
 use Scoring::{DirectionOnly, Scored, Unscored};
 use Span::{Hours, Minutes, Seconds};
 
-/// The quantities a scored or direction-only row reads, each one the day trace holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Measured {
     HeartRate,
@@ -43,7 +42,6 @@ pub(super) enum Direction {
     Down,
 }
 
-/// A bound in seconds is a fast check, in minutes or hours a slow one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Span {
     Seconds(u64),
@@ -74,7 +72,6 @@ impl Bound {
             Bound::Under(span) | Bound::By(span) => span,
         }
     }
-    /// `elapsed` is measured from the event's instant.
     pub(super) const fn meets(self, elapsed: u64) -> bool {
         match self {
             Bound::Under(span) => elapsed < span.ns(),
@@ -86,26 +83,22 @@ impl Bound {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Course {
     OneWay(Direction, Bound),
-    /// Row 2: a dip, a return to the band, then held up or unchanged from `held_from`.
     DipThenBack {
         dip: Bound,
         back: Bound,
         held_from: Span,
     },
-    /// Row 4: a brief rise, then down from `fall_from` with its fall beginning by `fall`.
     RiseThenFall {
         rise: Bound,
         fall_from: Span,
         fall: Bound,
     },
-    /// Against a run from the same start without the meal.
     AgainstControl(Direction, Bound),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Lean {
     Down,
-    /// Up from the hour before the wake, which must itself lie below the awake hour before the night's lie-down.
     UpAfterNightDip,
 }
 
@@ -113,7 +106,6 @@ pub(super) enum Lean {
 pub(super) enum Scoring {
     Scored(Measured, Course),
     DirectionOnly(&'static [Measured], Lean),
-    /// Its reason in words.
     Unscored(&'static [DayQuantity], &'static str),
 }
 
@@ -122,11 +114,9 @@ pub(super) struct Row {
     pub(super) number: u8,
     pub(super) event: EventKind,
     pub(super) scoring: Scoring,
-    /// The table's Source column; every row's citation check is still open.
     pub(super) source: &'static str,
 }
 
-/// Ticket 21's table: directions and timing only, never a target value.
 pub(super) const ROWS: [Row; 17] = [
     Row {
         number: 1,

@@ -39,8 +39,7 @@ fn two_days() -> NonZeroU32 {
     NonZeroU32::new(2).expect("two")
 }
 
-/// The reference plan with every payload present, as a later payload ticket would leave it.
-fn plan() -> DayPlan {
+fn plan_with_every_payload() -> DayPlan {
     let mut plan = DayPlan::reference(two_days());
     for occurrence in &mut plan.occurrences {
         occurrence.missing_payload = false;
@@ -52,7 +51,6 @@ fn wobble(index: usize) -> f64 {
     if index.is_multiple_of(2) { 1.0 } else { -1.0 }
 }
 
-/// Beats of `period` ns from `start`, while they end by `end`.
 fn beats(
     start: SimTime,
     end: SimTime,
@@ -84,7 +82,6 @@ fn traced(plan: &DayPlan, start: SimTime, end: SimTime, beats: Vec<Beat>) -> Day
     }
 }
 
-/// Every series at 100 with a wobble of one either way, plus `effect` from the beat's start.
 fn steady(index: usize, effect: f64) -> Sample {
     Sample {
         value: 100.0 + wobble(index) + effect,
@@ -128,7 +125,6 @@ fn stage(kind: EventKind) -> Stage {
     }
 }
 
-/// A trace of `stage` whose series move by `effect`, given the time since the stage's event.
 fn moving(plan: &DayPlan, stage: Stage, effect: impl Fn(Series, i64) -> f64) -> DayTrace {
     let value = |series, at, index| steady(index, effect(series, since(stage.event, at)));
     traced(
@@ -151,9 +147,8 @@ fn verdicts(row: u8, checks: &[DayCheck], at: SimTime) -> Vec<Verdict> {
     ours.map(DayCheck::verdict).collect()
 }
 
-/// The row's event in its stage, with a flat control for a meal.
 fn judged(row: &Row, effect: impl Fn(Series, i64) -> f64) -> Vec<Verdict> {
-    let plan = plan();
+    let plan = plan_with_every_payload();
     let stage = stage(row.event);
     let fed = moving(&plan, stage, effect);
     let control = moving(&plan, stage, |_, _| 0.0);
@@ -174,7 +169,6 @@ fn signed(direction: Direction, size: f64) -> f64 {
 
 type Effect = Box<dyn Fn(Series, i64) -> f64>;
 
-/// The trace that moves the row's way first, then each one-phase reversal, with the verdicts each must earn.
 fn courses(row: &Row) -> Vec<(Effect, Vec<Verdict>)> {
     let fail = Verdict::Fail;
     match row.scoring {
@@ -293,8 +287,6 @@ fn the_registry_holds_the_ticket_rows_in_order() {
     assert_eq!(against, scored_meals.collect::<Vec<u8>>());
 }
 
-/// The reversal test builds each trace from the registry, so the ticket's directions and bounds are pinned here, as
-/// the ticket's table states them.
 #[test]
 fn the_registry_states_the_tickets_directions_and_bounds() {
     let stated = [
@@ -343,9 +335,8 @@ fn each_scored_row_passes_its_way_and_fails_with_the_move_reversed() {
     assert_eq!(exercised, [1, 2, 3, 4, 5, 6, 7, 9, 10, 14, 15, 16, 17]);
 }
 
-/// Row 1 on a trace whose baseline is `before` and whose comparison beats all sit at `after`.
 fn heart_rate_step(before: impl Fn(usize) -> f64, after: f64, floor: f64) -> Verdict {
-    let (plan, stage) = (plan(), stage(EventKind::SitUp));
+    let (plan, stage) = (plan_with_every_payload(), stage(EventKind::SitUp));
     let value = |_, at, index| Sample {
         value: if at < stage.event { before(index) } else { after },
         floor,
@@ -410,7 +401,7 @@ fn a_fast_onset_must_meet_its_bound_and_stay_out_three_beats() {
 fn a_slow_onset_stays_out_five_minutes_inside_its_window() {
     let excursion = |since: i64| match since {
         _ if since < 0 => 0.0,
-        _ if since < 4 * M => -50.0,
+        _ if since < 4 * M + 30 * S => -50.0,
         _ if since < 21 * M => 0.0,
         _ => -50.0,
     };
@@ -422,7 +413,7 @@ fn a_slow_onset_stays_out_five_minutes_inside_its_window() {
 
 #[test]
 fn day_one_baseline_is_cut_at_the_trace_start_and_day_two_holds_ten_minutes() {
-    let plan = plan();
+    let plan = plan_with_every_payload();
     let (start, end) = (clock(1, 6, 55), clock(2, 7, 31));
     let planted = |from: SimTime, to: SimTime| {
         move |_, at: SimTime, index| {
@@ -457,7 +448,7 @@ fn day_one_baseline_is_cut_at_the_trace_start_and_day_two_holds_ten_minutes() {
 
 #[test]
 fn a_window_ends_at_the_next_occurrence() {
-    let (plan, at) = (plan(), clock(1, 7, 0));
+    let (plan, at) = (plan_with_every_payload(), clock(1, 7, 0));
     let stage = Stage {
         end: clock(1, 8, 1),
         ..stage(EventKind::SitUp)
@@ -471,9 +462,8 @@ fn a_window_ends_at_the_next_occurrence() {
     assert_eq!(verdicts(1, &checks, at), [Verdict::Pass]);
 }
 
-/// Rows 9 and 10 on a fed run and its control, each a function of the time since the 07:30 meal.
 fn meal_rows(fed: &DayTrace, control: Option<DayTrace>) -> Vec<Verdict> {
-    let (plan, at) = (plan(), clock(1, 7, 30));
+    let (plan, at) = (plan_with_every_payload(), clock(1, 7, 30));
     let controls: Vec<(usize, DayTrace)> = control
         .into_iter()
         .map(|control| (meal_index(&plan, at), control))
@@ -484,7 +474,7 @@ fn meal_rows(fed: &DayTrace, control: Option<DayTrace>) -> Vec<Verdict> {
 
 #[test]
 fn a_meal_reads_against_its_counterfactual() {
-    let (plan, stage) = (plan(), stage(EventKind::Meal));
+    let (plan, stage) = (plan_with_every_payload(), stage(EventKind::Meal));
     let drift = |since: i64| 10.0 * since as f64 / H as f64;
     let shared = moving(&plan, stage, |_, since| drift(since));
     let fed = moving(&plan, stage, |_, since| {
@@ -519,7 +509,7 @@ fn a_meal_reads_against_its_counterfactual() {
 
 #[test]
 fn fed_beats_shorter_than_the_controls_pair_by_time_and_find_the_planted_step() {
-    let (plan, stage) = (plan(), stage(EventKind::Meal));
+    let (plan, stage) = (plan_with_every_payload(), stage(EventKind::Meal));
     let dip = |since: i64| {
         if (30 * M..40 * M).contains(&since) {
             -60.0
@@ -553,7 +543,7 @@ fn fed_beats_shorter_than_the_controls_pair_by_time_and_find_the_planted_step() 
 }
 
 fn phases(number: u8, floor: f64, effect: impl Fn(i64) -> f64) -> Verdict {
-    let (plan, stage) = (plan(), stage(EventKind::SitUp));
+    let (plan, stage) = (plan_with_every_payload(), stage(EventKind::SitUp));
     let series = match row(number).scoring {
         Scoring::Scored(measured, _) => measured.series(),
         _ => panic!("row {number} is scored"),
@@ -615,7 +605,7 @@ fn the_wake_rises_only_after_a_night_dip() {
 
 #[test]
 fn unscored_rows_never_pass_or_fail() {
-    let plan = plan();
+    let plan = plan_with_every_payload();
     for kind in [EventKind::SitUp, EventKind::Meal] {
         let stage = stage(kind);
         for size in [50.0, -50.0, 0.0] {
@@ -663,7 +653,7 @@ fn a_check_says_why_it_is_not_available_yet() {
     }
     assert_eq!(verdicts(17, &checks, clock(2, 6, 30)), [no_payload; 2]);
 
-    let plan = plan();
+    let plan = plan_with_every_payload();
     let at = clock(1, 7, 0);
     let early = Stage {
         end: clock(1, 7, 20),
@@ -707,7 +697,7 @@ fn a_check_says_why_it_is_not_available_yet() {
 
 #[test]
 fn the_report_shows_a_line_per_check_with_its_reason() {
-    let plan = plan();
+    let plan = plan_with_every_payload();
     let early = Stage {
         end: clock(1, 7, 20),
         ..stage(EventKind::SitUp)
@@ -750,7 +740,6 @@ fn scales() -> ErrorScales {
     ErrorScales::uniform(unit(0.5), unit(0.25)).expect("positive")
 }
 
-/// One step's nine samples, worked from the recipes with absolute scale 0.5 and relative scale 0.25.
 fn by_hand(reading: &Reading, sizes: &Reading) -> [Sample; SERIES] {
     let value = |read: Read| reading[read as usize];
     let allowed = |read: Read| 0.5 * sizes[read as usize] + 0.25 * value(read).abs();
@@ -809,7 +798,7 @@ fn the_fold_keeps_whole_beats_from_edge_to_edge_with_step_length_weighted_means(
             Some(SimTime::from_ns(*at))
         })
         .collect();
-    let mut fold = Fold::new(&plan(), scales(), sizes, start, 0.9);
+    let mut fold = Fold::new(&plan_with_every_payload(), scales(), sizes, start, 0.9);
     for step in 0..lengths.len() {
         fold.step(ends[step], lengths[step], phases[step], &reading(step));
     }

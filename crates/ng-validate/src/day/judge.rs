@@ -11,11 +11,9 @@ const NIGHT_HOUR: u64 = HOUR;
 const FAST_STAY: usize = 3;
 const SLOW_STAY: u64 = 5 * MINUTE;
 
-/// A comparison mean less its baseline, with the floors it must clear.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Change {
     pub(super) delta: f64,
-    /// Three of the baseline's standard deviations.
     pub(super) noise: f64,
     pub(super) tolerance: f64,
 }
@@ -27,7 +25,7 @@ impl Change {
             tolerance,
         }
     }
-    /// A response is more than three noise floors and at least the declared tolerance. A NaN is no response.
+    /// A NaN is no response.
     pub(super) fn sign(self) -> Option<Direction> {
         let size = self.delta.abs();
         if !(size > self.noise && size >= self.tolerance) {
@@ -45,11 +43,9 @@ impl Change {
 pub(super) enum Uncovered {
     EndsBefore(SimTime),
     StartsAfter(SimTime),
-    /// The plan holds no event to bound the window.
     Unbounded,
 }
 
-/// What a check's report line shows. Each instant is measured from the event's.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Shown {
     pub(super) change: Option<Change>,
@@ -84,8 +80,7 @@ struct Stats {
     tolerance: f64,
 }
 
-/// NaN when either is.
-fn larger(first: f64, second: f64) -> f64 {
+fn larger_or_nan(first: f64, second: f64) -> f64 {
     if first > second {
         first
     } else if second >= first {
@@ -105,20 +100,17 @@ fn elapsed(from: SimTime, to: SimTime) -> u64 {
     to.nanoseconds().saturating_sub(from.nanoseconds())
 }
 
-/// The beats that start and end inside `[start, end)`.
 fn within(trace: &DayTrace, start: SimTime, end: SimTime) -> &[Beat] {
     let first = trace.beats.partition_point(|beat| beat.start < start);
     let last = trace.beats.partition_point(|beat| beat.end <= end);
     trace.beats.get(first..last).unwrap_or(&[])
 }
 
-/// The beat whose span holds `at`.
 fn holding(trace: &DayTrace, at: SimTime) -> Option<&Beat> {
     let index = trace.beats.partition_point(|beat| beat.end < at);
     trace.beats.get(index).filter(|beat| beat.start < at)
 }
 
-/// Each beat counts once, and the standard deviation is the sample one, over two passes in time order.
 fn stats(beats: &[Beat], quantity: Measured) -> Result<Stats, Pending> {
     if beats.len() < 2 {
         return Err(Unavailable::TooFewBeats.into());
@@ -141,7 +133,7 @@ fn response(seen: Stats, against: Stats) -> Change {
     Change::of(
         seen.mean - against.mean,
         against.sd,
-        larger(against.tolerance, seen.tolerance),
+        larger_or_nan(against.tolerance, seen.tolerance),
     )
 }
 
@@ -156,8 +148,6 @@ fn marks(beats: &[Beat], mut out: impl FnMut(&Beat) -> bool) -> Vec<(SimTime, bo
     beats.iter().map(|beat| (beat.end, out(beat))).collect()
 }
 
-/// The end of the first marked beat that stays marked: with the next two for a fast check, through the first beat
-/// ending 5 min or more after it for a slow one. A stay never runs past the beats it is given.
 fn onset(marks: &[(SimTime, bool)], fast: bool) -> Option<SimTime> {
     for (first, &(end, out)) in marks.iter().enumerate() {
         if !out {
@@ -208,7 +198,6 @@ impl Scene<'_> {
     fn next(&self) -> Option<SimTime> {
         self.plan.next_after(self.at())
     }
-    /// The 10 min before the event, cut at the trace's start.
     fn baseline(&self) -> SimTime {
         minus(self.at(), BASELINE).max(self.fed.start)
     }
@@ -244,7 +233,10 @@ impl Scene<'_> {
         let end = covered(fed, self.next())?;
         let base = stats(within(fed, self.baseline(), at), quantity)?;
         let change = response(stats(within(fed, plus(at, held_from.ns()), end), quantity)?, base);
-        let (band, value) = (larger(3.0 * base.sd, base.tolerance), Self::value(quantity));
+        let (band, value) = (
+            larger_or_nan(3.0 * base.sd, base.tolerance),
+            Self::value(quantity),
+        );
         let early = within(fed, at, plus(at, FIRST_PHASE));
         let below = |beat: &Beat| beyond(value(beat), base.mean, band, Direction::Down);
         let dipped = onset(&marks(early, below), dip.span().fast());
@@ -285,7 +277,10 @@ impl Scene<'_> {
         let end = covered(fed, self.next())?;
         let base = stats(within(fed, self.baseline(), at), quantity)?;
         let change = response(stats(within(fed, plus(at, fall_from.ns()), end), quantity)?, base);
-        let (band, value) = (larger(3.0 * base.sd, base.tolerance), Self::value(quantity));
+        let (band, value) = (
+            larger_or_nan(3.0 * base.sd, base.tolerance),
+            Self::value(quantity),
+        );
         let early = within(fed, at, plus(at, FIRST_PHASE));
         let above = |beat: &Beat| beyond(value(beat), base.mean, band, Direction::Up);
         let below = |beat: &Beat| beyond(value(beat), base.mean, band, Direction::Down);
@@ -307,7 +302,6 @@ impl Scene<'_> {
         Ok((verdict, shown))
     }
 
-    /// The control comes from the fed run's own start, so beats pair by the instant a fed beat ends, never by count.
     fn against_control(
         &self,
         quantity: Measured,
@@ -330,7 +324,7 @@ impl Scene<'_> {
         let change = Change::of(
             (fed_seen.mean - control_seen.mean) - offset,
             fed_base.sd,
-            larger(fed_seen.tolerance, control_seen.tolerance),
+            larger_or_nan(fed_seen.tolerance, control_seen.tolerance),
         );
         let value = Self::value(quantity);
         let out = |beat: &Beat| {
@@ -370,8 +364,6 @@ impl Scene<'_> {
         Ok((verdict, shown))
     }
 
-    /// The awake reference is the hour before the previous night's lie-down, the asleep baseline the hour before the
-    /// wake.
     fn after_night_dip(&self, quantity: Measured) -> Result<Judged, Pending> {
         let (fed, at) = (self.fed, self.at());
         let nights = self.plan.occurrences.iter();
@@ -438,8 +430,6 @@ impl Scene<'_> {
     }
 }
 
-/// Every row of the table, in order: one check per quantity per occurrence of its event in the fed run, or one per
-/// quantity when the run holds none. `controls` pairs each meal occurrence's index with the run that withholds it.
 pub(super) fn judge(plan: &DayPlan, fed: &DayTrace, controls: &[(usize, DayTrace)]) -> Vec<DayCheck> {
     let mut checks = Vec::new();
     for row in &ROWS {
