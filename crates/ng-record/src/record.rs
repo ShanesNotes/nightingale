@@ -126,8 +126,6 @@ impl<'m> PatientRecord<'m> {
         let link = self.history.linked(chunk, head.image_digest());
         Ok(NextImage { head, link })
     }
-    /// The contract answers whether the core followed its declared method and every row stays admissible; this
-    /// answers whether the ledger can take the step.
     fn validate(&self, step: &VerifiedStep) -> Result<LedgerChunk, TrialFailure> {
         let chunk = LedgerChunk::after(&self.history, self.body, step);
         if !chunk.is_finite() {

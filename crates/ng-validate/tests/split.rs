@@ -212,8 +212,6 @@ fn a_reference_error_measured_on_another_reference_is_refused() {
     assert!(matches!(refused, Err(SplitRejected::OtherReference)));
 }
 
-/// Read the other way round, the pair would measure the coarser run's error as the finer run's distance from it,
-/// which is about half that error.
 #[test]
 fn a_reference_whose_steps_are_not_half_the_coarser_runs_is_refused() {
     let case = stepped();
@@ -596,7 +594,6 @@ fn a_firing_at_the_first_instant_is_in_no_trace() {
     ReferenceError::self_convergence(&expected, &measured).expect("neither trace holds the firing");
 }
 
-/// A genuine admission of the case's doubled conductance, which no session of the case admits.
 fn admitted_elsewhere(case: &TwoReservoirs, core: &ReferenceIntegrator) -> InitialRevision {
     let origin = SimTime::from_ns(0);
     let port = BoundaryPort::new(Vec::new()).expect("no event");
@@ -643,7 +640,6 @@ fn a_draw_opens_only_on_an_admission_of_its_identitys_packet() {
         .expect("its own admission opens");
 }
 
-/// One step of a course driven by hand, settled through the head as a record settles it, retrying each refusal.
 fn settle(
     case: &TwoReservoirs,
     core: &ReferenceIntegrator,
@@ -678,8 +674,6 @@ fn run_of(case: &TwoReservoirs, core: &ReferenceIntegrator, words: [u64; 4]) -> 
     )
 }
 
-/// A head moves only by installing a step the contract settled, so a course driven by hand draws only steps
-/// that start at the head read last, under the run the draw opened.
 #[test]
 fn a_draw_refuses_a_step_of_another_head_or_run() {
     let case = stepped();
@@ -741,8 +735,6 @@ fn a_head_settles_steps_only_for_its_own_body_and_packet() {
     }
 }
 
-/// Parts from bytes carry waiting inputs no admission took, and an input that arrives between a step's attempt
-/// and its install is one that step could not apply.
 #[test]
 fn a_draw_refuses_a_head_whose_inputs_no_admission_took() {
     let case = stepped();

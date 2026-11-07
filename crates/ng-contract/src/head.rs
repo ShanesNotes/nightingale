@@ -5,16 +5,14 @@ use crate::{
     TrialFailure, ValidityExcursion, VerifiedParts, VerifiedStep,
 };
 
-/// A head's bound values, its image under the run's record hash (the image its seal links), and whether it
-/// descends from an admission through steps that each took every input admitted before them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct HeadDigest {
     parameters: Digest,
     image: Digest,
-    traced: bool,
+    from_admission: bool,
 }
 
-/// One accepted head. Only `install` moves its parts, so its digest stays theirs.
+/// Only `install` moves its parts, so its digest stays theirs.
 pub struct AcceptedHead {
     parts: ImageParts,
     hash: RecordHash,
@@ -25,7 +23,7 @@ impl AcceptedHead {
     pub fn admitted(origin: InitialRevision, hash: RecordHash) -> Self {
         Self::sealed(origin.into_parts(), hash, true)
     }
-    /// A head from parts verified elsewhere, such as checkpoint bytes. Neither it nor a head after it is traced,
+    /// A head from parts verified elsewhere, such as checkpoint bytes. No split trace reads it or a head after it,
     /// since its waiting inputs came from no admission.
     pub fn restored(parts: ImageParts, hash: RecordHash) -> Self {
         Self::sealed(parts, hash, false)
@@ -41,7 +39,7 @@ impl AcceptedHead {
         let digest = HeadDigest {
             parameters: parts.parameters().digest(),
             image,
-            traced: admission,
+            from_admission: admission,
         };
         Self {
             parts,
@@ -163,8 +161,8 @@ impl AcceptedHead {
         }
     }
     /// Becomes the head `next` settled. It cannot fail: a head settled from another head is the draw's to refuse,
-    /// since its extents name where it started. An input admitted since the attempt leaves this head untraced,
-    /// since the step could not take it.
+    /// since its extents name where it started. An input admitted since the attempt puts this head out of
+    /// every split trace, since the step could not take it.
     pub fn install(&mut self, next: NextHead) -> StepExtents {
         let NextHead {
             time,
@@ -178,20 +176,22 @@ impl AcceptedHead {
             excursions: _,
             extents,
         } = next;
-        let traced = digest.traced && known == self.parts.pending.known();
+        let from_admission = digest.from_admission && known == self.parts.pending.known();
         let parts = &mut self.parts;
         parts.time = time;
         parts.state = state;
         parts.continuation = continuation;
         parts.dense = dense;
         parts.pending.advance(applied);
-        self.digest = HeadDigest { traced, ..digest };
+        self.digest = HeadDigest {
+            from_admission,
+            ..digest
+        };
         self.admission = false;
         extents
     }
 }
 
-/// The whole next head of one settled attempt, its image already digested.
 pub struct NextHead {
     time: SimTime,
     state: Candidate,

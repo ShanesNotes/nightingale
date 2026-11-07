@@ -70,7 +70,6 @@ mod tests {
         NonZeroU64::new(ns).expect("not zero")
     }
 
-    /// The worst distance of either amount from the closed form at the grid's instants.
     fn closed_form_error(case: &TwoReservoirs, core: &ReferenceIntegrator, period_ns: u64) -> Compensated {
         let store = MemoryStore::default();
         let mut session = case.admit(core, &store).expect("admitted");
@@ -103,8 +102,6 @@ mod tests {
         Measure::new(value).expect("finite")
     }
 
-    /// The closed form says how far each run is from the truth. The gate measures the split against the
-    /// reference's half, so its reference error must cover the half's own error and its total the split's own.
     #[test]
     fn a_split_whose_closed_form_error_is_over_its_budget_is_refused() {
         let case = TwoReservoirs::closed().expect("a synthetic case");
@@ -127,16 +124,24 @@ mod tests {
         );
         let normalized =
             |core| closed_form_error(&case, core, period_ns).times(&measure::<Dimensionless>(1.0 / scale));
-        let (own, split_own) = (normalized(&half), normalized(&split));
+        let (half_from_truth, split_from_truth) = (normalized(&half), normalized(&split));
         assert!(
-            !split_own.at_most(Compensated::of(&measure::<Dimensionless>(1.0))),
+            !split_from_truth.at_most(Compensated::of(&measure::<Dimensionless>(1.0))),
             "the split's own error is over the budget"
         );
         let assessment = match split_gate(&case, &split, &reference, &lens, grid, budget) {
             Err(SplitFailure::Rejected(SplitRejected::OverBudget(assessment))) => assessment,
             other => panic!("not refused over the budget: {other:?}"),
         };
-        assert!(own.times(&measure(0.9)).at_most(assessment.reference_error()));
-        assert!(split_own.times(&measure(0.95)).at_most(assessment.worst_total()));
+        assert!(
+            half_from_truth
+                .times(&measure(0.9))
+                .at_most(assessment.reference_error())
+        );
+        assert!(
+            split_from_truth
+                .times(&measure(0.95))
+                .at_most(assessment.worst_total())
+        );
     }
 }
