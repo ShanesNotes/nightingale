@@ -386,6 +386,20 @@ fn a_withheld_start_that_already_holds_its_inputs_fails_late_admission() {
 }
 
 #[test]
+fn an_input_a_case_lists_twice_arrives_once_and_passes_late_admission() {
+    let clock = script();
+    let cores = || reference(8 * SECOND);
+    let twice = delivering(
+        vec![delivery(b"repeat", 30, 90), delivery(b"repeat", 30, 90)],
+        120,
+    );
+    let evidence = replay_gate(ReplayGate::LateAdmission, &twice, &cores, &plan(&clock)).expect("one input");
+    let once = delivering(vec![delivery(b"repeat", 30, 90)], 120);
+    let alone = replay_gate(ReplayGate::LateAdmission, &once, &cores, &plan(&clock)).expect("one input");
+    assert_eq!(evidence.runs(), alone.runs());
+}
+
+#[test]
 fn an_honest_core_refused_past_an_input_passes_late_admission() {
     let store = MemoryStore::default();
     let case = delivering(vec![delivery(b"input", 18, 118)], 60);

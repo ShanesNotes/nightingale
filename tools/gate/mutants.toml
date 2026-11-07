@@ -230,6 +230,13 @@ new = '''if false {'''
 test = "-p ng-validate --test replay a_withheld_start_that_already_holds_its_inputs_fails_late_admission"
 
 [[mutant]]
+name = "repeated-input-enqueued-twice"
+path = "crates/ng-validate/src/replay.rs"
+old = '''    events.dedup_by_key(|event| (event.at(), event.id()));'''
+new = ''''''
+test = "-p ng-validate --test replay an_input_a_case_lists_twice_arrives_once_and_passes_late_admission"
+
+[[mutant]]
 name = "forward-euler-inside-rc"
 path = "crates/ng-validate/tests/transaction.rs"
 old = '''    let core = euler(case.relaxation_ns() * 102 / 100);'''

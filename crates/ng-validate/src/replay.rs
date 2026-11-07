@@ -740,6 +740,8 @@ fn stamped(gate: ReplayGate, case: &dyn ReplayCase) -> Result<Vec<BoundaryEvent>
         .events()
         .map_err(|error| ReplayFailure::InputRefused { gate, error })?;
     events.sort_by_key(|event| (event.at(), event.id()));
+    // A port takes a repeated input once, so a late run must too; one id at two payloads fails the known run.
+    events.dedup_by_key(|event| (event.at(), event.id()));
     Ok(events)
 }
 
