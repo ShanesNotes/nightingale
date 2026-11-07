@@ -11,8 +11,8 @@ use core::fmt;
 use core::num::NonZeroU32;
 use judge::{Shown, Uncovered};
 use ng_contract::{
-    AdmissionError, BoundaryEvent, BoundaryInput, BoundaryPort, CompiledBody, CoupledSolver, Delivered,
-    Digest, ErrorScales, InitializationFailure, InputId, Interval, Legs, Measure, ObservationLens,
+    AdmissionError, BoundaryEvent, BoundaryInput, BoundaryPort, CompiledBody, Context, CoupledSolver,
+    Delivered, Digest, ErrorScales, InitializationFailure, InputId, Interval, Legs, Measure, ObservationLens,
     ParameterPacket, Posture, RowKind, RunIdentity, Seed, SimTime, SyntheticFixture,
 };
 use ng_record::{AuthorizedInput, Checkpoint, CheckpointError, FaultReport, Faulted, HistoryStore, Session};
@@ -351,6 +351,8 @@ pub enum DayFailure {
     Input(AdmissionError),
     /// A row the day trace reads that this body lacks.
     MissingRow(RowKind),
+    /// The sodium transfer along this edge, which the day trace reads from the ledger, absent from this body.
+    MissingTransfer(Context),
 }
 
 fn exported(stopped: Session<'_, Faulted>) -> DayFailure {
@@ -394,7 +396,13 @@ impl Start<'_> {
             let length_ns = view.time().nanoseconds() - before.nanoseconds();
             let ledger = session.conservation();
             let head = ledger.head().expect("an accepted step heads the ledger");
-            fold.step(view.time(), length_ns, phase, &reading, self.readings.moved(&head));
+            fold.step(
+                view.time(),
+                length_ns,
+                phase,
+                &reading,
+                self.readings.moved(&head),
+            );
             fold.applied(receipt.applied());
         }
         let record = session.record();

@@ -787,7 +787,7 @@ fn scales() -> ErrorScales {
     ErrorScales::uniform(unit(0.5), unit(0.25)).expect("positive")
 }
 
-fn by_hand(reading: &Reading, sizes: &Reading) -> [Sample; SERIES] {
+fn by_hand(reading: &Reading, sizes: &Reading, moved: f64) -> [Sample; SERIES] {
     let value = |read: Read| reading[read as usize];
     let allowed = |read: Read| 0.5 * sizes[read as usize] + 0.25 * value(read).abs();
     let own = |read: Read| Sample {
@@ -820,7 +820,7 @@ fn by_hand(reading: &Reading, sizes: &Reading) -> [Sample; SERIES] {
             ions.iter().map(|&read| allowed(read)).sum(),
         ),
         Sample {
-            value: flow * concentration,
+            value: moved,
             floor: concentration.abs() * allowed(Read::Tubular) + flow.abs() * concentration_floor,
         },
         own(Read::Tubular),
@@ -837,6 +837,7 @@ fn the_fold_keeps_whole_beats_from_edge_to_edge_with_step_length_weighted_means(
     let phases = [0.7, 0.8, 0.1, 0.4, 0.9, 0.3, 0.6];
     let reading =
         |step: usize| -> Reading { core::array::from_fn(|read| (step + 1) as f64 * (read + 2) as f64) };
+    let moved = |step: usize| 0.3 * (step + 1) as f64;
     let sizes: Reading = core::array::from_fn(|read| (read + 1) as f64);
     let start = clock(1, 6, 55);
     let ends: Vec<SimTime> = (lengths.iter())
@@ -847,12 +848,13 @@ fn the_fold_keeps_whole_beats_from_edge_to_edge_with_step_length_weighted_means(
         .collect();
     let mut fold = Fold::new(&plan_with_every_payload(), scales(), sizes, start, 0.9);
     for step in 0..lengths.len() {
-        let (flow, sodium, water) = (
-            reading(step)[Read::Tubular as usize],
-            reading(step)[Read::DuctSodium as usize],
-            reading(step)[Read::DuctWater as usize],
+        fold.step(
+            ends[step],
+            lengths[step],
+            phases[step],
+            &reading(step),
+            moved(step),
         );
-        fold.step(ends[step], lengths[step], phases[step], &reading(step), flow * sodium / water);
     }
     let synthetic = Digest::of_canonical(b"a synthetic run");
     let trace = fold.finish(synthetic, synthetic, ends[6]);
@@ -860,9 +862,9 @@ fn the_fold_keeps_whole_beats_from_edge_to_edge_with_step_length_weighted_means(
     assert_eq!(spans, [(ends[0], ends[2]), (ends[2], ends[5])]);
     for (beat, steps) in trace.beats.iter().zip([1..3, 3..6]) {
         let over = |series: usize, pick: fn(Sample) -> f64| -> f64 {
-            let each = steps
-                .clone()
-                .map(|step| pick(by_hand(&reading(step), &sizes)[series]) * lengths[step] as f64);
+            let each = steps.clone().map(|step| {
+                pick(by_hand(&reading(step), &sizes, moved(step))[series]) * lengths[step] as f64
+            });
             each.sum()
         };
         let weight: f64 = steps.clone().map(|step| lengths[step] as f64).sum();
@@ -906,13 +908,50 @@ fn a_reversed_urinary_flow_excretes_what_the_ledger_moved_with_the_bladders_floo
         fold.step(end, SECOND, phase, &reading, -2.0);
     }
     let synthetic = Digest::of_canonical(b"a synthetic run");
-    let trace = fold.finish(synthetic, synthetic, SimTime::from_ns(start.nanoseconds() + 3 * SECOND));
+    let trace = fold.finish(
+        synthetic,
+        synthetic,
+        SimTime::from_ns(start.nanoseconds() + 3 * SECOND),
+    );
     let [beat] = trace.beats[..] else {
         panic!("one beat: {:?}", trace.beats);
     };
     let excretion = beat.reading(Measured::SodiumExcretion);
     assert_eq!(excretion.value, -2.0, "{excretion:?}");
     assert!(close(excretion.floor, 2.1), "{excretion:?}");
+}
+
+#[test]
+fn the_trace_reads_the_sodium_the_engine_carried_from_the_duct_to_the_bladder() {
+    let body = crate::arena_body().expect("compiled");
+    let core = ng_solver::Core::new(10_000_000);
+    let store = crate::MemoryStore::default();
+    let (packet, lens) = (
+        crate::arena_packet(&body).expect("a packet"),
+        crate::arena_lens(&body).expect("a lens"),
+    );
+    let port = ng_contract::BoundaryPort::new(Vec::new()).expect("an empty port");
+    let start = crate::initialize::solved_start(&body, packet, port, &core, &lens, crate::anchor_moment());
+    let seed = ng_contract::Seed::new([1, 2, 3, 4]);
+    let admitted = start.and_then(|start| crate::initialize::admit_start(&body, &core, start, seed, &store));
+    let mut session = admitted.unwrap_or_else(|_| panic!("admitted"));
+    let readings = Readings::bind(&body).unwrap_or_else(|_| panic!("bound"));
+    for _ in 0..20 {
+        session = crate::run::advance(session)
+            .unwrap_or_else(|_| panic!("stepped"))
+            .0;
+        let ledger = session.conservation();
+        let moved = readings.moved(&ledger.head().expect("a head"));
+        let (_, reading) = readings.read(session.record().accepted());
+        let [flow, sodium, water] =
+            [Read::Tubular, Read::DuctSodium, Read::DuctWater].map(|read| reading[read as usize]);
+        let carried = flow * sodium / water;
+        assert!(carried > 0.0, "{carried}");
+        assert!(
+            (moved - carried).abs() <= 1e-6 * carried,
+            "{moved} against {carried}"
+        );
+    }
 }
 
 #[test]

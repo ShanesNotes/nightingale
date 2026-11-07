@@ -191,3 +191,18 @@ path = "crates/ng-validate/src/day/table.rs"
 old = '''scoring: Scored(Measured::PlasmaVolume, OneWay(Up, By(Minutes(35)))),'''
 new = '''scoring: Scored(Measured::PlasmaVolume, OneWay(Down, By(Minutes(35)))),'''
 test = "-p ng-validate --lib day::tests::the_registry_states_the_tickets_directions_and_bounds"
+
+[[mutant]]
+name = "day-excretion-donor-duct"
+path = "crates/ng-validate/src/day/trace.rs"
+old = '''
+    let donor = if moved < 0.0 {
+        ratio(at(Read::BladderSodium), at(Read::BladderWater))
+    } else {
+        ratio(at(Read::DuctSodium), at(Read::DuctWater))
+    };
+'''
+new = '''
+    let donor = ratio(at(Read::DuctSodium), at(Read::DuctWater));
+'''
+test = "-p ng-validate --lib day::tests::a_reversed_urinary_flow_excretes_what_the_ledger_moved_with_the_bladders_floor"

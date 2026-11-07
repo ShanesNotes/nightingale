@@ -2,8 +2,8 @@ use super::table::Measured;
 use super::{DayFailure, DayPlan, SECOND};
 use ng_contract::{
     AcceptedStateView, AnatomyBuilder, ColumnId, Compensated, CompiledBody, Context, CoupledProblem, Digest,
-    ErrorScales, InputId, Instance, LawName, Measure, Position, RowId, RowKind, SimTime, SiteClass, SiteId, Slot,
-    Space, Species, Target, VesselSegment,
+    ErrorScales, InputId, Instance, LawName, Measure, Position, RowId, RowKind, SimTime, SiteClass, SiteId,
+    Slot, Space, Species, Target, VesselSegment,
 };
 use ng_record::{Curve, HistorySegment};
 
@@ -92,7 +92,7 @@ pub(super) enum Read {
 pub(super) const READS: usize = 13;
 pub(super) type Reading = [f64; READS];
 
-fn series(reading: &Reading, allowed: &Reading, _moved: f64) -> [Sample; SERIES] {
+fn series(reading: &Reading, allowed: &Reading, moved: f64) -> [Sample; SERIES] {
     let at = |read: Read| (reading[read as usize], allowed[read as usize]);
     let plain = |read: Read| {
         let (value, floor) = at(read);
@@ -109,10 +109,14 @@ fn series(reading: &Reading, allowed: &Reading, _moved: f64) -> [Sample; SERIES]
         sodium.1 + potassium.1 + chloride.1,
     );
     let (flow, flow_floor) = at(Read::Tubular);
-    let duct = ratio(at(Read::DuctSodium), at(Read::DuctWater));
+    let donor = if moved < 0.0 {
+        ratio(at(Read::BladderSodium), at(Read::BladderWater))
+    } else {
+        ratio(at(Read::DuctSodium), at(Read::DuctWater))
+    };
     let excretion = Sample {
-        value: flow * duct.value,
-        floor: duct.value.abs() * flow_floor + flow.abs() * duct.floor,
+        value: moved,
+        floor: donor.value.abs() * flow_floor + flow.abs() * donor.floor,
     };
     [
         plain(Read::Rate),
@@ -309,17 +313,16 @@ impl Readings {
         let carries_sodium = |instance: &Instance| match instance.target() {
             Target::Column(column) if instance.context() == urinary => {
                 let terms = body.columns()[column.index()].terms();
-                terms.iter().any(|&(row, _)| row == duct_sodium.0).then_some(column)
+                terms
+                    .iter()
+                    .any(|&(row, _)| row == duct_sodium.0)
+                    .then_some(column)
             }
             _ => None,
         };
         let excreted = (body.instances().iter())
             .find_map(carries_sodium)
-            .ok_or(DayFailure::MissingRow(RowKind::Amount {
-                site: duct,
-                space: Space::Lumen,
-                species: Species::Sodium,
-            }))?;
+            .ok_or(DayFailure::MissingTransfer(urinary))?;
         Ok(Self {
             phase,
             rows: [

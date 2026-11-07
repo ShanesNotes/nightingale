@@ -11,6 +11,7 @@ fn told(failure: &DayFailure) -> String {
         DayFailure::Checkpoint(error) => format!("{error:?}"),
         DayFailure::Input(error) => format!("input {error:?}"),
         DayFailure::MissingRow(kind) => format!("no row {kind:?}"),
+        DayFailure::MissingTransfer(edge) => format!("no sodium transfer {edge:?}"),
     }
 }
 
