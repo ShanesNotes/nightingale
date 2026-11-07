@@ -462,6 +462,14 @@ fn a_meal_reads_against_its_counterfactual() {
         both(Verdict::Fail(Miss::Direction))
     );
     assert_eq!(meal_rows(&fed, Some(shared.clone())), both(Verdict::Pass));
+    for apart in [-50.0, 50.0] {
+        let parted = moving(&plan, stage, |_, since| drift(since) + apart);
+        assert_eq!(
+            meal_rows(&shared, Some(parted.clone())),
+            both(Verdict::Fail(Miss::Direction))
+        );
+        assert_eq!(meal_rows(&fed, Some(parted)), both(Verdict::Pass));
+    }
     let none = Verdict::NotAvailableYet(Unavailable::NoCounterfactual);
     assert_eq!(meal_rows(&fed, None), both(none));
     let short = DayTrace {
