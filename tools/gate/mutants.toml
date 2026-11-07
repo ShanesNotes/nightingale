@@ -156,3 +156,246 @@ path = "crates/ng-validate/src/run.rs"
 old = '''(read(clock)?.checked_sub(opened)).ok_or(ArenaFailure::MissingThroughput)?'''
 new = '''Some(read(clock)?.wrapping_sub(opened)).ok_or(ArenaFailure::MissingThroughput)?'''
 test = "-p ng-validate --test throughput a_throughput_that_measured_nothing_is_missing"
+
+[[mutant]]
+name = "withheld-start-unchecked"
+path = "crates/ng-validate/src/replay.rs"
+old = '''if session.record().digests().waiting == waiting {'''
+new = '''if false {'''
+test = "-p ng-validate --test replay a_withheld_start_that_already_holds_its_inputs_fails_late_admission"
+
+# From here to the end, the rows tools/gate/must-fail.toml names. Each turns a must-fail core or model of §7 into one
+# built to pass, and the test that builds it must then fail.
+
+[[mutant]]
+name = "forward-euler-inside-rc"
+path = "crates/ng-validate/tests/transaction.rs"
+old = '''    let core = euler(case.relaxation_ns() * 102 / 100);'''
+new = '''    let core = euler(case.relaxation_ns() / 125);'''
+test = "-p ng-validate --test transaction forward_euler_past_rc_closes_every_ledger_and_fails_the_accuracy_gate"
+
+[[mutant]]
+name = "error-above-one-floor-lowered"
+path = "crates/ng-validate/tests/transaction.rs"
+old = '''        .with_floor(NonZeroU64::new(4 * SECOND).expect("a floor"));'''
+new = '''        .with_floor(NonZeroU64::new(MILLISECOND).expect("a floor"));'''
+test = "-p ng-validate --test transaction an_estimate_above_one_at_the_floor_faults_and_never_publishes"
+
+[[mutant]]
+name = "sweeps-converge-in-the-window"
+path = "crates/ng-validate/tests/window.rs"
+old = '''            for _ in 0..self.updates {'''
+new = '''            for _ in 0..8 {'''
+test = "-p ng-validate --test window the_first_window_holds_each_core_to_the_references_own_distances"
+
+[[mutant]]
+name = "sweeps-converge-on-the-slice"
+path = "crates/ng-validate/tests/window.rs"
+old = '''            for _ in 0..self.updates {'''
+new = '''            for _ in 0..8 {'''
+test = "-p ng-validate --test window validate_refuses_a_slice_stage_its_core_left_unsolved"
+
+[[mutant]]
+name = "no-block-behind-in-the-window"
+path = "crates/ng-validate/tests/window.rs"
+old = '''                workspace.unknowns_mut()[unknown] = start[unknown];'''
+new = '''                let _ = unknown;'''
+test = "-p ng-validate --test window the_first_window_holds_each_core_to_the_references_own_distances"
+
+[[mutant]]
+name = "no-block-behind-on-the-slice"
+path = "crates/ng-validate/tests/window.rs"
+old = '''                workspace.unknowns_mut()[unknown] = start[unknown];'''
+new = '''                let _ = unknown;'''
+test = "-p ng-validate --test window validate_refuses_a_slice_stage_its_core_left_unsolved"
+
+[[mutant]]
+name = "one-sample-books-heun"
+path = "crates/ng-validate/tests/cores/must_fail.rs"
+old = '''
+        let (first, _, workspace) = heun_stages(problem, ticket)?;
+        let mut quadrature = problem.quadrature(ticket);
+        quadrature.add(&first, Ratio::ONE)?;
+'''
+new = '''
+        let (first, second, workspace) = heun_stages(problem, ticket)?;
+        let half = Ratio::new(1, 2).expect("a fraction");
+        let mut quadrature = problem.quadrature(ticket);
+        quadrature.add(&first, half)?;
+        quadrature.add(&second, half)?;
+'''
+test = "-p ng-validate --test transaction a_core_that_books_one_sample_while_its_endpoint_came_from_other_stages_faults"
+
+[[mutant]]
+name = "earlier-attempt-books-its-own"
+path = "crates/ng-validate/tests/cores/must_fail.rs"
+old = '''                quadrature.add(&earlier, Ratio::ONE)?;'''
+new = '''                quadrature.add(&stage, Ratio::ONE)?;'''
+test = "-p ng-validate --test transaction an_evaluation_from_an_earlier_attempt_is_a_binding_mismatch"
+
+[[mutant]]
+name = "due-input-stays-due"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''            cursor: self.past.cursor + due.len(),'''
+new = '''            cursor: self.past.cursor,'''
+test = "-p ng-validate --test transaction a_forced_refusal_changes_nothing_and_the_retry_applies_the_delivery_once"
+
+[[mutant]]
+name = "cache-never-counts"
+path = "crates/ng-validate/tests/replay_cores/mod.rs"
+old = '''        self.steps.set(steps + 1);'''
+new = '''        self.steps.set(steps);'''
+test = "-p ng-validate --test replay a_core_that_keeps_a_cache_outside_its_continuation_fails_resume_and_rewind"
+
+[[mutant]]
+name = "told-the-timeline-ignores-it"
+path = "crates/ng-validate/tests/replay_cores/mod.rs"
+old = '''        next.map_or(own, |output| own.min(output.nanoseconds() - head.nanoseconds()))'''
+new = '''        next.map_or(own, |_| own)'''
+test = "-p ng-validate --test replay a_core_told_the_timeline_in_only_one_run_fails_late_admission"
+
+[[mutant]]
+name = "huge-span-capped"
+path = "crates/ng-validate/tests/replay_cores/mod.rs"
+old = '''
+        self.span_ns
+'''
+new = '''
+        self.span_ns.min(8_000_000_000)
+'''
+test = "-p ng-validate --test replay a_core_that_tries_to_read_past_the_breakpoint_fails_late_admission"
+
+[[mutant]]
+name = "cut-reader-starts-short"
+path = "crates/ng-validate/tests/replay_cores/mod.rs"
+old = '''            .map_or(self.span_ns, |left| left / 2)'''
+new = '''            .map_or(self.span_ns >> 17, |left| left / 2)'''
+test = "-p ng-validate --test replay a_core_that_acts_on_a_cut_it_read_has_no_late_boundary"
+
+[[mutant]]
+name = "clipper-ignores-outputs"
+path = "crates/ng-validate/tests/replay_cores/mod.rs"
+old = '''        next.map_or(own, |output| own.min(output.nanoseconds() - head.nanoseconds()))'''
+new = '''        next.map_or(own, |_| own)'''
+test = "-p ng-validate --test replay a_core_that_clips_at_caller_output_times_fails_every_gate"
+
+[[mutant]]
+name = "host-clock-unread"
+path = "crates/ng-validate/tests/replay_cores/mod.rs"
+old = '''        self.inner.next_step(accepted) + self.clock.last.get() % 3'''
+new = '''        self.inner.next_step(accepted)'''
+test = "-p ng-validate --test replay a_core_that_reads_the_host_clock_fails_pace"
+
+[[mutant]]
+name = "step-dice-reach-nothing"
+path = "crates/ng-validate/tests/chance_cores/mod.rs"
+old = '''        workspace.unknowns_mut()[self.tone] += self.reach * dice_of(ticket.digest());'''
+new = '''        workspace.unknowns_mut()[self.tone] += 0.0 * dice_of(ticket.digest());'''
+test = "-p ng-validate --test chance a_core_that_draws_per_step_passes_every_bit_gate_and_fails_the_step_policy_gate"
+
+[[mutant]]
+name = "evaluation-dice-fixed"
+path = "crates/ng-validate/tests/chance_cores/mod.rs"
+old = '''        self.solves.set(self.solves.get() + 1);'''
+new = '''        self.solves.set(1);'''
+test = "-p ng-validate --test chance a_core_that_draws_per_evaluation_fails_the_extra_evaluation_gate"
+
+[[mutant]]
+name = "delay-of-nothing"
+path = "crates/ng-validate/tests/chance_cores/mod.rs"
+old = '''            workspace.unknowns_mut()[self.tone] -= self.by;'''
+new = '''            workspace.unknowns_mut()[self.tone] -= 0.0;'''
+test = "-p ng-validate --test chance a_core_that_delays_every_event_alike_fails_against_a_reference_policy"
+
+[[mutant]]
+name = "landings-taken"
+path = "crates/ng-validate/tests/chance_cores/mod.rs"
+old = '''        if ticket.length_ns() < self.interval_ns {'''
+new = '''        if ticket.length_ns() > self.interval_ns {'''
+test = "-p ng-validate --test chance a_core_that_refuses_every_landing_faults_and_publishes_nothing_past_the_crossing"
+
+[[mutant]]
+name = "firing-restarts-history"
+path = "crates/ng-validate/tests/chance_cores/mod.rs"
+old = '''        let kept = problem.accepted().method_history().clone();'''
+new = '''        let kept = MethodHistory::new(problem.accepted().method_history().schema(), ticket.interval().start(), Vec::new());'''
+test = "-p ng-validate --test chance a_core_that_keeps_its_history_across_a_firing_is_a_method_mismatch"
+
+[[mutant]]
+name = "posture-restarts-history"
+path = "crates/ng-validate/tests/cores/must_fail.rs"
+old = '''        let history = if ticket.interval().start() > self.keeps_after {'''
+new = '''        let history = if false {'''
+test = "-p ng-validate --test transaction a_history_kept_across_a_posture_faults_with_method_mismatch"
+
+[[mutant]]
+name = "divisor-not-a-source"
+path = "crates/ng-contract/src/sources.rs"
+old = '''sources.push(RefusalSource::Divisor { law });'''
+new = '''let _ = law;'''
+test = "-p ng-validate --test transaction the_refusal_sources_list_each_rows_set_and_each_laws_operators"
+
+[[mutant]]
+name = "refusal-not-counted"
+path = "crates/ng-validate/src/run.rs"
+old = '''health.refused(session.refused().reason());'''
+new = '''let _ = session.refused().reason();'''
+test = "-p ng-validate --test throughput a_slice_window_that_faults_at_the_floor_reports_its_health_up_to_the_fault"
+
+[[mutant]]
+name = "wall-power-solved"
+path = "crates/ng-validate/tests/window.rs"
+old = '''                    if slot == self.wall {'''
+new = '''                    if false {'''
+test = "-p ng-validate --test window validate_refuses_a_slice_stage_its_core_left_unsolved"
+
+[[mutant]]
+name = "held-route-declared"
+path = "crates/ng-contract/tests/held.rs"
+old = '''        Defect::RouteOmitted => vec![],'''
+new = '''        Defect::RouteOmitted => vec![ROUTE],'''
+test = "-p ng-contract --test held a_held_route_its_declaration_omits_is_refused_at_compile"
+
+[[mutant]]
+name = "held-pool-left-to-the-slice"
+path = "crates/ng-contract/tests/held.rs"
+old = '''        Defect::MovedSpaceHeld => vec![Space::Cells, Space::Plasma],'''
+new = '''        Defect::MovedSpaceHeld => vec![Space::Cells],'''
+test = "-p ng-contract --test held a_space_a_law_moves_cannot_be_held"
+
+[[mutant]]
+name = "orphan-held"
+path = "crates/ng-contract/tests/held.rs"
+old = '''        Defect::CellsUnheld | Defect::LiverHoldsCells => vec![],'''
+new = '''        Defect::LiverHoldsCells => vec![],'''
+test = "-p ng-contract --test held a_pool_no_law_moves_and_no_declaration_holds_is_an_orphan"
+
+[[mutant]]
+name = "cargo-held-at-both-ends"
+path = "crates/ng-contract/tests/map_reads.rs"
+old = '''        cargo(false, false).err(),'''
+new = '''        cargo(true, false).err(),'''
+test = "-p ng-contract --test map_reads a_species_one_end_of_a_route_lacks_is_refused_until_the_route_keeps_it_back"
+
+[[mutant]]
+name = "guess-that-solves"
+path = "crates/ng-validate/tests/admission.rs"
+old = '''
+fn an_initializer_that_returns_its_guess_is_refused_with_the_row_named() {
+    let case = PulsatileCase::plain();
+    let system = case.system(case.packet());
+'''
+new = '''
+fn an_initializer_that_returns_its_guess_is_refused_with_the_row_named() {
+    let case = PulsatileCase::plain();
+    let (packet, boundary, _) = steady_packet(&case);
+    let system = steady_system(&case, packet, boundary);
+'''
+test = "-p ng-validate --test admission an_initializer_that_returns_its_guess_is_refused_with_the_row_named"
+
+[[mutant]]
+name = "anchor-met"
+path = "crates/ng-validate/tests/admission.rs"
+old = '''        let (packet, boundary, _) = steady_packet_missing(&case, by);'''
+new = '''        let (packet, boundary, _) = steady_packet_missing(&case, 0.0 * by);'''
+test = "-p ng-validate --test admission a_witness_that_holds_every_row_and_misses_its_anchor_is_refused_with_the_anchor_named"

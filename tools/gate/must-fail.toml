@@ -1,0 +1,136 @@
+# One [[row]] for each row of the must-fail table in docs/architecture/solver-contract.md §7, and what shows the
+# row's gate rejecting its core or model. 05-seam holds the pairing.
+#   core      the row's first cell, verbatim
+#   mutants   rows of tools/gate/mutants.toml. Each turns this core into one built to pass, and its test, the test
+#             that builds the core and asserts the gate's rejection, must then fail. 40-mutants replays them.
+#   doctests  compile_fail doctests a crate holds for a core that does not compile, as the file, the error code
+#             gate.py codes proves, and a line only that doctest holds
+
+[[row]]
+core = "Forward Euler on the two-reservoir case with h > RC and a nonzero initial difference: every ledger closes, the difference grows"
+mutants = ["forward-euler-inside-rc"]
+
+[[row]]
+core = "Accepts a step whose normalized error exceeds one at its minimum interval (SB network.rs:439–449)"
+mutants = ["error-above-one-floor-lowered"]
+
+[[row]]
+core = "Accepts after the sweep limit on a strongly coupled fixture whose change is still above tolerance (SB stepper.rs:387–388)"
+mutants = ["sweeps-converge-on-the-slice", "sweeps-converge-in-the-window"]
+
+[[row]]
+core = "Evaluates blocks at stale coordinates under the coupled plan"
+mutants = ["no-block-behind-on-the-slice", "no-block-behind-in-the-window"]
+
+[[row]]
+core = "Books one sample at the start while its endpoint came from other stages (rate 1 + t over h = 1: one sample books 1, the trapezoid 1.5)"
+mutants = ["one-sample-books-heun"]
+doctests = [{ path = "crates/ng-contract/src/lib.rs", code = "E0451", text = "Extents { layout, forward, reverse }" }]
+
+[[row]]
+core = "Adds an evaluation from an earlier attempt"
+mutants = ["earlier-attempt-books-its-own"]
+
+[[row]]
+core = "Qualifies a split from invented samples"
+doctests = [
+  { path = "crates/ng-record/src/lib.rs", code = "E0599", text = "SplitTrace::new(id, grid, state, exchange, observable, events)" },
+]
+
+[[row]]
+core = "Applies a due input before the attempt and keeps it after a refusal (SB stepper.rs:228)"
+mutants = ["due-input-stays-due"]
+doctests = [
+  { path = "crates/ng-contract/src/lib.rs", code = "E0609", text = "accepted.pending" },
+  { path = "crates/ng-record/src/lib.rs", code = "E0596", text = "session.record().publish(next, store)" },
+]
+
+[[row]]
+core = "Keeps a counter or cache outside its continuation"
+mutants = ["cache-never-counts"]
+
+[[row]]
+core = "Spreads its steps toward a known later input"
+mutants = ["told-the-timeline-ignores-it"]
+doctests = [{ path = "crates/ng-contract/src/lib.rs", code = "E0609", text = "accepted.pending" }]
+
+[[row]]
+core = "Asks for a huge span to read the next breakpoint"
+mutants = ["huge-span-capped"]
+doctests = [{ path = "crates/ng-contract/src/lib.rs", code = "E0599", text = "problem.ticket(1 << 60)" }]
+
+[[row]]
+core = "Reads a cut, refuses it and spreads its steps toward that instant"
+mutants = ["cut-reader-starts-short"]
+
+[[row]]
+core = "Clips at caller output times"
+mutants = ["clipper-ignores-outputs"]
+doctests = [{ path = "crates/ng-validate/src/lib.rs", code = "E0061", text = "session.step(stop)" }]
+
+[[row]]
+core = "Reads the host's clock"
+mutants = ["host-clock-unread"]
+
+[[row]]
+core = "Draws chance per solver step or attempt"
+mutants = ["step-dice-reach-nothing"]
+doctests = [
+  { path = "crates/ng-contract/src/lib.rs", code = "E0599", text = "problem.threshold(0, 1)" },
+  { path = "crates/ng-contract/src/lib.rs", code = "E0616", text = "problem.identity" },
+]
+
+[[row]]
+core = "Draws chance per evaluation"
+mutants = ["evaluation-dice-fixed"]
+
+[[row]]
+core = "Biases every step alike, so its own two policies agree"
+mutants = ["delay-of-nothing"]
+
+[[row]]
+core = "Refuses every landing, hoping to skip an event"
+mutants = ["landings-taken"]
+
+[[row]]
+core = "Keeps its predictor or Jacobian across a firing"
+mutants = ["firing-restarts-history"]
+
+[[row]]
+core = "Keeps its predictor or Jacobian across a posture breakpoint"
+mutants = ["posture-restarts-history"]
+
+[[row]]
+core = "Refuses on a reference range"
+mutants = ["divisor-not-a-source", "refusal-not-counted"]
+doctests = [
+  { path = "crates/ng-contract/src/lib.rs", code = "E0599", text = "Admissible::new(low, high)" },
+  { path = "crates/ng-contract/src/lib.rs", code = "E0061", text = "k.finish(shifted, Admissible::nonnegative(), modes, class)" },
+]
+
+[[row]]
+core = "A pressure-volume update whose volumes pair but whose elastic energy does not close"
+mutants = ["wall-power-solved"]
+
+[[row]]
+core = "A held stand-in using a route its declaration omits, or holding a concentration whose store is in the slice"
+mutants = ["held-route-declared", "held-pool-left-to-the-slice"]
+
+[[row]]
+core = "An orphan pool"
+mutants = ["orphan-held"]
+
+[[row]]
+core = "A reaction that creates an element, written outside a scope or slipped into the schema"
+mutants = ["cargo-held-at-both-ends"]
+doctests = [
+  { path = "crates/ng-contract/src/lib.rs", code = "E0451", text = "SiteRoute { family: todo!(), brand: todo!(), kind: todo!() }" },
+]
+
+[[row]]
+core = "A kernel calling host math on an expression"
+doctests = [{ path = "crates/ng-contract/src/lib.rs", code = "E0599", text = "x.value().exp()" }]
+
+[[row]]
+core = "An initializer returning a packet guess that violates a row or anchor"
+mutants = ["guess-that-solves", "anchor-met"]
