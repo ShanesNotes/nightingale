@@ -4,11 +4,9 @@ use crate::checkpoint::{
 };
 use crate::history::{ConservationView, History, HistorySeal, LedgerChunk, Link};
 use ng_contract::{
-    AcceptedStateView, AdmissionError, AppliedInputs, Attempt, BoundaryEvent, Candidate, CompiledBody,
-    CoupledProblem, CoupledSolver, DenseSegment, Digest, Fired, ImageParts, InitialRevision, InputId,
-    MethodHistory, NumericalRefusal, RecordHash, RunIdentity, SimTime, SplitRejected, StepExtents,
-    StepProposal, StepTicket, TraceDraw, TraceHead, TrialFailure, ValidityExcursion, VerifiedParts,
-    VerifiedStep,
+    AcceptedHead, AcceptedStateView, AdmissionError, Attempt, BoundaryEvent, CompiledBody, CoupledProblem,
+    CoupledSolver, Digest, Fired, InitialRevision, InputId, NextHead, NumericalRefusal, RunIdentity, SimTime,
+    SplitRejected, StepExtents, TraceDraw, TrialFailure, ValidityExcursion, VerifiedStep,
 };
 
 /// The chained seal of one accepted revision: the previous seal, the revision, the image's digests and the
@@ -29,28 +27,17 @@ pub struct PatientRecord<'m> {
     body: &'m CompiledBody,
     identity: RunIdentity,
     branch: BranchAncestry,
-    image: ImageParts,
+    image: AcceptedHead,
     history: History,
-}
-
-fn digest_of(image: &ImageParts, hash: RecordHash) -> Digest {
-    hash.image(
-        image.time,
-        &image.state,
-        &image.continuation,
-        &image.dense,
-        image.pending.applied(),
-    )
 }
 
 impl<'m> PatientRecord<'m> {
     pub(crate) fn admit(body: &'m CompiledBody, identity: RunIdentity, origin: InitialRevision) -> Self {
-        let image = origin.into_parts();
         let run = identity.digest();
-        let accepted = AcceptedStateView::new(image.time, &image.state, &image.continuation, &image.dense);
         let format = RecordFormat::ADMISSION;
-        let opened = digest_of(&image, format.hash());
-        let history = History::opening(format, body, accepted, run, opened, image.parameters().digest());
+        let image = AcceptedHead::admitted(origin, format.hash());
+        let parameters = image.parts().parameters().digest();
+        let history = History::opening(format, body, image.view(), run, image.image_digest(), parameters);
         Self {
             body,
             identity,
@@ -69,7 +56,8 @@ impl<'m> PatientRecord<'m> {
             image,
             history,
         } = parts;
-        if digest_of(&image, history.format().hash()) != history.head_image() {
+        let image = AcceptedHead::restored(image, history.format().hash());
+        if image.image_digest() != history.head_image() {
             return Err(CheckpointError::SealMismatch);
         }
         Ok(Self {
@@ -101,12 +89,12 @@ impl<'m> PatientRecord<'m> {
         }
     }
     pub fn accepted(&self) -> AcceptedStateView<'_> {
-        let image = &self.image;
-        AcceptedStateView::new(image.time, &image.state, &image.continuation, &image.dense)
+        self.image.view()
     }
     /// The earliest stamp `Session::enqueue` takes now.
     pub fn earliest_stamp(&self) -> SimTime {
-        self.image.pending.earliest_stamp(self.image.time)
+        let parts = self.image.parts();
+        parts.pending.earliest_stamp(parts.time)
     }
     /// Oldest first. Empty on the run's own branch.
     pub fn ancestry(&self) -> &[BranchFork] {
@@ -115,7 +103,7 @@ impl<'m> PatientRecord<'m> {
     pub fn problem(&self) -> CoupledProblem<'_> {
         CoupledProblem::new(
             self.body,
-            self.image.parameters(),
+            self.image.parts().parameters(),
             &self.identity,
             self.accepted(),
             self.history.seal(),
@@ -127,92 +115,32 @@ impl<'m> PatientRecord<'m> {
         solver: &dyn CoupledSolver,
         attempt: Attempt<'_>,
     ) -> Result<NextImage, TrialFailure> {
-        let problem = self.problem();
-        let (step, chunk) = self.image.pending.attempt(&problem, attempt, |ticket| {
-            let proposal = solver.solve(&problem, ticket).map_err(|failure| match failure {
-                TrialFailure::Refused(refused) if refused.ticket() != ticket.digest() => {
-                    ticket.mismatch().into()
-                }
-                other => other,
-            })?;
-            self.validate(&problem, ticket, proposal)
-        })?;
-        Ok(self.next_image(step, chunk))
+        let (head, chunk) = self.image.attempt(
+            self.body,
+            &self.identity,
+            self.history.seal(),
+            attempt,
+            |problem, ticket| solver.solve(problem, ticket),
+            |step| self.validate(step),
+        )?;
+        let link = self.history.linked(chunk, head.image_digest());
+        Ok(NextImage { head, link })
     }
-    /// The contract answers whether the core followed its declared method; this answers whether the result
-    /// may stand. A firing moves no amount and resets to zero, which compile holds in the slot's set, so these
-    /// checks hold after it, and it reads the laws on what it leaves itself.
-    fn validate(
-        &self,
-        problem: &CoupledProblem<'_>,
-        expected: &StepTicket,
-        proposal: StepProposal,
-    ) -> Result<(VerifiedStep, LedgerChunk), TrialFailure> {
-        if proposal.ticket().digest() != expected.digest() {
-            return Err(expected.mismatch().into());
-        }
-        let step = proposal.verify(problem)?;
-        for row in self.body.rows() {
-            if !row.admissible().holds(step.value(row.id())) {
-                return Err(step.ticket().refuse(NumericalRefusal::TrialDomain {
-                    source: self.body.row_source(row.id()),
-                }));
-            }
-        }
-        let chunk = LedgerChunk::after(&self.history, self.body, &step);
+    /// The contract answers whether the core followed its declared method and every row stays admissible; this
+    /// answers whether the ledger can take the step.
+    fn validate(&self, step: &VerifiedStep) -> Result<LedgerChunk, TrialFailure> {
+        let chunk = LedgerChunk::after(&self.history, self.body, step);
         if !chunk.is_finite() {
             return Err(step.ticket().refuse(NumericalRefusal::LedgerOverflow));
         }
-        Ok((step, chunk))
-    }
-    fn next_image(&self, step: VerifiedStep, chunk: LedgerChunk) -> NextImage {
-        let pending = self.image.pending.after(step.ticket());
-        let time = step.ticket().interval().end();
-        let after_breakpoint = step.ticket().after_breakpoint();
-        let VerifiedParts {
-            state,
-            continuation,
-            dense,
-            excursions,
-            extents,
-        } = step.into_parts();
-        let image = self
-            .history
-            .format()
-            .hash()
-            .image(time, &state, &continuation, &dense, &pending);
-        let link = self.history.linked(chunk, image);
-        NextImage {
-            time,
-            state,
-            continuation,
-            dense,
-            pending,
-            link,
-            after_breakpoint,
-            excursions,
-            extents,
-        }
+        Ok(chunk)
     }
     /// The one path that changes accepted state. Installs every part of the image together and cannot fail. A
     /// link `store` refuses waits in the record, and no checkpoint exists until a later step's store keeps it.
     pub fn publish(&mut self, next: NextImage, store: &dyn HistoryStore) -> StepReceipt {
-        let NextImage {
-            time,
-            state,
-            continuation,
-            dense,
-            pending,
-            link,
-            after_breakpoint,
-            excursions,
-            extents,
-        } = next;
-        self.image.time = time;
-        self.image.state = state;
-        self.image.continuation = continuation;
-        self.image.dense = dense;
-        self.image.pending.advance(pending);
+        let NextImage { head, link } = next;
+        let (after_breakpoint, excursions) = (head.after_breakpoint(), head.excursions().to_vec());
+        let extents = self.image.install(head);
         let digest = link.seal();
         self.history.push(link, store);
         StepReceipt {
@@ -230,26 +158,16 @@ impl<'m> PatientRecord<'m> {
         draw: &mut TraceDraw,
         receipt: Option<&StepReceipt>,
     ) -> Result<(), SplitRejected> {
-        let history = &self.history;
-        let previous = history.previous().unwrap_or_else(|| self.identity.digest());
-        let ledger = history.ledger_digest(self.image.parameters().digest());
-        let head = TraceHead::new(
-            &self.image,
-            history.revision(),
-            previous,
-            ledger,
-            history.format().hash(),
-        );
         match receipt {
-            None => draw.open(&self.identity, head),
-            Some(receipt) if receipt.seal == self.seal() => draw.read(head, &receipt.extents),
+            None => draw.open(&self.identity, &self.image),
+            Some(receipt) if receipt.seal == self.seal() => draw.read(&self.image, &receipt.extents),
             Some(_) => Err(SplitRejected::OtherHead),
         }
     }
     pub(crate) fn admit_input(&mut self, input: AuthorizedInput) -> Result<InputReceipt, AdmissionError> {
         let AuthorizedInput { command: _, event } = input;
         let (id, at) = (event.id(), event.at());
-        let payload = self.image.pending.admit(self.body, self.image.time, event)?;
+        let payload = self.image.admit_input(self.body, event)?;
         Ok(InputReceipt { id, payload, at })
     }
     pub(crate) fn checkpoint(&self, latched: bool) -> Result<Checkpoint, CheckpointError> {
@@ -257,7 +175,7 @@ impl<'m> PatientRecord<'m> {
             return Err(CheckpointError::StoreFailed { seal });
         }
         let sections = Sections {
-            image: &self.image,
+            image: self.image.parts(),
             branch: &self.branch,
             history: &self.history,
         };
@@ -284,6 +202,7 @@ impl<'m> PatientRecord<'m> {
             image,
             history,
         } = self;
+        let image = image.parts();
         RecordDigests {
             revision: history.revision(),
             time: image.time,
@@ -316,15 +235,8 @@ pub struct RecordDigests {
 
 /// The entire next accepted image, validated and not yet visible.
 pub struct NextImage {
-    time: SimTime,
-    state: Candidate,
-    continuation: MethodHistory,
-    dense: DenseSegment,
-    pending: AppliedInputs,
+    head: NextHead,
     link: Link,
-    after_breakpoint: bool,
-    excursions: Vec<ValidityExcursion>,
-    extents: StepExtents,
 }
 
 #[derive(Debug)]

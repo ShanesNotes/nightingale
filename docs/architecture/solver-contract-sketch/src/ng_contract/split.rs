@@ -44,8 +44,8 @@ pub struct FamilySamples<F: MetricFamily> {
 }
 /// One run's samples on a grid, all four families required, bound to that run's identity.
 /// Produced only by a `TraceDraw` that `PatientRecord::split_trace` feeds each accepted head, with
-/// the extents `verify` made for its step; there is no constructor from samples, so a
-/// qualification cannot rest on invented traces.
+/// the extents of the step the contract settled on the head before it; there is no constructor
+/// from samples, so a qualification cannot rest on invented traces.
 pub struct SplitTrace {
     _identity: Digest,
     _grid: TraceGrid,

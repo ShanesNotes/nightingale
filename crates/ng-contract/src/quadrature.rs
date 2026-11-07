@@ -4,8 +4,8 @@ use crate::problem::{SolveWorkspace, StagePoint};
 use crate::scheme::Stage;
 use crate::{
     Candidate, Compensated, CompiledBody, CoupledProblem, DenseSegment, Digest, EngineFault, EngineFaultKind,
-    InputId, LawName, MethodHistory, ModeValue, NumericalRefusal, Ratio, RowId, SimTime, StepExtents,
-    StepTicket, TrialFailure, ValidityExcursion,
+    InputId, LawName, MethodHistory, ModeValue, NumericalRefusal, Ratio, RowId, SimTime, StepTicket,
+    TrialFailure, ValidityExcursion,
 };
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
@@ -431,7 +431,7 @@ pub struct VerifiedParts {
     pub continuation: MethodHistory,
     pub dense: DenseSegment,
     pub excursions: Vec<ValidityExcursion>,
-    pub extents: StepExtents,
+    pub fired: Vec<Fired>,
 }
 impl VerifiedStep {
     pub fn ticket(&self) -> &StepTicket {
@@ -477,12 +477,12 @@ impl VerifiedStep {
     }
     pub fn into_parts(self) -> VerifiedParts {
         let Self {
-            ticket,
+            ticket: _,
             state,
             continuation,
             dense,
-            forward,
-            reverse,
+            forward: _,
+            reverse: _,
             excursions,
             fired,
         } = self;
@@ -491,13 +491,7 @@ impl VerifiedStep {
             continuation,
             dense,
             excursions,
-            extents: StepExtents {
-                base: ticket.base,
-                applied: ticket.due,
-                forward,
-                reverse,
-                fired,
-            },
+            fired,
         }
     }
 }

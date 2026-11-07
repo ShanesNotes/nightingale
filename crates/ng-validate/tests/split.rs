@@ -596,35 +596,184 @@ fn a_firing_at_the_first_instant_is_in_no_trace() {
     ReferenceError::self_convergence(&expected, &measured).expect("neither trace holds the firing");
 }
 
-#[test]
-fn a_draw_refuses_a_head_no_step_of_its_run_follows() {
-    let case = stepped();
-    let lens = gauge(case.body(), case.rows()[0]);
-    let (core, store) = (reference(), MemoryStore::default());
+/// A genuine admission of the case's doubled conductance, which no session of the case admits.
+fn admitted_elsewhere(case: &TwoReservoirs, core: &ReferenceIntegrator) -> InitialRevision {
     let origin = SimTime::from_ns(0);
-    let request = InitializationRequest::at(origin);
     let port = BoundaryPort::new(Vec::new()).expect("no event");
     let other = case.other_values().expect("bound");
-    let system = case
-        .body()
-        .initialization(other, port, request)
+    let system = (case.body())
+        .initialization(other, port, InitializationRequest::at(origin))
         .expect("a system");
     let start = MethodHistory::new(core.resolution().policy(), origin, Vec::new());
     let solved = system.workspace();
-    let forged = system.admit(solved, start).expect("admitted").into_parts();
+    system.admit(solved, start).expect("admitted")
+}
 
+#[test]
+fn a_draw_opens_only_on_an_admission_of_its_identitys_packet() {
+    let case = stepped();
+    let lens = gauge(case.body(), case.rows()[0]);
+    let (core, store) = (reference(), MemoryStore::default());
     let session = case.admit(&core, &store).expect("admitted");
     let identity = session.record().identity().clone();
     let mut draw = TraceDraw::new(case.body(), &lens, off_step_grid()).expect("a draw");
-    let made_up = Digest::of_canonical(b"a synthetic ledger");
-    let head = TraceHead::new(&forged, 0, identity.digest(), made_up, RecordHash::Blake2b);
-    draw.open(&identity, head).expect("an admission head opens");
-    let (session, receipt) = accepted(session.step());
+    let elsewhere = AcceptedHead::admitted(admitted_elsewhere(&case, &core), RecordHash::Blake2b);
     assert_eq!(
-        session.record().split_trace(&mut draw, Some(&receipt)),
-        Err(SplitRejected::Gap)
+        draw.open(&identity, &elsewhere),
+        Err(SplitRejected::NotAdmission),
+        "another packet"
     );
-    assert!(!draw.done());
+    let parts = admitted_elsewhere(&case, &core).into_parts();
+    let packet = parts.parameters().packet_hash();
+    let restored = AcceptedHead::restored(parts, RecordHash::Blake2b);
+    let own = RunIdentity::new(
+        case.body().model_hash(),
+        packet,
+        Seed::new([1, 2, 3, 4]),
+        core.resolution(),
+    );
+    assert_eq!(
+        draw.open(&own, &restored),
+        Err(SplitRejected::NotAdmission),
+        "parts from elsewhere"
+    );
+    session
+        .record()
+        .split_trace(&mut draw, None)
+        .expect("its own admission opens");
+}
+
+/// One step of a course driven by hand, settled through the head as a record settles it, retrying each refusal.
+fn settle(
+    case: &TwoReservoirs,
+    core: &ReferenceIntegrator,
+    head: &AcceptedHead,
+    identity: &RunIdentity,
+) -> NextHead {
+    let base = Digest::of_canonical(b"a synthetic base");
+    let mut refusal: Option<Refused> = None;
+    loop {
+        let attempt = match &refusal {
+            None => Attempt::First {
+                span_ns: core.next_step(head.view()),
+            },
+            Some(refused) => Attempt::After(refused),
+        };
+        let solve = |problem: &CoupledProblem<'_>, ticket: &StepTicket| core.solve(problem, ticket);
+        match head.attempt(case.body(), identity, base, attempt, solve, |_| Ok(())) {
+            Ok((next, ())) => return next,
+            Err(TrialFailure::Refused(refused)) => refusal = Some(refused),
+            Err(TrialFailure::EngineFault(fault)) => panic!("faulted: {fault:?}"),
+        }
+    }
+}
+
+fn run_of(case: &TwoReservoirs, core: &ReferenceIntegrator, words: [u64; 4]) -> RunIdentity {
+    let packet = admitted_elsewhere(case, core).packet_hash();
+    RunIdentity::new(
+        case.body().model_hash(),
+        packet,
+        Seed::new(words),
+        core.resolution(),
+    )
+}
+
+/// A head moves only by installing a step the contract settled, so a course driven by hand draws only steps
+/// that start at the head read last, under the run the draw opened.
+#[test]
+fn a_draw_refuses_a_step_of_another_head_or_run() {
+    let case = stepped();
+    let lens = gauge(case.body(), case.rows()[0]);
+    let core = reference();
+    let (identity, reseeded) = (
+        run_of(&case, &core, [1, 2, 3, 4]),
+        run_of(&case, &core, [5, 6, 7, 8]),
+    );
+    let head = || AcceptedHead::admitted(admitted_elsewhere(&case, &core), RecordHash::Blake2b);
+    let mut draw = TraceDraw::new(case.body(), &lens, off_step_grid()).expect("a draw");
+    let mut opened = head();
+    draw.open(&identity, &opened).expect("an admission head opens");
+
+    let mut other = head();
+    let extents = other.install(settle(&case, &core, &other, &reseeded));
+    assert_eq!(
+        draw.read(&other, &extents),
+        Err(SplitRejected::Gap),
+        "another seed"
+    );
+    let mut ahead = head();
+    let _first = ahead.install(settle(&case, &core, &ahead, &identity));
+    let extents = opened.install(settle(&case, &core, &ahead, &identity));
+    assert_eq!(
+        draw.read(&opened, &extents),
+        Err(SplitRejected::Gap),
+        "a step settled on another head"
+    );
+
+    let mut course = head();
+    while course.parts().time < off_step_grid().end() {
+        let extents = course.install(settle(&case, &core, &course, &identity));
+        draw.read(&course, &extents).expect("the next head");
+    }
+    draw.finish().expect("a trace from a course driven by hand");
+}
+
+#[test]
+fn a_head_settles_steps_only_for_its_own_body_and_packet() {
+    let case = stepped();
+    let (core, store) = (reference(), MemoryStore::default());
+    let session = case.admit(&core, &store).expect("admitted");
+    let head = AcceptedHead::admitted(admitted_elsewhere(&case, &core), RecordHash::Blake2b);
+    let other = TwoReservoirs::closed().expect("a synthetic case");
+    let own = run_of(&case, &core, [1, 2, 3, 4]);
+    let base = Digest::of_canonical(b"a synthetic base");
+    let solve = |problem: &CoupledProblem<'_>, ticket: &StepTicket| core.solve(problem, ticket);
+    let attempt = Attempt::First {
+        span_ns: REFERENCE_STEP,
+    };
+    for (body, identity) in [(other.body(), &own), (case.body(), session.record().identity())] {
+        let refused = head.attempt(body, identity, base, attempt, solve, |_| Ok(()));
+        assert!(
+            matches!(&refused, Err(TrialFailure::EngineFault(fault)) if fault.kind() == EngineFaultKind::BindingMismatch),
+            "{:?}",
+            refused.err()
+        );
+    }
+}
+
+/// Parts from bytes carry waiting inputs no admission took, and an input that arrives between a step's attempt
+/// and its install is one that step could not apply.
+#[test]
+fn a_draw_refuses_a_head_whose_inputs_no_admission_took() {
+    let case = stepped();
+    let lens = gauge(case.body(), case.rows()[0]);
+    let core = reference();
+    let identity = run_of(&case, &core, [1, 2, 3, 4]);
+    let mut draw = TraceDraw::new(case.body(), &lens, off_step_grid()).expect("a draw");
+    let opened = AcceptedHead::admitted(admitted_elsewhere(&case, &core), RecordHash::Blake2b);
+    draw.open(&identity, &opened).expect("an admission head opens");
+
+    let parts = admitted_elsewhere(&case, &core).into_parts();
+    let mut restored = AcceptedHead::restored(parts, RecordHash::Blake2b);
+    assert_eq!(restored.image_digest(), opened.image_digest(), "the same image");
+    let extents = restored.install(settle(&case, &core, &restored, &identity));
+    assert_eq!(
+        draw.read(&restored, &extents),
+        Err(SplitRejected::Gap),
+        "restored parts"
+    );
+
+    let mut late = AcceptedHead::admitted(admitted_elsewhere(&case, &core), RecordHash::Blake2b);
+    let next = settle(&case, &core, &late, &identity);
+    let event = case.events().expect("an event").remove(0);
+    late.admit_input(case.body(), event)
+        .expect("admitted at the head");
+    let extents = late.install(next);
+    assert_eq!(
+        draw.read(&late, &extents),
+        Err(SplitRejected::Gap),
+        "a late input"
+    );
 }
 
 #[test]
@@ -644,7 +793,7 @@ fn a_draw_refuses_a_grid_that_starts_before_admission() {
 }
 
 #[test]
-fn a_draw_is_done_once_the_step_after_its_last_instant_names_that_head() {
+fn a_draw_is_done_once_it_reads_the_head_at_its_last_instant() {
     let case = stepped();
     let lens = gauge(case.body(), case.rows()[0]);
     let (core, store) = (reference(), MemoryStore::default());
@@ -655,17 +804,9 @@ fn a_draw_is_done_once_the_step_after_its_last_instant_names_that_head() {
         .record()
         .split_trace(&mut draw, None)
         .expect("opens at admission");
+    assert!(!draw.done(), "the last instant is not drawn yet");
     let session = drawn_from(session, &mut draw, grid.end());
     assert_eq!(session.record().accepted().time(), grid.end());
-    assert!(
-        !draw.done(),
-        "the head at the last instant waits for its next step"
-    );
-    let (session, receipt) = accepted(session.step());
-    session
-        .record()
-        .split_trace(&mut draw, Some(&receipt))
-        .expect("the next head");
     assert!(draw.done());
     draw.finish().expect("a trace");
 }

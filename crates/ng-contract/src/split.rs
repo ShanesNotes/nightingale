@@ -1,9 +1,10 @@
 use crate::body::RowKind;
+use crate::head::HeadDigest;
 use crate::identity::{Canonical, Seal};
 use crate::{
-    AcceptedStateView, AdmissionError, BoundParameters, Compensated, CompiledBody, Digest, Dimensionless,
-    ErrorScales, Fired, ImageParts, InputId, Measure, ModelHash, ObservationLens, PacketHash, RecordHash,
-    RowId, RunIdentity, SimTime, Time,
+    AcceptedHead, AdmissionError, BoundParameters, Compensated, CompiledBody, Digest, Dimensionless,
+    ErrorScales, Fired, InputId, Measure, ModelHash, ObservationLens, PacketHash, RowId, RunIdentity,
+    SimTime, Time,
 };
 use core::marker::PhantomData;
 use core::num::NonZeroU64;
@@ -118,10 +119,14 @@ impl<F: MetricFamily> Seal for FamilySamples<F> {
     }
 }
 
-/// Only `verify` makes one, so a trace's exchanges and events are a solve's own, and none can be left out.
+/// Only `AcceptedHead::attempt` makes one, from a step the contract verified on that head, so a trace's
+/// exchanges and events are a solve's own and none can be left out. It names the run and the heads the step went
+/// from and to.
 #[derive(Debug)]
 pub struct StepExtents {
-    pub(crate) base: Digest,
+    pub(crate) run: Digest,
+    pub(crate) start: HeadDigest,
+    pub(crate) end: HeadDigest,
     pub(crate) applied: Vec<InputId>,
     pub(crate) forward: Vec<Compensated>,
     pub(crate) reverse: Vec<Compensated>,
@@ -134,50 +139,6 @@ impl StepExtents {
     }
     pub fn fired(&self) -> &[Fired] {
         &self.fired
-    }
-}
-
-/// The draw recomputes this head's seal from its image and the given revision, seal before and ledger digest, and
-/// keeps it only once the next step's extents name that seal. The bound values a draw reads at admission reach the
-/// seal only through the ledger digest given here.
-pub struct TraceHead<'r> {
-    parts: &'r ImageParts,
-    revision: u64,
-    previous: Digest,
-    ledger: Digest,
-    hash: RecordHash,
-}
-impl<'r> TraceHead<'r> {
-    pub fn new(
-        parts: &'r ImageParts,
-        revision: u64,
-        previous: Digest,
-        ledger: Digest,
-        hash: RecordHash,
-    ) -> Self {
-        Self {
-            parts,
-            revision,
-            previous,
-            ledger,
-            hash,
-        }
-    }
-    fn view(&self) -> AcceptedStateView<'r> {
-        let parts = self.parts;
-        AcceptedStateView::new(parts.time, &parts.state, &parts.continuation, &parts.dense)
-    }
-    fn seal(&self) -> Digest {
-        let parts = self.parts;
-        let applied = parts.pending.applied();
-        let image = (self.hash).image(
-            parts.time,
-            &parts.state,
-            &parts.continuation,
-            &parts.dense,
-            applied,
-        );
-        self.hash.link(self.previous, self.revision, image, self.ledger)
     }
 }
 
@@ -266,11 +227,11 @@ fn patient(parameters: &BoundParameters) -> Digest {
 struct Opened {
     identity: RunIdentity,
     patient: Digest,
+    run: Digest,
     head: SimTime,
-    unconfirmed: Digest,
+    last: HeadDigest,
     net: Vec<Compensated>,
     filled: u32,
-    confirmed: u32,
     inputs: Digest,
     longest_ns: u64,
     state: Vec<Compensated>,
@@ -286,9 +247,9 @@ struct Layout {
     channels: Vec<RowId>,
 }
 impl Layout {
-    /// The run's first seal chains its identity, so a draw opened at admission is bound to that run.
-    fn open(&self, identity: &RunIdentity, head: &TraceHead<'_>) -> Result<Opened, SplitRejected> {
-        if head.revision != 0 || head.previous != identity.digest() {
+    fn open(&self, identity: &RunIdentity, head: &AcceptedHead) -> Result<Opened, SplitRejected> {
+        let parameters = head.parts().parameters();
+        if !head.admission() || identity.packet() != parameters.packet {
             return Err(SplitRejected::NotAdmission);
         }
         let view = head.view();
@@ -298,13 +259,13 @@ impl Layout {
         }
         let mut opened = Opened {
             identity: identity.clone(),
-            patient: patient(head.parts.parameters()),
+            patient: patient(parameters),
+            run: identity.digest(),
             head: time,
-            unconfirmed: head.seal(),
+            last: head.digest(),
             net: vec![Compensated::ZERO; self.columns],
             filled: 0,
-            confirmed: 0,
-            inputs: head.parts.pending.applied().chain(),
+            inputs: head.parts().pending.applied().chain(),
             longest_ns: 0,
             state: Vec::new(),
             exchange: Vec::new(),
@@ -317,21 +278,18 @@ impl Layout {
         }
         Ok(opened)
     }
-    /// A refused head leaves the draw as it was, so every check comes first. The step's extents name the seal of
-    /// the head read before, which confirms that head's samples.
+    /// A refused head leaves the draw as it was, so every check comes first.
     fn advance(
         &self,
         opened: &mut Opened,
-        head: &TraceHead<'_>,
+        head: &AcceptedHead,
         extents: &StepExtents,
     ) -> Result<(), SplitRejected> {
         let view = head.view();
-        let follows = extents.base == opened.unconfirmed;
-        let interval = (view.last_segment().interval()).filter(|interval| interval.start() == opened.head);
-        let Some(interval) = interval.filter(|_| follows) else {
+        let made = extents.run == opened.run && extents.start == opened.last && extents.end == head.digest();
+        let Some(interval) = (view.last_segment().interval()).filter(|_| made) else {
             return Err(SplitRejected::Gap);
         };
-        opened.confirmed = opened.filled;
         opened.longest_ns = opened.longest_ns.max(interval.length_ns());
         let end: Vec<Compensated> = (opened.net.iter().zip(&extents.forward).zip(&extents.reverse))
             .map(|((net, forward), reverse)| net.plus(*forward).minus(*reverse))
@@ -366,15 +324,15 @@ impl Layout {
             }
         }
         if opened.filled > before {
-            opened.inputs = head.parts.pending.applied().chain();
+            opened.inputs = head.parts().pending.applied().chain();
         }
         opened.net = end;
         opened.head = view.time();
-        opened.unconfirmed = head.seal();
+        opened.last = head.digest();
         Ok(())
     }
-    fn confirmed(&self, opened: &Opened) -> bool {
-        opened.confirmed == self.grid.samples
+    fn drawn(&self, opened: &Opened) -> bool {
+        opened.filled == self.grid.samples
     }
     fn sample(&self, opened: &mut Opened, net: Vec<Compensated>, value: impl Fn(RowId) -> Compensated) {
         opened.exchange.extend(net);
@@ -386,10 +344,9 @@ impl Layout {
     }
 }
 
-/// It recomputes each head's seal, and keeps a head's samples only once the next step's extents, which only
-/// `verify` makes, name that seal. It cannot tell which step made a head: `PatientRecord::split_trace` pairs each
-/// accepted head with its own step's receipt. An instant between two heads reads the step's chord; one at a head
-/// reads what the head holds, after any firing there.
+/// It opens on an admission head and keeps each later head only when the extents of the step that made it name
+/// the draw's run, the head read before and this one. An instant between two heads reads the step's chord; one at
+/// a head reads what the head holds, after any firing there.
 pub struct TraceDraw {
     lens: Digest,
     model: ModelHash,
@@ -424,28 +381,27 @@ impl TraceDraw {
             opened: None,
         })
     }
-    /// Opens the draw, once, on a head that names itself the run's admission and is not past the grid's first
-    /// instant. The first read proves the claim.
-    pub fn open(&mut self, identity: &RunIdentity, head: TraceHead<'_>) -> Result<(), SplitRejected> {
+    /// Opens the draw, once, on an admission head of `identity`'s packet that is not past the grid's first instant.
+    pub fn open(&mut self, identity: &RunIdentity, head: &AcceptedHead) -> Result<(), SplitRejected> {
         if identity.model() != self.model {
             return Err(SplitRejected::OtherBody);
         }
         if self.opened.is_some() {
             return Err(SplitRejected::Gap);
         }
-        self.opened = Some(self.layout.open(identity, &head)?);
+        self.opened = Some(self.layout.open(identity, head)?);
         Ok(())
     }
-    /// Reads a head with the extents of the step before it, which must name the seal of the head read last.
-    pub fn read(&mut self, head: TraceHead<'_>, step: &StepExtents) -> Result<(), SplitRejected> {
+    /// Reads a head with the extents of the step that made it.
+    pub fn read(&mut self, head: &AcceptedHead, step: &StepExtents) -> Result<(), SplitRejected> {
         let Some(opened) = &mut self.opened else {
             return Err(SplitRejected::Gap);
         };
-        self.layout.advance(opened, &head, step)
+        self.layout.advance(opened, head, step)
     }
-    /// Every instant is drawn and its head confirmed by the step after it.
+    /// Every instant is drawn.
     pub fn done(&self) -> bool {
-        (self.opened.as_ref()).is_some_and(|opened| self.layout.confirmed(opened))
+        (self.opened.as_ref()).is_some_and(|opened| self.layout.drawn(opened))
     }
     /// Refuses a draw that is not done.
     pub fn finish(self) -> Result<SplitTrace, SplitRejected> {
@@ -455,7 +411,7 @@ impl TraceDraw {
             layout,
             opened,
         } = self;
-        let Some(opened) = opened.filter(|opened| layout.confirmed(opened)) else {
+        let Some(opened) = opened.filter(|opened| layout.drawn(opened)) else {
             return Err(SplitRejected::Unfinished);
         };
         let Opened {
@@ -705,7 +661,7 @@ pub enum SplitRejected {
     MissingFamily,
     NotAdmission,
     PastStart,
-    /// A head that does not follow the head read last, a step that does not name its seal, a read before the draw
+    /// A step whose extents do not name the draw's run, the head read last and this head, a read before the draw
     /// opened, or a second opening.
     Gap,
     OtherHead,

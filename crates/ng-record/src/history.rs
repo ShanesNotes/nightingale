@@ -164,19 +164,12 @@ impl LedgerChunk {
 }
 
 fn linked(hash: RecordHash, previous: Digest, revision: u64, image: Digest, ledger: &[u8]) -> Digest {
-    hash.link(previous, revision, image, Digest::for_record(ledger, hash))
-}
-
-fn opening_bytes(opening: &[Compensated], incidence: &[Vec<i64>], parameters: Digest) -> Vec<u8> {
-    let mut bytes = b"ng-record ledger opening 1".to_vec();
-    for value in opening {
-        push_bits(&mut bytes, *value);
-    }
-    for coefficient in incidence.iter().flatten() {
-        bytes.extend_from_slice(&coefficient.to_be_bytes());
-    }
-    bytes.extend_from_slice(parameters.as_bytes());
-    bytes
+    let mut bytes = Vec::with_capacity(104);
+    bytes.extend_from_slice(previous.as_bytes());
+    bytes.extend_from_slice(&revision.to_be_bytes());
+    bytes.extend_from_slice(image.as_bytes());
+    bytes.extend_from_slice(Digest::for_record(ledger, hash).as_bytes());
+    Digest::for_record(&bytes, hash)
 }
 
 const LINK_HEAD: usize = 2 * size_of::<Digest>();
@@ -276,7 +269,14 @@ impl History {
                     .collect()
             })
             .collect();
-        let bytes = opening_bytes(&opening, &incidence, parameters);
+        let mut bytes = b"ng-record ledger opening 1".to_vec();
+        for value in &opening {
+            push_bits(&mut bytes, *value);
+        }
+        for coefficient in incidence.iter().flatten() {
+            bytes.extend_from_slice(&coefficient.to_be_bytes());
+        }
+        bytes.extend_from_slice(parameters.as_bytes());
         let seal = linked(format.hash(), run, 0, image, &bytes);
         Self {
             format,
@@ -307,17 +307,6 @@ impl History {
     }
     pub(crate) fn previous(&self) -> Option<Digest> {
         self.chain.head().map(|head| head.previous)
-    }
-    pub(crate) fn ledger_digest(&self, parameters: Digest) -> Digest {
-        let bytes = match self.chain.head() {
-            None => opening_bytes(&self.opening, &self.incidence, parameters),
-            Some(head) => {
-                let mut bytes = Vec::new();
-                head.chunk.write(&mut bytes);
-                bytes
-            }
-        };
-        Digest::for_record(&bytes, self.format.hash())
     }
     pub(crate) fn head_image(&self) -> Digest {
         self.chain.head().map_or(self.origin.image, |head| head.image)

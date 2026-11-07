@@ -45,9 +45,7 @@ pub fn draw_split_trace(
     let mut session = case.admit(core, &store).map_err(SplitFailure::Admission)?;
     let mut draw = TraceDraw::new(case.body(), lens, grid)?;
     session.record().split_trace(&mut draw, None)?;
-    let mut reached = false;
-    while !draw.done() && !reached {
-        reached = session.record().accepted().time() >= grid.end();
+    while session.record().accepted().time() < grid.end() {
         let (next, receipt) = accept(session).map_err(|stopped| SplitFailure::Faulted(*stopped.fault()))?;
         next.record().split_trace(&mut draw, Some(&receipt))?;
         session = next;

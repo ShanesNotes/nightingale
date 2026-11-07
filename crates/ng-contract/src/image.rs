@@ -92,14 +92,6 @@ impl<'b> ByteReader<'b> {
 }
 
 impl RecordHash {
-    pub fn link(self, previous: Digest, revision: u64, image: Digest, ledger: Digest) -> Digest {
-        let mut bytes = Vec::with_capacity(104);
-        bytes.extend_from_slice(previous.as_bytes());
-        bytes.extend_from_slice(&revision.to_be_bytes());
-        bytes.extend_from_slice(image.as_bytes());
-        bytes.extend_from_slice(ledger.as_bytes());
-        Digest::for_record(&bytes, self)
-    }
     pub fn image(
         self,
         time: SimTime,
