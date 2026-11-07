@@ -224,6 +224,14 @@ impl DayPlan {
         occurrences.push(Occurrence::sit_up(days.saturating_add(1)));
         Self { occurrences }
     }
+    /// The inputs at `from` or later, as a run's boundary port takes them.
+    pub fn events(&self, from: SimTime) -> Result<Vec<BoundaryEvent>, AdmissionError> {
+        let inputs = self.occurrences.iter().flat_map(|occurrence| &occurrence.inputs);
+        inputs
+            .filter(|input| input.at >= from)
+            .map(Planned::event)
+            .collect()
+    }
     /// Keeps the meal as a marker, so every other window still ends where it did.
     fn without(&self, meal: usize) -> DayPlan {
         let mut plan = self.clone();
@@ -342,6 +350,7 @@ impl DayCheck {
     }
 }
 
+#[derive(Debug)]
 pub enum DayFailure {
     Initialization(InitializationFailure),
     Faulted(FaultReport),
@@ -362,12 +371,23 @@ fn exported(stopped: Session<'_, Faulted>) -> DayFailure {
     }
 }
 
+/// A day run reads only each step's head and resumes only from the admitted start, whose checkpoint holds no link,
+/// so it keeps no history. A walk of it fails closed, as a store that lost a link does.
+struct KeepsNothing;
+impl HistoryStore for KeepsNothing {
+    fn resolve(&self, _: &Digest) -> Option<Vec<u8>> {
+        None
+    }
+    fn keep(&self, _: Digest, _: &[u8]) -> Result<(), CheckpointError> {
+        Ok(())
+    }
+}
+
 struct Start<'m> {
     saved: Checkpoint,
     identity: RunIdentity,
     body: &'m CompiledBody,
     core: &'m dyn CoupledSolver,
-    store: &'m dyn HistoryStore,
     readings: Readings,
     scales: ErrorScales,
     sizes: Reading,
@@ -375,14 +395,12 @@ struct Start<'m> {
 impl Start<'_> {
     fn run(&self, plan: &DayPlan, end: SimTime) -> Result<DayTrace, DayFailure> {
         let Self { saved, identity, .. } = self;
-        let resumed = Session::resume(saved, identity, self.body, self.core, self.store);
+        let resumed = Session::resume(saved, identity, self.body, self.core, &KeepsNothing);
         let mut session = resumed.map_err(DayFailure::Checkpoint)?;
         let head = session.record().accepted();
         let (start, (phase, _)) = (head.time(), self.readings.read(head));
         let command = Digest::of_canonical(b"the reference day");
-        let inputs = plan.occurrences.iter().flat_map(|occurrence| &occurrence.inputs);
-        for input in inputs.filter(|input| input.at >= start) {
-            let event = input.event().map_err(DayFailure::Input)?;
+        for event in plan.events(start).map_err(DayFailure::Input)? {
             let enqueued = session.enqueue(AuthorizedInput::from_command_receipt(command, event));
             enqueued.map_err(DayFailure::Input)?;
         }
@@ -416,11 +434,10 @@ impl Start<'_> {
 
 /// Admits once, checkpoints, and runs the plan from that start; for each meal whose window the run covers, also
 /// runs the plan without that meal from the same start. Then every row of the day table is checked.
-pub fn day_checks<'m>(
-    body: &'m CompiledBody,
-    core: &'m dyn CoupledSolver,
+pub fn day_checks(
+    body: &CompiledBody,
+    core: &dyn CoupledSolver,
     spec: DaySpec,
-    store: &'m dyn HistoryStore,
 ) -> Result<DayReport, DayFailure> {
     let DaySpec {
         window,
@@ -433,7 +450,7 @@ pub fn day_checks<'m>(
     let port = BoundaryPort::new(Vec::new()).map_err(|error| DayFailure::Initialization(error.into()))?;
     let (saved, identity, scales, sizes) = {
         let start = solved_start(body, packet, port, core, &lens, window.start());
-        let session = start.and_then(|start| admit_start(body, core, start, seed, store));
+        let session = start.and_then(|start| admit_start(body, core, start, seed, &KeepsNothing));
         let session = session.map_err(DayFailure::Initialization)?;
         let saved = session.checkpoint().map_err(DayFailure::Checkpoint)?;
         let record = session.record();
@@ -446,7 +463,6 @@ pub fn day_checks<'m>(
         identity,
         body,
         core,
-        store,
         readings,
         scales,
         sizes,
@@ -471,6 +487,7 @@ pub fn day_checks<'m>(
 }
 
 /// Every row of the day table, checked on one run and its counterfactuals.
+#[derive(Clone)]
 pub struct DayReport {
     run: Digest,
     seal: Digest,
@@ -483,6 +500,10 @@ impl DayReport {
     /// The run identity's digest.
     pub fn run(&self) -> Digest {
         self.run
+    }
+    /// The seal the fed run ended on.
+    pub fn seal(&self) -> Digest {
+        self.seal
     }
     /// Every row from 1 to 17 appears, in table order.
     pub fn checks(&self) -> &[DayCheck] {

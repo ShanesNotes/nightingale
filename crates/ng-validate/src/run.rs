@@ -1,5 +1,7 @@
 use crate::initialize::{admit_start, solved_start};
-use crate::{ClockSource, ScorePart, WallClock};
+use crate::{
+    AccuracyFailure, CertificateFailure, ClockSource, DayFailure, ReplayFailure, ScorePart, WallClock,
+};
 use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::{
     BoundaryPort, CompiledBody, CoupledSolver, DeclaredResolution, Digest, EngineFaultKind,
@@ -183,6 +185,7 @@ impl<'m> ArenaRun<'m> {
     }
 }
 
+#[derive(Debug)]
 pub enum ArenaFailure {
     Initialization(InitializationFailure),
     /// A latched session, exported for diagnosis, with the health of its repeat up to the fault.
@@ -204,6 +207,10 @@ pub enum ArenaFailure {
     MissingEvidence {
         part: ScorePart,
     },
+    Certificate(CertificateFailure),
+    Accuracy(AccuracyFailure),
+    Replay(ReplayFailure),
+    Day(DayFailure),
 }
 
 const WAVEFORM: [u64; 4] = [5, 5, 5, 5];

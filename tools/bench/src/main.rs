@@ -89,18 +89,6 @@ impl WallClock for HostClock {
     }
 }
 
-fn told(failure: &ArenaFailure) -> String {
-    match failure {
-        ArenaFailure::Initialization(failure) => format!("{failure:?}"),
-        ArenaFailure::Faulted { report, health } => format!("fault {:?} health {health:?}", report.fault()),
-        ArenaFailure::Checkpoint(error) => format!("{error:?}"),
-        ArenaFailure::Observation(refusal) => format!("{refusal:?}"),
-        ArenaFailure::MissingThroughput => "missing throughput".to_string(),
-        ArenaFailure::RepeatDiffered { repeat } => format!("repeat {repeat} differed"),
-        ArenaFailure::MissingEvidence { part } => format!("missing {part:?} evidence"),
-    }
-}
-
 fn arena(arguments: &[String]) {
     let number = |at: usize, what: &str| -> u64 {
         let given = arguments.get(at).and_then(|given| given.parse().ok());
@@ -122,14 +110,20 @@ fn arena(arguments: &[String]) {
         packet: arena_packet(&body).expect("packet"),
         lens: arena_lens(&body).expect("lens"),
         boundary: BoundaryPort::new(Vec::new()).expect("port"),
-        seed: Seed::new([1, 2, 3, 4]),
+        seed: arena_seed(),
         repeats: repeats.expect("at least one repeat"),
     };
     let log = LinkLog::create();
-    let arena =
-        run(&body, core.as_ref(), spec, &clock, &log).unwrap_or_else(|failure| panic!("{}", told(&failure)));
+    let arena = run(&body, core.as_ref(), spec, &clock, &log).unwrap_or_else(|failure| panic!("{failure:?}"));
     println!("work seal {}", hex(arena.session().record().seal().digest()));
-    let evidence = arena.into_evidence();
+    print_evidence(&arena.into_evidence());
+}
+
+fn leading(value: Compensated) -> f64 {
+    f64::from_bits(value.bits()[0])
+}
+
+fn print_evidence(evidence: &RunEvidence) {
     let throughput = evidence.throughput();
     println!("work run {}", hex(evidence.run()));
     println!("work clock {:?}", throughput.clock());
@@ -160,15 +154,110 @@ fn arena(arguments: &[String]) {
     }
 }
 
-fn told_day(failure: &DayFailure) -> String {
-    match failure {
-        DayFailure::Initialization(failure) => format!("{failure:?}"),
-        DayFailure::Faulted(report) => format!("fault {:?}", report.fault()),
-        DayFailure::Checkpoint(error) => format!("{error:?}"),
-        DayFailure::Input(error) => format!("input {error:?}"),
-        DayFailure::MissingRow(kind) => format!("no row {kind:?}"),
-        DayFailure::MissingTransfer(edge) => format!("no sodium transfer {edge:?}"),
+struct Named<'n> {
+    core: &'n str,
+    interval_ms: u64,
+}
+impl CoreFactory for Named<'_> {
+    fn fresh(&self) -> Box<dyn CoupledSolver + '_> {
+        solver(self.core, self.interval_ms)
     }
+}
+
+/// `full` is §7's protocol; otherwise the certificate's window and the span it covers, both in simulated seconds.
+fn score(arguments: &[String]) {
+    let number = |at: usize, what: &str| -> u64 {
+        let given = arguments.get(at).and_then(|given| given.parse().ok());
+        given.unwrap_or_else(|| panic!("{what}"))
+    };
+    let (interval_ms, second_ms) = (
+        number(0, "a step interval in ms"),
+        number(1, "a second policy's in ms"),
+    );
+    let named = arguments.get(2).expect("a core");
+    let protocol = match arguments.get(3).map(String::as_str) {
+        Some("full") => Protocol::full(),
+        _ => {
+            let window = NonZeroU64::new(number(3, "a certificate window in s") * 1_000 * MS);
+            let repeats = u32::try_from(number(5, "repeats")).ok().and_then(NonZeroU32::new);
+            Protocol {
+                windows: SlidingWindows::new(
+                    window.expect("a window"),
+                    number(4, "a span in s") * 1_000 * MS,
+                )
+                .expect("a span longer than its window"),
+                repeats: repeats.expect("at least one repeat"),
+            }
+        }
+    };
+    println!("work core {named} second_policy_ms {second_ms}");
+    println!(
+        "work protocol window_ns {} span_ns {} repeats {}",
+        protocol.windows.window_ns(),
+        protocol.windows.coverage_ns(),
+        protocol.repeats
+    );
+    let started = Instant::now();
+    let arena = Arena::new(protocol).unwrap_or_else(|failure| panic!("{failure:?}"));
+    println!("time arena_s {:.1}", started.elapsed().as_secs_f64());
+    let core = Named {
+        core: named,
+        interval_ms,
+    };
+    let second_policy = Named {
+        core: named,
+        interval_ms: second_ms,
+    };
+    let (clock, log) = (HostClock(Instant::now()), LinkLog::create());
+    let score = arena.score(&core, &second_policy, &clock, &log);
+    match score.evidence() {
+        Ok(evidence) => print_evidence(evidence),
+        Err(failure) => println!("evidence {failure:?}"),
+    }
+    match score.certificate() {
+        Ok(certificate) => {
+            println!("certificate passed, {} pieces", certificate.pieces());
+            for result in certificate.results() {
+                let (closure, drift) = (leading(result.worst_closure()), leading(result.worst_drift()));
+                println!(
+                    "certificate {:?} closure {closure:e} drift {drift:e}",
+                    result.quantity()
+                );
+            }
+        }
+        Err(failure) => println!("certificate {failure:?}"),
+    }
+    match score.accuracy() {
+        Ok(accuracy) => {
+            let worst: Vec<f64> = accuracy.worst().iter().copied().map(leading).collect();
+            println!("accuracy passed, worst {worst:?}");
+        }
+        Err(failure) => println!("accuracy {failure:?}"),
+    }
+    match score.replay() {
+        Ok(replay) => {
+            let step_policy = replay.of(ReplayGate::StepPolicy);
+            println!(
+                "replay passed, step policy within {:?} ns",
+                step_policy.tolerance_ns()
+            );
+            for fired in step_policy.fired() {
+                println!(
+                    "replay fired {:?} {} at {}",
+                    fired.stream(),
+                    fired.ordinal(),
+                    fired.at().nanoseconds()
+                );
+            }
+        }
+        Err(failure) => println!("replay {failure:?}"),
+    }
+    match score.day() {
+        Ok(day) => println!("{day}"),
+        Err(failure) => println!("day {failure:?}"),
+    }
+    println!("work history_bytes {}", log.bytes());
+    println!("time score_s {:.1}", clock.0.elapsed().as_secs_f64());
 }
 
 fn day(arguments: &[String]) {
@@ -192,16 +281,13 @@ fn day(arguments: &[String]) {
         window: Interval::new(origin, end).expect("a window"),
         packet: arena_packet(&body).expect("packet"),
         lens: arena_lens(&body).expect("lens"),
-        seed: Seed::new([1, 2, 3, 4]),
+        seed: arena_seed(),
         plan: DayPlan::reference(days.expect("a day")),
     };
-    let log = LinkLog::create();
     let started = Instant::now();
-    let report = day_checks(&body, core.as_ref(), spec, &log)
-        .unwrap_or_else(|failure| panic!("{}", told_day(&failure)));
+    let report = day_checks(&body, core.as_ref(), spec).unwrap_or_else(|failure| panic!("{failure:?}"));
     let seconds = started.elapsed().as_secs_f64();
     println!("{report}");
-    println!("work history_bytes {}", log.bytes());
     println!("time day_checks_s {seconds:.1}");
 }
 
@@ -210,6 +296,7 @@ fn main() {
     match arguments.split_first().map(|(mode, rest)| (mode.as_str(), rest)) {
         Some(("arena", rest)) => return arena(rest),
         Some(("day", rest)) => return day(rest),
+        Some(("score", rest)) => return score(rest),
         _ => {}
     }
     let interval_ms: u64 = std::env::args()

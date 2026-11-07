@@ -227,7 +227,7 @@ pub fn admit_at<'m>(
 ) -> Result<Admitted<'m>, InitializationFailure> {
     let start = solved_start(body, packet, boundary, core, lens, origin)?;
     let provenance = start.provenance().clone();
-    let session = admit_start(body, core, start, Seed::new([1, 2, 3, 4]), store)?;
+    let session = admit_start(body, core, start, crate::arena_seed(), store)?;
     Ok(Admitted { session, provenance })
 }
 

@@ -58,12 +58,6 @@ enum Judged {
     Window(SliceWindow),
 }
 impl Judged {
-    fn identity(&self) -> (u8, Digest) {
-        match self {
-            Self::Manufactured(case) => (case.kind, case.fixture.digest()),
-            Self::Window(window) => (WINDOW, window.digest()),
-        }
-    }
     fn of(case: AccuracyCase) -> Result<Self, AdmissionError> {
         let plain = |kind, fixture| {
             Self::Manufactured(Manufactured {
@@ -173,7 +167,6 @@ impl AccuracyPolicy {
 pub struct AccuracyEvidence {
     policy: Digest,
     resolution: Digest,
-    cases: Vec<(u8, Digest)>,
     absolute: Compensated,
     relative: Compensated,
     grid_ns: u64,
@@ -202,20 +195,6 @@ impl AccuracyEvidence {
     }
     pub fn worst(&self) -> &[Compensated] {
         &self.worst
-    }
-    /// Whether this ran `AccuracyPolicy::arena`'s cases under its bound, read without building its window again:
-    /// `SliceWindow::first` is the only window, so a window this ran is that one.
-    pub(crate) fn of_the_arena(&self) -> Result<bool, AdmissionError> {
-        let manufactured = AccuracyPolicy::manufactured()?;
-        let expected: Vec<(u8, Digest)> = manufactured.cases.iter().map(Judged::identity).collect();
-        let cases = match self.cases.split_last() {
-            Some(((kind, _), before)) => *kind == WINDOW && before == expected.as_slice(),
-            None => false,
-        };
-        Ok(cases
-            && self.absolute.bits() == manufactured.absolute.bits()
-            && self.relative.bits() == Compensated::of(&manufactured.relative).bits()
-            && self.grid_ns == manufactured.grid_ns)
     }
 }
 #[derive(Debug)]
@@ -344,7 +323,6 @@ pub fn accuracy(
     Ok(AccuracyEvidence {
         policy: policy.digest(),
         resolution: solver.resolution().digest(),
-        cases: policy.cases.iter().map(Judged::identity).collect(),
         absolute: policy.absolute,
         relative: Compensated::of(&policy.relative),
         grid_ns: policy.grid_ns,
@@ -515,52 +493,4 @@ pub fn observed_order(
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn ran(cases: Vec<(u8, Digest)>, absolute: f64, grid_ns: u64) -> bool {
-        let evidence = AccuracyEvidence {
-            policy: Digest::of_canonical(b"a policy"),
-            resolution: Digest::of_canonical(b"a core"),
-            cases,
-            absolute: Compensated::of(&Measure::<Water>::new(absolute).expect("finite")),
-            relative: Compensated::of(&Measure::<Dimensionless>::new(0.0).expect("finite")),
-            grid_ns,
-            windows: Vec::new(),
-            worst: Vec::new(),
-        };
-        evidence.of_the_arena().expect("the defaults build")
-    }
-
-    #[test]
-    fn only_the_arena_policys_cases_under_its_bound_and_grid_are_of_the_arena() {
-        let policy = AccuracyPolicy::manufactured().expect("the model default");
-        let manufactured: Vec<(u8, Digest)> = policy.cases.iter().map(Judged::identity).collect();
-        let then = |mut cases: Vec<(u8, Digest)>, last: (u8, Digest)| {
-            cases.push(last);
-            cases
-        };
-        let window = (WINDOW, Digest::of_canonical(b"a window"));
-        let grid = 100 * SECOND;
-        assert!(ran(then(manufactured.clone(), window), 5.0, grid));
-        assert!(!ran(manufactured.clone(), 5.0, grid), "no window");
-        assert!(
-            !ran(then(manufactured[..4].to_vec(), window), 5.0, grid),
-            "a case left out"
-        );
-        assert!(
-            !ran(then(manufactured.clone(), manufactured[0]), 5.0, grid),
-            "a sixth case that is no window"
-        );
-        let beside = then(then(manufactured.clone(), window), manufactured[0]);
-        assert!(!ran(beside, 5.0, grid), "a case after the window");
-        assert!(
-            !ran(then(manufactured.clone(), window), 6.0, grid),
-            "another bound"
-        );
-        assert!(!ran(then(manufactured, window), 5.0, grid / 2), "another grid");
-    }
 }
