@@ -1,10 +1,11 @@
 use super::table::Measured;
 use super::{DayFailure, DayPlan, SECOND};
 use ng_contract::{
-    AcceptedStateView, AnatomyBuilder, Compensated, CompiledBody, Context, CoupledProblem, Digest,
-    ErrorScales, InputId, LawName, Measure, Position, RowId, RowKind, SimTime, SiteClass, SiteId, Slot,
-    Space, Species, VesselSegment,
+    AcceptedStateView, AnatomyBuilder, ColumnId, Compensated, CompiledBody, Context, CoupledProblem, Digest,
+    ErrorScales, InputId, Instance, LawName, Measure, Position, RowId, RowKind, SimTime, SiteClass, SiteId, Slot,
+    Space, Species, Target, VesselSegment,
 };
+use ng_record::{Curve, HistorySegment};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Series {
@@ -80,16 +81,18 @@ pub(super) enum Read {
     Tubular,
     DuctSodium,
     DuctWater,
+    BladderSodium,
+    BladderWater,
     Water,
     Albumin,
     Sodium,
     Potassium,
     Chloride,
 }
-pub(super) const READS: usize = 11;
+pub(super) const READS: usize = 13;
 pub(super) type Reading = [f64; READS];
 
-fn series(reading: &Reading, allowed: &Reading) -> [Sample; SERIES] {
+fn series(reading: &Reading, allowed: &Reading, _moved: f64) -> [Sample; SERIES] {
     let at = |read: Read| (reading[read as usize], allowed[read as usize]);
     let plain = |read: Read| {
         let (value, floor) = at(read);
@@ -195,9 +198,9 @@ impl Fold {
                 .collect(),
         }
     }
-    pub(super) fn step(&mut self, end: SimTime, length_ns: u64, phase: f64, reading: &Reading) {
+    pub(super) fn step(&mut self, end: SimTime, length_ns: u64, phase: f64, reading: &Reading, moved: f64) {
         let allowed = core::array::from_fn(|read| self.scales.at(reading[read], self.sizes[read]));
-        let samples = series(reading, &allowed);
+        let samples = series(reading, &allowed, moved);
         if let Some(open) = &mut self.open {
             open.add(length_ns as f64, &samples);
         }
@@ -263,6 +266,7 @@ fn number(held: Compensated) -> f64 {
 pub(super) struct Readings {
     phase: RowId,
     rows: [Vec<(RowId, usize)>; READS],
+    excreted: ColumnId,
 }
 impl Readings {
     pub(super) fn bind(body: &CompiledBody) -> Result<Self, DayFailure> {
@@ -285,13 +289,14 @@ impl Readings {
             site::<VesselSegment>("collecting duct"),
             site::<VesselSegment>("bladder"),
         );
-        let duct_amount = |species| {
+        let lumen = |site, species| {
             row(RowKind::Amount {
-                site: duct,
+                site,
                 space: Space::Lumen,
                 species,
             })
         };
+        let duct_sodium = lumen(duct, Species::Sodium)?;
         let (phase, _) = row(RowKind::Memory(law("CV", "phase", Context::Body)))?;
         let aortic = Context::Edge {
             from: ventricle,
@@ -301,6 +306,20 @@ impl Readings {
             from: duct,
             to: bladder,
         };
+        let carries_sodium = |instance: &Instance| match instance.target() {
+            Target::Column(column) if instance.context() == urinary => {
+                let terms = body.columns()[column.index()].terms();
+                terms.iter().any(|&(row, _)| row == duct_sodium.0).then_some(column)
+            }
+            _ => None,
+        };
+        let excreted = (body.instances().iter())
+            .find_map(carries_sodium)
+            .ok_or(DayFailure::MissingRow(RowKind::Amount {
+                site: duct,
+                space: Space::Lumen,
+                species: Species::Sodium,
+            }))?;
         Ok(Self {
             phase,
             rows: [
@@ -312,14 +331,17 @@ impl Readings {
                 )))?],
                 vec![row(RowKind::Memory(law("CV", "valves", aortic)))?],
                 vec![row(RowKind::Algebraic(law("RN", "tubular flow", urinary)))?],
-                vec![duct_amount(Species::Sodium)?],
-                vec![duct_amount(Species::Water)?],
+                vec![duct_sodium],
+                vec![lumen(duct, Species::Water)?],
+                vec![lumen(bladder, Species::Sodium)?],
+                vec![lumen(bladder, Species::Water)?],
                 blood(Species::Water)?,
                 blood(Species::Albumin)?,
                 blood(Species::Sodium)?,
                 blood(Species::Potassium)?,
                 blood(Species::Chloride)?,
             ],
+            excreted,
         })
     }
     pub(super) fn sizes(&self, problem: &CoupledProblem<'_>) -> Reading {
@@ -334,5 +356,15 @@ impl Readings {
         let value = |&(id, _): &(RowId, usize)| number(view.value(id));
         let reading = core::array::from_fn(|read| self.rows[read].iter().map(value).sum());
         (number(view.value(self.phase)), reading)
+    }
+    /// The sodium the ledger moved from the collecting duct to the bladder over one segment, per second.
+    pub(super) fn moved(&self, segment: &HistorySegment) -> f64 {
+        let interval = segment.interval();
+        let net = |(forward, reverse): (Curve<'_>, Curve<'_>)| {
+            let ends = |curve: Curve<'_>| curve.on(interval).expect("a segment holds its own interval");
+            let (forward, reverse) = (ends(forward), ends(reverse));
+            forward[1].minus(forward[0]).minus(reverse[1].minus(reverse[0]))
+        };
+        number(net(segment.exchange(self.excreted))) / (interval.length_ns() as f64 / SECOND as f64)
     }
 }

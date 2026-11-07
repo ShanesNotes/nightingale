@@ -847,7 +847,12 @@ fn the_fold_keeps_whole_beats_from_edge_to_edge_with_step_length_weighted_means(
         .collect();
     let mut fold = Fold::new(&plan_with_every_payload(), scales(), sizes, start, 0.9);
     for step in 0..lengths.len() {
-        fold.step(ends[step], lengths[step], phases[step], &reading(step));
+        let (flow, sodium, water) = (
+            reading(step)[Read::Tubular as usize],
+            reading(step)[Read::DuctSodium as usize],
+            reading(step)[Read::DuctWater as usize],
+        );
+        fold.step(ends[step], lengths[step], phases[step], &reading(step), flow * sodium / water);
     }
     let synthetic = Digest::of_canonical(b"a synthetic run");
     let trace = fold.finish(synthetic, synthetic, ends[6]);
@@ -879,6 +884,35 @@ fn the_fold_keeps_whole_beats_from_edge_to_edge_with_step_length_weighted_means(
         assert!(close(stroke.floor, integral(|sample| sample.floor)), "{stroke:?}");
         assert_eq!(beat.reading(Measured::CardiacOutput), beat.means[aortic]);
     }
+}
+
+#[test]
+fn a_reversed_urinary_flow_excretes_what_the_ledger_moved_with_the_bladders_floor() {
+    let mut reading: Reading = [1.0; READS];
+    let set = [
+        (Read::Tubular, -2.0),
+        (Read::DuctSodium, 50.0),
+        (Read::DuctWater, 10.0),
+        (Read::BladderSodium, 20.0),
+        (Read::BladderWater, 20.0),
+    ];
+    for (read, value) in set {
+        reading[read as usize] = value;
+    }
+    let start = clock(1, 6, 55);
+    let mut fold = Fold::new(&plan_with_every_payload(), scales(), [1.0; READS], start, 0.9);
+    for (second, phase) in [(1, 0.1), (2, 0.5), (3, 0.2)] {
+        let end = SimTime::from_ns(start.nanoseconds() + second * SECOND);
+        fold.step(end, SECOND, phase, &reading, -2.0);
+    }
+    let synthetic = Digest::of_canonical(b"a synthetic run");
+    let trace = fold.finish(synthetic, synthetic, SimTime::from_ns(start.nanoseconds() + 3 * SECOND));
+    let [beat] = trace.beats[..] else {
+        panic!("one beat: {:?}", trace.beats);
+    };
+    let excretion = beat.reading(Measured::SodiumExcretion);
+    assert_eq!(excretion.value, -2.0, "{excretion:?}");
+    assert!(close(excretion.floor, 2.1), "{excretion:?}");
 }
 
 #[test]

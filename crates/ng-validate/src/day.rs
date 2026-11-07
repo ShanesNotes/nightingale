@@ -392,7 +392,9 @@ impl Start<'_> {
             let view = session.record().accepted();
             let (phase, reading) = self.readings.read(view);
             let length_ns = view.time().nanoseconds() - before.nanoseconds();
-            fold.step(view.time(), length_ns, phase, &reading);
+            let ledger = session.conservation();
+            let head = ledger.head().expect("an accepted step heads the ledger");
+            fold.step(view.time(), length_ns, phase, &reading, self.readings.moved(&head));
             fold.applied(receipt.applied());
         }
         let record = session.record();
