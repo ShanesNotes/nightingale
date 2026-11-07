@@ -142,7 +142,7 @@ impl AccuracyPolicy {
         Digest::of_canonical(&bytes)
     }
 }
-/// The worst error per case, under one policy, of one core. Accepted values only: a trial state is never read.
+/// The worst error per case. Accepted values only: a trial state is never read.
 #[derive(Debug)]
 pub struct AccuracyEvidence {
     policy: Digest,
@@ -156,11 +156,9 @@ impl AccuracyEvidence {
     pub fn policy(&self) -> Digest {
         self.policy
     }
-    /// The digest of the declared resolution of the core that ran every case.
     pub fn resolution(&self) -> Digest {
         self.resolution
     }
-    /// With `relative`, the policy's bound at each compared instant: `absolute + relative * |exact|`.
     pub fn absolute(&self) -> Compensated {
         self.absolute
     }

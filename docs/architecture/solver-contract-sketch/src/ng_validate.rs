@@ -225,8 +225,7 @@ impl AccuracyPolicy {
         todo!()
     }
 }
-/// The worst error per case, under one policy, of one core, with the bound and grid it was held to.
-/// Accepted values only: a trial state is never read.
+/// The worst error per case, under one policy. Accepted values only: a trial state is never read.
 pub struct AccuracyEvidence {
     _policy: Digest,
     _resolution: Digest,
@@ -239,7 +238,6 @@ impl AccuracyEvidence {
     pub fn policy(&self) -> Digest {
         todo!()
     }
-    /// The digest of the declared resolution of the core that ran every case.
     pub fn resolution(&self) -> Digest {
         todo!()
     }
@@ -368,8 +366,6 @@ pub struct NumericalHealth {
 pub trait CoreFactory {
     fn fresh(&self) -> Box<dyn CoupledSolver + '_>;
 }
-/// The run's evidence, bound to the history it ended on and its core's resolution, so evidence from
-/// another run cannot be scored with this one.
 pub struct RunEvidence {
     _seal: HistorySeal,
     _resolution: DeclaredResolution,
@@ -388,7 +384,6 @@ impl<'m> ArenaRun<'m> {
         todo!()
     }
 }
-/// Each part states the policy values it was judged by.
 pub struct ArenaScore {
     _certificate: Certificate,
     _accuracy: AccuracyEvidence,
@@ -409,8 +404,7 @@ impl ArenaScore {
         todo!()
     }
 }
-/// The part of a score that was not of its run.
-pub enum Evidence {
+pub enum ScorePart {
     Certificate,
     Accuracy,
     Replay,
@@ -427,7 +421,7 @@ pub enum ArenaFailure {
     /// would test nothing.
     NoLateBoundary { id: InputId },
     /// A gate that did not run, or evidence from another run: never scored as a pass.
-    MissingEvidence { evidence: Evidence },
+    MissingEvidence { part: ScorePart },
     /// A clock with no reading left, one that ran backward or stood still over a repeat, or a repeat
     /// with no waveform sample: a throughput that measured nothing.
     MissingThroughput,

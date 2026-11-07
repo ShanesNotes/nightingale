@@ -7,7 +7,6 @@ use ng_validate::*;
 const SECOND: u64 = 1_000_000_000;
 const HOUR: u64 = 3_600 * SECOND;
 const INTERVAL_NS: u64 = 16 * SECOND;
-const SEED: [u64; 4] = [1, 2, 3, 4];
 const END_NS: u64 = 7_000 * SECOND;
 
 fn measure<U>(value: f64) -> Measure<U> {
@@ -68,7 +67,7 @@ fn told(failure: &ArenaFailure) -> String {
         ArenaFailure::Observation(refusal) => format!("{refusal:?}"),
         ArenaFailure::MissingThroughput => "missing throughput".into(),
         ArenaFailure::RepeatDiffered { repeat } => format!("repeat {repeat} differed"),
-        ArenaFailure::MissingEvidence { evidence } => format!("missing {evidence:?} evidence"),
+        ArenaFailure::MissingEvidence { part } => format!("missing {part:?} evidence"),
     }
 }
 
@@ -76,7 +75,7 @@ fn arena<'m>(
     case: &'m TwoReservoirs,
     core: &'m ReferenceIntegrator,
     store: &'m MemoryStore,
-    seed: [u64; 4],
+    seed: Seed,
     window_ns: u64,
 ) -> ArenaRun<'m> {
     let body = case.body();
@@ -87,7 +86,7 @@ fn arena<'m>(
         packet: case.packet().expect("the case's packet"),
         lens,
         boundary: BoundaryPort::new(case.events().expect("its inputs")).expect("a port"),
-        seed: Seed::new(seed),
+        seed,
         repeats: NonZeroU32::MIN,
     };
     run(body, core, spec, &Ticks(Cell::new(0)), store).unwrap_or_else(|failure| panic!("{}", told(&failure)))
@@ -139,9 +138,9 @@ fn replayed(case: &TwoReservoirs, interval_ns: u64) -> ReplayEvidence {
     replay_gates(case, &move || reference(interval_ns), &plan).expect("every gate")
 }
 
-fn missing(scored: Result<ArenaScore, ArenaFailure>) -> Option<Evidence> {
+fn missing(scored: Result<ArenaScore, ArenaFailure>) -> Option<ScorePart> {
     match scored {
-        Err(ArenaFailure::MissingEvidence { evidence }) => Some(evidence),
+        Err(ArenaFailure::MissingEvidence { part }) => Some(part),
         Err(failure) => panic!("{}", told(&failure)),
         Ok(_) => None,
     }
@@ -150,7 +149,7 @@ fn missing(scored: Result<ArenaScore, ArenaFailure>) -> Option<Evidence> {
 #[test]
 fn a_score_holds_one_runs_four_parts_and_reports_every_policy_value_they_rest_on() {
     let (case, core, store) = (case(), reference(INTERVAL_NS), MemoryStore::default());
-    let ran = arena(&case, &core, &store, SEED, END_NS);
+    let ran = arena(&case, &core, &store, case.seed(), END_NS);
     let certificate = certified(&ran.session().conservation());
     let scored = score(
         certificate,
@@ -165,17 +164,13 @@ fn a_score_holds_one_runs_four_parts_and_reports_every_policy_value_they_rest_on
     assert_eq!(scored.accuracy().resolution(), evidence.resolution().digest());
 
     let bits = |value: Compensated| value.bits();
-    let (floor, relative, drift) = limits();
+    let (floor, relative, _) = limits();
     let windows = scored.certificate().windows();
     assert_eq!((windows.window_ns().get(), windows.coverage_ns()), (HOUR, END_NS));
     assert!(!scored.certificate().results().is_empty());
     for result in scored.certificate().results() {
         assert_eq!(bits(result.closure_floor()), bits(Compensated::of(&floor)));
         assert_eq!(bits(result.closure_relative()), bits(Compensated::of(&relative)));
-        assert_eq!(
-            result.drift_limit().map(bits),
-            Some(bits(Compensated::of(&drift)))
-        );
     }
     let checked = scored.accuracy();
     assert_eq!(
@@ -196,10 +191,10 @@ fn a_score_holds_one_runs_four_parts_and_reports_every_policy_value_they_rest_on
 #[test]
 fn a_certificate_of_another_run_or_of_the_same_run_at_another_head_is_missing() {
     let (case, core, store) = (case(), reference(INTERVAL_NS), MemoryStore::default());
-    let evidence = arena(&case, &core, &store, SEED, END_NS).into_evidence();
+    let evidence = arena(&case, &core, &store, case.seed(), END_NS).into_evidence();
     let replay = replayed(&case, INTERVAL_NS);
-    let reseeded = arena(&case, &core, &store, [5, 6, 7, 8], END_NS);
-    let longer = arena(&case, &core, &store, SEED, END_NS + HOUR);
+    let reseeded = arena(&case, &core, &store, Seed::new([5, 6, 7, 8]), END_NS);
+    let longer = arena(&case, &core, &store, case.seed(), END_NS + HOUR);
     for other in [reseeded, longer] {
         let certificate = certified(&other.session().conservation());
         let scored = score(
@@ -208,29 +203,29 @@ fn a_certificate_of_another_run_or_of_the_same_run_at_another_head_is_missing() 
             evidence.clone(),
             replay.clone(),
         );
-        assert_eq!(missing(scored), Some(Evidence::Certificate));
+        assert_eq!(missing(scored), Some(ScorePart::Certificate));
     }
 }
 
 #[test]
 fn run_evidence_of_another_run_is_missing_every_part_of_this_one() {
     let (case, core, store) = (case(), reference(INTERVAL_NS), MemoryStore::default());
-    let ran = arena(&case, &core, &store, SEED, END_NS);
+    let ran = arena(&case, &core, &store, case.seed(), END_NS);
     let certificate = certified(&ran.session().conservation());
     let replay = replayed(&case, INTERVAL_NS);
-    let other = arena(&case, &core, &store, [5, 6, 7, 8], END_NS);
+    let other = arena(&case, &core, &store, Seed::new([5, 6, 7, 8]), END_NS);
     let its_certificate = certified(&other.session().conservation());
     let other = other.into_evidence();
     let scored = score(certificate, checked(INTERVAL_NS), other.clone(), replay.clone());
-    assert_eq!(missing(scored), Some(Evidence::Certificate));
+    assert_eq!(missing(scored), Some(ScorePart::Certificate));
     let scored = score(its_certificate, checked(INTERVAL_NS), other, replay);
-    assert_eq!(missing(scored), Some(Evidence::Replay));
+    assert_eq!(missing(scored), Some(ScorePart::Replay));
 }
 
 #[test]
 fn accuracy_evidence_of_another_core_or_another_policy_is_missing() {
     let (case, core, store) = (case(), reference(INTERVAL_NS), MemoryStore::default());
-    let ran = arena(&case, &core, &store, SEED, END_NS);
+    let ran = arena(&case, &core, &store, case.seed(), END_NS);
     let certificates = [(); 3].map(|()| certified(&ran.session().conservation()));
     let (evidence, replay) = (ran.into_evidence(), replayed(&case, INTERVAL_NS));
     let mut without_independence = AccuracyCase::manufactured().expect("every case builds");
@@ -245,16 +240,16 @@ fn accuracy_evidence_of_another_core_or_another_policy_is_missing() {
     ];
     for (certificate, other) in certificates.into_iter().zip(others) {
         let scored = score(certificate, other, evidence.clone(), replay.clone());
-        assert_eq!(missing(scored), Some(Evidence::Accuracy));
+        assert_eq!(missing(scored), Some(ScorePart::Accuracy));
     }
 }
 
 #[test]
 fn replay_evidence_of_another_run_is_missing() {
     let (case, core, store) = (case(), reference(INTERVAL_NS), MemoryStore::default());
-    let ran = arena(&case, &core, &store, SEED, END_NS);
+    let ran = arena(&case, &core, &store, case.seed(), END_NS);
     let certificate = certified(&ran.session().conservation());
     let other = replayed(&case, INTERVAL_NS / 2);
     let scored = score(certificate, checked(INTERVAL_NS), ran.into_evidence(), other);
-    assert_eq!(missing(scored), Some(Evidence::Replay));
+    assert_eq!(missing(scored), Some(ScorePart::Replay));
 }

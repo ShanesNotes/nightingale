@@ -1,20 +1,12 @@
 use crate::{AccuracyEvidence, AccuracyPolicy, ArenaFailure, Certificate, ReplayEvidence, RunEvidence};
 
-/// The part of a score that was not of its run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Evidence {
-    /// A certificate of another history than the one the run ended on.
+pub enum ScorePart {
     Certificate,
-    /// Accuracy evidence of another core, or under a policy other than the model default, which leaves a case
-    /// out or holds it to another bound.
     Accuracy,
-    /// Replay evidence of another run identity.
     Replay,
 }
 
-/// One run's certificate, accuracy, run and replay evidence. Each part states the policy values it was judged
-/// by: the certificate its limits and windows, the accuracy evidence its bound and grid, the run evidence its
-/// core's resolution, and the replay evidence each gate's tolerance.
 pub struct ArenaScore {
     certificate: Certificate,
     accuracy: AccuracyEvidence,
@@ -44,17 +36,17 @@ pub fn score(
     evidence: RunEvidence,
     replay: ReplayEvidence,
 ) -> Result<ArenaScore, ArenaFailure> {
-    let missing = |evidence| Err(ArenaFailure::MissingEvidence { evidence });
+    let missing = |part| Err(ArenaFailure::MissingEvidence { part });
     if certificate.seal() != evidence.seal() {
-        return missing(Evidence::Certificate);
+        return missing(ScorePart::Certificate);
     }
-    // A default that does not build has no evidence under it.
-    let default = AccuracyPolicy::manufactured().ok().map(|policy| policy.digest());
-    if accuracy.resolution() != evidence.resolution().digest() || default != Some(accuracy.policy()) {
-        return missing(Evidence::Accuracy);
+    let default =
+        AccuracyPolicy::manufactured().map_err(|error| ArenaFailure::Initialization(error.into()))?;
+    if accuracy.resolution() != evidence.resolution().digest() || accuracy.policy() != default.digest() {
+        return missing(ScorePart::Accuracy);
     }
     if replay.run() != evidence.run() {
-        return missing(Evidence::Replay);
+        return missing(ScorePart::Replay);
     }
     Ok(ArenaScore {
         certificate,

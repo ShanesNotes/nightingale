@@ -97,7 +97,7 @@ fn told(failure: &ArenaFailure) -> String {
         ArenaFailure::Observation(refusal) => format!("{refusal:?}"),
         ArenaFailure::MissingThroughput => "missing throughput".to_string(),
         ArenaFailure::RepeatDiffered { repeat } => format!("repeat {repeat} differed"),
-        ArenaFailure::MissingEvidence { evidence } => format!("missing {evidence:?} evidence"),
+        ArenaFailure::MissingEvidence { part } => format!("missing {part:?} evidence"),
     }
 }
 

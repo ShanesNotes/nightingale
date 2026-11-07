@@ -1,5 +1,5 @@
 use crate::initialize::{admit_start, solved_start};
-use crate::{ClockSource, Evidence, WallClock};
+use crate::{ClockSource, ScorePart, WallClock};
 use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::{
     BoundaryPort, CompiledBody, CoupledSolver, DeclaredResolution, Digest, EngineFaultKind,
@@ -147,15 +147,12 @@ pub struct RunEvidence {
     health: NumericalHealth,
 }
 impl RunEvidence {
-    /// The run identity's digest.
     pub fn run(&self) -> Digest {
         self.seal.run
     }
-    /// The history the run ended on, which its certificate must certify.
     pub fn seal(&self) -> HistorySeal {
         self.seal
     }
-    /// The core's declared settings, whose error scales and minimum interval are policy values.
     pub fn resolution(&self) -> &DeclaredResolution {
         &self.resolution
     }
@@ -198,9 +195,8 @@ pub enum ArenaFailure {
     RepeatDiffered {
         repeat: u32,
     },
-    /// Evidence from another run, or from a gate that did not run: never scored as a pass.
     MissingEvidence {
-        evidence: Evidence,
+        part: ScorePart,
     },
 }
 

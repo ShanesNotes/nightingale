@@ -9,6 +9,7 @@ const RELAXATION_SECONDS: u64 = 1000;
 const CONDUCTANCE: f64 = 0.001;
 const START: [f64; 2] = [500_500.0, 499_500.0];
 const EXTERIOR: &str = "exterior";
+const FIXTURE_SEED: [u64; 4] = [1, 2, 3, 4];
 
 fn seconds(ns: u64) -> f64 {
     ns as f64 / NANOSECONDS_PER_SECOND
@@ -237,10 +238,11 @@ impl TwoReservoirs {
     pub fn exterior(&self) -> Option<ColumnId> {
         self.column(Context::Body)
     }
-    /// The packet every run of the case admits, so `run` on it with the case's seed names the run its replay gates
-    /// measure.
     pub fn packet(&self) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
         self.valued(CONDUCTANCE)
+    }
+    pub fn seed(&self) -> Seed {
+        Seed::new(FIXTURE_SEED)
     }
     fn valued(&self, conductance: f64) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
         let default = Binding::Network(Network::Vascular);
@@ -858,7 +860,7 @@ pub fn admit_fixture<'m>(
     core: &'m dyn CoupledSolver,
     store: &'m dyn HistoryStore,
 ) -> Result<Session<'m, Running>, InitializationFailure> {
-    admit_seeded(body, packet, boundary, core, Seed::new([1, 2, 3, 4]), store)
+    admit_seeded(body, packet, boundary, core, Seed::new(FIXTURE_SEED), store)
 }
 
 /// Admission reads no seed, so only the identity and the course move with it.

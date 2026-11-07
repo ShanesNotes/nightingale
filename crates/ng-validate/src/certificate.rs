@@ -136,14 +136,12 @@ impl CertificatePolicy {
     }
 }
 
-/// The worst window of one combination, named by instant, beside the limits it was held to. Every window was
-/// checked.
+/// The worst window of one combination, named by instant. Every window was checked.
 #[derive(Clone, Copy, Debug)]
 pub struct QuantityResult {
     quantity: QuantityId,
     closure_floor: Compensated,
     closure_relative: Compensated,
-    drift_limit: Option<Compensated>,
     worst_closure: Compensated,
     closure_window: Interval,
     worst_drift: Compensated,
@@ -153,16 +151,11 @@ impl QuantityResult {
     pub fn quantity(&self) -> QuantityId {
         self.quantity
     }
-    /// With `closure_relative`, the policy's closure bound: `floor + relative * gross exchange in the window`.
     pub fn closure_floor(&self) -> Compensated {
         self.closure_floor
     }
     pub fn closure_relative(&self) -> Compensated {
         self.closure_relative
-    }
-    /// `None` for charge, whose drift holds to the closure bound.
-    pub fn drift_limit(&self) -> Option<Compensated> {
-        self.drift_limit
     }
     /// The largest `|inventory change - net boundary exchange|` over any window.
     pub fn worst_closure(&self) -> Compensated {
@@ -479,7 +472,6 @@ fn keep_the_earliest_worst(
             quantity: limits.quantity,
             closure_floor: limits.absolute,
             closure_relative: Compensated::of(&limits.relative),
-            drift_limit: limits.drift,
             worst_closure: closure,
             closure_window: interval,
             worst_drift: drift,
