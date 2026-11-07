@@ -510,6 +510,29 @@ The arena's speed evidence for one run: the wall time of each repeat of its wind
 The arena's evidence of how hard a solver core worked for one run, beside the certificate and never in it: its refusals by reason and by refusal source, its floor faults and its validity excursions. A floor fault is the engine fault with no admissible step, a refusal at the minimum interval or past the retry budget. A faulted run reports its health up to the fault, and every repeat must report the same.
 _Avoid_: health check (that is the healthy-range check)
 
+**Day check**:
+A deterministic check drawn from the contract's day table that reads one produced quantity around one event of the day plan. It compares the quantity's mean over the time of a window after the event with its mean over a baseline before it, or for a meal with a counterfactual run's same window, and reports pass, fail or not available yet. A response is a change of more than three noise floors and at least the declared tolerance. It shows that the engine's structure answers the way the table says, never clinical validity.
+_Avoid_: body check, judge
+
+**Day plan**:
+The schedule day checks read around: sitting up at 07:00, meals at 07:30, 12:30 and 18:30, lying down to sleep at 23:00 and waking at 06:30, from the 06:55 admission. One plan makes both a run's boundary events and the occurrences its checks read. An event no payload carries yet, such as sleep, leaves its checks not available yet.
+
+**Beat**:
+The accepted steps from one beat edge to the next, one cardiac cycle of a run. A day check reads each quantity as one mean per beat, timed at its end.
+_Avoid_: cycle (the packet's equal-interval pass)
+
+**Day trace**:
+One mean per beat of each quantity the day checks read, folded from each accepted step while a run steps, with which of the plan's events applied. It is never rebuilt from history or taken from a previous run.
+
+**Counterfactual run**:
+A run from the same start with one meal of its day plan removed. That meal's day checks read against it, so the posture change and earlier meals cancel.
+
+**Noise floor**:
+The sample standard deviation of a quantity's beat means over its baseline window.
+
+**Declared tolerance**:
+What a core's declared error scales allow a row at a value: the absolute scale times the row's natural size plus the relative scale times the value, carried through a sum, ratio or product of rows.
+
 **Score**:
 The arena's result for one run: a certificate of the history the run ended on, accuracy evidence of its solver core on every manufactured case and the first slice window at the model-default bound, its throughput and numerical health, and replay evidence of its run identity, each with the policy values it was judged by. A part from another run, or from a gate that did not run, is missing evidence and never a pass.
 
