@@ -84,7 +84,13 @@ pub(crate) fn compile(
             .any(|instance| instance.inputs.iter().any(|input| input.unknown().is_some()))
     };
     let column_reads: Vec<bool> = (0..placement.columns.len()).map(read_by).collect();
-    let basis = conserved_basis(&species, &placement.columns, &column_reads);
+    let mut pools = Vec::new();
+    for (row, pool) in rows.amounts.iter().enumerate() {
+        if let Some(card) = holder(&schema, &held, *pool)? {
+            pools.push((RowId::at(row), card));
+        }
+    }
+    let basis = conserved_basis(&species, &placement.columns, &column_reads, held, pools);
     let judged = judged_rows(reads.len(), &stores);
     let pivots = pivots(solved_by.clone(), &stores);
     let sparsity = sparsity(reads);
@@ -105,7 +111,6 @@ pub(crate) fn compile(
         forcings,
         hazards,
         basis,
-        held,
     };
     Ok(CompiledBody::seal(layout, elimination))
 }

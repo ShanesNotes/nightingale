@@ -447,7 +447,7 @@
 //!         let relative = Measure::new(1e-9).ok()?;
 //!         quantities.push(QuantityPolicy::new(combination.id(), limit(1e-9)?, relative, limit(1.0)?).ok()?);
 //!     }
-//!     let windows = Sliding24Hours::covering(48 * 3_600_000_000_000).ok()?;
+//!     let windows = SlidingWindows::new(NonZeroU64::new(24 * 3_600_000_000_000)?, 48 * 3_600_000_000_000).ok()?;
 //!     let policy = CertificatePolicy::new(body.conserved_basis(), quantities, ExpectedDrift::Zero, windows).ok()?;
 //!     let first = view.basis().combinations().first()?.id();
 //!     let held = view.basis().coverage().held_routes();
@@ -470,9 +470,8 @@
 //!
 //! // 12. Accuracy: the core on manufactured cases and against the contract's reference integrator.
 //! fn accuracy_gate(body: &CompiledBody, core: &Core) -> Option<AccuracyEvidence> {
-//!     let reference = ReferenceIntegrator::new(100_000);
 //!     let cases = vec![AccuracyCase::TwoReservoir(TwoReservoirs::stepped_inflow().ok()?),
-//!         AccuracyCase::DrainAndRefill, AccuracyCase::SliceReference { reference, factor: 100 }];
+//!         AccuracyCase::DrainAndRefill, AccuracyCase::SliceWindow(SliceWindow::first().ok()?)];
 //!     let _sources: &[RefusalSource] = body.refusal_sources();
 //!     let policy = AccuracyPolicy::new(cases, Measure::new(1e-9).ok()?, Measure::new(1e-6).ok()?, 1_000_000).ok()?;
 //!     accuracy(core, &policy).ok()

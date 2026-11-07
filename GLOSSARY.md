@@ -478,7 +478,10 @@ A system outside the slice, held by a declaration that names every route on whic
 _Avoid_: stub, mock
 
 **Coverage manifest**:
-The compiled list of which conserved combinations close inside the slice and which rest on held stand-ins.
+The compiled list of which conserved combinations close inside the slice and which rest on held stand-ins: each held declaration with its routes, spaces and validity, each route's columns, and each held pool with its own combination.
+
+**Held support**:
+What a held stand-in moves across the boundary on one route. The certificate reports, for each route, the most any window carried into and out of the body.
 
 **Certificate**:
 The automatic check that every conserved quantity balances, that charge never drifts, and that every other quantity drifts over every sliding 24 h window no further than its within-subject variation allows (record 0004). It shows stability, not accuracy.
@@ -494,11 +497,18 @@ _Avoid_: re-anchoring, daily reset
 **Accuracy gate**:
 The arena check that runs a solver core on manufactured cases with known answers and against the reference integrator, because a step can close every ledger and still be wrong.
 
+**Slice window**:
+A stretch of the slice that the accuracy gate runs against the reference integrator at three refinements, because it has no closed form. The first is admission, a posture change and a meal. The finest refinement stands for the solution, and a core may stand no further from it, on any compared value or mode transition, than the coarser refinements do.
+
 **Replay gates**:
 The arena checks that pace, resuming, late events, rewinding, extra evaluations and attached observers never change physiology bits, and that a step policy moves no event further from the reference integrator than a declared tolerance.
 
 **Throughput**:
 The arena's speed evidence for one run: the wall time of each repeat of its window with full waveform, read from a wall clock the host passes in, with admission timed apart. Every repeat is kept, each must end on the same seal, and none of it enters the certificate.
+
+**Numerical health**:
+The arena's evidence of how hard a solver core worked for one run, beside the certificate and never in it: its refusals by reason and by refusal source, its floor faults and its validity excursions. A floor fault is the engine fault with no admissible step, a refusal at the minimum interval or past the retry budget. A faulted run reports its health up to the fault, and every repeat must report the same.
+_Avoid_: health check (that is the healthy-range check)
 
 **Pulse**:
 The Pulse Physiology Engine, a reference to compare against and never a pass bar (rule 6). A Pulse diff, a match to published data and clinical validity are three separate claims.

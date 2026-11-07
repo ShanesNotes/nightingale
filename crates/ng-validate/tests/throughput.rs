@@ -1,7 +1,7 @@
 use core::cell::Cell;
 use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::*;
-use ng_record::ObservationRefusal;
+use ng_record::{ObservationRefusal, Running, Session, Step};
 use ng_validate::*;
 
 const SECOND: u64 = 1_000_000_000;
@@ -45,7 +45,7 @@ impl WallClock for Scripted {
 fn told(failure: &ArenaFailure) -> String {
     match failure {
         ArenaFailure::Initialization(failure) => format!("{failure:?}"),
-        ArenaFailure::Faulted(report) => format!("{:?}", report.fault()),
+        ArenaFailure::Faulted { report, .. } => format!("{:?}", report.fault()),
         ArenaFailure::Checkpoint(error) => format!("{error:?}"),
         ArenaFailure::Observation(refusal) => format!("{refusal:?}"),
         ArenaFailure::MissingThroughput => "missing throughput".into(),
@@ -100,6 +100,12 @@ struct OneVessel {
 }
 impl OneVessel {
     fn new(vessel: &'static str) -> Self {
+        Self::built(vessel, false)
+    }
+    fn distrusting_zero(vessel: &'static str) -> Self {
+        Self::built(vessel, true)
+    }
+    fn built(vessel: &'static str, distrusting_zero: bool) -> Self {
         let mut map = AnatomyBuilder::new();
         let at = Position::new(measure(0.0), measure(0.0), measure(0.0));
         let site = map.site::<VesselSegment>(vessel, at);
@@ -114,6 +120,10 @@ impl OneVessel {
                 let value = k.read(&drive);
                 k.finish(value, laws.every_mode(), class)
             });
+            if distrusting_zero {
+                let range = ValidityRange::new(measure(1.0), measure(2.0), Basis::Fixture("synthetic"))?;
+                laws.validity(&flow, range);
+            }
             laws.transfer(Transfer::new(&route, flow));
             let reading = laws.algebraic::<Rate<Water>>("reading", Admissible::finite());
             let residual = laws.kernel(|mut k| {
@@ -325,4 +335,259 @@ fn the_clock_opens_before_admission_so_a_refused_one_has_read_it_once() {
     let refused = run(&small.body, &core, spec, &clock, &store);
     assert!(matches!(refused, Err(ArenaFailure::Initialization(_))));
     assert_eq!(clock.reads.get(), 1);
+}
+
+fn slice_core() -> ReferenceIntegrator {
+    let scale = |value| Measure::<Dimensionless>::new(value).expect("finite");
+    ReferenceIntegrator::new(5 * MILLISECOND)
+        .with_scales(ErrorScales::uniform(scale(1.0), scale(1e-3)).expect("positive"))
+}
+
+fn slice_spec(body: &CompiledBody, end: SimTime, repeats: u32) -> ArenaSpec {
+    ArenaSpec {
+        window: Interval::new(anchor_moment(), end).expect("an interval"),
+        packet: arena_packet(body).expect("a packet"),
+        lens: arena_lens(body).expect("a lens"),
+        boundary: BoundaryPort::new(Vec::new()).expect("no event"),
+        seed: Seed::new([1, 2, 3, 4]),
+        repeats: NonZeroU32::new(repeats).expect("positive"),
+    }
+}
+
+fn stepped<'m>(
+    session: Session<'m, Running>,
+    refused: &mut Vec<NumericalRefusal>,
+    excursions: &mut u64,
+) -> Session<'m, Running> {
+    let mut attempt = session.step();
+    loop {
+        match attempt {
+            Step::Accepted(session, receipt) => {
+                *excursions += receipt.excursions().len() as u64;
+                return session;
+            }
+            Step::Refused(session) => {
+                refused.push(session.refused().reason());
+                attempt = session.retry();
+            }
+            Step::Faulted(session) => panic!("{:?}", session.fault()),
+        }
+    }
+}
+
+fn tallied(reasons: &[NumericalRefusal]) -> Vec<(NumericalRefusal, u64)> {
+    let mut tally: Vec<(NumericalRefusal, u64)> = Vec::new();
+    for &reason in reasons {
+        match tally.iter_mut().find(|(seen, _)| *seen == reason) {
+            Some((_, count)) => *count += 1,
+            None => tally.push((reason, 1)),
+        }
+    }
+    tally
+}
+
+#[test]
+fn a_short_slice_window_reports_what_its_session_refused_once_per_repeat() {
+    let body = arena_body().expect("compiled");
+    let core = slice_core();
+    let end = SimTime::from_ns(anchor_moment().nanoseconds() + 2 * SECOND);
+    let (store, clock) = (MemoryStore::default(), Scripted::ticking());
+    let evidence = ran(run(&body, &core, slice_spec(&body, end, 2), &clock, &store)).into_evidence();
+    let health = evidence.health();
+
+    let stepped_store = MemoryStore::default();
+    let ArenaSpec {
+        packet,
+        lens,
+        boundary,
+        ..
+    } = slice_spec(&body, end, 1);
+    let admitted = admit_at(
+        &body,
+        packet,
+        boundary,
+        &core,
+        &lens,
+        anchor_moment(),
+        &stepped_store,
+    );
+    let mut session = admitted.expect("admitted").session;
+    let (mut refused, mut excursions) = (Vec::new(), 0);
+    while session.record().accepted().time() < end {
+        session = stepped(session, &mut refused, &mut excursions);
+    }
+    assert!(
+        !refused.is_empty(),
+        "the slice refuses at 5 ms, so the report has something to count"
+    );
+    assert_eq!(health.refusals(), tallied(&refused));
+    assert_eq!(health.excursions(), excursions);
+    assert_eq!(health.floor_faults(), 0);
+}
+
+struct RefusingFrom<'c> {
+    inner: &'c dyn CoupledSolver,
+    from: SimTime,
+    sources: [SourceId; 2],
+}
+impl CoupledSolver for RefusingFrom<'_> {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        if ticket.interval().start() < self.from {
+            return self.inner.solve(problem, ticket);
+        }
+        let source = self.sources[ticket.attempt() as usize % 2];
+        Err(ticket.refuse(NumericalRefusal::TrialDomain { source }))
+    }
+}
+
+#[test]
+fn a_slice_window_that_faults_at_the_floor_reports_its_health_up_to_the_fault() {
+    let body = arena_body().expect("compiled");
+    let rows = body.rows();
+    let (first, last) = (rows[0].id(), rows[rows.len() - 1].id());
+    let (low, high) = (body.row_source(first), body.row_source(last));
+    let inner = slice_core();
+    let core = RefusingFrom {
+        inner: &inner,
+        from: SimTime::from_ns(anchor_moment().nanoseconds() + 50 * MILLISECOND),
+        sources: [high, low],
+    };
+    let end = SimTime::from_ns(anchor_moment().nanoseconds() + 2 * SECOND);
+    let (store, clock) = (MemoryStore::default(), Scripted::ticking());
+    let Err(ArenaFailure::Faulted { report, health }) =
+        run(&body, &core, slice_spec(&body, end, 2), &clock, &store)
+    else {
+        panic!("the planted step faults");
+    };
+    assert_eq!(report.fault().kind(), EngineFaultKind::NoAdmissibleStep);
+    assert_eq!(health.floor_faults(), 1);
+    let planted = report.refusals().len() as u64;
+    assert!(planted >= 2, "both sources refuse before the floor");
+    assert_eq!(
+        health.by_source(),
+        [(low, planted / 2), (high, planted.div_ceil(2))]
+    );
+    let counted: u64 = health.refusals().iter().map(|(_, count)| count).sum();
+    assert!(counted > planted, "the steps before the planted one refused too");
+}
+
+struct MismatchedFrom {
+    inner: ReferenceIntegrator,
+    from: SimTime,
+}
+impl CoupledSolver for MismatchedFrom {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        if ticket.interval().start() < self.from {
+            return self.inner.solve(problem, ticket);
+        }
+        Err(ticket.mismatch().into())
+    }
+}
+
+#[test]
+fn a_fault_off_the_floor_is_no_floor_fault() {
+    let small = OneVessel::new("synthetic vessel");
+    let core = MismatchedFrom {
+        inner: small_core(),
+        from: SimTime::from_ns(500 * MILLISECOND),
+    };
+    let (store, clock) = (MemoryStore::default(), Scripted::ticking());
+    let Err(ArenaFailure::Faulted { report, health }) = run(
+        &small.body,
+        &core,
+        small.spec(small.lens(), 0, 1000, 1),
+        &clock,
+        &store,
+    ) else {
+        panic!("the step at 500 ms faults");
+    };
+    assert_eq!(report.fault().kind(), EngineFaultKind::BindingMismatch);
+    assert_eq!(health.floor_faults(), 0);
+}
+
+#[test]
+fn every_accepted_step_outside_a_validity_range_is_one_excursion() {
+    let small = OneVessel::distrusting_zero("synthetic vessel");
+    let (core, store, clock) = (small_core(), MemoryStore::default(), Scripted::ticking());
+    let evidence = ran(run(
+        &small.body,
+        &core,
+        small.spec(small.lens(), 0, 1000, 3),
+        &clock,
+        &store,
+    ))
+    .into_evidence();
+    assert!(evidence.throughput().accepted_steps() > 1);
+    assert_eq!(
+        evidence.health().excursions(),
+        evidence.throughput().accepted_steps()
+    );
+    assert!(evidence.health().refusals().is_empty());
+}
+
+struct RefusedAt {
+    inner: ReferenceIntegrator,
+    at: SimTime,
+    refused: Cell<u32>,
+    renamed: bool,
+}
+impl CoupledSolver for RefusedAt {
+    fn resolution(&self) -> DeclaredResolution {
+        self.inner.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        if ticket.interval().start() != self.at || ticket.attempt() > 0 {
+            return self.inner.solve(problem, ticket);
+        }
+        self.refused.set(self.refused.get() + 1);
+        let reason = match (self.renamed, self.refused.get()) {
+            (true, 2..) => NumericalRefusal::GuardInside,
+            _ => NumericalRefusal::IterationLimit,
+        };
+        Err(ticket.refuse(reason))
+    }
+}
+
+#[test]
+fn a_repeat_that_refused_for_another_reason_differed() {
+    let small = OneVessel::new("synthetic vessel");
+    let repeated = |renamed| {
+        let core = RefusedAt {
+            inner: small_core(),
+            at: SimTime::from_ns(500 * MILLISECOND),
+            refused: Cell::new(0),
+            renamed,
+        };
+        let (store, clock) = (MemoryStore::default(), Scripted::ticking());
+        let outcome = run(
+            &small.body,
+            &core,
+            small.spec(small.lens(), 0, 1000, 2),
+            &clock,
+            &store,
+        );
+        assert_eq!(core.refused.get(), 2);
+        outcome.map(|arena| arena.into_evidence())
+    };
+    let same = repeated(false).unwrap_or_else(|failure| panic!("{}", told(&failure)));
+    assert_eq!(same.health().refusals(), [(NumericalRefusal::IterationLimit, 1)]);
+    assert!(matches!(
+        repeated(true),
+        Err(ArenaFailure::RepeatDiffered { repeat: 1 })
+    ));
 }

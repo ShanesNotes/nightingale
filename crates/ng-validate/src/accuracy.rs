@@ -1,5 +1,5 @@
 use crate::run::advance;
-use crate::{MemoryStore, ReplayCase, TwoReservoirs};
+use crate::{Compared, MemoryStore, ReplayCase, SliceWindow, TwoReservoirs};
 use core::cell::RefCell;
 use ng_contract::{
     AcceptedStateView, AdmissionError, Attempt, BoundParameters, ColumnId, Compensated, CoupledProblem,
@@ -10,7 +10,8 @@ use ng_record::{Curve, Faulted, HistorySegment, PatientRecord, Session};
 
 const SECOND: u64 = 1_000_000_000;
 
-/// A manufactured case: a two-reservoir body with a closed form, and for some an exact identity beside it.
+/// A manufactured case is a two-reservoir body with a closed form, and for some an exact identity beside it. A
+/// slice window has no closed form and is judged against the reference integrator.
 pub enum AccuracyCase {
     TwoReservoir(Box<TwoReservoirs>),
     /// `a` drained to within one percent of empty and refilled from `b`: a core keeps publishing down to the
@@ -24,6 +25,7 @@ pub enum AccuracyCase {
     /// After evaluations the contract refused, the same core on the same head publishes the same bits, and one
     /// stage there gives the same residual and Jacobian bits.
     EvaluationIndependence,
+    SliceWindow(Box<SliceWindow>),
 }
 impl AccuracyCase {
     /// Every manufactured case §7 lists, in its order.
@@ -48,12 +50,19 @@ struct Manufactured {
     fixture: TwoReservoirs,
     check: Check,
 }
-impl Manufactured {
+
+enum Judged {
+    Manufactured(Manufactured),
+    Window(SliceWindow),
+}
+impl Judged {
     fn of(case: AccuracyCase) -> Result<Self, AdmissionError> {
-        let plain = |kind, fixture| Self {
-            kind,
-            fixture,
-            check: Check::ClosedForm,
+        let plain = |kind, fixture| {
+            Self::Manufactured(Manufactured {
+                kind,
+                fixture,
+                check: Check::ClosedForm,
+            })
         };
         Ok(match case {
             AccuracyCase::TwoReservoir(fixture) => plain(0, *fixture),
@@ -62,22 +71,23 @@ impl Manufactured {
             AccuracyCase::ControlledRemoval => plain(3, TwoReservoirs::controlled_removal()?),
             AccuracyCase::EvaluationIndependence => {
                 let fixture = TwoReservoirs::closed()?.until(SimTime::from_ns(2_000 * SECOND));
-                Self {
+                Self::Manufactured(Manufactured {
                     kind: 4,
                     check: Check::Independence {
                         refusing: Box::new(fixture.overflowing_values()?),
                     },
                     fixture,
-                }
+                })
             }
+            AccuracyCase::SliceWindow(window) => Self::Window(*window),
         })
     }
 }
 
-/// `absolute + relative * |exact|` bounds the error at each compared instant, and `grid_ns` spaces the
-/// instants compared inside a segment.
+/// `absolute + relative * |exact|` bounds a manufactured case's error at each compared instant, and `grid_ns`
+/// spaces the instants compared inside a segment. A slice window brings its own distances and instants.
 pub struct AccuracyPolicy {
-    cases: Vec<Manufactured>,
+    cases: Vec<Judged>,
     absolute: Compensated,
     relative: Measure<Dimensionless>,
     grid_ns: u64,
@@ -90,11 +100,11 @@ impl AccuracyPolicy {
         relative: Measure<Dimensionless>,
         grid_ns: u64,
     ) -> Result<Self, AdmissionError> {
-        let cases = cases
-            .into_iter()
-            .map(Manufactured::of)
-            .collect::<Result<Vec<_>, _>>()?;
-        let never_steps = |case: &Manufactured| case.fixture.end() == SimTime::from_ns(0);
+        let cases = cases.into_iter().map(Judged::of).collect::<Result<Vec<_>, _>>()?;
+        let never_steps = |case: &Judged| match case {
+            Judged::Manufactured(case) => case.fixture.end() == SimTime::from_ns(0),
+            Judged::Window(_) => false,
+        };
         if grid_ns == 0 || cases.is_empty() || cases.iter().any(never_steps) {
             return Err(AdmissionError::EmptyAccuracyPolicy);
         }
@@ -130,14 +140,17 @@ impl AccuracyPolicy {
         {
             bytes.extend_from_slice(&limb.to_be_bytes());
         }
-        for Manufactured {
-            kind,
-            fixture,
-            check: _,
-        } in cases
-        {
-            bytes.push(*kind);
-            bytes.extend_from_slice(fixture.digest().as_bytes());
+        for case in cases {
+            let (kind, digest) = match case {
+                Judged::Manufactured(Manufactured {
+                    kind,
+                    fixture,
+                    check: _,
+                }) => (*kind, fixture.digest()),
+                Judged::Window(window) => (5, window.digest()),
+            };
+            bytes.push(kind);
+            bytes.extend_from_slice(digest.as_bytes());
         }
         Digest::of_canonical(&bytes)
     }
@@ -184,13 +197,38 @@ pub enum AccuracyFailure {
     Dependent {
         case: usize,
     },
+    /// The first instant a slice window's quantity stood further from the reference's finest refinement than its
+    /// distance.
+    Outside {
+        case: usize,
+        at: SimTime,
+        quantity: Compared,
+        error: Compensated,
+        distance: Compensated,
+    },
+    /// A slice window's run held other modes than the reference's finest refinement at more compared instants than
+    /// its window allows.
+    ModesApart {
+        case: usize,
+        apart: usize,
+        most: usize,
+    },
+    /// A kind of mode transition a core made further from where the reference's finest refinement makes one than
+    /// its distance, at the transition that stood farthest. A kind the reference never makes is as far as can be.
+    TransitionMoved {
+        case: usize,
+        mode: usize,
+        at: SimTime,
+        apart_ns: u64,
+        distance_ns: u64,
+    },
 }
 
 fn water(value: f64) -> Compensated {
     Compensated::of(&Measure::<Water>::new(value).expect("the closed form of finite constants is finite"))
 }
 
-fn net_at(segment: &HistorySegment, column: ColumnId, at: SimTime) -> Compensated {
+pub(crate) fn net_at(segment: &HistorySegment, column: ColumnId, at: SimTime) -> Compensated {
     let piece = Interval::new(segment.interval().start(), at).expect("a compared instant is after the start");
     let reached = |curve: Curve<'_>| {
         let ends = curve.on(piece).expect("a compared instant is inside the segment");
@@ -236,17 +274,23 @@ fn comparisons(
 
 /// Runs each case with the same core. After every accepted step it compares the accepted segment with the
 /// closed form: both amounts, the circulation exchange and any boundary exchange. A core that diverges fails
-/// here at its first bad instant, before positivity can intervene.
+/// here at its first bad instant, before positivity can intervene. A slice window's worst is the largest share
+/// of its distance any quantity or transition reached.
 pub fn accuracy(
     solver: &dyn CoupledSolver,
     policy: &AccuracyPolicy,
 ) -> Result<AccuracyEvidence, AccuracyFailure> {
     let mut worst = Vec::with_capacity(policy.cases.len());
     for (index, case) in policy.cases.iter().enumerate() {
-        if let Check::Independence { refusing } = &case.check {
-            independent(solver, &case.fixture, refusing, index)?;
-        }
-        worst.push(closed_form(solver, &case.fixture, policy, index)?);
+        worst.push(match case {
+            Judged::Manufactured(case) => {
+                if let Check::Independence { refusing } = &case.check {
+                    independent(solver, &case.fixture, refusing, index)?;
+                }
+                closed_form(solver, &case.fixture, policy, index)?
+            }
+            Judged::Window(window) => window.judge(solver, index)?,
+        });
     }
     Ok(AccuracyEvidence {
         policy: policy.digest(),
@@ -254,7 +298,7 @@ pub fn accuracy(
     })
 }
 
-fn faulted(stopped: Session<'_, Faulted>) -> AccuracyFailure {
+pub(crate) fn faulted(stopped: Session<'_, Faulted>) -> AccuracyFailure {
     AccuracyFailure::Faulted(*stopped.fault())
 }
 

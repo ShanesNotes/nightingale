@@ -21,6 +21,23 @@
 //!     certify(&session.conservation(), policy)
 //! }
 //! ```
+//! Charge's drift holds to its closure bound, so a policy cannot give charge a drift bound of its own.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! use ng_validate::QuantityPolicy;
+//! fn bounded(quantity: QuantityId, floor: Measure<Charge>, relative: Measure<Dimensionless>, drift: Measure<Charge>)
+//!     -> Result<QuantityPolicy, AdmissionError> {
+//!     QuantityPolicy::new(quantity, floor, relative, drift)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! use ng_validate::QuantityPolicy;
+//! fn held(quantity: QuantityId, floor: Measure<Charge>, relative: Measure<Dimensionless>)
+//!     -> Result<QuantityPolicy, AdmissionError> {
+//!     QuantityPolicy::charge(quantity, floor, relative)
+//! }
+//! ```
 //! A pace is when a host calls `step`, and `step` takes nothing, so a caller's stop cannot cut a step.
 //! ```compile_fail,E0061
 //! use ng_contract::SimTime;
@@ -157,13 +174,14 @@ mod replay;
 mod run;
 mod slice;
 mod split;
+mod window;
 
 pub use accuracy::{
     AccuracyCase, AccuracyEvidence, AccuracyFailure, AccuracyPolicy, accuracy, observed_order,
 };
 pub use certificate::{
-    Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, ExpectedDrift, QuantityPolicy,
-    QuantityResult, Sliding24Hours, certify,
+    Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, ExpectedDrift, HeldSupport,
+    QuantityPolicy, QuantityResult, SlidingWindows, certify,
 };
 pub use fixture::{ChanceCase, Delivery, TwoReservoirs, admit_fixture, admit_seeded};
 pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved};
@@ -172,9 +190,12 @@ pub use replay::{
     ChancePlan, ClockSource, CoreFactory, GateEvidence, MemoryStore, ReplayCase, ReplayEvidence,
     ReplayFailure, ReplayGate, ReplayPlan, WallClock, replay_gate, replay_gates,
 };
-pub use run::{ArenaFailure, ArenaRun, ArenaSpec, RunEvidence, ThroughputEvidence, run, run_until};
+pub use run::{
+    ArenaFailure, ArenaRun, ArenaSpec, NumericalHealth, RunEvidence, ThroughputEvidence, run, run_until,
+};
 pub use slice::{
-    anchor_moment, arena_anatomy, arena_body, arena_lens, arena_organs, arena_packet, arena_schema,
-    hold_outside_slice,
+    SliceCase, anchor_moment, arena_anatomy, arena_body, arena_lens, arena_organs, arena_packet,
+    arena_schema, hold_outside_slice,
 };
 pub use split::{SplitFailure, draw_split_trace, split_gate};
+pub use window::{Compared, SliceWindow};
