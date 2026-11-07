@@ -1,4 +1,4 @@
-use crate::{AccuracyEvidence, AccuracyPolicy, ArenaFailure, Certificate, ReplayEvidence, RunEvidence};
+use crate::{AccuracyEvidence, ArenaFailure, Certificate, ReplayEvidence, RunEvidence};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScorePart {
@@ -28,8 +28,8 @@ impl ArenaScore {
     }
 }
 
-/// The run evidence names the run. The certificate must certify the history it ended on, the accuracy evidence
-/// must come from its core and cover `AccuracyPolicy::manufactured`, and the replay evidence must name its identity.
+/// The run evidence names the run. The certificate must certify the history it ended on, the replay evidence must
+/// name its identity, and the accuracy evidence must come from its core under `AccuracyPolicy::arena`.
 pub fn score(
     certificate: Certificate,
     accuracy: AccuracyEvidence,
@@ -40,13 +40,14 @@ pub fn score(
     if certificate.seal() != evidence.seal() {
         return missing(ScorePart::Certificate);
     }
-    let default =
-        AccuracyPolicy::manufactured().map_err(|error| ArenaFailure::Initialization(error.into()))?;
-    if accuracy.resolution() != evidence.resolution().digest() || !accuracy.covers(&default) {
-        return missing(ScorePart::Accuracy);
-    }
     if replay.run() != evidence.run() {
         return missing(ScorePart::Replay);
+    }
+    let arena = accuracy
+        .of_the_arena()
+        .map_err(|error| ArenaFailure::Initialization(error.into()))?;
+    if accuracy.resolution() != evidence.resolution().digest() || !arena {
+        return missing(ScorePart::Accuracy);
     }
     Ok(ArenaScore {
         certificate,

@@ -29,8 +29,13 @@ fn case() -> TwoReservoirs {
     case.until(SimTime::from_ns(END_NS))
 }
 
+/// Scales this loose never refuse, so on the slice the core takes the steps of the window's coarsest reference.
 fn reference(interval_ns: u64) -> ReferenceIntegrator {
+    let loose = ErrorScales::uniform(measure(1e9), measure(1.0)).expect("positive");
+    let floor = NonZeroU64::new(100_000).expect("a floor");
     ReferenceIntegrator::new(interval_ns)
+        .with_scales(loose)
+        .with_floor(floor)
 }
 
 struct Ticks(Cell<u64>);
@@ -110,7 +115,7 @@ fn certified(view: &ConservationView<'_>) -> Certificate {
     certify(view, &policy).expect("the ledger closes and the body holds")
 }
 
-fn checked(interval_ns: u64) -> AccuracyEvidence {
+fn without_the_window(interval_ns: u64) -> AccuracyEvidence {
     let policy = AccuracyPolicy::manufactured().expect("the model default");
     accuracy(&reference(interval_ns), &policy).expect("within the policy")
 }
@@ -147,21 +152,24 @@ fn missing(scored: Result<ArenaScore, ArenaFailure>) -> Option<ScorePart> {
 }
 
 #[test]
-fn a_score_holds_one_runs_four_parts_and_reports_every_policy_value_they_rest_on() {
+fn a_score_holds_one_runs_parts_under_the_arena_policy_and_refuses_another_cores_accuracy() {
+    let policy = AccuracyPolicy::arena().expect("the reference runs the slice window");
     let (case, core, store) = (case(), reference(INTERVAL_NS), MemoryStore::default());
     let ran = arena(&case, &core, &store, case.seed(), END_NS);
-    let certificate = certified(&ran.session().conservation());
-    let scored = score(
-        certificate,
-        checked(INTERVAL_NS),
-        ran.into_evidence(),
-        replayed(&case, INTERVAL_NS),
-    );
+    let [certificate, again] = [(); 2].map(|()| certified(&ran.session().conservation()));
+    let (evidence, replay) = (ran.into_evidence(), replayed(&case, INTERVAL_NS));
+    let another = accuracy(&reference(INTERVAL_NS / 2), &policy).expect("within the arena policy");
+    let refused = score(again, another, evidence.clone(), replay.clone());
+    assert_eq!(missing(refused), Some(ScorePart::Accuracy));
+    let checked = accuracy(&core, &policy).expect("within the arena policy");
+    let scored = score(certificate, checked, evidence, replay);
     let scored = scored.unwrap_or_else(|failure| panic!("{}", told(&failure)));
     let evidence = scored.evidence();
     assert_eq!(scored.certificate().seal(), evidence.seal());
     assert_eq!(scored.replay().run(), evidence.run());
     assert_eq!(scored.accuracy().resolution(), evidence.resolution().digest());
+    assert_eq!(scored.accuracy().policy(), policy.digest());
+    assert_eq!(scored.accuracy().worst().len(), 6);
 
     let bits = |value: Compensated| value.bits();
     let (floor, relative, _) = limits();
@@ -182,9 +190,9 @@ fn a_score_holds_one_runs_four_parts_and_reports_every_policy_value_they_rest_on
         bits(Compensated::of(&measure::<Dimensionless>(0.0)))
     );
     assert_eq!(checked.grid_ns(), 100 * SECOND);
-    let reference_scales = ErrorScales::uniform(measure(1.0), measure(1e-5)).expect("positive");
-    assert_eq!(evidence.resolution().scales(), &reference_scales);
-    assert_eq!(evidence.resolution().minimum_interval_ns().get(), 1_000_000);
+    let loose = ErrorScales::uniform(measure(1e9), measure(1.0)).expect("positive");
+    assert_eq!(evidence.resolution().scales(), &loose);
+    assert_eq!(evidence.resolution().minimum_interval_ns().get(), 100_000);
     assert_eq!(scored.replay().of(ReplayGate::StepPolicy).tolerance_ns(), None);
 }
 
@@ -199,7 +207,7 @@ fn a_certificate_of_another_run_or_of_the_same_run_at_another_head_is_missing() 
         let certificate = certified(&other.session().conservation());
         let scored = score(
             certificate,
-            checked(INTERVAL_NS),
+            without_the_window(INTERVAL_NS),
             evidence.clone(),
             replay.clone(),
         );
@@ -216,51 +224,29 @@ fn run_evidence_of_another_run_is_missing_every_part_of_this_one() {
     let other = arena(&case, &core, &store, Seed::new([5, 6, 7, 8]), END_NS);
     let its_certificate = certified(&other.session().conservation());
     let other = other.into_evidence();
-    let scored = score(certificate, checked(INTERVAL_NS), other.clone(), replay.clone());
+    let scored = score(
+        certificate,
+        without_the_window(INTERVAL_NS),
+        other.clone(),
+        replay.clone(),
+    );
     assert_eq!(missing(scored), Some(ScorePart::Certificate));
-    let scored = score(its_certificate, checked(INTERVAL_NS), other, replay);
+    let scored = score(its_certificate, without_the_window(INTERVAL_NS), other, replay);
     assert_eq!(missing(scored), Some(ScorePart::Replay));
 }
 
 #[test]
-fn accuracy_evidence_of_another_core_or_another_policy_is_missing() {
-    let (case, core, store) = (case(), reference(INTERVAL_NS), MemoryStore::default());
-    let ran = arena(&case, &core, &store, case.seed(), END_NS);
-    let certificates = [(); 3].map(|()| certified(&ran.session().conservation()));
-    let (evidence, replay) = (ran.into_evidence(), replayed(&case, INTERVAL_NS));
-    let mut without_independence = AccuracyCase::manufactured().expect("every case builds");
-    without_independence.pop();
-    let fewer = AccuracyPolicy::new(without_independence, measure(5.0), measure(0.0), 100 * SECOND);
-    let every = AccuracyCase::manufactured().expect("every case builds");
-    let looser = AccuracyPolicy::new(every, measure(6.0), measure(0.0), 100 * SECOND);
-    let others = [
-        checked(INTERVAL_NS / 2),
-        accuracy(&core, &fewer.expect("a policy")).expect("within the policy"),
-        accuracy(&core, &looser.expect("a policy")).expect("within the policy"),
-    ];
-    for (certificate, other) in certificates.into_iter().zip(others) {
-        let scored = score(certificate, other, evidence.clone(), replay.clone());
-        assert_eq!(missing(scored), Some(ScorePart::Accuracy));
-    }
-}
-
-#[test]
-fn accuracy_evidence_that_ran_a_case_beside_every_manufactured_one_scores() {
+fn accuracy_evidence_that_never_ran_the_slice_window_is_missing() {
     let (case, core, store) = (case(), reference(INTERVAL_NS), MemoryStore::default());
     let ran = arena(&case, &core, &store, case.seed(), END_NS);
     let certificate = certified(&ran.session().conservation());
-    let mut cases = AccuracyCase::manufactured().expect("every case builds");
-    let closed = TwoReservoirs::closed().expect("a body");
-    cases.push(AccuracyCase::TwoReservoir(Box::new(closed.until(at(2_000)))));
-    let wider = AccuracyPolicy::new(cases, measure(5.0), measure(0.0), 100 * SECOND).expect("a policy");
-    let checked = accuracy(&core, &wider).expect("within the policy");
     let scored = score(
         certificate,
-        checked,
+        without_the_window(INTERVAL_NS),
         ran.into_evidence(),
         replayed(&case, INTERVAL_NS),
     );
-    assert_eq!(missing(scored), None);
+    assert_eq!(missing(scored), Some(ScorePart::Accuracy));
 }
 
 #[test]
@@ -269,6 +255,11 @@ fn replay_evidence_of_another_run_is_missing() {
     let ran = arena(&case, &core, &store, case.seed(), END_NS);
     let certificate = certified(&ran.session().conservation());
     let other = replayed(&case, INTERVAL_NS / 2);
-    let scored = score(certificate, checked(INTERVAL_NS), ran.into_evidence(), other);
+    let scored = score(
+        certificate,
+        without_the_window(INTERVAL_NS),
+        ran.into_evidence(),
+        other,
+    );
     assert_eq!(missing(scored), Some(ScorePart::Replay));
 }

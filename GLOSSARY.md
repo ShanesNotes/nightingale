@@ -488,6 +488,9 @@ _Avoid_: re-anchoring, daily reset
 **Accuracy gate**:
 The arena check that runs a solver core on manufactured cases with known answers and against the reference integrator, because a step can close every ledger and still be wrong.
 
+**Slice window**:
+A stretch of the slice that the accuracy gate runs against the reference integrator at three refinements, because it has no closed form. The first is admission, a posture change and a meal. The finest refinement stands for the solution, and a core may stand no further from it, on any compared value or mode transition, than the coarser refinements do.
+
 **Replay gates**:
 The arena checks that pace, resuming, late events, rewinding, extra evaluations and attached observers never change physiology bits, and that a step policy moves no event further from the reference integrator than a declared tolerance.
 
@@ -499,7 +502,7 @@ The arena's evidence of how hard a solver core worked for one run, beside the ce
 _Avoid_: health check (that is the healthy-range check)
 
 **Score**:
-The arena's result for one run: a certificate of the history the run ended on, accuracy evidence of its solver core on every manufactured case at the model-default bound, its throughput and numerical health, and replay evidence of its run identity, each with the policy values it was judged by. A part from another run, or from a gate that did not run, is missing evidence and never a pass.
+The arena's result for one run: a certificate of the history the run ended on, accuracy evidence of its solver core on every manufactured case and the first slice window at the model-default bound, its throughput and numerical health, and replay evidence of its run identity, each with the policy values it was judged by. A part from another run, or from a gate that did not run, is missing evidence and never a pass.
 
 **Policy value**:
 A model default the validation crate sets for a gate and every result reports: the accuracy tolerances, the error scales, each core's minimum interval and the certificate's closure floor.
