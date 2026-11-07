@@ -173,6 +173,7 @@ pub enum AccuracyCase {
 /// One window, measured once: the finest refinement stands for the solution, and a quantity's
 /// distance is the farthest the coarser two stand from it.
 pub struct SliceWindow {
+    _policy: WindowPolicy,
     _distances: Vec<Compensated>,
 }
 impl SliceWindow {
@@ -180,6 +181,21 @@ impl SliceWindow {
     pub fn first() -> Result<Self, AccuracyFailure> {
         todo!()
     }
+    pub fn policy(&self) -> &WindowPolicy {
+        todo!()
+    }
+}
+/// A window's policy values: the margin over the coarser refinements' spread, the distance floor,
+/// the landing tolerance, the compared grid, how far past its end transitions count, and the
+/// reference's refinements.
+pub struct WindowPolicy {
+    _margin: u64,
+    _distance_floor: Compensated,
+    _landing_ns: NonZeroU64,
+    _grid_ns: u64,
+    _past_end_ns: u64,
+    _refinements_ns: [u64; 3],
+    _refinement_scales: ErrorScales,
 }
 /// The contract's slow reference: fully coupled backward Euler, step doubled, with Newton to
 /// convergence on the compiled body, on the public seam and nothing else. It serves the accuracy
@@ -239,10 +255,18 @@ impl AccuracyPolicy {
 /// The worst error per case, under one policy. Accepted values only: a trial state is never read.
 pub struct AccuracyEvidence {
     _policy: Digest,
+    _resolution: Digest,
+    _absolute: Compensated,
+    _relative: Compensated,
+    _grid_ns: u64,
+    _windows: Vec<WindowPolicy>,
     _worst: Vec<Compensated>,
 }
 impl AccuracyEvidence {
     pub fn policy(&self) -> Digest {
+        todo!()
+    }
+    pub fn resolution(&self) -> Digest {
         todo!()
     }
     pub fn worst(&self) -> &[Compensated] {
@@ -370,10 +394,9 @@ pub struct NumericalHealth {
 pub trait CoreFactory {
     fn fresh(&self) -> Box<dyn CoupledSolver + '_>;
 }
-/// The run's evidence, bound to the run identity it measured, so evidence from another run
-/// cannot be scored with this one.
 pub struct RunEvidence {
-    _run: Digest,
+    _seal: HistorySeal,
+    _resolution: DeclaredResolution,
     _throughput: ThroughputEvidence,
     _health: NumericalHealth,
 }
@@ -395,6 +418,25 @@ pub struct ArenaScore {
     _evidence: RunEvidence,
     _replay: ReplayEvidence,
 }
+impl ArenaScore {
+    pub fn certificate(&self) -> &Certificate {
+        todo!()
+    }
+    pub fn accuracy(&self) -> &AccuracyEvidence {
+        todo!()
+    }
+    pub fn evidence(&self) -> &RunEvidence {
+        todo!()
+    }
+    pub fn replay(&self) -> &ReplayEvidence {
+        todo!()
+    }
+}
+pub enum ScorePart {
+    Certificate,
+    Accuracy,
+    Replay,
+}
 pub enum ArenaFailure {
     Admission(AdmissionError),
     Initialization(InitializationFailure),
@@ -407,7 +449,7 @@ pub enum ArenaFailure {
     /// would test nothing.
     NoLateBoundary { id: InputId },
     /// A gate that did not run, or evidence from another run: never scored as a pass.
-    MissingEvidence { gate: ReplayGate },
+    MissingEvidence { part: ScorePart },
     /// A clock with no reading left, one that ran backward or stood still over a repeat, or a repeat
     /// with no waveform sample: a throughput that measured nothing.
     MissingThroughput,
@@ -434,7 +476,6 @@ pub fn run<'m>(
 ) -> Result<ArenaRun<'m>, ArenaFailure> {
     todo!()
 }
-/// A score needs all three: the certificate, the accuracy evidence and the run's evidence.
 /// Runs every replay gate against the uninterrupted run, building each core it resumes or
 /// rewinds into from `cores`.
 pub fn replay_gates(
@@ -444,8 +485,9 @@ pub fn replay_gates(
 ) -> Result<ReplayEvidence, ArenaFailure> {
     todo!()
 }
-/// A score needs all four: the certificate, the accuracy evidence, the run's evidence and the
-/// replay gates' evidence for the same run. Replay evidence from another run is `MissingEvidence`.
+/// A score needs all four parts of the run its run evidence names: a certificate of the history it
+/// ended on, accuracy evidence of its core on every case of the arena's policy, and replay evidence of
+/// its identity. Any other part is `MissingEvidence`.
 pub fn score(
     _certificate: Certificate,
     _accuracy: AccuracyEvidence,

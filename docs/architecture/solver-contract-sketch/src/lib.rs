@@ -237,11 +237,11 @@
 //!     SplitTrace::new(id, grid, state, exchange, observable, events)
 //! }
 //! ```
-//! Legal twin: the record samples its own sealed history.
+//! Legal twin: the record reads each accepted head, with its step, into a draw.
 //! ```
-//! use solver_contract_sketch::{ng_contract::*, ng_record::PatientRecord};
-//! fn sampled(record: &PatientRecord, grid: TraceGrid) -> Result<SplitTrace, AdmissionError> {
-//!     record.split_trace(grid)
+//! use solver_contract_sketch::{ng_contract::*, ng_record::{PatientRecord, StepReceipt}};
+//! fn sampled(record: &PatientRecord, mut draw: TraceDraw, step: &StepReceipt) -> Result<SplitTrace, SplitRejected> {
+//!     record.split_trace(&mut draw, Some(step))?; draw.finish()
 //! }
 //! ```
 //!

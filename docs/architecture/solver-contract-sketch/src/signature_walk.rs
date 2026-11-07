@@ -417,14 +417,24 @@
 //!     Ok(resumed)
 //! }
 //!
-//! // 10. Split measurement: a qualification only from four-family traces and a measured reference error.
-//! fn qualify(reference: &PatientRecord, refined: &PatientRecord, split: &PatientRecord)
+//! // 10. Split measurement: a qualification only from four-family traces drawn from accepted heads
+//! // and a measured reference error.
+//! fn trace(mut session: Session<'_, Running>, body: &CompiledBody, lens: &ObservationLens) -> Option<SplitTrace> {
+//!     let grid = TraceGrid::new(SimTime::from_ns(0), NonZeroU64::new(1_000_000)?, 7_200).ok()?;
+//!     let mut draw = TraceDraw::new(body, lens, grid).ok()?;
+//!     session.record().split_trace(&mut draw, None).ok()?;
+//!     while session.record().accepted().time() < grid.end() {
+//!         let Step::Accepted(next, receipt) = session.step() else { return None };
+//!         next.record().split_trace(&mut draw, Some(&receipt)).ok()?;
+//!         session = next;
+//!     }
+//!     draw.finish().ok()
+//! }
+//! fn qualify(coarse: SplitTrace, reference: SplitTrace, split: SplitTrace, scales: ErrorScales)
 //!     -> Option<SplitQualification> {
-//!     let grid = || TraceGrid::new(SimTime::from_ns(0), 1_000_000, 7_200).ok();
-//!     let reference = reference.split_trace(grid()?).ok()?;
-//!     let error = ReferenceError::self_convergence(&reference, &refined.split_trace(grid()?).ok()?).ok()?;
-//!     let budget = SplitBudget::new([1.0; 4], 0.25).ok()?;
-//!     SplitMeasurement::new(reference, split.split_trace(grid()?).ok()?, error, budget).ok()?.qualify().ok()
+//!     let error = ReferenceError::self_convergence(&coarse, &reference).ok()?;
+//!     let budget = SplitBudget::new(scales, scales, scales, scales, Measure::new(0.25).ok()?).ok()?;
+//!     SplitMeasurement::new(reference, split, error, budget).ok()?.qualify().ok()
 //! }
 //!
 //! // 11. Certificate: one sealed view of one record, with the segment queries it needs.

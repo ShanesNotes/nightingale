@@ -937,9 +937,7 @@ fn the_trace_reads_the_sodium_the_engine_carried_from_the_duct_to_the_bladder() 
     let mut session = admitted.unwrap_or_else(|_| panic!("admitted"));
     let readings = Readings::bind(&body).unwrap_or_else(|_| panic!("bound"));
     for _ in 0..20 {
-        session = crate::run::advance(session)
-            .unwrap_or_else(|_| panic!("stepped"))
-            .0;
+        session = crate::run::advance(session).unwrap_or_else(|_| panic!("stepped"));
         let ledger = session.conservation();
         let moved = readings.sodium_excreted_per_second(&ledger.head().expect("a head"));
         let (_, reading) = readings.read(session.record().accepted());

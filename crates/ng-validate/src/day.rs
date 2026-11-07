@@ -6,7 +6,7 @@ mod trace;
 mod tests;
 
 use crate::initialize::{admit_start, solved_start};
-use crate::run::advance;
+use crate::run::accept;
 use core::fmt;
 use core::num::NonZeroU32;
 use judge::{Shown, Uncovered};
@@ -389,7 +389,7 @@ impl Start<'_> {
         let mut fold = Fold::new(plan, self.scales, self.sizes, start, phase);
         while session.record().accepted().time() < end {
             let before = session.record().accepted().time();
-            let (next, receipt) = advance(session).map_err(exported)?;
+            let (next, receipt) = accept(session).map_err(exported)?;
             session = next;
             let view = session.record().accepted();
             let (phase, reading) = self.readings.read(view);

@@ -71,6 +71,12 @@ impl SlidingWindows {
             coverage_ns,
         })
     }
+    pub fn window_ns(&self) -> NonZeroU64 {
+        self.window_ns
+    }
+    pub fn coverage_ns(&self) -> u64 {
+        self.coverage_ns
+    }
 }
 pub struct CertificatePolicy {
     basis: Digest,
@@ -134,6 +140,8 @@ impl CertificatePolicy {
 #[derive(Clone, Copy, Debug)]
 pub struct QuantityResult {
     quantity: QuantityId,
+    closure_floor: Compensated,
+    closure_relative: Compensated,
     worst_closure: Compensated,
     closure_window: Interval,
     worst_drift: Compensated,
@@ -142,6 +150,12 @@ pub struct QuantityResult {
 impl QuantityResult {
     pub fn quantity(&self) -> QuantityId {
         self.quantity
+    }
+    pub fn closure_floor(&self) -> Compensated {
+        self.closure_floor
+    }
+    pub fn closure_relative(&self) -> Compensated {
+        self.closure_relative
     }
     /// The largest `|inventory change - net boundary exchange|` over any window.
     pub fn worst_closure(&self) -> Compensated {
@@ -189,6 +203,7 @@ pub struct Certificate {
     seal: HistorySeal,
     basis: Digest,
     policy: Digest,
+    windows: SlidingWindows,
     span: Interval,
     results: Vec<QuantityResult>,
     coverage: CoverageManifest,
@@ -204,6 +219,9 @@ impl Certificate {
     }
     pub fn policy(&self) -> Digest {
         self.policy
+    }
+    pub fn windows(&self) -> SlidingWindows {
+        self.windows
     }
     /// Admission to the accepted head the walk read.
     pub fn span(&self) -> Interval {
@@ -449,8 +467,11 @@ fn keep_the_earliest_worst(
             closure,
             drift,
         } = window;
+        let limits = &policy.quantities[quantity];
         let result = worst[quantity].get_or_insert(QuantityResult {
-            quantity: policy.quantities[quantity].quantity,
+            quantity: limits.quantity,
+            closure_floor: limits.absolute,
+            closure_relative: Compensated::of(&limits.relative),
             worst_closure: closure,
             closure_window: interval,
             worst_drift: drift,
@@ -517,6 +538,7 @@ pub fn certify(
         seal: view.seal(),
         basis: policy.basis,
         policy: policy.digest(),
+        windows: policy.windows,
         span,
         results,
         coverage: view.basis().coverage().clone(),

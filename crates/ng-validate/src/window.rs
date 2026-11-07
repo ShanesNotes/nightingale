@@ -14,16 +14,97 @@ use ng_contract::{
 const SECOND: u64 = 1_000_000_000;
 const MILLISECOND: u64 = 1_000_000;
 const REFINEMENT: u64 = 4;
-/// At 1 µs the reference's Newton could not settle on a landing's span and the run faulted.
-const LANDING_NS: NonZeroU64 = NonZeroU64::MIN.saturating_add(100_000 - 1);
-const GRID_NS: u64 = 10 * MILLISECOND;
 const LENGTH_NS: u64 = 6 * SECOND;
-/// So a transition just before the end finds its counterpart in a run that makes it just after.
-const TRANSITIONS_PAST_END_NS: u64 = 500 * MILLISECOND;
-/// Model default.
-const DISTANCE_FLOOR_SHARE: f64 = 1e-6;
-/// Model default.
-const MARGIN: u64 = 2;
+
+/// The policy values a window judges by, all model defaults.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WindowPolicy {
+    margin: u64,
+    distance_floor: f64,
+    landing_ns: NonZeroU64,
+    grid_ns: u64,
+    past_end_ns: u64,
+    refinements_ns: [u64; 3],
+    refinement_scales: ErrorScales,
+}
+impl WindowPolicy {
+    fn of(longest: u64) -> Self {
+        let scale = |value| Measure::<Dimensionless>::new(value).expect("a finite constant");
+        Self {
+            margin: 2,
+            distance_floor: 1e-6,
+            // At 1 µs the reference's Newton could not settle on a landing's span and the run faulted.
+            landing_ns: NonZeroU64::MIN.saturating_add(100_000 - 1),
+            grid_ns: 10 * MILLISECOND,
+            past_end_ns: 500 * MILLISECOND,
+            refinements_ns: [longest, longest / REFINEMENT, longest / (REFINEMENT * REFINEMENT)],
+            refinement_scales: ErrorScales::uniform(scale(1e9), scale(1.0)).expect("positive constants"),
+        }
+    }
+    /// How many times the coarser refinements' spread a core may stand from the finest, on values, transitions and
+    /// instants in other modes.
+    pub fn margin(&self) -> u64 {
+        self.margin
+    }
+    /// The least a quantity's distance may be, as a share of the most the finest refinement holds of it.
+    pub fn distance_floor(&self) -> Compensated {
+        Compensated::of(&self.floor())
+    }
+    /// The refinements' minimum interval, which locates each landing, and the least a transition's distance may be.
+    pub fn landing_ns(&self) -> NonZeroU64 {
+        self.landing_ns
+    }
+    pub fn grid_ns(&self) -> u64 {
+        self.grid_ns
+    }
+    /// How far past the window's end a run goes on recording transitions, so one just before the end finds its
+    /// counterpart in a run that makes it just after.
+    pub fn past_end_ns(&self) -> u64 {
+        self.past_end_ns
+    }
+    /// The reference's intervals, coarsest first: the body's longest step, then each a quarter of the last.
+    pub fn refinements_ns(&self) -> [u64; 3] {
+        self.refinements_ns
+    }
+    /// So loose the estimate never refuses, and each refinement takes the step it names.
+    pub fn refinement_scales(&self) -> ErrorScales {
+        self.refinement_scales
+    }
+    fn floor(&self) -> Measure<Dimensionless> {
+        Measure::new(self.distance_floor).expect("a finite constant")
+    }
+    fn seal(&self, bytes: &mut Vec<u8>) {
+        let Self {
+            margin,
+            distance_floor,
+            landing_ns,
+            grid_ns,
+            past_end_ns,
+            refinements_ns,
+            refinement_scales,
+        } = *self;
+        for value in [
+            margin,
+            distance_floor.to_bits(),
+            landing_ns.get(),
+            grid_ns,
+            past_end_ns,
+        ] {
+            bytes.extend_from_slice(&value.to_be_bytes());
+        }
+        for reference in references(refinements_ns, refinement_scales, landing_ns) {
+            bytes.extend_from_slice(reference.resolution().digest().as_bytes());
+        }
+    }
+}
+
+fn references(intervals_ns: [u64; 3], scales: ErrorScales, floor: NonZeroU64) -> [ReferenceIntegrator; 3] {
+    intervals_ns.map(|interval_ns| {
+        ReferenceIntegrator::new(interval_ns)
+            .with_scales(scales)
+            .with_floor(floor)
+    })
+}
 
 /// One quantity the window compares at each instant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,8 +185,14 @@ struct Measured {
     end: SimTime,
 }
 impl Measured {
-    fn new(compared: Vec<Compared>, target: Trace, rungs: &[&Trace], end: SimTime) -> Self {
-        let floor = Measure::<Dimensionless>::new(DISTANCE_FLOOR_SHARE).expect("a finite constant");
+    fn new(
+        policy: &WindowPolicy,
+        compared: Vec<Compared>,
+        target: Trace,
+        rungs: &[&Trace],
+        end: SimTime,
+    ) -> Self {
+        let (floor, margin) = (policy.floor(), policy.margin);
         let distances = (0..compared.len())
             .map(|quantity| {
                 let mut most = Compensated::ZERO;
@@ -127,7 +214,7 @@ impl Measured {
                         }
                     }
                 }
-                distance.scaled(MARGIN as i64)
+                distance.scaled(margin as i64)
             })
             .collect();
         let transition_distances = (target.kinds().into_iter())
@@ -135,8 +222,8 @@ impl Measured {
                 let most = (rungs.iter())
                     .filter_map(|rung| rung.farthest_from(&target, kind, end))
                     .map(|(_, apart)| apart)
-                    .fold(LANDING_NS.get(), u64::max);
-                (kind, MARGIN * most)
+                    .fold(policy.landing_ns.get(), u64::max);
+                (kind, margin * most)
             })
             .collect();
         let most_apart = rungs.iter().map(|rung| rung.apart(&target)).max().unwrap_or(0);
@@ -144,7 +231,7 @@ impl Measured {
             compared,
             distances,
             transition_distances,
-            most_apart: MARGIN as usize * most_apart,
+            most_apart: margin as usize * most_apart,
             target,
             end,
         }
@@ -264,6 +351,7 @@ fn admission(error: AdmissionError) -> AccuracyFailure {
 pub struct SliceWindow {
     body: CompiledBody,
     solution: Vec<f64>,
+    policy: WindowPolicy,
     measured: Measured,
 }
 impl SliceWindow {
@@ -276,24 +364,28 @@ impl SliceWindow {
         let boundary = BoundaryPort::new(timeline().map_err(admission)?).map_err(admission)?;
         let solution =
             solution(&body, packet, boundary, &lens, anchor_moment()).map_err(AccuracyFailure::Admission)?;
-        let longest = body.longest_step_ns();
+        let policy = WindowPolicy::of(body.longest_step_ns());
         let [coarse, middle, finest] =
-            [longest, longest / REFINEMENT, longest / (REFINEMENT * REFINEMENT)].map(fixed);
+            references(policy.refinements_ns, policy.refinement_scales, policy.landing_ns);
         let [coarse, middle, finest] =
-            [&coarse, &middle, &finest].map(|reference| trace(&body, &solution, reference));
-        let measured = Measured::new(compared(&body), finest?, &[&coarse?, &middle?], end());
+            [&coarse, &middle, &finest].map(|reference| trace(&body, &solution, &policy, reference));
+        let measured = Measured::new(&policy, compared(&body), finest?, &[&coarse?, &middle?], end());
         Ok(Self {
             body,
             solution,
+            policy,
             measured,
         })
+    }
+    pub fn policy(&self) -> &WindowPolicy {
+        &self.policy
     }
     pub(crate) fn judge(
         &self,
         core: &dyn CoupledSolver,
         case: usize,
     ) -> Result<Compensated, AccuracyFailure> {
-        let run = trace(&self.body, &self.solution, core)?;
+        let run = trace(&self.body, &self.solution, &self.policy, core)?;
         self.measured.verdict(&run, case)
     }
     /// Everything the window judges by, so two windows that would judge a core apart never share an identity.
@@ -301,9 +393,11 @@ impl SliceWindow {
         let Self {
             body,
             solution,
+            policy,
             measured,
         } = self;
         let mut bytes = body.model_hash().digest().as_bytes().to_vec();
+        policy.seal(&mut bytes);
         let mut number = |value: u64| bytes.extend_from_slice(&value.to_be_bytes());
         solution.iter().for_each(|value| number(value.to_bits()));
         measured.seal(&mut number);
@@ -328,7 +422,12 @@ fn compared(body: &CompiledBody) -> Vec<Compared> {
     rows.chain(columns.into_iter().map(Compared::Exchange)).collect()
 }
 
-fn trace(body: &CompiledBody, solution: &[f64], core: &dyn CoupledSolver) -> Result<Trace, AccuracyFailure> {
+fn trace(
+    body: &CompiledBody,
+    solution: &[f64],
+    policy: &WindowPolicy,
+    core: &dyn CoupledSolver,
+) -> Result<Trace, AccuracyFailure> {
     let compared = compared(body);
     let boundary = BoundaryPort::new(timeline().map_err(admission)?).map_err(admission)?;
     let (packet, lens) = (
@@ -346,10 +445,10 @@ fn trace(body: &CompiledBody, solution: &[f64], core: &dyn CoupledSolver) -> Res
         instants: Vec::new(),
         transitions: Vec::new(),
     };
-    let mut next = anchor_moment().nanoseconds() + GRID_NS;
-    while session.record().accepted().time().nanoseconds() < end + TRANSITIONS_PAST_END_NS {
+    let mut next = anchor_moment().nanoseconds() + policy.grid_ns;
+    while session.record().accepted().time().nanoseconds() < end + policy.past_end_ns {
         let before = session.record().accepted().modes().to_vec();
-        (session, _) = advance(session).map_err(faulted)?;
+        session = advance(session).map_err(faulted)?;
         let accepted = session.record().accepted();
         let (now, after) = (accepted.time(), accepted.modes());
         for (mode, (was, is)) in before.iter().zip(after).enumerate() {
@@ -376,19 +475,10 @@ fn trace(body: &CompiledBody, solution: &[f64], core: &dyn CoupledSolver) -> Res
                 modes: if at == now { after.to_vec() } else { before.clone() },
                 values: compared.iter().map(read).collect(),
             });
-            next += GRID_NS;
+            next += policy.grid_ns;
         }
     }
     Ok(trace)
-}
-
-/// Fixed step: scales this loose never refuse on the estimate, so each refinement takes the step it names.
-fn fixed(interval_ns: u64) -> ReferenceIntegrator {
-    let scale = |value| Measure::<Dimensionless>::new(value).expect("a finite constant");
-    let loose = ErrorScales::uniform(scale(1e9), scale(1.0)).expect("positive constants");
-    ReferenceIntegrator::new(interval_ns)
-        .with_scales(loose)
-        .with_floor(LANDING_NS)
 }
 
 fn after(ns: u64, tag: &[u8], payload: BoundaryInput) -> BoundaryEvent {
@@ -439,11 +529,12 @@ fn timeline() -> Result<Vec<BoundaryEvent>, AdmissionError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Instant, Kind, Measured, Trace, Transition};
+    use super::{Instant, Kind, Measured, Trace, Transition, WindowPolicy};
     use crate::AccuracyFailure;
     use ng_contract::SimTime;
 
     const MILLISECOND: u64 = 1_000_000;
+    const SECOND: u64 = 1_000_000_000;
 
     /// No compared values, so only modes and transitions decide: on the body a moved transition moves values too,
     /// and the values are compared first.
@@ -470,7 +561,13 @@ mod tests {
     fn measured() -> Measured {
         let target = modes_only(&[0, 1, 1, 0], &[((0, 1), 15), ((0, 0), 35)]);
         let rung = modes_only(&[0, 0, 1, 0], &[((0, 1), 18), ((0, 0), 34)]);
-        Measured::new(Vec::new(), target, &[&rung], SimTime::from_ns(40 * MILLISECOND))
+        Measured::new(
+            &WindowPolicy::of(SECOND),
+            Vec::new(),
+            target,
+            &[&rung],
+            SimTime::from_ns(40 * MILLISECOND),
+        )
     }
 
     #[test]

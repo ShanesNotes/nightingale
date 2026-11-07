@@ -60,6 +60,9 @@ _Avoid_: save (in prose)
 **Seal**:
 A digest that chains the seal before it with one accepted step's image and ledger chunk, so one seal stands for the whole accepted course up to that step. It covers nothing that waits.
 
+**Accepted head**:
+The accepted state at one step boundary, held with its digest. Only installing a step the contract settled on it moves it, so a split trace that reads accepted heads from an admission reads only steps the contract verified.
+
 **History store**:
 Host storage for the links of the seal's chain, addressed by seal and trusted for nothing: a session hands it each link as its step is accepted, and a load checks each link against the seal that asked for it.
 
@@ -453,7 +456,13 @@ The amount a transfer moved over one step, kept as gross forward and reverse par
 The record of each numerical stage a step used (its time, point and weight), which the contract re-evaluates on the record crate's own values before the step can be accepted.
 
 **Reference integrator**:
-The fully coupled backward Euler core in `ng-validate`, run at three refinements, against which the accuracy gate measures each solver core.
+The fully coupled backward Euler core in `ng-validate`, run at three refinements, against which the accuracy gate and the split measurement measure each solver core.
+
+**Split measurement**:
+How a core that evaluates some blocks apart within a step earns trust: its split trace and the reference integrator's, on one grid of one case, are compared family by family, and the reference's own error, its distance from a run with steps twice as long, counts against the same budget. Only a split measurement qualifies a split, and no run it measures is scored.
+
+**Split trace**:
+One run's state, exchange integrals, observations and event times on a grid, drawn from admission one accepted head at a time, each kept only when the extents of the step that made it name the run, the head before it and that head. It never rests on samples a caller supplies.
 
 **Bench integrator**:
 An explicit Heun integrator that serves only as a test bench, never as a solver core (rule 8).
@@ -523,6 +532,12 @@ The sample standard deviation of a quantity's beat means over its baseline windo
 
 **Declared tolerance**:
 What a core's declared error scales allow a row at a value: the absolute scale times the row's natural size plus the relative scale times the value, carried through a sum, ratio or product of rows.
+
+**Score**:
+The arena's result for one run: a certificate of the history the run ended on, accuracy evidence of its solver core on every manufactured case and the first slice window at the model-default bound, its throughput and numerical health, and replay evidence of its run identity, each with the policy values it was judged by. A part from another run, or from a gate that did not run, is missing evidence and never a pass.
+
+**Policy value**:
+A model default the validation crate sets for a gate and every result reports: the accuracy tolerances, a slice window's margin, distance floor, landing tolerance, grid and reference refinements, the error scales, each core's minimum interval and the certificate's closure floor.
 
 **Pulse**:
 The Pulse Physiology Engine, a reference to compare against and never a pass bar (rule 6). A Pulse diff, a match to published data and clinical validity are three separate claims.

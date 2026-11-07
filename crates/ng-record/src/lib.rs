@@ -165,6 +165,24 @@
 //! fn read_only<T: Sync>() {}
 //! read_only::<ng_record::PatientRecord<'static>>();
 //! ```
+//! A split trace comes only from a record's accepted heads, never from invented samples.
+//! ```compile_fail,E0599
+//! use ng_contract::*;
+//! fn invented(id: &RunIdentity, grid: TraceGrid, state: FamilySamples<StateFamily>,
+//!     exchange: FamilySamples<ExchangeFamily>, observable: FamilySamples<ObservableFamily>,
+//!     events: FamilySamples<EventTimeFamily>) -> SplitTrace {
+//!     SplitTrace::new(id, grid, state, exchange, observable, events)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! use ng_record::*;
+//! fn sampled(record: &PatientRecord<'_>, mut draw: TraceDraw, receipt: &StepReceipt)
+//!     -> Result<SplitTrace, SplitRejected> {
+//!     record.split_trace(&mut draw, Some(receipt))?;
+//!     draw.finish()
+//! }
+//! ```
 
 mod checkpoint;
 mod history;

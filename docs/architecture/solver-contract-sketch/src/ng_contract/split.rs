@@ -1,8 +1,9 @@
 //! Split qualification is measured evidence. It is produced only by `SplitMeasurement` over the
 //! four-family split metric (state, exchange integral, observable, event time; CB numerics.rs
 //! 122-260), with the reference's own self-convergence error included. It is never a byte array.
-use super::{AdmissionError, Digest, SimTime};
+use super::{AdmissionError, CompiledBody, Digest, Dimensionless, ErrorScales, Measure, ObservationLens, SimTime};
 use core::marker::PhantomData;
+use core::num::NonZeroU64;
 
 mod sealed {
     pub trait MetricFamily {}
@@ -22,13 +23,17 @@ impl sealed::MetricFamily for EventTimeFamily {}
 impl MetricFamily for EventTimeFamily {}
 
 /// A shared physical sample grid; both traces of a comparison must use the same one.
+#[derive(Clone, Copy)]
 pub struct TraceGrid {
     _start: SimTime,
-    _period_ns: u64,
+    _period_ns: NonZeroU64,
     _samples: u32,
 }
 impl TraceGrid {
-    pub fn new(_start: SimTime, _period_ns: u64, _samples: u32) -> Result<Self, AdmissionError> {
+    pub fn new(_start: SimTime, _period_ns: NonZeroU64, _samples: u32) -> Result<Self, AdmissionError> {
+        todo!()
+    }
+    pub fn end(&self) -> SimTime {
         todo!()
     }
 }
@@ -37,13 +42,9 @@ pub struct FamilySamples<F: MetricFamily> {
     _values: Vec<f64>,
     _family: PhantomData<F>,
 }
-impl<F: MetricFamily> FamilySamples<F> {
-    pub fn new(_keys: Vec<Digest>, _values: Vec<f64>) -> Result<Self, AdmissionError> {
-        todo!()
-    }
-}
 /// One run's samples on a grid, all four families required, bound to that run's identity.
-/// Produced only by `PatientRecord::split_trace` from accepted history; there is no constructor
+/// Produced only by a `TraceDraw` that `PatientRecord::split_trace` feeds each accepted head, with
+/// the extents of the step the contract settled on the head before it; there is no constructor
 /// from samples, so a qualification cannot rest on invented traces.
 pub struct SplitTrace {
     _identity: Digest,
@@ -53,24 +54,44 @@ pub struct SplitTrace {
     _observable: FamilySamples<ObservableFamily>,
     _event_time: FamilySamples<EventTimeFamily>,
 }
-/// The coupled reference's own error, measured against a refined reference; never assumed zero.
-/// It keeps the binding (identity, grid and samples digest) of the reference trace it was measured
-/// on, so an easier run's small error cannot stand in for this reference's.
+/// Reads one course's accepted heads in order and keeps the grid's samples.
+pub struct TraceDraw {
+    _grid: TraceGrid,
+    _lens: Digest,
+}
+impl TraceDraw {
+    pub fn new(_body: &CompiledBody, _lens: &ObservationLens, _grid: TraceGrid) -> Result<Self, SplitRejected> {
+        todo!()
+    }
+    /// Refuses a draw that has not reached the grid's last instant.
+    pub fn finish(self) -> Result<SplitTrace, SplitRejected> {
+        todo!()
+    }
+}
+/// The coupled reference's own error, its distance from a run with steps at least twice as long;
+/// never assumed zero. It keeps the binding (identity, grid and samples digest) of the reference
+/// trace it was measured on, so an easier run's small error cannot stand in for this reference's.
 pub struct ReferenceError {
     _reference: Digest,
     _per_family: [f64; 4],
 }
 impl ReferenceError {
-    pub fn self_convergence(_reference: &SplitTrace, _refined: &SplitTrace) -> Result<Self, SplitRejected> {
+    pub fn self_convergence(_coarse: &SplitTrace, _reference: &SplitTrace) -> Result<Self, SplitRejected> {
         todo!()
     }
 }
 pub struct SplitBudget {
-    _scales: [f64; 4],
-    _reference_fraction: f64,
+    _scales: [ErrorScales; 4],
+    _reference_fraction: Measure<Dimensionless>,
 }
 impl SplitBudget {
-    pub fn new(_scales: [f64; 4], _reference_fraction: f64) -> Result<Self, AdmissionError> {
+    pub fn new(
+        _state: ErrorScales,
+        _exchange: ErrorScales,
+        _observable: ErrorScales,
+        _event_time: ErrorScales,
+        _reference_fraction: Measure<Dimensionless>,
+    ) -> Result<Self, AdmissionError> {
         todo!()
     }
 }

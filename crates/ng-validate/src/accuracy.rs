@@ -1,5 +1,5 @@
 use crate::run::advance;
-use crate::{Compared, MemoryStore, ReplayCase, SliceWindow, TwoReservoirs};
+use crate::{Compared, MemoryStore, ReplayCase, SliceWindow, TwoReservoirs, WindowPolicy};
 use core::cell::RefCell;
 use ng_contract::{
     AcceptedStateView, AdmissionError, Attempt, BoundParameters, ColumnId, Compensated, CoupledProblem,
@@ -51,11 +51,19 @@ struct Manufactured {
     check: Check,
 }
 
+const WINDOW: u8 = 5;
+
 enum Judged {
     Manufactured(Manufactured),
     Window(SliceWindow),
 }
 impl Judged {
+    fn identity(&self) -> (u8, Digest) {
+        match self {
+            Self::Manufactured(case) => (case.kind, case.fixture.digest()),
+            Self::Window(window) => (WINDOW, window.digest()),
+        }
+    }
     fn of(case: AccuracyCase) -> Result<Self, AdmissionError> {
         let plain = |kind, fixture| {
             Self::Manufactured(Manufactured {
@@ -117,13 +125,18 @@ impl AccuracyPolicy {
     }
     /// Every manufactured case under the model defaults.
     pub fn manufactured() -> Result<Self, AdmissionError> {
-        let absolute = Measure::new(5.0)?;
-        Self::new(
-            AccuracyCase::manufactured()?,
-            absolute,
-            Measure::new(0.0)?,
-            100 * SECOND,
-        )
+        Self::defaulted(AccuracyCase::manufactured()?)
+    }
+    /// Every manufactured case and the slice's first window under the model defaults: the policy a score holds a
+    /// core to.
+    pub fn arena() -> Result<Self, AccuracyFailure> {
+        let admission = |error: AdmissionError| AccuracyFailure::Admission(error.into());
+        let mut cases = AccuracyCase::manufactured().map_err(admission)?;
+        cases.push(AccuracyCase::SliceWindow(Box::new(SliceWindow::first()?)));
+        Self::defaulted(cases).map_err(admission)
+    }
+    fn defaulted(cases: Vec<AccuracyCase>) -> Result<Self, AdmissionError> {
+        Self::new(cases, Measure::new(5.0)?, Measure::new(0.0)?, 100 * SECOND)
     }
     pub fn digest(&self) -> Digest {
         let Self {
@@ -147,7 +160,7 @@ impl AccuracyPolicy {
                     fixture,
                     check: _,
                 }) => (*kind, fixture.digest()),
-                Judged::Window(window) => (5, window.digest()),
+                Judged::Window(window) => (WINDOW, window.digest()),
             };
             bytes.push(kind);
             bytes.extend_from_slice(digest.as_bytes());
@@ -159,14 +172,50 @@ impl AccuracyPolicy {
 #[derive(Debug)]
 pub struct AccuracyEvidence {
     policy: Digest,
+    resolution: Digest,
+    cases: Vec<(u8, Digest)>,
+    absolute: Compensated,
+    relative: Compensated,
+    grid_ns: u64,
+    windows: Vec<WindowPolicy>,
     worst: Vec<Compensated>,
 }
 impl AccuracyEvidence {
     pub fn policy(&self) -> Digest {
         self.policy
     }
+    pub fn resolution(&self) -> Digest {
+        self.resolution
+    }
+    pub fn absolute(&self) -> Compensated {
+        self.absolute
+    }
+    pub fn relative(&self) -> Compensated {
+        self.relative
+    }
+    pub fn grid_ns(&self) -> u64 {
+        self.grid_ns
+    }
+    /// The policy of each slice window it ran, in case order.
+    pub fn windows(&self) -> &[WindowPolicy] {
+        &self.windows
+    }
     pub fn worst(&self) -> &[Compensated] {
         &self.worst
+    }
+    /// Whether this ran `AccuracyPolicy::arena`'s cases under its bound, read without building its window again:
+    /// `SliceWindow::first` is the only window, so a window this ran is that one.
+    pub(crate) fn of_the_arena(&self) -> Result<bool, AdmissionError> {
+        let manufactured = AccuracyPolicy::manufactured()?;
+        let expected: Vec<(u8, Digest)> = manufactured.cases.iter().map(Judged::identity).collect();
+        let cases = match self.cases.split_last() {
+            Some(((kind, _), before)) => *kind == WINDOW && before == expected.as_slice(),
+            None => false,
+        };
+        Ok(cases
+            && self.absolute.bits() == manufactured.absolute.bits()
+            && self.relative.bits() == Compensated::of(&manufactured.relative).bits()
+            && self.grid_ns == manufactured.grid_ns)
     }
 }
 #[derive(Debug)]
@@ -294,6 +343,17 @@ pub fn accuracy(
     }
     Ok(AccuracyEvidence {
         policy: policy.digest(),
+        resolution: solver.resolution().digest(),
+        cases: policy.cases.iter().map(Judged::identity).collect(),
+        absolute: policy.absolute,
+        relative: Compensated::of(&policy.relative),
+        grid_ns: policy.grid_ns,
+        windows: (policy.cases.iter())
+            .filter_map(|case| match case {
+                Judged::Manufactured(_) => None,
+                Judged::Window(window) => Some(*window.policy()),
+            })
+            .collect(),
         worst,
     })
 }
@@ -312,7 +372,7 @@ fn closed_form(
     let mut session = case.admit(solver, &store).map_err(AccuracyFailure::Admission)?;
     let mut largest = Compensated::ZERO;
     while session.record().accepted().time() < case.end() {
-        (session, _) = advance(session).map_err(faulted)?;
+        session = advance(session).map_err(faulted)?;
         let record = session.record();
         let Some(interval) = record.accepted().last_segment().interval() else {
             continue;
@@ -348,7 +408,7 @@ fn independent(
         .admit(solver, &clean_store)
         .map_err(AccuracyFailure::Admission)?;
     let stage_before = stage_bits(solver, clean.record());
-    let (clean, _) = advance(clean).map_err(faulted)?;
+    let clean = advance(clean).map_err(faulted)?;
 
     let store = MemoryStore::default();
     let session = case.admit(solver, &store).map_err(AccuracyFailure::Admission)?;
@@ -368,7 +428,7 @@ fn independent(
         return Err(AccuracyFailure::NothingRefused { case: index });
     }
     let stage_after = stage_bits(solver, record);
-    let (session, _) = advance(session).map_err(faulted)?;
+    let session = advance(session).map_err(faulted)?;
     let same_stage = stage_before.is_some() && stage_before == stage_after;
     if !same_stage || clean.record().seal() != session.record().seal() {
         return Err(AccuracyFailure::Dependent { case: index });
@@ -455,4 +515,52 @@ pub fn observed_order(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ran(cases: Vec<(u8, Digest)>, absolute: f64, grid_ns: u64) -> bool {
+        let evidence = AccuracyEvidence {
+            policy: Digest::of_canonical(b"a policy"),
+            resolution: Digest::of_canonical(b"a core"),
+            cases,
+            absolute: Compensated::of(&Measure::<Water>::new(absolute).expect("finite")),
+            relative: Compensated::of(&Measure::<Dimensionless>::new(0.0).expect("finite")),
+            grid_ns,
+            windows: Vec::new(),
+            worst: Vec::new(),
+        };
+        evidence.of_the_arena().expect("the defaults build")
+    }
+
+    #[test]
+    fn only_the_arena_policys_cases_under_its_bound_and_grid_are_of_the_arena() {
+        let policy = AccuracyPolicy::manufactured().expect("the model default");
+        let manufactured: Vec<(u8, Digest)> = policy.cases.iter().map(Judged::identity).collect();
+        let then = |mut cases: Vec<(u8, Digest)>, last: (u8, Digest)| {
+            cases.push(last);
+            cases
+        };
+        let window = (WINDOW, Digest::of_canonical(b"a window"));
+        let grid = 100 * SECOND;
+        assert!(ran(then(manufactured.clone(), window), 5.0, grid));
+        assert!(!ran(manufactured.clone(), 5.0, grid), "no window");
+        assert!(
+            !ran(then(manufactured[..4].to_vec(), window), 5.0, grid),
+            "a case left out"
+        );
+        assert!(
+            !ran(then(manufactured.clone(), manufactured[0]), 5.0, grid),
+            "a sixth case that is no window"
+        );
+        let beside = then(then(manufactured.clone(), window), manufactured[0]);
+        assert!(!ran(beside, 5.0, grid), "a case after the window");
+        assert!(
+            !ran(then(manufactured.clone(), window), 6.0, grid),
+            "another bound"
+        );
+        assert!(!ran(then(manufactured, window), 5.0, grid / 2), "another grid");
+    }
 }

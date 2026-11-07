@@ -1,18 +1,18 @@
 use crate::initialize::{admit_start, solved_start};
-use crate::{ClockSource, WallClock};
+use crate::{ClockSource, ScorePart, WallClock};
 use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::{
-    BoundaryPort, CompiledBody, CoupledSolver, Digest, EngineFaultKind, InitializationFailure, Interval,
-    NumericalRefusal, ObservationLens, ObservationSeed, ParameterPacket, Seed, SimTime, SourceId,
-    SyntheticFixture,
+    BoundaryPort, CompiledBody, CoupledSolver, DeclaredResolution, Digest, EngineFaultKind,
+    InitializationFailure, Interval, NumericalRefusal, ObservationLens, ObservationSeed, ParameterPacket,
+    Seed, SimTime, SourceId, SyntheticFixture,
 };
 use ng_observe::{Observation, ObservedValue, Observer};
 use ng_record::{
-    CheckpointError, FaultReport, Faulted, HistoryStore, ObservationRefusal, Running, Session, Step,
-    StepReceipt,
+    CheckpointError, FaultReport, Faulted, HistorySeal, HistoryStore, ObservationRefusal, Running, Session,
+    Step, StepReceipt,
 };
 
-pub(crate) fn advance<'m>(
+pub(crate) fn accept<'m>(
     session: Session<'m, Running>,
 ) -> Result<(Session<'m, Running>, StepReceipt), Session<'m, Faulted>> {
     counted(session, &mut NumericalHealth::default())
@@ -43,13 +43,19 @@ fn counted<'m>(
     }
 }
 
+pub(crate) fn advance<'m>(
+    session: Session<'m, Running>,
+) -> Result<Session<'m, Running>, Session<'m, Faulted>> {
+    accept(session).map(|(session, _)| session)
+}
+
 /// Steps until the accepted head reaches `end`, retrying every refusal. A fault ends it with the latch.
 pub fn run_until<'m>(
     mut session: Session<'m, Running>,
     end: SimTime,
 ) -> Result<Session<'m, Running>, Session<'m, Faulted>> {
     while session.record().accepted().time() < end {
-        (session, _) = advance(session)?;
+        session = advance(session)?;
     }
     Ok(session)
 }
@@ -139,15 +145,22 @@ impl NumericalHealth {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct RunEvidence {
-    run: Digest,
+    seal: HistorySeal,
+    resolution: DeclaredResolution,
     throughput: ThroughputEvidence,
     health: NumericalHealth,
 }
 impl RunEvidence {
     pub fn run(&self) -> Digest {
-        self.run
+        self.seal.run
+    }
+    pub fn seal(&self) -> HistorySeal {
+        self.seal
+    }
+    pub fn resolution(&self) -> &DeclaredResolution {
+        &self.resolution
     }
     pub fn throughput(&self) -> &ThroughputEvidence {
         &self.throughput
@@ -187,6 +200,9 @@ pub enum ArenaFailure {
     /// other work.
     RepeatDiffered {
         repeat: u32,
+    },
+    MissingEvidence {
+        part: ScorePart,
     },
 }
 
@@ -231,8 +247,8 @@ fn timed<'m>(
         if session.record().accepted().time() >= end {
             break;
         }
-        (session, _) = match counted(session, &mut health) {
-            Ok(stepped) => stepped,
+        session = match counted(session, &mut health) {
+            Ok((session, _)) => session,
             Err(stopped) => return Err(exported(stopped, health)),
         };
     }
@@ -304,7 +320,8 @@ pub fn run<'m>(
         waveform_samples: samples,
     };
     let evidence = RunEvidence {
-        run: record.identity().digest(),
+        seal: session.conservation().seal(),
+        resolution: identity.resolution().clone(),
         throughput,
         health,
     };
