@@ -196,7 +196,7 @@ test = "-p ng-validate --lib day::tests::the_registry_states_the_tickets_directi
 name = "day-excretion-donor-duct"
 path = "crates/ng-validate/src/day/trace.rs"
 old = '''
-    let donor = if moved < 0.0 {
+    let donor = if sodium_per_second < 0.0 {
         ratio(at(Read::BladderSodium), at(Read::BladderWater))
     } else {
         ratio(at(Read::DuctSodium), at(Read::DuctWater))

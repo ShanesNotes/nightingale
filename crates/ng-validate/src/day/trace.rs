@@ -92,7 +92,7 @@ pub(super) enum Read {
 pub(super) const READS: usize = 13;
 pub(super) type Reading = [f64; READS];
 
-fn series(reading: &Reading, allowed: &Reading, moved: f64) -> [Sample; SERIES] {
+fn series(reading: &Reading, allowed: &Reading, sodium_per_second: f64) -> [Sample; SERIES] {
     let at = |read: Read| (reading[read as usize], allowed[read as usize]);
     let plain = |read: Read| {
         let (value, floor) = at(read);
@@ -109,13 +109,13 @@ fn series(reading: &Reading, allowed: &Reading, moved: f64) -> [Sample; SERIES] 
         sodium.1 + potassium.1 + chloride.1,
     );
     let (flow, flow_floor) = at(Read::Tubular);
-    let donor = if moved < 0.0 {
+    let donor = if sodium_per_second < 0.0 {
         ratio(at(Read::BladderSodium), at(Read::BladderWater))
     } else {
         ratio(at(Read::DuctSodium), at(Read::DuctWater))
     };
     let excretion = Sample {
-        value: moved,
+        value: sodium_per_second,
         floor: donor.value.abs() * flow_floor + flow.abs() * donor.floor,
     };
     [
@@ -202,9 +202,16 @@ impl Fold {
                 .collect(),
         }
     }
-    pub(super) fn step(&mut self, end: SimTime, length_ns: u64, phase: f64, reading: &Reading, moved: f64) {
+    pub(super) fn step(
+        &mut self,
+        end: SimTime,
+        length_ns: u64,
+        phase: f64,
+        reading: &Reading,
+        sodium_per_second: f64,
+    ) {
         let allowed = core::array::from_fn(|read| self.scales.at(reading[read], self.sizes[read]));
-        let samples = series(reading, &allowed, moved);
+        let samples = series(reading, &allowed, sodium_per_second);
         if let Some(open) = &mut self.open {
             open.add(length_ns as f64, &samples);
         }
@@ -270,7 +277,7 @@ fn number(held: Compensated) -> f64 {
 pub(super) struct Readings {
     phase: RowId,
     rows: [Vec<(RowId, usize)>; READS],
-    excreted: ColumnId,
+    urinary_sodium: ColumnId,
 }
 impl Readings {
     pub(super) fn bind(body: &CompiledBody) -> Result<Self, DayFailure> {
@@ -320,7 +327,7 @@ impl Readings {
             }
             _ => None,
         };
-        let excreted = (body.instances().iter())
+        let urinary_sodium = (body.instances().iter())
             .find_map(carries_sodium)
             .ok_or(DayFailure::MissingTransfer(urinary))?;
         Ok(Self {
@@ -344,7 +351,7 @@ impl Readings {
                 blood(Species::Potassium)?,
                 blood(Species::Chloride)?,
             ],
-            excreted,
+            urinary_sodium,
         })
     }
     pub(super) fn sizes(&self, problem: &CoupledProblem<'_>) -> Reading {
@@ -360,14 +367,13 @@ impl Readings {
         let reading = core::array::from_fn(|read| self.rows[read].iter().map(value).sum());
         (number(view.value(self.phase)), reading)
     }
-    /// The sodium the ledger moved from the collecting duct to the bladder over one segment, per second.
-    pub(super) fn moved(&self, segment: &HistorySegment) -> f64 {
+    pub(super) fn sodium_excreted_per_second(&self, segment: &HistorySegment) -> f64 {
         let interval = segment.interval();
         let net = |(forward, reverse): (Curve<'_>, Curve<'_>)| {
             let ends = |curve: Curve<'_>| curve.on(interval).expect("a segment holds its own interval");
             let (forward, reverse) = (ends(forward), ends(reverse));
             forward[1].minus(forward[0]).minus(reverse[1].minus(reverse[0]))
         };
-        number(net(segment.exchange(self.excreted))) / (interval.length_ns() as f64 / SECOND as f64)
+        number(net(segment.exchange(self.urinary_sodium))) / (interval.length_ns() as f64 / SECOND as f64)
     }
 }

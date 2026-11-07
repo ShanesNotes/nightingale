@@ -401,7 +401,7 @@ impl Start<'_> {
                 length_ns,
                 phase,
                 &reading,
-                self.readings.moved(&head),
+                self.readings.sodium_excreted_per_second(&head),
             );
             fold.applied(receipt.applied());
         }
