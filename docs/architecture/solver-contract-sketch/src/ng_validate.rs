@@ -36,7 +36,7 @@ pub struct CertificatePolicy {
     _digest: Digest,
     _quantities: Vec<QuantityPolicy>,
     _expected: ExpectedDrift,
-    _windows: Sliding24Hours,
+    _windows: SlidingWindows,
 }
 impl CertificatePolicy {
     /// Refuses unless every combination of the basis has exactly one entry, in basis order.
@@ -44,7 +44,7 @@ impl CertificatePolicy {
         _basis: &ConservedBasis,
         _quantities: Vec<QuantityPolicy>,
         _expected: ExpectedDrift,
-        _windows: Sliding24Hours,
+        _windows: SlidingWindows,
     ) -> Result<Self, AdmissionError> {
         todo!()
     }
@@ -62,13 +62,15 @@ pub struct DriftCurve {
     _quantity: QuantityId,
     _coefficients: Vec<f64>,
 }
-/// Every sliding 24 h window over at least 48 h, from integral segments, never vital samples.
-pub struct Sliding24Hours {
+/// Every sliding window of one length over at least the coverage, from integral segments, never vital
+/// samples.
+pub struct SlidingWindows {
+    _window_ns: NonZeroU64,
     _coverage_ns: u64,
 }
-impl Sliding24Hours {
+impl SlidingWindows {
     /// Refuses a coverage that does not exceed one window, which could slide nowhere.
-    pub fn covering(_coverage_ns: u64) -> Result<Self, AdmissionError> {
+    pub fn new(_window_ns: NonZeroU64, _coverage_ns: u64) -> Result<Self, AdmissionError> {
         todo!()
     }
 }
@@ -126,7 +128,7 @@ pub struct CertificateFailure {
     _residual: Compensated,
 }
 /// Pure by construction of its inputs: one sealed history view and policy data. Window starts
-/// include every accepted segment boundary and its 24 h shift; inside a segment the Bernstein
+/// include every accepted segment boundary and its shift by one window; inside a segment the Bernstein
 /// coefficients bound interior extrema of the closure and drift differences. Closure failures win
 /// over drift, so a `Drift` failure says the ledger closed everywhere and the body still moved. It
 /// walks the store newest first and reports what a walk in time order would: the earliest failing
@@ -344,10 +346,10 @@ pub struct ThroughputEvidence {
     _waveform_samples: u64,
 }
 /// What the run cost numerically, beside the certificate: refusals by reason and by refusal
-/// source, faults at the minimum interval, and validity excursions.
+/// source, floor faults, and validity excursions, over one repeat.
 pub struct NumericalHealth {
     _refusals: Vec<(NumericalRefusal, u64)>,
-    _by_source: Vec<(RowId, u64)>,
+    _by_source: Vec<(SourceId, u64)>,
     _floor_faults: u64,
     _excursions: u64,
 }
@@ -385,8 +387,8 @@ pub struct ArenaScore {
 pub enum ArenaFailure {
     Admission(AdmissionError),
     Initialization(InitializationFailure),
-    /// A latched session, exported for diagnosis.
-    Faulted(FaultReport),
+    /// A latched session, exported for diagnosis, with its repeat's health up to the fault.
+    Faulted { report: FaultReport, health: NumericalHealth },
     Certificate(CertificateFailure),
     Accuracy(AccuracyFailure),
     Replay { gate: ReplayGate, first_divergence: SimTime },
@@ -398,7 +400,8 @@ pub enum ArenaFailure {
     /// A clock with no reading left, one that ran backward or stood still over a repeat, or a repeat
     /// with no waveform sample: a throughput that measured nothing.
     MissingThroughput,
-    /// A repeat that ended on another seal or waveform count than the first, so it timed other work.
+    /// A repeat that ended on another seal, waveform count or numerical health than the first, so it
+    /// timed other work.
     RepeatDiffered { repeat: u32 },
 }
 pub enum ReplayGate {

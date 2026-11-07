@@ -469,7 +469,10 @@ A system outside the slice, held by a declaration that names every route on whic
 _Avoid_: stub, mock
 
 **Coverage manifest**:
-The compiled list of which conserved combinations close inside the slice and which rest on held stand-ins.
+The compiled list of which conserved combinations close inside the slice and which rest on held stand-ins: each held declaration with its routes, spaces and validity, each route's columns, and each held pool with its own combination.
+
+**Held support**:
+What a held stand-in moves across the boundary on one route. The certificate reports, for each route, the most any window carried into and out of the body.
 
 **Certificate**:
 The automatic check that every conserved quantity balances, that charge never drifts, and that every other quantity drifts over every sliding 24 h window no further than its within-subject variation allows (record 0004). It shows stability, not accuracy.
@@ -490,6 +493,10 @@ The arena checks that pace, resuming, late events, rewinding, extra evaluations 
 
 **Throughput**:
 The arena's speed evidence for one run: the wall time of each repeat of its window with full waveform, read from a wall clock the host passes in, with admission timed apart. Every repeat is kept, each must end on the same seal, and none of it enters the certificate.
+
+**Numerical health**:
+The arena's evidence of how hard a solver core worked for one run, beside the certificate and never in it: its refusals by reason and by refusal source, its floor faults and its validity excursions. A floor fault is the engine fault with no admissible step, a refusal at the minimum interval or past the retry budget. A faulted run reports its health up to the fault, and every repeat must report the same.
+_Avoid_: health check (that is the healthy-range check)
 
 **Day check**:
 A deterministic check drawn from the contract's day table that reads one produced quantity around one event of the day plan. It compares the mean over a window after the event with the mean over a baseline before it, or for a meal with a counterfactual run's same window, and reports pass, fail or not available yet. A response is a change of more than three noise floors and at least the declared tolerance. It shows that the engine's structure answers the way the table says, never clinical validity.

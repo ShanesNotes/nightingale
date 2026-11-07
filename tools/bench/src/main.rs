@@ -92,7 +92,7 @@ impl WallClock for HostClock {
 fn told(failure: &ArenaFailure) -> String {
     match failure {
         ArenaFailure::Initialization(failure) => format!("{failure:?}"),
-        ArenaFailure::Faulted(report) => format!("fault {:?}", report.fault()),
+        ArenaFailure::Faulted { report, health } => format!("fault {:?} health {health:?}", report.fault()),
         ArenaFailure::Checkpoint(error) => format!("{error:?}"),
         ArenaFailure::Observation(refusal) => format!("{refusal:?}"),
         ArenaFailure::MissingThroughput => "missing throughput".to_string(),
@@ -135,6 +135,15 @@ fn arena(arguments: &[String]) {
     println!("work accepted_steps {}", throughput.accepted_steps());
     println!("work simulated_ns {}", throughput.simulated_ns());
     println!("work waveform_samples {}", throughput.waveform_samples());
+    let health = evidence.health();
+    for (reason, count) in health.refusals() {
+        println!("health refused {count} {reason:?}");
+    }
+    for (source, count) in health.by_source() {
+        println!("health source {} refused {count}", source.index());
+    }
+    println!("health floor_faults {}", health.floor_faults());
+    println!("health excursions {}", health.excursions());
     println!(
         "time admission_s {:.2}",
         throughput.admission_wall_ns() as f64 / 1e9

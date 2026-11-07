@@ -18,4 +18,10 @@ From the split of ticket 11: the contract says policy values are reported with e
 
 From 15: `AccuracyPolicy::manufactured()` is the model-default policy with every manufactured case, and `AccuracyEvidence` names its policy only by digest. A score can refuse accuracy evidence whose policy digest is not that default's (or, after ticket 16, the default with the slice window) as `MissingEvidence`, since a policy that leaves a case out is a gate that did not run. The tolerances (absolute 5, relative 0, grid 100 s) reach a result only through that digest today.
 
+From ticket 14: the certificate's closure floor still has no model default: each caller builds `QuantityPolicy` per combination, and the slice passes at absolute 0 and relative 1e-12, with a worst residual of 1.5e-25. The policy names its window and coverage only through `CertificatePolicy::digest`. `Certificate` returns its span, `coverage()` and `support()`, so the score can show the held support each part rests on.
+
 From ticket 12: `RunEvidence::run()` is the digest of the run identity that `run` admitted, so `score` can compare it with the replay evidence's run. `ArenaFailure` derives nothing, because `FaultReport` has no `Debug`.
+
+From 13: `RunEvidence::health()` is the run's `NumericalHealth`, counted over one repeat, and a repeat whose health differs is `RepeatDiffered`. It has no public constructor. `ArenaFailure::Faulted` is now `{ report: Box<FaultReport>, health }`, so a faulted run also shows its refusals up to the fault. A floor fault counts every `NoAdmissibleStep`, whether the floor or the retry budget ended it.
+
+From 18: `SliceCase` admits `arena_packet` at `anchor_moment` with seed [1, 2, 3, 4] through the same solve and admission as `run`, and the run identity reads no boundary port. So `run` on that packet, start, seed and core should name the run that `replay_gates` on `SliceCase` returns (inferred from the code, not run). Every gate's evidence on the slice names one run (`a_slice_window_passes_every_replay_gate_with_the_reference_core`).

@@ -3,7 +3,6 @@ use crate::evaluate::Tape;
 use crate::identity::{Canonical, Seal};
 use crate::law::{Op, Validity};
 use crate::problem::Jacobian;
-use crate::scope::HeldCard;
 use crate::sources::{RefusalSource, refusal_sources};
 use crate::{
     AdmissibleSet, Class, ConservedBasis, Crossing, Digest, LawName, Network, ParameterKey, Predicate,
@@ -68,7 +67,6 @@ pub(crate) struct Layout {
     pub(crate) forcings: Vec<ForcingLayout>,
     pub(crate) hazards: Vec<HazardLayout>,
     pub(crate) basis: ConservedBasis,
-    pub(crate) held: Vec<HeldCard>,
 }
 impl CompiledBody {
     pub(crate) fn seal(layout: Layout, elimination: Elimination) -> Self {
@@ -125,7 +123,7 @@ impl CompiledBody {
     }
     /// The cards held, in card order.
     pub fn held(&self) -> impl Iterator<Item = &'static str> + '_ {
-        self.layout.held.iter().map(|held| held.card)
+        (self.layout.basis.coverage().declarations().iter()).map(|held| held.card)
     }
     /// The row whose value and size a row's residual is judged at: its own, or the store a closed row holds.
     pub(crate) fn judged_at(&self, row: usize) -> usize {
@@ -177,7 +175,6 @@ impl Seal for Layout {
             forcings,
             hazards,
             basis,
-            held,
         } = self;
         schema.seal(out);
         rows.seal(out);
@@ -197,7 +194,6 @@ impl Seal for Layout {
         forcings.seal(out);
         hazards.seal(out);
         basis.seal(out);
-        held.seal(out);
     }
 }
 

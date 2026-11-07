@@ -2,8 +2,9 @@ use crate::initialize::{admit_start, solved_start};
 use crate::{ClockSource, WallClock};
 use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::{
-    BoundaryPort, CompiledBody, CoupledSolver, Digest, InitializationFailure, Interval, ObservationLens,
-    ObservationSeed, ParameterPacket, Seed, SimTime, SyntheticFixture,
+    BoundaryPort, CompiledBody, CoupledSolver, Digest, EngineFaultKind, InitializationFailure, Interval,
+    NumericalRefusal, ObservationLens, ObservationSeed, ParameterPacket, Seed, SimTime, SourceId,
+    SyntheticFixture,
 };
 use ng_observe::{Observation, ObservedValue, Observer};
 use ng_record::{
@@ -14,12 +15,30 @@ use ng_record::{
 pub(crate) fn advance<'m>(
     session: Session<'m, Running>,
 ) -> Result<(Session<'m, Running>, StepReceipt), Session<'m, Faulted>> {
+    counted(session, &mut NumericalHealth::default())
+}
+
+fn counted<'m>(
+    session: Session<'m, Running>,
+    health: &mut NumericalHealth,
+) -> Result<(Session<'m, Running>, StepReceipt), Session<'m, Faulted>> {
     let mut attempt = session.step();
     loop {
         match attempt {
-            Step::Accepted(session, receipt) => return Ok((session, receipt)),
-            Step::Refused(session) => attempt = session.retry(),
-            Step::Faulted(session) => return Err(session),
+            Step::Accepted(session, receipt) => {
+                health.excursions += receipt.excursions().len() as u64;
+                return Ok((session, receipt));
+            }
+            Step::Refused(session) => {
+                health.refused(session.refused().reason());
+                attempt = session.retry();
+            }
+            Step::Faulted(session) => {
+                if session.fault().kind() == EngineFaultKind::NoAdmissibleStep {
+                    health.floor_faults += 1;
+                }
+                return Err(session);
+            }
         }
     }
 }
@@ -81,10 +100,50 @@ impl ThroughputEvidence {
     }
 }
 
+/// Counted over one repeat, since every repeat must report the same.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NumericalHealth {
+    refusals: Vec<(NumericalRefusal, u64)>,
+    floor_faults: u64,
+    excursions: u64,
+}
+impl NumericalHealth {
+    /// Each reason, with the row or source it names, in the order it first refused.
+    pub fn refusals(&self) -> &[(NumericalRefusal, u64)] {
+        &self.refusals
+    }
+    /// The `TrialDomain` refusals per source, in `CompiledBody::refusal_sources` order.
+    pub fn by_source(&self) -> Vec<(SourceId, u64)> {
+        let mut sources: Vec<(SourceId, u64)> = (self.refusals.iter())
+            .filter_map(|&(reason, count)| match reason {
+                NumericalRefusal::TrialDomain { source } => Some((source, count)),
+                _ => None,
+            })
+            .collect();
+        sources.sort_unstable();
+        sources
+    }
+    /// The `NoAdmissibleStep` faults: at most one, and only in `ArenaFailure::Faulted`.
+    pub fn floor_faults(&self) -> u64 {
+        self.floor_faults
+    }
+    /// Over the accepted steps.
+    pub fn excursions(&self) -> u64 {
+        self.excursions
+    }
+    fn refused(&mut self, reason: NumericalRefusal) {
+        match self.refusals.iter_mut().find(|(seen, _)| *seen == reason) {
+            Some((_, count)) => *count += 1,
+            None => self.refusals.push((reason, 1)),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunEvidence {
     run: Digest,
     throughput: ThroughputEvidence,
+    health: NumericalHealth,
 }
 impl RunEvidence {
     pub fn run(&self) -> Digest {
@@ -92,6 +151,9 @@ impl RunEvidence {
     }
     pub fn throughput(&self) -> &ThroughputEvidence {
         &self.throughput
+    }
+    pub fn health(&self) -> &NumericalHealth {
+        &self.health
     }
 }
 
@@ -110,13 +172,19 @@ impl<'m> ArenaRun<'m> {
 
 pub enum ArenaFailure {
     Initialization(InitializationFailure),
-    Faulted(FaultReport),
+    /// A latched session, exported for diagnosis, with the health of its repeat up to the fault.
+    Faulted {
+        report: Box<FaultReport>,
+        health: NumericalHealth,
+    },
     /// A start the store would not checkpoint or resume, or a fault it would not export.
     Checkpoint(CheckpointError),
     Observation(ObservationRefusal),
     /// A clock with no reading left, one that ran backward, one that stood still over a repeat, or a repeat
     /// whose observer released no value: a throughput that measured nothing.
     MissingThroughput,
+    /// A repeat that ended on another seal, waveform count or numerical health than the first, so it timed
+    /// other work.
     RepeatDiffered {
         repeat: u32,
     },
@@ -128,9 +196,12 @@ fn read(clock: &dyn WallClock) -> Result<u64, ArenaFailure> {
     clock.elapsed_ns().ok_or(ArenaFailure::MissingThroughput)
 }
 
-fn exported(stopped: Session<'_, Faulted>) -> ArenaFailure {
+fn exported(stopped: Session<'_, Faulted>, health: NumericalHealth) -> ArenaFailure {
     match stopped.export() {
-        Ok(report) => ArenaFailure::Faulted(report),
+        Ok(report) => ArenaFailure::Faulted {
+            report: Box::new(report),
+            health,
+        },
         Err(error) => ArenaFailure::Checkpoint(error),
     }
 }
@@ -139,6 +210,7 @@ struct Repeat<'m> {
     session: Session<'m, Running>,
     wall_ns: NonZeroU64,
     samples: u64,
+    health: NumericalHealth,
 }
 
 fn timed<'m>(
@@ -150,6 +222,7 @@ fn timed<'m>(
     let began = read(clock)?;
     let mut observer = Observer::new(lens, ObservationSeed::new(WAVEFORM));
     let mut samples = 0;
+    let mut health = NumericalHealth::default();
     loop {
         let view = session.observation(lens).map_err(ArenaFailure::Observation)?;
         let observed = observer.advance(&view).map_err(ArenaFailure::Observation)?;
@@ -158,7 +231,10 @@ fn timed<'m>(
         if session.record().accepted().time() >= end {
             break;
         }
-        (session, _) = advance(session).map_err(exported)?;
+        (session, _) = match counted(session, &mut health) {
+            Ok(stepped) => stepped,
+            Err(stopped) => return Err(exported(stopped, health)),
+        };
     }
     let wall_ns = (read(clock)?.checked_sub(began)).and_then(NonZeroU64::new);
     match wall_ns {
@@ -166,6 +242,7 @@ fn timed<'m>(
             session,
             wall_ns,
             samples,
+            health,
         }),
         _ => Err(ArenaFailure::MissingThroughput),
     }
@@ -205,12 +282,13 @@ pub fn run<'m>(
         mut session,
         wall_ns,
         samples,
+        health,
     } = repeat()?;
     let course = (session.record().seal(), samples);
     let mut runs_wall_ns = vec![wall_ns];
     for index in 1..repeats.get() {
         let again = repeat()?;
-        if (again.session.record().seal(), again.samples) != course {
+        if (again.session.record().seal(), again.samples) != course || again.health != health {
             return Err(ArenaFailure::RepeatDiffered { repeat: index });
         }
         runs_wall_ns.push(again.wall_ns);
@@ -228,6 +306,7 @@ pub fn run<'m>(
     let evidence = RunEvidence {
         run: record.identity().digest(),
         throughput,
+        health,
     };
     Ok(ArenaRun { session, evidence })
 }
