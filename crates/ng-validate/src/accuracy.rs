@@ -49,6 +49,9 @@ struct Manufactured {
     check: Check,
 }
 impl Manufactured {
+    fn identity(&self) -> (u8, Digest) {
+        (self.kind, self.fixture.digest())
+    }
     fn of(case: AccuracyCase) -> Result<Self, AdmissionError> {
         let plain = |kind, fixture| Self {
             kind,
@@ -147,6 +150,7 @@ impl AccuracyPolicy {
 pub struct AccuracyEvidence {
     policy: Digest,
     resolution: Digest,
+    cases: Vec<(u8, Digest)>,
     absolute: Compensated,
     relative: Compensated,
     grid_ns: u64,
@@ -170,6 +174,14 @@ impl AccuracyEvidence {
     }
     pub fn worst(&self) -> &[Compensated] {
         &self.worst
+    }
+    /// Cases beside `policy`'s may have run too, as an arena policy adds its slice window to the manufactured cases.
+    pub(crate) fn covers(&self, policy: &AccuracyPolicy) -> bool {
+        let ran = |case: &Manufactured| self.cases.contains(&case.identity());
+        policy.cases.iter().all(ran)
+            && self.absolute.bits() == policy.absolute.bits()
+            && self.relative.bits() == Compensated::of(&policy.relative).bits()
+            && self.grid_ns == policy.grid_ns
     }
 }
 #[derive(Debug)]
@@ -267,6 +279,7 @@ pub fn accuracy(
     Ok(AccuracyEvidence {
         policy: policy.digest(),
         resolution: solver.resolution().digest(),
+        cases: policy.cases.iter().map(Manufactured::identity).collect(),
         absolute: policy.absolute,
         relative: Compensated::of(&policy.relative),
         grid_ns: policy.grid_ns,

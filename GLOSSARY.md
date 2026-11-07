@@ -499,7 +499,7 @@ The arena's evidence of how hard a solver core worked for one run, beside the ce
 _Avoid_: health check (that is the healthy-range check)
 
 **Score**:
-The arena's result for one run: a certificate of the history the run ended on, accuracy evidence of its solver core under the model-default policy, its throughput and numerical health, and replay evidence of its run identity, each with the policy values it was judged by. A part from another run, or from a gate that did not run, is missing evidence and never a pass.
+The arena's result for one run: a certificate of the history the run ended on, accuracy evidence of its solver core on every manufactured case at the model-default bound, its throughput and numerical health, and replay evidence of its run identity, each with the policy values it was judged by. A part from another run, or from a gate that did not run, is missing evidence and never a pass.
 
 **Policy value**:
 A model default the validation crate sets for a gate and every result reports: the accuracy tolerances, the error scales, each core's minimum interval and the certificate's closure floor.

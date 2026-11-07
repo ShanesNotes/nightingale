@@ -458,8 +458,8 @@ pub fn replay_gates(
     todo!()
 }
 /// A score needs all four parts of the run its run evidence names: a certificate of the history it
-/// ended on, accuracy evidence of its core under the model-default policy, and replay evidence of its
-/// identity. Any other part is `MissingEvidence`.
+/// ended on, accuracy evidence of its core on every case of the arena's policy, and replay evidence of
+/// its identity. Any other part is `MissingEvidence`.
 pub fn score(
     _certificate: Certificate,
     _accuracy: AccuracyEvidence,

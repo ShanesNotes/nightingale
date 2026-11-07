@@ -245,6 +245,25 @@ fn accuracy_evidence_of_another_core_or_another_policy_is_missing() {
 }
 
 #[test]
+fn accuracy_evidence_that_ran_a_case_beside_every_manufactured_one_scores() {
+    let (case, core, store) = (case(), reference(INTERVAL_NS), MemoryStore::default());
+    let ran = arena(&case, &core, &store, case.seed(), END_NS);
+    let certificate = certified(&ran.session().conservation());
+    let mut cases = AccuracyCase::manufactured().expect("every case builds");
+    let closed = TwoReservoirs::closed().expect("a body");
+    cases.push(AccuracyCase::TwoReservoir(Box::new(closed.until(at(2_000)))));
+    let wider = AccuracyPolicy::new(cases, measure(5.0), measure(0.0), 100 * SECOND).expect("a policy");
+    let checked = accuracy(&core, &wider).expect("within the policy");
+    let scored = score(
+        certificate,
+        checked,
+        ran.into_evidence(),
+        replayed(&case, INTERVAL_NS),
+    );
+    assert_eq!(missing(scored), None);
+}
+
+#[test]
 fn replay_evidence_of_another_run_is_missing() {
     let (case, core, store) = (case(), reference(INTERVAL_NS), MemoryStore::default());
     let ran = arena(&case, &core, &store, case.seed(), END_NS);

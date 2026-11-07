@@ -29,7 +29,7 @@ impl ArenaScore {
 }
 
 /// The run evidence names the run. The certificate must certify the history it ended on, the accuracy evidence
-/// must come from its core under `AccuracyPolicy::manufactured`, and the replay evidence must name its identity.
+/// must come from its core and cover `AccuracyPolicy::manufactured`, and the replay evidence must name its identity.
 pub fn score(
     certificate: Certificate,
     accuracy: AccuracyEvidence,
@@ -42,7 +42,7 @@ pub fn score(
     }
     let default =
         AccuracyPolicy::manufactured().map_err(|error| ArenaFailure::Initialization(error.into()))?;
-    if accuracy.resolution() != evidence.resolution().digest() || accuracy.policy() != default.digest() {
+    if accuracy.resolution() != evidence.resolution().digest() || !accuracy.covers(&default) {
         return missing(ScorePart::Accuracy);
     }
     if replay.run() != evidence.run() {
