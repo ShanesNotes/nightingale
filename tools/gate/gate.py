@@ -45,6 +45,8 @@ Phase = Literal["registration", "seam"]
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PATHS = "tools/gate/paths.toml"
+MUST_FAIL = "tools/gate/must-fail.toml"
+MUTANTS = "tools/gate/mutants.toml"
 STEPS = "tools/verify.d"
 CONTRACT = "docs/architecture/solver-contract.md"
 REGULAR = "100644"
@@ -1301,7 +1303,179 @@ def seals_name_every_field(ws: Workspace) -> list[Violation]:
     return out
 
 
-PROBE_COPY = ("Cargo.toml", "Cargo.lock", "clippy.toml", "rustfmt.toml", "rust-toolchain.toml", PATHS, CONTRACT)
+MUST_FAIL_HEADER = "| Must-fail core or model | Rejected by |"
+
+
+@dataclasses.dataclass(frozen=True)
+class Doctest:
+    path: str
+    code: str
+    text: str
+
+
+@dataclasses.dataclass(frozen=True)
+class MustFailRow:
+    core: str
+    mutants: tuple[str, ...]
+    doctests: tuple[Doctest, ...]
+
+
+def must_fail_rows(text: str) -> list[str]:
+    lines = text.splitlines()
+    heads = [i for i, line in enumerate(lines) if line.strip() == MUST_FAIL_HEADER]
+    if len(heads) != 1:
+        raise GateError(f"{CONTRACT}: expected one must-fail table headed {MUST_FAIL_HEADER!r}, found {len(heads)}")
+    rows, i = [], heads[0] + 2
+    while i < len(lines) and lines[i].startswith("|"):
+        cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+        if len(cells) != 2 or not cells[0]:
+            raise GateError(f"{CONTRACT}:{i + 1}: a must-fail row has two cells")
+        rows.append(cells[0])
+        i += 1
+    return rows
+
+
+def parse_must_fail(text: str) -> list[MustFailRow]:
+    try:
+        raw = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise GateError(f"{MUST_FAIL}: {e}") from None
+    _table(raw, MUST_FAIL, {"row"})
+    out = []
+    for i, r in enumerate(raw["row"]):
+        where = f"{MUST_FAIL}: row {i + 1}"
+        _table(r, where, {"core"}, {"mutants", "doctests"})
+        if not isinstance(r["core"], str) or not r["core"]:
+            raise GateError(f"{where}: core is the row's first cell")
+        doctests = []
+        for j, d in enumerate(r.get("doctests", [])):
+            d = _table(d, f"{where}: doctest {j + 1}", {"path", "code", "text"})
+            if not all(isinstance(d[k], str) and d[k] for k in ("path", "code", "text")) or not re.fullmatch(
+                r"E\d{4}", d["code"]
+            ):
+                raise GateError(f"{where}: doctest {j + 1}: a path, an error code such as E0599 and a line it holds")
+            doctests.append(Doctest(d["path"], d["code"], d["text"]))
+        out.append(MustFailRow(r["core"], _strings(r.get("mutants", []), f"{where}: mutants"), tuple(doctests)))
+    return out
+
+
+def mutant_tests(root: pathlib.Path) -> dict[str, str]:
+    table = _toml(root / MUTANTS)
+    return {m["name"]: m.get("test", table.get("test")) for m in table.get("mutant", [])}
+
+
+def declares_test(src: Source, name: str) -> bool:
+    code = src.code
+    for k in range(len(code) - 1):
+        if code[k].value != "fn" or code[k + 1].value != name:
+            continue
+        j = k - 1
+        while j >= 0 and _punct(code, j, "]"):
+            depth, i = 0, j
+            while i >= 0:
+                depth += _punct(code, i, "]") - _punct(code, i, "[")
+                if depth == 0:
+                    break
+                i -= 1
+            if [t.value for t in code[i + 1 : j]] == ["test"]:
+                return True
+            j = i - 2
+    return False
+
+
+def missing_test(ws: Workspace, test: str) -> str | None:
+    args = test.split()
+    valued = {"-p", "--package", "--test"}
+    crates = [b for a, b in zip(args, args[1:]) if a in ("-p", "--package")]
+    targets = [b for a, b in zip(args, args[1:]) if a == "--test"]
+    names = [a for k, a in enumerate(args) if not a.startswith("-") and (k == 0 or args[k - 1] not in valued)]
+    if len(crates) != 1 or len(targets) + ("--lib" in args) != 1 or len(names) != 1:
+        return "name one crate with -p, one target with --test or --lib, and one test"
+    m = ws.members.get(crates[0])
+    if m is None:
+        return f"{crates[0]} is no workspace member"
+    module, _, name = names[0].rpartition("::")
+    if targets:
+        target = next((t for t in m.targets if t.name == targets[0] and "test" in t.kinds), None)
+        files = [_rel(ws.root, target.src)] if target else []
+    elif module:
+        top = module.split("::")[0]
+        files = [f"{m.dir}/src/{top}.rs", f"{m.dir}/src/{top}/mod.rs"]
+    else:
+        files = [f"{m.dir}/src/lib.rs"]
+    if not any(declares_test(s, name) for s in m.sources if s.path in files):
+        return f"no #[test] fn {name} in {' or '.join(files) or f'a test target {targets[0]} of {m.name}'}"
+    return None
+
+
+def missing_doctest(ws: Workspace, d: Doctest) -> str | None:
+    src = next((s for m in ws.members.values() for s in m.sources if s.path == d.path), None)
+    if src is None:
+        return "names no Rust source of a workspace member"
+    held = [
+        line
+        for line, _, block, fences in src.docblocks
+        if {"compile_fail", d.code} <= set(_fence_words(fences.split("\n")[0].lstrip("`~"))) and d.text in block
+    ]
+    if len(held) != 1:
+        return f"{len(held)} compile_fail,{d.code} doctests hold {d.text!r}; quote a line only one of them holds"
+    return None
+
+
+@rule(
+    "seam.must-fail",
+    "seam",
+    edit(CONTRACT, r"^(\| An orphan pool \|)", r"| A core no test builds | Nothing |\n\1"),
+)
+def must_fail_rows_are_paired(ws: Workspace) -> list[Violation]:
+    code = "seam.must-fail"
+    rows = must_fail_rows(_read(ws.root / CONTRACT))
+    entries = parse_must_fail(_read(ws.root / MUST_FAIL))
+    mutants = mutant_tests(ws.root)
+    named = [e.core for e in entries]
+    out = []
+    for row in dict.fromkeys(rows):
+        if (n := named.count(row)) != 1 or rows.count(row) != 1:
+            what = "no [[row]]" if n == 0 else f"{n} [[row]] entries" if n > 1 else "a second row of the table"
+            out.append(Violation(code, row, f"{what} of {MUST_FAIL} names it; give it one, naming what rejects it"))
+    for e in entries:
+        if e.core not in rows:
+            out.append(Violation(code, e.core, f"names no row of the must-fail table in {CONTRACT}; copy its first cell"))
+        if not e.mutants and not e.doctests:
+            out.append(Violation(code, e.core, "names no mutant and no compile_fail doctest"))
+        out += [Violation(code, name, f"names no [[mutant]] of {MUTANTS}") for name in e.mutants if name not in mutants]
+    return out
+
+
+@rule(
+    "seam.must-fail-test",
+    "seam",
+    edit("crates/ng-validate/tests/replay.rs", r"^fn a_core_that_reads_the_host_clock_fails_pace\(", "fn renamed("),
+)
+def must_fail_tests_exist(ws: Workspace) -> list[Violation]:
+    code, out = "seam.must-fail-test", []
+    mutants = mutant_tests(ws.root)
+    for e in parse_must_fail(_read(ws.root / MUST_FAIL)):
+        for name in e.mutants:
+            if (test := mutants.get(name)) and (why := missing_test(ws, test)):
+                out.append(Violation(code, f"{name}: {test}", why))
+        out += [
+            Violation(code, f"{d.path} {d.code}", why) for d in e.doctests if (why := missing_doctest(ws, d))
+        ]
+    return out
+
+
+PROBE_COPY = (
+    "Cargo.toml",
+    "Cargo.lock",
+    "clippy.toml",
+    "rustfmt.toml",
+    "rust-toolchain.toml",
+    PATHS,
+    CONTRACT,
+    MUST_FAIL,
+    MUTANTS,
+)
 
 
 def _copy(ws: Workspace, dest: pathlib.Path) -> None:
@@ -2635,7 +2809,7 @@ def seam() -> int:
     print(
         f"05-seam: {len(ws.members)} members against the crate table; {len(RULES)} rules, {bites} probes bite; "
         f"{len(PLAN_CASES)} plan cases; {len(SCAN_CASES)} scan cases; {len(COMMENT_CASES)} comment cases; "
-        f"{len(SEAL_CASES)} seal cases"
+        f"{len(SEAL_CASES)} seal cases; {len(must_fail_rows(_read(ROOT / CONTRACT)))} must-fail rows"
     )
     return 1 if found or probes or cases else 0
 

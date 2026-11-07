@@ -129,8 +129,9 @@ pub enum ReplayFailure {
         gate: ReplayGate,
         error: CheckpointError,
     },
-    /// An input with no head after admission to arrive at, or no step left to apply it: the run would be the
-    /// known run by construction, and a gate that tests nothing passes nothing.
+    /// An input with no head after admission to arrive at, no step left to apply it, or one the withheld start
+    /// already held: the run would be the known run by construction, and a gate that tests nothing passes
+    /// nothing.
     NoLateBoundary { id: InputId },
     /// One event, by its stream and ordinal, further from the reference than the plan allows.
     EventMoved {
@@ -718,13 +719,18 @@ fn late_run<'m>(
     let events = stamped(gate, case)?;
     for (revision, event) in arrivals.iter().zip(events) {
         session = revision_to(gate, session, *revision, rows, watch.as_deref_mut())?;
+        let nothing_late = ReplayFailure::NoLateBoundary { id: event.id() };
         if session.record().earliest_stamp() > event.at() {
-            return Err(ReplayFailure::NoLateBoundary { id: event.id() });
+            return Err(nothing_late);
         }
         let command = Digest::of_canonical(b"replay gate");
         let input = AuthorizedInput::from_command_receipt(command, event);
         let refused = |error| ReplayFailure::InputRefused { gate, error };
+        let waiting = session.record().digests().waiting;
         session.enqueue(input).map_err(refused)?;
+        if session.record().digests().waiting == waiting {
+            return Err(nothing_late);
+        }
     }
     Ok(session)
 }
@@ -734,6 +740,8 @@ fn stamped(gate: ReplayGate, case: &dyn ReplayCase) -> Result<Vec<BoundaryEvent>
         .events()
         .map_err(|error| ReplayFailure::InputRefused { gate, error })?;
     events.sort_by_key(|event| (event.at(), event.id()));
+    // A port takes a repeated input once, so a late run must too; one id at two payloads fails the known run.
+    events.dedup_by_key(|event| (event.at(), event.id()));
     Ok(events)
 }
 

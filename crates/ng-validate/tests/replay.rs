@@ -341,6 +341,64 @@ fn a_live_pace_counts_from_the_runs_own_start() {
     assert!(verdict.is_ok(), "{:?}", verdict.err());
 }
 
+struct WithholdsNothing(TwoReservoirs);
+impl ReplayCase for WithholdsNothing {
+    fn body(&self) -> &CompiledBody {
+        self.0.body()
+    }
+    fn end(&self) -> SimTime {
+        self.0.end()
+    }
+    fn events(&self) -> Result<Vec<BoundaryEvent>, AdmissionError> {
+        self.0.events()
+    }
+    fn admit<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
+    ) -> Result<Session<'m, Running>, InitializationFailure> {
+        self.0.admit(core, store)
+    }
+    fn admit_withheld<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
+    ) -> Result<Session<'m, Running>, InitializationFailure> {
+        self.0.admit(core, store)
+    }
+}
+
+#[test]
+fn a_withheld_start_that_already_holds_its_inputs_fails_late_admission() {
+    let clock = script();
+    let cores = || reference(8 * SECOND);
+    replay_gate(ReplayGate::LateAdmission, &busy(), &cores, &plan(&clock)).expect("the inputs arrive late");
+    let failure = replay_gate(
+        ReplayGate::LateAdmission,
+        &WithholdsNothing(busy()),
+        &cores,
+        &plan(&clock),
+    );
+    assert!(
+        matches!(failure, Err(ReplayFailure::NoLateBoundary { .. })),
+        "{failure:?}"
+    );
+}
+
+#[test]
+fn an_input_a_case_lists_twice_arrives_once_and_passes_late_admission() {
+    let clock = script();
+    let cores = || reference(8 * SECOND);
+    let twice = delivering(
+        vec![delivery(b"repeat", 30, 90), delivery(b"repeat", 30, 90)],
+        120,
+    );
+    let evidence = replay_gate(ReplayGate::LateAdmission, &twice, &cores, &plan(&clock)).expect("one input");
+    let once = delivering(vec![delivery(b"repeat", 30, 90)], 120);
+    let alone = replay_gate(ReplayGate::LateAdmission, &once, &cores, &plan(&clock)).expect("one input");
+    assert_eq!(evidence.runs(), alone.runs());
+}
+
 #[test]
 fn an_honest_core_refused_past_an_input_passes_late_admission() {
     let store = MemoryStore::default();
