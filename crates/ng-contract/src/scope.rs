@@ -651,12 +651,29 @@ impl<S: OutsideSlice> HeldDeclaration<S> {
         }
     }
 }
-/// Normalized, so a declaration's order never reaches the model hash.
-pub(crate) struct HeldCard {
+/// A held declaration as compiled, normalized so its order never reaches the model hash.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeldCard {
     pub(crate) card: &'static str,
     pub(crate) supplies: Vec<&'static str>,
     pub(crate) holds: Vec<Space>,
     pub(crate) validity: &'static str,
+}
+impl HeldCard {
+    pub fn card(&self) -> &'static str {
+        self.card
+    }
+    /// The boundary routes it supplies, in name order.
+    pub fn routes(&self) -> &[&'static str] {
+        &self.supplies
+    }
+    /// The spaces whose pools it stands behind, in space order.
+    pub fn spaces(&self) -> &[Space] {
+        &self.holds
+    }
+    pub fn validity(&self) -> &'static str {
+        self.validity
+    }
 }
 impl Seal for HeldCard {
     fn seal(&self, out: &mut Canonical) {

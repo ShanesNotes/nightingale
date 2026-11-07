@@ -8,8 +8,7 @@ const SECOND: u64 = 1_000_000_000;
 const HOUR: u64 = 3_600 * SECOND;
 const INTERVAL_NS: u64 = 16 * SECOND;
 const SEED: [u64; 4] = [1, 2, 3, 4];
-/// The certificate slides 24 h windows, so a run it certifies covers more than one.
-const WINDOW_NS: u64 = 25 * HOUR;
+const END_NS: u64 = 7_000 * SECOND;
 
 fn measure<U>(value: f64) -> Measure<U> {
     Measure::new(value).expect("finite")
@@ -28,7 +27,7 @@ fn case() -> TwoReservoirs {
     };
     let start = [measure(500_500.0), measure(499_500.0)];
     let case = TwoReservoirs::delivering(start, vec![delivery]).expect("a body");
-    case.until(at(7_000))
+    case.until(SimTime::from_ns(END_NS))
 }
 
 fn reference(interval_ns: u64) -> ReferenceIntegrator {
@@ -106,7 +105,7 @@ fn certified(view: &ConservationView<'_>) -> Certificate {
     let quantities = quantities
         .collect::<Result<Vec<_>, _>>()
         .expect("a policy of water");
-    let windows = Sliding24Hours::covering(WINDOW_NS).expect("a coverage");
+    let windows = SlidingWindows::new(NonZeroU64::new(HOUR).expect("an hour"), END_NS).expect("a coverage");
     let policy =
         CertificatePolicy::new(view.basis(), quantities, ExpectedDrift::Zero, windows).expect("a policy");
     certify(view, &policy).expect("the ledger closes and the body holds")
@@ -151,7 +150,7 @@ fn missing(scored: Result<ArenaScore, ArenaFailure>) -> Option<Evidence> {
 #[test]
 fn a_score_holds_one_runs_four_parts_and_reports_every_policy_value_they_rest_on() {
     let (case, core, store) = (case(), reference(INTERVAL_NS), MemoryStore::default());
-    let ran = arena(&case, &core, &store, SEED, WINDOW_NS);
+    let ran = arena(&case, &core, &store, SEED, END_NS);
     let certificate = certified(&ran.session().conservation());
     let scored = score(
         certificate,
@@ -167,12 +166,16 @@ fn a_score_holds_one_runs_four_parts_and_reports_every_policy_value_they_rest_on
 
     let bits = |value: Compensated| value.bits();
     let (floor, relative, drift) = limits();
-    assert_eq!(scored.certificate().windows().coverage_ns(), WINDOW_NS);
+    let windows = scored.certificate().windows();
+    assert_eq!((windows.window_ns().get(), windows.coverage_ns()), (HOUR, END_NS));
     assert!(!scored.certificate().results().is_empty());
     for result in scored.certificate().results() {
         assert_eq!(bits(result.closure_floor()), bits(Compensated::of(&floor)));
         assert_eq!(bits(result.closure_relative()), bits(Compensated::of(&relative)));
-        assert_eq!(bits(result.drift_limit()), bits(Compensated::of(&drift)));
+        assert_eq!(
+            result.drift_limit().map(bits),
+            Some(bits(Compensated::of(&drift)))
+        );
     }
     let checked = scored.accuracy();
     assert_eq!(
@@ -193,10 +196,10 @@ fn a_score_holds_one_runs_four_parts_and_reports_every_policy_value_they_rest_on
 #[test]
 fn a_certificate_of_another_run_or_of_the_same_run_at_another_head_is_missing() {
     let (case, core, store) = (case(), reference(INTERVAL_NS), MemoryStore::default());
-    let evidence = arena(&case, &core, &store, SEED, WINDOW_NS).into_evidence();
+    let evidence = arena(&case, &core, &store, SEED, END_NS).into_evidence();
     let replay = replayed(&case, INTERVAL_NS);
-    let reseeded = arena(&case, &core, &store, [5, 6, 7, 8], WINDOW_NS);
-    let longer = arena(&case, &core, &store, SEED, WINDOW_NS + HOUR);
+    let reseeded = arena(&case, &core, &store, [5, 6, 7, 8], END_NS);
+    let longer = arena(&case, &core, &store, SEED, END_NS + HOUR);
     for other in [reseeded, longer] {
         let certificate = certified(&other.session().conservation());
         let scored = score(
@@ -212,10 +215,10 @@ fn a_certificate_of_another_run_or_of_the_same_run_at_another_head_is_missing() 
 #[test]
 fn run_evidence_of_another_run_is_missing_every_part_of_this_one() {
     let (case, core, store) = (case(), reference(INTERVAL_NS), MemoryStore::default());
-    let ran = arena(&case, &core, &store, SEED, WINDOW_NS);
+    let ran = arena(&case, &core, &store, SEED, END_NS);
     let certificate = certified(&ran.session().conservation());
     let replay = replayed(&case, INTERVAL_NS);
-    let other = arena(&case, &core, &store, [5, 6, 7, 8], WINDOW_NS);
+    let other = arena(&case, &core, &store, [5, 6, 7, 8], END_NS);
     let its_certificate = certified(&other.session().conservation());
     let other = other.into_evidence();
     let scored = score(certificate, checked(INTERVAL_NS), other.clone(), replay.clone());
@@ -227,7 +230,7 @@ fn run_evidence_of_another_run_is_missing_every_part_of_this_one() {
 #[test]
 fn accuracy_evidence_of_another_core_or_another_policy_is_missing() {
     let (case, core, store) = (case(), reference(INTERVAL_NS), MemoryStore::default());
-    let ran = arena(&case, &core, &store, SEED, WINDOW_NS);
+    let ran = arena(&case, &core, &store, SEED, END_NS);
     let certificates = [(); 3].map(|()| certified(&ran.session().conservation()));
     let (evidence, replay) = (ran.into_evidence(), replayed(&case, INTERVAL_NS));
     let mut without_independence = AccuracyCase::manufactured().expect("every case builds");
@@ -249,7 +252,7 @@ fn accuracy_evidence_of_another_core_or_another_policy_is_missing() {
 #[test]
 fn replay_evidence_of_another_run_is_missing() {
     let (case, core, store) = (case(), reference(INTERVAL_NS), MemoryStore::default());
-    let ran = arena(&case, &core, &store, SEED, WINDOW_NS);
+    let ran = arena(&case, &core, &store, SEED, END_NS);
     let certificate = certified(&ran.session().conservation());
     let other = replayed(&case, INTERVAL_NS / 2);
     let scored = score(certificate, checked(INTERVAL_NS), ran.into_evidence(), other);

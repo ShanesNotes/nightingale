@@ -1,23 +1,23 @@
+use core::num::NonZeroU64;
 use ng_contract::{
-    AdmissionError, Compensated, ConservedBasis, Digest, Dimension, Dimensionless, Interval, Measure,
-    QuantityId, SimTime,
+    AdmissionError, Book, BoundaryDirection, Charge, Compensated, ConservedBasis, CoverageManifest, Digest,
+    Dimensionless, HeldRoute, Interval, Measure, QuantityId, SimTime, Substance,
 };
 use ng_record::{CheckpointError, ConservationView, Curve, HistorySeal, HistorySegment, NewestFirst};
 
-const DAY_NS: u64 = 86_400_000_000_000;
-
 /// One combination's limits. `absolute + relative * gross exchange in the window` bounds closure, so a tiny
 /// exchange needs a tiny residual. `drift` stands in for 1.96 times the within-subject variation until the
-/// healthy-range set holds that variation: it is fixture data, not a policy value.
+/// healthy-range set holds that variation: it is fixture data, not a policy value. Charge has none: its drift
+/// holds to the closure bound (record 0004).
 pub struct QuantityPolicy {
     quantity: QuantityId,
     absolute: Compensated,
     relative: Measure<Dimensionless>,
-    drift: Compensated,
+    drift: Option<Compensated>,
 }
 impl QuantityPolicy {
     /// Refuses a dimension that is not what the combination balances.
-    pub fn new<U: Dimension>(
+    pub fn new<U: Substance>(
         quantity: QuantityId,
         absolute: Measure<U>,
         relative: Measure<Dimensionless>,
@@ -30,7 +30,23 @@ impl QuantityPolicy {
             quantity,
             absolute: Compensated::of(&absolute),
             relative,
-            drift: Compensated::of(&drift),
+            drift: Some(Compensated::of(&drift)),
+        })
+    }
+    /// Refuses a combination that is not charge.
+    pub fn charge(
+        quantity: QuantityId,
+        absolute: Measure<Charge>,
+        relative: Measure<Dimensionless>,
+    ) -> Result<Self, AdmissionError> {
+        if quantity.book() != Book::Charge {
+            return Err(AdmissionError::QuantityDimension { quantity });
+        }
+        Ok(Self {
+            quantity,
+            absolute: Compensated::of(&absolute),
+            relative,
+            drift: None,
         })
     }
 }
@@ -38,18 +54,25 @@ impl QuantityPolicy {
 pub enum ExpectedDrift {
     Zero,
 }
-/// Every sliding 24 h window over at least `coverage_ns` of history.
+/// Every sliding window of `window_ns` over at least `coverage_ns` of history.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Sliding24Hours {
+pub struct SlidingWindows {
+    window_ns: NonZeroU64,
     coverage_ns: u64,
 }
-impl Sliding24Hours {
+impl SlidingWindows {
     /// Refuses a coverage that does not exceed one window.
-    pub fn covering(coverage_ns: u64) -> Result<Self, AdmissionError> {
-        if coverage_ns <= DAY_NS {
+    pub fn new(window_ns: NonZeroU64, coverage_ns: u64) -> Result<Self, AdmissionError> {
+        if coverage_ns <= window_ns.get() {
             return Err(AdmissionError::ShortCoverage);
         }
-        Ok(Self { coverage_ns })
+        Ok(Self {
+            window_ns,
+            coverage_ns,
+        })
+    }
+    pub fn window_ns(&self) -> NonZeroU64 {
+        self.window_ns
     }
     pub fn coverage_ns(&self) -> u64 {
         self.coverage_ns
@@ -59,7 +82,7 @@ pub struct CertificatePolicy {
     basis: Digest,
     quantities: Vec<QuantityPolicy>,
     expected: ExpectedDrift,
-    windows: Sliding24Hours,
+    windows: SlidingWindows,
 }
 impl CertificatePolicy {
     /// Refuses unless every combination of the basis has exactly one entry, in basis order.
@@ -67,7 +90,7 @@ impl CertificatePolicy {
         basis: &ConservedBasis,
         quantities: Vec<QuantityPolicy>,
         expected: ExpectedDrift,
-        windows: Sliding24Hours,
+        windows: SlidingWindows,
     ) -> Result<Self, AdmissionError> {
         let held = quantities.iter().map(|quantity| quantity.quantity);
         if !held.eq(basis.ids()) {
@@ -89,7 +112,11 @@ impl CertificatePolicy {
         } = self;
         let mut bytes = basis.as_bytes().to_vec();
         let ExpectedDrift::Zero = expected;
-        let Sliding24Hours { coverage_ns } = windows;
+        let SlidingWindows {
+            window_ns,
+            coverage_ns,
+        } = windows;
+        bytes.extend_from_slice(&window_ns.get().to_be_bytes());
         bytes.extend_from_slice(&coverage_ns.to_be_bytes());
         for quantity in quantities {
             let QuantityPolicy {
@@ -98,7 +125,8 @@ impl CertificatePolicy {
                 relative,
                 drift,
             } = quantity;
-            for value in [*absolute, Compensated::of(relative), *drift] {
+            // Only charge has no drift bound, and the basis digest says which combination that is.
+            for value in [*absolute, Compensated::of(relative)].into_iter().chain(*drift) {
                 for limb in value.bits() {
                     bytes.extend_from_slice(&limb.to_be_bytes());
                 }
@@ -115,7 +143,7 @@ pub struct QuantityResult {
     quantity: QuantityId,
     closure_floor: Compensated,
     closure_relative: Compensated,
-    drift_limit: Compensated,
+    drift_limit: Option<Compensated>,
     worst_closure: Compensated,
     closure_window: Interval,
     worst_drift: Compensated,
@@ -132,7 +160,8 @@ impl QuantityResult {
     pub fn closure_relative(&self) -> Compensated {
         self.closure_relative
     }
-    pub fn drift_limit(&self) -> Compensated {
+    /// `None` for charge, whose drift holds to the closure bound.
+    pub fn drift_limit(&self) -> Option<Compensated> {
         self.drift_limit
     }
     /// The largest `|inventory change - net boundary exchange|` over any window.
@@ -150,13 +179,42 @@ impl QuantityResult {
         self.drift_window
     }
 }
+/// The most one held route moved into and out of the body over any window, each named by instant.
+#[derive(Clone, Copy, Debug)]
+pub struct HeldSupport {
+    route: HeldRoute,
+    most_inflow: Compensated,
+    inflow_window: Interval,
+    most_outflow: Compensated,
+    outflow_window: Interval,
+}
+impl HeldSupport {
+    pub fn route(&self) -> HeldRoute {
+        self.route
+    }
+    pub fn most_inflow(&self) -> Compensated {
+        self.most_inflow
+    }
+    pub fn inflow_window(&self) -> Interval {
+        self.inflow_window
+    }
+    pub fn most_outflow(&self) -> Compensated {
+        self.most_outflow
+    }
+    pub fn outflow_window(&self) -> Interval {
+        self.outflow_window
+    }
+}
 #[derive(Debug)]
 pub struct Certificate {
     seal: HistorySeal,
     basis: Digest,
     policy: Digest,
-    windows: Sliding24Hours,
+    windows: SlidingWindows,
+    span: Interval,
     results: Vec<QuantityResult>,
+    coverage: CoverageManifest,
+    support: Vec<HeldSupport>,
     pieces: u64,
 }
 impl Certificate {
@@ -169,11 +227,22 @@ impl Certificate {
     pub fn policy(&self) -> Digest {
         self.policy
     }
-    pub fn windows(&self) -> Sliding24Hours {
+    pub fn windows(&self) -> SlidingWindows {
         self.windows
+    }
+    /// Admission to the accepted head the walk read.
+    pub fn span(&self) -> Interval {
+        self.span
     }
     pub fn results(&self) -> &[QuantityResult] {
         &self.results
+    }
+    pub fn coverage(&self) -> &CoverageManifest {
+        &self.coverage
+    }
+    /// One per held route, in `CoverageManifest::held_routes` order.
+    pub fn support(&self) -> &[HeldSupport] {
+        &self.support
     }
     /// How many stretches of window starts the walk covered.
     pub fn pieces(&self) -> u64 {
@@ -261,18 +330,33 @@ struct Window {
     closure: Compensated,
     drift: Compensated,
 }
+struct Carried {
+    route: usize,
+    interval: Interval,
+    inflow: Compensated,
+    outflow: Compensated,
+}
+struct Pair {
+    drifted: Option<CertificateFailure>,
+    windows: Vec<Window>,
+    carried: Vec<Carried>,
+}
 
 fn pair(
     policy: &CertificatePolicy,
+    routes: &[HeldRoute],
     trailing: &HistorySegment,
     leading: &HistorySegment,
     from: u64,
     to: u64,
-) -> Result<(Option<CertificateFailure>, Vec<Window>), CertificateFailure> {
+) -> Result<Pair, CertificateFailure> {
     let coverage = of_history(CertificateCheck::Coverage);
+    let length = policy.windows.window_ns.get();
     let early = Interval::new(SimTime::from_ns(from), SimTime::from_ns(to)).ok_or(coverage)?;
     let late =
-        Interval::new(SimTime::from_ns(from + DAY_NS), SimTime::from_ns(to + DAY_NS)).ok_or(coverage)?;
+        Interval::new(SimTime::from_ns(from + length), SimTime::from_ns(to + length)).ok_or(coverage)?;
+    let window =
+        |start: u64| Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + length)).ok_or(coverage);
     let mut drifted = None;
     let mut windows = Vec::with_capacity(2 * policy.quantities.len());
     for (at, limits) in policy.quantities.iter().enumerate() {
@@ -294,8 +378,7 @@ fn pair(
         )
         .ok_or(coverage)?;
         for (index, start) in [from, to].into_iter().enumerate() {
-            let interval =
-                Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + DAY_NS)).ok_or(coverage)?;
+            let interval = window(start)?;
             let closure = change[index].minus(inflow[index].minus(outflow[index])).abs();
             let gross = inflow[index].plus(outflow[index]);
             let allowed = limits.absolute.plus(gross.times(&limits.relative));
@@ -308,7 +391,7 @@ fn pair(
                 });
             }
             let drift = change[index].abs();
-            if !drift.at_most(limits.drift) && drifted.is_none() {
+            if !drift.at_most(limits.drift.unwrap_or(allowed)) && drifted.is_none() {
                 drifted = Some(CertificateFailure {
                     check: CertificateCheck::Drift,
                     quantity: Some(quantity),
@@ -324,7 +407,58 @@ fn pair(
             });
         }
     }
-    Ok((drifted, windows))
+    let mut carried = Vec::with_capacity(2 * routes.len());
+    for (at, route) in routes.iter().enumerate() {
+        let ((forward, reverse), (forward_before, reverse_before)) = (
+            leading.exchange(route.column()),
+            trailing.exchange(route.column()),
+        );
+        let forward = differences(&forward, late, &forward_before, early).ok_or(coverage)?;
+        let reverse = differences(&reverse, late, &reverse_before, early).ok_or(coverage)?;
+        let (inflow, outflow) = match route.forward() {
+            BoundaryDirection::IntoBody => (forward, reverse),
+            BoundaryDirection::OutOfBody => (reverse, forward),
+        };
+        for (index, start) in [from, to].into_iter().enumerate() {
+            carried.push(Carried {
+                route: at,
+                interval: window(start)?,
+                inflow: inflow[index],
+                outflow: outflow[index],
+            });
+        }
+    }
+    Ok(Pair {
+        drifted,
+        windows,
+        carried,
+    })
+}
+
+fn keep_the_earliest_most(most: &mut [Option<HeldSupport>], routes: &[HeldRoute], carried: Vec<Carried>) {
+    for window in carried.into_iter().rev() {
+        let Carried {
+            route,
+            interval,
+            inflow,
+            outflow,
+        } = window;
+        let support = most[route].get_or_insert(HeldSupport {
+            route: routes[route],
+            most_inflow: inflow,
+            inflow_window: interval,
+            most_outflow: outflow,
+            outflow_window: interval,
+        });
+        if support.most_inflow.at_most(inflow) {
+            support.most_inflow = inflow;
+            support.inflow_window = interval;
+        }
+        if support.most_outflow.at_most(outflow) {
+            support.most_outflow = outflow;
+            support.outflow_window = interval;
+        }
+    }
 }
 
 /// `windows` came earlier in time than every window `worst` has seen, so a tie replaces.
@@ -378,23 +512,27 @@ pub fn certify(
         return Err(coverage);
     }
     let ExpectedDrift::Zero = policy.expected;
+    let routes = view.basis().coverage().held_routes();
+    let length = policy.windows.window_ns.get();
     let first = span.start().nanoseconds();
     let (mut early, mut late) = (Holding::new(view), Holding::new(view));
     let mut worst: Vec<Option<QuantityResult>> = vec![None; policy.quantities.len()];
+    let mut most: Vec<Option<HeldSupport>> = vec![None; routes.len()];
     let (mut failed, mut drifted) = (None, None);
     let mut pieces = 0;
-    let mut to = span.end().nanoseconds() - DAY_NS;
+    let mut to = span.end().nanoseconds() - length;
     while to > first {
         let trailing = early.holding(to)?;
-        let leading = late.holding(to + DAY_NS)?;
+        let leading = late.holding(to + length)?;
         let start = |segment: &HistorySegment| segment.interval().start().nanoseconds();
-        let from = start(trailing).max(start(leading).saturating_sub(DAY_NS));
+        let from = start(trailing).max(start(leading).saturating_sub(length));
         pieces += 1;
-        match pair(policy, trailing, leading, from, to) {
+        match pair(policy, routes, trailing, leading, from, to) {
             Err(failure) => failed = Some(failure),
-            Ok((drift, windows)) => {
-                drifted = drift.or(drifted);
-                keep_the_earliest_worst(&mut worst, policy, windows);
+            Ok(pair) => {
+                drifted = pair.drifted.or(drifted);
+                keep_the_earliest_worst(&mut worst, policy, pair.windows);
+                keep_the_earliest_most(&mut most, routes, pair.carried);
             }
         }
         to = from;
@@ -403,12 +541,16 @@ pub fn certify(
         return Err(failure);
     }
     let results = worst.into_iter().collect::<Option<Vec<_>>>().ok_or(coverage)?;
+    let support = most.into_iter().collect::<Option<Vec<_>>>().ok_or(coverage)?;
     Ok(Certificate {
         seal: view.seal(),
         basis: policy.basis,
         policy: policy.digest(),
         windows: policy.windows,
+        span,
         results,
+        coverage: view.basis().coverage().clone(),
+        support,
         pieces,
     })
 }

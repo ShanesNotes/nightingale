@@ -6,9 +6,18 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 Blocked by: 11, 12, 17
 
-Status: ready-for-agent
+Status: resolved
 
-- [ ] A short slice window passes all seven replay gates with the reference core
+- [x] A short slice window passes all seven replay gates with the reference core
+
+## Answer
+
+The slice is a `ReplayCase` now: `SliceCase` in `crates/ng-validate/src/slice.rs`. A window of it passes all seven replay gates with the reference core.
+
+- **A short slice window passes all seven replay gates with the reference core.** `a_slice_window_passes_every_replay_gate_with_the_reference_core` in `crates/ng-validate/tests/arena_body.rs` runs `replay_gates` on `SliceCase` with the reference core at 3 ms, and every gate passes. The window runs from 06:55 to 50 ms past the fence at 06:56. The stir fires inside it, at 528.07 ms on that core (measured). Two inputs wait at the fence with separate ids, a stand and a 400 unit gut water bolus, so the late-admission gate withholds both, and pace and resume meet posture, a delivery, same-time inputs and refusals (30 at 3 ms, measured). Each gate's reference run fires the stir alone, on stream `stir` at ordinal 0, and each gate's evidence names the one run. The test also checks that the withheld start holds no waiting input.
+- **The step policies.** The second policy is the reference core at 6 ms. The gate's reference is the first policy, because the core under test is the reference integrator. Its distance is the floor, 1 ms. The stir's rate is a constant, so a policy lands it within one floor after it crosses its draw. Measured landings: 529.000 ms at 1 and 2 ms, 528.367 ms at 2.5 ms, 528.072 ms at 3 ms and 528.031 ms at 4 ms.
+- **One admission per resolution.** An admission solve takes about 6.5 s and a run of the window about 0.66 s at 3 ms (measured, Omarchy, test profile), so `SliceCase` admits each core resolution's start once, with the inputs and without, keeps a checkpoint of each, and resumes every run from it. This test admits three: 3 ms with and without the inputs, and 6 ms. A start's checkpoint holds no link, so it resumes into any store.
+- **Wall time.** Measured on Omarchy in the test profile under `heavy.sh`: the test takes 61.7 s. The resume gate is about 28 s of it, because it loads on each side of every breakpoint, refusal and firing (43 rows at 3 ms) and runs each load to the end. The three admission solves take about 19 s. The test runs beside the slice's other checks in the `arena_body` binary, whose wall time went from 52.7 s to 61.6 s. At 2 ms the gates take 72.3 s. A run of the window at 1 ms costs about 1.5 s, more than twice the 3 ms run (measured), so the test runs at 3 ms.
 
 ## Comments
 
