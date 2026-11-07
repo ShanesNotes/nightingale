@@ -164,11 +164,22 @@ pub enum AccuracyCase {
     /// The same stage evaluated before and after refused evaluations returns identical residuals
     /// and Jacobian bits.
     EvaluationIndependence,
-    /// Windows of the slice against `ReferenceIntegrator` at three refinements (`factor` apart),
-    /// which give the reference's own error and the core's observed order. The windows cover
-    /// admission and the first posture change and meal, sleep onset, and the second day's waking.
-    /// Never against the core itself: a lagged or biased core converges to its own wrong limit.
-    SliceReference { reference: ReferenceIntegrator, factor: u32 },
+    /// A window of the slice against `ReferenceIntegrator` at three refinements, which give the
+    /// reference's own error and the core's observed order. The windows cover admission and the
+    /// first posture change and meal, sleep onset, and the second day's waking. Never against the
+    /// core itself: a lagged or biased core converges to its own wrong limit.
+    SliceWindow(SliceWindow),
+}
+/// One window, measured once: the finest refinement stands for the solution, and a quantity's
+/// distance is the farthest the coarser two stand from it.
+pub struct SliceWindow {
+    _distances: Vec<Compensated>,
+}
+impl SliceWindow {
+    /// Admission, the first posture change and the first meal.
+    pub fn first() -> Result<Self, AccuracyFailure> {
+        todo!()
+    }
 }
 /// The contract's slow reference: fully coupled backward Euler, step doubled, with Newton to
 /// convergence on the compiled body, on the public seam and nothing else. It serves the accuracy
