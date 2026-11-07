@@ -12,7 +12,7 @@ pub enum ScorePart {
 }
 
 /// One core's score under one protocol: each part its own result. A part that failed keeps its failure and leaves
-/// every other part standing.
+/// every other part standing. With no timed run, no part is held against one, and `evidence()` says why.
 pub struct ArenaScore {
     protocol: ArenaProtocol,
     second_policy: DeclaredResolution,

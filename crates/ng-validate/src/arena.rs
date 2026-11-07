@@ -113,25 +113,22 @@ impl Arena {
         let ran = self
             .spec()
             .and_then(|spec| run(&self.body, &*core, spec, clock, store));
-        let (evidence, certificate, day) = match ran {
+        let (evidence, certificate) = match ran {
             Ok(ran) => {
                 let certified = certify(&ran.session().conservation(), &self.certificate);
-                let evidence = ran.into_evidence();
                 (
-                    Ok(evidence),
+                    Ok(ran.into_evidence()),
                     certified.map_err(ArenaFailure::Certificate),
-                    self.day(cores),
                 )
             }
             Err(failure) => {
-                let missing = |part| ArenaFailure::MissingEvidence { part };
-                (
-                    Err(failure),
-                    Err(missing(ScorePart::Certificate)),
-                    Err(missing(ScorePart::Day)),
-                )
+                let missing = ArenaFailure::MissingEvidence {
+                    part: ScorePart::Certificate,
+                };
+                (Err(failure), Err(missing))
             }
         };
+        let day = self.day(cores);
         let second_policy = second_policy.fresh().resolution().clone();
         let parts = (evidence, certificate, accuracy, replay, day);
         Ok(bound(self.protocol, self.accuracy_digest, second_policy, parts))

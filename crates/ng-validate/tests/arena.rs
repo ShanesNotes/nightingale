@@ -32,6 +32,16 @@ impl WallClock for Ticks {
     }
 }
 
+struct Stopped;
+impl WallClock for Stopped {
+    fn elapsed_ns(&self) -> Option<u64> {
+        None
+    }
+    fn source(&self) -> ClockSource {
+        ClockSource::Scripted
+    }
+}
+
 fn reference(interval_ns: u64) -> ReferenceIntegrator {
     let full = ArenaProtocol::full();
     ReferenceIntegrator::new(interval_ns)
@@ -174,5 +184,32 @@ fn past_the_sit_up_the_day_checks_end_on_the_timed_runs_seal() {
         .all(|check| check.at() == Some(seven));
     assert!(at_seven, "{day}");
     score.replay().expect("every replay gate");
+    score.accuracy().expect("within the arena's policy");
+}
+
+#[test]
+fn a_clock_with_no_reading_leaves_the_day_checks_and_accuracy_standing() {
+    let arena = Arena::new(short()).expect("the arena builds");
+    let score = arena.score(
+        || reference(PAST_THE_SLICES_LONGEST_STEP),
+        || reference(UNDER_THE_SLICES_LONGEST_STEP),
+        &Stopped,
+        &MemoryStore::default(),
+    );
+    let score = score.expect("the core declares the protocol's scales and interval");
+    assert!(matches!(score.evidence(), Err(ArenaFailure::MissingThroughput)));
+    let certificate = score.certificate();
+    let part = ScorePart::Certificate;
+    assert!(matches!(certificate, Err(ArenaFailure::MissingEvidence { part: missing }) if *missing == part));
+    let replay = score.replay();
+    let gate = ReplayGate::Pace;
+    let pace = ReplayFailure::MissingEvidence { gate };
+    assert!(matches!(replay, Err(ArenaFailure::Replay(failure)) if *failure == pace));
+    let day = score
+        .day()
+        .expect("the day checks need neither the clock nor the store");
+    let mut rows: Vec<u8> = day.checks().iter().map(DayCheck::row).collect();
+    rows.dedup();
+    assert_eq!(rows, (1..=17).collect::<Vec<u8>>());
     score.accuracy().expect("within the arena's policy");
 }

@@ -475,3 +475,10 @@ path = "crates/ng-validate/src/arena.rs"
 old = '''let events = self.plan.events(anchor_moment()).map_err(admission)?;'''
 new = '''let events = self.plan.events(SimTime::from_ns(u64::MAX)).map_err(admission)?;'''
 test = "-p ng-validate --test arena past_the_sit_up_the_day_checks_end_on_the_timed_runs_seal"
+
+[[mutant]]
+name = "day-waits-on-the-timed-run"
+path = "crates/ng-validate/src/arena.rs"
+old = '''let day = self.day(cores);'''
+new = '''let day = (evidence.as_ref().map_err(|_| ArenaFailure::MissingEvidence { part: ScorePart::Day })).and_then(|_| self.day(cores));'''
+test = "-p ng-validate --test arena a_clock_with_no_reading_leaves_the_day_checks_and_accuracy_standing"
