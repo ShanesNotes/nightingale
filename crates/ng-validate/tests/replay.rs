@@ -341,6 +341,51 @@ fn a_live_pace_counts_from_the_runs_own_start() {
     assert!(verdict.is_ok(), "{:?}", verdict.err());
 }
 
+/// A case whose withheld start already holds every input, so `enqueue` takes each as the same request.
+struct WithholdsNothing(TwoReservoirs);
+impl ReplayCase for WithholdsNothing {
+    fn body(&self) -> &CompiledBody {
+        self.0.body()
+    }
+    fn end(&self) -> SimTime {
+        self.0.end()
+    }
+    fn events(&self) -> Result<Vec<BoundaryEvent>, AdmissionError> {
+        self.0.events()
+    }
+    fn admit<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
+    ) -> Result<Session<'m, Running>, InitializationFailure> {
+        self.0.admit(core, store)
+    }
+    fn admit_withheld<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
+    ) -> Result<Session<'m, Running>, InitializationFailure> {
+        self.0.admit(core, store)
+    }
+}
+
+#[test]
+fn a_withheld_start_that_already_holds_its_inputs_fails_late_admission() {
+    let clock = script();
+    let cores = || reference(8 * SECOND);
+    replay_gate(ReplayGate::LateAdmission, &busy(), &cores, &plan(&clock)).expect("the inputs arrive late");
+    let failure = replay_gate(
+        ReplayGate::LateAdmission,
+        &WithholdsNothing(busy()),
+        &cores,
+        &plan(&clock),
+    );
+    assert!(
+        matches!(failure, Err(ReplayFailure::NoLateBoundary { .. })),
+        "{failure:?}"
+    );
+}
+
 #[test]
 fn an_honest_core_refused_past_an_input_passes_late_admission() {
     let store = MemoryStore::default();
