@@ -176,53 +176,58 @@ const LINK_HEAD: usize = 2 * size_of::<Digest>();
 const INSTANT: usize = size_of::<u64>();
 const LINK_VALUES: usize = LINK_HEAD + 2 * INSTANT;
 const VALUE: usize = size_of::<[u64; 2]>();
-const PAIR: usize = 2 * VALUE;
 const WHOLE: u8 = 0;
 const ENDS: u8 = 1;
 
+fn values(bytes: &[u8]) -> Option<&[[u8; VALUE]]> {
+    let (values, rest) = bytes.as_chunks::<VALUE>();
+    rest.is_empty().then_some(values)
+}
+
 /// The end time and each curve's end value of a compact link, which are the start time and start values of
 /// the link that follows it.
-fn ends(compact: &[u8]) -> Option<(&[u8], impl Iterator<Item = &[u8]>)> {
+fn ends(compact: &[u8]) -> Option<(&[u8], impl Iterator<Item = &[u8; VALUE]>)> {
     let (&form, rest) = compact.split_first()?;
     let (time, values, stride) = match form {
-        WHOLE => (rest.get(LINK_HEAD + INSTANT..LINK_VALUES)?, rest.get(LINK_VALUES..)?, PAIR),
+        WHOLE => (
+            rest.get(LINK_HEAD + INSTANT..LINK_VALUES)?,
+            values(rest.get(LINK_VALUES..)?)?,
+            2,
+        ),
         ENDS => (
             rest.get(size_of::<Digest>()..size_of::<Digest>() + INSTANT)?,
-            rest.get(size_of::<Digest>() + INSTANT..)?,
-            VALUE,
+            values(rest.get(size_of::<Digest>() + INSTANT..)?)?,
+            1,
         ),
         _ => return None,
     };
-    let values = values.chunks_exact(stride);
-    values
-        .remainder()
-        .is_empty()
-        .then(|| (time, values.map(move |held| &held[stride - VALUE..])))
+    (values.len() % stride == 0).then(|| (time, values.iter().skip(stride - 1).step_by(stride)))
 }
 
 /// A link as a history store may keep it. When `link` follows `previous` (its seal, then its own compact
 /// form), only its image, its end time and each curve's end value are kept; any other link is kept whole.
 pub fn compact(previous: Option<(Digest, &[u8])>, link: &[u8]) -> Vec<u8> {
-    let follows = previous.is_some_and(|(seal, before)| {
-        let (Some((time, ends)), Some(starts)) = (ends(before), link.get(LINK_VALUES..)) else {
-            return false;
-        };
-        let pairs = starts.chunks_exact(PAIR);
-        link.get(..size_of::<Digest>()) == Some(seal.as_bytes())
-            && link.get(LINK_HEAD..LINK_HEAD + INSTANT) == Some(time)
-            && pairs.remainder().is_empty()
-            && pairs.map(|pair| &pair[..VALUE]).eq(ends)
+    let pairs = link
+        .get(LINK_VALUES..)
+        .and_then(values)
+        .filter(|pairs| pairs.len() % 2 == 0);
+    let follows = previous.zip(pairs).is_some_and(|((seal, before), pairs)| {
+        ends(before).is_some_and(|(time, ends)| {
+            link.get(..size_of::<Digest>()) == Some(seal.as_bytes())
+                && link.get(LINK_HEAD..LINK_HEAD + INSTANT) == Some(time)
+                && pairs.iter().step_by(2).eq(ends)
+        })
     });
-    if !follows {
+    let (Some(pairs), true) = (pairs, follows) else {
         let mut whole = vec![WHOLE];
         whole.extend_from_slice(link);
         return whole;
-    }
+    };
     let mut kept = vec![ENDS];
     kept.extend_from_slice(&link[size_of::<Digest>()..LINK_HEAD]);
     kept.extend_from_slice(&link[LINK_HEAD + INSTANT..LINK_VALUES]);
-    for pair in link[LINK_VALUES..].chunks_exact(PAIR) {
-        kept.extend_from_slice(&pair[VALUE..]);
+    for end in pairs.iter().skip(1).step_by(2) {
+        kept.extend_from_slice(end);
     }
     kept
 }
@@ -239,11 +244,8 @@ pub fn expand(previous: Option<(Digest, &[u8])>, compact: &[u8]) -> Option<Vec<u
     let (seal, before) = previous?;
     let (start, starts) = ends(before)?;
     let (image, rest) = rest.split_at_checked(size_of::<Digest>())?;
-    let (end, values) = rest.split_at_checked(INSTANT)?;
-    let mut values = values.chunks_exact(VALUE);
-    if !values.remainder().is_empty() {
-        return None;
-    }
+    let (end, held) = rest.split_at_checked(INSTANT)?;
+    let mut values = values(held)?.iter();
     let mut link = seal.as_bytes().to_vec();
     for part in [image, start, end] {
         link.extend_from_slice(part);
