@@ -62,7 +62,8 @@ mod tests {
     use crate::{MemoryStore, ReferenceIntegrator, ReplayCase, TwoReservoirs};
     use core::num::NonZeroU64;
     use ng_contract::{
-        ChannelSpec, Compensated, ErrorScales, Measure, SimTime, SplitBudget, SplitRejected, TraceGrid, Water,
+        ChannelSpec, Compensated, Dimensionless, ErrorScales, Measure, SimTime, SplitBudget, SplitRejected,
+        TraceGrid, Water,
     };
 
     const SECOND: u64 = 1_000_000_000;
@@ -104,8 +105,8 @@ mod tests {
         Measure::new(value).expect("finite")
     }
 
-    /// Backward Euler's error halves with its interval, so a reference and its half differ by about the half's
-    /// own error, and the reference's own is about twice that.
+    /// The closed form says how far each run is from the truth. The gate measures the split against the
+    /// reference's half, so its reference error must cover the half's own error and its total the split's own.
     #[test]
     fn a_split_whose_closed_form_error_is_over_its_budget_is_refused() {
         let case = TwoReservoirs::closed().expect("a synthetic case");
@@ -121,18 +122,23 @@ mod tests {
         let scale = 1.2;
         let scales = ErrorScales::uniform(measure(scale), measure(0.0)).expect("a positive scale");
         let budget = SplitBudget::new(scales, scales, scales, measure(1.0), measure(0.5)).expect("a share");
-        let (reference, split) = (
+        let (reference, half, split) = (
             ReferenceIntegrator::new(8 * SECOND),
+            ReferenceIntegrator::new(4 * SECOND),
             ReferenceIntegrator::new(16 * SECOND),
         );
+        let normalized =
+            |core| closed_form_error(&case, core, period_ns).times(&measure::<Dimensionless>(1.0 / scale));
+        let (own, split_own) = (normalized(&half), normalized(&split));
         assert!(
-            !closed_form_error(&case, &split, period_ns).at_most(Compensated::of(&measure::<Water>(scale))),
+            !split_own.at_most(Compensated::of(&measure::<Dimensionless>(1.0))),
             "the split's own error is over the budget"
         );
-        let outcome = split_gate(&case, &split, &reference, &lens, grid, budget);
-        assert!(
-            matches!(outcome, Err(SplitFailure::Rejected(SplitRejected::OverBudget(_)))),
-            "{outcome:?}"
-        );
+        let assessment = match split_gate(&case, &split, &reference, &lens, grid, budget) {
+            Err(SplitFailure::Rejected(SplitRejected::OverBudget(assessment))) => assessment,
+            other => panic!("not refused over the budget: {other:?}"),
+        };
+        assert!(own.times(&measure(0.9)).at_most(assessment.reference_error()));
+        assert!(split_own.times(&measure(0.95)).at_most(assessment.worst_total()));
     }
 }
