@@ -1321,7 +1321,6 @@ class MustFailRow:
 
 
 def must_fail_rows(text: str) -> list[str]:
-    """The first cell of each row of §7's must-fail table."""
     lines = text.splitlines()
     heads = [i for i, line in enumerate(lines) if line.strip() == MUST_FAIL_HEADER]
     if len(heads) != 1:
@@ -1428,8 +1427,7 @@ def missing_doctest(ws: Workspace, d: Doctest) -> str | None:
     "seam",
     edit(CONTRACT, r"^(\| An orphan pool \|)", r"| A core no test builds | Nothing |\n\1"),
 )
-def must_fail_rows_have_witnesses(ws: Workspace) -> list[Violation]:
-    """Every row of §7's must-fail table names what rejects its core, and every entry names a row."""
+def must_fail_rows_are_paired(ws: Workspace) -> list[Violation]:
     code = "seam.must-fail"
     rows = must_fail_rows(_read(ws.root / CONTRACT))
     entries = parse_must_fail(_read(ws.root / MUST_FAIL))
@@ -1455,7 +1453,6 @@ def must_fail_rows_have_witnesses(ws: Workspace) -> list[Violation]:
     edit("crates/ng-validate/tests/replay.rs", r"^fn a_core_that_reads_the_host_clock_fails_pace\(", "fn renamed("),
 )
 def must_fail_tests_exist(ws: Workspace) -> list[Violation]:
-    """Each test a must-fail entry names through its mutants exists, and each doctest it names is there."""
     code, out = "seam.must-fail-test", []
     mutants = mutant_tests(ws.root)
     for e in parse_must_fail(_read(ws.root / MUST_FAIL)):

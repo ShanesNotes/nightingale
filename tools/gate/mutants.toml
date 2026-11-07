@@ -229,9 +229,6 @@ old = '''if session.record().digests().waiting == waiting {'''
 new = '''if false {'''
 test = "-p ng-validate --test replay a_withheld_start_that_already_holds_its_inputs_fails_late_admission"
 
-# From here to the end, the rows tools/gate/must-fail.toml names. Each turns a must-fail core or model of §7 into one
-# built to pass, and the test that builds it must then fail.
-
 [[mutant]]
 name = "forward-euler-inside-rc"
 path = "crates/ng-validate/tests/transaction.rs"

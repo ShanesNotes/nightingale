@@ -1,8 +1,8 @@
 # One [[row]] for each row of the must-fail table in docs/architecture/solver-contract.md §7, and what shows the
 # row's gate rejecting its core or model. 05-seam holds the pairing.
 #   core      the row's first cell, verbatim
-#   mutants   rows of tools/gate/mutants.toml. Each turns this core into one built to pass, and its test, the test
-#             that builds the core and asserts the gate's rejection, must then fail. 40-mutants replays them.
+#   mutants   names of tools/gate/mutants.toml rows, each with a test that must fail under it. 40-mutants replays
+#             them.
 #   doctests  compile_fail doctests a crate holds for a core that does not compile, as the file, the error code
 #             gate.py codes proves, and a line only that doctest holds
 

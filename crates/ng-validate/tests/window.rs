@@ -26,8 +26,7 @@ fn fixed(interval_ns: u64, floor_ns: u64) -> ReferenceIntegrator {
         .with_floor(floor)
 }
 
-/// One resolution for every core here, so the slice admits one start for them all.
-fn declared(interval_ns: u64, scales: ErrorScales) -> DeclaredResolution {
+fn shared_resolution(interval_ns: u64, scales: ErrorScales) -> DeclaredResolution {
     let mut policy = b"doubled backward Euler".to_vec();
     policy.extend_from_slice(&interval_ns.to_be_bytes());
     DeclaredResolution::new(
@@ -68,8 +67,6 @@ fn backward_tangent(workspace: &mut SolveWorkspace, start: &[f64], span_ns: u64)
     }
 }
 
-/// Doubled backward Euler that stops each stage after `updates` Newton updates, then books it with the rows in
-/// `behind` back at the coordinates the stage started from.
 struct Sweeps {
     interval_ns: u64,
     scales: ErrorScales,
@@ -78,7 +75,7 @@ struct Sweeps {
 }
 impl CoupledSolver for Sweeps {
     fn resolution(&self) -> DeclaredResolution {
-        declared(self.interval_ns, self.scales)
+        shared_resolution(self.interval_ns, self.scales)
     }
     fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
         self.interval_ns
@@ -110,8 +107,6 @@ impl CoupledSolver for Sweeps {
     }
 }
 
-/// Solves each stage with the wall power held where the stage started: the walls' volumes pair, and the store follows
-/// a stale power, so its energy no longer closes on the walls' sum.
 struct HoldsTheWallPower {
     interval_ns: u64,
     scales: ErrorScales,
@@ -119,7 +114,7 @@ struct HoldsTheWallPower {
 }
 impl CoupledSolver for HoldsTheWallPower {
     fn resolution(&self) -> DeclaredResolution {
-        declared(self.interval_ns, self.scales)
+        shared_resolution(self.interval_ns, self.scales)
     }
     fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
         self.interval_ns

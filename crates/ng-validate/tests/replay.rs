@@ -341,7 +341,6 @@ fn a_live_pace_counts_from_the_runs_own_start() {
     assert!(verdict.is_ok(), "{:?}", verdict.err());
 }
 
-/// A case whose withheld start already holds every input, so `enqueue` takes each as the same request.
 struct WithholdsNothing(TwoReservoirs);
 impl ReplayCase for WithholdsNothing {
     fn body(&self) -> &CompiledBody {

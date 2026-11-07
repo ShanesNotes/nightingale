@@ -31,7 +31,7 @@ The native Rust engine for one simulated patient. Read `docs/srs.md` first: it b
 | A core's floor is a `NonZeroU64`, so no door refuses a zero one | the compile-fail doctest in `crates/ng-contract/src/lib.rs` |
 | A seal or digest names every field it holds: one it leaves out with `name: _` has a `seal_skip` entry and its reason in `tools/gate/paths.toml`, and `..` hides none | `tools/verify.d/05-seam.sh` (`seam.seal`), whose probe replays the layout's skipped `judged` |
 | A test that once missed a mistake keeps seeing it: each row of `tools/gate/mutants.toml` still applies, and a change to a row's code or test replays the row | `tools/verify.d/40-mutants.sh` |
-| Each row of §7's must-fail table has an entry in `tools/gate/must-fail.toml`: mutants whose tests build its core and see its gate reject it, or compile_fail doctests | `tools/verify.d/05-seam.sh` (`seam.must-fail`), with the mutants replayed by `40-mutants.sh` and the doctests' codes by `gate.py codes` |
+| Each row of §7's must-fail table has an entry in `tools/gate/must-fail.toml` naming the tests of its gate, through mutant rows each test must fail under, or its compile_fail doctests | `tools/verify.d/05-seam.sh` (`seam.must-fail`), with the mutants replayed by `40-mutants.sh` and the doctests' codes by `gate.py codes` |
 | Records in `data/` hold closed fields and capped text, tier rules and locators; an anchor names a method and window and rests on no inference; a derivation recomputes with dimensions; each identity closes | `tools/verify.d/30-data.sh`, whose probes refuse a record built to break each rule |
 | Comments | the `/no-comments` report |
 
