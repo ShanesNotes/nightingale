@@ -1314,7 +1314,7 @@ class Doctest:
 
 
 @dataclasses.dataclass(frozen=True)
-class Witnesses:
+class MustFailRow:
     core: str
     mutants: tuple[str, ...]
     doctests: tuple[Doctest, ...]
@@ -1336,7 +1336,7 @@ def must_fail_rows(text: str) -> list[str]:
     return rows
 
 
-def parse_must_fail(text: str) -> list[Witnesses]:
+def parse_must_fail(text: str) -> list[MustFailRow]:
     try:
         raw = tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:
@@ -1356,7 +1356,7 @@ def parse_must_fail(text: str) -> list[Witnesses]:
             ):
                 raise GateError(f"{where}: doctest {j + 1}: a path, an error code such as E0599 and a line it holds")
             doctests.append(Doctest(d["path"], d["code"], d["text"]))
-        out.append(Witnesses(r["core"], _strings(r.get("mutants", []), f"{where}: mutants"), tuple(doctests)))
+        out.append(MustFailRow(r["core"], _strings(r.get("mutants", []), f"{where}: mutants"), tuple(doctests)))
     return out
 
 
