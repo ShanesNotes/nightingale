@@ -156,3 +156,38 @@ path = "crates/ng-validate/src/run.rs"
 old = '''(read(clock)?.checked_sub(opened)).ok_or(ArenaFailure::MissingThroughput)?'''
 new = '''Some(read(clock)?.wrapping_sub(opened)).ok_or(ArenaFailure::MissingThroughput)?'''
 test = "-p ng-validate --test throughput a_throughput_that_measured_nothing_is_missing"
+
+[[mutant]]
+name = "day-slow-stay-four-minutes"
+path = "crates/ng-validate/src/day/judge.rs"
+old = '''const SLOW_STAY: u64 = 5 * MINUTE;'''
+new = '''const SLOW_STAY: u64 = 4 * MINUTE;'''
+test = "-p ng-validate --lib day::tests::a_slow_onset_stays_out_five_minutes_inside_its_window"
+
+[[mutant]]
+name = "day-meal-mean-offset"
+path = "crates/ng-validate/src/day/judge.rs"
+old = '''(fed_seen.mean - control_seen.mean) - offset,'''
+new = '''fed_seen.mean - control_seen.mean,'''
+test = "-p ng-validate --lib day::tests::a_meal_reads_against_its_counterfactual"
+
+[[mutant]]
+name = "day-meal-onset-offset"
+path = "crates/ng-validate/src/day/judge.rs"
+old = '''value(beat) - value(paired) - offset,'''
+new = '''value(beat) - value(paired),'''
+test = "-p ng-validate --lib day::tests::a_meal_reads_against_its_counterfactual"
+
+[[mutant]]
+name = "day-recovery-inclusive"
+path = "crates/ng-validate/src/day/table.rs"
+old = '''back: Under(Seconds(30)),'''
+new = '''back: By(Seconds(30)),'''
+test = "-p ng-validate --lib day::tests::the_registry_states_the_tickets_directions_and_bounds"
+
+[[mutant]]
+name = "day-night-volume-down"
+path = "crates/ng-validate/src/day/table.rs"
+old = '''scoring: Scored(Measured::PlasmaVolume, OneWay(Up, By(Minutes(35)))),'''
+new = '''scoring: Scored(Measured::PlasmaVolume, OneWay(Down, By(Minutes(35)))),'''
+test = "-p ng-validate --lib day::tests::the_registry_states_the_tickets_directions_and_bounds"
