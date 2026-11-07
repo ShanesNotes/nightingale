@@ -10,6 +10,7 @@ use ng_validate::*;
 const SECOND: u64 = 1_000_000_000;
 const MILLISECOND: u64 = 1_000_000;
 const HOUR: u64 = 3600 * SECOND;
+const DAY: u64 = 24 * HOUR;
 /// A model default, as in tests/chance.rs: the landing tolerance plus what a quadrature books wrong on this case.
 const EVENT_TOLERANCE_NS: u64 = 500 * MILLISECOND;
 
@@ -65,7 +66,7 @@ fn the_core_meets_every_manufactured_case_at_first_order() {
 }
 
 fn ledger_policy(basis: &ConservedBasis, drift: f64) -> Ledger {
-    Ledger::new(basis, 1e-24, 1e-9, drift)
+    Ledger::sliding(basis, DAY, 2 * DAY, 1e-24, 1e-9, drift)
 }
 
 #[test]

@@ -49,6 +49,7 @@ enum Defect {
     OneRouteDiscardsAnothers,
     OnlyARowReadsTheDrive,
     ARowAlsoReadsTheDrive,
+    RouteOutOfBody,
 }
 
 struct Sites {
@@ -87,7 +88,11 @@ fn schema(defect: Defect) -> Result<(Schema, Sites), AdmissionError> {
     };
     map.enclose(&belly, &[bed.id()], compliance);
     let mut schema = Schema::new(map.finish()?)?;
-    schema.boundary::<Water>(ROUTE, BoundaryDirection::IntoBody, vessel.id(), Space::Lumen)?;
+    let direction = match defect {
+        Defect::RouteOutOfBody => BoundaryDirection::OutOfBody,
+        _ => BoundaryDirection::IntoBody,
+    };
+    schema.boundary::<Water>(ROUTE, direction, vessel.id(), Space::Lumen)?;
     if matches!(
         defect,
         Defect::ElasticEnclosure | Defect::RigidEnclosure | Defect::FluidLeftOut
@@ -757,6 +762,26 @@ fn a_held_pool_is_an_amount_in_the_ledger_with_a_combination_of_its_own() -> Res
         assert!(!(body.columns().iter()).any(|column| column.terms().iter().any(|term| term.0 == row)));
     }
     assert_eq!(body.held().collect::<Vec<_>>(), ["BC", "GI"]);
+    Ok(())
+}
+
+#[test]
+fn the_basis_digest_covers_the_way_a_held_route_crosses() -> Result<(), AdmissionError> {
+    let (into, out_of) = (compiled(Defect::None)?, compiled(Defect::RouteOutOfBody)?);
+    let crossing = |body: &CompiledBody| {
+        let routes = body.conserved_basis().coverage().held_routes();
+        routes
+            .iter()
+            .map(|route| (route.name(), route.forward()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(crossing(&into), [(ROUTE, BoundaryDirection::IntoBody)]);
+    assert_eq!(crossing(&out_of), [(ROUTE, BoundaryDirection::OutOfBody)]);
+    assert_eq!(
+        into.conserved_basis().combinations(),
+        out_of.conserved_basis().combinations()
+    );
+    assert_ne!(into.conserved_basis().digest(), out_of.conserved_basis().digest());
     Ok(())
 }
 
