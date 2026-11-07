@@ -1,5 +1,5 @@
 //! Synthetic fixtures, the slice's composition root and held stand-ins, the admission solve, the reference
-//! integrator, the accuracy gate, the certificate, the replay gates and the arena run.
+//! integrator, the accuracy gate, the certificate, the replay gates, the arena run and its score.
 //!
 //! # Type rules
 //!
@@ -147,6 +147,21 @@
 //!     Ok(run(body, core, spec, clock, store)?.into_evidence().throughput().clone())
 //! }
 //! ```
+//! A score comes only from `score`, so every score passed its check that each part is of one run.
+//! ```compile_fail,E0451
+//! use ng_validate::*;
+//! fn assembled(certificate: Certificate, accuracy: AccuracyEvidence, evidence: RunEvidence,
+//!     replay: ReplayEvidence) -> ArenaScore {
+//!     ArenaScore { certificate, accuracy, evidence, replay }
+//! }
+//! ```
+//! ```
+//! use ng_validate::*;
+//! fn scored(certificate: Certificate, accuracy: AccuracyEvidence, evidence: RunEvidence,
+//!     replay: ReplayEvidence) -> Result<ArenaScore, ArenaFailure> {
+//!     score(certificate, accuracy, evidence, replay)
+//! }
+//! ```
 
 mod accuracy;
 mod certificate;
@@ -155,6 +170,7 @@ mod initialize;
 mod reference;
 mod replay;
 mod run;
+mod score;
 mod slice;
 
 pub use accuracy::{
@@ -174,6 +190,7 @@ pub use replay::{
 pub use run::{
     ArenaFailure, ArenaRun, ArenaSpec, NumericalHealth, RunEvidence, ThroughputEvidence, run, run_until,
 };
+pub use score::{ArenaScore, Evidence, score};
 pub use slice::{
     anchor_moment, arena_anatomy, arena_body, arena_lens, arena_organs, arena_packet, arena_schema,
     hold_outside_slice,

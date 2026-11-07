@@ -237,7 +237,12 @@ impl TwoReservoirs {
     pub fn exterior(&self) -> Option<ColumnId> {
         self.column(Context::Body)
     }
-    fn packet(&self, conductance: f64) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+    /// The packet every run of the case admits, so `run` on it with the case's seed names the run its replay gates
+    /// measure.
+    pub fn packet(&self) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+        self.valued(CONDUCTANCE)
+    }
+    fn valued(&self, conductance: f64) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
         let default = Binding::Network(Network::Vascular);
         let mut packet = ParameterPacket::new();
         let (e, g) = (ParameterKey::new("cv.e"), ParameterKey::new("cv.g"));
@@ -260,10 +265,10 @@ impl TwoReservoirs {
     }
     /// The same packet with a doubled conductance: what a core reads if it evaluates on other values.
     pub fn other_values(&self) -> Result<BoundParameters, AdmissionError> {
-        self.body.bind(self.packet(2.0 * CONDUCTANCE)?)
+        self.body.bind(self.valued(2.0 * CONDUCTANCE)?)
     }
     pub(crate) fn overflowing_values(&self) -> Result<BoundParameters, AdmissionError> {
-        self.body.bind(self.packet(f64::MAX)?)
+        self.body.bind(self.valued(f64::MAX)?)
     }
     /// Everything that makes this case this case, so two cases on one body never share an identity.
     pub fn digest(&self) -> Digest {
@@ -352,7 +357,7 @@ impl ReplayCase for TwoReservoirs {
         store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         let boundary = BoundaryPort::new(self.events()?)?;
-        admit_fixture(&self.body, self.packet(CONDUCTANCE)?, boundary, core, store)
+        admit_fixture(&self.body, self.packet()?, boundary, core, store)
     }
     /// The timeline is not part of the run identity, so this is the same run.
     fn admit_withheld<'m>(
@@ -361,7 +366,7 @@ impl ReplayCase for TwoReservoirs {
         store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         let boundary = BoundaryPort::new(Vec::new())?;
-        admit_fixture(&self.body, self.packet(CONDUCTANCE)?, boundary, core, store)
+        admit_fixture(&self.body, self.packet()?, boundary, core, store)
     }
 }
 

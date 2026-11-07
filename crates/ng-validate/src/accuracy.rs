@@ -142,15 +142,33 @@ impl AccuracyPolicy {
         Digest::of_canonical(&bytes)
     }
 }
-/// The worst error per case. Accepted values only: a trial state is never read.
+/// The worst error per case, under one policy, of one core. Accepted values only: a trial state is never read.
 #[derive(Debug)]
 pub struct AccuracyEvidence {
     policy: Digest,
+    resolution: Digest,
+    absolute: Compensated,
+    relative: Compensated,
+    grid_ns: u64,
     worst: Vec<Compensated>,
 }
 impl AccuracyEvidence {
     pub fn policy(&self) -> Digest {
         self.policy
+    }
+    /// The digest of the declared resolution of the core that ran every case.
+    pub fn resolution(&self) -> Digest {
+        self.resolution
+    }
+    /// With `relative`, the policy's bound at each compared instant: `absolute + relative * |exact|`.
+    pub fn absolute(&self) -> Compensated {
+        self.absolute
+    }
+    pub fn relative(&self) -> Compensated {
+        self.relative
+    }
+    pub fn grid_ns(&self) -> u64 {
+        self.grid_ns
     }
     pub fn worst(&self) -> &[Compensated] {
         &self.worst
@@ -250,6 +268,10 @@ pub fn accuracy(
     }
     Ok(AccuracyEvidence {
         policy: policy.digest(),
+        resolution: solver.resolution().digest(),
+        absolute: policy.absolute,
+        relative: Compensated::of(&policy.relative),
+        grid_ns: policy.grid_ns,
         worst,
     })
 }

@@ -223,13 +223,22 @@ impl AccuracyPolicy {
         todo!()
     }
 }
-/// The worst error per case, under one policy. Accepted values only: a trial state is never read.
+/// The worst error per case, under one policy, of one core, with the bound and grid it was held to.
+/// Accepted values only: a trial state is never read.
 pub struct AccuracyEvidence {
     _policy: Digest,
+    _resolution: Digest,
+    _absolute: Compensated,
+    _relative: Compensated,
+    _grid_ns: u64,
     _worst: Vec<Compensated>,
 }
 impl AccuracyEvidence {
     pub fn policy(&self) -> Digest {
+        todo!()
+    }
+    /// The digest of the declared resolution of the core that ran every case.
+    pub fn resolution(&self) -> Digest {
         todo!()
     }
     pub fn worst(&self) -> &[Compensated] {
@@ -357,10 +366,11 @@ pub struct NumericalHealth {
 pub trait CoreFactory {
     fn fresh(&self) -> Box<dyn CoupledSolver + '_>;
 }
-/// The run's evidence, bound to the run identity it measured, so evidence from another run
-/// cannot be scored with this one.
+/// The run's evidence, bound to the history it ended on and its core's resolution, so evidence from
+/// another run cannot be scored with this one.
 pub struct RunEvidence {
-    _run: Digest,
+    _seal: HistorySeal,
+    _resolution: DeclaredResolution,
     _throughput: ThroughputEvidence,
     _health: NumericalHealth,
 }
@@ -376,11 +386,32 @@ impl<'m> ArenaRun<'m> {
         todo!()
     }
 }
+/// Each part states the policy values it was judged by.
 pub struct ArenaScore {
     _certificate: Certificate,
     _accuracy: AccuracyEvidence,
     _evidence: RunEvidence,
     _replay: ReplayEvidence,
+}
+impl ArenaScore {
+    pub fn certificate(&self) -> &Certificate {
+        todo!()
+    }
+    pub fn accuracy(&self) -> &AccuracyEvidence {
+        todo!()
+    }
+    pub fn evidence(&self) -> &RunEvidence {
+        todo!()
+    }
+    pub fn replay(&self) -> &ReplayEvidence {
+        todo!()
+    }
+}
+/// The part of a score that was not of its run.
+pub enum Evidence {
+    Certificate,
+    Accuracy,
+    Replay,
 }
 pub enum ArenaFailure {
     Admission(AdmissionError),
@@ -394,7 +425,7 @@ pub enum ArenaFailure {
     /// would test nothing.
     NoLateBoundary { id: InputId },
     /// A gate that did not run, or evidence from another run: never scored as a pass.
-    MissingEvidence { gate: ReplayGate },
+    MissingEvidence { evidence: Evidence },
     /// A clock with no reading left, one that ran backward or stood still over a repeat, or a repeat
     /// with no waveform sample: a throughput that measured nothing.
     MissingThroughput,
@@ -421,7 +452,6 @@ pub fn run<'m>(
 ) -> Result<ArenaRun<'m>, ArenaFailure> {
     todo!()
 }
-/// A score needs all three: the certificate, the accuracy evidence and the run's evidence.
 /// Runs every replay gate against the uninterrupted run, building each core it resumes or
 /// rewinds into from `cores`.
 pub fn replay_gates(
@@ -431,8 +461,9 @@ pub fn replay_gates(
 ) -> Result<ReplayEvidence, ArenaFailure> {
     todo!()
 }
-/// A score needs all four: the certificate, the accuracy evidence, the run's evidence and the
-/// replay gates' evidence for the same run. Replay evidence from another run is `MissingEvidence`.
+/// A score needs all four parts of the run its run evidence names: a certificate of the history it
+/// ended on, accuracy evidence of its core under the model-default policy, and replay evidence of its
+/// identity. Any other part is `MissingEvidence`.
 pub fn score(
     _certificate: Certificate,
     _accuracy: AccuracyEvidence,

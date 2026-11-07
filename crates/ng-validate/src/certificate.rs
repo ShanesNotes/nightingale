@@ -51,6 +51,9 @@ impl Sliding24Hours {
         }
         Ok(Self { coverage_ns })
     }
+    pub fn coverage_ns(&self) -> u64 {
+        self.coverage_ns
+    }
 }
 pub struct CertificatePolicy {
     basis: Digest,
@@ -105,10 +108,14 @@ impl CertificatePolicy {
     }
 }
 
-/// The worst window of one combination, named by instant. Every window was checked.
+/// The worst window of one combination, named by instant, beside the limits it was held to. Every window was
+/// checked.
 #[derive(Clone, Copy, Debug)]
 pub struct QuantityResult {
     quantity: QuantityId,
+    closure_floor: Compensated,
+    closure_relative: Compensated,
+    drift_limit: Compensated,
     worst_closure: Compensated,
     closure_window: Interval,
     worst_drift: Compensated,
@@ -117,6 +124,16 @@ pub struct QuantityResult {
 impl QuantityResult {
     pub fn quantity(&self) -> QuantityId {
         self.quantity
+    }
+    /// With `closure_relative`, the policy's closure bound: `floor + relative * gross exchange in the window`.
+    pub fn closure_floor(&self) -> Compensated {
+        self.closure_floor
+    }
+    pub fn closure_relative(&self) -> Compensated {
+        self.closure_relative
+    }
+    pub fn drift_limit(&self) -> Compensated {
+        self.drift_limit
     }
     /// The largest `|inventory change - net boundary exchange|` over any window.
     pub fn worst_closure(&self) -> Compensated {
@@ -138,6 +155,7 @@ pub struct Certificate {
     seal: HistorySeal,
     basis: Digest,
     policy: Digest,
+    windows: Sliding24Hours,
     results: Vec<QuantityResult>,
     pieces: u64,
 }
@@ -150,6 +168,9 @@ impl Certificate {
     }
     pub fn policy(&self) -> Digest {
         self.policy
+    }
+    pub fn windows(&self) -> Sliding24Hours {
+        self.windows
     }
     pub fn results(&self) -> &[QuantityResult] {
         &self.results
@@ -319,8 +340,12 @@ fn keep_the_earliest_worst(
             closure,
             drift,
         } = window;
+        let limits = &policy.quantities[quantity];
         let result = worst[quantity].get_or_insert(QuantityResult {
-            quantity: policy.quantities[quantity].quantity,
+            quantity: limits.quantity,
+            closure_floor: limits.absolute,
+            closure_relative: Compensated::of(&limits.relative),
+            drift_limit: limits.drift,
             worst_closure: closure,
             closure_window: interval,
             worst_drift: drift,
@@ -382,6 +407,7 @@ pub fn certify(
         seal: view.seal(),
         basis: policy.basis,
         policy: policy.digest(),
+        windows: policy.windows,
         results,
         pieces,
     })

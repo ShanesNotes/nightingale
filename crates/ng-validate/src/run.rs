@@ -1,14 +1,15 @@
 use crate::initialize::{admit_start, solved_start};
-use crate::{ClockSource, WallClock};
+use crate::{ClockSource, Evidence, WallClock};
 use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::{
-    BoundaryPort, CompiledBody, CoupledSolver, Digest, EngineFaultKind, InitializationFailure, Interval,
-    NumericalRefusal, ObservationLens, ObservationSeed, ParameterPacket, Seed, SimTime, SourceId,
-    SyntheticFixture,
+    BoundaryPort, CompiledBody, CoupledSolver, DeclaredResolution, Digest, EngineFaultKind,
+    InitializationFailure, Interval, NumericalRefusal, ObservationLens, ObservationSeed, ParameterPacket,
+    Seed, SimTime, SourceId, SyntheticFixture,
 };
 use ng_observe::{Observation, ObservedValue, Observer};
 use ng_record::{
-    CheckpointError, FaultReport, Faulted, HistoryStore, ObservationRefusal, Running, Session, Step,
+    CheckpointError, FaultReport, Faulted, HistorySeal, HistoryStore, ObservationRefusal, Running, Session,
+    Step,
 };
 
 pub(crate) fn advance<'m>(
@@ -138,15 +139,25 @@ impl NumericalHealth {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct RunEvidence {
-    run: Digest,
+    seal: HistorySeal,
+    resolution: DeclaredResolution,
     throughput: ThroughputEvidence,
     health: NumericalHealth,
 }
 impl RunEvidence {
+    /// The run identity's digest.
     pub fn run(&self) -> Digest {
-        self.run
+        self.seal.run
+    }
+    /// The history the run ended on, which its certificate must certify.
+    pub fn seal(&self) -> HistorySeal {
+        self.seal
+    }
+    /// The core's declared settings, whose error scales and minimum interval are policy values.
+    pub fn resolution(&self) -> &DeclaredResolution {
+        &self.resolution
     }
     pub fn throughput(&self) -> &ThroughputEvidence {
         &self.throughput
@@ -186,6 +197,10 @@ pub enum ArenaFailure {
     /// other work.
     RepeatDiffered {
         repeat: u32,
+    },
+    /// Evidence from another run, or from a gate that did not run: never scored as a pass.
+    MissingEvidence {
+        evidence: Evidence,
     },
 }
 
@@ -303,7 +318,8 @@ pub fn run<'m>(
         waveform_samples: samples,
     };
     let evidence = RunEvidence {
-        run: record.identity().digest(),
+        seal: session.conservation().seal(),
+        resolution: identity.resolution().clone(),
         throughput,
         health,
     };
