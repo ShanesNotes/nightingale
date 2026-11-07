@@ -1,12 +1,11 @@
 use super::table::{Bound, Course, Direction, Lean, Measured, ROWS, Row, Scoring, Span};
 use super::trace::{Beat, DayTrace};
 use super::{
-    DayCheck, DayPlan, DayQuantity, EventKind, HOUR, MINUTE, Miss, Occurrence, SECOND, Unavailable, Verdict,
+    DayCheck, DayPlan, DayQuantity, EventKind, HOUR, MINUTE, Miss, Occurrence, Unavailable, Verdict,
 };
 use ng_contract::SimTime;
 
 const BASELINE: u64 = 10 * MINUTE;
-const FIRST_PHASE: u64 = 30 * SECOND;
 const NIGHT_HOUR: u64 = HOUR;
 const FAST_STAY: usize = 3;
 const SLOW_STAY: u64 = 5 * MINUTE;
@@ -137,6 +136,11 @@ fn response(seen: Stats, against: Stats) -> Change {
     )
 }
 
+/// A phase's excursion clears the same floors as a response.
+fn clears(excursion: f64, base: Stats) -> bool {
+    excursion > 3.0 * base.sd && excursion >= base.tolerance
+}
+
 fn beyond(value: f64, from: f64, margin: f64, direction: Direction) -> bool {
     match direction {
         Direction::Up => value > from + margin,
@@ -233,21 +237,17 @@ impl Scene<'_> {
         let end = covered(fed, self.next())?;
         let base = stats(within(fed, self.baseline(), at), quantity)?;
         let change = response(stats(within(fed, plus(at, held_from.ns()), end), quantity)?, base);
-        let (band, value) = (
-            larger_or_nan(3.0 * base.sd, base.tolerance),
-            Self::value(quantity),
-        );
-        let early = within(fed, at, plus(at, FIRST_PHASE));
-        let below = |beat: &Beat| beyond(value(beat), base.mean, band, Direction::Down);
-        let dipped = onset(&marks(early, below), dip.span().fast());
-        let window = within(fed, at, end);
+        let (window, value) = (within(fed, at, end), Self::value(quantity));
+        let below = |beat: &Beat| clears(base.mean - value(beat), base);
+        let dipped = onset(&marks(window, below), dip.span().fast());
         let after = dipped.map_or(&[][..], |dipped| {
             &window[window.partition_point(|beat| beat.start < dipped)..]
         });
-        let returned = onset(
-            &marks(after, |beat| value(beat) >= base.mean - band),
-            back.span().fast(),
-        );
+        let back_in = |beat: &Beat| {
+            let fall = base.mean - value(beat);
+            fall <= 3.0 * base.sd || fall < base.tolerance
+        };
+        let returned = onset(&marks(after, back_in), back.span().fast());
         let shown = Shown {
             change: Some(change),
             first: dipped.map(|end| elapsed(at, end)),
@@ -277,15 +277,11 @@ impl Scene<'_> {
         let end = covered(fed, self.next())?;
         let base = stats(within(fed, self.baseline(), at), quantity)?;
         let change = response(stats(within(fed, plus(at, fall_from.ns()), end), quantity)?, base);
-        let (band, value) = (
-            larger_or_nan(3.0 * base.sd, base.tolerance),
-            Self::value(quantity),
-        );
-        let early = within(fed, at, plus(at, FIRST_PHASE));
-        let above = |beat: &Beat| beyond(value(beat), base.mean, band, Direction::Up);
-        let below = |beat: &Beat| beyond(value(beat), base.mean, band, Direction::Down);
-        let rose = onset(&marks(early, above), rise.span().fast());
-        let fell = onset(&marks(within(fed, at, end), below), fall.span().fast());
+        let (window, value) = (within(fed, at, end), Self::value(quantity));
+        let above = |beat: &Beat| clears(value(beat) - base.mean, base);
+        let below = |beat: &Beat| clears(base.mean - value(beat), base);
+        let rose = onset(&marks(window, above), rise.span().fast());
+        let fell = onset(&marks(window, below), fall.span().fast());
         let shown = Shown {
             change: Some(change),
             first: rose.map(|end| elapsed(at, end)),

@@ -587,6 +587,53 @@ fn rows_two_and_four_fail_with_the_phase_that_is_missing() {
 }
 
 #[test]
+fn a_phase_bound_holds_its_onset_and_its_stay_may_run_past_it() {
+    let rises_at_twenty_eight = |since: i64| match since {
+        _ if (28 * S..33 * S).contains(&since) => 50.0,
+        _ if since >= M => -50.0,
+        _ => 0.0,
+    };
+    assert_eq!(sit_up_row(4, rises_at_twenty_eight), Verdict::Pass);
+}
+
+#[test]
+fn a_phase_at_the_declared_tolerance_is_a_response() {
+    let flat =
+        |effect: fn(i64) -> f64| move |since: i64| 100.0 + if since >= 0 { effect(since) } else { 0.0 };
+    let at_tolerance = |number, effect: fn(i64) -> f64| {
+        let (plan, stage) = (plan_with_every_payload(), stage(EventKind::SitUp));
+        let series = match row(number).scoring {
+            Scoring::Scored(measured, _) => measured.series(),
+            _ => panic!("row {number} is scored"),
+        };
+        let moved = flat(effect);
+        let value = |read, at, _| Sample {
+            value: if read == series {
+                moved(since(stage.event, at))
+            } else {
+                100.0
+            },
+            floor: 10.0,
+        };
+        let fed = traced(
+            &plan,
+            stage.start,
+            stage.end,
+            beats(stage.start, stage.end, stage.period, value),
+        );
+        verdicts(number, &judge(&plan, &fed, &[]), stage.event)[0]
+    };
+    let dip = |since: i64| if since < 5 * S { -10.0 } else { 0.0 };
+    let rise_then_fall = |since: i64| match since {
+        _ if since < 10 * S => 10.0,
+        _ if since < M => 0.0,
+        _ => -50.0,
+    };
+    assert_eq!(at_tolerance(2, dip), Verdict::Pass);
+    assert_eq!(at_tolerance(4, rise_then_fall), Verdict::Pass);
+}
+
+#[test]
 fn the_wake_rises_only_after_a_night_dip() {
     let night = -(7 * H + 30 * M);
     let wake = |asleep: f64, morning: f64| {
