@@ -314,6 +314,35 @@ fn a_history_kept_across_a_breakpoint_faults_with_method_mismatch() {
 }
 
 #[test]
+fn a_history_kept_across_a_posture_faults_with_method_mismatch() {
+    let store = MemoryStore::default();
+    let case = TwoReservoirs::closed().expect("a body");
+    let turn = SimTime::from_ns(40 * SECOND);
+    let port = || {
+        let seated = Posture::new(measure(1.0), Legs::SeatedDependent).expect("a posture");
+        let sits_up = BoundaryEvent::new(
+            InputId::new(Digest::of_canonical(b"sits up")),
+            turn,
+            BoundaryInput::Posture(seated),
+        );
+        BoundaryPort::new(vec![sits_up]).expect("a port")
+    };
+    let packet = || case.packet().expect("a packet");
+    let honest = euler(8 * SECOND);
+    let session = admit_fixture(case.body(), packet(), port(), &honest, &store).expect("admitted");
+    let (_, receipt) = accepted(to(session, turn).step());
+    assert!(receipt.after_breakpoint(), "a posture ends a step");
+    let core = KeptHistory {
+        inner: euler(8 * SECOND),
+        keeps_after: SimTime::from_ns(0),
+    };
+    let session = admit_fixture(case.body(), packet(), port(), &core, &store).expect("admitted");
+    let fault = fault_of(to(session, turn).step());
+    assert_eq!(fault.kind(), EngineFaultKind::MethodMismatch);
+    assert_eq!(fault.at(), turn);
+}
+
+#[test]
 fn a_continuation_of_another_core_faults_with_binding_mismatch() {
     let store = MemoryStore::default();
     let case = stepped();
