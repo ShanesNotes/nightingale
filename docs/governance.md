@@ -16,7 +16,7 @@ A doc earns its load when it binds behavior, defines a word, records a hard-to-r
 | `docs/adr/` | Decision records, one series from 0001 | When a pass touches that area, so it does not reopen a settled choice | Below the SRS |
 | `GLOSSARY.md` | The vocabulary | Before writing prose, a ticket or a name | Words only. SRS section 2 binds the terms it defines |
 | `docs/architecture/solver-contract.{md,svg,png}` and `solver-contract-sketch/` | The design the crates build against | When building or changing a crate or a seam | Below the records |
-| `docs/statecharts/` | The engine lifecycle as a TLA+ model, its Mermaid chart and the README image, with the script that redraws them | When a change adds, removes or moves a lifecycle state or transition | Below the contract: the model follows it |
+| `docs/statecharts/` | The system, engine, step and chart-placeholder statecharts as TLA+ models with their Mermaid charts, and the scripts that check and redraw them | When a change adds, removes or moves a state, a hand-off or a rule they draw | Below the contract: the model follows it |
 | `docs/atlas/` | The coupling map and one card per system, frozen | Only the cards a pass names, when that system is built | Lowest: the SRS and the contract win |
 | `docs/governance.md` | This doc | Before adding, moving, renaming or deleting a doc, term or record | Rules for docs |
 | `data/` | The source and inference records behind the reviewed packet and healthy-range set, as derived, cited numbers, with the identities they must close. Source text never enters | When binding a clinical value or writing a check that judges one | Below the records: a value is only as good as its source record |

@@ -1,155 +1,169 @@
 ---- MODULE engine ----
-EXTENDS Naturals
+EXTENDS Naturals, Sequences, FiniteSets
 
-CONSTANTS MaxRevision, MaxInterval, MinInterval, MaxBranch
+CONSTANTS MaxRevision, Coverage, Branches, Certifies, Overwrites
 
-Phases == {"mapDeclared", "mapChecked", "compiled", "bound",
-           "accepted", "proposed", "refused", "faulted",
-           "notAdmitted"}
+VARIABLES status, chain, kept, branch, ancestry, faulted,
+          saved, report, act, source, before
 
-VARIABLES phase, mapOk, bodyOk, packetOk, startOk,
-          revision, base, interval, branch,
-          act, prevPhase, prevRevision, prevBranch, prevInterval
+vars == <<status, chain, kept, branch, ancestry, faulted, saved, report, act, source, before>>
 
-vars == <<phase, mapOk, bodyOk, packetOk, startOk, revision, base, interval,
-          branch, act, prevPhase, prevRevision, prevBranch, prevInterval>>
+None == [held |-> FALSE, chain |-> <<>>, branch |-> 0, ancestry |-> {}, latched |-> FALSE]
 
-Remember(a) ==
-  /\ act' = a
-  /\ prevPhase' = phase
-  /\ prevRevision' = revision
-  /\ prevBranch' = branch
-  /\ prevInterval' = interval
+Range(s) == {s[i] : i \in 1..Len(s)}
+Link(b, r) == [branch |-> b, revision |-> r]
+IsPrefix(p, s) == Len(p) <= Len(s) /\ p = SubSeq(s, 1, Len(p))
+AllKept(s) == Range(s) \subseteq kept
+\* ng-record history.rs: the head is in memory, so the walk asks the store only for the links before it.
+KeptBeforeHead(s) == Len(s) <= 1 \/ Range(SubSeq(s, 1, Len(s) - 1)) \subseteq kept
+
+Now == [status |-> status, chain |-> chain]
+
+Did(a) == act' = a /\ before' = Now /\ source' = "none"
 
 Init ==
-  /\ phase = "mapDeclared"
-  /\ mapOk = FALSE /\ bodyOk = FALSE /\ packetOk = FALSE /\ startOk = FALSE
-  /\ revision = 0 /\ base = 0 /\ interval = MaxInterval /\ branch = 0
-  /\ act = "init" /\ prevPhase = "mapDeclared"
-  /\ prevRevision = 0 /\ prevBranch = 0 /\ prevInterval = MaxInterval
+  /\ status = "running" /\ chain = <<>> /\ kept = {}
+  /\ branch = 0 /\ ancestry = {0} /\ faulted = {}
+  /\ saved = None /\ report = None
+  /\ act = "admit" /\ source = "none" /\ before = Now
 
-Fail(from) ==
-  /\ phase = from
-  /\ phase' = "notAdmitted"
-  /\ Remember("fail")
-  /\ UNCHANGED <<mapOk, bodyOk, packetOk, startOk, revision, base, interval, branch>>
+\* ng-record history.rs: History::push appends the link to those waiting and the store keeps them oldest first,
+\* stopping at the first it refuses.
+Publish(a) ==
+  /\ Len(chain) < MaxRevision
+  /\ LET grown == Append(chain, Link(branch, Len(chain) + 1))
+         waits == SelectSeq(grown, LAMBDA l : l \notin kept)
+     IN /\ chain' = grown
+        /\ \E n \in 0..Len(waits) : kept' = kept \cup Range(SubSeq(waits, 1, n))
+  /\ status' = "running"
+  /\ Did(a)
+  /\ UNCHANGED <<branch, ancestry, faulted, saved, report>>
 
-\* crates/ng-contract/src/anatomy.rs: AnatomyBuilder::finish checks the map, Anatomy::digest hashes it.
-MapPasses ==
-  /\ phase = "mapDeclared" /\ phase' = "mapChecked" /\ mapOk' = TRUE
-  /\ Remember("mapPasses")
-  /\ UNCHANGED <<bodyOk, packetOk, startOk, revision, base, interval, branch>>
-MapFails == Fail("mapDeclared")
+\* ng-record session.rs: Session::step and Session<Retrying>::retry, through PatientRecord::attempt and publish.
+Accept == status = "running" /\ Publish("accept")
+RetryAccepted == status = "retrying" /\ Publish("retryAccepted")
 
-\* Sketch ng_contract/scope.rs: Assembly::compile, refusing a missing or doubly owned law (native-contract 03).
-LawsCompile ==
-  /\ phase = "mapChecked" /\ phase' = "compiled" /\ bodyOk' = TRUE
-  /\ Remember("compile")
-  /\ UNCHANGED <<mapOk, packetOk, startOk, revision, base, interval, branch>>
-CompileFails == Fail("mapChecked")
+Becomes(from, to, a) ==
+  /\ status = from /\ status' = to
+  /\ faulted' = IF to = "faulted" THEN faulted \cup {branch} ELSE faulted
+  /\ Did(a)
+  /\ UNCHANGED <<chain, kept, branch, ancestry, saved, report>>
 
-\* Sketch ng_contract/body.rs: CompiledBody::bind parses a packet against the parameter layout.
-PacketBinds ==
-  /\ phase = "compiled" /\ phase' = "bound" /\ packetOk' = TRUE
-  /\ Remember("bind")
-  /\ UNCHANGED <<mapOk, bodyOk, startOk, revision, base, interval, branch>>
-BindFails == Fail("compiled")
+Refuse == Becomes("running", "retrying", "refuse")
+NoShorterInterval == Becomes("retrying", "faulted", "exhausted")
+Fault == Becomes("running", "faulted", "fault")
 
-\* Sketch ng_contract/admission.rs and ng_record.rs: the admission solve, then Session::admit (native-contract 08).
-Admit ==
-  /\ phase = "bound" /\ phase' = "accepted" /\ startOk' = TRUE
-  /\ Remember("admit")
-  /\ UNCHANGED <<mapOk, bodyOk, packetOk, revision, base, interval, branch>>
-AdmitFails == Fail("bound")
+Copy(latched) ==
+  [held |-> TRUE, chain |-> chain, branch |-> branch, ancestry |-> ancestry,
+   latched |-> latched]
 
-\* SRS section 2 Step and sketch ng_record.rs Session::step, Step and retry (native-contract 04).
-Propose ==
-  /\ phase = "accepted" /\ phase' = "proposed"
-  /\ base' = revision /\ interval' = MaxInterval
-  /\ Remember("propose")
-  /\ UNCHANGED <<mapOk, bodyOk, packetOk, startOk, revision, branch>>
+\* ng-record record.rs: PatientRecord::checkpoint refuses with StoreFailed while a link the store refused waits.
+TakeCheckpoint ==
+  /\ status = "running" /\ (Overwrites \/ ~saved.held)
+  /\ IF AllKept(chain)
+     THEN saved' = Copy(FALSE) /\ Did("checkpoint")
+     ELSE UNCHANGED saved /\ Did("storeFailed")
+  /\ UNCHANGED <<status, chain, kept, branch, ancestry, faulted, report>>
 
-Accept ==
-  /\ phase = "proposed" /\ phase' = "accepted"
-  /\ revision' = base + 1
-  /\ Remember("accept")
-  /\ UNCHANGED <<mapOk, bodyOk, packetOk, startOk, base, interval, branch>>
+\* ng-record session.rs: Session<Faulted>::export marks the image latched.
+Export ==
+  /\ status = "faulted" /\ (Overwrites \/ ~report.held)
+  /\ IF AllKept(chain)
+     THEN report' = Copy(TRUE) /\ Did("export")
+     ELSE UNCHANGED report /\ Did("storeFailed")
+  /\ UNCHANGED <<status, chain, kept, branch, ancestry, faulted, saved>>
 
-Refuse ==
-  /\ phase = "proposed" /\ phase' = "refused"
-  /\ Remember("refuse")
-  /\ UNCHANGED <<mapOk, bodyOk, packetOk, startOk, revision, base, interval, branch>>
+Restore(name, ck, b, a) ==
+  /\ status' = "running" /\ chain' = ck.chain
+  /\ branch' = b
+  /\ ancestry' = ck.ancestry \cup {b}
+  /\ act' = a /\ before' = Now /\ source' = name
+  /\ UNCHANGED <<kept, faulted, saved, report>>
 
-Retry ==
-  /\ phase = "refused" /\ interval > MinInterval
-  /\ phase' = "proposed" /\ interval' = interval - 1
-  /\ Remember("retry")
-  /\ UNCHANGED <<mapOk, bodyOk, packetOk, startOk, revision, base, branch>>
+\* ng-record checkpoint.rs: restore refuses a latched image unless it recovers, then walks the store from its seal.
+Resume(name, ck) ==
+  /\ ck.held /\ ~ck.latched /\ AllKept(ck.chain)
+  /\ Restore(name, ck, ck.branch, "resume")
 
-NoShorterInterval ==
-  /\ phase = "refused" /\ interval = MinInterval
-  /\ phase' = "faulted"
-  /\ Remember("exhausted")
-  /\ UNCHANGED <<mapOk, bodyOk, packetOk, startOk, revision, base, interval, branch>>
+\* ng-record session.rs fork and checkpoint.rs restore: a branch id this branch or the checkpoint uses is
+\* BranchInUse, a checkpoint off this branch's chain NotOnThisBranch.
+Fork(name, ck, b, a) ==
+  /\ ck.held /\ b \notin ancestry \cup ck.ancestry
+  /\ IsPrefix(ck.chain, chain) /\ KeptBeforeHead(chain)
+  /\ Restore(name, ck, b, a)
 
-EngineFault ==
-  /\ phase = "proposed" /\ phase' = "faulted"
-  /\ Remember("fault")
-  /\ UNCHANGED <<mapOk, bodyOk, packetOk, startOk, revision, base, interval, branch>>
+Rewind(name, ck, b) == status = "running" /\ ~ck.latched /\ Fork(name, ck, b, "rewind")
+Recover(name, ck, b) == status = "faulted" /\ Fork(name, ck, b, "recover")
 
-\* Sketch ng_record.rs: Session<Faulted> has no step; recover opens a new branch from an earlier checkpoint.
-Recover ==
-  /\ phase = "faulted" /\ phase' = "accepted"
-  /\ \E r \in 0..revision : revision' = r
-  /\ branch' = branch + 1
-  /\ Remember("recover")
-  /\ UNCHANGED <<mapOk, bodyOk, packetOk, startOk, base, interval>>
+\* ng-validate certificate.rs: certify refuses a policy of another basis, a span shorter than the coverage and a
+\* link the store does not give.
+Certify(basis) ==
+  /\ Certifies
+  /\ IF basis = "own" /\ Len(chain) >= Coverage /\ KeptBeforeHead(chain)
+     THEN Did("certified") ELSE Did("certificateRefused")
+  /\ UNCHANGED <<status, chain, kept, branch, ancestry, faulted, saved, report>>
 
-Done ==
-  /\ phase = "notAdmitted"
+ModelRunsOutOfBranchIds ==
+  /\ status = "faulted" /\ Branches \subseteq ancestry
   /\ UNCHANGED vars
 
 Next ==
-  \/ MapPasses \/ MapFails
-  \/ LawsCompile \/ CompileFails
-  \/ PacketBinds \/ BindFails
-  \/ Admit \/ AdmitFails
-  \/ Propose \/ Accept \/ Refuse \/ Retry \/ NoShorterInterval \/ EngineFault
-  \/ Recover \/ Done
+  \/ ModelRunsOutOfBranchIds
+  \/ Accept \/ RetryAccepted
+  \/ Refuse \/ NoShorterInterval \/ Fault
+  \/ TakeCheckpoint \/ Export
+  \/ Resume("saved", saved) \/ Resume("report", report)
+  \/ \E b \in Branches :
+       \/ Rewind("saved", saved, b) \/ Rewind("report", report, b)
+       \/ Recover("saved", saved, b) \/ Recover("report", report, b)
+  \/ \E basis \in {"own", "other"} : Certify(basis)
 
 Spec == Init /\ [][Next]_vars
 
-Bound == revision <= MaxRevision /\ branch <= MaxBranch
+\* The drawn config merges states that differ only in what no step reads and no label shows: the last step's
+\* record and which branches faulted. The larger config checks every rule without it.
+Drawn == <<status, chain, kept, branch, ancestry, saved, report>>
 
-RunPhases == {"accepted", "proposed", "refused", "faulted"}
-
-TypeOK ==
-  /\ phase \in Phases
-  /\ act \in {"init", "fail", "mapPasses", "compile", "bind", "admit", "propose",
-              "accept", "refuse", "retry", "exhausted", "fault", "recover"}
-  /\ interval \in MinInterval..MaxInterval
-
-NoStepBeforeAdmission ==
-  phase \in RunPhases => (mapOk /\ bodyOk /\ packetOk /\ startOk)
-
-NotAdmittedHasNoRun ==
-  phase = "notAdmitted" => ~startOk
+Restored == {"resume", "rewind", "recover"}
+Source == IF source = "saved" THEN saved ELSE report
+Stepped == {"accept", "retryAccepted"}
 
 RefusalChangesNothing ==
-  act = "refuse" => (revision = prevRevision /\ revision = base)
+  act = "refuse" => chain = before.chain
 
-RetryIsShorterNeverBelowMinimum ==
-  act = "retry" => (interval < prevInterval /\ interval >= MinInterval)
+AFaultTakesNoStep ==
+  act \in Stepped \cup {"refuse", "checkpoint", "rewind"} => before.status # "faulted"
 
-OnlyAcceptAdvancesState ==
-  act \notin {"accept", "recover"} => revision = prevRevision
+OnlyRecoverContinuesAFaultedBranch ==
+  act \in Stepped => branch \notin faulted
 
-StepStartsFromAcceptedState ==
-  act = "propose" => prevPhase = "accepted"
+RecoverOpensANewBranch ==
+  act = "recover" => (before.status = "faulted" /\ branch \notin Source.ancestry)
 
-FaultIsLatched ==
-  act \in {"propose", "accept", "retry"} => prevPhase # "faulted"
+ACheckpointHoldsEveryLink ==
+  act \in {"checkpoint", "export"} => AllKept(chain)
 
-RecoverOpensNewBranch ==
-  act = "recover" => (prevPhase = "faulted" /\ branch = prevBranch + 1 /\ revision <= prevRevision)
+StoreFailedOnlyWhileALinkWaits ==
+  act = "storeFailed" => ~AllKept(chain)
+
+AFaultCanBeExported ==
+  status = "faulted" => AllKept(chain)
+
+ResumeAndRewindRefuseAFaultExport ==
+  act \in {"resume", "rewind"} => ~Source.latched
+
+ForksStayOnThisBranchsChain ==
+  act \in {"rewind", "recover"} => IsPrefix(chain, before.chain)
+
+RestoreGivesTheCheckpointBack ==
+  act \in Restored => (Source.held /\ chain = Source.chain)
+
+CertificateCoversItsSpanOnItsBasis ==
+  act = "certified" => (Len(chain) >= Coverage /\ KeptBeforeHead(chain))
+
+PublishedStepsStay ==
+  act \notin Restored => IsPrefix(before.chain, chain)
+
+OnlyAnAcceptedStepMovesTheHead ==
+  chain # before.chain => act \in Stepped \cup Restored
 ====

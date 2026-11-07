@@ -57,6 +57,9 @@ Rerunning a run from its event log, with the same run seed (identical bits) or a
 A saved copy of the whole accepted state at a step boundary, from which a run resumes exactly or branches.
 _Avoid_: save (in prose)
 
+**Fault export**:
+What a faulted run gives for diagnosis: its last accepted checkpoint marked latched, with the fault and the refusals before it. Resume refuses it, so only recover continues from it, on a new branch.
+
 **Seal**:
 A digest that chains the seal before it with one accepted step's image and ledger chunk, so one seal stands for the whole accepted course up to that step. It covers nothing that waits.
 
@@ -554,6 +557,10 @@ The repo that holds the Pulse port, the playground, the kernel, the chart and th
 
 **Atlas**:
 `docs/atlas/`: one card per system and the coupling map that joins them. It is frozen, and the SRS and the contract win where it disagrees with them.
+
+**Statechart**:
+A TLA+ model in `docs/statecharts/` that TLC checks, drawn as a Mermaid chart of states and arrows. Not the chart, which is the clinicians' documentation.
+_Avoid_: chart (for a statechart)
 
 **Coupling map**:
 The atlas's map of how systems affect each other: shared substrates and 38 direct couplings. Not the map of sites.
