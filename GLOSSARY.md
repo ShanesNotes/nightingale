@@ -511,7 +511,7 @@ The arena's evidence of how hard a solver core worked for one run, beside the ce
 _Avoid_: health check (that is the healthy-range check)
 
 **Day check**:
-A deterministic check drawn from the contract's day table that reads one produced quantity around one event of the day plan. It compares the mean over a window after the event with the mean over a baseline before it, or for a meal with a counterfactual run's same window, and reports pass, fail or not available yet. A response is a change of more than three noise floors and at least the declared tolerance. It shows that the engine's structure answers the way the table says, never clinical validity.
+A deterministic check drawn from the contract's day table that reads one produced quantity around one event of the day plan. It compares the quantity's mean over the time of a window after the event with its mean over a baseline before it, or for a meal with a counterfactual run's same window, and reports pass, fail or not available yet. A response is a change of more than three noise floors and at least the declared tolerance. It shows that the engine's structure answers the way the table says, never clinical validity.
 _Avoid_: body check, judge
 
 **Day plan**:
