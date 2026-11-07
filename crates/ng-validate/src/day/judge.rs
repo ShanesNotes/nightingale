@@ -1,5 +1,5 @@
 use super::table::{Bound, Course, Direction, Lean, Measured, ROWS, Row, Scoring, Span};
-use super::trace::{Beat, DayTrace};
+use super::trace::{Beat, DayTrace, Sample};
 use super::{
     DayCheck, DayPlan, DayQuantity, EventKind, HOUR, MINUTE, Miss, Occurrence, Unavailable, Verdict,
 };
@@ -110,32 +110,46 @@ fn holding(trace: &DayTrace, at: SimTime) -> Option<&Beat> {
     trace.beats.get(index).filter(|beat| beat.start < at)
 }
 
-/// The mean and tolerance weigh each instant of the window alike, so two runs whose beats differ
-/// compare on one clock. The noise floor stays the spread of whole beats.
+fn overlapping(trace: &DayTrace, start: SimTime, end: SimTime) -> &[Beat] {
+    let first = trace.beats.partition_point(|beat| beat.end <= start);
+    let last = trace.beats.partition_point(|beat| beat.start < end);
+    trace.beats.get(first..last).unwrap_or(&[])
+}
+
+fn on_one_clock(trace: &DayTrace, start: SimTime, end: SimTime, quantity: Measured) -> Sample {
+    let (mut held, mut sum) = (0.0, Sample::default());
+    for beat in overlapping(trace, start, end) {
+        let (weight, reading) = (beat.weight(quantity, start, end), beat.reading(quantity));
+        held += weight;
+        sum.value += weight * reading.value;
+        sum.floor += weight * reading.floor;
+    }
+    Sample {
+        value: sum.value / held,
+        floor: sum.floor / held,
+    }
+}
+
+fn spread_of_whole_beats(beats: &[Beat], quantity: Measured) -> f64 {
+    let count = beats.len() as f64;
+    let value = |beat: &Beat| beat.reading(quantity).value;
+    let mean = beats.iter().map(value).sum::<f64>() / count;
+    let spread = (beats.iter().map(value))
+        .map(|value| (value - mean) * (value - mean))
+        .sum::<f64>();
+    (spread / (count - 1.0)).sqrt()
+}
+
 fn stats(trace: &DayTrace, start: SimTime, end: SimTime, quantity: Measured) -> Result<Stats, Pending> {
     let beats = within(trace, start, end);
     if beats.len() < 2 {
         return Err(Unavailable::TooFewBeats.into());
     }
-    let count = beats.len() as f64;
-    let value = |beat: &Beat| beat.reading(quantity).value;
-    let per_beat = beats.iter().map(value).sum::<f64>() / count;
-    let spread = (beats.iter().map(value))
-        .map(|value| (value - per_beat) * (value - per_beat))
-        .sum::<f64>();
-    let first = trace.beats.partition_point(|beat| beat.end <= start);
-    let last = trace.beats.partition_point(|beat| beat.start < end);
-    let (mut held, mut sum, mut floor) = (0.0, 0.0, 0.0);
-    for beat in trace.beats.get(first..last).unwrap_or(&[]) {
-        let (weight, reading) = (beat.weight(quantity, start, end), beat.reading(quantity));
-        held += weight;
-        sum += weight * reading.value;
-        floor += weight * reading.floor;
-    }
+    let clocked = on_one_clock(trace, start, end, quantity);
     Ok(Stats {
-        mean: sum / held,
-        sd: (spread / (count - 1.0)).sqrt(),
-        tolerance: floor / held,
+        mean: clocked.value,
+        sd: spread_of_whole_beats(beats, quantity),
+        tolerance: clocked.floor,
     })
 }
 
