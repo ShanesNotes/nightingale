@@ -110,21 +110,32 @@ fn holding(trace: &DayTrace, at: SimTime) -> Option<&Beat> {
     trace.beats.get(index).filter(|beat| beat.start < at)
 }
 
-fn stats(beats: &[Beat], quantity: Measured) -> Result<Stats, Pending> {
+/// The mean and tolerance weigh each instant of the window alike, so two runs whose beats differ
+/// compare on one clock. The noise floor stays the spread of whole beats.
+fn stats(trace: &DayTrace, start: SimTime, end: SimTime, quantity: Measured) -> Result<Stats, Pending> {
+    let beats = within(trace, start, end);
     if beats.len() < 2 {
         return Err(Unavailable::TooFewBeats.into());
     }
     let count = beats.len() as f64;
     let value = |beat: &Beat| beat.reading(quantity).value;
-    let mean = beats.iter().map(value).sum::<f64>() / count;
+    let per_beat = beats.iter().map(value).sum::<f64>() / count;
     let spread = (beats.iter().map(value))
-        .map(|value| (value - mean) * (value - mean))
+        .map(|value| (value - per_beat) * (value - per_beat))
         .sum::<f64>();
-    let tolerance = beats.iter().map(|beat| beat.reading(quantity).floor).sum::<f64>() / count;
+    let first = trace.beats.partition_point(|beat| beat.end <= start);
+    let last = trace.beats.partition_point(|beat| beat.start < end);
+    let (mut held, mut sum, mut floor) = (0.0, 0.0, 0.0);
+    for beat in trace.beats.get(first..last).unwrap_or(&[]) {
+        let (weight, reading) = (beat.weight(quantity, start, end), beat.reading(quantity));
+        held += weight;
+        sum += weight * reading.value;
+        floor += weight * reading.floor;
+    }
     Ok(Stats {
-        mean,
+        mean: sum / held,
         sd: (spread / (count - 1.0)).sqrt(),
-        tolerance,
+        tolerance: floor / held,
     })
 }
 
@@ -212,9 +223,9 @@ impl Scene<'_> {
     fn one_way(&self, quantity: Measured, direction: Direction, bound: Bound) -> Result<Judged, Pending> {
         let (fed, at) = (self.fed, self.at());
         let end = covered(fed, self.next())?;
-        let base = stats(within(fed, self.baseline(), at), quantity)?;
+        let base = stats(fed, self.baseline(), at, quantity)?;
         let window = within(fed, at, end);
-        let change = response(stats(window, quantity)?, base);
+        let change = response(stats(fed, at, end, quantity)?, base);
         let value = Self::value(quantity);
         let out = |beat: &Beat| beyond(value(beat), base.mean, 3.0 * base.sd, direction);
         let began = onset(&marks(window, out), bound.span().fast()).map(|end| elapsed(at, end));
@@ -235,8 +246,8 @@ impl Scene<'_> {
     ) -> Result<Judged, Pending> {
         let (fed, at) = (self.fed, self.at());
         let end = covered(fed, self.next())?;
-        let base = stats(within(fed, self.baseline(), at), quantity)?;
-        let change = response(stats(within(fed, plus(at, held_from.ns()), end), quantity)?, base);
+        let base = stats(fed, self.baseline(), at, quantity)?;
+        let change = response(stats(fed, plus(at, held_from.ns()), end, quantity)?, base);
         let (window, value) = (within(fed, at, end), Self::value(quantity));
         let below = |beat: &Beat| clears(base.mean - value(beat), base);
         let dipped = onset(&marks(window, below), dip.span().fast());
@@ -275,8 +286,8 @@ impl Scene<'_> {
     ) -> Result<Judged, Pending> {
         let (fed, at) = (self.fed, self.at());
         let end = covered(fed, self.next())?;
-        let base = stats(within(fed, self.baseline(), at), quantity)?;
-        let change = response(stats(within(fed, plus(at, fall_from.ns()), end), quantity)?, base);
+        let base = stats(fed, self.baseline(), at, quantity)?;
+        let change = response(stats(fed, plus(at, fall_from.ns()), end, quantity)?, base);
         let (window, value) = (within(fed, at, end), Self::value(quantity));
         let above = |beat: &Beat| clears(value(beat) - base.mean, base);
         let below = |beat: &Beat| clears(base.mean - value(beat), base);
@@ -308,14 +319,14 @@ impl Scene<'_> {
         let (fed, at) = (self.fed, self.at());
         let end = covered(fed, Some(self.plan.meal_end(at)))?;
         let start = self.baseline();
-        let fed_base = stats(within(fed, start, at), quantity)?;
+        let fed_base = stats(fed, start, at, quantity)?;
         let window = within(fed, at, end);
-        let fed_seen = stats(window, quantity)?;
+        let fed_seen = stats(fed, at, end, quantity)?;
         let found = controls.iter().find(|(meal, _)| *meal == self.index);
         let (_, control) = found.ok_or_else(|| Pending::from(Unavailable::NoCounterfactual))?;
         covered(control, Some(end))?;
-        let control_base = stats(within(control, start, at), quantity)?;
-        let control_seen = stats(within(control, at, end), quantity)?;
+        let control_base = stats(control, start, at, quantity)?;
+        let control_seen = stats(control, at, end, quantity)?;
         let offset = fed_base.mean - control_base.mean;
         let change = Change::of(
             (fed_seen.mean - control_seen.mean) - offset,
@@ -346,8 +357,8 @@ impl Scene<'_> {
     fn direction_only(&self, quantity: Measured, direction: Direction) -> Result<Judged, Pending> {
         let (fed, at) = (self.fed, self.at());
         let end = covered(fed, self.next())?;
-        let base = stats(within(fed, self.baseline(), at), quantity)?;
-        let change = response(stats(within(fed, at, end), quantity)?, base);
+        let base = stats(fed, self.baseline(), at, quantity)?;
+        let change = response(stats(fed, at, end, quantity)?, base);
         let verdict = if change.sign() == Some(direction) {
             Verdict::Pass
         } else {
@@ -372,9 +383,9 @@ impl Scene<'_> {
             return Err(uncovered(Uncovered::StartsAfter(awake_start)));
         }
         let end = covered(fed, self.next())?;
-        let awake = stats(within(fed, awake_start, lie_down), quantity)?;
-        let asleep = stats(within(fed, minus(at, NIGHT_HOUR), at), quantity)?;
-        let change = response(stats(within(fed, at, end), quantity)?, asleep);
+        let awake = stats(fed, awake_start, lie_down, quantity)?;
+        let asleep = stats(fed, minus(at, NIGHT_HOUR), at, quantity)?;
+        let change = response(stats(fed, at, end, quantity)?, asleep);
         let dip = response(asleep, awake);
         let verdict = if dip.sign() != Some(Direction::Down) {
             Verdict::Fail(Miss::NoDip)

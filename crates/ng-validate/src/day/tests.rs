@@ -542,6 +542,77 @@ fn fed_beats_shorter_than_the_controls_pair_by_time_and_find_the_planted_step() 
     }
 }
 
+fn meal_on_one_clock(above: f64) -> Vec<DayCheck> {
+    let plan = plan_with_every_payload();
+    let (start, at, halfway, end) = (
+        clock(1, 7, 20),
+        clock(1, 7, 30),
+        clock(1, 9, 30),
+        clock(1, 11, 30),
+    );
+    let flat = |_, _, _| Sample {
+        value: 100.0,
+        floor: FLOOR,
+    };
+    let drifting = |period: u64, extra: f64| {
+        move |_, begins: SimTime, _| {
+            let middle = (since(at, begins) + period as i64 / 2) as f64 / H as f64;
+            Sample {
+                value: 100.0 + 20.0 * middle + extra,
+                floor: FLOOR,
+            }
+        }
+    };
+    let mut control = beats(start, at, SECOND, flat);
+    control.extend(beats(at, end, SECOND, drifting(SECOND, 0.0)));
+    let mut fed = beats(start, at, SECOND, flat);
+    fed.extend(beats(at, halfway, SECOND / 2, drifting(SECOND / 2, above)));
+    fed.extend(beats(halfway, end, SECOND, drifting(SECOND, above)));
+    let control = traced(&plan, start, end, control);
+    let checks = judge(
+        &plan,
+        &traced(&plan, start, end, fed),
+        &[(meal_index(&plan, at), control)],
+    );
+    checks
+        .into_iter()
+        .filter(|check| [9, 10].contains(&check.row()) && check.at() == Some(at))
+        .collect()
+}
+
+#[test]
+fn on_one_clock_a_meal_reads_a_fed_run_whose_beats_shorten_against_its_control() {
+    for (above, verdict) in [(1.0, Verdict::Pass), (-1.0, Verdict::Fail(Miss::Direction))] {
+        let checks = meal_on_one_clock(above);
+        assert_eq!(checks.len(), 2);
+        for check in checks {
+            let change = check.shown.change.expect("a change");
+            assert!(close(change.delta, above), "row {}: {change:?}", check.row());
+            assert_eq!(check.verdict(), verdict, "row {}: {change:?}", check.row());
+        }
+    }
+}
+
+#[test]
+fn on_one_clock_a_sit_up_window_weighs_quick_beats_by_their_time_and_stroke_volume_by_the_beat() {
+    let (plan, stage) = (plan_with_every_payload(), stage(EventKind::SitUp));
+    let quick_until = clock(1, 7, 10);
+    let value = |effect: f64| move |_, _, index| steady(index, effect);
+    let mut sat = beats(stage.start, stage.event, SECOND, value(0.0));
+    sat.extend(beats(stage.event, quick_until, SECOND / 4, value(20.0)));
+    sat.extend(beats(quick_until, stage.end, SECOND, value(-20.0)));
+    let checks = judge(&plan, &traced(&plan, stage.start, stage.end, sat), &[]);
+    for (number, delta) in [(5, -20.0 / 3.0), (3, -160.0 / 3.0)] {
+        let found = checks
+            .iter()
+            .find(|check| check.row() == number && check.at() == Some(stage.event));
+        let check = found.expect("a sit-up check");
+        let change = check.shown.change.expect("a change");
+        assert!(close(change.delta, delta), "row {number}: {change:?}");
+        assert_eq!(check.verdict(), Verdict::Pass, "row {number}: {change:?}");
+    }
+}
+
 fn phases(number: u8, floor: f64, effect: impl Fn(i64) -> f64) -> Verdict {
     let (plan, stage) = (plan_with_every_payload(), stage(EventKind::SitUp));
     let series = match row(number).scoring {

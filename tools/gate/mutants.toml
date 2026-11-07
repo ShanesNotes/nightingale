@@ -206,3 +206,18 @@ new = '''
     let donor = ratio(at(Read::DuctSodium), at(Read::DuctWater));
 '''
 test = "-p ng-validate --lib day::tests::a_reversed_urinary_flow_excretes_what_the_ledger_moved_with_the_bladders_floor"
+
+[[mutant]]
+name = "day-mean-per-beat"
+path = "crates/ng-validate/src/day/trace.rs"
+old = '''
+        } else {
+            inside
+        }
+'''
+new = '''
+        } else {
+            inside / self.seconds()
+        }
+'''
+test = "-p ng-validate --lib day::tests::on_one_clock"

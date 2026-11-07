@@ -50,15 +50,28 @@ pub(super) struct Beat {
     pub(super) means: [Sample; SERIES],
 }
 impl Beat {
+    fn seconds(&self) -> f64 {
+        (self.end.nanoseconds() - self.start.nanoseconds()) as f64 / SECOND as f64
+    }
     pub(super) fn reading(&self, quantity: Measured) -> Sample {
         let mean = self.means[quantity.series() as usize];
         if quantity != Measured::StrokeVolume {
             return mean;
         }
-        let seconds = (self.end.nanoseconds() - self.start.nanoseconds()) as f64 / SECOND as f64;
+        let seconds = self.seconds();
         Sample {
             value: mean.value * seconds,
             floor: mean.floor * seconds,
+        }
+    }
+    /// Stroke volume is a volume per beat, so a beat counts by the share of it inside the window.
+    pub(super) fn weight(&self, quantity: Measured, start: SimTime, end: SimTime) -> f64 {
+        let (from, to) = (start.max(self.start), end.min(self.end));
+        let inside = to.nanoseconds().saturating_sub(from.nanoseconds()) as f64 / SECOND as f64;
+        if quantity == Measured::StrokeVolume {
+            inside / self.seconds()
+        } else {
+            inside
         }
     }
 }
