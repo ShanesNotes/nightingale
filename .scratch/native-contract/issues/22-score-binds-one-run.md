@@ -6,9 +6,20 @@ Spec: [First build slice](../../../docs/architecture/solver-contract.md#first-bu
 
 Blocked by: 12, 13
 
-Status: ready-for-agent
+Status: resolved
 
-- [ ] `score` returns an `ArenaScore` for one run's certificate, accuracy, run and replay evidence, and refuses each kind taken from another run
+- [x] `score` returns an `ArenaScore` for one run's certificate, accuracy, run and replay evidence, and refuses each kind taken from another run
+
+## Answer
+
+`score(certificate, accuracy, evidence, replay)` in `crates/ng-validate/src/score.rs` returns an `ArenaScore` only when every part is of the run that the run evidence names. Any other part is `ArenaFailure::MissingEvidence { evidence }`, and `Evidence` names the part: `Certificate`, `Accuracy` or `Replay`.
+
+- **`score` returns an `ArenaScore` for one run's certificate, accuracy, run and replay evidence, and refuses each kind taken from another run.** `crates/ng-validate/tests/score.rs` takes a two-reservoir case with one delivery through `run`, `certify`, `accuracy` and `replay_gates`, on the reference integrator at 16 s. With all four parts of that run, the score holds them. Each kind from another run has its own test. A certificate of a reseeded run, or of the same run at a later head, is `Certificate`. Run evidence of a reseeded run is `Certificate` against this run's certificate, and `Replay` against its own certificate. Accuracy evidence of the core at 8 s, or under a policy that leaves out the independence case or allows 6 instead of 5, is `Accuracy`. Replay evidence of the core at 8 s is `Replay`. A planted fault in each check fails its test, 8 of 8 (`~/lanes/logs/ng-nc-11-24/22/mutants.log`).
+- What binds each part. `RunEvidence` now holds the `HistorySeal` the run ended on and the core's `DeclaredResolution`, and `run()` is still the identity digest. A certificate must certify that seal, so the same run identity at another head is refused too. Accuracy evidence now names the resolution digest of the core that ran it, which must be the run's, and its policy digest must be `AccuracyPolicy::manufactured()`'s. A policy that leaves out a case is a gate that did not run. Replay evidence must name the run's identity. `replay_gates` already bound every gate to one course, and a course's seal chains from the run identity, so it needed no change.
+- The policy values. Each part states the values it was judged by, and the score returns each part. The certificate has `windows()` and, per combination, `closure_floor()`, `closure_relative()` and `drift_limit()`. The accuracy evidence has `absolute()`, `relative()` and `grid_ns()`. The run evidence has `resolution()`, whose `scales()` is now public and whose `minimum_interval_ns()` already was. The replay evidence has each gate's `tolerance_ns()`. The test of the whole score reads each one back.
+- The type rule. `ArenaScore`'s fields are private, so only `score` makes one, and every score passed its one-run check (compile-fail `E0451` in `crates/ng-validate/src/lib.rs`). The binding itself compares digests, because the four producers run apart, on separate sessions and cores. A lifetime brand that all four producers share was rejected: it would bind the evidence made inside one scope, not the evidence of one run, and evidence that leaves the process could not carry it.
+- `TwoReservoirs::packet()` is public, so a host can give `run` the packet that the case's replay gates admit.
+- Not in this ticket: a score of the slice (ticket 24), and refusing a run under split measurement once the block seam can mark one (from 20).
 
 ## Comments
 
