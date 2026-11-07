@@ -154,17 +154,6 @@ fn print_evidence(evidence: &RunEvidence) {
     }
 }
 
-struct Named<'n> {
-    core: &'n str,
-    interval_ms: u64,
-}
-impl CoreFactory for Named<'_> {
-    fn fresh(&self) -> Box<dyn CoupledSolver + '_> {
-        solver(self.core, self.interval_ms)
-    }
-}
-
-/// `full` is §7's protocol; otherwise the certificate's window and the span it covers, both in simulated seconds.
 fn score(arguments: &[String]) {
     let number = |at: usize, what: &str| -> u64 {
         let given = arguments.get(at).and_then(|given| given.parse().ok());
@@ -176,17 +165,18 @@ fn score(arguments: &[String]) {
     );
     let named = arguments.get(2).expect("a core");
     let protocol = match arguments.get(3).map(String::as_str) {
-        Some("full") => Protocol::full(),
+        Some("full") => ArenaProtocol::full(),
         _ => {
             let window = NonZeroU64::new(number(3, "a certificate window in s") * 1_000 * MS);
             let repeats = u32::try_from(number(5, "repeats")).ok().and_then(NonZeroU32::new);
-            Protocol {
+            ArenaProtocol {
                 windows: SlidingWindows::new(
                     window.expect("a window"),
                     number(4, "a span in s") * 1_000 * MS,
                 )
                 .expect("a span longer than its window"),
                 repeats: repeats.expect("at least one repeat"),
+                ..ArenaProtocol::full()
             }
         }
     };
@@ -200,16 +190,19 @@ fn score(arguments: &[String]) {
     let started = Instant::now();
     let arena = Arena::new(protocol).unwrap_or_else(|failure| panic!("{failure:?}"));
     println!("time arena_s {:.1}", started.elapsed().as_secs_f64());
-    let core = Named {
-        core: named,
-        interval_ms,
-    };
-    let second_policy = Named {
-        core: named,
-        interval_ms: second_ms,
-    };
     let (clock, log) = (HostClock(Instant::now()), LinkLog::create());
-    let score = arena.score(&core, &second_policy, &clock, &log);
+    let reference = |ms: u64| {
+        ReferenceIntegrator::new(ms * MS)
+            .with_scales(protocol.scales)
+            .with_floor(protocol.minimum_interval_ns)
+    };
+    let solver = |ms: u64| ng_solver::Core::new(ms * MS);
+    let score = match named.as_str() {
+        "reference" => arena.score(|| reference(interval_ms), || reference(second_ms), &clock, &log),
+        "ng-solver" => arena.score(|| solver(interval_ms), || solver(second_ms), &clock, &log),
+        other => panic!("no core named {other}"),
+    };
+    let score = score.unwrap_or_else(|failure| panic!("{failure:?}"));
     match score.evidence() {
         Ok(evidence) => print_evidence(evidence),
         Err(failure) => println!("evidence {failure:?}"),

@@ -231,7 +231,6 @@ impl FaultReport {
         &self.refusals
     }
 }
-/// The checkpoint's bytes say nothing a reader of the fault needs.
 impl core::fmt::Debug for FaultReport {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("FaultReport")

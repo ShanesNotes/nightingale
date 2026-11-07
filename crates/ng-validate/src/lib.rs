@@ -1,6 +1,6 @@
 //! Synthetic fixtures, the slice's composition root and held stand-ins, the admission solve, the reference
 //! integrator, the accuracy gate, the certificate, the replay gates, the arena run, the split gate, the day checks, and
-//! the arena that scores a core on all of them.
+//! the arena that scores a core.
 //!
 //! # Type rules
 //!
@@ -187,12 +187,11 @@
 //!     day_checks(body, core, spec)
 //! }
 //! ```
-//! A score comes only from `Arena::score`, so every part it holds came from a gate the arena ran and was held against
-//! its timed run.
+//! A score comes only from `Arena::score`, so every part it holds came from a gate the arena ran.
 //! ```compile_fail,E0451
 //! use ng_contract::DeclaredResolution;
 //! use ng_validate::*;
-//! fn assembled(protocol: Protocol, second_policy: DeclaredResolution, evidence: RunEvidence,
+//! fn assembled(protocol: ArenaProtocol, second_policy: DeclaredResolution, evidence: RunEvidence,
 //!     certificate: Certificate, accuracy: AccuracyEvidence, replay: ReplayEvidence, day: DayReport) -> ArenaScore {
 //!     ArenaScore {
 //!         protocol,
@@ -206,11 +205,28 @@
 //! }
 //! ```
 //! ```
+//! use ng_contract::CoupledSolver;
 //! use ng_record::HistoryStore;
 //! use ng_validate::*;
-//! fn scored(arena: &Arena, cores: &dyn CoreFactory, second_policy: &dyn CoreFactory, clock: &dyn WallClock,
-//!     store: &dyn HistoryStore) -> ArenaScore {
+//! fn scored<C: CoupledSolver + 'static>(arena: &Arena, cores: impl Fn() -> C, second_policy: impl Fn() -> C,
+//!     clock: &dyn WallClock, store: &dyn HistoryStore) -> Result<ArenaScore, ArenaFailure> {
 //!     arena.score(cores, second_policy, clock, store)
+//! }
+//! ```
+//! The second policy is the same core under another step policy, so a score cannot hold the step-policy evidence of
+//! another core.
+//! ```compile_fail,E0308
+//! use ng_record::HistoryStore;
+//! use ng_validate::*;
+//! fn mixed(arena: &Arena, clock: &dyn WallClock, store: &dyn HistoryStore) -> Result<ArenaScore, ArenaFailure> {
+//!     arena.score(|| ng_solver::Core::new(10_000_000), || ReferenceIntegrator::new(5_000_000), clock, store)
+//! }
+//! ```
+//! ```
+//! use ng_record::HistoryStore;
+//! use ng_validate::*;
+//! fn same(arena: &Arena, clock: &dyn WallClock, store: &dyn HistoryStore) -> Result<ArenaScore, ArenaFailure> {
+//!     arena.score(|| ng_solver::Core::new(10_000_000), || ng_solver::Core::new(5_000_000), clock, store)
 //! }
 //! ```
 
@@ -233,7 +249,7 @@ mod window;
 pub use accuracy::{
     AccuracyCase, AccuracyEvidence, AccuracyFailure, AccuracyPolicy, accuracy, observed_order,
 };
-pub use arena::{Arena, Protocol};
+pub use arena::{Arena, ArenaProtocol};
 pub use certificate::{
     Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, ExpectedDrift, HeldSupport,
     QuantityPolicy, QuantityResult, SlidingWindows, certify,
@@ -253,8 +269,8 @@ pub use run::{
 };
 pub use score::{ArenaScore, ScorePart};
 pub use slice::{
-    SliceCase, anchor_moment, arena_anatomy, arena_body, arena_certificate, arena_lens, arena_organs,
-    arena_packet, arena_schema, arena_seed, hold_outside_slice,
+    SliceCase, anchor_moment, arena_anatomy, arena_body, arena_lens, arena_organs, arena_packet,
+    arena_schema, arena_seed, hold_outside_slice,
 };
 pub use split::{SplitFailure, draw_split_trace, split_gate};
 pub use window::{Compared, SliceWindow, WindowPolicy};

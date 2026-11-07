@@ -70,7 +70,6 @@ impl WindowPolicy {
     pub fn refinement_scales(&self) -> ErrorScales {
         self.refinement_scales
     }
-    /// The finest refinement, which stands for the solution.
     pub(crate) fn finest(&self) -> ReferenceIntegrator {
         let [.., finest] = references(self.refinements_ns, self.refinement_scales, self.landing_ns);
         finest

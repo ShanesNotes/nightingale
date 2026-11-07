@@ -207,6 +207,9 @@ pub enum ArenaFailure {
     MissingEvidence {
         part: ScorePart,
     },
+    /// A core, or its second policy, that declares other error scales or another minimum interval than the
+    /// protocol: nothing ran.
+    OffProtocol(DeclaredResolution),
     Certificate(CertificateFailure),
     Accuracy(AccuracyFailure),
     Replay(ReplayFailure),

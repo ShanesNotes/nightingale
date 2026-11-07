@@ -470,6 +470,9 @@ An explicit Heun integrator that serves only as a test bench, never as a solver 
 **Arena**:
 The benchmark that runs the candidate solver cores on the same compiled body and picks one, on conservation, accuracy, replay and speed.
 
+**Arena protocol**:
+What a score spans from the 06:55 admission, how many times the arena times that span, and the error scales and minimum interval every solver core it scores declares. The certificate's sliding windows cover the span, and the arena fixes everything else: the slice, its fixture packet, the day plan and every policy.
+
 **Slice**:
 The systems the arena runs for real: pulsatile cardiovascular, fluids, renal, a minimal nervous baroreflex, the receptor layer and the boundary port, for 48 simulated hours with synthetic values.
 
@@ -534,7 +537,7 @@ The sample standard deviation of a quantity's beat means over its baseline windo
 What a core's declared error scales allow a row at a value: the absolute scale times the row's natural size plus the relative scale times the value, carried through a sum, ratio or product of rows.
 
 **Score**:
-The arena's result for one run: a certificate of the history the run ended on, accuracy evidence of its solver core on every manufactured case and the first slice window at the model-default bound, its throughput and numerical health, and replay evidence of its run identity, each with the policy values it was judged by. A part from another run, or from a gate that did not run, is missing evidence and never a pass.
+The arena's result for one solver core under one arena protocol: the run the arena timed, with its throughput and numerical health, a certificate of the history that run ended on, accuracy evidence of its solver core on every manufactured case and the first slice window at the model-default bound, replay evidence of its run identity, and the day checks of its day plan, whose fed run must end on its seal. Each part is its own result with the policy values it was judged by, so a failed part leaves the others standing. A part from another run, or from a gate that did not run, is missing evidence and never a pass.
 
 **Policy value**:
 A model default the validation crate sets for a gate and every result reports: the accuracy tolerances, a slice window's margin, distance floor, landing tolerance, grid and reference refinements, the error scales, each core's minimum interval and the certificate's closure floor.

@@ -6,6 +6,10 @@ use ng_validate::*;
 
 const SECOND: u64 = 1_000_000_000;
 const MILLISECOND: u64 = 1_000_000;
+const SLICES_LONGEST_STEP: u64 = 10 * MILLISECOND;
+const PAST_THE_SLICES_LONGEST_STEP: u64 = 16 * SECOND;
+const UNDER_THE_SLICES_LONGEST_STEP: u64 = SLICES_LONGEST_STEP / 2;
+const A_DAY_EARLY: u64 = 86_400 * SECOND;
 
 const GATES: [ReplayGate; 7] = [
     ReplayGate::Pace,
@@ -28,23 +32,22 @@ impl WallClock for Ticks {
     }
 }
 
-/// Scales this loose never refuse, and the floor is the slice window's landing tolerance.
-fn loose(interval_ns: u64) -> ReferenceIntegrator {
-    let scale = |value| Measure::<Dimensionless>::new(value).expect("finite");
+fn reference(interval_ns: u64) -> ReferenceIntegrator {
+    let full = ArenaProtocol::full();
     ReferenceIntegrator::new(interval_ns)
-        .with_scales(ErrorScales::uniform(scale(1e9), scale(1.0)).expect("positive"))
-        .with_floor(NonZeroU64::new(100_000).expect("a floor"))
+        .with_scales(full.scales)
+        .with_floor(full.minimum_interval_ns)
 }
 
-fn short() -> Protocol {
+fn short() -> ArenaProtocol {
     let window = NonZeroU64::new(SECOND).expect("a second");
-    Protocol {
+    ArenaProtocol {
         windows: SlidingWindows::new(window, 2 * SECOND).expect("two seconds cover one"),
         repeats: NonZeroU32::MIN,
+        ..ArenaProtocol::full()
     }
 }
 
-/// Every part comes from the one call, and each is held against the run the arena timed.
 fn holds_every_part_apart_and_of_one_run(score: &ArenaScore) {
     let protocol = score.protocol();
     let evidence = score.evidence().expect("the timed run");
@@ -92,23 +95,84 @@ fn holds_every_part_apart_and_of_one_run(score: &ArenaScore) {
     );
 }
 
-/// The manufactured cases run at a core's own step, so both cores cap at 16 s; on the slice the body's longest step
-/// caps every ticket at 10 ms, and each second policy at 5 ms runs a grid of its own. The second core's clock started
-/// a day before the arena, as a host's may.
 #[test]
 fn one_arena_scores_the_reference_and_ng_solver_with_one_call_each() {
     let arena = Arena::new(short()).expect("the arena builds");
     assert_eq!(arena.protocol(), short());
-    let reference: [&dyn CoreFactory; 2] = [&|| loose(16 * SECOND), &|| loose(5 * MILLISECOND)];
-    let solver: [&dyn CoreFactory; 2] = [&|| Core::new(16 * SECOND), &|| Core::new(5 * MILLISECOND)];
-    let started = [0, 86_400 * SECOND];
-    let scores = [(reference, started[0]), (solver, started[1])].map(|([cores, second_policy], started)| {
-        let (clock, store) = (Ticks(Cell::new(started)), MemoryStore::default());
-        arena.score(cores, second_policy, &clock, &store)
-    });
+    let clock = |started| Ticks(Cell::new(started));
+    let stores = [MemoryStore::default(), MemoryStore::default()];
+    let scores = [
+        arena.score(
+            || reference(PAST_THE_SLICES_LONGEST_STEP),
+            || reference(UNDER_THE_SLICES_LONGEST_STEP),
+            &clock(0),
+            &stores[0],
+        ),
+        arena.score(
+            || Core::new(PAST_THE_SLICES_LONGEST_STEP),
+            || Core::new(UNDER_THE_SLICES_LONGEST_STEP),
+            &clock(A_DAY_EARLY),
+            &stores[1],
+        ),
+    ]
+    .map(|score| score.expect("both cores declare the protocol's scales and interval"));
     scores.iter().for_each(holds_every_part_apart_and_of_one_run);
     let [first, second] = scores
         .each_ref()
         .map(|score| score.evidence().map(RunEvidence::run).ok());
     assert_ne!(first, second, "two cores are two runs");
+
+    let scale = |value| Measure::<Dimensionless>::new(value).expect("finite");
+    let looser = ErrorScales::uniform(scale(1.0), scale(1e-3)).expect("positive");
+    let coarser = NonZeroU64::new(MILLISECOND).expect("a floor");
+    let refused = [
+        arena.score(
+            || reference(PAST_THE_SLICES_LONGEST_STEP).with_scales(looser),
+            || reference(UNDER_THE_SLICES_LONGEST_STEP),
+            &Ticks(Cell::new(0)),
+            &MemoryStore::default(),
+        ),
+        arena.score(
+            || reference(PAST_THE_SLICES_LONGEST_STEP),
+            || reference(UNDER_THE_SLICES_LONGEST_STEP).with_floor(coarser),
+            &Ticks(Cell::new(0)),
+            &MemoryStore::default(),
+        ),
+    ];
+    for score in refused {
+        assert!(
+            matches!(score, Err(ArenaFailure::OffProtocol(_))),
+            "refused whole"
+        );
+    }
+}
+
+#[test]
+fn past_the_sit_up_the_day_checks_end_on_the_timed_runs_seal() {
+    let span = 311 * SECOND;
+    let window = NonZeroU64::new(span / 2).expect("half the span");
+    let protocol = ArenaProtocol {
+        windows: SlidingWindows::new(window, span).expect("the span covers two windows"),
+        repeats: NonZeroU32::MIN,
+        ..ArenaProtocol::full()
+    };
+    let arena = Arena::new(protocol).expect("the arena builds");
+    let score = arena.score(
+        || Core::new(PAST_THE_SLICES_LONGEST_STEP),
+        || Core::new(UNDER_THE_SLICES_LONGEST_STEP),
+        &Ticks(Cell::new(0)),
+        &MemoryStore::default(),
+    );
+    let score = score.expect("the core declares the protocol's scales and interval");
+    let day = score.day().expect("the fed run ended on the timed run's seal");
+    let seven = SimTime::from_ns(anchor_moment().nanoseconds() + 300 * SECOND);
+    let sat_up = |check: &&DayCheck| check.row() == 1;
+    let at_seven = day
+        .checks()
+        .iter()
+        .filter(sat_up)
+        .all(|check| check.at() == Some(seven));
+    assert!(at_seven, "{day}");
+    score.replay().expect("every replay gate");
+    score.accuracy().expect("within the arena's policy");
 }

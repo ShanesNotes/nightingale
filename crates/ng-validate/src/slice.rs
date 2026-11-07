@@ -515,13 +515,9 @@ pub fn arena_seed() -> Seed {
 }
 
 const CLOSURE_RELATIVE: f64 = 1e-12;
-/// Ticket 14's synthetic stand-in for 1.96 times the within-subject variation, in each combination's own unit, until
-/// the healthy-range set holds that variation.
 const SYNTHETIC_DRIFT: f64 = 1e4;
 
-/// Every combination of the slice's basis closes to its share of the window's gross exchange, with no floor, and
-/// drifts no further than the synthetic limit; charge holds to its closure bound (record 0004).
-pub fn arena_certificate(
+pub(crate) fn arena_certificate(
     body: &CompiledBody,
     windows: SlidingWindows,
 ) -> Result<CertificatePolicy, AdmissionError> {

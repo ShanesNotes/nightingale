@@ -224,7 +224,7 @@ impl DayPlan {
         occurrences.push(Occurrence::sit_up(days.saturating_add(1)));
         Self { occurrences }
     }
-    /// The inputs at `from` or later, as a run's boundary port takes them.
+    /// The inputs at `from` or later.
     pub fn events(&self, from: SimTime) -> Result<Vec<BoundaryEvent>, AdmissionError> {
         let inputs = self.occurrences.iter().flat_map(|occurrence| &occurrence.inputs);
         inputs
@@ -371,8 +371,6 @@ fn exported(stopped: Session<'_, Faulted>) -> DayFailure {
     }
 }
 
-/// A day run reads only each step's head and resumes only from the admitted start, whose checkpoint holds no link,
-/// so it keeps no history. A walk of it fails closed, as a store that lost a link does.
 struct KeepsNothing;
 impl HistoryStore for KeepsNothing {
     fn resolve(&self, _: &Digest) -> Option<Vec<u8>> {

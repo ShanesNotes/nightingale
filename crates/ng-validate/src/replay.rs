@@ -596,8 +596,7 @@ fn pace_gate(
     })
 }
 
-/// Every link in memory, by seal, for tests and short runs. A long run's host keeps its links outside the
-/// process.
+/// Every link in memory, for tests and short runs. A long run's host keeps its links outside the process.
 #[derive(Default)]
 pub struct MemoryStore {
     links: RefCell<BTreeMap<Digest, Vec<u8>>>,

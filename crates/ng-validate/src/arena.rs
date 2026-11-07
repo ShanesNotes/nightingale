@@ -1,35 +1,50 @@
 use crate::score::bound;
+use crate::slice::arena_certificate;
 use crate::window::WindowPolicy;
 use crate::{
     AccuracyPolicy, ArenaFailure, ArenaScore, ArenaSpec, CertificatePolicy, ChancePlan, ClockSource,
     CoreFactory, DayPlan, DayReport, DaySpec, ReplayEvidence, ReplayPlan, ScorePart, SliceCase,
-    SlidingWindows, WallClock, accuracy, anchor_moment, arena_body, arena_certificate, arena_lens,
-    arena_packet, arena_seed, certify, day_checks, replay_gates, run,
+    SlidingWindows, WallClock, accuracy, anchor_moment, arena_body, arena_lens, arena_packet, arena_seed,
+    certify, day_checks, replay_gates, run,
 };
 use core::cell::Cell;
 use core::num::{NonZeroU32, NonZeroU64};
-use ng_contract::{AdmissionError, BoundaryPort, CompiledBody, Digest, Interval, SimTime};
+use ng_contract::{
+    AdmissionError, BoundaryPort, CompiledBody, CoupledSolver, DeclaredResolution, Digest, Dimensionless,
+    ErrorScales, Interval, Measure, SimTime,
+};
 use ng_record::HistoryStore;
 
 const MILLISECOND: u64 = 1_000_000;
 const HOUR: u64 = 3_600_000 * MILLISECOND;
 const DAY: u64 = 24 * HOUR;
 
-/// What a score spans from the 06:55 admission, and how many times the arena times that span. The windows'
-/// coverage is the span; the day plan covers every day it reaches.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Protocol {
+/// What a score spans from the 06:55 admission, how many times the arena times that span, and the error scales and
+/// minimum interval every core it scores declares: the day checks read their tolerance from the scales, and the
+/// step-policy gate its distance from the interval. The windows' coverage is the span; the day plan covers every day
+/// it reaches.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ArenaProtocol {
     pub windows: SlidingWindows,
     pub repeats: NonZeroU32,
+    pub scales: ErrorScales,
+    pub minimum_interval_ns: NonZeroU64,
 }
-impl Protocol {
-    /// §7's: every 24 h window over 48 h, timed twice so the throughput shows its spread.
+impl ArenaProtocol {
+    /// §7's: every 24 h window over 48 h, timed twice so the throughput shows its spread, at the solver arena's model
+    /// defaults for the scales and the interval.
     pub fn full() -> Self {
         let day = NonZeroU64::new(DAY).expect("a day");
+        let scale = |value| Measure::<Dimensionless>::new(value).expect("a finite constant");
         Self {
             windows: SlidingWindows::new(day, 2 * DAY).expect("two days cover one"),
             repeats: NonZeroU32::MIN.saturating_add(1),
+            scales: ErrorScales::uniform(scale(0.1), scale(1e-3)).expect("positive constants"),
+            minimum_interval_ns: NonZeroU64::new(100_000).expect("a positive constant"),
         }
+    }
+    fn declared_by(&self, resolution: &DeclaredResolution) -> bool {
+        *resolution.scales() == self.scales && resolution.minimum_interval_ns() == self.minimum_interval_ns
     }
     fn window(&self) -> Interval {
         let start = anchor_moment();
@@ -46,7 +61,7 @@ impl Protocol {
 /// What every core receives, built once: the slice, its certificate policy for the protocol's windows, the accuracy
 /// gate's policy with the first slice window measured, and the day plan whose inputs every timed run knows.
 pub struct Arena {
-    protocol: Protocol,
+    protocol: ArenaProtocol,
     body: CompiledBody,
     certificate: CertificatePolicy,
     accuracy: AccuracyPolicy,
@@ -55,7 +70,7 @@ pub struct Arena {
     window: WindowPolicy,
 }
 impl Arena {
-    pub fn new(protocol: Protocol) -> Result<Self, ArenaFailure> {
+    pub fn new(protocol: ArenaProtocol) -> Result<Self, ArenaFailure> {
         let admission = |error: AdmissionError| ArenaFailure::Initialization(error.into());
         let body = arena_body().map_err(admission)?;
         let certificate = arena_certificate(&body, protocol.windows).map_err(admission)?;
@@ -71,19 +86,27 @@ impl Arena {
             body,
         })
     }
-    pub fn protocol(&self) -> Protocol {
+    pub fn protocol(&self) -> ArenaProtocol {
         self.protocol
     }
     /// Scores one core: `cores` builds it fresh for every run, and `second_policy` builds the same core under
-    /// another step policy for the step-policy gate. Every part runs on its own fresh core, and only the timed run
-    /// keeps its history in `store`, which the certificate walks. A part that fails leaves the others standing.
-    pub fn score(
+    /// another step policy for the step-policy gate. Only the timed run keeps its history in `store`, which the
+    /// certificate walks. A part that fails leaves the others standing; only a core that declares other scales or
+    /// another interval than the protocol is refused whole.
+    pub fn score<C: CoupledSolver + 'static>(
         &self,
-        cores: &dyn CoreFactory,
-        second_policy: &dyn CoreFactory,
+        cores: impl Fn() -> C,
+        second_policy: impl Fn() -> C,
         clock: &dyn WallClock,
         store: &dyn HistoryStore,
-    ) -> ArenaScore {
+    ) -> Result<ArenaScore, ArenaFailure> {
+        let (cores, second_policy): (&dyn CoreFactory, &dyn CoreFactory) = (&cores, &second_policy);
+        for factory in [cores, second_policy] {
+            let resolution = factory.fresh().resolution().clone();
+            if !self.protocol.declared_by(&resolution) {
+                return Err(ArenaFailure::OffProtocol(resolution));
+            }
+        }
         let accuracy = accuracy(&*cores.fresh(), &self.accuracy).map_err(ArenaFailure::Accuracy);
         let replay = self.replay(cores, second_policy, clock);
         let core = cores.fresh();
@@ -111,7 +134,7 @@ impl Arena {
         };
         let second_policy = second_policy.fresh().resolution().clone();
         let parts = (evidence, certificate, accuracy, replay, day);
-        bound(self.protocol, self.accuracy_digest, second_policy, parts)
+        Ok(bound(self.protocol, self.accuracy_digest, second_policy, parts))
     }
     fn spec(&self) -> Result<ArenaSpec, ArenaFailure> {
         let admission = |error: AdmissionError| ArenaFailure::Initialization(error.into());
@@ -136,9 +159,6 @@ impl Arena {
         };
         day_checks(&self.body, &*cores.fresh(), spec).map_err(ArenaFailure::Day)
     }
-    /// The plan `tests/arena_body.rs` passes the reference with. The step-policy gate holds both policies to the
-    /// first slice window's finest refinement, within its landing tolerance: the stir's rate is constant, so every
-    /// policy lands it within its own floor after it crosses its draw.
     fn replay(
         &self,
         cores: &dyn CoreFactory,
@@ -148,7 +168,8 @@ impl Arena {
         let case = SliceCase::new().map_err(|error| ArenaFailure::Initialization(error.into()))?;
         let window = self.window;
         let reference = move || window.finest();
-        let clock = Since {
+        let either_floor = window.landing_ns().max(self.protocol.minimum_interval_ns);
+        let clock = FromFirstReading {
             clock,
             origin: Cell::new(None),
         };
@@ -160,20 +181,18 @@ impl Arena {
             chance: Some(ChancePlan {
                 second_policy,
                 reference: &reference,
-                event_tolerance_ns: window.landing_ns().get(),
+                event_tolerance_ns: either_floor.get(),
             }),
         };
         replay_gates(&case, cores, &plan).map_err(ArenaFailure::Replay)
     }
 }
 
-/// The live pace adds what its clock reads to the head its run starts from, so it reads the host's clock from its
-/// own first reading, as `WallClock` promises, and not from when the host started it.
-struct Since<'c> {
+struct FromFirstReading<'c> {
     clock: &'c dyn WallClock,
     origin: Cell<Option<u64>>,
 }
-impl WallClock for Since<'_> {
+impl WallClock for FromFirstReading<'_> {
     fn elapsed_ns(&self) -> Option<u64> {
         let reading = self.clock.elapsed_ns()?;
         let origin = self.origin.get().unwrap_or(reading);

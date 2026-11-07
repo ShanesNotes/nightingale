@@ -412,23 +412,69 @@ impl<'m> ArenaRun<'m> {
         todo!()
     }
 }
+/// One core's score under one protocol: each part its own result, held against the timed run.
 pub struct ArenaScore {
-    _certificate: Certificate,
-    _accuracy: AccuracyEvidence,
-    _evidence: RunEvidence,
-    _replay: ReplayEvidence,
+    _protocol: ArenaProtocol,
+    _evidence: Result<RunEvidence, ArenaFailure>,
+    _certificate: Result<Certificate, ArenaFailure>,
+    _accuracy: Result<AccuracyEvidence, ArenaFailure>,
+    _replay: Result<ReplayEvidence, ArenaFailure>,
+    _day: Result<DayReport, ArenaFailure>,
 }
 impl ArenaScore {
-    pub fn certificate(&self) -> &Certificate {
+    pub fn evidence(&self) -> Result<&RunEvidence, &ArenaFailure> {
         todo!()
     }
-    pub fn accuracy(&self) -> &AccuracyEvidence {
+    pub fn certificate(&self) -> Result<&Certificate, &ArenaFailure> {
         todo!()
     }
-    pub fn evidence(&self) -> &RunEvidence {
+    pub fn accuracy(&self) -> Result<&AccuracyEvidence, &ArenaFailure> {
         todo!()
     }
-    pub fn replay(&self) -> &ReplayEvidence {
+    pub fn replay(&self) -> Result<&ReplayEvidence, &ArenaFailure> {
+        todo!()
+    }
+    pub fn day(&self) -> Result<&DayReport, &ArenaFailure> {
+        todo!()
+    }
+}
+/// Every row of the day table, checked on one run and its counterfactuals.
+pub struct DayReport {
+    _run: Digest,
+}
+/// What a score spans from the 06:55 admission, how many times the arena times that span, and the
+/// error scales and minimum interval every core it scores declares.
+pub struct ArenaProtocol {
+    pub windows: SlidingWindows,
+    pub repeats: NonZeroU32,
+    pub scales: ErrorScales,
+    pub minimum_interval_ns: NonZeroU64,
+}
+impl ArenaProtocol {
+    /// Every 24 h window over 48 h.
+    pub fn full() -> Self {
+        todo!()
+    }
+}
+/// What every core receives, built once: the slice, its fixture packet, the day plan's boundary
+/// timeline and every policy.
+pub struct Arena {
+    _protocol: ArenaProtocol,
+}
+impl Arena {
+    pub fn new(_protocol: ArenaProtocol) -> Result<Self, ArenaFailure> {
+        todo!()
+    }
+    /// `cores` builds the core fresh for every run, and `second_policy` the same core under another
+    /// step policy. Only the timed run keeps its history in `store`, which the certificate walks. A
+    /// core that declares other scales or another interval than the protocol is refused whole.
+    pub fn score<C: CoupledSolver + 'static>(
+        &self,
+        _cores: impl Fn() -> C,
+        _second_policy: impl Fn() -> C,
+        _clock: &dyn WallClock,
+        _store: &dyn HistoryStore,
+    ) -> Result<ArenaScore, ArenaFailure> {
         todo!()
     }
 }
@@ -436,6 +482,7 @@ pub enum ScorePart {
     Certificate,
     Accuracy,
     Replay,
+    Day,
 }
 pub enum ArenaFailure {
     Admission(AdmissionError),
@@ -483,16 +530,5 @@ pub fn replay_gates(
     _cores: &dyn CoreFactory,
     _spec: &ArenaSpec,
 ) -> Result<ReplayEvidence, ArenaFailure> {
-    todo!()
-}
-/// A score needs all four parts of the run its run evidence names: a certificate of the history it
-/// ended on, accuracy evidence of its core on every case of the arena's policy, and replay evidence of
-/// its identity. Any other part is `MissingEvidence`.
-pub fn score(
-    _certificate: Certificate,
-    _accuracy: AccuracyEvidence,
-    _evidence: RunEvidence,
-    _replay: ReplayEvidence,
-) -> Result<ArenaScore, ArenaFailure> {
     todo!()
 }

@@ -1,4 +1,6 @@
-use crate::{AccuracyEvidence, ArenaFailure, Certificate, DayReport, Protocol, ReplayEvidence, RunEvidence};
+use crate::{
+    AccuracyEvidence, ArenaFailure, ArenaProtocol, Certificate, DayReport, ReplayEvidence, RunEvidence,
+};
 use ng_contract::{DeclaredResolution, Digest};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -9,10 +11,10 @@ pub enum ScorePart {
     Day,
 }
 
-/// One core's score under one protocol: each part its own result, held against the timed run. A part that failed
-/// keeps its failure and leaves every other part standing.
+/// One core's score under one protocol: each part its own result. A part that failed keeps its failure and leaves
+/// every other part standing.
 pub struct ArenaScore {
-    protocol: Protocol,
+    protocol: ArenaProtocol,
     second_policy: DeclaredResolution,
     evidence: Result<RunEvidence, ArenaFailure>,
     certificate: Result<Certificate, ArenaFailure>,
@@ -21,15 +23,14 @@ pub struct ArenaScore {
     day: Result<DayReport, ArenaFailure>,
 }
 impl ArenaScore {
-    pub fn protocol(&self) -> Protocol {
+    pub fn protocol(&self) -> ArenaProtocol {
         self.protocol
     }
     /// The resolution the step-policy gate held beside the core's own.
     pub fn second_policy(&self) -> &DeclaredResolution {
         &self.second_policy
     }
-    /// The timed run's identity, seal, resolution, throughput and numerical health. A faulted run's health is in
-    /// its `ArenaFailure::Faulted`.
+    /// A faulted run's health is in its `ArenaFailure::Faulted`.
     pub fn evidence(&self) -> Result<&RunEvidence, &ArenaFailure> {
         self.evidence.as_ref()
     }
@@ -55,12 +56,8 @@ pub(crate) type Parts = (
     Result<DayReport, ArenaFailure>,
 );
 
-/// The certificate must certify the seal the timed run ended on, the accuracy evidence must come from its
-/// resolution under the arena's accuracy policy, the replay evidence must name its identity, and the day checks
-/// must name its identity and end their fed run on its seal. A part held against no run, because the timed run
-/// failed, stays as its gate returned it.
 pub(crate) fn bound(
-    protocol: Protocol,
+    protocol: ArenaProtocol,
     accuracy_policy: Digest,
     second_policy: DeclaredResolution,
     parts: Parts,
@@ -78,10 +75,7 @@ pub(crate) fn bound(
         });
         replay =
             replay.and_then(|replay| held(replay.run() == run.run(), ScorePart::Replay).map(|()| replay));
-        day = day.and_then(|day| {
-            let of = day.run() == run.run() && day.seal() == run.seal().base;
-            held(of, ScorePart::Day).map(|()| day)
-        });
+        day = day.and_then(|day| held(day.seal() == run.seal().base, ScorePart::Day).map(|()| day));
     }
     ArenaScore {
         protocol,
@@ -227,12 +221,11 @@ mod tests {
         replay_gates(case, &move || reference(interval_ns), &plan).expect("every gate")
     }
 
-    /// Bound as the arena binds a score, with the manufactured policy standing for the arena's, so no slice window is
-    /// built.
     fn scored(parts: Parts) -> ArenaScore {
-        let protocol = Protocol {
+        let protocol = ArenaProtocol {
             windows: windows(),
             repeats: NonZeroU32::MIN,
+            ..ArenaProtocol::full()
         };
         let policy = AccuracyPolicy::manufactured()
             .expect("the model default")
