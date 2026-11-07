@@ -25,13 +25,12 @@ fn fixed(interval_ns: u64, floor_ns: u64) -> ReferenceIntegrator {
         .with_floor(floor)
 }
 
-/// Doubled backward Euler that stops each stage after its first Newton update, and declares scales loose enough
-/// for the record to accept what that leaves: §7's core that accepts after its sweep limit with its change still
-/// above tolerance. On a linear law one update is exact, so every manufactured case passes it.
-struct OneUpdate {
+/// Doubled backward Euler whose sweep limit is one Newton update, with scales loose enough for the record to accept
+/// what that leaves.
+struct AcceptsAfterSweepLimit {
     interval_ns: u64,
 }
-impl OneUpdate {
+impl AcceptsAfterSweepLimit {
     fn stage(
         problem: &CoupledProblem<'_>,
         workspace: &mut SolveWorkspace,
@@ -60,7 +59,7 @@ impl OneUpdate {
         problem.evaluate(&workspace.point(time))
     }
 }
-impl CoupledSolver for OneUpdate {
+impl CoupledSolver for AcceptsAfterSweepLimit {
     fn resolution(&self) -> DeclaredResolution {
         let mut policy = b"one update".to_vec();
         policy.extend_from_slice(&self.interval_ns.to_be_bytes());
@@ -93,7 +92,6 @@ impl CoupledSolver for OneUpdate {
     }
 }
 
-/// One window serves every core here: the reference's three runs of it cost more than everything else.
 #[test]
 fn the_first_window_holds_each_core_to_the_references_own_distances() {
     let window = SliceWindow::first().expect("the reference runs the window at each refinement");
@@ -117,14 +115,14 @@ fn the_first_window_holds_each_core_to_the_references_own_distances() {
     );
 
     let manufactured = AccuracyPolicy::manufactured().expect("the model default");
-    let sixteen = OneUpdate {
+    let sixteen = AcceptsAfterSweepLimit {
         interval_ns: 16 * SECOND,
     };
     accuracy(&sixteen, &manufactured).expect("one update solves a linear law");
-    let one_update = OneUpdate {
+    let after_one_update = AcceptsAfterSweepLimit {
         interval_ns: 10 * MILLISECOND,
     };
-    let failure = accuracy(&one_update, &policy);
+    let failure = accuracy(&after_one_update, &policy);
     assert!(
         matches!(failure, Err(AccuracyFailure::Outside { case: 0, .. })),
         "{failure:?}"

@@ -266,7 +266,6 @@ pub(crate) fn solved_start(
     started(system, solved, core, origin)
 }
 
-/// The solve alone, so one solve starts every core a case compares.
 pub(crate) fn solution(
     body: &CompiledBody,
     packet: ParameterPacket<SyntheticFixture>,
@@ -279,7 +278,7 @@ pub(crate) fn solution(
 }
 
 /// A fresh system holds the packet's modes at every point, so sweeps carry the solution's own modes round the ring
-/// first. `admit` then judges the solution again for each core, as it judges any start.
+/// first.
 pub(crate) fn start_from(
     body: &CompiledBody,
     packet: ParameterPacket<SyntheticFixture>,

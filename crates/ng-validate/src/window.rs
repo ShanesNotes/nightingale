@@ -13,20 +13,16 @@ use ng_contract::{
 
 const SECOND: u64 = 1_000_000_000;
 const MILLISECOND: u64 = 1_000_000;
-/// Each refinement is a quarter of the last, so three span the body's longest step down to a sixteenth of it.
 const REFINEMENT: u64 = 4;
-/// The ladder's landing tolerance. Much finer, and the reference's Newton cannot settle on so short a span.
+/// At 1 µs the reference's Newton could not settle on a landing's span and the run faulted.
 const LANDING_NS: NonZeroU64 = NonZeroU64::MIN.saturating_add(100_000 - 1);
 const GRID_NS: u64 = 10 * MILLISECOND;
 const LENGTH_NS: u64 = 6 * SECOND;
-/// Transitions are recorded past the window's end, so one near the end finds its counterpart in a run that makes it
-/// just after.
-const TAIL_NS: u64 = 500 * MILLISECOND;
-/// Model default: under a millionth of what a quantity reaches over the window, the window sees no difference.
-const FLOOR: f64 = 1e-6;
-/// Model default. Every rung lands each transition only to within the landing tolerance, so on a quantity a landing
-/// moves its two coarser rungs are two draws of what a landing leaves, and an honest core draws again: the reference
-/// on the arena's scales measured 0.2 percent past the farther of them.
+/// So a transition just before the end finds its counterpart in a run that makes it just after.
+const TRANSITIONS_PAST_END_NS: u64 = 500 * MILLISECOND;
+/// Model default.
+const DISTANCE_FLOOR_SHARE: f64 = 1e-6;
+/// Model default.
 const MARGIN: u64 = 2;
 
 /// One quantity the window compares at each instant.
@@ -44,31 +40,29 @@ struct Instant {
     values: Vec<Compensated>,
 }
 
-/// A mode variable, by its index in the accepted modes, and the value it entered.
-type Kind = (usize, usize);
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Kind {
+    mode: usize,
+    entered: usize,
+}
 
 struct Transition {
     kind: Kind,
     at: SimTime,
 }
 
-/// What one run of the window shows: every compared quantity at each grid instant, with the modes it held there,
-/// and every mode transition.
 struct Trace {
     instants: Vec<Instant>,
     transitions: Vec<Transition>,
 }
 impl Trace {
-    /// The compared instants at which `self` holds other modes than `target`.
     fn apart(&self, target: &Trace) -> usize {
         let other = |(instant, target): &(&Instant, &Instant)| instant.modes != target.modes;
         self.instants.iter().zip(&target.instants).filter(other).count()
     }
-    /// The farthest any transition of `kind` that `self` makes up to `end` stands from the nearest of that kind the
-    /// target makes, and where it is. A kind the target never makes is as far as can be. Only this way round: a
-    /// coarser step passes over brief excursions a finer one resolves, and what a run steps over shows as instants
-    /// in other modes.
-    fn farthest(&self, target: &Trace, kind: Kind, end: SimTime) -> Option<(SimTime, u64)> {
+    /// Only this way round: a coarser step passes over brief excursions a finer one resolves, and what a run steps
+    /// over shows as instants in other modes.
+    fn farthest_from(&self, target: &Trace, kind: Kind, end: SimTime) -> Option<(SimTime, u64)> {
         let mut worst: Option<(SimTime, u64)> = None;
         for transition in (self.transitions.iter()).filter(|seen| seen.kind == kind && seen.at <= end) {
             let nearest = (target.transitions.iter().filter(|other| other.kind == kind))
@@ -101,8 +95,6 @@ fn larger(one: f64, other: f64) -> f64 {
     if other > one { other } else { one }
 }
 
-/// The finest refinement's run, and how far a run may stand from it in each compared quantity, in each kind of
-/// transition and in instants spent in other modes: twice the farthest either coarser refinement stands.
 struct Measured {
     compared: Vec<Compared>,
     target: Trace,
@@ -113,7 +105,7 @@ struct Measured {
 }
 impl Measured {
     fn new(compared: Vec<Compared>, target: Trace, rungs: &[&Trace], end: SimTime) -> Self {
-        let floor = Measure::<Dimensionless>::new(FLOOR).expect("a finite constant");
+        let floor = Measure::<Dimensionless>::new(DISTANCE_FLOOR_SHARE).expect("a finite constant");
         let distances = (0..compared.len())
             .map(|quantity| {
                 let mut most = Compensated::ZERO;
@@ -141,7 +133,7 @@ impl Measured {
         let transition_distances = (target.kinds().into_iter())
             .map(|kind| {
                 let most = (rungs.iter())
-                    .filter_map(|rung| rung.farthest(&target, kind, end))
+                    .filter_map(|rung| rung.farthest_from(&target, kind, end))
                     .map(|(_, apart)| apart)
                     .fold(LANDING_NS.get(), u64::max);
                 (kind, MARGIN * most)
@@ -157,9 +149,6 @@ impl Measured {
             end,
         }
     }
-    /// The largest share of its distance any compared quantity or transition reaches. A run that holds other modes
-    /// at too many instants fails first, then the first quantity outside its distance in time order, then the first
-    /// kind of transition outside its own.
     fn verdict(&self, run: &Trace, case: usize) -> Result<Compensated, AccuracyFailure> {
         let apart = run.apart(&self.target);
         if apart > self.most_apart {
@@ -197,13 +186,13 @@ impl Measured {
             let distance_ns = (self.transition_distances.iter())
                 .find(|(known, _)| *known == kind)
                 .map_or(0, |(_, distance_ns)| *distance_ns);
-            let Some((at, apart_ns)) = run.farthest(&self.target, kind, self.end) else {
+            let Some((at, apart_ns)) = run.farthest_from(&self.target, kind, self.end) else {
                 continue;
             };
             if apart_ns > distance_ns {
                 return Err(AccuracyFailure::TransitionMoved {
                     case,
-                    mode: kind.0,
+                    mode: kind.mode,
                     at,
                     apart_ns,
                     distance_ns,
@@ -244,15 +233,15 @@ impl Measured {
                 .for_each(&mut *number);
         }
         for Transition { kind, at } in transitions {
-            number(kind.0 as u64);
-            number(kind.1 as u64);
+            number(kind.mode as u64);
+            number(kind.entered as u64);
             number(at.nanoseconds());
         }
         distances
             .iter()
             .flat_map(|distance| distance.bits())
             .for_each(&mut *number);
-        for ((mode, entered), distance_ns) in transition_distances {
+        for (Kind { mode, entered }, distance_ns) in transition_distances {
             number(*mode as u64);
             number(*entered as u64);
             number(*distance_ns);
@@ -289,7 +278,7 @@ impl SliceWindow {
             solution(&body, packet, boundary, &lens, anchor_moment()).map_err(AccuracyFailure::Admission)?;
         let longest = body.longest_step_ns();
         let [coarse, middle, finest] =
-            [longest, longest / REFINEMENT, longest / (REFINEMENT * REFINEMENT)].map(reference);
+            [longest, longest / REFINEMENT, longest / (REFINEMENT * REFINEMENT)].map(fixed);
         let [coarse, middle, finest] =
             [&coarse, &middle, &finest].map(|reference| trace(&body, &solution, reference));
         let measured = Measured::new(compared(&body), finest?, &[&coarse?, &middle?], end());
@@ -326,7 +315,6 @@ fn end() -> SimTime {
     SimTime::from_ns(anchor_moment().nanoseconds() + LENGTH_NS)
 }
 
-/// Each row, then each column's exchange.
 fn compared(body: &CompiledBody) -> Vec<Compared> {
     let mut columns: Vec<ColumnId> = (body.instances().iter())
         .filter_map(|instance| match instance.target() {
@@ -359,14 +347,14 @@ fn trace(body: &CompiledBody, solution: &[f64], core: &dyn CoupledSolver) -> Res
         transitions: Vec::new(),
     };
     let mut next = anchor_moment().nanoseconds() + GRID_NS;
-    while session.record().accepted().time().nanoseconds() < end + TAIL_NS {
+    while session.record().accepted().time().nanoseconds() < end + TRANSITIONS_PAST_END_NS {
         let before = session.record().accepted().modes().to_vec();
         session = advance(session).map_err(faulted)?;
         let accepted = session.record().accepted();
         let (now, after) = (accepted.time(), accepted.modes());
         for (mode, (was, is)) in before.iter().zip(after).enumerate() {
             if was != is {
-                let kind = (mode, *is);
+                let kind = Kind { mode, entered: *is };
                 trace.transitions.push(Transition { kind, at: now });
             }
         }
@@ -392,7 +380,7 @@ fn trace(body: &CompiledBody, solution: &[f64], core: &dyn CoupledSolver) -> Res
 }
 
 /// Fixed step: scales this loose never refuse on the estimate, so each refinement takes the step it names.
-fn reference(interval_ns: u64) -> ReferenceIntegrator {
+fn fixed(interval_ns: u64) -> ReferenceIntegrator {
     let scale = |value| Measure::<Dimensionless>::new(value).expect("a finite constant");
     let loose = ErrorScales::uniform(scale(1e9), scale(1.0)).expect("positive constants");
     ReferenceIntegrator::new(interval_ns)
@@ -405,8 +393,6 @@ fn after(ns: u64, tag: &[u8], payload: BoundaryInput) -> BoundaryEvent {
     BoundaryEvent::new(InputId::new(Digest::of_canonical(tag)), at, payload)
 }
 
-/// Supine to seated in eleven steps from 1.2 s, past the first cycle's fence, then a meal from 2.5 s to 4.5 s.
-/// Synthetic magnitudes.
 fn timeline() -> Result<Vec<BoundaryEvent>, AdmissionError> {
     let mut events = Vec::new();
     for step in 0..=10_u8 {
@@ -458,7 +444,7 @@ mod tests {
 
     /// No compared values, so only modes and transitions decide: on the body a moved transition moves values too,
     /// and the values are compared first.
-    fn run(modes: &[usize], transitions: &[(Kind, u64)]) -> Trace {
+    fn modes_only(modes: &[usize], transitions: &[((usize, usize), u64)]) -> Trace {
         let instants = (modes.iter().zip(1..))
             .map(|(mode, step)| Instant {
                 at: SimTime::from_ns(step * 10 * MILLISECOND),
@@ -467,8 +453,8 @@ mod tests {
             })
             .collect();
         let transitions = (transitions.iter())
-            .map(|&(kind, at_ms)| Transition {
-                kind,
+            .map(|&((mode, entered), at_ms)| Transition {
+                kind: Kind { mode, entered },
                 at: SimTime::from_ns(at_ms * MILLISECOND),
             })
             .collect();
@@ -479,17 +465,17 @@ mod tests {
     }
 
     fn measured() -> Measured {
-        let target = run(&[0, 1, 1, 0], &[((0, 1), 15), ((0, 0), 35)]);
-        let rung = run(&[0, 0, 1, 0], &[((0, 1), 18), ((0, 0), 34)]);
+        let target = modes_only(&[0, 1, 1, 0], &[((0, 1), 15), ((0, 0), 35)]);
+        let rung = modes_only(&[0, 0, 1, 0], &[((0, 1), 18), ((0, 0), 34)]);
         Measured::new(Vec::new(), target, &[&rung], SimTime::from_ns(40 * MILLISECOND))
     }
 
     #[test]
     fn a_transition_moved_past_twice_the_rungs_spread_fails_and_one_inside_it_passes() {
         let window = measured();
-        let inside = run(&[0, 0, 1, 0], &[((0, 1), 21), ((0, 0), 35)]);
+        let inside = modes_only(&[0, 0, 1, 0], &[((0, 1), 21), ((0, 0), 35)]);
         assert!(window.verdict(&inside, 0).is_ok());
-        let moved = run(&[0, 0, 1, 0], &[((0, 1), 22), ((0, 0), 35)]);
+        let moved = modes_only(&[0, 0, 1, 0], &[((0, 1), 22), ((0, 0), 35)]);
         assert!(matches!(
             window.verdict(&moved, 0),
             Err(AccuracyFailure::TransitionMoved {
@@ -503,7 +489,7 @@ mod tests {
     #[test]
     fn a_kind_the_reference_never_makes_is_as_far_as_can_be() {
         let window = measured();
-        let spurious = run(&[0, 1, 1, 0], &[((0, 1), 15), ((0, 2), 20), ((0, 0), 35)]);
+        let spurious = modes_only(&[0, 1, 1, 0], &[((0, 1), 15), ((0, 2), 20), ((0, 0), 35)]);
         assert!(matches!(
             window.verdict(&spurious, 0),
             Err(AccuracyFailure::TransitionMoved {
@@ -517,9 +503,9 @@ mod tests {
     #[test]
     fn a_run_may_step_over_what_the_reference_makes_until_its_other_modes_pass_twice_the_rungs() {
         let window = measured();
-        let missed = run(&[0, 0, 0, 0], &[]);
+        let missed = modes_only(&[0, 0, 0, 0], &[]);
         assert!(window.verdict(&missed, 0).is_ok());
-        let elsewhere = run(&[1, 0, 0, 1], &[]);
+        let elsewhere = modes_only(&[1, 0, 0, 1], &[]);
         assert!(matches!(
             window.verdict(&elsewhere, 0),
             Err(AccuracyFailure::ModesApart {
