@@ -501,6 +501,12 @@ The arena's speed evidence for one run: the wall time of each repeat of its wind
 The arena's evidence of how hard a solver core worked for one run, beside the certificate and never in it: its refusals by reason and by refusal source, its floor faults and its validity excursions. A floor fault is the engine fault with no admissible step, a refusal at the minimum interval or past the retry budget. A faulted run reports its health up to the fault, and every repeat must report the same.
 _Avoid_: health check (that is the healthy-range check)
 
+**Score**:
+The arena's result for one run: a certificate of the history the run ended on, accuracy evidence of its solver core on every manufactured case and the first slice window at the model-default bound, its throughput and numerical health, and replay evidence of its run identity, each with the policy values it was judged by. A part from another run, or from a gate that did not run, is missing evidence and never a pass.
+
+**Policy value**:
+A model default the validation crate sets for a gate and every result reports: the accuracy tolerances, a slice window's margin, distance floor, landing tolerance, grid and reference refinements, the error scales, each core's minimum interval and the certificate's closure floor.
+
 **Pulse**:
 The Pulse Physiology Engine, a reference to compare against and never a pass bar (rule 6). A Pulse diff, a match to published data and clinical validity are three separate claims.
 _Avoid_: oracle

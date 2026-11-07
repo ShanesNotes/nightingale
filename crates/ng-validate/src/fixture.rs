@@ -9,6 +9,7 @@ const RELAXATION_SECONDS: u64 = 1000;
 const CONDUCTANCE: f64 = 0.001;
 const START: [f64; 2] = [500_500.0, 499_500.0];
 const EXTERIOR: &str = "exterior";
+const FIXTURE_SEED: [u64; 4] = [1, 2, 3, 4];
 
 fn seconds(ns: u64) -> f64 {
     ns as f64 / NANOSECONDS_PER_SECOND
@@ -237,7 +238,13 @@ impl TwoReservoirs {
     pub fn exterior(&self) -> Option<ColumnId> {
         self.column(Context::Body)
     }
-    fn packet(&self, conductance: f64) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+    pub fn packet(&self) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+        self.valued(CONDUCTANCE)
+    }
+    pub fn seed(&self) -> Seed {
+        Seed::new(FIXTURE_SEED)
+    }
+    fn valued(&self, conductance: f64) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
         let default = Binding::Network(Network::Vascular);
         let mut packet = ParameterPacket::new();
         let (e, g) = (ParameterKey::new("cv.e"), ParameterKey::new("cv.g"));
@@ -260,10 +267,10 @@ impl TwoReservoirs {
     }
     /// The same packet with a doubled conductance: what a core reads if it evaluates on other values.
     pub fn other_values(&self) -> Result<BoundParameters, AdmissionError> {
-        self.body.bind(self.packet(2.0 * CONDUCTANCE)?)
+        self.body.bind(self.valued(2.0 * CONDUCTANCE)?)
     }
     pub(crate) fn overflowing_values(&self) -> Result<BoundParameters, AdmissionError> {
-        self.body.bind(self.packet(f64::MAX)?)
+        self.body.bind(self.valued(f64::MAX)?)
     }
     /// Everything that makes this case this case, so two cases on one body never share an identity.
     pub fn digest(&self) -> Digest {
@@ -352,7 +359,7 @@ impl ReplayCase for TwoReservoirs {
         store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         let boundary = BoundaryPort::new(self.events()?)?;
-        admit_fixture(&self.body, self.packet(CONDUCTANCE)?, boundary, core, store)
+        admit_fixture(&self.body, self.packet()?, boundary, core, store)
     }
     /// The timeline is not part of the run identity, so this is the same run.
     fn admit_withheld<'m>(
@@ -361,7 +368,7 @@ impl ReplayCase for TwoReservoirs {
         store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         let boundary = BoundaryPort::new(Vec::new())?;
-        admit_fixture(&self.body, self.packet(CONDUCTANCE)?, boundary, core, store)
+        admit_fixture(&self.body, self.packet()?, boundary, core, store)
     }
 }
 
@@ -853,7 +860,7 @@ pub fn admit_fixture<'m>(
     core: &'m dyn CoupledSolver,
     store: &'m dyn HistoryStore,
 ) -> Result<Session<'m, Running>, InitializationFailure> {
-    admit_seeded(body, packet, boundary, core, Seed::new([1, 2, 3, 4]), store)
+    admit_seeded(body, packet, boundary, core, Seed::new(FIXTURE_SEED), store)
 }
 
 /// Admission reads no seed, so only the identity and the course move with it.

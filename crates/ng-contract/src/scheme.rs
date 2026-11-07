@@ -95,7 +95,7 @@ fn stage(offset_ns: u64, weight: Ratio, from: Option<usize>, span_ns: u64, slope
 }
 
 /// How a core's stages make its increment: one of a closed set.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct StageScheme {
     method: Method,
 }
@@ -181,7 +181,7 @@ impl Seal for ErrorScales {
 const ROUTINE_BITS_SHA256: &str = "d42e4b1ce0ae507032fbce98d4721abd6a41f9f8a7766f0ee5a19ce7625d4dcf";
 
 /// The floating-point operations a run may use. Bitwise replay is promised within one profile.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct ArithmeticProfile {
     digest: Digest,
 }
@@ -194,7 +194,7 @@ impl ArithmeticProfile {
 }
 
 /// A solver core's declared settings; part of the run identity. Pace is not in it.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DeclaredResolution {
     policy: Digest,
     minimum_interval_ns: NonZeroU64,
@@ -257,7 +257,7 @@ impl DeclaredResolution {
     pub(crate) fn scheme(&self) -> StageScheme {
         self.scheme
     }
-    pub(crate) fn scales(&self) -> &ErrorScales {
+    pub fn scales(&self) -> &ErrorScales {
         &self.scales
     }
 }
