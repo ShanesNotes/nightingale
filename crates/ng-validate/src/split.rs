@@ -17,8 +17,9 @@ impl From<SplitRejected> for SplitFailure {
     }
 }
 
-/// The split gate (contract §7). The reference's own error comes from the gate's run of it at half its interval,
-/// and the gate returns the qualification and nothing else, so no run it measured is ever scored.
+/// The split gate (contract §7). The split is measured against the reference at half its interval, whose own
+/// error is its distance from the reference at its interval. The gate returns the qualification and nothing
+/// else, so no run it measured is ever scored.
 pub fn split_gate(
     case: &dyn ReplayCase,
     split: &dyn CoupledSolver,
@@ -27,9 +28,9 @@ pub fn split_gate(
     grid: TraceGrid,
     budget: SplitBudget,
 ) -> Result<SplitQualification, SplitFailure> {
-    let expected = draw_split_trace(case, reference, lens, grid)?;
-    let refined = draw_split_trace(case, &reference.refined(), lens, grid)?;
-    let error = ReferenceError::self_convergence(&expected, &refined)?;
+    let coarse = draw_split_trace(case, reference, lens, grid)?;
+    let expected = draw_split_trace(case, &reference.refined(), lens, grid)?;
+    let error = ReferenceError::self_convergence(&coarse, &expected)?;
     let measured = draw_split_trace(case, split, lens, grid)?;
     Ok(SplitMeasurement::new(expected, measured, error, budget)?.qualify()?)
 }
@@ -52,4 +53,86 @@ pub fn draw_split_trace(
         session = next;
     }
     Ok(draw.finish()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SplitFailure, split_gate};
+    use crate::run::advance;
+    use crate::{MemoryStore, ReferenceIntegrator, ReplayCase, TwoReservoirs};
+    use core::num::NonZeroU64;
+    use ng_contract::{
+        ChannelSpec, Compensated, ErrorScales, Measure, SimTime, SplitBudget, SplitRejected, TraceGrid, Water,
+    };
+
+    const SECOND: u64 = 1_000_000_000;
+
+    fn every(ns: u64) -> NonZeroU64 {
+        NonZeroU64::new(ns).expect("not zero")
+    }
+
+    /// The worst distance of either amount from the closed form at the grid's instants.
+    fn closed_form_error(case: &TwoReservoirs, core: &ReferenceIntegrator, period_ns: u64) -> Compensated {
+        let store = MemoryStore::default();
+        let mut session = case.admit(core, &store).expect("admitted");
+        let mut worst = Compensated::ZERO;
+        for index in 0..1_000 {
+            let at = SimTime::from_ns(index * period_ns);
+            while session.record().accepted().time() < at {
+                let Ok(next) = advance(session) else {
+                    panic!("faulted")
+                };
+                session = next;
+            }
+            let view = session.record().accepted();
+            for (row, exact) in case.rows().into_iter().zip(case.exact(at).amounts) {
+                let value = if view.time() == at {
+                    view.value(row)
+                } else {
+                    (view.last_segment().sample(row, at)).expect("an instant inside the step")
+                };
+                let error = value.minus(Compensated::of(&measure::<Water>(exact))).abs();
+                if !error.at_most(worst) {
+                    worst = error;
+                }
+            }
+        }
+        worst
+    }
+
+    fn measure<U>(value: f64) -> Measure<U> {
+        Measure::new(value).expect("finite")
+    }
+
+    /// Backward Euler's error halves with its interval, so a reference and its half differ by about the half's
+    /// own error, and the reference's own is about twice that.
+    #[test]
+    fn a_split_whose_closed_form_error_is_over_its_budget_is_refused() {
+        let case = TwoReservoirs::closed().expect("a synthetic case");
+        let kind = (case.body().rows().iter())
+            .find(|row| row.id() == case.rows()[0])
+            .expect("a row")
+            .kind();
+        let lens = (case.body())
+            .lens(vec![ChannelSpec::new("a synthetic gauge", kind)], every(SECOND))
+            .expect("a lens");
+        let period_ns = 7 * SECOND;
+        let grid = TraceGrid::new(SimTime::from_ns(0), every(period_ns), 1_000).expect("a grid");
+        let scale = 1.2;
+        let scales = ErrorScales::uniform(measure(scale), measure(0.0)).expect("a positive scale");
+        let budget = SplitBudget::new(scales, scales, scales, measure(1.0), measure(0.5)).expect("a share");
+        let (reference, split) = (
+            ReferenceIntegrator::new(8 * SECOND),
+            ReferenceIntegrator::new(16 * SECOND),
+        );
+        assert!(
+            !closed_form_error(&case, &split, period_ns).at_most(Compensated::of(&measure::<Water>(scale))),
+            "the split's own error is over the budget"
+        );
+        let outcome = split_gate(&case, &split, &reference, &lens, grid, budget);
+        assert!(
+            matches!(outcome, Err(SplitFailure::Rejected(SplitRejected::OverBudget(_)))),
+            "{outcome:?}"
+        );
+    }
 }

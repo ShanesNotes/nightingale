@@ -101,12 +101,13 @@ fn read_alone<F: MetricFamily>(split: &dyn CoupledSolver, families: [f64; 4]) ->
     (assessment.maximum::<F>(), assessment.reference_error())
 }
 
-fn about_twice((split, own): (Compensated, Compensated)) -> bool {
-    own.times(&measure(1.9)).at_most(split) && split.at_most(own.times(&measure(2.1)))
+fn about_thrice((split, own): (Compensated, Compensated)) -> bool {
+    own.times(&measure(2.9)).at_most(split) && split.at_most(own.times(&measure(3.1)))
 }
 
-/// At first order a coupled core at twice the reference's interval errs twice as much as the reference's own run
-/// against one at half, and each family shows that ratio only when it reads the instants it claims.
+/// At first order a core at twice the reference's interval errs four times as much as the reference's half, and
+/// the reference twice as much, so the core is three times as far from the half as the reference is. Each family
+/// shows that ratio only when it reads the instants it claims.
 #[test]
 fn a_split_within_its_budget_is_qualified_against_the_reference_integrator() {
     let split = ReferenceIntegrator::new(2 * REFERENCE_STEP);
@@ -136,15 +137,15 @@ fn a_split_within_its_budget_is_qualified_against_the_reference_integrator() {
         "the case has no hazard"
     );
 
-    assert!(about_twice(read_alone::<StateFamily>(
+    assert!(about_thrice(read_alone::<StateFamily>(
         &split,
         [1.0, MUTED, MUTED, MUTED]
     )));
-    assert!(about_twice(read_alone::<ExchangeFamily>(
+    assert!(about_thrice(read_alone::<ExchangeFamily>(
         &split,
         [MUTED, 1.0, MUTED, MUTED]
     )));
-    assert!(about_twice(read_alone::<ObservableFamily>(
+    assert!(about_thrice(read_alone::<ObservableFamily>(
         &split,
         [MUTED, MUTED, 1.0, MUTED]
     )));
@@ -175,7 +176,8 @@ fn a_reference_coarser_than_its_share_is_refused() {
 
 #[test]
 fn a_core_is_never_measured_against_itself() {
-    let failure = qualified(&reference(), [10.0, 10.0, 10.0, 1.0], 0.25).expect_err("its own run");
+    let half = ReferenceIntegrator::new(REFERENCE_STEP / 2);
+    let failure = qualified(&half, [10.0, 10.0, 10.0, 1.0], 0.25).expect_err("its own run");
     assert!(
         matches!(failure, SplitFailure::Rejected(SplitRejected::SameRun)),
         "{failure:?}"
@@ -208,6 +210,36 @@ fn a_reference_error_measured_on_another_reference_is_refused() {
     );
     let refused = SplitMeasurement::new(expected, split, error, budget([10.0; 4], 0.25));
     assert!(matches!(refused, Err(SplitRejected::OtherReference)));
+}
+
+/// Read the other way round, the pair would measure the coarser run's error as the finer run's distance from it,
+/// which is about half that error.
+#[test]
+fn a_reference_whose_steps_are_not_half_the_coarser_runs_is_refused() {
+    let case = stepped();
+    let lens = gauge(case.body(), case.rows()[0]);
+    let coarse = trace(&case, &reference(), &lens, off_step_grid());
+    let half = trace(
+        &case,
+        &ReferenceIntegrator::new(REFERENCE_STEP / 2),
+        &lens,
+        off_step_grid(),
+    );
+    let nearly = trace(
+        &case,
+        &ReferenceIntegrator::new(REFERENCE_STEP / 2 + 1),
+        &lens,
+        off_step_grid(),
+    );
+    ReferenceError::self_convergence(&coarse, &half).expect("a refined reference");
+    assert!(matches!(
+        ReferenceError::self_convergence(&half, &coarse),
+        Err(SplitRejected::NotRefined)
+    ));
+    assert!(matches!(
+        ReferenceError::self_convergence(&coarse, &nearly),
+        Err(SplitRejected::NotRefined)
+    ));
 }
 
 #[test]

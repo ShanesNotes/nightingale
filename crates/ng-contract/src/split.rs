@@ -187,6 +187,7 @@ pub struct SplitTrace {
     grid: TraceGrid,
     lens: Digest,
     inputs: Digest,
+    longest_ns: u64,
     state: FamilySamples<StateFamily>,
     exchange: FamilySamples<ExchangeFamily>,
     observable: FamilySamples<ObservableFamily>,
@@ -200,6 +201,7 @@ impl SplitTrace {
             grid,
             lens,
             inputs,
+            longest_ns,
             state,
             exchange,
             observable,
@@ -211,6 +213,7 @@ impl SplitTrace {
         grid.seal(&mut out);
         lens.seal(&mut out);
         inputs.seal(&mut out);
+        out.number(*longest_ns);
         state.seal(&mut out);
         exchange.seal(&mut out);
         observable.seal(&mut out);
@@ -269,6 +272,7 @@ struct Opened {
     filled: u32,
     confirmed: u32,
     inputs: Digest,
+    longest_ns: u64,
     state: Vec<Compensated>,
     exchange: Vec<Compensated>,
     observable: Vec<Compensated>,
@@ -301,6 +305,7 @@ impl Layout {
             filled: 0,
             confirmed: 0,
             inputs: head.parts.pending.applied().chain(),
+            longest_ns: 0,
             state: Vec::new(),
             exchange: Vec::new(),
             observable: Vec::new(),
@@ -327,6 +332,7 @@ impl Layout {
             return Err(SplitRejected::Gap);
         };
         opened.confirmed = opened.filled;
+        opened.longest_ns = opened.longest_ns.max(interval.length_ns());
         let end: Vec<Compensated> = (opened.net.iter().zip(&extents.forward).zip(&extents.reverse))
             .map(|((net, forward), reverse)| net.plus(*forward).minus(*reverse))
             .collect();
@@ -456,6 +462,7 @@ impl TraceDraw {
             identity,
             patient,
             inputs,
+            longest_ns,
             mut events,
             state,
             exchange,
@@ -476,6 +483,7 @@ impl TraceDraw {
             grid,
             lens,
             inputs,
+            longest_ns,
             state: FamilySamples::new(indexed("ng-contract split state 1", rows.len()), state),
             exchange: FamilySamples::new(indexed("ng-contract split exchange 1", columns), exchange),
             observable: FamilySamples::new(
@@ -487,16 +495,22 @@ impl TraceDraw {
     }
 }
 
-/// The coupled reference's own error, measured against a second run of it on the same grid and never assumed
-/// zero.
+/// The coupled reference's own error: its distance from a coarser run of it on the same grid, never assumed
+/// zero. At order `p` a run whose steps are at most half as long errs at most `2^-p` as much, so the two differ
+/// by at least the finer run's error when `p` is one or more. The finer run is therefore the one a split is
+/// measured against.
 pub struct ReferenceError {
     reference: Digest,
     differences: [Vec<Compensated>; 4],
 }
 impl ReferenceError {
-    pub fn self_convergence(reference: &SplitTrace, refined: &SplitTrace) -> Result<Self, SplitRejected> {
-        reference.comparable(refined)?;
-        let (coarse, fine) = (reference.families(), refined.families());
+    /// Refuses a reference whose longest step is over half the coarser run's, and two runs that differ nowhere.
+    pub fn self_convergence(coarse: &SplitTrace, reference: &SplitTrace) -> Result<Self, SplitRejected> {
+        reference.comparable(coarse)?;
+        if coarse.longest_ns < reference.longest_ns.saturating_mul(2) {
+            return Err(SplitRejected::NotRefined);
+        }
+        let (coarse, fine) = (coarse.families(), reference.families());
         let differences: [Vec<Compensated>; 4] = core::array::from_fn(|family| {
             (coarse[family].1.iter().zip(fine[family].1))
                 .map(|(coarse, fine)| coarse.minus(*fine))
