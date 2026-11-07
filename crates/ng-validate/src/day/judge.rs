@@ -6,7 +6,6 @@ use super::{
 use ng_contract::SimTime;
 
 const BASELINE: u64 = 10 * MINUTE;
-const MEAL_WINDOW: u64 = 4 * HOUR;
 const FIRST_PHASE: u64 = 30 * SECOND;
 const NIGHT_HOUR: u64 = HOUR;
 const FAST_STAY: usize = 3;
@@ -207,8 +206,7 @@ impl Scene<'_> {
         self.occurrence.at
     }
     fn next(&self) -> Option<SimTime> {
-        let later = self.plan.occurrences.iter().map(|occurrence| occurrence.at);
-        later.filter(|&at| at > self.at()).min()
+        self.plan.next_after(self.at())
     }
     /// The 10 min before the event, cut at the trace's start.
     fn baseline(&self) -> SimTime {
@@ -318,8 +316,7 @@ impl Scene<'_> {
         controls: &[(usize, DayTrace)],
     ) -> Result<Judged, Pending> {
         let (fed, at) = (self.fed, self.at());
-        let cap = plus(at, MEAL_WINDOW);
-        let end = covered(fed, Some(self.next().map_or(cap, |next| next.min(cap))))?;
+        let end = covered(fed, Some(self.plan.meal_end(at)))?;
         let start = self.baseline();
         let fed_base = stats(within(fed, start, at), quantity)?;
         let window = within(fed, at, end);

@@ -5,21 +5,25 @@ mod trace;
 #[cfg(test)]
 mod tests;
 
+use crate::initialize::{admit_start, solved_start};
+use crate::run::advance;
 use core::fmt;
 use core::num::NonZeroU32;
 use judge::{Shown, Uncovered};
-use ng_contract::InitializationFailure;
 use ng_contract::{
-    AdmissionError, BoundaryEvent, BoundaryInput, Delivered, Digest, InputId, Interval, Legs, Measure,
-    ObservationLens, ParameterPacket, Posture, RowKind, Seed, SimTime, SyntheticFixture,
+    AdmissionError, BoundaryEvent, BoundaryInput, BoundaryPort, CompiledBody, CoupledSolver, Delivered,
+    Digest, ErrorScales, InitializationFailure, InputId, Interval, Legs, Measure, ObservationLens,
+    ParameterPacket, Posture, RowKind, RunIdentity, Seed, SimTime, SyntheticFixture,
 };
-use ng_record::{CheckpointError, FaultReport};
+use ng_record::{AuthorizedInput, Checkpoint, CheckpointError, FaultReport, Faulted, HistoryStore, Session};
 use table::{Bound, Course, Lean, Row, Scoring, Span};
+use trace::{DayTrace, Fold, Reading, Readings};
 
 const SECOND: u64 = 1_000_000_000;
 const MINUTE: u64 = 60 * SECOND;
 const HOUR: u64 = 60 * MINUTE;
 const DAY: u64 = 24 * HOUR;
+const MEAL_WINDOW: u64 = 4 * HOUR;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EventKind {
@@ -230,6 +234,15 @@ impl DayPlan {
         }
         plan
     }
+    fn next_after(&self, at: SimTime) -> Option<SimTime> {
+        let later = self.occurrences.iter().map(|occurrence| occurrence.at);
+        later.filter(|&later| later > at).min()
+    }
+    /// A meal's window ends 4 h after it, or at the next occurrence when that comes first.
+    fn meal_end(&self, at: SimTime) -> SimTime {
+        let cap = SimTime::from_ns(at.nanoseconds().saturating_add(MEAL_WINDOW));
+        self.next_after(at).map_or(cap, |next| next.min(cap))
+    }
 }
 
 /// Admission at the window's start; the run steps until the head reaches its end.
@@ -342,6 +355,115 @@ pub enum DayFailure {
     Input(AdmissionError),
     /// A row the day trace reads that this body lacks.
     MissingRow(RowKind),
+}
+
+fn exported(stopped: Session<'_, Faulted>) -> DayFailure {
+    match stopped.export() {
+        Ok(report) => DayFailure::Faulted(report),
+        Err(error) => DayFailure::Checkpoint(error),
+    }
+}
+
+/// The admitted start every run of the day resumes from, and what each run's trace reads.
+struct Start<'m> {
+    saved: Checkpoint,
+    identity: RunIdentity,
+    body: &'m CompiledBody,
+    core: &'m dyn CoupledSolver,
+    store: &'m dyn HistoryStore,
+    readings: Readings,
+    scales: ErrorScales,
+    sizes: Reading,
+}
+impl Start<'_> {
+    /// Enqueues every input of `plan` from the head on, then steps until the head reaches `end`.
+    fn run(&self, plan: &DayPlan, end: SimTime) -> Result<DayTrace, DayFailure> {
+        let Self { saved, identity, .. } = self;
+        let resumed = Session::resume(saved, identity, self.body, self.core, self.store);
+        let mut session = resumed.map_err(DayFailure::Checkpoint)?;
+        let head = session.record().accepted();
+        let (start, (phase, _)) = (head.time(), self.readings.read(head));
+        let command = Digest::of_canonical(b"the reference day");
+        let inputs = plan.occurrences.iter().flat_map(|occurrence| &occurrence.inputs);
+        for input in inputs.filter(|input| input.at >= start) {
+            let event = input.event().map_err(DayFailure::Input)?;
+            let enqueued = session.enqueue(AuthorizedInput::from_command_receipt(command, event));
+            enqueued.map_err(DayFailure::Input)?;
+        }
+        let mut fold = Fold::new(plan, self.scales, self.sizes, start, phase);
+        while session.record().accepted().time() < end {
+            let before = session.record().accepted().time();
+            let (next, receipt) = advance(session).map_err(exported)?;
+            session = next;
+            let view = session.record().accepted();
+            let (phase, reading) = self.readings.read(view);
+            let length_ns = view.time().nanoseconds() - before.nanoseconds();
+            fold.step(view.time(), length_ns, phase, &reading);
+            fold.applied(receipt.applied());
+        }
+        let record = session.record();
+        Ok(fold.finish(
+            identity.digest(),
+            record.seal().digest(),
+            record.accepted().time(),
+        ))
+    }
+}
+
+/// Admits once, checkpoints, and runs the plan from that start; for each meal whose window the run covers, also
+/// runs the plan without that meal from the same start. Then every row of the day table is checked.
+pub fn day_checks<'m>(
+    body: &'m CompiledBody,
+    core: &'m dyn CoupledSolver,
+    spec: DaySpec,
+    store: &'m dyn HistoryStore,
+) -> Result<DayReport, DayFailure> {
+    let DaySpec {
+        window,
+        packet,
+        lens,
+        seed,
+        plan,
+    } = spec;
+    let readings = Readings::bind(body)?;
+    let port = BoundaryPort::new(Vec::new()).map_err(|error| DayFailure::Initialization(error.into()))?;
+    let (saved, identity, scales, sizes) = {
+        let start = solved_start(body, packet, port, core, &lens, window.start());
+        let session = start.and_then(|start| admit_start(body, core, start, seed, store));
+        let session = session.map_err(DayFailure::Initialization)?;
+        let saved = session.checkpoint().map_err(DayFailure::Checkpoint)?;
+        let record = session.record();
+        let identity = record.identity().clone();
+        let scales = *identity.resolution().scales();
+        (saved, identity, scales, readings.sizes(&record.problem()))
+    };
+    let start = Start {
+        saved,
+        identity,
+        body,
+        core,
+        store,
+        readings,
+        scales,
+        sizes,
+    };
+    let fed = start.run(&plan, window.end())?;
+    let mut controls = Vec::new();
+    for (index, meal) in plan.occurrences.iter().enumerate() {
+        let end = plan.meal_end(meal.at);
+        if meal.kind == EventKind::Meal && meal.at >= window.start() && end <= window.end() {
+            controls.push((index, start.run(&plan.without(index), end)?));
+        }
+    }
+    let checks = judge::judge(&plan, &fed, &controls);
+    Ok(DayReport {
+        run: fed.run,
+        seal: fed.seal,
+        start: fed.start,
+        end: fed.end,
+        beats: fed.beats.len(),
+        checks,
+    })
 }
 
 /// Every row of the day table, checked on one run and its counterfactuals.

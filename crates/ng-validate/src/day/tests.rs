@@ -49,7 +49,7 @@ fn plan() -> DayPlan {
 }
 
 fn wobble(index: usize) -> f64 {
-    if index % 2 == 0 { 1.0 } else { -1.0 }
+    if index.is_multiple_of(2) { 1.0 } else { -1.0 }
 }
 
 /// Beats of `period` ns from `start`, while they end by `end`.

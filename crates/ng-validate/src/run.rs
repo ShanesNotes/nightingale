@@ -8,15 +8,16 @@ use ng_contract::{
 use ng_observe::{Observation, ObservedValue, Observer};
 use ng_record::{
     CheckpointError, FaultReport, Faulted, HistoryStore, ObservationRefusal, Running, Session, Step,
+    StepReceipt,
 };
 
 pub(crate) fn advance<'m>(
     session: Session<'m, Running>,
-) -> Result<Session<'m, Running>, Session<'m, Faulted>> {
+) -> Result<(Session<'m, Running>, StepReceipt), Session<'m, Faulted>> {
     let mut attempt = session.step();
     loop {
         match attempt {
-            Step::Accepted(session, _) => return Ok(session),
+            Step::Accepted(session, receipt) => return Ok((session, receipt)),
             Step::Refused(session) => attempt = session.retry(),
             Step::Faulted(session) => return Err(session),
         }
@@ -29,7 +30,7 @@ pub fn run_until<'m>(
     end: SimTime,
 ) -> Result<Session<'m, Running>, Session<'m, Faulted>> {
     while session.record().accepted().time() < end {
-        session = advance(session)?;
+        (session, _) = advance(session)?;
     }
     Ok(session)
 }
@@ -157,7 +158,7 @@ fn timed<'m>(
         if session.record().accepted().time() >= end {
             break;
         }
-        session = advance(session).map_err(exported)?;
+        (session, _) = advance(session).map_err(exported)?;
     }
     let wall_ns = (read(clock)?.checked_sub(began)).and_then(NonZeroU64::new);
     match wall_ns {

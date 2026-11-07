@@ -268,7 +268,7 @@ fn closed_form(
     let mut session = case.admit(solver, &store).map_err(AccuracyFailure::Admission)?;
     let mut largest = Compensated::ZERO;
     while session.record().accepted().time() < case.end() {
-        session = advance(session).map_err(faulted)?;
+        (session, _) = advance(session).map_err(faulted)?;
         let record = session.record();
         let Some(interval) = record.accepted().last_segment().interval() else {
             continue;
@@ -304,7 +304,7 @@ fn independent(
         .admit(solver, &clean_store)
         .map_err(AccuracyFailure::Admission)?;
     let stage_before = stage_bits(solver, clean.record());
-    let clean = advance(clean).map_err(faulted)?;
+    let (clean, _) = advance(clean).map_err(faulted)?;
 
     let store = MemoryStore::default();
     let session = case.admit(solver, &store).map_err(AccuracyFailure::Admission)?;
@@ -324,7 +324,7 @@ fn independent(
         return Err(AccuracyFailure::NothingRefused { case: index });
     }
     let stage_after = stage_bits(solver, record);
-    let session = advance(session).map_err(faulted)?;
+    let (session, _) = advance(session).map_err(faulted)?;
     let same_stage = stage_before.is_some() && stage_before == stage_after;
     if !same_stage || clean.record().seal() != session.record().seal() {
         return Err(AccuracyFailure::Dependent { case: index });

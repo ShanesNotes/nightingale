@@ -1,5 +1,5 @@
 //! Synthetic fixtures, the slice's composition root and held stand-ins, the admission solve, the reference
-//! integrator, the accuracy gate, the certificate, the replay gates and the arena run.
+//! integrator, the accuracy gate, the certificate, the replay gates, the arena run and the day checks.
 //!
 //! # Type rules
 //!
@@ -147,6 +147,30 @@
 //!     Ok(run(body, core, spec, clock, store)?.into_evidence().throughput().clone())
 //! }
 //! ```
+//! A day report comes only from the runs its checks read.
+//! ```compile_fail,E0451
+//! use ng_contract::{Digest, SimTime};
+//! use ng_validate::*;
+//! fn forged(run: Digest, at: SimTime, checks: Vec<DayCheck>) -> DayReport {
+//!     DayReport {
+//!         run,
+//!         seal: run,
+//!         start: at,
+//!         end: at,
+//!         beats: 0,
+//!         checks,
+//!     }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! use ng_record::HistoryStore;
+//! use ng_validate::*;
+//! fn checked<'m>(body: &'m CompiledBody, core: &'m dyn CoupledSolver, spec: DaySpec,
+//!     store: &'m dyn HistoryStore) -> Result<DayReport, DayFailure> {
+//!     day_checks(body, core, spec, store)
+//! }
+//! ```
 
 mod accuracy;
 mod certificate;
@@ -165,7 +189,9 @@ pub use certificate::{
     Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, ExpectedDrift, QuantityPolicy,
     QuantityResult, Sliding24Hours, certify,
 };
-pub use day::{DayCheck, DayFailure, DayPlan, DayQuantity, DayReport, DaySpec, Miss, Unavailable, Verdict};
+pub use day::{
+    DayCheck, DayFailure, DayPlan, DayQuantity, DayReport, DaySpec, Miss, Unavailable, Verdict, day_checks,
+};
 pub use fixture::{ChanceCase, Delivery, TwoReservoirs, admit_fixture, admit_seeded};
 pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved};
 pub use reference::ReferenceIntegrator;
