@@ -173,6 +173,7 @@ pub enum AccuracyCase {
 /// One window, measured once: the finest refinement stands for the solution, and a quantity's
 /// distance is the farthest the coarser two stand from it.
 pub struct SliceWindow {
+    _policy: WindowPolicy,
     _distances: Vec<Compensated>,
 }
 impl SliceWindow {
@@ -180,6 +181,21 @@ impl SliceWindow {
     pub fn first() -> Result<Self, AccuracyFailure> {
         todo!()
     }
+    pub fn policy(&self) -> &WindowPolicy {
+        todo!()
+    }
+}
+/// A window's policy values: the margin over the coarser refinements' spread, the distance floor,
+/// the landing tolerance, the compared grid, how far past its end transitions count, and the
+/// reference's refinements.
+pub struct WindowPolicy {
+    _margin: u64,
+    _distance_floor: Compensated,
+    _landing_ns: NonZeroU64,
+    _grid_ns: u64,
+    _past_end_ns: u64,
+    _refinements_ns: [u64; 3],
+    _refinement_scales: ErrorScales,
 }
 /// The contract's slow reference: fully coupled backward Euler, step doubled, with Newton to
 /// convergence on the compiled body, on the public seam and nothing else. It serves the accuracy
@@ -243,6 +259,7 @@ pub struct AccuracyEvidence {
     _absolute: Compensated,
     _relative: Compensated,
     _grid_ns: u64,
+    _windows: Vec<WindowPolicy>,
     _worst: Vec<Compensated>,
 }
 impl AccuracyEvidence {

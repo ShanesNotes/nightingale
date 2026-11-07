@@ -4,6 +4,7 @@ use ng_contract::*;
 use ng_record::ConservationView;
 use ng_validate::*;
 
+const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000_000_000;
 const HOUR: u64 = 3_600 * SECOND;
 const INTERVAL_NS: u64 = 16 * SECOND;
@@ -191,6 +192,20 @@ fn a_score_holds_one_runs_parts_under_the_arena_policy_and_refuses_another_cores
     );
     assert_eq!(checked.grid_ns(), 100 * SECOND);
     let loose = ErrorScales::uniform(measure(1e9), measure(1.0)).expect("positive");
+    let [window] = checked.windows() else {
+        panic!("the arena runs one slice window");
+    };
+    assert_eq!(window.margin(), 2);
+    assert_eq!(
+        bits(window.distance_floor()),
+        bits(Compensated::of(&measure::<Dimensionless>(1e-6)))
+    );
+    assert_eq!(window.landing_ns().get(), 100_000);
+    assert_eq!(window.grid_ns(), 10 * MILLISECOND);
+    assert_eq!(window.past_end_ns(), 500 * MILLISECOND);
+    let longest = arena_body().expect("the slice compiles").longest_step_ns();
+    assert_eq!(window.refinements_ns(), [longest, longest / 4, longest / 16]);
+    assert_eq!(window.refinement_scales(), loose);
     assert_eq!(evidence.resolution().scales(), &loose);
     assert_eq!(evidence.resolution().minimum_interval_ns().get(), 100_000);
     assert_eq!(scored.replay().of(ReplayGate::StepPolicy).tolerance_ns(), None);

@@ -213,4 +213,4 @@ pub use slice::{
     SliceCase, anchor_moment, arena_anatomy, arena_body, arena_lens, arena_organs, arena_packet,
     arena_schema, hold_outside_slice,
 };
-pub use window::{Compared, SliceWindow};
+pub use window::{Compared, SliceWindow, WindowPolicy};

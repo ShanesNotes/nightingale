@@ -1,5 +1,5 @@
 use crate::run::advance;
-use crate::{Compared, MemoryStore, ReplayCase, SliceWindow, TwoReservoirs};
+use crate::{Compared, MemoryStore, ReplayCase, SliceWindow, TwoReservoirs, WindowPolicy};
 use core::cell::RefCell;
 use ng_contract::{
     AcceptedStateView, AdmissionError, Attempt, BoundParameters, ColumnId, Compensated, CoupledProblem,
@@ -177,6 +177,7 @@ pub struct AccuracyEvidence {
     absolute: Compensated,
     relative: Compensated,
     grid_ns: u64,
+    windows: Vec<WindowPolicy>,
     worst: Vec<Compensated>,
 }
 impl AccuracyEvidence {
@@ -194,6 +195,10 @@ impl AccuracyEvidence {
     }
     pub fn grid_ns(&self) -> u64 {
         self.grid_ns
+    }
+    /// The policy of each slice window it ran, in case order.
+    pub fn windows(&self) -> &[WindowPolicy] {
+        &self.windows
     }
     pub fn worst(&self) -> &[Compensated] {
         &self.worst
@@ -343,6 +348,12 @@ pub fn accuracy(
         absolute: policy.absolute,
         relative: Compensated::of(&policy.relative),
         grid_ns: policy.grid_ns,
+        windows: (policy.cases.iter())
+            .filter_map(|case| match case {
+                Judged::Manufactured(_) => None,
+                Judged::Window(window) => Some(*window.policy()),
+            })
+            .collect(),
         worst,
     })
 }
@@ -518,6 +529,7 @@ mod tests {
             absolute: Compensated::of(&Measure::<Water>::new(absolute).expect("finite")),
             relative: Compensated::of(&Measure::<Dimensionless>::new(0.0).expect("finite")),
             grid_ns,
+            windows: Vec::new(),
             worst: Vec::new(),
         };
         evidence.of_the_arena().expect("the defaults build")
