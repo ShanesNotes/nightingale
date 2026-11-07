@@ -362,7 +362,10 @@ fn trace(body: &CompiledBody, solution: &[f64], core: &dyn CoupledSolver) -> Res
         let dense = accepted.last_segment();
         while next <= now.nanoseconds() && next <= end {
             let at = SimTime::from_ns(next);
+            // A segment ends at a firing's left limit, so its end instant reads the accepted state, as an
+            // observation does.
             let read = |compared: &Compared| match *compared {
+                Compared::Row(row) if at == now => accepted.value(row),
                 Compared::Row(row) => dense
                     .sample(row, at)
                     .expect("a compared instant is inside the segment"),
