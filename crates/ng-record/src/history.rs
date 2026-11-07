@@ -184,36 +184,40 @@ fn values(bytes: &[u8]) -> Option<&[[u8; VALUE]]> {
     rest.is_empty().then_some(values)
 }
 
-/// The end time and each curve's end value of a compact link, which are the start time and start values of
-/// the link that follows it.
-fn ends(compact: &[u8]) -> Option<(&[u8], impl Iterator<Item = &[u8; VALUE]>)> {
+fn ends(compact: &[u8]) -> Option<(&[u8], Vec<&[u8; VALUE]>)> {
     let (&form, rest) = compact.split_first()?;
-    let (time, values, stride) = match form {
-        WHOLE => (
-            rest.get(LINK_HEAD + INSTANT..LINK_VALUES)?,
-            values(rest.get(LINK_VALUES..)?)?,
-            2,
-        ),
-        ENDS => (
-            rest.get(size_of::<Digest>()..size_of::<Digest>() + INSTANT)?,
-            values(rest.get(size_of::<Digest>() + INSTANT..)?)?,
-            1,
-        ),
-        _ => return None,
-    };
-    (values.len() % stride == 0).then(|| (time, values.iter().skip(stride - 1).step_by(stride)))
+    match form {
+        WHOLE => {
+            let pairs = values(rest.get(LINK_VALUES..)?)?;
+            let ends = pairs.iter().skip(1).step_by(2).collect();
+            (pairs.len() % 2 == 0).then_some((rest.get(LINK_HEAD + INSTANT..LINK_VALUES)?, ends))
+        }
+        ENDS => {
+            let rest = rest.get(size_of::<Digest>()..)?;
+            let (time, ends) = rest.split_at_checked(INSTANT)?;
+            Some((time, values(ends)?.iter().collect()))
+        }
+        _ => None,
+    }
 }
 
-/// A link as a history store may keep it. When `link` follows `previous` (its seal, then its own compact
-/// form), only its image, its end time and each curve's end value are kept; any other link is kept whole.
-pub fn compact(previous: Option<(Digest, &[u8])>, link: &[u8]) -> Vec<u8> {
+/// A compact link and the seal it was kept under.
+#[derive(Clone, Copy)]
+pub struct CompactLink<'b> {
+    pub seal: Digest,
+    pub bytes: &'b [u8],
+}
+
+/// A link as a history store may keep it. When `link` follows `previous`, only its image, its end time and each
+/// curve's end value are kept; any other link is kept whole.
+pub fn compact(previous: Option<CompactLink<'_>>, link: &[u8]) -> Vec<u8> {
     let pairs = link
         .get(LINK_VALUES..)
         .and_then(values)
         .filter(|pairs| pairs.len() % 2 == 0);
-    let follows = previous.zip(pairs).is_some_and(|((seal, before), pairs)| {
-        ends(before).is_some_and(|(time, ends)| {
-            link.get(..size_of::<Digest>()) == Some(seal.as_bytes())
+    let follows = previous.zip(pairs).is_some_and(|(previous, pairs)| {
+        ends(previous.bytes).is_some_and(|(time, ends)| {
+            link.get(..size_of::<Digest>()) == Some(previous.seal.as_bytes())
                 && link.get(LINK_HEAD..LINK_HEAD + INSTANT) == Some(time)
                 && pairs.iter().step_by(2).eq(ends)
         })
@@ -234,19 +238,19 @@ pub fn compact(previous: Option<(Digest, &[u8])>, link: &[u8]) -> Vec<u8> {
 
 /// The exact link `compact` was given, from its compact form and the same `previous`. `None` when `compact`
 /// is not a compact link or needs a `previous` it does not match in shape.
-pub fn expand(previous: Option<(Digest, &[u8])>, compact: &[u8]) -> Option<Vec<u8>> {
+pub fn expand(previous: Option<CompactLink<'_>>, compact: &[u8]) -> Option<Vec<u8>> {
     let (&form, rest) = compact.split_first()?;
     match form {
         WHOLE => return Some(rest.to_vec()),
         ENDS => {}
         _ => return None,
     }
-    let (seal, before) = previous?;
-    let (start, starts) = ends(before)?;
+    let previous = previous?;
+    let (start, starts) = ends(previous.bytes)?;
     let (image, rest) = rest.split_at_checked(size_of::<Digest>())?;
     let (end, held) = rest.split_at_checked(INSTANT)?;
     let mut values = values(held)?.iter();
-    let mut link = seal.as_bytes().to_vec();
+    let mut link = previous.seal.as_bytes().to_vec();
     for part in [image, start, end] {
         link.extend_from_slice(part);
     }

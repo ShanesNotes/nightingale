@@ -1,5 +1,5 @@
 use ng_contract::Digest;
-use ng_record::{CheckpointError, HistoryStore, compact, expand};
+use ng_record::{CheckpointError, CompactLink, HistoryStore, compact, expand};
 use std::cell::{Cell, RefCell};
 use std::fs::File;
 use std::os::unix::fs::FileExt;
@@ -8,7 +8,6 @@ use std::path::PathBuf;
 const HEAD: u64 = 8;
 const TAIL: u64 = 32 + 8;
 
-/// Each record is its compact link between two copies of its length, then its seal, so the log reads both ways.
 pub struct LinkLog {
     path: PathBuf,
     file: File,
@@ -16,7 +15,7 @@ pub struct LinkLog {
     cursors: Cell<[u64; 2]>,
     newer: Cell<usize>,
     newest: RefCell<Option<(Digest, Vec<u8>)>>,
-    next: Cell<u64>,
+    replay: Cell<u64>,
 }
 
 struct Record {
@@ -49,7 +48,7 @@ impl LinkLog {
             cursors: Cell::new([0; 2]),
             newer: Cell::new(0),
             newest: RefCell::new(None),
-            next: Cell::new(0),
+            replay: Cell::new(0),
         }
     }
 
@@ -102,7 +101,13 @@ impl LinkLog {
 
     fn append(&self, seal: Digest, link: &[u8]) {
         let mut newest = self.newest.borrow_mut();
-        let kept = compact(newest.as_ref().map(|(seal, kept)| (*seal, kept.as_slice())), link);
+        let kept = compact(
+            newest.as_ref().map(|(seal, kept)| CompactLink {
+                seal: *seal,
+                bytes: kept,
+            }),
+            link,
+        );
         let length = (kept.len() as u64).to_be_bytes();
         let mut record = length.to_vec();
         record.extend_from_slice(&kept);
@@ -111,8 +116,18 @@ impl LinkLog {
         let end = self.end.get();
         self.file.write_all_at(&record, end).expect("the log writes");
         self.end.set(end + record.len() as u64);
-        self.next.set(self.end.get());
+        self.replay.set(self.end.get());
         *newest = Some((seal, kept));
+    }
+
+    fn replays(&self, seal: &Digest) -> bool {
+        let at = self.replay.get();
+        let expected = (at < self.end.get()).then(|| self.record_at(at));
+        let replayed = expected.filter(|expected| &expected.seal == seal);
+        if let Some(expected) = &replayed {
+            self.replay.set(expected.end());
+        }
+        replayed.is_some()
     }
 }
 
@@ -133,27 +148,23 @@ impl HistoryStore for LinkLog {
             let previous = self.record_before(record.start);
             (previous.seal, self.compact_link(&previous))
         });
-        let previous = previous.as_ref().map(|(seal, kept)| (*seal, kept.as_slice()));
+        let previous = previous.as_ref().map(|(seal, kept)| CompactLink {
+            seal: *seal,
+            bytes: kept,
+        });
         expand(previous, &self.compact_link(&record))
     }
 
-    /// Repeats resume one admitted start and hand over the same links in order, so after the first link of a
-    /// repeat is found held, each next link is checked against the record after the one before it.
     fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
-        let next = self.next.get();
-        if next < self.end.get() {
-            let expected = self.record_at(next);
-            if expected.seal == seal {
-                self.next.set(expected.end());
-                return Ok(());
-            }
+        if self.replays(&seal) {
+            return Ok(());
         }
         let follows = match &*self.newest.borrow() {
             Some((newest, _)) => link.get(..32) == Some(newest.as_bytes().as_slice()),
             None => true,
         };
         match (!follows).then(|| self.find(&seal)).flatten() {
-            Some(held) => self.next.set(held.end()),
+            Some(held) => self.replay.set(held.end()),
             None => self.append(seal, link),
         }
         Ok(())

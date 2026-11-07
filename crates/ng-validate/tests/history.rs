@@ -1,7 +1,7 @@
 use core::cell::{Cell, RefCell};
 use core::num::NonZeroU32;
 use ng_contract::*;
-use ng_record::{CheckpointError, HistoryStore, Session, compact, expand};
+use ng_record::{CheckpointError, CompactLink, HistoryStore, Session, compact, expand};
 use ng_solver::Core;
 use ng_validate::*;
 
@@ -19,8 +19,6 @@ impl WallClock for Ticks {
     }
 }
 
-/// Keeps each seal once, as its compact link against the link kept before it, and remembers every link it
-/// was given so a test can compare.
 #[derive(Default)]
 struct Compacting {
     held: RefCell<Vec<(Digest, Vec<u8>)>>,
@@ -30,9 +28,10 @@ impl HistoryStore for Compacting {
     fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
         let held = self.held.borrow();
         let at = held.iter().position(|(held, _)| held == seal)?;
-        let previous = at
-            .checked_sub(1)
-            .map(|before| (held[before].0, held[before].1.as_slice()));
+        let previous = at.checked_sub(1).map(|before| CompactLink {
+            seal: held[before].0,
+            bytes: &held[before].1,
+        });
         expand(previous, &held[at].1)
     }
     fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
@@ -41,7 +40,13 @@ impl HistoryStore for Compacting {
         if held.iter().any(|(held, _)| *held == seal) {
             return Ok(());
         }
-        let kept = compact(held.last().map(|(seal, kept)| (*seal, kept.as_slice())), link);
+        let kept = compact(
+            held.last().map(|(seal, kept)| CompactLink {
+                seal: *seal,
+                bytes: kept,
+            }),
+            link,
+        );
         held.push((seal, kept));
         Ok(())
     }
