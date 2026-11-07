@@ -9,25 +9,25 @@ use ng_contract::{
 use ng_observe::{Observation, ObservedValue, Observer};
 use ng_record::{
     CheckpointError, FaultReport, Faulted, HistorySeal, HistoryStore, ObservationRefusal, Running, Session,
-    Step,
+    Step, StepReceipt,
 };
 
-pub(crate) fn advance<'m>(
+pub(crate) fn accept<'m>(
     session: Session<'m, Running>,
-) -> Result<Session<'m, Running>, Session<'m, Faulted>> {
+) -> Result<(Session<'m, Running>, StepReceipt), Session<'m, Faulted>> {
     counted(session, &mut NumericalHealth::default())
 }
 
 fn counted<'m>(
     session: Session<'m, Running>,
     health: &mut NumericalHealth,
-) -> Result<Session<'m, Running>, Session<'m, Faulted>> {
+) -> Result<(Session<'m, Running>, StepReceipt), Session<'m, Faulted>> {
     let mut attempt = session.step();
     loop {
         match attempt {
             Step::Accepted(session, receipt) => {
                 health.excursions += receipt.excursions().len() as u64;
-                return Ok(session);
+                return Ok((session, receipt));
             }
             Step::Refused(session) => {
                 health.refused(session.refused().reason());
@@ -41,6 +41,12 @@ fn counted<'m>(
             }
         }
     }
+}
+
+pub(crate) fn advance<'m>(
+    session: Session<'m, Running>,
+) -> Result<Session<'m, Running>, Session<'m, Faulted>> {
+    accept(session).map(|(session, _)| session)
 }
 
 /// Steps until the accepted head reaches `end`, retrying every refusal. A fault ends it with the latch.
@@ -242,7 +248,7 @@ fn timed<'m>(
             break;
         }
         session = match counted(session, &mut health) {
-            Ok(session) => session,
+            Ok((session, _)) => session,
             Err(stopped) => return Err(exported(stopped, health)),
         };
     }

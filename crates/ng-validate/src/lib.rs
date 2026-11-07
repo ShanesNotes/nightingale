@@ -1,5 +1,5 @@
 //! Synthetic fixtures, the slice's composition root and held stand-ins, the admission solve, the reference
-//! integrator, the accuracy gate, the certificate, the replay gates, the arena run and its score.
+//! integrator, the accuracy gate, the certificate, the replay gates, the arena run, its score and the split gate.
 //!
 //! # Type rules
 //!
@@ -189,6 +189,7 @@ mod replay;
 mod run;
 mod score;
 mod slice;
+mod split;
 mod window;
 
 pub use accuracy::{
@@ -213,4 +214,5 @@ pub use slice::{
     SliceCase, anchor_moment, arena_anatomy, arena_body, arena_lens, arena_organs, arena_packet,
     arena_schema, hold_outside_slice,
 };
+pub use split::{SplitFailure, draw_split_trace, split_gate};
 pub use window::{Compared, SliceWindow, WindowPolicy};

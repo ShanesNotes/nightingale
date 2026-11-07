@@ -362,6 +362,9 @@ impl RunIdentity {
     pub(crate) fn seed(&self) -> Seed {
         self.seed
     }
+    pub(crate) fn same_seed(&self, other: &Self) -> bool {
+        self.seed.words == other.seed.words
+    }
 }
 
 #[cfg(test)]

@@ -78,8 +78,9 @@ impl PatientRecord<'_> {
     pub fn digests(&self) -> RecordDigests {
         todo!()
     }
-    /// Four-family samples of this branch on a grid, for split measurement only.
-    pub fn split_trace(&self, _grid: TraceGrid) -> Result<SplitTrace, AdmissionError> {
+    /// Reads this head into a split trace: with no receipt, the head a draw opens on; with one, the
+    /// head that receipt's step made, for split measurement only.
+    pub fn split_trace(&self, _draw: &mut TraceDraw, _receipt: Option<&StepReceipt>) -> Result<(), SplitRejected> {
         todo!()
     }
 }

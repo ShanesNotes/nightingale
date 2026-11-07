@@ -60,6 +60,9 @@ _Avoid_: save (in prose)
 **Seal**:
 A digest that chains the seal before it with one accepted step's image and ledger chunk, so one seal stands for the whole accepted course up to that step. It covers nothing that waits.
 
+**Accepted head**:
+The accepted state at one step boundary, held with its digest. Only installing a step the contract settled on it moves it, so a split trace that reads accepted heads from an admission reads only steps the contract verified.
+
 **History store**:
 Host storage for the links of the seal's chain, addressed by seal and trusted for nothing: a session hands it each link as its step is accepted, and a load checks each link against the seal that asked for it.
 
@@ -453,7 +456,13 @@ The amount a transfer moved over one step, kept as gross forward and reverse par
 The record of each numerical stage a step used (its time, point and weight), which the contract re-evaluates on the record crate's own values before the step can be accepted.
 
 **Reference integrator**:
-The fully coupled backward Euler core in `ng-validate`, run at three refinements, against which the accuracy gate measures each solver core.
+The fully coupled backward Euler core in `ng-validate`, run at three refinements, against which the accuracy gate and the split measurement measure each solver core.
+
+**Split measurement**:
+How a core that evaluates some blocks apart within a step earns trust: its split trace and the reference integrator's, on one grid of one case, are compared family by family, and the reference's own error, its distance from a run with steps twice as long, counts against the same budget. Only a split measurement qualifies a split, and no run it measures is scored.
+
+**Split trace**:
+One run's state, exchange integrals, observations and event times on a grid, drawn from admission one accepted head at a time, each kept only when the extents of the step that made it name the run, the head before it and that head. It never rests on samples a caller supplies.
 
 **Bench integrator**:
 An explicit Heun integrator that serves only as a test bench, never as a solver core (rule 8).

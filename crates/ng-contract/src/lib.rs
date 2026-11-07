@@ -960,6 +960,73 @@
 //!     body.cardiovascular()
 //! }
 //! ```
+//! A split qualification is not a byte array.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn unsupported_split() -> EvaluationPlan<'static> { EvaluationPlan::QualifiedSplit(&[0; 32]) }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn split(qualification: &SplitQualification) -> EvaluationPlan<'_> {
+//!     EvaluationPlan::QualifiedSplit(qualification)
+//! }
+//! ```
+//! Only a measurement qualifies a split: no one writes a qualification by hand.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn forged(plan: Digest, model: ModelHash, packet: PacketHash, domain: Digest, assessment: SplitAssessment)
+//!     -> SplitQualification {
+//!     SplitQualification { plan, model, packet, domain, assessment }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn measured(measurement: SplitMeasurement) -> Result<SplitQualification, SplitRejected> {
+//!     measurement.qualify()
+//! }
+//! ```
+//! A trace's exchanges and firings come only from a step the contract settled on a head, so none can be invented
+//! or left out.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn forged(run: Digest, applied: Vec<InputId>, forward: Vec<Compensated>, reverse: Vec<Compensated>,
+//!     fired: Vec<Fired>) -> StepExtents {
+//!     StepExtents { run, start: todo!(), end: todo!(), applied, forward, reverse, fired }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn installed(head: &mut AcceptedHead, next: NextHead) -> StepExtents { head.install(next) }
+//! ```
+//! A head moves only by installing a step the contract settled on it, so no caller holds a head at a state no
+//! step reached.
+//! ```compile_fail,E0616
+//! use ng_contract::*;
+//! fn kept(head: &mut AcceptedHead, parts: ImageParts) { head.parts = parts; }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn read(head: &AcceptedHead) -> SimTime { head.parts().time }
+//! ```
+//! Nor settles a step by hand.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn settled(time: SimTime, state: Candidate, continuation: MethodHistory, dense: DenseSegment,
+//!     applied: AppliedInputs, excursions: Vec<ValidityExcursion>, extents: StepExtents) -> NextHead {
+//!     let after_breakpoint = false;
+//!     let (known, digest) = (0, todo!());
+//!     NextHead { time, state, continuation, dense, applied, known, digest, after_breakpoint, excursions, extents }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn settled(head: &AcceptedHead, body: &CompiledBody, identity: &RunIdentity, core: &dyn CoupledSolver)
+//!     -> Result<NextHead, TrialFailure> {
+//!     let (base, span_ns) = (Digest::of_canonical(b"a base"), core.next_step(head.view()));
+//!     let solve = |problem: &CoupledProblem<'_>, ticket: &StepTicket| core.solve(problem, ticket);
+//!     Ok(head.attempt(body, identity, base, Attempt::First { span_ns }, solve, |_| Ok(()))?.0)
+//! }
+//! ```
 
 extern crate alloc;
 
@@ -976,6 +1043,7 @@ mod elimination;
 mod evaluate;
 mod failure;
 mod graph;
+mod head;
 mod identity;
 mod image;
 mod landing;
@@ -992,6 +1060,7 @@ mod scheme;
 mod scope;
 mod seam;
 mod sources;
+mod split;
 mod state;
 mod system;
 mod time;
@@ -1007,6 +1076,7 @@ pub use compensated::*;
 pub use conservation::*;
 pub use elimination::Factors;
 pub use failure::*;
+pub use head::*;
 pub use identity::*;
 pub use image::*;
 pub use law::*;
@@ -1022,6 +1092,7 @@ pub use scheme::*;
 pub use scope::*;
 pub use seam::*;
 pub use sources::{ExcursionSide, RefusalSource, SourceId, ValidityExcursion};
+pub use split::*;
 pub use state::*;
 pub use system::*;
 pub use time::*;

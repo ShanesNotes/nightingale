@@ -272,6 +272,10 @@ impl AppliedInputs {
     pub fn digest(&self) -> Digest {
         self.canonical().digest()
     }
+    /// Every input applied so far, payload and time, in order: equal for two runs of one timeline.
+    pub(crate) fn chain(&self) -> Digest {
+        self.chain
+    }
     pub(crate) fn canonical(&self) -> Canonical {
         let Self {
             cursor,
@@ -459,6 +463,10 @@ impl PendingInputs {
     }
     pub fn advance(&mut self, past: AppliedInputs) {
         self.past = past;
+    }
+    /// Admission only adds to the timeline, so this moves exactly when a new input arrives.
+    pub(crate) fn known(&self) -> usize {
+        self.timeline.len()
     }
     pub fn applied(&self) -> &AppliedInputs {
         &self.past
