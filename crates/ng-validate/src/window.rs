@@ -28,7 +28,7 @@ pub struct WindowPolicy {
     refinement_scales: ErrorScales,
 }
 impl WindowPolicy {
-    fn of(longest: u64) -> Self {
+    pub(crate) fn of(longest: u64) -> Self {
         let scale = |value| Measure::<Dimensionless>::new(value).expect("a finite constant");
         Self {
             margin: 2,
@@ -69,6 +69,10 @@ impl WindowPolicy {
     /// So loose the estimate never refuses, and each refinement takes the step it names.
     pub fn refinement_scales(&self) -> ErrorScales {
         self.refinement_scales
+    }
+    pub(crate) fn finest(&self) -> ReferenceIntegrator {
+        let [.., finest] = references(self.refinements_ns, self.refinement_scales, self.landing_ns);
+        finest
     }
     fn floor(&self) -> Measure<Dimensionless> {
         Measure::new(self.distance_floor).expect("a finite constant")

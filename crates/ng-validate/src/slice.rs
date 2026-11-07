@@ -1,4 +1,7 @@
-use crate::{Admitted, MemoryStore, ReplayCase, admit_at};
+use crate::{
+    Admitted, CertificatePolicy, ExpectedDrift, MemoryStore, QuantityPolicy, ReplayCase, SlidingWindows,
+    admit_at,
+};
 use core::cell::RefCell;
 use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::*;
@@ -504,6 +507,44 @@ const POWER_SIZE: f64 = 1e6;
 /// 06:55, counted from the midnight the run's clock starts at, so a clock law reads the time of day from the head.
 pub fn anchor_moment() -> SimTime {
     SimTime::from_ns((6 * 3_600 + 55 * 60) * SECOND)
+}
+
+/// The seed `admit_at` admits with, so the arena's runs and the slice case's share a run identity.
+pub fn arena_seed() -> Seed {
+    Seed::new([1, 2, 3, 4])
+}
+
+const CLOSURE_RELATIVE: f64 = 1e-12;
+const SYNTHETIC_DRIFT: f64 = 1e4;
+
+pub(crate) fn arena_certificate(
+    body: &CompiledBody,
+    windows: SlidingWindows,
+) -> Result<CertificatePolicy, AdmissionError> {
+    fn limits<U: Substance>(quantity: QuantityId) -> Result<QuantityPolicy, AdmissionError> {
+        let relative = Measure::new(CLOSURE_RELATIVE)?;
+        QuantityPolicy::new(
+            quantity,
+            Measure::<U>::new(0.0)?,
+            relative,
+            Measure::new(SYNTHETIC_DRIFT)?,
+        )
+    }
+    let basis = body.conserved_basis();
+    let quantities = basis.ids().map(|quantity| match quantity.book() {
+        Book::Of(Species::Water) => limits::<Water>(quantity),
+        Book::Of(Species::Sodium) => limits::<Sodium>(quantity),
+        Book::Of(Species::Potassium) => limits::<Potassium>(quantity),
+        Book::Of(Species::Chloride) => limits::<Chloride>(quantity),
+        Book::Of(Species::Albumin) => limits::<Albumin>(quantity),
+        Book::Of(Species::Vasopressin) => limits::<Vasopressin>(quantity),
+        Book::Of(Species::Norepinephrine) => limits::<Norepinephrine>(quantity),
+        Book::Of(Species::Acetylcholine) => limits::<Acetylcholine>(quantity),
+        Book::Of(Species::Energy) => limits::<Energy>(quantity),
+        Book::Charge => QuantityPolicy::charge(quantity, Measure::new(0.0)?, Measure::new(CLOSURE_RELATIVE)?),
+    });
+    let quantities = quantities.collect::<Result<Vec<_>, _>>()?;
+    CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows)
 }
 
 /// One beat in 100 intervals: the cycle's period and the heart-rate anchor state one number twice, and `admit` fails

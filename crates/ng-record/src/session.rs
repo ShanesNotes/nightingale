@@ -231,3 +231,11 @@ impl FaultReport {
         &self.refusals
     }
 }
+impl core::fmt::Debug for FaultReport {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("FaultReport")
+            .field("fault", &self.fault)
+            .field("refusals", &self.refusals)
+            .finish_non_exhaustive()
+    }
+}

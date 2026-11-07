@@ -4,17 +4,6 @@ use ng_validate::*;
 
 const SECOND: u64 = 1_000_000_000;
 
-fn told(failure: &DayFailure) -> String {
-    match failure {
-        DayFailure::Initialization(failure) => format!("{failure:?}"),
-        DayFailure::Faulted(report) => format!("fault {:?}", report.fault()),
-        DayFailure::Checkpoint(error) => format!("{error:?}"),
-        DayFailure::Input(error) => format!("input {error:?}"),
-        DayFailure::MissingRow(kind) => format!("no row {kind:?}"),
-        DayFailure::MissingTransfer(edge) => format!("no sodium transfer {edge:?}"),
-    }
-}
-
 #[test]
 fn a_slice_run_checks_every_row_and_scores_none_before_a_window_closes() {
     let body = arena_body().expect("compiled");
@@ -31,9 +20,7 @@ fn a_slice_run_checks_every_row_and_scores_none_before_a_window_closes() {
         seed: Seed::new([1, 2, 3, 4]),
         plan: DayPlan::reference(NonZeroU32::MIN),
     };
-    let store = MemoryStore::default();
-    let report =
-        day_checks(&body, &core, spec, &store).unwrap_or_else(|failure| panic!("{}", told(&failure)));
+    let report = day_checks(&body, &core, spec).expect("the day checks run");
     let mut rows: Vec<u8> = report.checks().iter().map(DayCheck::row).collect();
     rows.dedup();
     assert_eq!(rows, (1..=17).collect::<Vec<u8>>());

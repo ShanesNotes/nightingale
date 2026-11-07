@@ -42,20 +42,8 @@ impl WallClock for Scripted {
     }
 }
 
-fn told(failure: &ArenaFailure) -> String {
-    match failure {
-        ArenaFailure::Initialization(failure) => format!("{failure:?}"),
-        ArenaFailure::Faulted { report, .. } => format!("{:?}", report.fault()),
-        ArenaFailure::Checkpoint(error) => format!("{error:?}"),
-        ArenaFailure::Observation(refusal) => format!("{refusal:?}"),
-        ArenaFailure::MissingThroughput => "missing throughput".into(),
-        ArenaFailure::RepeatDiffered { repeat } => format!("repeat {repeat} differed"),
-        ArenaFailure::MissingEvidence { part } => format!("missing {part:?} evidence"),
-    }
-}
-
 fn ran(result: Result<ArenaRun<'_>, ArenaFailure>) -> ArenaRun<'_> {
-    result.unwrap_or_else(|failure| panic!("{}", told(&failure)))
+    result.expect("the arena runs")
 }
 
 #[test]
@@ -585,7 +573,7 @@ fn a_repeat_that_refused_for_another_reason_differed() {
         assert_eq!(core.refused.get(), 2);
         outcome.map(|arena| arena.into_evidence())
     };
-    let same = repeated(false).unwrap_or_else(|failure| panic!("{}", told(&failure)));
+    let same = repeated(false).expect("both repeats do the same work");
     assert_eq!(same.health().refusals(), [(NumericalRefusal::IterationLimit, 1)]);
     assert!(matches!(
         repeated(true),

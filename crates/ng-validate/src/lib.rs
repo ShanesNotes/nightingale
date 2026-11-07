@@ -1,6 +1,6 @@
 //! Synthetic fixtures, the slice's composition root and held stand-ins, the admission solve, the reference
-//! integrator, the accuracy gate, the certificate, the replay gates, the arena run, its score, the split gate and the
-//! day checks.
+//! integrator, the accuracy gate, the certificate, the replay gates, the arena run, the split gate, the day checks, and
+//! the arena that scores a core.
 //!
 //! # Type rules
 //!
@@ -182,30 +182,58 @@
 //! ```
 //! ```
 //! use ng_contract::*;
+//! use ng_validate::*;
+//! fn checked(body: &CompiledBody, core: &dyn CoupledSolver, spec: DaySpec) -> Result<DayReport, DayFailure> {
+//!     day_checks(body, core, spec)
+//! }
+//! ```
+//! A score comes only from `Arena::score`, so every part it holds came from a gate the arena ran.
+//! ```compile_fail,E0451
+//! use ng_contract::DeclaredResolution;
+//! use ng_validate::*;
+//! fn assembled(protocol: ArenaProtocol, second_policy: DeclaredResolution, evidence: RunEvidence,
+//!     certificate: Certificate, accuracy: AccuracyEvidence, replay: ReplayEvidence, day: DayReport) -> ArenaScore {
+//!     ArenaScore {
+//!         protocol,
+//!         second_policy,
+//!         evidence: Ok(evidence),
+//!         certificate: Ok(certificate),
+//!         accuracy: Ok(accuracy),
+//!         replay: Ok(replay),
+//!         day: Ok(day),
+//!     }
+//! }
+//! ```
+//! ```
+//! use ng_contract::CoupledSolver;
 //! use ng_record::HistoryStore;
 //! use ng_validate::*;
-//! fn checked<'m>(body: &'m CompiledBody, core: &'m dyn CoupledSolver, spec: DaySpec,
-//!     store: &'m dyn HistoryStore) -> Result<DayReport, DayFailure> {
-//!     day_checks(body, core, spec, store)
+//! fn scored<C: CoupledSolver + 'static>(arena: &Arena, cores: impl Fn() -> C, second_policy: impl Fn() -> C,
+//!     clock: &dyn WallClock, store: &dyn HistoryStore) -> Result<ArenaScore, ArenaFailure> {
+//!     arena.score(cores, second_policy, clock, store)
 //! }
 //! ```
-//! A score comes only from `score`, so every score passed its check that each part is of one run.
-//! ```compile_fail,E0451
+//! The second policy is the same core under another step policy, so a score cannot hold the step-policy evidence of
+//! another core.
+//! ```compile_fail,E0308
+//! use ng_record::HistoryStore;
 //! use ng_validate::*;
-//! fn assembled(certificate: Certificate, accuracy: AccuracyEvidence, evidence: RunEvidence,
-//!     replay: ReplayEvidence) -> ArenaScore {
-//!     ArenaScore { certificate, accuracy, evidence, replay }
+//! fn mixed(arena: &Arena, clock: &dyn WallClock, store: &dyn HistoryStore) -> Result<ArenaScore, ArenaFailure> {
+//!     arena.score(|| ng_solver::Core::new(10_000_000), || ReferenceIntegrator::new(5_000_000), clock, store)
 //! }
 //! ```
 //! ```
+//! use ng_record::HistoryStore;
 //! use ng_validate::*;
-//! fn scored(certificate: Certificate, accuracy: AccuracyEvidence, evidence: RunEvidence,
-//!     replay: ReplayEvidence) -> Result<ArenaScore, ArenaFailure> {
-//!     score(certificate, accuracy, evidence, replay)
+//! fn same(arena: &Arena, clock: &dyn WallClock, store: &dyn HistoryStore) -> Result<ArenaScore, ArenaFailure> {
+//!     arena.score(|| ng_solver::Core::new(10_000_000), || ng_solver::Core::new(5_000_000), clock, store)
 //! }
 //! ```
 
+extern crate alloc;
+
 mod accuracy;
+mod arena;
 mod certificate;
 mod day;
 mod fixture;
@@ -221,6 +249,7 @@ mod window;
 pub use accuracy::{
     AccuracyCase, AccuracyEvidence, AccuracyFailure, AccuracyPolicy, accuracy, observed_order,
 };
+pub use arena::{Arena, ArenaProtocol};
 pub use certificate::{
     Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, ExpectedDrift, HeldSupport,
     QuantityPolicy, QuantityResult, SlidingWindows, certify,
@@ -238,10 +267,10 @@ pub use replay::{
 pub use run::{
     ArenaFailure, ArenaRun, ArenaSpec, NumericalHealth, RunEvidence, ThroughputEvidence, run, run_until,
 };
-pub use score::{ArenaScore, ScorePart, score};
+pub use score::{ArenaScore, ScorePart};
 pub use slice::{
     SliceCase, anchor_moment, arena_anatomy, arena_body, arena_lens, arena_organs, arena_packet,
-    arena_schema, hold_outside_slice,
+    arena_schema, arena_seed, hold_outside_slice,
 };
 pub use split::{SplitFailure, draw_split_trace, split_gate};
 pub use window::{Compared, SliceWindow, WindowPolicy};

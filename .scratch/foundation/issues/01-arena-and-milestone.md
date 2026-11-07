@@ -19,3 +19,7 @@ Rules for the arena seats:
 - The milestone build reads [pulse 0006](https://github.com/ShanesNotes/nightingale-pulse/blob/bdc01c567f6cadacbd96728c0600a2e052882a59/docs/decisions/0006-first-milestone-stable-healthy-body.md)'s defaults and section 1e choices by permalink, once every anchor passes that check. They enter the repo only through a reviewed packet.
 
 Source: the split plan's map ticket, from the consolidated vision's section B, steps 3 to 6.
+
+## Comments
+
+From native-contract 24: a seat calls `Arena::new(ArenaProtocol::full())?.score(cores, second_policy, clock, store)` and gets one `ArenaScore` whose run evidence (throughput and numerical health), certificate, accuracy, replay and day checks are each their own result. The seat contract is `~/lanes/briefs/ng-arena-seat-contract.md`. Three things stand before step 2. The crate table names only `ng-solver`, and 05-seam refuses any other crate or dependency, so `ng-solver-a` and `ng-solver-b` need their rows, and `ng-validate` may take both as dev-dependencies. The certificate fails every core on energy drift past a few seconds: ticket 14's synthetic 1e4 a unit against about 800 a second (124,246 over 155.5 s, measured), so 24 h windows need a synthetic energy limit of their own. And `full()` writes about 1,366 GB of link log on today's bench (683 GB a repeat) and takes about 40.5 h on the tower by arithmetic, where the tower had 322 GB free. nightingale#38 and nightingale#39 do not block: score every seat on one pinned commit, and rescore all of them if either lands mid-arena.

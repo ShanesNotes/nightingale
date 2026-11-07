@@ -1,4 +1,5 @@
 use crate::ReferenceIntegrator;
+use alloc::collections::BTreeMap;
 use core::cell::RefCell;
 use core::num::NonZeroU64;
 use ng_contract::{
@@ -595,23 +596,18 @@ fn pace_gate(
     })
 }
 
-/// Every link in memory, sorted by seal, for tests and short runs. A long run's host keeps its links outside
-/// the process.
+/// Every link in memory, for tests and short runs. A long run's host keeps its links outside the process.
 #[derive(Default)]
 pub struct MemoryStore {
-    links: RefCell<Vec<(Digest, Vec<u8>)>>,
+    links: RefCell<BTreeMap<Digest, Vec<u8>>>,
 }
 impl HistoryStore for MemoryStore {
     fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
-        let links = self.links.borrow();
-        let at = links.binary_search_by_key(seal, |link| link.0).ok()?;
-        Some(links[at].1.clone())
+        self.links.borrow().get(seal).cloned()
     }
     fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
         let mut links = self.links.borrow_mut();
-        if let Err(at) = links.binary_search_by_key(&seal, |link| link.0) {
-            links.insert(at, (seal, link.to_vec()));
-        }
+        links.entry(seal).or_insert_with(|| link.to_vec());
         Ok(())
     }
 }

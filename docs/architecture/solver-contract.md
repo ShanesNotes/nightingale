@@ -72,23 +72,17 @@ fn after_fault<'m>(stopped: Session<'m, Faulted>, earlier: &Checkpoint, fork: Br
 ### (c) The arena scores a 48 h run
 
 ```rust
-use solver_contract_sketch::ng_contract::*;
+use solver_contract_sketch::ng_contract::CoupledSolver;
 use solver_contract_sketch::ng_record::HistoryStore;
 use solver_contract_sketch::ng_validate::*;
 
-fn measure(body: &CompiledBody, solver: &dyn CoupledSolver, cores: &dyn CoreFactory,
-    spec: ArenaSpec, policy: &CertificatePolicy, cases: &AccuracyPolicy, store: &dyn HistoryStore,
-    clock: &dyn WallClock) -> Result<ArenaScore, ArenaFailure> {
-    let checked = accuracy(solver, cases).map_err(ArenaFailure::Accuracy)?;
-    let replay = replay_gates(body, cores, &spec)?;
-    let run = run(body, solver, spec, clock, store)?;
-    let certificate = certify(&run.session().conservation(), policy)
-        .map_err(ArenaFailure::Certificate)?;
-    score(certificate, checked, run.into_evidence(), replay)
+fn measure<C: CoupledSolver + 'static>(cores: impl Fn() -> C, second_policy: impl Fn() -> C,
+    clock: &dyn WallClock, store: &dyn HistoryStore) -> Result<ArenaScore, ArenaFailure> {
+    Arena::new(ArenaProtocol::full())?.score(cores, second_policy, clock, store)
 }
 ```
 
-`ArenaSpec` accepts only a `ParameterPacket<SyntheticFixture>`, so the arena is nonclinical by type. `accuracy` runs the same core on manufactured cases with known answers and against the reference integrator, because a step can close every ledger and still be wrong; a score needs its evidence. `certify` takes one `ConservationView` lent by one session and policy data; it cannot take a vital, a waveform or two histories. Wall time, read from a clock the host passes in, and replay evidence are collected beside the record, never inside the certificate. Both cores receive the same compiled body, fixture packet, boundary timeline and protocol.
+`Arena::new` builds once what every core receives: the slice, its fixture packet, the day plan's boundary timeline and every policy, so a core brings only its factory and the same core under a second step policy, declaring the protocol's error scales and minimum interval. `ArenaSpec` accepts only a `ParameterPacket<SyntheticFixture>`, so the arena is nonclinical by type. `accuracy` runs the same core on manufactured cases with known answers and against the reference integrator, because a step can close every ledger and still be wrong; a score needs its evidence. `certify` takes one `ConservationView` lent by one session and policy data; it cannot take a vital, a waveform or two histories. Wall time, read from a clock the host passes in, and replay evidence are collected beside the record, never inside the certificate. Both cores receive the same compiled body, fixture packet, boundary timeline and protocol. The score keeps the certificate, accuracy, replay, numerical health, throughput and day checks apart, each its own result held against the timed run.
 
 ## Shape
 
@@ -353,7 +347,7 @@ Gates for each core:
 - **Step policy.** Two step policies of a core each fire the same events as `ReferenceIntegrator`, by stream and ordinal, within a declared distance. A policy is measured against the reference and not the other, because a core that biases every step alike agrees with itself, and two policies on one grid are missing evidence.
 - **Late admission (the causal step rule).** Every timeline input admitted through `Session::enqueue`, at the last head a run can still take it, gives the same accepted state, ledger, event and observer bits as the same input known at admission. The gate reads each arrival off a run that does not hold that input, because a fence in a run that knows it comes from what only that run showed. It reads only heads and earliest stamps, so it needs no knowledge of the core. An input with no head after admission to arrive at, no step left to apply it, or already held by the start that should withhold it fails the gate, because a gate that tests nothing passes nothing.
 - **Rewind.** A branch rewound in the same process after the parent ran ahead, from two neighbouring revisions, matches the same branch loaded into a freshly built core and the parent's own course, so an in-game retry equals a loaded save.
-- **Evidence binding.** `replay_gates` runs every replay gate, building each fresh core from a `CoreFactory`, and returns evidence bound to the run's identity. `score` needs the certificate, the accuracy evidence, the run evidence and that replay evidence; evidence from another run, or a gate that did not run, is `ArenaFailure::MissingEvidence`, never a pass.
+- **Evidence binding.** `replay_gates` runs every replay gate, building each fresh core from a `CoreFactory`, and returns evidence bound to the run's identity. `Arena::score` holds the certificate, the accuracy evidence, the run evidence, that replay evidence and the day checks, each against the timed run; evidence from another run, or a gate that did not run, is `ArenaFailure::MissingEvidence`, never a pass.
 - **Non-perturbation.** Physiology bits are identical with observers attached, detached or changed, and a new lens applied to a finished replay gives the same physiology with new observations. A run whose observer read no value is missing evidence.
 - **Accuracy.** Every `AccuracyCase` within the `AccuracyPolicy`: the manufactured two-reservoir case with positive inventories, a nonzero initial difference and a stepped exterior inflow, against its closed form; drain and refill to the admissible bound; zero flow and restore; controlled removal with every removed amount in its receipt; evaluation independence (identical residual and Jacobian bits for one stage before and after refused evaluations); and windows of the slice (admission with the first posture change and meal, sleep onset, the second day's waking) against the contract's `ReferenceIntegrator`, fully coupled backward Euler at three refinements, which give the reference's own error and the core's observed order. Metrics cover states, exchanges, outputs and event times. A core is never compared with itself.
 - **Splits.** Solver-B passes the full split metric with traces drawn from accepted history, against the reference integrator. Runs under measurement are never scored.
@@ -532,7 +526,7 @@ Rejected: rejecting algebraic loops, and a quasi-steady reflex. An i64 ledger wi
 - set points only for `Sensed` dimensions, and no guard on a set point;
 - `ParameterPacket::pinned` removed, with `sampled` and `authored` reading population records from the packet's own manifest;
 - typed absence on observations and an observer `resume`;
-- `CoreFactory`, `replay_gates`, replay evidence bound to the run's identity and required by `score`, and `ArenaFailure::MissingEvidence`.
+- `CoreFactory`, `replay_gates`, replay evidence bound to the run's identity and required by the score, and `ArenaFailure::MissingEvidence`.
 
 **Repairs the judge found in A, made:** no core sees the timeline at all, because `CoupledProblem::ticket` takes the core's intrinsic end and clips it itself (the judge showed that A's start-only breakpoint query still let a core aim at the next input); `AnchorStatistic` now reaches the anchors through `over`; the observer has a restore path.
 
