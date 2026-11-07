@@ -166,7 +166,8 @@ impl ErrorScales {
             relative: relative.value(),
         })
     }
-    pub(crate) fn at(self, value: f64, size: f64) -> f64 {
+    /// What these scales allow a row at `value`, in the row's own unit, given its natural size.
+    pub fn at(self, value: f64, size: f64) -> f64 {
         self.absolute * size + self.relative * value.abs()
     }
 }
@@ -257,7 +258,7 @@ impl DeclaredResolution {
     pub(crate) fn scheme(&self) -> StageScheme {
         self.scheme
     }
-    pub(crate) fn scales(&self) -> &ErrorScales {
+    pub fn scales(&self) -> &ErrorScales {
         &self.scales
     }
 }

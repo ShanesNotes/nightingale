@@ -476,7 +476,7 @@ pub(super) fn judge(plan: &DayPlan, fed: &DayTrace, controls: &[(usize, DayTrace
             let absent = |&(quantity, _): &(DayQuantity, Option<Measured>)| DayCheck {
                 row,
                 quantity,
-                at: None,
+                occurrence: None,
                 verdict: Verdict::NotAvailableYet(why),
                 shown: Shown::default(),
             };
@@ -505,7 +505,7 @@ pub(super) fn judge(plan: &DayPlan, fed: &DayTrace, controls: &[(usize, DayTrace
                 checks.push(DayCheck {
                     row,
                     quantity,
-                    at: Some(occurrence.at),
+                    occurrence: Some((occurrence.day, occurrence.at)),
                     verdict,
                     shown,
                 });

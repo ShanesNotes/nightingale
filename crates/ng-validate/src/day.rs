@@ -312,7 +312,8 @@ pub enum Unavailable {
 pub struct DayCheck {
     row: &'static Row,
     quantity: DayQuantity,
-    at: Option<SimTime>,
+    /// The occurrence's day and instant.
+    occurrence: Option<(NonZeroU32, SimTime)>,
     verdict: Verdict,
     shown: Shown,
 }
@@ -325,7 +326,7 @@ impl DayCheck {
     }
     /// The occurrence's instant, or `None` when the run holds none.
     pub fn at(&self) -> Option<SimTime> {
-        self.at
+        self.occurrence.map(|(_, at)| at)
     }
     pub fn verdict(&self) -> Verdict {
         self.verdict
@@ -524,7 +525,9 @@ impl DayCheck {
             (Unavailable::Unscored, Scoring::Unscored(_, reason), _) => write!(f, "unscored, {reason}"),
             (Unavailable::Unscored, ..) => write!(f, "unscored"),
             (Unavailable::NoPayload, ..) => write!(f, "no payload carries sleep"),
-            (Unavailable::NotReached, ..) if self.at.is_some() => write!(f, "its inputs did not all apply"),
+            (Unavailable::NotReached, ..) if self.occurrence.is_some() => {
+                write!(f, "its inputs did not all apply")
+            }
             (Unavailable::NotReached, ..) => write!(f, "not reached"),
             (Unavailable::NotCovered, _, Some(Uncovered::EndsBefore(end))) => {
                 write!(f, "the run ends before {}", When(end))
@@ -588,8 +591,8 @@ impl fmt::Display for Line<'_> {
             quantity_words(check.quantity),
             event_words(row.event)
         )?;
-        match check.at {
-            Some(at) => write!(f, " day {} {}: ", at.nanoseconds() / DAY + 1, Clock(at))?,
+        match check.occurrence {
+            Some((day, at)) => write!(f, " day {day} {}: ", Clock(at))?,
             None => write!(f, ", none in the run: ")?,
         }
         match check.verdict {

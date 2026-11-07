@@ -1,10 +1,15 @@
 use super::judge::judge;
 use super::table::{Course, Direction, Lean, Measured, ROWS, Row, Scoring};
-use super::trace::{Beat, DayTrace, SERIES, Sample, Series};
+use super::trace::{
+    Beat, DayTrace, Fold, READS, Read, Reading, Readings, SERIES, Sample, Series, blood_spaces,
+};
 use super::{DAY, DayCheck, DayPlan, DayQuantity, DayReport, EventKind, HOUR, MINUTE, Miss, SECOND};
 use super::{Unavailable, Verdict};
 use core::num::NonZeroU32;
-use ng_contract::{Digest, SimTime};
+use ng_contract::{
+    AnatomyBuilder, CapillaryBed, Digest, Dimensionless, ErrorScales, InputId, Measure, Position, SimTime,
+    SiteClass, SiteId, Space, VesselSegment,
+};
 
 const ORDER: [Series; SERIES] = [
     Series::HeartRate,
@@ -709,4 +714,168 @@ fn the_report_shows_a_line_per_check_with_its_reason() {
         .iter()
         .filter(|check| check.quantity() == DayQuantity::Vasopressin);
     assert_eq!(quantities.count(), 1);
+}
+
+fn scales() -> ErrorScales {
+    let unit = |value| Measure::<Dimensionless>::new(value).expect("finite");
+    ErrorScales::uniform(unit(0.5), unit(0.25)).expect("positive")
+}
+
+/// One step's nine samples, worked from the recipes with absolute scale 0.5 and relative scale 0.25.
+fn by_hand(reading: &Reading, sizes: &Reading) -> [Sample; SERIES] {
+    let value = |read: Read| reading[read as usize];
+    let allowed = |read: Read| 0.5 * sizes[read as usize] + 0.25 * value(read).abs();
+    let own = |read: Read| Sample {
+        value: value(read),
+        floor: allowed(read),
+    };
+    let (water, water_floor) = (value(Read::Water), allowed(Read::Water));
+    let per_water = |top: f64, top_floor: f64| Sample {
+        value: top / water,
+        floor: top_floor / water.abs() + top.abs() * water_floor / (water * water),
+    };
+    let ions = [Read::Sodium, Read::Potassium, Read::Chloride];
+    let (flow, sodium, duct_water) = (
+        value(Read::Tubular),
+        value(Read::DuctSodium),
+        value(Read::DuctWater),
+    );
+    let concentration = sodium / duct_water;
+    let concentration_floor = allowed(Read::DuctSodium) / duct_water.abs()
+        + sodium.abs() * allowed(Read::DuctWater) / (duct_water * duct_water);
+    [
+        own(Read::Rate),
+        own(Read::Pressure),
+        own(Read::Aortic),
+        own(Read::Water),
+        per_water(value(Read::Albumin), allowed(Read::Albumin)),
+        per_water(value(Read::Sodium), allowed(Read::Sodium)),
+        per_water(
+            ions.iter().map(|&read| value(read)).sum(),
+            ions.iter().map(|&read| allowed(read)).sum(),
+        ),
+        Sample {
+            value: flow * concentration,
+            floor: concentration.abs() * allowed(Read::Tubular) + flow.abs() * concentration_floor,
+        },
+        own(Read::Tubular),
+    ]
+}
+
+fn close(found: f64, expected: f64) -> bool {
+    (found - expected).abs() <= 1e-12 * expected.abs()
+}
+
+#[test]
+fn the_fold_keeps_whole_beats_from_edge_to_edge_with_step_length_weighted_means() {
+    let lengths: [u64; 7] = [100, 300, 200, 100, 400, 200, 300].map(|ms| ms * 1_000_000);
+    let phases = [0.7, 0.8, 0.1, 0.4, 0.9, 0.3, 0.6];
+    let reading =
+        |step: usize| -> Reading { core::array::from_fn(|read| (step + 1) as f64 * (read + 2) as f64) };
+    let sizes: Reading = core::array::from_fn(|read| (read + 1) as f64);
+    let start = clock(1, 6, 55);
+    let ends: Vec<SimTime> = (lengths.iter())
+        .scan(start.nanoseconds(), |at, length| {
+            *at += length;
+            Some(SimTime::from_ns(*at))
+        })
+        .collect();
+    let mut fold = Fold::new(&plan(), scales(), sizes, start, 0.9);
+    for step in 0..lengths.len() {
+        fold.step(ends[step], lengths[step], phases[step], &reading(step));
+    }
+    let synthetic = Digest::of_canonical(b"a synthetic run");
+    let trace = fold.finish(synthetic, synthetic, ends[6]);
+    let spans: Vec<(SimTime, SimTime)> = trace.beats.iter().map(|beat| (beat.start, beat.end)).collect();
+    assert_eq!(spans, [(ends[0], ends[2]), (ends[2], ends[5])]);
+    for (beat, steps) in trace.beats.iter().zip([1..3, 3..6]) {
+        let over = |series: usize, pick: fn(Sample) -> f64| -> f64 {
+            let each = steps
+                .clone()
+                .map(|step| pick(by_hand(&reading(step), &sizes)[series]) * lengths[step] as f64);
+            each.sum()
+        };
+        let weight: f64 = steps.clone().map(|step| lengths[step] as f64).sum();
+        for (series, found) in beat.means.iter().enumerate() {
+            let (value, floor) = (
+                over(series, |sample| sample.value),
+                over(series, |sample| sample.floor),
+            );
+            assert!(
+                close(found.value, value / weight) && close(found.floor, floor / weight),
+                "{:?}: {found:?}",
+                ORDER[series]
+            );
+        }
+        let aortic = Series::AorticFlow as usize;
+        let stroke = beat.reading(Measured::StrokeVolume);
+        let integral = |pick| over(aortic, pick) / SECOND as f64;
+        assert!(close(stroke.value, integral(|sample| sample.value)), "{stroke:?}");
+        assert!(close(stroke.floor, integral(|sample| sample.floor)), "{stroke:?}");
+        assert_eq!(beat.reading(Measured::CardiacOutput), beat.means[aortic]);
+    }
+}
+
+#[test]
+fn an_occurrence_applies_once_every_input_has() {
+    let plan = DayPlan::reference(NonZeroU32::MIN);
+    let ids = |index: usize| -> Vec<InputId> {
+        plan.occurrences[index]
+            .inputs
+            .iter()
+            .map(|input| input.id)
+            .collect()
+    };
+    let (sit_up, meal) = (ids(0), ids(1));
+    let applied = |receipts: &[&[InputId]]| {
+        let mut fold = Fold::new(&plan, scales(), [1.0; READS], clock(1, 6, 55), 0.0);
+        receipts.iter().for_each(|ids| fold.applied(ids));
+        let synthetic = Digest::of_canonical(b"a synthetic run");
+        fold.finish(synthetic, synthetic, clock(1, 7, 1)).applied
+    };
+    let partly = applied(&[&sit_up[..20], &meal[..3]]);
+    assert_eq!(partly, [false, false, false, false, false, true, false]);
+    let all = applied(&[&sit_up[..20], &[], &meal, &sit_up[20..]]);
+    assert_eq!(all, [true, true, false, false, false, true, false]);
+}
+
+fn site<C: SiteClass>(key: &'static str) -> SiteId {
+    let origin = || Measure::new(0.0).expect("finite");
+    let at = Position::new(origin(), origin(), origin());
+    AnatomyBuilder::new().site::<C>(key, at).id()
+}
+
+#[test]
+fn the_blood_spaces_are_the_arena_hosts_vessel_lumens_and_bed_plasma() {
+    let body = crate::arena_body().expect("compiled");
+    let mut found = blood_spaces(&body);
+    found.sort_unstable();
+    let vessels = [
+        "right atrium",
+        "right ventricle",
+        "pulmonary artery",
+        "pulmonary vein",
+        "left atrium",
+        "left ventricle",
+        "systemic arteries",
+        "central veins",
+        "splanchnic veins",
+        "leg veins",
+    ];
+    let beds = [
+        "pulmonary bed",
+        "splanchnic bed",
+        "leg bed",
+        "glomerular bed",
+        "peritubular bed",
+    ];
+    let lumens = vessels.map(|key| (site::<VesselSegment>(key), Space::Lumen));
+    let plasma = beds.map(|key| (site::<CapillaryBed>(key), Space::Plasma));
+    let mut expected: Vec<(SiteId, Space)> = lumens.into_iter().chain(plasma).collect();
+    expected.sort_unstable();
+    assert_eq!(found, expected);
+    assert!(
+        Readings::bind(&body).is_ok(),
+        "the arena body has every row the trace reads"
+    );
 }
