@@ -66,6 +66,9 @@ The accepted state at one step boundary, held with its digest. Only installing a
 **History store**:
 Host storage for the links of the seal's chain, addressed by seal and trusted for nothing: a session hands it each link as its step is accepted, and a load checks each link against the seal that asked for it.
 
+**Compact link**:
+A link as a history store may keep it when it follows the link kept before it: its image, its end time and each curve's end value. Its previous seal, start time and start values are that link's seal and ends, so expanding it against that link gives back the exact bytes the store was handed. Any other link is kept whole.
+
 **Scope stage**:
 One of the five stages of scope in section 1, built bottom up. Not a solver stage, which is a numerical sub-step inside one step.
 

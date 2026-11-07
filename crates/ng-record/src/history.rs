@@ -173,6 +173,93 @@ fn linked(hash: RecordHash, previous: Digest, revision: u64, image: Digest, ledg
 }
 
 const LINK_HEAD: usize = 2 * size_of::<Digest>();
+const INSTANT: usize = size_of::<u64>();
+const LINK_VALUES: usize = LINK_HEAD + 2 * INSTANT;
+const VALUE: usize = size_of::<[u64; 2]>();
+const WHOLE: u8 = 0;
+const ENDS: u8 = 1;
+
+fn values(bytes: &[u8]) -> Option<&[[u8; VALUE]]> {
+    let (values, rest) = bytes.as_chunks::<VALUE>();
+    rest.is_empty().then_some(values)
+}
+
+fn ends(compact: &[u8]) -> Option<(&[u8], Vec<&[u8; VALUE]>)> {
+    let (&form, rest) = compact.split_first()?;
+    match form {
+        WHOLE => {
+            let pairs = values(rest.get(LINK_VALUES..)?)?;
+            let ends = pairs.iter().skip(1).step_by(2).collect();
+            (pairs.len() % 2 == 0).then_some((rest.get(LINK_HEAD + INSTANT..LINK_VALUES)?, ends))
+        }
+        ENDS => {
+            let rest = rest.get(size_of::<Digest>()..)?;
+            let (time, ends) = rest.split_at_checked(INSTANT)?;
+            Some((time, values(ends)?.iter().collect()))
+        }
+        _ => None,
+    }
+}
+
+/// A compact link and the seal it was kept under.
+#[derive(Clone, Copy)]
+pub struct CompactLink<'b> {
+    pub seal: Digest,
+    pub bytes: &'b [u8],
+}
+
+/// A link as a history store may keep it. When `link` follows `previous`, only its image, its end time and each
+/// curve's end value are kept; any other link is kept whole.
+pub fn compact(previous: Option<CompactLink<'_>>, link: &[u8]) -> Vec<u8> {
+    let pairs = link
+        .get(LINK_VALUES..)
+        .and_then(values)
+        .filter(|pairs| pairs.len() % 2 == 0);
+    let follows = previous.zip(pairs).is_some_and(|(previous, pairs)| {
+        ends(previous.bytes).is_some_and(|(time, ends)| {
+            link.get(..size_of::<Digest>()) == Some(previous.seal.as_bytes())
+                && link.get(LINK_HEAD..LINK_HEAD + INSTANT) == Some(time)
+                && pairs.iter().step_by(2).eq(ends)
+        })
+    });
+    let (Some(pairs), true) = (pairs, follows) else {
+        let mut whole = vec![WHOLE];
+        whole.extend_from_slice(link);
+        return whole;
+    };
+    let mut kept = vec![ENDS];
+    kept.extend_from_slice(&link[size_of::<Digest>()..LINK_HEAD]);
+    kept.extend_from_slice(&link[LINK_HEAD + INSTANT..LINK_VALUES]);
+    for end in pairs.iter().skip(1).step_by(2) {
+        kept.extend_from_slice(end);
+    }
+    kept
+}
+
+/// The exact link `compact` was given, from its compact form and the same `previous`. `None` when `compact`
+/// is not a compact link or needs a `previous` it does not match in shape.
+pub fn expand(previous: Option<CompactLink<'_>>, compact: &[u8]) -> Option<Vec<u8>> {
+    let (&form, rest) = compact.split_first()?;
+    match form {
+        WHOLE => return Some(rest.to_vec()),
+        ENDS => {}
+        _ => return None,
+    }
+    let previous = previous?;
+    let (start, starts) = ends(previous.bytes)?;
+    let (image, rest) = rest.split_at_checked(size_of::<Digest>())?;
+    let (end, held) = rest.split_at_checked(INSTANT)?;
+    let mut values = values(held)?.iter();
+    let mut link = previous.seal.as_bytes().to_vec();
+    for part in [image, start, end] {
+        link.extend_from_slice(part);
+    }
+    for start in starts {
+        link.extend_from_slice(start);
+        link.extend_from_slice(values.next()?);
+    }
+    values.next().is_none().then_some(link)
+}
 
 pub(crate) struct Link {
     chunk: LedgerChunk,

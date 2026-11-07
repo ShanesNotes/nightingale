@@ -482,3 +482,10 @@ path = "crates/ng-validate/src/arena.rs"
 old = '''let day = self.day(cores);'''
 new = '''let day = (evidence.as_ref().map_err(|_| ArenaFailure::MissingEvidence { part: ScorePart::Day })).and_then(|_| self.day(cores));'''
 test = "-p ng-validate --test arena a_clock_with_no_reading_leaves_the_day_checks_and_accuracy_standing"
+
+[[mutant]]
+name = "expand-flips-a-bit"
+path = "crates/ng-record/src/history.rs"
+old = '''values.next().is_none().then_some(link)'''
+new = '''values.next().is_none().then_some(link).map(|mut link| { let last = link.len() - 1; link[last] ^= 1; link })'''
+test = "-p ng-validate --test history a_store_that_keeps_end_values_only_gives_back_every_link_of_a_slice_run"
