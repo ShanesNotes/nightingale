@@ -588,3 +588,10 @@ The sum of a fixed set of pools of one species that a generative physiology mode
 **Beat edge**:
 The accepted step end at which the rhythm's phase resets, where a guard's landing puts it. A teacher run reads its state and ledger at beat edges, where both are exact.
 _Avoid_: cycle boundary
+
+**Run spec**:
+The canonical text that tells one teacher run its solver core, its end, its posture events, the closed-loop rule it follows if any, and its audit variant. Its spec id, the digest of the text and the capture version, names the run's directory; the run identity in its summary names what the engine ran.
+_Avoid_: run id
+
+**Beat reading**:
+One beat of a teacher run, which the driver computes once: the heart rate as one over the beat's length, the beat means of arterial pressure and filtration, and the stroke, the net water the aortic valve passed over the beat.
