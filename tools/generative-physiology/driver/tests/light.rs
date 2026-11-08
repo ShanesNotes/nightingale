@@ -1,6 +1,6 @@
 use gp_driver::{
-    BeatReading, CAPTURE_VERSION, Catalogue, NpyWriter, PostureEvent, RunSpec, SpecError, Stamp, Table,
-    digest_of_hex, hex,
+    BeatReading, CAPTURE_VERSION, Catalogue, MemoryCap, NpyWriter, Options, PostureEvent, RunSpec, SpecError,
+    Stamp, Table, TeachError, Teacher, digest_of_hex, hex,
 };
 use ng_contract::{Digest, InputId, Legs, RowKind, SimTime};
 use ng_validate::{anchor_moment, arena_body};
@@ -334,4 +334,26 @@ fn the_catalogue_covers_every_column_of_the_compiled_arena_body() {
         catalogue.quantities().len(),
         body.conserved_basis().combinations().len()
     );
+}
+
+#[test]
+fn a_late_lead_shorter_than_one_step_is_refused_before_any_directory() {
+    let text = "gp-run 1\ncore ng-solver cap-ms 10\nend-ms 3100\nevent at-ms 3000 trunk 1000 legs standing\nvariant \
+                late lead-ms 1\n";
+    let spec = RunSpec::parse(text).expect("canonical");
+    let teacher = Teacher::new(spec.core()).expect("a teacher");
+    let options = Options {
+        cap: MemoryCap::gb(8),
+        source_commit: "unrecorded".to_string(),
+    };
+    let out = scratch("short-lead");
+    let refused = teacher.run(&spec, &options, &out);
+    let longest = arena_body().expect("compiled").longest_step_ns();
+    assert!(
+        matches!(&refused, Err(TeachError::ShortLead { lead_ns: 1_000_000, longest_step_ns })
+            if *longest_step_ns == longest),
+        "{refused:?}"
+    );
+    let written = fs::read_dir(&out).expect("the out directory").count();
+    assert_eq!(written, 0, "nothing written for {}", spec.id());
 }

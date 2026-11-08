@@ -83,6 +83,10 @@ pub enum TeachError {
         error: Box<AdmissionError>,
     },
     Held(PathBuf),
+    ShortLead {
+        lead_ns: u64,
+        longest_step_ns: u64,
+    },
     Loop,
     OtherCore,
     NoCheckpoint,
@@ -99,6 +103,13 @@ impl fmt::Display for TeachError {
             Self::Spec(error) => write!(f, "spec: {error}"),
             Self::Enqueue { event, error } => write!(f, "event {event} refused: {error:?}"),
             Self::Held(path) => write!(f, "a live run holds {}", path.display()),
+            Self::ShortLead {
+                lead_ns,
+                longest_step_ns,
+            } => write!(
+                f,
+                "a late lead of {lead_ns} ns is shorter than the longest step, {longest_step_ns} ns"
+            ),
             Self::Loop => write!(f, "run takes a spec without closed-loop, interact one with it"),
             Self::OtherCore => write!(f, "the spec names another core than the teacher's"),
             Self::NoCheckpoint => write!(f, "the run ended without its checkpoint"),
