@@ -16,9 +16,9 @@ gp-driver interact SPEC --out DIR     # a closed-loop run: one JSON line out per
 gp-driver status --out DIR --identity A0-SUMMARY SPEC...   # one process: present, stale, fault, partial or missing
 ```
 
-`run` and `interact` take `--memory-cap-gb N`, which stays outside the run id.
+`run` and `interact` take `--memory-cap-gb N`, which stays outside the spec id.
 
-A run spec is one canonical text. Stamps are whole ms after the anchor, 06:55 (`crates/ng-validate/src/slice.rs:501-504`), and the trunk is its sine in thousandths:
+A run spec is one canonical text. Stamps are whole ms after the anchor, 06:55 (`crates/ng-validate/src/slice.rs:507-510`), and the trunk is its sine in thousandths:
 
 ```text
 gp-run 1
@@ -35,7 +35,7 @@ Two call sites:
 ```rust
 let spec = RunSpec::parse(&fs::read_to_string(path)?)?;   // the only constructor
 let teacher = Teacher::new(spec.core())?;                  // compiles the arena body once
-let summary = teacher.run(&spec, MemoryCap::gb(8), &out)?; // out/<run id>/, or out/<run id>.fault/
+let summary = teacher.run(&spec, MemoryCap::gb(8), &out)?; // out/<spec id>/, or out/<spec id>.fault/
 ```
 
 ```rust
@@ -66,14 +66,14 @@ pub struct Setting { pub trunk: Trunk, pub legs: Legs }
 pub struct PostureEvent { pub at: Stamp, pub setting: Setting }
 impl PostureEvent {
     /// Content addressed: one instant and one setting give one id in every run, so runs that share a
-    /// prefix share ids, and the seal covers ids (crates/ng-contract/src/boundary.rs:111-127).
+    /// prefix share ids, and the seal covers ids (crates/ng-contract/src/boundary.rs:111-130).
     pub fn id(&self) -> InputId { todo!() }
 }
 pub enum CoreChoice {
     Picked { cap_ms: u32 },                                         // ng_solver::Core::new
     Reference { step_us: u32, floor_us: u32, absolute: f64, relative: f64 },   // all enter identity
 }
-/// Audit variants only. A variant is part of the canonical text, so variants never share a run id.
+/// Audit variants only. A variant is part of the canonical text, so variants never share a spec id.
 pub enum Variant {
     None,
     Late { lead_ms: u32 },              // enqueue each event once the head passes its stamp minus the lead
@@ -89,12 +89,12 @@ pub enum Variant {
 pub struct RunSpec { core: CoreChoice, end: Stamp, events: Vec<PostureEvent>, closed_loop: Option<String>, variant: Variant }
 impl RunSpec {
     /// Refuses equal or unsorted stamps, a stamp before the fence and an end before the last event.
-    /// Equal stamps are refused because the engine would keep the larger id (boundary.rs:149, 646-651).
+    /// Equal stamps are refused because the engine would keep the larger id (boundary.rs:149, 654-659).
     pub fn parse(text: &str) -> Result<Self, SpecError> { todo!() }
     pub fn canonical(&self) -> String { todo!() }
     /// The id covers the spec and the capture version, not the engine. `status` reports a present run as
     /// stale unless its model, packet, resolution and run-identity digests equal the audit's A0 run's.
-    pub fn id(&self) -> RunId { todo!("digest of CAPTURE_VERSION and the canonical text") }
+    pub fn id(&self) -> SpecId { todo!("digest of CAPTURE_VERSION and the canonical text") }
     pub fn core(&self) -> &CoreChoice { todo!() }
 }
 ```
@@ -105,11 +105,11 @@ pub struct Teacher { body: CompiledBody, core: Box<dyn CoupledSolver>, catalogue
 impl Teacher {
     pub fn new(core: &CoreChoice) -> Result<Self, TeachError> { todo!() }
     // admit_at(arena_packet, a port holding every event, arena_lens, anchor_moment(), &links); about 17 s
-    // (crates/ng-validate/src/initialize.rs:219-240). Then step by hand, as validate/run.rs:4-15 does:
+    // (crates/ng-validate/src/initialize.rs:219-232). Then step by hand, as validate/run.rs:17-63 does:
     //   Accepted: add each row's chord integral; log the seal; when the CV phase row falls, write an edge
     //     and the beat that ended there; advance the diagnostic observer.
     //   Refused: retry and count.
-    //   Faulted: finish the directory as <run id>.fault/, with the fault's kind, instant and attempted ns.
+    //   Faulted: finish the directory as <spec id>.fault/, with the fault's kind, instant and attempted ns.
     // Every 10,000 steps read VmRSS; above the --memory-cap-gb flag, stop the same way with MemoryCap.
     pub fn run(&self, spec: &RunSpec, cap: MemoryCap, out: &Path) -> Result<RunSummary, TeachError> { todo!() }
     /// After each beat edge, sends the beat and the earliest admissible stamp and waits for the answer.
@@ -121,7 +121,7 @@ impl Teacher {
 /// directory is complete. The session keeps it from admission to the end (crates/ng-record/src/checkpoint.rs:58-62).
 pub struct LinkFile { /* the file, its end and a seal index */ }
 impl HistoryStore for LinkFile { /* resolve, keep */ }
-/// The resident-memory limit a run stops at; the summary records it, and the run id does not cover it.
+/// The resident-memory limit a run stops at; the summary records it, and the spec id does not cover it.
 pub struct MemoryCap(u64);
 impl MemoryCap {
     pub fn gb(gigabytes: u32) -> Self { todo!() }
@@ -156,7 +156,7 @@ pub struct BeatReading {
 ```rust
 // archive.rs: one run directory
 pub struct RunSummary {
-    pub id: RunId, pub capture_version: u32, pub source_commit: String,
+    pub id: SpecId, pub capture_version: u32, pub source_commit: String,
     pub model: Digest, pub packet: Digest, pub resolution: Digest, pub run_identity: Digest,
     pub first_seal: Digest, pub last_seal: Digest, pub revisions: u64, pub refusals: u64, pub beats: u32,
     pub fault: Option<FaultSummary>, pub admission_s: f64, pub step_wall_s: f64, pub peak_rss_bytes: u64,
@@ -166,7 +166,7 @@ pub struct RunSummary {
 
 ## The run directory
 
-A run writes `<out>/<run id>.partial-<pid>/` and renames it to `<out>/<run id>/` when every file is flushed. A run that faults, or passes its memory cap, is renamed whole to `<out>/<run id>.fault/` instead, with its spec, its summary and what it captured up to that point. `status` reports it, and no command removes or redoes it. A person reads it first. A partial directory whose process is gone has no summary, and the next run of its spec removes and redoes it.
+A run writes `<out>/<spec id>.partial-<pid>/` and renames it to `<out>/<spec id>/` when every file is flushed. A run that faults, or passes its memory cap, is renamed whole to `<out>/<spec id>.fault/` instead, with its spec, its summary and what it captured up to that point. `status` reports it, and no command removes or redoes it. A person reads it first. A partial directory whose process is gone has no summary, and the next run of its spec removes and redoes it.
 
 | File | Content |
 |---|---|
@@ -179,7 +179,7 @@ A run writes `<out>/<run id>.partial-<pid>/` and renames it to `<out>/<run id>/`
 | `summary.txt` | the fields of `RunSummary`, one per line |
 | `realized.txt` | closed-loop runs only: the run's actions as an open-loop spec |
 
-Extents and integrals are read only at edges, from the newest segment, `session.conservation().head()` (`crates/ng-record/src/session.rs:75-77`, `crates/ng-record/src/history.rs:575-579`): `let (forward, reverse) = segment.exchange(id)` returns two curves (`history.rs:624-628`), and the last coefficient of each curve's `on(segment.interval())` is its cumulative value at the step's end (`history.rs:642-648`). A checkpoint for an audit variant is `session.checkpoint()`, with no store argument (`crates/ng-record/src/session.rs:159-163`). So a beat's extent is an exact difference of cumulative values, taken in `Compensated` before rounding. Column ids come from deduplicated `Target::Column` instances (`crates/ng-contract/src/body.rs:442-445, 478`), because `ColumnId::at` is crate-private (`body.rs:21`). Rows are stored as both limbs of `Compensated::bits()` (`crates/ng-contract/src/compensated.rs:110`).
+Extents and integrals are read only at edges, from the newest segment, `session.conservation().head()` (`crates/ng-record/src/session.rs:75-77`, `crates/ng-record/src/history.rs:665-669`): `let (forward, reverse) = segment.exchange(id)` returns two curves (`history.rs:714-718`), and the last coefficient of each curve's `on(segment.interval())` is its cumulative value at the step's end (`history.rs:732-738`). A checkpoint for an audit variant is `session.checkpoint()`, with no store argument (`crates/ng-record/src/session.rs:159-163`). So a beat's extent is an exact difference of cumulative values, taken in `Compensated` before rounding. Column ids come from deduplicated `Target::Column` instances (`crates/ng-contract/src/body.rs:438-441, 474-476`), because `ColumnId::at` is crate-private (`body.rs:20`). Rows are stored as both limbs of `Compensated::bits()` (`crates/ng-contract/src/compensated.rs:110`).
 
 ## Acceptance
 
@@ -198,6 +198,8 @@ Extents and integrals are read only at edges, from the newest segment, `session.
 - Branching by rewind outside the audit's variant, and any engine change.
 
 ## Comments
+
+The sketch's `RunId` is `SpecId` in the code and `spec_id` in `summary.txt`, because the glossary's run identity is the engine's and a run's summary holds both. The citations above were read again at main `1d21f4e`.
 
 The root `clippy.toml` reaches this crate, so its bans on host libm, hash maps and wall clocks apply. The one wall clock, for cost evidence in the summary, carries a local allow and its reason.
 
