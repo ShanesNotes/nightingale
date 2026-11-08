@@ -1,7 +1,7 @@
 # 03: The teacher driver and its run format
 
 Type: task
-Status: open
+Status: resolved
 Blocked by: 02
 Runs on: written on the workstation; every build, test and run happens on the heavy-run machine
 
@@ -70,7 +70,7 @@ impl PostureEvent {
     pub fn id(&self) -> InputId { todo!() }
 }
 pub enum CoreChoice {
-    Picked { cap_ms: u32 },                                         // ng_solver::Core::new
+    NgSolver { cap_ms: u32 },                                       // ng_solver::Core::new
     Reference { step_us: u32, floor_us: u32, absolute: f64, relative: f64 },   // all enter identity
 }
 /// Audit variants only. A variant is part of the canonical text, so variants never share a spec id.
@@ -143,10 +143,10 @@ pub struct Catalogue { rows: Vec<RowName>, columns: Vec<ColumnName>, ids: Vec<Co
                        heart_rate: RowId, pressure: RowId, filtration: RowId, aortic_water: ColumnId }
 impl Catalogue { pub fn of(body: &CompiledBody) -> Result<Self, CatalogueError> { todo!() } }
 /// One beat, edge to edge, computed once, here. Heart rate is one over the length; the phase integrates
-/// the rate row and resets at 1.0 (crates/ng-cardiovascular/src/rhythm.rs:59-89).
+/// the rate row and resets at the packet's `cv.cycle-end` (crates/ng-cardiovascular/src/rhythm.rs:59-89).
 pub struct BeatReading {
     pub ordinal: u64, pub start: SimTime, pub end: SimTime,
-    pub heart_rate: f64,          // per s
+    pub heart_rate_per_s: f64,    // one over the beat's length
     pub arterial_pressure: f64,   // beat mean of the CV "blood pressure" row at systemic arteries
     pub stroke: f64,              // net extent of the aortic valve's water column over the beat
     pub filtration: f64,          // beat mean of the RN "filtration" row
@@ -183,14 +183,14 @@ Extents and integrals are read only at edges, from the newest segment, `session.
 
 ## Acceptance
 
-- [ ] On the heavy-run machine, `cargo build --release --locked --manifest-path tools/generative-physiology/driver/Cargo.toml` succeeds.
-- [ ] `gp-driver smoke` (a stand at 10 s, ending at 20 s) writes one complete run. Its packet digest and the seal at the head at 1000.079707 ms equal the values `crates/ng-validate/tests/trace.rs:135-136` pins for Core at a 10 ms cap; it has at least 15 beats, no fault, and the stand in `applied.npy`.
-- [ ] A second `gp-driver run` with the same spec and `--out` writes nothing and reports the run present.
-- [ ] A driver killed with SIGKILL leaves only a partial directory, which the next run of that spec removes and redoes.
-- [ ] A run forced past a small memory cap ends as a `.fault` directory, which `status` reports and a second `run` leaves alone.
-- [ ] `gp-driver status` reports present, stale, fault, partial and missing runs for a list of specs in one process.
-- [ ] Light tests pass: the spec's round trip, id addressing, refusals at the fence and on equal stamps, the `.npy` round trip, and a catalogue that covers all 257 columns of the compiled arena body.
-- [ ] `tools/verify.d/10-rust.sh` gains format, clippy, test and check lines for the driver's manifest beside bench's (`tools/verify.d/10-rust.sh:42`), and the proof from a clean git checkout of the PR head on the heavy-run machine shows `full_proof: yes`. An archive snapshot cannot give that proof, because `.agents/skills/verify-nightingale/prove.sh:6` needs a git checkout.
+- [x] On the heavy-run machine, `cargo build --release --locked --manifest-path tools/generative-physiology/driver/Cargo.toml` succeeds.
+- [x] `gp-driver smoke` (a stand at 10 s, ending at 20 s) writes one complete run. Its packet digest and the seal at the head at 1000.079707 ms equal the values `crates/ng-validate/tests/trace.rs:135-136` pins for Core at a 10 ms cap; it has at least 15 beats, no fault, and the stand in `applied.npy`.
+- [x] A second `gp-driver run` with the same spec and `--out` writes nothing and reports the run present.
+- [x] A driver killed with SIGKILL leaves only a partial directory, which the next run of that spec removes and redoes.
+- [x] A run forced past a small memory cap ends as a `.fault` directory, which `status` reports and a second `run` leaves alone.
+- [x] `gp-driver status` reports present, stale, fault, partial and missing runs for a list of specs in one process.
+- [x] Light tests pass: the spec's round trip, id addressing, refusals at the fence and on equal stamps, the `.npy` round trip, and a catalogue that covers all 257 columns of the compiled arena body.
+- [x] `tools/verify.d/10-rust.sh` gains format, clippy, test and check lines for the driver's manifest beside bench's (`tools/verify.d/10-rust.sh:42`), and the proof from a clean git checkout of the PR head on the heavy-run machine shows `full_proof: yes`. An archive snapshot cannot give that proof, because `.agents/skills/verify-nightingale/prove.sh:6` needs a git checkout.
 
 ## Non-goals
 
@@ -199,8 +199,43 @@ Extents and integrals are read only at edges, from the newest segment, `session.
 
 ## Comments
 
-The sketch's `RunId` is `SpecId` in the code and `spec_id` in `summary.txt`, because the glossary's run identity is the engine's and a run's summary holds both. The citations above were read again at main `1d21f4e`.
+The sketch's `RunId` is `SpecId` in the code and `spec_id` in `summary.txt`, because the glossary's run identity is the engine's and a run's summary holds both. `Picked` became `NgSolver` and `heart_rate` became `heart_rate_per_s` for the same reason: the name carries what a comment would. The citations above were read again at main `1d21f4e`.
 
 The root `clippy.toml` reaches this crate, so its bans on host libm, hash maps and wall clocks apply. The one wall clock, for cost evidence in the summary, carries a local allow and its reason.
 
 Question for the developer reviewer: any path under `tools/**` runs every verify step, mutants included (`tools/gate/paths.toml:10-16`). Should a rule ahead of it send `tools/generative-physiology/**` to fewer steps?
+
+## Answer
+
+`tools/generative-physiology/driver/` builds `gp-driver`. It sits outside the workspace, depends on the five engine crates by path, and makes one teacher run per process through public items only. No engine change was needed. The commands, the run spec grammar and the run directory are as above, with the names that Comments gives.
+
+On the heavy-run machine, at the PR head, every box holds:
+
+- The locked release build succeeds, and clippy with warnings denied, fmt and the 14 light tests pass.
+- `gp-driver smoke` reproduces the packet digest and the seal that `trace.rs` pins, at 1,000,079,707 ns after the anchor (revision 189). It has 22 beats, no fault, and the stand applied at revision 1874. These figures are measured on one run: admission took 6.8 s, the 20 s took 2.8 s of stepping, and the run peaked at 16 MB resident. Two builds in two processes wrote the same file digests.
+- The 12 acceptance tests are `#[ignore]`, so only a full verify or a person runs them. They pass in 130 s:
+  - A rerun writes nothing.
+  - SIGKILL leaves a partial directory, which the next run redoes.
+  - A memory-cap fault stays: `status` reports it, and a rerun leaves it alone.
+  - `status` reports all five states in one process.
+  - Checkpoint-resume, rewind, observer-off, late and replica each give variant none's seal log, and the checkpoint and rewind branches end on its record digests.
+  - A closed loop gives the same seal log as its `realized.txt` run open loop, and a refused answer ends it as a protocol fault.
+- The PR's tower proof shows `full_proof: yes`.
+
+Choices the sketch left open:
+
+- A checkpoint variant withholds only events stamped at least one longest step (10 ms) after its instant, because the admission port is fixed before the checkpoint's head exists.
+- A closed loop is not asked about a beat that ends at or after the spec's end, because no answer could apply there.
+- `summary.txt` also records:
+  - each late event's arrival, as `index@revision`
+  - the record digests at the end, and on a branch
+  - a fault's course, instant, attempted ns and step refusals
+- The exit codes are 0 for written or present, 1 for an error or a live partial, 2 for usage or a bad spec, and 3 for a fault. `--memory-cap-gb` counts 10^9 bytes and defaults to 8.
+
+Open:
+
+- The developer reviewer's verify path question in Comments.
+- `LinkFile` repeats the bench's `LinkLog`. One shared store is a follow-up.
+- File digests read each finished file whole. That is fine for an hour's run and too large for a simulated day.
+- A `.fault` directory keeps no link file, so `recover` cannot continue it.
+- The PR's /no-comments report lists seven engine items. Each needs an engine change, so each is outside this ticket.
