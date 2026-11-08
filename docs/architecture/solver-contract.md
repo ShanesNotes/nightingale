@@ -60,7 +60,7 @@ fn save_resume_rewind<'m>(session: &Session<'m, Running>, body: &'m CompiledBody
     Ok((resumed, forked))
 }
 
-fn after_fault<'m>(stopped: Session<'m, Faulted>, earlier: &Checkpoint, fork: BranchId)
+fn after_fault<'m>(mut stopped: Session<'m, Faulted>, earlier: &Checkpoint, fork: BranchId)
     -> Result<Session<'m, Running>, CheckpointError> {
     let _diagnosis = stopped.export()?;
     stopped.recover(earlier, fork)
