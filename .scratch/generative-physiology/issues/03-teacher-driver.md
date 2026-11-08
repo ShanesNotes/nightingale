@@ -168,7 +168,7 @@ pub struct RunSummary {
 
 ## The run directory
 
-A run makes `<out>/.<spec id>.staging-<pid>/`, locks the `lock` file inside it, and only then renames it to `<out>/<spec id>.partial-<pid>/`, so no other run sees a partial directory before its run holds it. No command reads or removes a staging directory. A run renames its partial directory to `<out>/<spec id>/` when every file is flushed. A run that faults, or passes its memory cap, is renamed whole to `<out>/<spec id>.fault/` instead, with its spec, its summary and what it captured up to that point. `status` reports it, and no command removes or redoes it. A person reads it first. A partial directory whose process is gone has no summary, and the next run of its spec removes and redoes it.
+A run makes `<out>/.<spec id>.staging-<pid>/`, locks the `lock` file inside it, and only then renames it to `<out>/<spec id>.partial-<pid>/`, so no other run sees a partial directory before its run holds it. No command reads a staging directory, and a run removes one only when it carries the run's own pid, which makes it a dead run's. A run renames its partial directory to `<out>/<spec id>/` when every file is flushed. A run that faults, or passes its memory cap, is renamed whole to `<out>/<spec id>.fault/` instead, with its spec, its summary and what it captured up to that point. `status` reports it, and no command removes or redoes it. A person reads it first. A partial directory whose process is gone has no summary, and the next run of its spec removes and redoes it.
 
 | File | Content |
 |---|---|

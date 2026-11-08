@@ -126,6 +126,13 @@ pub enum Settled {
     FinishedByAnother(PathBuf),
 }
 
+fn remove_staging_left_by_a_dead_run_with_this_pid(directory: &Path) -> io::Result<()> {
+    match fs::remove_dir_all(directory) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
 /// The platform cannot make a directory with a lock already held inside it.
 struct Staged {
     out: PathBuf,
@@ -136,10 +143,7 @@ struct Staged {
 impl Staged {
     fn create(out: &Path, id: SpecId) -> io::Result<Self> {
         let directory = out.join(format!(".{id}.staging-{}", std::process::id()));
-        match fs::remove_dir_all(&directory) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
-            _ => {}
-        }
+        remove_staging_left_by_a_dead_run_with_this_pid(&directory)?;
         fs::create_dir(&directory)?;
         let lock = File::create_new(directory.join(LOCK))?;
         lock.lock()?;
