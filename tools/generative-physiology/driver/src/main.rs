@@ -179,10 +179,14 @@ fn status(out: &Path, identity: &Path, specs: &[PathBuf]) -> Result<u8, Failure>
             Err(failure) => return Err(failure),
         };
         let id = spec.id();
-        let state = RunState::of(out, id, Some(&identity))?;
+        let state = RunState::of(out, id)?;
+        let word = match &state {
+            RunState::Present(made_by) if *made_by != identity => "stale",
+            state => state.word(),
+        };
         let held = matches!(state, RunState::Partial { held: true, .. });
         let suffix = if held { " held" } else { "" };
-        println!("{} {id} {}{suffix}", state.word(), path.display());
+        println!("{word} {id} {}{suffix}", path.display());
     }
     Ok(code)
 }

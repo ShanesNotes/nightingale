@@ -663,10 +663,8 @@ impl Teacher {
         }
         let id = spec.id();
         fs::create_dir_all(out)?;
-        match RunState::of(out, id, None)? {
-            RunState::Present(_) | RunState::Stale(_) => {
-                return Ok(Outcome::Present(out.join(id.to_string())));
-            }
+        match RunState::of(out, id)? {
+            RunState::Present(_) => return Ok(Outcome::Present(out.join(id.to_string()))),
             RunState::Fault(path) => return Ok(Outcome::FaultFound(path)),
             RunState::Partial { paths, held: true } => {
                 return Err(TeachError::Held(paths.into_iter().next().unwrap_or_default()));

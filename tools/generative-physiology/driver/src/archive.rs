@@ -48,18 +48,13 @@ pub enum RunState {
         held: bool,
     },
     Present(Recorded),
-    Stale(Recorded),
     Fault(PathBuf),
 }
 impl RunState {
-    pub fn of(out: &Path, id: SpecId, identity: Option<&Recorded>) -> io::Result<Self> {
+    pub fn of(out: &Path, id: SpecId) -> io::Result<Self> {
         let present = out.join(id.to_string());
         if present.is_dir() {
-            let recorded = Recorded::read(&present.join(SUMMARY))?;
-            return Ok(match identity {
-                Some(expected) if *expected != recorded => Self::Stale(recorded),
-                _ => Self::Present(recorded),
-            });
+            return Ok(Self::Present(Recorded::read(&present.join(SUMMARY))?));
         }
         let fault = out.join(format!("{id}.fault"));
         if fault.is_dir() {
@@ -97,7 +92,6 @@ impl RunState {
             Self::Missing => "missing",
             Self::Partial { .. } => "partial",
             Self::Present(_) => "present",
-            Self::Stale(_) => "stale",
             Self::Fault(_) => "fault",
         }
     }
