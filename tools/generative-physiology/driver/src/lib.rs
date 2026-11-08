@@ -7,7 +7,8 @@ mod spec;
 mod teacher;
 
 pub use archive::{
-    BranchSummary, Course, FaultKind, FaultSummary, Recorded, RunState, RunSummary, SUMMARY, summary_value,
+    BranchSummary, Course, FaultKind, FaultSummary, IdentityDigests, RunState, RunSummary, SUMMARY,
+    summary_value,
 };
 pub use capture::{BeatReading, Catalogue, CatalogueError, digest_of_words, step_row, words};
 pub use link_file::LinkFile;

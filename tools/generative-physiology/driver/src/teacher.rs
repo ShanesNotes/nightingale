@@ -1,6 +1,6 @@
 use crate::archive::{
-    BranchSummary, Course, FaultKind, FaultSummary, PartialRun, Recorded, RunState, RunSummary, SUMMARY,
-    Settled, write_synced,
+    BranchSummary, Course, FaultKind, FaultSummary, IdentityDigests, PartialRun, RunState, RunSummary,
+    SUMMARY, Settled, write_synced,
 };
 use crate::capture::{BeatReading, Capture, Catalogue, CatalogueError, STEP_COLUMNS, step_row};
 use crate::link_file::LinkFile;
@@ -721,7 +721,7 @@ impl Teacher {
         let admission_s = clock.seconds();
         let Admitted { session, .. } = admitted;
         let identity = session.record().identity().clone();
-        let recorded = Recorded {
+        let identity_digests = IdentityDigests {
             model: identity.model().digest(),
             packet: identity.packet().digest(),
             resolution: identity.resolution().digest(),
@@ -824,7 +824,7 @@ impl Teacher {
             id: spec.id(),
             capture_version: CAPTURE_VERSION,
             source_commit: options.source_commit.clone(),
-            identity: recorded,
+            identity: identity_digests,
             first_seal,
             last_seal: head.seal,
             revisions: head.revision,

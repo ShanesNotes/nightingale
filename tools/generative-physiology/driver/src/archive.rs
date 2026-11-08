@@ -15,13 +15,13 @@ pub fn summary_value<'t>(summary: &'t str, key: &str) -> Option<&'t str> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Recorded {
+pub struct IdentityDigests {
     pub model: Digest,
     pub packet: Digest,
     pub resolution: Digest,
     pub run_identity: Digest,
 }
-impl Recorded {
+impl IdentityDigests {
     pub fn read(summary: &Path) -> io::Result<Self> {
         let text = fs::read_to_string(summary)?;
         let digest = |key: &str| {
@@ -47,14 +47,14 @@ pub enum RunState {
         paths: Vec<PathBuf>,
         held: bool,
     },
-    Present(Recorded),
+    Present(IdentityDigests),
     Fault(PathBuf),
 }
 impl RunState {
     pub fn of(out: &Path, id: SpecId) -> io::Result<Self> {
         let present = out.join(id.to_string());
         if present.is_dir() {
-            return Ok(Self::Present(Recorded::read(&present.join(SUMMARY))?));
+            return Ok(Self::Present(IdentityDigests::read(&present.join(SUMMARY))?));
         }
         let fault = out.join(format!("{id}.fault"));
         if fault.is_dir() {
@@ -281,7 +281,7 @@ pub struct RunSummary {
     pub id: SpecId,
     pub capture_version: u32,
     pub source_commit: String,
-    pub identity: Recorded,
+    pub identity: IdentityDigests,
     pub first_seal: Digest,
     pub last_seal: Digest,
     pub revisions: u64,
@@ -300,7 +300,7 @@ pub struct RunSummary {
 }
 impl RunSummary {
     pub fn render(&self) -> String {
-        let Recorded {
+        let IdentityDigests {
             model,
             packet,
             resolution,

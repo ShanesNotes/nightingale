@@ -1,6 +1,6 @@
 use gp_driver::{
-    LineLink, MemoryCap, Options, Outcome, Recorded, RunSpec, RunState, SMOKE_SPEC, SpecId, TeachError,
-    Teacher, check_smoke,
+    IdentityDigests, LineLink, MemoryCap, Options, Outcome, RunSpec, RunState, SMOKE_SPEC, SpecId,
+    TeachError, Teacher, check_smoke,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -166,7 +166,7 @@ fn smoke(out: &Path, options: &Options) -> Result<u8, Failure> {
 }
 
 fn status(out: &Path, identity: &Path, specs: &[PathBuf]) -> Result<u8, Failure> {
-    let identity = Recorded::read(identity)?;
+    let identity = IdentityDigests::read(identity)?;
     let mut code = 0;
     for path in specs {
         let spec = match spec_at(path) {
