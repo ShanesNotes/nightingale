@@ -111,8 +111,9 @@ impl PostureEvent {
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum CoreChoice {
-    /// `ng_solver::Core::new`.
-    Picked { cap_ms: NonZeroU32 },
+    NgSolver {
+        cap_ms: NonZeroU32,
+    },
     Reference {
         step_us: NonZeroU32,
         floor_us: NonZeroU32,
@@ -123,7 +124,7 @@ pub enum CoreChoice {
 impl CoreChoice {
     pub fn build(&self) -> Result<Box<dyn CoupledSolver>, AdmissionError> {
         match *self {
-            Self::Picked { cap_ms } => Ok(Box::new(ng_solver::Core::new(
+            Self::NgSolver { cap_ms } => Ok(Box::new(ng_solver::Core::new(
                 u64::from(cap_ms.get()) * NS_PER_MS,
             ))),
             Self::Reference {
@@ -145,7 +146,7 @@ impl CoreChoice {
     }
     fn words(&self) -> String {
         match self {
-            Self::Picked { cap_ms } => format!("ng-solver cap-ms {cap_ms}"),
+            Self::NgSolver { cap_ms } => format!("ng-solver cap-ms {cap_ms}"),
             Self::Reference {
                 step_us,
                 floor_us,
@@ -392,7 +393,7 @@ fn grammar(mut words: Words<'_>) -> Result<Line, SpecError> {
 
 fn core_line(mut words: Words<'_>) -> Result<Line, SpecError> {
     let choice = match words.word()? {
-        "ng-solver" => CoreChoice::Picked {
+        "ng-solver" => CoreChoice::NgSolver {
             cap_ms: words.nonzero("cap-ms")?,
         },
         "reference" => {
