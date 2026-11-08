@@ -45,7 +45,7 @@ phase driver-fmt cargo fmt --check --manifest-path "$driver"
 [ "${NG_GATE_MODE:-}" = changed ] || phase driver-clippy cargo clippy --locked --all-targets --manifest-path "$driver" \
   -- -D warnings
 if [ "${NG_GATE_MODE:-}" = full ]; then
-  phase driver-test cargo test --locked --manifest-path "$driver" -- --include-ignored --test-threads=1
+  phase driver-test cargo test --locked --manifest-path "$driver" -- --include-ignored
 elif [ "${NG_GATE_MODE:-}" != changed ]; then
   phase driver-test cargo test --locked --manifest-path "$driver"
 fi

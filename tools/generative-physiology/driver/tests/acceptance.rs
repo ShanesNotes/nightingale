@@ -8,11 +8,16 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::OnceLock;
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread;
 use std::time::Duration;
 
 const DRIVER: &str = env!("CARGO_BIN_EXE_gp-driver");
+
+fn one_teacher_run_at_a_time() -> MutexGuard<'static, ()> {
+    static TURN: Mutex<()> = Mutex::new(());
+    TURN.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 fn scratch(name: &str) -> PathBuf {
     let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
@@ -215,6 +220,7 @@ fn smoke() -> &'static Path {
 #[test]
 #[ignore = "a teacher run of the arena body"]
 fn the_smoke_run_holds_the_first_second_pins() {
+    let _turn = one_teacher_run_at_a_time();
     let directory = smoke();
     let summary = summary(directory);
     assert_eq!(
@@ -287,6 +293,7 @@ fn the_smoke_run_holds_the_first_second_pins() {
 #[test]
 #[ignore = "a teacher run of the arena body"]
 fn a_second_run_of_a_present_spec_writes_nothing() {
+    let _turn = one_teacher_run_at_a_time();
     let directory = smoke();
     let out = directory.parent().expect("the out directory");
     let spec = written(&scratch("rerun"), "smoke.txt", SMOKE_SPEC);
@@ -305,6 +312,7 @@ fn a_second_run_of_a_present_spec_writes_nothing() {
 #[test]
 #[ignore = "a teacher run of the arena body"]
 fn a_killed_run_leaves_a_partial_that_the_next_run_redoes() {
+    let _turn = one_teacher_run_at_a_time();
     let out = scratch("killed");
     let text = "gp-run 1\ncore ng-solver cap-ms 10\nend-ms 20000\nevent at-ms 5000 trunk 1000 legs standing\nvariant \
                 replica 11\n";
@@ -338,6 +346,7 @@ fn a_killed_run_leaves_a_partial_that_the_next_run_redoes() {
 #[test]
 #[ignore = "a teacher run of the arena body"]
 fn a_run_past_its_memory_cap_is_a_fault_that_stays() {
+    let _turn = one_teacher_run_at_a_time();
     let out = scratch("capped");
     let text = "gp-run 1\ncore ng-solver cap-ms 10\nend-ms 3000\nvariant replica 12\n";
     let spec = written(&out, "spec.txt", text);
@@ -386,6 +395,7 @@ fn a_run_past_its_memory_cap_is_a_fault_that_stays() {
 #[test]
 #[ignore = "a teacher run of the arena body"]
 fn status_reports_every_state_in_one_process() {
+    let _turn = one_teacher_run_at_a_time();
     let out = scratch("status");
     let specs = scratch("status-specs");
     let short = |core: &str, variant: &str| {
@@ -546,12 +556,14 @@ fn same_branch(variant: &Path) {
 #[test]
 #[ignore = "a teacher run of the arena body"]
 fn a_replica_is_the_same_course() {
+    let _turn = one_teacher_run_at_a_time();
     same_course(&variant_run("replica 1"));
 }
 
 #[test]
 #[ignore = "a teacher run of the arena body"]
 fn late_inputs_are_the_same_course() {
+    let _turn = one_teacher_run_at_a_time();
     let variant = variant_run("late lead-ms 500");
     same_course(&variant);
     let arrived = arrivals(&summary(&variant), "enqueued");
@@ -571,6 +583,7 @@ fn late_inputs_are_the_same_course() {
 #[test]
 #[ignore = "a teacher run of the arena body"]
 fn an_observer_off_run_is_the_same_course() {
+    let _turn = one_teacher_run_at_a_time();
     let variant = variant_run("observer-off");
     same_course(&variant);
     assert_eq!(table(&variant.join("lens.npy")).len(), 0);
@@ -580,6 +593,7 @@ fn an_observer_off_run_is_the_same_course() {
 #[test]
 #[ignore = "a teacher run of the arena body"]
 fn a_checkpoint_resumed_into_a_fresh_body_and_core_is_the_same_course() {
+    let _turn = one_teacher_run_at_a_time();
     let variant = variant_run("checkpoint-resume at-ms 5000");
     same_course(&variant);
     same_branch(&variant);
@@ -588,6 +602,7 @@ fn a_checkpoint_resumed_into_a_fresh_body_and_core_is_the_same_course() {
 #[test]
 #[ignore = "a teacher run of the arena body"]
 fn a_rewound_branch_is_the_same_course() {
+    let _turn = one_teacher_run_at_a_time();
     let variant = variant_run("rewind at-ms 5000");
     same_course(&variant);
     same_branch(&variant);
@@ -604,6 +619,7 @@ fn number_after(line: &str, key: &str) -> u64 {
 #[test]
 #[ignore = "a teacher run of the arena body"]
 fn a_closed_loop_run_is_the_course_of_its_realized_spec() {
+    let _turn = one_teacher_run_at_a_time();
     let out = scratch("interact");
     let text = "gp-run 1\ncore ng-solver cap-ms 10\nend-ms 12000\nclosed-loop acceptance stand after beat 2, lie \
                 after beat 6\nvariant none\n";
@@ -697,6 +713,7 @@ fn a_closed_loop_run_is_the_course_of_its_realized_spec() {
 #[test]
 #[ignore = "a teacher run of the arena body"]
 fn a_closed_loop_answer_before_the_earliest_stamp_is_a_protocol_fault() {
+    let _turn = one_teacher_run_at_a_time();
     let out = scratch("protocol");
     let text = "gp-run 1\ncore ng-solver cap-ms 10\nend-ms 6000\nclosed-loop acceptance answers too early\nvariant \
                 none\n";
