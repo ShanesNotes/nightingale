@@ -229,7 +229,11 @@ fn authorized(event: &PostureEvent) -> Result<AuthorizedInput, AdmissionError> {
     ))
 }
 
-fn enqueue(session: &mut Session<'_, Running>, event: &PostureEvent, index: usize) -> Result<(), TeachError> {
+fn enqueue(
+    session: &mut Session<'_, Running>,
+    event: &PostureEvent,
+    index: usize,
+) -> Result<[u64; 2], TeachError> {
     let refused = |error: AdmissionError| TeachError::Enqueue {
         event: index,
         error: Box::new(error),
@@ -237,7 +241,7 @@ fn enqueue(session: &mut Session<'_, Running>, event: &PostureEvent, index: usiz
     session
         .enqueue(authorized(event).map_err(refused)?)
         .map_err(refused)?;
-    Ok(())
+    Ok([index as u64, session.record().revision()])
 }
 
 enum Stepped<'m> {
@@ -374,10 +378,12 @@ impl Policy<'_> {
         if self.known.contains(&action.at) {
             return refused(format!("{line} has the stamp of another event"));
         }
-        capture.register(action.id(), (spec_events + self.actions.len()) as u64);
+        let index = (spec_events + self.actions.len()) as u64;
+        capture.register(action.id(), index);
         if let Err(error) = session.enqueue(authorized(&action)?) {
             return refused(format!("the engine refused {line}: {error:?}"));
         }
+        capture.enqueued([index, session.record().revision()]);
         self.known.insert(action.at);
         self.actions.push(action);
         Ok(None)
@@ -437,7 +443,7 @@ impl<'l> Feed<'l> {
                     if event.at.sim_time().nanoseconds().saturating_sub(*lead_ns) > head.nanoseconds() {
                         break;
                     }
-                    enqueue(session, event, *next)?;
+                    capture.enqueued(enqueue(session, event, *next)?);
                     *next += 1;
                 }
             }
@@ -445,7 +451,7 @@ impl<'l> Feed<'l> {
                 if saved.is_none() && head >= *at {
                     *saved = Some(session.checkpoint()?);
                     for (index, event) in events.iter().enumerate().skip(*withheld) {
-                        enqueue(session, event, index)?;
+                        capture.enqueued(enqueue(session, event, index)?);
                     }
                 }
             }
@@ -555,6 +561,7 @@ impl Original<'_, '_> {
 
 struct Followed {
     from_revision: u64,
+    enqueued: Vec<[u64; 2]>,
     head: Head,
     refusals: u64,
     fault: Option<FaultSummary>,
@@ -566,9 +573,9 @@ fn follow(
     bounds: Bounds<'_>,
     steps: &mut NpyWriter<u64>,
 ) -> Result<Followed, TeachError> {
-    for (index, event) in withheld {
-        enqueue(&mut session, event, *index)?;
-    }
+    let enqueued = (withheld.iter())
+        .map(|(index, event)| enqueue(&mut session, event, *index))
+        .collect::<Result<Vec<_>, _>>()?;
     let from_revision = session.record().revision();
     let (mut refusals, mut accepted) = (0, 0u64);
     while session.record().accepted().time() < bounds.end {
@@ -591,6 +598,7 @@ fn follow(
                     let head = Head::of(&session);
                     return Ok(Followed {
                         from_revision,
+                        enqueued,
                         head,
                         refusals,
                         fault,
@@ -606,6 +614,7 @@ fn follow(
                 let head = Head::of(&stopped);
                 return Ok(Followed {
                     from_revision,
+                    enqueued,
                     head,
                     refusals,
                     fault,
@@ -615,6 +624,7 @@ fn follow(
     }
     Ok(Followed {
         from_revision,
+        enqueued,
         head: Head::of(&session),
         refusals,
         fault: None,
@@ -796,6 +806,7 @@ impl Teacher {
             fault = followed.fault;
             branch = Some(BranchSummary {
                 from_revision: followed.from_revision,
+                enqueued: followed.enqueued,
                 revisions: followed.head.revision,
                 refusals: followed.refusals,
                 last_seal: followed.head.seal,
@@ -804,6 +815,7 @@ impl Teacher {
         }
         let step_wall_s = clock.seconds();
         let beats = capture.beats();
+        let enqueued = capture.late().to_vec();
         capture.finish()?;
         let mut files = vec![
             "spec.txt",
@@ -839,6 +851,7 @@ impl Teacher {
             revisions: head.revision,
             refusals,
             beats,
+            enqueued,
             fault,
             admission_s,
             step_wall_s,

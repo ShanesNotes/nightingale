@@ -367,6 +367,7 @@ pub struct Capture<'c> {
     phase: Compensated,
     beat_edge: Option<Edge>,
     inputs: BTreeMap<InputId, u64>,
+    enqueued: Vec<[u64; 2]>,
 }
 impl<'c> Capture<'c> {
     /// Writes the start edge. `inputs` names each event's index in the spec.
@@ -391,12 +392,19 @@ impl<'c> Capture<'c> {
             phase: view.value(catalogue.phase()),
             beat_edge: None,
             inputs,
+            enqueued: Vec::new(),
         };
         capture.edge(start)?;
         Ok(capture)
     }
     pub fn register(&mut self, id: InputId, index: u64) {
         self.inputs.insert(id, index);
+    }
+    pub fn enqueued(&mut self, entry: [u64; 2]) {
+        self.enqueued.push(entry);
+    }
+    pub fn late(&self) -> &[[u64; 2]] {
+        &self.enqueued
     }
     pub fn beats(&self) -> u64 {
         self.beats.rows()

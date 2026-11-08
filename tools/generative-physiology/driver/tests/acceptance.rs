@@ -110,6 +110,35 @@ fn table(file: &Path) -> Vec<Vec<u64>> {
         .collect()
 }
 
+const MS: u64 = 1_000_000;
+
+fn arrivals(summary: &str, key: &str) -> Vec<[u64; 2]> {
+    let listed = value(summary, key);
+    if listed == "none" {
+        return Vec::new();
+    }
+    let entry = |text: &str| {
+        let (index, revision) = text.split_once('@').expect("index@revision");
+        [
+            index.parse().expect("an index"),
+            revision.parse().expect("a revision"),
+        ]
+    };
+    listed.split(' ').map(entry).collect()
+}
+
+fn head_at(directory: &Path, revision: u64) -> u64 {
+    if revision == 0 {
+        return 0;
+    }
+    let steps = seal_log(&directory.join("steps.npy"));
+    let row = steps
+        .iter()
+        .find(|row| row[0] == revision)
+        .expect("that revision's step");
+    row[1] - anchor_moment().nanoseconds()
+}
+
 /// Every entry under a directory with its inode, size and modification time, so a rewrite shows.
 fn listing(root: &Path) -> BTreeMap<PathBuf, [i64; 4]> {
     let mut found = BTreeMap::new();
@@ -441,6 +470,11 @@ fn same_course(variant: &Path) {
         "both events applied"
     );
     let (theirs, ours) = (summary(reference), summary(variant));
+    assert_eq!(
+        value(&theirs, "enqueued"),
+        "none",
+        "every reference event is in the port"
+    );
     for key in [
         "first_seal",
         "last_seal",
@@ -458,6 +492,12 @@ fn same_branch(variant: &Path) {
     let reference = reference();
     let (theirs, ours) = (summary(reference), summary(variant));
     let from: u64 = value(&ours, "branch_from_revision").parse().expect("a revision");
+    assert_eq!(
+        value(&ours, "enqueued"),
+        format!("1@{from}"),
+        "the 8 s event waits for the checkpoint"
+    );
+    assert_eq!(value(&ours, "branch_enqueued"), format!("1@{from}"));
     let known: Vec<[u64; 6]> = (seal_log(&reference.join("steps.npy")).into_iter())
         .filter(|row| row[0] > from)
         .collect();
@@ -502,7 +542,20 @@ fn a_replica_is_the_same_course() {
 #[test]
 #[ignore = "a teacher run of the arena body"]
 fn late_inputs_are_the_same_course() {
-    same_course(&variant_run("late lead-ms 500"));
+    let variant = variant_run("late lead-ms 500");
+    same_course(&variant);
+    let arrived = arrivals(&summary(&variant), "enqueued");
+    assert_eq!(
+        arrived.iter().map(|[index, _]| *index).collect::<Vec<_>>(),
+        [0, 1]
+    );
+    for (&[_, revision], stamp) in arrived.iter().zip([3_000 * MS, 8_000 * MS]) {
+        let head = head_at(&variant, revision);
+        assert!(
+            stamp - 500 * MS <= head && head < stamp,
+            "an event at {stamp} ns entered at {head} ns"
+        );
+    }
 }
 
 #[test]
@@ -594,6 +647,19 @@ fn a_closed_loop_run_is_the_course_of_its_realized_spec() {
     assert_eq!(open.closed_loop(), None);
     let lines: Vec<String> = open.events().iter().map(|event| event.line()).collect();
     assert_eq!(lines, acted);
+    let arrived = arrivals(&held, "enqueued");
+    assert_eq!(
+        arrived.iter().map(|[index, _]| *index).collect::<Vec<_>>(),
+        [0, 1]
+    );
+    for (&[_, revision], event) in arrived.iter().zip(open.events()) {
+        let (head, stamp) = (head_at(&directory, revision), u64::from(event.at.ms()) * MS);
+        assert!(
+            revision > 0 && head < stamp,
+            "{} entered at {head} ns",
+            event.line()
+        );
+    }
     assert_eq!(
         table(&directory.join("applied.npy")).len(),
         2,

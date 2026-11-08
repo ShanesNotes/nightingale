@@ -246,10 +246,21 @@ impl FaultSummary {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BranchSummary {
     pub from_revision: u64,
+    pub enqueued: Vec<[u64; 2]>,
     pub revisions: u64,
     pub refusals: u64,
     pub last_seal: Digest,
     pub end: RecordDigests,
+}
+
+fn entries(enqueued: &[[u64; 2]]) -> String {
+    if enqueued.is_empty() {
+        return "none".to_string();
+    }
+    let entries: Vec<String> = (enqueued.iter())
+        .map(|[index, revision]| format!("{index}@{revision}"))
+        .collect();
+    entries.join(" ")
 }
 
 fn digest_lines(prefix: &str, digests: &RecordDigests) -> Vec<String> {
@@ -290,6 +301,8 @@ pub struct RunSummary {
     pub revisions: u64,
     pub refusals: u64,
     pub beats: u64,
+    /// Each event that entered after admission: its index in the spec and the revision it entered at.
+    pub enqueued: Vec<[u64; 2]>,
     pub fault: Option<FaultSummary>,
     pub admission_s: f64,
     pub step_wall_s: f64,
@@ -322,6 +335,7 @@ impl RunSummary {
             format!("revisions {}", self.revisions),
             format!("refusals {}", self.refusals),
             format!("beats {}", self.beats),
+            format!("enqueued {}", entries(&self.enqueued)),
         ];
         match &self.fault {
             None => lines.push("fault none".to_string()),
@@ -338,6 +352,7 @@ impl RunSummary {
         lines.extend(digest_lines("end", &self.end));
         if let Some(branch) = &self.branch {
             lines.push(format!("branch_from_revision {}", branch.from_revision));
+            lines.push(format!("branch_enqueued {}", entries(&branch.enqueued)));
             lines.push(format!("branch_revisions {}", branch.revisions));
             lines.push(format!("branch_refusals {}", branch.refusals));
             lines.push(format!("branch_last_seal {}", hex(&branch.last_seal)));
