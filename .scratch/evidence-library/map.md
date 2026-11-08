@@ -16,6 +16,7 @@ A fresh agent can ask the evidence library which couplings the engine's body lac
 ## Decisions so far
 
 - [The tilt neighborhood](issues/01-tilt-neighborhood.md): on the whole corpus, the claim graph for the sustained response to passive head-up tilt found 16 of the slice's 19 posture-path couplings unprompted and named the kidney's answer to pressure and volume as the largest coupling the slice lacks. Seven of eight frozen bars pass; Jev's agreement on the fluids facet fails, and so did the annotators'.
+- [Pressure natriuresis](issues/03-pressure-natriuresis-check.md): the slice's kidney raises sodium excretion with pressure only through the filtered load, so it misses the human route at every parameter value. The missing piece is a renal law form that reads substrate S1's peritubular pressure, not a census arrow.
 - Depth is chased as couplings first: a new coupling field or census arrow, before finer law forms or map splits.
 - A new coupling enters as a split does under [record 0002](../../docs/adr/0002-map-starts-grouped.md): earned by a sourced check that fails without it, or by a clinician's question that brings a sourced target.
 - Animal-only evidence may set a law form when no human source exists, and the form is labelled animal-derived.
