@@ -1,4 +1,6 @@
-use gp_driver::{RunSpec, SMOKE_SPEC, SpecId, Table, digest_of_words, hex, summary_value};
+use gp_driver::{
+    Arrival, EventIndex, RunSpec, SMOKE_SPEC, SpecId, Table, digest_of_words, hex, summary_value,
+};
 use ng_validate::anchor_moment;
 use std::collections::BTreeMap;
 use std::fs;
@@ -107,17 +109,17 @@ fn table(file: &Path) -> Vec<Vec<u64>> {
 
 const MS: u64 = 1_000_000;
 
-fn arrivals(summary: &str, key: &str) -> Vec<[u64; 2]> {
+fn arrivals(summary: &str, key: &str) -> Vec<Arrival> {
     let listed = value(summary, key);
     if listed == "none" {
         return Vec::new();
     }
     let entry = |text: &str| {
         let (index, revision) = text.split_once('@').expect("index@revision");
-        [
-            index.parse().expect("an index"),
-            revision.parse().expect("a revision"),
-        ]
+        Arrival {
+            event: EventIndex(index.parse().expect("an index")),
+            revision: revision.parse().expect("a revision"),
+        }
     };
     listed.split(' ').map(entry).collect()
 }
@@ -539,11 +541,11 @@ fn late_inputs_are_the_same_course() {
     same_course(&variant);
     let arrived = arrivals(&summary(&variant), "enqueued");
     assert_eq!(
-        arrived.iter().map(|[index, _]| *index).collect::<Vec<_>>(),
-        [0, 1]
+        arrived.iter().map(|arrival| arrival.event).collect::<Vec<_>>(),
+        [EventIndex(0), EventIndex(1)]
     );
-    for (&[_, revision], stamp) in arrived.iter().zip([3_000 * MS, 8_000 * MS]) {
-        let head = head_at(&variant, revision);
+    for (arrival, stamp) in arrived.iter().zip([3_000 * MS, 8_000 * MS]) {
+        let head = head_at(&variant, arrival.revision);
         assert!(
             stamp - 500 * MS <= head && head < stamp,
             "an event at {stamp} ns entered at {head} ns"
@@ -642,13 +644,16 @@ fn a_closed_loop_run_is_the_course_of_its_realized_spec() {
     assert_eq!(lines, acted);
     let arrived = arrivals(&held, "enqueued");
     assert_eq!(
-        arrived.iter().map(|[index, _]| *index).collect::<Vec<_>>(),
-        [0, 1]
+        arrived.iter().map(|arrival| arrival.event).collect::<Vec<_>>(),
+        [EventIndex(0), EventIndex(1)]
     );
-    for (&[_, revision], event) in arrived.iter().zip(open.events()) {
-        let (head, stamp) = (head_at(&directory, revision), u64::from(event.at.ms()) * MS);
+    for (arrival, event) in arrived.iter().zip(open.events()) {
+        let (head, stamp) = (
+            head_at(&directory, arrival.revision),
+            u64::from(event.at.ms()) * MS,
+        );
         assert!(
-            revision > 0 && head < stamp,
+            arrival.revision > 0 && head < stamp,
             "{} entered at {head} ns",
             event.line()
         );

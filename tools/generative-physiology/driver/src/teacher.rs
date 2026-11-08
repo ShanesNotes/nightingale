@@ -2,7 +2,9 @@ use crate::archive::{
     BranchSummary, Course, FaultKind, FaultSummary, IdentityDigests, PartialRun, RunState, RunSummary,
     SUMMARY, Settled, write_synced,
 };
-use crate::capture::{BeatReading, Capture, Catalogue, CatalogueError, STEP_COLUMNS, step_row};
+use crate::capture::{
+    Arrival, BeatReading, Capture, Catalogue, CatalogueError, EventIndex, STEP_COLUMNS, step_row,
+};
 use crate::link_file::LinkFile;
 use crate::npy::NpyWriter;
 use crate::spec::{CAPTURE_VERSION, CoreChoice, PostureEvent, RunSpec, SpecError, Stamp, Variant};
@@ -223,7 +225,7 @@ fn enqueue(
     session: &mut Session<'_, Running>,
     event: &PostureEvent,
     index: usize,
-) -> Result<[u64; 2], TeachError> {
+) -> Result<Arrival, TeachError> {
     let refused = |error: AdmissionError| TeachError::Enqueue {
         event: index,
         error: Box::new(error),
@@ -231,7 +233,10 @@ fn enqueue(
     session
         .enqueue(authorized(event).map_err(refused)?)
         .map_err(refused)?;
-    Ok([index as u64, session.record().revision()])
+    Ok(Arrival {
+        event: EventIndex(index),
+        revision: session.record().revision(),
+    })
 }
 
 enum Stepped<'m> {
@@ -363,12 +368,15 @@ impl Policy<'_> {
         if self.known.contains(&action.at) {
             return refused(format!("{line} has the stamp of another event"));
         }
-        let index = (spec_events + self.actions.len()) as u64;
-        capture.register(action.id(), index);
+        let event = EventIndex(spec_events + self.actions.len());
+        capture.register(action.id(), event);
         if let Err(error) = session.enqueue(authorized(&action)?) {
             return refused(format!("the engine refused {line}: {error:?}"));
         }
-        capture.enqueued([index, session.record().revision()]);
+        capture.enqueued(Arrival {
+            event,
+            revision: session.record().revision(),
+        });
         self.known.insert(action.at);
         self.actions.push(action);
         Ok(None)
@@ -543,7 +551,7 @@ impl Original<'_, '_> {
 
 struct Followed {
     from_revision: u64,
-    enqueued: Vec<[u64; 2]>,
+    enqueued: Vec<Arrival>,
     head: Head,
     refusals: u64,
     fault: Option<FaultSummary>,
@@ -729,7 +737,7 @@ impl Teacher {
         };
         let first_seal = session.record().seal().digest();
         let inputs: BTreeMap<_, _> = (spec.events().iter().enumerate())
-            .map(|(index, event)| (event.id(), index as u64))
+            .map(|(index, event)| (event.id(), EventIndex(index)))
             .collect();
         let capture = Capture::create(partial.directory(), &self.body, &self.catalogue, &session, inputs)?;
         let bounds = Bounds {

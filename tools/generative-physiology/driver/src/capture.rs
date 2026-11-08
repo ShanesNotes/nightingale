@@ -339,6 +339,15 @@ fn ejected<S>(session: &Session<'_, S>, column: ColumnId) -> Compensated {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EventIndex(pub usize);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Arrival {
+    pub event: EventIndex,
+    pub revision: u64,
+}
+
 pub struct Capture<'c> {
     body: &'c CompiledBody,
     catalogue: &'c Catalogue,
@@ -350,8 +359,8 @@ pub struct Capture<'c> {
     chord: Vec<Compensated>,
     phase: Compensated,
     beat_edge: Option<Edge>,
-    inputs: BTreeMap<InputId, u64>,
-    enqueued: Vec<[u64; 2]>,
+    inputs: BTreeMap<InputId, EventIndex>,
+    enqueued: Vec<Arrival>,
 }
 impl<'c> Capture<'c> {
     pub fn create(
@@ -359,7 +368,7 @@ impl<'c> Capture<'c> {
         body: &'c CompiledBody,
         catalogue: &'c Catalogue,
         start: &Session<'_, Running>,
-        inputs: BTreeMap<InputId, u64>,
+        inputs: BTreeMap<InputId, EventIndex>,
     ) -> io::Result<Self> {
         let view = start.record().accepted();
         let width = catalogue.edge_columns(view.modes().len());
@@ -380,13 +389,13 @@ impl<'c> Capture<'c> {
         capture.edge(start)?;
         Ok(capture)
     }
-    pub fn register(&mut self, id: InputId, index: u64) {
-        self.inputs.insert(id, index);
+    pub fn register(&mut self, id: InputId, event: EventIndex) {
+        self.inputs.insert(id, event);
     }
-    pub fn enqueued(&mut self, entry: [u64; 2]) {
-        self.enqueued.push(entry);
+    pub fn enqueued(&mut self, arrival: Arrival) {
+        self.enqueued.push(arrival);
     }
-    pub fn late(&self) -> &[[u64; 2]] {
+    pub fn late(&self) -> &[Arrival] {
         &self.enqueued
     }
     pub fn beats(&self) -> u64 {
@@ -418,7 +427,7 @@ impl<'c> Capture<'c> {
         for id in receipt.applied() {
             let index = self.inputs.get(id).copied();
             let index = index.ok_or_else(|| io::Error::other("a step applied an input no spec names"))?;
-            self.applied.push(&[index, receipt.revision()])?;
+            self.applied.push(&[index.0 as u64, receipt.revision()])?;
         }
         let phase = view.value(self.catalogue.phase());
         let fell = !self.phase.at_most(phase);

@@ -10,7 +10,9 @@ pub use archive::{
     BranchSummary, Course, FaultKind, FaultSummary, IdentityDigests, RunState, RunSummary, SUMMARY,
     summary_value,
 };
-pub use capture::{BeatReading, Catalogue, CatalogueError, digest_of_words, step_row, words};
+pub use capture::{
+    Arrival, BeatReading, Catalogue, CatalogueError, EventIndex, digest_of_words, step_row, words,
+};
 pub use link_file::LinkFile;
 pub use npy::{Element, NpyWriter, Table};
 pub use smoke::{SMOKE_SPEC, check_smoke};

@@ -1,3 +1,4 @@
+use crate::capture::Arrival;
 use crate::spec::{SpecId, digest_of_hex, hex};
 use ng_contract::{Digest, EngineFaultKind, NumericalRefusal, SimTime};
 use ng_record::RecordDigests;
@@ -232,19 +233,19 @@ impl FaultSummary {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BranchSummary {
     pub from_revision: u64,
-    pub enqueued: Vec<[u64; 2]>,
+    pub enqueued: Vec<Arrival>,
     pub revisions: u64,
     pub refusals: u64,
     pub last_seal: Digest,
     pub end: RecordDigests,
 }
 
-fn entries(enqueued: &[[u64; 2]]) -> String {
+fn entries(enqueued: &[Arrival]) -> String {
     if enqueued.is_empty() {
         return "none".to_string();
     }
     let entries: Vec<String> = (enqueued.iter())
-        .map(|[index, revision]| format!("{index}@{revision}"))
+        .map(|arrival| format!("{}@{}", arrival.event.0, arrival.revision))
         .collect();
     entries.join(" ")
 }
@@ -287,7 +288,7 @@ pub struct RunSummary {
     pub revisions: u64,
     pub refusals: u64,
     pub beats: u64,
-    pub enqueued: Vec<[u64; 2]>,
+    pub enqueued: Vec<Arrival>,
     pub fault: Option<FaultSummary>,
     pub admission_s: f64,
     pub step_wall_s: f64,
