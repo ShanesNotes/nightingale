@@ -29,7 +29,6 @@ impl Stamp {
     pub fn sim_time(self) -> SimTime {
         SimTime::from_ns(anchor_moment().nanoseconds() + u64::from(self.0) * NS_PER_MS)
     }
-    /// The first whole ms at or after `at`, or `None` before the fence.
     pub fn at_or_after(at: SimTime) -> Option<Self> {
         let after = at.nanoseconds().checked_sub(anchor_moment().nanoseconds())?;
         Self::after_anchor_ms(u32::try_from(after.div_ceil(NS_PER_MS)).ok()?)
@@ -94,7 +93,6 @@ impl PostureEvent {
     pub fn line(&self) -> String {
         format!("event {}", self.words())
     }
-    /// Takes one canonical event line, as the spec grammar does.
     pub fn parse_line(text: &str) -> Result<Self, SpecError> {
         let Some(rest) = text.strip_prefix("event ") else {
             return Err(SpecError::Malformed { line: 1 });
@@ -120,7 +118,7 @@ impl PostureEvent {
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum CoreChoice {
-    /// `ng_solver::Core::new`, whose span never passes the cap.
+    /// `ng_solver::Core::new`.
     Picked { cap_ms: NonZeroU32 },
     /// Every field enters the resolution digest, so every field enters the run identity.
     Reference {
@@ -168,7 +166,7 @@ impl CoreChoice {
     }
 }
 
-/// Audit variants. A variant is part of the canonical text, so variants never share a spec id.
+/// A variant is part of the canonical text, so variants never share a spec id.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Variant {
     None,
@@ -201,7 +199,6 @@ impl Variant {
             Self::Replica(copy) => format!("replica {copy}"),
         }
     }
-    /// Only a variant that leaves the feed alone runs beside a closed loop.
     fn feeds_alone(&self) -> bool {
         matches!(self, Self::None | Self::ObserverOff | Self::Replica(_))
     }
@@ -254,7 +251,6 @@ pub enum SpecError {
     UnknownLine {
         line: usize,
     },
-    /// A line before a kind that must precede it, or a second line of a kind that comes once.
     OutOfOrder {
         line: usize,
     },
@@ -283,7 +279,6 @@ pub enum SpecError {
     ClosedLoopVariant {
         line: usize,
     },
-    /// The text parses, and it is not the text the spec renders.
     NotCanonical {
         line: usize,
     },
@@ -500,8 +495,7 @@ fn render(
     text
 }
 
-/// What a teacher run is told. `closed_loop` names the study's rule and its parameters; the driver never
-/// interprets it, and the id covers it.
+/// `closed_loop` names the study's rule and its parameters; the driver never interprets it, and the id covers it.
 #[derive(Clone, PartialEq, Debug)]
 pub struct RunSpec {
     core: CoreChoice,
@@ -622,7 +616,6 @@ impl RunSpec {
     pub fn variant(&self) -> Variant {
         self.variant
     }
-    /// The open-loop spec a closed-loop run realized: its own events and the loop's actions, in stamp order.
     pub fn realized(&self, actions: &[PostureEvent]) -> Result<Self, SpecError> {
         let mut events: Vec<PostureEvent> = self.events.iter().chain(actions).copied().collect();
         events.sort_by_key(|event| event.at);

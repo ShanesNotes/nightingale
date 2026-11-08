@@ -3,8 +3,7 @@ use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::marker::PhantomData;
 use std::path::Path;
 
-/// NPY format 1.0: the magic, the version and a little-endian header length, then the header text. A fixed 128
-/// bytes keeps the data 64-byte aligned and lets `finish` rewrite the row count in place.
+/// A fixed 128 bytes keeps the data 64-byte aligned and lets `finish` rewrite the row count in place.
 const HEADER: usize = 128;
 const MAGIC: &[u8; 8] = b"\x93NUMPY\x01\x00";
 
@@ -50,7 +49,7 @@ fn invalid(what: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, what.to_string())
 }
 
-/// A two-dimensional array written row by row, so a run's memory does not grow with its length.
+/// Written row by row, so a run's memory does not grow with its length.
 pub struct NpyWriter<E> {
     file: BufWriter<File>,
     columns: usize,
@@ -84,7 +83,6 @@ impl<E: Element> NpyWriter<E> {
     pub fn rows(&self) -> u64 {
         self.rows
     }
-    /// Writes the row count into the header and syncs the file.
     pub fn finish(self) -> io::Result<()> {
         let mut file = self.file.into_inner().map_err(io::IntoInnerError::into_error)?;
         file.seek(SeekFrom::Start(0))?;
@@ -93,7 +91,6 @@ impl<E: Element> NpyWriter<E> {
     }
 }
 
-/// A finished array, row major.
 #[derive(Debug, PartialEq)]
 pub struct Table<E> {
     columns: usize,

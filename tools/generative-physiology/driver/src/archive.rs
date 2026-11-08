@@ -8,15 +8,13 @@ use std::path::{Path, PathBuf};
 const LOCK: &str = "lock";
 pub const SUMMARY: &str = "summary.txt";
 
-/// The value of one `key value` line of a summary.
 pub fn summary_value<'t>(summary: &'t str, key: &str) -> Option<&'t str> {
     summary
         .lines()
         .find_map(|line| line.strip_prefix(key)?.strip_prefix(' '))
 }
 
-/// The digests that say which engine made a run: its model, packet, resolution and run identity
-/// (crates/ng-contract/src/scheme.rs:318-360).
+/// Which engine made a run (crates/ng-contract/src/scheme.rs:318-360).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Recorded {
     pub model: Digest,
@@ -45,8 +43,7 @@ impl Recorded {
 #[derive(Debug, PartialEq, Eq)]
 pub enum RunState {
     Missing,
-    /// Directories a run is writing, or ones a killed run left. A live run holds the lock inside its own for its
-    /// whole life, so a reused pid cannot pass for one.
+    /// A live run holds the lock inside its directory for its whole life, so a reused pid cannot pass for one.
     Partial {
         paths: Vec<PathBuf>,
         held: bool,
@@ -131,15 +128,13 @@ fn sync_directory(path: &Path) -> io::Result<()> {
     File::open(path)?.sync_all()
 }
 
-/// Where a finished directory went: its own name, or nowhere, because another process finished the same spec
-/// first and holds that name.
+/// `Lost`: another process finished the same spec first and holds the name.
 #[derive(Debug)]
 pub enum Settled {
     Renamed(PathBuf),
     Lost(PathBuf),
 }
 
-/// `<out>/<spec id>.partial-<pid>/`, locked while this process lives.
 pub struct PartialRun {
     out: PathBuf,
     id: SpecId,
@@ -248,7 +243,6 @@ impl FaultSummary {
     }
 }
 
-/// The copy or branch of a checkpoint variant, which the summary sets beside the original's end.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BranchSummary {
     pub from_revision: u64,
@@ -285,7 +279,6 @@ fn digest_lines(prefix: &str, digests: &RecordDigests) -> Vec<String> {
     ]
 }
 
-/// One run directory's `summary.txt`, one `key value` per line.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RunSummary {
     pub id: SpecId,

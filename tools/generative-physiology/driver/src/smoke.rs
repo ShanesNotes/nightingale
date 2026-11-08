@@ -6,7 +6,6 @@ use ng_validate::anchor_moment;
 use std::fs;
 use std::path::Path;
 
-/// A stand at 10 s and an end at 20 s on Core at a 10 ms cap.
 pub const SMOKE_SPEC: &str = "gp-run 1\ncore ng-solver cap-ms 10\nend-ms 20000\nevent at-ms 10000 trunk 1000 legs \
                               standing\nvariant none\n";
 /// `crates/ng-validate/tests/trace.rs:135-136` and `:147` pin these for Core at a 10 ms cap. A waiting input enters
@@ -17,7 +16,6 @@ pub const SMOKE_HEAD_NS: u64 = 1_000_079_707;
 const SMOKE_BEATS: u64 = 15;
 const SECOND_NS: u64 = 1_000_000_000;
 
-/// Each check on a smoke run's directory, as a line that says what it read, or the first that failed.
 pub fn check_smoke(directory: &Path) -> Result<Vec<String>, String> {
     let read = |name: &str| directory.join(name);
     let summary = fs::read_to_string(read(SUMMARY)).map_err(|error| format!("summary.txt: {error}"))?;

@@ -83,7 +83,6 @@ fn distinct(names: &[String]) -> Result<(), CatalogueError> {
     }
 }
 
-/// The names and ids a teacher run reads, taken once from the compiled body.
 pub struct Catalogue {
     rows: Vec<String>,
     columns: Vec<String>,
@@ -271,7 +270,6 @@ impl BeatReading {
             filtration,
         ]
     }
-    /// The closed loop's line: the beat and the earliest stamp an answer may take.
     pub fn json(&self, earliest: Stamp) -> String {
         let number = |value: f64| {
             if value.is_finite() {
@@ -332,7 +330,6 @@ pub fn step_row(revision: u64, end: SimTime, refusals: u64, seal: Digest) -> [u6
     ]
 }
 
-/// What a beat needs of one beat edge.
 #[derive(Clone, Copy)]
 struct Edge {
     at: SimTime,
@@ -417,7 +414,6 @@ impl<'c> Capture<'c> {
             *total = total.plus(Compensated::between(Compensated::ZERO, twice, 1, 2));
         }
     }
-    /// One accepted step: its row, the inputs it applied, and the beat it ended, if the phase fell.
     pub fn accepted(
         &mut self,
         session: &Session<'_, Running>,
@@ -473,7 +469,6 @@ impl<'c> Capture<'c> {
         }
         Ok(())
     }
-    /// The last edge, at the head the run ended at, whatever ended it.
     pub fn end<S>(&mut self, session: &Session<'_, S>) -> io::Result<()> {
         self.edge(session)
     }

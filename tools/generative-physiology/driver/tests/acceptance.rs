@@ -65,7 +65,6 @@ fn said(output: &Output) -> String {
     format!("exit {:?}: {text}", output.status.code())
 }
 
-/// The first two words of the driver's result line, and its exit code.
 fn result(output: &Output) -> (String, String, Option<i32>) {
     let text = stdout(output);
     let mut words = text.lines().next().unwrap_or_default().split(' ');
@@ -144,7 +143,6 @@ fn names(directory: &Path) -> Vec<String> {
     names
 }
 
-/// Polls until `ready` holds, a tenth of a second at a time, or panics after `seconds`.
 fn wait_for(seconds: u32, what: &str, mut ready: impl FnMut() -> bool) {
     for _ in 0..seconds * 10 {
         if ready() {
@@ -428,7 +426,6 @@ fn reference() -> &'static Path {
     REFERENCE.get_or_init(|| variant_run("none"))
 }
 
-/// The variant's own course is the reference course, step for step, and so is its applied input.
 fn same_course(variant: &Path) {
     let reference = reference();
     let known = seal_log(&reference.join("steps.npy"));
@@ -457,7 +454,6 @@ fn same_course(variant: &Path) {
     }
 }
 
-/// The copy or branch continues the reference course from its checkpoint to the same end.
 fn same_branch(variant: &Path) {
     let reference = reference();
     let (theirs, ours) = (summary(reference), summary(variant));

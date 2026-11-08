@@ -47,7 +47,7 @@ mod clock {
 }
 use clock::Stopwatch;
 
-/// The resident-memory limit a run stops at. The summary records it, and the spec id does not cover it.
+/// The summary records it, and the spec id does not cover it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MemoryCap {
     gigabytes: u32,
@@ -85,13 +85,9 @@ pub enum TeachError {
         event: usize,
         error: Box<AdmissionError>,
     },
-    /// A live process is writing this spec's run.
     Held(PathBuf),
-    /// `run` takes an open-loop spec and `interact` a closed-loop one.
     Loop,
-    /// The teacher was built for another core.
     OtherCore,
-    /// A checkpoint variant reached its end with no checkpoint.
     NoCheckpoint,
 }
 impl fmt::Display for TeachError {
@@ -148,7 +144,6 @@ impl From<SpecError> for TeachError {
     }
 }
 
-/// Where a run's directory stands after a command.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     /// Complete already, so nothing was written.
@@ -464,7 +459,6 @@ impl<'l> Feed<'l> {
     }
 }
 
-/// What every course stops at: the spec's end, the memory cap, and a history store that failed.
 #[derive(Clone, Copy)]
 struct Bounds<'r> {
     end: SimTime,
@@ -482,7 +476,6 @@ enum Ended<'m> {
     Stopped(Box<Stop>),
 }
 
-/// The run's own course, which writes every file but the branch's.
 struct Original<'r, 'l> {
     events: &'r [PostureEvent],
     bounds: Bounds<'r>,
@@ -567,7 +560,6 @@ struct Followed {
     fault: Option<FaultSummary>,
 }
 
-/// A copy or branch of a checkpoint variant: the withheld events again, then steps to the end, rows only.
 fn follow(
     mut session: Session<'_, Running>,
     withheld: &[(usize, PostureEvent)],
@@ -637,7 +629,6 @@ pub struct Teacher {
     catalogue: Catalogue,
 }
 impl Teacher {
-    /// Compiles the arena body once.
     pub fn new(core: &CoreChoice) -> Result<Self, TeachError> {
         let body = arena_body()?;
         let catalogue = Catalogue::of(&body)?;
@@ -651,14 +642,12 @@ impl Teacher {
     pub fn catalogue(&self) -> &Catalogue {
         &self.catalogue
     }
-    /// Writes `out/<spec id>/`, or `out/<spec id>.fault/` when the run faults or passes its cap.
     pub fn run(&self, spec: &RunSpec, options: &Options, out: &Path) -> Result<Outcome, TeachError> {
         if spec.closed_loop().is_some() {
             return Err(TeachError::Loop);
         }
         self.teach(spec, None, options, out)
     }
-    /// A closed-loop run: after each beat edge the driver asks the link and enqueues what comes back.
     pub fn interact(
         &self,
         spec: &RunSpec,

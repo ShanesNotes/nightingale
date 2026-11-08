@@ -109,7 +109,6 @@ fn spec_at(path: &Path) -> Result<RunSpec, Failure> {
     RunSpec::parse(&text).map_err(|error| Failure::Usage(format!("{}: {error}", path.display())))
 }
 
-/// The result line, and the exit code it carries.
 fn outcome(id: SpecId, outcome: &Outcome) -> (String, u8) {
     let (word, path, code) = match outcome {
         Outcome::Present(path) => ("present", path, 0),
