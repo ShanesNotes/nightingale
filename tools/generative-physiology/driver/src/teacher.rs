@@ -400,9 +400,9 @@ impl<'l> Feed<'l> {
                 next: 0,
             },
             Variant::CheckpointResume { at } | Variant::Rewind { at } => {
-                let past = at.sim_time().nanoseconds().saturating_add(longest_step_ns);
+                let beyond_checkpoint_head = at.sim_time().nanoseconds().saturating_add(longest_step_ns);
                 let withheld = (spec.events().iter())
-                    .position(|event| event.at.sim_time().nanoseconds() >= past)
+                    .position(|event| event.at.sim_time().nanoseconds() >= beyond_checkpoint_head)
                     .unwrap_or(spec.events().len());
                 Self::AfterCheckpoint {
                     at: at.sim_time(),
