@@ -165,7 +165,8 @@ fn score(arguments: &[String]) {
     );
     let named = arguments.get(2).expect("a core");
     let protocol = match arguments.get(3).map(String::as_str) {
-        Some("full") => ArenaProtocol::full(),
+        Some("pick") => ArenaProtocol::pick(),
+        Some("milestone") => ArenaProtocol::milestone(),
         _ => {
             let window = NonZeroU64::new(number(3, "a certificate window in s") * 1_000 * MS);
             let repeats = u32::try_from(number(5, "repeats")).ok().and_then(NonZeroU32::new);
@@ -174,9 +175,9 @@ fn score(arguments: &[String]) {
                     window.expect("a window"),
                     number(4, "a span in s") * 1_000 * MS,
                 )
-                .expect("a span longer than its window"),
+                .expect("a span of at least its window"),
                 repeats: repeats.expect("at least one repeat"),
-                ..ArenaProtocol::full()
+                ..ArenaProtocol::pick()
             }
         }
     };

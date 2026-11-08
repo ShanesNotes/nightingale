@@ -1954,6 +1954,64 @@ fn the_worst_window_can_start_inside_a_segment() {
     );
 }
 
+fn one_hour_of_a_steady_delivery(
+    past_the_hour_s: u64,
+    drift: f64,
+) -> Result<Certificate, CertificateFailure> {
+    let store = MemoryStore::default();
+    let case = TwoReservoirs::delivering(
+        [measure(1_000.0), measure(1_000.0)],
+        vec![
+            delivery(b"steady", 0, 3_600, 1.0),
+            delivery(b"faster past the hour", 3_600, 3_720, 5.0),
+        ],
+    )
+    .expect("a body");
+    let core = reference(60 * SECOND);
+    let end = SimTime::from_ns(HOUR + past_the_hour_s * SECOND);
+    let session = to(case.admit(&core, &store).expect("admitted"), end);
+    let view = session.conservation();
+    certified(
+        &view,
+        &Ledger::sliding(view.basis(), HOUR, HOUR, 1e-24, 1e-9, drift),
+    )
+}
+
+#[test]
+fn a_history_one_window_long_is_certified_on_its_one_window() {
+    let certificate = one_hour_of_a_steady_delivery(0, 1e12).expect("it closes");
+    let hour = Interval::new(SimTime::from_ns(0), SimTime::from_ns(HOUR)).expect("an hour");
+    assert_eq!((certificate.pieces(), certificate.span()), (1, hour));
+    let result = certificate.results()[0];
+    assert_eq!((result.closure_window(), result.drift_window()), (hour, hour));
+    assert!(
+        result
+            .worst_closure()
+            .at_most(Compensated::of(&measure::<Water>(1e-24)))
+    );
+    assert!(
+        (hi(result.worst_drift()) - 3_600.0).abs() < 1e-6,
+        "{:?}",
+        result.worst_drift()
+    );
+    let failure = one_hour_of_a_steady_delivery(0, 3_599.0).expect_err("it moved 3,600");
+    assert_eq!(
+        (failure.check(), failure.window()),
+        (CertificateCheck::Drift, Some(hour))
+    );
+}
+
+#[test]
+fn a_coverage_of_one_window_is_the_window_from_admission_however_far_the_history_runs() {
+    // The window from 60 s moves 3,840 and the one from 120 s 4,080, so a window past admission fails the bound.
+    let certificate = one_hour_of_a_steady_delivery(120, 3_700.0).expect("only the hour from admission");
+    let hour = Interval::new(SimTime::from_ns(0), SimTime::from_ns(HOUR)).expect("an hour");
+    assert_eq!(certificate.pieces(), 1);
+    let result = certificate.results()[0];
+    assert_eq!((result.closure_window(), result.drift_window()), (hour, hour));
+    assert!((hi(result.worst_drift()) - 3_600.0).abs() < 1e-6);
+}
+
 #[test]
 fn a_ledger_that_does_not_close_fails_closure_before_drift() {
     let store = MemoryStore::default();
@@ -2030,6 +2088,15 @@ fn the_certificate_walked_newest_first_is_the_certificate_walked_in_time_order()
                 &view,
                 &ledger_policy_with(view.basis(), absolute, relative, drift),
             );
+        }
+        let one_window = to(
+            case.admit(&core, &store).expect("admitted"),
+            SimTime::from_ns(6 * HOUR),
+        );
+        let view = one_window.conservation();
+        for (absolute, relative, drift) in limits {
+            let ledger = Ledger::sliding(view.basis(), 6 * HOUR, 6 * HOUR, absolute, relative, drift);
+            let _ = certified(&view, &ledger);
         }
     }
 }
@@ -2133,8 +2200,9 @@ fn a_certificate_policy_is_checked_when_it_is_built() {
     let windows = SlidingWindows::new(day, 48 * HOUR).expect("a coverage");
     let short = CertificatePolicy::new(basis, Vec::new(), ExpectedDrift::Zero, windows).err();
     assert_eq!(short, Some(AdmissionError::PolicyCoverage));
+    assert!(SlidingWindows::new(day, 24 * HOUR).is_ok());
     assert_eq!(
-        SlidingWindows::new(day, 24 * HOUR).err(),
+        SlidingWindows::new(day, 24 * HOUR - 1).err(),
         Some(AdmissionError::ShortCoverage)
     );
 }
