@@ -137,6 +137,11 @@ struct Staged {
 impl Staged {
     fn create(out: &Path, id: SpecId) -> io::Result<Self> {
         let directory = out.join(format!(".{id}.staging-{}", std::process::id()));
+        // The name holds this process's pid, so a directory already there is a dead run's.
+        match fs::remove_dir_all(&directory) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        }
         fs::create_dir(&directory)?;
         let lock = File::create_new(directory.join(LOCK))?;
         lock.lock()?;
@@ -393,7 +398,10 @@ mod tests {
         fs::create_dir_all(&out).expect("a scratch directory");
         let text = "gp-run 1\ncore ng-solver cap-ms 10\nend-ms 2000\nvariant none\n";
         let id = RunSpec::parse(text).expect("canonical").id();
-        let staged = Staged::create(&out, id).expect("staged");
+        let left = out.join(format!(".{id}.staging-{}", std::process::id()));
+        fs::create_dir(&left).expect("a staging directory a killed run with this pid left");
+        fs::write(left.join("lock"), "").expect("its lock file");
+        let staged = Staged::create(&out, id).expect("staged over what a dead run left");
         assert_eq!(
             RunState::of(&out, id).expect("a state"),
             RunState::Missing,
