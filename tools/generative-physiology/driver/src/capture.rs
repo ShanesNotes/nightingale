@@ -359,8 +359,6 @@ pub struct Capture<'c> {
     integrals: Vec<Compensated>,
     phase: Compensated,
     beat_edge: Option<Edge>,
-    /// Applied inputs and arrivals, held by input id until `finish`, because a closed loop's actions take
-    /// their places among the events only when its realized spec is known.
     applications: Vec<(InputId, u64)>,
     arrivals: Vec<(InputId, u64)>,
 }
@@ -465,9 +463,7 @@ impl<'c> Capture<'c> {
     pub fn end<S>(&mut self, session: &Session<'_, S>) -> io::Result<()> {
         self.edge(session)
     }
-    /// Names each applied input and each arrival by its event's position in `events`, the run's open-loop
-    /// spec, and returns the arrivals.
-    pub fn finish(self, events: &[PostureEvent]) -> io::Result<Vec<Arrival>> {
+    pub fn finish(self, open_loop_events: &[PostureEvent]) -> io::Result<Vec<Arrival>> {
         let Self {
             edges,
             beats,
@@ -478,7 +474,7 @@ impl<'c> Capture<'c> {
             arrivals,
             ..
         } = self;
-        let positions: BTreeMap<InputId, EventIndex> = (events.iter().enumerate())
+        let positions: BTreeMap<InputId, EventIndex> = (open_loop_events.iter().enumerate())
             .map(|(at, event)| (event.id(), EventIndex(at)))
             .collect();
         let named = |id: InputId, unnamed: &'static str| {

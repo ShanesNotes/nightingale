@@ -126,8 +126,8 @@ pub enum Settled {
     FinishedByAnother(PathBuf),
 }
 
-/// Under a name `RunState::of` never reads until its lock is held, so no other run takes a live run's
-/// directory for an abandoned partial and removes it.
+/// The platform cannot make a directory with a lock already held inside it, so a run locks one under a name
+/// `RunState::of` never reads, and only then renames it into view.
 struct Staged {
     out: PathBuf,
     id: SpecId,
