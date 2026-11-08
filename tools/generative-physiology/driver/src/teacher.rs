@@ -395,21 +395,35 @@ impl Policy<'_> {
 }
 
 impl<'l> Feed<'l> {
-    fn choose(spec: &RunSpec, longest_step_ns: u64, link: Option<&'l mut dyn PolicyLink>) -> Self {
+    fn choose(
+        spec: &RunSpec,
+        longest_step_ns: u64,
+        link: Option<&'l mut dyn PolicyLink>,
+    ) -> Result<Self, TeachError> {
         if let Some(link) = link {
-            return Self::Policy(Policy {
+            return Ok(Self::Policy(Policy {
                 link,
                 end: spec.end(),
                 known: spec.events().iter().map(|event| event.at).collect(),
                 actions: Vec::new(),
-            });
+            }));
         }
-        match spec.variant() {
+        Ok(match spec.variant() {
             Variant::None | Variant::ObserverOff | Variant::Replica(_) => Self::Port,
-            Variant::Late { lead_ms } => Self::Late {
-                lead_ns: u64::from(lead_ms.get()) * NS_PER_MS,
-                next: 0,
-            },
+            Variant::Late { lead_ms } => {
+                let lead_ns = u64::from(lead_ms.get()) * NS_PER_MS;
+                // An event enters at the first head at or after its stamp minus the lead. That head is at
+                // most one longest step past the one before (crates/ng-contract/src/boundary.rs:384), and
+                // the fence moves only to the stamp of a waiting input inside a step (boundary.rs:405-417,
+                // 449-452), so a lead of at least the longest step keeps the stamp at or after both.
+                if lead_ns < longest_step_ns {
+                    return Err(TeachError::ShortLead {
+                        lead_ns,
+                        longest_step_ns,
+                    });
+                }
+                Self::Late { lead_ns, next: 0 }
+            }
             Variant::CheckpointResume { at } | Variant::Rewind { at } => {
                 let beyond_checkpoint_head = at.sim_time().nanoseconds().saturating_add(longest_step_ns);
                 let withheld = (spec.events().iter())
@@ -421,7 +435,7 @@ impl<'l> Feed<'l> {
                     saved: None,
                 }
             }
-        }
+        })
     }
     fn port<'e>(&self, events: &'e [PostureEvent]) -> &'e [PostureEvent] {
         match self {
@@ -680,6 +694,7 @@ impl Teacher {
         if *spec.core() != self.choice {
             return Err(TeachError::OtherCore);
         }
+        let feed = Feed::choose(spec, self.body.longest_step_ns(), link)?;
         let id = spec.id();
         fs::create_dir_all(out)?;
         match RunState::of(out, id)? {
@@ -698,7 +713,7 @@ impl Teacher {
         let partial = PartialRun::create(out, id)?;
         write_synced(&partial.file("spec.txt"), &spec.canonical())?;
         let links = LinkFile::create(&partial.file("links"))?;
-        let summary = self.courses(spec, link, options, &partial, &links)?;
+        let summary = self.courses(spec, feed, options, &partial, &links)?;
         links.remove()?;
         write_synced(&partial.file(SUMMARY), &summary.render())?;
         Ok(match summary.fault {
@@ -715,13 +730,12 @@ impl Teacher {
     fn courses(
         &self,
         spec: &RunSpec,
-        link: Option<&mut dyn PolicyLink>,
+        feed: Feed<'_>,
         options: &Options,
         partial: &PartialRun,
         links: &LinkFile,
     ) -> Result<RunSummary, TeachError> {
         let lens = arena_lens(&self.body)?;
-        let feed = Feed::choose(spec, self.body.longest_step_ns(), link);
         let port: Result<Vec<_>, _> = (feed.port(spec.events()).iter())
             .map(PostureEvent::boundary_event)
             .collect();
