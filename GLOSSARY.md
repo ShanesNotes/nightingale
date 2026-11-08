@@ -58,7 +58,7 @@ A saved copy of the whole accepted state at a step boundary, from which a run re
 _Avoid_: save (in prose)
 
 **Fault export**:
-What a faulted run gives for diagnosis: its last accepted checkpoint marked latched, with the fault and the refusals before it. Resume refuses it, so only recover continues from it, on a new branch.
+What a faulted run gives for diagnosis: its last accepted checkpoint marked latched, with the fault and the refusals before it. Resume refuses it, so only recover continues from it, on a new branch. The export first hands the history store each link that still waits.
 
 **Seal**:
 A digest that chains the seal before it with one accepted step's image and ledger chunk, so one seal stands for the whole accepted course up to that step. It covers nothing that waits.

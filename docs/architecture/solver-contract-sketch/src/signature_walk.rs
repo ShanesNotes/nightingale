@@ -398,7 +398,7 @@
 //!                 let _why = retrying.refused().reason();
 //!                 retrying.retry()
 //!             }
-//!             Step::Faulted(stopped) => {
+//!             Step::Faulted(mut stopped) => {
 //!                 let _report: FaultReport = stopped.export()?;
 //!                 return stopped.recover(earlier, BranchId::new(Digest::of_canonical(b"b1")));
 //!             }

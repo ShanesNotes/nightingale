@@ -222,7 +222,7 @@ fn read(clock: &dyn WallClock) -> Result<u64, ArenaFailure> {
     clock.elapsed_ns().ok_or(ArenaFailure::MissingThroughput)
 }
 
-fn exported(stopped: Session<'_, Faulted>, health: NumericalHealth) -> ArenaFailure {
+fn exported(mut stopped: Session<'_, Faulted>, health: NumericalHealth) -> ArenaFailure {
     match stopped.export() {
         Ok(report) => ArenaFailure::Faulted {
             report: Box::new(report),
