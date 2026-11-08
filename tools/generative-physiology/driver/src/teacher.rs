@@ -141,8 +141,8 @@ impl From<SpecError> for TeachError {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
-    Present(PathBuf),
-    FaultFound(PathBuf),
+    AlreadyPresent(PathBuf),
+    AlreadyFaulted(PathBuf),
     Complete(PathBuf),
     Faulted(PathBuf),
 }
@@ -664,8 +664,8 @@ impl Teacher {
         let id = spec.id();
         fs::create_dir_all(out)?;
         match RunState::of(out, id)? {
-            RunState::Present(_) => return Ok(Outcome::Present(out.join(id.to_string()))),
-            RunState::Fault(path) => return Ok(Outcome::FaultFound(path)),
+            RunState::Present(_) => return Ok(Outcome::AlreadyPresent(out.join(id.to_string()))),
+            RunState::Fault(path) => return Ok(Outcome::AlreadyFaulted(path)),
             RunState::Partial { paths, held: true } => {
                 return Err(TeachError::Held(paths.into_iter().next().unwrap_or_default()));
             }
@@ -685,11 +685,11 @@ impl Teacher {
         Ok(match summary.fault {
             None => match partial.complete()? {
                 Settled::Renamed(path) => Outcome::Complete(path),
-                Settled::FinishedByAnother(path) => Outcome::Present(path),
+                Settled::FinishedByAnother(path) => Outcome::AlreadyPresent(path),
             },
             Some(_) => match partial.fault()? {
                 Settled::Renamed(path) => Outcome::Faulted(path),
-                Settled::FinishedByAnother(path) => Outcome::FaultFound(path),
+                Settled::FinishedByAnother(path) => Outcome::AlreadyFaulted(path),
             },
         })
     }

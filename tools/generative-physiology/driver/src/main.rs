@@ -111,9 +111,9 @@ fn spec_at(path: &Path) -> Result<RunSpec, Failure> {
 
 fn outcome(id: SpecId, outcome: &Outcome) -> (String, u8) {
     let (word, path, code) = match outcome {
-        Outcome::Present(path) => ("present", path, 0),
+        Outcome::AlreadyPresent(path) => ("present", path, 0),
         Outcome::Complete(path) => ("complete", path, 0),
-        Outcome::FaultFound(path) | Outcome::Faulted(path) => ("fault", path, 3),
+        Outcome::AlreadyFaulted(path) | Outcome::Faulted(path) => ("fault", path, 3),
     };
     (format!("{word} {id} {}", path.display()), code)
 }
@@ -143,8 +143,8 @@ fn smoke(out: &Path, options: &Options) -> Result<u8, Failure> {
     let (line, _) = outcome(spec.id(), &result);
     println!("{line}");
     let directory = match &result {
-        Outcome::Present(path) | Outcome::Complete(path) => path,
-        Outcome::FaultFound(_) | Outcome::Faulted(_) => {
+        Outcome::AlreadyPresent(path) | Outcome::Complete(path) => path,
+        Outcome::AlreadyFaulted(_) | Outcome::Faulted(_) => {
             println!("smoke: failed: the run faulted");
             return Ok(1);
         }
