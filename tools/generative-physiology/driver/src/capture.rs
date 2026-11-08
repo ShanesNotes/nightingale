@@ -312,8 +312,9 @@ pub fn words(digest: Digest) -> [u64; 4] {
 
 pub fn digest_of_words(words: [u64; 4]) -> Digest {
     let mut bytes = [0u8; 32];
-    for (chunk, word) in bytes.chunks_exact_mut(8).zip(words) {
-        chunk.copy_from_slice(&word.to_be_bytes());
+    let (chunks, _) = bytes.as_chunks_mut::<8>();
+    for (chunk, word) in chunks.iter_mut().zip(words) {
+        *chunk = word.to_be_bytes();
     }
     Digest::from_bytes(bytes)
 }

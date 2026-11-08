@@ -235,13 +235,15 @@ pub fn digest_of_hex(text: &str) -> Option<Digest> {
     if bytes.len() != 64 {
         return None;
     }
+    let nibble = |digit: u8| match digit {
+        b'0'..=b'9' => Some(digit - b'0'),
+        b'a'..=b'f' => Some(digit - b'a' + 10),
+        _ => None,
+    };
     let mut digest = [0u8; 32];
-    for (byte, pair) in digest.iter_mut().zip(bytes.chunks_exact(2)) {
-        let pair = core::str::from_utf8(pair).ok()?;
-        if pair.bytes().any(|digit| digit.is_ascii_uppercase()) {
-            return None;
-        }
-        *byte = u8::from_str_radix(pair, 16).ok()?;
+    let (pairs, _) = bytes.as_chunks::<2>();
+    for (byte, &[high, low]) in digest.iter_mut().zip(pairs) {
+        *byte = (nibble(high)? << 4) | nibble(low)?;
     }
     Some(Digest::from_bytes(digest))
 }
