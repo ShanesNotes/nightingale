@@ -267,7 +267,7 @@ fn step(session: Session<'_, Running>) -> Stepped<'_> {
     }
 }
 
-fn engine_fault(course: Course, session: &Session<'_, Faulted>, refusals: u64) -> FaultSummary {
+fn engine_fault(course: Course, session: &Session<'_, Faulted>, step_refusals: u64) -> FaultSummary {
     let fault = session.fault();
     FaultSummary {
         course,
@@ -277,7 +277,7 @@ fn engine_fault(course: Course, session: &Session<'_, Faulted>, refusals: u64) -
         },
         at: fault.at(),
         attempted_ns: fault.attempted_ns(),
-        refusals,
+        step_refusals,
     }
 }
 
@@ -287,7 +287,7 @@ fn halt<S>(course: Course, session: &Session<'_, S>, kind: FaultKind) -> FaultSu
         kind,
         at: session.record().accepted().time(),
         attempted_ns: 0,
-        refusals: 0,
+        step_refusals: 0,
     }
 }
 

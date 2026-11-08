@@ -199,7 +199,7 @@ pub struct FaultSummary {
     pub kind: FaultKind,
     pub at: SimTime,
     pub attempted_ns: u64,
-    pub refusals: u64,
+    pub step_refusals: u64,
 }
 impl FaultSummary {
     fn lines(&self) -> Vec<String> {
@@ -223,7 +223,7 @@ impl FaultSummary {
             format!("fault_course {course}"),
             format!("fault_at_ns {}", self.at.nanoseconds()),
             format!("fault_attempted_ns {}", self.attempted_ns),
-            format!("fault_refusals {}", self.refusals),
+            format!("fault_step_refusals {}", self.step_refusals),
             format!("fault_detail {detail}"),
         ]
     }
