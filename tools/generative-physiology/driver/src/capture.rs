@@ -430,9 +430,9 @@ impl<'c> Capture<'c> {
             self.applied.push(&[index.0 as u64, receipt.revision()])?;
         }
         let phase = view.value(self.catalogue.phase());
-        let fell = !self.phase.at_most(phase);
+        let at_beat_edge = !self.phase.at_most(phase);
         self.phase = phase;
-        if !fell {
+        if !at_beat_edge {
             return Ok(None);
         }
         self.edge(session)?;
