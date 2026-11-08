@@ -1,5 +1,5 @@
 use crate::npy::NpyWriter;
-use crate::spec::Stamp;
+use crate::spec::{PostureEvent, Stamp};
 use core::fmt;
 use ng_contract::{
     AcceptedStateView, AnatomyBuilder, CapillaryBed, Column, ColumnId, Compensated, CompiledBody, Context,
@@ -359,8 +359,10 @@ pub struct Capture<'c> {
     integrals: Vec<Compensated>,
     phase: Compensated,
     beat_edge: Option<Edge>,
-    inputs: BTreeMap<InputId, EventIndex>,
-    enqueued: Vec<Arrival>,
+    /// Applied inputs and arrivals, held by input id until `finish`, because a closed loop's actions take
+    /// their places among the events only when its realized spec is known.
+    applications: Vec<(InputId, u64)>,
+    arrivals: Vec<(InputId, u64)>,
 }
 impl<'c> Capture<'c> {
     pub fn create(
@@ -368,7 +370,6 @@ impl<'c> Capture<'c> {
         body: &'c CompiledBody,
         catalogue: &'c Catalogue,
         start: &Session<'_, Running>,
-        inputs: BTreeMap<InputId, EventIndex>,
     ) -> io::Result<Self> {
         let view = start.record().accepted();
         let width = catalogue.edge_columns(view.modes().len());
@@ -383,20 +384,14 @@ impl<'c> Capture<'c> {
             integrals: vec![Compensated::ZERO; catalogue.rows().len()],
             phase: view.value(catalogue.phase()),
             beat_edge: None,
-            inputs,
-            enqueued: Vec::new(),
+            applications: Vec::new(),
+            arrivals: Vec::new(),
         };
         capture.edge(start)?;
         Ok(capture)
     }
-    pub fn register(&mut self, id: InputId, event: EventIndex) {
-        self.inputs.insert(id, event);
-    }
-    pub fn enqueued(&mut self, arrival: Arrival) {
-        self.enqueued.push(arrival);
-    }
-    pub fn late(&self) -> &[Arrival] {
-        &self.enqueued
+    pub fn enqueued(&mut self, id: InputId, revision: u64) {
+        self.arrivals.push((id, revision));
     }
     pub fn beats(&self) -> u64 {
         self.beats.rows()
@@ -424,10 +419,8 @@ impl<'c> Capture<'c> {
         self.integrate(view);
         let row = step_row(receipt.revision(), view.time(), refusals, receipt.seal().digest());
         self.steps.push(&row)?;
-        for id in receipt.applied() {
-            let index = self.inputs.get(id).copied();
-            let index = index.ok_or_else(|| io::Error::other("a step applied an input no spec names"))?;
-            self.applied.push(&[index.0 as u64, receipt.revision()])?;
+        for &id in receipt.applied() {
+            self.applications.push((id, receipt.revision()));
         }
         let phase = view.value(self.catalogue.phase());
         let at_beat_edge = !self.phase.at_most(phase);
@@ -472,20 +465,44 @@ impl<'c> Capture<'c> {
     pub fn end<S>(&mut self, session: &Session<'_, S>) -> io::Result<()> {
         self.edge(session)
     }
-    pub fn finish(self) -> io::Result<()> {
+    /// Names each applied input and each arrival by its event's position in `events`, the run's open-loop
+    /// spec, and returns the arrivals.
+    pub fn finish(self, events: &[PostureEvent]) -> io::Result<Vec<Arrival>> {
         let Self {
             edges,
             beats,
             steps,
-            applied,
+            mut applied,
             lens,
+            applications,
+            arrivals,
             ..
         } = self;
+        let positions: BTreeMap<InputId, EventIndex> = (events.iter().enumerate())
+            .map(|(at, event)| (event.id(), EventIndex(at)))
+            .collect();
+        let named = |id: InputId, unnamed: &'static str| {
+            positions
+                .get(&id)
+                .copied()
+                .ok_or_else(|| io::Error::other(unnamed))
+        };
+        for &(id, revision) in &applications {
+            let index = named(id, "a step applied an input no spec names")?;
+            applied.push(&[index.0 as u64, revision])?;
+        }
+        let arrived = (arrivals.iter())
+            .map(|&(id, revision)| -> io::Result<Arrival> {
+                let event = named(id, "an input arrived that no spec names")?;
+                Ok(Arrival { event, revision })
+            })
+            .collect::<io::Result<Vec<_>>>()?;
         edges.finish()?;
         beats.finish()?;
         steps.finish()?;
         applied.finish()?;
-        lens.finish()
+        lens.finish()?;
+        Ok(arrived)
     }
     fn edge<S>(&mut self, session: &Session<'_, S>) -> io::Result<()> {
         let record = session.record();

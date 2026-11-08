@@ -19,7 +19,7 @@ use ng_record::{
     Running, Session, Step, StepReceipt,
 };
 use ng_validate::{Admitted, admit_at, anchor_moment, arena_body, arena_lens, arena_packet};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -236,7 +236,7 @@ fn enqueue(
     session: &mut Session<'_, Running>,
     event: &PostureEvent,
     index: usize,
-) -> Result<Arrival, TeachError> {
+) -> Result<u64, TeachError> {
     let refused = |error: AdmissionError| TeachError::Enqueue {
         event: index,
         error: Box::new(error),
@@ -244,10 +244,7 @@ fn enqueue(
     session
         .enqueue(authorized(event).map_err(refused)?)
         .map_err(refused)?;
-    Ok(Arrival {
-        event: EventIndex(index),
-        revision: session.record().revision(),
-    })
+    Ok(session.record().revision())
 }
 
 enum Stepped<'m> {
@@ -349,7 +346,6 @@ impl Policy<'_> {
         &mut self,
         session: &mut Session<'_, Running>,
         beat: &BeatReading,
-        spec_events: usize,
         capture: &mut Capture<'_>,
     ) -> Result<Option<FaultKind>, TeachError> {
         let refused = |reason: String| -> Result<Option<FaultKind>, TeachError> {
@@ -379,15 +375,10 @@ impl Policy<'_> {
         if self.known.contains(&action.at) {
             return refused(format!("{line} has the stamp of another event"));
         }
-        let event = EventIndex(spec_events + self.actions.len());
-        capture.register(action.id(), event);
         if let Err(error) = session.enqueue(authorized(&action)?) {
             return refused(format!("the engine refused {line}: {error:?}"));
         }
-        capture.enqueued(Arrival {
-            event,
-            revision: session.record().revision(),
-        });
+        capture.enqueued(action.id(), session.record().revision());
         self.known.insert(action.at);
         self.actions.push(action);
         Ok(None)
@@ -459,7 +450,7 @@ impl<'l> Feed<'l> {
                     if event.at.sim_time().nanoseconds().saturating_sub(*lead_ns) > head.nanoseconds() {
                         break;
                     }
-                    capture.enqueued(enqueue(session, event, *next)?);
+                    capture.enqueued(event.id(), enqueue(session, event, *next)?);
                     *next += 1;
                 }
             }
@@ -467,13 +458,13 @@ impl<'l> Feed<'l> {
                 if saved.is_none() && head >= *at {
                     *saved = Some(session.checkpoint()?);
                     for (index, event) in events.iter().enumerate().skip(*withheld) {
-                        capture.enqueued(enqueue(session, event, index)?);
+                        capture.enqueued(event.id(), enqueue(session, event, index)?);
                     }
                 }
             }
             Self::Policy(policy) => {
                 if let Some(beat) = beat {
-                    return policy.answer(session, beat, events.len(), capture);
+                    return policy.answer(session, beat, capture);
                 }
             }
         }
@@ -589,7 +580,13 @@ fn follow(
     steps: &mut NpyWriter<u64>,
 ) -> Result<Followed, TeachError> {
     let enqueued = (withheld.iter())
-        .map(|(index, event)| enqueue(&mut session, event, *index))
+        .map(|(index, event)| -> Result<Arrival, TeachError> {
+            let revision = enqueue(&mut session, event, *index)?;
+            Ok(Arrival {
+                event: EventIndex(*index),
+                revision,
+            })
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let from_revision = session.record().revision();
     let (mut refusals, mut accepted) = (0, 0u64);
@@ -761,10 +758,7 @@ impl Teacher {
             run_identity: identity.digest(),
         };
         let first_seal = session.record().seal().digest();
-        let inputs: BTreeMap<_, _> = (spec.events().iter().enumerate())
-            .map(|(index, event)| (event.id(), EventIndex(index)))
-            .collect();
-        let capture = Capture::create(partial.directory(), &self.body, &self.catalogue, &session, inputs)?;
+        let capture = Capture::create(partial.directory(), &self.body, &self.catalogue, &session)?;
         let bounds = Bounds {
             end: spec.end().sim_time(),
             cap: options.cap,
@@ -827,8 +821,11 @@ impl Teacher {
         }
         let step_wall_s = clock.seconds();
         let beats = capture.beats();
-        let enqueued = capture.late().to_vec();
-        capture.finish()?;
+        let realized = match &feed {
+            Feed::Policy(policy) => Some(spec.realized(&policy.actions)?),
+            Feed::Port | Feed::Late { .. } | Feed::AfterCheckpoint { .. } => None,
+        };
+        let enqueued = capture.finish(realized.as_ref().map_or(spec.events(), RunSpec::events))?;
         let mut files = vec![
             "spec.txt",
             "edges.npy",
@@ -840,8 +837,7 @@ impl Teacher {
         if branch.is_some() {
             files.push("branch-steps.npy");
         }
-        if let Feed::Policy(policy) = &feed {
-            let realized = spec.realized(&policy.actions)?;
+        if let Some(realized) = &realized {
             write_synced(&partial.file("realized.txt"), &realized.canonical())?;
             files.push("realized.txt");
         }
