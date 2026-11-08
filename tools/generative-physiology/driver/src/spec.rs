@@ -309,7 +309,7 @@ struct Kind {
     parse: fn(Words<'_>) -> Result<Line, SpecError>,
 }
 
-const KINDS: [Kind; 6] = [
+const LINES_IN_ORDER: [Kind; 6] = [
     Kind {
         keyword: "gp-run",
         count: Count::One,
@@ -490,18 +490,18 @@ pub struct RunSpec {
 impl RunSpec {
     pub fn parse(text: &str) -> Result<Self, SpecError> {
         let body = text.strip_suffix('\n').ok_or(SpecError::NoFinalNewline)?;
-        let mut seen = [0usize; KINDS.len()];
+        let mut seen = [0usize; LINES_IN_ORDER.len()];
         let mut last = 0;
         let (mut core, mut end, mut closed_loop, mut variant) = (None, None, None, None);
         let mut events: Vec<(PostureEvent, usize)> = Vec::new();
-        let mut lines = [0usize; KINDS.len()];
+        let mut lines = [0usize; LINES_IN_ORDER.len()];
         for (at, text) in body.split('\n').enumerate() {
             let line = at + 1;
             let keyword = text.split_whitespace().next().unwrap_or_default();
-            let kind = (KINDS.iter())
+            let kind = (LINES_IN_ORDER.iter())
                 .position(|kind| kind.keyword == keyword)
                 .ok_or(SpecError::UnknownLine { line })?;
-            let repeated = seen[kind] > 0 && KINDS[kind].count != Count::Many;
+            let repeated = seen[kind] > 0 && LINES_IN_ORDER[kind].count != Count::Many;
             if kind < last || repeated {
                 return Err(SpecError::OutOfOrder { line });
             }
@@ -509,7 +509,7 @@ impl RunSpec {
             seen[kind] += 1;
             lines[kind] = line;
             let rest = text.trim_start().strip_prefix(keyword).unwrap_or_default();
-            match (KINDS[kind].parse)(Words::of(rest, line))? {
+            match (LINES_IN_ORDER[kind].parse)(Words::of(rest, line))? {
                 Line::Grammar => {}
                 Line::Core(choice) => core = Some(choice),
                 Line::End(at) => end = Some(at),
@@ -519,7 +519,7 @@ impl RunSpec {
             }
         }
         if let Some((missing, _)) =
-            (KINDS.iter().zip(seen)).find(|(kind, seen)| kind.count == Count::One && *seen == 0)
+            (LINES_IN_ORDER.iter().zip(seen)).find(|(kind, seen)| kind.count == Count::One && *seen == 0)
         {
             return Err(SpecError::Missing {
                 keyword: missing.keyword,
@@ -544,7 +544,7 @@ impl RunSpec {
         {
             return Err(SpecError::EndBeforeEvent { line: *line });
         }
-        let variant_line = lines[KINDS.len() - 1];
+        let variant_line = lines[LINES_IN_ORDER.len() - 1];
         if let Variant::CheckpointResume { at } | Variant::Rewind { at } = variant
             && at > end
         {
