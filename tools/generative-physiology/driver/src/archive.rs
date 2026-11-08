@@ -126,8 +126,7 @@ pub enum Settled {
     FinishedByAnother(PathBuf),
 }
 
-/// The platform cannot make a directory with a lock already held inside it, so a run locks one under a name
-/// `RunState::of` never reads, and only then renames it into view.
+/// The platform cannot make a directory with a lock already held inside it.
 struct Staged {
     out: PathBuf,
     id: SpecId,
@@ -137,7 +136,6 @@ struct Staged {
 impl Staged {
     fn create(out: &Path, id: SpecId) -> io::Result<Self> {
         let directory = out.join(format!(".{id}.staging-{}", std::process::id()));
-        // The name holds this process's pid, so a directory already there is a dead run's.
         match fs::remove_dir_all(&directory) {
             Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
             _ => {}

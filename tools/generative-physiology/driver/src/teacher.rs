@@ -403,10 +403,6 @@ impl<'l> Feed<'l> {
             Variant::None | Variant::ObserverOff | Variant::Replica(_) => Self::Port,
             Variant::Late { lead_ms } => {
                 let lead_ns = u64::from(lead_ms.get()) * NS_PER_MS;
-                // An event enters at the first head at or after its stamp minus the lead. That head is at
-                // most one longest step past the one before (crates/ng-contract/src/boundary.rs:384), and
-                // the fence moves only to the stamp of a waiting input inside a step (boundary.rs:405-417,
-                // 449-452), so a lead of at least the longest step keeps the stamp at or after both.
                 if lead_ns < longest_step_ns {
                     return Err(TeachError::ShortLead {
                         lead_ns,
