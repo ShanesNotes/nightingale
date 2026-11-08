@@ -5,15 +5,9 @@ stateDiagram-v2
   state "Legend" as legend {
     lg0: accepted
     lg1: attention
-    lg2: Breaks AFaultCanBeExported
-    lg3: Breaks OnlyRecoverContinuesAFaultedBranch in some cases
-    lg4: Path to the AFaultCanBeExported or OnlyRecoverContinuesAFaultedBranch bug
   }
   class lg0 teal
   class lg1 orange
-  class lg2 breaks
-  class lg3 mayBreak
-  class lg4 bugPath
   s0: Run at its accepted head
   s1: Engine fault, run stopped
   s2: Step refused, retry pending
@@ -23,7 +17,6 @@ stateDiagram-v2
   s6: Step refused, a link waits for the store
   [*] --> s0
   s0 --> s1: the solver core or the model cannot go on
-  s0 --> s0: a checkpoint is taken
   s0 --> s2: refused whole, nothing changes
   s0 --> s3: accepted, the store refuses its link
   s1 --> s4: the fault is exported, latched
@@ -35,25 +28,16 @@ stateDiagram-v2
   s4 --> s0: recover on a new branch or resume a checkpoint in a fresh solver core
   s1 --> s0: resume a checkpoint in a fresh solver core or recover on a new branch
   s3 --> s0: resume a checkpoint in a fresh solver core or rewind on a new branch
+  s5 --> s4: the store keeps the waiting link, exported and latched
   s6 --> s5: no shorter interval is left
   s5 --> s0: resume a checkpoint in a fresh solver core or recover on a new branch
   s6 --> s0: resume a checkpoint in a fresh solver core
   s0 --> s4: the solver core or the model cannot go on
   s2 --> s4: no shorter interval is left
-  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
-  classDef mayBreak fill:#fff3e6,stroke:#e8730c,stroke-width:2.5px,color:#b85a06
   class s0 teal
-  class s0 mayBreak
-  class s0 bugPath
   class s1 orange
-  class s1 bugPath
   class s2 orange
   class s3 teal
-  class s3 mayBreak
-  class s3 bugPath
   class s4 orange
-  class s4 bugPath
   class s5 orange
-  class s5 breaks
-  class s5 bugPath
   class s6 orange

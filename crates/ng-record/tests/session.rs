@@ -23,6 +23,23 @@ impl HistoryStore for Kept {
     }
 }
 
+#[derive(Default)]
+struct Refusing {
+    kept: Kept,
+    refusing: core::cell::Cell<bool>,
+}
+impl HistoryStore for Refusing {
+    fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+        self.kept.resolve(seal)
+    }
+    fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
+        if self.refusing.get() {
+            return Err(CheckpointError::StoreFailed { seal });
+        }
+        self.kept.keep(seal, link)
+    }
+}
+
 fn measure<U>(value: f64) -> Result<Measure<U>, AdmissionError> {
     Measure::new(value)
 }
@@ -129,7 +146,7 @@ impl CoupledSolver for Explicit {
 fn admitted<'m>(
     fixture: &'m Reservoirs,
     core: &'m Explicit,
-    store: &'m Kept,
+    store: &'m dyn HistoryStore,
 ) -> Result<Session<'m, Running>, InitializationFailure> {
     let Reservoirs { body, a, b } = fixture;
     let network = Binding::Network(Network::Vascular);
@@ -262,5 +279,66 @@ fn a_refusal_whose_retry_passes_the_floor_latches_a_fault() -> Result<(), Initia
         Some(NumericalRefusal::IterationLimit)
     );
     assert_eq!(stopped.record().revision(), 0);
+    Ok(())
+}
+
+fn faulting_after_one_step() -> Explicit {
+    Explicit {
+        interval_ns: SECOND / 4,
+        refuse_at: Some(SimTime::from_ns(SECOND / 4)),
+    }
+}
+
+#[test]
+fn a_fault_after_a_refused_link_exports_once_the_store_keeps_it() -> Result<(), InitializationFailure> {
+    let fixture = reservoirs()?;
+    let core = faulting_after_one_step();
+    let store = Refusing::default();
+    let session = admitted(&fixture, &core, &store)?;
+    store.refusing.set(true);
+    let (session, receipt) = accepted(session.step());
+    assert!(matches!(
+        session.checkpoint(),
+        Err(CheckpointError::StoreFailed { seal }) if seal == receipt.seal().digest()
+    ));
+    let Step::Faulted(mut stopped) = session.step() else {
+        panic!("not faulted");
+    };
+    assert!(matches!(stopped.export(), Err(CheckpointError::StoreFailed { .. })));
+    store.refusing.set(false);
+    let report = stopped.export().expect("the store keeps the waiting link");
+    assert_eq!(store.kept.links.borrow().len(), 1);
+    let identity = stopped.record().identity().clone();
+    assert!(matches!(
+        Session::resume(report.last_accepted(), &identity, &fixture.body, &core, &store),
+        Err(CheckpointError::Latched)
+    ));
+    let branch = BranchId::new(Digest::of_canonical(b"after the fault"));
+    let recovered = stopped.recover(report.last_accepted(), branch).expect("recovered");
+    assert_eq!(recovered.record().revision(), 1);
+    Ok(())
+}
+
+#[test]
+fn a_checkpoint_taken_before_a_fault_resumes_as_a_replay_to_the_same_fault() -> Result<(), InitializationFailure> {
+    let fixture = reservoirs()?;
+    let core = faulting_after_one_step();
+    let store = Kept::default();
+    let session = admitted(&fixture, &core, &store)?;
+    let earlier = session.checkpoint().expect("a checkpoint at admission");
+    let identity = session.record().identity().clone();
+    let (session, first) = accepted(session.step());
+    let Step::Faulted(stopped) = session.step() else {
+        panic!("not faulted");
+    };
+    let resumed = Session::resume(&earlier, &identity, &fixture.body, &core, &store).expect("resumed");
+    let (resumed, replayed) = accepted(resumed.step());
+    assert_eq!(replayed.seal(), first.seal());
+    assert!(resumed.record().ancestry().is_empty());
+    let Step::Faulted(again) = resumed.step() else {
+        panic!("the replay went past the fault");
+    };
+    assert_eq!(again.fault(), stopped.fault());
+    assert_eq!(again.record().digests(), stopped.record().digests());
     Ok(())
 }

@@ -489,3 +489,11 @@ path = "crates/ng-record/src/history.rs"
 old = '''values.next().is_none().then_some(link)'''
 new = '''values.next().is_none().then_some(link).map(|mut link| { let last = link.len() - 1; link[last] ^= 1; link })'''
 test = "-p ng-validate --test history a_store_that_keeps_end_values_only_gives_back_every_link_of_a_slice_run"
+
+[[mutant]]
+name = "export-leaves-links-waiting"
+path = "crates/ng-record/src/session.rs"
+old = '''        self.record.keep_waiting(self.store);
+        Ok(FaultReport {'''
+new = '''        Ok(FaultReport {'''
+test = "-p ng-record --test session a_fault_after_a_refused_link_exports_once_the_store_keeps_it"

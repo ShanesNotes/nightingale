@@ -168,6 +168,9 @@ impl<'m> PatientRecord<'m> {
         let payload = self.image.admit_input(self.body, event)?;
         Ok(InputReceipt { id, payload, at })
     }
+    pub(crate) fn keep_waiting(&mut self, store: &dyn HistoryStore) {
+        self.history.keep_waiting(store);
+    }
     pub(crate) fn checkpoint(&self, latched: bool) -> Result<Checkpoint, CheckpointError> {
         if let Some(seal) = self.history.oldest_unkept() {
             return Err(CheckpointError::StoreFailed { seal });

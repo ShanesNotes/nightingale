@@ -21,20 +21,28 @@ Now == [status |-> status, chain |-> chain]
 
 Did(a) == act' = a /\ before' = Now /\ source' = "none"
 
+\* ng-record history.rs: History::keep_waiting hands the store the links that wait, oldest first, and it keeps
+\* them up to the first it refuses.
+KeepSome(s) ==
+  LET waits == SelectSeq(s, LAMBDA l : l \notin kept)
+  IN \E n \in 0..Len(waits) : kept' = kept \cup Range(SubSeq(waits, 1, n))
+
+\* A pure core on the same inputs takes the same course, so a branch that faulted at a head replays to that head
+\* and faults there again. A course that departs from it, with a late input, is outside this model.
+Replaying == {f \in faulted : f.branch = branch}
+
 Init ==
   /\ status = "running" /\ chain = <<>> /\ kept = {}
   /\ branch = 0 /\ ancestry = {0} /\ faulted = {}
   /\ saved = None /\ report = None
   /\ act = "admit" /\ source = "none" /\ before = Now
 
-\* ng-record history.rs: History::push appends the link to those waiting and the store keeps them oldest first,
-\* stopping at the first it refuses.
+\* ng-record history.rs: History::push appends the link to those waiting and keeps what it can.
 Publish(a) ==
   /\ Len(chain) < MaxRevision
+  /\ \A f \in Replaying : Len(chain) < f.revision
   /\ LET grown == Append(chain, Link(branch, Len(chain) + 1))
-         waits == SelectSeq(grown, LAMBDA l : l \notin kept)
-     IN /\ chain' = grown
-        /\ \E n \in 0..Len(waits) : kept' = kept \cup Range(SubSeq(waits, 1, n))
+     IN chain' = grown /\ KeepSome(grown)
   /\ status' = "running"
   /\ Did(a)
   /\ UNCHANGED <<branch, ancestry, faulted, saved, report>>
@@ -45,7 +53,8 @@ RetryAccepted == status = "retrying" /\ Publish("retryAccepted")
 
 Becomes(from, to, a) ==
   /\ status = from /\ status' = to
-  /\ faulted' = IF to = "faulted" THEN faulted \cup {branch} ELSE faulted
+  /\ to = "faulted" => \A f \in Replaying : f.revision = Len(chain)
+  /\ faulted' = IF to = "faulted" THEN faulted \cup {Link(branch, Len(chain))} ELSE faulted
   /\ Did(a)
   /\ UNCHANGED <<chain, kept, branch, ancestry, saved, report>>
 
@@ -65,13 +74,15 @@ TakeCheckpoint ==
      ELSE UNCHANGED saved /\ Did("storeFailed")
   /\ UNCHANGED <<status, chain, kept, branch, ancestry, faulted, report>>
 
-\* ng-record session.rs: Session<Faulted>::export marks the image latched.
+\* ng-record session.rs: Session<Faulted>::export hands the store the links that wait, then marks the image
+\* latched. A faulted session takes no step, so no other path keeps them.
 Export ==
   /\ status = "faulted" /\ (Overwrites \/ ~report.held)
-  /\ IF AllKept(chain)
+  /\ KeepSome(chain)
+  /\ IF Range(chain) \subseteq kept'
      THEN report' = Copy(TRUE) /\ Did("export")
      ELSE UNCHANGED report /\ Did("storeFailed")
-  /\ UNCHANGED <<status, chain, kept, branch, ancestry, faulted, saved>>
+  /\ UNCHANGED <<status, chain, branch, ancestry, faulted, saved>>
 
 Restore(name, ck, b, a) ==
   /\ status' = "running" /\ chain' = ck.chain
@@ -120,8 +131,8 @@ Next ==
 
 Spec == Init /\ [][Next]_vars
 
-\* The drawn config merges states that differ only in what no step reads and no label shows: the last step's
-\* record and which branches faulted. The larger config checks every rule without it.
+\* The drawn config merges states that differ only in what no label shows: the last step's record and the head
+\* each branch faulted at, which only a replay reads. The larger config checks every rule without it.
 Drawn == <<status, chain, kept, branch, ancestry, saved, report>>
 
 Restored == {"resume", "rewind", "recover"}
@@ -134,8 +145,8 @@ RefusalChangesNothing ==
 AFaultTakesNoStep ==
   act \in Stepped \cup {"refuse", "checkpoint", "rewind"} => before.status # "faulted"
 
-OnlyRecoverContinuesAFaultedBranch ==
-  act \in Stepped => branch \notin faulted
+OnlyRecoverGoesPastAFault ==
+  act \in Stepped => \A f \in Replaying : Len(chain) <= f.revision
 
 RecoverOpensANewBranch ==
   act = "recover" => (before.status = "faulted" /\ branch \notin Source.ancestry)
@@ -147,7 +158,7 @@ StoreFailedOnlyWhileALinkWaits ==
   act = "storeFailed" => ~AllKept(chain)
 
 AFaultCanBeExported ==
-  status = "faulted" => AllKept(chain)
+  (status = "faulted" /\ ~report.held) => ENABLED (Export /\ report'.held)
 
 ResumeAndRewindRefuseAFaultExport ==
   act \in {"resume", "rewind"} => ~Source.latched

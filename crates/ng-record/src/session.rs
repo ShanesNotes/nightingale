@@ -196,8 +196,10 @@ impl<'m> Session<'m, Faulted> {
     pub fn refusals(&self) -> &[Refused] {
         &self.status.refusals
     }
-    /// The image is marked, so `resume` refuses it: a faulted run goes on only through `recover`.
-    pub fn export(&self) -> Result<FaultReport, CheckpointError> {
+    /// The image is marked, so `resume` refuses it: a faulted run goes on only through `recover`. A faulted
+    /// session takes no step, so the export hands the store each link that still waits.
+    pub fn export(&mut self) -> Result<FaultReport, CheckpointError> {
+        self.record.keep_waiting(self.store);
         Ok(FaultReport {
             last_accepted: self.record.checkpoint(true)?,
             fault: self.status.fault,

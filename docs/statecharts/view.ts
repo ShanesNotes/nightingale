@@ -25,7 +25,10 @@ const becomes: Record<string, string> = {
 
 export const step = (action: string, from: any, to: any) => {
   if (action === "TakeCheckpoint") return "a checkpoint is taken";
-  if (action === "Export") return "the fault is exported, latched";
+  if (action === "Export") {
+    if (!kept(to)) return "the store refuses the waiting link again";
+    return kept(from) ? "the fault is exported, latched" : "the store keeps the waiting link, exported and latched";
+  }
   if (["Accept", "RetryAccepted", "Publish"].includes(action)) {
     if (kept(from) && !kept(to)) return "accepted, the store refuses its link";
     if (!kept(from) && kept(to)) return "accepted, the store keeps every link";

@@ -444,7 +444,7 @@ impl<'m> Session<'m, Faulted> {
         todo!()
     }
     /// The image is marked, so `resume` refuses it: a faulted run goes on only through `recover`.
-    pub fn export(&self) -> Result<FaultReport, CheckpointError> {
+    pub fn export(&mut self) -> Result<FaultReport, CheckpointError> {
         todo!()
     }
     /// The only way on: a NEW branch from a checkpoint on this branch's own chain, with ancestry.

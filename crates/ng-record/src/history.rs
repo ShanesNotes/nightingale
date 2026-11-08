@@ -446,6 +446,9 @@ impl History {
             head,
         };
         self.unkept.push((seal, stored));
+        self.keep_waiting(store);
+    }
+    pub(crate) fn keep_waiting(&mut self, store: &dyn HistoryStore) {
         let kept = (self.unkept.iter())
             .position(|(seal, link)| store.keep(*seal, link).is_err())
             .unwrap_or(self.unkept.len());
