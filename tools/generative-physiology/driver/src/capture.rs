@@ -477,22 +477,17 @@ impl<'c> Capture<'c> {
         let positions: BTreeMap<InputId, EventIndex> = (open_loop_events.iter().enumerate())
             .map(|(at, event)| (event.id(), EventIndex(at)))
             .collect();
-        let named = |id: InputId, unnamed: &'static str| {
-            positions
-                .get(&id)
-                .copied()
-                .ok_or_else(|| io::Error::other(unnamed))
-        };
         for &(id, revision) in &applications {
-            let index = named(id, "a step applied an input no spec names")?;
+            let index = positions.get(&id);
+            let index = index.ok_or_else(|| io::Error::other("a step applied an input no spec names"))?;
             applied.push(&[index.0 as u64, revision])?;
         }
         let arrived = (arrivals.iter())
-            .map(|&(id, revision)| -> io::Result<Arrival> {
-                let event = named(id, "an input arrived that no spec names")?;
-                Ok(Arrival { event, revision })
+            .map(|&(id, revision)| Arrival {
+                event: positions[&id],
+                revision,
             })
-            .collect::<io::Result<Vec<_>>>()?;
+            .collect();
         edges.finish()?;
         beats.finish()?;
         steps.finish()?;
