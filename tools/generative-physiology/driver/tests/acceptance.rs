@@ -1,7 +1,3 @@
-//! Teacher runs on the arena packet through the release binary. Each is synthetic and ends at most 20 s after
-//! the anchor. Run them on the heavy-run machine:
-//! `cargo test --release --locked --manifest-path tools/generative-physiology/driver/Cargo.toml -- --ignored --test-threads=1`.
-
 use gp_driver::{RunSpec, SMOKE_SPEC, SpecId, Table, digest_of_words, hex, summary_value};
 use ng_validate::anchor_moment;
 use std::collections::BTreeMap;
@@ -93,7 +89,6 @@ fn value(summary: &str, key: &str) -> String {
         .to_string()
 }
 
-/// Each accepted step's revision, end and seal: what two courses must share to be one course.
 fn seal_log(file: &Path) -> Vec<[u64; 6]> {
     let steps = Table::<u64>::read(file).expect("a step table");
     steps
@@ -139,7 +134,6 @@ fn head_at(directory: &Path, revision: u64) -> u64 {
     row[1] - anchor_moment().nanoseconds()
 }
 
-/// Every entry under a directory with its inode, size and modification time, so a rewrite shows.
 fn listing(root: &Path) -> BTreeMap<PathBuf, [i64; 4]> {
     let mut found = BTreeMap::new();
     let mut waiting = vec![root.to_path_buf()];
@@ -206,7 +200,6 @@ fn smoke() -> &'static Path {
 fn the_smoke_run_holds_the_first_second_pins() {
     let directory = smoke();
     let summary = summary(directory);
-    // crates/ng-validate/tests/trace.rs:135-136 and :147, Core at a 10 ms cap.
     assert_eq!(
         value(&summary, "packet"),
         "6d709479f0b103cadc1972febf6437a2dde172e19242eb76908b9dabde5bb752"

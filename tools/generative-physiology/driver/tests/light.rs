@@ -302,7 +302,6 @@ fn an_npy_file_reads_back_what_was_written() {
 fn the_catalogue_covers_every_column_of_the_compiled_arena_body() {
     let body = arena_body().expect("compiled");
     let catalogue = Catalogue::of(&body).expect("a catalogue");
-    // crates/ng-validate/tests/arena_body.rs:164-167 pins 241 rows and 257 columns.
     assert_eq!(body.columns().len(), 257);
     assert_eq!(catalogue.columns().len(), 257);
     assert_eq!(catalogue.column_ids().len(), 257);

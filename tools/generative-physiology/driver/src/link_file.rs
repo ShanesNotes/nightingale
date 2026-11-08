@@ -9,11 +9,6 @@ use std::path::{Path, PathBuf};
 const HEAD: u64 = 8;
 const TAIL: u64 = 32 + 8;
 
-/// The run's history store: one append-only file of links, each framed by its length on both sides and its
-/// seal at the end, so a walk reads it backwards from the head. Adapted from `tools/bench/src/link_log.rs`.
-///
-/// The engine reports a store refusal only at a checkpoint or an export, so a write error is kept here for
-/// the step loop to read.
 pub struct LinkFile {
     path: PathBuf,
     file: File,
@@ -55,7 +50,6 @@ impl LinkFile {
         })
     }
 
-    /// The first read or write error, once.
     pub fn check(&self) -> io::Result<()> {
         match self.failure.borrow_mut().take() {
             Some(error) => Err(error),
@@ -143,8 +137,6 @@ impl LinkFile {
         Ok(())
     }
 
-    /// A resumed or rewound session hands back links the file holds, in order, so the next one read is the
-    /// likely match.
     fn replays(&self, seal: &Digest) -> bool {
         let at = self.replay.get();
         let expected = (at < self.end.get()).then(|| self.record_at(at)).flatten();

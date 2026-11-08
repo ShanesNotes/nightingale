@@ -96,8 +96,6 @@ pub struct Catalogue {
     aortic_water: ColumnId,
 }
 impl Catalogue {
-    /// Every column has an instance target (crates/ng-contract/src/compile.rs:366-370, 1089-1108, 1135-1148,
-    /// 1196-1197, 1248-1259), so a body whose targets miss one is refused rather than read short.
     pub fn of(body: &CompiledBody) -> Result<Self, CatalogueError> {
         let mut column_ids: Vec<ColumnId> = (body.instances().iter())
             .filter_map(|instance| match instance.target() {
@@ -188,7 +186,6 @@ impl Catalogue {
     pub fn rows(&self) -> &[String] {
         &self.rows
     }
-    /// In column id order, which is the order of every column field in `edges.npy`.
     pub fn columns(&self) -> &[String] {
         &self.columns
     }
@@ -213,27 +210,19 @@ impl Catalogue {
     pub fn aortic_water(&self) -> ColumnId {
         self.aortic_water
     }
-    /// Time, revision, each mode, each row's value and chord integral, each column's two extents and each
-    /// quantity's inventory, inflow and outflow, every compensated value as its two limbs.
     pub fn edge_columns(&self, modes: usize) -> usize {
         2 + modes + 4 * self.rows.len() + 4 * self.columns.len() + 6 * self.quantities.len()
     }
 }
 
-/// One beat, edge to edge, computed once, here. Heart rate is one over the length; the phase integrates the
-/// rate row and resets at 1.0 (crates/ng-cardiovascular/src/rhythm.rs:59-89).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeatReading {
     pub ordinal: u64,
     pub start: SimTime,
     pub end: SimTime,
-    /// Per s.
     pub heart_rate: f64,
-    /// The beat mean of the CV blood pressure row at the systemic arteries.
     pub arterial_pressure: f64,
-    /// The net extent of the aortic valve's water column over the beat.
     pub stroke: f64,
-    /// The beat mean of the RN filtration row.
     pub filtration: f64,
 }
 impl BeatReading {
@@ -297,12 +286,10 @@ fn seconds_after_anchor(at: SimTime) -> f64 {
     (at.nanoseconds() - anchor_moment().nanoseconds()) as f64 / 1e9
 }
 
-/// The rounded value: every operation normalizes so `hi + lo` rounds to `hi` (compensated.rs:113-118).
 fn leading(value: Compensated) -> f64 {
     f64::from_bits(value.bits()[0])
 }
 
-/// A seal's four words, big-endian, so they print as the pinned hex does.
 pub fn words(digest: Digest) -> [u64; 4] {
     let (chunks, _) = digest.as_bytes().as_chunks::<8>();
     core::array::from_fn(|at| u64::from_be_bytes(chunks[at]))
@@ -335,7 +322,6 @@ struct Edge {
     at: SimTime,
     pressure: Compensated,
     filtration: Compensated,
-    /// The aortic water column's forward minus reverse extent since admission.
     ejected: Compensated,
 }
 
@@ -353,8 +339,6 @@ fn ejected<S>(session: &Session<'_, S>, column: ColumnId) -> Compensated {
     }
 }
 
-/// The files a run writes as it steps, and the one sum the engine does not keep: each row's integral over
-/// the accepted chords, since only the last chord is held.
 pub struct Capture<'c> {
     body: &'c CompiledBody,
     catalogue: &'c Catalogue,
@@ -370,7 +354,6 @@ pub struct Capture<'c> {
     enqueued: Vec<[u64; 2]>,
 }
 impl<'c> Capture<'c> {
-    /// Writes the start edge. `inputs` names each event's index in the spec.
     pub fn create(
         directory: &Path,
         body: &'c CompiledBody,
@@ -531,8 +514,6 @@ impl<'c> Capture<'c> {
                     row.extend(zero);
                     row.extend(zero);
                 }
-                // The fold History::opening runs (crates/ng-record/src/history.rs:316-331), so its bits are the
-                // opening inventory's.
                 for combination in self.body.conserved_basis().combinations() {
                     let inventory = (combination.terms().iter())
                         .fold(Compensated::ZERO, |sum, &(id, weight)| {

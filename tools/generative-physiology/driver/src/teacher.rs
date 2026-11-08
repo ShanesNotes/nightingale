@@ -24,8 +24,6 @@ use std::path::{Path, PathBuf};
 
 const NS_PER_MS: u64 = 1_000_000;
 const STEPS_BETWEEN_READS: u64 = 10_000;
-/// `crates/ng-validate/src/run.rs:219` observes the slice with this seed; the arena lens has no error, so any
-/// seed reads the same.
 const OBSERVATION_SEED: [u64; 4] = [5, 5, 5, 5];
 
 #[allow(
@@ -47,7 +45,6 @@ mod clock {
 }
 use clock::Stopwatch;
 
-/// The summary records it, and the spec id does not cover it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MemoryCap {
     gigabytes: u32,
@@ -64,7 +61,6 @@ impl MemoryCap {
     }
 }
 
-/// What a run records that no spec says.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
     pub cap: MemoryCap,
@@ -80,7 +76,6 @@ pub enum TeachError {
     Checkpoint(CheckpointError),
     Observation(ObservationRefusal),
     Spec(SpecError),
-    /// The engine refused a variant's event: a lead shorter than a step, or a stamp a step had passed.
     Enqueue {
         event: usize,
         error: Box<AdmissionError>,
@@ -146,9 +141,7 @@ impl From<SpecError> for TeachError {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
-    /// Complete already, so nothing was written.
     Present(PathBuf),
-    /// Faulted already, so nothing was written.
     FaultFound(PathBuf),
     Complete(PathBuf),
     Faulted(PathBuf),
@@ -171,12 +164,9 @@ impl fmt::Display for LinkError {
 }
 
 pub trait PolicyLink {
-    /// The beat that just ended, and the earliest stamp an answer may take. A beat that ends at or after the
-    /// spec's end is not asked about.
     fn after_beat(&mut self, beat: &BeatReading, earliest: Stamp) -> Result<Option<PostureEvent>, LinkError>;
 }
 
-/// One JSON line per beat out, one answer line back: `none`, or an event line of the spec grammar.
 pub struct LineLink {
     input: Box<dyn BufRead>,
     output: Box<dyn Write>,
@@ -256,7 +246,6 @@ enum Stepped<'m> {
     },
 }
 
-/// One accepted step, retrying each refusal as `crates/ng-validate/src/run.rs:23-46` does, with the count kept.
 fn step(session: Session<'_, Running>) -> Stepped<'_> {
     let mut refusals = 0;
     let mut attempt = session.step();
@@ -319,14 +308,11 @@ impl Head {
     }
 }
 
-/// When the events reach the session, chosen once from the spec.
 enum Feed<'l> {
     /// Every event in the admission port.
     Port,
     /// None in the port; each enqueued at the first accepted head at or after its stamp minus the lead.
     Late { lead_ns: u64, next: usize },
-    /// The events before `withheld` in the port; the rest enqueued right after the checkpoint at the first head at
-    /// or after `at`, and again on the copy or branch.
     AfterCheckpoint {
         at: SimTime,
         withheld: usize,
@@ -343,7 +329,6 @@ struct Policy<'l> {
     actions: Vec<PostureEvent>,
 }
 impl Policy<'_> {
-    /// The driver never moves a stamp: an answer it cannot keep as given ends the run.
     fn answer(
         &mut self,
         session: &mut Session<'_, Running>,
@@ -407,8 +392,6 @@ impl<'l> Feed<'l> {
                 next: 0,
             },
             Variant::CheckpointResume { at } | Variant::Rewind { at } => {
-                // The step that reaches `at` is at most the body's longest step, so an event that far past it is
-                // after the checkpoint's head however that step lands.
                 let past = at.sim_time().nanoseconds().saturating_add(longest_step_ns);
                 let withheld = (spec.events().iter())
                     .position(|event| event.at.sim_time().nanoseconds() >= past)
@@ -521,7 +504,6 @@ impl Original<'_, '_> {
             let beat = self.capture.accepted(&session, &receipt, refusals)?;
             self.observe(&session)?;
             self.bounds.links.check()?;
-            // Past the end no step follows, so no answer could apply.
             let continuing = session.record().accepted().time() < self.bounds.end;
             let asked = beat.as_ref().filter(|_| continuing);
             if let Some(kind) = self
@@ -631,7 +613,6 @@ fn follow(
     })
 }
 
-/// One admission, one run.
 pub struct Teacher {
     choice: CoreChoice,
     body: CompiledBody,

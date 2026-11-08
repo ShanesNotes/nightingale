@@ -8,8 +8,6 @@ use std::path::Path;
 
 pub const SMOKE_SPEC: &str = "gp-run 1\ncore ng-solver cap-ms 10\nend-ms 20000\nevent at-ms 10000 trunk 1000 legs \
                               standing\nvariant none\n";
-/// `crates/ng-validate/tests/trace.rs:135-136` and `:147` pin these for Core at a 10 ms cap. A waiting input enters
-/// no seal and no packet hash (`crates/ng-record/src/record.rs:12-14`), so the stand at 10 s moves neither.
 pub const SMOKE_PACKET: &str = "6d709479f0b103cadc1972febf6437a2dde172e19242eb76908b9dabde5bb752";
 pub const SMOKE_SEAL: &str = "58233f790617a4f1bf5122b47fc44efaeface2ebb7d4c3652567bb44ba176ecf";
 pub const SMOKE_HEAD_NS: u64 = 1_000_079_707;

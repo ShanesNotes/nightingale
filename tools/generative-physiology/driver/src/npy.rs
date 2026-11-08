@@ -49,7 +49,6 @@ fn invalid(what: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, what.to_string())
 }
 
-/// Written row by row, so a run's memory does not grow with its length.
 pub struct NpyWriter<E> {
     file: BufWriter<File>,
     columns: usize,

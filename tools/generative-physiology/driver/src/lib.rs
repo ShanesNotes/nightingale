@@ -1,6 +1,3 @@
-//! The teacher driver: one teacher run per process from a run spec, through the engine's public items only.
-//! A run's directory is written whole or not at all.
-
 mod archive;
 mod capture;
 mod link_file;

@@ -14,7 +14,6 @@ pub fn summary_value<'t>(summary: &'t str, key: &str) -> Option<&'t str> {
         .find_map(|line| line.strip_prefix(key)?.strip_prefix(' '))
 }
 
-/// Which engine made a run (crates/ng-contract/src/scheme.rs:318-360).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Recorded {
     pub model: Digest,
@@ -49,9 +48,7 @@ pub enum RunState {
         held: bool,
     },
     Present(Recorded),
-    /// Present, and made by an engine other than the identity it was judged against. `status` only.
     Stale(Recorded),
-    /// A person reads it first: no command removes or redoes it.
     Fault(PathBuf),
 }
 impl RunState {
@@ -128,7 +125,6 @@ fn sync_directory(path: &Path) -> io::Result<()> {
     File::open(path)?.sync_all()
 }
 
-/// `Lost`: another process finished the same spec first and holds the name.
 #[derive(Debug)]
 pub enum Settled {
     Renamed(PathBuf),
@@ -188,7 +184,6 @@ impl PartialRun {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Course {
     Original,
-    /// The copy or rewound branch of a checkpoint variant.
     Branch,
 }
 
@@ -201,7 +196,6 @@ pub enum FaultKind {
     MemoryCap {
         resident_bytes: u64,
     },
-    /// A closed loop's answer the driver refused, or a link that failed.
     Protocol(String),
 }
 
@@ -209,10 +203,8 @@ pub enum FaultKind {
 pub struct FaultSummary {
     pub course: Course,
     pub kind: FaultKind,
-    /// An engine fault's instant is the one its attempt started from; the driver's own stops are at the head.
     pub at: SimTime,
     pub attempted_ns: u64,
-    /// The refusals of the step that faulted.
     pub refusals: u64,
 }
 impl FaultSummary {
@@ -301,7 +293,6 @@ pub struct RunSummary {
     pub revisions: u64,
     pub refusals: u64,
     pub beats: u64,
-    /// Each event that entered after admission: its index in the spec and the revision it entered at.
     pub enqueued: Vec<[u64; 2]>,
     pub fault: Option<FaultSummary>,
     pub admission_s: f64,
@@ -310,7 +301,6 @@ pub struct RunSummary {
     pub files: Vec<(String, Digest)>,
     pub memory_cap_gb: u32,
     pub variant: String,
-    /// The record's digests at the original's last head, which also read what waits.
     pub end: RecordDigests,
     pub branch: Option<BranchSummary>,
 }

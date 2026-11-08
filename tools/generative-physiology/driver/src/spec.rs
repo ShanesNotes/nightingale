@@ -7,16 +7,13 @@ use ng_contract::{
 };
 use ng_validate::{ReferenceIntegrator, anchor_moment};
 
-/// Bumped whenever what a run writes changes meaning.
 pub const CAPTURE_VERSION: u32 = 1;
 
 const GRAMMAR: u32 = 1;
 const NS_PER_MS: u64 = 1_000_000;
 const NS_PER_US: u64 = 1_000;
-/// crates/ng-contract/src/admission.rs:162: the fence opens one cycle, 1 s, after the anchor.
 const FENCE_MS: u32 = 1_000;
 
-/// Whole ms after the anchor, at or after the fence.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Stamp(u32);
 impl Stamp {
@@ -35,7 +32,6 @@ impl Stamp {
     }
 }
 
-/// The trunk's sine in thousandths; the engine reads k / 1000.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Trunk(i16);
 impl Trunk {
@@ -73,8 +69,6 @@ pub struct PostureEvent {
     pub setting: Setting,
 }
 impl PostureEvent {
-    /// Content addressed: one instant and one setting give one id in every run, so runs that share a prefix
-    /// share ids, and the seal covers ids (crates/ng-contract/src/boundary.rs:111-130).
     pub fn id(&self) -> InputId {
         let mut bytes = b"gp-posture\n".to_vec();
         bytes.extend_from_slice(self.words().as_bytes());
@@ -89,7 +83,6 @@ impl PostureEvent {
             BoundaryInput::Posture(posture),
         ))
     }
-    /// The spec's event line, which is also a closed loop's answer.
     pub fn line(&self) -> String {
         format!("event {}", self.words())
     }
@@ -120,7 +113,6 @@ impl PostureEvent {
 pub enum CoreChoice {
     /// `ng_solver::Core::new`.
     Picked { cap_ms: NonZeroU32 },
-    /// Every field enters the resolution digest, so every field enters the run identity.
     Reference {
         step_us: NonZeroU32,
         floor_us: NonZeroU32,
@@ -166,18 +158,12 @@ impl CoreChoice {
     }
 }
 
-/// A variant is part of the canonical text, so variants never share a spec id.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Variant {
     None,
-    /// No event is in the admission port: each is enqueued at the first accepted head at or after its stamp
-    /// minus the lead.
     Late {
         lead_ms: NonZeroU32,
     },
-    /// Checkpoint at the first accepted head at or after `at`. Every event stamped at least the body's longest
-    /// step after `at`, which no step up to that head can reach, is then enqueued on the original and on a copy
-    /// resumed into a freshly compiled body and a fresh core, and both run to the end.
     CheckpointResume {
         at: Stamp,
     },
@@ -204,8 +190,6 @@ impl Variant {
     }
 }
 
-/// The digest of the capture version and the canonical text, which names the run's directory. It covers the
-/// spec, not the engine: `status` reports a present run as stale unless its identity digests equal the audit's.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct SpecId(Digest);
 impl SpecId {
@@ -324,7 +308,6 @@ struct Kind {
     parse: fn(Words<'_>) -> Result<Line, SpecError>,
 }
 
-/// Every line kind, in the order a spec holds them.
 const KINDS: [Kind; 6] = [
     Kind {
         keyword: "gp-run",
@@ -495,7 +478,6 @@ fn render(
     text
 }
 
-/// `closed_loop` names the study's rule and its parameters; the driver never interprets it, and the id covers it.
 #[derive(Clone, PartialEq, Debug)]
 pub struct RunSpec {
     core: CoreChoice,
@@ -505,7 +487,6 @@ pub struct RunSpec {
     variant: Variant,
 }
 impl RunSpec {
-    /// The only constructor. It takes only canonical text, so a spec, its text and its id cannot disagree.
     pub fn parse(text: &str) -> Result<Self, SpecError> {
         let body = text.strip_suffix('\n').ok_or(SpecError::NoFinalNewline)?;
         let mut seen = [0usize; KINDS.len()];
