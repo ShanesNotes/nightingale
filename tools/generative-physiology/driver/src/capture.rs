@@ -220,7 +220,7 @@ pub struct BeatReading {
     pub ordinal: u64,
     pub start: SimTime,
     pub end: SimTime,
-    pub heart_rate: f64,
+    pub heart_rate_per_s: f64,
     pub arterial_pressure: f64,
     pub stroke: f64,
     pub filtration: f64,
@@ -233,7 +233,7 @@ impl BeatReading {
             ordinal,
             start: start.at,
             end: end.at,
-            heart_rate: 1e9 / length,
+            heart_rate_per_s: 1e9 / length,
             arterial_pressure: mean(end.pressure, start.pressure),
             stroke: leading(end.ejected.minus(start.ejected)),
             filtration: mean(end.filtration, start.filtration),
@@ -244,7 +244,7 @@ impl BeatReading {
             ordinal,
             start,
             end,
-            heart_rate,
+            heart_rate_per_s,
             arterial_pressure,
             stroke,
             filtration,
@@ -253,7 +253,7 @@ impl BeatReading {
             ordinal as f64,
             seconds_after_anchor(start),
             seconds_after_anchor(end),
-            heart_rate,
+            heart_rate_per_s,
             arterial_pressure,
             stroke,
             filtration,
@@ -268,12 +268,12 @@ impl BeatReading {
             }
         };
         format!(
-            "{{\"beat\":{},\"start_s\":{},\"end_s\":{},\"heart_rate\":{},\"arterial_pressure\":{},\"stroke\":{},\
-             \"filtration\":{},\"earliest_ms\":{}}}",
+            "{{\"beat\":{},\"start_s\":{},\"end_s\":{},\"heart_rate_per_s\":{},\"arterial_pressure\":{},\
+             \"stroke\":{},\"filtration\":{},\"earliest_ms\":{}}}",
             self.ordinal,
             number(seconds_after_anchor(self.start)),
             number(seconds_after_anchor(self.end)),
-            number(self.heart_rate),
+            number(self.heart_rate_per_s),
             number(self.arterial_pressure),
             number(self.stroke),
             number(self.filtration),

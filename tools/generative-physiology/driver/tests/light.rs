@@ -242,7 +242,7 @@ fn a_beat_is_one_json_line_for_the_policy() {
         ordinal: 4,
         start: SimTime::from_ns(anchor + 1_500_000_000),
         end: SimTime::from_ns(anchor + 2_500_000_000),
-        heart_rate: 1.0,
+        heart_rate_per_s: 1.0,
         arterial_pressure: 93.25,
         stroke: 70.5,
         filtration: f64::NAN,
@@ -250,8 +250,8 @@ fn a_beat_is_one_json_line_for_the_policy() {
     let earliest = Stamp::after_anchor_ms(2501).expect("past the fence");
     assert_eq!(
         beat.json(earliest),
-        "{\"beat\":4,\"start_s\":1.5,\"end_s\":2.5,\"heart_rate\":1,\"arterial_pressure\":93.25,\"stroke\":70.5,\
-         \"filtration\":null,\"earliest_ms\":2501}"
+        "{\"beat\":4,\"start_s\":1.5,\"end_s\":2.5,\"heart_rate_per_s\":1,\"arterial_pressure\":93.25,\
+         \"stroke\":70.5,\"filtration\":null,\"earliest_ms\":2501}"
     );
     assert_eq!(beat.row()[..3], [4.0, 1.5, 2.5]);
 }
