@@ -356,7 +356,7 @@ pub struct Capture<'c> {
     steps: NpyWriter<u64>,
     applied: NpyWriter<u64>,
     lens: NpyWriter<u64>,
-    chord: Vec<Compensated>,
+    integrals: Vec<Compensated>,
     phase: Compensated,
     beat_edge: Option<Edge>,
     inputs: BTreeMap<InputId, EventIndex>,
@@ -380,7 +380,7 @@ impl<'c> Capture<'c> {
             steps: NpyWriter::create(&directory.join("steps.npy"), STEP_COLUMNS)?,
             applied: NpyWriter::create(&directory.join("applied.npy"), 2)?,
             lens: NpyWriter::create(&directory.join("lens.npy"), LENS_COLUMNS)?,
-            chord: vec![Compensated::ZERO; catalogue.rows().len()],
+            integrals: vec![Compensated::ZERO; catalogue.rows().len()],
             phase: view.value(catalogue.phase()),
             beat_edge: None,
             inputs,
@@ -405,7 +405,7 @@ impl<'c> Capture<'c> {
         let segment = view.last_segment();
         let step = segment.interval().expect("an accepted step has a chord");
         let length = i64::try_from(step.length_ns()).expect("a step is shorter than 2^63 ns");
-        for (total, &row) in self.chord.iter_mut().zip(self.catalogue.row_ids.iter()) {
+        for (total, &row) in self.integrals.iter_mut().zip(self.catalogue.row_ids.iter()) {
             let ends = (segment.sample(row, step.start()), segment.sample(row, step.end()));
             let (Some(start), Some(end)) = ends else {
                 unreachable!("a chord holds both of its ends");
@@ -438,8 +438,8 @@ impl<'c> Capture<'c> {
         self.edge(session)?;
         let edge = Edge {
             at: view.time(),
-            pressure: self.chord[self.catalogue.pressure().index()],
-            filtration: self.chord[self.catalogue.filtration().index()],
+            pressure: self.integrals[self.catalogue.pressure().index()],
+            filtration: self.integrals[self.catalogue.filtration().index()],
             ejected: ejected(session, self.catalogue.aortic_water()),
         };
         let Some(start) = self.beat_edge.replace(edge) else {
@@ -496,7 +496,7 @@ impl<'c> Capture<'c> {
         for &id in &self.catalogue.row_ids {
             row.extend(view.value(id).bits());
         }
-        for total in &self.chord {
+        for total in &self.integrals {
             row.extend(total.bits());
         }
         match session.conservation().head() {
