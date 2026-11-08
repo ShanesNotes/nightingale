@@ -126,6 +126,41 @@ pub enum Settled {
     FinishedByAnother(PathBuf),
 }
 
+struct Staged {
+    out: PathBuf,
+    id: SpecId,
+    directory: PathBuf,
+    lock: File,
+}
+impl Staged {
+    fn create(out: &Path, id: SpecId) -> io::Result<Self> {
+        let directory = out.join(format!("{id}.partial-{}", std::process::id()));
+        fs::create_dir(&directory)?;
+        let lock = File::create_new(directory.join(LOCK))?;
+        Ok(Self {
+            out: out.to_path_buf(),
+            id,
+            directory,
+            lock,
+        })
+    }
+    fn publish(self) -> io::Result<PartialRun> {
+        let Self {
+            out,
+            id,
+            directory,
+            lock,
+        } = self;
+        lock.lock()?;
+        Ok(PartialRun {
+            out,
+            id,
+            directory,
+            _lock: lock,
+        })
+    }
+}
+
 pub struct PartialRun {
     out: PathBuf,
     id: SpecId,
@@ -134,16 +169,7 @@ pub struct PartialRun {
 }
 impl PartialRun {
     pub fn create(out: &Path, id: SpecId) -> io::Result<Self> {
-        let directory = out.join(format!("{id}.partial-{}", std::process::id()));
-        fs::create_dir(&directory)?;
-        let lock = File::create_new(directory.join(LOCK))?;
-        lock.lock()?;
-        Ok(Self {
-            out: out.to_path_buf(),
-            id,
-            directory,
-            _lock: lock,
-        })
+        Staged::create(out, id)?.publish()
     }
     pub fn directory(&self) -> &Path {
         &self.directory
@@ -346,5 +372,40 @@ impl RunSummary {
         let mut text = lines.join("\n");
         text.push('\n');
         text
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RunState, Staged};
+    use crate::spec::RunSpec;
+    use std::fs;
+
+    #[test]
+    fn a_run_directory_is_a_partial_only_once_its_lock_is_held() {
+        let out = std::env::temp_dir().join(format!("gp-driver-archive-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&out);
+        fs::create_dir_all(&out).expect("a scratch directory");
+        let text = "gp-run 1\ncore ng-solver cap-ms 10\nend-ms 2000\nvariant none\n";
+        let id = RunSpec::parse(text).expect("canonical").id();
+        let staged = Staged::create(&out, id).expect("staged");
+        assert_eq!(
+            RunState::of(&out, id).expect("a state"),
+            RunState::Missing,
+            "a staged run is no partial, so no other run removes it"
+        );
+        let partial = staged.publish().expect("published");
+        let published = RunState::Partial {
+            paths: vec![partial.directory().to_path_buf()],
+            held: true,
+        };
+        assert_eq!(RunState::of(&out, id).expect("a state"), published);
+        drop(partial);
+        let state = RunState::of(&out, id).expect("a state");
+        assert!(
+            matches!(state, RunState::Partial { held: false, .. }),
+            "{state:?}"
+        );
+        fs::remove_dir_all(&out).expect("the scratch directory removed");
     }
 }
