@@ -122,7 +122,7 @@ fn sync_directory(path: &Path) -> io::Result<()> {
 #[derive(Debug)]
 pub enum Settled {
     Renamed(PathBuf),
-    Lost(PathBuf),
+    FinishedByAnother(PathBuf),
 }
 
 pub struct PartialRun {
@@ -168,7 +168,7 @@ impl PartialRun {
             }
             Err(_) if target.is_dir() => {
                 fs::remove_dir_all(&self.directory)?;
-                Ok(Settled::Lost(target))
+                Ok(Settled::FinishedByAnother(target))
             }
             Err(error) => Err(error),
         }

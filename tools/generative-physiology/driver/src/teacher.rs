@@ -685,11 +685,11 @@ impl Teacher {
         Ok(match summary.fault {
             None => match partial.complete()? {
                 Settled::Renamed(path) => Outcome::Complete(path),
-                Settled::Lost(path) => Outcome::Present(path),
+                Settled::FinishedByAnother(path) => Outcome::Present(path),
             },
             Some(_) => match partial.fault()? {
                 Settled::Renamed(path) => Outcome::Faulted(path),
-                Settled::Lost(path) => Outcome::FaultFound(path),
+                Settled::FinishedByAnother(path) => Outcome::FaultFound(path),
             },
         })
     }
