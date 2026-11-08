@@ -126,6 +126,8 @@ pub enum Settled {
     FinishedByAnother(PathBuf),
 }
 
+/// Under a name `RunState::of` never reads until its lock is held, so no other run takes a live run's
+/// directory for an abandoned partial and removes it.
 struct Staged {
     out: PathBuf,
     id: SpecId,
@@ -134,9 +136,10 @@ struct Staged {
 }
 impl Staged {
     fn create(out: &Path, id: SpecId) -> io::Result<Self> {
-        let directory = out.join(format!("{id}.partial-{}", std::process::id()));
+        let directory = out.join(format!(".{id}.staging-{}", std::process::id()));
         fs::create_dir(&directory)?;
         let lock = File::create_new(directory.join(LOCK))?;
+        lock.lock()?;
         Ok(Self {
             out: out.to_path_buf(),
             id,
@@ -144,6 +147,7 @@ impl Staged {
             lock,
         })
     }
+    /// The lock belongs to the open file, so it holds across the rename.
     fn publish(self) -> io::Result<PartialRun> {
         let Self {
             out,
@@ -151,11 +155,12 @@ impl Staged {
             directory,
             lock,
         } = self;
-        lock.lock()?;
+        let partial = out.join(format!("{id}.partial-{}", std::process::id()));
+        fs::rename(&directory, &partial)?;
         Ok(PartialRun {
             out,
             id,
-            directory,
+            directory: partial,
             _lock: lock,
         })
     }
