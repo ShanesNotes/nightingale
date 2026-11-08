@@ -621,8 +621,9 @@ fn number_after(line: &str, key: &str) -> u64 {
 fn a_closed_loop_run_is_the_course_of_its_realized_spec() {
     let _turn = one_teacher_run_at_a_time();
     let out = scratch("interact");
-    let text = "gp-run 1\ncore ng-solver cap-ms 10\nend-ms 12000\nclosed-loop acceptance stand after beat 2, lie \
-                after beat 6\nvariant none\n";
+    let text = "gp-run 1\ncore ng-solver cap-ms 10\nend-ms 12000\nevent at-ms 10000 trunk 500 legs \
+                seated\nclosed-loop acceptance stand after beat 2, lie after beat 6\nvariant none\n";
+    let scheduled = RunSpec::parse(text).expect("a canonical spec").events()[0].line();
     let spec = written(&out, "spec.txt", text);
     let mut child = (Command::new(DRIVER).args(["interact", path(&spec), "--out", path(&out)]))
         .stdin(Stdio::piped())
@@ -672,27 +673,34 @@ fn a_closed_loop_run_is_the_course_of_its_realized_spec() {
     let open = RunSpec::parse(&realized).expect("a canonical spec");
     assert_eq!(open.closed_loop(), None);
     let lines: Vec<String> = open.events().iter().map(|event| event.line()).collect();
-    assert_eq!(lines, acted);
+    let mut expected = acted.clone();
+    expected.push(scheduled);
+    assert_eq!(
+        lines, expected,
+        "both actions come before the spec's scheduled event"
+    );
     let arrived = arrivals(&held, "enqueued");
     assert_eq!(
         arrived.iter().map(|arrival| arrival.event).collect::<Vec<_>>(),
-        [EventIndex(0), EventIndex(1)]
+        [EventIndex(0), EventIndex(1)],
+        "each action's place in realized.txt"
     );
-    for (arrival, event) in arrived.iter().zip(open.events()) {
+    for (arrival, line) in arrived.iter().zip(&acted) {
+        let event = open.events()[arrival.event.0];
+        assert_eq!(event.line(), *line, "{arrival:?} names its action");
         let (head, stamp) = (
             head_at(&directory, arrival.revision),
             u64::from(event.at.ms()) * MS,
         );
         assert!(
             arrival.revision > 0 && head < stamp,
-            "{} entered at {head} ns",
-            event.line()
+            "{line} entered at {head} ns"
         );
     }
     assert_eq!(
         table(&directory.join("applied.npy")).len(),
-        2,
-        "both actions applied"
+        3,
+        "both actions and the scheduled event applied"
     );
     let replay = scratch("interact-replay");
     let replayed = completed(&written(&replay, "realized.txt", &realized), &replay);
