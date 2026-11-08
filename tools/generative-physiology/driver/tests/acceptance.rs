@@ -91,11 +91,26 @@ fn value(summary: &str, key: &str) -> String {
         .to_string()
 }
 
-fn seal_log(file: &Path) -> Vec<[u64; 6]> {
+#[derive(Debug, PartialEq, Eq)]
+struct SealedStep {
+    revision: u64,
+    end_ns: u64,
+    seal_words: [u64; 4],
+}
+
+fn seal_log(file: &Path) -> Vec<SealedStep> {
     let steps = Table::<u64>::read(file).expect("a step table");
-    steps
-        .iter()
-        .map(|row| [row[0], row[1], row[3], row[4], row[5], row[6]])
+    (steps.iter())
+        .map(|row| {
+            let &[revision, end_ns, _refusals, first, second, third, fourth] = row else {
+                panic!("a step row of {} columns", row.len());
+            };
+            SealedStep {
+                revision,
+                end_ns,
+                seal_words: [first, second, third, fourth],
+            }
+        })
         .collect()
 }
 
@@ -129,11 +144,11 @@ fn head_at(directory: &Path, revision: u64) -> u64 {
         return 0;
     }
     let steps = seal_log(&directory.join("steps.npy"));
-    let row = steps
+    let step = steps
         .iter()
-        .find(|row| row[0] == revision)
+        .find(|step| step.revision == revision)
         .expect("that revision's step");
-    row[1] - anchor_moment().nanoseconds()
+    step.end_ns - anchor_moment().nanoseconds()
 }
 
 fn listing(root: &Path) -> BTreeMap<PathBuf, [i64; 4]> {
@@ -493,15 +508,15 @@ fn same_branch(variant: &Path) {
         "the 8 s event waits for the checkpoint"
     );
     assert_eq!(value(&ours, "branch_enqueued"), format!("1@{from}"));
-    let known: Vec<[u64; 6]> = (seal_log(&reference.join("steps.npy")).into_iter())
-        .filter(|row| row[0] > from)
+    let known: Vec<SealedStep> = (seal_log(&reference.join("steps.npy")).into_iter())
+        .filter(|step| step.revision > from)
         .collect();
     let checkpoint_at = anchor_moment().nanoseconds() + 5_000_000_000;
     let at_checkpoint = seal_log(&reference.join("steps.npy"))
         .into_iter()
-        .find(|row| row[0] == from);
+        .find(|step| step.revision == from);
     assert!(
-        at_checkpoint.is_some_and(|row| row[1] >= checkpoint_at),
+        at_checkpoint.is_some_and(|step| step.end_ns >= checkpoint_at),
         "checkpoint at or after 5 s"
     );
     assert!(!known.is_empty());
