@@ -304,7 +304,10 @@ fn a_fault_after_a_refused_link_exports_once_the_store_keeps_it() -> Result<(), 
     let Step::Faulted(mut stopped) = session.step() else {
         panic!("not faulted");
     };
-    assert!(matches!(stopped.export(), Err(CheckpointError::StoreFailed { .. })));
+    assert!(matches!(
+        stopped.export(),
+        Err(CheckpointError::StoreFailed { .. })
+    ));
     store.refusing.set(false);
     let report = stopped.export().expect("the store keeps the waiting link");
     assert_eq!(store.kept.links.borrow().len(), 1);
@@ -314,13 +317,16 @@ fn a_fault_after_a_refused_link_exports_once_the_store_keeps_it() -> Result<(), 
         Err(CheckpointError::Latched)
     ));
     let branch = BranchId::new(Digest::of_canonical(b"after the fault"));
-    let recovered = stopped.recover(report.last_accepted(), branch).expect("recovered");
+    let recovered = stopped
+        .recover(report.last_accepted(), branch)
+        .expect("recovered");
     assert_eq!(recovered.record().revision(), 1);
     Ok(())
 }
 
 #[test]
-fn a_checkpoint_taken_before_a_fault_resumes_as_a_replay_to_the_same_fault() -> Result<(), InitializationFailure> {
+fn a_checkpoint_taken_before_a_fault_resumes_as_a_replay_to_the_same_fault()
+-> Result<(), InitializationFailure> {
     let fixture = reservoirs()?;
     let core = faulting_after_one_step();
     let store = Kept::default();
