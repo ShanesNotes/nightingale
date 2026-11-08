@@ -76,7 +76,9 @@ pub enum CoreChoice {
 /// Audit variants only. A variant is part of the canonical text, so variants never share a spec id.
 pub enum Variant {
     None,
-    Late { lead_ms: u32 },              // enqueue each event once the head passes its stamp minus the lead
+    /// Enqueue each event once the head passes its stamp minus the lead. The lead is at least the body's
+    /// longest step, or `run` refuses the spec before it writes anything, so no step passes a stamp first.
+    Late { lead_ms: u32 },
     /// Checkpoint at the first head at or after `at`; every later event is then enqueued on the original
     /// and on a copy resumed into a freshly compiled body and a fresh core, and both run to the end.
     CheckpointResume { at: Stamp },
@@ -166,7 +168,7 @@ pub struct RunSummary {
 
 ## The run directory
 
-A run writes `<out>/<spec id>.partial-<pid>/` and renames it to `<out>/<spec id>/` when every file is flushed. A run that faults, or passes its memory cap, is renamed whole to `<out>/<spec id>.fault/` instead, with its spec, its summary and what it captured up to that point. `status` reports it, and no command removes or redoes it. A person reads it first. A partial directory whose process is gone has no summary, and the next run of its spec removes and redoes it.
+A run makes `<out>/.<spec id>.staging-<pid>/`, locks the `lock` file inside it, and only then renames it to `<out>/<spec id>.partial-<pid>/`, so no other run sees a partial directory before its run holds it. No command reads or removes a staging directory. A run renames its partial directory to `<out>/<spec id>/` when every file is flushed. A run that faults, or passes its memory cap, is renamed whole to `<out>/<spec id>.fault/` instead, with its spec, its summary and what it captured up to that point. `status` reports it, and no command removes or redoes it. A person reads it first. A partial directory whose process is gone has no summary, and the next run of its spec removes and redoes it.
 
 | File | Content |
 |---|---|
@@ -174,7 +176,7 @@ A run writes `<out>/<spec id>.partial-<pid>/` and renames it to `<out>/<spec id>
 | `edges.npy` | u64, one row per edge (the start, every beat edge, the end): time ns, revision, mode values, every row's value as hi and lo bits, every row's cumulative chord integral, every column's cumulative forward and reverse extents, every conserved quantity's inventory, inflow and outflow |
 | `beats.npy` | f64, one row per complete beat: the fields of `BeatReading` |
 | `steps.npy` | u64, one row per accepted step: revision, end ns, refusals before it, the seal's four words |
-| `applied.npy` | each event's index in the spec and the revision that applied it |
+| `applied.npy` | each event's position in the run's open-loop spec (`spec.txt`, or `realized.txt` for a closed loop) and the revision that applied it |
 | `lens.npy` | the arena lens's observations, kept only as a diagnostic |
 | `summary.txt` | the fields of `RunSummary`, one per line |
 | `realized.txt` | closed-loop runs only: the run's actions as an open-loop spec |
@@ -211,7 +213,7 @@ Question for the developer reviewer: any path under `tools/**` runs every verify
 
 On the heavy-run machine, at the PR head, every box holds:
 
-- The locked release build succeeds, and clippy with warnings denied, fmt and the 14 light tests pass.
+- The locked release build succeeds, and clippy with warnings denied, fmt, the 15 light tests and the unit test pass.
 - `gp-driver smoke` reproduces the packet digest and the seal that `trace.rs` pins, at 1,000,079,707 ns after the anchor (revision 189). It has 22 beats, no fault, and the stand applied at revision 1874. These figures are measured on one run: admission took 6.8 s, the 20 s took 2.8 s of stepping, and the run peaked at 16 MB resident. Two builds in two processes wrote the same file digests.
 - The 12 acceptance tests are `#[ignore]`, so only a full verify or a person runs them. They pass in 130 s:
   - A rerun writes nothing.
