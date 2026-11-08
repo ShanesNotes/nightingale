@@ -40,3 +40,13 @@ phase doctests python3 -I tools/gate/gate.py doctests
 phase codes python3 -I tools/gate/gate.py codes
 [ "${NG_GATE_MODE:-}" = changed ] || phase bans python3 -I tools/gate/gate.py bans
 [ "${NG_GATE_MODE:-}" = changed ] || phase bench cargo check --locked --manifest-path tools/bench/Cargo.toml
+driver=tools/generative-physiology/driver/Cargo.toml
+phase driver-fmt cargo fmt --check --manifest-path "$driver"
+[ "${NG_GATE_MODE:-}" = changed ] || phase driver-clippy cargo clippy --locked --all-targets --manifest-path "$driver" \
+  -- -D warnings
+if [ "${NG_GATE_MODE:-}" = full ]; then
+  phase driver-test cargo test --locked --manifest-path "$driver" -- --include-ignored
+elif [ "${NG_GATE_MODE:-}" != changed ]; then
+  phase driver-test cargo test --locked --manifest-path "$driver"
+fi
+[ "${NG_GATE_MODE:-}" = changed ] || phase driver cargo check --locked --manifest-path "$driver"
