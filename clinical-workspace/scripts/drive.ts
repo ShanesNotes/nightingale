@@ -99,7 +99,6 @@ async function connect(tab: string) {
   const list = await devtools(port, '/json/list')
   const target = (Array.isArray(list) ? list : []).filter(isTarget).find((t) => t.id === id) ?? fail(`tab ${tab} is gone`)
   const page = await socket(target.webSocketDebuggerUrl)
-  await page.send('Page.bringToFront')
   const evaluate = async (expression: string): Promise<unknown> => {
     const answer = await page.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
     const thrown = read(answer, 'result', 'exceptionDetails')

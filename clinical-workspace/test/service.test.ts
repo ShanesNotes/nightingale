@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { parseReadModel, parseRun, parseVersions, parseWriteResult, ROSTER } from '../src/chart-api.ts'
 import { openChart, pgliteSql } from '../src/chart.ts'
-import { isPatientId, parseAnswers } from '../src/device.ts'
+import { isPatientId, OUTBOX_CAP, parseAnswers } from '../src/device.ts'
 import { startService } from '../src/service.ts'
 import { parseClock, type PatientTime, wallTime } from '../src/time.ts'
 
@@ -76,6 +76,30 @@ test('the chart service answers the chart API and the device protocol over HTTP'
     assert.deepEqual(model.value.entries.map((e) => [e.value, e.versions]), [[19, 2]])
     assert.deepEqual(model.value.statements.map((s) => s.arrived), [at('06:57:00')], 'the service stamps arrival from the patient clock')
     assert.equal((await call('GET', '/api/nothing')).status, 404)
+  } finally {
+    await service.close()
+    await sql.close()
+  }
+})
+
+test('the chart service answers each message of the largest batch a monitor can hold', async () => {
+  const sql = await pgliteSql()
+  const chart = await openChart(sql, { specId: 'test-spec', patient, start: at('06:55:00'), end: at('07:05:00') }, wallTime(1_000_000))
+  const service = await startService({ chart, now: () => at('06:56:00'), port: 0 })
+  const longest = (name: string) => `${name}-${'x'.repeat(199 - name.length)}`
+  const header = { device: longest('test-monitor'), boot: longest('test-boot'), patient: longest('test-patient') }
+  const channels = { HR: 'no source', 'ABP sys': 'no source', 'ABP dia': 'no source', 'ABP mean': 'no source', SpO2: 'no source', RR: 'no source', Temp: 'no source' }
+  const batch = Array.from({ length: OUTBOX_CAP }, (_, i) => ({ kind: 'statement', ...header, sequence: i + 1, at: at('06:55:00'), channels }))
+  try {
+    const response = await fetch(`${service.url}/api/device/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(batch),
+    })
+    const answers = parseAnswers(await response.json())
+    assert.equal(response.status, 200)
+    assert.ok(answers.ok)
+    assert.equal(answers.value.length, OUTBOX_CAP)
   } finally {
     await service.close()
     await sql.close()

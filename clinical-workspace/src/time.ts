@@ -71,7 +71,7 @@ export function patientTimeAt(clock: PatientClock, wall: WallTime): PatientTime 
   return earlier(clock.end, add(clock.start, duration(elapsed * NANOSECONDS_PER_SECOND)))
 }
 
-export function untilNextSecond(clock: PatientClock, wall: WallTime): number {
+export function msUntilNextSecond(clock: PatientClock, wall: WallTime): number {
   const into = (((wall - clock.anchor) % MILLISECONDS_PER_SECOND) + MILLISECONDS_PER_SECOND) % MILLISECONDS_PER_SECOND
   return MILLISECONDS_PER_SECOND - into
 }

@@ -10,6 +10,7 @@ import {
   isDeviceId,
   isSequence,
   type MessageAnswer,
+  OUTBOX_CAP,
   type PatientId,
   parseAnswers,
   parseDeviceMessage,
@@ -23,7 +24,7 @@ import {
   type PatientTime,
   patientTimeAt,
   seconds,
-  untilNextSecond,
+  msUntilNextSecond,
   type WallTime,
   wallTime,
 } from '../time.ts'
@@ -45,8 +46,6 @@ export type MonitorOptions = {
   readonly cap?: number
   readonly vitals?: readonly VitalRow[]
 }
-
-const CAP = 3_600
 
 function branded<T>(value: unknown, is: (v: unknown) => v is T, what: string): T {
   if (!is(value)) throw new Error(`${String(value)} is not ${what}`)
@@ -105,7 +104,7 @@ function linkWords(model: Model): string {
 }
 
 export function monitor(options: MonitorOptions) {
-  const { feed, link, boot, patient, cap = CAP, vitals = VITALS } = options
+  const { feed, link, boot, patient, cap = OUTBOX_CAP, vitals = VITALS } = options
   const deviceRow = (vital: string) => (isVital(vital) ? DEVICE_TABLE[vital] : undefined)
   const sourced = (vital: string) => {
     const entry = deviceRow(vital)
@@ -241,7 +240,7 @@ export function start(container: HTMLElement, options: MonitorOptions & { readon
   const program = monitor(options)
   const clock: PatientClock = { start: options.feed.start, end: options.feed.end, anchor: options.anchor ?? wallTime(Date.now()) }
   const tick = Effect.sync(() => Message.SecondPassed({ now: patientTimeAt(clock, wallTime(Date.now())) }))
-  const next = Effect.suspend(() => Effect.sleep(untilNextSecond(clock, wallTime(Date.now())) + TICK_MARGIN_MS)).pipe(Effect.andThen(tick))
+  const next = Effect.suspend(() => Effect.sleep(msUntilNextSecond(clock, wallTime(Date.now())) + TICK_MARGIN_MS)).pipe(Effect.andThen(tick))
   const subscriptions = Subscription.make<Model, Message>()(() => ({
     clock: Subscription.persistentEntry(Stream.concat(Stream.fromEffect(tick), Stream.fromEffectRepeat(next))),
   }))

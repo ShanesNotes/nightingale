@@ -246,7 +246,7 @@ function missingSpans(model: Omit<ReadModel, 'missing'>): MissingSpan[] {
 
 const refused = (refusal: Refusal): WriteResult => ({ kind: 'refused', refusal })
 
-const isUniqueViolation = (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '23505'
+const lostTheVersionRace = (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '23505'
 
 function refusalOf(write: { readonly patient: string; readonly value: number; readonly care: PatientTime }, run: RunView, now: PatientTime): Refusal | undefined {
   if (write.patient !== run.patient) return { kind: 'another patient' }
@@ -304,7 +304,7 @@ export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: 
           return { kind: 'taken', entry: taken }
         })
       } catch (error) {
-        if (isUniqueViolation(error)) return refused({ kind: 'not the current version' })
+        if (lostTheVersionRace(error)) return refused({ kind: 'not the current version' })
         throw error
       }
     },

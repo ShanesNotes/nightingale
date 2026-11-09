@@ -1,6 +1,6 @@
 import type { EntryView, ReadModel, ReadingView, StatementView } from './chart-api.ts'
 import { add, type Duration, earlier, floorTo, later, MINUTE, type PatientTime, SECOND, seconds, since, ZERO } from './time.ts'
-import { VITALS, type VitalRow } from './vitals.ts'
+import { isVital, VITALS, type VitalRow } from './vitals.ts'
 
 export type MonitorCell =
   | { readonly kind: 'no statement' }
@@ -41,8 +41,7 @@ function statementAt(statements: readonly StatementView[], time: PatientTime): S
 type Source = StatementView['channels'][keyof StatementView['channels']]
 
 function sourceOf(statement: StatementView | undefined, vital: string): Source | undefined {
-  const channels: Readonly<Record<string, Source>> | undefined = statement?.channels
-  return channels?.[vital]
+  return isVital(vital) ? statement?.channels[vital] : undefined
 }
 
 const LAST_SECOND = seconds(59)

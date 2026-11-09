@@ -13,6 +13,8 @@ export const isBootId = (value: unknown): value is BootId => isShortText(value)
 export const isPatientId = (value: unknown): value is PatientId => isShortText(value)
 export const isSequence = (value: unknown): value is Sequence => typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
 
+export const OUTBOX_CAP = 3_600
+
 export type DeviceAbsence = 'not collected' | 'pending' | 'invalid signal'
 export type DeviceValue = { readonly kind: 'present'; readonly value: number } | { readonly kind: 'absent'; readonly reason: DeviceAbsence }
 export type Source = 'sourced' | 'no source'

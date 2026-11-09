@@ -159,6 +159,42 @@ for (const [name, connect] of databases) {
         assert.equal(await chart.versions(branded('00000000-0000-4000-8000-000000000000', isEntryId)), undefined)
       }))
 
+    test('when another amendment takes the version first, the database refuses this one and the chart answers not the current version', async () => {
+      const base = await connect()
+      const racing: Sql = {
+        ...base,
+        transaction: (work) =>
+          base.transaction((tx) =>
+            work({
+              ...tx,
+              async query(text, params) {
+                const rows = await tx.query(text, params)
+                const [read] = rows
+                if (read !== undefined && 'current' in read) {
+                  await tx.query(
+                    `INSERT INTO entry_version (entry, number, value, care_ns, charted_ns, author, author_name, author_discipline)
+                     SELECT entry, number + 1, value, care_ns, charted_ns, author, author_name, author_discipline
+                     FROM entry_version WHERE entry = $1 AND number = $2`,
+                    [read['id'], read['current']],
+                  )
+                }
+                return rows
+              },
+            }),
+          ),
+      }
+      try {
+        const chart = await openChart(racing, RUN, wallTime(1_000_000))
+        const first = taken(await chart.write(newEntry({}), at('06:56:10')))
+        assert.deepEqual(await chart.write(amendment({ entry: first.entry, value: '19' }), at('06:57:00')), {
+          kind: 'refused',
+          refusal: { kind: 'not the current version' },
+        })
+      } finally {
+        await base.close()
+      }
+    })
+
     test('Postgres refuses any update, delete or truncate of chart rows, and a second version under one number', () =>
       withChart(async (chart, sql) => {
         const first = taken(await chart.write(newEntry({}), at('06:56:10')))
