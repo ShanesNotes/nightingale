@@ -128,3 +128,45 @@ test('on a healthy link the monitor states its channels at boot and delivers eac
     Scene.expect(Scene.selector('#link')).toHaveText('Everything delivered to the chart.'),
   )
 })
+
+const readingsHeld = (double: Double) =>
+  double.held().flatMap((m) => (m.kind === 'reading' ? [`${m.boot} ${m.sequence} ${m.vital} ${formatClock(m.collected)}`] : []))
+
+test('TLC path: a restart within the second of an undelivered reading takes that second\'s reading again', () => {
+  const double = chartDouble(patient)
+  const before = monitor({ patient, feed, link: double.link, boot: boot('test-boot-1') })
+  double.set('down')
+  Story.story(
+    before.update,
+    Story.given(before.init().model),
+    Story.message(Message.SecondPassed({ now: second(20) })),
+    serviceAnswers(double, before),
+    Story.model((model: Model) => assert.equal(model.outbox.length, 3, 'the statement and both readings are held')),
+  )
+  double.set('up')
+  const after = monitor({ patient, feed, link: double.link, boot: boot('test-boot-2') })
+  Story.story(after.update, Story.given(after.init().model), Story.message(Message.SecondPassed({ now: second(20) })), serviceAnswers(double, after))
+  assert.deepEqual(readingsHeld(double), ['test-boot-2 2 HR 06:55:20', 'test-boot-2 3 ABP mean 06:55:20'])
+})
+
+test('a lost answer leaves the batch held; the monitor sends the same messages again and the chart holds each once', () => {
+  const double = chartDouble(patient)
+  const m = monitor({ patient, feed, link: double.link, boot: boot('test-boot-1') })
+  double.set('losing answers')
+  Story.story(
+    m.update,
+    Story.given(m.init().model),
+    Story.message(Message.SecondPassed({ now: second(30) })),
+    serviceAnswers(double, m),
+    Story.model((model: Model) => assert.equal(model.outbox.length, 3, 'nothing answered, nothing let go')),
+    (sim: Story.StorySimulation<Model, Message>) => {
+      double.set('up')
+      return sim
+    },
+    Story.message(Message.SecondPassed({ now: second(31) })),
+    Story.Command.expectHas(m.SendBatch),
+    serviceAnswers(double, m),
+    Story.model((model: Model) => assert.deepEqual(model.outbox, [])),
+  )
+  assert.deepEqual(readingsHeld(double), ['test-boot-1 2 HR 06:55:30', 'test-boot-1 3 ABP mean 06:55:30', 'test-boot-1 4 HR 06:55:31', 'test-boot-1 5 ABP mean 06:55:31'])
+})
