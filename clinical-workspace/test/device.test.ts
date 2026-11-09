@@ -45,3 +45,32 @@ test('the per-message answers parse back in the order of the batch', () => {
   ]
   assert.deepEqual(parseAnswers({ answers }), { ok: true, value: answers })
 })
+
+test('a device message that is not well formed is refused at the boundary', () => {
+  const without = (message: object, key: string) => Object.fromEntries(Object.entries(message).filter(([k]) => k !== key))
+  const cases: Record<string, unknown> = {
+    'not an object': 'HR 61',
+    'unknown kind': { ...reading, kind: 'alarm' },
+    'a vital the table lacks': { ...reading, vital: 'EtCO2' },
+    'filtration': { ...reading, vital: 'Filtration' },
+    'no device': without(reading, 'device'),
+    'empty boot': { ...reading, boot: '' },
+    'no patient': without(reading, 'patient'),
+    'sequence zero': { ...reading, sequence: 0 },
+    'fractional sequence': { ...reading, sequence: 1.5 },
+    'time as text': { ...reading, collected: '06:55:01' },
+    'negative time': { ...reading, collected: -1 },
+    'available before collected': { ...reading, available: reading.collected - 1 },
+    'present value missing': { ...reading, value: { kind: 'present' } },
+    'present value not a number': { ...reading, value: { kind: 'present', value: '61' } },
+    'absent for no reason': { ...reading, value: { kind: 'absent', reason: 'tired' } },
+    'statement missing a vital': { ...statement, channels: without(statement.channels, 'Temp') },
+    'statement with an extra vital': { ...statement, channels: { ...statement.channels, EtCO2: 'sourced' } },
+    'statement with an unknown source word': { ...statement, channels: { ...statement.channels, HR: 'maybe' } },
+  }
+  for (const [name, json] of Object.entries(cases)) assert.equal(parseDeviceMessage(json).ok, false, name)
+  assert.equal(parseBatch({ messages: [reading] }).ok, false, 'a batch is a list')
+  assert.equal(parseBatch([reading, { ...reading, vital: 'EtCO2' }]).ok, false, 'one bad message refuses the batch')
+  assert.equal(parseAnswers({ answers: [{ boot: 'b', sequence: 1, answer: 'maybe' }] }).ok, false, 'an unknown answer')
+  assert.equal(parseAnswers({ answers: [{ boot: 'b', sequence: 1, answer: 'refused' }] }).ok, false, 'a refusal names its kind')
+})
