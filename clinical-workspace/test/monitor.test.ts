@@ -6,6 +6,7 @@ import { type BootId, isBootId, isPatientId, parseBatch } from '../src/device.ts
 import { Message, type Model, monitor } from '../src/monitor/monitor.ts'
 import { availableBetween, decodeRun } from '../src/run.ts'
 import { add, formatClock, type PatientTime, seconds } from '../src/time.ts'
+import { VITALS } from '../src/vitals.ts'
 import { chartDouble } from './link-double.ts'
 
 const capture = new URL('../capture/307caf19/', import.meta.url)
@@ -233,5 +234,17 @@ test('a message the chart refuses is never sent again, and the monitor counts it
       return sim
     },
     sceneAnswers(double, reused),
+  )
+})
+
+test('the tiles follow the vitals table, so EtCO2 is one more tile, and it has no source', () => {
+  const m = monitor({ patient, feed, link: chartDouble(patient).link, boot: boot('test-boot-1'), vitals: [...VITALS, { vital: 'EtCO2', label: 'End-tidal CO2', unit: 'mmHg' }] })
+  Scene.scene(
+    { update: m.update, view: m.view },
+    Scene.given(m.init().model),
+    Scene.Subscription.emit(Message.SecondPassed({ now: second(5) })),
+    Scene.Command.resolve(m.SendBatch, Message.BatchUnanswered()),
+    Scene.expectAll(Scene.all.selector('td[data-tile]')).toHaveCount(VITALS.length + 1),
+    Scene.expect(tile('EtCO2')).toHaveText('no source'),
   )
 })
