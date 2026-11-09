@@ -2,9 +2,12 @@ import { randomBytes } from 'node:crypto'
 import { PGlite } from '@electric-sql/pglite'
 import pg from 'pg'
 import {
+  type EntryId,
+  type EntryVersion,
   type EntryView,
-  type NewEntry,
+  type EntryWrite,
   parseEntries,
+  parseVersions,
   type ReadModel,
   type Refusal,
   ROSTER,
@@ -143,14 +146,16 @@ CREATE OR REPLACE VIEW current_entry AS
 `
 
 // Rows leave the database in the chart API's own shape, so the API's parser checks them on the way out.
-const ENTRY_JSON = `json_build_object('entry', id, 'patient', patient, 'vital', vital, 'number', number, 'value', value,
-  'care', care_ns, 'charted', charted_ns, 'author', json_build_object('id', author, 'name', author_name,
-  'discipline', author_discipline), 'versions', versions)`
+const VERSION_FIELDS = `'entry', id, 'patient', patient, 'vital', vital, 'number', number, 'value', value, 'care', care_ns,
+  'charted', charted_ns, 'author', json_build_object('id', author, 'name', author_name, 'discipline', author_discipline)`
+const ENTRY_JSON = `json_build_object(${VERSION_FIELDS}, 'versions', versions)`
+const VERSION_JSON = `json_build_object(${VERSION_FIELDS})`
 
 export type Chart = {
   readonly run: RunView
-  write(entry: NewEntry, now: PatientTime): Promise<WriteResult>
+  write(write: EntryWrite, now: PatientTime): Promise<WriteResult>
   readModel(now: PatientTime): Promise<ReadModel>
+  versions(entry: EntryId): Promise<readonly EntryVersion[] | undefined>
 }
 
 const trusted = <T>(parsed: Parsed<T>): T => {
@@ -178,6 +183,8 @@ function runOf(row: Row | undefined): RunView {
 
 const refused = (refusal: Refusal): WriteResult => ({ kind: 'refused', refusal })
 
+const isUniqueViolation = (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '23505'
+
 function refusalOf(write: { readonly patient: string; readonly value: number; readonly care: PatientTime }, run: RunView, now: PatientTime): Refusal | undefined {
   if (write.patient !== run.patient) return { kind: 'another patient' }
   if (write.care > now) return { kind: 'care time after now' }
@@ -201,24 +208,53 @@ export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: 
   }
   return {
     run: held,
-    async write(entry, now) {
-      const author = ROSTER.find((c) => c.id === entry.author)
+    async write(write, now) {
+      const author = ROSTER.find((c) => c.id === write.author)
       if (author === undefined) return refused({ kind: 'malformed', reason: 'the author is not on the roster' })
-      const care = entry.care.kind === 'now' ? now : entry.care.at
-      const refusal = refusalOf({ patient: entry.patient, value: entry.value, care }, held, now)
+      const care = write.care.kind === 'now' ? now : write.care.at
+      const refusal = refusalOf({ patient: write.patient, value: write.value, care }, held, now)
       if (refusal !== undefined) return refused(refusal)
-      return sql.transaction(async (tx) => {
-        const [made] = await tx.query('INSERT INTO entry (patient, vital) VALUES ($1, $2) RETURNING id', [entry.patient, entry.vital])
-        const id = made?.['id']
-        await tx.query(
-          `INSERT INTO entry_version (entry, number, value, care_ns, charted_ns, author, author_name, author_discipline)
-           VALUES ($1, 1, $2, $3, $4, $5, $6, $7)`,
-          [id, entry.value, care, now, author.id, author.name, author.discipline],
-        )
-        const [taken] = await entries(tx, 'id = $1', [id])
-        if (taken === undefined) throw new Error('the chart lost the entry it just took')
-        return { kind: 'taken', entry: taken }
-      })
+      try {
+        return await sql.transaction(async (tx) => {
+          let id: unknown
+          let number: number
+          if (write.kind === 'new entry') {
+            const [made] = await tx.query('INSERT INTO entry (patient, vital) VALUES ($1, $2) RETURNING id', [write.patient, write.vital])
+            id = made?.['id']
+            number = 1
+          } else {
+            const [current] = await tx.query(
+              'SELECT e.id, max(v.number) AS current FROM entry e JOIN entry_version v ON v.entry = e.id WHERE e.id::text = $1 AND e.patient = $2 GROUP BY e.id',
+              [write.entry, write.patient],
+            )
+            if (current === undefined) return refused({ kind: 'no such entry' })
+            if (current['current'] !== write.replaces) return refused({ kind: 'not the current version' })
+            id = current['id']
+            number = write.replaces + 1
+          }
+          await tx.query(
+            `INSERT INTO entry_version (entry, number, value, care_ns, charted_ns, author, author_name, author_discipline)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [id, number, write.value, care, now, author.id, author.name, author.discipline],
+          )
+          const [taken] = await entries(tx, 'id = $1', [id])
+          if (taken === undefined) throw new Error('the chart lost the entry it just took')
+          return { kind: 'taken', entry: taken }
+        })
+      } catch (error) {
+        // Two amendments of one version: the database's key on (entry, number) lets only the first in.
+        if (isUniqueViolation(error)) return refused({ kind: 'not the current version' })
+        throw error
+      }
+    },
+    async versions(entry) {
+      const [row] = await sql.query(
+        `SELECT coalesce(json_agg(${VERSION_JSON} ORDER BY number), '[]'::json) AS versions
+         FROM entry_version v JOIN entry e ON e.id = v.entry WHERE e.id::text = $1`,
+        [entry],
+      )
+      const versions = trusted(parseVersions(row?.['versions']))
+      return versions.length > 0 ? versions : undefined
     },
     async readModel(now) {
       return { run: held, now, entries: await entries(sql), readings: [], statements: [], missing: [] }
