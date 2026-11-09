@@ -65,7 +65,7 @@ fn newton_update_us(body: &CompiledBody) -> f64 {
     let mut update = Vec::new();
     let started = Instant::now();
     for _ in 0..UPDATES {
-        let (residuals, block) = system.stage(&workspace, 0).expect("stage");
+        let (residuals, block) = system.stage(&workspace, workspace.legs_of(0)[0]).expect("stage");
         let factors = system.factor(&block).expect("factor");
         update = residuals;
         factors.solve(&mut update);
