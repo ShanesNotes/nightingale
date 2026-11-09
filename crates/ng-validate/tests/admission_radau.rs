@@ -6,8 +6,9 @@
 //! `gain` is fitted to it. The rate also reads the store over its wall, which the closure holds at one, so the
 //! anchor rests on an amount. Beside the clock an elastic store is held to a wall by the power it sheds into a thermal
 //! store: the closed row has no slope of its own, so only the store's stage reaches the power, an index-2 pair. Work
-//! enters the store in the first quarter only, and heat leaves the thermal store in proportion to what it holds, so
-//! energy answers its own flows.
+//! enters the store in the first quarter only, and heat leaves the thermal store at `speed * held^2 / scale`, so energy
+//! answers its own flows, and not in proportion: a linear loss under one speed in every mode would give both stages the
+//! same sum round the ring, and no check could tell their weights apart.
 
 use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::*;
@@ -22,6 +23,7 @@ const NOTE: &str = "synthetic";
 const WORK: f64 = 6.0;
 const WALL: f64 = 2.0;
 const HEAT_SPEED: f64 = 0.5;
+const HEAT_SCALE: f64 = 1.0;
 const RATE: AnchorId = AnchorId::new("synthetic.rate");
 
 fn measure<U>(value: f64) -> Measure<U> {
@@ -142,9 +144,14 @@ fn pacemaker() -> Result<Pacemaker, AdmissionError> {
         let (mut laws, ports) = body.boundary()?.parts();
         let heat = ports.route::<Energy>(HEAT)?.route;
         let loss = laws.parameter::<Rate<Dimensionless>>(key("synthetic.heat-speed"), Admissible::positive());
+        let scale = laws.parameter::<Energy>(key("synthetic.heat-scale"), Admissible::positive());
         let leaving = laws.kernel(|mut k| {
             let (held, zero, pace) = (k.read(&heat.amount::<Energy>()), k.zero(), k.parameter(&loss));
             let value = k.relax(held, zero, pace);
+            let (held, scale) = (k.read(&heat.amount::<Energy>()), k.parameter(&scale));
+            let share = k.divide(held, scale);
+            let share = k.as_dimension::<_, Dimensionless>(share);
+            let value = k.scale(value, share);
             k.finish(value, laws.every_mode(), wave)
         });
         laws.transfer(Transfer::new(&heat, leaving));
@@ -203,6 +210,10 @@ impl Pacemaker {
                 .synthetic(key(local), Binding::Body, value, NOTE)
                 .expect("once");
         }
+        let heat_scale = measure::<Energy>(HEAT_SCALE);
+        packet
+            .synthetic(key("synthetic.heat-scale"), Binding::Body, heat_scale, NOTE)
+            .expect("once");
         let wall = measure::<Energy>(WALL);
         packet
             .synthetic(key("synthetic.wall"), Binding::Body, wall, NOTE)
@@ -222,7 +233,7 @@ impl Pacemaker {
         packet
             .calibrated(key("synthetic.gain"), Binding::Body, guess, RATE)
             .expect("once");
-        let stores = [(Space::Elastic, WALL), (Space::Thermal, WORK / 4.0 / HEAT_SPEED)];
+        let stores = [(Space::Elastic, WALL), (Space::Thermal, 2.0)];
         for (space, value) in stores {
             packet
                 .start(self.store(space), measure::<Energy>(value), NOTE)
@@ -327,9 +338,9 @@ fn the_lifted_ring_is_the_dense_solve_of_the_differenced_rows_through_a_reset() 
     }
 }
 
-/// Energy's end rows telescope round the ring, so their sum is the cycle's stage-weighted boundary flow. Heat leaves in
-/// proportion to the thermal store, so moving that store at every interior stage alone, or at every end alone, moves the
-/// sum by the period times the heat speed times that stage's weight.
+/// Energy's end rows telescope round the ring, so their sum is the cycle's stage-weighted boundary flow. Moving the
+/// thermal store by one at every interior stage alone, or at every end alone, moves the sum by each interval times that
+/// stage's weight times the change in the heat leaving there.
 #[test]
 fn energys_end_rows_sum_to_its_stage_weighted_boundary_flow() {
     let pacemaker = pacemaker().expect("a body");
@@ -345,14 +356,22 @@ fn energys_end_rows_sum_to_its_stage_weighted_boundary_flow() {
         ends.map(|slot| residuals[slot]).sum()
     };
     let before = summed(&workspace);
+    let h = 1.0 / f64::from(intervals);
     for (stage, weight) in [(0, 0.75), (1, 0.25)] {
         let mut moved = system.workspace();
         moved.unknowns_mut().copy_from_slice(&held);
+        let mut heat = 0.0;
         for point in 0..system.points() {
             let slots = [system.interior(point), system.endpoint(point)];
-            moved.unknowns_mut()[slots[stage].start + thermal] += 1.0;
+            let slot = slots[stage].start + thermal;
+            let was = held[slot];
+            moved.unknowns_mut()[slot] = was + 1.0;
+            heat += h * weight * HEAT_SPEED * ((was + 1.0) * (was + 1.0) - was * was) / HEAT_SCALE;
         }
         let change = summed(&moved) - before;
-        assert!((change - HEAT_SPEED * weight).abs() < 1e-12, "{stage}: {change}");
+        assert!(
+            (change - heat).abs() < 1e-12 * (1.0 + heat.abs()),
+            "{stage}: {change} against {heat}"
+        );
     }
 }
