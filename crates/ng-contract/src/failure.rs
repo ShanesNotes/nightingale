@@ -222,7 +222,7 @@ pub enum AdmissionError {
     },
     /// A certificate policy that does not hold one entry per combination, in basis order.
     PolicyCoverage,
-    /// A sliding window coverage that does not exceed one window.
+    /// A sliding window coverage shorter than one window.
     ShortCoverage,
     /// An accuracy policy with no case, a case that never steps or a zero grid.
     EmptyAccuracyPolicy,

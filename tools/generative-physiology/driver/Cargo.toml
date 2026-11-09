@@ -1,0 +1,19 @@
+[package]
+name = "gp-driver"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+ng-contract = { path = "../../../crates/ng-contract" }
+ng-observe = { path = "../../../crates/ng-observe" }
+ng-record = { path = "../../../crates/ng-record" }
+ng-solver = { path = "../../../crates/ng-solver" }
+ng-validate = { path = "../../../crates/ng-validate" }
+
+# The workspace root's test profile does not reach a crate with its own workspace, and the tests admit the
+# arena body.
+[profile.test]
+opt-level = 2

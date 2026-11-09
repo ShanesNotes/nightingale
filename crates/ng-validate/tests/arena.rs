@@ -43,10 +43,10 @@ impl WallClock for Stopped {
 }
 
 fn reference(interval_ns: u64) -> ReferenceIntegrator {
-    let full = ArenaProtocol::full();
+    let pick = ArenaProtocol::pick();
     ReferenceIntegrator::new(interval_ns)
-        .with_scales(full.scales)
-        .with_floor(full.minimum_interval_ns)
+        .with_scales(pick.scales)
+        .with_floor(pick.minimum_interval_ns)
 }
 
 fn short() -> ArenaProtocol {
@@ -54,7 +54,7 @@ fn short() -> ArenaProtocol {
     ArenaProtocol {
         windows: SlidingWindows::new(window, 2 * SECOND).expect("two seconds cover one"),
         repeats: NonZeroU32::MIN,
-        ..ArenaProtocol::full()
+        ..ArenaProtocol::pick()
     }
 }
 
@@ -164,7 +164,7 @@ fn past_the_sit_up_the_day_checks_end_on_the_timed_runs_seal() {
     let protocol = ArenaProtocol {
         windows: SlidingWindows::new(window, span).expect("the span covers two windows"),
         repeats: NonZeroU32::MIN,
-        ..ArenaProtocol::full()
+        ..ArenaProtocol::pick()
     };
     let arena = Arena::new(protocol).expect("the arena builds");
     let score = arena.score(
@@ -212,4 +212,84 @@ fn a_clock_with_no_reading_leaves_the_day_checks_and_accuracy_standing() {
     rows.dedup();
     assert_eq!(rows, (1..=17).collect::<Vec<u8>>());
     score.accuracy().expect("within the arena's policy");
+}
+
+const DAY: u64 = 24 * 3_600 * SECOND;
+
+#[test]
+fn the_pick_protocol_is_one_24_hour_window_timed_twice_and_the_milestone_every_one_over_48_hours() {
+    let (pick, milestone) = (ArenaProtocol::pick(), ArenaProtocol::milestone());
+    let shape = |protocol: ArenaProtocol| {
+        let windows = protocol.windows;
+        (
+            windows.window_ns().get(),
+            windows.coverage_ns(),
+            protocol.repeats.get(),
+        )
+    };
+    assert_eq!(shape(pick), (DAY, DAY, 2));
+    assert_eq!(shape(milestone), (DAY, 2 * DAY, 2));
+    let scale = |value| Measure::<Dimensionless>::new(value).expect("finite");
+    let model_defaults = ErrorScales::uniform(scale(0.1), scale(1e-3)).expect("positive");
+    assert_eq!(
+        (pick.scales, pick.minimum_interval_ns.get()),
+        (model_defaults, 100_000)
+    );
+    assert_eq!(
+        ArenaProtocol {
+            windows: pick.windows,
+            ..milestone
+        },
+        pick,
+        "the two differ only in what they cover"
+    );
+}
+
+struct OnlyDeclares(DeclaredResolution);
+impl CoupledSolver for OnlyDeclares {
+    fn resolution(&self) -> DeclaredResolution {
+        self.0.clone()
+    }
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        panic!("a core off the protocol never steps")
+    }
+    fn solve(
+        &self,
+        _problem: &CoupledProblem<'_>,
+        _ticket: &StepTicket,
+    ) -> Result<StepProposal, TrialFailure> {
+        panic!("a core off the protocol never steps")
+    }
+}
+
+#[test]
+fn a_core_off_either_protocol_is_refused_whole_before_it_steps() {
+    let scale = |value| Measure::<Dimensionless>::new(value).expect("finite");
+    let looser = ErrorScales::uniform(scale(1.0), scale(1e-3)).expect("positive");
+    let coarser = NonZeroU64::new(MILLISECOND).expect("a floor");
+    let declared = |core: ReferenceIntegrator| move || OnlyDeclares(core.resolution().clone());
+    let on = || reference(PAST_THE_SLICES_LONGEST_STEP);
+    for protocol in [ArenaProtocol::pick(), ArenaProtocol::milestone()] {
+        let arena = Arena::new(protocol).expect("the arena builds");
+        let refused = [
+            arena.score(
+                declared(on().with_scales(looser)),
+                declared(on()),
+                &Ticks(Cell::new(0)),
+                &MemoryStore::default(),
+            ),
+            arena.score(
+                declared(on()),
+                declared(on().with_floor(coarser)),
+                &Ticks(Cell::new(0)),
+                &MemoryStore::default(),
+            ),
+        ];
+        for score in refused {
+            assert!(
+                matches!(score, Err(ArenaFailure::OffProtocol(_))),
+                "refused whole under {protocol:?}"
+            );
+        }
+    }
 }
