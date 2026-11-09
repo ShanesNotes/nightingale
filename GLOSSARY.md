@@ -440,6 +440,10 @@ _Avoid_: entry time, timestamp
 A new version of a chart entry, written by any clinician, that names the version it replaces. The earlier versions stay in the chart.
 _Avoid_: overwrite, correction
 
+**Write id**:
+The id the workspace gives each chart entry and amendment it sends. The chart keeps it on the version that write made, so the same write sent again gets the same answer and is never charted twice.
+_Avoid_: idempotency key, request id
+
 **No source**:
 A device's statement that it has no channel for a vital, so it shows no number for that vital, never a zero.
 _Avoid_: unavailable, N/A

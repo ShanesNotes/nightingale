@@ -133,6 +133,8 @@ CREATE TABLE IF NOT EXISTS entry_version (
   author text NOT NULL,
   author_name text NOT NULL,
   author_discipline text NOT NULL,
+  write_id text NOT NULL UNIQUE,
+  write jsonb NOT NULL,
   inserted_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (entry, number)
 );
@@ -246,7 +248,20 @@ function missingSpans(model: Omit<ReadModel, 'missing'>): MissingSpan[] {
 
 const refused = (refusal: Refusal): WriteResult => ({ kind: 'refused', refusal })
 
-const lostTheVersionRace = (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '23505'
+const lostARace = (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '23505'
+
+async function answerByWriteId(sql: Sql, write: EntryWrite): Promise<WriteResult | undefined> {
+  const [held] = await sql.query('SELECT entry, write = $2::jsonb AS same FROM entry_version WHERE write_id = $1', [write.writeId, JSON.stringify(write)])
+  if (held === undefined) return undefined
+  if (held['same'] !== true) return refused({ kind: 'write id reused with other content' })
+  const [entry] = await entries(sql, 'id = $1', [held['entry']])
+  if (entry === undefined) throw new Error('the chart lost the entry a write id names')
+  return { kind: 'taken', entry }
+}
+
+const PREDATES_WRITE_ID = `SELECT to_regclass('entry_version') IS NOT NULL AND NOT EXISTS (
+  SELECT FROM pg_attribute WHERE attrelid = to_regclass('entry_version') AND attname = 'write_id' AND NOT attisdropped
+) AS predates`
 
 function refusalOf(write: { readonly patient: string; readonly value: number; readonly care: PatientTime }, run: RunView, now: PatientTime): Refusal | undefined {
   if (write.patient !== run.patient) return { kind: 'another patient' }
@@ -256,6 +271,8 @@ function refusalOf(write: { readonly patient: string; readonly value: number; re
 }
 
 export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: WallTime): Promise<Chart> {
+  const [tables] = await sql.query(PREDATES_WRITE_ID)
+  if (tables?.['predates'] === true) throw new Error("the chart's database predates the write id; run npm run reset in clinical-workspace/ for a fresh one")
   await sql.script(SCHEMA)
   await sql.query(`INSERT INTO run (${RUN_COLUMNS}) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (singleton) DO NOTHING`, [
     run.specId,
@@ -274,10 +291,12 @@ export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: 
       const author = ROSTER.find((c) => c.id === write.author)
       if (author === undefined) return refused({ kind: 'malformed', reason: 'the author is not on the roster' })
       const care = write.care.kind === 'now' ? now : write.care.at
-      const refusal = refusalOf({ patient: write.patient, value: write.value, care }, held, now)
-      if (refusal !== undefined) return refused(refusal)
       try {
         return await sql.transaction(async (tx) => {
+          const again = await answerByWriteId(tx, write)
+          if (again !== undefined) return again
+          const refusal = refusalOf({ patient: write.patient, value: write.value, care }, held, now)
+          if (refusal !== undefined) return refused(refusal)
           let id: unknown
           let number: number
           if (write.kind === 'new entry') {
@@ -295,17 +314,18 @@ export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: 
             number = write.replaces + 1
           }
           await tx.query(
-            `INSERT INTO entry_version (entry, number, value, care_ns, charted_ns, author, author_name, author_discipline)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [id, number, write.value, care, now, author.id, author.name, author.discipline],
+            `INSERT INTO entry_version (entry, number, value, care_ns, charted_ns, author, author_name, author_discipline, write_id, write)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)`,
+            [id, number, write.value, care, now, author.id, author.name, author.discipline, write.writeId, JSON.stringify(write)],
           )
           const [taken] = await entries(tx, 'id = $1', [id])
           if (taken === undefined) throw new Error('the chart lost the entry it just took')
           return { kind: 'taken', entry: taken }
         })
       } catch (error) {
-        if (lostTheVersionRace(error)) return refused({ kind: 'not the current version' })
-        throw error
+        if (!lostARace(error)) throw error
+        // The write lost a race on its write id or on its version, and whether the chart now holds its write id tells which.
+        return (await answerByWriteId(sql, write)) ?? refused({ kind: 'not the current version' })
       }
     },
     async versions(entry) {

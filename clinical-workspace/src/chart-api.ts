@@ -19,11 +19,13 @@ import { isVital, type PerVital, type Vital } from './vitals.ts'
 export type EntryId = string & { readonly __brand: 'EntryId' }
 export type ClinicianId = string & { readonly __brand: 'ClinicianId' }
 export type VersionNumber = number & { readonly __brand: 'VersionNumber' }
+export type WriteId = string & { readonly __brand: 'WriteId' }
 
 const isShortText = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 200
 
 export const isEntryId = (value: unknown): value is EntryId => isShortText(value)
 export const isClinicianId = (value: unknown): value is ClinicianId => isShortText(value)
+export const isWriteId = (value: unknown): value is WriteId => isShortText(value)
 export const isVersionNumber = (value: unknown): value is VersionNumber =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
 export type Discipline = 'nurse' | 'physician' | 'respiratory therapist'
@@ -45,6 +47,7 @@ export type CareTime = { readonly kind: 'now' } | { readonly kind: 'at'; readonl
 
 export type NewEntry = {
   readonly kind: 'new entry'
+  readonly writeId: WriteId
   readonly patient: PatientId
   readonly author: ClinicianId
   readonly vital: Vital
@@ -54,6 +57,7 @@ export type NewEntry = {
 
 export type Amendment = {
   readonly kind: 'amendment'
+  readonly writeId: WriteId
   readonly patient: PatientId
   readonly author: ClinicianId
   readonly entry: EntryId
@@ -65,6 +69,7 @@ export type Amendment = {
 export type EntryWrite = NewEntry | Amendment
 
 export type NewEntryBody = {
+  readonly writeId: string
   readonly patient: string
   readonly author: string
   readonly vital: string
@@ -80,6 +85,7 @@ export type Refusal =
   | { readonly kind: 'not a finite number' }
   | { readonly kind: 'no such entry' }
   | { readonly kind: 'not the current version' }
+  | { readonly kind: 'write id reused with other content' }
   | { readonly kind: 'malformed'; readonly reason: string }
 
 export type EntryVersion = {
@@ -145,6 +151,7 @@ const REFUSALS: readonly unknown[] = [
   'not a finite number',
   'no such entry',
   'not the current version',
+  'write id reused with other content',
 ] satisfies Refusal['kind'][]
 const DECIMAL = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/
 
@@ -172,6 +179,7 @@ const time = (json: Json, key: string): PatientTime => branded(json, key, isPati
 const patientOf = (json: Json): PatientId => branded(json, 'patient', isPatientId, 'a patient id')
 const entryOf = (json: Json, key: string): EntryId => branded(json, key, isEntryId, 'an entry id')
 const versionOf = (json: Json, key: string): VersionNumber => branded(json, key, isVersionNumber, 'a version number')
+const writeIdOf = (json: Json): WriteId => branded(json, 'writeId', isWriteId, 'a write id')
 
 function count(json: Json, key: string): number {
   const value = json[key]
@@ -300,7 +308,7 @@ function parsing<T>(parse: () => T): Parsed<T> {
 export const parseNewEntry = (body: unknown): Parsed<NewEntry> =>
   parsing(() => {
     const json = object(body, 'a new entry')
-    return { kind: 'new entry', patient: patientOf(json), author: author(json), vital: vital(json), value: typedValue(json), care: care(json) }
+    return { kind: 'new entry', writeId: writeIdOf(json), patient: patientOf(json), author: author(json), vital: vital(json), value: typedValue(json), care: care(json) }
   })
 
 export const parseAmendment = (body: unknown): Parsed<Amendment> =>
@@ -308,6 +316,7 @@ export const parseAmendment = (body: unknown): Parsed<Amendment> =>
     const json = object(body, 'an amendment')
     return {
       kind: 'amendment',
+      writeId: writeIdOf(json),
       patient: patientOf(json),
       author: author(json),
       entry: entryOf(json, 'entry'),
