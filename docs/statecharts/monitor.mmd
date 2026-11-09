@@ -1,0 +1,27 @@
+---
+title: "The bedside monitor's link to the chart service"
+---
+stateDiagram-v2
+  direction LR
+  state "At the same time" as all {
+    state "The monitor's link" as r0 {
+      s0: Held, the chart service not answering yet
+      s1: Held, a batch on its way
+      s2: Everything delivered
+      [*] --> s0
+      s0 --> s1: the monitor sends what it holds as one batch
+      s1 --> s0: the monitor restarts, loses what it held and takes this second's reading again
+      s1 --> s2: the chart service takes the batch and answers each message, and the monitor lets go of each one answered [when Answering]
+      s1 --> s0: the chart service takes the batch, but its answer is lost on the way back or the chart service takes the batch and answers each message, and the monitor lets go of each one answered [when Answering]
+      s2 --> s0: the monitor restarts, loses what it held and takes this second's reading again or a second passes and the monitor takes its reading
+      s1 --> s0: the connection is refused, the chart service answers an error, or the request times out [when Stopped, failing or too slow to answer]
+    }
+    --
+    state "The chart service" as r1 {
+      s3: Answering
+      s4: Stopped, failing or too slow to answer
+      [*] --> s3
+      s3 --> s4: the chart service stops, fails or slows down
+      s4 --> s3: the chart service comes back
+    }
+  }

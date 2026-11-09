@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Checks every statechart with TLC and redraws its Mermaid chart: system, engine and documentation here, and
-# the step statechart through check-step.sh. Each <name>.tla is a model, its view names the states and arrows,
-# and <name>.mmd is the chart TLC's state graph gives. The engine statechart is drawn small through a VIEW and
-# checked again larger, with no VIEW, a checkpoint and an export taken any number of times and the certificate
-# run. Needs Node 22.18 or later and the pstack statechart skill's scripts/statechart command, which runs TLC
-# (installed with mise on its first run). REPORTS, when set, keeps each TLC report there:
+# Checks every statechart with TLC and redraws its Mermaid chart: system, engine, documentation and the monitor's
+# link here, and the step statechart through check-step.sh. Each <name>.tla is a model, its view names the states
+# and arrows, and <name>.mmd is the chart TLC's state graph gives. The engine statechart is drawn small through a
+# VIEW and checked again larger, with no VIEW, a checkpoint and an export taken any number of times and the
+# certificate run. Needs Node 22.18 or later and the pstack statechart skill's scripts/statechart command, which
+# runs TLC (installed with mise on its first run). REPORTS, when set, keeps each TLC report there:
 #   STATECHART=<skill dir>/scripts/statechart bash docs/statecharts/regenerate.sh
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -25,7 +25,7 @@ check() {
   fi
 }
 
-for chart in system:system-view.ts documentation:documentation-view.ts engine:view.ts; do
+for chart in system:system-view.ts documentation:documentation-view.ts engine:view.ts monitor:monitor-view.ts; do
   name=${chart%%:*}
   check "$name" "$name" "$name.cfg" "${chart#*:}"
   [[ $status == holds ]] || { echo "$name: a rule breaks" >&2; exit 1; }
