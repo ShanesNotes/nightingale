@@ -6,6 +6,7 @@ import {
   type EntryVersion,
   type EntryView,
   type EntryWrite,
+  type MissingSpan,
   parseEntries,
   parseReadModel,
   parseVersions,
@@ -16,7 +17,8 @@ import {
   type WriteResult,
 } from './chart-api.ts'
 import { type DeviceMessage, isPatientId, type MessageAnswer, type Parsed } from './device.ts'
-import { isPatientTime, isWallTime, type PatientTime, type WallTime } from './time.ts'
+import { add, earlier, floorTo, isPatientTime, isWallTime, type PatientTime, SECOND, seconds, type WallTime } from './time.ts'
+import { VITALS } from './vitals.ts'
 
 // The chart's one seam: a small SQL client with a pg adapter for a real Postgres and a PGlite adapter that runs
 // Postgres in-process. Both give a bigint column as a safe integer, so callers never see which ran.
@@ -220,6 +222,35 @@ function runOf(row: Row | undefined): RunView {
   return { specId: spec_id, patient, start: start_ns, end: end_ns, anchor: anchor_ms }
 }
 
+// A second is missing for a vital when the device's latest statement at that second calls the vital sourced and
+// the chart holds no reading of it, up to the earlier of the run's end and the second before now.
+function missingSpans(model: Omit<ReadModel, 'missing'>): MissingSpan[] {
+  if (model.now <= model.run.start) return []
+  const horizon = earlier(model.run.end, add(model.now, seconds(-1)))
+  const key = (device: string, vital: string, second: PatientTime) => `${device} ${vital} ${second}`
+  const charted = new Set(model.readings.map((r) => key(r.device, r.vital, floorTo(r.collected, SECOND))))
+  const spans: MissingSpan[] = []
+  for (const device of new Set(model.statements.map((s) => s.device))) {
+    const statements = model.statements.filter((s) => s.device === device)
+    const first = statements[0]
+    if (first === undefined) continue
+    for (const { vital } of VITALS) {
+      let open: { from: PatientTime; through: PatientTime } | undefined
+      for (let second = floorTo(first.at, SECOND); second <= horizon; second = add(second, SECOND)) {
+        const latest = statements.filter((s) => s.at <= second).at(-1)
+        if (latest?.channels[vital] === 'sourced' && !charted.has(key(device, vital, second))) {
+          open = { from: open?.from ?? second, through: second }
+        } else if (open !== undefined) {
+          spans.push({ device, vital, ...open })
+          open = undefined
+        }
+      }
+      if (open !== undefined) spans.push({ device, vital, ...open })
+    }
+  }
+  return spans
+}
+
 const refused = (refusal: Refusal): WriteResult => ({ kind: 'refused', refusal })
 
 const isUniqueViolation = (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '23505'
@@ -322,7 +353,10 @@ export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: 
     },
     async readModel(now) {
       const [row] = await sql.query(CHART_JSON)
-      return trusted(parseReadModel({ run: held, now, entries: row?.['entries'], readings: row?.['readings'], statements: row?.['statements'], missing: [] }))
+      const model = trusted(
+        parseReadModel({ run: held, now, entries: row?.['entries'], readings: row?.['readings'], statements: row?.['statements'], missing: [] }),
+      )
+      return { ...model, missing: missingSpans(model) }
     },
   }
 }
