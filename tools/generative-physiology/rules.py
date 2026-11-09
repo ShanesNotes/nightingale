@@ -1,10 +1,4 @@
-"""Closed-loop rules: what a run spec's closed-loop line means, and the rule that answers each beat.
-
-The line names the rule's kind, its version and every parameter, so the spec id covers all of them, and a change to
-the rule's behavior bumps the version. A rule reads beat readings, the run's end and its events' stamps, and
-nothing else, and it never answers what the driver would refuse: a stamp after the end or one an event holds.
-These are synthetic rules for an experiment, never care instructions.
-"""
+"""These are synthetic rules for an experiment, never care instructions."""
 from __future__ import annotations
 
 import math
@@ -23,9 +17,7 @@ class RuleError(Exception):
 
 @dataclass(frozen=True)
 class AuditPressure:
-    """Ticket 04's B7 rule, which tests the closed-loop mechanism. After `after_ms`, each beat's arterial pressure
-    is compared with the mean of the `baseline_beats` beats that ended last before it: lower sets stand, higher
-    sets flat, `delay_ms` after the beat's end, while the rule's own last action is at least `refractory_ms` old."""
+    """Ticket 04's B7 rule, which tests the closed-loop mechanism."""
 
     after_ms: int
     baseline_beats: int
@@ -89,7 +81,6 @@ class AuditPressureRule:
 
 
 def start(run: RunSpec) -> AuditPressureRule:
-    """The rule a closed-loop spec names, bound to its end and to the stamps its events hold."""
     if run.closed_loop is None:
         raise RuleError("an open-loop spec has no rule")
     return AuditPressureRule(parse(run.closed_loop), run.end_ms, {event.at_ms for event in run.events})

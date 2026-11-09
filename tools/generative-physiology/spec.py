@@ -1,29 +1,3 @@
-"""What the study tells a teacher run: posture settings, run specs in the driver's canonical text, and the audit plan.
-
-    plan = Plan.read()                      # spec/audit-v1.txt; a plan mistake fails here, before any run
-    plan["A1"].spec.text()                  # what gp-driver parses; the driver owns the id
-    plan.divergence_ms("B1", "B2")          # 510000, the first stamp where their events differ
-
-The plan grammar, one blank line between blocks:
-
-    gp-audit 1
-    core <driver core words>                                    the default core of every block
-    run <NAME>
-    replays <NAME>                                              alone: the spec is NAME's realized.txt
-    core <driver core words>                                    optional
-    end-ms <MS>
-    events of <NAME> [before-ms <MS>] [except-at-ms <MS>]       optional, first
-    event at-ms <MS> <SETTING>
-    ramp at-ms <MS> every-ms <MS> events <N> trunk <K> to <K> legs <LEGS> to <LEGS> from-event <I>
-    repeat at-ms <MS> every-ms <MS> events <N> settings <SETTING>...
-    closed-loop <rule text>                                     optional
-    variant <driver variant words>                              optional; none otherwise
-    retry if histories-differ fails                             once, alone: the runs after it are the retry's
-
-A ramp's event i (from 1) of N is at `at + (i - 1) every` with trunk `K0 + (K1 - K0)(i - 1)/(N - 1)` in whole
-thousandths, and takes the first legs before event I and the second from it. A repeat takes its settings in turn.
-Python never computes a spec id: two runs with one text would share one directory, so the plan refuses them.
-"""
 from __future__ import annotations
 
 import re
@@ -107,16 +81,12 @@ class RunSpec:
         return int(words[2]) if words[0] == "ng-solver" else None
 
     def variant_ms(self) -> int | None:
-        """The instant of a checkpoint or rewind, or a late variant's lead."""
         words = self.variant.split(" ")
         return int(words[2]) if len(words) == 3 else None
 
 
 @dataclass(frozen=True)
 class PlannedRun:
-    """One run the plan names: a spec, or a replay of a closed loop's realized events. `changes` are the stamps where
-    the run's own lines start a posture change: each event, and the first event of each ramp or repeat."""
-
     name: str
     spec: RunSpec | None
     replays: str | None
@@ -298,7 +268,6 @@ class Plan:
         return events
 
     def divergence_ms(self, one: str, other: str) -> int:
-        """The first stamp at which the two runs' events differ, by instant or setting."""
         first, second = self[one].spec.events, self[other].spec.events
         for a, b in zip(first, second):
             if a != b:
@@ -308,7 +277,6 @@ class Plan:
         return (first if len(first) > len(second) else second)[min(len(first), len(second))].at_ms
 
     def shared_change(self, names: list[str]) -> int:
-        """The first event every named run holds at the same instant with the same setting."""
         common = set(self[names[0]].spec.events)
         for name in names[1:]:
             common &= set(self[name].spec.events)

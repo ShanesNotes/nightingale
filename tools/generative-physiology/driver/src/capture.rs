@@ -228,7 +228,6 @@ impl Catalogue {
     pub fn edge_columns(&self, modes: usize) -> usize {
         2 + modes + 4 * self.rows.len() + 4 * self.columns.len() + 6 * self.quantities.len()
     }
-    /// Mode names come from an admitted start's records, so a text made before admission lists no mode.
     pub fn text(&self, body: &CompiledBody, lens: &ObservationLens, start: &[ValueRecord]) -> String {
         let mut lines = vec![
             "gp-catalogue 1".to_string(),

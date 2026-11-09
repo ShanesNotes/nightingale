@@ -1,11 +1,5 @@
 """The four response features, defined once: ticket 04's informativeness gate reads them, and ticket 09's metrics and
-ticket 12's order test use them unchanged. Each beat's change is its reading less the baseline's level over the same
-beat. A beat belongs to a window when it starts at or after the window's start and ends by its end, so the beat that
-holds a posture change is never read as after it.
-
-    found = response_features(beats, 330.0, BeforeChange(beats, 330.0))   # the 30 s before the change
-    found = response_features(beats, h + 30.0, Counterfactual(control))   # the run without the change
-"""
+ticket 12's order test use them unchanged."""
 from __future__ import annotations
 
 import math
@@ -41,8 +35,6 @@ class Baseline(Protocol):
 
 @dataclass(frozen=True)
 class BeforeChange:
-    """The mean of each reading over the beats of the 30 s before the change, one level for every later beat."""
-
     beats: Sequence[BeatReading]
     change_s: float
 
@@ -53,8 +45,6 @@ class BeforeChange:
 
 @dataclass(frozen=True)
 class Counterfactual:
-    """The run without the change: its beats' readings, each held over its own beat, averaged over the same span."""
-
     beats: Sequence[BeatReading]
 
     def level(self, field: Field, start_s: float, end_s: float) -> float:
@@ -62,8 +52,6 @@ class Counterfactual:
 
 
 def held_mean(beats: Sequence[BeatReading], field: str, start_s: float, end_s: float) -> float:
-    """The time-weighted mean of one reading over [start, end], each beat's value held over its beat. Refuses a span
-    the beats do not cover."""
     total, covered = [], 0.0
     for beat in beats:
         overlap = min(end_s, beat.end_s) - max(start_s, beat.start_s)
@@ -102,8 +90,6 @@ def _change(beat: BeatReading, field: Field, baseline: Baseline) -> float:
 
 
 def early_features(beats: Sequence[BeatReading], change_s: float, baseline: Baseline) -> tuple[Feature, Feature]:
-    """(1) The heart-rate rise at its peak within 30 s of the change; (2) the arterial-pressure fall at its 3-beat-mean
-    nadir within the same 30 s."""
     early = within(beats, change_s, change_s + EARLY_S)
     if len(early) < 3:
         raise FeatureError(f"{len(early)} beats in the {EARLY_S:g} s after {change_s:g} s, fewer than three")
@@ -114,8 +100,6 @@ def early_features(beats: Sequence[BeatReading], change_s: float, baseline: Base
 
 
 def response_features(beats: Sequence[BeatReading], change_s: float, baseline: Baseline) -> Features:
-    """The two early features, then (3) and (4): the heart-rate and pressure changes averaged over 240 to 300 s
-    after the change."""
     rise, fall = early_features(beats, change_s, baseline)
     late = within(beats, change_s + LATE_FROM_S, change_s + LATE_TO_S)
     late_what = f"{LATE_FROM_S:g} to {LATE_TO_S:g} s after {change_s:g} s"
@@ -128,8 +112,6 @@ def response_features(beats: Sequence[BeatReading], change_s: float, baseline: B
 
 
 def time_to_fraction(beats: Sequence[BeatReading], field: Field, change_s: float, fraction: float = 0.63) -> float | None:
-    """Seconds from the change to the end of the first beat after it whose reading has gone `fraction` of the way
-    from the mean of the 30 s before it to the mean from 240 to 300 s after it. None for no change, or no beat there."""
     before = mean([getattr(b, field) for b in within(beats, change_s - BASELINE_S, change_s)], "the baseline")
     after = mean([getattr(b, field) for b in within(beats, change_s + LATE_FROM_S, change_s + LATE_TO_S)], "the late window")
     if after == before:
@@ -143,6 +125,5 @@ def time_to_fraction(beats: Sequence[BeatReading], field: Field, change_s: float
 
 
 def three_beat_means(beats: Sequence[BeatReading], field: Field) -> list[tuple[float, float]]:
-    """(start of the first beat, the mean of it and the two after it) for each run of three consecutive beats."""
     values = [getattr(beat, field) for beat in beats]
     return [(beats[at].start_s, math.fsum(values[at : at + 3]) / 3) for at in range(len(beats) - 2)]

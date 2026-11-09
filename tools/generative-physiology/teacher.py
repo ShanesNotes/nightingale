@@ -1,17 +1,3 @@
-"""Making teacher runs: the only module that starts `gp-driver`, for the audit now and for the later tickets.
-
-    teacher = Teacher(driver, data / "audit", commit, memory_cap_gb=8, disks=[data, Path("/mnt/c")], floor_bytes=10**10)
-    a0 = teacher.settle(TeacherRun("A0", spec, None))           # found by its spec text, or made alone
-    settled = teacher.ensure(runs, a0.directory / "summary.txt", workers=3)
-
-A caller names runs and gets each one's settled directory. The driver's words, exit codes and outcome lines,
-`status`, the spec files, the closed loop's beat lines and answers, the order, replays, the disk rule and
-progress.txt stay here. It never computes a spec id, never reads a table and gives no verdict.
-
-Every driver it starts dies with it (PR_SET_PDEATHSIG), so a dead teacher leaves partial runs that the next call
-redoes, never a closed loop that faults because its rule went away. The pool is one thread, so the hook between fork
-and exec is safe.
-"""
 from __future__ import annotations
 
 import ctypes
@@ -42,8 +28,6 @@ class TeacherError(Exception):
 
 @dataclass(frozen=True)
 class TeacherRun:
-    """A run a caller wants: a spec, or a replay of a closed loop's realized events once that loop has settled."""
-
     name: str
     spec: RunSpec | None
     replays: str | None
@@ -146,7 +130,6 @@ class Teacher:
         self.started: list[str] = []
 
     def find(self, text: str) -> Path | None:
-        """The settled directory whose spec.txt is this text, read by bytes, so no id is computed."""
         if not self.out.is_dir():
             return None
         for directory in sorted(self.out.iterdir()):
@@ -158,8 +141,6 @@ class Teacher:
         return None
 
     def settle(self, run: TeacherRun) -> Settled:
-        """A run found by its spec text, or made alone and waited for. The audit's A0 comes from here, because
-        `status` needs an identity summary before it reports anything."""
         found = self.find(run.spec.text())
         if found:
             word = "fault" if found.name.endswith(".fault") else "present"
@@ -168,10 +149,6 @@ class Teacher:
         return settled[run.name]
 
     def ensure(self, runs: list[TeacherRun], identity: Path, workers: int) -> dict[str, Settled]:
-        """Every run present, stale or faulted, `workers` drivers at a time, the longest chain first. Refuses before
-        anything starts: a spec the driver calls invalid, a partial a live driver holds, a settled run of another
-        source commit, and a disk without room. A settled run never starts again. A second call with everything
-        settled runs one `status` and starts nothing. A driver that fails stops new starts; the others finish."""
         with_specs = [run for run in runs if run.spec]
         paths = {run.name: self._spec_file(run) for run in with_specs}
         census = self._status(paths, identity)
@@ -259,6 +236,7 @@ class Teacher:
                 stdin=subprocess.PIPE if closed else subprocess.DEVNULL,
                 stdout=subprocess.PIPE if closed else stdout,
                 stderr=stderr,
+                # The pool is one thread, so the hook between fork and exec is safe.
                 preexec_fn=_die_with_parent(),
                 close_fds=True,
             )

@@ -1,8 +1,4 @@
-"""The study's tests: synthetic run directories, a stand-in driver and every check, in seconds, with no engine.
-
-`gp.py selftest` runs them; `--real GP_DRIVER` adds a short pass through a built driver. Every value here is
-synthetic. A fixture writes the driver's files with its own byte layout, so a reader mistake cannot cancel out.
-"""
+"""Every value here is synthetic."""
 from __future__ import annotations
 
 import hashlib
@@ -44,7 +40,6 @@ def words(hex_seal: str) -> list[int]:
 
 
 def rewrite(directory: pathlib.Path, name: str, data: bytes) -> None:
-    """Replaces one file and its summary digest, so only the planted change differs."""
     (directory / name).write_bytes(data)
     summary = directory / "summary.txt"
     lines = summary.read_text().splitlines()
@@ -89,7 +84,6 @@ def catalogue_text(model: str) -> str:
 
 
 def default_values(t_ns: int) -> dict[str, float]:
-    """Synthetic rows at one instant: amounts that drift slowly, and readings held flat."""
     t = t_ns / SECOND
     return {
         ROWS[0]: 1000.0 + 0.25 * t,
@@ -107,12 +101,6 @@ def default_values(t_ns: int) -> dict[str, float]:
 
 @dataclass
 class Fixture:
-    """One synthetic run directory as the driver writes it at capture version 2.
-
-    Beat edges fall every `beat_ns` from `first_edge_ns`; steps every `step_ns`; every reading is held flat unless
-    `values` says otherwise, so each integral is its value times time. The aortic column moves `stroke` per beat.
-    """
-
     spec: str = "gp-run 1\ncore ng-solver cap-ms 10\nend-ms 6000\nvariant none\n"
     end_ns: int = 6 * SECOND
     first_edge_ns: int = SECOND
@@ -526,8 +514,6 @@ class ClosedLoopRule(unittest.TestCase):
 
 
 def stepped_beats(length_s: float = 1.0, offset_s: float = 0.0, end_s: float = 900.0, change_s: float = 330.0):
-    """Synthetic beats: rate 1.0 per s and pressure 100 before the change; after it, rate 1.2, and pressure 90 for
-    10 s, then 95."""
     import capture
 
     beats, start, ordinal = [], offset_s, 0
@@ -1074,8 +1060,6 @@ class Settings(unittest.TestCase):
 
 
 def corpus(out: pathlib.Path, drop: tuple[str, ...] = ()) -> None:
-    """Every planned run as a synthetic directory whose spec is the plan's, built so every technical row passes and
-    the start histories differ."""
     import audit, spec
 
     plan = spec.Plan.read()
@@ -1247,8 +1231,6 @@ class Preflight(unittest.TestCase):
 
 
 class RealDriver(unittest.TestCase):
-    """`selftest --real GP_DRIVER`: three short admissions of the real driver, which settle what no fixture can."""
-
     @classmethod
     def setUpClass(cls) -> None:
         if REAL_DRIVER is None:

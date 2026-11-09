@@ -1,15 +1,3 @@
-"""A settled teacher run directory, read by name: what `gp-driver` writes at capture version 2, and nothing else.
-
-    run = RunData.open(directory)        # refuses another capture version, model, digest, key or layout
-    run.seals, run.branch_seals          # (revision, ns after the anchor, seal hex) from admission's revision 0
-    run.beats                            # the driver's beat readings
-    run.edges().value(row_name)          # both limbs at every edge, the start and the end included
-    run.samples(row_name)                # the sampled rows after each accepted step
-
-The NPY header, the hi and lo limbs, the seal's big-endian words, absolute nanoseconds and the edge sections stay
-here. Opening checks every file against its summary digest, and every beat against the edges it spans, so a reader
-that misread the writer's layout refuses instead of giving a verdict.
-"""
 from __future__ import annotations
 
 import ast
@@ -327,9 +315,6 @@ class Summary:
 
 @dataclass(frozen=True)
 class Limbs:
-    """One compensated value per edge, as both limbs. A difference sums all four limbs in one `fsum`, so a
-    difference of two large cumulative values is exact before its one rounding."""
-
     hi: tuple[float, ...]
     lo: tuple[float, ...]
 
@@ -353,8 +338,6 @@ class Ledger:
 
 
 class Edges:
-    """edges.npy: the start, every beat edge and the end, in time order. Beat j spans rows j + 1 and j + 2."""
-
     def __init__(self, catalogue: Catalogue, cells: array, rows: int) -> None:
         self.catalogue = catalogue
         self.cells = cells
@@ -397,7 +380,6 @@ class Edges:
         return tuple(self.cells[start : start + len(self.catalogue.modes)])
 
     def beat_means(self, row: str) -> list[float]:
-        """Each beat's mean of one row: the chord integral's exact change over the beat, in value x ns, over its ns."""
         integral = self.integral(row)
         return [
             integral.difference(j + 2, j + 1) / (self.times_ns[j + 2] - self.times_ns[j + 1])
@@ -425,8 +407,6 @@ def _close(one: float, other: float) -> bool:
 
 
 class RunData:
-    """One settled run directory, complete or faulted. Opening reads every file once and checks it."""
-
     def __init__(self, directory: Path, summary: Summary, catalogue: Catalogue) -> None:
         self.directory = directory
         self.summary = summary
@@ -511,7 +491,6 @@ class RunData:
         return [(cells[r * width], cells[r * width + 1] - ANCHOR_NS, as_double(cells[r * width + column])) for r in range(rows)]
 
     def lens_present(self, row: str) -> list[tuple[int, float]]:
-        """(collected ns, value) of each present reading of the channel that reads one row, one per window."""
         channel = self.catalogue.channel(row)
         rows, cells = self._table("lens.npy", "Q", 6)
         found: dict[int, float] = {}

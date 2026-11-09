@@ -1,12 +1,3 @@
-"""Ticket 04's teacher audit: `make` runs the audit plan through the teacher, and `report` turns the settled runs into
-the ticket's results template with every verdict.
-
-    gp.py audit --data DATA --source-commit C --workers 3 --disk /mnt/c    # safe to repeat
-    gp.py audit --data DATA --source-commit C --report                     # offline: reads DATA/audit, starts nothing
-
-This is the only module that knows the ticket's rows and criteria. The report finds each planned run by its spec text
-(B8's is B7's realized.txt), so it computes no spec id, and its bytes depend only on DATA/audit and this tree.
-"""
 from __future__ import annotations
 
 import argparse
@@ -45,7 +36,6 @@ ARCH = "algebraic/CV/aortic_arch_stretch/body"
 SINUS = "algebraic/CV/carotid_sinus_stretch/body"
 PRESSURE = "algebraic/CV/blood pressure/systemic arteries"
 SKIN_SUFFIX = "/Water/skin water"
-# crates/ng-validate/src/slice.rs:787 sets ms.skin-water; A0's packet pin fails if it moves.
 SKIN_BASAL_PER_S = 0.01
 STIR = "MS/stir"
 
@@ -129,8 +119,6 @@ def log_of(seals) -> list[tuple[int, int, str]]:
 
 
 def a0_pins() -> tuple[str, str, int]:
-    """What crates/ng-validate/tests/trace.rs pins for Core at a 10 ms cap, read from the test itself so the audit
-    keeps no copy: the packet digest, the seal at the first head at or after 1 s, and that head's instant in ns."""
     text = TRACE.read_text()
     start = text.find(PINNED)
     block = text[start : text.find("\n}\n", start)] if start >= 0 else ""
@@ -187,8 +175,6 @@ def sample_mean(run: RunData) -> float:
 
 
 def reflex_check(a2: RunData, a3: RunData) -> Check:
-    """The reference test's bars (crates/ng-validate/tests/arena_body.rs:523-547): the traffic mean takes one sample
-    per accepted step, added in order as the test adds them; the rest are read at the run's last head."""
     flat, stood = sample_mean(a2), sample_mean(a3)
     e2, e3 = a2.edges(), a3.edges()
     last2, last3 = e2.rows - 1, e3.rows - 1
@@ -202,7 +188,6 @@ def reflex_check(a2: RunData, a3: RunData) -> Check:
 
 
 def prefix_check(b1: RunData, b2: RunData, divergence_ms: int) -> Check:
-    """The logs agree for every revision through the one that ends at exactly the divergence, and differ after it."""
     one, other = log_of(b1.seals), log_of(b2.seals)
     at_ns = divergence_ms * 1_000_000
     cut = next((index for index, entry in enumerate(one) if entry[1] == at_ns), None)
@@ -213,7 +198,6 @@ def prefix_check(b1: RunData, b2: RunData, divergence_ms: int) -> Check:
 
 
 def early_check(b1: RunData, b3: RunData, divergence_ms: int) -> Check:
-    """The logs agree through the last revision that ends before the divergence, and B1's next ends at exactly it."""
     one, other = log_of(b1.seals), log_of(b3.seals)
     at_ns = divergence_ms * 1_000_000
     before = max((index for index, entry in enumerate(one) if entry[1] < at_ns), default=None)
@@ -238,8 +222,6 @@ def same_log_check(reference: RunData, others: list[RunData]) -> Check:
 
 
 def closure(run: RunData, edges) -> Extreme:
-    """Between consecutive edges, each conserved quantity's inventory change against its inflow less its outflow, over
-    64 times 2^-52 of the four magnitudes: both inventories and the interval's inflow and outflow."""
     worst = Extreme(0.0, "none")
     for quantity in edges.ledger():
         inv, inflow, outflow = quantity.inventory, quantity.inflow, quantity.outflow
@@ -278,10 +260,6 @@ def taus() -> list[tuple[float, float]]:
 
 
 def slow_fit(y: list[float], variation: float) -> Fit:
-    """y on a one-second grid, fitted as a + b exp(-i/tau) for each tau by least squares. Resolved when the best fit's
-    root-mean-square residual is at most 5% of abs(b), the taus within twice the best residual span less than a
-    factor of 2, abs(b) is at least 20 times the numerical variation, and the best tau is inside the grid: at either
-    end the grid, not the data, bounds it."""
     n = len(y)
     mean_y = math.fsum(y) / n
     results = []
@@ -307,8 +285,6 @@ def slow_fit(y: list[float], variation: float) -> Fit:
 
 
 def feature_floors(c3: features.Features, g1: features.Features, late_counts: list[int]) -> list[float]:
-    """Each feature's floor: the larger of its synthetic measurement error over the root of the beats it averages
-    (the fewest across C1 to C6 for the late features) and its numerical variation, C3 against G1."""
     counts = [1, 3, min(late_counts), min(late_counts)]
     sigmas = [RATE_ERROR_PER_S, PRESSURE_ERROR, RATE_ERROR_PER_S, PRESSURE_ERROR]
     pairs = zip(c3.items(), g1.items(), counts, sigmas)
@@ -346,7 +322,6 @@ def workers_for(logical: int, peak_bytes: float, links_bytes: float, free_bytes:
 
 
 def plan_size(run_wall_s: float, workers: int) -> int:
-    """The most training schedules per family per start history, at most 8, whose runs with every fixed run fit 36 h."""
     if workers < 1:
         return 0
     for k in range(SCHEDULES_AT_MOST, 0, -1):
@@ -366,8 +341,6 @@ class Faulted(Exception):
 
 
 class Runs:
-    """The plan's settled runs in DATA/audit, found by spec text and opened once each."""
-
     def __init__(self, out: Path, plan: Plan) -> None:
         self.out = out
         self.plan = plan
@@ -449,7 +422,6 @@ def change_features(run: RunData, change_s: float) -> features.Features:
 
 
 def held_series(run: RunData, row_name: str, grid_s: list[int]) -> list[float]:
-    """One row's value at each grid second, linear between the edges around it."""
     edges = run.edges()
     limbs = edges.value(row_name)
     times = edges.times_ns
@@ -861,9 +833,8 @@ def preflight(
     free_bytes: Callable[[Path], int],
     tools: Callable[[], dict[str, str]],
 ) -> None:
-    """What the audit refuses before its first long run: the worker count, a WSL run with no Windows drive named, the
-    toolchain, and, on the first command only, less than 40 GB free on DATA or any named disk. A later command does
-    not repeat the 40 GB check, because a WSL disk image keeps what a deleted links file used."""
+    """A later command does not repeat the 40 GB check, because a WSL disk image keeps what a deleted links file
+    used."""
     if not 1 <= workers <= min(WORKERS_AT_MOST, logical // 2):
         raise TeacherError(f"--workers {workers}: at most {min(WORKERS_AT_MOST, logical // 2)} here, half the logical processors and no more than 4")
     if under_wsl and not any(str(disk).startswith("/mnt/") for disk in disks):
