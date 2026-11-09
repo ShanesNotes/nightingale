@@ -29,3 +29,4 @@ Preconditions:
 
 - `#care` takes the patient's clock, not the wall clock. Read `#now` first.
 - A refusal leaves the form as typed, so clear `#care` before the next write.
+- While a write is in flight the form and the editor are disabled and drop what is filled in, so wait for `#notice` to show the answer before the next `fill` or `choose`.

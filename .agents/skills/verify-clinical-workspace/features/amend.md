@@ -1,6 +1,6 @@
 # Amend a chart entry
 
-Selecting a charted value shows its details: the author and discipline, the patient, the care time, the charted time, how late, and version n of m. **Edit** sends an amendment of the current version as the clinician chosen in the form. Every view then shows the new value, marked edited. Earlier versions stay hidden until asked for, then come from the chart service.
+Selecting a charted value shows its details: the author and discipline, the patient, the care time, the charted time, how late, and version n of m. **Edit** starts from the version shown, and saving sends an amendment of that version as the clinician chosen in the form. If someone charted a newer version meanwhile, the chart refuses it as not the current version. Every view then shows the new value, marked edited. Earlier versions stay hidden until asked for, then come from the chart service.
 
 ## Sub-features
 
