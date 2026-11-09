@@ -147,6 +147,10 @@ const list = (value: unknown, what: string): readonly unknown[] => (Array.isArra
 
 export const parseDeviceMessage = (json: unknown): Parsed<DeviceMessage> => parsing(() => message(json))
 
+export const parseDeviceValue = (json: unknown): Parsed<DeviceValue> => parsing(() => deviceValue(json))
+
+export const parseChannels = (json: unknown): Parsed<PerVital<Source>> => parsing(() => channels(json))
+
 export const parseBatch = (json: unknown): Parsed<readonly DeviceMessage[]> => parsing(() => list(json, 'a batch').map(message))
 
 export const parseAnswers = (json: unknown): Parsed<readonly MessageAnswer[]> =>
