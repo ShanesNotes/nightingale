@@ -13,8 +13,8 @@ own path.
 A ticket is `.scratch/<effort>/issues/<NN>-<slug>.md`, and its Status, Type, Claimed by and Blocked by lines are the
 ones before its first `## ` heading. A Blocked by line is `none`, `None (...)`, or a comma-separated list of ticket
 numbers in the ticket's own effort and of paths to tickets, backticked or not, from the repo root or from the
-ticket's directory. A ticket with no such line waits on nothing. A blocker is met only when the ticket it names has
-`Status: resolved`, and a line in any other shape names no ticket and blocks.
+ticket's directory. A ticket with no such line, or an empty one, waits on nothing. A blocker is met only when the
+ticket it names has `Status: resolved`, and a line in any other shape names no ticket and blocks.
 
 Exit codes: 0 printed; 1 a selftest case failed; 2 a wrong usage or an unreadable ticket, or git or gh failed, in
 which case the rest still prints.
@@ -120,7 +120,7 @@ def on(u: Ticket) -> Wait:
 
 def waits(t: Ticket, tickets: Mapping[str, Ticket]) -> list[Wait]:
     line = t.blocked_by or "none"
-    if re.match(r"none\b", line, re.I):
+    if re.fullmatch(r"none(?:\s*\(.*\))?", line, re.I):
         return []
     out = []
     for token in (part.strip().strip("`") for part in line.split(",")):
@@ -155,8 +155,7 @@ def open_pulls(gh: Sequence[str]) -> tuple[list[Pull], str | None]:
     fields = "number,title,headRefName,isDraft,files"
     argv = [*gh, "pr", "list", "--repo", REPO, "--state", "open", "--limit", "200", "--json", fields]
     try:
-        # Inside a checkout whose directory-scoped config empties gh's token, gh prints nothing and exits 0.
-        r = subprocess.run(argv, capture_output=True, text=True, cwd=tempfile.gettempdir(), timeout=120)
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.TimeoutExpired) as e:
         return [], f"{gh[0]} could not run: {e}"
     if r.returncode:
@@ -257,6 +256,8 @@ FIXTURE = {
     "a/16-triage.md": "Status: needs-triage\n",
     "a/17-out-of-scope-blocker.md": "Status: open\nBlocked by: ../../b/issues/04-out.md\n",
     "a/18-backticked-relative-path.md": "Status: open\nBlocked by: `../../b/issues/01-done.md`\n",
+    "a/19-empty-blocker-line.md": "Status: open\nBlocked by:\n",
+    "a/20-none-then-prose.md": "Status: open\nBlocked by: none until 01 lands\n",
     "b/01-done.md": "Status: resolved\n",
     "b/02-open.md": "Status: open\nBlocked by: None (can start immediately)\n",
     "b/03-no-status.md": "Blocked by: none\n",
@@ -280,6 +281,8 @@ EXPECT = (
     ("a 16", "other", ""),
     ("a 17", "blocked", "waits on b 04 (out-of-scope)"),
     ("a 18", "frontier", ""),
+    ("a 19", "frontier", ""),
+    ("a 20", "blocked", "names no ticket: none until 01 lands"),
     ("b 02", "frontier", ""),
     ("b 03", "other", ""),
 )
@@ -343,6 +346,7 @@ def selftest() -> int:
         trees, broken = worktrees(root / "missing")
         expect("a failing git worktree list is reported", not trees and "exited" in (broken or ""))
         git("init", "-q", "-b", "frontier-selftest", str(root))
+        git("-C", str(root), "add", "-f", ".scratch")
         lines, code = render(root, True, (sys.executable, "-c", "import sys; print(sys.argv[1])", json.dumps(PULLS)))
         expect("--in-flight exits 0", code == 0)
         expect("a title marks a 04 in flight", "in flight: nightingale#7 (draft)" in after(lines, "/04-number.md"))
@@ -351,13 +355,13 @@ def selftest() -> int:
         expect("a 15 shows no Status line", any("no Status line" in line for line in lines if line.endswith("/15-no-status.md")))
         expect(
             "the worktree shows its pull request and uncommitted paths",
-            any("frontier-selftest  nightingale#7 (draft), 1 uncommitted" in line for line in lines),
+            any(line.endswith(f"frontier-selftest  nightingale#7 (draft), {len(FIXTURE)} uncommitted") for line in lines),
         )
         for gh in FAILING_GH:
             lines, code = render(root, True, gh)
             ok = code == 2 and any(line.startswith("  unavailable: ") for line in lines)
             ok = ok and any(line.endswith("/04-number.md") for line in lines)
-            ok = ok and any("frontier-selftest  1 uncommitted" in line for line in lines)
+            ok = ok and any(line.endswith(f"frontier-selftest  {len(FIXTURE)} uncommitted") for line in lines)
             expect(f"gh as {gh[-1]!r} is reported unavailable and the rest still prints", ok)
 
     for case in failed:
