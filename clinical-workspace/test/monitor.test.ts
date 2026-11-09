@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { Scene } from 'foldkit'
 import { type BootId, isBootId, isPatientId } from '../src/device.ts'
@@ -60,4 +60,18 @@ test('fed the recorded run, the monitor shows heart rate and mean pressure with 
     Scene.Command.resolve(m.SendBatch, Message.BatchUnanswered()),
     Scene.expect(Scene.selector('#feed')).toContainText('The recorded feed ended at 07:05:00.'),
   )
+})
+
+test('nothing under src/monitor imports anything but observation, device, vitals, time, foldkit and effect', () => {
+  const dir = new URL('../src/monitor/', import.meta.url)
+  const IMPORT = /^\s*(?:import|export)\b[^'"]*?\bfrom\s*['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)|^\s*import\s*['"]([^'"]+)['"]/gm
+  const specifiers = readdirSync(dir)
+    .filter((file) => file.endsWith('.ts'))
+    .flatMap((file) => [...readFileSync(new URL(file, dir), 'utf8').matchAll(IMPORT)].map((m) => `${file}: ${m[1] ?? m[2] ?? m[3]}`))
+  assert.ok(specifiers.length > 0, 'the test read no import at all, so it proves nothing')
+  const allowed = (specifier: string) =>
+    ['../observation.ts', '../device.ts', '../vitals.ts', '../time.ts', 'effect', 'foldkit'].includes(specifier) ||
+    /^\.\/[\w-]+\.ts$/.test(specifier) ||
+    /^(effect|foldkit)\/[\w/-]+$/.test(specifier)
+  assert.deepEqual(specifiers.filter((line) => !allowed(line.slice(line.indexOf(': ') + 2))), [])
 })
