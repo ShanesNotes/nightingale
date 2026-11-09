@@ -178,31 +178,38 @@ function careTime(text: string): { readonly ok: true; readonly care: number | nu
 }
 
 function send(model: Model, write: Write, notice: string): Return {
-  if (model.writing !== null) return { model }
   const { unanswered } = model
   const writeId = unanswered !== null && Equal.equals(unanswered.write, write) ? unanswered.writeId : null
   const command = write.kind === 'new entry' ? PostEntry({ body: write.body, writeId }) : PostAmendment({ body: write.body, writeId })
   return { model: { ...model, notice, writing: write }, commands: [command] }
 }
 
-function wrote(model: Model, result: WriteResult): Return {
+function wrote(model: Model, write: Write, result: WriteResult): Return {
   if (result.kind === 'refused') return { model: { ...model, notice: REFUSED[result.refusal.kind] } }
   const { entry } = result
   const unit = VITALS.find((row) => row.vital === entry.vital)?.unit ?? ''
   const did = entry.number > 1 ? 'Amended' : 'Charted'
+  const answered = write.kind === 'new entry' ? { form: { ...model.form, value: '', care: '' } } : { editing: null }
   return {
-    model: {
-      ...model,
-      notice: `${did} ${entry.vital} ${entry.value} ${unit} as ${entry.author.name}.`,
-      form: { ...model.form, value: '', care: '' },
-      editing: null,
-      versions: null,
-    },
+    model: { ...model, ...answered, notice: `${did} ${entry.vital} ${entry.value} ${unit} as ${entry.author.name}.`, versions: null },
     commands: [FetchChart()],
   }
 }
 
+const DRAFTING: ReadonlySet<Message['_tag']> = new Set([
+  'ChoseAuthor',
+  'ChoseVital',
+  'TypedValue',
+  'TypedCare',
+  'ClickedChart',
+  'ClickedEdit',
+  'TypedEditValue',
+  'TypedEditCare',
+  'ClickedSaveEdit',
+])
+
 export function update(model: Model, message: Message): Return {
+  if (model.writing !== null && DRAFTING.has(message._tag)) return { model }
   return Message.match<Return>(message, {
     Polled: ({ at }) => (model.fetching ? { model: { ...model, checked: at } } : { model: { ...model, checked: at, fetching: true }, commands: [FetchChart()] }),
     GotChart: ({ chart, at }) => {
@@ -222,7 +229,7 @@ export function update(model: Model, message: Message): Return {
       const { author, vital, value } = model.form
       return send(model, { kind: 'new entry', body: { patient: model.latest.run.patient, author, vital, value, care: care.care } }, 'Charting.')
     },
-    Wrote: ({ result }) => wrote({ ...model, writing: null, unanswered: null }, result),
+    Wrote: ({ result }) => (model.writing === null ? { model } : wrote({ ...model, writing: null, unanswered: null }, model.writing, result)),
     WriteUnanswered: ({ writeId }) =>
       model.writing === null
         ? { model }
