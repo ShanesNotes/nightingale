@@ -29,11 +29,11 @@ drive() { timeout 60 node scripts/drive.ts "$@"; }
 state() { node -p "JSON.parse(require('fs').readFileSync('.dev/state.json', 'utf8'))$1" 2>/dev/null; }
 shot() { drive shot "$1" "$evidence/$2.png" >/dev/null && note "shot $evidence/$2.png"; }
 chart() { curl -sf "$service/api/chart" >"$evidence/chart-$1.json" && note "rows $evidence/chart-$1.json"; }
-# Polls a tab until the element's text matches the extended regex, or fails the check after the wait.
+# Polls a tab until the element's text, its lines joined by spaces, matches the extended regex, or fails the check.
 expect() {
   local tab=$1 selector=$2 pattern=$3 check=$4 wait=${5:-15} text=''
   for _ in $(seq 1 $((wait * 4))); do
-    text=$(drive text "$tab" "$selector" 2>/dev/null) && grep -Eq -- "$pattern" <<<"$text" && {
+    text=$(drive text "$tab" "$selector" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//') && grep -Eq -- "$pattern" <<<"$text" && {
       pass "$check"
       return 0
     }
