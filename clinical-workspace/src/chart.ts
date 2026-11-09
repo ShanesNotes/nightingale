@@ -136,6 +136,19 @@ CREATE TABLE IF NOT EXISTS entry_version (
   inserted_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (entry, number)
 );
+CREATE OR REPLACE FUNCTION refuse_chart_change() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'the chart is append-only: % on % is refused', TG_OP, TG_TABLE_NAME;
+END
+$$;
+CREATE OR REPLACE TRIGGER run_append_only BEFORE UPDATE OR DELETE ON run FOR EACH ROW EXECUTE FUNCTION refuse_chart_change();
+CREATE OR REPLACE TRIGGER run_kept BEFORE TRUNCATE ON run FOR EACH STATEMENT EXECUTE FUNCTION refuse_chart_change();
+CREATE OR REPLACE TRIGGER entry_append_only BEFORE UPDATE OR DELETE ON entry FOR EACH ROW EXECUTE FUNCTION refuse_chart_change();
+CREATE OR REPLACE TRIGGER entry_kept BEFORE TRUNCATE ON entry FOR EACH STATEMENT EXECUTE FUNCTION refuse_chart_change();
+CREATE OR REPLACE TRIGGER entry_version_append_only BEFORE UPDATE OR DELETE ON entry_version
+  FOR EACH ROW EXECUTE FUNCTION refuse_chart_change();
+CREATE OR REPLACE TRIGGER entry_version_kept BEFORE TRUNCATE ON entry_version
+  FOR EACH STATEMENT EXECUTE FUNCTION refuse_chart_change();
 CREATE OR REPLACE VIEW current_entry AS
   SELECT e.id, e.patient, e.vital, v.number, v.value, v.care_ns, v.charted_ns, v.author, v.author_name,
     v.author_discipline, counts.versions, e.inserted_at
