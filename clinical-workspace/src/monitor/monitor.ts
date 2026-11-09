@@ -4,18 +4,20 @@ import type { Html, HtmlBuilder } from 'foldkit/html'
 import { defineMessageUnion } from 'foldkit/message'
 import {
   type BootId,
+  type ChannelStatement,
   type DeviceMessage,
   type DeviceValue,
   isDeviceId,
   isSequence,
+  type MessageAnswer,
   type PatientId,
+  parseAnswers,
   parseDeviceMessage,
-  type Reading,
 } from '../device.ts'
 import type { Observation } from '../observation.ts'
 import { add, formatClock, isPatientTime, type PatientTime, seconds } from '../time.ts'
-import { VITALS, type Vital } from '../vitals.ts'
-import type { Link } from './link.ts'
+import { perVital, VITALS, type Vital } from '../vitals.ts'
+import type { Link, LinkResult } from './link.ts'
 
 // The standalone bedside monitor: one tile per vital of the table, fed the observer's observations, and an outbox
 // that delivers each reading to the chart service as a numbered device message.
@@ -49,6 +51,7 @@ const DEVICE_TABLE: Readonly<Partial<Record<Vital, { readonly row: string; reado
 
 const PatientTimeSchema = Schema.declare(isPatientTime)
 const DeviceMessageSchema = Schema.declare((value: unknown): value is DeviceMessage => parseDeviceMessage(value).ok)
+const AnswersSchema = Schema.declare((value: unknown): value is readonly MessageAnswer[] => parseAnswers({ answers: value }).ok)
 
 export const Model = Schema.Struct({
   now: Schema.NullOr(PatientTimeSchema),
@@ -61,7 +64,7 @@ export type Model = typeof Model.Type
 
 export const Message = defineMessageUnion({
   SecondPassed: { now: PatientTimeSchema },
-  BatchAnswered: {},
+  BatchAnswered: { answers: AnswersSchema },
   BatchUnanswered: {},
 })
 export type Message = typeof Message.Type
@@ -79,11 +82,23 @@ export function monitor(options: MonitorOptions) {
   const vitalOf = (channel: number): Vital | undefined =>
     VITALS.map((row) => row.vital).find((vital) => DEVICE_TABLE[vital]?.row === feed.channels[channel] && sourced(vital))
 
+  const messageFor = (result: LinkResult) =>
+    result.kind === 'answered' ? Message.BatchAnswered({ answers: result.answers }) : Message.BatchUnanswered()
+
   const SendBatch = Command.define('SendBatch', {
     args: { batch: Schema.Array(DeviceMessageSchema) },
     messages: [Message.BatchAnswered, Message.BatchUnanswered],
-    execute: ({ batch }) =>
-      Effect.promise(() => link.send(batch)).pipe(Effect.map((result) => (result.kind === 'answered' ? Message.BatchAnswered() : Message.BatchUnanswered()))),
+    execute: ({ batch }) => Effect.promise(() => link.send(batch)).pipe(Effect.map(messageFor)),
+  })
+
+  const statementAt = (sequence: number, now: PatientTime): ChannelStatement => ({
+    kind: 'statement',
+    device: DEVICE,
+    boot,
+    patient,
+    sequence: branded(sequence, isSequence, 'a sequence number'),
+    at: now,
+    channels: perVital((vital) => (sourced(vital) ? 'sourced' : 'no source')),
   })
 
   const init = (): Return => ({ model: { now: null, taken: null, sequence: 1, outbox: [], inFlight: false } })
@@ -101,7 +116,7 @@ export function monitor(options: MonitorOptions) {
         const after = model.taken ?? (now >= seconds(1) ? add(now, seconds(-1)) : undefined)
         const fresh = model.taken === null || now > model.taken ? feed.between(after, now) : []
         let sequence = model.sequence
-        const readings: Reading[] = []
+        const readings: DeviceMessage[] = model.taken === null ? [statementAt(sequence++, now)] : []
         for (const observation of fresh) {
           const vital = vitalOf(observation.channel)
           if (vital === undefined) continue
@@ -125,7 +140,10 @@ export function monitor(options: MonitorOptions) {
           commands: send ? [SendBatch({ batch: outbox })] : [],
         }
       },
-      BatchAnswered: () => ({ model: { ...model, inFlight: false } }),
+      BatchAnswered: ({ answers }) => {
+        const answered = new Set(answers.map((a) => `${a.boot} ${a.sequence}`))
+        return { model: { ...model, inFlight: false, outbox: model.outbox.filter((m) => !answered.has(`${m.boot} ${m.sequence}`)) } }
+      },
       BatchUnanswered: () => ({ model: { ...model, inFlight: false } }),
     })
 
@@ -147,6 +165,7 @@ export function monitor(options: MonitorOptions) {
         `Fed a recorded synthetic run, patient ${patient}.`,
         model.now !== null && model.now >= feed.end ? ` The recorded feed ended at ${formatClock(feed.end)}.` : '',
       ]),
+      h.p([h.Id('link')], [model.outbox.length === 0 ? 'Everything delivered to the chart.' : `Holding ${model.outbox.length} messages for the chart.`]),
       h.table([h.Id('tiles')], [
         h.tbody(
           [],
@@ -160,5 +179,5 @@ export function monitor(options: MonitorOptions) {
       ]),
     ])
 
-  return { init, update, view, SendBatch }
+  return { init, update, view, SendBatch, messageFor }
 }
