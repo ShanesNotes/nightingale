@@ -1,5 +1,4 @@
 import type { EntryView, ReadModel, ReadingView, StatementView } from './chart-api.ts'
-import type { Source } from './device.ts'
 import { add, type Duration, earlier, floorTo, later, MINUTE, type PatientTime, SECOND, seconds, since, ZERO } from './time.ts'
 import { VITALS, type VitalRow } from './vitals.ts'
 
@@ -39,6 +38,8 @@ function minutes(model: ReadModel): PatientTime[] {
 function statementAt(statements: readonly StatementView[], time: PatientTime): StatementView | undefined {
   return statements.filter((s) => s.at <= time).reduce<StatementView | undefined>((latest, s) => (latest === undefined || s.at >= latest.at ? s : latest), undefined)
 }
+
+type Source = StatementView['channels'][keyof StatementView['channels']]
 
 // A vital the device's table lacks, such as one added after it spoke, has no statement.
 function sourceOf(statement: StatementView | undefined, vital: string): Source | undefined {
