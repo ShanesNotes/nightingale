@@ -69,7 +69,10 @@ pub fn cross_check(system: &InitializationSystem<'_>, workspace: &mut SolveWorks
     let residuals = system.evaluate(workspace).expect("every row");
     let ring = system.solve(&lifted, &residuals).expect("a pivot");
     let dense = solved(matrix, residuals);
-    let largest = dense.iter().fold(0.0_f64, |most, value| most.max(value.abs()));
+    let largest = (dense.iter()).fold(
+        0.0,
+        |most: f64, value| if value.abs() > most { value.abs() } else { most },
+    );
     for (slot, (one, other)) in ring.iter().zip(&dense).enumerate() {
         assert!(
             (one - other).abs() <= 1e-5 * (1.0 + largest),

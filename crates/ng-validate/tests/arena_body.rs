@@ -335,18 +335,22 @@ fn every_link_of_every_loop_moves_the_row_that_reads_it_the_right_way(
     let system = body.initialization(parameters, port, request)?;
     let mut workspace = system.workspace();
     let start = solved.session();
-    for (slot, row) in body.rows().iter().enumerate() {
-        workspace.unknowns_mut()[slot] = number(start.record().accepted().value(row.id()));
+    for stage in [system.endpoint(0), system.interior(0)] {
+        for (slot, row) in stage.zip(body.rows()) {
+            workspace.unknowns_mut()[slot] = number(start.record().accepted().value(row.id()));
+        }
     }
     let (_, block) = system.stage(&workspace, 0)?;
     let view = block.view();
+    let size = body.rows().len();
+    // Both stages hold the start, so an end row's two stage columns of one row sum to its slope over the interval.
     let slope = |reader: RowKind, read: RowKind| {
         let (reader, read) = (solved.row(reader).index(), solved.row(read).index());
         let entries = view.row_offsets()[reader]..view.row_offsets()[reader + 1];
-        let found = entries
-            .into_iter()
-            .find(|&entry| view.columns()[entry].index() == read);
-        found.map_or(0.0, |entry| view.values()[entry])
+        let stages = [read, size + read];
+        (entries.filter(|&entry| stages.contains(&view.columns()[entry].index())))
+            .map(|entry| view.values()[entry])
+            .sum::<f64>()
     };
     let body_at = Context::Body;
     let (arteries, veins) = (vessel("systemic arteries"), vessel("central veins"));
@@ -653,13 +657,15 @@ fn a_standing_body_pays_gravitys_work_into_the_walls() -> Result<(), Initializat
     ));
     let (from, to) = (vessel("systemic arteries"), bed("leg bed"));
     let flow = index(algebraic("CV", "circulation", Context::Edge { from, to }));
+    // The store's end row reads the flow at both stages by their weights, which sum to the interval.
     let entries = view.row_offsets()[store]..view.row_offsets()[store + 1];
-    let slope = entries
-        .into_iter()
-        .find(|&entry| view.columns()[entry].index() == flow)
-        .map_or(0.0, |entry| view.values()[entry]);
-    let (per_metre, metres, stage) = (70.0, 1.0, 0.01);
-    assert!((slope + per_metre * metres * stage).abs() < 1e-9, "{slope}");
+    let stages = [flow, body.rows().len() + flow];
+    let slope: f64 = entries
+        .filter(|&entry| stages.contains(&view.columns()[entry].index()))
+        .map(|entry| view.values()[entry])
+        .sum();
+    let (per_metre, metres, interval) = (70.0, 1.0, 0.01);
+    assert!((slope + per_metre * metres * interval).abs() < 1e-9, "{slope}");
     Ok(())
 }
 

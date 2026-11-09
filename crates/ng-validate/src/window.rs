@@ -354,7 +354,7 @@ fn admission(error: AdmissionError) -> AccuracyFailure {
 /// made its transitions and how many instants it spent in other modes.
 pub struct SliceWindow {
     body: CompiledBody,
-    start: InitialRevision,
+    start: Box<InitialRevision>,
     policy: WindowPolicy,
     measured: Measured,
 }
@@ -370,6 +370,7 @@ impl SliceWindow {
         let [coarse, middle, finest] =
             references(policy.refinements_ns, policy.refinement_scales, policy.landing_ns);
         let start = solved_start(&body, packet, boundary, &coarse, &lens, anchor_moment())
+            .map(Box::new)
             .map_err(AccuracyFailure::Admission)?;
         let [coarse, middle, finest] =
             [&coarse, &middle, &finest].map(|reference| trace(&body, &start, &policy, reference));
