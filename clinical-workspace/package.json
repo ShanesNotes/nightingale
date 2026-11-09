@@ -9,7 +9,10 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test test/*.test.ts",
-    "build": "vite build"
+    "build": "vite build",
+    "dev": "node scripts/dev.ts",
+    "db:stop": "node scripts/db.ts stop",
+    "reset": "node scripts/db.ts reset"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.11",
