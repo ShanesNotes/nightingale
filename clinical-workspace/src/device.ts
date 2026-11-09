@@ -1,12 +1,19 @@
-import type { PatientTime } from './time.ts'
+import { isPatientTime, type PatientTime } from './time.ts'
 import { isVital, type PerVital, perVital, VITALS, type Vital } from './vitals.ts'
 
 // The device protocol between a bedside monitor and the chart service. Each message is numbered in sequence
 // within one device boot, and the service answers each one.
-export type DeviceId = string
-export type BootId = string
-export type PatientId = string
-export type Sequence = number
+export type DeviceId = string & { readonly __brand: 'DeviceId' }
+export type BootId = string & { readonly __brand: 'BootId' }
+export type PatientId = string & { readonly __brand: 'PatientId' }
+export type Sequence = number & { readonly __brand: 'Sequence' }
+
+const isShortText = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 200
+
+export const isDeviceId = (value: unknown): value is DeviceId => isShortText(value)
+export const isBootId = (value: unknown): value is BootId => isShortText(value)
+export const isPatientId = (value: unknown): value is PatientId => isShortText(value)
+export const isSequence = (value: unknown): value is Sequence => typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
 
 export type DeviceAbsence = 'not collected' | 'pending' | 'invalid signal'
 export type DeviceValue = { readonly kind: 'present'; readonly value: number } | { readonly kind: 'absent'; readonly reason: DeviceAbsence }
@@ -61,15 +68,12 @@ const isObject = (value: unknown): value is Json => typeof value === 'object' &&
 
 const object = (value: unknown, what: string): Json => (isObject(value) ? value : fail(`${what} is not an object`))
 
-function text(json: Json, key: string): string {
+function branded<T>(json: Json, key: string, is: (value: unknown) => value is T, what: string): T {
   const value = json[key]
-  return typeof value === 'string' && value.length > 0 && value.length <= 200 ? value : fail(`${key} is not a short text`)
+  return is(value) ? value : fail(`${key} is not ${what}`)
 }
 
-function whole(json: Json, key: string, least: number): number {
-  const value = json[key]
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= least ? value : fail(`${key} is not a whole number from ${least}`)
-}
+const time = (json: Json, key: string): PatientTime => branded(json, key, isPatientTime, 'a patient time')
 
 const one = <T>(json: Json, key: string, words: readonly unknown[], parsed: (value: unknown) => value is T): T => {
   const value = json[key]
@@ -81,7 +85,12 @@ const isSource = (value: unknown): value is Source => SOURCES.includes(value)
 const isRefusal = (value: unknown): value is DeviceRefusal => REFUSALS.includes(value)
 
 function numbered(json: Json): Numbered {
-  return { device: text(json, 'device'), boot: text(json, 'boot'), patient: text(json, 'patient'), sequence: whole(json, 'sequence', 1) }
+  return {
+    device: branded(json, 'device', isDeviceId, 'a device id'),
+    boot: branded(json, 'boot', isBootId, 'a boot id'),
+    patient: branded(json, 'patient', isPatientId, 'a patient id'),
+    sequence: branded(json, 'sequence', isSequence, 'a sequence number'),
+  }
 }
 
 function deviceValue(value: unknown): DeviceValue {
@@ -109,19 +118,20 @@ function channels(value: unknown): PerVital<Source> {
 function message(value: unknown): DeviceMessage {
   const json = object(value, 'a device message')
   if (json['kind'] === 'reading') {
-    const collected = whole(json, 'collected', 0)
-    const available = whole(json, 'available', collected)
+    const collected = time(json, 'collected')
+    const available = time(json, 'available')
+    if (available < collected) fail('a reading is available before it is collected')
     return { kind: 'reading', ...numbered(json), vital: vital(json), collected, available, value: deviceValue(json['value']) }
   }
   if (json['kind'] === 'statement') {
-    return { kind: 'statement', ...numbered(json), at: whole(json, 'at', 0), channels: channels(json['channels']) }
+    return { kind: 'statement', ...numbered(json), at: time(json, 'at'), channels: channels(json['channels']) }
   }
   return fail('a device message is a reading or a channel statement')
 }
 
 function answer(value: unknown): MessageAnswer {
   const json = object(value, 'an answer')
-  const answered = { boot: text(json, 'boot'), sequence: whole(json, 'sequence', 1) }
+  const answered = { boot: branded(json, 'boot', isBootId, 'a boot id'), sequence: branded(json, 'sequence', isSequence, 'a sequence number') }
   switch (json['answer']) {
     case 'taken':
       return { ...answered, answer: 'taken' }

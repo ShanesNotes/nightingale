@@ -2,6 +2,10 @@ import {
   type BootId,
   type DeviceId,
   type DeviceValue,
+  isBootId,
+  isDeviceId,
+  isPatientId,
+  isSequence,
   type Parsed,
   parseChannels,
   parseDeviceValue,
@@ -9,22 +13,35 @@ import {
   type Sequence,
   type Source,
 } from './device.ts'
-import type { PatientTime, WallTime } from './time.ts'
+import { isPatientTime, isWallTime, type PatientTime, type WallTime } from './time.ts'
 import { isVital, type PerVital, type Vital } from './vitals.ts'
 
 // The chart service's JSON contract with the workspace. Both ends parse what they receive with these parsers.
-export type EntryId = string
-export type ClinicianId = string
-export type VersionNumber = number
+export type EntryId = string & { readonly __brand: 'EntryId' }
+export type ClinicianId = string & { readonly __brand: 'ClinicianId' }
+export type VersionNumber = number & { readonly __brand: 'VersionNumber' }
+
+const isShortText = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 200
+
+export const isEntryId = (value: unknown): value is EntryId => isShortText(value)
+export const isClinicianId = (value: unknown): value is ClinicianId => isShortText(value)
+export const isVersionNumber = (value: unknown): value is VersionNumber =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
 export type Discipline = 'nurse' | 'physician' | 'respiratory therapist'
 
 export type Clinician = { readonly id: ClinicianId; readonly name: string; readonly discipline: Discipline }
 
-export const ROSTER = [
-  { id: 'synthetic-nurse', name: 'Synthetic Nurse A', discipline: 'nurse' },
-  { id: 'synthetic-physician', name: 'Synthetic Physician B', discipline: 'physician' },
-  { id: 'synthetic-respiratory-therapist', name: 'Synthetic Respiratory Therapist C', discipline: 'respiratory therapist' },
-] as const satisfies readonly Clinician[]
+function clinicianOf(id: string, name: string, discipline: Discipline): Clinician {
+  if (!isClinicianId(id)) throw new Error(`${id} is not a clinician id`)
+  return { id, name, discipline }
+}
+
+// A small synthetic roster spanning disciplines. The names are obviously not real people.
+export const ROSTER: readonly Clinician[] = [
+  clinicianOf('synthetic-nurse', 'Synthetic Nurse A', 'nurse'),
+  clinicianOf('synthetic-physician', 'Synthetic Physician B', 'physician'),
+  clinicianOf('synthetic-respiratory-therapist', 'Synthetic Respiratory Therapist C', 'respiratory therapist'),
+]
 
 export type CareTime = { readonly kind: 'now' } | { readonly kind: 'at'; readonly at: PatientTime }
 
@@ -146,12 +163,22 @@ const list = (value: unknown, what: string): readonly unknown[] => (Array.isArra
 
 function text(json: Json, key: string): string {
   const value = json[key]
-  return typeof value === 'string' && value.length > 0 && value.length <= 200 ? value : fail(`${key} is not a short text`)
+  return isShortText(value) ? value : fail(`${key} is not a short text`)
 }
 
-function whole(json: Json, key: string, least: number): number {
+function branded<T>(json: Json, key: string, is: (value: unknown) => value is T, what: string): T {
   const value = json[key]
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= least ? value : fail(`${key} is not a whole number from ${least}`)
+  return is(value) ? value : fail(`${key} is not ${what}`)
+}
+
+const time = (json: Json, key: string): PatientTime => branded(json, key, isPatientTime, 'a patient time')
+const patientOf = (json: Json): PatientId => branded(json, 'patient', isPatientId, 'a patient id')
+const entryOf = (json: Json, key: string): EntryId => branded(json, key, isEntryId, 'an entry id')
+const versionOf = (json: Json, key: string): VersionNumber => branded(json, key, isVersionNumber, 'a version number')
+
+function count(json: Json, key: string): number {
+  const value = json[key]
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 ? value : fail(`${key} is not a count from 1`)
 }
 
 function finite(json: Json, key: string): number {
@@ -167,7 +194,7 @@ function vital(json: Json): Vital {
 }
 
 function author(json: Json): ClinicianId {
-  const id = text(json, 'author')
+  const id = branded(json, 'author', isClinicianId, 'a clinician id')
   return ROSTER.some((c) => c.id === id) ? id : fail(`author ${id} is not on the roster`)
 }
 
@@ -179,32 +206,36 @@ function typedValue(json: Json): number {
 }
 
 function care(json: Json): CareTime {
-  return json['care'] === null ? { kind: 'now' } : { kind: 'at', at: whole(json, 'care', 0) }
+  return json['care'] === null ? { kind: 'now' } : { kind: 'at', at: time(json, 'care') }
 }
 
 function clinician(value: unknown): Clinician {
   const json = object(value, 'author')
   const discipline = json['discipline']
   const known = (d: unknown): d is Discipline => DISCIPLINES.includes(d)
-  return { id: text(json, 'id'), name: text(json, 'name'), discipline: known(discipline) ? discipline : fail('an unknown discipline') }
+  return {
+    id: branded(json, 'id', isClinicianId, 'a clinician id'),
+    name: text(json, 'name'),
+    discipline: known(discipline) ? discipline : fail('an unknown discipline'),
+  }
 }
 
 function entryVersion(value: unknown): EntryVersion {
   const json = object(value, 'an entry version')
   return {
-    entry: text(json, 'entry'),
-    patient: text(json, 'patient'),
+    entry: entryOf(json, 'entry'),
+    patient: patientOf(json),
     vital: vital(json),
-    number: whole(json, 'number', 1),
+    number: versionOf(json, 'number'),
     value: finite(json, 'value'),
-    care: whole(json, 'care', 0),
-    charted: whole(json, 'charted', 0),
+    care: time(json, 'care'),
+    charted: time(json, 'charted'),
     author: clinician(json['author']),
   }
 }
 
 function entryView(value: unknown): EntryView {
-  return { ...entryVersion(value), versions: whole(object(value, 'an entry'), 'versions', 1) }
+  return { ...entryVersion(value), versions: count(object(value, 'an entry'), 'versions') }
 }
 
 function refusal(value: unknown): Refusal {
@@ -219,23 +250,23 @@ function run(value: unknown): RunView {
   const json = object(value, 'the run')
   return {
     specId: text(json, 'specId'),
-    patient: text(json, 'patient'),
-    start: whole(json, 'start', 0),
-    end: whole(json, 'end', 0),
-    anchor: whole(json, 'anchor', 0),
+    patient: patientOf(json),
+    start: time(json, 'start'),
+    end: time(json, 'end'),
+    anchor: branded(json, 'anchor', isWallTime, 'a wall-clock instant'),
   }
 }
 
 function reading(value: unknown): ReadingView {
   const json = object(value, 'a reading')
   return {
-    device: text(json, 'device'),
-    boot: text(json, 'boot'),
-    sequence: whole(json, 'sequence', 1),
+    device: branded(json, 'device', isDeviceId, 'a device id'),
+    boot: branded(json, 'boot', isBootId, 'a boot id'),
+    sequence: branded(json, 'sequence', isSequence, 'a sequence number'),
     vital: vital(json),
-    collected: whole(json, 'collected', 0),
-    available: whole(json, 'available', 0),
-    arrived: whole(json, 'arrived', 0),
+    collected: time(json, 'collected'),
+    available: time(json, 'available'),
+    arrived: time(json, 'arrived'),
     value: unwrap(parseDeviceValue(json['value'])),
   }
 }
@@ -243,19 +274,21 @@ function reading(value: unknown): ReadingView {
 function statement(value: unknown): StatementView {
   const json = object(value, 'a channel statement')
   return {
-    device: text(json, 'device'),
-    boot: text(json, 'boot'),
-    sequence: whole(json, 'sequence', 1),
-    at: whole(json, 'at', 0),
-    arrived: whole(json, 'arrived', 0),
+    device: branded(json, 'device', isDeviceId, 'a device id'),
+    boot: branded(json, 'boot', isBootId, 'a boot id'),
+    sequence: branded(json, 'sequence', isSequence, 'a sequence number'),
+    at: time(json, 'at'),
+    arrived: time(json, 'arrived'),
     channels: unwrap(parseChannels(json['channels'])),
   }
 }
 
 function missing(value: unknown): MissingSpan {
   const json = object(value, 'a missing span')
-  const from = whole(json, 'from', 0)
-  return { device: text(json, 'device'), vital: vital(json), from, through: whole(json, 'through', from) }
+  const from = time(json, 'from')
+  const through = time(json, 'through')
+  if (through < from) fail('a missing span ends before it starts')
+  return { device: branded(json, 'device', isDeviceId, 'a device id'), vital: vital(json), from, through }
 }
 
 function parsing<T>(parse: () => T): Parsed<T> {
@@ -270,7 +303,7 @@ function parsing<T>(parse: () => T): Parsed<T> {
 export const parseNewEntry = (body: unknown): Parsed<NewEntry> =>
   parsing(() => {
     const json = object(body, 'a new entry')
-    return { kind: 'new entry', patient: text(json, 'patient'), author: author(json), vital: vital(json), value: typedValue(json), care: care(json) }
+    return { kind: 'new entry', patient: patientOf(json), author: author(json), vital: vital(json), value: typedValue(json), care: care(json) }
   })
 
 export const parseAmendment = (body: unknown): Parsed<Amendment> =>
@@ -278,10 +311,10 @@ export const parseAmendment = (body: unknown): Parsed<Amendment> =>
     const json = object(body, 'an amendment')
     return {
       kind: 'amendment',
-      patient: text(json, 'patient'),
+      patient: patientOf(json),
       author: author(json),
-      entry: text(json, 'entry'),
-      replaces: whole(json, 'replaces', 1),
+      entry: entryOf(json, 'entry'),
+      replaces: versionOf(json, 'replaces'),
       value: typedValue(json),
       care: care(json),
     }
@@ -304,7 +337,7 @@ export const parseReadModel = (body: unknown): Parsed<ReadModel> =>
     const json = object(body, 'the read model')
     return {
       run: run(json['run']),
-      now: whole(json, 'now', 0),
+      now: time(json, 'now'),
       entries: list(json['entries'], 'entries').map(entryView),
       readings: list(json['readings'], 'readings').map(reading),
       statements: list(json['statements'], 'statements').map(statement),

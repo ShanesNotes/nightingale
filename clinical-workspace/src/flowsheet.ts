@@ -1,6 +1,6 @@
 import type { EntryView, ReadModel, ReadingView, StatementView } from './chart-api.ts'
 import type { Source } from './device.ts'
-import { add, type Duration, earlier, floorTo, MINUTE, type PatientTime, SECOND, since } from './time.ts'
+import { add, type Duration, earlier, floorTo, later, MINUTE, type PatientTime, SECOND, seconds, since, ZERO } from './time.ts'
 import { VITALS, type VitalRow } from './vitals.ts'
 
 // A pure grid over the chart's read model: it computes and never stores.
@@ -46,18 +46,24 @@ function sourceOf(statement: StatementView | undefined, vital: string): Source |
   return channels?.[vital]
 }
 
+const LAST_SECOND = seconds(59)
+
 function missingIn(model: ReadModel, vital: string, minute: PatientTime): number {
-  const end = add(minute, MINUTE)
+  const last = add(minute, LAST_SECOND)
   return model.missing
     .filter((span) => span.vital === vital)
-    .reduce((count, span) => count + Math.max(0, Math.min(span.through, end - SECOND) - Math.max(span.from, minute) + SECOND) / SECOND, 0)
+    .reduce((count, span) => {
+      const from = later(span.from, minute)
+      const through = earlier(span.through, last)
+      return through < from ? count : count + since(through, from) / SECOND + 1
+    }, 0)
 }
 
 function monitorCell(model: ReadModel, vital: string, minute: PatientTime): MonitorCell {
   const readings = model.readings.filter((r) => r.vital === vital && within(r.collected, minute))
   const missing = missingIn(model, vital, minute)
   if (readings.length === 0 && missing === 0) {
-    const source = sourceOf(statementAt(model.statements, earlier(add(minute, MINUTE - SECOND), model.now)), vital)
+    const source = sourceOf(statementAt(model.statements, earlier(add(minute, LAST_SECOND), model.now)), vital)
     if (source === undefined) return { kind: 'no statement' }
     if (source === 'no source') return { kind: 'no source' }
   }
@@ -76,7 +82,8 @@ function monitorCell(model: ReadModel, vital: string, minute: PatientTime): Moni
 
 function chartedCell(model: ReadModel, vital: string, minute: PatientTime): ChartedCell {
   const entries = model.entries.filter((e) => e.vital === vital && within(e.care, minute))
-  return { kind: 'entries', entries: entries.map((entry) => ({ entry, lateBy: Math.max(0, since(entry.charted, entry.care)), edited: entry.versions > 1 })) }
+  const lateBy = (entry: EntryView) => (entry.charted > entry.care ? since(entry.charted, entry.care) : ZERO)
+  return { kind: 'entries', entries: entries.map((entry) => ({ entry, lateBy: lateBy(entry), edited: entry.versions > 1 })) }
 }
 
 export function flowsheet(model: ReadModel, vitals: readonly VitalRow[] = VITALS): Flowsheet {

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { availableBetween, decodeRun } from '../src/run.ts'
-import { formatClock } from '../src/time.ts'
+import { formatClock, isPatientTime, type PatientTime } from '../src/time.ts'
 
 const capture = new URL('../capture/307caf19/', import.meta.url)
 const bytes = (name: string) => readFileSync(new URL(name, capture))
@@ -110,12 +110,19 @@ test('the run gives out a reading once the observer has it: pending when collect
   )
   assert.equal(decoded.kind, 'decoded')
   const { run } = decoded
+  const second = (n: number): PatientTime => {
+    const time = n * 1e9
+    assert.ok(isPatientTime(time))
+    return time
+  }
   const shown = (after: number | undefined, through: number) =>
-    availableBetween(run, after, through).map((o) => `${o.collected / 1e9}s ${o.value.kind === 'present' ? o.value.value : o.value.kind}`)
-  assert.deepEqual(shown(undefined, 1e9), ['1s 1.5'])
-  assert.deepEqual(shown(1e9, 2e9), ['2s pending'])
-  assert.deepEqual(shown(2e9, 3e9), ['3s not collected'])
-  assert.deepEqual(shown(3e9, 4e9), ['2s 2.5'])
-  assert.deepEqual(shown(undefined, 5e9).length, 4)
-  assert.deepEqual(shown(4e9, 5e9), [])
+    availableBetween(run, after === undefined ? undefined : second(after), second(through)).map(
+      (o) => `${o.collected / 1e9}s ${o.value.kind === 'present' ? o.value.value : o.value.kind}`,
+    )
+  assert.deepEqual(shown(undefined, 1), ['1s 1.5'])
+  assert.deepEqual(shown(1, 2), ['2s pending'])
+  assert.deepEqual(shown(2, 3), ['3s not collected'])
+  assert.deepEqual(shown(3, 4), ['2s 2.5'])
+  assert.deepEqual(shown(undefined, 5).length, 4)
+  assert.deepEqual(shown(4, 5), [])
 })

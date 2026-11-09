@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { ReadModel, ReadingView, StatementView } from '../src/chart-api.ts'
-import { ROSTER } from '../src/chart-api.ts'
+import { parseReadModel, ROSTER, type ReadModel } from '../src/chart-api.ts'
 import { flowsheet } from '../src/flowsheet.ts'
 import { formatClock, parseClock } from '../src/time.ts'
 import { perVital } from '../src/vitals.ts'
@@ -15,7 +14,7 @@ const at = (clock: string) => {
 const run = { specId: 'test-spec', patient: 'test-patient', start: at('06:55:00'), end: at('07:05:00'), anchor: 1_000_000 }
 const nurse = ROSTER[0]
 
-const statement = (clock: string, sourced: readonly string[]): StatementView => ({
+const statement = (clock: string, sourced: readonly string[]) => ({
   device: 'test-monitor',
   boot: 'test-boot',
   sequence: 1,
@@ -24,7 +23,7 @@ const statement = (clock: string, sourced: readonly string[]): StatementView => 
   channels: perVital((v) => (sourced.includes(v) ? 'sourced' : 'no source')),
 })
 
-const reading = (vital: 'HR' | 'ABP mean', collected: string, value: number | 'not collected', arrived = collected): ReadingView => ({
+const reading = (vital: 'HR' | 'ABP mean', collected: string, value: number | 'not collected', arrived = collected) => ({
   device: 'test-monitor',
   boot: 'test-boot',
   sequence: 2,
@@ -35,15 +34,12 @@ const reading = (vital: 'HR' | 'ABP mean', collected: string, value: number | 'n
   value: value === 'not collected' ? { kind: 'absent', reason: value } : { kind: 'present', value },
 })
 
-const model = (overrides: Partial<ReadModel>): ReadModel => ({
-  run,
-  now: at('06:57:30'),
-  entries: [],
-  readings: [],
-  statements: [],
-  missing: [],
-  ...overrides,
-})
+// The test builds the read model as the service sends it and parses it as the workspace does.
+function model(overrides: Readonly<Record<string, unknown>>): ReadModel {
+  const parsed = parseReadModel({ run, now: at('06:57:30'), entries: [], readings: [], statements: [], missing: [], ...overrides })
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.reason)
+  return parsed.value
+}
 
 test('the flowsheet has one column per minute, from the earlier of the run start and the earliest care time, to now', () => {
   assert.deepEqual(flowsheet(model({})).minutes.map(formatClock), ['06:55:00', '06:56:00', '06:57:00'])

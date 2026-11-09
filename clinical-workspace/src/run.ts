@@ -1,5 +1,5 @@
 import type { Absence, Observation, ObservedValue } from './observation.ts'
-import type { PatientTime } from './time.ts'
+import { earlier, floorTo, isPatientTime, type PatientTime, SECOND } from './time.ts'
 
 // A recorded run from `gp-driver run`: its lens rows, the catalogue that names their channels and the summary
 // that names the run. The formats are tools/generative-physiology/driver/src/capture.rs and npy.rs.
@@ -19,7 +19,6 @@ export type RunFiles = { readonly lens: Uint8Array; readonly catalogue: string; 
 const MAGIC = [0x93, 0x4e, 0x55, 0x4d, 0x50, 0x59, 0x01, 0x00]
 const HEADER = /^\{'descr': '<u8', 'fortran_order': False, 'shape': \((\d+), 6\), \}$/
 const COLUMNS = 6
-const NANOSECONDS_PER_SECOND = 1_000_000_000
 const ABSENCES: Readonly<Record<string, Absence>> = { '1': 'not collected', '2': 'pending', '3': 'invalid signal' }
 
 class Malformed extends Error {}
@@ -30,6 +29,11 @@ const refuse = (reason: string): never => {
 
 const safe = (value: bigint, what: string): number =>
   value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : refuse(`${what} ${value} is past the safe integer range`)
+
+function time(value: bigint, what: string): PatientTime {
+  const nanoseconds = safe(value, what)
+  return isPatientTime(nanoseconds) ? nanoseconds : refuse(`${what} ${value} is not a patient time`)
+}
 
 function float(bits: bigint): number {
   const view = new DataView(new ArrayBuffer(8))
@@ -81,8 +85,8 @@ function observations(lens: Uint8Array, channelCount: number): Observation[] {
   return Array.from({ length: rows }, (_, row) => {
     const channel = safe(word(row, 0), 'a channel')
     if (channel >= channelCount) refuse(`row ${row} names channel ${channel} of ${channelCount}`)
-    const collected = safe(word(row, 1), 'a collected time')
-    const available = safe(word(row, 2), 'an available time')
+    const collected = time(word(row, 1), 'a collected time')
+    const available = time(word(row, 2), 'an available time')
     if (available < collected) refuse(`row ${row} is available before it is collected`)
     return { channel, collected, available, value: value(word(row, 3), word(row, 4), word(row, 5)) }
   })
@@ -92,11 +96,12 @@ export function decodeRun(files: RunFiles): Decoded {
   try {
     const names = channels(files.catalogue)
     const values = summary(files.summary)
-    const read = observations(files.lens, names.length)
-    if (read.length === 0) refuse('the lens holds no rows')
-    const endTime = safe(BigInt(values.get('end_time_ns')!), 'the end time')
-    const start = Math.min(...read.map((o) => o.collected))
-    const end = Math.floor(endTime / NANOSECONDS_PER_SECOND) * NANOSECONDS_PER_SECOND
+    const [first, ...rest] = observations(files.lens, names.length)
+    if (first === undefined) return refuse('the lens holds no rows')
+    const read = [first, ...rest]
+    const endTime = time(BigInt(values.get('end_time_ns')!), 'the end time')
+    const start = rest.reduce((soonest, o) => earlier(soonest, o.collected), first.collected)
+    const end = floorTo(endTime, SECOND)
     if (read.some((o) => o.available > endTime)) refuse('a lens row is available after the run ends')
     if (end < start) refuse('the run ends before its first lens row')
     return {

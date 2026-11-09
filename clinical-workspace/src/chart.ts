@@ -2,7 +2,8 @@ import { randomBytes } from 'node:crypto'
 import { PGlite } from '@electric-sql/pglite'
 import pg from 'pg'
 import type { RunView } from './chart-api.ts'
-import type { WallTime } from './time.ts'
+import { isPatientId } from './device.ts'
+import { isPatientTime, isWallTime, type WallTime } from './time.ts'
 
 // The chart's one seam: a small SQL client with a pg adapter for a real Postgres and a PGlite adapter that runs
 // Postgres in-process. Both give a bigint column as a safe integer, so callers never see which ran.
@@ -111,11 +112,12 @@ export type Chart = { readonly run: RunView }
 
 const RUN_COLUMNS = 'spec_id, patient, start_ns, end_ns, anchor_ms'
 
+// A row is read like any input from outside: checked once here, then trusted.
 function runOf(row: Row | undefined): RunView {
   const { spec_id, patient, start_ns, end_ns, anchor_ms } = row ?? {}
-  if (typeof spec_id !== 'string' || typeof patient !== 'string') throw new Error('the run row lacks its spec or patient')
-  for (const n of [start_ns, end_ns, anchor_ms]) if (typeof n !== 'number') throw new Error('the run row lacks its times')
-  return { specId: spec_id, patient, start: Number(start_ns), end: Number(end_ns), anchor: Number(anchor_ms) }
+  if (typeof spec_id !== 'string' || !isPatientId(patient)) throw new Error('the run row lacks its spec or patient')
+  if (!isPatientTime(start_ns) || !isPatientTime(end_ns) || !isWallTime(anchor_ms)) throw new Error('the run row lacks its times')
+  return { specId: spec_id, patient, start: start_ns, end: end_ns, anchor: anchor_ms }
 }
 
 // The schema is applied at every opening and changes nothing the second time. The run row is made once.
