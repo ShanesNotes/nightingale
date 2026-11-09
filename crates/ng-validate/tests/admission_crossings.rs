@@ -896,8 +896,8 @@ fn a_moved_crossing_a_stale_topology_and_a_foreign_workspace_are_refused() {
     );
 }
 
-/// Under loose scales a fit raised by a thousandth leaves every root row inside its tolerance, but neither guard reaches
-/// its root where its crossing stands, so the sweep would drop both and `admit` refuses the topology as stale.
+/// Under loose scales a fit raised by a tenth leaves every root row inside its tolerance, but neither guard reaches its
+/// root before the knot after its crossing, so the sweep drops both and `admit` refuses the topology as stale.
 #[test]
 fn a_crossing_the_sweep_would_drop_is_refused_under_loose_scales() {
     let shape = Shape {
@@ -910,14 +910,15 @@ fn a_crossing_the_sweep_would_drop_is_refused_under_loose_scales() {
         mean: UP + 1.88,
     };
     let mut packet = relaxer.packet_up(16, shape, 1.0, up);
-    let loose = ErrorScales::uniform(measure(0.01), measure(0.01)).expect("positive");
+    let loose = ErrorScales::uniform(measure(0.1), measure(0.1)).expect("positive");
     packet.within(loose);
     let system = relaxer.system(16, packet);
     let (mut workspace, _) = solved_by_hand(&system);
     let fit = workspace.fitted_slots().start;
-    workspace.unknowns_mut()[fit] += 0.001;
+    workspace.unknowns_mut()[fit] += 0.1;
     let mut swept = workspace.clone();
     assert_eq!(system.sweep(&mut swept), Ok(true));
+    assert_eq!((workspace.crossing_count(), swept.crossing_count()), (2, 0));
     let refused = system.admit(workspace, history()).err();
     assert!(
         matches!(refused, Some(InitializationFailure::GuardSweep { .. })),
