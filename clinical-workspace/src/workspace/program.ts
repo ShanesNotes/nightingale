@@ -50,7 +50,7 @@ export const Model = Schema.Struct({
   answering: Schema.Boolean,
   heard: Schema.NullOr(WallTimeSchema),
   checked: Schema.NullOr(WallTimeSchema),
-  fetching: Schema.Boolean,
+  read: Schema.Literals(['idle', 'in flight', 'in flight, another due']),
   form: Schema.Struct({ author: Schema.String, vital: Schema.String, value: Schema.String, care: Schema.String }),
   notice: Schema.String,
   selected: Schema.NullOr(Schema.String),
@@ -158,7 +158,7 @@ export function init(): Return {
       answering: false,
       heard: null,
       checked: null,
-      fetching: false,
+      read: 'idle',
       form: { author: ROSTER[0]?.id ?? '', vital: VITALS[0].vital, value: '', care: '' },
       notice: '',
       selected: null,
@@ -184,16 +184,25 @@ function send(model: Model, write: Write, notice: string): Return {
   return { model: { ...model, notice, writing: write }, commands: [command] }
 }
 
+const reading = (model: Model): Return => ({ model: { ...model, read: 'in flight' }, commands: [FetchChart()] })
+
+function readChart(model: Model): Return {
+  if (model.screen === 'closed') return { model }
+  return model.read === 'idle' ? reading(model) : { model: { ...model, read: 'in flight, another due' } }
+}
+
+function readAnswered(model: Model): Return {
+  const idle: Model = { ...model, read: 'idle' }
+  return model.read === 'in flight, another due' ? readChart(idle) : { model: idle }
+}
+
 function wrote(model: Model, write: Write, result: WriteResult): Return {
   if (result.kind === 'refused') return { model: { ...model, notice: REFUSED[result.refusal.kind] } }
   const { entry } = result
   const unit = VITALS.find((row) => row.vital === entry.vital)?.unit ?? ''
   const did = entry.number > 1 ? 'Amended' : 'Charted'
   const answered = write.kind === 'new entry' ? { form: { ...model.form, value: '', care: '' } } : { editing: null }
-  return {
-    model: { ...model, ...answered, notice: `${did} ${entry.vital} ${entry.value} ${unit} as ${entry.author.name}.`, versions: null },
-    commands: [FetchChart()],
-  }
+  return readChart({ ...model, ...answered, notice: `${did} ${entry.vital} ${entry.value} ${unit} as ${entry.author.name}.`, versions: null })
 }
 
 const DRAFTING: ReadonlySet<Message['_tag']> = new Set([
@@ -211,13 +220,9 @@ const DRAFTING: ReadonlySet<Message['_tag']> = new Set([
 export function update(model: Model, message: Message): Return {
   if (model.writing !== null && DRAFTING.has(message._tag)) return { model }
   return Message.match<Return>(message, {
-    Polled: ({ at }) => (model.fetching ? { model: { ...model, checked: at } } : { model: { ...model, checked: at, fetching: true }, commands: [FetchChart()] }),
-    GotChart: ({ chart, at }) => {
-      if (model.screen === 'closed') return { model: { ...model, fetching: false } }
-      const stale = model.latest !== null && chart.now < model.latest.now
-      return { model: { ...model, latest: stale ? model.latest : chart, answering: true, heard: at, checked: at, fetching: false } }
-    },
-    ChartUnanswered: ({ at }) => ({ model: { ...model, answering: false, checked: at, fetching: false } }),
+    Polled: ({ at }) => (model.read === 'idle' ? reading({ ...model, checked: at }) : { model: { ...model, checked: at } }),
+    GotChart: ({ chart, at }) => readAnswered(model.screen === 'closed' ? model : { ...model, latest: chart, answering: true, heard: at, checked: at }),
+    ChartUnanswered: ({ at }) => readAnswered({ ...model, answering: false, checked: at }),
     ChoseAuthor: ({ author }) => ({ model: { ...model, form: { ...model.form, author } } }),
     ChoseVital: ({ vital }) => ({ model: { ...model, form: { ...model.form, vital } } }),
     TypedValue: ({ text }) => ({ model: { ...model, form: { ...model.form, value: text } } }),
@@ -253,7 +258,7 @@ export function update(model: Model, message: Message): Return {
       return send(model, { kind: 'amendment', body: { patient: model.latest.run.patient, author: model.form.author, entry, replaces, value, care: care.care } }, 'Amending.')
     },
     ClickedClose: () => ({ model: { ...model, screen: 'closed', latest: null, selected: null, versions: null, editing: null, notice: '' } }),
-    ClickedReopen: () => ({ model: { ...model, screen: 'open', fetching: true }, commands: [FetchChart()] }),
+    ClickedReopen: () => readChart({ ...model, screen: 'open' }),
   })
 }
 
