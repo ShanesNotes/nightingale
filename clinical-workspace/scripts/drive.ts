@@ -21,6 +21,7 @@ const USAGE = `usage: node scripts/drive.ts <command>
   fill <tab> <selector> <text>  type the text into an input, as a person would
   choose <tab> <selector> <v>   choose the option with value v in a select
   eval <tab> <js>               print the expression's value as JSON
+  offline <tab> <seconds>       cut the tab off the network for that long, then reconnect it
   shot <tab> <file>             save a full-page screenshot as PNG
   stop                          end Chromium by its recorded pid and remove its profile`
 
@@ -223,6 +224,19 @@ async function command(args: readonly string[]): Promise<void> {
       case 'eval': {
         const [expression = fail('eval needs an expression')] = rest
         process.stdout.write(`${JSON.stringify(await page.evaluate(expression))}\n`)
+        return
+      }
+      case 'offline': {
+        const [held = fail('offline needs seconds')] = rest
+        const cut = (offline: boolean) =>
+          page.send('Network.emulateNetworkConditions', { offline, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+        // The emulation lasts only while this connection is open, so the command holds it for the whole span.
+        await page.send('Network.enable')
+        await cut(true)
+        process.stdout.write(`drive: ${tab} offline for ${held} s\n`)
+        await sleep(Number(held) * 1000)
+        await cut(false)
+        process.stdout.write(`drive: ${tab} back online\n`)
         return
       }
       case 'shot': {
