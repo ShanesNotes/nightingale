@@ -87,6 +87,13 @@ impl Channel {
     pub fn integrated(&self) -> bool {
         matches!(self.window, Window::Time(_))
     }
+    /// How long one reading's window lasts, whichever kind it is.
+    pub fn window_ns(&self) -> u64 {
+        match self.window {
+            Window::Samples(count) => count.get().saturating_mul(self.period_ns),
+            Window::Time(ns) => ns.get(),
+        }
+    }
     /// Whether a window closes at this grid instant. Windows sit on whole multiples of their length, so an
     /// observer keeps no cursor.
     pub fn closes(&self, at: SimTime) -> bool {

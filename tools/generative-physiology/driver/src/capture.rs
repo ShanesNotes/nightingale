@@ -251,7 +251,7 @@ impl Catalogue {
             }
         }
         for channel in lens.channels() {
-            let window_ns = channel.window() * lens.period_ns();
+            let window_ns = channel.window_ns();
             lines.push(format!("lens {} {window_ns}", self.rows[channel.row().index()]));
         }
         lines.push(format!("sampled {}", self.rows[self.traffic.index()]));
