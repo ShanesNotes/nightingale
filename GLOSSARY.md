@@ -416,6 +416,38 @@ The clinicians' documentation of the patient (assessment, vitals, medication adm
 What a clinician documented about the patient. It is never state, and a note is never parsed into physiology.
 _Avoid_: chart truth
 
+## The clinical workspace
+
+**Clinical workspace**:
+The prototype in `clinical-workspace/` where clinicians chart one synthetic patient beside a bedside monitor fed a recorded run. It reads the engine's output and never builds or runs the engine.
+_Avoid_: EHR, EMR
+
+**Chart service**:
+The small service that owns the chart in Postgres. It takes chart entries, amendments and device messages, stamps their times from the patient clock, and answers the monitor and the workspace, which are its clients.
+
+**Flowsheet**:
+A grid of the chart by minute of patient time, each vital with its monitor readings and its chart entries in separate rows. It is computed from the chart and stores nothing.
+
+**Care time**:
+The patient time a chart entry is about. The clinician types it, or leaves it blank for now.
+_Avoid_: event time, effective time
+
+**Charted time**:
+The patient time the chart service took a chart entry. An entry charted after its care time is late by the difference.
+_Avoid_: entry time, timestamp
+
+**Amendment**:
+A new version of a chart entry, written by any clinician, that names the version it replaces. The earlier versions stay in the chart.
+_Avoid_: overwrite, correction
+
+**No source**:
+A device's statement that it has no channel for a vital, so it shows no number for that vital, never a zero.
+_Avoid_: unavailable, N/A
+
+**Missing**:
+A second of a vital that the device's latest statement calls sourced, up to the earlier of the run's end and the second before now, with no reading of that vital in the chart. When the reading arrives later, that second shows it as late instead.
+_Avoid_: gap, lost
+
 ## The software
 
 **Layer**:

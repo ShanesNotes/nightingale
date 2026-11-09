@@ -4,7 +4,7 @@ The team contract is `~/memory/AGENTS.md`. This file adds what is specific here.
 
 ## What this repo is
 
-The native Rust engine for one simulated patient. Read `docs/srs.md` first: it binds, and every lower doc yields to it. `docs/adr/` holds the decision records, one series from 0001. `docs/architecture/solver-contract.md` is the design the crates build against, `docs/atlas/` maps the 13 systems, `GLOSSARY.md` defines the words, and `docs/governance.md` says what may enter the repo. Pulse-era work lives in nightingale-pulse: read it only at the commit [0001](docs/adr/0001-native-engine-repo.md) names, cite its records as pulse 000N with a permalink, and never depend on it to build or run.
+The native Rust engine for one simulated patient. Read `docs/srs.md` first: it binds, and every lower doc yields to it. `docs/adr/` holds the decision records, one series from 0001. `docs/architecture/solver-contract.md` is the design the crates build against, `docs/atlas/` maps the 13 systems, `GLOSSARY.md` defines the words, and `docs/governance.md` says what may enter the repo. Pulse-era work lives in nightingale-pulse: read it only at the commit [0001](docs/adr/0001-native-engine-repo.md) names, cite its records as pulse 000N with a permalink, and never depend on it to build or run. `clinical-workspace/` is a TypeScript prototype of the clinical workspace that replays one recorded run, and it never builds or runs the engine.
 
 ## Rules
 
