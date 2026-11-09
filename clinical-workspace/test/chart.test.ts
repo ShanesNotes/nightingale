@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import { isEntryId, parseAmendment, parseNewEntry, ROSTER, type WriteResult } from '../src/chart-api.ts'
 import { type Chart, openChart, pgliteSql, pgSql, type Sql } from '../src/chart.ts'
-import { isPatientId } from '../src/device.ts'
+import { isPatientId, parseBatch } from '../src/device.ts'
 import { parseClock, wallTime } from '../src/time.ts'
 
 const branded = <T>(value: unknown, is: (v: unknown) => v is T): T => {
@@ -35,6 +35,33 @@ const amendment = (body: Readonly<Record<string, unknown>>) => {
 const taken = (result: WriteResult) => {
   assert.ok(result.kind === 'taken', JSON.stringify(result))
   return result.entry
+}
+
+const DEVICE = { device: 'test-monitor', boot: 'test-boot-1', patient: 'test-patient' }
+const SOURCED = { HR: 'sourced', 'ABP sys': 'no source', 'ABP dia': 'no source', 'ABP mean': 'sourced', SpO2: 'no source', RR: 'no source', Temp: 'no source' }
+
+const deviceReading = (sequence: number, collected: string, value: number | 'not collected' = 1.5, header: object = DEVICE) => ({
+  kind: 'reading',
+  ...header,
+  sequence,
+  vital: 'HR',
+  collected: at(collected),
+  available: at(collected),
+  value: value === 'not collected' ? { kind: 'absent', reason: value } : { kind: 'present', value },
+})
+
+const deviceStatement = (sequence: number, clock: string, channels: object = SOURCED, header: object = DEVICE) => ({
+  kind: 'statement',
+  ...header,
+  sequence,
+  at: at(clock),
+  channels,
+})
+
+const batch = (...messages: object[]) => {
+  const parsed = parseBatch(messages)
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.reason)
+  return parsed.value
 }
 
 // The whole suite runs on PGlite, and on a real Postgres too when CHART_TEST_DATABASE_URL names one.
@@ -157,6 +184,39 @@ for (const [name, connect] of databases) {
           /duplicate key/,
         )
         assert.deepEqual((await chart.readModel(at('06:57:00'))).entries, [first])
+      }))
+
+    test('the chart takes a batch of device messages in one transaction and answers each message', () =>
+      withChart(async (chart, sql) => {
+        const answer = (sequence: number, answer: string, refusal?: string) => ({ boot: 'test-boot-1', sequence, answer, ...(refusal ? { refusal } : {}) })
+        const first = batch(deviceStatement(1, '06:55:00'), deviceReading(2, '06:55:00', 'not collected'), deviceReading(3, '06:55:01', 1.5))
+        assert.deepEqual(await chart.writeDeviceBatch(first, at('06:55:01')), [answer(1, 'taken'), answer(2, 'taken'), answer(3, 'taken')])
+        const resent = batch(...first, deviceReading(4, '06:55:02', 2.5))
+        assert.deepEqual(await chart.writeDeviceBatch(resent, at('06:55:03')), [
+          answer(1, 'already held'),
+          answer(2, 'already held'),
+          answer(3, 'already held'),
+          answer(4, 'taken'),
+        ])
+        const conflicting = batch(deviceReading(3, '06:55:01', 9.5), deviceReading(5, '06:55:03', 3.5, { ...DEVICE, patient: 'another-test-patient' }))
+        assert.deepEqual(await chart.writeDeviceBatch(conflicting, at('06:55:04')), [
+          answer(3, 'refused', 'sequence reused with other content'),
+          answer(5, 'refused', 'another patient'),
+        ])
+        const model = await chart.readModel(at('06:55:05'))
+        assert.deepEqual(
+          model.readings.map((r) => [r.sequence, r.collected, r.arrived, r.value.kind === 'present' ? r.value.value : r.value.reason]),
+          [
+            [2, at('06:55:00'), at('06:55:01'), 'not collected'],
+            [3, at('06:55:01'), at('06:55:01'), 1.5],
+            [4, at('06:55:02'), at('06:55:03'), 2.5],
+          ],
+        )
+        assert.deepEqual(model.statements.map((st) => [st.sequence, st.at, st.arrived, st.channels.HR, st.channels.SpO2]), [[1, at('06:55:00'), at('06:55:01'), 'sourced', 'no source']])
+        for (const statement of ["UPDATE device_message SET arrived_ns = 0", 'DELETE FROM device_message', 'TRUNCATE device_message']) {
+          await assert.rejects(sql.query(statement), /append-only/, statement)
+        }
+        await assert.rejects(sql.query('INSERT INTO device_message SELECT * FROM device_message'), /duplicate key/)
       }))
   })
 }
