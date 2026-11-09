@@ -21,3 +21,18 @@ Reading order matters more than row count, since one document answers many rows.
 - `XC-36` compares the product of Katona's cohort means with Wolsk's mean, so it is a consistency check, not an identity in one man.
 - The receptor half of the sinus node law is still open: `S_b`, `S_m` and the `eps` and occupancy behind `E_b1` and `E_m2`. Until then only the product closes at rest. A dry run on main found that wiring this anchor needs them.
 - `S_b` and `S_m` enter as derivations from `m`, `n` and the resting effects, not as calibrated values, because `m` and `n` are parameters and a calibrated record names anchors only.
+- Cardiovascular pilot, 2026-11-07. These rows are candidates. None entered `data/`, because none passed appraisal. Each number below was read from a public abstract. Full texts of licensed sources were not read.
+
+  | Parameter | Source | Value | n | Population and method | Verdict |
+  |---|---|---|---|---|---|
+  | `cv.orifice`, left ventricle to systemic arteries | EACVI and ASE 2017 focused update, doi:10.1016/j.echo.2017.02.009 | none | | stenosis grading | Not fit: its numbers are disease cut-offs, not a healthy valve's EOA |
+  | `cv.elastance`, systemic arteries | Gudbrandsson 1992, doi:10.3109/08037059209065121 | SV/PP 1.90 ± 0.58 (men), 2.00 ± 0.62 (women), after adjustment for body surface area; unit and statistic not stated | 801 | Normal adults 30 ± 5.6 y, echo-Doppler SV over cuff pulse pressure | Unresolved: needs the full text; cuff pressure biases SV/PP low |
+  | `cv.elastance`, systemic arteries | Chemla 1998, doi:10.1152/ajpheart.1998.274.2.H500 | none in the abstract | 7 controls | Invasive aortic pressure, area method | Method support for SV/PP; values need the full text |
+  | `cv.elastance`, systemic arteries | Kelly 1992, doi:10.1161/01.cir.86.2.513 | Ea | 10 | End-systolic pressure over SV | Rejected: effective arterial elastance is a load index, not 1/C |
+  | `cv.elastance`, systemic arteries | Stergiopulos 1999, doi:10.1152/ajpheart.1999.276.2.H424 | 0.169 ± 0.007 mL/mmHg (SE) | 7 | Anaesthetised dogs | Rejected: species. Shows that compliance depends on the pressure it is read at |
+  | `cv.elastance`, leg veins | Halliwill 1999, doi:10.1152/jappl.1999.87.4.1555 | none in the abstract; day-to-day CV 4.9% | 11 | Calf, deflating venous cuff from 60 mmHg, quadratic fit | Unresolved: values are in the full text. Calf per 100 mL tissue reaches the whole leg only by a justified scaling |
+  | `cv.unstressed-gain`, leg veins | Halliwill 1999 | none | 11 | Handgrip and post-exercise ischaemia | Not enough information: no number, and no measure of the effect the shift rode on |
+  | `cv.unstressed` | Magder 1998, doi:10.1097/00003246-199806000-00028 | stressed volume 20.2 ± 1.0 mL/kg | 5 | Patients in hypothermic circulatory arrest | Rejected: whole body, patients, no sympathetic contrast |
+
+- The orifice maps by B = ρ / (2 EOA²), so a sourced blood density joins any EOA row. The arterial elastance maps as 1/C only for whole-tree compliance read over the pulse pressure range.
+- Held out for testing, never fitted: Sarafian and Miles-Chan 2016, Front Physiol, doi:10.3389/fphys.2016.00656, CC BY. Its protocol was frozen before the search. It reports sustained heart rate and pressure at tilt sines 0.342, 0.643 and 0.866. So it can test arterial compliance through pulse pressure, and the leg venous rows only indirectly. It cannot test the valve, or the first minutes after a tilt.
