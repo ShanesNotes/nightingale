@@ -70,8 +70,8 @@ test = "-p ng-contract --lib evaluate::tests::a_value_that_is_not_finite_fails_a
 [[mutant]]
 name = "start-hashes-stated-modes"
 path = "crates/ng-contract/src/admission.rs"
-old = '''unread.reading(time, start, &solved, fitted, &history);'''
-new = '''unread.reading(time, start, &parameters.modes, fitted, &history);'''
+old = '''unread.reading(time, &start, &solved_modes, &fitted, witness.as_ref(), &history);'''
+new = '''unread.reading(time, &start, &parameters.modes, &fitted, witness.as_ref(), &history);'''
 test = "-p ng-contract --test solved_modes each_part_of_an_admitted_start_moves_the_hash_a_run_names"
 
 [[mutant]]
@@ -529,8 +529,8 @@ test = "-p ng-validate --test admission_radau energys_end_rows_sum_to_its_stage_
 [[mutant]]
 name = "admission-net-flow-end-stage-only"
 path = "crates/ng-contract/src/admission.rs"
-old = '''seconds * RADAU[END][stage]'''
-new = '''seconds * f64::from(stage == END)'''
+old = '''let seconds = held.length * RADAU[END][stage];'''
+new = '''let seconds = held.length * f64::from(stage == END);'''
 test = "-p ng-validate --test admission_radau a_closed_store_sheds_its_work_at_the_start_on_any_ring"
 
 [[mutant]]
@@ -543,15 +543,15 @@ test = "-p ng-validate --test admission an_interior_stage_no_other_row_reads_is_
 [[mutant]]
 name = "admission-chains-the-interior"
 path = "crates/ng-contract/src/admission.rs"
-old = '''self.slots(self.before(point), END).start + at, -1.0'''
-new = '''self.slots(self.before(point), INTERIOR).start + at, -1.0'''
+old = '''self.slots(previous, END).start + at, -1.0'''
+new = '''self.slots(previous, INTERIOR).start + at, -1.0'''
 test = "-p ng-validate --test admission the_lifted_ring_is_the_dense_solve_of_the_differenced_rows"
 
 [[mutant]]
 name = "admission-interval-reads-its-own-frame"
 path = "crates/ng-contract/src/admission.rs"
-old = '''frame: &self.frames[self.before(point)],'''
-new = '''frame: &self.frames[point],'''
+old = '''frame: &self.frames[self.before(leg.interval)],'''
+new = '''frame: &self.frames[leg.interval],'''
 test = "-p ng-validate --test admission a_stiff_row_driven_inside_the_beat_is_admitted_on_odd_and_even_rings"
 
 [[mutant]]
@@ -564,6 +564,97 @@ test = "-p ng-contract --test ring_pivot two_closed_rows_that_read_one_store_fac
 [[mutant]]
 name = "reused-start-keeps-its-history"
 path = "crates/ng-contract/src/admission.rs"
-old = '''(self.unread).reading(parts.time, &self.start, &parameters.modes, &self.fitted, &history);'''
-new = '''(self.unread).reading(parts.time, &self.start, &parameters.modes, &self.fitted, &parts.continuation);'''
+old = '''
+            self.witness.as_ref(),
+            &history,
+'''
+new = '''
+            self.witness.as_ref(),
+            &parts.continuation,
+'''
 test = "-p ng-validate --test admission a_judged_start_under_another_history_is_that_historys_admission_of_it"
+
+[[mutant]]
+name = "admission-crossing-end-signs-only"
+path = "crates/ng-contract/src/admission/crossings.rs"
+old = '''if jet.value.hi < 0.0 {'''
+new = '''if gap(lo)? < 0.0 && gap(hi)? < 0.0 {'''
+test = "-p ng-validate --test admission_crossings two_crossings_between_a_legs_stage_points_are_both_found"
+
+[[mutant]]
+name = "admission-crossing-no-root"
+path = "crates/ng-contract/src/admission.rs"
+old = '''out.push(self.root(workspace, &values, leg, crossing.guards[0])?);'''
+new = '''out.push(0.0 * self.root(workspace, &values, leg, crossing.guards[0])?);'''
+test = "-p ng-validate --test admission_crossings a_switch_located_inside_its_interval_keeps_the_cycle_third_order"
+
+[[mutant]]
+name = "admission-crossing-end-quantized"
+path = "crates/ng-contract/src/admission.rs"
+old = '''.map_or(interval, |at| self.topology.crossings[at].offset);'''
+new = '''.map_or(interval, |_| interval);'''
+test = "-p ng-validate --test admission_crossings a_switch_located_inside_its_interval_keeps_the_cycle_third_order"
+
+[[mutant]]
+name = "admission-crossing-one-length"
+path = "crates/ng-contract/src/admission.rs"
+old = '''add(&mut line, self.root_column(workspace, start), -along);'''
+new = '''let _ = (start, along);'''
+test = "-p ng-validate --test admission_crossings a_guard_that_reads_a_fit_has_the_slopes_its_differences_give"
+
+[[mutant]]
+name = "admission-crossing-no-reset"
+path = "crates/ng-contract/src/admission.rs"
+old = '''origin[row.index()] = 0.0;'''
+new = '''origin[row.index()] += 0.0;'''
+test = "-p ng-validate --test admission_radau the_end_of_systole_is_located_where_the_phase_reaches_it"
+
+[[mutant]]
+name = "admission-period-unchecked"
+path = "crates/ng-contract/src/admission.rs"
+old = '''if (reached - threshold).abs() > ROUNDING * threshold.abs() {'''
+new = '''if false && (reached - threshold).abs() > ROUNDING * threshold.abs() {'''
+test = "-p ng-validate --test admission_radau a_clock_whose_anchor_does_not_reach_its_threshold_in_one_period_is_refused"
+
+[[mutant]]
+name = "admission-time-mean-sampled"
+path = "crates/ng-contract/src/admission.rs"
+old = '''sum = sum.plus(Compensated::exact(held.length * RADAU[END][stage] * value));'''
+new = '''sum = sum.plus(Compensated::exact(0.5 * held.length * value));'''
+test = "-p ng-validate --test admission_radau a_varying_clock_is_paced_by_its_time_mean_and_refused_by_a_sampled_one"
+
+[[mutant]]
+name = "admission-unpaced-admitted"
+path = "crates/ng-contract/src/admission.rs"
+old = '''if still && fires && self.period.is_none() {'''
+new = '''if false && still && fires && self.period.is_none() {'''
+test = "-p ng-validate --test admission_radau an_autonomous_beat_no_clock_paces_is_refused"
+
+[[mutant]]
+name = "admission-knot-waits-for-a-rising-zero"
+path = "crates/ng-contract/src/admission/crossings.rs"
+old = '''Ok(rising > 0.0)'''
+new = '''Ok(rising > 0.0 && false)'''
+test = "-p ng-validate --test admission_radau a_guard_that_reaches_zero_on_a_knot_fires_on_that_knot"
+
+[[mutant]]
+name = "ring-border-row-drops-border-reads"
+path = "crates/ng-contract/src/ring.rs"
+old = '''                } else if place >= border {
+                    cells[size + place - border] += value;
+                }
+            }
+        }
+        let answer'''
+new = '''                }
+            }
+        }
+        let answer'''
+test = "-p ng-validate --test admission_crossings a_guard_that_reads_a_fit_has_the_slopes_its_differences_give"
+
+[[mutant]]
+name = "observation-time-mean-counts-samples"
+path = "crates/ng-observe/src/observer.rs"
+old = '''covered: covered.saturating_add(length),'''
+new = '''covered: covered.saturating_add(1),'''
+test = "-p ng-validate --test admission_crossings a_time_mean_channel_integrates_the_accepted_steps_and_a_sampled_one_does_not"
