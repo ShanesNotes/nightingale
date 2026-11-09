@@ -108,3 +108,10 @@ export function decodeRun(files: RunFiles): Decoded {
     throw error
   }
 }
+
+// The observer emits a delayed reading twice: pending when collected, then its value when available.
+const givenOutAt = (o: Observation): PatientTime => (o.value.kind === 'pending' ? o.collected : o.available)
+
+export function availableBetween(run: Run, after: PatientTime | undefined, through: PatientTime): readonly Observation[] {
+  return run.observations.filter((o) => (after === undefined || givenOutAt(o) > after) && givenOutAt(o) <= through)
+}
