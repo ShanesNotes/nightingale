@@ -248,7 +248,7 @@ function missingSpans(model: Omit<ReadModel, 'missing'>): MissingSpan[] {
 
 const refused = (refusal: Refusal): WriteResult => ({ kind: 'refused', refusal })
 
-const lostARace = (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '23505'
+const lostAWriteIdOrVersionRace = (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '23505'
 
 async function answerByWriteId(sql: Sql, write: EntryWrite): Promise<WriteResult | undefined> {
   const [held] = await sql.query('SELECT entry, write = $2::jsonb AS same FROM entry_version WHERE write_id = $1', [write.writeId, JSON.stringify(write)])
@@ -323,8 +323,7 @@ export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: 
           return { kind: 'taken', entry: taken }
         })
       } catch (error) {
-        if (!lostARace(error)) throw error
-        // The write lost a race on its write id or on its version, and whether the chart now holds its write id tells which.
+        if (!lostAWriteIdOrVersionRace(error)) throw error
         return (await answerByWriteId(sql, write)) ?? refused({ kind: 'not the current version' })
       }
     },
