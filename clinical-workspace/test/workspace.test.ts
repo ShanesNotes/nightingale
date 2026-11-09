@@ -209,6 +209,57 @@ test('an edit amends the version it began from, so a stale draft is refused when
   )
 })
 
+test('a write in flight takes no input, and its answer clears only the draft it answered, so no draft is lost', () => {
+  const first = entry({ id: 'test-entry-1', vital: 'RR', value: 18, care: '06:56:30', charted: '06:57:15' })
+  const charted = entry({ id: 'test-entry-2', vital: 'HR', value: 61, care: '06:57:30', charted: '06:57:30' })
+  const amended = { ...first, number: 2, versions: 2, value: 19, charted: at('06:57:40') }
+  Story.story(
+    update,
+    Story.given(loaded({ entries: [first] })),
+    Story.message(Message.ClickedEntry({ entry: 'test-entry-1' })),
+    Story.message(Message.ClickedEdit()),
+    Story.message(Message.TypedEditValue({ text: '19' })),
+    Story.message(Message.TypedValue({ text: '61' })),
+    Story.message(Message.ClickedChart()),
+    Story.Command.expectExact(PostEntry({ body: { patient: 'test-patient', author: 'synthetic-nurse', vital: 'HR', value: '61', care: null }, writeId: null })),
+    park,
+    Story.message(Message.TypedValue({ text: '62' })),
+    Story.message(Message.ChoseVital({ vital: 'RR' })),
+    Story.message(Message.TypedEditValue({ text: '20' })),
+    Story.message(Message.ClickedChart()),
+    Story.message(Message.ClickedSaveEdit()),
+    Story.Command.expectNone(),
+    Story.model((m: Model) => assert.deepEqual([m.form.vital, m.form.value, m.editing?.value], ['HR', '61', '19'], 'no input while the write is in flight')),
+    Story.message(Message.Wrote({ result: written({ kind: 'taken', entry: charted }) })),
+    Story.model((m: Model) => assert.deepEqual([m.form.value, m.editing?.value], ['', '19'], 'the answer cleared the form it answered and kept the edit')),
+    park,
+    Story.message(Message.TypedValue({ text: '64' })),
+    Story.message(Message.ClickedSaveEdit()),
+    park,
+    Story.message(Message.Wrote({ result: written({ kind: 'taken', entry: amended }) })),
+    Story.model((m: Model) => assert.deepEqual([m.editing, m.form.value], [null, '64'], 'the answer closed the edit it answered and kept the form')),
+    park,
+  )
+  const whileCharting = ['#author', '#vital', '#value', '#care', '#chart', '#edit']
+  const whileAmending = ['#author', '#vital', '#value', '#care', '#chart', '#edit-value', '#edit-care', '#save-edit']
+  Scene.scene(
+    { update, view },
+    Scene.given(loaded({ entries: [first] })),
+    Scene.click(Scene.selector('td[data-cell="RR charted 06:56"] button')),
+    Scene.type('#value', '61'),
+    Scene.click('#chart'),
+    ...whileCharting.map((id) => Scene.expect(Scene.selector(id)).toBeDisabled()),
+    Scene.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'taken', entry: charted }) })),
+    Scene.Command.resolve(FetchChart, Message.GotChart({ chart: readModel({ now: at('06:57:31'), entries: [first, charted] }), at: wallTime(6_000_000) })),
+    ...whileCharting.map((id) => Scene.expect(Scene.selector(id)).toBeEnabled()),
+    Scene.click('#edit'),
+    Scene.click('#save-edit'),
+    ...whileAmending.map((id) => Scene.expect(Scene.selector(id)).toBeDisabled()),
+    Scene.Command.resolve(PostAmendment, Message.Wrote({ result: written({ kind: 'taken', entry: amended }) })),
+    Scene.Command.resolve(FetchChart, Message.GotChart({ chart: readModel({ now: at('06:57:41'), entries: [amended, charted] }), at: wallTime(6_001_000) })),
+  )
+})
+
 test('close hides the chart screen and stops asking the service; reopen asks at once for the chart as it is now', () => {
   const asking = (model: Model) => subscriptions.poll.modelToDependencies(model).open
   Story.story(
