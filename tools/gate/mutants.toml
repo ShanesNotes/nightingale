@@ -633,9 +633,46 @@ test = "-p ng-validate --test admission_radau an_autonomous_beat_no_clock_paces_
 [[mutant]]
 name = "admission-knot-waits-for-a-rising-zero"
 path = "crates/ng-contract/src/admission/crossings.rs"
-old = '''Ok(rising > 0.0)'''
-new = '''Ok(rising > 0.0 && false)'''
+old = '''Ok(rising_fires && reading.rising > 0.0)'''
+new = '''Ok(rising_fires && reading.rising > 0.0 && false)'''
 test = "-p ng-validate --test admission_radau a_guard_that_reaches_zero_on_a_knot_fires_on_that_knot"
+
+[[mutant]]
+name = "admission-crossing-stands-by-value"
+path = "crates/ng-contract/src/admission/crossings.rs"
+old = '''off <= ROUNDING * self.terms ||'''
+new = '''off <= 1e-6 * self.terms ||'''
+test = "-p ng-validate --test admission_crossings a_guard_on_a_swing_far_below_its_level_keeps_both_crossings"
+
+[[mutant]]
+name = "admission-knot-fires-what-it-arms"
+path = "crates/ng-contract/src/admission/crossings.rs"
+old = '''let open = Some(at) != reference && armed[at] && guard.armed(&modes);'''
+new = '''let open = Some(at) != reference && guard.armed(&modes);'''
+test = "-p ng-validate --test firing a_guard_a_firing_arms_waits_for_the_next_step_on_the_ring_and_in_a_run"
+
+[[mutant]]
+name = "admission-settled-keeps-a-gone-crossing"
+path = "crates/ng-contract/src/admission/crossings.rs"
+old = '''
+                Event::Clear => {}
+                Event::Cross { .. } | Event::Unarmed | Event::Gone { .. } => return Err(point),
+'''
+new = '''
+                Event::Clear | Event::Gone { .. } => {}
+                Event::Cross { .. } | Event::Unarmed => return Err(point),
+'''
+test = "-p ng-validate --test admission_crossings a_crossing_the_sweep_would_drop_is_refused_under_loose_scales"
+
+[[mutant]]
+name = "lens-averaged-keeps-a-time-mean"
+path = "crates/ng-contract/src/lens.rs"
+old = '''window: Window::Samples(samples),'''
+new = '''window: match self.window {
+                Window::Time(_) => Window::Time(samples),
+                Window::Samples(_) => Window::Samples(samples),
+            },'''
+test = "-p ng-validate --test admission_crossings the_last_window_a_channel_is_given_is_the_one_it_reads"
 
 [[mutant]]
 name = "ring-border-row-drops-border-reads"
