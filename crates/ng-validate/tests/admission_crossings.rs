@@ -71,12 +71,30 @@ enum Up {
     Fitted { guess: f64, mean: f64 },
 }
 
+/// Where a level of `y`'s scale lies: `base + gain * level`.
+#[derive(Clone, Copy)]
+struct Levels {
+    base: f64,
+    gain: f64,
+}
+impl Levels {
+    fn of(self, level: f64) -> f64 {
+        self.base + self.gain * level
+    }
+}
+impl Default for Levels {
+    fn default() -> Self {
+        Self { base: 0.0, gain: 1.0 }
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 struct Shape {
     valve: bool,
     gate: bool,
     seen: bool,
     touch: bool,
+    levels: Levels,
 }
 
 struct Relaxer {
@@ -261,14 +279,24 @@ fn water(tag: &[u8], boundary: &'static str, from: u64, to: u64, rate: f64) -> B
 }
 
 fn port(cycles: u64) -> BoundaryPort {
+    port_at(cycles, Levels::default())
+}
+
+fn port_at(cycles: u64, levels: Levels) -> BoundaryPort {
     let mut events = Vec::new();
     for cycle in 0..cycles {
         let start = cycle * SECOND;
         for (boundary, tag) in [(PULSE, b'p'), (DRAIN, b'd')] {
             let first = [tag, b'h', cycle as u8];
             let second = [tag, b'l', cycle as u8];
-            events.push(water(&first, boundary, start, start + HALF, HIGH));
-            events.push(water(&second, boundary, start + HALF, start + SECOND, LOW));
+            events.push(water(&first, boundary, start, start + HALF, levels.of(HIGH)));
+            events.push(water(
+                &second,
+                boundary,
+                start + HALF,
+                start + SECOND,
+                levels.of(LOW),
+            ));
         }
     }
     BoundaryPort::new(events).expect("parsed")
@@ -325,11 +353,11 @@ impl Relaxer {
         }
         if shape.valve {
             rates.push(("synthetic.fast", FAST));
-            flows.push(("synthetic.down", DOWN));
+            flows.push(("synthetic.down", shape.levels.of(DOWN)));
             units.push(("synthetic.guard-scale", scale));
         }
         match up {
-            Up::Stated(value) if shape.valve => flows.push(("synthetic.up", value)),
+            Up::Stated(value) if shape.valve => flows.push(("synthetic.up", shape.levels.of(value))),
             Up::Stated(_) => {}
             Up::Fitted { guess, mean } => {
                 let read = Snapshot::new(
@@ -380,7 +408,7 @@ impl Relaxer {
             }
         }
         let guess = |kind| match kind {
-            RowKind::Memory(slot) if slot.law == name("y") => 2.0,
+            RowKind::Memory(slot) if slot.law == name("y") => shape.levels.of(2.0),
             _ => 0.5,
         };
         packet.start_rest(&self.body, guess, NOTE).expect("every row");
@@ -393,13 +421,24 @@ impl Relaxer {
         scale: f64,
         rows: &[RowKind],
     ) -> Result<Vec<f64>, InitializationFailure> {
+        Ok(self.admission(intervals, shape, scale, rows)?.0)
+    }
+    /// The admitted start's `rows` and how many crossings it located.
+    fn admission(
+        &self,
+        intervals: u32,
+        shape: Shape,
+        scale: f64,
+        rows: &[RowKind],
+    ) -> Result<(Vec<f64>, usize), InitializationFailure> {
         let core = ReferenceIntegrator::new(SECOND / u64::from(intervals));
         let store = MemoryStore::default();
         let lens = self.lens(intervals);
         let packet = self.packet(intervals, shape, scale);
-        let admitted = admit_solved(&self.body, packet, port(2), &core, &lens, &store)?;
+        let admitted = admit_solved(&self.body, packet, port_at(2, shape.levels), &core, &lens, &store)?;
         let start = admitted.session.record().accepted();
-        Ok(rows.iter().map(|&kind| hi(start.value(self.row(kind)))).collect())
+        let read = rows.iter().map(|&kind| hi(start.value(self.row(kind)))).collect();
+        Ok((read, admitted.provenance.crossings().len()))
     }
 }
 
@@ -522,6 +561,32 @@ fn a_guard_rescaled_by_a_positive_constant_moves_no_start() {
     assert!((one - three).abs() <= 1e-12 * one.abs(), "{one} against {three}");
 }
 
+/// The valve's beat moved to `1 + 1e-7 y`: the same orbit on a swing ten million times smaller than its distance from
+/// zero. Each guard's root lies where it did, inside its interval, so both crossings are located and the start is the
+/// moved orbit's.
+#[test]
+fn a_guard_on_a_swing_far_below_its_level_keeps_both_crossings() {
+    let shape = Shape {
+        valve: true,
+        ..Shape::default()
+    };
+    let narrow = Levels {
+        base: 1.0,
+        gain: 1e-7,
+    };
+    let relaxer = relaxer(shape).expect("a body");
+    let rows = [Relaxer::memory("y")];
+    let (plain, located) = relaxer.admission(16, shape, 1.0, &rows).expect("admitted");
+    let moved = Shape {
+        levels: narrow,
+        ..shape
+    };
+    let (small, kept) = relaxer.admission(16, moved, 1.0, &rows).expect("admitted");
+    assert_eq!((located, kept), (2, 2), "crossings");
+    let back = (small[0] - narrow.base) / narrow.gain;
+    assert!((back - plain[0]).abs() < 1e-6, "{back} against {}", plain[0]);
+}
+
 /// `seen` follows the pulse's rate, which steps up at the wrap and down at the half beat, both on the grid. The guard
 /// is crossed by the drive's edge itself, so it fires on that edge, not an interval later, and `u` relaxes to one over
 /// exactly the high half.
@@ -626,6 +691,30 @@ fn a_time_mean_channel_integrates_the_accepted_steps_and_a_sampled_one_does_not(
         .map(|&(_, mean)| mean)
         .expect("a sample mean");
     assert!((sampled - exact).abs() > 1e-2, "{sampled} against {exact}");
+}
+
+/// A channel's last window call names its window: `averaged` after `time_averaged` reads four samples, not four
+/// nanoseconds, and the other order a time mean.
+#[test]
+fn the_last_window_a_channel_is_given_is_the_one_it_reads() {
+    let relaxer = relaxer(Shape::default()).expect("a body");
+    let row = Relaxer::memory("y");
+    let digest = |channel| {
+        let lens = relaxer
+            .body
+            .lens(vec![channel], count(SECOND / 4))
+            .expect("a lens");
+        lens.digest()
+    };
+    let (samples, time) = (count(4), count(SECOND));
+    assert_eq!(
+        digest(ChannelSpec::new(GAUGE, row).time_averaged(time).averaged(samples)),
+        digest(ChannelSpec::new(GAUGE, row).averaged(samples))
+    );
+    assert_eq!(
+        digest(ChannelSpec::new(GAUGE, row).averaged(samples).time_averaged(time)),
+        digest(ChannelSpec::new(GAUGE, row).time_averaged(time))
+    );
 }
 
 fn at_second() -> SimTime {
@@ -804,6 +893,35 @@ fn a_moved_crossing_a_stale_topology_and_a_foreign_workspace_are_refused() {
     assert_eq!(
         refused,
         Some(InitializationFailure::Admission(AdmissionError::ForeignWorkspace))
+    );
+}
+
+/// Under loose scales a fit raised by a thousandth leaves every root row inside its tolerance, but neither guard reaches
+/// its root where its crossing stands, so the sweep would drop both and `admit` refuses the topology as stale.
+#[test]
+fn a_crossing_the_sweep_would_drop_is_refused_under_loose_scales() {
+    let shape = Shape {
+        valve: true,
+        ..Shape::default()
+    };
+    let relaxer = relaxer(shape).expect("a body");
+    let up = Up::Fitted {
+        guess: 2.15,
+        mean: UP + 1.88,
+    };
+    let mut packet = relaxer.packet_up(16, shape, 1.0, up);
+    let loose = ErrorScales::uniform(measure(0.01), measure(0.01)).expect("positive");
+    packet.within(loose);
+    let system = relaxer.system(16, packet);
+    let (mut workspace, _) = solved_by_hand(&system);
+    let fit = workspace.fitted_slots().start;
+    workspace.unknowns_mut()[fit] += 0.001;
+    let mut swept = workspace.clone();
+    assert_eq!(system.sweep(&mut swept), Ok(true));
+    let refused = system.admit(workspace, history()).err();
+    assert!(
+        matches!(refused, Some(InitializationFailure::GuardSweep { .. })),
+        "{refused:?}"
     );
 }
 
