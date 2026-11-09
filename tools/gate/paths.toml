@@ -43,6 +43,10 @@ docs_only = true
 paths = ["data/**"]
 run = ["30-data"]
 
+[[rule]]
+paths = ["clinical-workspace/**"]
+run = ["50-workspace"]
+
 # One row per workspace member, named for its directory: the member lives at crates/<name>.
 # Optional keys:
 #   smoke = ["trace"]                          test targets every merge run that reaches a crate runs

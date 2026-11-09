@@ -1,0 +1,31 @@
+{
+  "name": "nightingale-clinical-workspace",
+  "private": true,
+  "type": "module",
+  "description": "The clinical workspace prototype: a chart service on Postgres and two Foldkit pages, a bedside monitor and the chart screen.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.ts",
+    "build": "vite build",
+    "dev": "node scripts/dev.ts",
+    "db:stop": "node scripts/db.ts stop",
+    "reset": "node scripts/db.ts reset",
+    "drive": "node scripts/drive.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.11",
+    "effect": "4.1.2",
+    "foldkit": "0.170.0",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@foldkit/vite-plugin": "0.29.0",
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.5"
+  }
+}

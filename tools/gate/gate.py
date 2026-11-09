@@ -1670,6 +1670,7 @@ PLAN_CASES = (
     PlanCase("merge", "docs/srs.md", "docs-only", frozenset(), steps=frozenset({"10-docs"})),
     PlanCase("merge", ".scratch/foundation/map.md", "docs-only", frozenset(), steps=frozenset({"30-data"})),
     PlanCase("merge", "data/closure.jsonl", "affected", frozenset(), steps=frozenset({"30-data"})),
+    PlanCase("merge", "clinical-workspace/src/chart.ts", "affected", frozenset(), steps=frozenset({"50-workspace"})),
     PlanCase("merge", "AGENTS.md", "docs-only", frozenset(), steps=frozenset({"10-docs"})),
     PlanCase("merge", CONTRACT, "docs-only", frozenset(), steps=frozenset({"05-seam", "10-docs", "20-sketch"})),
     PlanCase(

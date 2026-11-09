@@ -1,0 +1,7 @@
+gp-run 1
+core ng-solver cap-ms 10
+end-ms 600000
+event at-ms 60000 trunk 1000 legs standing
+event at-ms 240000 trunk 0 legs horizontal
+event at-ms 420000 trunk 1000 legs standing
+variant none

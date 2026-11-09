@@ -2,7 +2,7 @@
 
 Nightingale is a Rust simulation of one patient's body, for teaching. It does not inform the care of a real person. Pressures, flows, lab values and other readings are meant to be computed from conserved amounts (water, salts, gases, heat) and from physics, so illness, chance and treatment would later act on the same body. Numbers in the crates are synthetic. Cited clinical records live in `data/`, and no crate reads them yet.
 
-[docs/statecharts](docs/statecharts) holds four statecharts, each a TLA+ model that TLC checks: the system, how its modules hand off from the map to admission, the record crate, the boundary port, observers and the arena; the engine, each step's accept, refuse and fault with the history store, checkpoints and the certificate; one step of a run; and the chart, which is a placeholder. Everything they draw but the chart runs today on synthetic bodies, the admission solve of a start state included.
+[docs/statecharts](docs/statecharts) holds five statecharts, each a TLA+ model that TLC checks: the system, how its modules hand off from the map to admission, the record crate, the boundary port, observers and the arena; the engine, each step's accept, refuse and fault with the history store, checkpoints and the certificate; one step of a run; the chart, which is a placeholder; and the bedside monitor's link to the chart service in the clinical workspace prototype. Everything the first four draw but the chart runs today on synthetic bodies, the admission solve of a start state included.
 
 ## Why it matters
 
@@ -37,4 +37,4 @@ There is no program to run. Workspace tests run synthetic bodies through the com
 
 ## What is in place
 
-Requirements, decision records, the atlas and the solver-contract sketch are written, and the sketch type-checks. The workspace runs a manufactured two-reservoir body, and it does not simulate a patient. Disease, treatment, a bedside monitor and learner scenarios are specified and not implemented.
+Requirements, decision records, the atlas and the solver-contract sketch are written, and the sketch type-checks. The workspace runs a manufactured two-reservoir body, and it does not simulate a patient. Disease, treatment and learner scenarios are specified and not implemented. `clinical-workspace/` holds a prototype bedside monitor and chart that replay one recorded synthetic run, and they never run the engine.

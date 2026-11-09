@@ -7,3 +7,6 @@ __pycache__/
 .scratch/runs/*/*.log
 reference/
 .DS_Store
+node_modules/
+clinical-workspace/dist/
+clinical-workspace/.dev/
