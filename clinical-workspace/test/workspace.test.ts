@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { Scene, Story } from 'foldkit'
-import { FetchChart, init, Message, type Model, PostEntry, update } from '../src/workspace/program.ts'
+import { FetchChart, FetchVersions, init, Message, type Model, PostAmendment, PostEntry, update } from '../src/workspace/program.ts'
 import { makeView, view } from '../src/workspace/view.ts'
 import { wallTime } from '../src/time.ts'
 import { VITALS } from '../src/vitals.ts'
-import { at, entry, reading, readModel, statement, THERAPIST, written } from './fixtures.ts'
+import { at, entry, reading, readModel, statement, THERAPIST, versions, written } from './fixtures.ts'
 
 type Sim = Parameters<Extract<Parameters<typeof Story.story>[1], (s: never) => unknown>>[0]
 const park = (sim: Sim) => ({ ...sim, commands: [] })
@@ -112,5 +112,38 @@ test('the charting form and the flowsheet follow the vitals table, so EtCO2 is o
     Scene.expect(Scene.selector('#vital option[value="EtCO2"]')).toExist(),
     Scene.expect(cell('EtCO2 monitor 06:55')).toHaveText('no device statement'),
     Scene.expect(cell('EtCO2 charted 06:55')).toExist(),
+  )
+})
+
+test('a charted value shows its details; edit amends the current version; earlier versions come from the service on request', () => {
+  const first = entry({ id: 'test-entry-1', vital: 'RR', value: 18, care: '06:56:30', charted: '06:57:15' })
+  const second = { ...first, number: 2, versions: 2, value: 19, charted: at('06:57:40') }
+  Scene.scene(
+    { update, view },
+    Scene.given(loaded({ entries: [first] })),
+    Scene.expect(Scene.selector('#details')).toBeAbsent(),
+    Scene.click(Scene.selector('td[data-cell="RR charted 06:56"] button')),
+    Scene.expect(Scene.selector('#details')).toContainText('Synthetic Nurse A, nurse'),
+    Scene.expect(Scene.selector('#details')).toContainText('Patient test-patient'),
+    Scene.expect(Scene.selector('#details')).toContainText('Care time 06:56:30'),
+    Scene.expect(Scene.selector('#details')).toContainText('Charted time 06:57:15'),
+    Scene.expect(Scene.selector('#details')).toContainText('Late by 45 s'),
+    Scene.expect(Scene.selector('#details')).toContainText('Version 1 of 1'),
+    Scene.expect(Scene.selector('#versions')).toBeAbsent(),
+    Scene.click('#edit'),
+    Scene.expect(Scene.selector('#edit-value')).toHaveValue('18'),
+    Scene.type('#edit-value', '19'),
+    Scene.click('#save-edit'),
+    Scene.Command.expectExact(
+      PostAmendment({ body: { patient: 'test-patient', author: 'synthetic-nurse', entry: 'test-entry-1', replaces: 1, value: '19', care: at('06:56:30') } }),
+    ),
+    Scene.Command.resolve(PostAmendment, Message.Wrote({ result: written({ kind: 'taken', entry: second }) })),
+    Scene.Command.resolve(FetchChart, Message.GotChart({ chart: readModel({ now: at('06:57:41'), entries: [second] }), at: wallTime(6_000_000) })),
+    Scene.expect(cell('RR charted 06:56')).toContainText('19 /min'),
+    Scene.expect(Scene.selector('#details')).toContainText('Version 2 of 2'),
+    Scene.click('#versions-button'),
+    Scene.Command.resolve(FetchVersions, Message.GotVersions({ entry: 'test-entry-1', versions: versions([{ ...first, number: 1 }, second]) })),
+    Scene.expect(Scene.selector('#versions')).toContainText('Version 1: 18 /min'),
+    Scene.expect(Scene.selector('#versions')).toContainText('Version 2: 19 /min'),
   )
 })
