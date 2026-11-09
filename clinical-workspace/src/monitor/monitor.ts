@@ -16,7 +16,7 @@ import {
 } from '../device.ts'
 import type { Observation } from '../observation.ts'
 import { add, formatClock, isPatientTime, type PatientTime, seconds } from '../time.ts'
-import { perVital, VITALS, type Vital } from '../vitals.ts'
+import { isVital, perVital, VITALS, type Vital, type VitalRow } from '../vitals.ts'
 import type { Link, LinkResult } from './link.ts'
 
 // The standalone bedside monitor: one tile per vital of the table, fed the observer's observations, and an outbox
@@ -34,6 +34,7 @@ export type MonitorOptions = {
   readonly link: Link
   readonly boot: BootId
   readonly cap?: number
+  readonly vitals?: readonly VitalRow[]
 }
 
 // A full outbox drops its oldest message: an hour of one message a second.
@@ -99,9 +100,10 @@ function linkWords(model: Model): string {
 }
 
 export function monitor(options: MonitorOptions) {
-  const { feed, link, boot, patient, cap = CAP } = options
-  const sourced = (vital: Vital) => {
-    const entry = DEVICE_TABLE[vital]
+  const { feed, link, boot, patient, cap = CAP, vitals = VITALS } = options
+  const deviceRow = (vital: string) => (isVital(vital) ? DEVICE_TABLE[vital] : undefined)
+  const sourced = (vital: string) => {
+    const entry = deviceRow(vital)
     return entry !== undefined && feed.channels.includes(entry.row)
   }
   const vitalOf = (channel: number): Vital | undefined =>
@@ -193,14 +195,14 @@ export function monitor(options: MonitorOptions) {
       BatchUnanswered: () => ({ model: { ...model, inFlight: false } }),
     })
 
-  const tileText = (vital: Vital, now: PatientTime): string => {
-    if (!sourced(vital)) return 'no source'
+  const tileText = (row: VitalRow, now: PatientTime): string => {
+    const { vital } = row
+    if (!isVital(vital) || !sourced(vital)) return 'no source'
     const channel = feed.channels.indexOf(DEVICE_TABLE[vital]?.row ?? '')
     const latest = feed.between(undefined, now).filter((o) => o.channel === channel).at(-1)
     if (latest === undefined) return 'no reading yet'
     const value = valueOf(vital, latest)
-    const unit = VITALS.find((row) => row.vital === vital)?.unit ?? ''
-    return value.kind === 'present' ? `${whole(value.value)} ${unit}` : value.reason
+    return value.kind === 'present' ? `${whole(value.value)} ${row.unit}` : value.reason
   }
 
   const view = (model: Model, h: HtmlBuilder<Message>): Html =>
@@ -215,10 +217,10 @@ export function monitor(options: MonitorOptions) {
       h.table([h.Id('tiles')], [
         h.tbody(
           [],
-          VITALS.map((row) =>
+          vitals.map((row) =>
             h.tr([h.DataAttribute('vital', row.vital)], [
-              h.th([], [row.label]),
-              h.td([h.DataAttribute('tile', row.vital)], [model.now === null ? '' : tileText(row.vital, model.now)]),
+              h.th([], [`${row.label} (${row.unit})`]),
+              h.td([h.DataAttribute('tile', row.vital)], [model.now === null ? '' : tileText(row, model.now)]),
             ]),
           ),
         ),
