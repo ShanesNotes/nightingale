@@ -896,6 +896,36 @@ fn a_moved_crossing_a_stale_topology_and_a_foreign_workspace_are_refused() {
     );
 }
 
+/// A solved cycle's stages nudged by a part in ten thousand move each guard's root off its crossing but leave it between
+/// its knots, so the sweep keeps the topology and every crossing where it stands, and Newton's root rows put them back.
+#[test]
+fn a_crossing_off_its_root_within_its_knots_is_placed_by_newton_not_the_sweep() {
+    let shape = Shape {
+        valve: true,
+        ..Shape::default()
+    };
+    let relaxer = relaxer(shape).expect("a body");
+    let system = relaxer.system(16, relaxer.packet(16, shape, 1.0));
+    let (solved, _) = solved_by_hand(&system);
+    let times = |workspace: &AdmissionWorkspace| -> Vec<f64> {
+        (system.crossings(workspace).iter())
+            .map(|crossing| hi(Compensated::of(&crossing.at())))
+            .collect()
+    };
+    let mut nudged = solved.clone();
+    let fits = nudged.fitted_slots().start;
+    for (slot, unknown) in nudged.unknowns_mut()[..fits].iter_mut().enumerate() {
+        *unknown *= 1.0 + 1e-4 * ((slot * 7 % 11) as f64 - 5.0) / 5.0;
+    }
+    let mut swept = nudged.clone();
+    assert_eq!(system.sweep(&mut swept), Ok(false));
+    assert_eq!(times(&swept), times(&solved));
+    assert!(newton(&system, &mut nudged));
+    for (back, placed) in times(&nudged).into_iter().zip(times(&solved)) {
+        assert!((back - placed).abs() < 1e-12, "{back} against {placed}");
+    }
+}
+
 /// Under loose scales a fit raised by a tenth leaves every root row inside its tolerance, but neither guard reaches its
 /// root before the knot after its crossing, so the sweep drops both and `admit` refuses the topology as stale.
 #[test]
