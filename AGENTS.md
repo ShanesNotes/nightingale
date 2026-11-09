@@ -1,10 +1,20 @@
 # AGENTS: working in the Nightingale repo
 
-The team contract is `~/memory/AGENTS.md`. This file adds what is specific here. Every session loads it, so it stays an index of rules and pointers.
+The team contract is `~/memory/AGENTS.md`. This file adds what is specific here. Every session loads it, so it stays an index of rules and pointers. The docs in this repo carry no dates and no progress notes. Where the work stands is in the vault's project master, and the tickets are in `.scratch/`.
 
 ## What this repo is
 
 The native Rust engine for one simulated patient. Read `docs/srs.md` first: it binds, and every lower doc yields to it. `docs/adr/` holds the decision records, one series from 0001. `docs/architecture/solver-contract.md` is the design the crates build against, `docs/atlas/` maps the 13 systems, `GLOSSARY.md` defines the words, and `docs/governance.md` says what may enter the repo. Pulse-era work lives in nightingale-pulse: read it only at the commit [0001](docs/adr/0001-native-engine-repo.md) names, cite its records as pulse 000N with a permalink, and never depend on it to build or run. `clinical-workspace/` is a TypeScript prototype of the clinical workspace that replays one recorded run, and it never builds or runs the engine.
+
+## Lines of work
+
+| Line | Start at | Tickets |
+|---|---|---|
+| The engine, to the first milestone (SRS invariant I19) | `docs/srs.md`, then `docs/architecture/solver-contract.md` | `.scratch/foundation/map.md` is the route. `.scratch/native-contract/issues/` holds the crate tickets |
+| The reference man's sourced numbers | `data/`, held by `tools/verify.d/30-data.sh` | `.scratch/research/map.md` |
+| The clinical workspace prototype | `clinical-workspace/` and the `verify-clinical-workspace` skill | None in the repo yet |
+| Generative physiology, a learned model that the engine teaches | `tools/generative-physiology/` | `.scratch/generative-physiology/map.md` |
+| The evidence library, an index of the literature | Its store is outside the repo | `.scratch/evidence-library/map.md` |
 
 ## Rules
 
@@ -41,8 +51,8 @@ Run the `verify-nightingale` skill on the PR's current head. Its proof block mus
 
 ## Tracker and handoff
 
-Tickets are local Markdown in `.scratch/` (`docs/agents/issue-tracker.md`). Write `nightingale-pulse#N` or `nightingale#N`, never a bare `#N`. A handoff goes in the PR and in `vault-log`: paths changed, commands run with results, synthetic or clinical status, evidence hashes and the next step.
+Tickets are local Markdown in `.scratch/`, and `docs/agents/issue-tracker.md` says how to read them and how to list the frontier. Write `nightingale-pulse#N` or `nightingale#N`, never a bare `#N`. A handoff goes in the PR and in `vault-log`: paths changed, commands run with results, synthetic or clinical status, evidence hashes and the next step.
 
 ## Agent skills
 
-Issue tracker, triage labels and domain docs: `docs/agents/`. The verify skill: `.agents/skills/verify-nightingale/`.
+Issue tracker, triage labels and domain docs: `docs/agents/`. The verify skills: `.agents/skills/verify-nightingale/` proves a change for merge, and `.agents/skills/verify-clinical-workspace/` drives the workspace prototype.

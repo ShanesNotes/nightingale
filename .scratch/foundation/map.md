@@ -7,10 +7,23 @@
 ## Notes
 
 - Prose uses "the map" for the patient's anatomy (SRS section 2) and calls this file the wayfinder map.
-- The architecture's layers ([SRS section 1](../../docs/srs.md#1-purpose-and-scope)) come first, and display comes after them. Until display work starts, nightingale-pulse's existing monitor covers display.
+- The architecture's layers ([SRS section 1](../../docs/srs.md#1-purpose-and-scope)) come first, and display comes after them. Display work has started outside this effort, as the `clinical-workspace/` prototype, which replays one recorded run and never runs the engine.
 - This wayfinder map carries execution as well as decisions. Its tickets include the build work that reaches the destination, not only the choices before it.
 - Foundation tickets name native-contract tickets in their `Blocked by:` and `Lands with:` lines, so a frontier scan reads `.scratch/native-contract/issues/` as well as `.scratch/foundation/issues/`.
 - Grilling tickets call the grilling and domain-modeling skills.
+
+## Where the route stands
+
+Update this block whenever a ticket on the route resolves. The vault's project master says what is in flight.
+
+The run machinery is built: native-contract 01 to 27 are resolved, and it runs a synthetic slice of four systems (heart and vessels, fluids, kidney and the baroreflex). What still stands between that and the destination, in order:
+
+1. **Before the arena pick** ([foundation 01](issues/01-arena-and-milestone.md), step 2). [Native-contract 28](../native-contract/issues/28-admission-energy-at-balance.md), admission's energy offset, is in review as nightingale#91. Native-contract 31, a cross-interval drift check, is filed in nightingale#92. Ticket 28 then sends a synthetic 24 h energy drift limit to the developer reviewer. Each candidate core needs a row in the contract's crate table and in `tools/gate/paths.toml`.
+2. **The pick and the 48 h run** (steps 2 and 3). The pick protocol scores each core, the developer reviewer confirms the pick (SRS rule 8), and the winner runs the milestone protocol once. [Ticket 26](../native-contract/issues/26-arena-picks-on-a-day.md)'s Answer has the cost, and [record 0008](../../docs/adr/0008-the-certificate-checks-each-window-as-the-run-goes.md) says what history a run keeps. The first pick, `crates/ng-solver`, was made before the harness existed and is provisional until it is rescored ([ticket 24](../native-contract/issues/24-arena-ready-to-dispatch.md)'s comments).
+3. **The body** (step 4): all 13 systems at rung 0. Nine have no crate (respiratory, hepatic, gastrointestinal, endocrine, blood chemistry, hematology, immune, metabolism and thermal, musculoskeletal and skin), and no ticket scopes any of them yet.
+4. **The contract's follow-ups** ([foundation 07](issues/07-contract.md)): the parameter-shift payload, inferred provenance, the day and the healthy-range set.
+5. **The clinical numbers** ([research map](../research/map.md)). Research 03 to 10 are open, and no crate reads `data/` until the [reviewed packet builder](../research/issues/10-reviewed-packet-builder.md) exists.
+6. **Speed.** The slice runs at 6.8 times real time on the heavy-run machine ([ticket 25](../native-contract/issues/25-history-on-disk.md)), against the aim of 100 with full waveforms ([SRS section 6](../../docs/srs.md#6-fidelity-aims)).
 
 ## Decisions so far
 
@@ -22,6 +35,7 @@
 - [Anatomy as data](../native-contract/issues/02-anatomy-as-data.md): `ng-contract` checks a map at `finish` with named reasons, hashes it in key order and derives one water pool per space. A bed must lie on the circulation, no pump is declared, and site ids are names resolved by key.
 - [Declaration language and compiler](../native-contract/issues/03-declaration-language-and-compiler.md): laws attach by reference, so compile refuses an omitted law, a second owner and an uncovered mode by name; route families are requested whole; every registry pool is an amount unless the schema leaves its space out with a reason, and one no transfer moves is refused.
 - [Record transaction and reference core](../native-contract/issues/04-record-transaction-and-reference-core.md): a core can only propose. `StepProposal::verify` replays its stages on the record's own values, `validate` compares the ticket the session issued, a refused session can only retry, a fault latches, and a ticket freezes its drives, so a refusal changes nothing and a delivery applies once. The certificate walks every sliding 24 h window without sampling, and a forward Euler core past RC closes every ledger and fails the accuracy gate.
+- [Native-contract 05 to 27](../native-contract/issues/): the replay gates, seeded chance, the lens and observer, the admission solve, the slice's anatomy and laws, flat memory, throughput and numerical health, the certificate and the accuracy and replay gates on the slice, split measurement, the day's checks, the score, the must-fail table, the arena's entry point, compact history, the pick and milestone protocols, and the fault paths. Each ticket's Answer or Comments holds its decisions. Records 0006 to 0008 in `docs/adr/` hold the three that are hard to reverse.
 
 ## Not yet specified
 
@@ -35,7 +49,7 @@ This effort leaves out the first milestone's non-goals, which [Chart the foundat
 
 - Disease, hazard, intervention and debrief behavior. They belong to scope stages 2 to 5, and I19's healthy adult has nothing done to them. What they will attach to stays in scope, such as the event log, checkpoints and the packet.
 - Bedside scenarios as the definition of done. SRS invariants define done, and scenarios belong to later scope stages.
-- Display work, the chart included. Display comes after the architecture.
+- Display work, the chart included. Display comes after the architecture. The `clinical-workspace/` prototype is its own line of work.
 - Map detail finer than the first milestone needs. D5 rules it out.
 - A build target other than native Rust (SRS rule 5).
 - Scripted outcomes and arbitrary odds. The body computes every number from its physics, and chance fires only at cited odds (SRS section 1).

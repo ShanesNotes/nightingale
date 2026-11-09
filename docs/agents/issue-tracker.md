@@ -24,9 +24,9 @@ Read the file at the referenced path.
 
 Used by `/wayfinder`. The **map** is a file with one **child** file per ticket.
 
-- **Map**: `.scratch/<effort>/map.md` (Destination / Notes / Decisions-so-far / Not yet specified / Out of scope).
+- **Map**: `.scratch/<effort>/map.md` (Destination / Notes / Decisions-so-far / Not yet specified / Out of scope). An effort built from a spec, such as `native-contract`, has no map: each ticket's Answer and Comments hold its decisions.
 - **Child ticket**: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`, with the question in the body. A `Type:` line records the ticket type (`research`/`prototype`/`grilling`/`task`); a `Status:` line records `open`/`claimed`/`resolved`/`ready-for-human`/`out-of-scope`.
 - **Blocking**: a `Blocked by: NN, NN` line near the top. A ticket is unblocked when every file it lists is `resolved`.
-- **Frontier**: scan `.scratch/<effort>/issues/` for files that are open, unblocked, and unclaimed; first by number wins.
+- **Frontier**: scan `.scratch/<effort>/issues/` for files that are `open` or `ready-for-agent`, unblocked, and unclaimed; first by number wins. Across every effort, `command grep -lE '^Status: (open|ready-for-agent)' .scratch/*/issues/*.md` lists the candidates. A claim made on a branch does not show on main, so drop any candidate that an open pull request already implements (`gh pr list`).
 - **Claim**: set `Status: claimed` and `Claimed by: <seat>` and save before any work.
 - **Resolve**: append the answer under an `## Answer` heading, set `Status: resolved`, then append a context pointer (gist + link) to the map's Decisions-so-far in `map.md`.
