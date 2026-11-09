@@ -81,3 +81,42 @@ test('a monitor cell before any device statement says so, which is not no source
   const temp = sheet.rows.find((r) => r.source === 'monitor' && r.vital.vital === 'Temp')
   assert.equal(temp?.cells[1]?.kind, 'no source')
 })
+
+test('a charted cell shows the current version of each entry whose care time falls in its minute, how late it was charted and whether it was edited', () => {
+  const entry = (id: string, vital: 'RR' | 'HR', care: string, charted: string, versions: number) => ({
+    entry: id,
+    patient: 'test-patient',
+    vital,
+    number: versions,
+    value: 18,
+    care: at(care),
+    charted: at(charted),
+    author: nurse,
+    versions,
+  })
+  const onTime = entry('test-entry-1', 'RR', '06:56:10', '06:56:10', 1)
+  const late = entry('test-entry-2', 'RR', '06:56:30', '06:57:15', 2)
+  const other = entry('test-entry-3', 'HR', '06:55:05', '06:55:05', 1)
+  const sheet = flowsheet(model({ entries: [onTime, late, other] }))
+  const rr = sheet.rows.find((row) => row.source === 'charted' && row.vital.vital === 'RR')
+  assert.ok(rr?.source === 'charted')
+  assert.deepEqual(rr.cells.map((cell) => cell.entries.length), [0, 2, 0])
+  assert.deepEqual(rr.cells[1]?.entries, [
+    { entry: onTime, lateBy: 0, edited: false },
+    { entry: late, lateBy: 45_000_000_000, edited: true },
+  ])
+  const hr = sheet.rows.find((row) => row.source === 'charted' && row.vital.vital === 'HR')
+  assert.deepEqual(hr?.cells.map((cell) => cell.entries.length), [1, 0, 0])
+})
+
+test('the rows follow the vitals table, so EtCO2 is one more row: a monitor row with no statement and an empty charted row', () => {
+  const withEtCO2 = [...flowsheet(model({})).rows.map((row) => row.vital).filter((v, i, all) => all.indexOf(v) === i), { vital: 'EtCO2', label: 'End-tidal CO2', unit: 'mmHg' }]
+  const sheet = flowsheet(model({ statements: [statement('06:55:00', ['HR', 'ABP mean'])] }), withEtCO2)
+  assert.deepEqual(sheet.rows.map((row) => `${row.vital.vital} ${row.source}`).slice(-4), ['Temp monitor', 'Temp charted', 'EtCO2 monitor', 'EtCO2 charted'])
+  assert.equal(sheet.rows.length, 16)
+  const etco2 = sheet.rows.filter((row) => row.vital.vital === 'EtCO2')
+  assert.deepEqual(etco2.map((row) => row.cells.map((cell) => (cell.kind === 'entries' ? cell.entries.length : cell.kind))), [
+    ['no statement', 'no statement', 'no statement'],
+    [0, 0, 0],
+  ])
+})
