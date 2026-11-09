@@ -132,5 +132,31 @@ for (const [name, connect] of databases) {
         assert.deepEqual(await chart.versions(first.entry).then((v) => v?.length), 2, 'a refused amendment adds no version')
         assert.equal(await chart.versions(branded('00000000-0000-4000-8000-000000000000', isEntryId)), undefined)
       }))
+
+    test('Postgres refuses any update, delete or truncate of chart rows, and a second version under one number', () =>
+      withChart(async (chart, sql) => {
+        const first = taken(await chart.write(newEntry({}), at('06:56:10')))
+        for (const statement of [
+          "UPDATE run SET patient = 'another-test-patient'",
+          'DELETE FROM run',
+          'TRUNCATE run',
+          "UPDATE entry SET vital = 'HR'",
+          'DELETE FROM entry',
+          'TRUNCATE entry CASCADE',
+          'UPDATE entry_version SET value = 99',
+          'DELETE FROM entry_version',
+          'TRUNCATE entry_version',
+        ]) {
+          await assert.rejects(sql.query(statement), /append-only/, statement)
+        }
+        await assert.rejects(
+          sql.query(
+            `INSERT INTO entry_version (entry, number, value, care_ns, charted_ns, author, author_name, author_discipline)
+             SELECT entry, number, 99, care_ns, charted_ns, author, author_name, author_discipline FROM entry_version`,
+          ),
+          /duplicate key/,
+        )
+        assert.deepEqual((await chart.readModel(at('06:57:00'))).entries, [first])
+      }))
   })
 }
