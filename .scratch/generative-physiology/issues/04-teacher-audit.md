@@ -5,7 +5,7 @@ Status: open
 Blocked by: 03
 Runs on: the code is written on the workstation; the audit runs only on the heavy-run machine
 
-**What it builds and answers:** `gp.py audit`, the audit plan below as `tools/generative-physiology/spec/audit-v1.txt`, and the report that turns the runs into verdicts. Then it runs the audit and records the filled template as this ticket's Answer. Before any training data exists, the audit answers one question. Is the slice on `ng_solver::Core` a usable and informative teacher for posture runs?
+**What it builds and answers:** `gp.py audit`, the audit plan below as `tools/generative-physiology/spec/audit-v1.txt`, the report that turns the runs into verdicts, and the driver's capture version 2, which writes what the report reads and capture version 1 did not: each run's catalogue of names, the sympathetic traffic after every accepted step, each hazard firing, the bytes of links, and on a branch its first seal and the time of the resume or rewind alone. Then it runs the audit and records the filled template as this ticket's Answer. Before any training data exists, the audit answers one question. Is the slice on `ng_solver::Core` a usable and informative teacher for posture runs?
 
 The program does not exist at 84744af. Ticket 03 builds the driver, and this ticket adds `gp.py audit`, standard-library Python that runs `gp-driver` once per run and reads the run directories, and the audit's closed-loop rule. The code PR merges first. The audit then runs from main's merge commit C of that PR, and a second, docs-only PR adds the Answer.
 
@@ -32,14 +32,14 @@ tar -xf "nightingale-$C.tar" && cd "nightingale-$C"
 rustc --version && cargo --version && python3 --version          # 1.98.1, 1.98.1, at least 3.11
 CARGO_TARGET_DIR="$PWD/../gp-target" cargo build --release --locked --manifest-path tools/generative-physiology/driver/Cargo.toml
 export GP_DRIVER="$PWD/../gp-target/release/gp-driver"           # build output stays outside the snapshot
-setsid nohup python3 -I tools/generative-physiology/gp.py audit --data DATA --source-commit "$C" --workers 3 \
+setsid nohup python3 -I tools/generative-physiology/gp.py audit --data DATA --source-commit "$C" --workers 3 --disk /mnt/c \
   > DATA/audit.log 2>&1 < /dev/null &
 cat DATA/audit/progress.txt                                       # after any reconnect
 python3 -I tools/generative-physiology/gp.py audit --data DATA --source-commit "$C" --report > DATA/audit/report.txt
-sha256sum DATA/audit/*/summary.txt > DATA/audit/summaries.sha256 && sha256sum DATA/audit/report.txt
+(cd DATA/audit && LC_ALL=C sha256sum */summary.txt) > DATA/audit/summaries.sha256 && sha256sum DATA/audit/summaries.sha256 DATA/audit/report.txt
 ```
 
-`audit` is safe to repeat: a complete run directory is skipped, a `.fault` directory is reported and kept, a partial one whose process is gone is removed and redone, and once every run is present or faulted the command only reads. It starts the longest runs first. Each run keeps its links in its own file store and deletes the file once its directory is complete (ticket 03), so memory stays flat and transient disk stays under about 25 GB at 3 workers. Before the first long run it checks free disk (at least 40 GB) and the toolchain, and refuses to start without them.
+`audit` is safe to repeat: a complete run directory is skipped, a `.fault` directory is reported and kept, a partial one whose process is gone is removed and redone, and once every run is present or faulted the command only reads. It starts the longest runs first. Each run keeps its links in its own file store and deletes the file once its directory is complete (ticket 03), so memory stays flat and transient disk stays under about 25 GB at 3 workers. Before the first long run it checks free disk (at least 40 GB) and the toolchain, and refuses to start without them. Under WSL, `--disk /mnt/c` names the Windows drive that holds the disk image, whose free space is the real budget. A later command does not repeat the 40 GB check, because the image keeps what a deleted links file used; before each start it needs room for every running run's projected links and the new one's, plus 10 GB.
 
 ## Inputs and identities
 
@@ -69,7 +69,7 @@ Times are seconds after 06:55:00, and every stamp is at or after the fence at 1 
 | B7 | B1's events before 330 s, then the audit rule below, as a closed loop through `gp-driver interact` | 900 | | the online closed loop |
 | B8 | B7's `realized.txt` as an open-loop spec | 900 | | B7's replay |
 | C1 to C6 | start histories: none; sit 1, flat 240; stand 1, flat 240; stand 1, flat 120; sit 1, stand 120, flat 240; tilt 1, flat 240. Each then stands at 330 and lies flat at 630 | 900 | | differences across start histories; the 15-minute cost |
-| C7 | C3's history, then a change every 3 s from 330 to 630 (stand, flat, sit, flat, repeating: 100 events), then a stand ramp of 21 events 0.2 s apart from 640 | 900 | | the cost of accumulated posture inputs, which never end (`crates/ng-contract/src/boundary.rs:188-198, 327-330, 450-457`) |
+| C7 | C3's history, then a change every 3 s from 330 to 630 (stand, flat, sit, flat, repeating: 100 events), then a stand ramp of 21 events 0.2 s apart from 640 (trunk 0 to 1 in steps of 0.05, horizontal legs, standing from the 11th) | 900 | | the cost of accumulated posture inputs, which never end (`crates/ng-contract/src/boundary.rs:188-198, 327-330, 450-457`) |
 | D0, D1 | none; stand 300 | 1800 | | the slow component against its matched flat control; the 30-minute cost |
 | F1 | tilt 300, flat 600 | 900 | | the static tilt |
 | F2 | a tilt ramp from 300 to 310 (trunk 0.1 to 0.5 in steps of 0.1, horizontal legs, seated from the 3rd) and back from 600 to 610 (trunk 0.4 to 0, seated legs, horizontal from the 3rd) | 900 | | the ramped tilt |
@@ -95,15 +95,15 @@ The technical gate passes only if every row below holds.
 | B4, B5, B6 | each seal log equals B1's from end to end |
 | B7, B8 | the two seal logs are equal from end to end |
 | Every run | no engine fault; every Core run at a 10 ms cap shares A0's model, packet, resolution and run-identity digests and its revision-0 seal |
-| Ledger closure | between consecutive edges, each conserved quantity's inventory change equals its inflow minus its outflow within 64 times 2^-52 of the sum of the four magnitudes involved |
+| Ledger closure | between consecutive edges, each conserved quantity's inventory change equals its inflow minus its outflow within 64 times 2^-52 of the sum of the four magnitudes involved: both inventories and the interval's inflow and outflow |
 | Beat identity | on every beat, one over its length and its mean rate agree within 1e-3 of one over its length |
 
 The informativeness gate decides whether the experiment can test anything. Both rows are model defaults.
 
 | Check | Passes when |
 |---|---|
-| Start histories differ | for at least two of the four response features below, the range across C1 to C6 is at least three times the feature's noise floor, each feature measured against the mean of the 30 s before the stand at 330 s. A feature's noise floor is the larger of its synthetic measurement error (0.02 per s for the rate and 2.0 for the pressure, divided by the square root of the beats averaged) and its numerical variation, the feature's difference between C3 and G1 |
-| The slow component | leg-interstitium water, D1 minus D0, from 360 to 1800 s, fitted as a + b exp(-(t - 360)/tau) over 161 log-spaced values of tau from 10 s to 100,000 s. Resolved when the best fit's root-mean-square residual is at most 5% of the absolute value of b, the values of tau whose residual is within twice the best span less than a factor of 2, and the absolute value of b is at least 20 times the largest absolute difference in the same quantity between D1 and G2. Otherwise it is reported as unresolved within 30 minutes, and the experiment proceeds with that limitation in every result |
+| Start histories differ | for at least two of the four response features below, the range across C1 to C6 is at least three times the feature floor, each feature measured against the mean of the 30 s before the stand at 330 s. A feature floor is the larger of its synthetic measurement error (0.02 per s for the rate and 2.0 for the pressure, divided by the square root of the beats averaged) and its numerical variation, the feature's difference between C3 and G1 |
+| The slow component | leg-interstitium water, D1 minus D0, from 360 to 1800 s, fitted as a + b exp(-(t - 360)/tau) over 161 log-spaced values of tau from 10 s to 100,000 s. Resolved when the best fit's root-mean-square residual is at most 5% of the absolute value of b, the values of tau whose residual is within twice the best span less than a factor of 2, the absolute value of b is at least 20 times the largest absolute difference in the same quantity between D1 and G2, and the best tau is not at either end of the grid, where the grid and not the data bounds it (a straight line meets the first two conditions at 100,000 s). Otherwise it is reported as unresolved within 30 minutes, and the experiment proceeds with that limitation in every result |
 
 **The four response features.** Defined here, and used unchanged by ticket 09's metrics and ticket 12's order test: (1) the heart-rate rise at its peak within 30 s of a posture change; (2) the arterial-pressure fall at its 3-beat-mean nadir within the same 30 s; (3) the heart-rate change averaged over 240 to 300 s after the change; (4) the same for arterial pressure. Each is measured against a baseline: here, the mean of the 30 s before the change; in ticket 09's paired branches, the run without the change over the same times.
 
@@ -114,11 +114,11 @@ Measurements, with no verdict: the time to 63% of the change in stroke and in he
 The Answer records each of these before any training data exists.
 
 - **The teaching core.** Core at a 10 ms cap, if the technical gate passes. If it fails, the experiment stops here and the Answer records why. The reference integrator is never an automatic fallback. At 1 ms, 30 minutes means at least 1.8 million accepted steps, about 33 GB of transient links and, at about 3.3 ms a step, about 1.7 hours of wall time per run.
-- **Start histories.** 300 s. If the first informativeness row fails, histories become 600 s and C1 to C6 run again once, with their stands at 630 s; every later case time is an offset from a history's end (tickets 06 and 09). A second failure removes the across-history order test from ticket 12's list of what earns the next step, and the Answer says so.
+- **Start histories.** 300 s. If the first informativeness row fails and the technical gate passes, histories become 600 s and C1 to C6 run again once as C1-600 to C6-600, each history stamp after the fence doubled, with their stands at 630 s and lying flat at 930 s, and with G1-600, C3-600 at a 5 ms cap, for their numerical variation; every later case time is an offset from a history's end (tickets 06 and 09). A second failure removes the across-history order test from ticket 12's list of what earns the next step, and the Answer says so.
 - **The encounter.** 10 minutes when tau is resolved and at most 20 minutes; 15 minutes when it is resolved and at most 40 minutes; otherwise 15 minutes, with the slow component marked unresolved.
 - **Workers.** At most 4, half the logical processors, and fewer if the longest planned run's peak memory or transient links, scaled from C1 to C7 by accepted steps, times the count would pass 24 GB of memory or the free disk.
 - **The rule's thresholds** for ticket 06: the 20th and 80th percentiles of the 3-beat mean beat pressure over C1 to C6, after their first minute.
-- **The plan's size.** If the teacher runs of tickets 06, 09 and 12 together project past 36 hours of wall time at the chosen workers, training schedules per start history drop from 8 to the largest count that fits. The validation cases, the held-out set and the replays stay whole.
+- **The plan's size.** If the teacher runs of tickets 06, 09 and 12 together project past 36 hours of wall time at the chosen workers, training schedules per start history drop from 8 to the largest count that fits. The validation cases, the held-out set and the replays stay whole: 32 tuning runs, 44 validation cases (ticket 09 enumerates 44, though its Usage says 48), 104 held-out cases and 160 replays, R's 40 among them.
 
 ## Expected time and memory
 
@@ -166,11 +166,11 @@ Machine: the heavy-run machine; logical processors <..>; memory limit <..>; swap
 | Ripple                | C1-C6   | RMS <..> against the stand response <..>             | measured                  |         |
 | Accumulated postures  | C7, C3  | wall per simulated s <..> against <..>               | measured                  |         |
 
-| Run | simulated s | accepted steps | per simulated s | refusals | admission s | wall s | times real time | peak MB | links GB |
+| Run | simulated s | accepted steps | per simulated s | refusals | admission s | wall s | times real time | peak MB | links GB | stir s | skin factor |
 
 Technical gate: <pass/fail>. Informativeness gate: <pass/fail, which rows>.
 Derived: teaching core <..>; history <..> s; encounter <..> min; workers <..>; rule low <..>, high <..>; plan size <..>.
-Evidence: summaries.sha256 <..>; report.txt <..>; the data stay on the heavy-run machine.
+Evidence: summaries.sha256 <..>; report.txt's sha256 is recorded beside it; the data stay on the heavy-run machine.
 ```
 
 ## Acceptance

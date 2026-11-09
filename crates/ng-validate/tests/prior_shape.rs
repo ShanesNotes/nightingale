@@ -194,7 +194,7 @@ fn a_checkpoint_main_wrote_resumes_and_goes_on_as_main_did() {
     let mut session = Session::resume(&saved, &identity, case.body(), &fresh, &store).expect("resumed");
     assert_eq!(session.record().seal().digest(), digest(WATER_SEALS[6]));
     assert_eq!(session.checkpoint().expect("saved").as_bytes(), saved.as_bytes());
-    let stopped = loop {
+    let mut stopped = loop {
         session = match step(session) {
             Next::Accepted(next) => next,
             Next::Stopped(stopped) => break stopped,
@@ -354,7 +354,7 @@ fn a_run_admitted_now_seals_in_blake2b_and_reaches_mains_state_ledger_and_observ
     let zero = session.checkpoint().expect("saved");
     assert_eq!(&zero.as_bytes()[..8], b"ngcheck2");
     assert_ne!(session.record().seal().digest(), digest(WATER_SEALS[0]));
-    let stopped = loop {
+    let mut stopped = loop {
         session = match step(session) {
             Next::Accepted(next) => next,
             Next::Stopped(stopped) => break stopped,

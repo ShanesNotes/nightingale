@@ -364,7 +364,7 @@ pub enum DayFailure {
     MissingTransfer(Context),
 }
 
-fn exported(stopped: Session<'_, Faulted>) -> DayFailure {
+fn exported(mut stopped: Session<'_, Faulted>) -> DayFailure {
     match stopped.export() {
         Ok(report) => DayFailure::Faulted(report),
         Err(error) => DayFailure::Checkpoint(error),

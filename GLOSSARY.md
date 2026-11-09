@@ -58,7 +58,7 @@ A saved copy of the whole accepted state at a step boundary, from which a run re
 _Avoid_: save (in prose)
 
 **Fault export**:
-What a faulted run gives for diagnosis: its last accepted checkpoint marked latched, with the fault and the refusals before it. Resume refuses it, so only recover continues from it, on a new branch.
+What a faulted run gives for diagnosis: its last accepted checkpoint marked latched, with the fault and the refusals before it. Resume refuses it, so only recover continues from it, on a new branch. The export first hands the history store each link that still waits.
 
 **Seal**:
 A digest that chains the seal before it with one accepted step's image and ledger chunk, so one seal stands for the whole accepted course up to that step. It covers nothing that waits.
@@ -67,7 +67,16 @@ A digest that chains the seal before it with one accepted step's image and ledge
 The accepted state at one step boundary, held with its digest. Only installing a step the contract settled on it moves it, so a split trace that reads accepted heads from an admission reads only steps the contract verified.
 
 **History store**:
-Host storage for the links of the seal's chain, addressed by seal and trusted for nothing: a session hands it each link as its step is accepted, and a load checks each link against the seal that asked for it.
+Host storage for the links of the seal's chain, addressed by seal and trusted for nothing: a session hands it each link as its step is accepted, and a load checks each link or witness against the seal that asked for it. It keeps a rolling day of links while a run goes, back to the checkpoint before the oldest window still open, and witnesses after it (record 0008).
+
+**Witness**:
+What a history store keeps of an accepted step after its run: the step's seal, image digest and ledger digest, from which the seal recomputes. It proves the chain, not the ledger values.
+
+**Flight recorder**:
+The links a history store keeps when a run fails: from the checkpoint before the failing window to the run's last head, the original bytes rather than a regeneration.
+
+**Regeneration**:
+Rerunning a finished run on the build that made it, from a checkpoint, checking each step's seal against its witness, to give back history the store no longer holds.
 
 **Compact link**:
 A link as a history store may keep it when it follows the link kept before it: its image, its end time and each curve's end value. Its previous seal, start time and start values are that link's seal and ends, so expanding it against that link gives back the exact bytes the store was handed. Any other link is kept whole.
@@ -477,10 +486,16 @@ An explicit Heun integrator that serves only as a test bench, never as a solver 
 The benchmark that runs the candidate solver cores on the same compiled body and picks one, on conservation, accuracy, replay and speed.
 
 **Arena protocol**:
-What a score spans from the 06:55 admission, how many times the arena times that span, and the error scales and minimum interval every solver core it scores declares. The certificate's sliding windows cover the span, and the arena fixes everything else: the slice, its fixture packet, the day plan and every policy.
+What a score spans from the 06:55 admission, how many times the arena times that span, and the error scales and minimum interval every solver core it scores declares. The certificate's sliding windows cover the span, and the arena fixes everything else: the slice, its fixture packet, the day plan and every policy. The arena has two, the pick protocol and the milestone protocol, at the same error scales and minimum interval.
+
+**Pick protocol**:
+The arena protocol every solver core is scored on, so the arena picks from its scores: 24 hours from the 06:55 admission, one 24 h window, timed twice.
+
+**Milestone protocol**:
+The arena protocol the picked solver core runs once, the run I19's check needs, on synthetic values: 48 hours from the 06:55 admission, every sliding 24 h window, timed twice. A core that fails it reopens the pick.
 
 **Slice**:
-The systems the arena runs for real: pulsatile cardiovascular, fluids, renal, a minimal nervous baroreflex, the receptor layer and the boundary port, for 48 simulated hours with synthetic values.
+The systems the arena runs for real: pulsatile cardiovascular, fluids, renal, a minimal nervous baroreflex, the receptor layer and the boundary port, over an arena protocol's span with synthetic values.
 
 **Held stand-in**:
 A system outside the slice, held by a declaration that names every route on which it supplies or removes an amount, so stability bought with held support shows in the certificate.
@@ -588,3 +603,31 @@ The sum of a fixed set of pools of one species that a generative physiology mode
 **Beat edge**:
 The accepted step end at which the rhythm's phase resets, where a guard's landing puts it. A teacher run reads its state and ledger at beat edges, where both are exact.
 _Avoid_: cycle boundary
+
+**Run spec**:
+The canonical text that tells one teacher run its solver core, its end, its posture events, the closed-loop rule it follows if any, and its audit variant. Its spec id, the digest of the text and the capture version, names the run's directory; the run identity in its summary names what the engine ran.
+_Avoid_: run id
+
+**Beat reading**:
+One beat of a teacher run, which the driver computes once: the heart rate as one over the beat's length, the beat means of arterial pressure and filtration, and the stroke, the net water the aortic valve passed over the beat.
+
+**Catalogue**:
+The names of a compiled body's rows, columns, conserved quantities, modes and lens channels, in the order a teacher run's tables hold them. Every run directory carries one, with the model hash it names.
+_Avoid_: schema (ticket 05's list of named totals), index
+
+**Seal log**:
+A course's accepted revisions in order, each with its end time and seal: from admission's revision 0 for a run, and from the revision after the checkpoint for a branch.
+
+**Start history**:
+The postures a teacher run holds from the fence until its history ends, before the posture change or the encounter a check reads.
+
+**Response feature**:
+One of four numbers that measure a posture change against a baseline: the heart-rate rise at its peak and the arterial-pressure fall at its three-beat-mean nadir within 30 s, and the heart-rate and pressure changes averaged over 240 to 300 s after.
+
+**Feature floor**:
+The smallest difference in a response feature the teacher audit reads as real: the larger of its synthetic measurement error over the root of the beats it averages and its change at a smaller step cap.
+_Avoid_: noise floor (the day checks' baseline standard deviation)
+
+**Teacher audit**:
+The check, before any training data exists, that the slice on one solver core is a usable and informative teacher. Its technical gate holds the core to its pins, to itself across checkpoints, variants, prefixes and a closed loop's replay, and to every ledger and beat; its informativeness gate asks whether start histories and the slow component can show anything.
+_Avoid_: validation (ticket 09's cases)

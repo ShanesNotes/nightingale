@@ -227,3 +227,23 @@ fn a_slice_that_closes_its_ledger_but_gains_charge_is_not_certified() {
         assert!(number(failure.residual()) > 0.0);
     });
 }
+
+#[test]
+fn a_slice_run_one_window_long_passes_on_that_window_with_its_held_support() {
+    two_seconds(|_, view| {
+        let ledger = Ledger::sliding(view.basis(), 2 * SECOND, 2 * SECOND, 0.0, 1e-12, 1e4);
+        let certificate = certified(view, &ledger).expect("the slice passes closure and drift");
+        assert_eq!(certificate.span().start(), anchor_moment());
+        for result in certificate.results() {
+            assert_eq!(seconds(result.closure_window()), 2.0);
+            assert_eq!(seconds(result.drift_window()), 2.0);
+        }
+        let held = view.basis().coverage().held_routes();
+        let supported: Vec<HeldRoute> = certificate.support().iter().map(HeldSupport::route).collect();
+        assert_eq!(supported, held);
+        for support in certificate.support() {
+            assert_eq!(seconds(support.inflow_window()), 2.0);
+            assert_eq!(seconds(support.outflow_window()), 2.0);
+        }
+    });
+}

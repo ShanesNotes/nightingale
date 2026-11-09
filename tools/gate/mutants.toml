@@ -489,3 +489,25 @@ path = "crates/ng-record/src/history.rs"
 old = '''values.next().is_none().then_some(link)'''
 new = '''values.next().is_none().then_some(link).map(|mut link| { let last = link.len() - 1; link[last] ^= 1; link })'''
 test = "-p ng-validate --test history a_store_that_keeps_end_values_only_gives_back_every_link_of_a_slice_run"
+
+[[mutant]]
+name = "export-leaves-links-waiting"
+path = "crates/ng-record/src/session.rs"
+old = '''        self.record.keep_waiting(self.store);
+        Ok(FaultReport {'''
+new = '''        Ok(FaultReport {'''
+test = "-p ng-record --test session a_fault_after_a_refused_link_exports_once_the_store_keeps_it"
+
+[[mutant]]
+name = "one-window-ends-where-the-head-starts"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''Some(vec![late.last()?.minus(*early.first()?)])'''
+new = '''Some(vec![late.first()?.minus(*early.first()?)])'''
+test = "-p ng-validate --test transaction a_history_one_window_long_is_certified_on_its_one_window"
+
+[[mutant]]
+name = "one-window-slides-past-admission"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let mut to = if policy.windows.coverage_ns == length {'''
+new = '''let mut to = if policy.windows.coverage_ns == 0 {'''
+test = "-p ng-validate --test transaction a_coverage_of_one_window_is_the_window_from_admission_however_far_the_history_runs"

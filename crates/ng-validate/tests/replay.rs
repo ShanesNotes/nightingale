@@ -1754,7 +1754,7 @@ fn a_latched_session_exports_an_image_only_recover_continues() {
         let parked = session.checkpoint().expect("saved");
         Checkpoint::from_bytes(parked.as_bytes().to_vec())
     };
-    let Step::Faulted(stopped) = session.step() else {
+    let Step::Faulted(mut stopped) = session.step() else {
         panic!("not faulted");
     };
     let report = stopped.export().expect("exported");

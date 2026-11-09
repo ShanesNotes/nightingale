@@ -1,7 +1,7 @@
 # 03: The teacher driver and its run format
 
 Type: task
-Status: open
+Status: resolved
 Blocked by: 02
 Runs on: written on the workstation; every build, test and run happens on the heavy-run machine
 
@@ -16,9 +16,9 @@ gp-driver interact SPEC --out DIR     # a closed-loop run: one JSON line out per
 gp-driver status --out DIR --identity A0-SUMMARY SPEC...   # one process: present, stale, fault, partial or missing
 ```
 
-`run` and `interact` take `--memory-cap-gb N`, which stays outside the run id.
+`run` and `interact` take `--memory-cap-gb N`, which stays outside the spec id.
 
-A run spec is one canonical text. Stamps are whole ms after the anchor, 06:55 (`crates/ng-validate/src/slice.rs:501-504`), and the trunk is its sine in thousandths:
+A run spec is one canonical text. Stamps are whole ms after the anchor, 06:55 (`crates/ng-validate/src/slice.rs:507-510`), and the trunk is its sine in thousandths:
 
 ```text
 gp-run 1
@@ -35,7 +35,7 @@ Two call sites:
 ```rust
 let spec = RunSpec::parse(&fs::read_to_string(path)?)?;   // the only constructor
 let teacher = Teacher::new(spec.core())?;                  // compiles the arena body once
-let summary = teacher.run(&spec, MemoryCap::gb(8), &out)?; // out/<run id>/, or out/<run id>.fault/
+let summary = teacher.run(&spec, MemoryCap::gb(8), &out)?; // out/<spec id>/, or out/<spec id>.fault/
 ```
 
 ```rust
@@ -66,17 +66,19 @@ pub struct Setting { pub trunk: Trunk, pub legs: Legs }
 pub struct PostureEvent { pub at: Stamp, pub setting: Setting }
 impl PostureEvent {
     /// Content addressed: one instant and one setting give one id in every run, so runs that share a
-    /// prefix share ids, and the seal covers ids (crates/ng-contract/src/boundary.rs:111-127).
+    /// prefix share ids, and the seal covers ids (crates/ng-contract/src/boundary.rs:111-130).
     pub fn id(&self) -> InputId { todo!() }
 }
 pub enum CoreChoice {
-    Picked { cap_ms: u32 },                                         // ng_solver::Core::new
+    NgSolver { cap_ms: u32 },                                       // ng_solver::Core::new
     Reference { step_us: u32, floor_us: u32, absolute: f64, relative: f64 },   // all enter identity
 }
-/// Audit variants only. A variant is part of the canonical text, so variants never share a run id.
+/// Audit variants only. A variant is part of the canonical text, so variants never share a spec id.
 pub enum Variant {
     None,
-    Late { lead_ms: u32 },              // enqueue each event once the head passes its stamp minus the lead
+    /// Enqueue each event once the head passes its stamp minus the lead. The lead is at least the body's
+    /// longest step, or `run` refuses the spec before it writes anything, so no step passes a stamp first.
+    Late { lead_ms: u32 },
     /// Checkpoint at the first head at or after `at`; every later event is then enqueued on the original
     /// and on a copy resumed into a freshly compiled body and a fresh core, and both run to the end.
     CheckpointResume { at: Stamp },
@@ -89,12 +91,12 @@ pub enum Variant {
 pub struct RunSpec { core: CoreChoice, end: Stamp, events: Vec<PostureEvent>, closed_loop: Option<String>, variant: Variant }
 impl RunSpec {
     /// Refuses equal or unsorted stamps, a stamp before the fence and an end before the last event.
-    /// Equal stamps are refused because the engine would keep the larger id (boundary.rs:149, 646-651).
+    /// Equal stamps are refused because the engine would keep the larger id (boundary.rs:149, 654-659).
     pub fn parse(text: &str) -> Result<Self, SpecError> { todo!() }
     pub fn canonical(&self) -> String { todo!() }
     /// The id covers the spec and the capture version, not the engine. `status` reports a present run as
     /// stale unless its model, packet, resolution and run-identity digests equal the audit's A0 run's.
-    pub fn id(&self) -> RunId { todo!("digest of CAPTURE_VERSION and the canonical text") }
+    pub fn id(&self) -> SpecId { todo!("digest of CAPTURE_VERSION and the canonical text") }
     pub fn core(&self) -> &CoreChoice { todo!() }
 }
 ```
@@ -105,11 +107,11 @@ pub struct Teacher { body: CompiledBody, core: Box<dyn CoupledSolver>, catalogue
 impl Teacher {
     pub fn new(core: &CoreChoice) -> Result<Self, TeachError> { todo!() }
     // admit_at(arena_packet, a port holding every event, arena_lens, anchor_moment(), &links); about 17 s
-    // (crates/ng-validate/src/initialize.rs:219-240). Then step by hand, as validate/run.rs:4-15 does:
+    // (crates/ng-validate/src/initialize.rs:219-232). Then step by hand, as validate/run.rs:17-63 does:
     //   Accepted: add each row's chord integral; log the seal; when the CV phase row falls, write an edge
     //     and the beat that ended there; advance the diagnostic observer.
     //   Refused: retry and count.
-    //   Faulted: finish the directory as <run id>.fault/, with the fault's kind, instant and attempted ns.
+    //   Faulted: finish the directory as <spec id>.fault/, with the fault's kind, instant and attempted ns.
     // Every 10,000 steps read VmRSS; above the --memory-cap-gb flag, stop the same way with MemoryCap.
     pub fn run(&self, spec: &RunSpec, cap: MemoryCap, out: &Path) -> Result<RunSummary, TeachError> { todo!() }
     /// After each beat edge, sends the beat and the earliest admissible stamp and waits for the answer.
@@ -121,7 +123,7 @@ impl Teacher {
 /// directory is complete. The session keeps it from admission to the end (crates/ng-record/src/checkpoint.rs:58-62).
 pub struct LinkFile { /* the file, its end and a seal index */ }
 impl HistoryStore for LinkFile { /* resolve, keep */ }
-/// The resident-memory limit a run stops at; the summary records it, and the run id does not cover it.
+/// The resident-memory limit a run stops at; the summary records it, and the spec id does not cover it.
 pub struct MemoryCap(u64);
 impl MemoryCap {
     pub fn gb(gigabytes: u32) -> Self { todo!() }
@@ -143,10 +145,10 @@ pub struct Catalogue { rows: Vec<RowName>, columns: Vec<ColumnName>, ids: Vec<Co
                        heart_rate: RowId, pressure: RowId, filtration: RowId, aortic_water: ColumnId }
 impl Catalogue { pub fn of(body: &CompiledBody) -> Result<Self, CatalogueError> { todo!() } }
 /// One beat, edge to edge, computed once, here. Heart rate is one over the length; the phase integrates
-/// the rate row and resets at 1.0 (crates/ng-cardiovascular/src/rhythm.rs:59-89).
+/// the rate row and resets at the packet's `cv.cycle-end` (crates/ng-cardiovascular/src/rhythm.rs:59-89).
 pub struct BeatReading {
     pub ordinal: u64, pub start: SimTime, pub end: SimTime,
-    pub heart_rate: f64,          // per s
+    pub heart_rate_per_s: f64,    // one over the beat's length
     pub arterial_pressure: f64,   // beat mean of the CV "blood pressure" row at systemic arteries
     pub stroke: f64,              // net extent of the aortic valve's water column over the beat
     pub filtration: f64,          // beat mean of the RN "filtration" row
@@ -156,7 +158,7 @@ pub struct BeatReading {
 ```rust
 // archive.rs: one run directory
 pub struct RunSummary {
-    pub id: RunId, pub capture_version: u32, pub source_commit: String,
+    pub id: SpecId, pub capture_version: u32, pub source_commit: String,
     pub model: Digest, pub packet: Digest, pub resolution: Digest, pub run_identity: Digest,
     pub first_seal: Digest, pub last_seal: Digest, pub revisions: u64, pub refusals: u64, pub beats: u32,
     pub fault: Option<FaultSummary>, pub admission_s: f64, pub step_wall_s: f64, pub peak_rss_bytes: u64,
@@ -166,7 +168,7 @@ pub struct RunSummary {
 
 ## The run directory
 
-A run writes `<out>/<run id>.partial-<pid>/` and renames it to `<out>/<run id>/` when every file is flushed. A run that faults, or passes its memory cap, is renamed whole to `<out>/<run id>.fault/` instead, with its spec, its summary and what it captured up to that point. `status` reports it, and no command removes or redoes it. A person reads it first. A partial directory whose process is gone has no summary, and the next run of its spec removes and redoes it.
+A run makes `<out>/.<spec id>.staging-<pid>/`, locks the `lock` file inside it, and only then renames it to `<out>/<spec id>.partial-<pid>/`, so no other run sees a partial directory before its run holds it. No command reads a staging directory, and a run removes one only when it carries the run's own pid, which makes it a dead run's. A run renames its partial directory to `<out>/<spec id>/` when every file is flushed. A run that faults, or passes its memory cap, is renamed whole to `<out>/<spec id>.fault/` instead, with its spec, its summary and what it captured up to that point. `status` reports it, and no command removes or redoes it. A person reads it first. A partial directory whose process is gone has no summary, and the next run of its spec removes and redoes it.
 
 | File | Content |
 |---|---|
@@ -174,23 +176,23 @@ A run writes `<out>/<run id>.partial-<pid>/` and renames it to `<out>/<run id>/`
 | `edges.npy` | u64, one row per edge (the start, every beat edge, the end): time ns, revision, mode values, every row's value as hi and lo bits, every row's cumulative chord integral, every column's cumulative forward and reverse extents, every conserved quantity's inventory, inflow and outflow |
 | `beats.npy` | f64, one row per complete beat: the fields of `BeatReading` |
 | `steps.npy` | u64, one row per accepted step: revision, end ns, refusals before it, the seal's four words |
-| `applied.npy` | each event's index in the spec and the revision that applied it |
+| `applied.npy` | each event's position in the run's open-loop spec (`spec.txt`, or `realized.txt` for a closed loop) and the revision that applied it |
 | `lens.npy` | the arena lens's observations, kept only as a diagnostic |
 | `summary.txt` | the fields of `RunSummary`, one per line |
 | `realized.txt` | closed-loop runs only: the run's actions as an open-loop spec |
 
-Extents and integrals are read only at edges, from the newest segment, `session.conservation().head()` (`crates/ng-record/src/session.rs:75-77`, `crates/ng-record/src/history.rs:575-579`): `let (forward, reverse) = segment.exchange(id)` returns two curves (`history.rs:624-628`), and the last coefficient of each curve's `on(segment.interval())` is its cumulative value at the step's end (`history.rs:642-648`). A checkpoint for an audit variant is `session.checkpoint()`, with no store argument (`crates/ng-record/src/session.rs:159-163`). So a beat's extent is an exact difference of cumulative values, taken in `Compensated` before rounding. Column ids come from deduplicated `Target::Column` instances (`crates/ng-contract/src/body.rs:442-445, 478`), because `ColumnId::at` is crate-private (`body.rs:21`). Rows are stored as both limbs of `Compensated::bits()` (`crates/ng-contract/src/compensated.rs:110`).
+Extents and integrals are read only at edges, from the newest segment, `session.conservation().head()` (`crates/ng-record/src/session.rs:75-77`, `crates/ng-record/src/history.rs:665-669`): `let (forward, reverse) = segment.exchange(id)` returns two curves (`history.rs:714-718`), and the last coefficient of each curve's `on(segment.interval())` is its cumulative value at the step's end (`history.rs:732-738`). A checkpoint for an audit variant is `session.checkpoint()`, with no store argument (`crates/ng-record/src/session.rs:159-163`). So a beat's extent is an exact difference of cumulative values, taken in `Compensated` before rounding. Column ids come from deduplicated `Target::Column` instances (`crates/ng-contract/src/body.rs:438-441, 474-476`), because `ColumnId::at` is crate-private (`body.rs:20`). Rows are stored as both limbs of `Compensated::bits()` (`crates/ng-contract/src/compensated.rs:110`).
 
 ## Acceptance
 
-- [ ] On the heavy-run machine, `cargo build --release --locked --manifest-path tools/generative-physiology/driver/Cargo.toml` succeeds.
-- [ ] `gp-driver smoke` (a stand at 10 s, ending at 20 s) writes one complete run. Its packet digest and the seal at the head at 1000.079707 ms equal the values `crates/ng-validate/tests/trace.rs:135-136` pins for Core at a 10 ms cap; it has at least 15 beats, no fault, and the stand in `applied.npy`.
-- [ ] A second `gp-driver run` with the same spec and `--out` writes nothing and reports the run present.
-- [ ] A driver killed with SIGKILL leaves only a partial directory, which the next run of that spec removes and redoes.
-- [ ] A run forced past a small memory cap ends as a `.fault` directory, which `status` reports and a second `run` leaves alone.
-- [ ] `gp-driver status` reports present, stale, fault, partial and missing runs for a list of specs in one process.
-- [ ] Light tests pass: the spec's round trip, id addressing, refusals at the fence and on equal stamps, the `.npy` round trip, and a catalogue that covers all 257 columns of the compiled arena body.
-- [ ] `tools/verify.d/10-rust.sh` gains format, clippy, test and check lines for the driver's manifest beside bench's (`tools/verify.d/10-rust.sh:42`), and the proof from a clean git checkout of the PR head on the heavy-run machine shows `full_proof: yes`. An archive snapshot cannot give that proof, because `.agents/skills/verify-nightingale/prove.sh:6` needs a git checkout.
+- [x] On the heavy-run machine, `cargo build --release --locked --manifest-path tools/generative-physiology/driver/Cargo.toml` succeeds.
+- [x] `gp-driver smoke` (a stand at 10 s, ending at 20 s) writes one complete run. Its packet digest and the seal at the head at 1000.079707 ms equal the values `crates/ng-validate/tests/trace.rs:135-136` pins for Core at a 10 ms cap; it has at least 15 beats, no fault, and the stand in `applied.npy`.
+- [x] A second `gp-driver run` with the same spec and `--out` writes nothing and reports the run present.
+- [x] A driver killed with SIGKILL leaves only a partial directory, which the next run of that spec removes and redoes.
+- [x] A run forced past a small memory cap ends as a `.fault` directory, which `status` reports and a second `run` leaves alone.
+- [x] `gp-driver status` reports present, stale, fault, partial and missing runs for a list of specs in one process.
+- [x] Light tests pass: the spec's round trip, id addressing, refusals at the fence and on equal stamps, the `.npy` round trip, and a catalogue that covers all 257 columns of the compiled arena body.
+- [x] `tools/verify.d/10-rust.sh` gains format, clippy, test and check lines for the driver's manifest beside bench's (`tools/verify.d/10-rust.sh:42`), and the proof from a clean git checkout of the PR head on the heavy-run machine shows `full_proof: yes`. An archive snapshot cannot give that proof, because `.agents/skills/verify-nightingale/prove.sh:6` needs a git checkout.
 
 ## Non-goals
 
@@ -199,6 +201,43 @@ Extents and integrals are read only at edges, from the newest segment, `session.
 
 ## Comments
 
+The sketch's `RunId` is `SpecId` in the code and `spec_id` in `summary.txt`, because the glossary's run identity is the engine's and a run's summary holds both. `Picked` became `NgSolver` and `heart_rate` became `heart_rate_per_s` for the same reason: the name carries what a comment would. The citations above were read again at main `1d21f4e`.
+
 The root `clippy.toml` reaches this crate, so its bans on host libm, hash maps and wall clocks apply. The one wall clock, for cost evidence in the summary, carries a local allow and its reason.
 
 Question for the developer reviewer: any path under `tools/**` runs every verify step, mutants included (`tools/gate/paths.toml:10-16`). Should a rule ahead of it send `tools/generative-physiology/**` to fewer steps?
+
+## Answer
+
+`tools/generative-physiology/driver/` builds `gp-driver`. It sits outside the workspace, depends on the five engine crates by path, and makes one teacher run per process through public items only. No engine change was needed. The commands, the run spec grammar and the run directory are as above, with the names that Comments gives.
+
+On the heavy-run machine, at the PR head, every box holds:
+
+- The locked release build succeeds, and clippy with warnings denied, fmt, the 15 light tests and the unit test pass.
+- `gp-driver smoke` reproduces the packet digest and the seal that `trace.rs` pins, at 1,000,079,707 ns after the anchor (revision 189). It has 22 beats, no fault, and the stand applied at revision 1874. These figures are measured on one run: admission took 6.8 s, the 20 s took 2.8 s of stepping, and the run peaked at 16 MB resident. Two builds in two processes wrote the same file digests.
+- The 12 acceptance tests are `#[ignore]`, so only a full verify or a person runs them. They pass in 130 s:
+  - A rerun writes nothing.
+  - SIGKILL leaves a partial directory, which the next run redoes.
+  - A memory-cap fault stays: `status` reports it, and a rerun leaves it alone.
+  - `status` reports all five states in one process.
+  - Checkpoint-resume, rewind, observer-off, late and replica each give variant none's seal log, and the checkpoint and rewind branches end on its record digests.
+  - A closed loop gives the same seal log as its `realized.txt` run open loop, and a refused answer ends it as a protocol fault.
+- The PR's tower proof shows `full_proof: yes`.
+
+Choices the sketch left open:
+
+- A checkpoint variant withholds only events stamped at least one longest step (10 ms) after its instant, because the admission port is fixed before the checkpoint's head exists.
+- A closed loop is not asked about a beat that ends at or after the spec's end, because no answer could apply there.
+- `summary.txt` also records:
+  - each late event's arrival, as `index@revision`
+  - the record digests at the end, and on a branch
+  - a fault's course, instant, attempted ns and step refusals
+- The exit codes are 0 for written or present, 1 for an error or a live partial, 2 for usage or a bad spec, and 3 for a fault. `--memory-cap-gb` counts 10^9 bytes and defaults to 8.
+
+Open:
+
+- The developer reviewer's verify path question in Comments.
+- `LinkFile` repeats the bench's `LinkLog`. One shared store is a follow-up.
+- File digests read each finished file whole. That is fine for an hour's run and too large for a simulated day.
+- A `.fault` directory keeps no link file, so `recover` cannot continue it.
+- The PR's /no-comments report lists seven engine items. Each needs an engine change, so each is outside this ticket.
