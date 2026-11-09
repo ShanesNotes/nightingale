@@ -7,6 +7,7 @@ import {
   type EntryView,
   type EntryWrite,
   parseEntries,
+  parseReadModel,
   parseVersions,
   type ReadModel,
   type Refusal,
@@ -14,7 +15,7 @@ import {
   type RunView,
   type WriteResult,
 } from './chart-api.ts'
-import { isPatientId, type Parsed } from './device.ts'
+import { type DeviceMessage, isPatientId, type MessageAnswer, type Parsed } from './device.ts'
 import { isPatientTime, isWallTime, type PatientTime, type WallTime } from './time.ts'
 
 // The chart's one seam: a small SQL client with a pg adapter for a real Postgres and a PGlite adapter that runs
@@ -136,6 +137,16 @@ CREATE TABLE IF NOT EXISTS entry_version (
   inserted_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (entry, number)
 );
+CREATE TABLE IF NOT EXISTS device_message (
+  device text NOT NULL,
+  boot text NOT NULL,
+  sequence integer NOT NULL CHECK (sequence >= 1),
+  patient text NOT NULL,
+  message jsonb NOT NULL,
+  arrived_ns bigint NOT NULL,
+  inserted_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (device, boot, sequence)
+);
 CREATE OR REPLACE FUNCTION refuse_chart_change() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   RAISE EXCEPTION 'the chart is append-only: % on % is refused', TG_OP, TG_TABLE_NAME;
@@ -148,6 +159,10 @@ CREATE OR REPLACE TRIGGER entry_kept BEFORE TRUNCATE ON entry FOR EACH STATEMENT
 CREATE OR REPLACE TRIGGER entry_version_append_only BEFORE UPDATE OR DELETE ON entry_version
   FOR EACH ROW EXECUTE FUNCTION refuse_chart_change();
 CREATE OR REPLACE TRIGGER entry_version_kept BEFORE TRUNCATE ON entry_version
+  FOR EACH STATEMENT EXECUTE FUNCTION refuse_chart_change();
+CREATE OR REPLACE TRIGGER device_message_append_only BEFORE UPDATE OR DELETE ON device_message
+  FOR EACH ROW EXECUTE FUNCTION refuse_chart_change();
+CREATE OR REPLACE TRIGGER device_message_kept BEFORE TRUNCATE ON device_message
   FOR EACH STATEMENT EXECUTE FUNCTION refuse_chart_change();
 CREATE OR REPLACE VIEW current_entry AS
   SELECT e.id, e.patient, e.vital, v.number, v.value, v.care_ns, v.charted_ns, v.author, v.author_name,
@@ -163,10 +178,21 @@ const VERSION_FIELDS = `'entry', id, 'patient', patient, 'vital', vital, 'number
   'charted', charted_ns, 'author', json_build_object('id', author, 'name', author_name, 'discipline', author_discipline)`
 const ENTRY_JSON = `json_build_object(${VERSION_FIELDS}, 'versions', versions)`
 const VERSION_JSON = `json_build_object(${VERSION_FIELDS})`
+const NUMBERED = `'device', device, 'boot', boot, 'sequence', sequence`
+const CHART_JSON = `SELECT
+  (SELECT coalesce(json_agg(${ENTRY_JSON} ORDER BY care_ns, inserted_at, id), '[]'::json) FROM current_entry) AS entries,
+  (SELECT coalesce(json_agg(json_build_object(${NUMBERED}, 'vital', message->'vital', 'collected', message->'collected',
+      'available', message->'available', 'arrived', arrived_ns, 'value', message->'value')
+    ORDER BY (message->>'collected')::bigint, inserted_at, device, boot, sequence), '[]'::json)
+    FROM device_message WHERE message->>'kind' = 'reading') AS readings,
+  (SELECT coalesce(json_agg(json_build_object(${NUMBERED}, 'at', message->'at', 'arrived', arrived_ns, 'channels', message->'channels')
+    ORDER BY (message->>'at')::bigint, inserted_at, device, boot, sequence), '[]'::json)
+    FROM device_message WHERE message->>'kind' = 'statement') AS statements`
 
 export type Chart = {
   readonly run: RunView
   write(write: EntryWrite, now: PatientTime): Promise<WriteResult>
+  writeDeviceBatch(messages: readonly DeviceMessage[], now: PatientTime): Promise<readonly MessageAnswer[]>
   readModel(now: PatientTime): Promise<ReadModel>
   versions(entry: EntryId): Promise<readonly EntryVersion[] | undefined>
 }
@@ -269,8 +295,34 @@ export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: 
       const versions = trusted(parseVersions(row?.['versions']))
       return versions.length > 0 ? versions : undefined
     },
+    writeDeviceBatch(messages, now) {
+      return sql.transaction(async (tx) => {
+        const answers: MessageAnswer[] = []
+        for (const message of messages) {
+          const answered = { boot: message.boot, sequence: message.sequence }
+          if (message.patient !== held.patient) {
+            answers.push({ ...answered, answer: 'refused', refusal: 'another patient' })
+            continue
+          }
+          const key = [message.device, message.boot, message.sequence, JSON.stringify(message)]
+          const [taken] = await tx.query(
+            `INSERT INTO device_message (device, boot, sequence, patient, message, arrived_ns) VALUES ($1, $2, $3, $5, $4::jsonb, $6)
+             ON CONFLICT (device, boot, sequence) DO NOTHING RETURNING sequence`,
+            [...key, message.patient, now],
+          )
+          if (taken !== undefined) {
+            answers.push({ ...answered, answer: 'taken' })
+            continue
+          }
+          const [stored] = await tx.query('SELECT message = $4::jsonb AS same FROM device_message WHERE device = $1 AND boot = $2 AND sequence = $3', key)
+          answers.push(stored?.['same'] === true ? { ...answered, answer: 'already held' } : { ...answered, answer: 'refused', refusal: 'sequence reused with other content' })
+        }
+        return answers
+      })
+    },
     async readModel(now) {
-      return { run: held, now, entries: await entries(sql), readings: [], statements: [], missing: [] }
+      const [row] = await sql.query(CHART_JSON)
+      return trusted(parseReadModel({ run: held, now, entries: row?.['entries'], readings: row?.['readings'], statements: row?.['statements'], missing: [] }))
     },
   }
 }
