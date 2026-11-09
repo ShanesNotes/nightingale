@@ -133,5 +133,9 @@ const end = () => {
 }
 process.once('SIGINT', end)
 process.once('SIGTERM', end)
-service.once('exit', () => fail('the chart service exited'))
-vite.once('exit', () => fail('Vite exited'))
+// A stopped chart service is a state the monitor and the workspace must live through, so the launcher stays up.
+service.once('exit', (code) => say(`dev: the chart service exited (${code}); the pages keep running without it`))
+vite.once('exit', () => {
+  stopGroup(service)
+  fail('Vite exited')
+})
