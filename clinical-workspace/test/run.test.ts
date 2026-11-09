@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { decodeRun } from '../src/run.ts'
+import { availableBetween, decodeRun } from '../src/run.ts'
 import { formatClock } from '../src/time.ts'
 
 const capture = new URL('../capture/307caf19/', import.meta.url)
@@ -95,4 +95,27 @@ test('malformed lens, catalogue or summary input is refused at the boundary', ()
     'summary end not in nanoseconds': () => synthetic(row({}), CATALOGUE, SUMMARY.replace('3000000000', 'soon')),
   }
   for (const [name, decode] of Object.entries(cases)) assert.equal(decode().kind, 'refused', name)
+})
+
+test('the run gives out a reading once the observer has it: pending when collected, a value when available', () => {
+  const decoded = synthetic(
+    npy([
+      [0n, 1n * SECOND, 1n * SECOND, 0n, bitsOf(1.5), 0n],
+      [0n, 2n * SECOND, 4n * SECOND, 2n, 0n, 0n],
+      [0n, 3n * SECOND, 3n * SECOND, 1n, 0n, 0n],
+      [0n, 2n * SECOND, 4n * SECOND, 0n, bitsOf(2.5), 0n],
+    ]),
+    CATALOGUE,
+    SUMMARY.replace('end_time_ns 3000000000', 'end_time_ns 5000000000'),
+  )
+  assert.equal(decoded.kind, 'decoded')
+  const { run } = decoded
+  const shown = (after: number | undefined, through: number) =>
+    availableBetween(run, after, through).map((o) => `${o.collected / 1e9}s ${o.value.kind === 'present' ? o.value.value : o.value.kind}`)
+  assert.deepEqual(shown(undefined, 1e9), ['1s 1.5'])
+  assert.deepEqual(shown(1e9, 2e9), ['2s pending'])
+  assert.deepEqual(shown(2e9, 3e9), ['3s not collected'])
+  assert.deepEqual(shown(3e9, 4e9), ['2s 2.5'])
+  assert.deepEqual(shown(undefined, 5e9).length, 4)
+  assert.deepEqual(shown(4e9, 5e9), [])
 })
