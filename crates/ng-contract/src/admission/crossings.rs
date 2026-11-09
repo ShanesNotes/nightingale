@@ -322,9 +322,10 @@ impl InitializationSystem<'_> {
     }
     /// What fires at the start of `leg` after modes `before`: the crossing's guards there, or a paced cycle's clock at
     /// the wrap, and every other guard those modes arm whose gap is not below zero at the knot, read in the leg's own
-    /// drive frame; then, in turn, each guard the resets and modes so far leave crossed. Each firing runs through
-    /// `Layout::fire`, so its order is the run's. A guard at its own zero there fires only if the curve that reaches the
-    /// knot was raising it. A guard that would fire twice at one knot is unresolved.
+    /// drive frame; then, in turn, each guard armed before the knot that the resets and modes so far leave crossed. A
+    /// guard only a firing arms waits for the next knot, as it waits for the next step in a run. Each firing runs
+    /// through `Layout::fire`, so its order is the run's. A guard at its own zero there fires only if the curve that
+    /// reaches the knot was raising it. A guard that would fire twice at one knot is unresolved.
     fn knot(
         &self,
         workspace: &AdmissionWorkspace,
@@ -344,6 +345,7 @@ impl InitializationSystem<'_> {
         };
         let curve = self.curve(workspace, previous);
         let arriving: Vec<f64> = (curve.b.iter().zip(&curve.c)).map(|(b, c)| b + 2.0 * c).collect();
+        let armed: Vec<bool> = guards.iter().map(|guard| guard.armed(before)).collect();
         let mut modes = before.to_vec();
         let mut fired: Vec<usize> = Vec::new();
         for round in 0..=guards.len() {
@@ -351,7 +353,7 @@ impl InitializationSystem<'_> {
             let along = (round == 0).then_some(&arriving[..]);
             for (at, guard) in guards.iter().enumerate() {
                 let forcing = round == 0 && forced.contains(&at);
-                let open = Some(at) != reference && guard.armed(&modes);
+                let open = Some(at) != reference && armed[at] && guard.armed(&modes);
                 crossed.push(
                     forcing || (open && self.crossed_at(at, held.interval, &state, &modes, values, along)?),
                 );
