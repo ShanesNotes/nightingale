@@ -344,13 +344,43 @@ fn every_link_of_every_loop_moves_the_row_that_reads_it_the_right_way(
     let view = block.view();
     let size = body.rows().len();
     // Both stages hold the start, so an end row's two stage columns of one row sum to its slope over the interval.
-    let slope = |reader: RowKind, read: RowKind| {
-        let (reader, read) = (solved.row(reader).index(), solved.row(read).index());
+    let entry = |reader: usize, read: usize| {
         let entries = view.row_offsets()[reader]..view.row_offsets()[reader + 1];
         let stages = [read, size + read];
         (entries.filter(|&entry| stages.contains(&view.columns()[entry].index())))
             .map(|entry| view.values()[entry])
             .sum::<f64>()
+    };
+    let slope = |reader: RowKind, read: RowKind| entry(solved.row(reader).index(), solved.row(read).index());
+    let held = |row: RowId| number(start.record().accepted().value(row));
+    // An amount row also carries what leaves through each edge its site is upwind of, at its ratio to water, and the
+    // block states that transport on the edge's flow column too: the water entry is the flow column's times -Q/W.
+    let law_on_water = |reader: RowKind, water: RowKind, at: SiteId| {
+        let (reader, water) = (solved.row(reader), solved.row(water));
+        let held_water = held(water);
+        let carried = (body.rows().iter())
+            .filter_map(|row| match row.kind() {
+                RowKind::Algebraic(Slot {
+                    at: Context::Edge { from, to },
+                    ..
+                })
+                | RowKind::Memory(Slot {
+                    at: Context::Edge { from, to },
+                    ..
+                }) => Some((row.id(), from, to)),
+                _ => None,
+            })
+            .map(|(flow, from, to)| {
+                let rate = held(flow);
+                let upwind = if rate >= 0.0 { from } else { to };
+                if upwind == at {
+                    rate / held_water * entry(reader.index(), flow.index())
+                } else {
+                    0.0
+                }
+            })
+            .sum::<f64>();
+        entry(reader.index(), water.index()) + carried
     };
     let body_at = Context::Body;
     let (arteries, veins) = (vessel("systemic arteries"), vessel("central veins"));
@@ -462,11 +492,6 @@ fn every_link_of_every_loop_moves_the_row_that_reads_it_the_right_way(
             blood(veins, Species::Sodium),
             rises,
         ),
-        (
-            blood(veins, Species::Vasopressin),
-            blood(veins, Species::Water),
-            falls,
-        ),
         (bound_v2, plasma(reclaim, Species::Vasopressin), rises),
         (bound_v2, plasma(reclaim, Species::Water), falls),
         (v2, bound_v2, rises),
@@ -477,6 +502,12 @@ fn every_link_of_every_loop_moves_the_row_that_reads_it_the_right_way(
         let moved = -slope(reader, read) * way;
         assert!(moved > 0.0, "{reader:?} reads {read:?}: {moved}");
     }
+    let (secreted, diluted) = (blood(veins, Species::Vasopressin), blood(veins, Species::Water));
+    let moved = law_on_water(secreted, diluted, veins);
+    assert!(
+        moved > 0.0,
+        "{secreted:?} reads {diluted:?} through its law: {moved}"
+    );
     for (reader, read) in [
         (tissue(leg), pleura),
         (tissue(leg), abdomen),

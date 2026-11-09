@@ -658,3 +658,10 @@ path = "crates/ng-observe/src/observer.rs"
 old = '''covered: covered.saturating_add(length),'''
 new = '''covered: covered.saturating_add(1),'''
 test = "-p ng-validate --test admission_crossings a_time_mean_channel_integrates_the_accepted_steps_and_a_sampled_one_does_not"
+
+[[mutant]]
+name = "vasopressin-secretion-reversed"
+path = "crates/ng-validate/src/slice.rs"
+old = '''let above = k.subtract(seen, center);'''
+new = '''let above = k.subtract(center, seen);'''
+test = "--release -p ng-validate --test arena_body the_slice_compiles_initializes_closes_and_regulates_itself"
