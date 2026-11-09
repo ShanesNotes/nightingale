@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# Walks every mapped feature of the clinical workspace in headless Chromium against a fresh local Postgres, keeps
-# screenshots and the chart's rows in the evidence folder, and stops what it started. Exit 0 only when every
-# check passed. Usage, from anywhere:
-#   bash .agents/skills/verify-clinical-workspace/walk.sh <evidence folder> [feature ...]
-# Features: monitor chart-a-vital flowsheet amend outage device-messages (all, in that order, by default).
 set -uo pipefail
 repo=$(cd "$(dirname "$0")/../../.." && pwd)
 pkg=$repo/clinical-workspace
@@ -29,7 +24,6 @@ drive() { timeout 60 node scripts/drive.ts "$@"; }
 state() { node -p "JSON.parse(require('fs').readFileSync('.dev/state.json', 'utf8'))$1" 2>/dev/null; }
 shot() { drive shot "$1" "$evidence/$2.png" >/dev/null && note "shot $evidence/$2.png"; }
 chart() { curl -sf "$service/api/chart" >"$evidence/chart-$1.json" && note "rows $evidence/chart-$1.json"; }
-# Polls a tab until the element's text, its lines joined by spaces, matches the extended regex, or fails the check.
 expect() {
   local tab=$1 selector=$2 pattern=$3 check=$4 wait=${5:-15} text=''
   for _ in $(seq 1 $((wait * 4))); do

@@ -5,8 +5,6 @@ import { decodeRun } from '../src/run.ts'
 import { startService } from '../src/service.ts'
 import { patientTimeAt, wallTime } from '../src/time.ts'
 
-// The chart service as a process: the recorded run names the patient and the clock, Postgres holds the chart.
-// It prints one line, "chart service <url> anchor <ms>", once it answers.
 const fail = (reason: string): never => {
   process.stderr.write(`chart service: ${reason}\n`)
   process.exit(1)

@@ -5,9 +5,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// Drives headless Chromium over the DevTools protocol with Node's own WebSocket, one command per call, so a
-// verification run can script the pages step by step. The session (pid, port, named tabs) lives in
-// .dev/drive.json. Run `node scripts/drive.ts help` for the commands.
 const PACKAGE = fileURLToPath(new URL('..', import.meta.url))
 const SESSION = `${PACKAGE}.dev/drive.json`
 const CHROMIUM = process.env['CHROMIUM'] ?? '/usr/local/bin/chromium'
@@ -34,7 +31,6 @@ const fail = (reason: string): never => {
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms))
 
-// Reads a nested field of a DevTools answer, which arrives as untyped JSON.
 const read = (value: unknown, ...path: readonly string[]): unknown =>
   path.reduce<unknown>((v, key) => (typeof v === 'object' && v !== null ? Reflect.get(v, key) : undefined), value)
 
@@ -97,8 +93,6 @@ async function socket(url: string) {
   return { send, close: () => ws.close() }
 }
 
-// Foldkit paints in animation frames, and Chromium runs none for a tab that is not in front, so each command
-// brings its tab to the front before it reads or acts.
 async function connect(tab: string) {
   const { port, tabs } = session()
   const id = tabs[tab] ?? fail(`no tab named ${tab}`)
@@ -187,9 +181,7 @@ async function command(args: readonly string[]): Promise<void> {
       } catch {
         try {
           process.kill(current.pid, 'SIGTERM')
-        } catch {
-          // Chromium has already ended.
-        }
+        } catch {}
       }
       await sleep(500)
       rmSync(current.profile, { recursive: true, force: true })

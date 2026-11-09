@@ -36,7 +36,6 @@ const reading = (sequence: number, value: number) => ({
   value: { kind: 'present', value },
 })
 
-// The same exchange through either adapter: new messages, the same ones again, then one that reuses a sequence.
 async function exchange(link: Link) {
   return [
     await link.send(batch(statement, reading(2, 61.5))),

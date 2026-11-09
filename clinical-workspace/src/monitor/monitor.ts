@@ -46,7 +46,6 @@ export type MonitorOptions = {
   readonly vitals?: readonly VitalRow[]
 }
 
-// A full outbox drops its oldest message: an hour of one message a second.
 const CAP = 3_600
 
 function branded<T>(value: unknown, is: (v: unknown) => v is T, what: string): T {
@@ -56,8 +55,7 @@ function branded<T>(value: unknown, is: (v: unknown) => v is T, what: string): T
 
 const DEVICE = branded('synthetic-bedside-monitor', isDeviceId, 'a device id')
 
-// The monitor's own channel table: the engine row each vital reads and the unit it shows and sends. Heart rate
-// arrives per second; mean pressure is taken as mmHg, as native-contract 29 records.
+// Mean pressure is taken as mmHg, as native-contract 29 records.
 const DEVICE_TABLE: Readonly<Partial<Record<Vital, { readonly row: string; readonly convert: (value: number) => number }>>> = {
   HR: { row: 'algebraic/CV/rate/body', convert: (perSecond) => perSecond * 60 },
   'ABP mean': { row: 'algebraic/CV/blood pressure/systemic arteries', convert: (mmHg) => mmHg },
@@ -237,10 +235,8 @@ export function monitor(options: MonitorOptions) {
   return { init, update, view, SendBatch, messageFor }
 }
 
-// A tick lands this long after each whole patient second, so the clock it reads is already in the new second.
 const TICK_MARGIN_MS = 30
 
-// With no anchor the patient clock starts at the page's load. The monitor never asks the chart service the time.
 export function start(container: HTMLElement, options: MonitorOptions & { readonly anchor?: WallTime }): void {
   const program = monitor(options)
   const clock: PatientClock = { start: options.feed.start, end: options.feed.end, anchor: options.anchor ?? wallTime(Date.now()) }

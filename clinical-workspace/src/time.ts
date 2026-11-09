@@ -1,5 +1,3 @@
-// Patient time is nanoseconds since the midnight the run's clock starts at. Every patient time, duration and
-// wall-clock instant is branded, and a brand comes only from a guard that checks the number.
 export type PatientTime = number & { readonly __brand: 'PatientTime' }
 export type Duration = number & { readonly __brand: 'Duration' }
 export type WallTime = number & { readonly __brand: 'WallTime' }
@@ -73,7 +71,6 @@ export function patientTimeAt(clock: PatientClock, wall: WallTime): PatientTime 
   return earlier(clock.end, add(clock.start, duration(elapsed * NANOSECONDS_PER_SECOND)))
 }
 
-// Milliseconds from a wall-clock instant to the next whole patient second, so a tick lands inside each second.
 export function untilNextSecond(clock: PatientClock, wall: WallTime): number {
   const into = (((wall - clock.anchor) % MILLISECONDS_PER_SECOND) + MILLISECONDS_PER_SECOND) % MILLISECONDS_PER_SECOND
   return MILLISECONDS_PER_SECOND - into

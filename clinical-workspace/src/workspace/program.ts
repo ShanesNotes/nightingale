@@ -16,7 +16,6 @@ import { formatClock, isWallTime, parseClock, wallTime } from '../time.ts'
 import { VITALS } from '../vitals.ts'
 import * as client from './client.ts'
 
-// The chart screen keeps no facts of its own: the latest read model the chart service sent, and its form state.
 const ReadModelSchema = Schema.declare((value: unknown): value is ReadModel => parseReadModel(value).ok)
 const WriteResultSchema = Schema.declare((value: unknown): value is WriteResult => parseWriteResult(value).ok)
 const VersionsSchema = Schema.declare((value: unknown): value is readonly EntryVersion[] => parseVersions(value).ok)
@@ -156,7 +155,6 @@ export function init(): Return {
   }
 }
 
-// Blank means now. Anything else must be HH:MM:SS on the patient's clock.
 function careTime(text: string): { readonly ok: true; readonly care: number | null } | { readonly ok: false } {
   const trimmed = text.trim()
   if (trimmed === '') return { ok: true, care: null }

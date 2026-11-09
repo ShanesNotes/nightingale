@@ -4,9 +4,6 @@ import { createServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
 
-// npm run dev: a local Postgres 17 container (made once, kept between runs), the chart service, then Vite with
-// /api proxied to the service and the run's anchor given to both pages. It records every pid in .dev/state.json
-// and stops the service and Vite when it ends, leaving the database running.
 const PACKAGE = fileURLToPath(new URL('..', import.meta.url))
 const CONTAINER = process.env['CW_DB_CONTAINER'] ?? 'clinical-workspace-pg'
 const IMAGE = 'postgres:17'
@@ -99,9 +96,7 @@ const stopGroup = (child: ChildProcess) => {
   if (child.pid === undefined) return
   try {
     process.kill(-child.pid, 'SIGTERM')
-  } catch {
-    // The group has already ended.
-  }
+  } catch {}
 }
 
 const url = await database()
@@ -132,7 +127,6 @@ const end = () => {
 }
 process.once('SIGINT', end)
 process.once('SIGTERM', end)
-// A stopped chart service is a state the monitor and the workspace must live through, so the launcher stays up.
 service.once('exit', (code) => say(`dev: the chart service exited (${code}); the pages keep running without it`))
 vite.once('exit', () => {
   stopGroup(service)

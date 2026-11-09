@@ -7,8 +7,6 @@ import { start } from '../monitor/monitor.ts'
 import { availableBetween, decodeRun } from '../run.ts'
 import { isWallTime } from '../time.ts'
 
-// The monitor page: the recorded run as its feed, the chart service on this page's origin as its link, a fresh
-// boot id at each load, and the run's anchor when the launcher gave one.
 const container = document.getElementById('monitor')
 if (container === null) throw new Error('monitor.html has no #monitor element')
 const lens = new Uint8Array(await (await fetch(lensUrl)).arrayBuffer())

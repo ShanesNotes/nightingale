@@ -1,8 +1,6 @@
 import { isPatientTime, type PatientTime } from './time.ts'
 import { isVital, type PerVital, perVital, VITALS, type Vital } from './vitals.ts'
 
-// The device protocol between a bedside monitor and the chart service. Each message is numbered in sequence
-// within one device boot, and the service answers each one.
 export type DeviceId = string & { readonly __brand: 'DeviceId' }
 export type BootId = string & { readonly __brand: 'BootId' }
 export type PatientId = string & { readonly __brand: 'PatientId' }

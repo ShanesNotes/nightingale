@@ -1,8 +1,6 @@
 import type { Absence, Observation, ObservedValue } from './observation.ts'
 import { earlier, floorTo, isPatientTime, type PatientTime, SECOND } from './time.ts'
 
-// A recorded run from `gp-driver run`: its lens rows, the catalogue that names their channels and the summary
-// that names the run. The formats are tools/generative-physiology/driver/src/capture.rs and npy.rs.
 export type Run = {
   readonly specId: string
   readonly packet: string
@@ -114,7 +112,6 @@ export function decodeRun(files: RunFiles): Decoded {
   }
 }
 
-// The observer emits a delayed reading twice: pending when collected, then its value when available.
 const givenOutAt = (o: Observation): PatientTime => (o.value.kind === 'pending' ? o.collected : o.available)
 
 export function availableBetween(run: Run, after: PatientTime | undefined, through: PatientTime): readonly Observation[] {

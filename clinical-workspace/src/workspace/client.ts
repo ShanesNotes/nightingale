@@ -10,8 +10,6 @@ import {
   type WriteResult,
 } from '../chart-api.ts'
 
-// The workspace's calls to the chart service, on the page's own origin. Each answers undefined when the service
-// does not answer, answers an error, or sends what the chart API does not parse.
 const TIMEOUT_MS = 3_000
 
 async function call(path: string, init: RequestInit = {}): Promise<unknown> {

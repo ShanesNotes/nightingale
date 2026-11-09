@@ -1,7 +1,5 @@
 import { execFileSync } from 'node:child_process'
 
-// npm run db:stop stops the launcher's database container. npm run reset removes it and its volume, so the next
-// npm run dev starts from an empty chart.
 const CONTAINER = process.env['CW_DB_CONTAINER'] ?? 'clinical-workspace-pg'
 
 const docker = (...args: string[]) => {

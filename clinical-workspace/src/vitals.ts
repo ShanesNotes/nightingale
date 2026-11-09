@@ -4,7 +4,6 @@ export type VitalRow = {
   readonly unit: string
 }
 
-// Every screen and the chart follow this table, so EtCO2 or any later vital is one more row here.
 export const VITALS = [
   { vital: 'HR', label: 'Heart rate', unit: '/min' },
   { vital: 'ABP sys', label: 'Systolic arterial pressure', unit: 'mmHg' },

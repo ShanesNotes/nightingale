@@ -64,7 +64,6 @@ const batch = (...messages: object[]) => {
   return parsed.value
 }
 
-// The whole suite runs on PGlite, and on a real Postgres too when CHART_TEST_DATABASE_URL names one.
 const databases: [string, () => Promise<Sql>][] = [['PGlite', pgliteSql]]
 const url = process.env['CHART_TEST_DATABASE_URL']
 if (url) databases.push(['Postgres', () => pgSql(url, { fresh: true })])

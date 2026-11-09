@@ -4,8 +4,6 @@ import type { Chart } from './chart.ts'
 import { parseBatch } from './device.ts'
 import type { PatientTime } from './time.ts'
 
-// The chart service: a thin JSON server over the chart under /api. It parses every body at this boundary, stamps
-// charted and arrival times from the patient clock, and answers a refusal with its kind.
 export type Service = { readonly url: string; close(): Promise<void> }
 
 export type ServiceOptions = {
@@ -15,7 +13,6 @@ export type ServiceOptions = {
   readonly host?: string
 }
 
-// A full outbox of device messages fits well inside this.
 const BODY_LIMIT = 8 * 1024 * 1024
 const VERSIONS = /^\/api\/entries\/([^/]+)\/versions$/
 

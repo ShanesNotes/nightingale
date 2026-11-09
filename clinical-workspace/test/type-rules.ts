@@ -3,7 +3,7 @@ import type { PatientId, Reading } from '../src/device.ts'
 import type { PatientTime } from '../src/time.ts'
 
 // Each rule pairs a legal line with an illegal one that differs from it in one way, so each @ts-expect-error can
-// be met only by the rule it names. tsc checks this file, and test/types.test.ts runs tsc.
+// be met only by the rule it names.
 declare const patient: PatientId
 declare const entry: EntryId
 declare const author: ClinicianId

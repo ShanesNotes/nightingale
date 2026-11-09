@@ -16,7 +16,6 @@ import {
 import { isPatientTime, isWallTime, type PatientTime, type WallTime } from './time.ts'
 import { isVital, type PerVital, type Vital } from './vitals.ts'
 
-// The chart service's JSON contract with the workspace. Both ends parse what they receive with these parsers.
 export type EntryId = string & { readonly __brand: 'EntryId' }
 export type ClinicianId = string & { readonly __brand: 'ClinicianId' }
 export type VersionNumber = number & { readonly __brand: 'VersionNumber' }
@@ -36,7 +35,6 @@ function clinicianOf(id: string, name: string, discipline: Discipline): Clinicia
   return { id, name, discipline }
 }
 
-// A small synthetic roster spanning disciplines. The names are obviously not real people.
 export const ROSTER: readonly Clinician[] = [
   clinicianOf('synthetic-nurse', 'Synthetic Nurse A', 'nurse'),
   clinicianOf('synthetic-physician', 'Synthetic Physician B', 'physician'),
@@ -66,7 +64,6 @@ export type Amendment = {
 
 export type EntryWrite = NewEntry | Amendment
 
-// The value travels as the clinician typed it, so empty text reaches the chart as not a number, never as zero.
 export type NewEntryBody = {
   readonly patient: string
   readonly author: string

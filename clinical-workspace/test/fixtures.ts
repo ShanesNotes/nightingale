@@ -3,7 +3,6 @@ import { type EntryVersion, parseReadModel, parseVersions, parseWriteResult, ROS
 import { parseClock, type PatientTime } from '../src/time.ts'
 import { perVital } from '../src/vitals.ts'
 
-// Synthetic read models, built as the chart service sends them and parsed as the workspace parses them.
 export const at = (clock: string): PatientTime => {
   const time = parseClock(clock)
   assert.ok(time !== undefined, clock)

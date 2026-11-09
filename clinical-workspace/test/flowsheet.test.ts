@@ -34,7 +34,6 @@ const reading = (vital: 'HR' | 'ABP mean', collected: string, value: number | 'n
   value: value === 'not collected' ? { kind: 'absent', reason: value } : { kind: 'present', value },
 })
 
-// The test builds the read model as the service sends it and parses it as the workspace does.
 function model(overrides: Readonly<Record<string, unknown>>): ReadModel {
   const parsed = parseReadModel({ run, now: at('06:57:30'), entries: [], readings: [], statements: [], missing: [], ...overrides })
   assert.ok(parsed.ok, parsed.ok ? '' : parsed.reason)

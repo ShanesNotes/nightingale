@@ -26,7 +26,6 @@ const boot = (id: string): BootId => {
 }
 const second = (n: number) => add(run.start, seconds(n))
 
-// The observer's own value of a channel at a second, read from the decoded run, never from a previous run's screen.
 const observed = (row: string, at: PatientTime) => {
   const channel = run.channels.indexOf(row)
   const o = run.observations.find((x) => x.channel === channel && x.collected === at)
@@ -80,7 +79,6 @@ test('nothing under src/monitor imports anything but observation, device, vitals
 type Program = ReturnType<typeof monitor>
 type Double = ReturnType<typeof chartDouble>
 
-// The chart service answers the batch in flight: the in-memory chart decides each answer.
 function answerOf(double: Double, m: Program, commands: ReadonlyArray<{ readonly name: string; readonly args?: Record<string, unknown> }>) {
   const pending = commands.find((c) => c.name === 'SendBatch')
   assert.ok(pending?.args !== undefined, 'a batch is in flight')

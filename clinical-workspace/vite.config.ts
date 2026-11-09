@@ -1,8 +1,6 @@
 import { foldkit } from '@foldkit/vite-plugin'
 import { defineConfig } from 'vite'
 
-// Two pages, each its own Foldkit program. The launcher sets CHART_SERVICE_URL for the /api proxy and
-// VITE_RUN_ANCHOR for the patient clock. WORKSPACE_OUT_DIR moves the build out of the package.
 export default defineConfig({
   plugins: [foldkit()],
   publicDir: false,

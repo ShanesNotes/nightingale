@@ -20,8 +20,6 @@ import { type DeviceMessage, isPatientId, type MessageAnswer, type Parsed } from
 import { add, earlier, floorTo, isPatientTime, isWallTime, type PatientTime, SECOND, seconds, type WallTime } from './time.ts'
 import { VITALS } from './vitals.ts'
 
-// The chart's one seam: a small SQL client with a pg adapter for a real Postgres and a PGlite adapter that runs
-// Postgres in-process. Both give a bigint column as a safe integer, so callers never see which ran.
 export type Row = Readonly<Record<string, unknown>>
 
 export type Sql = {
@@ -59,7 +57,6 @@ export async function pgliteSql(): Promise<Sql> {
 
 const types = { getTypeParser: (oid: number, format?: 'text' | 'binary') => (oid === INT8 ? int8 : pg.types.getTypeParser(oid, format)) }
 
-// With `fresh`, the adapter makes a database of its own on that server and drops it when it closes.
 export async function pgSql(url: string, options: { readonly fresh?: boolean } = {}): Promise<Sql> {
   let target = url
   let drop = async () => {}
@@ -175,7 +172,6 @@ CREATE OR REPLACE VIEW current_entry AS
   JOIN entry_version v ON v.entry = e.id AND v.number = counts.current;
 `
 
-// Rows leave the database in the chart API's own shape, so the API's parser checks them on the way out.
 const VERSION_FIELDS = `'entry', id, 'patient', patient, 'vital', vital, 'number', number, 'value', value, 'care', care_ns,
   'charted', charted_ns, 'author', json_build_object('id', author, 'name', author_name, 'discipline', author_discipline)`
 const ENTRY_JSON = `json_build_object(${VERSION_FIELDS}, 'versions', versions)`
@@ -214,7 +210,6 @@ async function entries(sql: Sql, where = 'true', params: readonly unknown[] = []
 
 const RUN_COLUMNS = 'spec_id, patient, start_ns, end_ns, anchor_ms'
 
-// A row is read like any input from outside: checked once here, then trusted.
 function runOf(row: Row | undefined): RunView {
   const { spec_id, patient, start_ns, end_ns, anchor_ms } = row ?? {}
   if (typeof spec_id !== 'string' || !isPatientId(patient)) throw new Error('the run row lacks its spec or patient')
@@ -222,8 +217,6 @@ function runOf(row: Row | undefined): RunView {
   return { specId: spec_id, patient, start: start_ns, end: end_ns, anchor: anchor_ms }
 }
 
-// A second is missing for a vital when the device's latest statement at that second calls the vital sourced and
-// the chart holds no reading of it, up to the earlier of the run's end and the second before now.
 function missingSpans(model: Omit<ReadModel, 'missing'>): MissingSpan[] {
   if (model.now <= model.run.start) return []
   const horizon = earlier(model.run.end, add(model.now, seconds(-1)))
@@ -262,7 +255,6 @@ function refusalOf(write: { readonly patient: string; readonly value: number; re
   return undefined
 }
 
-// The schema is applied at every opening and changes nothing the second time. The run row is made once.
 export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: WallTime): Promise<Chart> {
   await sql.script(SCHEMA)
   await sql.query(`INSERT INTO run (${RUN_COLUMNS}) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (singleton) DO NOTHING`, [
@@ -312,7 +304,6 @@ export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: 
           return { kind: 'taken', entry: taken }
         })
       } catch (error) {
-        // Two amendments of one version: the database's key on (entry, number) lets only the first in.
         if (isUniqueViolation(error)) return refused({ kind: 'not the current version' })
         throw error
       }

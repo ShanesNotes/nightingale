@@ -2,7 +2,6 @@ import type { EntryView, ReadModel, ReadingView, StatementView } from './chart-a
 import { add, type Duration, earlier, floorTo, later, MINUTE, type PatientTime, SECOND, seconds, since, ZERO } from './time.ts'
 import { VITALS, type VitalRow } from './vitals.ts'
 
-// A pure grid over the chart's read model: it computes and never stores.
 export type MonitorCell =
   | { readonly kind: 'no statement' }
   | { readonly kind: 'no source' }
@@ -41,7 +40,6 @@ function statementAt(statements: readonly StatementView[], time: PatientTime): S
 
 type Source = StatementView['channels'][keyof StatementView['channels']]
 
-// A vital the device's table lacks, such as one added after it spoke, has no statement.
 function sourceOf(statement: StatementView | undefined, vital: string): Source | undefined {
   const channels: Readonly<Record<string, Source>> | undefined = statement?.channels
   return channels?.[vital]
