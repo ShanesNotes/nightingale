@@ -2,7 +2,7 @@
 
 Type: task
 Status: open
-Blocked by: 11, 12, 16, 17, 18, 23
+Blocked by: 11, 12, 16, 17, 18, 23, 25
 
 **What to build:** The whole body, with no hold left that pass 1 names, lives 24 hours of the synthetic day on the heavy-run machine: sleep, two posture changes, three meals, drinks and room air. This is the map's destination for pass 1. It is not the first milestone: every number is synthetic, and only a reviewed packet can pass I19.
 
@@ -10,6 +10,7 @@ Blocked by: 11, 12, 16, 17, 18, 23
 - [ ] Each row of the contract's day table passes by direction, the rows the slice could not show included
 - [ ] The healthy-range check and the return check run on a synthetic set and report
 - [ ] The hold table lists only pass 2 holds and the systems at rest
+- [ ] Every coupling arrow is wired, an anatomy relation, or listed as a hold with its reason, by the whole body's census
 - [ ] Wall time for the day is recorded against [ticket 07](07-cost-budget-and-step-plan.md)'s budget, with the machine and the run count
 - [ ] The Answer lists what must change before [foundation 01](../../foundation/issues/01-arena-and-milestone.md), step 4, binds the reviewed packet
 

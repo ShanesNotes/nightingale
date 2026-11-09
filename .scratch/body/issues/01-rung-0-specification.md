@@ -10,7 +10,7 @@ Write the answer as tables a builder can work from:
 
 - [ ] The day's books. For each amount the day moves (water, sodium, potassium, chloride, oxygen, carbon dioxide, heat and energy, the fuels, nitrogen, fixed acid, the minerals, the blood's cells and proteins): where it enters, where it is made or used, where it leaves, and which law holds it. Each book closes on paper for the reference man's day before any law is written
 - [ ] For each system: what is dynamic at rung 0, what is a held store with explicit balanced flows, what is absent, and the behaviors the system cannot show at rung 0 (record 0002 asks a grouped region for the same list)
-- [ ] The species, spaces and sites those laws need, as the list ticket 03 builds from
+- [ ] The species, spaces and sites those laws need, as the list ticket 03 builds from. Each site the body adds beyond the slice's names the check or the reading that earns it (record 0002)
 - [ ] Which pass each item belongs to. Pass 1 is every loop that a monitor reading depends on or that drifts within a day. Pass 2 is the slow books
 - [ ] An owner for each fork the docs leave open: the nitrogen, acid and carbon dioxide ledgers, the potassium shift into cells, the bone pools, the natriuretic peptide's secretion, cell water, the pleural space, the bladder
 - [ ] The atlas card trims this implies, listed for [foundation 06](../../foundation/issues/06-atlas.md) to apply as each system is built

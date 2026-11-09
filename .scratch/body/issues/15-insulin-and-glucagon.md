@@ -4,7 +4,7 @@ Type: task
 Status: open
 Blocked by: 14, `.scratch/research/issues/13-law-forms-gut-and-fuels.md`
 
-**What to build:** The pancreas secretes insulin and glucagon into portal blood against glucose. The liver clears part of the insulin on its first pass, so portal and systemic concentrations differ. Muscle and fat take up glucose against insulin through the receptor layer, and potassium moves into cells with it.
+**What to build:** The pancreas secretes insulin and glucagon into portal blood against glucose. The liver clears part of the insulin on its first pass, so portal and systemic concentrations differ. Muscle and fat take up glucose against insulin through the receptor layer, and potassium moves into cells with it. The kidney reclaims filtered glucose up to its limit.
 
 **Releases:** the endocrine card's holds on insulin and glucagon, and the held values ticket 14 read.
 

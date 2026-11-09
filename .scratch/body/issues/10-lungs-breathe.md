@@ -4,7 +4,7 @@ Type: task
 Status: open
 Blocked by: 08, `.scratch/research/issues/11-law-forms-gas-loop.md`
 
-**What to build:** A tidal breath moves gas through the airway into one alveolar unit with a shunt and a dead space, and alveolar gas exchanges with pulmonary capillary blood. The breath's pleural pressure replaces the constant the slice holds, so venous return feels each breath. The resting lung volume follows posture. Water and heat leave with expired gas. The pump's force is musculoskeletal state that the lungs read, driven by a held drive until [ticket 11](11-breathing-is-controlled.md).
+**What to build:** A tidal breath moves gas through the airway into one alveolar unit with a shunt and a dead space, and alveolar gas exchanges with pulmonary capillary blood. The breath's pleural pressure replaces the constant the slice holds, so venous return feels each breath. The resting lung volume follows posture. Water and heat leave with expired gas, and the work of breathing is charged to metabolism (arrow 84). The pump's force is musculoskeletal state that the lungs read, driven by a held drive until [ticket 11](11-breathing-is-controlled.md).
 
 Breathing is tidal unless ticket 07's budget forbids it. Prototype tidal breathing against quasi-steady alveolar gas with a moving pleural pressure on the body before choosing, and say which in the Answer.
 

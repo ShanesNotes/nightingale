@@ -35,6 +35,7 @@ Tickets 01, 02, 07 and 23 and research tickets 11 to 15 can start today.
 | [10](issues/10-lungs-breathe.md) The lungs breathe | 08, research 11 | Gas loop |
 | [11](issues/11-breathing-is-controlled.md) Breathing is controlled | 05, 10, research 11 | Gas loop, closed |
 | [12](issues/12-heat-balance.md) Heat balance | 05, 09, research 12 | Heat loop, closed |
+| [25](issues/25-sleep-and-the-circulation.md) Sleep reaches the circulation and the metabolic rate | 05, 09, research 12 | The night's fall in rate, pressure and oxygen use |
 | [13](issues/13-gut-absorbs-a-meal.md) The gut absorbs a meal | 05, 06, research 13 | Fuel loop |
 | [14](issues/14-liver-glucose-hub.md) The liver is the glucose hub | 02, 13, research 13 | Fuel loop |
 | [15](issues/15-insulin-and-glucagon.md) Insulin and glucagon | 14, research 13 | Fuel loop |
@@ -46,7 +47,7 @@ Tickets 01, 02, 07 and 23 and research tickets 11 to 15 can start today.
 | [21](issues/21-blood-cells-and-systems-at-rest.md) Blood cells, plasma proteins and the systems at rest | 08, 14, research 15 | Pass 2 |
 | [22](issues/22-the-bladder.md) The bladder | 05, 06 | Pass 2 |
 | [23](issues/23-healthy-range-and-return-checks.md) The healthy-range check and the return check | nothing | The two milestone checks no code holds |
-| [24](issues/24-the-synthetic-day.md) The synthetic day | 11, 12, 16, 17, 18, 23 | Pass 1's destination: 24 hours on the whole body |
+| [24](issues/24-the-synthetic-day.md) The synthetic day | 11, 12, 16, 17, 18, 23, 25 | Pass 1's destination: 24 hours on the whole body |
 
 After ticket 06, three lanes can run side by side, because they start in different crates: the gases (08), the gut (13) and the volume hormones (17).
 

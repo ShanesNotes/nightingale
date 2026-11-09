@@ -4,9 +4,9 @@ Type: task
 Status: open
 Blocked by: 06, `.scratch/research/issues/14-law-forms-volume-and-acid.md`
 
-**What to build:** The kidney releases renin, which becomes angiotensin II and raises aldosterone. Wall stress releases a natriuretic peptide, from the owner [ticket 01](01-rung-0-specification.md) names. Vasopressin becomes a species with its own clearance and its rise at night, replacing the held logistic of sodium. The kidney's sodium excretion answers pressure and these hormones, and its potassium excretion answers aldosterone. The clock scales filtration.
+**What to build:** The kidney releases renin, which becomes angiotensin II and raises aldosterone. Wall stress releases a natriuretic peptide, from the owner [ticket 01](01-rung-0-specification.md) names. Vasopressin becomes a species with its own clearance and its rise at night, replacing the held logistic of sodium. The kidney's sodium excretion answers pressure and these hormones, and its potassium excretion answers aldosterone. The clock scales filtration. Cell water follows tonicity across the cell membrane, which replaces the slice's hold on cell water.
 
-**Releases:** the endocrine card's vasopressin hold, and coupling arrows 79 (wall stress), 89 (drive from the nervous system) and 98 (renin). It adds the pressure answer that [evidence library ticket 03](../../evidence-library/issues/03-pressure-natriuresis-check.md) found the slice's kidney lacks.
+**Releases:** the endocrine card's vasopressin hold, the blood chemistry card's hold on cell water, and coupling arrows 79 (wall stress), 89 (drive from the nervous system) and 98 (renin). It adds the pressure answer that [evidence library ticket 03](../../evidence-library/issues/03-pressure-natriuresis-check.md) found the slice's kidney lacks.
 
 - [ ] Tests: each secretion, conversion and excretion law matches its form at stated points
 - [ ] Run: a salt load is excreted over the following day and body sodium returns to its start. With the hormones held, a rise in arterial pressure still raises sodium excretion

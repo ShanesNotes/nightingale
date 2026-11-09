@@ -9,7 +9,7 @@ Blocked by: none
 Where it stands on the slice, from [native-contract 25](../../native-contract/issues/25-history-on-disk.md)'s run on the heavy-run machine (one repeat): 212 accepted steps a simulated second at 0.69 ms each. That is 145 ms for each simulated second, 14.5 times over. Three facts shape the work:
 
 - The record's own share of a step (its replay of the stages, the hash and the ledger) is about 37% in the one profile on record. At today's step count that share alone allows about 21 times real time, whatever the core costs.
-- The mean step is 4.7 ms under a 10 ms cap, about 156 steps a beat. Four in five refusals are accuracy refusals on the two valve flow rows of the left heart, and each firing restarts the core's step control. What limits the step is not established, and no histogram of accepted steps exists.
+- The mean step is 4.7 ms under a 10 ms cap, about 156 steps a beat. Four in five refusals are accuracy refusals on two rows that an earlier dump of the slice names as the left heart's valve flows, and each firing restarts the core's step control. What limits the step is not established, and no histogram of accepted steps exists.
 - One coupled step covers the whole body, so every new row pays for the heart's step count. A body with three times the rows at today's cost would be about 43 times over.
 
 - [ ] A histogram of accepted steps over a beat on the slice, and the limiter named from a profile or from counters, not from reading the code: the cap, one row's accuracy, or the restart after a firing

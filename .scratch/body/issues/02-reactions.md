@@ -9,7 +9,7 @@ Blocked by: none
 Settle the shape with two or three prototypes on the bench before the contract changes (the team contract asks for prototypes, not prose, where an experiment can answer). The candidates to compare:
 
 - books by element, with each species declaring what it is made of
-- books by declared group, as the catecholamine group is kept today
+- books by declared group, where species that share a conserved part belong to one group
 - books by species, with each reaction posting to a paired account at its site
 
 - [ ] A bench body burns a synthetic fuel with oxygen into carbon dioxide, water and heat, and the certificate closes every book over a run

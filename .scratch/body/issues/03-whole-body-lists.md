@@ -4,7 +4,7 @@ Type: task
 Status: open
 Blocked by: 01, 02
 
-**What to build:** The contract's closed lists grow once, for all nine systems the slice lacks, so that no later ticket edits them. Today there are nine species (water, sodium, potassium, chloride, albumin, vasopressin, norepinephrine, acetylcholine and energy), no airway or gut network, and no space for alveolar gas, a gut lumen or red cells. The lists come from [ticket 01](01-rung-0-specification.md)'s Answer.
+**What to build:** The contract's closed lists grow once, for all nine systems the slice lacks, so that no later ticket edits them. Today there are nine species (water, sodium, potassium, chloride, albumin, vasopressin, norepinephrine, acetylcholine and energy), no airway or gut network, and no site or space for alveolar gas, the gut's lumen or red cells. The lists come from [ticket 01](01-rung-0-specification.md)'s Answer.
 
 - [ ] Species for the gases, the fuels, urea and creatinine, the acid-base set, the hormones and hemoglobin, each with its dimension, its charge, the books it belongs to and the spaces that may hold it
 - [ ] Lumped classes where rung 0 needs no more: one other strong anion, ketones as one species
