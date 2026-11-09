@@ -72,3 +72,9 @@ export function patientTimeAt(clock: PatientClock, wall: WallTime): PatientTime 
   const elapsed = Math.max(0, Math.floor((wall - clock.anchor) / MILLISECONDS_PER_SECOND))
   return earlier(clock.end, add(clock.start, duration(elapsed * NANOSECONDS_PER_SECOND)))
 }
+
+// Milliseconds from a wall-clock instant to the next whole patient second, so a tick lands inside each second.
+export function untilNextSecond(clock: PatientClock, wall: WallTime): number {
+  const into = (((wall - clock.anchor) % MILLISECONDS_PER_SECOND) + MILLISECONDS_PER_SECOND) % MILLISECONDS_PER_SECOND
+  return MILLISECONDS_PER_SECOND - into
+}
