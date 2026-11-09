@@ -18,7 +18,6 @@ const ROUNDING: f64 = 64.0 * f64::EPSILON;
 pub enum Relocated {
     Settled,
     Split,
-    Moved,
     Merged,
 }
 
@@ -285,7 +284,7 @@ impl InitializationSystem<'_> {
         one.crossing == other.crossing && one.code.ops == other.code.ops && one.inputs == other.inputs
     }
     /// The first crossing inside one leg of any guard its modes arm, but a paced cycle's clock, which crosses only
-    /// at the wrap, or the crossing that ends the leg moved on to its root past the leg's end, before the next knot.
+    /// at the wrap, or the crossing that ends the leg standing off its root, which lies before the next knot.
     fn scan(
         &self,
         workspace: &AdmissionWorkspace,
@@ -314,7 +313,7 @@ impl InitializationSystem<'_> {
             if gap < 0.0 && !reading.stands(room) {
                 let end = held.start + held.length;
                 let ahead = -gap / rising * held.length;
-                // A leg's root moves with its length, so one just past its end moves the crossing on, not away.
+                // A leg's root moves with its length, so one just past its end keeps the crossing for Newton to place.
                 let next = (workspace.legs.get(leg + 1))
                     .filter(|next| next.interval == held.interval)
                     .map_or(interval, |next| next.start + next.length);
@@ -590,9 +589,10 @@ impl InitializationSystem<'_> {
         workspace.legs = legs;
     }
     /// Reads every knot's firings and every leg's first crossing off the workspace, and puts the topology they give in
-    /// place: a crossing a scan finds inside a leg splits it, one whose root is passed moves, one whose guard is not
-    /// armed or not reached goes. Returns whether anything changed, so a solver alternates it with Newton until it
-    /// returns `false`. It reads no tolerance; `admit` refuses a workspace it would change.
+    /// place: a crossing a scan finds inside a leg splits it, one whose root passed a knot moves across it, one whose
+    /// guard is not armed or not reached goes. It moves no crossing within its knots: Newton's root rows do. Returns
+    /// whether anything changed, so a solver alternates it with Newton until it returns `false`. It reads no tolerance;
+    /// `admit` refuses a workspace it would change or whose crossing stands off its root.
     pub fn sweep(&self, workspace: &mut AdmissionWorkspace) -> Result<bool, InitializationFailure> {
         self.check(workspace)?;
         if self.interval.is_none() {
@@ -626,15 +626,14 @@ impl InitializationSystem<'_> {
             match event {
                 Event::Clear => {}
                 Event::Cross { share, guards } => {
-                    let offset = held.start + share * held.length;
                     let ending = held
                         .ends_at
                         .filter(|&end| workspace.topology.crossings[end].guards == guards);
-                    if ending.is_some() {
-                        knots[interval][at + 1].offset = offset;
-                    } else {
+                    // A crossing whose root moved but stays between its knots keeps the topology: its root row, not the
+                    // sweep, places it.
+                    if ending.is_none() {
                         knots[interval].push(Knot {
-                            offset,
+                            offset: held.start + share * held.length,
                             fired: guards.clone(),
                             guards: Some(guards),
                         });
@@ -667,7 +666,8 @@ impl InitializationSystem<'_> {
         Ok(true)
     }
     /// A march's step after it solves `leg`'s stages: the knot at its start again, then its first crossing. A crossing
-    /// inside it splits it, one whose root it passed moves, and one whose guard is unarmed or unreached goes.
+    /// inside it splits it, and one whose guard is unarmed or unreached goes. One whose root moved within its knots stays
+    /// where it is, for Newton's root row to place.
     pub fn relocate(
         &self,
         workspace: &mut AdmissionWorkspace,
@@ -687,21 +687,18 @@ impl InitializationSystem<'_> {
         let outcome = match self.scan(workspace, &values, index)? {
             Event::Clear => return Ok(Relocated::Settled),
             Event::Cross { share, guards } => {
-                let offset = held.start + share * held.length;
                 let ending = held
                     .ends_at
                     .filter(|&end| workspace.topology.crossings[end].guards == guards);
                 if ending.is_some() {
-                    knots[held.interval][at + 1].offset = offset;
-                    Relocated::Moved
-                } else {
-                    knots[held.interval].push(Knot {
-                        offset,
-                        fired: guards.clone(),
-                        guards: Some(guards),
-                    });
-                    Relocated::Split
+                    return Ok(Relocated::Settled);
                 }
+                knots[held.interval].push(Knot {
+                    offset: held.start + share * held.length,
+                    fired: guards.clone(),
+                    guards: Some(guards),
+                });
+                Relocated::Split
             }
             Event::Unarmed | Event::Gone { .. } => {
                 knots[held.interval].remove(at + 1);
