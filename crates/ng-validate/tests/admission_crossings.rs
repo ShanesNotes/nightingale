@@ -12,6 +12,8 @@ use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::*;
 use ng_validate::*;
 
+mod dense;
+
 const SECOND: u64 = 1_000_000_000;
 const HALF: u64 = SECOND / 2;
 const PULSE: &str = "pulse";
@@ -59,6 +61,15 @@ fn name(local: &'static str) -> LawName {
 
 fn key(local: &'static str) -> ParameterKey {
     ParameterKey::new(local)
+}
+
+const MEAN_Y: AnchorId = AnchorId::new("synthetic.mean-y");
+
+/// The valve's rising threshold: stated, or fitted so that the mark's cycle time mean is `mean`.
+#[derive(Clone, Copy)]
+enum Up {
+    Stated(f64),
+    Fitted { guess: f64, mean: f64 },
 }
 
 /// Which guards the body holds besides the pulse's routes and `y`.
@@ -160,6 +171,14 @@ fn relaxer(shape: Shape) -> Result<Relaxer, AdmissionError> {
                 k.finish(gap, fastly.only(), class)
             });
             laws.event(Guard::new(falling, Crossing::Falling, fastly.to(&slowly)?));
+            let mark = laws.algebraic::<Rate<Water>>("mark", Admissible::finite());
+            let marking = laws.kernel(|mut k| {
+                let (row, up, now) = (k.algebraic(&mark), k.parameter(&up), k.state(&y));
+                let sum = k.add(now, up);
+                let residual = k.subtract(row, sum);
+                k.finish(residual, laws.every_mode(), class)
+            });
+            laws.residual(&mark, marking);
         } else {
             let relaxing = laws.kernel(|mut k| {
                 let (target, current, speed) = (k.read(&pulse), k.state(&y), k.parameter(&slow));
@@ -267,6 +286,9 @@ impl Relaxer {
             .expect("the body declares it")
             .id()
     }
+    fn mark() -> RowKind {
+        RowKind::Algebraic(name("mark").into())
+    }
     fn memory(local: &'static str) -> RowKind {
         RowKind::Memory(name(local).into())
     }
@@ -283,6 +305,15 @@ impl Relaxer {
         self.body.lens(vec![channel], grid).expect("a lens")
     }
     fn packet(&self, intervals: u32, shape: Shape, scale: f64) -> ParameterPacket<SyntheticFixture> {
+        self.packet_up(intervals, shape, scale, Up::Stated(UP))
+    }
+    fn packet_up(
+        &self,
+        intervals: u32,
+        shape: Shape,
+        scale: f64,
+        up: Up,
+    ) -> ParameterPacket<SyntheticFixture> {
         let cycle = Cycle::new(count(SECOND), NonZeroU32::new(intervals).expect("not zero")).expect("even");
         let mut packet = ParameterPacket::periodic(cycle);
         packet.within(admission_tolerance());
@@ -299,8 +330,25 @@ impl Relaxer {
         }
         if shape.valve {
             rates.push(("synthetic.fast", FAST));
-            flows.extend([("synthetic.up", UP), ("synthetic.down", DOWN)]);
+            flows.push(("synthetic.down", DOWN));
             units.push(("synthetic.guard-scale", scale));
+        }
+        match up {
+            Up::Stated(value) if shape.valve => flows.push(("synthetic.up", value)),
+            Up::Stated(_) => {}
+            Up::Fitted { guess, mean } => {
+                let read = Snapshot::new(
+                    Self::mark(),
+                    GAUGE,
+                    AnchorStatistic::CycleTimeMean,
+                    measure::<Rate<Water>>(mean),
+                );
+                packet.anchor(Synthetic::new(MEAN_Y, read, NOTE)).expect("once");
+                let guess = measure::<Rate<Water>>(guess);
+                packet
+                    .calibrated(key("synthetic.up"), Binding::Body, guess, MEAN_Y)
+                    .expect("once");
+            }
         }
         if shape.seen {
             flows.push(("synthetic.level", LEVEL));
@@ -360,9 +408,9 @@ impl Relaxer {
     }
 }
 
-/// `x` after `span` of relaxing to `target` at `speed`.
-fn relaxed(x: f64, target: f64, speed: f64, span: f64) -> f64 {
-    target + (x - target) * exp(-speed * span)
+/// `x` after `time` of relaxing to `target` at `speed`.
+fn relaxed(x: f64, target: f64, speed: f64, time: f64) -> f64 {
+    target + (x - target) * exp(-speed * time)
 }
 
 /// The first time in `[from, to]` at which `crossed` holds, by bisection on a function that holds after it.
@@ -513,6 +561,260 @@ fn a_guard_that_only_touches_zero_is_refused() {
         ..Shape::default()
     };
     let relaxer = relaxer(shape).expect("a body");
-    let refused = relaxer.admitted(8, shape, 1.0, &[Relaxer::memory("y")]);
-    assert!(refused.is_err(), "{refused:?}");
+    let refused = relaxer.admitted(8, shape, 1.0, &[Relaxer::memory("y")]).err();
+    let variable = name("touch").into();
+    assert_eq!(refused, Some(InitializationFailure::Unresolved { variable }));
+}
+
+/// The beat's time mean of `y` on the valve's orbit, in closed form: each piece between switches relaxes from where the
+/// last left it, slow then fast in the high half and fast then slow in the low half.
+fn valve_time_mean() -> f64 {
+    let (y0, [rise, fall]) = exact_valve();
+    let piece = |from: f64, target: f64, speed: f64, time: f64| {
+        target * time + (from - target) * (1.0 - exp(-speed * time)) / speed
+    };
+    let half = relaxed(UP, HIGH, FAST, 0.5 - rise);
+    piece(y0, HIGH, SLOW, rise)
+        + piece(UP, HIGH, FAST, 0.5 - rise)
+        + piece(half, LOW, FAST, fall - 0.5)
+        + piece(DOWN, LOW, SLOW, 1.0 - fall)
+}
+
+/// Rule 17 on both sides: an anchor's cycle time mean is what a time-mean channel reads, the integral of each accepted
+/// step's chord over the window divided by its length, which a core at a fine step brings to the continuous mean. The
+/// mean of the same row's grid samples is another number, so a sampled channel cannot stand in for it.
+#[test]
+fn a_time_mean_channel_integrates_the_accepted_steps_and_a_sampled_one_does_not() {
+    let shape = Shape {
+        valve: true,
+        ..Shape::default()
+    };
+    let relaxer = relaxer(shape).expect("a body");
+    let intervals = 32;
+    let row = Relaxer::memory("y");
+    let channels = vec![
+        ChannelSpec::new(GAUGE, row).time_averaged(count(SECOND)),
+        ChannelSpec::new(GAUGE, row).averaged(count(4)),
+    ];
+    let lens = relaxer.body.lens(channels, count(SECOND / 4)).expect("a lens");
+    let core = ReferenceIntegrator::new(SECOND / 1_000);
+    let store = MemoryStore::default();
+    let packet = relaxer.packet(intervals, shape, 1.0);
+    let admitted = admit_solved(&relaxer.body, packet, port(3), &core, &lens, &store).expect("admitted");
+    let mut session = admitted.session;
+    let mut observer = ng_observe::Observer::new(&lens, ObservationSeed::new([1, 2, 3, 4]));
+    let mut means = [Vec::new(), Vec::new()];
+    loop {
+        let view = session.observation(&lens).expect("this body's lens");
+        for seen in observer.advance(&view).expect("the next revision") {
+            if let ng_observe::ObservedValue::Present(value) = seen.value() {
+                means[seen.channel()].push((seen.collected(), hi(value)));
+            }
+        }
+        if session.record().accepted().time() >= at(2 * SECOND) {
+            break;
+        }
+        let mut attempt = session.step();
+        session = loop {
+            attempt = match attempt {
+                ng_record::Step::Accepted(session, _) => break session,
+                ng_record::Step::Refused(session) => session.retry(),
+                ng_record::Step::Faulted(stopped) => panic!("{:?}", stopped.fault()),
+            };
+        };
+    }
+    let exact = valve_time_mean();
+    let timed: Vec<f64> = means[0].iter().map(|&(_, mean)| mean).collect();
+    assert_eq!(
+        means[0].iter().map(|&(at, _)| at).collect::<Vec<_>>(),
+        [at(SECOND), at(2 * SECOND)]
+    );
+    // The reference core's own error at a millisecond, about 5e-4 here, bounds how near it comes.
+    for mean in &timed {
+        assert!((mean - exact).abs() < 2e-3, "{mean} against {exact}");
+    }
+    let sampled = means[1]
+        .iter()
+        .find(|&&(at, _)| at == at_second())
+        .map(|&(_, mean)| mean)
+        .expect("a sample mean");
+    assert!((sampled - exact).abs() > 1e-2, "{sampled} against {exact}");
+}
+
+fn at_second() -> SimTime {
+    at(SECOND)
+}
+
+impl Relaxer {
+    fn system(&self, intervals: u32, packet: ParameterPacket<SyntheticFixture>) -> InitializationSystem<'_> {
+        let mut channels = vec![
+            ChannelSpec::new(GAUGE, Self::memory("y")).time_averaged(count(SECOND)),
+            ChannelSpec::new(GAUGE, Self::memory("y")).averaged(count(u64::from(intervals))),
+        ];
+        if self.body.rows().iter().any(|row| row.kind() == Self::mark()) {
+            channels.push(ChannelSpec::new(GAUGE, Self::mark()).time_averaged(count(SECOND)));
+        }
+        let lens = self
+            .body
+            .lens(channels, count(SECOND / u64::from(intervals)))
+            .expect("a lens");
+        let parameters = self.body.bind(packet).expect("bound");
+        let request = InitializationRequest::at(at(0)).reading(&lens);
+        self.body
+            .initialization(parameters, port(1), request)
+            .expect("a system")
+    }
+}
+
+/// Newton on the topology the workspace holds, stopping where a crossing wants across a knot or nothing moves. Returns
+/// whether it converged with no crossing held at a knot.
+fn newton(system: &InitializationSystem<'_>, workspace: &mut AdmissionWorkspace) -> bool {
+    for _ in 0..16 {
+        let residuals = system.evaluate(workspace).expect("every row");
+        let matrix = system.linearize(workspace).expect("a matrix");
+        let correction = system
+            .solve(workspace, &matrix, &residuals)
+            .unwrap_or_else(|slot| panic!("a pivot: {slot} with {} crossings", workspace.crossing_count()));
+        let still = correction.slots().iter().all(|change| change.abs() < 1e-15);
+        if system.apply(workspace, &correction, 1.0) != Applied::Inside {
+            return false;
+        }
+        if still {
+            return true;
+        }
+    }
+    false
+}
+
+/// Each leg's stages solved again on their own, in time order from the wrap, twice round, each crossing relocated on
+/// its leg's curve: what a sweep's split or merged legs need before Newton reads them.
+fn reseed(system: &InitializationSystem<'_>, workspace: &mut AdmissionWorkspace) {
+    let points = system.points();
+    for _ in 0..2 {
+        for step in 1..=points {
+            let mut at = 0;
+            while let Some(&leg) = workspace.legs_of(step % points).get(at) {
+                system.settle(workspace, leg).expect("every guard reads");
+                system.seed(workspace, leg);
+                for _ in 0..8 {
+                    let (residuals, block) = system.stage(workspace, leg).expect("a stage");
+                    let update = system.solve_stage(&block, &residuals).expect("a pivot");
+                    let slots = workspace.leg_slots(leg);
+                    for (unknown, change) in workspace.unknowns_mut()[slots].iter_mut().zip(update) {
+                        *unknown -= change;
+                    }
+                }
+                if system.relocate(workspace, leg).expect("every guard reads") == Relocated::Settled {
+                    at += 1;
+                }
+            }
+        }
+    }
+}
+
+/// Newton and sweeps by hand, through the public surface alone, until a sweep changes nothing. Returns the workspace
+/// and how many sweeps it took.
+fn solved_by_hand(system: &InitializationSystem<'_>) -> (AdmissionWorkspace, u32) {
+    let mut workspace = system.workspace();
+    for sweeps in 1..=16 {
+        let converged = newton(system, &mut workspace);
+        if !converged {
+            reseed(system, &mut workspace);
+        }
+        if system.sweep(&mut workspace).expect("every guard reads") {
+            reseed(system, &mut workspace);
+        } else if converged {
+            return (workspace, sweeps);
+        }
+    }
+    panic!("no settled topology in 16 sweeps");
+}
+
+fn history() -> MethodHistory {
+    MethodHistory::new(Digest::of_canonical(b"a schema"), at(0), Vec::new())
+}
+
+/// From a workspace with no crossing, Newton and the sweep settle the valve's two crossings in a few rounds, a second
+/// sweep changes nothing, and the result is admitted.
+#[test]
+fn the_sweep_settles_and_a_second_sweep_changes_nothing() {
+    let shape = Shape {
+        valve: true,
+        ..Shape::default()
+    };
+    let relaxer = relaxer(shape).expect("a body");
+    let system = relaxer.system(16, relaxer.packet(16, shape, 1.0));
+    let (mut workspace, sweeps) = solved_by_hand(&system);
+    assert!(sweeps <= 6, "{sweeps}");
+    assert_eq!(workspace.crossing_count(), 2);
+    assert_eq!(system.sweep(&mut workspace), Ok(false));
+    let crossings = system.crossings(&workspace);
+    let (_, [rise, fall]) = exact_valve();
+    for (crossing, exact) in crossings.iter().zip([rise, fall]) {
+        let placed = hi(Compensated::of(&crossing.at()));
+        assert!((placed - exact).abs() < 1e-4, "{placed} against {exact}");
+    }
+    assert!(system.admit(workspace, history()).is_ok());
+}
+
+/// A solved workspace with one crossing moved, the same workspace solved with no sweep, so its topology is not what
+/// its values give, and a workspace another system made are each refused.
+#[test]
+fn a_moved_crossing_a_stale_topology_and_a_foreign_workspace_are_refused() {
+    let shape = Shape {
+        valve: true,
+        ..Shape::default()
+    };
+    let relaxer = relaxer(shape).expect("a body");
+    let system = || relaxer.system(16, relaxer.packet(16, shape, 1.0));
+    let (mut moved, _) = solved_by_hand(&system());
+    moved
+        .shift_crossing(0, measure::<Time>(1e-4))
+        .expect("inside its interval");
+    let refused = system().admit(moved, history()).err();
+    assert!(
+        matches!(refused, Some(InitializationFailure::Inconsistent { .. })),
+        "{refused:?}"
+    );
+
+    let stale_system = system();
+    let mut stale = stale_system.workspace();
+    assert!(newton(&stale_system, &mut stale));
+    let refused = stale_system.admit(stale, history()).err();
+    assert!(
+        matches!(refused, Some(InitializationFailure::GuardSweep { .. })),
+        "{refused:?}"
+    );
+
+    let (solved, _) = solved_by_hand(&system());
+    let other = relaxer.system(16, relaxer.packet_up(16, shape, 1.0, Up::Stated(UP + 0.05)));
+    let refused = other.admit(solved, history()).err();
+    assert_eq!(
+        refused,
+        Some(InitializationFailure::Admission(AdmissionError::ForeignWorkspace))
+    );
+}
+
+/// A guard whose threshold is fitted, by the time mean of a mark that reads `y` and the threshold: its root row reads the fit, and each crossing time reads both legs it bounds. The
+/// ring's matrix matches central differences in every slot, fit and time, and its update the dense solve.
+#[test]
+fn a_guard_that_reads_a_fit_has_the_slopes_its_differences_give() {
+    let shape = Shape {
+        valve: true,
+        ..Shape::default()
+    };
+    let relaxer = relaxer(shape).expect("a body");
+    let up = Up::Fitted {
+        guess: 2.15,
+        mean: UP + 1.88,
+    };
+    for intervals in [8, 16] {
+        let system = relaxer.system(intervals, relaxer.packet_up(intervals, shape, 1.0, up));
+        let (mut workspace, _) = solved_by_hand(&system);
+        assert_eq!(workspace.crossing_count(), 2, "{intervals}");
+        for (slot, unknown) in workspace.unknowns_mut().iter_mut().enumerate() {
+            *unknown *= 1.0 + 1e-4 * ((slot * 7 % 11) as f64 - 5.0) / 5.0;
+        }
+        dense::cross_check(&system, &mut workspace, &format!("{intervals} intervals"));
+    }
 }

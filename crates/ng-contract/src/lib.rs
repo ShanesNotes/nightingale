@@ -672,6 +672,44 @@
 //!     problem.propose(ticket, increment, end, history)
 //! }
 //! ```
+//! An admission crossing's time is a time, read through its accessor, and no caller writes it: a correction's times
+//! and a workspace's topology are private, and only the system makes a leg.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn read(crossing: &LocatedCrossing) -> Measure<Pressure> {
+//!     crossing.at()
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn read(crossing: &LocatedCrossing) -> Measure<Time> {
+//!     crossing.at()
+//! }
+//! ```
+//! ```compile_fail,E0616
+//! use ng_contract::*;
+//! fn forge(crossing: &mut LocatedCrossing) {
+//!     crossing.seconds = 0.0;
+//! }
+//! ```
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn forge() -> Correction {
+//!     Correction { slots: Vec::new(), times: Vec::new() }
+//! }
+//! ```
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn forge() -> LegHandle {
+//!     LegHandle { index: 0 }
+//! }
+//! ```
+//! ```compile_fail,E0616
+//! use ng_contract::*;
+//! fn forge(workspace: &mut AdmissionWorkspace) {
+//!     workspace.interval = None;
+//! }
+//! ```
 //! A firing comes only from an attempt, so a receipt cannot be written by hand.
 //! ```compile_fail,E0451
 //! use ng_contract::*;

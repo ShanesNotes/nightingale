@@ -105,11 +105,31 @@ reason = "one Newton update on the ring, in mixed row dimensions: a right side i
 
 [[crate.f64_allow]]
 item = "admission::InitializationSystem::stage"
-reason = "one interval's rows at both stages in mixed dimensions, for a march to the orbit that admit then judges"
+reason = "one leg's rows at both stages in mixed dimensions, for a march to the orbit that admit then judges"
 
 [[crate.f64_allow]]
 item = "admission::InitializationSystem::solve_stage"
-reason = "one interval's Newton update, in mixed row dimensions: a right side in, an update out"
+reason = "one leg's Newton update, in mixed row dimensions: a right side in, an update out"
+
+[[crate.f64_allow]]
+item = "admission::AdmissionWorkspace::unknowns_mut"
+reason = "every stage value and fit of an admission solve, one solver coordinate per row; crossing times stay out of it"
+
+[[crate.f64_allow]]
+item = "admission::Correction::slots"
+reason = "a Newton update to each stage value and fit, in mixed row dimensions, which a line search reads"
+
+[[crate.f64_allow]]
+item = "admission::Correction::time_share"
+reason = "the largest crossing-time change as a share of its interval, dimensionless, for an admission solver's stop"
+
+[[crate.f64_allow]]
+item = "admission::InitializationSystem::apply"
+reason = "the share of a Newton update a line search takes, dimensionless"
+
+[[crate.f64_allow]]
+item = "admission::InitializationSystem::merit"
+reason = "residuals in mixed row dimensions in, their sum of squares over natural sizes out, dimensionless"
 
 [[crate.f64_allow]]
 item = "ring::eliminate"

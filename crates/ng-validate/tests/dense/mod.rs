@@ -1,12 +1,33 @@
-//! The admission system's matrix assembled with no `linearize`, from central differences of `evaluate`, and a dense
-//! solve of it with no ring, so the lifted ring answers to an independent reading of the same rows.
+//! The admission system's matrix assembled with no `linearize`, from central differences of `evaluate` in every slot
+//! and every crossing time, and a dense solve of it with no ring, so the lifted ring answers to an independent reading
+//! of the same rows.
 
-use ng_contract::{InitializationSystem, SolveWorkspace};
+use ng_contract::{AdmissionWorkspace, InitializationSystem, Measure, Time};
 
-fn differenced(system: &InitializationSystem<'_>, workspace: &mut SolveWorkspace) -> Vec<Vec<f64>> {
-    let size = workspace.unknowns_mut().len();
+/// A crossing time moves by this many seconds each way.
+const NUDGE: f64 = 1e-7;
+
+fn differenced(system: &InitializationSystem<'_>, workspace: &mut AdmissionWorkspace) -> Vec<Vec<f64>> {
+    let slots = workspace.unknowns_mut().len();
+    let size = slots + workspace.crossing_count();
     let mut matrix = vec![vec![0.0; size]; size];
-    for column in 0..size {
+    let shift = |workspace: &mut AdmissionWorkspace, crossing: usize, by: f64| {
+        let by = Measure::<Time>::new(by).expect("finite");
+        workspace
+            .shift_crossing(crossing, by)
+            .expect("inside its interval");
+    };
+    for crossing in 0..workspace.crossing_count() {
+        shift(workspace, crossing, NUDGE);
+        let up = system.evaluate(workspace).expect("every row");
+        shift(workspace, crossing, -2.0 * NUDGE);
+        let down = system.evaluate(workspace).expect("every row");
+        shift(workspace, crossing, NUDGE);
+        for (row, cells) in matrix.iter_mut().enumerate() {
+            cells[slots + crossing] = (up[row] - down[row]) / (2.0 * NUDGE);
+        }
+    }
+    for column in 0..slots {
         let held = workspace.unknowns_mut()[column];
         let step = 1e-6 * (1.0 + held.abs());
         workspace.unknowns_mut()[column] = held + step;
@@ -48,7 +69,7 @@ fn solved(mut matrix: Vec<Vec<f64>>, mut right: Vec<f64>) -> Vec<f64> {
 }
 
 /// Every entry of `linearize` against the differenced matrix, and the ring's update against the dense one.
-pub fn cross_check(system: &InitializationSystem<'_>, workspace: &mut SolveWorkspace, tag: &str) {
+pub fn cross_check(system: &InitializationSystem<'_>, workspace: &mut AdmissionWorkspace, tag: &str) {
     let matrix = differenced(system, workspace);
     let lifted = system.linearize(workspace).expect("a matrix");
     let view = lifted.view();
@@ -67,13 +88,14 @@ pub fn cross_check(system: &InitializationSystem<'_>, workspace: &mut SolveWorks
         }
     }
     let residuals = system.evaluate(workspace).expect("every row");
-    let ring = system.solve(&lifted, &residuals).expect("a pivot");
+    let ring = system.solve(workspace, &lifted, &residuals).expect("a pivot");
+    let ring = ring.slots();
     let dense = solved(matrix, residuals);
     let largest = (dense.iter()).fold(
         0.0,
         |most: f64, value| if value.abs() > most { value.abs() } else { most },
     );
-    for (slot, (one, other)) in ring.iter().zip(&dense).enumerate() {
+    for (slot, (one, other)) in ring.iter().zip(&dense[..ring.len()]).enumerate() {
         assert!(
             (one - other).abs() <= 1e-5 * (1.0 + largest),
             "{tag}: slot {slot}: {one} against {other}"

@@ -50,6 +50,15 @@ fn key(local: &'static str) -> ParameterKey {
     ParameterKey::new(local)
 }
 
+/// How the packet times the beat: a paced cycle whose rate anchor is a time mean, the same read as grid samples, or
+/// grid samples with no clock named.
+#[derive(Clone, Copy)]
+enum Clock {
+    Timed,
+    Sampled,
+    Unpaced,
+}
+
 struct Pacemaker {
     body: CompiledBody,
     root: SiteId,
@@ -181,20 +190,35 @@ impl Pacemaker {
     fn rate(&self) -> RowKind {
         RowKind::Algebraic(name("rate").into())
     }
-    fn lens(&self, intervals: u32) -> ObservationLens {
-        let channel = ChannelSpec::new(GAUGE, self.rate()).averaged(count(u64::from(intervals)));
+    /// The rate read as its time mean over each beat, or as the mean of the grid's samples.
+    fn lens(&self, intervals: u32, clock: Clock) -> ObservationLens {
+        let channel = ChannelSpec::new(GAUGE, self.rate());
+        let channel = match clock {
+            Clock::Timed => channel.time_averaged(count(SECOND)),
+            Clock::Sampled | Clock::Unpaced => channel.averaged(count(u64::from(intervals))),
+        };
         let grid = count(SECOND / u64::from(intervals));
         self.body.lens(vec![channel], grid).expect("a lens")
     }
-    /// `targets` are the drive's in systole and in diastole.
-    fn packet(&self, intervals: u32, targets: [f64; 2]) -> ParameterPacket<SyntheticFixture> {
+    /// `targets` are the drive's in systole and in diastole; `end` is where the phase wraps.
+    fn packet(
+        &self,
+        intervals: u32,
+        targets: [f64; 2],
+        clock: Clock,
+        end: f64,
+    ) -> ParameterPacket<SyntheticFixture> {
         let cycle = Cycle::new(count(SECOND), NonZeroU32::new(intervals).expect("not zero")).expect("even");
+        let cycle = match clock {
+            Clock::Unpaced => cycle,
+            Clock::Timed | Clock::Sampled => cycle.paced(name("phase").into(), RATE),
+        };
         let mut packet = ParameterPacket::periodic(cycle);
         packet.within(admission_tolerance());
         let unit = |local, value| (key(local), measure::<Dimensionless>(value));
         for (key, value) in [
             unit("synthetic.split", 0.25),
-            unit("synthetic.end", 1.0),
+            unit("synthetic.end", end),
             unit("synthetic.systole-target", targets[0]),
             unit("synthetic.diastole-target", targets[1]),
         ] {
@@ -222,12 +246,11 @@ impl Pacemaker {
         packet
             .synthetic(key("synthetic.work"), Binding::Body, work, NOTE)
             .expect("once");
-        let read = Snapshot::new(
-            self.rate(),
-            GAUGE,
-            AnchorStatistic::CycleMean,
-            measure::<Rate<Dimensionless>>(1.0),
-        );
+        let statistic = match clock {
+            Clock::Timed => AnchorStatistic::CycleTimeMean,
+            Clock::Sampled | Clock::Unpaced => AnchorStatistic::CycleMean,
+        };
+        let read = Snapshot::new(self.rate(), GAUGE, statistic, measure::<Rate<Dimensionless>>(1.0));
         packet.anchor(Synthetic::new(RATE, read, NOTE)).expect("once");
         let guess = measure::<Rate<Dimensionless>>(1.0);
         packet
@@ -248,51 +271,77 @@ impl Pacemaker {
         packet.start_rest(&self.body, guess, NOTE).expect("every row");
         packet
     }
-    /// A system on `intervals` whose modes a ramp of the phase has swept round the ring: the end of systole at a
-    /// quarter, the wrap at the last point and its reset into point 0's interval.
-    fn swept(&self, intervals: u32, lens: &ObservationLens) -> (InitializationSystem<'_>, SolveWorkspace) {
-        let parameters = self.body.bind(self.packet(intervals, [1.0, 1.0])).expect("bound");
+    fn system(&self, intervals: u32, lens: &ObservationLens) -> InitializationSystem<'_> {
+        let packet = self.packet(intervals, [1.0, 1.0], Clock::Timed, 1.0);
+        let parameters = self.body.bind(packet).expect("bound");
         let request = InitializationRequest::at(SimTime::from_ns(0)).reading(lens);
         let boundary = BoundaryPort::new(Vec::new()).expect("no event");
-        let mut system = self
-            .body
+        self.body
             .initialization(parameters, boundary, request)
-            .expect("a system");
+            .expect("a system")
+    }
+    /// A system on `intervals` whose modes and crossings a ramp of the phase has swept round the ring: the end of
+    /// systole at a quarter, inside an interval or on a knot, and the wrap at the cycle's end.
+    fn swept(
+        &self,
+        intervals: u32,
+        lens: &ObservationLens,
+    ) -> (InitializationSystem<'_>, AdmissionWorkspace) {
+        let system = self.system(intervals, lens);
         let mut workspace = system.workspace();
         let phase = self.row(RowKind::Memory(name("phase").into())).index();
         let points = system.points();
         for point in 0..points {
-            let ramp = (point + 1) as f64 / points as f64;
-            workspace.unknowns_mut()[system.endpoint(point).start + phase] = ramp;
-            workspace.unknowns_mut()[system.interior(point).start + phase] = ramp - 0.5 / points as f64;
+            let end = if point == 0 {
+                1.0
+            } else {
+                point as f64 / points as f64
+            };
+            let slot = workspace.endpoint(point).start + phase;
+            workspace.unknowns_mut()[slot] = end;
+            let slot = workspace.interior(point).start + phase;
+            workspace.unknowns_mut()[slot] = end - 2.0 / (3.0 * points as f64);
         }
         for _ in 0..2 * points {
-            if system.sweep(&workspace, 0..points).expect("every guard reads") == 0 {
+            if !system.sweep(&mut workspace).expect("every guard reads") {
                 break;
             }
         }
         (system, workspace)
     }
-    /// The admitted start's value of each of `rows`.
+    /// The admitted start's value of each of `rows`, and the crossings the cycle located.
+    fn admitted(
+        &self,
+        intervals: u32,
+        targets: [f64; 2],
+        clock: Clock,
+        end: f64,
+        rows: &[RowKind],
+    ) -> Result<(Vec<f64>, Vec<LocatedCrossing>), InitializationFailure> {
+        let core = ReferenceIntegrator::new(SECOND / u64::from(intervals));
+        let store = MemoryStore::default();
+        let lens = self.lens(intervals, clock);
+        let boundary = BoundaryPort::new(Vec::new())?;
+        let packet = self.packet(intervals, targets, clock, end);
+        let admitted = admit_solved(&self.body, packet, boundary, &core, &lens, &store)?;
+        let start = admitted.session.record().accepted();
+        let values = rows.iter().map(|&kind| hi(start.value(self.row(kind)))).collect();
+        Ok((values, admitted.provenance.crossings().to_vec()))
+    }
     fn start(
         &self,
         intervals: u32,
         targets: [f64; 2],
         rows: &[RowKind],
     ) -> Result<Vec<f64>, InitializationFailure> {
-        let core = ReferenceIntegrator::new(SECOND / u64::from(intervals));
-        let store = MemoryStore::default();
-        let lens = self.lens(intervals);
-        let boundary = BoundaryPort::new(Vec::new())?;
-        let packet = self.packet(intervals, targets);
-        let admitted = admit_solved(&self.body, packet, boundary, &core, &lens, &store)?;
-        let start = admitted.session.record().accepted();
-        Ok(rows.iter().map(|&kind| hi(start.value(self.row(kind)))).collect())
+        Ok(self.admitted(intervals, targets, Clock::Timed, 1.0, rows)?.0)
     }
 }
 
 /// Work enters only in systole, so the power the closed store sheds steps with the mode, and the store's two stages
-/// must each give it: the wall row pins the store at both, and only the store's own row reaches the power.
+/// must each give it: the wall row pins the store at both, and only the store's own row reaches the power. The start
+/// is the state just after the wrap fires systole, and a firing solves no algebraic row again, so the power there is
+/// the last of diastole's: none.
 #[test]
 fn a_closed_store_sheds_its_work_at_the_start_on_any_ring() {
     let pacemaker = pacemaker().expect("a body");
@@ -305,22 +354,68 @@ fn a_closed_store_sheds_its_work_at_the_start_on_any_ring() {
         let [power, held] = start.unwrap_or_else(|failure| panic!("{intervals}: {failure:?}"))[..] else {
             panic!("two rows");
         };
-        assert!((power - WORK).abs() < 1e-9 * WORK, "{intervals}: {power}");
+        assert!(power.abs() < 1e-9 * WORK, "{intervals}: {power}");
         assert!((held - WALL).abs() < 1e-9 * WALL, "{intervals}: {held}");
     }
 }
 
-/// A drive that relaxes inside the beat makes the rate vary. A backward Euler ring advanced the phase by the interval
-/// times the rate at each point, so the anchor's mean of those points closed the phase on its wrap, and main admits
-/// this clock. Radau's interval advances it by the stage weights' integral, which no sampled mean pins, so the wrap the
-/// guard needs once a beat falls off the grid and no start stands. The arena's rate barely moves within a beat, and it
-/// admits; a clock like this one needs the cycle's time mean on both sides of rule 17.
+/// A drive that relaxes inside the beat makes the rate vary. Radau's leg advances the phase by the stage weights'
+/// integral of the rate, which no sampled mean pins, so a clock paced by a sampled anchor is refused before anything
+/// solves; the same clock paced by its time mean closes its phase on the wrap and stands.
 #[test]
-fn a_varying_clock_anchored_by_its_sampled_mean_finds_no_start() {
+fn a_varying_clock_is_paced_by_its_time_mean_and_refused_by_a_sampled_one() {
     let pacemaker = pacemaker().expect("a body");
     let rows = [RowKind::Memory(name("phase").into())];
-    assert!(pacemaker.start(8, [1.0, 1.0], &rows).is_ok());
-    assert!(pacemaker.start(8, [1.5, 1.0], &rows).is_err());
+    let sampled = pacemaker
+        .admitted(8, [1.5, 1.0], Clock::Sampled, 1.0, &rows)
+        .err();
+    let refused = InitializationFailure::Admission(AdmissionError::PeriodAnchor { anchor: RATE });
+    assert_eq!(sampled, Some(refused));
+    let (phase, _) = pacemaker
+        .admitted(8, [1.5, 1.0], Clock::Timed, 1.0, &rows)
+        .expect("a start");
+    assert_eq!(phase, [0.0]);
+}
+
+/// The clock wraps once a period: an anchor of one beat a second over a one-second cycle reaches a threshold of one,
+/// and a threshold the period does not reach is refused by the anchor that claims it.
+#[test]
+fn a_clock_whose_anchor_does_not_reach_its_threshold_in_one_period_is_refused() {
+    let pacemaker = pacemaker().expect("a body");
+    let rows = [RowKind::Memory(name("phase").into())];
+    let refused = pacemaker.admitted(8, [1.0, 1.0], Clock::Timed, 0.9, &rows).err();
+    let mismatch = InitializationFailure::Admission(AdmissionError::PeriodMismatch { anchor: RATE });
+    assert_eq!(refused, Some(mismatch));
+}
+
+/// With no clock named and no drive that moves, the beat may start anywhere along its orbit: only where the grid's
+/// samples fall would place it, which is no physiology. The start is refused, not placed.
+#[test]
+fn an_autonomous_beat_no_clock_paces_is_refused() {
+    let pacemaker = pacemaker().expect("a body");
+    let rows = [RowKind::Memory(name("phase").into())];
+    let refused = pacemaker
+        .admitted(8, [1.5, 1.0], Clock::Unpaced, 1.0, &rows)
+        .err();
+    assert_eq!(refused, Some(InitializationFailure::Unpaced));
+}
+
+/// The paced phase runs at one beat a second, so systole ends at a quarter of the beat. On five intervals that is
+/// inside the second, where admission locates it; the wrap is the cycle's own end and adds no crossing.
+#[test]
+fn the_end_of_systole_is_located_where_the_phase_reaches_it() {
+    let pacemaker = pacemaker().expect("a body");
+    let rows = [RowKind::Memory(name("phase").into())];
+    let (phase, crossings) = pacemaker
+        .admitted(5, [1.0, 1.0], Clock::Timed, 1.0, &rows)
+        .expect("a start");
+    assert_eq!(phase, [0.0]);
+    let [crossing] = crossings[..] else {
+        panic!("{crossings:?}");
+    };
+    assert_eq!((crossing.leaves, crossing.enters), ("systole", "diastole"));
+    let at = hi(Compensated::of(&crossing.at()));
+    assert!((at - 0.25).abs() < 1e-9, "{at}");
 }
 
 /// A reset phase, a closed store, a regulated total read through a law on the pool, and a fit, at every slot off the
@@ -329,7 +424,7 @@ fn a_varying_clock_anchored_by_its_sampled_mean_finds_no_start() {
 fn the_lifted_ring_is_the_dense_solve_of_the_differenced_rows_through_a_reset() {
     let pacemaker = pacemaker().expect("a body");
     for intervals in [2, 4] {
-        let lens = pacemaker.lens(intervals);
+        let lens = pacemaker.lens(intervals, Clock::Timed);
         let (system, mut workspace) = pacemaker.swept(intervals, &lens);
         for (slot, unknown) in workspace.unknowns_mut().iter_mut().enumerate() {
             *unknown += 1e-3 * ((slot * 7 % 11) as f64 - 5.0);
@@ -345,24 +440,25 @@ fn the_lifted_ring_is_the_dense_solve_of_the_differenced_rows_through_a_reset() 
 fn energys_end_rows_sum_to_its_stage_weighted_boundary_flow() {
     let pacemaker = pacemaker().expect("a body");
     let intervals = 4;
-    let lens = pacemaker.lens(intervals);
+    let lens = pacemaker.lens(intervals, Clock::Timed);
     let (system, mut workspace) = pacemaker.swept(intervals, &lens);
     let held = workspace.unknowns_mut().to_vec();
     let rows = [Space::Elastic, Space::Thermal].map(|space| pacemaker.row(pacemaker.store(space)).index());
     let thermal = rows[1];
-    let summed = |workspace: &SolveWorkspace| -> f64 {
+    let summed = |workspace: &AdmissionWorkspace| -> f64 {
         let residuals = system.evaluate(workspace).expect("every row");
-        let ends = (0..system.points()).flat_map(|point| rows.map(|row| system.endpoint(point).start + row));
+        let ends =
+            (0..system.points()).flat_map(|point| rows.map(|row| workspace.endpoint(point).start + row));
         ends.map(|slot| residuals[slot]).sum()
     };
     let before = summed(&workspace);
     let h = 1.0 / f64::from(intervals);
     for (stage, weight) in [(0, 0.75), (1, 0.25)] {
-        let mut moved = system.workspace();
+        let mut moved = workspace.clone();
         moved.unknowns_mut().copy_from_slice(&held);
         let mut heat = 0.0;
         for point in 0..system.points() {
-            let slots = [system.interior(point), system.endpoint(point)];
+            let slots = [moved.interior(point), moved.endpoint(point)];
             let slot = slots[stage].start + thermal;
             let was = held[slot];
             moved.unknowns_mut()[slot] = was + 1.0;
@@ -374,4 +470,26 @@ fn energys_end_rows_sum_to_its_stage_weighted_boundary_flow() {
             "{stage}: {change} against {heat}"
         );
     }
+}
+
+/// Systole ends at a quarter of the beat: on eight intervals its guard reaches zero exactly on a knot, rising, and fires
+/// there; on five it crosses inside an interval. Work enters only in systole, so the heat the thermal store balances
+/// reads how long systole lasted, and both grids hold it to their own error. A guard left to the next knot would hold
+/// systole an eighth of a beat too long, and the heat a fifth too high.
+#[test]
+fn a_guard_that_reaches_zero_on_a_knot_fires_on_that_knot() {
+    let pacemaker = pacemaker().expect("a body");
+    let rows = [pacemaker.store(Space::Thermal)];
+    let thermal = |intervals| {
+        let (held, crossings) = pacemaker
+            .admitted(intervals, [1.0, 1.0], Clock::Timed, 1.0, &rows)
+            .unwrap_or_else(|failure| panic!("{intervals}: {failure:?}"));
+        (held[0], crossings.len())
+    };
+    let ((on_knot, none), (inside, one)) = (thermal(8), thermal(5));
+    assert_eq!((none, one), (0, 1));
+    assert!(
+        (on_knot - inside).abs() < 1e-2 * inside,
+        "{on_knot} against {inside}"
+    );
 }

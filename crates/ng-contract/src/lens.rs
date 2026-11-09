@@ -14,6 +14,7 @@ pub struct ChannelSpec {
     window: NonZeroU64,
     delay_ns: u64,
     error: Option<(String, Compensated)>,
+    integrated: bool,
 }
 impl ChannelSpec {
     pub fn new(method: &'static str, row: RowKind) -> Self {
@@ -23,6 +24,16 @@ impl ChannelSpec {
             window: NonZeroU64::MIN,
             delay_ns: 0,
             error: None,
+            integrated: false,
+        }
+    }
+    /// One reading per `window_ns`, the row's integral over the window divided by its length: the accepted curve's
+    /// time mean, not a mean of samples. Windows sit on whole multiples of their length.
+    pub fn time_averaged(self, window_ns: NonZeroU64) -> Self {
+        Self {
+            window: window_ns,
+            integrated: true,
+            ..self
         }
     }
     /// One reading per `samples` grid instants, their mean. A count, so a window always fits the grid.
@@ -50,6 +61,7 @@ pub struct Channel {
     method: &'static str,
     row: RowId,
     window: u64,
+    integrated: bool,
     period_ns: u64,
     delay_ns: u64,
     sd: Option<Compensated>,
@@ -62,9 +74,13 @@ impl Channel {
     pub fn row(&self) -> RowId {
         self.row
     }
-    /// How many grid instants one reading holds.
+    /// How many grid instants one reading holds, or for a time mean how many nanoseconds.
     pub fn window(&self) -> u64 {
         self.window
+    }
+    /// Whether a reading integrates the row over its window rather than counting grid samples.
+    pub fn integrated(&self) -> bool {
+        self.integrated
     }
     /// Whether a window closes at this grid instant. Windows sit on whole multiples of their length, so an
     /// observer keeps no cursor.
@@ -110,9 +126,19 @@ impl ObservationLens {
     pub(crate) fn reads(&self, method: &str, row: RowId, window_ns: u64, points: u64) -> bool {
         (self.channels.iter()).any(|channel| {
             channel.method == method
+                && !channel.integrated
                 && channel.row == row
                 && channel.window == points
                 && channel.window.checked_mul(self.period_ns) == Some(window_ns)
+        })
+    }
+    /// Whether a channel reads `row` by `method` as its time mean over windows of exactly `window_ns`.
+    pub(crate) fn reads_time_mean(&self, method: &str, row: RowId, window_ns: u64) -> bool {
+        (self.channels.iter()).any(|channel| {
+            channel.method == method
+                && channel.integrated
+                && channel.row == row
+                && channel.window == window_ns
         })
     }
     /// What an observer's checkpoint is bound to: this lens with this seed.
@@ -144,6 +170,7 @@ impl CompiledBody {
                 window,
                 delay_ns,
                 error,
+                integrated,
             } = channel;
             let row = (self.rows().iter())
                 .find(|row| row.kind() == kind)
@@ -158,12 +185,20 @@ impl CompiledBody {
                 Some((_, sd)) => Some(sd),
                 None => None,
             };
-            let mut reading = Canonical::new("ng-contract channel 1");
+            // A sampled channel keeps the bytes it had before time means, so no existing lens moves.
+            let mut reading = Canonical::new(if integrated {
+                "ng-contract channel 2"
+            } else {
+                "ng-contract channel 1"
+            });
             method.seal(&mut reading);
             kind.seal(&mut reading);
             reading.number(window.get());
             reading.number(delay_ns);
             sd.seal(&mut reading);
+            if integrated {
+                reading.number(1);
+            }
             let digest = reading.digest();
             let key = first_word(digest);
             if compiled.iter().any(|known| known.key == key) {
@@ -174,6 +209,7 @@ impl CompiledBody {
                 method,
                 row: row.id(),
                 window: window.get(),
+                integrated,
                 period_ns,
                 delay_ns,
                 sd,

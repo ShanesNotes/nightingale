@@ -1,7 +1,7 @@
 use crate::identity::{Canonical, Seal};
 use crate::{
-    AdmissionRow, Binding, Compensated, ErrorScales, Measure, PacketKind, Reviewed, RowKind, Slot,
-    SyntheticFixture,
+    AdmissionRow, Binding, Compensated, ErrorScales, LocatedCrossing, Measure, PacketKind, Reviewed, RowKind,
+    Slot, SyntheticFixture,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -41,7 +41,10 @@ impl AnchorId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AnchorStatistic {
     Instant,
+    /// The mean of the cycle's grid samples, as an observer counts them.
     CycleMean,
+    /// The row's integral over the cycle over its period, as an observer integrates it.
+    CycleTimeMean,
 }
 impl Seal for AnchorStatistic {
     fn seal(&self, out: &mut Canonical) {
@@ -173,6 +176,7 @@ pub struct InitializationProvenance {
     pub(crate) values: Vec<ValueRecord>,
     pub(crate) tolerance: ErrorScales,
     pub(crate) worst: Option<(AdmissionRow, Compensated)>,
+    pub(crate) crossings: Vec<LocatedCrossing>,
 }
 impl InitializationProvenance {
     /// One per packet parameter entry, then one per row, then one per mode variable.
@@ -185,6 +189,10 @@ impl InitializationProvenance {
     /// The row with the largest defect over its scale, at most one. `None` for a body with no row.
     pub fn worst(&self) -> Option<(AdmissionRow, Compensated)> {
         self.worst
+    }
+    /// Each guard crossing the admitted cycle located inside an interval, in time order.
+    pub fn crossings(&self) -> &[LocatedCrossing] {
+        &self.crossings
     }
 }
 

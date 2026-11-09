@@ -40,7 +40,7 @@ fn finite(value: Compensated) -> Result<Compensated, Malformed> {
 /// observer left. A false value that looks true still passes, as does a reading from the future.
 fn filling(read: &mut ByteReader<'_>, channel: &Channel) -> Result<Filling, Malformed> {
     match read.number()? {
-        0 => {
+        0 if !channel.integrated() => {
             let sum = finite(read.compensated()?)?;
             let seen = read.number()?;
             if seen < channel.window() {
@@ -50,6 +50,16 @@ fn filling(read: &mut ByteReader<'_>, channel: &Channel) -> Result<Filling, Malf
             }
         }
         1 => Ok(Filling::Invalid),
+        // A time mean's filling has its own tag, so a sampled filling is never read as one, nor one as a sampled.
+        2 if channel.integrated() => {
+            let twice = finite(read.compensated()?)?;
+            let covered = read.number()?;
+            if covered < channel.window() {
+                Ok(Filling::Integral { twice, covered })
+            } else {
+                Err(Malformed)
+            }
+        }
         _ => Err(Malformed),
     }
 }
@@ -113,6 +123,11 @@ impl<'l> Observer<'l> {
                     body.extend_from_slice(&0_u64.to_be_bytes());
                     push_pair(&mut body, *sum);
                     body.extend_from_slice(&seen.to_be_bytes());
+                }
+                Filling::Integral { twice, covered } => {
+                    body.extend_from_slice(&2_u64.to_be_bytes());
+                    push_pair(&mut body, *twice);
+                    body.extend_from_slice(&covered.to_be_bytes());
                 }
                 Filling::Invalid => body.extend_from_slice(&1_u64.to_be_bytes()),
             }

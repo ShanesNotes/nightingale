@@ -112,7 +112,8 @@ fn a_species_a_route_keeps_back_stays_back_when_both_ends_hold_it() -> Result<()
         BoundaryPort::new(Vec::new())?,
         InitializationRequest::at(SimTime::from_ns(0)),
     )?;
-    let (residual, _) = system.stage(&system.workspace(), 0)?;
+    let workspace = system.workspace();
+    let (residual, _) = system.stage(&workspace, workspace.legs_of(0)[0])?;
     assert_eq!(
         residual[row], 0.0,
         "a wall that keeps albumin back must carry no albumin"

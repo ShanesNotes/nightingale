@@ -1,11 +1,18 @@
-use crate::body::{Bound, Instance, Layout, ParameterId, ProgramId, RowId, RowKind, Target, UnknownId};
+use crate::body::{Bound, Instance, Layout, ParameterId, ProgramId, RowKind, Target, UnknownId};
 use crate::boundary::DriveFrame;
 use crate::law::{Op, Validity};
 use crate::pinned;
-use crate::{
-    Compensated, CompiledBody, Crossing, ErrorScales, ExcursionSide, LawName, SimTime, ValidityExcursion,
-};
+use crate::{Compensated, CompiledBody, Crossing, ExcursionSide, LawName, SimTime, ValidityExcursion};
 use core::ops::Range;
+
+mod enclosure;
+pub(crate) use enclosure::{Bounds, Jet};
+
+/// A guard's directed slope in each unknown and parameter it reads, by their places.
+pub(crate) struct GuardSlopes {
+    pub(crate) unknowns: Vec<(usize, f64)>,
+    pub(crate) parameters: Vec<(usize, f64)>,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum OperatorDomain {
@@ -465,26 +472,54 @@ impl CompiledBody {
             Crossing::Falling => -value,
         })
     }
-    /// A gap within `tolerance` of zero counts as crossed, so a point that lands on its guard, as the ring's last point
-    /// lands on the wrap, reads the same on every sweep.
-    pub(crate) fn fired_at(
-        &self,
-        inputs: &Inputs<'_>,
-        tolerance: &ErrorScales,
-    ) -> Result<(Vec<usize>, Vec<RowId>), Undefined> {
-        let mut crossed = Vec::with_capacity(self.layout.guards.len());
-        for (at, guard) in self.layout.guards.iter().enumerate() {
-            crossed.push(
-                guard.armed(inputs.modes) && {
-                    let gap = self.guard_gap(at, inputs)?;
-                    gap >= -tolerance.at(gap, 1.0)
-                },
-            );
+    fn guard_sign(&self, guard: usize) -> f64 {
+        match self.layout.guards[guard].crossing {
+            Crossing::Rising => 1.0,
+            Crossing::Falling => -1.0,
         }
-        let mut modes = inputs.modes.to_vec();
-        let fired = self.layout.fire(&mut modes, &crossed);
-        let resets = fired.iter().filter_map(|guard| guard.resets).collect();
-        Ok((modes, resets))
+    }
+    /// A guard's directed slope in each unknown and each parameter it reads.
+    pub(crate) fn guard_slopes(&self, guard: usize, inputs: &Inputs<'_>) -> Result<GuardSlopes, Undefined> {
+        let layout = &self.layout.guards[guard];
+        let (arithmetic, reads) = self.tape.guard(guard);
+        let (mut values, mut slopes) = (vec![0.0; arithmetic.length], vec![0.0; arithmetic.length]);
+        let partial_volume = self.partial_volume();
+        let undefined = |domain| Undefined {
+            law: self.layout.modes[layout.variable].variable.law,
+            domain,
+        };
+        forward(arithmetic, reads, inputs, partial_volume, &mut values).map_err(undefined)?;
+        backward(arithmetic, &values, partial_volume, &mut slopes);
+        let sign = self.guard_sign(guard);
+        let finite = |(index, slope): (usize, f64)| {
+            if slope.is_finite() {
+                Ok((index, sign * slope))
+            } else {
+                Err(undefined(OperatorDomain::NonFinite))
+            }
+        };
+        let unknowns = (reads.unknowns.iter()).map(|&(slot, index)| finite((index, slopes[slot])));
+        let parameters = (reads.parameters.iter()).map(|&(slot, index)| finite((index, slopes[slot])));
+        Ok(GuardSlopes {
+            unknowns: unknowns.collect::<Result<_, _>>()?,
+            parameters: parameters.collect::<Result<_, _>>()?,
+        })
+    }
+    /// Every directed gap a guard takes while each unknown it reads stays inside its jet, with its slopes, or `None`
+    /// where no bound holds.
+    pub(crate) fn guard_enclosure(
+        &self,
+        guard: usize,
+        inputs: &Inputs<'_>,
+        unknown: &dyn Fn(usize) -> Jet,
+    ) -> Option<Jet> {
+        let (arithmetic, reads) = self.tape.guard(guard);
+        let jet = enclosure::enclose(arithmetic, reads, inputs, unknown, self.partial_volume())?;
+        Some(if self.guard_sign(guard) > 0.0 {
+            jet
+        } else {
+            jet.negated()
+        })
     }
     fn bound(bound: &Bound, inputs: &Inputs<'_>) -> f64 {
         match *bound {

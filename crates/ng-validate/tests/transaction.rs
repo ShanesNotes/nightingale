@@ -658,13 +658,10 @@ enum EdgeLaw {
     Exponentiates,
 }
 
-/// A start inside the law's domain, so admission passes it.
+/// A start inside the law's domain where every slope is finite, so admission passes it and rank can be read there; the
+/// trial core then carries an amount to where the law refuses.
 fn edge_law_body(law: EdgeLaw) -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
-    let start = match law {
-        EdgeLaw::TakesTheLogNearZero => [1.0, 1e-320],
-        EdgeLaw::Divides | EdgeLaw::TakesTheLog | EdgeLaw::Exponentiates => [1.0, 1.0],
-    };
-    edge_law_body_from(law, start)
+    edge_law_body_from(law, [1.0, 1.0])
 }
 
 fn refused_amounts(law: EdgeLaw) -> [f64; 2] {
@@ -816,6 +813,22 @@ fn a_finite_value_with_a_non_finite_slope_is_refused_where_it_linearizes() {
         refused_source_at_the_floor(EdgeLaw::TakesTheLogNearZero),
         RefusalSource::NonFinite { law }
     );
+}
+
+/// A start whose rows all hold but whose law has no finite slope there gives admission no matrix to read rank from, so
+/// it is refused at that law, not admitted with its rank unread.
+#[test]
+fn a_start_with_no_finite_slope_is_refused_at_its_law() {
+    let store = MemoryStore::default();
+    let (body, packet) = edge_law_body_from(EdgeLaw::TakesTheLogNearZero, [1.0, 1e-320]);
+    let boundary = BoundaryPort::new(Vec::new()).expect("no event");
+    let core = reference(4 * MILLISECOND);
+    let refused = admit_fixture(&body, packet, boundary, &core, &store).err();
+    let law = LawName {
+        owner: "CV",
+        local: "circulation",
+    };
+    assert_eq!(refused, Some(InitializationFailure::Undefined { law }));
 }
 
 #[test]

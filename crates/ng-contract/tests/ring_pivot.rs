@@ -165,7 +165,8 @@ fn two_closed_rows_that_read_one_store_factor_over_the_bodys_elimination() -> Re
         let port = BoundaryPort::new(Vec::new())?;
         let request = InitializationRequest::at(SimTime::from_ns(0));
         let system = body.initialization(body.bind(packet)?, port, request)?;
-        let (_, block) = system.stage(&system.workspace(), 0)?;
+        let workspace = system.workspace();
+        let (_, block) = system.stage(&workspace, workspace.legs_of(0)[0])?;
         assert!(
             system.factor(&block).is_ok(),
             "shared {shared}, second first {second_first}"
@@ -193,7 +194,8 @@ fn stage_factors(body: &CompiledBody, keys: &[&'static str]) -> Result<bool, Ini
     let port = BoundaryPort::new(Vec::new())?;
     let request = InitializationRequest::at(SimTime::from_ns(0));
     let system = body.initialization(body.bind(packet)?, port, request)?;
-    let (_, block) = system.stage(&system.workspace(), 0)?;
+    let workspace = system.workspace();
+    let (_, block) = system.stage(&workspace, workspace.legs_of(0)[0])?;
     Ok(system.factor(&block).is_ok())
 }
 
@@ -392,7 +394,8 @@ fn a_closed_row_keeps_its_own_unknown_when_another_row_could_take_it() -> Result
     let port = BoundaryPort::new(Vec::new())?;
     let request = InitializationRequest::at(SimTime::from_ns(0));
     let system = body.initialization(body.bind(packet)?, port, request)?;
-    let (_, block) = system.stage(&system.workspace(), 0)?;
+    let workspace = system.workspace();
+    let (_, block) = system.stage(&workspace, workspace.legs_of(0)[0])?;
     assert!(system.factor(&block).is_ok());
     Ok(())
 }

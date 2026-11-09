@@ -1,3 +1,4 @@
+use crate::admission::{AdmissionWorkspace, Correction};
 use crate::elimination::Factors;
 use crate::{InitializationSystem, Jacobian};
 
@@ -100,7 +101,7 @@ fn inverse(block: &Jacobian) -> Result<Vec<Vec<f64>>, usize> {
 }
 
 impl InitializationSystem<'_> {
-    /// One Newton update on the ring `linearize` lays out: `points` blocks of an interval's stages, each coupled to the
+    /// One Newton update on the ring `linearize` lays out: a block of each leg's stages, each coupled to the
     /// block before it through that block's end stage alone, totals in the last block reading point 0, and fits along
     /// the border. Dense, that is the cube of `points` times the block's unknowns.
     ///
@@ -108,10 +109,35 @@ impl InitializationSystem<'_> {
     /// linear function of the last block's slots that point 0 reads and of the fits, so the ring shrinks to one dense
     /// corner of the last block and the fits' anchors. A second walk fills every block from the corner's answer. A slot
     /// is named where its block or the corner has no pivot, and `admit` reads that the same way, on the whole ring.
-    pub fn solve(&self, ring: &Jacobian, right: &[f64]) -> Result<Vec<f64>, usize> {
+    pub fn solve(
+        &self,
+        workspace: &AdmissionWorkspace,
+        ring: &Jacobian,
+        right: &[f64],
+    ) -> Result<Correction, usize> {
+        let update = self.ring(workspace, ring, right)?;
+        let slots = workspace.fitted_slots().end;
+        Ok(Correction::of(update[..slots].to_vec(), update[slots..].to_vec()))
+    }
+    pub(crate) fn ring(
+        &self,
+        workspace: &AdmissionWorkspace,
+        ring: &Jacobian,
+        right: &[f64],
+    ) -> Result<Vec<f64>, usize> {
         let system = self;
         let view = ring.view();
-        let (size, points) = (system.width(), system.points());
+        let (size, points) = (system.width(), workspace.leg_count());
+        if points == 1 {
+            let mut matrix = vec![vec![0.0; right.len() + 1]; right.len()];
+            for (row, cells) in matrix.iter_mut().enumerate() {
+                for entry in view.row_offsets()[row]..view.row_offsets()[row + 1] {
+                    cells[view.columns()[entry].index()] += view.values()[entry];
+                }
+                cells[right.len()] = right[row];
+            }
+            return eliminate(matrix);
+        }
         let border = points * size;
         let fits = right.len() - border;
         let line = |slot: usize| {
@@ -215,8 +241,12 @@ impl InitializationSystem<'_> {
             for other in 0..fits {
                 cells[size + other] += row[read.len() + other];
             }
-            for (place, value) in line(border + fit).filter(|(place, _)| own(last).contains(place)) {
-                cells[place - last * size] += value;
+            for (place, value) in line(border + fit) {
+                if own(last).contains(&place) {
+                    cells[place - last * size] += value;
+                } else if place >= border {
+                    cells[size + place - border] += value;
+                }
             }
         }
         let answer = eliminate(matrix)?;

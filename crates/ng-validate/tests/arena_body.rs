@@ -335,12 +335,12 @@ fn every_link_of_every_loop_moves_the_row_that_reads_it_the_right_way(
     let system = body.initialization(parameters, port, request)?;
     let mut workspace = system.workspace();
     let start = solved.session();
-    for stage in [system.endpoint(0), system.interior(0)] {
+    for stage in [workspace.endpoint(0), workspace.interior(0)] {
         for (slot, row) in stage.zip(body.rows()) {
             workspace.unknowns_mut()[slot] = number(start.record().accepted().value(row.id()));
         }
     }
-    let (_, block) = system.stage(&workspace, 0)?;
+    let (_, block) = system.stage(&workspace, workspace.legs_of(0)[0])?;
     let view = block.view();
     let size = body.rows().len();
     // Both stages hold the start, so an end row's two stage columns of one row sum to its slope over the interval.
@@ -495,10 +495,9 @@ fn a_shut_valve_with_no_head_stays_shut(solved: &Solved) -> Result<(), Initializ
     let parameters = body.bind(packet)?;
     let port = BoundaryPort::new(Vec::new())?;
     let request = InitializationRequest::at(anchor_moment()).reading(&lens);
-    let mut system = body.initialization(parameters, port, request)?;
+    let system = body.initialization(parameters, port, request)?;
     let mut workspace = system.workspace();
     let (arteries, left) = (vessel("systemic arteries"), vessel("left ventricle"));
-    let size = system.rows();
     let flow = solved
         .row(memory(
             "CV",
@@ -509,13 +508,15 @@ fn a_shut_valve_with_no_head_stays_shut(solved: &Solved) -> Result<(), Initializ
             },
         ))
         .index();
-    for point in 0..2 {
-        workspace.unknowns_mut()[point * size + solved.row(pressure(left)).index()] = 50.0;
-        workspace.unknowns_mut()[point * size + solved.row(pressure(arteries)).index()] = 50.0;
-        workspace.unknowns_mut()[point * size + flow] = -5.0;
+    for stage in [workspace.endpoint(0).start, workspace.interior(0).start] {
+        workspace.unknowns_mut()[stage + solved.row(pressure(left)).index()] = 50.0;
+        workspace.unknowns_mut()[stage + solved.row(pressure(arteries)).index()] = 50.0;
+        workspace.unknowns_mut()[stage + flow] = -5.0;
     }
-    system.sweep(&workspace, 0..1)?;
-    let (residuals, _) = system.stage(&workspace, 1)?;
+    let after = workspace.legs_of(1)[0];
+    system.settle(&mut workspace, after)?;
+    system.seed(&mut workspace, after);
+    let (residuals, _) = system.stage(&workspace, after)?;
     assert_eq!(residuals[flow], 0.0);
     Ok(())
 }
@@ -644,7 +645,7 @@ fn a_standing_body_pays_gravitys_work_into_the_walls() -> Result<(), Initializat
     let request = InitializationRequest::at(anchor_moment()).reading(&lens);
     let system = body.initialization(parameters, port, request)?;
     let workspace = system.workspace();
-    let (_, block) = system.stage(&workspace, 0)?;
+    let (_, block) = system.stage(&workspace, workspace.legs_of(0)[0])?;
     let view = block.view();
     let index = |kind: RowKind| {
         let found = body.rows().iter().find(|row| row.kind() == kind);
@@ -911,7 +912,7 @@ fn a_tubule_with_no_ions_reclaims_none() -> Result<(), InitializationFailure> {
     for row in body.rows().iter().filter(|row| lumen_ion(row, &ions)) {
         workspace.unknowns_mut()[row.id().index()] = 0.0;
     }
-    assert!(system.stage(&workspace, 0).is_ok());
+    assert!(system.stage(&workspace, workspace.legs_of(0)[0]).is_ok());
     Ok(())
 }
 
@@ -935,12 +936,13 @@ fn a_lumen_with_no_chloride_gives_none_back() -> Result<(), InitializationFailur
             }
         )
     };
-    for point in 0..system.points() {
-        for row in body.rows().iter().filter(|row| chloride(row)) {
-            workspace.unknowns_mut()[point * system.rows() + row.id().index()] = 0.0;
+    let stages = workspace.fitted_slots().start;
+    for slot in 0..stages {
+        if chloride(&body.rows()[slot % system.rows()]) {
+            workspace.unknowns_mut()[slot] = 0.0;
         }
     }
-    let (residuals, _) = system.stage(&workspace, 0)?;
+    let (residuals, _) = system.stage(&workspace, workspace.legs_of(0)[0])?;
     let tubule = body
         .rows()
         .iter()

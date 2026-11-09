@@ -229,10 +229,13 @@ fn the_first_window_holds_each_core_to_the_references_own_distances() {
         updates: 8,
         behind: rows_outside_the_largest_block(&body),
     };
-    // From the Radau cycle's start, the rows this core leaves behind take a trial outside a law's domain before its
-    // modes can part from the finest reference's.
+    // The start is the beat's onset after the wrap, where this core's modes part from the finest reference's before
+    // the rows it leaves behind leave a law's domain.
     let failure = accuracy(&stale, &policy);
-    assert!(matches!(failure, Err(AccuracyFailure::Faulted(_))), "{failure:?}");
+    assert!(
+        matches!(failure, Err(AccuracyFailure::ModesApart { .. })),
+        "{failure:?}"
+    );
 
     let to_its_step = accuracy(&fixed(10 * MILLISECOND, 10 * MILLISECOND), &policy);
     assert!(
@@ -260,10 +263,12 @@ fn validate_refuses_a_slice_stage_its_core_left_unsolved() {
             Step::Faulted(stopped) => panic!("{:?}", stopped.fault()),
         }
     };
-    assert_eq!(
-        first(&sweeps(8, Vec::new())),
-        None,
-        "the honest core's step is accepted"
+    // The start is the beat's onset, a millisecond before the mitral valve shuts, so an honest first step can refuse
+    // for its own accuracy; it never refuses for a stage it left unsolved.
+    let honest = first(&sweeps(8, Vec::new()));
+    assert!(
+        !matches!(honest, Some(NumericalRefusal::StageResidual { .. })),
+        "the honest core's stages are solved: {honest:?}"
     );
     let after_one_update = first(&sweeps(1, Vec::new()));
     assert!(

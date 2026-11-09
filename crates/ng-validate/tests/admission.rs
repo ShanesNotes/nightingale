@@ -954,7 +954,8 @@ fn a_moved_conserved_total_is_refused_with_its_quantity() {
         let system = steady_system(&case, packet, boundary);
         let mut moved = system.workspace();
         // Both vessels at every stage move alike, so every stage still holds and the total speaks first.
-        for unknown in moved.unknowns_mut().iter_mut().take(system.fitted_slots().start) {
+        let stages = moved.fitted_slots().start;
+        for unknown in moved.unknowns_mut().iter_mut().take(stages) {
             *unknown += change;
         }
         assert_eq!(
@@ -1080,7 +1081,8 @@ fn a_witness_that_breaks_one_stage_at_one_point_is_refused_with_its_row() {
         let (packet, boundary, _) = steady_packet(&case);
         let system = steady_system(&case, packet, boundary);
         let mut witness = system.workspace();
-        witness.unknowns_mut()[system.endpoint(point).start] += change;
+        let slot = witness.endpoint(point).start;
+        witness.unknowns_mut()[slot] += change;
         assert_eq!(
             system.admit(witness, case.history()).err(),
             Some(InitializationFailure::Inconsistent {
@@ -1147,7 +1149,8 @@ fn a_total_moved_by_less_than_a_pools_rounding_is_refused() {
     let request = InitializationRequest::at(at(0));
     let system = (body.initialization(parameters, empty_port(), request)).expect("a system");
     let mut moved = system.workspace();
-    for stage in moved.unknowns_mut()[..system.fitted_slots().start].chunks_mut(2) {
+    let stages = moved.fitted_slots().start;
+    for stage in moved.unknowns_mut()[..stages].chunks_mut(2) {
         stage[0] = POOL / 4.0 - 1.0 / 32_768.0;
         stage[1] = 7.0 * POOL / 4.0;
     }
@@ -1247,7 +1250,7 @@ fn the_row_a_total_replaced_is_read_at_its_own_scale() {
     let request = InitializationRequest::at(at(0)).reading(&case.lens);
     let system = (case.body().initialization(parameters, empty_port(), request)).expect("a system");
     let mut witness = system.workspace();
-    let last = system.endpoint(3).start;
+    let last = witness.endpoint(3).start;
     witness.unknowns_mut()[last + 1] += 5e-4;
     let row = AdmissionRow::Body(case.row_a());
     assert_eq!(
@@ -1404,7 +1407,8 @@ fn a_law_with_no_value_at_a_later_point_is_refused_by_its_name() {
     let system = steady_system(&case, packet, boundary);
     let mut solved = system.workspace();
     let b = 1;
-    solved.unknowns_mut()[system.endpoint(2).start + b] = 0.0;
+    let slot = solved.endpoint(2).start + b;
+    solved.unknowns_mut()[slot] = 0.0;
     assert_eq!(
         system.admit(solved, case.history()).err(),
         Some(InitializationFailure::Undefined {
@@ -1841,7 +1845,10 @@ fn a_start_moved_inside_the_tolerance_or_another_history_names_another_run() {
     };
     let last = {
         let (packet, boundary, _) = steady_packet(&case);
-        steady_system(&case, packet, boundary).fitted_slots().start
+        steady_system(&case, packet, boundary)
+            .workspace()
+            .fitted_slots()
+            .start
     };
     let plain = named(0, 0.0, case.history());
     assert_eq!(plain, named(0, 0.0, case.history()));
@@ -1992,7 +1999,7 @@ fn hazard_system<'c>(
 }
 
 /// Every slot moved off the guess by its own small share, so the two stages of an interval differ.
-fn spread(workspace: &mut SolveWorkspace) {
+fn spread(workspace: &mut AdmissionWorkspace) {
     for (slot, unknown) in workspace.unknowns_mut().iter_mut().enumerate() {
         *unknown *= 1.0 + 1e-3 * ((slot * 7 % 11) as f64 - 5.0) / 5.0;
     }
@@ -2032,7 +2039,8 @@ fn an_interior_stage_no_other_row_reads_is_judged_on_its_own_row() {
         packet.start_mode(name("rhythm"), "sinus", NOTE).expect("once");
         let system = steady_system(&case, packet, boundary);
         let mut witness = system.workspace();
-        witness.unknowns_mut()[system.interior(1).start + hazard.index()] += change;
+        let slot = witness.interior(1).start + hazard.index();
+        witness.unknowns_mut()[slot] += change;
         system.admit(witness, case.history()).err()
     };
     assert_eq!(admitted(0.0), None);
@@ -2051,7 +2059,8 @@ fn a_ring_update_stays_on_its_bits() {
     let workspace = system.workspace();
     let residuals = system.evaluate(&workspace).expect("every row");
     let matrix = system.linearize(&workspace).expect("a matrix");
-    let update = system.solve(&matrix, &residuals).expect("a pivot");
+    let update = system.solve(&workspace, &matrix, &residuals).expect("a pivot");
+    let update = update.slots();
     let bits: Vec<u8> = (update.iter())
         .flat_map(|change| change.to_bits().to_be_bytes())
         .collect();
@@ -2061,7 +2070,7 @@ fn a_ring_update_stays_on_its_bits() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    expect_test::expect!["cdeaf551296e4eab9db813acb84b1756accc146fed7551f265e4287399bdd710 over 257 slots"]
+    expect_test::expect!["363cca1fdb794bc98d026d30e7cc852b322ee525d98212d01fcefc3d0a7d65ca over 257 slots"]
         .assert_eq(&format!("{digest} over {} slots", update.len()));
 }
 
@@ -2155,7 +2164,7 @@ fn a_stage_is_read_in_its_rows_own_unit_not_as_a_rate() {
         let (packet, boundary, _) = steady_packet(&case);
         let system = steady_system(&case, packet, boundary);
         let mut witness = system.workspace();
-        let point = system.endpoint(1).start;
+        let point = witness.endpoint(1).start;
         witness.unknowns_mut()[point] = a + nudge;
         witness.unknowns_mut()[point + 1] = b - nudge;
         system.admit(witness, case.history()).err()
@@ -2875,7 +2884,9 @@ fn a_points_block_of_the_ring_is_its_own_stage_where_a_hazard_reads_a_row() {
     let workspace = system.workspace();
     let ring = system.linearize(&workspace).expect("a matrix");
     for point in 0..system.points() - 1 {
-        let (_, own) = system.stage(&workspace, point).expect("a stage");
+        let (_, own) = system
+            .stage(&workspace, workspace.legs_of(point)[0])
+            .expect("a stage");
         let block = system.block(&ring, point);
         assert_eq!(block.view().values(), own.view().values(), "point {point}");
     }

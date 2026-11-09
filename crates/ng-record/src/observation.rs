@@ -1,5 +1,5 @@
 use crate::session::Session;
-use ng_contract::{AcceptedStateView, Compensated, Digest, ObservationLens, SimTime};
+use ng_contract::{AcceptedStateView, Compensated, Digest, Interval, ObservationLens, SimTime};
 
 /// One accepted revision through a lens.
 pub struct ObservationView<'r> {
@@ -50,6 +50,25 @@ impl<'r> ObservationView<'r> {
                 (at, channels.map(|channel| read(channel.row(), at)).collect())
             })
             .collect()
+    }
+    /// The step this revision accepted and each channel's chord over it, its values at the step's start and at its
+    /// end before any firing, which is the curve a time mean integrates; `None` at admission, which holds no step.
+    pub fn chords(&self) -> Option<(Interval, Vec<(Compensated, Compensated)>)> {
+        let segment = self.accepted.last_segment();
+        let step = segment.interval()?;
+        let ends = |row| {
+            let start = segment.sample(row, step.start()).expect("a step holds its start");
+            let end = segment.sample(row, step.end()).expect("a step holds its end");
+            (start, end)
+        };
+        Some((
+            step,
+            self.lens
+                .channels()
+                .iter()
+                .map(|channel| ends(channel.row()))
+                .collect(),
+        ))
     }
 }
 

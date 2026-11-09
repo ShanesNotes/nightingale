@@ -1,4 +1,4 @@
-use ng_contract::{AdmissibleSet, Compensated, Digest, ObservationLens, ObservationSeed, SimTime};
+use ng_contract::{AdmissibleSet, Compensated, Digest, Interval, ObservationLens, ObservationSeed, SimTime};
 use ng_record::{ObservationRefusal, ObservationView};
 
 /// Its channel in the lens gives its method and its row, and an amount's row its site. A reading held by its
@@ -42,9 +42,12 @@ pub enum ObservedValue {
     InvalidSignal,
 }
 
+/// A window filling: a sum of grid samples and their count, or for a time mean twice the chords' integral in
+/// value-nanoseconds and the nanoseconds it covers, or a sum that left the finite range.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Filling {
     Mean { sum: Compensated, seen: u64 },
+    Integral { twice: Compensated, covered: u64 },
     Invalid,
 }
 impl Filling {
@@ -52,6 +55,33 @@ impl Filling {
         sum: Compensated::ZERO,
         seen: 0,
     };
+    pub(crate) const EMPTY_INTEGRAL: Self = Self::Integral {
+        twice: Compensated::ZERO,
+        covered: 0,
+    };
+    fn empty(integrated: bool) -> Self {
+        if integrated {
+            Self::EMPTY_INTEGRAL
+        } else {
+            Self::EMPTY
+        }
+    }
+    /// One chord's piece from `from` to `to` nanoseconds, its two ends' values given: the trapezoid, exact for a
+    /// chord.
+    fn integrate(self, from: Compensated, to: Compensated, length: u64) -> Self {
+        let Self::Integral { twice, covered } = self else {
+            return self;
+        };
+        let twice = twice.plus(from.plus(to).scaled(length as i64));
+        if AdmissibleSet::Finite.holds(twice) {
+            Self::Integral {
+                twice,
+                covered: covered.saturating_add(length),
+            }
+        } else {
+            Self::Invalid
+        }
+    }
     fn add(self, value: Compensated) -> Self {
         let Self::Mean { sum, seen } = self else {
             return self;
@@ -73,6 +103,10 @@ impl Filling {
                 ObservedValue::Present(Compensated::between(Compensated::ZERO, sum, 1, window))
             }
             Self::Mean { .. } => ObservedValue::NotCollected,
+            Self::Integral { twice, covered } if covered == window => {
+                ObservedValue::Present(Compensated::between(Compensated::ZERO, twice, 1, 2 * window))
+            }
+            Self::Integral { .. } => ObservedValue::NotCollected,
         }
     }
 }
@@ -99,15 +133,15 @@ pub struct Observer<'l> {
 }
 impl<'l> Observer<'l> {
     pub fn new(lens: &'l ObservationLens, seed: ObservationSeed) -> Self {
-        let empty = || Reading {
-            filling: Filling::EMPTY,
+        let empty = |channel: &ng_contract::Channel| Reading {
+            filling: Filling::empty(channel.integrated()),
             held: Vec::new(),
         };
         Self {
             lens,
             seed,
             last: None,
-            readings: lens.channels().iter().map(|_| empty()).collect(),
+            readings: lens.channels().iter().map(empty).collect(),
         }
     }
     /// Reads the next revision and returns what it collected, then what it released. A view that does not
@@ -122,8 +156,18 @@ impl<'l> Observer<'l> {
         }
         let channels = self.lens.channels();
         let mut observed = Vec::new();
+        if let Some((step, chords)) = view.chords() {
+            for (channel, (start, end)) in chords.into_iter().enumerate() {
+                if channels[channel].integrated() {
+                    observed.extend(self.integrate(channel, step, start, end));
+                }
+            }
+        }
         for (at, values) in view.samples() {
             for (channel, value) in values.into_iter().enumerate() {
+                if channels[channel].integrated() {
+                    continue;
+                }
                 let reading = &mut self.readings[channel];
                 reading.filling = reading.filling.add(value);
                 if channels[channel].closes(at) {
@@ -144,11 +188,37 @@ impl<'l> Observer<'l> {
         self.last = Some(view.seal());
         Ok(observed)
     }
+    /// One accepted step's chord into a time-mean channel: each piece inside one window adds its integral, and a piece
+    /// that reaches a window's end closes it there.
+    fn integrate(
+        &mut self,
+        channel: usize,
+        step: Interval,
+        start: Compensated,
+        end: Compensated,
+    ) -> Vec<Observation> {
+        let window = self.lens.channels()[channel].window();
+        let (from, to) = (step.start().nanoseconds(), step.end().nanoseconds());
+        let at = |ns: u64| Compensated::between(start, end, ns - from, to - from);
+        let mut closed = Vec::new();
+        let mut here = from;
+        while here < to {
+            let boundary = (here / window).saturating_add(1).saturating_mul(window);
+            let next = if boundary < to { boundary } else { to };
+            let reading = &mut self.readings[channel];
+            reading.filling = reading.filling.integrate(at(here), at(next), next - here);
+            if next == boundary {
+                closed.push(self.close(channel, SimTime::from_ns(next)));
+            }
+            here = next;
+        }
+        closed
+    }
     /// Only a value waits: an absence is known at once.
     fn close(&mut self, channel: usize, at: SimTime) -> Observation {
         let settings = &self.lens.channels()[channel];
         let reading = &mut self.readings[channel];
-        let filled = core::mem::replace(&mut reading.filling, Filling::EMPTY);
+        let filled = core::mem::replace(&mut reading.filling, Filling::empty(settings.integrated()));
         let absent = |value| Observation {
             channel,
             collected: at,

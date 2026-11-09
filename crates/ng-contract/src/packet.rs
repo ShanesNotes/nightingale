@@ -52,13 +52,14 @@ impl PacketHash {
         Self { digest }
     }
     /// The hash a run names, closed at admission: the packet's, the moment it starts, the start, modes and fits it
-    /// reached and the core's history there, so one identity has one start whatever made it. Events stay out of it.
+    /// reached, the digest of the cycle that witnessed them, if any, and the core's history there, so one identity has one start whatever made it. Events stay out of it.
     pub(crate) fn reading(
         self,
         moment: SimTime,
         start: &[f64],
         modes: &[usize],
         fitted: &[f64],
+        witness: Option<&Digest>,
         history: &MethodHistory,
     ) -> Self {
         let mut out = Canonical::new("ng-contract packet and start 2");
@@ -69,6 +70,10 @@ impl PacketHash {
             out.number(mode as u64);
         }
         fitted.seal(&mut out);
+        // An instant has no cycle to witness, and its hash keeps the bytes it had before cycles had one.
+        if let Some(witness) = witness {
+            witness.seal(&mut out);
+        }
         history.digest().seal(&mut out);
         Self { digest: out.digest() }
     }
@@ -84,6 +89,7 @@ impl PacketHash {
 pub struct Cycle {
     period_ns: u64,
     intervals: u32,
+    pacing: Option<(Slot, AnchorId)>,
 }
 impl Cycle {
     /// Refuses a period `intervals` does not divide, so every point sits on the clock.
@@ -92,7 +98,20 @@ impl Cycle {
         if !period_ns.is_multiple_of(u64::from(intervals)) {
             return Err(AdmissionError::UnevenCycle);
         }
-        Ok(Self { period_ns, intervals })
+        Ok(Self {
+            period_ns,
+            intervals,
+            pacing: None,
+        })
+    }
+    /// A cycle the body times for itself: `clock` is a memory reset by its one rising guard, whose rate `anchor`
+    /// reads as a cycle time mean. Admission proves the clock, the anchor and the period agree, and the clock's wrap is
+    /// the cycle's end.
+    pub fn paced(self, clock: Slot, anchor: AnchorId) -> Self {
+        Self {
+            pacing: Some((clock, anchor)),
+            ..self
+        }
     }
     pub(crate) fn period_ns(self) -> u64 {
         self.period_ns
@@ -103,12 +122,27 @@ impl Cycle {
     pub(crate) fn step_ns(self) -> u64 {
         self.period_ns / u64::from(self.intervals)
     }
+    pub(crate) fn pacing(self) -> Option<(Slot, AnchorId)> {
+        self.pacing
+    }
 }
 impl Seal for Cycle {
     fn seal(&self, out: &mut Canonical) {
-        let Self { period_ns, intervals } = self;
+        let Self {
+            period_ns,
+            intervals,
+            pacing,
+        } = self;
         out.number(*period_ns);
         out.number(u64::from(*intervals));
+        match pacing {
+            Some((clock, anchor)) => {
+                out.number(1);
+                clock.seal(out);
+                out.text(anchor.id());
+            }
+            None => out.number(0),
+        }
     }
 }
 
@@ -943,10 +977,10 @@ impl CompiledBody {
                 AnchorStatistic::Instant if self.pulsatile(row) => {
                     return Err(AdmissionError::InstantOnPulsatile { anchor });
                 }
-                AnchorStatistic::CycleMean if packet.cycle.is_none() => {
+                AnchorStatistic::CycleMean | AnchorStatistic::CycleTimeMean if packet.cycle.is_none() => {
                     return Err(AdmissionError::NoCycle { anchor });
                 }
-                AnchorStatistic::Instant | AnchorStatistic::CycleMean => {}
+                AnchorStatistic::Instant | AnchorStatistic::CycleMean | AnchorStatistic::CycleTimeMean => {}
             }
             anchors.push(BoundAnchor {
                 id: anchor,

@@ -205,10 +205,11 @@ fn of_two_guards_on_one_variable_the_same_one_wins_on_the_ring_and_in_a_run() {
     let y = RowKind::Memory(named("y").into());
     let gauge = lens(&body, y);
     let request = InitializationRequest::at(SimTime::from_ns(0)).reading(&gauge);
-    let mut system = body.initialization(parameters, port, request).expect("a system");
-    let workspace = system.workspace();
-    assert_eq!(system.sweep(&workspace, 0..1), Ok(1));
-    let (residuals, _) = system.stage(&workspace, 1).expect("a stage");
+    let system = body.initialization(parameters, port, request).expect("a system");
+    let mut workspace = system.workspace();
+    let after = workspace.legs_of(1)[0];
+    assert_eq!(system.settle(&mut workspace, after), Ok(true));
+    let (residuals, _) = system.stage(&workspace, after).expect("a stage");
     let row = (body.rows().iter())
         .position(|row| row.kind() == y)
         .expect("a row");
