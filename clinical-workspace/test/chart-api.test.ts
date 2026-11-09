@@ -79,3 +79,23 @@ test('the read model, the versions of an entry and a write result parse back unc
   const refused = { kind: 'refused', refusal: { kind: 'care time after now' } }
   assert.deepEqual(parseWriteResult(refused), { ok: true, value: refused })
 })
+
+test('a body the workspace could not have sent is refused as malformed at the boundary', () => {
+  const entry = { patient: 'test-patient', author: nurse.id, vital: 'RR', value: '18', care: null }
+  const amendment = { ...entry, entry: 'test-entry-1', replaces: 1 }
+  const newEntries: Record<string, unknown> = {
+    'not an object': '18',
+    'an author off the roster': { ...entry, author: 'someone' },
+    'no author': { ...entry, author: undefined },
+    'a vital the table lacks': { ...entry, vital: 'EtCO2' },
+    'a value sent as a number': { ...entry, value: 18 },
+    'a care time as clock text': { ...entry, care: '06:56:00' },
+    'no patient': { ...entry, patient: '' },
+  }
+  for (const [name, body] of Object.entries(newEntries)) assert.equal(parseNewEntry(body).ok, false, name)
+  for (const [name, body] of Object.entries({ 'replaces version zero': { ...amendment, replaces: 0 }, 'no entry': { ...amendment, entry: '' } })) {
+    assert.equal(parseAmendment(body).ok, false, name)
+  }
+  assert.equal(parseWriteResult({ kind: 'refused', refusal: { kind: 'too late' } }).ok, false, 'an unknown refusal kind')
+  assert.equal(parseReadModel({ ...readModel, readings: [{ ...readModel.readings[0], value: { kind: 'present', value: null } }] }).ok, false, 'a reading without its value')
+})
