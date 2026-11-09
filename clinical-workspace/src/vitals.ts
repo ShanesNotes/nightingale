@@ -22,3 +22,13 @@ const NAMES: ReadonlySet<unknown> = new Set(VITALS.map((row) => row.vital))
 export function isVital(value: unknown): value is Vital {
   return NAMES.has(value)
 }
+
+export type PerVital<T> = { readonly [V in Vital]: T }
+
+const covers = <T>(record: Readonly<Record<string, T>>): record is PerVital<T> => VITALS.every((row) => row.vital in record)
+
+export function perVital<T>(make: (vital: Vital) => T): PerVital<T> {
+  const record = Object.fromEntries(VITALS.map((row) => [row.vital, make(row.vital)]))
+  if (!covers(record)) throw new Error('a record built from the vitals table lacks one of its vitals')
+  return record
+}
