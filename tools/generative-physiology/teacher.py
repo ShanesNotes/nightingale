@@ -32,6 +32,10 @@ class TeacherRun:
     spec: RunSpec | None
     replays: str | None
 
+    def __post_init__(self) -> None:
+        if (self.spec is None) == (self.replays is None):
+            raise TeacherError(f"{self.name}: a run is a spec or a replay, never both or neither")
+
 
 @dataclass(frozen=True)
 class Settled:
@@ -56,10 +60,8 @@ def expected_wall_s(spec: RunSpec) -> float:
 
 
 def branch_tail_s(spec: RunSpec) -> float:
-    at = spec.variant_ms()
-    if spec.variant.startswith(("checkpoint-resume", "rewind")) and at is not None:
-        return (spec.end_ms - at) / 1000
-    return 0.0
+    at = spec.checkpoint_ms()
+    return 0.0 if at is None else (spec.end_ms - at) / 1000
 
 
 def expected_link_bytes(spec: RunSpec) -> int:
@@ -100,8 +102,8 @@ class _Child:
         self.logs = logs
         self.rule = rule
         self.buffer = b""
-        self.taken = {event.at_ms for event in run.spec.events} if run.spec else set()
-        self.end_ms = run.spec.end_ms if run.spec else 0
+        self.taken = {event.at_ms for event in run.spec.events}
+        self.end_ms = run.spec.end_ms
         self.started = time.monotonic()
         self.refused: str | None = None
 
@@ -128,6 +130,7 @@ class Teacher:
         self.rule_for = rule_for or rules.start
         self.ids: dict[str, str] = {}
         self.started: list[str] = []
+        self.replay_files: dict[str, Path] = {}
 
     def find(self, text: str) -> Path | None:
         if not self.out.is_dir():
@@ -145,8 +148,7 @@ class Teacher:
         if found:
             word = "fault" if found.name.endswith(".fault") else "present"
             return Settled(run.name, found.name.removesuffix(".fault"), word, found)
-        settled = self._run_all([run], workers=1)
-        return settled[run.name]
+        return self._run_all([run], workers=1)[run.name]
 
     def ensure(self, runs: list[TeacherRun], identity: Path, workers: int) -> dict[str, Settled]:
         with_specs = [run for run in runs if run.spec]
@@ -165,7 +167,7 @@ class Teacher:
                 self._check_commit(run.name, directory)
                 settled[run.name] = Settled(run.name, spec_id, word, directory)
         pending = [run for run in runs if run.name not in settled]
-        made = self._run_all(pending, workers, settled, identity)
+        made = self._run_all(pending, workers, settled)
         settled.update(made)
         return {run.name: settled[run.name] for run in runs if run.name in settled}
 
@@ -214,7 +216,7 @@ class Teacher:
         return found
 
     def _room(self, running: list[_Child], run: TeacherRun) -> str | None:
-        need = self.floor_bytes + sum(expected_link_bytes(child.run.spec or run.spec) for child in running)
+        need = self.floor_bytes + sum(expected_link_bytes(child.run.spec) for child in running)
         need += expected_link_bytes(run.spec) if run.spec else 0
         for path in [*self.disks, self.out]:
             free = self.free_bytes(path)
@@ -274,7 +276,7 @@ class Teacher:
 
     def _outcome(self, child: _Child, code: int) -> Settled:
         stdout_log, stderr_log = child.logs
-        said = (stderr_log if child.run.spec is None or child.rule else stdout_log).read_text().strip().splitlines()
+        said = (stderr_log if child.rule else stdout_log).read_text().strip().splitlines()
         if child.refused:
             raise TeacherError(f"{child.run.name}: stopped: {child.refused}")
         if code not in (0, 3) or not said:
@@ -284,15 +286,8 @@ class Teacher:
             raise TeacherError(f"{child.run.name}: gp-driver said {said[-1]!r} and exited {code}")
         return Settled(child.run.name, spec_id, word, Path(path))
 
-    def _run_all(
-        self,
-        pending: list[TeacherRun],
-        workers: int,
-        settled: dict[str, Settled] | None = None,
-        identity: Path | None = None,
-    ) -> dict[str, Settled]:
+    def _run_all(self, pending: list[TeacherRun], workers: int, settled: dict[str, Settled] | None = None) -> dict[str, Settled]:
         settled = dict(settled or {})
-        names = {run.name for run in pending}
         replays_of: dict[str, list[TeacherRun]] = {}
         for run in pending:
             if run.replays:
@@ -304,11 +299,22 @@ class Teacher:
 
         ready = sorted((run for run in pending if run.spec), key=chain, reverse=True)
         waiting = [run for run in pending if run.replays]
-        for run in list(waiting):
-            if run.replays in settled:
-                waiting.remove(run)
-                ready.append(self._replay(run, settled[run.replays]))
         made: dict[str, Settled] = {}
+
+        def follow(source: Settled) -> None:
+            for replay in [r for r in waiting if r.replays == source.name]:
+                waiting.remove(replay)
+                resolved = self._replay(replay, source)
+                found = self.find(resolved.spec.text())
+                if found is None:
+                    ready.insert(0, resolved)
+                    continue
+                self._check_commit(replay.name, found)
+                word = "fault" if found.name.endswith(".fault") else "present"
+                made[replay.name] = settled[replay.name] = Settled(replay.name, found.name.removesuffix(".fault"), word, found)
+
+        for source in list(settled.values()):
+            follow(source)
         running: list[_Child] = []
         selector = selectors.DefaultSelector()
         stop: str | None = None
@@ -323,7 +329,7 @@ class Teacher:
                     stop = f"free disk: {blocked}"
                     break
                 ready.pop(0)
-                path = self._spec_path(run, settled)
+                path = self.replay_files.get(run.name) or self._spec_file(run)
                 child = self._start(run, path, spec, attempt)
                 self.started.append(run.name)
                 running.append(child)
@@ -347,9 +353,7 @@ class Teacher:
                     continue
                 made[child.run.name] = outcome
                 settled[child.run.name] = outcome
-                for replay in [r for r in waiting if r.replays == child.run.name]:
-                    waiting.remove(replay)
-                    ready.insert(0, self._replay(replay, outcome))
+                follow(outcome)
             self._progress(pending, made, settled, running, ready, waiting)
         selector.close()
         if stop:
@@ -360,8 +364,6 @@ class Teacher:
         realized = source.directory / "realized.txt"
         if not realized.is_file():
             raise TeacherError(f"{run.name}: {run.replays} settled with no realized.txt")
-        from spec import Plan
-
         text = realized.read_text()
         events = tuple(
             PostureEvent(int(words[2]), _setting(int(words[4]), words[6]))
@@ -373,13 +375,8 @@ class Teacher:
         spec = RunSpec(core, end_ms, events, None, "none")
         if spec.text() != text:
             raise TeacherError(f"{run.name}: {realized} is not a spec this study writes")
-        del Plan
-        return TeacherRun(run.name, spec, run.replays)
-
-    def _spec_path(self, run: TeacherRun, settled: dict[str, Settled]) -> Path:
-        if run.replays:
-            return settled[run.replays].directory / "realized.txt"
-        return self._spec_file(run)
+        self.replay_files[run.name] = realized
+        return TeacherRun(run.name, spec, None)
 
     def _progress(self, pending, made, settled, running, ready, waiting) -> None:
         total = len(pending) + len(settled) - len(made)

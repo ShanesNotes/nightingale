@@ -1,3 +1,22 @@
+"""The audit plan's grammar: a plan is blocks of lines with one blank line between them.
+
+    gp-audit 1
+    core <driver core words>                                    the default core of every block
+    run <NAME>
+    replays <NAME>                                              alone: the spec is NAME's realized.txt
+    core <driver core words>                                    optional
+    end-ms <MS>
+    events of <NAME> [before-ms <MS>] [except-at-ms <MS>]       optional, first
+    event at-ms <MS> <SETTING>
+    ramp at-ms <MS> every-ms <MS> events <N> trunk <K> to <K> legs <LEGS> to <LEGS> from-event <I>
+    repeat at-ms <MS> every-ms <MS> events <N> settings <SETTING>...
+    closed-loop <rule text>                                     optional
+    variant <driver variant words>                              optional; none otherwise
+    retry if histories-differ fails                             once, alone: the runs after it are the retry's
+
+A ramp's event i (from 1) of N is at `at + (i - 1) every` with trunk `K0 + (K1 - K0)(i - 1)/(N - 1)` in whole
+thousandths, and takes the first legs before event I and the second from it. A repeat takes its settings in turn.
+"""
 from __future__ import annotations
 
 import re
@@ -80,9 +99,9 @@ class RunSpec:
         words = self.core.split(" ")
         return int(words[2]) if words[0] == "ng-solver" else None
 
-    def variant_ms(self) -> int | None:
+    def checkpoint_ms(self) -> int | None:
         words = self.variant.split(" ")
-        return int(words[2]) if len(words) == 3 else None
+        return int(words[2]) if words[0] in ("checkpoint-resume", "rewind") else None
 
 
 @dataclass(frozen=True)
@@ -92,6 +111,10 @@ class PlannedRun:
     replays: str | None
     changes: tuple[int, ...]
     retry: bool
+
+    def __post_init__(self) -> None:
+        if (self.spec is None) == (self.replays is None):
+            raise PlanError(f"{self.name}: a run is a spec or a replay, never both or neither")
 
 
 class _Block:
@@ -223,7 +246,8 @@ class Plan:
         inherited = block.take("events")
         if inherited:
             events = Plan._inherit(name, inherited, known)
-            changes = [event.at_ms for event in events]
+            kept = {event.at_ms for event in events}
+            changes = [at for at in known[inherited[2]].changes if at in kept]
         while True:
             words = block.take("event")
             if words:

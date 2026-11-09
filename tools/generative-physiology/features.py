@@ -20,6 +20,7 @@ class FeatureError(Exception):
 
 
 def within(beats: Sequence[BeatReading], start_s: float, end_s: float) -> list[BeatReading]:
+    """Whole beats only, so the beat that holds a posture change is never read as after it."""
     return [beat for beat in beats if beat.start_s >= start_s and beat.end_s <= end_s]
 
 

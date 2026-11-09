@@ -991,7 +991,7 @@ class SlowFit(unittest.TestCase):
 
         tau = 10 * 10 ** (60 / 40)
         y = [3.0 + 40.0 * math.exp(-i / tau) for i in range(1441)]
-        fit = audit.slow_fit(y, 0.5)
+        fit = audit.slow_fit(y, 1, 0.5)
         self.assertTrue(fit.resolved, fit)
         self.assertAlmostEqual(fit.tau, tau, delta=tau * 1e-9)
         self.assertAlmostEqual(fit.b, 40.0, places=6)
@@ -999,7 +999,7 @@ class SlowFit(unittest.TestCase):
     def test_a_straight_line_resolves_nothing_at_the_grid_s_end(self) -> None:
         import audit
 
-        fit = audit.slow_fit([0.01 * i for i in range(1441)], 0.0)
+        fit = audit.slow_fit([0.01 * i for i in range(1441)], 1, 0.0)
         self.assertEqual(fit.tau, 100_000.0)
         self.assertLessEqual(fit.rms, 0.05 * abs(fit.b))
         self.assertLess(fit.span, 2.0)
@@ -1010,8 +1010,8 @@ class SlowFit(unittest.TestCase):
 
         tau = 10 * 10 ** (60 / 40)
         y = [40.0 * math.exp(-i / tau) for i in range(1441)]
-        self.assertFalse(audit.slow_fit(y, 2.5).resolved)
-        self.assertTrue(audit.slow_fit(y, 1.9).resolved)
+        self.assertFalse(audit.slow_fit(y, 1, 2.5).resolved)
+        self.assertTrue(audit.slow_fit(y, 1, 1.9).resolved)
 
 
 class Settings(unittest.TestCase):
@@ -1270,6 +1270,55 @@ class RealDriver(unittest.TestCase):
         self.assertGreaterEqual(len(looped.summary.enqueued), 1, "the rule acted")
         self.assertEqual(replayed.spec_text, looped.realized_text)
         self.assertEqual(audit.same_log_check(looped, [replayed]).verdict, "pass")
+
+
+RULE_TRANSCRIPTS = {1: "1e8441f9d6f1995be152340880c6fc2aa85396dbc6e6dc2ed1966db3e9beb0ba"}
+
+
+class Pins(unittest.TestCase):
+    def test_a_rule_whose_answers_change_takes_a_new_version(self) -> None:
+        import capture, rules
+
+        rule = rules.AuditPressureRule(rules.parse(RULE_TEXT), 900000, {1000, 180000})
+        lines = []
+        for n in range(600):
+            end_s = 300.0 + 0.9 * n
+            pressure = 100.0 + 5.0 * math.sin(n / 7.0)
+            event = rule.react(capture.BeatReading(n, end_s - 0.9, end_s, 1.0, pressure, 70.0, 2.0), earliest(end_s))
+            lines.append(event.line() if event else "none")
+        digest = hashlib.sha256("\n".join(lines).encode()).hexdigest()
+        self.assertEqual(RULE_TRANSCRIPTS.get(rules.VERSION), digest, "a rule whose answers change takes a new VERSION")
+
+    def test_the_skin_rate_is_read_from_the_slice(self) -> None:
+        import audit
+
+        rate = audit.skin_basal_per_s()
+        self.assertGreater(rate, 0.0)
+        self.assertIn(f'"ms.skin-water", body, {rate}, note', audit.SLICE.read_text())
+
+    def test_the_reflex_bars_are_the_reference_test_s(self) -> None:
+        import audit
+
+        text = audit.REFLEX_TEST.read_text()
+        test = text[text.index(audit.REFLEX) : text.index("\n}\n", text.index(audit.REFLEX))]
+        self.assertIn(f"traffic > {audit.TRAFFIC_RATIO} * flat_traffic", test)
+        self.assertIn(f"> solved.value(&flat, water) + {audit.LEG_WATER_MARGIN}", test)
+        self.assertIn(f"(gap - {audit.STRETCH_GAP}).abs() < 1e-9", test)
+        self.assertEqual(audit.STRETCH_WITHIN, 1e-9)
+        mean_over = text[text.index("fn mean_over") : text.index("(session, sum / count)")]
+        self.assertIn("sum += self.value(session, kind);", mean_over, "one sample per accepted step, added in order")
+
+    def test_the_fixture_writes_the_driver_layout_without_the_reader(self) -> None:
+        import inspect
+
+        source = inspect.getsource(Fixture) + inspect.getsource(npy) + inspect.getsource(catalogue_text)
+        self.assertNotRegex(source, r"\bcapture\.|import capture")
+
+    def test_a_difference_sums_both_limbs_before_its_one_rounding(self) -> None:
+        import capture
+
+        limbs = capture.Limbs((2.0**53, 2.0**53 + 2.0), (1.0, 0.0))
+        self.assertEqual(limbs.difference(1, 0), 1.0)
 
 
 def run(real: pathlib.Path | None) -> int:

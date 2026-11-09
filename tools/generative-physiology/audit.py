@@ -25,6 +25,9 @@ from teacher import Teacher, TeacherError, TeacherRun
 
 ROOT = Path(__file__).resolve().parents[2]
 TRACE = ROOT / "crates" / "ng-validate" / "tests" / "trace.rs"
+SLICE = ROOT / "crates" / "ng-validate" / "src" / "slice.rs"
+REFLEX_TEST = ROOT / "crates" / "ng-validate" / "tests" / "arena_body.rs"
+REFLEX = "fn the_body_answers_a_stand_through_its_own_baroreflex"
 PINNED = "fn the_first_second_of_the_slice_on_ng_solver_stays_where_it_was"
 FENCE_NS = 1_000_000_000
 
@@ -36,7 +39,6 @@ ARCH = "algebraic/CV/aortic_arch_stretch/body"
 SINUS = "algebraic/CV/carotid_sinus_stretch/body"
 PRESSURE = "algebraic/CV/blood pressure/systemic arteries"
 SKIN_SUFFIX = "/Water/skin water"
-SKIN_BASAL_PER_S = 0.01
 STIR = "MS/stir"
 
 TRAFFIC_RATIO = 1.2
@@ -128,6 +130,13 @@ def a0_pins() -> tuple[str, str, int]:
         raise CaptureError(f"{TRACE.name} no longer pins the first second in {PINNED}")
     whole, part = heads[-1]
     return digests[0], digests[1], int(whole) * 1_000_000 + int(part)
+
+
+def skin_basal_per_s() -> float:
+    found = re.findall(r'"ms\.skin-water", body, ([0-9.]+), note', SLICE.read_text())
+    if len(found) != 1:
+        raise CaptureError(f"{SLICE.name} no longer sets ms.skin-water once")
+    return float(found[0])
 
 
 def a0_check(run: RunData) -> Check:
@@ -247,7 +256,7 @@ def beat_gap(run: RunData, edges) -> Extreme:
     return worst
 
 
-def taus() -> list[tuple[float, float]]:
+def taus(step_s: int) -> list[tuple[float, float]]:
     """The 161 time constants 10 * 10^(k/40) s and each one's one-second decay exp(-1/tau), from `decimal`, so no host
     library reaches a reported digit."""
     found = []
@@ -255,15 +264,15 @@ def taus() -> list[tuple[float, float]]:
         context.prec = 50
         for k in range(TAUS):
             tau = Decimal(10) * Decimal(10) ** (Decimal(k) / Decimal(40))
-            found.append((float(tau), float((Decimal(-1) / tau).exp())))
+            found.append((float(tau), float((Decimal(-step_s) / tau).exp())))
     return found
 
 
-def slow_fit(y: list[float], variation: float) -> Fit:
+def slow_fit(y: list[float], step_s: int, variation: float) -> Fit:
     n = len(y)
     mean_y = math.fsum(y) / n
     results = []
-    for tau, decay in taus():
+    for tau, decay in taus(step_s):
         x, value = [], 1.0
         for _ in range(n):
             x.append(value)
@@ -452,7 +461,7 @@ def stir_s(run: RunData) -> str:
 def skin_range(run: RunData, edges) -> str:
     column = run.catalogue.column_ending(SKIN_SUFFIX)
     net = edges.beat_net_extents(column)
-    factors = [abs(extent) / ((edges.times_ns[j + 2] - edges.times_ns[j + 1]) / 1e9) / SKIN_BASAL_PER_S for j, extent in enumerate(net)]
+    factors = [abs(extent) / (edges.beat_ns(j) / 1e9) / skin_basal_per_s() for j, extent in enumerate(net)]
     return f"{num(min(factors))} to {num(max(factors))}" if factors else "no beat"
 
 
@@ -485,15 +494,15 @@ def evaluate(out: Path, plan: Plan, commit: str) -> Evaluation:
     tech, info, measure = "technical", "informativeness", "measurement"
 
     rows.append(row("A0 pinned second", "A0", "trace.rs:135-136, 147", tech, lambda: a0_check(runs["A0"])))
-    rows.append(row("A1 across checkpoint", "A1", "all equal", tech, lambda: branch_check(runs["A1"], plan["A1"].spec.variant_ms())))
-    rows.append(row("A2, A3 reflex", "A2, A3", "the reference test's bars", tech, lambda: reflex_check(runs["A2"], runs["A3"])))
+    rows.append(row("A1 across checkpoint", "A1", "all equal", tech, lambda: branch_check(runs["A1"], plan["A1"].spec.checkpoint_ms())))
+    rows.append(row("A2, A3 reflex", "A2, A3", f"the bars of {REFLEX.removeprefix('fn ')}", tech, lambda: reflex_check(runs["A2"], runs["A3"])))
 
     def late_checkpoint() -> Check:
-        found = branch_check(runs["A4"], plan["A4"].spec.variant_ms())
+        found = branch_check(runs["A4"], plan["A4"].spec.checkpoint_ms())
         return Check(f"{found.measured}; resume {num(runs['A4'].summary.branch.restore_s)} s", found.verdict)
 
     rows.append(row("A4 late checkpoint", "A4", "all equal", tech, late_checkpoint))
-    rows.append(row("A5 rewind", "A5", "all equal", tech, lambda: branch_check(runs["A5"], plan["A5"].spec.variant_ms())))
+    rows.append(row("A5 rewind", "A5", "all equal", tech, lambda: branch_check(runs["A5"], plan["A5"].spec.checkpoint_ms())))
 
     def prefixes() -> Check:
         runs.need("B1", "B2", "B3")
@@ -584,7 +593,7 @@ def evaluate(out: Path, plan: Plan, commit: str) -> Evaluation:
         d0, d1, g2 = (held_series(runs[name], LEG_INTERSTITIUM, grid) for name in ("D0", "D1", "G2"))
         y = [one - other for one, other in zip(d1, d0)]
         variation = max(abs(one - other) for one, other in zip(d1, g2))
-        fit = slow_fit(y, variation)
+        fit = slow_fit(y, 1, variation)
         fit_holder.append(fit)
         word = "resolved" if fit.resolved else "unresolved within 30 minutes"
         note = f"; {fit.note}" if fit.note else ""

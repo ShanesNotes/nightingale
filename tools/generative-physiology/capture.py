@@ -379,19 +379,26 @@ class Edges:
         start = edge * self.width + 2
         return tuple(self.cells[start : start + len(self.catalogue.modes)])
 
+    def beat_rows(self, beat: int) -> tuple[int, int]:
+        """The edge rows a beat spans: the start and the beat edges are rows 0 and up, so beat j's are j + 1 and j + 2."""
+        return beat + 1, beat + 2
+
+    def beat_ns(self, beat: int) -> int:
+        start, end = self.beat_rows(beat)
+        return self.times_ns[end] - self.times_ns[start]
+
     def beat_means(self, row: str) -> list[float]:
         integral = self.integral(row)
-        return [
-            integral.difference(j + 2, j + 1) / (self.times_ns[j + 2] - self.times_ns[j + 1])
-            for j in range(self.beats)
-        ]
+        return [integral.difference(*reversed(self.beat_rows(j))) / self.beat_ns(j) for j in range(self.beats)]
 
     def beat_net_extents(self, column: str) -> list[float]:
         forward, reverse = self.extent(column)
-        return [
-            math.fsum((*forward.parts(j + 2), *(-x for x in forward.parts(j + 1)), *(-x for x in reverse.parts(j + 2)), *reverse.parts(j + 1)))
-            for j in range(self.beats)
-        ]
+        found = []
+        for j in range(self.beats):
+            start, end = self.beat_rows(j)
+            limbs = (*forward.parts(end), *reverse.parts(start)), (*forward.parts(start), *reverse.parts(end))
+            found.append(math.fsum((*limbs[0], *(-x for x in limbs[1]))))
+        return found
 
     @property
     def beats(self) -> int:
@@ -440,7 +447,7 @@ class RunData:
         if catalogue.model != summary.model:
             raise CaptureError(f"{directory.name}: the catalogue's model is not the run's model")
         run = RunData(directory, summary, catalogue)
-        run.guard()
+        run.check_layout()
         return run
 
     def _table(self, name: str, typecode: str, columns: int) -> tuple[int, array]:
@@ -509,7 +516,7 @@ class RunData:
         rows, cells = self._table("applied.npy", "Q", 2)
         return tuple((cells[r * 2], cells[r * 2 + 1]) for r in range(rows))
 
-    def guard(self) -> None:
+    def check_layout(self) -> None:
         if len(self.seals) != self.summary.number("revisions") + 1:
             raise CaptureError(f"{self.directory.name}: steps.npy holds {len(self.seals) - 1} revisions")
         for row in self.catalogue.sampled:
@@ -528,6 +535,6 @@ class RunData:
         pressure = edges.beat_means(PRESSURE)[: len(beats)]
         stroke = edges.beat_net_extents(AORTIC_WATER)[: len(beats)]
         for j, beat in enumerate(beats):
-            spans = (seconds(edges.times_ns[j + 1]), seconds(edges.times_ns[j + 2]))
+            spans = tuple(seconds(edges.times_ns[row]) for row in edges.beat_rows(j))
             if spans != (beat.start_s, beat.end_s) or not (_close(pressure[j], beat.arterial_pressure) and _close(stroke[j], beat.stroke)):
                 raise CaptureError(f"{self.directory.name}: beat {j} differs from the edges it spans")
