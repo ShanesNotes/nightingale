@@ -1,6 +1,14 @@
 export type PatientTime = number
+export type WallTime = number
+
+export type PatientClock = {
+  readonly start: PatientTime
+  readonly end: PatientTime
+  readonly anchor: WallTime
+}
 
 const NANOSECONDS_PER_SECOND = 1_000_000_000
+const MILLISECONDS_PER_SECOND = 1_000
 const CLOCK = /^([01]\d|2[0-3]):([0-5]\d):([0-5]\d)$/
 
 const twoDigits = (n: number) => String(n).padStart(2, '0')
@@ -15,4 +23,14 @@ export function parseClock(text: string): PatientTime | undefined {
 export function formatClock(time: PatientTime): string {
   const seconds = Math.floor(time / NANOSECONDS_PER_SECOND)
   return `${twoDigits(Math.floor(seconds / 3600))}:${twoDigits(Math.floor(seconds / 60) % 60)}:${twoDigits(seconds % 60)}`
+}
+
+export function wallTime(milliseconds: number): WallTime {
+  if (!Number.isSafeInteger(milliseconds)) throw new RangeError(`${milliseconds} ms is not a wall-clock instant`)
+  return milliseconds
+}
+
+export function patientTimeAt(clock: PatientClock, wall: WallTime): PatientTime {
+  const elapsed = Math.max(0, Math.floor((wall - clock.anchor) / MILLISECONDS_PER_SECOND))
+  return Math.min(clock.end, clock.start + elapsed * NANOSECONDS_PER_SECOND)
 }
