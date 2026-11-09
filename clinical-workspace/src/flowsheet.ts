@@ -1,6 +1,6 @@
 import type { EntryView, ReadModel, ReadingView, StatementView } from './chart-api.ts'
 import type { Source } from './device.ts'
-import { add, earlier, floorTo, MINUTE, type PatientTime, SECOND } from './time.ts'
+import { add, type Duration, earlier, floorTo, MINUTE, type PatientTime, SECOND, since } from './time.ts'
 import { VITALS, type VitalRow } from './vitals.ts'
 
 // A pure grid over the chart's read model: it computes and never stores.
@@ -15,7 +15,9 @@ export type MonitorCell =
       readonly missing: number
     }
 
-export type ChartedCell = { readonly kind: 'entries'; readonly entries: readonly EntryView[] }
+export type ChartedValue = { readonly entry: EntryView; readonly lateBy: Duration; readonly edited: boolean }
+
+export type ChartedCell = { readonly kind: 'entries'; readonly entries: readonly ChartedValue[] }
 
 export type FlowsheetRow =
   | { readonly source: 'monitor'; readonly vital: VitalRow; readonly cells: readonly MonitorCell[] }
@@ -72,13 +74,18 @@ function monitorCell(model: ReadModel, vital: string, minute: PatientTime): Moni
   }
 }
 
+function chartedCell(model: ReadModel, vital: string, minute: PatientTime): ChartedCell {
+  const entries = model.entries.filter((e) => e.vital === vital && within(e.care, minute))
+  return { kind: 'entries', entries: entries.map((entry) => ({ entry, lateBy: Math.max(0, since(entry.charted, entry.care)), edited: entry.versions > 1 })) }
+}
+
 export function flowsheet(model: ReadModel, vitals: readonly VitalRow[] = VITALS): Flowsheet {
   const columns = minutes(model)
   return {
     minutes: columns,
     rows: vitals.flatMap((vital): FlowsheetRow[] => [
       { source: 'monitor', vital, cells: columns.map((minute) => monitorCell(model, vital.vital, minute)) },
-      { source: 'charted', vital, cells: columns.map(() => ({ kind: 'entries', entries: [] })) },
+      { source: 'charted', vital, cells: columns.map((minute) => chartedCell(model, vital.vital, minute)) },
     ]),
   }
 }
