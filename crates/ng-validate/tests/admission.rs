@@ -627,6 +627,89 @@ fn a_core_off_the_grid_starts_near_its_own_orbit_and_closes_on_it() {
     }
 }
 
+/// The start of `d`'s orbit at conductance times elastance `k`, with the pulse over the first `pulse` of `intervals`,
+/// when each interval multiplies a deviation from the drive's own orbit by `per(-2 k h)`.
+fn orbit_start(k: f64, intervals: u32, pulse: u32, per: impl Fn(f64) -> f64) -> f64 {
+    let period = seconds(PERIOD_NS);
+    let h = period / f64::from(intervals);
+    let (v, tau) = (DELIVERED / period, h * f64::from(pulse));
+    let (d1, d2) = ((DELIVERED / tau + v) / (2.0 * k), v / (2.0 * k));
+    let r = per(-2.0 * k * h);
+    let power = |steps: u32| (0..steps).fold(1.0, |product, _| product * r);
+    let (e1, e2) = (power(pulse), power(intervals - pulse));
+    let d = (d2 * (1.0 - e2) + d1 * e2 * (1.0 - e1)) / (1.0 - e1 * e2);
+    (TOTAL + d) / 2.0
+}
+
+/// Two-stage Radau IIA's multiplier on `y' = lambda y` over one interval, at `z = lambda h`.
+fn radau(z: f64) -> f64 {
+    (1.0 + z / 3.0) / (1.0 - 2.0 * z / 3.0 + z * z / 6.0)
+}
+
+/// `exp(-2 k h)` per interval is the continuous orbit, whose start every grid approaches.
+fn exact_start_a() -> f64 {
+    orbit_start(steady_k(), 4, 1, exp)
+}
+
+/// Each halving of the interval must cut the start's distance from the continuous orbit by about eight, the third
+/// order of a two-stage Radau IIA interval; a first-order stage cuts it by two. The bounds on the distance itself keep
+/// an answer that is exact by accident, or zero everywhere, from passing on its ratios.
+#[test]
+fn a_radau_cycle_closes_on_the_continuous_orbit_at_third_order() {
+    let store = MemoryStore::default();
+    let core = reference(REFERENCE_NS);
+    let exact = exact_start_a();
+    let distance = |intervals: u32| {
+        let case = PulsatileCase::plain().with_intervals(intervals);
+        let session = case.admitted(&core, &store).session;
+        (hi(session.record().accepted().value(case.row_a())) - exact).abs()
+    };
+    let distances: Vec<f64> = [8, 16, 32, 64].into_iter().map(distance).collect();
+    assert!(
+        distances[0] > 1e-5 && distances[3] < 1e-6,
+        "{distances:?}"
+    );
+    for pair in distances.windows(2) {
+        let ratio = pair[0] / pair[1];
+        assert!((7.5..8.5).contains(&ratio), "{ratio} in {distances:?}");
+    }
+}
+
+/// A conductance so large that each interval meets the flow's decay thousands of times over, with the pulse over the
+/// first interval alone. An interval that keeps a stiff deviation's size, as the trapezoid flips it, leaves an even
+/// ring with no rank there; a damping one admits odd and even rings alike, each on its own orbit in closed form.
+#[test]
+fn a_stiff_row_driven_inside_the_beat_is_admitted_on_odd_and_even_rings() {
+    let store = MemoryStore::default();
+    let (elastance, conductance) = (2.0, 5_000.0);
+    for intervals in [2_u32, 4, 5, 8, 25] {
+        let case = PulsatileCase::plain().with_intervals(intervals);
+        let step = PERIOD_NS / u64::from(intervals);
+        let mut packet = ParameterPacket::periodic(cycle(intervals));
+        packet.within(admission_tolerance());
+        let g = measure::<Conductance<Water>>(conductance);
+        packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+        (packet.synthetic(E, NETWORK, measure::<Elastance>(elastance), NOTE)).expect("once");
+        packet
+            .start(case.a(), measure::<Water>(START[0]), NOTE)
+            .expect("once");
+        packet
+            .start(case.b(), measure::<Water>(START[1]), NOTE)
+            .expect("once");
+        let boundary = BoundaryPort::new(vec![
+            water(b"first interval", 0, PULSE, 0, step, DELIVERED),
+            water(b"even out", 0, DRAIN, 0, PERIOD_NS, DELIVERED),
+        ])
+        .expect("parsed");
+        let core = reference(step);
+        let solved = admit_solved(case.body(), packet, boundary, &core, &case.lens, &store);
+        let session = solved.unwrap_or_else(|failure| panic!("{intervals}: {failure:?}")).session;
+        let start = hi(session.record().accepted().value(case.row_a()));
+        let orbit = orbit_start(elastance * conductance, intervals, 1, radau);
+        assert!((start - orbit).abs() < 1e-11, "{intervals}: {start} against {orbit}");
+    }
+}
+
 #[test]
 fn an_instant_anchor_on_a_pulsatile_row_is_refused_and_on_a_slow_row_is_read() {
     let store = MemoryStore::default();
@@ -844,6 +927,32 @@ fn a_guess_that_already_solves_the_system_is_admitted() {
     let system = steady_system(&case, packet, boundary);
     let guess = system.workspace();
     assert!(system.admit(guess, case.history()).is_ok());
+}
+
+/// One judged start serves every core: the start under another history is the start that history's admission of the
+/// same witness gives, bit for bit, with its hash closed on the new history, its fits, pending inputs and provenance
+/// unmoved.
+#[test]
+fn a_judged_start_under_another_history_is_that_historys_admission_of_it() {
+    let case = PulsatileCase::plain();
+    let other = MethodHistory::new(Digest::of_canonical(b"another schema"), at(0), vec![3]);
+    let admitted = |history: MethodHistory| {
+        let (packet, boundary, _) = steady_packet(&case);
+        let system = steady_system(&case, packet, boundary);
+        let guess = system.workspace();
+        system.admit(guess, history).expect("admitted")
+    };
+    let first = admitted(case.history());
+    let reused = first.with_history(other.clone());
+    let fresh = admitted(other);
+    assert_ne!(reused.packet_hash(), first.packet_hash());
+    assert_eq!(reused.packet_hash(), fresh.packet_hash());
+    assert_eq!(reused.model_hash(), fresh.model_hash());
+    assert_eq!(reused.provenance(), fresh.provenance());
+    assert_eq!(reused.into_parts().canonical(), fresh.into_parts().canonical());
+    let again = first.with_history(case.history());
+    assert_eq!(again.packet_hash(), first.packet_hash());
+    assert_eq!(again.into_parts().canonical(), first.into_parts().canonical());
 }
 
 #[test]
