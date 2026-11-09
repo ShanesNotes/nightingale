@@ -2,7 +2,7 @@
 
 Type: task
 Status: open
-Blocked by: 05, 06
+Blocked by: 05, 06, 26
 
 **What to build:** Urine the kidney makes collects in the bladder and leaves at a void, which is an event of the day. Balance never needed this, but a chart of voided urine does. This is pass 2.
 

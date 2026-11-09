@@ -8,6 +8,7 @@ Blocked by: 03
 
 - [ ] A scope and a ports struct for each of the nine systems, granting only what [ticket 01](01-rung-0-specification.md) says that system owns
 - [ ] Each coupling arrow with no payload yet gets one, or is recorded as an anatomy relation, so all 38 are accounted for in the whole body. Arrow 111, intracranial pressure, gets its owner or an explicit hold
+- [ ] Each system crate declares one law to a module, so two tickets that add laws to one crate edit different files
 - [ ] Every port signal states its time basis: instantaneous, a beat mean or a breath mean
 - [ ] The census is computed for an assembly, the slice's census is unchanged, and the check that pins the slice's counts still holds them
 - [ ] The rule in `AGENTS.md` that states the census, and its check, name both assemblies

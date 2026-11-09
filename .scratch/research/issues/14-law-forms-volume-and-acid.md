@@ -10,7 +10,8 @@ Blocked by: 02
 - [ ] Natriuretic peptide secretion against wall stress
 - [ ] Vasopressin as a species with its own clearance: secretion against osmolality and volume, and its rise at night
 - [ ] The kidney's sodium excretion against pressure and these hormones. [Evidence library ticket 03](../../evidence-library/issues/03-pressure-natriuresis-check.md) found that the slice's kidney answers only through the filtered load
-- [ ] Potassium excretion against aldosterone and delivery
+- [ ] Potassium excretion against aldosterone and delivery, and the pump and leak that hold potassium inside cells
+- [ ] Cell water against tonicity across the cell membrane
 - [ ] The clock's gain on filtration
 - [ ] Fixed acid production from the diet, and the kidney's net acid excretion as a feedback on the strong ion difference
 - [ ] The acid-base interface: strong ion difference, weak acids and carbon dioxide, with the lumped anion that keeps charge at zero

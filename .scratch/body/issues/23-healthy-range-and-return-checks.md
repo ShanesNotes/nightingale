@@ -8,6 +8,7 @@ Blocked by: none
 
 - [ ] A synthetic run built to leave its range for one window fails the healthy-range check, and the failure names the reading and the window
 - [ ] A run that stays in range but ends a day away from its anchor fails the return check and passes the other. A run that returns to its anchor but leaves its range between fails the healthy-range check and passes the other
+- [ ] A reading that leaves its range between two sampling instants, a window that crosses a change of activity, and a study that averaged a whole period are each judged as record 0004 says. A change with no range of its own blocks the verdict
 - [ ] A corrected set rechecks a finished replay and gives a new result without changing the run's identity
 - [ ] A reading with no range in the set blocks the verdict and is named, never skipped
 - [ ] Each rule has a must-fail row or a mutant row

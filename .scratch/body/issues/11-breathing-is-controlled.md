@@ -13,6 +13,6 @@ Blocked by: 05, 10, `.scratch/research/issues/11-law-forms-gas-loop.md`
 - [ ] Run: sleep raises arterial carbon dioxide and lowers ventilation, with no law setting either
 - [ ] Every link of the loop moves its reader the way the loop needs, on the admitted start
 - [ ] The certificate passes with the oxygen and carbon dioxide books held by this loop, and the body's trace is updated
-- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 07's budget
+- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** transport delays, periodic breathing, cough, and breathing under voluntary control.

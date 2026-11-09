@@ -8,10 +8,10 @@ Blocked by: 11, 12, 16, 17, 18, 23, 25
 
 - [ ] The certificate passes on the 24 h window: every book closes, and each amount's drift stays inside its synthetic bound
 - [ ] Each row of the contract's day table passes by direction, the rows the slice could not show included
-- [ ] The healthy-range check and the return check run on a synthetic set and report
+- [ ] The healthy-range check passes on a synthetic set, and the return check passes at 24 hours. Missing coverage is named and never counts as a pass. The return at 48 hours is ticket 28's
 - [ ] The hold table lists only pass 2 holds and the systems at rest
 - [ ] Every coupling arrow is wired, an anatomy relation, or listed as a hold with its reason, by the whole body's census
-- [ ] Wall time for the day is recorded against [ticket 07](07-cost-budget-and-step-plan.md)'s budget, with the machine and the run count
+- [ ] Wall time for the day meets [ticket 26](26-cost-budget.md)'s ceiling under its repeat protocol
 - [ ] The Answer lists what must change before [foundation 01](../../foundation/issues/01-arena-and-milestone.md), step 4, binds the reviewed packet
 
-**Non-goals:** a 48 h run, any clinical claim, and pass 2.
+**Non-goals:** a 48 h run and pass 2, which are [ticket 28](28-two-synthetic-days.md), and any clinical claim.

@@ -10,6 +10,6 @@ Blocked by: 05, 09, `.scratch/research/issues/12-law-forms-heat.md`
 - [ ] Run: in sleep, heart rate, arterial pressure and oxygen use fall and then return on waking, by direction. Lying down and sleep together do not overshoot the fall the day's check allows
 - [ ] The day table's sleep rows report pass or fail, not "not available yet"
 - [ ] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved
-- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 07's budget
+- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** REM sleep, a sleep law that decides when the body sleeps, and the clock as an oscillator.

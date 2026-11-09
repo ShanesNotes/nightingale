@@ -7,6 +7,7 @@ Blocked by: 02
 **Question:** Which cited form does each law of the oxygen and carbon dioxide loop take at rung 0? [Body tickets 08 to 11](../../body/map.md) write the laws, so each answer is a form, where its constants go, a stated validity range and how far the source was read, to the standard of [ticket 02](02-law-forms.md). No value is bound here.
 
 - [ ] Oxygen in blood: saturation against partial pressure, with the shifts rung 0 keeps
+- [ ] Hemoglobin as the oxygen carrier's capacity, and hematocrit as the viscosity form of ticket 02 reads it
 - [ ] Carbon dioxide in blood and tissue: total content against partial pressure, and the acid-base interface it shares with [ticket 14](14-law-forms-volume-and-acid.md)
 - [ ] The tissue store of carbon dioxide: one lumped compartment, and what sets its capacity
 - [ ] Tissue respiration: oxygen use, carbon dioxide and heat by bed, and the respiratory quotient by fuel

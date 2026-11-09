@@ -12,6 +12,6 @@ Blocked by: 08, 14, `.scratch/research/issues/15-law-forms-slow-books.md`
 - [ ] Run: a store started 5% below balance moves toward balance, and each store ends a synthetic day within its drift bound
 - [ ] The body model carries, for coagulation and for immunity, the list of behaviors it cannot show
 - [ ] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved
-- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 07's budget
+- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** a clotting model, an inflammation model, red cell age, and erythropoietin as a moving hormone.

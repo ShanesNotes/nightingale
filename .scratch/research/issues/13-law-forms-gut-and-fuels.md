@@ -8,12 +8,13 @@ Blocked by: 02
 
 - [ ] Gastric emptying and absorption by segment, for water, sodium, potassium, chloride, glucose and amino acids
 - [ ] Dietary fat by the lymph route
-- [ ] The liver as the glucose hub: glycogen storage and release, glucose output against insulin and glucagon, lactate uptake
+- [ ] The liver as the glucose hub: glycogen storage and release, glucose output against insulin and glucagon, and glucose made overnight from lactate, amino acids and glycerol
 - [ ] Urea synthesis from amino acids, so nitrogen in equals nitrogen out over a day
 - [ ] Insulin and glucagon secretion against glucose, with portal and systemic concentrations, and their clearance
 - [ ] Glucose uptake by muscle and fat against insulin, and the potassium that moves into cells with it
-- [ ] Fat storage after a meal and release overnight, and ketones as the fasting signal
+- [ ] Fat storage after a meal and release overnight, and ketones made by the liver and burned by the tissues
 - [ ] Body protein turnover at its smallest, and creatinine production from muscle
+- [ ] The kidney's handling of each new solute: glucose reclaimed up to a limit, urea partly reclaimed, creatinine filtered
 - [ ] Diet-induced heat production
 - [ ] A validity range for each form, with its source
 

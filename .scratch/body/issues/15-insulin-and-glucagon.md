@@ -13,6 +13,6 @@ Blocked by: 14, `.scratch/research/issues/13-law-forms-gut-and-fuels.md`
 - [ ] Run: a meal's potassium moves into cells first and is excreted after
 - [ ] Every link of the loop moves its reader the way the loop needs, on the admitted start
 - [ ] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved
-- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 07's budget
+- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** gut hormones, pulsed secretion, epinephrine's part unless ticket 01 puts it in rung 0, and the evening fall in sensitivity.

@@ -9,6 +9,6 @@ Blocked by: 05, 14, `.scratch/research/issues/15-law-forms-slow-books.md`
 - [ ] Tests: the secretion profile and the clearance match their forms at stated points
 - [ ] Run: the liver's glucose output rises toward morning with cortisol, and no law sets glucose
 - [ ] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved
-- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 07's budget
+- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** the stress response, pulsed secretion, and cortisol's other actions.

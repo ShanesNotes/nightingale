@@ -12,6 +12,6 @@ Blocked by: 05, 09, `.scratch/research/issues/12-law-forms-heat.md`
 - [ ] Run: at admission, heat made equals heat lost within a stated tolerance, so the heat book does not drift from the start
 - [ ] Run: a warmer room raises skin flow and then sweat. A cooler room narrows skin vessels and then starts shivering. The set point's daily swing shows in core temperature, with no law setting a temperature
 - [ ] The certificate passes on the whole body with the heat book held by this loop, and the body's trace is updated
-- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 07's budget
+- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** more than two nodes, fever, exercise, and clothing as anything but one insulation value.
