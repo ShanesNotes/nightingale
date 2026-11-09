@@ -11,6 +11,7 @@ The reference man's reviewed packet and a reviewed healthy-range set exist as ch
 - A cross-check runs at two levels: inside one source for integrity, and across the packet's picks for fitness. A failure is explained by method, population or scale, or the value changes. Source strength never excuses a failed identity.
 - Source text stays local. Only numbers and citations enter the repo.
 - Pulse is a reference, never a pass bar (SRS rule 6).
+- Tickets 11 to 15 give the law forms for the nine systems the slice lacks, one ticket for each loop of the [body map](../body/map.md).
 
 ## Decisions so far
 
