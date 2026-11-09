@@ -1,7 +1,7 @@
 import type { Html, HtmlBuilder } from 'foldkit/html'
 import { ROSTER } from '../chart-api.ts'
 import { type ChartedValue, flowsheet, type MonitorCell } from '../flowsheet.ts'
-import { formatClock, formatDuration, type PatientTime, since } from '../time.ts'
+import { formatClock, formatDuration, type PatientTime, seconds, since } from '../time.ts'
 import { VITALS, type VitalRow } from '../vitals.ts'
 import { Message, type Model, selectedEntry } from './program.ts'
 
@@ -119,17 +119,37 @@ function details(model: Model, h: H, vitals: readonly VitalRow[]): Html {
   ])
 }
 
+function serviceWords(model: Model): string {
+  if (model.latest === null) return 'The chart service has not answered yet.'
+  if (model.answering) return 'The chart service is answering.'
+  const ago = model.heard === null || model.checked === null ? 0 : Math.floor((model.checked - model.heard) / 1000)
+  return `The chart service is not answering. This view was current ${formatDuration(seconds(ago))} ago, at patient time ${formatClock(model.latest.now)}.`
+}
+
+function closed(h: H): Html {
+  return h.div([h.Id('workspace')], [
+    h.h1([], ['Clinical workspace']),
+    h.p([h.Id('closed')], ['The chart is closed.']),
+    h.button([h.Id('reopen'), h.Type('button'), h.OnClick(Message.ClickedReopen())], ['Reopen chart']),
+  ])
+}
+
 export const makeView =
   (vitals: readonly VitalRow[]) =>
-  (model: Model, h: H): Html =>
-    h.div([h.Id('workspace')], [
+  (model: Model, h: H): Html => {
+    if (model.screen === 'closed') return closed(h)
+    const { latest } = model
+    return h.div([h.Id('workspace')], [
       h.h1([], ['Clinical workspace']),
-      h.p([h.Id('patient')], [model.latest === null ? 'Waiting for the chart service.' : `Patient ${model.latest.run.patient}, synthetic, from a recorded run.`]),
-      h.p([h.Id('now')], [model.latest === null ? '' : `Patient time ${formatClock(model.latest.now)}`]),
+      h.button([h.Id('close'), h.Type('button'), h.OnClick(Message.ClickedClose())], ['Close chart']),
+      h.p([h.Id('patient')], [latest === null ? 'Waiting for the chart service.' : `Patient ${latest.run.patient}, synthetic, from a recorded run.`]),
+      h.p([h.Id('now')], [latest === null ? '' : `Patient time ${formatClock(latest.now)}`]),
+      h.p([h.Id('service'), h.AriaLive('polite')], [serviceWords(model)]),
       form(model, h, vitals),
       h.p([h.Id('notice'), h.AriaLive('polite')], [model.notice]),
       sheet(model, h, vitals),
       details(model, h, vitals),
     ])
+  }
 
 export const view = makeView(VITALS)

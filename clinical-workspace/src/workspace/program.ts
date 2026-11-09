@@ -73,6 +73,8 @@ export const Message = defineMessageUnion({
   TypedEditValue: { text: Schema.String },
   TypedEditCare: { text: Schema.String },
   ClickedSaveEdit: {},
+  ClickedClose: {},
+  ClickedReopen: {},
 })
 export type Message = typeof Message.Type
 
@@ -141,7 +143,7 @@ export function init(): Return {
     model: {
       screen: 'open',
       latest: null,
-      answering: true,
+      answering: false,
       heard: null,
       checked: null,
       fetching: false,
@@ -183,6 +185,7 @@ export function update(model: Model, message: Message): Return {
   return Message.match<Return>(message, {
     Polled: ({ at }) => (model.fetching ? { model: { ...model, checked: at } } : { model: { ...model, checked: at, fetching: true }, commands: [FetchChart()] }),
     GotChart: ({ chart, at }) => {
+      if (model.screen === 'closed') return { model: { ...model, fetching: false } }
       const stale = model.latest !== null && chart.now < model.latest.now
       return { model: { ...model, latest: stale ? model.latest : chart, answering: true, heard: at, checked: at, fetching: false } }
     },
@@ -228,6 +231,8 @@ export function update(model: Model, message: Message): Return {
       }
       return { model: { ...model, notice: 'Amending.' }, commands: [PostAmendment({ body })] }
     },
+    ClickedClose: () => ({ model: { ...model, screen: 'closed', latest: null, selected: null, versions: null, editing: null, notice: '' } }),
+    ClickedReopen: () => ({ model: { ...model, screen: 'open', fetching: true }, commands: [FetchChart()] }),
   })
 }
 
