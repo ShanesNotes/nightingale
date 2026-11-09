@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { formatClock, parseClock, patientTimeAt, wallTime } from '../src/time.ts'
+import { formatClock, parseClock, patientTimeAt, untilNextSecond, wallTime } from '../src/time.ts'
 
 const at = (text: string) => {
   const time = parseClock(text)
@@ -32,4 +32,10 @@ test('patient time is the run start plus the whole seconds since the anchor, cap
   assert.equal(shown(1_125_400), '06:57:05')
   assert.equal(shown(1_600_000), '07:05:00')
   assert.equal(shown(4_600_000), '07:05:00')
+})
+
+test('the next tick of the patient clock falls on the next whole second since the anchor', () => {
+  const clock = { start: at('06:55:00'), end: at('07:05:00'), anchor: wallTime(1_000_000) }
+  const wait = (ms: number) => untilNextSecond(clock, wallTime(ms))
+  assert.deepEqual([wait(1_000_000), wait(1_000_250), wait(1_000_999), wait(999_500), wait(1_002_400)], [1000, 750, 1, 500, 600])
 })
