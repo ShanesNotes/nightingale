@@ -188,8 +188,6 @@ impl<'l> Observer<'l> {
         self.last = Some(view.seal());
         Ok(observed)
     }
-    /// One accepted step's chord into a time-mean channel: each piece inside one window adds its integral, and a piece
-    /// that reaches a window's end closes it there.
     fn integrate(
         &mut self,
         channel: usize,

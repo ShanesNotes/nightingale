@@ -175,7 +175,6 @@ fn two_closed_rows_that_read_one_store_factor_over_the_bodys_elimination() -> Re
     Ok(())
 }
 
-/// Whether an interval's stage block factors over the system's plan, with no pivot left to a whole read.
 fn stage_factors(body: &CompiledBody, keys: &[&'static str]) -> Result<bool, InitializationFailure> {
     let cycle = Cycle::new(
         NonZeroU64::new(2_000_000_000).unwrap(),

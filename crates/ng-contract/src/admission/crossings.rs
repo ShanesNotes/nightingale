@@ -14,16 +14,11 @@ const DEPTH: u32 = 44;
 /// placed. Further below zero its root has not been reached; further above, it was passed before the leg's end.
 const REACHED: f64 = 1e-6;
 
-/// What a march's relocation did to the leg it scanned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Relocated {
-    /// Its topology stands.
     Settled,
-    /// A guard crosses inside it, so it now ends at that crossing and a new leg follows.
     Split,
-    /// The crossing that ends it now stands where its guard reaches zero.
     Moved,
-    /// The crossing that ended it is gone, and it runs on to the next knot.
     Merged,
 }
 
@@ -40,7 +35,6 @@ impl Curve {
             .map(|((a, b), c)| a + s * (b + s * c))
             .collect()
     }
-    /// Every value and slope row `row` takes over `[lo, hi]`.
     fn jet(&self, row: usize, lo: f64, hi: f64) -> Jet {
         let (a, b, c) = (self.a[row], self.b[row], self.c[row]);
         let value = |s: f64| a + s * (b + s * c);
@@ -76,15 +70,12 @@ impl Curve {
     }
 }
 
-/// What a scan of one leg found.
 enum Event {
     Clear,
-    /// The guards that first cross inside the leg, at this share of it, all sharing one zero.
     Cross {
         share: f64,
         guards: Vec<usize>,
     },
-    /// The crossing that ends the leg fires a guard its modes do not arm.
     Unarmed,
     /// The crossing that ends the leg stands short of its guard's zero, or its guard was past zero where the leg
     /// starts, so it crossed before. Where the leg reaches the interval's knot on that side, the crossing goes across
@@ -94,15 +85,12 @@ enum Event {
     },
 }
 
-/// What a first search over a leg found for one guard.
 enum Found {
     Clear,
     At(f64),
     Unresolved,
 }
 
-/// One knot of an interval while a topology is rebuilt: where it stands, the guards whose root it is, `None` at the
-/// interval's start, and what fires there.
 struct Knot {
     offset: f64,
     guards: Option<Vec<usize>>,
@@ -151,7 +139,6 @@ impl InitializationSystem<'_> {
         };
         self.body.guard_gap(guard, &inputs).map_err(undefined)
     }
-    /// How far from zero a guard's gap at the end of `leg` may stand and still mark a crossing placed there.
     fn window(
         &self,
         workspace: &AdmissionWorkspace,
@@ -162,9 +149,6 @@ impl InitializationSystem<'_> {
         let (read, size) = self.root_scale(workspace, values, leg, guard)?;
         Ok(REACHED * (read + size))
     }
-    /// The first share of `leg` at which `guard` crosses, by enclosing its gap over halves of the leg until each
-    /// half is below zero or holds one rising crossing. `end` is the window of a crossing the guard already places at
-    /// the leg's end, which this search passes over.
     fn earliest(
         &self,
         workspace: &AdmissionWorkspace,
@@ -225,7 +209,6 @@ impl InitializationSystem<'_> {
         }
         Ok(Found::Clear)
     }
-    /// The least share in `[lo, hi]` at which `gap` is not below zero, given that it is not below zero at `hi`.
     fn bisect(
         &self,
         gap: &dyn Fn(f64) -> Result<f64, InitializationFailure>,
@@ -427,7 +410,6 @@ impl InitializationSystem<'_> {
             .sum();
         Ok(rising > 0.0)
     }
-    /// A guard's directed slope along `curve` at share `share`, at the state `state` it stands at there.
     #[allow(clippy::too_many_arguments)]
     fn along(
         &self,
@@ -458,9 +440,6 @@ impl InitializationSystem<'_> {
     fn modes_before(&self, workspace: &AdmissionWorkspace, leg: usize) -> Vec<usize> {
         workspace.legs[Self::previous(&workspace.legs, leg)].modes.clone()
     }
-    /// Refuses a workspace whose own values give another topology: a knot that fires otherwise, a crossing a scan
-    /// finds that it does not place or that its modes do not arm, a cycle whose modes do not come back to the
-    /// packet's, or a paced clock that wraps before the cycle's end.
     pub(super) fn settled(&self, workspace: &AdmissionWorkspace) -> Result<(), InitializationFailure> {
         let values = self.values(workspace);
         let first = self.first_leg(&workspace.legs);
@@ -500,7 +479,6 @@ impl InitializationSystem<'_> {
         }
         Ok(())
     }
-    /// Each interval's knots, its start first, as the workspace places them.
     fn knots(&self, workspace: &AdmissionWorkspace) -> Vec<Vec<Knot>> {
         let mut knots: Vec<Vec<Knot>> = (0..self.frames.len()).map(|_| Vec::new()).collect();
         for (leg, held) in workspace.legs.iter().enumerate() {
@@ -513,7 +491,6 @@ impl InitializationSystem<'_> {
         }
         knots
     }
-    /// The topology of `knots`, in time order, each crossing at least the clearance from the knot before it.
     fn topology_of(&self, opening: Vec<usize>, mut knots: Vec<Vec<Knot>>) -> Topology {
         let clearance = CLEARANCE * self.interval.unwrap_or(0.0);
         let mut topology = Topology {
@@ -563,8 +540,6 @@ impl InitializationSystem<'_> {
         }
         topology
     }
-    /// Puts `topology` in place, each new leg's stages read off the old legs' curves of its interval at its own
-    /// nodes, the end from the left of a knot, and the fits as they were.
     fn retopologize(&self, workspace: &mut AdmissionWorkspace, topology: Topology) {
         let Some(legs) = self.derive(&topology) else {
             return;

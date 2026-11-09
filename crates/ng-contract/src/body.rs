@@ -154,7 +154,6 @@ impl Layout {
         let fired = self.fired(modes, crossed);
         fired.into_iter().map(|at| &self.guards[at]).collect()
     }
-    /// `fire`, by each fired guard's place.
     pub(crate) fn fired(&self, modes: &mut [usize], crossed: &[bool]) -> Vec<usize> {
         let mut fired = Vec::new();
         for (at, (guard, &crossed)) in self.guards.iter().zip(crossed).enumerate() {

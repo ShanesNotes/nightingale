@@ -54,9 +54,6 @@ impl InitializationRequest<'_> {
     }
 }
 
-/// The clock a paced cycle names, proved at `initialization`: a memory whose rate is the anchored row, reset to zero by
-/// its one rising guard, the clock less a threshold, which the anchor's time mean reaches in exactly one period. Its
-/// guard's crossing is the cycle's own end, so it holds no time of its own.
 #[derive(Clone, Copy)]
 struct PeriodIdentity {
     clock: usize,
@@ -163,7 +160,6 @@ impl CompiledBody {
         }
         Ok(())
     }
-    /// The identity a paced cycle claims, checked against the compiled laws, or the refusal that names what fails it.
     fn period_identity(
         &self,
         parameters: &BoundParameters,
@@ -337,7 +333,6 @@ impl StagePattern {
     }
 }
 
-/// Adds `value` at `column`, beside any entry the line already holds there.
 fn add(line: &mut Vec<(usize, f64)>, column: usize, value: f64) {
     match line.iter_mut().find(|(known, _)| *known == column) {
         Some((_, held)) => *held += value,
@@ -345,8 +340,6 @@ fn add(line: &mut Vec<(usize, f64)>, column: usize, value: f64) {
     }
 }
 
-/// A guard's crossing inside one interval: the guards that share its zero, the first the one its root row reads, and
-/// how far into the interval it lies, in seconds.
 #[derive(Clone, Debug, PartialEq)]
 struct Located {
     interval: usize,
@@ -354,9 +347,6 @@ struct Located {
     offset: f64,
 }
 
-/// Where a cycle's modes change: the modes the cycle opens in after the wrap's firings, each located crossing in
-/// interval and time order, and for each leg the guards that fire where it starts, in firing order. A leg's modes and
-/// resets follow from these.
 #[derive(Clone, Debug, PartialEq)]
 struct Topology {
     opening: Vec<usize>,
@@ -364,9 +354,6 @@ struct Topology {
     knots: Vec<Vec<usize>>,
 }
 
-/// A part of one interval on which the modes and drives are fixed, solved by one pair of Radau IIA stages: in seconds,
-/// where it starts in its interval and how long it lasts, the modes it holds, the rows its start resets, and the
-/// crossings that end and start it.
 #[derive(Clone, Debug, PartialEq)]
 struct Leg {
     interval: usize,
@@ -412,7 +399,6 @@ impl AdmissionWorkspace {
         let start = self.block(self.base(point));
         start..start + self.rows
     }
-    /// The slots of the interior stage of the leg that ends at `point`, empty at an instant.
     pub fn interior(&self, point: usize) -> Range<usize> {
         let end = self.endpoint(point).end;
         if self.interval.is_some() {
@@ -421,29 +407,24 @@ impl AdmissionWorkspace {
             end..end
         }
     }
-    /// Every slot of every leg of the interval that ends at `point`.
     pub fn interval_slots(&self, point: usize) -> Range<usize> {
         let first = (self.legs.iter())
             .position(|leg| leg.interval == point)
             .expect("a leg");
         self.block(first)..self.block(self.base(point) + 1)
     }
-    /// The fits' slots, after every stage.
     pub fn fitted_slots(&self) -> Range<usize> {
         self.block(self.legs.len())..self.unknowns.len()
     }
-    /// How many guard crossings the workspace places inside its intervals.
     pub fn crossing_count(&self) -> usize {
         self.topology.crossings.len()
     }
-    /// The legs of the interval that ends at `point`, in time order.
     pub fn legs_of(&self, point: usize) -> Vec<LegHandle> {
         (self.legs.iter().enumerate())
             .filter(|(_, leg)| leg.interval == point)
             .map(|(index, _)| LegHandle { index })
             .collect()
     }
-    /// The slots of one leg's two stages, end then interior.
     pub fn leg_slots(&self, leg: LegHandle) -> Range<usize> {
         self.block(leg.index)..self.block(leg.index + 1)
     }
@@ -464,7 +445,6 @@ impl AdmissionWorkspace {
         self.place();
         Ok(())
     }
-    /// Whether crossing `at` can stand at `offset`: inside its interval and after and before its neighbours there.
     fn fits(&self, at: usize, offset: f64) -> bool {
         let Some(interval) = self.interval else {
             return false;
@@ -479,7 +459,6 @@ impl AdmissionWorkspace {
         let high = after.map_or(interval, |after| crossings[after].offset);
         offset.is_finite() && offset - low >= clearance && high - offset >= clearance
     }
-    /// Each leg's start and length again, from its crossings.
     fn place(&mut self) {
         let interval = self.interval.unwrap_or(0.0);
         for leg in &mut self.legs {
@@ -493,20 +472,17 @@ impl AdmissionWorkspace {
     }
 }
 
-/// Whether `apply` moved every crossing time as far as its correction asked or held one short of a knot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Applied {
     Inside,
     Clamped,
 }
 
-/// One leg of a workspace, for a march that solves the cycle leg by leg.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LegHandle {
     index: usize,
 }
 
-/// A Newton update for a workspace: one change per slot, and one per crossing time, which only `apply` reads.
 pub struct Correction {
     slots: Vec<f64>,
     times: Vec<f64>,
@@ -515,7 +491,6 @@ impl Correction {
     pub(crate) fn of(slots: Vec<f64>, times: Vec<f64>) -> Self {
         Self { slots, times }
     }
-    /// The change to each slot `unknowns_mut` holds.
     pub fn slots(&self) -> &[f64] {
         &self.slots
     }
@@ -568,7 +543,6 @@ pub struct InitializationSystem<'m> {
     frames: Vec<DriveFrame>,
     /// One interval in seconds, and `None` for an instant.
     interval: Option<f64>,
-    /// A cycle's leg block, and `None` for an instant, whose one stage is the body's.
     pattern: Option<StagePattern>,
     period: Option<PeriodIdentity>,
     identity: Digest,
@@ -576,7 +550,6 @@ pub struct InitializationSystem<'m> {
     factors: Vec<f64>,
 }
 impl InitializationSystem<'_> {
-    /// Slots per leg: both stages under a cycle, the one point of an instant.
     pub(crate) fn width(&self) -> usize {
         let rows = self.body.rows().len();
         if self.interval.is_some() { 2 * rows } else { rows }
@@ -617,7 +590,6 @@ impl InitializationSystem<'_> {
     fn rank(&self, interval: usize) -> usize {
         (interval + self.frames.len() - 1) % self.frames.len()
     }
-    /// The leg that follows the wrap: the first of interval 1, or of the one interval.
     fn first_leg(&self, legs: &[Leg]) -> usize {
         let opening = 1 % self.frames.len();
         (legs.iter())
@@ -649,7 +621,6 @@ impl InitializationSystem<'_> {
             factors: &self.factors,
         }
     }
-    /// The state a leg starts from: the end of the leg before it, with each row its start's firings reset at zero.
     fn origin(&self, workspace: &AdmissionWorkspace, leg: usize) -> Vec<f64> {
         let previous = Self::previous(&workspace.legs, leg);
         let mut origin = workspace.unknowns[self.slots(previous, END)].to_vec();
@@ -658,15 +629,12 @@ impl InitializationSystem<'_> {
         }
         origin
     }
-    /// The start state: grid point 0 after the firings that open the cycle.
     fn start_state(&self, workspace: &AdmissionWorkspace) -> Vec<f64> {
         if self.interval.is_none() {
             return workspace.unknowns[self.slots(0, END)].to_vec();
         }
         self.origin(workspace, self.first_leg(&workspace.legs))
     }
-    /// Legs, modes and resets from a topology, or `None` where it holds the wrong number of knots or a crossing
-    /// outside its interval or out of order.
     fn derive(&self, topology: &Topology) -> Option<Vec<Leg>> {
         let points = self.frames.len();
         let Some(interval) = self.interval else {
@@ -778,13 +746,11 @@ impl InitializationSystem<'_> {
             .filter(|_| self.interval.is_some())
             .map(move |combination| (last + combination.terms()[0].0.index(), combination.id()))
     }
-    /// The slot whose end row a paced cycle's clock root replaces: the clock's end row in the leg before the wrap.
     fn clocked(&self, workspace: &AdmissionWorkspace) -> Option<usize> {
         let period = self.period?;
         let last = Self::previous(&workspace.legs, self.first_leg(&workspace.legs));
         Some(self.slots(last, END).start + period.clock)
     }
-    /// A slot's natural size, so a solver reads a small row at its own size. A fit and a root read as one.
     pub fn size(&self, workspace: &AdmissionWorkspace, slot: usize) -> f64 {
         if slot < workspace.fitted_slots().start {
             self.parameters.sizes[slot % self.body.rows().len()]
@@ -792,8 +758,6 @@ impl InitializationSystem<'_> {
             1.0
         }
     }
-    /// The sum of each row's square over its natural size: a slot's size and value, a fit's one, and a root's reach
-    /// over the rows its guard reads. A line search compares two of these; neither reads a tolerance.
     pub fn merit(&self, workspace: &AdmissionWorkspace, residuals: &[f64]) -> f64 {
         let slots = workspace.fitted_slots().end;
         let mut sum = 0.0;
@@ -814,19 +778,15 @@ impl InitializationSystem<'_> {
         }
         sum
     }
-    /// Whether the system is a cycle, which a march walks, rather than an instant.
     pub fn cycles(&self) -> bool {
         self.interval.is_some()
     }
-    /// How many rows a stage holds.
     pub fn rows(&self) -> usize {
         self.body.rows().len()
     }
-    /// How many grid points the ring holds, one for an instant.
     pub fn points(&self) -> usize {
         self.frames.len()
     }
-    /// Seeded with the packet's start values at every stage and each fit's guess, with no crossing located.
     pub fn workspace(&self) -> AdmissionWorkspace {
         let legs = self.frames.len();
         let mut unknowns = Vec::with_capacity(legs * self.width() + self.parameters.owed.fits.len());
@@ -841,7 +801,6 @@ impl InitializationSystem<'_> {
         };
         self.workspace_of(topology, unknowns)
     }
-    /// The crossings `workspace` places, with their guards' names and times from the anchor moment.
     pub fn crossings(&self, workspace: &AdmissionWorkspace) -> Vec<LocatedCrossing> {
         let step = self.interval.unwrap_or(0.0);
         let anchor = self.anchor_moment.nanoseconds() as f64 / NANOSECONDS_PER_SECOND;
@@ -874,7 +833,6 @@ impl InitializationSystem<'_> {
         }
         Ok(out)
     }
-    /// Each stage's residual with no tangent: an amount's or memory's rate negated, an algebraic row's own value.
     fn rates(
         &self,
         workspace: &AdmissionWorkspace,
@@ -925,9 +883,6 @@ impl InitializationSystem<'_> {
     fn root_column(&self, workspace: &AdmissionWorkspace, crossing: usize) -> usize {
         workspace.unknowns.len() + crossing
     }
-    /// Each row of one leg's block, end rows then interior rows, with the columns it reads in the ring's order.
-    /// `chained` adds the leg before's end, the fits and the crossing times that bound it, which a stage alone holds
-    /// fixed.
     fn leg_lines(
         &self,
         workspace: &AdmissionWorkspace,
@@ -1006,7 +961,6 @@ impl InitializationSystem<'_> {
         }
         Ok(lines)
     }
-    /// A guard's directed gap at the end of `leg`, the root a crossing there holds.
     fn root(
         &self,
         workspace: &AdmissionWorkspace,
@@ -1021,7 +975,6 @@ impl InitializationSystem<'_> {
         );
         self.body.guard_gap(guard, &inputs).map_err(undefined)
     }
-    /// A root row's columns: the end stage of the leg it ends and each fit whose slots the guard reads.
     fn root_line(
         &self,
         workspace: &AdmissionWorkspace,
@@ -1047,8 +1000,6 @@ impl InitializationSystem<'_> {
         }
         Ok(line)
     }
-    /// What a root row is held to: its guard's reach over the rows it reads, at their values and at their sizes, each
-    /// in the guard's own unit.
     fn root_scale(
         &self,
         workspace: &AdmissionWorkspace,
@@ -1093,8 +1044,6 @@ impl InitializationSystem<'_> {
             .map(|(row, _)| self.parameters.sizes[row.index()]);
         sizes.fold(0.0, |most, size| if size > most { size } else { most })
     }
-    /// The ring's rows in its order: each leg's stage rows, a total in one end row of the last interval, a paced
-    /// clock's root in its last end row, then each fit's anchor and each crossing's root.
     pub fn evaluate(&self, workspace: &AdmissionWorkspace) -> Result<Vec<f64>, InitializationFailure> {
         self.check(workspace)?;
         let values = self.values(workspace);
@@ -1172,7 +1121,6 @@ impl InitializationSystem<'_> {
             ),
         }
     }
-    /// One leg's block in its own pattern, each entry read by its column from `entry`.
     fn local_block(&self, leg: usize, entry: impl Fn(usize, usize) -> f64) -> Jacobian {
         let (offsets, unknowns) = self.pattern();
         let first = leg * self.width();
@@ -1183,16 +1131,12 @@ impl InitializationSystem<'_> {
         }
         Jacobian::of_parts(offsets.to_vec(), unknowns.to_vec(), values)
     }
-    /// A block of a `stage` or a `block`, factored over this system's plan, or the row whose pivot it cannot take. The
-    /// plan keeps the body's pivots at both stages, so a closed store factors here as it does in a core's stage.
     pub fn factor(&self, block: &Jacobian) -> Result<Factors<'_>, usize> {
         match &self.pattern {
             Some(pattern) => pattern.plan.factor(&block.values),
             None => self.body.factor(block),
         }
     }
-    /// A Newton update for one `stage`: its block factored over the plan, or read whole where a pivot of the plan is
-    /// zero, or the row with no pivot at all.
     pub fn solve_stage(&self, block: &Jacobian, residuals: &[f64]) -> Result<Vec<f64>, usize> {
         if let Ok(factors) = self.factor(block) {
             let mut update = residuals.to_vec();
@@ -1205,10 +1149,6 @@ impl InitializationSystem<'_> {
         }
         eliminate(matrix)
     }
-    /// One leg's stages on their own: each row's residual, as `evaluate` gives it before a total or a clock root
-    /// replaces a row, and the block of the leg's own unknowns, in the slots `leg_slots` names. An admission solver
-    /// marches the ring with this, `seed`, `settle` and `relocate`, to reach a guess Newton can start from. Nothing here
-    /// is judged: `admit` is.
     pub fn stage(
         &self,
         workspace: &AdmissionWorkspace,
@@ -1236,7 +1176,6 @@ impl InitializationSystem<'_> {
         self.stage_rows(workspace, &values, leg.index, &mut rows)?;
         Ok((rows, block))
     }
-    /// One leg's rows alone, as `stage` gives them, for a solver that holds a factored block of the leg.
     pub fn stage_residuals(
         &self,
         workspace: &AdmissionWorkspace,
@@ -1248,7 +1187,6 @@ impl InitializationSystem<'_> {
         self.stage_rows(workspace, &values, leg.index, &mut rows)?;
         Ok(rows)
     }
-    /// Starts both of a leg's stages at the state it starts from.
     pub fn seed(&self, workspace: &mut AdmissionWorkspace, leg: LegHandle) {
         let origin = if self.interval.is_some() {
             self.origin(workspace, leg.index)
@@ -1355,8 +1293,6 @@ impl InitializationSystem<'_> {
         let within = defect == 0.0 || (defect.is_finite() && defect <= scale);
         within.then(|| if scale > 0.0 { defect / scale } else { 0.0 })
     }
-    /// The value an observer reads at grid point `point`: the state there after any firing, as a step that ends there
-    /// leaves it.
     fn point_read(&self, workspace: &AdmissionWorkspace, point: usize, row: usize) -> Option<usize> {
         let after =
             (workspace.legs.iter()).position(|leg| leg.interval == (point + 1) % self.frames.len())?;
@@ -1666,9 +1602,6 @@ impl InitializationSystem<'_> {
         }
         Ok(false)
     }
-    /// What an admitted start's hash reads of the cycle that made it: the scheme, every leg's interval, start,
-    /// length and resets, every crossing's guards and time, every knot's firings, the clock that paces it and every
-    /// stage coordinate. The modes follow from the start's, which the hash reads beside this, and the firings.
     fn witness(&self, workspace: &AdmissionWorkspace) -> Digest {
         let mut out = Canonical::new("ng-contract admission witness 1");
         out.text(if self.interval.is_some() {
@@ -1917,10 +1850,7 @@ pub enum AdmissionRow {
     Body(RowId),
     Total(QuantityId),
     Anchor(AnchorId),
-    /// A guard's root at a crossing it fires, named by its mode variable.
-    Crossing {
-        variable: Slot,
-    },
+    Crossing { variable: Slot },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1948,7 +1878,6 @@ pub enum InitializationFailure {
     Unresolved {
         variable: Slot,
     },
-    /// A paced cycle's clock that wraps inside the cycle as well as at its end.
     SecondWrap,
     /// A cycle under drives that hold still all beat whose guards fire, so it times itself, with no clock named.
     Unpaced,
@@ -1957,7 +1886,6 @@ pub enum InitializationFailure {
     NoRank {
         row: RowId,
     },
-    /// A crossing time the whole ring leaves free.
     CrossingRank {
         variable: Slot,
     },
@@ -1972,7 +1900,6 @@ impl From<AdmissionError> for InitializationFailure {
 mod tests {
     use super::{END, INTERIOR, RADAU};
 
-    /// One interval of `y' = speed (target - y)` from `start`, both stages from their two linear rows.
     fn interval(start: f64, h: f64, speed: f64, target: f64) -> [f64; 2] {
         let a = |j: usize, k: usize| h * speed * RADAU[j][k];
         let matrix = [[1.0 + a(0, 0), a(0, 1)], [a(1, 0), 1.0 + a(1, 1)]];

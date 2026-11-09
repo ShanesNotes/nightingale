@@ -100,7 +100,6 @@ impl Elimination {
         }
     }
 
-    /// The row each unknown pivots on, as `plan` was given it.
     pub(crate) fn solved_by(&self) -> Vec<RowId> {
         let mut solved_by = vec![RowId::at(0); self.rows.len()];
         for (&unknown, &row) in self.unknowns.iter().zip(&self.rows) {

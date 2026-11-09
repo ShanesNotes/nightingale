@@ -50,8 +50,6 @@ fn key(local: &'static str) -> ParameterKey {
     ParameterKey::new(local)
 }
 
-/// How the packet times the beat: a paced cycle whose rate anchor is a time mean, the same read as grid samples, or
-/// grid samples with no clock named.
 #[derive(Clone, Copy)]
 enum Clock {
     Timed,
@@ -190,7 +188,6 @@ impl Pacemaker {
     fn rate(&self) -> RowKind {
         RowKind::Algebraic(name("rate").into())
     }
-    /// The rate read as its time mean over each beat, or as the mean of the grid's samples.
     fn lens(&self, intervals: u32, clock: Clock) -> ObservationLens {
         let channel = ChannelSpec::new(GAUGE, self.rate());
         let channel = match clock {
@@ -200,7 +197,6 @@ impl Pacemaker {
         let grid = count(SECOND / u64::from(intervals));
         self.body.lens(vec![channel], grid).expect("a lens")
     }
-    /// `targets` are the drive's in systole and in diastole; `end` is where the phase wraps.
     fn packet(
         &self,
         intervals: u32,
@@ -280,8 +276,6 @@ impl Pacemaker {
             .initialization(parameters, boundary, request)
             .expect("a system")
     }
-    /// A system on `intervals` whose modes and crossings a ramp of the phase has swept round the ring: the end of
-    /// systole at a quarter, inside an interval or on a knot, and the wrap at the cycle's end.
     fn swept(
         &self,
         intervals: u32,
@@ -309,7 +303,6 @@ impl Pacemaker {
         }
         (system, workspace)
     }
-    /// The admitted start's value of each of `rows`, and the crossings the cycle located.
     fn admitted(
         &self,
         intervals: u32,
@@ -418,8 +411,6 @@ fn the_end_of_systole_is_located_where_the_phase_reaches_it() {
     assert!((at - 0.25).abs() < 1e-9, "{at}");
 }
 
-/// A reset phase, a closed store, a regulated total read through a law on the pool, and a fit, at every slot off the
-/// guess.
 #[test]
 fn the_lifted_ring_is_the_dense_solve_of_the_differenced_rows_through_a_reset() {
     let pacemaker = pacemaker().expect("a body");

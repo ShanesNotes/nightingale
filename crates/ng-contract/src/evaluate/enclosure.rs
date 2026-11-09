@@ -58,7 +58,6 @@ impl Bounds {
             .fold(f64::NEG_INFINITY, |most, p| if p > most { p } else { most });
         Self::widened(lo, hi)
     }
-    /// `None` where the divisor may reach zero or below, as a law's divisor may not.
     fn over(self, divisor: Self) -> Option<Self> {
         if divisor.lo <= 0.0 {
             return None;
@@ -76,7 +75,6 @@ impl Bounds {
     }
 }
 
-/// An expression's values over a stretch of the curve it reads, and its slopes along that curve.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Jet {
     pub(crate) value: Bounds,
@@ -249,8 +247,6 @@ fn step(instr: Instr, jets: &[Jet], partial_volume: f64) -> Option<Jet> {
     })
 }
 
-/// Every value `arithmetic` takes while each unknown it reads stays inside its jet, and every slope it takes there, or
-/// `None` where a divisor, a logarithm or the finite range cannot be held.
 pub(crate) fn enclose(
     arithmetic: Arithmetic<'_>,
     reads: Reads<'_>,

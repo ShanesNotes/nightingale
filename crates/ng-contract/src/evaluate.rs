@@ -8,7 +8,6 @@ use core::ops::Range;
 mod enclosure;
 pub(crate) use enclosure::{Bounds, Jet};
 
-/// A guard's directed slope in each unknown and parameter it reads, by their places.
 pub(crate) struct GuardSlopes {
     pub(crate) unknowns: Vec<(usize, f64)>,
     pub(crate) parameters: Vec<(usize, f64)>,
@@ -478,7 +477,6 @@ impl CompiledBody {
             Crossing::Falling => -1.0,
         }
     }
-    /// A guard's directed slope in each unknown and each parameter it reads.
     pub(crate) fn guard_slopes(&self, guard: usize, inputs: &Inputs<'_>) -> Result<GuardSlopes, Undefined> {
         let layout = &self.layout.guards[guard];
         let (arithmetic, reads) = self.tape.guard(guard);
@@ -505,8 +503,6 @@ impl CompiledBody {
             parameters: parameters.collect::<Result<_, _>>()?,
         })
     }
-    /// Every directed gap a guard takes while each unknown it reads stays inside its jet, with its slopes, or `None`
-    /// where no bound holds.
     pub(crate) fn guard_enclosure(
         &self,
         guard: usize,

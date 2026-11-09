@@ -65,14 +65,12 @@ fn key(local: &'static str) -> ParameterKey {
 
 const MEAN_Y: AnchorId = AnchorId::new("synthetic.mean-y");
 
-/// The valve's rising threshold: stated, or fitted so that the mark's cycle time mean is `mean`.
 #[derive(Clone, Copy)]
 enum Up {
     Stated(f64),
     Fitted { guess: f64, mean: f64 },
 }
 
-/// Which guards the body holds besides the pulse's routes and `y`.
 #[derive(Clone, Copy, Default)]
 struct Shape {
     valve: bool,
@@ -86,7 +84,6 @@ struct Relaxer {
     vessel: SiteId,
 }
 
-/// How far `y` stands from the band's middle, either way.
 fn band<'b, 'k>(
     k: &mut Kernel<'b, 'k, Boundary>,
     y: &StateSlot<'b, Boundary, Rate<Water>>,
@@ -100,7 +97,6 @@ fn band<'b, 'k>(
     k.smooth_max(above, below, zero)
 }
 
-/// A flag that relaxes to one in the second of `modes` and to zero in the first.
 fn follow<'b>(
     laws: &mut FragmentBuilder<'b, Boundary>,
     flag: &'static str,
@@ -264,7 +260,6 @@ fn water(tag: &[u8], boundary: &'static str, from: u64, to: u64, rate: f64) -> B
     )
 }
 
-/// The pulse at three for the first half of each beat and one after it, drained as it comes.
 fn port(cycles: u64) -> BoundaryPort {
     let mut events = Vec::new();
     for cycle in 0..cycles {
@@ -408,12 +403,10 @@ impl Relaxer {
     }
 }
 
-/// `x` after `time` of relaxing to `target` at `speed`.
 fn relaxed(x: f64, target: f64, speed: f64, time: f64) -> f64 {
     target + (x - target) * exp(-speed * time)
 }
 
-/// The first time in `[from, to]` at which `crossed` holds, by bisection on a function that holds after it.
 fn first(from: f64, to: f64, crossed: impl Fn(f64) -> bool) -> f64 {
     let (mut lo, mut hi) = (from, to);
     for _ in 0..200 {
@@ -423,14 +416,11 @@ fn first(from: f64, to: f64, crossed: impl Fn(f64) -> bool) -> f64 {
     0.5 * (lo + hi)
 }
 
-/// The value at zero that a map of one beat returns to, for a map that is affine in it.
 fn periodic(map: impl Fn(f64) -> f64) -> f64 {
     let at_zero = map(0.0);
     at_zero / (1.0 - (map(1.0) - at_zero))
 }
 
-/// The valve's continuous orbit: slow from zero until `y` rises through `up`, fast until it falls through `down` in
-/// the low half, slow again to the end. Returns `y` at zero and the two switch times.
 fn exact_valve() -> (f64, [f64; 2]) {
     let beat = |y0: f64| {
         let rise = first(0.0, 0.5, |t| relaxed(y0, HIGH, SLOW, t) >= UP);
@@ -451,7 +441,6 @@ fn exact_valve() -> (f64, [f64; 2]) {
     (y0, beat(y0).1)
 }
 
-/// `y` relaxing at `slow` with no valve, from its periodic start, at `t`.
 fn plain_y(t: f64) -> f64 {
     let beat = |y0: f64| relaxed(relaxed(y0, HIGH, SLOW, 0.5), LOW, SLOW, 0.5);
     let y0 = periodic(beat);
@@ -462,7 +451,6 @@ fn plain_y(t: f64) -> f64 {
     }
 }
 
-/// The four times `y` crosses the band's edges, rising then falling.
 fn band_crossings() -> [f64; 4] {
     let inside = |t: f64| (plain_y(t) - MIDDLE).abs() < WIDTH;
     let enter = first(0.0, 0.25, inside);
@@ -521,7 +509,6 @@ fn two_crossings_between_a_legs_stage_points_are_both_found() {
     assert!((z - exact).abs() < 2e-3, "{z} against {exact}");
 }
 
-/// A guard on `y - up` and the same guard times three cross at one time, so their starts agree.
 #[test]
 fn a_guard_rescaled_by_a_positive_constant_moves_no_start() {
     let shape = Shape {
@@ -666,8 +653,6 @@ impl Relaxer {
     }
 }
 
-/// Newton on the topology the workspace holds, stopping where a crossing wants across a knot or nothing moves. Returns
-/// whether it converged with no crossing held at a knot.
 fn newton(system: &InitializationSystem<'_>, workspace: &mut AdmissionWorkspace) -> bool {
     for _ in 0..16 {
         let residuals = system.evaluate(workspace).expect("every row");
@@ -712,8 +697,6 @@ fn reseed(system: &InitializationSystem<'_>, workspace: &mut AdmissionWorkspace)
     }
 }
 
-/// Newton and sweeps by hand, through the public surface alone, until a sweep changes nothing. Returns the workspace
-/// and how many sweeps it took.
 fn solved_by_hand(system: &InitializationSystem<'_>) -> (AdmissionWorkspace, u32) {
     let mut workspace = system.workspace();
     for sweeps in 1..=16 {
@@ -734,8 +717,6 @@ fn history() -> MethodHistory {
     MethodHistory::new(Digest::of_canonical(b"a schema"), at(0), Vec::new())
 }
 
-/// From a workspace with no crossing, Newton and the sweep settle the valve's two crossings in a few rounds, a second
-/// sweep changes nothing, and the result is admitted.
 #[test]
 fn the_sweep_settles_and_a_second_sweep_changes_nothing() {
     let shape = Shape {
@@ -790,8 +771,6 @@ fn a_legs_rows_alone_are_the_rows_its_stage_gives() {
     );
 }
 
-/// A solved workspace with one crossing moved, the same workspace solved with no sweep, so its topology is not what
-/// its values give, and a workspace another system made are each refused.
 #[test]
 fn a_moved_crossing_a_stale_topology_and_a_foreign_workspace_are_refused() {
     let shape = Shape {
@@ -828,8 +807,6 @@ fn a_moved_crossing_a_stale_topology_and_a_foreign_workspace_are_refused() {
     );
 }
 
-/// A guard whose threshold is fitted, by the time mean of a mark that reads `y` and the threshold: its root row reads the fit, and each crossing time reads both legs it bounds. The
-/// ring's matrix matches central differences in every slot, fit and time, and its update the dense solve.
 #[test]
 fn a_guard_that_reads_a_fit_has_the_slopes_its_differences_give() {
     let shape = Shape {

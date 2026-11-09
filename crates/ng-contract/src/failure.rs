@@ -10,16 +10,12 @@ pub enum AdmissionError {
     PeriodAnchor {
         anchor: AnchorId,
     },
-    /// A paced cycle's clock that is not a memory whose rate is a row, reset to zero by its one rising guard, the
-    /// clock less a threshold.
     PeriodClock {
         clock: Slot,
     },
-    /// A paced cycle whose anchored rate over its period does not reach its clock's threshold.
     PeriodMismatch {
         anchor: AnchorId,
     },
-    /// A crossing moved out of its interval or past a neighbour.
     CrossingOutside,
     NonFinite,
     Anatomy(AnatomyDefect),

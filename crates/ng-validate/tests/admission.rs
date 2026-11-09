@@ -901,9 +901,6 @@ fn a_guess_that_already_solves_the_system_is_admitted() {
     assert!(system.admit(guess, case.history()).is_ok());
 }
 
-/// One judged start serves every core: the start under another history is the start that history's admission of the
-/// same witness gives, bit for bit, with its hash closed on the new history, its fits, pending inputs and provenance
-/// unmoved.
 #[test]
 fn a_judged_start_under_another_history_is_that_historys_admission_of_it() {
     let case = PulsatileCase::plain();
@@ -1959,8 +1956,6 @@ fn hazard_row(case: &PulsatileCase) -> RowId {
         .id()
 }
 
-/// A fit, a total in place of a row, a held hazard and a pulse that reaches only the first interval, on `intervals` of
-/// a period they divide.
 fn hazard_system<'c>(
     case: &'c PulsatileCase,
     intervals: u32,

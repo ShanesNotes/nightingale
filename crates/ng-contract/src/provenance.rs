@@ -190,7 +190,6 @@ impl InitializationProvenance {
     pub fn worst(&self) -> Option<(AdmissionRow, Compensated)> {
         self.worst
     }
-    /// Each guard crossing the admitted cycle located inside an interval, in time order.
     pub fn crossings(&self) -> &[LocatedCrossing] {
         &self.crossings
     }

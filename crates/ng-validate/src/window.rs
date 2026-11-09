@@ -115,7 +115,6 @@ fn references(intervals_ns: [u64; 3], scales: ErrorScales, floor: NonZeroU64) ->
 pub enum Compared {
     /// An amount, a memory or a produced quantity.
     Row(RowId),
-    /// A column's exchange over each grid interval.
     Exchange(ColumnId),
 }
 

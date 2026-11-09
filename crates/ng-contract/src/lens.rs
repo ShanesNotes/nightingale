@@ -78,7 +78,6 @@ impl Channel {
     pub fn window(&self) -> u64 {
         self.window
     }
-    /// Whether a reading integrates the row over its window rather than counting grid samples.
     pub fn integrated(&self) -> bool {
         self.integrated
     }
@@ -132,7 +131,6 @@ impl ObservationLens {
                 && channel.window.checked_mul(self.period_ns) == Some(window_ns)
         })
     }
-    /// Whether a channel reads `row` by `method` as its time mean over windows of exactly `window_ns`.
     pub(crate) fn reads_time_mean(&self, method: &str, row: RowId, window_ns: u64) -> bool {
         (self.channels.iter()).any(|channel| {
             channel.method == method

@@ -13,7 +13,6 @@ const MARCH_BEATS: u32 = 40;
 /// is solved all the same, and an unknown that rounding keeps near zero never gets there, which costs the
 /// updates until the point's state repeats, at most the limit's, and nothing else.
 const NEWTON_STOP: f64 = 8.0 * f64::EPSILON;
-/// The least shrink per update a march takes from a held block before it builds the block again.
 const CONTRACTION: f64 = 0.5;
 
 /// A model default reported with every result. A packet of far smaller amounts states its rows' natural sizes.
@@ -29,7 +28,6 @@ const CLAMPED: u32 = 1;
 /// reached and moving no crossing: a leg split or merged off the old curves is no stage solution, and a stiff row's
 /// Newton would chase it. Two, so the modes the wrap opens follow the legs a pass changed.
 const RESEED_BEATS: u32 = 2;
-/// Relocations a march takes in one leg before it moves on: a crossing settles in a few.
 const RELOCATIONS: u32 = 6;
 
 /// Walks the ring's own legs from the packet's guess, in time order from the wrap: each leg's Newton on its own
@@ -152,8 +150,6 @@ fn state_at_limit<'h>(held: &'h [f64], now: &[f64]) -> Option<&'h [f64]> {
     Some(&held[last * size..][..size])
 }
 
-/// What a Newton update did: whether a trial stood, and whether it held a crossing at its interval's edge, which a
-/// sweep moves past the knot.
 struct Stepped {
     stood: bool,
     leaving: bool,

@@ -4,7 +4,6 @@
 
 use ng_contract::{AdmissionWorkspace, InitializationSystem, Measure, Time};
 
-/// A crossing time moves by this many seconds each way.
 const NUDGE: f64 = 1e-7;
 
 fn differenced(system: &InitializationSystem<'_>, workspace: &mut AdmissionWorkspace) -> Vec<Vec<f64>> {
@@ -68,7 +67,6 @@ fn solved(mut matrix: Vec<Vec<f64>>, mut right: Vec<f64>) -> Vec<f64> {
     right
 }
 
-/// Every entry of `linearize` against the differenced matrix, and the ring's update against the dense one.
 pub fn cross_check(system: &InitializationSystem<'_>, workspace: &mut AdmissionWorkspace, tag: &str) {
     let matrix = differenced(system, workspace);
     let lifted = system.linearize(workspace).expect("a matrix");
