@@ -41,10 +41,11 @@ fn reduced(mut matrix: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>, usize> {
         slots.swap(pivot, best);
         across.swap(pivot, best);
         let (above, below) = matrix.split_at_mut(pivot + 1);
-        let leading = &above[pivot];
-        for row in below {
-            let factor = row[pivot] / leading[pivot];
-            for (cell, lead) in row.iter_mut().zip(leading).skip(pivot) {
+        let leading = &above[pivot][pivot..];
+        // A row with nothing under the pivot keeps its cells; a zero factor would only rewrite a zero's sign.
+        for row in below.iter_mut().filter(|row| row[pivot] != 0.0) {
+            let factor = row[pivot] / leading[0];
+            for (cell, lead) in row[pivot..].iter_mut().zip(leading) {
                 *cell -= factor * lead;
             }
         }
