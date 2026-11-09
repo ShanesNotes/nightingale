@@ -242,8 +242,11 @@ def closure(run: RunData, edges) -> Extreme:
             magnitude = abs(inv.at(a)) + abs(inv.at(b)) + abs(inflow.difference(b, a)) + abs(outflow.difference(b, a))
             bound = CLOSURE_ULPS * 2.0**-52 * magnitude
             ratio = residual / bound if bound else (math.inf if residual else 0.0)
+            where = f"{quantity.book} at {quantity.label}, {run.directory.name[:8]} edges {a} to {b}"
+            if not math.isfinite(ratio):
+                return Extreme(math.inf, where)
             if ratio > worst.value:
-                worst = Extreme(ratio, f"{quantity.book} at {quantity.label}, {run.directory.name[:8]} edges {a} to {b}")
+                worst = Extreme(ratio, where)
     return worst
 
 
@@ -251,6 +254,8 @@ def beat_gap(run: RunData, edges) -> Extreme:
     worst = Extreme(0.0, "none")
     for j, (mean_rate, beat) in enumerate(zip(edges.beat_means(RATE), run.beats)):
         gap = abs(mean_rate - beat.heart_rate_per_s) / beat.heart_rate_per_s
+        if not math.isfinite(gap):
+            return Extreme(math.inf, f"{run.directory.name[:8]} beat {j}")
         if gap > worst.value:
             worst = Extreme(gap, f"{run.directory.name[:8]} beat {j}")
     return worst
@@ -314,6 +319,11 @@ def encounter_min(fit: Fit) -> int:
     if fit.resolved and fit.tau <= 20 * 60:
         return 10
     return 15
+
+
+def encounter_text(fit: Fit) -> str:
+    limited = not (fit.resolved and fit.tau <= 40 * 60)
+    return f"{encounter_min(fit)} min" + (" (slow component unresolved)" if limited else "")
 
 
 def quintile_cuts(means: list[float]) -> tuple[float, float]:
@@ -482,9 +492,27 @@ def environment(out: Path) -> dict[str, str]:
     path = out / "environment.txt"
     found: dict[str, str] = {}
     for line in path.read_text().splitlines() if path.is_file() else []:
-        key, _, value = line.rpartition(" ") if line.startswith("free_bytes ") else line.partition(" ")
+        key, _, value = line.rpartition(" ") if "free_bytes " in line else line.partition(" ")
         found[key] = value
     return found
+
+
+def free_for_plans(env: dict[str, str]) -> int:
+    """The smallest free space recorded once every run settled, or at the audit's start before that."""
+    for prefix in ("settled_free_bytes", "free_bytes"):
+        found = [int(value) for key, value in env.items() if key.startswith(prefix + " ")]
+        if found:
+            return min(found)
+    return 0
+
+
+def record_settled_free(out: Path, disks: list[Path], free_bytes: Callable[[Path], int]) -> None:
+    path = out / "environment.txt"
+    kept = [line for line in path.read_text().splitlines() if not line.startswith("settled_free_bytes ")] if path.is_file() else []
+    kept += [f"settled_free_bytes {disk} {free_bytes(disk)}" for disk in [out, *disks]]
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text("\n".join(kept) + "\n")
+    os.replace(temporary, path)
 
 
 def evaluate(out: Path, plan: Plan, commit: str) -> Evaluation:
@@ -730,7 +758,6 @@ def derive(runs: Runs, plan: Plan, ev: Evaluation, fit: Fit | None, out: Path) -
         history = "600" if second.verdict == "pass" else "600 (the across-history order test is removed)"
         suffix = "-600"
     encounter = encounter_min(fit) if fit else None
-    tau_note = "" if fit and fit.resolved else " (slow component unresolved)"
     names_c = [f"C{n}{suffix}" for n in range(1, 7)]
     try:
         means = []
@@ -748,25 +775,22 @@ def derive(runs: Runs, plan: Plan, ev: Evaluation, fit: Fit | None, out: Path) -
     peak = max(runs[name].summary.number("peak_rss_bytes") * scale[name] for name in c_names)
     links = max(runs[name].summary.number("links_bytes") * scale[name] for name in c_names)
     logical = int(env.get("logical_processors", "0"))
-    free = min((int(value) for key, value in env.items() if key.startswith("free_bytes")), default=0)
-    workers = workers_for(logical, peak, links, free)
+    workers = workers_for(logical, peak, links, free_for_plans(env))
     per_s = [runs[n].summary.seconds("step_wall_s") / simulated_s(runs[n]) for n in names_c]
     overhead = [runs[n].summary.seconds("run_wall_s") - runs[n].summary.seconds("step_wall_s") for n in names_c]
     run_wall = math.fsum(overhead) / len(overhead) + math.fsum(per_s) / len(per_s) * seconds
     size = plan_size(run_wall, workers)
     size_text = f"{size} training schedules per family per start history" if size else "does not fit 36 h"
     return (
-        f"teaching core Core at a 10 ms cap; history {history} s; encounter {encounter} min{tau_note}; workers {workers}; "
+        f"teaching core Core at a 10 ms cap; history {history} s; encounter {encounter_text(fit) if fit else 'incomplete'}; workers {workers}; "
         f"rule low {num(low)}, high {num(high)}; plan size {size_text} (a {seconds} s run takes about {num(run_wall)} s)"
     )
 
 
 def manifest_digest(out: Path) -> str:
-    lines = []
-    for directory in sorted(out.iterdir()):
-        summary = directory / "summary.txt"
-        if directory.is_dir() and summary.is_file():
-            lines.append(f"{hashlib.sha256(summary.read_bytes()).hexdigest()}  {directory.name}/summary.txt\n")
+    """The digest of what `LC_ALL=C sha256sum */summary.txt` prints in DATA/audit, in its byte order."""
+    names = sorted(f"{d.name}/summary.txt" for d in out.iterdir() if d.is_dir() and (d / "summary.txt").is_file())
+    lines = [f"{hashlib.sha256((out / name).read_bytes()).hexdigest()}  {name}\n" for name in names]
     return hashlib.sha256("".join(lines).encode()).hexdigest()
 
 
@@ -787,7 +811,7 @@ def render(ev: Evaluation, out: Path, commit: str) -> str:
         "",
         f"Technical gate: {ev.technical}. Informativeness gate: {ev.informative}.",
         f"Derived: {ev.derived}.",
-        f"Evidence: summaries manifest sha256 {manifest_digest(out)}; report.txt's sha256 is recorded beside it; the data stay on the heavy-run machine.",
+        f"Evidence: summaries.sha256 {manifest_digest(out)}; report.txt's sha256 is recorded beside it; the data stay on the heavy-run machine.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -893,6 +917,7 @@ def make(data: Path, commit: str, workers: int, disks: list[Path]) -> int:
         ev = evaluate(out, plan, commit)
         if ev.retry_needed:
             teacher.ensure([TeacherRun(r.name, r.spec, r.replays) for r in plan.retry], identity, workers)
+        record_settled_free(out, disks, free)
     except (TeacherError, CaptureError) as error:
         print(f"gp.py: {error}", file=sys.stderr)
         return 1

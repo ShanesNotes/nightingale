@@ -500,16 +500,16 @@ class RunData:
     def lens_present(self, row: str) -> list[tuple[int, float]]:
         channel = self.catalogue.channel(row)
         rows, cells = self._table("lens.npy", "Q", 6)
-        found: dict[int, float] = {}
+        found: dict[int, tuple[int, int]] = {}
         for r in range(rows):
             at = r * 6
             if cells[at] != channel or cells[at + 3] != 0:
                 continue
             collected = cells[at + 1] - ANCHOR_NS
-            value = as_double(cells[at + 4])
-            if found.setdefault(collected, value) != value:
+            reading = (cells[at + 4], cells[at + 5])
+            if found.setdefault(collected, reading) != reading:
                 raise CaptureError(f"{self.directory.name}: two readings of channel {channel} at {collected} ns")
-        return sorted(found.items())
+        return [(collected, as_double(hi)) for collected, (hi, _) in sorted(found.items())]
 
     @cached_property
     def applied(self) -> tuple[tuple[int, int], ...]:

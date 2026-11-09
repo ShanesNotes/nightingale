@@ -671,6 +671,15 @@ sys.exit(3 if how.get("fault") else 0)
 """
 
 
+def running(pid: int) -> bool:
+    """A zombie counts as gone: where PID 1 reaps no orphan, a killed driver stays in the table until its parent waits."""
+    try:
+        stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
+    except FileNotFoundError:
+        return False
+    return stat[stat.rindex(")") + 2] not in "ZX"
+
+
 def open_spec(end_ms: int, closed_loop: str | None = None):
     import spec
 
@@ -739,6 +748,15 @@ class Pool(unittest.TestCase):
         found = self.teacher().settle(run)
         self.assertEqual(found.directory, made.directory)
         self.assertEqual(len([n for n in self.notes() if n.startswith("start")]), 1, "no second run of A0")
+
+    def test_a_found_identity_run_of_another_commit_is_refused(self) -> None:
+        import teacher
+
+        run = teacher.TeacherRun("A0", open_spec(1100), None)
+        self.teacher().settle(run)
+        later = teacher.Teacher([sys.executable, "-I", str(self.root / "stand-in.py")], self.out, "d" * 40, 8, [self.root], 0, lambda path: self.free)
+        with self.assertRaisesRegex(teacher.TeacherError, "source commit"):
+            later.settle(run)
 
     def test_runs_start_longest_first_and_never_more_than_the_workers(self) -> None:
         self.steer({5000: {"sleep": 0.3}, 6000: {"sleep": 0.3}, 7000: {"sleep": 0.3}, 8000: {"sleep": 0.3}})
@@ -815,7 +833,7 @@ class Pool(unittest.TestCase):
     def test_a_driver_error_stops_new_starts_and_the_others_finish(self) -> None:
         import teacher
 
-        self.steer({8000: {"exit": 1, "sleep": 0.1}, 7000: {"sleep": 0.5}})
+        self.steer({8000: {"exit": 1}, 7000: {"sleep": 2.0}})
         with self.assertRaisesRegex(teacher.TeacherError, "synthetic io error"):
             self.teacher().ensure(self.runs(open_spec(8000), open_spec(7000), open_spec(5000)), self.identity, workers=2)
         starts = [n.split(" ")[1] for n in self.notes() if n.startswith("start")]
@@ -859,9 +877,7 @@ class Pool(unittest.TestCase):
         parent.send_signal(signal.SIGKILL)
         parent.wait()
         for _ in range(100):
-            try:
-                os.kill(child, 0)
-            except ProcessLookupError:
+            if not running(child):
                 break
             time.sleep(0.05)
         else:
@@ -1319,6 +1335,60 @@ class Pins(unittest.TestCase):
 
         limbs = capture.Limbs((2.0**53, 2.0**53 + 2.0), (1.0, 0.0))
         self.assertEqual(limbs.difference(1, 0), 1.0)
+
+
+class ReviewFindings(unittest.TestCase):
+    def setUp(self) -> None:
+        self.scratch = tempfile.TemporaryDirectory()
+        self.out = pathlib.Path(self.scratch.name)
+
+    def tearDown(self) -> None:
+        self.scratch.cleanup()
+
+    def test_a_non_finite_ledger_or_rate_fails_instead_of_passing(self) -> None:
+        import audit, capture
+
+        def nan_inventory(rows: list) -> None:
+            rows[4][2 + 2 + 4 * len(ROWS) + 4 * len(COLUMNS)] = bits(math.nan)
+
+        run = capture.RunData.open(Fixture(label="nan", edge_edit=nan_inventory).write(self.out))
+        self.assertEqual(audit.closure(run, run.edges()).value, math.inf)
+
+        def nan_rate(t_ns: int) -> dict:
+            v = default_values(t_ns)
+            v[RATE] = math.nan if t_ns == 3 * SECOND else 1.0
+            return v
+
+        rate = capture.RunData.open(Fixture(label="rate", values=nan_rate).write(self.out))
+        self.assertEqual(audit.beat_gap(rate, rate.edges()).value, math.inf)
+
+    def test_a_time_constant_past_40_minutes_keeps_its_limitation(self) -> None:
+        import audit
+
+        self.assertEqual(audit.encounter_text(audit.Fit(3162.28, 0.0, 1.0, 0.0, 1.5, True, "")), "15 min (slow component unresolved)")
+        self.assertEqual(audit.encounter_text(audit.Fit(2400.0, 0.0, 1.0, 0.0, 1.5, True, "")), "15 min")
+        self.assertEqual(audit.encounter_text(audit.Fit(600.0, 0.0, 1.0, 0.0, 1.5, True, "")), "10 min")
+        self.assertEqual(audit.encounter_text(audit.Fit(600.0, 0.0, 1.0, 0.0, 1.5, False, "")), "15 min (slow component unresolved)")
+
+    def test_workers_read_the_free_disk_recorded_once_the_runs_settled(self) -> None:
+        import audit
+
+        (self.out / "environment.txt").write_text("logical_processors 12\nfree_bytes /data 50000000000\nfree_bytes /mnt/c 60000000000\n")
+        self.assertEqual(audit.free_for_plans(audit.environment(self.out)), 50 * 10**9)
+        audit.record_settled_free(self.out, [pathlib.Path("/mnt/c")], lambda path: 15 * 10**9)
+        self.assertEqual(audit.free_for_plans(audit.environment(self.out)), 15 * 10**9)
+
+    def test_the_manifest_digest_is_the_digest_of_the_documented_sha256sum_output(self) -> None:
+        import audit, shutil, subprocess
+
+        if shutil.which("sha256sum") is None:
+            self.skipTest("no sha256sum")
+        for label in ("b", "a", "c"):
+            Fixture(label=label, directory_name=ident(label)).write(self.out)
+        Fixture(label="f", directory_name=ident("f"), faulted=True).write(self.out)
+        Fixture(label="g", directory_name=ident("f")).write(self.out)
+        listed = subprocess.run(["bash", "-c", "LC_ALL=C sha256sum */summary.txt"], cwd=self.out, capture_output=True, check=True).stdout
+        self.assertEqual(audit.manifest_digest(self.out), hashlib.sha256(listed).hexdigest())
 
 
 def run(real: pathlib.Path | None) -> int:

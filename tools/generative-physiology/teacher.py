@@ -146,6 +146,7 @@ class Teacher:
     def settle(self, run: TeacherRun) -> Settled:
         found = self.find(run.spec.text())
         if found:
+            self._check_commit(run.name, found)
             word = "fault" if found.name.endswith(".fault") else "present"
             return Settled(run.name, found.name.removesuffix(".fault"), word, found)
         return self._run_all([run], workers=1)[run.name]

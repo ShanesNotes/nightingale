@@ -36,7 +36,7 @@ setsid nohup python3 -I tools/generative-physiology/gp.py audit --data DATA --so
   > DATA/audit.log 2>&1 < /dev/null &
 cat DATA/audit/progress.txt                                       # after any reconnect
 python3 -I tools/generative-physiology/gp.py audit --data DATA --source-commit "$C" --report > DATA/audit/report.txt
-sha256sum DATA/audit/*/summary.txt > DATA/audit/summaries.sha256 && sha256sum DATA/audit/report.txt
+(cd DATA/audit && LC_ALL=C sha256sum */summary.txt) > DATA/audit/summaries.sha256 && sha256sum DATA/audit/summaries.sha256 DATA/audit/report.txt
 ```
 
 `audit` is safe to repeat: a complete run directory is skipped, a `.fault` directory is reported and kept, a partial one whose process is gone is removed and redone, and once every run is present or faulted the command only reads. It starts the longest runs first. Each run keeps its links in its own file store and deletes the file once its directory is complete (ticket 03), so memory stays flat and transient disk stays under about 25 GB at 3 workers. Before the first long run it checks free disk (at least 40 GB) and the toolchain, and refuses to start without them. Under WSL, `--disk /mnt/c` names the Windows drive that holds the disk image, whose free space is the real budget. A later command does not repeat the 40 GB check, because the image keeps what a deleted links file used; before each start it needs room for every running run's projected links and the new one's, plus 10 GB.
@@ -170,7 +170,7 @@ Machine: the heavy-run machine; logical processors <..>; memory limit <..>; swap
 
 Technical gate: <pass/fail>. Informativeness gate: <pass/fail, which rows>.
 Derived: teaching core <..>; history <..> s; encounter <..> min; workers <..>; rule low <..>, high <..>; plan size <..>.
-Evidence: summaries manifest sha256 <..>; report.txt's sha256 is recorded beside it; the data stay on the heavy-run machine.
+Evidence: summaries.sha256 <..>; report.txt's sha256 is recorded beside it; the data stay on the heavy-run machine.
 ```
 
 ## Acceptance
