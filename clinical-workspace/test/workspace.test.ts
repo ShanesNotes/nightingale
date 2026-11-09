@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { Story } from 'foldkit'
 import { FetchChart, init, Message, type Model, PostEntry, update } from '../src/workspace/program.ts'
 import { wallTime } from '../src/time.ts'
-import { at, entry, readModel, THERAPIST } from './fixtures.ts'
+import { at, entry, readModel, THERAPIST, written } from './fixtures.ts'
 
 type Sim = Parameters<Extract<Parameters<typeof Story.story>[1], (s: never) => unknown>>[0]
 const park = (sim: Sim) => ({ ...sim, commands: [] })
@@ -14,7 +14,7 @@ const loaded = (overrides: Readonly<Record<string, unknown>> = {}): Model =>
 const notice = (expected: string | RegExp) => Story.model((m: Model) => assert.match(m.notice, typeof expected === 'string' ? new RegExp(expected) : expected))
 
 test('a clinician of any discipline charts any vital: the page sends what was typed, then shows the chart as the service now has it', () => {
-  const taken = { kind: 'taken', entry: { ...entry({ id: 'test-entry-1', vital: 'RR', value: 18, care: '06:56:10', charted: '06:57:30' }), author: THERAPIST } }
+  const taken = written({ kind: 'taken', entry: { ...entry({ id: 'test-entry-1', vital: 'RR', value: 18, care: '06:56:10', charted: '06:57:30' }), author: THERAPIST } })
   Story.story(
     update,
     Story.given(loaded()),
@@ -49,11 +49,11 @@ test('a refusal shows in words, and a write the service does not answer is refus
     Story.message(Message.TypedValue({ text: '61' })),
     Story.message(Message.TypedCare({ text: '06:59:00' })),
     Story.message(Message.ClickedChart()),
-    Story.Command.resolve(PostEntry, Message.Wrote({ result: { kind: 'refused', refusal: { kind: 'care time after now' } } })),
+    Story.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'care time after now' } }) })),
     notice('The care time is after now; nothing was charted.'),
     Story.message(Message.TypedValue({ text: '' })),
     Story.message(Message.ClickedChart()),
-    Story.Command.resolve(PostEntry, Message.Wrote({ result: { kind: 'refused', refusal: { kind: 'not a finite number' } } })),
+    Story.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'not a finite number' } }) })),
     notice('The value is not a number; nothing was charted.'),
     Story.message(Message.ClickedChart()),
     Story.Command.resolve(PostEntry, Message.WriteUnanswered()),

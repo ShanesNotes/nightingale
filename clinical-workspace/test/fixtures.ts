@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { parseReadModel, ROSTER, type ReadModel } from '../src/chart-api.ts'
+import { parseReadModel, parseWriteResult, ROSTER, type ReadModel, type WriteResult } from '../src/chart-api.ts'
 import { parseClock, type PatientTime } from '../src/time.ts'
 import { perVital } from '../src/vitals.ts'
 
@@ -47,6 +47,12 @@ export const entry = (fields: { id: string; vital: string; value: number; care: 
 
 export function readModel(overrides: Readonly<Record<string, unknown>>): ReadModel {
   const parsed = parseReadModel({ run: RUN, now: at('06:57:30'), entries: [], readings: [], statements: [], missing: [], ...overrides })
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.reason)
+  return parsed.value
+}
+
+export function written(json: unknown): WriteResult {
+  const parsed = parseWriteResult(json)
   assert.ok(parsed.ok, parsed.ok ? '' : parsed.reason)
   return parsed.value
 }
