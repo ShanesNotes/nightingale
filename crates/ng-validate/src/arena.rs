@@ -31,13 +31,21 @@ pub struct ArenaProtocol {
     pub minimum_interval_ns: NonZeroU64,
 }
 impl ArenaProtocol {
-    /// §7's: every 24 h window over 48 h, timed twice so the throughput shows its spread, at the solver arena's model
+    /// §7's pick, which scores every core: one 24 h window from 06:55.
+    pub fn pick() -> Self {
+        Self::over(DAY)
+    }
+    /// §7's milestone protocol, which the picked core runs once: every 24 h window over 48 h, as I19's check needs.
+    pub fn milestone() -> Self {
+        Self::over(2 * DAY)
+    }
+    /// 24 h windows over `coverage_ns`, timed twice so the throughput shows its spread, at the solver arena's model
     /// defaults for the scales and the interval.
-    pub fn full() -> Self {
+    fn over(coverage_ns: u64) -> Self {
         let day = NonZeroU64::new(DAY).expect("a day");
         let scale = |value| Measure::<Dimensionless>::new(value).expect("a finite constant");
         Self {
-            windows: SlidingWindows::new(day, 2 * DAY).expect("two days cover one"),
+            windows: SlidingWindows::new(day, coverage_ns).expect("at least a day"),
             repeats: NonZeroU32::MIN.saturating_add(1),
             scales: ErrorScales::uniform(scale(0.1), scale(1e-3)).expect("positive constants"),
             minimum_interval_ns: NonZeroU64::new(100_000).expect("a positive constant"),
@@ -50,7 +58,7 @@ impl ArenaProtocol {
         let start = anchor_moment();
         let end = start.nanoseconds().saturating_add(self.windows.coverage_ns());
         Interval::new(start, SimTime::from_ns(end))
-            .expect("a coverage longer than its window ends after it starts")
+            .expect("a coverage of at least one window ends after it starts")
     }
     fn days(&self) -> NonZeroU32 {
         let days = self.windows.coverage_ns().div_ceil(DAY);

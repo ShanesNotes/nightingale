@@ -54,16 +54,18 @@ impl QuantityPolicy {
 pub enum ExpectedDrift {
     Zero,
 }
-/// Every sliding window of `window_ns` over at least `coverage_ns` of history.
+/// Every sliding window of `window_ns` over at least `coverage_ns` of history. A coverage of one window is the one
+/// window from admission, however far past its end the history's last step reaches, so every core is judged on the
+/// same window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SlidingWindows {
     window_ns: NonZeroU64,
     coverage_ns: u64,
 }
 impl SlidingWindows {
-    /// Refuses a coverage that does not exceed one window.
+    /// Refuses a coverage shorter than one window, which holds none.
     pub fn new(window_ns: NonZeroU64, coverage_ns: u64) -> Result<Self, AdmissionError> {
-        if coverage_ns <= window_ns.get() {
+        if coverage_ns < window_ns.get() {
             return Err(AdmissionError::ShortCoverage);
         }
         Ok(Self {
@@ -287,16 +289,23 @@ fn of_history(check: CertificateCheck) -> CertificateFailure {
 struct Holding<'r> {
     walk: NewestFirst<'r>,
     at: Option<HistorySegment>,
+    admission: u64,
 }
 impl<'r> Holding<'r> {
-    fn new(view: &ConservationView<'r>) -> Self {
+    fn new(view: &ConservationView<'r>, admission: u64) -> Self {
         Self {
             walk: view.newest_first(),
             at: None,
+            admission,
         }
     }
     fn holding(&mut self, instant: u64) -> Result<&HistorySegment, CertificateFailure> {
-        let before = |segment: &HistorySegment| segment.interval().start().nanoseconds() < instant;
+        let admission = self.admission;
+        let before = |segment: &HistorySegment| {
+            let start = segment.interval().start().nanoseconds();
+            let opens_the_history = start == admission;
+            start < instant || opens_the_history
+        };
         while !self.at.as_ref().is_some_and(before) {
             let next = self.walk.next().ok_or(of_history(CertificateCheck::Coverage))?;
             let read = |error| of_history(CertificateCheck::History(error));
@@ -306,15 +315,41 @@ impl<'r> Holding<'r> {
     }
 }
 
-fn differences(
-    later: &Curve<'_>,
-    late: Interval,
-    earlier: &Curve<'_>,
-    early: Interval,
-) -> Option<Vec<Compensated>> {
-    let (later, earlier) = (later.on(late)?, earlier.on(early)?);
-    let difference = |(later, earlier): (&Compensated, &Compensated)| later.minus(*earlier);
-    Some(later.iter().zip(&earlier).map(difference).collect())
+#[derive(Clone, Copy)]
+enum Stretch {
+    Between { from: u64, to: u64 },
+    FromAdmission { at: u64 },
+}
+impl Stretch {
+    fn starts(self) -> impl Iterator<Item = u64> {
+        let (from, to, count) = match self {
+            Stretch::Between { from, to } => (from, to, 2),
+            Stretch::FromAdmission { at } => (at, at, 1),
+        };
+        [from, to].into_iter().take(count)
+    }
+    fn changes(
+        self,
+        (later, leading): (&Curve<'_>, Interval),
+        (earlier, trailing): (&Curve<'_>, Interval),
+        length: u64,
+    ) -> Option<Vec<Compensated>> {
+        let at = SimTime::from_ns;
+        let difference = |(later, earlier): (&Compensated, &Compensated)| later.minus(*earlier);
+        match self {
+            Stretch::Between { from, to } => {
+                let early = Interval::new(at(from), at(to))?;
+                let late = Interval::new(at(from + length), at(to + length))?;
+                let (later, earlier) = (later.on(late)?, earlier.on(early)?);
+                Some(later.iter().zip(&earlier).map(difference).collect())
+            }
+            Stretch::FromAdmission { at: start } => {
+                let late = later.on(Interval::new(leading.start(), at(start + length))?)?;
+                let early = earlier.on(Interval::new(at(start), trailing.end())?)?;
+                Some(vec![late.last()?.minus(*early.first()?)])
+            }
+        }
+    }
 }
 
 struct Window {
@@ -340,37 +375,24 @@ fn pair(
     routes: &[HeldRoute],
     trailing: &HistorySegment,
     leading: &HistorySegment,
-    from: u64,
-    to: u64,
+    stretch: Stretch,
 ) -> Result<Pair, CertificateFailure> {
     let coverage = of_history(CertificateCheck::Coverage);
     let length = policy.windows.window_ns.get();
-    let early = Interval::new(SimTime::from_ns(from), SimTime::from_ns(to)).ok_or(coverage)?;
-    let late =
-        Interval::new(SimTime::from_ns(from + length), SimTime::from_ns(to + length)).ok_or(coverage)?;
+    let (early, late) = (trailing.interval(), leading.interval());
+    let differences =
+        |later: &Curve<'_>, earlier: &Curve<'_>| stretch.changes((later, late), (earlier, early), length);
     let window =
         |start: u64| Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + length)).ok_or(coverage);
     let mut drifted = None;
     let mut windows = Vec::with_capacity(2 * policy.quantities.len());
     for (at, limits) in policy.quantities.iter().enumerate() {
         let quantity = limits.quantity;
-        let change = differences(
-            &leading.inventory(quantity),
-            late,
-            &trailing.inventory(quantity),
-            early,
-        )
-        .ok_or(coverage)?;
-        let inflow = differences(&leading.inflow(quantity), late, &trailing.inflow(quantity), early)
-            .ok_or(coverage)?;
-        let outflow = differences(
-            &leading.outflow(quantity),
-            late,
-            &trailing.outflow(quantity),
-            early,
-        )
-        .ok_or(coverage)?;
-        for (index, start) in [from, to].into_iter().enumerate() {
+        let change =
+            differences(&leading.inventory(quantity), &trailing.inventory(quantity)).ok_or(coverage)?;
+        let inflow = differences(&leading.inflow(quantity), &trailing.inflow(quantity)).ok_or(coverage)?;
+        let outflow = differences(&leading.outflow(quantity), &trailing.outflow(quantity)).ok_or(coverage)?;
+        for (index, start) in stretch.starts().enumerate() {
             let interval = window(start)?;
             let closure = change[index].minus(inflow[index].minus(outflow[index])).abs();
             let gross = inflow[index].plus(outflow[index]);
@@ -406,13 +428,13 @@ fn pair(
             leading.exchange(route.column()),
             trailing.exchange(route.column()),
         );
-        let forward = differences(&forward, late, &forward_before, early).ok_or(coverage)?;
-        let reverse = differences(&reverse, late, &reverse_before, early).ok_or(coverage)?;
+        let forward = differences(&forward, &forward_before).ok_or(coverage)?;
+        let reverse = differences(&reverse, &reverse_before).ok_or(coverage)?;
         let (inflow, outflow) = match route.forward() {
             BoundaryDirection::IntoBody => (forward, reverse),
             BoundaryDirection::OutOfBody => (reverse, forward),
         };
-        for (index, start) in [from, to].into_iter().enumerate() {
+        for (index, start) in stretch.starts().enumerate() {
             carried.push(Carried {
                 route: at,
                 interval: window(start)?,
@@ -507,25 +529,37 @@ pub fn certify(
     let routes = view.basis().coverage().held_routes();
     let length = policy.windows.window_ns.get();
     let first = span.start().nanoseconds();
-    let (mut early, mut late) = (Holding::new(view), Holding::new(view));
+    let (mut early, mut late) = (Holding::new(view, first), Holding::new(view, first));
     let mut worst: Vec<Option<QuantityResult>> = vec![None; policy.quantities.len()];
     let mut most: Vec<Option<HeldSupport>> = vec![None; routes.len()];
     let (mut failed, mut drifted) = (None, None);
     let mut pieces = 0;
-    let mut to = span.end().nanoseconds() - length;
-    while to > first {
+    let mut to = if policy.windows.coverage_ns == length {
+        first
+    } else {
+        span.end().nanoseconds() - length
+    };
+    loop {
         let trailing = early.holding(to)?;
         let leading = late.holding(to + length)?;
         let start = |segment: &HistorySegment| segment.interval().start().nanoseconds();
         let from = start(trailing).max(start(leading).saturating_sub(length));
         pieces += 1;
-        match pair(policy, routes, trailing, leading, from, to) {
+        let stretch = if to == first {
+            Stretch::FromAdmission { at: first }
+        } else {
+            Stretch::Between { from, to }
+        };
+        match pair(policy, routes, trailing, leading, stretch) {
             Err(failure) => failed = Some(failure),
             Ok(pair) => {
                 drifted = pair.drifted.or(drifted);
                 keep_the_earliest_worst(&mut worst, policy, pair.windows);
                 keep_the_earliest_most(&mut most, routes, pair.carried);
             }
+        }
+        if from == first {
+            break;
         }
         to = from;
     }

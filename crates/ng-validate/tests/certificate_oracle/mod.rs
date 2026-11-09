@@ -207,7 +207,11 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
         .map_err(|error| failed(CertificateCheck::History(error)))?;
     segments.reverse();
     let first = span.start().nanoseconds();
-    let last = span.end().nanoseconds() - length;
+    let last = if ledger.coverage_ns == length {
+        first
+    } else {
+        span.end().nanoseconds() - length
+    };
     let starts = window_starts(&segments, first, last, length);
     let quantities: Vec<QuantityId> = view.basis().ids().collect();
     let routes = view.basis().coverage().held_routes();
@@ -216,22 +220,44 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
     let mut drifted: Option<Failed> = None;
     let (mut trail, mut lead) = (0, 0);
     let mut pieces = 0;
-    for pair in starts.windows(2) {
-        let [from, to] = [pair[0], pair[1]];
-        let early = Interval::new(SimTime::from_ns(from), SimTime::from_ns(to)).ok_or_else(coverage)?;
-        let late = Interval::new(SimTime::from_ns(from + length), SimTime::from_ns(to + length))
-            .ok_or_else(coverage)?;
-        while segments[trail].interval().end() <= early.start() {
-            trail += 1;
-        }
-        while segments[lead].interval().end() <= late.start() {
-            lead += 1;
-        }
-        let (trailing, leading) = (&segments[trail], &segments[lead]);
+    let stretches: Vec<&[u64]> = match starts.len() {
+        1 => vec![&starts[..]],
+        _ => starts.windows(2).collect(),
+    };
+    for pair in stretches {
+        let (trailing, leading, pieces_of) = match *pair {
+            [from, to] => {
+                let early =
+                    Interval::new(SimTime::from_ns(from), SimTime::from_ns(to)).ok_or_else(coverage)?;
+                let late = Interval::new(SimTime::from_ns(from + length), SimTime::from_ns(to + length))
+                    .ok_or_else(coverage)?;
+                while segments[trail].interval().end() <= early.start() {
+                    trail += 1;
+                }
+                while segments[lead].interval().end() <= late.start() {
+                    lead += 1;
+                }
+                (&segments[trail], &segments[lead], Some((early, late)))
+            }
+            _ => {
+                let end = SimTime::from_ns(first + length);
+                let leading = segments.iter().find(|segment| segment.interval().end() >= end);
+                (&segments[0], leading.ok_or_else(coverage)?, None)
+            }
+        };
+        let differences = |later: &Curve<'_>, earlier: &Curve<'_>| match pieces_of {
+            Some((early, late)) => differences(later, late, earlier, early),
+            None => {
+                let end = SimTime::from_ns(first + length);
+                let end = later.on(Interval::new(leading.interval().start(), end)?)?;
+                let start = earlier.on(trailing.interval())?;
+                Some(vec![end.last()?.minus(*start.first()?)])
+            }
+        };
         pieces += 1;
         for (&quantity, held) in quantities.iter().zip(&mut worst) {
             let pick = |curve: fn(&HistorySegment, QuantityId) -> Curve<'_>| {
-                differences(&curve(leading, quantity), late, &curve(trailing, quantity), early)
+                differences(&curve(leading, quantity), &curve(trailing, quantity))
             };
             let change = pick(HistorySegment::inventory).ok_or_else(coverage)?;
             let inflow = pick(HistorySegment::inflow).ok_or_else(coverage)?;
@@ -278,8 +304,8 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
                 leading.exchange(route.column()),
                 trailing.exchange(route.column()),
             );
-            let forward = differences(&forward, late, &forward_before, early).ok_or_else(coverage)?;
-            let reverse = differences(&reverse, late, &reverse_before, early).ok_or_else(coverage)?;
+            let forward = differences(&forward, &forward_before).ok_or_else(coverage)?;
+            let reverse = differences(&reverse, &reverse_before).ok_or_else(coverage)?;
             let (inflow, outflow) = match route.forward() {
                 BoundaryDirection::IntoBody => (forward, reverse),
                 BoundaryDirection::OutOfBody => (reverse, forward),
