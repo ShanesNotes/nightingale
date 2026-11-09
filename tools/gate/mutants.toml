@@ -665,3 +665,10 @@ path = "crates/ng-validate/src/slice.rs"
 old = '''let above = k.subtract(seen, center);'''
 new = '''let above = k.subtract(center, seen);'''
 test = "--release -p ng-validate --test arena_body the_slice_compiles_initializes_closes_and_regulates_itself"
+
+[[mutant]]
+name = "window-judges-exchange-nets"
+path = "crates/ng-validate/src/window.rs"
+old = '''Compared::Exchange(_) => value.minus(*before),'''
+new = '''Compared::Exchange(_) => *value,'''
+test = "--release -p ng-validate --test arena one_arena_scores_the_reference_and_ng_solver_with_one_call_each"

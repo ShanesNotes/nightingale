@@ -115,7 +115,7 @@ fn references(intervals_ns: [u64; 3], scales: ErrorScales, floor: NonZeroU64) ->
 pub enum Compared {
     /// An amount, a memory or a produced quantity.
     Row(RowId),
-    /// A column's exchange since admission.
+    /// A column's exchange over each grid interval.
     Exchange(ColumnId),
 }
 
@@ -445,6 +445,7 @@ fn trace(
         transitions: Vec::new(),
     };
     let mut next = anchor_moment().nanoseconds() + policy.grid_ns;
+    let mut reached = vec![Compensated::ZERO; compared.len()];
     while session.record().accepted().time().nanoseconds() < end + policy.past_end_ns {
         let before = session.record().accepted().modes().to_vec();
         session = advance(session).map_err(faulted)?;
@@ -469,10 +470,20 @@ fn trace(
                     .expect("a compared instant is inside the segment"),
                 Compared::Exchange(column) => net_at(&segment, column, at),
             };
+            let values: Vec<Compensated> = compared.iter().map(read).collect();
+            // An exchange's running total carries its signed error from interval to interval, where it cancels or
+            // grows by where the grid falls in the beat, so each instant holds its net over the interval it ends.
+            let nets = (compared.iter().zip(&values).zip(&reached))
+                .map(|((quantity, value), before)| match quantity {
+                    Compared::Row(_) => *value,
+                    Compared::Exchange(_) => value.minus(*before),
+                })
+                .collect();
+            reached = values;
             trace.instants.push(Instant {
                 at,
                 modes: if at == now { after.to_vec() } else { before.clone() },
-                values: compared.iter().map(read).collect(),
+                values: nets,
             });
             next += policy.grid_ns;
         }
