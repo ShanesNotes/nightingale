@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { Scene } from 'foldkit'
-import { type BootId, isBootId, isPatientId } from '../src/device.ts'
-import { Message, monitor } from '../src/monitor/monitor.ts'
+import { Scene, Story } from 'foldkit'
+import { type BootId, isBootId, isPatientId, parseBatch } from '../src/device.ts'
+import { Message, type Model, monitor } from '../src/monitor/monitor.ts'
 import { availableBetween, decodeRun } from '../src/run.ts'
 import { add, formatClock, type PatientTime, seconds } from '../src/time.ts'
 import { chartDouble } from './link-double.ts'
@@ -74,4 +74,57 @@ test('nothing under src/monitor imports anything but observation, device, vitals
     /^\.\/[\w-]+\.ts$/.test(specifier) ||
     /^(effect|foldkit)\/[\w/-]+$/.test(specifier)
   assert.deepEqual(specifiers.filter((line) => !allowed(line.slice(line.indexOf(': ') + 2))), [])
+})
+
+type Program = ReturnType<typeof monitor>
+type Double = ReturnType<typeof chartDouble>
+
+// The chart service answers the batch in flight: the in-memory chart decides each answer.
+function answerOf(double: Double, m: Program, commands: ReadonlyArray<{ readonly name: string; readonly args?: Record<string, unknown> }>) {
+  const pending = commands.find((c) => c.name === 'SendBatch')
+  assert.ok(pending?.args !== undefined, 'a batch is in flight')
+  const batch = parseBatch(pending.args['batch'])
+  assert.ok(batch.ok, batch.ok ? '' : batch.reason)
+  return m.messageFor(double.answer(batch.value))
+}
+
+const serviceAnswers = (double: Double, m: Program) => (sim: Story.StorySimulation<Model, Message>) =>
+  Story.Command.resolve(m.SendBatch, answerOf(double, m, sim.commands))(sim)
+
+const sceneAnswers = (double: Double, m: Program) => (sim: Scene.SceneSimulation<Model, Message>) =>
+  Scene.Command.resolve(m.SendBatch, answerOf(double, m, sim.commands))(sim)
+
+test('on a healthy link the monitor states its channels at boot and delivers each second\'s readings in one batch, none late', () => {
+  const double = chartDouble(patient)
+  const m = monitor({ patient, feed, link: double.link, boot: boot('test-boot-1') })
+  Story.story(
+    m.update,
+    Story.given(m.init().model),
+    Story.message(Message.SecondPassed({ now: second(10) })),
+    serviceAnswers(double, m),
+    Story.model((model: Model) => assert.deepEqual(model.outbox, [], 'every answered message leaves the outbox')),
+    Story.message(Message.SecondPassed({ now: second(11) })),
+    serviceAnswers(double, m),
+    Story.model((model: Model) => assert.deepEqual(model.outbox, [])),
+  )
+  const held = double.held()
+  const [first, ...readings] = held
+  assert.ok(first?.kind === 'statement', 'the boot statement comes first')
+  assert.equal(first.at, second(10))
+  assert.deepEqual(first.channels, { HR: 'sourced', 'ABP sys': 'no source', 'ABP dia': 'no source', 'ABP mean': 'sourced', SpO2: 'no source', RR: 'no source', Temp: 'no source' })
+  assert.deepEqual(
+    readings.map((r) => (r.kind === 'reading' ? `${r.sequence} ${r.vital} ${formatClock(r.collected)}` : r.kind)),
+    ['2 HR 06:55:10', '3 ABP mean 06:55:10', '4 HR 06:55:11', '5 ABP mean 06:55:11'],
+  )
+  assert.ok(held.every((message) => message.device === held[0]?.device && message.boot === 'test-boot-1' && message.patient === patient))
+  const hr = readings.find((r) => r.kind === 'reading' && r.vital === 'HR')
+  assert.ok(hr?.kind === 'reading' && hr.value.kind === 'present')
+  assert.equal(hr.value.value, observed('algebraic/CV/rate/body', second(10)) * 60, 'heart rate is sent per minute, the exact factor of 60')
+  Scene.scene(
+    { update: m.update, view: m.view },
+    Scene.given(m.init().model),
+    Scene.Subscription.emit(Message.SecondPassed({ now: second(12) })),
+    sceneAnswers(chartDouble(patient), m),
+    Scene.expect(Scene.selector('#link')).toHaveText('Everything delivered to the chart.'),
+  )
 })
