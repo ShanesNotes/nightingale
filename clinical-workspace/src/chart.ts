@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto'
 import { PGlite } from '@electric-sql/pglite'
 import pg from 'pg'
-import type { RunView } from './chart-api.ts'
-import { isPatientId } from './device.ts'
-import { isPatientTime, isWallTime, type WallTime } from './time.ts'
+import { type EntryView, type NewEntry, parseEntries, type ReadModel, ROSTER, type RunView, type WriteResult } from './chart-api.ts'
+import { isPatientId, type Parsed } from './device.ts'
+import { isPatientTime, isWallTime, type PatientTime, type WallTime } from './time.ts'
 
 // The chart's one seam: a small SQL client with a pg adapter for a real Postgres and a PGlite adapter that runs
 // Postgres in-process. Both give a bigint column as a safe integer, so callers never see which ran.
@@ -106,9 +106,56 @@ CREATE TABLE IF NOT EXISTS run (
   anchor_ms bigint NOT NULL,
   inserted_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS entry (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  patient text NOT NULL,
+  vital text NOT NULL,
+  inserted_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS entry_version (
+  entry uuid NOT NULL REFERENCES entry (id),
+  number integer NOT NULL CHECK (number >= 1),
+  value double precision NOT NULL CHECK (value <> 'NaN' AND value <> 'Infinity' AND value <> '-Infinity'),
+  care_ns bigint NOT NULL,
+  charted_ns bigint NOT NULL,
+  author text NOT NULL,
+  author_name text NOT NULL,
+  author_discipline text NOT NULL,
+  inserted_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (entry, number)
+);
+CREATE OR REPLACE VIEW current_entry AS
+  SELECT e.id, e.patient, e.vital, v.number, v.value, v.care_ns, v.charted_ns, v.author, v.author_name,
+    v.author_discipline, counts.versions, e.inserted_at
+  FROM entry e
+  JOIN (SELECT entry, max(number) AS current, count(*) AS versions FROM entry_version GROUP BY entry) counts
+    ON counts.entry = e.id
+  JOIN entry_version v ON v.entry = e.id AND v.number = counts.current;
 `
 
-export type Chart = { readonly run: RunView }
+// Rows leave the database in the chart API's own shape, so the API's parser checks them on the way out.
+const ENTRY_JSON = `json_build_object('entry', id, 'patient', patient, 'vital', vital, 'number', number, 'value', value,
+  'care', care_ns, 'charted', charted_ns, 'author', json_build_object('id', author, 'name', author_name,
+  'discipline', author_discipline), 'versions', versions)`
+
+export type Chart = {
+  readonly run: RunView
+  write(entry: NewEntry, now: PatientTime): Promise<WriteResult>
+  readModel(now: PatientTime): Promise<ReadModel>
+}
+
+const trusted = <T>(parsed: Parsed<T>): T => {
+  if (!parsed.ok) throw new Error(`the chart's database gave a row the chart API refuses: ${parsed.reason}`)
+  return parsed.value
+}
+
+async function entries(sql: Sql, where = 'true', params: readonly unknown[] = []): Promise<readonly EntryView[]> {
+  const [row] = await sql.query(
+    `SELECT coalesce(json_agg(${ENTRY_JSON} ORDER BY care_ns, inserted_at, id), '[]'::json) AS entries FROM current_entry WHERE ${where}`,
+    params,
+  )
+  return trusted(parseEntries(row?.['entries']))
+}
 
 const RUN_COLUMNS = 'spec_id, patient, start_ns, end_ns, anchor_ms'
 
@@ -134,5 +181,27 @@ export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: 
   if (held.specId !== run.specId || held.patient !== run.patient || held.start !== run.start || held.end !== run.end) {
     throw new Error(`the chart's database holds run ${held.specId} for patient ${held.patient}, not this one`)
   }
-  return { run: held }
+  return {
+    run: held,
+    async write(entry, now) {
+      const author = ROSTER.find((c) => c.id === entry.author)
+      if (author === undefined) return { kind: 'refused', refusal: { kind: 'malformed', reason: 'the author is not on the roster' } }
+      const care = entry.care.kind === 'now' ? now : entry.care.at
+      return sql.transaction(async (tx) => {
+        const [made] = await tx.query('INSERT INTO entry (patient, vital) VALUES ($1, $2) RETURNING id', [entry.patient, entry.vital])
+        const id = made?.['id']
+        await tx.query(
+          `INSERT INTO entry_version (entry, number, value, care_ns, charted_ns, author, author_name, author_discipline)
+           VALUES ($1, 1, $2, $3, $4, $5, $6, $7)`,
+          [id, entry.value, care, now, author.id, author.name, author.discipline],
+        )
+        const [taken] = await entries(tx, 'id = $1', [id])
+        if (taken === undefined) throw new Error('the chart lost the entry it just took')
+        return { kind: 'taken', entry: taken }
+      })
+    },
+    async readModel(now) {
+      return { run: held, now, entries: await entries(sql), readings: [], statements: [], missing: [] }
+    },
+  }
 }

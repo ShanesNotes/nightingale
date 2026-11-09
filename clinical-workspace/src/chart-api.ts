@@ -328,6 +328,8 @@ export const parseWriteResult = (body: unknown): Parsed<WriteResult> =>
     return fail('a write result is taken or refused')
   })
 
+export const parseEntries = (body: unknown): Parsed<readonly EntryView[]> => parsing(() => list(body, 'entries').map(entryView))
+
 export const parseVersions = (body: unknown): Parsed<readonly EntryVersion[]> => parsing(() => list(body, 'versions').map(entryVersion))
 
 export const parseRun = (body: unknown): Parsed<RunView> => parsing(() => run(body))
