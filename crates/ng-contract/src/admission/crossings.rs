@@ -453,8 +453,8 @@ impl InitializationSystem<'_> {
                 return Err(point);
             }
             match self.scan(workspace, &values, leg)? {
-                Event::Clear | Event::Gone { .. } => {}
-                Event::Cross { .. } | Event::Unarmed => return Err(point),
+                Event::Clear => {}
+                Event::Cross { .. } | Event::Unarmed | Event::Gone { .. } => return Err(point),
             }
         }
         let Some(period) = self.period else {
