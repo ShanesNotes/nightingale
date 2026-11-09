@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 ANCHOR_NS = 24_900_000_000_000
 SECOND = 1_000_000_000
+FENCE = SECOND
 REAL_DRIVER: pathlib.Path | None = None
 
 
@@ -899,21 +900,24 @@ class GateRows(unittest.TestCase):
 
         return capture.RunData.open(Fixture(**fields).write(self.out))
 
-    def test_a0_s_pins_are_trace_rs_s(self) -> None:
+    def test_a0_s_pins_are_read_from_trace_rs(self) -> None:
         import audit
 
-        trace = (audit.ROOT / "crates" / "ng-validate" / "tests" / "trace.rs").read_text()
-        self.assertIn(f'expect!["{audit.A0_PACKET}"]', trace)
-        self.assertIn(f'expect!["{audit.A0_SEAL}"]', trace)
-        self.assertIn(f"{audit.A0_HEAD_NS / 1e6:.6f} ms", trace)
+        packet, sealed, head_ns = audit.a0_pins()
+        trace = audit.TRACE.read_text()
+        self.assertIn(f'expect!["{packet}"]', trace)
+        self.assertIn(f'expect!["{sealed}"]', trace)
+        self.assertNotEqual(packet, sealed)
+        self.assertTrue(FENCE <= head_ns < FENCE + SECOND // 10, head_ns)
 
     def test_the_a0_row_passes_its_pins_and_fails_one_ns_late(self) -> None:
         import audit
 
-        steps = [250_000_000, 500_000_000, 1_000_079_707, 1_100_000_000]
-        good = self.made(label="a0", packet=audit.A0_PACKET, steps_ns=steps, end_ns=1_100_000_000, seals={3: audit.A0_SEAL})
+        packet, sealed, head_ns = audit.a0_pins()
+        steps = [250_000_000, 500_000_000, head_ns, 1_100_000_000]
+        good = self.made(label="a0", packet=packet, steps_ns=steps, end_ns=1_100_000_000, seals={3: sealed})
         self.assertEqual(audit.a0_check(good).verdict, "pass")
-        late = self.made(label="late", packet=audit.A0_PACKET, steps_ns=[250_000_000, 500_000_000, 1_000_079_708, 1_100_000_000], end_ns=1_100_000_000, seals={3: audit.A0_SEAL})
+        late = self.made(label="late", packet=packet, steps_ns=[250_000_000, 500_000_000, head_ns + 1, 1_100_000_000], end_ns=1_100_000_000, seals={3: sealed})
         self.assertEqual(audit.a0_check(late).verdict, "fail")
 
     def test_a_branch_row_compares_from_the_checkpoint_inclusive(self) -> None:
@@ -1077,6 +1081,7 @@ def corpus(out: pathlib.Path, drop: tuple[str, ...] = ()) -> None:
     plan = spec.Plan.read()
     first = seal("first")
     a3_beat = 909_090_909
+    packet, sealed, head_ns = audit.a0_pins()
 
     def histories(n: int):
         def values(t_ns: int) -> dict:
@@ -1102,7 +1107,7 @@ def corpus(out: pathlib.Path, drop: tuple[str, ...] = ()) -> None:
     action = spec.PostureEvent(333000, spec.SETTINGS["stand"])
     realized = spec.RunSpec(b7.core, b7.end_ms, tuple(sorted(b7.events + (action,), key=lambda e: e.at_ms)), None, "none").text()
     special = {
-        "A0": dict(steps_ns=[SECOND // 4, SECOND // 2, audit.A0_HEAD_NS, 1_100_000_000], seals={0: first, 3: audit.A0_SEAL}),
+        "A0": dict(steps_ns=[SECOND // 4, SECOND // 2, head_ns, 1_100_000_000], seals={0: first, 3: sealed}),
         "A1": dict(branch_from=5, enqueued="0@5"),
         "A3": dict(values=standing, beat_ns=a3_beat, first_edge_ns=a3_beat, step_ns=a3_beat),
         "A4": dict(branch_from=290, enqueued="3@290 4@290 5@290"),
@@ -1126,7 +1131,7 @@ def corpus(out: pathlib.Path, drop: tuple[str, ...] = ()) -> None:
             continue
         source = run.spec or plan[run.replays].spec
         fields = dict(label=run.name, spec=run.spec.text() if run.spec else "", end_ns=source.end_ms * 1_000_000)
-        fields.update(directory_name=ident(run.name), packet=audit.A0_PACKET, seals={0: first})
+        fields.update(directory_name=ident(run.name), packet=packet, seals={0: first})
         fields["step_ns"] = SECOND if source.end_ms > 60000 else SECOND // 4
         if source.cap_ms != 10:
             fields["resolution"] = seal("synthetic resolution of another core")

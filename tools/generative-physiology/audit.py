@@ -15,6 +15,7 @@ import hashlib
 import math
 import os
 import platform
+import re
 import shutil
 import statistics
 import subprocess
@@ -32,9 +33,8 @@ from spec import Plan
 from teacher import Teacher, TeacherError, TeacherRun
 
 ROOT = Path(__file__).resolve().parents[2]
-A0_PACKET = "6d709479f0b103cadc1972febf6437a2dde172e19242eb76908b9dabde5bb752"
-A0_SEAL = "58233f790617a4f1bf5122b47fc44efaeface2ebb7d4c3652567bb44ba176ecf"
-A0_HEAD_NS = 1_000_079_707
+TRACE = ROOT / "crates" / "ng-validate" / "tests" / "trace.rs"
+PINNED = "fn the_first_second_of_the_slice_on_ng_solver_stays_where_it_was"
 FENCE_NS = 1_000_000_000
 
 TRAFFIC = "algebraic/NS/sympathetic traffic/body"
@@ -128,12 +128,27 @@ def log_of(seals) -> list[tuple[int, int, str]]:
     return [(entry.revision, entry.end_ns, entry.seal) for entry in seals]
 
 
+def a0_pins() -> tuple[str, str, int]:
+    """What crates/ng-validate/tests/trace.rs pins for Core at a 10 ms cap, read from the test itself so the audit
+    keeps no copy: the packet digest, the seal at the first head at or after 1 s, and that head's instant in ns."""
+    text = TRACE.read_text()
+    start = text.find(PINNED)
+    block = text[start : text.find("\n}\n", start)] if start >= 0 else ""
+    digests = re.findall(r'expect!\["([0-9a-f]{64})"\]', block)
+    heads = re.findall(r"^ +([0-9]+)\.([0-9]{6}) ms ", block, re.M)
+    if len(digests) != 2 or not heads:
+        raise CaptureError(f"{TRACE.name} no longer pins the first second in {PINNED}")
+    whole, part = heads[-1]
+    return digests[0], digests[1], int(whole) * 1_000_000 + int(part)
+
+
 def a0_check(run: RunData) -> Check:
     head = next((entry for entry in run.seals if entry.end_ns >= FENCE_NS), None)
     if head is None:
         return Check("no head at or after 1 s", "fail")
     packet = run.summary.packet
-    ok = packet == A0_PACKET and head.seal == A0_SEAL and head.end_ns == A0_HEAD_NS
+    pinned_packet, pinned_seal, pinned_head = a0_pins()
+    ok = packet == pinned_packet and head.seal == pinned_seal and head.end_ns == pinned_head
     return Check(f"packet {short(packet)}, seal {short(head.seal)}, head {ms(head.end_ns)} ms", verdict(ok))
 
 
