@@ -12,7 +12,8 @@
     "build": "vite build",
     "dev": "node scripts/dev.ts",
     "db:stop": "node scripts/db.ts stop",
-    "reset": "node scripts/db.ts reset"
+    "reset": "node scripts/db.ts reset",
+    "drive": "node scripts/drive.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.11",
