@@ -49,7 +49,7 @@ export const Model = Schema.Struct({
   notice: Schema.String,
   selected: Schema.NullOr(Schema.String),
   versions: Schema.NullOr(Schema.Struct({ entry: Schema.String, list: VersionsSchema })),
-  editing: Schema.NullOr(Schema.Struct({ value: Schema.String, care: Schema.String })),
+  editing: Schema.NullOr(Schema.Struct({ entry: Schema.String, replaces: Schema.Number, value: Schema.String, care: Schema.String })),
 })
 export type Model = typeof Model.Type
 
@@ -210,23 +210,17 @@ export function update(model: Model, message: Message): Return {
     VersionsUnanswered: () => ({ model: { ...model, notice: 'The chart service did not answer; the earlier versions are not shown.' } }),
     ClickedEdit: () => {
       const current = selectedEntry(model)
-      return current === undefined ? { model } : { model: { ...model, editing: { value: String(current.value), care: formatClock(current.care) } } }
+      if (current === undefined) return { model }
+      return { model: { ...model, editing: { entry: current.entry, replaces: current.number, value: String(current.value), care: formatClock(current.care) } } }
     },
     TypedEditValue: ({ text }) => (model.editing === null ? { model } : { model: { ...model, editing: { ...model.editing, value: text } } }),
     TypedEditCare: ({ text }) => (model.editing === null ? { model } : { model: { ...model, editing: { ...model.editing, care: text } } }),
     ClickedSaveEdit: () => {
-      const current = selectedEntry(model)
-      if (current === undefined || model.editing === null || model.latest === null) return { model }
+      if (model.editing === null || model.latest === null) return { model }
       const care = careTime(model.editing.care)
       if (!care.ok) return { model: { ...model, notice: 'The care time is not HH:MM:SS; nothing was charted.' } }
-      const body = {
-        patient: model.latest.run.patient,
-        author: model.form.author,
-        entry: current.entry,
-        replaces: current.number,
-        value: model.editing.value,
-        care: care.care,
-      }
+      const { entry, replaces, value } = model.editing
+      const body = { patient: model.latest.run.patient, author: model.form.author, entry, replaces, value, care: care.care }
       return { model: { ...model, notice: 'Amending.' }, commands: [PostAmendment({ body })] }
     },
     ClickedClose: () => ({ model: { ...model, screen: 'closed', latest: null, selected: null, versions: null, editing: null, notice: '' } }),
