@@ -26,7 +26,7 @@ Reading order matters more than row count, since one document answers many rows.
   | Parameter | Source | Value | n | Population and method | Verdict |
   |---|---|---|---|---|---|
   | `cv.orifice`, left ventricle to systemic arteries | EACVI and ASE 2017 focused update, doi:10.1016/j.echo.2017.02.009 | none | | stenosis grading | Not fit: its numbers are disease cut-offs, not a healthy valve's EOA |
-  | `cv.elastance`, systemic arteries | Gudbrandsson 1992, doi:10.3109/08037059209065121 | SV/PP 1.90 ± 0.58 (men), 2.00 ± 0.62 (women); unit and statistic not stated | 801 | Normal adults 30 ± 5.6 y, echo-Doppler SV over cuff pulse pressure | Unresolved: needs the full text; cuff pressure biases SV/PP low |
+  | `cv.elastance`, systemic arteries | Gudbrandsson 1992, doi:10.3109/08037059209065121 | SV/PP 1.90 ± 0.58 (men), 2.00 ± 0.62 (women), after adjustment for body surface area; unit and statistic not stated | 801 | Normal adults 30 ± 5.6 y, echo-Doppler SV over cuff pulse pressure | Unresolved: needs the full text; cuff pressure biases SV/PP low |
   | `cv.elastance`, systemic arteries | Chemla 1998, doi:10.1152/ajpheart.1998.274.2.H500 | none in the abstract | 7 controls | Invasive aortic pressure, area method | Method support for SV/PP; values need the full text |
   | `cv.elastance`, systemic arteries | Kelly 1992, doi:10.1161/01.cir.86.2.513 | Ea | 10 | End-systolic pressure over SV | Rejected: effective arterial elastance is a load index, not 1/C |
   | `cv.elastance`, systemic arteries | Stergiopulos 1999, doi:10.1152/ajpheart.1999.276.2.H424 | 0.169 ± 0.007 mL/mmHg (SE) | 7 | Anaesthetised dogs | Rejected: species. Shows that compliance depends on the pressure it is read at |
