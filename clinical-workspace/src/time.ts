@@ -1,4 +1,5 @@
 export type PatientTime = number
+export type Duration = number
 export type WallTime = number
 
 export type PatientClock = {
@@ -10,6 +11,14 @@ export type PatientClock = {
 const NANOSECONDS_PER_SECOND = 1_000_000_000
 const MILLISECONDS_PER_SECOND = 1_000
 const CLOCK = /^([01]\d|2[0-3]):([0-5]\d):([0-5]\d)$/
+
+export const SECOND: Duration = NANOSECONDS_PER_SECOND
+export const MINUTE: Duration = 60 * NANOSECONDS_PER_SECOND
+
+export const add = (time: PatientTime, duration: Duration): PatientTime => time + duration
+export const since = (later: PatientTime, earlier: PatientTime): Duration => later - earlier
+export const floorTo = (time: PatientTime, unit: Duration): PatientTime => Math.floor(time / unit) * unit
+export const earlier = (a: PatientTime, b: PatientTime): PatientTime => Math.min(a, b)
 
 const twoDigits = (n: number) => String(n).padStart(2, '0')
 
