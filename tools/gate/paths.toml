@@ -108,6 +108,10 @@ item = "admission::InitializationSystem::stage"
 reason = "one leg's rows at both stages in mixed dimensions, for a march to the orbit that admit then judges"
 
 [[crate.f64_allow]]
+item = "admission::InitializationSystem::stage_residuals"
+reason = "one leg's rows at both stages in mixed dimensions, for a march that solves them against a block it holds"
+
+[[crate.f64_allow]]
 item = "admission::InitializationSystem::solve_stage"
 reason = "one leg's Newton update, in mixed row dimensions: a right side in, an update out"
 

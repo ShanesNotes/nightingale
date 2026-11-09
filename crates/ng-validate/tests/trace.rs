@@ -113,8 +113,8 @@ fn the_first_second_of_the_slice_stays_where_it_was() {
     let core = ReferenceIntegrator::new(MILLISECOND)
         .with_scales(ErrorScales::uniform(scale(1.0), scale(1e-3)).expect("positive"));
     let FirstSecond { named, trace, sealed } = first_second(&core);
-    expect!["622fb0bba25771d7cfe5b8435ff0e0c00022b86048ff5c11f61b27f5acd0febd"].assert_eq(&named);
-    expect!["faec8d7edaee405390f07dd73f181c5e2cb97ac09288603a0668cf7bb2e3cc85"].assert_eq(&sealed);
+    expect!["4b163a090023f9352abd205cb3e96c81102a551b426ec2f53ffd7994a2ac0b34"].assert_eq(&named);
+    expect!["b7657e93675c5634d35c97116c102177ac288aea40b28ace74df0d73ad60937b"].assert_eq(&sealed);
     expect![[r#"
          100.000000 ms  arterial pressure 125.034455  right atrial pressure 1.617394  heart rate 1.053684  sympathetic traffic 0.709794  filtration 1.709744  urine 0.020000  wall power 14119.392387  aortic flow 0.000000
          200.000000 ms  arterial pressure 120.538735  right atrial pressure 2.047878  heart rate 1.070960  sympathetic traffic 0.129996  filtration 2.082523  urine 0.020000  wall power 10381.269823  aortic flow 39.901422
@@ -132,8 +132,8 @@ fn the_first_second_of_the_slice_stays_where_it_was() {
 #[test]
 fn the_first_second_of_the_slice_on_ng_solver_stays_where_it_was() {
     let FirstSecond { named, trace, sealed } = first_second(&ng_solver::Core::new(10 * MILLISECOND));
-    expect!["7b94c746c82dc54aefef8303217e6c6df7a71bc97586847aeeef51ccd334d31f"].assert_eq(&named);
-    expect!["c4cbe637acd357bb24565cd11a077df03aed4428870b3f99e88159abeacf8190"].assert_eq(&sealed);
+    expect!["007107b9d8e40041bab727edbbf3fa1d7a14f63fc198f1879d79f520cbd72984"].assert_eq(&named);
+    expect!["9068ca8d17629dfe5fe63d33e91f461072291fa01e935178481e09b9b7eead90"].assert_eq(&sealed);
     expect![[r#"
          100.976282 ms  arterial pressure 124.892593  right atrial pressure 1.621228  heart rate 1.053980  sympathetic traffic 0.701829  filtration 1.714747  urine 0.020000  wall power 14084.714534  aortic flow 0.000000
          203.732841 ms  arterial pressure 120.451780  right atrial pressure 2.061712  heart rate 1.070090  sympathetic traffic 0.123378  filtration 2.091194  urine 0.020000  wall power 10303.511849  aortic flow 37.681462
