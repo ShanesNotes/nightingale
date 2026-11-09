@@ -477,10 +477,16 @@ An explicit Heun integrator that serves only as a test bench, never as a solver 
 The benchmark that runs the candidate solver cores on the same compiled body and picks one, on conservation, accuracy, replay and speed.
 
 **Arena protocol**:
-What a score spans from the 06:55 admission, how many times the arena times that span, and the error scales and minimum interval every solver core it scores declares. The certificate's sliding windows cover the span, and the arena fixes everything else: the slice, its fixture packet, the day plan and every policy.
+What a score spans from the 06:55 admission, how many times the arena times that span, and the error scales and minimum interval every solver core it scores declares. The certificate's sliding windows cover the span, and the arena fixes everything else: the slice, its fixture packet, the day plan and every policy. The arena has two, the pick protocol and the milestone protocol, at the same error scales and minimum interval.
+
+**Pick protocol**:
+The arena protocol every solver core is scored on, so the arena picks from its scores: 24 hours from the 06:55 admission, one 24 h window, timed twice.
+
+**Milestone protocol**:
+The arena protocol the picked solver core runs once, the run I19's check needs, on synthetic values: 48 hours from the 06:55 admission, every sliding 24 h window, timed twice. A core that fails it reopens the pick.
 
 **Slice**:
-The systems the arena runs for real: pulsatile cardiovascular, fluids, renal, a minimal nervous baroreflex, the receptor layer and the boundary port, for 48 simulated hours with synthetic values.
+The systems the arena runs for real: pulsatile cardiovascular, fluids, renal, a minimal nervous baroreflex, the receptor layer and the boundary port, over an arena protocol's span with synthetic values.
 
 **Held stand-in**:
 A system outside the slice, held by a declaration that names every route on which it supplies or removes an amount, so stability bought with held support shows in the certificate.
