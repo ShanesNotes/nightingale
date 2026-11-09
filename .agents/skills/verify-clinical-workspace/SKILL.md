@@ -60,6 +60,7 @@ The walk's exit trap stops Chromium by the pid in `.dev/drive.json`, the restart
 
 ## Gotchas
 
+- Chromium runs no animation frames for a tab that is not in front, and Foldkit paints in one, so a background page keeps working but its DOM goes stale. `npm run drive -- open` gives each page a window of its own, and each command brings its tab to the front before it reads or acts. A screenshot forces a frame, so a stale read beside a correct screenshot is this.
 - 06:55:00, when heart rate and mean pressure show no number, passes before a page can open. `clinical-workspace/test/monitor.test.ts` proves that moment.
 - The chart service anchors the patient clock at its first start on an empty database, and the run ends at 07:05:00. A walk that starts later than ten minutes after its own launch sees a stopped clock.
 - `offline` cuts one tab off the network only while its command runs, because DevTools drops the setting when its connection closes.

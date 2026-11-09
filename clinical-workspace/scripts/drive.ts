@@ -72,19 +72,15 @@ type Target = { readonly id: string; readonly webSocketDebuggerUrl: string }
 const isTarget = (v: unknown): v is Target =>
   typeof v === 'object' && v !== null && 'id' in v && typeof v.id === 'string' && 'webSocketDebuggerUrl' in v && typeof v.webSocketDebuggerUrl === 'string'
 
-async function connect(tab: string) {
-  const { port, tabs } = session()
-  const id = tabs[tab] ?? fail(`no tab named ${tab}`)
-  const list = await devtools(port, '/json/list')
-  const target = (Array.isArray(list) ? list : []).filter(isTarget).find((t) => t.id === id) ?? fail(`tab ${tab} is gone`)
-  const socket = new WebSocket(target.webSocketDebuggerUrl)
+async function socket(url: string) {
+  const ws = new WebSocket(url)
   await new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true })
-    socket.addEventListener('error', reject, { once: true })
+    ws.addEventListener('open', resolve, { once: true })
+    ws.addEventListener('error', reject, { once: true })
   })
   let next = 0
   const waiting = new Map<number, (message: unknown) => void>()
-  socket.addEventListener('message', (event) => {
+  ws.addEventListener('message', (event) => {
     const message: unknown = JSON.parse(String(event.data))
     const id = read(message, 'id')
     if (typeof id === 'number') {
@@ -96,15 +92,27 @@ async function connect(tab: string) {
     new Promise<unknown>((resolve) => {
       next += 1
       waiting.set(next, resolve)
-      socket.send(JSON.stringify({ id: next, method, params }))
+      ws.send(JSON.stringify({ id: next, method, params }))
     })
+  return { send, close: () => ws.close() }
+}
+
+// Foldkit paints in animation frames, and Chromium runs none for a tab that is not in front, so each command
+// brings its tab to the front before it reads or acts.
+async function connect(tab: string) {
+  const { port, tabs } = session()
+  const id = tabs[tab] ?? fail(`no tab named ${tab}`)
+  const list = await devtools(port, '/json/list')
+  const target = (Array.isArray(list) ? list : []).filter(isTarget).find((t) => t.id === id) ?? fail(`tab ${tab} is gone`)
+  const page = await socket(target.webSocketDebuggerUrl)
+  await page.send('Page.bringToFront')
   const evaluate = async (expression: string): Promise<unknown> => {
-    const answer = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+    const answer = await page.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
     const thrown = read(answer, 'result', 'exceptionDetails')
     if (thrown !== undefined) return fail(`the page threw: ${JSON.stringify(thrown)}`)
     return read(answer, 'result', 'result', 'value')
   }
-  return { send, evaluate, close: () => socket.close() }
+  return { ...page, evaluate }
 }
 
 const quoted = (text: string) => JSON.stringify(text)
@@ -151,9 +159,15 @@ async function command(args: readonly string[]): Promise<void> {
     case 'open': {
       const [url = fail('open needs a url')] = rest
       const current = session()
-      const target = await devtools(current.port, `/json/new?${encodeURI(url)}`, 'PUT')
-      if (!isTarget(target)) return fail('DevTools opened no tab')
-      save({ ...current, tabs: { ...current.tabs, [tab]: target.id } })
+      // A window of its own keeps a page painting while the other page is in front.
+      const browserUrl = read(await devtools(current.port, '/json/version'), 'webSocketDebuggerUrl')
+      if (typeof browserUrl !== 'string') return fail('DevTools named no browser socket')
+      const browser = await socket(browserUrl)
+      const created = await browser.send('Target.createTarget', { url, newWindow: true })
+      browser.close()
+      const id = read(created, 'result', 'targetId')
+      if (typeof id !== 'string') return fail('DevTools opened no window')
+      save({ ...current, tabs: { ...current.tabs, [tab]: id } })
       process.stdout.write(`drive: opened ${tab} at ${url}\n`)
       return
     }

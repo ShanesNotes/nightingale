@@ -109,7 +109,7 @@ for feature in "${features[@]}"; do
         const [clock] = JSON.parse(process.argv[1]); const at = parseClock(clock.replace('Patient time ', ''))
         const d = decodeRun({ lens: readFileSync('capture/307caf19/lens.npy'), catalogue: readFileSync('capture/307caf19/catalogue.txt', 'utf8'), summary: readFileSync('capture/307caf19/summary.txt', 'utf8') })
         const o = d.run.observations.find((x) => x.channel === d.run.channels.indexOf('algebraic/CV/rate/body') && x.collected === at)
-        console.log(o.value.kind === 'present' ? Math.round(o.value.value * 60) + ' /min' : o.value.kind)" "$seen" 2>&1)
+        console.log(o === undefined ? 'no observation for the clock ' + clock : o.value.kind === 'present' ? Math.round(o.value.value * 60) + ' /min' : o.value.kind)" "$seen" 2>&1)
       [ "$(node -p "JSON.parse(process.argv[1])[1]" "$seen")" = "$expected" ] && pass "monitor: heart rate $expected at $(node -p "JSON.parse(process.argv[1])[0]" "$seen") is the observer's value" || fail "monitor: shown $seen, the observer gives $expected"
       shot monitor 01-monitor
       ;;
