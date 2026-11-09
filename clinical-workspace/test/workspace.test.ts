@@ -148,6 +148,26 @@ test('a charted value shows its details; edit amends the current version; earlie
   )
 })
 
+test('an edit amends the version it began from, so a stale draft is refused when a poll brings a newer version', () => {
+  const first = entry({ id: 'test-entry-1', vital: 'RR', value: 18, care: '06:56:30', charted: '06:57:15' })
+  const newer = { ...first, number: 2, versions: 2, value: 20, author: THERAPIST, charted: at('06:57:40') }
+  Story.story(
+    update,
+    Story.given(loaded({ entries: [first] })),
+    Story.message(Message.ClickedEntry({ entry: 'test-entry-1' })),
+    Story.message(Message.ClickedEdit()),
+    Story.message(Message.Polled({ at: wallTime(5_001_000) })),
+    Story.Command.resolve(FetchChart, Message.GotChart({ chart: readModel({ now: at('06:57:41'), entries: [newer] }), at: wallTime(5_001_100) })),
+    Story.message(Message.TypedEditValue({ text: '19' })),
+    Story.message(Message.ClickedSaveEdit()),
+    Story.Command.expectExact(
+      PostAmendment({ body: { patient: 'test-patient', author: 'synthetic-nurse', entry: 'test-entry-1', replaces: 1, value: '19', care: at('06:56:30') } }),
+    ),
+    Story.Command.resolve(PostAmendment, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'not the current version' } }) })),
+    notice('Someone charted a newer version first; nothing was charted.'),
+  )
+})
+
 test('close hides the chart screen and stops asking the service; reopen asks at once for the chart as it is now', () => {
   const asking = (model: Model) => subscriptions.poll.modelToDependencies(model).open
   Story.story(
