@@ -1,0 +1,207 @@
+gp-audit 1
+core ng-solver cap-ms 10
+
+run A0
+end-ms 1100
+
+run A1
+end-ms 60000
+event at-ms 1300 stand
+variant checkpoint-resume at-ms 1250
+
+run A2
+end-ms 6000
+
+run A3
+end-ms 6000
+event at-ms 1200 stand
+
+run A4
+end-ms 420000
+event at-ms 1000 stand
+event at-ms 120000 flat
+event at-ms 240000 stand
+event at-ms 300000 flat
+event at-ms 330000 stand
+event at-ms 390000 flat
+variant checkpoint-resume at-ms 290000
+
+run A5
+end-ms 420000
+events of A4
+variant rewind at-ms 290000
+
+run B1
+end-ms 900000
+event at-ms 1000 stand
+event at-ms 180000 flat
+event at-ms 330000 stand
+event at-ms 400000 flat
+ramp at-ms 420000 every-ms 500 events 21 trunk 0 to 1000 legs horizontal to seated from-event 11
+event at-ms 480000 head-down
+event at-ms 510000 stand
+event at-ms 700000 flat
+
+run B2
+end-ms 900000
+events of B1 except-at-ms 510000
+event at-ms 510000 sit
+
+run B3
+end-ms 900000
+events of B1 except-at-ms 510000
+event at-ms 540000 stand
+
+run B4
+end-ms 900000
+events of B1
+variant replica 1
+
+run B5
+end-ms 900000
+events of B1
+variant late lead-ms 10000
+
+run B6
+end-ms 900000
+events of B1
+variant observer-off
+
+run B7
+end-ms 900000
+events of B1 before-ms 330000
+closed-loop audit-pressure 1 after-ms 330000 baseline-beats 3 refractory-ms 30000 delay-ms 2000
+
+run B8
+replays B7
+
+run C1
+end-ms 900000
+event at-ms 330000 stand
+event at-ms 630000 flat
+
+run C2
+end-ms 900000
+event at-ms 1000 sit
+event at-ms 240000 flat
+event at-ms 330000 stand
+event at-ms 630000 flat
+
+run C3
+end-ms 900000
+event at-ms 1000 stand
+event at-ms 240000 flat
+event at-ms 330000 stand
+event at-ms 630000 flat
+
+run C4
+end-ms 900000
+event at-ms 1000 stand
+event at-ms 120000 flat
+event at-ms 330000 stand
+event at-ms 630000 flat
+
+run C5
+end-ms 900000
+event at-ms 1000 sit
+event at-ms 120000 stand
+event at-ms 240000 flat
+event at-ms 330000 stand
+event at-ms 630000 flat
+
+run C6
+end-ms 900000
+event at-ms 1000 tilt
+event at-ms 240000 flat
+event at-ms 330000 stand
+event at-ms 630000 flat
+
+run C7
+end-ms 900000
+events of C3 before-ms 330000
+repeat at-ms 330000 every-ms 3000 events 100 settings stand flat sit flat
+ramp at-ms 640000 every-ms 200 events 21 trunk 0 to 1000 legs horizontal to standing from-event 11
+
+run D0
+end-ms 1800000
+
+run D1
+end-ms 1800000
+event at-ms 300000 stand
+
+run F1
+end-ms 900000
+event at-ms 300000 tilt
+event at-ms 600000 flat
+
+run F2
+end-ms 900000
+ramp at-ms 300000 every-ms 2500 events 5 trunk 100 to 500 legs horizontal to seated from-event 3
+ramp at-ms 600000 every-ms 2500 events 5 trunk 400 to 0 legs seated to horizontal from-event 3
+
+run G1
+core ng-solver cap-ms 5
+end-ms 900000
+events of C3
+
+run G2
+core ng-solver cap-ms 5
+end-ms 1800000
+events of D1
+
+run G3
+core reference step-us 1000 floor-us 100 absolute 1 relative 0.001
+end-ms 180000
+event at-ms 60000 stand
+
+run G4
+end-ms 180000
+events of G3
+
+retry if histories-differ fails
+
+run C1-600
+end-ms 1200000
+event at-ms 630000 stand
+event at-ms 930000 flat
+
+run C2-600
+end-ms 1200000
+event at-ms 1000 sit
+event at-ms 480000 flat
+event at-ms 630000 stand
+event at-ms 930000 flat
+
+run C3-600
+end-ms 1200000
+event at-ms 1000 stand
+event at-ms 480000 flat
+event at-ms 630000 stand
+event at-ms 930000 flat
+
+run C4-600
+end-ms 1200000
+event at-ms 1000 stand
+event at-ms 240000 flat
+event at-ms 630000 stand
+event at-ms 930000 flat
+
+run C5-600
+end-ms 1200000
+event at-ms 1000 sit
+event at-ms 240000 stand
+event at-ms 480000 flat
+event at-ms 630000 stand
+event at-ms 930000 flat
+
+run C6-600
+end-ms 1200000
+event at-ms 1000 tilt
+event at-ms 480000 flat
+event at-ms 630000 stand
+event at-ms 930000 flat
+
+run G1-600
+core ng-solver cap-ms 5
+end-ms 1200000
+events of C3-600
