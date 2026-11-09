@@ -106,7 +106,8 @@ test('a charted cell shows the current version of each entry whose care time fal
     { entry: late, lateBy: 45_000_000_000, edited: true },
   ])
   const hr = sheet.rows.find((row) => row.source === 'charted' && row.vital.vital === 'HR')
-  assert.deepEqual(hr?.cells.map((cell) => cell.entries.length), [1, 0, 0])
+  assert.ok(hr?.source === 'charted')
+  assert.deepEqual(hr.cells.map((cell) => cell.entries.length), [1, 0, 0])
 })
 
 test('the rows follow the vitals table, so EtCO2 is one more row: a monitor row with no statement and an empty charted row', () => {
