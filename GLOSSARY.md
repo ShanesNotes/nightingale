@@ -67,7 +67,7 @@ A digest that chains the seal before it with one accepted step's image and ledge
 The accepted state at one step boundary, held with its digest. Only installing a step the contract settled on it moves it, so a split trace that reads accepted heads from an admission reads only steps the contract verified.
 
 **History store**:
-Host storage for the links of the seal's chain, addressed by seal and trusted for nothing: a session hands it each link as its step is accepted, and a load checks each link or witness against the seal that asked for it. It keeps a rolling day of links while a run goes, and witnesses after it (record 0008).
+Host storage for the links of the seal's chain, addressed by seal and trusted for nothing: a session hands it each link as its step is accepted, and a load checks each link or witness against the seal that asked for it. It keeps a rolling day of links while a run goes, back to the checkpoint before the oldest window still open, and witnesses after it (record 0008).
 
 **Witness**:
 What a history store keeps of an accepted step after its run: the step's seal, image digest and ledger digest, from which the seal recomputes. It proves the chain, not the ledger values.
