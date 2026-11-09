@@ -36,6 +36,7 @@ A comment pass proves itself apart from them: `python3 -I tools/gate/gate.py com
 - `20-sketch.sh`: the solver-contract sketch built with warnings denied, every doctest, the error code of each compile-fail doctest through the same `gate.py codes`, and the coupling census.
 - `30-data.sh`: every rule in `tools/gate/data.py` over `data/` and each `Data:` line in `.scratch/`, then a must-fail probe for every rule on a synthetic base the tool holds.
 - `40-mutants.sh`: every row of `tools/gate/mutants.toml` still applies, then `tools/mutate.py` replays the rows: all of them in a full or everything run, and in a merge run the rows whose path, or any file under their test crate's `tests/`, changed since the base. The changed run only checks that the rows apply.
+- `50-workspace.sh`: Node 24 or newer and npm answer, then in `clinical-workspace/` a clean `npm ci` with install scripts off, the type check, the tests (the chart's on PGlite, in-process) and a build of both pages into a temporary directory removed on exit. It times its phases as `time: 50-workspace <phase> <n> s`: install, typecheck, test and build.
 
 A new step is an `NN-name.sh` file in `tools/verify.d/`, named in `tools/gate/paths.toml`; `registration.steps` refuses a step that no run selects. A step times its own phases by appending `time: <step> <phase> <n> s` lines to the file that `$NG_GATE_TIMES` names, as `10-rust.sh` does.
 
@@ -53,6 +54,8 @@ The scope is `docs-only` when every changed path is a regular file under `docs/`
 
     .agents/skills/verify-nightingale/ensure-prereqs.sh   # once per clone: the toolchain and the pre-push hook
     .agents/skills/verify-nightingale/prove.sh [log]      # from a clean checkout of the PR head
+
+Besides the pinned toolchain and Python 3.11 or newer, `50-workspace` needs Node 24 or newer with npm on the plain `PATH`, and the npm registry for `npm ci`.
 
 `ensure-prereqs.sh` sets `core.hooksPath` to the relative path `tools/gate/hooks`, so each worktree runs its own checkout's hook. It leaves an existing `core.hooksPath` or an active hook in `.git/hooks` alone and says so. `git config --unset core.hooksPath` turns the hook off, and `git push --no-verify` skips it for one push.
 
