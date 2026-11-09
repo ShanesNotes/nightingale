@@ -1138,11 +1138,24 @@ def corpus(out: pathlib.Path, drop: tuple[str, ...] = ()) -> None:
 class Report(unittest.TestCase):
     commit = "c" * 40
 
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.built = tempfile.TemporaryDirectory()
+        cls.template = pathlib.Path(cls.built.name) / "audit"
+        cls.template.mkdir()
+        corpus(cls.template)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.built.cleanup()
+
     def setUp(self) -> None:
+        import shutil
+
         self.scratch = tempfile.TemporaryDirectory()
         self.data = pathlib.Path(self.scratch.name) / "DATA"
         self.out = self.data / "audit"
-        self.out.mkdir(parents=True)
+        shutil.copytree(self.template, self.out)
 
     def tearDown(self) -> None:
         self.scratch.cleanup()
@@ -1156,7 +1169,6 @@ class Report(unittest.TestCase):
         return done.returncode, done.stdout
 
     def test_a_settled_audit_fills_every_row_the_same_bytes_twice(self) -> None:
-        corpus(self.out)
         code, text = self.report()
         self.assertEqual(code, 0, text)
         self.assertEqual(self.report(), (code, text), "two processes print the same bytes")
@@ -1170,7 +1182,6 @@ class Report(unittest.TestCase):
         self.assertNotIn(self.scratch.name, text, "no path reaches the report")
 
     def test_a_planted_failure_fails_its_row_and_the_gate(self) -> None:
-        corpus(self.out)
         b5 = self.out / ident("B5")
         steps = bytearray((b5 / "steps.npy").read_bytes())
         steps[-8:] = bytes(8)
@@ -1181,7 +1192,9 @@ class Report(unittest.TestCase):
         self.assertIn("Technical gate: fail.", text)
 
     def test_an_unfinished_audit_reports_its_missing_runs_and_exits_2(self) -> None:
-        corpus(self.out, drop=("B5",))
+        import shutil
+
+        shutil.rmtree(self.out / ident("B5"))
         code, text = self.report()
         self.assertEqual(code, 2)
         self.assertRegex(text, r"\| B4, B5, B6 \|[^\n]*missing B5[^\n]*\| incomplete \|\n")
@@ -1223,6 +1236,50 @@ class Preflight(unittest.TestCase):
         self.check(free=41 * 10**9)
         self.assertIn("free_bytes", (self.out / "environment.txt").read_text())
         self.check(free=10**9)
+
+
+class RealDriver(unittest.TestCase):
+    """`selftest --real GP_DRIVER`: three short admissions of the real driver, which settle what no fixture can."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if REAL_DRIVER is None:
+            raise unittest.SkipTest("no --real driver")
+        import spec, teacher
+
+        cls.scratch = tempfile.TemporaryDirectory()
+        cls.out = pathlib.Path(cls.scratch.name) / "audit"
+        cls.teacher = teacher.Teacher([str(REAL_DRIVER)], cls.out, "real-selftest", 8, [], 0)
+        cls.plan = spec.Plan.read()
+        cls.a0 = cls.teacher.settle(teacher.TeacherRun("A0", cls.plan["A0"].spec, None))
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.scratch.cleanup()
+
+    def test_a0_its_names_and_every_planned_spec_hold_on_the_real_driver(self) -> None:
+        import audit, capture
+
+        run = capture.RunData.open(self.a0.directory)
+        self.assertEqual(audit.a0_check(run).verdict, "pass", audit.a0_check(run).measured)
+        for name in (audit.TRAFFIC, audit.RATE, audit.LEG_VEINS, audit.LEG_INTERSTITIUM, audit.ARCH, audit.SINUS, audit.PRESSURE):
+            run.catalogue.row(name)
+        run.catalogue.column_ending(audit.SKIN_SUFFIX)
+        self.assertIn(audit.TRAFFIC, run.catalogue.sampled)
+        specs = {r.name: self.teacher._spec_file(r) for r in self.plan.all if r.spec}
+        census = self.teacher._status(specs, self.a0.directory / "summary.txt")
+        self.assertEqual([name for name, (word, _, _) in census.items() if word == "invalid"], [])
+
+    def test_a_short_closed_loop_and_its_replay_give_one_seal_log(self) -> None:
+        import audit, capture, spec, teacher
+
+        rule = "audit-pressure 1 after-ms 3500 baseline-beats 2 refractory-ms 1000 delay-ms 500"
+        loop = spec.RunSpec("ng-solver cap-ms 10", 6000, (spec.PostureEvent(1000, spec.SETTINGS["stand"]),), rule, "none")
+        settled = self.teacher.ensure([teacher.TeacherRun("loop", loop, None), teacher.TeacherRun("replay", None, "loop")], self.a0.directory / "summary.txt", 2)
+        looped, replayed = (capture.RunData.open(settled[name].directory) for name in ("loop", "replay"))
+        self.assertGreaterEqual(len(looped.summary.enqueued), 1, "the rule acted")
+        self.assertEqual(replayed.spec_text, looped.realized_text)
+        self.assertEqual(audit.same_log_check(looped, [replayed]).verdict, "pass")
 
 
 def run(real: pathlib.Path | None) -> int:
