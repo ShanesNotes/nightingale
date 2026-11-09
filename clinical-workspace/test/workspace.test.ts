@@ -260,6 +260,36 @@ test('a write in flight takes no input, and its answer clears only the draft it 
   )
 })
 
+test('the page asks for one chart at a time, so an older chart never replaces a newer one once the clock has stopped', () => {
+  const stopped = at('07:05:00')
+  const charted = entry({ id: 'test-entry-1', vital: 'HR', value: 61, care: '07:05:00', charted: '07:05:00' })
+  const older = Message.GotChart({ chart: readModel({ now: stopped }), at: wallTime(5_001_200) })
+  const newer = Message.GotChart({ chart: readModel({ now: stopped, entries: [charted] }), at: wallTime(5_001_300) })
+  Story.story(
+    update,
+    Story.given(loaded({ now: stopped })),
+    Story.message(Message.Polled({ at: wallTime(5_001_000) })),
+    Story.Command.expectExact(FetchChart()),
+    park,
+    Story.message(Message.TypedValue({ text: '61' })),
+    Story.message(Message.ClickedChart()),
+    Story.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'taken', entry: charted }) })),
+    Story.Command.expectNone(),
+    Story.message(older),
+    Story.Command.expectExact(FetchChart()),
+    Story.Command.resolve(FetchChart, newer),
+    Story.model((m: Model) => assert.deepEqual(m.latest?.entries.map((e) => e.entry), ['test-entry-1'], 'the chart read after the write is the one shown')),
+    Story.message(Message.Polled({ at: wallTime(5_002_000) })),
+    park,
+    Story.message(Message.ClickedClose()),
+    Story.message(Message.ClickedReopen()),
+    Story.Command.expectNone(),
+    Story.message(newer),
+    Story.Command.expectExact(FetchChart()),
+    Story.Command.resolve(FetchChart, newer),
+  )
+})
+
 test('close hides the chart screen and stops asking the service; reopen asks at once for the chart as it is now', () => {
   const asking = (model: Model) => subscriptions.poll.modelToDependencies(model).open
   Story.story(
