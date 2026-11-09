@@ -43,11 +43,12 @@ Jev cost: $7.99 so far on top of the slice's $43.43. Finishing the fluids retag 
 
 - the two-step test's hub control;
 - the quantity nouns the term step lacks (feedback, resetting, set point);
-- counting a textbook's editions and copies as one work.
+- counting a textbook's editions and copies as one work;
+- the body-scale rule's nitric oxide exception.
 
-## Open for Shane
+## Nitric oxide
 
-The body-scale rule also drops local mediators named alone, so nitric oxide edges leave the gap list along with acetylcholine's. FL owns nitric oxide synthase capacity. If nitric oxide should stay, the rule changes in one line.
+The body-scale rule also drops local mediators named alone, so nitric oxide edges leave the gap list along with acetylcholine's. FL owns nitric oxide synthase capacity. Decided after the score: nitric oxide's edges stay. [Ticket 05](05-two-step-hub-and-work-families.md) adds the exception before its rerun, so this ticket's scores stand on the rule they were scored with.
 
 ## Answer
 
@@ -69,7 +70,7 @@ What changed:
 - **Chunks.** The 11 chunks over 60,000 characters became 976 pieces, all tagged; the largest chunk is now 57,103 characters. 11,179 chunks are marked as reference lists, and they stay out of the neighborhood with the passages layer zero marks as other design.
 - **Fluids facet.** On the new wording the annotators agreed at kappa 0.79 on the old 100 passages and 0.85 (0.70 to 0.97) on 100 fresh ones with 18 agreed positives. Jev against their agreed labels reached 1.0 and 0.85 (0.68 to 0.97).
 - **Terms.** The Schwartz–Hearst rule found 3,293 abbreviations in the neighborhood's 421 works. Jev typed 2,634 phrase endings for $0.07, and 1,287 are terms. On 150 random endings Jev agreed with the annotators at kappa 0.88 on whether each is a term and 0.88 on body scale, though the body-scale interval runs from 0.49 to 1.0 because the annotators agreed on only 5 negatives.
-- **Gap list.** The body-scale rule removed 81 gaps. Of the 15 rows that left the top 20, ten were cell-scale or badly pulled: seven acetylcholine rows, tyramine, choline and "stimulates renin secretion". Four renal rows were pushed down by stronger ones, and nitric oxide on filtration left by the body-scale rule (see Open for Shane).
+- **Gap list.** The body-scale rule removed 81 gaps. Of the 15 rows that left the top 20, ten were cell-scale or badly pulled: seven acetylcholine rows, tyramine, choline and "stimulates renin secretion". Four renal rows were pushed down by stronger ones, and nitric oxide on filtration left by the body-scale rule (see Nitric oxide).
 - **Recall** gained atrial stretch raising natriuretic peptide, through central venous pressure, in one work. Baroreflex resetting and lymph return are still missed; [ticket 05](05-two-step-hub-and-work-families.md) adds the resetting noun. The Guyton circulation model's overlap rose from 17 to 22 of its 27 edges.
 
 The agent's source check replaces the developer reviewer's blind rating. Each find's evidence sentences were read against the edge as stated, and then the edge against the answer key and the [solver contract](../../../docs/architecture/solver-contract.md).
