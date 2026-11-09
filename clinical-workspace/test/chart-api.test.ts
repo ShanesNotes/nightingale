@@ -46,14 +46,16 @@ const readModel = {
 }
 
 test('a new entry and an amendment parse from what the workspace sends', () => {
-  assert.deepEqual(parseNewEntry({ patient: 'test-patient', author: nurse.id, vital: 'RR', value: '18', care: null }), {
+  assert.deepEqual(parseNewEntry({ writeId: 'test-write-1', patient: 'test-patient', author: nurse.id, vital: 'RR', value: '18', care: null }), {
     ok: true,
-    value: { kind: 'new entry', patient: 'test-patient', author: nurse.id, vital: 'RR', value: 18, care: { kind: 'now' } },
+    value: { kind: 'new entry', writeId: 'test-write-1', patient: 'test-patient', author: nurse.id, vital: 'RR', value: 18, care: { kind: 'now' } },
   })
-  assert.deepEqual(parseAmendment({ patient: 'test-patient', author: nurse.id, entry: 'test-entry-1', replaces: 1, value: '19.5', care: at(60) }), {
+  const amendment = { writeId: 'test-write-2', patient: 'test-patient', author: nurse.id, entry: 'test-entry-1', replaces: 1, value: '19.5', care: at(60) }
+  assert.deepEqual(parseAmendment(amendment), {
     ok: true,
     value: {
       kind: 'amendment',
+      writeId: 'test-write-2',
       patient: 'test-patient',
       author: nurse.id,
       entry: 'test-entry-1',
@@ -66,7 +68,7 @@ test('a new entry and an amendment parse from what the workspace sends', () => {
 
 test('empty value text is never zero: it parses to a value that is not a finite number', () => {
   for (const text of ['', '   ', 'twelve', '12 bpm']) {
-    const parsed = parseNewEntry({ patient: 'test-patient', author: nurse.id, vital: 'HR', value: text, care: null })
+    const parsed = parseNewEntry({ writeId: 'test-write-1', patient: 'test-patient', author: nurse.id, vital: 'HR', value: text, care: null })
     assert.ok(parsed.ok && Number.isNaN(parsed.value.value), JSON.stringify(text))
   }
 })
@@ -76,15 +78,18 @@ test('the read model, the versions of an entry and a write result parse back unc
   assert.deepEqual(parseVersions([version, { ...version, number: 1, value: 17 }]), { ok: true, value: [version, { ...version, number: 1, value: 17 }] })
   const taken = { kind: 'taken', entry: { ...version, versions: 2 } }
   assert.deepEqual(parseWriteResult(taken), { ok: true, value: taken })
-  const refused = { kind: 'refused', refusal: { kind: 'care time after now' } }
-  assert.deepEqual(parseWriteResult(refused), { ok: true, value: refused })
+  for (const kind of ['care time after now', 'write id reused with other content']) {
+    const refused = { kind: 'refused', refusal: { kind } }
+    assert.deepEqual(parseWriteResult(refused), { ok: true, value: refused }, kind)
+  }
 })
 
 test('a body the workspace could not have sent is refused as malformed at the boundary', () => {
-  const entry = { patient: 'test-patient', author: nurse.id, vital: 'RR', value: '18', care: null }
+  const entry = { writeId: 'test-write-1', patient: 'test-patient', author: nurse.id, vital: 'RR', value: '18', care: null }
   const amendment = { ...entry, entry: 'test-entry-1', replaces: 1 }
   const newEntries: Record<string, unknown> = {
     'not an object': '18',
+    'no write id': { ...entry, writeId: undefined },
     'an author off the roster': { ...entry, author: 'someone' },
     'no author': { ...entry, author: undefined },
     'a vital the table lacks': { ...entry, vital: 'EtCO2' },
@@ -93,7 +98,8 @@ test('a body the workspace could not have sent is refused as malformed at the bo
     'no patient': { ...entry, patient: '' },
   }
   for (const [name, body] of Object.entries(newEntries)) assert.equal(parseNewEntry(body).ok, false, name)
-  for (const [name, body] of Object.entries({ 'replaces version zero': { ...amendment, replaces: 0 }, 'no entry': { ...amendment, entry: '' } })) {
+  const amendments = { 'replaces version zero': { ...amendment, replaces: 0 }, 'no entry': { ...amendment, entry: '' }, 'no write id': { ...amendment, writeId: '' } }
+  for (const [name, body] of Object.entries(amendments)) {
     assert.equal(parseAmendment(body).ok, false, name)
   }
   assert.equal(parseWriteResult({ kind: 'refused', refusal: { kind: 'too late' } }).ok, false, 'an unknown refusal kind')

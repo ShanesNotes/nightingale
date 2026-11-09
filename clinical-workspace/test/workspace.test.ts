@@ -25,7 +25,7 @@ test('a clinician of any discipline charts any vital: the page sends what was ty
     Story.message(Message.TypedValue({ text: '18' })),
     Story.message(Message.TypedCare({ text: '06:56:10' })),
     Story.message(Message.ClickedChart()),
-    Story.Command.expectExact(PostEntry({ body: { patient: 'test-patient', author: THERAPIST.id, vital: 'RR', value: '18', care: at('06:56:10') } })),
+    Story.Command.expectExact(PostEntry({ body: { patient: 'test-patient', author: THERAPIST.id, vital: 'RR', value: '18', care: at('06:56:10') }, writeId: null })),
     Story.Command.resolve(PostEntry, Message.Wrote({ result: taken })),
     Story.Command.expectHas(FetchChart),
     notice('Charted RR 18 /min as Synthetic Respiratory Therapist C'),
@@ -39,12 +39,12 @@ test('a blank care time is sent as now, for the chart service to read when it ta
     Story.given(loaded()),
     Story.message(Message.TypedValue({ text: '61' })),
     Story.message(Message.ClickedChart()),
-    Story.Command.expectExact(PostEntry({ body: { patient: 'test-patient', author: 'synthetic-nurse', vital: 'HR', value: '61', care: null } })),
+    Story.Command.expectExact(PostEntry({ body: { patient: 'test-patient', author: 'synthetic-nurse', vital: 'HR', value: '61', care: null }, writeId: null })),
     park,
   )
 })
 
-test('a refusal shows in words, and a write the service does not answer is refused in words and never queued', () => {
+test('a refusal shows in words, and a write the service does not answer is never queued', () => {
   Story.story(
     update,
     Story.given(loaded()),
@@ -58,13 +58,54 @@ test('a refusal shows in words, and a write the service does not answer is refus
     Story.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'not a finite number' } }) })),
     notice('The value is not a number; nothing was charted.'),
     Story.message(Message.ClickedChart()),
-    Story.Command.resolve(PostEntry, Message.WriteUnanswered()),
-    notice('The chart service did not answer; nothing was charted.'),
+    Story.Command.resolve(PostEntry, Message.WriteUnanswered({ writeId: 'test-write-1' })),
+    notice('The chart service did not answer, so the entry may already be in the chart.'),
     Story.Command.expectNone(),
     Story.message(Message.TypedCare({ text: '6:59' })),
     Story.message(Message.ClickedChart()),
     Story.Command.expectNone(),
     notice('The care time is not HH:MM:SS; nothing was charted.'),
+  )
+})
+
+test('a write the service does not answer may already be in the chart, so sending the same draft again sends the same write id', () => {
+  const body = { patient: 'test-patient', author: 'synthetic-nurse', vital: 'HR', value: '61', care: null }
+  Story.story(
+    update,
+    Story.given(loaded()),
+    Story.message(Message.TypedValue({ text: '61' })),
+    Story.message(Message.ClickedChart()),
+    Story.Command.expectExact(PostEntry({ body, writeId: null })),
+    Story.Command.resolve(PostEntry, Message.WriteUnanswered({ writeId: 'test-write-1' })),
+    notice('The chart service did not answer, so the entry may already be in the chart. Charting it again unchanged cannot chart it twice.'),
+    Story.model((m: Model) => assert.equal(m.form.value, '61', 'the draft stays as typed')),
+    Story.message(Message.ClickedChart()),
+    Story.Command.expectExact(PostEntry({ body, writeId: 'test-write-1' })),
+    Story.Command.resolve(PostEntry, Message.WriteUnanswered({ writeId: 'test-write-1' })),
+    Story.message(Message.TypedValue({ text: '' })),
+    Story.message(Message.ClickedChart()),
+    Story.Command.expectExact(PostEntry({ body: { ...body, value: '' }, writeId: null })),
+    Story.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'not a finite number' } }) })),
+    Story.message(Message.TypedValue({ text: '61' })),
+    Story.message(Message.ClickedChart()),
+    Story.Command.expectExact(PostEntry({ body, writeId: null })),
+    park,
+  )
+  const first = entry({ id: 'test-entry-1', vital: 'RR', value: 18, care: '06:56:30', charted: '06:57:15' })
+  const amendment = { patient: 'test-patient', author: 'synthetic-nurse', entry: 'test-entry-1', replaces: 1, value: '19', care: at('06:56:30') }
+  Story.story(
+    update,
+    Story.given(loaded({ entries: [first] })),
+    Story.message(Message.ClickedEntry({ entry: 'test-entry-1' })),
+    Story.message(Message.ClickedEdit()),
+    Story.message(Message.TypedEditValue({ text: '19' })),
+    Story.message(Message.ClickedSaveEdit()),
+    Story.Command.expectExact(PostAmendment({ body: amendment, writeId: null })),
+    Story.Command.resolve(PostAmendment, Message.WriteUnanswered({ writeId: 'test-write-2' })),
+    notice('The chart service did not answer, so the new version may already be in the chart. Saving it again unchanged cannot chart it twice.'),
+    Story.message(Message.ClickedSaveEdit()),
+    Story.Command.expectExact(PostAmendment({ body: amendment, writeId: 'test-write-2' })),
+    park,
   )
 })
 
@@ -135,7 +176,7 @@ test('a charted value shows its details; edit amends the current version; earlie
     Scene.type('#edit-value', '19'),
     Scene.click('#save-edit'),
     Scene.Command.expectExact(
-      PostAmendment({ body: { patient: 'test-patient', author: 'synthetic-nurse', entry: 'test-entry-1', replaces: 1, value: '19', care: at('06:56:30') } }),
+      PostAmendment({ body: { patient: 'test-patient', author: 'synthetic-nurse', entry: 'test-entry-1', replaces: 1, value: '19', care: at('06:56:30') }, writeId: null }),
     ),
     Scene.Command.resolve(PostAmendment, Message.Wrote({ result: written({ kind: 'taken', entry: second }) })),
     Scene.Command.resolve(FetchChart, Message.GotChart({ chart: readModel({ now: at('06:57:41'), entries: [second] }), at: wallTime(6_000_000) })),
@@ -161,7 +202,7 @@ test('an edit amends the version it began from, so a stale draft is refused when
     Story.message(Message.TypedEditValue({ text: '19' })),
     Story.message(Message.ClickedSaveEdit()),
     Story.Command.expectExact(
-      PostAmendment({ body: { patient: 'test-patient', author: 'synthetic-nurse', entry: 'test-entry-1', replaces: 1, value: '19', care: at('06:56:30') } }),
+      PostAmendment({ body: { patient: 'test-patient', author: 'synthetic-nurse', entry: 'test-entry-1', replaces: 1, value: '19', care: at('06:56:30') }, writeId: null }),
     ),
     Story.Command.resolve(PostAmendment, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'not the current version' } }) })),
     notice('Someone charted a newer version first; nothing was charted.'),

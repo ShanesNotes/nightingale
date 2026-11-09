@@ -20,14 +20,17 @@ const RUN = { specId: 'test-spec', patient: branded('test-patient', isPatientId)
 
 const nurse = ROSTER[0]!
 
+let writes = 0
+const writeId = () => `test-write-${(writes += 1)}`
+
 const newEntry = (body: Readonly<Record<string, unknown>>) => {
-  const parsed = parseNewEntry({ patient: 'test-patient', author: nurse.id, vital: 'RR', value: '18', care: null, ...body })
+  const parsed = parseNewEntry({ writeId: writeId(), patient: 'test-patient', author: nurse.id, vital: 'RR', value: '18', care: null, ...body })
   assert.ok(parsed.ok, parsed.ok ? '' : parsed.reason)
   return parsed.value
 }
 
 const amendment = (body: Readonly<Record<string, unknown>>) => {
-  const parsed = parseAmendment({ patient: 'test-patient', author: nurse.id, replaces: 1, value: '18', care: null, ...body })
+  const parsed = parseAmendment({ writeId: writeId(), patient: 'test-patient', author: nurse.id, replaces: 1, value: '18', care: null, ...body })
   assert.ok(parsed.ok, parsed.ok ? '' : parsed.reason)
   return parsed.value
 }
@@ -172,8 +175,8 @@ for (const [name, connect] of databases) {
                 const [read] = rows
                 if (read !== undefined && 'current' in read) {
                   await tx.query(
-                    `INSERT INTO entry_version (entry, number, value, care_ns, charted_ns, author, author_name, author_discipline)
-                     SELECT entry, number + 1, value, care_ns, charted_ns, author, author_name, author_discipline
+                    `INSERT INTO entry_version (entry, number, value, care_ns, charted_ns, author, author_name, author_discipline, write_id, write)
+                     SELECT entry, number + 1, value, care_ns, charted_ns, author, author_name, author_discipline, 'test-write-racing', write
                      FROM entry_version WHERE entry = $1 AND number = $2`,
                     [read['id'], read['current']],
                   )
@@ -195,7 +198,69 @@ for (const [name, connect] of databases) {
       }
     })
 
-    test('Postgres refuses any update, delete or truncate of chart rows, and a second version under one number', () =>
+    test('a write sent again under its write id charts nothing twice: the chart answers taken, with the entry as it now stands', () =>
+      withChart(async (chart) => {
+        const write = newEntry({ writeId: 'test-write-entry' })
+        const first = taken(await chart.write(write, at('06:56:10')))
+        assert.deepEqual(await chart.write(write, at('06:56:20')), { kind: 'taken', entry: first }, 'a blank care time stays the now the chart first read')
+        const amend = amendment({ writeId: 'test-write-amendment', entry: first.entry, value: '19' })
+        const second = taken(await chart.write(amend, at('06:56:30')))
+        assert.deepEqual(await chart.write(amend, at('06:56:40')), { kind: 'taken', entry: second }, 'an amendment sent again is not refused as stale')
+        assert.deepEqual(await chart.write(write, at('06:56:50')), { kind: 'taken', entry: second }, 'the entry as it now stands')
+        assert.deepEqual((await chart.readModel(at('06:57:00'))).entries, [second])
+        assert.equal((await chart.versions(first.entry))?.length, 2)
+      }))
+
+    test('a write id the chart already holds is refused when it comes with other content, and charts nothing', () =>
+      withChart(async (chart) => {
+        const reused = { kind: 'refused', refusal: { kind: 'write id reused with other content' } }
+        const first = taken(await chart.write(newEntry({ writeId: 'test-write-1' }), at('06:56:10')))
+        assert.deepEqual(await chart.write(newEntry({ writeId: 'test-write-1', value: '19' }), at('06:56:20')), reused)
+        assert.deepEqual(await chart.write(amendment({ writeId: 'test-write-1', entry: first.entry, value: '19' }), at('06:56:30')), reused)
+        assert.deepEqual((await chart.readModel(at('06:56:40'))).entries, [first])
+        assert.equal((await chart.versions(first.entry))?.length, 1)
+      }))
+
+    test('when two copies of one write race, the copy that loses on the write id is answered taken, as the other was', async () => {
+      const base = await connect()
+      const racing: Sql = {
+        ...base,
+        transaction: (work) =>
+          base.transaction((tx) =>
+            work({
+              ...tx,
+              async query(text, params) {
+                const rows = await tx.query(text, params)
+                return rows.some((row) => 'same' in row) ? [] : rows
+              },
+            }),
+          ),
+      }
+      try {
+        const chart = await openChart(racing, RUN, wallTime(1_000_000))
+        const write = newEntry({ writeId: 'test-write-1' })
+        const first = taken(await chart.write(write, at('06:56:10')))
+        assert.deepEqual(await chart.write(write, at('06:56:20')), { kind: 'taken', entry: first })
+        assert.deepEqual((await chart.readModel(at('06:56:30'))).entries, [first])
+      } finally {
+        await base.close()
+      }
+    })
+
+    test('the chart will not open a database whose chart tables predate the write id, and says to run npm run reset', async () => {
+      const sql = await connect()
+      try {
+        await sql.script(`CREATE TABLE entry_version (
+          entry uuid NOT NULL, number integer NOT NULL CHECK (number >= 1), value double precision NOT NULL, care_ns bigint NOT NULL,
+          charted_ns bigint NOT NULL, author text NOT NULL, author_name text NOT NULL, author_discipline text NOT NULL,
+          inserted_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (entry, number))`)
+        await assert.rejects(openChart(sql, RUN, wallTime(1_000_000)), /npm run reset/)
+      } finally {
+        await sql.close()
+      }
+    })
+
+    test('Postgres refuses any update, delete or truncate of chart rows, and a second version under one number or one write id', () =>
       withChart(async (chart, sql) => {
         const first = taken(await chart.write(newEntry({}), at('06:56:10')))
         for (const statement of [
@@ -211,13 +276,13 @@ for (const [name, connect] of databases) {
         ]) {
           await assert.rejects(sql.query(statement), /append-only/, statement)
         }
-        await assert.rejects(
+        const again = (number: string, writeId: string) =>
           sql.query(
-            `INSERT INTO entry_version (entry, number, value, care_ns, charted_ns, author, author_name, author_discipline)
-             SELECT entry, number, 99, care_ns, charted_ns, author, author_name, author_discipline FROM entry_version`,
-          ),
-          /duplicate key/,
-        )
+            `INSERT INTO entry_version (entry, number, value, care_ns, charted_ns, author, author_name, author_discipline, write_id, write)
+             SELECT entry, ${number}, 99, care_ns, charted_ns, author, author_name, author_discipline, ${writeId}, write FROM entry_version`,
+          )
+        await assert.rejects(again('number', "'test-write-again'"), /duplicate key/, 'a second version under one number')
+        await assert.rejects(again('number + 1', 'write_id'), /duplicate key/, 'a second version under one write id')
         assert.deepEqual((await chart.readModel(at('06:57:00'))).entries, [first])
       }))
 
