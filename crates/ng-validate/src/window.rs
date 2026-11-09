@@ -1,5 +1,5 @@
 use crate::accuracy::{faulted, net_at};
-use crate::initialize::{admit_start, solution, start_from};
+use crate::initialize::{admit_start, solved_start};
 use crate::run::advance;
 use crate::{
     AccuracyFailure, MemoryStore, ReferenceIntegrator, anchor_moment, arena_body, arena_lens, arena_packet,
@@ -7,8 +7,8 @@ use crate::{
 use core::num::NonZeroU64;
 use ng_contract::{
     AdmissionError, BoundaryEvent, BoundaryInput, BoundaryPort, ColumnId, Compensated, CompiledBody,
-    CoupledSolver, Delivered, Digest, Dimensionless, ErrorScales, InputId, Legs, Measure, Posture, RowId,
-    Seed, SimTime, Target,
+    CoupledSolver, Delivered, Digest, Dimensionless, ErrorScales, InitialRevision, InputId, Legs, Measure,
+    MethodHistory, Posture, RowId, Seed, SimTime, Target,
 };
 
 const SECOND: u64 = 1_000_000_000;
@@ -354,7 +354,7 @@ fn admission(error: AdmissionError) -> AccuracyFailure {
 /// made its transitions and how many instants it spent in other modes.
 pub struct SliceWindow {
     body: CompiledBody,
-    solution: Vec<f64>,
+    start: InitialRevision,
     policy: WindowPolicy,
     measured: Measured,
 }
@@ -366,17 +366,17 @@ impl SliceWindow {
             arena_lens(&body).map_err(admission)?,
         );
         let boundary = BoundaryPort::new(timeline().map_err(admission)?).map_err(admission)?;
-        let solution =
-            solution(&body, packet, boundary, &lens, anchor_moment()).map_err(AccuracyFailure::Admission)?;
         let policy = WindowPolicy::of(body.longest_step_ns());
         let [coarse, middle, finest] =
             references(policy.refinements_ns, policy.refinement_scales, policy.landing_ns);
+        let start = solved_start(&body, packet, boundary, &coarse, &lens, anchor_moment())
+            .map_err(AccuracyFailure::Admission)?;
         let [coarse, middle, finest] =
-            [&coarse, &middle, &finest].map(|reference| trace(&body, &solution, &policy, reference));
+            [&coarse, &middle, &finest].map(|reference| trace(&body, &start, &policy, reference));
         let measured = Measured::new(&policy, compared(&body), finest?, &[&coarse?, &middle?], end());
         Ok(Self {
             body,
-            solution,
+            start,
             policy,
             measured,
         })
@@ -389,21 +389,21 @@ impl SliceWindow {
         core: &dyn CoupledSolver,
         case: usize,
     ) -> Result<Compensated, AccuracyFailure> {
-        let run = trace(&self.body, &self.solution, &self.policy, core)?;
+        let run = trace(&self.body, &self.start, &self.policy, core)?;
         self.measured.verdict(&run, case)
     }
     /// Everything the window judges by, so two windows that would judge a core apart never share an identity.
     pub fn digest(&self) -> Digest {
         let Self {
             body,
-            solution,
+            start,
             policy,
             measured,
         } = self;
         let mut bytes = body.model_hash().digest().as_bytes().to_vec();
         policy.seal(&mut bytes);
+        bytes.extend_from_slice(start.packet_hash().digest().as_bytes());
         let mut number = |value: u64| bytes.extend_from_slice(&value.to_be_bytes());
-        solution.iter().for_each(|value| number(value.to_bits()));
         measured.seal(&mut number);
         Digest::of_canonical(&bytes)
     }
@@ -428,22 +428,16 @@ fn compared(body: &CompiledBody) -> Vec<Compared> {
 
 fn trace(
     body: &CompiledBody,
-    solution: &[f64],
+    start: &InitialRevision,
     policy: &WindowPolicy,
     core: &dyn CoupledSolver,
 ) -> Result<Trace, AccuracyFailure> {
     let compared = compared(body);
-    let boundary = BoundaryPort::new(timeline().map_err(admission)?).map_err(admission)?;
-    let (packet, lens) = (
-        arena_packet(body).map_err(admission)?,
-        arena_lens(body).map_err(admission)?,
-    );
-    let start = start_from(body, packet, boundary, core, &lens, anchor_moment(), solution);
+    let history = MethodHistory::new(core.resolution().policy(), anchor_moment(), Vec::new());
+    let start = start.with_history(history);
     let store = MemoryStore::default();
     let seed = Seed::new([1, 2, 3, 4]);
-    let mut session = start
-        .and_then(|start| admit_start(body, core, start, seed, &store))
-        .map_err(AccuracyFailure::Admission)?;
+    let mut session = admit_start(body, core, start, seed, &store).map_err(AccuracyFailure::Admission)?;
     let end = end().nanoseconds();
     let mut trace = Trace {
         instants: Vec::new(),

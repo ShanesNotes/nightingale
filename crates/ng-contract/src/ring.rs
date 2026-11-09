@@ -100,19 +100,18 @@ fn inverse(block: &Jacobian) -> Result<Vec<Vec<f64>>, usize> {
 }
 
 impl InitializationSystem<'_> {
-    /// One Newton update on the ring `linearize` lays out: `points` blocks of `size` rows, each coupled to the block
-    /// before it by its stage's tangent alone, totals in the last block reading point 0, and fits along the border.
-    /// Dense, that is the cube of `points` times `size` unknowns.
+    /// One Newton update on the ring `linearize` lays out: `points` blocks of an interval's stages, each coupled to the
+    /// block before it through that block's end stage alone, totals in the last block reading point 0, and fits along
+    /// the border. Dense, that is the cube of `points` times the block's unknowns.
     ///
-    /// Each point but the last factors over the body's elimination. Walking forward from point 0, every point becomes a
-    /// linear function of the last point's rows that point 0 reads and of the fits, so the ring shrinks to one dense
-    /// corner of the last point's rows and the fits' anchors. A second walk fills every point from the corner's answer.
-    /// A row is named where its point's block or the corner has no pivot, and `admit` reads that the same
-    /// way, on the whole ring.
+    /// Each block but the last factors over the interval's plan. Walking forward from point 0, every block becomes a
+    /// linear function of the last block's slots that point 0 reads and of the fits, so the ring shrinks to one dense
+    /// corner of the last block and the fits' anchors. A second walk fills every block from the corner's answer. A slot
+    /// is named where its block or the corner has no pivot, and `admit` reads that the same way, on the whole ring.
     pub fn solve(&self, ring: &Jacobian, right: &[f64]) -> Result<Vec<f64>, usize> {
-        let (system, body) = (self, self.body);
+        let system = self;
         let view = ring.view();
-        let (size, points) = (system.rows(), system.points());
+        let (size, points) = (system.width(), system.points());
         let border = points * size;
         let fits = right.len() - border;
         let line = |slot: usize| {
@@ -138,7 +137,7 @@ impl InitializationSystem<'_> {
         let mut anchors = vec![vec![0.0; width]; fits];
         for point in 0..last {
             let block = system.block(ring, point);
-            let lu = match body.factor(&block) {
+            let lu = match system.factor(&block) {
                 Ok(factors) => Block::Fixed(factors),
                 Err(_) => Block::Whole(inverse(&block)?),
             };

@@ -105,7 +105,11 @@ reason = "one Newton update on the ring, in mixed row dimensions: a right side i
 
 [[crate.f64_allow]]
 item = "admission::InitializationSystem::stage"
-reason = "one point's rows in mixed dimensions, for a march to the orbit that admit then judges"
+reason = "one interval's rows at both stages in mixed dimensions, for a march to the orbit that admit then judges"
+
+[[crate.f64_allow]]
+item = "admission::InitializationSystem::solve_stage"
+reason = "one interval's Newton update, in mixed row dimensions: a right side in, an update out"
 
 [[crate.f64_allow]]
 item = "ring::eliminate"

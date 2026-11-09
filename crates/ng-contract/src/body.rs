@@ -121,6 +121,10 @@ impl CompiledBody {
     pub fn factor(&self, jacobian: &Jacobian) -> Result<Factors<'_>, usize> {
         self.elimination.factor(&jacobian.values)
     }
+    /// The row each unknown's pivot takes in `factor`: its own, or across a closed row and the store that holds it.
+    pub(crate) fn pivots(&self) -> Vec<RowId> {
+        self.elimination.solved_by()
+    }
     /// The cards held, in card order.
     pub fn held(&self) -> impl Iterator<Item = &'static str> + '_ {
         (self.layout.basis.coverage().declarations().iter()).map(|held| held.card)

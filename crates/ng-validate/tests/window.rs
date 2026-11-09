@@ -229,9 +229,11 @@ fn the_first_window_holds_each_core_to_the_references_own_distances() {
         updates: 8,
         behind: rows_outside_the_largest_block(&body),
     };
+    // From the Radau cycle's start, the rows this core leaves behind take a trial outside a law's domain before its
+    // modes can part from the finest reference's.
     let failure = accuracy(&stale, &policy);
     assert!(
-        matches!(failure, Err(AccuracyFailure::ModesApart { case: 0, .. })),
+        matches!(failure, Err(AccuracyFailure::Faulted(_))),
         "{failure:?}"
     );
 

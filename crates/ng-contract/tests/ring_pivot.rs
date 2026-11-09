@@ -167,14 +167,15 @@ fn two_closed_rows_that_read_one_store_factor_over_the_bodys_elimination() -> Re
         let system = body.initialization(body.bind(packet)?, port, request)?;
         let (_, block) = system.stage(&system.workspace(), 0)?;
         assert!(
-            body.factor(&block).is_ok(),
+            system.factor(&block).is_ok(),
             "shared {shared}, second first {second_first}"
         );
     }
     Ok(())
 }
 
-fn ring_of(body: &CompiledBody, keys: &[&'static str]) -> Result<Jacobian, InitializationFailure> {
+/// Whether an interval's stage block factors over the system's plan, with no pivot left to a whole read.
+fn stage_factors(body: &CompiledBody, keys: &[&'static str]) -> Result<bool, InitializationFailure> {
     let cycle = Cycle::new(
         NonZeroU64::new(2_000_000_000).unwrap(),
         NonZeroU32::new(2).unwrap(),
@@ -192,7 +193,8 @@ fn ring_of(body: &CompiledBody, keys: &[&'static str]) -> Result<Jacobian, Initi
     let port = BoundaryPort::new(Vec::new())?;
     let request = InitializationRequest::at(SimTime::from_ns(0));
     let system = body.initialization(body.bind(packet)?, port, request)?;
-    Ok(system.stage(&system.workspace(), 0)?.1)
+    let (_, block) = system.stage(&system.workspace(), 0)?;
+    Ok(system.factor(&block).is_ok())
 }
 
 #[test]
@@ -300,8 +302,7 @@ fn two_closed_rows_either_store_could_hold_take_the_same_stores_in_either_order(
     let (forward, backward) = (crossed(false)?, crossed(true)?);
     assert_eq!(forward.model_hash(), backward.model_hash());
     for body in [&forward, &backward] {
-        let block = ring_of(body, &["t1", "t2"])?;
-        assert!(body.factor(&block).is_ok());
+        assert!(stage_factors(body, &["t1", "t2"])?);
     }
     Ok(())
 }
@@ -392,7 +393,7 @@ fn a_closed_row_keeps_its_own_unknown_when_another_row_could_take_it() -> Result
     let request = InitializationRequest::at(SimTime::from_ns(0));
     let system = body.initialization(body.bind(packet)?, port, request)?;
     let (_, block) = system.stage(&system.workspace(), 0)?;
-    assert!(body.factor(&block).is_ok());
+    assert!(system.factor(&block).is_ok());
     Ok(())
 }
 

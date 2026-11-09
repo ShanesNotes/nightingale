@@ -43,7 +43,10 @@ fn energy_inflow_and_outflow_agree_over_the_first_30_seconds_after_admission() {
         .collect();
     assert_eq!(energy.len(), 1);
     let (inflow, outflow) = (end_of(head.inflow(energy[0])), end_of(head.outflow(energy[0])));
-    assert!(inflow.is_finite() && outflow.is_finite() && inflow > 0.0, "{inflow} {outflow}");
+    assert!(
+        inflow.is_finite() && outflow.is_finite() && inflow > 0.0,
+        "{inflow} {outflow}"
+    );
     let gap = inflow - outflow;
     assert!(
         gap.abs() <= GAP_SHARE * inflow,

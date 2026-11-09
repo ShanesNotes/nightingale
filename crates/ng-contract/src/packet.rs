@@ -617,6 +617,18 @@ pub struct BoundParameters {
     pub(crate) owed: Owed,
 }
 impl BoundParameters {
+    /// An admitted revision's parameters again. Admission took what they owed, so the copy owes nothing either.
+    pub(crate) fn copied(&self) -> Self {
+        Self {
+            model: self.model,
+            packet: self.packet,
+            values: self.values.clone(),
+            starts: self.starts.clone(),
+            sizes: self.sizes.clone(),
+            modes: self.modes.clone(),
+            owed: Owed::default(),
+        }
+    }
     pub fn packet_hash(&self) -> PacketHash {
         self.packet
     }

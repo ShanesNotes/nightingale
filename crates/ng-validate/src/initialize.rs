@@ -21,27 +21,30 @@ pub fn admission_tolerance() -> ErrorScales {
     ErrorScales::uniform(scale(1e-9), scale(1e-12)).expect("positive constants")
 }
 
-/// Walks the ring's own stages from the packet's guess: each point's Newton on its own block, each firing into the next
-/// point, a pass per beat. A pulsatile orbit is too far from a constant guess for Newton on the ring, and a walk needs
-/// nothing but the stages, so it reaches a guess with the modes in their places. `admit` still judges all of it.
-fn march(system: &mut InitializationSystem<'_>, body: &CompiledBody, workspace: &mut SolveWorkspace) {
-    let (size, points) = (system.rows(), system.points());
-    let mut held = Vec::with_capacity(NEWTON_LIMIT as usize * size);
+/// Walks the ring's own stages from the packet's guess: each interval's Newton on its own block, from the point before
+/// it, each firing into the next interval, a pass per beat. A pulsatile orbit is too far from a constant guess for
+/// Newton on the ring, and a walk needs nothing but the stages, so it reaches a guess with the modes in their places.
+/// `admit` still judges all of it.
+fn march(system: &mut InitializationSystem<'_>, workspace: &mut SolveWorkspace) {
+    let points = system.points();
+    let mut held = Vec::with_capacity(NEWTON_LIMIT as usize * system.interval_slots(0).len());
     for _ in 0..MARCH_BEATS {
         for point in 0..points {
-            let before = (point + points - 1) % points;
-            let (from, to) = (before * size, point * size);
-            workspace.unknowns_mut().copy_within(from..from + size, to);
+            let before = system.endpoint((point + points - 1) % points);
+            let slots = system.interval_slots(point);
+            for stage in [system.endpoint(point), system.interior(point)] {
+                workspace.unknowns_mut().copy_within(before.clone(), stage.start);
+            }
             held.clear();
             for _ in 0..NEWTON_LIMIT {
-                held.extend_from_slice(&workspace.unknowns_mut()[to..to + size]);
+                held.extend_from_slice(&workspace.unknowns_mut()[slots.clone()]);
                 let Ok((residuals, block)) = system.stage(workspace, point) else {
                     return;
                 };
-                let Ok(update) = solve_block(body, &block, &residuals) else {
+                let Ok(update) = system.solve_stage(&block, &residuals) else {
                     return;
                 };
-                let unknowns = &mut workspace.unknowns_mut()[to..to + size];
+                let unknowns = &mut workspace.unknowns_mut()[slots.clone()];
                 let settled = (update.iter().zip(unknowns.iter()))
                     .all(|(change, unknown)| change.abs() <= NEWTON_STOP * unknown.abs());
                 for (unknown, change) in unknowns.iter_mut().zip(update) {
@@ -77,17 +80,6 @@ fn state_at_limit<'h>(held: &'h [f64], now: &[f64]) -> Option<&'h [f64]> {
     Some(&held[last * size..][..size])
 }
 
-fn solve_block(body: &CompiledBody, block: &Jacobian, residuals: &[f64]) -> Result<Vec<f64>, usize> {
-    match body.factor(block) {
-        Ok(factors) => {
-            let mut update = residuals.to_vec();
-            factors.solve(&mut update);
-            Ok(update)
-        }
-        Err(_) => solve_dense(block.view(), residuals),
-    }
-}
-
 fn merit(system: &InitializationSystem<'_>, unknowns: &[f64], residuals: &[f64]) -> f64 {
     let read = |(slot, (residual, unknown)): (usize, (&f64, &f64))| {
         let share = residual / (system.size(slot) + unknown.abs());
@@ -107,7 +99,7 @@ fn step(
     update: &[f64],
 ) -> bool {
     let size = system.rows();
-    let fits = system.points() * size;
+    let fits = system.fitted_slots().start;
     let amounts: Vec<bool> = (body.rows().iter())
         .map(|row| matches!(row.kind(), RowKind::Amount { .. }))
         .collect();
@@ -159,7 +151,7 @@ fn step(
 fn initialize(system: &mut InitializationSystem<'_>, body: &CompiledBody) -> SolveWorkspace {
     let mut workspace = system.workspace();
     if system.points() > 1 {
-        march(system, body, &mut workspace);
+        march(system, &mut workspace);
     }
     for _ in 0..SWEEP_LIMIT {
         let mut last = f64::INFINITY;
@@ -263,39 +255,6 @@ pub(crate) fn solved_start(
 ) -> Result<InitialRevision, InitializationFailure> {
     let mut system = system(body, packet, boundary, lens, origin)?;
     let solved = initialize(&mut system, body);
-    started(system, solved, core, origin)
-}
-
-pub(crate) fn solution(
-    body: &CompiledBody,
-    packet: ParameterPacket<SyntheticFixture>,
-    boundary: BoundaryPort,
-    lens: &ObservationLens,
-    origin: SimTime,
-) -> Result<Vec<f64>, InitializationFailure> {
-    let mut system = system(body, packet, boundary, lens, origin)?;
-    Ok(initialize(&mut system, body).unknowns_mut().to_vec())
-}
-
-/// A fresh system holds the packet's modes at every point, so sweeps carry the solution's own modes round the ring
-/// first.
-pub(crate) fn start_from(
-    body: &CompiledBody,
-    packet: ParameterPacket<SyntheticFixture>,
-    boundary: BoundaryPort,
-    core: &dyn CoupledSolver,
-    lens: &ObservationLens,
-    origin: SimTime,
-    solution: &[f64],
-) -> Result<InitialRevision, InitializationFailure> {
-    let mut system = system(body, packet, boundary, lens, origin)?;
-    let mut solved = system.workspace();
-    solved.unknowns_mut().copy_from_slice(solution);
-    for _ in 0..SWEEP_LIMIT {
-        if !matches!(system.sweep(&solved, 0..system.points()), Ok(1..)) {
-            break;
-        }
-    }
     started(system, solved, core, origin)
 }
 

@@ -70,8 +70,8 @@ test = "-p ng-contract --lib evaluate::tests::a_value_that_is_not_finite_fails_a
 [[mutant]]
 name = "start-hashes-stated-modes"
 path = "crates/ng-contract/src/admission.rs"
-old = '''parameters.packet.reading(time, start, &solved, fitted, &history);'''
-new = '''parameters.packet.reading(time, start, &parameters.modes, fitted, &history);'''
+old = '''unread.reading(time, start, &solved, fitted, &history);'''
+new = '''unread.reading(time, start, &parameters.modes, fitted, &history);'''
 test = "-p ng-contract --test solved_modes each_part_of_an_admitted_start_moves_the_hash_a_run_names"
 
 [[mutant]]
@@ -511,3 +511,59 @@ path = "crates/ng-validate/src/certificate.rs"
 old = '''let mut to = if policy.windows.coverage_ns == length {'''
 new = '''let mut to = if policy.windows.coverage_ns == 0 {'''
 test = "-p ng-validate --test transaction a_coverage_of_one_window_is_the_window_from_admission_however_far_the_history_runs"
+
+[[mutant]]
+name = "admission-radau-interior-sign"
+path = "crates/ng-contract/src/admission.rs"
+old = '''[[5.0 / 12.0, -1.0 / 12.0],'''
+new = '''[[5.0 / 12.0, 1.0 / 12.0],'''
+test = "-p ng-validate --test admission a_radau_cycle_closes_on_the_continuous_orbit_at_third_order"
+
+[[mutant]]
+name = "admission-radau-end-weights"
+path = "crates/ng-contract/src/admission.rs"
+old = '''[3.0 / 4.0, 1.0 / 4.0]];'''
+new = '''[1.0 / 2.0, 1.0 / 2.0]];'''
+test = "-p ng-validate --test admission_radau energys_end_rows_sum_to_its_stage_weighted_boundary_flow"
+
+[[mutant]]
+name = "admission-net-flow-end-stage-only"
+path = "crates/ng-contract/src/admission.rs"
+old = '''seconds * RADAU[END][stage]'''
+new = '''seconds * f64::from(stage == END)'''
+test = "-p ng-validate --test admission_radau a_closed_store_sheds_its_work_at_the_start_on_any_ring"
+
+[[mutant]]
+name = "admission-interior-unjudged"
+path = "crates/ng-contract/src/admission.rs"
+old = '''for slot in (0..stages.len()).filter(|slot| !replaced(slot)) {'''
+new = '''for slot in (0..stages.len()).filter(|slot| !replaced(slot) && slot % self.width() < size) {'''
+test = "-p ng-validate --test admission an_interior_stage_no_other_row_reads_is_judged_on_its_own_row"
+
+[[mutant]]
+name = "admission-chains-the-interior"
+path = "crates/ng-contract/src/admission.rs"
+old = '''self.slots(self.before(point), END).start + at, -1.0'''
+new = '''self.slots(self.before(point), INTERIOR).start + at, -1.0'''
+test = "-p ng-validate --test admission the_lifted_ring_is_the_dense_solve_of_the_differenced_rows"
+
+[[mutant]]
+name = "admission-interval-reads-its-own-frame"
+path = "crates/ng-contract/src/admission.rs"
+old = '''frame: &self.frames[self.before(point)],'''
+new = '''frame: &self.frames[point],'''
+test = "-p ng-validate --test admission a_stiff_row_driven_inside_the_beat_is_admitted_on_odd_and_even_rings"
+
+[[mutant]]
+name = "admission-stage-pivots-unpaired"
+path = "crates/ng-contract/src/admission.rs"
+old = '''.map(|unknown| RowId::at(unknown / size * size + pivots[unknown % size].index()))'''
+new = '''.map(|unknown| RowId::at(unknown / size * size + unknown % size + 0 * pivots.len()))'''
+test = "-p ng-contract --test ring_pivot two_closed_rows_that_read_one_store_factor_over_the_bodys_elimination"
+
+[[mutant]]
+name = "reused-start-keeps-its-history"
+path = "crates/ng-contract/src/admission.rs"
+old = '''(self.unread).reading(parts.time, &self.start, &parameters.modes, &self.fitted, &history);'''
+new = '''(self.unread).reading(parts.time, &self.start, &parameters.modes, &self.fitted, &parts.continuation);'''
+test = "-p ng-validate --test admission a_judged_start_under_another_history_is_that_historys_admission_of_it"

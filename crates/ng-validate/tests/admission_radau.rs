@@ -13,6 +13,8 @@ use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::*;
 use ng_validate::*;
 
+mod dense;
+
 const SECOND: u64 = 1_000_000_000;
 const HEAT: &str = "heat";
 const GAUGE: &str = "a synthetic gauge";
@@ -149,7 +151,10 @@ fn pacemaker() -> Result<Pacemaker, AdmissionError> {
         body.add(laws.finish());
         body.compile()
     })?;
-    Ok(Pacemaker { body, root: root.id() })
+    Ok(Pacemaker {
+        body,
+        root: root.id(),
+    })
 }
 
 impl Pacemaker {
@@ -194,12 +199,18 @@ impl Pacemaker {
             ("synthetic.heat-speed", HEAT_SPEED),
         ] {
             let value = measure::<Rate<Dimensionless>>(value);
-            packet.synthetic(key(local), Binding::Body, value, NOTE).expect("once");
+            packet
+                .synthetic(key(local), Binding::Body, value, NOTE)
+                .expect("once");
         }
         let wall = measure::<Energy>(WALL);
-        packet.synthetic(key("synthetic.wall"), Binding::Body, wall, NOTE).expect("once");
+        packet
+            .synthetic(key("synthetic.wall"), Binding::Body, wall, NOTE)
+            .expect("once");
         let work = measure::<Rate<Energy>>(WORK);
-        packet.synthetic(key("synthetic.work"), Binding::Body, work, NOTE).expect("once");
+        packet
+            .synthetic(key("synthetic.work"), Binding::Body, work, NOTE)
+            .expect("once");
         let read = Snapshot::new(
             self.rate(),
             GAUGE,
@@ -208,10 +219,14 @@ impl Pacemaker {
         );
         packet.anchor(Synthetic::new(RATE, read, NOTE)).expect("once");
         let guess = measure::<Rate<Dimensionless>>(1.0);
-        packet.calibrated(key("synthetic.gain"), Binding::Body, guess, RATE).expect("once");
+        packet
+            .calibrated(key("synthetic.gain"), Binding::Body, guess, RATE)
+            .expect("once");
         let stores = [(Space::Elastic, WALL), (Space::Thermal, WORK / 4.0 / HEAT_SPEED)];
         for (space, value) in stores {
-            packet.start(self.store(space), measure::<Energy>(value), NOTE).expect("once");
+            packet
+                .start(self.store(space), measure::<Energy>(value), NOTE)
+                .expect("once");
         }
         packet.start_mode(name("rhythm"), "systole", NOTE).expect("once");
         let guess = |kind| match kind {
@@ -222,8 +237,38 @@ impl Pacemaker {
         packet.start_rest(&self.body, guess, NOTE).expect("every row");
         packet
     }
+    /// A system on `intervals` whose modes a ramp of the phase has swept round the ring: the end of systole at a
+    /// quarter, the wrap at the last point and its reset into point 0's interval.
+    fn swept(&self, intervals: u32, lens: &ObservationLens) -> (InitializationSystem<'_>, SolveWorkspace) {
+        let parameters = self.body.bind(self.packet(intervals, [1.0, 1.0])).expect("bound");
+        let request = InitializationRequest::at(SimTime::from_ns(0)).reading(lens);
+        let boundary = BoundaryPort::new(Vec::new()).expect("no event");
+        let mut system = self
+            .body
+            .initialization(parameters, boundary, request)
+            .expect("a system");
+        let mut workspace = system.workspace();
+        let phase = self.row(RowKind::Memory(name("phase").into())).index();
+        let points = system.points();
+        for point in 0..points {
+            let ramp = (point + 1) as f64 / points as f64;
+            workspace.unknowns_mut()[system.endpoint(point).start + phase] = ramp;
+            workspace.unknowns_mut()[system.interior(point).start + phase] = ramp - 0.5 / points as f64;
+        }
+        for _ in 0..2 * points {
+            if system.sweep(&workspace, 0..points).expect("every guard reads") == 0 {
+                break;
+            }
+        }
+        (system, workspace)
+    }
     /// The admitted start's value of each of `rows`.
-    fn start(&self, intervals: u32, targets: [f64; 2], rows: &[RowKind]) -> Result<Vec<f64>, InitializationFailure> {
+    fn start(
+        &self,
+        intervals: u32,
+        targets: [f64; 2],
+        rows: &[RowKind],
+    ) -> Result<Vec<f64>, InitializationFailure> {
         let core = ReferenceIntegrator::new(SECOND / u64::from(intervals));
         let store = MemoryStore::default();
         let lens = self.lens(intervals);
@@ -240,7 +285,10 @@ impl Pacemaker {
 #[test]
 fn a_closed_store_sheds_its_work_at_the_start_on_any_ring() {
     let pacemaker = pacemaker().expect("a body");
-    let rows = [RowKind::Algebraic(name("power").into()), pacemaker.store(Space::Elastic)];
+    let rows = [
+        RowKind::Algebraic(name("power").into()),
+        pacemaker.store(Space::Elastic),
+    ];
     for intervals in [4, 8] {
         let start = pacemaker.start(intervals, [1.0, 1.0], &rows);
         let [power, held] = start.unwrap_or_else(|failure| panic!("{intervals}: {failure:?}"))[..] else {
@@ -251,17 +299,60 @@ fn a_closed_store_sheds_its_work_at_the_start_on_any_ring() {
     }
 }
 
-/// A drive that relaxes inside the beat makes the rate vary. A backward Euler ring advances the phase by the interval
-/// times the rate at each point, so the anchor's mean of those points closes the phase on its wrap. Radau's interval
-/// advances it by the stage weights' integral instead, which no sampled mean pins, so the wrap the guard needs once a
-/// beat may fall short of the grid.
+/// A drive that relaxes inside the beat makes the rate vary. A backward Euler ring advanced the phase by the interval
+/// times the rate at each point, so the anchor's mean of those points closed the phase on its wrap, and main admits
+/// this clock. Radau's interval advances it by the stage weights' integral, which no sampled mean pins, so the wrap the
+/// guard needs once a beat falls off the grid and no start stands. The arena's rate barely moves within a beat, and it
+/// admits; a clock like this one needs the cycle's time mean on both sides of rule 17.
 #[test]
-fn a_sampled_rate_mean_closes_a_varying_clock_on_its_wrap() {
+fn a_varying_clock_anchored_by_its_sampled_mean_finds_no_start() {
     let pacemaker = pacemaker().expect("a body");
     let rows = [RowKind::Memory(name("phase").into())];
-    let start = pacemaker.start(8, [1.5, 1.0], &rows);
-    let [phase] = start.unwrap_or_else(|failure| panic!("{failure:?}"))[..] else {
-        panic!("one row");
+    assert!(pacemaker.start(8, [1.0, 1.0], &rows).is_ok());
+    assert!(pacemaker.start(8, [1.5, 1.0], &rows).is_err());
+}
+
+/// A reset phase, a closed store, a regulated total read through a law on the pool, and a fit, at every slot off the
+/// guess.
+#[test]
+fn the_lifted_ring_is_the_dense_solve_of_the_differenced_rows_through_a_reset() {
+    let pacemaker = pacemaker().expect("a body");
+    for intervals in [2, 4] {
+        let lens = pacemaker.lens(intervals);
+        let (system, mut workspace) = pacemaker.swept(intervals, &lens);
+        for (slot, unknown) in workspace.unknowns_mut().iter_mut().enumerate() {
+            *unknown += 1e-3 * ((slot * 7 % 11) as f64 - 5.0);
+        }
+        dense::cross_check(&system, &mut workspace, &format!("{intervals} intervals"));
+    }
+}
+
+/// Energy's end rows telescope round the ring, so their sum is the cycle's stage-weighted boundary flow. Heat leaves in
+/// proportion to the thermal store, so moving that store at every interior stage alone, or at every end alone, moves the
+/// sum by the period times the heat speed times that stage's weight.
+#[test]
+fn energys_end_rows_sum_to_its_stage_weighted_boundary_flow() {
+    let pacemaker = pacemaker().expect("a body");
+    let intervals = 4;
+    let lens = pacemaker.lens(intervals);
+    let (system, mut workspace) = pacemaker.swept(intervals, &lens);
+    let held = workspace.unknowns_mut().to_vec();
+    let rows = [Space::Elastic, Space::Thermal].map(|space| pacemaker.row(pacemaker.store(space)).index());
+    let thermal = rows[1];
+    let summed = |workspace: &SolveWorkspace| -> f64 {
+        let residuals = system.evaluate(workspace).expect("every row");
+        let ends = (0..system.points()).flat_map(|point| rows.map(|row| system.endpoint(point).start + row));
+        ends.map(|slot| residuals[slot]).sum()
     };
-    assert!((0.0..1.0).contains(&phase), "{phase}");
+    let before = summed(&workspace);
+    for (stage, weight) in [(0, 0.75), (1, 0.25)] {
+        let mut moved = system.workspace();
+        moved.unknowns_mut().copy_from_slice(&held);
+        for point in 0..system.points() {
+            let slots = [system.interior(point), system.endpoint(point)];
+            moved.unknowns_mut()[slots[stage].start + thermal] += 1.0;
+        }
+        let change = summed(&moved) - before;
+        assert!((change - HEAT_SPEED * weight).abs() < 1e-12, "{stage}: {change}");
+    }
 }

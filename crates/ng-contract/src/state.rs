@@ -14,6 +14,16 @@ pub struct Candidate {
     pub(crate) fired: bool,
 }
 impl Candidate {
+    pub(crate) fn copied(&self) -> Self {
+        Self {
+            amounts: self.amounts.clone(),
+            memory: self.memory.clone(),
+            algebraic: self.algebraic.clone(),
+            modes: self.modes.clone(),
+            ordinals: self.ordinals.clone(),
+            fired: self.fired,
+        }
+    }
     pub(crate) fn of_coordinates(body: &CompiledBody, coordinates: &[f64], modes: Vec<usize>) -> Self {
         let mut state = Self {
             amounts: Vec::new(),

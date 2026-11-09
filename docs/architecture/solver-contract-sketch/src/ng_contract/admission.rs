@@ -21,9 +21,9 @@ impl InitializationRequest<'_> {
     }
 }
 impl CompiledBody {
-    /// The square admission system: `N` points of the rows plus one unknown per fit. Each point is one backward
-    /// Euler stage around the ring of the packet's `Cycle`, one conserved total replaces one row of each
-    /// combination, and each fit adds its anchor's row. An instant is one point with no ring.
+    /// The square admission system: the rows at both stages of `N` intervals plus one unknown per fit. Each point
+    /// ends two Radau IIA stages around the ring of the packet's `Cycle`, one conserved total replaces one row of
+    /// each combination, and each fit adds its anchor's row. An instant is one point with no ring.
     pub fn initialization<'m>(
         &'m self,
         _parameters: BoundParameters,

@@ -438,8 +438,8 @@ pub fn hold_outside_slice(body: &mut Assembly<'_>) -> Result<(), AdmissionError>
 }
 
 /// Urine and heat leave by a law on what the pool holds, so water and energy answer their own flows: admission solves
-/// their totals. Model defaults: the bladder drains in proportion to what it holds past a rest, and voiding is no
-/// event, since no law here needs one.
+/// their totals at the balance of its own cycle's flows, which a running core's beat need not share. Model defaults:
+/// the bladder drains in proportion to what it holds past a rest, and voiding is no event, since no law here needs one.
 fn exits(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let (mut laws, ports) = body.boundary()?.parts();
     let urine = ports.route::<Water>(URINE)?.route;

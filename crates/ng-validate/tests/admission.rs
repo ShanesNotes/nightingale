@@ -12,11 +12,13 @@
 //!
 //!     e = v / (g (2 A - S - H / 2))
 //!
-//! The ring of `N` backward Euler stages keeps both means exactly when the drive's edges sit on points. Summing the
-//! stages of `d` around the ring gives the same `v / k`, and on a uniform ring the mean of the points of the
-//! piecewise linear `s` is its integral. Only the wave's shape carries the grid's error: `d` steps by
-//! `r = 1 / (1 + 2 k h)` where the continuous orbit decays by `exp(-2 k h)`, and with `D1 = (P / tau + v) / (2 k)`,
-//! `D2 = v / (2 k)`, `E1 = r^(N tau / T)` and `E2 = r^(N (1 - tau / T))`,
+//! The ring of `N` intervals of two Radau IIA stages keeps both means exactly when the drive's edges sit on points.
+//! Each interval moves `d` from the point before as `d_j = R d_(j-1) + (1 - R) D_j` for its drive's own level `D_j`,
+//! so summing round the ring gives the same `v / k` whatever `R` is, and on a uniform ring the mean of the points of
+//! the piecewise linear `s` is its integral. Only the wave's shape carries the grid's error: `d` steps by
+//! `r = R(-2 k h)`, Radau's `R(z) = (1 + z / 3) / (1 - 2 z / 3 + z^2 / 6)`, where the continuous orbit decays by
+//! `exp(-2 k h)`, and with `D1 = (P / tau + v) / (2 k)`, `D2 = v / (2 k)`, `E1 = r^(N tau / T)` and
+//! `E2 = r^(N (1 - tau / T))`,
 //!
 //!     d(0) = (D2 (1 - E2) + D1 E2 (1 - E1)) / (1 - E1 E2)
 
@@ -25,6 +27,8 @@ use ng_contract::*;
 use ng_observe::*;
 use ng_record::*;
 use ng_validate::*;
+
+mod dense;
 
 const SECOND: u64 = 1_000_000_000;
 const PERIOD_NS: u64 = SECOND;
@@ -114,19 +118,6 @@ fn seconds(ns: u64) -> f64 {
 
 fn fitted_elastance() -> f64 {
     steady_k() / CONDUCTANCE
-}
-
-fn start_a(intervals: u32) -> f64 {
-    let (k, period, tau) = (steady_k(), seconds(PERIOD_NS), seconds(PULSE_NS));
-    let v = DELIVERED / period;
-    let (d1, d2) = ((DELIVERED / tau + v) / (2.0 * k), v / (2.0 * k));
-    let h = period / f64::from(intervals);
-    let r = 1.0 / (1.0 + 2.0 * k * h);
-    let power = |steps: u32| (0..steps).fold(1.0, |product, _| product * r);
-    let pulse_steps = intervals / 4;
-    let (e1, e2) = (power(pulse_steps), power(intervals - pulse_steps));
-    let d = (d2 * (1.0 - e2) + d1 * e2 * (1.0 - e1)) / (1.0 - e1 * e2);
-    (TOTAL + d) / 2.0
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -571,8 +562,10 @@ fn a_cycle_mean_anchor_is_met_as_a_cycle_mean_not_an_instant() {
         (instant - MEAN_A).abs() > 2.0,
         "the start is no cycle mean: {instant}"
     );
+    // The core, doubled backward Euler, starts on the Radau orbit and not its own, so its first cycle's mean stands
+    // off the anchor by its own error, a hundredth of the start's distance from the mean.
     let (means, _) = cycle_means(session, &case.lens, 1);
-    assert!((means[0] - MEAN_A).abs() < 1e-12, "{means:?}");
+    assert!((means[0] - MEAN_A).abs() < 1e-2, "{means:?}");
 }
 
 #[test]
@@ -594,37 +587,14 @@ fn the_fit_is_its_closed_form_on_any_grid_because_the_ring_keeps_the_means() {
 }
 
 #[test]
-fn the_start_state_is_the_point_of_the_backward_euler_orbit() {
+fn the_start_state_is_the_point_of_the_radau_orbit() {
     let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let core = reference(REFERENCE_NS);
     let session = case.admitted(&core, &store).session;
     let start = hi(session.record().accepted().value(case.row_a()));
-    assert!((start - start_a(INTERVALS)).abs() < 1e-11, "{start}");
-}
-
-#[test]
-fn a_core_on_the_grids_own_step_closes_the_first_cycle_to_rounding() {
-    let store = MemoryStore::default();
-    let case = PulsatileCase::plain();
-    let core = reference(REFERENCE_NS);
-    let session = case.admitted(&core, &store).session;
-    let start = hi(session.record().accepted().value(case.row_a()));
-    let (_, session) = cycle_means(session, &case.lens, 1);
-    let end = hi(session.record().accepted().value(case.row_a()));
-    assert!((end - start).abs() < 1e-11, "{}", end - start);
-}
-
-#[test]
-fn a_core_off_the_grid_starts_near_its_own_orbit_and_closes_on_it() {
-    let store = MemoryStore::default();
-    let case = PulsatileCase::plain();
-    for interval_ns in [PERIOD_NS / 128, PERIOD_NS / 16, PERIOD_NS / 4] {
-        let core = reference(interval_ns);
-        let (means, _) = cycle_means(case.admitted(&core, &store).session, &case.lens, 4);
-        let (first, last) = ((means[0] - MEAN_A).abs(), (means[3] - MEAN_A).abs());
-        assert!(first < 0.05 && last < first / 100.0, "{interval_ns}: {means:?}");
-    }
+    let orbit = orbit_start(steady_k(), INTERVALS, INTERVALS / 4, radau);
+    assert!((start - orbit).abs() < 1e-11, "{start} against {orbit}");
 }
 
 /// The start of `d`'s orbit at conductance times elastance `k`, with the pulse over the first `pulse` of `intervals`,
@@ -665,10 +635,7 @@ fn a_radau_cycle_closes_on_the_continuous_orbit_at_third_order() {
         (hi(session.record().accepted().value(case.row_a())) - exact).abs()
     };
     let distances: Vec<f64> = [8, 16, 32, 64].into_iter().map(distance).collect();
-    assert!(
-        distances[0] > 1e-5 && distances[3] < 1e-6,
-        "{distances:?}"
-    );
+    assert!(distances[0] > 1e-5 && distances[3] < 1e-6, "{distances:?}");
     for pair in distances.windows(2) {
         let ratio = pair[0] / pair[1];
         assert!((7.5..8.5).contains(&ratio), "{ratio} in {distances:?}");
@@ -703,10 +670,15 @@ fn a_stiff_row_driven_inside_the_beat_is_admitted_on_odd_and_even_rings() {
         .expect("parsed");
         let core = reference(step);
         let solved = admit_solved(case.body(), packet, boundary, &core, &case.lens, &store);
-        let session = solved.unwrap_or_else(|failure| panic!("{intervals}: {failure:?}")).session;
+        let session = solved
+            .unwrap_or_else(|failure| panic!("{intervals}: {failure:?}"))
+            .session;
         let start = hi(session.record().accepted().value(case.row_a()));
         let orbit = orbit_start(elastance * conductance, intervals, 1, radau);
-        assert!((start - orbit).abs() < 1e-11, "{intervals}: {start} against {orbit}");
+        assert!(
+            (start - orbit).abs() < 1e-11,
+            "{intervals}: {start} against {orbit}"
+        );
     }
 }
 
@@ -977,13 +949,12 @@ fn a_solved_orbit_that_misses_a_second_anchor_is_refused_with_that_anchor_named(
 fn a_moved_conserved_total_is_refused_with_its_quantity() {
     let case = PulsatileCase::plain();
     let quantity = case.body().conserved_basis().combinations()[0].id();
-    let rows = case.body().rows().len();
     for change in [0.5, -0.5] {
         let (packet, boundary, _) = steady_packet(&case);
         let system = steady_system(&case, packet, boundary);
         let mut moved = system.workspace();
-        // Both vessels at every point move alike, so every stage still holds and the total speaks first.
-        for unknown in moved.unknowns_mut().iter_mut().take(4 * rows) {
+        // Both vessels at every stage move alike, so every stage still holds and the total speaks first.
+        for unknown in moved.unknowns_mut().iter_mut().take(system.fitted_slots().start) {
             *unknown += change;
         }
         assert_eq!(
@@ -1105,12 +1076,11 @@ fn an_instant_moves_no_conserved_total_past_its_scale() {
 #[test]
 fn a_witness_that_breaks_one_stage_at_one_point_is_refused_with_its_row() {
     let case = PulsatileCase::plain();
-    let rows = case.body().rows().len();
     for (point, change) in [(1, 1e-3), (2, -1e-3), (3, 1e-3)] {
         let (packet, boundary, _) = steady_packet(&case);
         let system = steady_system(&case, packet, boundary);
         let mut witness = system.workspace();
-        witness.unknowns_mut()[point * rows] += change;
+        witness.unknowns_mut()[system.endpoint(point).start] += change;
         assert_eq!(
             system.admit(witness, case.history()).err(),
             Some(InitializationFailure::Inconsistent {
@@ -1177,9 +1147,9 @@ fn a_total_moved_by_less_than_a_pools_rounding_is_refused() {
     let request = InitializationRequest::at(at(0));
     let system = (body.initialization(parameters, empty_port(), request)).expect("a system");
     let mut moved = system.workspace();
-    for point in moved.unknowns_mut().chunks_mut(2) {
-        point[0] = POOL / 4.0 - 1.0 / 32_768.0;
-        point[1] = 7.0 * POOL / 4.0;
+    for stage in moved.unknowns_mut()[..system.fitted_slots().start].chunks_mut(2) {
+        stage[0] = POOL / 4.0 - 1.0 / 32_768.0;
+        stage[1] = 7.0 * POOL / 4.0;
     }
     let quantity = body.conserved_basis().combinations()[0].id();
     assert_eq!(
@@ -1277,7 +1247,7 @@ fn the_row_a_total_replaced_is_read_at_its_own_scale() {
     let request = InitializationRequest::at(at(0)).reading(&case.lens);
     let system = (case.body().initialization(parameters, empty_port(), request)).expect("a system");
     let mut witness = system.workspace();
-    let last = 3 * case.body().rows().len();
+    let last = system.endpoint(3).start;
     witness.unknowns_mut()[last + 1] += 5e-4;
     let row = AdmissionRow::Body(case.row_a());
     assert_eq!(
@@ -1433,9 +1403,8 @@ fn a_law_with_no_value_at_a_later_point_is_refused_by_its_name() {
     let (packet, boundary, _) = steady_packet(&case);
     let system = steady_system(&case, packet, boundary);
     let mut solved = system.workspace();
-    let rows = case.body().rows().len();
     let b = 1;
-    solved.unknowns_mut()[2 * rows + b] = 0.0;
+    solved.unknowns_mut()[system.endpoint(2).start + b] = 0.0;
     assert_eq!(
         system.admit(solved, case.history()).err(),
         Some(InitializationFailure::Undefined {
@@ -1870,7 +1839,10 @@ fn a_start_moved_inside_the_tolerance_or_another_history_names_another_run() {
         let revision = system.admit(start, history);
         revision.expect("inside the tolerance").packet_hash()
     };
-    let last = 2 * 4;
+    let last = {
+        let (packet, boundary, _) = steady_packet(&case);
+        steady_system(&case, packet, boundary).fitted_slots().start
+    };
     let plain = named(0, 0.0, case.history());
     assert_eq!(plain, named(0, 0.0, case.history()));
     assert_ne!(plain, named(0, 1e-10, case.history()));
@@ -1972,6 +1944,106 @@ fn linearize_is_the_slope_of_evaluate() {
     }
 }
 
+fn hazard_row(case: &PulsatileCase) -> RowId {
+    let hazard = RowKind::Memory(name("hazard").into());
+    (case.body().rows().iter())
+        .find(|row| row.kind() == hazard)
+        .expect("the body declares it")
+        .id()
+}
+
+/// A fit, a total in place of a row, a held hazard and a pulse that reaches only the first interval, on `intervals` of
+/// a period they divide.
+fn hazard_system<'c>(
+    case: &'c PulsatileCase,
+    intervals: u32,
+    lens: &ObservationLens,
+) -> InitializationSystem<'c> {
+    let period_ns = 100_000_000 * u64::from(intervals);
+    let cycle = Cycle::new(count(period_ns), NonZeroU32::new(intervals).expect("not zero")).expect("even");
+    let mut packet = ParameterPacket::periodic(cycle);
+    packet.within(admission_tolerance());
+    let g = measure::<Conductance<Water>>(CONDUCTANCE);
+    packet.synthetic(G, NETWORK, g, NOTE).expect("once");
+    for (row, value) in [(case.a(), START[0]), (case.b(), START[1])] {
+        packet.start(row, measure::<Water>(value), NOTE).expect("once");
+    }
+    let rate = measure::<Rate<Dimensionless>>(4.0);
+    packet.synthetic(PACE, Binding::Body, rate, NOTE).expect("once");
+    let hazard = RowKind::Memory(name("hazard").into());
+    packet
+        .start(hazard, measure::<Dimensionless>(0.25), NOTE)
+        .expect("once");
+    packet.start_mode(name("rhythm"), "sinus", NOTE).expect("once");
+    packet
+        .anchor(case.mean_anchor(MEAN, case.a(), MEAN_A))
+        .expect("once");
+    packet
+        .calibrated(E, NETWORK, measure::<Elastance>(GUESS), MEAN)
+        .expect("once");
+    let boundary = BoundaryPort::new(vec![
+        water(b"first interval", 0, PULSE, 0, 100_000_000, DELIVERED),
+        water(b"even out", 0, DRAIN, 0, period_ns, DELIVERED),
+    ])
+    .expect("parsed");
+    let parameters = case.body().bind(packet).expect("bound");
+    let request = InitializationRequest::at(at(0)).reading(lens);
+    (case.body().initialization(parameters, boundary, request)).expect("a system")
+}
+
+/// Every slot moved off the guess by its own small share, so the two stages of an interval differ.
+fn spread(workspace: &mut SolveWorkspace) {
+    for (slot, unknown) in workspace.unknowns_mut().iter_mut().enumerate() {
+        *unknown *= 1.0 + 1e-3 * ((slot * 7 % 11) as f64 - 5.0) / 5.0;
+    }
+}
+
+#[test]
+fn the_lifted_ring_is_the_dense_solve_of_the_differenced_rows() {
+    let case = PulsatileCase::new(Variant::Hazard);
+    for intervals in [1, 2, 7] {
+        let channels = [case.a(), case.b()]
+            .map(|row| ChannelSpec::new(GAUGE, row).averaged(count(u64::from(intervals))));
+        let lens = case
+            .body()
+            .lens(channels.into(), count(100_000_000))
+            .expect("a lens");
+        let system = hazard_system(&case, intervals, &lens);
+        let mut workspace = system.workspace();
+        spread(&mut workspace);
+        dense::cross_check(&system, &mut workspace, &format!("{intervals} intervals"));
+    }
+}
+
+/// Only its own interior row reads a held hazard's interior stage, so moving that one slot breaks one row of the
+/// system: the interior stage is judged by its own row, not through an end row that reads it.
+#[test]
+fn an_interior_stage_no_other_row_reads_is_judged_on_its_own_row() {
+    let case = PulsatileCase::new(Variant::Hazard);
+    let hazard = hazard_row(&case);
+    let admitted = |change: f64| {
+        let (mut packet, boundary, _) = steady_packet(&case);
+        let rate = measure::<Rate<Dimensionless>>(4.0);
+        packet.synthetic(PACE, Binding::Body, rate, NOTE).expect("once");
+        let row = RowKind::Memory(name("hazard").into());
+        packet
+            .start(row, measure::<Dimensionless>(0.25), NOTE)
+            .expect("once");
+        packet.start_mode(name("rhythm"), "sinus", NOTE).expect("once");
+        let system = steady_system(&case, packet, boundary);
+        let mut witness = system.workspace();
+        witness.unknowns_mut()[system.interior(1).start + hazard.index()] += change;
+        system.admit(witness, case.history()).err()
+    };
+    assert_eq!(admitted(0.0), None);
+    assert_eq!(
+        admitted(1e-3),
+        Some(InitializationFailure::Inconsistent {
+            row: AdmissionRow::Body(hazard)
+        })
+    );
+}
+
 #[test]
 fn a_ring_update_stays_on_its_bits() {
     let case = PulsatileCase::plain();
@@ -1989,7 +2061,7 @@ fn a_ring_update_stays_on_its_bits() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    expect_test::expect!["6fc2e75f8537c38e80d96ff138446fcfe6dca8d8d332790ec1b06748870c51e7 over 129 slots"]
+    expect_test::expect!["cdeaf551296e4eab9db813acb84b1756accc146fed7551f265e4287399bdd710 over 257 slots"]
         .assert_eq(&format!("{digest} over {} slots", update.len()));
 }
 
@@ -2074,7 +2146,6 @@ fn a_wider_tolerance_is_another_packet_so_it_cannot_share_a_runs_identity() {
 #[test]
 fn a_stage_is_read_in_its_rows_own_unit_not_as_a_rate() {
     let case = PulsatileCase::plain();
-    let rows = case.body().rows().len();
     let (a, b) = {
         let (_, _, a) = steady_packet(&case);
         (a, TOTAL - a)
@@ -2084,8 +2155,9 @@ fn a_stage_is_read_in_its_rows_own_unit_not_as_a_rate() {
         let (packet, boundary, _) = steady_packet(&case);
         let system = steady_system(&case, packet, boundary);
         let mut witness = system.workspace();
-        witness.unknowns_mut()[rows] = a + nudge;
-        witness.unknowns_mut()[rows + 1] = b - nudge;
+        let point = system.endpoint(1).start;
+        witness.unknowns_mut()[point] = a + nudge;
+        witness.unknowns_mut()[point + 1] = b - nudge;
         system.admit(witness, case.history()).err()
     };
     assert_eq!(admitted(0.2 * scale), None);
