@@ -888,8 +888,9 @@ impl InitializationSystem<'_> {
         workspace: &AdmissionWorkspace,
         values: &[f64],
         leg: usize,
-        chained: bool,
+        reach: Reach,
     ) -> Result<Vec<Vec<(usize, f64)>>, InitializationFailure> {
+        let chained = reach == Reach::Ring;
         let rows = self.body.rows();
         let sparsity = self.body.sparsity();
         let fits = &self.parameters.owed.fits;
@@ -1081,7 +1082,7 @@ impl InitializationSystem<'_> {
         let mut lines: Vec<Vec<(usize, f64)>> =
             Vec::with_capacity(workspace.unknowns.len() + crossings.len());
         for leg in 0..workspace.legs.len() {
-            lines.extend(self.leg_lines(workspace, &values, leg, true)?);
+            lines.extend(self.leg_lines(workspace, &values, leg, Reach::Ring)?);
         }
         let start = workspace.endpoint(0).start;
         for (slot, quantity) in self.replaced(workspace) {
@@ -1156,7 +1157,7 @@ impl InitializationSystem<'_> {
     ) -> Result<(Vec<f64>, Jacobian), InitializationFailure> {
         self.check(workspace)?;
         let values = self.values(workspace);
-        let lines = self.leg_lines(workspace, &values, leg.index, false)?;
+        let lines = self.leg_lines(workspace, &values, leg.index, Reach::Leg)?;
         let first = leg.index * self.width();
         let mut cells = vec![0.0; self.width()];
         let (offsets, unknowns) = self.pattern();
@@ -1263,7 +1264,7 @@ impl InitializationSystem<'_> {
         values: &[f64],
     ) -> Result<Option<RowId>, InitializationFailure> {
         let size = self.width();
-        let lines = self.leg_lines(workspace, values, 0, false)?;
+        let lines = self.leg_lines(workspace, values, 0, Reach::Leg)?;
         let mut matrix = vec![vec![0.0; size + 1]; size];
         for (cells, line) in matrix.iter_mut().zip(&lines) {
             for &(column, value) in line.iter().filter(|(column, _)| *column < size) {
@@ -1894,6 +1895,13 @@ impl From<AdmissionError> for InitializationFailure {
     fn from(error: AdmissionError) -> Self {
         Self::Admission(error)
     }
+}
+
+/// Whether a leg's lines also read what the ring carries into it: the previous leg's end, the fits and the crossing times that bound it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reach {
+    Leg,
+    Ring,
 }
 
 #[cfg(test)]
