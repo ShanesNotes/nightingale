@@ -72,7 +72,6 @@ type Target = { readonly id: string; readonly webSocketDebuggerUrl: string }
 const isTarget = (v: unknown): v is Target =>
   typeof v === 'object' && v !== null && 'id' in v && typeof v.id === 'string' && 'webSocketDebuggerUrl' in v && typeof v.webSocketDebuggerUrl === 'string'
 
-// One DevTools connection to a tab for the length of a command.
 async function connect(tab: string) {
   const { port, tabs } = session()
   const id = tabs[tab] ?? fail(`no tab named ${tab}`)

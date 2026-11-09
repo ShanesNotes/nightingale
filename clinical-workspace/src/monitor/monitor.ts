@@ -30,8 +30,6 @@ import {
 import { isVital, perVital, VITALS, type Vital, type VitalRow } from '../vitals.ts'
 import type { Link, LinkResult } from './link.ts'
 
-// The standalone bedside monitor: one tile per vital of the table, fed the observer's observations, and an outbox
-// that delivers each reading to the chart service as a numbered device message.
 export type Feed = {
   readonly start: PatientTime
   readonly end: PatientTime
@@ -95,8 +93,6 @@ const whole = (value: number) => String(Math.round(value))
 
 const counted = (n: number, what: string) => `${n} ${what}${n === 1 ? '' : 's'}`
 
-// How the link is, in words: what it holds and since when the chart service has not answered, and what the chart
-// refused or the full outbox dropped.
 function linkWords(model: Model): string {
   const since = model.answeredAt ?? model.startedAt
   const held =
@@ -244,8 +240,7 @@ export function monitor(options: MonitorOptions) {
 // A tick lands this long after each whole patient second, so the clock it reads is already in the new second.
 const TICK_MARGIN_MS = 30
 
-// Runs the monitor on the page. With no anchor it anchors the patient clock at its own load, and it never asks
-// the chart service for the time.
+// With no anchor the patient clock starts at the page's load. The monitor never asks the chart service the time.
 export function start(container: HTMLElement, options: MonitorOptions & { readonly anchor?: WallTime }): void {
   const program = monitor(options)
   const clock: PatientClock = { start: options.feed.start, end: options.feed.end, anchor: options.anchor ?? wallTime(Date.now()) }

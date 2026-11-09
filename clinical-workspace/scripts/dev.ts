@@ -44,7 +44,6 @@ async function until<T>(what: string, seconds: number, attempt: () => Promise<T 
   return fail(`${what} not ready after ${seconds} s`)
 }
 
-// The container is made once with a free port and a named volume, and started again on later runs.
 async function database(): Promise<string> {
   const running = (() => {
     try {
