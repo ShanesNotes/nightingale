@@ -77,5 +77,17 @@ for (const [name, connect] of databases) {
         assert.deepEqual(model.entries, [typed.entry, blank.entry])
         assert.equal(model.now, at('06:58:05'))
       }))
+
+    test('the chart refuses an entry about another patient, a care time after now, or a value that is not a finite number', () =>
+      withChart(async (chart) => {
+        const now = at('06:57:00')
+        const refused = (kind: string) => ({ kind: 'refused', refusal: { kind } })
+        assert.deepEqual(await chart.write(newEntry({ patient: 'another-test-patient' }), now), refused('another patient'))
+        assert.deepEqual(await chart.write(newEntry({ care: at('06:57:01') }), now), refused('care time after now'))
+        for (const value of ['', '   ', 'twelve']) {
+          assert.deepEqual(await chart.write(newEntry({ value }), now), refused('not a finite number'), JSON.stringify(value))
+        }
+        assert.deepEqual((await chart.readModel(now)).entries, [], 'a refused write charts nothing')
+      }))
   })
 }
