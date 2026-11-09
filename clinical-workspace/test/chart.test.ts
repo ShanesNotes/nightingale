@@ -3,7 +3,7 @@ import { describe, test } from 'node:test'
 import { isEntryId, parseAmendment, parseNewEntry, ROSTER, type WriteResult } from '../src/chart-api.ts'
 import { type Chart, openChart, pgliteSql, pgSql, type Sql } from '../src/chart.ts'
 import { isPatientId, parseBatch } from '../src/device.ts'
-import { parseClock, wallTime } from '../src/time.ts'
+import { formatClock, parseClock, wallTime } from '../src/time.ts'
 
 const branded = <T>(value: unknown, is: (v: unknown) => v is T): T => {
   assert.ok(is(value), String(value))
@@ -217,6 +217,26 @@ for (const [name, connect] of databases) {
           await assert.rejects(sql.query(statement), /append-only/, statement)
         }
         await assert.rejects(sql.query('INSERT INTO device_message SELECT * FROM device_message'), /duplicate key/)
+      }))
+
+    test('missing is each second a sourced vital lacks its reading, up to the earlier of the run end and the second before now', () =>
+      withChart(async (chart) => {
+        const spans = async (now: string) =>
+          (await chart.readModel(at(now))).missing.map((m) => `${m.vital} ${formatClock(m.from)}-${formatClock(m.through)}`)
+        const abpMean = (sequence: number, collected: string) => ({ ...deviceReading(sequence, collected), vital: 'ABP mean' })
+        assert.deepEqual(await spans('06:55:30'), [], 'no device has made a statement, so nothing is expected')
+        await chart.writeDeviceBatch(batch(deviceStatement(1, '06:55:00'), deviceReading(2, '06:55:00', 'not collected'), deviceReading(3, '06:55:01')), at('06:55:01'))
+        await chart.writeDeviceBatch(batch(deviceReading(4, '06:55:04'), abpMean(5, '06:55:04')), at('06:55:06'))
+        assert.deepEqual(await spans('06:55:06'), ['HR 06:55:02-06:55:03', 'HR 06:55:05-06:55:05', 'ABP mean 06:55:00-06:55:03', 'ABP mean 06:55:05-06:55:05'])
+        await chart.writeDeviceBatch(batch(deviceReading(6, '06:55:05')), at('06:55:07'))
+        assert.deepEqual(await spans('06:55:07'), ['HR 06:55:02-06:55:03', 'HR 06:55:06-06:55:06', 'ABP mean 06:55:00-06:55:03', 'ABP mean 06:55:05-06:55:06'])
+        const later = (await chart.readModel(at('06:55:07'))).readings.find((r) => r.sequence === 6)
+        assert.ok(later !== undefined && later.arrived > later.available, 'the reading that filled a missing second arrived late')
+        const restart = { ...DEVICE, boot: 'test-boot-2' }
+        await chart.writeDeviceBatch(batch(deviceStatement(1, '06:55:08', { ...SOURCED, 'ABP mean': 'no source' }, restart)), at('06:55:08'))
+        assert.deepEqual(await spans('06:55:10'), ['HR 06:55:02-06:55:03', 'HR 06:55:06-06:55:09', 'ABP mean 06:55:00-06:55:03', 'ABP mean 06:55:05-06:55:07'])
+        const end = await spans('07:05:00')
+        assert.deepEqual(end.filter((span) => span.startsWith('HR')).at(-1), 'HR 06:55:06-07:04:59', 'the run end caps what is expected')
       }))
   })
 }
