@@ -1,5 +1,5 @@
-import { Effect, Schema } from 'effect'
-import { Command, type Update } from 'foldkit'
+import { Effect, Schema, Stream } from 'effect'
+import { Command, Runtime, Subscription, type Update } from 'foldkit'
 import type { Html, HtmlBuilder } from 'foldkit/html'
 import { defineMessageUnion } from 'foldkit/message'
 import {
@@ -15,7 +15,18 @@ import {
   parseDeviceMessage,
 } from '../device.ts'
 import type { Observation } from '../observation.ts'
-import { add, formatClock, isPatientTime, type PatientTime, seconds } from '../time.ts'
+import {
+  add,
+  formatClock,
+  isPatientTime,
+  type PatientClock,
+  type PatientTime,
+  patientTimeAt,
+  seconds,
+  untilNextSecond,
+  type WallTime,
+  wallTime,
+} from '../time.ts'
 import { isVital, perVital, VITALS, type Vital, type VitalRow } from '../vitals.ts'
 import type { Link, LinkResult } from './link.ts'
 
@@ -228,4 +239,20 @@ export function monitor(options: MonitorOptions) {
     ])
 
   return { init, update, view, SendBatch, messageFor }
+}
+
+// A tick lands this long after each whole patient second, so the clock it reads is already in the new second.
+const TICK_MARGIN_MS = 30
+
+// Runs the monitor on the page. With no anchor it anchors the patient clock at its own load, and it never asks
+// the chart service for the time.
+export function start(container: HTMLElement, options: MonitorOptions & { readonly anchor?: WallTime }): void {
+  const program = monitor(options)
+  const clock: PatientClock = { start: options.feed.start, end: options.feed.end, anchor: options.anchor ?? wallTime(Date.now()) }
+  const tick = Effect.sync(() => Message.SecondPassed({ now: patientTimeAt(clock, wallTime(Date.now())) }))
+  const next = Effect.suspend(() => Effect.sleep(untilNextSecond(clock, wallTime(Date.now())) + TICK_MARGIN_MS)).pipe(Effect.andThen(tick))
+  const subscriptions = Subscription.make<Model, Message>()(() => ({
+    clock: Subscription.persistentEntry(Stream.concat(Stream.fromEffect(tick), Stream.fromEffectRepeat(next))),
+  }))
+  Runtime.run(Runtime.makeElement({ Model, init: program.init, update: program.update, view: program.view, subscriptions, container }))
 }
