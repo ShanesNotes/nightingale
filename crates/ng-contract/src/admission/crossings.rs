@@ -10,9 +10,9 @@ pub(crate) const CLEARANCE: f64 = 1.0 / 4_294_967_296.0;
 /// Halvings of a leg the scan may take before it calls a crossing unresolved: a few hundred times rounding on the
 /// leg's own clock.
 const DEPTH: u32 = 44;
-/// A guard's gap at a crossing it is placed at, as a share of its reach, within which the crossing stands where it is
-/// placed. Further below zero its root has not been reached; further above, it was passed before the leg's end.
-const REACHED: f64 = 1e-6;
+/// A guard's rounding, as a share of the terms its gap is computed from: a gap within it reads as zero however slowly the
+/// guard moves.
+const ROUNDING: f64 = 64.0 * f64::EPSILON;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Relocated {
@@ -30,6 +30,11 @@ struct Curve {
     c: Vec<f64>,
 }
 impl Curve {
+    fn slope(&self, s: f64) -> Vec<f64> {
+        (self.b.iter().zip(&self.c))
+            .map(|(b, c)| b + 2.0 * s * c)
+            .collect()
+    }
     fn at(&self, s: f64) -> Vec<f64> {
         (self.a.iter().zip(&self.b).zip(&self.c))
             .map(|((a, b), c)| a + s * (b + s * c))
@@ -77,12 +82,30 @@ enum Event {
         guards: Vec<usize>,
     },
     Unarmed,
-    /// The crossing that ends the leg stands short of its guard's zero, or its guard was past zero where the leg
-    /// starts, so it crossed before. Where the leg reaches the interval's knot on that side, the crossing goes across
-    /// it, to the neighbouring interval and the offset its guard's slope there gives.
+    /// The crossing that ends the leg stands short of its guard's zero with no room left in its interval to reach it,
+    /// or its guard was past zero where the leg starts, so it crossed before. Where the leg reaches the interval's knot
+    /// on that side, the crossing goes across it, to the neighbouring interval and the offset its guard's slope there
+    /// gives.
     Gone {
         across: Option<(usize, f64)>,
     },
+}
+
+/// A guard read at one point of a leg: its gap, the gap's slope per share of the leg, and the size of the terms the gap
+/// is computed from.
+struct Reading {
+    gap: f64,
+    rising: f64,
+    terms: f64,
+}
+impl Reading {
+    /// Whether the guard stands at its zero: within its rounding, or with its root nearer along its slope than `room`,
+    /// the share of the leg a crossing must keep from a knot. Both scale with the guard, and neither reads how far its
+    /// value lies from zero elsewhere, so a small swing far from zero keeps the crossings of a large one.
+    fn stands(&self, room: f64) -> bool {
+        let off = self.gap.abs();
+        off <= ROUNDING * self.terms || off <= self.rising.abs() * room
+    }
 }
 
 enum Found {
@@ -139,15 +162,36 @@ impl InitializationSystem<'_> {
         };
         self.body.guard_gap(guard, &inputs).map_err(undefined)
     }
-    fn window(
+    /// The least share of `leg` a crossing keeps from either of its knots.
+    fn room(&self, workspace: &AdmissionWorkspace, leg: usize) -> f64 {
+        CLEARANCE * self.interval.unwrap_or(0.0) / workspace.legs[leg].length
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn reading(
         &self,
-        workspace: &AdmissionWorkspace,
-        values: &[f64],
-        leg: usize,
         guard: usize,
-    ) -> Result<f64, InitializationFailure> {
-        let (read, size) = self.root_scale(workspace, values, leg, guard)?;
-        Ok(REACHED * (read + size))
+        interval: usize,
+        state: &[f64],
+        modes: &[usize],
+        values: &[f64],
+        direction: &[f64],
+    ) -> Result<Reading, InitializationFailure> {
+        let gap = self.gap_in(guard, interval, state, modes, values)?;
+        let inputs = Inputs {
+            parameters: values,
+            frame: &self.frames[self.before(interval)],
+            unknowns: state,
+            modes,
+            draws: &self.draws,
+            factors: &self.factors,
+        };
+        let slopes = self.body.guard_slopes(guard, &inputs).map_err(undefined)?;
+        let (mut rising, mut terms) = (0.0, 0.0);
+        for &(row, slope) in &slopes.unknowns {
+            rising += slope * direction[row];
+            terms += slope.abs() * state[row].abs();
+        }
+        Ok(Reading { gap, rising, terms })
     }
     fn earliest(
         &self,
@@ -156,10 +200,15 @@ impl InitializationSystem<'_> {
         leg: usize,
         curve: &Curve,
         guard: usize,
-        end: Option<f64>,
+        ends_here: bool,
     ) -> Result<Found, InitializationFailure> {
         let held = &workspace.legs[leg];
         let gap = |share: f64| self.gap_in(guard, held.interval, &curve.at(share), &held.modes, values);
+        let stands_at_end = || -> Result<bool, InitializationFailure> {
+            let (end, slope) = (curve.at(1.0), curve.slope(1.0));
+            let reading = self.reading(guard, held.interval, &end, &held.modes, values, &slope)?;
+            Ok(reading.stands(self.room(workspace, leg)))
+        };
         let still = curve.at(0.0);
         let inputs = self.inputs(held, &still, values);
         let mut pieces = vec![(0.0, 1.0, 0)];
@@ -187,9 +236,7 @@ impl InitializationSystem<'_> {
             if jet.value.lo >= 0.0 {
                 return Ok(Found::At(lo));
             }
-            if let Some(window) = end.filter(|_| hi == 1.0 && jet.slope.lo > 0.0)
-                && gap(1.0)?.abs() <= window
-            {
+            if ends_here && hi == 1.0 && jet.slope.lo > 0.0 && stands_at_end()? {
                 continue;
             }
             if jet.slope.lo > 0.0 {
@@ -238,7 +285,7 @@ impl InitializationSystem<'_> {
         one.crossing == other.crossing && one.code.ops == other.code.ops && one.inputs == other.inputs
     }
     /// The first crossing inside one leg of any guard its modes arm, but a paced cycle's clock, which crosses only
-    /// at the wrap.
+    /// at the wrap, or the crossing that ends the leg moved on to its root past the leg's end, before the next knot.
     fn scan(
         &self,
         workspace: &AdmissionWorkspace,
@@ -249,30 +296,42 @@ impl InitializationSystem<'_> {
         let guards = &self.body.layout.guards;
         let ending = held.ends_at.map(|at| &workspace.topology.crossings[at]);
         let curve = self.curve(workspace, leg);
+        let room = self.room(workspace, leg);
         if let Some(crossing) = ending {
             let root = crossing.guards[0];
             if !guards[root].armed(&held.modes) {
                 return Ok(Event::Unarmed);
             }
-            let window = self.window(workspace, values, leg, root)?;
             let interval = self.interval.unwrap_or(0.0);
             let edge = 4.0 * CLEARANCE * interval;
             let points = self.frames.len();
-            let end = curve.at(1.0);
-            let gap = self.gap_in(root, held.interval, &end, &held.modes, values)?;
-            if gap < -window {
-                let rising = self.along(root, held.interval, &end, &held.modes, values, &curve, 1.0)?;
-                let at_edge = interval - (held.start + held.length) <= edge;
-                let across = (at_edge && rising > 0.0).then(|| {
-                    let ahead = -gap / rising * held.length;
-                    ((held.interval + 1) % points, ahead.clamp(edge, 0.5 * interval))
-                });
+            let read = |share: f64| {
+                let (state, slope) = (curve.at(share), curve.slope(share));
+                self.reading(root, held.interval, &state, &held.modes, values, &slope)
+            };
+            let reading = read(1.0)?;
+            let (gap, rising) = (reading.gap, reading.rising);
+            if gap < 0.0 && !reading.stands(room) {
+                let end = held.start + held.length;
+                let ahead = -gap / rising * held.length;
+                // A leg's root moves with its length, so one just past its end moves the crossing on, not away.
+                let next = (workspace.legs.get(leg + 1))
+                    .filter(|next| next.interval == held.interval)
+                    .map_or(interval, |next| next.start + next.length);
+                if rising > 0.0 && end + ahead < next - edge {
+                    return Ok(Event::Cross {
+                        share: 1.0 + ahead / held.length,
+                        guards: crossing.guards.clone(),
+                    });
+                }
+                let at_edge = interval - end <= edge;
+                let across = (at_edge && rising > 0.0)
+                    .then(|| ((held.interval + 1) % points, ahead.clamp(edge, 0.5 * interval)));
                 return Ok(Event::Gone { across });
             }
-            let start = curve.at(0.0);
-            let gap = self.gap_in(root, held.interval, &start, &held.modes, values)?;
-            if gap > window {
-                let rising = self.along(root, held.interval, &start, &held.modes, values, &curve, 0.0)?;
+            let reading = read(0.0)?;
+            let (gap, rising) = (reading.gap, reading.rising);
+            if gap > 0.0 && !reading.stands(room) {
                 let across = (held.start == 0.0 && rising > 0.0).then(|| {
                     let behind = gap / rising * held.length;
                     (
@@ -284,19 +343,12 @@ impl InitializationSystem<'_> {
             }
         }
         let reference = self.period.map(|period| period.guard);
-        let interval = self.interval.unwrap_or(0.0);
-        let room = CLEARANCE * interval / held.length;
         let mut first: Option<(f64, Vec<usize>)> = None;
         for guard in
             (0..guards.len()).filter(|&guard| guards[guard].armed(&held.modes) && Some(guard) != reference)
         {
-            let end = match ending {
-                Some(crossing) if crossing.guards.contains(&guard) => {
-                    Some(self.window(workspace, values, leg, guard)?)
-                }
-                _ => None,
-            };
-            let share = match self.earliest(workspace, values, leg, &curve, guard, end)? {
+            let ends_here = ending.is_some_and(|crossing| crossing.guards.contains(&guard));
+            let share = match self.earliest(workspace, values, leg, &curve, guard, ends_here)? {
                 Found::Clear => continue,
                 Found::Unresolved => return Err(self.unresolved(guard)),
                 Found::At(share) => share,
@@ -343,19 +395,28 @@ impl InitializationSystem<'_> {
             None if leg == self.first_leg(&workspace.legs) => reference.into_iter().collect(),
             None => Vec::new(),
         };
-        let curve = self.curve(workspace, previous);
-        let arriving: Vec<f64> = (curve.b.iter().zip(&curve.c)).map(|(b, c)| b + 2.0 * c).collect();
+        let arriving = self.curve(workspace, previous).slope(1.0);
+        let room = self.room(workspace, previous);
         let armed: Vec<bool> = guards.iter().map(|guard| guard.armed(before)).collect();
         let mut modes = before.to_vec();
         let mut fired: Vec<usize> = Vec::new();
         for round in 0..=guards.len() {
             let mut crossed = Vec::with_capacity(guards.len());
-            let along = (round == 0).then_some(&arriving[..]);
             for (at, guard) in guards.iter().enumerate() {
                 let forcing = round == 0 && forced.contains(&at);
                 let open = Some(at) != reference && armed[at] && guard.armed(&modes);
                 crossed.push(
-                    forcing || (open && self.crossed_at(at, held.interval, &state, &modes, values, along)?),
+                    forcing
+                        || (open
+                            && self.crossed_at(
+                                at,
+                                held.interval,
+                                (&state, &arriving),
+                                &modes,
+                                values,
+                                room,
+                                round == 0,
+                            )?),
                 );
             }
             let batch = self.body.layout.fired(&mut modes, &crossed);
@@ -374,70 +435,25 @@ impl InitializationSystem<'_> {
         }
         Err(self.unresolved(fired[0]))
     }
-    /// Whether a guard is crossed at a knot: past its zero beyond the window in which it stands at it, or, where
-    /// `arriving` gives the slope of the curve that reaches the knot, at its zero and rising along that curve. A guard at
-    /// its zero and falling, such as the one a firing's complement leaves, does not fire.
+    /// Whether a guard is crossed at a knot: past its zero and not standing at it, or, when `rising_fires`, standing at
+    /// its zero and rising along the curve that reaches the knot, whose slope per share of its leg `arriving` gives. A
+    /// guard at its zero and falling, such as the one a firing's complement leaves, does not fire.
+    #[allow(clippy::too_many_arguments)]
     fn crossed_at(
         &self,
         guard: usize,
         interval: usize,
-        state: &[f64],
+        (state, arriving): (&[f64], &[f64]),
         modes: &[usize],
         values: &[f64],
-        arriving: Option<&[f64]>,
+        room: f64,
+        rising_fires: bool,
     ) -> Result<bool, InitializationFailure> {
-        let gap = self.gap_in(guard, interval, state, modes, values)?;
-        let inputs = Inputs {
-            parameters: values,
-            frame: &self.frames[self.before(interval)],
-            unknowns: state,
-            modes,
-            draws: &self.draws,
-            factors: &self.factors,
-        };
-        let slopes = self.body.guard_slopes(guard, &inputs).map_err(undefined)?;
-        let sizes = &self.parameters.sizes;
-        let reach: f64 = (slopes.unknowns.iter())
-            .map(|&(unknown, slope)| slope.abs() * (state[unknown].abs() + sizes[unknown]))
-            .sum();
-        let window = REACHED * reach;
-        if gap > window {
-            return Ok(true);
+        let reading = self.reading(guard, interval, state, modes, values, arriving)?;
+        if !reading.stands(room) {
+            return Ok(reading.gap > 0.0);
         }
-        let Some(arriving) = arriving.filter(|_| gap >= -window) else {
-            return Ok(false);
-        };
-        let rising: f64 = (slopes.unknowns.iter())
-            .map(|&(unknown, slope)| slope * arriving[unknown])
-            .sum();
-        Ok(rising > 0.0)
-    }
-    #[allow(clippy::too_many_arguments)]
-    fn along(
-        &self,
-        guard: usize,
-        interval: usize,
-        state: &[f64],
-        modes: &[usize],
-        values: &[f64],
-        curve: &Curve,
-        share: f64,
-    ) -> Result<f64, InitializationFailure> {
-        let inputs = Inputs {
-            parameters: values,
-            frame: &self.frames[self.before(interval)],
-            unknowns: state,
-            modes,
-            draws: &self.draws,
-            factors: &self.factors,
-        };
-        let slopes = self.body.guard_slopes(guard, &inputs).map_err(undefined)?;
-        let direction = |row: usize| curve.b[row] + 2.0 * share * curve.c[row];
-        Ok(slopes
-            .unknowns
-            .iter()
-            .map(|&(row, slope)| slope * direction(row))
-            .sum())
+        Ok(rising_fires && reading.rising > 0.0)
     }
     fn modes_before(&self, workspace: &AdmissionWorkspace, leg: usize) -> Vec<usize> {
         workspace.legs[Self::previous(&workspace.legs, leg)].modes.clone()
@@ -467,13 +483,8 @@ impl InitializationSystem<'_> {
             if !self.body.layout.guards[period.guard].armed(&held.modes) {
                 continue;
             }
-            let end = if leg == last {
-                Some(self.window(workspace, &values, leg, period.guard)?)
-            } else {
-                None
-            };
             let curve = self.curve(workspace, leg);
-            match self.earliest(workspace, &values, leg, &curve, period.guard, end)? {
+            match self.earliest(workspace, &values, leg, &curve, period.guard, leg == last)? {
                 Found::Clear => {}
                 Found::At(_) => return Err(InitializationFailure::SecondWrap),
                 Found::Unresolved => return Err(self.unresolved(period.guard)),
