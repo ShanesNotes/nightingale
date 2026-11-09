@@ -966,15 +966,12 @@ impl InitializationSystem<'_> {
                 let own = self.slots(leg, stage).start;
                 let reads = sparsity.row_offsets()[at]..sparsity.row_offsets()[at + 1];
                 let mut line = Vec::new();
+                // A stage's columns are its own slots, and each row reads one at most once, so none is in the line yet.
                 let read = |line: &mut Vec<(usize, f64)>, from: usize, scale: f64| {
                     let (entries, by_fit) = &slopes[from];
                     let first = self.slots(leg, from).start;
                     for entry in reads.clone() {
-                        add(
-                            line,
-                            first + sparsity.unknowns()[entry].index(),
-                            scale * entries[entry],
-                        );
+                        line.push((first + sparsity.unknowns()[entry].index(), scale * entries[entry]));
                     }
                     for (fit, slope) in by_fit.iter().enumerate() {
                         add(line, border + fit, scale * slope[at]);
@@ -1220,11 +1217,21 @@ impl InitializationSystem<'_> {
         self.check(workspace)?;
         let values = self.values(workspace);
         let lines = self.leg_lines(workspace, &values, leg.index, false)?;
-        let block = self.local_block(leg.index, |row, column| {
-            (lines[row].iter())
-                .find(|(at, _)| *at == column)
-                .map_or(0.0, |(_, value)| *value)
-        });
+        let first = leg.index * self.width();
+        let mut cells = vec![0.0; self.width()];
+        let (offsets, unknowns) = self.pattern();
+        let mut entries = Vec::with_capacity(unknowns.len());
+        for (row, line) in lines.iter().enumerate() {
+            for &(column, value) in line {
+                cells[column - first] = value;
+            }
+            let pattern = &unknowns[offsets[row]..offsets[row + 1]];
+            entries.extend(pattern.iter().map(|unknown| cells[unknown.index()]));
+            for &(column, _) in line {
+                cells[column - first] = 0.0;
+            }
+        }
+        let block = Jacobian::of_parts(offsets.to_vec(), unknowns.to_vec(), entries);
         let mut rows = Vec::with_capacity(self.width());
         self.stage_rows(workspace, &values, leg.index, &mut rows)?;
         Ok((rows, block))
