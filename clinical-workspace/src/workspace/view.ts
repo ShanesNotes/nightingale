@@ -49,7 +49,7 @@ function form(model: Model, h: H, vitals: readonly VitalRow[]): Html {
     h.input([h.Id('value'), h.Value(model.form.value), h.OnInput((text) => Message.TypedValue({ text }))]),
     h.label([h.For('care')], [' Care time, HH:MM:SS or blank for now ']),
     h.input([h.Id('care'), h.Value(model.form.care), h.Placeholder('now'), h.OnInput((text) => Message.TypedCare({ text }))]),
-    h.button([h.Id('chart'), h.Type('button'), h.OnClick(Message.ClickedChart())], [' Chart']),
+    h.button([h.Id('chart'), h.Type('button'), h.OnClick(Message.ClickedChart())], ['Chart']),
   ])
 }
 
@@ -105,9 +105,9 @@ function details(model: Model, h: H, vitals: readonly VitalRow[]): Html {
           h.input([h.Id('edit-value'), h.Value(model.editing.value), h.OnInput((text) => Message.TypedEditValue({ text }))]),
           h.label([h.For('edit-care')], [' Care time ']),
           h.input([h.Id('edit-care'), h.Value(model.editing.care), h.OnInput((text) => Message.TypedEditCare({ text }))]),
-          h.button([h.Id('save-edit'), h.Type('button'), h.OnClick(Message.ClickedSaveEdit())], [' Save as a new version']),
+          h.button([h.Id('save-edit'), h.Type('button'), h.OnClick(Message.ClickedSaveEdit())], ['Save as a new version']),
         ]),
-    h.button([h.Id('versions-button'), h.Type('button'), h.OnClick(Message.ClickedVersions())], [' Show earlier versions']),
+    h.button([h.Id('versions-button'), h.Type('button'), h.OnClick(Message.ClickedVersions())], ['Show earlier versions']),
     versions === undefined
       ? h.empty
       : h.ul(
