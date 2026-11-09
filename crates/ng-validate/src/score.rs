@@ -225,7 +225,7 @@ mod tests {
         let protocol = ArenaProtocol {
             windows: windows(),
             repeats: NonZeroU32::MIN,
-            ..ArenaProtocol::full()
+            ..ArenaProtocol::pick()
         };
         let policy = AccuracyPolicy::manufactured()
             .expect("the model default")

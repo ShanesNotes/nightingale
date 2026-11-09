@@ -42,6 +42,10 @@ Model defaults from [the architecture pass](issues/02-first-build-architecture.m
 - **A sufficiency screen before the freeze,** a diagnostic and never a model ([ticket 07](issues/07-sufficiency-screen.md)).
 - **The audit gates everything.** Core must pass posture mid-run, a checkpoint, a rewind and a closed loop, and the start histories must differ beyond their noise; the reference integrator is never an automatic fallback.
 
+Settled by the driver's build ([ticket 03](issues/03-teacher-driver.md)):
+
+- **The teacher driver runs.** `gp-driver` turns one canonical run spec into one run directory, written whole or not at all, on the unchanged engine. On the heavy-run machine its smoke reproduces the pinned Core seal, and every audit variant and the closed loop give a plain run's seal log. A 20 s run admits in 7 s, steps in 3 s and peaks at 16 MB resident (measured, one run).
+
 ## Not yet specified
 
 - **The fluid-delivery experiment.** A deferred line ([ticket 13](issues/13-fluids-line-deferred.md)); one of its prerequisites is a question for the engine's process: where varied packet values come from. Hour-scale runs no longer wait on the engine, because a run's memory stays flat since native-contract ticket 11.

@@ -69,7 +69,7 @@ pub struct SlidingWindows {
     _coverage_ns: u64,
 }
 impl SlidingWindows {
-    /// Refuses a coverage that does not exceed one window, which could slide nowhere.
+    /// Refuses a coverage shorter than one window, which holds none.
     pub fn new(_window_ns: NonZeroU64, _coverage_ns: u64) -> Result<Self, AdmissionError> {
         todo!()
     }
@@ -451,8 +451,12 @@ pub struct ArenaProtocol {
     pub minimum_interval_ns: NonZeroU64,
 }
 impl ArenaProtocol {
-    /// Every 24 h window over 48 h.
-    pub fn full() -> Self {
+    /// Every core's: one 24 h window from 06:55.
+    pub fn pick() -> Self {
+        todo!()
+    }
+    /// The picked core's, once: every 24 h window over 48 h.
+    pub fn milestone() -> Self {
         todo!()
     }
 }
