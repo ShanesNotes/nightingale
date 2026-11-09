@@ -6,7 +6,7 @@
 
 A caller names runs and gets each one's settled directory. The driver's words, exit codes and outcome lines,
 `status`, the spec files, the closed loop's beat lines and answers, the order, replays, the disk rule and
-progress.txt stay here. It never computes a spec id, never reads a table and never judges a run.
+progress.txt stay here. It never computes a spec id, never reads a table and gives no verdict.
 
 Every driver it starts dies with it (PR_SET_PDEATHSIG), so a dead teacher leaves partial runs that the next call
 redoes, never a closed loop that faults because its rule went away. The pool is one thread, so the hook between fork

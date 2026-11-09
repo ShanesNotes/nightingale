@@ -8,7 +8,7 @@
 
 The NPY header, the hi and lo limbs, the seal's big-endian words, absolute nanoseconds and the edge sections stay
 here. Opening checks every file against its summary digest, and every beat against the edges it spans, so a reader
-that misread the writer's layout refuses instead of judging.
+that misread the writer's layout refuses instead of giving a verdict.
 """
 from __future__ import annotations
 

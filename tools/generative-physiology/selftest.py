@@ -1036,6 +1036,9 @@ class Settings(unittest.TestCase):
         floors = audit.feature_floors(c3, g1, [60, 61])
         self.assertEqual(floors[0], 0.02)
         self.assertEqual(floors[1], 2.0 / math.sqrt(3))
+        self.assertEqual(floors[2:], [0.02 / math.sqrt(60), 2.0 / math.sqrt(60)], "the fewest late beats give the floor")
+        varied = made(0.2, 10.0, 0.1, -4.0)
+        self.assertEqual(audit.feature_floors(c3, varied, [60])[3], 1.0, "a numerical variation above the error")
         spread = [made(0.2 + 0.06 * n, 10.0 + 3.5 * n, 0.1, -5.0) for n in range(2)]
         self.assertTrue(audit.histories_differ(spread, floors)[1])
         narrow = [made(0.2 + 0.059 * n, 10.0 + 3.5 * n, 0.1, -5.0) for n in range(2)]
