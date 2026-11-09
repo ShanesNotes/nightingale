@@ -1,7 +1,16 @@
 import { randomBytes } from 'node:crypto'
 import { PGlite } from '@electric-sql/pglite'
 import pg from 'pg'
-import { type EntryView, type NewEntry, parseEntries, type ReadModel, ROSTER, type RunView, type WriteResult } from './chart-api.ts'
+import {
+  type EntryView,
+  type NewEntry,
+  parseEntries,
+  type ReadModel,
+  type Refusal,
+  ROSTER,
+  type RunView,
+  type WriteResult,
+} from './chart-api.ts'
 import { isPatientId, type Parsed } from './device.ts'
 import { isPatientTime, isWallTime, type PatientTime, type WallTime } from './time.ts'
 
@@ -167,6 +176,15 @@ function runOf(row: Row | undefined): RunView {
   return { specId: spec_id, patient, start: start_ns, end: end_ns, anchor: anchor_ms }
 }
 
+const refused = (refusal: Refusal): WriteResult => ({ kind: 'refused', refusal })
+
+function refusalOf(write: { readonly patient: string; readonly value: number; readonly care: PatientTime }, run: RunView, now: PatientTime): Refusal | undefined {
+  if (write.patient !== run.patient) return { kind: 'another patient' }
+  if (write.care > now) return { kind: 'care time after now' }
+  if (!Number.isFinite(write.value)) return { kind: 'not a finite number' }
+  return undefined
+}
+
 // The schema is applied at every opening and changes nothing the second time. The run row is made once.
 export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: WallTime): Promise<Chart> {
   await sql.script(SCHEMA)
@@ -185,8 +203,10 @@ export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: 
     run: held,
     async write(entry, now) {
       const author = ROSTER.find((c) => c.id === entry.author)
-      if (author === undefined) return { kind: 'refused', refusal: { kind: 'malformed', reason: 'the author is not on the roster' } }
+      if (author === undefined) return refused({ kind: 'malformed', reason: 'the author is not on the roster' })
       const care = entry.care.kind === 'now' ? now : entry.care.at
+      const refusal = refusalOf({ patient: entry.patient, value: entry.value, care }, held, now)
+      if (refusal !== undefined) return refused(refusal)
       return sql.transaction(async (tx) => {
         const [made] = await tx.query('INSERT INTO entry (patient, vital) VALUES ($1, $2) RETURNING id', [entry.patient, entry.vital])
         const id = made?.['id']
