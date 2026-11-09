@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { Scene, Story } from 'foldkit'
-import { FetchChart, FetchVersions, init, Message, type Model, PostAmendment, PostEntry, update } from '../src/workspace/program.ts'
+import { FetchChart, FetchVersions, init, Message, type Model, PostAmendment, PostEntry, subscriptions, update } from '../src/workspace/program.ts'
 import { makeView, view } from '../src/workspace/view.ts'
 import { wallTime } from '../src/time.ts'
 import { VITALS } from '../src/vitals.ts'
@@ -145,5 +145,52 @@ test('a charted value shows its details; edit amends the current version; earlie
     Scene.Command.resolve(FetchVersions, Message.GotVersions({ entry: 'test-entry-1', versions: versions([{ ...first, number: 1 }, second]) })),
     Scene.expect(Scene.selector('#versions')).toContainText('Version 1: 18 /min'),
     Scene.expect(Scene.selector('#versions')).toContainText('Version 2: 19 /min'),
+  )
+})
+
+test('close hides the chart screen and stops asking the service; reopen asks at once for the chart as it is now', () => {
+  const asking = (model: Model) => subscriptions.poll.modelToDependencies(model).open
+  Story.story(
+    update,
+    Story.given(loaded({ entries: [entry({ id: 'test-entry-1', vital: 'RR', value: 18, care: '06:56:30', charted: '06:57:15' })] })),
+    Story.model((m: Model) => assert.equal(asking(m), true)),
+    Story.message(Message.ClickedClose()),
+    Story.model((m: Model) => {
+      assert.equal(asking(m), false)
+      assert.equal(m.latest, null, 'a closed screen holds no chart of its own')
+    }),
+    Story.message(Message.ClickedReopen()),
+    Story.Command.expectExact(FetchChart()),
+    Story.Command.resolve(FetchChart, Message.GotChart({ chart: readModel({ now: at('06:59:00') }), at: wallTime(9_000_000) })),
+    Story.model((m: Model) => {
+      assert.equal(asking(m), true)
+      assert.equal(m.latest?.now, at('06:59:00'))
+    }),
+  )
+  Scene.scene(
+    { update, view },
+    Scene.given(loaded()),
+    Scene.click('#close'),
+    Scene.expect(Scene.selector('#flowsheet')).toBeAbsent(),
+    Scene.expect(Scene.selector('#closed')).toContainText('The chart is closed.'),
+    Scene.click('#reopen'),
+    Scene.Command.resolve(FetchChart, Message.GotChart({ chart: readModel({}), at: wallTime(9_000_000) })),
+    Scene.expect(Scene.selector('#flowsheet')).toExist(),
+  )
+})
+
+test('when the chart service stops answering, the page says how long ago its view was current', () => {
+  Scene.scene(
+    { update, view },
+    Scene.given(loaded()),
+    Scene.expect(Scene.selector('#service')).toHaveText('The chart service is answering.'),
+    Scene.Subscription.emit(Message.Polled({ at: wallTime(5_001_000) })),
+    Scene.Command.resolve(FetchChart, Message.ChartUnanswered({ at: wallTime(5_001_200) })),
+    Scene.Subscription.emit(Message.Polled({ at: wallTime(5_012_000) })),
+    Scene.Command.resolve(FetchChart, Message.ChartUnanswered({ at: wallTime(5_012_300) })),
+    Scene.expect(Scene.selector('#service')).toHaveText('The chart service is not answering. This view was current 12 s ago, at patient time 06:57:30.'),
+    Scene.Subscription.emit(Message.Polled({ at: wallTime(5_013_000) })),
+    Scene.Command.resolve(FetchChart, Message.GotChart({ chart: readModel({ now: at('06:57:43') }), at: wallTime(5_013_100) })),
+    Scene.expect(Scene.selector('#service')).toHaveText('The chart service is answering.'),
   )
 })
