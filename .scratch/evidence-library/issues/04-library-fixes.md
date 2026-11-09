@@ -22,7 +22,7 @@ Two real faults sit behind this:
 - [ ] **Fluids facet.** Rewrite the facet from the 23 gold passages where the annotators or Jev split, against the engine's own fluids boundary (the [FL atlas page](../../../docs/atlas/fluids-endothelium.md)), and freeze the wording before any test.
   - Two annotators who did not write it label the old 100 gold passages and 100 fresh ones drawn after the freeze. They are blind to each other and to Jev. Half the fresh passages carry fluid words and half are drawn at random.
   - The bar: kappa of at least 0.60 between the annotators, and between Jev and their agreed labels, on each set.
-  - If it holds, Jev retags the whole corpus on this facet alone. The combined request keeps its old wording, so no other facet's answers move. The wording held and the retag stopped at 56%; [ticket 06](06-finish-fluids-retag.md) finishes it.
+  - If it holds, Jev retags the whole corpus on this facet alone. The combined request keeps its old wording, so no other facet's answers move. The wording held. The retag stopped at 56% when the credits ran out, and [ticket 06](06-finish-fluids-retag.md) finished it.
 - [x] **Terms and the gap list.**
   - Expand abbreviations by the Schwartz–Hearst rule. It finds the one-word long forms the current rule misses, such as ACh, NE and ADH.
   - Match a short form only in its own case, so "NO" no longer turns every "no" into nitric oxide.
@@ -35,7 +35,7 @@ Two real faults sit behind this:
   - Hold the graph to the eight frozen bars with the sealed answer key, the same traps, and a fresh blind Codex rating of the new top 20 against fresh random edges.
   - Check each find against its source passages and record the verdict with the evidence. This replaces Shane's blind rating ([ticket 02](02-reviewer-blind-rating.md)).
 
-Jev cost: $7.99 so far on top of the slice's $43.43. Finishing the fluids retag adds about $5.90, for about $57.40 in all, inside the $60 bar. This ticket estimated $10, but the retag alone runs about $13.30. MIMIC rows stay local; the text corpus holds none.
+Jev cost: $13.86 on top of the slice's $43.43, for $57.29 in all, inside the $60 bar. This ticket estimated $10, but the retag alone ran $13.23. MIMIC rows stay local; the text corpus holds none.
 
 ## Not in this ticket
 
@@ -52,7 +52,7 @@ The body-scale rule also drops local mediators named alone, so nitric oxide edge
 
 ## Answer
 
-The fixes hold. The rebuilt graph passes all eight frozen bars, and the gap list's top 20 has none of ticket 01's cell-scale or badly pulled rows. One step is unfinished: the fluids retag stopped at 199,971 of 360,430 chunks when the TypeSafe credits ran out, and [ticket 06](06-finish-fluids-retag.md) finishes it. No bar reads the fluids tag, so the partial retag leaves the scores as they are.
+The fixes hold. The rebuilt graph passes all eight frozen bars, and the gap list's top 20 has none of ticket 01's cell-scale or badly pulled rows. The fluids retag stopped at 199,971 of 360,430 chunks when the TypeSafe credits ran out, and [ticket 06](06-finish-fluids-retag.md) finished it on 2026-11-09. No bar reads the fluids tag, so the retag leaves the scores as they are.
 
 | Measure | Bar | Ticket 01 | Ticket 04 | Verdict |
 |---|---|---|---|---|
@@ -63,7 +63,7 @@ The fixes hold. The rebuilt graph passes all eight frozen bars, and the gap list
 | Link traps | at least 90% right | 90 of 96 | 90 of 96 | pass |
 | Quarantine leaks | none | none | none | pass |
 | Top gaps a human measurement would see | at least 1 | 2 of 20 | 4 of 20; 2 hold on reading | pass |
-| Jev cost | at most $60 | $43.43 | $51.42; about $57.40 once the retag finishes | pass |
+| Jev cost | at most $60 | $43.43 | $51.42 at the score; $57.29 with the retag finished | pass |
 
 What changed:
 
