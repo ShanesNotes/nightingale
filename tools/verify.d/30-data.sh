@@ -3,3 +3,4 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 python3 -I tools/gate/data.py check
 python3 -I tools/gate/data.py probes
+python3 -I tools/frontier --selftest

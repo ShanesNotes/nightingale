@@ -1,0 +1,405 @@
+"""What the tracker holds open, what waits and on what, and what is already in flight.
+
+Python 3.11 stdlib only. Run as `python3 -I tools/frontier [--in-flight | --selftest]`; it finds the repo from its
+own path.
+
+    (no flag)     the frontier: open and ready-for-agent tickets whose blockers are all resolved, by effort and
+                  number, so first by number wins. Then the blocked tickets and what blocks each, the claimed and
+                  ready-for-human tickets, and any whose Status line is missing or names another status
+    --in-flight   also the open pull requests, the frontier tickets their titles or changed paths name, and the
+                  worktrees with uncommitted paths or an open pull request
+    --selftest    every Blocked by shape, a ticket with no Status line, and a failing gh, on a synthetic tracker
+
+A ticket is `.scratch/<effort>/issues/<NN>-<slug>.md`, and its Status, Type, Claimed by and Blocked by lines are the
+ones before its first `## ` heading. A Blocked by line is `none`, `None (...)`, or a comma-separated list of ticket
+numbers in the ticket's own effort and of paths to tickets, backticked or not, from the repo root or from the
+ticket's directory. A ticket with no such line, or an empty one, waits on nothing. A blocker is met only when the
+ticket it names has `Status: resolved`, and a line in any other shape names no ticket and blocks.
+
+Exit codes: 0 printed; 1 a selftest case failed; 2 a wrong usage or an unreadable ticket, or git or gh failed, in
+which case the rest still prints.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import json
+import os
+import pathlib
+import posixpath
+import re
+import subprocess
+import sys
+import tempfile
+from collections.abc import Mapping, Sequence
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+REPO = "ShanesNotes/nightingale"
+GH = ("gh",)
+START = ("open", "ready-for-agent")
+CLOSED = ("resolved", "out-of-scope", "wontfix")
+PATH = re.compile(r"[\w.-]+(?:/[\w.-]+)*\.md")
+NUMBERS = r"\d+(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+|\s+to\s+)\d+)*"
+TITLES = {
+    "frontier": "Frontier: open or ready-for-agent with every blocker resolved; first by number wins",
+    "blocked": "Blocked: open or ready-for-agent, waiting on a ticket that is not resolved",
+    "claimed": "Claimed",
+    "human": "Ready for human",
+    "other": "Other: no Status line, or a status this tool does not group",
+}
+
+
+@dataclasses.dataclass(frozen=True)
+class Ticket:
+    path: str
+    effort: str
+    number: str
+    status: str | None
+    kind: str
+    claimed_by: str
+    blocked_by: str | None
+
+    @property
+    def name(self) -> str:
+        return f"{self.effort} {self.number}" if self.number else self.path
+
+    @property
+    def shown(self) -> str:
+        return ", ".join(x for x in (self.status or "no Status line", self.kind) if x)
+
+
+@dataclasses.dataclass(frozen=True)
+class Wait:
+    what: str
+    met: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class Pull:
+    number: int
+    title: str
+    branch: str
+    draft: bool
+    files: frozenset[str]
+
+    @property
+    def name(self) -> str:
+        return f"{REPO.split('/')[1]}#{self.number}" + (" (draft)" if self.draft else "")
+
+    def names(self, t: Ticket) -> bool:
+        effort = r"[-\s]+".join(map(re.escape, t.effort.split("-")))
+        numbers: set[int] = set()
+        for m in re.finditer(rf"\b{effort}\s+(?:tickets?\s+)?({NUMBERS})\b", self.title, re.I):
+            words = re.findall(r"\d+|to", m.group(1), re.I)
+            for i, word in enumerate(words):
+                if word.isdigit():
+                    numbers.add(int(word))
+                else:
+                    numbers.update(range(int(words[i - 1]), int(words[i + 1]) + 1))
+        return t.path in self.files or (t.number != "" and int(t.number) in numbers)
+
+
+def field(head: str, label: str) -> str | None:
+    m = re.search(rf"^{label}:[ \t]*(.*)$", head, re.M | re.I)
+    return m.group(1).strip() if m else None
+
+
+def load(root: pathlib.Path) -> dict[str, Ticket]:
+    tickets = []
+    for f in root.glob(".scratch/*/issues/*.md"):
+        head = re.split(r"^## ", f.read_text(encoding="utf-8"), maxsplit=1, flags=re.M)[0]
+        number = re.match(r"\d*", f.name).group(0)
+        tickets.append(Ticket(
+            path=f.relative_to(root).as_posix(),
+            effort=f.parent.parent.name,
+            number=number,
+            status=re.match(r"[a-z-]*", (field(head, "Status") or "").lower()).group(0) or None,
+            kind=(field(head, "Type") or "").partition(" ")[0],
+            claimed_by=field(head, "Claimed by") or "",
+            blocked_by=field(head, "Blocked by"),
+        ))
+    tickets.sort(key=lambda t: (t.effort, int(t.number or -1), t.path))
+    return {t.path: t for t in tickets}
+
+
+def on(u: Ticket) -> Wait:
+    return Wait(f"{u.name} ({u.status or 'no Status line'})", u.status == "resolved")
+
+
+def waits(t: Ticket, tickets: Mapping[str, Ticket]) -> list[Wait]:
+    line = t.blocked_by or "none"
+    if re.fullmatch(r"none(?:\s*\(.*\))?", line, re.I):
+        return []
+    out = []
+    for token in (part.strip().strip("`") for part in line.split(",")):
+        if re.fullmatch(r"[0-9]+", token):
+            named = [u for u in tickets.values() if u.effort == t.effort and u.number and int(u.number) == int(token)]
+            out += [on(u) for u in named] or [Wait(f"{t.effort} {token} (no such ticket)", False)]
+        elif PATH.fullmatch(token):
+            base = "" if token.startswith(".scratch/") else posixpath.dirname(t.path)
+            path = posixpath.normpath(posixpath.join(base, token))
+            out.append(on(tickets[path]) if path in tickets else Wait(f"{token} (no such ticket)", False))
+        else:
+            return [Wait(f"a Blocked by line that names no ticket: {line}", False)]
+    return out
+
+
+def classify(tickets: Mapping[str, Ticket]) -> dict[str, list[tuple[Ticket, list[str]]]]:
+    groups: dict[str, list[tuple[Ticket, list[str]]]] = {key: [] for key in TITLES}
+    for t in tickets.values():
+        if t.status in START:
+            unmet = [f"waits on {w.what}" for w in waits(t, tickets) if not w.met]
+            groups["blocked" if unmet else "frontier"].append((t, unmet))
+        elif t.status == "claimed":
+            groups["claimed"].append((t, [f"claimed by {t.claimed_by}"] if t.claimed_by else []))
+        elif t.status == "ready-for-human":
+            groups["human"].append((t, []))
+        elif t.status not in CLOSED:
+            groups["other"].append((t, []))
+    return groups
+
+
+def open_pulls(gh: Sequence[str]) -> tuple[list[Pull], str | None]:
+    fields = "number,title,headRefName,isDraft,files"
+    argv = [*gh, "pr", "list", "--repo", REPO, "--state", "open", "--limit", "200", "--json", fields]
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return [], f"{gh[0]} could not run: {e}"
+    if r.returncode:
+        return [], f"{gh[0]} exited {r.returncode}: {(r.stderr.strip().splitlines() or ['no output'])[0]}"
+    try:
+        return [
+            Pull(p["number"], p["title"], p["headRefName"], p["isDraft"], frozenset(f["path"] for f in p["files"] or ()))
+            for p in json.loads(r.stdout)
+        ], None
+    except (ValueError, KeyError, TypeError) as e:
+        return [], f"{gh[0]} printed no pull request list: {e!r}"
+
+
+def git(*args: str) -> subprocess.CompletedProcess[str]:
+    # A hook exports GIT_DIR, which would point every -C at the hook's own repository.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return subprocess.run(["git", *args], capture_output=True, text=True, env=env)
+
+
+def worktrees(root: pathlib.Path) -> tuple[list[tuple[str, str, str]], str | None]:
+    try:
+        r = git("-C", str(root), "worktree", "list", "--porcelain")
+    except OSError as e:
+        return [], f"git could not run: {e}"
+    if r.returncode:
+        return [], f"git worktree list exited {r.returncode}: {r.stderr.strip()}"
+    out = []
+    for block in r.stdout.strip().split("\n\n"):
+        kv = dict(line.partition(" ")[::2] for line in block.splitlines())
+        if "bare" in kv or "prunable" in kv:
+            continue
+        s = git("-C", kv["worktree"], "status", "--porcelain")
+        n = len(s.stdout.splitlines())
+        mark = f"git status exited {s.returncode}" if s.returncode else f"{n} uncommitted" if n else ""
+        out.append((kv["worktree"], kv.get("branch", "").removeprefix("refs/heads/"), mark))
+    return out, None
+
+
+def render(root: pathlib.Path, in_flight: bool, gh: Sequence[str] = GH) -> tuple[list[str], int]:
+    groups = classify(load(root))
+    pulls, unavailable = open_pulls(gh) if in_flight else ([], None)
+    rows = [t for group in groups.values() for t, _ in group]
+    name_w = max((len(t.name) for t in rows), default=0)
+    shown_w = max((len(t.shown) for t in rows), default=0)
+    lines = []
+    for key, title in TITLES.items():
+        lines.append(title)
+        if not groups[key]:
+            lines.append("  none")
+        for t, notes in groups[key]:
+            if key == "frontier":
+                notes = notes + [f"in flight: {p.name}" for p in pulls if p.names(t)]
+            lines.append(f"  {t.name:<{name_w}}  {t.shown:<{shown_w}}  {t.path}")
+            lines += [f"  {'':<{name_w}}  {note}" for note in notes]
+    if not in_flight:
+        return lines, 0
+    code = 0
+    lines.append(f"Open pull requests in {REPO}")
+    if unavailable:
+        lines.append(f"  unavailable: {unavailable}")
+        code = 2
+    elif not pulls:
+        lines.append("  none")
+    lines += [f"  {p.name}  {p.branch}  {p.title}" for p in pulls]
+    lines.append("Worktrees with uncommitted paths or an open pull request")
+    trees, broken = worktrees(root)
+    if broken:
+        lines.append(f"  unavailable: {broken}")
+        code = 2
+    listed = 0
+    for path, branch, mark in trees:
+        marks = [p.name for p in pulls if branch and p.branch == branch] + ([mark] if mark else [])
+        if marks:
+            lines.append(f"  {path}  {branch or 'detached'}  {', '.join(marks)}")
+            listed += 1
+    if not listed and not broken:
+        lines.append("  none")
+    return lines, code
+
+
+FIXTURE = {
+    "a/01-done.md": "# 01: Done\n\nType: task\nStatus: resolved\nBlocked by: none\n",
+    "a/02-done.md": "Status: resolved\n\nBlocked by: None (can start immediately)\n",
+    "a/03-no-blocker-line.md": "Type: task\nStatus: open\n",
+    "a/04-number.md": "Status: open\nBlocked by: 01\n",
+    "a/05-numbers.md": "Status: ready-for-agent\nBlocked by: 1, 02\n",
+    "a/06-number-not-resolved.md": "Status: open\nBlocked by: 01, 03\n",
+    "a/07-repo-path.md": "Status: open\nBlocked by: `.scratch/b/issues/01-done.md`\n",
+    "a/08-relative-path.md": "Status: open\nBlocked by: ../../b/issues/02-open.md\n",
+    "a/09-blocker-without-status.md": "Status: open\n"
+    "Blocked by: `.scratch/b/issues/01-done.md`, `../../b/issues/03-no-status.md`\n",
+    "a/10-no-such-ticket.md": "Status: open\nBlocked by: 99, .scratch/b/issues/09-gone.md\n",
+    "a/11-prose.md": "Status: open\nBlocked by: the statecharts PR (agreed order: statechart first)\n",
+    "a/12-claimed.md": "Status: claimed\nClaimed by: seat\nBlocked by: none\n",
+    "a/13-human.md": "Status: ready-for-human\n",
+    "a/14-closed.md": "Status: out-of-scope\nBlocked by: 99\n",
+    "a/15-no-status.md": "# 15: No status\n\nBlocked by: none\n\n## Comments\n\nStatus: resolved\n",
+    "a/16-triage.md": "Status: needs-triage\n",
+    "a/17-out-of-scope-blocker.md": "Status: open\nBlocked by: ../../b/issues/04-out.md\n",
+    "a/18-backticked-relative-path.md": "Status: open\nBlocked by: `../../b/issues/01-done.md`\n",
+    "a/19-empty-blocker-line.md": "Status: open\nBlocked by:\n",
+    "a/20-none-then-prose.md": "Status: open\nBlocked by: none until 01 lands\n",
+    "b/01-done.md": "Status: resolved\n",
+    "b/02-open.md": "Status: open\nBlocked by: None (can start immediately)\n",
+    "b/03-no-status.md": "Blocked by: none\n",
+    "b/04-out.md": "Status: out-of-scope\n",
+}
+
+EXPECT = (
+    ("a 03", "frontier", ""),
+    ("a 04", "frontier", ""),
+    ("a 05", "frontier", ""),
+    ("a 06", "blocked", "waits on a 03 (open)"),
+    ("a 07", "frontier", ""),
+    ("a 08", "blocked", "waits on b 02 (open)"),
+    ("a 09", "blocked", "waits on b 03 (no Status line)"),
+    ("a 10", "blocked", "waits on a 99 (no such ticket)"),
+    ("a 10", "blocked", "waits on .scratch/b/issues/09-gone.md (no such ticket)"),
+    ("a 11", "blocked", "names no ticket: the statecharts PR"),
+    ("a 12", "claimed", "claimed by seat"),
+    ("a 13", "human", ""),
+    ("a 15", "other", ""),
+    ("a 16", "other", ""),
+    ("a 17", "blocked", "waits on b 04 (out-of-scope)"),
+    ("a 18", "frontier", ""),
+    ("a 19", "frontier", ""),
+    ("a 20", "blocked", "names no ticket: none until 01 lands"),
+    ("b 02", "frontier", ""),
+    ("b 03", "other", ""),
+)
+
+NAMED = (
+    ("Admission on two-stage Radau with located guard crossings (native-contract 28)", "native-contract 28", True),
+    ("Ticket native-contract 31: a cross-interval drift check for the slice window", "native-contract 28", False),
+    ("Evidence library ticket 03: the slice's kidney gets natriuresis only through filtered load",
+     "evidence-library 03", True),
+    ("Add native-contract tickets 29 and 30: the pressure unit and a streaming host", "native-contract 29", True),
+    ("Add native-contract tickets 29 and 30: the pressure unit and a streaming host", "native-contract 30", True),
+    ("Close native-contract 11, 12 and 14", "native-contract 12", True),
+    ("Close native-contract 11, 12 and 14", "native-contract 13", False),
+    ("Answer research 03 to 10", "research 07", True),
+    ("Answer research 03 to 10", "research 11", False),
+    ("Speed up native-contract 280", "native-contract 28", False),
+    ("Measure native-contract 28x speedups", "native-contract 28", False),
+)
+
+PULLS = [{
+    "number": 7,
+    "title": "Do the thing (a 04)",
+    "headRefName": "frontier-selftest",
+    "isDraft": True,
+    "files": [{"path": ".scratch/a/issues/07-repo-path.md"}],
+}]
+
+FAILING_GH = (
+    ("frontier-selftest-no-such-gh",),
+    (sys.executable, "-c", "print('[]'); raise SystemExit(4)"),
+    (sys.executable, "-c", ""),
+    (sys.executable, "-c", "print('{')"),
+)
+
+
+def selftest() -> int:
+    failed: list[str] = []
+    cases = 0
+
+    def expect(case: str, ok: bool) -> None:
+        nonlocal cases
+        cases += 1
+        if not ok:
+            failed.append(case)
+
+    def after(lines: list[str], path: str) -> str:
+        i = next((i for i, line in enumerate(lines) if line.endswith(path)), len(lines))
+        return lines[i + 1] if i + 1 < len(lines) else ""
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = pathlib.Path(temporary)
+        for name, text in FIXTURE.items():
+            f = root / ".scratch" / name.replace("/", "/issues/", 1)
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(text, encoding="utf-8")
+        listed = {t.name: (key, notes) for key, group in classify(load(root)).items() for t, notes in group}
+        for name, key, note in EXPECT:
+            got = listed.get(name)
+            ok = got is not None and got[0] == key and any(note in n for n in got[1] or [""])
+            expect(f"{name} is {key}, noting {note!r}", ok)
+        expect("no other ticket is listed", set(listed) == {name for name, _, _ in EXPECT})
+        for title, name, named in NAMED:
+            effort, number = name.split()
+            t = Ticket(f".scratch/{effort}/issues/{number}-x.md", effort, number, "open", "", "", None)
+            expect(f"{title!r} names {name}: {named}", Pull(1, title, "", False, frozenset()).names(t) == named)
+
+        trees, broken = worktrees(root / "missing")
+        expect("a failing git worktree list is reported", not trees and "exited" in (broken or ""))
+        git("init", "-q", "-b", "frontier-selftest", str(root))
+        git("-C", str(root), "add", "-f", ".scratch")
+        lines, code = render(root, True, (sys.executable, "-c", "import sys; print(sys.argv[1])", json.dumps(PULLS)))
+        expect("--in-flight exits 0", code == 0)
+        expect("a title marks a 04 in flight", "in flight: nightingale#7 (draft)" in after(lines, "/04-number.md"))
+        expect("a changed path marks a 07 in flight", "in flight: nightingale#7 (draft)" in after(lines, "/07-repo-path.md"))
+        expect("nothing marks a 05", "in flight" not in after(lines, "/05-numbers.md"))
+        expect("a 15 shows no Status line", any("no Status line" in line for line in lines if line.endswith("/15-no-status.md")))
+        expect(
+            "the worktree shows its pull request and uncommitted paths",
+            any(line.endswith(f"frontier-selftest  nightingale#7 (draft), {len(FIXTURE)} uncommitted") for line in lines),
+        )
+        for gh in FAILING_GH:
+            lines, code = render(root, True, gh)
+            ok = code == 2 and any(line.startswith("  unavailable: ") for line in lines)
+            ok = ok and any(line.endswith("/04-number.md") for line in lines)
+            ok = ok and any(line.endswith(f"frontier-selftest  {len(FIXTURE)} uncommitted") for line in lines)
+            expect(f"gh as {gh[-1]!r} is reported unavailable and the rest still prints", ok)
+
+    for case in failed:
+        print(f"frontier: failed: {case}")
+    print(f"frontier: {cases} cases, {len(failed)} failed")
+    return 1 if failed else 0
+
+
+def main(argv: list[str]) -> int:
+    match argv:
+        case [] | ["--in-flight"]:
+            try:
+                lines, code = render(ROOT, argv == ["--in-flight"])
+            except (OSError, UnicodeDecodeError) as e:
+                print(f"frontier: {e}")
+                return 2
+            print("\n".join(lines))
+            return code
+        case ["--selftest"]:
+            return selftest()
+        case _:
+            print(__doc__, file=sys.stderr)
+            return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -10,3 +10,4 @@ reference/
 node_modules/
 clinical-workspace/dist/
 clinical-workspace/.dev/
+.claude/worktrees/
