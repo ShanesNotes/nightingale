@@ -39,6 +39,7 @@ GH = ("gh",)
 START = ("open", "ready-for-agent")
 CLOSED = ("resolved", "out-of-scope", "wontfix")
 PATH = re.compile(r"[\w.-]+(?:/[\w.-]+)*\.md")
+NUMBERS = r"\d+(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+|\s+to\s+)\d+)*"
 TITLES = {
     "frontier": "Frontier: open or ready-for-agent with every blocker resolved; first by number wins",
     "blocked": "Blocked: open or ready-for-agent, waiting on a ticket that is not resolved",
@@ -87,8 +88,15 @@ class Pull:
 
     def names(self, t: Ticket) -> bool:
         effort = r"[-\s]+".join(map(re.escape, t.effort.split("-")))
-        title = t.number and re.search(rf"\b{effort}\s+(?:tickets?\s+)?0*{int(t.number)}\b", self.title, re.I)
-        return t.path in self.files or bool(title)
+        numbers: set[int] = set()
+        for m in re.finditer(rf"\b{effort}\s+(?:tickets?\s+)?({NUMBERS})\b", self.title, re.I):
+            words = re.findall(r"\d+|to", m.group(1), re.I)
+            for i, word in enumerate(words):
+                if word.isdigit():
+                    numbers.add(int(word))
+                else:
+                    numbers.update(range(int(words[i - 1]), int(words[i + 1]) + 1))
+        return t.path in self.files or (t.number != "" and int(t.number) in numbers)
 
 
 def field(head: str, label: str) -> str | None:
@@ -293,7 +301,13 @@ NAMED = (
     ("Evidence library ticket 03: the slice's kidney gets natriuresis only through filtered load",
      "evidence-library 03", True),
     ("Add native-contract tickets 29 and 30: the pressure unit and a streaming host", "native-contract 29", True),
+    ("Add native-contract tickets 29 and 30: the pressure unit and a streaming host", "native-contract 30", True),
+    ("Close native-contract 11, 12 and 14", "native-contract 12", True),
+    ("Close native-contract 11, 12 and 14", "native-contract 13", False),
+    ("Answer research 03 to 10", "research 07", True),
+    ("Answer research 03 to 10", "research 11", False),
     ("Speed up native-contract 280", "native-contract 28", False),
+    ("Measure native-contract 28x speedups", "native-contract 28", False),
 )
 
 PULLS = [{
