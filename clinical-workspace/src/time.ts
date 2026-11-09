@@ -60,6 +60,14 @@ export function formatClock(time: PatientTime): string {
   return `${twoDigits(Math.floor(seconds / 3600))}:${twoDigits(Math.floor(seconds / 60) % 60)}:${twoDigits(seconds % 60)}`
 }
 
+export function formatDuration(span: Duration): string {
+  const total = Math.round(span / NANOSECONDS_PER_SECOND)
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor(total / 60) % 60
+  const parts = [hours > 0 ? `${hours} h` : '', hours > 0 || minutes > 0 ? `${minutes} min` : '', `${total % 60} s`]
+  return parts.filter((part) => part !== '').join(' ')
+}
+
 export function patientTimeAt(clock: PatientClock, wall: WallTime): PatientTime {
   const elapsed = Math.max(0, Math.floor((wall - clock.anchor) / MILLISECONDS_PER_SECOND))
   return earlier(clock.end, add(clock.start, duration(elapsed * NANOSECONDS_PER_SECOND)))
