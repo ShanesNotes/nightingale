@@ -61,6 +61,10 @@ impl LinkFile {
         fs::remove_file(&self.path)
     }
 
+    pub fn bytes(&self) -> u64 {
+        self.end.get()
+    }
+
     fn fail(&self, error: io::Error) {
         let mut failure = self.failure.borrow_mut();
         if failure.is_none() {

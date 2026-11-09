@@ -271,8 +271,10 @@ fn the_smoke_run_holds_the_first_second_pins() {
     let files = [
         "applied.npy",
         "beats.npy",
+        "catalogue.txt",
         "edges.npy",
         "lens.npy",
+        "samples.npy",
         "spec.txt",
         "steps.npy",
         "summary.txt",
@@ -288,6 +290,35 @@ fn the_smoke_run_holds_the_first_second_pins() {
         ));
         assert_eq!(value(&summary, &format!("file {name}")), digest, "{name}");
     }
+    the_capture_names_its_tables_and_samples_every_step(directory, &summary);
+}
+
+fn the_capture_names_its_tables_and_samples_every_step(directory: &Path, summary: &str) {
+    let names = fs::read_to_string(directory.join("catalogue.txt")).expect("the catalogue");
+    let count = |kind: &str| {
+        (names.lines())
+            .filter(|line| line.starts_with(&format!("{kind} ")))
+            .count()
+    };
+    let modes = count("mode");
+    assert_eq!(modes, 7, "the rhythm, five valves and the stir");
+    assert!(names.contains("\nmode mode/MS/stirring/body still\n"), "{names}");
+    let width = 2 + modes + 4 * count("row") + 4 * count("column") + 6 * count("quantity");
+    let edges = Table::<u64>::read(&directory.join("edges.npy")).expect("edges");
+    assert_eq!(edges.row(0).len(), width);
+    let steps = table(&directory.join("steps.npy"));
+    let samples = table(&directory.join("samples.npy"));
+    assert_eq!(samples.len(), steps.len(), "one sample per accepted step");
+    assert!((samples.iter().zip(&steps)).all(|(sample, step)| sample[..2] == step[..2]));
+    let links: u64 = value(summary, "links_bytes").parse().expect("a byte count");
+    assert!(links > 0);
+    let seconds = |key: &str| -> f64 { value(summary, key).parse().expect("seconds") };
+    assert!(seconds("run_wall_s") + 0.002 >= seconds("admission_s") + seconds("step_wall_s"));
+    let fired = value(summary, "fired");
+    assert!(
+        fired == "none" || fired.split(' ').all(|entry| entry.starts_with("MS/stir@")),
+        "{fired}"
+    );
 }
 
 #[test]
@@ -526,9 +557,15 @@ fn same_branch(variant: &Path) {
         .into_iter()
         .find(|step| step.revision == from);
     assert!(
-        at_checkpoint.is_some_and(|step| step.end_ns >= checkpoint_at),
+        at_checkpoint
+            .as_ref()
+            .is_some_and(|step| step.end_ns >= checkpoint_at),
         "checkpoint at or after 5 s"
     );
+    let checkpoint_seal = at_checkpoint.map(|step| hex(&digest_of_words(step.seal_words)));
+    assert_eq!(Some(value(&ours, "branch_first_seal")), checkpoint_seal);
+    let restore_s: f64 = value(&ours, "branch_restore_s").parse().expect("seconds");
+    assert!(restore_s >= 0.0);
     assert!(!known.is_empty());
     assert_eq!(seal_log(&variant.join("branch-steps.npy")), known);
     assert_eq!(value(&ours, "branch_last_seal"), value(&theirs, "last_seal"));

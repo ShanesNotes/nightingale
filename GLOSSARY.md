@@ -601,3 +601,24 @@ _Avoid_: run id
 
 **Beat reading**:
 One beat of a teacher run, which the driver computes once: the heart rate as one over the beat's length, the beat means of arterial pressure and filtration, and the stroke, the net water the aortic valve passed over the beat.
+
+**Catalogue**:
+The names of a compiled body's rows, columns, conserved quantities, modes and lens channels, in the order a teacher run's tables hold them. Every run directory carries one, with the model hash it names.
+_Avoid_: schema (ticket 05's list of named totals), index
+
+**Seal log**:
+A course's accepted revisions in order, each with its end time and seal: from admission's revision 0 for a run, and from the revision after the checkpoint for a branch.
+
+**Start history**:
+The postures a teacher run holds from the fence until its history ends, before the posture change or the encounter a check reads.
+
+**Response feature**:
+One of four numbers that measure a posture change against a baseline: the heart-rate rise at its peak and the arterial-pressure fall at its three-beat-mean nadir within 30 s, and the heart-rate and pressure changes averaged over 240 to 300 s after.
+
+**Feature floor**:
+The smallest difference in a response feature the teacher audit reads as real: the larger of its synthetic measurement error over the root of the beats it averages and its change at a smaller step cap.
+_Avoid_: noise floor (the day checks' baseline standard deviation)
+
+**Teacher audit**:
+The check, before any training data exists, that the slice on one solver core is a usable and informative teacher. Its technical gate holds the core to its pins, to itself across checkpoints, variants, prefixes and a closed loop's replay, and to every ledger and beat; its informativeness gate asks whether start histories and the slow component can show anything.
+_Avoid_: validation (ticket 09's cases)

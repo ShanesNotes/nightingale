@@ -3,7 +3,7 @@ use gp_driver::{
     Stamp, Table, TeachError, Teacher, digest_of_hex, hex,
 };
 use ng_contract::{Digest, InputId, Legs, RowKind, SimTime};
-use ng_validate::{anchor_moment, arena_body};
+use ng_validate::{anchor_moment, arena_body, arena_lens};
 use std::fs;
 use std::path::PathBuf;
 
@@ -334,6 +334,46 @@ fn the_catalogue_covers_every_column_of_the_compiled_arena_body() {
         catalogue.quantities().len(),
         body.conserved_basis().combinations().len()
     );
+}
+
+#[test]
+fn the_catalogue_text_names_every_table_entry_in_table_order() {
+    let body = arena_body().expect("compiled");
+    let catalogue = Catalogue::of(&body).expect("a catalogue");
+    let lens = arena_lens(&body).expect("the arena lens");
+    let text = catalogue.text(&body, &lens, &[]);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0], "gp-catalogue 1");
+    assert_eq!(lines[1], format!("model {}", hex(&body.model_hash().digest())));
+    let named = |kind: &str| -> Vec<String> {
+        (lines.iter())
+            .filter_map(|line| line.strip_prefix(&format!("{kind} ")))
+            .map(str::to_string)
+            .collect()
+    };
+    assert_eq!(named("row"), catalogue.rows());
+    assert_eq!(named("column"), catalogue.columns());
+    let quantities = named("quantity");
+    assert_eq!(quantities.len(), body.conserved_basis().combinations().len());
+    assert!(quantities.iter().any(|line| line.starts_with("Water ")));
+    assert_eq!(
+        quantities.last().map(|line| line.split(' ').next()),
+        Some(Some("Charge"))
+    );
+    let first = &body.conserved_basis().combinations()[0];
+    let (row, weight) = first.terms()[0];
+    assert!(quantities[0].contains(&format!(" {}:{weight}", row.index())));
+    assert!(named("mode").is_empty(), "no start, so no mode names");
+    assert_eq!(
+        named("lens"),
+        [
+            "algebraic/CV/rate/body 1000000000",
+            "algebraic/CV/blood pressure/systemic arteries 1000000000",
+            "algebraic/RN/filtration/glomerular bed>renal tubule 1000000000",
+        ]
+    );
+    assert_eq!(named("sampled"), ["algebraic/NS/sympathetic traffic/body"]);
+    assert!(text.ends_with('\n') && !text.ends_with("\n\n"));
 }
 
 #[test]
