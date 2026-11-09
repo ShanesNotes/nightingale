@@ -3,6 +3,7 @@ import { Command, Subscription, type Update } from 'foldkit'
 import { defineMessageUnion } from 'foldkit/message'
 import {
   type EntryVersion,
+  isEntryId,
   parseReadModel,
   parseVersions,
   parseWriteResult,
@@ -11,7 +12,7 @@ import {
   ROSTER,
   type WriteResult,
 } from '../chart-api.ts'
-import { isWallTime, parseClock, wallTime } from '../time.ts'
+import { formatClock, isWallTime, parseClock, wallTime } from '../time.ts'
 import { VITALS } from '../vitals.ts'
 import * as client from './client.ts'
 
@@ -64,6 +65,14 @@ export const Message = defineMessageUnion({
   ClickedChart: {},
   Wrote: { result: WriteResultSchema },
   WriteUnanswered: {},
+  ClickedEntry: { entry: Schema.String },
+  ClickedVersions: {},
+  GotVersions: { entry: Schema.String, versions: VersionsSchema },
+  VersionsUnanswered: {},
+  ClickedEdit: {},
+  TypedEditValue: { text: Schema.String },
+  TypedEditCare: { text: Schema.String },
+  ClickedSaveEdit: {},
 })
 export type Message = typeof Message.Type
 
@@ -84,6 +93,24 @@ export const PostEntry = Command.define('PostEntry', {
   execute: ({ body }) =>
     Effect.promise(() => client.write('/api/entries', body)).pipe(
       Effect.map((result) => (result === undefined ? Message.WriteUnanswered() : Message.Wrote({ result }))),
+    ),
+})
+
+export const PostAmendment = Command.define('PostAmendment', {
+  args: { body: AmendmentBody },
+  messages: [Message.Wrote, Message.WriteUnanswered],
+  execute: ({ body }) =>
+    Effect.promise(() => client.write('/api/amendments', body)).pipe(
+      Effect.map((result) => (result === undefined ? Message.WriteUnanswered() : Message.Wrote({ result }))),
+    ),
+})
+
+export const FetchVersions = Command.define('FetchVersions', {
+  args: { entry: Schema.String },
+  messages: [Message.GotVersions, Message.VersionsUnanswered],
+  execute: ({ entry }) =>
+    Effect.promise(async () => (isEntryId(entry) ? client.versions(entry) : undefined)).pipe(
+      Effect.map((versions) => (versions === undefined ? Message.VersionsUnanswered() : Message.GotVersions({ entry, versions }))),
     ),
 })
 
@@ -141,7 +168,13 @@ function wrote(model: Model, result: WriteResult): Return {
   const unit = VITALS.find((row) => row.vital === entry.vital)?.unit ?? ''
   const did = entry.number > 1 ? 'Amended' : 'Charted'
   return {
-    model: { ...model, notice: `${did} ${entry.vital} ${entry.value} ${unit} as ${entry.author.name}.`, form: { ...model.form, value: '', care: '' } },
+    model: {
+      ...model,
+      notice: `${did} ${entry.vital} ${entry.value} ${unit} as ${entry.author.name}.`,
+      form: { ...model.form, value: '', care: '' },
+      editing: null,
+      versions: null,
+    },
     commands: [FetchChart()],
   }
 }
@@ -170,5 +203,32 @@ export function update(model: Model, message: Message): Return {
     },
     Wrote: ({ result }) => wrote(model, result),
     WriteUnanswered: () => ({ model: { ...model, notice: UNANSWERED } }),
+    ClickedEntry: ({ entry }) => ({ model: { ...model, selected: entry, versions: null, editing: null } }),
+    ClickedVersions: () => (model.selected === null ? { model } : { model, commands: [FetchVersions({ entry: model.selected })] }),
+    GotVersions: ({ entry, versions }) => ({ model: { ...model, versions: { entry, list: versions } } }),
+    VersionsUnanswered: () => ({ model: { ...model, notice: 'The chart service did not answer; the earlier versions are not shown.' } }),
+    ClickedEdit: () => {
+      const current = selectedEntry(model)
+      return current === undefined ? { model } : { model: { ...model, editing: { value: String(current.value), care: formatClock(current.care) } } }
+    },
+    TypedEditValue: ({ text }) => (model.editing === null ? { model } : { model: { ...model, editing: { ...model.editing, value: text } } }),
+    TypedEditCare: ({ text }) => (model.editing === null ? { model } : { model: { ...model, editing: { ...model.editing, care: text } } }),
+    ClickedSaveEdit: () => {
+      const current = selectedEntry(model)
+      if (current === undefined || model.editing === null || model.latest === null) return { model }
+      const care = careTime(model.editing.care)
+      if (!care.ok) return { model: { ...model, notice: 'The care time is not HH:MM:SS; nothing was charted.' } }
+      const body = {
+        patient: model.latest.run.patient,
+        author: model.form.author,
+        entry: current.entry,
+        replaces: current.number,
+        value: model.editing.value,
+        care: care.care,
+      }
+      return { model: { ...model, notice: 'Amending.' }, commands: [PostAmendment({ body })] }
+    },
   })
 }
+
+export const selectedEntry = (model: Model) => model.latest?.entries.find((e) => e.entry === model.selected)

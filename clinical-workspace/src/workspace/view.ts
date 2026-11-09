@@ -1,9 +1,9 @@
 import type { Html, HtmlBuilder } from 'foldkit/html'
 import { ROSTER } from '../chart-api.ts'
 import { type ChartedValue, flowsheet, type MonitorCell } from '../flowsheet.ts'
-import { formatClock, formatDuration, type PatientTime } from '../time.ts'
+import { formatClock, formatDuration, type PatientTime, since } from '../time.ts'
 import { VITALS, type VitalRow } from '../vitals.ts'
-import { Message, type Model } from './program.ts'
+import { Message, type Model, selectedEntry } from './program.ts'
 
 type H = HtmlBuilder<Message>
 
@@ -69,7 +69,9 @@ function sheet(model: Model, h: H, vitals: readonly VitalRow[]): Html {
             : row.cells.map((cell, i) =>
                 h.td(
                   [h.DataAttribute('cell', name(i))],
-                  cell.entries.map((value) => h.button([h.Type('button')], [chartedText(value, row.vital.unit)])),
+                  cell.entries.map((value) =>
+                    h.button([h.Type('button'), h.OnClick(Message.ClickedEntry({ entry: value.entry.entry }))], [chartedText(value, row.vital.unit)]),
+                  ),
                 ),
               )
         return h.tr([h.DataAttribute('vital', row.vital.vital), h.DataAttribute('source', row.source)], [
@@ -79,6 +81,41 @@ function sheet(model: Model, h: H, vitals: readonly VitalRow[]): Html {
         ])
       }),
     ),
+  ])
+}
+
+function details(model: Model, h: H, vitals: readonly VitalRow[]): Html {
+  const current = selectedEntry(model)
+  if (current === undefined) return h.empty
+  const unit = vitals.find((row) => row.vital === current.vital)?.unit ?? ''
+  const late = current.charted > current.care ? `Late by ${formatDuration(since(current.charted, current.care))}` : 'Charted on time'
+  const versions = model.versions?.entry === current.entry ? model.versions.list : undefined
+  return h.section([h.Id('details')], [
+    h.h2([], [`${current.vital} ${current.value} ${unit}`]),
+    h.p([], [`By ${current.author.name}, ${current.author.discipline}`]),
+    h.p([], [`Patient ${current.patient}`]),
+    h.p([], [`Care time ${formatClock(current.care)}`]),
+    h.p([], [`Charted time ${formatClock(current.charted)}`]),
+    h.p([], [late]),
+    h.p([], [`Version ${current.number} of ${current.versions}`]),
+    model.editing === null
+      ? h.button([h.Id('edit'), h.Type('button'), h.OnClick(Message.ClickedEdit())], ['Edit'])
+      : h.div([h.Id('editing')], [
+          h.label([h.For('edit-value')], ['New value ']),
+          h.input([h.Id('edit-value'), h.Value(model.editing.value), h.OnInput((text) => Message.TypedEditValue({ text }))]),
+          h.label([h.For('edit-care')], [' Care time ']),
+          h.input([h.Id('edit-care'), h.Value(model.editing.care), h.OnInput((text) => Message.TypedEditCare({ text }))]),
+          h.button([h.Id('save-edit'), h.Type('button'), h.OnClick(Message.ClickedSaveEdit())], [' Save as a new version']),
+        ]),
+    h.button([h.Id('versions-button'), h.Type('button'), h.OnClick(Message.ClickedVersions())], [' Show earlier versions']),
+    versions === undefined
+      ? h.empty
+      : h.ul(
+          [h.Id('versions')],
+          versions.map((v) =>
+            h.li([], [`Version ${v.number}: ${v.value} ${unit} by ${v.author.name}, care ${formatClock(v.care)}, charted ${formatClock(v.charted)}`]),
+          ),
+        ),
   ])
 }
 
@@ -92,6 +129,7 @@ export const makeView =
       form(model, h, vitals),
       h.p([h.Id('notice'), h.AriaLive('polite')], [model.notice]),
       sheet(model, h, vitals),
+      details(model, h, vitals),
     ])
 
 export const view = makeView(VITALS)
