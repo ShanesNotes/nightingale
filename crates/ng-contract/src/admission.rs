@@ -1229,6 +1229,18 @@ impl InitializationSystem<'_> {
         self.stage_rows(workspace, &values, leg.index, &mut rows)?;
         Ok((rows, block))
     }
+    /// One leg's rows alone, as `stage` gives them, for a solver that holds a factored block of the leg.
+    pub fn stage_residuals(
+        &self,
+        workspace: &AdmissionWorkspace,
+        leg: LegHandle,
+    ) -> Result<Vec<f64>, InitializationFailure> {
+        self.check(workspace)?;
+        let values = self.values(workspace);
+        let mut rows = Vec::with_capacity(self.width());
+        self.stage_rows(workspace, &values, leg.index, &mut rows)?;
+        Ok(rows)
+    }
     /// Starts both of a leg's stages at the state it starts from.
     pub fn seed(&self, workspace: &mut AdmissionWorkspace, leg: LegHandle) {
         let origin = if self.interval.is_some() {

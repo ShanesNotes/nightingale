@@ -757,6 +757,39 @@ fn the_sweep_settles_and_a_second_sweep_changes_nothing() {
     assert!(system.admit(workspace, history()).is_ok());
 }
 
+/// A leg's rows alone are the rows its `stage` gives, bit for bit, on every leg of a cycle whose crossings split its
+/// intervals, so a march that holds a factored block solves against the rows that block was built for. A workspace
+/// another system made is refused.
+#[test]
+fn a_legs_rows_alone_are_the_rows_its_stage_gives() {
+    let shape = Shape {
+        valve: true,
+        ..Shape::default()
+    };
+    let relaxer = relaxer(shape).expect("a body");
+    let system = relaxer.system(16, relaxer.packet(16, shape, 1.0));
+    let (mut workspace, _) = solved_by_hand(&system);
+    for (slot, unknown) in workspace.unknowns_mut().iter_mut().enumerate() {
+        *unknown *= 1.0 + 1e-4 * ((slot * 7 % 11) as f64 - 5.0) / 5.0;
+    }
+    let bits = |rows: &[f64]| rows.iter().map(|row| row.to_bits()).collect::<Vec<_>>();
+    let mut legs = 0;
+    for point in 0..system.points() {
+        for leg in workspace.legs_of(point) {
+            let (whole, _) = system.stage(&workspace, leg).expect("a stage");
+            let alone = system.stage_residuals(&workspace, leg).expect("its rows");
+            assert_eq!(bits(&alone), bits(&whole), "point {point}");
+            legs += 1;
+        }
+    }
+    assert_eq!(legs, system.points() + workspace.crossing_count());
+    let other = relaxer.system(16, relaxer.packet_up(16, shape, 1.0, Up::Stated(UP + 0.05)));
+    assert_eq!(
+        other.stage_residuals(&workspace, workspace.legs_of(0)[0]),
+        Err(InitializationFailure::Admission(AdmissionError::ForeignWorkspace))
+    );
+}
+
 /// A solved workspace with one crossing moved, the same workspace solved with no sweep, so its topology is not what
 /// its values give, and a workspace another system made are each refused.
 #[test]

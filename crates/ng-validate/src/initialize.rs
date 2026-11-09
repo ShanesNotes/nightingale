@@ -13,6 +13,8 @@ const MARCH_BEATS: u32 = 40;
 /// is solved all the same, and an unknown that rounding keeps near zero never gets there, which costs the
 /// updates until the point's state repeats, at most the limit's, and nothing else.
 const NEWTON_STOP: f64 = 8.0 * f64::EPSILON;
+/// The least shrink per update a march takes from a held block before it builds the block again.
+const CONTRACTION: f64 = 0.5;
 
 /// A model default reported with every result. A packet of far smaller amounts states its rows' natural sizes.
 pub fn admission_tolerance() -> ErrorScales {
@@ -70,18 +72,55 @@ fn march(
     }
 }
 
-/// Newton on one leg's block alone. `false` where a law has no value or the block no pivot.
+/// Newton on one leg's block alone, holding the block it factored while its updates shrink by `CONTRACTION` or more:
+/// a held block solves for the same rows, and building and factoring one costs many residuals. An update that grew is
+/// not taken, and the block is built again where it stands. `false` where a law has no value or the block no pivot.
 fn solve_leg(system: &InitializationSystem<'_>, workspace: &mut AdmissionWorkspace, leg: LegHandle) -> bool {
     let slots = workspace.leg_slots(leg);
     let mut held = Vec::with_capacity(NEWTON_LIMIT as usize * slots.len());
-    for _ in 0..NEWTON_LIMIT {
-        held.extend_from_slice(&workspace.unknowns_mut()[slots.clone()]);
-        let Ok((residuals, block)) = system.stage(workspace, leg) else {
-            return false;
+    let mut factored: Option<Factors<'_>> = None;
+    let mut last = f64::INFINITY;
+    let mut taken = 0;
+    while taken < NEWTON_LIMIT {
+        let reused = factored.is_some();
+        let update = match &factored {
+            Some(factors) => {
+                let Ok(mut update) = system.stage_residuals(workspace, leg) else {
+                    return false;
+                };
+                factors.solve(&mut update);
+                update
+            }
+            None => {
+                let Ok((mut residuals, block)) = system.stage(workspace, leg) else {
+                    return false;
+                };
+                match system.factor(&block) {
+                    Ok(factors) => {
+                        factors.solve(&mut residuals);
+                        factored = Some(factors);
+                        residuals
+                    }
+                    Err(_) => match system.solve_stage(&block, &residuals) {
+                        Ok(update) => update,
+                        Err(_) => return false,
+                    },
+                }
+            }
         };
-        let Ok(update) = system.solve_stage(&block, &residuals) else {
-            return false;
-        };
+        let now = workspace.unknowns_mut()[slots.clone()].to_vec();
+        let moved = (update.iter().zip(&now).zip(slots.clone()))
+            .map(|((change, unknown), slot)| change.abs() / (system.size(workspace, slot) + unknown.abs()))
+            .fold(0.0, |most, share| if share > most { share } else { most });
+        if reused && moved > NEWTON_STOP && moved > CONTRACTION * last {
+            factored = None;
+            if moved >= last || moved.is_nan() {
+                continue;
+            }
+        }
+        last = moved;
+        taken += 1;
+        held.extend_from_slice(&now);
         let unknowns = &mut workspace.unknowns_mut()[slots.clone()];
         let settled = (update.iter().zip(unknowns.iter()))
             .all(|(change, unknown)| change.abs() <= NEWTON_STOP * unknown.abs());
