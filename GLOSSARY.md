@@ -67,7 +67,16 @@ A digest that chains the seal before it with one accepted step's image and ledge
 The accepted state at one step boundary, held with its digest. Only installing a step the contract settled on it moves it, so a split trace that reads accepted heads from an admission reads only steps the contract verified.
 
 **History store**:
-Host storage for the links of the seal's chain, addressed by seal and trusted for nothing: a session hands it each link as its step is accepted, and a load checks each link against the seal that asked for it.
+Host storage for the links of the seal's chain, addressed by seal and trusted for nothing: a session hands it each link as its step is accepted, and a load checks each link or witness against the seal that asked for it. It keeps a rolling day of links while a run goes, back to the checkpoint before the oldest window still open, and witnesses after it (record 0008).
+
+**Witness**:
+What a history store keeps of an accepted step after its run: the step's seal, image digest and ledger digest, from which the seal recomputes. It proves the chain, not the ledger values.
+
+**Flight recorder**:
+The links a history store keeps when a run fails: from the checkpoint before the failing window to the run's last head, the original bytes rather than a regeneration.
+
+**Regeneration**:
+Rerunning a finished run on the build that made it, from a checkpoint, checking each step's seal against its witness, to give back history the store no longer holds.
 
 **Compact link**:
 A link as a history store may keep it when it follows the link kept before it: its image, its end time and each curve's end value. Its previous seal, start time and start values are that link's seal and ends, so expanding it against that link gives back the exact bytes the store was handed. Any other link is kept whole.
