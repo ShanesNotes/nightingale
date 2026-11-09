@@ -1,6 +1,6 @@
-use crate::capture::Arrival;
+use crate::capture::{Arrival, Firing};
 use crate::spec::{SpecId, digest_of_hex, hex};
-use ng_contract::{Digest, EngineFaultKind, NumericalRefusal, SimTime};
+use ng_contract::{Digest, EngineFaultKind, LawName, NumericalRefusal, SimTime};
 use ng_record::RecordDigests;
 use std::fs::{self, File, TryLockError};
 use std::io::{self, Write};
@@ -268,12 +268,14 @@ impl FaultSummary {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BranchSummary {
     pub from_revision: u64,
     pub enqueued: Vec<Arrival>,
+    pub first_seal: Digest,
     pub revisions: u64,
     pub refusals: u64,
+    pub restore_s: f64,
     pub last_seal: Digest,
     pub end: RecordDigests,
 }
@@ -286,6 +288,19 @@ fn entries(enqueued: &[Arrival]) -> String {
         .map(|arrival| format!("{}@{}", arrival.event.0, arrival.revision))
         .collect();
     entries.join(" ")
+}
+
+fn firings(fired: &[Firing]) -> String {
+    if fired.is_empty() {
+        return "none".to_string();
+    }
+    let firings: Vec<String> = (fired.iter())
+        .map(|firing| {
+            let LawName { owner, local } = firing.stream;
+            format!("{owner}/{local}@{}@{}", firing.revision, firing.at.nanoseconds())
+        })
+        .collect();
+    firings.join(" ")
 }
 
 fn digest_lines(prefix: &str, digests: &RecordDigests) -> Vec<String> {
@@ -327,10 +342,13 @@ pub struct RunSummary {
     pub refusals: u64,
     pub beats: u64,
     pub enqueued: Vec<Arrival>,
+    pub fired: Vec<Firing>,
     pub fault: Option<FaultSummary>,
     pub admission_s: f64,
     pub step_wall_s: f64,
+    pub run_wall_s: f64,
     pub peak_rss_bytes: u64,
+    pub links_bytes: u64,
     pub files: Vec<(String, Digest)>,
     pub memory_cap_gb: u32,
     pub variant: String,
@@ -359,6 +377,7 @@ impl RunSummary {
             format!("refusals {}", self.refusals),
             format!("beats {}", self.beats),
             format!("enqueued {}", entries(&self.enqueued)),
+            format!("fired {}", firings(&self.fired)),
         ];
         match &self.fault {
             None => lines.push("fault none".to_string()),
@@ -366,7 +385,9 @@ impl RunSummary {
         }
         lines.push(format!("admission_s {:.3}", self.admission_s));
         lines.push(format!("step_wall_s {:.3}", self.step_wall_s));
+        lines.push(format!("run_wall_s {:.3}", self.run_wall_s));
         lines.push(format!("peak_rss_bytes {}", self.peak_rss_bytes));
+        lines.push(format!("links_bytes {}", self.links_bytes));
         for (name, digest) in &self.files {
             lines.push(format!("file {name} {}", hex(digest)));
         }
@@ -376,8 +397,10 @@ impl RunSummary {
         if let Some(branch) = &self.branch {
             lines.push(format!("branch_from_revision {}", branch.from_revision));
             lines.push(format!("branch_enqueued {}", entries(&branch.enqueued)));
+            lines.push(format!("branch_first_seal {}", hex(&branch.first_seal)));
             lines.push(format!("branch_revisions {}", branch.revisions));
             lines.push(format!("branch_refusals {}", branch.refusals));
+            lines.push(format!("branch_restore_s {:.3}", branch.restore_s));
             lines.push(format!("branch_last_seal {}", hex(&branch.last_seal)));
             lines.extend(digest_lines("branch_end", &branch.end));
         }

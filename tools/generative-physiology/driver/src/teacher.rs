@@ -644,9 +644,11 @@ pub struct Teacher {
     body: CompiledBody,
     core: Box<dyn CoupledSolver>,
     catalogue: Catalogue,
+    built: Stopwatch,
 }
 impl Teacher {
     pub fn new(core: &CoreChoice) -> Result<Self, TeachError> {
+        let built = Stopwatch::start();
         let body = arena_body()?;
         let catalogue = Catalogue::of(&body)?;
         Ok(Self {
@@ -654,6 +656,7 @@ impl Teacher {
             core: core.build()?,
             body,
             catalogue,
+            built,
         })
     }
     pub fn catalogue(&self) -> &Catalogue {
@@ -745,7 +748,9 @@ impl Teacher {
             links,
         )?;
         let admission_s = clock.seconds();
-        let Admitted { session, .. } = admitted;
+        let Admitted { session, provenance } = admitted;
+        let names = self.catalogue.text(&self.body, &lens, provenance.values());
+        write_synced(&partial.file("catalogue.txt"), &names)?;
         let identity = session.record().identity().clone();
         let identity_digests = IdentityDigests {
             model: identity.model().digest(),
@@ -789,19 +794,29 @@ impl Teacher {
                 .skip(*withheld)
                 .collect();
             let mut steps = NpyWriter::create(&partial.file("branch-steps.npy"), STEP_COLUMNS)?;
-            let followed = match spec.variant() {
+            let (followed, first_seal, restore_s) = match spec.variant() {
                 Variant::Rewind { .. } => {
                     let named = BranchId::new(Digest::of_canonical(b"gp-driver rewind"));
+                    let restoring = Stopwatch::start();
                     let rewound = session.rewind(saved, named)?;
+                    let restore_s = restoring.seconds();
                     drop(session);
-                    follow(rewound, &later, bounds, &mut steps)?
+                    let first_seal = rewound.record().seal().digest();
+                    (
+                        follow(rewound, &later, bounds, &mut steps)?,
+                        first_seal,
+                        restore_s,
+                    )
                 }
                 _ => {
                     drop(session);
                     let body = arena_body()?;
                     let core = self.choice.build()?;
+                    let restoring = Stopwatch::start();
                     let copy = Session::resume(saved, &identity, &body, core.as_ref(), links)?;
-                    follow(copy, &later, bounds, &mut steps)?
+                    let restore_s = restoring.seconds();
+                    let first_seal = copy.record().seal().digest();
+                    (follow(copy, &later, bounds, &mut steps)?, first_seal, restore_s)
                 }
             };
             steps.finish()?;
@@ -809,8 +824,10 @@ impl Teacher {
             branch = Some(BranchSummary {
                 from_revision: followed.from_revision,
                 enqueued: followed.enqueued,
+                first_seal,
                 revisions: followed.head.revision,
                 refusals: followed.refusals,
+                restore_s,
                 last_seal: followed.head.seal,
                 end: followed.head.digests,
             });
@@ -821,12 +838,14 @@ impl Teacher {
             Feed::Policy(policy) => Some(spec.realized(&policy.actions)?),
             Feed::Port | Feed::Late { .. } | Feed::AfterCheckpoint { .. } => None,
         };
-        let enqueued = capture.finish(realized.as_ref().map_or(spec.events(), RunSpec::events))?;
+        let finished = capture.finish(realized.as_ref().map_or(spec.events(), RunSpec::events))?;
         let mut files = vec![
             "spec.txt",
+            "catalogue.txt",
             "edges.npy",
             "beats.npy",
             "steps.npy",
+            "samples.npy",
             "applied.npy",
             "lens.npy",
         ];
@@ -855,11 +874,14 @@ impl Teacher {
             revisions: head.revision,
             refusals,
             beats,
-            enqueued,
+            enqueued: finished.arrivals,
+            fired: finished.fired,
             fault,
             admission_s,
             step_wall_s,
+            run_wall_s: self.built.seconds(),
             peak_rss_bytes: status_bytes("VmHWM:")?,
+            links_bytes: links.bytes(),
             files,
             memory_cap_gb: options.cap.gigabytes(),
             variant: spec.variant().words(),

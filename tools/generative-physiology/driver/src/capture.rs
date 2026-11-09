@@ -1,10 +1,10 @@
 use crate::npy::NpyWriter;
-use crate::spec::{PostureEvent, Stamp};
+use crate::spec::{PostureEvent, Stamp, hex};
 use core::fmt;
 use ng_contract::{
-    AcceptedStateView, AnatomyBuilder, CapillaryBed, Column, ColumnId, Compensated, CompiledBody, Context,
-    Digest, InputId, LawName, Measure, Position, QuantityId, Row, RowId, RowKind, SimTime, SiteClass, SiteId,
-    Slot, Species, Target, VesselSegment,
+    AcceptedStateView, AnatomyBuilder, Book, CapillaryBed, Column, ColumnId, Compensated, CompiledBody,
+    Context, Digest, InputId, LawName, Measure, ObservationLens, Position, QuantityId, Row, RowId, RowKind,
+    SimTime, SiteClass, SiteId, Slot, Species, Target, ValueName, ValueRecord, VesselSegment,
 };
 use ng_observe::{Observation, ObservedValue};
 use ng_record::{Curve, Running, Session, StepReceipt};
@@ -14,6 +14,7 @@ use std::io;
 use std::path::Path;
 
 pub const STEP_COLUMNS: usize = 7;
+pub const SAMPLE_COLUMNS: usize = 4;
 const BEAT_COLUMNS: usize = 7;
 const LENS_COLUMNS: usize = 6;
 
@@ -54,10 +55,19 @@ fn place(context: Context) -> String {
 fn row_name(kind: RowKind) -> String {
     match kind {
         RowKind::Amount { site, space, species } => format!("amount/{}/{space:?}/{species:?}", site.key()),
-        RowKind::Memory(Slot { law, at }) => format!("memory/{}/{}/{}", law.owner, law.local, place(at)),
-        RowKind::Algebraic(Slot { law, at }) => {
-            format!("algebraic/{}/{}/{}", law.owner, law.local, place(at))
-        }
+        RowKind::Memory(slot) => slot_name("memory", slot),
+        RowKind::Algebraic(slot) => slot_name("algebraic", slot),
+    }
+}
+
+fn slot_name(kind: &str, Slot { law, at }: Slot) -> String {
+    format!("{kind}/{}/{}/{}", law.owner, law.local, place(at))
+}
+
+fn book_name(book: Book) -> String {
+    match book {
+        Book::Of(species) => format!("{species:?}"),
+        Book::Charge => "Charge".to_string(),
     }
 }
 
@@ -93,6 +103,7 @@ pub struct Catalogue {
     heart_rate: RowId,
     pressure: RowId,
     filtration: RowId,
+    traffic: RowId,
     aortic_water: ColumnId,
 }
 impl Catalogue {
@@ -175,6 +186,10 @@ impl Catalogue {
                 RowKind::Algebraic(slot("RN", "filtration", glomerulus)),
                 "RN filtration row",
             )?,
+            traffic: find(
+                RowKind::Algebraic(slot("NS", "sympathetic traffic", Context::Body)),
+                "NS sympathetic traffic row",
+            )?,
             aortic_water,
             rows,
             columns,
@@ -212,6 +227,38 @@ impl Catalogue {
     }
     pub fn edge_columns(&self, modes: usize) -> usize {
         2 + modes + 4 * self.rows.len() + 4 * self.columns.len() + 6 * self.quantities.len()
+    }
+    /// Mode names come from an admitted start's records, so a text made before admission lists no mode.
+    pub fn text(&self, body: &CompiledBody, lens: &ObservationLens, start: &[ValueRecord]) -> String {
+        let mut lines = vec![
+            "gp-catalogue 1".to_string(),
+            format!("model {}", hex(&body.model_hash().digest())),
+        ];
+        lines.extend(self.rows.iter().map(|name| format!("row {name}")));
+        lines.extend(self.columns.iter().map(|name| format!("column {name}")));
+        for combination in body.conserved_basis().combinations() {
+            let terms: Vec<String> = (combination.terms().iter())
+                .map(|&(row, weight)| format!("{}:{weight}", row.index()))
+                .collect();
+            lines.push(format!(
+                "quantity {} {}",
+                book_name(combination.book()),
+                terms.join(" ")
+            ));
+        }
+        for record in start {
+            if let ValueName::Mode { variable, value } = record.name {
+                lines.push(format!("mode {} {value}", slot_name("mode", variable)));
+            }
+        }
+        for channel in lens.channels() {
+            let window_ns = channel.window() * lens.period_ns();
+            lines.push(format!("lens {} {window_ns}", self.rows[channel.row().index()]));
+        }
+        lines.push(format!("sampled {}", self.rows[self.traffic.index()]));
+        let mut text = lines.join("\n");
+        text.push('\n');
+        text
     }
 }
 
@@ -348,12 +395,25 @@ pub struct Arrival {
     pub revision: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Firing {
+    pub stream: LawName,
+    pub revision: u64,
+    pub at: SimTime,
+}
+
+pub struct Finished {
+    pub arrivals: Vec<Arrival>,
+    pub fired: Vec<Firing>,
+}
+
 pub struct Capture<'c> {
     body: &'c CompiledBody,
     catalogue: &'c Catalogue,
     edges: NpyWriter<u64>,
     beats: NpyWriter<f64>,
     steps: NpyWriter<u64>,
+    samples: NpyWriter<u64>,
     applied: NpyWriter<u64>,
     lens: NpyWriter<u64>,
     integrals: Vec<Compensated>,
@@ -361,6 +421,7 @@ pub struct Capture<'c> {
     beat_edge: Option<Edge>,
     applications: Vec<(InputId, u64)>,
     arrivals: Vec<(InputId, u64)>,
+    fired: Vec<Firing>,
 }
 impl<'c> Capture<'c> {
     pub fn create(
@@ -377,6 +438,7 @@ impl<'c> Capture<'c> {
             edges: NpyWriter::create(&directory.join("edges.npy"), width)?,
             beats: NpyWriter::create(&directory.join("beats.npy"), BEAT_COLUMNS)?,
             steps: NpyWriter::create(&directory.join("steps.npy"), STEP_COLUMNS)?,
+            samples: NpyWriter::create(&directory.join("samples.npy"), SAMPLE_COLUMNS)?,
             applied: NpyWriter::create(&directory.join("applied.npy"), 2)?,
             lens: NpyWriter::create(&directory.join("lens.npy"), LENS_COLUMNS)?,
             integrals: vec![Compensated::ZERO; catalogue.rows().len()],
@@ -384,6 +446,7 @@ impl<'c> Capture<'c> {
             beat_edge: None,
             applications: Vec::new(),
             arrivals: Vec::new(),
+            fired: Vec::new(),
         };
         capture.edge(start)?;
         Ok(capture)
@@ -417,9 +480,17 @@ impl<'c> Capture<'c> {
         self.integrate(view);
         let row = step_row(receipt.revision(), view.time(), refusals, receipt.seal().digest());
         self.steps.push(&row)?;
+        let [hi, lo] = view.value(self.catalogue.traffic).bits();
+        self.samples
+            .push(&[receipt.revision(), view.time().nanoseconds(), hi, lo])?;
         for &id in receipt.applied() {
             self.applications.push((id, receipt.revision()));
         }
+        self.fired.extend(receipt.fired().iter().map(|fired| Firing {
+            stream: fired.stream(),
+            revision: receipt.revision(),
+            at: fired.at(),
+        }));
         let phase = view.value(self.catalogue.phase());
         let at_beat_edge = !self.phase.at_most(phase);
         self.phase = phase;
@@ -463,15 +534,17 @@ impl<'c> Capture<'c> {
     pub fn end<S>(&mut self, session: &Session<'_, S>) -> io::Result<()> {
         self.edge(session)
     }
-    pub fn finish(self, open_loop_events: &[PostureEvent]) -> io::Result<Vec<Arrival>> {
+    pub fn finish(self, open_loop_events: &[PostureEvent]) -> io::Result<Finished> {
         let Self {
             edges,
             beats,
             steps,
+            samples,
             mut applied,
             lens,
             applications,
             arrivals,
+            fired,
             ..
         } = self;
         let positions: BTreeMap<InputId, EventIndex> = (open_loop_events.iter().enumerate())
@@ -491,9 +564,13 @@ impl<'c> Capture<'c> {
         edges.finish()?;
         beats.finish()?;
         steps.finish()?;
+        samples.finish()?;
         applied.finish()?;
         lens.finish()?;
-        Ok(arrived)
+        Ok(Finished {
+            arrivals: arrived,
+            fired,
+        })
     }
     fn edge<S>(&mut self, session: &Session<'_, S>) -> io::Result<()> {
         let record = session.record();

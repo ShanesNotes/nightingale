@@ -11,7 +11,8 @@ pub use archive::{
     summary_value,
 };
 pub use capture::{
-    Arrival, BeatReading, Catalogue, CatalogueError, EventIndex, digest_of_words, step_row, words,
+    Arrival, BeatReading, Catalogue, CatalogueError, EventIndex, Firing, SAMPLE_COLUMNS, digest_of_words,
+    step_row, words,
 };
 pub use link_file::LinkFile;
 pub use npy::{Element, NpyWriter, Table};
