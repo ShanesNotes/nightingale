@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { parseNewEntry, ROSTER } from '../src/chart-api.ts'
+import { isEntryId, parseAmendment, parseNewEntry, ROSTER, type WriteResult } from '../src/chart-api.ts'
 import { type Chart, openChart, pgliteSql, pgSql, type Sql } from '../src/chart.ts'
 import { isPatientId } from '../src/device.ts'
 import { parseClock, wallTime } from '../src/time.ts'
@@ -24,6 +24,17 @@ const newEntry = (body: Readonly<Record<string, unknown>>) => {
   const parsed = parseNewEntry({ patient: 'test-patient', author: nurse.id, vital: 'RR', value: '18', care: null, ...body })
   assert.ok(parsed.ok, parsed.ok ? '' : parsed.reason)
   return parsed.value
+}
+
+const amendment = (body: Readonly<Record<string, unknown>>) => {
+  const parsed = parseAmendment({ patient: 'test-patient', author: nurse.id, replaces: 1, value: '18', care: null, ...body })
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.reason)
+  return parsed.value
+}
+
+const taken = (result: WriteResult) => {
+  assert.ok(result.kind === 'taken', JSON.stringify(result))
+  return result.entry
 }
 
 // The whole suite runs on PGlite, and on a real Postgres too when CHART_TEST_DATABASE_URL names one.
@@ -88,6 +99,38 @@ for (const [name, connect] of databases) {
           assert.deepEqual(await chart.write(newEntry({ value }), now), refused('not a finite number'), JSON.stringify(value))
         }
         assert.deepEqual((await chart.readModel(now)).entries, [], 'a refused write charts nothing')
+      }))
+
+    test('an amendment adds a version naming its author; the read model shows the current one, and the earlier ones come on request', () =>
+      withChart(async (chart) => {
+        const physician = ROSTER[1]!
+        const first = taken(await chart.write(newEntry({ value: '18', care: at('06:56:00') }), at('06:56:10')))
+        const second = taken(
+          await chart.write(amendment({ entry: first.entry, author: physician.id, value: '20', care: at('06:56:05') }), at('06:57:00')),
+        )
+        assert.deepEqual(second, { ...first, number: 2, versions: 2, value: 20, care: at('06:56:05'), charted: at('06:57:00'), author: physician })
+        assert.deepEqual((await chart.readModel(at('06:57:05'))).entries, [second])
+        const versions = await chart.versions(first.entry)
+        assert.deepEqual(
+          versions?.map((v) => [v.number, v.value, v.author.id, v.charted]),
+          [
+            [1, 18, nurse.id, at('06:56:10')],
+            [2, 20, physician.id, at('06:57:00')],
+          ],
+        )
+      }))
+
+    test('an amendment of an entry that does not exist, or of a version that is not the current one, is refused', () =>
+      withChart(async (chart) => {
+        const now = at('06:58:00')
+        const refused = (kind: string) => ({ kind: 'refused', refusal: { kind } })
+        const first = taken(await chart.write(newEntry({}), at('06:56:10')))
+        taken(await chart.write(amendment({ entry: first.entry, value: '19' }), at('06:57:00')))
+        assert.deepEqual(await chart.write(amendment({ entry: first.entry, replaces: 1, value: '21' }), now), refused('not the current version'))
+        assert.deepEqual(await chart.write(amendment({ entry: '00000000-0000-4000-8000-000000000000' }), now), refused('no such entry'))
+        assert.deepEqual(await chart.write(amendment({ entry: first.entry, replaces: 2, care: at('06:58:01') }), now), refused('care time after now'))
+        assert.deepEqual(await chart.versions(first.entry).then((v) => v?.length), 2, 'a refused amendment adds no version')
+        assert.equal(await chart.versions(branded('00000000-0000-4000-8000-000000000000', isEntryId)), undefined)
       }))
   })
 }
