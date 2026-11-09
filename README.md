@@ -22,7 +22,7 @@ The ten crates under `crates/` compile. `ng-contract` holds the anatomy, the lan
 
 ## Build
 
-Python 3.11 or newer, and the toolchain pinned in `rust-toolchain.toml`. From a clone:
+Python 3.11 or newer, the toolchain pinned in `rust-toolchain.toml`, and Node 24 or newer with npm for the gate's clinical workspace step. From a clone:
 
 ```sh
 .agents/skills/verify-nightingale/ensure-prereqs.sh
@@ -33,8 +33,8 @@ cargo test --doc --locked --manifest-path docs/architecture/solver-contract-sket
 tools/verify
 ```
 
-There is no program to run. Workspace tests run synthetic bodies through the compiler, the step check and the gates. The sketch's doctests check the API shape, including forms that must fail to compile. The first command installs the pinned toolchain and, when git has no hook path yet, turns on this repo's pre-push check. `tools/verify` is the merge check.
+The engine has no program to run. Workspace tests run synthetic bodies through the compiler, the step check and the gates. The sketch's doctests check the API shape, including forms that must fail to compile. The first command installs the pinned toolchain and, when git has no hook path yet, turns on this repo's pre-push check. `tools/verify` is the merge check.
 
 ## What is in place
 
-Requirements, decision records, the atlas and the solver-contract sketch are written, and the sketch type-checks. The workspace runs a manufactured two-reservoir body, and it does not simulate a patient. Disease, treatment and learner scenarios are specified and not implemented. `clinical-workspace/` holds a prototype bedside monitor and chart that replay one recorded synthetic run, and they never run the engine.
+Requirements, decision records, the atlas and the solver-contract sketch are written, and the sketch type-checks. The crates run synthetic bodies: a manufactured two-reservoir body and a slice of four systems (heart and vessels, fluids, kidney and the baroreflex). They do not simulate a patient, and nine of the 13 systems have no crate. Disease, treatment and learner scenarios are specified and not implemented. `clinical-workspace/` holds a prototype bedside monitor and chart that replay one recorded synthetic run, and they never run the engine.

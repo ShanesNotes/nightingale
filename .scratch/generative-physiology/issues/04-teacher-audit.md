@@ -183,3 +183,7 @@ Evidence: summaries.sha256 <..>; report.txt's sha256 is recorded beside it; the 
 
 - The reduction's balance and the reversal share per transfer (ticket 05 adds them to this report).
 - Training data, models, and any change to an expectation the workspace pins.
+
+## Comments
+
+The code PR merged as nightingale#85: `gp.py audit`, the plan `tools/generative-physiology/spec/audit-v1.txt`, the report and the driver's capture version 2 are on main. The first acceptance box is met. What remains is the audit itself: the long runs from main on the heavy-run machine, which wait for the developer reviewer's go-ahead because their transient links need about 100 GB of its disk, and then the Answer.
