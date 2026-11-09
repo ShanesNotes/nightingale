@@ -170,3 +170,68 @@ test('a lost answer leaves the batch held; the monitor sends the same messages a
   )
   assert.deepEqual(readingsHeld(double), ['test-boot-1 2 HR 06:55:30', 'test-boot-1 3 ABP mean 06:55:30', 'test-boot-1 4 HR 06:55:31', 'test-boot-1 5 ABP mean 06:55:31'])
 })
+
+const serviceIs = (double: Double, state: Parameters<Double['set']>[0]) => <S>(sim: S) => {
+  double.set(state)
+  return sim
+}
+
+test('in an outage the monitor holds its messages, says since when, drops its oldest at the cap and keeps reading; back up, it delivers', () => {
+  const double = chartDouble(patient)
+  const m = monitor({ patient, feed, link: double.link, boot: boot('test-boot-1'), cap: 4 })
+  const tick = (n: number) => Scene.Subscription.emit(Message.SecondPassed({ now: second(n) }))
+  Scene.scene(
+    { update: m.update, view: m.view },
+    Scene.given(m.init().model),
+    tick(40),
+    sceneAnswers(double, m),
+    serviceIs(double, 'down'),
+    tick(41),
+    sceneAnswers(double, m),
+    Scene.expect(Scene.selector('#link')).toHaveText('Holding 2 messages. The chart service has not answered since 06:55:40.'),
+    Scene.expect(tile('HR')).toHaveText(`${Math.round(observed('algebraic/CV/rate/body', second(41)) * 60)} /min`),
+    tick(42),
+    sceneAnswers(double, m),
+    tick(43),
+    sceneAnswers(double, m),
+    Scene.expect(Scene.selector('#link')).toHaveText(
+      'Holding 4 messages. The chart service has not answered since 06:55:40. The outbox dropped 2 messages when it was full.',
+    ),
+    Scene.expect(tile('HR')).toHaveText(`${Math.round(observed('algebraic/CV/rate/body', second(43)) * 60)} /min`),
+    serviceIs(double, 'up'),
+    tick(44),
+    sceneAnswers(double, m),
+    Scene.expect(Scene.selector('#link')).toHaveText('Everything delivered to the chart. The outbox dropped 4 messages when it was full.'),
+  )
+  assert.deepEqual(readingsHeld(double), [
+    'test-boot-1 2 HR 06:55:40',
+    'test-boot-1 3 ABP mean 06:55:40',
+    'test-boot-1 8 HR 06:55:43',
+    'test-boot-1 9 ABP mean 06:55:43',
+    'test-boot-1 10 HR 06:55:44',
+    'test-boot-1 11 ABP mean 06:55:44',
+  ])
+})
+
+test('a message the chart refuses is never sent again, and the monitor counts it in words', () => {
+  const double = chartDouble(patient)
+  const first = monitor({ patient, feed, link: double.link, boot: boot('test-boot-1') })
+  Story.story(first.update, Story.given(first.init().model), Story.message(Message.SecondPassed({ now: second(50) })), serviceAnswers(double, first))
+  const reused = monitor({ patient, feed, link: double.link, boot: boot('test-boot-1') })
+  Scene.scene(
+    { update: reused.update, view: reused.view },
+    Scene.given(reused.init().model),
+    Scene.Subscription.emit(Message.SecondPassed({ now: second(51) })),
+    sceneAnswers(double, reused),
+    Scene.expect(Scene.selector('#link')).toHaveText('Every message has its answer from the chart. The chart refused 3 messages.'),
+    Scene.Subscription.emit(Message.SecondPassed({ now: second(52) })),
+    (sim: Scene.SceneSimulation<Model, Message>) => {
+      const pending = sim.commands.find((c) => c.name === 'SendBatch')
+      const batch = parseBatch(pending?.args?.['batch'])
+      assert.ok(batch.ok)
+      assert.deepEqual(batch.value.map((message) => message.sequence), [4, 5], 'the refused messages are not sent again')
+      return sim
+    },
+    sceneAnswers(double, reused),
+  )
+})
