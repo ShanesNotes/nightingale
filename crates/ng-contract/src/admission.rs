@@ -1648,8 +1648,8 @@ impl InitializationSystem<'_> {
         Ok(false)
     }
     /// What an admitted start's hash reads of the cycle that made it: the scheme, every leg's interval, start,
-    /// length, modes and resets, every crossing's guards and time, every knot's firings, the clock that paces it and
-    /// every stage coordinate.
+    /// length and resets, every crossing's guards and time, every knot's firings, the clock that paces it and every
+    /// stage coordinate. The modes follow from the start's, which the hash reads beside this, and the firings.
     fn witness(&self, workspace: &AdmissionWorkspace) -> Digest {
         let mut out = Canonical::new("ng-contract admission witness 1");
         out.text(if self.interval.is_some() {
@@ -1791,7 +1791,7 @@ impl Seal for Witness<'_> {
                 interval,
                 start,
                 length,
-                modes,
+                modes: _,
                 resets,
                 ends_at,
                 starts_at,
@@ -1799,7 +1799,6 @@ impl Seal for Witness<'_> {
             interval.seal(out);
             start.seal(out);
             length.seal(out);
-            modes.seal(out);
             out.number(resets.len() as u64);
             for row in resets {
                 row.index().seal(out);
@@ -1808,11 +1807,10 @@ impl Seal for Witness<'_> {
             starts_at.seal(out);
         }
         let Topology {
-            opening,
+            opening: _,
             crossings,
             knots,
         } = topology;
-        opening.seal(out);
         out.number(crossings.len() as u64);
         for crossing in crossings.iter() {
             let Located {

@@ -154,6 +154,16 @@ field = "subtree"
 reason = "ranges over the preorder, derived from the sealed parents as the preorder is"
 
 [[crate.seal_skip]]
+item = "admission::Witness::seal"
+field = "modes"
+reason = "a leg's modes follow from the cycle's opening modes and the sealed knots' firings"
+
+[[crate.seal_skip]]
+item = "admission::Witness::seal"
+field = "opening"
+reason = "the start's modes, which the hash a run names reads beside the witness"
+
+[[crate.seal_skip]]
 item = "body::StreamLayout::seal"
 field = "key"
 reason = "key_word of the name, which the seal covers"
