@@ -706,6 +706,6 @@ test = "--release -p ng-validate --test arena_body the_slice_compiles_initialize
 [[mutant]]
 name = "window-judges-exchange-nets"
 path = "crates/ng-validate/src/window.rs"
-old = '''Compared::Exchange(_) => value.minus(*before),'''
-new = '''Compared::Exchange(_) => *value,'''
-test = "--release -p ng-validate --test arena one_arena_scores_the_reference_and_ng_solver_with_one_call_each"
+old = '''let net = total.minus(*before);'''
+new = '''let net = total;'''
+test = "-p ng-validate --lib window::tests::an_exchange_is_compared_by_its_net_over_each_interval_and_a_level_as_it_stands"

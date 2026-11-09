@@ -463,31 +463,44 @@ fn trace(
             // A segment ends at a firing's left limit, so its end instant reads the accepted state, as an
             // observation does.
             let read = |compared: &Compared| match *compared {
-                Compared::Row(row) if at == now => accepted.value(row),
-                Compared::Row(row) => dense
-                    .sample(row, at)
-                    .expect("a compared instant is inside the segment"),
-                Compared::Exchange(column) => net_at(&segment, column, at),
+                Compared::Row(row) if at == now => Reading::Level(accepted.value(row)),
+                Compared::Row(row) => Reading::Level(
+                    dense
+                        .sample(row, at)
+                        .expect("a compared instant is inside the segment"),
+                ),
+                Compared::Exchange(column) => Reading::Total(net_at(&segment, column, at)),
             };
-            let values: Vec<Compensated> = compared.iter().map(read).collect();
-            // An exchange's running total carries its signed error from interval to interval, where it cancels or
-            // grows by where the grid falls in the beat, so each instant holds its net over the interval it ends.
-            let nets = (compared.iter().zip(&values).zip(&reached))
-                .map(|((quantity, value), before)| match quantity {
-                    Compared::Row(_) => *value,
-                    Compared::Exchange(_) => value.minus(*before),
-                })
-                .collect();
-            reached = values;
             trace.instants.push(Instant {
                 at,
                 modes: if at == now { after.to_vec() } else { before.clone() },
-                values: nets,
+                values: over_interval(compared.iter().map(read), &mut reached),
             });
             next += policy.grid_ns;
         }
     }
     Ok(trace)
+}
+
+/// A compared value at a grid instant: a level as it stands, or an exchange's total since admission.
+enum Reading {
+    Level(Compensated),
+    Total(Compensated),
+}
+
+/// A level as it stands, and an exchange's net over the interval the instant ends. A running total carries its signed
+/// error from interval to interval, where it cancels or grows by where the grid falls in the beat.
+fn over_interval(readings: impl Iterator<Item = Reading>, reached: &mut [Compensated]) -> Vec<Compensated> {
+    (readings.zip(reached.iter_mut()))
+        .map(|(reading, before)| match reading {
+            Reading::Level(value) => value,
+            Reading::Total(total) => {
+                let net = total.minus(*before);
+                *before = total;
+                net
+            }
+        })
+        .collect()
 }
 
 fn after(ns: u64, tag: &[u8], payload: BoundaryInput) -> BoundaryEvent {
@@ -538,9 +551,9 @@ fn timeline() -> Result<Vec<BoundaryEvent>, AdmissionError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Instant, Kind, Measured, Trace, Transition, WindowPolicy};
+    use super::{Instant, Kind, Measured, Reading, Trace, Transition, WindowPolicy, over_interval};
     use crate::AccuracyFailure;
-    use ng_contract::SimTime;
+    use ng_contract::{Compensated, Dimensionless, Measure, SimTime};
 
     const MILLISECOND: u64 = 1_000_000;
     const SECOND: u64 = 1_000_000_000;
@@ -577,6 +590,19 @@ mod tests {
             &[&rung],
             SimTime::from_ns(40 * MILLISECOND),
         )
+    }
+
+    #[test]
+    fn an_exchange_is_compared_by_its_net_over_each_interval_and_a_level_as_it_stands() {
+        let value = |v: f64| Compensated::of(&Measure::<Dimensionless>::new(v).expect("finite"));
+        let mut reached = [Compensated::ZERO; 2];
+        let read =
+            |level: f64, total: f64| [Reading::Level(value(level)), Reading::Total(value(total))].into_iter();
+        let instants = [(5.0, 1.0), (7.0, 3.0), (7.0, 6.0)]
+            .map(|(level, total)| over_interval(read(level, total), &mut reached));
+        let expected =
+            [(5.0, 1.0), (7.0, 2.0), (7.0, 3.0)].map(|(level, net)| vec![value(level), value(net)]);
+        assert_eq!(instants, expected);
     }
 
     #[test]
