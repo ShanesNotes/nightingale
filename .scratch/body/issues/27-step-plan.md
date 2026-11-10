@@ -1,7 +1,8 @@
 # 27: A step plan that can reach the speed aim
 
 Type: prototype
-Status: open
+Status: claimed
+Claimed by: 27-step-plan
 Blocked by: 07
 
 **What to build:** A way of stepping the body that can reach 100 times real time on all 13 systems. [Ticket 07](07-what-limits-the-step.md) says what limits the step today. On its figures no faster core closes the gap alone: the record's own work caps the slice near 21 times real time, and every row the body adds pays for the heart's step count.
