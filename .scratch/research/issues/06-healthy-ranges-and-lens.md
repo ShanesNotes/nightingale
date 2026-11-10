@@ -11,6 +11,7 @@ Data: obs.range.*, bc.anion_gap.range
 - [ ] A range computed from a public dataset names the dataset's version and query
 - [ ] A waveform reading is held by named features of its curve, each with a range
 - [ ] A reading with no sourced range is listed as blocking the claim
+- [ ] The postprandial creatinine reading takes the meal's creatinine in [body ticket 05](../../body/issues/05-the-days-inputs.md)'s delivery, or leaves the postprandial set, because rung 0 makes creatinine from muscle only ([body ticket 01](../../body/issues/01-rung-0-specification.md))
 
 ## Comments
 

@@ -4,7 +4,7 @@ Type: task
 Status: open
 Blocked by: 02, 13, `.scratch/research/issues/13-law-forms-gut-and-fuels.md`
 
-**What to build:** The liver bed takes portal and arterial blood. It stores glucose as glycogen and releases it, makes glucose overnight from lactate, amino acids and glycerol as reactions, and makes urea from amino acids as a reaction ([ticket 02](02-reactions.md)), so nitrogen has its way out: the kidney filters urea and reclaims part of it. Albumin synthesis is constant. Insulin and glucagon are read at their portal concentrations, from held values until [ticket 15](15-insulin-and-glucagon.md).
+**What to build:** The liver bed takes portal and arterial blood. It stores glucose as glycogen and releases it, makes glucose overnight from lactate, amino acids and glycerol as reactions, and makes urea from amino acids as a reaction ([ticket 02](02-reactions.md)) that also carries the sulfur ticket 18 posts as fixed acid, so nitrogen has its way out: the kidney filters urea and reclaims part of it. Albumin synthesis is constant, with a matching held loss until ticket 21. Insulin and glucagon are read at their portal concentrations, from held values until [ticket 15](15-insulin-and-glucagon.md).
 
 **Releases:** the hepatic card's hold, and coupling arrow 99 (portal pressure). Arrow 100, ammonia to the nervous system, stays an explicit hold.
 

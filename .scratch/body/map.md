@@ -30,6 +30,7 @@ Tickets 01, 02, 07 and 23 and research tickets 11 to 15 can start today. Ticket 
 |---|---|---|
 | [01](issues/01-rung-0-specification.md) Rung 0, system by system | nothing | The specification, as tables |
 | [02](issues/02-reactions.md) A reaction and its books | nothing | The law language can turn one species into another |
+| [29](issues/29-the-charge-default.md) How charge closes when a reaction makes a strong anion | 02 | A pick between the two ways of counting charge |
 | [03](issues/03-whole-body-lists.md) Species, spaces and networks | 01, 02 | The contract's closed lists, grown once |
 | [04](issues/04-scopes-ports-and-census.md) Scopes, ports and a census for each assembly | 03 | Nine systems can declare laws, and no system ticket edits a shared constant |
 | [05](issues/05-the-days-inputs.md) The day's inputs | 03 | The clock, sleep, the room and meals reach the body |
@@ -37,7 +38,7 @@ Tickets 01, 02, 07 and 23 and research tickets 11 to 15 can start today. Ticket 
 | [07](issues/07-what-limits-the-step.md) What limits the step | nothing | Where a step's cost goes on the slice, and its limiter |
 | [27](issues/27-step-plan.md) A step plan that can reach the speed aim | 07 | Prototypes and a pick, on main before the synthetic day |
 | [26](issues/26-cost-budget.md) A cost budget for the whole body | 06, 07 | The budget each loop is held to, with ceilings for admission and the gate |
-| [08](issues/08-blood-carries-gases.md) Blood carries the gases | 06, 26, research 11 | Gas loop |
+| [08](issues/08-blood-carries-gases.md) Blood carries the gases | 06, 26, 29, research 11 | Gas loop |
 | [09](issues/09-tissues-respire.md) Tissues respire | 02, 08, research 11 | Gas loop |
 | [10](issues/10-lungs-breathe.md) The lungs breathe | 08, 09, research 11 | Gas loop |
 | [11](issues/11-breathing-is-controlled.md) Breathing is controlled | 05, 10, research 11 | Gas loop, closed |
@@ -45,14 +46,14 @@ Tickets 01, 02, 07 and 23 and research tickets 11 to 15 can start today. Ticket 
 | [25](issues/25-sleep-and-the-circulation.md) Sleep reaches the circulation and the metabolic rate | 05, 09, research 12 | The night's fall in rate, pressure and oxygen use |
 | [13](issues/13-gut-absorbs-a-meal.md) The gut absorbs a meal | 05, 06, 26, research 13 | Fuel loop |
 | [14](issues/14-liver-glucose-hub.md) The liver is the glucose hub | 02, 13, research 13 | Fuel loop |
-| [15](issues/15-insulin-and-glucagon.md) Insulin and glucagon | 14, research 13 | Fuel loop |
+| [15](issues/15-insulin-and-glucagon.md) Insulin and glucagon | 14, 17, research 13 | Fuel loop |
 | [16](issues/16-fuel-stores.md) Fuel stores close over a day | 09, 15, research 13 | Fuel loop, closed |
 | [17](issues/17-volume-hormones.md) Volume hormones and the kidney's pressure answer | 06, 26, research 14 | Water and salt loop, closed |
-| [18](issues/18-acid-loop.md) The acid loop | 08, 09, 11, 17, research 14 | Acid loop, closed |
+| [18](issues/18-acid-loop.md) The acid loop | 08, 09, 11, 14, 17, 29, research 14 | Acid loop, closed |
 | [19](issues/19-minerals-and-bone.md) Minerals and bone | 13, 15, 17, research 15 | Pass 2 |
 | [20](issues/20-cortisol-rhythm.md) Cortisol's daily rhythm | 05, 14, research 15 | Pass 2 |
 | [21](issues/21-blood-cells-and-systems-at-rest.md) Blood cells, plasma proteins and the systems at rest | 08, 14, research 15 | Pass 2 |
-| [22](issues/22-the-bladder.md) The bladder | 05, 06, 26 | Pass 2 |
+| [22](issues/22-the-bladder.md) The bladder | 05, 06, 26, research 15 | Pass 2 |
 | [23](issues/23-healthy-range-and-return-checks.md) The healthy-range check and the return check | nothing | The two milestone checks no code holds |
 | [24](issues/24-the-synthetic-day.md) The synthetic day | 11, 12, 16, 17, 18, 23, 25, 27 | Pass 1 checked: 24 hours on the whole body |
 | [28](issues/28-two-synthetic-days.md) The whole body lives two synthetic days | 19, 20, 21, 22, 24 | The destination: both passes, 48 hours |
@@ -62,6 +63,7 @@ After tickets 06 and 26, three lanes can be built side by side: the gases (08), 
 ## Decisions so far
 
 - [What limits the step](issues/07-what-limits-the-step.md): on the slice the accuracy estimate sets the step in the first half of each beat, on the heart's rows, and the body's 10 ms wave rate class sets it in the second half. A longer cap on the core changes nothing, and the restart after a firing costs Newton work, not steps. The 15 landings a beat take 21% of the wall time. The core takes 62% of a step and the record 38%, and a step's fixed cost alone is 58% of the budget at 100 times real time. Each outflow valve opens and shuts more than once a beat, 6 of the 15 landings, and [native-contract 32](../native-contract/issues/32-valves-shut-inside-ejection.md) asks why.
+- [Rung 0, system by system](issues/01-rung-0-specification.md): the Answer specifies rung 0 for all 13 systems as tables, and ticket 06 builds the whole body with every row held. Each conserved quantity the day moves closes on paper for the reference man's day, from water to the blood's cells and proteins, with the law that holds each term and the ticket that releases its stand-in. Each of the 38 arrows' 56 fields is wired, an anatomy relation, or held with its reason: 18 arrows wire at least one field, 5 are anatomy relations, and 15 hold every field. The holds rung 0 keeps at the destination each carry their reason, and the Answer lists which holds each ticket from 08 to 25 releases. Forks name the owner of a law, never of a pool.
 
 ## Model defaults, open to review
 
@@ -69,6 +71,11 @@ After tickets 06 and 26, three lanes can be built side by side: the gases (08), 
 - **Immunity and coagulation at rest are declared with zero flux** and a list of what they cannot show, as record 0002 asks of a grouped region. Alternative: a reduced model of each now, which no check of a healthy day could judge.
 - **Breathing is tidal and the heart pulsatile at rung 0**, unless ticket 26's budget forbids a tidal breath. Ticket 10 prototypes the alternative, quasi-steady alveolar gas, before it chooses.
 - **Acid-base is stated from the strong ion difference, the weak acids and carbon dioxide** in every space, with one lumped anion. Alternative: bicarbonate from carbon dioxide alone at rung 0, which a later ticket would have to replace.
+- **Ticket 01's Answer sets the model defaults of rung 0.** They are listed in its sections "Fork owners", "Where the drafts and the atlas disagree on physiology" and "Choices that need a ruling", and its site rows marked model default.
+- **Acidity is stated from ticket 08.** Ticket 08 states acidity in every watery space with the lumped anion and the diet's organic anion held, ticket 11's sensor reads that acidity, and ticket 18 adds the anions' making and excretion. Alternative: ticket 08 carries carbon dioxide on a sourced buffer line, which ticket 18 replaces with the full balance. It touched tickets 08, 11 and 18.
+- **Ticket 15 waits on ticket 17**, so its potassium check stays whole. Alternative: ticket 15's run drops "and is excreted after", and whichever of tickets 15 and 17 lands second carries that check. It touched ticket 15.
+- **Research 12 gives sleep's gain on sympathetic traffic**, and ticket 25's blockers stand. Alternative: research 14 or a new research ticket gives it, and ticket 25 waits on that. It touched research 12.
+- **Charge counts each acid and base as a neutral moiety** that speciation charges, and the certificate reads charge after speciation. Alternative: a fixed charge on each strong anion, with a counter-charge for each reaction that makes or burns one. [Ticket 29](issues/29-the-charge-default.md) tests both.
 
 ## Not yet specified
 

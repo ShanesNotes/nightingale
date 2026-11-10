@@ -4,7 +4,7 @@ Type: task
 Status: open
 Blocked by: 08, 14, `.scratch/research/issues/15-law-forms-slow-books.md`
 
-**What to build:** Red cell mass, iron and albumin are stores that lose mass in proportion to their size, with production to match, so each returns to balance by itself. Coagulation and immunity do nothing a healthy day can show. Each is declared with zero flux, its coupling arrows are held at zero, and it states the behaviors it cannot show (record 0002). This is pass 2.
+**What to build:** Red cell mass and albumin are stores that lose mass in proportion to their size, with production to match, so each returns to balance by itself. Red cell mass is the hemoglobin amount. Iron enters from the meal by absorption, not production, and leaves with the gut's shed cells through the fecal exit. Coagulation and immunity do nothing a healthy day can show. Each is declared with zero flux, its coupling arrows are held at zero, and it states the behaviors it cannot show (record 0002). This is pass 2.
 
 **Releases:** the hematology card's remaining holds and the immune card's hold, each replaced by a store or by an explicit statement of what is absent.
 

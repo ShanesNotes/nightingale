@@ -8,7 +8,8 @@ Blocked by: 03
 
 - [ ] A clock phase and a sleep state reach a law as inputs. They scale gains and set points and never set a produced quantity (SRS rule 2)
 - [ ] The room reaches the body: air and radiant temperature, humidity, air speed, pressure, inspired gas, and clothing or bedding
-- [ ] A meal is a vector of nutrients and salts delivered into the gut lumen, and a drink is water delivered there
+- [ ] A meal is a vector of every species [ticket 01](01-rung-0-specification.md)'s tables deliver, iron and the diet's organic anion included, delivered into the gut lumen, and a drink is water delivered there
+- [ ] A void is an input of the day, for [ticket 22](22-the-bladder.md)
 - [ ] The run's boundary events are made from the day in the packet (records 0004 and 0005). This lands the day item of [foundation 07](../../foundation/issues/07-contract.md) in the crates
 - [ ] Each input replays: late admission, pause and resume give the same bits as the same day known from the start (SRS invariant I5), on the existing replay gates
 - [ ] The slice's model hash and trace do not move

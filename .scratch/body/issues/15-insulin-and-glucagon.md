@@ -2,7 +2,7 @@
 
 Type: task
 Status: open
-Blocked by: 14, `.scratch/research/issues/13-law-forms-gut-and-fuels.md`
+Blocked by: 14, 17, `.scratch/research/issues/13-law-forms-gut-and-fuels.md`
 
 **What to build:** The pancreas secretes insulin and glucagon into portal blood against glucose. The liver clears part of the insulin on its first pass, so portal and systemic concentrations differ. Muscle and fat take up glucose against insulin through the receptor layer, and potassium moves into cells with it. The kidney reclaims filtered glucose up to its limit.
 
@@ -15,4 +15,4 @@ Blocked by: 14, `.scratch/research/issues/13-law-forms-gut-and-fuels.md`
 - [ ] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
-**Non-goals:** gut hormones, pulsed secretion, epinephrine's part unless ticket 01 puts it in rung 0, and the evening fall in sensitivity.
+**Non-goals:** gut hormones, pulsed secretion, epinephrine's part, which ticket 01 leaves out of rung 0, and the evening fall in sensitivity.

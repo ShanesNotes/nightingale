@@ -6,10 +6,11 @@ Blocked by: 01, 02
 
 **What to build:** The contract's closed lists grow once, for all nine systems the slice lacks, so that no later ticket edits them. Today there are nine species (water, sodium, potassium, chloride, albumin, vasopressin, norepinephrine, acetylcholine and energy), no airway or gut network, and no site or space for alveolar gas, the gut's lumen or red cells. The lists come from [ticket 01](01-rung-0-specification.md)'s Answer.
 
-- [ ] Species for the gases, the fuels, urea and creatinine, the acid-base set, the hormones and hemoglobin, each with its dimension, its charge, the books it belongs to and the spaces that may hold it
+- [ ] Species for the gases, the fuels, urea and creatinine, the acid-base set, the hormones and hemoglobin, and iron, ammonium, glycerol, body protein, the cell anion and the diet's organic anion, each with its dimension, its charge, the books it belongs to and the spaces that may hold it
 - [ ] Lumped classes where rung 0 needs no more: one other strong anion, ketones as one species
-- [ ] Spaces and site classes for alveolar gas, the gut lumen and whatever ticket 01 names, and networks and edge kinds for the airway and the gut, with the portal circuit on the blood network
-- [ ] Landmarks for each new sensor: the chemoreceptors, the thermostat's sensors, the osmoreceptor
+- [ ] Spaces and site classes for alveolar gas, the gut lumen and whatever ticket 01 names, and networks and edge kinds for the airway and the gut, with the portal circuit on the blood network. The alveolar and airway gas is a space that holds no water, with a gas-law identity, and it holds nitrogen gas and water vapor. Red cells get no space, because hemoglobin is a mass in blood ([ticket 08](08-blood-carries-gases.md))
+- [ ] Route families across the cell membrane, heat carried by blood, conduction between heat stores, and an osmotic identity for small solutes, so tickets 12, 15 and 17 edit no shared list
+- [ ] Landmarks for each new sensor: the chemoreceptors, the skin thermoreceptor, the osmoreceptor, the volume receptor, the adrenal, the islets and the parathyroid. Core temperature reaches the nervous system by arrow 91, so it needs no landmark. Each new hormone has its secretion and clearance sites
 - [ ] Temperature at a site, read from the heat it holds
 - [ ] One membrane type with its two settings, as SRS section 5 states it, before the first new exchange law ([foundation 07](../../foundation/issues/07-contract.md) lists this as C3)
 - [ ] A compile-fail test with its legal twin for each new type rule

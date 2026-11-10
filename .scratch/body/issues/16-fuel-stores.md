@@ -11,6 +11,7 @@ Blocked by: 09, 15, `.scratch/research/issues/13-law-forms-gut-and-fuels.md`
 - [ ] Tests: each storage and release law matches its form at stated points
 - [ ] Run: over a synthetic day whose intake equals what the body spends, each store ends within its drift bound of where it started
 - [ ] Run: the respiratory quotient rises after meals and falls overnight. Nitrogen in equals nitrogen out over the day. Creatinine made equals creatinine excreted
+- [ ] Run: the respiratory quotient run once with the triglyceride store in the muscle bed's cells and no fat bed. The fat bed stays only if the run fails without it (record 0002)
 - [ ] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 

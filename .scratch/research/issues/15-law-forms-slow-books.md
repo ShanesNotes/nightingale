@@ -6,9 +6,9 @@ Blocked by: 02
 
 **Question:** Which cited form does each slow store take at rung 0? [Body tickets 19 to 22](../../body/map.md) write the laws, so each answer is a form, where its constants go, a stated validity range and how far the source was read, to the standard of [ticket 02](02-law-forms.md). No value is bound here.
 
-- [ ] Calcium, phosphate and magnesium with a fast partner pool in bone and cells, parathyroid hormone as calcium's controller, and what returns phosphate and magnesium after a load
+- [ ] Calcium, phosphate and magnesium: absorption from the gut, a fast partner pool in bone and cells, parathyroid hormone as calcium's controller, and what returns phosphate and magnesium after a load
 - [ ] Cortisol's daily secretion profile and its action on the liver's glucose output
-- [ ] Red cell mass, iron and albumin as stores that lose mass in proportion to their size, with production to match
+- [ ] Red cell mass and albumin as stores that lose mass in proportion to their size, with production to match, and iron as a store that absorption from the gut refills
 - [ ] The bladder: urine made against urine voided
 - [ ] What coagulation and immunity do in a healthy day, stated as the behaviors a held store cannot show
 - [ ] A validity range for each form, with its source
