@@ -744,3 +744,10 @@ path = "crates/ng-contract/src/conservation.rs"
 old = '''for piece in joined(weighed.len(), groups) {'''
 new = '''for piece in joined(weighed.len(), groups.chain([(0..weighed.len()).collect()])) {'''
 test = "-p ng-contract --test reactions a_quantity_splits_where_its_own_columns_do_not_join_its_rows"
+
+[[mutant]]
+name = "store-on-the-tissue-site"
+path = "crates/ng-contract/src/compile.rs"
+old = '''let found = (schema.pools()).find(|pool| body(pool) && pool.1 == space && pool.2 == Species::Energy);'''
+new = '''let found = (schema.pools()).find(|pool| (body(pool) || true) && pool.1 == space && pool.2 == Species::Energy);'''
+test = "-p ng-contract --test reactions dissipation_reaches_the_body_store_whatever_sorts_before_it"

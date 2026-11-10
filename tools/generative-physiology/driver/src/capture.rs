@@ -68,6 +68,8 @@ fn book_name(book: Book) -> String {
     match book {
         Book::Of(species) => format!("{species:?}"),
         Book::Charge => "Charge".to_string(),
+        Book::Element(element) => format!("{element:?}Atoms"),
+        Book::Energy => "EnergyWithFuel".to_string(),
     }
 }
 
