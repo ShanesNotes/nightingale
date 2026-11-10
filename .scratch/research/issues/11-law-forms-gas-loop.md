@@ -1,7 +1,8 @@
 # 11: Law forms for the gas loop
 
 Type: research
-Status: open
+Status: claimed
+Claimed by: research-11-gas-loop
 Blocked by: 02
 
 **Question:** Which cited form does each law of the oxygen and carbon dioxide loop take at rung 0? [Body tickets 08 to 11](../../body/map.md) write the laws, so each answer is a form, where its constants go, a stated validity range and how far the source was read, to the standard of [ticket 02](02-law-forms.md). No value is bound here.
