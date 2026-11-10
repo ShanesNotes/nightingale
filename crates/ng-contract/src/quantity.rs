@@ -45,6 +45,10 @@ pub enum Temperature {}
 pub enum Phase {}
 pub enum Viscosity {}
 pub enum Oxygen {}
+pub enum CarbonDioxide {}
+pub enum Glucose {}
+/// An amount of one element's atoms, in the amount unit: what an element's conserved quantity totals.
+pub enum Atoms {}
 pub enum Renin {}
 pub enum Ammonia {}
 pub struct Rate<Q>(PhantomData<Q>);
@@ -68,7 +72,8 @@ pub struct Affinity<Q>(PhantomData<Q>);
 pub struct PerSite<C: SiteSet, U>(PhantomData<(C, U)>);
 pub struct PerEdge<U, E: EdgeKind = VascularEdge>(PhantomData<(U, E)>);
 
-/// What a pool holds. One closed list, so a row, a route's carried columns and a `Book` all read one name.
+/// What a pool holds. One closed list, so a row, a route's carried columns, a makeup and a `Book` all read one name.
+/// A new species goes after the last, so no discriminant a seal holds moves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Species {
     Water,
@@ -80,10 +85,38 @@ pub enum Species {
     Norepinephrine,
     Acetylcholine,
     Energy,
+    Oxygen,
+    CarbonDioxide,
+    Glucose,
+}
+/// An element whose atoms a reaction moves from one species to another, so where a reaction joins species its atoms,
+/// not each species, are what stays conserved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Element {
+    Carbon,
+    Hydrogen,
+    Oxygen,
+}
+impl Element {
+    pub(crate) const ALL: [Element; 3] = [Element::Carbon, Element::Hydrogen, Element::Oxygen];
+}
+/// What one unit of a species is made of, which a reaction's counts must balance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Makeup {
+    /// No reaction may use or make it: it only moves from pool to pool.
+    Carried,
+    /// Whole counts of each element's atoms. A fuel holds energy, whose content per unit the schema states; the rest
+    /// hold none, measured against carbon dioxide and water.
+    Atoms {
+        elements: &'static [(Element, i64)],
+        fuel: bool,
+    },
+    /// One unit of energy.
+    Energy,
 }
 impl Species {
     /// What water can carry, water first: every species but energy, which no route moves as a share of a flow.
-    pub(crate) const CARRIED: [Species; 8] = [
+    pub(crate) const CARRIED: [Species; 11] = [
         Species::Water,
         Species::Sodium,
         Species::Potassium,
@@ -92,7 +125,37 @@ impl Species {
         Species::Vasopressin,
         Species::Norepinephrine,
         Species::Acetylcholine,
+        Species::Oxygen,
+        Species::CarbonDioxide,
+        Species::Glucose,
     ];
+    /// Exhaustive, so a species added without its makeup does not compile.
+    pub const fn makeup(self) -> Makeup {
+        use Element::{Carbon, Hydrogen, Oxygen};
+        const fn atoms(elements: &'static [(Element, i64)]) -> Makeup {
+            Makeup::Atoms {
+                elements,
+                fuel: false,
+            }
+        }
+        match self {
+            Species::Water => atoms(&[(Hydrogen, 2), (Oxygen, 1)]),
+            Species::Sodium
+            | Species::Potassium
+            | Species::Chloride
+            | Species::Albumin
+            | Species::Vasopressin
+            | Species::Norepinephrine
+            | Species::Acetylcholine => Makeup::Carried,
+            Species::Energy => Makeup::Energy,
+            Species::Oxygen => atoms(&[(Oxygen, 2)]),
+            Species::CarbonDioxide => atoms(&[(Carbon, 1), (Oxygen, 2)]),
+            Species::Glucose => Makeup::Atoms {
+                elements: &[(Carbon, 6), (Hydrogen, 12), (Oxygen, 6)],
+                fuel: true,
+            },
+        }
+    }
     /// Charge in units of the amount, zero for what the ledger keeps as no ion.
     pub(crate) const fn charge(self) -> i64 {
         match self {
@@ -175,6 +238,30 @@ impl Species {
                 "effect energy",
                 "exchange energy",
             ],
+            Species::Oxygen => [
+                "reclaim oxygen",
+                "release oxygen",
+                "reuptake oxygen",
+                "binding oxygen",
+                "effect oxygen",
+                "exchange oxygen",
+            ],
+            Species::CarbonDioxide => [
+                "reclaim carbon dioxide",
+                "release carbon dioxide",
+                "reuptake carbon dioxide",
+                "binding carbon dioxide",
+                "effect carbon dioxide",
+                "exchange carbon dioxide",
+            ],
+            Species::Glucose => [
+                "reclaim glucose",
+                "release glucose",
+                "reuptake glucose",
+                "binding glucose",
+                "effect glucose",
+                "exchange glucose",
+            ],
         }
     }
     pub(crate) fn dimension(self) -> String {
@@ -188,6 +275,9 @@ impl Species {
             Species::Norepinephrine => dimension::<Norepinephrine>(),
             Species::Acetylcholine => dimension::<Acetylcholine>(),
             Species::Energy => dimension::<Energy>(),
+            Species::Oxygen => dimension::<Oxygen>(),
+            Species::CarbonDioxide => dimension::<CarbonDioxide>(),
+            Species::Glucose => dimension::<Glucose>(),
         }
     }
 }
@@ -215,7 +305,35 @@ substances!(
     Vasopressin,
     Norepinephrine,
     Acetylcholine,
-    Energy
+    Energy,
+    Oxygen,
+    CarbonDioxide,
+    Glucose
+);
+
+mod reactants {
+    pub trait Sealed {}
+}
+/// A species a reaction may use or make: every substance but energy, whose share a reaction derives from what it burns.
+pub trait Reactant: reactants::Sealed + Substance {}
+macro_rules! reactants {
+    ($($name:ident),*) => {$(
+        impl reactants::Sealed for $name {}
+        impl Reactant for $name {}
+    )*};
+}
+reactants!(
+    Water,
+    Sodium,
+    Potassium,
+    Chloride,
+    Albumin,
+    Vasopressin,
+    Norepinephrine,
+    Acetylcholine,
+    Oxygen,
+    CarbonDioxide,
+    Glucose
 );
 
 macro_rules! named {
@@ -252,6 +370,9 @@ named!(
     Phase = "phase",
     Viscosity = "viscosity",
     Oxygen = "oxygen",
+    CarbonDioxide = "carbon dioxide",
+    Glucose = "glucose",
+    Atoms = "atoms",
     Renin = "renin",
     Ammonia = "ammonia",
 );

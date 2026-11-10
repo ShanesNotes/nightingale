@@ -57,6 +57,7 @@ pub struct Term {
     _coefficient: f64,
 }
 pub enum Book {
+    /// Water, until a reaction makes it; then its atoms count in hydrogen and oxygen.
     Water,
     Element(Element),
     Charge,
@@ -66,7 +67,11 @@ pub enum Book {
     /// Albumin and fixed carrier mass: transported, not produced, inside the slice.
     Carrier,
 }
+/// The elements a reaction moves between species, and those a species holds where none does.
 pub enum Element {
+    Carbon,
+    Hydrogen,
+    Oxygen,
     Sodium,
     Potassium,
     Chloride,

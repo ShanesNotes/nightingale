@@ -322,20 +322,24 @@
 //! }
 //! ```
 //!
-//! A reaction cannot be written from raw stoichiometry; a scope issues it after element and charge
-//! accounting.
+//! A reaction cannot be written from raw stoichiometry: proportions are built from typed species,
+//! and the body compile checks that they balance every element, charge and energy.
 //! ```compile_fail,E0451
 //! use solver_contract_sketch::ng_contract::*;
 //! use core::marker::PhantomData;
-//! fn make_sodium<'b>(brand: Brand<'b>) -> BalancedReaction<'b, Receptor> {
-//!     BalancedReaction { _stoichiometry: vec![(0, 1)], _brand: brand, _owner: PhantomData }
+//! fn raw() -> Proportions<Glucose> {
+//!     Proportions { _terms: vec![(Space::Interstitium, 0, -1)], _energy: None, _reference: PhantomData }
 //! }
 //! ```
-//! Legal twin: the receptor scope issues its balanced bindings.
+//! Legal twin: the typed builder.
 //! ```
 //! use solver_contract_sketch::ng_contract::*;
-//! fn bindings<'b>(scope: ReceptorScope<'b>) -> Vec<BalancedReaction<'b, Receptor>> {
-//!     scope.parts().1.bindings
+//! fn burn() -> Proportions<Glucose> {
+//!     Proportions::using(Space::Interstitium)
+//!         .uses::<Oxygen, 6>(Space::Interstitium)
+//!         .makes::<CarbonDioxide, 6>(Space::Interstitium)
+//!         .makes::<Water, 6>(Space::Interstitium)
+//!         .energy_into(Space::Thermal)
 //! }
 //! ```
 //!

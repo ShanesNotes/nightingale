@@ -108,6 +108,15 @@ fn first_second(core: &dyn CoupledSolver) -> FirstSecond {
 }
 
 #[test]
+fn the_slices_model_hash_and_conserved_basis_stay_where_they_were() {
+    let body = arena_body().expect("compiled");
+    expect!["8e46139470a550a84d482a1c41e6f94e2eadd7e56d1e9783ba58efefa6e635ea"]
+        .assert_eq(&hex(body.model_hash().digest()));
+    expect!["1e5235d9018ec8b93dcb9045ec3bde7f6e024fc3de2f77e7bf7b94256e189b25"]
+        .assert_eq(&hex(body.conserved_basis().digest()));
+}
+
+#[test]
 fn the_first_second_of_the_slice_stays_where_it_was() {
     let scale = |value| Measure::<Dimensionless>::new(value).expect("finite");
     let core = ReferenceIntegrator::new(MILLISECOND)

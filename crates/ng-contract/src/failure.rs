@@ -1,5 +1,5 @@
 use crate::{
-    AnatomyDefect, AnchorId, Binding, Digest, InputId, LawName, ModeValue, ParameterKey, Predicate,
+    AnatomyDefect, AnchorId, Binding, Book, Digest, InputId, LawName, ModeValue, ParameterKey, Predicate,
     QuantityId, RowId, RowKind, SimTime, SiteId, Slot, SourceId, Space, Species,
 };
 
@@ -33,6 +33,11 @@ pub enum AdmissionError {
     NonPositivePartialVolume,
     /// A second partial-volume coefficient that differs from the first.
     PartialVolumeTwice,
+    /// An energy content for a species that is no fuel, one that is no whole number of energy units from 1 to 2^53, or
+    /// a second one that differs from the first.
+    EnergyContent {
+        species: Species,
+    },
     BoundaryNamedTwice {
         name: &'static str,
     },
@@ -349,6 +354,29 @@ pub enum CompileDefect {
         site: SiteId,
         space: Space,
     },
+    /// A reaction that names one species twice.
+    SpeciesTwice { law: LawName, species: Species },
+    /// A reaction that names a species no reaction may use or make.
+    NoMakeup { law: LawName, species: Species },
+    /// A reaction that names a fuel whose energy content the schema does not state, so its energy has no value.
+    UnstatedEnergy { law: LawName, species: Species },
+    /// A reaction whose counts leave a conserved quantity open: an element or charge its uses and makes do not hold
+    /// alike, or energy with no pool to take it. Names the first in `Book` order.
+    UnbalancedReaction { law: LawName, book: Book },
+    /// A count times a weight, or their sum, past 2^53, where an integer weight stops being exact, or exact arithmetic on
+    /// the conserved combinations past i128. Names the reaction when one is to blame, and none for admission's totals.
+    ConservationOverflow { law: Option<LawName> },
+    /// A reaction whose pools exist together at no site of its set.
+    ReactionNowhere { law: LawName },
+    /// A site where a reaction stands without the energy pool its energy goes to.
+    ReactionEndpoint {
+        law: LawName,
+        site: SiteId,
+        space: Space,
+    },
+    /// A part the reaction joins whose conserved quantities miss a combination its columns leave unchanged, which the
+    /// certificate could then not name.
+    UnnamedConservedQuantity { law: LawName },
 }
 
 /// Why one attempt cannot stand. A smaller retry of the same base can still succeed. A row or source id

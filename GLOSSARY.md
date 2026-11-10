@@ -249,7 +249,7 @@ The amount of one conserved quantity (water, sodium, oxygen, heat, and so on) he
 One part of a site that holds pools: a tissue bed's plasma, interstitial fluid or cells, a vessel segment's lumen, or an enclosed space's own fluid. A junction, a tissue site and a nerve segment have none.
 
 **Conserved quantity**:
-A quantity the ledger balances: water, an element (sodium, potassium, chloride, calcium, magnesium, phosphorus, nitrogen), charge, energy, a moiety such as glucose or catecholamine, or carrier mass. The contract's `Book` type names one.
+A quantity the ledger balances: water, an element (carbon, hydrogen, oxygen, sodium, potassium, chloride, calcium, magnesium, phosphorus, nitrogen), charge, energy, a moiety such as glucose or catecholamine, or carrier mass. Where a reaction joins species, the elements and energy are what balance, and a species such as water has no quantity of its own there. The contract's `Book` type names one.
 _Avoid_: book
 
 **Conserved combination**:
@@ -257,6 +257,12 @@ A sum of pools that no transfer or reaction inside the body changes, such as all
 
 **Transfer**:
 A flow with two ends: what leaves one pool enters another pool or a receipt pool, so no amount appears or vanishes (I10).
+
+**Reaction**:
+At one site, several amounts used and made in fixed whole-number proportion, at one rate. Its two ends are what it uses and what it makes, and they hold the same count of every element, the same charge and the same energy, so it keeps I10 as a transfer does. Only a card granted its site class declares one.
+
+**Energy content**:
+The energy one unit of a fuel holds beyond the carbon dioxide and water it burns to, stated in a body's schema. A reaction's heat follows from the contents of what it uses and makes, so no law writes a heat.
 
 **Receipt pool**:
 A named pool outside the body, or behind a held stand-in, that takes what crosses the boundary, so a boundary transfer still has two ends.

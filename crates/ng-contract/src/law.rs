@@ -4,9 +4,9 @@ use crate::quantity::dimension;
 use crate::scope::ENCLOSURE_PRESSURE;
 use crate::{
     Admissible, AdmissibleSet, AdmissionError, Basis, Blood, Boundary, CapillaryBed, Conductance, Deviation,
-    Dimension, Dimensionless, Landmark, Length, Network, NonMaterial, Owner, ParameterKey, PerEdge, PerSite,
-    Pressure, Product, Quotient, Rate, Reference, SameDimension, Sensed, SiteSet, Sites, Space, Species,
-    Substance, Time, Urinary, ValidityRange, Volume, Water,
+    Dimension, Dimensionless, Landmark, Length, Metabolism, Network, NonMaterial, Owner, ParameterKey,
+    PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reactant, Reference, SameDimension, Sensed, SiteSet,
+    Sites, Space, Species, Substance, Time, Urinary, ValidityRange, Volume, Water,
 };
 use core::cell::Cell;
 use core::marker::PhantomData;
@@ -393,6 +393,11 @@ impl Seal for Source {
                 out.text(family.name());
             }
             Source::Extravascular => out.number(6),
+            Source::Reacting(reaction, species) => {
+                out.number(7);
+                out.text(reaction);
+                out.number(species as u64);
+            }
         }
     }
 }
@@ -836,6 +841,7 @@ pub(crate) enum Source {
     Field(LawName),
     Flow(Family),
     Extravascular,
+    Reacting(&'static str, Species),
 }
 impl<'b, O, U> ReadPort<'b, O, U> {
     fn of(source: Source) -> Self {
@@ -998,6 +1004,91 @@ impl<'b, O, Q> Pair<'b, O, Q> {
         ReadPort::of(Source::RoutePool(self.serves.local(), R::SPECIES))
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Term {
+    pub(crate) species: Species,
+    pub(crate) space: Space,
+    pub(crate) change: i64,
+}
+/// What a reaction uses and makes for each unit of its reference species `Q`: each species once, with its space and a
+/// whole count, and the space whose energy pool takes what the uses hold beyond the makes. It is built only from typed
+/// species, so no law writes a coefficient, a pool or a heat, and `Assembly::compile` checks it against each species'
+/// makeup.
+pub struct Proportions<Q> {
+    terms: Vec<Term>,
+    energy: Option<Space>,
+    reference: PhantomData<Q>,
+}
+impl<Q: Reactant> Proportions<Q> {
+    /// One unit of `Q` used in `space`, so the reaction's rate counts `Q` used per second.
+    pub fn using(space: Space) -> Self {
+        Self {
+            terms: vec![Term {
+                species: Q::SPECIES,
+                space,
+                change: -1,
+            }],
+            energy: None,
+            reference: PhantomData,
+        }
+    }
+}
+impl<Q> Proportions<Q> {
+    /// `N` units of `R` used in `space`. A count of zero does not compile.
+    pub fn uses<R: Reactant, const N: u32>(self, space: Space) -> Self {
+        const { assert!(N > 0, "a reaction's count is a whole number above zero") };
+        self.term(R::SPECIES, space, -i64::from(N))
+    }
+    /// `N` units of `R` made in `space`. A count of zero does not compile.
+    pub fn makes<R: Reactant, const N: u32>(self, space: Space) -> Self {
+        const { assert!(N > 0, "a reaction's count is a whole number above zero") };
+        self.term(R::SPECIES, space, i64::from(N))
+    }
+    /// The energy the uses hold beyond the makes enters the energy pool in `space` at the reaction's site, and a
+    /// reaction that holds less than none draws it from there.
+    pub fn energy_into(self, space: Space) -> Self {
+        Self {
+            energy: Some(space),
+            ..self
+        }
+    }
+    fn term(mut self, species: Species, space: Space, change: i64) -> Self {
+        self.terms.push(Term {
+            species,
+            space,
+            change,
+        });
+        self
+    }
+}
+/// A reaction its owner declared at the sites of `C` where its pools exist, its rate counted in units of `Q`. Only
+/// `FragmentBuilder::reaction` makes one, and that records the rate the fragment owes.
+pub struct Reaction<'b, O, C, Q> {
+    name: &'static str,
+    brand: Brand<'b>,
+    kind: PhantomData<(O, C, Q)>,
+}
+impl<'b, O, C: SiteSet, Q> Reaction<'b, O, C, Q> {
+    /// The amount of `R` the reaction uses or makes, at the kernel's own site. Compile refuses a species it does not
+    /// hold.
+    pub fn amount<R: Reactant>(&self) -> ReadPort<'b, O, PerSite<C, R>> {
+        ReadPort::of(Source::Reacting(self.name, R::SPECIES))
+    }
+}
+mod grants {
+    pub trait Sealed<C> {}
+}
+/// A site class the contract grants a card to react at: metabolism at the capillary beds.
+pub trait ReactsAt<C: SiteSet>: grants::Sealed<C> + Owner {}
+impl grants::Sealed<CapillaryBed> for Metabolism {}
+impl ReactsAt<CapillaryBed> for Metabolism {}
+pub(crate) struct ReactionDeclaration {
+    pub(crate) name: &'static str,
+    pub(crate) set: Sites,
+    pub(crate) terms: Vec<Term>,
+    pub(crate) energy: Option<Space>,
+}
+
 /// A transfer law on a pair: what leaves one end enters the other.
 pub struct Transfer<'b, O, Q> {
     serves: Obligation,
@@ -1569,6 +1660,40 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     pub fn transfer<Q>(&mut self, transfer: Transfer<'b, O, Q>) {
         self.attach(transfer.serves, transfer.rate.data);
     }
+    /// Declares a reaction at every site of `C` where each pool it uses or makes exists, and records the rate it owes.
+    pub fn reaction<C: SiteSet, Q: Reactant>(
+        &mut self,
+        name: &'static str,
+        proportions: Proportions<Q>,
+    ) -> Reaction<'b, O, C, Q>
+    where
+        O: ReactsAt<C>,
+    {
+        let Proportions {
+            terms,
+            energy,
+            reference: _,
+        } = proportions;
+        self.data.reactions.push(ReactionDeclaration {
+            name,
+            set: C::SET,
+            terms,
+            energy,
+        });
+        Reaction {
+            name,
+            brand: PhantomData,
+            kind: PhantomData,
+        }
+    }
+    /// The reaction's rate in units of its reference species, positive forward: one law in each mode, as a route's.
+    pub fn react_at<C: SiteSet, Q>(
+        &mut self,
+        reaction: &Reaction<'b, O, C, Q>,
+        rate: PureKernel<'b, O, Rate<Q>, C>,
+    ) {
+        self.attach(Obligation::Reaction(reaction.name), rate.data);
+    }
     /// How much of species `R` this bed's wall holds back from the water the route moves: `1 - sigma` of it crosses.
     /// A species with no such line crosses freely. Returns the parameter, so a law can read the sigma it depends on.
     pub fn reflect<R: Substance>(
@@ -1652,6 +1777,7 @@ pub(crate) struct FragmentData {
     pub(crate) closed: Vec<&'static str>,
     pub(crate) reflections: Vec<(Family, Species, ParameterKey)>,
     pub(crate) kept_back: Vec<(Family, Species)>,
+    pub(crate) reactions: Vec<ReactionDeclaration>,
 }
 impl FragmentData {
     pub(crate) fn owe_flow(&mut self, family: Family) {
@@ -1679,6 +1805,7 @@ impl FragmentData {
             closed: Vec::new(),
             reflections: Vec::new(),
             kept_back: Vec::new(),
+            reactions: Vec::new(),
         }
     }
 }
@@ -1724,6 +1851,7 @@ pub(crate) enum Obligation {
     Family(Family),
     Boundary(&'static str),
     Sum(&'static str, Sites),
+    Reaction(&'static str),
 }
 impl Obligation {
     pub(crate) fn local(self) -> &'static str {
@@ -1731,7 +1859,8 @@ impl Obligation {
             Obligation::Slot(name)
             | Obligation::Defined(name)
             | Obligation::Boundary(name)
-            | Obligation::Sum(name, _) => name,
+            | Obligation::Sum(name, _)
+            | Obligation::Reaction(name) => name,
             Obligation::Family(family) => family.name(),
         }
     }
