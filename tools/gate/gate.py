@@ -3053,7 +3053,7 @@ time.sleep(60)
 """
 
 
-def driver_case() -> list[Violation]:
+def driver_cases() -> list[Violation]:
     log = io.StringIO()
     began = time.monotonic()
     with contextlib.redirect_stdout(log):
@@ -3070,6 +3070,16 @@ def driver_case() -> list[Violation]:
             out.append(Violation("sweep", "a fake sweep", "the fake still ran after the driver returned"))
     else:
         out.append(Violation("sweep", "a fake sweep", "the driver did not echo the fake's lines"))
+    with tempfile.TemporaryDirectory(prefix="gate-sweep-") as tmp:
+        table = pathlib.Path(tmp) / "mutants.toml"
+        rows = [f'[[mutant]]\nname = "{n}"\npath = "crates/ng-none/src/{n}.rs"\nold = "x"\nnew = "y"\n' for n in "ab"]
+        table.write_text("\n".join(['test = "-p ng-none --test none"\n', *rows]), encoding="utf-8")
+        log = io.StringIO()
+        with contextlib.redirect_stdout(log):
+            code = sweep([sys.executable, "-I", MUTATE, str(table), "--check"], ("a", "b"), 0)
+    stopped = "40-mutants: a NOT APPLIED, so the sweep stops with 1 rows not run" in log.getvalue().splitlines()
+    if code != 1 or not stopped:
+        out.append(Violation("sweep", f"{MUTATE} --check", "the driver misses mutate.py's own NOT APPLIED line"))
     return out
 
 
@@ -3080,13 +3090,13 @@ def seam() -> int:
         print(v)
     probes, bites = run_probes(ws, tree_passes=not found)
     cases = plan_cases(ws) + scan_cases() + comment_cases() + seal_cases()
-    cases += part_cases() + line_cases() + driver_case()
+    cases += part_cases() + line_cases() + driver_cases()
     for v in probes + cases:
         print(v)
     print(
         f"05-seam: {len(ws.members)} members against the crate table; {len(RULES)} rules, {bites} probes bite; "
         f"{len(PLAN_CASES)} plan cases; {len(SCAN_CASES)} scan cases; {len(COMMENT_CASES)} comment cases; "
-        f"{len(SEAL_CASES)} seal cases; {len(PART_CASES)} part cases; {len(LINE_CASES)} line cases; 1 driver case; "
+        f"{len(SEAL_CASES)} seal cases; {len(PART_CASES)} part cases; {len(LINE_CASES)} line cases; 2 driver cases; "
         f"{len(must_fail_rows(_read(ROOT / CONTRACT)))} must-fail rows"
     )
     return 1 if found or probes or cases else 0
