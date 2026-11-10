@@ -18,4 +18,4 @@ Blocked by: 02
 - [ ] The respiratory pump: force against drive
 - [ ] A validity range for each form, with its source
 
-**Start from:** the candidate fills for needs RS-L01, RS-L02, RS-L05, BC-L01, BC-L02 and MT-L01 in `~/nightingale-evidence/source-curation/coverage.jsonl`, none of which states a validity range, and slice B of `~/lanes/logs/ng-q1-healthy-body-draft.md`, which names a rung 0 model for each row. Both are leads to check against the sources. Neither is a source (SRS rule 16).
+**Start from:** the candidate fills for needs RS-L01, RS-L02, RS-L05, BC-L01, BC-L02 and MT-L01 in `~/nightingale-evidence/source-curation/coverage.jsonl`, none of which states a validity range, and slice B of `~/lanes/logs/ng-q1-healthy-body-draft.md`, which names a rung 0 model for each row. Both are leads to check against the sources. Neither is a source (SRS rule 16). The evidence store's search and the evidence library's tagged passages find the sources ([body map](../../body/map.md), Notes).

@@ -13,4 +13,4 @@ Blocked by: 02
 - [ ] What coagulation and immunity do in a healthy day, stated as the behaviors a held store cannot show
 - [ ] A validity range for each form, with its source
 
-**Start from:** slices C and E of `~/lanes/logs/ng-q1-healthy-body-draft.md` and section 4 of `~/lanes/logs/ng-q1-frame-followup.md`. The hematology, immune and musculoskeletal systems have no law need in the curation store, so this ticket adds them. These are leads to check against the sources, never sources themselves (SRS rule 16).
+**Start from:** slices C and E of `~/lanes/logs/ng-q1-healthy-body-draft.md` and section 4 of `~/lanes/logs/ng-q1-frame-followup.md`. The hematology, immune and musculoskeletal systems have no law need in the curation store, so this ticket adds them. These are leads to check against the sources, never sources themselves (SRS rule 16). The evidence store's search and the evidence library's tagged passages find the sources ([body map](../../body/map.md), Notes).

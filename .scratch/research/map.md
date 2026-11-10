@@ -12,6 +12,7 @@ The reference man's reviewed packet and a reviewed healthy-range set exist as ch
 - Source text stays local. Only numbers and citations enter the repo.
 - Pulse is a reference, never a pass bar (SRS rule 6).
 - Tickets 11 to 15 give the law forms for the nine systems the slice lacks, one ticket for each loop of the [body map](../body/map.md).
+- A search for a source starts in the curation study, the evidence store and the evidence library, which the [body map](../body/map.md)'s Notes locate. None of the three is a source.
 
 ## Decisions so far
 

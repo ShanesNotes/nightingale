@@ -17,4 +17,4 @@ Blocked by: 02
 - [ ] The acid-base interface: strong ion difference, weak acids and carbon dioxide, with the lumped anion that keeps charge at zero
 - [ ] A validity range for each form, with its source
 
-**Start from:** the candidate fills for needs EN-L01, EN-L03 and BC-L01 in `~/nightingale-evidence/source-curation/coverage.jsonl`, and slices B and C of `~/lanes/logs/ng-q1-healthy-body-draft.md`. These are leads to check against the sources, never sources themselves (SRS rule 16).
+**Start from:** the candidate fills for needs EN-L01, EN-L03 and BC-L01 in `~/nightingale-evidence/source-curation/coverage.jsonl`, and slices B and C of `~/lanes/logs/ng-q1-healthy-body-draft.md`. These are leads to check against the sources, never sources themselves (SRS rule 16). The evidence store's search and the evidence library's tagged passages find the sources ([body map](../../body/map.md), Notes).
