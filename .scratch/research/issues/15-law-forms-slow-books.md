@@ -8,7 +8,7 @@ Blocked by: 02
 
 - [ ] Calcium, phosphate and magnesium: absorption from the gut, a fast partner pool in bone and cells, parathyroid hormone as calcium's controller, and what returns phosphate and magnesium after a load
 - [ ] Cortisol's daily secretion profile and its action on the liver's glucose output
-- [ ] Red cell mass, iron and albumin as stores that lose mass in proportion to their size, with production to match
+- [ ] Red cell mass and albumin as stores that lose mass in proportion to their size, with production to match, and iron as a store that absorption from the gut refills
 - [ ] The bladder: urine made against urine voided
 - [ ] What coagulation and immunity do in a healthy day, stated as the behaviors a held store cannot show
 - [ ] A validity range for each form, with its source
