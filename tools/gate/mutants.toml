@@ -751,3 +751,14 @@ path = "crates/ng-contract/src/compile.rs"
 old = '''let found = (schema.pools()).find(|pool| body(pool) && pool.1 == space && pool.2 == Species::Energy);'''
 new = '''let found = (schema.pools()).find(|pool| (body(pool) || true) && pool.1 == space && pool.2 == Species::Energy);'''
 test = "-p ng-contract --test reactions dissipation_reaches_the_body_store_whatever_sorts_before_it"
+
+[[mutant]]
+name = "exchange-on-receipts"
+path = "crates/ng-record/src/history.rs"
+old = '''    if !crosses {
+        return 0;
+    }'''
+new = '''    if !crosses && false {
+        return 0;
+    }'''
+test = "-p ng-record --lib history::tests::carbon_a_reaction_makes_inside_the_body_leaves_closure_open_instead_of_counting_as_exchange"

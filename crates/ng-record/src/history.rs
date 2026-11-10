@@ -11,6 +11,15 @@ pub(crate) fn push_bits(bytes: &mut Vec<u8>, value: Compensated) {
     }
 }
 
+/// What one combination gains on one column as exchange. Only a column with a receipt crosses the boundary, so a column
+/// inside the body that changed a combination shows in its inventory alone, and closure reports it.
+fn exchanged<R>(weight: impl Fn(R) -> i64, terms: impl Iterator<Item = (R, i64)>, crosses: bool) -> i64 {
+    if !crosses {
+        return 0;
+    }
+    terms.map(|(row, coefficient)| coefficient * weight(row)).sum()
+}
+
 #[derive(Clone)]
 pub(crate) struct LedgerChunk {
     interval: Interval,
@@ -349,9 +358,8 @@ impl History {
                 };
                 (body.columns().iter())
                     .map(|column| {
-                        (column.terms().iter())
-                            .map(|&(row, coefficient)| coefficient * weight(row))
-                            .sum()
+                        let terms = (column.terms().iter()).map(|&(row, coefficient)| (row, coefficient));
+                        exchanged(weight, terms, column.receipt().is_some())
                     })
                     .collect()
             })
@@ -740,5 +748,33 @@ impl Curve<'_> {
         let reached = instant.nanoseconds() - self.interval.start().nanoseconds();
         let [start, end] = *self.coefficients;
         Compensated::between(start, end, reached, self.interval.length_ns())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::exchanged;
+
+    const FUEL: usize = 0;
+    const CARBON_DIOXIDE: usize = 1;
+    fn carbon(row: usize) -> i64 {
+        i64::from(row == FUEL || row == CARBON_DIOXIDE)
+    }
+    fn gained(terms: &[(usize, i64)]) -> i64 {
+        terms.iter().map(|&(row, coefficient)| coefficient * carbon(row)).sum()
+    }
+
+    #[test]
+    fn carbon_a_reaction_makes_inside_the_body_leaves_closure_open_instead_of_counting_as_exchange() {
+        let burn_making_carbon = [(FUEL, -1), (CARBON_DIOXIDE, 2)];
+        let fuel_supply = [(FUEL, 1)];
+        let inventory = gained(&burn_making_carbon) + gained(&fuel_supply);
+        let exchange = exchanged(carbon, burn_making_carbon.into_iter(), false)
+            + exchanged(carbon, fuel_supply.into_iter(), true);
+        assert_eq!(
+            (inventory, exchange),
+            (2, 1),
+            "one unit of each: the supply crosses the boundary, the burn's extra carbon does not"
+        );
     }
 }

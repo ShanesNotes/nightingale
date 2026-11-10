@@ -63,7 +63,8 @@ fn at_origin() -> Result<Position, AdmissionError> {
 
 /// Capillary beds on a vascular loop, each burning glucose with oxygen in its interstitium into a heat store of its
 /// own. Each bed takes glucose and oxygen in and lets carbon dioxide, water and heat out through boundaries of its
-/// own, so no column joins two beds. Every number is synthetic, glucose's energy content included.
+/// own, so no column joins two beds. It is a bench, not tissue respiration: its rate law and every number in it are
+/// synthetic, glucose's energy content included.
 pub struct BurningBeds {
     body: CompiledBody,
     beds: Vec<SiteId>,
