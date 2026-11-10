@@ -4,9 +4,10 @@ Python 3.11 stdlib only. Run as `python3 -I tools/gate/gate.py <command>`; it fi
 
     plan <merge|changed|full> [--base REV]   the run's plan as key=value lines
     seam                                     the workspace rules, every rule's probe, the plan, scan and comment cases
-    mutants [first|rest]                     40-mutants: first the check that every row applies and the sweep of the
-                                             rows the run's change adds or edits, then the sweep of the run's other
-                                             rows; each sweep stops at the first row not caught, and no part runs both
+    mutants [first|rest]                     40-mutants: first checks that every row applies, then sweeps the rows the
+                                             change adds or edits or whose path it changes; rest sweeps the run's
+                                             other rows; with no part, both in turn. A sweep stops at its first row
+                                             that is not caught
     bans                                     clippy rejects a probe built from clippy.toml, entry by entry
     f64                                      no bare f64 or f32 in a public API outside its row's allow list
     nightly-record <exit> <log>              record a nightly full run (tools/gate/nightly.sh)
@@ -2863,6 +2864,8 @@ class SweepParts:
 @functools.cache
 def mutate_py():
     spec = importlib.util.spec_from_file_location("mutate", ROOT / MUTATE)
+    if spec is None or spec.loader is None:
+        raise GateError(f"{MUTATE} does not load")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -2922,10 +2925,10 @@ def sweep(argv: list[str], names: Sequence[str], later: int) -> int:
         if stop is not None:
             child.kill()
     if stop is not None:
-        print(f"40-mutants: {stop[0]} {stop[1]}, so the sweep stops with {left} rows not run", flush=True)
+        print(f"40-mutants: the sweep stops at {stop[0]}, {stop[1]}. Rows not run: {left}", flush=True)
         return 1
     if child.returncode != 0:
-        print(f"40-mutants: the sweep failed with {left} rows not run", flush=True)
+        print(f"40-mutants: the sweep failed. Rows not run: {left}", flush=True)
         return 1
     return 0
 
@@ -2939,9 +2942,11 @@ def mutants(part: str | None) -> int:
     if part != "rest" and subprocess.run([*command, "--check"], cwd=ROOT).returncode != 0:
         return 1
     rows = mutate_py().load_rows(ROOT / MUTANTS, [])
-    diffed = mode != "changed" and base is not None
-    changed = set(_git_z(ROOT, "diff", "--name-only", "-z", base, "HEAD")) if diffed else set()
-    parts = sweep_parts(mode, scope, base, rows, rows_at(base) if diffed else [], changed)
+    changed: set[str] = set()
+    base_rows: list[dict] = []
+    if mode != "changed" and base is not None:
+        changed, base_rows = set(_git_z(ROOT, "diff", "--name-only", "-z", base, "HEAD")), rows_at(base)
+    parts = sweep_parts(mode, scope, base, rows, base_rows, changed)
     if part != "rest":
         named = f"{len(parts.first)} rows: {' '.join(parts.first)}" if parts.first else "no row"
         print(f"40-mutants: first part, {named}", flush=True)
@@ -3062,7 +3067,7 @@ def driver_cases() -> list[Violation]:
     out = []
     if code != 1 or took >= 10:
         out.append(Violation("sweep", "a fake sweep", f"returned {code} after {took:.0f} s; a SURVIVED row stops it"))
-    if "40-mutants: b SURVIVED, so the sweep stops with 1 rows not run" not in log.getvalue().splitlines():
+    if "40-mutants: the sweep stops at b, SURVIVED. Rows not run: 1" not in log.getvalue().splitlines():
         out.append(Violation("sweep", "a fake sweep", "no line reports b SURVIVED with 1 row not run"))
     if found := re.search(r"^sweep of (\d+),", log.getvalue(), re.M):
         with contextlib.suppress(ProcessLookupError):
@@ -3077,7 +3082,7 @@ def driver_cases() -> list[Violation]:
         log = io.StringIO()
         with contextlib.redirect_stdout(log):
             code = sweep([sys.executable, "-I", MUTATE, str(table), "--check"], ("a", "b"), 0)
-    stopped = "40-mutants: a NOT APPLIED, so the sweep stops with 1 rows not run" in log.getvalue().splitlines()
+    stopped = "40-mutants: the sweep stops at a, NOT APPLIED. Rows not run: 1" in log.getvalue().splitlines()
     if code != 1 or not stopped:
         out.append(Violation("sweep", f"{MUTATE} --check", "the driver misses mutate.py's own NOT APPLIED line"))
     return out
