@@ -1,7 +1,8 @@
 # 07: What limits the step
 
 Type: task
-Status: open
+Status: claimed
+Claimed by: body-07-step-limit
 Blocked by: none
 
 **What to build:** A measured account, on the slice, of where a step's cost goes and what limits its length. The aim is 100 times real time with full waveforms (SRS section 6), which is 10 ms of wall time for each simulated second.
