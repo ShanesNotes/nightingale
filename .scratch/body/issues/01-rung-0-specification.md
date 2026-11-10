@@ -34,6 +34,8 @@ Rung 0 is the whole body at the body map's destination. Each system has the smal
 - Ticket 06 builds the whole body with every row on a held stand-in. The **Ticket** column names the ticket that replaces that stand-in with the row's law. "slice" means the slice already has the law and ticket 06 carries it over. "05" means a boundary input. "kept" means rung 0 keeps the hold, for the reason given.
 - In a system table, **dynamic** rows are laws the system declares at rung 0. **Held** rows are stores or values a held stand-in keeps at rung 0, with their reason. **Absent** rows are not in the body at all. **Cannot show** lists the behaviors record 0002 asks a grouped region to state.
 - Sites are the slice's (`crates/ng-validate/src/slice.rs`), on the site classes of the [solver contract](../../../docs/architecture/solver-contract.md) section 1, plus the sites listed for ticket 03 below. The slice's splanchnic bed is the gut bed, its splanchnic veins are the portal vein, and its leg bed is the muscle bed.
+- "Every watery space" means the plasma, interstitium and cells of each bed and the lumen of each vessel on the blood network. The gut and urinary lumens are named apart.
+- Each bed has two walls, and each route family across them has one owner. FL owns every crossing of the capillary wall and the cell membrane by water, ions and other solutes. MT owns the crossings of both walls by oxygen and carbon dioxide, and the crossings of the cell membrane by fuels, except at the liver bed, where HP's glucose hub owns them.
 
 ### The day's conserved quantities
 
@@ -57,7 +59,7 @@ Pass 1. Vasopressin on the collecting duct controls it, answering osmolality, vo
 | urine | leaves | bladder | voiding: the slice's drain, then a void event | RN | slice, 22 |
 | skin evaporation | leaves | skin bed | evaporation, which takes water and its latent heat in one transfer | MT | 12 |
 | sweat | leaves | skin bed | sweat under the thermostat's sweat drive | MT | 12 |
-| airway evaporation | leaves | conducting airway | water that humidifies inspired gas leaves in expired gas | RS | 10 |
+| airway evaporation | leaves | conducting airway | water that humidifies inspired gas, held as vapor in the airway gas, leaves in expired gas | RS | 10 |
 | feces water | leaves | small intestine lumen | the balanced fecal exit | GI | 13 |
 
 Closes on paper: drinks + food water + metabolic water = urine + skin evaporation + sweat + airway evaporation + feces water + change in stores.
@@ -66,7 +68,7 @@ Water is stored in every watery space, cells included. Metabolic water needs tic
 
 #### Sodium
 
-Pass 1. Aldosterone through renin and angiotensin II, the natriuretic peptide, and pressure natriuresis control it (17). The store integrates intake less excretion, which gives the loop its integral action (healthy-body draft section 2.2).
+Pass 1. Aldosterone through renin and angiotensin II, the natriuretic peptide, and pressure natriuresis control it (17). The store integrates intake less excretion, which gives the loop its integral action (a model proposal in the healthy-body draft, section 2.2, for research 14 to source).
 
 | Term | Kind | Where | Law | Owner | Ticket |
 |---|---|---|---|---|---|
@@ -75,7 +77,7 @@ Pass 1. Aldosterone through renin and angiotensin II, the natriuretic peptide, a
 | circulation and capillary exchange | moves | blood and interstitium | advection, Starling exchange and lymph | CV, FL | slice |
 | cell sodium | moves | interstitium and cells | the sodium pump against a leak | FL | 17 |
 | filtration and reclaim | moves | glomerular bed, tubule, collecting duct | filtration, and saturable reclaim under aldosterone, the peptide and arterial pressure | RN | slice, 17 |
-| urine sodium | leaves | bladder | voiding | RN | slice |
+| urine sodium | leaves | bladder | voiding | RN | slice, 22 |
 | sweat sodium | leaves | skin bed | sweat carries sodium with its water | MT | 12 |
 | feces sodium | leaves | small intestine lumen | the balanced fecal exit | GI | 13 |
 
@@ -83,7 +85,7 @@ Closes on paper: meal sodium = urine sodium + sweat sodium + feces sodium + chan
 
 #### Potassium
 
-Pass 1. Insulin moves a meal's potassium into cells within minutes (15), and aldosterone raises its excretion over hours (17). A meal carries a large share of the extracellular store, so the shift into cells is dynamic at rung 0 (frame follow-up section 3a).
+Pass 1. Insulin moves a meal's potassium into cells within minutes (15), and aldosterone raises its excretion over hours (17). A meal carries a large share of the extracellular store, so the shift into cells is dynamic at rung 0 (a model proposal in the frame follow-up, section 3a, for research 13 to source).
 
 | Term | Kind | Where | Law | Owner | Ticket |
 |---|---|---|---|---|---|
@@ -93,7 +95,7 @@ Pass 1. Insulin moves a meal's potassium into cells within minutes (15), and ald
 | shift into cells | moves | interstitium to cells of the muscle and fat beds | uptake that insulin drives through the receptor layer | FL | 15 |
 | pump and leak | moves | cells and interstitium of every bed | the sodium pump against a leak, so what insulin moves in can return | FL | 17 |
 | filtration, reclaim and secretion | moves | glomerular bed, tubule, collecting duct | filtration, saturable reclaim, and secretion under aldosterone | RN | slice, 17 |
-| urine potassium | leaves | bladder | voiding | RN | slice |
+| urine potassium | leaves | bladder | voiding | RN | slice, 22 |
 | feces potassium | leaves | small intestine lumen | the balanced fecal exit | GI | 13 |
 
 Closes on paper: meal potassium = urine potassium + feces potassium + change in stores.
@@ -108,13 +110,13 @@ Pass 1. Chloride has no controller of its own. Its reclaim follows sodium's, as 
 | absorption | moves | small intestine lumen to portal blood | absorption | GI | 13 |
 | circulation and capillary exchange | moves | blood and interstitium | advection, Starling exchange and lymph | CV, FL | slice |
 | filtration and reclaim | moves | glomerular bed, tubule, collecting duct | reclaim follows sodium's, and the acid loop's feedback on the strong ion difference | RN | slice, 18 |
-| urine chloride | leaves | bladder | voiding | RN | slice |
+| urine chloride | leaves | bladder | voiding | RN | slice, 22 |
 | sweat chloride | leaves | skin bed | sweat carries chloride with its water | MT | 12 |
 | feces chloride | leaves | small intestine lumen | the balanced fecal exit | GI | 13 |
 
 Closes on paper: meal chloride = urine chloride + sweat chloride + feces chloride + change in stores.
 
-Cells hold no chloride at rung 0. A lumped anion stands for the cells' anions (see fixed acid).
+Cells hold no chloride at rung 0. The cell anion, a species that never crosses the cell membrane, stands for the cells' anions (see the species list).
 
 #### Oxygen
 
@@ -140,7 +142,7 @@ Pass 1. Ventilation under the central chemoreflex controls it, reading the acidi
 | Term | Kind | Where | Law | Owner | Ticket |
 |---|---|---|---|---|---|
 | carbon dioxide made | made | cells of every bed | the bed's oxidation reaction | MT | 09 |
-| tissue store | moves | cells and interstitium of every bed | one lumped store a bed's spaces hold | MT | 09 |
+| tissue store | moves | cells and interstitium of every bed | one store in each bed's spaces | MT | 09 |
 | carriage | moves | blood | advection, with dissolved, bicarbonate and bound forms as speciation in the strong-ion frame | CV, BC | 08 |
 | alveolar elimination | moves | pulmonary bed plasma to alveolar gas | diffusion across the gas-exchange surface | RS | 10 |
 | inspired carbon dioxide | enters | conducting airway | the room's inspired gas | RS | 10 |
@@ -160,6 +162,7 @@ Pass 1. The thermostat controls it, with a set point that follows the clock and 
 | food energy | enters | stomach lumen | the energy each fuel species carries in the meal's delivery | boundary | 05 |
 | gravity's work | enters | every vessel segment | posture's work, a receipt that nets over the day | CV | slice |
 | fuel energy to heat | moves | cells of every bed | the oxidation reaction gives each fuel's energy as heat, less the work it pays | MT | 09 |
+| heat of conversion | moves | liver bed cells | each conversion (glycogen, gluconeogenesis, urea, ketones) gives its energy difference as heat | HP | 14, 16 |
 | work to heat | moves | heart, vessel walls, respiratory pump | the walls' and the pump's work, paid by fuel at a bed, dissipates as heat | CV, MT | slice, 09, 10 |
 | heat carried by blood | moves | core and skin heat stores | blood carries heat between the two stores | CV | 12 |
 | conduction | moves | core to skin | conduction between the two stores | MT | 12 |
@@ -171,7 +174,7 @@ Pass 1. The thermostat controls it, with a set point that follows the clock and 
 
 Closes on paper: food energy + gravity's work = dry heat loss + evaporative heat + warming inspired gas + feces energy + urine energy + change in stores.
 
-Energy is stored as heat in the core and skin stores, as chemical energy in every fuel pool (glycogen, triglyceride and body protein the largest), and the walls' elastic store. Until ticket 09 the heart's work is paid by the exterior chemical energy MT stands behind in the slice, and until ticket 12 heat leaves by the slice's single exit. The energy each fuel carries is ticket 02's choice of book shape.
+Energy is stored as heat in the core and skin stores, as chemical energy in every fuel pool (glycogen, triglyceride and body protein the largest), and the walls' elastic store. Until ticket 09 the heart's work is paid by the exterior chemical energy MT stands behind in the slice, and until tickets 10 and 12 heat leaves by held exits at the skin and the airway. How a reaction carries each fuel's energy is ticket 02's choice.
 
 #### The fuels
 
@@ -183,28 +186,30 @@ Pass 1. Insulin and glucagon control them (15). No loop holds the stores within 
 | glucose absorption | moves | small intestine lumen to portal blood | absorption | GI | 13 |
 | liver glycogen | moves | liver bed cells | glycogen made and broken down under portal insulin and glucagon | HP | 14 |
 | gluconeogenesis | made | liver bed cells | glucose from lactate, amino acids and glycerol, as reactions | HP | 14 |
-| glucose uptake | moves | brain, muscle and fat beds | uptake the brain takes without insulin, and that muscle and fat take with insulin | MT | 15 |
+| glucose uptake | moves | cells of every bed | uptake without insulin in every bed, and more with insulin in muscle and fat | MT | 09, 15 |
 | muscle glycogen | moves | muscle bed cells | glycogen made and used in muscle | MS | 16 |
 | renal glucose reclaim | moves | glomerular bed, tubule | filtration, and reclaim up to its limit | RN | 15 |
-| glucose oxidation | used | cells of every bed | the oxidation reaction, one mixed fuel until ticket 16 | MT | 09, 16 |
-| glycolysis to lactate | used | cells of every bed | glycolysis when supply falls short, and at rest in some beds | MT | 09 |
+| glucose oxidation | used | cells of every bed | the oxidation reaction, with fatty acids in a fixed proportion until ticket 16 | MT | 09, 16 |
+| glycolysis to lactate | used | cells of every bed | glycolysis, at rest in some beds and wherever supply falls short | MT | 09 |
 | lactate made | made | cells of every bed | the product of glycolysis | MT | 09 |
-| lactate use | used | liver bed cells, and cells of beds that burn it | gluconeogenesis and oxidation | HP, MT | 14, 16 |
+| lactate use | used | cells of the beds that burn it, and liver bed cells | oxidation (09), and gluconeogenesis (14) | MT, HP | 09, 14 |
 | meal fat | enters | stomach lumen | the meal's fat | boundary | 05 |
-| fat absorption | moves | small intestine to the gut bed's lymph | fat by the lymph route | GI | 13 |
+| fat absorption | moves | small intestine lumen to the gut bed's interstitium, then by lymph | fat by the lymph route, since the gut bed's capillary wall keeps it back | GI | 13 |
 | fat storage and release | moves | fat bed cells | triglyceride stored after meals, and fatty acids and glycerol released under low insulin | MT | 16 |
-| fatty acid oxidation | used | cells of every bed | the oxidation reaction | MT | 16 |
+| fatty acid oxidation | used | cells of every bed but the brain's | the oxidation reaction | MT | 09, 16 |
 | ketones made | made | liver bed cells | ketones from fatty acids, overnight | HP | 16 |
 | ketogenesis | used | liver bed cells | fatty acids turned into ketones | HP | 16 |
-| ketone oxidation | used | cells of the brain and muscle beds | the oxidation reaction | MT | 16 |
+| ketone oxidation | used | cells of every bed | the oxidation reaction | MT | 16 |
 | glycerol to glucose | used | liver bed cells | glycerol taken into gluconeogenesis | HP | 14 |
 | meal protein | enters | stomach lumen | the meal's protein, delivered as amino acids | boundary | 05 |
 | amino acid absorption | moves | small intestine lumen to portal blood | absorption | GI | 13 |
 | protein turnover | moves | muscle and liver bed cells | body protein made and broken down at its smallest | MS | 16 |
-| amino acid use | used | liver bed cells | deamination into urea, with the carbon to glucose or oxidation | HP | 14 |
+| amino acid use | used | liver bed cells | deamination into urea, with the sulfur posted as fixed acid and the carbon made into glucose | HP | 14, 18 |
+| amino acids to ammonium | used | peritubular bed cells | ammonium made for acid excretion | RN | 18 |
+| protein to creatinine | used | muscle bed cells | creatinine made from muscle | MS | 16 |
 | feces fuel | leaves | small intestine lumen | unabsorbed fuel in the balanced fecal exit | GI | 13 |
 
-Closes on paper (glucose and glycogen): meal glucose + gluconeogenesis = glucose oxidation + glycolysis to lactate + change in stores.
+Closes on paper (glucose and glycogen): meal glucose + gluconeogenesis = glucose oxidation + glycolysis to lactate + feces fuel + change in stores.
 
 Closes on paper (lactate): lactate made = lactate use + change in stores.
 
@@ -212,13 +217,13 @@ Closes on paper (fat): meal fat = fatty acid oxidation + ketogenesis + glycerol 
 
 Closes on paper (ketones): ketones made = ketone oxidation + change in stores.
 
-Closes on paper (amino acids and body protein): meal protein = amino acid use + feces fuel + change in stores.
+Closes on paper (amino acids and body protein): meal protein = amino acid use + amino acids to ammonium + protein to creatinine + feces fuel + change in stores.
 
-Each fuel's carbon leaves as carbon dioxide and its hydrogen as water, which those two tables carry.
+Ticket 09 burns glucose and fatty acids in a fixed proportion, which fixes the respiratory quotient, and it oxidizes lactate. Each is supplied by its held stand-in until tickets 13 to 16 build its sources. Each fuel's carbon leaves as carbon dioxide, except the carbon urea and creatinine carry out, and its hydrogen leaves as water. The carbon dioxide and water tables carry both.
 
 #### Nitrogen
 
-Pass 1. No controller acts within a day, and enzyme induction acts over days (healthy-body draft section 2.8). Amino acid use rises with supply, so urea's making and excretion follow intake.
+Pass 1. No controller acts within a day, and enzyme induction acts over days (a model proposal in the healthy-body draft, section 2.8). Amino acid use rises with supply, so urea's making and excretion follow intake.
 
 | Term | Kind | Where | Law | Owner | Ticket |
 |---|---|---|---|---|---|
@@ -226,7 +231,7 @@ Pass 1. No controller acts within a day, and enzyme induction acts over days (he
 | amino acid absorption | moves | small intestine lumen to portal blood | absorption | GI | 13 |
 | protein turnover | moves | muscle and liver bed cells | body protein made and broken down | MS | 16 |
 | urea synthesis | moves | liver bed cells | urea from amino acids, as a reaction | HP | 14 |
-| ammonium made | moves | renal tubule | ammonium made from amino acids in the tubule, for acid excretion | RN | 18 |
+| ammonium made | moves | peritubular bed cells, then the tubule lumen | ammonium made from amino acids in the kidney's cells and secreted, for acid excretion | RN | 18 |
 | creatinine made | moves | muscle bed cells | creatinine made from muscle | MS | 16 |
 | urine urea | leaves | bladder | filtration, with part reclaimed | RN | 14 |
 | urine ammonium | leaves | bladder | ammonium excretion | RN | 18 |
@@ -235,21 +240,26 @@ Pass 1. No controller acts within a day, and enzyme induction acts over days (he
 
 Closes on paper: meal nitrogen = urine urea + urine ammonium + urine creatinine + feces nitrogen + change in stores.
 
-Ammonia has no pool at rung 0, because urea is made from amino acids in one reaction (14). Albumin's and hemoglobin's nitrogen stays in their own conserved quantities, whose making and loss balance (21), so they leave this table unchanged.
+Ammonia has no pool at rung 0, because urea is made from amino acids in one reaction (14). The peritubular bed's cells stand for the tubule's cells, where ammonium is made. Albumin's and hemoglobin's nitrogen stays in their own conserved quantities, whose making and loss balance (21), so they leave this table unchanged.
 
 #### Fixed acid
 
-Pass 1. The kidney's feedback on the strong ion difference controls it over hours (18), and the chemoreflex answers through carbon dioxide within minutes (11). The draft's "net acid excretion" becomes, in the strong-ion frame, the kidney excreting chloride and the lumped anion with ammonium instead of with sodium.
+Pass 1. The kidney's feedback on the strong ion difference controls it over hours (18), and the chemoreflex answers through carbon dioxide within minutes (11). The draft's "net acid excretion" becomes, in the strong-ion frame, the kidney excreting chloride and the lumped anion with ammonium instead of with sodium. The diet's organic anions are its base: tissues burn them to total carbon dioxide.
 
 | Term | Kind | Where | Law | Owner | Ticket |
 |---|---|---|---|---|---|
-| fixed acid made | made | cells of every bed | the oxidation reaction posts the lumped strong anion the diet's protein yields | MT | 18 |
-| speciation | moves | every watery space | acidity stated from the strong ion difference, the weak acids and carbon dioxide | BC | 08, 18 |
-| fixed acid excreted | leaves | bladder | the kidney's excretion of the lumped anion as a feedback on the strong ion difference | RN | 18 |
+| fixed acid made | made | liver bed interstitium | the liver's amino acid use posts the sulfur of the diet's protein as the lumped strong anion | HP | 18 |
+| diet base | enters | stomach lumen | the meal's organic anions, delivered with its cations | boundary | 05 |
+| diet base absorption | moves | small intestine lumen to portal blood | absorption | GI | 18 |
+| diet base burned | used | cells of every bed | the oxidation reaction burns the organic anion to total carbon dioxide | MT | 18 |
+| speciation | moves | every watery space | acidity stated from the strong ion difference, the weak acids and carbon dioxide | BC | 08 |
+| fixed acid excreted | leaves | bladder | the kidney's excretion of the lumped anion with ammonium, as a feedback on the strong ion difference | RN | 18 |
 
-Closes on paper: fixed acid made = fixed acid excreted + change in stores.
+Closes on paper (fixed acid): fixed acid made = fixed acid excreted + change in stores.
 
-Lactate and ketones are strong anions too. They close in the fuels table. Hydrogen ion and bicarbonate are never amounts.
+Closes on paper (diet base): diet base = diet base burned + change in stores.
+
+The lumped anion is made in the liver and moves through every watery space outside cells. The cells' own anions are a separate species that never crosses the cell membrane. Lactate and ketones are strong anions after speciation too, and they close in the fuels table. Hydrogen ion and bicarbonate are never amounts. Until ticket 18 the synthetic meal pairs its cations with chloride, as the slice's does.
 
 #### The minerals
 
@@ -287,22 +297,24 @@ Pass 2. No controller acts. Each store loses mass in proportion to its size, wit
 | Term | Kind | Where | Law | Owner | Ticket |
 |---|---|---|---|---|---|
 | hemoglobin production | made | central veins | red cell production to match the loss, entering the blood | HC | 21 |
-| hemoglobin carriage | moves | blood | advection; hemoglobin crosses no capillary wall | CV | 08 |
+| hemoglobin carriage | moves | blood | advection; hemoglobin crosses no capillary wall | CV | 06 |
 | hemoglobin destruction | used | gut bed blood | first-order loss in proportion to the red cell mass | HC | 21 |
-| iron absorption | enters | small intestine lumen to portal blood | absorption to match iron's loss | GI | 21 |
-| iron recycling | moves | liver bed cells | iron from destroyed red cells returns to the store, and production draws on it | HC | 21 |
-| iron loss | leaves | gut bed | first-order loss in proportion to the store | HC | 21 |
-| albumin synthesis | made | liver bed plasma | constant synthesis, then production to match the loss | HP | 14, 21 |
+| meal iron | enters | stomach lumen | the meal's delivery | boundary | 05 |
+| iron absorption | moves | small intestine lumen to portal blood | absorption, to match the loss | GI | 21 |
+| iron store | moves | liver bed cells | the store that absorption fills | HC | 21 |
+| feces iron | leaves | small intestine lumen | the unabsorbed share | GI | 21 |
+| iron loss | leaves | gut bed cells to the small intestine lumen | first-order loss in proportion to the store, as shed cells | HC | 21 |
+| albumin synthesis | made | liver bed plasma | constant synthesis, then production to match a first-order loss | HP | 14, 21 |
 | albumin exchange | moves | every bed | Starling exchange with albumin's reflection, and lymph | FL | slice |
-| albumin loss | used | liver bed plasma | first-order loss in proportion to the store | HP | 21 |
+| albumin loss | used | liver bed plasma | a held loss equal to the constant synthesis, then first-order loss in proportion to the store | HP | 14, 21 |
 
 Closes on paper (hemoglobin): hemoglobin production = hemoglobin destruction + change in stores.
 
-Closes on paper (iron): iron absorption = iron loss + change in stores.
+Closes on paper (iron): meal iron = feces iron + iron loss + change in stores.
 
 Closes on paper (albumin): albumin synthesis = albumin loss + change in stores.
 
-Hemoglobin is the red cell mass at rung 0, one amount whose partial volume stands for the red cells' volume (08, 21). Platelets, leukocytes, globulins and clotting factors are absent, as coagulation and immunity at rest have zero flux (21).
+Hemoglobin is the red cell mass at rung 0, one amount whose partial volume stands for the red cells' volume (08, 21). Its making and loss are balanced flows that draw no iron from the store and return none. Platelets, leukocytes, globulins and clotting factors are absent, as coagulation and immunity at rest have zero flux (21).
 
 ### The 13 systems at rung 0
 
@@ -313,7 +325,7 @@ Each row is one law or one stand-in. **Ticket** names the ticket that makes a dy
 | Kind | What | Law or reason | Ticket |
 |---|---|---|---|
 | dynamic | The pulsatile heart: four chambers with time-varying elastance, valves as modes, the rhythm's phase | the slice's laws (map default: pulsatile at rung 0) | slice |
-| dynamic | Compliance and resistance on every vascular edge of the whole body's map, the portal circuit included | the slice's edge laws on the new beds | 06 |
+| dynamic | Compliance and resistance on every vascular edge of the whole body's map, except the liver bed's, which HP's sinusoidal law holds | the slice's edge laws on the new beds | 06 |
 | dynamic | Advection of every species the blood carries, hemoglobin included | the slice's advection, extended to each species a route carries | 06 |
 | dynamic | Hydrostatic head from site positions under posture | arrow 96, an anatomy relation | slice |
 | dynamic | Rate, contractility and vessel tone from receptor occupancy | the receptor layer | slice |
@@ -322,8 +334,9 @@ Each row is one law or one stand-in. **Ticket** names the ticket that makes a dy
 | dynamic | Skin vessel tone under the thermostat's release at the skin junction | the receptor layer at the skin bed | 12 |
 | dynamic | Heat carried by blood between the core and skin heat stores | a heat advection law | 12 |
 | held | Every CV law runs at a reference temperature | no rung 0 CV law reads temperature (arrow 90's temperature field) | kept |
+| held | Ventricular wall stress as a field | one natriuretic peptide is secreted, on atrial stretch (arrow 79) | kept |
 | absent | The arrest rhythms, their hazard, and cardiac conduction | no healthy day enters them | none |
-| absent | The ECG waveform as a law's output | open, and no ticket plans it (body map, Not yet specified) | none |
+| absent | The ECG waveform | open: whether a law or an observer makes it, and no ticket plans it (body map, Not yet specified) | none |
 | absent | Coronary territories, collaterals and watershed zones | one coronary bed stands for the heart's tissue (record 0002) | none |
 | cannot show | Arrhythmia, arrest, ischemia by coronary territory, tamponade, and pooling within one limb | the map holds none of the structure these need | none |
 
@@ -335,7 +348,7 @@ Each row is one law or one stand-in. **Ticket** names the ticket that makes a dy
 | dynamic | Diffusion of oxygen and carbon dioxide across the gas-exchange surface | alveolar exchange, reading pulmonary capillary flow (arrow 81) | 10 |
 | dynamic | The pleural space's pressure, felt by every bed it encloses | the breath's pleural pressure replaces the slice's held constant (arrow 82) | 10 |
 | dynamic | The resting lung volume, which follows posture | the equation of motion's resting point | 10 |
-| dynamic | Water and heat that leave in expired gas | airway heat and water loss | 10 |
+| dynamic | Water vapor and heat that leave in expired gas | airway heat and water loss | 10 |
 | dynamic | The work of breathing charged to metabolism, and the pump's load on MS | arrows 84 and 85 | 10 |
 | dynamic | Lung stretch reported to NS | arrow 83 | 11 |
 | held | Lung water | no rung 0 lung law reads it (arrow 110) | kept |
@@ -349,11 +362,12 @@ Each row is one law or one stand-in. **Ticket** names the ticket that makes a dy
 | Kind | What | Law or reason | Ticket |
 |---|---|---|---|
 | dynamic | The baroreflex: stretch afferents, and norepinephrine and acetylcholine release, reuptake and clearance at every junction | the slice's laws (arrow 77) | slice |
-| dynamic | The chemoreflex: a central sensor on the brain bed's acidity and a peripheral sensor on arterial oxygen and carbon dioxide, driving the pump's junction | arrows 86 and 88. The acidity read follows carbon dioxide alone until ticket 18 | 11, 18 |
-| dynamic | The thermostat: core temperature against a set point that follows the clock and steps down in sleep, driving release at the skin junction and the sweat and shiver drives | arrows 87 and 91 | 12 |
+| dynamic | The chemoreflex: a central sensor on the brain bed's acidity, which BC states from ticket 08, and a peripheral sensor on arterial oxygen and carbon dioxide, driving the pump's junction. Sleep shifts its set point and lowers its gain | arrows 86 and 88 | 11 |
+| dynamic | The thermostat: core temperature (arrow 91) and skin temperature against a set point that follows the clock and steps down in sleep, driving release on skin vessels and sweat glands at the skin junction, and the shiver drive | arrows 87 and 91 | 12 |
 | dynamic | The osmoreceptor and the volume drive to vasopressin | arrow 89's vasopressin field | 17 |
 | dynamic | Sleep's gain on sympathetic traffic | the sleep state input (05) | 25 |
 | held | The circadian phase and the CRH drive to EN | the clock reaches every law as a boundary input (05), as foundation 06 says for arrow 89, so NS relays neither | kept |
+| held | The thermostat's set point and its sweat drive as fields of arrow 87 | the set point is NS memory, and sweat answers release at the skin junction | kept |
 | held | Brain water and intracranial pressure | no skull enclosure at rung 0 (arrow 111) | kept |
 | held | Ammonia's effect on the brain, and the fever set point shift | no ammonia pool, and immunity at rest (arrows 100 and 108) | kept |
 | absent | A clock oscillator, REM sleep, and sleep the body decides | the non-goals of tickets 05 and 25 | none |
@@ -364,27 +378,28 @@ Each row is one law or one stand-in. **Ticket** names the ticket that makes a dy
 
 | Kind | What | Law or reason | Ticket |
 |---|---|---|---|
-| dynamic | Filtration, one lumped tubule and collecting duct, water reclaim under vasopressin, saturable sodium and potassium reclaim, and tubuloglomerular feedback | the slice's laws (arrow 97) | slice |
+| dynamic | Filtration, one grouped tubule and collecting duct, water reclaim under vasopressin, saturable sodium and potassium reclaim, and tubuloglomerular feedback | the slice's laws (arrow 97) | slice |
 | dynamic | Filtration and reclaim of each new small solute: glucose up to its limit, urea in part, creatinine not at all, total carbon dioxide | tubular laws per species | 14, 15, 16, 18 |
 | dynamic | Renin secretion | arrow 98 | 17 |
 | dynamic | Sodium reclaim that answers aldosterone, the peptide and the renal bed's own pressure, so pressure natriuresis shows as a check | the kidney's pressure answer (curation study, need RN-L04: a check, never a law) | 17 |
 | dynamic | Potassium secretion under aldosterone, and the clock's gain on filtration | the clock input (05) | 17 |
-| dynamic | Ammonium made in the tubule and excreted with chloride and the lumped anion, as the feedback on the strong ion difference | | 18 |
+| dynamic | Ammonium made from amino acids in the peritubular bed's cells, which stand for the tubule's cells, and secreted with chloride and the lumped anion, as the feedback on the strong ion difference | | 18 |
 | dynamic | Calcium reclaim under parathyroid hormone, and saturable phosphate and magnesium reclaim | | 19 |
 | dynamic | The bladder: urine collects, and leaves at a void that is an event of the day | | 22 |
 | held | Intra-abdominal pressure on the kidney | a held constant on a healthy day (arrow 102) | kept |
 | absent | Erythropoietin and calcitriol as moving hormones | the non-goals of tickets 19 and 21 | none |
 | absent | Nephrons by type, the medulla's gradient, renal nerves beyond the slice's, drug excretion, dialysis | record 0002; ticket 17's non-goals | none |
-| cannot show | Acute kidney injury, obstruction, a concentrating defect from the medulla, the urge to void, bladder pressure | one lumped nephron and no bladder wall | none |
+| cannot show | Acute kidney injury, obstruction, a concentrating defect from the medulla, the urge to void, bladder pressure | one grouped nephron and no bladder wall | none |
 
 #### HP. Hepatic
 
 | Kind | What | Law or reason | Ticket |
 |---|---|---|---|
-| dynamic | The liver bed on the portal circuit, taking portal and arterial blood | the vascular laws on the new bed (arrow 99) | 14 |
+| dynamic | The liver bed on the portal circuit, taking portal and arterial blood through its sinusoidal edge law | arrow 99, an anatomy relation | 14 |
 | dynamic | Glycogen made and broken down under portal insulin and glucagon | | 14 |
-| dynamic | Gluconeogenesis from lactate, amino acids and glycerol, and urea from amino acids | reactions (ticket 02) | 14 |
-| dynamic | Albumin synthesis: constant, then production to match a first-order loss | | 14, 21 |
+| dynamic | Gluconeogenesis from lactate, amino acids and glycerol, and urea from amino acids, each reaction giving its energy difference as heat | reactions (ticket 02) | 14 |
+| dynamic | The sulfur of the diet's protein posted as fixed acid by the amino acid reaction | | 18 |
+| dynamic | Albumin synthesis: constant with a matching held loss, then production to match a first-order loss | | 14, 21 |
 | dynamic | First-pass clearance of insulin | | 15 |
 | dynamic | Ketones from fatty acids overnight | | 16 |
 | dynamic | Cortisol's action on the glucose output | the receptor layer | 20 |
@@ -399,8 +414,9 @@ Each row is one law or one stand-in. **Ticket** names the ticket that makes a dy
 | Kind | What | Law or reason | Ticket |
 |---|---|---|---|
 | dynamic | Stomach and small intestine lumens on the gut network, with gastric emptying | | 13 |
-| dynamic | Absorption of water, sodium, potassium, chloride, glucose and amino acids into portal blood, and of fat by the lymph route | arrow 104 | 13 |
+| dynamic | Absorption of water, sodium, potassium, chloride, glucose and amino acids into portal blood, and of fat by the lymph route | arrow 104, an anatomy relation | 13 |
 | dynamic | The balanced fecal exit of each meal's unabsorbed share | | 13 |
+| dynamic | Absorption of the diet's organic anion | | 18 |
 | dynamic | Absorption of calcium, phosphate and magnesium | | 19 |
 | dynamic | Absorption of iron to match its loss | | 21 |
 | held | Gut secretion and its reabsorption | one balanced held flow (ticket 13) | kept |
@@ -428,11 +444,10 @@ Each row is one law or one stand-in. **Ticket** names the ticket that makes a dy
 | Kind | What | Law or reason | Ticket |
 |---|---|---|---|
 | dynamic | Oxygen's saturation and partial pressure from its content and hemoglobin | algebraic rows that write no amount | 08 |
-| dynamic | Carbon dioxide's dissolved, bicarbonate and bound forms, in the strong-ion frame | algebraic rows. Ticket 08 states them with the lumped anion held, and ticket 18 completes them | 08 |
-| dynamic | Acidity in every watery space from the strong ion difference, the weak acids and total carbon dioxide | algebraic rows (map default) | 18 |
+| dynamic | Acidity in every watery space from the strong ion difference, the weak acids and total carbon dioxide, with carbon dioxide's dissolved, bicarbonate and bound forms | algebraic rows (map default). Ticket 08 states them with the lumped anion and the diet's organic anion held, and ticket 18 adds their making and excretion | 08 |
 | dynamic | Ionized calcium | an algebraic row | 19 |
 | held | Every speciation runs at a reference temperature | arrow 94 | kept |
-| absent | Transfers across the cell membrane | FL owns the cell membrane (fork owners), so BC writes no amount | none |
+| absent | Transfers across the cell membrane | FL and MT own the membrane's routes, so BC writes no amount | none |
 | absent | Red cell chemistry, buffering inside cells and bone, drug binding | ticket 18's non-goals; no drugs | none |
 | cannot show | The oxygen curve's adaptation, intracellular acidosis, bone's buffering in chronic acidosis, the alkaline tide after a meal unless research 14 sources its size | the laws they need are absent | none |
 
@@ -442,17 +457,17 @@ Each row is one law or one stand-in. **Ticket** names the ticket that makes a dy
 |---|---|---|---|
 | dynamic | Hemoglobin as a mass in blood, so its concentration follows dilution and hematocrit sets viscosity | arrow 114's viscosity field | 08 |
 | dynamic | Red cell mass lost in proportion to its size, with production to match | | 21 |
-| dynamic | Iron's store, its recycling from destroyed red cells, and its loss | | 21 |
-| held | Coagulation at rest | zero flux with its cannot-show list (ticket 21); arrow 114's bleeding competence and thrombosis fields | kept |
+| dynamic | Iron's store, filled by absorption and lost in proportion to its size | | 21 |
+| held | Coagulation's fields | held at zero, and ticket 21 declares coagulation at zero flux with its cannot-show list (arrow 114's bleeding competence and thrombosis fields) | kept |
 | held | Every HC law runs at a reference temperature | arrow 92 | kept |
 | absent | Platelets, leukocytes, clotting factors, red cell age, erythropoietin as a moving hormone | ticket 21's non-goals | none |
-| cannot show | Bleeding, clotting, thrombosis, recovery from anemia, polycythemia, a white cell response | the laws they need are absent | none |
+| cannot show | Bleeding, clotting, thrombosis, erythropoietin's answer to hypoxia or bleeding, iron limiting red cell production, polycythemia, a white cell response | the laws they need are absent | none |
 
 #### IM. Immune
 
 | Kind | What | Law or reason | Ticket |
 |---|---|---|---|
-| dynamic | None | immunity at rest has zero flux (map default), and IM's crate declares its ports at zero | 21 |
+| dynamic | None: ticket 21 replaces the held card with a declaration of zero flux and its cannot-show list | immunity at rest (map default) | 21 |
 | held | iNOS, myocardial depression, permeability, glycocalyx, tissue factor, hepcidin, the fever set point shift, mitochondrial efficiency | each held at zero or at the healthy value (arrows 105 to 109) | kept |
 | absent | Pathogens, mediators, phagocytes, antibodies | no healthy day shows them | none |
 | cannot show | Infection, sepsis, fever, anaphylaxis, inflammation, wound healing | ticket 21 puts this list in the body model | none |
@@ -462,7 +477,7 @@ Each row is one law or one stand-in. **Ticket** names the ticket that makes a dy
 | Kind | What | Law or reason | Ticket |
 |---|---|---|---|
 | dynamic | Starling exchange at every bed, interstitial pressure, and lymph return | the slice's laws (arrow 80) | slice |
-| dynamic | Each new small solute's crossing of the capillary wall | the slice's exchange law per species, or a keep-back until the species' ticket | 06 |
+| dynamic | Each new solute's crossing of the capillary wall, gases excepted | the slice's exchange law per species, or a keep-back until the species' ticket | 06 |
 | dynamic | Potassium moved into cells by insulin | the receptor layer | 15 |
 | dynamic | Water across the cell membrane by tonicity, and the sodium pump against a leak, with the pump's energy charged to metabolism | | 17 |
 | dynamic | Phosphate moved into cells with insulin | | 19 |
@@ -476,14 +491,16 @@ Each row is one law or one stand-in. **Ticket** names the ticket that makes a dy
 
 | Kind | What | Law or reason | Ticket |
 |---|---|---|---|
-| dynamic | Each bed burns fuel with oxygen into carbon dioxide, water, heat and fixed acid: one mixed fuel at a fixed respiratory quotient, then each bed's own mix | a reaction (ticket 02); arrow 78 | 09, 16, 18 |
-| dynamic | Gas diffusion between each bed's blood and tissue, the tissue carbon dioxide store, and oxygen debt and lactate when supply falls short | arrow 90 | 08, 09 |
-| dynamic | Glucose uptake: without insulin in the brain, with insulin in muscle and fat | the receptor layer | 15 |
+| dynamic | Oxygen and carbon dioxide across the capillary wall and the cell membrane, and the tissue carbon dioxide store | diffusion | 08, 09 |
+| dynamic | Each bed burns fuel with oxygen into carbon dioxide, water and heat: glucose and fatty acids in a fixed proportion with lactate's oxidation, then each bed's own mix | a reaction (ticket 02); arrow 78 | 09, 16 |
+| dynamic | Oxygen debt and lactate when supply falls short | arrow 90 | 09 |
+| dynamic | Fuels across the cell membrane: glucose without insulin in every bed and with insulin in muscle and fat, and the other fuels | the receptor layer | 09, 15, 16 |
 | dynamic | Fat stored after meals and released overnight, fatty acid and ketone oxidation, and the heat a meal adds | | 16 |
-| dynamic | Two heat stores, core and skin, with conduction between them, radiation, convection, evaporation and sweat to the room, and shivering's heat in the muscle bed | arrows 87 and 91 | 12 |
+| dynamic | The diet's organic anion burned to total carbon dioxide | | 18 |
+| dynamic | Two heat stores, core and skin, with conduction between them, radiation, convection, evaporation and sweat to the room, sweat answering release at the skin junction, and shivering's heat in the muscle bed | arrows 87 and 91 | 12 |
 | dynamic | Sleep's gain on each bed's metabolic rate | the sleep state input (05) | 25 |
 | held | Mitochondrial efficiency | the healthy value (arrow 109) | kept |
-| absent | More than two heat stores, temperature's effect on rate, exercise, fever | ticket 12's non-goals | none |
+| absent | More than two heat stores, exercise and fever (ticket 12's non-goals), and temperature's effect on rate (ticket 09's) | | none |
 | cannot show | Heat illness, regional temperature differences, starvation | the structure and laws they need are absent | none |
 
 #### MS. Musculoskeletal and skin
@@ -495,49 +512,53 @@ Each row is one law or one stand-in. **Ticket** names the ticket that makes a dy
 | dynamic | Bone's partner pool for calcium, phosphate and magnesium | | 19 |
 | held | Respiratory muscle fatigue | a resting day has no fatigue law (arrow 95) | kept |
 | held | Skin and compartment water | arrow 113 | kept |
-| held | The chance fixture: the slice's stir, which moves no law | the replay gates need a hazard on the body (ticket 06) until a physiological law draws chance | kept |
 | absent | Voluntary movement, posture as muscle work, junctions other than the pump's, bone remodeling, pressure injury | posture is a boundary input; no healthy day needs the rest | none |
 | cannot show | Weakness, fatigue, rhabdomyolysis, compartment syndrome, fracture, pressure injury | the laws they need are absent | none |
 
 ### The species, spaces and sites ticket 03 builds from
 
-Ticket 03 adds these once, so no loop ticket edits a closed list.
+Ticket 03 adds these once, so no loop ticket edits a closed list. "Blood" means each vessel lumen and each bed's plasma.
 
 | Species | Measure | Charge | Conserved quantities | Spaces | First moved by |
 |---|---|---|---|---|---|
-| oxygen | amount | 0 | oxygen | every blood and tissue space, alveolar gas, airway gas | 08 |
-| carbon dioxide, total | amount | 0 as a total; speciation gives bicarbonate's | carbon dioxide | every watery space, alveolar gas, airway gas | 08 |
-| nitrogen gas | amount | 0 | none: it crosses no wall | alveolar gas and airway gas, only if ticket 10 keeps the tidal breath | 10 |
-| glucose | amount | 0 | the fuels, energy | every watery space, gut and urinary lumens | 13 |
+| oxygen | amount | 0 | oxygen | every watery space, alveolar gas, airway gas | 08 |
+| carbon dioxide, total | amount | a neutral moiety; speciation gives bicarbonate's charge | carbon dioxide | every watery space, urinary lumens, alveolar gas, airway gas | 08 |
+| nitrogen gas | amount | 0 | its own: it enters and leaves with each breath and crosses no wall | alveolar gas, airway gas | 10 |
+| water (exists) | volume | 0 | water | adds vapor in the alveolar and airway gas | 10 |
+| glucose | amount | 0 | the fuels, energy | every watery space, gut and urinary lumens | 09 |
 | glycogen | mass | 0 | the fuels, energy | cells of the liver and muscle beds | 14 |
-| triglyceride | mass | 0 | the fuels, energy | gut lumen, the gut bed's lymph and blood, cells of the fat bed | 13 |
-| fatty acids | amount | 0 at rung 0 | the fuels, energy | plasma, interstitium, cells | 16 |
-| glycerol | amount | 0 | the fuels, energy | plasma, interstitium, cells | 16 |
-| amino acids, one lumped species | amount | 0 | the fuels, nitrogen, energy | every watery space, gut lumen | 13 |
+| triglyceride | mass | 0 | the fuels, energy | gut lumen, the gut bed's interstitium, blood, cells of the fat bed | 13 |
+| fatty acids | amount | 0 at rung 0 | the fuels, energy | every watery space | 09 |
+| glycerol | amount | 0 | the fuels, energy | every watery space | 14 |
+| amino acids, one lumped species | amount | 0 | the fuels, nitrogen, energy | every watery space, gut and urinary lumens | 13 |
 | body protein | mass | 0 | the fuels, nitrogen, energy | cells of the muscle and liver beds | 16 |
-| lactate | amount | -1 | the fuels, energy, charge | every watery space | 09 |
-| ketones, one species | amount | -1 | the fuels, energy, charge | plasma, interstitium, cells | 16 |
-| urea | amount | 0 | nitrogen, energy | every watery space, urinary lumen | 14 |
-| ammonium | amount | +1 | nitrogen, charge | tubule, collecting duct and bladder lumens | 18 |
-| creatinine | amount | 0 | nitrogen, energy | every watery space, urinary lumen | 16 |
-| other strong anion, lumped | amount | -1 | fixed acid, charge | every watery space, urinary lumen | 18 |
-| calcium | amount | +2 | the minerals, charge | every watery space, bone bed cells, gut and urinary lumens | 19 |
+| lactate | amount | a neutral moiety; -1 after speciation | the fuels, energy | every watery space | 09 |
+| ketones, one species | amount | a neutral moiety; -1 after speciation | the fuels, energy | every watery space | 16 |
+| urea | amount | 0 | nitrogen, energy | every watery space, urinary lumens | 14 |
+| ammonium | amount | a neutral moiety; +1 after speciation | nitrogen | peritubular bed cells, urinary lumens | 18 |
+| creatinine | amount | 0 | nitrogen, energy | every watery space, urinary lumens | 16 |
+| other strong anion, lumped: the fixed acid | amount | a neutral moiety; -1 after speciation | fixed acid | every watery space outside cells, urinary lumens | 18 |
+| diet organic anion, lumped: the diet's base | amount | a neutral moiety; -1 after speciation | fixed acid, energy | gut lumen, every watery space | 18 |
+| cell anion | amount | -1 | charge | cells of every bed; it crosses no membrane, held or a site parameter as ticket 03 picks | 17 reads it |
+| calcium | amount | +2 | the minerals, charge | every watery space, gut and urinary lumens, bone bed cells | 19 |
 | magnesium | amount | +2 | the minerals, charge | every watery space, gut and urinary lumens | 19 |
-| phosphate | amount | a weak acid, charged by speciation | the minerals, charge | every watery space, bone bed cells, gut and urinary lumens | 19 |
-| hemoglobin | mass | a weak acid in blood (18) | the blood's cells and proteins | bed plasma and vessel lumens only | 08 |
-| iron | amount | 0 | the blood's cells and proteins | blood, cells of the liver bed, gut lumen | 21 |
+| phosphate | amount | a weak acid, charged by speciation | the minerals | every watery space, gut and urinary lumens, bone bed cells | 19 |
+| hemoglobin | mass | a weak acid, charged by speciation | the blood's cells and proteins | blood only | 06 |
+| iron | amount | 0 | the blood's cells and proteins | gut lumen, blood, cells of the liver and gut beds | 21 |
 | insulin, glucagon | amount | 0 | each its own | blood, interstitium, bound | 15 |
-| renin, angiotensin II, aldosterone, the natriuretic peptide | amount | 0 | each its own | blood, interstitium, bound (renin in blood only) | 17 |
+| renin, angiotensin II, aldosterone, the natriuretic peptide | amount | 0 | each its own | blood, interstitium, bound; renin in blood only | 17 |
 | parathyroid hormone | amount | 0 | its own | blood, interstitium, bound | 19 |
 | cortisol | amount | 0 | its own | blood, interstitium, bound | 20 |
-| albumin (exists) | mass | a weak acid (18) | the blood's cells and proteins | as in the slice | 18 |
+| albumin (exists) | mass | a weak acid, charged by speciation | the blood's cells and proteins | as in the slice | 08 |
 
 No species is added for hydrogen ion, bicarbonate, ammonia, angiotensinogen, epinephrine or thyroid hormone. The first two are speciation, ammonia has no pool, and the rest are absent at rung 0.
 
+Charge is a default for tickets 02 and 03 (see hard parts). A reaction that makes lactate, ketones, the fixed acid or ammonium would change the sum of fixed charges, and hydrogen ion is never an amount in the strong-ion frame. So each acid or base is a neutral moiety whose charge BC's speciation gives, and every reaction balances charge. Each space's charge after speciation is zero, which electroneutrality holds. A meal delivers its cations with chloride, phosphate and the diet's organic anion, so each delivery is neutral.
+
 | Space | At | Earned by |
 |---|---|---|
-| alveolar gas: not watery, its volume follows the gas law | the pulmonary bed | ticket 10's exchange, and the lens's arterial and end-tidal gas readings |
-| airway gas: not watery | the conducting airway | ticket 10's dead space, and the airway's water and heat loss |
+| alveolar gas: not watery, its volume follows the gas law, and it holds oxygen, carbon dioxide, nitrogen gas and water vapor | the pulmonary bed | ticket 10's exchange, and the lens's arterial and end-tidal gas readings |
+| airway gas: not watery, holding the same gases | the conducting airway | ticket 10's dead space, and the airway's water and heat loss |
 | gut lumen: watery, a lumen as the renal tubule's is | the stomach and the small intestine | ticket 13's emptying and absorption |
 | heat store | the skin heat site; the core's heat stays at the slice's body site | ticket 12's two heat stores |
 
@@ -551,7 +572,7 @@ Red cells get no space, because hemoglobin is a mass in blood (ticket 08). The s
 | muscle bed | capillary bed: the slice's leg bed, standing for all skeletal muscle and the tissue no other bed names | insulin-driven uptake (15), muscle glycogen, body protein and creatinine (16), shivering (12), and the posture checks that earned the leg bed |
 | fat bed | capillary bed | the triglyceride store and lipolysis (16), and insulin-driven uptake (15) |
 | skin bed | capillary bed | skin vessel tone, evaporation and sweat (12) |
-| skin heat site | tissue site | the skin heat store (12) |
+| skin heat site | tissue site | the skin heat store and the skin thermoreceptor (12) |
 | bone bed | capillary bed | the minerals' partner pool (19) |
 | stomach | vessel segment on the gut network | emptying (13) |
 | small intestine | vessel segment on the gut network | absorption and the fecal exit (13) |
@@ -559,23 +580,38 @@ Red cells get no space, because hemoglobin is a mass in blood (ticket 08). The s
 | respiratory pump junction | junction | the drive reaches the pump as release (11) |
 | skin junction | junction | the thermostat's release on skin vessels and sweat glands (12) |
 
-The gut bed and the portal vein are the slice's splanchnic bed and veins, which now drain into the liver bed.
+The gut bed and the portal vein are the slice's splanchnic bed and veins, which now drain into the liver bed. The peritubular bed's cells stand for the tubule's cells.
 
 | Landmark | At | Read by |
 |---|---|---|
 | central chemoreceptor | brain bed | 11 |
 | peripheral chemoreceptor | systemic arteries | 11 |
-| thermostat | brain bed | 12 |
+| skin thermoreceptor | skin heat site | 12 |
 | osmoreceptor | brain bed | 17 |
 | volume receptor | central veins | 17 |
-| islets | gut bed | 15 |
+| adrenal | systemic arteries, reading potassium, with angiotensin II through the receptor layer | 17 |
+| islets | systemic arteries, reading glucose | 15 |
 | parathyroid | systemic arteries | 19 |
+
+The thermostat reads core temperature through arrow 91, so it needs no landmark of its own.
+
+| Hormone | Enters at | Leaves at | Ticket |
+|---|---|---|---|
+| insulin, glucagon | the portal vein, from the islets | the liver bed for insulin's first pass, and the central veins | 15 |
+| renin | the glomerular bed's plasma | the central veins | 17 |
+| angiotensin II | the pulmonary bed's plasma, made at a rate renin sets | the central veins | 17 |
+| aldosterone, the natriuretic peptide | the central veins | the central veins | 17 |
+| parathyroid hormone | the central veins | the central veins | 19 |
+| cortisol | the central veins | the central veins | 20 |
+| vasopressin (exists) | the central veins | the central veins | slice, 17 |
+
+Each hormone leaves by a first-order clearance, as vasopressin does in the slice.
 
 Three networks are new. The airway runs from the room through the conducting airway to the alveolar gas. The gut runs from the stomach through the small intestine to the fecal exit. The portal circuit on the vascular network runs from the gut bed through the portal vein to the liver bed and the central veins. The pleural space also encloses the coronary bed, and the abdominal space the liver bed.
 
 ### Which pass each item belongs to
 
-Pass 1 is every loop that a monitor reading depends on or that drifts within a day. Pass 2 is the slow books. A row's ticket gives its pass.
+Pass 1 is every loop that a monitor reading depends on or that drifts within a day. Pass 2 is the slow conserved quantities. A row's ticket gives its pass.
 
 | Pass | Tickets | Conserved quantities and controllers |
 |---|---|---|
@@ -587,7 +623,7 @@ Until its ticket lands, a pass 2 amount is a held store with balanced flows. Nit
 
 ### The holds rung 0 keeps
 
-Every other hold of ticket 06's table has a releasing ticket. These stay at the destination, so ticket 28's hold table lists exactly these.
+Every other hold of ticket 06's table has a releasing ticket. These stay at the destination, so ticket 28's hold table lists exactly these. Some belong to cards that have a crate by then, which needs the contract change listed under hard parts.
 
 | Hold | Card | Reason | Where it shows |
 |---|---|---|---|
@@ -601,10 +637,10 @@ Every other hold of ticket 06's table has a releasing ticket. These stay at the 
 | Intra-abdominal pressure on the kidney and the diaphragm | GI | The same held constant as the abdominal space's pressure | arrows 102 and 103 |
 | Ventricular wall stress | CV | One natriuretic peptide is secreted, on atrial stretch | arrow 79 |
 | The circadian phase and the CRH drive | NS | The clock is a boundary input every law reads (ticket 05), and cortisol follows it directly (ticket 20) | arrow 89 |
-| The thermostat's set point as a field | NS | The set point is NS memory, compared with core temperature inside NS | arrow 87 |
+| The thermostat's set point and its sweat drive as fields | NS | The set point is NS memory, compared inside NS, and sweat answers release at the skin junction | arrow 87 |
 | Respiratory muscle fatigue | MS | A resting day has no fatigue | arrow 95 |
-| Immunity at rest | IM | Zero flux (map default): no check of a healthy day could judge a reduced model | arrows 105 to 109 |
-| Coagulation at rest | HC | Zero flux (map default), for the same reason | arrow 107, arrow 114's bleeding and thrombosis fields |
+| IM's coupling fields | IM | Held at zero or at the healthy value (map default). Ticket 21 replaces IM's held card with a declaration of zero flux and its cannot-show list, and the fields stay held | arrows 105 to 109 |
+| Coagulation's fields | HC | Held at zero (map default), as ticket 21 declares coagulation at zero flux | arrow 107, arrow 114's bleeding and thrombosis fields |
 | The vessel wall's permeability and glycocalyx | FL | Their healthy values, since immunity is at rest | arrow 106 |
 | Mitochondrial efficiency | MT | Its healthy value, since immunity is at rest | arrow 109 |
 | The chance fixture | none: the composition root | The replay gates need a hazard on the body until a physiological law draws chance. The slice's stir moves no law. The slice's forcing on skin water loss moves with that loss to MT's evaporation (12) | the stir's stream and hazard |
@@ -625,7 +661,7 @@ Each row is one line of the [coupling map](../../../docs/atlas/coupling-map.md),
 | 84 | RS to MT, work of breathing | `work of breathing`: wired by 10 |
 | 85 | RS to MS, pump load | `pump load`: wired by 10 |
 | 86 | NS to RS, respiratory drive | `respiratory_drive`: wired by 11 |
-| 87 | NS to MT, thermostat, shiver and sweat | `thermostat_set_point`: held at rung 0, the set point is NS memory and no MT law reads it; `shiver_drive`: wired by 12, read by the muscle bed's heat; `sweat_drive`: wired by 12, read by the sweat law |
+| 87 | NS to MT, thermostat, shiver and sweat | `thermostat_set_point`: held at rung 0, the set point is NS memory and no MT law reads it; `shiver_drive`: wired by 12, read by the muscle bed's heat, since shivering is a somatic act; `sweat_drive`: held at rung 0, sweat answers release at the skin junction (S10) |
 | 88 | NS to MS, motor drive | `motor_drive`: wired by 11, release at the respiratory pump's junction |
 | 89 | NS to EN, CRH, vasopressin, circadian phase | `crh_drive`: held at rung 0, cortisol's profile follows the clock input directly (ticket 20); `vasopressin_drive`: wired by 17; `circadian_phase`: held at rung 0, the clock is a boundary input every law reads (ticket 05) |
 | 90 | MT to CV, O2 debt per bed, temperature | `oxygen_debt_per_bed`: wired by 09; `temperature`: held at rung 0, CV's laws run at a reference temperature |
@@ -637,12 +673,12 @@ Each row is one line of the [coupling map](../../../docs/atlas/coupling-map.md),
 | 96 | MS to CV, position and gravity | `position`: anatomy relation, site positions under the boundary's posture; `gravity`: anatomy relation, the hydrostatic head those positions give |
 | 97 | RN to CV, tubuloglomerular feedback | `afferent_tone`: wired by 06, live in the slice |
 | 98 | RN to EN, renin | `renin_secretion`: wired by 17 |
-| 99 | HP to CV, portal pressure | `portal_pressure`: wired by 14, the liver bed on the portal circuit |
+| 99 | HP to CV, portal pressure | `portal_pressure`: anatomy relation, the liver bed on the portal circuit, so CV's one solve gives portal pressure through HP's sinusoidal edge law (14) |
 | 100 | HP to NS, ammonia | `plasma_ammonia`: held at rung 0, urea is made with no ammonia pool and no rung 0 law reads ammonia (ticket 14) |
 | 101 | GI to CV, intra-abdominal pressure | `intra-abdominal pressure`: anatomy relation, the abdominal space's pressure felt by every bed it encloses, whose compliance GI holds |
 | 102 | GI to RN, intra-abdominal pressure | `intra_abdominal_pressure`: held at rung 0, a held constant on a healthy day (ticket 13) |
 | 103 | GI to RS, intra-abdominal pressure | `intra-abdominal pressure`: held at rung 0, the same held constant, and the resting lung volume follows posture directly (ticket 10) |
-| 104 | GI to HP, portal delivery | `portal delivery`: wired by 13 |
+| 104 | GI to HP, portal delivery | `portal delivery`: anatomy relation, the portal vein carries what the gut absorbs to the liver bed by CV's advection (13) |
 | 105 | IM to CV, iNOS, myocardial depression | `inos_activity`: held at rung 0, immunity at rest has zero flux (ticket 21); `myocardial_depression`: held at rung 0, zero flux |
 | 106 | IM to FL, permeability, glycocalyx | `permeability`: held at rung 0, the healthy wall (ticket 21); `glycocalyx`: held at rung 0, the healthy wall |
 | 107 | IM to HC, tissue factor, hepcidin | `tissue factor`: held at rung 0, zero flux (ticket 21); `hepcidin`: held at rung 0, zero flux, and iron's store follows its own loss |
@@ -654,7 +690,7 @@ Each row is one line of the [coupling map](../../../docs/atlas/coupling-map.md),
 | 113 | FL to MS, skin and compartment water | `skin_water`: held at rung 0, pressure injury is absent; `compartment_water`: held at rung 0, limb compartments are absent |
 | 114 | HC to CV, bleeding competence, viscosity, thrombosis | `bleeding_competence`: held at rung 0, no bleeding edge (ticket 21); `viscosity`: wired by 08; `thrombosis`: held at rung 0, zero flux (ticket 21) |
 
-Totals at rung 0: 20 arrows wire at least one field, 3 are anatomy relations, and 15 hold every field. The check script in the pull request recounts them. Arrows 79, 87, 89, 90, 95 and 114 wire some fields and hold others.
+Totals at rung 0: 18 arrows wire at least one field, 5 are anatomy relations, and 15 hold every field. The check script in the pull request recounts them. Arrows 79, 87, 89, 90, 95 and 114 wire some fields and hold others.
 
 ### Fork owners
 
@@ -662,12 +698,12 @@ Owning a fork means writing the laws that fill the gap it names. The ledger stay
 
 | Fork | Owner | Why | Built by |
 |---|---|---|---|
-| nitrogen ledger | HP | The gap is urea's making, which closes the nitrogen book (ticket 14). MS turns protein over and makes creatinine (16), and RN excretes urea, ammonium and creatinine, each by its own laws | 03, 14 |
-| acid ledger | MT | The gap is the fixed acid's making, which no card posted. MT's reaction posts the lumped anion each fuel yields. RN's feedback excretes it and BC states acidity, each by its own laws | 03, 18 |
+| nitrogen ledger | HP | The gap is urea's making, which closes nitrogen's table (ticket 14). MS turns protein over and makes creatinine (16), and RN makes ammonium and excretes urea, ammonium and creatinine, each by its own laws | 03, 14 |
+| acid ledger | HP | The gap is the fixed acid's making, which no card posted. HP's amino acid use posts the sulfur of the diet's protein as the lumped anion. MT burns the diet's organic anion, RN's feedback excretes the fixed acid, and BC states acidity, each by its own laws | 03, 14, 18 |
 | carbon dioxide ledger | MT | The gap is the tissue store, which no card named. It is each bed's spaces, filled by MT's reaction and emptied by MT's diffusion to blood. Total carbon dioxide is one species, so the gas and acid loops move one amount | 03, 09 |
-| potassium shift into cells | FL | FL owns the cell membrane. Insulin's uptake (15) and the pump and leak (17) are its route laws, read through the receptor layer. The atlas gave the shift to BC, whose speciation writes no amount | 03, 15, 17 |
+| potassium shift into cells | FL | FL owns the water and ion routes across the cell membrane. Insulin's uptake (15) and the pump and leak (17) are its laws, read through the receptor layer. The atlas gave the shift to BC, whose speciation writes no amount | 03, 15, 17 |
 | natriuretic peptide's secretion | EN | EN secretes every hormone. Arrow 79 carries the atrial wall stress CV computes to EN's law, ticket 17 already releases that arrow, and the packet anchors the peptide in plasma | 17 |
-| cell water | FL | FL owns water and osmoles in every space, and one membrane type (SRS section 5) puts the cell membrane beside the capillary wall FL already owns | 03, 17 |
+| cell water | FL | FL owns water and osmoles in every space. One membrane type (SRS section 5) puts the cell membrane beside the capillary wall, and FL owns water's routes across both | 03, 17 |
 | bone pools | MS | Bone is MS's tissue. Its partner pool is the bone bed's cells, moved by MS's exchange law (19). Until then the minerals are held stores | 03, 19 |
 | pleural space | RS | RS defines the pleural space's pressure from the breath (10). The pleural fluid is a left-out space at rung 0 | 03, 04, 10 |
 | bladder | RN | The urinary tract is RN's (atlas renal card). The slice's drain is a boundary law, and ticket 22's void moves it to RN | 22 |
@@ -681,22 +717,22 @@ The ticket lists the bladder and the body map lists intracranial pressure, so bo
 
 | Card | Trim | Lands with |
 |---|---|---|
-| CV | Natriuretic peptide secretion leaves the register for EN (line 17 left it open). Heat carried between the core and skin stores is a CV law | 12, 17 |
+| CV | Natriuretic peptide secretion leaves the register for EN (line 17 left it open). Heat carried between the core and skin stores is a CV law. The liver bed's edges are HP's | 12, 14, 17 |
 | RS | One alveolar unit with a shunt, not two per lung (line 87). Pleural pressure is the pleural space's pressure. Ventilation and perfusion spread and hypoxic vasoconstriction are later rungs | 10 |
-| NS | NS owns intracranial pressure once a skull enclosure exists, so line 27's open ownership closes, and arrow 111 becomes that enclosure's pressure. Its sensors are landmarks. It sends no circadian phase at rung 0 | 11 |
-| RN | RN owns the bladder and its void. Rung 0's tubular detail is one tubule and one collecting duct (line 28). Erythropoietin and calcitriol are not moving hormones at rung 0 | 17 |
-| HP | Zones within the liver are absent (line 63). Heat comes from MT's reaction, so HP posts none to S6. Urea is an uncharged osmole carrying nitrogen, not an S4 ion. Albumin synthesis is constant, then matches a first-order loss | 14 |
+| NS | NS owns intracranial pressure once a skull enclosure exists, so line 27's open ownership closes, and arrow 111 becomes that enclosure's pressure. Its sensors are landmarks, and the thermostat reads core temperature through arrow 91. It sends no circadian phase at rung 0 | 11 |
+| RN | RN owns the bladder and its void, and makes ammonium. Rung 0's tubular detail is one tubule and one collecting duct (line 28). Erythropoietin and calcitriol are not moving hormones at rung 0 | 17 |
+| HP | Zones within the liver are absent (line 63). HP's conversions post their own heat, and HP posts the fixed acid. Urea is an uncharged osmole carrying nitrogen, not an S4 ion. Albumin synthesis is constant with a matching held loss, then matches a first-order loss. HP owns the liver bed's edges and its cells' fuel routes | 14 |
 | GI | Enteric control is absent at rung 0 (line 55). Stomach and small intestine only, with secretion as one balanced held flow and a balanced fecal exit | 13 |
-| EN | The axes at rung 0 (line 47): insulin and glucagon, the renin chain, vasopressin and the natriuretic peptide in pass 1, then parathyroid hormone and cortisol in pass 2. Epinephrine, thyroid hormones, growth hormone, incretins, erythropoietin and calcitriol are absent. Insulin's portal-to-peripheral gradient is the liver's first-pass clearance (15) | 17, the first EN crate |
-| BC | Speciation only, writing no amount: the cell membrane's pumps and shifts, and tonicity-driven cell water, go to FL | 08 |
+| EN | The axes at rung 0 (line 47): insulin and glucagon, the renin chain, vasopressin and the natriuretic peptide in pass 1, then parathyroid hormone and cortisol in pass 2. Epinephrine, thyroid hormones, growth hormone, incretins, erythropoietin and calcitriol are absent. Insulin's portal-to-peripheral gradient is the liver's first-pass clearance (15) | 17 or 15, whichever lands first |
+| BC | Speciation only, writing no amount: the cell's pumps and shifts, and tonicity-driven cell water, go to FL | 08 |
 | HC | The reduced coagulation model is cut (line 22): coagulation at rest has zero flux. Red cell mass is the hemoglobin amount | 08, 21 |
 | IM | A quiescent card with its ports at zero flux (line 24) | 21 |
-| FL | FL owns the cell membrane: water by tonicity, the sodium pump and leak, and insulin's uptake of potassium and phosphate. The intake and output ledger goes (line 20) | 17 |
-| MT | Two heat stores, not eight (lines 25 and 71). MT posts metabolic water and sweat to S8, fixed acid to S4, and owns the fat bed. "Oxygen debt to every card" goes (line 18) | 09, 12 |
+| FL | FL owns the crossings of both walls by water, ions and other solutes, gases and fuels excepted: water by tonicity, the sodium pump and leak, and insulin's uptake of potassium and phosphate at the cell membrane. The intake and output ledger goes (line 20) | 17 |
+| MT | Two heat stores, not eight (lines 25 and 71). MT posts metabolic water, skin evaporation and sweat to S8, owns the fat bed, and owns the gases' crossings of both walls and the fuels' crossings of the cell membrane. "Oxygen debt to every card" goes (line 18) | 08, 09, 12 |
 | MS | Creatinine is a solute, not S9 (line 26). Bone is a reservoir only until ticket 19 (line 75). The respiratory pump and its junction are rung 0. Its heat goes through MT's reaction | 10, 16, 19 |
-| Coupling map | Arrow 89's circadian phase comes from the boundary clock (line 18). Arrow 87's set point stays NS memory, and its shiver drive is read by the muscle bed's heat. Arrow 111 waits for a skull enclosure | 12, 17 |
+| Coupling map | Arrow 89's circadian phase comes from the boundary clock (line 18). Arrow 87's set point stays NS memory, its sweat drive gives way to release at the skin junction, and its shiver drive is read by the muscle bed's heat. Arrows 99 and 104 are realized by the portal circuit, as anatomy relations. Arrow 111 waits for a skull enclosure | 12, 13, 14, 17 |
 
-Each card's crate is first built in these tickets: BC and HC in 08, MT in 09, RS and MS in 10, GI in 13, HP in 14, EN in 17 or 15, whichever lands first, and IM in 21. CV, FL, NS and RN have crates in the slice.
+Each card's crate is first built in these tickets: BC, HC and MT in 08, RS and MS in 10, GI in 13, HP in 14, EN in 17 or 15, whichever lands first, and IM in 21. CV, FL, NS and RN have crates in the slice.
 
 ### Evidence library links by loop
 
@@ -712,7 +748,7 @@ The [evidence library](../../evidence-library/map.md) stores each link as a dire
 | Hypoxia narrows pulmonary vessels | 4 works, 10 passages (West 11e; Boron and Boulpaep) | S1 | held | ticket 10's non-goal; an RS law on the pulmonary bed's own edges would carry it |
 | Hydrogen ion, carbon dioxide and saturation set arteriolar tone | 4 works, 9 passages (Guyton; Klabunde; West) | S3 | held | rung 0's local signal is oxygen debt alone (09) |
 | Chemoreceptor activity drives breathing, heart rate and pressure | 3 works, 3 passages (Ganong; Guyton; Klabunde) | 86 | wired | 11 |
-| Arterial oxygen drives chemoreceptor discharge | 1 work, 1 passage | S2 | wired | 11 |
+| A fall in arterial oxygen raises chemoreceptor discharge | 1 work, 1 passage | S2 | wired | 11 |
 | Lung volume changes heart rate | 1 work (Berne and Levy) | 83 | wired | 11 |
 | Pulmonary blood flow sets oxygen uptake | 1 work | 81 | wired | 10 |
 
@@ -723,9 +759,9 @@ No edge covers ventilation acting on arterial carbon dioxide, or carbon dioxide 
 | Link | Evidence | Arrow | Status | Ticket |
 |---|---|---|---|---|
 | Body temperature raises heart rate | 6 works, 10 passages (Guyton; two models) | 90 | held | CV's laws run at a reference temperature |
-| Core temperature narrows skin vessels and lowers skin flow | 8 works and 6 works (a Stolwijk model; Berne and Levy; Levick) | 91 | wired | 12 |
+| A rise in core temperature relaxes skin vessels and raises skin flow | 8 works and 6 works (a Stolwijk model; Berne and Levy; Levick) | 91 | wired | 12 |
 | Skin vessel tone and skin flow set skin temperature | 7 works, 8 passages (Berne and Levy; Boron and Boulpaep) | S6 | wired | 12 |
-| Core temperature drives sympathetic activity | 2 works (Boron and Boulpaep; Levick) | 91 | wired | 12 |
+| Core temperature sets sympathetic activity to the skin | 2 works (Boron and Boulpaep; Levick) | 91 | wired | 12 |
 | Sympathetic activity narrows skin vessels | 4 works (Berne and Levy; Katzung; Klabunde) | S10 | wired | 12 |
 | Muscle activity raises body temperature | 4 works (Katzung 14e; Rang and Dale 8e) | 87 | wired | 12, through the shiver drive |
 | Thyroid hormone raises heat production | 1 work (Berne and Levy) | S7 | held | thyroid hormones are absent at rung 0 |
@@ -758,7 +794,7 @@ No edge covers emptying, absorption, the liver's glucose output, glycogen or lac
 | Urine output and sodium excretion lower extracellular volume | 19 works, 38 passages (Guyton; Levick) | S8 | wired | slice |
 | Blood volume raises arterial pressure, filling and cardiac output | 22 works, 108 passages (Guyton 13e; Klabunde; Boron and Boulpaep) | S1 | wired | slice |
 | Arterial pressure drives the baroreflex | 29 works, 70 passages (Levick; Katzung) | 77 | wired | slice |
-| Blood volume and pressure drive vasopressin | 13 works, 39 passages (Guyton 12e; Boron and Boulpaep; Berne and Levy) | 89 | wired | 17 |
+| A fall in blood volume or pressure raises vasopressin | 13 works, 39 passages (Guyton 12e; Boron and Boulpaep; Berne and Levy) | 89 | wired | 17 |
 | Plasma osmolality drives vasopressin | 10 works, 22 passages (Berne and Levy; Boron and Boulpaep; Goodman and Gilman) | 89 | wired | 17 |
 | Atrial pressure and volume drive the natriuretic peptide | 4 works (Ganong; Boron and Boulpaep; Berne and Levy) | 79 | wired | 17 |
 | Chloride at the macula densa sets afferent tone and renin | 4 works, 6 passages (Guyton 12e and 13e) | 97 | wired | slice |
@@ -777,8 +813,8 @@ No edge covers thirst or drinking, which rung 0 schedules.
 |---|---|---|---|---|
 | Hydrogen ion and carbon dioxide change arteriolar tone | 2 works (Guyton) | S4 | held | rung 0's local signal is oxygen debt alone |
 | Carbonic anhydrase drives bicarbonate reclaim | 1 work (Katzung) | S4 | wired | 18 |
-| Hydrogen ion raises potassium secretion | 1 work (Guyton) | S4 | held | ticket 17's potassium secretion reads aldosterone, not acidity |
-| Extracellular volume and sympathetic activity raise acid secretion | 1 work each (Boron and Boulpaep) | none | lead | the same volume gap as the water and salt loop |
+| Hydrogen ion lowers potassium secretion | 1 work (Guyton) | S4 | held | ticket 17's potassium secretion reads aldosterone, not acidity |
+| Volume contraction and sympathetic activity raise acid secretion | 1 work each (Boron and Boulpaep) | none | lead | the same volume gap as the water and salt loop |
 
 No edge covers ventilation acting on arterial carbon dioxide, or net acid excretion.
 
@@ -821,26 +857,26 @@ No edge covers albumin synthesis, red cell lifespan or iron.
 |---|---|---|---|---|
 | No link: no term names the bladder, voiding, micturition or the detrusor | 0 works, from the graph's term list | none | none | 22 builds the void with no library lead |
 
-Posture is the graph's densest neighborhood. Venous pooling, hydrostatic pressure and the muscle pump act on venous return and pressure in 22 works (arrow 96, an anatomy relation), and intra-abdominal pressure acts on venous return in 5 works (arrow 101). Sleep-tagged passages hold 56 edges from 17 works, none of them on the night's fall in pressure, the chemoreflex's gain or vasopressin.
+Posture is the graph's densest neighborhood. Venous pooling, hydrostatic pressure and the muscle pump act on venous return and pressure in 22 works (arrow 96, an anatomy relation), and intra-abdominal pressure acts on venous return in 5 works (arrow 101). Sleep-tagged passages hold 56 edges from 17 works, none of them on the night's fall in pressure, the chemoreflex's gain or vasopressin. Three arrows have links outside these loops, and all three are held at rung 0: 105 (cytokines on nitric oxide, one textbook), 106 (one to three works) and 111 (intracranial pressure on arterial pressure, the Cushing response).
 
 ### Which holds each later ticket releases
 
 | Ticket | Releases |
 |---|---|
 | 08 | The held gas in blood and tissue, the carrier's capacity, and arrow 114's viscosity. It adds a fixed exchange at the lung and a fixed use at each bed |
-| 09 | Ticket 08's fixed use at each bed, MT's held chemical energy that pays the heart's work in the slice, and arrows 78 and 90. It adds one mixed fuel at a fixed respiratory quotient |
-| 10 | RS's held pleural pressure, ticket 08's fixed exchange at the lung, the lung's share of water and heat loss, and arrows 81, 82, 84, 85 and 95's pump force. It adds a held drive |
+| 09 | Ticket 08's fixed use at each bed, MT's held chemical energy that pays the heart's work in the slice, and arrows 78 and 90. It burns glucose and fatty acids in a fixed proportion with lactate's oxidation, held until ticket 16 |
+| 10 | RS's held pleural pressure, ticket 08's fixed exchange at the lung, ticket 06's held airway exit for water and heat, and arrows 81, 82, 84, 85 and 95's pump force. It adds a held drive |
 | 11 | Ticket 10's held drive, and arrows 83, 86 and 88 |
 | 12 | MS's held skin water loss, the slice's single heat exit, and arrows 87 (shiver and sweat) and 91 |
-| 13 | GI's absorption stand-in, which puts a meal straight into the veins, and arrow 104 |
-| 14 | HP's held card: glycogen, gluconeogenesis and urea, and arrow 99. It adds held insulin and glucagon values and a constant albumin synthesis |
+| 13 | GI's absorption stand-in, which puts a meal straight into the veins, and arrow 104, which the portal circuit realizes |
+| 14 | HP's held card: glycogen, gluconeogenesis and urea, the liver bed's held edges, and arrow 99, which the portal circuit realizes. It adds held insulin and glucagon values, and a constant albumin synthesis with a matching held loss |
 | 15 | EN's held insulin and glucagon with ticket 14's held values, the slice's external insulin-driven potassium shift, and the filter's keep-back of glucose |
 | 16 | MS's held stores (muscle glycogen, body protein and creatinine's source), MT's one mixed fuel, the fat store and ketones |
 | 17 | EN's held vasopressin logistic, its held renin chain and peptide, BC's held cell water, and arrows 79 (atrial stress), 89 (vasopressin drive) and 98 |
-| 18 | BC's held lumped anion, the filter's keep-back of total carbon dioxide, and NS's acidity read from carbon dioxide alone |
+| 18 | BC's held lumped anion and the diet's held organic anion, the filter's keep-back of total carbon dioxide, and the synthetic meal's pairing of its cations with chloride |
 | 19 | The minerals' held stores with balanced flows: absorption, bone and cell exchange, and excretion |
 | 20 | EN's held cortisol |
-| 21 | HC's held red cell mass and iron, ticket 14's constant albumin synthesis, and IM's held card, each replaced by a store or by zero flux with its cannot-show list |
+| 21 | HC's held red cell mass and iron, ticket 14's constant albumin synthesis and its held loss, and IM's held card, replaced by a declaration of zero flux with its cannot-show list |
 | 22 | The slice's bladder drain, which has no void |
 | 23 | None. It builds the healthy-range and return checks in validation and no law, so no stand-in changes |
 | 24 | None. It runs the day on the body the earlier tickets built, and its check is that only pass 2 holds and the holds rung 0 keeps remain |
@@ -850,12 +886,14 @@ Posture is the graph's densest neighborhood. Venous pooling, hydrostatic pressur
 
 #### Conserved quantities rung 0's laws cannot close today
 
+- Charge cannot close as the contract books it today. Its charge is a sum of fixed charges, and the compiler asks each reaction for exact charge stoichiometry. Rung 0's reactions make lactate, ketones, the fixed acid and ammonium, and the strong-ion frame keeps hydrogen ion out of the amounts. A meal's calcium, magnesium and potassium also come with phosphate and organic anions that no species named. The default above books each acid and base as a neutral moiety whose charge speciation gives, and adds the diet's organic anion and the cell anion. Tickets 02 and 03 decide it, and ticket 02's reaction prototype is the place to test it.
 - Every made or used row (metabolic water, oxygen use, carbon dioxide made, the fuels, urea, ammonium, creatinine, fixed acid) needs ticket 02's reaction. Today a transfer never changes a species, and the contract has no reaction.
-- The energy table needs each fuel species to carry its energy, so a reaction's heat is the fuels' energy less the products'. That is ticket 02's choice of book shape.
-- Iron cannot close as ticket 21 words it. "Production to match" gives iron no source, because iron only enters by absorption. The table above closes it with absorption.
+- The energy table needs each fuel species to carry its energy, so a reaction's heat is the fuels' energy less the products'. MT's oxidation and HP's conversions both post heat this way.
+- Iron cannot close as ticket 21 words it. "Production to match" gives iron no source, because iron enters only from the meal, by absorption. The table above closes it with the meal's iron, absorption and loss.
 - The minerals cannot close as laws, because no ticket or research ticket absorbs calcium, phosphate or magnesium from the gut (13, research 13 and research 15 leave it out).
 - Sodium and chloride lose their sweat exit if ticket 12's sweat carries only water. A thermoneutral day barely sweats, but ticket 12's warm room and ticket 28's warm hour do.
 - No ticket's certificate line names potassium or chloride. Ticket 17's laws close both, and its check names only sodium and water.
+- Albumin climbs from ticket 14 to ticket 21 unless ticket 14's constant synthesis comes with a matching held loss, which the tables above give it.
 - Albumin's and hemoglobin's nitrogen stays in their own conserved quantities, because their making and loss are balanced flows, not reactions with amino acids. Counting them in the nitrogen table would need those reactions.
 
 #### Systems whose rung 0 needs what the contract lacks
@@ -870,9 +908,10 @@ Read against the contract at main `85d1e6e`.
 | An osmotic identity for small solutes | FL | Only albumin has one | 03, before ticket 17's cell water |
 | A reaction | MT, HP, MS, RN | None | 02 |
 | The clock phase and the sleep state as inputs a law reads | NS, EN, RN, MT | No kernel input reads time, and a clock kept as a law's memory cannot pass periodic admission | 05 |
-| A pressure law for a released enclosure | RS | Only a held card owes an enclosure's pressure, and the compiler refuses a rigid or elastic one | unticketed: 04 or 10 |
+| A pressure law for a released enclosure | RS, and GI if its compliance ever becomes a law | Only a held card owes an enclosure's pressure, and the compiler refuses a rigid or elastic one | unticketed: 04 or 10 |
 | Admission with a tidal breath beside a pulsatile heart | RS, CV | An admission cycle has at most one pacing clock | unticketed: ticket 10's prototype covers it |
 | Synthesis and loss across the boundary for a system that is not held | EN, HP, HC, GI | Only the boundary scope and held cards get boundary routes | 04 |
+| A card with a crate that keeps named holds | GI (the abdominal space's compliance), and MS, BC and HC until their releasing tickets | A held compliance needs a named stand-in, and only a card outside the built set has a held declaration | 04 |
 | A hold of one species in a space | the body on holds | A hold names a whole space, so the slice's hold on cells cannot be released species by species, though tickets 08, 15, 17 and 19 each move a different species there | 04 or 06 |
 | A census disposition for a field held with its reason | every system | The census has live, input, sink, anatomy relation, outside the slice and unresolved | 04 |
 
@@ -882,35 +921,39 @@ No system needs a new site class if the gas space lands as a kind of space. Ever
 
 | Topic | Drafts | Atlas | Resolution here |
 |---|---|---|---|
-| The thermostat | release at skin vessels and sweat glands, and motor drive for shivering | a direct NS to MT arrow, against the coupling map's own rule that controllers act only through ligands (line 26) | the effectors act through release (12), arrow 87's drives are read by MT's laws, and its set point stays NS memory |
+| The thermostat | release at skin vessels and sweat glands, and motor drive for shivering | a direct NS to MT arrow, against the coupling map's own rule that controllers act only through ligands (line 26) | skin vessels and sweat answer release at the skin junction (12); shivering, a somatic act, comes through arrow 87's shiver drive; the set point stays NS memory |
 | The natriuretic peptide | EN secretes it | the CV card secretes it, while arrow 79 sends wall stress to EN | EN |
 | The potassium shift and cell water | FL moves cell water, and the shift's owner is open | BC owns the cell's pumps and shifts, and shares cell water with FL | FL owns the cell membrane |
-| Metabolic water, fixed acid and skin evaporation | MT posts all three | MT posts lactate and sweat only, and no card posts skin evaporation | MT posts all three (09, 12, 18) |
-| Heat production | through MT's reaction at each bed | HP and MS also post heat | MT's reaction alone |
+| Metabolic water, fixed acid and skin evaporation | MT posts all three | MT posts lactate and sweat only, and no card posts skin evaporation | MT posts metabolic water and skin evaporation (09, 12); HP's amino acid use posts the fixed acid (18) |
+| Heat production | through MT's reaction at each bed | HP and MS also post heat | MT's oxidation makes most heat, and HP's conversions post their own; MS posts none |
 | Urea and creatinine | uncharged solutes, urea an osmole carrying nitrogen | urea on S4 with the ions, creatinine on S9 with the formed elements | uncharged solutes |
-| Hepcidin | made by the liver | an immune output (arrow 107) | held at zero at rung 0, and iron's store follows its own loss |
-| The tissue carbon dioxide store | blood plus one lumped tissue store | no card names a tissue carbon dioxide space | each bed's spaces, moved by MT |
+| Hepcidin | made by the liver | an immune signal (arrow 107) | held at zero at rung 0, and iron's store follows its own loss |
+| The tissue carbon dioxide store | blood plus one tissue store | no card names a tissue carbon dioxide space | each bed's spaces, moved by MT |
 | The clock | one forced phase that many laws read | one NS to EN arrow | a boundary input, so arrow 89's phase is held |
 | Acid-base | Henderson-Hasselbalch on plasma first | Stewart's frame decided (blood chemistry card) | the strong-ion frame from ticket 08 (map default) |
-| The first rungs of RS, HC, IM, MS and GI | one alveolar unit; quiescent coagulation and immunity; the junction later; one lumped lumen | ventilation and perfusion spread; reduced coagulation and inflammation models; the junction first; emptying and segmental absorption | one unit; zero flux; only the pump's junction; stomach and small intestine |
+| The first rungs of RS, HC, IM, MS and GI | one alveolar unit; quiescent coagulation and immunity; the junction later; one lumen for the whole gut | ventilation and perfusion spread; reduced coagulation and inflammation models; the junction first; emptying and segmental absorption | one unit; zero flux; only the pump's junction; stomach and small intestine |
 | Ownership | each store has an owner card | no system owns a pool | no system owns a pool, and forks name law owners |
 
 ### What this changes in the plan
 
 Each item names a ticket this Answer leaves unedited.
 
-- **Ticket 03.** The alveolar and airway gas needs a non-watery space and a gas-law identity. The cell membrane's route family, heat advection, conduction and the small-solute osmotic identity belong here, so tickets 12, 15 and 17 edit no shared list. No red cell site or space is needed, because hemoglobin is a mass in blood, as ticket 08 says. It needs seven landmarks, not three. Iron, ammonium, glycerol, body protein, and nitrogen gas if the breath is tidal, join the species.
-- **Ticket 04.** The census needs a disposition for a field held with its reason. Arrow 111 is held with NS as its owner. EN, HP, HC and GI need boundary routes for synthesis and loss. An unheld card needs a way to own an enclosure's pressure, for ticket 10.
-- **Ticket 05.** Ticket 22 needs a void as an input of the day. Ticket 05 lists none.
-- **Ticket 06.** Holds name one species in a space. Its hold table takes this Answer's rows.
-- **Ticket 08.** It speciates carbon dioxide in the strong-ion frame with the lumped anion held, so ticket 18 adds dynamics and replaces no form.
-- **Ticket 09.** "The bed's heat" is the core heat store, or the skin heat store for the skin bed, because only tissue sites hold heat.
+- **Ticket 02.** Its prototype should test the charge default: acids and bases as neutral moieties that speciation charges.
+- **Ticket 03.** The alveolar and airway gas needs a non-watery space and a gas-law identity, with nitrogen gas and water vapor. The cell membrane's route families, heat advection, conduction and the small-solute osmotic identity belong here, so tickets 12, 15 and 17 edit no shared list. No red cell site or space is needed, because hemoglobin is a mass in blood, as ticket 08 says. It needs eight landmarks, not three, and the hormones' secretion and clearance sites. Iron, ammonium, glycerol, body protein, the cell anion and the diet's organic anion join the species.
+- **Ticket 04.** The census needs a disposition for a field held with its reason. Arrow 111 is held with NS as its owner, and arrows 99 and 104 are anatomy relations, as 82, 96 and 101 are. A card with a crate must be able to keep named holds, and an unheld card to own an enclosure's pressure. EN, HP, HC and GI need boundary routes for synthesis and loss.
+- **Ticket 05.** The meal's vector carries every species the tables deliver, iron and the diet's organic anion included. Ticket 22 needs a void as an input of the day, and ticket 05 lists none.
+- **Ticket 06.** Holds name one species in a space. The airway's exit for water and heat is an RS held route beside the slice's skin and heat exits, so ticket 10 has a hold to release. The liver bed's edges are held under HP's card until ticket 14. Its hold table takes this Answer's rows.
+- **Ticket 08.** It states acidity in the strong-ion frame, with the lumped anion and the diet's organic anion held, so ticket 18 adds their making and excretion and replaces no form.
+- **Ticket 09.** It burns glucose and fatty acids in a fixed proportion and oxidizes lactate, so lactate closes from ticket 09. "The bed's heat" is the core heat store, or the skin heat store for the skin bed, because only tissue sites hold heat.
 - **Ticket 10.** Admission with two rhythms is unticketed, so its prototype covers it. Its Releases line should name arrow 84, which its text wires.
-- **Ticket 12.** Sweat carries sodium and chloride with its water. Shivering is a somatic act, whose drive the muscle bed's heat reads.
+- **Ticket 11.** Its central sensor reads the acidity BC states from ticket 08, not carbon dioxide alone, so ticket 18's release of that read goes.
+- **Ticket 12.** Sweat carries sodium and chloride with its water. Skin vessels and sweat answer release, and shivering is a somatic act whose drive the muscle bed's heat reads. Skin temperature joins core temperature as the thermostat's input, through a skin thermoreceptor, as research 12 asks.
+- **Ticket 14.** Its constant albumin synthesis needs a matching held loss. Its amino acid reaction carries the sulfur that ticket 18 posts as fixed acid.
 - **Ticket 15.** Its check that a meal's potassium "is excreted after" needs ticket 17's leak and aldosterone, so ticket 15 waits on 17, or the check drops that clause. Epinephrine is not in rung 0.
 - **Ticket 17.** Its certificate line should also name potassium and chloride, and its Releases line the held renin chain and peptide.
+- **Ticket 18.** It waits on ticket 14, whose amino acid reaction makes the fixed acid. Its check bounds the lumped anion's amount, or the total carbon dioxide reading's return, because bicarbonate is speciation and no amount. Its Releases line drops NS's carbon-dioxide-only read.
 - **Ticket 19.** It adds absorption of calcium, phosphate and magnesium, and releases the minerals' held stores. The healthy-range set already holds total calcium and phosphate (`data/healthy-range-set.jsonl`), and the packet anchors plasma phosphate. If research 06 keeps both readings, ticket 19 is pass 1 and joins ticket 24's blockers.
-- **Ticket 21.** Iron enters by absorption, not production. Hemoglobin and red cell mass are one amount.
+- **Ticket 21.** Iron enters from the meal by absorption, not production. Hemoglobin and red cell mass are one amount. IM's held card becomes a declaration of zero flux, and its fields stay held.
 - **Ticket 22.** It needs a void input and research 15's bladder item among its blockers.
 - **Ticket 24.** Its hold check should allow the holds rung 0 keeps, as ticket 28's does.
 - **Ticket 25.** Research 12 has no form for the sympathetic gain. Research 11's sleep shift or research 14 gives it, or ticket 25's blocker changes.
