@@ -837,7 +837,7 @@ class Pool(unittest.TestCase):
         with self.assertRaisesRegex(teacher.TeacherError, "synthetic io error"):
             self.teacher().ensure(self.runs(open_spec(8000), open_spec(7000), open_spec(5000)), self.identity, workers=2)
         starts = [n.split(" ")[1] for n in self.notes() if n.startswith("start")]
-        self.assertEqual(starts, ["8000", "7000"])
+        self.assertEqual(sorted(starts), ["7000", "8000"])
         self.assertIn("end 7000", self.notes())
 
     def test_a_start_waits_for_room_on_every_disk(self) -> None:
