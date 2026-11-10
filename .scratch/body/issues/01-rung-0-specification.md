@@ -584,3 +584,116 @@ Pass 1 is every loop that a monitor reading depends on or that drifts within a d
 | 2 | 19 to 22 | the minerals, cortisol, the blood's cells and proteins, the bladder |
 
 Until its ticket lands, a pass 2 amount is a held store with balanced flows. Nitrogen is pass 1, because its exit closes the fuels (14 and 16). The minerals move to pass 1 if research 06 keeps total calcium and phosphate in the lens.
+
+### The holds rung 0 keeps
+
+Every other hold of ticket 06's table has a releasing ticket. These stay at the destination, so ticket 28's hold table lists exactly these.
+
+| Hold | Card | Reason | Where it shows |
+|---|---|---|---|
+| Abdominal pressure | GI | A healthy day barely moves it, no rung 0 check reads it, and a compliance law would need the volume of the abdominal contents, which rung 0 does not hold | the abdominal space; arrows 101 to 103 |
+| Gut secretion and its reabsorption | GI | They balance over the day, and the losses they would show are disease (ticket 13) | the gut lumen |
+| Laws at a reference temperature | CV, HP, HC, BC | The healthy day's swing in temperature is small, and ticket 12 keeps these readers at a reference temperature | arrows 90 (temperature), 92, 93, 94 |
+| Ammonia | HP | Urea is made in one reaction, and ammonia matters for the brain only in liver failure (ticket 14) | arrow 100 |
+| Lung water | FL | No rung 0 lung law reads it, and a healthy lung's water barely moves (ticket 10's non-goal) | arrow 110 |
+| Brain water and intracranial pressure | FL, NS | No skull enclosure at rung 0, and no check of a healthy day reads either | arrow 111 |
+| Gut wall, skin and compartment water | FL | No rung 0 law reads them | arrows 112 and 113 |
+| Intra-abdominal pressure on the kidney and the diaphragm | GI | The same held constant as the abdominal space's pressure | arrows 102 and 103 |
+| Ventricular wall stress | CV | One natriuretic peptide is secreted, on atrial stretch | arrow 79 |
+| The circadian phase and the CRH drive | NS | The clock is a boundary input every law reads (ticket 05), and cortisol follows it directly (ticket 20) | arrow 89 |
+| The thermostat's set point as a field | NS | The set point is NS memory, compared with core temperature inside NS | arrow 87 |
+| Respiratory muscle fatigue | MS | A resting day has no fatigue | arrow 95 |
+| Immunity at rest | IM | Zero flux (map default): no check of a healthy day could judge a reduced model | arrows 105 to 109 |
+| Coagulation at rest | HC | Zero flux (map default), for the same reason | arrow 107, arrow 114's bleeding and thrombosis fields |
+| The vessel wall's permeability and glycocalyx | FL | Their healthy values, since immunity is at rest | arrow 106 |
+| Mitochondrial efficiency | MT | Its healthy value, since immunity is at rest | arrow 109 |
+| The chance fixture | none: the composition root | The replay gates need a hazard on the body until a physiological law draws chance. The slice's stir moves no law | the stir's stream and hazard |
+
+### The 38 arrows
+
+Each row is one line of the [coupling map](../../../docs/atlas/coupling-map.md), lines 77 to 114, with each field of the census payload in `crates/ng-contract/src/catalog.rs`. An arrow with no payload is split by the words of its label. "Wired by" names the ticket whose laws define and read the field.
+
+| Line | Arrow | Fields at rung 0 |
+|---|---|---|
+| 77 | CV to NS, baroreceptor afferents | `carotid_sinus_stretch`: wired by 06, live in the slice; `aortic_arch_stretch`: wired by 06, live in the slice |
+| 78 | CV to MT, myocardial work, flow per bed | `myocardial_work`: wired by 09, the heart's work paid by fuel burned at the coronary bed; `flow_per_bed`: wired by 09, the delivery each bed's extraction and debt read |
+| 79 | CV to EN, wall stress | `atrial_wall_stress`: wired by 17, the natriuretic peptide's secretion; `ventricular_wall_stress`: held at rung 0, one peptide is secreted, on atrial stretch |
+| 80 | CV to FL, capillary and venous pressure | `capillary_pressure`: wired by 06, live in the slice; `venous_pressure`: wired by 06, live in the slice |
+| 81 | CV to RS, pulmonary capillary flow | `pulmonary_capillary_flow`: wired by 10, alveolar exchange |
+| 82 | RS to CV, pleural pressure | `pleural pressure`: anatomy relation, the pleural space's pressure felt by every bed it encloses, defined by the breath from ticket 10 |
+| 83 | RS to NS, lung afferents | `pulmonary_stretch`: wired by 11 |
+| 84 | RS to MT, work of breathing | `work of breathing`: wired by 10 |
+| 85 | RS to MS, pump load | `pump load`: wired by 10 |
+| 86 | NS to RS, respiratory drive | `respiratory_drive`: wired by 11 |
+| 87 | NS to MT, thermostat, shiver and sweat | `thermostat_set_point`: held at rung 0, the set point is NS memory and no MT law reads it; `shiver_drive`: wired by 12, read by the muscle bed's heat; `sweat_drive`: wired by 12, read by the sweat law |
+| 88 | NS to MS, motor drive | `motor_drive`: wired by 11, release at the respiratory pump's junction |
+| 89 | NS to EN, CRH, vasopressin, circadian phase | `crh_drive`: held at rung 0, cortisol's profile follows the clock input directly (ticket 20); `vasopressin_drive`: wired by 17; `circadian_phase`: held at rung 0, the clock is a boundary input every law reads (ticket 05) |
+| 90 | MT to CV, O2 debt per bed, temperature | `oxygen_debt_per_bed`: wired by 09; `temperature`: held at rung 0, CV's laws run at a reference temperature |
+| 91 | MT to NS, temperature | `core_temperature`: wired by 12 |
+| 92 | MT to HC, temperature | `temperature`: held at rung 0, HC's laws run at a reference temperature (ticket 12) |
+| 93 | MT to HP, temperature | `temperature`: held at rung 0, HP's laws run at a reference temperature (ticket 12) |
+| 94 | MT to BC, temperature | `temperature`: held at rung 0, BC's speciation runs at a reference temperature (ticket 12) |
+| 95 | MS to RS, pump force and fatigue | `pump force`: wired by 10; `fatigue`: held at rung 0, a resting day has no fatigue law |
+| 96 | MS to CV, position and gravity | `position`: anatomy relation, site positions under the boundary's posture; `gravity`: anatomy relation, the hydrostatic head those positions give |
+| 97 | RN to CV, tubuloglomerular feedback | `afferent_tone`: wired by 06, live in the slice |
+| 98 | RN to EN, renin | `renin_secretion`: wired by 17 |
+| 99 | HP to CV, portal pressure | `portal_pressure`: wired by 14, the liver bed on the portal circuit |
+| 100 | HP to NS, ammonia | `plasma_ammonia`: held at rung 0, urea is made with no ammonia pool and no rung 0 law reads ammonia (ticket 14) |
+| 101 | GI to CV, intra-abdominal pressure | `intra-abdominal pressure`: anatomy relation, the abdominal space's pressure felt by every bed it encloses, whose compliance GI holds |
+| 102 | GI to RN, intra-abdominal pressure | `intra_abdominal_pressure`: held at rung 0, a held constant on a healthy day (ticket 13) |
+| 103 | GI to RS, intra-abdominal pressure | `intra-abdominal pressure`: held at rung 0, the same held constant, and the resting lung volume follows posture directly (ticket 10) |
+| 104 | GI to HP, portal delivery | `portal delivery`: wired by 13 |
+| 105 | IM to CV, iNOS, myocardial depression | `inos_activity`: held at rung 0, immunity at rest has zero flux (ticket 21); `myocardial_depression`: held at rung 0, zero flux |
+| 106 | IM to FL, permeability, glycocalyx | `permeability`: held at rung 0, the healthy wall (ticket 21); `glycocalyx`: held at rung 0, the healthy wall |
+| 107 | IM to HC, tissue factor, hepcidin | `tissue factor`: held at rung 0, zero flux (ticket 21); `hepcidin`: held at rung 0, zero flux, and iron's store follows its own loss |
+| 108 | IM to NS, set point shift | `set_point_shift`: held at rung 0, no fever (ticket 21) |
+| 109 | IM to MT, mitochondrial efficiency | `mitochondrial efficiency`: held at rung 0, the healthy value (ticket 21) |
+| 110 | FL to RS, lung water | `lung_water`: held at rung 0, no rung 0 lung law reads it (ticket 10's non-goal) |
+| 111 | FL to NS, brain water and ICP | `brain water`: held at rung 0, no skull enclosure; `ICP`: held at rung 0, no skull enclosure, and NS owns it when one is earned |
+| 112 | FL to GI, gut wall water | `gut_wall_water`: held at rung 0, no rung 0 gut law reads it |
+| 113 | FL to MS, skin and compartment water | `skin_water`: held at rung 0, pressure injury is absent; `compartment_water`: held at rung 0, limb compartments are absent |
+| 114 | HC to CV, bleeding competence, viscosity, thrombosis | `bleeding_competence`: held at rung 0, no bleeding edge (ticket 21); `viscosity`: wired by 08; `thrombosis`: held at rung 0, zero flux (ticket 21) |
+
+Totals at rung 0: 20 arrows wire at least one field, 3 are anatomy relations, and 15 hold every field. The check script in the pull request recounts them. Arrows 79, 87, 89, 90, 95 and 114 wire some fields and hold others.
+
+### Fork owners
+
+Owning a fork means writing the laws that fill the gap it names. The ledger stays the body's, and no system owns a pool.
+
+| Fork | Owner | Why | Built by |
+|---|---|---|---|
+| nitrogen ledger | HP | The gap is urea's making, which closes the nitrogen book (ticket 14). MS turns protein over and makes creatinine (16), and RN excretes urea, ammonium and creatinine, each by its own laws | 03, 14 |
+| acid ledger | MT | The gap is the fixed acid's making, which no card posted. MT's reaction posts the lumped anion each fuel yields. RN's feedback excretes it and BC states acidity, each by its own laws | 03, 18 |
+| carbon dioxide ledger | MT | The gap is the tissue store, which no card named. It is each bed's spaces, filled by MT's reaction and emptied by MT's diffusion to blood. Total carbon dioxide is one species, so the gas and acid loops move one amount | 03, 09 |
+| potassium shift into cells | FL | FL owns the cell membrane. Insulin's uptake (15) and the pump and leak (17) are its route laws, read through the receptor layer. The atlas gave the shift to BC, whose speciation writes no amount | 03, 15, 17 |
+| natriuretic peptide's secretion | EN | EN secretes every hormone. Arrow 79 carries the atrial wall stress CV computes to EN's law, ticket 17 already releases that arrow, and the packet anchors the peptide in plasma | 17 |
+| cell water | FL | FL owns water and osmoles in every space, and one membrane type (SRS section 5) puts the cell membrane beside the capillary wall FL already owns | 03, 17 |
+| bone pools | MS | Bone is MS's tissue. Its partner pool is the bone bed's cells, moved by MS's exchange law (19). Until then the minerals are held stores | 03, 19 |
+| pleural space | RS | RS defines the pleural space's pressure from the breath (10). The pleural fluid is a left-out space at rung 0 | 03, 04, 10 |
+| bladder | RN | The urinary tract is RN's (atlas renal card). The slice's drain is a boundary law, and ticket 22's void moves it to RN | 22 |
+| intracranial pressure | NS | NS owns the intracranial pressure laws (atlas nervous card) once a skull enclosure is earned. Arrow 111 then becomes that enclosure's pressure, an anatomy relation. At rung 0 there is no skull enclosure, and arrow 111 is held | 04 |
+
+The ticket lists the bladder and the body map lists intracranial pressure, so both are answered.
+
+### Atlas card trims for foundation 06
+
+[Foundation 06](../../foundation/issues/06-atlas.md) lands each trim with its system's crate (line 91). Line numbers below are foundation 06's.
+
+| Card | Trim | Lands with |
+|---|---|---|
+| CV | Natriuretic peptide secretion leaves the register for EN (line 17 left it open). Heat carried between the core and skin stores is a CV law | 17 |
+| RS | One alveolar unit with a shunt, not two per lung (line 87). Pleural pressure is the pleural space's pressure. Ventilation and perfusion spread and hypoxic vasoconstriction are later rungs | 10 |
+| NS | NS owns intracranial pressure once a skull enclosure exists, so line 27's open ownership closes, and arrow 111 becomes that enclosure's pressure. Its sensors are landmarks. It sends no circadian phase at rung 0 | 11 |
+| RN | RN owns the bladder and its void. Rung 0's tubular detail is one tubule and one collecting duct (line 28). Erythropoietin and calcitriol are not moving hormones at rung 0 | 17 |
+| HP | Zones within the liver are absent (line 63). Heat comes from MT's reaction, so HP posts none to S6. Urea is an uncharged osmole carrying nitrogen, not an S4 ion. Albumin synthesis is constant, then matches a first-order loss | 14 |
+| GI | Enteric control is absent at rung 0 (line 55). Stomach and small intestine only, with secretion as one balanced held flow and a balanced fecal exit | 13 |
+| EN | The axes at rung 0 (line 47): insulin and glucagon, the renin chain, vasopressin and the natriuretic peptide in pass 1, then parathyroid hormone and cortisol in pass 2. Epinephrine, thyroid hormones, growth hormone, incretins, erythropoietin and calcitriol are absent. Insulin's portal-to-peripheral gradient is the liver's first-pass clearance (15) | 17, the first EN crate |
+| BC | Speciation only, writing no amount: the cell membrane's pumps and shifts, and tonicity-driven cell water, go to FL | 08 |
+| HC | The reduced coagulation model is cut (line 22): coagulation at rest has zero flux. Red cell mass is the hemoglobin amount | 08, 21 |
+| IM | A quiescent card with its ports at zero flux (line 24) | 21 |
+| FL | FL owns the cell membrane: water by tonicity, the sodium pump and leak, and insulin's uptake of potassium and phosphate. The intake and output ledger goes (line 20) | 17 |
+| MT | Two heat stores, not eight (lines 25 and 71). MT posts metabolic water and sweat to S8, fixed acid to S4, and owns the fat bed. "Oxygen debt to every card" goes (line 18) | 09, 12 |
+| MS | Creatinine is a solute, not S9 (line 26). Bone is a reservoir only until ticket 19 (line 75). The respiratory pump and its junction are rung 0. Its heat goes through MT's reaction | 10, 16, 19 |
+| Coupling map | Arrow 89's circadian phase comes from the boundary clock (line 18). Arrow 87's set point stays NS memory, and its shiver drive is read by the muscle bed's heat. Arrow 111 waits for a skull enclosure | 12, 17 |
+
+Each card's crate is first built by: BC and HC in 08, MT in 09, RS and MS in 10, GI in 13, HP in 14, EN in 17 or 15, whichever lands first, and IM in 21. CV, FL, NS and RN have crates in the slice.
