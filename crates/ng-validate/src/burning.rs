@@ -251,11 +251,7 @@ fn burn() -> Proportions<Glucose> {
 }
 
 /// The burn at each bed, in proportion to its glucose and slowed as its oxygen runs short.
-fn burned<'b>(
-    laws: &mut FragmentBuilder<'b, Metabolism>,
-    proportions: Proportions<Glucose>,
-    class: RateClass,
-) {
+fn burned(laws: &mut FragmentBuilder<'_, Metabolism>, proportions: Proportions<Glucose>, class: RateClass) {
     let burn = laws.reaction::<CapillaryBed, Glucose>(BURN, proportions);
     let speed = laws.site_parameter::<CapillaryBed, Rate<Dimensionless>>(
         ParameterKey::new(BURN_SPEED.0),
