@@ -2,11 +2,11 @@
 
 Type: task
 Status: open
-Blocked by: 01, 02
+Blocked by: 01, 02, 29
 
 **What to build:** The contract's closed lists grow once, for all nine systems the slice lacks, so that no later ticket edits them. Today there are nine species (water, sodium, potassium, chloride, albumin, vasopressin, norepinephrine, acetylcholine and energy), no airway or gut network, and no site or space for alveolar gas, the gut's lumen or red cells. The lists come from [ticket 01](01-rung-0-specification.md)'s Answer.
 
-- [ ] Species for the gases, the fuels, urea and creatinine, the acid-base set, the hormones and hemoglobin, and iron, ammonium, glycerol, body protein, the cell anion and the diet's organic anion, each with its dimension, its charge, the books it belongs to and the spaces that may hold it. Oxygen, carbon dioxide and glucose are in the list already, from [ticket 02](02-reactions.md), and stay
+- [ ] Species for the gases, the fuels, urea and creatinine, the acid-base set, the hormones and hemoglobin, and iron, ammonium, glycerol, body protein, the cell anion and the diet's organic anion, each with its dimension, its charge as [ticket 29](29-the-charge-default.md) picks it, the books it belongs to and the spaces that may hold it. Oxygen, carbon dioxide and glucose are in the list already, from [ticket 02](02-reactions.md), and stay
 - [ ] Lumped classes where rung 0 needs no more: one other strong anion, ketones as one species
 - [ ] Spaces and site classes for alveolar gas, the gut lumen and whatever ticket 01 names, and networks and edge kinds for the airway and the gut, with the portal circuit on the blood network. The alveolar and airway gas is a space that holds no water, with a gas-law identity, and it holds nitrogen gas and water vapor. Red cells get no space, because hemoglobin is a mass in blood ([ticket 08](08-blood-carries-gases.md))
 - [ ] Route families across the cell membrane, heat carried by blood, conduction between heat stores, and an osmotic identity for small solutes, so tickets 12, 15 and 17 edit no shared list
