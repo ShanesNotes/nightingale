@@ -149,7 +149,7 @@ impl NumericalHealth {
         self.most_refusals
     }
     /// The shortest span a refusal left its retry. A run reads it against its resolution's minimum interval,
-    /// since a retry below that is the fault `NoAdmissibleStep`: how near the run came to stopping.
+    /// since a retry below that is the fault `NoAdmissibleStep`.
     pub fn shortest_retry_ns(&self) -> Option<u64> {
         self.shortest_retry_ns
     }

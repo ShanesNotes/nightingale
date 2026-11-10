@@ -317,7 +317,6 @@ pub type ObservationSeed = DomainSeed<ObservationDomain>;
 #[derive(Clone)]
 pub struct RunIdentity {
     parts: IdentityParts,
-    /// Taken once: every ticket seals it, and no part changes after `new`.
     digest: Digest,
 }
 #[derive(Clone)]
