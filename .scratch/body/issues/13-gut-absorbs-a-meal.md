@@ -15,3 +15,5 @@ Blocked by: 05, 06, 26, `.scratch/research/issues/13-law-forms-gut-and-fuels.md`
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** the colon, motility under nervous control, vomiting, and any loss in feces beyond a balanced exit.
+
+From [research 13](../../research/issues/13-law-forms-gut-and-fuels.md): if the run misses Hunt and Stubbs's half-time, emptying takes the fallback in research 13's Decisions, an exponential with a declared reference volume in place of the meal's starting volume, which keeps the curve's shape and gets the half-time right only at that volume.

@@ -20,4 +20,4 @@ Blocked by: 03
 
 This changes the contract's interface, so it runs pstack `architect` with an Opus and a Codex runner and a Codex judge.
 
-From [research 14](../../research/issues/14-law-forms-volume-and-acid.md): `ReactsAt` grants only metabolism at the capillary beds, and HP's fixed acid at the liver bed and RN's ammonium at the peritubular bed each need a grant.
+From [research 13](../../research/issues/13-law-forms-gut-and-fuels.md) and [research 14](../../research/issues/14-law-forms-volume-and-acid.md): `ReactsAt` grants only metabolism at the capillary beds, so the hepatic card needs a grant at the liver bed for its glycogen, gluconeogenesis, amino acid and ketone reactions and its fixed acid, the musculoskeletal card one at the muscle bed for its glycogen, protein and creatinine reactions, and RN's ammonium one at the peritubular bed.

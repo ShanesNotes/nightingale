@@ -16,3 +16,5 @@ Blocked by: 06, 26, `.scratch/research/issues/14-law-forms-volume-and-acid.md`
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** thirst as behavior (drinks are scheduled), sodium stored in skin, and renal nerves beyond what the slice has.
+
+From [research 13](../../research/issues/13-law-forms-gut-and-fuels.md) and [research 14](../../research/issues/14-law-forms-volume-and-acid.md): insulin multiplies the pump's maximum rate in the muscle and fat beds by `rho = 1 + S_K E_ins`, which [ticket 15](15-insulin-and-glucagon.md) writes, so this ticket's pump carries that factor at 1 until ticket 15 lands.

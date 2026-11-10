@@ -15,3 +15,5 @@ Blocked by: 05, 14, `.scratch/research/issues/15-law-forms-slow-books.md`
 **Non-goals:** the stress response, pulsed secretion, and cortisol's other actions.
 
 From [research 15](../../research/issues/15-law-forms-slow-books.md): Scheer counts cortisol's phase from the core temperature minimum, so the secretion law maps that zero to the one [ticket 05](05-the-days-inputs.md) states.
+
+From [research 13](../../research/issues/13-law-forms-gut-and-fuels.md): the liver's glucose output is the sum of its reactions, and only the glycogen rows read insulin's effect, while gluconeogenesis reads glucagon alone, so lowering insulin's efficacy reaches glycogen synthesis and breakdown only. Research 13 splits it, so this ticket can still take the gain on gluconeogenesis that research 15 set aside.
