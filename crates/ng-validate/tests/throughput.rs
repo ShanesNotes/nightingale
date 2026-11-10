@@ -347,16 +347,20 @@ fn stepped<'m>(
     session: Session<'m, Running>,
     refused: &mut Vec<NumericalRefusal>,
     excursions: &mut u64,
+    retries: &mut Vec<Vec<u64>>,
 ) -> Session<'m, Running> {
     let mut attempt = session.step();
+    let mut spans = Vec::new();
     loop {
         match attempt {
             Step::Accepted(session, receipt) => {
                 *excursions += receipt.excursions().len() as u64;
+                retries.push(spans);
                 return session;
             }
             Step::Refused(session) => {
                 refused.push(session.refused().reason());
+                spans.push(session.refused().retry_ns());
                 attempt = session.retry();
             }
             Step::Faulted(session) => panic!("{:?}", session.fault()),
@@ -401,9 +405,9 @@ fn a_short_slice_window_reports_what_its_session_refused_once_per_repeat() {
         &stepped_store,
     );
     let mut session = admitted.expect("admitted").session;
-    let (mut refused, mut excursions) = (Vec::new(), 0);
+    let (mut refused, mut excursions, mut retries) = (Vec::new(), 0, Vec::new());
     while session.record().accepted().time() < end {
-        session = stepped(session, &mut refused, &mut excursions);
+        session = stepped(session, &mut refused, &mut excursions, &mut retries);
     }
     assert!(
         !refused.is_empty(),
@@ -412,6 +416,23 @@ fn a_short_slice_window_reports_what_its_session_refused_once_per_repeat() {
     assert_eq!(health.refusals(), tallied(&refused));
     assert_eq!(health.excursions(), excursions);
     assert_eq!(health.floor_faults(), 0);
+    let deepest = retries.iter().map(Vec::len).max().expect("a step");
+    assert!(
+        (1..refused.len()).contains(&deepest),
+        "more than one step is refused, so a count that ran on across steps would read {} and not {deepest}",
+        refused.len()
+    );
+    assert_eq!(health.most_refusals() as usize, deepest);
+    assert_eq!(
+        health.shortest_retry_ns(),
+        retries.iter().flatten().copied().min()
+    );
+}
+
+#[test]
+fn a_window_with_no_refusal_reports_no_retry() {
+    let health = NumericalHealth::default();
+    assert_eq!((health.most_refusals(), health.shortest_retry_ns()), (0, None));
 }
 
 struct RefusingFrom<'c> {
@@ -464,6 +485,14 @@ fn a_slice_window_that_faults_at_the_floor_reports_its_health_up_to_the_fault() 
     );
     let counted: u64 = health.refusals().iter().map(|(_, count)| count).sum();
     assert!(counted > planted, "the steps before the planted one refused too");
+    assert!(u64::from(health.most_refusals()) >= planted);
+    let nearest = report.refusals().iter().map(|refused| refused.retry_ns()).min();
+    assert_eq!(health.shortest_retry_ns(), nearest);
+    let floor = inner.resolution().minimum_interval_ns().get();
+    assert!(
+        nearest.is_some_and(|ns| (floor..2 * floor).contains(&ns)),
+        "the planted step's last retry is the one a further halving would take below the floor"
+    );
 }
 
 struct MismatchedFrom {

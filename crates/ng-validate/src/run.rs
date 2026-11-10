@@ -25,6 +25,7 @@ fn counted<'m>(
     health: &mut NumericalHealth,
 ) -> Result<(Session<'m, Running>, StepReceipt), Session<'m, Faulted>> {
     let mut attempt = session.step();
+    let mut refusals = 0;
     loop {
         match attempt {
             Step::Accepted(session, receipt) => {
@@ -33,6 +34,8 @@ fn counted<'m>(
             }
             Step::Refused(session) => {
                 health.refused(session.refused().reason());
+                refusals += 1;
+                health.retried(refusals, session.refused().retry_ns());
                 attempt = session.retry();
             }
             Step::Faulted(session) => {
@@ -114,6 +117,8 @@ pub struct NumericalHealth {
     refusals: Vec<(NumericalRefusal, u64)>,
     floor_faults: u64,
     excursions: u64,
+    most_refusals: u32,
+    shortest_retry_ns: Option<u64>,
 }
 impl NumericalHealth {
     /// Each reason, with the row or source it names, in the order it first refused.
@@ -138,6 +143,19 @@ impl NumericalHealth {
     /// Over the accepted steps.
     pub fn excursions(&self) -> u64 {
         self.excursions
+    }
+    /// The most refusals one step took, the step a fault ended included.
+    pub fn most_refusals(&self) -> u32 {
+        self.most_refusals
+    }
+    /// The shortest span a refusal left its retry. A run reads it against its resolution's minimum interval,
+    /// since a retry below that is the fault `NoAdmissibleStep`.
+    pub fn shortest_retry_ns(&self) -> Option<u64> {
+        self.shortest_retry_ns
+    }
+    fn retried(&mut self, refusals: u32, retry_ns: u64) {
+        self.most_refusals = self.most_refusals.max(refusals);
+        self.shortest_retry_ns = Some(self.shortest_retry_ns.map_or(retry_ns, |ns| ns.min(retry_ns)));
     }
     fn refused(&mut self, reason: NumericalRefusal) {
         match self.refusals.iter_mut().find(|(seen, _)| *seen == reason) {
