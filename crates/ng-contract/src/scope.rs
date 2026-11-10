@@ -5,17 +5,19 @@ use crate::law::{Brand, Family, FragmentData, Over, SiteField};
 use crate::{
     AdmissionError, Anatomy, Blood, Boundary, BoundaryRoute, CapillaryBed, Cardiovascular, CompiledBody,
     Dimensionless, EdgeRoute, EnclosedSpace, Energy, FilterEdge, Fluids, Fragment, FragmentBuilder, Junction,
-    LawName, LymphEdge, Measure, Nervous, Output, OutsideSlice, Owner, Pair, PartialVolume, PerSite,
-    Pressure, ReadPort, Receptor, ReclaimEdge, Renal, SiteId, SiteRoute, SiteSet, Sites, Species, Substance,
-    TubuleEdge, Urinary, ValveEdge, Water,
+    LawName, LymphEdge, Makeup, Measure, Nervous, Output, OutsideSlice, Owner, Pair, PartialVolume, PerSite,
+    Pressure, Quotient, ReadPort, Receptor, ReclaimEdge, Renal, SiteId, SiteRoute, SiteSet, Sites, Species,
+    Substance, TubuleEdge, Urinary, ValveEdge, Water,
 };
 use core::marker::PhantomData;
 
 pub(crate) const ENCLOSURE_PRESSURE: &str = "enclosure_pressure";
 const BLOOD_PRESSURE: &str = "blood pressure";
+/// Past this an integer weight stops being exact in the binary64 the ledger and the evaluator scale by.
+pub(crate) const EXACT: i64 = 1 << 53;
 
 /// The anatomy and the composition data laws never see: which species live in which spaces, where a route crosses
-/// the boundary, the partial-volume coefficient and the spaces this body leaves out.
+/// the boundary, the partial-volume coefficient, each fuel's energy content and the spaces this body leaves out.
 pub struct Schema {
     pub(crate) anatomy: Anatomy,
     pub(crate) carried: Vec<(Sites, Space, Species)>,
@@ -23,6 +25,8 @@ pub struct Schema {
     pub(crate) boundaries: Vec<RouteBoundary>,
     pub(crate) partial_volume: Option<Measure<PartialVolume<Water>>>,
     pub(crate) left_out: Vec<(Space, &'static str)>,
+    /// In species order: whole energy units per amount unit.
+    pub(crate) energy: Vec<(Species, i64)>,
 }
 #[derive(Clone, Copy)]
 pub(crate) struct RouteBoundary {
@@ -46,6 +50,7 @@ impl Schema {
             boundaries: Vec::new(),
             partial_volume: None,
             left_out: Vec::new(),
+            energy: Vec::new(),
         })
     }
 
@@ -135,6 +140,32 @@ impl Schema {
         Ok(())
     }
 
+    /// What one unit of fuel `Q` holds in energy, measured against carbon dioxide and water. It is composition data, as
+    /// water's partial volume is, so a synthetic body states a synthetic content and a reviewed body a cited one.
+    /// Refuses a species that is no fuel, a content that is no whole number of energy units up to 2^53, and a second
+    /// content that differs from the first.
+    pub fn energy_content<Q: Substance>(
+        &mut self,
+        content: Measure<Quotient<Energy, Q>>,
+    ) -> Result<(), AdmissionError> {
+        let species = Q::SPECIES;
+        let refused = AdmissionError::EnergyContent { species };
+        let value = content.value();
+        let whole = value as i64;
+        let fuel = matches!(species.makeup(), Makeup::Atoms { fuel: true, .. });
+        if !fuel || !(1..=EXACT).contains(&whole) || (whole as f64).to_bits() != value.to_bits() {
+            return Err(refused);
+        }
+        match self.energy.binary_search_by_key(&species, |known| known.0) {
+            Ok(at) if self.energy[at].1 != whole => Err(refused),
+            Ok(_) => Ok(()),
+            Err(at) => {
+                self.energy.insert(at, (species, whole));
+                Ok(())
+            }
+        }
+    }
+
     /// States that this body does not model the space, and why: its pools are not amount rows, and a
     /// law that moves or reads one is refused. Every other pool is an amount some transfer must move.
     pub fn leave_out(&mut self, space: Space, reason: &'static str) {
@@ -178,6 +209,7 @@ impl Seal for Schema {
             boundaries,
             partial_volume,
             left_out,
+            energy,
         } = self;
         anatomy.digest().seal(out);
         let mut pools: Vec<(SiteId, Space, Species)> = self.pools().collect();
@@ -213,6 +245,16 @@ impl Seal for Schema {
             out.number(space as u64);
             out.text(reason);
         }
+        // Only a body that states a content writes these, after a tag no row count equals, so no other body's
+        // bytes move.
+        if !energy.is_empty() {
+            out.number(u64::MAX);
+            out.length(energy.len());
+            for &(species, content) in energy {
+                out.number(species as u64);
+                out.number(content as u64);
+            }
+        }
     }
 }
 
@@ -236,13 +278,19 @@ pub enum Space {
     Bound,
     /// The mechanical energy held in stretched walls: one store, on the tissue site that stands for the body.
     Elastic,
-    /// Heat: one store, on the same site.
+    /// Heat: one store on the same site, and a bed's own where a reaction there releases energy.
     Thermal,
 }
 impl Space {
     fn of(class: Class) -> &'static [Space] {
         match class {
-            Class::CapillaryBed => &[Space::Plasma, Space::Interstitium, Space::Cells, Space::Bound],
+            Class::CapillaryBed => &[
+                Space::Plasma,
+                Space::Interstitium,
+                Space::Cells,
+                Space::Bound,
+                Space::Thermal,
+            ],
             Class::VesselSegment => &[Space::Lumen],
             Class::EnclosedSpace => &[Space::Fluid],
             Class::Junction => &[Space::Vesicle, Space::Cleft, Space::Bound],

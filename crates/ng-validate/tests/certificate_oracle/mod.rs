@@ -18,7 +18,16 @@ fn limits(quantity: QuantityId, absolute: f64, relative: f64, drift: f64) -> Qua
         Book::Of(Species::Vasopressin) => of::<Vasopressin>,
         Book::Of(Species::Norepinephrine) => of::<Norepinephrine>,
         Book::Of(Species::Acetylcholine) => of::<Acetylcholine>,
-        Book::Of(Species::Energy) => of::<Energy>,
+        Book::Of(Species::Energy) | Book::Energy => of::<Energy>,
+        Book::Of(Species::Oxygen) => of::<Oxygen>,
+        Book::Of(Species::CarbonDioxide) => of::<CarbonDioxide>,
+        Book::Of(Species::Glucose) => of::<Glucose>,
+        Book::Element(_) => {
+            let measure = |value| Measure::<Atoms>::new(value).expect("finite");
+            let ratio = Measure::<Dimensionless>::new(relative).expect("finite");
+            return QuantityPolicy::element(quantity, measure(absolute), ratio, measure(drift))
+                .expect("atoms");
+        }
         Book::Charge => {
             let floor = Measure::<Charge>::new(absolute).expect("finite");
             let ratio = Measure::<Dimensionless>::new(relative).expect("finite");
@@ -279,7 +288,7 @@ fn in_time_order(view: &ConservationView<'_>, ledger: &Ledger) -> Result<Walked,
                 let drift = change[index].abs();
                 let bound = match quantity.book() {
                     Book::Charge => allowed,
-                    Book::Of(_) => ledger.drift,
+                    Book::Of(_) | Book::Element(_) | Book::Energy => ledger.drift,
                 };
                 if !drift.at_most(bound) && drifted.is_none() {
                     drifted = Some(Failed {

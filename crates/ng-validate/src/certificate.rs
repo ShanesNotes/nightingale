@@ -1,7 +1,7 @@
 use core::num::NonZeroU64;
 use ng_contract::{
-    AdmissionError, Book, BoundaryDirection, Charge, Compensated, ConservedBasis, CoverageManifest, Digest,
-    Dimensionless, HeldRoute, Interval, Measure, QuantityId, SimTime, Substance,
+    AdmissionError, Atoms, Book, BoundaryDirection, Charge, Compensated, ConservedBasis, CoverageManifest,
+    Digest, Dimensionless, HeldRoute, Interval, Measure, QuantityId, SimTime, Substance,
 };
 use ng_record::{CheckpointError, ConservationView, Curve, HistorySeal, HistorySegment, NewestFirst};
 
@@ -24,6 +24,23 @@ impl QuantityPolicy {
         drift: Measure<U>,
     ) -> Result<Self, AdmissionError> {
         if !quantity.book().measures::<U>() {
+            return Err(AdmissionError::QuantityDimension { quantity });
+        }
+        Ok(Self {
+            quantity,
+            absolute: Compensated::of(&absolute),
+            relative,
+            drift: Some(Compensated::of(&drift)),
+        })
+    }
+    /// Refuses a combination that is not an element's atoms.
+    pub fn element(
+        quantity: QuantityId,
+        absolute: Measure<Atoms>,
+        relative: Measure<Dimensionless>,
+        drift: Measure<Atoms>,
+    ) -> Result<Self, AdmissionError> {
+        if !quantity.book().measures::<Atoms>() {
             return Err(AdmissionError::QuantityDimension { quantity });
         }
         Ok(Self {

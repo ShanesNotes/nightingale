@@ -2,20 +2,27 @@ use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::quantity::dimension;
 use crate::scope::HeldCard;
-use crate::{BoundaryDirection, Column, ColumnId, Digest, Dimension, RowId, Species};
+use crate::{Atoms, BoundaryDirection, Column, ColumnId, Digest, Dimension, Element, Energy, RowId, Species};
 
-/// The conserved quantity a combination balances: what its pools hold, or charge, the sum of every ion by its sign.
-/// A moiety is its species across spaces, because a transfer never changes a species.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The conserved quantity a combination balances. Where no reaction joins species, what its pools hold: a moiety is
+/// its species across spaces, because a transfer never changes a species. Where a reaction joins species, an
+/// element's atoms, or energy. Charge is the sum of every ion by its sign. The order breaks ties between combinations
+/// that start on one row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Book {
     Of(Species),
     Charge,
+    Element(Element),
+    /// The energy species, and each fuel at the content the schema states.
+    Energy,
 }
 impl Book {
     pub fn measures<U: Dimension>(self) -> bool {
         match self {
             Book::Of(species) => dimension::<U>() == species.dimension(),
             Book::Charge => false,
+            Book::Element(_) => dimension::<U>() == dimension::<Atoms>(),
+            Book::Energy => dimension::<U>() == dimension::<Energy>(),
         }
     }
 }
@@ -211,6 +218,11 @@ impl Seal for Combination {
         match id.book {
             Book::Of(species) => out.number(species as u64),
             Book::Charge => out.number(u64::MAX),
+            Book::Element(element) => {
+                out.number(u64::MAX - 1);
+                out.number(element as u64);
+            }
+            Book::Energy => out.number(u64::MAX - 2),
         }
         terms.seal(out);
         out.number(u64::from(*regulated));
