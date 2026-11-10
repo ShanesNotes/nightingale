@@ -528,7 +528,10 @@ fn a_reaction_that_moves_a_pool_its_card_holds_is_refused() {
     );
 }
 
-fn combinations(compiled: &CompiledBody) -> Vec<(Book, Vec<(usize, i64)>)> {
+/// Row indices, each with its weight or count.
+type Terms = Vec<(usize, i64)>;
+
+fn combinations(compiled: &CompiledBody) -> Vec<(Book, Terms)> {
     (compiled.conserved_basis().combinations().iter())
         .map(|combination| {
             let terms = combination
@@ -572,7 +575,7 @@ fn a_burn_is_one_column_at_each_bed_with_its_heat() {
         paced,
     )
     .expect("compiled");
-    let burns: Vec<(Context, Vec<(usize, i64)>)> = (compiled.columns().iter())
+    let burns: Vec<(Context, Terms)> = (compiled.columns().iter())
         .filter(|column| column.origin() == BURN)
         .map(|column| {
             assert_eq!(column.receipt(), None, "a reaction has no receipt");

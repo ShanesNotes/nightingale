@@ -276,7 +276,7 @@ pub(crate) fn conserved_basis(
             inside[part_of[row.index()]].push(column);
         }
     }
-    let mut found: Vec<(Book, Vec<(RowId, i64)>)> = Vec::new();
+    let mut found: Vec<(Book, Terms)> = Vec::new();
     for (part, inside) in parts.iter().zip(&inside) {
         let part: Vec<RowId> = part.iter().map(|&row| RowId::at(row)).collect();
         match inside.iter().find(|column| joins_species(column, amounts)) {
@@ -359,6 +359,9 @@ pub(crate) fn conserved_basis(
     })
 }
 
+/// Rows, each with its weight, in row order.
+type Terms = Vec<(RowId, i64)>;
+
 fn joins_species(column: &Column, amounts: &[Species]) -> bool {
     let mut species = column.terms.iter().map(|term| amounts[term.0.index()]);
     let first = species.next();
@@ -406,7 +409,7 @@ fn quantities(
     amounts: &[Species],
     contents: &[(Species, i64)],
     law: LawName,
-) -> Result<Vec<(Book, Vec<(RowId, i64)>)>, CompileDefect> {
+) -> Result<Vec<(Book, Terms)>, CompileDefect> {
     let mut found = Vec::new();
     for book in Element::ALL.map(Book::Element).into_iter().chain([Book::Energy]) {
         let weighed: Vec<(RowId, i64)> = (part.iter())
@@ -435,7 +438,7 @@ fn complete(
     part: &[RowId],
     inside: &[&Column],
     amounts: &[Species],
-    found: &[(Book, Vec<(RowId, i64)>)],
+    found: &[(Book, Terms)],
 ) -> Option<bool> {
     let index = |row: RowId| {
         part.binary_search(&row)
@@ -575,7 +578,7 @@ pub(crate) fn admission_totals(
     let books = (basis.combinations.iter()).filter(|combination| combination.book() != Book::Charge);
     let (untouched, touched): (Vec<&Combination>, Vec<&Combination>) =
         books.partition(|&combination| reading.iter().all(|&column| incidence(combination, column) == 0));
-    let mut totals: Vec<(Vec<(RowId, i64)>, Option<QuantityId>)> = (untouched.iter())
+    let mut totals: Vec<(Terms, Option<QuantityId>)> = (untouched.iter())
         .map(|combination| (combination.terms.clone(), Some(combination.id)))
         .collect();
     let mut moved = Echelon::default();
@@ -711,7 +714,8 @@ mod tests {
     #[test]
     fn a_fuel_supply_that_reads_the_body_leaves_three_totals_each_on_its_own_row() {
         let body = topped_up_bed().expect("compiled");
-        let plan: Vec<(usize, Vec<(usize, i64)>, AdmissionRow)> = (body.admission_totals().iter())
+        type Placed = (usize, Vec<(usize, i64)>, AdmissionRow);
+        let plan: Vec<Placed> = (body.admission_totals().iter())
             .map(|total| {
                 let terms = total.terms.iter().map(|&(row, weight)| (row.index(), weight));
                 (total.row.index(), terms.collect(), total.label)
