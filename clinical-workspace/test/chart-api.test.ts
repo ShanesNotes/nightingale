@@ -8,9 +8,9 @@ const at = (seconds: number) => 24_900_000_000_000 + seconds * 1_000_000_000
 const version = {
   entry: 'test-entry-1',
   patient: 'test-patient',
-  vital: 'RR',
+  kind: 'vital',
   number: 2,
-  value: 18,
+  body: { vital: 'RR', value: 18 },
   care: at(60),
   charted: at(95),
   author: nurse,
@@ -46,36 +46,37 @@ const readModel = {
 }
 
 test('a new entry and an amendment parse from what the workspace sends', () => {
-  assert.deepEqual(parseNewEntry({ writeId: 'test-write-1', patient: 'test-patient', author: nurse.id, vital: 'RR', value: '18', care: null }), {
+  assert.deepEqual(parseNewEntry({ writeId: 'test-write-1', patient: 'test-patient', author: nurse.id, kind: 'vital' as const, body: { vital: 'RR', value: '18' }, care: null }), {
     ok: true,
-    value: { kind: 'new entry', writeId: 'test-write-1', patient: 'test-patient', author: nurse.id, vital: 'RR', value: 18, care: { kind: 'now' } },
+    value: { operation: 'new entry', writeId: 'test-write-1', patient: 'test-patient', author: nurse.id, kind: 'vital' as const, body: { vital: 'RR', value: 18 }, care: { kind: 'now' } },
   })
-  const amendment = { writeId: 'test-write-2', patient: 'test-patient', author: nurse.id, entry: 'test-entry-1', replaces: 1, value: '19.5', care: at(60) }
+  const amendment = { writeId: 'test-write-2', patient: 'test-patient', author: nurse.id, entry: 'test-entry-1', replaces: 1, kind: 'vital', body: { vital: 'RR', value: '19.5' }, care: at(60) }
   assert.deepEqual(parseAmendment(amendment), {
     ok: true,
     value: {
-      kind: 'amendment',
+      operation: 'amendment',
+      kind: 'vital',
       writeId: 'test-write-2',
       patient: 'test-patient',
       author: nurse.id,
       entry: 'test-entry-1',
       replaces: 1,
-      value: 19.5,
+      body: { vital: 'RR', value: 19.5 },
       care: { kind: 'at', at: at(60) },
     },
   })
 })
 
-test('empty value text is never zero: it parses to a value that is not a finite number', () => {
+test('empty or invalid value text is refused at the boundary, never parsed as zero', () => {
   for (const text of ['', '   ', 'twelve', '12 bpm']) {
-    const parsed = parseNewEntry({ writeId: 'test-write-1', patient: 'test-patient', author: nurse.id, vital: 'HR', value: text, care: null })
-    assert.ok(parsed.ok && Number.isNaN(parsed.value.value), JSON.stringify(text))
+    const parsed = parseNewEntry({ writeId: 'test-write-1', patient: 'test-patient', author: nurse.id, kind: 'vital' as const, body: { vital: 'HR', value: text }, care: null })
+    assert.deepEqual(parsed.ok ? undefined : parsed.refusal, { kind: 'body does not fit kind' }, JSON.stringify(text))
   }
 })
 
 test('the read model, the versions of an entry and a write result parse back unchanged', () => {
   assert.deepEqual(parseReadModel(JSON.parse(JSON.stringify(readModel))), { ok: true, value: readModel })
-  assert.deepEqual(parseVersions([version, { ...version, number: 1, value: 17 }]), { ok: true, value: [version, { ...version, number: 1, value: 17 }] })
+  assert.deepEqual(parseVersions([version, { ...version, number: 1, body: { ...version.body, value: 17 } }]), { ok: true, value: [version, { ...version, number: 1, body: { ...version.body, value: 17 } }] })
   const taken = { kind: 'taken', entry: { ...version, versions: 2 } }
   assert.deepEqual(parseWriteResult(taken), { ok: true, value: taken })
   for (const kind of ['care time after now', 'write id reused with other content']) {
@@ -85,15 +86,15 @@ test('the read model, the versions of an entry and a write result parse back unc
 })
 
 test('a body the workspace could not have sent is refused as malformed at the boundary', () => {
-  const entry = { writeId: 'test-write-1', patient: 'test-patient', author: nurse.id, vital: 'RR', value: '18', care: null }
+  const entry = { writeId: 'test-write-1', patient: 'test-patient', author: nurse.id, kind: 'vital' as const, body: { vital: 'RR', value: '18' }, care: null }
   const amendment = { ...entry, entry: 'test-entry-1', replaces: 1 }
   const newEntries: Record<string, unknown> = {
     'not an object': '18',
     'no write id': { ...entry, writeId: undefined },
     'an author off the roster': { ...entry, author: 'someone' },
     'no author': { ...entry, author: undefined },
-    'a vital the table lacks': { ...entry, vital: 'EtCO2' },
-    'a value sent as a number': { ...entry, value: 18 },
+    'a vital the table lacks': { ...entry, body: { ...entry.body, vital: 'EtCO2' } },
+    'a value sent as a number': { ...entry, body: { ...entry.body, value: 18 } },
     'a care time as clock text': { ...entry, care: '06:56:00' },
     'no patient': { ...entry, patient: '' },
   }

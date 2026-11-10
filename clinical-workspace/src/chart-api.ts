@@ -15,6 +15,7 @@ import {
 } from './device.ts'
 import { isPatientTime, isWallTime, type PatientTime, type WallTime } from './time.ts'
 import { isVital, type PerVital, type Vital } from './vitals.ts'
+import { type EntryContent, type EntryKind, type KindRefusal, parseContent } from './entry-kinds.ts'
 
 export type EntryId = string & { readonly __brand: 'EntryId' }
 export type ClinicianId = string & { readonly __brand: 'ClinicianId' }
@@ -45,24 +46,21 @@ export const ROSTER: readonly Clinician[] = [
 
 export type CareTime = { readonly kind: 'now' } | { readonly kind: 'at'; readonly at: PatientTime }
 
-export type NewEntry = {
-  readonly kind: 'new entry'
+export type NewEntry = EntryContent & {
+  readonly operation: 'new entry'
   readonly writeId: WriteId
   readonly patient: PatientId
   readonly author: ClinicianId
-  readonly vital: Vital
-  readonly value: number
   readonly care: CareTime
 }
 
-export type Amendment = {
-  readonly kind: 'amendment'
+export type Amendment = EntryContent & {
+  readonly operation: 'amendment'
   readonly writeId: WriteId
   readonly patient: PatientId
   readonly author: ClinicianId
   readonly entry: EntryId
   readonly replaces: VersionNumber
-  readonly value: number
   readonly care: CareTime
 }
 
@@ -72,34 +70,33 @@ export type NewEntryBody = {
   readonly writeId: string
   readonly patient: string
   readonly author: string
-  readonly vital: string
-  readonly value: string
+  readonly kind: string
+  readonly body: Readonly<Record<string, string>>
   readonly care: number | null
 }
 
-export type AmendmentBody = Omit<NewEntryBody, 'vital'> & { readonly entry: string; readonly replaces: number }
+export type AmendmentBody = NewEntryBody & { readonly entry: string; readonly replaces: number }
 
 export type Refusal =
+  | KindRefusal
+  | { readonly kind: 'entry kind differs' }
   | { readonly kind: 'another patient' }
   | { readonly kind: 'care time after now' }
-  | { readonly kind: 'not a finite number' }
   | { readonly kind: 'no such entry' }
   | { readonly kind: 'not the current version' }
   | { readonly kind: 'write id reused with other content' }
   | { readonly kind: 'malformed'; readonly reason: string }
 
-export type EntryVersion = {
+export type EntryVersion<K extends EntryKind = EntryKind> = EntryContent<K> & {
   readonly entry: EntryId
   readonly patient: PatientId
-  readonly vital: Vital
   readonly number: VersionNumber
-  readonly value: number
   readonly care: PatientTime
   readonly charted: PatientTime
   readonly author: Clinician
 }
 
-export type EntryView = EntryVersion & { readonly versions: number }
+export type EntryView<K extends EntryKind = EntryKind> = EntryVersion<K> & { readonly versions: number }
 
 export type WriteResult = { readonly kind: 'taken'; readonly entry: EntryView } | { readonly kind: 'refused'; readonly refusal: Refusal }
 
@@ -142,20 +139,29 @@ export type ReadModel = {
   readonly missing: readonly MissingSpan[]
 }
 
+export const entriesOfKind = <K extends EntryKind>(model: ReadModel, kind: K): readonly Extract<EntryView, { kind: K }>[] =>
+  model.entries.filter((entry): entry is Extract<EntryView, { kind: K }> => entry.kind === kind)
+
 type Json = Readonly<Record<string, unknown>>
 
 const DISCIPLINES: readonly unknown[] = ['nurse', 'physician', 'respiratory therapist'] satisfies Discipline[]
 const REFUSALS: readonly unknown[] = [
+  'unknown entry kind',
+  'body does not fit kind',
+  'entry kind differs',
   'another patient',
   'care time after now',
-  'not a finite number',
   'no such entry',
   'not the current version',
   'write id reused with other content',
 ] satisfies Refusal['kind'][]
-const DECIMAL = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/
-
-class Malformed extends Error {}
+class Malformed extends Error {
+  readonly refusal: Refusal
+  constructor(reason: string, refusal: Refusal = { kind: 'malformed', reason }) {
+    super(reason)
+    this.refusal = refusal
+  }
+}
 
 const fail = (reason: string): never => {
   throw new Malformed(reason)
@@ -186,11 +192,6 @@ function count(json: Json, key: string): number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 ? value : fail(`${key} is not a count from 1`)
 }
 
-function finite(json: Json, key: string): number {
-  const value = json[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : fail(`${key} is not a finite number`)
-}
-
 const unwrap = <T>(parsed: Parsed<T>): T => (parsed.ok ? parsed.value : fail(parsed.reason))
 
 function vital(json: Json): Vital {
@@ -203,11 +204,10 @@ function author(json: Json): ClinicianId {
   return ROSTER.some((c) => c.id === id) ? id : fail(`author ${id} is not on the roster`)
 }
 
-function typedValue(json: Json): number {
-  const typed = json['value']
-  if (typeof typed !== 'string') return fail('value is not the text the clinician typed')
-  const trimmed = typed.trim()
-  return DECIMAL.test(trimmed) ? Number(trimmed) : Number.NaN
+function content(json: Json, from: 'write' | 'read'): EntryContent {
+  const parsed = parseContent(json['kind'], json['body'], from)
+  if (!parsed.ok) throw new Malformed(parsed.refusal.kind, parsed.refusal)
+  return parsed.value
 }
 
 function care(json: Json): CareTime {
@@ -228,11 +228,10 @@ function clinician(value: unknown): Clinician {
 function entryVersion(value: unknown): EntryVersion {
   const json = object(value, 'an entry version')
   return {
+    ...content(json, 'read'),
     entry: entryOf(json, 'entry'),
     patient: patientOf(json),
-    vital: vital(json),
     number: versionOf(json, 'number'),
-    value: finite(json, 'value'),
     care: time(json, 'care'),
     charted: time(json, 'charted'),
     author: clinician(json['author']),
@@ -305,23 +304,34 @@ function parsing<T>(parse: () => T): Parsed<T> {
   }
 }
 
-export const parseNewEntry = (body: unknown): Parsed<NewEntry> =>
-  parsing(() => {
+type ParsedWrite<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly reason: string; readonly refusal: Refusal }
+
+function parsingWrite<T>(parse: () => T): ParsedWrite<T> {
+  try {
+    return { ok: true, value: parse() }
+  } catch (error) {
+    if (error instanceof Malformed) return { ok: false, reason: error.message, refusal: error.refusal }
+    throw error
+  }
+}
+
+export const parseNewEntry = (body: unknown): ParsedWrite<NewEntry> =>
+  parsingWrite(() => {
     const json = object(body, 'a new entry')
-    return { kind: 'new entry', writeId: writeIdOf(json), patient: patientOf(json), author: author(json), vital: vital(json), value: typedValue(json), care: care(json) }
+    return { ...content(json, 'write'), operation: 'new entry', writeId: writeIdOf(json), patient: patientOf(json), author: author(json), care: care(json) }
   })
 
-export const parseAmendment = (body: unknown): Parsed<Amendment> =>
-  parsing(() => {
+export const parseAmendment = (body: unknown): ParsedWrite<Amendment> =>
+  parsingWrite(() => {
     const json = object(body, 'an amendment')
     return {
-      kind: 'amendment',
+      ...content(json, 'write'),
+      operation: 'amendment',
       writeId: writeIdOf(json),
       patient: patientOf(json),
       author: author(json),
       entry: entryOf(json, 'entry'),
       replaces: versionOf(json, 'replaces'),
-      value: typedValue(json),
       care: care(json),
     }
   })

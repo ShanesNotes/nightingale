@@ -24,19 +24,22 @@ let writes = 0
 const writeId = () => `test-write-${(writes += 1)}`
 
 const newEntry = (body: Readonly<Record<string, unknown>>) => {
-  const parsed = parseNewEntry({ writeId: writeId(), patient: 'test-patient', author: nurse.id, vital: 'RR', value: '18', care: null, ...body })
+  const { vital = 'RR', value = '18', ...shared } = body
+  const parsed = parseNewEntry({ writeId: writeId(), patient: 'test-patient', author: nurse.id, kind: 'vital', body: { vital, value }, care: null, ...shared })
   assert.ok(parsed.ok, parsed.ok ? '' : parsed.reason)
   return parsed.value
 }
 
 const amendment = (body: Readonly<Record<string, unknown>>) => {
-  const parsed = parseAmendment({ writeId: writeId(), patient: 'test-patient', author: nurse.id, replaces: 1, value: '18', care: null, ...body })
+  const { vital = 'RR', value = '18', ...shared } = body
+  const parsed = parseAmendment({ writeId: writeId(), patient: 'test-patient', author: nurse.id, replaces: 1, kind: 'vital', body: { vital, value }, care: null, ...shared })
   assert.ok(parsed.ok, parsed.ok ? '' : parsed.reason)
   return parsed.value
 }
 
 const taken = (result: WriteResult) => {
   assert.ok(result.kind === 'taken', JSON.stringify(result))
+  assert.equal(result.entry.kind, 'vital')
   return result.entry
 }
 
@@ -102,9 +105,9 @@ for (const [name, connect] of databases) {
         assert.deepEqual({ ...typed.entry, entry: 'any' }, {
           entry: 'any',
           patient: 'test-patient',
-          vital: 'RR',
+          kind: 'vital',
           number: 1,
-          value: 18,
+          body: { vital: 'RR', value: 18 },
           care: at('06:56:30'),
           charted: at('06:57:10'),
           author: nurse,
@@ -118,15 +121,12 @@ for (const [name, connect] of databases) {
         assert.equal(model.now, at('06:58:05'))
       }))
 
-    test('the chart refuses an entry about another patient, a care time after now, or a value that is not a finite number', () =>
+    test('the chart refuses an entry about another patient or a care time after now', () =>
       withChart(async (chart) => {
         const now = at('06:57:00')
         const refused = (kind: string) => ({ kind: 'refused', refusal: { kind } })
         assert.deepEqual(await chart.write(newEntry({ patient: 'another-test-patient' }), now), refused('another patient'))
         assert.deepEqual(await chart.write(newEntry({ care: at('06:57:01') }), now), refused('care time after now'))
-        for (const value of ['', '   ', 'twelve']) {
-          assert.deepEqual(await chart.write(newEntry({ value }), now), refused('not a finite number'), JSON.stringify(value))
-        }
         assert.deepEqual((await chart.readModel(now)).entries, [], 'a refused write charts nothing')
       }))
 
@@ -137,11 +137,11 @@ for (const [name, connect] of databases) {
         const second = taken(
           await chart.write(amendment({ entry: first.entry, author: physician.id, value: '20', care: at('06:56:05') }), at('06:57:00')),
         )
-        assert.deepEqual(second, { ...first, number: 2, versions: 2, value: 20, care: at('06:56:05'), charted: at('06:57:00'), author: physician })
+        assert.deepEqual(second, { ...first, number: 2, versions: 2, body: { vital: 'RR', value: 20 }, care: at('06:56:05'), charted: at('06:57:00'), author: physician })
         assert.deepEqual((await chart.readModel(at('06:57:05'))).entries, [second])
         const versions = await chart.versions(first.entry)
         assert.deepEqual(
-          versions?.map((v) => [v.number, v.value, v.author.id, v.charted]),
+          versions?.map((v) => [v.number, v.kind === 'vital' ? v.body.value : undefined, v.author.id, v.charted]),
           [
             [1, 18, nurse.id, at('06:56:10')],
             [2, 20, physician.id, at('06:57:00')],
@@ -175,8 +175,8 @@ for (const [name, connect] of databases) {
                 const [read] = rows
                 if (read !== undefined && 'current' in read) {
                   await tx.query(
-                    `INSERT INTO entry_version (entry, number, value, care_ns, charted_ns, author, author_name, author_discipline, write_id, write)
-                     SELECT entry, number + 1, value, care_ns, charted_ns, author, author_name, author_discipline, 'test-write-racing', write
+                    `INSERT INTO entry_version (entry, kind, number, care_ns, charted_ns, author, author_name, author_discipline, write_id, write_fingerprint)
+                     SELECT entry, kind, number + 1, care_ns, charted_ns, author, author_name, author_discipline, 'test-write-racing', write_fingerprint
                      FROM entry_version WHERE entry = $1 AND number = $2`,
                     [read['id'], read['current']],
                   )
@@ -266,20 +266,23 @@ for (const [name, connect] of databases) {
         for (const statement of [
           "UPDATE run SET patient = 'another-test-patient'",
           'DELETE FROM run',
-          'TRUNCATE run',
-          "UPDATE entry SET vital = 'HR'",
+          'TRUNCATE run CASCADE',
+          "UPDATE entry SET kind = 'note'",
           'DELETE FROM entry',
           'TRUNCATE entry CASCADE',
-          'UPDATE entry_version SET value = 99',
+          'UPDATE entry_version SET care_ns = 99',
           'DELETE FROM entry_version',
-          'TRUNCATE entry_version',
+          'TRUNCATE entry_version CASCADE',
+          'UPDATE entry_vital SET value = 99',
+          'DELETE FROM entry_vital',
+          'TRUNCATE entry_vital',
         ]) {
           await assert.rejects(sql.query(statement), /append-only/, statement)
         }
         const again = (number: string, writeId: string) =>
           sql.query(
-            `INSERT INTO entry_version (entry, number, value, care_ns, charted_ns, author, author_name, author_discipline, write_id, write)
-             SELECT entry, ${number}, 99, care_ns, charted_ns, author, author_name, author_discipline, ${writeId}, write FROM entry_version`,
+            `INSERT INTO entry_version (entry, kind, number, care_ns, charted_ns, author, author_name, author_discipline, write_id, write_fingerprint)
+             SELECT entry, kind, ${number}, care_ns, charted_ns, author, author_name, author_discipline, ${writeId}, write_fingerprint FROM entry_version`,
           )
         await assert.rejects(again('number', "'test-write-again'"), /duplicate key/, 'a second version under one number')
         await assert.rejects(again('number + 1', 'write_id'), /duplicate key/, 'a second version under one write id')

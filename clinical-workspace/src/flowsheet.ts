@@ -1,4 +1,4 @@
-import type { EntryView, ReadModel, ReadingView, StatementView } from './chart-api.ts'
+import { entriesOfKind, type EntryView, type ReadModel, type ReadingView, type StatementView } from './chart-api.ts'
 import { add, type Duration, earlier, floorTo, later, MINUTE, type PatientTime, SECOND, seconds, since, ZERO } from './time.ts'
 import { isVital, VITALS, type VitalRow } from './vitals.ts'
 
@@ -13,7 +13,7 @@ export type MonitorCell =
       readonly missing: number
     }
 
-export type ChartedValue = { readonly entry: EntryView; readonly lateBy: Duration; readonly edited: boolean }
+export type ChartedValue = { readonly entry: EntryView<'vital'>; readonly lateBy: Duration; readonly edited: boolean }
 
 export type ChartedCell = { readonly kind: 'entries'; readonly entries: readonly ChartedValue[] }
 
@@ -28,7 +28,7 @@ const within = (time: PatientTime, minute: PatientTime) => minute <= time && tim
 const lateReading = (r: ReadingView) => floorTo(r.arrived, SECOND) > floorTo(r.available, SECOND)
 
 function minutes(model: ReadModel): PatientTime[] {
-  const first = model.entries.reduce((soonest, e) => earlier(soonest, e.care), model.run.start)
+  const first = entriesOfKind(model, 'vital').reduce((soonest, e) => earlier(soonest, e.care), model.run.start)
   const out: PatientTime[] = []
   for (let minute = floorTo(first, MINUTE); minute <= model.now; minute = add(minute, MINUTE)) out.push(minute)
   return out
@@ -79,7 +79,7 @@ function monitorCell(model: ReadModel, vital: string, minute: PatientTime): Moni
 }
 
 function chartedCell(model: ReadModel, vital: string, minute: PatientTime): ChartedCell {
-  const entries = model.entries.filter((e) => e.vital === vital && within(e.care, minute))
+  const entries = entriesOfKind(model, 'vital').filter((e) => e.body.vital === vital && within(e.care, minute))
   const lateBy = (entry: EntryView) => (entry.charted > entry.care ? since(entry.charted, entry.care) : ZERO)
   return { kind: 'entries', entries: entries.map((entry) => ({ entry, lateBy: lateBy(entry), edited: entry.versions > 1 })) }
 }

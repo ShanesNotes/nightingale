@@ -21,11 +21,11 @@ test('a clinician of any discipline charts any vital: the page sends what was ty
     update,
     Story.given(loaded()),
     Story.message(Message.ChoseAuthor({ author: THERAPIST.id })),
-    Story.message(Message.ChoseVital({ vital: 'RR' })),
-    Story.message(Message.TypedValue({ text: '18' })),
+    Story.message(Message.TypedField({ field: 'vital', text: 'RR' })),
+    Story.message(Message.TypedField({ field: 'value', text: '18' })),
     Story.message(Message.TypedCare({ text: '06:56:10' })),
     Story.message(Message.ClickedChart()),
-    Story.Command.expectExact(PostEntry({ body: { patient: 'test-patient', author: THERAPIST.id, vital: 'RR', value: '18', care: at('06:56:10') }, writeId: null })),
+    Story.Command.expectExact(PostEntry({ body: { patient: 'test-patient', author: THERAPIST.id, kind: 'vital', body: { vital: 'RR', value: '18' }, care: at('06:56:10') }, writeId: null })),
     Story.Command.resolve(PostEntry, Message.Wrote({ result: taken })),
     Story.Command.expectHas(FetchChart),
     notice('Charted RR 18 /min as Synthetic Respiratory Therapist C'),
@@ -37,9 +37,9 @@ test('a blank care time is sent as now, for the chart service to read when it ta
   Story.story(
     update,
     Story.given(loaded()),
-    Story.message(Message.TypedValue({ text: '61' })),
+    Story.message(Message.TypedField({ field: 'value', text: '61' })),
     Story.message(Message.ClickedChart()),
-    Story.Command.expectExact(PostEntry({ body: { patient: 'test-patient', author: 'synthetic-nurse', vital: 'HR', value: '61', care: null }, writeId: null })),
+    Story.Command.expectExact(PostEntry({ body: { patient: 'test-patient', author: 'synthetic-nurse', kind: 'vital', body: { vital: 'HR', value: '61' }, care: null }, writeId: null })),
     park,
   )
 })
@@ -48,15 +48,15 @@ test('a refusal shows in words, and a write the service does not answer is never
   Story.story(
     update,
     Story.given(loaded()),
-    Story.message(Message.TypedValue({ text: '61' })),
+    Story.message(Message.TypedField({ field: 'value', text: '61' })),
     Story.message(Message.TypedCare({ text: '06:59:00' })),
     Story.message(Message.ClickedChart()),
     Story.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'care time after now' } }) })),
     notice('The care time is after now; nothing was charted.'),
-    Story.message(Message.TypedValue({ text: '' })),
+    Story.message(Message.TypedField({ field: 'value', text: '' })),
     Story.message(Message.ClickedChart()),
-    Story.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'not a finite number' } }) })),
-    notice('The value is not a number; nothing was charted.'),
+    Story.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'body does not fit kind' } }) })),
+    notice('Enter a finite value for a listed vital; nothing was charted.'),
     Story.message(Message.ClickedChart()),
     Story.Command.resolve(PostEntry, Message.WriteUnanswered({ writeId: 'test-write-1' })),
     notice('The chart service did not answer, so the entry may already be in the chart.'),
@@ -69,36 +69,36 @@ test('a refusal shows in words, and a write the service does not answer is never
 })
 
 test('a write the service does not answer may already be in the chart, so sending the same draft again sends the same write id', () => {
-  const body = { patient: 'test-patient', author: 'synthetic-nurse', vital: 'HR', value: '61', care: null }
+  const body = { patient: 'test-patient', author: 'synthetic-nurse', kind: 'vital' as const, body: { vital: 'HR', value: '61' }, care: null }
   Story.story(
     update,
     Story.given(loaded()),
-    Story.message(Message.TypedValue({ text: '61' })),
+    Story.message(Message.TypedField({ field: 'value', text: '61' })),
     Story.message(Message.ClickedChart()),
     Story.Command.expectExact(PostEntry({ body, writeId: null })),
     Story.Command.resolve(PostEntry, Message.WriteUnanswered({ writeId: 'test-write-1' })),
     notice('The chart service did not answer, so the entry may already be in the chart. Charting it again unchanged cannot chart it twice.'),
-    Story.model((m: Model) => assert.equal(m.form.value, '61', 'the draft stays as typed')),
+    Story.model((m: Model) => assert.equal(m.form.body.value, '61', 'the draft stays as typed')),
     Story.message(Message.ClickedChart()),
     Story.Command.expectExact(PostEntry({ body, writeId: 'test-write-1' })),
     Story.Command.resolve(PostEntry, Message.WriteUnanswered({ writeId: 'test-write-1' })),
-    Story.message(Message.TypedValue({ text: '' })),
+    Story.message(Message.TypedField({ field: 'value', text: '' })),
     Story.message(Message.ClickedChart()),
-    Story.Command.expectExact(PostEntry({ body: { ...body, value: '' }, writeId: null })),
-    Story.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'not a finite number' } }) })),
-    Story.message(Message.TypedValue({ text: '61' })),
+    Story.Command.expectExact(PostEntry({ body: { ...body, body: { ...body.body, value: '' } }, writeId: null })),
+    Story.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'body does not fit kind' } }) })),
+    Story.message(Message.TypedField({ field: 'value', text: '61' })),
     Story.message(Message.ClickedChart()),
     Story.Command.expectExact(PostEntry({ body, writeId: null })),
     park,
   )
   const first = entry({ id: 'test-entry-1', vital: 'RR', value: 18, care: '06:56:30', charted: '06:57:15' })
-  const amendment = { patient: 'test-patient', author: 'synthetic-nurse', entry: 'test-entry-1', replaces: 1, value: '19', care: at('06:56:30') }
+  const amendment = { patient: 'test-patient', author: 'synthetic-nurse', entry: 'test-entry-1', replaces: 1, kind: 'vital' as const, body: { vital: 'RR', value: '19' }, care: at('06:56:30') }
   Story.story(
     update,
     Story.given(loaded({ entries: [first] })),
     Story.message(Message.ClickedEntry({ entry: 'test-entry-1' })),
     Story.message(Message.ClickedEdit()),
-    Story.message(Message.TypedEditValue({ text: '19' })),
+    Story.message(Message.TypedEditField({ field: 'value', text: '19' })),
     Story.message(Message.ClickedSaveEdit()),
     Story.Command.expectExact(PostAmendment({ body: amendment, writeId: null })),
     Story.Command.resolve(PostAmendment, Message.WriteUnanswered({ writeId: 'test-write-2' })),
@@ -158,7 +158,7 @@ test('the charting form and the flowsheet follow the vitals table, so EtCO2 is o
 
 test('a charted value shows its details; edit amends the current version; earlier versions come from the service on request', () => {
   const first = entry({ id: 'test-entry-1', vital: 'RR', value: 18, care: '06:56:30', charted: '06:57:15' })
-  const second = { ...first, number: 2, versions: 2, value: 19, charted: at('06:57:40') }
+  const second = { ...first, number: 2, versions: 2, body: { ...first.body, value: 19 }, charted: at('06:57:40') }
   Scene.scene(
     { update, view },
     Scene.given(loaded({ entries: [first] })),
@@ -176,7 +176,7 @@ test('a charted value shows its details; edit amends the current version; earlie
     Scene.type('#edit-value', '19'),
     Scene.click('#save-edit'),
     Scene.Command.expectExact(
-      PostAmendment({ body: { patient: 'test-patient', author: 'synthetic-nurse', entry: 'test-entry-1', replaces: 1, value: '19', care: at('06:56:30') }, writeId: null }),
+      PostAmendment({ body: { patient: 'test-patient', author: 'synthetic-nurse', entry: 'test-entry-1', replaces: 1, kind: 'vital' as const, body: { vital: 'RR', value: '19' }, care: at('06:56:30') }, writeId: null }),
     ),
     Scene.Command.resolve(PostAmendment, Message.Wrote({ result: written({ kind: 'taken', entry: second }) })),
     Scene.Command.resolve(FetchChart, Message.GotChart({ chart: readModel({ now: at('06:57:41'), entries: [second] }), at: wallTime(6_000_000) })),
@@ -191,7 +191,7 @@ test('a charted value shows its details; edit amends the current version; earlie
 
 test('an edit amends the version it began from, so a stale draft is refused when a poll brings a newer version', () => {
   const first = entry({ id: 'test-entry-1', vital: 'RR', value: 18, care: '06:56:30', charted: '06:57:15' })
-  const newer = { ...first, number: 2, versions: 2, value: 20, author: THERAPIST, charted: at('06:57:40') }
+  const newer = { ...first, number: 2, versions: 2, body: { ...first.body, value: 20 }, author: THERAPIST, charted: at('06:57:40') }
   Story.story(
     update,
     Story.given(loaded({ entries: [first] })),
@@ -199,10 +199,10 @@ test('an edit amends the version it began from, so a stale draft is refused when
     Story.message(Message.ClickedEdit()),
     Story.message(Message.Polled({ at: wallTime(5_001_000) })),
     Story.Command.resolve(FetchChart, Message.GotChart({ chart: readModel({ now: at('06:57:41'), entries: [newer] }), at: wallTime(5_001_100) })),
-    Story.message(Message.TypedEditValue({ text: '19' })),
+    Story.message(Message.TypedEditField({ field: 'value', text: '19' })),
     Story.message(Message.ClickedSaveEdit()),
     Story.Command.expectExact(
-      PostAmendment({ body: { patient: 'test-patient', author: 'synthetic-nurse', entry: 'test-entry-1', replaces: 1, value: '19', care: at('06:56:30') }, writeId: null }),
+      PostAmendment({ body: { patient: 'test-patient', author: 'synthetic-nurse', entry: 'test-entry-1', replaces: 1, kind: 'vital' as const, body: { vital: 'RR', value: '19' }, care: at('06:56:30') }, writeId: null }),
     ),
     Story.Command.resolve(PostAmendment, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'not the current version' } }) })),
     notice('Someone charted a newer version first; nothing was charted.'),
@@ -212,32 +212,32 @@ test('an edit amends the version it began from, so a stale draft is refused when
 test('a write in flight takes no input, and its answer clears only the draft it answered, so no draft is lost', () => {
   const first = entry({ id: 'test-entry-1', vital: 'RR', value: 18, care: '06:56:30', charted: '06:57:15' })
   const charted = entry({ id: 'test-entry-2', vital: 'HR', value: 61, care: '06:57:30', charted: '06:57:30' })
-  const amended = { ...first, number: 2, versions: 2, value: 19, charted: at('06:57:40') }
+  const amended = { ...first, number: 2, versions: 2, body: { ...first.body, value: 19 }, charted: at('06:57:40') }
   Story.story(
     update,
     Story.given(loaded({ entries: [first] })),
     Story.message(Message.ClickedEntry({ entry: 'test-entry-1' })),
     Story.message(Message.ClickedEdit()),
-    Story.message(Message.TypedEditValue({ text: '19' })),
-    Story.message(Message.TypedValue({ text: '61' })),
+    Story.message(Message.TypedEditField({ field: 'value', text: '19' })),
+    Story.message(Message.TypedField({ field: 'value', text: '61' })),
     Story.message(Message.ClickedChart()),
-    Story.Command.expectExact(PostEntry({ body: { patient: 'test-patient', author: 'synthetic-nurse', vital: 'HR', value: '61', care: null }, writeId: null })),
+    Story.Command.expectExact(PostEntry({ body: { patient: 'test-patient', author: 'synthetic-nurse', kind: 'vital', body: { vital: 'HR', value: '61' }, care: null }, writeId: null })),
     park,
-    Story.message(Message.TypedValue({ text: '62' })),
-    Story.message(Message.ChoseVital({ vital: 'RR' })),
-    Story.message(Message.TypedEditValue({ text: '20' })),
+    Story.message(Message.TypedField({ field: 'value', text: '62' })),
+    Story.message(Message.TypedField({ field: 'vital', text: 'RR' })),
+    Story.message(Message.TypedEditField({ field: 'value', text: '20' })),
     Story.message(Message.ClickedChart()),
     Story.message(Message.ClickedSaveEdit()),
     Story.Command.expectNone(),
-    Story.model((m: Model) => assert.deepEqual([m.form.vital, m.form.value, m.editing?.value], ['HR', '61', '19'], 'no input while the write is in flight')),
+    Story.model((m: Model) => assert.deepEqual([m.form.body.vital, m.form.body.value, m.editing?.body.value], ['HR', '61', '19'], 'no input while the write is in flight')),
     Story.message(Message.Wrote({ result: written({ kind: 'taken', entry: charted }) })),
-    Story.model((m: Model) => assert.deepEqual([m.form.value, m.editing?.value], ['', '19'], 'the answer cleared the form it answered and kept the edit')),
+    Story.model((m: Model) => assert.deepEqual([m.form.body.value, m.editing?.body.value], ['', '19'], 'the answer cleared the form it answered and kept the edit')),
     park,
-    Story.message(Message.TypedValue({ text: '64' })),
+    Story.message(Message.TypedField({ field: 'value', text: '64' })),
     Story.message(Message.ClickedSaveEdit()),
     park,
     Story.message(Message.Wrote({ result: written({ kind: 'taken', entry: amended }) })),
-    Story.model((m: Model) => assert.deepEqual([m.editing, m.form.value], [null, '64'], 'the answer closed the edit it answered and kept the form')),
+    Story.model((m: Model) => assert.deepEqual([m.editing, m.form.body.value], [null, '64'], 'the answer closed the edit it answered and kept the form')),
     park,
   )
   const whileCharting = ['#author', '#vital', '#value', '#care', '#chart', '#edit']
@@ -271,7 +271,7 @@ test('the page asks for one chart at a time, so an older chart never replaces a 
     Story.message(Message.Polled({ at: wallTime(5_001_000) })),
     Story.Command.expectExact(FetchChart()),
     park,
-    Story.message(Message.TypedValue({ text: '61' })),
+    Story.message(Message.TypedField({ field: 'value', text: '61' })),
     Story.message(Message.ClickedChart()),
     Story.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'taken', entry: charted }) })),
     Story.Command.expectNone(),

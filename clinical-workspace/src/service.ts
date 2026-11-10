@@ -55,13 +55,13 @@ async function route(options: ServiceOptions, request: IncomingMessage): Promise
   if (request.method === 'POST' && path === '/api/entries') {
     return post(async (json) => {
       const parsed = parseNewEntry(json)
-      return parsed.ok ? written(await chart.write(parsed.value, now())) : malformed(parsed.reason)
+      return parsed.ok ? written(await chart.write(parsed.value, now())) : { status: 400, json: { kind: 'refused', refusal: parsed.refusal } }
     })
   }
   if (request.method === 'POST' && path === '/api/amendments') {
     return post(async (json) => {
       const parsed = parseAmendment(json)
-      return parsed.ok ? written(await chart.write(parsed.value, now())) : malformed(parsed.reason)
+      return parsed.ok ? written(await chart.write(parsed.value, now())) : { status: 400, json: { kind: 'refused', refusal: parsed.refusal } }
     })
   }
   if (request.method === 'POST' && path === '/api/device/messages') {
