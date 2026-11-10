@@ -1,7 +1,8 @@
 # 13: Law forms for the gut and the fuels
 
 Type: research
-Status: open
+Status: claimed
+Claimed by: r13-gut-fuels
 Blocked by: 02
 
 **Question:** Which cited form does each law that carries a meal from the gut to the stores take at rung 0? [Body tickets 13 to 16](../../body/map.md) write the laws, so each answer is a form, where its constants go, a stated validity range and how far the source was read, to the standard of [ticket 02](02-law-forms.md). No value is bound here.
