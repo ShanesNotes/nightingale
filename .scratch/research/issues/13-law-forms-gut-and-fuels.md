@@ -18,4 +18,4 @@ Blocked by: 02
 - [ ] Diet-induced heat production
 - [ ] A validity range for each form, with its source
 
-**Start from:** the candidate fills for needs EN-L01 and EN-L02 in `~/nightingale-evidence/source-curation/coverage.jsonl`, and slice D of `~/lanes/logs/ng-q1-healthy-body-draft.md`, which names a rung 0 model for each row. The hepatic, gastrointestinal and musculoskeletal systems have no law need in the curation store at all, so this ticket adds them. These are leads to check against the sources, never sources themselves (SRS rule 16).
+**Start from:** the candidate fills for needs EN-L01 and EN-L02 in `~/nightingale-evidence/source-curation/coverage.jsonl`, and slice D of `~/lanes/logs/ng-q1-healthy-body-draft.md`, which names a rung 0 model for each row. The hepatic, gastrointestinal and musculoskeletal systems have no law need in the curation store at all, so this ticket adds them. These are leads to check against the sources, never sources themselves (SRS rule 16). The evidence store's search and the evidence library's tagged passages find the sources ([body map](../../body/map.md), Notes).

@@ -14,4 +14,4 @@ Blocked by: 02
 - [ ] Heat production by state: asleep, seated awake, and after a meal
 - [ ] A validity range for each form, with its source
 
-**Start from:** slice E of `~/lanes/logs/ng-q1-healthy-body-draft.md` and section 4 of `~/lanes/logs/ng-q1-frame-followup.md`, which name a two-node model and the rhythm's sources. The curation store's fill for need MT-L01 has no thermoregulation form. These are leads to check against the sources, never sources themselves (SRS rule 16).
+**Start from:** slice E of `~/lanes/logs/ng-q1-healthy-body-draft.md` and section 4 of `~/lanes/logs/ng-q1-frame-followup.md`, which name a two-node model and the rhythm's sources. The curation store's fill for need MT-L01 has no thermoregulation form. These are leads to check against the sources, never sources themselves (SRS rule 16). The evidence store's search and the evidence library's tagged passages find the sources ([body map](../../body/map.md), Notes).
