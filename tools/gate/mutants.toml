@@ -742,5 +742,5 @@ test = "-p ng-contract --lib conservation::tests::a_fuel_supply_that_reads_the_b
 name = "quantity-split-where-unjoined"
 path = "crates/ng-contract/src/conservation.rs"
 old = '''for piece in joined(weighed.len(), groups) {'''
-new = '''for piece in [(0..weighed.len()).collect::<Vec<_>>()] {'''
+new = '''for piece in joined(weighed.len(), groups.chain([(0..weighed.len()).collect()])) {'''
 test = "-p ng-contract --test reactions a_quantity_splits_where_its_own_columns_do_not_join_its_rows"
