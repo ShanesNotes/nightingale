@@ -31,7 +31,7 @@ Tickets 01, 02, 07 and 23 and research tickets 11 to 15 can start today. Ticket 
 | [01](issues/01-rung-0-specification.md) Rung 0, system by system | nothing | The specification, as tables |
 | [02](issues/02-reactions.md) A reaction and its books | nothing | The law language can turn one species into another |
 | [29](issues/29-the-charge-default.md) How charge closes when a reaction makes a strong anion | 02 | A pick between the two ways of counting charge |
-| [03](issues/03-whole-body-lists.md) Species, spaces and networks | 01, 02 | The contract's closed lists, grown once |
+| [03](issues/03-whole-body-lists.md) Species, spaces and networks | 01, 02, 29 | The contract's closed lists, grown once |
 | [04](issues/04-scopes-ports-and-census.md) Scopes, ports and a census for each assembly | 03 | Nine systems can declare laws, and no system ticket edits a shared constant |
 | [05](issues/05-the-days-inputs.md) The day's inputs | 03 | The clock, sleep, the room and meals reach the body |
 | [06](issues/06-whole-body-on-holds.md) The whole body on holds | 04, 05 | The second assembly and its hold table |
@@ -76,7 +76,7 @@ After tickets 06 and 26, three lanes can be built side by side: the gases (08), 
 - **Acidity is stated from ticket 08.** Ticket 08 states acidity in every watery space with the lumped anion and the diet's organic anion held, ticket 11's sensor reads that acidity, and ticket 18 adds the anions' making and excretion. Alternative: ticket 08 carries carbon dioxide on a sourced buffer line, which ticket 18 replaces with the full balance. It touched tickets 08, 11 and 18.
 - **Ticket 15 waits on ticket 17**, so its potassium check stays whole. Alternative: ticket 15's run drops "and is excreted after", and whichever of tickets 15 and 17 lands second carries that check. It touched ticket 15.
 - **Research 12 gives sleep's gain on sympathetic traffic**, and ticket 25's blockers stand. Alternative: research 14 or a new research ticket gives it, and ticket 25 waits on that. It touched research 12.
-- **Charge counts each acid and base as a neutral moiety** that speciation charges, and the certificate reads charge after speciation. Alternative: a fixed charge on each strong anion, with a counter-charge for each reaction that makes or burns one. [Ticket 29](issues/29-the-charge-default.md) tests both.
+- **Charge counts each acid and base as a neutral moiety** that speciation charges, and the certificate reads charge after speciation. Alternative: a fixed charge on each strong anion, with a counter-charge for each reaction that makes or burns one. [Ticket 29](issues/29-the-charge-default.md) tests both. Ticket 03 waits on its pick, because the species list states each species' charge.
 - **The record counts exchange only on columns with a receipt**, so a reaction out of balance shows in the inventory and closure reports it. Alternative: any column that changes a combination counts as exchange, as before ticket 02. It touched `crates/ng-record/src/history.rs` and the contract's paragraph on the certificate.
 
 ## Not yet specified
