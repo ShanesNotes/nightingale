@@ -121,6 +121,10 @@ impl CompiledBody {
     pub fn factor(&self, jacobian: &Jacobian) -> Result<Factors<'_>, usize> {
         self.elimination.factor(&jacobian.values)
     }
+    /// The row each unknown's pivot takes in `factor`: its own, or across a closed row and the store that holds it.
+    pub(crate) fn pivots(&self) -> Vec<RowId> {
+        self.elimination.solved_by()
+    }
     /// The cards held, in card order.
     pub fn held(&self) -> impl Iterator<Item = &'static str> + '_ {
         (self.layout.basis.coverage().declarations().iter()).map(|held| held.card)
@@ -147,11 +151,15 @@ impl Layout {
     /// guards on one variable the first wins, and a guard a firing arms waits for the next step. The run and the ring
     /// both fire here.
     pub(crate) fn fire(&self, modes: &mut [usize], crossed: &[bool]) -> Vec<&GuardLayout> {
+        let fired = self.fired(modes, crossed);
+        fired.into_iter().map(|at| &self.guards[at]).collect()
+    }
+    pub(crate) fn fired(&self, modes: &mut [usize], crossed: &[bool]) -> Vec<usize> {
         let mut fired = Vec::new();
-        for (guard, &crossed) in self.guards.iter().zip(crossed) {
+        for (at, (guard, &crossed)) in self.guards.iter().zip(crossed).enumerate() {
             if crossed && guard.armed(modes) {
                 modes[guard.variable] = guard.enters;
-                fired.push(guard);
+                fired.push(at);
             }
         }
         fired

@@ -6,6 +6,17 @@ use crate::{
 /// A refusal at a construction call, at `AnatomyBuilder::finish`, at `Assembly::compile`, or at admission.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdmissionError {
+    /// A paced cycle's anchor that is not a cycle time mean of the packet's: a sampled mean pins no period.
+    PeriodAnchor {
+        anchor: AnchorId,
+    },
+    PeriodClock {
+        clock: Slot,
+    },
+    PeriodMismatch {
+        anchor: AnchorId,
+    },
+    CrossingOutside,
     NonFinite,
     Anatomy(AnatomyDefect),
     Compile(CompileDefect),

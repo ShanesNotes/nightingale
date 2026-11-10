@@ -7,11 +7,19 @@ use crate::{
 };
 use core::num::NonZeroU64;
 
+/// What one reading spans: a count of grid instants whose samples it averages, or a duration in nanoseconds over which
+/// it integrates the accepted curve.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Window {
+    Samples(NonZeroU64),
+    Time(NonZeroU64),
+}
+
 /// With no window, delay or error it reads every grid instant, as it is, at once.
 pub struct ChannelSpec {
     method: &'static str,
     row: RowKind,
-    window: NonZeroU64,
+    window: Window,
     delay_ns: u64,
     error: Option<(String, Compensated)>,
 }
@@ -20,15 +28,23 @@ impl ChannelSpec {
         Self {
             method,
             row,
-            window: NonZeroU64::MIN,
+            window: Window::Samples(NonZeroU64::MIN),
             delay_ns: 0,
             error: None,
+        }
+    }
+    /// One reading per `window_ns`, the row's integral over the window divided by its length: the accepted curve's
+    /// time mean, not a mean of samples. Windows sit on whole multiples of their length.
+    pub fn time_averaged(self, window_ns: NonZeroU64) -> Self {
+        Self {
+            window: Window::Time(window_ns),
+            ..self
         }
     }
     /// One reading per `samples` grid instants, their mean. A count, so a window always fits the grid.
     pub fn averaged(self, samples: NonZeroU64) -> Self {
         Self {
-            window: samples,
+            window: Window::Samples(samples),
             ..self
         }
     }
@@ -49,7 +65,7 @@ impl ChannelSpec {
 pub struct Channel {
     method: &'static str,
     row: RowId,
-    window: u64,
+    window: Window,
     period_ns: u64,
     delay_ns: u64,
     sd: Option<Compensated>,
@@ -62,14 +78,26 @@ impl Channel {
     pub fn row(&self) -> RowId {
         self.row
     }
-    /// How many grid instants one reading holds.
+    /// How many grid instants one reading holds, or for a time mean how many nanoseconds.
     pub fn window(&self) -> u64 {
-        self.window
+        match self.window {
+            Window::Samples(count) | Window::Time(count) => count.get(),
+        }
+    }
+    pub fn integrated(&self) -> bool {
+        matches!(self.window, Window::Time(_))
+    }
+    /// How long one reading's window lasts, whichever kind it is.
+    pub fn window_ns(&self) -> u64 {
+        match self.window {
+            Window::Samples(count) => count.get().saturating_mul(self.period_ns),
+            Window::Time(ns) => ns.get(),
+        }
     }
     /// Whether a window closes at this grid instant. Windows sit on whole multiples of their length, so an
     /// observer keeps no cursor.
     pub fn closes(&self, at: SimTime) -> bool {
-        (at.nanoseconds() / self.period_ns).is_multiple_of(self.window)
+        (at.nanoseconds() / self.period_ns).is_multiple_of(self.window())
     }
     /// When a reading collected at `collected` results; `None` past the clock's end.
     pub fn available(&self, collected: SimTime) -> Option<SimTime> {
@@ -111,8 +139,15 @@ impl ObservationLens {
         (self.channels.iter()).any(|channel| {
             channel.method == method
                 && channel.row == row
-                && channel.window == points
-                && channel.window.checked_mul(self.period_ns) == Some(window_ns)
+                && matches!(channel.window, Window::Samples(count)
+                    if count.get() == points && count.get().checked_mul(self.period_ns) == Some(window_ns))
+        })
+    }
+    pub(crate) fn reads_time_mean(&self, method: &str, row: RowId, window_ns: u64) -> bool {
+        (self.channels.iter()).any(|channel| {
+            channel.method == method
+                && channel.row == row
+                && matches!(channel.window, Window::Time(ns) if ns.get() == window_ns)
         })
     }
     /// What an observer's checkpoint is bound to: this lens with this seed.
@@ -158,12 +193,20 @@ impl CompiledBody {
                 Some((_, sd)) => Some(sd),
                 None => None,
             };
-            let mut reading = Canonical::new("ng-contract channel 1");
+            // A sampled channel keeps the bytes it had before time means, so no existing lens moves.
+            let (version, length) = match window {
+                Window::Samples(count) => ("ng-contract channel 1", count),
+                Window::Time(ns) => ("ng-contract channel 2", ns),
+            };
+            let mut reading = Canonical::new(version);
             method.seal(&mut reading);
             kind.seal(&mut reading);
-            reading.number(window.get());
+            reading.number(length.get());
             reading.number(delay_ns);
             sd.seal(&mut reading);
+            if let Window::Time(_) = window {
+                reading.number(1);
+            }
             let digest = reading.digest();
             let key = first_word(digest);
             if compiled.iter().any(|known| known.key == key) {
@@ -173,7 +216,7 @@ impl CompiledBody {
             compiled.push(Channel {
                 method,
                 row: row.id(),
-                window: window.get(),
+                window,
                 period_ns,
                 delay_ns,
                 sd,

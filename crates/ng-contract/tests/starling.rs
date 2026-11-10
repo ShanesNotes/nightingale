@@ -534,6 +534,9 @@ fn an_empty_ring_solves_to_no_update() -> Result<(), InitializationFailure> {
     let system = body.initialization(body.bind(packet)?, port, request)?;
     let workspace = system.workspace();
     let (matrix, right) = (system.linearize(&workspace)?, system.evaluate(&workspace)?);
-    assert_eq!(system.solve(&matrix, &right), Ok(Vec::new()));
+    let update = system
+        .solve(&workspace, &matrix, &right)
+        .map(|update| update.slots().to_vec());
+    assert_eq!(update, Ok(Vec::new()));
     Ok(())
 }

@@ -336,10 +336,19 @@ _Avoid_: golden value, goal
 A target a produced quantity must meet when the start state is solved, stated with its measurement method and averaging window. An anchor is never a parameter's value. Methods are named as current charting practice names them (an arterial-line pressure is charted as from the arterial blood pressure monitor); that naming follows practice and is not a law, since practice can improve.
 
 **Anchor statistic**:
-What an anchor's value summarizes: an instant, a cycle mean or a window mean. An anchor on a pulsatile quantity is a cycle mean.
+What an anchor's value summarizes: an instant, a cycle mean of the grid's samples, a cycle time mean or a window mean. An anchor on a pulsatile quantity is a cycle mean or a cycle time mean.
+
+**Cycle time mean**:
+A reading's integral over the cycle divided by its period. Admission computes it with its stage weights and an observer by integrating each accepted step; it is distinct from the cycle mean of the grid's samples.
 
 **Cycle**:
-One pass of a periodic goal from the anchor moment, in equal intervals. The packet states it, so the packet's hash covers it, and a cycle mean reads it.
+One pass of a periodic goal from the anchor moment, on an equal grid of intervals, split into legs at located crossings. The packet states it, so the packet's hash covers it, and a cycle mean reads it. A cycle a body times for itself names its clock, whose wrap is the cycle's end.
+
+**Leg**:
+A part of one admission interval between knots, on which the modes and drives hold still; two Radau IIA stages solve it. Not a span, which is a core's step.
+
+**Located crossing**:
+A guard crossing that admission places inside an interval: its time is an unknown and its guard's root a row, the state before it ends one leg, and the reset it fires starts the next.
 
 **Healthy range**:
 The target for one reading, the central 95% of healthy adults over the averaging window their study used, matched to the patient in activity, sex, age or method wherever a source shows that one of these shifts the reading. It comes from a primary study, else a compiled source or a textbook value at its tier (section 6), else an inference record that adjusts a sourced range by a sourced shift (record 0004).

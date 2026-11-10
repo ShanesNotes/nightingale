@@ -229,9 +229,11 @@ fn the_first_window_holds_each_core_to_the_references_own_distances() {
         updates: 8,
         behind: rows_outside_the_largest_block(&body),
     };
+    // The start is the beat's onset after the wrap, where this core's modes part from the finest reference's before
+    // the rows it leaves behind leave a law's domain.
     let failure = accuracy(&stale, &policy);
     assert!(
-        matches!(failure, Err(AccuracyFailure::ModesApart { case: 0, .. })),
+        matches!(failure, Err(AccuracyFailure::ModesApart { .. })),
         "{failure:?}"
     );
 
@@ -247,8 +249,8 @@ fn validate_refuses_a_slice_stage_its_core_left_unsolved() {
     let case = SliceCase::new().expect("compiled");
     let body = case.body();
     let scales = ErrorScales::uniform(measure(1.0), measure(1e-2)).expect("positive");
-    let sweeps = |updates, behind| Sweeps {
-        interval_ns: 5 * MILLISECOND,
+    let sweeps = |interval_ns, updates, behind| Sweeps {
+        interval_ns,
         scales,
         updates,
         behind,
@@ -261,24 +263,28 @@ fn validate_refuses_a_slice_stage_its_core_left_unsolved() {
             Step::Faulted(stopped) => panic!("{:?}", stopped.fault()),
         }
     };
+    // The start is the beat's onset and the mitral valve shuts 1.16 ms in. Over 5 ms the honest core refuses for
+    // accuracy at that closure, so its control takes 2 ms, over which it is accepted.
     assert_eq!(
-        first(&sweeps(8, Vec::new())),
+        first(&sweeps(2 * MILLISECOND, 8, Vec::new())),
         None,
         "the honest core's step is accepted"
     );
-    let after_one_update = first(&sweeps(1, Vec::new()));
+    let after_one_update = first(&sweeps(5 * MILLISECOND, 1, Vec::new()));
     assert!(
         matches!(after_one_update, Some(NumericalRefusal::StageResidual { .. })),
         "{after_one_update:?}"
     );
-    let stale = first(&sweeps(8, rows_outside_the_largest_block(body)));
+    let stale = first(&sweeps(5 * MILLISECOND, 8, rows_outside_the_largest_block(body)));
     assert!(
         matches!(stale, Some(NumericalRefusal::StageResidual { .. })),
         "{stale:?}"
     );
     let wall = wall_power(body);
+    // The wall power is judged at the elastic store it closes, so the held row shows only once the law's work over
+    // the step outgrows that store's scale: over the longest step the body lets a core take.
     let unclosed = HoldsTheWallPower {
-        interval_ns: 5 * MILLISECOND,
+        interval_ns: body.longest_step_ns(),
         scales,
         wall,
     };

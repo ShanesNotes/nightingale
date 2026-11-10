@@ -300,6 +300,23 @@ fn chained(chain: Digest, delivery: &Delivery) -> Digest {
 }
 
 impl PendingInputs {
+    pub(crate) fn copied(&self) -> Self {
+        let AppliedInputs {
+            cursor,
+            active,
+            chain,
+            fence,
+        } = &self.past;
+        Self {
+            timeline: self.timeline.clone(),
+            past: AppliedInputs {
+                cursor: *cursor,
+                active: active.clone(),
+                chain: *chain,
+                fence: *fence,
+            },
+        }
+    }
     /// The fence opens at the first instant admission did not read: an input stamped before it cannot arrive
     /// after the start state that read its drive.
     pub(crate) fn opening(port: BoundaryPort, fence: SimTime) -> Self {

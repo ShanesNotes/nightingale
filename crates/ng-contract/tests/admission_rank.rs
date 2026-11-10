@@ -275,7 +275,7 @@ fn an_instants_stage_reads_the_row_it_returns() -> Result<(), InitializationFail
     let request = InitializationRequest::at(SimTime::from_ns(0));
     let system = body.initialization(parameters, BoundaryPort::new(Vec::new())?, request)?;
     let workspace = system.workspace();
-    let (_, stage) = system.stage(&workspace, 0)?;
+    let (_, stage) = system.stage(&workspace, workspace.legs_of(0)[0])?;
     assert_eq!(stage.view().values()[0], 1.0);
     Ok(())
 }

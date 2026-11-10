@@ -149,16 +149,18 @@ fn system(body: &CompiledBody, moment_ns: u64) -> Result<InitializationSystem<'_
 }
 
 fn admitted(body: &CompiledBody, start: Start) -> Result<InitialRevision, InitializationFailure> {
-    let mut system = system(body, start.moment_ns)?;
+    let system = system(body, start.moment_ns)?;
     let mut workspace = system.workspace();
     if start.through_b {
         let rest = workspace.unknowns_mut().to_vec();
         workspace.unknowns_mut().fill(2.0);
-        assert!(system.sweep(&workspace, 0..2)? > 0);
+        assert!(system.sweep(&mut workspace)?);
         workspace.unknowns_mut().copy_from_slice(&rest);
+        assert!(system.sweep(&mut workspace)?);
     }
-    assert_eq!(system.sweep(&workspace, 0..2)?, 0);
-    let (points, fits) = workspace.unknowns_mut().split_at_mut(2 * body.rows().len());
+    assert!(!system.sweep(&mut workspace)?);
+    let fitted = workspace.fitted_slots().start;
+    let (points, fits) = workspace.unknowns_mut().split_at_mut(fitted);
     let up = |value: &mut f64| *value = f64::from_bits(value.to_bits() + 1);
     if start.start_up {
         points.iter_mut().for_each(up);
@@ -263,14 +265,14 @@ fn a_mode_the_ring_moved_is_reported_as_solved() -> Result<(), InitializationFai
 #[test]
 fn a_guard_that_reads_no_value_names_its_mode() -> Result<(), InitializationFailure> {
     let body = body()?;
-    let mut system = system(&body, 0)?;
+    let system = system(&body, 0)?;
     let mut workspace = system.workspace();
     workspace.unknowns_mut().fill(f64::NAN);
     let law = LawName {
         owner: "NS",
         local: "switch",
     };
-    let swept = system.sweep(&workspace, 0..2);
+    let swept = system.sweep(&mut workspace);
     assert!(
         matches!(swept, Err(InitializationFailure::Undefined { law: failed }) if failed == law),
         "{swept:?}"

@@ -334,6 +334,6 @@ fn every_operators_slope_stays_on_the_bits_of_a_rings_matrix() {
         .collect();
     let digest = hex(Digest::of_canonical(&bits));
     let trace = format!("ring slopes {digest} over {} entries", slopes.len());
-    expect!["ring slopes 4d06e209f25395075849604857fe1126582ca89fcc45a154083d9dda5f56f4aa over 75 entries"]
+    expect!["ring slopes 5b78cfd2b0b2ea74f913be71dda11e789c55534adeaac6e928748c8ea7392fe5 over 252 entries"]
         .assert_eq(&trace);
 }

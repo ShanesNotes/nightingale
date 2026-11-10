@@ -118,7 +118,9 @@ fn a_guard_crossed_and_crossed_back_inside_a_step_refuses_it_and_lands() {
     assert!(landed.abs_diff(SECOND / 4) <= SECOND / 512, "landed at {landed}");
 }
 
-fn two_guards() -> CompiledBody {
+/// Two guards on `m` out of `low`, or with `chained` a chain `low` to `first` to `second`, whose second guard only a
+/// firing of the first arms.
+fn two_guards(chained: bool) -> CompiledBody {
     assemble(one_site(), |mut body| {
         let (mut laws, _ports) = body.nervous()?.parts();
         let m = laws.state::<Dimensionless>("m", Admissible::finite());
@@ -138,12 +140,13 @@ fn two_guards() -> CompiledBody {
             });
             laws.memory_rate(&y, rate);
         }
-        for target in [&first, &second] {
+        let source = if chained { &first } else { &low };
+        for (source, target) in [(&low, &first), (source, &second)] {
             let zero = laws.kernel(|mut k| {
                 let value = k.state(&m);
-                k.finish(value, low.only(), wave())
+                k.finish(value, source.only(), wave())
             });
-            laws.event(Guard::new(zero, Crossing::Rising, low.to(target)?));
+            laws.event(Guard::new(zero, Crossing::Rising, source.to(target)?));
         }
         body.add(laws.finish());
         body.compile()
@@ -177,15 +180,15 @@ fn guarded_packet(
     packet
 }
 
-#[test]
-fn of_two_guards_on_one_variable_the_same_one_wins_on_the_ring_and_in_a_run() {
+/// The mode a run holds after its first step from `m` at `start`, and `y`'s residual on the ring's leg after a knot
+/// at `m` = 1: half a second at the rate of the mode the knot left.
+fn run_and_ring(body: &CompiledBody, start: f64) -> (usize, f64) {
     let store = MemoryStore::default();
-    let body = two_guards();
     let core = ReferenceIntegrator::new(SECOND);
     let port = BoundaryPort::new(Vec::new()).expect("no event");
     let session = admit_fixture(
-        &body,
-        guarded_packet(ParameterPacket::new(), -0.5),
+        body,
+        guarded_packet(ParameterPacket::new(), start),
         port,
         &core,
         &store,
@@ -194,26 +197,48 @@ fn of_two_guards_on_one_variable_the_same_one_wins_on_the_ring_and_in_a_run() {
     let Ok(session) = run_until(session, SimTime::from_ns(1)) else {
         panic!("the bench faulted");
     };
-    // Values sort by name: `first`, `low`, `second`.
-    let winner = session.record().accepted().modes()[0];
-    assert_ne!(winner, 1, "a guard fired");
+    let mode = session.record().accepted().modes()[0];
 
     let mut packet = guarded_packet(cycle(2), 1.0);
     packet.within(admission_tolerance());
     let parameters = body.bind(packet).expect("bound");
     let port = BoundaryPort::new(Vec::new()).expect("no event");
     let y = RowKind::Memory(named("y").into());
-    let gauge = lens(&body, y);
+    let gauge = lens(body, y);
     let request = InitializationRequest::at(SimTime::from_ns(0)).reading(&gauge);
-    let mut system = body.initialization(parameters, port, request).expect("a system");
-    let workspace = system.workspace();
-    assert_eq!(system.sweep(&workspace, 0..1), Ok(1));
-    let (residuals, _) = system.stage(&workspace, 1).expect("a stage");
+    let system = body.initialization(parameters, port, request).expect("a system");
+    let mut workspace = system.workspace();
+    let after = workspace.legs_of(1)[0];
+    assert_eq!(system.settle(&mut workspace, after), Ok(true));
+    let (residuals, _) = system.stage(&workspace, after).expect("a stage");
     let row = (body.rows().iter())
         .position(|row| row.kind() == y)
         .expect("a row");
-    let half_a_second_of = if winner == 0 { 1.0 } else { 3.0 };
-    assert_eq!(residuals[row], -0.5 * half_a_second_of);
+    (mode, residuals[row])
+}
+
+// Values sort by name: `first`, `low`, `second`.
+const FIRST: usize = 0;
+const LOW: usize = 1;
+
+fn half_a_second_in(mode: usize) -> f64 {
+    -0.5 * if mode == FIRST { 1.0 } else { 3.0 }
+}
+
+#[test]
+fn of_two_guards_on_one_variable_the_same_one_wins_on_the_ring_and_in_a_run() {
+    let (winner, residual) = run_and_ring(&two_guards(false), -0.5);
+    assert_ne!(winner, LOW, "a guard fired");
+    assert_eq!(residual, half_a_second_in(winner));
+}
+
+/// `m` stands past both guards of the chain, but only the first is armed before the knot fires, so the run and the ring
+/// both stop in `first`.
+#[test]
+fn a_guard_a_firing_arms_waits_for_the_next_step_on_the_ring_and_in_a_run() {
+    let (mode, residual) = run_and_ring(&two_guards(true), 1.0);
+    assert_eq!(mode, FIRST);
+    assert_eq!(residual, half_a_second_in(FIRST));
 }
 
 const HEAT: &str = "heat";

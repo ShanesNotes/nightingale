@@ -438,8 +438,8 @@ pub fn hold_outside_slice(body: &mut Assembly<'_>) -> Result<(), AdmissionError>
 }
 
 /// Urine and heat leave by a law on what the pool holds, so water and energy answer their own flows: admission solves
-/// their totals. Model defaults: the bladder drains in proportion to what it holds past a rest, and voiding is no
-/// event, since no law here needs one.
+/// their totals at the balance of its own cycle's flows, which a running core's beat need not share. Model defaults:
+/// the bladder drains in proportion to what it holds past a rest, and voiding is no event, since no law here needs one.
 fn exits(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let (mut laws, ports) = body.boundary()?.parts();
     let urine = ports.route::<Water>(URINE)?.route;
@@ -547,14 +547,20 @@ pub(crate) fn arena_certificate(
     CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows)
 }
 
-/// One beat in 100 intervals: the cycle's period and the heart-rate anchor state one number twice, and `admit` fails
-/// when they disagree.
+/// One beat in 100 intervals, paced by the heart's phase: the cycle's period and the heart rate's time mean state one
+/// number twice, and `initialization` refuses them when they disagree.
 pub fn arena_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
     let note = "arena fixture: synthetic";
+    let rate = AnchorId::new("heart rate");
+    let phase = LawName {
+        owner: Cardiovascular::CARD,
+        local: "phase",
+    };
     let cycle = Cycle::new(
         NonZeroU64::MIN.saturating_add(SECOND - 1),
         NonZeroU32::MIN.saturating_add(POINTS - 1),
-    )?;
+    )?
+    .paced(phase.into(), rate);
     let mut packet = ParameterPacket::periodic(cycle);
     let unit = |value| Measure::<Dimensionless>::new(value);
     let scales = ErrorScales::uniform(unit(1e-9)?, unit(1e-10)?)?;
@@ -564,12 +570,13 @@ pub fn arena_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixt
         site::<VesselSegment>("systemic arteries")?,
         site::<CapillaryBed>("glomerular bed")?,
     );
-    let rate = AnchorId::new("heart rate");
-    packet.anchor(mean_anchor(
-        rate,
+    let read = Snapshot::new(
         heart_rate(),
+        METHOD,
+        AnchorStatistic::CycleTimeMean,
         Measure::<Rate<Dimensionless>>::new(1.0)?,
-    ))?;
+    );
+    packet.anchor(Synthetic::new(rate, read, "arena fixture: synthetic"))?;
     packet.calibrated(
         ParameterKey::new("cv.intrinsic-rate"),
         Binding::Body,
@@ -997,10 +1004,13 @@ fn mean_anchor<U: Dimension>(id: AnchorId, row: RowKind, value: Measure<U>) -> A
 
 pub fn arena_lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError> {
     let window = NonZeroU64::MIN.saturating_add(u64::from(POINTS) - 1);
-    let channels = [heart_rate(), arterial_pressure()?, filtration_flow()?]
-        .map(|row| ChannelSpec::new(METHOD, row).averaged(window));
+    let beat = NonZeroU64::MIN.saturating_add(SECOND - 1);
+    let rate = ChannelSpec::new(METHOD, heart_rate()).time_averaged(beat);
+    let channels =
+        [arterial_pressure()?, filtration_flow()?].map(|row| ChannelSpec::new(METHOD, row).averaged(window));
+    let channels = [rate].into_iter().chain(channels).collect();
     let grid = NonZeroU64::MIN.saturating_add(SECOND / u64::from(POINTS) - 1);
-    body.lens(channels.into(), grid)
+    body.lens(channels, grid)
 }
 
 const PAST_THE_FENCE_NS: u64 = 50_000_000;

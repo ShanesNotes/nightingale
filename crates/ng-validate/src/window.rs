@@ -1,5 +1,5 @@
 use crate::accuracy::{faulted, net_at};
-use crate::initialize::{admit_start, solution, start_from};
+use crate::initialize::{admit_start, solved_start};
 use crate::run::advance;
 use crate::{
     AccuracyFailure, MemoryStore, ReferenceIntegrator, anchor_moment, arena_body, arena_lens, arena_packet,
@@ -7,8 +7,8 @@ use crate::{
 use core::num::NonZeroU64;
 use ng_contract::{
     AdmissionError, BoundaryEvent, BoundaryInput, BoundaryPort, ColumnId, Compensated, CompiledBody,
-    CoupledSolver, Delivered, Digest, Dimensionless, ErrorScales, InputId, Legs, Measure, Posture, RowId,
-    Seed, SimTime, Target,
+    CoupledSolver, Delivered, Digest, Dimensionless, ErrorScales, InitialRevision, InputId, Legs, Measure,
+    MethodHistory, Posture, RowId, Seed, SimTime, Target,
 };
 
 const SECOND: u64 = 1_000_000_000;
@@ -115,7 +115,6 @@ fn references(intervals_ns: [u64; 3], scales: ErrorScales, floor: NonZeroU64) ->
 pub enum Compared {
     /// An amount, a memory or a produced quantity.
     Row(RowId),
-    /// A column's exchange since admission.
     Exchange(ColumnId),
 }
 
@@ -354,7 +353,7 @@ fn admission(error: AdmissionError) -> AccuracyFailure {
 /// made its transitions and how many instants it spent in other modes.
 pub struct SliceWindow {
     body: CompiledBody,
-    solution: Vec<f64>,
+    start: Box<InitialRevision>,
     policy: WindowPolicy,
     measured: Measured,
 }
@@ -366,17 +365,18 @@ impl SliceWindow {
             arena_lens(&body).map_err(admission)?,
         );
         let boundary = BoundaryPort::new(timeline().map_err(admission)?).map_err(admission)?;
-        let solution =
-            solution(&body, packet, boundary, &lens, anchor_moment()).map_err(AccuracyFailure::Admission)?;
         let policy = WindowPolicy::of(body.longest_step_ns());
         let [coarse, middle, finest] =
             references(policy.refinements_ns, policy.refinement_scales, policy.landing_ns);
+        let start = solved_start(&body, packet, boundary, &coarse, &lens, anchor_moment())
+            .map(Box::new)
+            .map_err(AccuracyFailure::Admission)?;
         let [coarse, middle, finest] =
-            [&coarse, &middle, &finest].map(|reference| trace(&body, &solution, &policy, reference));
+            [&coarse, &middle, &finest].map(|reference| trace(&body, &start, &policy, reference));
         let measured = Measured::new(&policy, compared(&body), finest?, &[&coarse?, &middle?], end());
         Ok(Self {
             body,
-            solution,
+            start,
             policy,
             measured,
         })
@@ -389,21 +389,21 @@ impl SliceWindow {
         core: &dyn CoupledSolver,
         case: usize,
     ) -> Result<Compensated, AccuracyFailure> {
-        let run = trace(&self.body, &self.solution, &self.policy, core)?;
+        let run = trace(&self.body, &self.start, &self.policy, core)?;
         self.measured.verdict(&run, case)
     }
     /// Everything the window judges by, so two windows that would judge a core apart never share an identity.
     pub fn digest(&self) -> Digest {
         let Self {
             body,
-            solution,
+            start,
             policy,
             measured,
         } = self;
         let mut bytes = body.model_hash().digest().as_bytes().to_vec();
         policy.seal(&mut bytes);
+        bytes.extend_from_slice(start.packet_hash().digest().as_bytes());
         let mut number = |value: u64| bytes.extend_from_slice(&value.to_be_bytes());
-        solution.iter().for_each(|value| number(value.to_bits()));
         measured.seal(&mut number);
         Digest::of_canonical(&bytes)
     }
@@ -428,28 +428,23 @@ fn compared(body: &CompiledBody) -> Vec<Compared> {
 
 fn trace(
     body: &CompiledBody,
-    solution: &[f64],
+    start: &InitialRevision,
     policy: &WindowPolicy,
     core: &dyn CoupledSolver,
 ) -> Result<Trace, AccuracyFailure> {
     let compared = compared(body);
-    let boundary = BoundaryPort::new(timeline().map_err(admission)?).map_err(admission)?;
-    let (packet, lens) = (
-        arena_packet(body).map_err(admission)?,
-        arena_lens(body).map_err(admission)?,
-    );
-    let start = start_from(body, packet, boundary, core, &lens, anchor_moment(), solution);
+    let history = MethodHistory::new(core.resolution().policy(), anchor_moment(), Vec::new());
+    let start = start.with_history(history);
     let store = MemoryStore::default();
     let seed = Seed::new([1, 2, 3, 4]);
-    let mut session = start
-        .and_then(|start| admit_start(body, core, start, seed, &store))
-        .map_err(AccuracyFailure::Admission)?;
+    let mut session = admit_start(body, core, start, seed, &store).map_err(AccuracyFailure::Admission)?;
     let end = end().nanoseconds();
     let mut trace = Trace {
         instants: Vec::new(),
         transitions: Vec::new(),
     };
     let mut next = anchor_moment().nanoseconds() + policy.grid_ns;
+    let mut reached = vec![Compensated::ZERO; compared.len()];
     while session.record().accepted().time().nanoseconds() < end + policy.past_end_ns {
         let before = session.record().accepted().modes().to_vec();
         session = advance(session).map_err(faulted)?;
@@ -468,21 +463,44 @@ fn trace(
             // A segment ends at a firing's left limit, so its end instant reads the accepted state, as an
             // observation does.
             let read = |compared: &Compared| match *compared {
-                Compared::Row(row) if at == now => accepted.value(row),
-                Compared::Row(row) => dense
-                    .sample(row, at)
-                    .expect("a compared instant is inside the segment"),
-                Compared::Exchange(column) => net_at(&segment, column, at),
+                Compared::Row(row) if at == now => Reading::Level(accepted.value(row)),
+                Compared::Row(row) => Reading::Level(
+                    dense
+                        .sample(row, at)
+                        .expect("a compared instant is inside the segment"),
+                ),
+                Compared::Exchange(column) => Reading::Total(net_at(&segment, column, at)),
             };
             trace.instants.push(Instant {
                 at,
                 modes: if at == now { after.to_vec() } else { before.clone() },
-                values: compared.iter().map(read).collect(),
+                values: over_interval(compared.iter().map(read), &mut reached),
             });
             next += policy.grid_ns;
         }
     }
     Ok(trace)
+}
+
+/// A compared value at a grid instant: a level as it stands, or an exchange's total since admission.
+enum Reading {
+    Level(Compensated),
+    Total(Compensated),
+}
+
+/// A level as it stands, and an exchange's net over the interval the instant ends. A running total carries its signed
+/// error from interval to interval, where it cancels or grows by where the grid falls in the beat.
+fn over_interval(readings: impl Iterator<Item = Reading>, reached: &mut [Compensated]) -> Vec<Compensated> {
+    (readings.zip(reached.iter_mut()))
+        .map(|(reading, before)| match reading {
+            Reading::Level(value) => value,
+            Reading::Total(total) => {
+                let net = total.minus(*before);
+                *before = total;
+                net
+            }
+        })
+        .collect()
 }
 
 fn after(ns: u64, tag: &[u8], payload: BoundaryInput) -> BoundaryEvent {
@@ -533,9 +551,9 @@ fn timeline() -> Result<Vec<BoundaryEvent>, AdmissionError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Instant, Kind, Measured, Trace, Transition, WindowPolicy};
+    use super::{Instant, Kind, Measured, Reading, Trace, Transition, WindowPolicy, over_interval};
     use crate::AccuracyFailure;
-    use ng_contract::SimTime;
+    use ng_contract::{Compensated, Dimensionless, Measure, SimTime};
 
     const MILLISECOND: u64 = 1_000_000;
     const SECOND: u64 = 1_000_000_000;
@@ -572,6 +590,19 @@ mod tests {
             &[&rung],
             SimTime::from_ns(40 * MILLISECOND),
         )
+    }
+
+    #[test]
+    fn an_exchange_is_compared_by_its_net_over_each_interval_and_a_level_as_it_stands() {
+        let value = |v: f64| Compensated::of(&Measure::<Dimensionless>::new(v).expect("finite"));
+        let mut reached = [Compensated::ZERO; 2];
+        let read =
+            |level: f64, total: f64| [Reading::Level(value(level)), Reading::Total(value(total))].into_iter();
+        let instants = [(5.0, 1.0), (7.0, 3.0), (7.0, 6.0)]
+            .map(|(level, total)| over_interval(read(level, total), &mut reached));
+        let expected =
+            [(5.0, 1.0), (7.0, 2.0), (7.0, 3.0)].map(|(level, net)| vec![value(level), value(net)]);
+        assert_eq!(instants, expected);
     }
 
     #[test]
