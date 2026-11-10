@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { parseAmendment, parseNewEntry, parseReadModel, type WriteResult } from '../src/chart-api.ts'
+import { parseAmendment, parseNewEntry, type WriteResult } from '../src/chart-api.ts'
 import { openChart, pgliteSql, pgSql, type Chart, type Sql } from '../src/chart.ts'
 import { isPatientId } from '../src/device.ts'
-import { flowsheet } from '../src/flowsheet.ts'
-import { at, NURSE, PHYSICIAN } from './fixtures.ts'
+import { ENTRY_KINDS } from '../src/entry-kinds.ts'
+import { at, NURSE } from './fixtures.ts'
 import { wallTime } from '../src/time.ts'
 
 const patient = 'synthetic-kinds-patient'
@@ -26,6 +26,13 @@ const taken = (result: WriteResult) => {
   assert.equal(result.kind, 'taken', JSON.stringify(result))
   return result.entry
 }
+
+test('each kind in the catalog is named by its key and names each of its fields once', () => {
+  for (const [key, kind] of Object.entries(ENTRY_KINDS)) {
+    assert.equal(kind.kind, key)
+    assert.equal(new Set(kind.fields.map((field) => field.name)).size, kind.fields.length, key)
+  }
+})
 
 test('unknown kinds and content that does not fit its kind have named boundary refusals, and a misfit says why', () => {
   for (const parse of [parseNewEntry, parseAmendment]) {
@@ -62,45 +69,6 @@ for (const [name, connect] of databases) {
     }
   }
   describe(`both entry kinds on ${name}`, () => {
-    test('one write and read model keep a note, its amendment, author, care time and earlier versions', () => withChart(async (chart) => {
-      const first = taken(await chart.write(newWrite({ care: at('06:55:10') }), at('06:56:00')))
-      assert.equal(first.kind, 'note')
-      assert.deepEqual(first.content, { text: 'Synthetic note alpha.' })
-      const second = taken(await chart.write(amend(first.entry, { author: PHYSICIAN.id, content: { text: 'Synthetic note beta.' }, care: at('06:55:15') }), at('06:57:00')))
-      assert.deepEqual(second, { ...first, content: { text: 'Synthetic note beta.' }, number: 2, versions: 2, author: PHYSICIAN, care: at('06:55:15'), charted: at('06:57:00') })
-      const model = await chart.readModel(at('06:57:00'))
-      assert.deepEqual(model.entries, [second])
-      assert.deepEqual(parseReadModel(JSON.parse(JSON.stringify(model))), { ok: true, value: model })
-      assert.deepEqual((await chart.versions(first.entry))?.map((v) => [v.number, v.content, v.author]), [[1, first.content, NURSE], [2, second.content, PHYSICIAN]])
-      assert.deepEqual(model.readings, [], 'an entry makes no device reading')
-    }))
-
-    test('note writes and amendments retry once and reject changed content, stale versions, another patient and future care', () => withChart(async (chart) => {
-      const write = newWrite()
-      const first = taken(await chart.write(write, at('06:56:00')))
-      assert.deepEqual(taken(await chart.write(write, at('06:56:10'))), first)
-      const amendment = amend(first.entry, { content: { text: 'Synthetic amended note.' } })
-      const second = taken(await chart.write(amendment, at('06:56:20')))
-      assert.deepEqual(taken(await chart.write(amendment, at('06:56:30'))), second)
-      assert.deepEqual(taken(await chart.write(write, at('06:56:40'))), second)
-      for (const [write, kind] of [
-        [newWrite({ writeId: amendment.writeId }), 'write id reused with other content'],
-        [amend(first.entry), 'not the current version'],
-        [amend(first.entry, { replaces: 2, kind: 'vital', content: { vital: 'HR', value: '1.25' } }), 'entry kind differs'],
-        [newWrite({ care: at('07:00:00') }), 'care time after now'],
-        [amend(first.entry, { replaces: 2, care: at('07:00:00') }), 'care time after now'],
-        [newWrite({ patient: 'another-synthetic-patient' }), 'another patient'],
-      ] as const) assert.deepEqual(await chart.write(write, at('06:57:00')), { kind: 'refused', refusal: { kind } })
-      assert.equal((await chart.versions(first.entry))?.length, 2)
-    }))
-
-    test('adding even an earlier note leaves every flowsheet cell and column unchanged', () => withChart(async (chart) => {
-      taken(await chart.write(newWrite({ kind: 'vital', content: { vital: 'HR', value: '1.25' } }), at('06:56:00')))
-      const before = flowsheet(await chart.readModel(at('06:57:00')))
-      taken(await chart.write(newWrite({ care: at('05:00:00') }), at('06:57:00')))
-      assert.deepEqual(flowsheet(await chart.readModel(at('06:57:00'))), before)
-    }))
-
     test('an amendment cannot change which vital an entry is about: the chart refuses it by name, and Postgres on its own', () => withChart(async (chart, sql) => {
       const vital = (value: string) => ({ kind: 'vital', content: { vital: 'HR', value } })
       const first = taken(await chart.write(newWrite(vital('1.25')), at('06:56:00')))

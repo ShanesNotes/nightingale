@@ -1,0 +1,563 @@
+{
+ "minutes": [
+  "06:53",
+  "06:54",
+  "06:55",
+  "06:56",
+  "06:57",
+  "06:58",
+  "06:59",
+  "07:00",
+  "07:01",
+  "07:02",
+  "07:03",
+  "07:04",
+  "07:05"
+ ],
+ "cells": {
+  "HR monitor 06:53": {
+   "kind": "no statement"
+  },
+  "HR monitor 06:54": {
+   "kind": "no statement"
+  },
+  "HR monitor 06:55": {
+   "kind": "no statement"
+  },
+  "HR monitor 06:56": {
+   "kind": "readings",
+   "latest": {
+    "value": 85.30012340187386,
+    "collected": 25019000000000
+   },
+   "absent": 0,
+   "late": 59,
+   "missing": 0
+  },
+  "HR monitor 06:57": {
+   "kind": "readings",
+   "latest": {
+    "value": 86.38000953122665,
+    "collected": 25079000000000
+   },
+   "absent": 0,
+   "late": 60,
+   "missing": 0
+  },
+  "HR monitor 06:58": {
+   "kind": "readings",
+   "latest": {
+    "value": 87.84568574713222,
+    "collected": 25139000000000
+   },
+   "absent": 0,
+   "late": 59,
+   "missing": 0
+  },
+  "HR monitor 06:59": {
+   "kind": "readings",
+   "latest": {
+    "value": 59.45597882947504,
+    "collected": 25199000000000
+   },
+   "absent": 0,
+   "late": 60,
+   "missing": 0
+  },
+  "HR monitor 07:00": {
+   "kind": "readings",
+   "latest": {
+    "value": 59.349486802582,
+    "collected": 25259000000000
+   },
+   "absent": 0,
+   "late": 60,
+   "missing": 0
+  },
+  "HR monitor 07:01": {
+   "kind": "readings",
+   "latest": {
+    "value": 59.352106095422684,
+    "collected": 25319000000000
+   },
+   "absent": 0,
+   "late": 59,
+   "missing": 0
+  },
+  "HR monitor 07:02": {
+   "kind": "readings",
+   "latest": {
+    "value": 88.34063187739297,
+    "collected": 25379000000000
+   },
+   "absent": 0,
+   "late": 60,
+   "missing": 0
+  },
+  "HR monitor 07:03": {
+   "kind": "readings",
+   "latest": {
+    "value": 89.37211075662191,
+    "collected": 25439000000000
+   },
+   "absent": 0,
+   "late": 60,
+   "missing": 0
+  },
+  "HR monitor 07:04": {
+   "kind": "readings",
+   "latest": {
+    "value": 90.55029330491749,
+    "collected": 25499000000000
+   },
+   "absent": 0,
+   "late": 60,
+   "missing": 0
+  },
+  "HR monitor 07:05": {
+   "kind": "readings",
+   "latest": {
+    "value": 90.61332813749199,
+    "collected": 25500000000000
+   },
+   "absent": 0,
+   "late": 0,
+   "missing": 0
+  },
+  "HR charted 06:53": [
+   {
+    "value": 61,
+    "author": "synthetic-nurse",
+    "care": "06:53:30",
+    "charted": "06:56:00",
+    "version": "1 of 1",
+    "lateBy": 150000000000,
+    "edited": false
+   }
+  ],
+  "HR charted 06:54": [],
+  "HR charted 06:55": [],
+  "HR charted 06:56": [],
+  "HR charted 06:57": [],
+  "HR charted 06:58": [],
+  "HR charted 06:59": [
+   {
+    "value": 64,
+    "author": "synthetic-nurse",
+    "care": "06:59:00",
+    "charted": "06:59:00",
+    "version": "1 of 1",
+    "lateBy": 0,
+    "edited": false
+   }
+  ],
+  "HR charted 07:00": [],
+  "HR charted 07:01": [],
+  "HR charted 07:02": [],
+  "HR charted 07:03": [],
+  "HR charted 07:04": [],
+  "HR charted 07:05": [],
+  "ABP sys monitor 06:53": {
+   "kind": "no statement"
+  },
+  "ABP sys monitor 06:54": {
+   "kind": "no statement"
+  },
+  "ABP sys monitor 06:55": {
+   "kind": "no statement"
+  },
+  "ABP sys monitor 06:56": {
+   "kind": "no source"
+  },
+  "ABP sys monitor 06:57": {
+   "kind": "no source"
+  },
+  "ABP sys monitor 06:58": {
+   "kind": "no source"
+  },
+  "ABP sys monitor 06:59": {
+   "kind": "no source"
+  },
+  "ABP sys monitor 07:00": {
+   "kind": "no source"
+  },
+  "ABP sys monitor 07:01": {
+   "kind": "no source"
+  },
+  "ABP sys monitor 07:02": {
+   "kind": "no source"
+  },
+  "ABP sys monitor 07:03": {
+   "kind": "no source"
+  },
+  "ABP sys monitor 07:04": {
+   "kind": "no source"
+  },
+  "ABP sys monitor 07:05": {
+   "kind": "no source"
+  },
+  "ABP sys charted 06:53": [],
+  "ABP sys charted 06:54": [],
+  "ABP sys charted 06:55": [],
+  "ABP sys charted 06:56": [],
+  "ABP sys charted 06:57": [],
+  "ABP sys charted 06:58": [],
+  "ABP sys charted 06:59": [],
+  "ABP sys charted 07:00": [],
+  "ABP sys charted 07:01": [],
+  "ABP sys charted 07:02": [],
+  "ABP sys charted 07:03": [],
+  "ABP sys charted 07:04": [],
+  "ABP sys charted 07:05": [],
+  "ABP dia monitor 06:53": {
+   "kind": "no statement"
+  },
+  "ABP dia monitor 06:54": {
+   "kind": "no statement"
+  },
+  "ABP dia monitor 06:55": {
+   "kind": "no statement"
+  },
+  "ABP dia monitor 06:56": {
+   "kind": "no source"
+  },
+  "ABP dia monitor 06:57": {
+   "kind": "no source"
+  },
+  "ABP dia monitor 06:58": {
+   "kind": "no source"
+  },
+  "ABP dia monitor 06:59": {
+   "kind": "no source"
+  },
+  "ABP dia monitor 07:00": {
+   "kind": "no source"
+  },
+  "ABP dia monitor 07:01": {
+   "kind": "no source"
+  },
+  "ABP dia monitor 07:02": {
+   "kind": "no source"
+  },
+  "ABP dia monitor 07:03": {
+   "kind": "no source"
+  },
+  "ABP dia monitor 07:04": {
+   "kind": "no source"
+  },
+  "ABP dia monitor 07:05": {
+   "kind": "no source"
+  },
+  "ABP dia charted 06:53": [],
+  "ABP dia charted 06:54": [],
+  "ABP dia charted 06:55": [],
+  "ABP dia charted 06:56": [],
+  "ABP dia charted 06:57": [],
+  "ABP dia charted 06:58": [],
+  "ABP dia charted 06:59": [],
+  "ABP dia charted 07:00": [],
+  "ABP dia charted 07:01": [],
+  "ABP dia charted 07:02": [],
+  "ABP dia charted 07:03": [],
+  "ABP dia charted 07:04": [],
+  "ABP dia charted 07:05": [],
+  "ABP mean monitor 06:53": {
+   "kind": "no statement"
+  },
+  "ABP mean monitor 06:54": {
+   "kind": "no statement"
+  },
+  "ABP mean monitor 06:55": {
+   "kind": "no statement"
+  },
+  "ABP mean monitor 06:56": {
+   "kind": "readings",
+   "latest": {
+    "value": 103.37990315387944,
+    "collected": 25019000000000
+   },
+   "absent": 0,
+   "late": 59,
+   "missing": 0
+  },
+  "ABP mean monitor 06:57": {
+   "kind": "readings",
+   "latest": {
+    "value": 102.1962425570366,
+    "collected": 25079000000000
+   },
+   "absent": 0,
+   "late": 60,
+   "missing": 0
+  },
+  "ABP mean monitor 06:58": {
+   "kind": "readings",
+   "latest": {
+    "value": 102.5127345202105,
+    "collected": 25139000000000
+   },
+   "absent": 0,
+   "late": 59,
+   "missing": 0
+  },
+  "ABP mean monitor 06:59": {
+   "kind": "readings",
+   "latest": {
+    "value": 100.53603135148269,
+    "collected": 25199000000000
+   },
+   "absent": 0,
+   "late": 60,
+   "missing": 0
+  },
+  "ABP mean monitor 07:00": {
+   "kind": "readings",
+   "latest": {
+    "value": 100.2233432667708,
+    "collected": 25259000000000
+   },
+   "absent": 0,
+   "late": 60,
+   "missing": 0
+  },
+  "ABP mean monitor 07:01": {
+   "kind": "readings",
+   "latest": {
+    "value": 100.49479363347568,
+    "collected": 25319000000000
+   },
+   "absent": 0,
+   "late": 59,
+   "missing": 0
+  },
+  "ABP mean monitor 07:02": {
+   "kind": "readings",
+   "latest": {
+    "value": 102.42908774083898,
+    "collected": 25379000000000
+   },
+   "absent": 0,
+   "late": 60,
+   "missing": 0
+  },
+  "ABP mean monitor 07:03": {
+   "kind": "readings",
+   "latest": {
+    "value": 101.9118205741005,
+    "collected": 25439000000000
+   },
+   "absent": 0,
+   "late": 60,
+   "missing": 0
+  },
+  "ABP mean monitor 07:04": {
+   "kind": "readings",
+   "latest": {
+    "value": 102.27179353804948,
+    "collected": 25499000000000
+   },
+   "absent": 0,
+   "late": 60,
+   "missing": 0
+  },
+  "ABP mean monitor 07:05": {
+   "kind": "readings",
+   "latest": {
+    "value": 103.14933560674442,
+    "collected": 25500000000000
+   },
+   "absent": 0,
+   "late": 0,
+   "missing": 0
+  },
+  "ABP mean charted 06:53": [],
+  "ABP mean charted 06:54": [],
+  "ABP mean charted 06:55": [],
+  "ABP mean charted 06:56": [],
+  "ABP mean charted 06:57": [],
+  "ABP mean charted 06:58": [],
+  "ABP mean charted 06:59": [],
+  "ABP mean charted 07:00": [],
+  "ABP mean charted 07:01": [],
+  "ABP mean charted 07:02": [],
+  "ABP mean charted 07:03": [],
+  "ABP mean charted 07:04": [],
+  "ABP mean charted 07:05": [],
+  "SpO2 monitor 06:53": {
+   "kind": "no statement"
+  },
+  "SpO2 monitor 06:54": {
+   "kind": "no statement"
+  },
+  "SpO2 monitor 06:55": {
+   "kind": "no statement"
+  },
+  "SpO2 monitor 06:56": {
+   "kind": "no source"
+  },
+  "SpO2 monitor 06:57": {
+   "kind": "no source"
+  },
+  "SpO2 monitor 06:58": {
+   "kind": "no source"
+  },
+  "SpO2 monitor 06:59": {
+   "kind": "no source"
+  },
+  "SpO2 monitor 07:00": {
+   "kind": "no source"
+  },
+  "SpO2 monitor 07:01": {
+   "kind": "no source"
+  },
+  "SpO2 monitor 07:02": {
+   "kind": "no source"
+  },
+  "SpO2 monitor 07:03": {
+   "kind": "no source"
+  },
+  "SpO2 monitor 07:04": {
+   "kind": "no source"
+  },
+  "SpO2 monitor 07:05": {
+   "kind": "no source"
+  },
+  "SpO2 charted 06:53": [],
+  "SpO2 charted 06:54": [],
+  "SpO2 charted 06:55": [],
+  "SpO2 charted 06:56": [],
+  "SpO2 charted 06:57": [],
+  "SpO2 charted 06:58": [],
+  "SpO2 charted 06:59": [],
+  "SpO2 charted 07:00": [],
+  "SpO2 charted 07:01": [],
+  "SpO2 charted 07:02": [],
+  "SpO2 charted 07:03": [],
+  "SpO2 charted 07:04": [],
+  "SpO2 charted 07:05": [],
+  "RR monitor 06:53": {
+   "kind": "no statement"
+  },
+  "RR monitor 06:54": {
+   "kind": "no statement"
+  },
+  "RR monitor 06:55": {
+   "kind": "no statement"
+  },
+  "RR monitor 06:56": {
+   "kind": "no source"
+  },
+  "RR monitor 06:57": {
+   "kind": "no source"
+  },
+  "RR monitor 06:58": {
+   "kind": "no source"
+  },
+  "RR monitor 06:59": {
+   "kind": "no source"
+  },
+  "RR monitor 07:00": {
+   "kind": "no source"
+  },
+  "RR monitor 07:01": {
+   "kind": "no source"
+  },
+  "RR monitor 07:02": {
+   "kind": "no source"
+  },
+  "RR monitor 07:03": {
+   "kind": "no source"
+  },
+  "RR monitor 07:04": {
+   "kind": "no source"
+  },
+  "RR monitor 07:05": {
+   "kind": "no source"
+  },
+  "RR charted 06:53": [],
+  "RR charted 06:54": [],
+  "RR charted 06:55": [],
+  "RR charted 06:56": [],
+  "RR charted 06:57": [
+   {
+    "value": 20,
+    "author": "synthetic-physician",
+    "care": "06:57:20",
+    "charted": "06:58:30",
+    "version": "2 of 2",
+    "lateBy": 70000000000,
+    "edited": true
+   }
+  ],
+  "RR charted 06:58": [],
+  "RR charted 06:59": [],
+  "RR charted 07:00": [],
+  "RR charted 07:01": [],
+  "RR charted 07:02": [],
+  "RR charted 07:03": [],
+  "RR charted 07:04": [],
+  "RR charted 07:05": [],
+  "Temp monitor 06:53": {
+   "kind": "no statement"
+  },
+  "Temp monitor 06:54": {
+   "kind": "no statement"
+  },
+  "Temp monitor 06:55": {
+   "kind": "no statement"
+  },
+  "Temp monitor 06:56": {
+   "kind": "no source"
+  },
+  "Temp monitor 06:57": {
+   "kind": "no source"
+  },
+  "Temp monitor 06:58": {
+   "kind": "no source"
+  },
+  "Temp monitor 06:59": {
+   "kind": "no source"
+  },
+  "Temp monitor 07:00": {
+   "kind": "no source"
+  },
+  "Temp monitor 07:01": {
+   "kind": "no source"
+  },
+  "Temp monitor 07:02": {
+   "kind": "no source"
+  },
+  "Temp monitor 07:03": {
+   "kind": "no source"
+  },
+  "Temp monitor 07:04": {
+   "kind": "no source"
+  },
+  "Temp monitor 07:05": {
+   "kind": "no source"
+  },
+  "Temp charted 06:53": [],
+  "Temp charted 06:54": [],
+  "Temp charted 06:55": [],
+  "Temp charted 06:56": [],
+  "Temp charted 06:57": [],
+  "Temp charted 06:58": [],
+  "Temp charted 06:59": [],
+  "Temp charted 07:00": [
+   {
+    "value": 37.1,
+    "author": "synthetic-physician",
+    "care": "07:00:10",
+    "charted": "07:00:10",
+    "version": "1 of 1",
+    "lateBy": 0,
+    "edited": false
+   }
+  ],
+  "Temp charted 07:01": [],
+  "Temp charted 07:02": [],
+  "Temp charted 07:03": [],
+  "Temp charted 07:04": [],
+  "Temp charted 07:05": []
+ }
+}
