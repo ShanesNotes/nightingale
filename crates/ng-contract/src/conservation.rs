@@ -350,3 +350,106 @@ pub(crate) fn conserved_basis(
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+
+    fn at_origin() -> Result<Position, AdmissionError> {
+        Ok(Position::new(
+            Measure::new(0.0)?,
+            Measure::new(0.0)?,
+            Measure::new(0.0)?,
+        ))
+    }
+
+    /// A bed that burns glucose in its interstitium into its own heat, its glucose topped up toward a level through a
+    /// boundary that reads it. Rows: the interstitium's water, oxygen, carbon dioxide and glucose, then the heat.
+    fn topped_up_bed() -> Result<CompiledBody, AdmissionError> {
+        let mut map = AnatomyBuilder::new();
+        let root = map.site::<TissueSite>("body", at_origin()?);
+        let vessel = map.site::<VesselSegment>("vessel", at_origin()?);
+        let bed = map.site::<CapillaryBed>("bed", at_origin()?);
+        for site in [vessel.id(), bed.id()] {
+            map.contain(root.id(), site);
+        }
+        map.connect(Network::Vascular, vessel.id(), bed.id());
+        map.connect(Network::Vascular, bed.id(), vessel.id());
+        let mut schema = Schema::new(map.finish()?)?;
+        for space in [Space::Plasma, Space::Cells, Space::Lumen] {
+            schema.leave_out(space, "the burn draws on the interstitium alone");
+        }
+        schema.carry::<Oxygen, CapillaryBed>(Space::Interstitium);
+        schema.carry::<CarbonDioxide, CapillaryBed>(Space::Interstitium);
+        schema.carry::<Glucose, CapillaryBed>(Space::Interstitium);
+        schema.carry::<Energy, CapillaryBed>(Space::Thermal);
+        schema.energy_content::<Glucose>(Measure::new(1_000.0)?)?;
+        let supply = "bed glucose";
+        schema.boundary::<Glucose>(supply, BoundaryDirection::IntoBody, bed.id(), Space::Interstitium)?;
+        let class = RateClass::new(RateBand::Minutes, 60_000_000_000)?;
+        assemble(schema, |mut body| {
+            let held = HeldDeclaration::<Metabolism>::new(Vec::new(), Vec::new(), "bench: synthetic");
+            let (mut laws, _) = body.hold(held)?.parts();
+            let burn = Proportions::using::<Glucose>(Space::Interstitium)
+                .uses::<Oxygen, 6>(Space::Interstitium)
+                .makes::<CarbonDioxide, 6>(Space::Interstitium)
+                .makes::<Water, 6>(Space::Interstitium)
+                .energy_into(Space::Thermal);
+            let burn = laws.reaction::<CapillaryBed, Glucose>("burn", burn);
+            let pace = laws.site_parameter::<CapillaryBed, Rate<Dimensionless>>(
+                ParameterKey::new("mt.burn-speed"),
+                Admissible::nonnegative(),
+            );
+            let fuel = burn.amount::<Glucose>();
+            let rate = laws.site_kernel(|mut k| {
+                let fuel = k.at_site(&fuel);
+                let zero = k.zero();
+                let pace = k.site_parameter(&pace);
+                let rate = k.relax(fuel, zero, pace);
+                k.finish(rate, laws.every_mode(), class)
+            });
+            laws.react_at(&burn, rate);
+            body.add(laws.finish());
+            let (mut laws, ports) = body.boundary()?.parts();
+            let BoundaryRoute { route, .. } = ports.route::<Glucose>(supply)?;
+            let level =
+                laws.parameter::<Glucose>(ParameterKey::new("bench.glucose-level"), Admissible::positive());
+            let speed = laws.parameter::<Rate<Dimensionless>>(
+                ParameterKey::new("bench.glucose-speed"),
+                Admissible::nonnegative(),
+            );
+            let held = route.amount::<Glucose>();
+            let rate = laws.kernel(|mut k| {
+                let (level, held, speed) = (k.parameter(&level), k.read(&held), k.parameter(&speed));
+                let rate = k.relax(level, held, speed);
+                k.finish(rate, laws.every_mode(), class)
+            });
+            laws.transfer(Transfer::new(&route, rate));
+            body.add(laws.finish());
+            body.compile()
+        })
+    }
+
+    /// The supply reads glucose, so it answers its own flow and each of the burn's four quantities, which all hold
+    /// glucose, may move: what stays put is each combination of them the supply leaves unchanged. Oxygen and carbon
+    /// dioxide together, water less carbon dioxide, and 500 water less 3 heat each lead with a row of their own.
+    #[test]
+    fn a_fuel_supply_that_reads_the_body_leaves_three_totals_each_on_its_own_row() {
+        let body = topped_up_bed().expect("compiled");
+        let plan: Vec<(usize, Vec<(usize, i64)>, AdmissionRow)> = (body.admission_totals().iter())
+            .map(|total| {
+                let terms = total.terms.iter().map(|&(row, weight)| (row.index(), weight));
+                (total.row.index(), terms.collect(), total.label)
+            })
+            .collect();
+        let conserved = |index| AdmissionRow::Conserved(ConservedRowId { index });
+        assert_eq!(
+            plan,
+            [
+                (1, vec![(1, 1), (2, 1)], conserved(0)),
+                (0, vec![(0, 1), (2, -1)], conserved(1)),
+                (2, vec![(0, 500), (4, -3)], conserved(2)),
+            ]
+        );
+    }
+}

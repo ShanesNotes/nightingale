@@ -527,3 +527,173 @@ fn a_reaction_that_moves_a_pool_its_card_holds_is_refused() {
         }
     );
 }
+
+fn combinations(compiled: &CompiledBody) -> Vec<(Book, Vec<(usize, i64)>)> {
+    (compiled.conserved_basis().combinations().iter())
+        .map(|combination| {
+            let terms = combination
+                .terms()
+                .iter()
+                .map(|&(row, weight)| (row.index(), weight));
+            (combination.book(), terms.collect())
+        })
+        .collect()
+}
+
+/// The rows of a burning bed, in key order: its interstitium's water, oxygen, carbon dioxide and glucose, then its
+/// heat.
+#[test]
+fn a_burning_bed_closes_hydrogen_oxygen_carbon_and_energy_in_that_order() {
+    let compiled = burning(schema(), Vec::new(), burn(), paced).expect("compiled");
+    let element = Book::Element;
+    assert_eq!(
+        combinations(&compiled),
+        [
+            (element(Element::Hydrogen), vec![(0, 2), (3, 12)]),
+            (element(Element::Oxygen), vec![(0, 1), (1, 2), (2, 2), (3, 6)]),
+            (element(Element::Carbon), vec![(2, 1), (3, 6)]),
+            (Book::Energy, vec![(3, 1_000), (4, 1)]),
+        ]
+    );
+    let regulated = compiled
+        .conserved_basis()
+        .combinations()
+        .iter()
+        .any(Combination::regulated);
+    assert!(!regulated, "no boundary reads this body");
+}
+
+#[test]
+fn a_burn_is_one_column_at_each_bed_with_its_heat() {
+    let compiled = burning(
+        burning_schema(&["bed a", "bed b"]).expect("a schema"),
+        Vec::new(),
+        burn(),
+        paced,
+    )
+    .expect("compiled");
+    let burns: Vec<(Context, Vec<(usize, i64)>)> = (compiled.columns().iter())
+        .filter(|column| column.origin() == BURN)
+        .map(|column| {
+            assert_eq!(column.receipt(), None, "a reaction has no receipt");
+            let terms = column.terms().iter().map(|&(row, count)| (row.index(), count));
+            (column.context(), terms.collect())
+        })
+        .collect();
+    let at = |key| Context::Site(site::<CapillaryBed>(key));
+    let bed = |first: usize| {
+        let row = |offset: usize| first + offset;
+        vec![
+            (row(0), 6),
+            (row(1), -6),
+            (row(2), 6),
+            (row(3), -1),
+            (row(4), 1_000),
+        ]
+    };
+    assert_eq!(burns, [(at("bed a"), bed(0)), (at("bed b"), bed(5))]);
+}
+
+#[test]
+fn a_reaction_and_its_heat_are_in_the_model_hash() {
+    let hash = |stated: f64, name: &'static str| {
+        let mut schema = interstitial(&["bed"]).expect("a schema");
+        schema.carry::<Glucose, CapillaryBed>(Space::Interstitium);
+        schema.carry::<Energy, CapillaryBed>(Space::Thermal);
+        schema
+            .energy_content::<Glucose>(content(stated))
+            .expect("a content");
+        let compiled = assemble(schema, |mut body| {
+            let held = HeldDeclaration::<Metabolism>::new(Vec::new(), Vec::new(), "bench: synthetic");
+            let (mut laws, _) = body.hold(held)?.parts();
+            let burn = laws.reaction::<CapillaryBed, Glucose>(name, burn());
+            paced(&mut laws, &burn)?;
+            body.add(laws.finish());
+            body.compile()
+        });
+        compiled.expect("compiled").model_hash()
+    };
+    assert_eq!(hash(1_000.0, "burn"), hash(1_000.0, "burn"));
+    assert_ne!(hash(1_000.0, "burn"), hash(2_000.0, "burn"));
+    assert_ne!(hash(1_000.0, "burn"), hash(1_000.0, "oxidation"));
+}
+
+/// A bed that burns glucose in its plasma and in its interstitium into one heat store, with `Q` exchanged across the
+/// wall and nothing else crossing it.
+fn two_burns<Q: Reactant>() -> Result<CompiledBody, AdmissionError> {
+    let mut schema = Schema::new(anatomy(&["bed"])?)?;
+    for space in [Space::Cells, Space::Lumen] {
+        schema.leave_out(space, "two burns in two spaces alone");
+    }
+    for space in [Space::Plasma, Space::Interstitium] {
+        schema.carry::<Oxygen, CapillaryBed>(space);
+        schema.carry::<CarbonDioxide, CapillaryBed>(space);
+        schema.carry::<Glucose, CapillaryBed>(space);
+    }
+    schema.carry::<Energy, CapillaryBed>(Space::Thermal);
+    schema.energy_content::<Glucose>(content(1_000.0))?;
+    let class = RateClass::new(RateBand::Minutes, 60_000_000_000)?;
+    assemble(schema, |mut body| {
+        let held = HeldDeclaration::<Metabolism>::new(Vec::new(), Vec::new(), "bench: synthetic");
+        let (mut laws, _) = body.hold(held)?.parts();
+        let interstitial = laws.reaction::<CapillaryBed, Glucose>("burn", burn());
+        paced(&mut laws, &interstitial)?;
+        let plasma = Proportions::using::<Glucose>(Space::Plasma)
+            .uses::<Oxygen, 6>(Space::Plasma)
+            .makes::<CarbonDioxide, 6>(Space::Plasma)
+            .makes::<Water, 6>(Space::Plasma)
+            .energy_into(Space::Thermal);
+        let plasma = laws.reaction::<CapillaryBed, Glucose>("burn in plasma", plasma);
+        paced(&mut laws, &plasma)?;
+        body.add(laws.finish());
+        let (mut laws, ports) = body.fluids()?.parts();
+        let wall = ports.exchange::<Q>(&mut laws);
+        let speed = laws.site_parameter::<CapillaryBed, Rate<Dimensionless>>(
+            ParameterKey::new("fl.wall-speed"),
+            Admissible::nonnegative(),
+        );
+        let rate = laws.site_kernel(|mut k| {
+            let (inside, outside) = (
+                k.at_site(&wall.from_amount::<Q>()),
+                k.at_site(&wall.to_amount::<Q>()),
+            );
+            let speed = k.site_parameter(&speed);
+            let rate = k.relax(inside, outside, speed);
+            k.finish(rate, laws.every_mode(), class)
+        });
+        laws.transfer_at(&wall, rate);
+        body.add(laws.finish());
+        body.compile()
+    })
+}
+
+/// Rows: plasma's water, oxygen, carbon dioxide and glucose, the interstitium's, then the heat store. Oxygen crossing the
+/// wall joins the oxygen of both burns, and their shared heat store joins their energy, but no column holds the carbon
+/// or the hydrogen of both.
+#[test]
+fn a_quantity_splits_where_its_own_columns_do_not_join_its_rows() {
+    let compiled = two_burns::<Oxygen>().expect("compiled");
+    let element = Book::Element;
+    let oxygen = vec![(0, 1), (1, 2), (2, 2), (3, 6), (4, 1), (5, 2), (6, 2), (7, 6)];
+    assert_eq!(
+        combinations(&compiled),
+        [
+            (element(Element::Hydrogen), vec![(0, 2), (3, 12)]),
+            (element(Element::Oxygen), oxygen),
+            (element(Element::Carbon), vec![(2, 1), (3, 6)]),
+            (Book::Energy, vec![(3, 1_000), (7, 1_000), (8, 1)]),
+            (element(Element::Hydrogen), vec![(4, 2), (7, 12)]),
+            (element(Element::Carbon), vec![(6, 1), (7, 6)]),
+        ]
+    );
+}
+
+/// Water crossing the wall joins the hydrogen of both burns too, which leaves the oxygen less half the hydrogen in each
+/// space conserved apart, and no quantity names it.
+#[test]
+fn two_burns_joined_only_by_water_leave_a_conserved_direction_unnamed() {
+    assert_eq!(
+        refused(two_burns::<Water>()),
+        CompileDefect::UnnamedConservedQuantity { law: BURN }
+    );
+}
