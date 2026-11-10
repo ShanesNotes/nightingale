@@ -629,6 +629,8 @@ class Target:
     name: str
     kinds: frozenset[str]
     src: pathlib.Path
+    test: bool
+    doctest: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -739,7 +741,8 @@ def cargo_members(root: pathlib.Path) -> dict[str, Member]:
             for d in p["dependencies"]
         )
         targets = tuple(
-            Target(t["name"], frozenset(t["kind"]), pathlib.Path(t["src_path"]).resolve()) for t in p["targets"]
+            Target(t["name"], frozenset(t["kind"]), pathlib.Path(t["src_path"]).resolve(), t["test"], t["doctest"])
+            for t in p["targets"]
         )
         manifest = pathlib.Path(p["manifest_path"])
         rel = _rel(root, manifest.parent)
@@ -1529,6 +1532,8 @@ class Plan:
     crates: tuple[str, ...]
     smoke: tuple[str, ...]
     steps: tuple[str, ...]
+    first: tuple[str, ...] = ()
+    rest: tuple[str, ...] = ()
 
     def lines(self) -> str:
         return "\n".join(
@@ -1539,6 +1544,8 @@ class Plan:
                 f"reason={self.reason}",
                 f"crates={' '.join(self.crates)}",
                 f"smoke={' '.join(self.smoke)}",
+                f"first={' '.join(self.first)}",
+                f"rest={' '.join(self.rest)}",
                 f"steps={' '.join(self.steps)}",
             ]
         )
@@ -1604,6 +1611,30 @@ def plan_changes(ws: Workspace, mode: Mode, base: str | None, changes: Mapping[s
     )
 
 
+def split_tests(ws: Workspace, p: Plan, changes: Mapping[str, Modes]) -> Plan:
+    """`--test NAME` runs NAME in every planned crate that has one, so `rest` leaves out each name in `first`. A crate
+    with a target that `--lib`, `--test` and `--doc` cover differently from a plain `cargo test` keeps the run whole."""
+    if p.mode != "merge":
+        return p
+    members = [ws.members[c] for c in p.crates]
+    tests = [t for m in members for t in m.targets if t.kinds == {"test"}]
+
+    def edited(t: Target) -> bool:
+        src = _rel(ws.root, t.src)
+        home = posixpath.dirname(src) + "/" if posixpath.basename(src) == "main.rs" else None
+        return any(path == src or (home is not None and path.startswith(home)) for path in changes)
+
+    first = {t.name for t in tests if edited(t)}
+    whole = all(
+        any(t.kinds == {"lib"} for t in m.targets)
+        and all(t.test and (t.kinds == {"test"} or (t.kinds == {"lib"} and t.doctest)) for t in m.targets)
+        for m in members
+    )
+    if not first or not whole:
+        return p
+    return dataclasses.replace(p, first=tuple(sorted(first)), rest=tuple(sorted({t.name for t in tests} - first)))
+
+
 def resolve_base(root: pathlib.Path, arg: str | None) -> tuple[str | None, str]:
     if arg is not None:
         if (sha := git(root, "rev-parse", "--verify", "--quiet", f"{arg}^{{commit}}")) is None:
@@ -1651,7 +1682,8 @@ def plan(ws: Workspace, mode: Mode, base_arg: str | None) -> Plan:
     base, why = resolve_base(ws.root, base_arg)
     if base is None:
         return everything(ws, mode, None, why)
-    return plan_changes(ws, mode, base, changed_paths(ws.root, base))
+    changes = changed_paths(ws.root, base)
+    return split_tests(ws, plan_changes(ws, mode, base, changes), changes)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1663,6 +1695,7 @@ class PlanCase:
     reaches: frozenset[str] = frozenset()
     steps: frozenset[str] = frozenset()
     modes: Modes = (REGULAR, REGULAR)
+    first: tuple[str, ...] = ()
 
 
 RECORD_USERS = frozenset({"ng-record", "ng-observe", "ng-validate"})
@@ -1679,6 +1712,11 @@ PLAN_CASES = (
     PlanCase("merge", "crates/ng-record/src/lib.rs", "affected", RECORD_USERS),
     PlanCase("changed", "crates/ng-record/src/lib.rs", "affected", frozenset({"ng-record"})),
     PlanCase("merge", "crates/ng-contract/src/lib.rs", "affected", reaches=RECORD_USERS | {"ng-contract"}),
+    PlanCase(
+        "merge", "crates/ng-validate/tests/window.rs", "affected", reaches=frozenset({"ng-validate"}), first=("window",)
+    ),
+    PlanCase("changed", "crates/ng-validate/tests/window.rs", "affected", frozenset({"ng-validate"})),
+    PlanCase("merge", "crates/ng-validate/tests/replay_cores/mod.rs", "affected", reaches=frozenset({"ng-validate"})),
     PlanCase("merge", "crates/ng-contract/src/catalog.rs", "everything"),
     PlanCase("merge", "crates/ng-contract/src/system.rs", "everything"),
     PlanCase("merge", "Cargo.lock", "everything"),
@@ -1692,7 +1730,8 @@ PLAN_CASES = (
 def plan_cases(ws: Workspace) -> list[Violation]:
     out = []
     for c in PLAN_CASES:
-        p = plan_changes(ws, c.mode, "base", {c.path: c.modes})
+        changes = {c.path: c.modes}
+        p = split_tests(ws, plan_changes(ws, c.mode, "base", changes), changes)
         subject = f"{c.mode} {c.path}" + ("" if c.modes == (REGULAR, REGULAR) else f" ({c.modes[1]})")
         crates, steps = set(p.crates), set(p.steps)
         exact = set(ws.members) if c.scope == "everything" else c.crates
@@ -1707,6 +1746,13 @@ def plan_cases(ws: Workspace) -> list[Violation]:
             out.append(Violation("plan", subject, f"does not select {' '.join(sorted(missing))}"))
         if c.scope == "docs-only" and steps & set(ws.registry.crate_steps) - c.steps:
             out.append(Violation("plan", subject, "a docs-only plan selects a crate step"))
+        if p.first != c.first:
+            got, want = " ".join(p.first) or "none", " ".join(c.first) or "none"
+            out.append(Violation("plan", subject, f"first {got}, expected {want}"))
+        tests = {t.name for n in p.crates for t in ws.members[n].targets if t.kinds == {"test"}}
+        if p.rest != (tuple(sorted(tests - set(c.first))) if c.first else ()):
+            want = "every other test target of the planned crates" if c.first else "none"
+            out.append(Violation("plan", subject, f"rest {' '.join(p.rest) or 'none'}, expected {want}"))
     return out
 
 

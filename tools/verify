@@ -36,16 +36,18 @@ if ! plan=$(python3 -I tools/gate/gate.py plan "$mode" "${base_args[@]}"); then
   echo "verify: the plan failed"
   exit 1
 fi
-scope='' base='' reason='' crates='' smoke='' steps=''
+scope='' base='' reason='' crates='' smoke='' first='' rest='' steps=''
 while IFS='=' read -r key value; do
   case "$key" in
-    scope | base | reason | crates | smoke | steps) printf -v "$key" '%s' "$value" ;;
+    scope | base | reason | crates | smoke | first | rest | steps) printf -v "$key" '%s' "$value" ;;
   esac
 done <<<"$plan"
 echo "gate: mode=$mode scope=$scope base=$base reason=$reason"
 echo "gate: crates=${crates:-none} smoke=${smoke:-none}"
+echo "gate: first=${first:-none}"
 echo "gate: steps=$steps"
-export NG_GATE_MODE="$mode" NG_GATE_SCOPE="$scope" NG_GATE_BASE="$base" NG_GATE_CRATES="$crates" NG_GATE_SMOKE="$smoke"
+export NG_GATE_MODE="$mode" NG_GATE_SCOPE="$scope" NG_GATE_BASE="$base" NG_GATE_CRATES="$crates" NG_GATE_SMOKE="$smoke" \
+  NG_GATE_FIRST="$first" NG_GATE_REST="$rest"
 times=$(mktemp)
 trap 'rm -f "$times"' EXIT
 export NG_GATE_TIMES="$times"
