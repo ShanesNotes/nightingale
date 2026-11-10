@@ -24,13 +24,13 @@ Evidence so far: `~/lanes/logs/ng-body-plan/body-cost.md`.
 
 ## Answer
 
-The accuracy estimate limits the step. In the first half of each beat it sets 105 of 135 steps, on the heart's rows during ejection and relaxation, and no single row dominates. In the second half the 10 ms cap sets 50 of its 52 steps. That cap is the body's own wave rate class, so a longer cap on the core changes nothing. The restart after a firing never binds. Firings cost wall time instead. A landing takes 3.8 solves, so the 15 landings a beat take 21% of the wall time.
+The accuracy estimate limits the step. In the first half of each beat it sets 105 of 135 steps, on the heart's rows during ejection and relaxation, and no single row dominates. In the second half the 10 ms cap sets 50 of its 52 steps. That cap is the body's own wave rate class, so a longer cap on the core changes nothing. The restart after a firing sets no step's length. With all of it kept across a firing, the run takes the same steps with the same refusals. It costs Newton work instead. Firings cost wall time through their landings. A landing takes 3.8 solves, so the 15 landings a beat take 21% of the wall time.
 
-Every number below is from the heavy-run machine, an AMD Ryzen 5 2600 under WSL2, with Rust 1.98.1 and release builds. Each run held the machine's lock, and the probe was the only busy process. Each slice run admits the arena at 06:55 with `ng_solver::Core` at 10 ms and no boundary input, on main `85d1e6e`. The evidence and the probe are in `~/lanes/logs/ng-body-wave-1/07-step-limit/`, and its `REPORT.md` names the log behind each number.
+Every number below is from the heavy-run machine, an AMD Ryzen 5 2600 under WSL2, with Rust 1.98.1 and release builds. Each run held the machine's lock, and the probe was the only busy process. Each slice run admits the arena at 06:55 with `ng_solver::Core` at 10 ms and no boundary input, on main `85d1e6e`. The evidence and the probe are in `~/lanes/logs/ng-body-wave-1/07-step-limit/`, and its `REPORT.md` names the log behind each number. Every statement below is measured unless it says it is inferred or read from the code.
 
 ### How the probe reads a step
 
-The probe runs a copy of today's core with counters, a record of each decision and settings it can change. A script writes the copy from `crates/ng-solver/src/lib.rs` and stops if any line it edits has moved. With today's settings the copy reproduces the shipped core's seal bit for bit, over the first 120 s (22,482 steps) and over the day window (392,922 steps). A sampling profile (perf at 1999 Hz on a build with frame pointers) splits the record's work. On the core's parts, the copy's timers and the profile agree within 2 µs a step.
+The probe runs a copy of today's core with counters, a record of each decision and settings it can change. A script writes the copy from `crates/ng-solver/src/lib.rs` and stops if any line it edits has moved. With today's settings the copy reproduces the shipped core's seal bit for bit, over the first 120 s (22,482 steps) and over the day window (392,922 steps). A sampling profile (perf at 1999 Hz on a build with frame pointers) splits the record's work. That build runs about 1.5% slower than the timed one, and its shares are taken to carry over (inferred). On the core's parts, the copy's timers (median of 4 runs) and the profile (median of 3) agree within 4 µs a step.
 
 ### Where the steps fall in the beat
 
@@ -57,7 +57,7 @@ Steps a beat by phase, over the 120 beats of the first 120 s. Phase 0 starts sys
 | 0.6 to 1.0 | 41.0 | 9.93 | 0 | 40.0 | 1.0 | 0 | 0 |
 | Whole beat | 187.3 | 5.34 | 106.3 | 53.0 | 15.0 | 10.0 | 3.0 |
 
-Over the whole beat, accuracy sets 57% of the steps and takes 46% of the wall time. The cap sets 28% and takes 22%, landings 8% and 21%, retries 5% and 9%, and growth 2% and 1%. A landing takes 3.8 solves and a retried step 2.5, against 1.0 for the rest. Half of the retried steps start right after a firing.
+Over the whole beat, accuracy sets 57% of the steps and takes 46% of the wall time. Each wall share below holds to 0.1 point over 4 runs of the copy. The cap sets 28% and takes 22%, landings 8% and 21%, retries 5% and 9%, and growth 2% and 1%. A landing takes 3.8 solves and a retried step 2.5, against 1.0 for the rest. A landing takes 1.67 to 1.71 ms of wall time and an accuracy step 0.52 to 0.53 ms, over the same 4 runs. Half of the retried steps, 601 of 1,203, start right after a firing.
 
 Accepted step lengths over the 120 s, by reason:
 
@@ -69,17 +69,17 @@ Accepted step lengths over the 120 s, by reason:
 | Retry | 0 | 363 | 120 | 600 | 120 | 0 | 0 |
 | Growth | 0 | 0 | 121 | 120 | 120 | 0 | 0 |
 
-One landing of the 1,804 is the stir's chance firing. The rest are mode changes. Each beat has 16, one to a step, and 15 of them end a landing step. The 16th ends a step the record refused first, which counts as a retry. The rhythm, the mitral valve and the tricuspid valve change twice a beat each. The aortic valve opens and shuts three times a beat and the pulmonary valve twice, all before phase 0.31. The leg veins' valve never changes. A valve's shut resets its own flow row to zero, and that reset names each mode in the trace.
+One landing of the 1,804 is the stir's chance firing. The rest are mode changes. Each beat has 16, one to a step, and 15 of them end a landing step. The 16th is the aortic valve's first opening, near phase 0.01. It ends an accuracy step that keeps its whole span after one landing trial, so it counts under accuracy. That its crossing falls within the landing's tolerance of the span's end is inferred from the landing rule. The rhythm, the mitral valve and the tricuspid valve change twice a beat each. The aortic valve opens and shuts three times a beat and the pulmonary valve twice, all before phase 0.31. The leg veins' valve never changes. A valve's shut resets its own flow row to zero, and that reset names each mode in the trace.
 
 ### What limits the step
 
-The accuracy estimate names the heart's rows. On the steps it set, the worst row is the aortic valve's flow 39% of the time, the left ventricle's pressure 20% and its chloride 17%. The pulmonary valve's flow is the worst row 11% of the time, the mitral valve's flow 6%, the right ventricle's chloride 6% and the tricuspid valve's flow 2%. A ventricle's chloride ties with its sodium on every one of those steps, because a lumen's species move together. No one row dominates. Were the worst row out of the estimate, the runner-up would allow a median step 1.19 times longer (tenth percentile 1.00, ninetieth 2.05).
+The accuracy estimate names the heart's rows. For the 12,754 accuracy steps, the row that the step before named is the aortic valve's flow 38.8% of the time, the left ventricle's pressure 20.7% and its chloride 19.8%. It is the pulmonary valve's flow 9.4% of the time, the mitral valve's flow 5.7% and the right ventricle's chloride 5.6%. Where a ventricle's chloride is the worst row, its sodium comes within 0.1% of it, on all 3,364 such steps. That a lumen's species move together is the inferred reason. No one row dominates. Over the 15,280 steps whose next span the estimate set, the runner-up row would allow a median step 1.19 times longer than the worst row does (tenth percentile 1.00, ninetieth 2.05).
 
-The cap that binds is the cardiovascular crate's wave rate class, `WAVE_NS` at `crates/ng-cardiovascular/src/lib.rs:22`. `CompiledBody::longest_step_ns` applies it to every ticket, whatever the core asks.
+The cap that binds is the cardiovascular crate's wave rate class, `WAVE_NS` at `crates/ng-cardiovascular/src/lib.rs:22`. `CompiledBody::longest_step_ns` applies it to every ticket, whatever the core asks. That is read from the code, and the cap runs below agree with it.
 
-The restart after a firing does not bind. In the step after a firing, the core grows its next span from that step's own length instead of the span it had committed to. Growing from the committed span instead gives the same seal over 120 s. On the slice the step after a firing always runs its whole committed span, so the two lengths are equal.
+The restart after a firing sets no step's length. In the step after a firing, the core grows its next span from that step's own length instead of the span it committed to. It also drops its carried Newton tolerance, its predictor and its trend. Keeping the growth base across a firing gives the same seal over 120 s. Of the 1,925 steps after a firing, 1,203 ran their whole committed span, so the two bases are equal. Another 601 were retried, which the core treats the same either way. For the 121 that landed, the growth limit did not bind, which the unchanged seal implies (inferred). Keeping the rest of the restart as well changes the seal but not the steps. The run takes the same 22,482 steps, for the same reasons, with the same 1,806 refusals. Without the restart, a step after a firing does 12.0 evaluates and 6.7 Newton updates, against 14.7 and 9.4 with it, and the core spends 70 µs less on it (one run of the copy's timers). Steps after a firing are where refusals cluster. They hold 120 of the 121 IterationLimit refusals and 601 of the 1,203 retried steps, and none of these goes away with the restart off. So the span after a firing causes them, not the restart (inferred).
 
-Each experiment changes one setting and runs 120 s from the same admission. Each prediction came from today's trace before the run, from the length the estimate allowed each step. The accuracy target is the estimate the core aims a span at, 0.7 against the refusal at 1.0. The wave class is a body setting, so its runs used a throwaway clone with `WAVE_NS` changed. That clone admits to the same state digest as main.
+Each experiment changes one setting and runs 120 s from the same admission. Each prediction came from today's trace before the run, from the length the estimate allowed each step. The restart's prediction also said its IterationLimit refusals would fall, and they did not. The accuracy target is the estimate the core aims a span at, 0.7 against the refusal at 1.0. The wave class is a body setting, so its runs used a throwaway clone with `WAVE_NS` changed. That clone admits to the same state digest as main.
 
 | Change | Predicted steps | Measured steps | What it shows |
 |---|---|---|---|
@@ -90,7 +90,8 @@ Each experiment changes one setting and runs 120 s from the same admission. Each
 | The wave class and the core's cap to 40 ms | 19,337 (-14.0%) | 19,236 (-14.4%) | Past the cap, the estimate sets 81% of the steps |
 | The accuracy target to 0.35 | 28,050 (+24.8%) | 28,736 (+27.8%) | The estimate sets the accuracy steps |
 | The accuracy target to 0.9 | 20,993 (-6.6%) | 21,765 (-3.2%) | Retried steps rise from 1,203 to 3,249 and take half the gain |
-| The growth base kept across a firing | 22,440 (-0.2%) | 22,482, the same seal | The restart never binds |
+| The growth base kept across a firing | 22,440 (-0.2%) | 22,482, the same seal | The growth base never binds |
+| The whole restart kept across a firing | Within 0.6% of 22,482 | 22,482, a new seal | The restart costs Newton work, not steps |
 
 The first prediction for a longer core cap missed, and the miss found the body's cap. Lifting it to 40 ms removes 14% of the steps. After that, the estimate sets 81% of the steps that remain.
 
@@ -111,27 +112,29 @@ On the slice a step costs 0.640 ms, the median of 5 paired runs (range 0.639 to 
 | Link store and the rest | 7.0 | 1.5 | 1.1 | 0.03 |
 | Whole step | 640 (639 to 642) | 35.1 (34.9 to 37.1) | 30.8 (30.5 to 31.2) | 2.55 |
 
-The core takes 62% of a step on the slice and the record 38%. The core's own arithmetic is its Krylov vectors, norms, copies and quadrature. The slice has 380 instances, 257 columns and 1,578 Jacobian entries. Per call on the slice, an evaluate takes 19.1 µs (7.6 a step), a linearize 36.9 µs and a factor 52.2 µs (1.31 a step each), and a back solve 5.5 µs (12.4 a step, 6.8 of them inside the Krylov solve). Per call, an evaluate grows with instances (0.05 µs each), a linearize with Jacobian entries (0.023 µs each) and a back solve with rows (0.023 µs each). How a factor grows depends on its fill, which no public item reports.
+The core takes 62% of a step on the slice and the record 38%. The core's own arithmetic is the core's samples outside the four contract calls, and its hottest functions are the Krylov vectors, the norms, the copies and the quadrature (inferred from the profile's own frames). The slice has 380 instances, 257 columns and 1,578 Jacobian entries. Per call on the slice, the median of 4 runs of the copy's timers with their range, an evaluate takes 19.3 µs (19.1 to 19.4) and runs 7.6 times a step. A linearize takes 38.8 µs (36.9 to 40.8) and a factor 50.5 µs (49.7 to 52.2), 1.31 times a step each. A back solve takes 5.4 to 5.6 µs and runs 12.4 times a step, 6.8 of them inside the Krylov solve. On the fixtures, from one run each, an evaluate takes 0.27 and 0.46 µs, a linearize 0.38 and 0.66 µs, and a back solve 0.09 to 0.13 µs. Per call, an evaluate grows with instances (0.05 µs each), a linearize with Jacobian entries (0.024 µs each) and a back solve with rows (0.023 µs each). How a factor grows depends on its fill, which no public item reports (read from the code).
 
-A step has a fixed cost of 31 µs on a body with two rows. Of that, 16 µs is SHA-256 of the run identity (7.5 µs), the resolution (5.8 µs) and the ticket (2.8 µs), and both the identity and the resolution are fixed for the whole run. The slice spends 18 µs a step on the same three digests. Its other 40 µs of hash is BLAKE2b, 22 µs for the link's seal and 18 µs for the image. At the slice's 187 steps a second, the fixed cost alone takes 5.8 ms of each simulated second's wall time, 58% of the budget at 100 times real time.
+A step has a fixed cost of 31 µs on a body with two rows. Of that, 16 µs is SHA-256 of the run identity (7.5 µs), the resolution (5.8 µs) and the ticket (2.8 µs), and both the identity and the resolution are fixed for the whole run. This split by digest comes from one profile of each body. The hash's total comes from three. The slice spends 18 µs a step on the same three digests. Its other 40 µs of hash is BLAKE2b, 22 µs for the link's seal and 18 µs for the image. At the slice's 187 steps a second, the fixed cost alone takes 5.8 ms of each simulated second's wall time, 58% of the budget at 100 times real time.
 
-Two small bodies and the slice cannot show whether a part grows faster than its rows. Ticket 06's body gives the next point.
+Two small bodies and the slice cannot show whether a part grows faster than its rows. The line from two reservoirs to the slice predicts 38.4 µs a step at 5 rows, and the chance fixture measures 35.1. The slope carries the slice's heavier work a step, 7.6 evaluates and 12.4 back solves against 5 and 5 on the fixtures. Ticket 06's body gives the next point.
 
 ### The cost of a full-waveform observer
 
-An observer costs about 0.1 µs a sample, one channel read at one output-grid instant. The runs below had observers take turns after one admission, 5 rounds of 60 s. The extra wall time is the median of the 5 paired differences with no observer. Those 5 runs with no observer spread over 0.6 ms a simulated second.
+An observer costs about 0.1 µs a sample, one channel read at one output-grid instant. The runs below had observers take turns after one admission, 5 rounds of 60 s. The extra wall time is the median of the 5 paired differences with no observer, with their range. Those 5 runs with no observer spread over 0.6 ms a simulated second.
 
 | Lens | Samples a simulated second | Extra wall time a simulated second | Rounds slower than none |
 |---|---|---|---|
 | The arena's 3 means | 3 | Under the noise | 3 of 5 |
 | 8 channels at 125 Hz | 1,000 | Under the noise | 2 of 5 |
-| 8 channels at 500 Hz | 4,000 | 0.52 ms | 5 of 5 |
-| All 241 rows at 125 Hz | 30,129 | 3.7 ms | 5 of 5 |
-| All 241 rows at 500 Hz | 120,504 | 11.7 ms | 5 of 5 |
+| 8 channels at 500 Hz | 4,000 | 0.52 ms (0.22 to 1.05) | 5 of 5 |
+| All 241 rows at 125 Hz | 30,129 | 3.7 ms (3.6 to 4.4) | 5 of 5 |
+| All 241 rows at 500 Hz | 120,504 | 11.7 ms (10.7 to 11.9) | 5 of 5 |
 
-A monitor's waveforms, 8 channels at 500 Hz, take about 5% of the 10 ms budget. Every state row at 125 Hz takes 37% of it.
+If a monitor shows 8 waveforms at 500 Hz, an assumption rather than a requirement, they take about 5% of the 10 ms budget. Every state row at 125 Hz takes 37% of it.
 
 ### Numbers no host-side probe reads today
+
+What the shipped core and the record publish is read from the code.
 
 - Why a step had its length. The shipped core's method history holds the span it chose and its estimate. It does not hold which limit chose the span or which row the estimate named. The probe read both from its copy. The hook is a decision the core publishes with each proposal, or the per-row estimate the record already recomputes in `StepProposal::verify`.
 - The record's parts. Only a sampling profile splits the replay, the hash and the ledger, to about a point of share. A timer for each part inside the record would read them exactly.
@@ -142,3 +145,5 @@ The copy works because the core is one file, unchanged since nightingale#54. Onc
 ### For tickets 26 and 27
 
 These are measurements, not picks. At 187 steps a second and 0.640 ms a step, the slice takes 120 ms of wall time for each simulated second, 12 times the budget. Lifting the wave class to 40 ms would remove 14% of the steps. Landings take 21% of the wall time, and the fixed cost of a step takes 58% of the budget at today's step count.
+
+An observation for the cardiovascular owner, not a fix. In each of the 119 whole beats the aortic valve opens at phase 0.01, shuts at 0.10, opens at 0.12, shuts at 0.18, opens at 0.18 and shuts at 0.30. The pulmonary valve opens at 0.00, shuts at 0.16, opens at 0.17 and shuts at 0.31. The opening and closing past each valve's first pair are 6 of the 15 landings a beat, and at their measured average they take about 10 ms of each beat's 122 ms of wall time. Whether that is chatter is for the cardiovascular owner to judge, and what removing it would save is not measured.
