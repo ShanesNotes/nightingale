@@ -1,7 +1,8 @@
 # 01: Rung 0, system by system
 
 Type: research
-Status: open
+Status: claimed
+Claimed by: body-01-rung-0
 Blocked by: none
 
 **Question:** What is the smallest thing each of the 13 systems must do for the body to live a day? No doc in this repo says. The glossary defines rung 0 as a system's simplest working version, and the only system-by-system account is in two drafts outside the repo that predate the contract.
