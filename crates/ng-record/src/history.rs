@@ -761,7 +761,10 @@ mod tests {
         i64::from(row == FUEL || row == CARBON_DIOXIDE)
     }
     fn gained(terms: &[(usize, i64)]) -> i64 {
-        terms.iter().map(|&(row, coefficient)| coefficient * carbon(row)).sum()
+        terms
+            .iter()
+            .map(|&(row, coefficient)| coefficient * carbon(row))
+            .sum()
     }
 
     #[test]
