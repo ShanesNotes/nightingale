@@ -12,7 +12,7 @@ The native Rust engine for one simulated patient. Read `docs/srs.md` first: it b
 |---|---|---|
 | The engine, to the first milestone (SRS invariant I19) | `docs/srs.md`, then `docs/architecture/solver-contract.md` | `.scratch/foundation/map.md` is the route, `.scratch/native-contract/issues/` holds the crate tickets, and `.scratch/body/map.md` plans the 13 systems |
 | The reference man's sourced numbers | `data/`, held by `tools/verify.d/30-data.sh` | `.scratch/research/map.md` |
-| The clinical workspace prototype | `clinical-workspace/` and the `verify-clinical-workspace` skill | None in the repo yet |
+| The clinical workspace prototype | `clinical-workspace/` and the `verify-clinical-workspace` skill | `.scratch/clinical-workspace/map.md` |
 | Generative physiology, a learned model that the engine teaches | `tools/generative-physiology/` | `.scratch/generative-physiology/map.md` |
 | The evidence library, an index of the literature | Its store is outside the repo | `.scratch/evidence-library/map.md` |
 

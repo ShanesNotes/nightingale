@@ -7,7 +7,7 @@
 ## Notes
 
 - Prose uses "the map" for the patient's anatomy (SRS section 2) and calls this file the wayfinder map.
-- The architecture's layers ([SRS section 1](../../docs/srs.md#1-purpose-and-scope)) come first, and display comes after them. Display work has started outside this effort, as the `clinical-workspace/` prototype, which replays one recorded run and never runs the engine.
+- The architecture's layers ([SRS section 1](../../docs/srs.md#1-purpose-and-scope)) come first, and display comes after them. Display work has started outside this effort, as the `clinical-workspace/` prototype, which replays one recorded run and never runs the engine. Its tickets are in the [clinical workspace map](../clinical-workspace/map.md).
 - This wayfinder map carries execution as well as decisions. Its tickets include the build work that reaches the destination, not only the choices before it.
 - Foundation tickets name native-contract tickets in their `Blocked by:` and `Lands with:` lines, so a frontier scan reads `.scratch/native-contract/issues/` as well as `.scratch/foundation/issues/`.
 - Grilling tickets call the grilling and domain-modeling skills.

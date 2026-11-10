@@ -19,7 +19,7 @@ All 13 systems run at rung 0 in one body, on a synthetic fixture. The body admit
 
 ## Order
 
-Tickets 01, 02, 07 and 23 and research tickets 11 to 15 can start today. Ticket 27 follows 07.
+Tickets 01, 02, 07 and 23 and research tickets 11 to 15 can start today. Ticket 27 follows 07, and it comes before the loop lanes when seats are short: a split changes the solver's interface, which is cheaper to change with four systems than with 13.
 
 | Ticket | Waits for | What it lands |
 |---|---|---|
@@ -30,8 +30,8 @@ Tickets 01, 02, 07 and 23 and research tickets 11 to 15 can start today. Ticket 
 | [05](issues/05-the-days-inputs.md) The day's inputs | 03 | The clock, sleep, the room and meals reach the body |
 | [06](issues/06-whole-body-on-holds.md) The whole body on holds | 04, 05 | The second assembly and its hold table |
 | [07](issues/07-what-limits-the-step.md) What limits the step | nothing | Where a step's cost goes on the slice, and its limiter |
-| [27](issues/27-step-plan.md) A step plan that can reach the speed aim | 07 | Prototypes and a pick |
-| [26](issues/26-cost-budget.md) A cost budget for the whole body | 06, 07 | The budget each loop is held to |
+| [27](issues/27-step-plan.md) A step plan that can reach the speed aim | 07 | Prototypes and a pick, on main before the synthetic day |
+| [26](issues/26-cost-budget.md) A cost budget for the whole body | 06, 07 | The budget each loop is held to, with ceilings for admission and the gate |
 | [08](issues/08-blood-carries-gases.md) Blood carries the gases | 06, 26, research 11 | Gas loop |
 | [09](issues/09-tissues-respire.md) Tissues respire | 02, 08, research 11 | Gas loop |
 | [10](issues/10-lungs-breathe.md) The lungs breathe | 08, 09, research 11 | Gas loop |
@@ -49,7 +49,7 @@ Tickets 01, 02, 07 and 23 and research tickets 11 to 15 can start today. Ticket 
 | [21](issues/21-blood-cells-and-systems-at-rest.md) Blood cells, plasma proteins and the systems at rest | 08, 14, research 15 | Pass 2 |
 | [22](issues/22-the-bladder.md) The bladder | 05, 06, 26 | Pass 2 |
 | [23](issues/23-healthy-range-and-return-checks.md) The healthy-range check and the return check | nothing | The two milestone checks no code holds |
-| [24](issues/24-the-synthetic-day.md) The synthetic day | 11, 12, 16, 17, 18, 23, 25 | Pass 1 checked: 24 hours on the whole body |
+| [24](issues/24-the-synthetic-day.md) The synthetic day | 11, 12, 16, 17, 18, 23, 25, 27 | Pass 1 checked: 24 hours on the whole body |
 | [28](issues/28-two-synthetic-days.md) The whole body lives two synthetic days | 19, 20, 21, 22, 24 | The destination: both passes, 48 hours |
 
 After tickets 06 and 26, three lanes can be built side by side: the gases (08), the gut (13) and the volume hormones (17). They share the body's assembly and add laws to the cardiovascular and renal crates, so ticket 04 puts each law in its own module and the PRs merge one at a time.
@@ -64,7 +64,8 @@ After tickets 06 and 26, three lanes can be built side by side: the gases (08), 
 ## Not yet specified
 
 - **Which readings the lens carries at the milestone.** [Research 06](../research/issues/06-healthy-ranges-and-lens.md) proposes the list. If it keeps total calcium and phosphate, ticket 19 moves into pass 1 and joins ticket 24's blockers.
-- **The speed plan.** The slice runs 14.5 times over the speed aim's budget, and about a third of a step is the record's own work. Ticket 07 measures what limits the step and ticket 27 picks a plan. Until then, no one knows whether the whole body can reach the aim on one coupled step.
+- **The speed plan.** The slice runs 14.5 times over the speed aim's budget, and about a third of a step is the record's own work. Ticket 07 measures what limits the step and ticket 27 picks a plan. Until then, no one knows whether the whole body can reach the aim on one coupled step. The synthetic day waits for that pick, so the body's long runs are not built on a step they cannot afford.
+- **The ECG.** [SRS section 6](../../docs/srs.md#6-fidelity-aims) requires the waveform on the monitor. The body has the rhythm's phase and its two modes and no electrical model, and [research 06](../research/issues/06-healthy-ranges-and-lens.md) covers only the heart rate an ECG reads. Whether the waveform is a law's output or an observer's reading of the rhythm is open, and no ticket plans it.
 - **Owners the docs leave open**: the nitrogen, acid and carbon dioxide ledgers, the potassium shift into cells, the bone pools, the natriuretic peptide's secretion, cell water, the pleural space and intracranial pressure. Ticket 01 names a default for each, and tickets 03 and 04 build it.
 - **The membrane list by site class** (SRS section 5). Ticket 03 lands the one membrane type. Each loop ticket adds the walls it crosses.
 

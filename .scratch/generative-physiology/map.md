@@ -40,7 +40,7 @@ Model defaults from [the architecture pass](issues/02-first-build-architecture.m
 - **Paired branches are fresh runs of one prefix.** Checkpoint, resume and rewind stay audit cases. Alternative: branches by rewind, which copy every history link.
 - **The fourth model is R,** called on validation cases by the seed spread and a bootstrap over start histories, so the held-out set is read once ([ticket 12](issues/12-heldout-evaluation-and-decision.md)). Alternative: C4b, whose latent part starts from the named totals and so cannot recover what they discard.
 - **A sufficiency screen before the freeze,** a diagnostic and never a model ([ticket 07](issues/07-sufficiency-screen.md)).
-- **The audit gates everything.** Core must pass posture mid-run, a checkpoint, a rewind and a closed loop, and the start histories must differ beyond their noise; the reference integrator is never an automatic fallback.
+- **The audit gates everything.** Core must pass posture mid-run, a checkpoint, a rewind and a closed loop, and the start histories must differ beyond their noise; the reference integrator is never an automatic fallback. Its long runs wait for native-contract 28 and the arena's pick, so the audit runs once, on the teacher the study keeps ([ticket 04](issues/04-teacher-audit.md)).
 
 Settled by the driver's build ([ticket 03](issues/03-teacher-driver.md)):
 
