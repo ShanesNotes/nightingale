@@ -33,8 +33,8 @@ pub enum AdmissionError {
     NonPositivePartialVolume,
     /// A second partial-volume coefficient that differs from the first.
     PartialVolumeTwice,
-    /// An energy content for a species that is no fuel, one that is no whole number of energy units up to 2^53, or a
-    /// second one that differs from the first.
+    /// An energy content for a species that is no fuel, one that is no whole number of energy units from 1 to 2^53, or
+    /// a second one that differs from the first.
     EnergyContent {
         species: Species,
     },

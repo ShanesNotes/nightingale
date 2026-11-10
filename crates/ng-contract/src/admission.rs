@@ -742,7 +742,7 @@ impl InitializationSystem<'_> {
         let last = workspace.endpoint(0).start;
         (self.body.admission_totals().iter())
             .filter(|_| self.interval.is_some())
-            .map(move |total| (last + total.row.index(), total))
+            .map(move |total| (last + total.replaces.index(), total))
     }
     fn clocked(&self, workspace: &AdmissionWorkspace) -> Option<usize> {
         let period = self.period?;
@@ -1022,8 +1022,7 @@ impl InitializationSystem<'_> {
             .position(|leg| leg.ends_at == Some(crossing))
             .expect("a crossing ends a leg")
     }
-    /// How far a weighted sum at the start stands from the packet's, and the packet's sum. The first is summed term by
-    /// term, so a total too large to hold still reads as unmoved.
+    /// The shift from the packet's sum is summed term by term, so a total too large to hold still reads as unmoved.
     fn total(&self, start: &[f64], terms: &[(RowId, i64)]) -> (f64, f64) {
         let (mut moved, mut packet) = (Compensated::ZERO, Compensated::ZERO);
         for (row, coefficient) in terms {

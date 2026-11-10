@@ -1,6 +1,6 @@
 use crate::identity::{Canonical, Seal};
 use crate::quantity::dimension;
-use crate::scope::{EXACT, HeldCard};
+use crate::scope::{BINARY64_EXACT, HeldCard};
 use crate::{
     AdmissionRow, Atoms, BoundaryDirection, Column, ColumnId, CompileDefect, Digest, Dimension, Element,
     Energy, LawName, Makeup, RowId, Species,
@@ -29,8 +29,6 @@ impl Book {
     }
 }
 
-/// What one unit of `species` counts in `book`: one of itself, its charge, its atoms of an element, or its energy, a
-/// fuel's at the content the schema states.
 pub(crate) fn weight(book: Book, species: Species, contents: &[(Species, i64)]) -> i64 {
     match (book, species.makeup()) {
         (Book::Of(own), _) => i64::from(own == species),
@@ -248,11 +246,6 @@ impl Seal for Combination {
     }
 }
 
-/// The conserved combinations of the body's amounts. Rows the internal columns join form a part. A part no reaction
-/// joins holds one species, because a transfer moves one, and is one combination of it, weight one on each row. In a
-/// part a reaction joins, each element its species hold and energy are a combination on each piece of their rows that
-/// their own columns join, each row weighted by what its species holds. Ordered by least row and then by book, with
-/// charge last over every ion. A boundary column that reads the body regulates each combination that holds its row.
 pub(crate) fn conserved_basis(
     amounts: &[Species],
     columns: &[Column],
@@ -263,7 +256,7 @@ pub(crate) fn conserved_basis(
 ) -> Result<ConservedBasis, CompileDefect> {
     let internal: Vec<&Column> = columns.iter().filter(|column| column.receipt.is_none()).collect();
     let ends = |column: &&Column| -> Vec<usize> { column.terms.iter().map(|term| term.0.index()).collect() };
-    let parts = joined(amounts.len(), internal.iter().map(ends));
+    let parts = connected_sets(amounts.len(), internal.iter().map(ends));
     let mut part_of = vec![0; amounts.len()];
     for (at, part) in parts.iter().enumerate() {
         for &row in part {
@@ -359,7 +352,6 @@ pub(crate) fn conserved_basis(
     })
 }
 
-/// Rows, each with its weight, in row order.
 type Terms = Vec<(RowId, i64)>;
 
 fn joins_species(column: &Column, amounts: &[Species]) -> bool {
@@ -368,8 +360,7 @@ fn joins_species(column: &Column, amounts: &[Species]) -> bool {
     species.any(|other| Some(other) != first)
 }
 
-/// Which of `count` indices the groups join: each set in index order, the sets by least index.
-fn joined(count: usize, groups: impl Iterator<Item = Vec<usize>>) -> Vec<Vec<usize>> {
+fn connected_sets(count: usize, groups: impl Iterator<Item = Vec<usize>>) -> Vec<Vec<usize>> {
     fn root(parent: &mut [usize], mut at: usize) -> usize {
         while parent[at] != at {
             parent[at] = parent[parent[at]];
@@ -400,9 +391,6 @@ fn joined(count: usize, groups: impl Iterator<Item = Vec<usize>>) -> Vec<Vec<usi
     sets
 }
 
-/// The combinations of a part `law`'s reaction joins: for each element its species hold and then energy, one on each
-/// piece of the rows with weight in it that its own columns join. Refuses the part unless they span every combination
-/// its columns conserve, so the certificate names each quantity it judges.
 fn quantities(
     part: &[RowId],
     inside: &[&Column],
@@ -420,21 +408,20 @@ fn quantities(
         let groups = inside
             .iter()
             .map(|column| column.terms.iter().filter_map(|term| at(&term.0)).collect());
-        for piece in joined(weighed.len(), groups) {
+        for piece in connected_sets(weighed.len(), groups) {
             found.push((book, piece.into_iter().map(|at| weighed[at]).collect()));
         }
     }
     let overflow = CompileDefect::ConservationOverflow { law: Some(law) };
-    if !complete(part, inside, amounts, &found).ok_or(overflow)? {
+    if !spans_conserved(part, inside, amounts, &found).ok_or(overflow)? {
         return Err(CompileDefect::UnnamedConservedQuantity { law });
     }
     Ok(found)
 }
 
-/// Whether `found` spans every combination the part's columns leave unchanged. A transfer moves one species, so such a
-/// combination is constant on the rows transfers join, and on those sets it is any the reactions leave unchanged.
-/// `None` past i128.
-fn complete(
+/// A transfer moves one species, so a combination the part's columns leave unchanged is constant on the rows transfers
+/// join, and on those sets it is any the reactions leave unchanged.
+fn spans_conserved(
     part: &[RowId],
     inside: &[&Column],
     amounts: &[Species],
@@ -449,7 +436,7 @@ fn complete(
         .copied()
         .partition(|column| joins_species(column, amounts));
     let ends = |column: &&Column| -> Vec<usize> { column.terms.iter().map(|term| index(term.0)).collect() };
-    let sets = joined(part.len(), transfers.iter().map(ends));
+    let sets = connected_sets(part.len(), transfers.iter().map(ends));
     let mut set_of = vec![0; part.len()];
     for (at, set) in sets.iter().enumerate() {
         for &row in set {
@@ -475,8 +462,6 @@ fn complete(
     Some(spanned.kept.len() + columns.kept.len() == sets.len())
 }
 
-/// Integer vectors, each kept one reduced against those before it so that it leads with a coordinate no other kept one
-/// leads with. Exact: products in i128 and each reduced vector divided by its entries' greatest common divisor.
 #[derive(Default)]
 struct Echelon {
     kept: Vec<(usize, Vec<i128>)>,
@@ -486,9 +471,7 @@ enum Reduced {
     Held(Vec<i128>),
 }
 impl Echelon {
-    /// Takes the kept vectors out of `vector`, which then leads with its first nonzero coordinate below `within`: kept,
-    /// or given back when it has none there. `None` past i128.
-    fn reduce(&mut self, mut vector: Vec<i128>, within: usize) -> Option<Reduced> {
+    fn reduce(&mut self, mut vector: Vec<i128>, leads_within: usize) -> Option<Reduced> {
         for (lead, kept) in &self.kept {
             let (by, scale) = (vector[*lead], kept[*lead]);
             if by == 0 {
@@ -499,7 +482,7 @@ impl Echelon {
             }
             lowest(&mut vector)?;
         }
-        match vector[..within].iter().position(|&entry| entry != 0) {
+        match vector[..leads_within].iter().position(|&entry| entry != 0) {
             Some(lead) => {
                 let at = self.kept.partition_point(|kept| kept.0 < lead);
                 self.kept.insert(at, (lead, vector));
@@ -510,7 +493,6 @@ impl Echelon {
     }
 }
 
-/// Divides by the entries' greatest common divisor, and makes the first nonzero entry positive.
 fn lowest(vector: &mut [i128]) -> Option<()> {
     let mut divisor: u128 = 0;
     for entry in vector.iter() {
@@ -530,10 +512,9 @@ fn lowest(vector: &mut [i128]) -> Option<()> {
     Some(())
 }
 
-/// A combination admission states at a cycle's wrap, on the row whose end stage it replaces.
 #[derive(Debug, PartialEq)]
 pub(crate) struct AdmissionTotal {
-    pub(crate) row: RowId,
+    pub(crate) replaces: RowId,
     pub(crate) terms: Vec<(RowId, i64)>,
     pub(crate) label: AdmissionRow,
 }
@@ -550,11 +531,8 @@ impl ConservedRowId {
     }
 }
 
-/// What admission states at a cycle's wrap: each combination but charge that no boundary column reading the body
-/// changes, in basis order, then each integer combination of the others that those columns leave unchanged. Each is
-/// reduced against those before it and placed on the row its reduction leads with, so no two share a row and the
-/// replaced rows keep their rank; one the others already hold takes none. Charge follows from the rest. With no
-/// reaction these are the combinations no such column touches, each on its least row. `None` past the exact range.
+/// Each total is placed on the row its reduction against those before it leads with, so no two share a row and the
+/// replaced rows keep their rank. Charge follows from the rest.
 pub(crate) fn admission_totals(
     basis: &ConservedBasis,
     columns: &[Column],
@@ -599,7 +577,7 @@ pub(crate) fn admission_totals(
             }
         }
         lowest(&mut sum)?;
-        let exact = |entry: &i128| entry.unsigned_abs() <= EXACT.unsigned_abs().into();
+        let exact = |entry: &i128| entry.unsigned_abs() <= BINARY64_EXACT.unsigned_abs().into();
         let terms = (sum.iter().enumerate())
             .filter(|&(_, &entry)| entry != 0)
             .map(|(row, &entry)| exact(&entry).then_some((RowId::at(row), entry as i64)))
@@ -620,7 +598,7 @@ pub(crate) fn admission_totals(
                 AdmissionRow::Total,
             );
             plan.push(AdmissionTotal {
-                row: RowId::at(lead),
+                replaces: RowId::at(lead),
                 terms,
                 label,
             });
@@ -641,8 +619,6 @@ mod tests {
         ))
     }
 
-    /// A bed that burns glucose in its interstitium into its own heat, its glucose topped up toward a level through a
-    /// boundary that reads it. Rows: the interstitium's water, oxygen, carbon dioxide and glucose, then the heat.
     fn topped_up_bed() -> Result<CompiledBody, AdmissionError> {
         let mut map = AnatomyBuilder::new();
         let root = map.site::<TissueSite>("body", at_origin()?);
@@ -718,7 +694,7 @@ mod tests {
         let plan: Vec<Placed> = (body.admission_totals().iter())
             .map(|total| {
                 let terms = total.terms.iter().map(|&(row, weight)| (row.index(), weight));
-                (total.row.index(), terms.collect(), total.label)
+                (total.replaces.index(), terms.collect(), total.label)
             })
             .collect();
         let conserved = |index| AdmissionRow::Conserved(ConservedRowId { index });

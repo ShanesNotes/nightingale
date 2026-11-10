@@ -13,8 +13,7 @@ use core::marker::PhantomData;
 
 pub(crate) const ENCLOSURE_PRESSURE: &str = "enclosure_pressure";
 const BLOOD_PRESSURE: &str = "blood pressure";
-/// Past this an integer weight stops being exact in the binary64 the ledger and the evaluator scale by.
-pub(crate) const EXACT: i64 = 1 << 53;
+pub(crate) const BINARY64_EXACT: i64 = 1 << 53;
 
 /// The anatomy and the composition data laws never see: which species live in which spaces, where a route crosses
 /// the boundary, the partial-volume coefficient, each fuel's energy content and the spaces this body leaves out.
@@ -25,7 +24,6 @@ pub struct Schema {
     pub(crate) boundaries: Vec<RouteBoundary>,
     pub(crate) partial_volume: Option<Measure<PartialVolume<Water>>>,
     pub(crate) left_out: Vec<(Space, &'static str)>,
-    /// In species order: whole energy units per amount unit.
     pub(crate) energy: Vec<(Species, i64)>,
 }
 #[derive(Clone, Copy)]
@@ -142,8 +140,8 @@ impl Schema {
 
     /// What one unit of fuel `Q` holds in energy, measured against carbon dioxide and water. It is composition data, as
     /// water's partial volume is, so a synthetic body states a synthetic content and a reviewed body a cited one.
-    /// Refuses a species that is no fuel, a content that is no whole number of energy units up to 2^53, and a second
-    /// content that differs from the first.
+    /// Refuses a species that is no fuel, a content that is no whole number of energy units from 1 to 2^53, and a
+    /// second content that differs from the first.
     pub fn energy_content<Q: Substance>(
         &mut self,
         content: Measure<Quotient<Energy, Q>>,
@@ -153,7 +151,7 @@ impl Schema {
         let value = content.value();
         let whole = value as i64;
         let fuel = matches!(species.makeup(), Makeup::Atoms { fuel: true, .. });
-        if !fuel || !(1..=EXACT).contains(&whole) || (whole as f64).to_bits() != value.to_bits() {
+        if !fuel || !(1..=BINARY64_EXACT).contains(&whole) || (whole as f64).to_bits() != value.to_bits() {
             return Err(refused);
         }
         match self.energy.binary_search_by_key(&species, |known| known.0) {

@@ -1004,12 +1004,11 @@ impl<'b, O, Q> Pair<'b, O, Q> {
         ReadPort::of(Source::RoutePool(self.serves.local(), R::SPECIES))
     }
 }
-/// One species a reaction uses (a negative count) or makes (a positive one), in a space at the reaction's site.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Term {
     pub(crate) species: Species,
     pub(crate) space: Space,
-    pub(crate) count: i64,
+    pub(crate) change: i64,
 }
 /// What a reaction uses and makes for each unit of its reference species `Q`: each species once, with its space and a
 /// whole count, and the space whose energy pool takes what the uses hold beyond the makes. It is built only from typed
@@ -1027,7 +1026,7 @@ impl<Q: Reactant> Proportions<Q> {
             terms: vec![Term {
                 species: Q::SPECIES,
                 space,
-                count: -1,
+                change: -1,
             }],
             energy: None,
             reference: PhantomData,
@@ -1053,11 +1052,11 @@ impl<Q> Proportions<Q> {
             ..self
         }
     }
-    fn term(mut self, species: Species, space: Space, count: i64) -> Self {
+    fn term(mut self, species: Species, space: Space, change: i64) -> Self {
         self.terms.push(Term {
             species,
             space,
-            count,
+            change,
         });
         self
     }

@@ -20,9 +20,6 @@ fn refused(case: Result<BurningBeds, AdmissionError>) -> CompileDefect {
     }
 }
 
-/// Each bed's quantities hold that bed's rows alone, since only boundaries of its own move them, and the run's
-/// certificate closes every one. The burn itself ran: each bed's column moved forward, using glucose and making carbon
-/// dioxide and heat.
 #[test]
 fn every_bed_closes_carbon_hydrogen_oxygen_and_energy_while_it_burns() {
     let case = BurningBeds::burning().expect("compiled");
@@ -85,7 +82,6 @@ fn every_bed_closes_carbon_hydrogen_oxygen_and_energy_while_it_burns() {
     }
 }
 
-/// The must-fail test for a reaction whose proportions leave an element open.
 #[test]
 fn a_burn_that_makes_carbon_is_refused_naming_carbon() {
     let seven = Proportions::<Glucose>::using(Space::Interstitium)
@@ -128,7 +124,6 @@ fn a_burn_whose_fuel_has_no_stated_content_is_refused() {
     );
 }
 
-/// The twin a cost is measured against: the same rows and every column of the burning beds but their burns.
 #[test]
 fn the_idle_twin_holds_the_same_rows_and_every_column_but_the_burns() {
     let (burning, idle) = (

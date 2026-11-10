@@ -71,7 +71,6 @@ pub(crate) struct Layout {
     pub(crate) basis: ConservedBasis,
 }
 impl CompiledBody {
-    /// `totals` follow from the layout's basis, columns and reads, so the hash covers them through it.
     pub(crate) fn seal(layout: Layout, elimination: Elimination, totals: Vec<AdmissionTotal>) -> Self {
         let mut out = Canonical::new("ng-contract model 2");
         layout.seal(&mut out);
@@ -117,7 +116,6 @@ impl CompiledBody {
     pub fn conserved_basis(&self) -> &ConservedBasis {
         &self.layout.basis
     }
-    /// What admission states at a cycle's wrap, each on the row whose end stage it replaces.
     pub(crate) fn admission_totals(&self) -> &[AdmissionTotal] {
         &self.totals
     }

@@ -13,7 +13,6 @@ fn site<C: SiteClass>(key: &'static str) -> SiteId {
     AnatomyBuilder::new().site::<C>(key, origin).id()
 }
 
-/// A tissue site that stands for the body, a vessel, and each bed on a loop out of the vessel and back.
 fn anatomy(beds: &[&'static str]) -> Result<Anatomy, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at_origin()?);
@@ -40,8 +39,6 @@ fn thousand<U>() -> Measure<U> {
     Measure::new(1_000.0).expect("finite")
 }
 
-/// One vessel's water, filled from outside: the smallest body that compiles, so what the schema states shows in the
-/// model hash.
 fn water(stated: Option<f64>) -> Result<CompiledBody, AdmissionError> {
     let mut schema = Schema::new(anatomy(&[])?)?;
     schema.boundary::<Water>(
@@ -145,8 +142,6 @@ fn a_bed_holds_its_own_heat() {
     );
 }
 
-/// A bed keyed before the body that holds heat of its own, so the first thermal pool in key order is the bed's. CV
-/// dissipates the body's elastic store and the bed's heat leaves through a boundary.
 fn heat_ahead_of_the_body() -> Result<CompiledBody, AdmissionError> {
     let (bed, root) = (site::<CapillaryBed>("a-bed"), site::<TissueSite>("body"));
     let mut schema = Schema::new(anatomy(&["a-bed"])?)?;
@@ -204,8 +199,7 @@ const BURN: LawName = LawName {
     local: "burn",
 };
 
-/// Glucose burned with oxygen in a bed's interstitium, its energy into the bed's own heat store. Its counts are
-/// definitional chemistry.
+/// Its counts are definitional chemistry.
 fn burn() -> Proportions<Glucose> {
     Proportions::<Glucose>::using(Space::Interstitium)
         .uses::<Oxygen, 6>(Space::Interstitium)
@@ -214,7 +208,6 @@ fn burn() -> Proportions<Glucose> {
         .energy_into(Space::Thermal)
 }
 
-/// Beds whose interstitium holds water, oxygen and carbon dioxide, with each space a burn does not use left out.
 fn interstitial(beds: &[&'static str]) -> Result<Schema, AdmissionError> {
     let mut schema = Schema::new(anatomy(beds)?)?;
     for space in [Space::Plasma, Space::Cells, Space::Lumen] {
@@ -225,8 +218,6 @@ fn interstitial(beds: &[&'static str]) -> Result<Schema, AdmissionError> {
     Ok(schema)
 }
 
-/// What a burn needs at each bed: glucose in the interstitium, a heat store of the bed's own and glucose's synthetic
-/// energy content.
 fn burning_schema(beds: &[&'static str]) -> Result<Schema, AdmissionError> {
     let mut schema = interstitial(beds)?;
     schema.carry::<Glucose, CapillaryBed>(Space::Interstitium);
@@ -235,7 +226,6 @@ fn burning_schema(beds: &[&'static str]) -> Result<Schema, AdmissionError> {
     Ok(schema)
 }
 
-/// MT, held over `holds`, declares `proportions` as its burn at the capillary beds and gives it what `rates` does.
 fn burning<Q: Reactant>(
     schema: Schema,
     holds: Vec<Space>,
@@ -255,7 +245,6 @@ fn burning<Q: Reactant>(
     })
 }
 
-/// A rate in proportion to the reference species' amount, holding in `modes`.
 fn paced_in<'b, Q: Reactant>(
     laws: &mut FragmentBuilder<'b, Metabolism>,
     burn: &Reaction<'b, Metabolism, CapillaryBed, Q>,
@@ -474,7 +463,6 @@ fn a_reaction_named_as_another_of_its_owners_laws_is_refused() {
     );
 }
 
-/// The rate also reads sodium, which the burn neither uses nor makes.
 fn salty<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, burn: &Burn<'b>) -> Result<(), AdmissionError> {
     let class = RateClass::new(RateBand::Minutes, 60_000_000_000)?;
     let speed = laws.site_parameter::<CapillaryBed, Rate<Dimensionless>>(
@@ -528,7 +516,6 @@ fn a_reaction_that_moves_a_pool_its_card_holds_is_refused() {
     );
 }
 
-/// Row indices, each with its weight or count.
 type Terms = Vec<(usize, i64)>;
 
 fn combinations(compiled: &CompiledBody) -> Vec<(Book, Terms)> {
@@ -543,8 +530,6 @@ fn combinations(compiled: &CompiledBody) -> Vec<(Book, Terms)> {
         .collect()
 }
 
-/// The rows of a burning bed, in key order: its interstitium's water, oxygen, carbon dioxide and glucose, then its
-/// heat.
 #[test]
 fn a_burning_bed_closes_hydrogen_oxygen_carbon_and_energy_in_that_order() {
     let compiled = burning(schema(), Vec::new(), burn(), paced).expect("compiled");
@@ -621,8 +606,6 @@ fn a_reaction_and_its_heat_are_in_the_model_hash() {
     assert_ne!(hash(1_000.0, "burn"), hash(1_000.0, "oxidation"));
 }
 
-/// A bed that burns glucose in its plasma and in its interstitium into one heat store, with `Q` exchanged across the
-/// wall and nothing else crossing it.
 fn two_burns<Q: Reactant>() -> Result<CompiledBody, AdmissionError> {
     let mut schema = Schema::new(anatomy(&["bed"])?)?;
     for space in [Space::Cells, Space::Lumen] {
@@ -670,9 +653,8 @@ fn two_burns<Q: Reactant>() -> Result<CompiledBody, AdmissionError> {
     })
 }
 
-/// Rows: plasma's water, oxygen, carbon dioxide and glucose, the interstitium's, then the heat store. Oxygen crossing the
-/// wall joins the oxygen of both burns, and their shared heat store joins their energy, but no column holds the carbon
-/// or the hydrogen of both.
+/// Oxygen crossing the wall joins the oxygen of both burns, and their shared heat store joins their energy, but no
+/// column holds the carbon or the hydrogen of both.
 #[test]
 fn a_quantity_splits_where_its_own_columns_do_not_join_its_rows() {
     let compiled = two_burns::<Oxygen>().expect("compiled");

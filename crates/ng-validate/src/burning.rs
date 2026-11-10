@@ -10,7 +10,6 @@ const CLOSURE_FLOOR: f64 = 1e-9;
 const CLOSURE_RELATIVE: f64 = 1e-12;
 const SYNTHETIC_DRIFT: f64 = 1e4;
 
-/// A bed and the boundaries it alone uses.
 struct Bed {
     site: &'static str,
     glucose: &'static str,
@@ -46,7 +45,6 @@ const BEDS: [Bed; 3] = [
     },
 ];
 
-/// Values a packet binds, by key: the burn's at the capillary beds, the boundaries' for the body.
 const BURN_SPEED: (&str, f64) = ("mt.burn-speed", 0.001);
 const OXYGEN_HALF: (&str, f64) = ("mt.oxygen-half", 5.0);
 const GLUCOSE_SUPPLY: (&str, f64) = ("bench.glucose-supply", 0.01);
@@ -237,8 +235,7 @@ impl BurningBeds {
     }
 }
 
-/// One glucose with six oxygen into six carbon dioxide and six water in a bed's interstitium, its energy into the bed's
-/// heat: definitional chemistry.
+/// Its counts are definitional chemistry.
 fn burn() -> Proportions<Glucose> {
     Proportions::<Glucose>::using(Space::Interstitium)
         .uses::<Oxygen, 6>(Space::Interstitium)
@@ -247,7 +244,6 @@ fn burn() -> Proportions<Glucose> {
         .energy_into(Space::Thermal)
 }
 
-/// The burn at each bed, in proportion to its glucose and slowed as its oxygen runs short.
 fn burned(laws: &mut FragmentBuilder<'_, Metabolism>, proportions: Proportions<Glucose>, class: RateClass) {
     let burn = laws.reaction::<CapillaryBed, Glucose>(BURN, proportions);
     let speed = laws.site_parameter::<CapillaryBed, Rate<Dimensionless>>(
@@ -270,7 +266,6 @@ fn burned(laws: &mut FragmentBuilder<'_, Metabolism>, proportions: Proportions<G
     laws.react_at(&burn, rate);
 }
 
-/// A boundary that brings `Q` in at a fixed rate.
 fn supplied<'b, Q: Substance>(
     laws: &mut FragmentBuilder<'b, Boundary>,
     ports: &BoundaryPorts<'b>,
@@ -287,7 +282,6 @@ fn supplied<'b, Q: Substance>(
     Ok(())
 }
 
-/// A boundary that lets `Q` out in proportion to what its pool holds.
 fn cleared<'b, Q: Substance>(
     laws: &mut FragmentBuilder<'b, Boundary>,
     ports: &BoundaryPorts<'b>,

@@ -13,7 +13,7 @@ use crate::law::{
     ParameterContext, ParameterDeclaration, ReactionDeclaration, Selector, SlotDeclaration, SlotKind, Source,
     Where,
 };
-use crate::scope::{ENCLOSURE_PRESSURE, EXACT, HeldCard, PoolRef, RouteBoundary};
+use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, PoolRef, RouteBoundary};
 use crate::{
     AdmissibleSet, AdmissionError, Anatomy, Book, Boundary, BoundaryDirection, Class, CompileDefect,
     Compliance, Element, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Predicate, RateClass,
@@ -238,7 +238,6 @@ fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
     }
 }
 
-/// The quantities a reaction's counts must balance, in `Book` order.
 fn balanced() -> impl Iterator<Item = Book> {
     let elements = Element::ALL.into_iter().map(Book::Element);
     core::iter::once(Book::Charge)
@@ -246,14 +245,11 @@ fn balanced() -> impl Iterator<Item = Book> {
         .chain([Book::Energy])
 }
 
-/// What a reaction's counts leave over in `book`, what it makes less what it uses: zero when it balances, and for
-/// energy the opposite of what it releases. `None` when a count times a weight, or their sum, is past the exact
-/// range.
-fn open(reaction: &ReactionDeclaration, book: Book, contents: &[(Species, i64)]) -> Option<i64> {
-    let exact = i128::from(EXACT);
+fn left_over(reaction: &ReactionDeclaration, book: Book, contents: &[(Species, i64)]) -> Option<i64> {
+    let exact = i128::from(BINARY64_EXACT);
     let mut sum = 0;
     for term in &reaction.terms {
-        let held = i128::from(term.count) * i128::from(weight(book, term.species, contents));
+        let held = i128::from(term.change) * i128::from(weight(book, term.species, contents));
         if held.abs() > exact {
             return None;
         }
@@ -261,12 +257,9 @@ fn open(reaction: &ReactionDeclaration, book: Book, contents: &[(Species, i64)])
     }
     i64::try_from(sum)
         .ok()
-        .filter(|sum| sum.unsigned_abs() <= EXACT.unsigned_abs())
+        .filter(|sum| sum.unsigned_abs() <= BINARY64_EXACT.unsigned_abs())
 }
 
-/// Each reaction, by owner and then name, refused at its first defect in this order: a species named twice, a species
-/// no reaction may use, a fuel whose content the schema does not state, a weight past the exact range, and the first
-/// quantity in `Book` order its counts leave open, energy open only when nothing takes it.
 fn check_reactions(fragments: &[FragmentData], schema: &Schema) -> Result<(), CompileDefect> {
     for fragment in fragments {
         let mut reactions: Vec<&ReactionDeclaration> = fragment.reactions.iter().collect();
@@ -293,7 +286,7 @@ fn check_reactions(fragments: &[FragmentData], schema: &Schema) -> Result<(), Co
             }
             let mut left = Vec::new();
             for book in balanced() {
-                let over = open(reaction, book, &schema.energy)
+                let over = left_over(reaction, book, &schema.energy)
                     .ok_or(CompileDefect::ConservationOverflow { law: Some(law) })?;
                 left.push((book, over));
             }
@@ -1462,8 +1455,6 @@ fn column(law: LawName, reach: &Reach, rows: &Rows) -> Result<Column, CompileDef
     })
 }
 
-/// One column at each site of the reaction's set where every pool it uses or makes exists, as a route stands where its
-/// two pools do: each pool's row with its count, and the energy pool's with what the reaction releases.
 fn reaction_columns(
     law: LawName,
     reaction: &ReactionDeclaration,
@@ -1477,13 +1468,13 @@ fn reaction_columns(
         ..
     } = *places;
     let overflow = CompileDefect::ConservationOverflow { law: Some(law) };
-    let left = open(reaction, Book::Energy, &schema.energy).ok_or(overflow)?;
+    let left = left_over(reaction, Book::Energy, &schema.energy).ok_or(overflow)?;
     let mut columns = Vec::new();
     for site in anatomy.in_set(reaction.set) {
         let pools: Vec<(PoolRef, i64)> = (reaction.terms.iter())
             .map(|term| {
                 let (space, species) = (term.space, term.species);
-                (PoolRef { site, space, species }, term.count)
+                (PoolRef { site, space, species }, term.change)
             })
             .collect();
         if !pools.iter().all(|&(pool, _)| reaches.held(Some(pool))) {

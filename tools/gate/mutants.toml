@@ -727,22 +727,22 @@ test = "-p ng-validate --test burning a_burn_whose_energy_goes_nowhere_is_refuse
 [[mutant]]
 name = "reacting-part-spanned"
 path = "crates/ng-contract/src/conservation.rs"
-old = '''if !complete(part, inside, amounts, &found).ok_or(overflow)? {'''
-new = '''if false && !complete(part, inside, amounts, &found).ok_or(overflow)? {'''
+old = '''if !spans_conserved(part, inside, amounts, &found).ok_or(overflow)? {'''
+new = '''if false && !spans_conserved(part, inside, amounts, &found).ok_or(overflow)? {'''
 test = "-p ng-contract --test reactions two_burns_joined_only_by_water_leave_a_conserved_direction_unnamed"
 
 [[mutant]]
 name = "admission-total-on-its-lead"
 path = "crates/ng-contract/src/conservation.rs"
-old = '''row: RowId::at(lead),'''
-new = '''row: terms[0].0,'''
+old = '''replaces: RowId::at(lead),'''
+new = '''replaces: terms[0].0,'''
 test = "-p ng-contract --lib conservation::tests::a_fuel_supply_that_reads_the_body_leaves_three_totals_each_on_its_own_row"
 
 [[mutant]]
 name = "quantity-split-where-unjoined"
 path = "crates/ng-contract/src/conservation.rs"
-old = '''for piece in joined(weighed.len(), groups) {'''
-new = '''for piece in joined(weighed.len(), groups.chain([(0..weighed.len()).collect()])) {'''
+old = '''for piece in connected_sets(weighed.len(), groups) {'''
+new = '''for piece in connected_sets(weighed.len(), groups.chain([(0..weighed.len()).collect()])) {'''
 test = "-p ng-contract --test reactions a_quantity_splits_where_its_own_columns_do_not_join_its_rows"
 
 [[mutant]]
