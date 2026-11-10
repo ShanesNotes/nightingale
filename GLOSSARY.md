@@ -453,6 +453,17 @@ _Avoid_: overwrite, correction
 The id the workspace gives each chart entry and amendment it sends. The chart keeps it on the version that write made, so the same write sent again gets the same answer and is never charted twice.
 _Avoid_: idempotency key, request id
 
+**Entry kind**:
+What a chart entry is, such as a vital or a note. Every kind shares the entry's patient, author, care time, charted time, write id and versions, and each defines its own content. The chart refuses a kind it does not know.
+_Avoid_: entry type, template
+
+**Content**:
+The named fields an entry kind defines and each version of an entry fills, such as a vital and its value, or a note's text. Postgres keeps each kind's content in a table of its own, with a typed column per field.
+_Avoid_: body (the simulated body), payload
+
+**Note**:
+A chart entry of free text by its author. It is never parsed into physiology.
+
 **No source**:
 A device's statement that it has no channel for a vital, so it shows no number for that vital, never a zero.
 _Avoid_: unavailable, N/A

@@ -79,7 +79,7 @@ function monitorCell(model: ReadModel, vital: string, minute: PatientTime): Moni
 }
 
 function chartedCell(model: ReadModel, vital: string, minute: PatientTime): ChartedCell {
-  const entries = entriesOfKind(model, 'vital').filter((e) => e.body.vital === vital && within(e.care, minute))
+  const entries = entriesOfKind(model, 'vital').filter((e) => e.content.vital === vital && within(e.care, minute))
   const lateBy = (entry: EntryView) => (entry.charted > entry.care ? since(entry.charted, entry.care) : ZERO)
   return { kind: 'entries', entries: entries.map((entry) => ({ entry, lateBy: lateBy(entry), edited: entry.versions > 1 })) }
 }

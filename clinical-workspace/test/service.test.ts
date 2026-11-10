@@ -33,7 +33,7 @@ test('the chart service answers the chart API and the device protocol over HTTP'
     const run = await call('GET', '/api/run')
     assert.deepEqual(parseRun(run.json), { ok: true, value: chart.run })
 
-    const entry = { writeId: 'test-write-1', patient, author: nurse.id, kind: 'vital' as const, body: { vital: 'RR', value: '18' }, care: null }
+    const entry = { writeId: 'test-write-1', patient, author: nurse.id, kind: 'vital' as const, content: { vital: 'RR', value: '18' }, care: null }
     const charted = await call('POST', '/api/entries', entry)
     const taken = parseWriteResult(charted.json)
     assert.equal(charted.status, 200)
@@ -48,12 +48,12 @@ test('the chart service answers the chart API and the device protocol over HTTP'
     assert.equal((await call('POST', '/api/entries', '{not json')).status, 400)
 
     now = at('06:57:00')
-    const amended = await call('POST', '/api/amendments', { ...entry, writeId: 'test-write-4', entry: taken.value.entry.entry, replaces: 1, body: { ...entry.body, value: '19' } })
+    const amended = await call('POST', '/api/amendments', { ...entry, writeId: 'test-write-4', entry: taken.value.entry.entry, replaces: 1, content: { ...entry.content, value: '19' } })
     assert.equal(amended.status, 200)
     const versions = await call('GET', `/api/entries/${taken.value.entry.entry}/versions`)
     const parsedVersions = parseVersions(versions.json)
     assert.ok(parsedVersions.ok)
-    assert.deepEqual(parsedVersions.value.map((v) => v.kind === 'vital' ? v.body.value : undefined), [18, 19])
+    assert.deepEqual(parsedVersions.value.map((v) => v.kind === 'vital' ? v.content.value : undefined), [18, 19])
     assert.equal((await call('GET', '/api/entries/00000000-0000-4000-8000-000000000000/versions')).status, 404)
 
     const statement = {
@@ -73,25 +73,25 @@ test('the chart service answers the chart API and the device protocol over HTTP'
     const model = parseReadModel((await call('GET', '/api/chart')).json)
     assert.ok(model.ok)
     assert.equal(model.value.now, at('06:57:03'))
-    assert.deepEqual(model.value.entries.map((e) => [e.kind === 'vital' ? e.body.value : undefined, e.versions]), [[19, 2]])
+    assert.deepEqual(model.value.entries.map((e) => [e.kind === 'vital' ? e.content.value : undefined, e.versions]), [[19, 2]])
     assert.deepEqual(model.value.statements.map((s) => s.arrived), [at('06:57:00')], 'the service stamps arrival from the patient clock')
 
-    const note = { ...entry, writeId: 'synthetic-note-write', kind: 'note', body: { text: 'Synthetic note over HTTP.' }, care: at('06:55:30') }
+    const note = { ...entry, writeId: 'synthetic-note-write', kind: 'note', content: { text: 'Synthetic note over HTTP.' }, care: at('06:55:30') }
     const noteAnswer = await call('POST', '/api/entries', note)
     const noteTaken = parseWriteResult(noteAnswer.json)
     assert.equal(noteAnswer.status, 200)
     assert.ok(noteTaken.ok && noteTaken.value.kind === 'taken')
     assert.equal(noteTaken.value.entry.kind, 'note')
     assert.deepEqual(await call('POST', '/api/entries', note), noteAnswer)
-    const amendedNote = await call('POST', '/api/amendments', { ...note, writeId: 'synthetic-note-amendment', entry: noteTaken.value.entry.entry, replaces: 1, body: { text: 'Synthetic amended note over HTTP.' } })
+    const amendedNote = await call('POST', '/api/amendments', { ...note, writeId: 'synthetic-note-amendment', entry: noteTaken.value.entry.entry, replaces: 1, content: { text: 'Synthetic amended note over HTTP.' } })
     assert.equal(amendedNote.status, 200)
     const noteVersions = parseVersions((await call('GET', `/api/entries/${noteTaken.value.entry.entry}/versions`)).json)
     assert.ok(noteVersions.ok)
-    assert.deepEqual(noteVersions.value.map((v) => v.body), [note.body, { text: 'Synthetic amended note over HTTP.' }])
+    assert.deepEqual(noteVersions.value.map((v) => v.content), [note.content, { text: 'Synthetic amended note over HTTP.' }])
     const unknownKind = await call('POST', '/api/entries', { ...note, kind: 'unknown' })
     assert.deepEqual([unknownKind.status, unknownKind.json], [400, { kind: 'refused', refusal: { kind: 'unknown entry kind' } }])
-    const badBody = await call('POST', '/api/entries', { ...note, body: { value: 1.25 } })
-    assert.deepEqual([badBody.status, badBody.json], [400, { kind: 'refused', refusal: { kind: 'body does not fit kind' } }])
+    const badContent = await call('POST', '/api/entries', { ...note, content: { value: 1.25 } })
+    assert.deepEqual([badContent.status, badContent.json], [400, { kind: 'refused', refusal: { kind: 'content does not fit kind' } }])
     const withNote = parseReadModel((await call('GET', '/api/chart')).json)
     assert.ok(withNote.ok)
     assert.deepEqual(withNote.value.entries.map((entry) => entry.kind), ['note', 'vital'])
@@ -112,11 +112,11 @@ test('a write sent again over HTTP under its write id gets the same answer and c
     return { status: response.status, json: await response.json() }
   }
   try {
-    const entry = { writeId: 'test-write-1', patient, author: nurse.id, kind: 'vital' as const, body: { vital: 'RR', value: '18' }, care: null }
+    const entry = { writeId: 'test-write-1', patient, author: nurse.id, kind: 'vital' as const, content: { vital: 'RR', value: '18' }, care: null }
     const first = await post(entry)
     assert.equal(first.status, 200)
     assert.deepEqual(await post(entry), first)
-    const reused = await post({ ...entry, body: { ...entry.body, value: '19' } })
+    const reused = await post({ ...entry, content: { ...entry.content, value: '19' } })
     assert.deepEqual([reused.status, parseWriteResult(reused.json)], [422, { ok: true, value: { kind: 'refused', refusal: { kind: 'write id reused with other content' } } }])
     assert.equal((await post({ ...entry, writeId: undefined })).status, 400, 'a write without its write id is malformed')
     const model = parseReadModel(await (await fetch(`${service.url}/api/chart`)).json())

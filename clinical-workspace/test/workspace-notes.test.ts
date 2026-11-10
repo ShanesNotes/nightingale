@@ -6,7 +6,7 @@ import { view } from '../src/workspace/view.ts'
 import { wallTime } from '../src/time.ts'
 import { at, NURSE, readModel, versions, written } from './fixtures.ts'
 
-const first = { entry: 'synthetic-note-1', patient: 'test-patient', kind: 'note', body: { text: 'Synthetic note alpha.' }, author: NURSE, care: at('06:55:00'), charted: at('06:56:00'), number: 1, versions: 1 }
+const first = { entry: 'synthetic-note-1', patient: 'test-patient', kind: 'note', content: { text: 'Synthetic note alpha.' }, author: NURSE, care: at('06:55:00'), charted: at('06:56:00'), number: 1, versions: 1 }
 const loaded = (entries: readonly object[] = []) => update(init().model, Message.GotChart({ chart: readModel({ entries }), at: wallTime(1_000_000) })).model
 
 test('a clinician writes a note through the same chart command and gets useful confirmation', () => {
@@ -16,7 +16,7 @@ test('a clinician writes a note through the same chart command and gets useful c
     Story.message(Message.TypedField({ field: 'text', text: 'Synthetic note alpha.' })),
     Story.message(Message.TypedCare({ text: '06:55:00' })),
     Story.message(Message.ClickedChart()),
-    Story.Command.expectExact(PostEntry({ body: { patient: 'test-patient', author: NURSE.id, kind: 'note', body: { text: 'Synthetic note alpha.' }, care: at('06:55:00') }, writeId: null })),
+    Story.Command.expectExact(PostEntry({ content: { patient: 'test-patient', author: NURSE.id, kind: 'note', content: { text: 'Synthetic note alpha.' }, care: at('06:55:00') }, writeId: null })),
     Story.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'taken', entry: first }) })),
     Story.Command.resolve(FetchChart, Message.GotChart({ chart: readModel({ entries: [first] }), at: wallTime(1_001_000) })),
     Story.model((model) => assert.match(model.notice, /Charted note as Synthetic Nurse A/)),
@@ -24,7 +24,7 @@ test('a clinician writes a note through the same chart command and gets useful c
 })
 
 test('notes show author, care time and lateness; editing and earlier versions use the common entry controls', () => {
-  const second = { ...first, body: { text: 'Synthetic note beta.' }, number: 2, versions: 2, charted: at('06:57:00') }
+  const second = { ...first, content: { text: 'Synthetic note beta.' }, number: 2, versions: 2, charted: at('06:57:00') }
   Scene.scene({ update, view },
     Scene.given(loaded([first])),
     Scene.expect(Scene.selector('#notes')).toContainText('Synthetic note alpha.'),
@@ -37,7 +37,7 @@ test('notes show author, care time and lateness; editing and earlier versions us
     Scene.expect(Scene.selector('#edit-text')).toHaveValue('Synthetic note alpha.'),
     Scene.type('#edit-text', 'Synthetic note beta.'),
     Scene.click('#save-edit'),
-    Scene.Command.expectExact(PostAmendment({ body: { patient: 'test-patient', author: NURSE.id, entry: first.entry, replaces: 1, kind: 'note', body: { text: 'Synthetic note beta.' }, care: first.care }, writeId: null })),
+    Scene.Command.expectExact(PostAmendment({ content: { patient: 'test-patient', author: NURSE.id, entry: first.entry, replaces: 1, kind: 'note', content: { text: 'Synthetic note beta.' }, care: first.care }, writeId: null })),
     Scene.Command.resolve(PostAmendment, Message.Wrote({ result: written({ kind: 'taken', entry: second }) })),
     Scene.Command.resolve(FetchChart, Message.GotChart({ chart: readModel({ entries: [second] }), at: wallTime(1_001_000) })),
     Scene.expect(Scene.selector('#notes')).toContainText('Synthetic note beta.'),
@@ -51,13 +51,13 @@ test('notes show author, care time and lateness; editing and earlier versions us
   )
 })
 
-test('a refused note keeps its draft and explains how to fix an empty body', () => {
+test('a refused note keeps its draft and explains how to fix an empty content', () => {
   Scene.scene({ update, view },
     Scene.given(update(loaded(), Message.ChoseKind({ kind: 'note' })).model),
     Scene.expect(Scene.selector('#notes')).toContainText('No notes charted yet.'),
     Scene.type('#note-text', '   '),
     Scene.click('#chart'),
-    Scene.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'body does not fit kind' } }) })),
+    Scene.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'content does not fit kind' } }) })),
     Scene.expect(Scene.selector('#notice')).toContainText('Enter note text'),
     Scene.expect(Scene.selector('#note-text')).toHaveValue('   '),
   )

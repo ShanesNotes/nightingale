@@ -110,9 +110,9 @@ export async function pgSql(url: string, options: { readonly fresh?: boolean } =
 }
 
 const KINDS = Object.keys(ENTRY_KINDS).filter(isEntryKind)
-const bodyTable = (kind: EntryKind) => sqlName(`entry_${kind}`)
-const bodyTables = KINDS.map((kind) => `
-CREATE TABLE IF NOT EXISTS ${bodyTable(kind)} (
+const contentTable = (kind: EntryKind) => sqlName(`content_${kind}`)
+const contentTables = KINDS.map((kind) => `
+CREATE TABLE IF NOT EXISTS ${contentTable(kind)} (
   entry uuid NOT NULL,
   number integer NOT NULL,
   kind text GENERATED ALWAYS AS (${sqlText(kind)}::text) STORED,
@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS ${bodyTable(kind)} (
   FOREIGN KEY (entry, number, kind) REFERENCES entry_version (entry, number, kind)
 );`).join('\n')
 
-const appendOnly = ['run', 'entry', 'entry_version', 'device_message', ...KINDS.map((kind) => `entry_${kind}`)].map((table) => `
+const appendOnly = ['run', 'entry', 'entry_version', 'device_message', ...KINDS.map((kind) => `content_${kind}`)].map((table) => `
 CREATE OR REPLACE TRIGGER append_only BEFORE UPDATE OR DELETE ON ${sqlName(table)}
   FOR EACH ROW EXECUTE FUNCTION refuse_chart_change();
 CREATE OR REPLACE TRIGGER kept BEFORE TRUNCATE ON ${sqlName(table)}
@@ -163,7 +163,7 @@ CREATE TABLE IF NOT EXISTS entry_version (
   FOREIGN KEY (entry, replaces) REFERENCES entry_version (entry, number),
   CHECK (${ROSTER.map((c) => `(author = ${sqlText(c.id)} AND author_name = ${sqlText(c.name)} AND author_discipline = ${sqlText(c.discipline)})`).join(' OR ')})
 );
-${bodyTables}
+${contentTables}
 CREATE TABLE IF NOT EXISTS device_message (
   device text NOT NULL,
   boot text NOT NULL,
@@ -180,21 +180,21 @@ BEGIN
 END
 $$;
 ${appendOnly}
-CREATE OR REPLACE FUNCTION require_entry_body() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION require_entry_content() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   CASE NEW.kind
     ${KINDS.map((kind) => `WHEN ${sqlText(kind)} THEN
-      IF NOT EXISTS (SELECT FROM ${bodyTable(kind)} WHERE entry = NEW.entry AND number = NEW.number) THEN
-        RAISE EXCEPTION 'entry version needs its ${kind} body' USING ERRCODE = '23514';
+      IF NOT EXISTS (SELECT FROM ${contentTable(kind)} WHERE entry = NEW.entry AND number = NEW.number) THEN
+        RAISE EXCEPTION 'entry version needs its ${kind} content' USING ERRCODE = '23514';
       END IF;`).join('\n    ')}
     ELSE RAISE EXCEPTION 'unknown entry kind';
   END CASE;
   RETURN NEW;
 END
 $$;
-DROP TRIGGER IF EXISTS entry_body_required ON entry_version;
-CREATE CONSTRAINT TRIGGER entry_body_required AFTER INSERT ON entry_version
-  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION require_entry_body();
+DROP TRIGGER IF EXISTS entry_content_required ON entry_version;
+CREATE CONSTRAINT TRIGGER entry_content_required AFTER INSERT ON entry_version
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION require_entry_content();
 CREATE OR REPLACE FUNCTION require_first_version() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NOT EXISTS (SELECT FROM entry_version WHERE entry = NEW.id AND number = 1) THEN
@@ -209,15 +209,15 @@ CREATE CONSTRAINT TRIGGER entry_version_required AFTER INSERT ON entry
 CREATE OR REPLACE VIEW chart_entry_version AS
   ${KINDS.map((kind) => `SELECT e.id, e.patient, v.kind, v.number, v.care_ns, v.charted_ns, v.author,
     v.author_name, v.author_discipline, e.inserted_at,
-    json_build_object(${Object.keys(kindFields(kind)).flatMap((field) => [sqlText(field), `b.${sqlName(field)}`]).join(', ')}) AS body
-    FROM entry e JOIN entry_version v ON v.entry = e.id JOIN ${bodyTable(kind)} b ON b.entry = v.entry AND b.number = v.number`).join('\n  UNION ALL\n  ')};
+    json_build_object(${Object.keys(kindFields(kind)).flatMap((field) => [sqlText(field), `b.${sqlName(field)}`]).join(', ')}) AS content
+    FROM entry e JOIN entry_version v ON v.entry = e.id JOIN ${contentTable(kind)} b ON b.entry = v.entry AND b.number = v.number`).join('\n  UNION ALL\n  ')};
 CREATE OR REPLACE VIEW current_entry AS
   SELECT v.*, counts.versions FROM chart_entry_version v
   JOIN (SELECT entry, max(number) AS current, count(*) AS versions FROM entry_version GROUP BY entry) counts
     ON counts.entry = v.id AND counts.current = v.number;
 `
 
-const VERSION_FIELDS = `'entry', id, 'patient', patient, 'kind', kind, 'body', body, 'number', number, 'care', care_ns,
+const VERSION_FIELDS = `'entry', id, 'patient', patient, 'kind', kind, 'content', content, 'number', number, 'care', care_ns,
   'charted', charted_ns, 'author', json_build_object('id', author, 'name', author_name, 'discipline', author_discipline)`
 const ENTRY_JSON = `json_build_object(${VERSION_FIELDS}, 'versions', versions)`
 const VERSION_JSON = `json_build_object(${VERSION_FIELDS})`
@@ -294,10 +294,10 @@ const refused = (refusal: Refusal): WriteResult => ({ kind: 'refused', refusal }
 const lostAWriteIdOrVersionRace = (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '23505'
 
 function fingerprint(write: EntryWrite): string {
-  const body: Readonly<Record<string, unknown>> = write.body
+  const content: Readonly<Record<string, unknown>> = write.content
   return createHash('sha256').update(JSON.stringify([
     write.operation, write.patient, write.author, write.kind,
-    Object.keys(kindFields(write.kind)).map((field) => body[field]), write.care,
+    Object.keys(kindFields(write.kind)).map((field) => content[field]), write.care,
     write.operation === 'amendment' ? [write.entry, write.replaces] : null,
   ])).digest('hex')
 }
@@ -311,9 +311,7 @@ async function answerByWriteId(sql: Sql, write: EntryWrite): Promise<WriteResult
   return { kind: 'taken', entry }
 }
 
-const PREDATES_KINDS = `SELECT to_regclass('entry_version') IS NOT NULL AND NOT EXISTS (
-  SELECT FROM pg_attribute WHERE attrelid = to_regclass('entry_version') AND attname = 'write_fingerprint' AND NOT attisdropped
-) AS predates`
+const PREDATES_KINDS = `SELECT to_regclass('entry_version') IS NOT NULL AND (${KINDS.map((kind) => `to_regclass(${sqlText(`content_${kind}`)}) IS NULL`).join(' OR ')}) AS predates`
 
 function refusalOf(write: { readonly patient: string; readonly care: PatientTime }, run: RunView, now: PatientTime): Refusal | undefined {
   if (write.patient !== run.patient) return { kind: 'another patient' }
@@ -323,7 +321,7 @@ function refusalOf(write: { readonly patient: string; readonly care: PatientTime
 
 export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: WallTime): Promise<Chart> {
   const [tables] = await sql.query(PREDATES_KINDS)
-  if (tables?.['predates'] === true) throw new Error("the chart's database predates typed entry kinds; run npm run reset in clinical-workspace/ for a fresh one")
+  if (tables?.['predates'] === true) throw new Error("the chart's database predates the entry kinds the chart knows; run npm run reset in clinical-workspace/ for a fresh one")
   await sql.script(SCHEMA)
   await sql.query(`INSERT INTO run (${RUN_COLUMNS}) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (singleton) DO NOTHING`, [
     run.specId,
@@ -371,11 +369,11 @@ export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: 
             [id, write.kind, number, care, now, author.id, author.name, author.discipline, write.writeId, fingerprint(write)],
           )
           const fields = Object.keys(kindFields(write.kind))
-          const body: Readonly<Record<string, unknown>> = write.body
+          const content: Readonly<Record<string, unknown>> = write.content
           await tx.query(
-            `INSERT INTO ${bodyTable(write.kind)} (entry, number, ${fields.map(sqlName).join(', ')})
+            `INSERT INTO ${contentTable(write.kind)} (entry, number, ${fields.map(sqlName).join(', ')})
              VALUES ($1, $2, ${fields.map((_, i) => `$${i + 3}`).join(', ')})`,
-            [id, number, ...fields.map((field) => body[field])],
+            [id, number, ...fields.map((field) => content[field])],
           )
           const [taken] = await entries(tx, 'id = $1', [id])
           if (taken === undefined) throw new Error('the chart lost the entry it just took')

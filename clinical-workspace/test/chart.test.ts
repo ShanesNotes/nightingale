@@ -23,16 +23,16 @@ const nurse = ROSTER[0]!
 let writes = 0
 const writeId = () => `test-write-${(writes += 1)}`
 
-const newEntry = (body: Readonly<Record<string, unknown>>) => {
-  const { vital = 'RR', value = '18', ...shared } = body
-  const parsed = parseNewEntry({ writeId: writeId(), patient: 'test-patient', author: nurse.id, kind: 'vital', body: { vital, value }, care: null, ...shared })
+const newEntry = (content: Readonly<Record<string, unknown>>) => {
+  const { vital = 'RR', value = '18', ...shared } = content
+  const parsed = parseNewEntry({ writeId: writeId(), patient: 'test-patient', author: nurse.id, kind: 'vital', content: { vital, value }, care: null, ...shared })
   assert.ok(parsed.ok, parsed.ok ? '' : parsed.reason)
   return parsed.value
 }
 
-const amendment = (body: Readonly<Record<string, unknown>>) => {
-  const { vital = 'RR', value = '18', ...shared } = body
-  const parsed = parseAmendment({ writeId: writeId(), patient: 'test-patient', author: nurse.id, replaces: 1, kind: 'vital', body: { vital, value }, care: null, ...shared })
+const amendment = (content: Readonly<Record<string, unknown>>) => {
+  const { vital = 'RR', value = '18', ...shared } = content
+  const parsed = parseAmendment({ writeId: writeId(), patient: 'test-patient', author: nurse.id, replaces: 1, kind: 'vital', content: { vital, value }, care: null, ...shared })
   assert.ok(parsed.ok, parsed.ok ? '' : parsed.reason)
   return parsed.value
 }
@@ -107,7 +107,7 @@ for (const [name, connect] of databases) {
           patient: 'test-patient',
           kind: 'vital',
           number: 1,
-          body: { vital: 'RR', value: 18 },
+          content: { vital: 'RR', value: 18 },
           care: at('06:56:30'),
           charted: at('06:57:10'),
           author: nurse,
@@ -137,11 +137,11 @@ for (const [name, connect] of databases) {
         const second = taken(
           await chart.write(amendment({ entry: first.entry, author: physician.id, value: '20', care: at('06:56:05') }), at('06:57:00')),
         )
-        assert.deepEqual(second, { ...first, number: 2, versions: 2, body: { vital: 'RR', value: 20 }, care: at('06:56:05'), charted: at('06:57:00'), author: physician })
+        assert.deepEqual(second, { ...first, number: 2, versions: 2, content: { vital: 'RR', value: 20 }, care: at('06:56:05'), charted: at('06:57:00'), author: physician })
         assert.deepEqual((await chart.readModel(at('06:57:05'))).entries, [second])
         const versions = await chart.versions(first.entry)
         assert.deepEqual(
-          versions?.map((v) => [v.number, v.kind === 'vital' ? v.body.value : undefined, v.author.id, v.charted]),
+          versions?.map((v) => [v.number, v.kind === 'vital' ? v.content.value : undefined, v.author.id, v.charted]),
           [
             [1, 18, nurse.id, at('06:56:10')],
             [2, 20, physician.id, at('06:57:00')],
@@ -260,6 +260,18 @@ for (const [name, connect] of databases) {
       }
     })
 
+    test('the chart will not open a database that lacks the content table of a kind it knows, and says to run npm run reset', async () => {
+      const sql = await connect()
+      try {
+        await sql.script(`CREATE TABLE entry_version (
+          entry uuid NOT NULL, kind text NOT NULL, number integer NOT NULL, write_fingerprint text NOT NULL, PRIMARY KEY (entry, number));
+          CREATE TABLE entry_note (entry uuid NOT NULL, number integer NOT NULL, text text NOT NULL)`)
+        await assert.rejects(openChart(sql, RUN, wallTime(1_000_000)), /npm run reset/)
+      } finally {
+        await sql.close()
+      }
+    })
+
     test('Postgres refuses any update, delete or truncate of chart rows, and a second version under one number or one write id', () =>
       withChart(async (chart, sql) => {
         const first = taken(await chart.write(newEntry({}), at('06:56:10')))
@@ -273,9 +285,9 @@ for (const [name, connect] of databases) {
           'UPDATE entry_version SET care_ns = 99',
           'DELETE FROM entry_version',
           'TRUNCATE entry_version CASCADE',
-          'UPDATE entry_vital SET value = 99',
-          'DELETE FROM entry_vital',
-          'TRUNCATE entry_vital',
+          'UPDATE content_vital SET value = 99',
+          'DELETE FROM content_vital',
+          'TRUNCATE content_vital',
         ]) {
           await assert.rejects(sql.query(statement), /append-only/, statement)
         }

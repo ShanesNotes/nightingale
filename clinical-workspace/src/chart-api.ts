@@ -66,16 +66,16 @@ export type Amendment = EntryContent & {
 
 export type EntryWrite = NewEntry | Amendment
 
-export type NewEntryBody = {
+export type NewEntryRequest = {
   readonly writeId: string
   readonly patient: string
   readonly author: string
   readonly kind: string
-  readonly body: Readonly<Record<string, string>>
+  readonly content: Readonly<Record<string, string>>
   readonly care: number | null
 }
 
-export type AmendmentBody = NewEntryBody & { readonly entry: string; readonly replaces: number }
+export type AmendmentRequest = NewEntryRequest & { readonly entry: string; readonly replaces: number }
 
 export type Refusal =
   | KindRefusal
@@ -147,7 +147,7 @@ type Json = Readonly<Record<string, unknown>>
 const DISCIPLINES: readonly unknown[] = ['nurse', 'physician', 'respiratory therapist'] satisfies Discipline[]
 const REFUSALS: readonly unknown[] = [
   'unknown entry kind',
-  'body does not fit kind',
+  'content does not fit kind',
   'entry kind differs',
   'another patient',
   'care time after now',
@@ -205,7 +205,7 @@ function author(json: Json): ClinicianId {
 }
 
 function content(json: Json, from: 'write' | 'read'): EntryContent {
-  const parsed = parseContent(json['kind'], json['body'], from)
+  const parsed = parseContent(json['kind'], json['content'], from)
   if (!parsed.ok) throw new Malformed(parsed.refusal.kind, parsed.refusal)
   return parsed.value
 }
@@ -315,15 +315,15 @@ function parsingWrite<T>(parse: () => T): ParsedWrite<T> {
   }
 }
 
-export const parseNewEntry = (body: unknown): ParsedWrite<NewEntry> =>
+export const parseNewEntry = (value: unknown): ParsedWrite<NewEntry> =>
   parsingWrite(() => {
-    const json = object(body, 'a new entry')
+    const json = object(value, 'a new entry')
     return { ...content(json, 'write'), operation: 'new entry', writeId: writeIdOf(json), patient: patientOf(json), author: author(json), care: care(json) }
   })
 
-export const parseAmendment = (body: unknown): ParsedWrite<Amendment> =>
+export const parseAmendment = (value: unknown): ParsedWrite<Amendment> =>
   parsingWrite(() => {
-    const json = object(body, 'an amendment')
+    const json = object(value, 'an amendment')
     return {
       ...content(json, 'write'),
       operation: 'amendment',
@@ -336,23 +336,23 @@ export const parseAmendment = (body: unknown): ParsedWrite<Amendment> =>
     }
   })
 
-export const parseWriteResult = (body: unknown): Parsed<WriteResult> =>
+export const parseWriteResult = (value: unknown): Parsed<WriteResult> =>
   parsing(() => {
-    const json = object(body, 'a write result')
+    const json = object(value, 'a write result')
     if (json['kind'] === 'taken') return { kind: 'taken', entry: entryView(json['entry']) }
     if (json['kind'] === 'refused') return { kind: 'refused', refusal: refusal(json['refusal']) }
     return fail('a write result is taken or refused')
   })
 
-export const parseEntries = (body: unknown): Parsed<readonly EntryView[]> => parsing(() => list(body, 'entries').map(entryView))
+export const parseEntries = (value: unknown): Parsed<readonly EntryView[]> => parsing(() => list(value, 'entries').map(entryView))
 
-export const parseVersions = (body: unknown): Parsed<readonly EntryVersion[]> => parsing(() => list(body, 'versions').map(entryVersion))
+export const parseVersions = (value: unknown): Parsed<readonly EntryVersion[]> => parsing(() => list(value, 'versions').map(entryVersion))
 
-export const parseRun = (body: unknown): Parsed<RunView> => parsing(() => run(body))
+export const parseRun = (value: unknown): Parsed<RunView> => parsing(() => run(value))
 
-export const parseReadModel = (body: unknown): Parsed<ReadModel> =>
+export const parseReadModel = (value: unknown): Parsed<ReadModel> =>
   parsing(() => {
-    const json = object(body, 'the read model')
+    const json = object(value, 'the read model')
     return {
       run: run(json['run']),
       now: time(json, 'now'),

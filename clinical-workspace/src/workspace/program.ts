@@ -13,7 +13,7 @@ import {
   type WriteResult,
 } from '../chart-api.ts'
 import { formatClock, isWallTime, parseClock, wallTime } from '../time.ts'
-import { blankBody, isEntryKind } from '../entry-kinds.ts'
+import { blankContent, isEntryKind } from '../entry-kinds.ts'
 import { contentText } from './content.ts'
 import * as client from './client.ts'
 
@@ -24,27 +24,27 @@ const WallTimeSchema = Schema.declare(isWallTime)
 const KindSchema = Schema.declare(isEntryKind)
 const Fields = Schema.Record(Schema.String, Schema.String)
 
-const NewEntryBody = Schema.Struct({
+const NewEntryRequest = Schema.Struct({
   patient: Schema.String,
   author: Schema.String,
   kind: KindSchema,
-  body: Fields,
+  content: Fields,
   care: Schema.NullOr(Schema.Number),
 })
 
-const AmendmentBody = Schema.Struct({
+const AmendmentRequest = Schema.Struct({
   patient: Schema.String,
   author: Schema.String,
   entry: Schema.String,
   replaces: Schema.Number,
   kind: KindSchema,
-  body: Fields,
+  content: Fields,
   care: Schema.NullOr(Schema.Number),
 })
 
 const Write = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal('new entry'), body: NewEntryBody }),
-  Schema.Struct({ kind: Schema.Literal('amendment'), body: AmendmentBody }),
+  Schema.Struct({ kind: Schema.Literal('new entry'), content: NewEntryRequest }),
+  Schema.Struct({ kind: Schema.Literal('amendment'), content: AmendmentRequest }),
 ])
 type Write = typeof Write.Type
 
@@ -55,11 +55,11 @@ export const Model = Schema.Struct({
   heard: Schema.NullOr(WallTimeSchema),
   checked: Schema.NullOr(WallTimeSchema),
   read: Schema.Literals(['idle', 'in flight', 'in flight, another due']),
-  form: Schema.Struct({ author: Schema.String, kind: KindSchema, body: Fields, care: Schema.String }),
+  form: Schema.Struct({ author: Schema.String, kind: KindSchema, content: Fields, care: Schema.String }),
   notice: Schema.String,
   selected: Schema.NullOr(Schema.String),
   versions: Schema.NullOr(Schema.Struct({ entry: Schema.String, list: VersionsSchema })),
-  editing: Schema.NullOr(Schema.Struct({ entry: Schema.String, replaces: Schema.Number, kind: KindSchema, body: Fields, care: Schema.String })),
+  editing: Schema.NullOr(Schema.Struct({ entry: Schema.String, replaces: Schema.Number, kind: KindSchema, content: Fields, care: Schema.String })),
   writing: Schema.NullOr(Write),
   unanswered: Schema.NullOr(Schema.Struct({ writeId: Schema.String, write: Write })),
 })
@@ -109,15 +109,15 @@ const posting = (post: (writeId: string) => Promise<WriteResult | undefined>, wr
   })
 
 export const PostEntry = Command.define('PostEntry', {
-  args: { body: NewEntryBody, writeId: Schema.NullOr(Schema.String) },
+  args: { content: NewEntryRequest, writeId: Schema.NullOr(Schema.String) },
   messages: [Message.Wrote, Message.WriteUnanswered],
-  execute: ({ body, writeId }) => posting((id) => client.write('/api/entries', { ...body, writeId: id }), writeId),
+  execute: ({ content, writeId }) => posting((id) => client.write('/api/entries', { ...content, writeId: id }), writeId),
 })
 
 export const PostAmendment = Command.define('PostAmendment', {
-  args: { body: AmendmentBody, writeId: Schema.NullOr(Schema.String) },
+  args: { content: AmendmentRequest, writeId: Schema.NullOr(Schema.String) },
   messages: [Message.Wrote, Message.WriteUnanswered],
-  execute: ({ body, writeId }) => posting((id) => client.write('/api/amendments', { ...body, writeId: id }), writeId),
+  execute: ({ content, writeId }) => posting((id) => client.write('/api/amendments', { ...content, writeId: id }), writeId),
 })
 
 export const FetchVersions = Command.define('FetchVersions', {
@@ -142,7 +142,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
 
 const REFUSED: Readonly<Record<Refusal['kind'], string>> = {
   'unknown entry kind': 'The chart does not know this kind of entry; nothing was charted.',
-  'body does not fit kind': 'Check the entry fields; nothing was charted.',
+  'content does not fit kind': 'Check the entry fields; nothing was charted.',
   'entry kind differs': 'An amendment must keep the entry kind; nothing was charted.',
   'another patient': 'That write names another patient; nothing was charted.',
   'care time after now': 'The care time is after now; nothing was charted.',
@@ -166,7 +166,7 @@ export function init(): Return {
       heard: null,
       checked: null,
       read: 'idle',
-      form: { author: ROSTER[0]?.id ?? '', kind: 'vital', body: blankBody('vital'), care: '' },
+      form: { author: ROSTER[0]?.id ?? '', kind: 'vital', content: blankContent('vital'), care: '' },
       notice: '',
       selected: null,
       versions: null,
@@ -187,7 +187,7 @@ function careTime(text: string): { readonly ok: true; readonly care: number | nu
 function send(model: Model, write: Write, notice: string): Return {
   const { unanswered } = model
   const writeId = unanswered !== null && Equal.equals(unanswered.write, write) ? unanswered.writeId : null
-  const command = write.kind === 'new entry' ? PostEntry({ body: write.body, writeId }) : PostAmendment({ body: write.body, writeId })
+  const command = write.kind === 'new entry' ? PostEntry({ content: write.content, writeId }) : PostAmendment({ content: write.content, writeId })
   return { model: { ...model, notice, writing: write }, commands: [command] }
 }
 
@@ -205,15 +205,15 @@ function readAnswered(model: Model): Return {
 
 function wrote(model: Model, write: Write, result: WriteResult): Return {
   if (result.kind === 'refused') {
-    const notice = result.refusal.kind === 'body does not fit kind' && write.body.kind === 'note'
+    const notice = result.refusal.kind === 'content does not fit kind' && write.content.kind === 'note'
       ? 'Enter note text (up to 10,000 characters); nothing was charted.'
-      : result.refusal.kind === 'body does not fit kind' && write.body.kind === 'vital'
+      : result.refusal.kind === 'content does not fit kind' && write.content.kind === 'vital'
         ? 'Enter a finite value for a listed vital; nothing was charted.' : REFUSED[result.refusal.kind]
     return { model: { ...model, notice } }
   }
   const { entry } = result
   const did = entry.number > 1 ? 'Amended' : 'Charted'
-  const answered = write.kind === 'new entry' ? { form: { ...model.form, body: blankBody(model.form.kind), care: '' } } : { editing: null }
+  const answered = write.kind === 'new entry' ? { form: { ...model.form, content: blankContent(model.form.kind), care: '' } } : { editing: null }
   return readChart({ ...model, ...answered, notice: `${did} ${entry.kind === 'note' ? 'note' : contentText(entry)} as ${entry.author.name}.`, versions: null })
 }
 
@@ -237,15 +237,15 @@ export function update(model: Model, message: Message): Return {
     GotChart: ({ chart, at }) => readAnswered(model.screen === 'closed' ? model : { ...model, latest: chart, answering: true, heard: at, checked: at }),
     ChartUnanswered: ({ at }) => readAnswered({ ...model, answering: false, checked: at }),
     ChoseAuthor: ({ author }) => ({ model: { ...model, form: { ...model.form, author } } }),
-    ChoseKind: ({ kind }) => ({ model: { ...model, form: { ...model.form, kind, body: blankBody(kind) } } }),
-    TypedField: ({ field, text }) => ({ model: { ...model, form: { ...model.form, body: { ...model.form.body, [field]: text } } } }),
+    ChoseKind: ({ kind }) => ({ model: { ...model, form: { ...model.form, kind, content: blankContent(kind) } } }),
+    TypedField: ({ field, text }) => ({ model: { ...model, form: { ...model.form, content: { ...model.form.content, [field]: text } } } }),
     TypedCare: ({ text }) => ({ model: { ...model, form: { ...model.form, care: text } } }),
     ClickedChart: () => {
       if (model.latest === null) return { model: { ...model, notice: 'The chart has not loaded yet; nothing was charted.' } }
       const care = careTime(model.form.care)
       if (!care.ok) return { model: { ...model, notice: 'The care time is not HH:MM:SS; nothing was charted.' } }
-      const { author, kind, body } = model.form
-      return send(model, { kind: 'new entry', body: { patient: model.latest.run.patient, author, kind, body, care: care.care } }, 'Charting.')
+      const { author, kind, content } = model.form
+      return send(model, { kind: 'new entry', content: { patient: model.latest.run.patient, author, kind, content, care: care.care } }, 'Charting.')
     },
     Wrote: ({ result }) => (model.writing === null ? { model } : wrote({ ...model, writing: null, unanswered: null }, model.writing, result)),
     WriteUnanswered: ({ writeId }) =>
@@ -259,17 +259,17 @@ export function update(model: Model, message: Message): Return {
     ClickedEdit: () => {
       const current = selectedEntry(model)
       if (current === undefined) return { model }
-      return { model: { ...model, editing: { entry: current.entry, replaces: current.number, kind: current.kind, body: Object.fromEntries(Object.entries(current.body).map(([field, value]) => [field, String(value)])), care: formatClock(current.care) } } }
+      return { model: { ...model, editing: { entry: current.entry, replaces: current.number, kind: current.kind, content: Object.fromEntries(Object.entries(current.content).map(([field, value]) => [field, String(value)])), care: formatClock(current.care) } } }
     },
-    TypedEditField: ({ field, text }) => (model.editing === null ? { model } : { model: { ...model, editing: { ...model.editing, body: { ...model.editing.body, [field]: text } } } }),
+    TypedEditField: ({ field, text }) => (model.editing === null ? { model } : { model: { ...model, editing: { ...model.editing, content: { ...model.editing.content, [field]: text } } } }),
     ClickedCancelEdit: () => ({ model: { ...model, editing: null } }),
     TypedEditCare: ({ text }) => (model.editing === null ? { model } : { model: { ...model, editing: { ...model.editing, care: text } } }),
     ClickedSaveEdit: () => {
       if (model.editing === null || model.latest === null) return { model }
       const care = careTime(model.editing.care)
       if (!care.ok) return { model: { ...model, notice: 'The care time is not HH:MM:SS; nothing was charted.' } }
-      const { entry, replaces, kind, body } = model.editing
-      return send(model, { kind: 'amendment', body: { patient: model.latest.run.patient, author: model.form.author, entry, replaces, kind, body, care: care.care } }, 'Amending.')
+      const { entry, replaces, kind, content } = model.editing
+      return send(model, { kind: 'amendment', content: { patient: model.latest.run.patient, author: model.form.author, entry, replaces, kind, content, care: care.care } }, 'Amending.')
     },
     ClickedClose: () => ({ model: { ...model, screen: 'closed', latest: null, selected: null, versions: null, editing: null, notice: '' } }),
     ClickedReopen: () => readChart({ ...model, screen: 'open' }),

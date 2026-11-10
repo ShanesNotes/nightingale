@@ -42,7 +42,7 @@ function model(overrides: Readonly<Record<string, unknown>>): ReadModel {
 
 test('the flowsheet has one column per minute, from the earlier of the run start and the earliest care time, to now', () => {
   assert.deepEqual(flowsheet(model({})).minutes.map(formatClock), ['06:55:00', '06:56:00', '06:57:00'])
-  const early = { entry: 'test-entry', patient: 'test-patient', kind: 'vital' as const, body: { vital: 'RR' as const, value: 18 }, number: 1,  care: at('06:53:10'), charted: at('06:55:20'), author: nurse, versions: 1 }
+  const early = { entry: 'test-entry', patient: 'test-patient', kind: 'vital' as const, content: { vital: 'RR' as const, value: 18 }, number: 1,  care: at('06:53:10'), charted: at('06:55:20'), author: nurse, versions: 1 }
   assert.deepEqual(flowsheet(model({ entries: [early] })).minutes.map(formatClock), ['06:53:00', '06:54:00', '06:55:00', '06:56:00', '06:57:00'])
 })
 
@@ -83,7 +83,7 @@ test('a charted cell shows the current version of each entry whose care time fal
     patient: 'test-patient',
     kind: 'vital',
     number: versions,
-    body: { vital, value: 18 },
+    content: { vital, value: 18 },
     care: at(care),
     charted: at(charted),
     author: nurse,

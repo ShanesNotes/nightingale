@@ -47,30 +47,30 @@ export const ENTRY_KINDS = {
 } as const
 
 export type EntryKind = keyof typeof ENTRY_KINDS
-type Body<K extends EntryKind> = { readonly [P in keyof typeof ENTRY_KINDS[K]['fields']]: typeof ENTRY_KINDS[K]['fields'][P] extends Field<infer T> ? T : never }
-export type EntryContent<K extends EntryKind = EntryKind> = { [P in K]: { readonly kind: P; readonly body: Body<P> } }[K]
-export type KindRefusal = { readonly kind: 'unknown entry kind' } | { readonly kind: 'body does not fit kind' }
+type Content<K extends EntryKind> = { readonly [P in keyof typeof ENTRY_KINDS[K]['fields']]: typeof ENTRY_KINDS[K]['fields'][P] extends Field<infer T> ? T : never }
+export type EntryContent<K extends EntryKind = EntryKind> = { [P in K]: { readonly kind: P; readonly content: Content<P> } }[K]
+export type KindRefusal = { readonly kind: 'unknown entry kind' } | { readonly kind: 'content does not fit kind' }
 
 export const isEntryKind = (value: unknown): value is EntryKind => typeof value === 'string' && Object.hasOwn(ENTRY_KINDS, value)
 export const kindFields = (kind: EntryKind): Readonly<Record<string, Field>> => ENTRY_KINDS[kind].fields
 
-export function parseContent(kind: unknown, body: unknown, from: 'write' | 'read'):
+export function parseContent(kind: unknown, content: unknown, from: 'write' | 'read'):
   { readonly ok: true; readonly value: EntryContent } | { readonly ok: false; readonly refusal: KindRefusal } {
   if (!isEntryKind(kind)) return { ok: false, refusal: { kind: 'unknown entry kind' } }
-  const invalid = { ok: false, refusal: { kind: 'body does not fit kind' } } as const
-  if (typeof body !== 'object' || body === null || Array.isArray(body)) return invalid
+  const invalid = { ok: false, refusal: { kind: 'content does not fit kind' } } as const
+  if (typeof content !== 'object' || content === null || Array.isArray(content)) return invalid
   const fields = kindFields(kind)
-  if (Object.keys(body).length !== Object.keys(fields).length) return invalid
+  if (Object.keys(content).length !== Object.keys(fields).length) return invalid
   const parsed: Record<string, unknown> = {}
   for (const [name, field] of Object.entries(fields)) {
-    if (!Object.hasOwn(body, name)) return invalid
-    const value = field.parse(Reflect.get(body, name), from)
+    if (!Object.hasOwn(content, name)) return invalid
+    const value = field.parse(Reflect.get(content, name), from)
     if (value === undefined) return invalid
     parsed[name] = value
   }
-  return { ok: true, value: { kind, body: parsed } as EntryContent }
+  return { ok: true, value: { kind, content: parsed } as EntryContent }
 }
 
-export const blankBody = (kind: EntryKind): Readonly<Record<string, string>> => Object.fromEntries(
+export const blankContent = (kind: EntryKind): Readonly<Record<string, string>> => Object.fromEntries(
   Object.entries(kindFields(kind)).map(([name, field]) => [name, typeof field.input === 'string' ? '' : field.input[0]?.value ?? '']),
 )

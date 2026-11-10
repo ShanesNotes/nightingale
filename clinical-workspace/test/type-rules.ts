@@ -19,23 +19,23 @@ export const patientFromAPatient: PatientId = patient
 // @ts-expect-error an entry id is not a patient id
 export const patientFromAnEntry: PatientId = entry
 
-export const signed: NewEntry = { operation: 'new entry', writeId, patient, author, kind: 'vital' as const, body: { vital: 'HR', value: 61 }, care: { kind: 'now' } }
+export const signed: NewEntry = { operation: 'new entry', writeId, patient, author, kind: 'vital' as const, content: { vital: 'HR', value: 61 }, care: { kind: 'now' } }
 // @ts-expect-error an entry cannot be written without an author
-export const unsigned: NewEntry = { operation: 'new entry', writeId, patient, kind: 'vital' as const, body: { vital: 'HR', value: 61 }, care: { kind: 'now' } }
+export const unsigned: NewEntry = { operation: 'new entry', writeId, patient, kind: 'vital' as const, content: { vital: 'HR', value: 61 }, care: { kind: 'now' } }
 // @ts-expect-error an entry cannot be written without its write id
-export const withoutWriteId: NewEntry = { operation: 'new entry', patient, author, kind: 'vital' as const, body: { vital: 'HR', value: 61 }, care: { kind: 'now' } }
+export const withoutWriteId: NewEntry = { operation: 'new entry', patient, author, kind: 'vital' as const, content: { vital: 'HR', value: 61 }, care: { kind: 'now' } }
 
 export const heartRate: Reading = { ...reading, vital: 'HR' }
 // @ts-expect-error a device message cannot carry a vital the table lacks
 export const endTidal: Reading = { ...reading, vital: 'EtCO2' }
 
-export const note: NewEntry = { operation: 'new entry', kind: 'note', body: { text: 'Synthetic note.' }, writeId, patient, author, care: { kind: 'now' } }
-// @ts-expect-error a note cannot have a vital body
-export const wrongBody: NewEntry = { ...note, body: { vital: 'HR', value: 1.25 } }
+export const note: NewEntry = { operation: 'new entry', kind: 'note', content: { text: 'Synthetic note.' }, writeId, patient, author, care: { kind: 'now' } }
+// @ts-expect-error a note cannot hold a vital's content
+export const wrongContent: NewEntry = { ...note, content: { vital: 'HR', value: 1.25 } }
 // @ts-expect-error an unregistered kind cannot be written
 export const unknownKind: NewEntry = { ...note, kind: 'unregistered' }
 
 declare const chart: ReadModel
-export const noteText: string | undefined = entriesOfKind(chart, 'note')[0]?.body.text
+export const noteText: string | undefined = entriesOfKind(chart, 'note')[0]?.content.text
 // @ts-expect-error a typed note read has no numeric vital value
-export const noteValue = entriesOfKind(chart, 'note')[0]?.body.value
+export const noteValue = entriesOfKind(chart, 'note')[0]?.content.value

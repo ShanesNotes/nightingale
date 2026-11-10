@@ -37,7 +37,7 @@ export const entry = (fields: { id: string; vital: string; value: number; care: 
   patient: 'test-patient',
   kind: 'vital' as const,
   number: fields.versions ?? 1,
-  body: { vital: fields.vital, value: fields.value },
+  content: { vital: fields.vital, value: fields.value },
   care: at(fields.care),
   charted: at(fields.charted),
   author: fields.author ?? NURSE,
