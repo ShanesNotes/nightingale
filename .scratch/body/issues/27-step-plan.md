@@ -19,3 +19,13 @@ Blocked by: 07
 **Non-goals:** the arena's pick between cores, and any gain bought by dropping a law.
 
 This runs as pstack's Hillclimb playbook: one metric, one hypothesis at a time, a decision log, and one commit for each accepted gain.
+
+## Comments
+
+**What the rhythm's firing costs, read from ticket 07's trace.** The trace is `data/v3/out/trace-today.csv` in ticket 07's evidence folder (sha256 `91a5901070752994…`): 120 s on the heavy-run machine, one deterministic run. Twice a beat the rhythm fires, and the step after it asks for the span the core carried from before the firing, 10 ms both times. At the start of systole that step is refused four times, once at Newton's iteration limit and three times on the accuracy of the mitral valve's flow, and it passes at 0.625 ms. At the end of systole it is refused three times and passes at 1.25 ms. The two steps take 3.5% of the wall time.
+
+For a plan the margin matters more than the cost. A step that passes at 0.625 ms has two refusals left: a third would retry at 0.078 ms, below the floor of 0.1 ms, which is the fault `NoAdmissibleStep`. A 48 h run stands at that point 172,800 times.
+
+Two facts of the seam shape any step control that survives a firing. `CoupledSolver::next_step` takes the accepted view, which has no reading that says the head is a breakpoint, so a core commits its span before it can know that a guard fired. And `StepTicket::refuse` halves the span whatever the estimate was, so a step sixteen times too long takes four refused solves to find its length.
+
+`NumericalHealth::most_refusals` and `NumericalHealth::shortest_retry_ns` report this margin for any run through the arena, so each prototype's run shows its own.
