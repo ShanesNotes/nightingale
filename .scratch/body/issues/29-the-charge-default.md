@@ -1,7 +1,8 @@
 # 29: How charge closes when a reaction makes a strong anion
 
 Type: prototype
-Status: open
+Status: claimed
+Claimed by: 29-charge-default
 Blocked by: 02
 
 **Question:** Rung 0's reactions make lactate, ketones, the fixed acid and ammonium, and the strong-ion frame keeps hydrogen ion out of the amounts. Today the contract's charge is a sum of fixed charges, and the certificate holds charge's drift at zero. [Ticket 01](01-rung-0-specification.md)'s Answer books each acid and base as a neutral moiety that speciation charges, so every reaction balances charge, and the certificate reads charge after speciation. Its alternative gives each strong anion a fixed charge and pairs each reaction that makes or burns one with a counter-charge. Test both on [ticket 02](02-reactions.md)'s bench and pick one.
