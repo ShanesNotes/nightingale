@@ -174,7 +174,7 @@ for feature in "${features[@]}"; do
       expect workspace "#note-list li[data-entry=\"$id\"]" 'Synthetic Physician B, physician · edited, version 2 of 2.*Synthetic walk note, second version\..*Version 2 charted [0-9:]+, late by' 'note: the note shows the new text, its author, version 2 of 2 and how late version 2 was charted'
       [ "$(drive eval workspace "document.querySelector('#versions') === null")" = true ] && pass 'note: earlier versions stay hidden until asked for' || fail 'note: earlier versions show unasked'
       drive click workspace "#note-list li[data-entry=\"$id\"] [data-action=\"versions\"]"
-      expect workspace "#note-list li[data-entry=\"$id\"] #versions" '^Version 1 · Synthetic Nurse A, nurse · care time [0-9:]+ · charted [0-9:]+ Synthetic walk note, first version\.$' 'note: the earlier version comes from the chart service on request, inside the note'
+      expect workspace "#note-list li[data-entry=\"$id\"] #versions" '^Version 1 · Synthetic Nurse A, nurse · care time [0-9:]+ · charted [0-9:]+ +Synthetic walk note, first version\.$' 'note: the earlier version comes from the chart service on request, inside the note'
       shot workspace 07-note-amended
       curl -sf "$service/api/entries/$id/versions" >"$evidence/note-versions.json" && note "rows $evidence/note-versions.json"
       node -e "const v=JSON.parse(require('fs').readFileSync(process.argv[1]));const s=v.map(x=>[x.number,x.kind,x.content.text,x.author.id].join('|')).join(';');if(s!=='1|note|Synthetic walk note, first version.|synthetic-nurse;2|note|Synthetic walk note, second version.|synthetic-physician')process.exit(1)" "$evidence/note-versions.json" && pass 'note: the chart service gives both versions, each with its text and author' || fail 'note: the chart service does not give both versions'
@@ -249,7 +249,7 @@ for feature in "${features[@]}"; do
       {
         docker exec "$CW_DB_CONTAINER" psql -U postgres -c "UPDATE content_vital SET vital = 'HR'" 2>&1
         docker exec "$CW_DB_CONTAINER" psql -U postgres -c 'DELETE FROM device_message' 2>&1
-        docker exec "$CW_DB_CONTAINER" psql -U postgres -c 'TRUNCATE entry_version' 2>&1
+        docker exec "$CW_DB_CONTAINER" psql -U postgres -c 'TRUNCATE entry_version CASCADE' 2>&1
       } >"$evidence/postgres-refusals.txt"
       [ "$(grep -c 'append-only' "$evidence/postgres-refusals.txt")" -ge 3 ] && pass 'device: Postgres refuses an update, a delete and a truncate of chart rows' || fail 'device: Postgres let a chart row change'
       docker exec "$CW_DB_CONTAINER" psql -U postgres -c "

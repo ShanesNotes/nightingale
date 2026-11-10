@@ -21,7 +21,7 @@ Preconditions:
 
 - **Resend.** Post one batch from the synthetic device `verify-walk-device`, boot `verify-walk-boot`: a statement at now minus 4 s calling HR sourced, and HR readings with sequence 2 at now minus 4 s and sequence 4 at now minus 2 s. Post the same batch again. The first answer has `taken` for each message, the second `already held` for each.
 - **Gap.** `GET /api/chart` lists a `missing` span for `verify-walk-device` HR that covers now minus 3 s, the second sequence 3 would have carried, and none covering now minus 4 s or now minus 2 s. It holds two readings from that device.
-- **Append-only.** Run `docker exec <container> psql -U postgres -c "UPDATE content_vital SET vital = 'HR'"`, and the same with `DELETE FROM device_message` and `TRUNCATE entry_version`. Each fails with `the chart is append-only`.
+- **Append-only.** Run `docker exec <container> psql -U postgres -c "UPDATE content_vital SET vital = 'HR'"`, and the same with `DELETE FROM device_message` and `TRUNCATE entry_version CASCADE`, since the content tables refer to `entry_version` and a plain truncate stops at that reference before the chart is asked. Each fails with `the chart is append-only`.
 - **Fixed field.** In one psql command, insert version 3 of the RR entry into `entry_version`, copied from its version 2, and its content into `content_vital` with the vital `HR`. It fails with `violates foreign key constraint`, so Postgres keeps the vital without the chart service. `walk.sh` holds the exact SQL.
 - **Proof.** Keep both answers and the psql output, in `postgres-refusals.txt` and `postgres-fixed-field.txt`.
 
