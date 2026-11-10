@@ -2,19 +2,19 @@
 
 Type: research
 Status: open
-Blocked by: 03
+Blocked by: 03, `.scratch/native-contract/issues/28-admission-energy-at-balance.md`
 Runs on: the code is written on the workstation; the audit runs only on the heavy-run machine
 
 **What it builds and answers:** `gp.py audit`, the audit plan below as `tools/generative-physiology/spec/audit-v1.txt`, the report that turns the runs into verdicts, and the driver's capture version 2, which writes what the report reads and capture version 1 did not: each run's catalogue of names, the sympathetic traffic after every accepted step, each hazard firing, the bytes of links, and on a branch its first seal and the time of the resume or rewind alone. Then it runs the audit and records the filled template as this ticket's Answer. Before any training data exists, the audit answers one question. Is the slice on `ng_solver::Core` a usable and informative teacher for posture runs?
 
-The program does not exist at 84744af. Ticket 03 builds the driver, and this ticket adds `gp.py audit`, standard-library Python that runs `gp-driver` once per run and reads the run directories, and the audit's closed-loop rule. The code PR merges first. The audit then runs from main's merge commit C of that PR, and a second, docs-only PR adds the Answer.
+The program does not exist at 84744af. Ticket 03 builds the driver, and this ticket adds `gp.py audit`, standard-library Python that runs `gp-driver` once per run and reads the run directories, and the audit's closed-loop rule. The code PR merges first. The audit then runs from C, a main commit that holds that PR, native-contract 28 and the core the arena's pick confirms, and a second, docs-only PR adds the Answer.
 
 ## Usage
 
 On the workstation, with git only:
 
 ```text
-C=<main's merge commit of this ticket's code PR>
+C=<the main commit the audit runs from>
 git rev-parse "$C:crates"                       # the teaching engine's crates tree; the Answer records it
 git diff --quiet 84744af86ae9feac3a90e610ce21b741990f9cae "$C" -- crates Cargo.toml Cargo.lock rust-toolchain.toml clippy.toml rustfmt.toml \
   && echo engine-as-designed || echo engine-moved-since-design
@@ -176,7 +176,7 @@ Evidence: summaries.sha256 <..>; report.txt's sha256 is recorded beside it; the 
 ## Acceptance
 
 - [ ] The code PR adds `gp.py audit`, the plan and the report, and its proof from a clean git checkout on the heavy-run machine shows `full_proof: yes`.
-- [ ] The audit has run from main's merge commit C, and the Answer holds every field of the template, both gates' verdicts and every derived setting.
+- [ ] The audit has run from C, and the Answer holds every field of the template, both gates' verdicts and every derived setting.
 - [ ] If either gate fails, the Answer says which rows failed, and the next ticket that depends on this one stays blocked until a person reads it.
 
 ## Non-goals
@@ -187,3 +187,5 @@ Evidence: summaries.sha256 <..>; report.txt's sha256 is recorded beside it; the 
 ## Comments
 
 The code PR merged as nightingale#85: `gp.py audit`, the plan `tools/generative-physiology/spec/audit-v1.txt`, the report and the driver's capture version 2 are on main. The first acceptance box is met. What remains is the audit itself: the long runs from main on the heavy-run machine, which wait for the developer reviewer's go-ahead because their transient links need about 100 GB of its disk, and then the Answer.
+
+The long runs now also wait for two changes to the teacher, so that they run once. [Native-contract 28](../../native-contract/issues/28-admission-energy-at-balance.md) corrects the start state that admission gives every run. The arena's pick, which the developer reviewer confirms ([foundation map](../../foundation/map.md), "Where the route stands"), decides which core teaches. By this ticket's engine-input rule an audit run before either would run again, and a study frozen on an earlier C would learn from a start state the engine is about to correct. C is therefore the first main commit that holds both. If native-contract 28 moves the pins in `crates/ng-validate/tests/trace.rs`, A0's digests in this ticket and in the plan are read again at C. Later engine changes do not reach the study, which runs on the snapshot at C.
