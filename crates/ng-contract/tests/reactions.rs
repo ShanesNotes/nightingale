@@ -25,7 +25,7 @@ fn anatomy(beds: &[&'static str]) -> Result<Anatomy, AdmissionError> {
         map.connect(Network::Vascular, vessel.id(), bed.id());
         map.connect(Network::Vascular, bed.id(), vessel.id());
     }
-    Ok(map.finish()?)
+    map.finish()
 }
 
 fn wave() -> Result<RateClass, AdmissionError> {
