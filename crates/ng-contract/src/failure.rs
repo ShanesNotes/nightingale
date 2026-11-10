@@ -1,5 +1,5 @@
 use crate::{
-    AnatomyDefect, AnchorId, Binding, Digest, InputId, LawName, ModeValue, ParameterKey, Predicate,
+    AnatomyDefect, AnchorId, Binding, Book, Digest, InputId, LawName, ModeValue, ParameterKey, Predicate,
     QuantityId, RowId, RowKind, SimTime, SiteId, Slot, SourceId, Space, Species,
 };
 
@@ -351,6 +351,25 @@ pub enum CompileDefect {
     HeldNothing { card: &'static str, space: Space },
     PoolHeldTwice {
         cards: [&'static str; 2],
+        site: SiteId,
+        space: Space,
+    },
+    /// A reaction that names one species twice.
+    SpeciesTwice { law: LawName, species: Species },
+    /// A reaction that names a species no reaction may use or make.
+    NoMakeup { law: LawName, species: Species },
+    /// A reaction that names a fuel whose energy content the schema does not state, so its energy has no value.
+    UnstatedEnergy { law: LawName, species: Species },
+    /// A reaction whose counts leave a conserved quantity open: an element or charge its uses and makes do not hold
+    /// alike, or energy with no pool to take it. Names the first in `Book` order.
+    UnbalancedReaction { law: LawName, book: Book },
+    /// A count times a weight, or their sum, past 2^53, where an integer weight stops being exact.
+    ConservationOverflow { law: LawName },
+    /// A reaction whose pools exist together at no site of its set.
+    ReactionNowhere { law: LawName },
+    /// A site where a reaction stands without the energy pool its energy goes to.
+    ReactionEndpoint {
+        law: LawName,
         site: SiteId,
         space: Space,
     },

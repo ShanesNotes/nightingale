@@ -97,6 +97,9 @@ pub enum Element {
     Hydrogen,
     Oxygen,
 }
+impl Element {
+    pub(crate) const ALL: [Element; 3] = [Element::Carbon, Element::Hydrogen, Element::Oxygen];
+}
 /// What one unit of a species is made of, which a reaction's counts must balance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Makeup {
@@ -303,6 +306,31 @@ substances!(
     Norepinephrine,
     Acetylcholine,
     Energy,
+    Oxygen,
+    CarbonDioxide,
+    Glucose
+);
+
+mod reactants {
+    pub trait Sealed {}
+}
+/// A species a reaction may use or make: every substance but energy, whose share a reaction derives from what it burns.
+pub trait Reactant: reactants::Sealed + Substance {}
+macro_rules! reactants {
+    ($($name:ident),*) => {$(
+        impl reactants::Sealed for $name {}
+        impl Reactant for $name {}
+    )*};
+}
+reactants!(
+    Water,
+    Sodium,
+    Potassium,
+    Chloride,
+    Albumin,
+    Vasopressin,
+    Norepinephrine,
+    Acetylcholine,
     Oxygen,
     CarbonDioxide,
     Glucose

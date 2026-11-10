@@ -2,7 +2,9 @@ use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::quantity::dimension;
 use crate::scope::HeldCard;
-use crate::{Atoms, BoundaryDirection, Column, ColumnId, Digest, Dimension, Element, Energy, RowId, Species};
+use crate::{
+    Atoms, BoundaryDirection, Column, ColumnId, Digest, Dimension, Element, Energy, Makeup, RowId, Species,
+};
 
 /// The conserved quantity a combination balances. Where no reaction joins species, what its pools hold: a moiety is
 /// its species across spaces, because a transfer never changes a species. Where a reaction joins species, an
@@ -24,6 +26,23 @@ impl Book {
             Book::Element(_) => dimension::<U>() == dimension::<Atoms>(),
             Book::Energy => dimension::<U>() == dimension::<Energy>(),
         }
+    }
+}
+
+/// What one unit of `species` counts in `book`: one of itself, its charge, its atoms of an element, or its energy, a
+/// fuel's at the content the schema states.
+pub(crate) fn weight(book: Book, species: Species, contents: &[(Species, i64)]) -> i64 {
+    match (book, species.makeup()) {
+        (Book::Of(own), _) => i64::from(own == species),
+        (Book::Charge, _) => species.charge(),
+        (Book::Element(element), Makeup::Atoms { elements, .. }) => (elements.iter())
+            .find(|held| held.0 == element)
+            .map_or(0, |held| held.1),
+        (Book::Energy, Makeup::Energy) => 1,
+        (Book::Energy, Makeup::Atoms { fuel: true, .. }) => (contents.iter())
+            .find(|content| content.0 == species)
+            .map_or(0, |content| content.1),
+        (Book::Element(_) | Book::Energy, _) => 0,
     }
 }
 
