@@ -217,12 +217,12 @@ field = "digest"
 reason = "this seal's own output, which the ticket keeps"
 
 [[crate.seal_skip]]
-item = "scheme::RunIdentity::digest"
+item = "scheme::IdentityParts::digest"
 field = "word"
 reason = "seed_word of the domain's name and the words, and the words are sealed"
 
 [[crate.seal_skip]]
-item = "scheme::RunIdentity::digest"
+item = "scheme::IdentityParts::digest"
 field = "domain"
 reason = "a marker with no value; a run identity takes only the run domain's seed"
 

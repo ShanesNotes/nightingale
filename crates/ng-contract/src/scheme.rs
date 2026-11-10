@@ -316,21 +316,19 @@ pub type ObservationSeed = DomainSeed<ObservationDomain>;
 /// The body model's hash, the packet's hash, the run seed and the declared resolution. Nothing else.
 #[derive(Clone)]
 pub struct RunIdentity {
+    parts: IdentityParts,
+    /// Taken once: every ticket seals it, and no part changes after `new`.
+    digest: Digest,
+}
+#[derive(Clone)]
+struct IdentityParts {
     model: ModelHash,
     packet: PacketHash,
     seed: Seed,
     resolution: DeclaredResolution,
 }
-impl RunIdentity {
-    pub fn new(model: ModelHash, packet: PacketHash, seed: Seed, resolution: DeclaredResolution) -> Self {
-        Self {
-            model,
-            packet,
-            seed,
-            resolution,
-        }
-    }
-    pub fn digest(&self) -> Digest {
+impl IdentityParts {
+    fn digest(&self) -> Digest {
         let Self {
             model,
             packet,
@@ -351,20 +349,37 @@ impl RunIdentity {
         resolution.digest().seal(&mut out);
         out.digest()
     }
+}
+impl RunIdentity {
+    pub fn new(model: ModelHash, packet: PacketHash, seed: Seed, resolution: DeclaredResolution) -> Self {
+        let parts = IdentityParts {
+            model,
+            packet,
+            seed,
+            resolution,
+        };
+        Self {
+            digest: parts.digest(),
+            parts,
+        }
+    }
+    pub fn digest(&self) -> Digest {
+        self.digest
+    }
     pub fn model(&self) -> ModelHash {
-        self.model
+        self.parts.model
     }
     pub fn packet(&self) -> PacketHash {
-        self.packet
+        self.parts.packet
     }
     pub fn resolution(&self) -> &DeclaredResolution {
-        &self.resolution
+        &self.parts.resolution
     }
     pub(crate) fn seed(&self) -> Seed {
-        self.seed
+        self.parts.seed
     }
     pub(crate) fn same_seed(&self, other: &Self) -> bool {
-        self.seed.words == other.seed.words
+        self.parts.seed.words == other.parts.seed.words
     }
 }
 
