@@ -1,7 +1,8 @@
 # 12: Law forms for heat
 
 Type: research
-Status: open
+Status: claimed
+Claimed by: r12-heat
 Blocked by: 02
 
 **Question:** Which cited form does each law of the heat loop take at rung 0? [Body ticket 12](../../body/issues/12-heat-balance.md) writes the laws, so each answer is a form, where its constants go, a stated validity range and how far the source was read, to the standard of [ticket 02](02-law-forms.md). No value is bound here.
