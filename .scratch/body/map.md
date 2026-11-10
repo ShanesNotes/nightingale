@@ -61,7 +61,7 @@ After tickets 06 and 26, three lanes can be built side by side: the gases (08), 
 
 ## Decisions so far
 
-- [What limits the step](issues/07-what-limits-the-step.md): on the slice the accuracy estimate sets the step in the first half of each beat, on the heart's rows, and the body's 10 ms wave rate class sets it in the second half. A longer cap on the core changes nothing, and the restart after a firing costs Newton work, not steps. The 15 landings a beat take 21% of the wall time. The core takes 62% of a step and the record 38%, and a step's fixed cost alone is 58% of the budget at 100 times real time. Each valve opens and shuts more than once a beat, 6 of the 15 landings, which the cardiovascular owner has yet to judge.
+- [What limits the step](issues/07-what-limits-the-step.md): on the slice the accuracy estimate sets the step in the first half of each beat, on the heart's rows, and the body's 10 ms wave rate class sets it in the second half. A longer cap on the core changes nothing, and the restart after a firing costs Newton work, not steps. The 15 landings a beat take 21% of the wall time. The core takes 62% of a step and the record 38%, and a step's fixed cost alone is 58% of the budget at 100 times real time. Each outflow valve opens and shuts more than once a beat, 6 of the 15 landings, and [native-contract 32](../native-contract/issues/32-valves-shut-inside-ejection.md) asks why.
 
 ## Model defaults, open to review
 
