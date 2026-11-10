@@ -19,3 +19,9 @@ Blocked by: 01, 02, 29
 **Non-goals:** any law, any new pool in the slice, and species only a later scope stage needs (drugs, pathogens, clotting factors).
 
 This changes the contract's interface, so it runs pstack `architect` with an Opus and a Codex runner and a Codex judge. Split it into two PRs, species first, if the judge finds the diff too wide to review.
+
+From [research 12](../../research/issues/12-law-forms-heat.md): the identity table has no row for heat over a heat capacity, a conductance times a temperature difference, or a heat capacity per volume times a flow times a temperature difference, which a heat store's temperature, conduction and the heat blood carries need.
+
+From [research 14](../../research/issues/14-law-forms-volume-and-acid.md): no row turns each charged species' concentration into a charge concentration, which the strong ion difference and the mass-action terms need, and none takes a flow over a flow, an osmolality per volume times a volume, or a sum of two species' amounts. The lumped anion's makeup is this ticket's to settle, because sulfur is no element the ledger balances.
+
+From [research 15](../../research/issues/15-law-forms-slow-books.md): GI's iron absorption reads the store in the liver bed's cells, so the landmark list needs a place where GI's law reads that store. Ticket 01 lists bone bed cells for calcium and phosphate and not for magnesium, while its MS row gives bone's pool to all three, so this ticket lists bone bed cells for magnesium or [ticket 19](19-minerals-and-bone.md) drops magnesium's bone pool.

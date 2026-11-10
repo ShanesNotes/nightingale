@@ -12,6 +12,9 @@ Blocked by: 08, 09, 11, 14, 17, 29, `.scratch/research/issues/14-law-forms-volum
 - [ ] Run: with acid production and the kidney's feedback both on, the lumped anion's amount ends a day within its drift bound
 - [ ] Run: after a step up in acid production, the kidney's feedback brings the total carbon dioxide reading back inside its bound. With the feedback clamped at its rate from before the step, the same run fails
 - [ ] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved
+- [ ] From [research 14](../../research/issues/14-law-forms-volume-and-acid.md): the run after a step in acid production allows days, because ammonium's rise peaks at 5 to 6 days, or takes a shorter time constant as a model default
+- [ ] From [research 14](../../research/issues/14-law-forms-volume-and-acid.md): cells hold phosphate, a weak acid, so this ticket counts phosphate's term in cells or drops it, and decides whether research 11's tissue store reads this balance. With no weak acid, a cell's balance has a root only while its strong ion difference lies between 0 and its total carbon dioxide
+- [ ] From [research 14](../../research/issues/14-law-forms-volume-and-acid.md): the lumped anion's exit from the liver bed's cells, the diet's organic anion's absorption and entry into cells, and the lumped anion's filtering and reclaim take the forms of its crossings row
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** buffering inside cells, bone as a buffer, and the rise in bicarbonate after a meal unless research 14 sources its size.

@@ -19,3 +19,5 @@ Blocked by: 03
 **Non-goals:** any law, and any emitter or receiver for an arrow. Those arrive with the loop that needs them.
 
 This changes the contract's interface, so it runs pstack `architect` with an Opus and a Codex runner and a Codex judge.
+
+From [research 14](../../research/issues/14-law-forms-volume-and-acid.md): `ReactsAt` grants only metabolism at the capillary beds, and HP's fixed acid at the liver bed and RN's ammonium at the peritubular bed each need a grant.

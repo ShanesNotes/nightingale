@@ -15,3 +15,5 @@ Blocked by: 08, 14, `.scratch/research/issues/15-law-forms-slow-books.md`
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** a clotting model, an inflammation model, red cell age, and erythropoietin as a moving hormone.
+
+From [research 15](../../research/issues/15-law-forms-slow-books.md): iron absorption in the gut reads the store in the liver bed's cells, a pool at another site, so it reads that store at a landmark [ticket 03](03-whole-body-lists.md) adds.

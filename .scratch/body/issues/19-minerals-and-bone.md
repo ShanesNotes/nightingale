@@ -15,3 +15,5 @@ Blocked by: 13, 15, 17, `.scratch/research/issues/15-law-forms-slow-books.md`
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** bone remodeling, calcitriol as a moving hormone, and calcitonin.
+
+From [research 15](../../research/issues/15-law-forms-slow-books.md): ticket 01 gives magnesium no bone bed cells, so [ticket 03](03-whole-body-lists.md) lists them or this ticket drops magnesium's bone pool. PTH moves only calcium's reclaim threshold, and if a meal takes phosphate out of its healthy range, PTH's effect on phosphate's threshold is the first term to add.

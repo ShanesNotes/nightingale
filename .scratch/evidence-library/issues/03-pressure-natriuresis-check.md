@@ -11,3 +11,5 @@ The tilt neighborhood's largest gap ([ticket 01](01-tilt-neighborhood.md)) is th
 - [ ] A human pressure-natriuresis relation from the library, with its method, window and tier
 - [ ] The slice run against it, with the result and the reason
 - [ ] If the slice fails, the coupling's proposal under record 0002
+
+From [research 14](../../research/issues/14-law-forms-volume-and-acid.md): the evidence store's searches found no fitted human pressure-natriuresis curve. The nearest is Guyton and Hall 12e p. 213, prose beside an isolated kidney's curve with no method or window.
