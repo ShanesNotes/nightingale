@@ -147,9 +147,6 @@ impl BurningBeds {
         })?;
         Ok(Self { body, beds, burns })
     }
-    pub fn body(&self) -> &CompiledBody {
-        &self.body
-    }
     /// Each bed's reaction column, in column order.
     pub fn burns(&self) -> Vec<ColumnId> {
         let burn = LawName {
