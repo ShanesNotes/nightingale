@@ -355,8 +355,8 @@
 //!     k.at_junction_if_supplied(nerve)
 //! }
 //! ```
-//! A route comes from a scope, whole. A binding is a transfer of one ligand between two pools, so nothing can write a
-//! reaction from raw stoichiometry: a hand-made route does not compile.
+//! A route comes from a scope, whole: a hand-made route does not compile. A binding is a transfer of one ligand between
+//! two pools.
 //! ```compile_fail,E0451
 //! use ng_contract::*;
 //! fn forged<'b>() -> SiteRoute<'b, Receptor, Junction, Norepinephrine> {
@@ -369,6 +369,85 @@
 //!     -> SiteRoute<'b, Receptor, Junction, Norepinephrine> {
 //!     ports.binding(laws)
 //! }
+//! ```
+//! A reaction's proportions come from typed species, so nothing writes one from raw stoichiometry.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn raw() -> Proportions<Glucose> {
+//!     Proportions { terms: Vec::new(), energy: None, reference: core::marker::PhantomData }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn typed() -> Proportions<Glucose> {
+//!     Proportions::<Glucose>::using(Space::Interstitium)
+//!         .uses::<Oxygen, 6>(Space::Interstitium)
+//!         .makes::<CarbonDioxide, 6>(Space::Interstitium)
+//!         .makes::<Water, 6>(Space::Interstitium)
+//!         .energy_into(Space::Thermal)
+//! }
+//! ```
+//! A reaction comes from its owner's builder, which records the rate it owes.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn forged<'b>() -> Reaction<'b, Metabolism, CapillaryBed, Glucose> {
+//!     Reaction { name: "burn", brand: core::marker::PhantomData, kind: core::marker::PhantomData }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn declared<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, burn: Proportions<Glucose>)
+//!     -> Reaction<'b, Metabolism, CapillaryBed, Glucose> {
+//!     laws.reaction("burn", burn)
+//! }
+//! ```
+//! A reaction's energy follows from what it uses and makes, so no law writes it: energy is no reactant.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! let _ = Proportions::<Glucose>::using(Space::Interstitium).makes::<Energy, 470>(Space::Thermal);
+//! ```
+//! ```
+//! use ng_contract::*;
+//! let _ = Proportions::<Glucose>::using(Space::Interstitium).energy_into(Space::Thermal);
+//! ```
+//! Only a card the contract grants a site class reacts there.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn ungranted<'b>(laws: &mut FragmentBuilder<'b, Renal>, burn: Proportions<Glucose>)
+//!     -> Reaction<'b, Renal, CapillaryBed, Glucose> {
+//!     laws.reaction("burn", burn)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn granted<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, burn: Proportions<Glucose>)
+//!     -> Reaction<'b, Metabolism, CapillaryBed, Glucose> {
+//!     laws.reaction::<CapillaryBed, Glucose>("burn", burn)
+//! }
+//! ```
+//! A reaction's rate counts its reference species.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn attach<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, burn: &Reaction<'b, Metabolism, CapillaryBed, Glucose>,
+//!     rate: PureKernel<'b, Metabolism, Rate<Oxygen>, CapillaryBed>) {
+//!     laws.react_at(burn, rate)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn attach<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, burn: &Reaction<'b, Metabolism, CapillaryBed, Glucose>,
+//!     rate: PureKernel<'b, Metabolism, Rate<Glucose>, CapillaryBed>) {
+//!     laws.react_at(burn, rate)
+//! }
+//! ```
+//! A count is a whole number above zero.
+//! ```compile_fail,E0080
+//! use ng_contract::*;
+//! let _ = Proportions::<Glucose>::using(Space::Interstitium).uses::<Oxygen, 0>(Space::Interstitium);
+//! ```
+//! ```
+//! use ng_contract::*;
+//! let _ = Proportions::<Glucose>::using(Space::Interstitium).uses::<Oxygen, 6>(Space::Interstitium);
 //! ```
 //! A flow row belongs to its own kind of edge: a plain edge's law cannot read a valve's.
 //! ```compile_fail,E0308

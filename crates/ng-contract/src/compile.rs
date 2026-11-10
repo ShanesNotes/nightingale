@@ -4,19 +4,20 @@ use crate::body::{
     RowId, RowKind, Slot, Sparsity, StreamLayout, Target, UnknownId,
 };
 use crate::chance::key_word;
-use crate::conservation::conserved_basis;
+use crate::conservation::{admission_totals, conserved_basis, weight};
 use crate::elimination::Elimination;
 use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::law::{
     End, Family, FragmentData, GuardDeclaration, Input, KernelData, ModeDeclaration, Obligation, Op, Over,
-    ParameterContext, ParameterDeclaration, Selector, SlotDeclaration, SlotKind, Source, Where,
+    ParameterContext, ParameterDeclaration, ReactionDeclaration, Selector, SlotDeclaration, SlotKind, Source,
+    Where,
 };
-use crate::scope::{ENCLOSURE_PRESSURE, HeldCard, PoolRef, RouteBoundary};
+use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, PoolRef, RouteBoundary};
 use crate::{
-    AdmissibleSet, AdmissionError, Anatomy, Boundary, BoundaryDirection, Class, CompileDefect, Compliance,
-    LawName, ModeValue, Network, Owner, ParameterKey, Predicate, RateClass, Schema, SiteId, Sites, Space,
-    Species,
+    AdmissibleSet, AdmissionError, Anatomy, Book, Boundary, BoundaryDirection, Class, CompileDefect,
+    Compliance, Element, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Predicate, RateClass,
+    Schema, SiteId, Sites, Space, Species,
 };
 
 pub(crate) fn compile(
@@ -30,6 +31,7 @@ pub(crate) fn compile(
     held.sort_by_key(|card| card.card);
     check_fragments(&issued, &fragments, &schema, &held)?;
     check_boundaries(&schema)?;
+    check_reactions(&fragments, &schema)?;
     let declarations = declarations(&fragments)?;
     let unissued = FragmentData::empty(Boundary::CARD);
     let owed = obligations(&fragments, &schema, &held, &unissued)?;
@@ -90,7 +92,16 @@ pub(crate) fn compile(
             pools.push((RowId::at(row), card));
         }
     }
-    let basis = conserved_basis(&species, &placement.columns, &column_reads, held, pools);
+    let basis = conserved_basis(
+        &species,
+        &placement.columns,
+        &column_reads,
+        &schema.energy,
+        held,
+        pools,
+    )?;
+    let totals = admission_totals(&basis, &placement.columns, &column_reads, species.len())
+        .ok_or(CompileDefect::ConservationOverflow { law: None })?;
     let judged = judged_rows(reads.len(), &stores);
     let pivots = pivots(solved_by.clone(), &stores);
     let sparsity = sparsity(reads);
@@ -112,7 +123,7 @@ pub(crate) fn compile(
         hazards,
         basis,
     };
-    Ok(CompiledBody::seal(layout, elimination))
+    Ok(CompiledBody::seal(layout, elimination, totals))
 }
 
 fn check_fragments(
@@ -184,6 +195,7 @@ fn check_names(fragment: &FragmentData, schema: &Schema, held: &[HeldCard]) -> R
                 .filter(|boundary| route_owner(held, boundary.name) == fragment.owner)
                 .map(|boundary| boundary.name),
         )
+        .chain(fragment.reactions.iter().map(|reaction| reaction.name))
         .collect();
     names.sort_unstable();
     if let Some(pair) = names.windows(2).find(|pair| pair[0] == pair[1]) {
@@ -226,6 +238,67 @@ fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
     }
 }
 
+fn balanced() -> impl Iterator<Item = Book> {
+    let elements = Element::ALL.into_iter().map(Book::Element);
+    core::iter::once(Book::Charge)
+        .chain(elements)
+        .chain([Book::Energy])
+}
+
+fn left_over(reaction: &ReactionDeclaration, book: Book, contents: &[(Species, i64)]) -> Option<i64> {
+    let exact = i128::from(BINARY64_EXACT);
+    let mut sum = 0;
+    for term in &reaction.terms {
+        let held = i128::from(term.change) * i128::from(weight(book, term.species, contents));
+        if held.abs() > exact {
+            return None;
+        }
+        sum += held;
+    }
+    i64::try_from(sum)
+        .ok()
+        .filter(|sum| sum.unsigned_abs() <= BINARY64_EXACT.unsigned_abs())
+}
+
+fn check_reactions(fragments: &[FragmentData], schema: &Schema) -> Result<(), CompileDefect> {
+    for fragment in fragments {
+        let mut reactions: Vec<&ReactionDeclaration> = fragment.reactions.iter().collect();
+        reactions.sort_by_key(|reaction| reaction.name);
+        for reaction in reactions {
+            let law = LawName {
+                owner: fragment.owner,
+                local: reaction.name,
+            };
+            let mut species: Vec<Species> = reaction.terms.iter().map(|term| term.species).collect();
+            species.sort_unstable();
+            if let Some(pair) = species.windows(2).find(|pair| pair[0] == pair[1]) {
+                let species = pair[0];
+                return Err(CompileDefect::SpeciesTwice { law, species });
+            }
+            let made = |species: Species| matches!(species.makeup(), Makeup::Atoms { .. });
+            if let Some(&species) = species.iter().find(|&&species| !made(species)) {
+                return Err(CompileDefect::NoMakeup { law, species });
+            }
+            let fuel = |species: Species| matches!(species.makeup(), Makeup::Atoms { fuel: true, .. });
+            let stated = |species: Species| schema.energy.iter().any(|content| content.0 == species);
+            if let Some(&species) = species.iter().find(|&&species| fuel(species) && !stated(species)) {
+                return Err(CompileDefect::UnstatedEnergy { law, species });
+            }
+            let mut left = Vec::new();
+            for book in balanced() {
+                let over = left_over(reaction, book, &schema.energy)
+                    .ok_or(CompileDefect::ConservationOverflow { law: Some(law) })?;
+                left.push((book, over));
+            }
+            let taken = |book: Book| book == Book::Energy && reaction.energy.is_some();
+            if let Some(&(book, _)) = left.iter().find(|&&(book, over)| over != 0 && !taken(book)) {
+                return Err(CompileDefect::UnbalancedReaction { law, book });
+            }
+        }
+    }
+    Ok(())
+}
+
 fn declarations(fragments: &[FragmentData]) -> Result<Vec<&ParameterDeclaration>, CompileDefect> {
     let mut all: Vec<&ParameterDeclaration> = fragments
         .iter()
@@ -258,6 +331,7 @@ enum Serves<'f> {
     Family(Family),
     Boundary(&'f RouteBoundary),
     Sum(Sites),
+    Reaction(&'f ReactionDeclaration),
 }
 
 fn obligations<'f>(
@@ -308,6 +382,14 @@ fn obligations<'f>(
                 family.name(),
                 Serves::Family(family),
                 Obligation::Family(family),
+            ));
+        }
+        for reaction in &fragment.reactions {
+            owed.push(Owed::gather(
+                fragment,
+                reaction.name,
+                Serves::Reaction(reaction),
+                Obligation::Reaction(reaction.name),
             ));
         }
         for law in &fragment.laws {
@@ -764,7 +846,8 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
     let species_at = |site, space, species| PoolRef { site, space, species };
     let junctions = || anatomy.in_set(Sites::Class(Class::Junction)).into_iter();
     let store = |space: Space| {
-        let found = (schema.pools()).find(|pool| pool.1 == space && pool.2 == Species::Energy);
+        let body = |pool: &(SiteId, Space, Species)| pool.0.class() == Class::TissueSite;
+        let found = (schema.pools()).find(|pool| body(pool) && pool.1 == space && pool.2 == Species::Energy);
         found.map(|(site, space, species)| PoolRef { site, space, species })
     };
     match family {
@@ -1106,6 +1189,15 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                 }
                 targets
             }
+            Serves::Reaction(reaction) => {
+                let mut targets = Vec::new();
+                for (site, column) in reaction_columns(law.name, reaction, places)? {
+                    let target = Target::Column(ColumnId::at(placement.columns.len()));
+                    targets.push((Context::Site(site), target));
+                    placement.columns.push(column);
+                }
+                targets
+            }
         };
         for &(_, kernel) in &law.laws {
             if let Serves::Boundary(water) = law.serves {
@@ -1363,6 +1455,60 @@ fn column(law: LawName, reach: &Reach, rows: &Rows) -> Result<Column, CompileDef
     })
 }
 
+fn reaction_columns(
+    law: LawName,
+    reaction: &ReactionDeclaration,
+    places: &Places,
+) -> Result<Vec<(SiteId, Column)>, CompileDefect> {
+    let Places {
+        rows,
+        reaches,
+        anatomy,
+        schema,
+        ..
+    } = *places;
+    let overflow = CompileDefect::ConservationOverflow { law: Some(law) };
+    let left = left_over(reaction, Book::Energy, &schema.energy).ok_or(overflow)?;
+    let mut columns = Vec::new();
+    for site in anatomy.in_set(reaction.set) {
+        let pools: Vec<(PoolRef, i64)> = (reaction.terms.iter())
+            .map(|term| {
+                let (space, species) = (term.space, term.species);
+                (PoolRef { site, space, species }, term.change)
+            })
+            .collect();
+        if !pools.iter().all(|&(pool, _)| reaches.held(Some(pool))) {
+            continue;
+        }
+        let mut terms = Vec::with_capacity(pools.len() + 1);
+        for (pool, count) in pools {
+            terms.push((RowId::at(rows.amount(pool).ok_or(left_out(law, pool))?), count));
+        }
+        if let Some(space) = reaction.energy {
+            let species = Species::Energy;
+            let store = PoolRef { site, space, species };
+            if !reaches.held(Some(store)) {
+                return Err(CompileDefect::ReactionEndpoint { law, site, space });
+            }
+            if left != 0 {
+                terms.push((RowId::at(rows.amount(store).ok_or(left_out(law, store))?), -left));
+            }
+        }
+        terms.sort_unstable();
+        let column = Column {
+            terms,
+            origin: law,
+            context: Context::Site(site),
+            receipt: None,
+        };
+        columns.push((site, column));
+    }
+    if columns.is_empty() {
+        return Err(CompileDefect::ReactionNowhere { law });
+    }
+    Ok(columns)
+}
+
 fn exterior(law: LawName, water: &RouteBoundary, rows: &Rows) -> Result<Column, CompileDefect> {
     let row = rows.amount(water.pool).ok_or(left_out(law, water.pool))?;
     let coefficient = match water.direction {
@@ -1447,8 +1593,8 @@ fn addresses(
         chance,
         anatomy,
         schema,
+        fragments,
         held,
-        ..
     } = *places;
     let inputs = kernel
         .code
@@ -1535,6 +1681,25 @@ fn addresses(
                 };
                 let pool = base.ok_or(CompileDefect::NoSuchRead { law })?;
                 let pool = PoolRef { species, ..pool };
+                unknown(rows.amount(pool).ok_or(left_out(law, pool))?)
+            }
+            Source::Reacting(reaction, species) => {
+                let site = landed.ok_or(CompileDefect::NoSuchRead { law })?;
+                let term = (fragments.iter())
+                    .filter(|fragment| fragment.owner == law.owner)
+                    .flat_map(|fragment| &fragment.reactions)
+                    .filter(|declared| declared.name == reaction)
+                    .flat_map(|declared| &declared.terms)
+                    .find(|term| term.species == species)
+                    .ok_or(CompileDefect::NoSuchRead { law })?;
+                let pool = PoolRef {
+                    site,
+                    space: term.space,
+                    species,
+                };
+                if !reaches.held(Some(pool)) {
+                    return Err(CompileDefect::NoSuchRead { law });
+                }
                 unknown(rows.amount(pool).ok_or(left_out(law, pool))?)
             }
             Source::Drive(route) => {

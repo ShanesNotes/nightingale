@@ -121,10 +121,10 @@ core = "An orphan pool"
 mutants = ["orphan-held"]
 
 [[row]]
-core = "A reaction that creates an element, written outside a scope or slipped into the schema"
-mutants = ["cargo-held-at-both-ends"]
+core = "A reaction whose proportions leave an element, charge or energy open, or written from raw stoichiometry"
+mutants = ["reaction-balanced"]
 doctests = [
-  { path = "crates/ng-contract/src/lib.rs", code = "E0451", text = "SiteRoute { family: todo!(), brand: todo!(), kind: todo!() }" },
+  { path = "crates/ng-contract/src/lib.rs", code = "E0451", text = "Proportions { terms: Vec::new(), energy: None, reference: core::marker::PhantomData }" },
 ]
 
 [[row]]

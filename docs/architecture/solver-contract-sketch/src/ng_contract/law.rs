@@ -11,7 +11,8 @@ use super::catalog::{Coupling, Defines, Reads};
 use super::{
     Admissible, AdmissionError, Brand, Conductance, Digest, Dimensionless, Energy, NonMaterial,
     ParameterKey, PerSite, PoolRef, Pressure, Product, Quotient, RateClass, Rate, Reference, Deviation,
-    Representation, SameDimension, Sensed, SiteClass, ValidityRange, Volume,
+    Representation, SameDimension, Sensed, SiteClass, ValidityRange, Volume, CapillaryBed, Metabolism,
+    Space,
 };
 use core::marker::PhantomData;
 
@@ -364,12 +365,44 @@ pub struct SiteRoute<'b, O, C, Q> {
     _brand: Brand<'b>,
     _kind: PhantomData<(O, C, Q)>,
 }
-/// Minted by a scope only after exact element and charge accounting and energy-route checks.
-pub struct BalancedReaction<'b, O> {
-    _stoichiometry: Vec<(u32, i64)>,
-    _brand: Brand<'b>,
-    _owner: PhantomData<O>,
+/// What a reaction uses and makes per unit of its reference species `Q`: typed species, each once,
+/// with its space and a whole count. `Assembly::compile` checks that the counts balance every
+/// element, charge and energy.
+pub struct Proportions<Q> {
+    _terms: Vec<(Space, u32, i64)>,
+    _energy: Option<Space>,
+    _reference: PhantomData<Q>,
 }
+impl<Q> Proportions<Q> {
+    /// Per unit of `Q` used, so the reaction's rate counts `Q` used per second.
+    pub fn using(_space: Space) -> Self {
+        todo!()
+    }
+    pub fn uses<R, const N: u32>(self, _space: Space) -> Self {
+        todo!()
+    }
+    pub fn makes<R, const N: u32>(self, _space: Space) -> Self {
+        todo!()
+    }
+    /// The energy the uses hold beyond the makes, at the contents the schema states, enters the
+    /// energy pool in this space at the reaction's site. No law writes a heat.
+    pub fn energy_into(self, _space: Space) -> Self {
+        todo!()
+    }
+}
+/// A reaction its owner declared for every site of `C` that holds its pools, counted in `Q`.
+pub struct Reaction<'b, O, C, Q> {
+    _name: &'static str,
+    _brand: Brand<'b>,
+    _kind: PhantomData<(O, C, Q)>,
+}
+mod grants {
+    pub trait ReactsAt<C> {}
+}
+/// The site classes a card may declare a reaction at. Sealed: metabolism at the capillary beds.
+pub trait ReactsAt<C: SiteClass>: grants::ReactsAt<C> {}
+impl grants::ReactsAt<CapillaryBed> for Metabolism {}
+impl ReactsAt<CapillaryBed> for Metabolism {}
 
 /// Declaring a slot, an output or a route records a law the fragment owes, and attaching a law borrows
 /// it, so the model compiler sees every law on a row together and checks coverage and modes.
@@ -480,7 +513,15 @@ impl<'b, O> FragmentBuilder<'b, O> {
     pub fn work(&mut self, _pair: &WorkPair<'b, O>, _power: PureKernel<'b, O, Rate<Energy>>) {
         todo!()
     }
-    pub fn reaction(&mut self, _reaction: &BalancedReaction<'b, O>, _rate: PureKernel<'b, O, Rate<Dimensionless>>) {
+    /// Declares a reaction at every site of `C` that holds its pools, and records the rate it owes.
+    pub fn reaction<C: SiteClass, Q>(&mut self, _name: &'static str, _proportions: Proportions<Q>) -> Reaction<'b, O, C, Q>
+    where
+        O: ReactsAt<C>,
+    {
+        todo!()
+    }
+    /// The reaction's rate, in its reference species per second.
+    pub fn react_at<C: SiteClass, Q>(&mut self, _reaction: &Reaction<'b, O, C, Q>, _rate: PureKernel<'b, O, Rate<Q>, C>) {
         todo!()
     }
     pub fn event<U>(&mut self, _guard: Guard<'b, O, U>) {

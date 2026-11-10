@@ -709,3 +709,56 @@ path = "crates/ng-validate/src/window.rs"
 old = '''let net = total.minus(*before);'''
 new = '''let net = total;'''
 test = "-p ng-validate --lib window::tests::an_exchange_is_compared_by_its_net_over_each_interval_and_a_level_as_it_stands"
+
+[[mutant]]
+name = "reaction-balanced"
+path = "crates/ng-contract/src/compile.rs"
+old = '''left.iter().find(|&&(book, over)| over != 0 && !taken(book))'''
+new = '''left.iter().find(|&&(book, over)| false && over != 0 && !taken(book))'''
+test = "-p ng-validate --test burning a_burn_that_makes_carbon_is_refused_naming_carbon"
+
+[[mutant]]
+name = "reaction-energy-taken"
+path = "crates/ng-contract/src/compile.rs"
+old = '''let taken = |book: Book| book == Book::Energy && reaction.energy.is_some();'''
+new = '''let taken = |book: Book| book == Book::Energy;'''
+test = "-p ng-validate --test burning a_burn_whose_energy_goes_nowhere_is_refused"
+
+[[mutant]]
+name = "reacting-part-spanned"
+path = "crates/ng-contract/src/conservation.rs"
+old = '''if !spans_conserved(part, inside, amounts, &found).ok_or(overflow)? {'''
+new = '''if false && !spans_conserved(part, inside, amounts, &found).ok_or(overflow)? {'''
+test = "-p ng-contract --test reactions two_burns_joined_only_by_water_leave_a_conserved_direction_unnamed"
+
+[[mutant]]
+name = "admission-total-on-its-lead"
+path = "crates/ng-contract/src/conservation.rs"
+old = '''replaces: RowId::at(lead),'''
+new = '''replaces: terms[0].0,'''
+test = "-p ng-contract --lib conservation::tests::a_fuel_supply_that_reads_the_body_leaves_three_totals_each_on_its_own_row"
+
+[[mutant]]
+name = "quantity-split-where-unjoined"
+path = "crates/ng-contract/src/conservation.rs"
+old = '''for piece in connected_sets(weighed.len(), groups) {'''
+new = '''for piece in connected_sets(weighed.len(), groups.chain([(0..weighed.len()).collect()])) {'''
+test = "-p ng-contract --test reactions a_quantity_splits_where_its_own_columns_do_not_join_its_rows"
+
+[[mutant]]
+name = "store-on-the-tissue-site"
+path = "crates/ng-contract/src/compile.rs"
+old = '''let found = (schema.pools()).find(|pool| body(pool) && pool.1 == space && pool.2 == Species::Energy);'''
+new = '''let found = (schema.pools()).find(|pool| (body(pool) || true) && pool.1 == space && pool.2 == Species::Energy);'''
+test = "-p ng-contract --test reactions dissipation_reaches_the_body_store_whatever_sorts_before_it"
+
+[[mutant]]
+name = "exchange-on-receipts"
+path = "crates/ng-record/src/history.rs"
+old = '''    if !crosses {
+        return 0;
+    }'''
+new = '''    if !crosses && false {
+        return 0;
+    }'''
+test = "-p ng-record --lib history::tests::carbon_a_reaction_makes_inside_the_body_leaves_closure_open_instead_of_counting_as_exchange"

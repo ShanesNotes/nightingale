@@ -234,6 +234,7 @@ extern crate alloc;
 
 mod accuracy;
 mod arena;
+mod burning;
 mod certificate;
 mod day;
 mod fixture;
@@ -250,6 +251,7 @@ pub use accuracy::{
     AccuracyCase, AccuracyEvidence, AccuracyFailure, AccuracyPolicy, accuracy, observed_order,
 };
 pub use arena::{Arena, ArenaProtocol};
+pub use burning::BurningBeds;
 pub use certificate::{
     Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, ExpectedDrift, HeldSupport,
     QuantityPolicy, QuantityResult, SlidingWindows, certify,

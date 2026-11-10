@@ -10,5 +10,6 @@ Blocked by: 02
 - [ ] What the certificate reads for charge under each option, over the same run
 - [ ] A pick with its reason
 - [ ] What the pick asks of tickets 03, 14 and 18
+- [ ] A refusal test and a mutant row for the charge leg of the compile's balance check. No test reaches that leg today, because every charged species is carried and states no atoms, so a reaction that names one is refused first
 
 **Non-goals:** the acid loop's laws ([ticket 18](18-acid-loop.md)).

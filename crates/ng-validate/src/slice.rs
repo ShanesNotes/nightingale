@@ -540,7 +540,16 @@ pub(crate) fn arena_certificate(
         Book::Of(Species::Vasopressin) => limits::<Vasopressin>(quantity),
         Book::Of(Species::Norepinephrine) => limits::<Norepinephrine>(quantity),
         Book::Of(Species::Acetylcholine) => limits::<Acetylcholine>(quantity),
-        Book::Of(Species::Energy) => limits::<Energy>(quantity),
+        Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity),
+        Book::Of(Species::Oxygen) => limits::<Oxygen>(quantity),
+        Book::Of(Species::CarbonDioxide) => limits::<CarbonDioxide>(quantity),
+        Book::Of(Species::Glucose) => limits::<Glucose>(quantity),
+        Book::Element(_) => QuantityPolicy::element(
+            quantity,
+            Measure::new(0.0)?,
+            Measure::new(CLOSURE_RELATIVE)?,
+            Measure::new(SYNTHETIC_DRIFT)?,
+        ),
         Book::Charge => QuantityPolicy::charge(quantity, Measure::new(0.0)?, Measure::new(CLOSURE_RELATIVE)?),
     });
     let quantities = quantities.collect::<Result<Vec<_>, _>>()?;
