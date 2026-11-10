@@ -1,9 +1,9 @@
-use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::quantity::dimension;
-use crate::scope::HeldCard;
+use crate::scope::{EXACT, HeldCard};
 use crate::{
-    Atoms, BoundaryDirection, Column, ColumnId, Digest, Dimension, Element, Energy, Makeup, RowId, Species,
+    AdmissionRow, Atoms, BoundaryDirection, Column, ColumnId, CompileDefect, Digest, Dimension, Element,
+    Energy, LawName, Makeup, RowId, Species,
 };
 
 /// The conserved quantity a combination balances. Where no reaction joins species, what its pools hold: a moiety is
@@ -248,45 +248,53 @@ impl Seal for Combination {
     }
 }
 
+/// The conserved combinations of the body's amounts. Rows the internal columns join form a part. A part no reaction
+/// joins holds one species, because a transfer moves one, and is one combination of it, weight one on each row. In a
+/// part a reaction joins, each element its species hold and energy are a combination on each piece of their rows that
+/// their own columns join, each row weighted by what its species holds. Ordered by least row and then by book, with
+/// charge last over every ion. A boundary column that reads the body regulates each combination that holds its row.
 pub(crate) fn conserved_basis(
     amounts: &[Species],
     columns: &[Column],
     reads: &[bool],
+    contents: &[(Species, i64)],
     held: Vec<HeldCard>,
     pools: Vec<(RowId, &'static str)>,
-) -> ConservedBasis {
-    let mut edges = Vec::new();
-    for column in columns {
-        match column.terms[..] {
-            [(from, -1), (to, 1)] | [(to, 1), (from, -1)] => {
-                edges.push((from.index(), to.index()));
-                edges.push((to.index(), from.index()));
-            }
-            [] | [_] => {}
-            _ => unreachable!("a transfer moves one unit between two amounts, or across the boundary"),
+) -> Result<ConservedBasis, CompileDefect> {
+    let internal: Vec<&Column> = columns.iter().filter(|column| column.receipt.is_none()).collect();
+    let ends = |column: &&Column| -> Vec<usize> { column.terms.iter().map(|term| term.0.index()).collect() };
+    let parts = joined(amounts.len(), internal.iter().map(ends));
+    let mut part_of = vec![0; amounts.len()];
+    for (at, part) in parts.iter().enumerate() {
+        for &row in part {
+            part_of[row] = at;
         }
     }
-    let part = Digraph::new(amounts.len(), &edges).strongly_connected_components();
-    let mut seen: Vec<usize> = Vec::new();
-    let mut combinations: Vec<Combination> = Vec::new();
-    for (row, &part) in part.iter().enumerate() {
-        let at = match seen.iter().position(|&known| known == part) {
-            Some(at) => at,
-            None => {
-                seen.push(part);
-                combinations.push(Combination {
-                    id: QuantityId {
-                        index: seen.len() - 1,
-                        book: Book::Of(amounts[row]),
-                    },
-                    terms: Vec::new(),
-                    regulated: false,
-                });
-                seen.len() - 1
-            }
-        };
-        combinations[at].terms.push((RowId::at(row), 1));
+    let mut inside: Vec<Vec<&Column>> = vec![Vec::new(); parts.len()];
+    for &column in &internal {
+        if let Some(&(row, _)) = column.terms.first() {
+            inside[part_of[row.index()]].push(column);
+        }
     }
+    let mut found: Vec<(Book, Vec<(RowId, i64)>)> = Vec::new();
+    for (part, inside) in parts.iter().zip(&inside) {
+        let part: Vec<RowId> = part.iter().map(|&row| RowId::at(row)).collect();
+        match inside.iter().find(|column| joins_species(column, amounts)) {
+            None => found.push((
+                Book::Of(amounts[part[0].index()]),
+                part.iter().map(|&row| (row, 1)).collect(),
+            )),
+            Some(reaction) => found.extend(quantities(&part, inside, amounts, contents, reaction.origin)?),
+        }
+    }
+    found.sort_by_key(|(book, terms)| (terms[0].0, *book));
+    let mut combinations: Vec<Combination> = (found.into_iter().enumerate())
+        .map(|(index, (book, terms))| Combination {
+            id: QuantityId { index, book },
+            terms,
+            regulated: false,
+        })
+        .collect();
     for (column, _) in
         (columns.iter().zip(reads)).filter(|&(column, reads)| *reads && column.receipt.is_some())
     {
@@ -341,14 +349,281 @@ pub(crate) fn conserved_basis(
             quantity: quantity(row),
         })
         .collect();
-    ConservedBasis {
+    Ok(ConservedBasis {
         combinations,
         coverage: CoverageManifest {
             declarations: held,
             routes,
             pools,
         },
+    })
+}
+
+fn joins_species(column: &Column, amounts: &[Species]) -> bool {
+    let mut species = column.terms.iter().map(|term| amounts[term.0.index()]);
+    let first = species.next();
+    species.any(|other| Some(other) != first)
+}
+
+/// Which of `count` indices the groups join: each set in index order, the sets by least index.
+fn joined(count: usize, groups: impl Iterator<Item = Vec<usize>>) -> Vec<Vec<usize>> {
+    fn root(parent: &mut [usize], mut at: usize) -> usize {
+        while parent[at] != at {
+            parent[at] = parent[parent[at]];
+            at = parent[at];
+        }
+        at
     }
+    let mut parent: Vec<usize> = (0..count).collect();
+    for group in groups {
+        if let Some((&first, rest)) = group.split_first() {
+            for &other in rest {
+                let (a, b) = (root(&mut parent, first), root(&mut parent, other));
+                parent[a.max(b)] = a.min(b);
+            }
+        }
+    }
+    let (mut sets, mut set_of): (Vec<Vec<usize>>, Vec<Option<usize>>) = (Vec::new(), vec![None; count]);
+    for at in 0..count {
+        let top = root(&mut parent, at);
+        match set_of[top] {
+            Some(set) => sets[set].push(at),
+            None => {
+                set_of[top] = Some(sets.len());
+                sets.push(vec![at]);
+            }
+        }
+    }
+    sets
+}
+
+/// The combinations of a part `law`'s reaction joins: for each element its species hold and then energy, one on each
+/// piece of the rows with weight in it that its own columns join. Refuses the part unless they span every combination
+/// its columns conserve, so the certificate names each quantity it judges.
+fn quantities(
+    part: &[RowId],
+    inside: &[&Column],
+    amounts: &[Species],
+    contents: &[(Species, i64)],
+    law: LawName,
+) -> Result<Vec<(Book, Vec<(RowId, i64)>)>, CompileDefect> {
+    let mut found = Vec::new();
+    for book in Element::ALL.map(Book::Element).into_iter().chain([Book::Energy]) {
+        let weighed: Vec<(RowId, i64)> = (part.iter())
+            .map(|&row| (row, weight(book, amounts[row.index()], contents)))
+            .filter(|&(_, weight)| weight != 0)
+            .collect();
+        let at = |row: &RowId| weighed.binary_search_by_key(row, |held| held.0).ok();
+        let groups = inside
+            .iter()
+            .map(|column| column.terms.iter().filter_map(|term| at(&term.0)).collect());
+        for piece in joined(weighed.len(), groups) {
+            found.push((book, piece.into_iter().map(|at| weighed[at]).collect()));
+        }
+    }
+    let overflow = CompileDefect::ConservationOverflow { law: Some(law) };
+    if !complete(part, inside, amounts, &found).ok_or(overflow)? {
+        return Err(CompileDefect::UnnamedConservedQuantity { law });
+    }
+    Ok(found)
+}
+
+/// Whether `found` spans every combination the part's columns leave unchanged. A transfer moves one species, so such a
+/// combination is constant on the rows transfers join, and on those sets it is any the reactions leave unchanged.
+/// `None` past i128.
+fn complete(
+    part: &[RowId],
+    inside: &[&Column],
+    amounts: &[Species],
+    found: &[(Book, Vec<(RowId, i64)>)],
+) -> Option<bool> {
+    let index = |row: RowId| {
+        part.binary_search(&row)
+            .expect("a column inside a part has its rows there")
+    };
+    let (reactions, transfers): (Vec<&Column>, Vec<&Column>) = inside
+        .iter()
+        .copied()
+        .partition(|column| joins_species(column, amounts));
+    let ends = |column: &&Column| -> Vec<usize> { column.terms.iter().map(|term| index(term.0)).collect() };
+    let sets = joined(part.len(), transfers.iter().map(ends));
+    let mut set_of = vec![0; part.len()];
+    for (at, set) in sets.iter().enumerate() {
+        for &row in set {
+            set_of[row] = at;
+        }
+    }
+    let mut columns = Echelon::default();
+    for column in reactions {
+        let mut vector = vec![0; sets.len()];
+        for &(row, coefficient) in &column.terms {
+            vector[set_of[index(row)]] += i128::from(coefficient);
+        }
+        columns.reduce(vector, sets.len())?;
+    }
+    let mut spanned = Echelon::default();
+    for (_, terms) in found {
+        let mut vector = vec![0; sets.len()];
+        for &(row, weight) in terms {
+            vector[set_of[index(row)]] = i128::from(weight);
+        }
+        spanned.reduce(vector, sets.len())?;
+    }
+    Some(spanned.kept.len() + columns.kept.len() == sets.len())
+}
+
+/// Integer vectors, each kept one reduced against those before it so that it leads with a coordinate no other kept one
+/// leads with. Exact: products in i128 and each reduced vector divided by its entries' greatest common divisor.
+#[derive(Default)]
+struct Echelon {
+    kept: Vec<(usize, Vec<i128>)>,
+}
+enum Reduced {
+    Leads(usize),
+    Held(Vec<i128>),
+}
+impl Echelon {
+    /// Takes the kept vectors out of `vector`, which then leads with its first nonzero coordinate below `within`: kept,
+    /// or given back when it has none there. `None` past i128.
+    fn reduce(&mut self, mut vector: Vec<i128>, within: usize) -> Option<Reduced> {
+        for (lead, kept) in &self.kept {
+            let (by, scale) = (vector[*lead], kept[*lead]);
+            if by == 0 {
+                continue;
+            }
+            for (entry, &other) in vector.iter_mut().zip(kept) {
+                *entry = entry.checked_mul(scale)?.checked_sub(other.checked_mul(by)?)?;
+            }
+            lowest(&mut vector)?;
+        }
+        match vector[..within].iter().position(|&entry| entry != 0) {
+            Some(lead) => {
+                let at = self.kept.partition_point(|kept| kept.0 < lead);
+                self.kept.insert(at, (lead, vector));
+                Some(Reduced::Leads(lead))
+            }
+            None => Some(Reduced::Held(vector)),
+        }
+    }
+}
+
+/// Divides by the entries' greatest common divisor, and makes the first nonzero entry positive.
+fn lowest(vector: &mut [i128]) -> Option<()> {
+    let mut divisor: u128 = 0;
+    for entry in vector.iter() {
+        let (mut a, mut b) = (divisor, entry.unsigned_abs());
+        while b != 0 {
+            (a, b) = (b, a % b);
+        }
+        divisor = a;
+    }
+    let first = vector.iter().find(|&&entry| entry != 0).copied().unwrap_or(0);
+    let divisor = i128::try_from(divisor).ok()?.checked_mul(first.signum())?;
+    if divisor != 0 {
+        for entry in vector.iter_mut() {
+            *entry /= divisor;
+        }
+    }
+    Some(())
+}
+
+/// A combination admission states at a cycle's wrap, on the row whose end stage it replaces.
+#[derive(Debug, PartialEq)]
+pub(crate) struct AdmissionTotal {
+    pub(crate) row: RowId,
+    pub(crate) terms: Vec<(RowId, i64)>,
+    pub(crate) label: AdmissionRow,
+}
+
+/// A total admission states that is no one combination's: an integer combination of several that the boundary columns
+/// reading the body move only together. Its index is its place among admission's totals.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConservedRowId {
+    index: usize,
+}
+impl ConservedRowId {
+    pub fn index(self) -> usize {
+        self.index
+    }
+}
+
+/// What admission states at a cycle's wrap: each combination but charge that no boundary column reading the body
+/// changes, in basis order, then each integer combination of the others that those columns leave unchanged. Each is
+/// reduced against those before it and placed on the row its reduction leads with, so no two share a row and the
+/// replaced rows keep their rank; one the others already hold takes none. Charge follows from the rest. With no
+/// reaction these are the combinations no such column touches, each on its least row. `None` past the exact range.
+pub(crate) fn admission_totals(
+    basis: &ConservedBasis,
+    columns: &[Column],
+    reads: &[bool],
+    amounts: usize,
+) -> Option<Vec<AdmissionTotal>> {
+    let reading: Vec<&Column> = (columns.iter().zip(reads))
+        .filter(|&(column, reads)| *reads && column.receipt.is_some())
+        .map(|(column, _)| column)
+        .collect();
+    let incidence = |combination: &Combination, column: &Column| -> i128 {
+        let weight = |row| {
+            (combination.terms.iter())
+                .find(|term| term.0 == row)
+                .map_or(0, |term| term.1)
+        };
+        (column.terms.iter())
+            .map(|&(row, coefficient)| i128::from(coefficient) * i128::from(weight(row)))
+            .sum()
+    };
+    let books = (basis.combinations.iter()).filter(|combination| combination.book() != Book::Charge);
+    let (untouched, touched): (Vec<&Combination>, Vec<&Combination>) =
+        books.partition(|&combination| reading.iter().all(|&column| incidence(combination, column) == 0));
+    let mut totals: Vec<(Vec<(RowId, i64)>, Option<QuantityId>)> = (untouched.iter())
+        .map(|combination| (combination.terms.clone(), Some(combination.id)))
+        .collect();
+    let mut moved = Echelon::default();
+    for (at, &combination) in touched.iter().enumerate() {
+        let mut vector: Vec<i128> = reading
+            .iter()
+            .map(|&column| incidence(combination, column))
+            .collect();
+        vector.extend((0..touched.len()).map(|other| i128::from(other == at)));
+        let Reduced::Held(held) = moved.reduce(vector, reading.len())? else {
+            continue;
+        };
+        let mut sum = vec![0_i128; amounts];
+        for (combination, &by) in touched.iter().zip(&held[reading.len()..]) {
+            for &(row, weight) in &combination.terms {
+                let entry = &mut sum[row.index()];
+                *entry = entry.checked_add(by.checked_mul(i128::from(weight))?)?;
+            }
+        }
+        lowest(&mut sum)?;
+        let exact = |entry: &i128| entry.unsigned_abs() <= EXACT.unsigned_abs().into();
+        let terms = (sum.iter().enumerate())
+            .filter(|&(_, &entry)| entry != 0)
+            .map(|(row, &entry)| exact(&entry).then_some((RowId::at(row), entry as i64)))
+            .collect::<Option<Vec<_>>>()?;
+        totals.push((terms, None));
+    }
+    let mut rows = Echelon::default();
+    let mut plan = Vec::new();
+    for (terms, quantity) in totals {
+        let mut vector = vec![0; amounts];
+        for &(row, weight) in &terms {
+            vector[row.index()] = i128::from(weight);
+        }
+        if let Reduced::Leads(lead) = rows.reduce(vector, amounts)? {
+            let index = plan.len();
+            let label = quantity.map_or(
+                AdmissionRow::Conserved(ConservedRowId { index }),
+                AdmissionRow::Total,
+            );
+            plan.push(AdmissionTotal {
+                row: RowId::at(lead),
+                terms,
+                label,
+            });
+        }
+    }
+    Some(plan)
 }
 
 #[cfg(test)]
@@ -390,7 +665,7 @@ mod tests {
         assemble(schema, |mut body| {
             let held = HeldDeclaration::<Metabolism>::new(Vec::new(), Vec::new(), "bench: synthetic");
             let (mut laws, _) = body.hold(held)?.parts();
-            let burn = Proportions::using::<Glucose>(Space::Interstitium)
+            let burn = Proportions::<Glucose>::using(Space::Interstitium)
                 .uses::<Oxygen, 6>(Space::Interstitium)
                 .makes::<CarbonDioxide, 6>(Space::Interstitium)
                 .makes::<Water, 6>(Space::Interstitium)

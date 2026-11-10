@@ -363,8 +363,9 @@ pub enum CompileDefect {
     /// A reaction whose counts leave a conserved quantity open: an element or charge its uses and makes do not hold
     /// alike, or energy with no pool to take it. Names the first in `Book` order.
     UnbalancedReaction { law: LawName, book: Book },
-    /// A count times a weight, or their sum, past 2^53, where an integer weight stops being exact.
-    ConservationOverflow { law: LawName },
+    /// A count times a weight, or their sum, past 2^53, where an integer weight stops being exact, or exact arithmetic on
+    /// the conserved combinations past i128. Names the reaction when one is to blame, and none for admission's totals.
+    ConservationOverflow { law: Option<LawName> },
     /// A reaction whose pools exist together at no site of its set.
     ReactionNowhere { law: LawName },
     /// A site where a reaction stands without the energy pool its energy goes to.
@@ -373,6 +374,9 @@ pub enum CompileDefect {
         site: SiteId,
         space: Space,
     },
+    /// A part the reaction joins whose conserved quantities miss a combination its columns leave unchanged, which the
+    /// certificate could then not name.
+    UnnamedConservedQuantity { law: LawName },
 }
 
 /// Why one attempt cannot stand. A smaller retry of the same base can still succeed. A row or source id

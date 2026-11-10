@@ -1,3 +1,4 @@
+use crate::conservation::AdmissionTotal;
 use crate::elimination::{Elimination, Factors};
 use crate::evaluate::Tape;
 use crate::identity::{Canonical, Seal};
@@ -50,6 +51,7 @@ pub struct CompiledBody {
     elimination: Elimination,
     pub(crate) sources: Vec<RefusalSource>,
     pub(crate) tape: Tape,
+    totals: Vec<AdmissionTotal>,
 }
 pub(crate) struct Layout {
     pub(crate) schema: Schema,
@@ -69,7 +71,8 @@ pub(crate) struct Layout {
     pub(crate) basis: ConservedBasis,
 }
 impl CompiledBody {
-    pub(crate) fn seal(layout: Layout, elimination: Elimination) -> Self {
+    /// `totals` follow from the layout's basis, columns and reads, so the hash covers them through it.
+    pub(crate) fn seal(layout: Layout, elimination: Elimination, totals: Vec<AdmissionTotal>) -> Self {
         let mut out = Canonical::new("ng-contract model 2");
         layout.seal(&mut out);
         Self {
@@ -78,6 +81,7 @@ impl CompiledBody {
             tape: Tape::of(&layout),
             layout,
             elimination,
+            totals,
         }
     }
     pub fn model_hash(&self) -> ModelHash {
@@ -112,6 +116,10 @@ impl CompiledBody {
     }
     pub fn conserved_basis(&self) -> &ConservedBasis {
         &self.layout.basis
+    }
+    /// What admission states at a cycle's wrap, each on the row whose end stage it replaces.
+    pub(crate) fn admission_totals(&self) -> &[AdmissionTotal] {
+        &self.totals
     }
     pub fn hazards(&self) -> impl Iterator<Item = LawName> + '_ {
         (self.layout.hazards.iter()).map(|hazard| self.layout.streams[hazard.stream].name)

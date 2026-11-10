@@ -4,7 +4,7 @@ use crate::body::{
     RowId, RowKind, Slot, Sparsity, StreamLayout, Target, UnknownId,
 };
 use crate::chance::key_word;
-use crate::conservation::{conserved_basis, weight};
+use crate::conservation::{admission_totals, conserved_basis, weight};
 use crate::elimination::Elimination;
 use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
@@ -92,7 +92,16 @@ pub(crate) fn compile(
             pools.push((RowId::at(row), card));
         }
     }
-    let basis = conserved_basis(&species, &placement.columns, &column_reads, held, pools);
+    let basis = conserved_basis(
+        &species,
+        &placement.columns,
+        &column_reads,
+        &schema.energy,
+        held,
+        pools,
+    )?;
+    let totals = admission_totals(&basis, &placement.columns, &column_reads, species.len())
+        .ok_or(CompileDefect::ConservationOverflow { law: None })?;
     let judged = judged_rows(reads.len(), &stores);
     let pivots = pivots(solved_by.clone(), &stores);
     let sparsity = sparsity(reads);
@@ -114,7 +123,7 @@ pub(crate) fn compile(
         hazards,
         basis,
     };
-    Ok(CompiledBody::seal(layout, elimination))
+    Ok(CompiledBody::seal(layout, elimination, totals))
 }
 
 fn check_fragments(
@@ -285,7 +294,7 @@ fn check_reactions(fragments: &[FragmentData], schema: &Schema) -> Result<(), Co
             let mut left = Vec::new();
             for book in balanced() {
                 let over = open(reaction, book, &schema.energy)
-                    .ok_or(CompileDefect::ConservationOverflow { law })?;
+                    .ok_or(CompileDefect::ConservationOverflow { law: Some(law) })?;
                 left.push((book, over));
             }
             let taken = |book: Book| book == Book::Energy && reaction.energy.is_some();
@@ -1467,8 +1476,8 @@ fn reaction_columns(
         schema,
         ..
     } = *places;
-    let left =
-        open(reaction, Book::Energy, &schema.energy).ok_or(CompileDefect::ConservationOverflow { law })?;
+    let overflow = CompileDefect::ConservationOverflow { law: Some(law) };
+    let left = open(reaction, Book::Energy, &schema.energy).ok_or(overflow)?;
     let mut columns = Vec::new();
     for site in anatomy.in_set(reaction.set) {
         let pools: Vec<(PoolRef, i64)> = (reaction.terms.iter())

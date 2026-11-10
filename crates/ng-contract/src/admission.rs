@@ -1,14 +1,15 @@
 use crate::body::{Bound, Instance, ModeLayout, Target};
 use crate::boundary::{Delivery, DriveFrame, PendingInputs};
 use crate::chance::{HELD_DRAW, HELD_FACTOR};
+use crate::conservation::AdmissionTotal;
 use crate::elimination::{Elimination, Factors};
 use crate::evaluate::{Inputs, Undefined};
 use crate::identity::{Canonical, Seal};
 use crate::packet::{BoundAnchor, Fit, Owed};
 use crate::problem::Jacobian;
 use crate::{
-    AdmissionError, AnchorId, AnchorStatistic, Book, BoundParameters, BoundaryPort, Candidate, Combination,
-    Compensated, CompiledBody, DenseSegment, Digest, ErrorScales, ImageParts, InitializationProvenance,
+    AdmissionError, AnchorId, AnchorStatistic, Book, BoundParameters, BoundaryPort, Candidate, Compensated,
+    CompiledBody, ConservedRowId, DenseSegment, Digest, ErrorScales, ImageParts, InitializationProvenance,
     LawName, Measure, MethodHistory, ModelHash, ObservationLens, PacketHash, QuantityId, Row, RowId, RowKind,
     SimTime, Slot, Time, UnknownId, ValueName, ValueProvenance, ValueRecord, eliminate,
 };
@@ -731,20 +732,17 @@ impl InitializationSystem<'_> {
         let hazard = (self.body.layout.hazards.iter()).any(|hazard| hazard.integral.index() == row);
         self.interval.is_some() && !hazard
     }
-    /// The total row of a combination replaces its least row's end stage at the wrap, in the leg whose end it reads,
-    /// because the end rows sum to the combination's net boundary flow over the cycle, whatever the state: they alone
-    /// leave its total free. A regulated total answers its own flows, so its rows pin it and it needs no row. Charge
-    /// follows from the ions.
+    /// Each admission total replaces its row's end stage at the wrap, in the leg whose end it reads, because the end rows
+    /// sum to the total's net boundary flow over the cycle, whatever the state: they alone leave it free. A total that
+    /// a boundary reading the body moves answers its own flows, so its rows pin it and it needs no row.
     fn replaced<'w>(
         &'w self,
         workspace: &'w AdmissionWorkspace,
-    ) -> impl Iterator<Item = (usize, QuantityId)> + 'w {
+    ) -> impl Iterator<Item = (usize, &'w AdmissionTotal)> + 'w {
         let last = workspace.endpoint(0).start;
-        let combinations = self.body.conserved_basis().combinations();
-        (combinations.iter())
-            .filter(|combination| !combination.regulated() && combination.book() != Book::Charge)
+        (self.body.admission_totals().iter())
             .filter(|_| self.interval.is_some())
-            .map(move |combination| (last + combination.terms()[0].0.index(), combination.id()))
+            .map(move |total| (last + total.row.index(), total))
     }
     fn clocked(&self, workspace: &AdmissionWorkspace) -> Option<usize> {
         let period = self.period?;
@@ -1024,12 +1022,11 @@ impl InitializationSystem<'_> {
             .position(|leg| leg.ends_at == Some(crossing))
             .expect("a crossing ends a leg")
     }
-    /// How far a combination's sum at the start stands from the packet's, and the packet's sum. The first is summed
-    /// term by term, so a total too large to hold still reads as unmoved.
-    fn total(&self, start: &[f64], quantity: QuantityId) -> (f64, f64) {
-        let combination = &self.body.conserved_basis().combinations()[quantity.index()];
+    /// How far a weighted sum at the start stands from the packet's, and the packet's sum. The first is summed term by
+    /// term, so a total too large to hold still reads as unmoved.
+    fn total(&self, start: &[f64], terms: &[(RowId, i64)]) -> (f64, f64) {
         let (mut moved, mut packet) = (Compensated::ZERO, Compensated::ZERO);
-        for (row, coefficient) in combination.terms() {
+        for (row, coefficient) in terms {
             let then = Compensated::exact(self.parameters.starts[row.index()]).scaled(*coefficient);
             let now = Compensated::exact(start[row.index()]).scaled(*coefficient);
             moved = moved.plus(now.minus(then));
@@ -1037,12 +1034,9 @@ impl InitializationSystem<'_> {
         }
         (moved.rounded(), packet.rounded())
     }
-    fn total_size(&self, quantity: QuantityId) -> f64 {
-        let combination = &self.body.conserved_basis().combinations()[quantity.index()];
-        let sizes = combination
-            .terms()
-            .iter()
-            .map(|(row, _)| self.parameters.sizes[row.index()]);
+    fn total_size(&self, terms: &[(RowId, i64)]) -> f64 {
+        let sizes = (terms.iter())
+            .map(|(row, weight)| weight.unsigned_abs() as f64 * self.parameters.sizes[row.index()]);
         sizes.fold(0.0, |most, size| if size > most { size } else { most })
     }
     pub fn evaluate(&self, workspace: &AdmissionWorkspace) -> Result<Vec<f64>, InitializationFailure> {
@@ -1050,8 +1044,8 @@ impl InitializationSystem<'_> {
         let values = self.values(workspace);
         let mut out = self.stages(workspace, &values)?;
         let start = self.start_state(workspace);
-        for (slot, quantity) in self.replaced(workspace) {
-            out[slot] = self.total(&start, quantity).0;
+        for (slot, total) in self.replaced(workspace) {
+            out[slot] = self.total(&start, &total.terms).0;
         }
         if let (Some(slot), Some(period)) = (self.clocked(workspace), self.period) {
             let last = slot / self.width();
@@ -1085,10 +1079,9 @@ impl InitializationSystem<'_> {
             lines.extend(self.leg_lines(workspace, &values, leg, Reach::Ring)?);
         }
         let start = workspace.endpoint(0).start;
-        for (slot, quantity) in self.replaced(workspace) {
-            let terms = self.body.conserved_basis().combinations()[quantity.index()].terms();
+        for (slot, total) in self.replaced(workspace) {
             let term = |(row, coefficient): &(RowId, i64)| (start + row.index(), *coefficient as f64);
-            lines[slot] = terms.iter().map(term).collect();
+            lines[slot] = total.terms.iter().map(term).collect();
         }
         if let (Some(slot), Some(period)) = (self.clocked(workspace), self.period) {
             lines[slot] = self.root_line(workspace, &values, slot / self.width(), period.guard)?;
@@ -1498,10 +1491,11 @@ impl InitializationSystem<'_> {
         let start = self.start_state(workspace);
         let combinations = self.body.conserved_basis().combinations();
         let books = (combinations.iter()).filter(|combination| combination.book() != Book::Charge);
-        for quantity in books.filter(|_| self.interval.is_some()).map(Combination::id) {
-            let (moved, packet) = self.total(&start, quantity);
+        for combination in books.filter(|_| self.interval.is_some()) {
+            let (quantity, terms) = (combination.id(), combination.terms());
+            let (moved, packet) = self.total(&start, terms);
             let flow = self.net_flow(workspace, &values, quantity)?.abs();
-            let held = self.held(flow, packet + moved, self.total_size(quantity));
+            let held = self.held(flow, packet + moved, self.total_size(terms));
             note(
                 AdmissionRow::Total(quantity),
                 held.ok_or(InitializationFailure::NetBoundaryFlow { quantity })?,
@@ -1510,12 +1504,10 @@ impl InitializationSystem<'_> {
         for slot in (0..stages.len()).filter(replaced) {
             note(body_row(slot % size), stage(slot)?);
         }
-        let specified = (self.body.conserved_basis().combinations().iter())
-            .filter(|combination| !combination.regulated() && combination.book() != Book::Charge);
-        for quantity in specified.map(|combination| combination.id()) {
-            let row = AdmissionRow::Total(quantity);
-            let (moved, packet) = self.total(&start, quantity);
-            let bulk = self.total_size(quantity);
+        for total in self.body.admission_totals() {
+            let row = total.label;
+            let (moved, packet) = self.total(&start, &total.terms);
+            let bulk = self.total_size(&total.terms);
             note(
                 row,
                 self.held(moved.abs(), packet, bulk).ok_or(inconsistent(row))?,
@@ -1849,9 +1841,14 @@ impl InitialRevision {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdmissionRow {
     Body(RowId),
+    /// One conserved combination's total.
     Total(QuantityId),
+    /// A total of several, which the boundaries that read the body move only together.
+    Conserved(ConservedRowId),
     Anchor(AnchorId),
-    Crossing { variable: Slot },
+    Crossing {
+        variable: Slot,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

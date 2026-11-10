@@ -381,7 +381,7 @@ fn a_count_times_an_energy_content_past_two_to_the_fifty_third_is_refused() {
         .energy_into(Space::Thermal);
     assert_eq!(
         refused(burning(rich, Vec::new(), doubled, paced)),
-        CompileDefect::ConservationOverflow { law: BURN }
+        CompileDefect::ConservationOverflow { law: Some(BURN) }
     );
 }
 
