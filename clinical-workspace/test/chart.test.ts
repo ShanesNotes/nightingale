@@ -22,7 +22,6 @@ const RUN = { specId: 'test-spec', patient: branded('test-patient', isPatientId)
 const nurse = ROSTER[0]!
 const physician = ROSTER[1]!
 
-// A kind cannot join the catalog without three contents here, so every rule below runs on every kind the chart knows.
 const SAMPLES: { readonly [K in EntryKind]: readonly [EntryContent<K>['content'], EntryContent<K>['content'], EntryContent<K>['content']] } = {
   vital: [{ vital: 'RR', value: 18 }, { vital: 'RR', value: 20 }, { vital: 'RR', value: 21.5 }],
   note: [{ text: 'Synthetic note, first version.' }, { text: 'Synthetic note, second version.' }, { text: 'Synthetic note, third version.' }],
