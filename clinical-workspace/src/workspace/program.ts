@@ -3,6 +3,7 @@ import { Command, Subscription, type Update } from 'foldkit'
 import { defineMessageUnion } from 'foldkit/message'
 import {
   type EntryVersion,
+  type EntryView,
   isEntryId,
   parseReadModel,
   parseVersions,
@@ -13,34 +14,39 @@ import {
   type WriteResult,
 } from '../chart-api.ts'
 import { formatClock, isWallTime, parseClock, wallTime } from '../time.ts'
-import { VITALS } from '../vitals.ts'
+import { blankContent, type EntryKind, isEntryKind } from '../entry-kinds.ts'
+import { contentText } from './content.ts'
 import * as client from './client.ts'
 
 const ReadModelSchema = Schema.declare((value: unknown): value is ReadModel => parseReadModel(value).ok)
 const WriteResultSchema = Schema.declare((value: unknown): value is WriteResult => parseWriteResult(value).ok)
 const VersionsSchema = Schema.declare((value: unknown): value is readonly EntryVersion[] => parseVersions(value).ok)
 const WallTimeSchema = Schema.declare(isWallTime)
+const KindSchema = Schema.declare(isEntryKind)
+const Fields = Schema.Record(Schema.String, Schema.String)
+const Draft = Schema.Struct({ content: Fields, care: Schema.String })
 
-const NewEntryBody = Schema.Struct({
+const NewEntryRequest = Schema.Struct({
   patient: Schema.String,
   author: Schema.String,
-  vital: Schema.String,
-  value: Schema.String,
+  kind: KindSchema,
+  content: Fields,
   care: Schema.NullOr(Schema.Number),
 })
 
-const AmendmentBody = Schema.Struct({
+const AmendmentRequest = Schema.Struct({
   patient: Schema.String,
   author: Schema.String,
   entry: Schema.String,
   replaces: Schema.Number,
-  value: Schema.String,
+  kind: KindSchema,
+  content: Fields,
   care: Schema.NullOr(Schema.Number),
 })
 
 const Write = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal('new entry'), body: NewEntryBody }),
-  Schema.Struct({ kind: Schema.Literal('amendment'), body: AmendmentBody }),
+  Schema.Struct({ kind: Schema.Literal('new entry'), request: NewEntryRequest }),
+  Schema.Struct({ kind: Schema.Literal('amendment'), request: AmendmentRequest }),
 ])
 type Write = typeof Write.Type
 
@@ -51,11 +57,12 @@ export const Model = Schema.Struct({
   heard: Schema.NullOr(WallTimeSchema),
   checked: Schema.NullOr(WallTimeSchema),
   read: Schema.Literals(['idle', 'in flight', 'in flight, another due']),
-  form: Schema.Struct({ author: Schema.String, vital: Schema.String, value: Schema.String, care: Schema.String }),
-  notice: Schema.String,
+  author: Schema.String,
+  drafts: Schema.Struct({ vital: Draft, note: Draft }),
+  notice: Schema.Struct({ about: KindSchema, text: Schema.String }),
   selected: Schema.NullOr(Schema.String),
   versions: Schema.NullOr(Schema.Struct({ entry: Schema.String, list: VersionsSchema })),
-  editing: Schema.NullOr(Schema.Struct({ entry: Schema.String, replaces: Schema.Number, value: Schema.String, care: Schema.String })),
+  editing: Schema.NullOr(Schema.Struct({ entry: Schema.String, replaces: Schema.Number, kind: KindSchema, content: Fields, care: Schema.String })),
   writing: Schema.NullOr(Write),
   unanswered: Schema.NullOr(Schema.Struct({ writeId: Schema.String, write: Write })),
 })
@@ -66,20 +73,20 @@ export const Message = defineMessageUnion({
   GotChart: { chart: ReadModelSchema, at: WallTimeSchema },
   ChartUnanswered: { at: WallTimeSchema },
   ChoseAuthor: { author: Schema.String },
-  ChoseVital: { vital: Schema.String },
-  TypedValue: { text: Schema.String },
-  TypedCare: { text: Schema.String },
-  ClickedChart: {},
+  TypedField: { kind: KindSchema, field: Schema.String, text: Schema.String },
+  TypedCare: { kind: KindSchema, text: Schema.String },
+  ClickedChart: { kind: KindSchema },
   Wrote: { result: WriteResultSchema },
   WriteUnanswered: { writeId: Schema.String },
   ClickedEntry: { entry: Schema.String },
-  ClickedVersions: {},
+  ClickedVersions: { entry: Schema.String },
   GotVersions: { entry: Schema.String, versions: VersionsSchema },
-  VersionsUnanswered: {},
-  ClickedEdit: {},
-  TypedEditValue: { text: Schema.String },
+  VersionsUnanswered: { entry: Schema.String },
+  ClickedEdit: { entry: Schema.String },
+  TypedEditField: { field: Schema.String, text: Schema.String },
   TypedEditCare: { text: Schema.String },
   ClickedSaveEdit: {},
+  ClickedCancelEdit: {},
   ClickedClose: {},
   ClickedReopen: {},
 })
@@ -104,15 +111,15 @@ const posting = (post: (writeId: string) => Promise<WriteResult | undefined>, wr
   })
 
 export const PostEntry = Command.define('PostEntry', {
-  args: { body: NewEntryBody, writeId: Schema.NullOr(Schema.String) },
+  args: { request: NewEntryRequest, writeId: Schema.NullOr(Schema.String) },
   messages: [Message.Wrote, Message.WriteUnanswered],
-  execute: ({ body, writeId }) => posting((id) => client.write('/api/entries', { ...body, writeId: id }), writeId),
+  execute: ({ request, writeId }) => posting((id) => client.write('/api/entries', { ...request, writeId: id }), writeId),
 })
 
 export const PostAmendment = Command.define('PostAmendment', {
-  args: { body: AmendmentBody, writeId: Schema.NullOr(Schema.String) },
+  args: { request: AmendmentRequest, writeId: Schema.NullOr(Schema.String) },
   messages: [Message.Wrote, Message.WriteUnanswered],
-  execute: ({ body, writeId }) => posting((id) => client.write('/api/amendments', { ...body, writeId: id }), writeId),
+  execute: ({ request, writeId }) => posting((id) => client.write('/api/amendments', { ...request, writeId: id }), writeId),
 })
 
 export const FetchVersions = Command.define('FetchVersions', {
@@ -120,7 +127,7 @@ export const FetchVersions = Command.define('FetchVersions', {
   messages: [Message.GotVersions, Message.VersionsUnanswered],
   execute: ({ entry }) =>
     Effect.promise(async () => (isEntryId(entry) ? client.versions(entry) : undefined)).pipe(
-      Effect.map((versions) => (versions === undefined ? Message.VersionsUnanswered() : Message.GotVersions({ entry, versions }))),
+      Effect.map((versions) => (versions === undefined ? Message.VersionsUnanswered({ entry }) : Message.GotVersions({ entry, versions }))),
     ),
 })
 
@@ -135,20 +142,37 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
   ),
 }))
 
-const REFUSED: Readonly<Record<Refusal['kind'], string>> = {
-  'another patient': 'That write names another patient; nothing was charted.',
-  'care time after now': 'The care time is after now; nothing was charted.',
-  'not a finite number': 'The value is not a number; nothing was charted.',
-  'no such entry': 'That entry does not exist; nothing was charted.',
-  'not the current version': 'Someone charted a newer version first; nothing was charted.',
-  'write id reused with other content': 'The chart holds another write under this write id; nothing was charted.',
-  malformed: 'The chart service could not read the write; nothing was charted.',
+function refusedWords(refusal: Refusal): string {
+  switch (refusal.kind) {
+    case 'unknown entry kind':
+      return 'The chart does not know this kind of entry; nothing was charted.'
+    case 'content does not fit kind':
+      return `${refusal.reason}; nothing was charted.`
+    case 'entry kind differs':
+      return 'An amendment must keep the entry kind; nothing was charted.'
+    case 'amendment changes a fixed field':
+      return `An amendment cannot change the ${refusal.field} of the entry it amends; nothing was charted.`
+    case 'another patient':
+      return 'That write names another patient; nothing was charted.'
+    case 'care time after now':
+      return 'The care time is after now; nothing was charted.'
+    case 'no such entry':
+      return 'That entry does not exist; nothing was charted.'
+    case 'not the current version':
+      return 'Someone charted a newer version first; nothing was charted.'
+    case 'write id reused with other content':
+      return 'The chart holds another write under this write id; nothing was charted.'
+    case 'malformed':
+      return 'The chart service could not read the write; nothing was charted.'
+  }
 }
 
 const UNANSWERED: Readonly<Record<Write['kind'], string>> = {
   'new entry': 'The chart service did not answer, so the entry may already be in the chart. Charting it again unchanged cannot chart it twice.',
   amendment: 'The chart service did not answer, so the new version may already be in the chart. Saving it again unchanged cannot chart it twice.',
 }
+
+const blankDraft = (kind: EntryKind) => ({ content: blankContent(kind), care: '' })
 
 export function init(): Return {
   return {
@@ -159,8 +183,9 @@ export function init(): Return {
       heard: null,
       checked: null,
       read: 'idle',
-      form: { author: ROSTER[0]?.id ?? '', vital: VITALS[0].vital, value: '', care: '' },
-      notice: '',
+      author: ROSTER[0]?.id ?? '',
+      drafts: { vital: blankDraft('vital'), note: blankDraft('note') },
+      notice: { about: 'vital', text: '' },
       selected: null,
       versions: null,
       editing: null,
@@ -169,6 +194,13 @@ export function init(): Return {
     },
   }
 }
+
+const told = (model: Model, about: EntryKind, text: string): Model => ({ ...model, notice: { about, text } })
+
+const redrafted = (model: Model, kind: EntryKind, draft: Partial<Model['drafts'][EntryKind]>): Model => ({
+  ...model,
+  drafts: { ...model.drafts, [kind]: { ...model.drafts[kind], ...draft } },
+})
 
 function careTime(text: string): { readonly ok: true; readonly care: number | null } | { readonly ok: false } {
   const trimmed = text.trim()
@@ -180,8 +212,8 @@ function careTime(text: string): { readonly ok: true; readonly care: number | nu
 function send(model: Model, write: Write, notice: string): Return {
   const { unanswered } = model
   const writeId = unanswered !== null && Equal.equals(unanswered.write, write) ? unanswered.writeId : null
-  const command = write.kind === 'new entry' ? PostEntry({ body: write.body, writeId }) : PostAmendment({ body: write.body, writeId })
-  return { model: { ...model, notice, writing: write }, commands: [command] }
+  const command = write.kind === 'new entry' ? PostEntry({ request: write.request, writeId }) : PostAmendment({ request: write.request, writeId })
+  return { model: { ...told(model, write.request.kind, notice), writing: write }, commands: [command] }
 }
 
 const reading = (model: Model): Return => ({ model: { ...model, read: 'in flight' }, commands: [FetchChart()] })
@@ -197,25 +229,29 @@ function readAnswered(model: Model): Return {
 }
 
 function wrote(model: Model, write: Write, result: WriteResult): Return {
-  if (result.kind === 'refused') return { model: { ...model, notice: REFUSED[result.refusal.kind] } }
+  const { kind } = write.request
+  if (result.kind === 'refused') return { model: told(model, kind, refusedWords(result.refusal)) }
   const { entry } = result
-  const unit = VITALS.find((row) => row.vital === entry.vital)?.unit ?? ''
   const did = entry.number > 1 ? 'Amended' : 'Charted'
-  const answered = write.kind === 'new entry' ? { form: { ...model.form, value: '', care: '' } } : { editing: null }
-  return readChart({ ...model, ...answered, notice: `${did} ${entry.vital} ${entry.value} ${unit} as ${entry.author.name}.`, versions: null })
+  const answered = write.kind === 'new entry' ? redrafted(model, kind, blankDraft(kind)) : { ...model, editing: null }
+  return readChart({ ...told(answered, kind, `${did} ${entry.kind === 'note' ? 'note' : contentText(entry)} as ${entry.author.name}.`), versions: null })
 }
+
+const entryOf = (model: Model, entry: string): EntryView | undefined => model.latest?.entries.find((e) => e.entry === entry)
 
 const DRAFTING: ReadonlySet<Message['_tag']> = new Set([
   'ChoseAuthor',
-  'ChoseVital',
-  'TypedValue',
+  'TypedField',
   'TypedCare',
   'ClickedChart',
   'ClickedEdit',
-  'TypedEditValue',
+  'TypedEditField',
   'TypedEditCare',
   'ClickedSaveEdit',
+  'ClickedCancelEdit',
 ])
+
+const UNREADABLE_CARE = 'The care time is not HH:MM:SS; nothing was charted.'
 
 export function update(model: Model, message: Message): Return {
   if (model.writing !== null && DRAFTING.has(message._tag)) return { model }
@@ -223,43 +259,44 @@ export function update(model: Model, message: Message): Return {
     Polled: ({ at }) => (model.read === 'idle' ? reading({ ...model, checked: at }) : { model: { ...model, checked: at } }),
     GotChart: ({ chart, at }) => readAnswered(model.screen === 'closed' ? model : { ...model, latest: chart, answering: true, heard: at, checked: at }),
     ChartUnanswered: ({ at }) => readAnswered({ ...model, answering: false, checked: at }),
-    ChoseAuthor: ({ author }) => ({ model: { ...model, form: { ...model.form, author } } }),
-    ChoseVital: ({ vital }) => ({ model: { ...model, form: { ...model.form, vital } } }),
-    TypedValue: ({ text }) => ({ model: { ...model, form: { ...model.form, value: text } } }),
-    TypedCare: ({ text }) => ({ model: { ...model, form: { ...model.form, care: text } } }),
-    ClickedChart: () => {
-      if (model.latest === null) return { model: { ...model, notice: 'The chart has not loaded yet; nothing was charted.' } }
-      const care = careTime(model.form.care)
-      if (!care.ok) return { model: { ...model, notice: 'The care time is not HH:MM:SS; nothing was charted.' } }
-      const { author, vital, value } = model.form
-      return send(model, { kind: 'new entry', body: { patient: model.latest.run.patient, author, vital, value, care: care.care } }, 'Charting.')
+    ChoseAuthor: ({ author }) => ({ model: { ...model, author } }),
+    TypedField: ({ kind, field, text }) => ({ model: redrafted(model, kind, { content: { ...model.drafts[kind].content, [field]: text } }) }),
+    TypedCare: ({ kind, text }) => ({ model: redrafted(model, kind, { care: text }) }),
+    ClickedChart: ({ kind }) => {
+      if (model.latest === null) return { model: told(model, kind, 'The chart has not loaded yet; nothing was charted.') }
+      const { content, care } = model.drafts[kind]
+      const when = careTime(care)
+      if (!when.ok) return { model: told(model, kind, UNREADABLE_CARE) }
+      return send(model, { kind: 'new entry', request: { patient: model.latest.run.patient, author: model.author, kind, content, care: when.care } }, 'Charting.')
     },
     Wrote: ({ result }) => (model.writing === null ? { model } : wrote({ ...model, writing: null, unanswered: null }, model.writing, result)),
     WriteUnanswered: ({ writeId }) =>
       model.writing === null
         ? { model }
-        : { model: { ...model, writing: null, unanswered: { writeId, write: model.writing }, notice: UNANSWERED[model.writing.kind] } },
+        : { model: { ...told(model, model.writing.request.kind, UNANSWERED[model.writing.kind]), writing: null, unanswered: { writeId, write: model.writing } } },
     ClickedEntry: ({ entry }) => ({ model: { ...model, selected: entry, versions: null, editing: null } }),
-    ClickedVersions: () => (model.selected === null ? { model } : { model, commands: [FetchVersions({ entry: model.selected })] }),
+    ClickedVersions: ({ entry }) => (model.versions?.entry === entry ? { model: { ...model, versions: null } } : { model, commands: [FetchVersions({ entry })] }),
     GotVersions: ({ entry, versions }) => ({ model: { ...model, versions: { entry, list: versions } } }),
-    VersionsUnanswered: () => ({ model: { ...model, notice: 'The chart service did not answer; the earlier versions are not shown.' } }),
-    ClickedEdit: () => {
-      const current = selectedEntry(model)
+    VersionsUnanswered: ({ entry }) => ({ model: told(model, entryOf(model, entry)?.kind ?? model.notice.about, 'The chart service did not answer; the earlier versions are not shown.') }),
+    ClickedEdit: ({ entry }) => {
+      const current = entryOf(model, entry)
       if (current === undefined) return { model }
-      return { model: { ...model, editing: { entry: current.entry, replaces: current.number, value: String(current.value), care: formatClock(current.care) } } }
+      const content = Object.fromEntries(Object.entries(current.content).map(([field, value]) => [field, String(value)]))
+      return { model: { ...model, editing: { entry: current.entry, replaces: current.number, kind: current.kind, content, care: formatClock(current.care) } } }
     },
-    TypedEditValue: ({ text }) => (model.editing === null ? { model } : { model: { ...model, editing: { ...model.editing, value: text } } }),
+    TypedEditField: ({ field, text }) => (model.editing === null ? { model } : { model: { ...model, editing: { ...model.editing, content: { ...model.editing.content, [field]: text } } } }),
     TypedEditCare: ({ text }) => (model.editing === null ? { model } : { model: { ...model, editing: { ...model.editing, care: text } } }),
     ClickedSaveEdit: () => {
       if (model.editing === null || model.latest === null) return { model }
-      const care = careTime(model.editing.care)
-      if (!care.ok) return { model: { ...model, notice: 'The care time is not HH:MM:SS; nothing was charted.' } }
-      const { entry, replaces, value } = model.editing
-      return send(model, { kind: 'amendment', body: { patient: model.latest.run.patient, author: model.form.author, entry, replaces, value, care: care.care } }, 'Amending.')
+      const { entry, replaces, kind, content, care } = model.editing
+      const when = careTime(care)
+      if (!when.ok) return { model: told(model, kind, UNREADABLE_CARE) }
+      return send(model, { kind: 'amendment', request: { patient: model.latest.run.patient, author: model.author, entry, replaces, kind, content, care: when.care } }, 'Amending.')
     },
-    ClickedClose: () => ({ model: { ...model, screen: 'closed', latest: null, selected: null, versions: null, editing: null, notice: '' } }),
+    ClickedCancelEdit: () => ({ model: { ...model, editing: null } }),
+    ClickedClose: () => ({ model: { ...told(model, model.notice.about, ''), screen: 'closed', latest: null, selected: null, versions: null, editing: null } }),
     ClickedReopen: () => readChart({ ...model, screen: 'open' }),
   })
 }
 
-export const selectedEntry = (model: Model) => model.latest?.entries.find((e) => e.entry === model.selected)
+export const selectedEntry = (model: Model) => (model.selected === null ? undefined : entryOf(model, model.selected))

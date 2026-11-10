@@ -19,6 +19,7 @@ One chart holds every kind of entry a care team writes about one patient, in one
 ## Decisions so far
 
 - [The prototype](../../clinical-workspace/src/chart.ts): one append-only chart in Postgres behind a small chart service, a monitor that replays the recorded run `307caf19` through an outbox that survives an outage, and a flowsheet that reads only the chart. The monitor's link is model-checked in `docs/statecharts/monitor.tla`.
+- [One entry shape](issues/01-one-entry-shape.md): every entry shares a spine (patient, author, care time, charted time, write id, versions), and each kind keeps its content in a typed Postgres table of its own, drawn with its parser, forms and checks from one catalog in `clinical-workspace/src/entry-kinds.ts`. A third kind costs its catalog entry and three test samples, plus a draft and a section if the screen shows it, and it adds a table, so a developer's database needs `npm run reset`. Typed columns beat jsonb and text content because Postgres and the parser then refuse the same rows, with no check written twice.
 
 ## Not yet specified
 
@@ -26,7 +27,7 @@ One chart holds every kind of entry a care team writes about one patient, in one
 - **The ECG.** [SRS section 6](../../docs/srs.md#6-fidelity-aims) requires the waveform on the monitor, and no ticket plans one ([body map](../body/map.md), "Not yet specified").
 - **Waveforms.** The monitor shows numbers only. A waveform needs the stream of native-contract 30 and a place to keep strips.
 - **A live feed.** The monitor replays a recorded run until native-contract 30 lands.
-- **Kinds of entry past the second.** [Ticket 01](issues/01-one-entry-shape.md) proves the shape on two kinds. Orders, medication administration and assessments each need a ticket of their own, and their clinical content needs review (SRS rule 16).
+- **Kinds of entry past the second.** [Ticket 01](issues/01-one-entry-shape.md) proves the shape on two kinds. Orders, medication administration and assessments each need a ticket of their own, and their clinical content needs review (SRS rule 16). Content is flat named fields, so a kind with nested or repeated parts needs more relational work.
 - **A second device.** One device is only a guess at what devices share.
 
 ## Out of scope

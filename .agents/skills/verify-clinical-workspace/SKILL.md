@@ -14,13 +14,13 @@ The clinical workspace is two pages and a chart service in `clinical-workspace/`
 
     bash .agents/skills/verify-clinical-workspace/walk.sh <evidence folder> [feature ...]
 
-`walk.sh` is the whole recipe: launch, doctor, every mapped feature, evidence and cleanup. With no feature named it walks all of them in order: `monitor chart-a-vital flowsheet amend outage device-messages`. It prints one `PASS` or `FAIL` line per check into `walk.txt` in the evidence folder and exits 0 only when every check passed. A failed launch ends the walk at once.
+`walk.sh` is the whole recipe: launch, doctor, every mapped feature, evidence and cleanup. With no feature named it walks all of them in order: `monitor chart-a-vital flowsheet amend chart-a-note outage device-messages`. It prints one `PASS` or `FAIL` line per check into `walk.txt` in the evidence folder and exits 0 only when every check passed. A failed launch ends the walk at once.
 
 The walk starts a Postgres container, the chart service, Vite and Chromium together, so run it as one heavy step where the machine has a heavy-step lock. It takes about three minutes.
 
 ## Launch
 
-The walk runs the launcher from an empty database: `npm run reset` with `CW_DB_CONTAINER=cw-verify-<pid>`, then `npm run dev` in its own session, with the inherited file descriptors closed so the dev servers hold no lock. The launcher prints `dev: workspace <url>` and `dev: monitor <url>` once Vite answers, and writes every pid to `.dev/state.json` in the package. Ready means the chart service answers `GET /api/run` with the run row for the spec id in `clinical-workspace/capture/307caf19/summary.txt`, and both pages answer.
+The walk runs the launcher from an empty database: `npm run reset` with `CW_DB_CONTAINER=cw-verify-<pid>`, or the name `CW_DB_CONTAINER` already holds, then `npm run dev` in its own session, with the inherited file descriptors closed so the dev servers hold no lock. The launcher prints `dev: workspace <url>` and `dev: monitor <url>` once Vite answers, and writes every pid to `.dev/state.json` in the package. Ready means the chart service answers `GET /api/run` with the run row for the spec id in `clinical-workspace/capture/307caf19/summary.txt`, and both pages answer.
 
 To launch by hand for a look, run `npm run dev` in `clinical-workspace/`. It reuses the container `clinical-workspace-pg` and its volume, so the chart and its patient clock carry over between runs. `npm run reset` removes both for a fresh run.
 
@@ -36,7 +36,7 @@ Drive only an instance this run started. The developer's own `npm run dev` and t
 
 ## Drive
 
-`npm run drive -- <command>` drives Chromium (`/usr/local/bin/chromium`) over the DevTools protocol, one command per call, with named tabs. `npm run drive -- help` lists the commands: `start`, `open`, `wait`, `text`, `click`, `fill`, `choose`, `eval`, `offline`, `shot`, `close` and `stop`. The walk opens the monitor in a tab named `monitor` and the chart screen in one named `workspace`. Select by the ids and data attributes the pages render: `td[data-tile="HR"]`, `#link`, `#clock`, `#feed` on the monitor; `#author`, `#vital`, `#value`, `#care`, `#chart`, `#notice`, `#service`, `#close`, `#reopen`, `#details`, `#edit`, `#versions-button` and `td[data-cell="<vital> <monitor|charted> <HH:MM>"]` on the chart screen.
+`npm run drive -- <command>` drives Chromium (`/usr/local/bin/chromium`) over the DevTools protocol, one command per call, with named tabs. `npm run drive -- help` lists the commands: `start`, `open`, `wait`, `text`, `click`, `fill`, `choose`, `eval`, `offline`, `shot`, `close` and `stop`. The walk opens the monitor in a tab named `monitor` and the chart screen in one named `workspace`. Select by the ids and data attributes the pages render: `td[data-tile="HR"]`, `#link`, `#clock`, `#feed` on the monitor; `#author`, `#vital`, `#value`, `#care`, `#chart`, `#notice`, `#service`, `#close`, `#reopen`, `#details`, `#edit`, `#versions-button` and `td[data-cell="<vital> <monitor|charted> <HH:MM>"]` on the chart screen, and below the flowsheet `#note-text`, `#note-care`, `#chart-note`, `#note-notice` and `#note-list li[data-entry="<entry id>"]` with its `[data-action="edit"]` and `[data-action="versions"]` buttons.
 
 Foldkit paints in an animation frame, so read the page by polling for the expected text, never in the tick of the click that changes it. The walk's `expect` does that.
 
@@ -49,14 +49,15 @@ The evidence folder is the one you pass, outside the repo. Use `~/lanes/logs/<la
 - `walk.txt`, every check with its result, the commit walked and the cleanup lines;
 - `NN-<feature>.png`, full-page screenshots after each step that changes what a person sees;
 - `chart-<phase>.json`, the chart's rows as `GET /api/chart` gave them at that moment;
-- `device-first.json`, `device-again.json` and `postgres-refusals.txt`, the chart service's answers and Postgres's own refusals;
+- `device-first.json`, `device-again.json`, `postgres-refusals.txt` and `postgres-fixed-field.txt`, the chart service's answers and Postgres's own refusals;
+- `note-versions.json`, the note's versions as `GET /api/entries/<id>/versions` gave them;
 - `dev.log` and `service-again.log`, the launcher's and the restarted chart service's output.
 
 A proof drives the real user path and reads the chart back. A screenshot alone proves nothing about the chart: pair it with the rows.
 
 ## Cleanup
 
-The walk's exit trap stops Chromium by the pid in `.dev/drive.json`, the restarted chart service by its pid file, and the launcher's session (the chart service and Vite stop with it), then removes the container `cw-verify-<pid>` and its volume. It never removes the evidence folder. After a run, `docker ps -a --filter name=cw-verify` should list nothing.
+The walk's exit trap stops Chromium by the pid in `.dev/drive.json`, the restarted chart service by its pid file, and the launcher's session (the chart service and Vite stop with it), then removes that container and its volume. It never removes the evidence folder. After a run, `docker ps -a --filter name=<that name>` should list nothing.
 
 ## Gotchas
 

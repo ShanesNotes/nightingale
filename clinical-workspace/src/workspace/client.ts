@@ -1,8 +1,8 @@
 import {
-  type AmendmentBody,
+  type AmendmentRequest,
   type EntryId,
   type EntryVersion,
-  type NewEntryBody,
+  type NewEntryRequest,
   parseReadModel,
   parseVersions,
   parseWriteResult,
@@ -28,5 +28,5 @@ export const chart = async (): Promise<ReadModel | undefined> => parsed(parseRea
 export const versions = async (entry: EntryId): Promise<readonly EntryVersion[] | undefined> =>
   parsed(parseVersions(await call(`/api/entries/${encodeURIComponent(entry)}/versions`)))
 
-export const write = async (path: '/api/entries' | '/api/amendments', body: NewEntryBody | AmendmentBody): Promise<WriteResult | undefined> =>
-  parsed(parseWriteResult(await call(path, { method: 'POST', body: JSON.stringify(body) })))
+export const write = async (path: '/api/entries' | '/api/amendments', request: NewEntryRequest | AmendmentRequest): Promise<WriteResult | undefined> =>
+  parsed(parseWriteResult(await call(path, { method: 'POST', body: JSON.stringify(request) })))

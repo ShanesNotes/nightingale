@@ -1,13 +1,18 @@
 import type { Html, HtmlBuilder } from 'foldkit/html'
-import { ROSTER } from '../chart-api.ts'
+import { type EntryVersion, ROSTER } from '../chart-api.ts'
+import { type EntryKind, kindFields } from '../entry-kinds.ts'
 import { type ChartedValue, flowsheet, type MonitorCell } from '../flowsheet.ts'
-import { formatClock, formatDuration, type PatientTime, seconds, since } from '../time.ts'
+import { type NoteRow, notes } from '../notes.ts'
+import { type Duration, formatClock, formatDuration, type PatientTime, seconds, since } from '../time.ts'
 import { VITALS, type VitalRow } from '../vitals.ts'
+import { contentText } from './content.ts'
 import { Message, type Model, selectedEntry } from './program.ts'
 
 type H = HtmlBuilder<Message>
 
 const minuteOf = (minute: PatientTime) => formatClock(minute).slice(0, 5)
+
+const lateWords = (late: Duration) => (late > 0 ? `late by ${formatDuration(late)}` : 'on time')
 
 function monitorText(cell: MonitorCell, unit: string): string {
   switch (cell.kind) {
@@ -27,30 +32,55 @@ function monitorText(cell: MonitorCell, unit: string): string {
 
 function chartedText(value: ChartedValue, unit: string): string {
   const { entry } = value
-  const parts = [`${entry.value} ${unit} by ${entry.author.name}`, `care ${formatClock(entry.care)}`, `charted ${formatClock(entry.charted)}`]
+  const parts = [`${entry.content.value} ${unit} by ${entry.author.name}`, `care ${formatClock(entry.care)}`, `charted ${formatClock(entry.charted)}`]
   if (value.lateBy > 0) parts.push(`late by ${formatDuration(value.lateBy)}`)
   if (value.edited) parts.push('edited')
   return parts.join(', ')
 }
 
-function form(model: Model, h: H, vitals: readonly VitalRow[]): Html {
-  const writing = h.Disabled(model.writing !== null)
+function fields(model: Model, h: H, kind: EntryKind, content: Readonly<Record<string, string>>, place: 'form' | 'editor', vitals: readonly VitalRow[]): Html[] {
+  return kindFields(kind)
+    .filter((field) => place === 'form' || !field.fixed)
+    .flatMap((field) => {
+      const id = place === 'editor' ? `edit-${field.name}` : kind === 'vital' ? field.name : `${kind}-${field.name}`
+      const changed = (text: string) => (place === 'editor' ? Message.TypedEditField({ field: field.name, text }) : Message.TypedField({ kind, field: field.name, text }))
+      const attributes = [h.Id(id), h.Disabled(model.writing !== null), h.Value(content[field.name] ?? '')]
+      const options = kind === 'vital' && field.name === 'vital' ? vitals.map((row) => ({ value: row.vital, label: `${row.label} (${row.unit})` })) : field.input
+      const control =
+        typeof options !== 'string'
+          ? h.select([...attributes, h.OnChange(changed)], options.map((option) => h.option([h.Value(option.value), h.Selected(option.value === content[field.name])], [option.label])))
+          : options === 'multiline'
+            ? h.textarea([...attributes, h.Rows(4), h.OnInput(changed)])
+            : h.input([...attributes, h.OnInput(changed)])
+      return [h.label([h.For(id)], [` ${field.label} `]), control]
+    })
+}
+
+function clinician(model: Model, h: H): Html {
+  return h.p([h.Id('clinician')], [
+    h.label([h.For('author')], ['Charting as ']),
+    h.select(
+      [h.Id('author'), h.Disabled(model.writing !== null), h.OnChange((author) => Message.ChoseAuthor({ author }))],
+      ROSTER.map((c) => h.option([h.Value(c.id), h.Selected(c.id === model.author)], [`${c.name} (${c.discipline})`])),
+    ),
+  ])
+}
+
+function careInput(model: Model, h: H, id: string, value: string, changed: (text: string) => Message, label: string): Html[] {
+  return [
+    h.label([h.For(id)], [label]),
+    h.input([h.Id(id), h.Disabled(model.writing !== null), h.Value(value), h.Placeholder('now'), h.OnInput(changed)]),
+  ]
+}
+
+const noticeAbout = (model: Model, kind: EntryKind) => (model.notice.about === kind ? model.notice.text : '')
+
+function vitalForm(model: Model, h: H, vitals: readonly VitalRow[]): Html {
+  const draft = model.drafts.vital
   return h.div([h.Id('charting')], [
-    h.label([h.For('author')], ['Clinician ']),
-    h.select(
-      [h.Id('author'), writing, h.OnChange((author) => Message.ChoseAuthor({ author }))],
-      ROSTER.map((c) => h.option([h.Value(c.id), h.Selected(c.id === model.form.author)], [`${c.name} (${c.discipline})`])),
-    ),
-    h.label([h.For('vital')], [' Vital ']),
-    h.select(
-      [h.Id('vital'), writing, h.OnChange((vital) => Message.ChoseVital({ vital }))],
-      vitals.map((row) => h.option([h.Value(row.vital), h.Selected(row.vital === model.form.vital)], [`${row.label} (${row.unit})`])),
-    ),
-    h.label([h.For('value')], [' Value ']),
-    h.input([h.Id('value'), writing, h.Value(model.form.value), h.OnInput((text) => Message.TypedValue({ text }))]),
-    h.label([h.For('care')], [' Care time, HH:MM:SS or blank for now ']),
-    h.input([h.Id('care'), writing, h.Value(model.form.care), h.Placeholder('now'), h.OnInput((text) => Message.TypedCare({ text }))]),
-    h.button([h.Id('chart'), h.Type('button'), writing, h.OnClick(Message.ClickedChart())], ['Chart']),
+    ...fields(model, h, 'vital', draft.content, 'form', vitals),
+    ...careInput(model, h, 'care', draft.care, (text) => Message.TypedCare({ kind: 'vital', text }), ' Care time, HH:MM:SS or blank for now '),
+    h.button([h.Id('chart'), h.Type('button'), h.Disabled(model.writing !== null), h.OnClick(Message.ClickedChart({ kind: 'vital' }))], ['Chart']),
   ])
 }
 
@@ -85,40 +115,95 @@ function sheet(model: Model, h: H, vitals: readonly VitalRow[]): Html {
   ])
 }
 
+function editor(model: Model, h: H, vitals: readonly VitalRow[]): Html {
+  if (model.editing === null) return h.empty
+  const writing = h.Disabled(model.writing !== null)
+  return h.div([h.Id('editing')], [
+    ...fields(model, h, model.editing.kind, model.editing.content, 'editor', vitals),
+    ...careInput(model, h, 'edit-care', model.editing.care, (text) => Message.TypedEditCare({ text }), ' Care time '),
+    h.button([h.Id('save-edit'), h.Type('button'), writing, h.OnClick(Message.ClickedSaveEdit())], ['Save as a new version']),
+    h.button([h.Id('cancel-edit'), h.Type('button'), writing, h.OnClick(Message.ClickedCancelEdit())], ['Cancel']),
+  ])
+}
+
+const versionsOf = (model: Model, entry: string) => (model.versions?.entry === entry ? model.versions.list : undefined)
+
 function details(model: Model, h: H, vitals: readonly VitalRow[]): Html {
   const current = selectedEntry(model)
   if (current === undefined) return h.empty
-  const unit = vitals.find((row) => row.vital === current.vital)?.unit ?? ''
   const late = current.charted > current.care ? `Late by ${formatDuration(since(current.charted, current.care))}` : 'Charted on time'
-  const versions = model.versions?.entry === current.entry ? model.versions.list : undefined
-  const writing = h.Disabled(model.writing !== null)
+  const versions = versionsOf(model, current.entry)
   return h.section([h.Id('details')], [
-    h.h2([], [`${current.vital} ${current.value} ${unit}`]),
+    h.h2([], [contentText(current)]),
     h.p([], [`By ${current.author.name}, ${current.author.discipline}`]),
     h.p([], [`Patient ${current.patient}`]),
     h.p([], [`Care time ${formatClock(current.care)}`]),
     h.p([], [`Charted time ${formatClock(current.charted)}`]),
     h.p([], [late]),
     h.p([], [`Version ${current.number} of ${current.versions}`]),
-    model.editing === null
-      ? h.button([h.Id('edit'), h.Type('button'), writing, h.OnClick(Message.ClickedEdit())], ['Edit'])
-      : h.div([h.Id('editing')], [
-          h.label([h.For('edit-value')], ['New value ']),
-          h.input([h.Id('edit-value'), writing, h.Value(model.editing.value), h.OnInput((text) => Message.TypedEditValue({ text }))]),
-          h.label([h.For('edit-care')], [' Care time ']),
-          h.input([h.Id('edit-care'), writing, h.Value(model.editing.care), h.OnInput((text) => Message.TypedEditCare({ text }))]),
-          h.button([h.Id('save-edit'), h.Type('button'), writing, h.OnClick(Message.ClickedSaveEdit())], ['Save as a new version']),
-        ]),
-    h.button([h.Id('versions-button'), h.Type('button'), h.OnClick(Message.ClickedVersions())], ['Show earlier versions']),
+    model.editing?.entry === current.entry
+      ? editor(model, h, vitals)
+      : h.button([h.Id('edit'), h.Type('button'), h.Disabled(model.writing !== null), h.OnClick(Message.ClickedEdit({ entry: current.entry }))], ['Edit']),
+    h.button([h.Id('versions-button'), h.Type('button'), h.OnClick(Message.ClickedVersions({ entry: current.entry }))], [versions === undefined ? 'Show earlier versions' : 'Hide earlier versions']),
     versions === undefined
       ? h.empty
       : h.ul(
           [h.Id('versions')],
-          versions.map((v) =>
-            h.li([], [`Version ${v.number}: ${v.value} ${unit} by ${v.author.name}, care ${formatClock(v.care)}, charted ${formatClock(v.charted)}`]),
-          ),
+          versions.map((v) => h.li([], [`Version ${v.number}: ${contentText(v)} by ${v.author.name}, care ${formatClock(v.care)}, charted ${formatClock(v.charted)}`])),
         ),
   ])
+}
+
+function noteForm(model: Model, h: H, vitals: readonly VitalRow[]): Html {
+  const draft = model.drafts.note
+  return h.div([h.Id('note-form')], [
+    ...fields(model, h, 'note', draft.content, 'form', vitals),
+    h.div([], [
+      ...careInput(model, h, 'note-care', draft.care, (text) => Message.TypedCare({ kind: 'note', text }), 'Care time, HH:MM:SS or blank for now '),
+      h.button([h.Id('chart-note'), h.Type('button'), h.Disabled(model.writing !== null), h.OnClick(Message.ClickedChart({ kind: 'note' }))], ['Chart note']),
+    ]),
+  ])
+}
+
+function earlierVersions(h: H, versions: readonly EntryVersion[], current: number): Html {
+  return h.ol(
+    [h.Id('versions')],
+    versions
+      .filter((v) => v.number < current)
+      .map((v) =>
+        h.li([], [
+          h.p([h.Class('note-head')], [`Version ${v.number} · ${v.author.name}, ${v.author.discipline} · care time ${formatClock(v.care)} · charted ${formatClock(v.charted)}`]),
+          h.p([h.Class('note-text')], [v.kind === 'note' ? v.content.text : contentText(v)]),
+        ]),
+      ),
+  )
+}
+
+function noteItem(model: Model, h: H, row: NoteRow, vitals: readonly VitalRow[]): Html {
+  const { entry, lateBy, edited } = row
+  const editing = model.editing?.entry === entry.entry
+  const shown = versionsOf(model, entry.entry)
+  const head = [`Care time ${formatClock(entry.care)}`, `${entry.author.name}, ${entry.author.discipline}`]
+  if (edited) head.push(`edited, version ${entry.number} of ${entry.versions}`)
+  return h.li([h.DataAttribute('entry', entry.entry), h.Class('note')], [
+    h.p([h.Class('note-head')], [head.join(' · ')]),
+    editing ? editor(model, h, vitals) : h.p([h.Class('note-text')], [entry.content.text]),
+    h.p([h.Class('note-charted')], [`${edited ? `Version ${entry.number} charted` : 'Charted'} ${formatClock(entry.charted)}, ${lateWords(lateBy)}.`]),
+    h.div([], [
+      editing ? h.empty : h.button([h.Type('button'), h.DataAttribute('action', 'edit'), h.Disabled(model.writing !== null), h.OnClick(Message.ClickedEdit({ entry: entry.entry }))], ['Edit']),
+      edited
+        ? h.button([h.Type('button'), h.DataAttribute('action', 'versions'), h.OnClick(Message.ClickedVersions({ entry: entry.entry }))], [shown === undefined ? 'Show earlier versions' : 'Hide earlier versions'])
+        : h.empty,
+    ]),
+    shown === undefined ? h.empty : earlierVersions(h, shown, entry.number),
+  ])
+}
+
+function noteList(model: Model, h: H, vitals: readonly VitalRow[]): Html {
+  if (model.latest === null) return h.p([h.Id('note-list')], ['The notes show once the chart service answers.'])
+  const rows = notes(model.latest)
+  if (rows.length === 0) return h.p([h.Id('note-list')], ['No notes charted yet.'])
+  return h.ol([h.Id('note-list')], rows.map((row) => noteItem(model, h, row, vitals)))
 }
 
 function serviceWords(model: Model): string {
@@ -147,10 +232,20 @@ export const makeView =
       h.p([h.Id('patient')], [latest === null ? 'Waiting for the chart service.' : `Patient ${latest.run.patient}, synthetic, from a recorded run.`]),
       h.p([h.Id('now')], [latest === null ? '' : `Patient time ${formatClock(latest.now)}`]),
       h.p([h.Id('service'), h.AriaLive('polite')], [serviceWords(model)]),
-      form(model, h, vitals),
-      h.p([h.Id('notice'), h.AriaLive('polite')], [model.notice]),
-      sheet(model, h, vitals),
-      details(model, h, vitals),
+      clinician(model, h),
+      h.section([h.Id('vitals')], [
+        h.h2([], ['Flowsheet']),
+        vitalForm(model, h, vitals),
+        h.p([h.Id('notice'), h.AriaLive('polite')], [noticeAbout(model, 'vital')]),
+        sheet(model, h, vitals),
+        details(model, h, vitals),
+      ]),
+      h.section([h.Id('notes')], [
+        h.h2([], ['Notes']),
+        noteForm(model, h, vitals),
+        h.p([h.Id('note-notice'), h.AriaLive('polite')], [noticeAbout(model, 'note')]),
+        noteList(model, h, vitals),
+      ]),
     ])
   }
 

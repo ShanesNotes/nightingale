@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { PGlite } from '@electric-sql/pglite'
 import pg from 'pg'
 import {
@@ -19,6 +19,7 @@ import {
 import { type DeviceMessage, isPatientId, type MessageAnswer, type Parsed } from './device.ts'
 import { add, earlier, floorTo, isPatientTime, isWallTime, type PatientTime, SECOND, seconds, type WallTime } from './time.ts'
 import { VITALS } from './vitals.ts'
+import { ENTRY_KINDS, type EntryKind, fixedFields, isEntryKind, kindFields, sqlName, sqlText } from './entry-kinds.ts'
 
 export type Row = Readonly<Record<string, unknown>>
 
@@ -108,11 +109,36 @@ export async function pgSql(url: string, options: { readonly fresh?: boolean } =
   }
 }
 
+const KINDS = Object.keys(ENTRY_KINDS).filter(isEntryKind)
+const contentTable = (kind: EntryKind) => sqlName(`content_${kind}`)
+const keepsFixed = (kind: EntryKind) => {
+  const fixed = fixedFields(kind).map((field) => sqlName(field.name)).join(', ')
+  return fixed === '' ? '' : `,
+  replaces integer GENERATED ALWAYS AS (CASE WHEN number > 1 THEN number - 1 END) STORED,
+  UNIQUE (entry, number, ${fixed}),
+  FOREIGN KEY (entry, replaces, ${fixed}) REFERENCES ${contentTable(kind)} (entry, number, ${fixed})`
+}
+const contentTables = KINDS.map((kind) => `
+CREATE TABLE IF NOT EXISTS ${contentTable(kind)} (
+  entry uuid NOT NULL,
+  number integer NOT NULL,
+  kind text GENERATED ALWAYS AS (${sqlText(kind)}::text) STORED,
+  ${kindFields(kind).map((field) => `${sqlName(field.name)} ${field.column}`).join(',\n  ')},
+  PRIMARY KEY (entry, number),
+  FOREIGN KEY (entry, number, kind) REFERENCES entry_version (entry, number, kind)${keepsFixed(kind)}
+);`).join('\n')
+
+const appendOnly = ['run', 'entry', 'entry_version', 'device_message', ...KINDS.map((kind) => `content_${kind}`)].map((table) => `
+CREATE OR REPLACE TRIGGER append_only BEFORE UPDATE OR DELETE ON ${sqlName(table)}
+  FOR EACH ROW EXECUTE FUNCTION refuse_chart_change();
+CREATE OR REPLACE TRIGGER kept BEFORE TRUNCATE ON ${sqlName(table)}
+  FOR EACH STATEMENT EXECUTE FUNCTION refuse_chart_change();`).join('\n')
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS run (
   singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
   spec_id text NOT NULL,
-  patient text NOT NULL,
+  patient text NOT NULL UNIQUE,
   start_ns bigint NOT NULL,
   end_ns bigint NOT NULL CHECK (end_ns >= start_ns),
   anchor_ms bigint NOT NULL,
@@ -120,24 +146,31 @@ CREATE TABLE IF NOT EXISTS run (
 );
 CREATE TABLE IF NOT EXISTS entry (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  patient text NOT NULL,
-  vital text NOT NULL,
-  inserted_at timestamptz NOT NULL DEFAULT now()
+  patient text NOT NULL REFERENCES run (patient),
+  kind text NOT NULL CHECK (kind IN (${KINDS.map(sqlText).join(', ')})),
+  inserted_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (id, kind)
 );
 CREATE TABLE IF NOT EXISTS entry_version (
-  entry uuid NOT NULL REFERENCES entry (id),
+  entry uuid NOT NULL,
+  kind text NOT NULL,
   number integer NOT NULL CHECK (number >= 1),
-  value double precision NOT NULL CHECK (value <> 'NaN' AND value <> 'Infinity' AND value <> '-Infinity'),
-  care_ns bigint NOT NULL,
-  charted_ns bigint NOT NULL,
+  replaces integer GENERATED ALWAYS AS (CASE WHEN number > 1 THEN number - 1 END) STORED,
+  care_ns bigint NOT NULL CHECK (care_ns BETWEEN 0 AND 9007199254740991),
+  charted_ns bigint NOT NULL CHECK (charted_ns BETWEEN care_ns AND 9007199254740991),
   author text NOT NULL,
   author_name text NOT NULL,
   author_discipline text NOT NULL,
-  write_id text NOT NULL UNIQUE,
-  write jsonb NOT NULL,
+  write_id text NOT NULL UNIQUE CHECK (length(write_id) BETWEEN 1 AND 200),
+  write_fingerprint text NOT NULL,
   inserted_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (entry, number)
+  PRIMARY KEY (entry, number),
+  UNIQUE (entry, number, kind),
+  FOREIGN KEY (entry, kind) REFERENCES entry (id, kind),
+  FOREIGN KEY (entry, replaces) REFERENCES entry_version (entry, number),
+  CHECK (${ROSTER.map((c) => `(author = ${sqlText(c.id)} AND author_name = ${sqlText(c.name)} AND author_discipline = ${sqlText(c.discipline)})`).join(' OR ')})
 );
+${contentTables}
 CREATE TABLE IF NOT EXISTS device_message (
   device text NOT NULL,
   boot text NOT NULL,
@@ -153,28 +186,45 @@ BEGIN
   RAISE EXCEPTION 'the chart is append-only: % on % is refused', TG_OP, TG_TABLE_NAME;
 END
 $$;
-CREATE OR REPLACE TRIGGER run_append_only BEFORE UPDATE OR DELETE ON run FOR EACH ROW EXECUTE FUNCTION refuse_chart_change();
-CREATE OR REPLACE TRIGGER run_kept BEFORE TRUNCATE ON run FOR EACH STATEMENT EXECUTE FUNCTION refuse_chart_change();
-CREATE OR REPLACE TRIGGER entry_append_only BEFORE UPDATE OR DELETE ON entry FOR EACH ROW EXECUTE FUNCTION refuse_chart_change();
-CREATE OR REPLACE TRIGGER entry_kept BEFORE TRUNCATE ON entry FOR EACH STATEMENT EXECUTE FUNCTION refuse_chart_change();
-CREATE OR REPLACE TRIGGER entry_version_append_only BEFORE UPDATE OR DELETE ON entry_version
-  FOR EACH ROW EXECUTE FUNCTION refuse_chart_change();
-CREATE OR REPLACE TRIGGER entry_version_kept BEFORE TRUNCATE ON entry_version
-  FOR EACH STATEMENT EXECUTE FUNCTION refuse_chart_change();
-CREATE OR REPLACE TRIGGER device_message_append_only BEFORE UPDATE OR DELETE ON device_message
-  FOR EACH ROW EXECUTE FUNCTION refuse_chart_change();
-CREATE OR REPLACE TRIGGER device_message_kept BEFORE TRUNCATE ON device_message
-  FOR EACH STATEMENT EXECUTE FUNCTION refuse_chart_change();
+${appendOnly}
+CREATE OR REPLACE FUNCTION require_entry_content() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  CASE NEW.kind
+    ${KINDS.map((kind) => `WHEN ${sqlText(kind)} THEN
+      IF NOT EXISTS (SELECT FROM ${contentTable(kind)} WHERE entry = NEW.entry AND number = NEW.number) THEN
+        RAISE EXCEPTION 'entry version needs its ${kind} content' USING ERRCODE = '23514';
+      END IF;`).join('\n    ')}
+    ELSE RAISE EXCEPTION 'unknown entry kind';
+  END CASE;
+  RETURN NEW;
+END
+$$;
+DROP TRIGGER IF EXISTS entry_content_required ON entry_version;
+CREATE CONSTRAINT TRIGGER entry_content_required AFTER INSERT ON entry_version
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION require_entry_content();
+CREATE OR REPLACE FUNCTION require_first_version() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM entry_version WHERE entry = NEW.id AND number = 1) THEN
+    RAISE EXCEPTION 'entry needs its first version' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END
+$$;
+DROP TRIGGER IF EXISTS entry_version_required ON entry;
+CREATE CONSTRAINT TRIGGER entry_version_required AFTER INSERT ON entry
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION require_first_version();
+CREATE OR REPLACE VIEW chart_entry_version AS
+  ${KINDS.map((kind) => `SELECT e.id, e.patient, v.kind, v.number, v.care_ns, v.charted_ns, v.author,
+    v.author_name, v.author_discipline, e.inserted_at,
+    json_build_object(${kindFields(kind).flatMap((field) => [sqlText(field.name), `b.${sqlName(field.name)}`]).join(', ')}) AS content
+    FROM entry e JOIN entry_version v ON v.entry = e.id JOIN ${contentTable(kind)} b ON b.entry = v.entry AND b.number = v.number`).join('\n  UNION ALL\n  ')};
 CREATE OR REPLACE VIEW current_entry AS
-  SELECT e.id, e.patient, e.vital, v.number, v.value, v.care_ns, v.charted_ns, v.author, v.author_name,
-    v.author_discipline, counts.versions, e.inserted_at
-  FROM entry e
+  SELECT v.*, counts.versions FROM chart_entry_version v
   JOIN (SELECT entry, max(number) AS current, count(*) AS versions FROM entry_version GROUP BY entry) counts
-    ON counts.entry = e.id
-  JOIN entry_version v ON v.entry = e.id AND v.number = counts.current;
+    ON counts.entry = v.id AND counts.current = v.number;
 `
 
-const VERSION_FIELDS = `'entry', id, 'patient', patient, 'vital', vital, 'number', number, 'value', value, 'care', care_ns,
+const VERSION_FIELDS = `'entry', id, 'patient', patient, 'kind', kind, 'content', content, 'number', number, 'care', care_ns,
   'charted', charted_ns, 'author', json_build_object('id', author, 'name', author_name, 'discipline', author_discipline)`
 const ENTRY_JSON = `json_build_object(${VERSION_FIELDS}, 'versions', versions)`
 const VERSION_JSON = `json_build_object(${VERSION_FIELDS})`
@@ -250,8 +300,17 @@ const refused = (refusal: Refusal): WriteResult => ({ kind: 'refused', refusal }
 
 const lostAWriteIdOrVersionRace = (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '23505'
 
+function fingerprint(write: EntryWrite): string {
+  const content: Readonly<Record<string, unknown>> = write.content
+  return createHash('sha256').update(JSON.stringify([
+    write.operation, write.patient, write.author, write.kind,
+    kindFields(write.kind).map((field) => content[field.name]), write.care,
+    write.operation === 'amendment' ? [write.entry, write.replaces] : null,
+  ])).digest('hex')
+}
+
 async function answerByWriteId(sql: Sql, write: EntryWrite): Promise<WriteResult | undefined> {
-  const [held] = await sql.query('SELECT entry, write = $2::jsonb AS same FROM entry_version WHERE write_id = $1', [write.writeId, JSON.stringify(write)])
+  const [held] = await sql.query('SELECT entry, write_fingerprint = $2 AS same FROM entry_version WHERE write_id = $1', [write.writeId, fingerprint(write)])
   if (held === undefined) return undefined
   if (held['same'] !== true) return refused({ kind: 'write id reused with other content' })
   const [entry] = await entries(sql, 'id = $1', [held['entry']])
@@ -259,20 +318,24 @@ async function answerByWriteId(sql: Sql, write: EntryWrite): Promise<WriteResult
   return { kind: 'taken', entry }
 }
 
-const PREDATES_WRITE_ID = `SELECT to_regclass('entry_version') IS NOT NULL AND NOT EXISTS (
-  SELECT FROM pg_attribute WHERE attrelid = to_regclass('entry_version') AND attname = 'write_id' AND NOT attisdropped
-) AS predates`
+async function changedFixedField(sql: Sql, kind: EntryKind, entry: unknown, number: number, content: Readonly<Record<string, unknown>>): Promise<string | undefined> {
+  const fixed = fixedFields(kind)
+  if (fixed.length === 0) return undefined
+  const [held] = await sql.query(`SELECT ${fixed.map((field) => sqlName(field.name)).join(', ')} FROM ${contentTable(kind)} WHERE entry = $1 AND number = $2`, [entry, number])
+  return fixed.find((field) => held?.[field.name] !== content[field.name])?.name
+}
 
-function refusalOf(write: { readonly patient: string; readonly value: number; readonly care: PatientTime }, run: RunView, now: PatientTime): Refusal | undefined {
+const PREDATES_KINDS = `SELECT to_regclass('entry_version') IS NOT NULL AND (${KINDS.map((kind) => `to_regclass(${sqlText(`content_${kind}`)}) IS NULL`).join(' OR ')}) AS predates`
+
+function refusalOf(write: { readonly patient: string; readonly care: PatientTime }, run: RunView, now: PatientTime): Refusal | undefined {
   if (write.patient !== run.patient) return { kind: 'another patient' }
   if (write.care > now) return { kind: 'care time after now' }
-  if (!Number.isFinite(write.value)) return { kind: 'not a finite number' }
   return undefined
 }
 
 export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: WallTime): Promise<Chart> {
-  const [tables] = await sql.query(PREDATES_WRITE_ID)
-  if (tables?.['predates'] === true) throw new Error("the chart's database predates the write id; run npm run reset in clinical-workspace/ for a fresh one")
+  const [tables] = await sql.query(PREDATES_KINDS)
+  if (tables?.['predates'] === true) throw new Error("the chart's database predates the entry kinds the chart knows; run npm run reset in clinical-workspace/ for a fresh one")
   await sql.script(SCHEMA)
   await sql.query(`INSERT INTO run (${RUN_COLUMNS}) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (singleton) DO NOTHING`, [
     run.specId,
@@ -295,28 +358,38 @@ export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: 
         return await sql.transaction(async (tx) => {
           const again = await answerByWriteId(tx, write)
           if (again !== undefined) return again
-          const refusal = refusalOf({ patient: write.patient, value: write.value, care }, held, now)
+          const refusal = refusalOf({ patient: write.patient, care }, held, now)
           if (refusal !== undefined) return refused(refusal)
           let id: unknown
           let number: number
-          if (write.kind === 'new entry') {
-            const [made] = await tx.query('INSERT INTO entry (patient, vital) VALUES ($1, $2) RETURNING id', [write.patient, write.vital])
+          if (write.operation === 'new entry') {
+            const [made] = await tx.query('INSERT INTO entry (patient, kind) VALUES ($1, $2) RETURNING id', [write.patient, write.kind])
             id = made?.['id']
             number = 1
           } else {
             const [current] = await tx.query(
-              'SELECT e.id, max(v.number) AS current FROM entry e JOIN entry_version v ON v.entry = e.id WHERE e.id::text = $1 AND e.patient = $2 GROUP BY e.id',
+              'SELECT e.id, e.kind, max(v.number) AS current FROM entry e JOIN entry_version v ON v.entry = e.id WHERE e.id::text = $1 AND e.patient = $2 GROUP BY e.id',
               [write.entry, write.patient],
             )
             if (current === undefined) return refused({ kind: 'no such entry' })
+            if (current['kind'] !== write.kind) return refused({ kind: 'entry kind differs' })
             if (current['current'] !== write.replaces) return refused({ kind: 'not the current version' })
+            const changed = await changedFixedField(tx, write.kind, current['id'], write.replaces, write.content)
+            if (changed !== undefined) return refused({ kind: 'amendment changes a fixed field', field: changed })
             id = current['id']
             number = write.replaces + 1
           }
           await tx.query(
-            `INSERT INTO entry_version (entry, number, value, care_ns, charted_ns, author, author_name, author_discipline, write_id, write)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)`,
-            [id, number, write.value, care, now, author.id, author.name, author.discipline, write.writeId, JSON.stringify(write)],
+            `INSERT INTO entry_version (entry, kind, number, care_ns, charted_ns, author, author_name, author_discipline, write_id, write_fingerprint)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [id, write.kind, number, care, now, author.id, author.name, author.discipline, write.writeId, fingerprint(write)],
+          )
+          const fields = kindFields(write.kind).map((field) => field.name)
+          const content: Readonly<Record<string, unknown>> = write.content
+          await tx.query(
+            `INSERT INTO ${contentTable(write.kind)} (entry, number, ${fields.map(sqlName).join(', ')})
+             VALUES ($1, $2, ${fields.map((_, i) => `$${i + 3}`).join(', ')})`,
+            [id, number, ...fields.map((field) => content[field])],
           )
           const [taken] = await entries(tx, 'id = $1', [id])
           if (taken === undefined) throw new Error('the chart lost the entry it just took')
@@ -330,7 +403,7 @@ export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: 
     async versions(entry) {
       const [row] = await sql.query(
         `SELECT coalesce(json_agg(${VERSION_JSON} ORDER BY number), '[]'::json) AS versions
-         FROM entry_version v JOIN entry e ON e.id = v.entry WHERE e.id::text = $1`,
+         FROM chart_entry_version WHERE id::text = $1`,
         [entry],
       )
       const versions = trusted(parseVersions(row?.['versions']))

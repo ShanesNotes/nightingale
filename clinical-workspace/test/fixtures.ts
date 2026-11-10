@@ -35,9 +35,9 @@ export const reading = (vital: string, collected: string, value: number | 'not c
 export const entry = (fields: { id: string; vital: string; value: number; care: string; charted: string; versions?: number; author?: object }) => ({
   entry: fields.id,
   patient: 'test-patient',
-  vital: fields.vital,
+  kind: 'vital' as const,
   number: fields.versions ?? 1,
-  value: fields.value,
+  content: { vital: fields.vital, value: fields.value },
   care: at(fields.care),
   charted: at(fields.charted),
   author: fields.author ?? NURSE,

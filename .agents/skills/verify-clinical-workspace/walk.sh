@@ -4,11 +4,11 @@ repo=$(cd "$(dirname "$0")/../../.." && pwd)
 pkg=$repo/clinical-workspace
 evidence=${1:?usage: walk.sh <evidence folder> [feature ...]}
 shift
-features=("${@:-monitor chart-a-vital flowsheet amend outage device-messages}")
+features=("${@:-monitor chart-a-vital flowsheet amend chart-a-note outage device-messages}")
 read -r -a features <<<"${features[*]}"
 mkdir -p "$evidence"
 evidence=$(cd "$evidence" && pwd)
-export CW_DB_CONTAINER=cw-verify-$$
+export CW_DB_CONTAINER=${CW_DB_CONTAINER:-cw-verify-$$}
 report=$evidence/walk.txt
 : >"$report"
 failures=0
@@ -128,7 +128,7 @@ for feature in "${features[@]}"; do
       expect workspace '#notice' '^The value is not a number; nothing was charted\.$' 'workspace: empty value text is refused, never charted as zero'
       shot workspace 03-refusals
       chart charted
-      node -e "const m=JSON.parse(require('fs').readFileSync(process.argv[1]));const d=m.entries.map(e=>e.author.discipline).sort().join(',');if(d!=='nurse,physician,respiratory therapist'||!m.entries.every(e=>e.patient===m.run.patient&&e.care<=e.charted))process.exit(1)" "$evidence/chart-charted.json" && pass 'chart: three entries by three disciplines, each with its patient, care time and charted time' || fail 'chart: the entries do not name who, the patient and both times'
+      node -e "const m=JSON.parse(require('fs').readFileSync(process.argv[1]));const v=m.entries.filter(e=>e.kind==='vital');const d=v.map(e=>e.author.discipline).sort().join(',');if(v.length!==m.entries.length||d!=='nurse,physician,respiratory therapist'||!v.every(e=>e.patient===m.run.patient&&e.care<=e.charted))process.exit(1)" "$evidence/chart-charted.json" && pass 'chart: three vital entries by three disciplines, each with its patient, care time and charted time' || fail 'chart: the entries are not three vitals naming who, the patient and both times'
       ;;
     flowsheet)
       expect workspace 'tr[data-vital="HR"][data-source="monitor"]' '[0-9]+ /min' 'flowsheet: the HR monitor row shows readings'
@@ -147,8 +147,40 @@ for feature in "${features[@]}"; do
       expect workspace 'tr[data-vital="RR"][data-source="charted"]' '20 /min by Synthetic Physician B.*edited' 'amend: the flowsheet shows the new value, marked edited'
       [ "$(drive eval workspace "document.querySelector('#versions') === null")" = true ] && pass 'amend: earlier versions stay hidden until asked for' || fail 'amend: earlier versions show unasked'
       drive click workspace '#versions-button'
-      expect workspace '#versions' 'Version 1: 18 /min.*Version 2: 20 /min' 'amend: the earlier version comes from the chart service on request'
+      expect workspace '#versions' 'Version 1: RR 18 /min.*Version 2: RR 20 /min' 'amend: the earlier version comes from the chart service on request, with its own vital and unit'
+      [ "$(drive eval workspace "document.querySelector('#edit-vital') === null && document.querySelector('#edit') !== null")" = true ] && pass 'amend: the editor offers the value but never the vital' || fail 'amend: the editor offers the vital'
       shot workspace 05-amended
+      ;;
+    chart-a-note)
+      expect workspace '#service' '^The chart service is answering\.$' 'note: the chart service answers' 30
+      now=$(clock workspace '#now')
+      drive choose workspace '#author' synthetic-nurse
+      drive fill workspace '#note-text' 'Synthetic walk note, first version.' && drive fill workspace '#note-care' "$(shift_clock "$now" -90)" && drive click workspace '#chart-note'
+      expect workspace '#note-notice' '^Charted note as Synthetic Nurse A\.$' 'note: a nurse charts a note 90 s after its care time, and the answer shows beside the note form'
+      expect workspace '#note-list' 'Synthetic walk note, first version\..*Charted [0-9:]+, late by 1 min (29|30|31) s\.' 'note: the note shows its text and how late it was charted'
+      drive fill workspace '#note-text' '   ' && drive fill workspace '#note-care' '' && drive click workspace '#chart-note'
+      expect workspace '#note-notice' '^The note text is blank; nothing was charted\.$' 'note: a blank note is refused in words that say why'
+      [ "$(drive eval workspace "document.querySelector('#note-text').value === '   ' && !document.querySelector('#notice').innerText.includes('note')")" = true ] && pass 'note: the refused draft stays as typed, and the vitals notice says nothing of it' || fail 'note: the refusal lost the draft or showed beside the vitals form'
+      shot workspace 06-note-charted
+      chart note
+      id=$(node -p "const m=JSON.parse(require('fs').readFileSync(process.argv[1]));const n=m.entries.filter(e=>e.kind==='note');n.length===1&&n[0].content.text==='Synthetic walk note, first version.'&&n[0].versions===1&&n[0].author.id==='synthetic-nurse'&&n[0].charted-n[0].care>=89e9?n[0].entry:''" "$evidence/chart-note.json")
+      [ -n "$id" ] && pass "note: the chart service holds one note, version 1 by the nurse, charted at least 89 s after its care time" || fail 'note: the chart service does not hold the note as charted'
+      drive choose workspace '#author' synthetic-physician
+      drive click workspace "#note-list li[data-entry=\"$id\"] [data-action=\"edit\"]"
+      expect workspace "#note-list li[data-entry=\"$id\"] #edit-text" '' 'note: edit opens the editor inside the note'
+      [ "$(drive eval workspace "document.querySelector('#note-list li[data-entry=\"$id\"] #edit-text').value")" = '"Synthetic walk note, first version."' ] && pass 'note: the editor starts from the version shown' || fail 'note: the editor does not start from the version shown'
+      drive fill workspace '#edit-text' 'Synthetic walk note, second version.' && drive click workspace '#save-edit'
+      expect workspace '#note-notice' '^Amended note as Synthetic Physician B\.$' 'note: a physician amends the note in place'
+      expect workspace "#note-list li[data-entry=\"$id\"]" 'Synthetic Physician B, physician · edited, version 2 of 2.*Synthetic walk note, second version\..*Version 2 charted [0-9:]+, late by' 'note: the note shows the new text, its author, version 2 of 2 and how late version 2 was charted'
+      [ "$(drive eval workspace "document.querySelector('#versions') === null")" = true ] && pass 'note: earlier versions stay hidden until asked for' || fail 'note: earlier versions show unasked'
+      drive click workspace "#note-list li[data-entry=\"$id\"] [data-action=\"versions\"]"
+      expect workspace "#note-list li[data-entry=\"$id\"] #versions" '^Version 1 · Synthetic Nurse A, nurse · care time [0-9:]+ · charted [0-9:]+ +Synthetic walk note, first version\.$' 'note: the earlier version comes from the chart service on request, inside the note'
+      shot workspace 07-note-amended
+      curl -sf "$service/api/entries/$id/versions" >"$evidence/note-versions.json" && note "rows $evidence/note-versions.json"
+      node -e "const v=JSON.parse(require('fs').readFileSync(process.argv[1]));const s=v.map(x=>[x.number,x.kind,x.content.text,x.author.id].join('|')).join(';');if(s!=='1|note|Synthetic walk note, first version.|synthetic-nurse;2|note|Synthetic walk note, second version.|synthetic-physician')process.exit(1)" "$evidence/note-versions.json" && pass 'note: the chart service gives both versions, each with its text and author' || fail 'note: the chart service does not give both versions'
+      chart note-amended
+      node -e "const m=JSON.parse(require('fs').readFileSync(process.argv[1]));const n=m.entries.filter(e=>e.kind==='note');const r=m.entries.filter(e=>e.kind==='vital'&&e.content.vital==='RR');if(n.length!==1||n[0].versions!==2||n[0].content.text!=='Synthetic walk note, second version.'||r.length!==1||r[0].content.value!==20)process.exit(1)" "$evidence/chart-note-amended.json" && pass 'note: the chart holds the amended note beside the amended RR entry, one read model for both kinds' || fail 'note: the chart does not hold the amended note beside the vitals'
+      expect workspace 'tr[data-vital="RR"][data-source="charted"]' '20 /min by Synthetic Physician B' 'note: the flowsheet still shows the vitals alone'
       ;;
     outage)
       drive click workspace '#close'
@@ -159,7 +191,7 @@ for feature in "${features[@]}"; do
       first=$(clock monitor '#clock')
       sleep 2
       [ "$(clock monitor '#clock')" != "$first" ] && expect monitor 'td[data-tile="HR"]' '^[0-9]+ /min$' 'outage: the monitor keeps taking readings with the service stopped and the workspace closed'
-      shot monitor 06-outage-monitor
+      shot monitor 08-outage-monitor
       drive offline monitor 14 >>"$report" 2>&1 &
       offline=$!
       sleep 1
@@ -174,7 +206,7 @@ for feature in "${features[@]}"; do
       expect workspace '#service' '^The chart service is answering\.$' 'outage: the reopened workspace reads the chart as it is now' 20
       expect workspace 'tr[data-vital="HR"][data-source="monitor"]' '[0-9]+ missing' 'outage: the seconds the monitor still holds show as missing'
       chart while-held
-      shot workspace 07-missing
+      shot workspace 09-missing
       wait "$offline"
       offline=''
       expect monitor '#link' '^Everything delivered to the chart\.$' 'outage: the monitor delivers what it held once it reaches the service' 20
@@ -191,8 +223,8 @@ for feature in "${features[@]}"; do
         console.log(turned.length + ' missing seconds of HR turned late')" "$evidence/chart-while-held.json" "$evidence/chart-after-delivery.json" >>"$report" 2>&1 \
         && pass 'outage: every missing second the monitor held turned into a late reading' || fail 'outage: missing seconds did not turn late'
       expect workspace 'tr[data-vital="HR"][data-source="monitor"]' '[0-9]+ late' 'outage: the flowsheet marks the held readings late' 20
-      shot workspace 08-late
-      shot monitor 09-monitor-recovered
+      shot workspace 10-late
+      shot monitor 11-monitor-recovered
       ;;
     device-messages)
       now=$(node -p "JSON.parse(require('fs').readFileSync('$evidence/chart-after-delivery.json')).now" 2>/dev/null || curl -sf "$service/api/chart" | node -p "JSON.parse(require('fs').readFileSync(0)).now")
@@ -215,11 +247,17 @@ for feature in "${features[@]}"; do
         if (!has(gap) || has(now - 4 * s) || has(now - 2 * s) || held !== 2) process.exit(1)" "$evidence/chart-device-gap.json" "$now" \
         && pass 'device: the gap in the sequence shows as a missing second, the held readings once each' || fail 'device: the sequence gap does not show as missing'
       {
-        docker exec "$CW_DB_CONTAINER" psql -U postgres -c "UPDATE entry SET vital = 'HR'" 2>&1
+        docker exec "$CW_DB_CONTAINER" psql -U postgres -c "UPDATE content_vital SET vital = 'HR'" 2>&1
         docker exec "$CW_DB_CONTAINER" psql -U postgres -c 'DELETE FROM device_message' 2>&1
-        docker exec "$CW_DB_CONTAINER" psql -U postgres -c 'TRUNCATE entry_version' 2>&1
+        docker exec "$CW_DB_CONTAINER" psql -U postgres -c 'TRUNCATE entry_version CASCADE' 2>&1
       } >"$evidence/postgres-refusals.txt"
       [ "$(grep -c 'append-only' "$evidence/postgres-refusals.txt")" -ge 3 ] && pass 'device: Postgres refuses an update, a delete and a truncate of chart rows' || fail 'device: Postgres let a chart row change'
+      docker exec "$CW_DB_CONTAINER" psql -U postgres -c "
+        INSERT INTO entry_version (entry, kind, number, care_ns, charted_ns, author, author_name, author_discipline, write_id, write_fingerprint)
+          SELECT v.entry, v.kind, 3, v.care_ns, v.charted_ns, v.author, v.author_name, v.author_discipline, 'verify-walk-raw', v.write_fingerprint
+          FROM entry_version v JOIN content_vital c ON c.entry = v.entry AND c.number = v.number WHERE c.vital = 'RR' AND v.number = 2;
+        INSERT INTO content_vital (entry, number, vital, value) SELECT entry, 3, 'HR', value FROM content_vital WHERE vital = 'RR' AND number = 2" >"$evidence/postgres-fixed-field.txt" 2>&1
+      grep -q 'violates foreign key constraint' "$evidence/postgres-fixed-field.txt" && pass 'device: Postgres on its own refuses a version that changes which vital an entry is about' || fail 'device: Postgres took a version that changes the vital'
       ;;
     *) fail "no feature named $feature" ;;
   esac

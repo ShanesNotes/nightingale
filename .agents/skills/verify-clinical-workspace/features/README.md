@@ -31,5 +31,6 @@ Each feature file starts with an H1 title and one paragraph on what a person see
 - [Chart a vital](chart-a-vital.md): any clinician charts any vital, care time and charted time, refusals in words (moment 3).
 - [The flowsheet](flowsheet.md): the chart by minute, monitor and charted rows apart, no source, missing and late as words (moment 4).
 - [Amend a chart entry](amend.md): details, a new version, earlier versions on request (moment 5).
+- [Chart a note](chart-a-note.md): a note charted late, a refused blank note, an amendment in place, earlier versions inside the note, all read back from the chart service.
 - [A chart service outage](outage.md): the monitor holds with the workspace closed and the service stopped, then its readings arrive late (moment 2).
 - [Device messages](device-messages.md): a resend changes nothing, a sequence gap shows as missing, Postgres refuses changes (moment 6).

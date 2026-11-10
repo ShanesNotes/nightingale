@@ -1,0 +1,134 @@
+import assert from 'node:assert/strict'
+import { describe, test } from 'node:test'
+import { parseAmendment, parseNewEntry, type WriteResult } from '../src/chart-api.ts'
+import { openChart, pgliteSql, pgSql, type Chart, type Sql } from '../src/chart.ts'
+import { isPatientId } from '../src/device.ts'
+import { ENTRY_KINDS } from '../src/entry-kinds.ts'
+import { at, NURSE } from './fixtures.ts'
+import { wallTime } from '../src/time.ts'
+
+const patient = 'synthetic-kinds-patient'
+assert.ok(isPatientId(patient))
+const run = { specId: 'synthetic-kinds-spec', patient, start: at('06:55:00'), end: at('07:05:00') }
+let serial = 0
+const wire = (fields: object = {}) => ({ writeId: `kinds-${++serial}`, patient, author: NURSE.id, care: null, kind: 'note', content: { text: 'Synthetic note alpha.' }, ...fields })
+const newWrite = (fields: object = {}) => {
+  const parsed = parseNewEntry(wire(fields))
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.reason)
+  return parsed.value
+}
+const amend = (entry: string, fields: object = {}) => {
+  const parsed = parseAmendment(wire({ entry, replaces: 1, ...fields }))
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.reason)
+  return parsed.value
+}
+const taken = (result: WriteResult) => {
+  assert.equal(result.kind, 'taken', JSON.stringify(result))
+  return result.entry
+}
+
+test('each kind in the catalog is named by its key and names each of its fields once', () => {
+  for (const [key, kind] of Object.entries(ENTRY_KINDS)) {
+    assert.equal(kind.kind, key)
+    assert.equal(new Set(kind.fields.map((field) => field.name)).size, kind.fields.length, key)
+  }
+})
+
+test('unknown kinds and content that does not fit its kind have named boundary refusals, and a misfit says why', () => {
+  for (const parse of [parseNewEntry, parseAmendment]) {
+    const unknown = parse(wire({ entry: 'synthetic-entry', replaces: 1, kind: 'unregistered', content: {} }))
+    assert.deepEqual(unknown.ok ? undefined : unknown.refusal, { kind: 'unknown entry kind' })
+    for (const [fields, reason] of [
+      [{ kind: 'note', content: { value: 3 } }, 'A note has no field named value'],
+      [{ kind: 'note', content: { text: '' } }, 'The note text is blank'],
+      [{ kind: 'note', content: { text: ' \n\t' } }, 'The note text is blank'],
+      [{ kind: 'note', content: { text: 'x'.repeat(10_001) } }, 'The note text is longer than 10,000 characters'],
+      [{ kind: 'note', content: { text: 'Synthetic.', vital: 'HR' } }, 'A note has no field named vital'],
+      [{ kind: 'note', content: 'Synthetic note as bare text.' }, 'The note content is not a set of named fields'],
+      [{ kind: 'vital', content: { text: 'Synthetic.' } }, 'A vital has no field named text'],
+      [{ kind: 'vital', content: { vital: 'HR' } }, 'The vital has no value'],
+      [{ kind: 'vital', content: { vital: 'EtCO2', value: '1.25' } }, 'The vital is not one the chart lists'],
+      [{ kind: 'vital', content: { vital: 'HR', value: 'twelve' } }, 'The value is not a number'],
+      [{ kind: 'vital', content: { vital: 'HR', value: 'Infinity' } }, 'The value is not a number'],
+    ] as const) {
+      const invalid = parse(wire({ entry: 'synthetic-entry', replaces: 1, ...fields }))
+      assert.deepEqual(invalid.ok ? undefined : invalid.refusal, { kind: 'content does not fit kind', reason }, JSON.stringify(fields))
+    }
+  }
+})
+
+const databases: [string, () => Promise<Sql>][] = [['PGlite', pgliteSql]]
+if (process.env['CHART_TEST_DATABASE_URL']) databases.push(['Postgres', () => pgSql(process.env['CHART_TEST_DATABASE_URL']!, { fresh: true })])
+for (const [name, connect] of databases) {
+  const withChart = async (work: (chart: Chart, sql: Sql) => Promise<void>) => {
+    const sql = await connect()
+    try {
+      await work(await openChart(sql, run, wallTime(1_000_000)), sql)
+    } finally {
+      await sql.close()
+    }
+  }
+  describe(`both entry kinds on ${name}`, () => {
+    test('an amendment cannot change which vital an entry is about: the chart refuses it by name, and Postgres on its own', () => withChart(async (chart, sql) => {
+      const vital = (value: string) => ({ kind: 'vital', content: { vital: 'HR', value } })
+      const first = taken(await chart.write(newWrite(vital('1.25')), at('06:56:00')))
+      const second = taken(await chart.write(amend(first.entry, vital('1.5')), at('06:56:10')))
+      assert.deepEqual(second.content, { vital: 'HR', value: 1.5 })
+      assert.deepEqual(
+        await chart.write(amend(first.entry, { replaces: 2, kind: 'vital', content: { vital: 'RR', value: '1.5' } }), at('06:56:20')),
+        { kind: 'refused', refusal: { kind: 'amendment changes a fixed field', field: 'vital' } },
+      )
+      await assert.rejects(sql.transaction(async (tx) => {
+        await tx.query(`INSERT INTO entry_version (entry, kind, number, care_ns, charted_ns, author, author_name, author_discipline, write_id, write_fingerprint)
+          SELECT entry, kind, 3, care_ns, charted_ns, author, author_name, author_discipline, $2, write_fingerprint
+          FROM entry_version WHERE entry = $1 AND number = 2`, [first.entry, `sql-${++serial}`])
+        await tx.query('INSERT INTO content_vital (entry, number, vital, value) VALUES ($1, 3, $2, $3)', [first.entry, 'RR', 1.5])
+      }), /foreign key/, 'version 3 of an HR entry cannot be about RR')
+      assert.deepEqual((await chart.versions(first.entry))?.map((v) => v.content), [{ vital: 'HR', value: 1.25 }, { vital: 'HR', value: 1.5 }])
+    }))
+
+    test('SQL itself refuses a missing content, a wrong-kind content, a skipped version, future care and a changed content', () => withChart(async (chart, sql) => {
+      const first = taken(await chart.write(newWrite(), at('06:56:00')))
+      const next = (tx: Sql, number = 2, care = first.care) => tx.query(`
+        INSERT INTO entry_version (entry, kind, number, care_ns, charted_ns, author, author_name, author_discipline, write_id, write_fingerprint)
+        SELECT entry, kind, $2, $3, charted_ns, author, author_name, author_discipline, $4, write_fingerprint
+        FROM entry_version WHERE entry = $1 AND number = 1`, [first.entry, number, care, `sql-${++serial}`])
+      await assert.rejects(sql.transaction((tx) => next(tx)), /content/, 'commit refuses an empty version')
+      await assert.rejects(sql.transaction(async (tx) => {
+        await next(tx)
+        await tx.query('INSERT INTO content_vital (entry, number, vital, value) VALUES ($1, 2, $2, $3)', [first.entry, 'HR', 1.25])
+      }), /foreign key/, 'a vital content cannot belong to a note version')
+      await assert.rejects(sql.transaction(async (tx) => {
+        await next(tx, 3)
+        await tx.query('INSERT INTO content_note (entry, number, text) VALUES ($1, 3, $2)', [first.entry, 'Synthetic skipped version.'])
+      }), /foreign key/, 'version 3 cannot skip version 2')
+      await assert.rejects(sql.transaction((tx) => next(tx, 2, at('06:57:00'))), /check constraint/, 'care must not be after charted time')
+      for (const statement of ["UPDATE content_note SET text = 'Synthetic change.'", 'DELETE FROM content_note', 'TRUNCATE content_note']) {
+        await assert.rejects(sql.query(statement), /append-only/, statement)
+      }
+      assert.deepEqual((await chart.readModel(at('06:57:00'))).entries, [first], 'failed SQL leaves no partial versions')
+    }))
+
+    test('SQL typed columns refuse invalid bodies and the spine refuses a kind it does not know', () => withChart(async (chart, sql) => {
+      const note = taken(await chart.write(newWrite(), at('06:56:00')))
+      const vital = taken(await chart.write(newWrite({ kind: 'vital', content: { vital: 'HR', value: '1.25' } }), at('06:56:00')))
+      const invalidContent = (entry: string, kind: string, contentSql: string, params: unknown[]) => sql.transaction(async (tx) => {
+        await tx.query(`INSERT INTO entry_version (entry, kind, number, care_ns, charted_ns, author, author_name, author_discipline, write_id, write_fingerprint)
+          SELECT entry, kind, 2, care_ns, charted_ns, author, author_name, author_discipline, $2, write_fingerprint
+          FROM entry_version WHERE entry = $1`, [entry, `sql-${++serial}`])
+        await tx.query(`INSERT INTO content_${kind} (entry, number, ${kind === 'note' ? 'text' : 'vital, value'}) VALUES ($1, 2, ${contentSql})`, [entry, ...params])
+      })
+      for (const text of ['', ' \n\t', '\v', '\f\r']) await assert.rejects(invalidContent(note.entry, 'note', '$2', [text]), /check constraint/)
+      for (const value of ['NaN', 'Infinity', '-Infinity']) await assert.rejects(invalidContent(vital.entry, 'vital', "'HR', $2", [value]), /check constraint/)
+      await assert.rejects(invalidContent(vital.entry, 'vital', "'unknown', 1.25", []), /check constraint/)
+      await assert.rejects(sql.query('INSERT INTO entry (patient, kind) VALUES ($1, $2)', [patient, 'unknown']), /check constraint/)
+    }))
+
+    test('note text preserves letters, Unicode, line breaks and literal markup without interpreting it', () => withChart(async (chart) => {
+      for (const text of ['v', 'Synthetic Ω note.\nSecond line.', '<script>synthetic text only</script>']) {
+        const entry = taken(await chart.write(newWrite({ content: { text } }), at('06:56:00')))
+        assert.deepEqual(entry.content, { text })
+      }
+    }))
+  })
+}
