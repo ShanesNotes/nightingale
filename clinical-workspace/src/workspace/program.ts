@@ -148,6 +148,8 @@ function refusedWords(refusal: Refusal): string {
       return `${refusal.reason}; nothing was charted.`
     case 'entry kind differs':
       return 'An amendment must keep the entry kind; nothing was charted.'
+    case 'amendment changes a fixed field':
+      return `An amendment cannot change the ${refusal.field} of the entry it amends; nothing was charted.`
     case 'another patient':
       return 'That write names another patient; nothing was charted.'
     case 'care time after now':

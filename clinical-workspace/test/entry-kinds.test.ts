@@ -101,6 +101,24 @@ for (const [name, connect] of databases) {
       assert.deepEqual(flowsheet(await chart.readModel(at('06:57:00'))), before)
     }))
 
+    test('an amendment cannot change which vital an entry is about: the chart refuses it by name, and Postgres on its own', () => withChart(async (chart, sql) => {
+      const vital = (value: string) => ({ kind: 'vital', content: { vital: 'HR', value } })
+      const first = taken(await chart.write(newWrite(vital('1.25')), at('06:56:00')))
+      const second = taken(await chart.write(amend(first.entry, vital('1.5')), at('06:56:10')))
+      assert.deepEqual(second.content, { vital: 'HR', value: 1.5 })
+      assert.deepEqual(
+        await chart.write(amend(first.entry, { replaces: 2, kind: 'vital', content: { vital: 'RR', value: '1.5' } }), at('06:56:20')),
+        { kind: 'refused', refusal: { kind: 'amendment changes a fixed field', field: 'vital' } },
+      )
+      await assert.rejects(sql.transaction(async (tx) => {
+        await tx.query(`INSERT INTO entry_version (entry, kind, number, care_ns, charted_ns, author, author_name, author_discipline, write_id, write_fingerprint)
+          SELECT entry, kind, 3, care_ns, charted_ns, author, author_name, author_discipline, $2, write_fingerprint
+          FROM entry_version WHERE entry = $1 AND number = 2`, [first.entry, `sql-${++serial}`])
+        await tx.query('INSERT INTO content_vital (entry, number, vital, value) VALUES ($1, 3, $2, $3)', [first.entry, 'RR', 1.5])
+      }), /foreign key/, 'version 3 of an HR entry cannot be about RR')
+      assert.deepEqual((await chart.versions(first.entry))?.map((v) => v.content), [{ vital: 'HR', value: 1.25 }, { vital: 'HR', value: 1.5 }])
+    }))
+
     test('SQL itself refuses a missing content, a wrong-kind content, a skipped version, future care and a changed content', () => withChart(async (chart, sql) => {
       const first = taken(await chart.write(newWrite(), at('06:56:00')))
       const next = (tx: Sql, number = 2, care = first.care) => tx.query(`

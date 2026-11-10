@@ -461,6 +461,9 @@ _Avoid_: entry type, template
 The named fields an entry kind defines and each version of an entry fills, such as a vital and its value, or a note's text. Postgres keeps each kind's content in a table of its own, with a typed column per field.
 _Avoid_: body (the simulated body), payload
 
+**Fixed field**:
+A field of an entry kind's content that every amendment keeps, such as which vital a vital entry is about. The chart refuses an amendment that changes one, and so does Postgres on its own.
+
 **Note**:
 A chart entry of free text by its author. It is never parsed into physiology.
 

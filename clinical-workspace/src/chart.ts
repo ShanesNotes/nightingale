@@ -19,7 +19,7 @@ import {
 import { type DeviceMessage, isPatientId, type MessageAnswer, type Parsed } from './device.ts'
 import { add, earlier, floorTo, isPatientTime, isWallTime, type PatientTime, SECOND, seconds, type WallTime } from './time.ts'
 import { VITALS } from './vitals.ts'
-import { ENTRY_KINDS, type EntryKind, isEntryKind, kindFields, sqlName, sqlText } from './entry-kinds.ts'
+import { ENTRY_KINDS, type EntryKind, fixedFields, isEntryKind, kindFields, sqlName, sqlText } from './entry-kinds.ts'
 
 export type Row = Readonly<Record<string, unknown>>
 
@@ -111,6 +111,13 @@ export async function pgSql(url: string, options: { readonly fresh?: boolean } =
 
 const KINDS = Object.keys(ENTRY_KINDS).filter(isEntryKind)
 const contentTable = (kind: EntryKind) => sqlName(`content_${kind}`)
+const keepsFixed = (kind: EntryKind) => {
+  const fixed = fixedFields(kind).map((field) => sqlName(field.name)).join(', ')
+  return fixed === '' ? '' : `,
+  replaces integer GENERATED ALWAYS AS (CASE WHEN number > 1 THEN number - 1 END) STORED,
+  UNIQUE (entry, number, ${fixed}),
+  FOREIGN KEY (entry, replaces, ${fixed}) REFERENCES ${contentTable(kind)} (entry, number, ${fixed})`
+}
 const contentTables = KINDS.map((kind) => `
 CREATE TABLE IF NOT EXISTS ${contentTable(kind)} (
   entry uuid NOT NULL,
@@ -118,7 +125,7 @@ CREATE TABLE IF NOT EXISTS ${contentTable(kind)} (
   kind text GENERATED ALWAYS AS (${sqlText(kind)}::text) STORED,
   ${kindFields(kind).map((field) => `${sqlName(field.name)} ${field.column}`).join(',\n  ')},
   PRIMARY KEY (entry, number),
-  FOREIGN KEY (entry, number, kind) REFERENCES entry_version (entry, number, kind)
+  FOREIGN KEY (entry, number, kind) REFERENCES entry_version (entry, number, kind)${keepsFixed(kind)}
 );`).join('\n')
 
 const appendOnly = ['run', 'entry', 'entry_version', 'device_message', ...KINDS.map((kind) => `content_${kind}`)].map((table) => `
@@ -311,6 +318,13 @@ async function answerByWriteId(sql: Sql, write: EntryWrite): Promise<WriteResult
   return { kind: 'taken', entry }
 }
 
+async function changedFixedField(sql: Sql, kind: EntryKind, entry: unknown, number: number, content: Readonly<Record<string, unknown>>): Promise<string | undefined> {
+  const fixed = fixedFields(kind)
+  if (fixed.length === 0) return undefined
+  const [held] = await sql.query(`SELECT ${fixed.map((field) => sqlName(field.name)).join(', ')} FROM ${contentTable(kind)} WHERE entry = $1 AND number = $2`, [entry, number])
+  return fixed.find((field) => held?.[field.name] !== content[field.name])?.name
+}
+
 const PREDATES_KINDS = `SELECT to_regclass('entry_version') IS NOT NULL AND (${KINDS.map((kind) => `to_regclass(${sqlText(`content_${kind}`)}) IS NULL`).join(' OR ')}) AS predates`
 
 function refusalOf(write: { readonly patient: string; readonly care: PatientTime }, run: RunView, now: PatientTime): Refusal | undefined {
@@ -360,6 +374,8 @@ export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: 
             if (current === undefined) return refused({ kind: 'no such entry' })
             if (current['kind'] !== write.kind) return refused({ kind: 'entry kind differs' })
             if (current['current'] !== write.replaces) return refused({ kind: 'not the current version' })
+            const changed = await changedFixedField(tx, write.kind, current['id'], write.replaces, write.content)
+            if (changed !== undefined) return refused({ kind: 'amendment changes a fixed field', field: changed })
             id = current['id']
             number = write.replaces + 1
           }

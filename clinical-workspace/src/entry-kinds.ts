@@ -6,6 +6,7 @@ export type Field<T> = {
   readonly name: string
   readonly label: string
   readonly input: 'line' | 'multiline' | readonly { readonly value: string; readonly label: string }[]
+  readonly fixed: boolean
   parse(value: unknown, from: 'write' | 'read'): Fit<T>
   readonly column: string
 }
@@ -16,10 +17,11 @@ export const sqlText = (text: string) => `'${text.replaceAll("'", "''")}'`
 const fits = <T>(value: T): Fit<T> => ({ ok: true, value })
 const misfit = (reason: string): Fit<never> => ({ ok: false, reason })
 
-const choices = <T extends string>(name: string, label: string, options: readonly { readonly value: T; readonly label: string }[]): Field<T> => ({
+const choices = <T extends string>(name: string, label: string, options: readonly { readonly value: T; readonly label: string }[], fixed: boolean): Field<T> => ({
   name,
   label,
   input: options,
+  fixed,
   parse(value) {
     const chosen = options.find((option) => option.value === value)
     return chosen === undefined ? misfit(`The ${label.toLowerCase()} is not one the chart lists`) : fits(chosen.value)
@@ -32,6 +34,7 @@ const numberField = (name: string, label: string): Field<number> => ({
   name,
   label,
   input: 'line',
+  fixed: false,
   parse(value, from) {
     const number = from === 'write' ? (typeof value === 'string' && DECIMAL.test(value.trim()) ? Number(value) : undefined) : value
     return typeof number === 'number' && Number.isFinite(number) ? fits(number) : misfit(`The ${label.toLowerCase()} is not a number`)
@@ -43,6 +46,7 @@ const textField = (name: string, label: string, limit: number): Field<string> =>
   name,
   label,
   input: 'multiline',
+  fixed: false,
   parse(value) {
     const what = label.toLowerCase()
     if (typeof value !== 'string' || !/[^ \t\n\r\f\v]/.test(value)) return misfit(`The ${what} is blank`)
@@ -79,7 +83,7 @@ const kindOf = <K extends string, C>(kind: K, label: string, fields: readonly Fi
   },
 })
 
-const vital = choices<Vital>('vital', 'Vital', VITALS.map((row) => ({ value: row.vital, label: `${row.label} (${row.unit})` })))
+const vital = choices<Vital>('vital', 'Vital', VITALS.map((row) => ({ value: row.vital, label: `${row.label} (${row.unit})` })), true)
 const value = numberField('value', 'Value')
 const text = textField('text', 'Note text', 10_000)
 
@@ -94,6 +98,7 @@ export type KindRefusal = { readonly kind: 'unknown entry kind' } | { readonly k
 
 export const isEntryKind = (value: unknown): value is EntryKind => typeof value === 'string' && Object.hasOwn(ENTRY_KINDS, value)
 export const kindFields = (kind: EntryKind): readonly Field<unknown>[] => ENTRY_KINDS[kind].fields
+export const fixedFields = (kind: EntryKind): readonly Field<unknown>[] => kindFields(kind).filter((field) => field.fixed)
 
 export function parseContent(kind: unknown, content: unknown, from: 'write' | 'read'):
   { readonly ok: true; readonly value: EntryContent } | { readonly ok: false; readonly refusal: KindRefusal } {

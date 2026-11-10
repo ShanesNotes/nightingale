@@ -80,6 +80,7 @@ export type AmendmentRequest = NewEntryRequest & { readonly entry: string; reado
 export type Refusal =
   | KindRefusal
   | { readonly kind: 'entry kind differs' }
+  | { readonly kind: 'amendment changes a fixed field'; readonly field: string }
   | { readonly kind: 'another patient' }
   | { readonly kind: 'care time after now' }
   | { readonly kind: 'no such entry' }
@@ -153,7 +154,7 @@ const REFUSALS: readonly unknown[] = [
   'no such entry',
   'not the current version',
   'write id reused with other content',
-] satisfies Exclude<Refusal, { readonly reason: string }>['kind'][]
+] satisfies Exclude<Refusal, { readonly reason: string } | { readonly field: string }>['kind'][]
 class Malformed extends Error {
   readonly refusal: Refusal
   constructor(reason: string, refusal: Refusal = { kind: 'malformed', reason }) {
@@ -245,7 +246,8 @@ function refusal(value: unknown): Refusal {
   const json = object(value, 'a refusal')
   const kind = json['kind']
   if (kind === 'malformed' || kind === 'content does not fit kind') return { kind, reason: text(json, 'reason') }
-  const known = (k: unknown): k is Exclude<Refusal, { readonly reason: string }>['kind'] => REFUSALS.includes(k)
+  if (kind === 'amendment changes a fixed field') return { kind, field: text(json, 'field') }
+  const known = (k: unknown): k is Exclude<Refusal, { readonly reason: string } | { readonly field: string }>['kind'] => REFUSALS.includes(k)
   return known(kind) ? { kind } : fail(`refusal ${String(kind)} is not a kind the chart gives`)
 }
 
