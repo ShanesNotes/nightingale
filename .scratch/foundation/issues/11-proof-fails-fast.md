@@ -1,7 +1,8 @@
 # 11: The proof fails fast
 
 Type: task
-Status: open
+Status: claimed
+Claimed by: f11-fail-fast
 Blocked by: none
 
 **What to build:** A red proof stops at its first failure, near the start of the run. Today `tools/verify` runs its steps in file order, and `40-mutants` prints a surviving row only when its whole sweep ends. The diagnosis at `~/lanes/logs/ng-optimize/proof-time.md` (section 5, cut 2) measured the cost. Since native-contract 24, 9,030 of 38,143 s of full proofs on the tower (24%) went to red proofs. One red proof failed on a doctest in `20-sketch`, a 5 s step, after 889 s. Another had two surviving rows that took 6 s each, printed after 3,844 s. The diagnosis estimates that the order below would have saved about 8,000 of those 9,030 s. The new order is:
