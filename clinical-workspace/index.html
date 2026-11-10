@@ -2,31 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Clinical workspace</title>
     <style>
-      body { margin: 1.5rem; font-family: system-ui, sans-serif; color: #202020; background: #fff; }
-      h1 { font-size: 1.5rem; }
-      h2 { margin: 1.5rem 0 0.75rem; font-size: 1.125rem; }
-      button, input, select, textarea { font: inherit; }
-      button { cursor: pointer; padding: 0.35rem 0.65rem; }
-      button:disabled { cursor: wait; }
-      :focus-visible { outline: 2px solid #17548a; outline-offset: 2px; }
-      .entry-form { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; }
-      .field { display: flex; flex-direction: column; gap: 0.3rem; max-width: 100%; }
-      input, select, textarea { padding: 0.35rem; max-width: 100%; box-sizing: border-box; }
-      textarea { width: 32rem; resize: vertical; }
-      #notes ol { list-style: none; padding: 0; max-width: 75ch; }
-      #notes li { border-bottom: 1px solid #bbb; padding: 0.75rem 0; }
-      .note-meta { margin: 0 0 0.4rem; font-size: 0.9rem; }
-      .note-text { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 75ch; }
-      #details { border: 1px solid #888; padding: 0.75rem; max-width: 75ch; }
-      #details h2 { margin-top: 0; }
-      #details button { margin: 0.35rem 0.5rem 0 0; }
-      #notice { min-height: 1.5em; }
-      .sheet-scroll { max-width: 100%; overflow-x: auto; }
       table { border-collapse: collapse; }
       th, td { border: 1px solid #888; padding: 2px 6px; text-align: left; vertical-align: top; }
+      #note-text, #edit-text { display: block; width: 40em; max-width: 100%; }
+      #note-list { list-style: none; padding: 0; max-width: 48em; }
+      .note { border: 1px solid #888; padding: 2px 8px; margin: 6px 0; }
+      .note p { margin: 4px 0; }
+      .note-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+      .note-head, .note-charted { color: #444; }
     </style>
   </head>
   <body>
