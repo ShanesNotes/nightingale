@@ -91,7 +91,7 @@ test('the chart service answers the chart API and the device protocol over HTTP'
     const unknownKind = await call('POST', '/api/entries', { ...note, kind: 'unknown' })
     assert.deepEqual([unknownKind.status, unknownKind.json], [400, { kind: 'refused', refusal: { kind: 'unknown entry kind' } }])
     const badContent = await call('POST', '/api/entries', { ...note, content: { value: 1.25 } })
-    assert.deepEqual([badContent.status, badContent.json], [400, { kind: 'refused', refusal: { kind: 'content does not fit kind' } }])
+    assert.deepEqual([badContent.status, badContent.json], [400, { kind: 'refused', refusal: { kind: 'content does not fit kind', reason: 'A note has no field named value' } }])
     const withNote = parseReadModel((await call('GET', '/api/chart')).json)
     assert.ok(withNote.ok)
     assert.deepEqual(withNote.value.entries.map((entry) => entry.kind), ['note', 'vital'])

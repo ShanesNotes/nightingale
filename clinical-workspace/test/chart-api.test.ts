@@ -70,7 +70,7 @@ test('a new entry and an amendment parse from what the workspace sends', () => {
 test('empty or invalid value text is refused at the boundary, never parsed as zero', () => {
   for (const text of ['', '   ', 'twelve', '12 bpm']) {
     const parsed = parseNewEntry({ writeId: 'test-write-1', patient: 'test-patient', author: nurse.id, kind: 'vital' as const, content: { vital: 'HR', value: text }, care: null })
-    assert.deepEqual(parsed.ok ? undefined : parsed.refusal, { kind: 'content does not fit kind' }, JSON.stringify(text))
+    assert.deepEqual(parsed.ok ? undefined : parsed.refusal, { kind: 'content does not fit kind', reason: 'The value is not a number' }, JSON.stringify(text))
   }
 })
 

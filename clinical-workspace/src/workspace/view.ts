@@ -37,7 +37,8 @@ function chartedText(value: ChartedValue, unit: string): string {
 }
 
 function fields(kind: EntryKind, content: Readonly<Record<string, string>>, editing: boolean, model: Model, h: H, vitals: readonly VitalRow[]): Html[] {
-  return Object.entries(kindFields(kind)).map(([name, field]) => {
+  return kindFields(kind).map((field) => {
+    const { name } = field
     const id = editing ? `edit-${name}` : kind === 'note' ? `note-${name}` : name
     const attributes = [h.Id(id), h.Disabled(model.writing !== null), h.Value(content[name] ?? '')]
     const changed = (text: string) => editing ? Message.TypedEditField({ field: name, text }) : Message.TypedField({ field: name, text })

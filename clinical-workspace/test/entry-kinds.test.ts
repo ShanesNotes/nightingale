@@ -27,21 +27,25 @@ const taken = (result: WriteResult) => {
   return result.entry
 }
 
-test('unknown kinds and bodies that do not fit their kind have named boundary refusals', () => {
+test('unknown kinds and content that does not fit its kind have named boundary refusals, and a misfit says why', () => {
   for (const parse of [parseNewEntry, parseAmendment]) {
     const unknown = parse(wire({ entry: 'synthetic-entry', replaces: 1, kind: 'unregistered', content: {} }))
     assert.deepEqual(unknown.ok ? undefined : unknown.refusal, { kind: 'unknown entry kind' })
-    for (const fields of [
-      { kind: 'note', content: { value: 3 } },
-      { kind: 'note', content: { text: '' } },
-      { kind: 'note', content: { text: ' \n\t' } },
-      { kind: 'note', content: { text: 'Synthetic.', vital: 'HR' } },
-      { kind: 'vital', content: { text: 'Synthetic.' } },
-      { kind: 'vital', content: { vital: 'HR', value: 'twelve' } },
-      { kind: 'vital', content: { vital: 'HR', value: 'Infinity' } },
-    ]) {
+    for (const [fields, reason] of [
+      [{ kind: 'note', content: { value: 3 } }, 'A note has no field named value'],
+      [{ kind: 'note', content: { text: '' } }, 'The note text is blank'],
+      [{ kind: 'note', content: { text: ' \n\t' } }, 'The note text is blank'],
+      [{ kind: 'note', content: { text: 'x'.repeat(10_001) } }, 'The note text is longer than 10,000 characters'],
+      [{ kind: 'note', content: { text: 'Synthetic.', vital: 'HR' } }, 'A note has no field named vital'],
+      [{ kind: 'note', content: 'Synthetic note as bare text.' }, 'The note content is not a set of named fields'],
+      [{ kind: 'vital', content: { text: 'Synthetic.' } }, 'A vital has no field named text'],
+      [{ kind: 'vital', content: { vital: 'HR' } }, 'The vital has no value'],
+      [{ kind: 'vital', content: { vital: 'EtCO2', value: '1.25' } }, 'The vital is not one the chart lists'],
+      [{ kind: 'vital', content: { vital: 'HR', value: 'twelve' } }, 'The value is not a number'],
+      [{ kind: 'vital', content: { vital: 'HR', value: 'Infinity' } }, 'The value is not a number'],
+    ] as const) {
       const invalid = parse(wire({ entry: 'synthetic-entry', replaces: 1, ...fields }))
-      assert.deepEqual(invalid.ok ? undefined : invalid.refusal, { kind: 'content does not fit kind' }, JSON.stringify(fields))
+      assert.deepEqual(invalid.ok ? undefined : invalid.refusal, { kind: 'content does not fit kind', reason }, JSON.stringify(fields))
     }
   }
 })

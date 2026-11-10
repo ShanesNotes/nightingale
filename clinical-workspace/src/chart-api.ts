@@ -147,14 +147,13 @@ type Json = Readonly<Record<string, unknown>>
 const DISCIPLINES: readonly unknown[] = ['nurse', 'physician', 'respiratory therapist'] satisfies Discipline[]
 const REFUSALS: readonly unknown[] = [
   'unknown entry kind',
-  'content does not fit kind',
   'entry kind differs',
   'another patient',
   'care time after now',
   'no such entry',
   'not the current version',
   'write id reused with other content',
-] satisfies Refusal['kind'][]
+] satisfies Exclude<Refusal, { readonly reason: string }>['kind'][]
 class Malformed extends Error {
   readonly refusal: Refusal
   constructor(reason: string, refusal: Refusal = { kind: 'malformed', reason }) {
@@ -245,8 +244,8 @@ function entryView(value: unknown): EntryView {
 function refusal(value: unknown): Refusal {
   const json = object(value, 'a refusal')
   const kind = json['kind']
-  if (kind === 'malformed') return { kind, reason: text(json, 'reason') }
-  const known = (k: unknown): k is Exclude<Refusal['kind'], 'malformed'> => REFUSALS.includes(k)
+  if (kind === 'malformed' || kind === 'content does not fit kind') return { kind, reason: text(json, 'reason') }
+  const known = (k: unknown): k is Exclude<Refusal, { readonly reason: string }>['kind'] => REFUSALS.includes(k)
   return known(kind) ? { kind } : fail(`refusal ${String(kind)} is not a kind the chart gives`)
 }
 

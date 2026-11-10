@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS ${contentTable(kind)} (
   entry uuid NOT NULL,
   number integer NOT NULL,
   kind text GENERATED ALWAYS AS (${sqlText(kind)}::text) STORED,
-  ${Object.entries(kindFields(kind)).map(([name, field]) => `${sqlName(name)} ${field.column(sqlName(name))}`).join(',\n  ')},
+  ${kindFields(kind).map((field) => `${sqlName(field.name)} ${field.column}`).join(',\n  ')},
   PRIMARY KEY (entry, number),
   FOREIGN KEY (entry, number, kind) REFERENCES entry_version (entry, number, kind)
 );`).join('\n')
@@ -209,7 +209,7 @@ CREATE CONSTRAINT TRIGGER entry_version_required AFTER INSERT ON entry
 CREATE OR REPLACE VIEW chart_entry_version AS
   ${KINDS.map((kind) => `SELECT e.id, e.patient, v.kind, v.number, v.care_ns, v.charted_ns, v.author,
     v.author_name, v.author_discipline, e.inserted_at,
-    json_build_object(${Object.keys(kindFields(kind)).flatMap((field) => [sqlText(field), `b.${sqlName(field)}`]).join(', ')}) AS content
+    json_build_object(${kindFields(kind).flatMap((field) => [sqlText(field.name), `b.${sqlName(field.name)}`]).join(', ')}) AS content
     FROM entry e JOIN entry_version v ON v.entry = e.id JOIN ${contentTable(kind)} b ON b.entry = v.entry AND b.number = v.number`).join('\n  UNION ALL\n  ')};
 CREATE OR REPLACE VIEW current_entry AS
   SELECT v.*, counts.versions FROM chart_entry_version v
@@ -297,7 +297,7 @@ function fingerprint(write: EntryWrite): string {
   const content: Readonly<Record<string, unknown>> = write.content
   return createHash('sha256').update(JSON.stringify([
     write.operation, write.patient, write.author, write.kind,
-    Object.keys(kindFields(write.kind)).map((field) => content[field]), write.care,
+    kindFields(write.kind).map((field) => content[field.name]), write.care,
     write.operation === 'amendment' ? [write.entry, write.replaces] : null,
   ])).digest('hex')
 }
@@ -368,7 +368,7 @@ export async function openChart(sql: Sql, run: Omit<RunView, 'anchor'>, anchor: 
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
             [id, write.kind, number, care, now, author.id, author.name, author.discipline, write.writeId, fingerprint(write)],
           )
-          const fields = Object.keys(kindFields(write.kind))
+          const fields = kindFields(write.kind).map((field) => field.name)
           const content: Readonly<Record<string, unknown>> = write.content
           await tx.query(
             `INSERT INTO ${contentTable(write.kind)} (entry, number, ${fields.map(sqlName).join(', ')})

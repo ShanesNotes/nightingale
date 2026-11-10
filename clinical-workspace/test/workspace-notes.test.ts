@@ -57,8 +57,8 @@ test('a refused note keeps its draft and explains how to fix an empty content', 
     Scene.expect(Scene.selector('#notes')).toContainText('No notes charted yet.'),
     Scene.type('#note-text', '   '),
     Scene.click('#chart'),
-    Scene.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'content does not fit kind' } }) })),
-    Scene.expect(Scene.selector('#notice')).toContainText('Enter note text'),
+    Scene.Command.resolve(PostEntry, Message.Wrote({ result: written({ kind: 'refused', refusal: { kind: 'content does not fit kind', reason: 'The note text is blank' } }) })),
+    Scene.expect(Scene.selector('#notice')).toContainText('The note text is blank; nothing was charted.'),
     Scene.expect(Scene.selector('#note-text')).toHaveValue('   '),
   )
 })

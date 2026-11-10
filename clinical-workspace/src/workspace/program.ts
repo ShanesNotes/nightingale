@@ -140,16 +140,27 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
   ),
 }))
 
-const REFUSED: Readonly<Record<Refusal['kind'], string>> = {
-  'unknown entry kind': 'The chart does not know this kind of entry; nothing was charted.',
-  'content does not fit kind': 'Check the entry fields; nothing was charted.',
-  'entry kind differs': 'An amendment must keep the entry kind; nothing was charted.',
-  'another patient': 'That write names another patient; nothing was charted.',
-  'care time after now': 'The care time is after now; nothing was charted.',
-  'no such entry': 'That entry does not exist; nothing was charted.',
-  'not the current version': 'Someone charted a newer version first; nothing was charted.',
-  'write id reused with other content': 'The chart holds another write under this write id; nothing was charted.',
-  malformed: 'The chart service could not read the write; nothing was charted.',
+function refusedWords(refusal: Refusal): string {
+  switch (refusal.kind) {
+    case 'unknown entry kind':
+      return 'The chart does not know this kind of entry; nothing was charted.'
+    case 'content does not fit kind':
+      return `${refusal.reason}; nothing was charted.`
+    case 'entry kind differs':
+      return 'An amendment must keep the entry kind; nothing was charted.'
+    case 'another patient':
+      return 'That write names another patient; nothing was charted.'
+    case 'care time after now':
+      return 'The care time is after now; nothing was charted.'
+    case 'no such entry':
+      return 'That entry does not exist; nothing was charted.'
+    case 'not the current version':
+      return 'Someone charted a newer version first; nothing was charted.'
+    case 'write id reused with other content':
+      return 'The chart holds another write under this write id; nothing was charted.'
+    case 'malformed':
+      return 'The chart service could not read the write; nothing was charted.'
+  }
 }
 
 const UNANSWERED: Readonly<Record<Write['kind'], string>> = {
@@ -204,13 +215,7 @@ function readAnswered(model: Model): Return {
 }
 
 function wrote(model: Model, write: Write, result: WriteResult): Return {
-  if (result.kind === 'refused') {
-    const notice = result.refusal.kind === 'content does not fit kind' && write.content.kind === 'note'
-      ? 'Enter note text (up to 10,000 characters); nothing was charted.'
-      : result.refusal.kind === 'content does not fit kind' && write.content.kind === 'vital'
-        ? 'Enter a finite value for a listed vital; nothing was charted.' : REFUSED[result.refusal.kind]
-    return { model: { ...model, notice } }
-  }
+  if (result.kind === 'refused') return { model: { ...model, notice: refusedWords(result.refusal) } }
   const { entry } = result
   const did = entry.number > 1 ? 'Amended' : 'Charted'
   const answered = write.kind === 'new entry' ? { form: { ...model.form, content: blankContent(model.form.kind), care: '' } } : { editing: null }
