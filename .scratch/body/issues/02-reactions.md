@@ -1,7 +1,8 @@
 # 02: A reaction, and the books it closes
 
 Type: prototype
-Status: open
+Status: claimed
+Claimed by: body-02-reactions
 Blocked by: none
 
 **What to build:** The law language gains a reaction: at one site, several amounts are used and made in fixed proportion. Today a binding is a paired transfer and there is no reaction, so no law can burn a fuel, make urea or buffer an acid, and the books are one for each species plus charge. A reaction turns one species into another, so the ticket must also say what stays conserved across it.
