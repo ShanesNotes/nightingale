@@ -1,7 +1,7 @@
 # 07: What limits the step
 
 Type: task
-Status: claimed
+Status: resolved
 Claimed by: body-07-step-limit
 Blocked by: none
 
@@ -24,25 +24,25 @@ Evidence so far: `~/lanes/logs/ng-body-plan/body-cost.md`.
 
 ## Answer
 
-The accuracy estimate limits the step. In the first half of each beat it sets 106 of 135 steps, on the heart's rows during ejection and relaxation, and no single row dominates. In the second half the 10 ms cap sets every step. That cap is the body's own wave rate class, so a longer cap on the core changes nothing. The restart after a firing never binds. Firings cost wall time instead: a landing takes 3.8 solves, so 15 landings a beat take 21% of the wall time.
+The accuracy estimate limits the step. In the first half of each beat it sets 106 of 135 steps, on the heart's rows during ejection and relaxation, and no single row dominates. In the second half the 10 ms cap sets every step. That cap is the body's own wave rate class, so a longer cap on the core changes nothing. The restart after a firing never binds. Firings cost wall time instead. A landing takes 3.8 solves, so the 15 landings a beat take 21% of the wall time.
 
-Every number below is from the heavy-run machine: an AMD Ryzen 5 2600 under WSL2, Rust 1.98.1, release builds, one job at a time under its lock, with the probe the only busy process. Each run admits the arena at 06:55 with `ng_solver::Core` at 10 ms and no boundary input, on main `85d1e6e`. The evidence and the probe are in `~/lanes/logs/ng-body-wave-1/07-step-limit/`, and its `REPORT.md` names the log behind each number.
+Every number below is from the heavy-run machine, an AMD Ryzen 5 2600 under WSL2, with Rust 1.98.1 and release builds. Each run held the machine's lock, and the probe was the only busy process. Each run admits the arena at 06:55 with `ng_solver::Core` at 10 ms and no boundary input, on main `85d1e6e`. The evidence and the probe are in `~/lanes/logs/ng-body-wave-1/07-step-limit/`, and its `REPORT.md` names the log behind each number.
 
 ### How the probe reads a step
 
-The probe runs a copy of today's core with counters, a record of each decision and settings it can change. A script writes the copy from `crates/ng-solver/src/lib.rs` and stops if any line it edits has moved. With today's settings the copy reproduces the shipped core's seal bit for bit, over the first 120 s (22,482 steps) and over the day window. A sampling profile (perf at 1999 Hz on a build with frame pointers) splits the record's work. On the core's parts, the copy's timers and the profile agree within 2 µs a step.
+The probe runs a copy of today's core with counters, a record of each decision and settings it can change. A script writes the copy from `crates/ng-solver/src/lib.rs` and stops if any line it edits has moved. With today's settings the copy reproduces the shipped core's seal bit for bit, over the first 120 s (22,482 steps) and over the day window (392,922 steps). A sampling profile (perf at 1999 Hz on a build with frame pointers) splits the record's work. On the core's parts, the copy's timers and the profile agree within 2 µs a step.
 
 ### Where the steps fall in the beat
 
-The first 120 s are periodic. The heart beats 60 times a minute, and every beat takes the same 187 steps. DAYWINDOW
+The first 120 s are periodic. The heart beats 60 times a minute, and every beat takes the same 187 steps. The whole window from 06:55 to 07:30 is the same. It takes 392,922 steps in 2,100 s (187.1 a second), with 60 beats a minute, 187 steps a beat and the same reasons in every five-minute stretch. The record on file for that window, from before native-contract 28 merged, had 2,859 beats (about 82 a minute), 212 steps a second and 156 steps a beat. On today's main the heart beats slower, so a second takes 12% fewer steps and a beat takes 20% more.
 
 Each step's length has one reason, read where the core or the record set it.
 
-- Accuracy: the core's error estimate set the span it asked for.
-- Cap: the 10 ms longest step set it.
-- Landing: the record cut the step at a guard's crossing, so a mode changed at its end.
-- Retry: the record refused one or more attempts, and the step passed at a halved span.
-- Growth: the core's limit of twice the last span set it, in the steps after a landing.
+- Accuracy means the core's error estimate set the span the core asked for.
+- Cap means the 10 ms longest step set it.
+- Landing means the record cut the step at a guard's crossing, so a mode changed at its end.
+- Retry means the record refused one or more attempts, and the step passed at a halved span.
+- Growth means the core's limit of twice the last span set it, in the steps after a landing.
 
 Steps a beat by phase, over the 120 beats of the first 120 s. Phase 0 starts systole, which ends at 0.3.
 
@@ -69,7 +69,7 @@ Accepted step lengths over the 120 s, by reason:
 | Retry | 0 | 363 | 120 | 600 | 120 | 0 | 0 |
 | Growth | 0 | 0 | 121 | 120 | 120 | 0 | 0 |
 
-One landing of the 1,804 is the stir's chance firing. The rest are mode changes, 16 a beat: the rhythm, the mitral and the tricuspid valves change twice each, and VALVES.
+One landing of the 1,804 is the stir's chance firing. The rest land the 16 mode changes of each beat. The rhythm, the mitral valve and the tricuspid valve change twice a beat each. The aortic valve opens and shuts three times a beat and the pulmonary valve twice, all between phases 0.01 and 0.31. The leg veins' valve never changes. A valve's shut resets its own flow row to zero, and that reset names each mode in the trace.
 
 ### What limits the step
 
@@ -77,7 +77,7 @@ The accuracy estimate names the heart's rows. On the steps it set, the worst row
 
 The cap that binds is the cardiovascular crate's wave rate class, `WAVE_NS` at `crates/ng-cardiovascular/src/lib.rs:22`. `CompiledBody::longest_step_ns` applies it to every ticket, whatever the core asks.
 
-The restart after a firing does not bind. After a firing the core grows its next span from the landed step's length. Growing from the earlier span instead gives the same seal over 120 s, because on the slice the two lengths are always equal.
+The restart after a firing does not bind. In the step after a firing, the core grows its next span from that step's own length instead of the span it had committed to. Growing from the committed span instead gives the same seal over 120 s. On the slice the step after a firing always runs its whole committed span, so the two lengths are equal.
 
 Each experiment changes one setting and runs 120 s from the same admission. Each prediction came from today's trace before the run, from the length the estimate allowed each step. The accuracy target is the estimate the core aims a span at, 0.7 against the refusal at 1.0. The wave class is a body setting, so its runs used a throwaway clone with `WAVE_NS` changed. That clone admits to the same state digest as main.
 
@@ -113,7 +113,7 @@ On the slice a step costs 0.640 ms, the median of 5 paired runs (range 0.639 to 
 
 The core takes 62% of a step on the slice and the record 38%. The core's own arithmetic is its Krylov vectors, norms, copies and quadrature. The slice has 380 instances, 257 columns and 1,578 Jacobian entries. Per call on the slice, an evaluate takes 19.1 µs (7.6 a step), a linearize 36.9 µs and a factor 52.2 µs (1.31 a step each), and a back solve 5.5 µs (12.4 a step, 6.8 of them inside the Krylov solve). Per call, an evaluate grows with instances (0.05 µs each), a linearize with Jacobian entries (0.023 µs each) and a back solve with rows (0.023 µs each). How a factor grows depends on its fill, which no public item reports.
 
-A step has a fixed cost of 31 µs on a body with two rows. About 16 µs of it is SHA-256 of the run identity, the resolution and the ticket, which every attempt recomputes, on every body. At the slice's 187 steps a second, the fixed cost alone takes 5.8 ms of each simulated second's wall time, 58% of the budget at 100 times real time.
+A step has a fixed cost of 31 µs on a body with two rows. Of that, 16 µs is SHA-256 of the run identity (7.5 µs), the resolution (5.8 µs) and the ticket (2.8 µs), and both the identity and the resolution are fixed for the whole run. The slice spends 18 µs a step on the same three digests. Its other 40 µs of hash is BLAKE2b, 22 µs for the link's seal and 18 µs for the image. At the slice's 187 steps a second, the fixed cost alone takes 5.8 ms of each simulated second's wall time, 58% of the budget at 100 times real time.
 
 Two small bodies and the slice cannot show whether a part grows faster than its rows. Ticket 06's body gives the next point.
 
