@@ -1,7 +1,8 @@
 # 14: Law forms for the volume hormones and the acid loop
 
 Type: research
-Status: open
+Status: claimed
+Claimed by: r14-volume-acid
 Blocked by: 02
 
 **Question:** Which cited form does each law that holds sodium, water, potassium and acid over a day take at rung 0? [Body tickets 17 and 18](../../body/map.md) write the laws, so each answer is a form, where its constants go, a stated validity range and how far the source was read, to the standard of [ticket 02](02-law-forms.md). No value is bound here.
