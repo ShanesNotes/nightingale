@@ -1,7 +1,8 @@
 # 15: Law forms for the slow books
 
 Type: research
-Status: open
+Status: claimed
+Claimed by: r15-slow-books
 Blocked by: 02
 
 **Question:** Which cited form does each slow store take at rung 0? [Body tickets 19 to 22](../../body/map.md) write the laws, so each answer is a form, where its constants go, a stated validity range and how far the source was read, to the standard of [ticket 02](02-law-forms.md). No value is bound here.
