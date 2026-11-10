@@ -25,6 +25,7 @@ A fresh agent can ask the evidence library which couplings the engine's body lac
 
 - **Where the library's code lives.** It sits in the store's `scripts/graph/` beside the store's other scripts; whether it moves to `tools/evidence/` is the data sourcing plan's E01 call.
 - **The disease side.** How MIMIC's data dictionary maps onto the facets, and which disease and intervention questions the graph answers first.
+- **Loop neighborhoods.** The graph covers the tilt neighborhood, so the other loops lack the quantity nouns that would link them: ventilation, pH, absorption, emptying, synthesis, storage, rhythm, thirst and voiding. [Body ticket 01](../body/issues/01-rung-0-specification.md) names this lead.
 - **Records for the two evidence rulings.** Whether the coupling bar and the animal-evidence rule become lines in the SRS or a record.
 
 ## Out of scope

@@ -4,7 +4,7 @@ Type: task
 Status: open
 Blocked by: 05, 10, `.scratch/research/issues/11-law-forms-gas-loop.md`
 
-**What to build:** The nervous system sets the drive to breathe. A central sensor reads the acidity of a brain space, which follows carbon dioxide, and a peripheral sensor reads arterial oxygen and carbon dioxide. The drive reaches the pump as release at its junctions. Sleep shifts the set point and lowers the gain. This closes the gas loop with its own controller.
+**What to build:** The nervous system sets the drive to breathe. A central sensor reads the acidity that blood chemistry states for a brain space from ticket 08, which follows carbon dioxide while the anions are held, and a peripheral sensor reads arterial oxygen and carbon dioxide. The drive reaches the pump as release at its junctions. Sleep shifts the set point and lowers the gain. This closes the gas loop with its own controller.
 
 **Releases:** the held drive of ticket 10, and coupling arrows 83 (stretch from the lung), 86 (respiratory drive) and 88 (motor drive to the pump).
 

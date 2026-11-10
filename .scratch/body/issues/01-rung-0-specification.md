@@ -35,7 +35,7 @@ Rung 0 is the whole body at the body map's destination. Each system has the smal
 - In a system table, **dynamic** rows are laws the system declares at rung 0. **Held** rows are stores or values a held stand-in keeps at rung 0, with their reason. **Absent** rows are not in the body at all. **Cannot show** lists the behaviors record 0002 asks a grouped region to state.
 - Sites are the slice's (`crates/ng-validate/src/slice.rs`), on the site classes of the [solver contract](../../../docs/architecture/solver-contract.md) section 1, plus the sites listed for ticket 03 below. The slice's splanchnic bed is the gut bed, its splanchnic veins are the portal vein, and its leg bed is the muscle bed.
 - "Every watery space" means the plasma, interstitium and cells of each bed and the lumen of each vessel on the blood network. The gut and urinary lumens are named apart.
-- Each bed has two walls, and each route family across them has one owner. FL owns every crossing of the capillary wall and the cell membrane by water, ions and other solutes, and the fuels' crossings of the capillary wall. MT owns the crossings of both walls by oxygen and carbon dioxide, and the crossings of the cell membrane by fuels, except at the liver bed, where HP's glucose hub owns them. Two cargoes have another owner at the cell membrane. MS owns the minerals' crossings at the bone bed (19), and HC owns iron's crossings at the liver and gut beds (21).
+- Each bed has two walls, and each route family across them has one owner. FL owns every crossing of the capillary wall and the cell membrane by water, ions and other solutes, and the fuels' crossings of the capillary wall. MT owns the crossings of both walls by oxygen and carbon dioxide, and the crossings of the cell membrane by fuels, except at the liver bed, where HP's glucose hub owns them. Two cargoes have another owner at the cell membrane. MS owns the minerals' crossings at the bone bed (19), and HC owns iron's crossings at the liver and gut beds (21). The shedding of the gut's cells into the lumen, with their iron, is GI's.
 - Where a row states acidity from ticket 08, it follows the default for a choice that waits on a ruling (see what this changes in the plan).
 
 ### The day's conserved quantities
@@ -462,7 +462,7 @@ Each row is one law or one stand-in. **Ticket** names the ticket that makes a dy
 |---|---|---|---|
 | dynamic | Hemoglobin as a mass in blood, so its concentration follows dilution and hematocrit sets viscosity | arrow 114's viscosity field | 08 |
 | dynamic | Red cell mass lost in proportion to its size, with production to match | | 21 |
-| dynamic | Iron's store in the liver bed's cells, filled from blood and released to it in proportion to its size, and iron's uptake by the gut's cells, which shed it into the lumen | | 21 |
+| dynamic | Iron's store in the liver bed's cells, filled from blood and released to it in proportion to its size, and iron's uptake by the gut's cells | | 21 |
 | held | Coagulation's fields | held at zero, and ticket 21 declares coagulation at zero flux with its cannot-show list (arrow 114's bleeding competence and thrombosis fields) | kept |
 | held | Every HC law runs at a reference temperature | arrow 92 | kept |
 | absent | Platelets, leukocytes, clotting factors, red cell age, erythropoietin as a moving hormone | ticket 21's non-goals | none |
@@ -969,6 +969,8 @@ Each item names a ticket this Answer leaves unedited. The first list holds chang
 - **The evidence library.** Two leads go to its process. One is the volume signal to the kidney and its hormones, which its tickets 01 and 04 already hold. The other is loop neighborhoods with the quantity nouns the graph lacks (ventilation, pH, absorption, emptying, synthesis, storage, rhythm, thirst, voiding).
 
 #### Choices that need a ruling
+
+Option A of each is applied as a model default, and the body map lists it.
 
 - **When acidity is stated (tickets 08, 11 and 18).** In option A, the default, ticket 08 states acidity in every watery space from the strong ion difference, the weak acids and total carbon dioxide, with the lumped anion and the diet's organic anion held, and ticket 18 adds their making and excretion. In option B, ticket 08 carries carbon dioxide on a sourced buffer line, and ticket 18 replaces that line with the full balance, as tickets 08, 11 and 18 read today. The evidence for the default is research 11's section "The interface with ticket 14". It finds that ticket 08 cannot hold pH while it waits for ticket 18, because with pH held the body would store and release about three times too much carbon dioxide for each step in partial pressure. So ticket 08 needs the charge balance or a sourced buffer line. The body map's model default states acid-base in the strong-ion frame in every space, and its alternative is one a later ticket would have to replace. Option A changes three lines:
   - Ticket 08's non-goal "acid-base beyond what carriage needs (ticket 18)" (line 17) narrows to the anions' making and excretion, which widens ticket 08.

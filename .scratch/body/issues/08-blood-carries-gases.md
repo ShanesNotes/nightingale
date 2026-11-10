@@ -2,9 +2,9 @@
 
 Type: task
 Status: open
-Blocked by: 06, 26, `.scratch/research/issues/11-law-forms-gas-loop.md`
+Blocked by: 06, 26, 29, `.scratch/research/issues/11-law-forms-gas-loop.md`
 
-**What to build:** Oxygen and carbon dioxide are amounts in every blood and tissue space, moved by the flows that already move water, and crossing the capillary wall and the cell membrane by diffusion. Blood chemistry turns each total into its partial pressure and its saturation as algebraic rows that never make or lose mass. Hemoglobin is a mass in blood, so its concentration follows dilution, and the hematocrit it gives sets viscosity by the form research 02 gives. No vessel law reads viscosity yet, so this ticket adds that reader. The lungs and the tissues stay held: a fixed exchange at the lung and a fixed use at each bed.
+**What to build:** Oxygen and carbon dioxide are amounts in every blood and tissue space, moved by the flows that already move water, and crossing the capillary wall and the cell membrane by diffusion. Blood chemistry turns each total into its partial pressure and its saturation as algebraic rows that never make or lose mass. It also states acidity in every watery space from the strong ion difference, the weak acids and total carbon dioxide, with the lumped anion and the diet's organic anion held. Hemoglobin is a mass in blood, so its concentration follows dilution, and the hematocrit it gives sets viscosity by the form research 02 gives. No vessel law reads viscosity yet, so this ticket adds that reader. The lungs and the tissues stay held: a fixed exchange at the lung and a fixed use at each bed.
 
 **Releases:** from ticket 06's hold table, gas content in blood and tissue, the carrier's capacity, and viscosity on coupling arrow 114.
 
@@ -14,4 +14,4 @@ Blocked by: 06, 26, `.scratch/research/issues/11-law-forms-gas-loop.md`
 - [ ] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against [ticket 26](26-cost-budget.md)'s budget
 
-**Non-goals:** acid-base beyond what carriage needs (ticket 18), abnormal hemoglobins, and red cell turnover (ticket 21).
+**Non-goals:** the making and excretion of the lumped anion and the diet's organic anion (ticket 18), abnormal hemoglobins, and red cell turnover (ticket 21).
