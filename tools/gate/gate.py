@@ -4,6 +4,9 @@ Python 3.11 stdlib only. Run as `python3 -I tools/gate/gate.py <command>`; it fi
 
     plan <merge|changed|full> [--base REV]   the run's plan as key=value lines
     seam                                     the workspace rules, every rule's probe, the plan, scan and comment cases
+    mutants [first|rest]                     40-mutants: first the check that every row applies and the sweep of the
+                                             rows the run's change adds or edits, then the sweep of the run's other
+                                             rows; each sweep stops at the first row not caught, and no part runs both
     bans                                     clippy rejects a probe built from clippy.toml, entry by entry
     f64                                      no bare f64 or f32 in a public API outside its row's allow list
     nightly-record <exit> <log>              record a nightly full run (tools/gate/nightly.sh)
@@ -21,22 +24,28 @@ reads is missing or malformed.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import datetime
 import fcntl
+import functools
 import hashlib
+import importlib.util
+import io
 import json
 import os
 import pathlib
 import posixpath
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
-from collections.abc import Callable, Mapping, Set
+from collections.abc import Callable, Iterable, Mapping, Sequence, Set
 from typing import Literal
 
 Mode = Literal["merge", "changed", "full"]
@@ -47,6 +56,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 PATHS = "tools/gate/paths.toml"
 MUST_FAIL = "tools/gate/must-fail.toml"
 MUTANTS = "tools/gate/mutants.toml"
+MUTATE = "tools/mutate.py"
 STEPS = "tools/verify.d"
 CONTRACT = "docs/architecture/solver-contract.md"
 REGULAR = "100644"
@@ -2844,6 +2854,225 @@ def changed_run_warning() -> None:
         )
 
 
+@dataclasses.dataclass(frozen=True)
+class SweepParts:
+    first: tuple[str, ...]
+    rest: tuple[str, ...]
+
+
+@functools.cache
+def mutate_py():
+    spec = importlib.util.spec_from_file_location("mutate", ROOT / MUTATE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def sweep_parts(
+    mode: str, scope: str, base: str | None, rows: Sequence[dict], base_rows: Sequence[dict], changed: Set[str]
+) -> SweepParts:
+    """A row that only its test crate's tests/ selects waits for the rest: one edit under a crate's tests/ selects
+    every row aimed at that crate."""
+    if mode == "changed":
+        return SweepParts((), ())
+    whole = mode == "full" or scope == "everything" or base is None
+    pool = [r for r in rows if whole or mutate_py().touched(r, changed)]
+    was = {r["name"]: r for r in base_rows}
+    first = {r["name"] for r in pool if base is not None and (r["path"] in changed or was.get(r["name"]) != r)}
+    return SweepParts(
+        tuple(r["name"] for r in pool if r["name"] in first), tuple(r["name"] for r in pool if r["name"] not in first)
+    )
+
+
+def rows_at(rev: str) -> list[dict]:
+    if not _git_z(ROOT, "ls-tree", "-z", "--name-only", rev, "--", MUTANTS):
+        return []
+    try:
+        table = tomllib.loads(_blob(rev, MUTANTS))
+    except tomllib.TOMLDecodeError as e:
+        raise GateError(f"{rev}:{MUTANTS}: {e}") from None
+    return [{**row, "test": row.get("test", table.get("test"))} for row in table.get("mutant", [])]
+
+
+VERDICTS = frozenset({"CAUGHT", "CAUGHT at build", "SURVIVED", "NOT APPLIED", "UNCLEAR"})
+# mutate.py reports a row as f"{verdict:<15}  {name}  {seconds:.0f} s  {detail}".
+VERDICT_LINE = re.compile(r"(.{15})  (\S+)  \d+ s(?:  |$)")
+
+
+def first_stop(lines: Iterable[str], names: Sequence[str], later: int) -> tuple[tuple[str, str] | None, int]:
+    judged = set()
+    for line in lines:
+        if (m := VERDICT_LINE.match(line)) and (verdict := m[1].rstrip()) in VERDICTS:
+            judged.add(m[2])
+            if verdict not in ("CAUGHT", "CAUGHT at build"):
+                return (m[2], verdict), len(set(names) - judged) + later
+    return None, len(set(names) - judged) + later
+
+
+def sweep(argv: list[str], names: Sequence[str], later: int) -> int:
+    def echoed(stream: Iterable[bytes]) -> Iterable[str]:
+        for raw in stream:
+            line = raw.decode(errors="replace")
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            yield line.rstrip("\n")
+
+    with subprocess.Popen(argv, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as child:
+        stop, left = first_stop(echoed(child.stdout), names, later)
+        if stop is not None:
+            child.kill()
+    if stop is not None:
+        print(f"40-mutants: {stop[0]} {stop[1]}, so the sweep stops with {left} rows not run", flush=True)
+        return 1
+    if child.returncode != 0:
+        print(f"40-mutants: the sweep failed with {left} rows not run", flush=True)
+        return 1
+    return 0
+
+
+def mutants(part: str | None) -> int:
+    mode = os.environ.get("NG_GATE_MODE") or "full"
+    scope = os.environ.get("NG_GATE_SCOPE") or "everything"
+    base = os.environ.get("NG_GATE_BASE") or "-"
+    base = None if base == "-" else base
+    command = [sys.executable, "-I", MUTATE, MUTANTS]
+    if part != "rest" and subprocess.run([*command, "--check"], cwd=ROOT).returncode != 0:
+        return 1
+    rows = mutate_py().load_rows(ROOT / MUTANTS, [])
+    diffed = mode != "changed" and base is not None
+    changed = set(_git_z(ROOT, "diff", "--name-only", "-z", base, "HEAD")) if diffed else set()
+    parts = sweep_parts(mode, scope, base, rows, rows_at(base) if diffed else [], changed)
+    if part != "rest":
+        named = f"{len(parts.first)} rows: {' '.join(parts.first)}" if parts.first else "no row"
+        print(f"40-mutants: first part, {named}", flush=True)
+        if parts.first and sweep([*command, "--only", *parts.first], parts.first, len(parts.rest)):
+            return 1
+    if part != "first" and mode != "changed":
+        print(f"40-mutants: rest part, {len(parts.rest)} rows", flush=True)
+        only = [] if len(parts.rest) == len(rows) else ["--only", *parts.rest]
+        if parts.rest and sweep([*command, *only], parts.rest, 0):
+            return 1
+    return 0
+
+
+PART_ROWS = (
+    {"name": "added", "path": "crates/ng-a/src/one.rs", "old": "a", "new": "b", "test": "-p ng-a --test alpha"},
+    {"name": "pathed", "path": "crates/ng-b/src/two.rs", "old": "a", "new": "b", "test": "-p ng-b --test beta"},
+    {"name": "edited", "path": "crates/ng-a/src/three.rs", "old": "a", "new": "c", "test": "-p ng-a --test alpha"},
+    {"name": "idle", "path": "crates/ng-b/src/four.rs", "old": "a", "new": "b", "test": "-p ng-b --test beta"},
+    {"name": "tested", "path": "crates/ng-a/src/five.rs", "old": "a", "new": "b", "test": "-p ng-a --test alpha"},
+)
+PART_BASE = (
+    PART_ROWS[1],
+    {**PART_ROWS[2], "new": "b"},
+    *PART_ROWS[3:],
+    {"name": "gone", "path": "crates/ng-a/src/six.rs", "old": "a", "new": "b", "test": "-p ng-a --test alpha"},
+)
+PART_CHANGED = frozenset({"crates/ng-b/src/two.rs", "crates/ng-a/tests/alpha.rs"})
+EVERY_ROW = frozenset(r["name"] for r in PART_ROWS)
+PART_CASES: tuple[tuple[str, str, str | None, frozenset[str], tuple[str, ...]], ...] = (
+    ("changed", "affected", "base", frozenset(), ()),
+    ("full", "everything", None, EVERY_ROW, ()),
+    ("merge", "everything", None, EVERY_ROW, ()),
+    ("merge", "everything", "base", EVERY_ROW, ("added", "pathed", "edited")),
+    ("merge", "affected", "base", EVERY_ROW - {"idle"}, ("added", "pathed", "edited")),
+)
+
+
+def part_cases() -> list[Violation]:
+    out = []
+    for mode, scope, base, pool, first in PART_CASES:
+        rest = tuple(r["name"] for r in PART_ROWS if r["name"] in pool - set(first))
+        got = sweep_parts(mode, scope, base, PART_ROWS, PART_BASE, PART_CHANGED)
+        if got != SweepParts(first, rest):
+            out.append(
+                Violation(
+                    "sweep",
+                    f"{mode} {scope} base {base or '-'}",
+                    f"first {' '.join(got.first) or 'none'} and rest {' '.join(got.rest) or 'none'}; the pool splits "
+                    f"into first {' '.join(first) or 'none'} and rest {' '.join(rest) or 'none'}",
+                )
+            )
+    return out
+
+
+SWEEP_OF = "sweep of 0123abc, 3 rows, budget 420 s"
+BASELINE = "baseline  12 s  cargo test -p ng-a --test alpha"
+LINE_CASES: tuple[tuple[tuple[str, ...], tuple[str, str] | None, int], ...] = (
+    (
+        (
+            SWEEP_OF,
+            BASELINE,
+            f"{'CAUGHT':<15}  a  3 s  alpha::x",
+            f"{'CAUGHT at build':<15}  b  1 s  error[E0308]: mismatched types",
+            f"{'CAUGHT':<15}  c  4 s  alpha::y",
+            "summary: 2 CAUGHT, 1 CAUGHT at build, of 3 rows at 0123abc",
+        ),
+        None,
+        2,
+    ),
+    (
+        (
+            SWEEP_OF,
+            BASELINE,
+            f"{'CAUGHT':<15}  a  3 s  alpha::x",
+            f"{'SURVIVED':<15}  b  3 s",
+            f"{'CAUGHT':<15}  c  4 s  alpha::y",
+        ),
+        ("b", "SURVIVED"),
+        3,
+    ),
+    ((SWEEP_OF, BASELINE, f"{'UNCLEAR':<15}  a  420 s  over 420 s"), ("a", "UNCLEAR"), 4),
+    ((SWEEP_OF, f"{'NOT APPLIED':<15}  c  0 s  0 matches in crates/ng-a/src/one.rs"), ("c", "NOT APPLIED"), 4),
+    (("no row is touched after 0123abc",), None, 5),
+    ((SWEEP_OF, "mutate: `cargo test -p ng-a --test alpha` must pass some test on the unmutated tree"), None, 5),
+)
+
+
+def line_cases() -> list[Violation]:
+    out = []
+    for lines, stop, left in LINE_CASES:
+        got = first_stop(lines, ("a", "b", "c"), 2)
+        if got != (stop, left):
+            out.append(
+                Violation(
+                    "sweep",
+                    repr(lines[-1][:40]),
+                    f"stops at {got[0]} with {got[1]} rows not run; the driver's rule says {stop} with {left}",
+                )
+            )
+    return out
+
+
+FAKE_SWEEP = """\
+import os, time
+print(f"sweep of {os.getpid()}, 3 rows, budget 1 s", flush=True)
+print(f"{'CAUGHT':<15}  a  1 s  alpha::x", flush=True)
+print(f"{'SURVIVED':<15}  b  1 s", flush=True)
+time.sleep(60)
+"""
+
+
+def driver_case() -> list[Violation]:
+    log = io.StringIO()
+    began = time.monotonic()
+    with contextlib.redirect_stdout(log):
+        code = sweep([sys.executable, "-I", "-c", FAKE_SWEEP], ("a", "b", "c"), 0)
+    took = time.monotonic() - began
+    out = []
+    if code != 1 or took >= 10:
+        out.append(Violation("sweep", "a fake sweep", f"returned {code} after {took:.0f} s; a SURVIVED row stops it"))
+    if "40-mutants: b SURVIVED, so the sweep stops with 1 rows not run" not in log.getvalue().splitlines():
+        out.append(Violation("sweep", "a fake sweep", "no line reports b SURVIVED with 1 row not run"))
+    if found := re.search(r"^sweep of (\d+),", log.getvalue(), re.M):
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(int(found[1]), signal.SIGKILL)
+            out.append(Violation("sweep", "a fake sweep", "the fake still ran after the driver returned"))
+    else:
+        out.append(Violation("sweep", "a fake sweep", "the driver did not echo the fake's lines"))
+    return out
+
+
 def seam() -> int:
     ws = load(ROOT)
     found = check(ws, "registration") + check(ws, "seam")
@@ -2851,12 +3080,14 @@ def seam() -> int:
         print(v)
     probes, bites = run_probes(ws, tree_passes=not found)
     cases = plan_cases(ws) + scan_cases() + comment_cases() + seal_cases()
+    cases += part_cases() + line_cases() + driver_case()
     for v in probes + cases:
         print(v)
     print(
         f"05-seam: {len(ws.members)} members against the crate table; {len(RULES)} rules, {bites} probes bite; "
         f"{len(PLAN_CASES)} plan cases; {len(SCAN_CASES)} scan cases; {len(COMMENT_CASES)} comment cases; "
-        f"{len(SEAL_CASES)} seal cases; {len(must_fail_rows(_read(ROOT / CONTRACT)))} must-fail rows"
+        f"{len(SEAL_CASES)} seal cases; {len(PART_CASES)} part cases; {len(LINE_CASES)} line cases; 1 driver case; "
+        f"{len(must_fail_rows(_read(ROOT / CONTRACT)))} must-fail rows"
     )
     return 1 if found or probes or cases else 0
 
@@ -2877,6 +3108,10 @@ def main(argv: list[str]) -> int:
                 return plan_command(mode, base)
             case ["seam"]:
                 return seam()
+            case ["mutants"]:
+                return mutants(None)
+            case ["mutants", "first" | "rest" as part]:
+                return mutants(part)
             case ["bans"]:
                 return bans()
             case ["f64"]:
