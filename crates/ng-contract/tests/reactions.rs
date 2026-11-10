@@ -207,7 +207,7 @@ const BURN: LawName = LawName {
 /// Glucose burned with oxygen in a bed's interstitium, its energy into the bed's own heat store. Its counts are
 /// definitional chemistry.
 fn burn() -> Proportions<Glucose> {
-    Proportions::using::<Glucose>(Space::Interstitium)
+    Proportions::<Glucose>::using(Space::Interstitium)
         .uses::<Oxygen, 6>(Space::Interstitium)
         .makes::<CarbonDioxide, 6>(Space::Interstitium)
         .makes::<Water, 6>(Space::Interstitium)
@@ -338,7 +338,7 @@ fn a_burn_whose_fuel_has_no_stated_content_is_refused() {
 
 #[test]
 fn a_burn_that_makes_carbon_is_refused_naming_carbon() {
-    let seven = Proportions::using::<Glucose>(Space::Interstitium)
+    let seven = Proportions::<Glucose>::using(Space::Interstitium)
         .uses::<Oxygen, 6>(Space::Interstitium)
         .makes::<CarbonDioxide, 7>(Space::Interstitium)
         .makes::<Water, 6>(Space::Interstitium)
@@ -354,7 +354,7 @@ fn a_burn_that_makes_carbon_is_refused_naming_carbon() {
 
 #[test]
 fn a_burn_whose_energy_goes_nowhere_is_refused() {
-    let cold = Proportions::using::<Glucose>(Space::Interstitium)
+    let cold = Proportions::<Glucose>::using(Space::Interstitium)
         .uses::<Oxygen, 6>(Space::Interstitium)
         .makes::<CarbonDioxide, 6>(Space::Interstitium)
         .makes::<Water, 6>(Space::Interstitium);
@@ -374,7 +374,7 @@ fn a_count_times_an_energy_content_past_two_to_the_fifty_third_is_refused() {
     rich.carry::<Energy, CapillaryBed>(Space::Thermal);
     rich.energy_content::<Glucose>(content(9_007_199_254_740_992.0))
         .expect("the most a content may be");
-    let doubled = Proportions::using::<Oxygen>(Space::Interstitium)
+    let doubled = Proportions::<Oxygen>::using(Space::Interstitium)
         .uses::<Glucose, 2>(Space::Interstitium)
         .makes::<CarbonDioxide, 12>(Space::Interstitium)
         .makes::<Water, 12>(Space::Interstitium)
@@ -638,7 +638,7 @@ fn two_burns<Q: Reactant>() -> Result<CompiledBody, AdmissionError> {
         let (mut laws, _) = body.hold(held)?.parts();
         let interstitial = laws.reaction::<CapillaryBed, Glucose>("burn", burn());
         paced(&mut laws, &interstitial)?;
-        let plasma = Proportions::using::<Glucose>(Space::Plasma)
+        let plasma = Proportions::<Glucose>::using(Space::Plasma)
             .uses::<Oxygen, 6>(Space::Plasma)
             .makes::<CarbonDioxide, 6>(Space::Plasma)
             .makes::<Water, 6>(Space::Plasma)

@@ -380,7 +380,7 @@
 //! ```
 //! use ng_contract::*;
 //! fn typed() -> Proportions<Glucose> {
-//!     Proportions::using::<Glucose>(Space::Interstitium)
+//!     Proportions::<Glucose>::using(Space::Interstitium)
 //!         .uses::<Oxygen, 6>(Space::Interstitium)
 //!         .makes::<CarbonDioxide, 6>(Space::Interstitium)
 //!         .makes::<Water, 6>(Space::Interstitium)
@@ -404,11 +404,11 @@
 //! A reaction's energy follows from what it uses and makes, so no law writes it: energy is no reactant.
 //! ```compile_fail,E0277
 //! use ng_contract::*;
-//! let _ = Proportions::using::<Glucose>(Space::Interstitium).makes::<Energy, 470>(Space::Thermal);
+//! let _ = Proportions::<Glucose>::using(Space::Interstitium).makes::<Energy, 470>(Space::Thermal);
 //! ```
 //! ```
 //! use ng_contract::*;
-//! let _ = Proportions::using::<Glucose>(Space::Interstitium).energy_into(Space::Thermal);
+//! let _ = Proportions::<Glucose>::using(Space::Interstitium).energy_into(Space::Thermal);
 //! ```
 //! Only a card the contract grants a site class reacts there.
 //! ```compile_fail,E0277
@@ -443,11 +443,11 @@
 //! A count is a whole number above zero.
 //! ```compile_fail,E0080
 //! use ng_contract::*;
-//! let _ = Proportions::using::<Glucose>(Space::Interstitium).uses::<Oxygen, 0>(Space::Interstitium);
+//! let _ = Proportions::<Glucose>::using(Space::Interstitium).uses::<Oxygen, 0>(Space::Interstitium);
 //! ```
 //! ```
 //! use ng_contract::*;
-//! let _ = Proportions::using::<Glucose>(Space::Interstitium).uses::<Oxygen, 6>(Space::Interstitium);
+//! let _ = Proportions::<Glucose>::using(Space::Interstitium).uses::<Oxygen, 6>(Space::Interstitium);
 //! ```
 //! A flow row belongs to its own kind of edge: a plain edge's law cannot read a valve's.
 //! ```compile_fail,E0308
