@@ -1623,8 +1623,7 @@ def plan_changes(ws: Workspace, mode: Mode, base: str | None, changes: Mapping[s
 
 
 def split_tests(ws: Workspace, p: Plan, changes: Mapping[str, Modes]) -> Plan:
-    """`--test NAME` runs NAME in every planned crate that has one, so `rest` leaves out each name in `first`. A crate
-    with a target that `--lib`, `--test` and `--doc` cover differently from a plain `cargo test` keeps the run whole."""
+    """`--test NAME` runs NAME in every planned crate that has one."""
     if p.mode != "merge":
         return p
     members = [ws.members[c] for c in p.crates]
@@ -1636,12 +1635,12 @@ def split_tests(ws: Workspace, p: Plan, changes: Mapping[str, Modes]) -> Plan:
         return any(path == src or (home is not None and path.startswith(home)) for path in changes)
 
     first = {t.name for t in tests if edited(t)}
-    whole = all(
+    splittable = all(
         any(t.kinds == {"lib"} for t in m.targets)
         and all(t.test and (t.kinds == {"test"} or (t.kinds == {"lib"} and t.doctest)) for t in m.targets)
         for m in members
     )
-    if not first or not whole:
+    if not first or not splittable:
         return p
     return dataclasses.replace(p, first=tuple(sorted(first)), rest=tuple(sorted({t.name for t in tests} - first)))
 
@@ -2874,8 +2873,6 @@ def mutate_py():
 def sweep_parts(
     mode: str, scope: str, base: str | None, rows: Sequence[dict], base_rows: Sequence[dict], changed: Set[str]
 ) -> SweepParts:
-    """A row that only its test crate's tests/ selects waits for the rest: one edit under a crate's tests/ selects
-    every row aimed at that crate."""
     if mode == "changed":
         return SweepParts((), ())
     whole = mode == "full" or scope == "everything" or base is None
@@ -2898,7 +2895,6 @@ def rows_at(rev: str) -> list[dict]:
 
 
 VERDICTS = frozenset({"CAUGHT", "CAUGHT at build", "SURVIVED", "NOT APPLIED", "UNCLEAR"})
-# mutate.py reports a row as f"{verdict:<15}  {name}  {seconds:.0f} s  {detail}".
 VERDICT_LINE = re.compile(r"(.{15})  (\S+)  \d+ s(?:  |$)")
 
 

@@ -49,10 +49,9 @@ echo "gate: steps=$steps"
 export NG_GATE_MODE="$mode" NG_GATE_SCOPE="$scope" NG_GATE_BASE="$base" NG_GATE_CRATES="$crates" NG_GATE_SMOKE="$smoke" \
   NG_GATE_FIRST="$first" NG_GATE_REST="$rest"
 
-# The cheap steps, then the change's own mutant rows and test targets, so a red run stops near its start.
-order=(01-toolchain 05-seam 10-docs 15-f64 20-sketch 30-data 40-mutants:first 10-rust 40-mutants:rest 50-workspace)
+run_order=(01-toolchain 05-seam 10-docs 15-f64 20-sketch 30-data 40-mutants:first 10-rust 40-mutants:rest 50-workspace)
 for file in tools/verify.d/*.sh; do
-  case " ${order[*]%%:*} " in
+  case " ${run_order[*]%%:*} " in
     *" $(basename "$file" .sh) "*) ;;
     *) echo "verify: $file has no place in the run order"; exit 1 ;;
   esac
@@ -62,8 +61,8 @@ trap 'rm -f "$times"' EXIT
 export NG_GATE_TIMES="$times"
 
 declare -A last=() spent=()
-for unit in "${order[@]}"; do last[${unit%%:*}]=$unit; done
-for unit in "${order[@]}"; do
+for unit in "${run_order[@]}"; do last[${unit%%:*}]=$unit; done
+for unit in "${run_order[@]}"; do
   IFS=: read -r step part <<<"$unit"
   name="$step.sh${part:+ $part}"
   case " $steps " in
