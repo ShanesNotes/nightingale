@@ -53,6 +53,9 @@ pub enum Potassium {}
 pub enum Chloride {}
 pub enum Albumin {}
 pub enum Oxygen {}
+pub enum CarbonDioxide {}
+/// A fuel: carbon 6, hydrogen 12 and oxygen 6 a unit, with its energy content stated by the schema.
+pub enum Glucose {}
 pub enum Ammonia {}
 pub enum Renin {}
 /// Sympathetic transmitter. Free, receptor-bound and metabolite forms are separate pools;

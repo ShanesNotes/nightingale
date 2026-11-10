@@ -36,6 +36,8 @@ pub enum Space {
     Cells,
     Lumen,
     Fluid,
+    /// Heat: a site's energy store, where a reaction's energy goes.
+    Thermal,
 }
 pub struct Assembly<'b> {
     _schema: Schema,
@@ -196,11 +198,14 @@ impl<'b> NervousPorts<'b> {
     }
 }
 pub struct ReceptorPorts<'b> {
-    /// Ligand + free receptor to complex, per receptor site (beta-1, alpha-1, M2, V2).
-    pub bindings: Vec<BalancedReaction<'b, Receptor>>,
-    /// Transmitter clearance into named product pools.
-    pub clearance: Vec<BalancedReaction<'b, Receptor>>,
     pub ligand_activity: ReadPort<'b, Receptor, Dimensionless>,
+}
+impl<'b> ReceptorPorts<'b> {
+    /// Free ligand to bound at every site of `C` that holds `Q` bound: a transfer of one ligand, so
+    /// it closes by pairing. A receptor is a site parameter, not a pool.
+    pub fn binding<C: SiteClass, Q>(&self, _laws: &mut FragmentBuilder<'b, Receptor>) -> SiteRoute<'b, Receptor, C, Q> {
+        todo!()
+    }
 }
 pub struct BoundaryPorts<'b> {
     pub intake_water: Pair<'b, Boundary, Water>,
