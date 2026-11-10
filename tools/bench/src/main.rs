@@ -139,6 +139,11 @@ fn print_evidence(evidence: &RunEvidence) {
     }
     println!("health floor_faults {}", health.floor_faults());
     println!("health excursions {}", health.excursions());
+    println!("health most_refusals {}", health.most_refusals());
+    match health.shortest_retry_ns() {
+        Some(ns) => println!("health shortest_retry_ns {ns}"),
+        None => println!("health shortest_retry_ns none"),
+    }
     println!(
         "time admission_s {:.2}",
         throughput.admission_wall_ns() as f64 / 1e9
@@ -150,6 +155,10 @@ fn print_evidence(evidence: &RunEvidence) {
         println!(
             "time repeat_{repeat}_ms_a_step {:.3}",
             1e3 * seconds / throughput.accepted_steps() as f64
+        );
+        println!(
+            "time repeat_{repeat}_ms_a_simulated_s {:.3}",
+            1e3 * seconds / simulated
         );
     }
 }
