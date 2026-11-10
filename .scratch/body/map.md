@@ -59,6 +59,10 @@ Tickets 01, 02, 07 and 23 and research tickets 11 to 15 can start today. Ticket 
 
 After tickets 06 and 26, three lanes can be built side by side: the gases (08), the gut (13) and the volume hormones (17). They share the body's assembly and add laws to the cardiovascular and renal crates, so ticket 04 puts each law in its own module and the PRs merge one at a time.
 
+## Decisions so far
+
+- [What limits the step](issues/07-what-limits-the-step.md): on the slice the accuracy estimate sets the step in the first half of each beat, on the heart's rows, and the body's 10 ms wave rate class sets it in the second half. A longer cap on the core changes nothing, and the restart after a firing costs Newton work, not steps. The 15 landings a beat take 21% of the wall time. The core takes 62% of a step and the record 38%, and a step's fixed cost alone is 58% of the budget at 100 times real time. Each valve opens and shuts more than once a beat, 6 of the 15 landings, which the cardiovascular owner has yet to judge.
+
 ## Model defaults, open to review
 
 - **Two passes.** Pass 1 is every loop that a monitor reading depends on or that drifts within a day: the gases, heat, the fuels, water and salt, acid. Pass 2 is the slow books: the minerals and bone, cortisol, the blood's cells and proteins, the bladder. Until its ticket lands, a pass 2 amount is a held store with balanced flows. Alternative: one pass, with the slow books before the synthetic day.

@@ -18,6 +18,7 @@ The reference man's reviewed packet and a reviewed healthy-range set exist as ch
 
 - [Public data and the check over it](issues/01-data-layout-and-check.md): `data/` holds records as sorted JSON lines with closed fields and capped text, and `30-data` runs 18 rules and their must-fail probes over them. No crate reads `data/` yet.
 - [Law forms the slice needs](issues/02-law-forms.md): the valve law is quadratic with inertance, resistance is linear in the alpha-1 effect, the effector's lag belongs to the junction pool, and viscosity takes Pries's in vivo law in discharge hematocrit. Two forms stand on open restatements and the venous gain on analogy until their primaries are read.
+- [Law forms for the gas loop](issues/11-law-forms-gas-loop.md): 18 forms for body tickets 08 to 11. Blood carries both gases by Dash's equations, shifted by pH, PCO2 and temperature, with the 2,3-DPG factor held at 1. The peripheral chemoreflex reads desaturation, not Weil's hyperbola, and the controller's output is transmitter release. Four forms have no source on hand: force against drive, the vessels' answer to oxygen debt, the dry heat of warming inspired air and the breathing rhythm. It lists what the contract lacks for these forms, for body tickets 03, 09 and 11.
 
 ## Not yet specified
 
