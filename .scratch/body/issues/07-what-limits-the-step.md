@@ -26,7 +26,7 @@ Evidence so far: `~/lanes/logs/ng-body-plan/body-cost.md`.
 
 The accuracy estimate limits the step. In the first half of each beat it sets 105 of 135 steps, on the heart's rows during ejection and relaxation, and no single row dominates. In the second half the 10 ms cap sets 50 of its 52 steps. That cap is the body's own wave rate class, so a longer cap on the core changes nothing. The restart after a firing never binds. Firings cost wall time instead. A landing takes 3.8 solves, so the 15 landings a beat take 21% of the wall time.
 
-Every number below is from the heavy-run machine, an AMD Ryzen 5 2600 under WSL2, with Rust 1.98.1 and release builds. Each run held the machine's lock, and the probe was the only busy process. Each run admits the arena at 06:55 with `ng_solver::Core` at 10 ms and no boundary input, on main `85d1e6e`. The evidence and the probe are in `~/lanes/logs/ng-body-wave-1/07-step-limit/`, and its `REPORT.md` names the log behind each number.
+Every number below is from the heavy-run machine, an AMD Ryzen 5 2600 under WSL2, with Rust 1.98.1 and release builds. Each run held the machine's lock, and the probe was the only busy process. Each slice run admits the arena at 06:55 with `ng_solver::Core` at 10 ms and no boundary input, on main `85d1e6e`. The evidence and the probe are in `~/lanes/logs/ng-body-wave-1/07-step-limit/`, and its `REPORT.md` names the log behind each number.
 
 ### How the probe reads a step
 
@@ -69,7 +69,7 @@ Accepted step lengths over the 120 s, by reason:
 | Retry | 0 | 363 | 120 | 600 | 120 | 0 | 0 |
 | Growth | 0 | 0 | 121 | 120 | 120 | 0 | 0 |
 
-One landing of the 1,804 is the stir's chance firing. The rest are mode changes. Each beat has 16, one to a step, and 15 of them end a landing step. The 16th ends a step the record refused first, which counts as a retry. The rhythm, the mitral valve and the tricuspid valve change twice a beat each. The aortic valve opens and shuts three times a beat and the pulmonary valve twice, all between phases 0.01 and 0.31. The leg veins' valve never changes. A valve's shut resets its own flow row to zero, and that reset names each mode in the trace.
+One landing of the 1,804 is the stir's chance firing. The rest are mode changes. Each beat has 16, one to a step, and 15 of them end a landing step. The 16th ends a step the record refused first, which counts as a retry. The rhythm, the mitral valve and the tricuspid valve change twice a beat each. The aortic valve opens and shuts three times a beat and the pulmonary valve twice, all before phase 0.31. The leg veins' valve never changes. A valve's shut resets its own flow row to zero, and that reset names each mode in the trace.
 
 ### What limits the step
 
