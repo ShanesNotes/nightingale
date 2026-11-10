@@ -1,7 +1,7 @@
 # 01: Rung 0, system by system
 
 Type: research
-Status: claimed
+Status: resolved
 Claimed by: body-01-rung-0
 Blocked by: none
 
@@ -9,15 +9,15 @@ Blocked by: none
 
 Write the answer as tables a builder can work from:
 
-- [ ] The day's books. For each amount the day moves (water, sodium, potassium, chloride, oxygen, carbon dioxide, heat and energy, the fuels, nitrogen, fixed acid, the minerals, the blood's cells and proteins): where it enters, where it is made or used, where it leaves, and which law holds it. Each book closes on paper for the reference man's day before any law is written
-- [ ] For each system: what is dynamic at rung 0, what is a held store with explicit balanced flows, what is absent, and the behaviors the system cannot show at rung 0 (record 0002 asks a grouped region for the same list)
-- [ ] The species, spaces and sites those laws need, as the list ticket 03 builds from. Each site the body adds beyond the slice's names the check or the reading that earns it (record 0002)
-- [ ] Which pass each item belongs to. Pass 1 is every loop that a monitor reading depends on or that drifts within a day. Pass 2 is the slow books
-- [ ] The holds rung 0 keeps, such as abdominal pressure, each with its reason
-- [ ] For every coupling arrow and each of its fields: the ticket that wires it, an anatomy relation, or a hold with its reason
-- [ ] An owner for each fork the docs leave open: the nitrogen, acid and carbon dioxide ledgers, the potassium shift into cells, the bone pools, the natriuretic peptide's secretion, cell water, the pleural space, the bladder
-- [ ] The atlas card trims this implies, listed for [foundation 06](../../foundation/issues/06-atlas.md) to apply as each system is built
-- [ ] For each loop, the links across systems that the evidence library holds, set beside the coupling map's arrows: wired, held, or a lead the coupling map lacks. A lead goes to the evidence library's process and adds no arrow here
+- [x] The day's books. For each amount the day moves (water, sodium, potassium, chloride, oxygen, carbon dioxide, heat and energy, the fuels, nitrogen, fixed acid, the minerals, the blood's cells and proteins): where it enters, where it is made or used, where it leaves, and which law holds it. Each book closes on paper for the reference man's day before any law is written
+- [x] For each system: what is dynamic at rung 0, what is a held store with explicit balanced flows, what is absent, and the behaviors the system cannot show at rung 0 (record 0002 asks a grouped region for the same list)
+- [x] The species, spaces and sites those laws need, as the list ticket 03 builds from. Each site the body adds beyond the slice's names the check or the reading that earns it (record 0002)
+- [x] Which pass each item belongs to. Pass 1 is every loop that a monitor reading depends on or that drifts within a day. Pass 2 is the slow books
+- [x] The holds rung 0 keeps, such as abdominal pressure, each with its reason
+- [x] For every coupling arrow and each of its fields: the ticket that wires it, an anatomy relation, or a hold with its reason
+- [x] An owner for each fork the docs leave open: the nitrogen, acid and carbon dioxide ledgers, the potassium shift into cells, the bone pools, the natriuretic peptide's secretion, cell water, the pleural space, the bladder
+- [x] The atlas card trims this implies, listed for [foundation 06](../../foundation/issues/06-atlas.md) to apply as each system is built
+- [x] For each loop, the links across systems that the evidence library holds, set beside the coupling map's arrows: wired, held, or a lead the coupling map lacks. A lead goes to the evidence library's process and adds no arrow here
 
 **Start from:** the evidence on hand, which the [body map](../map.md)'s Notes locate: the curation study's `needs.md` for what each system needs, and the evidence library's links for each loop. Then read `~/lanes/logs/ng-q1-healthy-body-draft.md` (sections 2 to 8: the balance sheets, the systems derived from them, a model named for each rung, and the rules that contain growth) and `~/lanes/logs/ng-q1-frame-followup.md` (sections 3 and 4: what must be dynamic once the day has meals and sleep, and the smallest clock and sleep). They are model proposals, never sources (SRS rule 16), and they predate the contract, so restate them in the contract's and the glossary's words. Numbers stay out: this ticket fixes shape, and the research tickets fix forms and values.
 
@@ -697,3 +697,230 @@ The ticket lists the bladder and the body map lists intracranial pressure, so bo
 | Coupling map | Arrow 89's circadian phase comes from the boundary clock (line 18). Arrow 87's set point stays NS memory, and its shiver drive is read by the muscle bed's heat. Arrow 111 waits for a skull enclosure | 12, 17 |
 
 Each card's crate is first built by: BC and HC in 08, MT in 09, RS and MS in 10, GI in 13, HP in 14, EN in 17 or 15, whichever lands first, and IM in 21. CV, FL, NS and RN have crates in the slice.
+
+### Evidence library links by loop
+
+The [evidence library](../../evidence-library/map.md) stores each link as a directed claim that one term raises or lowers another, pooled over the passages where its classifier judged the pair so with confidence of at least 0.7 (`data/graph/edges.parquet` in the evidence store). Works are counted per work, and editions count apart until evidence library ticket 05 merges them. The graph covers only the tilt neighborhood (the store's `scripts/graph/terms.py`), so the water and salt loop is dense, the other loops are thin, and the bladder has no link. **Arrow** names a coupling map line, a shared substrate (S1 to S10, coupling map lines 11 to 20), or none. **Status** is wired or held at rung 0, or a lead the coupling map lacks. A lead goes to the evidence library's process and adds no arrow here. Of the 38 arrows, 24 have at least one link; 84, 85, 88, 93, 94, 95, 100, 102, 103, 107, 109, 110, 112 and 113 have none.
+
+#### Gases
+
+| Link | Evidence | Arrow | Status | Ticket |
+|---|---|---|---|---|
+| Pleural and intrathoracic pressure change venous return, filling and cardiac output | 19 works, 33 passages (Nunn 1969; Berne and Levy 7e; Ganong 26e) | 82 | wired | 10 |
+| Metabolic rate and oxygen use dilate arterioles and raise local flow | 9 works, 14 passages (Berne and Levy; Klabunde 2e) | 90 | wired | 09 |
+| Heart rate, filling and afterload raise the heart's oxygen use | 6 works, 9 passages (Klabunde; Goodman and Gilman 13e) | 78 | wired | 09 |
+| Hypoxia narrows pulmonary vessels | 4 works, 10 passages (West 11e; Boron and Boulpaep) | S1 | held | ticket 10's non-goal; an RS law on the pulmonary bed's own edges would carry it |
+| Hydrogen ion, carbon dioxide and saturation set arteriolar tone | 4 works, 9 passages (Guyton; Klabunde; West) | S3 | held | rung 0's local signal is oxygen debt alone (09) |
+| Chemoreceptor activity drives breathing, heart rate and pressure | 3 works, 3 passages (Ganong; Guyton; Klabunde) | 86 | wired | 11 |
+| Arterial oxygen drives chemoreceptor discharge | 1 work, 1 passage | S2 | wired | 11 |
+| Lung volume changes heart rate | 1 work (Berne and Levy) | 83 | wired | 11 |
+| Pulmonary blood flow sets oxygen uptake | 1 work | 81 | wired | 10 |
+
+No edge covers ventilation acting on arterial carbon dioxide, or carbon dioxide acting on breathing, though both are terms in the graph.
+
+#### Heat
+
+| Link | Evidence | Arrow | Status | Ticket |
+|---|---|---|---|---|
+| Body temperature raises heart rate | 6 works, 10 passages (Guyton; two models) | 90 | held | CV's laws run at a reference temperature |
+| Core temperature narrows skin vessels and lowers skin flow | 8 works and 6 works (a Stolwijk model; Berne and Levy; Levick) | 91 | wired | 12 |
+| Skin vessel tone and skin flow set skin temperature | 7 works, 8 passages (Berne and Levy; Boron and Boulpaep) | S6 | wired | 12 |
+| Core temperature drives sympathetic activity | 2 works (Boron and Boulpaep; Levick) | 91 | wired | 12 |
+| Sympathetic activity narrows skin vessels | 4 works (Berne and Levy; Katzung; Klabunde) | S10 | wired | 12 |
+| Muscle activity raises body temperature | 4 works (Katzung 14e; Rang and Dale 8e) | 87 | wired | 12, through the shiver drive |
+| Thyroid hormone raises heat production | 1 work (Berne and Levy) | S7 | held | thyroid hormones are absent at rung 0 |
+| Cytokines raise body temperature | 1 work, a model | 108 | held | 21, zero flux |
+| Body temperature changes viscosity | 1 work (Klabunde) | 92 | held | a reference temperature |
+
+No edge covers sweating, shivering, the set point or the night's fall in temperature.
+
+#### Fuels
+
+| Link | Evidence | Arrow | Status | Ticket |
+|---|---|---|---|---|
+| Glucose drives insulin release | 3 works (Berne and Levy; Katzung; Modern Nutrition 11e) | S5 | wired | 15 |
+| Insulin resistance lowers glucose uptake | 2 works, 4 passages (a forearm study; Modern Nutrition) | S7 | wired | 15 |
+| Sympathetic activity narrows splanchnic vessels | 2 works (Guyton 12e and 13e) | S10 | wired | slice |
+| Sympathetic activity changes glucose uptake | 1 work, 3 passages | S10 | held | sympathetic effects on metabolism, and epinephrine, are absent at rung 0 |
+| Splanchnic vasodilation raises portal pressure | 1 work, a dose model | 104 | wired | 13 |
+| Portal and hepatic venous pressure change venous flow and cardiac output | 2 works (Guyton; a flow MRI study) | 99 | wired | 14 |
+
+No edge covers emptying, absorption, the liver's glucose output, glycogen or lactate.
+
+#### Water and salt
+
+| Link | Evidence | Arrow | Status | Ticket |
+|---|---|---|---|---|
+| Arterial pressure raises sodium excretion and urine flow | 11 works, 62 passages (Guyton 12e; Clinical Physiology of Acid-Base and Electrolyte Disorders 5e) | S1 | wired | 17: the kidney's reclaim reads its own bed's pressure, the check evidence library ticket 03 asks for |
+| Arterial pressure and vessel tone set filtration and renal flow | 21 works, 51 passages (Guyton; Ganong) | S1 | wired | slice |
+| Arterial pressure lowers renin | 9 works, 18 passages (Berne and Levy; Goodman and Gilman; Guyton) | S1 | wired | 17 |
+| Extracellular volume raises sodium excretion and filtration, and lowers renin and aldosterone | 10, 11, 10 and 8 works (August, Nelson and Thorn 1958; Berne and Levy; Boron and Boulpaep) | none | lead | At rung 0 volume reaches the kidney and EN only as pressure (S1) and atrial stretch (79). Evidence library tickets 01 and 04 name it the largest gap |
+| Urine output and sodium excretion lower extracellular volume | 19 works, 38 passages (Guyton; Levick) | S8 | wired | slice |
+| Blood volume raises arterial pressure, filling and cardiac output | 22 works, 108 passages (Guyton 13e; Klabunde; Boron and Boulpaep) | S1 | wired | slice |
+| Arterial pressure drives the baroreflex | 29 works, 70 passages (Levick; Katzung) | 77 | wired | slice |
+| Blood volume and pressure drive vasopressin | 13 works, 39 passages (Guyton 12e; Boron and Boulpaep; Berne and Levy) | 89 | wired | 17 |
+| Plasma osmolality drives vasopressin | 10 works, 22 passages (Berne and Levy; Boron and Boulpaep; Goodman and Gilman) | 89 | wired | 17 |
+| Atrial pressure and volume drive the natriuretic peptide | 4 works (Ganong; Boron and Boulpaep; Berne and Levy) | 79 | wired | 17 |
+| Chloride at the macula densa sets afferent tone and renin | 4 works, 6 passages (Guyton 12e and 13e) | 97 | wired | slice |
+| Renin drives angiotensin II and aldosterone | 9 works and 7 works (Tietz 7e; Berne and Levy) | 98 | wired | 17 |
+| Renal sympathetic activity raises renin and reclaim and lowers filtration | 11 works, 23 passages (renal nerve studies) | S10 | wired | slice, 17 |
+| Vasopressin, aldosterone and the peptide act on urine and sodium excretion | 18 works and 8 works (Berne and Levy; Guyton; a renal model) | S7 | wired | 17 |
+| Angiotensin II, aldosterone and renin raise arterial pressure | 7 to 8 works each (Guyton; OpenStax Anatomy and Physiology) | S7 | wired | 17 |
+| Plasma potassium raises aldosterone | 4 works, 8 passages (Guyton; Tietz) | S4 | wired | 17 |
+| Venous pressure and arteriolar resistance set capillary pressure | 12 works and 10 works (Levick; Klabunde) | 80 | wired | slice |
+
+No edge covers thirst or drinking, which rung 0 schedules.
+
+#### Acid
+
+| Link | Evidence | Arrow | Status | Ticket |
+|---|---|---|---|---|
+| Hydrogen ion and carbon dioxide change arteriolar tone | 2 works (Guyton) | S4 | held | rung 0's local signal is oxygen debt alone |
+| Carbonic anhydrase drives bicarbonate reclaim | 1 work (Katzung) | S4 | wired | 18 |
+| Hydrogen ion raises potassium secretion | 1 work (Guyton) | S4 | held | ticket 17's potassium secretion reads aldosterone, not acidity |
+| Extracellular volume and sympathetic activity raise acid secretion | 1 work each (Boron and Boulpaep) | none | lead | the same volume gap as the water and salt loop |
+
+No edge covers ventilation acting on arterial carbon dioxide, or net acid excretion.
+
+#### Minerals and bone
+
+| Link | Evidence | Arrow | Status | Ticket |
+|---|---|---|---|---|
+| Calcitriol lowers phosphate excretion and raises calcium reclaim | 3 works (Guyton; Rang and Dale 9e) | S7 | held | calcitriol is not a moving hormone at rung 0 (19) |
+| Calcitriol and plasma phosphate act on each other | 1 work each way | S7 | held | the same |
+| Plasma calcium narrows vessels and raises contractility | 2 works (Guyton; OpenStax Anatomy and Physiology) | S4 | held | no CV law reads calcium at rung 0 |
+| Calcitriol and calcium lower renin | 1 work, a model | S7 | held | calcitriol is absent |
+
+No edge covers parathyroid hormone, magnesium or bone.
+
+#### Cortisol
+
+| Link | Evidence | Arrow | Status | Ticket |
+|---|---|---|---|---|
+| CRH drives ACTH | 1 work | 89 | held | cortisol follows the clock directly (20) |
+| Cortisol raises heart rate, and ACTH raises pressure | 1 work each (a model; Ganong) | S7 | held | cortisol acts only on the liver's glucose output at rung 0 (20) |
+
+No edge covers the daily rhythm.
+
+#### Blood cells and proteins
+
+| Link | Evidence | Arrow | Status | Ticket |
+|---|---|---|---|---|
+| Erythropoietin raises red cell production | 12 works, 15 passages (Guyton; OpenStax Anatomy and Physiology; Berne and Levy) | S9 | held | erythropoietin is not a moving hormone at rung 0 (21) |
+| Erythropoietin raises hematocrit, viscosity and blood volume | 5 works each (OpenStax Anatomy and Physiology; Clinical Physiology 5e) | S9 | held | the same |
+| Plasma volume dilutes hemoglobin and hematocrit | 11 works, 15 passages | S9 | wired | 08: concentration follows dilution |
+| Viscosity and hematocrit change flow, resistance and pressure | 12 works, 33 passages (Guyton; Levick) | 114 | wired | 08 |
+| Filtration fraction raises peritubular oncotic pressure and reclaim | 4 works, 7 passages (Guyton; Clinical Physiology 5e) | S1 | wired | slice: FL's Starling exchange at the peritubular bed |
+| Renal flow and venous pressure change erythropoietin | 1 work each | S7 | held | erythropoietin is absent |
+
+No edge covers albumin synthesis, red cell lifespan or iron.
+
+#### Bladder
+
+| Link | Evidence | Arrow | Status | Ticket |
+|---|---|---|---|---|
+| No link: no term names the bladder, voiding, micturition or the detrusor | 0 works, from the graph's term list | none | none | 22 builds the void with no library lead |
+
+Posture is the graph's densest neighborhood: venous pooling, hydrostatic pressure and the muscle pump act on venous return and pressure in 22 works (arrow 96, an anatomy relation), and intra-abdominal pressure acts on venous return in 5 works (arrow 101). Sleep-tagged passages hold 56 edges from 17 works, none of them on the night's fall in pressure, the chemoreflex's gain or vasopressin.
+
+### Which holds each later ticket releases
+
+| Ticket | Releases |
+|---|---|
+| 08 | The held gas in blood and tissue, the carrier's capacity, and arrow 114's viscosity. It adds a fixed exchange at the lung and a fixed use at each bed |
+| 09 | Ticket 08's fixed use at each bed, MT's held chemical energy that pays the heart's work in the slice, and arrows 78 and 90. It adds one mixed fuel at a fixed respiratory quotient |
+| 10 | RS's held pleural pressure, ticket 08's fixed exchange at the lung, the lung's share of water and heat loss, and arrows 81, 82, 84, 85 and 95's pump force. It adds a held drive |
+| 11 | Ticket 10's held drive, and arrows 83, 86 and 88 |
+| 12 | MS's held skin water loss, the slice's single heat exit, and arrows 87 (shiver and sweat) and 91 |
+| 13 | GI's absorption stand-in, which puts a meal straight into the veins, and arrow 104 |
+| 14 | HP's held card: glycogen, gluconeogenesis and urea, and arrow 99. It adds held insulin and glucagon values and a constant albumin synthesis |
+| 15 | EN's held insulin and glucagon with ticket 14's held values, the slice's external insulin-driven potassium shift, and the filter's keep-back of glucose |
+| 16 | MS's held stores (muscle glycogen, body protein and creatinine's source), MT's one mixed fuel, the fat store and ketones |
+| 17 | EN's held vasopressin logistic, its held renin chain and peptide, BC's held cell water, and arrows 79 (atrial stress), 89 (vasopressin drive) and 98 |
+| 18 | BC's held lumped anion, the filter's keep-back of total carbon dioxide, and NS's acidity read from carbon dioxide alone |
+| 19 | The minerals' held stores with balanced flows: absorption, bone and cell exchange, and excretion |
+| 20 | EN's held cortisol |
+| 21 | HC's held red cell mass and iron, ticket 14's constant albumin synthesis, and IM's held card, each replaced by a store or by zero flux with its cannot-show list |
+| 22 | The slice's bladder drain, which has no void |
+| 23 | None. It builds the healthy-range and return checks in validation and no law, so no stand-in changes |
+| 24 | None. It runs the day on the body the earlier tickets built, and its check is that only pass 2 holds and the holds rung 0 keeps remain |
+| 25 | The constant gains that stand in for sleep: sympathetic traffic and each bed's metabolic rate keep their waking values through the night until it lands |
+
+### Hard parts
+
+#### Conserved quantities rung 0's laws cannot close today
+
+- Every made or used row (metabolic water, oxygen use, carbon dioxide made, the fuels, urea, ammonium, creatinine, fixed acid) needs ticket 02's reaction. Today a transfer never changes a species, and the contract has no reaction.
+- The energy table needs each fuel species to carry its energy, so a reaction's heat is the fuels' energy less the products'. That is ticket 02's choice of book shape.
+- Iron cannot close as ticket 21 words it. "Production to match" gives iron no source, because iron only enters by absorption. The table above closes it with absorption.
+- The minerals cannot close as laws: no ticket or research ticket absorbs calcium, phosphate or magnesium from the gut (13, research 13 and research 15 leave it out).
+- Sodium and chloride lose their sweat exit if ticket 12's sweat carries only water. A thermoneutral day barely sweats, but ticket 12's warm room and ticket 28's warm hour do.
+- No ticket's certificate line names potassium or chloride. Ticket 17's laws close both, and its check names only sodium and water.
+- Albumin's and hemoglobin's nitrogen stays in their own conserved quantities, because their making and loss are balanced flows, not reactions with amino acids. Counting them in the nitrogen table would need those reactions.
+
+#### Systems whose rung 0 needs what the contract lacks
+
+Read against the contract at main `85d1e6e`.
+
+| Need | Systems | What the contract lacks | Where it lands |
+|---|---|---|---|
+| A gas space whose volume follows the gas law, an airway network and its edge kind, and an identity from a gas amount to a partial pressure | RS | Every watery space takes its volume from water, each site class has a fixed set of spaces, there is no airway network, and the identity table has no gas law | 03. A non-watery space on the pulmonary bed and the conducting airway is the smaller change; a new site class is the alternative, a contract version |
+| A route family across the cell membrane, with a pump that draws energy | FL, MT, MS | No route family reaches the cells space | 03, before tickets 08, 15 and 17 |
+| Heat carried by blood, conduction between two heat stores, and temperature read from heat | CV, MT | Energy is not carried by flow, the energy families take one thermal pool, and no identity gives temperature | 03 lists temperature. Heat advection and conduction are unticketed and belong in 03, so ticket 12 edits no shared list |
+| An osmotic identity for small solutes | FL | Only albumin has one | 03, before ticket 17's cell water |
+| A reaction | MT, HP, MS, RN | None | 02 |
+| The clock phase and the sleep state as inputs a law reads | NS, EN, RN, MT | No kernel input reads time, and a clock kept as a law's memory cannot pass periodic admission | 05 |
+| A pressure law for a released enclosure | RS | Only a held card owes an enclosure's pressure, and the compiler refuses a rigid or elastic one | unticketed: 04 or 10 |
+| Admission with a tidal breath beside a pulsatile heart | RS, CV | An admission cycle has at most one pacing clock | unticketed: ticket 10's prototype covers it |
+| Synthesis and loss across the boundary for a system that is not held | EN, HP, HC, GI | Only the boundary scope and held cards get boundary routes | 04 |
+| A hold of one species in a space | the body on holds | A hold names a whole space, so the slice's hold on cells cannot be released species by species, though tickets 08, 15, 17 and 19 each move a different species there | 04 or 06 |
+| A census disposition for a field held with its reason | every system | The census has live, input, sink, anatomy relation, outside the slice and unresolved | 04 |
+
+No system needs a new site class if the gas space lands as a kind of space. Every new bed fits the capillary bed class, and the portal circuit is legal on the vascular network because each bed drains to one site.
+
+#### Where the drafts and the atlas disagree on physiology
+
+| Topic | Drafts | Atlas | Resolution here |
+|---|---|---|---|
+| The thermostat | release at skin vessels and sweat glands, and motor drive for shivering | a direct NS to MT arrow, against the coupling map's own rule that controllers act only through ligands (line 26) | the effectors act through release (12), arrow 87's drives are read by MT's laws, and its set point stays NS memory |
+| The natriuretic peptide | EN secretes it | the CV card secretes it, while arrow 79 sends wall stress to EN | EN |
+| The potassium shift and cell water | FL moves cell water, and the shift's owner is open | BC owns the cell's pumps and shifts, and shares cell water with FL | FL owns the cell membrane |
+| Metabolic water, fixed acid and skin evaporation | MT posts all three | MT posts lactate and sweat only, and no card posts skin evaporation | MT posts all three (09, 12, 18) |
+| Heat production | through MT's reaction at each bed | HP and MS also post heat | MT's reaction alone |
+| Urea and creatinine | uncharged solutes, urea an osmole carrying nitrogen | urea on S4 with the ions, creatinine on S9 with the formed elements | uncharged solutes |
+| Hepcidin | made by the liver | an immune output (arrow 107) | held at zero at rung 0, and iron's store follows its own loss |
+| The tissue carbon dioxide store | blood plus one lumped tissue store | no card names a tissue carbon dioxide space | each bed's spaces, moved by MT |
+| The clock | one forced phase that many laws read | one NS to EN arrow | a boundary input, so arrow 89's phase is held |
+| Acid-base | Henderson-Hasselbalch on plasma first | Stewart's frame decided (blood chemistry card) | the strong-ion frame from ticket 08 (map default) |
+| The first rungs of RS, HC, IM, MS and GI | one alveolar unit; quiescent coagulation and immunity; the junction later; one lumped lumen | ventilation and perfusion spread; reduced coagulation and inflammation models; the junction first; emptying and segmental absorption | one unit; zero flux; only the pump's junction; stomach and small intestine |
+| Ownership | each store has an owner card | no system owns a pool | no system owns a pool, and forks name law owners |
+
+### What this changes in the plan
+
+Each item names a ticket this Answer leaves unedited.
+
+- **Ticket 03.** The alveolar and airway gas needs a non-watery space and a gas-law identity. The cell membrane's route family, heat advection, conduction and the small-solute osmotic identity belong here, so tickets 12, 15 and 17 edit no shared list. No red cell site or space is needed: hemoglobin is a mass in blood, as ticket 08 says. It needs seven landmarks, not three. Iron, ammonium, glycerol, body protein, and nitrogen gas if the breath is tidal, join the species.
+- **Ticket 04.** The census needs a disposition for a field held with its reason. Arrow 111 is held with NS as its owner. EN, HP, HC and GI need boundary routes for synthesis and loss. An unheld card needs a way to own an enclosure's pressure, for ticket 10.
+- **Ticket 05.** Ticket 22 needs a void as an input of the day. Ticket 05 lists none.
+- **Ticket 06.** Holds name one species in a space. Its hold table takes this Answer's rows.
+- **Ticket 08.** It speciates carbon dioxide in the strong-ion frame with the lumped anion held, so ticket 18 adds dynamics and replaces no form.
+- **Ticket 09.** "The bed's heat" is the core heat store, or the skin heat store for the skin bed, because only tissue sites hold heat.
+- **Ticket 10.** Admission with two rhythms is unticketed, so its prototype covers it. Its Releases line should name arrow 84, which its text wires.
+- **Ticket 12.** Sweat carries sodium and chloride with its water. Shivering is a somatic act, whose drive the muscle bed's heat reads.
+- **Ticket 15.** Its check that a meal's potassium "is excreted after" needs ticket 17's leak and aldosterone, so ticket 15 waits on 17, or the check drops that clause. Epinephrine is not in rung 0.
+- **Ticket 17.** Its certificate line should also name potassium and chloride, and its Releases line the held renin chain and peptide.
+- **Ticket 19.** It adds absorption of calcium, phosphate and magnesium, and releases the minerals' held stores. The healthy-range set already holds total calcium and phosphate (`data/healthy-range-set.jsonl`), and the packet anchors plasma phosphate. If research 06 keeps both readings, ticket 19 is pass 1 and joins ticket 24's blockers.
+- **Ticket 21.** Iron enters by absorption, not production. Hemoglobin and red cell mass are one amount.
+- **Ticket 22.** It needs a void input and research 15's bladder item among its blockers.
+- **Ticket 24.** Its hold check should allow the holds rung 0 keeps, as ticket 28's does.
+- **Ticket 25.** Research 12 has no form for the sympathetic gain. Research 11's sleep shift or research 14 gives it, or ticket 25's blocker changes.
+- **Ticket 27.** It measures on ticket 06's body but waits only on ticket 07.
+- **Research 13 and 15.** Neither gives a form for mineral absorption.
+- **Research 06.** Its postprandial creatinine range would judge a rise rung 0 cannot make, since creatinine comes from muscle only (16). The meal's creatinine joins the meal's delivery (05), or that reading leaves the postprandial set.
+- **The evidence library.** Two leads go to its process: the volume signal to the kidney and its hormones, which its tickets 01 and 04 already hold, and loop neighborhoods with the quantity nouns the graph lacks (ventilation, pH, absorption, emptying, synthesis, storage, rhythm, thirst, voiding).
+
+### Sources and how far they were read
+
+- In the repo, in full: `docs/srs.md`, the solver contract's sections 1, 2, 4, 5 and 6, the 13 atlas cards, the atlas README and coupling map, the glossary's sections on the body's structure and the software, records 0002 and 0004, `crates/ng-contract/src/catalog.rs`, `crates/ng-validate/src/slice.rs` to line 490, body tickets 02 to 28, research tickets 06 and 11 to 15, foundation 06, and the keys in `data/`.
+- In the repo, in part: the contract's `quantity.rs`, `scope.rs`, `anatomy.rs`, `law.rs`, `conservation.rs`, `compile.rs`, `boundary.rs` and `packet.rs`, for their closed lists and operators.
+- Leads, never sources (SRS rule 16): the healthy-body draft (sections 2 to 8, 10c, 10d, and Part II's minimum stores and fidelity ladders), the frame follow-up (all), the curation study's `needs.md` (all), the evidence store's link graph (queried read-only, with nothing restricted opened), and the earlier readiness logs (all). No number from them enters this Answer.
