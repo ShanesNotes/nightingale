@@ -36,6 +36,10 @@ fn content(value: f64) -> Measure<Quotient<Energy, Glucose>> {
     Measure::new(value).expect("finite")
 }
 
+fn thousand<U>() -> Measure<U> {
+    Measure::new(1_000.0).expect("finite")
+}
+
 /// One vessel's water, filled from outside: the smallest body that compiles, so what the schema states shows in the
 /// model hash.
 fn water(stated: Option<f64>) -> Result<CompiledBody, AdmissionError> {
@@ -102,7 +106,6 @@ fn an_energy_content_is_a_whole_number_of_energy_units_up_to_two_to_the_fifty_th
 fn only_a_fuel_has_an_energy_content() {
     let mut schema = Schema::new(anatomy(&["bed"]).expect("an anatomy")).expect("a schema");
     let refused = |species| Err(AdmissionError::EnergyContent { species });
-    let thousand = || Measure::new(1_000.0).expect("finite");
     assert_eq!(
         schema.energy_content::<Water>(thousand()),
         refused(Species::Water)
