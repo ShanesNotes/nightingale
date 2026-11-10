@@ -18,4 +18,4 @@ Blocked by: 03
 
 **Non-goals:** any law that reads these inputs, thirst or appetite as behavior, and REM sleep.
 
-From [research 12](../../research/issues/12-law-forms-heat.md): air speed's form needs a speed over a reference speed, and the identity table has no speed. Either this ticket delivers air speed as its ratio to 0.1 m/s, or the table gains a speed.
+From [research 12](../../research/issues/12-law-forms-heat.md): air speed's form needs a speed over a reference speed, and the identity table has no speed. Either this ticket delivers air speed as its ratio to 0.1 m/s, or the table gains a speed. Clothing or bedding arrives as a count of clo, because insulation has no dimension in the table.

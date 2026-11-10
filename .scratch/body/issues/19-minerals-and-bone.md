@@ -17,3 +17,5 @@ Blocked by: 13, 15, 17, `.scratch/research/issues/15-law-forms-slow-books.md`
 **Non-goals:** bone remodeling, calcitriol as a moving hormone, and calcitonin.
 
 From [research 15](../../research/issues/15-law-forms-slow-books.md): ticket 01 gives magnesium no bone bed cells, so [ticket 03](03-whole-body-lists.md) lists them or this ticket drops magnesium's bone pool. PTH moves only calcium's reclaim threshold, and if a meal takes phosphate out of its healthy range, PTH's effect on phosphate's threshold is the first term to add.
+
+From [research 14](../../research/issues/14-law-forms-volume-and-acid.md): the acid balance counts calcium as its whole amount until this ticket's row states ionized calcium, and as its ionized amount after. It counts magnesium as its whole amount, because no row states magnesium's ionized share.
