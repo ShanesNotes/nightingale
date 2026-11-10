@@ -11,6 +11,7 @@
 - This wayfinder map carries execution as well as decisions. Its tickets include the build work that reaches the destination, not only the choices before it.
 - Foundation tickets name native-contract tickets in their `Blocked by:` and `Lands with:` lines, so a frontier scan reads `.scratch/native-contract/issues/` as well as `.scratch/foundation/issues/`.
 - Grilling tickets call the grilling and domain-modeling skills.
+- Proof time limits how many tickets land in a day, because the tower proves one head at a time. [Ticket 11](issues/11-proof-fails-fast.md) makes a red proof stop at its first failure, and [ticket 12](issues/12-mutant-baseline-once.md) drops the mutant baselines `10-rust` already ran. The diagnosis is `~/lanes/logs/ng-optimize/proof-time.md`.
 
 ## Where the route stands
 
