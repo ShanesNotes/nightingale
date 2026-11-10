@@ -198,3 +198,332 @@ fn dissipation_reaches_the_body_store_whatever_sorts_before_it() {
         .collect();
     assert_eq!(ends, [(root, Space::Elastic, -1), (root, Space::Thermal, 1)]);
 }
+
+const BURN: LawName = LawName {
+    owner: <Metabolism as Owner>::CARD,
+    local: "burn",
+};
+
+/// Glucose burned with oxygen in a bed's interstitium, its energy into the bed's own heat store. Its counts are
+/// definitional chemistry.
+fn burn() -> Proportions<Glucose> {
+    Proportions::using::<Glucose>(Space::Interstitium)
+        .uses::<Oxygen, 6>(Space::Interstitium)
+        .makes::<CarbonDioxide, 6>(Space::Interstitium)
+        .makes::<Water, 6>(Space::Interstitium)
+        .energy_into(Space::Thermal)
+}
+
+/// Beds whose interstitium holds water, oxygen and carbon dioxide, with each space a burn does not use left out.
+fn interstitial(beds: &[&'static str]) -> Result<Schema, AdmissionError> {
+    let mut schema = Schema::new(anatomy(beds)?)?;
+    for space in [Space::Plasma, Space::Cells, Space::Lumen] {
+        schema.leave_out(space, "the burn draws on the interstitium alone");
+    }
+    schema.carry::<Oxygen, CapillaryBed>(Space::Interstitium);
+    schema.carry::<CarbonDioxide, CapillaryBed>(Space::Interstitium);
+    Ok(schema)
+}
+
+/// What a burn needs at each bed: glucose in the interstitium, a heat store of the bed's own and glucose's synthetic
+/// energy content.
+fn burning_schema(beds: &[&'static str]) -> Result<Schema, AdmissionError> {
+    let mut schema = interstitial(beds)?;
+    schema.carry::<Glucose, CapillaryBed>(Space::Interstitium);
+    schema.carry::<Energy, CapillaryBed>(Space::Thermal);
+    schema.energy_content::<Glucose>(content(1_000.0))?;
+    Ok(schema)
+}
+
+/// MT, held over `holds`, declares `proportions` as its burn at the capillary beds and gives it what `rates` does.
+fn burning<Q: Reactant>(
+    schema: Schema,
+    holds: Vec<Space>,
+    proportions: Proportions<Q>,
+    rates: impl for<'b> FnOnce(
+        &mut FragmentBuilder<'b, Metabolism>,
+        &Reaction<'b, Metabolism, CapillaryBed, Q>,
+    ) -> Result<(), AdmissionError>,
+) -> Result<CompiledBody, AdmissionError> {
+    assemble(schema, |mut body| {
+        let held = HeldDeclaration::<Metabolism>::new(Vec::new(), holds, "bench: synthetic");
+        let (mut laws, _) = body.hold(held)?.parts();
+        let burn = laws.reaction::<CapillaryBed, Q>("burn", proportions);
+        rates(&mut laws, &burn)?;
+        body.add(laws.finish());
+        body.compile()
+    })
+}
+
+/// A rate in proportion to the reference species' amount, holding in `modes`.
+fn paced_in<'b, Q: Reactant>(
+    laws: &mut FragmentBuilder<'b, Metabolism>,
+    burn: &Reaction<'b, Metabolism, CapillaryBed, Q>,
+    modes: ModeSet<'b, Metabolism>,
+) -> Result<(), AdmissionError> {
+    let class = RateClass::new(RateBand::Minutes, 60_000_000_000)?;
+    let speed = laws.site_parameter::<CapillaryBed, Rate<Dimensionless>>(
+        ParameterKey::new("mt.burn-speed"),
+        Admissible::nonnegative(),
+    );
+    let reference = burn.amount::<Q>();
+    let rate = laws.site_kernel(|mut k| {
+        let amount = k.at_site(&reference);
+        let zero = k.zero();
+        let speed = k.site_parameter(&speed);
+        let rate = k.relax(amount, zero, speed);
+        k.finish(rate, modes, class)
+    });
+    laws.react_at(burn, rate);
+    Ok(())
+}
+
+fn paced<'b, Q: Reactant>(
+    laws: &mut FragmentBuilder<'b, Metabolism>,
+    burn: &Reaction<'b, Metabolism, CapillaryBed, Q>,
+) -> Result<(), AdmissionError> {
+    let every = laws.every_mode();
+    paced_in(laws, burn, every)
+}
+
+fn refused(compiled: Result<CompiledBody, AdmissionError>) -> CompileDefect {
+    match compiled {
+        Err(AdmissionError::Compile(defect)) => defect,
+        Err(other) => panic!("refused outside the compile: {other:?}"),
+        Ok(_) => panic!("compiled"),
+    }
+}
+
+fn schema() -> Schema {
+    burning_schema(&["bed"]).expect("a schema")
+}
+
+#[test]
+fn a_reaction_that_names_a_species_twice_is_refused() {
+    let twice = burn().makes::<Oxygen, 1>(Space::Interstitium);
+    assert_eq!(
+        refused(burning(schema(), Vec::new(), twice, paced)),
+        CompileDefect::SpeciesTwice {
+            law: BURN,
+            species: Species::Oxygen
+        }
+    );
+}
+
+#[test]
+fn a_reaction_that_names_a_species_no_reaction_may_use_is_refused() {
+    let salted = burn().uses::<Sodium, 1>(Space::Interstitium);
+    assert_eq!(
+        refused(burning(schema(), Vec::new(), salted, paced)),
+        CompileDefect::NoMakeup {
+            law: BURN,
+            species: Species::Sodium
+        }
+    );
+}
+
+#[test]
+fn a_burn_whose_fuel_has_no_stated_content_is_refused() {
+    let mut unstated = interstitial(&["bed"]).expect("a schema");
+    unstated.carry::<Glucose, CapillaryBed>(Space::Interstitium);
+    unstated.carry::<Energy, CapillaryBed>(Space::Thermal);
+    assert_eq!(
+        refused(burning(unstated, Vec::new(), burn(), paced)),
+        CompileDefect::UnstatedEnergy {
+            law: BURN,
+            species: Species::Glucose
+        }
+    );
+}
+
+#[test]
+fn a_burn_that_makes_carbon_is_refused_naming_carbon() {
+    let seven = Proportions::using::<Glucose>(Space::Interstitium)
+        .uses::<Oxygen, 6>(Space::Interstitium)
+        .makes::<CarbonDioxide, 7>(Space::Interstitium)
+        .makes::<Water, 6>(Space::Interstitium)
+        .energy_into(Space::Thermal);
+    assert_eq!(
+        refused(burning(schema(), Vec::new(), seven, paced)),
+        CompileDefect::UnbalancedReaction {
+            law: BURN,
+            book: Book::Element(Element::Carbon)
+        }
+    );
+}
+
+#[test]
+fn a_burn_whose_energy_goes_nowhere_is_refused() {
+    let cold = Proportions::using::<Glucose>(Space::Interstitium)
+        .uses::<Oxygen, 6>(Space::Interstitium)
+        .makes::<CarbonDioxide, 6>(Space::Interstitium)
+        .makes::<Water, 6>(Space::Interstitium);
+    assert_eq!(
+        refused(burning(schema(), Vec::new(), cold, paced)),
+        CompileDefect::UnbalancedReaction {
+            law: BURN,
+            book: Book::Energy
+        }
+    );
+}
+
+#[test]
+fn a_count_times_an_energy_content_past_two_to_the_fifty_third_is_refused() {
+    let mut rich = interstitial(&["bed"]).expect("a schema");
+    rich.carry::<Glucose, CapillaryBed>(Space::Interstitium);
+    rich.carry::<Energy, CapillaryBed>(Space::Thermal);
+    rich.energy_content::<Glucose>(content(9_007_199_254_740_992.0))
+        .expect("the most a content may be");
+    let doubled = Proportions::using::<Oxygen>(Space::Interstitium)
+        .uses::<Glucose, 2>(Space::Interstitium)
+        .makes::<CarbonDioxide, 12>(Space::Interstitium)
+        .makes::<Water, 12>(Space::Interstitium)
+        .energy_into(Space::Thermal);
+    assert_eq!(
+        refused(burning(rich, Vec::new(), doubled, paced)),
+        CompileDefect::ConservationOverflow { law: BURN }
+    );
+}
+
+#[test]
+fn a_reaction_whose_pools_meet_at_no_site_is_refused() {
+    let mut no_fuel = interstitial(&["bed"]).expect("a schema");
+    no_fuel.carry::<Energy, CapillaryBed>(Space::Thermal);
+    no_fuel
+        .energy_content::<Glucose>(content(1_000.0))
+        .expect("a content");
+    assert_eq!(
+        refused(burning(no_fuel, Vec::new(), burn(), paced)),
+        CompileDefect::ReactionNowhere { law: BURN }
+    );
+}
+
+#[test]
+fn a_bed_where_a_reaction_stands_without_its_energy_pool_is_refused() {
+    let mut no_store = interstitial(&["bed"]).expect("a schema");
+    no_store.carry::<Glucose, CapillaryBed>(Space::Interstitium);
+    no_store
+        .energy_content::<Glucose>(content(1_000.0))
+        .expect("a content");
+    assert_eq!(
+        refused(burning(no_store, Vec::new(), burn(), paced)),
+        CompileDefect::ReactionEndpoint {
+            law: BURN,
+            site: site::<CapillaryBed>("bed"),
+            space: Space::Thermal
+        }
+    );
+}
+
+#[test]
+fn a_reaction_with_no_rate_is_refused() {
+    assert_eq!(
+        refused(burning(schema(), Vec::new(), burn(), |_, _| Ok(()))),
+        CompileDefect::OmittedLaw { law: BURN }
+    );
+}
+
+type Burn<'b> = Reaction<'b, Metabolism, CapillaryBed, Glucose>;
+
+fn twice<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, burn: &Burn<'b>) -> Result<(), AdmissionError> {
+    paced(laws, burn)?;
+    paced(laws, burn)
+}
+
+#[test]
+fn two_rates_on_a_reaction_in_one_mode_are_refused() {
+    assert_eq!(
+        refused(burning(schema(), Vec::new(), burn(), twice)),
+        CompileDefect::SecondOwner {
+            law: BURN,
+            first: Predicate::EveryMode,
+            second: Predicate::EveryMode
+        }
+    );
+}
+
+fn fast_only<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, burn: &Burn<'b>) -> Result<(), AdmissionError> {
+    let [fast, _slow] = laws.modes("pace", ["fast", "slow"]);
+    paced_in(laws, burn, fast.only())
+}
+
+#[test]
+fn a_reaction_whose_rates_leave_a_mode_uncovered_is_refused() {
+    assert_eq!(
+        refused(burning(schema(), Vec::new(), burn(), fast_only)),
+        CompileDefect::UncoveredMode {
+            law: BURN,
+            mode: ModeValue {
+                variable: "pace",
+                value: "slow"
+            }
+        }
+    );
+}
+
+fn shadowed<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, burn: &Burn<'b>) -> Result<(), AdmissionError> {
+    let _ = laws.state::<Dimensionless>("burn", Admissible::finite());
+    paced(laws, burn)
+}
+
+#[test]
+fn a_reaction_named_as_another_of_its_owners_laws_is_refused() {
+    assert_eq!(
+        refused(burning(schema(), Vec::new(), burn(), shadowed)),
+        CompileDefect::NamedTwice { law: BURN }
+    );
+}
+
+/// The rate also reads sodium, which the burn neither uses nor makes.
+fn salty<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, burn: &Burn<'b>) -> Result<(), AdmissionError> {
+    let class = RateClass::new(RateBand::Minutes, 60_000_000_000)?;
+    let speed = laws.site_parameter::<CapillaryBed, Rate<Dimensionless>>(
+        ParameterKey::new("mt.burn-speed"),
+        Admissible::nonnegative(),
+    );
+    let (salt, fuel) = (burn.amount::<Sodium>(), burn.amount::<Glucose>());
+    let rate = laws.site_kernel(|mut k| {
+        let _ = k.at_site(&salt);
+        let fuel = k.at_site(&fuel);
+        let zero = k.zero();
+        let speed = k.site_parameter(&speed);
+        let rate = k.relax(fuel, zero, speed);
+        k.finish(rate, laws.every_mode(), class)
+    });
+    laws.react_at(burn, rate);
+    Ok(())
+}
+
+#[test]
+fn a_read_of_a_species_the_reaction_does_not_hold_is_refused() {
+    assert_eq!(
+        refused(burning(schema(), Vec::new(), burn(), salty)),
+        CompileDefect::NoSuchRead { law: BURN }
+    );
+}
+
+#[test]
+fn a_reaction_in_a_left_out_space_is_refused() {
+    let mut without = schema();
+    without.leave_out(Space::Interstitium, "a bench whose burn has nowhere to stand");
+    assert_eq!(
+        refused(burning(without, Vec::new(), burn(), paced)),
+        CompileDefect::LeftOutTouched {
+            law: BURN,
+            site: site::<CapillaryBed>("bed"),
+            space: Space::Interstitium
+        }
+    );
+}
+
+#[test]
+fn a_reaction_that_moves_a_pool_its_card_holds_is_refused() {
+    assert_eq!(
+        refused(burning(schema(), vec![Space::Interstitium], burn(), paced)),
+        CompileDefect::HeldPoolMoved {
+            card: <Metabolism as Owner>::CARD,
+            site: site::<CapillaryBed>("bed"),
+            space: Space::Interstitium
+        }
+    );
+}
