@@ -16,8 +16,8 @@ use crate::law::{
 use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, PoolRef, RouteBoundary};
 use crate::{
     AdmissibleSet, AdmissionError, Anatomy, Book, Boundary, BoundaryDirection, Class, CompileDefect,
-    Compliance, HeatRoute, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Passage, Predicate,
-    RateClass, Schema, SiteId, Sites, Space, Species, Wall,
+    Compliance, HeatRoute, Lasting, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Passage,
+    Predicate, RateClass, Schema, SiteId, Sites, Space, Species, Wall,
 };
 
 pub(crate) fn compile(
@@ -1060,6 +1060,7 @@ enum Address {
     Forcing(usize),
     Gauge,
     Height(u64),
+    Lasting(Lasting),
 }
 
 struct Places<'a> {
@@ -1289,6 +1290,24 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                     let law = law.name;
                     return Err(CompileDefect::DriveOfAnotherRoute { law, route });
                 }
+            }
+            let read = |input: &Input| match input {
+                Input::Read(Source::Lasting(_), _) => Some(false),
+                Input::Parameter(_)
+                | Input::SiteParameter(_)
+                | Input::EdgeParameter(_)
+                | Input::EndParameter(..)
+                | Input::Memory(_) => Some(true),
+                _ => None,
+            };
+            let reads: Vec<bool> = (kernel.code.iter())
+                .filter_map(|op| match op {
+                    Op::Input(input) => read(input),
+                    _ => None,
+                })
+                .collect();
+            if reads.contains(&false) && !reads.contains(&true) {
+                return Err(CompileDefect::UnscaledInput { law: law.name });
             }
             let defined;
             let mut kernel = kernel;
@@ -1796,6 +1815,7 @@ fn addresses(
                     Some((space, _)) => return Err(CompileDefect::NoEnclosurePressure { law, space }),
                 }
             }
+            Source::Lasting(input) => Address::Lasting(input),
         })
     };
     let resolve = |input: Input, accepts: bool, expects: Option<&str>| -> Result<Address, CompileDefect> {
@@ -2025,7 +2045,8 @@ fn bind(
             | Address::Draw(_)
             | Address::Forcing(_)
             | Address::Gauge
-            | Address::Height(_) => None,
+            | Address::Height(_)
+            | Address::Lasting(_) => None,
         })
         .chain(forced.iter().copied())
         .collect();
@@ -2069,6 +2090,7 @@ fn bind(
         Address::Forcing(forcing) => Bound::Forcing(forcing),
         Address::Gauge => Bound::Gauge,
         Address::Height(axial) => Bound::Height(axial),
+        Address::Lasting(input) => Bound::Lasting(input),
     };
     let instances = (placed.into_iter())
         .map(|placed| {

@@ -1,6 +1,6 @@
 //! The boundary port: ONE timestamped timeline of the day, partitioned by payload and ordered by
 //! (time, id). Pending events and active continuous deliveries are record state and checkpoint.
-use super::{AdmissionError, CompiledBody, CoupledProblem, Digest, Measure, Refused, SimTime, StepTicket, TrialFailure, VerifiedStep, Water};
+use super::{AdmissionError, CompiledBody, CoupledProblem, Digest, Dimensionless, Measure, Pressure, Refused, SimTime, StepTicket, Temperature, TrialFailure, VerifiedStep, Water};
 
 pub struct BoundaryPort {
     _events: Vec<BoundaryEvent>,
@@ -9,6 +9,15 @@ impl BoundaryPort {
     /// Parses and orders a schedule; duplicate ids with different payloads are refused, and so is
     /// a continuous delivery that ends at or before its event.
     pub fn new(_events: Vec<BoundaryEvent>) -> Result<Self, AdmissionError> {
+        todo!()
+    }
+}
+/// The day a packet holds. One id names one event, so an id with two payloads is refused.
+pub struct Day {
+    _events: Vec<BoundaryEvent>,
+}
+impl Day {
+    pub fn new(_events: Vec<BoundaryEvent>) -> Result<Day, AdmissionError> {
         todo!()
     }
 }
@@ -42,9 +51,10 @@ pub enum BoundaryInput {
     Water(WaterDelivery),
     Intake(Intake),
     Posture(Posture),
-    Environment(Environment),
-    Clock(ClockPhase),
-    Sleep(SleepState),
+    Clock(Clock),
+    Sleep(Sleep),
+    Room(Room),
+    Void(Gate),
 }
 /// `amount` of water through the named boundary, from the event's instant until `ends`, at the rate
 /// that delivers it exactly, so "applied once" shows as a total received. Overlapping deliveries add.
@@ -102,43 +112,33 @@ pub enum Legs {
     SeatedDependent,
     Standing,
 }
-pub struct Environment {
-    _air_kelvin: f64,
-    _radiant_kelvin: f64,
-    _humidity: f64,
-    _air_speed: f64,
-    _clothing: f64,
-    _bedding: f64,
-    _pressure: f64,
-    _inspired_fractions: Vec<f64>,
+/// The room around the body: absolute temperatures, relative humidity, air speed as its ratio to 0.1 m/s,
+/// barometric pressure, the inspired dry fractions of oxygen and carbon dioxide, and clothing or bedding in clo.
+/// Parsing refuses a value outside its range.
+pub struct Room {
+    pub air: Measure<Temperature>,
+    pub radiant: Measure<Temperature>,
+    pub humidity: Measure<Dimensionless>,
+    pub air_speed: Measure<Dimensionless>,
+    pub pressure: Measure<Pressure>,
+    pub oxygen: Measure<Dimensionless>,
+    pub carbon_dioxide: Measure<Dimensionless>,
+    pub clothing: Measure<Dimensionless>,
 }
-impl Environment {
-    pub fn new(
-        _air_kelvin: f64,
-        _radiant_kelvin: f64,
-        _humidity: f64,
-        _air_speed: f64,
-        _clothing: f64,
-        _bedding: f64,
-        _pressure: f64,
-        _inspired_fractions: Vec<f64>,
-    ) -> Result<Self, AdmissionError> {
-        todo!()
-    }
+/// The time of day at the event's instant. The phase is zero at midnight and makes one turn a day; a law reads its
+/// cosine and sine, which change at each whole minute. Parsing refuses a reading of a day or more.
+pub struct Clock {
+    pub since_midnight_ns: u64,
 }
-pub struct ClockPhase {
-    _admission_phase: u64,
-    _period_ns: u64,
-}
-impl ClockPhase {
-    /// Refuses a zero period or an admission phase at or past it.
-    pub fn new(_admission_phase: u64, _period_ns: u64) -> Result<Self, AdmissionError> {
-        todo!()
-    }
-}
-pub enum SleepState {
+/// Rung 0 has no REM sleep.
+pub enum Sleep {
     Awake,
     Nrem,
+}
+/// A void carries no amount, because the volume voided is a produced quantity.
+pub enum Gate {
+    Open,
+    Shut,
 }
 #[derive(Clone, Copy)]
 pub enum Attempt<'a> {
