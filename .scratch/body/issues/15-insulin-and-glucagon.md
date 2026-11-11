@@ -17,4 +17,4 @@ Blocked by: 14, 17, `.scratch/research/issues/13-law-forms-gut-and-fuels.md`
 
 **Non-goals:** gut hormones, pulsed secretion, epinephrine's part, which ticket 01 leaves out of rung 0, and the evening fall in sensitivity.
 
-From [research 13](../../research/issues/13-law-forms-gut-and-fuels.md): the receptor layer binds a ligand only in a junction's cleft or in plasma. Until it gains a place to bind in a bed's interstitium, the uptake and potassium rows read insulin bound in the bed's plasma and put the whole lag on binding.
+From [research 13](../../research/issues/13-law-forms-gut-and-fuels.md): the receptor layer binds a ligand only in a junction's cleft or in plasma. Until it gains a place to bind in a bed's interstitium, the uptake and potassium rows read insulin bound in the bed's plasma and put the whole lag on binding. [Ticket 03](03-whole-body-lists.md) added no third binding place: that is the receptor crate's change.

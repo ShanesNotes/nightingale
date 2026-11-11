@@ -19,3 +19,5 @@ Breathing is tidal unless ticket 26's budget forbids it. Prototype tidal breathi
 **Non-goals:** more than one alveolar unit, airway resistance by generation, hypoxic vasoconstriction, and lung water (arrow 110).
 
 From [research 12](../../research/issues/12-law-forms-heat.md): Kingma's supplement, now on hand, gives respiratory heat at rest, evaporative and convective together, as a fixed 8% of the metabolic rate (its Eq A2). Research 11 had no form for the dry heat of warming inspired air.
+
+From [ticket 03](03-whole-body-lists.md)'s Answer: the conducting airway is a tissue site with a gas space on the airway network, where ticket 01 said a vessel segment. A vessel segment's lumen gets a water pool by rule, and nothing moves water in an airway, so compile would refuse that pool as an orphan. The site has a thermal and an elastic store, so heat can reach it from the core and leave there. The water that humidifies inspired gas comes from the pulmonary bed, as ticket 01's row says: the lining wall reaches beds only, so vapor enters at the lung bed's gas and moves out along the airway.

@@ -16,3 +16,5 @@ Blocked by: 04, 05
 - [ ] Cost: unknowns, rows and milliseconds a step for the body on holds against the slice, measured on the heavy-run machine. [Ticket 26](26-cost-budget.md) sets the budgets from this
 
 **Non-goals:** any new law. A stand-in is a constant or the simplest balanced flow that lets the body compile.
+
+From [ticket 03](03-whole-body-lists.md)'s Answer: the cell anion is a species with a fixed charge of -1 whose pools sit in each bed's cells, and no route moves it. A pool that nothing moves or holds is refused as an orphan, so the hold table holds it, through the box above on a hold that names one species in a space: a held card holds a whole kind of space today. The conducting airway is a tissue site with a gas space on the airway network, not a vessel segment, so the airway's held exit for water and heat leaves from that site.

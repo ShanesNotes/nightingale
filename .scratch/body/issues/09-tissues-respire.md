@@ -19,3 +19,5 @@ Blocked by: 02, 08, `.scratch/research/issues/11-law-forms-gas-loop.md`
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** which fuel a bed burns (ticket 16), temperature's effect on rate, and heat exchange with the room (ticket 12).
+
+From [ticket 03](03-whole-body-lists.md)'s Answer: the work of the cells' pumps is a heat route of its own (`FluidsPorts::pump_work`), and it draws on the same receipt, `chemical energy`, as the heart's and the vessel walls' work. The box above on work paid from outside the body covers the pumps and every wall's work too.
