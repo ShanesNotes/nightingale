@@ -1002,3 +1002,17 @@ path = "crates/ng-contract/src/healthy.rs"
 old = '''high.seal(out);'''
 new = '''low.seal(out);'''
 test = "-p ng-validate --test healthy a_corrected_set_rechecks_a_finished_replay_and_gives_a_new_result_for_the_same_run"
+
+[[mutant]]
+name = "healthy-range-unjudged-reading-passes"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if results.iter().filter(own).all(|result| result.judged == 0) {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::a_reading_the_run_holds_no_whole_window_of_blocks_and_is_named"
+
+[[mutant]]
+name = "return-no-anchors-passes"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''if plans.is_empty() {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::a_packet_with_no_anchors_blocks_the_return_check"

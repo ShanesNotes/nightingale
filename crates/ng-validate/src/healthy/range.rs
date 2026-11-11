@@ -134,6 +134,9 @@ pub enum RangeGap {
         to: Activity,
         at: SimTime,
     },
+    /// The run held no whole window or whole period of any of this reading's ranges, so a check that tested
+    /// nothing never passes.
+    Unjudged { row: RowKind, method: &'static str },
 }
 
 #[derive(Clone, Copy)]
@@ -526,12 +529,19 @@ impl RangeFold {
         let Self {
             mut results,
             readings,
-            gaps,
+            mut gaps,
             ..
         } = self;
-        for reading in readings {
+        for reading in &readings {
             if let Some(range) = (reading.period).and_then(|open| reading.whole[open.span]) {
                 results[range].cut += 1;
+            }
+        }
+        for reading in readings.iter().filter(|reading| reading.ranged) {
+            let own = |result: &&RangeResult| (result.row, result.method) == (reading.row, reading.method);
+            if results.iter().filter(own).all(|result| result.judged == 0) {
+                let (row, method) = (reading.row, reading.method);
+                note(&mut gaps, RangeGap::Unjudged { row, method });
             }
         }
         (results, gaps)

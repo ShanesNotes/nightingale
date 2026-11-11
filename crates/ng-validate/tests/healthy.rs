@@ -126,9 +126,9 @@ fn a_run_pushed_past_its_healthy_range_for_a_while_fails_naming_the_reading_and_
         "the report names the learner's lens"
     );
     assert_eq!(
-        checked.returns.verdict(),
-        CheckVerdict::Pass,
-        "the fixture has no anchor to return to"
+        (checked.returns.verdict(), checked.returns.gaps()),
+        (CheckVerdict::Blocked, [ReturnGap::NoAnchors].as_slice()),
+        "the fixture has no anchor to return to, and a check that held nothing never passes"
     );
 }
 

@@ -131,11 +131,13 @@ pub enum ReturnGap {
     NoReading { anchor: AnchorId },
     /// The run ended before this morning's window did.
     NotReached { anchor: AnchorId, morning: NonZeroU32 },
+    /// The packet states no anchor, so a check that held nothing never passes.
+    NoAnchors,
 }
 impl ReturnGap {
     fn blocks(&self, morning: NonZeroU32) -> bool {
         match *self {
-            Self::NoVariation { .. } | Self::NoReading { .. } => true,
+            Self::NoVariation { .. } | Self::NoReading { .. } | Self::NoAnchors => true,
             Self::NotReached { morning: missed, .. } => missed == morning,
         }
     }
@@ -184,6 +186,9 @@ impl ReturnFold {
         }
         let factor = Measure::<Dimensionless>::new(RETURN_FACTOR)?;
         let (mut held, mut gaps) = (Vec::new(), Vec::new());
+        if plans.is_empty() {
+            gaps.push(ReturnGap::NoAnchors);
+        }
         let mut by_reading = vec![Vec::new(); readings.len()];
         for plan in plans {
             let anchor = plan.anchor;

@@ -430,6 +430,31 @@ fn an_activity_with_no_range_blocks_and_is_named() {
 }
 
 #[test]
+fn a_reading_the_run_holds_no_whole_window_of_blocks_and_is_named() {
+    let set = set(
+        vec![range("xx.range", Scope::Every, sliding(8 * SECOND), 0.0, 100.0)],
+        Vec::new(),
+    );
+    let report = each_second(&set, &day(&[(0, "awake")]), &[50.0; 4]);
+    assert_eq!(result(&report, "xx.range").judged(), 0);
+    assert_eq!(report.verdict(), CheckVerdict::Blocked);
+    let named = RangeGap::Unjudged {
+        row: reading(),
+        method: METHOD,
+    };
+    assert_eq!(report.gaps(), [named], "four seconds hold no window of eight");
+}
+
+#[test]
+fn a_packet_with_no_anchors_blocks_the_return_check() {
+    let set = set(Vec::new(), vec![variation(10.0)]);
+    let report = returned(&[sampled(reading())], &set, &[], &hourly(48, |_| 100.0));
+    assert_eq!(report.verdict(), CheckVerdict::Blocked);
+    assert_eq!(report.gaps(), [ReturnGap::NoAnchors]);
+    assert_eq!(report.morning(morning(1)), CheckVerdict::Blocked);
+}
+
+#[test]
 fn a_run_inside_its_range_but_away_from_its_admission_reading_at_24_hours_fails_only_the_return_check() {
     let stream = hourly(48, |hour| if hour == 24 { 140.0 } else { 100.0 });
     let set = set(
