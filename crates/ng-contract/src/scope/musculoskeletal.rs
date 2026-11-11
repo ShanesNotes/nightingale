@@ -10,6 +10,20 @@ impl<'b> MusculoskeletalPorts<'b> {
         Self { brand: PhantomData }
     }
     /// A mineral across the cell membrane of the bone bed.
+    /// ```compile_fail,E0277
+    /// use ng_contract::*;
+    /// fn crossed<'b>(ms: &mut FragmentBuilder<'b, Musculoskeletal>, ports: &MusculoskeletalPorts<'b>)
+    ///     -> SiteRoute<'b, Musculoskeletal, Beds<Bone>, Sodium> {
+    ///     ports.bone::<Sodium>(ms)
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// fn crossed<'b>(ms: &mut FragmentBuilder<'b, Musculoskeletal>, ports: &MusculoskeletalPorts<'b>)
+    ///     -> SiteRoute<'b, Musculoskeletal, Beds<Bone>, Calcium> {
+    ///     ports.bone::<Calcium>(ms)
+    /// }
+    /// ```
     pub fn bone<Q: Mineral>(
         &self,
         laws: &mut FragmentBuilder<'b, Musculoskeletal>,

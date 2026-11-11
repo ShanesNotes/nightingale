@@ -664,6 +664,22 @@ new = '''(Input::EdgeFlow, Context::Edge { from, to }) => {'''
 test = "-p ng-contract --test sinusoids a_lymph_law_reads_no_blood_flow_at_the_liver_bed_as_at_any_other"
 
 [[mutant]]
+name = "reacts-at-its-grant-alone"
+path = "crates/ng-contract/src/law.rs"
+old = '''impl ReactsAt<crate::Beds<crate::Liver>> for crate::Hepatic {}'''
+new = '''impl ReactsAt<crate::Beds<crate::Liver>> for crate::Hepatic {}
+impl grants::Sealed<CapillaryBed> for crate::Hepatic {}
+impl ReactsAt<CapillaryBed> for crate::Hepatic {}'''
+test = "--doc -p ng-contract ReactsAt"
+
+[[mutant]]
+name = "cargo-class-closed"
+path = "crates/ng-contract/src/scope/cargo.rs"
+old = '''Respired: Substance = Oxygen, CarbonDioxide;'''
+new = '''Respired: Substance = Oxygen, CarbonDioxide, Sodium;'''
+test = "--doc -p ng-contract alveolar"
+
+[[mutant]]
 name = "enclosure-owed-by-its-card"
 path = "crates/ng-contract/src/compile.rs"
 old = '''

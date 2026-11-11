@@ -34,6 +34,20 @@ impl<'b> MetabolismPorts<'b> {
         }
     }
     /// Oxygen or carbon dioxide across the capillary wall of every bed.
+    /// ```compile_fail,E0277
+    /// use ng_contract::*;
+    /// fn crossed<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts<'b>)
+    ///     -> SiteRoute<'b, Metabolism, CapillaryBed, Sodium> {
+    ///     ports.gas_exchange::<Sodium>(mt)
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// fn crossed<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts<'b>)
+    ///     -> SiteRoute<'b, Metabolism, CapillaryBed, CarbonDioxide> {
+    ///     ports.gas_exchange::<CarbonDioxide>(mt)
+    /// }
+    /// ```
     pub fn gas_exchange<Q: Respired>(
         &self,
         laws: &mut FragmentBuilder<'b, Metabolism>,
@@ -43,6 +57,20 @@ impl<'b> MetabolismPorts<'b> {
         SiteRoute::requested(family)
     }
     /// Oxygen or carbon dioxide across the cell membrane of every bed.
+    /// ```compile_fail,E0277
+    /// use ng_contract::*;
+    /// fn crossed<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts<'b>)
+    ///     -> SiteRoute<'b, Metabolism, CapillaryBed, Sodium> {
+    ///     ports.gas_into_cells::<Sodium>(mt)
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// fn crossed<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts<'b>)
+    ///     -> SiteRoute<'b, Metabolism, CapillaryBed, Oxygen> {
+    ///     ports.gas_into_cells::<Oxygen>(mt)
+    /// }
+    /// ```
     pub fn gas_into_cells<Q: Respired>(
         &self,
         laws: &mut FragmentBuilder<'b, Metabolism>,
@@ -75,6 +103,20 @@ impl<'b> MetabolismPorts<'b> {
         SiteRoute::requested(family)
     }
     /// Triglyceride from a store bed's plasma into its cells, past the interstitium.
+    /// ```compile_fail,E0277
+    /// use ng_contract::*;
+    /// fn stored<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts<'b>)
+    ///     -> SiteRoute<'b, Metabolism, Beds<Liver>, Triglyceride> {
+    ///     ports.fat_into_cells::<Beds<Liver>>(mt)
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// fn stored<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts<'b>)
+    ///     -> SiteRoute<'b, Metabolism, Beds<Fat>, Triglyceride> {
+    ///     ports.fat_into_cells::<Beds<Fat>>(mt)
+    /// }
+    /// ```
     pub fn fat_into_cells<C: FatStore>(
         &self,
         laws: &mut FragmentBuilder<'b, Metabolism>,

@@ -42,6 +42,20 @@ impl<'b> RespiratoryPorts<'b> {
         }
     }
     /// Gas to plasma across the gas-exchange surface of every lung bed; carbon dioxide leaves at a negative rate.
+    /// ```compile_fail,E0277
+    /// use ng_contract::*;
+    /// fn crossed<'b>(rs: &mut FragmentBuilder<'b, Respiratory>, ports: &RespiratoryPorts<'b>)
+    ///     -> SiteRoute<'b, Respiratory, Beds<Lung>, Sodium> {
+    ///     ports.alveolar::<Sodium>(rs)
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// fn crossed<'b>(rs: &mut FragmentBuilder<'b, Respiratory>, ports: &RespiratoryPorts<'b>)
+    ///     -> SiteRoute<'b, Respiratory, Beds<Lung>, Oxygen> {
+    ///     ports.alveolar::<Oxygen>(rs)
+    /// }
+    /// ```
     pub fn alveolar<Q: Respired>(
         &self,
         laws: &mut FragmentBuilder<'b, Respiratory>,
@@ -51,6 +65,20 @@ impl<'b> RespiratoryPorts<'b> {
         SiteRoute::requested(family)
     }
     /// `Q` along every airway edge toward the alveolar gas: a breath in, or out at a negative rate.
+    /// ```compile_fail,E0277
+    /// use ng_contract::*;
+    /// fn breathed<'b>(rs: &mut FragmentBuilder<'b, Respiratory>, ports: &RespiratoryPorts<'b>)
+    ///     -> EdgeRoute<'b, Respiratory, Glucose, AirwayEdge> {
+    ///     ports.airway::<Glucose>(rs)
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// fn breathed<'b>(rs: &mut FragmentBuilder<'b, Respiratory>, ports: &RespiratoryPorts<'b>)
+    ///     -> EdgeRoute<'b, Respiratory, NitrogenGas, AirwayEdge> {
+    ///     ports.airway::<NitrogenGas>(rs)
+    /// }
+    /// ```
     pub fn airway<Q: Breathed>(
         &self,
         laws: &mut FragmentBuilder<'b, Respiratory>,

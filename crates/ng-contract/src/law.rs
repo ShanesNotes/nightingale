@@ -1218,6 +1218,62 @@ mod grants {
     pub trait Sealed<C> {}
 }
 /// A site set the contract grants a card to react at.
+/// ```compile_fail,E0277
+/// use ng_contract::*;
+/// fn ungranted<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, made: Proportions<Glucose>)
+///     -> Reaction<'b, Metabolism, TissueSite, Glucose> {
+///     mt.reaction::<TissueSite, Glucose>("burn", made)
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn granted<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, made: Proportions<Glucose>)
+///     -> Reaction<'b, Metabolism, CapillaryBed, Glucose> {
+///     mt.reaction::<CapillaryBed, Glucose>("burn", made)
+/// }
+/// ```
+/// ```compile_fail,E0277
+/// use ng_contract::*;
+/// fn ungranted<'b>(hp: &mut FragmentBuilder<'b, Hepatic>, made: Proportions<Glucose>)
+///     -> Reaction<'b, Hepatic, CapillaryBed, Glucose> {
+///     hp.reaction::<CapillaryBed, Glucose>("glycogen made", made)
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn granted<'b>(hp: &mut FragmentBuilder<'b, Hepatic>, made: Proportions<Glucose>)
+///     -> Reaction<'b, Hepatic, Beds<Liver>, Glucose> {
+///     hp.reaction::<Beds<Liver>, Glucose>("glycogen made", made)
+/// }
+/// ```
+/// ```compile_fail,E0277
+/// use ng_contract::*;
+/// fn ungranted<'b>(ms: &mut FragmentBuilder<'b, Musculoskeletal>, made: Proportions<Glucose>)
+///     -> Reaction<'b, Musculoskeletal, CapillaryBed, Glucose> {
+///     ms.reaction::<CapillaryBed, Glucose>("glycogen made", made)
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn granted<'b>(ms: &mut FragmentBuilder<'b, Musculoskeletal>, made: Proportions<Glucose>)
+///     -> Reaction<'b, Musculoskeletal, Beds<Muscle>, Glucose> {
+///     ms.reaction::<Beds<Muscle>, Glucose>("glycogen made", made)
+/// }
+/// ```
+/// ```compile_fail,E0277
+/// use ng_contract::*;
+/// fn ungranted<'b>(rn: &mut FragmentBuilder<'b, Renal>, made: Proportions<AminoAcids>)
+///     -> Reaction<'b, Renal, Beds<Liver>, AminoAcids> {
+///     rn.reaction::<Beds<Liver>, AminoAcids>("ammonium made", made)
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn granted<'b>(rn: &mut FragmentBuilder<'b, Renal>, made: Proportions<AminoAcids>)
+///     -> Reaction<'b, Renal, Beds<Tubule>, AminoAcids> {
+///     rn.reaction::<Beds<Tubule>, AminoAcids>("ammonium made", made)
+/// }
+/// ```
 pub trait ReactsAt<C: SiteSet>: grants::Sealed<C> + Owner {}
 impl grants::Sealed<CapillaryBed> for Metabolism {}
 impl ReactsAt<CapillaryBed> for Metabolism {}
