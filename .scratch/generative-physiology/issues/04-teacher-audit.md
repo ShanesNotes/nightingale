@@ -1,7 +1,7 @@
 # 04: The teacher audit
 
 Type: research
-Status: open
+Status: ready-for-human
 Blocked by: 03, `.scratch/native-contract/issues/28-admission-energy-at-balance.md`
 Runs on: the code is written on the workstation; the audit runs only on the heavy-run machine
 
@@ -189,3 +189,79 @@ Evidence: summaries.sha256 <..>; report.txt's sha256 is recorded beside it; the 
 The code PR merged as nightingale#85: `gp.py audit`, the plan `tools/generative-physiology/spec/audit-v1.txt`, the report and the driver's capture version 2 are on main. The first acceptance box is met. What remains is the audit itself: the long runs from main on the heavy-run machine, which wait for the developer reviewer's go-ahead because their transient links need about 100 GB of its disk, and then the Answer.
 
 The long runs now also wait for two changes to the teacher, so that they run once. [Native-contract 28](../../native-contract/issues/28-admission-energy-at-balance.md) corrects the start state that admission gives every run. The arena's pick, which the developer reviewer confirms ([foundation map](../../foundation/map.md), "Where the route stands"), decides which core teaches. By this ticket's engine-input rule an audit run before either would run again, and a study frozen on an earlier C would learn from a start state the engine is about to correct. C is therefore the first main commit that holds both. If native-contract 28 moves the pins in `crates/ng-validate/tests/trace.rs`, A0's digests in this ticket and in the plan are read again at C. Later engine changes do not reach the study, which runs on the snapshot at C.
+
+The audit ran once at bd38c0a5360addc7d5c2be2ffec4338a14e5c402 on the developer reviewer's go-ahead, with native-contract 28 in and the arena's pick still to come. Its technical gate fails. This run is evidence, not this ticket's Answer: the Answer still comes from a run at the C that the comment above defines. The whole audit took 24 minutes at 3 workers, and Windows C: free space went from 51.9 GB to 51.6 GB, so the next run costs little.
+
+The technical gate fails because B1 to B6 fault with `NoAdmissibleStep` at 509.772053 s, 29.77 s after head-down (trunk -0.2, horizontal legs) at 480 s. The six courses are equal seal for seal through revision 106,937, so the replica, late and observer-off variants reach the same fault, and B2 and B3 fault before their divergence at 510 s. Because B1 faulted, the prefix row and the B4, B5 and B6 row cannot pass, and the faults row counts six. These six are the plan's only runs that go head-down, and every other run completes. Five diagnostic runs outside the audit's data find the cause. The slice's leg veins empty within 30 s of head-down, after any history, and the next step's upwind transfer from them divides by zero water. The reference integrator at 1 ms faults within 1.2 ms of Core, so the cause is in the model and no core fixes it. [Native-contract 33](../../native-contract/issues/33-leg-veins-empty-head-down.md) takes the question to the engine's process.
+
+Every other technical row passes. A0 reproduces the pins `crates/ng-validate/tests/trace.rs` holds at C, and the checkpoint, rewind and reflex rows hold. B7 and its replay B8 share one seal log over 18 actions. Closure stays within 3.6e-12 of its bound, and the largest beat-identity gap is 8.4e-4 against the bar of 1e-3. The informativeness gate passes. The start histories differ on all four response features, and the slow component resolves with tau 631 s, which would give a 300 s history and a 10-minute encounter.
+
+The measurements add three facts:
+
+- Core runs the slice at 5.3 to 7.7 times real time, against the projected 2.5 to 4.9. An admission takes about 14 s, peak memory stays near 53 MB, and a 900 s run writes about 1.8 GB of links.
+- The cores row is flagged. Core (G4) differs from the reference integrator at 1 ms (G3) by up to 0.95 in beat-mean pressure and 0.055 per s in heart rate, and both exceed 2% of G4's stand response, a 6.42 pressure fall and a 0.90 per s rate rise.
+- The tilt times resolve only to whole beats. In F1 and F2, stroke and heart rate pass 63% of their change on the same beat, so their times are equal, and ticket 09's outside check cannot order them at this resolution.
+
+The question for the developer reviewer is whether to wait for native-contract 33 and the arena's pick and then run the audit again, or to drop head-down from the study's settings: B1 to B6 here, and ticket 09's o4 family and its head-down branch. The model default is to wait, because head-down is the study's only setting with a negative trunk, and ticket 09 uses it to test a setting no training family reaches.
+
+The workstation's facts for the template's first line: archive sha256 1ee726ebfbf224aacfef1c78ae63cc86c9d392842eecdb515a5bf6e7deba8b1a, the same on the heavy-run machine; crates tree e8d6f9ce7b707d1e16444ac2e263025ab56d610b; engine as designed (against 84744af): no. Seventeen commits moved it, native-contract 12 to 28, body ticket 02 and nightingale#108, and A0's pins moved with them. The report's own text, sha256 0f7ba481448e61afa391426e96c4fca070d8d3ac3ade6047eda4c8296d6c83d4, with its summaries.sha256 at 635bec7b014b0270fbedb9ae27bb327c3e9100f28e60f2d691e05e92f0377e11:
+
+```text
+Input: commit C bd38c0a5360addc7d5c2be2ffec4338a14e5c402; archive sha256, crates tree and engine as designed (against 84744af): the Answer records them from the workstation
+Toolchain: rustc 1.98.1 (48a229cea 2026-09-01), cargo 1.98.1 (797e8a9bc 2026-08-05), python3 3.14.7; rust-src present: yes
+Machine: the heavy-run machine; logical processors 12; memory limit 42061242368 bytes; swap limit 4294967296 bytes
+
+| Check | Runs | Measured | Criterion | Verdict |
+| A0 pinned second | A0 | packet 2dde20ac..045b, seal c4821276..ed7e, head 1000.229928 ms | trace.rs:135-136, 147 | pass |
+| A1 across checkpoint | A1 | equal seals from revision 277 to 13398 | all equal | pass |
+| A2, A3 reflex | A2, A3 | traffic 0.72067 vs 0.451838; rate 1.76645 vs 1.01558; leg-vein water 565.442 vs 470.539; stretch gap 0.105000000000 | the bars of the_body_answers_a_stand_through_its_own_baroreflex | pass |
+| A4 late checkpoint | A4 | equal seals from revision 60755 to 88068; resume 3.042 s | all equal | pass |
+| A5 rewind | A5 | equal seals from revision 60755 to 88068 | all equal | pass |
+| B1/B2, B1/B3 prefixes | B1, B2, B3 | B1 faulted (NoAdmissibleStep) | 510 000 / just before | fail |
+| B4, B5, B6 | B1, B4, B5, B6 | B1 faulted (NoAdmissibleStep) | equal | fail |
+| B7/B8 closed loop | B7, B8 | equal end to end, 175740 revisions; actions 18 | equal | pass |
+| Faults, identities | all | 6: B1 NoAdmissibleStep, B2 NoAdmissibleStep, B3 NoAdmissibleStep, B4 NoAdmissibleStep, B5 NoAdmissibleStep, B6 NoAdmissibleStep; shared | 0; shared | fail |
+| Closure, beat identity | all | max residual 3.62716e-12 of its bound (Charge at amount/bladder/Lumen/Sodium, 35e6077a edges 6 to 7); max beat gap 0.000837558 (934d0200 beat 521) | bound; 1e-3 | pass |
+| Histories differ | C1-C6 | ranges 0.162444, 6.39686, 0.0799009, 1.04083 against floors 0.0245904, 1.47056, 0.00500229, 0.204124 | two of four | pass |
+| Slow component | D0, D1 | tau 630.957 s, b -87.8677, residual over abs(b) 0.0016621, span 1.05925 | resolved or not | resolved |
+| Tilt | F1, F2 | F1 stroke 3.5345/3.26609 s, rate 3.5345/3.26609 s; F2 stroke 8.32229/7.55792 s, rate 8.32229/7.55792 s | measured | measured |
+| Cores | G3, G4 | max d pressure 0.950034, max d rate 0.0551023; G4's stand: fall 6.42126, rise 0.896082 | flag above 2% | flagged |
+| Numerical variation | G1, G2 | per feature rate rise 0.0245904, pressure fall 1.47056, late rate 0.00500229, late pressure 0.0978228; leg interstitium 0.011365 | measured | measured |
+| Ripple | C1-C6 | RMS 1.04601 over 5388 windows against the stand response 6.26203 to 12.6589 | measured | measured |
+| Accumulated postures | C7, C3 | wall per simulated s 0.161636 against 0.155216 | measured | measured |
+
+| Run | simulated s | accepted steps | per simulated s | refusals | admission s | wall s | times real time | peak MB | links GB | stir s | skin factor |
+| A0 | 1.1002 | 245 | 222.687 | 21 | 13.235 | 0.159 | 6.91948 | 53.3053 | 0.00229292 | 0.528060 | no beat |
+| A1 | 118.748 | 26519 | 223.321 | 2760 | 14.64 | 18.663 | 6.36277 | 53.334 | 0.124892 | 0.528060 | 1.10192 to 1.15358 |
+| A2 | 6.00074 | 1131 | 188.477 | 94 | 14.237 | 0.784 | 7.65401 | 53.3873 | 0.0105513 | 0.528060 | 1.15103 to 1.15357 |
+| A3 | 6.00424 | 1276 | 212.517 | 124 | 13.456 | 0.863 | 6.9574 | 52.0069 | 0.0119029 | 0.528060 | 1.15108 to 1.15358 |
+| A4 | 550.016 | 115381 | 209.777 | 10182 | 15.428 | 84.291 | 6.52521 | 52.5926 | 0.820891 | 0.528060 | 0.838134 to 1.1536 |
+| A5 | 550.016 | 115381 | 209.777 | 10182 | 14.357 | 85.743 | 6.41471 | 52.6377 | 0.820891 | 0.528060 | 0.838134 to 1.1536 |
+| B1 | 509.772 | 106937 | 209.774 | 9667 | 14.559 | 77.034 | 6.61749 | 51.0239 | 0.996769 | 0.528060 | 0.838134 to 1.1536 |
+| B2 | 509.772 | 106937 | 209.774 | 9667 | 14.2 | 76.593 | 6.6556 | 51.1713 | 0.996769 | 0.528060 | 0.838134 to 1.1536 |
+| B3 | 509.772 | 106937 | 209.774 | 9667 | 14.948 | 76.877 | 6.63101 | 50.9747 | 0.996769 | 0.528060 | 0.838134 to 1.1536 |
+| B4 | 509.772 | 106937 | 209.774 | 9667 | 15.542 | 76.805 | 6.63722 | 50.9747 | 0.996769 | 0.528060 | 0.838134 to 1.1536 |
+| B5 | 509.772 | 106937 | 209.774 | 9667 | 14.236 | 75.779 | 6.72709 | 52.609 | 0.996769 | 0.528060 | 0.838134 to 1.1536 |
+| B6 | 509.772 | 106937 | 209.774 | 9667 | 14.308 | 77.211 | 6.60232 | 52.6008 | 0.996769 | 0.528060 | 0.838134 to 1.1536 |
+| B7 | 900.004 | 175740 | 195.266 | 14716 | 14.409 | 122.687 | 7.33577 | 51.3229 | 1.63808 | 0.528060 | 0.838134 to 1.27989 |
+| B8 | 900.004 | 175740 | 195.266 | 14716 | 14.269 | 125.943 | 7.14612 | 52.6664 | 1.63808 | 0.528060 | 0.838134 to 1.27989 |
+| C1 | 900.008 | 180869 | 200.964 | 15676 | 14.386 | 133.141 | 6.75981 | 52.6664 | 1.68589 | 0.528060 | 0.838134 to 1.27989 |
+| C2 | 900.009 | 189091 | 210.099 | 16983 | 14.433 | 139.833 | 6.43631 | 53.3504 | 1.76253 | 0.528060 | 0.838135 to 1.27989 |
+| C3 | 900 | 192192 | 213.547 | 16582 | 14.179 | 139.694 | 6.44266 | 53.2808 | 1.79143 | 0.528060 | 0.838134 to 1.27989 |
+| C4 | 900.007 | 186525 | 207.248 | 16317 | 14.119 | 131.375 | 6.85067 | 53.248 | 1.73861 | 0.528060 | 0.838134 to 1.27989 |
+| C5 | 900.004 | 190711 | 211.9 | 16755 | 14.446 | 136.86 | 6.5761 | 53.2357 | 1.77763 | 0.528060 | 0.838134 to 1.27989 |
+| C6 | 900.005 | 185482 | 206.09 | 16909 | 14.444 | 133.91 | 6.72097 | 53.2972 | 1.72889 | 0.528060 | 0.838134 to 1.27989 |
+| C7 | 900.003 | 195100 | 216.777 | 16923 | 14.37 | 145.473 | 6.18673 | 53.2685 | 1.81854 | 0.528060 | 0.838134 to 1.27989 |
+| D0 | 1800.01 | 336775 | 187.097 | 27015 | 14.33 | 235.216 | 7.65256 | 59.9368 | 3.13909 | 0.528060 | 0.838134 to 1.27989 |
+| D1 | 1800 | 408412 | 226.895 | 36826 | 14.364 | 305.692 | 5.88829 | 55.0339 | 3.80682 | 0.528060 | 0.838134 to 1.27989 |
+| F1 | 900.001 | 172835 | 192.039 | 15245 | 14.242 | 121.678 | 7.39658 | 56.0087 | 1.611 | 0.528060 | 0.838134 to 1.27989 |
+| F2 | 900.007 | 172916 | 192.127 | 15282 | 14.152 | 121.845 | 7.38649 | 53.2644 | 1.61176 | 0.528060 | 0.838134 to 1.27989 |
+| G1 | 900.004 | 241141 | 267.933 | 10382 | 14.388 | 158.893 | 5.66421 | 53.2726 | 2.24768 | 0.528060 | 0.838134 to 1.27989 |
+| G2 | 1800 | 498713 | 277.062 | 23714 | 14.507 | 339.782 | 5.29753 | 55.1363 | 4.64851 | 0.528060 | 0.838134 to 1.27989 |
+| G3 | 180 | 181930 | 1010.72 | 0 | 14.304 | 350.431 | 0.513655 | 53.207 | 1.69578 | 0.528052 | 0.945488 to 1.15357 |
+| G4 | 180.001 | 38203 | 212.238 | 3568 | 14.821 | 27.311 | 6.59079 | 52.3346 | 0.356099 | 0.528060 | 0.945206 to 1.15357 |
+
+Technical gate: fail. Informativeness gate: pass.
+Derived: teaching core none: the technical gate failed and the experiment stops here.
+Evidence: summaries.sha256 635bec7b014b0270fbedb9ae27bb327c3e9100f28e60f2d691e05e92f0377e11; report.txt's sha256 is recorded beside it; the data stay on the heavy-run machine.
+```
