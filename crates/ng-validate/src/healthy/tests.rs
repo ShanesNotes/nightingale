@@ -885,13 +885,46 @@ fn a_range_check_that_judged_nothing_blocks() {
         vec![range("xx.range", Scope::Every, sliding(SECOND), 0.0, 100.0)],
         Vec::new(),
     );
-    let awake = day(&[(0, "awake")]);
-    let no_reading = ranged(&[], SECOND, &set, &awake, 0, &[]);
-    let no_value = ranged(&[sampled(reading())], SECOND, &set, &awake, 0, &[]);
-    for report in [no_reading, no_value] {
-        assert_eq!(report.verdict(), CheckVerdict::Blocked);
-        assert_eq!(report.gaps(), [RangeGap::NothingJudged]);
-    }
+    let report = ranged(&[], SECOND, &set, &day(&[(0, "awake")]), 0, &[]);
+    assert_eq!(report.verdict(), CheckVerdict::Blocked);
+    assert_eq!(report.gaps(), [RangeGap::NothingJudged]);
+}
+
+#[test]
+fn a_reading_that_gave_no_value_blocks_and_is_named_beside_one_that_was_judged() {
+    let other = row("other");
+    let every = |id, row| {
+        let (low, high) = (pressure(0.0), pressure(100.0));
+        HealthyRange::synthetic(
+            id,
+            row,
+            METHOD,
+            Scope::Every,
+            sliding(SECOND),
+            low,
+            high,
+            "synthetic",
+        )
+        .expect("a range")
+    };
+    let set = set(
+        vec![every("xx.other", other), every("xx.range", reading())],
+        Vec::new(),
+    );
+    let readings = [sampled(reading()), time_mean(other)];
+    let stream = each_period(0, SECOND, &[50.0; 4]);
+    let report = ranged(&readings, SECOND, &set, &day(&[(0, "awake")]), 0, &stream);
+    assert_eq!(result(&report, "xx.range").judged(), 4);
+    assert_eq!(report.verdict(), CheckVerdict::Blocked);
+    let named = RangeGap::Unread {
+        row: other,
+        method: METHOD,
+    };
+    assert_eq!(
+        report.gaps(),
+        [named],
+        "the time mean gave no value in a run shorter than its grid period"
+    );
 }
 
 #[test]

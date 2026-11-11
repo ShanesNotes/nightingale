@@ -23,8 +23,8 @@ const DAY_NS: u64 = 24 * 3_600 * 1_000_000_000;
 pub enum CheckVerdict {
     Pass,
     Fail,
-    /// Nothing failed, but something the check could not judge stops the claim, as a study could close it
-    /// (record 0004).
+    /// Nothing failed, but something the check could not judge stops the claim until a source or a longer run
+    /// closes it (record 0004).
     Blocked,
 }
 impl CheckVerdict {

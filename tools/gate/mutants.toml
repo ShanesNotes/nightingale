@@ -1380,3 +1380,66 @@ path = "crates/ng-validate/src/healthy/range.rs"
 old = '''if gaps.is_empty() && results.iter().all(|result| result.judged == 0) {'''
 new = '''if false {'''
 test = "-p ng-validate --lib healthy::tests::a_range_check_that_judged_nothing_blocks"
+
+[[mutant]]
+name = "healthy-range-anchor-view-out-of-id-order"
+path = "crates/ng-contract/src/packet.rs"
+old = '''readings.sort_by_key(|reading| reading.id);'''
+new = '''readings.sort_by_key(|reading| core::cmp::Reverse(reading.id));'''
+test = "-p ng-contract --lib provenance::tests::a_packet_lists_what_admission_reads_of_each_anchor_in_id_order"
+
+[[mutant]]
+name = "healthy-range-anchor-view-drops-the-cycle-window"
+path = "crates/ng-contract/src/packet.rs"
+old = '''AnchorStatistic::CycleMean | AnchorStatistic::CycleTimeMean => window_ns,'''
+new = '''AnchorStatistic::CycleMean | AnchorStatistic::CycleTimeMean => 0,'''
+test = "-p ng-contract --lib provenance::tests::a_packet_lists_what_admission_reads_of_each_anchor_in_id_order"
+
+[[mutant]]
+name = "healthy-range-anchor-view-names-another-packet"
+path = "crates/ng-contract/src/packet.rs"
+old = '''packet: self.hash(),'''
+new = '''packet: PacketHash::of_digest(Digest::of_canonical(b"another packet")),'''
+test = "-p ng-contract --lib provenance::tests::an_anchor_view_names_its_packet_apart_from_another_with_the_same_anchors"
+
+[[mutant]]
+name = "healthy-range-day-digest-skips-each-start"
+path = "crates/ng-validate/src/healthy.rs"
+old = '''bytes.extend_from_slice(&start.nanoseconds().to_be_bytes());'''
+new = '''let _ = start;'''
+test = "-p ng-validate --lib healthy::tests::a_day_refuses_no_span_a_start_out_of_order_and_one_activity_twice_running"
+
+[[mutant]]
+name = "healthy-range-day-digest-skips-each-activity"
+path = "crates/ng-validate/src/healthy.rs"
+old = '''bytes.extend_from_slice(activity.name().as_bytes());'''
+new = '''let _ = activity;'''
+test = "-p ng-validate --lib healthy::tests::a_day_refuses_no_span_a_start_out_of_order_and_one_activity_twice_running"
+
+[[mutant]]
+name = "healthy-range-period-open-at-the-end-not-cut"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''results[range].cut += 1;'''
+new = '''results[range].cut += 0;'''
+test = "-p ng-validate --lib healthy::tests::a_whole_period_range_judges_each_whole_periods_mean_and_counts_the_periods_the_run_cuts"
+
+[[mutant]]
+name = "healthy-range-latest-failing-window-named"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if result.failure.is_none_or(|known| end < known.end) {'''
+new = '''if result.failure.is_none_or(|known| end > known.end) {'''
+test = "-p ng-validate --lib healthy::tests::a_reading_that_leaves_its_range_between_two_tumbling_means_fails_a_sliding_window"
+
+[[mutant]]
+name = "return-unread-morning-passes"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''let blocked = !MORNINGS.contains(&morning) || self.gaps.iter().any(|gap| gap.blocks(morning));'''
+new = '''let blocked = self.gaps.iter().any(|gap| gap.blocks(morning));'''
+test = "-p ng-validate --lib healthy::tests::a_morning_the_run_does_not_reach_blocks_and_is_named"
+
+[[mutant]]
+name = "healthy-range-unread-reading-unnamed"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''for reading in readings.iter().filter(|reading| reading.ranged && !reading.read.contains(&true)) {'''
+new = '''for reading in readings.iter().filter(|_| false) {'''
+test = "-p ng-validate --lib healthy::tests::a_reading_that_gave_no_value_blocks_and_is_named_beside_one_that_was_judged"

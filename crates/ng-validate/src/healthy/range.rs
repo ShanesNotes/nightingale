@@ -112,8 +112,8 @@ impl RangeFailure {
     }
 }
 
-/// Where the set holds no range for a reading of the lens. Each blocks the verdict, since a study could close it,
-/// and none leaves its reading unchecked silently (record 0004).
+/// What the check could not judge. Each blocks the verdict until a source or a longer run closes it, and none
+/// leaves its reading unchecked silently (record 0004).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RangeGap {
     NoRange {
@@ -143,8 +143,14 @@ pub enum RangeGap {
         row: RowKind,
         method: &'static str,
     },
-    /// The check judged no window or whole period at all and named nothing else, as with a lens of no reading or a
-    /// run that gave no value, so a check that tested nothing never passes.
+    /// A reading of the lens that gave no value, as a time mean does in a run shorter than one grid period, so none
+    /// of its ranges judged it.
+    Unread {
+        row: RowKind,
+        method: &'static str,
+    },
+    /// The check judged no window or whole period at all and named nothing else, as with a lens of no reading, so a
+    /// check that tested nothing never passes.
     NothingJudged,
 }
 
@@ -592,6 +598,13 @@ impl RangeFold {
                     method: result.method,
                 });
             }
+        }
+        for reading in readings
+            .iter()
+            .filter(|reading| reading.ranged && !reading.read.contains(&true))
+        {
+            let (row, method) = (reading.row, reading.method);
+            note(&mut gaps, RangeGap::Unread { row, method });
         }
         if gaps.is_empty() && results.iter().all(|result| result.judged == 0) {
             gaps.push(RangeGap::NothingJudged);
