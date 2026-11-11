@@ -467,6 +467,23 @@ fn one_id_names_one_event_so_a_meal_and_a_drink_under_it_conflict_in_either_orde
 }
 
 #[test]
+fn a_water_only_meal_and_a_sleep_under_its_id_at_its_instant_conflict_in_either_order() {
+    let conflict = Some(AdmissionError::InputConflict { id: id(b"x") });
+    let water_only = || meal(b"x", at(0), Meal::new(at(10)).with::<Water>(measure(1.0)));
+    let sleep = || BoundaryEvent::new(id(b"x"), at(0), BoundaryInput::Sleep(Sleep::Nrem));
+    assert_eq!(
+        BoundaryPort::new(vec![water_only(), sleep()]).err(),
+        conflict,
+        "meal first"
+    );
+    assert_eq!(
+        BoundaryPort::new(vec![sleep(), water_only()]).err(),
+        conflict,
+        "sleep first"
+    );
+}
+
+#[test]
 fn a_late_event_under_the_id_of_a_waiting_one_of_another_kind_is_a_conflict()
 -> Result<(), InitializationFailure> {
     let conflict = Err(AdmissionError::InputConflict { id: id(b"x") });
