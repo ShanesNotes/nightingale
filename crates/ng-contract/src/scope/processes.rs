@@ -50,7 +50,7 @@ pub trait BoundaryProcess: sealed::Process {
     /// A drain carries every species its pool holds at its water's rate, as the urine does.
     const DRAINS: bool;
 }
-/// A hormone entering the body: its secretion, or angiotensin II's making at the rate renin sets.
+/// A hormone entering the body by its secretion.
 pub struct Secretion<H>(PhantomData<H>);
 /// A hormone leaving by its first-order clearance.
 pub struct Clearance<H>(PhantomData<H>);
@@ -62,6 +62,7 @@ pub struct Sweat<Q>(PhantomData<Q>);
 pub struct Inspired<Q>(PhantomData<Q>);
 /// What leaves the conducting airway in expired gas.
 pub struct Expired<Q>(PhantomData<Q>);
+pub enum AngiotensinIIMade {}
 pub enum InsulinFirstPass {}
 pub enum AlbuminSynthesis {}
 pub enum AlbuminLoss {}
@@ -100,7 +101,7 @@ processes! {
     Clearance<Glucagon> = "glucagon clearance": Endocrine, Glucagon, OutOfBody;
     Secretion<Renin> = "renin secretion": Endocrine, Renin, IntoBody;
     Clearance<Renin> = "renin clearance": Endocrine, Renin, OutOfBody;
-    Secretion<AngiotensinII> = "angiotensin II secretion": Endocrine, AngiotensinII, IntoBody;
+    AngiotensinIIMade = "angiotensin II made": Endocrine, AngiotensinII, IntoBody;
     Clearance<AngiotensinII> = "angiotensin II clearance": Endocrine, AngiotensinII, OutOfBody;
     Secretion<Aldosterone> = "aldosterone secretion": Endocrine, Aldosterone, IntoBody;
     Clearance<Aldosterone> = "aldosterone clearance": Endocrine, Aldosterone, OutOfBody;
