@@ -832,3 +832,17 @@ path = "crates/ng-solver/src/lib.rs"
 old = '''scheme: StageScheme::backward_euler_doubled(),'''
 new = '''scheme: StageScheme::backward_euler_halved(),'''
 test = "-p ng-validate --test trace the_first_second_of_the_slice_on_the_doubled_core_stays_where_it_was"
+
+[[mutant]]
+name = "estimate-skips-the-binding"
+path = "crates/ng-contract/src/quadrature.rs"
+old = '''if increment.ticket != ticket.digest() || increment.extents.layout != self.layout() {'''
+new = '''if false {'''
+test = "-p ng-solver --test core an_estimate_of_stages_off_its_ticket_s_set_is_a_method_mismatch"
+
+[[mutant]]
+name = "halved-second-stage-from-the-start"
+path = "crates/ng-contract/src/scheme.rs"
+old = '''stage(whole, part(second), Some(0), second, 1),'''
+new = '''stage(whole, part(second), None, second, 1),'''
+test = "-p ng-contract --lib scheme::tests::the_halved_set_is_the_doubled_sets_two_halves"
