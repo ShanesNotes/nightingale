@@ -360,8 +360,8 @@ pub enum CompileDefect {
     NoMakeup { law: LawName, species: Species },
     /// A reaction that names a fuel whose energy content the schema does not state, so its energy has no value.
     UnstatedEnergy { law: LawName, species: Species },
-    /// A reaction whose counts leave a conserved quantity open: an element or charge its uses and makes do not hold
-    /// alike, or energy with no pool to take it. Names the first in `Book` order.
+    /// A reaction whose counts leave a conserved quantity open: an element its uses and makes do not hold alike, or
+    /// energy with no pool to take it. Names the first in `Book` order.
     UnbalancedReaction { law: LawName, book: Book },
     /// A count times a weight, or their sum, past 2^53, where an integer weight stops being exact, or exact arithmetic on
     /// the conserved combinations past i128. Names the reaction when one is to blame, and none for admission's totals.

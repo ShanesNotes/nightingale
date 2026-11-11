@@ -9,19 +9,16 @@ fn limits(quantity: QuantityId, absolute: f64, relative: f64, drift: f64) -> Qua
         let ratio = Measure::<Dimensionless>::new(relative).expect("finite");
         QuantityPolicy::new(quantity, measure(absolute), ratio, measure(drift)).expect("its own dimension")
     }
+    struct Build;
+    impl Visit for Build {
+        type Output = fn(QuantityId, f64, f64, f64) -> QuantityPolicy;
+        fn visit<Q: Substance>(self) -> Self::Output {
+            of::<Q>
+        }
+    }
     let build = match quantity.book() {
-        Book::Of(Species::Water) => of::<Water>,
-        Book::Of(Species::Sodium) => of::<Sodium>,
-        Book::Of(Species::Potassium) => of::<Potassium>,
-        Book::Of(Species::Chloride) => of::<Chloride>,
-        Book::Of(Species::Albumin) => of::<Albumin>,
-        Book::Of(Species::Vasopressin) => of::<Vasopressin>,
-        Book::Of(Species::Norepinephrine) => of::<Norepinephrine>,
-        Book::Of(Species::Acetylcholine) => of::<Acetylcholine>,
-        Book::Of(Species::Energy) | Book::Energy => of::<Energy>,
-        Book::Of(Species::Oxygen) => of::<Oxygen>,
-        Book::Of(Species::CarbonDioxide) => of::<CarbonDioxide>,
-        Book::Of(Species::Glucose) => of::<Glucose>,
+        Book::Of(species) => species.visit(Build),
+        Book::Energy => of::<Energy>,
         Book::Element(_) => {
             let measure = |value| Measure::<Atoms>::new(value).expect("finite");
             let ratio = Measure::<Dimensionless>::new(relative).expect("finite");

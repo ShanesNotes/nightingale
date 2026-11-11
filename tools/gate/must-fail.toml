@@ -125,6 +125,7 @@ core = "A reaction whose proportions leave an element, charge or energy open, or
 mutants = ["reaction-balanced"]
 doctests = [
   { path = "crates/ng-contract/src/lib.rs", code = "E0451", text = "Proportions { terms: Vec::new(), energy: None, reference: core::marker::PhantomData }" },
+  { path = "crates/ng-contract/src/lib.rs", code = "E0559", text = "Makeup::Atoms { elements: &[(Element::Carbon, 1)], fuel: false, charge: -1 }" },
 ]
 
 [[row]]

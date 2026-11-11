@@ -387,6 +387,16 @@
 //!         .energy_into(Space::Thermal)
 //! }
 //! ```
+//! A species that states its atoms states no fixed charge: an acid or a base states its uncharged form. Only a carried
+//! species holds one.
+//! ```compile_fail,E0559
+//! use ng_contract::*;
+//! let _ = Makeup::Atoms { elements: &[(Element::Carbon, 1)], fuel: false, charge: -1 };
+//! ```
+//! ```
+//! use ng_contract::*;
+//! let _ = Makeup::Carried { charge: -1 };
+//! ```
 //! A reaction comes from its owner's builder, which records the rate it owes.
 //! ```compile_fail,E0451
 //! use ng_contract::*;
@@ -1177,6 +1187,7 @@ mod scheme;
 mod scope;
 mod seam;
 mod sources;
+mod species;
 mod split;
 mod state;
 mod system;
@@ -1209,6 +1220,7 @@ pub use scheme::*;
 pub use scope::*;
 pub use seam::*;
 pub use sources::{ExcursionSide, RefusalSource, SourceId, ValidityExcursion};
+pub use species::*;
 pub use split::*;
 pub use state::*;
 pub use system::*;

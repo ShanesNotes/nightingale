@@ -1,7 +1,10 @@
-use crate::{AdmissionError, Basis, EdgeKind, SiteSet, VascularEdge};
+use crate::{
+    AdmissionError, Albumin, Basis, Chloride, EdgeKind, Energy, Potassium, SiteSet, Sodium, Substance,
+    VascularEdge, Water,
+};
 use core::marker::PhantomData;
 
-mod dimensions {
+pub(crate) mod dimensions {
     pub trait Sealed {
         fn name() -> String;
     }
@@ -26,16 +29,6 @@ pub enum Length {}
 pub enum Time {}
 /// Pressure per volume: a wall's stiffness, never a pressure.
 pub enum Elastance {}
-/// Water, whose amount is in the canonical amount unit; its volume derives from it.
-pub enum Water {}
-pub enum Energy {}
-pub enum Sodium {}
-pub enum Potassium {}
-pub enum Chloride {}
-pub enum Albumin {}
-pub enum Vasopressin {}
-pub enum Norepinephrine {}
-pub enum Acetylcholine {}
 /// The sum of every ion's amount by its sign, in the amount unit.
 pub enum Charge {}
 pub enum Resistance {}
@@ -44,9 +37,6 @@ pub enum Orifice {}
 pub enum Temperature {}
 pub enum Phase {}
 pub enum Viscosity {}
-pub enum Oxygen {}
-pub enum CarbonDioxide {}
-pub enum Glucose {}
 /// An amount of one element's atoms, in the amount unit: what an element's conserved quantity totals.
 pub enum Atoms {}
 pub enum Renin {}
@@ -72,41 +62,28 @@ pub struct Affinity<Q>(PhantomData<Q>);
 pub struct PerSite<C: SiteSet, U>(PhantomData<(C, U)>);
 pub struct PerEdge<U, E: EdgeKind = VascularEdge>(PhantomData<(U, E)>);
 
-/// What a pool holds. One closed list, so a row, a route's carried columns, a makeup and a `Book` all read one name.
-/// A new species goes after the last, so no discriminant a seal holds moves.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Species {
-    Water,
-    Sodium,
-    Potassium,
-    Chloride,
-    Albumin,
-    Vasopressin,
-    Norepinephrine,
-    Acetylcholine,
-    Energy,
-    Oxygen,
-    CarbonDioxide,
-    Glucose,
+macro_rules! elements {
+    ($($name:ident),*) => {
+        /// An element whose atoms a reaction moves from one species to another, so where a reaction joins species its
+        /// atoms, not each species, are what stays conserved.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+        pub enum Element {
+            $($name),*
+        }
+        impl Element {
+            pub(crate) const ALL: [Element; [$(Element::$name),*].len()] = [$(Element::$name),*];
+        }
+    };
 }
-/// An element whose atoms a reaction moves from one species to another, so where a reaction joins species its atoms,
-/// not each species, are what stays conserved.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Element {
-    Carbon,
-    Hydrogen,
-    Oxygen,
-}
-impl Element {
-    pub(crate) const ALL: [Element; 3] = [Element::Carbon, Element::Hydrogen, Element::Oxygen];
-}
+elements!(Carbon, Hydrogen, Oxygen);
+
 /// What one unit of a species is made of, which a reaction's counts must balance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Makeup {
-    /// No reaction may use or make it: it only moves from pool to pool.
-    Carried,
-    /// Whole counts of each element's atoms. A fuel holds energy, whose content per unit the schema states; the rest
-    /// hold none, measured against carbon dioxide and water.
+    /// No reaction may use or make it: it only moves from pool to pool, holding the fixed charge it states.
+    Carried { charge: i64 },
+    /// Whole counts of each element's atoms, and no fixed charge. A fuel holds energy, whose content per unit the
+    /// schema states; the rest hold none, measured against carbon dioxide and water.
     Atoms {
         elements: &'static [(Element, i64)],
         fuel: bool,
@@ -114,227 +91,6 @@ pub enum Makeup {
     /// One unit of energy.
     Energy,
 }
-impl Species {
-    /// What water can carry, water first: every species but energy, which no route moves as a share of a flow.
-    pub(crate) const CARRIED: [Species; 11] = [
-        Species::Water,
-        Species::Sodium,
-        Species::Potassium,
-        Species::Chloride,
-        Species::Albumin,
-        Species::Vasopressin,
-        Species::Norepinephrine,
-        Species::Acetylcholine,
-        Species::Oxygen,
-        Species::CarbonDioxide,
-        Species::Glucose,
-    ];
-    /// Exhaustive, so a species added without its makeup does not compile.
-    pub const fn makeup(self) -> Makeup {
-        use Element::{Carbon, Hydrogen, Oxygen};
-        const fn atoms(elements: &'static [(Element, i64)]) -> Makeup {
-            Makeup::Atoms {
-                elements,
-                fuel: false,
-            }
-        }
-        match self {
-            Species::Water => atoms(&[(Hydrogen, 2), (Oxygen, 1)]),
-            Species::Sodium
-            | Species::Potassium
-            | Species::Chloride
-            | Species::Albumin
-            | Species::Vasopressin
-            | Species::Norepinephrine
-            | Species::Acetylcholine => Makeup::Carried,
-            Species::Energy => Makeup::Energy,
-            Species::Oxygen => atoms(&[(Oxygen, 2)]),
-            Species::CarbonDioxide => atoms(&[(Carbon, 1), (Oxygen, 2)]),
-            Species::Glucose => Makeup::Atoms {
-                elements: &[(Carbon, 6), (Hydrogen, 12), (Oxygen, 6)],
-                fuel: true,
-            },
-        }
-    }
-    /// Charge in units of the amount, zero for what the ledger keeps as no ion.
-    pub(crate) const fn charge(self) -> i64 {
-        match self {
-            Species::Sodium | Species::Potassium => 1,
-            Species::Chloride => -1,
-            _ => 0,
-        }
-    }
-    pub(crate) const fn names(self) -> [&'static str; 6] {
-        match self {
-            Species::Water => [
-                "reclaim water",
-                "release water",
-                "reuptake water",
-                "binding water",
-                "effect water",
-                "exchange water",
-            ],
-            Species::Sodium => [
-                "reclaim sodium",
-                "release sodium",
-                "reuptake sodium",
-                "binding sodium",
-                "effect sodium",
-                "exchange sodium",
-            ],
-            Species::Potassium => [
-                "reclaim potassium",
-                "release potassium",
-                "reuptake potassium",
-                "binding potassium",
-                "effect potassium",
-                "exchange potassium",
-            ],
-            Species::Chloride => [
-                "reclaim chloride",
-                "release chloride",
-                "reuptake chloride",
-                "binding chloride",
-                "effect chloride",
-                "exchange chloride",
-            ],
-            Species::Albumin => [
-                "reclaim albumin",
-                "release albumin",
-                "reuptake albumin",
-                "binding albumin",
-                "effect albumin",
-                "exchange albumin",
-            ],
-            Species::Vasopressin => [
-                "reclaim vasopressin",
-                "release vasopressin",
-                "reuptake vasopressin",
-                "binding vasopressin",
-                "effect vasopressin",
-                "exchange vasopressin",
-            ],
-            Species::Norepinephrine => [
-                "reclaim norepinephrine",
-                "release norepinephrine",
-                "reuptake norepinephrine",
-                "binding norepinephrine",
-                "effect norepinephrine",
-                "exchange norepinephrine",
-            ],
-            Species::Acetylcholine => [
-                "reclaim acetylcholine",
-                "release acetylcholine",
-                "reuptake acetylcholine",
-                "binding acetylcholine",
-                "effect acetylcholine",
-                "exchange acetylcholine",
-            ],
-            Species::Energy => [
-                "reclaim energy",
-                "release energy",
-                "reuptake energy",
-                "binding energy",
-                "effect energy",
-                "exchange energy",
-            ],
-            Species::Oxygen => [
-                "reclaim oxygen",
-                "release oxygen",
-                "reuptake oxygen",
-                "binding oxygen",
-                "effect oxygen",
-                "exchange oxygen",
-            ],
-            Species::CarbonDioxide => [
-                "reclaim carbon dioxide",
-                "release carbon dioxide",
-                "reuptake carbon dioxide",
-                "binding carbon dioxide",
-                "effect carbon dioxide",
-                "exchange carbon dioxide",
-            ],
-            Species::Glucose => [
-                "reclaim glucose",
-                "release glucose",
-                "reuptake glucose",
-                "binding glucose",
-                "effect glucose",
-                "exchange glucose",
-            ],
-        }
-    }
-    pub(crate) fn dimension(self) -> String {
-        match self {
-            Species::Water => dimension::<Water>(),
-            Species::Sodium => dimension::<Sodium>(),
-            Species::Potassium => dimension::<Potassium>(),
-            Species::Chloride => dimension::<Chloride>(),
-            Species::Albumin => dimension::<Albumin>(),
-            Species::Vasopressin => dimension::<Vasopressin>(),
-            Species::Norepinephrine => dimension::<Norepinephrine>(),
-            Species::Acetylcholine => dimension::<Acetylcholine>(),
-            Species::Energy => dimension::<Energy>(),
-            Species::Oxygen => dimension::<Oxygen>(),
-            Species::CarbonDioxide => dimension::<CarbonDioxide>(),
-            Species::Glucose => dimension::<Glucose>(),
-        }
-    }
-}
-mod substances {
-    pub trait Sealed {}
-}
-/// A dimension a pool can hold: the type a law reads, tied to the name a row carries.
-pub trait Substance: substances::Sealed + Dimension {
-    const SPECIES: Species;
-}
-macro_rules! substances {
-    ($($name:ident),*) => {$(
-        impl substances::Sealed for $name {}
-        impl Substance for $name {
-            const SPECIES: Species = Species::$name;
-        }
-    )*};
-}
-substances!(
-    Water,
-    Sodium,
-    Potassium,
-    Chloride,
-    Albumin,
-    Vasopressin,
-    Norepinephrine,
-    Acetylcholine,
-    Energy,
-    Oxygen,
-    CarbonDioxide,
-    Glucose
-);
-
-mod reactants {
-    pub trait Sealed {}
-}
-/// A species a reaction may use or make: every substance but energy, whose share a reaction derives from what it burns.
-pub trait Reactant: reactants::Sealed + Substance {}
-macro_rules! reactants {
-    ($($name:ident),*) => {$(
-        impl reactants::Sealed for $name {}
-        impl Reactant for $name {}
-    )*};
-}
-reactants!(
-    Water,
-    Sodium,
-    Potassium,
-    Chloride,
-    Albumin,
-    Vasopressin,
-    Norepinephrine,
-    Acetylcholine,
-    Oxygen,
-    CarbonDioxide,
-    Glucose
-);
 
 macro_rules! named {
     ($($dimension:ident = $name:literal),* $(,)?) => {$(
@@ -353,15 +109,6 @@ named!(
     Length = "length",
     Time = "time",
     Elastance = "elastance",
-    Water = "water",
-    Energy = "energy",
-    Sodium = "sodium",
-    Potassium = "potassium",
-    Chloride = "chloride",
-    Albumin = "albumin",
-    Vasopressin = "vasopressin",
-    Norepinephrine = "norepinephrine",
-    Acetylcholine = "acetylcholine",
     Charge = "charge",
     Resistance = "resistance",
     Inertance = "inertance",
@@ -369,9 +116,6 @@ named!(
     Temperature = "temperature",
     Phase = "phase",
     Viscosity = "viscosity",
-    Oxygen = "oxygen",
-    CarbonDioxide = "carbon dioxide",
-    Glucose = "glucose",
     Atoms = "atoms",
     Renin = "renin",
     Ammonia = "ammonia",

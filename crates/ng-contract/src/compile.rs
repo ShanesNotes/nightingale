@@ -4,7 +4,7 @@ use crate::body::{
     RowId, RowKind, Slot, Sparsity, StreamLayout, Target, UnknownId,
 };
 use crate::chance::key_word;
-use crate::conservation::{admission_totals, conserved_basis, weight};
+use crate::conservation::{Balanced, admission_totals, conserved_basis, weight};
 use crate::elimination::Elimination;
 use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
@@ -16,8 +16,8 @@ use crate::law::{
 use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, PoolRef, RouteBoundary};
 use crate::{
     AdmissibleSet, AdmissionError, Anatomy, Book, Boundary, BoundaryDirection, Class, CompileDefect,
-    Compliance, Element, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Predicate, RateClass,
-    Schema, SiteId, Sites, Space, Species,
+    Compliance, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Predicate, RateClass, Schema,
+    SiteId, Sites, Space, Species,
 };
 
 pub(crate) fn compile(
@@ -238,14 +238,7 @@ fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
     }
 }
 
-fn balanced() -> impl Iterator<Item = Book> {
-    let elements = Element::ALL.into_iter().map(Book::Element);
-    core::iter::once(Book::Charge)
-        .chain(elements)
-        .chain([Book::Energy])
-}
-
-fn left_over(reaction: &ReactionDeclaration, book: Book, contents: &[(Species, i64)]) -> Option<i64> {
+fn left_over(reaction: &ReactionDeclaration, book: Balanced, contents: &[(Species, i64)]) -> Option<i64> {
     let exact = i128::from(BINARY64_EXACT);
     let mut sum = 0;
     for term in &reaction.terms {
@@ -285,10 +278,10 @@ fn check_reactions(fragments: &[FragmentData], schema: &Schema) -> Result<(), Co
                 return Err(CompileDefect::UnstatedEnergy { law, species });
             }
             let mut left = Vec::new();
-            for book in balanced() {
+            for book in Balanced::all() {
                 let over = left_over(reaction, book, &schema.energy)
                     .ok_or(CompileDefect::ConservationOverflow { law: Some(law) })?;
-                left.push((book, over));
+                left.push((book.book(), over));
             }
             let taken = |book: Book| book == Book::Energy && reaction.energy.is_some();
             if let Some(&(book, _)) = left.iter().find(|&&(book, over)| over != 0 && !taken(book)) {
@@ -1468,7 +1461,7 @@ fn reaction_columns(
         ..
     } = *places;
     let overflow = CompileDefect::ConservationOverflow { law: Some(law) };
-    let left = left_over(reaction, Book::Energy, &schema.energy).ok_or(overflow)?;
+    let left = left_over(reaction, Balanced::Energy, &schema.energy).ok_or(overflow)?;
     let mut columns = Vec::new();
     for site in anatomy.in_set(reaction.set) {
         let pools: Vec<(PoolRef, i64)> = (reaction.terms.iter())
