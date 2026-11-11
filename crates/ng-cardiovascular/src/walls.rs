@@ -1,6 +1,13 @@
 use crate::rhythm::Heart;
 use ng_contract::*;
 
+mod dissipation;
+mod elastic_energy;
+mod gravity_work;
+mod stroke_work;
+mod wall_power;
+mod wall_work;
+
 type Port<'b, U> = ReadPort<'b, Cardiovascular, PerSite<Blood, U>>;
 type Effect<'b> = ReadPort<'b, Cardiovascular, PerSite<Junction, Dimensionless>>;
 type Knob<'b, U> = SiteParameter<'b, Cardiovascular, Blood, U>;
@@ -131,76 +138,16 @@ impl<'b, 'h> Walls<'b, 'h> {
     ) -> Result<(), AdmissionError> {
         let half = cv.parameter::<Dimensionless>(ParameterKey::new("cv.half"), Admissible::positive());
         let elastic = cv.algebraic::<Energy>("elastic energy", Admissible::nonnegative());
-        let row = cv.kernel(|mut k| {
-            let value = k.algebraic(&elastic);
-            k.finish(value, cv.every_mode(), wave)
-        });
-        let held = cv.site_kernel::<Blood, _, _>(|mut k| {
-            let stiffness = self.elastance(&mut k);
-            let held = self.stored(&mut k, &half, stiffness);
-            k.finish(held, cv.every_mode(), wave)
-        });
-        cv.sum_at(&elastic, row, held);
-
-        let work = ports.stroke_work(cv);
-        let into_wall = cv.site_kernel::<Blood, _, _>(|mut k| {
-            let contractile = self.contractile(&mut k);
-            let per_unit = self.stored(&mut k, &half, contractile);
-            let (target, current, speed) = (
-                k.parameter(&heart.peak),
-                k.state(&heart.activation),
-                k.parameter(&heart.rise),
-            );
-            let rate = k.relax(target, current, speed);
-            let power = k.multiply(per_unit, rate);
-            let power = k.as_dimension(power);
-            k.finish(power, heart.systole.only(), wave)
-        });
-        cv.transfer_at(&work, into_wall);
-        let none = cv.site_kernel::<Blood, _, _>(|mut k| {
-            let zero = k.zero::<Rate<Energy>>();
-            k.finish(zero, heart.diastole.only(), wave)
-        });
-        cv.transfer_at(&work, none);
-
-        let fallen = ports.gravity_work(cv);
-        let falling = cv.edge_kernel(|mut k| {
-            let per_length = k.parameter(head);
-            let fall = k.fall();
-            let product = k.multiply(per_length, fall);
-            let head: Expr<'_, '_, _, Pressure> = k.as_dimension(product);
-            let flow = k.edge_flow();
-            let moved = k.volume_flow(flow);
-            let product = k.multiply(head, moved);
-            let power = k.as_dimension(product);
-            k.finish(power, cv.every_mode(), wave)
-        });
-        cv.transfer_along(&fallen, falling);
+        self.elastic_energy(cv, &half, &elastic, wave);
+        self.stroke_work(cv, ports, heart, &half, wave);
+        gravity_work::declare(cv, ports, head, wave);
 
         let store = ports.dissipation(cv);
         let power = cv.algebraic::<Rate<Energy>>("wall power", Admissible::finite());
-        let closing = cv.kernel(|mut k| {
-            let held = k.read(&store.amount::<Energy>());
-            let sum = k.algebraic(&elastic);
-            let gap = k.subtract(held, sum);
-            k.finish(gap, cv.every_mode(), wave)
-        });
-        cv.closes(&power, closing);
+        wall_power::declare(cv, &store, &power, &elastic, wave);
         let soft = cv.parameter::<Rate<Energy>>(ParameterKey::new("cv.heat-width"), Admissible::positive());
-        let leaving = cv.kernel(|mut k| {
-            let net = k.algebraic(&power);
-            let heat = shed(&mut k, net, &soft);
-            k.finish(heat, cv.every_mode(), wave)
-        });
-        cv.transfer(Transfer::new(&store, leaving));
-        let paid = ports.wall_work(cv);
-        let gaining = cv.kernel(|mut k| {
-            let net = k.algebraic(&power);
-            let heat = shed(&mut k, net, &soft);
-            let gain = k.subtract(heat, net);
-            k.finish(gain, cv.every_mode(), wave)
-        });
-        cv.transfer(Transfer::new(&paid, gaining));
+        dissipation::declare(cv, &store, &power, &soft, wave);
+        wall_work::declare(cv, ports, &power, &soft, wave);
         Ok(())
     }
 }
