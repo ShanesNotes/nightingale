@@ -795,6 +795,22 @@ new = '''&& true'''
 test = "-p ng-contract --test map_reads a_gut_edge_into_a_tissue_site_is_refused"
 
 [[mutant]]
+name = "airway-fit-into"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''from.class == Class::TissueSite && matches!(to.class, Class::TissueSite | Class::CapillaryBed)'''
+new = '''from.class == Class::TissueSite'''
+test = "-p ng-contract --test map_reads an_airway_edge_into_a_vessel_segment_is_refused"
+
+[[mutant]]
+name = "gut-fit-out-of"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''from.class == Class::VesselSegment
+                    && matches!(to.class, Class::VesselSegment | Class::CapillaryBed)'''
+new = '''true
+                    && matches!(to.class, Class::VesselSegment | Class::CapillaryBed)'''
+test = "-p ng-contract --test map_reads a_gut_edge_out_of_a_bed_is_refused"
+
+[[mutant]]
 name = "besides-leaves-out-its-tissue"
 path = "crates/ng-contract/src/anatomy.rs"
 old = '''Sites::Besides(tissue) => bed(site) && self.tissue(site) != Some(tissue),'''

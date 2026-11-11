@@ -21,6 +21,13 @@ mod sensed {
 }
 pub trait Sensed: sensed::Sealed + Dimension {}
 
+pub(crate) mod plain {
+    pub trait Sealed {}
+}
+/// A dimension with no set point and no deviation anywhere inside it. The two algebra rows take only these, so
+/// neither carries a set point or a deviation out of its own dimension, however deep it sits.
+pub trait Plain: plain::Sealed + Dimension {}
+
 pub enum Dimensionless {}
 pub enum Pressure {}
 pub enum Volume {}
@@ -101,6 +108,8 @@ macro_rules! named {
             }
         }
         impl Dimension for $dimension {}
+        impl plain::Sealed for $dimension {}
+        impl Plain for $dimension {}
     )*};
 }
 named!(
@@ -188,6 +197,19 @@ macro_rules! sensed {
 }
 sensed!(Dimensionless, Pressure, Volume, Temperature, Length, Rate<Water>);
 
+impl<Q: Plain> plain::Sealed for Rate<Q> {}
+impl<Q: Plain> Plain for Rate<Q> {}
+impl<Q: Plain> plain::Sealed for Concentration<Q> {}
+impl<Q: Plain> Plain for Concentration<Q> {}
+impl<Q: Plain> plain::Sealed for Conductance<Q> {}
+impl<Q: Plain> Plain for Conductance<Q> {}
+impl<Q: Plain> plain::Sealed for Affinity<Q> {}
+impl<Q: Plain> Plain for Affinity<Q> {}
+impl<A: Plain, B: Plain> plain::Sealed for Product<A, B> {}
+impl<A: Plain, B: Plain> Plain for Product<A, B> {}
+impl<A: Plain, B: Plain> plain::Sealed for Quotient<A, B> {}
+impl<A: Plain, B: Plain> Plain for Quotient<A, B> {}
+
 pub(crate) mod identities {
     pub trait Sealed<U> {}
 }
@@ -225,10 +247,10 @@ same_dimension! {
     Quotient<Charge, Volume> => Concentration<Charge>;
     Quotient<Osmoles, Volume> => Concentration<Osmoles>;
 }
-impl<U: Dimension, V: Dimension> identities::Sealed<U> for Product<Quotient<U, V>, V> {}
-impl<U: Dimension, V: Dimension> SameDimension<U> for Product<Quotient<U, V>, V> {}
-impl<U: Dimension, V: Dimension> identities::Sealed<V> for Quotient<U, Quotient<U, V>> {}
-impl<U: Dimension, V: Dimension> SameDimension<V> for Quotient<U, Quotient<U, V>> {}
+impl<U: Plain, V: Plain> identities::Sealed<U> for Product<Quotient<U, V>, V> {}
+impl<U: Plain, V: Plain> SameDimension<U> for Product<Quotient<U, V>, V> {}
+impl<U: Plain, V: Plain> identities::Sealed<V> for Quotient<U, Quotient<U, V>> {}
+impl<U: Plain, V: Plain> SameDimension<V> for Quotient<U, Quotient<U, V>> {}
 impl<U: Dimension> identities::Sealed<U> for Quotient<U, Dimensionless> {}
 impl<U: Dimension> SameDimension<U> for Quotient<U, Dimensionless> {}
 impl<Q: Substance> identities::Sealed<Dimensionless> for Quotient<Concentration<Q>, Concentration<Q>> {}

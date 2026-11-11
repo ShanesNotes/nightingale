@@ -1801,8 +1801,10 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     ) -> SiteParameter<'b, O, CapillaryBed, Dimensionless> {
         self.reflection::<CapillaryBed, R>(route.family, key)
     }
-    /// The wall `route` crosses, as it holds species `Q`: a positive conductance and a reflection that lowers as
-    /// `reflect`'s does, so a body declared either way compiles to one model.
+    /// The wall `route` crosses, as it holds species `Q`: a positive conductance and a reflection. On a fluid route,
+    /// where water carries the species, the reflection lowers as `reflect`'s does, so a body declared either way
+    /// compiles to one model; on a wall's or a passage's own route nothing carries the species, so the law reads
+    /// the reflection as a share.
     pub fn membrane<C: SiteSet, R, Q: Substance, G: Dimension>(
         &mut self,
         route: &SiteRoute<'b, O, C, R>,

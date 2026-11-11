@@ -1,5 +1,5 @@
-use crate::quantity::{dimensions, identities};
-use crate::{Charge, Concentration, Dimension, Element, Makeup, Osmoles, SameDimension, Space};
+use crate::quantity::{dimensions, identities, plain};
+use crate::{Charge, Concentration, Dimension, Element, Makeup, Osmoles, Plain, SameDimension, Space};
 
 mod substances {
     pub trait Sealed {}
@@ -144,6 +144,8 @@ macro_rules! species {
                 }
             }
             impl Dimension for $name {}
+            impl plain::Sealed for $name {}
+            impl Plain for $name {}
             impl substances::Sealed for $name {}
             impl Substance for $name {
                 const SPECIES: Species = Species::$name;

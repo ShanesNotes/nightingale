@@ -351,6 +351,63 @@
 //!     k.as_dimension(ratio)
 //! }
 //! ```
+//! No cancellation row carries a set point or a deviation out of its dimension, however deep it sits: a parameter
+//! in pressure per set point, a set point over a set point per pressure, a gain on a deviation, and a set point
+//! wrapped in a product all stay their own.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn leak<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>,
+//!     unit: &Parameter<'b, Nervous, Quotient<Pressure, Reference<Pressure>>>,
+//!     set_point: &StateSlot<'b, Nervous, Reference<Pressure>>) -> Expr<'b, 'k, Nervous, Pressure> {
+//!     let unit = k.parameter(unit);
+//!     let reference = k.state(set_point);
+//!     let product = k.multiply(unit, reference);
+//!     k.as_dimension(product)
+//! }
+//! ```
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn leak<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>,
+//!     per: &Parameter<'b, Nervous, Quotient<Reference<Pressure>, Pressure>>,
+//!     set_point: &StateSlot<'b, Nervous, Reference<Pressure>>) -> Expr<'b, 'k, Nervous, Pressure> {
+//!     let per = k.parameter(per);
+//!     let reference = k.state(set_point);
+//!     let ratio = k.divide(reference, per);
+//!     k.as_dimension(ratio)
+//! }
+//! ```
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn gain<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>, off: Expr<'b, 'k, Nervous, Deviation<Pressure>>,
+//!     gain: Expr<'b, 'k, Nervous, Quotient<Rate<Water>, Deviation<Pressure>>>)
+//!     -> Expr<'b, 'k, Nervous, Rate<Water>> {
+//!     let product = k.multiply(gain, off);
+//!     k.as_dimension(product)
+//! }
+//! ```
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn leak<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>,
+//!     unit: &Parameter<'b, Nervous, Quotient<Pressure, Product<Reference<Pressure>, Dimensionless>>>,
+//!     set_point: &StateSlot<'b, Nervous, Reference<Pressure>>, one: Expr<'b, 'k, Nervous, Dimensionless>)
+//!     -> Expr<'b, 'k, Nervous, Pressure> {
+//!     let unit = k.parameter(unit);
+//!     let reference = k.state(set_point);
+//!     let wrapped = k.multiply(reference, one);
+//!     let product = k.multiply(unit, wrapped);
+//!     k.as_dimension(product)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn coefficient<'b, 'k>(k: &mut Kernel<'b, 'k, Nervous>,
+//!     unit: &Parameter<'b, Nervous, Quotient<Pressure, Length>>,
+//!     length: Expr<'b, 'k, Nervous, Length>) -> Expr<'b, 'k, Nervous, Pressure> {
+//!     let unit = k.parameter(unit);
+//!     let product = k.multiply(unit, length);
+//!     k.as_dimension(product)
+//! }
+//! ```
 //! Only the circulation reads a nerve across sites with one and without, so only its laws may accept no nerve. A renal
 //! arm that read a bare bed would do nothing and pass every test.
 //! ```compile_fail,E0599
@@ -581,6 +638,17 @@
 //!     let ratio = k.divide(heat, capacity);
 //!     k.as_dimension(ratio)
 //! }
+//! ```
+//! A heat over a coefficient in another quantity per temperature is no temperature.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn cancels<T: SameDimension<Temperature>>() {}
+//! cancels::<Quotient<Energy, Quotient<Pressure, Temperature>>>();
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn cancels<T: SameDimension<Temperature>>() {}
+//! cancels::<Quotient<Energy, Quotient<Energy, Temperature>>>();
 //! ```
 //! A membrane's reflection is a share, so it is dimensionless.
 //! ```compile_fail,E0308

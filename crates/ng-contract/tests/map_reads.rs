@@ -690,6 +690,30 @@ fn a_gut_edge_into_a_tissue_site_is_refused() -> Result<(), AdmissionError> {
     Ok(())
 }
 
+#[test]
+fn an_airway_edge_into_a_vessel_segment_is_refused() -> Result<(), AdmissionError> {
+    assert!(joined(Network::Airway, |sites| (sites.airway, sites.bed))?.is_ok());
+    assert_eq!(
+        joined(Network::Airway, |sites| (sites.airway, sites.vessel))?.err(),
+        Some(AdmissionError::Anatomy(AnatomyDefect::WrongNetwork {
+            site: "airway"
+        }))
+    );
+    Ok(())
+}
+
+#[test]
+fn a_gut_edge_out_of_a_bed_is_refused() -> Result<(), AdmissionError> {
+    assert!(joined(Network::Gut, |sites| (sites.vessel, sites.bed))?.is_ok());
+    assert_eq!(
+        joined(Network::Gut, |sites| (sites.bed, sites.vessel))?.err(),
+        Some(AdmissionError::Anatomy(AnatomyDefect::WrongNetwork {
+            site: "bed"
+        }))
+    );
+    Ok(())
+}
+
 /// A tissue has no lumen, so a route from one would lose its flow with nothing said.
 #[test]
 fn a_urinary_edge_out_of_a_site_with_no_lumen_is_refused() -> Result<(), AdmissionError> {
