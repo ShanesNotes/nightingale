@@ -1,6 +1,6 @@
 # 32: The slice's outflow valves shut and open again inside one ejection
 
-Spec: `crates/ng-cardiovascular/src/lib.rs` (`valves`), and the valve law of [research 02](../../research/issues/02-law-forms.md)
+Spec: `crates/ng-cardiovascular/src/valves.rs` (`valves`), and the valve law of [research 02](../../research/issues/02-law-forms.md)
 
 Type: research
 

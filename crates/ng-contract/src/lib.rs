@@ -1098,6 +1098,19 @@
 //!     packet.synthetic(key, Binding::Body, value, "synthetic")
 //! }
 //! ```
+//! A reviewed packet always holds a day, so no clinical run takes its day from plain events.
+//! ```compile_fail,E0599
+//! use ng_contract::*;
+//! fn dayless() -> ParameterPacket<Reviewed> {
+//!     ParameterPacket::<Reviewed>::new()
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn holding(day: Day) -> ParameterPacket<Reviewed> {
+//!     ParameterPacket::<Reviewed>::with_day(day)
+//! }
+//! ```
 //! An anchor states its method and window (rule 17).
 //! ```compile_fail,E0061
 //! use ng_contract::*;
@@ -1328,6 +1341,18 @@
 //!     Ok(head.attempt(body, identity, base, Attempt::First { span_ns }, solve, |_| Ok(()))?.0)
 //! }
 //! ```
+//! A void opens or shuts the bladder's outlet and carries no amount, because the volume voided is a produced
+//! quantity.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn void(ends: SimTime) -> Result<BoundaryInput, AdmissionError> {
+//!     Ok(BoundaryInput::Void(Delivered::<Water> { boundary: "bladder", amount: Measure::new(0.3)?, ends }))
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn void() -> BoundaryInput { BoundaryInput::Void(Gate::Open) }
+//! ```
 
 extern crate alloc;
 
@@ -1371,8 +1396,8 @@ pub use admission::*;
 pub use anatomy::*;
 pub use body::*;
 pub use boundary::{
-    AppliedInputs, Attempt, BoundaryEvent, BoundaryInput, BoundaryPort, Delivered, InputId, Legs,
-    PendingInputs, Posture, WaterDelivery,
+    AppliedInputs, Attempt, BoundaryEvent, BoundaryInput, BoundaryPort, Clock, Day, Delivered, Eaten, Gate,
+    InputId, Lasting, Legs, Meal, PendingInputs, Posture, Room, Sleep, WaterDelivery,
 };
 pub use compensated::*;
 pub use conservation::*;

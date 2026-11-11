@@ -1205,6 +1205,210 @@ new = '''stage(whole, part(second), None, second, 1),'''
 test = "-p ng-contract --lib scheme::tests::the_halved_set_is_the_doubled_sets_two_halves"
 
 [[mutant]]
+name = "clock-past-a-day"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''BoundaryInput::Clock(Clock { since_midnight_ns }) if since_midnight_ns >= DAY_NS => {'''
+new = '''BoundaryInput::Clock(Clock { since_midnight_ns }) if false && since_midnight_ns >= DAY_NS => {'''
+test = "-p ng-contract --lib boundary::tests::a_clock_of_a_day_or_more_and_a_room_out_of_range_are_refused"
+
+[[mutant]]
+name = "clock-read-past-a-day"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''reading if reading >= DAY_NS => return Err(Malformed),'''
+new = '''reading if false && reading >= DAY_NS => return Err(Malformed),'''
+test = "-p ng-contract --test image a_lasting_value_no_payload_can_carry_is_malformed"
+
+[[mutant]]
+name = "room-humidity-unchecked"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''        && fraction(humidity)'''
+new = '''        && (fraction(humidity) || humidity > 0.0)'''
+test = "-p ng-contract --lib boundary::tests::a_clock_of_a_day_or_more_and_a_room_out_of_range_are_refused"
+
+[[mutant]]
+name = "gate-reads-any-value"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''.find(|gate| gate.value().to_bits() == value.to_bits())'''
+new = '''.find(|gate| gate.value() <= value.abs().ceil())'''
+test = "-p ng-contract --test image a_lasting_value_no_payload_can_carry_is_malformed"
+
+[[mutant]]
+name = "sleep-reads-any-value"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''.find(|sleep| sleep.value().to_bits() == value.to_bits())'''
+new = '''.find(|sleep| sleep.value() >= value.floor())'''
+test = "-p ng-contract --test image a_lasting_value_no_payload_can_carry_is_malformed"
+
+[[mutant]]
+name = "step-crosses-a-minute"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''                .chain(next_turn)'''
+new = '''                .chain(next_turn.filter(|_| false))'''
+test = "-p ng-contract --test day_inputs a_step_never_crosses_a_clock_edge_in_a_body_that_reads_the_clock"
+
+[[mutant]]
+name = "minute-off-the-grid-admitted"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''} else if reads_clock && turns_off(delivery) {'''
+new = '''} else if false && reads_clock && turns_off(delivery) {'''
+test = "-p ng-contract --lib boundary::tests::a_clock_whose_minute_turns_between_two_points_is_off_the_grid_only_in_a_body_that_reads_it"
+
+[[mutant]]
+name = "unscaled-input-compiles"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if reads.contains(&false) && !reads.contains(&true) {'''
+new = '''if false && reads.contains(&false) && !reads.contains(&true) {'''
+test = "-p ng-contract --test day_inputs compile_refuses_a_law_that_sets_its_row_to_an_input_and_takes_one_that_scales_a_parameter_by_it"
+
+[[mutant]]
+name = "unstated-input-admitted"
+path = "crates/ng-contract/src/admission.rs"
+old = '''.find(|read| !frames[0].states(**read))'''
+new = '''.find(|read| false && !frames[0].states(**read))'''
+test = "-p ng-contract --test day_inputs admission_refuses_a_body_that_reads_a_lasting_input_the_day_never_states"
+
+[[mutant]]
+name = "voiding-reads-sleep"
+path = "crates/ng-contract/src/law.rs"
+old = '''
+    pub fn voiding(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.lasting(Lasting::Void)
+'''
+new = '''
+    pub fn voiding(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.lasting(Lasting::Sleep)
+'''
+test = "-p ng-contract --test day_inputs each_lasting_input_reaches_the_law_that_reads_it"
+
+[[mutant]]
+name = "meal-parts-land-one-at-a-time"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''
+                .map_err(|error| arrival.named(error))?;
+'''
+new = '''
+                .map_err(|error| arrival.named(error))?;
+            self.timeline.push(*part);
+'''
+test = "-p ng-contract --test meal a_late_meal_lands_whole_or_not_at_all_and_once"
+
+[[mutant]]
+name = "meal-part-id-ignores-the-meal"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''    meal.seal(&mut out);'''
+new = '''    let _ = meal;'''
+test = "-p ng-contract --test meal a_meal_sent_twice_lands_once_and_two_meals_at_one_instant_both_land"
+
+[[mutant]]
+name = "glucose-written-as-water"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''[0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12]'''
+new = '''[0, 1, 2, 3, 0, 6, 7, 8, 9, 10, 11, 12]'''
+test = "-p ng-contract --test meal every_meal_species_reads_back_under_its_own_tag"
+
+[[mutant]]
+name = "meal-negative-part-skipped"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''if amounts.iter().any(|amount| *amount < 0.0) {'''
+new = '''if false && amounts.iter().any(|amount| *amount < 0.0) {'''
+test = "-p ng-contract --test meal a_meal_any_part_of_which_would_be_refused_is_refused_whole"
+
+[[mutant]]
+name = "day-merge-drops-the-last-event"
+path = "crates/ng-contract/src/boundary/day.rs"
+old = '''
+        arrivals.extend(restamped);
+'''
+new = '''
+        let _ = arrivals.pop();
+        arrivals.extend(restamped);
+'''
+test = "-p ng-validate --lib day::tests::a_packet_holding_the_reference_day_admits_the_timeline_the_arenas_port_does"
+
+[[mutant]]
+name = "packet-hash-leaves-the-day-out"
+path = "crates/ng-contract/src/packet.rs"
+old = '''
+        if let Some(day) = day {
+            day.seal(&mut out);
+        }
+'''
+new = '''
+        let _ = day;
+'''
+test = "-p ng-contract --lib packet::tests::the_hash_covers_the_day_and_one_amount_moves_it"
+
+[[mutant]]
+name = "restamped-clock-unmoved"
+path = "crates/ng-contract/src/boundary/day.rs"
+old = '''Kind::Clock(reading) => Kind::Clock(time_of_day(self.at, reading, moment)),'''
+new = '''Kind::Clock(reading) => Kind::Clock(reading),'''
+test = "-p ng-contract --test day_inputs a_lasting_input_the_day_stated_before_the_anchor_moment_reads_at_it_with_the_clock_moved_on"
+
+[[mutant]]
+name = "day-seals-a-meals-parts"
+path = "crates/ng-contract/src/boundary/day.rs"
+old = '''
+                    out.number(MEAL);
+'''
+new = '''
+                    out.number(MEAL);
+                    if let Ok(arrival) = item.arrival() {
+                        arrival.parts.seal(out);
+                    }
+'''
+test = "-p ng-contract --lib boundary::day::tests::a_meal_seals_as_one_item_and_no_part_enters_the_day"
+
+[[mutant]]
+name = "day-delivery-across-admission-dropped"
+path = "crates/ng-contract/src/boundary/day.rs"
+old = '''} else if arrival.parts.iter().any(|part| part.ends > moment) {'''
+new = '''} else if false && arrival.parts.iter().any(|part| part.ends > moment) {'''
+test = "-p ng-contract --test meal a_day_delivery_across_the_anchor_moment_is_refused_and_one_that_ended_is_dropped"
+
+[[mutant]]
+name = "bind-takes-the-day-unchecked"
+path = "crates/ng-contract/src/packet.rs"
+old = '''owed.day = packet.day.map(|day| day.checked(self)).transpose()?;'''
+new = '''owed.day = packet.day;'''
+test = "-p ng-contract --test day_inputs bind_refuses_a_day_event_the_body_would_refuse_on_its_port"
+
+[[mutant]]
+name = "restamp-over-a-lasting-input-at-the-moment"
+path = "crates/ng-contract/src/boundary/day.rs"
+old = '''.filter(|latest| !stands(latest))'''
+new = '''.filter(|latest| true || !stands(latest))'''
+test = "-p ng-contract --lib boundary::day::tests::a_lasting_input_at_the_moment_stands_over_the_one_before_it_whatever_their_ids"
+
+[[mutant]]
+name = "one-id-drops-the-events-own-id"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''core::iter::once(id).chain(parts).collect()'''
+new = '''parts.collect()'''
+test = "-p ng-contract --test meal one_id_names_one_event_so_a_meal_and_a_drink_under_it_conflict_in_either_order"
+
+[[mutant]]
+name = "one-id-a-single-takes-only-its-own-id"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''part_ids: ids_of(delivery.id),'''
+new = '''part_ids: vec![delivery.id],'''
+test = "-p ng-contract --test meal one_id_names_one_event_so_a_meal_and_a_drink_under_it_conflict_in_either_order"
+
+[[mutant]]
+name = "duplicate-day-taken"
+path = "crates/ng-contract/src/packet.rs"
+old = '''
+        if self.day.is_some() {
+            return Err(AdmissionError::DuplicateDay);
+        }
+        self.day = Some(day);
+'''
+new = '''
+        self.day = Some(day);
+'''
+test = "-p ng-contract --lib packet::tests::a_packet_takes_one_day"
+
+[[mutant]]
 name = "second-holder-wired-and-held"
 path = "crates/ng-contract/src/catalog.rs"
 old = '''let (wired, held) = (self.carries.wired(), self.carries.held());'''
@@ -1294,3 +1498,57 @@ path = "crates/ng-contract/src/catalog.rs"
 old = '''fatigue: Dimensionless => Musculoskeletal "a resting day has no fatigue law"'''
 new = '''fatigue: Dimensionless => Musculoskeletal ""'''
 test = "-p ng-contract --test census every_arrow_of_the_catalog_keeps_the_census_rules"
+
+[[mutant]]
+name = "v-holder-moved-to-the-other-end-111"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''intracranial_pressure: Pressure => Nervous'''
+new = '''intracranial_pressure: Pressure => Fluids'''
+test = "-p ng-contract --test census every_arrow_of_the_catalog_keeps_the_census_rules"
+
+[[mutant]]
+name = "v-holder-moved-to-the-other-end-106"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''permeability: PerSite<CapillaryBed, Dimensionless> => Immune'''
+new = '''permeability: PerSite<CapillaryBed, Dimensionless> => Fluids'''
+test = "-p ng-contract --test census every_arrow_of_the_catalog_keeps_the_census_rules"
+
+[[mutant]]
+name = "v-wired-ticket-moved-inside-the-range"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''wired (BloodViscosity { viscosity: Viscosity => 8 })'''
+new = '''wired (BloodViscosity { viscosity: Viscosity => 21 })'''
+test = "-p ng-contract --test census every_arrow_of_the_catalog_keeps_the_census_rules"
+
+[[mutant]]
+name = "energy-drift-falls-back-to-the-common-limit"
+path = "crates/ng-validate/src/slice.rs"
+old = '''Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_ENERGY_DRIFT),'''
+new = '''Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_DRIFT),'''
+test = "-p ng-validate --test arena_certificate energy_drifts_up_to_2e5_over_the_arenas_day_and_no_further"
+
+# This row changes the species and element arms together, and the water test sees only the species arm: the slice
+# has no reaction, so no element is a quantity of its own there, and a change to the element arm alone would survive.
+# The element arm gets its own row with the first body that has a reaction.
+[[mutant]]
+name = "every-quantity-takes-energys-drift-limit"
+path = "crates/ng-validate/src/slice.rs"
+old = '''
+        Book::Of(species) => species.visit(Limits(quantity, SYNTHETIC_DRIFT)),
+        Book::Element(_) => QuantityPolicy::element(
+            quantity,
+            Measure::new(0.0)?,
+            Measure::new(CLOSURE_RELATIVE)?,
+            Measure::new(SYNTHETIC_DRIFT)?,
+        ),
+'''
+new = '''
+        Book::Of(species) => species.visit(Limits(quantity, SYNTHETIC_ENERGY_DRIFT)),
+        Book::Element(_) => QuantityPolicy::element(
+            quantity,
+            Measure::new(0.0)?,
+            Measure::new(CLOSURE_RELATIVE)?,
+            Measure::new(SYNTHETIC_ENERGY_DRIFT)?,
+        ),
+'''
+test = "-p ng-validate --test arena_certificate water_drifts_up_to_1e4_as_every_quantity_but_energy_does"

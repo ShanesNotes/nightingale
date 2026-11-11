@@ -4,10 +4,10 @@ use crate::quantity::dimension;
 use crate::scope::ENCLOSURE_PRESSURE;
 use crate::{
     Admissible, AdmissibleSet, AdmissionError, Airway, Alimentary, Basis, Blood, Boundary, CapillaryBed,
-    Conductance, Deviation, Dimension, Dimensionless, Landmark, Length, Metabolism, Network, NonMaterial,
-    Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reactant, Reference,
-    SameDimension, Sensed, SiteSet, Sites, Space, Species, Substance, Time, Urinary, ValidityRange, Volume,
-    Water,
+    Conductance, Deviation, Dimension, Dimensionless, Landmark, Lasting, Length, Metabolism, Network,
+    NonMaterial, Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reactant,
+    Reference, SameDimension, Sensed, SiteSet, Sites, Space, Species, Substance, Temperature, Time, Urinary,
+    ValidityRange, Volume, Water,
 };
 use core::cell::Cell;
 use core::marker::PhantomData;
@@ -536,6 +536,10 @@ impl Seal for Source {
                 out.text(reaction);
                 out.number(species as u64);
             }
+            Source::Lasting(input) => {
+                out.number(8);
+                input.seal(out);
+            }
         }
     }
 }
@@ -715,6 +719,45 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     }
     pub fn read<U: Dimension>(&mut self, port: &ReadPort<'b, O, U>) -> Expr<'b, 'k, O, U> {
         self.read_at(port.source, Where::Here)
+    }
+    fn lasting<U: Dimension>(&mut self, input: Lasting) -> Expr<'b, 'k, O, U> {
+        self.read_at(Source::Lasting(input), Where::Here)
+    }
+    pub fn clock(&mut self) -> (Expr<'b, 'k, O, Dimensionless>, Expr<'b, 'k, O, Dimensionless>) {
+        (
+            self.lasting(Lasting::ClockCosine),
+            self.lasting(Lasting::ClockSine),
+        )
+    }
+    pub fn asleep(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.lasting(Lasting::Sleep)
+    }
+    pub fn voiding(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.lasting(Lasting::Void)
+    }
+    pub fn room_air(&mut self) -> Expr<'b, 'k, O, Temperature> {
+        self.lasting(Lasting::AirTemperature)
+    }
+    pub fn room_radiant(&mut self) -> Expr<'b, 'k, O, Temperature> {
+        self.lasting(Lasting::RadiantTemperature)
+    }
+    pub fn room_humidity(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.lasting(Lasting::Humidity)
+    }
+    pub fn room_air_speed(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.lasting(Lasting::AirSpeed)
+    }
+    pub fn room_pressure(&mut self) -> Expr<'b, 'k, O, Pressure> {
+        self.lasting(Lasting::Pressure)
+    }
+    pub fn inspired_oxygen(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.lasting(Lasting::InspiredOxygen)
+    }
+    pub fn inspired_carbon_dioxide(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.lasting(Lasting::InspiredCarbonDioxide)
+    }
+    pub fn clothing(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.lasting(Lasting::Clothing)
     }
     /// The entry at the junction that supplies this site, or the site this edge runs into. Compile refuses a site the
     /// map says no nerve reaches, a site it says nothing of, a junction with no such entry and a law of the whole body,
@@ -980,6 +1023,7 @@ pub(crate) enum Source {
     Flow(Family),
     Extravascular,
     Reacting(&'static str, Species),
+    Lasting(Lasting),
 }
 impl<'b, O, U> ReadPort<'b, O, U> {
     fn of(source: Source) -> Self {
