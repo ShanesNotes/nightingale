@@ -166,6 +166,17 @@ enum Across {
     Unranged,
 }
 
+enum Judging {
+    By(usize),
+    NoRangeOfThisLength,
+    Blocked { change_into: usize },
+}
+impl Judging {
+    fn of(range: Option<usize>) -> Self {
+        range.map_or(Self::NoRangeOfThisLength, Self::By)
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Before {
     sum: Compensated,
@@ -217,23 +228,23 @@ impl Slider {
             covers: first.covers,
         })
     }
-    fn judging(&self, first: usize, covers: u64, last: usize) -> Result<Option<usize>, usize> {
+    fn judging(&self, first: usize, covers: u64, last: usize) -> Judging {
         let into_first = (first > 0).then(|| self.across[first]);
         let shift = into_first.and_then(|across| match across {
             Across::Own { range, shift_ends_ns } if covers < shift_ends_ns => Some(range),
             Across::Own { .. } | Across::EveryActivity | Across::Unranged => None,
         });
         let mut needing_own = (first + 1..=last).filter(|&span| self.across[span] != Across::EveryActivity);
-        let Some(change) = needing_own.next() else {
-            return Ok(match shift {
+        let Some(change_into) = needing_own.next() else {
+            return Judging::of(match shift {
                 Some(range) => range,
                 None if first == last => self.within[last],
                 None => self.every,
             });
         };
-        match (shift, needing_own.next(), self.across[change]) {
-            (None, None, Across::Own { range, .. }) => Ok(range),
-            _ => Err(change),
+        match (shift, needing_own.next(), self.across[change_into]) {
+            (None, None, Across::Own { range, .. }) => Judging::of(range),
+            _ => Judging::Blocked { change_into },
         }
     }
 }
@@ -460,13 +471,13 @@ impl RangeFold {
                 continue;
             };
             match slider.judging(window.first, window.covers, span) {
-                Ok(Some(range)) => {
+                Judging::By(range) => {
                     let mean = mean(window.sum, window.absent, slider.count);
                     judge(&limits[range], &mut results[range], mean, at, slider.length_ns);
                 }
-                Ok(None) => {}
-                Err(change) => {
-                    let (from, to) = (spans[change - 1], spans[change]);
+                Judging::NoRangeOfThisLength => {}
+                Judging::Blocked { change_into } => {
+                    let (from, to) = (spans[change_into - 1], spans[change_into]);
                     note(
                         gaps,
                         RangeGap::NoChangeRange {

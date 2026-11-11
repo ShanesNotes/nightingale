@@ -922,8 +922,8 @@ test = "-p ng-validate --lib healthy::tests::a_reading_that_leaves_its_range_bet
 [[mutant]]
 name = "healthy-range-change-takes-an-activitys-range"
 path = "crates/ng-validate/src/healthy/range.rs"
-old = '''(None, None, Across::Own { range, .. }) => Ok(range),'''
-new = '''(None, None, Across::Own { .. }) => Ok(self.within[last]),'''
+old = '''(None, None, Across::Own { range, .. }) => Judging::of(range),'''
+new = '''(None, None, Across::Own { .. }) => Judging::of(self.within[last]),'''
 test = "-p ng-validate --lib healthy::tests::a_window_across_a_change_takes_the_changes_own_range"
 
 [[mutant]]
@@ -1104,6 +1104,6 @@ test = "-p ng-validate --lib healthy::tests::a_window_of_a_length_the_change_has
 [[mutant]]
 name = "healthy-range-window-in-two-changes-judged"
 path = "crates/ng-validate/src/healthy/range.rs"
-old = '''(None, None, Across::Own { range, .. }) => Ok(range),'''
-new = '''(_, None, Across::Own { range, .. }) => Ok(range),'''
+old = '''(None, None, Across::Own { range, .. }) => Judging::of(range),'''
+new = '''(_, None, Across::Own { range, .. }) => Judging::of(range),'''
 test = "-p ng-validate --lib healthy::tests::a_window_that_belongs_to_two_changes_blocks_at_the_first_after_its_first_value"
