@@ -149,6 +149,13 @@ impl BoundaryPort {
         deliveries.sort_by_key(|delivery| (delivery.at, delivery.id));
         Ok(Self { deliveries })
     }
+    /// Every input of the timeline, payload and time, in order.
+    pub fn digest(&self) -> Digest {
+        let Self { deliveries } = self;
+        let mut out = Canonical::new("ng-contract boundary port 1");
+        deliveries.seal(&mut out);
+        out.digest()
+    }
     /// The first delivery that starts or ends inside the window between two points. A point's frame holds one
     /// interval, so such an edge would read a drive the run never gives.
     pub(crate) fn off_grid(&self, start: SimTime, cycle: Cycle) -> Option<InputId> {

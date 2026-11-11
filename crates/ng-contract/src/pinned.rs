@@ -236,8 +236,16 @@ mod tests {
     fn a_turn_is_within_two_ulps_of_the_correctly_rounded_value() {
         for (k, cos, sin) in TURN_VECTORS {
             let (got_cos, got_sin) = turn(k, MINUTES);
-            assert!(ulps(got_cos, f64::from_bits(cos)) <= 2, "cos {k}: {:#x}", got_cos.to_bits());
-            assert!(ulps(got_sin, f64::from_bits(sin)) <= 2, "sin {k}: {:#x}", got_sin.to_bits());
+            assert!(
+                ulps(got_cos, f64::from_bits(cos)) <= 2,
+                "cos {k}: {:#x}",
+                got_cos.to_bits()
+            );
+            assert!(
+                ulps(got_sin, f64::from_bits(sin)) <= 2,
+                "sin {k}: {:#x}",
+                got_sin.to_bits()
+            );
         }
     }
 
@@ -246,7 +254,11 @@ mod tests {
         let bits = |(cos, sin): (f64, f64)| (cos.to_bits(), sin.to_bits());
         let quarters = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
         for (quarter, want) in (0..).zip(quarters) {
-            assert_eq!(bits(turn(360 * quarter, MINUTES)), bits(want), "quarter {quarter}");
+            assert_eq!(
+                bits(turn(360 * quarter, MINUTES)),
+                bits(want),
+                "quarter {quarter}"
+            );
         }
         for k in [0, 1, 179, 180, 181, 719, 1439] {
             assert_eq!(bits(turn(k + 1440, MINUTES)), bits(turn(k, MINUTES)), "{k}");
