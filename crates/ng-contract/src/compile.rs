@@ -2511,8 +2511,6 @@ mod tests {
         ))
     }
 
-    /// The airway runs into the lung bed and the gut into the gut bed. The skin heat site holds the skin bed, and the
-    /// body every other site.
     fn whole_body() -> Result<Schema, AdmissionError> {
         let mut map = AnatomyBuilder::new();
         let body = map.site::<TissueSite>("body", at()?);
@@ -2557,7 +2555,6 @@ mod tests {
 
     type Reached = (Stands, (&'static str, Space), (&'static str, Space));
 
-    /// Where each reach stands and the pools it moves `species` from and to.
     fn reached(family: Family, species: Species) -> Result<Vec<Reached>, AdmissionError> {
         let schema = whole_body()?;
         let reaches = reaches_of(family, &schema).into_iter().map(|reach| {

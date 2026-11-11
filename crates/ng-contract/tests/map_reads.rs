@@ -666,7 +666,6 @@ fn joined(
     Ok(sites.map.finish())
 }
 
-/// The airway's gas sits in tissue sites, so an airway edge runs out of one.
 #[test]
 fn an_airway_edge_out_of_a_vessel_segment_is_refused() -> Result<(), AdmissionError> {
     assert!(joined(Network::Airway, |sites| (sites.airway, sites.bed))?.is_ok());
@@ -679,7 +678,6 @@ fn an_airway_edge_out_of_a_vessel_segment_is_refused() -> Result<(), AdmissionEr
     Ok(())
 }
 
-/// A gut edge runs from a lumen to a lumen or to the bed that absorbs it, so one into a tissue site loses its load.
 #[test]
 fn a_gut_edge_into_a_tissue_site_is_refused() -> Result<(), AdmissionError> {
     assert!(joined(Network::Gut, |sites| (sites.vessel, sites.bed))?.is_ok());

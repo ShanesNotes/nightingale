@@ -142,7 +142,6 @@ fn a_bed_holds_its_own_heat() {
     );
 }
 
-/// A bed's store and another tissue site's sort before the body's, and the body is the containment root.
 fn heat_ahead_of_the_body() -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at_origin()?).id();

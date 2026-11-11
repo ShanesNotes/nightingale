@@ -548,7 +548,6 @@ enum Declared {
     Unreflected,
 }
 
-/// Albumin rides the Starling flow, so the wall's reflection reaches its carried columns.
 fn albumin_wall(declared: Declared) -> Result<ModelHash, AdmissionError> {
     let mut schema = beds()?.schema;
     schema.partial_volume(Measure::new(1.0)?)?;
@@ -605,8 +604,6 @@ fn albumin_wall(declared: Declared) -> Result<ModelHash, AdmissionError> {
     Ok(compiled.model_hash())
 }
 
-/// A membrane's reflection is the record `reflect` writes, so the two cannot drift. A plain parameter under the same key
-/// writes none, and its model differs.
 #[test]
 fn a_membrane_and_a_reflected_route_lower_to_one_model() -> Result<(), AdmissionError> {
     let reflected = albumin_wall(Declared::Reflected)?;

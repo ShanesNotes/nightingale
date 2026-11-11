@@ -926,7 +926,6 @@ impl Anatomy {
             site.seal(&mut bytes);
             height.seal(&mut bytes);
         }
-        // Only a map that states a tissue writes these, after a tag no count equals, so no other map's bytes move.
         if !tissues.is_empty() {
             bytes.number(u64::MAX);
             bytes.length(tissues.len());
@@ -1014,7 +1013,6 @@ impl Anatomy {
             .collect()
     }
 
-    /// The containment tree's one root: the site that stands for the whole body.
     pub(crate) fn root(&self) -> Option<SiteId> {
         self.preorder.first().copied()
     }

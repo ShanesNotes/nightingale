@@ -1,6 +1,3 @@
-//! The whole body's places and routes on a synthetic map: which sites each set holds, and where each route family
-//! a port requests stands.
-
 use ng_contract::*;
 
 fn at() -> Result<Position, AdmissionError> {
@@ -22,7 +19,6 @@ fn wave() -> Result<RateClass, AdmissionError> {
 
 const BEDS: [&str; 5] = ["bare bed", "gut bed", "liver bed", "lung bed", "skin bed"];
 
-/// The skin bed sits in the skin heat site, every other site in the body. The bare bed serves no tissue.
 fn whole_body() -> Result<Anatomy, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let body = map.site::<TissueSite>("body", at()?);
@@ -99,7 +95,6 @@ fn each_site_set_holds_the_sites_the_map_places_on_it() -> Result<(), AdmissionE
     Ok(())
 }
 
-/// One airway site, whose gas holds `Q` and takes it in from the room.
 fn breathed<Q: Substance>() -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let body = map.site::<TissueSite>("body", at()?);
@@ -144,7 +139,6 @@ fn watery_spaces_left_out(schema: &mut Schema) {
 
 type Placed = (Context, Option<&'static str>, Vec<(&'static str, Space, i64)>);
 
-/// Each column a law places under `local`: where it stands, its receipt, and the pools it takes from and gives to.
 fn columns(compiled: &CompiledBody, local: &str) -> Vec<Placed> {
     (compiled.columns().iter())
         .filter(|column| column.origin().local == local)
@@ -218,7 +212,6 @@ fn the_pumps_work_turns_chemical_energy_into_each_beds_heat() -> Result<(), Admi
     Ok(())
 }
 
-/// Only the skin bed sits in a store other than the core.
 #[test]
 fn blood_carries_heat_from_the_core_store_to_the_store_a_bed_sits_in_at_that_bed()
 -> Result<(), AdmissionError> {
@@ -251,7 +244,6 @@ fn blood_carries_heat_from_the_core_store_to_the_store_a_bed_sits_in_at_that_bed
     Ok(())
 }
 
-/// The tubule also carries the bed's blood, so the map holds two sites and every pool moves.
 #[test]
 fn the_tubules_cells_secrete_into_the_lumen_against_each_reclaim_edge() -> Result<(), AdmissionError> {
     let mut map = AnatomyBuilder::new();
@@ -292,7 +284,6 @@ fn the_tubules_cells_secrete_into_the_lumen_against_each_reclaim_edge() -> Resul
     Ok(())
 }
 
-/// A crossing's name ignores its set, so one owner crosses one wall once for each species.
 #[test]
 fn one_owner_crossing_one_wall_for_one_species_at_two_sets_is_named_twice() -> Result<(), AdmissionError> {
     let compiled = assemble(Schema::new(whole_body()?)?, |mut body| {

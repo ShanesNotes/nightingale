@@ -225,8 +225,6 @@ same_dimension! {
     Quotient<Charge, Volume> => Concentration<Charge>;
     Quotient<Osmoles, Volume> => Concentration<Osmoles>;
 }
-// Generic, so a law that cancels a coefficient needs no row of its own; coherence refuses a concrete instance beside
-// them.
 impl<U: Dimension, V: Dimension> identities::Sealed<U> for Product<Quotient<U, V>, V> {}
 impl<U: Dimension, V: Dimension> SameDimension<U> for Product<Quotient<U, V>, V> {}
 impl<U: Dimension, V: Dimension> identities::Sealed<V> for Quotient<U, Quotient<U, V>> {}

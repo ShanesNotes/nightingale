@@ -603,7 +603,8 @@ impl<'b> FluidsPorts<'b> {
         laws.request(Family::Lymph);
         EdgeRoute::requested(Family::Lymph)
     }
-    /// `Q` across the cell membrane at every bed of `C`, interstitium to cells.
+    /// `Q` across the cell membrane at every bed of `C`, interstitium to cells. An owner crosses one wall with one
+    /// species once, whatever the set: a second set is refused as `NamedTwice`.
     pub fn cell_membrane<C: SiteSet, Q: Substance>(
         &self,
         laws: &mut FragmentBuilder<'b, Fluids>,
