@@ -930,14 +930,14 @@ test = "-p ng-validate --lib healthy::tests::a_window_across_a_change_takes_the_
 name = "healthy-range-unranged-change-passes"
 path = "crates/ng-validate/src/healthy/range.rs"
 old = '''None => Across::Unranged,'''
-new = '''None => Across::Shared,'''
+new = '''None => Across::EveryActivity,'''
 test = "-p ng-validate --lib healthy::tests::a_change_between_activities_with_different_ranges_and_none_of_its_own_blocks_naming_the_change"
 
 [[mutant]]
 name = "healthy-range-shared-range-not-across-a-change"
 path = "crates/ng-validate/src/healthy/range.rs"
-old = '''None if !during(from) && !during(to) => Across::Shared,'''
-new = '''None if false => Across::Shared,'''
+old = '''None if !during(from) && !during(to) => Across::EveryActivity,'''
+new = '''None if false => Across::EveryActivity,'''
 test = "-p ng-validate --lib healthy::tests::a_change_between_activities_that_share_the_every_activity_range_is_judged_by_it"
 
 [[mutant]]
@@ -1083,8 +1083,8 @@ test = "-p ng-validate --lib healthy::tests::a_changes_range_judges_each_window_
 [[mutant]]
 name = "healthy-range-owned-period-drops-lasting"
 path = "crates/ng-validate/src/healthy/range.rs"
-old = '''until_ns: pair[1].start.nanoseconds().saturating_add(lasting),'''
-new = '''until_ns: pair[1].start.nanoseconds(),'''
+old = '''shift_ends_ns: pair[1].start.nanoseconds().saturating_add(lasting),'''
+new = '''shift_ends_ns: pair[1].start.nanoseconds(),'''
 test = "-p ng-validate --lib healthy::tests::a_changes_range_judges_each_window_in_the_time_its_shift_lasts"
 
 [[mutant]]
