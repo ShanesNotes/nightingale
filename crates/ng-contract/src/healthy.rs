@@ -344,6 +344,9 @@ mod tests {
         Averaging::Sliding(NonZeroU64::new(seconds * SECOND).expect("not zero"))
     }
 
+    /// One field changed, by name.
+    type Change<T> = (&'static str, fn(&mut T));
+
     /// A synthetic range's arguments, changed one at a time.
     #[derive(Clone, Copy)]
     struct Range {
@@ -519,7 +522,7 @@ mod tests {
         let first = digest(vec![range.range()], vec![variation.variation()]);
         let again = digest(vec![range.range()], vec![variation.variation()]);
         assert_eq!(again, first, "one set, one digest");
-        let ranges: [(&str, fn(&mut Range)); 11] = [
+        let ranges: [Change<Range>; 11] = [
             ("id", |range| range.id = "xx.b"),
             ("row", |range| range.row = reading("other")),
             ("method", |range| range.method = "another gauge"),
@@ -554,7 +557,7 @@ mod tests {
         let volume = HealthyRange::synthetic(id, row, method, scope, averaging, low, high, note);
         let changed = digest(vec![volume.expect("a range")], vec![variation.variation()]);
         assert_ne!(changed, first, "a range's dimension");
-        let variations: [(&str, fn(&mut Variation)); 5] = [
+        let variations: [Change<Variation>; 5] = [
             ("id", |variation| variation.id = "xx.w"),
             ("row", |variation| variation.row = reading("other")),
             ("method", |variation| variation.method = "another gauge"),
