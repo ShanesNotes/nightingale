@@ -757,6 +757,40 @@ new = '''Wall::Lining => &[Crossed::Cell],'''
 test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
 
 [[mutant]]
+name = "ingested-class-closed"
+path = "crates/ng-contract/src/scope/cargo.rs"
+old = '''Ingested: Substance = Triglyceride;'''
+new = '''Ingested: Substance = Triglyceride, Oxygen;'''
+test = "--doc -p ng-contract transit"
+
+[[mutant]]
+name = "absorbed-class-closed"
+path = "crates/ng-contract/src/scope/cargo.rs"
+old = '''Magnesium, Iron;
+    Ingested'''
+new = '''Magnesium, Iron, Oxygen;
+    Ingested'''
+test = "--doc -p ng-contract absorption"
+
+[[mutant]]
+name = "musculoskeletal-reacts-at-the-muscle-bed-alone"
+path = "crates/ng-contract/src/law.rs"
+old = '''impl ReactsAt<crate::Beds<crate::Muscle>> for crate::Musculoskeletal {}'''
+new = '''impl ReactsAt<crate::Beds<crate::Muscle>> for crate::Musculoskeletal {}
+impl grants::Sealed<crate::Beds<crate::Liver>> for crate::Musculoskeletal {}
+impl ReactsAt<crate::Beds<crate::Liver>> for crate::Musculoskeletal {}'''
+test = "--doc -p ng-contract ReactsAt"
+
+[[mutant]]
+name = "hepatic-reacts-at-the-liver-bed-alone"
+path = "crates/ng-contract/src/law.rs"
+old = '''impl ReactsAt<crate::Beds<crate::Liver>> for crate::Hepatic {}'''
+new = '''impl ReactsAt<crate::Beds<crate::Liver>> for crate::Hepatic {}
+impl grants::Sealed<crate::Beds<crate::Muscle>> for crate::Hepatic {}
+impl ReactsAt<crate::Beds<crate::Muscle>> for crate::Hepatic {}'''
+test = "--doc -p ng-contract ReactsAt"
+
+[[mutant]]
 name = "enclosure-owed-by-its-card"
 path = "crates/ng-contract/src/compile.rs"
 old = '''

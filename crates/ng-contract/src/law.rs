@@ -1282,6 +1282,13 @@ mod grants {
 ///     hp.reaction::<CapillaryBed, Glucose>("glycogen made", made)
 /// }
 /// ```
+/// ```compile_fail,E0277
+/// use ng_contract::*;
+/// fn ungranted<'b>(hp: &mut FragmentBuilder<'b, Hepatic>, made: Proportions<Glucose>)
+///     -> Reaction<'b, Hepatic, Beds<Muscle>, Glucose> {
+///     hp.reaction::<Beds<Muscle>, Glucose>("glycogen made", made)
+/// }
+/// ```
 /// ```
 /// use ng_contract::*;
 /// fn granted<'b>(hp: &mut FragmentBuilder<'b, Hepatic>, made: Proportions<Glucose>)
@@ -1294,6 +1301,13 @@ mod grants {
 /// fn ungranted<'b>(ms: &mut FragmentBuilder<'b, Musculoskeletal>, made: Proportions<Glucose>)
 ///     -> Reaction<'b, Musculoskeletal, CapillaryBed, Glucose> {
 ///     ms.reaction::<CapillaryBed, Glucose>("glycogen made", made)
+/// }
+/// ```
+/// ```compile_fail,E0277
+/// use ng_contract::*;
+/// fn ungranted<'b>(ms: &mut FragmentBuilder<'b, Musculoskeletal>, made: Proportions<Glucose>)
+///     -> Reaction<'b, Musculoskeletal, Beds<Liver>, Glucose> {
+///     ms.reaction::<Beds<Liver>, Glucose>("glycogen made", made)
 /// }
 /// ```
 /// ```
