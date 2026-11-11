@@ -16,6 +16,7 @@ OWNERS = "../../../crates/ng-contract/src/system.rs"
 MAPPED = {"live", "input", "sink", "relation"}
 SLICE_KINDS = {"live", "input", "sink"}
 SLICE_REASONED = {"relation", "outside", "unresolved"}
+BODY_TICKETS = range(6, 26)
 SLICE_COUNTS = {"rows": 38, "mapped": 27, "listed unmapped": 11, "incident mapped": 27, "incident unmapped": 1}
 BODY_COUNTS = {"rows": 38, "wire a field": 18, "relations": 5, "hold every field": 15, "wire and hold": 6,
                "wired fields": 21, "held fields": 29}
@@ -213,6 +214,13 @@ for r in rows:
     reasons = [r["slice_reason"], r["relation"], *(reason for *_, reason in r["held"])]
     if "" in reasons:
         failures.append(f"line {r['line']}: a reason is empty")
+    if any(holder not in (r["from"], r["to"]) for _, _, holder, _ in r["held"]):
+        failures.append(f"line {r['line']}: a holder is neither end")
+    names = [name for name, *_ in r["wired"] + r["held"]]
+    if len(set(names)) != len(names):
+        failures.append(f"line {r['line']}: a field has a second holder")
+    if any(ticket not in BODY_TICKETS for *_, ticket in r["wired"]):
+        failures.append(f"line {r['line']}: a wired field names no body ticket from 06 to 25")
 
 incident = [r for r in rows if r["from"] in SLICE or r["to"] in SLICE]
 slice_census = {
@@ -254,7 +262,7 @@ print("slice census: " + "; ".join(f"{k} = {v}" for k, v in slice_census.items()
 for kind in SLICE_LINES:
     print(f"  {kind:<10} {[r['line'] for r in rows if r['slice'] == kind]}")
 print("whole body census: " + "; ".join(f"{k} = {v}" for k, v in body_census.items()))
-print("parse, line, endpoints and label equality, order, uniqueness, reasons and both censuses:",
+print("parse, line, endpoints and label equality, order, uniqueness, reasons, holders, tickets and both censuses:",
       "PASS" if not failures else "FAIL")
 for failure in failures:
     print("  " + failure)
