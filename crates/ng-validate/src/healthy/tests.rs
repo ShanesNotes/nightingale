@@ -231,6 +231,31 @@ fn a_window_outside_its_range_fails_naming_the_reading_and_the_window() {
 }
 
 #[test]
+fn a_window_holding_a_value_that_was_not_present_fails_with_no_mean() {
+    let set = set(
+        vec![range("xx.range", Scope::Every, sliding(2 * SECOND), 0.0, 20.0)],
+        Vec::new(),
+    );
+    let mut stream = each_period(0, SECOND, &[10.0, 10.0, 10.0, 10.0]);
+    stream[1].value = None;
+    let report = ranged(
+        &[sampled(reading())],
+        SECOND,
+        &set,
+        &day(&[(0, "awake")]),
+        0,
+        &stream,
+    );
+    assert_eq!(report.verdict(), CheckVerdict::Fail);
+    assert_eq!(result(&report, "xx.range").judged(), 3);
+    assert_eq!(
+        failure(&report, "xx.range"),
+        (at(SECOND), 2 * SECOND, None),
+        "the window of the values at 0 s and 1 s, where a zero would leave a mean of 5 inside 0 to 20"
+    );
+}
+
+#[test]
 fn a_reading_that_leaves_its_range_between_two_tumbling_means_fails_a_sliding_window() {
     let values = [5.0, 5.0, 14.0, 14.0, 14.0, 14.0, 5.0, 5.0];
     let tumbling: Vec<f64> = values
@@ -611,6 +636,30 @@ fn a_time_mean_whole_period_holds_every_mean_closing_in_its_span() {
 }
 
 #[test]
+fn a_whole_period_holding_a_value_that_was_not_present_fails_with_no_mean() {
+    let day = day(&[(0, "awake"), (4 * SECOND, "asleep"), (8 * SECOND, "awake")]);
+    let values = [50.0, 50.0, 50.0, 50.0, 2.0, 2.0, 2.0, 2.0, 50.0, 50.0];
+    let mut stream = each_period(0, SECOND, &values);
+    stream[5].value = None;
+    let report = ranged(
+        &[sampled(reading())],
+        SECOND,
+        &night_and_day(),
+        &day,
+        0,
+        &stream,
+    );
+    assert_eq!(report.verdict(), CheckVerdict::Fail);
+    let night = result(&report, "xx.night");
+    assert_eq!((night.judged(), night.cut()), (1, 0));
+    assert_eq!(
+        failure(&report, "xx.night"),
+        (at(7 * SECOND), 4 * SECOND, None),
+        "the night from 4 s to 8 s, where a zero would leave a mean of 1.5 inside 0 to 10"
+    );
+}
+
+#[test]
 fn a_time_mean_takes_the_activity_of_the_period_it_covers() {
     let (a, b) = (Activity::new("a"), Activity::new("b"));
     let set = set(
@@ -810,6 +859,26 @@ fn a_morning_may_move_from_admission_by_1_96_root_2_within_subject_variations() 
         value(27.71).at_most(allowed) && allowed.at_most(value(27.72)),
         "{allowed:?}"
     );
+}
+
+#[test]
+fn a_morning_whose_window_holds_a_value_that_was_not_present_fails() {
+    let mut stream = hourly(48, |_| 10.0);
+    stream[24].value = None;
+    let set = set(Vec::new(), vec![variation(10.0)]);
+    let report = returned(&[sampled(reading())], &set, &[instant()], &stream);
+    let anchor = AnchorId::new("xx.anchor");
+    let expected = [
+        (anchor, 1, at(24 * HOUR), None, false),
+        (anchor, 2, at(48 * HOUR), Some(value(10.0)), true),
+    ];
+    assert_eq!(
+        returns_of(&report),
+        expected,
+        "a zero would sit 10 from admission's 10, inside the 27.7 a variation of 10 allows"
+    );
+    assert_eq!(report.gaps(), []);
+    assert_eq!(report.morning(morning(1)), CheckVerdict::Fail);
 }
 
 #[test]
@@ -1035,4 +1104,15 @@ fn a_day_that_starts_after_admission_is_refused() {
         RangeFold::new(&readings, SECOND, &set, &night, at(10 * SECOND)).is_ok(),
         "a day may start at admission"
     );
+}
+
+#[test]
+fn an_observation_not_collected_or_invalid_is_fed_as_an_absent_value_and_a_pending_one_waits() {
+    assert_eq!(
+        fed(ObservedValue::Present(value(10.0))),
+        Some(Some(value(10.0)))
+    );
+    assert_eq!(fed(ObservedValue::NotCollected), Some(None));
+    assert_eq!(fed(ObservedValue::InvalidSignal), Some(None));
+    assert_eq!(fed(ObservedValue::Pending), None);
 }

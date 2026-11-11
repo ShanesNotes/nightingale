@@ -204,6 +204,77 @@ fn the_checks_read_this_bodys_lens_from_admission() {
     assert_eq!(late.err(), Some(ReadingCheckError::AfterAdmission));
 }
 
+#[test]
+fn the_checks_refuse_a_bare_lens_of_another_body() {
+    let case = excursion();
+    let closed = TwoReservoirs::closed().expect("another body");
+    let elsewhere = closed.body().lens(Vec::new(), count(SECOND)).expect("a lens");
+    let bare = BareLens::new(closed.body(), &elsewhere).expect("that body's lens");
+    let core = ReferenceIntegrator::new(8 * SECOND);
+    let store = MemoryStore::default();
+    let session = closed.admit(&core, &store).expect("admitted");
+    let set = set(&case, EXCURSION_HIGH);
+    let anchors = case.packet().expect("a packet").anchors();
+    let refused = ReadingChecks::new(case.body(), &bare, &set, &day(), anchors, &session);
+    assert_eq!(
+        refused.err(),
+        Some(ReadingCheckError::OtherBody),
+        "the body whose rows the set is checked against must be the one the lens reads"
+    );
+}
+
+#[test]
+fn the_checks_refuse_a_set_entry_in_another_dimension_than_its_row() {
+    let case = excursion();
+    let core = ReferenceIntegrator::new(8 * SECOND);
+    let store = MemoryStore::default();
+    let bare = BareLens::new(case.body(), &lens(&case)).expect("this body's lens");
+    let session = case.admit(&core, &store).expect("admitted");
+    let averaging = Averaging::Sliding(count(4 * SECOND));
+    let (low, high) = (measure::<Pressure>(0.0), measure::<Pressure>(1e6));
+    let pressure = HealthyRange::synthetic(
+        "xx.pressure",
+        amount(&case),
+        METHOD,
+        Scope::Every,
+        averaging,
+        low,
+        high,
+        "synthetic",
+    );
+    let set = HealthyRangeSet::synthetic(vec![pressure.expect("a range")], Vec::new()).expect("a set");
+    let anchors = case.packet().expect("a packet").anchors();
+    let refused = ReadingChecks::new(case.body(), &bare, &set, &day(), anchors, &session);
+    let named = AdmissionError::RangeDimension { id: "xx.pressure" };
+    assert_eq!(
+        refused.err(),
+        Some(ReadingCheckError::Admission(named)),
+        "a pressure range on a water amount"
+    );
+}
+
+#[test]
+fn the_checks_refuse_an_admission_between_two_grid_instants() {
+    let case = TwoReservoirs::closed().expect("a body");
+    let lens = lens(&case);
+    let core = ReferenceIntegrator::new(8 * SECOND);
+    let store = MemoryStore::default();
+    let half = SimTime::from_ns(SECOND / 2);
+    let boundary = BoundaryPort::new(Vec::new()).expect("no event");
+    let packet = case.packet().expect("a packet");
+    let admitted = admit_at(case.body(), packet, boundary, &core, &lens, half, &store);
+    let bare = BareLens::new(case.body(), &lens).expect("this body's lens");
+    let set = set(&case, EXCURSION_HIGH);
+    let anchors = case.packet().expect("a packet").anchors();
+    let session = admitted.expect("admitted").session;
+    let refused = ReadingChecks::new(case.body(), &bare, &set, &day(), anchors, &session);
+    assert_eq!(
+        refused.err(),
+        Some(ReadingCheckError::AdmissionOffGrid { at: half }),
+        "the lens reads each second, and admission is half a second in"
+    );
+}
+
 const GAIN: ParameterKey = ParameterKey::new("xx.gain");
 const STORED: AnchorId = AnchorId::new("xx.stored");
 const GAUGED: AnchorId = AnchorId::new("xx.gauged");

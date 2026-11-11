@@ -1,7 +1,7 @@
 use core::num::NonZeroU64;
 use ng_contract::{
-    Activity, AdmissionError, AnchorId, Anchors, ChannelSpec, CompiledBody, Digest, HealthyRangeSet,
-    ObservationLens, ObservationSeed, PacketHash, PacketKind, RowKind, SimTime,
+    Activity, AdmissionError, AnchorId, Anchors, ChannelSpec, Compensated, CompiledBody, Digest,
+    HealthyRangeSet, ObservationLens, ObservationSeed, PacketHash, PacketKind, RowKind, SimTime,
 };
 use ng_observe::{Observation, ObservedValue, Observer};
 use ng_record::{ObservationRefusal, Session};
@@ -307,14 +307,22 @@ impl<'b> ReadingChecks<'b> {
     }
     fn take(&mut self, observed: &[Observation]) {
         for observation in observed {
-            let value = match observation.value() {
-                ObservedValue::Present(value) => Some(value),
-                ObservedValue::NotCollected | ObservedValue::InvalidSignal => None,
-                ObservedValue::Pending => continue,
+            let Some(value) = fed(observation.value()) else {
+                continue;
             };
             let (reading, at) = (observation.channel(), observation.collected());
             self.range.feed(reading, at, value);
             self.returns.feed(reading, at, value);
         }
+    }
+}
+
+/// What the folds take of one observation: its value, an absent value for one not present, never a zero, and
+/// nothing while it is pending.
+fn fed(value: ObservedValue) -> Option<Option<Compensated>> {
+    match value {
+        ObservedValue::Present(value) => Some(Some(value)),
+        ObservedValue::NotCollected | ObservedValue::InvalidSignal => Some(None),
+        ObservedValue::Pending => None,
     }
 }
