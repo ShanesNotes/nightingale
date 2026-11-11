@@ -48,6 +48,7 @@ fn solver(named: &str, interval_ms: u64) -> Box<dyn CoupledSolver> {
                 .with_scales(ErrorScales::uniform(scale(1.0), scale(1e-3)).expect("positive")),
         ),
         "ng-solver" => Box::new(ng_solver::Core::new(interval_ms * MS)),
+        "ng-solver-doubled" => Box::new(ng_solver::Core::doubled(interval_ms * MS)),
         other => panic!("no core named {other}"),
     }
 }
@@ -207,9 +208,11 @@ fn score(arguments: &[String]) {
             .with_floor(protocol.minimum_interval_ns)
     };
     let solver = |ms: u64| ng_solver::Core::new(ms * MS);
+    let doubled = |ms: u64| ng_solver::Core::doubled(ms * MS);
     let score = match named.as_str() {
         "reference" => arena.score(|| reference(interval_ms), || reference(second_ms), &clock, &log),
         "ng-solver" => arena.score(|| solver(interval_ms), || solver(second_ms), &clock, &log),
+        "ng-solver-doubled" => arena.score(|| doubled(interval_ms), || doubled(second_ms), &clock, &log),
         other => panic!("no core named {other}"),
     };
     let score = score.unwrap_or_else(|failure| panic!("{failure:?}"));

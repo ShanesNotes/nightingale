@@ -1,11 +1,11 @@
 use crate::body::RowKind;
 use crate::chance::Trigger;
 use crate::problem::{SolveWorkspace, StagePoint};
-use crate::scheme::Stage;
+use crate::scheme::{Estimate, Stage};
 use crate::{
     Candidate, Compensated, CompiledBody, CoupledProblem, DenseSegment, Digest, EngineFault, EngineFaultKind,
-    InputId, LawName, MethodHistory, ModeValue, NumericalRefusal, Ratio, RowId, SimTime, StepTicket,
-    TrialFailure, ValidityExcursion,
+    ErrorScales, InputId, LawName, MethodHistory, ModeValue, NumericalRefusal, Ratio, RowId, SimTime,
+    StageSet, StepTicket, TrialFailure, ValidityExcursion,
 };
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
@@ -122,6 +122,41 @@ struct WitnessStage {
     unknowns: Vec<f64>,
     derivative: Vec<f64>,
 }
+impl StageWitness {
+    /// The only arithmetic of an error estimate. `Difference` keeps the operations the doubled scheme always ran,
+    /// so its bits hold.
+    fn error(
+        &self,
+        estimate: Estimate,
+        start: &[f64],
+        scales: &ErrorScales,
+        sizes: &[f64],
+        body: &CompiledBody,
+    ) -> Worst {
+        let mut error = Worst::NONE;
+        match estimate {
+            Estimate::Difference { fine, coarse } => {
+                let (fine, coarse) = (&self.stages[fine].unknowns, &self.stages[coarse].unknowns);
+                for (at, row) in body.rows().iter().enumerate() {
+                    error.note(
+                        (fine[at] - coarse[at]).abs() / scales.at(fine[at], sizes[at]),
+                        row.id(),
+                    );
+                }
+            }
+            Estimate::SecondDifference { half, end } => {
+                let (half, end) = (&self.stages[half].unknowns, &self.stages[end].unknowns);
+                for (at, row) in body.rows().iter().enumerate() {
+                    error.note(
+                        (end[at] - 2.0 * half[at] + start[at]).abs() / scales.at(end[at], sizes[at]),
+                        row.id(),
+                    );
+                }
+            }
+        }
+        error
+    }
+}
 
 impl CoupledProblem<'_> {
     pub fn quadrature(&self, ticket: &StepTicket) -> Quadrature {
@@ -144,6 +179,35 @@ impl CoupledProblem<'_> {
             total: Ratio::ZERO,
             stages: Vec::new(),
         }
+    }
+    /// The stages `ticket` must show under this run's scheme, which `StepProposal::verify` checks.
+    pub fn stage_set(&self, ticket: &StepTicket) -> StageSet {
+        self.identity.resolution().scheme().set(ticket)
+    }
+    /// The record's error estimate of a core's own increment, by `verify`'s arithmetic: the worst row's error over
+    /// its declared tolerance, and zero for a set that reads none. Above one it is the refusal, or the fault at the
+    /// floor, that `verify` gives. Another ticket's or layout's increment is `BindingMismatch`, and stages off the
+    /// ticket's set are `MethodMismatch`.
+    pub fn estimate(&self, ticket: &StepTicket, increment: &Increment) -> Result<f64, TrialFailure> {
+        if increment.ticket != ticket.digest() || increment.extents.layout != self.layout() {
+            return Err(ticket.mismatch().into());
+        }
+        let set = self.stage_set(ticket);
+        if !same_structure(&set.stages(ticket.length_ns()), &increment.witness) {
+            return Err(method_mismatch(ticket).into());
+        }
+        let Some(estimate) = set.estimate() else {
+            return Ok(0.0);
+        };
+        let start = self.accepted.state().coordinates();
+        let (scales, sizes) = (self.identity.resolution().scales(), &self.parameters.sizes);
+        let worst = increment
+            .witness
+            .error(estimate, &start, scales, sizes, self.body);
+        if let Some(row) = worst.above_one() {
+            return Err(ticket.refuse(NumericalRefusal::Accuracy { row }));
+        }
+        Ok(worst.normalized)
     }
     /// `verify` takes amounts and memory from the start plus the increment, and the dense segment from the
     /// ends, so `end` supplies only algebraic values.
@@ -234,15 +298,11 @@ impl StepProposal {
         {
             return Err(ticket.mismatch().into());
         }
-        let mismatch = |ticket: &StepTicket| EngineFault {
-            kind: EngineFaultKind::MethodMismatch,
-            ..ticket.mismatch()
-        };
         let resolution = problem.identity.resolution();
-        let scheme = resolution.scheme();
-        let stages = scheme.stages(ticket.length_ns());
+        let set = problem.stage_set(&ticket);
+        let stages = set.stages(ticket.length_ns());
         if !same_structure(&stages, &witness) {
-            return Err(mismatch(&ticket).into());
+            return Err(method_mismatch(&ticket).into());
         }
         let mut replay = problem.quadrature(&ticket);
         let mut evaluations = Vec::with_capacity(stages.len());
@@ -263,7 +323,7 @@ impl StepProposal {
             || !same_bits(reverse, &replayed.extents.reverse)
             || !same_floats(&memory, &replayed.memory)
         {
-            return Err(mismatch(&ticket).into());
+            return Err(method_mismatch(&ticket).into());
         }
         let body = problem.body;
         let scales = resolution.scales();
@@ -299,21 +359,13 @@ impl StepProposal {
         if let Some(row) = stage_defect.above_one() {
             return Err(ticket.refuse(NumericalRefusal::StageResidual { row }));
         }
-        if let Some((fine, coarse)) = scheme.estimate(ticket.length_ns()) {
-            let (fine, coarse) = (&witness.stages[fine].unknowns, &witness.stages[coarse].unknowns);
-            let mut error = Worst::NONE;
-            for (at, row) in body.rows().iter().enumerate() {
-                error.note(
-                    (fine[at] - coarse[at]).abs() / scales.at(fine[at], sizes[at]),
-                    row.id(),
-                );
-            }
-            if let Some(row) = error.above_one() {
-                return Err(ticket.refuse(NumericalRefusal::Accuracy { row }));
-            }
+        if let Some(estimate) = set.estimate()
+            && let Some(row) = witness.error(estimate, &start, scales, sizes, body).above_one()
+        {
+            return Err(ticket.refuse(NumericalRefusal::Accuracy { row }));
         }
         if ticket.after_breakpoint() && history.started_at != ticket.interval().start() {
-            return Err(mismatch(&ticket).into());
+            return Err(method_mismatch(&ticket).into());
         }
         if history.schema != problem.accepted.method_history().schema {
             return Err(ticket.mismatch().into());
@@ -365,6 +417,13 @@ impl StepProposal {
             reverse: extents.reverse,
             ticket,
         })
+    }
+}
+
+fn method_mismatch(ticket: &StepTicket) -> EngineFault {
+    EngineFault {
+        kind: EngineFaultKind::MethodMismatch,
+        ..ticket.mismatch()
     }
 }
 
@@ -520,5 +579,79 @@ impl Fired {
     }
     pub fn entered(&self) -> ModeValue {
         self.entered
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StageWitness, WitnessStage};
+    use crate::scheme::Estimate;
+    use crate::*;
+
+    fn measure<U>(value: f64) -> Measure<U> {
+        Measure::new(value).expect("finite")
+    }
+
+    fn one_row() -> CompiledBody {
+        let mut map = AnatomyBuilder::new();
+        map.site::<TissueSite>("body", Position::new(measure(0.0), measure(0.0), measure(0.0)));
+        let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+        assemble(schema, |mut body| {
+            let (mut laws, _) = body.nervous()?.parts();
+            let x = laws.state::<Dimensionless>("x", Admissible::finite());
+            let speed =
+                laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.speed"), Admissible::positive());
+            let class = RateClass::new(RateBand::Minutes, 1_000_000_000)?;
+            let rate = laws.kernel(|mut k| {
+                let speed = k.parameter(&speed);
+                let x = k.state(&x);
+                let rate = k.scale(speed, x);
+                k.finish(rate, laws.every_mode(), class)
+            });
+            laws.memory_rate(&x, rate);
+            body.add(laws.finish());
+            body.compile()
+        })
+        .expect("compiled")
+    }
+
+    fn witnessed(values: &[f64]) -> StageWitness {
+        let stage = |&value: &f64| WitnessStage {
+            offset_ns: 0,
+            weight: Ratio::ZERO,
+            unknowns: vec![value],
+            derivative: vec![0.0],
+        };
+        StageWitness {
+            stages: values.iter().map(stage).collect(),
+        }
+    }
+
+    #[test]
+    fn each_estimate_reads_its_own_stages_and_scales_at_its_end() {
+        let body = one_row();
+        let row = Some(body.rows()[0].id());
+        let scales = ErrorScales::uniform(measure(1.0), measure(1.0)).expect("positive");
+        let error = |values: &[f64], estimate| {
+            let worst = witnessed(values).error(estimate, &[1.0], &scales, &[1.0], &body);
+            (worst.normalized, worst.row)
+        };
+        let second = Estimate::SecondDifference { half: 0, end: 1 };
+        assert_eq!(
+            error(&[3.0, 7.0], second),
+            (0.25, row),
+            "|7 - 2 * 3 + 1| over 1 + 7"
+        );
+        assert_eq!(
+            error(&[7.0, 3.0], second),
+            (2.5, row),
+            "|3 - 2 * 7 + 1| over 1 + 3"
+        );
+        let difference = Estimate::Difference { fine: 2, coarse: 0 };
+        assert_eq!(
+            error(&[2.0, 3.0, 7.0], difference),
+            (0.625, row),
+            "|7 - 2| over 1 + 7"
+        );
     }
 }

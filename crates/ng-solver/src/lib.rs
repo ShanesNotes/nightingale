@@ -2,8 +2,8 @@ use core::num::NonZeroU64;
 use ng_contract::{
     AcceptedStateView, ArithmeticProfile, CoupledProblem, CoupledSolver, DeclaredResolution, Digest,
     EngineFaultKind, ErrorScales, Factors, Increment, Jacobian, Measure, MethodHistory, NumericalRefusal,
-    Ratio, RowKind, SolveWorkspace, SparseView, StageEvaluation, StageScheme, StageTime, StepProposal,
-    StepTicket, TrialFailure, eliminate,
+    Ratio, RowKind, SolveWorkspace, SparseView, StageEvaluation, StageScheme, StageSet, StageTime,
+    StepProposal, StepTicket, TrialFailure, eliminate,
 };
 
 const ABSOLUTE: f64 = 0.1;
@@ -70,11 +70,23 @@ impl Carried {
 
 pub struct Core {
     longest_step_ns: u64,
+    scheme: StageScheme,
 }
 impl Core {
-    /// A core whose committed span never exceeds `longest_step_ns`.
+    /// A core of `StageScheme::backward_euler_halved` whose committed span never exceeds `longest_step_ns`.
     pub fn new(longest_step_ns: u64) -> Self {
-        Self { longest_step_ns }
+        Self {
+            longest_step_ns,
+            scheme: StageScheme::backward_euler_halved(),
+        }
+    }
+    /// The same core on `StageScheme::backward_euler_doubled`: the identity and course `new` had before record
+    /// 0009, so a run it wrote resumes and replays.
+    pub fn doubled(longest_step_ns: u64) -> Self {
+        Self {
+            longest_step_ns,
+            scheme: StageScheme::backward_euler_doubled(),
+        }
     }
     fn bounded(&self, span_ns: u64) -> u64 {
         let longest = self.longest_step_ns;
@@ -99,8 +111,12 @@ impl Core {
 
 impl CoupledSolver for Core {
     fn resolution(&self) -> DeclaredResolution {
+        let Self {
+            longest_step_ns,
+            scheme,
+        } = self;
         let mut policy = b"ng-solver core 1".to_vec();
-        policy.extend_from_slice(&self.longest_step_ns.to_be_bytes());
+        policy.extend_from_slice(&longest_step_ns.to_be_bytes());
         let scale = |value| Measure::new(value).expect("a finite constant");
         let scales = ErrorScales::uniform(scale(ABSOLUTE), scale(RELATIVE)).expect("positive constants");
         DeclaredResolution::new(
@@ -108,7 +124,7 @@ impl CoupledSolver for Core {
             FLOOR,
             RETRY_BUDGET,
             ArithmeticProfile::contract_v1(),
-            StageScheme::backward_euler_doubled(),
+            *scheme,
             scales,
         )
     }
@@ -124,7 +140,7 @@ impl CoupledSolver for Core {
         });
         let midpoint = carried.map(|carried| carried.midpoint).unwrap_or_default();
         let stages = Stages::new(problem, ticket, tolerance);
-        let solved = stages.solve(midpoint)?;
+        let solved = stages.solve(problem.stage_set(ticket), midpoint)?;
         let committed_ns = self.next_step(problem.accepted());
         let carried = Carried {
             span_ns: self.next_span(ticket, committed_ns, solved.estimate),
@@ -267,6 +283,14 @@ struct Solved {
     midpoint: Vec<f64>,
 }
 
+struct Halves {
+    early: StageEvaluation,
+    late: StageEvaluation,
+    reached: Vec<f64>,
+    fine: Vec<f64>,
+    end: SolveWorkspace,
+}
+
 struct Stages<'a, 'p> {
     problem: &'a CoupledProblem<'p>,
     ticket: &'a StepTicket,
@@ -290,7 +314,7 @@ impl<'a, 'p> Stages<'a, 'p> {
         }
     }
 
-    fn solve(&self, midpoint: Vec<f64>) -> Result<Solved, TrialFailure> {
+    fn solve(&self, set: StageSet, midpoint: Vec<f64>) -> Result<Solved, TrialFailure> {
         let (problem, ticket) = (self.problem, self.ticket);
         let length = ticket.length_ns();
         let mut seed = problem.workspace();
@@ -298,77 +322,91 @@ impl<'a, 'p> Stages<'a, 'p> {
         let trend = Trend::of(problem, ticket, midpoint);
         let mut quadrature = problem.quadrature(ticket);
         let mut linear = None;
-        if length < 2 {
-            let mut whole = problem.workspace();
-            let guess = trend.reach(&[(0.0, &start)], 2, length as f64);
-            let leg = Leg::weighted(&start, length, length, self.tolerance);
-            let stage = self.settle(&mut whole, leg, &guess, &mut linear)?;
-            quadrature.add(&stage, Ratio::ONE)?;
-            return Ok(Solved {
-                increment: quadrature.finish()?,
-                end: whole,
-                estimate: 0.0,
-                midpoint: Vec::new(),
-            });
-        }
+        let (end, midpoint) = match set {
+            StageSet::Whole => {
+                let mut whole = problem.workspace();
+                let guess = trend.reach(&[(0.0, &start)], 2, length as f64);
+                let leg = Leg::weighted(&start, length, length, self.tolerance);
+                let stage = self.settle(&mut whole, leg, &guess, &mut linear)?;
+                quadrature.add(&stage, Ratio::ONE)?;
+                (whole, Vec::new())
+            }
+            StageSet::Doubled | StageSet::Halved => {
+                let halves = self.halves(&trend, &start, &mut linear)?;
+                if set == StageSet::Doubled {
+                    quadrature.add(&self.coarse(&start, &halves, &mut linear)?, Ratio::ZERO)?;
+                }
+                quadrature.add(&halves.early, ticket.fraction(length / 2))?;
+                quadrature.add(&halves.late, ticket.fraction(length - length / 2))?;
+                (halves.end, halves.reached)
+            }
+            StageSet::ForwardEuler | StageSet::Heun => return Err(ticket.mismatch().into()),
+        };
+        let increment = quadrature.finish()?;
+        let estimate = problem.estimate(ticket, &increment)?;
+        Ok(Solved {
+            increment,
+            end,
+            estimate,
+            midpoint,
+        })
+    }
+
+    fn halves(
+        &self,
+        trend: &Trend,
+        start: &[f64],
+        linear: &mut Option<Linear<'p>>,
+    ) -> Result<Halves, TrialFailure> {
+        let (problem, length) = (self.problem, self.ticket.length_ns());
         let (half, rest) = (length / 2, length - length / 2);
         let mut first = problem.workspace();
-        let guess = trend.reach(&[(0.0, &start)], 2, half as f64);
+        let guess = trend.reach(&[(0.0, start)], 2, half as f64);
         let early = self.settle(
             &mut first,
-            Leg::weighted(&start, half, half, self.tolerance),
+            Leg::weighted(start, half, half, self.tolerance),
             &guess,
-            &mut linear,
+            linear,
         )?;
         let reached = first.unknowns_mut().to_vec();
-        let guess = trend.reach(&[(0.0, &start), (half as f64, &reached)], 1, length as f64);
+        let guess = trend.reach(&[(0.0, start), (half as f64, &reached)], 1, length as f64);
         let mut end = problem.workspace();
         let leg = Leg::weighted(&reached, length, rest, self.tolerance);
-        let late = self.settle(&mut end, leg, &guess, &mut linear)?;
+        let late = self.settle(&mut end, leg, &guess, linear)?;
         let fine = end.unknowns_mut().to_vec();
-        let guess: Vec<f64> = (fine.iter().zip(&reached).zip(&start))
+        Ok(Halves {
+            early,
+            late,
+            reached,
+            fine,
+            end,
+        })
+    }
+
+    fn coarse(
+        &self,
+        start: &[f64],
+        halves: &Halves,
+        linear: &mut Option<Linear<'p>>,
+    ) -> Result<StageEvaluation, TrialFailure> {
+        let Halves { reached, fine, .. } = halves;
+        let guess: Vec<f64> = (fine.iter().zip(reached).zip(start))
             .map(|((fine, half), start)| start + 2.0 * (fine - half))
             .collect();
-        let tolerance = COARSE_SHARE * self.estimate(&fine, &guess).0;
+        let apart: Vec<f64> = fine
+            .iter()
+            .zip(&guess)
+            .map(|(fine, guess)| fine - guess)
+            .collect();
+        let tolerance = COARSE_SHARE * self.norm(&apart, fine);
         let tolerance = if tolerance > self.tolerance {
             tolerance
         } else {
             self.tolerance
         };
-        let mut whole = problem.workspace();
-        let leg = Leg::coarse(&start, length, tolerance);
-        let coarse_stage = self.settle(&mut whole, leg, &guess, &mut linear)?;
-        let coarse = whole.unknowns_mut().to_vec();
-        let (estimate, worst) = self.estimate(&fine, &coarse);
-        if estimate > 1.0 {
-            let reason = problem
-                .row(worst)
-                .map_or(NumericalRefusal::IterationLimit, |row| {
-                    NumericalRefusal::Accuracy { row }
-                });
-            return Err(ticket.refuse(reason));
-        }
-        quadrature.add(&coarse_stage, Ratio::ZERO)?;
-        quadrature.add(&early, ticket.fraction(half))?;
-        quadrature.add(&late, ticket.fraction(rest))?;
-        Ok(Solved {
-            increment: quadrature.finish()?,
-            end,
-            estimate,
-            midpoint: reached,
-        })
-    }
-
-    /// The record's own formula, so the core refuses what the record would.
-    fn estimate(&self, fine: &[f64], coarse: &[f64]) -> (f64, usize) {
-        let mut worst = (0.0, 0);
-        for (at, (fine, coarse)) in fine.iter().zip(coarse).enumerate() {
-            let normalized = (fine - coarse).abs() / scale(*fine, self.sizes[at]);
-            if normalized > worst.0 {
-                worst = (normalized, at);
-            }
-        }
-        worst
+        let mut whole = self.problem.workspace();
+        let leg = Leg::coarse(start, self.ticket.length_ns(), tolerance);
+        self.settle(&mut whole, leg, &guess, linear)
     }
 
     /// The record's stage defect, each row judged at its own value: the record judges a row that closes a store

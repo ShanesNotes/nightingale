@@ -1,6 +1,6 @@
 use crate::chance::seed_word;
 use crate::identity::{Canonical, Seal};
-use crate::{AdmissionError, Digest, Dimensionless, Measure, ModelHash, PacketHash};
+use crate::{AdmissionError, Digest, Dimensionless, Measure, ModelHash, PacketHash, StepTicket};
 use core::marker::PhantomData;
 use core::num::NonZeroU64;
 
@@ -62,11 +62,13 @@ impl Ratio {
     }
 }
 
+/// Each number enters the resolution digest, so a number never moves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Method {
-    ForwardEuler,
-    Heun,
-    BackwardEulerDoubled,
+    ForwardEuler = 0,
+    Heun = 1,
+    BackwardEulerDoubled = 2,
+    BackwardEulerHalved = 3,
 }
 
 /// Its value is `from` (the accepted state when `None`) plus `span_ns` times the tangent of stage `slope`.
@@ -94,6 +96,56 @@ fn stage(offset_ns: u64, weight: Ratio, from: Option<usize>, span_ns: u64, slope
     }
 }
 
+/// The stages one ticket must show under its run's declared scheme, read from the ticket alone.
+/// `StepProposal::verify` holds a witness to its set, and a core reads it from `CoupledProblem::stage_set`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StageSet {
+    ForwardEuler,
+    Heun,
+    /// One backward Euler stage over the whole ticket, at weight one: a ticket under 2 ns.
+    Whole,
+    Doubled,
+    Halved,
+}
+impl StageSet {
+    pub(crate) fn stages(self, length_ns: u64) -> Vec<Stage> {
+        let whole = length_ns;
+        let (first, second) = (whole / 2, whole - whole / 2);
+        let part = |span| Ratio::new(span, whole).expect("a ticket's length is not zero");
+        match self {
+            StageSet::ForwardEuler => vec![stage(0, Ratio::ONE, None, 0, 0)],
+            StageSet::Heun => vec![stage(0, HALF, None, 0, 0), stage(whole, HALF, None, whole, 0)],
+            StageSet::Whole => vec![stage(whole, Ratio::ONE, None, whole, 0)],
+            StageSet::Doubled => vec![
+                stage(whole, Ratio::ZERO, None, whole, 0),
+                stage(first, part(first), None, first, 1),
+                stage(whole, part(second), Some(1), second, 2),
+            ],
+            StageSet::Halved => vec![
+                stage(first, part(first), None, first, 0),
+                stage(whole, part(second), Some(0), second, 1),
+            ],
+        }
+    }
+    pub(crate) fn estimate(self) -> Option<Estimate> {
+        match self {
+            StageSet::ForwardEuler | StageSet::Heun | StageSet::Whole => None,
+            StageSet::Doubled => Some(Estimate::Difference { fine: 2, coarse: 0 }),
+            StageSet::Halved => Some(Estimate::SecondDifference { half: 0, end: 1 }),
+        }
+    }
+}
+
+/// How the record recomputes a set's error estimate from its witnessed stages, each row over its declared
+/// tolerance at the end value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Estimate {
+    /// `|fine - coarse|`.
+    Difference { fine: usize, coarse: usize },
+    /// `|end - 2 half + start|`: on a smooth row `h^2 y'' / 4`, the difference's leading term.
+    SecondDifference { half: usize, end: usize },
+}
+
 /// How a core's stages make its increment: one of a closed set.
 #[derive(Clone, Copy, Debug)]
 pub struct StageScheme {
@@ -118,27 +170,25 @@ impl StageScheme {
             method: Method::BackwardEulerDoubled,
         }
     }
-    pub(crate) fn stages(self, length_ns: u64) -> Vec<Stage> {
-        let whole = length_ns;
-        match self.method {
-            Method::ForwardEuler => vec![stage(0, Ratio::ONE, None, 0, 0)],
-            Method::Heun => vec![stage(0, HALF, None, 0, 0), stage(whole, HALF, None, whole, 0)],
-            Method::BackwardEulerDoubled if whole < 2 => {
-                vec![stage(whole, Ratio::ONE, None, whole, 0)]
-            }
-            Method::BackwardEulerDoubled => {
-                let (first, second) = (whole / 2, whole - whole / 2);
-                let part = |span| Ratio::new(span, whole).expect("a ticket's length is not zero");
-                vec![
-                    stage(whole, Ratio::ZERO, None, whole, 0),
-                    stage(first, part(first), None, first, 1),
-                    stage(whole, part(second), Some(1), second, 2),
-                ]
-            }
+    /// The doubled scheme's two halves alone, and the estimate is their second difference from the start. A
+    /// ticket after a breakpoint shows the doubled scheme's stages, since a firing restarts stiff transients the
+    /// second difference over-reads. A length of 1 ns has one whole stage and no estimate.
+    pub fn backward_euler_halved() -> Self {
+        Self {
+            method: Method::BackwardEulerHalved,
         }
     }
-    pub(crate) fn estimate(self, length_ns: u64) -> Option<(usize, usize)> {
-        (self.method == Method::BackwardEulerDoubled && length_ns >= 2).then_some((2, 0))
+    /// Reads the method, the ticket's breakpoint flag and its length, nothing else.
+    pub(crate) fn set(self, ticket: &StepTicket) -> StageSet {
+        let whole = ticket.length_ns() < 2;
+        match self.method {
+            Method::ForwardEuler => StageSet::ForwardEuler,
+            Method::Heun => StageSet::Heun,
+            Method::BackwardEulerDoubled | Method::BackwardEulerHalved if whole => StageSet::Whole,
+            Method::BackwardEulerDoubled => StageSet::Doubled,
+            Method::BackwardEulerHalved if ticket.after_breakpoint() => StageSet::Doubled,
+            Method::BackwardEulerHalved => StageSet::Halved,
+        }
     }
 }
 
@@ -384,9 +434,30 @@ impl RunIdentity {
 
 #[cfg(test)]
 mod tests {
-    use super::{ROUTINE_BITS_SHA256, Ratio, StageScheme};
+    use super::{
+        ArithmeticProfile, DeclaredResolution, Estimate, ROUTINE_BITS_SHA256, Ratio, StageScheme, StageSet,
+    };
+    use crate::boundary::DriveFrame;
     use crate::pinned::{exp, ln};
-    use crate::{AdmissionError, Digest, Dimensionless, ErrorScales, Measure};
+    use crate::{AdmissionError, Digest, Dimensionless, ErrorScales, Interval, Measure, SimTime, StepTicket};
+    use core::num::NonZeroU64;
+
+    fn ticket(length_ns: u64, after_breakpoint: bool) -> StepTicket {
+        let start = SimTime::from_ns(0);
+        StepTicket {
+            base: Digest::of_canonical(b"a base"),
+            interval: Interval::new(start, SimTime::from_ns(length_ns)).expect("a positive length"),
+            span_ns: length_ns,
+            due: Vec::new(),
+            frame: DriveFrame::default(),
+            after_breakpoint,
+            attempt: 0,
+            fence: start,
+            floor_ns: NonZeroU64::MIN,
+            budget: 0,
+            digest: Digest::of_canonical(b"a ticket"),
+        }
+    }
 
     #[test]
     fn a_ratio_is_kept_in_lowest_terms() {
@@ -453,7 +524,7 @@ mod tests {
 
     #[test]
     fn backward_euler_doubled_halves_an_odd_interval_without_losing_a_nanosecond() {
-        let stages = StageScheme::backward_euler_doubled().stages(7);
+        let stages = StageSet::Doubled.stages(7);
         let offsets: Vec<u64> = stages.iter().map(|stage| stage.offset_ns).collect();
         assert_eq!(offsets, [7, 3, 7]);
         let spans: Vec<u64> = stages.iter().map(|stage| stage.span_ns).collect();
@@ -464,11 +535,93 @@ mod tests {
     }
 
     #[test]
+    fn the_halved_set_is_the_doubled_sets_two_halves() -> Result<(), AdmissionError> {
+        let (halved, doubled) = (StageSet::Halved.stages(7), StageSet::Doubled.stages(7));
+        let shape = |stages: &[super::Stage]| -> Vec<(u64, Ratio, u64)> {
+            (stages.iter())
+                .map(|stage| (stage.offset_ns, stage.weight, stage.span_ns))
+                .collect()
+        };
+        assert_eq!(shape(&halved), shape(&doubled[1..]));
+        assert_eq!(
+            (halved[0].weight, halved[1].weight),
+            (Ratio::new(3, 7)?, Ratio::new(4, 7)?)
+        );
+        let chain: Vec<(Option<usize>, usize)> =
+            halved.iter().map(|stage| (stage.from, stage.slope)).collect();
+        assert_eq!(chain, [(None, 0), (Some(0), 1)]);
+        Ok(())
+    }
+
+    #[test]
     fn one_nanosecond_has_one_whole_stage_and_no_estimate() {
-        let scheme = StageScheme::backward_euler_doubled();
-        assert_eq!(scheme.stages(1).len(), 1);
-        assert_eq!(scheme.estimate(1), None);
-        assert_eq!(scheme.estimate(2), Some((2, 0)));
+        for scheme in [
+            StageScheme::backward_euler_doubled(),
+            StageScheme::backward_euler_halved(),
+        ] {
+            for after_breakpoint in [false, true] {
+                let set = scheme.set(&ticket(1, after_breakpoint));
+                assert_eq!(set.stages(1).len(), 1);
+                assert_eq!(set.estimate(), None);
+            }
+        }
+        let doubled = Some(Estimate::Difference { fine: 2, coarse: 0 });
+        assert_eq!(StageSet::Doubled.estimate(), doubled);
+        let halved = Some(Estimate::SecondDifference { half: 0, end: 1 });
+        assert_eq!(StageSet::Halved.estimate(), halved);
+    }
+
+    #[test]
+    fn a_tickets_stage_set_follows_its_scheme_breakpoint_and_length() {
+        use StageSet::{Doubled, ForwardEuler, Halved, Heun, Whole};
+        let schemes = [
+            StageScheme::forward_euler(),
+            StageScheme::heun(),
+            StageScheme::backward_euler_doubled(),
+            StageScheme::backward_euler_halved(),
+        ];
+        for (length, after_breakpoint, sets) in [
+            (1, false, [ForwardEuler, Heun, Whole, Whole]),
+            (1, true, [ForwardEuler, Heun, Whole, Whole]),
+            (2, false, [ForwardEuler, Heun, Doubled, Halved]),
+            (2, true, [ForwardEuler, Heun, Doubled, Doubled]),
+            (7, false, [ForwardEuler, Heun, Doubled, Halved]),
+            (7, true, [ForwardEuler, Heun, Doubled, Doubled]),
+        ] {
+            let ticket = ticket(length, after_breakpoint);
+            let seen = schemes.map(|scheme| scheme.set(&ticket));
+            assert_eq!(seen, sets, "{length} ns, after a breakpoint: {after_breakpoint}");
+        }
+    }
+
+    #[test]
+    fn each_scheme_seals_its_own_number_and_the_first_three_stay() -> Result<(), AdmissionError> {
+        let measure = |value| Measure::<Dimensionless>::new(value);
+        let scales = ErrorScales::uniform(measure(1.0)?, measure(0.0)?)?;
+        let sealed = [
+            StageScheme::forward_euler(),
+            StageScheme::heun(),
+            StageScheme::backward_euler_doubled(),
+            StageScheme::backward_euler_halved(),
+        ]
+        .map(|scheme| {
+            let (policy, profile) = (
+                Digest::of_canonical(b"each scheme"),
+                ArithmeticProfile::contract_v1(),
+            );
+            let resolution = DeclaredResolution::new(policy, NonZeroU64::MIN, 1, profile, scheme, scales);
+            (resolution.digest().as_bytes().iter())
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        });
+        let before_the_halved_scheme = [
+            "cb728da5231a9400e5c16913ddaef980376887c4bf4b73a91479760f12124a6f",
+            "a4ef8307d42e51fc289f9e34b8565716ae4de15ad97ddf88831f35dacda3c552",
+            "dfa677b154b92b992aca82c98e6efc1bbfe94122e35a7125c9cac4c15c844486",
+        ];
+        assert_eq!(sealed[..3], before_the_halved_scheme);
+        assert!(!sealed[..3].contains(&sealed[3]), "{sealed:?}");
+        Ok(())
     }
 
     #[test]
