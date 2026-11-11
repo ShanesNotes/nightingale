@@ -1063,7 +1063,7 @@ fn chemistry(
     })
 }
 
-fn cells(beds: &[(&'static str, Tissue)]) -> Result<Schema, AdmissionError> {
+fn cell_schema(beds: &[(&'static str, Tissue)]) -> Result<Schema, AdmissionError> {
     tissues(beds, &[Space::Plasma, Space::Lumen])
 }
 
@@ -1113,7 +1113,7 @@ fn burns(mt: &mut FragmentBuilder<'_, Metabolism>) -> Result<(), AdmissionError>
 #[test]
 fn the_musculoskeletal_card_making_metabolisms_glycogen_at_the_muscle_bed_is_refused_naming_both_laws_and_the_bed()
 -> Result<(), AdmissionError> {
-    let found = chemistry(cells(&MUSCLE_BED)?, &["muscle bed"], |body| {
+    let found = chemistry(cell_schema(&MUSCLE_BED)?, &["muscle bed"], |body| {
         metabolism(body, stores_and_burns)?;
         musculoskeletal(body, stored::<1>())
     });
@@ -1130,7 +1130,7 @@ fn the_musculoskeletal_card_making_metabolisms_glycogen_at_the_muscle_bed_is_ref
 #[test]
 fn the_hepatic_card_burning_glucose_as_metabolism_does_at_the_liver_bed_is_refused()
 -> Result<(), AdmissionError> {
-    let found = chemistry(cells(&BOTH_BEDS)?, &["muscle bed"], |body| {
+    let found = chemistry(cell_schema(&BOTH_BEDS)?, &["muscle bed"], |body| {
         metabolism(body, burns)?;
         hepatic(body, |hp| {
             react::<_, Beds<Liver>, _, 1>(hp, "storage burn", burned())
@@ -1149,7 +1149,7 @@ fn the_hepatic_card_burning_glucose_as_metabolism_does_at_the_liver_bed_is_refus
 
 #[test]
 fn a_copy_with_every_count_doubled_is_the_same_chemistry_and_is_refused() -> Result<(), AdmissionError> {
-    let found = chemistry(cells(&MUSCLE_BED)?, &["muscle bed"], |body| {
+    let found = chemistry(cell_schema(&MUSCLE_BED)?, &["muscle bed"], |body| {
         metabolism(body, stores_and_burns)?;
         musculoskeletal(body, stored::<2>())
     });
@@ -1166,7 +1166,7 @@ fn a_copy_with_every_count_doubled_is_the_same_chemistry_and_is_refused() -> Res
 #[test]
 fn the_hepatic_cards_storage_beside_metabolisms_burn_at_the_liver_bed_compiles() -> Result<(), AdmissionError>
 {
-    chemistry(cells(&BOTH_BEDS)?, &BOTH_BEDS.map(|bed| bed.0), |body| {
+    chemistry(cell_schema(&BOTH_BEDS)?, &BOTH_BEDS.map(|bed| bed.0), |body| {
         metabolism(body, burns)?;
         hepatic(body, |hp| {
             react::<_, Beds<Liver>, _, 1>(hp, "glycogen made", stored())
@@ -1178,7 +1178,7 @@ fn the_hepatic_cards_storage_beside_metabolisms_burn_at_the_liver_bed_compiles()
 
 #[test]
 fn one_card_declaring_one_chemistry_under_two_names_compiles() -> Result<(), AdmissionError> {
-    chemistry(cells(&MUSCLE_BED)?, &["muscle bed"], |body| {
+    chemistry(cell_schema(&MUSCLE_BED)?, &["muscle bed"], |body| {
         metabolism(body, |mt| {
             stores_and_burns(mt)?;
             react::<_, CapillaryBed, _, 2>(mt, "glycogen kept", stored())
@@ -1189,7 +1189,7 @@ fn one_card_declaring_one_chemistry_under_two_names_compiles() -> Result<(), Adm
 
 #[test]
 fn two_cards_with_one_chemistry_at_two_beds_compile() -> Result<(), AdmissionError> {
-    chemistry(cells(&BOTH_BEDS)?, &BOTH_BEDS.map(|bed| bed.0), |body| {
+    chemistry(cell_schema(&BOTH_BEDS)?, &BOTH_BEDS.map(|bed| bed.0), |body| {
         metabolism(body, burns)?;
         hepatic(body, |hp| {
             react::<_, Beds<Liver>, _, 1>(hp, "glycogen made", stored())
@@ -1201,7 +1201,7 @@ fn two_cards_with_one_chemistry_at_two_beds_compile() -> Result<(), AdmissionErr
 
 #[test]
 fn a_grant_shared_where_one_chemistry_has_no_pools_is_no_second_owner() -> Result<(), AdmissionError> {
-    let found = chemistry(cells(&BOTH_BEDS)?, &["liver bed"], |body| {
+    let found = chemistry(cell_schema(&BOTH_BEDS)?, &["liver bed"], |body| {
         metabolism(body, stores_and_burns)?;
         hepatic(body, |_| Ok(()))?;
         musculoskeletal(body, stored::<1>())
@@ -1211,6 +1211,356 @@ fn a_grant_shared_where_one_chemistry_has_no_pools_is_no_second_owner() -> Resul
         Err(defect(CompileDefect::ReactionNowhere {
             law: law("MS", "glycogen made"),
         }))
+    );
+    Ok(())
+}
+
+fn still_along<'b, O: Owner, Q: Substance, E: EdgeKind>(
+    laws: &mut FragmentBuilder<'b, O>,
+    route: &EdgeRoute<'b, O, Q, E>,
+) -> Result<(), AdmissionError> {
+    let class = slow()?;
+    let rate = laws.edge_kernel::<E, _, _>(|mut k| {
+        let zero = k.zero::<Rate<Q>>();
+        k.finish(zero, laws.every_mode(), class)
+    });
+    laws.transfer_along(route, rate);
+    Ok(())
+}
+
+fn moves(body: &CompiledBody, owner: &str) -> Vec<String> {
+    let pool = |row: RowId| match body.rows()[row.index()].kind() {
+        RowKind::Amount { site, space, species } => (species, format!("{} {space:?}", site.key())),
+        other => panic!("a transfer moves amounts, not {other:?}"),
+    };
+    let mut found: Vec<String> = (body.columns().iter())
+        .filter(|column| column.origin().owner == owner)
+        .map(|column| {
+            let ((cargo, from), (moved, to)) = match column.terms() {
+                [(from, -1), (to, 1)] | [(to, 1), (from, -1)] => (pool(*from), pool(*to)),
+                terms => panic!("{:?} has the terms {terms:?}", column.origin()),
+            };
+            assert_eq!(cargo, moved, "{:?} moves one species", column.origin());
+            format!("{}: {cargo:?} {from} -> {to}", column.origin().local)
+        })
+        .collect();
+    found.sort_unstable();
+    found
+}
+
+fn perfuse(map: &mut AnatomyBuilder, root: SiteId, bed: SiteId) -> Result<(), AdmissionError> {
+    let vessel = map.site::<VesselSegment>("vessel", at()?).id();
+    map.contain(root, vessel);
+    map.connect(Network::Vascular, vessel, bed);
+    map.connect(Network::Vascular, bed, vessel);
+    Ok(())
+}
+
+fn breathing() -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let airway = map.site::<TissueSite>("airway", at()?);
+    let lung = map.site::<CapillaryBed>("lung bed", at()?);
+    for child in [airway.id(), lung.id()] {
+        map.contain(root.id(), child);
+    }
+    perfuse(&mut map, root.id(), lung.id())?;
+    map.connect(Network::Airway, airway.id(), lung.id());
+    map.serves(&lung, Tissue::Lung);
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.leave_out(Space::Lumen, "a bench whose blood stands still");
+    schema.carry::<Oxygen, Airway>(Space::Gas);
+    for space in [Space::Plasma, Space::Interstitium] {
+        schema.carry::<Oxygen, CapillaryBed>(space);
+    }
+    schema.carry::<Water, CapillaryBed>(Space::Gas);
+    assemble(schema, |mut body| {
+        let (mut fl, ports) = body.fluids()?.parts();
+        let starling = ports.starling(&mut fl);
+        still(&mut fl, &starling)?;
+        let water = ports.cell_membrane::<CapillaryBed, Water>(&mut fl);
+        still(&mut fl, &water)?;
+        body.add(fl.finish());
+        let (mut rs, ports) = body.respiratory(None)?.parts();
+        let alveolar = ports.alveolar::<Oxygen>(&mut rs);
+        still(&mut rs, &alveolar)?;
+        let airway = ports.airway::<Oxygen>(&mut rs);
+        still_along(&mut rs, &airway)?;
+        let lining = ports.lining(&mut rs);
+        still(&mut rs, &lining)?;
+        body.add(rs.finish());
+        body.compile()
+    })
+}
+
+fn digesting() -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let stomach = map.site::<VesselSegment>("stomach", at()?);
+    let intestine = map.site::<VesselSegment>("intestine", at()?);
+    let gut = map.site::<CapillaryBed>("gut bed", at()?);
+    for child in [stomach.id(), intestine.id(), gut.id()] {
+        map.contain(root.id(), child);
+    }
+    perfuse(&mut map, root.id(), gut.id())?;
+    map.connect(Network::Gut, stomach.id(), intestine.id());
+    map.connect(Network::Gut, intestine.id(), gut.id());
+    map.serves(&gut, Tissue::Gut);
+    let mut schema = Schema::new(map.finish()?)?;
+    for (site, space) in [(intestine.id(), Space::Lumen), (gut.id(), Space::Interstitium)] {
+        schema.pool::<Triglyceride>(site, space)?;
+    }
+    for (site, space) in [(gut.id(), Space::Cells), (intestine.id(), Space::Lumen)] {
+        schema.pool::<Iron>(site, space)?;
+    }
+    assemble(schema, |mut body| {
+        circulation(&mut body)?;
+        let (mut fl, ports) = body.fluids()?.parts();
+        let water = ports.cell_membrane::<CapillaryBed, Water>(&mut fl);
+        still(&mut fl, &water)?;
+        body.add(fl.finish());
+        let (mut gi, ports) = body.gastrointestinal(None)?.parts();
+        let transit = ports.transit::<Water>(&mut gi);
+        still_along(&mut gi, &transit)?;
+        let absorption = ports.absorption::<Water>(&mut gi);
+        still_along(&mut gi, &absorption)?;
+        let chyle = ports.chyle(&mut gi);
+        still_along(&mut gi, &chyle)?;
+        let shedding = ports.shedding(&mut gi);
+        still_along(&mut gi, &shedding)?;
+        body.add(gi.finish());
+        body.compile()
+    })
+}
+
+fn cells() -> Result<CompiledBody, AdmissionError> {
+    let beds = [
+        ("bone bed", Tissue::Bone),
+        ("gut bed", Tissue::Gut),
+        ("liver bed", Tissue::Liver),
+    ];
+    let mut schema = tissues(&beds, &[Space::Plasma, Space::Lumen])?;
+    for space in [Space::Interstitium, Space::Cells] {
+        schema.carry::<Oxygen, CapillaryBed>(space);
+        schema.carry::<Glucose, CapillaryBed>(space);
+        schema.carry::<Calcium, CapillaryBed>(space);
+        for bed in ["gut bed", "liver bed"] {
+            schema.pool::<Iron>(site::<CapillaryBed>(bed), space)?;
+        }
+    }
+    assemble(schema, |mut body| {
+        let (mut fl, ports) = body.fluids()?.parts();
+        let water = ports.cell_membrane::<CapillaryBed, Water>(&mut fl);
+        still(&mut fl, &water)?;
+        let calcium = ports.cell_membrane::<Besides<Bone>, Calcium>(&mut fl);
+        still(&mut fl, &calcium)?;
+        body.add(fl.finish());
+        let (mut mt, ports) = body.metabolism(None)?.parts();
+        let gas = ports.gas_into_cells::<Oxygen>(&mut mt);
+        still(&mut mt, &gas)?;
+        let fuel = ports.fuel_into_cells::<Glucose>(&mut mt);
+        still(&mut mt, &fuel)?;
+        body.add(mt.finish());
+        liver_glucose(&mut body)?;
+        let (mut ms, ports) = body.musculoskeletal(None)?.parts();
+        let mineral = ports.bone::<Calcium>(&mut ms);
+        still(&mut ms, &mineral)?;
+        body.add(ms.finish());
+        let (mut hc, ports) = body.hematology(None)?.parts();
+        let iron = ports.iron_into_cells(&mut hc);
+        still(&mut hc, &iron)?;
+        body.add(hc.finish());
+        body.compile()
+    })
+}
+
+fn walls() -> Result<CompiledBody, AdmissionError> {
+    let beds = [("muscle bed", Tissue::Muscle), ("skin bed", Tissue::Skin)];
+    let mut schema = tissues(&beds, &[Space::Lumen])?;
+    for space in [Space::Plasma, Space::Interstitium] {
+        schema.carry::<Oxygen, CapillaryBed>(space);
+    }
+    for space in [Space::Plasma, Space::Interstitium, Space::Cells] {
+        schema.pool::<Triglyceride>(site::<CapillaryBed>("muscle bed"), space)?;
+    }
+    assemble(schema, |mut body| {
+        let (mut fl, ports) = body.fluids()?.parts();
+        let starling = ports.starling(&mut fl);
+        still(&mut fl, &starling)?;
+        let water = ports.cell_membrane::<CapillaryBed, Water>(&mut fl);
+        still(&mut fl, &water)?;
+        body.add(fl.finish());
+        let (mut mt, ports) = body.metabolism(None)?.parts();
+        let gas = ports.gas_exchange::<Oxygen>(&mut mt);
+        still(&mut mt, &gas)?;
+        let fat = ports.fat_into_cells::<Beds<Muscle>>(&mut mt);
+        still(&mut mt, &fat)?;
+        body.add(mt.finish());
+        body.compile()
+    })
+}
+
+fn heat() -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let skin = map.site::<TissueSite>("skin", at()?);
+    let bed = map.site::<CapillaryBed>("muscle bed", at()?);
+    for child in [skin.id(), bed.id()] {
+        map.contain(root.id(), child);
+    }
+    perfuse(&mut map, root.id(), bed.id())?;
+    let mut schema = Schema::new(map.finish()?)?;
+    for space in [Space::Plasma, Space::Interstitium, Space::Cells, Space::Lumen] {
+        schema.leave_out(space, "a bench of heat alone");
+    }
+    for site in [root.id(), skin.id(), bed.id()] {
+        schema.pool::<Energy>(site, Space::Thermal)?;
+    }
+    assemble(schema, |mut body| {
+        let (mut mt, ports) = body.metabolism(None)?.parts();
+        let from_beds = ports.bed_heat(&mut mt);
+        still(&mut mt, &from_beds)?;
+        let conducted = ports.conduction(&mut mt);
+        still(&mut mt, &conducted)?;
+        body.add(mt.finish());
+        body.compile()
+    })
+}
+
+fn liver_flow() -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let artery = map.site::<VesselSegment>("artery", at()?);
+    let vein = map.site::<VesselSegment>("vein", at()?);
+    let liver = map.site::<CapillaryBed>("liver bed", at()?);
+    for child in [artery.id(), vein.id(), liver.id()] {
+        map.contain(root.id(), child);
+    }
+    for (from, to) in [
+        (artery.id(), liver.id()),
+        (liver.id(), vein.id()),
+        (vein.id(), artery.id()),
+    ] {
+        map.connect(Network::Vascular, from, to);
+    }
+    map.serves(&liver, Tissue::Liver);
+    let mut schema = Schema::new(map.finish()?)?;
+    for space in [Space::Interstitium, Space::Cells] {
+        schema.leave_out(space, "a bench of blood alone");
+    }
+    assemble(schema, |mut body| {
+        circulation(&mut body)?;
+        let (mut hp, ports) = body.hepatic(None)?.parts();
+        let sinusoids = ports.sinusoids(&mut hp);
+        still_along(&mut hp, &sinusoids)?;
+        body.add(hp.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn each_port_moves_its_cargo_between_the_two_pools_its_route_names() -> Result<(), AdmissionError> {
+    assert_eq!(
+        moves(&breathing()?, "RS"),
+        [
+            "airway oxygen: Oxygen airway Gas -> lung bed Gas",
+            "alveolar oxygen: Oxygen lung bed Gas -> lung bed Plasma",
+            "lining water: Water lung bed Interstitium -> lung bed Gas",
+        ]
+    );
+    assert_eq!(
+        moves(&digesting()?, "GI"),
+        [
+            "absorb water: Water intestine Lumen -> gut bed Plasma",
+            "chyle triglyceride: Triglyceride intestine Lumen -> gut bed Interstitium",
+            "shed iron: Iron gut bed Cells -> intestine Lumen",
+            "transit water: Water stomach Lumen -> intestine Lumen",
+        ]
+    );
+    let body = cells()?;
+    assert_eq!(
+        moves(&body, "MT"),
+        [
+            "cell membrane glucose: Glucose bone bed Interstitium -> bone bed Cells",
+            "cell membrane glucose: Glucose gut bed Interstitium -> gut bed Cells",
+            "cell membrane oxygen: Oxygen bone bed Interstitium -> bone bed Cells",
+            "cell membrane oxygen: Oxygen gut bed Interstitium -> gut bed Cells",
+            "cell membrane oxygen: Oxygen liver bed Interstitium -> liver bed Cells",
+        ]
+    );
+    assert_eq!(
+        moves(&body, "HP"),
+        ["cell membrane glucose: Glucose liver bed Interstitium -> liver bed Cells"]
+    );
+    assert_eq!(
+        moves(&body, "MS"),
+        ["cell membrane calcium: Calcium bone bed Interstitium -> bone bed Cells"]
+    );
+    assert_eq!(
+        moves(&body, "HC"),
+        [
+            "cell membrane iron: Iron gut bed Interstitium -> gut bed Cells",
+            "cell membrane iron: Iron liver bed Interstitium -> liver bed Cells",
+        ]
+    );
+    assert_eq!(
+        moves(&walls()?, "MT"),
+        [
+            "endothelium triglyceride: Triglyceride muscle bed Plasma -> muscle bed Cells",
+            "exchange oxygen: Oxygen muscle bed Plasma -> muscle bed Interstitium",
+            "exchange oxygen: Oxygen skin bed Plasma -> skin bed Interstitium",
+        ]
+    );
+    assert_eq!(
+        moves(&heat()?, "MT"),
+        [
+            "bed heat: Energy muscle bed Thermal -> body Thermal",
+            "conduction: Energy body Thermal -> skin Thermal",
+        ]
+    );
+    assert_eq!(
+        moves(&liver_flow()?, "HP"),
+        [
+            "sinusoids: Water artery Lumen -> liver bed Plasma",
+            "sinusoids: Water liver bed Plasma -> vein Lumen",
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn hematology_crosses_iron_into_cells_only_at_the_beds_whose_cells_hold_iron() -> Result<(), AdmissionError> {
+    let beds = [
+        ("gut bed", Tissue::Gut),
+        ("liver bed", Tissue::Liver),
+        ("muscle bed", Tissue::Muscle),
+    ];
+    let mut schema = tissues(&beds, &[Space::Lumen])?;
+    for space in [Space::Plasma, Space::Interstitium] {
+        schema.carry::<Iron, CapillaryBed>(space);
+    }
+    for bed in ["gut bed", "liver bed"] {
+        schema.pool::<Iron>(site::<CapillaryBed>(bed), Space::Cells)?;
+    }
+    let body = assemble(schema, |mut body| {
+        let (mut fl, ports) = body.fluids()?.parts();
+        let starling = ports.starling(&mut fl);
+        still(&mut fl, &starling)?;
+        let water = ports.cell_membrane::<CapillaryBed, Water>(&mut fl);
+        still(&mut fl, &water)?;
+        body.add(fl.finish());
+        let (mut hc, ports) = body.hematology(None)?.parts();
+        let iron = ports.iron_into_cells(&mut hc);
+        still(&mut hc, &iron)?;
+        body.add(hc.finish());
+        body.compile()
+    })?;
+    assert_eq!(
+        moves(&body, "HC"),
+        [
+            "cell membrane iron: Iron gut bed Interstitium -> gut bed Cells",
+            "cell membrane iron: Iron liver bed Interstitium -> liver bed Cells",
+        ]
     );
     Ok(())
 }

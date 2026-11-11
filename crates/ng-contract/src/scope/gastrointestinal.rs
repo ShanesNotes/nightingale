@@ -18,6 +18,20 @@ impl<'b> GastrointestinalPorts<'b> {
         }
     }
     /// Lumen to lumen along every gut edge between two lumens.
+    /// ```compile_fail,E0277
+    /// use ng_contract::*;
+    /// fn moved<'b>(gi: &mut FragmentBuilder<'b, Gastrointestinal>, ports: &GastrointestinalPorts<'b>)
+    ///     -> EdgeRoute<'b, Gastrointestinal, Oxygen, GutEdge> {
+    ///     ports.transit::<Oxygen>(gi)
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// fn moved<'b>(gi: &mut FragmentBuilder<'b, Gastrointestinal>, ports: &GastrointestinalPorts<'b>)
+    ///     -> EdgeRoute<'b, Gastrointestinal, Triglyceride, GutEdge> {
+    ///     ports.transit::<Triglyceride>(gi)
+    /// }
+    /// ```
     pub fn transit<Q: Ingested>(
         &self,
         laws: &mut FragmentBuilder<'b, Gastrointestinal>,
@@ -32,6 +46,13 @@ impl<'b> GastrointestinalPorts<'b> {
     /// fn absorbed<'b>(gi: &mut FragmentBuilder<'b, Gastrointestinal>, ports: &GastrointestinalPorts<'b>)
     ///     -> EdgeRoute<'b, Gastrointestinal, Triglyceride, AbsorbingEdge> {
     ///     ports.absorption::<Triglyceride>(gi)
+    /// }
+    /// ```
+    /// ```compile_fail,E0277
+    /// use ng_contract::*;
+    /// fn absorbed<'b>(gi: &mut FragmentBuilder<'b, Gastrointestinal>, ports: &GastrointestinalPorts<'b>)
+    ///     -> EdgeRoute<'b, Gastrointestinal, Oxygen, AbsorbingEdge> {
+    ///     ports.absorption::<Oxygen>(gi)
     /// }
     /// ```
     /// ```

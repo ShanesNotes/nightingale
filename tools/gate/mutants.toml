@@ -594,6 +594,13 @@ new = '''Wall::Endothelium => &[Crossed::Capillary],'''
 test = "-p ng-contract --test scopes the_endothelial_route_crosses_the_cell_membrane_another_card_crosses"
 
 [[mutant]]
+name = "a-route-stands-where-both-its-pools-are"
+path = "crates/ng-contract/src/compile.rs"
+old = '''reach.ends.iter().all(|end| match end {'''
+new = '''reach.ends.iter().any(|end| match end {'''
+test = "-p ng-contract --test scopes hematology_crosses_iron_into_cells_only_at_the_beds_whose_cells_hold_iron"
+
+[[mutant]]
 name = "circulation-leaves-the-liver-bed"
 path = "crates/ng-contract/src/compile.rs"
 old = '''.filter(|&pair| !anatomy.is_valve(pair) && !sinusoidal(anatomy, pair))'''
@@ -706,6 +713,137 @@ path = "crates/ng-contract/src/scope/cargo.rs"
 old = '''Respired: Substance = Oxygen, CarbonDioxide;'''
 new = '''Respired: Substance = Oxygen, CarbonDioxide, Sodium;'''
 test = "--doc -p ng-contract alveolar"
+
+[[mutant]]
+name = "chyle-reaches-the-interstitium"
+path = "crates/ng-contract/src/scope/gastrointestinal.rs"
+old = '''Family::Along(Passage::Chyle, Species::Triglyceride)'''
+new = '''Family::Along(Passage::Absorption, Species::Triglyceride)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "shedding-leaves-the-gut-cells"
+path = "crates/ng-contract/src/scope/gastrointestinal.rs"
+old = '''Family::Along(Passage::Shedding, Species::Iron)'''
+new = '''Family::Along(Passage::Absorption, Species::Iron)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "transit-stays-between-lumens"
+path = "crates/ng-contract/src/scope/gastrointestinal.rs"
+old = '''Family::Along(Passage::Transit, Q::SPECIES)'''
+new = '''Family::Along(Passage::Absorption, Q::SPECIES)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "absorption-reaches-the-plasma"
+path = "crates/ng-contract/src/scope/gastrointestinal.rs"
+old = '''Family::Along(Passage::Absorption, Q::SPECIES)'''
+new = '''Family::Along(Passage::Chyle, Q::SPECIES)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "lining-wets-the-gas"
+path = "crates/ng-contract/src/scope/respiratory.rs"
+old = '''Family::Across(Wall::Lining, <Beds<Lung> as SiteSet>::SET, Species::Water)'''
+new = '''Family::Across(Wall::Cell, <Beds<Lung> as SiteSet>::SET, Species::Water)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "airway-runs-along-the-airway"
+path = "crates/ng-contract/src/scope/respiratory.rs"
+old = '''Family::Along(Passage::Airway, Q::SPECIES)'''
+new = '''Family::Along(Passage::Transit, Q::SPECIES)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "alveolar-crosses-gas-to-plasma"
+path = "crates/ng-contract/src/scope/respiratory.rs"
+old = '''Family::Across(Wall::Alveolar, <Beds<Lung> as SiteSet>::SET, Q::SPECIES)'''
+new = '''Family::Across(Wall::Lining, <Beds<Lung> as SiteSet>::SET, Q::SPECIES)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "iron-crosses-as-iron"
+path = "crates/ng-contract/src/scope/hematology.rs"
+old = '''Family::Across(Wall::Cell, <CapillaryBed as SiteSet>::SET, Species::Iron)'''
+new = '''Family::Across(Wall::Cell, <CapillaryBed as SiteSet>::SET, Species::Calcium)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "bed-heat-reaches-the-core"
+path = "crates/ng-contract/src/scope/metabolism.rs"
+old = '''Family::Heat(HeatRoute::FromBeds)'''
+new = '''Family::Heat(HeatRoute::Conduction)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "conduction-leaves-the-core"
+path = "crates/ng-contract/src/scope/metabolism.rs"
+old = '''Family::Heat(HeatRoute::Conduction)'''
+new = '''Family::Heat(HeatRoute::FromBeds)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "lining-is-its-own-membrane"
+path = "crates/ng-contract/src/law.rs"
+old = '''Wall::Lining => &[Crossed::Lining],'''
+new = '''Wall::Lining => &[Crossed::Cell],'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "ingested-class-closed"
+path = "crates/ng-contract/src/scope/cargo.rs"
+old = '''Ingested: Substance = Triglyceride;'''
+new = '''Ingested: Substance = Triglyceride, Oxygen;'''
+test = "--doc -p ng-contract transit"
+
+[[mutant]]
+name = "absorbed-class-closed"
+path = "crates/ng-contract/src/scope/cargo.rs"
+old = '''Magnesium, Iron;
+    Ingested'''
+new = '''Magnesium, Iron, Oxygen;
+    Ingested'''
+test = "--doc -p ng-contract absorption"
+
+[[mutant]]
+name = "musculoskeletal-reacts-at-the-muscle-bed-alone"
+path = "crates/ng-contract/src/law.rs"
+old = '''impl ReactsAt<crate::Beds<crate::Muscle>> for crate::Musculoskeletal {}'''
+new = '''impl ReactsAt<crate::Beds<crate::Muscle>> for crate::Musculoskeletal {}
+impl grants::Sealed<crate::Beds<crate::Liver>> for crate::Musculoskeletal {}
+impl ReactsAt<crate::Beds<crate::Liver>> for crate::Musculoskeletal {}'''
+test = "--doc -p ng-contract ReactsAt"
+
+[[mutant]]
+name = "hepatic-reacts-at-the-liver-bed-alone"
+path = "crates/ng-contract/src/law.rs"
+old = '''impl ReactsAt<crate::Beds<crate::Liver>> for crate::Hepatic {}'''
+new = '''impl ReactsAt<crate::Beds<crate::Liver>> for crate::Hepatic {}
+impl grants::Sealed<crate::Beds<crate::Muscle>> for crate::Hepatic {}
+impl ReactsAt<crate::Beds<crate::Muscle>> for crate::Hepatic {}'''
+test = "--doc -p ng-contract ReactsAt"
+
+[[mutant]]
+name = "guard-reads-its-routes-flow"
+path = "crates/ng-contract/src/compile.rs"
+old = '''                Over::Route(family) => Some(family),
+                _ => None,
+            };
+            let sorted'''
+new = '''                Over::Route(_) => None,
+                _ => None,
+            };
+            let sorted'''
+test = "-p ng-contract --test sinusoids a_guard_on_a_switch_along_circulation_reads_the_flow_at_its_own_edge"
+
+[[mutant]]
+name = "sinusoids-are-vascular"
+path = "crates/ng-contract/src/law.rs"
+old = '''Family::Circulation | Family::Valves | Family::Sinusoids | Family::GravityWork'''
+new = '''Family::Circulation | Family::Valves | Family::GravityWork'''
+test = "-p ng-contract --test sinusoids the_hepatic_card_reads_the_flow_along_its_own_sinusoids"
 
 [[mutant]]
 name = "enclosure-owed-by-its-card"
@@ -1273,6 +1411,538 @@ path = "crates/ng-contract/src/scheme.rs"
 old = '''stage(whole, part(second), Some(0), second, 1),'''
 new = '''stage(whole, part(second), None, second, 1),'''
 test = "-p ng-contract --lib scheme::tests::the_halved_set_is_the_doubled_sets_two_halves"
+
+[[mutant]]
+name = "healthy-range-windows-tumble"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if self.received < self.count {'''
+new = '''if self.received % self.count != 0 {'''
+test = "-p ng-validate --lib healthy::tests::a_reading_that_leaves_its_range_between_two_tumbling_means_fails_a_sliding_window"
+
+[[mutant]]
+name = "healthy-range-change-takes-an-activitys-range"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''(None, None, Across::Own { range, .. }) => Judging::of(range),'''
+new = '''(None, None, Across::Own { .. }) => Judging::of(self.within[last]),'''
+test = "-p ng-validate --lib healthy::tests::a_window_across_a_change_takes_the_changes_own_range"
+
+[[mutant]]
+name = "healthy-range-unranged-change-passes"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''None => Across::Unranged,'''
+new = '''None => Across::EveryActivity,'''
+test = "-p ng-validate --lib healthy::tests::a_change_between_activities_with_different_ranges_and_none_of_its_own_blocks_naming_the_change"
+
+[[mutant]]
+name = "healthy-range-shared-range-not-across-a-change"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''None if !during(from) && !during(to) => Across::EveryActivity,'''
+new = '''None if false => Across::EveryActivity,'''
+test = "-p ng-validate --lib healthy::tests::a_change_between_activities_that_share_the_every_activity_range_is_judged_by_it"
+
+[[mutant]]
+name = "healthy-range-whole-period-judges-each-value"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if !fold.taken.closes(at, end, *period_ns) {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::a_whole_period_range_judges_each_whole_periods_mean_and_counts_the_periods_the_run_cuts"
+
+[[mutant]]
+name = "healthy-range-cut-period-judged"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if before_admission {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::a_whole_period_range_judges_each_whole_periods_mean_and_counts_the_periods_the_run_cuts"
+
+[[mutant]]
+name = "healthy-range-unranged-reading-passes"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if own.is_empty() {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::a_lens_reading_with_no_range_in_the_set_blocks_and_is_named"
+
+[[mutant]]
+name = "healthy-range-unranged-activity-passes"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if fold.unranged[span] {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::an_activity_with_no_range_blocks_and_is_named"
+
+[[mutant]]
+name = "return-morning-half-a-day-on"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''days * DAY_NS'''
+new = '''days * DAY_NS / 2'''
+test = "-p ng-validate --lib healthy::tests::a_run_inside_its_range_but_away_from_its_admission_reading_at_24_hours_fails_only_the_return_check"
+
+[[mutant]]
+name = "return-allows-1-96-variations"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''const RETURN_FACTOR: f64 = 1.96 * core::f64::consts::SQRT_2;'''
+new = '''const RETURN_FACTOR: f64 = 1.96;'''
+test = "-p ng-validate --lib healthy::tests::a_morning_may_move_from_admission_by_1_96_root_2_within_subject_variations"
+
+[[mutant]]
+name = "return-measured-from-zero"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''reading.minus(admission).abs().at_most(self.allowed)'''
+new = '''reading.minus(Compensated::ZERO).abs().at_most(self.allowed)'''
+test = "-p ng-validate --lib healthy::tests::a_run_back_at_its_admission_reading_that_left_its_range_between_fails_only_the_range_check"
+
+[[mutant]]
+name = "return-unvaried-anchor-skipped"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''if variation.is_none() {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::an_anchor_with_no_within_subject_variation_blocks_and_is_named"
+
+[[mutant]]
+name = "healthy-range-set-digest-skips-the-high-limit"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''high.seal(out);'''
+new = '''low.seal(out);'''
+test = "-p ng-validate --test healthy a_corrected_set_rechecks_a_finished_replay_and_gives_a_new_result_for_the_same_run"
+
+[[mutant]]
+name = "healthy-range-unjudged-range-passes"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if result.judged == 0 && readings.iter().any(|reading| reading.holds(at, &spans)) {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::a_reading_the_run_holds_no_whole_window_of_blocks_and_is_named"
+
+[[mutant]]
+name = "return-no-anchors-passes"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''if plans.is_empty() {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::a_packet_with_no_anchors_blocks_the_return_check"
+
+[[mutant]]
+name = "healthy-range-no-range-named-twice"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''note(&mut gaps, RangeGap::NoRange { row, method });'''
+new = '''gaps.push(RangeGap::NoRange { row, method });'''
+test = "-p ng-validate --lib healthy::tests::a_reading_with_no_range_is_named_once_however_the_lens_reads_it"
+
+[[mutant]]
+name = "healthy-range-day-after-admission-taken"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''&& at > admission'''
+new = '''&& false'''
+test = "-p ng-validate --lib healthy::tests::a_day_that_starts_after_admission_is_refused"
+
+[[mutant]]
+name = "healthy-range-time-mean-tagged-by-its-closing-instant"
+path = "crates/ng-validate/src/healthy.rs"
+old = '''Self::TimeMean => at.nanoseconds().saturating_sub(period_ns),'''
+new = '''Self::TimeMean => at.nanoseconds(),'''
+test = "-p ng-validate --lib healthy::tests::a_time_mean_takes_the_activity_of_the_period_it_covers"
+
+[[mutant]]
+name = "healthy-range-time-mean-period-closes-one-mean-early"
+path = "crates/ng-validate/src/healthy.rs"
+old = '''Self::TimeMean => at == end,'''
+new = '''Self::TimeMean => at.nanoseconds() == end.nanoseconds().saturating_sub(period_ns),'''
+test = "-p ng-validate --lib healthy::tests::a_time_mean_whole_period_holds_every_mean_closing_in_its_span"
+
+[[mutant]]
+name = "healthy-range-window-across-two-changes-never-judged"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''None => self.every,'''
+new = '''None => None,'''
+test = "-p ng-validate --lib healthy::tests::a_window_across_two_shared_changes_is_judged_by_the_every_activity_range"
+
+[[mutant]]
+name = "healthy-range-period-starting-at-admission-cut"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''before_admission: start < admission,'''
+new = '''before_admission: start <= admission,'''
+test = "-p ng-validate --lib healthy::tests::a_period_that_starts_at_admission_is_whole"
+
+[[mutant]]
+name = "healthy-range-set-digest-skips-the-lasting"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''out.number(lasting.get());'''
+new = '''out.number(lasting.get().min(1));'''
+test = "-p ng-contract --lib healthy::tests::a_set_digest_covers_every_field_of_every_entry"
+
+[[mutant]]
+name = "healthy-range-set-takes-one-change-twice"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''&& known.scope.same_activities(range.scope)'''
+new = '''&& known.scope == range.scope'''
+test = "-p ng-contract --lib healthy::tests::a_set_holds_one_entry_per_id_per_reading_scope_and_averaging_and_one_variation_per_reading"
+
+[[mutant]]
+name = "healthy-range-owned-period-judged-by-the-activitys-range"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''Some(range) => range,'''
+new = '''Some(_) => self.within[last],'''
+test = "-p ng-validate --lib healthy::tests::a_changes_range_judges_each_window_in_the_time_its_shift_lasts"
+
+[[mutant]]
+name = "healthy-range-owned-period-drops-lasting"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''shift_ends_ns: pair[1].start.nanoseconds().saturating_add(lasting),'''
+new = '''shift_ends_ns: pair[1].start.nanoseconds(),'''
+test = "-p ng-validate --lib healthy::tests::a_changes_range_judges_each_window_in_the_time_its_shift_lasts"
+
+[[mutant]]
+name = "healthy-range-owned-period-takes-the-shortest-lasting"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''.map(|(_, _, lasting)| lasting).max()'''
+new = '''.map(|(_, _, lasting)| lasting).min()'''
+test = "-p ng-validate --lib healthy::tests::a_change_owns_the_time_its_longest_lasting_range_states"
+
+[[mutant]]
+name = "healthy-range-owned-period-falls-back-to-every"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''Some(range) => range,'''
+new = '''Some(range) => range.or(self.every),'''
+test = "-p ng-validate --lib healthy::tests::a_window_of_a_length_the_change_has_no_range_for_is_not_judged_in_the_time_its_shift_lasts"
+
+[[mutant]]
+name = "healthy-range-window-in-two-changes-judged"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''(None, None, Across::Own { range, .. }) => Judging::of(range),'''
+new = '''(_, None, Across::Own { range, .. }) => Judging::of(range),'''
+test = "-p ng-validate --lib healthy::tests::a_window_that_belongs_to_two_changes_blocks_at_the_first_after_its_first_value"
+
+[[mutant]]
+name = "healthy-range-absent-value-counts-as-zero-in-a-window"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''(absent == 0).then(|| Compensated::between(Compensated::ZERO, sum, 1, count))'''
+new = '''(absent == absent).then(|| Compensated::between(Compensated::ZERO, sum, 1, count))'''
+test = "-p ng-validate --lib healthy::tests::a_window_holding_a_value_that_was_not_present_fails_with_no_mean"
+
+[[mutant]]
+name = "healthy-range-absent-value-counts-as-zero-in-a-whole-period"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''mean(period.sum, period.absent, period.seen),'''
+new = '''mean(period.sum, 0, period.seen),'''
+test = "-p ng-validate --lib healthy::tests::a_whole_period_holding_a_value_that_was_not_present_fails_with_no_mean"
+
+[[mutant]]
+name = "return-absent-value-passes-a-morning"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''            _ => false,'''
+new = '''            _ => true,'''
+test = "-p ng-validate --lib healthy::tests::a_morning_whose_window_holds_a_value_that_was_not_present_fails"
+
+[[mutant]]
+name = "reading-checks-absent-observation-dropped"
+path = "crates/ng-validate/src/healthy.rs"
+old = '''ObservedValue::NotCollected | ObservedValue::InvalidSignal => Some(None),'''
+new = '''ObservedValue::NotCollected | ObservedValue::InvalidSignal => None,'''
+test = "-p ng-validate --lib healthy::tests::an_observation_not_collected_or_invalid_is_fed_as_an_absent_value_and_a_pending_one_waits"
+
+[[mutant]]
+name = "reading-checks-set-dimension-unchecked"
+path = "crates/ng-validate/src/healthy.rs"
+old = '''body.check_set(set)?;'''
+new = '''let _ = body;'''
+test = "-p ng-validate --test healthy the_checks_refuse_a_set_entry_in_another_dimension_than_its_row"
+
+[[mutant]]
+name = "reading-checks-admission-off-grid-taken"
+path = "crates/ng-validate/src/healthy.rs"
+old = '''if !admission.nanoseconds().is_multiple_of(period_ns) {'''
+new = '''if false {'''
+test = "-p ng-validate --test healthy the_checks_refuse_an_admission_between_two_grid_instants"
+
+[[mutant]]
+name = "reading-checks-other-bodys-bare-lens-taken"
+path = "crates/ng-validate/src/healthy.rs"
+old = '''if bare.lens.model() != body.model_hash() {'''
+new = '''if false {'''
+test = "-p ng-validate --test healthy the_checks_refuse_a_bare_lens_of_another_body"
+
+[[mutant]]
+name = "reading-checks-other-bodys-lens-made-bare"
+path = "crates/ng-validate/src/healthy.rs"
+old = '''if lens.model() != body.model_hash() {'''
+new = '''if false {'''
+test = "-p ng-validate --test healthy the_checks_read_this_bodys_lens_from_admission"
+
+[[mutant]]
+name = "reading-checks-view-after-admission-taken"
+path = "crates/ng-validate/src/healthy.rs"
+old = '''if view.previous().is_some() {'''
+new = '''if false {'''
+test = "-p ng-validate --test healthy the_checks_read_this_bodys_lens_from_admission"
+
+[[mutant]]
+name = "healthy-range-window-above-its-range-passes"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if mean.is_some_and(|mean| limits.low.at_most(mean) && mean.at_most(limits.high)) {'''
+new = '''if mean.is_some_and(|mean| limits.low.at_most(mean)) {'''
+test = "-p ng-validate --lib healthy::tests::a_window_outside_its_range_fails_naming_the_reading_and_the_window"
+
+[[mutant]]
+name = "healthy-range-window-below-its-range-passes"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if mean.is_some_and(|mean| limits.low.at_most(mean) && mean.at_most(limits.high)) {'''
+new = '''if mean.is_some_and(|mean| mean.at_most(limits.high)) {'''
+test = "-p ng-validate --lib healthy::tests::a_window_outside_its_range_fails_naming_the_reading_and_the_window"
+
+[[mutant]]
+name = "healthy-range-unjudged-range-of-a-held-activity-passes"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''Scope::During(during) => (0..spans.len()).filter(read).any(|span| activity(span) == during),'''
+new = '''Scope::During(_) => false,'''
+test = "-p ng-validate --lib healthy::tests::a_range_whose_activity_the_run_holds_but_never_judges_blocks_and_is_named"
+
+[[mutant]]
+name = "healthy-range-unjudged-range-of-a-crossed-change-passes"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''crossed && (activity(span - 1), activity(span)) == (from, to)'''
+new = '''false'''
+test = "-p ng-validate --lib healthy::tests::a_change_the_run_crosses_whose_range_judged_nothing_blocks_and_is_named"
+
+[[mutant]]
+name = "healthy-range-range-of-an-unheld-activity-blocks"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''.any(|span| activity(span) == during)'''
+new = '''.any(|_| true)'''
+test = "-p ng-validate --lib healthy::tests::a_range_whose_activity_the_run_holds_but_never_judges_blocks_and_is_named"
+
+[[mutant]]
+name = "healthy-range-every-activity-range-blocks-where-each-activity-has-its-own"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''!self.own.iter().any(|&(_, held, _)| held == its_own)'''
+new = '''true'''
+test = "-p ng-validate --lib healthy::tests::a_change_the_run_crosses_whose_range_judged_nothing_blocks_and_is_named"
+
+[[mutant]]
+name = "healthy-range-change-held-from-its-later-side-blocks"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''let crossed = self.read[span - 1] && self.read[span];'''
+new = '''let crossed = self.read[span];'''
+test = "-p ng-validate --lib healthy::tests::a_change_the_run_crosses_whose_range_judged_nothing_blocks_and_is_named"
+
+[[mutant]]
+name = "healthy-range-change-held-from-its-earlier-side-blocks"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''let crossed = self.read[span - 1] && self.read[span];'''
+new = '''let crossed = self.read[span - 1];'''
+test = "-p ng-validate --lib healthy::tests::a_range_whose_activity_the_run_holds_but_never_judges_blocks_and_is_named"
+
+[[mutant]]
+name = "return-unread-anchor-unnamed"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''if reading.is_none() {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::an_anchor_no_bare_reading_reads_blocks_and_is_named"
+
+[[mutant]]
+name = "return-unreached-morning-passes"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''_ => gaps.push(ReturnGap::NotReached {'''
+new = '''_ => drop(ReturnGap::NotReached {'''
+test = "-p ng-validate --lib healthy::tests::a_morning_the_run_does_not_reach_blocks_and_is_named"
+
+[[mutant]]
+name = "return-cycle-anchor-read-from-its-morning-instant"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''(period_ns, plan.window_ns / period_ns)'''
+new = '''(0, plan.window_ns / period_ns)'''
+test = "-p ng-validate --lib healthy::tests::a_cycle_anchor_reads_the_cycle_after_each_morning_by_its_own_kind_of_mean"
+
+[[mutant]]
+name = "return-anchor-window-off-the-grid-taken"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''|| !plan.window_ns.is_multiple_of(period_ns) {'''
+new = '''|| false {'''
+test = "-p ng-validate --lib healthy::tests::the_checks_refuse_a_length_a_change_or_a_window_off_the_grid_and_a_grid_off_the_day"
+
+[[mutant]]
+name = "return-anchor-window-of-zero-taken"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''if plan.window_ns == 0 || !plan'''
+new = '''if !plan'''
+test = "-p ng-validate --lib healthy::tests::the_checks_refuse_a_length_a_change_or_a_window_off_the_grid_and_a_grid_off_the_day"
+
+[[mutant]]
+name = "return-uneven-grid-taken"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''if !DAY_NS.is_multiple_of(period_ns) {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::the_checks_refuse_a_length_a_change_or_a_window_off_the_grid_and_a_grid_off_the_day"
+
+[[mutant]]
+name = "healthy-range-change-off-the-grid-taken"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''.find(|at| !at.nanoseconds().is_multiple_of(period_ns))'''
+new = '''.find(|_| false)'''
+test = "-p ng-validate --lib healthy::tests::the_checks_refuse_a_length_a_change_or_a_window_off_the_grid_and_a_grid_off_the_day"
+
+[[mutant]]
+name = "healthy-range-sliding-length-off-the-grid-taken"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''&& !length.get().is_multiple_of(period_ns)'''
+new = '''&& false'''
+test = "-p ng-validate --lib healthy::tests::the_checks_refuse_a_length_a_change_or_a_window_off_the_grid_and_a_grid_off_the_day"
+
+[[mutant]]
+name = "healthy-range-empty-day-taken"
+path = "crates/ng-validate/src/healthy.rs"
+old = '''if spans.is_empty() {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::a_day_refuses_no_span_a_start_out_of_order_and_one_activity_twice_running"
+
+[[mutant]]
+name = "healthy-range-unordered-day-taken"
+path = "crates/ng-validate/src/healthy.rs"
+old = '''if at <= before {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::a_day_refuses_no_span_a_start_out_of_order_and_one_activity_twice_running"
+
+[[mutant]]
+name = "healthy-range-repeated-activity-taken"
+path = "crates/ng-validate/src/healthy.rs"
+old = '''if activity == earlier {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::a_day_refuses_no_span_a_start_out_of_order_and_one_activity_twice_running"
+
+[[mutant]]
+name = "healthy-range-set-dimension-unchecked"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''known.kind == row && known.dimension != *dimension'''
+new = '''known.kind == row && false'''
+test = "-p ng-validate --lib healthy::tests::a_set_entry_on_a_row_the_body_holds_in_another_dimension_is_refused"
+
+[[mutant]]
+name = "healthy-range-reversed-range-taken"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''if !low.at_most(high) {'''
+new = '''if false {'''
+test = "-p ng-contract --lib healthy::tests::a_range_whose_high_limit_is_below_its_low_one_is_refused"
+
+[[mutant]]
+name = "healthy-range-whole-period-outside-one-activity-taken"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''if averaging == Averaging::WholePeriod && !matches!(scope, Scope::During(_)) {'''
+new = '''if false {'''
+test = "-p ng-contract --lib healthy::tests::a_whole_period_holds_only_during_one_activity"
+
+[[mutant]]
+name = "healthy-range-negative-variation-taken"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''if !Compensated::ZERO.at_most(sd) {'''
+new = '''if false {'''
+test = "-p ng-contract --lib healthy::tests::a_negative_within_subject_variation_is_refused"
+
+[[mutant]]
+name = "healthy-range-set-takes-one-id-twice"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''ids.windows(2).find(|pair| pair[0] == pair[1])'''
+new = '''ids.windows(2).find(|_| false)'''
+test = "-p ng-contract --lib healthy::tests::a_set_holds_one_entry_per_id_per_reading_scope_and_averaging_and_one_variation_per_reading"
+
+[[mutant]]
+name = "healthy-range-set-takes-one-reading-twice"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''if ranges[..at].iter().any(same) {'''
+new = '''if false {'''
+test = "-p ng-contract --lib healthy::tests::a_set_holds_one_entry_per_id_per_reading_scope_and_averaging_and_one_variation_per_reading"
+
+[[mutant]]
+name = "healthy-range-set-takes-two-variations-for-one-reading"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''if variations[..at].iter().any(same) {'''
+new = '''if false {'''
+test = "-p ng-contract --lib healthy::tests::a_set_holds_one_entry_per_id_per_reading_scope_and_averaging_and_one_variation_per_reading"
+
+[[mutant]]
+name = "healthy-range-set-ranges-out-of-id-order"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''ranges.sort_by_key(|range| range.id);'''
+new = '''ranges.sort_by_key(|_| 0);'''
+test = "-p ng-contract --lib healthy::tests::a_set_keeps_its_entries_in_id_order"
+
+[[mutant]]
+name = "healthy-range-set-variations-out-of-id-order"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''variations.sort_by_key(|variation| variation.id);'''
+new = '''variations.sort_by_key(|_| 0);'''
+test = "-p ng-contract --lib healthy::tests::a_set_keeps_its_entries_in_id_order"
+
+[[mutant]]
+name = "healthy-range-set-digest-skips-its-kind"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''out.number(K::TAG);'''
+new = '''out.number(0);'''
+test = "-p ng-contract --lib healthy::tests::a_synthetic_set_and_a_reviewed_one_seal_their_kind"
+
+[[mutant]]
+name = "healthy-range-nothing-judged-passes"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if gaps.is_empty() && results.iter().all(|result| result.judged == 0) {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::a_range_check_that_judged_nothing_blocks"
+
+[[mutant]]
+name = "healthy-range-anchor-view-out-of-id-order"
+path = "crates/ng-contract/src/packet.rs"
+old = '''readings.sort_by_key(|reading| reading.id);'''
+new = '''readings.sort_by_key(|reading| core::cmp::Reverse(reading.id));'''
+test = "-p ng-contract --lib provenance::tests::a_packet_lists_what_admission_reads_of_each_anchor_in_id_order"
+
+[[mutant]]
+name = "healthy-range-anchor-view-drops-the-cycle-window"
+path = "crates/ng-contract/src/packet.rs"
+old = '''AnchorStatistic::CycleMean | AnchorStatistic::CycleTimeMean => window_ns,'''
+new = '''AnchorStatistic::CycleMean | AnchorStatistic::CycleTimeMean => 0,'''
+test = "-p ng-contract --lib provenance::tests::a_packet_lists_what_admission_reads_of_each_anchor_in_id_order"
+
+[[mutant]]
+name = "healthy-range-anchor-view-names-another-packet"
+path = "crates/ng-contract/src/packet.rs"
+old = '''packet: self.hash(),'''
+new = '''packet: PacketHash::of_digest(Digest::of_canonical(b"another packet")),'''
+test = "-p ng-contract --lib provenance::tests::an_anchor_view_names_its_packet_apart_from_another_with_the_same_anchors"
+
+[[mutant]]
+name = "healthy-range-day-digest-skips-each-start"
+path = "crates/ng-validate/src/healthy.rs"
+old = '''bytes.extend_from_slice(&start.nanoseconds().to_be_bytes());'''
+new = '''let _ = start;'''
+test = "-p ng-validate --lib healthy::tests::a_day_refuses_no_span_a_start_out_of_order_and_one_activity_twice_running"
+
+[[mutant]]
+name = "healthy-range-day-digest-skips-each-activity"
+path = "crates/ng-validate/src/healthy.rs"
+old = '''bytes.extend_from_slice(activity.name().as_bytes());'''
+new = '''let _ = activity;'''
+test = "-p ng-validate --lib healthy::tests::a_day_refuses_no_span_a_start_out_of_order_and_one_activity_twice_running"
+
+[[mutant]]
+name = "healthy-range-period-open-at-the-end-not-cut"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''results[range].cut += 1;'''
+new = '''results[range].cut += 0;'''
+test = "-p ng-validate --lib healthy::tests::a_whole_period_range_judges_each_whole_periods_mean_and_counts_the_periods_the_run_cuts"
+
+[[mutant]]
+name = "healthy-range-latest-failing-window-named"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if result.failure.is_none_or(|known| end < known.end) {'''
+new = '''if result.failure.is_none_or(|known| end > known.end) {'''
+test = "-p ng-validate --lib healthy::tests::a_reading_that_leaves_its_range_between_two_tumbling_means_fails_a_sliding_window"
+
+[[mutant]]
+name = "return-unread-morning-passes"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''let blocked = !MORNINGS.contains(&morning) || self.gaps.iter().any(|gap| gap.blocks(morning));'''
+new = '''let blocked = self.gaps.iter().any(|gap| gap.blocks(morning));'''
+test = "-p ng-validate --lib healthy::tests::a_morning_the_run_does_not_reach_blocks_and_is_named"
+
+[[mutant]]
+name = "healthy-range-unread-reading-unnamed"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''.filter(|reading| reading.ranged && !reading.read.contains(&true))'''
+new = '''.filter(|_| false)'''
+test = "-p ng-validate --lib healthy::tests::a_reading_that_gave_no_value_blocks_and_is_named_beside_one_that_was_judged"
 
 [[mutant]]
 name = "clock-past-a-day"

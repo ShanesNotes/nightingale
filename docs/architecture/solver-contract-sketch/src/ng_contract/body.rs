@@ -24,6 +24,11 @@ impl CompiledBody {
     pub fn bind<K: PacketKind>(&self, _packet: ParameterPacket<K>) -> Result<BoundParameters, AdmissionError> {
         todo!()
     }
+    /// Refuses a healthy range or within-subject variation whose row this body holds in another dimension. One
+    /// set serves every body, so an entry for a row this body lacks is not an error.
+    pub fn check_set<K: PacketKind>(&self, _set: &HealthyRangeSet<K>) -> Result<(), AdmissionError> {
+        todo!()
+    }
     /// Compiles channels and a grid against this body into a lens, hashed apart from the model, so a
     /// new lens applies to any replay of this body. Refuses a row the body does not hold, an error in
     /// another dimension, a negative error and two channels that read one row one way.

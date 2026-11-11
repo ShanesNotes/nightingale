@@ -5,9 +5,10 @@ use crate::law::Op;
 use crate::provenance::seal_trace;
 use crate::quantity::dimension;
 use crate::{
-    AdmissionError, Anchor, AnchorId, AnchorStatistic, Binding, Citation, Compensated, CompiledBody, Day,
-    Digest, Dimension, Dimensionless, ErrorScales, LawName, Measure, MethodHistory, ModelHash, PacketSeed,
-    ParameterKey, RateBand, RowId, RowKind, SimTime, Slot, UnknownId, ValueName, ValueProvenance,
+    AdmissionError, Anchor, AnchorId, AnchorReading, AnchorStatistic, Anchors, Binding, Citation,
+    Compensated, CompiledBody, Day, Digest, Dimension, Dimensionless, ErrorScales, LawName, Measure,
+    MethodHistory, ModelHash, PacketSeed, ParameterKey, RateBand, RowId, RowKind, SimTime, Slot, UnknownId,
+    ValueName, ValueProvenance,
 };
 use core::marker::PhantomData;
 use core::num::{NonZeroU32, NonZeroU64};
@@ -248,6 +249,27 @@ impl<K: PacketKind> ParameterPacket<K> {
             trace: <K as sealed::PacketKind>::words(&trace),
         });
         Ok(())
+    }
+    /// What admission reads of each anchor, in id order, and never its value, named by this packet's hash.
+    pub fn anchors(&self) -> Anchors {
+        let window_ns = self.cycle.map_or(0, Cycle::period_ns);
+        let mut readings: Vec<AnchorReading> = (self.anchors.iter())
+            .map(|entry| AnchorReading {
+                id: entry.id,
+                row: entry.row,
+                method: entry.method,
+                statistic: entry.statistic,
+                window_ns: match entry.statistic {
+                    AnchorStatistic::Instant => 0,
+                    AnchorStatistic::CycleMean | AnchorStatistic::CycleTimeMean => window_ns,
+                },
+            })
+            .collect();
+        readings.sort_by_key(|reading| reading.id);
+        Anchors {
+            readings,
+            packet: self.hash(),
+        }
     }
     /// `key`'s range in the patient's population. Refuses a reversed interval and a second record for a key.
     pub fn population<U: Dimension>(

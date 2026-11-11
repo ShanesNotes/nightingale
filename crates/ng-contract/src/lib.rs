@@ -547,7 +547,7 @@
 //! use ng_contract::*;
 //! let _ = Proportions::<Glucose>::using(Space::Interstitium).energy_into(Space::Thermal);
 //! ```
-//! Only a card the contract grants a site class reacts there.
+//! Only a card the contract grants a site set reacts there.
 //! ```compile_fail,E0277
 //! use ng_contract::*;
 //! fn ungranted<'b>(laws: &mut FragmentBuilder<'b, Renal>, burn: Proportions<Glucose>)
@@ -1139,6 +1139,32 @@
 //!     packet.calibrated(key, Binding::Body, guess, anchor)
 //! }
 //! ```
+//! A packet's anchor view names what admission reads of each anchor, and no value leaves it (I14).
+//! ```compile_fail,E0599
+//! use ng_contract::*;
+//! fn targets(packet: &ParameterPacket<SyntheticFixture>) -> Vec<Compensated> {
+//!     packet.anchors().iter().map(|reading| reading.value()).collect()
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn read(packet: &ParameterPacket<SyntheticFixture>) -> Vec<(RowKind, &'static str)> {
+//!     packet.anchors().iter().map(|reading| (reading.row(), reading.method())).collect()
+//! }
+//! ```
+//! Only its packet makes its anchor view, so no caller can leave an anchor out.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn emptied(packet: PacketHash) -> Anchors {
+//!     Anchors { readings: Vec::new(), packet }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn viewed(packet: &ParameterPacket<SyntheticFixture>) -> Anchors {
+//!     packet.anchors()
+//! }
+//! ```
 //! A fit names its anchor, so it is one unknown with one row.
 //! ```compile_fail,E0061
 //! use ng_contract::*;
@@ -1189,6 +1215,59 @@
 //! use ng_contract::*;
 //! fn run(model: ModelHash, packet: PacketHash, seed: Seed, resolution: DeclaredResolution) -> RunIdentity {
 //!     RunIdentity::new(model, packet, seed, resolution)
+//! }
+//! ```
+//! A healthy-range set only judges a body, so it never stands where a run's identity begins (record 0005).
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn judged(body: &CompiledBody, set: HealthyRangeSet<SyntheticFixture>)
+//!     -> Result<BoundParameters, AdmissionError> {
+//!     body.bind(set)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn bound(body: &CompiledBody, packet: ParameterPacket<SyntheticFixture>)
+//!     -> Result<BoundParameters, AdmissionError> {
+//!     body.bind(packet)
+//! }
+//! ```
+//! A healthy range's limits are measures, never bare numbers.
+//! ```compile_fail,E0308
+//! use core::num::NonZeroU64;
+//! use ng_contract::*;
+//! fn bare(row: RowKind, length: NonZeroU64) -> Result<HealthyRange<SyntheticFixture>, AdmissionError> {
+//!     let averaging = Averaging::Sliding(length);
+//!     HealthyRange::synthetic("xx.range", row, "a synthetic gauge", Scope::Every, averaging, 0.0, 20.0, "synthetic")
+//! }
+//! ```
+//! A synthetic range takes a note and no citation, as a packet's kinds do.
+//! ```compile_fail,E0308
+//! use core::num::NonZeroU64;
+//! use ng_contract::*;
+//! fn cited(row: RowKind, length: NonZeroU64, low: Measure<Pressure>, high: Measure<Pressure>, source: Citation)
+//!     -> Result<HealthyRange<SyntheticFixture>, AdmissionError> {
+//!     let averaging = Averaging::Sliding(length);
+//!     HealthyRange::synthetic("xx.range", row, "a synthetic gauge", Scope::Every, averaging, low, high, source)
+//! }
+//! ```
+//! Nothing builds a reviewed range yet, so every set the checks read is synthetic.
+//! ```compile_fail,E0599
+//! use core::num::NonZeroU64;
+//! use ng_contract::*;
+//! fn cited(row: RowKind, length: NonZeroU64, low: Measure<Pressure>, high: Measure<Pressure>, source: Citation)
+//!     -> Result<HealthyRange<Reviewed>, AdmissionError> {
+//!     let averaging = Averaging::Sliding(length);
+//!     HealthyRange::<Reviewed>::synthetic("xx.range", row, "a synthetic gauge", Scope::Every, averaging, low, high, source)
+//! }
+//! ```
+//! ```
+//! use core::num::NonZeroU64;
+//! use ng_contract::*;
+//! fn noted(row: RowKind, length: NonZeroU64, low: Measure<Pressure>, high: Measure<Pressure>)
+//!     -> Result<HealthyRange<SyntheticFixture>, AdmissionError> {
+//!     let averaging = Averaging::Sliding(length);
+//!     HealthyRange::synthetic("xx.range", row, "a synthetic gauge", Scope::Every, averaging, low, high, "synthetic")
 //! }
 //! ```
 //! Only the receiver the coupling map draws reads an arrow: RN cannot read what CV sends NS.
@@ -1370,6 +1449,7 @@ mod evaluate;
 mod failure;
 mod graph;
 mod head;
+mod healthy;
 mod identity;
 mod image;
 mod landing;
@@ -1404,6 +1484,7 @@ pub use conservation::*;
 pub use elimination::Factors;
 pub use failure::*;
 pub use head::*;
+pub use healthy::*;
 pub use identity::*;
 pub use image::*;
 pub use law::*;

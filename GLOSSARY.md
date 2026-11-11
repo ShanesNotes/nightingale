@@ -291,7 +291,7 @@ A sum of pools that no transfer or reaction inside the body changes, such as all
 A flow with two ends: what leaves one pool enters another pool or a receipt pool, so no amount appears or vanishes (I10).
 
 **Reaction**:
-At one site, several amounts used and made in fixed whole-number proportion, at one rate. Its two ends are what it uses and what it makes, and they hold the same count of every element and the same energy, so it keeps I10 as a transfer does. Only a species that states its atoms takes part, and such a species holds no fixed charge, so a reaction never moves charge. Only a card granted its site class declares one. One turnover uses and makes each species by its count.
+At one site, several amounts used and made in fixed whole-number proportion, at one rate. Its two ends are what it uses and what it makes, and they hold the same count of every element and the same energy, so it keeps I10 as a transfer does. Only a species that states its atoms takes part, and such a species holds no fixed charge, so a reaction never moves charge. Its terms sit in one space of its site, apart from the space its energy goes into. Only a card granted its site set declares one. One turnover uses and makes each species by its count.
 
 **Reference species**:
 The species a reaction's rate counts, used or made per second, as a source states the rate. A turnover uses or makes it a whole number of times, one unless the proportions state more, and the reaction's column counts turnovers: its rate is the stated rate over that count.
@@ -672,6 +672,20 @@ _Avoid_: health check, normal-range check
 **Return check**:
 The check that the patient meets the anchors again, within the change their within-subject variation allows, at the same time of day on each later day of the run, with nothing reimposed since admission. With the certificate and the healthy-range check, it decides the first milestone (record 0004).
 _Avoid_: re-anchoring, daily reset
+
+**Activity**:
+What the patient is doing that a source shows shifts a reading, such as asleep or seated after a meal. A run's day is a series of activities, each from its start until the next, and a change is the instant one gives way to the next. The healthy-range check matches each window to the activity it lies in, and a window across a change, or in the time the change's shift lasts, takes the change's own range (record 0004).
+_Avoid_: state, phase, mode
+
+**Bare lens**:
+A lens's readings with no window, delay or measurement error: each grid instant's value, or each grid period's time mean for a reading that integrates. The healthy-range check and the return check read a run through it and slide their own windows (record 0004).
+
+**Whole period**:
+The whole span of one activity, such as the night, when a healthy range's study averaged over it. The healthy-range check judges each whole period the run holds and counts the ones the run's start or end cuts.
+
+**Coverage gap**:
+Something a check could not judge: a reading, an activity or a change with no healthy range, an anchor with no within-subject variation or no bare reading, a morning the run did not reach, a range whose activity or change the run holds but which judged no whole window or whole period, a reading that gave no value, or a check that judged nothing at all. Each is named and blocks the verdict, and none leaves a reading unchecked silently (record 0004). It is not a missing reading in the chart.
+_Avoid_: skipped, exempt
 
 **Accuracy gate**:
 The arena check that runs a solver core on manufactured cases with known answers and against the reference integrator, because a step can close every ledger and still be wrong.

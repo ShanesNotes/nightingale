@@ -50,7 +50,6 @@ fn circuit(liver: bool) -> Result<Schema, AdmissionError> {
     }
     schema.carry::<Sodium, Blood>(Space::Plasma);
     schema.carry::<Sodium, Blood>(Space::Lumen);
-    schema.pool::<Energy>(root.id(), Space::Elastic)?;
     Ok(schema)
 }
 
@@ -62,7 +61,9 @@ enum Liver {
 }
 
 fn circulate(liver: Liver) -> Result<CompiledBody, AdmissionError> {
-    assemble(circuit(liver != Liver::Unstated)?, |mut body| {
+    let mut schema = circuit(liver != Liver::Unstated)?;
+    schema.pool::<Energy>(site::<TissueSite>("body"), Space::Elastic)?;
+    assemble(schema, |mut body| {
         let class = slow()?;
         let (mut cv, ports) = body.cardiovascular()?.parts();
         let (pressure, _) = ports.blood_pressure(&mut cv);
@@ -344,4 +345,59 @@ fn a_lymph_law_reads_no_blood_flow_at_the_liver_bed_as_at_any_other() {
             "lymph from the {bed:?} bed"
         );
     }
+}
+
+fn switch<'b, O: Owner>(
+    laws: &mut FragmentBuilder<'b, O>,
+    route: &EdgeRoute<'b, O, Water>,
+) -> Result<(), AdmissionError> {
+    let class = slow()?;
+    let [on, off] = laws.modes_along(route, "switch", ["on", "off"]);
+    let flow = laws.edge_kernel::<VascularEdge, _, _>(|mut k| {
+        let flow = k.edge_flow();
+        k.finish(flow, on.only(), class)
+    });
+    laws.event(Guard::new(flow, Crossing::Falling, on.to(&off)?));
+    Ok(())
+}
+
+fn switched(hepatic: bool) -> Result<CompiledBody, AdmissionError> {
+    assemble(circuit(true)?, |mut body| {
+        let class = slow()?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, still);
+        if !hepatic {
+            switch(&mut cv, &route)?;
+        }
+        body.add(cv.finish());
+        let (mut hp, ports) = body.hepatic(None)?.parts();
+        let route = ports.sinusoids(&mut hp);
+        let still = hp.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, hp.every_mode(), class)
+        });
+        hp.transfer_along(&route, still);
+        if hepatic {
+            switch(&mut hp, &route)?;
+        }
+        body.add(hp.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn a_guard_on_a_switch_along_circulation_reads_the_flow_at_its_own_edge() -> Result<(), AdmissionError> {
+    switched(false)?;
+    Ok(())
+}
+
+#[test]
+fn the_hepatic_card_reads_the_flow_along_its_own_sinusoids() -> Result<(), AdmissionError> {
+    switched(true)?;
+    Ok(())
 }
