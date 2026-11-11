@@ -2402,14 +2402,23 @@ fn lunch() -> Meal {
 }
 
 /// The day's held inputs at the anchor, which every run knows, then a later clock, a sleep, a room change, a
-/// void that opens and shuts and a meal, each of which can arrive late. The later clock crosses midnight.
+/// void that opens and shuts and a meal, each of which can arrive late. The later clock crosses midnight. A run
+/// that knows them all at admission takes them on its port, or from its packet's day.
 struct DayInputs {
     body: CompiledBody,
+    in_the_packet: bool,
 }
 impl DayInputs {
     fn new() -> Self {
         Self {
             body: day_body().expect("a body"),
+            in_the_packet: false,
+        }
+    }
+    fn in_the_packet() -> Self {
+        Self {
+            in_the_packet: true,
+            ..Self::new()
         }
     }
     fn stated() -> Vec<BoundaryEvent> {
@@ -2506,13 +2515,12 @@ impl ReplayCase for DayInputs {
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         let mut events = Self::stated();
         events.extend(self.events()?);
-        admit_fixture(
-            &self.body,
-            self.packet()?,
-            BoundaryPort::new(events)?,
-            core,
-            store,
-        )
+        let mut packet = self.packet()?;
+        if self.in_the_packet {
+            packet.day(Day::new(events)?)?;
+            return admit_fixture(&self.body, packet, BoundaryPort::new(Vec::new())?, core, store);
+        }
+        admit_fixture(&self.body, packet, BoundaryPort::new(events)?, core, store)
     }
     fn admit_withheld<'m>(
         &'m self,
@@ -2542,6 +2550,79 @@ fn the_days_held_inputs_and_a_meal_pass_late_admission_pause_and_resume() {
             evidence.runs().len()
         );
     }
+}
+
+/// What a record shows of a run but its ledger, whose links seal the packet's hash, and what still waits.
+fn state_bits(session: &Session<'_, Running>) -> [Digest; 6] {
+    let RecordDigests {
+        state,
+        continuation,
+        segment,
+        modes,
+        streams,
+        applied,
+        ..
+    } = session.record().digests();
+    [state, continuation, segment, modes, streams, applied]
+}
+
+/// The same day known from the start in the packet, and its events each admitted at the last head that takes it
+/// on a packet with no day, give the same state bits at every revision. Their seals differ: the packet's hash
+/// covers its day.
+#[test]
+fn a_day_the_packet_holds_gives_the_bits_of_its_events_admitted_late() {
+    let case = DayInputs::in_the_packet();
+    let (core, store) = (reference(8 * SECOND), MemoryStore::default());
+    let mut known = case.admit(&core, &store).expect("admitted");
+    let mut rows = vec![(known.record().accepted().time(), state_bits(&known))];
+    let mut stamps = vec![known.record().earliest_stamp()];
+    while known.record().accepted().time() < case.end() {
+        known = advance(known);
+        rows.push((known.record().accepted().time(), state_bits(&known)));
+        stamps.push(known.record().earliest_stamp());
+    }
+    let mut arrivals: Vec<(usize, BoundaryEvent)> = (case.events().expect("events").into_iter())
+        .map(|event| {
+            (
+                stamps.iter().rposition(|stamp| *stamp < event.at()).unwrap_or(0),
+                event,
+            )
+        })
+        .collect();
+    arrivals.sort_by_key(|arrival| arrival.0);
+    assert!(
+        arrivals.iter().any(|arrival| arrival.0 > 0),
+        "an event arrives after a step"
+    );
+    let (late_core, late_store) = (reference(8 * SECOND), MemoryStore::default());
+    let mut late = case.admit_withheld(&late_core, &late_store).expect("admitted");
+    let mut seen = vec![(late.record().accepted().time(), state_bits(&late))];
+    for (revision, event) in arrivals {
+        while seen.len() <= revision {
+            late = advance(late);
+            seen.push((late.record().accepted().time(), state_bits(&late)));
+        }
+        let input = AuthorizedInput::from_command_receipt(Digest::of_canonical(b"a command"), event);
+        late.enqueue(input).expect("a head that still takes it");
+    }
+    while late.record().accepted().time() < case.end() {
+        late = advance(late);
+        seen.push((late.record().accepted().time(), state_bits(&late)));
+    }
+    assert_eq!(seen, rows, "every revision, by its state bits");
+    assert_eq!(late.record().digests().waiting, known.record().digests().waiting);
+    assert_ne!(late.record().seal(), known.record().seal());
+}
+
+/// A resume reads the timeline from the checkpoint, never the packet's day again.
+#[test]
+fn a_run_whose_packet_holds_its_day_survives_a_resume() {
+    let case = DayInputs::in_the_packet();
+    let clock = script();
+    let plan = plan(&clock);
+    let evidence =
+        replay_gate(ReplayGate::Resume, &case, &|| reference(8 * SECOND), &plan).expect("the gate");
+    assert!(evidence.runs().len() >= 2, "{} runs", evidence.runs().len());
 }
 
 #[test]
