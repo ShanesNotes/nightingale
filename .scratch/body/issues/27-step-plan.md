@@ -25,11 +25,11 @@ This runs as pstack's Hillclimb playbook: one metric, one hypothesis at a time, 
 
 The pick is the halved backward Euler step, `backward_euler_halved` ([record 0009](../../../docs/adr/0009-a-step-reads-its-error-from-its-two-half-stages.md)). A step solves only the two half stages that carry its increment, and the record reads its error from the change in slope between them times half the ticket, measured from the start. That is their second difference when the halves are equal; on an odd ticket it weighs each half by its length, so a straight line reads no error. A ticket after a breakpoint shows the doubled set, and a ticket under 2 ns one whole stage. `ng_solver::Core::new` steps by it. `Core::doubled` keeps the old run, so a checkpoint it wrote still resumes and replays.
 
-On the slice it takes 19.5% less wall time for each simulated second than the doubled step: 126.4 ms against 157.7. Those are medians of 25 repeats a core, on asrog after its interrupt fix, from 5 alternating rounds of 5 repeats in one binary. The paired difference is -19.49%, range -20.68 to -18.28, lower in 5 of 5 rounds. A step costs 22.0% less (instructions a step -23.4%, 2 counter runs a core), and a second takes 3.2% more steps. Health is the doubled step's, except fewer accuracy refusals on row 158 (361 for 482 in 60 s); `most_refusals` stays 4 and `shortest_retry_ns` 625,000. It passes the certificate, the accuracy gate (worst 0.693) and the replay gates. Over the first 30 s after admission the energy gap is 0.963% of inflow, against 0.814% on the doubled step, under the test's 2%.
+On the slice it takes 18.9% less wall time for each simulated second than the doubled step in the same binary: 131.5 ms against 161.5. Those are medians on asrog after its interrupt fix, from five alternating rounds of 5 repeats, 25 for each core. The paired difference is -18.94%, range -21.77 to -11.56, lower in 5 of 5 rounds. Against main's binary from before this change, in five alternating rounds of 5 repeats, 25 for each binary, the gain main gets is -18.39%, range -28.18 to -9.34, lower in 5 of 5: 134.8 ms against 161.5. A step costs 21.5% less (instructions a step -23.4%, 2 counter runs a core, in either comparison), and a second takes 3.2% more steps. Health is the doubled step's, except fewer accuracy refusals on row 158 (361 for 482 in 60 s); `most_refusals` stays 4 and `shortest_retry_ns` 625,000. It passes the certificate, the accuracy gate (worst 0.693) and the replay gates. Over the first 30 s after admission the energy gap is 0.963% of inflow, against 0.814% on the doubled step, under the test's 2%.
 
 It is a different run. The resolution gains method 3, so the run identity changes, and the first-second seal and trace in `trace.rs` and `smoke.rs` move. The slice's model hash and its packet do not.
 
-**The pick falls short of the aim by a factor of 12.6:** 126.4 ms for each simulated second against 10.
+**The pick falls short of the aim by a factor of 13.1:** 131.5 ms for each simulated second against 10.
 
 ### The plans measured
 
@@ -40,9 +40,9 @@ Every row is the slice on asrog (i7-6700, release builds), from paired rounds th
 | The doubled step, the baseline | `6f129e3` | 149.64 ms (148.53 to 157.60, 25 repeats) | baseline |
 | The books visit only exchanging columns | `claude/body-27-ledger` | +5.1% (+3.9 to +5.4), 5 rounds; instructions -1.09% | no: code placement |
 | After a firing, commit the length the last restart passed at | `claude/body-27-restart` | +3.95% (+3.53 to +4.63), 5 rounds; refusals -59.7% | no |
-| Two-stage Radau IIA, order 3 | `claude/body-27-radau` | +15% tuned, 5 rounds; steps -21%, a step +46% | no |
+| Two-stage Radau IIA, order 3 | `claude/body-27-radau` | +15% tuned: 175.39 ms (174.54 to 179.61), set B, 3 rounds; steps -21%, a step +46% | no |
 | The halved step | `claude/body-27-lean` | -20.05% (-21.01 to -14.93), 5 rounds | yes |
-| The halved step, built, after the interrupt fix | this ticket's PR | -19.49% (-20.68 to -18.28), 5 rounds | the pick |
+| The halved step, built, after the interrupt fix | this ticket's PR | -18.94% (-21.77 to -11.56) in one binary; -18.39% (-28.18 to -9.34) against main's binary; 5 rounds each | the pick |
 | One stage read by Milne's device | `claude/body-27-lean` | -30.37% (-33.93 to -26.92), 5 rounds | no: one refusal of floor margin, accuracy worst 0.989, 4 fewer valve mode changes a beat |
 | Accuracy target 0.85 | `claude/body-27-tune` | -0.17% (-10.77 to +1.47), 10 rounds | no: retries +113% |
 | Growth 4 | `claude/body-27-tune` | -1.75% (-9.26 to +5.83), 10 rounds | no: under the noise |
@@ -56,7 +56,7 @@ On the halved step a beat takes 193.5 steps: the estimate sets 103.3, the 10 ms 
 
 ### What would close the rest
 
-The step count and a step's cost have to fall together, about 12.6 times between them. In order of size:
+The step count and a step's cost have to fall together, about 13.1 times between them. In order of size:
 
 1. Landings: 16 a beat take 23% of the solves, at 3.6 solves each. The record's landing rule (`crates/ng-contract/src/landing.rs`) aims a secant at published ends. The half stage's guard reading could aim it nearer. That changes the contract outside this ticket. Six of the landings are valve reopenings inside one ejection ([native-contract 32](../../native-contract/issues/32-valves-shut-inside-ejection.md)).
 2. The wave rate class: 50 of the 193 steps a beat are the cardiovascular crate's 10 ms class. [Ticket 07](07-what-limits-the-step.md) measured 14% fewer steps at 40 ms.
