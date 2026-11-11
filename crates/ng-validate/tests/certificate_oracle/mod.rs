@@ -17,8 +17,8 @@ fn limits(quantity: QuantityId, absolute: f64, relative: f64, drift: f64) -> Qua
         }
     }
     let build = match quantity.book() {
+        Book::Of(Species::Energy) | Book::Energy => of::<Energy>,
         Book::Of(species) => species.visit(Build),
-        Book::Energy => of::<Energy>,
         Book::Element(_) => {
             let measure = |value| Measure::<Atoms>::new(value).expect("finite");
             let ratio = Measure::<Dimensionless>::new(relative).expect("finite");

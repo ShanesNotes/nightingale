@@ -279,8 +279,8 @@ pub enum Space {
     Elastic,
     /// Heat: one store on the same site, and a bed's own where a reaction there releases energy.
     Thermal,
-    /// Gas with no water of its own: a bed's alveolar gas, or an airway site's. The gas law sets its volume, so no law
-    /// reads it from water.
+    /// Gas with no water of its own: a lung bed's alveolar gas. The gas law sets its volume, so no law reads it from
+    /// water.
     Gas,
 }
 impl Space {
@@ -297,11 +297,11 @@ impl Space {
             Class::VesselSegment => &[Space::Lumen],
             Class::EnclosedSpace => &[Space::Fluid],
             Class::Junction => &[Space::Vesicle, Space::Cleft, Space::Bound],
-            Class::TissueSite => &[Space::Elastic, Space::Thermal, Space::Gas],
+            Class::TissueSite => &[Space::Elastic, Space::Thermal],
             Class::NerveSegment => &[],
         }
     }
-    fn holds_water(self) -> bool {
+    pub(crate) const fn holds_water(self) -> bool {
         matches!(
             self,
             Space::Plasma | Space::Interstitium | Space::Cells | Space::Lumen | Space::Fluid

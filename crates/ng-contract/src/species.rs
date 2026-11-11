@@ -84,10 +84,10 @@ macro_rules! species {
         false
     };
     (@spaces watery $space:ident) => {
-        matches!($space, Space::Plasma | Space::Interstitium | Space::Cells | Space::Lumen | Space::Fluid)
+        $space.holds_water()
     };
     (@spaces outside $space:ident) => {
-        matches!($space, Space::Plasma | Space::Interstitium | Space::Lumen | Space::Fluid)
+        $space.holds_water() && !matches!($space, Space::Cells)
     };
     (@spaces blood $space:ident) => {
         matches!($space, Space::Plasma | Space::Lumen)
@@ -231,7 +231,7 @@ species! {
     Triglyceride = "triglyceride" => fuel(C 51, H 98, O 6), water_borne, [watery], uncharged(), inert;
     /// Palmitic acid stands for every fatty acid.
     FattyAcids = "fatty acids" => fuel(C 16, H 32, O 2), water_borne, [watery], uncharged(), inert;
-    Glycerol = "glycerol" => fuel(C 3, H 8, O 3), water_borne, [watery], uncharged(), osmotic;
+    Glycerol = "glycerol" => fuel(C 3, H 8, O 3), water_borne, [watery], uncharged(), inert;
     /// Alanine stands for every amino acid.
     AminoAcids = "amino acids" => fuel(C 3, H 7, N 1, O 2), water_borne, [watery], uncharged(), osmotic;
     /// An alanine residue, the amino acid less a water, stands for a unit of body protein.
@@ -265,7 +265,7 @@ species! {
     Cortisol = "cortisol" => carried(0), water_borne, [outside, bound], uncharged(), inert;
 }
 
-const CARRIED_COUNT: usize = {
+const WATER_BORNE_COUNT: usize = {
     let (mut count, mut at) = (0, 0);
     while at < Species::ALL.len() {
         if Species::ALL[at].water_borne() {
@@ -277,8 +277,8 @@ const CARRIED_COUNT: usize = {
 };
 
 impl Species {
-    pub(crate) const CARRIED: [Species; CARRIED_COUNT] = {
-        let mut carried = [Species::Water; CARRIED_COUNT];
+    pub(crate) const WATER_BORNE: [Species; WATER_BORNE_COUNT] = {
+        let mut carried = [Species::Water; WATER_BORNE_COUNT];
         let (mut at, mut next) = (0, 0);
         while at < Species::ALL.len() {
             if Species::ALL[at].water_borne() {
@@ -341,7 +341,7 @@ mod tests {
             Species::CarbonDioxide,
             Species::Glucose,
         ];
-        assert_eq!(Species::CARRIED[..carried.len()], carried);
+        assert_eq!(Species::WATER_BORNE[..carried.len()], carried);
     }
 
     #[test]
@@ -361,5 +361,77 @@ mod tests {
                 (Species::Magnesium, 2),
             ]
         );
+    }
+
+    #[test]
+    fn the_new_rows_state_body_01s_makeup_carriage_and_spaces() {
+        use super::{Charge, Concentration, Element, Makeup, Osmoles, SameDimension, Space};
+        use super::{
+            Ammonium, Calcium, CellAnion, Chloride, Creatinine, DietBase, FixedAcid, Glucose, Ketones, Lactate,
+            Magnesium, Phosphate, Potassium, Sodium, Urea,
+        };
+        use Element::{Carbon as C, Hydrogen as H, Nitrogen as N, Oxygen as O};
+        use Space::{Bound, Cells, Cleft, Elastic, Fluid, Gas, Interstitium, Lumen, Plasma, Thermal, Vesicle};
+        const WATERY: &[Space] = &[Plasma, Interstitium, Cells, Lumen, Fluid];
+        const HORMONE: &[Space] = &[Plasma, Interstitium, Lumen, Fluid, Bound];
+        const BLOOD: &[Space] = &[Plasma, Lumen];
+        let carried = |charge: i64| Makeup::Carried { charge };
+        let fuel = |elements: &'static [(Element, i64)]| Makeup::Atoms { elements, fuel: true };
+        let rows: [(Species, Makeup, bool, &[Space]); 28] = [
+            (Species::NitrogenGas, carried(0), false, &[Gas]),
+            (Species::Glycogen, fuel(&[(C, 6), (H, 10), (O, 5)]), false, &[Cells]),
+            (Species::Triglyceride, fuel(&[(C, 51), (H, 98), (O, 6)]), true, WATERY),
+            (Species::FattyAcids, fuel(&[(C, 16), (H, 32), (O, 2)]), true, WATERY),
+            (Species::Glycerol, fuel(&[(C, 3), (H, 8), (O, 3)]), true, WATERY),
+            (Species::AminoAcids, fuel(&[(C, 3), (H, 7), (N, 1), (O, 2)]), true, WATERY),
+            (Species::BodyProtein, fuel(&[(C, 3), (H, 5), (N, 1), (O, 1)]), false, &[Cells]),
+            (Species::Lactate, fuel(&[(C, 3), (H, 6), (O, 3)]), true, WATERY),
+            (Species::Ketones, fuel(&[(C, 4), (H, 6), (O, 3)]), true, WATERY),
+            (Species::Urea, fuel(&[(C, 1), (H, 4), (N, 2), (O, 1)]), true, WATERY),
+            (Species::Ammonium, fuel(&[(N, 1), (H, 3)]), true, WATERY),
+            (Species::Creatinine, fuel(&[(C, 4), (H, 7), (N, 3), (O, 1)]), true, WATERY),
+            (Species::FixedAcid, carried(0), true, WATERY),
+            (Species::DietBase, fuel(&[(C, 2), (H, 4), (O, 2)]), true, WATERY),
+            (Species::CellAnion, carried(-1), false, &[Cells]),
+            (Species::Calcium, carried(2), true, WATERY),
+            (Species::Magnesium, carried(2), true, WATERY),
+            (Species::Phosphate, carried(0), true, WATERY),
+            (Species::Hemoglobin, carried(0), true, BLOOD),
+            (Species::Iron, carried(0), true, WATERY),
+            (Species::Insulin, carried(0), true, HORMONE),
+            (Species::Glucagon, carried(0), true, HORMONE),
+            (Species::Renin, carried(0), true, BLOOD),
+            (Species::AngiotensinII, carried(0), true, HORMONE),
+            (Species::Aldosterone, carried(0), true, HORMONE),
+            (Species::NatriureticPeptide, carried(0), true, HORMONE),
+            (Species::ParathyroidHormone, carried(0), true, HORMONE),
+            (Species::Cortisol, carried(0), true, HORMONE),
+        ];
+        let every = [Plasma, Interstitium, Cells, Lumen, Fluid, Vesicle, Cleft, Bound, Elastic, Thermal, Gas];
+        assert_eq!(rows.map(|row| row.0), Species::ALL[12..]);
+        for (species, makeup, water_borne, spaces) in rows {
+            assert_eq!(species.makeup(), makeup, "{species:?}");
+            assert_eq!(species.water_borne(), water_borne, "{species:?}");
+            let held: Vec<Space> = every.into_iter().filter(|&space| species.may_hold(space)).collect();
+            assert_eq!(held, spaces, "{species:?}");
+        }
+        fn charge<A: SameDimension<Charge>, C: SameDimension<Concentration<Charge>>>() {}
+        fn osmoles<A: SameDimension<Osmoles>, C: SameDimension<Concentration<Osmoles>>>() {}
+        charge::<Sodium, Concentration<Sodium>>();
+        charge::<Potassium, Concentration<Potassium>>();
+        charge::<Chloride, Concentration<Chloride>>();
+        charge::<Lactate, Concentration<Lactate>>();
+        charge::<Ketones, Concentration<Ketones>>();
+        charge::<Ammonium, Concentration<Ammonium>>();
+        charge::<FixedAcid, Concentration<FixedAcid>>();
+        charge::<DietBase, Concentration<DietBase>>();
+        charge::<CellAnion, Concentration<CellAnion>>();
+        charge::<Calcium, Concentration<Calcium>>();
+        charge::<Magnesium, Concentration<Magnesium>>();
+        osmoles::<Glucose, Concentration<Glucose>>();
+        osmoles::<Urea, Concentration<Urea>>();
+        osmoles::<Creatinine, Concentration<Creatinine>>();
+        osmoles::<Phosphate, Concentration<Phosphate>>();
+        osmoles::<CellAnion, Concentration<CellAnion>>();
     }
 }
