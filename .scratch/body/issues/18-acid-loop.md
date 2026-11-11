@@ -19,3 +19,5 @@ Blocked by: 08, 09, 11, 14, 17, 29, `.scratch/research/issues/14-law-forms-volum
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** buffering inside cells, bone as a buffer, and the rise in bicarbonate after a meal unless research 14 sources its size.
+
+From [ticket 03](03-whole-body-lists.md)'s Answer: the lumped anion is the species `fixed acid`, which is carried, holds no fixed charge and is -1 after speciation. The diet's organic anion is the species `diet base`, which states acetic acid's atoms and is -1 after speciation. They share no book, because the fixed acid states no atoms, and this ticket's balance reads both. The species table's column for charge after speciation gives the direct relabels into a charge sum, for the fixed and strong rows. A weak acid reaches the sum through a declared conversion in charge per that species, by the cancellation rows, and `Osmoles` has the same two ways in.

@@ -18,3 +18,5 @@ Blocked by: 09, 15, `.scratch/research/issues/13-law-forms-gut-and-fuels.md`
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** exercise, amino acids one by one, and lipoproteins.
+
+From [ticket 03](03-whole-body-lists.md)'s Answer: a reaction counts its reference species once. So creatinine from body protein compiles only with creatinine as the reference, to run on a negative rate, and a single storage reaction that burns a share below one half in its own counts cannot be written. [Ticket 04](04-scopes-ports-and-census.md) decides whether the reference may be counted N times. The species rule is by kind of space, so triglyceride may sit in any cells, and the run with the store in the muscle bed's cells needs no change to the lists.
