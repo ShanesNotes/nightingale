@@ -389,10 +389,8 @@ impl RangeFold {
                 .map(|(at, range)| (at, range.scope(), range.averaging()))
                 .collect();
             if own.is_empty() {
-                gaps.push(RangeGap::NoRange {
-                    row: reading.row,
-                    method: reading.method,
-                });
+                let (row, method) = (reading.row, reading.method);
+                note(&mut gaps, RangeGap::NoRange { row, method });
             }
             folds.push(Reading::new(reading, &own, &spans, period_ns));
         }

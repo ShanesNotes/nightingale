@@ -413,6 +413,25 @@ fn a_lens_reading_with_no_range_in_the_set_blocks_and_is_named() {
 }
 
 #[test]
+fn a_reading_with_no_range_is_named_once_however_the_lens_reads_it() {
+    let set = set(
+        vec![range("xx.range", Scope::Every, sliding(SECOND), 0.0, 100.0)],
+        Vec::new(),
+    );
+    let readings = [sampled(row("unranged")), integrated(row("unranged"))];
+    let report = ranged(&readings, SECOND, &set, &day(&[(0, "awake")]), 0, &[]);
+    let named = RangeGap::NoRange {
+        row: row("unranged"),
+        method: METHOD,
+    };
+    assert_eq!(
+        report.gaps(),
+        [named],
+        "one row by one method, sampled and time-averaged"
+    );
+}
+
+#[test]
 fn an_activity_with_no_range_blocks_and_is_named() {
     let awake = Scope::During(Activity::new("awake"));
     let set = set(
