@@ -12,6 +12,15 @@ impl BoundaryPort {
         todo!()
     }
 }
+/// The day a packet holds. One id names one event, so an id with two payloads is refused.
+pub struct Day {
+    _events: Vec<BoundaryEvent>,
+}
+impl Day {
+    pub fn new(_events: Vec<BoundaryEvent>) -> Result<Day, AdmissionError> {
+        todo!()
+    }
+}
 pub struct BoundaryEvent {
     _id: InputId,
     _at: SimTime,

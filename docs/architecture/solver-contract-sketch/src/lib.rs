@@ -214,6 +214,17 @@
 //! }
 //! ```
 //!
+//! A reviewed packet cannot be made without its day.
+//! ```compile_fail,E0599
+//! use solver_contract_sketch::ng_contract::*;
+//! fn dayless() -> ParameterPacket<Reviewed> { ParameterPacket::<Reviewed>::new() }
+//! ```
+//! Legal twin: a reviewed packet made with its day.
+//! ```
+//! use solver_contract_sketch::ng_contract::*;
+//! fn with_day(day: Day) -> ParameterPacket<Reviewed> { ParameterPacket::<Reviewed>::with_day(day) }
+//! ```
+//!
 //! Split qualification is not a byte array.
 //! ```compile_fail,E0308
 //! use solver_contract_sketch::ng_contract::*;
