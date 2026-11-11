@@ -52,6 +52,51 @@ impl Seal for AnchorStatistic {
     }
 }
 
+/// What admission reads of one anchor: its row, by its method, over its window. Its value never leaves it (I14).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AnchorReading {
+    pub(crate) id: AnchorId,
+    pub(crate) row: RowKind,
+    pub(crate) method: &'static str,
+    pub(crate) statistic: AnchorStatistic,
+    pub(crate) window_ns: u64,
+}
+impl AnchorReading {
+    pub fn id(&self) -> AnchorId {
+        self.id
+    }
+    pub fn row(&self) -> RowKind {
+        self.row
+    }
+    pub fn method(&self) -> &'static str {
+        self.method
+    }
+    pub fn statistic(&self) -> AnchorStatistic {
+        self.statistic
+    }
+    /// The cycle's period for a cycle statistic, zero for an instant.
+    pub fn window_ns(&self) -> u64 {
+        self.window_ns
+    }
+}
+/// Every anchor of one packet, in id order. Only its packet makes one, so no caller can leave an anchor out.
+#[derive(Debug)]
+pub struct Anchors {
+    pub(crate) readings: Vec<AnchorReading>,
+}
+impl Anchors {
+    pub fn iter(&self) -> core::slice::Iter<'_, AnchorReading> {
+        self.readings.iter()
+    }
+}
+impl<'a> IntoIterator for &'a Anchors {
+    type Item = &'a AnchorReading;
+    type IntoIter = core::slice::Iter<'a, AnchorReading>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 /// What an anchor states (rule 17): the row it reads, the method that reads it, the window and the value. The
 /// value leaves only as an admission row's target, so no packet entry can copy it.
 pub struct Snapshot<U> {
@@ -199,4 +244,44 @@ pub(crate) fn seal_trace(trace: &[&'static str; 2], out: &mut Canonical) {
     let [first, second] = trace;
     out.text(first);
     out.text(second);
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        Anchor, AnchorId, AnchorStatistic, Cycle, LawName, Measure, ParameterPacket, Pressure, RowKind, Snapshot,
+        SyntheticFixture,
+    };
+    use core::num::{NonZeroU32, NonZeroU64};
+
+    fn row(local: &'static str) -> RowKind {
+        RowKind::Algebraic(LawName { owner: "XX", local }.into())
+    }
+
+    fn anchor(id: &'static str, local: &'static str, statistic: AnchorStatistic) -> Anchor<SyntheticFixture, Pressure> {
+        let value = Measure::new(10.0).expect("finite");
+        Anchor::new(AnchorId::new(id), Snapshot::new(row(local), "a synthetic gauge", statistic, value), "synthetic")
+    }
+
+    #[test]
+    fn a_packet_lists_what_admission_reads_of_each_anchor_in_id_order() {
+        let period = NonZeroU64::new(4_000_000_000).expect("not zero");
+        let cycle = Cycle::new(period, NonZeroU32::new(4).expect("not zero")).expect("a cycle");
+        let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
+        packet.anchor(anchor("xx.c", "third", AnchorStatistic::CycleTimeMean)).expect("an anchor");
+        packet.anchor(anchor("xx.a", "first", AnchorStatistic::Instant)).expect("an anchor");
+        packet.anchor(anchor("xx.b", "second", AnchorStatistic::CycleMean)).expect("an anchor");
+        let read: Vec<_> = (packet.anchors().iter())
+            .map(|reading| (reading.id(), reading.row(), reading.method(), reading.statistic(), reading.window_ns()))
+            .collect();
+        let method = "a synthetic gauge";
+        assert_eq!(
+            read,
+            [
+                (AnchorId::new("xx.a"), row("first"), method, AnchorStatistic::Instant, 0),
+                (AnchorId::new("xx.b"), row("second"), method, AnchorStatistic::CycleMean, period.get()),
+                (AnchorId::new("xx.c"), row("third"), method, AnchorStatistic::CycleTimeMean, period.get()),
+            ]
+        );
+    }
 }

@@ -246,6 +246,26 @@ pub enum AdmissionError {
     TraceGridOutOfRange,
     /// A split budget whose reference share is not between zero and one.
     ReferenceShare,
+    /// A healthy range whose high limit is below its low one.
+    ReversedRange {
+        id: &'static str,
+    },
+    /// A whole-period range that is not during one activity: only an activity has periods.
+    WholePeriodScope {
+        id: &'static str,
+    },
+    NegativeVariation {
+        id: &'static str,
+    },
+    /// A second entry under one id, a second range for one reading, scope and averaging, or a second
+    /// within-subject variation for one reading.
+    DuplicateRangeEntry {
+        id: &'static str,
+    },
+    /// A healthy-range set entry on a row the body holds in another dimension.
+    RangeDimension {
+        id: &'static str,
+    },
 }
 impl From<AnatomyDefect> for AdmissionError {
     fn from(defect: AnatomyDefect) -> Self {
