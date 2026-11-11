@@ -801,9 +801,16 @@ test = "-p ng-validate --test transaction a_second_difference_above_one_at_the_f
 [[mutant]]
 name = "second-difference-drops-the-start"
 path = "crates/ng-contract/src/quadrature.rs"
-old = '''(end[at] - 2.0 * half[at] + start[at]).abs()'''
-new = '''(end[at] - 2.0 * half[at]).abs()'''
+old = '''(middle - from) / first'''
+new = '''middle / first'''
 test = "-p ng-contract --lib quadrature::tests::each_estimate_reads_its_own_stages_and_scales_at_its_end"
+
+[[mutant]]
+name = "second-difference-ignores-the-split"
+path = "crates/ng-contract/src/quadrature.rs"
+old = '''let curvature = reach * ((to - middle) / rest - (middle - from) / first);'''
+new = '''let curvature = to - 2.0 * middle + from;'''
+test = "-p ng-contract --lib quadrature::tests::the_second_difference_weighs_an_odd_tickets_unequal_halves"
 
 [[mutant]]
 name = "core-swallows-the-estimate"

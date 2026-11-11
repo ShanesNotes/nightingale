@@ -675,6 +675,47 @@ fn a_guess_past_a_law_s_domain_falls_back_and_the_stage_still_solves() {
     );
 }
 
+fn constant_rate(speed: f64, start: f64) -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("synthetic body", origin());
+    let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    let body = assemble(schema, |mut body| {
+        let (mut laws, _) = body.nervous()?.parts();
+        let memory = laws.state::<Dimensionless>("memory", Admissible::finite());
+        let speed = laws
+            .parameter::<Rate<Dimensionless>>(ParameterKey::new("synthetic speed"), Admissible::positive());
+        let class = RateClass::new(RateBand::Minutes, SECOND)?;
+        let rate = laws.kernel(|mut k| {
+            let speed = k.parameter(&speed);
+            k.finish(speed, laws.every_mode(), class)
+        });
+        laws.memory_rate(&memory, rate);
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let mut packet = ParameterPacket::new();
+    (packet.synthetic(
+        ParameterKey::new("synthetic speed"),
+        Binding::Body,
+        measure::<Rate<Dimensionless>>(speed),
+        "synthetic",
+    ))
+    .expect("once");
+    packet.start_rest(&body, |_| start, "synthetic").expect("a start");
+    (body, packet)
+}
+
+#[test]
+fn an_affine_row_on_an_odd_ticket_at_the_floor_steps_without_a_refusal() {
+    let (body, packet) = constant_rate(1e9, -100_001.0);
+    let core = Core::new(100_001);
+    let mut run = Run::admit_body(&body, packet, Vec::new(), &core);
+    let taken = run.step(&core).expect("a step");
+    assert_eq!(taken.interval.length_ns(), 100_001);
+    assert!(taken.refusals.is_empty(), "{:?}", taken.refusals);
+}
+
 #[test]
 fn excess_error_at_the_floor_is_an_engine_fault() {
     let case = Reservoirs::new([1_000_000.0, 0.0], Vec::new()).stiff(10_000.0);

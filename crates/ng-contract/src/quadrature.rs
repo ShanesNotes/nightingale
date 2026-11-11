@@ -143,12 +143,14 @@ impl StageWitness {
                 }
             }
             Estimate::SecondDifference { half, end } => {
-                let (half, end) = (&self.stages[half].unknowns, &self.stages[end].unknowns);
+                let (early, late) = (&self.stages[half], &self.stages[end]);
+                let first = early.offset_ns as f64;
+                let rest = (late.offset_ns - early.offset_ns) as f64;
+                let reach = late.offset_ns as f64 / 2.0;
                 for (at, row) in body.rows().iter().enumerate() {
-                    error.note(
-                        (end[at] - 2.0 * half[at] + start[at]).abs() / scales.at(end[at], sizes[at]),
-                        row.id(),
-                    );
+                    let (from, middle, to) = (start[at], early.unknowns[at], late.unknowns[at]);
+                    let curvature = reach * ((to - middle) / rest - (middle - from) / first);
+                    error.note(curvature.abs() / scales.at(to, sizes[at]), row.id());
                 }
             }
         }
@@ -613,15 +615,15 @@ mod tests {
         .expect("compiled")
     }
 
-    fn witnessed(values: &[f64]) -> StageWitness {
-        let stage = |&value: &f64| WitnessStage {
-            offset_ns: 0,
+    fn witnessed(stages: &[(u64, f64)]) -> StageWitness {
+        let stage = |&(offset_ns, value): &(u64, f64)| WitnessStage {
+            offset_ns,
             weight: Ratio::ZERO,
             unknowns: vec![value],
             derivative: vec![0.0],
         };
         StageWitness {
-            stages: values.iter().map(stage).collect(),
+            stages: stages.iter().map(stage).collect(),
         }
     }
 
@@ -630,26 +632,50 @@ mod tests {
         let body = one_row();
         let row = Some(body.rows()[0].id());
         let scales = ErrorScales::uniform(measure(1.0), measure(1.0)).expect("positive");
-        let error = |values: &[f64], estimate| {
-            let worst = witnessed(values).error(estimate, &[1.0], &scales, &[1.0], &body);
+        let error = |stages: &[(u64, f64)], estimate| {
+            let worst = witnessed(stages).error(estimate, &[1.0], &scales, &[1.0], &body);
             (worst.normalized, worst.row)
         };
         let second = Estimate::SecondDifference { half: 0, end: 1 };
         assert_eq!(
-            error(&[3.0, 7.0], second),
+            error(&[(1, 3.0), (2, 7.0)], second),
             (0.25, row),
             "|7 - 2 * 3 + 1| over 1 + 7"
         );
         assert_eq!(
-            error(&[7.0, 3.0], second),
+            error(&[(1, 7.0), (2, 3.0)], second),
             (2.5, row),
             "|3 - 2 * 7 + 1| over 1 + 3"
         );
         let difference = Estimate::Difference { fine: 2, coarse: 0 };
         assert_eq!(
-            error(&[2.0, 3.0, 7.0], difference),
+            error(&[(2, 2.0), (1, 3.0), (2, 7.0)], difference),
             (0.625, row),
             "|7 - 2| over 1 + 7"
+        );
+    }
+
+    #[test]
+    fn the_second_difference_weighs_an_odd_tickets_unequal_halves() {
+        let body = one_row();
+        let scales = ErrorScales::uniform(measure(1.0), measure(1.0)).expect("positive");
+        let second = Estimate::SecondDifference { half: 0, end: 1 };
+        let error = |start: f64, stages: &[(u64, f64)]| {
+            let worst = witnessed(stages).error(second, &[start], &scales, &[1.0], &body);
+            (worst.normalized, worst.row)
+        };
+        let affine = error(-100_001.0, &[(50_000, -50_001.0), (100_001, 0.0)]);
+        assert_eq!(
+            affine,
+            (0.0, None),
+            "one a nanosecond over 100,001 ns reads no error"
+        );
+        let row = Some(body.rows()[0].id());
+        let parabola = error(0.0, &[(3, 9.0), (7, 49.0)]);
+        assert_eq!(
+            parabola,
+            (0.49, row),
+            "t^2 over 7 ns reads h^2 y'' / 4, 24.5, over 1 + 49"
         );
     }
 }

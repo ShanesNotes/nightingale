@@ -132,7 +132,10 @@ impl StageSet {
     }
 }
 
-/// On a smooth row `|end - 2 half + start|` is `h^2 y'' / 4`, the leading term of `|fine - coarse|`.
+/// `SecondDifference` is `h / 2` times the difference of the halves' slopes,
+/// `(end - half) / b - (half - start) / a` for halves `a` and `b`, which is `end - 2 half + start` when they
+/// are equal. On a smooth row its size is `h^2 y'' / 4`, the leading term of `|fine - coarse|`, for any
+/// split, and it is zero on an affine row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Estimate {
     Difference { fine: usize, coarse: usize },
@@ -163,10 +166,10 @@ impl StageScheme {
             method: Method::BackwardEulerDoubled,
         }
     }
-    /// The doubled scheme's two halves alone, and the estimate is their second difference from the start. A
-    /// ticket after a breakpoint shows the doubled scheme's stages, since a firing or a delivery's start or end
-    /// can start a stiff transient the second difference over-reads. A length of 1 ns has one whole stage and no
-    /// estimate.
+    /// The doubled scheme's two halves alone, and the estimate is their second difference from the start,
+    /// each half's change weighed by its length. A ticket after a breakpoint shows the doubled scheme's
+    /// stages, since a firing or a delivery's start or end can start a stiff transient the second difference
+    /// over-reads. A length of 1 ns has one whole stage and no estimate.
     pub fn backward_euler_halved() -> Self {
         Self {
             method: Method::BackwardEulerHalved,
