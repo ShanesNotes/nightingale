@@ -268,7 +268,7 @@ A flow with two ends: what leaves one pool enters another pool or a receipt pool
 At one site, several amounts used and made in fixed whole-number proportion, at one rate. Its two ends are what it uses and what it makes, and they hold the same count of every element and the same energy, so it keeps I10 as a transfer does. Only a species that states its atoms takes part, and such a species holds no fixed charge, so a reaction never moves charge. Only a card granted its site class declares one. One turnover uses and makes each species by its count.
 
 **Reference species**:
-The species a reaction's rate counts, used or made per second, as a source states the rate. A turnover uses or makes it a whole number of times, one unless the proportions state more, and the contract takes the rate over that count as the reaction's extent.
+The species a reaction's rate counts, used or made per second, as a source states the rate. A turnover uses or makes it a whole number of times, one unless the proportions state more, and the reaction's column counts turnovers: its rate is the stated rate over that count.
 
 **Energy content**:
 The energy one unit of a fuel holds beyond the carbon dioxide, water and nitrogen gas it burns to, stated in a body's schema. A reaction's heat follows from the contents of what it uses and makes, so no law writes a heat.

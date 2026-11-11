@@ -365,23 +365,27 @@ pub struct SiteRoute<'b, O, C, Q> {
     _brand: Brand<'b>,
     _kind: PhantomData<(O, C, Q)>,
 }
-/// What a reaction uses and makes per unit of its reference species `Q`: typed species, each once,
-/// with its space and a whole count. `Assembly::compile` checks that the counts balance every
-/// element and energy.
-pub struct Proportions<Q> {
+/// What a reaction uses and makes in one turnover: `N` units of its reference species `Q`, used or
+/// made, and typed species, each once, with its space and a whole count. `Assembly::compile` checks
+/// that the counts balance every element and energy.
+pub struct Proportions<Q, const N: u32 = 1> {
     _terms: Vec<(Space, u32, i64)>,
     _energy: Option<Space>,
     _reference: PhantomData<Q>,
 }
-impl<Q> Proportions<Q> {
-    /// Per unit of `Q` used, so the reaction's rate counts `Q` used per second.
+impl<Q, const N: u32> Proportions<Q, N> {
+    /// `N` units of `Q` used, so the reaction's rate counts `Q` used per second.
     pub fn using(_space: Space) -> Self {
         todo!()
     }
-    pub fn uses<R, const N: u32>(self, _space: Space) -> Self {
+    /// `N` units of `Q` made, so the reaction's rate counts `Q` made per second.
+    pub fn making(_space: Space) -> Self {
         todo!()
     }
-    pub fn makes<R, const N: u32>(self, _space: Space) -> Self {
+    pub fn uses<R, const M: u32>(self, _space: Space) -> Self {
+        todo!()
+    }
+    pub fn makes<R, const M: u32>(self, _space: Space) -> Self {
         todo!()
     }
     /// The energy the uses hold beyond the makes, at the contents the schema states, enters the
@@ -514,13 +518,14 @@ impl<'b, O> FragmentBuilder<'b, O> {
         todo!()
     }
     /// Declares a reaction at every site of `C` that holds its pools, and records the rate it owes.
-    pub fn reaction<C: SiteClass, Q>(&mut self, _name: &'static str, _proportions: Proportions<Q>) -> Reaction<'b, O, C, Q>
+    pub fn reaction<C: SiteClass, Q, const N: u32>(&mut self, _name: &'static str, _proportions: Proportions<Q, N>) -> Reaction<'b, O, C, Q>
     where
         O: ReactsAt<C>,
     {
         todo!()
     }
-    /// The reaction's rate, in its reference species per second.
+    /// The reaction's rate, in its reference species used or made per second. The column's rate, in
+    /// turnovers, is that value over the reference's count.
     pub fn react_at<C: SiteClass, Q>(&mut self, _reaction: &Reaction<'b, O, C, Q>, _rate: PureKernel<'b, O, Rate<Q>, C>) {
         todo!()
     }

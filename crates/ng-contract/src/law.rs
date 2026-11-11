@@ -1817,7 +1817,7 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
         }
     }
     /// The reaction's rate in its reference species used or made per second, as a source states it, positive forward:
-    /// one law in each mode, as a route's. The contract takes it over the reference's count as the reaction's extent.
+    /// one law in each mode, as a route's. The column's rate, in turnovers, is this value over the reference's count.
     pub fn react_at<C: SiteSet, Q>(
         &mut self,
         reaction: &Reaction<'b, O, C, Q>,
