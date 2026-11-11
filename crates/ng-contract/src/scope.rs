@@ -138,8 +138,9 @@ impl Schema {
         Ok(())
     }
 
-    /// What one unit of fuel `Q` holds in energy, measured against carbon dioxide and water. It is composition data, as
-    /// water's partial volume is, so a synthetic body states a synthetic content and a reviewed body a cited one.
+    /// What one unit of fuel `Q` holds in energy, measured against carbon dioxide, water and nitrogen gas. It is
+    /// composition data, as water's partial volume is, so a synthetic body states a synthetic content and a
+    /// reviewed body a cited one.
     /// Refuses a species that is no fuel, a content that is no whole number of energy units from 1 to 2^53, and a
     /// second content that differs from the first.
     pub fn energy_content<Q: Substance>(
@@ -278,6 +279,9 @@ pub enum Space {
     Elastic,
     /// Heat: one store on the same site, and a bed's own where a reaction there releases energy.
     Thermal,
+    /// Gas with no water of its own: a lung bed's alveolar gas. The gas law sets its volume, so no law reads it from
+    /// water.
+    Gas,
 }
 impl Space {
     fn of(class: Class) -> &'static [Space] {
@@ -288,6 +292,7 @@ impl Space {
                 Space::Cells,
                 Space::Bound,
                 Space::Thermal,
+                Space::Gas,
             ],
             Class::VesselSegment => &[Space::Lumen],
             Class::EnclosedSpace => &[Space::Fluid],
@@ -296,7 +301,7 @@ impl Space {
             Class::NerveSegment => &[],
         }
     }
-    fn holds_water(self) -> bool {
+    pub(crate) const fn holds_water(self) -> bool {
         matches!(
             self,
             Space::Plasma | Space::Interstitium | Space::Cells | Space::Lumen | Space::Fluid

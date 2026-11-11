@@ -323,7 +323,7 @@
 //! ```
 //!
 //! A reaction cannot be written from raw stoichiometry: proportions are built from typed species,
-//! and the body compile checks that they balance every element, charge and energy.
+//! and the body compile checks that they balance every element and energy.
 //! ```compile_fail,E0451
 //! use solver_contract_sketch::ng_contract::*;
 //! use core::marker::PhantomData;

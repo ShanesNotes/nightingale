@@ -530,20 +530,17 @@ pub(crate) fn arena_certificate(
             Measure::new(SYNTHETIC_DRIFT)?,
         )
     }
+    struct Limits(QuantityId);
+    impl Visit for Limits {
+        type Output = Result<QuantityPolicy, AdmissionError>;
+        fn visit<Q: Substance>(self) -> Self::Output {
+            limits::<Q>(self.0)
+        }
+    }
     let basis = body.conserved_basis();
     let quantities = basis.ids().map(|quantity| match quantity.book() {
-        Book::Of(Species::Water) => limits::<Water>(quantity),
-        Book::Of(Species::Sodium) => limits::<Sodium>(quantity),
-        Book::Of(Species::Potassium) => limits::<Potassium>(quantity),
-        Book::Of(Species::Chloride) => limits::<Chloride>(quantity),
-        Book::Of(Species::Albumin) => limits::<Albumin>(quantity),
-        Book::Of(Species::Vasopressin) => limits::<Vasopressin>(quantity),
-        Book::Of(Species::Norepinephrine) => limits::<Norepinephrine>(quantity),
-        Book::Of(Species::Acetylcholine) => limits::<Acetylcholine>(quantity),
         Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity),
-        Book::Of(Species::Oxygen) => limits::<Oxygen>(quantity),
-        Book::Of(Species::CarbonDioxide) => limits::<CarbonDioxide>(quantity),
-        Book::Of(Species::Glucose) => limits::<Glucose>(quantity),
+        Book::Of(species) => species.visit(Limits(quantity)),
         Book::Element(_) => QuantityPolicy::element(
             quantity,
             Measure::new(0.0)?,

@@ -647,10 +647,8 @@ fn a_urinary_edge_out_of_a_site_with_no_lumen_is_refused() -> Result<(), Admissi
     Ok(())
 }
 
-/// An energy route that took any pool in its space would turn water into energy, and the conserved
-/// combination that joined the two would hide it.
 #[test]
-fn an_energy_route_takes_no_pool_of_another_species() -> Result<(), AdmissionError> {
+fn water_in_an_energy_store_is_refused_so_no_route_turns_it_to_energy() -> Result<(), AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at()?);
     map.region("whole", root.id());
@@ -672,9 +670,10 @@ fn an_energy_route_takes_no_pool_of_another_species() -> Result<(), AdmissionErr
     });
     assert_eq!(
         compiled.err(),
-        Some(AdmissionError::Compile(CompileDefect::OrphanPool {
+        Some(AdmissionError::Compile(CompileDefect::OutOfPlace {
             site: root.id(),
             space: Space::Elastic,
+            species: Species::Water,
         }))
     );
     Ok(())

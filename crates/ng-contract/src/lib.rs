@@ -387,6 +387,73 @@
 //!         .energy_into(Space::Thermal)
 //! }
 //! ```
+//! A species that states its atoms states no fixed charge: an acid or a base states its uncharged form. Only a carried
+//! species holds one.
+//! ```compile_fail,E0559
+//! use ng_contract::*;
+//! let _ = Makeup::Atoms { elements: &[(Element::Carbon, 1)], fuel: false, charge: -1 };
+//! ```
+//! ```
+//! use ng_contract::*;
+//! let _ = Makeup::Carried { charge: -1 };
+//! ```
+//! A carried species is no reactant: it states no atoms to balance, and it is the only kind that holds a fixed charge,
+//! so no reaction moves a fixed charge.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! let _ = Proportions::<Glucose>::using(Space::Interstitium).uses::<Sodium, 1>(Space::Interstitium);
+//! ```
+//! ```
+//! use ng_contract::*;
+//! let _ = Proportions::<Glucose>::using(Space::Cells)
+//!     .makes::<Lactate, 2>(Space::Cells)
+//!     .energy_into(Space::Thermal);
+//! ```
+//! Only a species that holds a charge after speciation enters a charge sum: glucose holds none.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn charged<C: SameDimension<Concentration<Charge>>>() {}
+//! charged::<Concentration<Glucose>>();
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn charged<C: SameDimension<Concentration<Charge>>>() {}
+//! charged::<Concentration<Lactate>>();
+//! ```
+//! An amount sums as charge only for the same rows, so chloride and the fixed acid add into one charge and glucose
+//! cannot.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn charge<A: SameDimension<Charge>>() {}
+//! charge::<Glucose>();
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn charge<A: SameDimension<Charge>>() {}
+//! charge::<Chloride>();
+//! ```
+//! Only a small solute free in water enters an osmole sum: albumin pulls water as a colloid, through its own oncotic
+//! row, and water is the solvent.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn osmotic<C: SameDimension<Concentration<Osmoles>>>() {}
+//! osmotic::<Concentration<Albumin>>();
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn osmotic<C: SameDimension<Concentration<Osmoles>>>() {}
+//! osmotic::<Concentration<Glucose>>();
+//! ```
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn osmoles<A: SameDimension<Osmoles>>() {}
+//! osmoles::<Water>();
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn osmoles<A: SameDimension<Osmoles>>() {}
+//! osmoles::<Sodium>();
+//! ```
 //! A reaction comes from its owner's builder, which records the rate it owes.
 //! ```compile_fail,E0451
 //! use ng_contract::*;
@@ -1177,6 +1244,7 @@ mod scheme;
 mod scope;
 mod seam;
 mod sources;
+mod species;
 mod split;
 mod state;
 mod system;
@@ -1209,6 +1277,7 @@ pub use scheme::*;
 pub use scope::*;
 pub use seam::*;
 pub use sources::{ExcursionSide, RefusalSource, SourceId, ValidityExcursion};
+pub use species::*;
 pub use split::*;
 pub use state::*;
 pub use system::*;

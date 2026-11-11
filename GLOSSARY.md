@@ -246,7 +246,7 @@ A wall between two spaces, classed by what can cross it (section 5).
 The amount of one conserved quantity (water, sodium, oxygen, heat, and so on) held in one site, or in one space of a site such as a tissue bed's plasma. The body names its pools, the state holds their amounts, and no organ or system owns one.
 
 **Space**:
-One part of a site that holds pools: a tissue bed's plasma, interstitial fluid or cells, a vessel segment's lumen, or an enclosed space's own fluid. A junction, a tissue site and a nerve segment have none.
+One part of a site that holds pools: a tissue bed's plasma, interstitial fluid or cells, a vessel segment's lumen, an enclosed space's own fluid, a junction's vesicles and cleft, a ligand bound to its receptors, a store of heat or of stretch energy, or the gas of a lung bed or an airway, which holds no water. Each species states the kinds of space that may hold it, and compilation refuses a pool in any other. A nerve segment has none.
 
 **Conserved quantity**:
 A quantity the ledger balances: water, an element (carbon, hydrogen, oxygen, sodium, potassium, chloride, calcium, magnesium, phosphorus, nitrogen), charge, energy, a moiety such as glucose or catecholamine, or carrier mass. Where a reaction joins species, the elements and energy are what balance, and a species such as water has no quantity of its own there. The contract's `Book` type names one.
@@ -259,10 +259,29 @@ A sum of pools that no transfer or reaction inside the body changes, such as all
 A flow with two ends: what leaves one pool enters another pool or a receipt pool, so no amount appears or vanishes (I10).
 
 **Reaction**:
-At one site, several amounts used and made in fixed whole-number proportion, at one rate. Its two ends are what it uses and what it makes, and they hold the same count of every element, the same charge and the same energy, so it keeps I10 as a transfer does. Only a card granted its site class declares one.
+At one site, several amounts used and made in fixed whole-number proportion, at one rate. Its two ends are what it uses and what it makes, and they hold the same count of every element and the same energy, so it keeps I10 as a transfer does. Only a species that states its atoms takes part, and such a species holds no fixed charge, so a reaction never moves charge. Only a card granted its site class declares one.
 
 **Energy content**:
-The energy one unit of a fuel holds beyond the carbon dioxide and water it burns to, stated in a body's schema. A reaction's heat follows from the contents of what it uses and makes, so no law writes a heat.
+The energy one unit of a fuel holds beyond the carbon dioxide, water and nitrogen gas it burns to, stated in a body's schema. A reaction's heat follows from the contents of what it uses and makes, so no law writes a heat.
+
+**Fixed charge**:
+The charge one unit of a species holds whatever its space's acidity: +1 for sodium and potassium, +2 for calcium and magnesium, -1 for chloride and the cell anion. Only a species no reaction uses holds one, so no reaction moves a fixed charge. The ledger's charge is the sum of fixed charges.
+
+**Charge after speciation**:
+The charge a species holds once the acid-base balance splits it into its ionized forms. Lactate, ketones, the fixed acid and the diet base are strong ions at -1 a unit and ammonium at +1; carbon dioxide, phosphate, albumin and hemoglobin are weak acids whose charge the space's acidity sets. Each acid or base states the atoms of its uncharged form and no fixed charge.
+_Avoid_: hydrogen ion or bicarbonate as a species
+
+**Fixed acid**:
+The strong anion the diet protein's sulfur leaves, counted as one species, which the kidney excretes. It holds no fixed charge, is -1 after speciation, and the liver makes it by a synthesis route, because sulfur is no element the ledger balances.
+
+**Diet base**:
+The diet's organic anions, counted as one species. They burn to carbon dioxide and water and so spend acid. Acetic acid's atoms stand for them, one unit to one equivalent.
+
+**Cell anion**:
+The anions a cell's own molecules hold, which cross no membrane. A species with a fixed charge of -1 that sits only in cells.
+
+**Osmoles**:
+Dissolved particles that pull water across a wall that holds them back. A space's osmolality is their concentration. A species counts when it is a small solute, free in water, that reaches about a millimole a litre in some watery space; a colloid such as albumin pulls water through its own oncotic row, and water is the solvent.
 
 **Receipt pool**:
 A named pool outside the body, or behind a held stand-in, that takes what crosses the boundary, so a boundary transfer still has two ends.

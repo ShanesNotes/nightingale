@@ -29,18 +29,36 @@ impl Book {
     }
 }
 
-pub(crate) fn weight(book: Book, species: Species, contents: &[(Species, i64)]) -> i64 {
+#[derive(Clone, Copy)]
+pub(crate) enum Balanced {
+    Element(Element),
+    Energy,
+}
+impl Balanced {
+    pub(crate) fn all() -> impl Iterator<Item = Balanced> {
+        Element::ALL
+            .into_iter()
+            .map(Balanced::Element)
+            .chain([Balanced::Energy])
+    }
+    pub(crate) fn book(self) -> Book {
+        match self {
+            Balanced::Element(element) => Book::Element(element),
+            Balanced::Energy => Book::Energy,
+        }
+    }
+}
+
+pub(crate) fn weight(book: Balanced, species: Species, contents: &[(Species, i64)]) -> i64 {
     match (book, species.makeup()) {
-        (Book::Of(own), _) => i64::from(own == species),
-        (Book::Charge, _) => species.charge(),
-        (Book::Element(element), Makeup::Atoms { elements, .. }) => (elements.iter())
+        (Balanced::Element(element), Makeup::Atoms { elements, .. }) => (elements.iter())
             .find(|held| held.0 == element)
             .map_or(0, |held| held.1),
-        (Book::Energy, Makeup::Energy) => 1,
-        (Book::Energy, Makeup::Atoms { fuel: true, .. }) => (contents.iter())
+        (Balanced::Energy, Makeup::Energy) => 1,
+        (Balanced::Energy, Makeup::Atoms { fuel: true, .. }) => (contents.iter())
             .find(|content| content.0 == species)
             .map_or(0, |content| content.1),
-        (Book::Element(_) | Book::Energy, _) => 0,
+        (Balanced::Element(_) | Balanced::Energy, _) => 0,
     }
 }
 
@@ -399,7 +417,7 @@ fn quantities(
     law: LawName,
 ) -> Result<Vec<(Book, Terms)>, CompileDefect> {
     let mut found = Vec::new();
-    for book in Element::ALL.map(Book::Element).into_iter().chain([Book::Energy]) {
+    for book in Balanced::all() {
         let weighed: Vec<(RowId, i64)> = (part.iter())
             .map(|&row| (row, weight(book, amounts[row.index()], contents)))
             .filter(|&(_, weight)| weight != 0)
@@ -409,7 +427,7 @@ fn quantities(
             .iter()
             .map(|column| column.terms.iter().filter_map(|term| at(&term.0)).collect());
         for piece in connected_sets(weighed.len(), groups) {
-            found.push((book, piece.into_iter().map(|at| weighed[at]).collect()));
+            found.push((book.book(), piece.into_iter().map(|at| weighed[at]).collect()));
         }
     }
     let overflow = CompileDefect::ConservationOverflow { law: Some(law) };

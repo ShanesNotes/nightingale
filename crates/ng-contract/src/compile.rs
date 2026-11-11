@@ -4,7 +4,7 @@ use crate::body::{
     RowId, RowKind, Slot, Sparsity, StreamLayout, Target, UnknownId,
 };
 use crate::chance::key_word;
-use crate::conservation::{admission_totals, conserved_basis, weight};
+use crate::conservation::{Balanced, admission_totals, conserved_basis, weight};
 use crate::elimination::Elimination;
 use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
@@ -16,8 +16,8 @@ use crate::law::{
 use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, PoolRef, RouteBoundary};
 use crate::{
     AdmissibleSet, AdmissionError, Anatomy, Book, Boundary, BoundaryDirection, Class, CompileDefect,
-    Compliance, Element, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Predicate, RateClass,
-    Schema, SiteId, Sites, Space, Species,
+    Compliance, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Predicate, RateClass, Schema,
+    SiteId, Sites, Space, Species,
 };
 
 pub(crate) fn compile(
@@ -31,6 +31,7 @@ pub(crate) fn compile(
     held.sort_by_key(|card| card.card);
     check_fragments(&issued, &fragments, &schema, &held)?;
     check_boundaries(&schema)?;
+    check_places(&schema)?;
     check_reactions(&fragments, &schema)?;
     let declarations = declarations(&fragments)?;
     let unissued = FragmentData::empty(Boundary::CARD);
@@ -238,14 +239,14 @@ fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
     }
 }
 
-fn balanced() -> impl Iterator<Item = Book> {
-    let elements = Element::ALL.into_iter().map(Book::Element);
-    core::iter::once(Book::Charge)
-        .chain(elements)
-        .chain([Book::Energy])
+fn check_places(schema: &Schema) -> Result<(), CompileDefect> {
+    match (schema.pools()).find(|&(_, space, species)| !species.may_hold(space)) {
+        Some((site, space, species)) => Err(CompileDefect::OutOfPlace { site, space, species }),
+        None => Ok(()),
+    }
 }
 
-fn left_over(reaction: &ReactionDeclaration, book: Book, contents: &[(Species, i64)]) -> Option<i64> {
+fn left_over(reaction: &ReactionDeclaration, book: Balanced, contents: &[(Species, i64)]) -> Option<i64> {
     let exact = i128::from(BINARY64_EXACT);
     let mut sum = 0;
     for term in &reaction.terms {
@@ -275,20 +276,16 @@ fn check_reactions(fragments: &[FragmentData], schema: &Schema) -> Result<(), Co
                 let species = pair[0];
                 return Err(CompileDefect::SpeciesTwice { law, species });
             }
-            let made = |species: Species| matches!(species.makeup(), Makeup::Atoms { .. });
-            if let Some(&species) = species.iter().find(|&&species| !made(species)) {
-                return Err(CompileDefect::NoMakeup { law, species });
-            }
             let fuel = |species: Species| matches!(species.makeup(), Makeup::Atoms { fuel: true, .. });
             let stated = |species: Species| schema.energy.iter().any(|content| content.0 == species);
             if let Some(&species) = species.iter().find(|&&species| fuel(species) && !stated(species)) {
                 return Err(CompileDefect::UnstatedEnergy { law, species });
             }
             let mut left = Vec::new();
-            for book in balanced() {
+            for book in Balanced::all() {
                 let over = left_over(reaction, book, &schema.energy)
                     .ok_or(CompileDefect::ConservationOverflow { law: Some(law) })?;
-                left.push((book, over));
+                left.push((book.book(), over));
             }
             let taken = |book: Book| book == Book::Energy && reaction.energy.is_some();
             if let Some(&(book, _)) = left.iter().find(|&&(book, over)| over != 0 && !taken(book)) {
@@ -821,7 +818,7 @@ impl Reaches {
         let both = |&species: &Species| {
             self.held(reach.pool(End::From, species)) && self.held(reach.pool(End::To, species))
         };
-        Species::CARRIED.into_iter().filter(both).collect()
+        Species::WATER_BORNE.into_iter().filter(both).collect()
     }
     fn stranded(&self, reach: &Reach) -> Vec<Species> {
         let two_ends = reach.ends.iter().all(|end| matches!(end, Terminal::Pool(_)));
@@ -829,7 +826,7 @@ impl Reaches {
             let held = |end| self.held(reach.pool(end, *species));
             two_ends && held(End::From) != held(End::To)
         };
-        Species::CARRIED.into_iter().filter(apart).collect()
+        Species::WATER_BORNE.into_iter().filter(apart).collect()
     }
 }
 fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
@@ -1468,7 +1465,7 @@ fn reaction_columns(
         ..
     } = *places;
     let overflow = CompileDefect::ConservationOverflow { law: Some(law) };
-    let left = left_over(reaction, Book::Energy, &schema.energy).ok_or(overflow)?;
+    let left = left_over(reaction, Balanced::Energy, &schema.energy).ok_or(overflow)?;
     let mut columns = Vec::new();
     for site in anatomy.in_set(reaction.set) {
         let pools: Vec<(PoolRef, i64)> = (reaction.terms.iter())

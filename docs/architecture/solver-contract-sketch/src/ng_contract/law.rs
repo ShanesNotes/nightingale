@@ -367,7 +367,7 @@ pub struct SiteRoute<'b, O, C, Q> {
 }
 /// What a reaction uses and makes per unit of its reference species `Q`: typed species, each once,
 /// with its space and a whole count. `Assembly::compile` checks that the counts balance every
-/// element, charge and energy.
+/// element and energy.
 pub struct Proportions<Q> {
     _terms: Vec<(Space, u32, i64)>,
     _energy: Option<Space>,

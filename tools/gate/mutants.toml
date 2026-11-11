@@ -718,6 +718,20 @@ new = '''left.iter().find(|&&(book, over)| false && over != 0 && !taken(book))''
 test = "-p ng-validate --test burning a_burn_that_makes_carbon_is_refused_naming_carbon"
 
 [[mutant]]
+name = "cell-anion-stays-in-cells"
+path = "crates/ng-contract/src/species.rs"
+old = '''CellAnion = "cell anion" => carried(-1), not_water_borne, [cells]'''
+new = '''CellAnion = "cell anion" => carried(-1), water_borne, [cells]'''
+test = "-p ng-contract --lib species::tests::the_new_rows_state_body_01s_makeup_carriage_and_spaces"
+
+[[mutant]]
+name = "species-in-its-spaces"
+path = "crates/ng-contract/src/compile.rs"
+old = '''find(|&(_, space, species)| !species.may_hold(space))'''
+new = '''find(|&(_, space, species)| false && !species.may_hold(space))'''
+test = "-p ng-contract --test placed_pools a_species_in_a_space_it_may_not_hold_is_refused"
+
+[[mutant]]
 name = "reaction-energy-taken"
 path = "crates/ng-contract/src/compile.rs"
 old = '''let taken = |book: Book| book == Book::Energy && reaction.energy.is_some();'''
