@@ -246,7 +246,7 @@ How an enclosure's pressure answers the volume inside it: rigid, elastic, or hel
 A site's place in the body frame. Posture rotates the frame, so every site's hydrostatic head follows from one place and no law carries gravity.
 
 **Membrane**:
-A wall between two spaces. Every wall is one membrane type with two settings for each species: its conductance, how easily the species crosses, and its reflection, how much of it the wall holds back from the water that crosses. Permeable, semi-permeable and non-permeable are ranges of the two settings, not kinds (section 5).
+A wall between two spaces, classed by what can cross it (section 5).
 
 **Pool**:
 The amount of one conserved quantity (water, sodium, oxygen, heat, and so on) held in one site, or in one space of a site such as a tissue bed's plasma. The body names its pools, the state holds their amounts, and no organ or system owns one.
