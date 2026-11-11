@@ -5,7 +5,6 @@ use crate::{
 };
 use core::marker::PhantomData;
 
-/// Only the respiratory card's ports carry an enclosure's pressure.
 /// ```compile_fail,E0609
 /// use ng_contract::*;
 /// fn defined<'b>(
@@ -27,7 +26,7 @@ use core::marker::PhantomData;
 /// }
 /// ```
 pub struct RespiratoryPorts<'b> {
-    /// The pressure of each enclosure the map names the respiratory card on: the pleural space's, from the breath.
+    /// The pressure of each enclosure the map names the respiratory card on.
     pub enclosure_pressure: Output<'b, Respiratory, PerSite<EnclosedSpace, Pressure>>,
     processes: Vec<&'static str>,
     brand: Brand<'b>,

@@ -41,7 +41,6 @@ outside! {
 }
 
 impl<'b> Assembly<'b> {
-    /// Issues one of the nine once. Each enclosure the map names it on owes its pressure from here, held or built.
     pub(super) fn issue_outside<S: OutsideSlice>(
         &mut self,
     ) -> Result<FragmentBuilder<'b, S>, AdmissionError> {

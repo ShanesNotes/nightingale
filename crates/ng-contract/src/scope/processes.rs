@@ -10,8 +10,7 @@ use core::marker::PhantomData;
 mod sealed {
     pub trait Process {}
 }
-/// A route across the body's boundary that one card's law serves. The contract states its card, species, direction
-/// and name, so composition data places it at a site and nothing else, and only that card's ports serve it.
+/// A route across the body's boundary that one card's law serves. Only that card's ports serve it.
 /// ```compile_fail,E0271
 /// use ng_contract::*;
 /// fn served<'b>(ports: &RespiratoryPorts<'b>) -> Result<BoundaryRoute<'b, Water, Respiratory>, AdmissionError> {
@@ -47,20 +46,14 @@ pub trait BoundaryProcess: sealed::Process {
     type Quantity: Substance;
     const NAME: &'static str;
     const DIRECTION: BoundaryDirection;
-    /// A drain carries every species its pool holds at its water's rate, as the urine does.
+    /// A drain carries every species its pool holds at its water's rate.
     const DRAINS: bool;
 }
-/// A hormone entering the body by its secretion.
 pub struct Secretion<H>(PhantomData<H>);
-/// A hormone leaving by its first-order clearance.
 pub struct Clearance<H>(PhantomData<H>);
-/// What leaves the small intestine's lumen in the balanced fecal exit.
 pub struct Feces<Q>(PhantomData<Q>);
-/// What sweat carries out of the skin bed.
 pub struct Sweat<Q>(PhantomData<Q>);
-/// A room gas entering the conducting airway with a breath.
 pub struct Inspired<Q>(PhantomData<Q>);
-/// What leaves the conducting airway in expired gas.
 pub struct Expired<Q>(PhantomData<Q>);
 pub enum AngiotensinIIMade {}
 pub enum InsulinFirstPass {}
@@ -72,7 +65,6 @@ pub enum HemoglobinDestruction {}
 pub enum SkinEvaporation {}
 pub enum DryHeatLoss {}
 pub enum SkinEvaporativeHeat {}
-/// Heat leaving the conducting airway's own store with expired gas: warming the breath and its water's latent heat.
 pub enum AirwayHeat {}
 pub enum Urine {}
 

@@ -144,8 +144,7 @@ impl Schema {
         })
     }
 
-    /// Places one card's boundary process at a pool. The process states its card, species, direction and name, so
-    /// composition data names only the site and space, and only that card serves it. Refuses a name declared twice.
+    /// Places one card's boundary process at a pool. Refuses a name declared twice.
     pub fn process<P: BoundaryProcess>(&mut self, site: SiteId, space: Space) -> Result<(), AdmissionError> {
         let species = <P::Quantity as Substance>::SPECIES;
         self.named(RouteBoundary {
@@ -551,7 +550,7 @@ pub struct BoundaryPorts<'b> {
 }
 impl<'b> BoundaryPorts<'b> {
     /// The schema boundary's pair and drive. Refuses a name the schema does not declare for `Q`, and a card's boundary
-    /// process, which only that card's ports serve.
+    /// process.
     pub fn route<Q: Substance>(&self, name: &'static str) -> Result<BoundaryRoute<'b, Q>, AdmissionError> {
         named_route(&self.names, name)
     }
@@ -761,8 +760,7 @@ impl<'b> RenalPorts<'b> {
     pub fn effect<Q: Substance>(&self) -> ReadPort<'b, Renal, PerSite<Blood, Dimensionless>> {
         effect::<_, _, Q>()
     }
-    /// The route of a boundary process the renal card owns: the urine drain, once the void is the kidney's. Refuses
-    /// one the schema does not place.
+    /// The route of a boundary process the renal card owns. Refuses one the schema does not place.
     pub fn boundary<P: BoundaryProcess<Card = Renal>>(
         &self,
     ) -> Result<BoundaryRoute<'b, P::Quantity, Renal>, AdmissionError> {
@@ -884,7 +882,6 @@ impl<'b, S: OutsideSlice> HeldScope<'b, S> {
     pub fn parts(self) -> (FragmentBuilder<'b, S>, HeldPorts<'b, S>) {
         (self.laws, self.ports)
     }
-    /// The builder the stand-ins write to and their ports, before the card's own scope takes the builder over.
     pub fn stand_ins(&mut self) -> (&mut FragmentBuilder<'b, S>, &HeldPorts<'b, S>) {
         (&mut self.laws, &self.ports)
     }
