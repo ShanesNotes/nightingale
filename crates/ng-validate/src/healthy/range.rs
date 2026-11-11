@@ -136,7 +136,10 @@ pub enum RangeGap {
     },
     /// The run held no whole window or whole period of any of this reading's ranges, so a check that tested
     /// nothing never passes.
-    Unjudged { row: RowKind, method: &'static str },
+    Unjudged {
+        row: RowKind,
+        method: &'static str,
+    },
 }
 
 #[derive(Clone, Copy)]
