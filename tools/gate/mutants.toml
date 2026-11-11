@@ -974,3 +974,36 @@ path = "crates/ng-contract/src/admission.rs"
 old = '''.find(|held| !frames[0].states(**held))'''
 new = '''.find(|held| false && !frames[0].states(**held))'''
 test = "-p ng-contract --test day_inputs admission_refuses_a_body_that_reads_a_held_input_the_day_never_states"
+
+[[mutant]]
+name = "meal-parts-land-one-at-a-time"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''
+                .map_err(|error| arrival.named(error))?;
+'''
+new = '''
+                .map_err(|error| arrival.named(error))?;
+            self.timeline.push(*part);
+'''
+test = "-p ng-contract --test meal a_late_meal_lands_whole_or_not_at_all_and_once"
+
+[[mutant]]
+name = "meal-part-id-ignores-the-meal"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''    meal.seal(&mut out);'''
+new = '''    let _ = meal;'''
+test = "-p ng-contract --test meal a_meal_sent_twice_lands_once_and_two_meals_at_one_instant_both_land"
+
+[[mutant]]
+name = "glucose-written-as-water"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''[0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12]'''
+new = '''[0, 1, 2, 3, 0, 6, 7, 8, 9, 10, 11, 12]'''
+test = "-p ng-contract --test meal every_meal_species_reads_back_under_its_own_tag"
+
+[[mutant]]
+name = "meal-negative-part-skipped"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''if amounts.iter().any(|amount| *amount < 0.0) {'''
+new = '''if false && amounts.iter().any(|amount| *amount < 0.0) {'''
+test = "-p ng-contract --test meal a_meal_any_part_of_which_would_be_refused_is_refused_whole"
