@@ -641,14 +641,7 @@ fn a_whole_period_holding_a_value_that_was_not_present_fails_with_no_mean() {
     let values = [50.0, 50.0, 50.0, 50.0, 2.0, 2.0, 2.0, 2.0, 50.0, 50.0];
     let mut stream = each_period(0, SECOND, &values);
     stream[5].value = None;
-    let report = ranged(
-        &[sampled(reading())],
-        SECOND,
-        &night_and_day(),
-        &day,
-        0,
-        &stream,
-    );
+    let report = ranged(&[sampled(reading())], SECOND, &night_and_day(), &day, 0, &stream);
     assert_eq!(report.verdict(), CheckVerdict::Fail);
     let night = result(&report, "xx.night");
     assert_eq!((night.judged(), night.cut()), (1, 0));
@@ -752,10 +745,112 @@ fn a_reading_the_run_holds_no_whole_window_of_blocks_and_is_named() {
     assert_eq!(result(&report, "xx.range").judged(), 0);
     assert_eq!(report.verdict(), CheckVerdict::Blocked);
     let named = RangeGap::Unjudged {
+        range: "xx.range",
         row: reading(),
         method: METHOD,
     };
     assert_eq!(report.gaps(), [named], "four seconds hold no window of eight");
+}
+
+#[test]
+fn a_range_whose_activity_the_run_holds_but_never_judges_blocks_and_is_named() {
+    let day = day(&[(0, "awake"), (4 * SECOND, "asleep"), (20 * SECOND, "awake")]);
+    let (asleep, exercising) = (Activity::new("asleep"), Activity::new("exercising"));
+    let set = set(
+        vec![
+            range("xx.awake", Scope::Every, sliding(SECOND), 0.0, 100.0),
+            range(
+                "xx.exercise",
+                Scope::During(exercising),
+                sliding(SECOND),
+                0.0,
+                100.0,
+            ),
+            range(
+                "xx.night",
+                Scope::During(asleep),
+                Averaging::WholePeriod,
+                0.0,
+                10.0,
+            ),
+            range(
+                "xx.waking",
+                change("asleep", "awake", SECOND),
+                sliding(SECOND),
+                0.0,
+                100.0,
+            ),
+        ],
+        Vec::new(),
+    );
+    let values = [
+        50.0, 50.0, 50.0, 50.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0,
+    ];
+    let report = each_second(&set, &day, &values);
+    let night = result(&report, "xx.night");
+    assert_eq!((night.judged(), night.cut()), (0, 1), "the run ends in the night");
+    assert_eq!(
+        report.verdict(),
+        CheckVerdict::Blocked,
+        "every night value is 1000, against a night range of 0 to 10"
+    );
+    let named = RangeGap::Unjudged {
+        range: "xx.night",
+        row: reading(),
+        method: METHOD,
+    };
+    assert_eq!(
+        report.gaps(),
+        [named],
+        "the run never exercises and never wakes, so neither of those ranges is a gap"
+    );
+}
+
+#[test]
+fn a_change_the_run_crosses_whose_range_judged_nothing_blocks_and_is_named() {
+    let (asleep, awake) = (Activity::new("asleep"), Activity::new("awake"));
+    let set = set(
+        vec![
+            range("xx.day", Scope::During(awake), sliding(SECOND), 0.0, 100.0),
+            range("xx.every", Scope::Every, sliding(16 * SECOND), 0.0, 100.0),
+            range(
+                "xx.falling-asleep",
+                change("awake", "asleep", SECOND),
+                sliding(16 * SECOND),
+                0.0,
+                100.0,
+            ),
+            range("xx.night", Scope::During(asleep), sliding(SECOND), 0.0, 100.0),
+            range(
+                "xx.waking",
+                change("asleep", "awake", SECOND),
+                sliding(16 * SECOND),
+                0.0,
+                100.0,
+            ),
+        ],
+        Vec::new(),
+    );
+    let day = day(&[(0, "awake"), (2 * SECOND, "asleep"), (6 * SECOND, "awake")]);
+    let stream = each_period(4 * SECOND, SECOND, &[50.0; 8]);
+    let report = ranged(&[sampled(reading())], SECOND, &set, &day, 4 * SECOND, &stream);
+    let judged = (
+        result(&report, "xx.night").judged(),
+        result(&report, "xx.day").judged(),
+    );
+    assert_eq!(judged, (2, 5), "the value at 6 s lies in waking's 1 s");
+    assert_eq!(report.verdict(), CheckVerdict::Blocked);
+    let named = RangeGap::Unjudged {
+        range: "xx.waking",
+        row: reading(),
+        method: METHOD,
+    };
+    assert_eq!(
+        report.gaps(),
+        [named],
+        "the run starts after falling asleep, and each activity has a range of its own, so neither the falling-asleep \
+         range nor the every-activity range is a gap"
+    );
 }
 
 #[test]
@@ -1108,10 +1203,7 @@ fn a_day_that_starts_after_admission_is_refused() {
 
 #[test]
 fn an_observation_not_collected_or_invalid_is_fed_as_an_absent_value_and_a_pending_one_waits() {
-    assert_eq!(
-        fed(ObservedValue::Present(value(10.0))),
-        Some(Some(value(10.0)))
-    );
+    assert_eq!(fed(ObservedValue::Present(value(10.0))), Some(Some(value(10.0))));
     assert_eq!(fed(ObservedValue::NotCollected), Some(None));
     assert_eq!(fed(ObservedValue::InvalidSignal), Some(None));
     assert_eq!(fed(ObservedValue::Pending), None);

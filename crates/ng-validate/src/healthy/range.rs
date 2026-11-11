@@ -134,9 +134,12 @@ pub enum RangeGap {
         to: Activity,
         at: SimTime,
     },
-    /// The run held no whole window or whole period of any of this reading's ranges, so a check that tested
-    /// nothing never passes.
+    /// A range whose activity or change the run holds that judged no whole window or whole period, so no range
+    /// passes untested. The run holds an activity with a value in it and a change with a value on each side, and
+    /// the every-activity range holds for each activity with no range of its own. A range whose activity or change
+    /// the run never holds is no gap, since one set serves every run.
     Unjudged {
+        range: &'static str,
         row: RowKind,
         method: &'static str,
     },
@@ -267,9 +270,16 @@ struct Reading {
     sliders: Vec<Slider>,
     period: Option<Period>,
     span: usize,
+    own: Vec<(usize, Scope, Averaging)>,
+    read: Vec<bool>,
 }
 impl Reading {
-    fn new(reading: BareReading, own: &[(usize, Scope, Averaging)], spans: &[Span], period_ns: u64) -> Self {
+    fn new(
+        reading: BareReading,
+        own: Vec<(usize, Scope, Averaging)>,
+        spans: &[Span],
+        period_ns: u64,
+    ) -> Self {
         let find = |scope: Scope, averaging: Averaging| {
             (own.iter())
                 .find(|&&(_, held, by)| (held, by) == (scope, averaging))
@@ -349,6 +359,26 @@ impl Reading {
             sliders,
             period: None,
             span: 0,
+            read: vec![false; spans.len()],
+            own,
+        }
+    }
+    fn holds(&self, range: usize, spans: &[Span]) -> bool {
+        let Some(&(_, scope, _)) = self.own.iter().find(|&&(own, _, _)| own == range) else {
+            return false;
+        };
+        let read = |span: &usize| self.read[*span];
+        let activity = |span: usize| spans[span].activity;
+        match scope {
+            Scope::Every => (0..spans.len()).filter(read).any(|span| {
+                let its_own = Scope::During(activity(span));
+                !self.own.iter().any(|&(_, held, _)| held == its_own)
+            }),
+            Scope::During(during) => (0..spans.len()).filter(read).any(|span| activity(span) == during),
+            Scope::Change { from, to, .. } => (1..spans.len()).any(|span| {
+                let crossed = self.read[span - 1] && self.read[span];
+                crossed && (activity(span - 1), activity(span)) == (from, to)
+            }),
         }
     }
 }
@@ -415,7 +445,7 @@ impl RangeFold {
                 let (row, method) = (reading.row, reading.method);
                 note(&mut gaps, RangeGap::NoRange { row, method });
             }
-            folds.push(Reading::new(reading, &own, &spans, period_ns));
+            folds.push(Reading::new(reading, own, &spans, period_ns));
         }
         Ok(Self {
             period_ns,
@@ -457,6 +487,7 @@ impl RangeFold {
             fold.span += 1;
         }
         let span = fold.span;
+        fold.read[span] = true;
         if fold.unranged[span] {
             let activity = spans[span].activity;
             note(
@@ -539,6 +570,7 @@ impl RangeFold {
     }
     pub(crate) fn finish(self) -> (Vec<RangeResult>, Vec<RangeGap>) {
         let Self {
+            spans,
             mut results,
             readings,
             mut gaps,
@@ -549,11 +581,13 @@ impl RangeFold {
                 results[range].cut += 1;
             }
         }
-        for reading in readings.iter().filter(|reading| reading.ranged) {
-            let own = |result: &&RangeResult| (result.row, result.method) == (reading.row, reading.method);
-            if results.iter().filter(own).all(|result| result.judged == 0) {
-                let (row, method) = (reading.row, reading.method);
-                note(&mut gaps, RangeGap::Unjudged { row, method });
+        for (at, result) in results.iter().enumerate() {
+            if result.judged == 0 && readings.iter().any(|reading| reading.holds(at, &spans)) {
+                gaps.push(RangeGap::Unjudged {
+                    range: result.range,
+                    row: result.row,
+                    method: result.method,
+                });
             }
         }
         (results, gaps)
