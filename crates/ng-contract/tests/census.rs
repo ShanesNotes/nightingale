@@ -1,9 +1,9 @@
-use ng_contract::catalog::{Arrow, Carries, Disposition, HeldField, WiredField};
+use ng_contract::catalog::{ARROWS, Arrow, Carries, Disposition, HeldField, WiredField};
 
 const ATRIAL: WiredField = WiredField {
     name: "atrial_wall_stress",
     unit: "Pressure",
-    ticket: 17,
+    body_ticket: 17,
 };
 
 const fn held(name: &'static str, holder: &'static str) -> HeldField {
@@ -15,8 +15,11 @@ const fn held(name: &'static str, holder: &'static str) -> HeldField {
     }
 }
 
-const fn wired(ticket: u8) -> WiredField {
-    WiredField { ticket, ..ATRIAL }
+const fn wired(body_ticket: u8) -> WiredField {
+    WiredField {
+        body_ticket,
+        ..ATRIAL
+    }
 }
 
 const fn wall_stress(carries: Carries) -> Arrow {
@@ -151,4 +154,22 @@ fn the_census_refuses_an_empty_reason() {
         !SLICE_WITHOUT_ONE.every_reason_given(),
         "a slice disposition names no reason"
     );
+}
+
+#[test]
+fn every_arrow_of_the_catalog_keeps_the_census_rules() {
+    for arrow in &ARROWS {
+        let line = arrow.line;
+        assert!(arrow.accounted(), "line {line} carries nothing");
+        assert!(
+            arrow.held_at_its_ends(),
+            "line {line} has a holder at neither end"
+        );
+        assert!(
+            arrow.wired_by_body_tickets(),
+            "line {line} names no body ticket from 06 to 25"
+        );
+        assert!(arrow.one_holder_per_field(), "line {line} has a second holder");
+        assert!(arrow.every_reason_given(), "line {line} has an empty reason");
+    }
 }

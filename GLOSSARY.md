@@ -266,7 +266,7 @@ A bounded space (the skull, the pericardium, the chest, the abdomen, a limb comp
 _Avoid_: pressure wire
 
 **Compliance**:
-How an enclosure's pressure answers the volume inside it: rigid, elastic, or held by a named stand-in.
+How an enclosure's pressure answers the volume inside it: rigid, elastic, or set by the card the map names, through a held stand-in or that card's own law.
 
 **Position**:
 A site's place in the body frame. Posture rotates the frame, so every site's hydrostatic head follows from one place and no law carries gravity.
@@ -317,6 +317,9 @@ Dissolved particles that pull water across a wall that holds them back. A space'
 
 **Receipt pool**:
 A named pool outside the body, or behind a held stand-in, that takes what crosses the boundary, so a boundary transfer still has two ends.
+
+**Boundary process**:
+A card's way across the body's boundary, such as insulin's secretion, the fecal exit of sodium or the urine drain. The contract states its card, species, direction and name, and the schema places it at a site, so only that card serves it.
 
 **Route family**:
 Every transfer of one kind the map implies: one per site of a class, such as plasma to interstitium at every capillary bed, or one per vascular edge. A system requests it whole through its scope, so the body owes a law for every one, and no law names a site.
@@ -568,6 +571,9 @@ The crates a step's arithmetic runs through: the rows the crate table in `docs/a
 **Fragment**:
 What a system crate declares: its laws, ports, parameter slots, modes and streams, as data the contract compiles. No fragment runs during a solve.
 
+**Scope**:
+What the code's `Assembly` issues each card once while it builds an assembly: the builder its laws are declared on and the ports that grant only what the card owns at rung 0. A card outside the slice is issued fresh, or its scope takes over the builder its held stand-ins wrote to, so it keeps named holds beside its crate's laws.
+
 **Kernel**:
 One law's closed expression graph, built once at declaration from the contract's own operators. It reads no time step, solver, state store or host math.
 _Avoid_: callback
@@ -634,8 +640,11 @@ The systems the arena runs for real: pulsatile cardiovascular, fluids, renal, a 
 **Whole body**:
 All 13 systems, the receptor layer and the boundary, as body ticket 01 plans them at rung 0. Its census accounts for every arrow of the coupling map, field by field.
 
+**Assembly**:
+The set of systems one compiled body holds: the slice or the whole body. Each assembly has its own census. The code's `Assembly` is the builder that issues each card's scope and compiles one body from them: it builds an assembly in this sense and is not one.
+
 **Held stand-in**:
-A system outside the slice, held by a declaration that names every route on which it supplies or removes an amount, so stability bought with held support shows in the certificate.
+A system's laws that stand in for physiology, held by a declaration that names every route on which they supply or remove an amount, so stability bought with held support shows in the certificate. A card outside the slice stands in whole, and a card with a crate keeps only its named holds this way.
 _Avoid_: stub, mock
 
 **Coverage manifest**:

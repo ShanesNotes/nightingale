@@ -16,8 +16,9 @@ OWNERS = "../../../crates/ng-contract/src/system.rs"
 MAPPED = {"live", "input", "sink", "relation"}
 SLICE_KINDS = {"live", "input", "sink"}
 SLICE_REASONED = {"relation", "outside", "unresolved"}
+BODY_TICKETS = range(6, 26)
 SLICE_COUNTS = {"rows": 38, "mapped": 27, "listed unmapped": 11, "incident mapped": 27, "incident unmapped": 1}
-BODY_COUNTS = {"rows": 38, "mapped": 38, "unmapped": 0, "wire a field": 18, "relations": 5, "hold every field": 15, "wire and hold": 6,
+BODY_COUNTS = {"rows": 38, "wire a field": 18, "relations": 5, "hold every field": 15, "wire and hold": 6,
                "wired fields": 21, "held fields": 29}
 SLICE_LINES = {
     "live": [77, 80, 97],
@@ -27,8 +28,64 @@ SLICE_LINES = {
     "outside": [84, 85, 92, 93, 94, 95, 103, 104, 107, 109],
     "unresolved": [111],
 }
+BODY_LIVE = [77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 88, 89, 90, 91, 95, 97, 98, 114]
+BODY_HELD = [92, 93, 94, 100, 102, 103, 105, 106, 107, 108, 109, 110, 111, 112, 113]
 RELATIONS = [82, 96, 99, 101, 104]
 WIRE_AND_HOLD = [79, 87, 89, 90, 95, 114]
+HELD_BY = [
+    (79, "ventricular_wall_stress", "CV"),
+    (87, "thermostat_set_point", "NS"),
+    (87, "sweat_drive", "NS"),
+    (89, "crh_drive", "NS"),
+    (89, "circadian_phase", "NS"),
+    (90, "temperature", "CV"),
+    (92, "temperature", "HC"),
+    (93, "temperature", "HP"),
+    (94, "temperature", "BC"),
+    (95, "fatigue", "MS"),
+    (100, "plasma_ammonia", "HP"),
+    (102, "intra_abdominal_pressure", "GI"),
+    (103, "intra_abdominal_pressure", "GI"),
+    (105, "inos_activity", "IM"),
+    (105, "myocardial_depression", "IM"),
+    (106, "permeability", "IM"),
+    (106, "glycocalyx", "IM"),
+    (107, "tissue_factor", "IM"),
+    (107, "hepcidin", "IM"),
+    (108, "set_point_shift", "IM"),
+    (109, "mitochondrial_efficiency", "IM"),
+    (110, "lung_water", "FL"),
+    (111, "brain_water", "FL"),
+    (111, "intracranial_pressure", "NS"),
+    (112, "gut_wall_water", "FL"),
+    (113, "skin_water", "FL"),
+    (113, "compartment_water", "FL"),
+    (114, "bleeding_competence", "HC"),
+    (114, "thrombosis", "HC"),
+]
+WIRED_BY = [
+    (77, "carotid_sinus_stretch", 6),
+    (77, "aortic_arch_stretch", 6),
+    (78, "myocardial_work", 9),
+    (78, "flow_per_bed", 9),
+    (79, "atrial_wall_stress", 17),
+    (80, "capillary_pressure", 6),
+    (80, "venous_pressure", 6),
+    (81, "pulmonary_capillary_flow", 10),
+    (83, "pulmonary_stretch", 11),
+    (84, "work_of_breathing", 10),
+    (85, "pump_load", 10),
+    (86, "respiratory_drive", 11),
+    (87, "shiver_drive", 12),
+    (88, "motor_drive", 11),
+    (89, "vasopressin_drive", 17),
+    (90, "oxygen_debt_per_bed", 9),
+    (91, "core_temperature", 12),
+    (95, "pump_force", 10),
+    (97, "afferent_tone", 6),
+    (98, "renin_secretion", 17),
+    (114, "viscosity", 8),
+]
 
 owners = re.findall(r'^\s*(\w+) = "(\w+)", (slice|held);$', open(OWNERS, encoding="utf-8").read(), re.M)
 CARD = {name: card for name, card, _ in owners}
@@ -211,6 +268,19 @@ for r in rows:
     reasons = [r["slice_reason"], r["relation"], *(reason for *_, reason in r["held"])]
     if "" in reasons:
         failures.append(f"line {r['line']}: a reason is empty")
+    if any(holder not in (r["from"], r["to"]) for _, _, holder, _ in r["held"]):
+        failures.append(f"line {r['line']}: a holder is neither end")
+    names = [name for name, *_ in r["wired"] + r["held"]]
+    if len(set(names)) != len(names):
+        failures.append(f"line {r['line']}: a field has a second holder")
+    if any(ticket not in BODY_TICKETS for *_, ticket in r["wired"]):
+        failures.append(f"line {r['line']}: a wired field names no body ticket from 06 to 25")
+
+held_by = [(r["line"], name, holder) for r in rows for name, _, holder, _ in r["held"]]
+wired_by = [(r["line"], name, ticket) for r in rows for name, _, ticket in r["wired"]]
+for name, got, want in (("holder", held_by, HELD_BY), ("body ticket", wired_by, WIRED_BY)):
+    if got != want:
+        failures.append(f"a {name} is not the plan's: {sorted(set(got) ^ set(want), key=str)}")
 
 incident = [r for r in rows if r["from"] in SLICE or r["to"] in SLICE]
 slice_census = {
@@ -222,8 +292,6 @@ slice_census = {
 }
 body_census = {
     "rows": len(rows),
-    "mapped": sum(r["relation"] is not None or bool(r["wired"]) or bool(r["held"]) for r in rows),
-    "unmapped": sum(r["relation"] is None and not r["wired"] and not r["held"] for r in rows),
     "wire a field": sum(bool(r["wired"]) for r in rows),
     "relations": sum(r["relation"] is not None for r in rows),
     "hold every field": sum(bool(r["held"]) and not r["wired"] for r in rows),
@@ -240,6 +308,8 @@ for kind, want in SLICE_LINES.items():
     if got != want:
         failures.append(f"slice census: {kind} are lines {got}, not {want}")
 for name, got, want in (
+    ("live", [r["line"] for r in rows if r["wired"]], BODY_LIVE),
+    ("held", [r["line"] for r in rows if r["held"] and not r["wired"]], BODY_HELD),
     ("relations", [r["line"] for r in rows if r["relation"] is not None], RELATIONS),
     ("wire and hold", [r["line"] for r in rows if r["wired"] and r["held"]], WIRE_AND_HOLD),
 ):
@@ -252,7 +322,7 @@ print("slice census: " + "; ".join(f"{k} = {v}" for k, v in slice_census.items()
 for kind in SLICE_LINES:
     print(f"  {kind:<10} {[r['line'] for r in rows if r['slice'] == kind]}")
 print("whole body census: " + "; ".join(f"{k} = {v}" for k, v in body_census.items()))
-print("parse, line, endpoints and label equality, order, uniqueness, reasons and both censuses:",
+print("parse, line, endpoints and label equality, order, uniqueness, reasons, holders, tickets and both censuses:",
       "PASS" if not failures else "FAIL")
 for failure in failures:
     print("  " + failure)

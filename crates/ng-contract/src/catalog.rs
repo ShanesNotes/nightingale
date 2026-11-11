@@ -122,7 +122,7 @@ impl CensusRow {
 pub struct WiredField {
     pub name: &'static str,
     pub unit: &'static str,
-    pub ticket: u8,
+    pub body_ticket: u8,
 }
 /// A held field is no member of its arrow's payload: EN cannot read the ventricular wall stress arrow 79 holds.
 /// ```compile_fail,E0609
@@ -220,7 +220,7 @@ impl Arrow {
         let wired = self.carries.wired();
         let mut i = 0;
         while i < wired.len() {
-            if wired[i].ticket < FIRST_WIRING_TICKET || wired[i].ticket > LAST_WIRING_TICKET {
+            if wired[i].body_ticket < FIRST_WIRING_TICKET || wired[i].body_ticket > LAST_WIRING_TICKET {
                 return false;
             }
             i += 1;
@@ -422,7 +422,7 @@ macro_rules! coupling_map {
             wired: &[$(WiredField {
                 name: stringify!($field),
                 unit: carried_unit::<$unit>(stringify!($unit)),
-                ticket: $ticket,
+                body_ticket: $ticket,
             }),+],
             held: coupling_map!(@held $($held)?),
         }
@@ -465,7 +465,7 @@ coupling_map! {
     86 Nervous => Respiratory, "respiratory drive", sink,
         wired (RespiratoryDrive { respiratory_drive: Dimensionless => 11 });
     87 Nervous => Metabolism, "thermostat, shiver and sweat", sink,
-        wired (ThermostatShiverSweat { shiver_drive: Dimensionless => 12 })
+        wired (ShiverDrive { shiver_drive: Dimensionless => 12 })
         held [thermostat_set_point: Temperature => Nervous "the set point is NS memory and no MT law reads it",
             sweat_drive: Dimensionless => Nervous "sweat answers release at the skin junction (S10)"];
     88 Nervous => Musculoskeletal, "motor drive", sink,
@@ -475,7 +475,7 @@ coupling_map! {
         held [crh_drive: Dimensionless => Nervous "cortisol's profile follows the clock input directly (ticket 20)",
             circadian_phase: Phase => Nervous "the clock is a boundary input every law reads (ticket 05)"];
     90 Metabolism => Cardiovascular, "O2 debt per bed, temperature", input,
-        wired (OxygenDebtAndTemperature { oxygen_debt_per_bed: PerSite<CapillaryBed, Oxygen> => 9 })
+        wired (OxygenDebtPerBed { oxygen_debt_per_bed: PerSite<CapillaryBed, Oxygen> => 9 })
         held [temperature: Temperature => Cardiovascular "CV's laws run at a reference temperature"];
     91 Metabolism => Nervous, "temperature", input,
         wired (CoreTemperature { core_temperature: Temperature => 12 });
@@ -486,7 +486,7 @@ coupling_map! {
     94 Metabolism => BloodChemistry, "temperature", outside "neither end in the arena slice",
         held [temperature: Temperature => BloodChemistry "BC's speciation runs at a reference temperature (ticket 12)"];
     95 Musculoskeletal => Respiratory, "pump force and fatigue", outside "neither end in the arena slice",
-        wired (PumpForceAndFatigue { pump_force: Pressure => 10 })
+        wired (PumpForce { pump_force: Pressure => 10 })
         held [fatigue: Dimensionless => Musculoskeletal "a resting day has no fatigue law"];
     96 Musculoskeletal => Cardiovascular, "position and gravity",
         relation "site positions under the boundary's posture",
@@ -536,7 +536,7 @@ coupling_map! {
         held [skin_water: Volume => Fluids "pressure injury is absent",
             compartment_water: Volume => Fluids "limb compartments are absent"];
     114 Hematology => Cardiovascular, "bleeding competence, viscosity, thrombosis", input,
-        wired (BleedingViscosityThrombosis { viscosity: Viscosity => 8 })
+        wired (BloodViscosity { viscosity: Viscosity => 8 })
         held [bleeding_competence: Dimensionless => Hematology "no bleeding edge (ticket 21)",
             thrombosis: Dimensionless => Hematology "zero flux (ticket 21)"];
 }
@@ -547,7 +547,6 @@ const _: () = assert!(SLICE.mapped() + SLICE.unmapped() == MAP_EDGES);
 const _: () = assert!(SLICE.mapped() == 27 && SLICE.unmapped() == 11);
 const _: () = assert!(SLICE.incident_mapped == 27 && SLICE.incident_unmapped == 1);
 const _: () = assert!(WHOLE_BODY.live == 18 && WHOLE_BODY.relation == 5 && WHOLE_BODY.held == 15);
-const _: () = assert!(WHOLE_BODY.mapped() == 38 && WHOLE_BODY.unmapped() == 0);
 const FIELDS: FieldCount = field_count();
 const _: () = assert!(FIELDS.wired == 21 && FIELDS.held == 29 && FIELDS.wire_and_hold == 6);
 const _: () = {
@@ -555,7 +554,7 @@ const _: () = {
     while i < MAP_EDGES {
         let arrow = &ARROWS[i];
         assert!(arrow.line as usize == 77 + i);
-        assert!(Census::Slice.row(arrow).ends_fit() && Census::WholeBody.row(arrow).ends_fit());
+        assert!(Census::Slice.row(arrow).ends_fit());
         assert!(
             arrow.accounted(),
             "an arrow carries no field and is no anatomy relation"
@@ -574,16 +573,7 @@ const _: () = {
     }
 };
 const _: () = {
-    let relations = [82, 96, 99, 101, 104];
     let wire_and_hold = [79, 87, 89, 90, 95, 114];
-    let mut i = 0;
-    while i < relations.len() {
-        assert!(matches!(
-            ARROWS[relations[i] - 77].carries,
-            Carries::Relation { .. }
-        ));
-        i += 1;
-    }
     let mut i = 0;
     while i < wire_and_hold.len() {
         let carries = ARROWS[wire_and_hold[i] - 77].carries;
@@ -592,12 +582,12 @@ const _: () = {
     }
 };
 
-macro_rules! slice_lines {
-    ($kind:pat, $lines:expr) => {{
+macro_rules! census_lines {
+    ($census:expr, $kind:pat, $lines:expr) => {{
         let lines: &[usize] = &$lines;
         let (mut i, mut n) = (0, 0);
         while i < MAP_EDGES {
-            if matches!(ARROWS[i].slice, $kind) {
+            if matches!($census.row(&ARROWS[i]).disposition, $kind) {
                 assert!(n < lines.len() && lines[n] == 77 + i);
                 n += 1;
             }
@@ -607,21 +597,134 @@ macro_rules! slice_lines {
     }};
 }
 const _: () = {
-    slice_lines!(Disposition::Live, [77, 80, 97]);
-    slice_lines!(
+    census_lines!(Census::Slice, Disposition::Live, [77, 80, 97]);
+    census_lines!(
+        Census::Slice,
         Disposition::ExternalInput,
         [83, 90, 91, 99, 100, 102, 105, 106, 108, 114]
     );
-    slice_lines!(
+    census_lines!(
+        Census::Slice,
         Disposition::ExternalSink,
         [78, 79, 81, 86, 87, 88, 89, 98, 110, 112, 113]
     );
-    slice_lines!(Disposition::AnatomyRelation { .. }, [82, 96, 101]);
-    slice_lines!(
+    census_lines!(Census::Slice, Disposition::AnatomyRelation { .. }, [82, 96, 101]);
+    census_lines!(
+        Census::Slice,
         Disposition::OutsideSlice { .. },
         [84, 85, 92, 93, 94, 95, 103, 104, 107, 109]
     );
-    slice_lines!(Disposition::Unresolved { .. }, [111]);
+    census_lines!(Census::Slice, Disposition::Unresolved { .. }, [111]);
+    census_lines!(
+        Census::WholeBody,
+        Disposition::Live,
+        [
+            77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 88, 89, 90, 91, 95, 97, 98, 114
+        ]
+    );
+    census_lines!(
+        Census::WholeBody,
+        Disposition::AnatomyRelation { .. },
+        [82, 96, 99, 101, 104]
+    );
+    census_lines!(
+        Census::WholeBody,
+        Disposition::Held,
+        [
+            92, 93, 94, 100, 102, 103, 105, 106, 107, 108, 109, 110, 111, 112, 113
+        ]
+    );
+};
+
+const _: () = {
+    let plan: [(usize, &str, &str); 29] = [
+        (79, "ventricular_wall_stress", "CV"),
+        (87, "thermostat_set_point", "NS"),
+        (87, "sweat_drive", "NS"),
+        (89, "crh_drive", "NS"),
+        (89, "circadian_phase", "NS"),
+        (90, "temperature", "CV"),
+        (92, "temperature", "HC"),
+        (93, "temperature", "HP"),
+        (94, "temperature", "BC"),
+        (95, "fatigue", "MS"),
+        (100, "plasma_ammonia", "HP"),
+        (102, "intra_abdominal_pressure", "GI"),
+        (103, "intra_abdominal_pressure", "GI"),
+        (105, "inos_activity", "IM"),
+        (105, "myocardial_depression", "IM"),
+        (106, "permeability", "IM"),
+        (106, "glycocalyx", "IM"),
+        (107, "tissue_factor", "IM"),
+        (107, "hepcidin", "IM"),
+        (108, "set_point_shift", "IM"),
+        (109, "mitochondrial_efficiency", "IM"),
+        (110, "lung_water", "FL"),
+        (111, "brain_water", "FL"),
+        (111, "intracranial_pressure", "NS"),
+        (112, "gut_wall_water", "FL"),
+        (113, "skin_water", "FL"),
+        (113, "compartment_water", "FL"),
+        (114, "bleeding_competence", "HC"),
+        (114, "thrombosis", "HC"),
+    ];
+    let (mut i, mut n) = (0, 0);
+    while i < MAP_EDGES {
+        let held = ARROWS[i].carries.held();
+        let mut j = 0;
+        while j < held.len() {
+            let (line, name, holder) = plan[n];
+            assert!(
+                line == 77 + i && same(held[j].name, name) && same(held[j].holder, holder),
+                "a held field's holder is not the plan's"
+            );
+            j += 1;
+            n += 1;
+        }
+        i += 1;
+    }
+    assert!(n == plan.len());
+};
+const _: () = {
+    let plan: [(usize, &str, u8); 21] = [
+        (77, "carotid_sinus_stretch", 6),
+        (77, "aortic_arch_stretch", 6),
+        (78, "myocardial_work", 9),
+        (78, "flow_per_bed", 9),
+        (79, "atrial_wall_stress", 17),
+        (80, "capillary_pressure", 6),
+        (80, "venous_pressure", 6),
+        (81, "pulmonary_capillary_flow", 10),
+        (83, "pulmonary_stretch", 11),
+        (84, "work_of_breathing", 10),
+        (85, "pump_load", 10),
+        (86, "respiratory_drive", 11),
+        (87, "shiver_drive", 12),
+        (88, "motor_drive", 11),
+        (89, "vasopressin_drive", 17),
+        (90, "oxygen_debt_per_bed", 9),
+        (91, "core_temperature", 12),
+        (95, "pump_force", 10),
+        (97, "afferent_tone", 6),
+        (98, "renin_secretion", 17),
+        (114, "viscosity", 8),
+    ];
+    let (mut i, mut n) = (0, 0);
+    while i < MAP_EDGES {
+        let wired = ARROWS[i].carries.wired();
+        let mut j = 0;
+        while j < wired.len() {
+            let (line, name, ticket) = plan[n];
+            assert!(
+                line == 77 + i && same(wired[j].name, name) && wired[j].body_ticket == ticket,
+                "a wired field's body ticket is not the plan's"
+            );
+            j += 1;
+            n += 1;
+        }
+        i += 1;
+    }
+    assert!(n == plan.len());
 };
 
 struct FieldCount {
