@@ -16,4 +16,6 @@ Blocked by: [04](04-scopes-ports-and-census.md), [06](06-whole-body-on-holds.md)
 - [ ] The reference day is made one way, and `DayPlan` keeps only what the day checks read
 - [ ] The arena's digests and run identity move once, and the PR says why in one sentence. The slice's model hash and the first-second traces do not move
 
+Every event ends a step, whether or not a law reads it. So a clock, sleep or room event added to the arena's day moves the slice's step grid and its bits, though the slice reads none of them: ticket 05's blast-radius probe moved the grid from 8, 16, 24, 32 and 40 s to 8, 16, 24, 32, 37 and 45 s with one sleep event at 37 s. Such events belong to this ticket's one move, and on a paced cycle one inside the first period off the grid is refused.
+
 **Non-goals:** the whole body's day ([ticket 24](24-the-synthetic-day.md)), a reviewed packet's day ([research 10](../../research/issues/10-reviewed-packet-builder.md)), and interventions themselves.
