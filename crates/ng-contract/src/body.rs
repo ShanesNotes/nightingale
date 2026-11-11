@@ -6,8 +6,8 @@ use crate::law::{Op, Validity};
 use crate::problem::Jacobian;
 use crate::sources::{RefusalSource, refusal_sources};
 use crate::{
-    AdmissibleSet, Class, ConservedBasis, Crossing, Digest, LawName, Network, ParameterKey, Predicate,
-    RateClass, Schema, SiteId, Space, Species,
+    AdmissibleSet, Class, ConservedBasis, Crossing, Digest, Lasting, LawName, Network, ParameterKey,
+    Predicate, RateClass, Schema, SiteId, Space, Species,
 };
 
 macro_rules! index {
@@ -52,6 +52,7 @@ pub struct CompiledBody {
     pub(crate) sources: Vec<RefusalSource>,
     pub(crate) tape: Tape,
     totals: Vec<AdmissionTotal>,
+    lasting: Vec<Lasting>,
 }
 pub(crate) struct Layout {
     pub(crate) schema: Schema,
@@ -74,6 +75,15 @@ impl CompiledBody {
     pub(crate) fn seal(layout: Layout, elimination: Elimination, totals: Vec<AdmissionTotal>) -> Self {
         let mut out = Canonical::new("ng-contract model 2");
         layout.seal(&mut out);
+        let mut lasting: Vec<Lasting> = (layout.instances.iter())
+            .flat_map(|instance| &instance.inputs)
+            .filter_map(|input| match *input {
+                Bound::Lasting(input) => Some(input),
+                _ => None,
+            })
+            .collect();
+        lasting.sort_unstable();
+        lasting.dedup();
         Self {
             hash: ModelHash { digest: out.digest() },
             sources: refusal_sources(&layout),
@@ -81,7 +91,11 @@ impl CompiledBody {
             layout,
             elimination,
             totals,
+            lasting,
         }
+    }
+    pub(crate) fn lasting_reads(&self) -> &[Lasting] {
+        &self.lasting
     }
     pub fn model_hash(&self) -> ModelHash {
         self.hash
@@ -525,6 +539,7 @@ pub(crate) enum Bound {
     Forcing(usize),
     Gauge,
     Height(u64),
+    Lasting(Lasting),
 }
 impl Bound {
     pub(crate) fn unknown(&self) -> Option<UnknownId> {
@@ -535,7 +550,8 @@ impl Bound {
             | Bound::Draw(_)
             | Bound::Forcing(_)
             | Bound::Gauge
-            | Bound::Height(_) => None,
+            | Bound::Height(_)
+            | Bound::Lasting(_) => None,
         }
     }
 }
@@ -566,6 +582,10 @@ impl Seal for Bound {
             Bound::Height(axial) => {
                 out.number(6);
                 out.number(*axial);
+            }
+            Bound::Lasting(input) => {
+                out.number(7);
+                input.seal(out);
             }
         }
     }

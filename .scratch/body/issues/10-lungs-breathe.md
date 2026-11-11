@@ -15,6 +15,7 @@ Breathing is tidal unless ticket 26's budget forbids it. Prototype tidal breathi
 - [ ] The hold table no longer lists pleural pressure, and the certificate passes on the whole body
 - [ ] The body's trace is updated with one sentence on why it moved
 - [ ] Cost: the firings and landings a breath adds, unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
+- [ ] From [ticket 05](05-the-days-inputs.md): each law here that reads a lasting input is reviewed against the rule by reading: the input scales a gain or a set point and never stands for a produced quantity. Compile's `UnscaledInput` is only a stand-in: it passes a law that reads any parameter, such as `0 = k (T - room_air())`, and refuses one that reads only inputs. Dalton's dry inspired gas, `inspired_oxygen() * room_pressure()`, reads only inputs and is refused as it stands; it passes once the water vapour pressure is a parameter in it
 
 **Non-goals:** more than one alveolar unit, airway resistance by generation, hypoxic vasoconstriction, and lung water (arrow 110).
 
