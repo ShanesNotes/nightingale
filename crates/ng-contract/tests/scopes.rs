@@ -1317,3 +1317,40 @@ fn each_port_moves_its_cargo_between_the_two_pools_its_route_names() -> Result<(
     );
     Ok(())
 }
+
+#[test]
+fn hematology_crosses_iron_into_cells_only_at_the_beds_whose_cells_hold_iron() -> Result<(), AdmissionError> {
+    let beds = [
+        ("gut bed", Tissue::Gut),
+        ("liver bed", Tissue::Liver),
+        ("muscle bed", Tissue::Muscle),
+    ];
+    let mut schema = tissues(&beds, &[Space::Lumen])?;
+    for space in [Space::Plasma, Space::Interstitium] {
+        schema.carry::<Iron, CapillaryBed>(space);
+    }
+    for bed in ["gut bed", "liver bed"] {
+        schema.pool::<Iron>(site::<CapillaryBed>(bed), Space::Cells)?;
+    }
+    let body = assemble(schema, |mut body| {
+        let (mut fl, ports) = body.fluids()?.parts();
+        let starling = ports.starling(&mut fl);
+        still(&mut fl, &starling)?;
+        let water = ports.cell_membrane::<CapillaryBed, Water>(&mut fl);
+        still(&mut fl, &water)?;
+        body.add(fl.finish());
+        let (mut hc, ports) = body.hematology(None)?.parts();
+        let iron = ports.iron_into_cells(&mut hc);
+        still(&mut hc, &iron)?;
+        body.add(hc.finish());
+        body.compile()
+    })?;
+    assert_eq!(
+        moves(&body, "HC"),
+        [
+            "cell membrane iron: Iron gut bed Interstitium -> gut bed Cells",
+            "cell membrane iron: Iron liver bed Interstitium -> liver bed Cells",
+        ]
+    );
+    Ok(())
+}
