@@ -1,3 +1,4 @@
+use core::cell::Cell;
 use ng_contract::*;
 use ng_solver::Core;
 
@@ -331,8 +332,6 @@ fn no_span_passes_the_cap_and_a_quiet_body_runs_at_it() {
     assert!(lengths.iter().all(|&length| length == 16 * SECOND), "{lengths:?}");
 }
 
-/// A cap far past the relaxation time leaves the doubling estimate above the scales on the first step, so the
-/// first attempts are refused for accuracy and the span the core carries on comes down.
 #[test]
 fn excess_error_is_refused_and_the_span_comes_down() {
     let case = Reservoirs::new([1_000_000.0, 1_000.0], Vec::new());
@@ -340,7 +339,10 @@ fn excess_error_is_refused_and_the_span_comes_down() {
     let core = Core::new(cap);
     let mut run = Run::admit(&case, &core);
     let first = run.step(&core).expect("a step");
-    assert!(!first.refusals.is_empty());
+    assert!(
+        !first.refusals.is_empty(),
+        "a cap far past the relaxation time is refused for accuracy first"
+    );
     for refused in &first.refusals {
         assert!(
             matches!(refused.reason(), NumericalRefusal::Accuracy { .. }),
@@ -416,19 +418,28 @@ fn two_caps_are_two_identities_and_two_grids() {
 
 #[test]
 fn the_declared_resolution_is_the_arenas() {
-    let resolution = Core::new(10 * MILLISECOND).resolution();
-    assert_eq!(resolution.minimum_interval_ns().get(), 100_000);
-    let scales =
-        |absolute, relative| ErrorScales::uniform(measure(absolute), measure(relative)).expect("scales");
-    let expected = DeclaredResolution::new(
-        resolution.policy(),
-        resolution.minimum_interval_ns(),
-        12,
-        ArithmeticProfile::contract_v1(),
-        StageScheme::backward_euler_doubled(),
-        scales(0.1, 1e-3),
-    );
-    assert_eq!(expected.digest(), resolution.digest());
+    let (halved, doubled) = (Core::new(10 * MILLISECOND), Core::doubled(10 * MILLISECOND));
+    for (core, scheme) in [
+        (&halved, StageScheme::backward_euler_halved()),
+        (&doubled, StageScheme::backward_euler_doubled()),
+    ] {
+        let resolution = core.resolution();
+        assert_eq!(resolution.minimum_interval_ns().get(), 100_000);
+        let scales =
+            |absolute, relative| ErrorScales::uniform(measure(absolute), measure(relative)).expect("scales");
+        let expected = DeclaredResolution::new(
+            resolution.policy(),
+            resolution.minimum_interval_ns(),
+            12,
+            ArithmeticProfile::contract_v1(),
+            scheme,
+            scales(0.1, 1e-3),
+        );
+        assert_eq!(expected.digest(), resolution.digest());
+    }
+    let (halved, doubled) = (halved.resolution(), doubled.resolution());
+    assert_eq!(halved.policy(), doubled.policy(), "one continuation schema");
+    assert_ne!(halved.digest(), doubled.digest(), "two runs");
 }
 
 fn coupled_memory(nonlinear: bool) -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
@@ -580,23 +591,26 @@ fn a_fresh_core_resumes_from_the_image_s_canonical_bytes() {
         [500_500.0, 499_500.0],
         vec![(b"pulse", 30, 90, 5_000.0), (b"short", 45, 46, 100.0)],
     );
-    let core = Core::new(16 * SECOND);
-    let mut uninterrupted = Run::admit(&case, &core);
-    for _ in 0..4 {
-        uninterrupted.step(&core).expect("a step");
-    }
-    let mut resumed = Run::admit(&case, &core);
-    resumed.parts = ImageParts::parse(&case.body, &uninterrupted.parts.canonical()).expect("parsed");
-    resumed.revision = uninterrupted.revision;
-    for _ in 0..20 {
-        let fresh = Core::new(16 * SECOND);
-        assert_eq!(
-            core.next_step(uninterrupted.accepted()),
-            fresh.next_step(resumed.accepted())
-        );
-        uninterrupted.step(&core).expect("a step");
-        resumed.step(&fresh).expect("a step");
-        assert_eq!(uninterrupted.parts.canonical(), resumed.parts.canonical());
+    let constructors: [fn(u64) -> Core; 2] = [Core::new, Core::doubled];
+    for build in constructors {
+        let core = build(16 * SECOND);
+        let mut uninterrupted = Run::admit(&case, &core);
+        for _ in 0..4 {
+            uninterrupted.step(&core).expect("a step");
+        }
+        let mut resumed = Run::admit(&case, &core);
+        resumed.parts = ImageParts::parse(&case.body, &uninterrupted.parts.canonical()).expect("parsed");
+        resumed.revision = uninterrupted.revision;
+        for _ in 0..20 {
+            let fresh = build(16 * SECOND);
+            assert_eq!(
+                core.next_step(uninterrupted.accepted()),
+                fresh.next_step(resumed.accepted())
+            );
+            uninterrupted.step(&core).expect("a step");
+            resumed.step(&fresh).expect("a step");
+            assert_eq!(uninterrupted.parts.canonical(), resumed.parts.canonical());
+        }
     }
 }
 
@@ -641,7 +655,7 @@ fn a_nonlinear_memory_meets_the_implicit_quadratic_root() {
 #[test]
 fn a_guess_past_a_law_s_domain_falls_back_and_the_stage_still_solves() {
     let (body, packet) = logarithm();
-    let core = Core::new(SECOND / 10);
+    let core = Core::doubled(SECOND / 10);
     let mut run = Run::admit_body(&body, packet, Vec::new(), &core);
     let taken = run.step(&core).expect("a step");
     assert!(taken.refusals.is_empty(), "{:?}", taken.refusals);
@@ -649,6 +663,57 @@ fn a_guess_past_a_law_s_domain_falls_back_and_the_stage_still_solves() {
     let [x, log] = [0, 1].map(|at| run.amount(body.rows()[at].id()));
     assert!((x - 1.0 / 9.0).abs() < 1e-12, "{x}");
     assert!((exp(log) - 1.0 / 9.0).abs() < 1e-9, "{log}");
+    let (stiff, packet) = logarithm();
+    let halved = Core::new(SECOND / 10);
+    let refused = Run::admit_body(&stiff, packet, Vec::new(), &halved)
+        .step(&halved)
+        .expect("a step")
+        .refusals;
+    assert!(
+        (refused.iter()).any(|refused| matches!(refused.reason(), NumericalRefusal::Accuracy { .. })),
+        "the second difference refuses this stiff first step: {refused:?}"
+    );
+}
+
+fn constant_rate(speed: f64, start: f64) -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
+    let mut map = AnatomyBuilder::new();
+    map.site::<TissueSite>("synthetic body", origin());
+    let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+    let body = assemble(schema, |mut body| {
+        let (mut laws, _) = body.nervous()?.parts();
+        let memory = laws.state::<Dimensionless>("memory", Admissible::finite());
+        let speed = laws
+            .parameter::<Rate<Dimensionless>>(ParameterKey::new("synthetic speed"), Admissible::positive());
+        let class = RateClass::new(RateBand::Minutes, SECOND)?;
+        let rate = laws.kernel(|mut k| {
+            let speed = k.parameter(&speed);
+            k.finish(speed, laws.every_mode(), class)
+        });
+        laws.memory_rate(&memory, rate);
+        body.add(laws.finish());
+        body.compile()
+    })
+    .expect("compiled");
+    let mut packet = ParameterPacket::new();
+    (packet.synthetic(
+        ParameterKey::new("synthetic speed"),
+        Binding::Body,
+        measure::<Rate<Dimensionless>>(speed),
+        "synthetic",
+    ))
+    .expect("once");
+    packet.start_rest(&body, |_| start, "synthetic").expect("a start");
+    (body, packet)
+}
+
+#[test]
+fn an_affine_row_on_an_odd_ticket_at_the_floor_steps_without_a_refusal() {
+    let (body, packet) = constant_rate(1e9, -100_001.0);
+    let core = Core::new(100_001);
+    let mut run = Run::admit_body(&body, packet, Vec::new(), &core);
+    let taken = run.step(&core).expect("a step");
+    assert_eq!(taken.interval.length_ns(), 100_001);
+    assert!(taken.refusals.is_empty(), "{:?}", taken.refusals);
 }
 
 #[test]
@@ -664,4 +729,92 @@ fn excess_error_at_the_floor_is_an_engine_fault() {
         matches!(fault.last_refusal(), Some(NumericalRefusal::Accuracy { .. })),
         "{fault:?}"
     );
+}
+
+struct Counting<'c> {
+    core: &'c Core,
+    refused: Cell<usize>,
+}
+impl CoupledSolver for Counting<'_> {
+    fn resolution(&self) -> DeclaredResolution {
+        self.core.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.core.next_step(accepted)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let solved = self.core.solve(problem, ticket);
+        if let Err(TrialFailure::Refused(refused)) = &solved {
+            assert!(
+                matches!(refused.reason(), NumericalRefusal::Accuracy { .. }),
+                "{refused:?}"
+            );
+            self.refused.set(self.refused.get() + 1);
+        }
+        solved
+    }
+}
+
+#[test]
+fn the_record_never_refuses_for_accuracy_a_step_the_core_proposed() {
+    let case = Reservoirs::new([1_000_000.0, 1_000.0], Vec::new());
+    let core = Core::new(4_000 * SECOND);
+    let counting = Counting {
+        core: &core,
+        refused: Cell::new(0),
+    };
+    let mut run = Run::admit(&case, &counting);
+    let mut refusals = 0;
+    run.until(&counting, at(8_000), |_, taken| refusals += taken.refusals.len());
+    assert!(refusals > 0, "the cap is far past the relaxation time");
+    assert_eq!(counting.refused.get(), refusals, "every refusal is the core's");
+}
+
+#[test]
+fn an_estimate_of_stages_off_its_ticket_s_set_is_a_method_mismatch() {
+    let case = Reservoirs::stepped();
+    let core = Core::new(16 * SECOND);
+    let run = Run::admit(&case, &core);
+    let problem = run.problem();
+    let booked = |ticket: &StepTicket, stages: &[(u64, Ratio)]| -> Result<Increment, TrialFailure> {
+        let workspace = problem.workspace();
+        let mut quadrature = problem.quadrature(ticket);
+        for &(offset, weight) in stages {
+            quadrature.add(&problem.evaluate(&workspace.point(ticket.at(offset)?))?, weight)?;
+        }
+        Ok(quadrature.finish()?)
+    };
+    let kind = |read: Result<f64, TrialFailure>| match read {
+        Err(TrialFailure::EngineFault(fault)) => Some(fault.kind()),
+        _ => None,
+    };
+    let first = Attempt::First { span_ns: 16 * SECOND };
+    let (_, (set, kept, halves, doubled)) = (run.parts.pending)
+        .attempt(&problem, first, |ticket| {
+            let (length, half) = (ticket.length_ns(), ticket.length_ns() / 2);
+            let halves = [
+                (half, ticket.fraction(half)),
+                (length, ticket.fraction(length - half)),
+            ];
+            let doubled = [(length, Ratio::ZERO), halves[0], halves[1]];
+            let kept = booked(ticket, &halves)?;
+            let read = (
+                problem.estimate(ticket, &kept),
+                problem.estimate(ticket, &booked(ticket, &doubled)?),
+            );
+            let verified = core.solve(&problem, ticket)?.verify(&problem)?;
+            Ok((verified, (problem.stage_set(ticket), kept, read.0, read.1)))
+        })
+        .expect("verified");
+    assert_eq!(set, StageSet::Halved);
+    assert_eq!(halves, Ok(0.0), "unmoved halves have no second difference");
+    assert_eq!(kind(doubled), Some(EngineFaultKind::MethodMismatch));
+    let shorter = Attempt::First { span_ns: 8 * SECOND };
+    let (_, other) = (run.parts.pending)
+        .attempt(&problem, shorter, |ticket| {
+            let read = problem.estimate(ticket, &kept);
+            Ok((core.solve(&problem, ticket)?.verify(&problem)?, read))
+        })
+        .expect("verified");
+    assert_eq!(kind(other), Some(EngineFaultKind::BindingMismatch));
 }
