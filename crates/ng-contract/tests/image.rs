@@ -390,33 +390,33 @@ fn a_reader_stops_at_its_bytes() {
     );
 }
 
-fn held(id: &[u8], from: SimTime, payload: BoundaryInput) -> BoundaryEvent {
+fn lasting(id: &[u8], from: SimTime, payload: BoundaryInput) -> BoundaryEvent {
     BoundaryEvent::new(InputId::new(Digest::of_canonical(id)), from, payload)
 }
 
-fn held_image(body: &CompiledBody, sites: [SiteId; 2]) -> ImageParts {
+fn lasting_image(body: &CompiledBody, sites: [SiteId; 2]) -> ImageParts {
     let room = Room {
-        air: measure(293.0),
-        radiant: measure(294.0),
-        humidity: measure(0.5),
-        air_speed: measure(1.0),
-        pressure: measure(760.0),
-        oxygen: measure(0.21),
-        carbon_dioxide: measure(0.0004),
-        clothing: measure(1.0),
+        air: measure(309.0),
+        radiant: measure(310.0),
+        humidity: measure(0.25),
+        air_speed: measure(7.0),
+        pressure: measure(735.0),
+        oxygen: measure(0.35),
+        carbon_dioxide: measure(0.08),
+        clothing: measure(0.3),
     };
     let seven = 7 * 3600 * SECOND;
     let events = vec![
-        held(
+        lasting(
             b"clock",
             at(0),
             BoundaryInput::Clock(Clock {
                 since_midnight_ns: seven,
             }),
         ),
-        held(b"sleep", at(5), BoundaryInput::Sleep(Sleep::Nrem)),
-        held(b"room", at(5), BoundaryInput::Room(room)),
-        held(b"void", at(6), BoundaryInput::Void(Gate::Open)),
+        lasting(b"sleep", at(5), BoundaryInput::Sleep(Sleep::Nrem)),
+        lasting(b"room", at(5), BoundaryInput::Room(room)),
+        lasting(b"void", at(6), BoundaryInput::Void(Gate::Open)),
     ];
     image_with(body, sites, events)
 }
@@ -432,9 +432,9 @@ fn named(bytes: &[u8], name: &str) -> (usize, usize) {
 }
 
 #[test]
-fn every_held_input_reads_back_to_the_same_bytes_under_its_own_tag() {
+fn every_lasting_input_reads_back_to_the_same_bytes_under_its_own_tag() {
     let (body, sites) = body().expect("a body");
-    let parts = held_image(&body, sites);
+    let parts = lasting_image(&body, sites);
     let bytes = parts.canonical();
     let read = ImageParts::parse(&body, &bytes).expect("parsed");
     assert_eq!(read.canonical(), bytes);
@@ -449,9 +449,9 @@ fn every_held_input_reads_back_to_the_same_bytes_under_its_own_tag() {
 }
 
 #[test]
-fn a_held_value_no_payload_can_carry_is_malformed() {
+fn a_lasting_value_no_payload_can_carry_is_malformed() {
     let (body, sites) = body().expect("a body");
-    let bytes = held_image(&body, sites).canonical();
+    let bytes = lasting_image(&body, sites).canonical();
     let value = |name: &str, offset: usize, value: u64| {
         let mut broken = bytes.clone();
         let (_, at) = named(&bytes, name);

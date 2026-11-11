@@ -2273,8 +2273,8 @@ macro_rules! follows {
     };
 }
 
-/// A slot for each held input of the day, and a memory that relaxes toward the clock's cosine, so the state
-/// moves within each minute and every held value lands in the bits.
+/// A slot for each lasting input of the day, and a memory that relaxes toward the clock's cosine, so the state
+/// moves within each minute and every lasting value lands in the bits.
 fn day_body() -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let origin = || Position::new(measure(0.0), measure(0.0), measure(0.0));
@@ -2371,7 +2371,7 @@ fn room(values: [f64; 8]) -> BoundaryInput {
     })
 }
 
-fn held(id: &[u8], seconds: u64, payload: BoundaryInput) -> BoundaryEvent {
+fn lasting(id: &[u8], seconds: u64, payload: BoundaryInput) -> BoundaryEvent {
     BoundaryEvent::new(InputId::new(Digest::of_canonical(id)), at(seconds), payload)
 }
 
@@ -2381,14 +2381,14 @@ const STATED: [(&str, f64); 12] = [
     ("clock sine", 1.0),
     ("sleep", 0.0),
     ("void", 0.0),
-    ("air", 293.0),
-    ("radiant", 294.0),
-    ("humidity", 0.5),
-    ("air speed", 1.0),
-    ("pressure", 760.0),
-    ("oxygen", 0.21),
-    ("carbon dioxide", 0.0004),
-    ("clothing", 1.0),
+    ("air", 307.0),
+    ("radiant", 308.0),
+    ("humidity", 0.15),
+    ("air speed", 2.0),
+    ("pressure", 765.0),
+    ("oxygen", 0.4),
+    ("carbon dioxide", 0.03),
+    ("clothing", 0.9),
 ];
 
 fn lunch() -> Meal {
@@ -2418,20 +2418,16 @@ impl DayInputs {
     }
     fn stated() -> Vec<BoundaryEvent> {
         vec![
-            held(
+            lasting(
                 b"clock at six",
                 0,
                 BoundaryInput::Clock(Clock {
                     since_midnight_ns: 6 * HOUR,
                 }),
             ),
-            held(b"awake", 0, BoundaryInput::Sleep(Sleep::Awake)),
-            held(b"shut", 0, BoundaryInput::Void(Gate::Shut)),
-            held(
-                b"room",
-                0,
-                room([293.0, 294.0, 0.5, 1.0, 760.0, 0.21, 0.0004, 1.0]),
-            ),
+            lasting(b"awake", 0, BoundaryInput::Sleep(Sleep::Awake)),
+            lasting(b"shut", 0, BoundaryInput::Void(Gate::Shut)),
+            lasting(b"room", 0, room([307.0, 308.0, 0.15, 2.0, 765.0, 0.4, 0.03, 0.9])),
         ]
     }
     fn packet(&self) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
@@ -2485,16 +2481,16 @@ impl ReplayCase for DayInputs {
     }
     fn events(&self) -> Result<Vec<BoundaryEvent>, AdmissionError> {
         Ok(vec![
-            held(b"asleep", 40, BoundaryInput::Sleep(Sleep::Nrem)),
-            held(
+            lasting(b"asleep", 40, BoundaryInput::Sleep(Sleep::Nrem)),
+            lasting(
                 b"warmer",
                 50,
-                room([297.0, 299.0, 0.4, 2.0, 755.0, 0.2, 0.001, 0.5]),
+                room([305.0, 303.0, 0.7, 6.0, 770.0, 0.3, 0.06, 0.2]),
             ),
-            held(b"open", 70, BoundaryInput::Void(Gate::Open)),
-            held(b"shut again", 100, BoundaryInput::Void(Gate::Shut)),
-            held(b"lunch", 80, BoundaryInput::Meal(lunch())),
-            held(
+            lasting(b"open", 70, BoundaryInput::Void(Gate::Open)),
+            lasting(b"shut again", 100, BoundaryInput::Void(Gate::Shut)),
+            lasting(b"lunch", 80, BoundaryInput::Meal(lunch())),
+            lasting(
                 b"clock before midnight",
                 130,
                 BoundaryInput::Clock(Clock {
@@ -2533,7 +2529,7 @@ impl ReplayCase for DayInputs {
 }
 
 #[test]
-fn the_days_held_inputs_and_a_meal_pass_late_admission_pause_and_resume() {
+fn the_days_lasting_inputs_and_a_meal_pass_late_admission_pause_and_resume() {
     let case = DayInputs::new();
     let clock = script();
     let plan = plan(&clock);

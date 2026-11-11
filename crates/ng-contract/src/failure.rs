@@ -1,5 +1,5 @@
 use crate::{
-    AnatomyDefect, AnchorId, Binding, Book, Digest, Held, InputId, LawName, ModeValue, ParameterKey,
+    AnatomyDefect, AnchorId, Binding, Book, Digest, InputId, Lasting, LawName, ModeValue, ParameterKey,
     Predicate, QuantityId, RowId, RowKind, SimTime, SiteId, Slot, SourceId, Space, Species,
 };
 
@@ -228,7 +228,7 @@ pub enum AdmissionError {
         id: InputId,
     },
     InputUnstated {
-        input: Held,
+        input: Lasting,
     },
     /// A delivery of the packet's day that starts before the anchor moment and ends after it, so admission would
     /// read only its end.
@@ -370,7 +370,7 @@ pub enum CompileDefect {
     /// A read of the drive of a route the law's card does not own, or a route's law that reads another
     /// route's drive and would carry its delivery down the wrong route.
     DriveOfAnotherRoute { law: LawName, route: &'static str },
-    /// A law that reads a held input of the day and no parameter or memory slot. An input scales a gain or a set
+    /// A law that reads a lasting input of the day and no parameter or memory slot. An input scales a gain or a set
     /// point and never sets a produced quantity.
     UnscaledInput { law: LawName },
     /// A space a held card answers for that has no pool in this body.

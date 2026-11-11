@@ -139,6 +139,11 @@ fn part_id(meal: InputId, place: usize) -> InputId {
     out.number(place as u64);
     InputId::new(out.digest())
 }
+/// Whatever its payload, an event's id and the ids a meal under it would take, so one id names one event.
+fn ids_of(id: InputId) -> Vec<InputId> {
+    let parts = (0..Meal::SPECIES.len()).map(|place| part_id(id, place));
+    core::iter::once(id).chain(parts).collect()
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Clock {
     pub since_midnight_ns: u64,
@@ -241,7 +246,7 @@ impl Gate {
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Held {
+pub enum Lasting {
     ClockCosine,
     ClockSine,
     Sleep,
@@ -255,21 +260,21 @@ pub enum Held {
     Clothing,
     Void,
 }
-impl Seal for Held {
+impl Seal for Lasting {
     fn seal(&self, out: &mut Canonical) {
         out.number(*self as u64);
     }
 }
-const HELD: usize = 12;
-const ROOM: [Held; 8] = [
-    Held::AirTemperature,
-    Held::RadiantTemperature,
-    Held::Humidity,
-    Held::AirSpeed,
-    Held::Pressure,
-    Held::InspiredOxygen,
-    Held::InspiredCarbonDioxide,
-    Held::Clothing,
+const LASTING: usize = 12;
+const ROOM: [Lasting; 8] = [
+    Lasting::AirTemperature,
+    Lasting::RadiantTemperature,
+    Lasting::Humidity,
+    Lasting::AirSpeed,
+    Lasting::Pressure,
+    Lasting::InspiredOxygen,
+    Lasting::InspiredCarbonDioxide,
+    Lasting::Clothing,
 ];
 /// `trunk` is the sine of the trunk's angle from flat: 0 lying flat, 1 sitting up or standing, a negative
 /// value head down.
@@ -422,9 +427,9 @@ impl BoundaryPort {
                 return false;
             };
             let next = clocks.iter().map(|clock| clock.at).find(|at| *at > delivery.at);
-            let held_until = next.unwrap_or(window).min(window);
+            let lasts_until = next.unwrap_or(window).min(window);
             let mut edge = next_minute(delivery.at, reading, delivery.at.max(start));
-            while edge < held_until {
+            while edge < lasts_until {
                 if off(edge) {
                     return true;
                 }
@@ -453,7 +458,7 @@ impl Arrival {
     fn one(delivery: Delivery) -> Self {
         Self {
             id: delivery.id,
-            part_ids: vec![delivery.id],
+            part_ids: ids_of(delivery.id),
             parts: vec![delivery],
         }
     }
@@ -507,7 +512,7 @@ impl Delivery {
             let part = Delivery::checked(part_id(id, place), at, boundary, amount, ends, place);
             parts.push(part.map_err(|_| AdmissionError::UnboundedDelivery { id })?);
         }
-        let part_ids = (0..Meal::SPECIES.len()).map(|place| part_id(id, place)).collect();
+        let part_ids = ids_of(id);
         Ok(Arrival { id, part_ids, parts })
     }
     fn parsed(event: BoundaryEvent) -> Result<Arrival, AdmissionError> {
@@ -542,14 +547,14 @@ impl Delivery {
                 Err(AdmissionError::ClockOutOfRange { id })
             }
             BoundaryInput::Clock(Clock { since_midnight_ns }) => {
-                Ok(Self::held(id, at, Kind::Clock(since_midnight_ns)))
+                Ok(Self::lasting(id, at, Kind::Clock(since_midnight_ns)))
             }
-            BoundaryInput::Sleep(sleep) => Ok(Self::held(id, at, Kind::Sleep(sleep))),
+            BoundaryInput::Sleep(sleep) => Ok(Self::lasting(id, at, Kind::Sleep(sleep))),
             BoundaryInput::Room(room) if !room_in_range(room.values()) => {
                 Err(AdmissionError::RoomOutOfRange { id })
             }
-            BoundaryInput::Room(room) => Ok(Self::held(id, at, Kind::Room(room.values()))),
-            BoundaryInput::Void(gate) => Ok(Self::held(id, at, Kind::Void(gate))),
+            BoundaryInput::Room(room) => Ok(Self::lasting(id, at, Kind::Room(room.values()))),
+            BoundaryInput::Void(gate) => Ok(Self::lasting(id, at, Kind::Void(gate))),
         };
         single.map(Arrival::one)
     }
@@ -564,7 +569,7 @@ impl Delivery {
             kind: Kind::Posture,
         }
     }
-    fn held(id: InputId, at: SimTime, kind: Kind) -> Self {
+    fn lasting(id: InputId, at: SimTime, kind: Kind) -> Self {
         let boundary = match kind {
             Kind::Delivered(_) | Kind::Posture => POSTURE,
             Kind::Clock(_) => "clock",
@@ -611,7 +616,7 @@ impl Delivery {
             kind: Kind::Delivered(place),
         })
     }
-    pub(crate) fn held_event(&self) -> bool {
+    pub(crate) fn lasting_event(&self) -> bool {
         !matches!(self.kind, Kind::Delivered(_))
     }
     pub(crate) fn carries(&self, species: Species) -> bool {
@@ -718,7 +723,7 @@ impl PendingInputs {
     }
     /// The drives running across `[at, at + 1 ns)`, as a ticket starting at `at` would freeze them. Unlike `plan`
     /// it reads the whole timeline, because nothing has applied yet and a delivery can end inside a window.
-    pub(crate) fn frame_at(&self, at: SimTime, reads: &[Held]) -> DriveFrame {
+    pub(crate) fn frame_at(&self, at: SimTime, reads: &[Lasting]) -> DriveFrame {
         let mut frame = DriveFrame::default();
         for delivery in &self.timeline {
             if delivery.at <= at && at < delivery.ends {
@@ -735,7 +740,7 @@ impl PendingInputs {
         let running = (self.past.active.iter()).filter(move |delivery| delivery.ends > start);
         running.chain(self.due_at(start))
     }
-    pub(crate) fn plan(&self, start: SimTime, fired: bool, reads: &[Held]) -> Plan {
+    pub(crate) fn plan(&self, start: SimTime, fired: bool, reads: &[Lasting]) -> Plan {
         let due = self.due_at(start);
         let ended = self.past.active.iter().any(|delivery| delivery.ends == start);
         let mut frame = DriveFrame::default();
@@ -794,7 +799,11 @@ impl PendingInputs {
             attempted_ns: span_ns,
             last_refusal: None,
         };
-        let plan = self.plan(start, problem.accepted.state().fired, problem.body.held_reads());
+        let plan = self.plan(
+            start,
+            problem.accepted.state().fired,
+            problem.body.lasting_reads(),
+        );
         let capped = span_ns.min(problem.longest_span_ns());
         let wanted = start.plus_ns(capped).ok_or(mismatch)?;
         let end = plan.running_end.map_or(wanted, |ends| ends.min(wanted));
@@ -949,9 +958,9 @@ impl PendingInputs {
                 POSTURE_PAYLOAD => Delivery::posture(id, at, amount, Legs::of_share(read.float()?)?),
                 CLOCK_PAYLOAD => match read.number()? {
                     reading if reading >= DAY_NS => return Err(Malformed),
-                    reading => Delivery::held(id, at, Kind::Clock(reading)),
+                    reading => Delivery::lasting(id, at, Kind::Clock(reading)),
                 },
-                SLEEP_PAYLOAD => Delivery::held(id, at, Kind::Sleep(Sleep::of_value(read.float()?)?)),
+                SLEEP_PAYLOAD => Delivery::lasting(id, at, Kind::Sleep(Sleep::of_value(read.float()?)?)),
                 ROOM_PAYLOAD => {
                     let mut values = [0.0; ROOM.len()];
                     for value in &mut values {
@@ -960,9 +969,9 @@ impl PendingInputs {
                     if !room_in_range(values) {
                         return Err(Malformed);
                     }
-                    Delivery::held(id, at, Kind::Room(values))
+                    Delivery::lasting(id, at, Kind::Room(values))
                 }
-                VOID_PAYLOAD => Delivery::held(id, at, Kind::Void(Gate::of_value(read.float()?)?)),
+                VOID_PAYLOAD => Delivery::lasting(id, at, Kind::Void(Gate::of_value(read.float()?)?)),
                 tag => {
                     let place = delivered_place(tag)?;
                     let boundary = body.boundary_name(name).ok_or(Malformed)?;
@@ -1070,8 +1079,8 @@ fn delivered_place(tag: u64) -> Result<usize, Malformed> {
 }
 const DELIVERY_BYTES: usize = 32 + 8 + 8 + 8 + 8 + 8;
 
-fn reads_clock(reads: &[Held]) -> bool {
-    reads.contains(&Held::ClockCosine) || reads.contains(&Held::ClockSine)
+fn reads_clock(reads: &[Lasting]) -> bool {
+    reads.contains(&Lasting::ClockCosine) || reads.contains(&Lasting::ClockSine)
 }
 fn into_minute(at: SimTime, reading: u64, now: SimTime) -> u64 {
     let elapsed = now.nanoseconds().saturating_sub(at.nanoseconds());
@@ -1094,8 +1103,8 @@ pub(crate) struct DriveFrame {
     drives: Vec<(&'static str, f64)>,
     trunk: f64,
     legs: f64,
-    /// Only the held inputs the body reads, so a ticket never seals one no law sees.
-    held: [Option<f64>; HELD],
+    /// Only the lasting inputs the body reads, so a ticket never seals one no law sees.
+    lasting: [Option<f64>; LASTING],
 }
 impl DriveFrame {
     /// A site's height in gravity from its place in the body frame, so posture reaches every law through one read and no
@@ -1104,35 +1113,35 @@ impl DriveFrame {
         axial * if axial < 0.0 { self.legs } else { self.trunk }
     }
     /// Deliveries add, and a posture replaces the one before it: both arrive here in `(time, id)` order.
-    fn take(&mut self, delivery: &Delivery, now: SimTime, reads: &[Held]) {
+    fn take(&mut self, delivery: &Delivery, now: SimTime, reads: &[Lasting]) {
         match delivery.kind {
             Kind::Delivered(_) => self.add(delivery.boundary, delivery.rate),
             Kind::Posture => (self.trunk, self.legs) = (delivery.amount, delivery.rate),
             Kind::Clock(reading) => {
                 let (cosine, sine) = turn(minute_of_day(delivery.at, reading, now), EIGHTH_OF_A_DAY);
-                self.set(Held::ClockCosine, cosine, reads);
-                self.set(Held::ClockSine, sine, reads);
+                self.set(Lasting::ClockCosine, cosine, reads);
+                self.set(Lasting::ClockSine, sine, reads);
             }
-            Kind::Sleep(sleep) => self.set(Held::Sleep, sleep.value(), reads),
+            Kind::Sleep(sleep) => self.set(Lasting::Sleep, sleep.value(), reads),
             Kind::Room(values) => {
-                for (held, value) in ROOM.into_iter().zip(values) {
-                    self.set(held, value, reads);
+                for (input, value) in ROOM.into_iter().zip(values) {
+                    self.set(input, value, reads);
                 }
             }
-            Kind::Void(gate) => self.set(Held::Void, gate.value(), reads),
+            Kind::Void(gate) => self.set(Lasting::Void, gate.value(), reads),
         }
     }
-    fn set(&mut self, held: Held, value: f64, reads: &[Held]) {
-        if reads.contains(&held) {
-            self.held[held as usize] = Some(value);
+    fn set(&mut self, input: Lasting, value: f64, reads: &[Lasting]) {
+        if reads.contains(&input) {
+            self.lasting[input as usize] = Some(value);
         }
     }
-    pub(crate) fn states(&self, held: Held) -> bool {
-        self.held[held as usize].is_some()
+    pub(crate) fn states(&self, input: Lasting) -> bool {
+        self.lasting[input as usize].is_some()
     }
-    /// Admission refuses a body that reads a held input with no value, so a run never reads this NaN.
-    pub(crate) fn held(&self, held: Held) -> f64 {
-        self.held[held as usize].unwrap_or(f64::NAN)
+    /// Admission refuses a body that reads a lasting input with no value, so a run never reads this NaN.
+    pub(crate) fn lasting(&self, input: Lasting) -> f64 {
+        self.lasting[input as usize].unwrap_or(f64::NAN)
     }
     fn add(&mut self, boundary: &'static str, rate: f64) {
         match self.drives.binary_search_by_key(&boundary, |drive| drive.0) {
@@ -1153,7 +1162,7 @@ impl Seal for DriveFrame {
             drives,
             trunk,
             legs,
-            held,
+            lasting,
         } = self;
         out.length(drives.len());
         for (boundary, rate) in drives {
@@ -1162,10 +1171,10 @@ impl Seal for DriveFrame {
         }
         trunk.seal(out);
         legs.seal(out);
-        // A frame that holds no held input seals the bytes it did before there were any.
-        if held.iter().any(Option::is_some) {
+        // A frame that holds no lasting input seals the bytes it did before there were any.
+        if lasting.iter().any(Option::is_some) {
             out.number(u64::MAX);
-            held.seal(out);
+            lasting.seal(out);
         }
     }
 }
@@ -1173,8 +1182,8 @@ impl Seal for DriveFrame {
 #[cfg(test)]
 mod tests {
     use super::{
-        BoundaryEvent, BoundaryInput, BoundaryPort, Clock, Cycle, DriveFrame, EIGHTH_OF_A_DAY, Gate, Held,
-        InputId, MINUTE_NS, PendingInputs, Room, Sleep, turn,
+        BoundaryEvent, BoundaryInput, BoundaryPort, Clock, Cycle, DriveFrame, EIGHTH_OF_A_DAY, Gate, InputId,
+        Lasting, MINUTE_NS, PendingInputs, Room, Sleep, turn,
     };
     use crate::identity::{Canonical, Seal};
     use crate::{AdmissionError, Digest, Measure, SimTime};
@@ -1182,7 +1191,7 @@ mod tests {
 
     const SECOND: u64 = 1_000_000_000;
     const HOUR: u64 = 60 * MINUTE_NS;
-    const CLOCK: [Held; 2] = [Held::ClockCosine, Held::ClockSine];
+    const CLOCK: [Lasting; 2] = [Lasting::ClockCosine, Lasting::ClockSine];
     type Change = fn(&mut [f64; 8]);
 
     fn event(name: &[u8], at: u64, payload: BoundaryInput) -> BoundaryEvent {
@@ -1209,8 +1218,8 @@ mod tests {
     }
     fn bits(frame: &DriveFrame) -> (u64, u64) {
         (
-            frame.held(Held::ClockCosine).to_bits(),
-            frame.held(Held::ClockSine).to_bits(),
+            frame.lasting(Lasting::ClockCosine).to_bits(),
+            frame.lasting(Lasting::ClockSine).to_bits(),
         )
     }
     fn turned(minute: u64) -> (u64, u64) {
@@ -1224,7 +1233,10 @@ mod tests {
         let half_past_seven = 7 * HOUR + 30 * MINUTE_NS;
         let pending = opened(vec![clock(0, half_past_seven)])?;
         let frame = |at: u64| pending.frame_at(SimTime::from_ns(at), &CLOCK);
-        let (cosine, sine) = (frame(0).held(Held::ClockCosine), frame(0).held(Held::ClockSine));
+        let (cosine, sine) = (
+            frame(0).lasting(Lasting::ClockCosine),
+            frame(0).lasting(Lasting::ClockSine),
+        );
         assert!((cosine + 0.382_683_432_365_089_8).abs() < 1e-15, "{cosine}");
         assert!((sine - 0.923_879_532_511_286_7).abs() < 1e-15, "{sine}");
         assert_eq!(bits(&frame(0)), turned(450));
@@ -1239,7 +1251,7 @@ mod tests {
     }
 
     #[test]
-    fn a_held_input_replaces_the_one_before_it_and_a_frame_holds_only_what_the_body_reads()
+    fn a_lasting_input_replaces_the_one_before_it_and_a_frame_holds_only_what_the_body_reads()
     -> Result<(), AdmissionError> {
         let pending = opened(vec![
             event(b"awake", 0, BoundaryInput::Sleep(Sleep::Awake)),
@@ -1247,18 +1259,24 @@ mod tests {
             event(b"open", 0, BoundaryInput::Void(Gate::Open)),
             event(b"shut", 10 * SECOND, BoundaryInput::Void(Gate::Shut)),
         ])?;
-        let reads = [Held::Sleep, Held::Void];
+        let reads = [Lasting::Sleep, Lasting::Void];
         let early = pending.frame_at(SimTime::from_ns(5 * SECOND), &reads);
         let late = pending.frame_at(SimTime::from_ns(10 * SECOND), &reads);
-        assert_eq!((early.held(Held::Sleep), early.held(Held::Void)), (0.0, 1.0));
-        assert_eq!((late.held(Held::Sleep), late.held(Held::Void)), (1.0, 0.0));
-        let unread = pending.frame_at(SimTime::from_ns(10 * SECOND), &[Held::Void]);
-        assert!(!unread.states(Held::Sleep) && unread.held(Held::Sleep).is_nan());
+        assert_eq!(
+            (early.lasting(Lasting::Sleep), early.lasting(Lasting::Void)),
+            (0.0, 1.0)
+        );
+        assert_eq!(
+            (late.lasting(Lasting::Sleep), late.lasting(Lasting::Void)),
+            (1.0, 0.0)
+        );
+        let unread = pending.frame_at(SimTime::from_ns(10 * SECOND), &[Lasting::Void]);
+        assert!(!unread.states(Lasting::Sleep) && unread.lasting(Lasting::Sleep).is_nan());
         Ok(())
     }
 
     #[test]
-    fn a_frame_seals_its_held_inputs_only_when_it_holds_one() -> Result<(), AdmissionError> {
+    fn a_frame_seals_its_lasting_inputs_only_when_it_holds_one() -> Result<(), AdmissionError> {
         let sealed = |frame: &DriveFrame| {
             let mut out = Canonical::new("frame");
             frame.seal(&mut out);
@@ -1269,8 +1287,8 @@ mod tests {
         0.0_f64.seal(&mut before);
         0.0_f64.seal(&mut before);
         let pending = opened(vec![event(b"open", 0, BoundaryInput::Void(Gate::Open))])?;
-        let unread = pending.frame_at(SimTime::from_ns(0), &[Held::Sleep]);
-        let read = pending.frame_at(SimTime::from_ns(0), &[Held::Void]);
+        let unread = pending.frame_at(SimTime::from_ns(0), &[Lasting::Sleep]);
+        let read = pending.frame_at(SimTime::from_ns(0), &[Lasting::Void]);
         assert_eq!(sealed(&DriveFrame::default()), before.digest());
         assert_eq!(sealed(&unread), before.digest());
         assert_ne!(sealed(&read), before.digest());
@@ -1291,7 +1309,7 @@ mod tests {
             at_edge.running_end,
             SimTime::from_ns(40 * SECOND).plus_ns(MINUTE_NS)
         );
-        let blind = pending.plan(edge, false, &[Held::Sleep]);
+        let blind = pending.plan(edge, false, &[Lasting::Sleep]);
         assert!(!blind.after_breakpoint);
         assert_eq!(blind.running_end, Some(SimTime::from_ns(u64::MAX)));
         Ok(())
@@ -1328,7 +1346,7 @@ mod tests {
         );
         assert!(BoundaryPort::new(vec![clock(0, 24 * HOUR - 1)]).is_ok());
         let room = |change: Change| -> Result<BoundaryEvent, AdmissionError> {
-            let mut values = [293.0, 293.0, 0.5, 1.0, 760.0, 0.21, 0.0004, 1.0];
+            let mut values = [311.0, 312.0, 0.6, 3.0, 740.0, 0.3, 0.07, 0.4];
             change(&mut values);
             let [
                 air,

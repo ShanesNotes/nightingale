@@ -9,10 +9,9 @@ use crate::packet::{BoundAnchor, Fit, Owed};
 use crate::problem::Jacobian;
 use crate::{
     AdmissionError, AnchorId, AnchorStatistic, Book, BoundParameters, BoundaryPort, Candidate, Compensated,
-    CompiledBody, ConservedRowId, DenseSegment, Digest, ErrorScales, Held, ImageParts,
-    InitializationProvenance, LawName, Measure, MethodHistory, ModelHash, ObservationLens, PacketHash,
-    QuantityId, Row, RowId, RowKind, SimTime, Slot, Time, UnknownId, ValueName, ValueProvenance, ValueRecord,
-    eliminate,
+    CompiledBody, ConservedRowId, DenseSegment, Digest, ErrorScales, ImageParts, InitializationProvenance,
+    Lasting, LawName, Measure, MethodHistory, ModelHash, ObservationLens, PacketHash, QuantityId, Row, RowId,
+    RowKind, SimTime, Slot, Time, UnknownId, ValueName, ValueProvenance, ValueRecord, eliminate,
 };
 use core::ops::Range;
 
@@ -99,7 +98,7 @@ impl CompiledBody {
         if delivery.at < earliest {
             return Err(AdmissionError::EventBeforeHead { id: delivery.id });
         }
-        if delivery.held_event() {
+        if delivery.lasting_event() {
             return Ok(());
         }
         let boundaries = &self.layout.schema.boundaries;
@@ -246,8 +245,8 @@ impl CompiledBody {
                 (vec![start], None, fence)
             }
             Some(cycle) => {
-                let reads_clock = (self.held_reads().iter())
-                    .any(|held| matches!(held, Held::ClockCosine | Held::ClockSine));
+                let reads_clock = (self.lasting_reads().iter())
+                    .any(|input| matches!(input, Lasting::ClockCosine | Lasting::ClockSine));
                 if let Some(refused) = boundary.off_grid(anchor_moment, cycle, reads_clock) {
                     return Err(refused);
                 }
@@ -261,9 +260,9 @@ impl CompiledBody {
             }
         };
         let pending = PendingInputs::opening(boundary, fence);
-        let frame_at = |ns: &u64| pending.frame_at(SimTime::from_ns(*ns), self.held_reads());
+        let frame_at = |ns: &u64| pending.frame_at(SimTime::from_ns(*ns), self.lasting_reads());
         let frames: Vec<DriveFrame> = instants.iter().map(frame_at).collect();
-        if let Some(&input) = (self.held_reads().iter()).find(|held| !frames[0].states(**held)) {
+        if let Some(&input) = (self.lasting_reads().iter()).find(|read| !frames[0].states(**read)) {
             return Err(AdmissionError::InputUnstated { input });
         }
         let tolerance = parameters.owed.tolerance.unwrap_or(ErrorScales::EXACT);

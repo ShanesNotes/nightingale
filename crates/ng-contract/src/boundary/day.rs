@@ -20,11 +20,10 @@ enum Item {
 const EVENT: u64 = 0;
 const MEAL: u64 = 1;
 impl Item {
-    /// A meal sorts after an event of its own id and instant, so the order never rests on how events came.
-    fn key(&self) -> (SimTime, InputId, u64) {
+    fn key(&self) -> (SimTime, InputId) {
         match *self {
-            Item::Meal { id, at, .. } => (at, id, MEAL),
-            Item::Event(delivery) => (delivery.at, delivery.id, EVENT),
+            Item::Meal { id, at, .. } => (at, id),
+            Item::Event(delivery) => (delivery.at, delivery.id),
         }
     }
     fn arrival(&self) -> Result<Arrival, AdmissionError> {
@@ -107,15 +106,15 @@ impl BoundaryPort {
     pub(crate) fn with_day(self, day: Day, moment: SimTime) -> Result<Self, AdmissionError> {
         let Self { mut deliveries } = self;
         let mut arrivals: Vec<Arrival> = Vec::new();
-        let mut held: Vec<Delivery> = Vec::new();
+        let mut lasting: Vec<Delivery> = Vec::new();
         for item in &day.items {
             let arrival = item.arrival()?;
             let first = arrival.parts[0];
             if first.at >= moment {
                 arrivals.push(arrival);
-            } else if first.held_event() {
-                held.retain(|known| discriminant(&known.kind) != discriminant(&first.kind));
-                held.push(first);
+            } else if first.lasting_event() {
+                lasting.retain(|known| discriminant(&known.kind) != discriminant(&first.kind));
+                lasting.push(first);
             } else if arrival.parts.iter().any(|part| part.ends > moment) {
                 return Err(AdmissionError::DeliveryAcrossAdmission { id: arrival.id });
             }
@@ -126,7 +125,7 @@ impl BoundaryPort {
                 .chain(arrivals.iter().flat_map(|arrival| &arrival.parts)))
             .any(|known| known.at == moment && discriminant(&known.kind) == discriminant(&latest.kind))
         };
-        let restamped: Vec<Arrival> = (held.into_iter())
+        let restamped: Vec<Arrival> = (lasting.into_iter())
             .filter(|latest| !stands(latest))
             .map(|latest| Arrival::one(latest.restamped(moment)))
             .collect();
@@ -273,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn the_latest_held_input_of_each_kind_before_the_moment_is_restamped_at_it_and_a_clock_moves_on()
+    fn the_latest_lasting_input_of_each_kind_before_the_moment_is_restamped_at_it_and_a_clock_moves_on()
     -> Result<(), AdmissionError> {
         let day = vec![
             clock(b"clock", 0, 24 * HOUR - MINUTE_NS),
@@ -292,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn a_held_input_at_the_moment_stands_over_the_one_before_it_whatever_their_ids()
+    fn a_lasting_input_at_the_moment_stands_over_the_one_before_it_whatever_their_ids()
     -> Result<(), AdmissionError> {
         for (before, at) in [(&b"a"[..], &b"b"[..]), (&b"b"[..], &b"a"[..])] {
             let day = vec![
@@ -318,6 +317,14 @@ mod tests {
             merged(vec![drink()?], vec![other], 0).err(),
             Some(AdmissionError::InputConflict { id: id(b"drink") })
         );
+        let meal =
+            || -> Result<BoundaryEvent, AdmissionError> { Ok(event(b"drink", HOUR, lunch(2 * HOUR)?)) };
+        for (day, port) in [(meal()?, drink()?), (drink()?, meal()?)] {
+            assert_eq!(
+                merged(vec![day], vec![port], 0).err(),
+                Some(AdmissionError::InputConflict { id: id(b"drink") })
+            );
+        }
         Ok(())
     }
 }

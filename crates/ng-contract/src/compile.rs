@@ -16,7 +16,7 @@ use crate::law::{
 use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, PoolRef, RouteBoundary};
 use crate::{
     AdmissibleSet, AdmissionError, Anatomy, Book, Boundary, BoundaryDirection, Class, CompileDefect,
-    Compliance, HeatRoute, Held, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Passage,
+    Compliance, HeatRoute, Lasting, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Passage,
     Predicate, RateClass, Schema, SiteId, Sites, Space, Species, Wall,
 };
 
@@ -1060,7 +1060,7 @@ enum Address {
     Forcing(usize),
     Gauge,
     Height(u64),
-    Held(Held),
+    Lasting(Lasting),
 }
 
 struct Places<'a> {
@@ -1292,7 +1292,7 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                 }
             }
             let read = |input: &Input| match input {
-                Input::Read(Source::Held(_), _) => Some(false),
+                Input::Read(Source::Lasting(_), _) => Some(false),
                 Input::Parameter(_)
                 | Input::SiteParameter(_)
                 | Input::EdgeParameter(_)
@@ -1815,7 +1815,7 @@ fn addresses(
                     Some((space, _)) => return Err(CompileDefect::NoEnclosurePressure { law, space }),
                 }
             }
-            Source::Held(held) => Address::Held(held),
+            Source::Lasting(input) => Address::Lasting(input),
         })
     };
     let resolve = |input: Input, accepts: bool, expects: Option<&str>| -> Result<Address, CompileDefect> {
@@ -2046,7 +2046,7 @@ fn bind(
             | Address::Forcing(_)
             | Address::Gauge
             | Address::Height(_)
-            | Address::Held(_) => None,
+            | Address::Lasting(_) => None,
         })
         .chain(forced.iter().copied())
         .collect();
@@ -2090,7 +2090,7 @@ fn bind(
         Address::Forcing(forcing) => Bound::Forcing(forcing),
         Address::Gauge => Bound::Gauge,
         Address::Height(axial) => Bound::Height(axial),
-        Address::Held(held) => Bound::Held(held),
+        Address::Lasting(input) => Bound::Lasting(input),
     };
     let instances = (placed.into_iter())
         .map(|placed| {

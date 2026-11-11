@@ -437,3 +437,49 @@ fn a_day_delivery_across_the_anchor_moment_is_refused_and_one_that_ended_is_drop
     assert_eq!(admitted(meal), Err(across));
     Ok(())
 }
+
+fn drink(name: &[u8], from: SimTime) -> BoundaryEvent {
+    let delivered = Delivered {
+        boundary: "gut water",
+        amount: measure(1.0),
+        ends: at(10),
+    };
+    BoundaryEvent::new(id(name), from, BoundaryInput::Water(delivered))
+}
+
+#[test]
+fn one_id_names_one_event_so_a_meal_and_a_drink_under_it_conflict_in_either_order() {
+    let conflict = Some(AdmissionError::InputConflict { id: id(b"x") });
+    let meal_first = || vec![meal(b"x", at(0), breakfast(at(10))), drink(b"x", at(0))];
+    let drink_first = || vec![drink(b"x", at(0)), meal(b"x", at(0), breakfast(at(10)))];
+    assert_eq!(
+        BoundaryPort::new(meal_first()).err(),
+        conflict,
+        "port, meal first"
+    );
+    assert_eq!(
+        BoundaryPort::new(drink_first()).err(),
+        conflict,
+        "port, drink first"
+    );
+    assert_eq!(Day::new(meal_first()).err(), conflict, "day, meal first");
+    assert_eq!(Day::new(drink_first()).err(), conflict, "day, drink first");
+}
+
+#[test]
+fn a_late_event_under_the_id_of_a_waiting_one_of_another_kind_is_a_conflict()
+-> Result<(), InitializationFailure> {
+    let conflict = Err(AdmissionError::InputConflict { id: id(b"x") });
+    let orders = [
+        (meal(b"x", at(5), breakfast(at(10))), drink(b"x", at(5))),
+        (drink(b"x", at(5)), meal(b"x", at(5), breakfast(at(10)))),
+    ];
+    for (waiting, late) in orders {
+        let mut bench = Bench::admitted(&Meal::SPECIES, vec![waiting])?;
+        let head = bench.parts.time;
+        let before = bench.parts.pending.waiting_digest();
+        assert_eq!((bench.parts.pending).admit(&bench.body, head, late), conflict);
+        assert_eq!(bench.parts.pending.waiting_digest(), before, "nothing lands");
+    }
+    Ok(())
+}

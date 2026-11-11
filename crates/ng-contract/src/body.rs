@@ -6,8 +6,8 @@ use crate::law::{Op, Validity};
 use crate::problem::Jacobian;
 use crate::sources::{RefusalSource, refusal_sources};
 use crate::{
-    AdmissibleSet, Class, ConservedBasis, Crossing, Digest, Held, LawName, Network, ParameterKey, Predicate,
-    RateClass, Schema, SiteId, Space, Species,
+    AdmissibleSet, Class, ConservedBasis, Crossing, Digest, Lasting, LawName, Network, ParameterKey,
+    Predicate, RateClass, Schema, SiteId, Space, Species,
 };
 
 macro_rules! index {
@@ -52,7 +52,7 @@ pub struct CompiledBody {
     pub(crate) sources: Vec<RefusalSource>,
     pub(crate) tape: Tape,
     totals: Vec<AdmissionTotal>,
-    held: Vec<Held>,
+    lasting: Vec<Lasting>,
 }
 pub(crate) struct Layout {
     pub(crate) schema: Schema,
@@ -75,15 +75,15 @@ impl CompiledBody {
     pub(crate) fn seal(layout: Layout, elimination: Elimination, totals: Vec<AdmissionTotal>) -> Self {
         let mut out = Canonical::new("ng-contract model 2");
         layout.seal(&mut out);
-        let mut held: Vec<Held> = (layout.instances.iter())
+        let mut lasting: Vec<Lasting> = (layout.instances.iter())
             .flat_map(|instance| &instance.inputs)
             .filter_map(|input| match *input {
-                Bound::Held(held) => Some(held),
+                Bound::Lasting(input) => Some(input),
                 _ => None,
             })
             .collect();
-        held.sort_unstable();
-        held.dedup();
+        lasting.sort_unstable();
+        lasting.dedup();
         Self {
             hash: ModelHash { digest: out.digest() },
             sources: refusal_sources(&layout),
@@ -91,11 +91,11 @@ impl CompiledBody {
             layout,
             elimination,
             totals,
-            held,
+            lasting,
         }
     }
-    pub(crate) fn held_reads(&self) -> &[Held] {
-        &self.held
+    pub(crate) fn lasting_reads(&self) -> &[Lasting] {
+        &self.lasting
     }
     pub fn model_hash(&self) -> ModelHash {
         self.hash
@@ -539,7 +539,7 @@ pub(crate) enum Bound {
     Forcing(usize),
     Gauge,
     Height(u64),
-    Held(Held),
+    Lasting(Lasting),
 }
 impl Bound {
     pub(crate) fn unknown(&self) -> Option<UnknownId> {
@@ -551,7 +551,7 @@ impl Bound {
             | Bound::Forcing(_)
             | Bound::Gauge
             | Bound::Height(_)
-            | Bound::Held(_) => None,
+            | Bound::Lasting(_) => None,
         }
     }
 }
@@ -583,9 +583,9 @@ impl Seal for Bound {
                 out.number(6);
                 out.number(*axial);
             }
-            Bound::Held(held) => {
+            Bound::Lasting(input) => {
                 out.number(7);
-                held.seal(out);
+                input.seal(out);
             }
         }
     }

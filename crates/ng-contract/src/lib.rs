@@ -1397,7 +1397,7 @@ pub use anatomy::*;
 pub use body::*;
 pub use boundary::{
     AppliedInputs, Attempt, BoundaryEvent, BoundaryInput, BoundaryPort, Clock, Day, Delivered, Eaten, Gate,
-    Held, InputId, Legs, Meal, PendingInputs, Posture, Room, Sleep, WaterDelivery,
+    InputId, Lasting, Legs, Meal, PendingInputs, Posture, Room, Sleep, WaterDelivery,
 };
 pub use compensated::*;
 pub use conservation::*;

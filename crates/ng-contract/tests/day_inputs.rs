@@ -269,7 +269,7 @@ fn the_day(clock: u64) -> Result<Vec<BoundaryEvent>, AdmissionError> {
 }
 
 #[test]
-fn each_held_input_reaches_the_law_that_reads_it() -> Result<(), InitializationFailure> {
+fn each_lasting_input_reaches_the_law_that_reads_it() -> Result<(), InitializationFailure> {
     let day = BoundaryPort::new(the_day(5 * HOUR)?)?;
     let bench = Bench::admitted(reading(&EVERY)?, packet(&READS)?, day)?;
     let mut expected = vec![("plain", 1.0)];
@@ -302,13 +302,13 @@ fn waking_and_a_shut_gate_read_zero() -> Result<(), InitializationFailure> {
 }
 
 #[test]
-fn admission_refuses_a_body_that_reads_a_held_input_the_day_never_states() -> Result<(), AdmissionError> {
+fn admission_refuses_a_body_that_reads_a_lasting_input_the_day_never_states() -> Result<(), AdmissionError> {
     let names = ["sleep", "humidity"];
     let body = reading(&names)?;
     let only_sleep = vec![event(b"sleep", 0, BoundaryInput::Sleep(Sleep::Nrem))];
     let refused = Bench::admitted(body, packet(&reads(&names))?, BoundaryPort::new(only_sleep)?).err();
     let unstated = AdmissionError::InputUnstated {
-        input: Held::Humidity,
+        input: Lasting::Humidity,
     };
     assert_eq!(refused, Some(unstated.into()));
     let late = vec![
@@ -316,7 +316,7 @@ fn admission_refuses_a_body_that_reads_a_held_input_the_day_never_states() -> Re
         event(
             b"room",
             SECOND,
-            room([293.0, 293.0, 0.5, 1.0, 760.0, 0.21, 0.0, 1.0])?,
+            room([303.0, 304.0, 0.35, 5.0, 745.0, 0.25, 0.06, 0.6])?,
         ),
     ];
     let refused = Bench::admitted(
@@ -334,7 +334,7 @@ fn admission_refuses_a_body_that_reads_a_held_input_the_day_never_states() -> Re
 }
 
 #[test]
-fn admission_takes_a_held_input_no_law_reads() -> Result<(), InitializationFailure> {
+fn admission_takes_a_lasting_input_no_law_reads() -> Result<(), InitializationFailure> {
     let bench = Bench::admitted(reading(&[])?, packet(&[])?, BoundaryPort::new(the_day(0)?)?)?;
     assert_eq!(bench.read(), [("plain", 1.0)]);
     Ok(())
@@ -369,15 +369,15 @@ fn a_step_never_crosses_a_clock_edge_in_a_body_that_reads_the_clock() -> Result<
 }
 
 #[test]
-fn a_held_input_the_day_stated_before_the_anchor_moment_reads_at_it_with_the_clock_moved_on()
+fn a_lasting_input_the_day_stated_before_the_anchor_moment_reads_at_it_with_the_clock_moved_on()
 -> Result<(), InitializationFailure> {
     let names = ["clock cosine", "clock sine", "sleep", "air", "humidity"];
     let mut packet = packet(&[
         ("clock cosine", 1.0),
         ("clock sine", 0.0),
         ("sleep", 0.0),
-        ("air", 297.0),
-        ("humidity", 0.4),
+        ("air", 305.0),
+        ("humidity", 0.45),
     ])?;
     let day = vec![
         event(
@@ -388,12 +388,16 @@ fn a_held_input_the_day_stated_before_the_anchor_moment_reads_at_it_with_the_clo
             }),
         ),
         event(b"asleep", 0, BoundaryInput::Sleep(Sleep::Nrem)),
-        event(b"room", 0, room([293.0, 293.0, 0.5, 1.0, 760.0, 0.21, 0.0, 1.0])?),
+        event(
+            b"room",
+            0,
+            room([303.0, 304.0, 0.35, 5.0, 745.0, 0.25, 0.06, 0.6])?,
+        ),
         event(b"awake", HOUR, BoundaryInput::Sleep(Sleep::Awake)),
         event(
             b"warmer",
             2 * HOUR,
-            room([297.0, 297.0, 0.4, 1.0, 760.0, 0.21, 0.0, 1.0])?,
+            room([305.0, 306.0, 0.45, 6.0, 755.0, 0.15, 0.1, 0.8])?,
         ),
     ];
     packet.day(Day::new(day)?)?;
@@ -406,8 +410,8 @@ fn a_held_input_the_day_stated_before_the_anchor_moment_reads_at_it_with_the_clo
         ("clock cosine", 1.0),
         ("clock sine", 0.0),
         ("sleep", 0.0),
-        ("air", 297.0),
-        ("humidity", 0.4),
+        ("air", 305.0),
+        ("humidity", 0.45),
     ];
     assert_eq!(read, expected);
     Ok(())
