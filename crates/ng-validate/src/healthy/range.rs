@@ -1,4 +1,4 @@
-use super::{BareReading, CheckVerdict, DayActivities, ReadingCheckError};
+use super::{BareReading, CheckVerdict, DayActivities, ReadingCheckError, Taken};
 use alloc::collections::VecDeque;
 use core::num::NonZeroU64;
 use ng_contract::{
@@ -249,7 +249,7 @@ struct Period {
 struct Reading {
     row: RowKind,
     method: &'static str,
-    integrated: bool,
+    taken: Taken,
     ranged: bool,
     unranged: Vec<bool>,
     whole: Vec<Option<usize>>,
@@ -325,7 +325,7 @@ impl Reading {
         Self {
             row: reading.row,
             method: reading.method,
-            integrated: reading.integrated,
+            taken: reading.taken,
             ranged: !own.is_empty(),
             unranged: spans
                 .iter()
@@ -440,11 +440,7 @@ impl RangeFold {
         let Some(fold) = readings.get_mut(reading).filter(|fold| fold.ranged) else {
             return;
         };
-        let covers = if fold.integrated {
-            at.nanoseconds().saturating_sub(*period_ns)
-        } else {
-            at.nanoseconds()
-        };
+        let covers = fold.taken.covers(at, *period_ns);
         while (spans.get(fold.span + 1)).is_some_and(|next| next.start.nanoseconds() <= covers) {
             fold.span += 1;
         }
@@ -510,12 +506,7 @@ impl RangeFold {
             fold.period = Some(period);
             return;
         };
-        let last = if fold.integrated {
-            end
-        } else {
-            SimTime::from_ns(end.nanoseconds().saturating_sub(*period_ns))
-        };
-        if at != last {
+        if !fold.taken.closes(at, end, *period_ns) {
             fold.period = Some(period);
             return;
         }

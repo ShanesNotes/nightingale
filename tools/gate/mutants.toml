@@ -943,7 +943,7 @@ test = "-p ng-validate --lib healthy::tests::a_change_between_activities_that_sh
 [[mutant]]
 name = "healthy-range-whole-period-judges-each-value"
 path = "crates/ng-validate/src/healthy/range.rs"
-old = '''if at != last {'''
+old = '''if !fold.taken.closes(at, end, *period_ns) {'''
 new = '''if false {'''
 test = "-p ng-validate --lib healthy::tests::a_whole_period_range_judges_each_whole_periods_mean_and_counts_the_periods_the_run_cuts"
 
@@ -1033,16 +1033,16 @@ test = "-p ng-validate --lib healthy::tests::a_day_that_starts_after_admission_i
 
 [[mutant]]
 name = "healthy-range-time-mean-tagged-by-its-closing-instant"
-path = "crates/ng-validate/src/healthy/range.rs"
-old = '''at.nanoseconds().saturating_sub(*period_ns)'''
-new = '''at.nanoseconds()'''
+path = "crates/ng-validate/src/healthy.rs"
+old = '''Self::TimeMean => at.nanoseconds().saturating_sub(period_ns),'''
+new = '''Self::TimeMean => at.nanoseconds(),'''
 test = "-p ng-validate --lib healthy::tests::a_time_mean_takes_the_activity_of_the_period_it_covers"
 
 [[mutant]]
 name = "healthy-range-time-mean-period-closes-one-mean-early"
-path = "crates/ng-validate/src/healthy/range.rs"
-old = '''        let last = if fold.integrated {'''
-new = '''        let last = if false {'''
+path = "crates/ng-validate/src/healthy.rs"
+old = '''Self::TimeMean => at == end,'''
+new = '''Self::TimeMean => at.nanoseconds() == end.nanoseconds().saturating_sub(period_ns),'''
 test = "-p ng-validate --lib healthy::tests::a_time_mean_whole_period_holds_every_mean_closing_in_its_span"
 
 [[mutant]]

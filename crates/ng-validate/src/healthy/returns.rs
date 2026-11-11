@@ -1,4 +1,4 @@
-use super::{BareReading, CheckVerdict, DAY_NS, ReadingCheckError};
+use super::{BareReading, CheckVerdict, DAY_NS, ReadingCheckError, Taken};
 use core::num::NonZeroU32;
 use ng_contract::{
     AnchorId, AnchorReading, AnchorStatistic, Compensated, Digest, Dimensionless, HealthyRangeSet, Measure,
@@ -187,10 +187,12 @@ impl ReturnFold {
         let mut by_reading = vec![Vec::new(); readings.len()];
         for plan in plans {
             let anchor = plan.anchor;
-            let integrated = plan.statistic == AnchorStatistic::CycleTimeMean;
-            let reading = (readings.iter()).position(|bare| {
-                (bare.row, bare.method, bare.integrated) == (plan.row, plan.method, integrated)
-            });
+            let taken = match plan.statistic {
+                AnchorStatistic::Instant | AnchorStatistic::CycleMean => Taken::Sampled,
+                AnchorStatistic::CycleTimeMean => Taken::TimeMean,
+            };
+            let reading = (readings.iter())
+                .position(|bare| (bare.row, bare.method, bare.taken) == (plan.row, plan.method, taken));
             let variation = (set.variations().iter())
                 .find(|variation| (variation.row(), variation.method()) == (plan.row, plan.method));
             if reading.is_none() {

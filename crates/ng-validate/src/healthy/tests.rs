@@ -24,15 +24,15 @@ fn sampled(row: RowKind) -> BareReading {
     BareReading {
         row,
         method: METHOD,
-        integrated: false,
+        taken: Taken::Sampled,
     }
 }
 
-fn integrated(row: RowKind) -> BareReading {
+fn time_mean(row: RowKind) -> BareReading {
     BareReading {
         row,
         method: METHOD,
-        integrated: true,
+        taken: Taken::TimeMean,
     }
 }
 
@@ -586,7 +586,7 @@ fn a_time_mean_whole_period_holds_every_mean_closing_in_its_span() {
     let values = [50.0, 50.0, 50.0, 50.0, 12.0, 12.0, 12.0, 2.0, 50.0, 50.0];
     let stream = each_period(SECOND, SECOND, &values);
     let report = ranged(
-        &[integrated(reading())],
+        &[time_mean(reading())],
         SECOND,
         &night_and_day(),
         &day,
@@ -613,7 +613,7 @@ fn a_time_mean_takes_the_activity_of_the_period_it_covers() {
     );
     let day = day(&[(0, "a"), (4 * SECOND, "b")]);
     let stream = each_period(SECOND, SECOND, &[5.0, 5.0, 5.0, 5.0, 25.0, 25.0, 25.0, 25.0]);
-    let report = ranged(&[integrated(reading())], SECOND, &set, &day, 0, &stream);
+    let report = ranged(&[time_mean(reading())], SECOND, &set, &day, 0, &stream);
     assert_eq!(
         report.verdict(),
         CheckVerdict::Pass,
@@ -648,7 +648,7 @@ fn a_reading_with_no_range_is_named_once_however_the_lens_reads_it() {
         vec![range("xx.range", Scope::Every, sliding(SECOND), 0.0, 100.0)],
         Vec::new(),
     );
-    let readings = [sampled(row("unranged")), integrated(row("unranged"))];
+    let readings = [sampled(row("unranged")), time_mean(row("unranged"))];
     let report = ranged(&readings, SECOND, &set, &day(&[(0, "awake")]), 0, &[]);
     let named = RangeGap::NoRange {
         row: row("unranged"),
@@ -853,7 +853,7 @@ fn a_cycle_anchor_reads_the_cycle_after_each_morning_by_its_own_kind_of_mean() {
         anchor("xx.sampled", AnchorStatistic::CycleMean, 2 * HOUR),
         anchor("xx.timed", AnchorStatistic::CycleTimeMean, 2 * HOUR),
     ];
-    let readings = [sampled(reading()), integrated(reading())];
+    let readings = [sampled(reading()), time_mean(reading())];
     let report = returned(
         &readings,
         &set(Vec::new(), vec![variation(10.0)]),

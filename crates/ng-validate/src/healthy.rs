@@ -131,10 +131,30 @@ impl DayActivities {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Taken {
+    Sampled,
+    TimeMean,
+}
+impl Taken {
+    pub(crate) fn covers(self, at: SimTime, period_ns: u64) -> u64 {
+        match self {
+            Self::Sampled => at.nanoseconds(),
+            Self::TimeMean => at.nanoseconds().saturating_sub(period_ns),
+        }
+    }
+    pub(crate) fn closes(self, at: SimTime, end: SimTime, period_ns: u64) -> bool {
+        match self {
+            Self::Sampled => at.nanoseconds() == end.nanoseconds().saturating_sub(period_ns),
+            Self::TimeMean => at == end,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BareReading {
     pub(crate) row: RowKind,
     pub(crate) method: &'static str,
-    pub(crate) integrated: bool,
+    pub(crate) taken: Taken,
 }
 
 /// A learner's lens with nothing a reading adds to its row: one channel for each row, method and kind of mean the
@@ -152,10 +172,15 @@ impl BareLens {
         }
         let mut readings: Vec<BareReading> = Vec::new();
         for channel in lens.channels() {
+            let taken = if channel.integrated() {
+                Taken::TimeMean
+            } else {
+                Taken::Sampled
+            };
             let reading = BareReading {
                 row: body.rows()[channel.row().index()].kind(),
                 method: channel.method(),
-                integrated: channel.integrated(),
+                taken,
             };
             if !readings.contains(&reading) {
                 readings.push(reading);
@@ -164,10 +189,9 @@ impl BareLens {
         let period = NonZeroU64::new(lens.period_ns()).expect("a lens's grid period is not zero");
         let channels = readings.iter().map(|reading| {
             let channel = ChannelSpec::new(reading.method, reading.row);
-            if reading.integrated {
-                channel.time_averaged(period)
-            } else {
-                channel
+            match reading.taken {
+                Taken::Sampled => channel,
+                Taken::TimeMean => channel.time_averaged(period),
             }
         });
         Ok(Self {
