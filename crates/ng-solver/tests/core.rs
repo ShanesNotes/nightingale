@@ -103,7 +103,7 @@ impl Reservoirs {
     }
     fn packet(&self) -> ParameterPacket<SyntheticFixture> {
         let default = Binding::Network(Network::Vascular);
-        let mut packet = ParameterPacket::new();
+        let mut packet = ParameterPacket::<SyntheticFixture>::new();
         packet
             .synthetic(
                 ParameterKey::new("cv.e"),
@@ -489,7 +489,7 @@ fn coupled_memory(nonlinear: bool) -> (CompiledBody, ParameterPacket<SyntheticFi
         body.compile()
     })
     .expect("compiled");
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     let speed = measure::<Rate<Dimensionless>>(4.0);
     (packet.synthetic(
         ParameterKey::new("synthetic speed"),
@@ -543,7 +543,7 @@ fn logarithm() -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
         body.compile()
     })
     .expect("compiled");
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     let speed = measure::<Rate<Dimensionless>>(40.0);
     (packet.synthetic(
         ParameterKey::new("synthetic speed"),
@@ -694,7 +694,7 @@ fn constant_rate(speed: f64, start: f64) -> (CompiledBody, ParameterPacket<Synth
         body.compile()
     })
     .expect("compiled");
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     (packet.synthetic(
         ParameterKey::new("synthetic speed"),
         Binding::Body,

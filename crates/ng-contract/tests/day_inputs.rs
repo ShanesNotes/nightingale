@@ -178,7 +178,7 @@ fn slot(local: &'static str) -> RowKind {
 
 /// Each slot starts at what it reads: admission takes a start only where every law holds exactly.
 fn packet(starts: &[(&str, f64)]) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     let gain = Measure::<Dimensionless>::new(1.0)?;
     packet.synthetic(ParameterKey::new("ns.gain"), Binding::Body, gain, "synthetic")?;
     packet.start(slot("plain"), Measure::<Dimensionless>::new(1.0)?, "synthetic")?;

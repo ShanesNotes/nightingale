@@ -147,7 +147,7 @@ impl OneVessel {
         (self.body.lens(channels, wall(100 * MILLISECOND))).expect("a lens")
     }
     fn spec(&self, lens: ObservationLens, from_ms: u64, to_ms: u64, repeats: u32) -> ArenaSpec {
-        let mut packet = ParameterPacket::new();
+        let mut packet = ParameterPacket::<SyntheticFixture>::new();
         packet.within(admission_tolerance());
         (packet.start(self.amount, measure::<Water>(10.0), "synthetic")).expect("a start");
         (packet.start(self.reading, measure::<Rate<Water>>(0.0), "synthetic")).expect("a start");
@@ -320,7 +320,7 @@ fn the_clock_opens_before_admission_so_a_refused_one_has_read_it_once() {
     let small = OneVessel::new("synthetic vessel");
     let (core, store, clock) = (small_core(), MemoryStore::default(), Scripted::ticking());
     let mut spec = small.spec(small.lens(), 0, 1000, 1);
-    spec.packet = ParameterPacket::new();
+    spec.packet = ParameterPacket::<SyntheticFixture>::new();
     let refused = run(&small.body, &core, spec, &clock, &store);
     assert!(matches!(refused, Err(ArenaFailure::Initialization(_))));
     assert_eq!(clock.reads.get(), 1);

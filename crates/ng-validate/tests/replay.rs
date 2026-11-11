@@ -2431,7 +2431,7 @@ impl DayInputs {
         ]
     }
     fn packet(&self) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
-        let mut packet = ParameterPacket::new();
+        let mut packet = ParameterPacket::<SyntheticFixture>::new();
         packet.synthetic(
             ParameterKey::new("ns.gain"),
             Binding::Body,

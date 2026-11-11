@@ -9,6 +9,9 @@ use crate::{
 };
 use core::num::NonZeroU64;
 
+mod day;
+pub use day::Day;
+
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 const MINUTE_NS: u64 = 60_000_000_000;
 const DAY_NS: u64 = 24 * 60 * MINUTE_NS;
@@ -1098,10 +1101,14 @@ fn next_minute(at: SimTime, reading: u64, now: SimTime) -> SimTime {
     let left = MINUTE_NS - into_minute(at, reading, now);
     SimTime::from_ns(now.nanoseconds().saturating_add(left))
 }
+/// The time of day at `now` for a clock that read `reading` at `at`.
+fn time_of_day(at: SimTime, reading: u64, now: SimTime) -> u64 {
+    let elapsed = now.nanoseconds().saturating_sub(at.nanoseconds());
+    (reading + elapsed % DAY_NS) % DAY_NS
+}
 /// The time of day at `now` in whole minutes: the phase is zero at midnight and makes one turn a day.
 fn minute_of_day(at: SimTime, reading: u64, now: SimTime) -> u64 {
-    let elapsed = now.nanoseconds().saturating_sub(at.nanoseconds());
-    (reading + elapsed % DAY_NS) % DAY_NS / MINUTE_NS
+    time_of_day(at, reading, now) / MINUTE_NS
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

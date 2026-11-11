@@ -821,7 +821,7 @@ fn edge_law_body_from(law: EdgeLaw, start: [f64; 2]) -> (CompiledBody, Parameter
         space: Space::Lumen,
         species: Species::Water,
     };
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     packet
         .synthetic(
             conductance,
@@ -1013,7 +1013,7 @@ fn a_published_state_is_evaluated_once_so_a_law_undefined_there_is_refused() {
         space: Space::Lumen,
         species: Species::Water,
     };
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     packet
         .synthetic(
             conductance,
@@ -1089,7 +1089,7 @@ fn a_body_with_a_mode_is_refused_by_name_at_binding() {
 
 fn reservoir_packet(body: &CompiledBody, e: f64, g: f64) -> ParameterPacket<SyntheticFixture> {
     let default = Binding::Network(Network::Vascular);
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     packet
         .synthetic(
             ParameterKey::new("cv.e"),
@@ -1120,7 +1120,7 @@ fn a_packet_binds_its_values_and_its_hash_ignores_declaration_order() {
     let body = case.body();
     let bound = body.bind(reservoir_packet(body, 1.0, 0.5)).expect("bound");
     let default = Binding::Network(Network::Vascular);
-    let mut reversed = ParameterPacket::new();
+    let mut reversed = ParameterPacket::<SyntheticFixture>::new();
     let rows: Vec<RowKind> = body.rows().iter().map(Row::kind).rev().collect();
     for row in rows {
         reversed
@@ -1180,7 +1180,7 @@ fn each_bad_packet_is_refused_by_name() {
     let default = Binding::Network(Network::Vascular);
     let refusal = |packet: ParameterPacket<SyntheticFixture>| body.bind(packet).err().expect("refused");
 
-    let mut unbound = ParameterPacket::new();
+    let mut unbound = ParameterPacket::<SyntheticFixture>::new();
     unbound
         .synthetic(e, default, measure::<Elastance>(1.0), "synthetic")
         .expect("once");
@@ -1211,7 +1211,7 @@ fn each_bad_packet_is_refused_by_name() {
     let outside = reservoir_packet(body, -1.0, 0.5);
     assert!(matches!(refusal(outside), AdmissionError::ParameterOutsideSet { key, .. } if key == e));
 
-    let mut wrong = ParameterPacket::new();
+    let mut wrong = ParameterPacket::<SyntheticFixture>::new();
     wrong
         .synthetic(e, default, measure::<Pressure>(1.0), "synthetic")
         .expect("once");
@@ -1221,7 +1221,7 @@ fn each_bad_packet_is_refused_by_name() {
     assert!(matches!(refusal(wrong), AdmissionError::ParameterDimension { key, .. } if key == e));
 
     let rows: Vec<RowKind> = body.rows().iter().map(Row::kind).collect();
-    let mut missing = ParameterPacket::new();
+    let mut missing = ParameterPacket::<SyntheticFixture>::new();
     missing
         .synthetic(e, default, measure::<Elastance>(1.0), "synthetic")
         .expect("once");
@@ -1249,7 +1249,7 @@ fn each_bad_packet_is_refused_by_name() {
         Err(AdmissionError::DuplicateStart { row: rows[0] })
     );
 
-    let mut pressure = ParameterPacket::new();
+    let mut pressure = ParameterPacket::<SyntheticFixture>::new();
     pressure
         .synthetic(e, default, measure::<Elastance>(1.0), "synthetic")
         .expect("once");
@@ -1264,7 +1264,7 @@ fn each_bad_packet_is_refused_by_name() {
         .expect("once");
     assert_eq!(refusal(pressure), AdmissionError::StartDimension { row: rows[0] });
 
-    let mut negative = ParameterPacket::new();
+    let mut negative = ParameterPacket::<SyntheticFixture>::new();
     negative
         .synthetic(e, default, measure::<Elastance>(1.0), "synthetic")
         .expect("once");
@@ -1601,7 +1601,7 @@ fn filter_only_body() -> CompiledBody {
 }
 
 fn filter_only_packet() -> ParameterPacket<SyntheticFixture> {
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     let row = RowKind::Memory(
         LawName {
             owner: "NS",
@@ -1653,7 +1653,7 @@ fn filter_body() -> CompiledBody {
 }
 
 fn filter_packet() -> ParameterPacket<SyntheticFixture> {
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     let bind = Binding::Body;
     let speed = measure::<Rate<Dimensionless>>(0.01);
     packet
@@ -1759,7 +1759,7 @@ impl CoupledSolver for ForwardEulerWithScale {
 fn an_algebraic_start_that_does_not_solve_is_refused_with_its_row() {
     let store = MemoryStore::default();
     let body = filter_body();
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     let bind = Binding::Body;
     let speed = measure::<Rate<Dimensionless>>(0.01);
     packet
@@ -1846,7 +1846,7 @@ fn a_law_undefined_at_the_start_is_refused_by_its_name_at_admission() {
     })
     .expect("compiled");
     let name = |local| LawName { owner: "NS", local };
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     for (key, value) in [("ns.low", 0.0), ("ns.unit", 1.0)] {
         packet
             .synthetic(
@@ -1908,7 +1908,7 @@ fn a_solved_algebraic_value_outside_its_set_is_refused_with_its_row() {
     })
     .expect("compiled");
     let name = |local| LawName { owner: "NS", local };
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     let gain = measure::<Dimensionless>(-3.0);
     packet
         .synthetic(ParameterKey::new("ns.gain"), Binding::Body, gain, "synthetic")
@@ -2433,7 +2433,7 @@ fn backward_boundary_body(direction: BoundaryDirection) -> (CompiledBody, Parame
         body.compile()
     })
     .expect("compiled");
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     packet
         .synthetic(leak, Binding::Body, measure::<Rate<Water>>(0.5), "synthetic")
         .expect("once");
@@ -2616,7 +2616,7 @@ fn newton_reaches_the_root(rate: f64, interval_ns: u64) {
     })
     .expect("compiled");
     let name = |local| LawName { owner: "NS", local };
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     let value = measure::<Rate<Dimensionless>>(rate);
     packet
         .synthetic(ParameterKey::new("ns.rate"), Binding::Body, value, "synthetic")
@@ -2838,7 +2838,7 @@ fn two_slot_body() -> CompiledBody {
 
 fn two_slot_packet() -> ParameterPacket<SyntheticFixture> {
     let name = |local| LawName { owner: "NS", local };
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     for slot in ["first", "second"] {
         packet
             .start(
@@ -2955,7 +2955,7 @@ fn a_singular_row_is_named_by_the_fault_that_ends_the_run() {
     // where the row has no slope in `x` and still a residual, so the stage's Jacobian has no pivot on it.
     let body = singular_body();
     let name = |local| LawName { owner: "NS", local };
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     let bind = Binding::Body;
     let rate = measure::<Rate<Dimensionless>>(0.5);
     packet
@@ -3026,7 +3026,7 @@ fn deaf_boundary_body() -> (CompiledBody, ParameterPacket<SyntheticFixture>) {
         body.compile()
     })
     .expect("compiled");
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     packet
         .synthetic(leak, Binding::Body, measure::<Rate<Water>>(0.0), "synthetic")
         .expect("once");
@@ -3102,7 +3102,7 @@ fn newton_applies_a_correction_too_small_to_read_as_a_change() {
     // A rate of 1e6 per second makes a change of one ulp in the filter a defect far above these scales, so
     // a stage that stopped before its last correction fails its own equation.
     let body = filter_body();
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     let bind = Binding::Body;
     let speed = measure::<Rate<Dimensionless>>(1e6);
     packet
@@ -3165,7 +3165,7 @@ fn a_stage_already_solved_needs_no_factorization() {
         body.compile()
     })
     .expect("compiled");
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     let name = |local| LawName { owner: "NS", local };
     packet
         .synthetic(

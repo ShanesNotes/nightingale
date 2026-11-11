@@ -46,7 +46,7 @@ fn a_guard_at_the_end_of_a_step_hides_no_earlier_crossing_at_a_stage() {
         body.compile()
     })
     .expect("compiled");
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     packet
         .synthetic(
             ParameterKey::new("slope"),

@@ -233,6 +233,13 @@ pub enum AdmissionError {
     InputUnstated {
         input: Held,
     },
+    /// A delivery of the packet's day that starts before the anchor moment and ends after it, so admission would
+    /// read only its end.
+    DeliveryAcrossAdmission {
+        id: InputId,
+    },
+    /// A second day for one packet.
+    DuplicateDay,
     /// Parameters bound on another compiled body.
     ForeignParameters,
     /// A workspace from another compiled body, or of another shape.

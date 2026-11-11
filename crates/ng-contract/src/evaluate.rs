@@ -814,7 +814,7 @@ mod tests {
             body.compile()
         })
         .expect("compiled");
-        let mut packet: ParameterPacket<SyntheticFixture> = ParameterPacket::new();
+        let mut packet = ParameterPacket::<SyntheticFixture>::new();
         let synthetic = "synthetic";
         let dimensionless = |value| measure::<Dimensionless>(value);
         (packet.synthetic(

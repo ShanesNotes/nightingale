@@ -246,7 +246,7 @@ impl TwoReservoirs {
     }
     fn valued(&self, conductance: f64) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
         let default = Binding::Network(Network::Vascular);
-        let mut packet = ParameterPacket::new();
+        let mut packet = ParameterPacket::<SyntheticFixture>::new();
         let (e, g) = (ParameterKey::new("cv.e"), ParameterKey::new("cv.g"));
         packet.synthetic(e, default, Measure::<Elastance>::new(1.0)?, "synthetic")?;
         packet.synthetic(
@@ -760,7 +760,7 @@ impl ChanceCase {
     }
     fn packet(&self) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
         let default = Binding::Network(Network::Vascular);
-        let mut packet = ParameterPacket::new();
+        let mut packet = ParameterPacket::<SyntheticFixture>::new();
         let note = "synthetic";
         let body = Binding::Body;
         let zero = || Measure::<Dimensionless>::new(0.0);

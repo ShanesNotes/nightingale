@@ -184,7 +184,10 @@ fn packet(
     a: SiteId,
     cycle: Option<Cycle>,
 ) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
-    let mut packet = cycle.map_or_else(ParameterPacket::new, ParameterPacket::periodic);
+    let mut packet = cycle.map_or_else(
+        ParameterPacket::<SyntheticFixture>::new,
+        ParameterPacket::<SyntheticFixture>::periodic,
+    );
     let vascular = Binding::Network(Network::Vascular);
     packet.synthetic(
         ParameterKey::new("cv.e"),

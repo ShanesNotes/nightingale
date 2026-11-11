@@ -66,7 +66,7 @@ fn a_species_a_route_keeps_back_stays_back_when_both_ends_hold_it() -> Result<()
         NonZeroU64::new(2_000_000_000).unwrap(),
         NonZeroU32::new(2).unwrap(),
     )?;
-    let mut packet = ParameterPacket::periodic(cycle);
+    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
     packet.synthetic(
         ParameterKey::new("synthetic.flow"),
         Binding::Site(bed),

@@ -292,7 +292,7 @@ fn reads_a_reset(reads: Reads) -> Result<(CompiledBody, ParameterPacket<Syntheti
         body.add(laws.finish());
         body.compile()
     })?;
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     let pace = Measure::<Rate<Dimensionless>>::new(1.0)?;
     packet.synthetic(
         ParameterKey::new("fixture.pace"),
@@ -1696,7 +1696,7 @@ fn a_forcing_is_a_function_of_the_instant_and_not_of_the_step() -> Result<(), In
     let store = MemoryStore::default();
     let (body, held) = holds_a_forcing()?;
     let packet = || -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
-        let mut packet = ParameterPacket::new();
+        let mut packet = ParameterPacket::<SyntheticFixture>::new();
         let note = "synthetic";
         let body_binding = Binding::Body;
         let scale = Measure::<Dimensionless>::new(3.0)?;
@@ -1769,7 +1769,7 @@ fn admission_holds_a_draw_at_its_mean() -> Result<(), InitializationFailure> {
         body.compile()
     })?;
     let start = |offset: f64| -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
-        let mut packet = ParameterPacket::new();
+        let mut packet = ParameterPacket::<SyntheticFixture>::new();
         let note = "synthetic";
         let number = Measure::<Dimensionless>::new(offset)?;
         packet.synthetic(ParameterKey::new("fixture.offset"), Binding::Body, number, note)?;
@@ -1803,7 +1803,7 @@ fn admission_holds_the_forcing_at_its_mean() -> Result<(), InitializationFailure
     let store = MemoryStore::default();
     let (body, _) = holds_a_forcing()?;
     let start = |held: f64| -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
-        let mut packet = ParameterPacket::new();
+        let mut packet = ParameterPacket::<SyntheticFixture>::new();
         let default = Binding::Body;
         packet.synthetic(
             ParameterKey::new("fixture.scale"),

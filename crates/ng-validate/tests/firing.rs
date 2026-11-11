@@ -31,7 +31,7 @@ fn lens(body: &CompiledBody, kind: RowKind) -> ObservationLens {
 fn cycle(points: u32) -> ParameterPacket<SyntheticFixture> {
     let period = NonZeroU64::new(SECOND).expect("not zero");
     let points = NonZeroU32::new(points).expect("not zero");
-    ParameterPacket::periodic(Cycle::new(period, points).expect("a cycle"))
+    ParameterPacket::<SyntheticFixture>::periodic(Cycle::new(period, points).expect("a cycle"))
 }
 
 fn named(local: &'static str) -> LawName {
@@ -70,7 +70,7 @@ fn crossing_inside() -> CompiledBody {
 fn a_guard_crossed_and_crossed_back_inside_a_step_refuses_it_and_lands() {
     let store = MemoryStore::default();
     let body = crossing_inside();
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     for (key, value) in [("ns.slope", 2.0), ("ns.quarter", 0.25)] {
         if key == "ns.slope" {
             packet
@@ -188,7 +188,7 @@ fn run_and_ring(body: &CompiledBody, start: f64) -> (usize, f64) {
     let port = BoundaryPort::new(Vec::new()).expect("no event");
     let session = admit_fixture(
         body,
-        guarded_packet(ParameterPacket::new(), start),
+        guarded_packet(ParameterPacket::<SyntheticFixture>::new(), start),
         port,
         &core,
         &store,
@@ -443,7 +443,7 @@ fn a_delivery_only_one_modes_law_reads_is_refused() {
     };
     let history = MemoryStore::default();
     let delivered = |body: &CompiledBody| {
-        let mut packet = ParameterPacket::new();
+        let mut packet = ParameterPacket::<SyntheticFixture>::new();
         let store = RowKind::Amount {
             site: tank,
             space: Space::Lumen,
@@ -509,7 +509,7 @@ fn no_flow_out_of_a_dry_pool_carries_nothing() {
     })
     .expect("compiled");
     let dry = a.id();
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     packet
         .start_rest(
             &body,
@@ -621,7 +621,7 @@ fn a_step_stops_at_a_guards_interval_though_no_row_moves_that_fast() -> Result<(
         body.compile()
     })?;
     assert_eq!(body.longest_step_ns(), tight);
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     packet.synthetic(
         ParameterKey::new("slope"),
         Binding::Body,
@@ -685,7 +685,7 @@ fn of_two_guards_on_one_variable_only_the_first_fires() -> Result<(), Initializa
         body.add(laws.finish());
         body.compile()
     })?;
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     let rate = measure::<Rate<Dimensionless>>(1.0);
     packet.synthetic(ParameterKey::new("ns.speed"), Binding::Body, rate, "synthetic")?;
     for (local, value) in [("m", -0.5), ("one", 1.0), ("other", 1.0)] {

@@ -217,12 +217,12 @@ impl CompiledBody {
             anchor: at,
         }))
     }
-    /// The square admission system. Refuses parameters bound on another body, an event `check_delivery` refuses
-    /// at the anchor moment, an anchor no channel reads, a delivery edge off the cycle's grid and a paced cycle whose
-    /// clock, anchor or period do not agree.
+    /// The square admission system. The packet's day joins the port first. Refuses parameters bound on another
+    /// body, an event `check_delivery` refuses at the anchor moment, an anchor no channel reads, a delivery edge
+    /// off the cycle's grid and a paced cycle whose clock, anchor or period do not agree.
     pub fn initialization<'m>(
         &'m self,
-        parameters: BoundParameters,
+        mut parameters: BoundParameters,
         boundary: BoundaryPort,
         request: InitializationRequest<'_>,
     ) -> Result<InitializationSystem<'m>, AdmissionError> {
@@ -230,6 +230,10 @@ impl CompiledBody {
         if parameters.model != self.model_hash() {
             return Err(AdmissionError::ForeignParameters);
         }
+        let boundary = match parameters.owed.day.take() {
+            Some(day) => boundary.with_day(day, anchor_moment)?,
+            None => boundary,
+        };
         for delivery in &boundary.deliveries {
             self.check_delivery(delivery, anchor_moment)?;
         }

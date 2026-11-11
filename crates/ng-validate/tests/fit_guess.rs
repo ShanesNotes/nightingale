@@ -49,7 +49,7 @@ fn fitted(guess: f64) -> Result<f64, InitializationFailure> {
         }
         .into(),
     );
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     packet.within(admission_tolerance());
     packet.start(
         RowKind::Amount {

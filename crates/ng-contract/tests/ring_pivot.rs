@@ -32,12 +32,12 @@ fn admit(periodic: bool) -> Result<(), InitializationFailure> {
         body.compile()
     })?;
     let mut packet = if periodic {
-        ParameterPacket::periodic(Cycle::new(
+        ParameterPacket::<SyntheticFixture>::periodic(Cycle::new(
             NonZeroU64::new(2_000_000_000).unwrap(),
             NonZeroU32::new(2).unwrap(),
         )?)
     } else {
-        ParameterPacket::new()
+        ParameterPacket::<SyntheticFixture>::new()
     };
     packet.synthetic(
         ParameterKey::new("synthetic p"),
@@ -152,7 +152,7 @@ fn two_closed_rows_that_read_one_store_factor_over_the_bodys_elimination() -> Re
             NonZeroU64::new(2_000_000_000).unwrap(),
             NonZeroU32::new(2).unwrap(),
         )?;
-        let mut packet = ParameterPacket::periodic(cycle);
+        let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
         for key in ["t1", "t2"] {
             packet.synthetic(
                 ParameterKey::new(key),
@@ -180,7 +180,7 @@ fn stage_factors(body: &CompiledBody, keys: &[&'static str]) -> Result<bool, Ini
         NonZeroU64::new(2_000_000_000).unwrap(),
         NonZeroU32::new(2).unwrap(),
     )?;
-    let mut packet = ParameterPacket::periodic(cycle);
+    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
     for &key in keys {
         packet.synthetic(
             ParameterKey::new(key),
@@ -386,7 +386,7 @@ fn a_closed_row_keeps_its_own_unknown_when_another_row_could_take_it() -> Result
         NonZeroU64::new(2_000_000_000).unwrap(),
         NonZeroU32::new(2).unwrap(),
     )?;
-    let mut packet = ParameterPacket::periodic(cycle);
+    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
     let speed = measure::<Rate<Dimensionless>>(0.5);
     packet.synthetic(ParameterKey::new("s"), Binding::Body, speed, "synthetic")?;
     packet.start_rest(&body, |_| 0.0, "synthetic")?;
@@ -436,7 +436,7 @@ fn a_closed_row_whose_store_reads_its_unknown_through_an_algebraic_row_is_admitt
         NonZeroU64::new(2_000_000_000).unwrap(),
         NonZeroU32::new(2).unwrap(),
     )?;
-    let mut packet = ParameterPacket::periodic(cycle);
+    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
     packet.start_rest(&body, |_| 0.0, "synthetic exact root")?;
     let port = BoundaryPort::new(Vec::new())?;
     let request = InitializationRequest::at(SimTime::from_ns(0));

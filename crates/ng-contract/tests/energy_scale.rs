@@ -46,7 +46,7 @@ fn admits_inconsistent_store(power_size: f64) -> Result<bool, InitializationFail
         }
         .into(),
     );
-    let mut packet = ParameterPacket::periodic(Cycle::new(
+    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(Cycle::new(
         NonZeroU64::new(2_000_000_000).unwrap(),
         NonZeroU32::new(2).unwrap(),
     )?);

@@ -107,7 +107,7 @@ fn gut(species: &[Species]) -> Result<(CompiledBody, SiteId), AdmissionError> {
 }
 
 fn packet(site: SiteId, species: &[Species]) -> ParameterPacket<SyntheticFixture> {
-    let mut packet = ParameterPacket::new();
+    let mut packet = ParameterPacket::<SyntheticFixture>::new();
     for &held in species {
         let packet = &mut packet;
         held.visit(Start { packet, site }).expect("a start");

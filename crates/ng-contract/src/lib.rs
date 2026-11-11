@@ -1098,6 +1098,19 @@
 //!     packet.synthetic(key, Binding::Body, value, "synthetic")
 //! }
 //! ```
+//! A reviewed packet always holds a day, so no clinical run takes its day from plain events.
+//! ```compile_fail,E0061
+//! use ng_contract::*;
+//! fn dayless() -> ParameterPacket<Reviewed> {
+//!     ParameterPacket::<Reviewed>::new()
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn holding(day: Day) -> ParameterPacket<Reviewed> {
+//!     ParameterPacket::<Reviewed>::new(day)
+//! }
+//! ```
 //! An anchor states its method and window (rule 17).
 //! ```compile_fail,E0061
 //! use ng_contract::*;
@@ -1383,8 +1396,8 @@ pub use admission::*;
 pub use anatomy::*;
 pub use body::*;
 pub use boundary::{
-    AppliedInputs, Attempt, BoundaryEvent, BoundaryInput, BoundaryPort, Clock, Delivered, Eaten, Gate, Held,
-    InputId, Legs, Meal, PendingInputs, Posture, Room, Sleep, WaterDelivery,
+    AppliedInputs, Attempt, BoundaryEvent, BoundaryInput, BoundaryPort, Clock, Day, Delivered, Eaten, Gate,
+    Held, InputId, Legs, Meal, PendingInputs, Posture, Room, Sleep, WaterDelivery,
 };
 pub use compensated::*;
 pub use conservation::*;
