@@ -18,8 +18,6 @@ fn count(value: u64) -> NonZeroU64 {
     NonZeroU64::new(value).expect("not zero")
 }
 
-/// Reservoir `a` starts near 500 500 and takes 100 000 more from 40 s to 60 s, so it rises past 575 000 while the
-/// delivery runs and falls back below it as the two reservoirs settle toward 550 000 each.
 fn excursion() -> TwoReservoirs {
     let delivery = Delivery {
         id: b"input",
@@ -80,7 +78,6 @@ struct Checked {
     returns: ReturnReport,
 }
 
-/// Admits the case, reads every revision through the bare lens to the case's end, and finishes both checks.
 fn checked(case: &TwoReservoirs, set: &HealthyRangeSet<SyntheticFixture>) -> Checked {
     let core = ReferenceIntegrator::new(8 * SECOND);
     let store = MemoryStore::default();

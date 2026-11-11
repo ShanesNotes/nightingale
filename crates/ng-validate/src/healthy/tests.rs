@@ -86,11 +86,8 @@ fn morning(days: u32) -> NonZeroU32 {
     NonZeroU32::new(days).expect("not zero")
 }
 
-/// One value a bare reading gave: the reading's place in the lens, the instant and the value, `None` when it was
-/// not present.
 type Read = (usize, u64, Option<f64>);
 
-/// One value of the first reading each grid period from `from`.
 fn each_period(from: u64, period_ns: u64, values: &[f64]) -> Vec<Read> {
     (0u64..)
         .zip(values)
@@ -126,7 +123,6 @@ fn ranged(
     }
 }
 
-/// One sampled reading, one value a second from admission at the clock's zero.
 fn each_second(set: &HealthyRangeSet<SyntheticFixture>, day: &DayActivities, values: &[f64]) -> RangeReport {
     ranged(
         &[sampled(reading())],
@@ -185,7 +181,6 @@ fn instant() -> AnchorPlan {
     anchor("xx.anchor", AnchorStatistic::Instant, 0)
 }
 
-/// One value an hour from admission at the clock's zero through `hours`.
 fn hourly(hours: u64, read: impl Fn(u64) -> f64) -> Vec<Read> {
     let values: Vec<f64> = (0..=hours).map(read).collect();
     each_period(0, HOUR, &values)
@@ -257,7 +252,6 @@ fn a_reading_that_leaves_its_range_between_two_tumbling_means_fails_a_sliding_wi
     );
 }
 
-/// A change from one activity to the next whose shift lasts `lasting_ns`.
 fn change(from: &'static str, to: &'static str, lasting_ns: u64) -> Scope {
     Scope::Change {
         from: Activity::new(from),
@@ -318,8 +312,6 @@ fn a_window_across_a_change_takes_the_changes_own_range() {
     assert_eq!(result(&report, "xx.seated").failure(), None);
 }
 
-/// Supine to seated at 4 s, where a source shows his pressure dips for 4 s: 70 to 140 over a 4 s window then, and
-/// 90 to 140 otherwise.
 fn sitting_up_dips(mut ranges: Vec<HealthyRange<SyntheticFixture>>) -> HealthyRangeSet<SyntheticFixture> {
     ranges.push(range("xx.every", Scope::Every, sliding(4 * SECOND), 90.0, 140.0));
     let change = sitting_up_for(4 * SECOND);
@@ -327,7 +319,6 @@ fn sitting_up_dips(mut ranges: Vec<HealthyRange<SyntheticFixture>>) -> HealthyRa
     set(ranges, Vec::new())
 }
 
-/// The samples of one a second from the clock's zero: 100, then 75 for `dip` seconds from 5 s, then 100.
 fn dipping(dip: usize, values: usize) -> Vec<f64> {
     let mut read = vec![100.0; values];
     read[5..5 + dip].fill(75.0);

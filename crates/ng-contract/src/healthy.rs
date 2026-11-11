@@ -7,7 +7,7 @@ use crate::{
 };
 use core::num::NonZeroU64;
 
-/// What the patient is doing as his day names it, such as asleep or seated. Compared only for equality.
+/// What the patient is doing as his day names it, such as asleep or seated.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Activity {
     name: &'static str,
@@ -58,7 +58,6 @@ impl Seal for Scope {
     }
 }
 impl Scope {
-    /// Whether two scopes cover the same activities, however long each says a change's shift lasts.
     fn same_activities(self, other: Self) -> bool {
         match (self, other) {
             (
@@ -376,10 +375,8 @@ mod tests {
         }
     }
 
-    /// One field changed, by name.
     type Change<T> = (&'static str, fn(&mut T));
 
-    /// A synthetic range's arguments, changed one at a time.
     #[derive(Clone, Copy)]
     struct Range {
         id: &'static str,
@@ -422,7 +419,6 @@ mod tests {
         }
     }
 
-    /// A synthetic variation's arguments, changed one at a time.
     #[derive(Clone, Copy)]
     struct Variation {
         id: &'static str,

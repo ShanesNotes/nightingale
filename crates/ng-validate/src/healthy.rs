@@ -92,7 +92,7 @@ impl From<ObservationRefusal> for ReadingCheckError {
 }
 
 /// What the patient does from admission on: spans in time order, each the start of one activity. The first covers
-/// admission and the last runs on. Until the packet's day gives them, the caller states them.
+/// admission and the last runs on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DayActivities {
     spans: Vec<(SimTime, Activity)>,
@@ -130,8 +130,6 @@ impl DayActivities {
     }
 }
 
-/// One reading of the lens as the checks read it: its row by its method, as grid samples or as each grid period's
-/// time mean.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BareReading {
     pub(crate) row: RowKind,
@@ -288,7 +286,6 @@ impl<'b> ReadingChecks<'b> {
             let value = match observation.value() {
                 ObservedValue::Present(value) => Some(value),
                 ObservedValue::NotCollected | ObservedValue::InvalidSignal => None,
-                // A held reading comes back with its value once the head reaches it.
                 ObservedValue::Pending => continue,
             };
             let (reading, at) = (observation.channel(), observation.collected());

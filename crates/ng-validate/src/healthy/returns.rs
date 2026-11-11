@@ -9,7 +9,6 @@ use ng_contract::{
 const RETURN_FACTOR: f64 = 1.96 * core::f64::consts::SQRT_2;
 const MORNINGS: [NonZeroU32; 2] = [NonZeroU32::MIN, NonZeroU32::MIN.saturating_add(1)];
 
-/// What the return check reads of one anchor, as its packet's view states it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct AnchorPlan {
     pub(crate) anchor: AnchorId,
@@ -54,7 +53,6 @@ impl ReturnReport {
     pub fn seal(&self) -> Digest {
         self.seal
     }
-    /// The healthy-range set's digest.
     pub fn set(&self) -> Digest {
         self.set
     }
@@ -148,7 +146,6 @@ impl ReturnGap {
     }
 }
 
-/// One anchor window's values so far, from the instant it is read from.
 #[derive(Clone, Copy)]
 struct Window {
     at: SimTime,
@@ -157,8 +154,6 @@ struct Window {
     absent: bool,
 }
 
-/// One anchor the check can hold: its window's shape and its allowance, then its window from admission and from
-/// each later morning.
 struct Held {
     anchor: AnchorId,
     first_ns: u64,
@@ -167,18 +162,13 @@ struct Held {
     windows: [Window; 3],
 }
 
-/// The return check as a fold over each bare reading's values in time order.
 pub(crate) struct ReturnFold {
     period_ns: u64,
     held: Vec<Held>,
-    /// Per bare reading, its anchors' places in `held`.
     readings: Vec<Vec<usize>>,
     gaps: Vec<ReturnGap>,
 }
 impl ReturnFold {
-    /// Reads each anchor as admission does: an instant from the sample at its moment, a cycle mean from the cycle's
-    /// samples after it, and a cycle time mean from the cycle's grid periods after it, each through the bare
-    /// reading of its own kind.
     pub(crate) fn new<K: PacketKind>(
         readings: &[BareReading],
         period_ns: u64,
@@ -263,7 +253,6 @@ impl ReturnFold {
             }
         }
     }
-    /// A morning whose window the run did not finish is not reached.
     pub(crate) fn finish(self) -> (Vec<AnchorReturn>, Vec<ReturnGap>) {
         let Self { held, mut gaps, .. } = self;
         let mut results = Vec::new();

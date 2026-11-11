@@ -26,7 +26,6 @@ impl RangeReport {
     pub fn seal(&self) -> Digest {
         self.seal
     }
-    /// The healthy-range set's digest.
     pub fn set(&self) -> Digest {
         self.set
     }
@@ -149,7 +148,6 @@ struct Limits {
     high: Compensated,
 }
 
-/// One span of the day, where the next begins, and whether it began before admission, so the run's start cut it.
 #[derive(Clone, Copy)]
 struct Span {
     start: SimTime,
@@ -158,8 +156,6 @@ struct Span {
     before_admission: bool,
 }
 
-/// How a window across the change into a span is judged: by the change's own range, by the every-activity range
-/// both its activities fall back to, or by nothing, which blocks.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Across {
     /// The change's range of this length, if it has one, and the end of the longest shift its ranges state.
@@ -171,8 +167,6 @@ enum Across {
     Unranged,
 }
 
-/// The running sum and count of values not present before one value, that value's span, and the instant it
-/// covers: a sample's own, or the start of a time mean's period.
 #[derive(Clone, Copy)]
 struct Before {
     sum: Compensated,
@@ -181,7 +175,6 @@ struct Before {
     covers: u64,
 }
 
-/// One window's values: their sum, how many were not present, and the first one's span and instant.
 struct Window {
     sum: Compensated,
     absent: u64,
@@ -189,8 +182,6 @@ struct Window {
     covers: u64,
 }
 
-/// Every window of one length over one reading, one ending at each value, each from two running sums, so memory
-/// is the window.
 struct Slider {
     length_ns: u64,
     count: u64,
@@ -198,9 +189,7 @@ struct Slider {
     sum: Compensated,
     absent: u64,
     held: VecDeque<Before>,
-    /// Per span, the range of a window inside it.
     within: Vec<Option<usize>>,
-    /// Per change of activity, from the second span on.
     across: Vec<Across>,
     every: Option<usize>,
 }
@@ -229,11 +218,6 @@ impl Slider {
             covers: first.covers,
         })
     }
-    /// The range that judges a window from span `first`, whose first value covers `covers`, to span `last`, or else
-    /// the span whose change no one range judges it at. A window belongs to a change with ranges of its own when it
-    /// crosses the change or its first value lies in the time the change's shift lasts, and only that change's
-    /// range of the window's length judges a window that belongs to one. A window that belongs to two, or crosses
-    /// a change no range judges, blocks at the first such change after its first value (record 0004).
     fn judging(&self, first: usize, covers: u64, last: usize) -> Result<Option<usize>, usize> {
         let shift = (first.checked_sub(1)).and_then(|change| match self.across[change] {
             Across::Own { range, until_ns } if covers < until_ns => Some(range),
@@ -254,7 +238,6 @@ impl Slider {
     }
 }
 
-/// One span's values so far, for its activity's whole-period range.
 #[derive(Clone, Copy)]
 struct Period {
     span: usize,
@@ -263,22 +246,18 @@ struct Period {
     seen: u64,
 }
 
-/// One reading of the bare lens, and every range of the set for its row and method.
 struct Reading {
     row: RowKind,
     method: &'static str,
     integrated: bool,
     ranged: bool,
-    /// Per span, whether its activity has no range for this reading.
     unranged: Vec<bool>,
-    /// Per span, its activity's whole-period range.
     whole: Vec<Option<usize>>,
     sliders: Vec<Slider>,
     period: Option<Period>,
     span: usize,
 }
 impl Reading {
-    /// An activity's ranges are its own if it has any, else the every-activity ones.
     fn new(reading: BareReading, own: &[(usize, Scope, Averaging)], spans: &[Span], period_ns: u64) -> Self {
         let find = |scope: Scope, averaging: Averaging| {
             (own.iter())
@@ -362,8 +341,6 @@ impl Reading {
     }
 }
 
-/// The healthy-range check as a fold over each bare reading's values in time order. Each window is judged when
-/// its last value arrives.
 pub(crate) struct RangeFold {
     period_ns: u64,
     spans: Vec<Span>,
@@ -451,7 +428,6 @@ impl RangeFold {
             gaps,
         })
     }
-    /// One value of one reading: a sample read at `at`, or the time mean of the grid period that ends there.
     pub(crate) fn feed(&mut self, reading: usize, at: SimTime, value: Option<Compensated>) {
         let Self {
             period_ns,
@@ -534,7 +510,6 @@ impl RangeFold {
             fold.period = Some(period);
             return;
         };
-        // A sampled span holds the samples in [start, end), a time-mean span the means that close in (start, end].
         let last = if fold.integrated {
             end
         } else {
@@ -559,7 +534,6 @@ impl RangeFold {
             );
         }
     }
-    /// A period still open when the run ends is cut: counted, not judged.
     pub(crate) fn finish(self) -> (Vec<RangeResult>, Vec<RangeGap>) {
         let Self {
             mut results,
@@ -583,7 +557,6 @@ impl RangeFold {
     }
 }
 
-/// `None` when a value was not present, which fails its window.
 fn mean(sum: Compensated, absent: u64, count: u64) -> Option<Compensated> {
     (absent == 0).then(|| Compensated::between(Compensated::ZERO, sum, 1, count))
 }
