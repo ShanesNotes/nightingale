@@ -443,7 +443,10 @@ struct Course<'c> {
 #[test]
 fn checkpoints_main_wrote_with_a_continuation_and_with_a_firing_resume_as_main_did() {
     let water = water_case();
-    let (solver, fresh_solver) = (ng_solver::Core::new(8 * SECOND), ng_solver::Core::new(8 * SECOND));
+    let (solver, fresh_solver) = (
+        ng_solver::Core::doubled(8 * SECOND),
+        ng_solver::Core::doubled(8 * SECOND),
+    );
     let chance = ChanceCase::ectopy().expect("a body");
     let (reference, fresh_reference) = (ReferenceIntegrator::new(SECOND), ReferenceIntegrator::new(SECOND));
     let courses = [

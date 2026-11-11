@@ -1,6 +1,7 @@
-use super::stages::{ForwardEuler, Heun, advance, euler_step, explicit_stage, heun_stages};
+use super::stages::{ForwardEuler, Heun, advance, euler_step, explicit_stage, heun_stages, implicit_stage};
 use super::{fresh_history, resolution};
 use core::cell::RefCell;
+use core::num::NonZeroU64;
 use ng_contract::*;
 use ng_validate::ReferenceIntegrator;
 
@@ -78,6 +79,57 @@ impl CoupledSolver for UnreachedStage {
         quadrature.add(&second, ticket.fraction(length - half))?;
         let history = fresh_history(problem, ticket);
         Ok(problem.propose(ticket, quadrature.finish()?, &problem.workspace(), history))
+    }
+}
+
+/// Declares the halved scheme and shows the reference integrator's doubled set on every ticket, so the kinder
+/// difference would judge its error.
+pub struct ShowsTheDoubledSet {
+    pub inner: ReferenceIntegrator,
+}
+impl CoupledSolver for ShowsTheDoubledSet {
+    fn resolution(&self) -> DeclaredResolution {
+        resolution(StageScheme::backward_euler_halved(), b"shows the doubled set", 12)
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.inner.next_step(accepted)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.inner.solve(problem, ticket)
+    }
+}
+
+/// Declares the halved scheme, shows the halves on every ticket, after a breakpoint too, and never reads its
+/// estimate, so only the record refuses it.
+pub struct AlwaysHalves {
+    pub interval_ns: u64,
+    pub scales: ErrorScales,
+    pub floor_ns: NonZeroU64,
+}
+impl CoupledSolver for AlwaysHalves {
+    fn resolution(&self) -> DeclaredResolution {
+        DeclaredResolution::new(
+            Digest::of_canonical(b"always halves"),
+            self.floor_ns,
+            12,
+            ArithmeticProfile::contract_v1(),
+            StageScheme::backward_euler_halved(),
+            self.scales,
+        )
+    }
+    fn next_step(&self, _accepted: AcceptedStateView<'_>) -> u64 {
+        self.interval_ns
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        let (length, half) = (ticket.length_ns(), ticket.length_ns() / 2);
+        let mut workspace = problem.workspace();
+        let early = implicit_stage(problem, &mut workspace, ticket, half, half)?;
+        let late = implicit_stage(problem, &mut workspace, ticket, length, length - half)?;
+        let mut quadrature = problem.quadrature(ticket);
+        quadrature.add(&early, ticket.fraction(half))?;
+        quadrature.add(&late, ticket.fraction(length - half))?;
+        let history = fresh_history(problem, ticket);
+        Ok(problem.propose(ticket, quadrature.finish()?, &workspace, history))
     }
 }
 

@@ -151,6 +151,10 @@ reason = "a synthetic guess for every row a fixture does not state, in that row'
 item = "problem::SparseView::values"
 reason = "Jacobian entries in mixed row and column dimensions, for a core's own linear solve"
 
+[[crate.f64_allow]]
+item = "problem::CoupledProblem::estimate"
+reason = "the record's error estimate of a core's own increment, dimensionless, which its step control reads; verify recomputes it and reads none from a core"
+
 [[crate.seal_skip]]
 item = "anatomy::Anatomy::digest"
 field = "preorder"

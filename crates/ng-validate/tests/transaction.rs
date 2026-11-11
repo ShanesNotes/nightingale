@@ -6,10 +6,10 @@ use core::cell::{Cell, RefCell};
 use core::num::NonZeroU64;
 use cores::forced_refusal::{ForcedRefusal, Refuser};
 use cores::must_fail::{
-    EarlierAttempt, ForeignBody, ForeignHistory, ForeignProposal, ForeignRefusal, ForeignWorkspace,
-    KeptHistory, MisplacedStage, NeverConverges, OneSample, OtherValues, PoisonedPoint,
-    ProposesThroughAnotherBody, ReadsItsTicket, ShortWorkspace, Spans, StaleIncrement, StaleProposal,
-    SwappedTicket, TrialOutside, UnevenWeights, UnfitWeights, UnreachedStage, WrongWeight,
+    AlwaysHalves, EarlierAttempt, ForeignBody, ForeignHistory, ForeignProposal, ForeignRefusal,
+    ForeignWorkspace, KeptHistory, MisplacedStage, NeverConverges, OneSample, OtherValues, PoisonedPoint,
+    ProposesThroughAnotherBody, ReadsItsTicket, ShortWorkspace, ShowsTheDoubledSet, Spans, StaleIncrement,
+    StaleProposal, SwappedTicket, TrialOutside, UnevenWeights, UnfitWeights, UnreachedStage, WrongWeight,
 };
 use cores::stages::{ForwardEuler, Heun, KeepsItsSpan};
 use ng_contract::*;
@@ -551,6 +551,94 @@ fn an_estimate_above_one_at_the_floor_faults_and_never_publishes() {
     let core = reference(8 * SECOND)
         .with_scales(scales(1e-3, 0.0))
         .with_floor(NonZeroU64::new(4 * SECOND).expect("a floor"));
+    let session = case.admit(&core, &store).expect("admitted");
+    let before = session.record().digests();
+    let stopped = exhaust(session.step());
+    let fault = stopped.fault();
+    assert_eq!(stopped.refusals().len(), 1);
+    assert_eq!(fault.kind(), EngineFaultKind::NoAdmissibleStep);
+    assert!(matches!(
+        fault.last_refusal(),
+        Some(NumericalRefusal::Accuracy { .. })
+    ));
+    assert_eq!(fault.at(), SimTime::from_ns(0));
+    assert_eq!(fault.attempted_ns(), 4 * SECOND);
+    assert_eq!(stopped.record().digests(), before);
+}
+
+fn inflow_from(seconds: u64) -> TwoReservoirs {
+    let delivery = Delivery {
+        id: b"inflow",
+        from: SimTime::from_ns(seconds * SECOND),
+        to: SimTime::from_ns(100 * SECOND),
+        amount: measure(1_000.0),
+    };
+    TwoReservoirs::delivering([measure(500_500.0), measure(499_500.0)], vec![delivery]).expect("a body")
+}
+
+fn always_halves(scales: ErrorScales, floor_ns: u64) -> AlwaysHalves {
+    AlwaysHalves {
+        interval_ns: 8 * SECOND,
+        scales,
+        floor_ns: NonZeroU64::new(floor_ns).expect("a floor"),
+    }
+}
+
+#[test]
+fn a_halved_core_that_shows_the_doubled_set_on_a_continuing_ticket_faults_with_method_mismatch() {
+    let store = MemoryStore::default();
+    let case = inflow_from(0);
+    let core = ShowsTheDoubledSet {
+        inner: reference(8 * SECOND),
+    };
+    let (session, _) = accepted(case.admit(&core, &store).expect("admitted").step());
+    let before = session.record().digests();
+    let Step::Faulted(stopped) = session.step() else {
+        panic!("not faulted");
+    };
+    assert_eq!(stopped.fault().kind(), EngineFaultKind::MethodMismatch);
+    assert_eq!(stopped.fault().at(), SimTime::from_ns(8 * SECOND));
+    assert_eq!(stopped.record().digests(), before);
+}
+
+#[test]
+fn a_halved_core_that_keeps_its_halves_after_a_breakpoint_faults_with_method_mismatch() {
+    let store = MemoryStore::default();
+    let case = inflow_from(16);
+    let core = always_halves(scales(1.0, 1e-5), MILLISECOND);
+    let session = to(
+        case.admit(&core, &store).expect("admitted"),
+        SimTime::from_ns(16 * SECOND),
+    );
+    let before = session.record().digests();
+    let Step::Faulted(stopped) = session.step() else {
+        panic!("not faulted");
+    };
+    assert_eq!(stopped.fault().kind(), EngineFaultKind::MethodMismatch);
+    assert_eq!(stopped.fault().at(), SimTime::from_ns(16 * SECOND));
+    assert_eq!(stopped.record().digests(), before);
+}
+
+#[test]
+fn a_second_difference_above_one_is_refused_and_the_retry_is_accepted() {
+    let store = MemoryStore::default();
+    let case = stepped();
+    let core = always_halves(scales(0.01, 0.0), MILLISECOND);
+    let session = refused(case.admit(&core, &store).expect("admitted").step());
+    assert!(matches!(
+        session.refused().reason(),
+        NumericalRefusal::Accuracy { .. }
+    ));
+    assert_eq!(session.refused().retry_ns(), 4 * SECOND);
+    let (session, _) = accepted(session.retry());
+    assert_eq!(session.record().accepted().time(), SimTime::from_ns(4 * SECOND));
+}
+
+#[test]
+fn a_second_difference_above_one_at_the_floor_faults_and_never_publishes() {
+    let store = MemoryStore::default();
+    let case = stepped();
+    let core = always_halves(scales(1e-3, 0.0), 4 * SECOND);
     let session = case.admit(&core, &store).expect("admitted");
     let before = session.record().digests();
     let stopped = exhaust(session.step());
