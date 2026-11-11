@@ -954,6 +954,9 @@ old = '''Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, 
 new = '''Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_DRIFT),'''
 test = "-p ng-validate --test arena_certificate energy_drifts_up_to_2e5_over_the_arenas_day_and_no_further"
 
+# This row changes the species and element arms together, and the water test sees only the species arm: the slice
+# has no reaction, so no element is a quantity of its own there, and a change to the element arm alone would survive.
+# The element arm gets its own row with the first body that has a reaction.
 [[mutant]]
 name = "every-quantity-takes-energys-drift-limit"
 path = "crates/ng-validate/src/slice.rs"
