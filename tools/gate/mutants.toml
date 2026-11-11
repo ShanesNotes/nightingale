@@ -773,6 +773,14 @@ new = '''
 test = "-p ng-contract --lib evaluate::tests::the_slopes_of_a_reaction_counting_its_reference_nineteen_times_match_central_differences"
 
 [[mutant]]
+name = "validity-per-reference"
+path = "crates/ng-contract/src/evaluate.rs"
+old = '''Target::Row(row) if program.code.defines => unknowns[row.index()],'''
+new = '''Target::Row(row) if program.code.defines => unknowns[row.index()],
+                Target::Column(column) => self.layout.columns[column.index()].turnovers(value),'''
+test = "-p ng-validate --test reference_count a_validity_range_judges_the_kernels_value_before_the_division"
+
+[[mutant]]
 name = "reference-count-sealed"
 path = "crates/ng-contract/src/body.rs"
 old = '''if *reference_count != NonZeroU32::MIN {'''

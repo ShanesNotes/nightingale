@@ -1,7 +1,7 @@
 use core::num::NonZeroU64;
 use expect_test::expect;
 use ng_contract::*;
-use ng_record::{Running, Session};
+use ng_record::{Running, Session, Step};
 use ng_validate::*;
 
 const SECOND: u64 = 1_000_000_000;
@@ -41,11 +41,20 @@ fn burn() -> Proportions<Glucose> {
         .energy_into(Space::Thermal)
 }
 
+fn burn_twice() -> Proportions<Glucose, 2> {
+    Proportions::<Glucose, 2>::using(Space::Cells)
+        .uses::<Oxygen, 12>(Space::Cells)
+        .makes::<CarbonDioxide, 12>(Space::Cells)
+        .makes::<Water, 12>(Space::Cells)
+        .energy_into(Space::Thermal)
+}
+
 fn paced<Q: Reactant, const N: u32>(
     laws: &mut FragmentBuilder<'_, Metabolism>,
     name: &'static str,
     proportions: Proportions<Q, N>,
     key: &'static str,
+    range: Option<ValidityRange<Rate<Q>>>,
 ) -> Result<(), AdmissionError> {
     let class = RateClass::new(RateBand::Minutes, 10 * SECOND)?;
     let reaction = laws.reaction::<CapillaryBed, Q, N>(name, proportions);
@@ -55,6 +64,9 @@ fn paced<Q: Reactant, const N: u32>(
         let rate = k.site_parameter(&rate);
         k.finish(rate, laws.every_mode(), class)
     });
+    if let Some(range) = range {
+        laws.validity(&kernel, range);
+    }
     laws.react_at(&reaction, kernel);
     Ok(())
 }
@@ -62,6 +74,7 @@ fn paced<Q: Reactant, const N: u32>(
 fn bed<Q: Reactant, const N: u32>(
     carry: impl FnOnce(&mut Schema),
     proportions: Proportions<Q, N>,
+    range: Option<ValidityRange<Rate<Q>>>,
     partnered: bool,
 ) -> Result<(CompiledBody, SiteId), AdmissionError> {
     let mut map = AnatomyBuilder::new();
@@ -90,9 +103,9 @@ fn bed<Q: Reactant, const N: u32>(
     let body = assemble(schema, |mut body| {
         let held = HeldDeclaration::<Metabolism>::new(Vec::new(), Vec::new(), SYNTHETIC);
         let (mut laws, _) = body.hold(held)?.parts();
-        paced(&mut laws, REACTION.local, proportions, RATE)?;
+        paced(&mut laws, REACTION.local, proportions, RATE, range)?;
         if partnered {
-            paced(&mut laws, "partner", burn(), PARTNER_RATE)?;
+            paced(&mut laws, "partner", burn(), PARTNER_RATE, None)?;
         }
         body.add(laws.finish());
         body.compile()
@@ -161,7 +174,7 @@ impl Run {
     }
 }
 
-fn run<Q: Reactant>((body, bed): &(CompiledBody, SiteId), rate: f64, partnered: bool) -> Run {
+fn packet<Q: Reactant>(body: &CompiledBody, rate: f64, partnered: bool) -> ParameterPacket<SyntheticFixture> {
     let mut packet = ParameterPacket::new();
     let beds = Binding::Class(Class::CapillaryBed);
     let speed = Measure::<Rate<Q>>::new(rate).expect("finite");
@@ -171,6 +184,11 @@ fn run<Q: Reactant>((body, bed): &(CompiledBody, SiteId), rate: f64, partnered: 
         (packet.synthetic(ParameterKey::new(PARTNER_RATE), beds, still, SYNTHETIC)).expect("once");
     }
     (packet.start_rest(body, |_| 1_000.0, SYNTHETIC)).expect("a start for each row");
+    packet
+}
+
+fn run<Q: Reactant>((body, bed): &(CompiledBody, SiteId), rate: f64, partnered: bool) -> Run {
+    let packet = packet::<Q>(body, rate, partnered);
     let (store, core) = (MemoryStore::default(), ReferenceIntegrator::new(10 * SECOND));
     let port = BoundaryPort::new(Vec::new()).expect("an empty port");
     let session = admit_fixture(body, packet, port, &core, &store).expect("admitted at an instant");
@@ -242,7 +260,7 @@ fn glycogen_stored_from_twenty_glucose_moves_glucose_by_its_rate_and_closes_ever
         schema.carry::<Glucose, CapillaryBed>(Space::Cells);
         schema.carry::<Glycogen, CapillaryBed>(Space::Cells);
     };
-    let run = run::<Glucose>(&bed(carry, stored, true).expect("compiled"), 0.05, true);
+    let run = run::<Glucose>(&bed(carry, stored, None, true).expect("compiled"), 0.05, true);
     assert_eq!(
         run.books,
         books(&[Element::Carbon, Element::Hydrogen, Element::Oxygen])
@@ -272,7 +290,7 @@ fn urea_made_from_amino_acids_moves_by_its_rate_and_closes_every_book() {
         schema.carry::<AminoAcids, CapillaryBed>(Space::Cells);
         schema.carry::<Urea, CapillaryBed>(Space::Cells);
     };
-    let run = run::<Urea>(&bed(carry, made, false).expect("compiled"), 0.01, false);
+    let run = run::<Urea>(&bed(carry, made, None, false).expect("compiled"), 0.01, false);
     let elements = [
         Element::Carbon,
         Element::Hydrogen,
@@ -305,7 +323,7 @@ fn creatinine_made_from_body_protein_moves_by_its_rate_and_closes_every_book() {
         schema.carry::<BodyProtein, CapillaryBed>(Space::Cells);
         schema.carry::<Creatinine, CapillaryBed>(Space::Cells);
     };
-    let run = run::<Creatinine>(&bed(carry, made, false).expect("compiled"), 0.01, false);
+    let run = run::<Creatinine>(&bed(carry, made, None, false).expect("compiled"), 0.01, false);
     let elements = [
         Element::Carbon,
         Element::Hydrogen,
@@ -338,7 +356,7 @@ fn glucose_made_from_lactate_warms_its_bed_and_closes_every_book() {
         schema.carry::<Lactate, CapillaryBed>(Space::Cells);
         schema.carry::<Glucose, CapillaryBed>(Space::Cells);
     };
-    let run = run::<Glucose>(&bed(carry, made, true).expect("compiled"), 0.01, true);
+    let run = run::<Glucose>(&bed(carry, made, None, true).expect("compiled"), 0.01, true);
     assert_eq!(
         run.books,
         books(&[Element::Carbon, Element::Hydrogen, Element::Oxygen])
@@ -365,13 +383,8 @@ fn the_reference_count_is_in_the_model_hash() {
     let carry = |schema: &mut Schema| {
         schema.carry::<Glucose, CapillaryBed>(Space::Cells);
     };
-    let (once, _) = bed(carry, burn(), false).expect("compiled");
-    let twice = Proportions::<Glucose, 2>::using(Space::Cells)
-        .uses::<Oxygen, 12>(Space::Cells)
-        .makes::<CarbonDioxide, 12>(Space::Cells)
-        .makes::<Water, 12>(Space::Cells)
-        .energy_into(Space::Thermal);
-    let (twice, _) = bed(carry, twice, false).expect("compiled");
+    let (once, _) = bed(carry, burn(), None, false).expect("compiled");
+    let (twice, _) = bed(carry, burn_twice(), None, false).expect("compiled");
     assert_ne!(once.model_hash(), twice.model_hash());
     expect!["1ecafbca522756f57161f9ed7203af0bb52a0be9299d2fbb822510522d37bee6"]
         .assert_eq(&hex(twice.model_hash().digest()));
@@ -382,4 +395,26 @@ fn a_reaction_counting_its_reference_once_keeps_the_burning_beds_hash() {
     let burning = BurningBeds::burning().expect("compiled");
     expect!["97f56356df7c0ce48dc256fa58ac1bf29500c29a391bfc474629771cc55d6859"]
         .assert_eq(&hex(burning.body().model_hash().digest()));
+}
+
+#[test]
+fn a_validity_range_judges_the_kernels_value_before_the_division() {
+    let carry = |schema: &mut Schema| {
+        schema.carry::<Glucose, CapillaryBed>(Space::Cells);
+    };
+    let (lower, upper) = (Measure::new(0.0).expect("finite"), Measure::new(0.008).expect("finite"));
+    let range = ValidityRange::new(lower, upper, Basis::Fixture(SYNTHETIC)).expect("ordered");
+    let (body, _) = bed(carry, burn_twice(), Some(range), false).expect("compiled");
+    let (store, core) = (MemoryStore::default(), ReferenceIntegrator::new(10 * SECOND));
+    let port = BoundaryPort::new(Vec::new()).expect("an empty port");
+    let packet = packet::<Glucose>(&body, 0.01, false);
+    let session = admit_fixture(&body, packet, port, &core, &store).expect("admitted at an instant");
+    let Step::Accepted(_, receipt) = session.step() else {
+        panic!("the step was not accepted");
+    };
+    let [excursion] = receipt.excursions() else {
+        panic!("one excursion: {:?}", receipt.excursions());
+    };
+    assert_eq!(excursion.side(), ExcursionSide::Above);
+    assert_eq!(number(excursion.value()), 0.01, "the column's rate, 0.005 turnovers a second, is inside");
 }
