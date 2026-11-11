@@ -213,7 +213,7 @@ class Fixture:
         last = len(steps)
         lines = [
             f"spec_id {seal('spec ' + self.spec)}",
-            "capture_version 2",
+            "capture_version 3",
             f"source_commit {self.source_commit}",
             f"model {self.model}",
             f"packet {self.packet}",
@@ -311,7 +311,7 @@ class CaptureReads(unittest.TestCase):
             capture.RunData.open(directory)
 
     def test_another_capture_version_or_model_is_refused(self) -> None:
-        self.refused(Fixture(label="v1", summary_edit=lambda lines: [l.replace("capture_version 2", "capture_version 1") for l in lines]), "capture version")
+        self.refused(Fixture(label="v2", summary_edit=lambda lines: [l.replace("capture_version 3", "capture_version 2") for l in lines]), "capture version")
 
         def other_model(lines: list[str]) -> list[str]:
             return [f"model {seal('another model')}" if l.startswith("model ") else l for l in lines]
@@ -661,7 +661,7 @@ if verb == "interact":
     lines = [l for l in text.splitlines() if not l.startswith(("event ", "closed-loop ", "variant "))]
     realized = "\n".join(lines[:3] + events + ["variant none"]) + "\n"
     (partial / "realized.txt").write_text(realized)
-(partial / "summary.txt").write_text(f"spec_id {i}\ncapture_version 2\nsource_commit {flag('--source-commit')}\n")
+(partial / "summary.txt").write_text(f"spec_id {i}\ncapture_version 3\nsource_commit {flag('--source-commit')}\n")
 target = out / (i + (".fault" if how.get("fault") else ""))
 partial.rename(target)
 note(f"end {name}")
