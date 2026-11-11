@@ -257,13 +257,17 @@ fn a_reading_that_leaves_its_range_between_two_tumbling_means_fails_a_sliding_wi
     );
 }
 
-/// Supine to seated, a change whose shift lasts `lasting_ns`.
-fn sitting_up_for(lasting_ns: u64) -> Scope {
+/// A change from one activity to the next whose shift lasts `lasting_ns`.
+fn change(from: &'static str, to: &'static str, lasting_ns: u64) -> Scope {
     Scope::Change {
-        from: Activity::new("supine"),
-        to: Activity::new("seated"),
+        from: Activity::new(from),
+        to: Activity::new(to),
         lasting: NonZeroU64::new(lasting_ns).expect("not zero"),
     }
+}
+
+fn sitting_up_for(lasting_ns: u64) -> Scope {
+    change("supine", "seated", lasting_ns)
 }
 
 fn sitting_up(change_high: Option<f64>) -> HealthyRangeSet<SyntheticFixture> {
@@ -316,8 +320,7 @@ fn a_window_across_a_change_takes_the_changes_own_range() {
 
 /// Supine to seated at 4 s, where a source shows his pressure dips for 4 s: 70 to 140 over a 4 s window then, and
 /// 90 to 140 otherwise.
-fn sitting_up_dips(ranges: Vec<HealthyRange<SyntheticFixture>>) -> HealthyRangeSet<SyntheticFixture> {
-    let mut ranges = ranges;
+fn sitting_up_dips(mut ranges: Vec<HealthyRange<SyntheticFixture>>) -> HealthyRangeSet<SyntheticFixture> {
     ranges.push(range("xx.every", Scope::Every, sliding(4 * SECOND), 90.0, 140.0));
     let change = sitting_up_for(4 * SECOND);
     ranges.push(range("xx.sitting-up", change, sliding(4 * SECOND), 70.0, 140.0));
@@ -416,24 +419,19 @@ fn a_window_of_a_length_the_change_has_no_range_for_is_not_judged_in_the_time_it
 
 #[test]
 fn a_window_that_belongs_to_two_changes_blocks_at_the_first_after_its_first_value() {
-    let change = |from, to| Scope::Change {
-        from: Activity::new(from),
-        to: Activity::new(to),
-        lasting: NonZeroU64::new(4 * SECOND).expect("not zero"),
-    };
     let set = set(
         vec![
             range("xx.every", Scope::Every, sliding(4 * SECOND), 0.0, 100.0),
             range(
                 "xx.sitting-up",
-                change("supine", "seated"),
+                change("supine", "seated", 4 * SECOND),
                 sliding(4 * SECOND),
                 0.0,
                 100.0,
             ),
             range(
                 "xx.standing-up",
-                change("seated", "standing"),
+                change("seated", "standing", 4 * SECOND),
                 sliding(4 * SECOND),
                 0.0,
                 100.0,

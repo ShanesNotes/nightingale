@@ -235,19 +235,19 @@ impl Slider {
     /// range of the window's length judges a window that belongs to one. A window that belongs to two, or crosses
     /// a change no range judges, blocks at the first such change after its first value (record 0004).
     fn judging(&self, first: usize, covers: u64, last: usize) -> Result<Option<usize>, usize> {
-        let lasting = (first.checked_sub(1)).and_then(|change| match self.across[change] {
+        let shift = (first.checked_sub(1)).and_then(|change| match self.across[change] {
             Across::Own { range, until_ns } if covers < until_ns => Some(range),
             Across::Own { .. } | Across::Shared | Across::Unranged => None,
         });
         let mut unshared = (first + 1..=last).filter(|&change| self.across[change - 1] != Across::Shared);
         let Some(change) = unshared.next() else {
-            return Ok(match lasting {
+            return Ok(match shift {
                 Some(range) => range,
                 None if first == last => self.within[last],
                 None => self.every,
             });
         };
-        match (lasting, unshared.next(), self.across[change - 1]) {
+        match (shift, unshared.next(), self.across[change - 1]) {
             (None, None, Across::Own { range, .. }) => Ok(range),
             _ => Err(change),
         }
