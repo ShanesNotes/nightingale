@@ -347,15 +347,27 @@ fn a_window_across_a_change_takes_the_changes_own_range() {
 }
 
 fn sitting_up_dips(mut ranges: Vec<HealthyRange<SyntheticFixture>>) -> HealthyRangeSet<SyntheticFixture> {
-    ranges.push(range("xx.every", Scope::Every, sliding(4 * SECOND), 90.0, 140.0));
+    ranges.push(range(
+        "xx.every",
+        Scope::Every,
+        sliding(4 * SECOND),
+        4500.0,
+        7000.0,
+    ));
     let change = sitting_up_for(4 * SECOND);
-    ranges.push(range("xx.sitting-up", change, sliding(4 * SECOND), 70.0, 140.0));
+    ranges.push(range(
+        "xx.sitting-up",
+        change,
+        sliding(4 * SECOND),
+        3500.0,
+        7000.0,
+    ));
     set(ranges, Vec::new())
 }
 
 fn dipping(dip: usize, values: usize) -> Vec<f64> {
-    let mut read = vec![100.0; values];
-    read[5..5 + dip].fill(75.0);
+    let mut read = vec![5000.0; values];
+    read[5..5 + dip].fill(3750.0);
     read
 }
 
@@ -366,7 +378,7 @@ fn a_changes_range_judges_each_window_in_the_time_its_shift_lasts() {
     assert_eq!(
         report.verdict(),
         CheckVerdict::Pass,
-        "a dip to 75 in the 4 s from the change"
+        "a dip to 3750 in the 4 s from the change"
     );
     assert_eq!(report.gaps(), []);
     let judged = (
@@ -382,7 +394,7 @@ fn a_changes_range_judges_each_window_in_the_time_its_shift_lasts() {
     assert_eq!(result(&report, "xx.sitting-up").failure(), None);
     assert_eq!(
         failure(&report, "xx.every"),
-        (at(11 * SECOND), 4 * SECOND, Some(value(81.25))),
+        (at(11 * SECOND), 4 * SECOND, Some(value(4062.5))),
         "a dip that outlasts the shift fails the first window wholly past it, the values at 8 s to 11 s"
     );
 }
@@ -393,8 +405,8 @@ fn a_change_owns_the_time_its_longest_lasting_range_states() {
         "xx.brief",
         sitting_up_for(2 * SECOND),
         sliding(2 * SECOND),
-        70.0,
-        140.0,
+        3500.0,
+        7000.0,
     );
     let day = day(&[(0, "supine"), (4 * SECOND, "seated")]);
     let report = each_second(&sitting_up_dips(vec![brief]), &day, &dipping(3, 12));

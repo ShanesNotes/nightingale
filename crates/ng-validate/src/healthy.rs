@@ -224,9 +224,10 @@ pub struct ReadingChecks<'b> {
     returns: ReturnFold,
 }
 impl<'b> ReadingChecks<'b> {
-    /// Reads `admitted`'s admission revision, which every later read follows. The checks take the packet's every
-    /// anchor, so none can be left out. Refuses a lens or set entry the body cannot hold, a day or range or anchor
-    /// window off the grid, a grid that does not divide a day, and a view after admission.
+    /// Reads `admitted`'s admission revision, which every later read follows. The checks take every anchor of the
+    /// packet the caller names, and the return report names that packet. Refuses a lens or set entry the body
+    /// cannot hold, a day or range or anchor window off the grid, a grid that does not divide a day, and a view
+    /// after admission.
     pub fn new<K: PacketKind, S>(
         body: &CompiledBody,
         bare: &'b BareLens,
