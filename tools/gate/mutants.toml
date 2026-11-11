@@ -615,6 +615,34 @@ new = '''(Family::Circulation, law.owner)'''
 test = "-p ng-contract --test sinusoids the_flow_at_a_liver_bed_edge_is_the_sinusoids_whoever_reads_it"
 
 [[mutant]]
+name = "crossings-compare-the-wall"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|pair| pair[0].0 == pair[1].0 && pair[0].1 == pair[1].1 && pair[0].2 == pair[1].2)'''
+new = '''.filter(|pair| pair[0].1 == pair[1].1 && pair[0].2 == pair[1].2)'''
+test = "-p ng-contract --test scopes oxygen_crosses_the_gas_exchange_surface_and_the_capillary_wall_of_one_lung_bed_by_two_cards"
+
+[[mutant]]
+name = "crossings-compare-the-species"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|pair| pair[0].0 == pair[1].0 && pair[0].1 == pair[1].1 && pair[0].2 == pair[1].2)'''
+new = '''.filter(|pair| pair[0].0 == pair[1].0 && pair[0].2 == pair[1].2)'''
+test = "-p ng-contract --test scopes water_and_oxygen_cross_one_cell_membrane_by_two_cards"
+
+[[mutant]]
+name = "each-wall-crosses-its-own-membranes"
+path = "crates/ng-contract/src/law.rs"
+old = '''Family::Across(wall, _, species) => Some((wall.crossed(), species)),'''
+new = '''Family::Across(_, _, species) => Some((&[Crossed::Capillary], species)),'''
+test = "-p ng-contract --test scopes glucose_crosses_the_capillary_wall_by_fluids_and_each_beds_cell_membrane_by_its_own_card"
+
+[[mutant]]
+name = "sinusoids-leave-the-valves"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|&pair| !anatomy.is_valve(pair) && sinusoidal(anatomy, pair))'''
+new = '''.filter(|&pair| sinusoidal(anatomy, pair))'''
+test = "-p ng-contract --test sinusoids the_sinusoids_leave_a_valved_edge_of_the_liver_bed_to_the_valves"
+
+[[mutant]]
 name = "enclosure-owed-by-its-card"
 path = "crates/ng-contract/src/compile.rs"
 old = '''

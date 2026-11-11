@@ -160,3 +160,57 @@ fn the_flow_at_a_liver_bed_edge_is_the_sinusoids_whoever_reads_it() -> Result<()
     );
     Ok(())
 }
+
+#[test]
+fn the_sinusoids_leave_a_valved_edge_of_the_liver_bed_to_the_valves() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let artery = map.site::<VesselSegment>("artery", at()?);
+    let vein = map.site::<VesselSegment>("vein", at()?);
+    let liver_bed = map.site::<CapillaryBed>("liver bed", at()?);
+    for child in [artery.id(), vein.id(), liver_bed.id()] {
+        map.contain(root.id(), child);
+    }
+    map.connect(Network::Vascular, artery.id(), liver_bed.id());
+    map.valve(liver_bed.id(), vein.id());
+    map.connect(Network::Vascular, vein.id(), artery.id());
+    map.serves(&liver_bed, Tissue::Liver);
+    let mut schema = Schema::new(map.finish()?)?;
+    for space in [Space::Interstitium, Space::Cells] {
+        schema.leave_out(space, "a bench of blood alone");
+    }
+    schema.carry::<Sodium, Blood>(Space::Plasma);
+    schema.carry::<Sodium, Blood>(Space::Lumen);
+    let body = assemble(schema, |mut body| {
+        let class = slow()?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, still);
+        let flow = ports.valves(&mut cv).flow_memory();
+        let held = cv.edge_kernel::<ValveEdge, _, _>(|mut k| {
+            let zero = k.zero::<Rate<Rate<Water>>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.memory_rate(&flow, held);
+        body.add(cv.finish());
+        let (mut hp, ports) = body.hepatic(None)?.parts();
+        let route = ports.sinusoids(&mut hp);
+        let still = hp.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, hp.every_mode(), class)
+        });
+        hp.transfer_along(&route, still);
+        body.add(hp.finish());
+        body.compile()
+    })?;
+    let (artery, liver_bed) = (site::<VesselSegment>("artery"), site::<CapillaryBed>("liver bed"));
+    assert_eq!(
+        columns_of(&body, law("HP", "sinusoids")),
+        [edge(artery, liver_bed)]
+    );
+    Ok(())
+}

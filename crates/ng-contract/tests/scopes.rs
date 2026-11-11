@@ -860,3 +860,98 @@ fn another_species_crosses_both_walls_the_endothelial_route_spans() -> Result<()
     })?;
     Ok(())
 }
+
+#[test]
+fn oxygen_crosses_the_gas_exchange_surface_and_the_capillary_wall_of_one_lung_bed_by_two_cards()
+-> Result<(), AdmissionError> {
+    let mut schema = tissues(&[("lung bed", Tissue::Lung)], &[Space::Lumen, Space::Cells])?;
+    for space in [Space::Gas, Space::Plasma, Space::Interstitium] {
+        schema.carry::<Oxygen, CapillaryBed>(space);
+    }
+    assemble(schema, |mut body| {
+        let (mut fl, ports) = body.fluids()?.parts();
+        let route = ports.starling(&mut fl);
+        still(&mut fl, &route)?;
+        body.add(fl.finish());
+        let (mut mt, ports) = body.metabolism(None)?.parts();
+        let route = ports.gas_exchange::<Oxygen>(&mut mt);
+        still(&mut mt, &route)?;
+        body.add(mt.finish());
+        let (mut rs, ports) = body.respiratory(None)?.parts();
+        let route = ports.alveolar::<Oxygen>(&mut rs);
+        still(&mut rs, &route)?;
+        body.add(rs.finish());
+        body.compile()
+    })?;
+    Ok(())
+}
+
+#[test]
+fn water_and_oxygen_cross_one_cell_membrane_by_two_cards() -> Result<(), AdmissionError> {
+    let mut schema = tissues(&MUSCLE_BED, &[Space::Lumen, Space::Plasma])?;
+    for space in [Space::Interstitium, Space::Cells] {
+        schema.carry::<Oxygen, CapillaryBed>(space);
+    }
+    assemble(schema, |mut body| {
+        let (mut fl, ports) = body.fluids()?.parts();
+        let route = ports.cell_membrane::<CapillaryBed, Water>(&mut fl);
+        still(&mut fl, &route)?;
+        body.add(fl.finish());
+        let (mut mt, ports) = body.metabolism(None)?.parts();
+        let route = ports.gas_into_cells::<Oxygen>(&mut mt);
+        still(&mut mt, &route)?;
+        body.add(mt.finish());
+        body.compile()
+    })?;
+    Ok(())
+}
+
+#[test]
+fn glucose_crosses_the_capillary_wall_by_fluids_and_each_beds_cell_membrane_by_its_own_card()
+-> Result<(), AdmissionError> {
+    let mut schema = tissues(&THREE_BEDS, &[Space::Lumen])?;
+    for space in [Space::Plasma, Space::Interstitium, Space::Cells] {
+        schema.carry::<Glucose, CapillaryBed>(space);
+    }
+    assemble(schema, |mut body| {
+        let (mut fl, ports) = body.fluids()?.parts();
+        let route = ports.starling(&mut fl);
+        still(&mut fl, &route)?;
+        let water = ports.cell_membrane::<CapillaryBed, Water>(&mut fl);
+        still(&mut fl, &water)?;
+        let glucose = ports.exchange::<Glucose>(&mut fl);
+        still(&mut fl, &glucose)?;
+        body.add(fl.finish());
+        let (mut mt, ports) = body.metabolism(None)?.parts();
+        let route = ports.fuel_into_cells::<Glucose>(&mut mt);
+        still(&mut mt, &route)?;
+        body.add(mt.finish());
+        liver_glucose(&mut body)?;
+        body.compile()
+    })?;
+    Ok(())
+}
+
+#[test]
+fn one_card_crosses_both_walls_of_one_bed_with_oxygen() -> Result<(), AdmissionError> {
+    let mut schema = tissues(&MUSCLE_BED, &[Space::Lumen])?;
+    for space in [Space::Plasma, Space::Interstitium, Space::Cells] {
+        schema.carry::<Oxygen, CapillaryBed>(space);
+    }
+    assemble(schema, |mut body| {
+        let (mut fl, ports) = body.fluids()?.parts();
+        let route = ports.starling(&mut fl);
+        still(&mut fl, &route)?;
+        let water = ports.cell_membrane::<CapillaryBed, Water>(&mut fl);
+        still(&mut fl, &water)?;
+        body.add(fl.finish());
+        let (mut mt, ports) = body.metabolism(None)?.parts();
+        let wall = ports.gas_exchange::<Oxygen>(&mut mt);
+        still(&mut mt, &wall)?;
+        let membrane = ports.gas_into_cells::<Oxygen>(&mut mt);
+        still(&mut mt, &membrane)?;
+        body.add(mt.finish());
+        body.compile()
+    })?;
+    Ok(())
+}
