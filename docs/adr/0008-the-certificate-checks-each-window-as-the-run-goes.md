@@ -18,7 +18,7 @@ Keeping every ledger chunk costs 296 to 342 GB for one 48 h course. Compressed, 
 - Every replay gate keeps its live comparison on fresh cores. A revision between checkpoints replays forward from the checkpoint before it.
 - A new lens, a debrief and the readings checks needed a replay before this record, and still do, because no store holds past state or readings.
 - A run's evidence names the build that made it. A regeneration that no longer reproduces its seals is itself a finding, and its run can still be compared against its witnesses step by step.
-- The flight recorder starts on the first closure or drift failure, a replay divergence, an engine fault or a store failure. An early failure can keep nearly the whole course. While every core fails the synthetic energy drift, every milestone run keeps it.
+- The flight recorder starts on the first closure or drift failure, a replay divergence, an engine fault or a store failure. An early failure can keep nearly the whole course.
 - The fold reads one session through a view the record mints at admission, so no host can feed it two runs. A trimmed `restore` takes the run's opening time from the record's opening, which a witness does not hold.
 - Before any history is trimmed, the fold must match `certify` and the independent oracle on every window shape.
 - Links and checkpoints that an earlier build wrote still load.
