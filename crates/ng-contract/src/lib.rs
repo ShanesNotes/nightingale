@@ -1139,6 +1139,19 @@
 //!     packet.anchors().iter().map(|reading| (reading.row(), reading.method())).collect()
 //! }
 //! ```
+//! Only its packet makes its anchor view, so no caller can leave an anchor out.
+//! ```compile_fail,E0451
+//! use ng_contract::*;
+//! fn emptied(packet: PacketHash) -> Anchors {
+//!     Anchors { readings: Vec::new(), packet }
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn viewed(packet: &ParameterPacket<SyntheticFixture>) -> Anchors {
+//!     packet.anchors()
+//! }
+//! ```
 //! A fit names its anchor, so it is one unknown with one row.
 //! ```compile_fail,E0061
 //! use ng_contract::*;
