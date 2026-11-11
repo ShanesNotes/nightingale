@@ -1,5 +1,6 @@
-//! The arena certificate's drift limits, on a synthetic body that energy and water enter at steady rates. No arena
-//! history can serve: a short arena run moves energy by about 1e4 at most, so none comes near energy's limit of 4e5.
+//! The arena certificate's drift limits, on a synthetic body that energy and water enter at steady rates. An arena
+//! history cannot serve: its drift is whatever the day's physiology makes it, 8.3e4 over a day that takes hours to
+//! run, and each limit needs a drift just under it and one just over.
 
 use ng_contract::*;
 use ng_validate::*;
@@ -43,7 +44,6 @@ fn steady<'b, Q: Substance>(
     Ok(())
 }
 
-/// No other law moves either pool, so each one's drift over a day is what entered it that day.
 fn steady_inflows() -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>(ROOT, origin()?).id();
@@ -112,18 +112,16 @@ fn refused(failure: CertificateFailure) -> (CertificateCheck, Option<Book>) {
 }
 
 #[test]
-fn energy_drifts_up_to_4e5_over_the_arenas_day_and_no_further() {
-    let under = certified(399_999.0, 0.0).expect("energy inside its limit");
-    assert!((drift(&under, Species::Energy) - 399_999.0).abs() < 1e-6);
-    let over = certified(400_001.0, 0.0).expect_err("energy past its limit");
+fn energy_drifts_up_to_2e5_over_the_arenas_day_and_no_further() {
+    let under = certified(199_999.0, 0.0).expect("energy inside its limit");
+    assert!((drift(&under, Species::Energy) - 199_999.0).abs() < 1e-6);
+    let over = certified(200_001.0, 0.0).expect_err("energy past its limit");
     assert_eq!(
         refused(over),
         (CertificateCheck::Drift, Some(Book::Of(Species::Energy)))
     );
 }
 
-/// Water moves only its own quantity here, since no reaction joins it to another and it holds no charge, so the
-/// refusal names the limit water keeps and no other.
 #[test]
 fn water_drifts_up_to_1e4_as_every_quantity_but_energy_does() {
     let under = certified(0.0, 9_999.0).expect("water inside its limit");

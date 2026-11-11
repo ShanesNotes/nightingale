@@ -516,9 +516,9 @@ pub fn arena_seed() -> Seed {
 
 const CLOSURE_RELATIVE: f64 = 1e-12;
 const SYNTHETIC_DRIFT: f64 = 1e4;
-/// About twice energy's measured drift over the arena's own day from 06:55, MEASURED_DRIFT. Like `SYNTHETIC_DRIFT`,
-/// it is fixture data until the healthy-range set holds energy's within-subject variation.
-const SYNTHETIC_ENERGY_DRIFT: f64 = 4e5;
+/// About twice energy's measured drift over the arena's own day from 06:55, 8.3e4. Like `SYNTHETIC_DRIFT`, it is
+/// fixture data until the healthy-range set holds energy's within-subject variation.
+const SYNTHETIC_ENERGY_DRIFT: f64 = 2e5;
 
 pub fn arena_certificate(
     body: &CompiledBody,

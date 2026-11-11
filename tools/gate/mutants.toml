@@ -917,7 +917,7 @@ name = "energy-drift-falls-back-to-the-common-limit"
 path = "crates/ng-validate/src/slice.rs"
 old = '''Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_ENERGY_DRIFT),'''
 new = '''Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_DRIFT),'''
-test = "-p ng-validate --test arena_certificate energy_drifts_up_to_4e5_over_the_arenas_day_and_no_further"
+test = "-p ng-validate --test arena_certificate energy_drifts_up_to_2e5_over_the_arenas_day_and_no_further"
 
 [[mutant]]
 name = "every-quantity-takes-energys-drift-limit"
