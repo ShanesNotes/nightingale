@@ -257,6 +257,15 @@ fn a_reading_that_leaves_its_range_between_two_tumbling_means_fails_a_sliding_wi
     );
 }
 
+/// Supine to seated, a change whose shift lasts `lasting_ns`.
+fn sitting_up_for(lasting_ns: u64) -> Scope {
+    Scope::Change {
+        from: Activity::new("supine"),
+        to: Activity::new("seated"),
+        lasting: NonZeroU64::new(lasting_ns).expect("not zero"),
+    }
+}
+
 fn sitting_up(change_high: Option<f64>) -> HealthyRangeSet<SyntheticFixture> {
     let (supine, seated) = (Activity::new("supine"), Activity::new("seated"));
     let mut ranges = vec![
@@ -270,10 +279,7 @@ fn sitting_up(change_high: Option<f64>) -> HealthyRangeSet<SyntheticFixture> {
         ),
     ];
     if let Some(high) = change_high {
-        let change = Scope::Change {
-            from: supine,
-            to: seated,
-        };
+        let change = sitting_up_for(SECOND);
         ranges.push(range("xx.sitting-up", change, sliding(2 * SECOND), 0.0, high));
     }
     set(ranges, Vec::new())

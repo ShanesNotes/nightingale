@@ -271,6 +271,18 @@ impl Reading {
                 .find(|&&(_, held, by)| (held, by) == (scope, averaging))
                 .map(|&(range, _, _)| range)
         };
+        let change = |from: Activity, to: Activity, averaging: Averaging| {
+            (own.iter())
+                .find(|&&(_, scope, by)| match scope {
+                    Scope::Change {
+                        from: left,
+                        to: entered,
+                        ..
+                    } => (left, entered, by) == (from, to, averaging),
+                    Scope::Every | Scope::During(_) => false,
+                })
+                .map(|&(range, _, _)| range)
+        };
         let during = |activity: Activity| own.iter().any(|&(_, scope, _)| scope == Scope::During(activity));
         let every = own.iter().any(|&(_, scope, _)| scope == Scope::Every);
         let mut lengths: Vec<NonZeroU64> = (own.iter())
@@ -294,7 +306,7 @@ impl Reading {
                 let across = (spans.windows(2))
                     .map(|pair| {
                         let (from, to) = (pair[0].activity, pair[1].activity);
-                        match find(Scope::Change { from, to }, sliding) {
+                        match change(from, to, sliding) {
                             Some(range) => Across::Own(range),
                             None if !during(from) && !during(to) => Across::Shared,
                             None => Across::Unranged,

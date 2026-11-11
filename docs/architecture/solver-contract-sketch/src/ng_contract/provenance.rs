@@ -365,11 +365,12 @@ impl Activity {
         Self { _name }
     }
 }
-/// The activities a healthy range covers: every one, one, or a change from one to the next.
+/// The activities a healthy range covers: every one, one, or a change from one to the next and the
+/// nanoseconds its source shows the shift lasting.
 pub enum Scope {
     Every,
     During(Activity),
-    Change { from: Activity, to: Activity },
+    Change { from: Activity, to: Activity, lasting: NonZeroU64 },
 }
 /// How a range's study averaged its reading: a sliding window's length, or the whole period of one activity.
 pub enum Averaging {

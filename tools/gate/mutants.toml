@@ -1058,3 +1058,17 @@ path = "crates/ng-validate/src/healthy/range.rs"
 old = '''before_admission: start < admission,'''
 new = '''before_admission: start <= admission,'''
 test = "-p ng-validate --lib healthy::tests::a_period_that_starts_at_admission_is_whole"
+
+[[mutant]]
+name = "healthy-range-set-digest-skips-the-lasting"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''out.number(lasting.get());'''
+new = '''out.number(lasting.get().min(1));'''
+test = "-p ng-contract --lib healthy::tests::a_set_digest_covers_every_field_of_every_entry"
+
+[[mutant]]
+name = "healthy-range-set-takes-one-change-twice"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''&& known.scope.same_activities(range.scope)'''
+new = '''&& known.scope == range.scope'''
+test = "-p ng-contract --lib healthy::tests::a_set_holds_one_entry_per_id_per_reading_scope_and_averaging_and_one_variation_per_reading"

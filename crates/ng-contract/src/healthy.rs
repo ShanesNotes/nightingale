@@ -33,7 +33,12 @@ impl Seal for Activity {
 pub enum Scope {
     Every,
     During(Activity),
-    Change { from: Activity, to: Activity },
+    Change {
+        from: Activity,
+        to: Activity,
+        /// The nanoseconds after the change that its source shows the shift lasting.
+        lasting: NonZeroU64,
+    },
 }
 impl Seal for Scope {
     fn seal(&self, out: &mut Canonical) {
@@ -43,11 +48,28 @@ impl Seal for Scope {
                 out.number(1);
                 activity.seal(out);
             }
-            Self::Change { from, to } => {
+            Self::Change { from, to, lasting } => {
                 out.number(2);
                 from.seal(out);
                 to.seal(out);
+                out.number(lasting.get());
             }
+        }
+    }
+}
+impl Scope {
+    /// Whether two scopes cover the same activities, however long each says a change's shift lasts.
+    fn same_activities(self, other: Self) -> bool {
+        match (self, other) {
+            (
+                Self::Change { from, to, .. },
+                Self::Change {
+                    from: other_from,
+                    to: other_to,
+                    ..
+                },
+            ) => (from, to) == (other_from, other_to),
+            _ => self == other,
         }
     }
 }
@@ -203,8 +225,8 @@ pub struct HealthyRangeSet<K: PacketKind> {
     variations: Vec<WithinSubjectVariation<K>>,
 }
 impl HealthyRangeSet<SyntheticFixture> {
-    /// Refuses a repeated id, two ranges for one reading with one scope and averaging, and two variations for
-    /// one reading.
+    /// Refuses a repeated id, two ranges for one reading with one scope and averaging, however long each says a
+    /// change's shift lasts, and two variations for one reading.
     pub fn synthetic(
         ranges: Vec<HealthyRange<SyntheticFixture>>,
         variations: Vec<WithinSubjectVariation<SyntheticFixture>>,
@@ -244,8 +266,8 @@ impl<K: PacketKind> HealthyRangeSet<K> {
         variations.sort_by_key(|variation| variation.id);
         for (at, range) in ranges.iter().enumerate() {
             let same = |known: &HealthyRange<K>| {
-                (known.row, known.method, known.scope, known.averaging)
-                    == (range.row, range.method, range.scope, range.averaging)
+                (known.row, known.method, known.averaging) == (range.row, range.method, range.averaging)
+                    && known.scope.same_activities(range.scope)
             };
             if ranges[..at].iter().any(same) {
                 return Err(AdmissionError::DuplicateRangeEntry { id: range.id });
@@ -343,6 +365,15 @@ mod tests {
 
     fn sliding(seconds: u64) -> Averaging {
         Averaging::Sliding(NonZeroU64::new(seconds * SECOND).expect("not zero"))
+    }
+
+    fn waking(seconds: u64) -> Scope {
+        let lasting = NonZeroU64::new(seconds * SECOND).expect("not zero");
+        Scope::Change {
+            from: NIGHT,
+            to: DAY,
+            lasting,
+        }
     }
 
     /// One field changed, by name.
@@ -458,8 +489,7 @@ mod tests {
         };
         let refused = Some(AdmissionError::WholePeriodScope { id: "xx.range" });
         assert_eq!(whole(Scope::Every).built().err(), refused);
-        let change = Scope::Change { from: NIGHT, to: DAY };
-        assert_eq!(whole(change).built().err(), refused);
+        assert_eq!(whole(waking(4)).built().err(), refused);
         assert!(whole(Scope::During(NIGHT)).built().is_ok());
     }
 
@@ -490,6 +520,16 @@ mod tests {
             ..Range::of("xx.b")
         };
         assert!(set(vec![Range::of("xx.a").range(), longer.range()], Vec::new()).is_ok());
+        let crossing = |id, seconds| Range {
+            scope: waking(seconds),
+            ..Range::of(id)
+        };
+        let lastings = vec![crossing("xx.a", 4).range(), crossing("xx.b", 8).range()];
+        assert_eq!(
+            set(lastings, Vec::new()).err(),
+            repeated("xx.b"),
+            "one change and averaging, however long each says the shift lasts"
+        );
         let one_reading = vec![
             Variation::of("xx.v").variation(),
             Variation::of("xx.w").variation(),
@@ -529,9 +569,7 @@ mod tests {
             ("method", |range| range.method = "another gauge"),
             ("activity", |range| range.scope = Scope::During(DAY)),
             ("scope", |range| range.scope = Scope::Every),
-            ("change", |range| {
-                range.scope = Scope::Change { from: NIGHT, to: DAY }
-            }),
+            ("change", |range| range.scope = waking(4)),
             ("length", |range| range.averaging = sliding(8)),
             ("averaging", |range| range.averaging = Averaging::WholePeriod),
             ("low", |range| range.low = 1.0),
@@ -544,6 +582,14 @@ mod tests {
             let changed = digest(vec![changed.range()], vec![variation.variation()]);
             assert_ne!(changed, first, "a range's {field}");
         }
+        let crossing = |seconds| {
+            let range = Range {
+                scope: waking(seconds),
+                ..range
+            };
+            digest(vec![range.range()], vec![variation.variation()])
+        };
+        assert_ne!(crossing(8), crossing(4), "how long a change's shift lasts");
         let (low, high) = (Measure::<Volume>::new(0.0), Measure::<Volume>::new(20.0));
         let (low, high) = (low.expect("finite"), high.expect("finite"));
         let Range {
