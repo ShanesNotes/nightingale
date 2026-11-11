@@ -680,6 +680,83 @@ new = '''Respired: Substance = Oxygen, CarbonDioxide, Sodium;'''
 test = "--doc -p ng-contract alveolar"
 
 [[mutant]]
+name = "chyle-reaches-the-interstitium"
+path = "crates/ng-contract/src/scope/gastrointestinal.rs"
+old = '''Family::Along(Passage::Chyle, Species::Triglyceride)'''
+new = '''Family::Along(Passage::Absorption, Species::Triglyceride)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "shedding-leaves-the-gut-cells"
+path = "crates/ng-contract/src/scope/gastrointestinal.rs"
+old = '''Family::Along(Passage::Shedding, Species::Iron)'''
+new = '''Family::Along(Passage::Absorption, Species::Iron)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "transit-stays-between-lumens"
+path = "crates/ng-contract/src/scope/gastrointestinal.rs"
+old = '''Family::Along(Passage::Transit, Q::SPECIES)'''
+new = '''Family::Along(Passage::Absorption, Q::SPECIES)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "absorption-reaches-the-plasma"
+path = "crates/ng-contract/src/scope/gastrointestinal.rs"
+old = '''Family::Along(Passage::Absorption, Q::SPECIES)'''
+new = '''Family::Along(Passage::Chyle, Q::SPECIES)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "lining-wets-the-gas"
+path = "crates/ng-contract/src/scope/respiratory.rs"
+old = '''Family::Across(Wall::Lining, <Beds<Lung> as SiteSet>::SET, Species::Water)'''
+new = '''Family::Across(Wall::Cell, <Beds<Lung> as SiteSet>::SET, Species::Water)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "airway-runs-along-the-airway"
+path = "crates/ng-contract/src/scope/respiratory.rs"
+old = '''Family::Along(Passage::Airway, Q::SPECIES)'''
+new = '''Family::Along(Passage::Transit, Q::SPECIES)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "alveolar-crosses-gas-to-plasma"
+path = "crates/ng-contract/src/scope/respiratory.rs"
+old = '''Family::Across(Wall::Alveolar, <Beds<Lung> as SiteSet>::SET, Q::SPECIES)'''
+new = '''Family::Across(Wall::Lining, <Beds<Lung> as SiteSet>::SET, Q::SPECIES)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "iron-crosses-as-iron"
+path = "crates/ng-contract/src/scope/hematology.rs"
+old = '''Family::Across(Wall::Cell, <CapillaryBed as SiteSet>::SET, Species::Iron)'''
+new = '''Family::Across(Wall::Cell, <CapillaryBed as SiteSet>::SET, Species::Calcium)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "bed-heat-reaches-the-core"
+path = "crates/ng-contract/src/scope/metabolism.rs"
+old = '''Family::Heat(HeatRoute::FromBeds)'''
+new = '''Family::Heat(HeatRoute::Conduction)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "conduction-leaves-the-core"
+path = "crates/ng-contract/src/scope/metabolism.rs"
+old = '''Family::Heat(HeatRoute::Conduction)'''
+new = '''Family::Heat(HeatRoute::FromBeds)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "lining-is-its-own-membrane"
+path = "crates/ng-contract/src/law.rs"
+old = '''Wall::Lining => &[Crossed::Lining],'''
+new = '''Wall::Lining => &[Crossed::Cell],'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
 name = "enclosure-owed-by-its-card"
 path = "crates/ng-contract/src/compile.rs"
 old = '''
