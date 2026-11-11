@@ -420,6 +420,40 @@
 //! fn charged<C: SameDimension<Concentration<Charge>>>() {}
 //! charged::<Concentration<Lactate>>();
 //! ```
+//! An amount sums as charge only for the same rows, so chloride and the fixed acid add into one charge and glucose
+//! cannot.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn charge<A: SameDimension<Charge>>() {}
+//! charge::<Glucose>();
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn charge<A: SameDimension<Charge>>() {}
+//! charge::<Chloride>();
+//! ```
+//! Only a small solute free in water enters an osmole sum: albumin pulls water as a colloid, through its own oncotic
+//! row, and water is the solvent.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn osmotic<C: SameDimension<Concentration<Osmoles>>>() {}
+//! osmotic::<Concentration<Albumin>>();
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn osmotic<C: SameDimension<Concentration<Osmoles>>>() {}
+//! osmotic::<Concentration<Glucose>>();
+//! ```
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn osmoles<A: SameDimension<Osmoles>>() {}
+//! osmoles::<Water>();
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn osmoles<A: SameDimension<Osmoles>>() {}
+//! osmoles::<Sodium>();
+//! ```
 //! A reaction comes from its owner's builder, which records the rate it owes.
 //! ```compile_fail,E0451
 //! use ng_contract::*;

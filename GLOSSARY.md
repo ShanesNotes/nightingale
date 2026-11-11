@@ -272,16 +272,16 @@ The charge a species holds once the acid-base balance splits it into its ionized
 _Avoid_: hydrogen ion or bicarbonate as a species
 
 **Fixed acid**:
-The strong anion the diet protein's sulfur leaves, lumped, which the kidney excretes. It holds no fixed charge, is -1 after speciation, and the liver makes it by a synthesis route, because sulfur is no element the ledger balances.
+The strong anion the diet protein's sulfur leaves, counted as one species, which the kidney excretes. It holds no fixed charge, is -1 after speciation, and the liver makes it by a synthesis route, because sulfur is no element the ledger balances.
 
 **Diet base**:
-The diet's organic anions, lumped. They burn to carbon dioxide and water and so spend acid. Acetic acid's atoms stand for them, one unit to one equivalent.
+The diet's organic anions, counted as one species. They burn to carbon dioxide and water and so spend acid. Acetic acid's atoms stand for them, one unit to one equivalent.
 
 **Cell anion**:
 The anions a cell's own molecules hold, which cross no membrane. A species with a fixed charge of -1 that sits only in cells.
 
 **Osmoles**:
-Dissolved particles that pull water across a wall that holds them back. A space's osmolality is their concentration, and a small solute's concentration counts in it.
+Dissolved particles that pull water across a wall that holds them back. A space's osmolality is their concentration. A species counts when it is a small solute, free in water, that reaches about a millimole a litre in some watery space; a colloid such as albumin pulls water through its own oncotic row, and water is the solvent.
 
 **Receipt pool**:
 A named pool outside the body, or behind a held stand-in, that takes what crosses the boundary, so a boundary transfer still has two ends.

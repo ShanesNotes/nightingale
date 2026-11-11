@@ -818,7 +818,7 @@ impl Reaches {
         let both = |&species: &Species| {
             self.held(reach.pool(End::From, species)) && self.held(reach.pool(End::To, species))
         };
-        Species::CARRIED.into_iter().filter(both).collect()
+        Species::WATER_BORNE.into_iter().filter(both).collect()
     }
     fn stranded(&self, reach: &Reach) -> Vec<Species> {
         let two_ends = reach.ends.iter().all(|end| matches!(end, Terminal::Pool(_)));
@@ -826,7 +826,7 @@ impl Reaches {
             let held = |end| self.held(reach.pool(end, *species));
             two_ends && held(End::From) != held(End::To)
         };
-        Species::CARRIED.into_iter().filter(apart).collect()
+        Species::WATER_BORNE.into_iter().filter(apart).collect()
     }
 }
 fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {

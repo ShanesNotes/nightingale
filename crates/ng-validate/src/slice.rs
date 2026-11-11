@@ -539,8 +539,8 @@ pub(crate) fn arena_certificate(
     }
     let basis = body.conserved_basis();
     let quantities = basis.ids().map(|quantity| match quantity.book() {
+        Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity),
         Book::Of(species) => species.visit(Limits(quantity)),
-        Book::Energy => limits::<Energy>(quantity),
         Book::Element(_) => QuantityPolicy::element(
             quantity,
             Measure::new(0.0)?,
