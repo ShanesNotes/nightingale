@@ -16,6 +16,42 @@ pub fn explicit_stage(
     problem.evaluate(&workspace.point(time))
 }
 
+const UPDATES_FOR_A_LINEAR_BODY: usize = 2;
+
+pub fn implicit_stage(
+    problem: &CoupledProblem<'_>,
+    workspace: &mut SolveWorkspace,
+    ticket: &StepTicket,
+    offset_ns: u64,
+    span_ns: u64,
+) -> Result<StageEvaluation, TrialFailure> {
+    let (time, shift) = (ticket.at(offset_ns)?, ticket.shift(span_ns)?);
+    let per_second = NANOSECONDS_PER_SECOND / span_ns as f64;
+    let from = workspace.unknowns_mut().to_vec();
+    let mut updates = 0;
+    loop {
+        let unknowns = workspace.unknowns_mut().to_vec();
+        for ((tangent, now), then) in workspace.derivative_mut().iter_mut().zip(&unknowns).zip(&from) {
+            *tangent = (now - then) * per_second;
+        }
+        let point = workspace.point(time);
+        let stage = problem.evaluate(&point)?;
+        if updates == UPDATES_FOR_A_LINEAR_BODY {
+            return Ok(stage);
+        }
+        let jacobian = problem.linearize(&point, shift)?;
+        let Ok(factors) = problem.body().factor(&jacobian) else {
+            return Err(ticket.refuse(NumericalRefusal::IterationLimit));
+        };
+        let mut update = stage.residuals().to_vec();
+        factors.solve(&mut update);
+        for (unknown, change) in workspace.unknowns_mut().iter_mut().zip(update) {
+            *unknown -= change;
+        }
+        updates += 1;
+    }
+}
+
 pub fn euler_step(
     problem: &CoupledProblem<'_>,
     ticket: &StepTicket,

@@ -12,7 +12,11 @@ mutants = ["forward-euler-inside-rc"]
 
 [[row]]
 core = "Accepts a step whose normalized error exceeds one at its minimum interval (SB network.rs:439–449)"
-mutants = ["error-above-one-floor-lowered"]
+mutants = ["error-above-one-floor-lowered", "halved-reads-no-estimate"]
+
+[[row]]
+core = "Shows the doubled stage set where its scheme names the halved one, so the kinder difference judges its error"
+mutants = ["halved-doubles-every-ticket"]
 
 [[row]]
 core = "Accepts after the sweep limit on a strongly coupled fixture whose change is still above tolerance (SB stepper.rs:387–388)"

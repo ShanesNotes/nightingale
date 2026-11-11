@@ -804,3 +804,87 @@ new = '''    if !crosses && false {
         return 0;
     }'''
 test = "-p ng-record --lib history::tests::carbon_a_reaction_makes_inside_the_body_leaves_closure_open_instead_of_counting_as_exchange"
+
+[[mutant]]
+name = "halved-sealed-as-doubled"
+path = "crates/ng-contract/src/scheme.rs"
+old = '''out.number(*method as u64);'''
+new = '''out.number((*method as u64).min(2));'''
+test = "-p ng-contract --lib scheme::tests::each_scheme_seals_its_own_number_and_the_first_three_stay"
+
+[[mutant]]
+name = "whole-only-at-zero"
+path = "crates/ng-contract/src/scheme.rs"
+old = '''let whole = ticket.length_ns() < 2;'''
+new = '''let whole = ticket.length_ns() < 1;'''
+test = "-p ng-contract --lib scheme::tests::a_tickets_stage_set_follows_its_scheme_breakpoint_and_length"
+
+[[mutant]]
+name = "halved-doubles-every-ticket"
+path = "crates/ng-contract/src/scheme.rs"
+old = '''Method::BackwardEulerHalved => StageSet::Halved,'''
+new = '''Method::BackwardEulerHalved => StageSet::Doubled,'''
+test = "-p ng-validate --test transaction a_halved_core_that_shows_the_doubled_set_on_a_continuing_ticket_faults_with_method_mismatch"
+
+[[mutant]]
+name = "halved-ignores-the-breakpoint"
+path = "crates/ng-contract/src/scheme.rs"
+old = '''Method::BackwardEulerHalved if ticket.after_breakpoint() => StageSet::Doubled,'''
+new = '''Method::BackwardEulerHalved if false => StageSet::Doubled,'''
+test = "-p ng-validate --test transaction a_halved_core_that_keeps_its_halves_after_a_breakpoint_faults_with_method_mismatch"
+
+[[mutant]]
+name = "halved-reads-no-estimate"
+path = "crates/ng-contract/src/scheme.rs"
+old = '''StageSet::Halved => Some(Estimate::SecondDifference { half: 0, end: 1 }),'''
+new = '''StageSet::Halved => None,'''
+test = "-p ng-validate --test transaction a_second_difference_above_one_at_the_floor_faults_and_never_publishes"
+
+[[mutant]]
+name = "second-difference-drops-the-start"
+path = "crates/ng-contract/src/quadrature.rs"
+old = '''(middle - from) / first'''
+new = '''middle / first'''
+test = "-p ng-contract --lib quadrature::tests::each_estimate_reads_its_own_stages_and_scales_at_its_end"
+
+[[mutant]]
+name = "second-difference-ignores-the-split"
+path = "crates/ng-contract/src/quadrature.rs"
+old = '''let curvature = reach * ((to - middle) / rest - (middle - from) / first);'''
+new = '''let curvature = to - 2.0 * middle + from;'''
+test = "-p ng-contract --lib quadrature::tests::the_second_difference_weighs_an_odd_tickets_unequal_halves"
+
+[[mutant]]
+name = "core-swallows-the-estimate"
+path = "crates/ng-solver/src/lib.rs"
+old = '''let estimate = problem.estimate(ticket, &increment)?;'''
+new = '''let estimate = problem.estimate(ticket, &increment).unwrap_or(0.0);'''
+test = "-p ng-solver --test core the_record_never_refuses_for_accuracy_a_step_the_core_proposed"
+
+[[mutant]]
+name = "estimate-skips-the-set"
+path = "crates/ng-contract/src/quadrature.rs"
+old = '''if !same_structure(&set.stages(ticket.length_ns()), &increment.witness) {'''
+new = '''if false {'''
+test = "-p ng-solver --test core an_estimate_of_stages_off_its_ticket_s_set_is_a_method_mismatch"
+
+[[mutant]]
+name = "doubled-core-declares-halved"
+path = "crates/ng-solver/src/lib.rs"
+old = '''scheme: StageScheme::backward_euler_doubled(),'''
+new = '''scheme: StageScheme::backward_euler_halved(),'''
+test = "-p ng-validate --test trace the_first_second_of_the_slice_on_the_doubled_core_stays_where_it_was"
+
+[[mutant]]
+name = "estimate-skips-the-binding"
+path = "crates/ng-contract/src/quadrature.rs"
+old = '''if increment.ticket != ticket.digest() || increment.extents.layout != self.layout() {'''
+new = '''if false {'''
+test = "-p ng-solver --test core an_estimate_of_stages_off_its_ticket_s_set_is_a_method_mismatch"
+
+[[mutant]]
+name = "halved-second-stage-from-the-start"
+path = "crates/ng-contract/src/scheme.rs"
+old = '''stage(whole, part(second), Some(0), second, 1),'''
+new = '''stage(whole, part(second), None, second, 1),'''
+test = "-p ng-contract --lib scheme::tests::the_halved_set_is_the_doubled_sets_two_halves"
