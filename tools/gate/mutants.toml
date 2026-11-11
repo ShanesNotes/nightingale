@@ -911,3 +911,38 @@ path = "crates/ng-contract/src/scheme.rs"
 old = '''stage(whole, part(second), Some(0), second, 1),'''
 new = '''stage(whole, part(second), None, second, 1),'''
 test = "-p ng-contract --lib scheme::tests::the_halved_set_is_the_doubled_sets_two_halves"
+
+[[mutant]]
+name = "second-holder-wired-and-held"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''let (wired, held) = (self.carries.wired(), self.carries.held());'''
+new = '''let (wired, held) = (&[] as &[WiredField], self.carries.held());'''
+test = "-p ng-contract --test census the_census_refuses_a_second_holder_of_one_field"
+
+[[mutant]]
+name = "holder-any-card"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''if !same(held[i].holder, self.from) && !same(held[i].holder, self.to) {'''
+new = '''if held[i].holder.is_empty() {'''
+test = "-p ng-contract --test census the_census_refuses_a_holder_at_neither_end_of_the_arrow"
+
+[[mutant]]
+name = "wiring-ticket-open-above"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''if wired[i].ticket < FIRST_WIRING_TICKET || wired[i].ticket > LAST_WIRING_TICKET {'''
+new = '''if wired[i].ticket < FIRST_WIRING_TICKET {'''
+test = "-p ng-contract --test census the_census_refuses_a_wired_field_no_body_ticket_wires"
+
+[[mutant]]
+name = "empty-arrow-accounted"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''Carries::Fields { wired, held } => !wired.is_empty() || !held.is_empty(),'''
+new = '''Carries::Fields { .. } => true,'''
+test = "-p ng-contract --test census the_census_refuses_an_arrow_that_carries_nothing"
+
+[[mutant]]
+name = "held-reason-unchecked"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''if held[i].reason.is_empty() {'''
+new = '''if held[i].name.is_empty() {'''
+test = "-p ng-contract --test census the_census_refuses_an_empty_reason"
