@@ -118,11 +118,18 @@ mutants = ["wall-power-solved"]
 
 [[row]]
 core = "A held stand-in using a route its declaration omits, or holding a concentration whose store is in the slice"
-mutants = ["held-route-declared", "held-pool-left-to-the-slice"]
+mutants = ["held-route-declared", "held-pool-left-to-the-slice", "held-port-offers-declared-processes"]
 
 [[row]]
 core = "An orphan pool"
 mutants = ["orphan-held"]
+
+[[row]]
+core = "A card serving a boundary route another card owns"
+mutants = ["process-owned-by-its-card", "process-of-another-card-supplied", "boundary-port-offers-no-process"]
+doctests = [
+  { path = "crates/ng-contract/src/scope/processes.rs", code = "E0271", text = "ports.boundary::<Urine>()" },
+]
 
 [[row]]
 core = "A reaction whose proportions leave an element or energy open, name a species with a fixed charge, or are written from raw stoichiometry"

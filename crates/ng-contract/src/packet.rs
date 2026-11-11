@@ -6,7 +6,7 @@ use crate::provenance::seal_trace;
 use crate::quantity::dimension;
 use crate::{
     AdmissionError, Anchor, AnchorId, AnchorReading, AnchorStatistic, Anchors, Binding, Citation,
-    Compensated, CompiledBody, Digest, Dimension, Dimensionless, ErrorScales, LawName, Measure,
+    Compensated, CompiledBody, Day, Digest, Dimension, Dimensionless, ErrorScales, LawName, Measure,
     MethodHistory, ModelHash, PacketSeed, ParameterKey, RateBand, RowId, RowKind, SimTime, Slot, UnknownId,
     ValueName, ValueProvenance,
 };
@@ -196,13 +196,13 @@ pub struct ParameterPacket<K: PacketKind> {
     modes: Vec<ModeEntry>,
     anchors: Vec<AnchorEntry>,
     populations: Vec<PopulationEntry>,
+    day: Option<Day>,
     kind: PhantomData<K>,
 }
 impl<K: PacketKind> ParameterPacket<K> {
-    /// A packet whose start state stands at one instant.
-    pub fn new() -> Self {
+    fn opened(cycle: Option<Cycle>, day: Option<Day>) -> Self {
         Self {
-            cycle: None,
+            cycle,
             tolerance: None,
             parameters: Vec::new(),
             starts: Vec::new(),
@@ -210,15 +210,8 @@ impl<K: PacketKind> ParameterPacket<K> {
             modes: Vec::new(),
             anchors: Vec::new(),
             populations: Vec::new(),
+            day,
             kind: PhantomData,
-        }
-    }
-    /// A packet whose start state returns after `cycle`: the periodic goal. Its start values are the guess
-    /// at every point.
-    pub fn periodic(cycle: Cycle) -> Self {
-        Self {
-            cycle: Some(cycle),
-            ..Self::new()
         }
     }
     /// How near every row of the admission system must come. The hash covers it, so no initializer can widen it
@@ -438,6 +431,7 @@ impl<K: PacketKind> ParameterPacket<K> {
             modes,
             anchors,
             populations,
+            day,
             kind: _,
         } = self;
         let mut parameters: Vec<&ParameterEntry> = parameters.iter().collect();
@@ -537,15 +531,43 @@ impl<K: PacketKind> ParameterPacket<K> {
             upper.seal(&mut out);
             seal_trace(trace, &mut out);
         }
+        // A packet with no day seals the bytes it did before a packet held one.
+        if let Some(day) = day {
+            day.seal(&mut out);
+        }
         PacketHash { digest: out.digest() }
     }
 }
-impl<K: PacketKind> Default for ParameterPacket<K> {
+impl ParameterPacket<Reviewed> {
+    pub fn with_day(day: Day) -> Self {
+        Self::opened(None, Some(day))
+    }
+    pub fn periodic_with_day(cycle: Cycle, day: Day) -> Self {
+        Self::opened(Some(cycle), Some(day))
+    }
+}
+impl Default for ParameterPacket<SyntheticFixture> {
     fn default() -> Self {
         Self::new()
     }
 }
 impl ParameterPacket<SyntheticFixture> {
+    /// A packet whose start state stands at one instant.
+    pub fn new() -> Self {
+        Self::opened(None, None)
+    }
+    /// A packet whose start state returns after `cycle`: the periodic goal. Its start values are the guess
+    /// at every point.
+    pub fn periodic(cycle: Cycle) -> Self {
+        Self::opened(Some(cycle), None)
+    }
+    pub fn day(&mut self, day: Day) -> Result<(), AdmissionError> {
+        if self.day.is_some() {
+            return Err(AdmissionError::DuplicateDay);
+        }
+        self.day = Some(day);
+        Ok(())
+    }
     /// One parameter's value where it binds: the body, a site or an edge, or as a default a site class or
     /// the network. Refuses the same key and binding twice.
     pub fn synthetic<U: Dimension>(
@@ -652,7 +674,7 @@ impl Fit {
 }
 /// What this packet asks of admission, read from the packet at `bind`. The packet and model hashes cover all
 /// of it, so neither `digest` nor an image holds it, and a revision's parameters owe nothing: a resume never
-/// refits.
+/// refits, and its day is already on the timeline.
 #[derive(Default)]
 pub(crate) struct Owed {
     pub(crate) cycle: Option<Cycle>,
@@ -660,6 +682,7 @@ pub(crate) struct Owed {
     pub(crate) anchors: Vec<BoundAnchor>,
     pub(crate) fits: Vec<Fit>,
     pub(crate) entries: Vec<(ValueName, ValueProvenance, f64)>,
+    pub(crate) day: Option<Day>,
 }
 
 /// Packet values in compiled parameter order with the packet's hash.
@@ -890,10 +913,12 @@ impl CompiledBody {
             return Err(AdmissionError::UnknownStart { row: entry.row });
         }
         let sizes = self.sizes(&packet)?;
-        let owed = self.owed(&packet, &settled, &filled_by)?;
+        let mut owed = self.owed(&packet, &settled, &filled_by)?;
+        let hash = packet.hash();
+        owed.day = packet.day.map(|day| day.checked(self)).transpose()?;
         Ok(BoundParameters {
             model: self.model_hash(),
-            packet: packet.hash(),
+            packet: hash,
             values,
             starts,
             sizes,
@@ -966,7 +991,8 @@ impl CompiledBody {
                 | Bound::Draw(_)
                 | Bound::Forcing(_)
                 | Bound::Gauge
-                | Bound::Height(_) => false,
+                | Bound::Height(_)
+                | Bound::Lasting(_) => false,
             })
     }
     fn pulsatile(&self, row: RowId) -> bool {
@@ -1063,6 +1089,7 @@ impl CompiledBody {
             anchors,
             fits,
             entries,
+            day: None,
         })
     }
 }
@@ -1093,4 +1120,61 @@ fn numbered(code: &[Op]) -> Vec<usize> {
         }
     }
     numbers
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ParameterPacket;
+    use crate::{
+        AdmissionError, BoundaryEvent, BoundaryInput, Day, Delivered, Digest, InputId, Meal, Measure,
+        SimTime, Sodium, SyntheticFixture, Water,
+    };
+
+    const SECOND: u64 = 1_000_000_000;
+
+    fn holding(payload: BoundaryInput) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+        let id = InputId::new(Digest::of_canonical(b"input"));
+        let mut packet = ParameterPacket::new();
+        packet.day(Day::new(vec![BoundaryEvent::new(
+            id,
+            SimTime::from_ns(0),
+            payload,
+        )])?)?;
+        Ok(packet)
+    }
+    fn drink(amount: f64) -> Result<BoundaryInput, AdmissionError> {
+        Ok(BoundaryInput::Water(Delivered {
+            boundary: "gut water",
+            amount: Measure::new(amount)?,
+            ends: SimTime::from_ns(SECOND),
+        }))
+    }
+    fn meal(water: f64) -> Result<BoundaryInput, AdmissionError> {
+        let meal = Meal::new(SimTime::from_ns(SECOND))
+            .with(Measure::<Water>::new(water)?)
+            .with(Measure::<Sodium>::new(6.0)?);
+        Ok(BoundaryInput::Meal(meal))
+    }
+
+    #[test]
+    fn the_hash_covers_the_day_and_one_amount_moves_it() -> Result<(), AdmissionError> {
+        let none = ParameterPacket::new().hash();
+        let one = holding(drink(1.0)?)?.hash();
+        assert_ne!(one, none, "a day enters the hash");
+        assert_eq!(holding(drink(1.0)?)?.hash(), one);
+        assert_ne!(holding(drink(2.0)?)?.hash(), one, "a delivery's amount");
+        let lunch = holding(meal(60.0)?)?.hash();
+        assert_ne!(holding(meal(61.0)?)?.hash(), lunch, "a meal's composition");
+        Ok(())
+    }
+
+    #[test]
+    fn a_packet_takes_one_day() -> Result<(), AdmissionError> {
+        let mut packet = holding(drink(1.0)?)?;
+        assert_eq!(
+            packet.day(Day::new(Vec::new())?),
+            Err(AdmissionError::DuplicateDay)
+        );
+        Ok(())
+    }
 }

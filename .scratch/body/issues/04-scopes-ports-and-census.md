@@ -1,7 +1,8 @@
 # 04: A scope and ports for each system, and a census for each assembly
 
 Type: task
-Status: open
+Status: claimed
+Claimed by: 04-scopes-ports-census
 Blocked by: 03
 
 **What to build:** Each of the nine systems gets its scope and its ports in the contract, and the census of coupling arrows reads the assembly it is asked about. Today the owner set is sealed with nine systems marked held, and the counts of mapped and unmapped arrows are constants about the slice: moving one system into the slice breaks those constants and the sketch's copy of them. Once the census reads an assembly, the slice keeps its count, the whole body has its own, and no system ticket edits a shared constant.

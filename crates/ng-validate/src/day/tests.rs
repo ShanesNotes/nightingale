@@ -6,9 +6,11 @@ use super::trace::{
 use super::{DAY, DayCheck, DayPlan, DayQuantity, DayReport, EventKind, HOUR, MINUTE, Miss, SECOND};
 use super::{Unavailable, Verdict};
 use core::num::NonZeroU32;
+use expect_test::expect;
 use ng_contract::{
-    AnatomyBuilder, CapillaryBed, Digest, Dimensionless, ErrorScales, InputId, Measure, Position, SimTime,
-    SiteClass, SiteId, Space, VesselSegment,
+    AnatomyBuilder, BoundaryPort, CapillaryBed, CoupledSolver, Day, Digest, Dimensionless, ErrorScales,
+    InputId, Measure, ParameterPacket, Position, RunIdentity, SimTime, SiteClass, SiteId, Space,
+    SyntheticFixture, VesselSegment,
 };
 
 const ORDER: [Series; SERIES] = [
@@ -1085,4 +1087,44 @@ fn the_blood_spaces_are_the_arena_hosts_vessel_lumens_and_bed_plasma() {
         Readings::bind(&body).is_ok(),
         "the arena body has every row the trace reads"
     );
+}
+
+#[test]
+fn the_reference_days_events_keep_their_digest() {
+    let events = DayPlan::reference(two_days()).events(crate::anchor_moment());
+    let port = BoundaryPort::new(events.expect("its events")).expect("a port");
+    let hex: String = port
+        .digest()
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    expect!["2ddb4348db5dd7ed428668430af9ec49307342ac6764fde7138e65842d3cec73"].assert_eq(&hex);
+}
+
+#[test]
+fn a_packet_holding_the_reference_day_admits_the_timeline_the_arenas_port_does() {
+    let body = crate::arena_body().expect("compiled");
+    let core = ng_solver::Core::new(10_000_000);
+    let lens = crate::arena_lens(&body).expect("a lens");
+    let moment = crate::anchor_moment();
+    let events = || DayPlan::reference(two_days()).events(moment).expect("its events");
+    let admitted = |packet: ParameterPacket<SyntheticFixture>, port| {
+        let start =
+            crate::initialize::solved_start(&body, packet, port, &core, &lens, moment).expect("admitted");
+        let identity = RunIdentity::new(
+            body.model_hash(),
+            start.packet_hash(),
+            crate::arena_seed(),
+            core.resolution(),
+        );
+        (identity.digest(), start.into_parts().pending.waiting_digest())
+    };
+    let mut held = crate::arena_packet(&body).expect("a packet");
+    held.day(Day::new(events()).expect("a day")).expect("its one day");
+    let (from_the_day, timeline) = admitted(held, BoundaryPort::new(Vec::new()).expect("an empty port"));
+    let port = BoundaryPort::new(events()).expect("a port");
+    let (from_the_port, expected) = admitted(crate::arena_packet(&body).expect("a packet"), port);
+    assert_eq!(timeline, expected, "one timeline");
+    assert_ne!(from_the_day, from_the_port, "the run identity covers the day");
 }

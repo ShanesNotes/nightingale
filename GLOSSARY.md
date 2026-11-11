@@ -16,6 +16,9 @@ The one person an engine simulates, described by a packet.
 **Packet**:
 The bundle of one patient's parameters and the day the patient lives. It holds every parameter value with where it came from (cited, drawn from a population range or chosen inside one with a reason, derived by an identity, fitted when the start state is solved, or inferred by a model), the anchors the start state must meet, the day (sleep, posture, meals, drinks and room conditions) that the run's boundary events are made from, and the source, population and inference records behind them. A packet is either reviewed (clinical values with citations, and a count of its inferred values) or a synthetic test fixture. Its hash is fixed at admission and is part of the run's identity.
 
+**Day**:
+The timeline of the patient's day that a packet holds: posture, meals, drinks, the clock, sleep, room conditions and voids. Admission makes the run's boundary events from it, and the packet's hash covers it. The latest lasting input of each kind stated before the anchor moment is restamped at it, unless one of its kind is stated at the moment. A delivery that ended before the moment is dropped, and one that runs across it is refused. A meal is one item of the day. A reviewed packet always holds a day; only a synthetic fixture may hold none.
+
 **Admission**:
 The moment a run starts. The start state is solved once here and never imposed again.
 
@@ -104,13 +107,36 @@ A run continued from a checkpoint under its own id, with its ancestry kept. The 
 Continuing from an earlier checkpoint on a new branch in the same process. It must give the same bits as that branch loaded from its saved checkpoint (I3).
 
 **Boundary port**:
-The one port for events from outside the body: intake, posture, environment, clock and sleep, and later interventions. Each event is timestamped, has an id and is applied once.
+The one port for events from outside the body: deliveries and meals, posture, the clock, sleep, room conditions and voids, and later interventions. Each event is timestamped, has an id and is applied once.
 
 **Breakpoint**:
 An instant that ends a step: an event or a guard crossing. A display refresh, a pace change or a checkpoint request is never one.
 
 **Delivery**:
 An event's amount entering the body through a boundary at a steady rate from the event's instant until its end. Overlapping deliveries add.
+
+**Lasting input**:
+A boundary input that lasts from its event until the next of its kind and carries no amount: posture, the clock, sleep, room conditions and the void gate. A law reads posture through each site's height and every other lasting input as a value in its own dimension, and a body that reads one needs its value stated at admission. An input scales a gain or a set point and never stands for a produced quantity. Compile holds only a stand-in for that rule: it refuses a law that reads a lasting input and no parameter or memory slot. So a law that reads one is also reviewed against the rule by reading.
+_Avoid_: held input
+
+**Clock**:
+The lasting input that gives the time of day. A clock event states the time of day at its instant, and the clock runs on from there. Its phase is zero at midnight and makes one turn a day. A law reads the cosine and the sine of the phase, which change at each whole minute, and maps its source's zero to midnight through its own phase parameters. In a body that reads the clock, each minute's edge ends a step.
+
+**Sleep state**:
+The lasting input that says whether the patient sleeps. A law reads 1 in non-REM sleep and 0 awake. Rung 0 has no REM sleep.
+
+**Room conditions**:
+The lasting input that gives the room: air and radiant temperature, relative humidity, air speed as its ratio to 0.1 m/s, barometric pressure, the inspired dry fractions of oxygen and carbon dioxide with nitrogen gas the rest, and clothing or bedding as a count of clo. Temperatures are absolute.
+_Avoid_: environment
+
+**Void gate**:
+The lasting input that opens and shuts the bladder's outlet. A void is the gate open from one event until the next. It carries no amount, because the volume voided is a produced quantity.
+
+**Meal**:
+One event with one id that delivers an amount of each of twelve species into the gut: water, sodium, potassium, chloride, glucose, triglyceride, amino acids, the diet base, calcium, phosphate, magnesium and iron. Each species with an amount arrives as a delivery of its own, into the boundary named for the gut and that species, with an id that comes from the meal's. A meal lands whole and once.
+
+**Drink**:
+Water delivered into the gut, as a meal's water is.
 
 **Waiting input**:
 An admitted event not yet due. No seal or ticket digest covers it, so nothing a core reads carries it until a cut shows it.
@@ -134,7 +160,7 @@ The end of a step at a guard's crossing: a ticket that crosses, and one at most 
 An event whose instant is the start of a step. It is applied when that step is accepted, so a refused step leaves it pending.
 
 **Drive frame**:
-What the boundary supplies over one step, frozen when the step's interval is issued, so a stage at the step's end never reads a delivery that starts there.
+What the boundary supplies over one step, frozen when the step's interval is issued, so a stage at the step's end never reads a delivery that starts there. It holds each delivery's rate, the posture and every lasting input the body reads.
 
 **Causal step rule**:
 A step is the solver's own interval, cut short only at the next breakpoint and blind to anything later, so an event that arrives during the run gives the same bits as the same event known from the start (I5). A waiting input shows only in a cut.
@@ -240,7 +266,7 @@ A bounded space (the skull, the pericardium, the chest, the abdomen, a limb comp
 _Avoid_: pressure wire
 
 **Compliance**:
-How an enclosure's pressure answers the volume inside it: rigid, elastic, or held by a named stand-in.
+How an enclosure's pressure answers the volume inside it: rigid, elastic, or set by the card the map names, through a held stand-in or that card's own law.
 
 **Position**:
 A site's place in the body frame. Posture rotates the frame, so every site's hydrostatic head follows from one place and no law carries gravity.
@@ -292,6 +318,9 @@ Dissolved particles that pull water across a wall that holds them back. A space'
 **Receipt pool**:
 A named pool outside the body, or behind a held stand-in, that takes what crosses the boundary, so a boundary transfer still has two ends.
 
+**Boundary process**:
+A card's way across the body's boundary, such as insulin's secretion, the fecal exit of sodium or the urine drain. The contract states its card, species, direction and name, and the schema places it at a site, so only that card serves it.
+
 **Route family**:
 Every transfer of one kind the map implies: one per site of a class, such as plasma to interstitium at every capillary bed, or one per vascular edge. A system requests it whole through its scope, so the body owes a law for every one, and no law names a site.
 
@@ -315,6 +344,12 @@ The volume one unit amount of a species takes up. A space's volume derives from 
 
 **Coupling field**:
 One value an arrow of the coupling map carries, held as an algebraic row that the map's sender defines and its receiver reads. A per-site field has one row per site.
+
+**Wired field**:
+A coupling field the coupling catalog names with the body ticket whose laws define and read it.
+
+**Held field**:
+A value an arrow of the coupling map names that no law defines or reads at rung 0, so it is no coupling field and no member of its arrow's port. One end of its arrow holds it with a reason, and the catalog keeps its unit, so a later rung can wire it.
 
 **Shared substrate**:
 One of the ten resources the systems share (S1 to S10 in the coupling map), such as the vascular registry, or water and osmoles per space.
@@ -536,6 +571,9 @@ The crates a step's arithmetic runs through: the rows the crate table in `docs/a
 **Fragment**:
 What a system crate declares: its laws, ports, parameter slots, modes and streams, as data the contract compiles. No fragment runs during a solve.
 
+**Scope**:
+What the code's `Assembly` issues each card once while it builds an assembly: the builder its laws are declared on and the ports that grant only what the card owns at rung 0. A card outside the slice is issued fresh, or its scope takes over the builder its held stand-ins wrote to, so it keeps named holds beside its crate's laws.
+
 **Kernel**:
 One law's closed expression graph, built once at declaration from the contract's own operators. It reads no time step, solver, state store or host math.
 _Avoid_: callback
@@ -599,8 +637,14 @@ The arena protocol the picked solver core runs once, the run I19's check needs, 
 **Slice**:
 The systems the arena runs for real: pulsatile cardiovascular, fluids, renal, a minimal nervous baroreflex, the receptor layer and the boundary port, over an arena protocol's span with synthetic values.
 
+**Whole body**:
+All 13 systems, the receptor layer and the boundary, as body ticket 01 plans them at rung 0. Its census accounts for every arrow of the coupling map, field by field.
+
+**Assembly**:
+The set of systems one compiled body holds: the slice or the whole body. Each assembly has its own census. The code's `Assembly` is the builder that issues each card's scope and compiles one body from them: it builds an assembly in this sense and is not one.
+
 **Held stand-in**:
-A system outside the slice, held by a declaration that names every route on which it supplies or removes an amount, so stability bought with held support shows in the certificate.
+A system's laws that stand in for physiology, held by a declaration that names every route on which they supply or remove an amount, so stability bought with held support shows in the certificate. A card outside the slice stands in whole, and a card with a crate keeps only its named holds this way.
 _Avoid_: stub, mock
 
 **Coverage manifest**:
@@ -655,7 +699,7 @@ A deterministic check drawn from the contract's day table that reads one produce
 _Avoid_: body check, judge
 
 **Day plan**:
-The schedule day checks read around: sitting up at 07:00, meals at 07:30, 12:30 and 18:30, lying down to sleep at 23:00 and waking at 06:30, from the 06:55 admission. One plan makes both a run's boundary events and the occurrences its checks read. An event no payload carries yet, such as sleep, leaves its checks not available yet.
+The schedule day checks read around: sitting up at 07:00, meals at 07:30, 12:30 and 18:30, lying down to sleep at 23:00 and waking at 06:30, from the 06:55 admission. One plan makes both a run's boundary events and the occurrences its checks read. The slice reads no sleep, so the plan carries none and the sleep rows stay not available yet. The arena's fixture packet holds no day, so the plan's events reach the port as plain events.
 
 **Beat**:
 The accepted steps from one beat edge to the next, one cardiac cycle of a run. A day check reads each quantity as one mean per beat, timed at its end.
@@ -695,6 +739,9 @@ _Avoid_: chart (for a statechart)
 
 **Coupling map**:
 The atlas's map of how systems affect each other: shared substrates and 38 direct couplings. Not the map of sites.
+
+**Census**:
+How the coupling map's 38 arrows stand in one assembly, the slice or the whole body, counted by the compiler. In the slice an arrow is live, an input, a sink, an anatomy relation, outside or unresolved. In the whole body it is an anatomy relation or names fields, each wired or held, and only a wired field is carried. It is live when it wires one and held when it holds every one, and every arrow is mapped, since a held field's home is its holder.
 
 ## Systems
 

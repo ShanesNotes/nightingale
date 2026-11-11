@@ -3,7 +3,8 @@
 //! values and their provenance; parameters bind to the compiled body by key (`CompiledBody::bind`), so
 //! evaluation sees the values.
 use super::{
-    AdmissionError, Compensated, Digest, Dimensionless, ErrorScales, Measure, PacketHash, PacketSeed, RowKind, Unit,
+    AdmissionError, Compensated, Day, Digest, Dimensionless, ErrorScales, Measure, PacketHash, PacketSeed, RowKind,
+    Unit,
 };
 use core::marker::PhantomData;
 use core::num::{NonZeroU32, NonZeroU64};
@@ -270,14 +271,6 @@ pub struct ParameterPacket<K: PacketKind> {
     _kind: PhantomData<K>,
 }
 impl<K: PacketKind> ParameterPacket<K> {
-    /// A packet whose start state stands at one instant.
-    pub fn new() -> Self {
-        todo!()
-    }
-    /// A packet whose start state returns after `cycle`: the periodic goal.
-    pub fn periodic(_cycle: Cycle) -> Self {
-        todo!()
-    }
     /// How near every row of the admission system must come. The hash covers it, and a packet that states none is
     /// held exactly.
     pub fn within(&mut self, _tolerance: ErrorScales) {
@@ -347,7 +340,28 @@ impl Anchors {
         todo!()
     }
 }
+/// A reviewed packet is made with its day, which its run's boundary events are made from.
+impl ParameterPacket<Reviewed> {
+    pub fn with_day(_day: Day) -> Self {
+        todo!()
+    }
+    pub fn periodic_with_day(_cycle: Cycle, _day: Day) -> Self {
+        todo!()
+    }
+}
 impl ParameterPacket<SyntheticFixture> {
+    /// A packet whose start state stands at one instant.
+    pub fn new() -> Self {
+        todo!()
+    }
+    /// A packet whose start state returns after `cycle`: the periodic goal.
+    pub fn periodic(_cycle: Cycle) -> Self {
+        todo!()
+    }
+    /// A synthetic packet may hold no day; a second day is refused.
+    pub fn day(&mut self, _day: Day) -> Result<(), AdmissionError> {
+        todo!()
+    }
     /// Fixture-only: a dimensioned synthetic design value with no anchor and no citation.
     pub fn synthetic<U>(
         &mut self,

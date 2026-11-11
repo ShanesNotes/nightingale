@@ -10,8 +10,8 @@ use crate::problem::Jacobian;
 use crate::{
     AdmissionError, AnchorId, AnchorStatistic, Book, BoundParameters, BoundaryPort, Candidate, Compensated,
     CompiledBody, ConservedRowId, DenseSegment, Digest, ErrorScales, ImageParts, InitializationProvenance,
-    LawName, Measure, MethodHistory, ModelHash, ObservationLens, PacketHash, QuantityId, Row, RowId, RowKind,
-    SimTime, Slot, Time, UnknownId, ValueName, ValueProvenance, ValueRecord, eliminate,
+    Lasting, LawName, Measure, MethodHistory, ModelHash, ObservationLens, PacketHash, QuantityId, Row, RowId,
+    RowKind, SimTime, Slot, Time, UnknownId, ValueName, ValueProvenance, ValueRecord, eliminate,
 };
 use core::ops::Range;
 
@@ -98,7 +98,7 @@ impl CompiledBody {
         if delivery.at < earliest {
             return Err(AdmissionError::EventBeforeHead { id: delivery.id });
         }
-        if delivery.posture_event() {
+        if delivery.lasting_event() {
             return Ok(());
         }
         let boundaries = &self.layout.schema.boundaries;
@@ -221,7 +221,7 @@ impl CompiledBody {
     /// clock, anchor or period do not agree.
     pub fn initialization<'m>(
         &'m self,
-        parameters: BoundParameters,
+        mut parameters: BoundParameters,
         boundary: BoundaryPort,
         request: InitializationRequest<'_>,
     ) -> Result<InitializationSystem<'m>, AdmissionError> {
@@ -229,6 +229,10 @@ impl CompiledBody {
         if parameters.model != self.model_hash() {
             return Err(AdmissionError::ForeignParameters);
         }
+        let boundary = match parameters.owed.day.take() {
+            Some(day) => boundary.with_day(day, anchor_moment)?,
+            None => boundary,
+        };
         for delivery in &boundary.deliveries {
             self.check_delivery(delivery, anchor_moment)?;
         }
@@ -241,8 +245,10 @@ impl CompiledBody {
                 (vec![start], None, fence)
             }
             Some(cycle) => {
-                if let Some(id) = boundary.off_grid(anchor_moment, cycle) {
-                    return Err(AdmissionError::DeliveryOffGrid { id });
+                let reads_clock = (self.lasting_reads().iter())
+                    .any(|input| matches!(input, Lasting::ClockCosine | Lasting::ClockSine));
+                if let Some(refused) = boundary.off_grid(anchor_moment, cycle, reads_clock) {
+                    return Err(refused);
                 }
                 let step_ns = cycle.step_ns();
                 let instants = (0..cycle.intervals()).map(|point| point * step_ns);
@@ -254,8 +260,11 @@ impl CompiledBody {
             }
         };
         let pending = PendingInputs::opening(boundary, fence);
-        let frame_at = |ns: &u64| pending.frame_at(SimTime::from_ns(*ns));
+        let frame_at = |ns: &u64| pending.frame_at(SimTime::from_ns(*ns), self.lasting_reads());
         let frames: Vec<DriveFrame> = instants.iter().map(frame_at).collect();
+        if let Some(&input) = (self.lasting_reads().iter()).find(|read| !frames[0].states(**read)) {
+            return Err(AdmissionError::InputUnstated { input });
+        }
         let tolerance = parameters.owed.tolerance.unwrap_or(ErrorScales::EXACT);
         let staged = |row: usize| {
             let hazard = (self.layout.hazards.iter()).any(|hazard| hazard.integral.index() == row);

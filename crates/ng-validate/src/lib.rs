@@ -297,8 +297,8 @@ pub use run::{
 };
 pub use score::{ArenaScore, ScorePart};
 pub use slice::{
-    SliceCase, anchor_moment, arena_anatomy, arena_body, arena_lens, arena_organs, arena_packet,
-    arena_schema, arena_seed, hold_outside_slice,
+    SliceCase, anchor_moment, arena_anatomy, arena_body, arena_certificate, arena_lens, arena_organs,
+    arena_packet, arena_schema, arena_seed, hold_outside_slice,
 };
 pub use split::{SplitFailure, draw_split_trace, split_gate};
 pub use window::{Compared, SliceWindow, WindowPolicy};

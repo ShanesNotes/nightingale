@@ -3,13 +3,36 @@ use crate::compile::compile;
 use crate::identity::{Canonical, Seal};
 use crate::law::{Brand, Family, FragmentData, Over, SiteField};
 use crate::{
-    AdmissionError, Anatomy, Blood, Boundary, BoundaryRoute, CapillaryBed, Cardiovascular, CompiledBody,
-    Dimensionless, EdgeRoute, EnclosedSpace, Energy, FilterEdge, Fluids, Fragment, FragmentBuilder,
-    HeatRoute, Junction, LawName, LymphEdge, Makeup, Measure, Nervous, Output, OutsideSlice, Owner, Pair,
-    PartialVolume, Passage, PerSite, Pressure, Quotient, ReadPort, Receptor, ReclaimEdge, Renal, SiteId,
+    AdmissionError, Anatomy, Blood, BloodChemistry, Boundary, BoundaryRoute, CapillaryBed, Cardiovascular,
+    CompiledBody, Dimensionless, EdgeRoute, EnclosedSpace, Endocrine, Energy, FilterEdge, Fluids, Fragment,
+    FragmentBuilder, Gastrointestinal, HeatRoute, Hematology, Hepatic, Immune, Junction, LawName, LymphEdge,
+    Makeup, Measure, Metabolism, Musculoskeletal, Nervous, Output, OutsideSlice, Owner, Pair, PartialVolume,
+    Passage, PerSite, Pressure, Quotient, ReadPort, Receptor, ReclaimEdge, Renal, Respiratory, SiteId,
     SiteRoute, SiteSet, Sites, Species, Substance, TubuleEdge, Urinary, ValveEdge, Wall, Water,
 };
 use core::marker::PhantomData;
+
+mod blood_chemistry;
+mod endocrine;
+mod gastrointestinal;
+mod hematology;
+mod hepatic;
+mod immune;
+mod metabolism;
+mod musculoskeletal;
+mod outside;
+mod processes;
+mod respiratory;
+pub use blood_chemistry::BloodChemistryPorts;
+pub use endocrine::EndocrinePorts;
+pub use gastrointestinal::GastrointestinalPorts;
+pub use hematology::HematologyPorts;
+pub use hepatic::HepaticPorts;
+pub use immune::ImmunePorts;
+pub use metabolism::MetabolismPorts;
+pub use musculoskeletal::MusculoskeletalPorts;
+pub use processes::*;
+pub use respiratory::RespiratoryPorts;
 
 pub(crate) const ENCLOSURE_PRESSURE: &str = "enclosure_pressure";
 const BLOOD_PRESSURE: &str = "blood pressure";
@@ -32,6 +55,7 @@ pub(crate) struct RouteBoundary {
     pub(crate) direction: BoundaryDirection,
     pub(crate) pool: PoolRef,
     pub(crate) drains: bool,
+    pub(crate) owner: Option<&'static str>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BoundaryDirection {
@@ -102,6 +126,7 @@ impl Schema {
             direction,
             pool,
             drains,
+            owner: None,
         })
     }
 
@@ -115,6 +140,19 @@ impl Schema {
             direction: BoundaryDirection::OutOfBody,
             pool,
             drains: true,
+            owner: None,
+        })
+    }
+
+    /// Places one card's boundary process at a pool. Refuses a name declared twice.
+    pub fn process<P: BoundaryProcess>(&mut self, site: SiteId, space: Space) -> Result<(), AdmissionError> {
+        let species = <P::Quantity as Substance>::SPECIES;
+        self.named(RouteBoundary {
+            name: P::NAME,
+            direction: P::DIRECTION,
+            pool: PoolRef { site, space, species },
+            drains: P::DRAINS,
+            owner: Some(<P::Card as Owner>::CARD),
         })
     }
 
@@ -226,6 +264,7 @@ impl Seal for Schema {
             direction,
             pool: PoolRef { site, space, species },
             drains,
+            owner,
         } in boundaries
         {
             out.text(name);
@@ -234,6 +273,10 @@ impl Seal for Schema {
             out.number(*space as u64);
             out.number(*species as u64);
             out.number(u64::from(*drains));
+            if let Some(card) = owner {
+                out.number(u64::MAX);
+                out.text(card);
+            }
         }
         partial_volume.as_ref().map(Measure::bits).seal(out);
         let mut left_out = left_out.clone();
@@ -340,17 +383,19 @@ impl<'b> Assembly<'b> {
             },
         })
     }
-    fn boundary_names(&self) -> Vec<(&'static str, Species)> {
-        self.schema
-            .boundaries
-            .iter()
+    fn boundary_names(&self, offered: impl Fn(&RouteBoundary) -> bool) -> Vec<(&'static str, Species)> {
+        (self.schema.boundaries.iter())
+            .filter(|boundary| offered(boundary))
             .map(|boundary| (boundary.name, boundary.pool.species))
             .collect()
     }
     pub fn renal(&mut self) -> Result<RenalScope<'b>, AdmissionError> {
         Ok(RenalScope {
             laws: self.issue()?,
-            ports: RenalPorts { brand: PhantomData },
+            ports: RenalPorts {
+                processes: self.processes_of::<Renal>(&[]),
+                brand: PhantomData,
+            },
         })
     }
     pub fn receptor(&mut self) -> Result<ReceptorScope<'b>, AdmissionError> {
@@ -363,17 +408,17 @@ impl<'b> Assembly<'b> {
         Ok(BoundaryScope {
             laws: self.issue()?,
             ports: BoundaryPorts {
-                names: self.boundary_names(),
+                names: self.boundary_names(|known| known.owner.is_none()),
                 brand: PhantomData,
             },
         })
     }
-    /// Refuses a route the schema does not name, and one another card declared.
+    /// Refuses a route the schema does not name, one another card declared, and another card's boundary process.
     pub fn hold<S: OutsideSlice>(
         &mut self,
         declaration: HeldDeclaration<S>,
     ) -> Result<HeldScope<'b, S>, AdmissionError> {
-        let names = self.boundary_names();
+        let names = self.boundary_names(|_| true);
         let HeldDeclaration {
             mut supplies,
             mut holds,
@@ -391,16 +436,14 @@ impl<'b> Assembly<'b> {
             if self.held.iter().any(|held| held.supplies.contains(&name)) {
                 return Err(AdmissionError::BoundaryNamedTwice { name });
             }
+            if (self.schema.boundaries.iter())
+                .any(|known| known.name == name && known.owner.is_some_and(|card| card != S::CARD))
+            {
+                return Err(AdmissionError::BoundaryNamedTwice { name });
+            }
         }
-        let mut laws: FragmentBuilder<'b, S> = self.issue()?;
-        if self
-            .schema
-            .anatomy
-            .held_enclosures()
-            .any(|(_, card)| card == S::CARD)
-        {
-            laws.owe_enclosure_pressure();
-        }
+        let offered = self.boundary_names(|known| known.owner.is_none() || supplies.contains(&known.name));
+        let laws = self.issue_outside::<S>()?;
         self.held.push(HeldCard {
             card: S::CARD,
             supplies,
@@ -411,7 +454,7 @@ impl<'b> Assembly<'b> {
             laws,
             ports: HeldPorts {
                 enclosure_pressure: Output::named(ENCLOSURE_PRESSURE),
-                names,
+                names: offered,
                 brand: PhantomData,
             },
         })
@@ -466,6 +509,15 @@ scope!(FluidsScope, Fluids, FluidsPorts);
 scope!(NervousScope, Nervous, NervousPorts);
 scope!(RenalScope, Renal, RenalPorts);
 scope!(ReceptorScope, Receptor, ReceptorPorts);
+scope!(RespiratoryScope, Respiratory, RespiratoryPorts);
+scope!(HepaticScope, Hepatic, HepaticPorts);
+scope!(GastrointestinalScope, Gastrointestinal, GastrointestinalPorts);
+scope!(EndocrineScope, Endocrine, EndocrinePorts);
+scope!(BloodChemistryScope, BloodChemistry, BloodChemistryPorts);
+scope!(HematologyScope, Hematology, HematologyPorts);
+scope!(ImmuneScope, Immune, ImmunePorts);
+scope!(MetabolismScope, Metabolism, MetabolismPorts);
+scope!(MusculoskeletalScope, Musculoskeletal, MusculoskeletalPorts);
 
 fn named_route<'b, Q: Substance, O>(
     names: &[(&'static str, Species)],
@@ -474,6 +526,15 @@ fn named_route<'b, Q: Substance, O>(
     match names.iter().find(|known| known.0 == name) {
         Some(known) if known.1 == Q::SPECIES => Ok(BoundaryRoute::named(name)),
         _ => Err(AdmissionError::UnknownBoundary { name }),
+    }
+}
+fn process_route<'b, P: BoundaryProcess>(
+    processes: &[&'static str],
+) -> Result<BoundaryRoute<'b, P::Quantity, P::Card>, AdmissionError> {
+    if processes.contains(&P::NAME) {
+        Ok(BoundaryRoute::named(P::NAME))
+    } else {
+        Err(AdmissionError::UnknownBoundary { name: P::NAME })
     }
 }
 fn effect<'b, O, C: SiteSet, Q: Substance>() -> ReadPort<'b, O, PerSite<C, Dimensionless>> {
@@ -488,7 +549,8 @@ pub struct BoundaryPorts<'b> {
     brand: Brand<'b>,
 }
 impl<'b> BoundaryPorts<'b> {
-    /// The schema boundary's pair and drive. Refuses a name the schema does not declare for `Q`.
+    /// The schema boundary's pair and drive. Refuses a name the schema does not declare for `Q`, and a card's boundary
+    /// process.
     pub fn route<Q: Substance>(&self, name: &'static str) -> Result<BoundaryRoute<'b, Q>, AdmissionError> {
         named_route(&self.names, name)
     }
@@ -649,6 +711,7 @@ impl<'b> NervousPorts<'b> {
     }
 }
 pub struct RenalPorts<'b> {
+    processes: Vec<&'static str>,
     brand: Brand<'b>,
 }
 impl<'b> RenalPorts<'b> {
@@ -697,6 +760,12 @@ impl<'b> RenalPorts<'b> {
     pub fn effect<Q: Substance>(&self) -> ReadPort<'b, Renal, PerSite<Blood, Dimensionless>> {
         effect::<_, _, Q>()
     }
+    /// The route of a boundary process the renal card owns. Refuses one the schema does not place.
+    pub fn boundary<P: BoundaryProcess<Card = Renal>>(
+        &self,
+    ) -> Result<BoundaryRoute<'b, P::Quantity, Renal>, AdmissionError> {
+        process_route::<P>(&self.processes)
+    }
 }
 pub struct ReceptorPorts<'b> {
     brand: Brand<'b>,
@@ -732,8 +801,8 @@ pub struct HeldDeclaration<S> {
     card: PhantomData<S>,
 }
 impl<S: OutsideSlice> HeldDeclaration<S> {
-    /// `supplies` names every route this card moves water on. `holds` names the spaces whose pools it stands
-    /// behind: no law moves them, and a held enclosure's own fluid needs no entry.
+    /// `supplies` names every boundary route its stand-ins serve. `holds` names the spaces whose pools it stands
+    /// behind: no law moves them, and the fluid of an enclosure the map names this card on needs no entry.
     pub fn new(supplies: Vec<&'static str>, holds: Vec<Space>, validity: &'static str) -> Self {
         Self {
             supplies,
@@ -788,7 +857,23 @@ impl Seal for HeldCard {
     }
 }
 
-/// Issued once per assembly, for a card outside the slice.
+/// Issued once per assembly, for a card outside the slice. It stands in whole (`parts`), or it keeps the named holds
+/// of a card with a crate: its stand-ins write through `stand_ins`, then the card's scope method takes the builder over.
+/// A held scope goes only to its own card's scope.
+/// ```compile_fail,E0308
+/// use ng_contract::*;
+/// fn crossed<'b>(body: &mut Assembly<'b>, held: HeldScope<'b, Gastrointestinal>)
+///     -> Result<RespiratoryScope<'b>, AdmissionError> {
+///     body.respiratory(Some(held))
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn kept<'b>(body: &mut Assembly<'b>, held: HeldScope<'b, Respiratory>)
+///     -> Result<RespiratoryScope<'b>, AdmissionError> {
+///     body.respiratory(Some(held))
+/// }
+/// ```
 pub struct HeldScope<'b, S> {
     laws: FragmentBuilder<'b, S>,
     ports: HeldPorts<'b, S>,
@@ -796,6 +881,9 @@ pub struct HeldScope<'b, S> {
 impl<'b, S: OutsideSlice> HeldScope<'b, S> {
     pub fn parts(self) -> (FragmentBuilder<'b, S>, HeldPorts<'b, S>) {
         (self.laws, self.ports)
+    }
+    pub fn stand_ins(&mut self) -> (&mut FragmentBuilder<'b, S>, &HeldPorts<'b, S>) {
+        (&mut self.laws, &self.ports)
     }
 }
 pub struct HeldPorts<'b, S> {
@@ -805,8 +893,105 @@ pub struct HeldPorts<'b, S> {
     brand: Brand<'b>,
 }
 impl<'b, S> HeldPorts<'b, S> {
-    /// Refuses a name the schema does not declare for `Q`. Compile refuses a law on a route the declaration omits.
+    /// Refuses a name the schema does not declare for `Q`, and a boundary process the declaration does not supply.
+    /// Compile refuses a law on a route the declaration omits.
     pub fn route<Q: Substance>(&self, name: &'static str) -> Result<BoundaryRoute<'b, Q, S>, AdmissionError> {
         named_route(&self.names, name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::processes::TABLE;
+
+    #[test]
+    fn every_boundary_process_has_a_name_of_its_own() {
+        let mut names: Vec<&str> = TABLE.iter().map(|process| process.0).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), TABLE.len());
+    }
+
+    #[test]
+    fn each_boundary_process_keeps_its_card_species_direction_and_drain() {
+        use crate::BoundaryDirection::{IntoBody, OutOfBody};
+        use crate::Species::*;
+        let pinned = [
+            ("insulin secretion", "EN", Insulin, IntoBody, false),
+            ("insulin clearance", "EN", Insulin, OutOfBody, false),
+            ("glucagon secretion", "EN", Glucagon, IntoBody, false),
+            ("glucagon clearance", "EN", Glucagon, OutOfBody, false),
+            ("renin secretion", "EN", Renin, IntoBody, false),
+            ("renin clearance", "EN", Renin, OutOfBody, false),
+            ("angiotensin II made", "EN", AngiotensinII, IntoBody, false),
+            ("angiotensin II clearance", "EN", AngiotensinII, OutOfBody, false),
+            ("aldosterone secretion", "EN", Aldosterone, IntoBody, false),
+            ("aldosterone clearance", "EN", Aldosterone, OutOfBody, false),
+            (
+                "natriuretic peptide secretion",
+                "EN",
+                NatriureticPeptide,
+                IntoBody,
+                false,
+            ),
+            (
+                "natriuretic peptide clearance",
+                "EN",
+                NatriureticPeptide,
+                OutOfBody,
+                false,
+            ),
+            (
+                "parathyroid hormone secretion",
+                "EN",
+                ParathyroidHormone,
+                IntoBody,
+                false,
+            ),
+            (
+                "parathyroid hormone clearance",
+                "EN",
+                ParathyroidHormone,
+                OutOfBody,
+                false,
+            ),
+            ("cortisol secretion", "EN", Cortisol, IntoBody, false),
+            ("cortisol clearance", "EN", Cortisol, OutOfBody, false),
+            ("vasopressin secretion", "EN", Vasopressin, IntoBody, false),
+            ("vasopressin clearance", "EN", Vasopressin, OutOfBody, false),
+            ("insulin first pass", "HP", Insulin, OutOfBody, false),
+            ("albumin synthesis", "HP", Albumin, IntoBody, false),
+            ("albumin loss", "HP", Albumin, OutOfBody, false),
+            ("fixed acid made", "HP", FixedAcid, IntoBody, false),
+            ("hemoglobin production", "HC", Hemoglobin, IntoBody, false),
+            ("hemoglobin destruction", "HC", Hemoglobin, OutOfBody, false),
+            ("feces water", "GI", Water, OutOfBody, false),
+            ("feces sodium", "GI", Sodium, OutOfBody, false),
+            ("feces potassium", "GI", Potassium, OutOfBody, false),
+            ("feces chloride", "GI", Chloride, OutOfBody, false),
+            ("feces glucose", "GI", Glucose, OutOfBody, false),
+            ("feces triglyceride", "GI", Triglyceride, OutOfBody, false),
+            ("feces amino acids", "GI", AminoAcids, OutOfBody, false),
+            ("feces calcium", "GI", Calcium, OutOfBody, false),
+            ("feces phosphate", "GI", Phosphate, OutOfBody, false),
+            ("feces magnesium", "GI", Magnesium, OutOfBody, false),
+            ("feces iron", "GI", Iron, OutOfBody, false),
+            ("skin evaporation", "MT", Water, OutOfBody, false),
+            ("sweat water", "MT", Water, OutOfBody, false),
+            ("sweat sodium", "MT", Sodium, OutOfBody, false),
+            ("sweat chloride", "MT", Chloride, OutOfBody, false),
+            ("dry heat loss", "MT", Energy, OutOfBody, false),
+            ("skin evaporative heat", "MT", Energy, OutOfBody, false),
+            ("inspired oxygen", "RS", Oxygen, IntoBody, false),
+            ("inspired carbon dioxide", "RS", CarbonDioxide, IntoBody, false),
+            ("inspired nitrogen gas", "RS", NitrogenGas, IntoBody, false),
+            ("expired oxygen", "RS", Oxygen, OutOfBody, false),
+            ("expired carbon dioxide", "RS", CarbonDioxide, OutOfBody, false),
+            ("expired nitrogen gas", "RS", NitrogenGas, OutOfBody, false),
+            ("expired water", "RS", Water, OutOfBody, false),
+            ("airway heat", "RS", Energy, OutOfBody, false),
+            ("urine", "RN", Water, OutOfBody, true),
+        ];
+        assert_eq!(TABLE, &pinned[..]);
     }
 }

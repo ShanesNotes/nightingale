@@ -23,4 +23,4 @@ The per-interval statistic is blind to slow drift. Suppose a core's error is sma
 - [ ] A mutant row holds it, with a test inside 40-mutants' 420 s budget.
 - [ ] §7's lines on the window change only as much as the new rule needs.
 
-**Non-goals:** the energy drift limit stays unset (ticket 28's residual: +0.81% of inflow over the first 30 s, −2.2/s over 120 s). No widened window distances, no changed margins.
+**Non-goals:** the synthetic energy drift limit, 2e5 since ticket 28, does not change here (ticket 28's residual on the working core, `ng_solver::Core::new`: +0.96% of inflow over the first 30 s, +5.8/s over 120 s). No widened window distances, no changed margins.

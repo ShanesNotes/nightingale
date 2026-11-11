@@ -6,7 +6,7 @@ Type: task
 
 Status: resolved
 
-Blocked by: the statecharts PR (agreed order: statechart first). The runs this ticket enables also need a synthetic 24 h energy drift limit for the slice fixture (`.scratch/foundation/issues/01-arena-and-milestone.md`, comments from native-contract 24): until it exists every core fails the certificate on energy, so no scored run starts before it.
+Blocked by: the statecharts PR (agreed order: statechart first). The runs this ticket enables also need a synthetic 24 h energy drift limit for the slice fixture (`.scratch/foundation/issues/01-arena-and-milestone.md`, comments from native-contract 24): until it exists every core fails the certificate on energy, so no scored run starts before it. It exists since nightingale#134, which set 2e5 for energy (native-contract 28).
 
 Decided (Shane, 2026-11-07): the arena picks a core from the short gates plus one 24 h run, then the winner runs 48 h once as the evidence for SRS invariant I19 (record 0004). The 48 h run stops being a gate every seat pays.
 

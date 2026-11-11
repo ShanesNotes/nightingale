@@ -1,6 +1,6 @@
 use crate::{
-    AnatomyDefect, AnchorId, Binding, Book, Digest, InputId, LawName, ModeValue, ParameterKey, Predicate,
-    QuantityId, RowId, RowKind, SimTime, SiteId, Slot, SourceId, Space, Species,
+    AnatomyDefect, AnchorId, Binding, Book, Digest, InputId, Lasting, LawName, ModeValue, ParameterKey,
+    Predicate, QuantityId, RowId, RowKind, SimTime, SiteId, Slot, SourceId, Space, Species,
 };
 
 /// A refusal at a construction call, at `AnatomyBuilder::finish`, at `Assembly::compile`, or at admission.
@@ -215,10 +215,27 @@ pub enum AdmissionError {
         key: ParameterKey,
         binding: Binding,
     },
-    /// A delivery that starts or ends between two points of the cycle.
     DeliveryOffGrid {
         id: InputId,
     },
+    ClockOffGrid {
+        id: InputId,
+    },
+    ClockOutOfRange {
+        id: InputId,
+    },
+    RoomOutOfRange {
+        id: InputId,
+    },
+    InputUnstated {
+        input: Lasting,
+    },
+    /// A delivery of the packet's day that starts before the anchor moment and ends after it, so admission would
+    /// read only its end.
+    DeliveryAcrossAdmission {
+        id: InputId,
+    },
+    DuplicateDay,
     /// Parameters bound on another compiled body.
     ForeignParameters,
     /// A workspace from another compiled body, or of another shape.
@@ -373,6 +390,9 @@ pub enum CompileDefect {
     /// A read of the drive of a route the law's card does not own, or a route's law that reads another
     /// route's drive and would carry its delivery down the wrong route.
     DriveOfAnotherRoute { law: LawName, route: &'static str },
+    /// A law that reads a lasting input of the day and no parameter or memory slot. An input scales a gain or a set
+    /// point and never sets a produced quantity.
+    UnscaledInput { law: LawName },
     /// A space a held card answers for that has no pool in this body.
     HeldNothing { card: &'static str, space: Space },
     PoolHeldTwice {

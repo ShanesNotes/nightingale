@@ -236,15 +236,24 @@
 //! fn morning(meal_schema: Digest) -> Result<BoundaryPort, AdmissionError> {
 //!     let at = |minutes: u64| SimTime::from_ns(minutes * 60_000_000_000);
 //!     let id = |name: &[u8]| InputId::new(Digest::of_canonical(name));
-//!     let day = ClockPhase::new(0, 86_400_000_000_000)?;
-//!     let room = Environment::new(1.0, 1.0, 0.5, 0.0, 1.0, 1.0, 1.0, vec![1.0])?; // synthetic
+//!     let clock = Clock { since_midnight_ns: 0 };
+//!     let room = Room { // synthetic
+//!         air: Measure::new(1.0)?,
+//!         radiant: Measure::new(1.0)?,
+//!         humidity: Measure::new(0.5)?,
+//!         air_speed: Measure::new(1.0)?,
+//!         pressure: Measure::new(1.0)?,
+//!         oxygen: Measure::new(0.5)?,
+//!         carbon_dioxide: Measure::new(0.0)?,
+//!         clothing: Measure::new(1.0)?,
+//!     };
 //!     let seated = Posture::new(1.0, Legs::SeatedDependent)?;
 //!     let meal = Composition::new(meal_schema, vec![1.0, 1.0])?; // synthetic, not physiological
 //!     let breakfast = Intake::new(IntakeRoute::Oral, meal, Delivery::Continuous { ends: at(65) });
 //!     BoundaryPort::new(vec![
-//!         BoundaryEvent::new(id(b"clock"), at(0), BoundaryInput::Clock(day)),
-//!         BoundaryEvent::new(id(b"room"), at(0), BoundaryInput::Environment(room)),
-//!         BoundaryEvent::new(id(b"awake"), at(0), BoundaryInput::Sleep(SleepState::Awake)),
+//!         BoundaryEvent::new(id(b"clock"), at(0), BoundaryInput::Clock(clock)),
+//!         BoundaryEvent::new(id(b"room"), at(0), BoundaryInput::Room(room)),
+//!         BoundaryEvent::new(id(b"awake"), at(0), BoundaryInput::Sleep(Sleep::Awake)),
 //!         BoundaryEvent::new(id(b"sit"), at(5), BoundaryInput::Posture(seated)),
 //!         BoundaryEvent::new(id(b"breakfast"), at(35), BoundaryInput::Intake(breakfast)),
 //!     ])

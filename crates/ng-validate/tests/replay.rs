@@ -2254,3 +2254,380 @@ fn late_inputs_match_the_known_timeline_on_random_timelines() {
         "{honest} and {hashed} rows compared"
     );
 }
+
+const MINUTE: u64 = 60 * SECOND;
+const HOUR: u64 = 60 * MINUTE;
+
+macro_rules! follows {
+    ($laws:ident, $gain:ident, $wave:ident, $name:literal, $unit:ty, |$k:ident| $read:expr) => {
+        let slot = $laws.algebraic::<$unit>($name, Admissible::finite());
+        let residual = $laws.kernel(|mut $k| {
+            let value = $read;
+            let gain = $k.parameter(&$gain);
+            let target = $k.scale(value, gain);
+            let now = $k.algebraic(&slot);
+            let residual = $k.subtract(now, target);
+            $k.finish(residual, $laws.every_mode(), $wave)
+        });
+        $laws.residual(&slot, residual);
+    };
+}
+
+/// A slot for each lasting input of the day, and a memory that relaxes toward the clock's cosine, so the state
+/// moves within each minute and every lasting value lands in the bits.
+fn day_body() -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let origin = || Position::new(measure(0.0), measure(0.0), measure(0.0));
+    let root = map.site::<TissueSite>("body", origin());
+    let gut = map.site::<VesselSegment>("gut", origin());
+    map.contain(root.id(), gut.id());
+    let gut = gut.id();
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.boundary::<Water>("gut water", BoundaryDirection::IntoBody, gut, Space::Lumen)?;
+    schema.pool::<Sodium>(gut, Space::Lumen)?;
+    schema.boundary::<Sodium>("gut sodium", BoundaryDirection::IntoBody, gut, Space::Lumen)?;
+    schema.pool::<Glucose>(gut, Space::Lumen)?;
+    schema.boundary::<Glucose>("gut glucose", BoundaryDirection::IntoBody, gut, Space::Lumen)?;
+    schema.pool::<Iron>(gut, Space::Lumen)?;
+    schema.boundary::<Iron>("gut iron", BoundaryDirection::IntoBody, gut, Space::Lumen)?;
+    assemble(schema, |mut body| {
+        let (mut laws, ports) = body.boundary()?.parts();
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
+        eaten::<Water>(&mut laws, &ports, "gut water", wave)?;
+        eaten::<Sodium>(&mut laws, &ports, "gut sodium", wave)?;
+        eaten::<Glucose>(&mut laws, &ports, "gut glucose", wave)?;
+        eaten::<Iron>(&mut laws, &ports, "gut iron", wave)?;
+        body.add(laws.finish());
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let gain = laws.parameter::<Dimensionless>(ParameterKey::new("ns.gain"), Admissible::positive());
+        let speed =
+            laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.speed"), Admissible::positive());
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
+        follows!(laws, gain, wave, "clock cosine", Dimensionless, |k| k.clock().0);
+        follows!(laws, gain, wave, "clock sine", Dimensionless, |k| k.clock().1);
+        follows!(laws, gain, wave, "sleep", Dimensionless, |k| k.asleep());
+        follows!(laws, gain, wave, "void", Dimensionless, |k| k.voiding());
+        follows!(laws, gain, wave, "air", Temperature, |k| k.room_air());
+        follows!(laws, gain, wave, "radiant", Temperature, |k| k.room_radiant());
+        follows!(laws, gain, wave, "humidity", Dimensionless, |k| k.room_humidity());
+        follows!(laws, gain, wave, "air speed", Dimensionless, |k| k
+            .room_air_speed());
+        follows!(laws, gain, wave, "pressure", Pressure, |k| k.room_pressure());
+        follows!(laws, gain, wave, "oxygen", Dimensionless, |k| k.inspired_oxygen());
+        follows!(laws, gain, wave, "carbon dioxide", Dimensionless, |k| k
+            .inspired_carbon_dioxide());
+        follows!(laws, gain, wave, "clothing", Dimensionless, |k| k.clothing());
+        let lag = laws.state::<Dimensionless>("lag", Admissible::finite());
+        let rate = laws.kernel(|mut k| {
+            let (cosine, _) = k.clock();
+            let gain = k.parameter(&gain);
+            let target = k.scale(cosine, gain);
+            let now = k.state(&lag);
+            let speed = k.parameter(&speed);
+            let rate = k.relax(target, now, speed);
+            k.finish(rate, laws.every_mode(), wave)
+        });
+        laws.memory_rate(&lag, rate);
+        body.add(laws.finish());
+        body.compile()
+    })
+}
+
+fn eaten<'b, Q: Substance>(
+    laws: &mut FragmentBuilder<'b, Boundary>,
+    ports: &BoundaryPorts<'b>,
+    name: &'static str,
+    wave: RateClass,
+) -> Result<(), AdmissionError> {
+    let BoundaryRoute { route, drive } = ports.route::<Q>(name)?;
+    let rate = laws.kernel(|mut k| {
+        let value = k.read(&drive);
+        k.finish(value, laws.every_mode(), wave)
+    });
+    laws.transfer(Transfer::new(&route, rate));
+    Ok(())
+}
+
+fn room(values: [f64; 8]) -> BoundaryInput {
+    let [
+        air,
+        radiant,
+        humidity,
+        air_speed,
+        pressure,
+        oxygen,
+        carbon_dioxide,
+        clothing,
+    ] = values;
+    BoundaryInput::Room(Room {
+        air: measure(air),
+        radiant: measure(radiant),
+        humidity: measure(humidity),
+        air_speed: measure(air_speed),
+        pressure: measure(pressure),
+        oxygen: measure(oxygen),
+        carbon_dioxide: measure(carbon_dioxide),
+        clothing: measure(clothing),
+    })
+}
+
+fn lasting(id: &[u8], seconds: u64, payload: BoundaryInput) -> BoundaryEvent {
+    BoundaryEvent::new(InputId::new(Digest::of_canonical(id)), at(seconds), payload)
+}
+
+/// Synthetic values. Six in the morning is a quarter turn past midnight, so the clock's start is exact.
+const STATED: [(&str, f64); 12] = [
+    ("clock cosine", 0.0),
+    ("clock sine", 1.0),
+    ("sleep", 0.0),
+    ("void", 0.0),
+    ("air", 307.0),
+    ("radiant", 308.0),
+    ("humidity", 0.15),
+    ("air speed", 2.0),
+    ("pressure", 765.0),
+    ("oxygen", 0.4),
+    ("carbon dioxide", 0.03),
+    ("clothing", 0.9),
+];
+
+fn lunch() -> Meal {
+    Meal::new(at(140))
+        .with(measure::<Water>(60.0))
+        .with(measure::<Sodium>(6.0))
+        .with(measure::<Glucose>(3.0))
+        .with(measure::<Iron>(0.6))
+}
+
+struct DayInputs {
+    body: CompiledBody,
+    in_the_packet: bool,
+}
+impl DayInputs {
+    fn new() -> Self {
+        Self {
+            body: day_body().expect("a body"),
+            in_the_packet: false,
+        }
+    }
+    fn in_the_packet() -> Self {
+        Self {
+            in_the_packet: true,
+            ..Self::new()
+        }
+    }
+    fn stated() -> Vec<BoundaryEvent> {
+        vec![
+            lasting(
+                b"clock at six",
+                0,
+                BoundaryInput::Clock(Clock {
+                    since_midnight_ns: 6 * HOUR,
+                }),
+            ),
+            lasting(b"awake", 0, BoundaryInput::Sleep(Sleep::Awake)),
+            lasting(b"shut", 0, BoundaryInput::Void(Gate::Shut)),
+            lasting(b"room", 0, room([307.0, 308.0, 0.15, 2.0, 765.0, 0.4, 0.03, 0.9])),
+        ]
+    }
+    fn packet(&self) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+        let mut packet = ParameterPacket::new();
+        packet.synthetic(
+            ParameterKey::new("ns.gain"),
+            Binding::Body,
+            measure::<Dimensionless>(1.0),
+            "synthetic",
+        )?;
+        let speed = measure::<Rate<Dimensionless>>(0.05);
+        packet.synthetic(ParameterKey::new("ns.speed"), Binding::Body, speed, "synthetic")?;
+        let slot = |local| RowKind::Algebraic(LawName { owner: "NS", local }.into());
+        for (local, value) in STATED {
+            match local {
+                "air" | "radiant" => packet.start(slot(local), measure::<Temperature>(value), "synthetic")?,
+                "pressure" => packet.start(slot(local), measure::<Pressure>(value), "synthetic")?,
+                _ => packet.start(slot(local), measure::<Dimensionless>(value), "synthetic")?,
+            }
+        }
+        let lag = RowKind::Memory(
+            LawName {
+                owner: "NS",
+                local: "lag",
+            }
+            .into(),
+        );
+        packet.start(lag, measure::<Dimensionless>(0.5), "synthetic")?;
+        let gut = self.body.rows().iter().find_map(|row| match row.kind() {
+            RowKind::Amount { site, .. } => Some(site),
+            _ => None,
+        });
+        let amount = |species| RowKind::Amount {
+            site: gut.expect("a gut"),
+            space: Space::Lumen,
+            species,
+        };
+        packet.start(amount(Species::Water), measure::<Water>(100.0), "synthetic")?;
+        packet.start(amount(Species::Sodium), measure::<Sodium>(14.0), "synthetic")?;
+        packet.start(amount(Species::Glucose), measure::<Glucose>(5.0), "synthetic")?;
+        packet.start(amount(Species::Iron), measure::<Iron>(0.01), "synthetic")?;
+        Ok(packet)
+    }
+}
+impl ReplayCase for DayInputs {
+    fn body(&self) -> &CompiledBody {
+        &self.body
+    }
+    fn end(&self) -> SimTime {
+        at(210)
+    }
+    fn events(&self) -> Result<Vec<BoundaryEvent>, AdmissionError> {
+        Ok(vec![
+            lasting(b"asleep", 40, BoundaryInput::Sleep(Sleep::Nrem)),
+            lasting(
+                b"warmer",
+                50,
+                room([305.0, 303.0, 0.7, 6.0, 770.0, 0.3, 0.06, 0.2]),
+            ),
+            lasting(b"open", 70, BoundaryInput::Void(Gate::Open)),
+            lasting(b"shut again", 100, BoundaryInput::Void(Gate::Shut)),
+            lasting(b"lunch", 80, BoundaryInput::Meal(lunch())),
+            lasting(
+                b"clock before midnight",
+                130,
+                BoundaryInput::Clock(Clock {
+                    since_midnight_ns: 24 * HOUR - 10 * SECOND,
+                }),
+            ),
+        ])
+    }
+    fn admit<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
+    ) -> Result<Session<'m, Running>, InitializationFailure> {
+        let mut events = Self::stated();
+        events.extend(self.events()?);
+        let mut packet = self.packet()?;
+        if self.in_the_packet {
+            packet.day(Day::new(events)?)?;
+            return admit_fixture(&self.body, packet, BoundaryPort::new(Vec::new())?, core, store);
+        }
+        admit_fixture(&self.body, packet, BoundaryPort::new(events)?, core, store)
+    }
+    fn admit_withheld<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
+    ) -> Result<Session<'m, Running>, InitializationFailure> {
+        admit_fixture(
+            &self.body,
+            self.packet()?,
+            BoundaryPort::new(Self::stated())?,
+            core,
+            store,
+        )
+    }
+}
+
+#[test]
+fn the_days_lasting_inputs_and_a_meal_pass_late_admission_pause_and_resume() {
+    let case = DayInputs::new();
+    let clock = script();
+    let plan = plan(&clock);
+    for gate in [ReplayGate::LateAdmission, ReplayGate::Pace, ReplayGate::Resume] {
+        let evidence = replay_gate(gate, &case, &|| reference(8 * SECOND), &plan).expect("the gate");
+        assert!(
+            evidence.runs().len() >= 2,
+            "{gate:?} compared {} runs",
+            evidence.runs().len()
+        );
+    }
+}
+
+/// What a record shows of a run but its ledger, whose links seal the packet's hash, and what still waits.
+fn state_bits(session: &Session<'_, Running>) -> [Digest; 6] {
+    let RecordDigests {
+        state,
+        continuation,
+        segment,
+        modes,
+        streams,
+        applied,
+        ..
+    } = session.record().digests();
+    [state, continuation, segment, modes, streams, applied]
+}
+
+#[test]
+fn a_day_the_packet_holds_gives_the_bits_of_its_events_admitted_late() {
+    let case = DayInputs::in_the_packet();
+    let (core, store) = (reference(8 * SECOND), MemoryStore::default());
+    let mut known = case.admit(&core, &store).expect("admitted");
+    let mut rows = vec![(known.record().accepted().time(), state_bits(&known))];
+    let mut stamps = vec![known.record().earliest_stamp()];
+    while known.record().accepted().time() < case.end() {
+        known = advance(known);
+        rows.push((known.record().accepted().time(), state_bits(&known)));
+        stamps.push(known.record().earliest_stamp());
+    }
+    let mut arrivals: Vec<(usize, BoundaryEvent)> = (case.events().expect("events").into_iter())
+        .map(|event| {
+            (
+                stamps.iter().rposition(|stamp| *stamp < event.at()).unwrap_or(0),
+                event,
+            )
+        })
+        .collect();
+    arrivals.sort_by_key(|arrival| arrival.0);
+    assert!(
+        arrivals.iter().any(|arrival| arrival.0 > 0),
+        "an event arrives after a step"
+    );
+    let (late_core, late_store) = (reference(8 * SECOND), MemoryStore::default());
+    let mut late = case.admit_withheld(&late_core, &late_store).expect("admitted");
+    let mut seen = vec![(late.record().accepted().time(), state_bits(&late))];
+    for (revision, event) in arrivals {
+        while seen.len() <= revision {
+            late = advance(late);
+            seen.push((late.record().accepted().time(), state_bits(&late)));
+        }
+        let input = AuthorizedInput::from_command_receipt(Digest::of_canonical(b"a command"), event);
+        late.enqueue(input).expect("a head that still takes it");
+    }
+    while late.record().accepted().time() < case.end() {
+        late = advance(late);
+        seen.push((late.record().accepted().time(), state_bits(&late)));
+    }
+    assert_eq!(seen, rows, "every revision, by its state bits");
+    assert_eq!(late.record().digests().waiting, known.record().digests().waiting);
+    assert_ne!(late.record().seal(), known.record().seal());
+}
+
+#[test]
+fn a_run_whose_packet_holds_its_day_survives_a_resume() {
+    let case = DayInputs::in_the_packet();
+    let clock = script();
+    let plan = plan(&clock);
+    let evidence =
+        replay_gate(ReplayGate::Resume, &case, &|| reference(8 * SECOND), &plan).expect("the gate");
+    assert!(evidence.runs().len() >= 2, "{} runs", evidence.runs().len());
+}
+
+#[test]
+fn a_step_never_crosses_the_minute_of_a_clock_the_body_reads() {
+    let case = DayInputs::new();
+    let (core, store) = (reference(8 * SECOND), MemoryStore::default());
+    let mut session = case.admit(&core, &store).expect("admitted");
+    let edges = [60, 120, 140, 200].map(at);
+    let mut steps = 0;
+    while session.record().accepted().time() < case.end() {
+        let start = session.record().accepted().time();
+        session = advance(session);
+        let end = session.record().accepted().time();
+        assert!(
+            !edges.iter().any(|edge| start < *edge && *edge < end),
+            "{start:?} to {end:?}"
+        );
+        steps += 1;
+    }
+    assert!(steps > edges.len(), "{steps} steps");
+}
