@@ -1328,6 +1328,18 @@
 //!     Ok(head.attempt(body, identity, base, Attempt::First { span_ns }, solve, |_| Ok(()))?.0)
 //! }
 //! ```
+//! A void opens or shuts the bladder's outlet and carries no amount, because the volume voided is a produced
+//! quantity.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn void(ends: SimTime) -> Result<BoundaryInput, AdmissionError> {
+//!     Ok(BoundaryInput::Void(Delivered::<Water> { boundary: "bladder", amount: Measure::new(0.3)?, ends }))
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn void() -> BoundaryInput { BoundaryInput::Void(Gate::Open) }
+//! ```
 
 extern crate alloc;
 
