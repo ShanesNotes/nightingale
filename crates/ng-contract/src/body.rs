@@ -9,6 +9,7 @@ use crate::{
     AdmissibleSet, Class, ConservedBasis, Crossing, Digest, LawName, Network, ParameterKey, Predicate,
     RateClass, Schema, SiteId, Space, Species,
 };
+use core::num::NonZeroU32;
 
 macro_rules! index {
     ($($(#[$doc:meta])* $name:ident),*) => {$(
@@ -317,6 +318,7 @@ pub struct Column {
     pub(crate) origin: LawName,
     pub(crate) context: Context,
     pub(crate) receipt: Option<Receipt>,
+    pub(crate) reference_count: NonZeroU32,
 }
 impl Column {
     /// In row order. A transfer whose two ends are one pool has none.
@@ -334,6 +336,11 @@ impl Column {
     pub fn receipt(&self) -> Option<Receipt> {
         self.receipt
     }
+    /// A kernel's value, in its reference species per second, or a slope of it, as turnovers: what each term's count
+    /// multiplies. A transfer's count is one, so its value is its rate.
+    pub(crate) fn turnovers(&self, value: f64) -> f64 {
+        value / f64::from(self.reference_count.get())
+    }
 }
 impl Seal for Column {
     fn seal(&self, out: &mut Canonical) {
@@ -342,11 +349,18 @@ impl Seal for Column {
             origin,
             context,
             receipt,
+            reference_count,
         } = self;
         terms.seal(out);
         origin.seal(out);
         context.seal(out);
         receipt.seal(out);
+        // Only a count above one writes, after a tag no term count and no program count equals, so every body that
+        // counts each reference once keeps its bytes.
+        if *reference_count != NonZeroU32::MIN {
+            out.number(u64::MAX);
+            out.number(u64::from(reference_count.get()));
+        }
     }
 }
 /// The receipt pool outside the body that takes what a boundary transfer moves, so the transfer still

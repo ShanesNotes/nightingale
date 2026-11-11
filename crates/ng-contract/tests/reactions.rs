@@ -250,7 +250,7 @@ fn burning<Q: Reactant>(
     assemble(schema, |mut body| {
         let held = HeldDeclaration::<Metabolism>::new(Vec::new(), holds, "bench: synthetic");
         let (mut laws, _) = body.hold(held)?.parts();
-        let burn = laws.reaction::<CapillaryBed, Q>("burn", proportions);
+        let burn = laws.reaction::<CapillaryBed, Q, _>("burn", proportions);
         rates(&mut laws, &burn)?;
         body.add(laws.finish());
         body.compile()
@@ -594,7 +594,7 @@ fn a_reaction_and_its_heat_are_in_the_model_hash() {
         let compiled = assemble(schema, |mut body| {
             let held = HeldDeclaration::<Metabolism>::new(Vec::new(), Vec::new(), "bench: synthetic");
             let (mut laws, _) = body.hold(held)?.parts();
-            let burn = laws.reaction::<CapillaryBed, Glucose>(name, burn());
+            let burn = laws.reaction::<CapillaryBed, Glucose, _>(name, burn());
             paced(&mut laws, &burn)?;
             body.add(laws.finish());
             body.compile()
@@ -622,14 +622,14 @@ fn two_burns<Q: Reactant>() -> Result<CompiledBody, AdmissionError> {
     assemble(schema, |mut body| {
         let held = HeldDeclaration::<Metabolism>::new(Vec::new(), Vec::new(), "bench: synthetic");
         let (mut laws, _) = body.hold(held)?.parts();
-        let interstitial = laws.reaction::<CapillaryBed, Glucose>("burn", burn());
+        let interstitial = laws.reaction::<CapillaryBed, Glucose, _>("burn", burn());
         paced(&mut laws, &interstitial)?;
         let plasma = Proportions::<Glucose>::using(Space::Plasma)
             .uses::<Oxygen, 6>(Space::Plasma)
             .makes::<CarbonDioxide, 6>(Space::Plasma)
             .makes::<Water, 6>(Space::Plasma)
             .energy_into(Space::Thermal);
-        let plasma = laws.reaction::<CapillaryBed, Glucose>("burn in plasma", plasma);
+        let plasma = laws.reaction::<CapillaryBed, Glucose, _>("burn in plasma", plasma);
         paced(&mut laws, &plasma)?;
         body.add(laws.finish());
         let (mut laws, ports) = body.fluids()?.parts();

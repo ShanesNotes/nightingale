@@ -19,6 +19,7 @@ use crate::{
     Compliance, HeatRoute, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Passage, Predicate,
     RateClass, Schema, SiteId, Sites, Space, Species, Wall,
 };
+use core::num::NonZeroU32;
 
 pub(crate) fn compile(
     schema: Schema,
@@ -1422,6 +1423,7 @@ fn fluid_columns(placement: &mut Placement, places: &Places) -> Result<(), Compi
                     boundary: boundary.name,
                     coefficient: 1,
                 }),
+                reference_count: NonZeroU32::MIN,
             });
             let (amount, solvent) = (
                 Address::Unknown(UnknownId::at(row)),
@@ -1526,6 +1528,7 @@ fn column(law: LawName, reach: &Reach, rows: &Rows) -> Result<Column, CompileDef
         origin: law,
         context: reach.context,
         receipt,
+        reference_count: NonZeroU32::MIN,
     })
 }
 
@@ -1574,6 +1577,7 @@ fn reaction_columns(
             origin: law,
             context: Context::Site(site),
             receipt: None,
+            reference_count: reaction.reference_count,
         };
         columns.push((site, column));
     }
@@ -1597,6 +1601,7 @@ fn exterior(law: LawName, water: &RouteBoundary, rows: &Rows) -> Result<Column, 
             boundary: water.name,
             coefficient: -coefficient,
         }),
+        reference_count: NonZeroU32::MIN,
     })
 }
 
