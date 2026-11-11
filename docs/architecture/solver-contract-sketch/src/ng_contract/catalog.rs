@@ -51,6 +51,7 @@ impl Disposition {
                 | Disposition::ExternalInput
                 | Disposition::ExternalSink
                 | Disposition::AnatomyRelation { .. }
+                | Disposition::Held
         )
     }
 }
@@ -81,7 +82,7 @@ impl CensusRow {
 pub struct WiredField {
     pub name: &'static str,
     pub unit: &'static str,
-    pub ticket: u8,
+    pub body_ticket: u8,
 }
 #[derive(Clone, Copy)]
 pub struct HeldField {
@@ -149,12 +150,33 @@ impl Arrow {
         let wired = self.carries.wired();
         let mut i = 0;
         while i < wired.len() {
-            if wired[i].ticket < FIRST_WIRING_TICKET || wired[i].ticket > LAST_WIRING_TICKET {
+            if wired[i].body_ticket < FIRST_WIRING_TICKET || wired[i].body_ticket > LAST_WIRING_TICKET {
                 return false;
             }
             i += 1;
         }
         true
+    }
+    pub const fn every_reason_given(&self) -> bool {
+        let slice = match self.slice {
+            Disposition::AnatomyRelation { reason }
+            | Disposition::OutsideSlice { reason }
+            | Disposition::Unresolved { reason } => !reason.is_empty(),
+            Disposition::Live | Disposition::ExternalInput | Disposition::ExternalSink | Disposition::Held => true,
+        };
+        let relation = match self.carries {
+            Carries::Relation { reason } => !reason.is_empty(),
+            Carries::Fields { .. } => true,
+        };
+        let held = self.carries.held();
+        let mut i = 0;
+        while i < held.len() {
+            if held[i].reason.is_empty() {
+                return false;
+            }
+            i += 1;
+        }
+        slice && relation
     }
     pub const fn one_holder_per_field(&self) -> bool {
         let (wired, held) = (self.carries.wired(), self.carries.held());
@@ -261,13 +283,12 @@ pub struct Count {
 }
 impl Count {
     pub const fn mapped(&self) -> usize {
-        self.live + self.input + self.sink + self.relation
+        self.live + self.input + self.sink + self.relation + self.held
     }
     pub const fn unmapped(&self) -> usize {
-        self.held + self.outside + self.unresolved
+        self.outside + self.unresolved
     }
 }
-
 
 pub const MAP_EDGES: usize = 38;
 const FIRST_WIRING_TICKET: u8 = 6;
@@ -314,7 +335,7 @@ macro_rules! coupling_map {
             wired: &[$(WiredField {
                 name: stringify!($field),
                 unit: stringify!($unit),
-                ticket: $ticket,
+                body_ticket: $ticket,
             }),+],
             held: coupling_map!(@held $($held)?),
         }
@@ -357,7 +378,7 @@ coupling_map! {
     86 Nervous => Respiratory, "respiratory drive", sink,
         wired (RespiratoryDrive { respiratory_drive: Dimensionless => 11 });
     87 Nervous => Metabolism, "thermostat, shiver and sweat", sink,
-        wired (ThermostatShiverSweat { shiver_drive: Dimensionless => 12 })
+        wired (ShiverDrive { shiver_drive: Dimensionless => 12 })
         held [thermostat_set_point: Temperature => Nervous "the set point is NS memory and no MT law reads it",
             sweat_drive: Dimensionless => Nervous "sweat answers release at the skin junction (S10)"];
     88 Nervous => Musculoskeletal, "motor drive", sink,
@@ -367,7 +388,7 @@ coupling_map! {
         held [crh_drive: Dimensionless => Nervous "cortisol's profile follows the clock input directly (ticket 20)",
             circadian_phase: Phase => Nervous "the clock is a boundary input every law reads (ticket 05)"];
     90 Metabolism => Cardiovascular, "O2 debt per bed, temperature", input,
-        wired (OxygenDebtAndTemperature { oxygen_debt_per_bed: PerSite<CapillaryBed, Oxygen> => 9 })
+        wired (OxygenDebtPerBed { oxygen_debt_per_bed: PerSite<CapillaryBed, Oxygen> => 9 })
         held [temperature: Temperature => Cardiovascular "CV's laws run at a reference temperature"];
     91 Metabolism => Nervous, "temperature", input,
         wired (CoreTemperature { core_temperature: Temperature => 12 });
@@ -378,7 +399,7 @@ coupling_map! {
     94 Metabolism => BloodChemistry, "temperature", outside "neither end in the arena slice",
         held [temperature: Temperature => BloodChemistry "BC's speciation runs at a reference temperature (ticket 12)"];
     95 Musculoskeletal => Respiratory, "pump force and fatigue", outside "neither end in the arena slice",
-        wired (PumpForceAndFatigue { pump_force: Pressure => 10 })
+        wired (PumpForce { pump_force: Pressure => 10 })
         held [fatigue: Dimensionless => Musculoskeletal "a resting day has no fatigue law"];
     96 Musculoskeletal => Cardiovascular, "position and gravity",
         relation "site positions under the boundary's posture",
@@ -428,7 +449,7 @@ coupling_map! {
         held [skin_water: Volume => Fluids "pressure injury is absent",
             compartment_water: Volume => Fluids "limb compartments are absent"];
     114 Hematology => Cardiovascular, "bleeding competence, viscosity, thrombosis", input,
-        wired (BleedingViscosityThrombosis { viscosity: Viscosity => 8 })
+        wired (BloodViscosity { viscosity: Viscosity => 8 })
         held [bleeding_competence: Dimensionless => Hematology "no bleeding edge (ticket 21)",
             thrombosis: Dimensionless => Hematology "zero flux (ticket 21)"];
 }
@@ -446,28 +467,57 @@ const _: () = {
     while i < MAP_EDGES {
         let arrow = &ARROWS[i];
         assert!(arrow.line as usize == 77 + i);
-        assert!(Census::Slice.row(arrow).ends_fit() && Census::WholeBody.row(arrow).ends_fit());
+        assert!(Census::Slice.row(arrow).ends_fit());
         assert!(arrow.accounted(), "an arrow carries no field and is no anatomy relation");
         assert!(arrow.held_at_its_ends(), "a held field's holder is neither end of its arrow");
         assert!(arrow.wired_by_body_tickets(), "a wired field names no body ticket from 06 to 25");
         assert!(arrow.one_holder_per_field(), "a field has a second holder");
+        assert!(arrow.every_reason_given(), "a reason is empty");
         i += 1;
     }
 };
 const _: () = {
-    let relations = [82, 96, 99, 101, 104];
     let wire_and_hold = [79, 87, 89, 90, 95, 114];
-    let mut i = 0;
-    while i < relations.len() {
-        assert!(matches!(ARROWS[relations[i] - 77].carries, Carries::Relation { .. }));
-        i += 1;
-    }
     let mut i = 0;
     while i < wire_and_hold.len() {
         let carries = ARROWS[wire_and_hold[i] - 77].carries;
         assert!(!carries.wired().is_empty() && !carries.held().is_empty());
         i += 1;
     }
+};
+
+macro_rules! census_lines {
+    ($census:expr, $kind:pat, $lines:expr) => {{
+        let lines: &[usize] = &$lines;
+        let (mut i, mut n) = (0, 0);
+        while i < MAP_EDGES {
+            if matches!($census.row(&ARROWS[i]).disposition, $kind) {
+                assert!(n < lines.len() && lines[n] == 77 + i);
+                n += 1;
+            }
+            i += 1;
+        }
+        assert!(n == lines.len());
+    }};
+}
+const _: () = {
+    census_lines!(Census::Slice, Disposition::Live, [77, 80, 97]);
+    census_lines!(Census::Slice, Disposition::ExternalInput, [83, 90, 91, 99, 100, 102, 105, 106, 108, 114]);
+    census_lines!(Census::Slice, Disposition::ExternalSink, [78, 79, 81, 86, 87, 88, 89, 98, 110, 112, 113]);
+    census_lines!(Census::Slice, Disposition::AnatomyRelation { .. }, [82, 96, 101]);
+    census_lines!(Census::Slice, Disposition::OutsideSlice { .. }, [84, 85, 92, 93, 94, 95, 103, 104, 107, 109]);
+    census_lines!(Census::Slice, Disposition::Unresolved { .. }, [111]);
+    census_lines!(
+        Census::WholeBody,
+        Disposition::Live,
+        [77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 88, 89, 90, 91, 95, 97, 98, 114]
+    );
+    census_lines!(Census::WholeBody, Disposition::AnatomyRelation { .. }, [82, 96, 99, 101, 104]);
+    census_lines!(
+        Census::WholeBody,
+        Disposition::Held,
+        [92, 93, 94, 100, 102, 103, 105, 106, 107, 108, 109, 110, 111, 112, 113]
+    );
 };
 
 struct FieldCount {

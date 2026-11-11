@@ -552,7 +552,7 @@
 //! use ng_contract::*;
 //! fn ungranted<'b>(laws: &mut FragmentBuilder<'b, Renal>, burn: Proportions<Glucose>)
 //!     -> Reaction<'b, Renal, CapillaryBed, Glucose> {
-//!     laws.reaction("burn", burn)
+//!     laws.reaction::<CapillaryBed, Glucose, _>("burn", burn)
 //! }
 //! ```
 //! ```

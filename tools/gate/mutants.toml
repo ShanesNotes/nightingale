@@ -440,6 +440,298 @@ new = '''        Defect::LiverHoldsCells => vec![],'''
 test = "-p ng-contract --test held a_pool_no_law_moves_and_no_declaration_holds_is_an_orphan"
 
 [[mutant]]
+name = "outside-issued-once"
+path = "crates/ng-contract/src/scope/outside.rs"
+old = '''None => (self.issue_outside::<S>()?, Vec::new()),'''
+new = '''None => (FragmentBuilder::new(), Vec::new()),'''
+test = "-p ng-contract --test scopes a_card_outside_the_slice_is_issued_once_held_or_built"
+
+[[mutant]]
+name = "enclosure-owed-at-issue"
+path = "crates/ng-contract/src/scope/outside.rs"
+old = '''laws.owe_enclosure_pressure();'''
+new = '''let _ = &mut laws;'''
+test = "-p ng-contract --test scopes a_built_respiratory_card_defines_its_enclosures_pressure_and_holds_no_fluid"
+
+[[mutant]]
+name = "enclosure-owed-not-held"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.any(|slot| slot.name == ENCLOSURE_PRESSURE && slot.over == Over::HeldEnclosures)'''
+new = '''.any(|_| held.iter().any(|known| known.card == fragment.owner))'''
+test = "-p ng-contract --test scopes a_built_respiratory_card_defines_its_enclosures_pressure_and_holds_no_fluid"
+
+[[mutant]]
+name = "enclosure-fluid-held-only"
+path = "crates/ng-contract/src/compile.rs"
+old = '''Some(Compliance::Held { card }) if held.iter().any(|known| known.card == card) => Some(card),'''
+new = '''Some(Compliance::Held { card }) => Some(card),'''
+test = "-p ng-contract --test scopes a_built_cards_enclosure_fluid_that_nothing_moves_is_an_orphan"
+
+[[mutant]]
+name = "enclosure-fluid-required-held-only"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|(_, card)| stood_in(card))'''
+new = '''.filter(|_| true)'''
+test = "-p ng-contract --test scopes a_built_respiratory_card_defines_its_enclosures_pressure_and_holds_no_fluid"
+
+[[mutant]]
+name = "handoff-keeps-the-builder"
+path = "crates/ng-contract/src/scope/outside.rs"
+old = '''Some(HeldScope { laws, .. }) => (laws, self.supplied_by::<S>()),'''
+new = '''Some(_) => (self.issue_outside::<S>()?, self.supplied_by::<S>()),'''
+test = "-p ng-contract --test scopes handing_a_held_scope_to_its_cards_scope_moves_no_byte"
+
+[[mutant]]
+name = "process-owned-by-its-card"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.or(process)'''
+new = '''.or(None)'''
+test = "-p ng-contract --test scopes a_card_serves_its_own_boundary_processes_through_its_ports"
+
+[[mutant]]
+name = "process-of-another-card-supplied"
+path = "crates/ng-contract/src/scope.rs"
+old = '''known.owner.is_some_and(|card| card != S::CARD)'''
+new = '''known.owner.is_some_and(|_| false)'''
+test = "-p ng-contract --test scopes a_held_card_cannot_supply_another_cards_process"
+
+[[mutant]]
+name = "held-port-offers-declared-processes"
+path = "crates/ng-contract/src/scope.rs"
+old = '''known.owner.is_none() || supplies.contains(&known.name)'''
+new = '''true'''
+test = "-p ng-contract --test scopes a_held_stand_in_serves_its_own_process_only_when_its_declaration_supplies_it"
+
+[[mutant]]
+name = "boundary-port-offers-no-process"
+path = "crates/ng-contract/src/scope.rs"
+old = '''names: self.boundary_names(|known| known.owner.is_none()),'''
+new = '''names: self.boundary_names(|_| true),'''
+test = "-p ng-contract --test scopes the_boundary_scope_cannot_serve_a_cards_process"
+
+[[mutant]]
+name = "unscoped-process-names-its-card"
+path = "crates/ng-contract/src/compile.rs"
+old = '''None if owner == Boundary::CARD => unissued,'''
+new = '''None => unissued,'''
+test = "-p ng-contract --test scopes a_process_whose_card_has_no_scope_is_omitted_under_that_card"
+
+[[mutant]]
+name = "kept-port-leaves-held-routes"
+path = "crates/ng-contract/src/scope/outside.rs"
+old = '''.filter(|boundary| boundary.owner == Some(O::CARD) && !supplied.contains(&boundary.name))'''
+new = '''.filter(|boundary| boundary.owner == Some(O::CARD))'''
+test = "-p ng-contract --test scopes a_kept_cards_ports_leave_the_routes_its_stand_ins_supply"
+
+[[mutant]]
+name = "process-names-distinct"
+path = "crates/ng-contract/src/scope/processes.rs"
+old = '''Clearance<Insulin> = "insulin clearance"'''
+new = '''Clearance<Insulin> = "insulin secretion"'''
+test = "-p ng-contract --lib scope::tests::every_boundary_process_has_a_name_of_its_own"
+
+[[mutant]]
+name = "port-refuses-an-unplaced-process"
+path = "crates/ng-contract/src/scope.rs"
+old = '''if processes.contains(&P::NAME) {'''
+new = '''if true {'''
+test = "-p ng-contract --test scopes a_port_refuses_a_process_the_schema_does_not_place"
+
+[[mutant]]
+name = "process-card-sealed"
+path = "crates/ng-contract/src/scope.rs"
+old = '''if let Some(card) = owner {'''
+new = '''if let Some(card) = owner.filter(|_| false) {'''
+test = "-p ng-contract --test scopes the_card_a_process_names_enters_the_model_hash"
+
+[[mutant]]
+name = "process-endpoint-names-its-card"
+path = "crates/ng-contract/src/compile.rs"
+old = '''owner: boundary.owner.unwrap_or(Boundary::CARD),'''
+new = '''owner: Boundary::CARD,'''
+test = "-p ng-contract --test scopes a_process_at_a_pool_the_body_lacks_is_named_under_its_card"
+
+[[mutant]]
+name = "crossed-twice-refused"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|pair| pair[0].0 == pair[1].0 && pair[0].1 == pair[1].1 && pair[0].2 == pair[1].2)'''
+new = '''.filter(|_| false)'''
+test = "-p ng-contract --test scopes two_cards_crossing_one_wall_with_one_species_at_one_bed_is_refused"
+
+[[mutant]]
+name = "crossed-twice-at-one-site"
+path = "crates/ng-contract/src/compile.rs"
+old = '''&& pair[0].2 == pair[1].2)'''
+new = ''')'''
+test = "-p ng-contract --test scopes disjoint_sets_of_one_wall_and_species_take_two_cards"
+
+[[mutant]]
+name = "owned-crossing-at-the-capillary-wall"
+path = "crates/ng-contract/src/law.rs"
+old = '''Family::Exchange(species) => Some((&[Crossed::Capillary], species)),'''
+new = '''Family::Exchange(_) => None,'''
+test = "-p ng-contract --test scopes the_metabolism_card_and_fluids_cannot_both_move_oxygen_across_the_capillary_wall"
+
+[[mutant]]
+name = "owned-crossing-across-a-wall"
+path = "crates/ng-contract/src/law.rs"
+old = '''Family::Across(wall, _, species) => Some((wall.crossed(), species)),'''
+new = '''Family::Across(..) => None,'''
+test = "-p ng-contract --test scopes two_cards_crossing_one_wall_with_one_species_at_one_bed_is_refused"
+
+[[mutant]]
+name = "endothelium-crosses-the-capillary-wall"
+path = "crates/ng-contract/src/law.rs"
+old = '''Wall::Endothelium => &[Crossed::Capillary, Crossed::Cell],'''
+new = '''Wall::Endothelium => &[Crossed::Cell],'''
+test = "-p ng-contract --test scopes the_endothelial_route_crosses_the_capillary_wall_another_card_crosses"
+
+[[mutant]]
+name = "endothelium-crosses-the-cell-membrane"
+path = "crates/ng-contract/src/law.rs"
+old = '''Wall::Endothelium => &[Crossed::Capillary, Crossed::Cell],'''
+new = '''Wall::Endothelium => &[Crossed::Capillary],'''
+test = "-p ng-contract --test scopes the_endothelial_route_crosses_the_cell_membrane_another_card_crosses"
+
+[[mutant]]
+name = "circulation-leaves-the-liver-bed"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|&pair| !anatomy.is_valve(pair) && !sinusoidal(anatomy, pair))'''
+new = '''.filter(|&pair| !anatomy.is_valve(pair))'''
+test = "-p ng-contract --test sinusoids every_plain_vascular_edge_is_reached_by_circulation_or_the_sinusoids_and_never_both"
+
+[[mutant]]
+name = "sinusoids-reach-the-liver-bed"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|&pair| !anatomy.is_valve(pair) && sinusoidal(anatomy, pair))'''
+new = '''.filter(|&pair| anatomy.is_valve(pair) && sinusoidal(anatomy, pair))'''
+test = "-p ng-contract --test sinusoids every_plain_vascular_edge_is_reached_by_circulation_or_the_sinusoids_and_never_both"
+
+[[mutant]]
+name = "edge-flow-at-the-liver-bed"
+path = "crates/ng-contract/src/compile.rs"
+old = '''(Family::Sinusoids, crate::Hepatic::CARD)'''
+new = '''(Family::Circulation, law.owner)'''
+test = "-p ng-contract --test sinusoids the_flow_at_a_liver_bed_edge_is_the_sinusoids_whoever_reads_it"
+
+[[mutant]]
+name = "crossings-compare-the-wall"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|pair| pair[0].0 == pair[1].0 && pair[0].1 == pair[1].1 && pair[0].2 == pair[1].2)'''
+new = '''.filter(|pair| pair[0].1 == pair[1].1 && pair[0].2 == pair[1].2)'''
+test = "-p ng-contract --test scopes oxygen_crosses_the_gas_exchange_surface_and_the_capillary_wall_of_one_lung_bed_by_two_cards"
+
+[[mutant]]
+name = "crossings-compare-the-species"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|pair| pair[0].0 == pair[1].0 && pair[0].1 == pair[1].1 && pair[0].2 == pair[1].2)'''
+new = '''.filter(|pair| pair[0].0 == pair[1].0 && pair[0].2 == pair[1].2)'''
+test = "-p ng-contract --test scopes water_and_oxygen_cross_one_cell_membrane_by_two_cards"
+
+[[mutant]]
+name = "each-wall-crosses-its-own-membranes"
+path = "crates/ng-contract/src/law.rs"
+old = '''Family::Across(wall, _, species) => Some((wall.crossed(), species)),'''
+new = '''Family::Across(_, _, species) => Some((&[Crossed::Capillary], species)),'''
+test = "-p ng-contract --test scopes glucose_crosses_the_capillary_wall_by_fluids_and_each_beds_cell_membrane_by_its_own_card"
+
+[[mutant]]
+name = "sinusoids-leave-the-valves"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|&pair| !anatomy.is_valve(pair) && sinusoidal(anatomy, pair))'''
+new = '''.filter(|&pair| sinusoidal(anatomy, pair))'''
+test = "-p ng-contract --test sinusoids the_sinusoids_leave_a_valved_edge_of_the_liver_bed_to_the_valves"
+
+[[mutant]]
+name = "reaction-in-one-space"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if let [first, second, ..] = spaces[..] {'''
+new = '''if let [first, second, ..] = spaces[..1] {'''
+test = "-p ng-contract --test scopes a_reaction_that_takes_its_glucose_across_the_cell_membrane_is_refused_naming_both_spaces"
+
+[[mutant]]
+name = "circulation-owes-the-sinusoids"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if requested(Family::Circulation) && unowed {'''
+new = '''if false && unowed {'''
+test = "-p ng-contract --test sinusoids a_liver_bed_beside_circulation_owes_the_hepatic_cards_sinusoids"
+
+[[mutant]]
+name = "edge-flow-on-a-vascular-edge"
+path = "crates/ng-contract/src/compile.rs"
+old = '''(Input::EdgeFlow, Context::Edge { from, to }) if route.is_some_and(Family::vascular) => {'''
+new = '''(Input::EdgeFlow, Context::Edge { from, to }) => {'''
+test = "-p ng-contract --test sinusoids a_lymph_law_reads_no_blood_flow_at_the_liver_bed_as_at_any_other"
+
+[[mutant]]
+name = "reacts-at-its-grant-alone"
+path = "crates/ng-contract/src/law.rs"
+old = '''impl ReactsAt<crate::Beds<crate::Liver>> for crate::Hepatic {}'''
+new = '''impl ReactsAt<crate::Beds<crate::Liver>> for crate::Hepatic {}
+impl grants::Sealed<CapillaryBed> for crate::Hepatic {}
+impl ReactsAt<CapillaryBed> for crate::Hepatic {}'''
+test = "--doc -p ng-contract ReactsAt"
+
+[[mutant]]
+name = "cargo-class-closed"
+path = "crates/ng-contract/src/scope/cargo.rs"
+old = '''Respired: Substance = Oxygen, CarbonDioxide;'''
+new = '''Respired: Substance = Oxygen, CarbonDioxide, Sodium;'''
+test = "--doc -p ng-contract alveolar"
+
+[[mutant]]
+name = "enclosure-owed-by-its-card"
+path = "crates/ng-contract/src/compile.rs"
+old = '''
+            fragment.owner == *card
+                && (fragment.slots.iter())'''
+new = '''
+            (fragment.slots.iter())'''
+test = "-p ng-contract --test scopes another_cards_owed_pressure_does_not_cover_an_enclosure_whose_card_owes_none"
+
+[[mutant]]
+name = "enclosure-owed-by-its-slot"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.any(|slot| slot.name == ENCLOSURE_PRESSURE && slot.over == Over::HeldEnclosures)'''
+new = '''.any(|slot| slot.name == ENCLOSURE_PRESSURE)'''
+test = "-p ng-contract --test scopes a_field_named_like_the_enclosure_pressure_is_not_the_pressure_an_enclosure_is_owed"
+
+[[mutant]]
+name = "kept-port-reads-its-own-supplies"
+path = "crates/ng-contract/src/scope/outside.rs"
+old = '''.find(|card| card.card == S::CARD)'''
+new = '''.find(|_| true)'''
+test = "-p ng-contract --test scopes a_kept_cards_ports_leave_the_routes_its_stand_ins_supply"
+
+[[mutant]]
+name = "enclosure-fluid-held-by-its-card"
+path = "crates/ng-contract/src/compile.rs"
+old = '''Some(Compliance::Held { card }) if held.iter().any(|known| known.card == card) => Some(card),'''
+new = '''Some(Compliance::Held { card }) if !held.is_empty() => Some(card),'''
+test = "-p ng-contract --test scopes a_built_cards_enclosure_fluid_that_nothing_moves_is_an_orphan"
+
+[[mutant]]
+name = "enclosure-fluid-owed-by-its-card"
+path = "crates/ng-contract/src/compile.rs"
+old = '''let stood_in = |card: &&'static str| held.iter().any(|known| known.card == *card);'''
+new = '''let stood_in = |_: &&'static str| !held.is_empty();'''
+test = "-p ng-contract --test scopes a_built_respiratory_card_defines_its_enclosures_pressure_and_holds_no_fluid"
+
+[[mutant]]
+name = "process-direction-recorded"
+path = "crates/ng-contract/src/scope.rs"
+old = '''direction: P::DIRECTION,'''
+new = '''direction: BoundaryDirection::IntoBody,'''
+test = "-p ng-contract --test scopes a_card_serves_its_own_boundary_processes_through_its_ports"
+
+[[mutant]]
+name = "process-table-pinned"
+path = "crates/ng-contract/src/scope/processes.rs"
+old = '''Clearance<Glucagon> = "glucagon clearance": Endocrine, Glucagon, OutOfBody;'''
+new = '''Clearance<Glucagon> = "glucagon clearance": Hepatic, Glucagon, IntoBody;'''
+test = "-p ng-contract --lib scope::tests::each_boundary_process_keeps_its_card_species_direction_and_drain"
+
+[[mutant]]
 name = "cargo-held-at-both-ends"
 path = "crates/ng-contract/tests/map_reads.rs"
 old = '''        cargo(false, false).err(),'''
@@ -971,8 +1263,8 @@ test = "-p ng-contract --test census the_census_refuses_a_holder_at_neither_end_
 [[mutant]]
 name = "wiring-ticket-open-above"
 path = "crates/ng-contract/src/catalog.rs"
-old = '''if wired[i].ticket < FIRST_WIRING_TICKET || wired[i].ticket > LAST_WIRING_TICKET {'''
-new = '''if wired[i].ticket < FIRST_WIRING_TICKET {'''
+old = '''if wired[i].body_ticket < FIRST_WIRING_TICKET || wired[i].body_ticket > LAST_WIRING_TICKET {'''
+new = '''if wired[i].body_ticket < FIRST_WIRING_TICKET {'''
 test = "-p ng-contract --test census the_census_refuses_a_wired_field_no_body_ticket_wires"
 
 [[mutant]]
@@ -981,3 +1273,66 @@ path = "crates/ng-contract/src/catalog.rs"
 old = '''Carries::Fields { wired, held } => !wired.is_empty() || !held.is_empty(),'''
 new = '''Carries::Fields { .. } => true,'''
 test = "-p ng-contract --test census the_census_refuses_an_arrow_that_carries_nothing"
+
+[[mutant]]
+name = "held-reason-unchecked"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''if held[i].reason.is_empty() {'''
+new = '''if held[i].name.is_empty() {'''
+test = "-p ng-contract --test census the_census_refuses_an_empty_reason"
+
+[[mutant]]
+name = "second-holder-held-twice"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''if same(field_name(wired, held, i), field_name(wired, held, j)) {'''
+new = '''if i < wired.len() && same(field_name(wired, held, i), field_name(wired, held, j)) {'''
+test = "-p ng-contract --test census the_census_refuses_a_second_holder_of_one_field"
+
+[[mutant]]
+name = "wiring-ticket-open-below"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''if wired[i].body_ticket < FIRST_WIRING_TICKET || wired[i].body_ticket > LAST_WIRING_TICKET {'''
+new = '''if wired[i].body_ticket > LAST_WIRING_TICKET {'''
+test = "-p ng-contract --test census the_census_refuses_a_wired_field_no_body_ticket_wires"
+
+[[mutant]]
+name = "relation-reason-unchecked"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''Carries::Relation { reason } => !reason.is_empty(),'''
+new = '''Carries::Relation { .. } => true,'''
+test = "-p ng-contract --test census the_census_refuses_an_empty_reason"
+
+[[mutant]]
+name = "slice-reason-unchecked"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''| Disposition::Unresolved { reason } => !reason.is_empty(),'''
+new = '''| Disposition::Unresolved { reason } => !reason.is_empty() || true,'''
+test = "-p ng-contract --test census the_census_refuses_an_empty_reason"
+
+[[mutant]]
+name = "catalog-holder-off-its-arrow"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''held [ventricular_wall_stress: Pressure => Cardiovascular'''
+new = '''held [ventricular_wall_stress: Pressure => Metabolism'''
+test = "-p ng-contract --test census every_arrow_of_the_catalog_keeps_the_census_rules"
+
+[[mutant]]
+name = "catalog-ticket-before-the-body"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''wired (BloodViscosity { viscosity: Viscosity => 8 })'''
+new = '''wired (BloodViscosity { viscosity: Viscosity => 5 })'''
+test = "-p ng-contract --test census every_arrow_of_the_catalog_keeps_the_census_rules"
+
+[[mutant]]
+name = "catalog-field-held-twice"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''thrombosis: Dimensionless => Hematology'''
+new = '''bleeding_competence: Dimensionless => Hematology'''
+test = "-p ng-contract --test census every_arrow_of_the_catalog_keeps_the_census_rules"
+
+[[mutant]]
+name = "catalog-reason-empty"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''fatigue: Dimensionless => Musculoskeletal "a resting day has no fatigue law"'''
+new = '''fatigue: Dimensionless => Musculoskeletal ""'''
+test = "-p ng-contract --test census every_arrow_of_the_catalog_keeps_the_census_rules"

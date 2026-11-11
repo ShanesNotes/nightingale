@@ -116,9 +116,9 @@ edge_kinds! {
     AbsorbingEdge: Alimentary => CapillaryBed, Gut;
 }
 
-/// A wall between two spaces of one capillary bed, crossed one species at a time. The capillary wall's crossings are
-/// Starling's water and each species' exchange, the tubule wall's are reclaim, and the gut wall's are passages. These
-/// are the rest.
+/// A wall between two spaces of one capillary bed, crossed one species at a time. Water crosses the capillary wall by
+/// Starling's law, and each other species crosses it by its exchange. The tubule wall's crossings are reclaim, and the
+/// gut wall's are passages. These are the rest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Wall {
     /// The cell membrane: interstitium to cells.
@@ -137,6 +137,14 @@ impl Wall {
             Wall::Alveolar => 7,
             Wall::Lining => 8,
             Wall::Endothelium => 9,
+        }
+    }
+    const fn crossed(self) -> &'static [Crossed] {
+        match self {
+            Wall::Cell => &[Crossed::Cell],
+            Wall::Alveolar => &[Crossed::Alveolar],
+            Wall::Lining => &[Crossed::Lining],
+            Wall::Endothelium => &[Crossed::Capillary, Crossed::Cell],
         }
     }
 }
@@ -201,6 +209,7 @@ impl HeatRoute {
 pub(crate) enum Family {
     Circulation,
     Valves,
+    Sinusoids,
     Starling,
     Lymph,
     Filtration,
@@ -223,6 +232,7 @@ impl Family {
         match self {
             Family::Circulation => "circulation",
             Family::Valves => "valves",
+            Family::Sinusoids => "sinusoids",
             Family::Starling => "starling",
             Family::Lymph => "lymph",
             Family::Filtration => "filtration",
@@ -246,12 +256,49 @@ impl Family {
             self,
             Family::Circulation
                 | Family::Valves
+                | Family::Sinusoids
                 | Family::Starling
                 | Family::Lymph
                 | Family::Filtration
                 | Family::Tubular
         )
     }
+    pub(crate) fn vascular(self) -> bool {
+        matches!(
+            self,
+            Family::Circulation | Family::Valves | Family::Sinusoids | Family::GravityWork
+        )
+    }
+    pub(crate) fn transport(self) -> Option<(&'static [Crossed], Species)> {
+        match self {
+            Family::Exchange(species) => Some((&[Crossed::Capillary], species)),
+            Family::Across(wall, _, species) => Some((wall.crossed(), species)),
+            Family::Circulation
+            | Family::Valves
+            | Family::Sinusoids
+            | Family::Starling
+            | Family::Lymph
+            | Family::Filtration
+            | Family::Tubular
+            | Family::Reclaim(_)
+            | Family::Release(_)
+            | Family::Reuptake(_)
+            | Family::Binding(..)
+            | Family::StrokeWork
+            | Family::GravityWork
+            | Family::WallWork
+            | Family::Dissipation
+            | Family::Along(..)
+            | Family::Heat(_) => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Crossed {
+    Capillary,
+    Cell,
+    Alveolar,
+    Lining,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum End {
@@ -1199,10 +1246,72 @@ impl<'b, O, C: SiteSet, Q> Reaction<'b, O, C, Q> {
 mod grants {
     pub trait Sealed<C> {}
 }
-/// A site class the contract grants a card to react at: metabolism at the capillary beds.
+/// A site set the contract grants a card to react at.
+/// ```compile_fail,E0277
+/// use ng_contract::*;
+/// fn ungranted<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, made: Proportions<Glucose>)
+///     -> Reaction<'b, Metabolism, TissueSite, Glucose> {
+///     mt.reaction::<TissueSite, Glucose, _>("burn", made)
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn granted<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, made: Proportions<Glucose>)
+///     -> Reaction<'b, Metabolism, CapillaryBed, Glucose> {
+///     mt.reaction::<CapillaryBed, Glucose, _>("burn", made)
+/// }
+/// ```
+/// ```compile_fail,E0277
+/// use ng_contract::*;
+/// fn ungranted<'b>(hp: &mut FragmentBuilder<'b, Hepatic>, made: Proportions<Glucose>)
+///     -> Reaction<'b, Hepatic, CapillaryBed, Glucose> {
+///     hp.reaction::<CapillaryBed, Glucose, _>("glycogen made", made)
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn granted<'b>(hp: &mut FragmentBuilder<'b, Hepatic>, made: Proportions<Glucose>)
+///     -> Reaction<'b, Hepatic, Beds<Liver>, Glucose> {
+///     hp.reaction::<Beds<Liver>, Glucose, _>("glycogen made", made)
+/// }
+/// ```
+/// ```compile_fail,E0277
+/// use ng_contract::*;
+/// fn ungranted<'b>(ms: &mut FragmentBuilder<'b, Musculoskeletal>, made: Proportions<Glucose>)
+///     -> Reaction<'b, Musculoskeletal, CapillaryBed, Glucose> {
+///     ms.reaction::<CapillaryBed, Glucose, _>("glycogen made", made)
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn granted<'b>(ms: &mut FragmentBuilder<'b, Musculoskeletal>, made: Proportions<Glucose>)
+///     -> Reaction<'b, Musculoskeletal, Beds<Muscle>, Glucose> {
+///     ms.reaction::<Beds<Muscle>, Glucose, _>("glycogen made", made)
+/// }
+/// ```
+/// ```compile_fail,E0277
+/// use ng_contract::*;
+/// fn ungranted<'b>(rn: &mut FragmentBuilder<'b, Renal>, made: Proportions<AminoAcids>)
+///     -> Reaction<'b, Renal, Beds<Liver>, AminoAcids> {
+///     rn.reaction::<Beds<Liver>, AminoAcids, _>("ammonium made", made)
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn granted<'b>(rn: &mut FragmentBuilder<'b, Renal>, made: Proportions<AminoAcids>)
+///     -> Reaction<'b, Renal, Beds<Tubule>, AminoAcids> {
+///     rn.reaction::<Beds<Tubule>, AminoAcids, _>("ammonium made", made)
+/// }
+/// ```
 pub trait ReactsAt<C: SiteSet>: grants::Sealed<C> + Owner {}
 impl grants::Sealed<CapillaryBed> for Metabolism {}
 impl ReactsAt<CapillaryBed> for Metabolism {}
+impl grants::Sealed<crate::Beds<crate::Liver>> for crate::Hepatic {}
+impl ReactsAt<crate::Beds<crate::Liver>> for crate::Hepatic {}
+impl grants::Sealed<crate::Beds<crate::Muscle>> for crate::Musculoskeletal {}
+impl ReactsAt<crate::Beds<crate::Muscle>> for crate::Musculoskeletal {}
+impl grants::Sealed<crate::Beds<crate::Tubule>> for crate::Renal {}
+impl ReactsAt<crate::Beds<crate::Tubule>> for crate::Renal {}
 pub(crate) struct ReactionDeclaration {
     pub(crate) name: &'static str,
     pub(crate) set: Sites,

@@ -42,6 +42,7 @@ pub(crate) fn compile(
     check_volume(&schema, &owed, &fragments)?;
 
     let reaches = Reaches::of(&schema, &fragments);
+    check_crossings(&fragments, &reaches)?;
     let rows = Rows::lay_out(&schema, &fragments, &reaches, &held);
     let chance = ChanceNames::of(&fragments);
     let places = Places {
@@ -143,10 +144,15 @@ fn check_fragments(
         .try_for_each(|fragment| check_names(fragment, schema, held))
 }
 
-fn route_owner(held: &[HeldCard], route: &'static str) -> &'static str {
+fn route_owner(schema: &Schema, held: &[HeldCard], route: &'static str) -> &'static str {
+    let process = (schema.boundaries.iter())
+        .find(|boundary| boundary.name == route)
+        .and_then(|boundary| boundary.owner);
     (held.iter())
         .find(|card| card.supplies.contains(&route))
-        .map_or(Boundary::CARD, |card| card.card)
+        .map(|card| card.card)
+        .or(process)
+        .unwrap_or(Boundary::CARD)
 }
 
 /// Whether a route's columns come from one flow row: a valve's always, and any fluid route's in a body that carries
@@ -194,7 +200,7 @@ fn check_names(fragment: &FragmentData, schema: &Schema, held: &[HeldCard]) -> R
         )
         .chain(
             (schema.boundaries.iter())
-                .filter(|boundary| route_owner(held, boundary.name) == fragment.owner)
+                .filter(|boundary| route_owner(schema, held, boundary.name) == fragment.owner)
                 .map(|boundary| boundary.name),
         )
         .chain(fragment.reactions.iter().map(|reaction| reaction.name))
@@ -232,7 +238,7 @@ fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
     {
         Some(boundary) => Err(CompileDefect::BoundaryEndpoint {
             law: LawName {
-                owner: Boundary::CARD,
+                owner: boundary.owner.unwrap_or(Boundary::CARD),
                 local: boundary.name,
             },
         }),
@@ -243,6 +249,35 @@ fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
 fn check_places(schema: &Schema) -> Result<(), CompileDefect> {
     match (schema.pools()).find(|&(_, space, species)| !species.may_hold(space)) {
         Some((site, space, species)) => Err(CompileDefect::OutOfPlace { site, space, species }),
+        None => Ok(()),
+    }
+}
+
+fn check_crossings(fragments: &[FragmentData], reaches: &Reaches) -> Result<(), CompileDefect> {
+    let mut crossings = Vec::new();
+    for fragment in fragments {
+        for &family in &fragment.families {
+            let Some((walls, species)) = family.transport() else {
+                continue;
+            };
+            let law = LawName {
+                owner: fragment.owner,
+                local: family.name(),
+            };
+            for reach in reaches.of_family(family) {
+                if let Context::Site(site) = reach.context {
+                    crossings.extend(walls.iter().map(|&wall| (wall, species, site, law)));
+                }
+            }
+        }
+    }
+    crossings.sort_unstable();
+    let doubled = (crossings.windows(2))
+        .filter(|pair| pair[0].0 == pair[1].0 && pair[0].1 == pair[1].1 && pair[0].2 == pair[1].2)
+        .map(|pair| ([pair[0].3, pair[1].3], pair[0].2))
+        .min();
+    match doubled {
+        Some((laws, site)) => Err(CompileDefect::CrossedTwice { laws, site }),
         None => Ok(()),
     }
 }
@@ -276,6 +311,15 @@ fn check_reactions(fragments: &[FragmentData], schema: &Schema) -> Result<(), Co
             if let Some(pair) = species.windows(2).find(|pair| pair[0] == pair[1]) {
                 let species = pair[0];
                 return Err(CompileDefect::SpeciesTwice { law, species });
+            }
+            let mut spaces: Vec<Space> = reaction.terms.iter().map(|term| term.space).collect();
+            spaces.sort_unstable();
+            spaces.dedup();
+            if let [first, second, ..] = spaces[..] {
+                return Err(CompileDefect::ReactionInTwoSpaces {
+                    law,
+                    spaces: [first, second],
+                });
             }
             let fuel = |species: Species| matches!(species.makeup(), Makeup::Atoms { fuel: true, .. });
             let stated = |species: Species| schema.energy.iter().any(|content| content.0 == species);
@@ -338,9 +382,16 @@ fn obligations<'f>(
     held: &[HeldCard],
     unissued: &'f FragmentData,
 ) -> Result<Vec<Owed<'f>>, CompileDefect> {
+    let owes_pressure = |card: &&'static str| {
+        (fragments.iter()).any(|fragment| {
+            fragment.owner == *card
+                && (fragment.slots.iter())
+                    .any(|slot| slot.name == ENCLOSURE_PRESSURE && slot.over == Over::HeldEnclosures)
+        })
+    };
     let unheld = (schema.anatomy.held_enclosures())
         .map(|(_, card)| card)
-        .filter(|card| !held.iter().any(|held| held.card == *card))
+        .filter(|card| !owes_pressure(card))
         .min();
     if let Some(owner) = unheld {
         let local = ENCLOSURE_PRESSURE;
@@ -348,12 +399,27 @@ fn obligations<'f>(
             law: LawName { owner, local },
         });
     }
+    let requested = |family| (fragments.iter()).any(|fragment| fragment.families.contains(&family));
+    let unowed = !requested(Family::Sinusoids) && !reaches_of(Family::Sinusoids, schema).is_empty();
+    if requested(Family::Circulation) && unowed {
+        let (owner, local) = (crate::Hepatic::CARD, Family::Sinusoids.name());
+        return Err(CompileDefect::OmittedLaw {
+            law: LawName { owner, local },
+        });
+    }
     let mut owed = Vec::new();
     for water in &schema.boundaries {
-        let owner = route_owner(held, water.name);
-        let fragment = (fragments.iter())
-            .find(|fragment| fragment.owner == owner)
-            .unwrap_or(unissued);
+        let owner = route_owner(schema, held, water.name);
+        let fragment = match (fragments.iter()).find(|fragment| fragment.owner == owner) {
+            Some(fragment) => fragment,
+            None if owner == Boundary::CARD => unissued,
+            None => {
+                let local = water.name;
+                return Err(CompileDefect::OmittedLaw {
+                    law: LawName { owner, local },
+                });
+            }
+        };
         owed.push(Owed::gather(
             fragment,
             water.name,
@@ -678,7 +744,7 @@ impl Rows {
         let rate = crate::quantity::dimension::<crate::Rate<crate::Water>>();
         for boundary in schema.boundaries.iter().filter(|boundary| boundary.drains) {
             let law = LawName {
-                owner: route_owner(held, boundary.name),
+                owner: route_owner(schema, held, boundary.name),
                 local: boundary.name,
             };
             slots.push((SlotKind::Defined, Slot::from(law), AdmissibleSet::Finite, &rate));
@@ -830,6 +896,11 @@ impl Reaches {
         Species::WATER_BORNE.into_iter().filter(apart).collect()
     }
 }
+fn sinusoidal(anatomy: &Anatomy, (from, to): (SiteId, SiteId)) -> bool {
+    let liver = |site| anatomy.tissue(site) == Some(crate::Tissue::Liver);
+    liver(from) || liver(to)
+}
+
 fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
     let anatomy = &schema.anatomy;
     let edge = |(from, to): (SiteId, SiteId), ends: [PoolRef; 2]| Reach {
@@ -851,11 +922,15 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
     let heat = |site| species_at(site, Space::Thermal, Species::Energy);
     match family {
         Family::Circulation => (anatomy.vascular())
-            .filter(|&pair| !anatomy.is_valve(pair))
+            .filter(|&pair| !anatomy.is_valve(pair) && !sinusoidal(anatomy, pair))
             .map(blood)
             .collect(),
         Family::Valves => (anatomy.vascular())
             .filter(|&pair| anatomy.is_valve(pair))
+            .map(blood)
+            .collect(),
+        Family::Sinusoids => (anatomy.vascular())
+            .filter(|&pair| !anatomy.is_valve(pair) && sinusoidal(anatomy, pair))
             .map(blood)
             .collect(),
         Family::Starling => (anatomy.in_set(Sites::Class(Class::CapillaryBed)).into_iter())
@@ -1274,6 +1349,10 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                 targets
             }
         };
+        let route = match law.serves {
+            Serves::Family(family) | Serves::Slot(Over::Route(family)) => Some(family),
+            _ => None,
+        };
         for &(_, kernel) in &law.laws {
             if let Serves::Boundary(water) = law.serves {
                 let written = (kernel.code.iter())
@@ -1310,7 +1389,7 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                     program,
                     context,
                     target,
-                    addresses: addresses(law.name, kernel, context, places)?,
+                    addresses: addresses(law.name, route, kernel, context, places)?,
                 });
             }
         }
@@ -1405,7 +1484,7 @@ fn fluid_columns(placement: &mut Placement, places: &Places) -> Result<(), Compi
     }
     for boundary in schema.boundaries.iter().filter(|boundary| boundary.drains) {
         let law = LawName {
-            owner: route_owner(held, boundary.name),
+            owner: route_owner(schema, held, boundary.name),
             local: boundary.name,
         };
         let flow = Address::Unknown(UnknownId::at(rows.declared(law, Context::Body)));
@@ -1662,6 +1741,7 @@ fn place_of(place: Where, context: Context, anatomy: &Anatomy) -> Option<SiteId>
 
 fn addresses(
     law: LawName,
+    route: Option<Family>,
     kernel: &KernelData,
     context: Context,
     places: &Places,
@@ -1782,7 +1862,7 @@ fn addresses(
                 unknown(rows.amount(pool).ok_or(left_out(law, pool))?)
             }
             Source::Drive(route) => {
-                if route_owner(held, route) != law.owner {
+                if route_owner(schema, held, route) != law.owner {
                     return Err(CompileDefect::DriveOfAnotherRoute { law, route });
                 }
                 Address::Boundary(route)
@@ -1820,14 +1900,16 @@ fn addresses(
                 let site = place_of(place, context, anatomy).ok_or(CompileDefect::NoSuchRead { law })?;
                 Address::Height(anatomy.axial(site).to_bits())
             }
-            (Input::EdgeFlow, Context::Edge { from, to }) => {
-                let family = if anatomy.is_valve((from, to)) {
-                    Family::Valves
+            (Input::EdgeFlow, Context::Edge { from, to }) if route.is_some_and(Family::vascular) => {
+                let (family, owner) = if anatomy.is_valve((from, to)) {
+                    (Family::Valves, law.owner)
+                } else if sinusoidal(anatomy, (from, to)) {
+                    (Family::Sinusoids, crate::Hepatic::CARD)
                 } else {
-                    Family::Circulation
+                    (Family::Circulation, law.owner)
                 };
                 let flow = LawName {
-                    owner: law.owner,
+                    owner,
                     local: family.name(),
                 };
                 unknown(
@@ -1895,7 +1977,7 @@ fn addresses(
 
 fn holder(schema: &Schema, held: &[HeldCard], pool: PoolRef) -> Result<Option<&'static str>, CompileDefect> {
     let enclosure = match schema.anatomy.compliance(pool.site) {
-        Some(Compliance::Held { card }) => Some(card),
+        Some(Compliance::Held { card }) if held.iter().any(|known| known.card == card) => Some(card),
         _ => None,
     };
     let declared = (held.iter())
@@ -1920,7 +2002,8 @@ fn check_holds(rows: &Rows, schema: &Schema, held: &[HeldCard]) -> Result<(), Co
             return Err(CompileDefect::HeldNothing { card, space });
         }
     }
-    for (site, card) in schema.anatomy.held_enclosures() {
+    let stood_in = |card: &&'static str| held.iter().any(|known| known.card == *card);
+    for (site, card) in (schema.anatomy.held_enclosures()).filter(|(_, card)| stood_in(card)) {
         if !rows.amounts.iter().any(|pool| pool.site == site) {
             let space = Space::Fluid;
             return Err(CompileDefect::HeldNothing { card, space });
@@ -1978,6 +2061,10 @@ fn guards(
                 owner: fragment.owner,
                 local: mode.name,
             };
+            let route = match mode.over {
+                Over::Route(family) => Some(family),
+                _ => None,
+            };
             let sorted = |index: usize| {
                 let mut values = mode.values.clone();
                 values.sort_unstable();
@@ -2007,7 +2094,7 @@ fn guards(
                     inputs: Vec::new(),
                     resets: reset,
                 };
-                guards.push((layout, addresses(law, zero, at, places)?));
+                guards.push((layout, addresses(law, route, zero, at, places)?));
             }
         }
     }

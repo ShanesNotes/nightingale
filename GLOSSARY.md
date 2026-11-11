@@ -240,7 +240,7 @@ A bounded space (the skull, the pericardium, the chest, the abdomen, a limb comp
 _Avoid_: pressure wire
 
 **Compliance**:
-How an enclosure's pressure answers the volume inside it: rigid, elastic, or held by a named stand-in.
+How an enclosure's pressure answers the volume inside it: rigid, elastic, or set by the card the map names, through a held stand-in or that card's own law.
 
 **Position**:
 A site's place in the body frame. Posture rotates the frame, so every site's hydrostatic head follows from one place and no law carries gravity.
@@ -295,8 +295,17 @@ Dissolved particles that pull water across a wall that holds them back. A space'
 **Receipt pool**:
 A named pool outside the body, or behind a held stand-in, that takes what crosses the boundary, so a boundary transfer still has two ends.
 
+**Boundary process**:
+A card's way across the body's boundary, such as insulin's secretion, the fecal exit of sodium or the urine drain. The contract states its card, species, direction and name, and the schema places it at a site, so only that card serves it.
+
 **Route family**:
 Every transfer of one kind the map implies: one per site of a class, such as plasma to interstitium at every capillary bed, or one per vascular edge. A system requests it whole through its scope, so the body owes a law for every one, and no law names a site.
+
+**Cargo class**:
+The species a card's wall or passage port may move, closed in the contract, such as the fuels the metabolism card moves into cells. A species outside the class does not compile.
+
+**Sinusoids**:
+The liver bed's own edges: every plain vascular edge with an end at a bed that serves the liver. The hepatic card's law holds their flow, and circulation reaches every other plain vascular edge.
 
 **Passage**:
 A route along a network, one species at a time: the airway's gas, the gut's transit, absorption into a bed, fat into the lymph, shedding from the gut's cells and secretion from the tubule's cells.
@@ -545,6 +554,9 @@ The crates a step's arithmetic runs through: the rows the crate table in `docs/a
 **Fragment**:
 What a system crate declares: its laws, ports, parameter slots, modes and streams, as data the contract compiles. No fragment runs during a solve.
 
+**Scope**:
+What an assembly issues each card once: the builder its laws are declared on and the ports that grant only what the card owns at rung 0. A card outside the slice is issued fresh, or its scope takes over the builder its held stand-ins wrote to, so it keeps named holds beside its crate's laws.
+
 **Kernel**:
 One law's closed expression graph, built once at declaration from the contract's own operators. It reads no time step, solver, state store or host math.
 _Avoid_: callback
@@ -611,8 +623,11 @@ The systems the arena runs for real: pulsatile cardiovascular, fluids, renal, a 
 **Whole body**:
 All 13 systems, the receptor layer and the boundary, as body ticket 01 plans them at rung 0. Its census accounts for every arrow of the coupling map, field by field.
 
+**Assembly**:
+The set of systems one compiled body holds: the slice or the whole body. Each assembly has its own census. The code's `Assembly` is the builder that issues each card's scope and compiles one body from them: it builds an assembly in this sense and is not one.
+
 **Held stand-in**:
-A system outside the slice, held by a declaration that names every route on which it supplies or removes an amount, so stability bought with held support shows in the certificate.
+A system's laws that stand in for physiology, held by a declaration that names every route on which they supply or remove an amount, so stability bought with held support shows in the certificate. A card outside the slice stands in whole, and a card with a crate keeps only its named holds this way.
 _Avoid_: stub, mock
 
 **Coverage manifest**:
@@ -695,7 +710,7 @@ _Avoid_: chart (for a statechart)
 The atlas's map of how systems affect each other: shared substrates and 38 direct couplings. Not the map of sites.
 
 **Census**:
-How the coupling map's 38 arrows stand in one assembly, the slice or the whole body, counted by the compiler. In the slice an arrow is live, an input, a sink, an anatomy relation, outside or unresolved. In the whole body it is an anatomy relation or carries fields, each wired or held, and it is live when it wires one and held when it holds every one.
+How the coupling map's 38 arrows stand in one assembly, the slice or the whole body, counted by the compiler. In the slice an arrow is live, an input, a sink, an anatomy relation, outside or unresolved. In the whole body it is an anatomy relation or names fields, each wired or held, and only a wired field is carried. It is live when it wires one and held when it holds every one, and every arrow is mapped, since a held field's home is its holder.
 
 ## Systems
 
