@@ -43,7 +43,7 @@ fn in_plasma<'b, 'k, Q: Substance>(
     k: &mut Kernel<'b, 'k, Receptor, Blood>,
     route: &SiteRoute<'b, Receptor, Blood, Q>,
 ) -> Expr<'b, 'k, Receptor, Concentration<Q>> {
-    let held = k.at_site(&route.from_amount::<Q>());
+    let held = k.at_site(&route.from_amount());
     let water = k.at_site(&route.from_amount());
     let volume = k.volume(water);
     let ratio = k.divide(held, volume);
