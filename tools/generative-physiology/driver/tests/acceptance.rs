@@ -1,5 +1,6 @@
 use gp_driver::{
-    Arrival, EventIndex, RunSpec, SMOKE_SPEC, SpecId, Table, digest_of_words, hex, summary_value,
+    Arrival, EventIndex, RunSpec, SMOKE_HEAD_NS, SMOKE_PACKET, SMOKE_SEAL, SMOKE_SPEC, SpecId, Table,
+    digest_of_words, hex, summary_value,
 };
 use ng_validate::anchor_moment;
 use std::collections::BTreeMap;
@@ -223,22 +224,16 @@ fn the_smoke_run_holds_the_first_second_pins() {
     let _turn = one_teacher_run_at_a_time();
     let directory = smoke();
     let summary = summary(directory);
-    assert_eq!(
-        value(&summary, "packet"),
-        "6d709479f0b103cadc1972febf6437a2dde172e19242eb76908b9dabde5bb752"
-    );
+    assert_eq!(value(&summary, "packet"), SMOKE_PACKET);
     let anchor = anchor_moment().nanoseconds();
     let steps = Table::<u64>::read(&directory.join("steps.npy")).expect("steps");
     let first = steps
         .iter()
         .find(|row| row[1] >= anchor + 1_000_000_000)
         .expect("a head past 1000 ms");
-    assert_eq!(first[1] - anchor, 1_000_079_707);
+    assert_eq!(first[1] - anchor, SMOKE_HEAD_NS);
     let seal = hex(&digest_of_words([first[3], first[4], first[5], first[6]]));
-    assert_eq!(
-        seal,
-        "58233f790617a4f1bf5122b47fc44efaeface2ebb7d4c3652567bb44ba176ecf"
-    );
+    assert_eq!(seal, SMOKE_SEAL);
     let beats: u64 = value(&summary, "beats").parse().expect("a count");
     assert!(beats >= 15, "{beats} beats");
     assert_eq!(

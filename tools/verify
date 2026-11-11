@@ -30,37 +30,53 @@ while [ $# -gt 0 ]; do
 done
 [ "$mode" != full ] || [ ${#base_args[@]} -eq 0 ] || usage
 
+run_order=(01-toolchain 05-seam 10-docs 15-f64 20-sketch 30-data 40-mutants:first 10-rust 40-mutants:rest 50-workspace)
+for file in tools/verify.d/*.sh; do
+  case " ${run_order[*]%%:*} " in
+    *" $(basename "$file" .sh) "*) ;;
+    *) echo "verify: $file has no place in the run order"; exit 1 ;;
+  esac
+done
+
 # A command substitution, not `< <(...)`: set -e ignores a failed process substitution.
 if ! plan=$(python3 -I tools/gate/gate.py plan "$mode" "${base_args[@]}"); then
   printf '%s\n' "$plan"
   echo "verify: the plan failed"
   exit 1
 fi
-scope='' base='' reason='' crates='' smoke='' steps=''
+scope='' base='' reason='' crates='' smoke='' first='' rest='' steps=''
 while IFS='=' read -r key value; do
   case "$key" in
-    scope | base | reason | crates | smoke | steps) printf -v "$key" '%s' "$value" ;;
+    scope | base | reason | crates | smoke | first | rest | steps) printf -v "$key" '%s' "$value" ;;
   esac
 done <<<"$plan"
 echo "gate: mode=$mode scope=$scope base=$base reason=$reason"
 echo "gate: crates=${crates:-none} smoke=${smoke:-none}"
+echo "gate: first=${first:-none}"
 echo "gate: steps=$steps"
-export NG_GATE_MODE="$mode" NG_GATE_SCOPE="$scope" NG_GATE_BASE="$base" NG_GATE_CRATES="$crates" NG_GATE_SMOKE="$smoke"
+export NG_GATE_MODE="$mode" NG_GATE_SCOPE="$scope" NG_GATE_BASE="$base" NG_GATE_CRATES="$crates" \
+  NG_GATE_SMOKE="$smoke" NG_GATE_FIRST="$first" NG_GATE_REST="$rest"
+
 times=$(mktemp)
 trap 'rm -f "$times"' EXIT
 export NG_GATE_TIMES="$times"
 
-for step in tools/verify.d/*.sh; do
-  name=$(basename "$step")
+declare -A last=() spent=()
+for unit in "${run_order[@]}"; do last[${unit%%:*}]=$unit; done
+for unit in "${run_order[@]}"; do
+  IFS=: read -r step part <<<"$unit"
+  name="$step.sh${part:+ $part}"
   case " $steps " in
-    *" ${name%.sh} "*)
-      echo "== $name"
-      start=$SECONDS
-      bash "$step" || { echo "verify: $name failed"; exit 1; }
-      echo "time: ${name%.sh} $((SECONDS - start)) s" >>"$times"
-      ;;
-    *) echo "== $name (not selected)" ;;
+    *" $step "*) ;;
+    *) echo "== $name (not selected)"; continue ;;
   esac
+  echo "== $name"
+  start=$SECONDS
+  bash "tools/verify.d/$step.sh" ${part:+"$part"} || { echo "verify: $step.sh failed"; exit 1; }
+  took=$((SECONDS - start))
+  spent[$step]=$((${spent[$step]:-0} + took))
+  [ -z "$part" ] || echo "time: $step $part $took s" >>"$times"
+  [ "${last[$step]}" != "$unit" ] || echo "time: $step ${spent[$step]} s" >>"$times"
 done
 cat "$times"
 if [ "$mode" = changed ]; then

@@ -27,6 +27,10 @@ pass there before any row runs. Each row prints as it ends, so a killed sweep ke
 Exit 0 only when every row is CAUGHT. --check lists the NOT APPLIED rows and stops before any build. --since keeps the
 rows whose path, or any file under their test crate's tests/, changed after REV. Each command runs in its own process
 group, and that group dies with the command and with this script, however this script dies.
+
+tools/verify's 40-mutants step runs this script through `gate.py mutants`. Before 10-rust it replays the rows a change
+adds or edits, or whose path it changes, and after 10-rust the rest. It stops each sweep at the first row that is not
+CAUGHT, so a red run reports only its first failure. A hand run reports every row.
 """
 import argparse
 import collections

@@ -24,10 +24,17 @@ for crate in $NG_GATE_CRATES; do
 done
 if [ ${#pkgs[@]} -gt 0 ]; then
   phase clippy cargo clippy --locked --all-targets "${pkgs[@]}" -- -D warnings
-  if [ "${NG_GATE_MODE:-}" = full ]; then
-    phase test cargo test --locked "${pkgs[@]}" -- --include-ignored
+  ignored=()
+  [ "${NG_GATE_MODE:-}" != full ] || ignored=(-- --include-ignored)
+  if [ -n "${NG_GATE_FIRST:-}" ]; then
+    first=() rest=()
+    for name in $NG_GATE_FIRST; do first+=(--test "$name"); done
+    for name in ${NG_GATE_REST:-}; do rest+=(--test "$name"); done
+    phase "test first" cargo test --locked "${pkgs[@]}" "${first[@]}" "${ignored[@]}"
+    phase test cargo test --locked "${pkgs[@]}" --lib "${rest[@]}" "${ignored[@]}"
+    phase "test doc" cargo test --locked "${pkgs[@]}" --doc "${ignored[@]}"
   else
-    phase test cargo test --locked "${pkgs[@]}"
+    phase test cargo test --locked "${pkgs[@]}" "${ignored[@]}"
   fi
 fi
 for smoke in ${NG_GATE_SMOKE:-}; do

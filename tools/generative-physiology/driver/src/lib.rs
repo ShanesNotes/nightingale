@@ -16,7 +16,7 @@ pub use capture::{
 };
 pub use link_file::LinkFile;
 pub use npy::{Element, NpyWriter, Table};
-pub use smoke::{SMOKE_SPEC, check_smoke};
+pub use smoke::{SMOKE_HEAD_NS, SMOKE_PACKET, SMOKE_SEAL, SMOKE_SPEC, check_smoke};
 pub use spec::{
     CAPTURE_VERSION, CoreChoice, PostureEvent, RunSpec, Setting, SpecError, SpecId, Stamp, Trunk, Variant,
     digest_of_hex, hex,
