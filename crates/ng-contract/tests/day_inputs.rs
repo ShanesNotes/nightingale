@@ -83,7 +83,6 @@ impl Bench {
             (None, Ok(_)) => panic!("an attempt that issued no ticket passed"),
         }
     }
-    /// Each slot's residual at the ticket's start with every unknown at zero: minus what its law read.
     fn read(&self) -> Vec<(&'static str, f64)> {
         let problem = self.problem();
         let ticket = self.ticket(SECOND).expect("a ticket");
@@ -102,7 +101,6 @@ impl Bench {
     }
 }
 
-/// Every held input of the day, each into its own slot through a gain.
 const EVERY: [&str; 12] = [
     "clock cosine",
     "clock sine",
@@ -135,7 +133,6 @@ macro_rules! follows {
     };
 }
 
-/// A whole-body law for each named read, and one slot that reads only the gain.
 fn reading(reads: &[&str]) -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", at()?);
@@ -184,7 +181,6 @@ fn slot(local: &'static str) -> RowKind {
     RowKind::Algebraic(LawName { owner: "NS", local }.into())
 }
 
-/// Each slot starts at what it reads: admission takes a start only where every law holds exactly.
 fn packet(starts: &[(&str, f64)]) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
     let mut packet = ParameterPacket::new();
     let gain = Measure::<Dimensionless>::new(1.0)?;
@@ -234,7 +230,6 @@ fn room(values: [f64; 8]) -> Result<BoundaryInput, AdmissionError> {
     }))
 }
 
-/// What `the_day` gives each read at six in the morning: a quarter turn past midnight.
 const READS: [(&str, f64); 12] = [
     ("clock cosine", 0.0),
     ("clock sine", 1.0),
@@ -257,7 +252,6 @@ fn reads(names: &[&str]) -> Vec<(&'static str, f64)> {
         .collect()
 }
 
-/// Synthetic values, each distinct so a crossed wire shows.
 fn the_day(clock: u64) -> Result<Vec<BoundaryEvent>, AdmissionError> {
     Ok(vec![
         event(
@@ -373,8 +367,6 @@ fn a_step_never_crosses_a_clock_edge_in_a_body_that_reads_the_clock() -> Result<
     Ok(())
 }
 
-/// What a body that reads sleep, the room and the clock reads at admission, six hours after the packet's day stated
-/// them: the clock moved on from 18:00 to midnight, the later sleep and the later room.
 #[test]
 fn a_held_input_the_day_stated_before_the_anchor_moment_reads_at_it_with_the_clock_moved_on()
 -> Result<(), InitializationFailure> {
@@ -437,8 +429,6 @@ fn bind_refuses_a_day_event_the_body_would_refuse_on_its_port() -> Result<(), Ad
     Ok(())
 }
 
-/// A law that defines a slot as the clock's cosine sets a produced quantity; its legal twin scales a
-/// parameter by it.
 fn defining(scaled: bool) -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     map.site::<TissueSite>("body", at()?);

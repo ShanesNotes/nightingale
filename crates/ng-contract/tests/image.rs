@@ -394,7 +394,6 @@ fn held(id: &[u8], from: SimTime, payload: BoundaryInput) -> BoundaryEvent {
     BoundaryEvent::new(InputId::new(Digest::of_canonical(id)), from, payload)
 }
 
-/// A clock that has applied and still runs, and a sleep, a room and a void that wait.
 fn held_image(body: &CompiledBody, sites: [SiteId; 2]) -> ImageParts {
     let room = Room {
         air: measure(293.0),
@@ -422,8 +421,6 @@ fn held_image(body: &CompiledBody, sites: [SiteId; 2]) -> ImageParts {
     image_with(body, sites, events)
 }
 
-/// Where a held input's name starts, as its length: its tag is the 8 bytes before, and its values follow its
-/// amount and end.
 fn named(bytes: &[u8], name: &str) -> (usize, usize) {
     let mut text = (name.len() as u64).to_be_bytes().to_vec();
     text.extend_from_slice(name.as_bytes());

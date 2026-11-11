@@ -15,7 +15,6 @@ pub use day::Day;
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
 const MINUTE_NS: u64 = 60_000_000_000;
 const DAY_NS: u64 = 24 * 60 * MINUTE_NS;
-/// Eight times this many minutes make the day's one turn.
 const EIGHTH_OF_A_DAY: NonZeroU64 = NonZeroU64::new(180).unwrap();
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -51,22 +50,17 @@ pub enum BoundaryInput {
     /// How the body lies from this instant until the next one. An event is one instant, so a ramp is a train of events.
     /// Each ends a step, and every site's head follows from its place.
     Posture(Posture),
-    /// The time of day from this instant until the next clock.
     Clock(Clock),
     Sleep(Sleep),
     Room(Room),
-    /// The bladder's outlet from this instant until the next void.
     Void(Gate),
     Meal(Meal),
 }
-/// A meal: one event with one id, which lands whole and once. It delivers each species with an amount above zero
-/// into the gut, from the event's instant until `ends`, as a delivery of its own whose id comes from the meal's.
 pub struct Meal {
     ends: SimTime,
     amounts: [f64; Meal::SPECIES.len()],
 }
 impl Meal {
-    /// Body 01's boundary rows, in their order.
     pub const SPECIES: [Species; 12] = [
         Species::Water,
         Species::Sodium,
@@ -81,7 +75,6 @@ impl Meal {
         Species::Magnesium,
         Species::Iron,
     ];
-    /// The gut's boundary for each species, in the order of `SPECIES`.
     pub const BOUNDARIES: [&'static str; 12] = [
         "gut water",
         "gut sodium",
@@ -119,7 +112,6 @@ mod eaten {
         const PLACE: usize = super::place(Self::SPECIES);
     }
 }
-/// A species a meal delivers: exactly those of `Meal::SPECIES`.
 pub trait Eaten: eaten::Sealed {}
 macro_rules! eaten {
     ($($species:ident),*) => {$(
@@ -141,19 +133,16 @@ eaten!(
     Magnesium,
     Iron
 );
-/// A meal part's id, from the meal's id and the species' place.
 fn part_id(meal: InputId, place: usize) -> InputId {
     let mut out = Canonical::new("ng-contract meal part 1");
     meal.seal(&mut out);
     out.number(place as u64);
     InputId::new(out.digest())
 }
-/// The time of day at the event's instant. The clock's phase is zero at midnight and makes one turn a day.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Clock {
     pub since_midnight_ns: u64,
 }
-/// Non-REM sleep reads 1 and waking 0. Rung 0 has no REM sleep.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sleep {
     Awake,
@@ -173,9 +162,8 @@ impl Sleep {
             .ok_or(Malformed)
     }
 }
-/// The room around the body. Temperatures are absolute. Air speed is its ratio to 0.1 m/s and clothing or bedding
-/// a count of clo, because the table has no speed and insulation has no dimension. Oxygen and carbon dioxide are
-/// the inspired gas's dry fractions, and nitrogen gas is the rest.
+/// Air speed is its ratio to 0.1 m/s and clothing or bedding a count of clo, because the table has no speed and
+/// insulation has no dimension.
 pub struct Room {
     pub air: Measure<Temperature>,
     pub radiant: Measure<Temperature>,
@@ -233,7 +221,6 @@ fn room_in_range(values: [f64; ROOM.len()]) -> bool {
         && oxygen + carbon_dioxide <= 1.0
         && clothing >= 0.0
 }
-/// A void carries no amount, because the volume voided is a produced quantity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Gate {
     Open,
@@ -253,7 +240,6 @@ impl Gate {
             .ok_or(Malformed)
     }
 }
-/// A value of the day's held inputs a law reads. Each is held from its event until the next of its kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Held {
     ClockCosine,
@@ -351,8 +337,6 @@ pub(crate) struct Delivery {
     rate: f64,
     kind: Kind,
 }
-/// A posture and a held input never end, and each replaces the one of its kind before it. A delivery names its
-/// species by its place in `Meal::SPECIES`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Kind {
     Delivered(usize),
@@ -414,7 +398,6 @@ impl BoundaryPort {
         deliveries.sort_by_key(|delivery| (delivery.at, delivery.id));
         Ok(Self { deliveries })
     }
-    /// Every input of the timeline, payload and time, in order.
     pub fn digest(&self) -> Digest {
         let Self { deliveries } = self;
         let mut out = Canonical::new("ng-contract boundary port 1");
@@ -454,10 +437,8 @@ impl BoundaryPort {
             .map(|delivery| delivery.id)
     }
 }
-/// One event's deliveries: a meal's parts, or the one delivery of any other event.
 struct Arrival {
     id: InputId,
-    /// Every id the event can hold a part under.
     ids: Vec<InputId>,
     parts: Vec<Delivery>,
 }
@@ -469,7 +450,6 @@ impl Arrival {
             parts: vec![delivery],
         }
     }
-    /// The same parts again are the same request; another payload under the same id is a conflict.
     fn new_to(&self, known: &[Delivery]) -> Result<bool, AdmissionError> {
         let found: Vec<&Delivery> = (known.iter())
             .filter(|known| self.ids.contains(&known.id))
@@ -494,7 +474,6 @@ impl Arrival {
             }
         }
     }
-    /// A refusal names the event, never one of a meal's parts.
     fn named(&self, error: AdmissionError) -> AdmissionError {
         match error {
             AdmissionError::EventBeforeHead { .. } => AdmissionError::EventBeforeHead { id: self.id },
@@ -503,7 +482,6 @@ impl Arrival {
     }
 }
 impl Delivery {
-    /// Refuses the whole meal when any part would be refused, so no part lands alone.
     fn meal(id: InputId, at: SimTime, meal: Meal) -> Result<Arrival, AdmissionError> {
         let Meal { ends, amounts } = meal;
         if ends <= at || amounts.iter().all(|amount| *amount == 0.0) {
@@ -626,7 +604,6 @@ impl Delivery {
             kind: Kind::Delivered(place),
         })
     }
-    /// A posture or a held input, which no boundary carries.
     pub(crate) fn held_event(&self) -> bool {
         !matches!(self.kind, Kind::Delivered(_))
     }
@@ -751,7 +728,6 @@ impl PendingInputs {
         let running = (self.past.active.iter()).filter(move |delivery| delivery.ends > start);
         running.chain(self.due_at(start))
     }
-    /// In a body that reads the clock, each minute's edge ends a step as a delivery's end does.
     pub(crate) fn plan(&self, start: SimTime, fired: bool, reads: &[Held]) -> Plan {
         let due = self.due_at(start);
         let ended = self.past.active.iter().any(|delivery| delivery.ends == start);
@@ -1063,7 +1039,6 @@ fn land<T>(
 }
 
 const POSTURE: &str = "posture";
-/// The record tag of a delivery of each species of `Meal::SPECIES`.
 const DELIVERED_PAYLOADS: [u64; Meal::SPECIES.len()] = [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12];
 const POSTURE_PAYLOAD: u64 = 4;
 const CLOCK_PAYLOAD: u64 = 13;
@@ -1091,22 +1066,18 @@ const DELIVERY_BYTES: usize = 32 + 8 + 8 + 8 + 8 + 8;
 fn reads_clock(reads: &[Held]) -> bool {
     reads.contains(&Held::ClockCosine) || reads.contains(&Held::ClockSine)
 }
-/// How far `now` lies past the clock's last whole minute, for a clock that read `reading` at `at`.
 fn into_minute(at: SimTime, reading: u64, now: SimTime) -> u64 {
     let elapsed = now.nanoseconds().saturating_sub(at.nanoseconds());
     (reading % MINUTE_NS + elapsed % MINUTE_NS) % MINUTE_NS
 }
-/// The clock's first whole minute after `now`.
 fn next_minute(at: SimTime, reading: u64, now: SimTime) -> SimTime {
     let left = MINUTE_NS - into_minute(at, reading, now);
     SimTime::from_ns(now.nanoseconds().saturating_add(left))
 }
-/// The time of day at `now` for a clock that read `reading` at `at`.
 fn time_of_day(at: SimTime, reading: u64, now: SimTime) -> u64 {
     let elapsed = now.nanoseconds().saturating_sub(at.nanoseconds());
     (reading + elapsed % DAY_NS) % DAY_NS
 }
-/// The time of day at `now` in whole minutes: the phase is zero at midnight and makes one turn a day.
 fn minute_of_day(at: SimTime, reading: u64, now: SimTime) -> u64 {
     time_of_day(at, reading, now) / MINUTE_NS
 }
@@ -1125,8 +1096,7 @@ impl DriveFrame {
     pub(crate) fn height(&self, axial: f64) -> f64 {
         axial * if axial < 0.0 { self.legs } else { self.trunk }
     }
-    /// Deliveries add, and a posture or a held input replaces the one of its kind before it: all arrive here in
-    /// `(time, id)` order. The clock's value is the one at `now`.
+    /// Deliveries add, and a posture replaces the one before it: both arrive here in `(time, id)` order.
     fn take(&mut self, delivery: &Delivery, now: SimTime, reads: &[Held]) {
         match delivery.kind {
             Kind::Delivered(_) => self.add(delivery.boundary, delivery.rate),
@@ -1224,7 +1194,6 @@ mod tests {
             SimTime::from_ns(0),
         ))
     }
-    /// Every event has applied and still runs, as after a step past them all.
     fn applied(events: Vec<BoundaryEvent>) -> Result<PendingInputs, AdmissionError> {
         let mut pending = opened(events)?;
         pending.past.cursor = pending.timeline.len();
@@ -1248,7 +1217,6 @@ mod tests {
         let half_past_seven = 7 * HOUR + 30 * MINUTE_NS;
         let pending = opened(vec![clock(0, half_past_seven)])?;
         let frame = |at: u64| pending.frame_at(SimTime::from_ns(at), &CLOCK);
-        // 07:30 is 112.5 degrees past midnight.
         let (cosine, sine) = (frame(0).held(Held::ClockCosine), frame(0).held(Held::ClockSine));
         assert!((cosine + 0.382_683_432_365_089_8).abs() < 1e-15, "{cosine}");
         assert!((sine - 0.923_879_532_511_286_7).abs() < 1e-15, "{sine}");

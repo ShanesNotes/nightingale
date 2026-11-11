@@ -124,8 +124,6 @@ pub(crate) fn ln(x: f64) -> Option<f64> {
     Some(k * LN2_HI - ((half_square - (tail + k * LN2_LO)) - f))
 }
 
-/// `(cos, sin)` of `k` steps, where `8 * eighth` steps make a turn, identical on every host: the angle inside one
-/// octant comes from the integers, then its Taylor polynomials, then the exact symmetries.
 pub(crate) fn turn(k: u64, eighth: NonZeroU64) -> (f64, f64) {
     let eighth = eighth.get();
     let quarter = 2 * eighth;

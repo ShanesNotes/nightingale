@@ -2333,7 +2333,6 @@ fn day_body() -> Result<CompiledBody, AdmissionError> {
     })
 }
 
-/// The route's law carries its drive into the gut.
 fn eaten<'b, Q: Substance>(
     laws: &mut FragmentBuilder<'b, Boundary>,
     ports: &BoundaryPorts<'b>,
@@ -2392,7 +2391,6 @@ const STATED: [(&str, f64); 12] = [
     ("clothing", 1.0),
 ];
 
-/// Synthetic amounts, delivered from 80 s until 140 s, across the later clock.
 fn lunch() -> Meal {
     Meal::new(at(140))
         .with(measure::<Water>(60.0))
@@ -2401,9 +2399,6 @@ fn lunch() -> Meal {
         .with(measure::<Iron>(0.6))
 }
 
-/// The day's held inputs at the anchor, which every run knows, then a later clock, a sleep, a room change, a
-/// void that opens and shuts and a meal, each of which can arrive late. The later clock crosses midnight. A run
-/// that knows them all at admission takes them on its port, or from its packet's day.
 struct DayInputs {
     body: CompiledBody,
     in_the_packet: bool,
@@ -2566,9 +2561,6 @@ fn state_bits(session: &Session<'_, Running>) -> [Digest; 6] {
     [state, continuation, segment, modes, streams, applied]
 }
 
-/// The same day known from the start in the packet, and its events each admitted at the last head that takes it
-/// on a packet with no day, give the same state bits at every revision. Their seals differ: the packet's hash
-/// covers its day.
 #[test]
 fn a_day_the_packet_holds_gives_the_bits_of_its_events_admitted_late() {
     let case = DayInputs::in_the_packet();
@@ -2614,7 +2606,6 @@ fn a_day_the_packet_holds_gives_the_bits_of_its_events_admitted_late() {
     assert_ne!(late.record().seal(), known.record().seal());
 }
 
-/// A resume reads the timeline from the checkpoint, never the packet's day again.
 #[test]
 fn a_run_whose_packet_holds_its_day_survives_a_resume() {
     let case = DayInputs::in_the_packet();
@@ -2630,7 +2621,6 @@ fn a_step_never_crosses_the_minute_of_a_clock_the_body_reads() {
     let case = DayInputs::new();
     let (core, store) = (reference(8 * SECOND), MemoryStore::default());
     let mut session = case.admit(&core, &store).expect("admitted");
-    // Each minute of the clock at six, then from ten seconds before midnight at 130 s.
     let edges = [60, 120, 140, 200].map(at);
     let mut steps = 0;
     while session.record().accepted().time() < case.end() {

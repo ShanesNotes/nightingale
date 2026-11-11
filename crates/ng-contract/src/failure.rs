@@ -215,21 +215,15 @@ pub enum AdmissionError {
         key: ParameterKey,
         binding: Binding,
     },
-    /// A delivery that starts or ends between two points of the cycle, or a clock the body reads whose minute
-    /// turns there.
     DeliveryOffGrid {
         id: InputId,
     },
-    /// A clock reading of a whole day or more.
     ClockOutOfRange {
         id: InputId,
     },
-    /// A room with a temperature at or below absolute zero, a humidity or an inspired fraction outside 0 to 1,
-    /// fractions that sum past 1, a negative air speed or clothing, or a pressure at or below zero.
     RoomOutOfRange {
         id: InputId,
     },
-    /// A held input a law reads with no value at the anchor moment.
     InputUnstated {
         input: Held,
     },
@@ -238,7 +232,6 @@ pub enum AdmissionError {
     DeliveryAcrossAdmission {
         id: InputId,
     },
-    /// A second day for one packet.
     DuplicateDay,
     /// Parameters bound on another compiled body.
     ForeignParameters,

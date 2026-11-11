@@ -94,7 +94,6 @@ impl CompiledBody {
             held,
         }
     }
-    /// The held inputs of the day some law reads, in order.
     pub(crate) fn held_reads(&self) -> &[Held] {
         &self.held
     }

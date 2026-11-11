@@ -70,7 +70,6 @@ impl Visit for Start<'_> {
     }
 }
 
-/// A gut that holds each of `species`, each delivered through its own boundary, whose law reads its drive.
 fn gut(species: &[Species]) -> Result<(CompiledBody, SiteId), AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", origin());
@@ -155,7 +154,6 @@ impl Bench {
             identity,
         })
     }
-    /// The rate into each species' pool over the first ticket.
     fn rates(&self) -> Vec<(Species, f64)> {
         let parts = &self.parts;
         let accepted = AcceptedStateView::new(parts.time, &parts.state, &parts.continuation, &parts.dense);
@@ -370,7 +368,6 @@ fn a_late_meal_lands_whole_or_not_at_all_and_once() -> Result<(), Initialization
     Ok(())
 }
 
-/// Where a part's boundary name starts, as its length: its tag is the 8 bytes before.
 fn tag_of(bytes: &[u8], name: &str) -> u64 {
     let mut text = (name.len() as u64).to_be_bytes().to_vec();
     text.extend_from_slice(name.as_bytes());
@@ -410,8 +407,6 @@ fn every_meal_species_reads_back_under_its_own_tag() -> Result<(), Initializatio
     Ok(())
 }
 
-/// A delivery of the packet's day that ran before the anchor moment and ended by it is dropped; one that runs
-/// across it is refused by its id, and a meal by the meal's.
 #[test]
 fn a_day_delivery_across_the_anchor_moment_is_refused_and_one_that_ended_is_dropped()
 -> Result<(), AdmissionError> {

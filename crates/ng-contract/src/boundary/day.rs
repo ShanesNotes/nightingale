@@ -3,9 +3,8 @@ use crate::identity::{Canonical, Seal};
 use crate::{AdmissionError, CompiledBody, InputId, SimTime};
 use core::mem::discriminant;
 
-/// The day a packet holds: the boundary events its run's are made from, in `(time, id)` order. A meal stays one
-/// item, its id, instant, end and amounts, so how a meal reaches the timeline can change without changing the day
-/// or the packet's hash.
+/// A meal stays one item, its id, instant, end and amounts, so how a meal reaches the timeline can change
+/// without changing the day or the packet's hash.
 pub struct Day {
     items: Vec<Item>,
 }
@@ -28,7 +27,6 @@ impl Item {
             Item::Event(delivery) => (delivery.at, delivery.id, EVENT),
         }
     }
-    /// What the item delivers: a meal's parts as the port parses them, or the event's one delivery.
     fn arrival(&self) -> Result<Arrival, AdmissionError> {
         match *self {
             Item::Meal {
@@ -42,8 +40,6 @@ impl Item {
     }
 }
 impl Day {
-    /// Parses each event as `BoundaryPort::new` does: the same refusals, one id with two payloads refused and one
-    /// id repeated with one payload taken once.
     pub fn new(events: Vec<BoundaryEvent>) -> Result<Self, AdmissionError> {
         let mut known: Vec<Delivery> = Vec::with_capacity(events.len());
         let mut items = Vec::with_capacity(events.len());
@@ -71,7 +67,6 @@ impl Day {
         items.sort_by_key(Item::key);
         Ok(Self { items })
     }
-    /// Refuses an event the body refuses on its port, whatever its instant.
     pub(crate) fn checked(self, body: &CompiledBody) -> Result<Self, AdmissionError> {
         for item in &self.items {
             for part in &item.arrival()?.parts {
@@ -82,7 +77,6 @@ impl Day {
     }
 }
 impl Seal for Day {
-    /// A meal seals as its one item, never as its parts, and every other event as its delivery.
     fn seal(&self, out: &mut Canonical) {
         let Self { items } = self;
         out.length(items.len());
@@ -110,11 +104,6 @@ impl Seal for Day {
 }
 
 impl BoundaryPort {
-    /// The port with `day` merged in, as admission at `moment` reads it. An event at or after the moment enters as
-    /// it is, a meal as its parts. The latest held input of each kind before the moment is restamped at it, a clock
-    /// moved on to the moment's time of day, unless one of its kind stands at the moment. A delivery that ended by
-    /// the moment is dropped, and one that runs across it is refused, because admission would read only its end.
-    /// One id on the day and the port is one input when its payload is the same.
     pub(crate) fn with_day(self, day: Day, moment: SimTime) -> Result<Self, AdmissionError> {
         let Self { mut deliveries } = self;
         let mut arrivals: Vec<Arrival> = Vec::new();
@@ -229,7 +218,6 @@ mod tests {
     fn holds(bytes: &[u8], wanted: &[u8]) -> bool {
         bytes.windows(wanted.len()).any(|window| window == wanted)
     }
-    /// An id as a seal writes it, with no tag before it.
     fn written(id: InputId) -> Vec<u8> {
         let mut out = Canonical::new("");
         id.seal(&mut out);

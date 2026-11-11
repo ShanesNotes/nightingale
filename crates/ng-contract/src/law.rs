@@ -676,17 +676,12 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     fn held<U: Dimension>(&mut self, held: Held) -> Expr<'b, 'k, O, U> {
         self.read_at(Source::Held(held), Where::Here)
     }
-    /// The cosine and the sine of the clock's phase, which is zero at midnight and makes one turn a day. Each
-    /// changes at a whole minute. Compile refuses a law that reads a held input of the day and no parameter or
-    /// memory slot, so an input scales a gain or a set point and never sets a produced quantity.
     pub fn clock(&mut self) -> (Expr<'b, 'k, O, Dimensionless>, Expr<'b, 'k, O, Dimensionless>) {
         (self.held(Held::ClockCosine), self.held(Held::ClockSine))
     }
-    /// 1 in non-REM sleep, 0 awake.
     pub fn asleep(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
         self.held(Held::Sleep)
     }
-    /// 1 while the bladder's outlet is open, 0 while it is shut.
     pub fn voiding(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
         self.held(Held::Void)
     }
@@ -696,27 +691,21 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     pub fn room_radiant(&mut self) -> Expr<'b, 'k, O, Temperature> {
         self.held(Held::RadiantTemperature)
     }
-    /// Relative humidity, from 0 to 1.
     pub fn room_humidity(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
         self.held(Held::Humidity)
     }
-    /// Air speed over 0.1 m/s.
     pub fn room_air_speed(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
         self.held(Held::AirSpeed)
     }
-    /// Barometric pressure.
     pub fn room_pressure(&mut self) -> Expr<'b, 'k, O, Pressure> {
         self.held(Held::Pressure)
     }
-    /// The inspired gas's dry fraction of oxygen.
     pub fn inspired_oxygen(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
         self.held(Held::InspiredOxygen)
     }
-    /// The inspired gas's dry fraction of carbon dioxide.
     pub fn inspired_carbon_dioxide(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
         self.held(Held::InspiredCarbonDioxide)
     }
-    /// Clothing or bedding, in clo.
     pub fn clothing(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
         self.held(Held::Clothing)
     }

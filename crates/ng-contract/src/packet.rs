@@ -31,9 +31,8 @@ impl sealed::PacketKind for SyntheticFixture {
     }
 }
 impl PacketKind for SyntheticFixture {}
-/// Clinical values with citations. No value that names no source enters one, and it always holds a day, so no
-/// clinical run takes its day from plain events. No crate here builds one yet: what a first reviewed packet needs
-/// beyond these lands with it.
+/// Clinical values with citations. No value that names no source enters one, and no crate here builds one
+/// yet: what a first reviewed packet needs beyond these lands with it.
 pub enum Reviewed {}
 impl sealed::PacketKind for Reviewed {
     const TAG: u64 = 1;
@@ -518,12 +517,9 @@ impl<K: PacketKind> ParameterPacket<K> {
     }
 }
 impl ParameterPacket<Reviewed> {
-    /// A packet whose start state stands at one instant, and the day its run's events are made from.
     pub fn with_day(day: Day) -> Self {
         Self::opened(None, Some(day))
     }
-    /// A packet whose start state returns after `cycle`: the periodic goal. Its start values are the guess
-    /// at every point.
     pub fn periodic_with_day(cycle: Cycle, day: Day) -> Self {
         Self::opened(Some(cycle), Some(day))
     }
@@ -534,7 +530,7 @@ impl Default for ParameterPacket<SyntheticFixture> {
     }
 }
 impl ParameterPacket<SyntheticFixture> {
-    /// A packet whose start state stands at one instant. Its run's events come on the port until it holds a day.
+    /// A packet whose start state stands at one instant.
     pub fn new() -> Self {
         Self::opened(None, None)
     }
@@ -543,8 +539,6 @@ impl ParameterPacket<SyntheticFixture> {
     pub fn periodic(cycle: Cycle) -> Self {
         Self::opened(Some(cycle), None)
     }
-    /// The day the run's events are made from, beside any the port brings. Only a synthetic fixture may hold
-    /// none, so only it gains one here, and once.
     pub fn day(&mut self, day: Day) -> Result<(), AdmissionError> {
         if self.day.is_some() {
             return Err(AdmissionError::DuplicateDay);
@@ -803,7 +797,7 @@ impl CompiledBody {
     }
     /// Parses a packet against the compiled layout. Each refusal is by name. What cannot run yet and a
     /// constant no packet entry backs are refused first, and a mode's start next, because which laws hold
-    /// decides what every later value means. The day's events are checked as admission checks the port's.
+    /// decides what every later value means.
     pub fn bind<K: PacketKind>(&self, packet: ParameterPacket<K>) -> Result<BoundParameters, AdmissionError> {
         if let Some(variable) = self.unrun_mode() {
             return Err(AdmissionError::ModesNotYetRun { variable });

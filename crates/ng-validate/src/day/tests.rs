@@ -1102,8 +1102,6 @@ fn the_reference_days_events_keep_their_digest() {
     expect!["2ddb4348db5dd7ed428668430af9ec49307342ac6764fde7138e65842d3cec73"].assert_eq(&hex);
 }
 
-/// The arena's fixture holds no day yet, so this is what keeps a packet's day and the arena's port one timeline.
-/// The packet's hash covers its day, so the two runs' identities differ.
 #[test]
 fn a_packet_holding_the_reference_day_admits_the_timeline_the_arenas_port_does() {
     let body = crate::arena_body().expect("compiled");
