@@ -2254,3 +2254,257 @@ fn late_inputs_match_the_known_timeline_on_random_timelines() {
         "{honest} and {hashed} rows compared"
     );
 }
+
+const MINUTE: u64 = 60 * SECOND;
+const HOUR: u64 = 60 * MINUTE;
+
+macro_rules! follows {
+    ($laws:ident, $gain:ident, $wave:ident, $name:literal, $unit:ty, |$k:ident| $read:expr) => {
+        let slot = $laws.algebraic::<$unit>($name, Admissible::finite());
+        let residual = $laws.kernel(|mut $k| {
+            let value = $read;
+            let gain = $k.parameter(&$gain);
+            let target = $k.scale(value, gain);
+            let now = $k.algebraic(&slot);
+            let residual = $k.subtract(now, target);
+            $k.finish(residual, $laws.every_mode(), $wave)
+        });
+        $laws.residual(&slot, residual);
+    };
+}
+
+/// A slot for each held input of the day, and a memory that relaxes toward the clock's cosine, so the state
+/// moves within each minute and every held value lands in the bits.
+fn day_body() -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let origin = Position::new(measure(0.0), measure(0.0), measure(0.0));
+    map.site::<TissueSite>("body", origin);
+    let schema = Schema::new(map.finish()?)?;
+    assemble(schema, |mut body| {
+        let (mut laws, _ports) = body.nervous()?.parts();
+        let gain = laws.parameter::<Dimensionless>(ParameterKey::new("ns.gain"), Admissible::positive());
+        let speed =
+            laws.parameter::<Rate<Dimensionless>>(ParameterKey::new("ns.speed"), Admissible::positive());
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
+        follows!(laws, gain, wave, "clock cosine", Dimensionless, |k| k.clock().0);
+        follows!(laws, gain, wave, "clock sine", Dimensionless, |k| k.clock().1);
+        follows!(laws, gain, wave, "sleep", Dimensionless, |k| k.asleep());
+        follows!(laws, gain, wave, "void", Dimensionless, |k| k.voiding());
+        follows!(laws, gain, wave, "air", Temperature, |k| k.room_air());
+        follows!(laws, gain, wave, "radiant", Temperature, |k| k.room_radiant());
+        follows!(laws, gain, wave, "humidity", Dimensionless, |k| k.room_humidity());
+        follows!(laws, gain, wave, "air speed", Dimensionless, |k| k
+            .room_air_speed());
+        follows!(laws, gain, wave, "pressure", Pressure, |k| k.room_pressure());
+        follows!(laws, gain, wave, "oxygen", Dimensionless, |k| k.inspired_oxygen());
+        follows!(laws, gain, wave, "carbon dioxide", Dimensionless, |k| k
+            .inspired_carbon_dioxide());
+        follows!(laws, gain, wave, "clothing", Dimensionless, |k| k.clothing());
+        let lag = laws.state::<Dimensionless>("lag", Admissible::finite());
+        let rate = laws.kernel(|mut k| {
+            let (cosine, _) = k.clock();
+            let gain = k.parameter(&gain);
+            let target = k.scale(cosine, gain);
+            let now = k.state(&lag);
+            let speed = k.parameter(&speed);
+            let rate = k.relax(target, now, speed);
+            k.finish(rate, laws.every_mode(), wave)
+        });
+        laws.memory_rate(&lag, rate);
+        body.add(laws.finish());
+        body.compile()
+    })
+}
+
+fn room(values: [f64; 8]) -> BoundaryInput {
+    let [
+        air,
+        radiant,
+        humidity,
+        air_speed,
+        pressure,
+        oxygen,
+        carbon_dioxide,
+        clothing,
+    ] = values;
+    BoundaryInput::Room(Room {
+        air: measure(air),
+        radiant: measure(radiant),
+        humidity: measure(humidity),
+        air_speed: measure(air_speed),
+        pressure: measure(pressure),
+        oxygen: measure(oxygen),
+        carbon_dioxide: measure(carbon_dioxide),
+        clothing: measure(clothing),
+    })
+}
+
+fn held(id: &[u8], seconds: u64, payload: BoundaryInput) -> BoundaryEvent {
+    BoundaryEvent::new(InputId::new(Digest::of_canonical(id)), at(seconds), payload)
+}
+
+/// Synthetic values. Six in the morning is a quarter turn past midnight, so the clock's start is exact.
+const STATED: [(&str, f64); 12] = [
+    ("clock cosine", 0.0),
+    ("clock sine", 1.0),
+    ("sleep", 0.0),
+    ("void", 0.0),
+    ("air", 293.0),
+    ("radiant", 294.0),
+    ("humidity", 0.5),
+    ("air speed", 1.0),
+    ("pressure", 760.0),
+    ("oxygen", 0.21),
+    ("carbon dioxide", 0.0004),
+    ("clothing", 1.0),
+];
+
+/// The day's held inputs at the anchor, which every run knows, then a later clock, a sleep, a room change and
+/// a void that opens and shuts, each of which can arrive late. The later clock crosses midnight.
+struct DayInputs {
+    body: CompiledBody,
+}
+impl DayInputs {
+    fn new() -> Self {
+        Self {
+            body: day_body().expect("a body"),
+        }
+    }
+    fn stated() -> Vec<BoundaryEvent> {
+        vec![
+            held(
+                b"clock at six",
+                0,
+                BoundaryInput::Clock(Clock {
+                    since_midnight_ns: 6 * HOUR,
+                }),
+            ),
+            held(b"awake", 0, BoundaryInput::Sleep(Sleep::Awake)),
+            held(b"shut", 0, BoundaryInput::Void(Gate::Shut)),
+            held(
+                b"room",
+                0,
+                room([293.0, 294.0, 0.5, 1.0, 760.0, 0.21, 0.0004, 1.0]),
+            ),
+        ]
+    }
+    fn packet(&self) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+        let mut packet = ParameterPacket::new();
+        packet.synthetic(
+            ParameterKey::new("ns.gain"),
+            Binding::Body,
+            measure::<Dimensionless>(1.0),
+            "synthetic",
+        )?;
+        let speed = measure::<Rate<Dimensionless>>(0.05);
+        packet.synthetic(ParameterKey::new("ns.speed"), Binding::Body, speed, "synthetic")?;
+        let slot = |local| RowKind::Algebraic(LawName { owner: "NS", local }.into());
+        for (local, value) in STATED {
+            match local {
+                "air" | "radiant" => packet.start(slot(local), measure::<Temperature>(value), "synthetic")?,
+                "pressure" => packet.start(slot(local), measure::<Pressure>(value), "synthetic")?,
+                _ => packet.start(slot(local), measure::<Dimensionless>(value), "synthetic")?,
+            }
+        }
+        let lag = RowKind::Memory(
+            LawName {
+                owner: "NS",
+                local: "lag",
+            }
+            .into(),
+        );
+        packet.start(lag, measure::<Dimensionless>(0.5), "synthetic")?;
+        Ok(packet)
+    }
+}
+impl ReplayCase for DayInputs {
+    fn body(&self) -> &CompiledBody {
+        &self.body
+    }
+    fn end(&self) -> SimTime {
+        at(210)
+    }
+    fn events(&self) -> Result<Vec<BoundaryEvent>, AdmissionError> {
+        Ok(vec![
+            held(b"asleep", 40, BoundaryInput::Sleep(Sleep::Nrem)),
+            held(
+                b"warmer",
+                50,
+                room([297.0, 299.0, 0.4, 2.0, 755.0, 0.2, 0.001, 0.5]),
+            ),
+            held(b"open", 70, BoundaryInput::Void(Gate::Open)),
+            held(b"shut again", 100, BoundaryInput::Void(Gate::Shut)),
+            held(
+                b"clock before midnight",
+                130,
+                BoundaryInput::Clock(Clock {
+                    since_midnight_ns: 24 * HOUR - 10 * SECOND,
+                }),
+            ),
+        ])
+    }
+    fn admit<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
+    ) -> Result<Session<'m, Running>, InitializationFailure> {
+        let mut events = Self::stated();
+        events.extend(self.events()?);
+        admit_fixture(
+            &self.body,
+            self.packet()?,
+            BoundaryPort::new(events)?,
+            core,
+            store,
+        )
+    }
+    fn admit_withheld<'m>(
+        &'m self,
+        core: &'m dyn CoupledSolver,
+        store: &'m dyn HistoryStore,
+    ) -> Result<Session<'m, Running>, InitializationFailure> {
+        admit_fixture(
+            &self.body,
+            self.packet()?,
+            BoundaryPort::new(Self::stated())?,
+            core,
+            store,
+        )
+    }
+}
+
+#[test]
+fn the_days_held_inputs_pass_late_admission_pause_and_resume() {
+    let case = DayInputs::new();
+    let clock = script();
+    let plan = plan(&clock);
+    for gate in [ReplayGate::LateAdmission, ReplayGate::Pace, ReplayGate::Resume] {
+        let evidence = replay_gate(gate, &case, &|| reference(8 * SECOND), &plan).expect("the gate");
+        assert!(
+            evidence.runs().len() >= 2,
+            "{gate:?} compared {} runs",
+            evidence.runs().len()
+        );
+    }
+}
+
+#[test]
+fn a_step_never_crosses_the_minute_of_a_clock_the_body_reads() {
+    let case = DayInputs::new();
+    let (core, store) = (reference(8 * SECOND), MemoryStore::default());
+    let mut session = case.admit(&core, &store).expect("admitted");
+    // Each minute of the clock at six, then from ten seconds before midnight at 130 s.
+    let edges = [60, 120, 140, 200].map(at);
+    let mut steps = 0;
+    while session.record().accepted().time() < case.end() {
+        let start = session.record().accepted().time();
+        session = advance(session);
+        let end = session.record().accepted().time();
+        assert!(
+            !edges.iter().any(|edge| start < *edge && *edge < end),
+            "{start:?} to {end:?}"
+        );
+        steps += 1;
+    }
+    assert!(steps > edges.len(), "{steps} steps");
+}
