@@ -1231,6 +1231,13 @@ pub struct SiteParameter<'b, O, C, U> {
     brand: Brand<'b>,
     kind: PhantomData<(O, C, U)>,
 }
+/// A wall's two settings at every site of `C` for one species: how easily it crosses, and the share of it the wall holds
+/// back from the water a route moves, in the unit interval. Only `FragmentBuilder::membrane` makes one.
+#[non_exhaustive]
+pub struct Membrane<'b, O, C, G> {
+    pub conductance: SiteParameter<'b, O, C, G>,
+    pub reflection: SiteParameter<'b, O, C, Dimensionless>,
+}
 /// A parameter of every edge of one kind, bound per edge with the network as default.
 pub struct EdgeParameter<'b, O, U, E: EdgeKind = VascularEdge> {
     key: ParameterKey,
@@ -1792,7 +1799,27 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
         route: &SiteRoute<'b, O, CapillaryBed, Water>,
         key: ParameterKey,
     ) -> SiteParameter<'b, O, CapillaryBed, Dimensionless> {
-        self.data.reflections.push((route.family, R::SPECIES, key));
+        self.reflection::<CapillaryBed, R>(route.family, key)
+    }
+    /// The wall `route` crosses, as it holds species `Q`: a positive conductance and a reflection that lowers as
+    /// `reflect`'s does, so a body declared either way compiles to one model.
+    pub fn membrane<C: SiteSet, R, Q: Substance, G: Dimension>(
+        &mut self,
+        route: &SiteRoute<'b, O, C, R>,
+        conductance: ParameterKey,
+        reflection: ParameterKey,
+    ) -> Membrane<'b, O, C, G> {
+        Membrane {
+            conductance: self.site_parameter(conductance, Admissible::positive()),
+            reflection: self.reflection::<C, Q>(route.family, reflection),
+        }
+    }
+    fn reflection<C: SiteSet, Q: Substance>(
+        &mut self,
+        family: Family,
+        key: ParameterKey,
+    ) -> SiteParameter<'b, O, C, Dimensionless> {
+        self.data.reflections.push((family, Q::SPECIES, key));
         self.site_parameter(key, Admissible::unit_interval())
     }
     pub(crate) fn request(&mut self, family: Family) {

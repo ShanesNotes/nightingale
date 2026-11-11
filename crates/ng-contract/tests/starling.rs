@@ -540,3 +540,77 @@ fn an_empty_ring_solves_to_no_update() -> Result<(), InitializationFailure> {
     assert_eq!(update, Ok(Vec::new()));
     Ok(())
 }
+
+#[derive(Clone, Copy)]
+enum Declared {
+    Reflected,
+    Membrane,
+    Unreflected,
+}
+
+/// Albumin rides the Starling flow, so the wall's reflection reaches its carried columns.
+fn albumin_wall(declared: Declared) -> Result<ModelHash, AdmissionError> {
+    let mut schema = beds()?.schema;
+    schema.partial_volume(Measure::new(1.0)?)?;
+    for space in [Space::Plasma, Space::Interstitium] {
+        schema.carry::<Albumin, CapillaryBed>(space);
+    }
+    for space in [Space::Cells, Space::Lumen, Space::Fluid] {
+        schema.leave_out(space, "the Starling wall alone");
+    }
+    let compiled = assemble(schema, |mut body| {
+        let (mut laws, ports) = body.fluids()?.parts();
+        let route = ports.starling(&mut laws);
+        let (kf, sigma) = (
+            ParameterKey::new("fl.kf"),
+            ParameterKey::new("fl.albumin-reflection"),
+        );
+        let (conductance, reflection) = match declared {
+            Declared::Reflected => (
+                laws.site_parameter::<CapillaryBed, Conductance<Water>>(kf, Admissible::positive()),
+                laws.reflect::<Albumin>(&route, sigma),
+            ),
+            Declared::Membrane => {
+                let wall = laws.membrane::<_, _, Albumin, Conductance<Water>>(&route, kf, sigma);
+                (wall.conductance, wall.reflection)
+            }
+            Declared::Unreflected => (
+                laws.site_parameter::<CapillaryBed, Conductance<Water>>(kf, Admissible::positive()),
+                laws.site_parameter::<CapillaryBed, Dimensionless>(sigma, Admissible::unit_interval()),
+            ),
+        };
+        let e =
+            laws.site_parameter::<CapillaryBed, Elastance>(ParameterKey::new("fl.e"), Admissible::positive());
+        let minutes = RateClass::new(RateBand::Minutes, 60_000_000_000)?;
+        let filtration = laws.site_kernel(|mut k| {
+            let plasma = k.at_site(&route.from_amount());
+            let interstitial = k.at_site(&route.to_amount());
+            let (pv, iv) = (k.volume(plasma), k.volume(interstitial));
+            let (pe, ie) = (k.site_parameter(&e), k.site_parameter(&e));
+            let inside = k.multiply(pe, pv);
+            let outside = k.multiply(ie, iv);
+            let inside = k.as_dimension::<_, Pressure>(inside);
+            let outside = k.as_dimension::<_, Pressure>(outside);
+            let head = k.subtract(inside, outside);
+            let sigma = k.site_parameter(&reflection);
+            let held = k.scale(head, sigma);
+            let conductance = k.site_parameter(&conductance);
+            let flow = k.conductance_flow(conductance, held);
+            k.finish(flow, laws.every_mode(), minutes)
+        });
+        laws.transfer_at(&route, filtration);
+        body.add(laws.finish());
+        body.compile()
+    })?;
+    Ok(compiled.model_hash())
+}
+
+/// A membrane's reflection is the record `reflect` writes, so the two cannot drift. A plain parameter under the same key
+/// writes none, and its model differs.
+#[test]
+fn a_membrane_and_a_reflected_route_lower_to_one_model() -> Result<(), AdmissionError> {
+    let reflected = albumin_wall(Declared::Reflected)?;
+    assert_eq!(albumin_wall(Declared::Membrane)?, reflected);
+    assert_ne!(albumin_wall(Declared::Unreflected)?, reflected);
+    Ok(())
+}

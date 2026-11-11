@@ -1,6 +1,6 @@
 use crate::{
-    AdmissionError, Albumin, Basis, Chloride, EdgeKind, Energy, Potassium, SiteSet, Sodium, Substance,
-    VascularEdge, Water,
+    AdmissionError, Basis, Chloride, EdgeKind, Energy, Potassium, SiteSet, Sodium, Substance, VascularEdge,
+    Water,
 };
 use core::marker::PhantomData;
 
@@ -209,17 +209,30 @@ same_dimension! {
     Product<Resistance, Rate<Water>> => Pressure;
     Quotient<Pressure, Inertance> => Rate<Rate<Water>>;
     Product<Orifice, Product<Rate<Water>, Rate<Water>>> => Pressure;
-    Product<Quotient<Pressure, Length>, Length> => Pressure;
     Product<Rate<Water>, Dimensionless> => Rate<Water>;
     Product<Pressure, Quotient<Dimensionless, Pressure>> => Dimensionless;
-    Product<Quotient<Pressure, Concentration<Albumin>>, Concentration<Albumin>> => Pressure;
     Product<Pressure, Volume> => Energy;
     Product<Energy, Rate<Dimensionless>> => Rate<Energy>;
     Product<Pressure, Rate<Volume>> => Rate<Energy>;
-    Product<Quotient<Volume, Albumin>, Albumin> => Volume;
     Rate<Sodium> => Rate<Chloride>;
     Rate<Potassium> => Rate<Chloride>;
+    Quotient<Length, Length> => Dimensionless;
+    Quotient<Temperature, Temperature> => Dimensionless;
+    Quotient<Rate<Water>, Rate<Water>> => Dimensionless;
+    Quotient<Charge, Charge> => Dimensionless;
+    Quotient<Concentration<Charge>, Concentration<Charge>> => Dimensionless;
+    Quotient<Concentration<Osmoles>, Concentration<Osmoles>> => Dimensionless;
+    Quotient<Charge, Volume> => Concentration<Charge>;
+    Quotient<Osmoles, Volume> => Concentration<Osmoles>;
 }
+// Generic, so a law that cancels a coefficient needs no row of its own; coherence refuses a concrete instance beside
+// them.
+impl<U: Dimension, V: Dimension> identities::Sealed<U> for Product<Quotient<U, V>, V> {}
+impl<U: Dimension, V: Dimension> SameDimension<U> for Product<Quotient<U, V>, V> {}
+impl<U: Dimension, V: Dimension> identities::Sealed<U> for Quotient<Product<U, V>, V> {}
+impl<U: Dimension, V: Dimension> SameDimension<U> for Quotient<Product<U, V>, V> {}
+impl<U: Dimension, V: Dimension> identities::Sealed<V> for Quotient<U, Quotient<U, V>> {}
+impl<U: Dimension, V: Dimension> SameDimension<V> for Quotient<U, Quotient<U, V>> {}
 impl<U: Dimension> identities::Sealed<U> for Quotient<U, Dimensionless> {}
 impl<U: Dimension> SameDimension<U> for Quotient<U, Dimensionless> {}
 impl<Q: Substance> identities::Sealed<Dimensionless> for Quotient<Concentration<Q>, Concentration<Q>> {}

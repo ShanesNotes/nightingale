@@ -527,6 +527,42 @@
 //!     k.as_dimension(product)
 //! }
 //! ```
+//! A coefficient cancels only its own denominator: a pressure per volume times a length is no pressure.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn cancels<T: SameDimension<Pressure>>() {}
+//! cancels::<Product<Quotient<Pressure, Volume>, Length>>();
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn cancels<T: SameDimension<Pressure>>() {}
+//! cancels::<Product<Quotient<Pressure, Length>, Length>>();
+//! ```
+//! A heat over a heat capacity is a temperature, so a store's temperature reads from the heat it holds.
+//! ```
+//! use ng_contract::*;
+//! fn temperature<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular>, heat: Expr<'b, 'k, Cardiovascular, Energy>,
+//!     capacity: Expr<'b, 'k, Cardiovascular, Quotient<Energy, Temperature>>)
+//!     -> Expr<'b, 'k, Cardiovascular, Temperature> {
+//!     let ratio = k.divide(heat, capacity);
+//!     k.as_dimension(ratio)
+//! }
+//! ```
+//! A membrane's reflection is a share, so it is dimensionless.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn reflection<'b>(wall: Membrane<'b, Fluids, CapillaryBed, Conductance<Water>>)
+//!     -> SiteParameter<'b, Fluids, CapillaryBed, Pressure> {
+//!     wall.reflection
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn reflection<'b>(wall: Membrane<'b, Fluids, CapillaryBed, Conductance<Water>>)
+//!     -> SiteParameter<'b, Fluids, CapillaryBed, Dimensionless> {
+//!     wall.reflection
+//! }
+//! ```
 //! A guard never fires on a set point: only a sensed dimension is guarded.
 //! ```compile_fail,E0277
 //! use ng_contract::*;
