@@ -817,3 +817,43 @@ impl Seal for HazardLayout {
         enters.seal(out);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Column, Context, RowId};
+    use crate::LawName;
+    use crate::identity::{Canonical, Seal};
+    use core::num::NonZeroU32;
+
+    fn column(reference_count: NonZeroU32) -> Column {
+        Column {
+            terms: vec![(RowId::at(0), -2), (RowId::at(1), 1)],
+            origin: LawName {
+                owner: "MT",
+                local: "reaction",
+            },
+            context: Context::Body,
+            receipt: None,
+            reference_count,
+        }
+    }
+
+    fn sealed(column: &Column) -> Vec<u8> {
+        let mut out = Canonical::new("column");
+        column.seal(&mut out);
+        out.into_bytes()
+    }
+
+    #[test]
+    fn a_count_above_one_moves_the_seal_and_a_count_of_one_seals_only_the_other_fields() {
+        let once = column(NonZeroU32::MIN);
+        let twice = column(NonZeroU32::new(2).expect("above zero"));
+        assert_ne!(sealed(&once), sealed(&twice));
+        let mut fields = Canonical::new("column");
+        once.terms.seal(&mut fields);
+        once.origin.seal(&mut fields);
+        once.context.seal(&mut fields);
+        once.receipt.seal(&mut fields);
+        assert_eq!(sealed(&once), fields.into_bytes());
+    }
+}

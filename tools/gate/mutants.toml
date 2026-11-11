@@ -777,7 +777,7 @@ name = "reference-count-sealed"
 path = "crates/ng-contract/src/body.rs"
 old = '''if *reference_count != NonZeroU32::MIN {'''
 new = '''if false && *reference_count != NonZeroU32::MIN {'''
-test = "-p ng-validate --test reference_count the_reference_count_is_in_the_model_hash"
+test = "-p ng-contract --lib body::tests::a_count_above_one_moves_the_seal_and_a_count_of_one_seals_only_the_other_fields"
 
 [[mutant]]
 name = "reacting-part-spanned"
