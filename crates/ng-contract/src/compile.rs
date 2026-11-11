@@ -337,9 +337,16 @@ fn obligations<'f>(
     held: &[HeldCard],
     unissued: &'f FragmentData,
 ) -> Result<Vec<Owed<'f>>, CompileDefect> {
+    let owes_pressure = |card: &&'static str| {
+        (fragments.iter()).any(|fragment| {
+            fragment.owner == *card
+                && (fragment.slots.iter())
+                    .any(|slot| slot.name == ENCLOSURE_PRESSURE && slot.over == Over::HeldEnclosures)
+        })
+    };
     let unheld = (schema.anatomy.held_enclosures())
         .map(|(_, card)| card)
-        .filter(|card| !held.iter().any(|held| held.card == *card))
+        .filter(|card| !owes_pressure(card))
         .min();
     if let Some(owner) = unheld {
         let local = ENCLOSURE_PRESSURE;
@@ -1890,7 +1897,7 @@ fn addresses(
 
 fn holder(schema: &Schema, held: &[HeldCard], pool: PoolRef) -> Result<Option<&'static str>, CompileDefect> {
     let enclosure = match schema.anatomy.compliance(pool.site) {
-        Some(Compliance::Held { card }) => Some(card),
+        Some(Compliance::Held { card }) if held.iter().any(|known| known.card == card) => Some(card),
         _ => None,
     };
     let declared = (held.iter())
@@ -1915,7 +1922,8 @@ fn check_holds(rows: &Rows, schema: &Schema, held: &[HeldCard]) -> Result<(), Co
             return Err(CompileDefect::HeldNothing { card, space });
         }
     }
-    for (site, card) in schema.anatomy.held_enclosures() {
+    let stood_in = |card: &&'static str| held.iter().any(|known| known.card == *card);
+    for (site, card) in (schema.anatomy.held_enclosures()).filter(|(_, card)| stood_in(card)) {
         if !rows.amounts.iter().any(|pool| pool.site == site) {
             let space = Space::Fluid;
             return Err(CompileDefect::HeldNothing { card, space });

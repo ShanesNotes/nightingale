@@ -440,6 +440,48 @@ new = '''        Defect::LiverHoldsCells => vec![],'''
 test = "-p ng-contract --test held a_pool_no_law_moves_and_no_declaration_holds_is_an_orphan"
 
 [[mutant]]
+name = "outside-issued-once"
+path = "crates/ng-contract/src/scope/outside.rs"
+old = '''None => self.issue_outside::<S>(),'''
+new = '''None => Ok(FragmentBuilder::new()),'''
+test = "-p ng-contract --test scopes a_card_outside_the_slice_is_issued_once_held_or_built"
+
+[[mutant]]
+name = "enclosure-owed-at-issue"
+path = "crates/ng-contract/src/scope/outside.rs"
+old = '''laws.owe_enclosure_pressure();'''
+new = '''let _ = &mut laws;'''
+test = "-p ng-contract --test scopes a_built_respiratory_card_defines_its_enclosures_pressure_and_holds_no_fluid"
+
+[[mutant]]
+name = "enclosure-owed-not-held"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.any(|slot| slot.name == ENCLOSURE_PRESSURE && slot.over == Over::HeldEnclosures)'''
+new = '''.any(|_| held.iter().any(|known| known.card == fragment.owner))'''
+test = "-p ng-contract --test scopes a_built_respiratory_card_defines_its_enclosures_pressure_and_holds_no_fluid"
+
+[[mutant]]
+name = "enclosure-fluid-held-only"
+path = "crates/ng-contract/src/compile.rs"
+old = '''Some(Compliance::Held { card }) if held.iter().any(|known| known.card == card) => Some(card),'''
+new = '''Some(Compliance::Held { card }) => Some(card),'''
+test = "-p ng-contract --test scopes a_built_cards_enclosure_fluid_that_nothing_moves_is_an_orphan"
+
+[[mutant]]
+name = "enclosure-fluid-required-held-only"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|(_, card)| stood_in(card))'''
+new = '''.filter(|_| true)'''
+test = "-p ng-contract --test scopes a_built_respiratory_card_defines_its_enclosures_pressure_and_holds_no_fluid"
+
+[[mutant]]
+name = "handoff-keeps-the-builder"
+path = "crates/ng-contract/src/scope/outside.rs"
+old = '''Some(HeldScope { laws, .. }) => Ok(laws),'''
+new = '''Some(_) => self.issue_outside::<S>(),'''
+test = "-p ng-contract --test scopes handing_a_held_scope_to_its_cards_scope_moves_no_byte"
+
+[[mutant]]
 name = "cargo-held-at-both-ends"
 path = "crates/ng-contract/tests/map_reads.rs"
 old = '''        cargo(false, false).err(),'''

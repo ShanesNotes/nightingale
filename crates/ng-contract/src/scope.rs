@@ -3,13 +3,34 @@ use crate::compile::compile;
 use crate::identity::{Canonical, Seal};
 use crate::law::{Brand, Family, FragmentData, Over, SiteField};
 use crate::{
-    AdmissionError, Anatomy, Blood, Boundary, BoundaryRoute, CapillaryBed, Cardiovascular, CompiledBody,
-    Dimensionless, EdgeRoute, EnclosedSpace, Energy, FilterEdge, Fluids, Fragment, FragmentBuilder,
-    HeatRoute, Junction, LawName, LymphEdge, Makeup, Measure, Nervous, Output, OutsideSlice, Owner, Pair,
-    PartialVolume, Passage, PerSite, Pressure, Quotient, ReadPort, Receptor, ReclaimEdge, Renal, SiteId,
+    AdmissionError, Anatomy, Blood, BloodChemistry, Boundary, BoundaryRoute, CapillaryBed, Cardiovascular,
+    CompiledBody, Dimensionless, EdgeRoute, EnclosedSpace, Endocrine, Energy, FilterEdge, Fluids, Fragment,
+    FragmentBuilder, Gastrointestinal, HeatRoute, Hematology, Hepatic, Immune, Junction, LawName, LymphEdge,
+    Makeup, Measure, Metabolism, Musculoskeletal, Nervous, Output, OutsideSlice, Owner, Pair, PartialVolume,
+    Passage, PerSite, Pressure, Quotient, ReadPort, Receptor, ReclaimEdge, Renal, Respiratory, SiteId,
     SiteRoute, SiteSet, Sites, Species, Substance, TubuleEdge, Urinary, ValveEdge, Wall, Water,
 };
 use core::marker::PhantomData;
+
+mod blood_chemistry;
+mod endocrine;
+mod gastrointestinal;
+mod hematology;
+mod hepatic;
+mod immune;
+mod metabolism;
+mod musculoskeletal;
+mod outside;
+mod respiratory;
+pub use blood_chemistry::BloodChemistryPorts;
+pub use endocrine::EndocrinePorts;
+pub use gastrointestinal::GastrointestinalPorts;
+pub use hematology::HematologyPorts;
+pub use hepatic::HepaticPorts;
+pub use immune::ImmunePorts;
+pub use metabolism::MetabolismPorts;
+pub use musculoskeletal::MusculoskeletalPorts;
+pub use respiratory::RespiratoryPorts;
 
 pub(crate) const ENCLOSURE_PRESSURE: &str = "enclosure_pressure";
 const BLOOD_PRESSURE: &str = "blood pressure";
@@ -392,15 +413,7 @@ impl<'b> Assembly<'b> {
                 return Err(AdmissionError::BoundaryNamedTwice { name });
             }
         }
-        let mut laws: FragmentBuilder<'b, S> = self.issue()?;
-        if self
-            .schema
-            .anatomy
-            .held_enclosures()
-            .any(|(_, card)| card == S::CARD)
-        {
-            laws.owe_enclosure_pressure();
-        }
+        let laws = self.issue_outside::<S>()?;
         self.held.push(HeldCard {
             card: S::CARD,
             supplies,
@@ -466,6 +479,15 @@ scope!(FluidsScope, Fluids, FluidsPorts);
 scope!(NervousScope, Nervous, NervousPorts);
 scope!(RenalScope, Renal, RenalPorts);
 scope!(ReceptorScope, Receptor, ReceptorPorts);
+scope!(RespiratoryScope, Respiratory, RespiratoryPorts);
+scope!(HepaticScope, Hepatic, HepaticPorts);
+scope!(GastrointestinalScope, Gastrointestinal, GastrointestinalPorts);
+scope!(EndocrineScope, Endocrine, EndocrinePorts);
+scope!(BloodChemistryScope, BloodChemistry, BloodChemistryPorts);
+scope!(HematologyScope, Hematology, HematologyPorts);
+scope!(ImmuneScope, Immune, ImmunePorts);
+scope!(MetabolismScope, Metabolism, MetabolismPorts);
+scope!(MusculoskeletalScope, Musculoskeletal, MusculoskeletalPorts);
 
 fn named_route<'b, Q: Substance, O>(
     names: &[(&'static str, Species)],
@@ -732,8 +754,8 @@ pub struct HeldDeclaration<S> {
     card: PhantomData<S>,
 }
 impl<S: OutsideSlice> HeldDeclaration<S> {
-    /// `supplies` names every route this card moves water on. `holds` names the spaces whose pools it stands
-    /// behind: no law moves them, and a held enclosure's own fluid needs no entry.
+    /// `supplies` names every boundary route its stand-ins serve. `holds` names the spaces whose pools it stands
+    /// behind: no law moves them, and the fluid of an enclosure the map names this card on needs no entry.
     pub fn new(supplies: Vec<&'static str>, holds: Vec<Space>, validity: &'static str) -> Self {
         Self {
             supplies,
@@ -788,7 +810,23 @@ impl Seal for HeldCard {
     }
 }
 
-/// Issued once per assembly, for a card outside the slice.
+/// Issued once per assembly, for a card outside the slice. It stands in whole (`parts`), or it keeps the named holds
+/// of a card with a crate: its stand-ins write through `stand_ins`, then the card's scope method takes the builder over.
+/// A held scope goes only to its own card's scope.
+/// ```compile_fail,E0308
+/// use ng_contract::*;
+/// fn crossed<'b>(body: &mut Assembly<'b>, held: HeldScope<'b, Gastrointestinal>)
+///     -> Result<RespiratoryScope<'b>, AdmissionError> {
+///     body.respiratory(Some(held))
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn kept<'b>(body: &mut Assembly<'b>, held: HeldScope<'b, Respiratory>)
+///     -> Result<RespiratoryScope<'b>, AdmissionError> {
+///     body.respiratory(Some(held))
+/// }
+/// ```
 pub struct HeldScope<'b, S> {
     laws: FragmentBuilder<'b, S>,
     ports: HeldPorts<'b, S>,
@@ -796,6 +834,10 @@ pub struct HeldScope<'b, S> {
 impl<'b, S: OutsideSlice> HeldScope<'b, S> {
     pub fn parts(self) -> (FragmentBuilder<'b, S>, HeldPorts<'b, S>) {
         (self.laws, self.ports)
+    }
+    /// The builder the stand-ins write to and their ports, before the card's own scope takes the builder over.
+    pub fn stand_ins(&mut self) -> (&mut FragmentBuilder<'b, S>, &HeldPorts<'b, S>) {
+        (&mut self.laws, &self.ports)
     }
 }
 pub struct HeldPorts<'b, S> {
