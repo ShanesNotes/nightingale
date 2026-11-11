@@ -178,7 +178,7 @@ impl StageScheme {
             method: Method::BackwardEulerHalved,
         }
     }
-    /// Reads the method, the ticket's breakpoint flag and its length, nothing else.
+    /// Only sealed ticket fields, so every attempt at a head and a resumed run read the same rule.
     pub(crate) fn set(self, ticket: &StepTicket) -> StageSet {
         let whole = ticket.length_ns() < 2;
         match self.method {
