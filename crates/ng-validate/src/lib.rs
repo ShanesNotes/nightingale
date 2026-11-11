@@ -187,6 +187,27 @@
 //!     day_checks(body, core, spec)
 //! }
 //! ```
+//! A healthy-range report and a return report come only from the checks that read the run.
+//! ```compile_fail,E0451
+//! use ng_contract::Digest;
+//! use ng_validate::*;
+//! fn forged(run: Digest, results: Vec<RangeResult>, gaps: Vec<RangeGap>) -> RangeReport {
+//!     RangeReport { run, seal: run, set: run, lens: run, day: run, results, gaps }
+//! }
+//! ```
+//! ```compile_fail,E0451
+//! use ng_contract::Digest;
+//! use ng_validate::*;
+//! fn forged(run: Digest, results: Vec<AnchorReturn>, gaps: Vec<ReturnGap>) -> ReturnReport {
+//!     ReturnReport { run, seal: run, set: run, lens: run, results, gaps }
+//! }
+//! ```
+//! ```
+//! use ng_validate::*;
+//! fn read(checks: ReadingChecks<'_>) -> (RangeReport, ReturnReport) {
+//!     checks.finish()
+//! }
+//! ```
 //! A score comes only from `Arena::score`, so every part it holds came from a gate the arena ran.
 //! ```compile_fail,E0451
 //! use ng_contract::DeclaredResolution;
