@@ -516,31 +516,29 @@ pub fn arena_seed() -> Seed {
 
 const CLOSURE_RELATIVE: f64 = 1e-12;
 const SYNTHETIC_DRIFT: f64 = 1e4;
+/// About twice energy's measured drift over the arena's own day from 06:55, MEASURED_DRIFT. Like `SYNTHETIC_DRIFT`,
+/// it is fixture data until the healthy-range set holds energy's within-subject variation.
+const SYNTHETIC_ENERGY_DRIFT: f64 = 4e5;
 
 pub fn arena_certificate(
     body: &CompiledBody,
     windows: SlidingWindows,
 ) -> Result<CertificatePolicy, AdmissionError> {
-    fn limits<U: Substance>(quantity: QuantityId) -> Result<QuantityPolicy, AdmissionError> {
+    fn limits<U: Substance>(quantity: QuantityId, drift: f64) -> Result<QuantityPolicy, AdmissionError> {
         let relative = Measure::new(CLOSURE_RELATIVE)?;
-        QuantityPolicy::new(
-            quantity,
-            Measure::<U>::new(0.0)?,
-            relative,
-            Measure::new(SYNTHETIC_DRIFT)?,
-        )
+        QuantityPolicy::new(quantity, Measure::<U>::new(0.0)?, relative, Measure::new(drift)?)
     }
-    struct Limits(QuantityId);
+    struct Limits(QuantityId, f64);
     impl Visit for Limits {
         type Output = Result<QuantityPolicy, AdmissionError>;
         fn visit<Q: Substance>(self) -> Self::Output {
-            limits::<Q>(self.0)
+            limits::<Q>(self.0, self.1)
         }
     }
     let basis = body.conserved_basis();
     let quantities = basis.ids().map(|quantity| match quantity.book() {
-        Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity),
-        Book::Of(species) => species.visit(Limits(quantity)),
+        Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_ENERGY_DRIFT),
+        Book::Of(species) => species.visit(Limits(quantity, SYNTHETIC_DRIFT)),
         Book::Element(_) => QuantityPolicy::element(
             quantity,
             Measure::new(0.0)?,
