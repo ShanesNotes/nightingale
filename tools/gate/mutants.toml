@@ -1440,6 +1440,6 @@ test = "-p ng-validate --lib healthy::tests::a_morning_the_run_does_not_reach_bl
 [[mutant]]
 name = "healthy-range-unread-reading-unnamed"
 path = "crates/ng-validate/src/healthy/range.rs"
-old = '''for reading in readings.iter().filter(|reading| reading.ranged && !reading.read.contains(&true)) {'''
-new = '''for reading in readings.iter().filter(|_| false) {'''
+old = '''.filter(|reading| reading.ranged && !reading.read.contains(&true))'''
+new = '''.filter(|_| false)'''
 test = "-p ng-validate --lib healthy::tests::a_reading_that_gave_no_value_blocks_and_is_named_beside_one_that_was_judged"
