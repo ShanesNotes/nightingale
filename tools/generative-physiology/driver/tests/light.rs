@@ -1,6 +1,7 @@
 use gp_driver::{
-    BeatReading, CAPTURE_VERSION, Catalogue, MemoryCap, NpyWriter, Options, PostureEvent, RunSpec, SpecError,
-    Stamp, Table, TeachError, Teacher, digest_of_hex, hex,
+    BeatReading, CAPTURE_VERSION, Catalogue, MemoryCap, NpyWriter, Options, PostureEvent, RunSpec,
+    SMOKE_HEAD_NS, SMOKE_PACKET, SMOKE_SEAL, SpecError, Stamp, Table, TeachError, Teacher, digest_of_hex,
+    hex,
 };
 use ng_contract::{Digest, InputId, Legs, RowKind, SimTime};
 use ng_validate::{anchor_moment, arena_body, arena_lens};
@@ -396,4 +397,28 @@ fn a_late_lead_shorter_than_one_step_is_refused_before_any_directory() {
     );
     let written = fs::read_dir(&out).expect("the out directory").count();
     assert_eq!(written, 0, "nothing written for {}", spec.id());
+}
+
+#[test]
+fn the_smoke_pins_are_what_trace_rs_pins_for_the_first_second_on_ng_solver() {
+    let trace = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../crates/ng-validate/tests/trace.rs"
+    ))
+    .expect("crates/ng-validate/tests/trace.rs");
+    let pinned = (trace.split_once("fn the_first_second_of_the_slice_on_ng_solver_stays_where_it_was()"))
+        .and_then(|(_, rest)| rest.split_once("\n}\n"))
+        .expect("trace.rs pins the first second on ng-solver")
+        .0;
+    let digests: Vec<&str> = (pinned.split("expect![\"").skip(1))
+        .filter_map(|rest| rest.split_once('"').map(|(digest, _)| digest))
+        .collect();
+    assert_eq!(digests, [SMOKE_PACKET, SMOKE_SEAL], "the packet and the seal");
+    let (ms, ns) = (pinned.lines())
+        .filter_map(|line| line.trim_start().split_once(" ms ")?.0.split_once('.'))
+        .next_back()
+        .expect("a traced head");
+    assert_eq!(ns.len(), 6, "a head to the nanosecond");
+    let head_ns = ms.parse::<u64>().expect("whole ms") * 1_000_000 + ns.parse::<u64>().expect("ns");
+    assert_eq!(head_ns, SMOKE_HEAD_NS, "the first head at or after 1 s");
 }
