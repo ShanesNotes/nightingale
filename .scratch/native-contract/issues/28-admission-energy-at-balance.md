@@ -4,7 +4,9 @@ Spec: [solver contract](../../../docs/architecture/solver-contract.md), section 
 
 Type: task
 
-Status: open
+Status: claimed
+
+Claimed by: nc28-drift-limit
 
 Blocked by: none
 
