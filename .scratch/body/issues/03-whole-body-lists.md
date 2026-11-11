@@ -1,7 +1,8 @@
 # 03: The whole body's species, spaces and networks
 
 Type: task
-Status: open
+Status: claimed
+Claimed by: 03-whole-body-lists
 Blocked by: 01, 02, 29
 
 **What to build:** The contract's closed lists grow once, for all nine systems the slice lacks, so that no later ticket edits them. Today there are nine species (water, sodium, potassium, chloride, albumin, vasopressin, norepinephrine, acetylcholine and energy), no airway or gut network, and no site or space for alveolar gas, the gut's lumen or red cells. The lists come from [ticket 01](01-rung-0-specification.md)'s Answer.
