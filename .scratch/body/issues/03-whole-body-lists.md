@@ -1,7 +1,7 @@
 # 03: The whole body's species, spaces and networks
 
 Type: task
-Status: claimed
+Status: resolved
 Claimed by: 03-whole-body-lists
 Blocked by: 01, 02, 29
 
@@ -11,13 +11,13 @@ Blocked by: 01, 02, 29
 - [x] From [ticket 29](29-the-charge-default.md): each acid and base states the atoms of its uncharged form and a fixed charge of zero, and a fixed charge belongs only to a carried species: sodium, potassium, chloride, calcium, magnesium and the cell anion. No species stands for hydrogen ion or bicarbonate. The species type holds that rule, so a species that states atoms cannot state a fixed charge, with a compile-fail test and its legal twin. The rule keeps the charge leg of the compile's balance check unreachable, so this ticket retires that leg and gives the must-fail table's row on a reaction left open its entry for charge from the new test, or keeps the leg with a refusal test that reaches it and a mutant row that removes it
 - [x] Lumped classes where rung 0 needs no more: one other strong anion, ketones as one species
 - [x] From [research 13](../../research/issues/13-law-forms-gut-and-fuels.md): glycogen, triglyceride and body protein each get a unit with atoms for their reactions, a glucosyl residue, a triglyceride of stated formula and an amino acid residue, because ticket 01 measures them as masses and a reaction counts whole units of a fixed formula
-- [ ] Spaces and site classes for alveolar gas, the gut lumen and whatever ticket 01 names, and networks and edge kinds for the airway and the gut, with the portal circuit on the blood network. The alveolar and airway gas is a space that holds no water, with a gas-law identity, and it holds nitrogen gas and water vapor. Red cells get no space, because hemoglobin is a mass in blood ([ticket 08](08-blood-carries-gases.md))
-- [ ] Route families across the cell membrane, heat carried by blood, conduction between heat stores, and an osmotic identity for small solutes, so tickets 12, 15 and 17 edit no shared list
-- [ ] Landmarks for each new sensor: the chemoreceptors, the skin thermoreceptor, the osmoreceptor, the volume receptor, the adrenal, the islets and the parathyroid. Core temperature reaches the nervous system by arrow 91, so it needs no landmark. Each new hormone has its secretion and clearance sites
-- [ ] Temperature at a site, read from the heat it holds
-- [ ] One membrane type with its two settings, as SRS section 5 states it, before the first new exchange law ([foundation 07](../../foundation/issues/07-contract.md) lists this as C3)
-- [ ] A compile-fail test with its legal twin for each new type rule
-- [ ] The slice's model hash and trace do not move
+- [x] Spaces and site classes for alveolar gas, the gut lumen and whatever ticket 01 names, and networks and edge kinds for the airway and the gut, with the portal circuit on the blood network. The alveolar and airway gas is a space that holds no water, with a gas-law identity, and it holds nitrogen gas and water vapor. Red cells get no space, because hemoglobin is a mass in blood ([ticket 08](08-blood-carries-gases.md))
+- [x] Route families across the cell membrane, heat carried by blood, conduction between heat stores, and an osmotic identity for small solutes, so tickets 12, 15 and 17 edit no shared list
+- [x] Landmarks for each new sensor: the chemoreceptors, the skin thermoreceptor, the osmoreceptor, the volume receptor, the adrenal, the islets and the parathyroid. Core temperature reaches the nervous system by arrow 91, so it needs no landmark. Each new hormone has its secretion and clearance sites
+- [x] Temperature at a site, read from the heat it holds
+- [x] One membrane type with its two settings, as SRS section 5 states it, before the first new exchange law ([foundation 07](../../foundation/issues/07-contract.md) lists this as C3)
+- [x] A compile-fail test with its legal twin for each new type rule
+- [x] The slice's model hash and trace do not move
 
 **Non-goals:** any law, any new pool in the slice, and species only a later scope stage needs (drugs, pathogens, clotting factors).
 
@@ -30,3 +30,37 @@ From [research 13](../../research/issues/13-law-forms-gut-and-fuels.md): the ami
 From [research 14](../../research/issues/14-law-forms-volume-and-acid.md): no row turns each charged species' concentration into a charge concentration, which the strong ion difference and the mass-action terms need, and none takes a flow over a flow, an osmolality per volume times a volume, or a sum of two species' amounts. The lumped anion's makeup is this ticket's to settle, because sulfur is no element the ledger balances.
 
 From [research 15](../../research/issues/15-law-forms-slow-books.md): GI's iron absorption reads the store in the liver bed's cells, so the landmark list needs a place where GI's law reads that store. Ticket 01 lists bone bed cells for calcium and phosphate and not for magnesium, while its MS row gives bone's pool to all three, so this ticket lists bone bed cells for magnesium or [ticket 19](19-minerals-and-bone.md) drops magnesium's bone pool.
+
+## Answer
+
+The contract's closed lists grew once, in two PRs: nightingale#124 for the species and the charge rule, and nightingale#126 for places and routes. pstack `architect` ran an Opus and a Codex design at max effort with a Codex judge at max; the judge picked the Opus design, 24 to 21, and the split (`~/lanes/logs/ng-body-wave-2/03-whole-body-lists/architect/`). Every value is synthetic or chemistry: no clinical number entered.
+
+- **Species.** One `species!` table (`crates/ng-contract/src/species.rs`) states each of 40 species once, and the crate derives its marker type, makeup, names, dimension, whether water carries it, the kinds of space that may hold it, its charge after speciation and whether it counts in osmolality. The twelve existing rows keep their order, strings and discriminants. The 28 new ones are nitrogen gas, glycogen, triglyceride, fatty acids, glycerol, amino acids, body protein, lactate, ketones, urea, ammonium, creatinine, the fixed acid, the diet base, the cell anion, calcium, magnesium, phosphate, hemoglobin, iron, insulin, glucagon, renin, angiotensin II, aldosterone, the natriuretic peptide, parathyroid hormone and cortisol. Nitrogen joins the elements.
+- **Charge.** `Makeup::Carried { charge }` is the only makeup with a fixed charge, and `Reactant` exists only for a species that states atoms, so no reaction names a charged species. The compile's charge leg could no longer be reached by any code or test, so it retired, and so did `NoMakeup`. Each acid and base states its uncharged atoms, but for the fixed acid (below); the table's charge-after-speciation column feeds the charge membership rows, which ticket 18's balance reads.
+- **Places.** `Space::Gas` holds no water: a capillary bed's alveolar gas and the conducting airway's. A capillary bed may state its `Tissue`, so `Beds<T>` and `Besides<T>` name one tissue's beds or every other; `Alimentary` and `Airway` name a network's sites. The networks gain the airway and the gut, with `AirwayEdge`, `GutEdge` and `AbsorbingEdge`. Nine landmarks join the slice's four. Compile refuses a pool in a space its species may not hold (`OutOfPlace`), by kind of space.
+- **Routes.** `Across(Wall, Sites, Species)` crosses a bed's walls, `Along(Passage, Species)` runs along a network, and `Heat(HeatRoute)` moves energy between each bed's heat, the core store and the other stores, with the pumps' work from the receipt `chemical energy`. The core store is the containment root's. Four ports in the slice's scopes name entries; ticket 04 adds the rest. One `Membrane` gives a wall's conductance and reflection for a species, and its reflection lowers as `reflect` does.
+- **Identities.** `Osmoles` and the charge and osmole membership rows; two cancellation rows (a coefficient in U per V times a V is a U; a U over a U per V is a V), which hold Henry's law, conduction, blood's heat, a partial pressure and a store's temperature from its heat; and ratio rows for length, temperature, flow, charge and osmoles. A product over one of its factors has no row, because it made a concentration's species ambiguous.
+- **Held by tests.** Compile-fail probes, each with its code and legal twin: a fixed charge on atoms (E0559), a carried reactant (E0277), a species outside a charge or osmole sum at the amount and the concentration level (E0277), a tissue on a site that is no bed (E0308), a coefficient against another denominator (E0277), and a dimensioned reflection (E0308). Refusals with mutant rows their tests catch: `species-in-its-spaces`, `cell-anion-stays-in-cells`, `tissue-served-once`, `airway-fit`, `gut-fit`, `besides-leaves-out-its-tissue`, and the core store's row. The slice's model hash, conserved basis and both first-second traces in `tests/trace.rs` did not move.
+
+Model defaults, open to review:
+
+| Default | Alternative |
+|---|---|
+| The fixed acid is carried, holds no fixed charge, and the hepatic card's synthesis route makes it at `s J_aa`, research 14's form with `s` declared; sulfur stays out of the elements | Sulfur joins the elements with an 80-residue amino acid unit holding two sulfur atoms, which fixes `s` by formula (design B) |
+| Stand-ins: alanine for the amino acids, an alanine residue for body protein, palmitic acid, tripalmitin, acetoacetic acid for the ketones, acetic acid for the diet base, a glucosyl residue for glycogen | Other whole-number representatives; asparagine would give a count-one urea reaction but a third more nitrogen per gram of protein |
+| The space rule is by kind of space, so it is necessary and not sufficient | A rule by bed role or network, which design B drew and which would forbid ticket 16's triglyceride in muscle cells |
+| The cell anion is a pool in each bed's cells that no route moves; ticket 06's hold table holds it | A site parameter, which puts no fixed charge in the ledger |
+| The conducting airway is a tissue site, against body 01 line 584's vessel segment, because a vessel segment's lumen gets a water pool that nothing moves, which compile refuses as an orphan | A vessel segment with a gas space and no automatic water lumen (design B) |
+| The pumps' work comes from the receipt `chemical energy`, as stroke and wall work do | A pump paid by a coupled fuel burn (design B); paying all work by fuel is ticket 09's |
+| A species counts in osmolality when it is a small solute, free in water, that reaches about a millimole a litre in some watery space | Every free small solute |
+
+Departures from body 01's rows: ammonium is a fuel and may sit in any watery space; the diet base shares no book with the fixed acid; hemoglobin and renin may sit in any lumen and the hormones in enclosed fluid; the named beds' cells widen to any cells; glycogen, triglyceride, body protein and hemoglobin are amounts of a stated unit, not masses; the conducting airway is a tissue site. nightingale#124's body gives each one's reason.
+
+Asks from research 11 to 15 and body 29: added are hemoglobin, the units with atoms, the amino acid's formula, the fixed acid's makeup, body 29's rule in the type, charge after speciation, the retired charge leg, magnesium in bone cells, the charge and osmole identities, the sum of two species' amounts, temperature over temperature, length over length, Henry's law, the gas law, the heat rows, a bed's heat to the core store, the mass-action terms, flow over flow, osmolality per volume times volume, and the liver's iron landmark. Left out, each with its owner: hydrogen ion (body 29), speed (ticket 05 delivers a ratio), surface and clothing dimensions (research 12 holds them), the burned share in storage counts (below), the receptor's third binding place (`ng-receptor`; ticket 15 binds in plasma), a field reading its own row (ticket 18), `ReactsAt` grants (ticket 04), the clock's cosine and sine, its zero and the void's gate (ticket 05), and the operators research 11 to 15 name (a delay, a rate of change, a value held from a delivery).
+
+Findings for other tickets:
+
+- A reaction counts its reference species once. A storage reaction that burns less than half of what it stores has no count-one species and cannot be written. Urea from alanine and creatinine from body protein compile with the made species as the reference, run on a negative rate. Gluconeogenesis written as glycolysis run backward takes its energy from the bed's heat pool, so it does not serve. Counting the reference N times would let all four be written forward; it belongs before ticket 14, with ticket 04.
+- Ticket 04's line asking a `ReactsAt` grant for the fixed acid points at the synthesis route, since the fixed acid is no reactant.
+- Paying the pumps' and every wall's work by fuel is ticket 09's, and ticket 17's pump law should keep its share out of the bed's demand once beds burn fuel.
+- Moving FL's `reflect` callers to `Membrane` is a follow-up; until then a reflection has two spellings that lower to one record.
