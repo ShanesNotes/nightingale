@@ -39,7 +39,6 @@ import pathlib
 import posixpath
 import re
 import shutil
-import signal
 import stat
 import subprocess
 import sys
@@ -2935,14 +2934,14 @@ def mutants(part: str | None) -> int:
     base = os.environ.get("NG_GATE_BASE") or "-"
     base = None if base == "-" else base
     command = [sys.executable, "-I", MUTATE, MUTANTS]
-    if part != "rest" and subprocess.run([*command, "--check"], cwd=ROOT).returncode != 0:
-        return 1
     rows = mutate_py().load_rows(ROOT / MUTANTS, [])
     changed: set[str] = set()
     base_rows: list[dict] = []
     if mode != "changed" and base is not None:
         changed, base_rows = set(_git_z(ROOT, "diff", "--name-only", "-z", base, "HEAD")), rows_at(base)
     parts = sweep_parts(mode, scope, base, rows, base_rows, changed)
+    if part != "rest" and sweep([*command, "--check"], (*parts.first, *parts.rest), 0):
+        return 1
     if part != "rest":
         named = f"{len(parts.first)} rows: {' '.join(parts.first)}" if parts.first else "no row"
         print(f"40-mutants: first part, {named}", flush=True)
@@ -3052,9 +3051,14 @@ print(f"{'CAUGHT':<15}  a  1 s  alpha::x", flush=True)
 print(f"{'SURVIVED':<15}  b  1 s", flush=True)
 time.sleep(60)
 """
+FAILED_SWEEP = """\
+print("sweep of 0123abc, 3 rows, budget 1 s", flush=True)
+print("baseline  1 s  cargo test -p ng-a --test alpha", flush=True)
+raise SystemExit("mutate: another sweep is running; no sweep")
+"""
 
 
-def driver_cases() -> list[Violation]:
+def survivor_case() -> list[Violation]:
     log = io.StringIO()
     began = time.monotonic()
     with contextlib.redirect_stdout(log):
@@ -3067,10 +3071,24 @@ def driver_cases() -> list[Violation]:
         out.append(Violation("sweep", "a fake sweep", "no line reports b SURVIVED with 1 row not run"))
     if found := re.search(r"^sweep of (\d+),", log.getvalue(), re.M):
         with contextlib.suppress(ProcessLookupError):
-            os.kill(int(found[1]), signal.SIGKILL)
+            os.kill(int(found[1]), 0)
             out.append(Violation("sweep", "a fake sweep", "the fake still ran after the driver returned"))
     else:
         out.append(Violation("sweep", "a fake sweep", "the driver did not echo the fake's lines"))
+    return out
+
+
+def failed_sweep_case() -> list[Violation]:
+    log = io.StringIO()
+    with contextlib.redirect_stdout(log):
+        code = sweep([sys.executable, "-I", "-c", FAILED_SWEEP], ("a", "b", "c"), 2)
+    if code != 1 or "40-mutants: the sweep failed. Rows not run: 5" not in log.getvalue().splitlines():
+        return [Violation("sweep", "a sweep that dies", f"returned {code}; it fails with 5 rows not run")]
+    return []
+
+
+def check_case() -> list[Violation]:
+    out = []
     with tempfile.TemporaryDirectory(prefix="gate-sweep-") as tmp:
         table = pathlib.Path(tmp) / "mutants.toml"
         rows = [f'[[mutant]]\nname = "{n}"\npath = "crates/ng-none/src/{n}.rs"\nold = "x"\nnew = "y"\n' for n in "ab"]
@@ -3084,6 +3102,35 @@ def driver_cases() -> list[Violation]:
     return out
 
 
+DRIVER_CASES: tuple[Callable[[], list[Violation]], ...] = (survivor_case, failed_sweep_case, check_case)
+ORDER_CASES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("01-toolchain.sh", "99-unplaced.sh"), "verify: tools/verify.d/99-unplaced.sh has no place in the run order"),
+    (("01-toolchain.sh", "40-mutants.sh"), "verify: the plan failed"),
+)
+
+
+def order_cases() -> list[Violation]:
+    out = []
+    for files, last in ORDER_CASES:
+        with tempfile.TemporaryDirectory(prefix="gate-order-") as tmp:
+            steps = pathlib.Path(tmp) / "tools" / "verify.d"
+            steps.mkdir(parents=True)
+            shutil.copyfile(ROOT / "tools" / "verify", steps.parent / "verify")
+            for name in files:
+                (steps / name).write_text("exit 0\n", encoding="utf-8")
+            run = subprocess.run(["bash", str(steps.parent / "verify")], capture_output=True, text=True)
+        lines = run.stdout.splitlines()
+        if run.returncode != 1 or lines[-1:] != [last]:
+            out.append(
+                Violation(
+                    "order",
+                    " ".join(files),
+                    f"exit {run.returncode} with last line {lines[-1:]}; tools/verify exits 1 with {last!r}",
+                )
+            )
+    return out
+
+
 def seam() -> int:
     ws = load(ROOT)
     found = check(ws, "registration") + check(ws, "seam")
@@ -3091,13 +3138,14 @@ def seam() -> int:
         print(v)
     probes, bites = run_probes(ws, tree_passes=not found)
     cases = plan_cases(ws) + scan_cases() + comment_cases() + seal_cases()
-    cases += part_cases() + line_cases() + driver_cases()
+    cases += part_cases() + line_cases() + [v for case in DRIVER_CASES for v in case()] + order_cases()
     for v in probes + cases:
         print(v)
     print(
         f"05-seam: {len(ws.members)} members against the crate table; {len(RULES)} rules, {bites} probes bite; "
         f"{len(PLAN_CASES)} plan cases; {len(SCAN_CASES)} scan cases; {len(COMMENT_CASES)} comment cases; "
-        f"{len(SEAL_CASES)} seal cases; {len(PART_CASES)} part cases; {len(LINE_CASES)} line cases; 2 driver cases; "
+        f"{len(SEAL_CASES)} seal cases; {len(PART_CASES)} part cases; {len(LINE_CASES)} line cases; "
+        f"{len(DRIVER_CASES)} driver cases; {len(ORDER_CASES)} order cases; "
         f"{len(must_fail_rows(_read(ROOT / CONTRACT)))} must-fail rows"
     )
     return 1 if found or probes or cases else 0
