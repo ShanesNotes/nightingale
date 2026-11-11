@@ -218,12 +218,12 @@ impl Slider {
         })
     }
     fn judging(&self, first: usize, covers: u64, last: usize) -> Result<Option<usize>, usize> {
-        let shift = (first.checked_sub(1)).and_then(|change| match self.across[change] {
+        let into_first = (first > 0).then(|| self.across[first]);
+        let shift = into_first.and_then(|across| match across {
             Across::Own { range, shift_ends_ns } if covers < shift_ends_ns => Some(range),
             Across::Own { .. } | Across::EveryActivity | Across::Unranged => None,
         });
-        let mut needing_own =
-            (first + 1..=last).filter(|&change| self.across[change - 1] != Across::EveryActivity);
+        let mut needing_own = (first + 1..=last).filter(|&span| self.across[span] != Across::EveryActivity);
         let Some(change) = needing_own.next() else {
             return Ok(match shift {
                 Some(range) => range,
@@ -231,7 +231,7 @@ impl Slider {
                 None => self.every,
             });
         };
-        match (shift, needing_own.next(), self.across[change - 1]) {
+        match (shift, needing_own.next(), self.across[change]) {
             (None, None, Across::Own { range, .. }) => Ok(range),
             _ => Err(change),
         }
@@ -295,20 +295,19 @@ impl Reading {
                         find(Scope::Every, sliding)
                     }
                 };
-                let across = (spans.windows(2))
-                    .map(|pair| {
-                        let (from, to) = (pair[0].activity, pair[1].activity);
-                        match changes(from, to).map(|(_, _, lasting)| lasting).max() {
-                            Some(lasting) => Across::Own {
-                                range: (changes(from, to).find(|&(_, by, _)| by == sliding))
-                                    .map(|(range, _, _)| range),
-                                shift_ends_ns: pair[1].start.nanoseconds().saturating_add(lasting),
-                            },
-                            None if !during(from) && !during(to) => Across::EveryActivity,
-                            None => Across::Unranged,
-                        }
-                    })
-                    .collect();
+                let into = (spans.windows(2)).map(|pair| {
+                    let (from, to) = (pair[0].activity, pair[1].activity);
+                    match changes(from, to).map(|(_, _, lasting)| lasting).max() {
+                        Some(lasting) => Across::Own {
+                            range: (changes(from, to).find(|&(_, by, _)| by == sliding))
+                                .map(|(range, _, _)| range),
+                            shift_ends_ns: pair[1].start.nanoseconds().saturating_add(lasting),
+                        },
+                        None if !during(from) && !during(to) => Across::EveryActivity,
+                        None => Across::Unranged,
+                    }
+                });
+                let across = core::iter::once(Across::Unranged).chain(into).collect();
                 Slider {
                     length_ns: length.get(),
                     count: length.get() / period_ns,
