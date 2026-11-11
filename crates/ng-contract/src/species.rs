@@ -352,13 +352,15 @@ mod tests {
 
     #[test]
     fn the_new_rows_state_body_01s_makeup_carriage_and_spaces() {
-        use super::{Charge, Concentration, Element, Makeup, Osmoles, SameDimension, Space};
         use super::{
-            Ammonium, Calcium, CellAnion, Chloride, Creatinine, DietBase, FixedAcid, Glucose, Ketones, Lactate,
-            Magnesium, Phosphate, Potassium, Sodium, Urea,
+            Ammonium, Calcium, CellAnion, Chloride, Creatinine, DietBase, FixedAcid, Glucose, Ketones,
+            Lactate, Magnesium, Phosphate, Potassium, Sodium, Urea,
         };
+        use super::{Charge, Concentration, Element, Makeup, Osmoles, SameDimension, Space};
         use Element::{Carbon as C, Hydrogen as H, Nitrogen as N, Oxygen as O};
-        use Space::{Bound, Cells, Cleft, Elastic, Fluid, Gas, Interstitium, Lumen, Plasma, Thermal, Vesicle};
+        use Space::{
+            Bound, Cells, Cleft, Elastic, Fluid, Gas, Interstitium, Lumen, Plasma, Thermal, Vesicle,
+        };
         const WATERY: &[Space] = &[Plasma, Interstitium, Cells, Lumen, Fluid];
         const HORMONE: &[Space] = &[Plasma, Interstitium, Lumen, Fluid, Bound];
         const BLOOD: &[Space] = &[Plasma, Lumen];
@@ -366,17 +368,52 @@ mod tests {
         let fuel = |elements: &'static [(Element, i64)]| Makeup::Atoms { elements, fuel: true };
         let rows: [(Species, Makeup, bool, &[Space]); 28] = [
             (Species::NitrogenGas, carried(0), false, &[Gas]),
-            (Species::Glycogen, fuel(&[(C, 6), (H, 10), (O, 5)]), false, &[Cells]),
-            (Species::Triglyceride, fuel(&[(C, 51), (H, 98), (O, 6)]), true, WATERY),
-            (Species::FattyAcids, fuel(&[(C, 16), (H, 32), (O, 2)]), true, WATERY),
+            (
+                Species::Glycogen,
+                fuel(&[(C, 6), (H, 10), (O, 5)]),
+                false,
+                &[Cells],
+            ),
+            (
+                Species::Triglyceride,
+                fuel(&[(C, 51), (H, 98), (O, 6)]),
+                true,
+                WATERY,
+            ),
+            (
+                Species::FattyAcids,
+                fuel(&[(C, 16), (H, 32), (O, 2)]),
+                true,
+                WATERY,
+            ),
             (Species::Glycerol, fuel(&[(C, 3), (H, 8), (O, 3)]), true, WATERY),
-            (Species::AminoAcids, fuel(&[(C, 3), (H, 7), (N, 1), (O, 2)]), true, WATERY),
-            (Species::BodyProtein, fuel(&[(C, 3), (H, 5), (N, 1), (O, 1)]), false, &[Cells]),
+            (
+                Species::AminoAcids,
+                fuel(&[(C, 3), (H, 7), (N, 1), (O, 2)]),
+                true,
+                WATERY,
+            ),
+            (
+                Species::BodyProtein,
+                fuel(&[(C, 3), (H, 5), (N, 1), (O, 1)]),
+                false,
+                &[Cells],
+            ),
             (Species::Lactate, fuel(&[(C, 3), (H, 6), (O, 3)]), true, WATERY),
             (Species::Ketones, fuel(&[(C, 4), (H, 6), (O, 3)]), true, WATERY),
-            (Species::Urea, fuel(&[(C, 1), (H, 4), (N, 2), (O, 1)]), true, WATERY),
+            (
+                Species::Urea,
+                fuel(&[(C, 1), (H, 4), (N, 2), (O, 1)]),
+                true,
+                WATERY,
+            ),
             (Species::Ammonium, fuel(&[(N, 1), (H, 3)]), true, WATERY),
-            (Species::Creatinine, fuel(&[(C, 4), (H, 7), (N, 3), (O, 1)]), true, WATERY),
+            (
+                Species::Creatinine,
+                fuel(&[(C, 4), (H, 7), (N, 3), (O, 1)]),
+                true,
+                WATERY,
+            ),
             (Species::FixedAcid, carried(0), true, WATERY),
             (Species::DietBase, fuel(&[(C, 2), (H, 4), (O, 2)]), true, WATERY),
             (Species::CellAnion, carried(-1), false, &[Cells]),
@@ -394,12 +431,27 @@ mod tests {
             (Species::ParathyroidHormone, carried(0), true, HORMONE),
             (Species::Cortisol, carried(0), true, HORMONE),
         ];
-        let every = [Plasma, Interstitium, Cells, Lumen, Fluid, Vesicle, Cleft, Bound, Elastic, Thermal, Gas];
+        let every = [
+            Plasma,
+            Interstitium,
+            Cells,
+            Lumen,
+            Fluid,
+            Vesicle,
+            Cleft,
+            Bound,
+            Elastic,
+            Thermal,
+            Gas,
+        ];
         assert_eq!(rows.map(|row| row.0), Species::ALL[12..]);
         for (species, makeup, water_borne, spaces) in rows {
             assert_eq!(species.makeup(), makeup, "{species:?}");
             assert_eq!(species.water_borne(), water_borne, "{species:?}");
-            let held: Vec<Space> = every.into_iter().filter(|&space| species.may_hold(space)).collect();
+            let held: Vec<Space> = every
+                .into_iter()
+                .filter(|&space| species.may_hold(space))
+                .collect();
             assert_eq!(held, spaces, "{species:?}");
         }
         fn charge<A: SameDimension<Charge>, C: SameDimension<Concentration<Charge>>>() {}
