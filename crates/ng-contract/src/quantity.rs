@@ -1,6 +1,6 @@
 use crate::{
-    AdmissionError, Albumin, Basis, Chloride, EdgeKind, Energy, Potassium, SiteSet, Sodium, Substance,
-    VascularEdge, Water,
+    AdmissionError, Basis, Chloride, EdgeKind, Energy, Potassium, SiteSet, Sodium, Substance, VascularEdge,
+    Water,
 };
 use core::marker::PhantomData;
 
@@ -20,6 +20,13 @@ mod sensed {
     pub trait Sealed {}
 }
 pub trait Sensed: sensed::Sealed + Dimension {}
+
+pub(crate) mod plain {
+    pub trait Sealed {}
+}
+/// A dimension with no set point and no deviation anywhere inside it. The two algebra rows take only these, so
+/// neither carries a set point or a deviation out of its own dimension, however deep it sits.
+pub trait Plain: plain::Sealed + Dimension {}
 
 pub enum Dimensionless {}
 pub enum Pressure {}
@@ -101,6 +108,8 @@ macro_rules! named {
             }
         }
         impl Dimension for $dimension {}
+        impl plain::Sealed for $dimension {}
+        impl Plain for $dimension {}
     )*};
 }
 named!(
@@ -188,6 +197,19 @@ macro_rules! sensed {
 }
 sensed!(Dimensionless, Pressure, Volume, Temperature, Length, Rate<Water>);
 
+impl<Q: Plain> plain::Sealed for Rate<Q> {}
+impl<Q: Plain> Plain for Rate<Q> {}
+impl<Q: Plain> plain::Sealed for Concentration<Q> {}
+impl<Q: Plain> Plain for Concentration<Q> {}
+impl<Q: Plain> plain::Sealed for Conductance<Q> {}
+impl<Q: Plain> Plain for Conductance<Q> {}
+impl<Q: Plain> plain::Sealed for Affinity<Q> {}
+impl<Q: Plain> Plain for Affinity<Q> {}
+impl<A: Plain, B: Plain> plain::Sealed for Product<A, B> {}
+impl<A: Plain, B: Plain> Plain for Product<A, B> {}
+impl<A: Plain, B: Plain> plain::Sealed for Quotient<A, B> {}
+impl<A: Plain, B: Plain> Plain for Quotient<A, B> {}
+
 pub(crate) mod identities {
     pub trait Sealed<U> {}
 }
@@ -209,17 +231,26 @@ same_dimension! {
     Product<Resistance, Rate<Water>> => Pressure;
     Quotient<Pressure, Inertance> => Rate<Rate<Water>>;
     Product<Orifice, Product<Rate<Water>, Rate<Water>>> => Pressure;
-    Product<Quotient<Pressure, Length>, Length> => Pressure;
     Product<Rate<Water>, Dimensionless> => Rate<Water>;
     Product<Pressure, Quotient<Dimensionless, Pressure>> => Dimensionless;
-    Product<Quotient<Pressure, Concentration<Albumin>>, Concentration<Albumin>> => Pressure;
     Product<Pressure, Volume> => Energy;
     Product<Energy, Rate<Dimensionless>> => Rate<Energy>;
     Product<Pressure, Rate<Volume>> => Rate<Energy>;
-    Product<Quotient<Volume, Albumin>, Albumin> => Volume;
     Rate<Sodium> => Rate<Chloride>;
     Rate<Potassium> => Rate<Chloride>;
+    Quotient<Length, Length> => Dimensionless;
+    Quotient<Temperature, Temperature> => Dimensionless;
+    Quotient<Rate<Water>, Rate<Water>> => Dimensionless;
+    Quotient<Charge, Charge> => Dimensionless;
+    Quotient<Concentration<Charge>, Concentration<Charge>> => Dimensionless;
+    Quotient<Concentration<Osmoles>, Concentration<Osmoles>> => Dimensionless;
+    Quotient<Charge, Volume> => Concentration<Charge>;
+    Quotient<Osmoles, Volume> => Concentration<Osmoles>;
 }
+impl<U: Plain, V: Plain> identities::Sealed<U> for Product<Quotient<U, V>, V> {}
+impl<U: Plain, V: Plain> SameDimension<U> for Product<Quotient<U, V>, V> {}
+impl<U: Plain, V: Plain> identities::Sealed<V> for Quotient<U, Quotient<U, V>> {}
+impl<U: Plain, V: Plain> SameDimension<V> for Quotient<U, Quotient<U, V>> {}
 impl<U: Dimension> identities::Sealed<U> for Quotient<U, Dimensionless> {}
 impl<U: Dimension> SameDimension<U> for Quotient<U, Dimensionless> {}
 impl<Q: Substance> identities::Sealed<Dimensionless> for Quotient<Concentration<Q>, Concentration<Q>> {}

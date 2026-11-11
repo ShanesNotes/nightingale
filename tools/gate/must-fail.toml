@@ -143,6 +143,15 @@ doctests = [
 ]
 
 [[row]]
+core = "A set point or deviation carried out of its own dimension through a cancellation row, at any depth"
+doctests = [
+  { path = "crates/ng-contract/src/lib.rs", code = "E0277", text = "Quotient<Pressure, Reference<Pressure>>" },
+  { path = "crates/ng-contract/src/lib.rs", code = "E0277", text = "Quotient<Reference<Pressure>, Pressure>" },
+  { path = "crates/ng-contract/src/lib.rs", code = "E0277", text = "Quotient<Rate<Water>, Deviation<Pressure>>" },
+  { path = "crates/ng-contract/src/lib.rs", code = "E0277", text = "Product<Reference<Pressure>, Dimensionless>" },
+]
+
+[[row]]
 core = "A kernel calling host math on an expression"
 doctests = [{ path = "crates/ng-contract/src/lib.rs", code = "E0599", text = "x.value().exp()" }]
 

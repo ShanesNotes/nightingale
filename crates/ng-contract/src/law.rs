@@ -3,10 +3,11 @@ use crate::identity::{Canonical, Seal};
 use crate::quantity::dimension;
 use crate::scope::ENCLOSURE_PRESSURE;
 use crate::{
-    Admissible, AdmissibleSet, AdmissionError, Basis, Blood, Boundary, CapillaryBed, Conductance, Deviation,
-    Dimension, Dimensionless, Landmark, Length, Metabolism, Network, NonMaterial, Owner, ParameterKey,
-    PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reactant, Reference, SameDimension, Sensed, SiteSet,
-    Sites, Space, Species, Substance, Time, Urinary, ValidityRange, Volume, Water,
+    Admissible, AdmissibleSet, AdmissionError, Airway, Alimentary, Basis, Blood, Boundary, CapillaryBed,
+    Conductance, Deviation, Dimension, Dimensionless, Landmark, Length, Metabolism, Network, NonMaterial,
+    Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reactant, Reference,
+    SameDimension, Sensed, SiteSet, Sites, Space, Species, Substance, Time, Urinary, ValidityRange, Volume,
+    Water,
 };
 use core::cell::Cell;
 use core::marker::PhantomData;
@@ -106,6 +107,90 @@ edge_kinds! {
     TubuleEdge: Urinary => Urinary, Urinary;
     /// Every reclaim edge: a lumen back to a bed's plasma.
     ReclaimEdge: Urinary => Blood, Reclaim;
+    /// Every airway edge: one site's gas to the next, toward the alveolar gas.
+    AirwayEdge: Airway => Airway, Airway;
+    /// Every gut edge between two lumens: the stomach to the small intestine.
+    GutEdge: Alimentary => Alimentary, Gut;
+    /// Every gut edge into a bed: a lumen to the bed whose wall absorbs it.
+    AbsorbingEdge: Alimentary => CapillaryBed, Gut;
+}
+
+/// A wall between two spaces of one capillary bed, crossed one species at a time. The capillary wall's crossings are
+/// Starling's water and each species' exchange, the tubule wall's are reclaim, and the gut wall's are passages. These
+/// are the rest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Wall {
+    /// The cell membrane: interstitium to cells.
+    Cell,
+    /// The gas-exchange surface: gas to plasma.
+    Alveolar,
+    /// The lining that wets the gas: interstitium to gas, the water that humidifies a breath.
+    Lining,
+    /// Plasma to cells, past the interstitium: fat that the capillaries' lipase hands to a bed's cells.
+    Endothelium,
+}
+impl Wall {
+    const fn at(self) -> usize {
+        match self {
+            Wall::Cell => 6,
+            Wall::Alveolar => 7,
+            Wall::Lining => 8,
+            Wall::Endothelium => 9,
+        }
+    }
+}
+
+/// A route along the edges of a network, one species at a time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Passage {
+    /// Gas to gas along every airway edge: a breath in, or out at a negative rate.
+    Airway,
+    /// Lumen to lumen along every gut edge between two lumens.
+    Transit,
+    /// A gut lumen to its bed's plasma along every absorbing edge.
+    Absorption,
+    /// A gut lumen to its bed's interstitium along every absorbing edge: fat that leaves by the lymph.
+    Chyle,
+    /// The bed's cells to the gut lumen, against every absorbing edge: what the gut's cells shed.
+    Shedding,
+    /// The bed's cells to the urinary lumen, against every reclaim edge: what the tubule's cells secrete.
+    Secretion,
+}
+impl Passage {
+    const fn at(self) -> usize {
+        match self {
+            Passage::Airway => 10,
+            Passage::Transit => 11,
+            Passage::Absorption => 12,
+            Passage::Chyle => 13,
+            Passage::Shedding => 14,
+            Passage::Secretion => 15,
+        }
+    }
+}
+
+/// Energy between the beds and the heat stores. The core store is the energy in the thermal space of the containment
+/// tree's root, when the root is a tissue site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HeatRoute {
+    /// Each capillary bed's heat to the core store.
+    FromBeds,
+    /// The core store to the store a bed sits in, at that bed, as its blood carries it.
+    CarriedByBlood,
+    /// The core store to each other tissue site's store, through tissue.
+    Conduction,
+    /// Metabolism's chemical energy into each bed's heat: the work of its cells' pumps.
+    Pumps,
+}
+impl HeatRoute {
+    const fn name(self) -> &'static str {
+        match self {
+            HeatRoute::FromBeds => "bed heat",
+            HeatRoute::CarriedByBlood => "heat carried by blood",
+            HeatRoute::Conduction => "conduction",
+            HeatRoute::Pumps => "pump work",
+        }
+    }
 }
 
 /// One kind of transfer the map implies. In a body that carries more than water, a fluid route's water rate is a row
@@ -128,6 +213,9 @@ pub(crate) enum Family {
     GravityWork,
     WallWork,
     Dissipation,
+    Across(Wall, Sites, Species),
+    Along(Passage, Species),
+    Heat(HeatRoute),
 }
 impl Family {
     pub(crate) fn name(self) -> &'static str {
@@ -147,6 +235,9 @@ impl Family {
             Family::GravityWork => "gravity work",
             Family::WallWork => "wall work",
             Family::Dissipation => "dissipation",
+            Family::Across(wall, _, species) => species.names()[wall.at()],
+            Family::Along(passage, species) => species.names()[passage.at()],
+            Family::Heat(route) => route.name(),
         }
     }
     pub(crate) fn fluid(self) -> bool {
@@ -1140,6 +1231,13 @@ pub struct SiteParameter<'b, O, C, U> {
     brand: Brand<'b>,
     kind: PhantomData<(O, C, U)>,
 }
+/// A wall's two settings at every site of `C` for one species: how easily it crosses, and the share of it the wall holds
+/// back from the water a route moves, in the unit interval. Only `FragmentBuilder::membrane` makes one.
+#[non_exhaustive]
+pub struct Membrane<'b, O, C, G> {
+    pub conductance: SiteParameter<'b, O, C, G>,
+    pub reflection: SiteParameter<'b, O, C, Dimensionless>,
+}
 /// A parameter of every edge of one kind, bound per edge with the network as default.
 pub struct EdgeParameter<'b, O, U, E: EdgeKind = VascularEdge> {
     key: ParameterKey,
@@ -1701,7 +1799,29 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
         route: &SiteRoute<'b, O, CapillaryBed, Water>,
         key: ParameterKey,
     ) -> SiteParameter<'b, O, CapillaryBed, Dimensionless> {
-        self.data.reflections.push((route.family, R::SPECIES, key));
+        self.reflection::<CapillaryBed, R>(route.family, key)
+    }
+    /// The wall `route` crosses, as it holds species `Q`: a positive conductance and a reflection. On a fluid route,
+    /// where water carries the species, the reflection lowers as `reflect`'s does, so a body declared either way
+    /// compiles to one model; on a wall's or a passage's own route nothing carries the species, so the law reads
+    /// the reflection as a share.
+    pub fn membrane<C: SiteSet, R, Q: Substance, G: Dimension>(
+        &mut self,
+        route: &SiteRoute<'b, O, C, R>,
+        conductance: ParameterKey,
+        reflection: ParameterKey,
+    ) -> Membrane<'b, O, C, G> {
+        Membrane {
+            conductance: self.site_parameter(conductance, Admissible::positive()),
+            reflection: self.reflection::<C, Q>(route.family, reflection),
+        }
+    }
+    fn reflection<C: SiteSet, Q: Substance>(
+        &mut self,
+        family: Family,
+        key: ParameterKey,
+    ) -> SiteParameter<'b, O, C, Dimensionless> {
+        self.data.reflections.push((family, Q::SPECIES, key));
         self.site_parameter(key, Admissible::unit_interval())
     }
     pub(crate) fn request(&mut self, family: Family) {

@@ -722,7 +722,14 @@ name = "cell-anion-stays-in-cells"
 path = "crates/ng-contract/src/species.rs"
 old = '''CellAnion = "cell anion" => carried(-1), not_water_borne, [cells]'''
 new = '''CellAnion = "cell anion" => carried(-1), water_borne, [cells]'''
-test = "-p ng-contract --lib species::tests::the_new_rows_state_body_01s_makeup_carriage_and_spaces"
+test = "-p ng-contract --lib species::tests::the_new_rows_keep_the_tables_makeup_carriage_and_spaces"
+
+[[mutant]]
+name = "glycerol-stays-out-of-osmolality"
+path = "crates/ng-contract/src/species.rs"
+old = '''Glycerol = "glycerol" => fuel(C 3, H 8, O 3), water_borne, [watery], uncharged(), inert;'''
+new = '''Glycerol = "glycerol" => fuel(C 3, H 8, O 3), water_borne, [watery], uncharged(), osmotic;'''
+test = "-p ng-contract --lib species::tests::only_the_osmotic_rows_count_in_osmolality"
 
 [[mutant]]
 name = "species-in-its-spaces"
@@ -762,9 +769,53 @@ test = "-p ng-contract --test reactions a_quantity_splits_where_its_own_columns_
 [[mutant]]
 name = "store-on-the-tissue-site"
 path = "crates/ng-contract/src/compile.rs"
-old = '''let found = (schema.pools()).find(|pool| body(pool) && pool.1 == space && pool.2 == Species::Energy);'''
-new = '''let found = (schema.pools()).find(|pool| (body(pool) || true) && pool.1 == space && pool.2 == Species::Energy);'''
-test = "-p ng-contract --test reactions dissipation_reaches_the_body_store_whatever_sorts_before_it"
+old = '''let root = anatomy.root().filter(|root| root.class() == Class::TissueSite)?;'''
+new = '''let root = anatomy.in_set(Sites::Class(Class::TissueSite)).first().copied()?;'''
+test = "-p ng-contract --test reactions the_core_store_is_the_roots_whatever_tissue_store_sorts_first"
+
+[[mutant]]
+name = "tissue-served-once"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''self.tissues.windows(2).find(|pair| pair[0].0 == pair[1].0)'''
+new = '''self.tissues.windows(2).find(|_| false)'''
+test = "-p ng-contract --test anatomy a_bed_that_serves_two_tissues_is_refused"
+
+[[mutant]]
+name = "airway-fit"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''from.class == Class::TissueSite && matches!(to.class, Class::TissueSite | Class::CapillaryBed)'''
+new = '''matches!(to.class, Class::TissueSite | Class::CapillaryBed)'''
+test = "-p ng-contract --test map_reads an_airway_edge_out_of_a_vessel_segment_is_refused"
+
+[[mutant]]
+name = "gut-fit"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''&& matches!(to.class, Class::VesselSegment | Class::CapillaryBed)'''
+new = '''&& true'''
+test = "-p ng-contract --test map_reads a_gut_edge_into_a_tissue_site_is_refused"
+
+[[mutant]]
+name = "airway-fit-into"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''from.class == Class::TissueSite && matches!(to.class, Class::TissueSite | Class::CapillaryBed)'''
+new = '''from.class == Class::TissueSite'''
+test = "-p ng-contract --test map_reads an_airway_edge_into_a_vessel_segment_is_refused"
+
+[[mutant]]
+name = "gut-fit-out-of"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''from.class == Class::VesselSegment
+                    && matches!(to.class, Class::VesselSegment | Class::CapillaryBed)'''
+new = '''true
+                    && matches!(to.class, Class::VesselSegment | Class::CapillaryBed)'''
+test = "-p ng-contract --test map_reads a_gut_edge_out_of_a_bed_is_refused"
+
+[[mutant]]
+name = "besides-leaves-out-its-tissue"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''Sites::Besides(tissue) => bed(site) && self.tissue(site) != Some(tissue),'''
+new = '''Sites::Besides(_) => bed(site),'''
+test = "-p ng-contract --test routes each_site_set_holds_the_sites_the_map_places_on_it"
 
 [[mutant]]
 name = "exchange-on-receipts"

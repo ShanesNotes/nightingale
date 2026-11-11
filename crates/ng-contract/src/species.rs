@@ -1,5 +1,5 @@
-use crate::quantity::{dimensions, identities};
-use crate::{Charge, Concentration, Dimension, Element, Makeup, Osmoles, SameDimension, Space};
+use crate::quantity::{dimensions, identities, plain};
+use crate::{Charge, Concentration, Dimension, Element, Makeup, Osmoles, Plain, SameDimension, Space};
 
 mod substances {
     pub trait Sealed {}
@@ -119,6 +119,12 @@ macro_rules! species {
         species!(@sum Osmoles $name);
     };
     (@osmole inert $name:ident) => {};
+    (@osmotic osmotic) => {
+        true
+    };
+    (@osmotic inert) => {
+        false
+    };
     (@sum $total:ident $name:ident) => {
         impl identities::Sealed<$total> for $name {}
         impl SameDimension<$total> for $name {}
@@ -138,6 +144,8 @@ macro_rules! species {
                 }
             }
             impl Dimension for $name {}
+            impl plain::Sealed for $name {}
+            impl Plain for $name {}
             impl substances::Sealed for $name {}
             impl Substance for $name {
                 const SPECIES: Species = Species::$name;
@@ -162,7 +170,7 @@ macro_rules! species {
                     $(Species::$name => species!(@makeup $kind($($made)*)),)*
                 }
             }
-            pub(crate) const fn names(self) -> [&'static str; 6] {
+            pub(crate) const fn names(self) -> [&'static str; 16] {
                 match self {
                     $(Species::$name => [
                         concat!("reclaim ", $text),
@@ -171,6 +179,16 @@ macro_rules! species {
                         concat!("binding ", $text),
                         concat!("effect ", $text),
                         concat!("exchange ", $text),
+                        concat!("cell membrane ", $text),
+                        concat!("alveolar ", $text),
+                        concat!("lining ", $text),
+                        concat!("endothelium ", $text),
+                        concat!("airway ", $text),
+                        concat!("transit ", $text),
+                        concat!("absorb ", $text),
+                        concat!("chyle ", $text),
+                        concat!("shed ", $text),
+                        concat!("secrete ", $text),
                     ],)*
                 }
             }
@@ -187,6 +205,12 @@ macro_rules! species {
             pub(crate) const fn may_hold(self, space: Space) -> bool {
                 match self {
                     $(Species::$name => $(species!(@spaces $kinds space))||+,)*
+                }
+            }
+            #[cfg(test)]
+            const fn osmotic(self) -> bool {
+                match self {
+                    $(Species::$name => species!(@osmotic $osmole),)*
                 }
             }
             /// Calls the visitor with this species' marker type.
@@ -313,7 +337,10 @@ mod tests {
         for (at, (species, text)) in pinned.into_iter().enumerate() {
             assert_eq!(species as usize, at, "{text}");
             assert_eq!(species.dimension(), text);
-            assert_eq!(species.names(), PREFIXES.map(|prefix| format!("{prefix} {text}")));
+            assert_eq!(
+                species.names()[..6],
+                PREFIXES.map(|prefix| format!("{prefix} {text}"))
+            );
         }
         let carried = [
             Species::Water,
@@ -351,7 +378,37 @@ mod tests {
     }
 
     #[test]
-    fn the_new_rows_state_body_01s_makeup_carriage_and_spaces() {
+    fn only_the_osmotic_rows_count_in_osmolality() {
+        let osmotic: Vec<Species> = Species::ALL
+            .into_iter()
+            .filter(|species| species.osmotic())
+            .collect();
+        assert_eq!(
+            osmotic,
+            [
+                Species::Sodium,
+                Species::Potassium,
+                Species::Chloride,
+                Species::CarbonDioxide,
+                Species::Glucose,
+                Species::AminoAcids,
+                Species::Lactate,
+                Species::Ketones,
+                Species::Urea,
+                Species::Ammonium,
+                Species::Creatinine,
+                Species::FixedAcid,
+                Species::DietBase,
+                Species::CellAnion,
+                Species::Calcium,
+                Species::Magnesium,
+                Species::Phosphate,
+            ]
+        );
+    }
+
+    #[test]
+    fn the_new_rows_keep_the_tables_makeup_carriage_and_spaces() {
         use super::{
             Ammonium, Calcium, CellAnion, Chloride, Creatinine, DietBase, FixedAcid, Glucose, Ketones,
             Lactate, Magnesium, Phosphate, Potassium, Sodium, Urea,
