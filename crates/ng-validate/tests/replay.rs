@@ -2277,10 +2277,27 @@ macro_rules! follows {
 /// moves within each minute and every held value lands in the bits.
 fn day_body() -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
-    let origin = Position::new(measure(0.0), measure(0.0), measure(0.0));
-    map.site::<TissueSite>("body", origin);
-    let schema = Schema::new(map.finish()?)?;
+    let origin = || Position::new(measure(0.0), measure(0.0), measure(0.0));
+    let root = map.site::<TissueSite>("body", origin());
+    let gut = map.site::<VesselSegment>("gut", origin());
+    map.contain(root.id(), gut.id());
+    let gut = gut.id();
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.boundary::<Water>("gut water", BoundaryDirection::IntoBody, gut, Space::Lumen)?;
+    schema.pool::<Sodium>(gut, Space::Lumen)?;
+    schema.boundary::<Sodium>("gut sodium", BoundaryDirection::IntoBody, gut, Space::Lumen)?;
+    schema.pool::<Glucose>(gut, Space::Lumen)?;
+    schema.boundary::<Glucose>("gut glucose", BoundaryDirection::IntoBody, gut, Space::Lumen)?;
+    schema.pool::<Iron>(gut, Space::Lumen)?;
+    schema.boundary::<Iron>("gut iron", BoundaryDirection::IntoBody, gut, Space::Lumen)?;
     assemble(schema, |mut body| {
+        let (mut laws, ports) = body.boundary()?.parts();
+        let wave = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
+        eaten::<Water>(&mut laws, &ports, "gut water", wave)?;
+        eaten::<Sodium>(&mut laws, &ports, "gut sodium", wave)?;
+        eaten::<Glucose>(&mut laws, &ports, "gut glucose", wave)?;
+        eaten::<Iron>(&mut laws, &ports, "gut iron", wave)?;
+        body.add(laws.finish());
         let (mut laws, _ports) = body.nervous()?.parts();
         let gain = laws.parameter::<Dimensionless>(ParameterKey::new("ns.gain"), Admissible::positive());
         let speed =
@@ -2314,6 +2331,22 @@ fn day_body() -> Result<CompiledBody, AdmissionError> {
         body.add(laws.finish());
         body.compile()
     })
+}
+
+/// The route's law carries its drive into the gut.
+fn eaten<'b, Q: Substance>(
+    laws: &mut FragmentBuilder<'b, Boundary>,
+    ports: &BoundaryPorts<'b>,
+    name: &'static str,
+    wave: RateClass,
+) -> Result<(), AdmissionError> {
+    let BoundaryRoute { route, drive } = ports.route::<Q>(name)?;
+    let rate = laws.kernel(|mut k| {
+        let value = k.read(&drive);
+        k.finish(value, laws.every_mode(), wave)
+    });
+    laws.transfer(Transfer::new(&route, rate));
+    Ok(())
 }
 
 fn room(values: [f64; 8]) -> BoundaryInput {
@@ -2359,8 +2392,17 @@ const STATED: [(&str, f64); 12] = [
     ("clothing", 1.0),
 ];
 
-/// The day's held inputs at the anchor, which every run knows, then a later clock, a sleep, a room change and
-/// a void that opens and shuts, each of which can arrive late. The later clock crosses midnight.
+/// Synthetic amounts, delivered from 80 s until 140 s, across the later clock.
+fn lunch() -> Meal {
+    Meal::new(at(140))
+        .with(measure::<Water>(60.0))
+        .with(measure::<Sodium>(6.0))
+        .with(measure::<Glucose>(3.0))
+        .with(measure::<Iron>(0.6))
+}
+
+/// The day's held inputs at the anchor, which every run knows, then a later clock, a sleep, a room change, a
+/// void that opens and shuts and a meal, each of which can arrive late. The later clock crosses midnight.
 struct DayInputs {
     body: CompiledBody,
 }
@@ -2414,6 +2456,19 @@ impl DayInputs {
             .into(),
         );
         packet.start(lag, measure::<Dimensionless>(0.5), "synthetic")?;
+        let gut = self.body.rows().iter().find_map(|row| match row.kind() {
+            RowKind::Amount { site, .. } => Some(site),
+            _ => None,
+        });
+        let amount = |species| RowKind::Amount {
+            site: gut.expect("a gut"),
+            space: Space::Lumen,
+            species,
+        };
+        packet.start(amount(Species::Water), measure::<Water>(100.0), "synthetic")?;
+        packet.start(amount(Species::Sodium), measure::<Sodium>(14.0), "synthetic")?;
+        packet.start(amount(Species::Glucose), measure::<Glucose>(5.0), "synthetic")?;
+        packet.start(amount(Species::Iron), measure::<Iron>(0.01), "synthetic")?;
         Ok(packet)
     }
 }
@@ -2434,6 +2489,7 @@ impl ReplayCase for DayInputs {
             ),
             held(b"open", 70, BoundaryInput::Void(Gate::Open)),
             held(b"shut again", 100, BoundaryInput::Void(Gate::Shut)),
+            held(b"lunch", 80, BoundaryInput::Meal(lunch())),
             held(
                 b"clock before midnight",
                 130,
@@ -2474,7 +2530,7 @@ impl ReplayCase for DayInputs {
 }
 
 #[test]
-fn the_days_held_inputs_pass_late_admission_pause_and_resume() {
+fn the_days_held_inputs_and_a_meal_pass_late_admission_pause_and_resume() {
     let case = DayInputs::new();
     let clock = script();
     let plan = plan(&clock);
