@@ -7,21 +7,6 @@ use crate::{
 };
 use core::marker::PhantomData;
 
-/// The metabolism card crosses fuels at every bed but the liver's, which the hepatic card's ports cross.
-/// ```compile_fail,E0308
-/// use ng_contract::*;
-/// fn crossed<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts<'b>)
-///     -> SiteRoute<'b, Metabolism, Beds<Liver>, Glucose> {
-///     ports.fuel_into_cells::<Glucose>(mt)
-/// }
-/// ```
-/// ```
-/// use ng_contract::*;
-/// fn crossed<'b>(hp: &mut FragmentBuilder<'b, Hepatic>, ports: &HepaticPorts<'b>)
-///     -> SiteRoute<'b, Hepatic, Beds<Liver>, Glucose> {
-///     ports.fuel_into_cells::<Glucose>(hp)
-/// }
-/// ```
 pub struct MetabolismPorts<'b> {
     processes: Vec<&'static str>,
     brand: Brand<'b>,
@@ -91,6 +76,13 @@ impl<'b> MetabolismPorts<'b> {
     /// use ng_contract::*;
     /// fn crossed<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts<'b>)
     ///     -> SiteRoute<'b, Metabolism, Besides<Liver>, Glucose> {
+    ///     ports.fuel_into_cells::<Glucose>(mt)
+    /// }
+    /// ```
+    /// ```compile_fail,E0308
+    /// use ng_contract::*;
+    /// fn crossed<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts<'b>)
+    ///     -> SiteRoute<'b, Metabolism, Beds<Liver>, Glucose> {
     ///     ports.fuel_into_cells::<Glucose>(mt)
     /// }
     /// ```

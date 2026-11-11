@@ -116,8 +116,8 @@ edge_kinds! {
 }
 
 /// A wall between two spaces of one capillary bed, crossed one species at a time. Water crosses the capillary wall by
-/// Starling's law, which is not a crossing one owner holds, and each other species crosses it by its exchange. The
-/// tubule wall's crossings are reclaim, and the gut wall's are passages. These are the rest.
+/// Starling's law, and each other species crosses it by its exchange. The tubule wall's crossings are reclaim, and the
+/// gut wall's are passages. These are the rest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Wall {
     /// The cell membrane: interstitium to cells.
@@ -268,7 +268,7 @@ impl Family {
             Family::Circulation | Family::Valves | Family::Sinusoids | Family::GravityWork
         )
     }
-    pub(crate) fn owned_crossing(self) -> Option<(&'static [Crossed], Species)> {
+    pub(crate) fn transport(self) -> Option<(&'static [Crossed], Species)> {
         match self {
             Family::Exchange(species) => Some((&[Crossed::Capillary], species)),
             Family::Across(wall, _, species) => Some((wall.crossed(), species)),
@@ -292,7 +292,6 @@ impl Family {
         }
     }
 }
-/// A membrane of a capillary bed, as `CrossedTwice` counts the crossings of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Crossed {
     Capillary,

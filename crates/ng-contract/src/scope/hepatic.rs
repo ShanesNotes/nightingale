@@ -19,6 +19,13 @@ impl<'b> HepaticPorts<'b> {
         }
     }
     /// A fuel across the cell membrane of each liver bed, interstitium to cells.
+    /// ```
+    /// use ng_contract::*;
+    /// fn crossed<'b>(hp: &mut FragmentBuilder<'b, Hepatic>, ports: &HepaticPorts<'b>)
+    ///     -> SiteRoute<'b, Hepatic, Beds<Liver>, Glucose> {
+    ///     ports.fuel_into_cells::<Glucose>(hp)
+    /// }
+    /// ```
     pub fn fuel_into_cells<Q: CellFuel>(
         &self,
         laws: &mut FragmentBuilder<'b, Hepatic>,

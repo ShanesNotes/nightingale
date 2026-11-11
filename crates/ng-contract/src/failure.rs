@@ -365,7 +365,7 @@ pub enum CompileDefect {
     /// A reaction that names one species twice.
     SpeciesTwice { law: LawName, species: Species },
     /// A reaction whose terms sit in two spaces of its site, named in space order. A reaction's terms sit in one space,
-    /// apart from the space `energy_into` names, because a move between spaces is a crossing, which only a route makes.
+    /// apart from the space `energy_into` names.
     ReactionInTwoSpaces { law: LawName, spaces: [Space; 2] },
     /// A reaction that names a fuel whose energy content the schema does not state, so its energy has no value.
     UnstatedEnergy { law: LawName, species: Species },
