@@ -252,7 +252,6 @@ fn check_places(schema: &Schema) -> Result<(), CompileDefect> {
     }
 }
 
-/// A fluid route carries what its water carries and crosses no wall of its own, so it is no crossing.
 fn check_crossings(fragments: &[FragmentData], reaches: &Reaches) -> Result<(), CompileDefect> {
     let mut crossings = Vec::new();
     for fragment in fragments {

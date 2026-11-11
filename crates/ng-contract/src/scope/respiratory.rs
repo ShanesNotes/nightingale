@@ -59,7 +59,7 @@ impl<'b> RespiratoryPorts<'b> {
         laws.request(family);
         EdgeRoute::requested(family)
     }
-    /// Water from each lung bed's interstitium into its gas: what humidifies a breath.
+    /// Water from each lung bed's interstitium into its gas.
     pub fn lining(
         &self,
         laws: &mut FragmentBuilder<'b, Respiratory>,

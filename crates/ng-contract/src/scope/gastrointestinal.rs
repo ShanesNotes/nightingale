@@ -17,7 +17,7 @@ impl<'b> GastrointestinalPorts<'b> {
             brand: PhantomData,
         }
     }
-    /// Lumen to lumen along every gut edge between two lumens: gastric emptying.
+    /// Lumen to lumen along every gut edge between two lumens.
     pub fn transit<Q: Ingested>(
         &self,
         laws: &mut FragmentBuilder<'b, Gastrointestinal>,
@@ -49,7 +49,7 @@ impl<'b> GastrointestinalPorts<'b> {
         laws.request(family);
         EdgeRoute::requested(family)
     }
-    /// Fat to the bed's interstitium, which its lymph drains: the only way triglyceride is absorbed.
+    /// Fat to the bed's interstitium.
     pub fn chyle(
         &self,
         laws: &mut FragmentBuilder<'b, Gastrointestinal>,

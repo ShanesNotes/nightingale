@@ -92,7 +92,7 @@ impl<'b> MetabolismPorts<'b> {
         laws.request(family);
         SiteRoute::requested(family)
     }
-    /// The core store to each other tissue site's store: the skin's, and the conducting airway's.
+    /// The core store to each other tissue site's store.
     pub fn conduction(
         &self,
         laws: &mut FragmentBuilder<'b, Metabolism>,

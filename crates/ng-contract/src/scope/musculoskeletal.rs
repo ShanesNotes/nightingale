@@ -9,7 +9,7 @@ impl<'b> MusculoskeletalPorts<'b> {
     pub(super) fn issued(_: Vec<&'static str>) -> Self {
         Self { brand: PhantomData }
     }
-    /// A mineral across the cell membrane of the bone bed: bone's partner pool.
+    /// A mineral across the cell membrane of the bone bed.
     pub fn bone<Q: Mineral>(
         &self,
         laws: &mut FragmentBuilder<'b, Musculoskeletal>,

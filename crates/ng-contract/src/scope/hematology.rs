@@ -17,8 +17,7 @@ impl<'b> HematologyPorts<'b> {
             brand: PhantomData,
         }
     }
-    /// Iron across the cell membrane of each bed whose interstitium and cells hold iron: the liver's store and the
-    /// gut's cells, where body 01's schema puts iron.
+    /// Iron across the cell membrane of each bed whose interstitium and cells hold iron.
     pub fn iron_into_cells(
         &self,
         laws: &mut FragmentBuilder<'b, Hematology>,

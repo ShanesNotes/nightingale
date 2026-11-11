@@ -360,7 +360,7 @@ pub enum CompileDefect {
         site: SiteId,
         space: Space,
     },
-    /// One species across one wall at one site by two cards, so two laws would move it twice.
+    /// One species across one wall at one site by two cards.
     CrossedTwice { laws: [LawName; 2], site: SiteId },
     /// A reaction that names one species twice.
     SpeciesTwice { law: LawName, species: Species },

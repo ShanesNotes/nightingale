@@ -7,8 +7,7 @@ use crate::{
 };
 use core::marker::PhantomData;
 
-/// Only the hepatic card reacts at the liver bed; the musculoskeletal card reacts at the muscle bed, and the renal card
-/// at the peritubular bed.
+/// Only the hepatic card reacts at the liver bed.
 /// ```compile_fail,E0277
 /// use ng_contract::*;
 /// fn ungranted<'b>(ms: &mut FragmentBuilder<'b, Musculoskeletal>, store: Proportions<Glucose>)
@@ -42,7 +41,7 @@ impl<'b> HepaticPorts<'b> {
             brand: PhantomData,
         }
     }
-    /// A fuel across the cell membrane of each liver bed, interstitium to cells: the glucose hub's crossings.
+    /// A fuel across the cell membrane of each liver bed, interstitium to cells.
     pub fn fuel_into_cells<Q: CellFuel>(
         &self,
         laws: &mut FragmentBuilder<'b, Hepatic>,
@@ -51,12 +50,11 @@ impl<'b> HepaticPorts<'b> {
         laws.request(family);
         SiteRoute::requested(family)
     }
-    /// Every plain vascular edge with an end at a liver bed: the liver bed's own edges, which circulation leaves out.
+    /// Every plain vascular edge with an end at a liver bed.
     pub fn sinusoids(&self, laws: &mut FragmentBuilder<'b, Hepatic>) -> EdgeRoute<'b, Hepatic, Water> {
         laws.request(Family::Sinusoids);
         EdgeRoute::requested(Family::Sinusoids)
     }
-    /// The pressure of every blood site, which the cardiovascular card defines.
     pub fn blood_pressure(&self) -> ReadPort<'b, Hepatic, PerSite<Blood, Pressure>> {
         ReadPort::field(LawName {
             owner: Cardiovascular::CARD,

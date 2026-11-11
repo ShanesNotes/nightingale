@@ -1200,9 +1200,7 @@ impl<'b, O, C: SiteSet, Q> Reaction<'b, O, C, Q> {
 mod grants {
     pub trait Sealed<C> {}
 }
-/// A site set the contract grants a card to react at: metabolism at the capillary beds, the hepatic card at the liver
-/// bed, the musculoskeletal card at the muscle bed, and the renal card at the peritubular bed, whose cells stand for
-/// the tubule's.
+/// A site set the contract grants a card to react at.
 pub trait ReactsAt<C: SiteSet>: grants::Sealed<C> + Owner {}
 impl grants::Sealed<CapillaryBed> for Metabolism {}
 impl ReactsAt<CapillaryBed> for Metabolism {}
