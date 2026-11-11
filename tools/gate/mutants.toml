@@ -746,6 +746,40 @@ new = '''let taken = |book: Book| book == Book::Energy;'''
 test = "-p ng-validate --test burning a_burn_whose_energy_goes_nowhere_is_refused"
 
 [[mutant]]
+name = "extent-per-reference"
+path = "crates/ng-contract/src/evaluate.rs"
+old = '''columns[column.index()] = self.layout.columns[column.index()].turnovers(value);'''
+new = '''columns[column.index()] = value;'''
+test = "-p ng-validate --test reference_count glycogen_stored_from_twenty_glucose_moves_glucose_by_its_rate_and_closes_every_book"
+
+[[mutant]]
+name = "jacobian-per-reference"
+path = "crates/ng-contract/src/evaluate.rs"
+old = '''
+                        let slope = column.turnovers(slope);
+                        for &(_, coefficient) in &column.terms {'''
+new = '''
+                        for &(_, coefficient) in &column.terms {'''
+test = "-p ng-contract --lib evaluate::tests::the_slopes_of_a_reaction_counting_its_reference_nineteen_times_match_central_differences"
+
+[[mutant]]
+name = "parameter-slope-per-reference"
+path = "crates/ng-contract/src/evaluate.rs"
+old = '''
+                    let slope = column.turnovers(slope);
+                    for &(row, coefficient) in &column.terms {'''
+new = '''
+                    for &(row, coefficient) in &column.terms {'''
+test = "-p ng-contract --lib evaluate::tests::the_slopes_of_a_reaction_counting_its_reference_nineteen_times_match_central_differences"
+
+[[mutant]]
+name = "reference-count-sealed"
+path = "crates/ng-contract/src/body.rs"
+old = '''if *reference_count != NonZeroU32::MIN {'''
+new = '''if false && *reference_count != NonZeroU32::MIN {'''
+test = "-p ng-validate --test reference_count the_reference_count_is_in_the_model_hash"
+
+[[mutant]]
 name = "reacting-part-spanned"
 path = "crates/ng-contract/src/conservation.rs"
 old = '''if !spans_conserved(part, inside, amounts, &found).ok_or(overflow)? {'''

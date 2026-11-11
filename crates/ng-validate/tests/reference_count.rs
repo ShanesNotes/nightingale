@@ -39,7 +39,7 @@ fn at_origin() -> Result<Position, AdmissionError> {
 
 /// Run at a rate of zero, it moves nothing. Beside a reaction that joins six pools under four books it names the
 /// direction those books leave, as the body's own burn will.
-fn partner() -> Proportions<Glucose> {
+fn burn() -> Proportions<Glucose> {
     Proportions::<Glucose>::using(Space::Cells)
         .uses::<Oxygen, 6>(Space::Cells)
         .makes::<CarbonDioxide, 6>(Space::Cells)
@@ -100,7 +100,7 @@ fn bed<Q: Reactant, const N: u32>(
         let (mut laws, _) = body.hold(held)?.parts();
         paced(&mut laws, REACTION.local, proportions, RATE)?;
         if partnered {
-            paced(&mut laws, "partner", partner(), PARTNER_RATE)?;
+            paced(&mut laws, "partner", burn(), PARTNER_RATE)?;
         }
         body.add(laws.finish());
         body.compile()
@@ -357,6 +357,23 @@ fn glucose_made_from_lactate_warms_its_bed_and_closes_every_book() {
         ],
         integral(0.01),
     );
+}
+
+#[test]
+fn the_reference_count_is_in_the_model_hash() {
+    let carry = |schema: &mut Schema| {
+        schema.carry::<Glucose, CapillaryBed>(Space::Cells);
+    };
+    let (once, _) = bed(carry, burn(), false).expect("compiled");
+    let twice = Proportions::<Glucose, 2>::using(Space::Cells)
+        .uses::<Oxygen, 12>(Space::Cells)
+        .makes::<CarbonDioxide, 12>(Space::Cells)
+        .makes::<Water, 12>(Space::Cells)
+        .energy_into(Space::Thermal);
+    let (twice, _) = bed(carry, twice, false).expect("compiled");
+    assert_ne!(once.model_hash(), twice.model_hash());
+    expect!["1ecafbca522756f57161f9ed7203af0bb52a0be9299d2fbb822510522d37bee6"]
+        .assert_eq(&hex(twice.model_hash().digest()));
 }
 
 #[test]
