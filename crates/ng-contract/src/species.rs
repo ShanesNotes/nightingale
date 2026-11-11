@@ -1,5 +1,5 @@
-use crate::quantity::dimensions;
-use crate::{Dimension, Element, Makeup};
+use crate::quantity::{dimensions, identities};
+use crate::{Charge, Concentration, Dimension, Element, Makeup, Osmoles, SameDimension, Space};
 
 mod substances {
     pub trait Sealed {}
@@ -12,7 +12,9 @@ pub trait Substance: substances::Sealed + Dimension {
 mod reactants {
     pub trait Sealed {}
 }
-/// A species a reaction may use or make: every substance but energy, whose share a reaction derives from what it burns.
+/// A species a reaction may use or make: one that states its atoms. A carried species states none to balance and is
+/// the only kind that holds a fixed charge, so no reaction moves a fixed charge. Energy follows from what a reaction
+/// burns.
 pub trait Reactant: reactants::Sealed + Substance {}
 
 /// A typed action on one species. Code that needs a species' marker type reaches it from a `Species` value with one
@@ -22,8 +24,28 @@ pub trait Visit {
     fn visit<Q: Substance>(self) -> Self::Output;
 }
 
-/// Each row is the only place a species is stated: its marker type, its name, its makeup and whether water carries it.
+/// Each row is the only place a species is stated: its name, its makeup, whether water carries it, the kinds of space
+/// that may hold it, its charge after speciation, and whether it counts in osmolality.
 macro_rules! species {
+    (@marker [$($attr:tt)*] $name:ident fixed()) => {
+        $($attr)*
+        #[doc = "Its fixed charge is its charge after speciation."]
+        pub enum $name {}
+    };
+    (@marker [$($attr:tt)*] $name:ident strong($charge:literal)) => {
+        $($attr)*
+        #[doc = concat!("After speciation each unit holds a charge of ", stringify!($charge), ".")]
+        pub enum $name {}
+    };
+    (@marker [$($attr:tt)*] $name:ident weak()) => {
+        $($attr)*
+        #[doc = "After speciation its charge follows its space's acidity."]
+        pub enum $name {}
+    };
+    (@marker [$($attr:tt)*] $name:ident none()) => {
+        $($attr)*
+        pub enum $name {}
+    };
     (@makeup carried($charge:literal)) => {
         Makeup::Carried { charge: $charge }
     };
@@ -45,6 +67,9 @@ macro_rules! species {
     (@element O) => {
         Element::Oxygen
     };
+    (@element N) => {
+        Element::Nitrogen
+    };
     (@reactant atoms $name:ident) => {
         impl reactants::Sealed for $name {}
         impl Reactant for $name {}
@@ -52,9 +77,7 @@ macro_rules! species {
     (@reactant fuel $name:ident) => {
         species!(@reactant atoms $name);
     };
-    (@reactant carried $name:ident) => {
-        species!(@reactant atoms $name);
-    };
+    (@reactant carried $name:ident) => {};
     (@reactant energy $name:ident) => {};
     (@carried water) => {
         true
@@ -62,13 +85,55 @@ macro_rules! species {
     (@carried still) => {
         false
     };
+    (@spaces watery $space:ident) => {
+        matches!($space, Space::Plasma | Space::Interstitium | Space::Cells | Space::Lumen | Space::Fluid)
+    };
+    (@spaces outside $space:ident) => {
+        matches!($space, Space::Plasma | Space::Interstitium | Space::Lumen | Space::Fluid)
+    };
+    (@spaces blood $space:ident) => {
+        matches!($space, Space::Plasma | Space::Lumen)
+    };
+    (@spaces cells $space:ident) => {
+        matches!($space, Space::Cells)
+    };
+    (@spaces bound $space:ident) => {
+        matches!($space, Space::Bound)
+    };
+    (@spaces synapse $space:ident) => {
+        matches!($space, Space::Vesicle | Space::Cleft | Space::Bound)
+    };
+    (@spaces gas $space:ident) => {
+        matches!($space, Space::Gas)
+    };
+    (@spaces stores $space:ident) => {
+        matches!($space, Space::Elastic | Space::Thermal)
+    };
+    (@charged fixed $name:ident) => {
+        species!(@sum Charge $name);
+    };
+    (@charged strong $name:ident) => {
+        species!(@sum Charge $name);
+    };
+    (@charged weak $name:ident) => {};
+    (@charged none $name:ident) => {};
+    (@osmole osmole $name:ident) => {
+        species!(@sum Osmoles $name);
+    };
+    (@osmole inert $name:ident) => {};
+    (@sum $total:ident $name:ident) => {
+        impl identities::Sealed<$total> for $name {}
+        impl SameDimension<$total> for $name {}
+        impl identities::Sealed<Concentration<$total>> for Concentration<$name> {}
+        impl SameDimension<Concentration<$total>> for Concentration<$name> {}
+    };
     ($(
         $(#[$doc:meta])*
-        $name:ident = $text:literal => $kind:ident($($made:tt)*), $carry:ident;
+        $name:ident = $text:literal => $kind:ident($($made:tt)*), $carry:ident, [$($kinds:ident),+],
+            $after:ident($($charge:tt)*), $osmole:ident;
     )*) => {
         $(
-            $(#[$doc])*
-            pub enum $name {}
+            species!(@marker [$(#[$doc])*] $name $after($($charge)*));
             impl dimensions::Sealed for $name {
                 fn name() -> String {
                     String::from($text)
@@ -80,6 +145,8 @@ macro_rules! species {
                 const SPECIES: Species = Species::$name;
             }
             species!(@reactant $kind $name);
+            species!(@charged $after $name);
+            species!(@osmole $osmole $name);
         )*
 
         /// What a pool holds. One closed list, so a row, a route's carried columns, a makeup and a `Book` all read one
@@ -122,6 +189,12 @@ macro_rules! species {
                     $(Species::$name => species!(@carried $carry),)*
                 }
             }
+            /// Whether a space of this kind may hold it.
+            pub(crate) const fn may_hold(self, space: Space) -> bool {
+                match self {
+                    $(Species::$name => $(species!(@spaces $kinds space))||+,)*
+                }
+            }
             /// Calls the visitor with this species' marker type.
             pub fn visit<V: Visit>(self, visitor: V) -> V::Output {
                 match self {
@@ -133,19 +206,59 @@ macro_rules! species {
 }
 
 species! {
-    /// Water, whose amount is in the canonical amount unit; its volume derives from it.
-    Water = "water" => atoms(H 2, O 1), water;
-    Sodium = "sodium" => carried(1), water;
-    Potassium = "potassium" => carried(1), water;
-    Chloride = "chloride" => carried(-1), water;
-    Albumin = "albumin" => carried(0), water;
-    Vasopressin = "vasopressin" => carried(0), water;
-    Norepinephrine = "norepinephrine" => carried(0), water;
-    Acetylcholine = "acetylcholine" => carried(0), water;
-    Energy = "energy" => energy(), still;
-    Oxygen = "oxygen" => atoms(O 2), water;
-    CarbonDioxide = "carbon dioxide" => atoms(C 1, O 2), water;
-    Glucose = "glucose" => fuel(C 6, H 12, O 6), water;
+    /// Water, whose amount is in the canonical amount unit; its volume derives from it. In a gas space it is vapor.
+    Water = "water" => atoms(H 2, O 1), water, [watery, gas], none(), inert;
+    Sodium = "sodium" => carried(1), water, [watery], fixed(), osmole;
+    Potassium = "potassium" => carried(1), water, [watery], fixed(), osmole;
+    Chloride = "chloride" => carried(-1), water, [watery], fixed(), osmole;
+    Albumin = "albumin" => carried(0), water, [outside], weak(), inert;
+    Vasopressin = "vasopressin" => carried(0), water, [outside, bound], none(), inert;
+    Norepinephrine = "norepinephrine" => carried(0), water, [synapse, outside], none(), inert;
+    Acetylcholine = "acetylcholine" => carried(0), water, [synapse, outside], none(), inert;
+    Energy = "energy" => energy(), still, [stores], none(), inert;
+    Oxygen = "oxygen" => atoms(O 2), water, [watery, gas], none(), inert;
+    /// Total carbon dioxide: dissolved, bicarbonate and carbamino, one moiety.
+    CarbonDioxide = "carbon dioxide" => atoms(C 1, O 2), water, [watery, gas], weak(), osmole;
+    Glucose = "glucose" => fuel(C 6, H 12, O 6), water, [watery], none(), osmole;
+    NitrogenGas = "nitrogen gas" => carried(0), still, [gas], none(), inert;
+    /// One glucosyl residue stands for a unit of glycogen.
+    Glycogen = "glycogen" => fuel(C 6, H 10, O 5), still, [cells], none(), inert;
+    /// Tripalmitin stands for every triglyceride.
+    Triglyceride = "triglyceride" => fuel(C 51, H 98, O 6), water, [watery], none(), inert;
+    /// Palmitic acid stands for every fatty acid.
+    FattyAcids = "fatty acids" => fuel(C 16, H 32, O 2), water, [watery], none(), inert;
+    Glycerol = "glycerol" => fuel(C 3, H 8, O 3), water, [watery], none(), osmole;
+    /// Alanine stands for every amino acid.
+    AminoAcids = "amino acids" => fuel(C 3, H 7, N 1, O 2), water, [watery], none(), osmole;
+    /// An alanine residue, the amino acid less a water, stands for a unit of body protein.
+    BodyProtein = "body protein" => fuel(C 3, H 5, N 1, O 1), still, [cells], none(), inert;
+    /// Lactic acid's atoms stand for lactate.
+    Lactate = "lactate" => fuel(C 3, H 6, O 3), water, [watery], strong(-1), osmole;
+    /// Acetoacetic acid stands for every ketone.
+    Ketones = "ketones" => fuel(C 4, H 6, O 3), water, [watery], strong(-1), osmole;
+    Urea = "urea" => fuel(C 1, H 4, N 2, O 1), water, [watery], none(), osmole;
+    /// Ammonia's atoms, its uncharged form, stand for ammonium.
+    Ammonium = "ammonium" => fuel(N 1, H 3), water, [watery], strong(1), osmole;
+    Creatinine = "creatinine" => fuel(C 4, H 7, N 3, O 1), water, [watery], none(), osmole;
+    /// The strong anion the diet's protein sulfur leaves. A synthesis route makes it, never a reaction.
+    FixedAcid = "fixed acid" => carried(0), water, [watery], strong(-1), osmole;
+    /// Acetic acid stands for the diet's organic anions: one unit is one equivalent of base.
+    DietBase = "diet base" => fuel(C 2, H 4, O 2), water, [watery], strong(-1), osmole;
+    /// The cells' own anions, which cross no membrane.
+    CellAnion = "cell anion" => carried(-1), still, [cells], fixed(), osmole;
+    Calcium = "calcium" => carried(2), water, [watery], fixed(), osmole;
+    Magnesium = "magnesium" => carried(2), water, [watery], fixed(), osmole;
+    Phosphate = "phosphate" => carried(0), water, [watery], weak(), osmole;
+    Hemoglobin = "hemoglobin" => carried(0), water, [blood], weak(), inert;
+    Iron = "iron" => carried(0), water, [watery], none(), inert;
+    Insulin = "insulin" => carried(0), water, [outside, bound], none(), inert;
+    Glucagon = "glucagon" => carried(0), water, [outside, bound], none(), inert;
+    Renin = "renin" => carried(0), water, [blood], none(), inert;
+    AngiotensinII = "angiotensin II" => carried(0), water, [outside, bound], none(), inert;
+    Aldosterone = "aldosterone" => carried(0), water, [outside, bound], none(), inert;
+    NatriureticPeptide = "natriuretic peptide" => carried(0), water, [outside, bound], none(), inert;
+    ParathyroidHormone = "parathyroid hormone" => carried(0), water, [outside, bound], none(), inert;
+    Cortisol = "cortisol" => carried(0), water, [outside, bound], none(), inert;
 }
 
 const CARRIED_COUNT: usize = {
@@ -226,5 +339,26 @@ mod tests {
             Species::Glucose,
         ];
         assert_eq!(Species::CARRIED[..carried.len()], carried);
+    }
+
+    /// The basis's charge combination weighs each amount by its species' fixed charge, so these six ions are the only
+    /// terms it can hold.
+    #[test]
+    fn only_carried_species_hold_a_fixed_charge() {
+        let charged: Vec<(Species, i64)> = (Species::ALL.into_iter())
+            .map(|species| (species, species.charge()))
+            .filter(|&(_, charge)| charge != 0)
+            .collect();
+        assert_eq!(
+            charged,
+            [
+                (Species::Sodium, 1),
+                (Species::Potassium, 1),
+                (Species::Chloride, -1),
+                (Species::CellAnion, -1),
+                (Species::Calcium, 2),
+                (Species::Magnesium, 2),
+            ]
+        );
     }
 }

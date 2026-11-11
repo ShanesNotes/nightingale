@@ -287,6 +287,12 @@ pub enum CompileDefect {
     /// An algebraic row that no structural matching pairs with an algebraic unknown it reads, or a closed row with no
     /// store of its own to hold it.
     StructuralSingularity { law: LawName },
+    /// A pool in a space its species may not hold, the first in key order.
+    OutOfPlace {
+        site: SiteId,
+        space: Space,
+        species: Species,
+    },
     /// A pool this body models that no transfer moves and no held card answers for. A read never moves a
     /// pool, and a transfer whose two ends are one pool moves nothing.
     OrphanPool { site: SiteId, space: Space },
@@ -356,8 +362,6 @@ pub enum CompileDefect {
     },
     /// A reaction that names one species twice.
     SpeciesTwice { law: LawName, species: Species },
-    /// A reaction that names a species no reaction may use or make.
-    NoMakeup { law: LawName, species: Species },
     /// A reaction that names a fuel whose energy content the schema does not state, so its energy has no value.
     UnstatedEnergy { law: LawName, species: Species },
     /// A reaction whose counts leave a conserved quantity open: an element its uses and makes do not hold alike, or

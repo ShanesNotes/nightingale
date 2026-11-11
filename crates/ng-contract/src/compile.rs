@@ -31,6 +31,7 @@ pub(crate) fn compile(
     held.sort_by_key(|card| card.card);
     check_fragments(&issued, &fragments, &schema, &held)?;
     check_boundaries(&schema)?;
+    check_places(&schema)?;
     check_reactions(&fragments, &schema)?;
     let declarations = declarations(&fragments)?;
     let unissued = FragmentData::empty(Boundary::CARD);
@@ -238,6 +239,14 @@ fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
     }
 }
 
+/// The first pool, in key order, whose species a space of that kind may not hold.
+fn check_places(schema: &Schema) -> Result<(), CompileDefect> {
+    match (schema.pools()).find(|&(_, space, species)| !species.may_hold(space)) {
+        Some((site, space, species)) => Err(CompileDefect::OutOfPlace { site, space, species }),
+        None => Ok(()),
+    }
+}
+
 fn left_over(reaction: &ReactionDeclaration, book: Balanced, contents: &[(Species, i64)]) -> Option<i64> {
     let exact = i128::from(BINARY64_EXACT);
     let mut sum = 0;
@@ -267,10 +276,6 @@ fn check_reactions(fragments: &[FragmentData], schema: &Schema) -> Result<(), Co
             if let Some(pair) = species.windows(2).find(|pair| pair[0] == pair[1]) {
                 let species = pair[0];
                 return Err(CompileDefect::SpeciesTwice { law, species });
-            }
-            let made = |species: Species| matches!(species.makeup(), Makeup::Atoms { .. });
-            if let Some(&species) = species.iter().find(|&&species| !made(species)) {
-                return Err(CompileDefect::NoMakeup { law, species });
             }
             let fuel = |species: Species| matches!(species.makeup(), Makeup::Atoms { fuel: true, .. });
             let stated = |species: Species| schema.energy.iter().any(|content| content.0 == species);

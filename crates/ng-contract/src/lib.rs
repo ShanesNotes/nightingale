@@ -397,6 +397,29 @@
 //! use ng_contract::*;
 //! let _ = Makeup::Carried { charge: -1 };
 //! ```
+//! A carried species is no reactant: it states no atoms to balance, and it is the only kind that holds a fixed charge,
+//! so no reaction moves a fixed charge.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! let _ = Proportions::<Glucose>::using(Space::Interstitium).uses::<Sodium, 1>(Space::Interstitium);
+//! ```
+//! ```
+//! use ng_contract::*;
+//! let _ = Proportions::<Glucose>::using(Space::Cells)
+//!     .makes::<Lactate, 2>(Space::Cells)
+//!     .energy_into(Space::Thermal);
+//! ```
+//! Only a species that holds a charge after speciation enters a charge sum: glucose holds none.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn charged<C: SameDimension<Concentration<Charge>>>() {}
+//! charged::<Concentration<Glucose>>();
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn charged<C: SameDimension<Concentration<Charge>>>() {}
+//! charged::<Concentration<Lactate>>();
+//! ```
 //! A reaction comes from its owner's builder, which records the rate it owes.
 //! ```compile_fail,E0451
 //! use ng_contract::*;

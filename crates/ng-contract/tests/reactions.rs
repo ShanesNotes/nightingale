@@ -300,18 +300,6 @@ fn a_reaction_that_names_a_species_twice_is_refused() {
 }
 
 #[test]
-fn a_reaction_that_names_a_species_no_reaction_may_use_is_refused() {
-    let salted = burn().uses::<Sodium, 1>(Space::Interstitium);
-    assert_eq!(
-        refused(burning(schema(), Vec::new(), salted, paced)),
-        CompileDefect::NoMakeup {
-            law: BURN,
-            species: Species::Sodium
-        }
-    );
-}
-
-#[test]
 fn a_burn_whose_fuel_has_no_stated_content_is_refused() {
     let mut unstated = interstitial(&["bed"]).expect("a schema");
     unstated.carry::<Glucose, CapillaryBed>(Space::Interstitium);
@@ -463,15 +451,15 @@ fn a_reaction_named_as_another_of_its_owners_laws_is_refused() {
     );
 }
 
-fn salty<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, burn: &Burn<'b>) -> Result<(), AdmissionError> {
+fn lactic<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, burn: &Burn<'b>) -> Result<(), AdmissionError> {
     let class = RateClass::new(RateBand::Minutes, 60_000_000_000)?;
     let speed = laws.site_parameter::<CapillaryBed, Rate<Dimensionless>>(
         ParameterKey::new("mt.burn-speed"),
         Admissible::nonnegative(),
     );
-    let (salt, fuel) = (burn.amount::<Sodium>(), burn.amount::<Glucose>());
+    let (lactate, fuel) = (burn.amount::<Lactate>(), burn.amount::<Glucose>());
     let rate = laws.site_kernel(|mut k| {
-        let _ = k.at_site(&salt);
+        let _ = k.at_site(&lactate);
         let fuel = k.at_site(&fuel);
         let zero = k.zero();
         let speed = k.site_parameter(&speed);
@@ -485,7 +473,7 @@ fn salty<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, burn: &Burn<'b>) -> Res
 #[test]
 fn a_read_of_a_species_the_reaction_does_not_hold_is_refused() {
     assert_eq!(
-        refused(burning(schema(), Vec::new(), burn(), salty)),
+        refused(burning(schema(), Vec::new(), burn(), lactic)),
         CompileDefect::NoSuchRead { law: BURN }
     );
 }

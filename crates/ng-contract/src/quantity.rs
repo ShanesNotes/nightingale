@@ -39,7 +39,8 @@ pub enum Phase {}
 pub enum Viscosity {}
 /// An amount of one element's atoms, in the amount unit: what an element's conserved quantity totals.
 pub enum Atoms {}
-pub enum Renin {}
+/// Dissolved particles that pull water: a space's osmolality is their concentration.
+pub enum Osmoles {}
 pub enum Ammonia {}
 pub struct Rate<Q>(PhantomData<Q>);
 pub struct Concentration<Q>(PhantomData<Q>);
@@ -75,7 +76,7 @@ macro_rules! elements {
         }
     };
 }
-elements!(Carbon, Hydrogen, Oxygen);
+elements!(Carbon, Hydrogen, Oxygen, Nitrogen);
 
 /// What one unit of a species is made of, which a reaction's counts must balance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,7 +118,7 @@ named!(
     Phase = "phase",
     Viscosity = "viscosity",
     Atoms = "atoms",
-    Renin = "renin",
+    Osmoles = "osmoles",
     Ammonia = "ammonia",
 );
 impl<Q: Dimension> dimensions::Sealed for Rate<Q> {
@@ -187,7 +188,7 @@ macro_rules! sensed {
 }
 sensed!(Dimensionless, Pressure, Volume, Temperature, Length, Rate<Water>);
 
-mod identities {
+pub(crate) mod identities {
     pub trait Sealed<U> {}
 }
 /// The pinned table `Kernel::as_dimension` reads. Sealed: a new identity is a contract version, never

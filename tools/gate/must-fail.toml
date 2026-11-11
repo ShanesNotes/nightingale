@@ -126,6 +126,7 @@ mutants = ["reaction-balanced"]
 doctests = [
   { path = "crates/ng-contract/src/lib.rs", code = "E0451", text = "Proportions { terms: Vec::new(), energy: None, reference: core::marker::PhantomData }" },
   { path = "crates/ng-contract/src/lib.rs", code = "E0559", text = "Makeup::Atoms { elements: &[(Element::Carbon, 1)], fuel: false, charge: -1 }" },
+  { path = "crates/ng-contract/src/lib.rs", code = "E0277", text = "uses::<Sodium, 1>(Space::Interstitium)" },
 ]
 
 [[row]]
