@@ -8,7 +8,7 @@ use crate::{
 use core::num::NonZeroU64;
 
 /// What the patient is doing as his day names it, such as asleep or seated.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Activity {
     name: &'static str,
 }
@@ -375,7 +375,7 @@ mod tests {
         }
     }
 
-    type Change<T> = (&'static str, fn(&mut T));
+    type FieldEdit<T> = (&'static str, fn(&mut T));
 
     #[derive(Clone, Copy)]
     struct Range {
@@ -559,7 +559,7 @@ mod tests {
         let first = digest(vec![range.range()], vec![variation.variation()]);
         let again = digest(vec![range.range()], vec![variation.variation()]);
         assert_eq!(again, first, "one set, one digest");
-        let ranges: [Change<Range>; 11] = [
+        let ranges: [FieldEdit<Range>; 11] = [
             ("id", |range| range.id = "xx.b"),
             ("row", |range| range.row = reading("other")),
             ("method", |range| range.method = "another gauge"),
@@ -572,10 +572,10 @@ mod tests {
             ("high", |range| range.high = 21.0),
             ("note", |range| range.note = "another note"),
         ];
-        for (field, change) in ranges {
-            let mut changed = range;
-            change(&mut changed);
-            let changed = digest(vec![changed.range()], vec![variation.variation()]);
+        for (field, edit) in ranges {
+            let mut edited = range;
+            edit(&mut edited);
+            let changed = digest(vec![edited.range()], vec![variation.variation()]);
             assert_ne!(changed, first, "a range's {field}");
         }
         let crossing = |seconds| {
@@ -600,17 +600,17 @@ mod tests {
         let volume = HealthyRange::synthetic(id, row, method, scope, averaging, low, high, note);
         let changed = digest(vec![volume.expect("a range")], vec![variation.variation()]);
         assert_ne!(changed, first, "a range's dimension");
-        let variations: [Change<Variation>; 5] = [
+        let variations: [FieldEdit<Variation>; 5] = [
             ("id", |variation| variation.id = "xx.w"),
             ("row", |variation| variation.row = reading("other")),
             ("method", |variation| variation.method = "another gauge"),
             ("sd", |variation| variation.sd = 2.0),
             ("note", |variation| variation.note = "another note"),
         ];
-        for (field, change) in variations {
-            let mut changed = variation;
-            change(&mut changed);
-            let changed = digest(vec![range.range()], vec![changed.variation()]);
+        for (field, edit) in variations {
+            let mut edited = variation;
+            edit(&mut edited);
+            let changed = digest(vec![range.range()], vec![edited.variation()]);
             assert_ne!(changed, first, "a variation's {field}");
         }
         let sd = Measure::<Volume>::new(1.0).expect("finite");
