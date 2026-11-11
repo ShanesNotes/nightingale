@@ -229,8 +229,6 @@ same_dimension! {
 // them.
 impl<U: Dimension, V: Dimension> identities::Sealed<U> for Product<Quotient<U, V>, V> {}
 impl<U: Dimension, V: Dimension> SameDimension<U> for Product<Quotient<U, V>, V> {}
-impl<U: Dimension, V: Dimension> identities::Sealed<U> for Quotient<Product<U, V>, V> {}
-impl<U: Dimension, V: Dimension> SameDimension<U> for Quotient<Product<U, V>, V> {}
 impl<U: Dimension, V: Dimension> identities::Sealed<V> for Quotient<U, Quotient<U, V>> {}
 impl<U: Dimension, V: Dimension> SameDimension<V> for Quotient<U, Quotient<U, V>> {}
 impl<U: Dimension> identities::Sealed<U> for Quotient<U, Dimensionless> {}
