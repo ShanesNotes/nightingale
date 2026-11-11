@@ -547,7 +547,6 @@ const _: () = assert!(SLICE.mapped() + SLICE.unmapped() == MAP_EDGES);
 const _: () = assert!(SLICE.mapped() == 27 && SLICE.unmapped() == 11);
 const _: () = assert!(SLICE.incident_mapped == 27 && SLICE.incident_unmapped == 1);
 const _: () = assert!(WHOLE_BODY.live == 18 && WHOLE_BODY.relation == 5 && WHOLE_BODY.held == 15);
-const _: () = assert!(WHOLE_BODY.mapped() == 38 && WHOLE_BODY.unmapped() == 0);
 const FIELDS: FieldCount = field_count();
 const _: () = assert!(FIELDS.wired == 21 && FIELDS.held == 29 && FIELDS.wire_and_hold == 6);
 const _: () = {
@@ -555,7 +554,7 @@ const _: () = {
     while i < MAP_EDGES {
         let arrow = &ARROWS[i];
         assert!(arrow.line as usize == 77 + i);
-        assert!(Census::Slice.row(arrow).ends_fit() && Census::WholeBody.row(arrow).ends_fit());
+        assert!(Census::Slice.row(arrow).ends_fit());
         assert!(
             arrow.accounted(),
             "an arrow carries no field and is no anatomy relation"

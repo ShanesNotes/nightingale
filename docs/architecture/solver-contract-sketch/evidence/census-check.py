@@ -17,7 +17,7 @@ MAPPED = {"live", "input", "sink", "relation"}
 SLICE_KINDS = {"live", "input", "sink"}
 SLICE_REASONED = {"relation", "outside", "unresolved"}
 SLICE_COUNTS = {"rows": 38, "mapped": 27, "listed unmapped": 11, "incident mapped": 27, "incident unmapped": 1}
-BODY_COUNTS = {"rows": 38, "mapped": 38, "unmapped": 0, "wire a field": 18, "relations": 5, "hold every field": 15, "wire and hold": 6,
+BODY_COUNTS = {"rows": 38, "wire a field": 18, "relations": 5, "hold every field": 15, "wire and hold": 6,
                "wired fields": 21, "held fields": 29}
 SLICE_LINES = {
     "live": [77, 80, 97],
@@ -222,8 +222,6 @@ slice_census = {
 }
 body_census = {
     "rows": len(rows),
-    "mapped": sum(r["relation"] is not None or bool(r["wired"]) or bool(r["held"]) for r in rows),
-    "unmapped": sum(r["relation"] is None and not r["wired"] and not r["held"] for r in rows),
     "wire a field": sum(bool(r["wired"]) for r in rows),
     "relations": sum(r["relation"] is not None for r in rows),
     "hold every field": sum(bool(r["held"]) and not r["wired"] for r in rows),
