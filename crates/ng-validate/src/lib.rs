@@ -238,6 +238,7 @@ mod burning;
 mod certificate;
 mod day;
 mod fixture;
+mod healthy;
 mod initialize;
 mod reference;
 mod replay;
@@ -260,6 +261,10 @@ pub use day::{
     DayCheck, DayFailure, DayPlan, DayQuantity, DayReport, DaySpec, Miss, Unavailable, Verdict, day_checks,
 };
 pub use fixture::{ChanceCase, Delivery, TwoReservoirs, admit_fixture, admit_seeded};
+pub use healthy::{
+    AnchorReturn, BareLens, CheckVerdict, DayActivities, RangeFailure, RangeGap, RangeReport, RangeResult,
+    ReadingCheckError, ReadingChecks, ReturnGap, ReturnReport,
+};
 pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved};
 pub use reference::ReferenceIntegrator;
 pub use replay::{
