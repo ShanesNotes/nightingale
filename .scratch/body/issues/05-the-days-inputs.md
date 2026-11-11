@@ -25,7 +25,7 @@ From [research 12](../../research/issues/12-law-forms-heat.md): air speed's form
 
 The boundary carries the whole day, and a packet holds it. Every value in the tests is synthetic. The day's clinical numbers are research 04's.
 
-**What a law reads.** Each new input is a held input: it holds from its event until the next of its kind and carries no amount. A body that reads one with no value at the anchor moment is refused (`InputUnstated`).
+**What a law reads.** Each new input is a lasting input: it lasts from its event until the next of its kind and carries no amount. A body that reads one with no value at the anchor moment is refused (`InputUnstated`).
 
 - The clock. A clock event states the time of day at its instant (`Clock::since_midnight_ns`). The phase is zero at midnight and makes one turn a day. A law reads its cosine and sine (`Kernel::clock`), which the contract's own `pinned::turn` gives for each whole minute, because no operator takes a cosine. Research 14 counts from the hour of the day, so its laws need no shift. Research 15 counts from the core temperature minimum, so ticket 20 maps Scheer's zero to midnight through its own phase parameters. In a body that reads the clock, each minute's edge ends a step. The slice reads none and never sees one.
 - Sleep: `Sleep::Awake` and `Sleep::Nrem`, read as 0 and 1 (`asleep`). Rung 0 has no REM sleep.
@@ -34,9 +34,9 @@ The boundary carries the whole day, and a packet holds it. Every value in the te
 
 **A meal.** A meal is one event with one id (`BoundaryInput::Meal`) over the twelve species body 01's tables deliver: water, sodium, potassium, chloride, glucose, triglyceride, amino acids, the diet base, calcium, phosphate, magnesium and iron (`Meal::SPECIES`, pinned by a test). It parses into one typed delivery for each species with an amount, into the boundary named "gut" and the species (`Meal::BOUNDARIES`), with an id derived from the meal's. It lands whole: parsing and admission refuse the whole meal when any part is refused. It lands once: the same meal sent twice collapses. A drink is water delivered there. On the SRS: the SRS's meal event is the day's meal item, and until [ticket 31](31-one-intake-event-and-the-arenas-day.md) the timeline holds it as its typed deliveries.
 
-**What holds "an input scales a gain or a set point and never sets a produced quantity".** Three things hold it:
+**What holds "an input scales a gain or a set point and never sets a produced quantity".** Three things hold parts of it:
 
-- Compile refuses a law that reads a held input and no parameter or memory slot (`UnscaledInput`). It has a test and a mutant row.
+- Compile refuses a law that reads a lasting input and no parameter or memory slot (`UnscaledInput`). It has a test and a mutant row. It is a stand-in for the rule. It passes a law that reads any parameter, such as `0 = k (T - room_air())` or a void flow `voiding() * k_V`. It refuses a valid law that reads only inputs, such as Dalton's `inspired_oxygen() * room_pressure()`. So each law that reads an input is reviewed against the rule by reading, and tickets 10, 12, 20, 22 and 25 carry that line.
 - A void carries no amount, by type: a `compile_fail,E0308` probe and its legal twin.
 - No delivery carries a negative amount (`NegativeDelivery`), for every species of a meal.
 
@@ -47,12 +47,12 @@ The boundary carries the whole day, and a packet holds it. Every value in the te
 - The packet's hash seals the day only when the packet holds one, so every day-less packet hashes as on main.
 - `bind` checks the day against the body, and admission merges it into the port:
   - an event at or after the anchor moment enters, a meal as its parts;
-  - the latest held input of each kind before the moment is restamped at it, unless one of its kind is stated there, and a clock moves on by the time between;
+  - the latest lasting input of each kind before the moment is restamped at it, unless one of its kind is stated there, and a clock moves on by the time between;
   - a delivery that ended before the moment is dropped, and one that runs across it is refused (`DeliveryAcrossAdmission`).
 
 **Reading record 0005.** Record 0005 holds for every packet that holds a day: the run's events are made from the day, and the run's identity covers it. The arena's synthetic fixture holds no day until ticket 31, and its events are named by the event log and the day checks' digests. A test shows that a packet holding the reference day admits the same timeline digest as the arena's port, and that the two run identities differ. A mutant row that drops the merge's last event fails that test.
 
-**Replay.** On the replay gates, late admission, pause and resume give the same bits as the same day known from the start. That holds for a body that reads every held input and takes a meal. It also holds with the day in the packet, against the same events admitted late on a day-less packet.
+**Replay.** On the replay gates, late admission, pause and resume give the same bits as the same day known from the start. That holds for a body that reads every lasting input and takes a meal. It also holds with the day in the packet, against the same events admitted late on a day-less packet.
 
 **What did not move.** The slice's model hash, its conserved basis, the packet named in `trace.rs` and the three first-second traces. Every record `prior_shape` loads. The reference day's event digest, pinned before any change. No pinned value moved.
 
