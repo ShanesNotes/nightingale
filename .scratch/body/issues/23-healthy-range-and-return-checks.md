@@ -1,7 +1,8 @@
 # 23: The healthy-range check and the return check
 
 Type: task
-Status: open
+Status: claimed
+Claimed by: 23-range-return-checks
 Blocked by: none
 
 **What to build:** The two checks of record 0004 that no code holds yet. The healthy-range check tests each reading in the lens against its healthy range, over every sliding window of its study's length, for the activity that window lies in. The return check tests each anchor 24 and 48 hours after admission against the change its within-subject variation allows. Both run in validation on a synthetic healthy-range set, read a run through the lens with no observation error, and name the run and the set they read (record 0005). The [foundation map](../../foundation/map.md) lists them as unticketed.
