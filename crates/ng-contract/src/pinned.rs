@@ -1,3 +1,6 @@
+use core::f64::consts::FRAC_PI_4;
+use core::num::NonZeroU64;
+
 const LN2_HI: f64 = f64::from_bits(0x3FE6_2E42_FEE0_0000);
 const LN2_LO: f64 = f64::from_bits(0x3DEA_39EF_3579_3C76);
 const INV_LN2: f64 = f64::from_bits(0x3FF7_1547_652B_82FE);
@@ -33,6 +36,31 @@ const ATANH_SERIES: [f64; 11] = [
     1.0 / 7.0,
     1.0 / 5.0,
     1.0 / 3.0,
+];
+
+const COS_SERIES: [f64; 10] = [
+    -1.0 / 6_402_373_705_728_000.0,
+    1.0 / 20_922_789_888_000.0,
+    -1.0 / 87_178_291_200.0,
+    1.0 / 479_001_600.0,
+    -1.0 / 3_628_800.0,
+    1.0 / 40_320.0,
+    -1.0 / 720.0,
+    1.0 / 24.0,
+    -1.0 / 2.0,
+    1.0,
+];
+const SIN_SERIES: [f64; 10] = [
+    -1.0 / 121_645_100_408_832_000.0,
+    1.0 / 355_687_428_096_000.0,
+    -1.0 / 1_307_674_368_000.0,
+    1.0 / 6_227_020_800.0,
+    -1.0 / 39_916_800.0,
+    1.0 / 362_880.0,
+    -1.0 / 5_040.0,
+    1.0 / 120.0,
+    -1.0 / 6.0,
+    1.0,
 ];
 
 fn horner(series: &[f64], x: f64) -> f64 {
@@ -96,9 +124,36 @@ pub(crate) fn ln(x: f64) -> Option<f64> {
     Some(k * LN2_HI - ((half_square - (tail + k * LN2_LO)) - f))
 }
 
+/// `(cos, sin)` of `k` steps, where `8 * eighth` steps make a turn, identical on every host: the angle inside one
+/// octant comes from the integers, then its Taylor polynomials, then the exact symmetries.
+pub(crate) fn turn(k: u64, eighth: NonZeroU64) -> (f64, f64) {
+    let eighth = eighth.get();
+    let quarter = 2 * eighth;
+    let (quadrant, within) = ((k / quarter) % 4, k % quarter);
+    let (cos, sin) = if within <= eighth {
+        octant(within, eighth)
+    } else {
+        let (cos, sin) = octant(quarter - within, eighth);
+        (sin, cos)
+    };
+    match quadrant {
+        0 => (cos, sin),
+        1 => (0.0 - sin, cos),
+        2 => (0.0 - cos, 0.0 - sin),
+        _ => (sin, 0.0 - cos),
+    }
+}
+
+fn octant(steps: u64, eighth: u64) -> (f64, f64) {
+    let x = steps as f64 * (FRAC_PI_4 / eighth as f64);
+    let y = x * x;
+    (horner(&COS_SERIES, y), x * horner(&SIN_SERIES, y))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{exp, ln};
+    use super::{exp, ln, turn};
+    use core::num::NonZeroU64;
 
     fn ulps(a: f64, b: f64) -> u64 {
         a.to_bits().abs_diff(b.to_bits())
@@ -156,6 +211,45 @@ mod tests {
                 "ln({x:#x}) = {:#x}",
                 got.to_bits()
             );
+        }
+    }
+
+    const TURN_VECTORS: [(u64, u64, u64); 14] = [
+        (1, 0x3FEFFFEC0960384E, 0x3F71DF42EAE296E2),
+        (7, 0x3FEFFC2DDE7CB544, 0x3F9F457CEE04C393),
+        (89, 0x3FED9E071E7C1F2A, 0x3FD83BC7690D138B),
+        (179, 0x3FE6B9D6AE4CC898, 0x3FE68749E32E1B53),
+        (180, 0x3FE6A09E667F3BCD, 0x3FE6A09E667F3BCD),
+        (181, 0x3FE68749E32E1B53, 0x3FE6B9D6AE4CC898),
+        (300, 0x3FD0907DC1930690, 0x3FEEE8DD4748BF15),
+        (359, 0x3F71DF42EAE296E2, 0x3FEFFFEC0960384E),
+        (361, 0xBF71DF42EAE296E2, 0x3FEFFFEC0960384E),
+        (541, 0xBFE6B9D6AE4CC898, 0x3FE68749E32E1B53),
+        (719, 0xBFEFFFEC0960384E, 0x3F71DF42EAE296E2),
+        (721, 0xBFEFFFEC0960384E, 0xBF71DF42EAE296E2),
+        (1000, 0xBFD5E3A8748A0BF5, 0xBFEE11F642522D1C),
+        (1439, 0x3FEFFFEC0960384E, 0xBF71DF42EAE296E2),
+    ];
+    const MINUTES: NonZeroU64 = NonZeroU64::new(180).unwrap();
+
+    #[test]
+    fn a_turn_is_within_two_ulps_of_the_correctly_rounded_value() {
+        for (k, cos, sin) in TURN_VECTORS {
+            let (got_cos, got_sin) = turn(k, MINUTES);
+            assert!(ulps(got_cos, f64::from_bits(cos)) <= 2, "cos {k}: {:#x}", got_cos.to_bits());
+            assert!(ulps(got_sin, f64::from_bits(sin)) <= 2, "sin {k}: {:#x}", got_sin.to_bits());
+        }
+    }
+
+    #[test]
+    fn a_turn_is_exact_at_its_quarters_and_repeats() {
+        let bits = |(cos, sin): (f64, f64)| (cos.to_bits(), sin.to_bits());
+        let quarters = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
+        for (quarter, want) in (0..).zip(quarters) {
+            assert_eq!(bits(turn(360 * quarter, MINUTES)), bits(want), "quarter {quarter}");
+        }
+        for k in [0, 1, 179, 180, 181, 719, 1439] {
+            assert_eq!(bits(turn(k + 1440, MINUTES)), bits(turn(k, MINUTES)), "{k}");
         }
     }
 
