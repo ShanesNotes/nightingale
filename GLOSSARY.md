@@ -181,7 +181,7 @@ A conducting segment of a flow network between two branch points.
 A neuroeffector junction, where a nerve releases a transmitter that is then cleared. A branch point of a network is not a junction.
 
 **Tissue site**:
-A piece of tissue that reports afferent signals, such as stretch or nociception, to a nerve segment.
+A piece of tissue that is no capillary bed: one that reports afferent signals, such as stretch or nociception, to a nerve segment, holds a heat store, such as the skin's, or holds gas, as the conducting airway does.
 
 **Nerve segment**:
 A spinal or cranial nerve segment where afferent signals from many sites converge.
@@ -223,6 +223,12 @@ _Avoid_: organ compartment, compartment
 **System**:
 One of the 13 body systems in the atlas, such as cardiovascular, fluids, renal or nervous. A system's code declares laws per site class and owns no pool.
 
+**Tissue**:
+What a capillary bed serves: lung, gut, muscle, glomerulus, tubule, brain, heart, liver, fat, skin or bone. The map states it, so a site set can name one tissue's beds, and a split bed keeps its tissue.
+
+**Site set**:
+A site class, or the sites a relation picks across classes: those of one network (blood, the urinary tract, the gut, the airway), or the capillary beds that serve one tissue or any other. A law on a set is still one law.
+
 **Landmark**:
 A place a whole-body law reads by what it is, such as the carotid sinus or the macula densa. The map says where it stands, so the law names no site.
 
@@ -240,7 +246,7 @@ How an enclosure's pressure answers the volume inside it: rigid, elastic, or hel
 A site's place in the body frame. Posture rotates the frame, so every site's hydrostatic head follows from one place and no law carries gravity.
 
 **Membrane**:
-A wall between two spaces, classed by what can cross it (section 5).
+A wall between two spaces. Every wall is one membrane type with two settings for each species: its conductance, how easily the species crosses, and its reflection, how much of it the wall holds back from the water that crosses. Permeable, semi-permeable and non-permeable are ranges of the two settings, not kinds (section 5).
 
 **Pool**:
 The amount of one conserved quantity (water, sodium, oxygen, heat, and so on) held in one site, or in one space of a site such as a tissue bed's plasma. The body names its pools, the state holds their amounts, and no organ or system owns one.
@@ -288,6 +294,15 @@ A named pool outside the body, or behind a held stand-in, that takes what crosse
 
 **Route family**:
 Every transfer of one kind the map implies: one per site of a class, such as plasma to interstitium at every capillary bed, or one per vascular edge. A system requests it whole through its scope, so the body owes a law for every one, and no law names a site.
+
+**Passage**:
+A route along a network, one species at a time: the airway's gas, the gut's transit, absorption into a bed, fat into the lymph, shedding from the gut's cells and secretion from the tubule's cells.
+
+**Heat route**:
+A route that moves energy between heat stores: each bed's heat to the core store, the heat blood carries into the store a bed sits in, conduction between stores, and the pumps' work into a bed's heat.
+
+**Core store**:
+The heat store of the containment root, the site that stands for the whole body. Each bed's heat reaches it.
 
 **Left-out space**:
 A space the schema states this body does not model, with its reason, such as cell water in a bench with no cell-water law. Its pools are not amounts, and no law may move or read them. Every other pool is an amount some transfer must move or a held declaration holds; one that neither covers is an orphan pool, which compilation refuses.
