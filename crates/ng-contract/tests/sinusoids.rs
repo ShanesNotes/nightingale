@@ -332,3 +332,16 @@ fn a_liver_bed_beside_circulation_owes_the_hepatic_cards_sinusoids() {
         }))
     );
 }
+
+#[test]
+fn a_lymph_law_reads_no_blood_flow_at_the_liver_bed_as_at_any_other() {
+    for bed in [Tissue::Liver, Tissue::Muscle] {
+        assert_eq!(
+            drained(true, Some(bed)).map(|body| body.model_hash()),
+            Err(AdmissionError::Compile(CompileDefect::NoSuchRead {
+                law: law("FL", "lymph")
+            })),
+            "lymph from the {bed:?} bed"
+        );
+    }
+}

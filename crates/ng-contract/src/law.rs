@@ -262,6 +262,12 @@ impl Family {
                 | Family::Tubular
         )
     }
+    pub(crate) fn vascular(self) -> bool {
+        matches!(
+            self,
+            Family::Circulation | Family::Valves | Family::Sinusoids | Family::GravityWork
+        )
+    }
     pub(crate) fn owned_crossing(self) -> Option<(&'static [Crossed], Species)> {
         match self {
             Family::Exchange(species) => Some((&[Crossed::Capillary], species)),

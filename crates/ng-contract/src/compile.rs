@@ -1348,6 +1348,10 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                 targets
             }
         };
+        let route = match law.serves {
+            Serves::Family(family) | Serves::Slot(Over::Route(family)) => Some(family),
+            _ => None,
+        };
         for &(_, kernel) in &law.laws {
             if let Serves::Boundary(water) = law.serves {
                 let written = (kernel.code.iter())
@@ -1384,7 +1388,7 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                     program,
                     context,
                     target,
-                    addresses: addresses(law.name, kernel, context, places)?,
+                    addresses: addresses(law.name, route, kernel, context, places)?,
                 });
             }
         }
@@ -1732,6 +1736,7 @@ fn place_of(place: Where, context: Context, anatomy: &Anatomy) -> Option<SiteId>
 
 fn addresses(
     law: LawName,
+    route: Option<Family>,
     kernel: &KernelData,
     context: Context,
     places: &Places,
@@ -1890,7 +1895,7 @@ fn addresses(
                 let site = place_of(place, context, anatomy).ok_or(CompileDefect::NoSuchRead { law })?;
                 Address::Height(anatomy.axial(site).to_bits())
             }
-            (Input::EdgeFlow, Context::Edge { from, to }) => {
+            (Input::EdgeFlow, Context::Edge { from, to }) if route.is_some_and(Family::vascular) => {
                 let (family, owner) = if anatomy.is_valve((from, to)) {
                     (Family::Valves, law.owner)
                 } else if sinusoidal(anatomy, (from, to)) {
@@ -2051,6 +2056,10 @@ fn guards(
                 owner: fragment.owner,
                 local: mode.name,
             };
+            let route = match mode.over {
+                Over::Route(family) => Some(family),
+                _ => None,
+            };
             let sorted = |index: usize| {
                 let mut values = mode.values.clone();
                 values.sort_unstable();
@@ -2080,7 +2089,7 @@ fn guards(
                     inputs: Vec::new(),
                     resets: reset,
                 };
-                guards.push((layout, addresses(law, zero, at, places)?));
+                guards.push((layout, addresses(law, route, zero, at, places)?));
             }
         }
     }

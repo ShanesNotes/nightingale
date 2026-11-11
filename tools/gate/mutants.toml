@@ -657,6 +657,13 @@ new = '''if false && unowed {'''
 test = "-p ng-contract --test sinusoids a_liver_bed_beside_circulation_owes_the_hepatic_cards_sinusoids"
 
 [[mutant]]
+name = "edge-flow-on-a-vascular-edge"
+path = "crates/ng-contract/src/compile.rs"
+old = '''(Input::EdgeFlow, Context::Edge { from, to }) if route.is_some_and(Family::vascular) => {'''
+new = '''(Input::EdgeFlow, Context::Edge { from, to }) => {'''
+test = "-p ng-contract --test sinusoids a_lymph_law_reads_no_blood_flow_at_the_liver_bed_as_at_any_other"
+
+[[mutant]]
 name = "enclosure-owed-by-its-card"
 path = "crates/ng-contract/src/compile.rs"
 old = '''
