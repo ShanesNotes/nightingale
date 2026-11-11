@@ -162,7 +162,7 @@ macro_rules! species {
                     $(Species::$name => species!(@makeup $kind($($made)*)),)*
                 }
             }
-            pub(crate) const fn names(self) -> [&'static str; 6] {
+            pub(crate) const fn names(self) -> [&'static str; 16] {
                 match self {
                     $(Species::$name => [
                         concat!("reclaim ", $text),
@@ -171,6 +171,16 @@ macro_rules! species {
                         concat!("binding ", $text),
                         concat!("effect ", $text),
                         concat!("exchange ", $text),
+                        concat!("cell membrane ", $text),
+                        concat!("alveolar ", $text),
+                        concat!("lining ", $text),
+                        concat!("endothelium ", $text),
+                        concat!("airway ", $text),
+                        concat!("transit ", $text),
+                        concat!("absorb ", $text),
+                        concat!("chyle ", $text),
+                        concat!("shed ", $text),
+                        concat!("secrete ", $text),
                     ],)*
                 }
             }
@@ -313,7 +323,10 @@ mod tests {
         for (at, (species, text)) in pinned.into_iter().enumerate() {
             assert_eq!(species as usize, at, "{text}");
             assert_eq!(species.dimension(), text);
-            assert_eq!(species.names(), PREFIXES.map(|prefix| format!("{prefix} {text}")));
+            assert_eq!(
+                species.names()[..6],
+                PREFIXES.map(|prefix| format!("{prefix} {text}"))
+            );
         }
         let carried = [
             Species::Water,

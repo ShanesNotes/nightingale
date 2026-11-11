@@ -115,6 +115,84 @@ edge_kinds! {
     AbsorbingEdge: Alimentary => CapillaryBed, Gut;
 }
 
+/// A wall between two spaces of one capillary bed, crossed one species at a time. The capillary wall's crossings are
+/// Starling's water and each species' exchange, the tubule wall's are reclaim, and the gut wall's are passages. These
+/// are the rest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Wall {
+    /// The cell membrane: interstitium to cells.
+    Cell,
+    /// The gas-exchange surface: gas to plasma.
+    Alveolar,
+    /// The lining that wets the gas: interstitium to gas, the water that humidifies a breath.
+    Lining,
+    /// Plasma to cells, past the interstitium: fat that the capillaries' lipase hands to a bed's cells.
+    Endothelium,
+}
+impl Wall {
+    const fn at(self) -> usize {
+        match self {
+            Wall::Cell => 6,
+            Wall::Alveolar => 7,
+            Wall::Lining => 8,
+            Wall::Endothelium => 9,
+        }
+    }
+}
+
+/// A route along the edges of a network, one species at a time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Passage {
+    /// Gas to gas along every airway edge: a breath in, or out at a negative rate.
+    Airway,
+    /// Lumen to lumen along every gut edge between two lumens.
+    Transit,
+    /// A gut lumen to its bed's plasma along every absorbing edge.
+    Absorption,
+    /// A gut lumen to its bed's interstitium along every absorbing edge: fat that leaves by the lymph.
+    Chyle,
+    /// The bed's cells to the gut lumen, against every absorbing edge: what the gut's cells shed.
+    Shedding,
+    /// The bed's cells to the urinary lumen, against every reclaim edge: what the tubule's cells secrete.
+    Secretion,
+}
+impl Passage {
+    const fn at(self) -> usize {
+        match self {
+            Passage::Airway => 10,
+            Passage::Transit => 11,
+            Passage::Absorption => 12,
+            Passage::Chyle => 13,
+            Passage::Shedding => 14,
+            Passage::Secretion => 15,
+        }
+    }
+}
+
+/// Energy between the beds and the heat stores. The core store is the energy in the thermal space of the containment
+/// tree's root, when the root is a tissue site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HeatRoute {
+    /// Each capillary bed's heat to the core store.
+    FromBeds,
+    /// The core store to the store a bed sits in, at that bed, as its blood carries it.
+    CarriedByBlood,
+    /// The core store to each other tissue site's store, through tissue.
+    Conduction,
+    /// Metabolism's chemical energy into each bed's heat: the work of its cells' pumps.
+    Pumps,
+}
+impl HeatRoute {
+    const fn name(self) -> &'static str {
+        match self {
+            HeatRoute::FromBeds => "bed heat",
+            HeatRoute::CarriedByBlood => "heat carried by blood",
+            HeatRoute::Conduction => "conduction",
+            HeatRoute::Pumps => "pump work",
+        }
+    }
+}
+
 /// One kind of transfer the map implies. In a body that carries more than water, a fluid route's water rate is a row
 /// and it carries every species both ends hold; any other route moves its one species. A route stands wherever its
 /// two pools exist, so the schema's pools say where a law reaches and no law names a site.
@@ -135,6 +213,9 @@ pub(crate) enum Family {
     GravityWork,
     WallWork,
     Dissipation,
+    Across(Wall, Sites, Species),
+    Along(Passage, Species),
+    Heat(HeatRoute),
 }
 impl Family {
     pub(crate) fn name(self) -> &'static str {
@@ -154,6 +235,9 @@ impl Family {
             Family::GravityWork => "gravity work",
             Family::WallWork => "wall work",
             Family::Dissipation => "dissipation",
+            Family::Across(wall, _, species) => species.names()[wall.at()],
+            Family::Along(passage, species) => species.names()[passage.at()],
+            Family::Heat(route) => route.name(),
         }
     }
     pub(crate) fn fluid(self) -> bool {

@@ -755,9 +755,9 @@ test = "-p ng-contract --test reactions a_quantity_splits_where_its_own_columns_
 [[mutant]]
 name = "store-on-the-tissue-site"
 path = "crates/ng-contract/src/compile.rs"
-old = '''let found = (schema.pools()).find(|pool| body(pool) && pool.1 == space && pool.2 == Species::Energy);'''
-new = '''let found = (schema.pools()).find(|pool| (body(pool) || true) && pool.1 == space && pool.2 == Species::Energy);'''
-test = "-p ng-contract --test reactions dissipation_reaches_the_body_store_whatever_sorts_before_it"
+old = '''let root = anatomy.root().filter(|root| root.class() == Class::TissueSite)?;'''
+new = '''let root = anatomy.in_set(Sites::Class(Class::TissueSite)).first().copied()?;'''
+test = "-p ng-contract --test reactions the_core_store_is_the_roots_whatever_tissue_store_sorts_first"
 
 [[mutant]]
 name = "tissue-served-once"

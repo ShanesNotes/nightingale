@@ -4,10 +4,10 @@ use crate::identity::{Canonical, Seal};
 use crate::law::{Brand, Family, FragmentData, Over, SiteField};
 use crate::{
     AdmissionError, Anatomy, Blood, Boundary, BoundaryRoute, CapillaryBed, Cardiovascular, CompiledBody,
-    Dimensionless, EdgeRoute, EnclosedSpace, Energy, FilterEdge, Fluids, Fragment, FragmentBuilder, Junction,
-    LawName, LymphEdge, Makeup, Measure, Nervous, Output, OutsideSlice, Owner, Pair, PartialVolume, PerSite,
-    Pressure, Quotient, ReadPort, Receptor, ReclaimEdge, Renal, SiteId, SiteRoute, SiteSet, Sites, Species,
-    Substance, TubuleEdge, Urinary, ValveEdge, Water,
+    Dimensionless, EdgeRoute, EnclosedSpace, Energy, FilterEdge, Fluids, Fragment, FragmentBuilder,
+    HeatRoute, Junction, LawName, LymphEdge, Makeup, Measure, Nervous, Output, OutsideSlice, Owner, Pair,
+    PartialVolume, Passage, PerSite, Pressure, Quotient, ReadPort, Receptor, ReclaimEdge, Renal, SiteId,
+    SiteRoute, SiteSet, Sites, Species, Substance, TubuleEdge, Urinary, ValveEdge, Wall, Water,
 };
 use core::marker::PhantomData;
 
@@ -565,6 +565,16 @@ impl<'b> CardiovascularPorts<'b> {
         laws.request(Family::Dissipation);
         Pair::serving(crate::law::Obligation::Family(Family::Dissipation))
     }
+    /// Heat blood carries from the core store to the store a bed sits in, at that bed, so the law reads the bed's own
+    /// flow.
+    pub fn heat_carried(
+        &self,
+        laws: &mut FragmentBuilder<'b, Cardiovascular>,
+    ) -> SiteRoute<'b, Cardiovascular, CapillaryBed, Energy> {
+        let family = Family::Heat(HeatRoute::CarriedByBlood);
+        laws.request(family);
+        SiteRoute::requested(family)
+    }
 }
 pub struct FluidsPorts<'b> {
     /// Each bed's pressure from outside: its enclosure's, or zero gauge for a bed nothing encloses.
@@ -592,6 +602,25 @@ impl<'b> FluidsPorts<'b> {
     pub fn lymph(&self, laws: &mut FragmentBuilder<'b, Fluids>) -> EdgeRoute<'b, Fluids, Water, LymphEdge> {
         laws.request(Family::Lymph);
         EdgeRoute::requested(Family::Lymph)
+    }
+    /// `Q` across the cell membrane at every bed of `C`, interstitium to cells.
+    pub fn cell_membrane<C: SiteSet, Q: Substance>(
+        &self,
+        laws: &mut FragmentBuilder<'b, Fluids>,
+    ) -> SiteRoute<'b, Fluids, C, Q> {
+        let family = Family::Across(Wall::Cell, C::SET, Q::SPECIES);
+        laws.request(family);
+        SiteRoute::requested(family)
+    }
+    /// Metabolism's chemical energy into each bed's heat: the work of its cells' pumps. The far end is a receipt, as
+    /// the heart's stroke work's is.
+    pub fn pump_work(
+        &self,
+        laws: &mut FragmentBuilder<'b, Fluids>,
+    ) -> SiteRoute<'b, Fluids, CapillaryBed, Energy> {
+        let family = Family::Heat(HeatRoute::Pumps);
+        laws.request(family);
+        SiteRoute::requested(family)
     }
 }
 pub struct NervousPorts<'b> {
@@ -641,6 +670,16 @@ impl<'b> RenalPorts<'b> {
         laws: &mut FragmentBuilder<'b, Renal>,
     ) -> EdgeRoute<'b, Renal, Q, ReclaimEdge> {
         let family = Family::Reclaim(Q::SPECIES);
+        laws.request(family);
+        EdgeRoute::requested(family)
+    }
+    /// `Q` from the cells of the bed at the end of every reclaim edge into that edge's lumen: what the tubule's cells
+    /// secrete.
+    pub fn secretion<Q: Substance>(
+        &self,
+        laws: &mut FragmentBuilder<'b, Renal>,
+    ) -> EdgeRoute<'b, Renal, Q, ReclaimEdge> {
+        let family = Family::Along(Passage::Secretion, Q::SPECIES);
         laws.request(family);
         EdgeRoute::requested(family)
     }

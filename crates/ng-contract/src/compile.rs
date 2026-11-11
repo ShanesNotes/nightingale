@@ -16,8 +16,8 @@ use crate::law::{
 use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, PoolRef, RouteBoundary};
 use crate::{
     AdmissibleSet, AdmissionError, Anatomy, Book, Boundary, BoundaryDirection, Class, CompileDefect,
-    Compliance, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Predicate, RateClass, Schema,
-    SiteId, Sites, Space, Species,
+    Compliance, HeatRoute, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Passage, Predicate,
+    RateClass, Schema, SiteId, Sites, Space, Species, Wall,
 };
 
 pub(crate) fn compile(
@@ -842,11 +842,12 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
     let blood = |pair: (SiteId, SiteId)| edge(pair, [flowing(pair.0), flowing(pair.1)]);
     let species_at = |site, space, species| PoolRef { site, space, species };
     let junctions = || anatomy.in_set(Sites::Class(Class::Junction)).into_iter();
+    let beds = || anatomy.in_set(Sites::Class(Class::CapillaryBed)).into_iter();
     let store = |space: Space| {
-        let body = |pool: &(SiteId, Space, Species)| pool.0.class() == Class::TissueSite;
-        let found = (schema.pools()).find(|pool| body(pool) && pool.1 == space && pool.2 == Species::Energy);
-        found.map(|(site, space, species)| PoolRef { site, space, species })
+        let root = anatomy.root().filter(|root| root.class() == Class::TissueSite)?;
+        Some(species_at(root, space, Species::Energy))
     };
+    let heat = |site| species_at(site, Space::Thermal, Species::Energy);
     match family {
         Family::Circulation => (anatomy.vascular())
             .filter(|&pair| !anatomy.is_valve(pair))
@@ -958,6 +959,82 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
             .map(|(elastic, thermal)| Reach {
                 context: Context::Body,
                 ends: [Terminal::Pool(elastic), Terminal::Pool(thermal)],
+            })
+            .collect(),
+        Family::Across(wall, set, species) => {
+            let [from, to] = match wall {
+                Wall::Cell => [Space::Interstitium, Space::Cells],
+                Wall::Alveolar => [Space::Gas, Space::Plasma],
+                Wall::Lining => [Space::Interstitium, Space::Gas],
+                Wall::Endothelium => [Space::Plasma, Space::Cells],
+            };
+            (anatomy.in_set(set).into_iter())
+                .filter(|site| site.class() == Class::CapillaryBed)
+                .map(|bed| {
+                    at(
+                        bed,
+                        [species_at(bed, from, species), species_at(bed, to, species)],
+                    )
+                })
+                .collect()
+        }
+        Family::Along(passage, species) => {
+            let into_bed = |pair: &(SiteId, SiteId)| pair.1.class() == Class::CapillaryBed;
+            let pools = |pair, from: (SiteId, Space), to: (SiteId, Space)| {
+                edge(
+                    pair,
+                    [
+                        species_at(from.0, from.1, species),
+                        species_at(to.0, to.1, species),
+                    ],
+                )
+            };
+            match passage {
+                Passage::Airway => (anatomy.edges(Network::Airway))
+                    .map(|(up, down)| pools((up, down), (up, Space::Gas), (down, Space::Gas)))
+                    .collect(),
+                Passage::Transit => (anatomy.edges(Network::Gut))
+                    .filter(|pair| !into_bed(pair))
+                    .map(|(up, down)| pools((up, down), (up, Space::Lumen), (down, Space::Lumen)))
+                    .collect(),
+                Passage::Absorption => (anatomy.edges(Network::Gut))
+                    .filter(into_bed)
+                    .map(|(lumen, bed)| pools((lumen, bed), (lumen, Space::Lumen), (bed, Space::Plasma)))
+                    .collect(),
+                Passage::Chyle => (anatomy.edges(Network::Gut))
+                    .filter(into_bed)
+                    .map(|(lumen, bed)| {
+                        pools((lumen, bed), (lumen, Space::Lumen), (bed, Space::Interstitium))
+                    })
+                    .collect(),
+                Passage::Shedding => (anatomy.edges(Network::Gut))
+                    .filter(into_bed)
+                    .map(|(lumen, bed)| pools((lumen, bed), (bed, Space::Cells), (lumen, Space::Lumen)))
+                    .collect(),
+                Passage::Secretion => (anatomy.edges(Network::Reclaim))
+                    .map(|(lumen, bed)| pools((lumen, bed), (bed, Space::Cells), (lumen, Space::Lumen)))
+                    .collect(),
+            }
+        }
+        Family::Heat(HeatRoute::FromBeds) => beds()
+            .filter_map(|bed| Some(at(bed, [heat(bed), store(Space::Thermal)?])))
+            .collect(),
+        Family::Heat(HeatRoute::CarriedByBlood) => beds()
+            .filter_map(|bed| {
+                let (core, held) = (store(Space::Thermal)?, heat(anatomy.parent(bed)?));
+                (held != core).then(|| at(bed, [core, held]))
+            })
+            .collect(),
+        Family::Heat(HeatRoute::Conduction) => (anatomy.in_set(Sites::Class(Class::TissueSite)).into_iter())
+            .filter_map(|site| {
+                let core = store(Space::Thermal)?;
+                (site != core.site).then(|| at(site, [core, heat(site)]))
+            })
+            .collect(),
+        Family::Heat(HeatRoute::Pumps) => beds()
+            .map(|bed| Reach {
+                context: Context::Site(bed),
+                ends: [Terminal::Exterior("chemical energy"), Terminal::Pool(heat(bed))],
             })
             .collect(),
     }
@@ -2418,4 +2495,184 @@ fn modes(fragments: &[FragmentData], places: &Places) -> Vec<ModeLayout> {
         .collect();
     modes.sort_by_key(|mode| mode.variable);
     modes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Terminal, reaches_of};
+    use crate::law::Family;
+    use crate::*;
+
+    fn at() -> Result<Position, AdmissionError> {
+        Ok(Position::new(
+            Measure::new(0.0)?,
+            Measure::new(0.0)?,
+            Measure::new(0.0)?,
+        ))
+    }
+
+    /// The airway runs into the lung bed and the gut into the gut bed. The skin heat site holds the skin bed, and the
+    /// body every other site.
+    fn whole_body() -> Result<Schema, AdmissionError> {
+        let mut map = AnatomyBuilder::new();
+        let body = map.site::<TissueSite>("body", at()?);
+        let airway = map.site::<TissueSite>("airway", at()?);
+        let skin = map.site::<TissueSite>("skin", at()?);
+        let vessel = map.site::<VesselSegment>("vessel", at()?);
+        let stomach = map.site::<VesselSegment>("stomach", at()?);
+        let intestine = map.site::<VesselSegment>("intestine", at()?);
+        let lung = map.site::<CapillaryBed>("lung", at()?);
+        let gut = map.site::<CapillaryBed>("gut", at()?);
+        let skin_bed = map.site::<CapillaryBed>("skin bed", at()?);
+        let held = [
+            airway.id(),
+            skin.id(),
+            vessel.id(),
+            stomach.id(),
+            intestine.id(),
+            lung.id(),
+            gut.id(),
+        ];
+        for site in held {
+            map.contain(body.id(), site);
+        }
+        map.contain(skin.id(), skin_bed.id());
+        for bed in [lung.id(), gut.id(), skin_bed.id()] {
+            map.connect(Network::Vascular, vessel.id(), bed);
+            map.connect(Network::Vascular, bed, vessel.id());
+        }
+        map.serves(&lung, Tissue::Lung);
+        map.serves(&gut, Tissue::Gut);
+        map.connect(Network::Airway, airway.id(), lung.id());
+        map.connect(Network::Gut, stomach.id(), intestine.id());
+        map.connect(Network::Gut, intestine.id(), gut.id());
+        Schema::new(map.finish()?)
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum Stands {
+        Site(&'static str),
+        Edge(&'static str, &'static str),
+    }
+
+    type Reached = (Stands, (&'static str, Space), (&'static str, Space));
+
+    /// Where each reach stands and the pools it moves `species` from and to.
+    fn reached(family: Family, species: Species) -> Result<Vec<Reached>, AdmissionError> {
+        let schema = whole_body()?;
+        let reaches = reaches_of(family, &schema).into_iter().map(|reach| {
+            let end = |at: usize| match reach.ends[at] {
+                Terminal::Pool(pool) if pool.species == species => (pool.site.key(), pool.space),
+                Terminal::Pool(pool) => panic!("a pool of {species:?}, not of {:?}", pool.species),
+                Terminal::Exterior(receipt) => panic!("a pool, not the receipt {receipt}"),
+            };
+            let stands = match reach.context {
+                Context::Site(site) => Stands::Site(site.key()),
+                Context::Edge { from, to } => Stands::Edge(from.key(), to.key()),
+                Context::Body => panic!("a site or an edge"),
+            };
+            (stands, end(0), end(1))
+        });
+        Ok(reaches.collect())
+    }
+
+    #[test]
+    fn each_wall_crosses_from_its_first_space_to_its_second_at_the_beds_of_its_set()
+    -> Result<(), AdmissionError> {
+        let (oxygen, water, fat) = (Species::Oxygen, Species::Water, Species::FattyAcids);
+        let lung = Sites::Tissue(Tissue::Lung);
+        assert_eq!(
+            reached(Family::Across(Wall::Alveolar, lung, oxygen), oxygen)?,
+            [(
+                Stands::Site("lung"),
+                ("lung", Space::Gas),
+                ("lung", Space::Plasma)
+            )]
+        );
+        assert_eq!(
+            reached(Family::Across(Wall::Lining, Sites::Airway, water), water)?,
+            [(
+                Stands::Site("lung"),
+                ("lung", Space::Interstitium),
+                ("lung", Space::Gas)
+            )]
+        );
+        assert_eq!(
+            reached(
+                Family::Across(Wall::Endothelium, Sites::Besides(Tissue::Lung), fat),
+                fat
+            )?,
+            [
+                (Stands::Site("gut"), ("gut", Space::Plasma), ("gut", Space::Cells)),
+                (
+                    Stands::Site("skin bed"),
+                    ("skin bed", Space::Plasma),
+                    ("skin bed", Space::Cells)
+                ),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn each_passage_runs_along_its_networks_edges_between_its_two_spaces() -> Result<(), AdmissionError> {
+        let along = |passage, species| reached(Family::Along(passage, species), species);
+        let absorbing = Stands::Edge("intestine", "gut");
+        assert_eq!(
+            along(Passage::Airway, Species::Oxygen)?,
+            [(
+                Stands::Edge("airway", "lung"),
+                ("airway", Space::Gas),
+                ("lung", Space::Gas)
+            )]
+        );
+        assert_eq!(
+            along(Passage::Transit, Species::Glucose)?,
+            [(
+                Stands::Edge("stomach", "intestine"),
+                ("stomach", Space::Lumen),
+                ("intestine", Space::Lumen)
+            )]
+        );
+        assert_eq!(
+            along(Passage::Absorption, Species::Glucose)?,
+            [(absorbing, ("intestine", Space::Lumen), ("gut", Space::Plasma))]
+        );
+        assert_eq!(
+            along(Passage::Chyle, Species::Triglyceride)?,
+            [(
+                absorbing,
+                ("intestine", Space::Lumen),
+                ("gut", Space::Interstitium)
+            )]
+        );
+        assert_eq!(
+            along(Passage::Shedding, Species::Iron)?,
+            [(absorbing, ("gut", Space::Cells), ("intestine", Space::Lumen))]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn heat_leaves_each_bed_for_the_core_store_and_conducts_from_it_to_each_other_tissue_site()
+    -> Result<(), AdmissionError> {
+        let energy = Species::Energy;
+        let core = ("body", Space::Thermal);
+        assert_eq!(
+            reached(Family::Heat(HeatRoute::FromBeds), energy)?,
+            [
+                (Stands::Site("gut"), ("gut", Space::Thermal), core),
+                (Stands::Site("lung"), ("lung", Space::Thermal), core),
+                (Stands::Site("skin bed"), ("skin bed", Space::Thermal), core),
+            ]
+        );
+        assert_eq!(
+            reached(Family::Heat(HeatRoute::Conduction), energy)?,
+            [
+                (Stands::Site("airway"), core, ("airway", Space::Thermal)),
+                (Stands::Site("skin"), core, ("skin", Space::Thermal)),
+            ]
+        );
+        Ok(())
+    }
 }

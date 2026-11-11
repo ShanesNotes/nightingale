@@ -142,16 +142,28 @@ fn a_bed_holds_its_own_heat() {
     );
 }
 
+/// A bed's store and another tissue site's sort before the body's, and the body is the containment root.
 fn heat_ahead_of_the_body() -> Result<CompiledBody, AdmissionError> {
-    let (bed, root) = (site::<CapillaryBed>("a-bed"), site::<TissueSite>("body"));
-    let mut schema = Schema::new(anatomy(&["a-bed"])?)?;
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at_origin()?).id();
+    let skin = map.site::<TissueSite>("a skin heat site", at_origin()?).id();
+    let vessel = map.site::<VesselSegment>("vessel", at_origin()?).id();
+    let bed = map.site::<CapillaryBed>("a-bed", at_origin()?).id();
+    for site in [skin, vessel, bed] {
+        map.contain(root, site);
+    }
+    map.connect(Network::Vascular, vessel, bed);
+    map.connect(Network::Vascular, bed, vessel);
+    let mut schema = Schema::new(map.finish()?)?;
     for space in [Space::Plasma, Space::Interstitium, Space::Cells, Space::Lumen] {
         schema.leave_out(space, "a bench of energy alone");
     }
     schema.pool::<Energy>(root, Space::Elastic)?;
     schema.pool::<Energy>(root, Space::Thermal)?;
     schema.pool::<Energy>(bed, Space::Thermal)?;
+    schema.pool::<Energy>(skin, Space::Thermal)?;
     schema.boundary::<Energy>("bed heat", BoundaryDirection::OutOfBody, bed, Space::Thermal)?;
+    schema.boundary::<Energy>("skin heat", BoundaryDirection::OutOfBody, skin, Space::Thermal)?;
     let class = wave()?;
     assemble(schema, |mut body| {
         let (mut laws, ports) = body.cardiovascular()?.parts();
@@ -165,21 +177,22 @@ fn heat_ahead_of_the_body() -> Result<CompiledBody, AdmissionError> {
         laws.transfer(Transfer::new(&pair, rate));
         body.add(laws.finish());
         let (mut laws, ports) = body.boundary()?.parts();
-        let BoundaryRoute { route, .. } = ports.route::<Energy>("bed heat")?;
-        let loss =
-            laws.parameter::<Rate<Energy>>(ParameterKey::new("bench.bed-heat"), Admissible::nonnegative());
-        let rate = laws.kernel(|mut k| {
-            let value = k.parameter(&loss);
-            k.finish(value, laws.every_mode(), class)
-        });
-        laws.transfer(Transfer::new(&route, rate));
+        for (name, key) in [("bed heat", "bench.bed-heat"), ("skin heat", "bench.skin-heat")] {
+            let BoundaryRoute { route, .. } = ports.route::<Energy>(name)?;
+            let loss = laws.parameter::<Rate<Energy>>(ParameterKey::new(key), Admissible::nonnegative());
+            let rate = laws.kernel(|mut k| {
+                let value = k.parameter(&loss);
+                k.finish(value, laws.every_mode(), class)
+            });
+            laws.transfer(Transfer::new(&route, rate));
+        }
         body.add(laws.finish());
         body.compile()
     })
 }
 
 #[test]
-fn dissipation_reaches_the_body_store_whatever_sorts_before_it() {
+fn the_core_store_is_the_roots_whatever_tissue_store_sorts_first() {
     let compiled = heat_ahead_of_the_body().expect("compiled");
     let root = site::<TissueSite>("body");
     let dissipation = (compiled.columns().iter())

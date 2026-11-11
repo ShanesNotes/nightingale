@@ -1012,6 +1012,15 @@ impl Anatomy {
             .collect()
     }
 
+    /// The containment tree's one root: the site that stands for the whole body.
+    pub(crate) fn root(&self) -> Option<SiteId> {
+        self.preorder.first().copied()
+    }
+
+    pub(crate) fn parent(&self, site: SiteId) -> Option<SiteId> {
+        Some(self.sites[self.placed(site)?.parent?].id)
+    }
+
     pub(crate) fn tissue(&self, site: SiteId) -> Option<Tissue> {
         let at = self.tissues.binary_search_by_key(&site, |served| served.0).ok()?;
         Some(self.tissues[at].1)
