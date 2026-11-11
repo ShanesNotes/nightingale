@@ -545,9 +545,19 @@ mod tests {
             averaging: sliding(8),
             ..Range::of("xx.a")
         };
-        let set = set(vec![Range::of("xx.b").range(), later.range()], Vec::new()).expect("a set");
+        let elsewhere = Variation {
+            row: reading("other"),
+            ..Variation::of("xx.v")
+        };
+        let ranges = vec![Range::of("xx.b").range(), later.range()];
+        let variations = vec![Variation::of("xx.w").variation(), elsewhere.variation()];
+        let set = set(ranges, variations).expect("a set");
         let ids: Vec<&str> = set.ranges().iter().map(HealthyRange::id).collect();
         assert_eq!(ids, ["xx.a", "xx.b"]);
+        let ids: Vec<&str> = (set.variations().iter())
+            .map(WithinSubjectVariation::id)
+            .collect();
+        assert_eq!(ids, ["xx.v", "xx.w"]);
     }
 
     #[test]

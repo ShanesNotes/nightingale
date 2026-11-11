@@ -211,12 +211,12 @@ fn returns_of(report: &ReturnReport) -> Vec<(AnchorId, u32, SimTime, Option<Comp
 
 #[test]
 fn a_window_outside_its_range_fails_naming_the_reading_and_the_window() {
-    let set = set(
+    let zero_to_twenty = set(
         vec![range("xx.range", Scope::Every, sliding(2 * SECOND), 0.0, 20.0)],
         Vec::new(),
     );
     let values = [10.0, 10.0, 10.0, 10.0, 30.0, 30.0, 10.0, 10.0, 10.0];
-    let report = each_second(&set, &day(&[(0, "awake")]), &values);
+    let report = each_second(&zero_to_twenty, &day(&[(0, "awake")]), &values);
     assert_eq!(report.verdict(), CheckVerdict::Fail);
     assert_eq!(report.gaps(), []);
     let checked = result(&report, "xx.range");
@@ -227,6 +227,20 @@ fn a_window_outside_its_range_fails_naming_the_reading_and_the_window() {
         failure(&report, "xx.range"),
         named,
         "only the values at 4 s and 5 s leave 0 to 20"
+    );
+    let ten_to_twenty = set(
+        vec![range("xx.range", Scope::Every, sliding(2 * SECOND), 10.0, 20.0)],
+        Vec::new(),
+    );
+    let report = each_second(
+        &ten_to_twenty,
+        &day(&[(0, "awake")]),
+        &[15.0, 15.0, 5.0, 5.0, 15.0],
+    );
+    assert_eq!(
+        failure(&report, "xx.range"),
+        (at(3 * SECOND), 2 * SECOND, Some(value(5.0))),
+        "the values at 2 s and 3 s lie below 10 to 20, and each window holding one 5 and one 15 sits on its low limit"
     );
 }
 
