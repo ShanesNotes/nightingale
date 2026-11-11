@@ -957,8 +957,8 @@ test = "-p ng-contract --test day_inputs a_step_never_crosses_a_clock_edge_in_a_
 [[mutant]]
 name = "minute-off-the-grid-admitted"
 path = "crates/ng-contract/src/boundary.rs"
-old = '''|| (reads_clock && turns_off(delivery))'''
-new = '''|| (false && reads_clock && turns_off(delivery))'''
+old = '''} else if reads_clock && turns_off(delivery) {'''
+new = '''} else if false && reads_clock && turns_off(delivery) {'''
 test = "-p ng-contract --lib boundary::tests::a_clock_whose_minute_turns_between_two_points_is_off_the_grid_only_in_a_body_that_reads_it"
 
 [[mutant]]
@@ -974,6 +974,19 @@ path = "crates/ng-contract/src/admission.rs"
 old = '''.find(|held| !frames[0].states(**held))'''
 new = '''.find(|held| false && !frames[0].states(**held))'''
 test = "-p ng-contract --test day_inputs admission_refuses_a_body_that_reads_a_held_input_the_day_never_states"
+
+[[mutant]]
+name = "voiding-reads-sleep"
+path = "crates/ng-contract/src/law.rs"
+old = '''
+    pub fn voiding(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.held(Held::Void)
+'''
+new = '''
+    pub fn voiding(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.held(Held::Sleep)
+'''
+test = "-p ng-contract --test day_inputs each_held_input_reaches_the_law_that_reads_it"
 
 [[mutant]]
 name = "meal-parts-land-one-at-a-time"

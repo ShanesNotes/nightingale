@@ -218,6 +218,9 @@ pub enum AdmissionError {
     DeliveryOffGrid {
         id: InputId,
     },
+    ClockOffGrid {
+        id: InputId,
+    },
     ClockOutOfRange {
         id: InputId,
     },

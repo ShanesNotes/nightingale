@@ -230,11 +230,12 @@ fn room(values: [f64; 8]) -> Result<BoundaryInput, AdmissionError> {
     }))
 }
 
+// The cosine and sine of 05:00 correctly rounded (80-digit `decimal`); `turn` hits both exactly.
 const READS: [(&str, f64); 12] = [
-    ("clock cosine", 0.0),
-    ("clock sine", 1.0),
+    ("clock cosine", 0.25881904510252074),
+    ("clock sine", 0.9659258262890683),
     ("sleep", 1.0),
-    ("void", 1.0),
+    ("void", 0.0),
     ("air", 301.0),
     ("radiant", 302.0),
     ("humidity", 0.3),
@@ -262,14 +263,14 @@ fn the_day(clock: u64) -> Result<Vec<BoundaryEvent>, AdmissionError> {
             }),
         ),
         event(b"sleep", 0, BoundaryInput::Sleep(Sleep::Nrem)),
-        event(b"void", 0, BoundaryInput::Void(Gate::Open)),
+        event(b"void", 0, BoundaryInput::Void(Gate::Shut)),
         event(b"room", 0, room([301.0, 302.0, 0.3, 4.0, 750.0, 0.2, 0.05, 0.7])?),
     ])
 }
 
 #[test]
 fn each_held_input_reaches_the_law_that_reads_it() -> Result<(), InitializationFailure> {
-    let day = BoundaryPort::new(the_day(6 * HOUR)?)?;
+    let day = BoundaryPort::new(the_day(5 * HOUR)?)?;
     let bench = Bench::admitted(reading(&EVERY)?, packet(&READS)?, day)?;
     let mut expected = vec![("plain", 1.0)];
     expected.extend(READS);
@@ -341,7 +342,7 @@ fn admission_takes_a_held_input_no_law_reads() -> Result<(), InitializationFailu
 
 #[test]
 fn a_step_never_crosses_a_clock_edge_in_a_body_that_reads_the_clock() -> Result<(), InitializationFailure> {
-    let twenty_past = 6 * HOUR + 20 * SECOND;
+    let twenty_past = 5 * HOUR + 20 * SECOND;
     let names = ["clock cosine"];
     let bench = Bench::admitted(
         reading(&names)?,

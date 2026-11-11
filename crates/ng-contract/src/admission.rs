@@ -248,8 +248,8 @@ impl CompiledBody {
             Some(cycle) => {
                 let reads_clock = (self.held_reads().iter())
                     .any(|held| matches!(held, Held::ClockCosine | Held::ClockSine));
-                if let Some(id) = boundary.off_grid(anchor_moment, cycle, reads_clock) {
-                    return Err(AdmissionError::DeliveryOffGrid { id });
+                if let Some(refused) = boundary.off_grid(anchor_moment, cycle, reads_clock) {
+                    return Err(refused);
                 }
                 let step_ns = cycle.step_ns();
                 let instants = (0..cycle.intervals()).map(|point| point * step_ns);

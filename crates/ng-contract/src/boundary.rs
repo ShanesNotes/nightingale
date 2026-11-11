@@ -407,7 +407,7 @@ impl BoundaryPort {
     /// The first delivery that starts or ends inside the window between two points, or the first clock whose
     /// minute turns there in a body that reads it. A point's frame holds one interval, so such an edge would read
     /// a drive the run never gives.
-    pub(crate) fn off_grid(&self, start: SimTime, cycle: Cycle, reads_clock: bool) -> Option<InputId> {
+    pub(crate) fn off_grid(&self, start: SimTime, cycle: Cycle, reads_clock: bool) -> Option<AdmissionError> {
         let (from, step) = (start.nanoseconds(), cycle.step_ns());
         let window = SimTime::from_ns(from.saturating_add(cycle.period_ns()));
         let off = |edge: SimTime| {
@@ -432,27 +432,34 @@ impl BoundaryPort {
             }
             false
         };
-        (self.deliveries.iter())
-            .find(|delivery| off(delivery.at) || off(delivery.ends) || (reads_clock && turns_off(delivery)))
-            .map(|delivery| delivery.id)
+        self.deliveries.iter().find_map(|delivery| {
+            let id = delivery.id;
+            if off(delivery.at) || off(delivery.ends) {
+                Some(AdmissionError::DeliveryOffGrid { id })
+            } else if reads_clock && turns_off(delivery) {
+                Some(AdmissionError::ClockOffGrid { id })
+            } else {
+                None
+            }
+        })
     }
 }
 struct Arrival {
     id: InputId,
-    ids: Vec<InputId>,
+    part_ids: Vec<InputId>,
     parts: Vec<Delivery>,
 }
 impl Arrival {
     fn one(delivery: Delivery) -> Self {
         Self {
             id: delivery.id,
-            ids: vec![delivery.id],
+            part_ids: vec![delivery.id],
             parts: vec![delivery],
         }
     }
     fn new_to(&self, known: &[Delivery]) -> Result<bool, AdmissionError> {
         let found: Vec<&Delivery> = (known.iter())
-            .filter(|known| self.ids.contains(&known.id))
+            .filter(|known| self.part_ids.contains(&known.id))
             .collect();
         if found.is_empty() {
             return Ok(true);
@@ -500,8 +507,8 @@ impl Delivery {
             let part = Delivery::checked(part_id(id, place), at, boundary, amount, ends, place);
             parts.push(part.map_err(|_| AdmissionError::UnboundedDelivery { id })?);
         }
-        let ids = (0..Meal::SPECIES.len()).map(|place| part_id(id, place)).collect();
-        Ok(Arrival { id, ids, parts })
+        let part_ids = (0..Meal::SPECIES.len()).map(|place| part_id(id, place)).collect();
+        Ok(Arrival { id, part_ids, parts })
     }
     fn parsed(event: BoundaryEvent) -> Result<Arrival, AdmissionError> {
         let BoundaryEvent { id, at, payload } = event;
@@ -1302,7 +1309,7 @@ mod tests {
         let start = SimTime::from_ns(0);
         assert_eq!(
             port.off_grid(start, cycle(48, 4)?, true),
-            Some(id),
+            Some(AdmissionError::ClockOffGrid { id }),
             "40 s between 36 and 48"
         );
         assert_eq!(port.off_grid(start, cycle(48, 4)?, false), None);
