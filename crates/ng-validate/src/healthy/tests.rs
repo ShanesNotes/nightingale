@@ -86,12 +86,21 @@ fn morning(days: u32) -> NonZeroU32 {
     NonZeroU32::new(days).expect("not zero")
 }
 
-type Read = (usize, u64, Option<f64>);
+#[derive(Clone, Copy)]
+struct Read {
+    reading: usize,
+    at: u64,
+    value: Option<f64>,
+}
 
 fn each_period(from: u64, period_ns: u64, values: &[f64]) -> Vec<Read> {
     (0u64..)
         .zip(values)
-        .map(|(index, &read)| (0, from + index * period_ns, Some(read)))
+        .map(|(index, &read)| Read {
+            reading: 0,
+            at: from + index * period_ns,
+            value: Some(read),
+        })
         .collect()
 }
 
@@ -108,8 +117,8 @@ fn ranged(
     stream: &[Read],
 ) -> RangeReport {
     let mut fold = RangeFold::new(readings, period_ns, set, day, at(admission)).expect("a fold");
-    for &(reading, instant, read) in stream {
-        fold.feed(reading, at(instant), read.map(value));
+    for read in stream {
+        fold.feed(read.reading, at(read.at), read.value.map(value));
     }
     let (results, gaps) = fold.finish();
     RangeReport {
@@ -152,8 +161,8 @@ fn returned(
     stream: &[Read],
 ) -> ReturnReport {
     let mut fold = ReturnFold::new(readings, HOUR, set, plans, at(0)).expect("a fold");
-    for &(reading, instant, read) in stream {
-        fold.feed(reading, at(instant), read.map(value));
+    for read in stream {
+        fold.feed(read.reading, at(read.at), read.value.map(value));
     }
     let (results, gaps) = fold.finish();
     ReturnReport {
@@ -631,7 +640,13 @@ fn a_lens_reading_with_no_range_in_the_set_blocks_and_is_named() {
     );
     let readings = [sampled(reading()), sampled(row("unranged"))];
     let stream: Vec<Read> = (0..4)
-        .flat_map(|second| [0, 1].map(|read| (read, second * SECOND, Some(50.0))))
+        .flat_map(|second| {
+            [0, 1].map(|reading| Read {
+                reading,
+                at: second * SECOND,
+                value: Some(50.0),
+            })
+        })
         .collect();
     let report = ranged(&readings, SECOND, &set, &day(&[(0, "awake")]), 0, &stream);
     assert_eq!(report.verdict(), CheckVerdict::Blocked);
@@ -847,8 +862,13 @@ fn a_cycle_anchor_reads_the_cycle_after_each_morning_by_its_own_kind_of_mean() {
         49 | 50 => 140.0,
         _ => 100.0,
     };
-    let mut stream: Vec<Read> = (0..=50).map(|hour| (0, hour * HOUR, Some(read(hour)))).collect();
-    stream.extend((1..=50).map(|hour| (1, hour * HOUR, Some(read(hour)))));
+    let at_hour = |reading, hour| Read {
+        reading,
+        at: hour * HOUR,
+        value: Some(read(hour)),
+    };
+    let mut stream: Vec<Read> = (0..=50).map(|hour| at_hour(0, hour)).collect();
+    stream.extend((1..=50).map(|hour| at_hour(1, hour)));
     let plans = [
         anchor("xx.sampled", AnchorStatistic::CycleMean, 2 * HOUR),
         anchor("xx.timed", AnchorStatistic::CycleTimeMean, 2 * HOUR),

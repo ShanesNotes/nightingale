@@ -6,6 +6,11 @@ use ng_validate::*;
 const SECOND: u64 = 1_000_000_000;
 const HOUR: u64 = 3_600 * SECOND;
 const METHOD: &str = "a synthetic method";
+const START: [f64; 2] = [500_500.0, 499_500.0];
+const DELIVERY: f64 = 100_000.0;
+/// Above the level both reservoirs share once the delivery spreads, and below the first one's as it ends, so the
+/// excursion passes it for a while.
+const EXCURSION_HIGH: f64 = (START[0] + START[1]) / 2.0 + 0.75 * DELIVERY;
 
 fn at(seconds: u64) -> SimTime {
     SimTime::from_ns(seconds * SECOND)
@@ -24,10 +29,9 @@ fn excursion() -> TwoReservoirs {
         id: b"input",
         from: at(40),
         to: at(60),
-        amount: water(100_000.0),
+        amount: water(DELIVERY),
     };
-    let case =
-        TwoReservoirs::delivering([water(500_500.0), water(499_500.0)], vec![delivery]).expect("a body");
+    let case = TwoReservoirs::delivering(START.map(water), vec![delivery]).expect("a body");
     case.until(at(600))
 }
 
@@ -99,7 +103,7 @@ fn checked(case: &TwoReservoirs, set: &HealthyRangeSet<SyntheticFixture>) -> Che
 #[test]
 fn a_run_pushed_past_its_healthy_range_for_a_while_fails_naming_the_reading_and_a_window_in_the_excursion() {
     let case = excursion();
-    let checked = checked(&case, &set(&case, 575_000.0));
+    let checked = checked(&case, &set(&case, EXCURSION_HIGH));
     let range = &checked.range;
     assert_eq!(range.verdict(), CheckVerdict::Fail);
     assert_eq!(range.gaps(), []);
@@ -110,14 +114,14 @@ fn a_run_pushed_past_its_healthy_range_for_a_while_fails_naming_the_reading_and_
         (result.range(), result.row(), result.method()),
         ("xx.reservoir", amount(&case), METHOD)
     );
-    let failure = result.failure().expect("a window above 575 000");
+    let failure = result.failure().expect("a window above the high limit");
     let opens = SimTime::from_ns(failure.end().nanoseconds() - failure.length_ns());
     assert!(
         at(40) <= opens && failure.end() <= at(60),
         "{failure:?} lies inside the delivery that drives the excursion"
     );
     let mean = failure.mean().expect("every value present");
-    assert!(!mean.at_most(Compensated::of(&water(575_000.0))), "{mean:?}");
+    assert!(!mean.at_most(Compensated::of(&water(EXCURSION_HIGH))), "{mean:?}");
     assert_eq!(
         range.lens(),
         lens(&case).digest(),
@@ -133,7 +137,7 @@ fn a_run_pushed_past_its_healthy_range_for_a_while_fails_naming_the_reading_and_
 #[test]
 fn a_corrected_set_rechecks_a_finished_replay_and_gives_a_new_result_for_the_same_run() {
     let case = excursion();
-    let first = checked(&case, &set(&case, 575_000.0));
+    let first = checked(&case, &set(&case, EXCURSION_HIGH));
     let corrected = checked(&case, &set(&case, 700_000.0));
     assert_eq!(first.run, corrected.run, "one run identity before and after");
     assert_eq!((first.range.run(), corrected.range.run()), (first.run, first.run));
@@ -159,7 +163,7 @@ fn a_return_report_names_the_packet_whose_anchors_it_read() {
     let core = ReferenceIntegrator::new(8 * SECOND);
     let store = MemoryStore::default();
     let bare = BareLens::new(case.body(), &lens(&case)).expect("this body's lens");
-    let set = set(&case, 575_000.0);
+    let set = set(&case, EXCURSION_HIGH);
     let session = case.admit(&core, &store).expect("admitted");
     let packet = || case.packet().expect("a packet");
     let admitted = case.body().bind(packet()).expect("bound").packet_hash();
@@ -193,7 +197,7 @@ fn the_checks_read_this_bodys_lens_from_admission() {
     let core = ReferenceIntegrator::new(8 * SECOND);
     let store = MemoryStore::default();
     let bare = BareLens::new(case.body(), &lens(&case)).expect("this body's lens");
-    let set = set(&case, 575_000.0);
+    let set = set(&case, EXCURSION_HIGH);
     let session = step(case.admit(&core, &store).expect("admitted"));
     let anchors = case.packet().expect("a packet").anchors();
     let late = ReadingChecks::new(case.body(), &bare, &set, &day(), anchors, &session);
@@ -204,7 +208,7 @@ const GAIN: ParameterKey = ParameterKey::new("xx.gain");
 const STORED: AnchorId = AnchorId::new("xx.stored");
 const GAUGED: AnchorId = AnchorId::new("xx.gauged");
 const QUARTER: u64 = HOUR / 4;
-const DELIVERED: f64 = 900.0;
+const EACH_WAY: f64 = 900.0;
 const STORED_WATER: f64 = 10.0;
 const GAUGE_MEAN: f64 = 0.5;
 /// The size admission gives a row whose scale the packet does not state.
@@ -307,7 +311,7 @@ fn first_cycle() -> BoundaryPort {
     let delivery = |id: &[u8], boundary, ends| {
         let delivered = WaterDelivery {
             boundary,
-            amount: water(DELIVERED),
+            amount: water(EACH_WAY),
             ends: SimTime::from_ns(ends),
         };
         let id = InputId::new(Digest::of_canonical(id));
