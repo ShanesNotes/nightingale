@@ -99,6 +99,43 @@ fn each_site_set_holds_the_sites_the_map_places_on_it() -> Result<(), AdmissionE
     Ok(())
 }
 
+/// One airway site, whose gas holds `Q` and takes it in from the room.
+fn breathed<Q: Substance>() -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let body = map.site::<TissueSite>("body", at()?);
+    let airway = map.site::<TissueSite>("conducting airway", at()?).id();
+    map.contain(body.id(), airway);
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.pool::<Q>(airway, Space::Gas)?;
+    schema.boundary::<Q>("inspired", BoundaryDirection::IntoBody, airway, Space::Gas)?;
+    let class = wave()?;
+    assemble(schema, |mut body| {
+        let (mut laws, ports) = body.boundary()?.parts();
+        let BoundaryRoute { route, .. } = ports.route::<Q>("inspired")?;
+        let rate = laws.kernel(|mut k| {
+            let zero = k.zero::<Rate<Q>>();
+            k.finish(zero, laws.every_mode(), class)
+        });
+        laws.transfer(Transfer::new(&route, rate));
+        body.add(laws.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn an_airway_sites_gas_holds_a_gas_and_refuses_what_may_not_sit_in_gas() -> Result<(), AdmissionError> {
+    breathed::<Oxygen>()?;
+    assert_eq!(
+        breathed::<Glucose>().err(),
+        Some(AdmissionError::Compile(CompileDefect::OutOfPlace {
+            site: site::<TissueSite>("conducting airway"),
+            space: Space::Gas,
+            species: Species::Glucose,
+        }))
+    );
+    Ok(())
+}
+
 fn watery_spaces_left_out(schema: &mut Schema) {
     for space in [Space::Plasma, Space::Interstitium, Space::Cells, Space::Lumen] {
         schema.leave_out(space, "a bench of energy alone");

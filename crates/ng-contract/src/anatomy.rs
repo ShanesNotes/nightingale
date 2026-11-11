@@ -188,7 +188,9 @@ pub enum Network {
     /// From a lumen back to a bed's plasma: what a tubule wall takes back.
     Reclaim,
     /// From the room's side of the airway toward the alveolar gas: a tissue site's gas to the next tissue site's, or
-    /// to a bed's.
+    /// to a bed's. The room is a boundary at the first site's gas. An airway site is a tissue site, not a vessel
+    /// segment, because `Schema::new` puts water in every vessel segment's lumen and compile refuses a pool nothing
+    /// moves as `CompileDefect::OrphanPool`, and no law moves water along the airway.
     Airway,
     /// From the stomach on: a gut lumen to the next, or to the bed whose wall absorbs it.
     Gut,
