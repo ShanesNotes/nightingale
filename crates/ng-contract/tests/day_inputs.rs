@@ -36,12 +36,20 @@ impl Bench {
         packet: ParameterPacket<SyntheticFixture>,
         boundary: BoundaryPort,
     ) -> Result<Self, InitializationFailure> {
+        Self::admitted_at(body, packet, boundary, SimTime::from_ns(0))
+    }
+    fn admitted_at(
+        body: CompiledBody,
+        packet: ParameterPacket<SyntheticFixture>,
+        boundary: BoundaryPort,
+        moment: SimTime,
+    ) -> Result<Self, InitializationFailure> {
         let parameters = body.bind(packet)?;
-        let request = InitializationRequest::at(SimTime::from_ns(0));
+        let request = InitializationRequest::at(moment);
         let system = body.initialization(parameters, boundary, request)?;
         let solved = system.workspace();
         let schema = Digest::of_canonical(b"day inputs test");
-        let history = MethodHistory::new(schema, SimTime::from_ns(0), Vec::new());
+        let history = MethodHistory::new(schema, moment, Vec::new());
         let revision = system.admit(solved, history)?;
         let identity = RunIdentity::new(
             body.model_hash(),
@@ -361,6 +369,70 @@ fn a_step_never_crosses_a_clock_edge_in_a_body_that_reads_the_clock() -> Result<
     assert!(
         ticket.length_ns() > 40 * SECOND,
         "a body that reads no clock sees no edge"
+    );
+    Ok(())
+}
+
+/// What a body that reads sleep, the room and the clock reads at admission, six hours after the packet's day stated
+/// them: the clock moved on from 18:00 to midnight, the later sleep and the later room.
+#[test]
+fn a_held_input_the_day_stated_before_the_anchor_moment_reads_at_it_with_the_clock_moved_on()
+-> Result<(), InitializationFailure> {
+    let names = ["clock cosine", "clock sine", "sleep", "air", "humidity"];
+    let mut packet = packet(&[
+        ("clock cosine", 1.0),
+        ("clock sine", 0.0),
+        ("sleep", 0.0),
+        ("air", 297.0),
+        ("humidity", 0.4),
+    ])?;
+    let day = vec![
+        event(
+            b"clock",
+            0,
+            BoundaryInput::Clock(Clock {
+                since_midnight_ns: 18 * HOUR,
+            }),
+        ),
+        event(b"asleep", 0, BoundaryInput::Sleep(Sleep::Nrem)),
+        event(b"room", 0, room([293.0, 293.0, 0.5, 1.0, 760.0, 0.21, 0.0, 1.0])?),
+        event(b"awake", HOUR, BoundaryInput::Sleep(Sleep::Awake)),
+        event(
+            b"warmer",
+            2 * HOUR,
+            room([297.0, 297.0, 0.4, 1.0, 760.0, 0.21, 0.0, 1.0])?,
+        ),
+    ];
+    packet.day(Day::new(day)?)?;
+    let moment = SimTime::from_ns(6 * HOUR);
+    let bench = Bench::admitted_at(reading(&names)?, packet, BoundaryPort::new(Vec::new())?, moment)?;
+    let mut read = bench.read();
+    read.sort_by_key(|(name, _)| EVERY.iter().position(|known| known == name));
+    let expected = vec![
+        ("plain", 1.0),
+        ("clock cosine", 1.0),
+        ("clock sine", 0.0),
+        ("sleep", 0.0),
+        ("air", 297.0),
+        ("humidity", 0.4),
+    ];
+    assert_eq!(read, expected);
+    Ok(())
+}
+
+#[test]
+fn bind_refuses_a_day_event_the_body_would_refuse_on_its_port() -> Result<(), AdmissionError> {
+    let drink = BoundaryInput::Water(Delivered {
+        boundary: "gut water",
+        amount: Measure::new(1.0)?,
+        ends: SimTime::from_ns(HOUR),
+    });
+    let mut held = packet(&[])?;
+    held.day(Day::new(vec![event(b"drink", 0, drink)])?)?;
+    let refused = reading(&[])?.bind(held).err();
+    assert_eq!(
+        refused,
+        Some(AdmissionError::UnknownBoundary { name: "gut water" })
     );
     Ok(())
 }

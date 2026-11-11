@@ -409,3 +409,36 @@ fn every_meal_species_reads_back_under_its_own_tag() -> Result<(), Initializatio
     assert_eq!(tags, [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12]);
     Ok(())
 }
+
+/// A delivery of the packet's day that ran before the anchor moment and ended by it is dropped; one that runs
+/// across it is refused by its id, and a meal by the meal's.
+#[test]
+fn a_day_delivery_across_the_anchor_moment_is_refused_and_one_that_ended_is_dropped()
+-> Result<(), AdmissionError> {
+    let species = [Species::Water];
+    let (body, site) = gut(&species)?;
+    let admitted = |event: BoundaryEvent| -> Result<(), AdmissionError> {
+        let mut packet = packet(site, &species);
+        packet.day(Day::new(vec![event])?)?;
+        let parameters = body.bind(packet)?;
+        let request = InitializationRequest::at(at(60));
+        body.initialization(parameters, BoundaryPort::new(Vec::new())?, request)?;
+        Ok(())
+    };
+    let drink = |ends| {
+        let delivered = Delivered {
+            boundary: "gut water",
+            amount: measure(1.0),
+            ends: at(ends),
+        };
+        BoundaryEvent::new(id(b"drink"), at(0), BoundaryInput::Water(delivered))
+    };
+    assert_eq!(admitted(drink(60)), Ok(()), "ended at the moment");
+    let across = AdmissionError::DeliveryAcrossAdmission { id: id(b"drink") };
+    assert_eq!(admitted(drink(61)), Err(across));
+    let lunch = Meal::new(at(90)).with(measure::<Water>(5.0));
+    let meal = BoundaryEvent::new(id(b"lunch"), at(30), BoundaryInput::Meal(lunch));
+    let across = AdmissionError::DeliveryAcrossAdmission { id: id(b"lunch") };
+    assert_eq!(admitted(meal), Err(across));
+    Ok(())
+}
