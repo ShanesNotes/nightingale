@@ -6,7 +6,7 @@ use core::num::NonZeroU64;
 
 const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
 
-fn greatest_common_divisor(mut a: u128, mut b: u128) -> u128 {
+pub(crate) fn greatest_common_divisor(mut a: u128, mut b: u128) -> u128 {
     while b != 0 {
         (a, b) = (b, a % b);
     }
