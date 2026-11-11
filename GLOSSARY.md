@@ -316,6 +316,12 @@ The volume one unit amount of a species takes up. A space's volume derives from 
 **Coupling field**:
 One value an arrow of the coupling map carries, held as an algebraic row that the map's sender defines and its receiver reads. A per-site field has one row per site.
 
+**Wired field**:
+A coupling field the coupling catalog names with the body ticket whose laws define and read it.
+
+**Held field**:
+A value an arrow of the coupling map names that no law defines or reads at rung 0, so it is no coupling field and no member of its arrow's port. One end of its arrow holds it with a reason, and the catalog keeps its unit, so a later rung can wire it.
+
 **Shared substrate**:
 One of the ten resources the systems share (S1 to S10 in the coupling map), such as the vascular registry, or water and osmoles per space.
 
@@ -599,6 +605,9 @@ The arena protocol the picked solver core runs once, the run I19's check needs, 
 **Slice**:
 The systems the arena runs for real: pulsatile cardiovascular, fluids, renal, a minimal nervous baroreflex, the receptor layer and the boundary port, over an arena protocol's span with synthetic values.
 
+**Whole body**:
+All 13 systems, the receptor layer and the boundary, as body ticket 01 plans them at rung 0. Its census accounts for every arrow of the coupling map, field by field.
+
 **Held stand-in**:
 A system outside the slice, held by a declaration that names every route on which it supplies or removes an amount, so stability bought with held support shows in the certificate.
 _Avoid_: stub, mock
@@ -681,6 +690,9 @@ _Avoid_: chart (for a statechart)
 
 **Coupling map**:
 The atlas's map of how systems affect each other: shared substrates and 38 direct couplings. Not the map of sites.
+
+**Census**:
+How the coupling map's 38 arrows stand in one assembly, the slice or the whole body, counted by the compiler. In the slice an arrow is live, an input, a sink, an anatomy relation, outside or unresolved. In the whole body it is an anatomy relation or carries fields, each wired or held, and it is live when it wires one and held when it holds every one.
 
 ## Systems
 
