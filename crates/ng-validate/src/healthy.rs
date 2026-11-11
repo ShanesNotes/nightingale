@@ -1,7 +1,7 @@
 use core::num::NonZeroU64;
 use ng_contract::{
     Activity, AdmissionError, AnchorId, Anchors, ChannelSpec, CompiledBody, Digest, HealthyRangeSet,
-    ObservationLens, ObservationSeed, PacketKind, RowKind, SimTime,
+    ObservationLens, ObservationSeed, PacketHash, PacketKind, RowKind, SimTime,
 };
 use ng_observe::{Observation, ObservedValue, Observer};
 use ng_record::{ObservationRefusal, Session};
@@ -197,6 +197,7 @@ pub struct ReadingChecks<'b> {
     seal: Digest,
     set: Digest,
     day: Digest,
+    packet: PacketHash,
     range: RangeFold,
     returns: ReturnFold,
 }
@@ -232,6 +233,7 @@ impl<'b> ReadingChecks<'b> {
             seal: view.seal(),
             set: set.digest(),
             day: day.digest(),
+            packet: anchors.packet(),
             range: RangeFold::new(&bare.readings, period_ns, set, day, admission)?,
             returns: ReturnFold::new(&bare.readings, period_ns, set, &plans, admission)?,
         };
@@ -255,6 +257,7 @@ impl<'b> ReadingChecks<'b> {
             seal,
             set,
             day,
+            packet,
             range,
             returns,
         } = self;
@@ -274,6 +277,7 @@ impl<'b> ReadingChecks<'b> {
             seal,
             set,
             lens: lens.learner,
+            packet,
             results,
             gaps,
         };

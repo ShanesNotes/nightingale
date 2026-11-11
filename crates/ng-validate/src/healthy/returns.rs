@@ -2,7 +2,7 @@ use super::{BareReading, CheckVerdict, DAY_NS, ReadingCheckError};
 use core::num::NonZeroU32;
 use ng_contract::{
     AnchorId, AnchorReading, AnchorStatistic, Compensated, Digest, Dimensionless, HealthyRangeSet, Measure,
-    PacketKind, RowKind, SimTime,
+    PacketHash, PacketKind, RowKind, SimTime,
 };
 
 /// The reference change value without its analytical part, in within-subject variations (record 0004).
@@ -37,6 +37,7 @@ pub struct ReturnReport {
     pub(super) seal: Digest,
     pub(super) set: Digest,
     pub(super) lens: Digest,
+    pub(super) packet: PacketHash,
     pub(super) results: Vec<AnchorReturn>,
     pub(super) gaps: Vec<ReturnGap>,
 }
@@ -44,6 +45,10 @@ impl ReturnReport {
     /// The run identity's digest.
     pub fn run(&self) -> Digest {
         self.run
+    }
+    /// The packet whose anchors the check read, so a holder of the run's packet can see they are its own.
+    pub fn packet(&self) -> PacketHash {
+        self.packet
     }
     /// The seal of the last revision read.
     pub fn seal(&self) -> Digest {

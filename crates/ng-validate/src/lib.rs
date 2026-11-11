@@ -196,10 +196,10 @@
 //! }
 //! ```
 //! ```compile_fail,E0451
-//! use ng_contract::Digest;
+//! use ng_contract::{Digest, PacketHash};
 //! use ng_validate::*;
-//! fn forged(run: Digest, results: Vec<AnchorReturn>, gaps: Vec<ReturnGap>) -> ReturnReport {
-//!     ReturnReport { run, seal: run, set: run, lens: run, results, gaps }
+//! fn forged(run: Digest, packet: PacketHash, results: Vec<AnchorReturn>, gaps: Vec<ReturnGap>) -> ReturnReport {
+//!     ReturnReport { run, seal: run, set: run, lens: run, packet, results, gaps }
 //! }
 //! ```
 //! ```

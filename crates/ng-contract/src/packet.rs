@@ -257,7 +257,7 @@ impl<K: PacketKind> ParameterPacket<K> {
         });
         Ok(())
     }
-    /// What admission reads of each anchor, in id order, and never its value.
+    /// What admission reads of each anchor, in id order, and never its value, named by this packet's hash.
     pub fn anchors(&self) -> Anchors {
         let window_ns = self.cycle.map_or(0, Cycle::period_ns);
         let mut readings: Vec<AnchorReading> = (self.anchors.iter())
@@ -273,7 +273,10 @@ impl<K: PacketKind> ParameterPacket<K> {
             })
             .collect();
         readings.sort_by_key(|reading| reading.id);
-        Anchors { readings }
+        Anchors {
+            readings,
+            packet: self.hash(),
+        }
     }
     /// `key`'s range in the patient's population. Refuses a reversed interval and a second record for a key.
     pub fn population<U: Dimension>(

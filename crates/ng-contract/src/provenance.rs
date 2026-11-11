@@ -1,7 +1,7 @@
 use crate::identity::{Canonical, Seal};
 use crate::{
-    AdmissionRow, Binding, Compensated, ErrorScales, LocatedCrossing, Measure, PacketKind, Reviewed, RowKind,
-    Slot, SyntheticFixture,
+    AdmissionRow, Binding, Compensated, ErrorScales, LocatedCrossing, Measure, PacketHash, PacketKind,
+    Reviewed, RowKind, Slot, SyntheticFixture,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -83,10 +83,15 @@ impl AnchorReading {
 #[derive(Debug)]
 pub struct Anchors {
     pub(crate) readings: Vec<AnchorReading>,
+    pub(crate) packet: PacketHash,
 }
 impl Anchors {
     pub fn iter(&self) -> core::slice::Iter<'_, AnchorReading> {
         self.readings.iter()
+    }
+    /// The hash of the packet these anchors came from, as `bind` gives it.
+    pub fn packet(&self) -> PacketHash {
+        self.packet
     }
 }
 impl<'a> IntoIterator for &'a Anchors {
@@ -323,5 +328,23 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn an_anchor_view_names_its_packet_apart_from_another_with_the_same_anchors() {
+        let anchored = || {
+            let mut packet = ParameterPacket::<SyntheticFixture>::new();
+            packet
+                .anchor(anchor("xx.a", "first", AnchorStatistic::Instant))
+                .expect("an anchor");
+            packet
+        };
+        let mut started = anchored();
+        let value = Measure::<Pressure>::new(10.0).expect("finite");
+        started.start(row("first"), value, "synthetic").expect("a start");
+        let (view, again, other) = (anchored().anchors(), anchored().anchors(), started.anchors());
+        assert!(view.iter().eq(other.iter()), "one anchor, read alike");
+        assert_eq!(view.packet(), again.packet(), "one packet built twice");
+        assert_ne!(view.packet(), other.packet(), "a packet with one more start");
     }
 }

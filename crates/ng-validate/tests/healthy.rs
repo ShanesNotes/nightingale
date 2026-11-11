@@ -156,6 +156,34 @@ fn a_corrected_set_rechecks_a_finished_replay_and_gives_a_new_result_for_the_sam
 }
 
 #[test]
+fn a_return_report_names_the_packet_whose_anchors_it_read() {
+    let case = excursion();
+    let core = ReferenceIntegrator::new(8 * SECOND);
+    let store = MemoryStore::default();
+    let bare = BareLens::new(case.body(), &lens(&case)).expect("this body's lens");
+    let set = set(&case, 575_000.0);
+    let session = case.admit(&core, &store).expect("admitted");
+    let packet = || case.packet().expect("a packet");
+    let admitted = case.body().bind(packet()).expect("bound").packet_hash();
+    let named = |anchors: Anchors| {
+        let checks = ReadingChecks::new(case.body(), &bare, &set, &day(), anchors, &session);
+        checks.expect("the checks").finish().1.packet()
+    };
+    assert_eq!(
+        packet().anchors().packet(),
+        admitted,
+        "the view names the packet the run bound"
+    );
+    assert_eq!(named(packet().anchors()), admitted);
+    let other = ParameterPacket::<SyntheticFixture>::new().anchors();
+    assert_ne!(
+        named(other),
+        admitted,
+        "another packet's anchors name another packet"
+    );
+}
+
+#[test]
 fn the_checks_read_this_bodys_lens_from_admission() {
     let case = excursion();
     let closed = TwoReservoirs::closed().expect("another body");

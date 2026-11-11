@@ -4,8 +4,8 @@ use super::*;
 use crate::{ReplayCase, TwoReservoirs};
 use core::num::NonZeroU32;
 use ng_contract::{
-    AnchorStatistic, Averaging, Compensated, HealthyRange, LawName, Measure, Pressure, Scope,
-    SyntheticFixture, Water, WithinSubjectVariation,
+    AnchorStatistic, Averaging, Compensated, HealthyRange, LawName, Measure, ParameterPacket, Pressure,
+    Scope, SyntheticFixture, Water, WithinSubjectVariation,
 };
 
 const SECOND: u64 = 1_000_000_000;
@@ -165,6 +165,7 @@ fn returned(
         seal: unread(),
         set: unread(),
         lens: unread(),
+        packet: ParameterPacket::<SyntheticFixture>::new().anchors().packet(),
         results,
         gaps,
     }
