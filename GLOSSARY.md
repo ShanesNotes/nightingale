@@ -298,6 +298,9 @@ A card's way across the body's boundary, such as insulin's secretion, the fecal 
 **Route family**:
 Every transfer of one kind the map implies: one per site of a class, such as plasma to interstitium at every capillary bed, or one per vascular edge. A system requests it whole through its scope, so the body owes a law for every one, and no law names a site.
 
+**Cargo class**:
+The species a card's wall or passage port may move, closed in the contract, such as the fuels the metabolism card moves into cells. A species outside the class does not compile.
+
 **Passage**:
 A route along a network, one species at a time: the airway's gas, the gut's transit, absorption into a bed, fat into the lymph, shedding from the gut's cells and secretion from the tubule's cells.
 

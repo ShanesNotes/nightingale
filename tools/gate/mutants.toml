@@ -552,6 +552,20 @@ new = '''owner: Boundary::CARD,'''
 test = "-p ng-contract --test scopes a_process_at_a_pool_the_body_lacks_is_named_under_its_card"
 
 [[mutant]]
+name = "crossed-twice-refused"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|pair| pair[0].0 == pair[1].0 && pair[0].1 == pair[1].1 && pair[0].2 == pair[1].2)'''
+new = '''.filter(|_| false)'''
+test = "-p ng-contract --test scopes two_cards_crossing_one_wall_with_one_species_at_one_bed_is_refused"
+
+[[mutant]]
+name = "crossed-twice-at-one-site"
+path = "crates/ng-contract/src/compile.rs"
+old = '''&& pair[0].2 == pair[1].2)'''
+new = ''')'''
+test = "-p ng-contract --test scopes disjoint_sets_of_one_wall_and_species_take_two_cards"
+
+[[mutant]]
 name = "cargo-held-at-both-ends"
 path = "crates/ng-contract/tests/map_reads.rs"
 old = '''        cargo(false, false).err(),'''

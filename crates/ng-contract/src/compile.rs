@@ -41,6 +41,7 @@ pub(crate) fn compile(
     check_volume(&schema, &owed, &fragments)?;
 
     let reaches = Reaches::of(&schema, &fragments);
+    check_crossings(&fragments, &reaches)?;
     let rows = Rows::lay_out(&schema, &fragments, &reaches, &held);
     let chance = ChanceNames::of(&fragments);
     let places = Places {
@@ -247,6 +248,38 @@ fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
 fn check_places(schema: &Schema) -> Result<(), CompileDefect> {
     match (schema.pools()).find(|&(_, space, species)| !species.may_hold(space)) {
         Some((site, space, species)) => Err(CompileDefect::OutOfPlace { site, space, species }),
+        None => Ok(()),
+    }
+}
+
+/// A fluid route carries what its water carries and crosses no wall of its own, so it is no crossing.
+fn check_crossings(fragments: &[FragmentData], reaches: &Reaches) -> Result<(), CompileDefect> {
+    let mut crossings = Vec::new();
+    for fragment in fragments {
+        for &family in &fragment.families {
+            let (wall, species) = match family {
+                Family::Exchange(species) => (None, species),
+                Family::Across(wall, _, species) => (Some(wall), species),
+                _ => continue,
+            };
+            let law = LawName {
+                owner: fragment.owner,
+                local: family.name(),
+            };
+            for reach in reaches.of_family(family) {
+                if let Context::Site(site) = reach.context {
+                    crossings.push((wall, species, site, law));
+                }
+            }
+        }
+    }
+    crossings.sort_unstable();
+    let doubled = (crossings.windows(2))
+        .filter(|pair| pair[0].0 == pair[1].0 && pair[0].1 == pair[1].1 && pair[0].2 == pair[1].2)
+        .map(|pair| ([pair[0].3, pair[1].3], pair[0].2))
+        .min();
+    match doubled {
+        Some((laws, site)) => Err(CompileDefect::CrossedTwice { laws, site }),
         None => Ok(()),
     }
 }

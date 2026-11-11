@@ -13,6 +13,7 @@ use crate::{
 use core::marker::PhantomData;
 
 mod blood_chemistry;
+mod cargo;
 mod endocrine;
 mod gastrointestinal;
 mod hematology;
@@ -24,6 +25,7 @@ mod outside;
 mod processes;
 mod respiratory;
 pub use blood_chemistry::BloodChemistryPorts;
+pub use cargo::*;
 pub use endocrine::EndocrinePorts;
 pub use gastrointestinal::GastrointestinalPorts;
 pub use hematology::HematologyPorts;

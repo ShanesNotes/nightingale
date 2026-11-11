@@ -1169,10 +1169,18 @@ impl<'b, O, C: SiteSet, Q> Reaction<'b, O, C, Q> {
 mod grants {
     pub trait Sealed<C> {}
 }
-/// A site class the contract grants a card to react at: metabolism at the capillary beds.
+/// A site set the contract grants a card to react at: metabolism at the capillary beds, the hepatic card at the liver
+/// bed, the musculoskeletal card at the muscle bed, and the renal card at the peritubular bed, whose cells stand for
+/// the tubule's.
 pub trait ReactsAt<C: SiteSet>: grants::Sealed<C> + Owner {}
 impl grants::Sealed<CapillaryBed> for Metabolism {}
 impl ReactsAt<CapillaryBed> for Metabolism {}
+impl grants::Sealed<crate::Beds<crate::Liver>> for crate::Hepatic {}
+impl ReactsAt<crate::Beds<crate::Liver>> for crate::Hepatic {}
+impl grants::Sealed<crate::Beds<crate::Muscle>> for crate::Musculoskeletal {}
+impl ReactsAt<crate::Beds<crate::Muscle>> for crate::Musculoskeletal {}
+impl grants::Sealed<crate::Beds<crate::Tubule>> for crate::Renal {}
+impl ReactsAt<crate::Beds<crate::Tubule>> for crate::Renal {}
 pub(crate) struct ReactionDeclaration {
     pub(crate) name: &'static str,
     pub(crate) set: Sites,

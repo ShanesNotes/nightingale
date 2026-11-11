@@ -125,6 +125,10 @@ core = "An orphan pool"
 mutants = ["orphan-held"]
 
 [[row]]
+core = "A wall crossing two cards own"
+mutants = ["crossed-twice-refused", "crossed-twice-at-one-site"]
+
+[[row]]
 core = "A card serving a boundary route another card owns"
 mutants = ["process-owned-by-its-card", "process-of-another-card-supplied", "boundary-port-offers-no-process"]
 doctests = [
