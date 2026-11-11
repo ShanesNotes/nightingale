@@ -16,6 +16,9 @@ The one person an engine simulates, described by a packet.
 **Packet**:
 The bundle of one patient's parameters and the day the patient lives. It holds every parameter value with where it came from (cited, drawn from a population range or chosen inside one with a reason, derived by an identity, fitted when the start state is solved, or inferred by a model), the anchors the start state must meet, the day (sleep, posture, meals, drinks and room conditions) that the run's boundary events are made from, and the source, population and inference records behind them. A packet is either reviewed (clinical values with citations, and a count of its inferred values) or a synthetic test fixture. Its hash is fixed at admission and is part of the run's identity.
 
+**Day**:
+The timeline of the patient's day that a packet holds: posture, meals, drinks, the clock, sleep, room conditions and voids. Admission makes the run's boundary events from it, and the packet's hash covers it. A held input stated before the anchor moment is restamped at it, and a meal is one item of the day. A reviewed packet always holds a day; only a synthetic fixture may hold none.
+
 **Admission**:
 The moment a run starts. The start state is solved once here and never imposed again.
 
@@ -104,13 +107,35 @@ A run continued from a checkpoint under its own id, with its ancestry kept. The 
 Continuing from an earlier checkpoint on a new branch in the same process. It must give the same bits as that branch loaded from its saved checkpoint (I3).
 
 **Boundary port**:
-The one port for events from outside the body: intake, posture, environment, clock and sleep, and later interventions. Each event is timestamped, has an id and is applied once.
+The one port for events from outside the body: deliveries and meals, posture, the clock, sleep, room conditions and voids, and later interventions. Each event is timestamped, has an id and is applied once.
 
 **Breakpoint**:
 An instant that ends a step: an event or a guard crossing. A display refresh, a pace change or a checkpoint request is never one.
 
 **Delivery**:
 An event's amount entering the body through a boundary at a steady rate from the event's instant until its end. Overlapping deliveries add.
+
+**Held input**:
+A boundary input that holds from its event until the next of its kind and carries no amount: posture, the clock, sleep, room conditions and the void gate. A law reads posture through each site's height and every other held input as a value in its own dimension. A law that reads one must also read a parameter or a memory slot, so the input scales a gain or a set point and never stands for a produced quantity. A body that reads one needs its value stated at admission.
+
+**Clock**:
+The held input that gives the time of day. A clock event states the time of day at its instant, and the clock runs on from there. Its phase is zero at midnight and makes one turn a day. A law reads the cosine and the sine of the phase, which change at each whole minute, and maps its source's zero to midnight through its own phase parameters. In a body that reads the clock, each minute's edge ends a step.
+
+**Sleep state**:
+The held input that says whether the patient sleeps. A law reads 1 in non-REM sleep and 0 awake. Rung 0 has no REM sleep.
+
+**Room conditions**:
+The held input that gives the room: air and radiant temperature, relative humidity, air speed as its ratio to 0.1 m/s, barometric pressure, the inspired dry fractions of oxygen and carbon dioxide with nitrogen gas the rest, and clothing or bedding as a count of clo. Temperatures are absolute.
+_Avoid_: environment
+
+**Void gate**:
+The held input that opens and shuts the bladder's outlet. A void is the gate open from one event until the next. It carries no amount, because the volume voided is a produced quantity.
+
+**Meal**:
+One event with one id that delivers an amount of each of twelve species into the gut: water, sodium, potassium, chloride, glucose, triglyceride, amino acids, the diet base, calcium, phosphate, magnesium and iron. Each species with an amount arrives as a delivery of its own, into the boundary named for the gut and that species, with an id that comes from the meal's. A meal lands whole and once.
+
+**Drink**:
+Water delivered into the gut, as a meal's water is.
 
 **Waiting input**:
 An admitted event not yet due. No seal or ticket digest covers it, so nothing a core reads carries it until a cut shows it.
@@ -134,7 +159,7 @@ The end of a step at a guard's crossing: a ticket that crosses, and one at most 
 An event whose instant is the start of a step. It is applied when that step is accepted, so a refused step leaves it pending.
 
 **Drive frame**:
-What the boundary supplies over one step, frozen when the step's interval is issued, so a stage at the step's end never reads a delivery that starts there.
+What the boundary supplies over one step, frozen when the step's interval is issued, so a stage at the step's end never reads a delivery that starts there. It holds each delivery's rate, the posture and every held input the body reads.
 
 **Causal step rule**:
 A step is the solver's own interval, cut short only at the next breakpoint and blind to anything later, so an event that arrives during the run gives the same bits as the same event known from the start (I5). A waiting input shows only in a cut.
@@ -641,7 +666,7 @@ A deterministic check drawn from the contract's day table that reads one produce
 _Avoid_: body check, judge
 
 **Day plan**:
-The schedule day checks read around: sitting up at 07:00, meals at 07:30, 12:30 and 18:30, lying down to sleep at 23:00 and waking at 06:30, from the 06:55 admission. One plan makes both a run's boundary events and the occurrences its checks read. An event no payload carries yet, such as sleep, leaves its checks not available yet.
+The schedule day checks read around: sitting up at 07:00, meals at 07:30, 12:30 and 18:30, lying down to sleep at 23:00 and waking at 06:30, from the 06:55 admission. One plan makes both a run's boundary events and the occurrences its checks read. The slice reads no sleep, so the plan carries none and the sleep rows stay not available yet. The arena's fixture packet holds no day, so the plan's events reach the port as plain events.
 
 **Beat**:
 The accepted steps from one beat edge to the next, one cardiac cycle of a run. A day check reads each quantity as one mean per beat, timed at its end.
