@@ -1,9 +1,10 @@
-use core::num::NonZeroU64;
+use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::*;
 use ng_record::*;
 use ng_validate::*;
 
 const SECOND: u64 = 1_000_000_000;
+const HOUR: u64 = 3_600 * SECOND;
 const METHOD: &str = "a synthetic method";
 
 fn at(seconds: u64) -> SimTime {
@@ -197,4 +198,192 @@ fn the_checks_read_this_bodys_lens_from_admission() {
     let anchors = case.packet().expect("a packet").anchors();
     let late = ReadingChecks::new(case.body(), &bare, &set, &day(), anchors, &session);
     assert_eq!(late.err(), Some(ReadingCheckError::AfterAdmission));
+}
+
+const GAIN: ParameterKey = ParameterKey::new("xx.gain");
+const STORED: AnchorId = AnchorId::new("xx.stored");
+const GAUGED: AnchorId = AnchorId::new("xx.gauged");
+const QUARTER: u64 = HOUR / 4;
+const DELIVERED: f64 = 900.0;
+const STORED_WATER: f64 = 10.0;
+const GAUGE_MEAN: f64 = 0.5;
+/// The size admission gives a row whose scale the packet does not state.
+const UNSCALED: f64 = 1.0;
+
+fn measure<U>(value: f64) -> Measure<U> {
+    Measure::new(value).expect("finite")
+}
+
+struct Gauged {
+    body: CompiledBody,
+    stored: RowKind,
+    gauge: RowKind,
+}
+
+/// One vessel in the minutes band, so an instant anchor holds on its water, and a gauge that reads the inflow's
+/// drive times a gain.
+fn gauged() -> Result<Gauged, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let origin = Position::new(measure(0.0), measure(0.0), measure(0.0));
+    let site = map.site::<VesselSegment>("vessel", origin).id();
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.boundary::<Water>("in", BoundaryDirection::IntoBody, site, Space::Lumen)?;
+    schema.boundary::<Water>("out", BoundaryDirection::OutOfBody, site, Space::Lumen)?;
+    let body = assemble(schema, |mut body| {
+        let (mut laws, ports) = body.boundary()?.parts();
+        let class = RateClass::new(RateBand::Minutes, 60 * SECOND)?;
+        let gain = laws.parameter::<Dimensionless>(GAIN, Admissible::finite());
+        let gauge = laws.algebraic::<Rate<Water>>("gauge", Admissible::finite());
+        for boundary in ["in", "out"] {
+            let BoundaryRoute { route, drive } = ports.route::<Water>(boundary)?;
+            let flow = laws.kernel(|mut k| {
+                let value = k.read(&drive);
+                k.finish(value, laws.every_mode(), class)
+            });
+            laws.transfer(Transfer::new(&route, flow));
+            if boundary == "in" {
+                let reads = laws.kernel(|mut k| {
+                    let x = k.algebraic(&gauge);
+                    let input = k.read(&drive);
+                    let gain = k.parameter(&gain);
+                    let target = k.scale(input, gain);
+                    let residual = k.subtract(x, target);
+                    k.finish(residual, laws.every_mode(), class)
+                });
+                laws.residual(&gauge, reads);
+            }
+        }
+        body.add(laws.finish());
+        body.compile()
+    })?;
+    let gauge = RowKind::Algebraic(
+        LawName {
+            owner: "Boundary",
+            local: "gauge",
+        }
+        .into(),
+    );
+    let stored = RowKind::Amount {
+        site,
+        space: Space::Lumen,
+        species: Species::Water,
+    };
+    Ok(Gauged { body, stored, gauge })
+}
+
+fn anchored(gauged: &Gauged) -> ParameterPacket<SyntheticFixture> {
+    let cycle = Cycle::new(count(HOUR), NonZeroU32::new(4).expect("not zero")).expect("even");
+    let mut packet = ParameterPacket::periodic(cycle);
+    packet.within(admission_tolerance());
+    let stored = water(STORED_WATER);
+    packet.start(gauged.stored, stored, "synthetic").expect("once");
+    packet
+        .start(gauged.gauge, measure::<Rate<Water>>(1.0), "synthetic")
+        .expect("once");
+    let stored = Snapshot::new(
+        gauged.stored,
+        METHOD,
+        AnchorStatistic::Instant,
+        water(STORED_WATER),
+    );
+    packet
+        .anchor(Synthetic::new(STORED, stored, "synthetic"))
+        .expect("once");
+    let gauge = measure::<Rate<Water>>(GAUGE_MEAN);
+    let mean = Snapshot::new(gauged.gauge, METHOD, AnchorStatistic::CycleMean, gauge);
+    packet
+        .anchor(Synthetic::new(GAUGED, mean, "synthetic"))
+        .expect("once");
+    let guess = measure::<Dimensionless>(1.0);
+    packet
+        .calibrated(GAIN, Binding::Body, guess, GAUGED)
+        .expect("once");
+    packet
+}
+
+/// Water in over the cycle's first quarter and out over the whole cycle, so the vessel ends the cycle where it began
+/// and the gauge reads only the first quarter.
+fn first_cycle() -> BoundaryPort {
+    let delivery = |id: &[u8], boundary, ends| {
+        let delivered = WaterDelivery {
+            boundary,
+            amount: water(DELIVERED),
+            ends: SimTime::from_ns(ends),
+        };
+        let id = InputId::new(Digest::of_canonical(id));
+        BoundaryEvent::new(id, at(0), BoundaryInput::Water(delivered))
+    };
+    let events = vec![delivery(b"in", "in", QUARTER), delivery(b"out", "out", HOUR)];
+    BoundaryPort::new(events).expect("parsed")
+}
+
+fn assert_baseline_meets_anchor<U>(returns: &ReturnReport, anchor: AnchorId, stated: f64) {
+    let first = (returns.results().iter())
+        .find(|result| (result.anchor(), result.morning()) == (anchor, NonZeroU32::MIN))
+        .expect("morning 1 read");
+    let baseline = first.admission().expect("every value present");
+    let scale = admission_tolerance().at(stated, UNSCALED);
+    let defect = baseline.minus(Compensated::of(&measure::<U>(stated))).abs();
+    assert!(
+        defect.at_most(Compensated::of(&measure::<U>(scale))),
+        "{anchor:?}: {baseline:?} at admission against the packet's {stated}"
+    );
+}
+
+#[test]
+fn the_return_check_reads_each_anchor_at_admission_as_admission_met_it() {
+    let gauged = gauged().expect("a body");
+    let channels = vec![
+        ChannelSpec::new(METHOD, gauged.stored),
+        ChannelSpec::new(METHOD, gauged.gauge).averaged(count(4)),
+    ];
+    let lens = gauged.body.lens(channels, count(QUARTER)).expect("a lens");
+    let core = ReferenceIntegrator::new(60 * SECOND);
+    let store = MemoryStore::default();
+    let admitted = admit_solved(
+        &gauged.body,
+        anchored(&gauged),
+        first_cycle(),
+        &core,
+        &lens,
+        &store,
+    );
+    let mut session = admitted.expect("admitted").session;
+    let bare = BareLens::new(&gauged.body, &lens).expect("this body's lens");
+    let variations = vec![
+        WithinSubjectVariation::synthetic("xx.stored", gauged.stored, METHOD, water(1.0), "synthetic"),
+        WithinSubjectVariation::synthetic(
+            "xx.gauged",
+            gauged.gauge,
+            METHOD,
+            measure::<Rate<Water>>(1.0),
+            "synthetic",
+        ),
+    ];
+    let variations = variations
+        .into_iter()
+        .map(|variation| variation.expect("a variation"));
+    let set = HealthyRangeSet::synthetic(Vec::new(), variations.collect()).expect("a set");
+    let anchors = anchored(&gauged).anchors();
+    let mut checks =
+        ReadingChecks::new(&gauged.body, &bare, &set, &day(), anchors, &session).expect("the checks");
+    while session.record().accepted().time() <= SimTime::from_ns(24 * HOUR + HOUR) {
+        session = step(session);
+        checks.read(&session).expect("the next revision");
+    }
+    let (_, returns) = checks.finish();
+    let bound = gauged.body.bind(anchored(&gauged)).expect("bound");
+    assert_eq!(
+        returns.packet(),
+        bound.packet_hash(),
+        "the report names the packet the run bound"
+    );
+    assert_baseline_meets_anchor::<Water>(&returns, STORED, STORED_WATER);
+    assert_baseline_meets_anchor::<Rate<Water>>(&returns, GAUGED, GAUGE_MEAN);
+    assert_eq!(
+        returns.morning(NonZeroU32::MIN),
+        CheckVerdict::Pass,
+        "a variation of 1 allows each reading to move 2.77 from admission's: {:?}",
+        returns.results()
+    );
 }
