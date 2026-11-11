@@ -71,7 +71,7 @@ pub enum HemoglobinProduction {}
 pub enum HemoglobinDestruction {}
 pub enum SkinEvaporation {}
 pub enum DryHeatLoss {}
-pub enum EvaporativeHeat {}
+pub enum SkinEvaporativeHeat {}
 /// Heat leaving the conducting airway's own store with expired gas: warming the breath and its water's latent heat.
 pub enum AirwayHeat {}
 pub enum Urine {}
@@ -135,7 +135,7 @@ processes! {
     Sweat<Sodium> = "sweat sodium": Metabolism, Sodium, OutOfBody;
     Sweat<Chloride> = "sweat chloride": Metabolism, Chloride, OutOfBody;
     DryHeatLoss = "dry heat loss": Metabolism, Energy, OutOfBody;
-    EvaporativeHeat = "evaporative heat": Metabolism, Energy, OutOfBody;
+    SkinEvaporativeHeat = "skin evaporative heat": Metabolism, Energy, OutOfBody;
     Inspired<Oxygen> = "inspired oxygen": Respiratory, Oxygen, IntoBody;
     Inspired<CarbonDioxide> = "inspired carbon dioxide": Respiratory, CarbonDioxide, IntoBody;
     Inspired<NitrogenGas> = "inspired nitrogen gas": Respiratory, NitrogenGas, IntoBody;
