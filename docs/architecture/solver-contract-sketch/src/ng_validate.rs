@@ -523,6 +523,10 @@ impl ReturnReport {
     pub fn morning(&self, _morning: NonZeroU32) -> CheckVerdict {
         todo!()
     }
+    /// The packet whose anchors the check read.
+    pub fn packet(&self) -> PacketHash {
+        todo!()
+    }
 }
 /// What a score spans from the 06:55 admission, how many times the arena times that span, and the
 /// error scales and minimum interval every core it scores declares.

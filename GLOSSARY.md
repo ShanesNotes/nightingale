@@ -621,7 +621,7 @@ The check that the patient meets the anchors again, within the change their with
 _Avoid_: re-anchoring, daily reset
 
 **Activity**:
-What the patient is doing that a source shows shifts a reading, such as asleep or seated after a meal. A run's day is a series of activities, each from its start until the next, and a change is the instant one gives way to the next. The healthy-range check matches each window to the activity it lies in, and a window across a change takes the change's own range (record 0004).
+What the patient is doing that a source shows shifts a reading, such as asleep or seated after a meal. A run's day is a series of activities, each from its start until the next, and a change is the instant one gives way to the next. The healthy-range check matches each window to the activity it lies in, and a window across a change, or in the time the change's shift lasts, takes the change's own range (record 0004).
 _Avoid_: state, phase, mode
 
 **Bare lens**:

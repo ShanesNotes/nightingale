@@ -342,6 +342,10 @@ impl Anchors {
     pub fn iter(&self) -> core::slice::Iter<'_, AnchorReading> {
         todo!()
     }
+    /// The hash of the packet these anchors came from, the one `CompiledBody::bind` gives.
+    pub fn packet(&self) -> PacketHash {
+        todo!()
+    }
 }
 impl ParameterPacket<SyntheticFixture> {
     /// Fixture-only: a dimensioned synthetic design value with no anchor and no citation.
