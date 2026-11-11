@@ -698,7 +698,7 @@ _Avoid_: chart (for a statechart)
 The atlas's map of how systems affect each other: shared substrates and 38 direct couplings. Not the map of sites.
 
 **Census**:
-How the coupling map's 38 arrows stand in one assembly, the slice or the whole body, counted by the compiler. In the slice an arrow is live, an input, a sink, an anatomy relation, outside or unresolved. In the whole body it is an anatomy relation or carries fields, each wired or held, and it is live when it wires one and held when it holds every one.
+How the coupling map's 38 arrows stand in one assembly, the slice or the whole body, counted by the compiler. In the slice an arrow is live, an input, a sink, an anatomy relation, outside or unresolved. In the whole body it is an anatomy relation or names fields, each wired or held, and only a wired field is carried. It is live when it wires one and held when it holds every one, and every arrow is mapped, since a held field's home is its holder.
 
 ## Systems
 

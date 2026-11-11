@@ -17,8 +17,16 @@ MAPPED = {"live", "input", "sink", "relation"}
 SLICE_KINDS = {"live", "input", "sink"}
 SLICE_REASONED = {"relation", "outside", "unresolved"}
 SLICE_COUNTS = {"rows": 38, "mapped": 27, "listed unmapped": 11, "incident mapped": 27, "incident unmapped": 1}
-BODY_COUNTS = {"rows": 38, "wire a field": 18, "relations": 5, "hold every field": 15, "wire and hold": 6,
+BODY_COUNTS = {"rows": 38, "mapped": 38, "unmapped": 0, "wire a field": 18, "relations": 5, "hold every field": 15, "wire and hold": 6,
                "wired fields": 21, "held fields": 29}
+SLICE_LINES = {
+    "live": [77, 80, 97],
+    "input": [83, 90, 91, 99, 100, 102, 105, 106, 108, 114],
+    "sink": [78, 79, 81, 86, 87, 88, 89, 98, 110, 112, 113],
+    "relation": [82, 96, 101],
+    "outside": [84, 85, 92, 93, 94, 95, 103, 104, 107, 109],
+    "unresolved": [111],
+}
 RELATIONS = [82, 96, 99, 101, 104]
 WIRE_AND_HOLD = [79, 87, 89, 90, 95, 114]
 
@@ -199,6 +207,10 @@ for arrow, r in zip(arrows, rows):
         failures.append(f"map {arrow} != catalog {(r['line'], r['from'], r['to'], r['label'])}")
 if len({r["line"] for r in rows}) != len(rows):
     failures.append("duplicate catalog line")
+for r in rows:
+    reasons = [r["slice_reason"], r["relation"], *(reason for *_, reason in r["held"])]
+    if "" in reasons:
+        failures.append(f"line {r['line']}: a reason is empty")
 
 incident = [r for r in rows if r["from"] in SLICE or r["to"] in SLICE]
 slice_census = {
@@ -210,6 +222,8 @@ slice_census = {
 }
 body_census = {
     "rows": len(rows),
+    "mapped": sum(r["relation"] is not None or bool(r["wired"]) or bool(r["held"]) for r in rows),
+    "unmapped": sum(r["relation"] is None and not r["wired"] and not r["held"] for r in rows),
     "wire a field": sum(bool(r["wired"]) for r in rows),
     "relations": sum(r["relation"] is not None for r in rows),
     "hold every field": sum(bool(r["held"]) and not r["wired"] for r in rows),
@@ -221,6 +235,10 @@ for name, got, want in (("slice", slice_census, SLICE_COUNTS), ("whole body", bo
     for key, count in want.items():
         if got[key] != count:
             failures.append(f"{name} census: {key} = {got[key]}, not {count}")
+for kind, want in SLICE_LINES.items():
+    got = [r["line"] for r in rows if r["slice"] == kind]
+    if got != want:
+        failures.append(f"slice census: {kind} are lines {got}, not {want}")
 for name, got, want in (
     ("relations", [r["line"] for r in rows if r["relation"] is not None], RELATIONS),
     ("wire and hold", [r["line"] for r in rows if r["wired"] and r["held"]], WIRE_AND_HOLD),
@@ -231,10 +249,10 @@ for name, got, want in (
 print(f"map source: {MAP} (Direct couplings, lines {arrows[0][0]}-{arrows[-1][0]})")
 print(f"map edges = {len(arrows)}; catalog rows = {len(rows)}")
 print("slice census: " + "; ".join(f"{k} = {v}" for k, v in slice_census.items()))
-for kind in ("live", "input", "sink", "relation", "outside", "unresolved"):
+for kind in SLICE_LINES:
     print(f"  {kind:<10} {[r['line'] for r in rows if r['slice'] == kind]}")
 print("whole body census: " + "; ".join(f"{k} = {v}" for k, v in body_census.items()))
-print("parse, line, endpoints and label equality, order, uniqueness and both censuses:",
+print("parse, line, endpoints and label equality, order, uniqueness, reasons and both censuses:",
       "PASS" if not failures else "FAIL")
 for failure in failures:
     print("  " + failure)

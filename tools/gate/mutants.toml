@@ -1051,3 +1051,10 @@ path = "crates/ng-contract/src/catalog.rs"
 old = '''Carries::Fields { wired, held } => !wired.is_empty() || !held.is_empty(),'''
 new = '''Carries::Fields { .. } => true,'''
 test = "-p ng-contract --test census the_census_refuses_an_arrow_that_carries_nothing"
+
+[[mutant]]
+name = "held-reason-unchecked"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''if held[i].reason.is_empty() {'''
+new = '''if held[i].name.is_empty() {'''
+test = "-p ng-contract --test census the_census_refuses_an_empty_reason"

@@ -51,6 +51,7 @@ impl Disposition {
                 | Disposition::ExternalInput
                 | Disposition::ExternalSink
                 | Disposition::AnatomyRelation { .. }
+                | Disposition::Held
         )
     }
 }
@@ -155,6 +156,27 @@ impl Arrow {
             i += 1;
         }
         true
+    }
+    pub const fn every_reason_given(&self) -> bool {
+        let slice = match self.slice {
+            Disposition::AnatomyRelation { reason }
+            | Disposition::OutsideSlice { reason }
+            | Disposition::Unresolved { reason } => !reason.is_empty(),
+            Disposition::Live | Disposition::ExternalInput | Disposition::ExternalSink | Disposition::Held => true,
+        };
+        let relation = match self.carries {
+            Carries::Relation { reason } => !reason.is_empty(),
+            Carries::Fields { .. } => true,
+        };
+        let held = self.carries.held();
+        let mut i = 0;
+        while i < held.len() {
+            if held[i].reason.is_empty() {
+                return false;
+            }
+            i += 1;
+        }
+        slice && relation
     }
     pub const fn one_holder_per_field(&self) -> bool {
         let (wired, held) = (self.carries.wired(), self.carries.held());
@@ -261,13 +283,12 @@ pub struct Count {
 }
 impl Count {
     pub const fn mapped(&self) -> usize {
-        self.live + self.input + self.sink + self.relation
+        self.live + self.input + self.sink + self.relation + self.held
     }
     pub const fn unmapped(&self) -> usize {
-        self.held + self.outside + self.unresolved
+        self.outside + self.unresolved
     }
 }
-
 
 pub const MAP_EDGES: usize = 38;
 const FIRST_WIRING_TICKET: u8 = 6;
@@ -439,6 +460,7 @@ const _: () = assert!(SLICE.mapped() + SLICE.unmapped() == MAP_EDGES);
 const _: () = assert!(SLICE.mapped() == 27 && SLICE.unmapped() == 11);
 const _: () = assert!(SLICE.incident_mapped == 27 && SLICE.incident_unmapped == 1);
 const _: () = assert!(WHOLE_BODY.live == 18 && WHOLE_BODY.relation == 5 && WHOLE_BODY.held == 15);
+const _: () = assert!(WHOLE_BODY.mapped() == 38 && WHOLE_BODY.unmapped() == 0);
 const FIELDS: FieldCount = field_count();
 const _: () = assert!(FIELDS.wired == 21 && FIELDS.held == 29 && FIELDS.wire_and_hold == 6);
 const _: () = {
@@ -451,6 +473,7 @@ const _: () = {
         assert!(arrow.held_at_its_ends(), "a held field's holder is neither end of its arrow");
         assert!(arrow.wired_by_body_tickets(), "a wired field names no body ticket from 06 to 25");
         assert!(arrow.one_holder_per_field(), "a field has a second holder");
+        assert!(arrow.every_reason_given(), "a reason is empty");
         i += 1;
     }
 };
@@ -468,6 +491,29 @@ const _: () = {
         assert!(!carries.wired().is_empty() && !carries.held().is_empty());
         i += 1;
     }
+};
+
+macro_rules! slice_lines {
+    ($kind:pat, $lines:expr) => {{
+        let lines: &[usize] = &$lines;
+        let (mut i, mut n) = (0, 0);
+        while i < MAP_EDGES {
+            if matches!(ARROWS[i].slice, $kind) {
+                assert!(n < lines.len() && lines[n] == 77 + i);
+                n += 1;
+            }
+            i += 1;
+        }
+        assert!(n == lines.len());
+    }};
+}
+const _: () = {
+    slice_lines!(Disposition::Live, [77, 80, 97]);
+    slice_lines!(Disposition::ExternalInput, [83, 90, 91, 99, 100, 102, 105, 106, 108, 114]);
+    slice_lines!(Disposition::ExternalSink, [78, 79, 81, 86, 87, 88, 89, 98, 110, 112, 113]);
+    slice_lines!(Disposition::AnatomyRelation { .. }, [82, 96, 101]);
+    slice_lines!(Disposition::OutsideSlice { .. }, [84, 85, 92, 93, 94, 95, 103, 104, 107, 109]);
+    slice_lines!(Disposition::Unresolved { .. }, [111]);
 };
 
 struct FieldCount {

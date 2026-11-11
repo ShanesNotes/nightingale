@@ -119,3 +119,36 @@ fn the_census_refuses_an_arrow_that_carries_nothing() {
         "an arrow with no field and no relation is not accounted for"
     );
 }
+
+#[test]
+fn the_census_refuses_an_empty_reason() {
+    const REASONED: Arrow = wall_stress(Carries::Fields {
+        wired: &[],
+        held: &[held("ventricular_wall_stress", "CV")],
+    });
+    const HELD_WITHOUT_ONE: Arrow = wall_stress(Carries::Fields {
+        wired: &[],
+        held: &[HeldField {
+            reason: "",
+            ..held("ventricular_wall_stress", "CV")
+        }],
+    });
+    const RELATION_WITHOUT_ONE: Arrow = wall_stress(Carries::Relation { reason: "" });
+    const SLICE_WITHOUT_ONE: Arrow = Arrow {
+        slice: Disposition::OutsideSlice { reason: "" },
+        ..REASONED
+    };
+    assert!(REASONED.every_reason_given());
+    assert!(
+        !HELD_WITHOUT_ONE.every_reason_given(),
+        "a held field names no reason"
+    );
+    assert!(
+        !RELATION_WITHOUT_ONE.every_reason_given(),
+        "an anatomy relation names no reason"
+    );
+    assert!(
+        !SLICE_WITHOUT_ONE.every_reason_given(),
+        "a slice disposition names no reason"
+    );
+}
