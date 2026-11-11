@@ -254,6 +254,34 @@ impl Family {
                 | Family::Tubular
         )
     }
+    pub(crate) fn crossing(self) -> Option<(Crossed, Species)> {
+        match self {
+            Family::Exchange(species) => Some((Crossed::Capillary, species)),
+            Family::Across(wall, _, species) => Some((Crossed::Wall(wall), species)),
+            Family::Circulation
+            | Family::Valves
+            | Family::Sinusoids
+            | Family::Starling
+            | Family::Lymph
+            | Family::Filtration
+            | Family::Tubular
+            | Family::Reclaim(_)
+            | Family::Release(_)
+            | Family::Reuptake(_)
+            | Family::Binding(..)
+            | Family::StrokeWork
+            | Family::GravityWork
+            | Family::WallWork
+            | Family::Dissipation
+            | Family::Along(..)
+            | Family::Heat(_) => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Crossed {
+    Capillary,
+    Wall(Wall),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum End {
