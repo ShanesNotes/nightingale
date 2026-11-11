@@ -55,6 +55,10 @@ pub enum ReadingCheckError {
     RepeatedActivity {
         at: SimTime,
     },
+    /// A day whose first span starts after admission, so no activity holds the values read before it.
+    DayAfterAdmission {
+        at: SimTime,
+    },
     /// A change of activity between two grid instants, which would split one value between two activities.
     ChangeOffGrid {
         at: SimTime,

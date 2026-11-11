@@ -352,6 +352,11 @@ impl RangeFold {
         admission: SimTime,
     ) -> Result<Self, ReadingCheckError> {
         let day = day.spans();
+        if let Some(&(at, _)) = day.first()
+            && at > admission
+        {
+            return Err(ReadingCheckError::DayAfterAdmission { at });
+        }
         let changes = day.iter().skip(1).map(|&(at, _)| at);
         if let Some(at) = changes
             .clone()

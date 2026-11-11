@@ -762,3 +762,27 @@ fn a_day_refuses_no_span_a_start_out_of_order_and_one_activity_twice_running() {
     assert_ne!(day(&[(0, "awake"), (4, "seated")]).digest(), base, "an activity");
     assert_ne!(day(&[(0, "awake")]).digest(), base, "a span");
 }
+
+#[test]
+fn a_day_that_starts_after_admission_is_refused() {
+    let asleep = Scope::During(Activity::new("asleep"));
+    let set = set(
+        vec![
+            range("xx.awake", Scope::Every, sliding(SECOND), 0.0, 100.0),
+            range("xx.night", asleep, Averaging::WholePeriod, 0.0, 10.0),
+        ],
+        Vec::new(),
+    );
+    let readings = [sampled(reading())];
+    let night = day(&[(10 * SECOND, "asleep"), (20 * SECOND, "awake")]);
+    let refused = Some(ReadingCheckError::DayAfterAdmission { at: at(10 * SECOND) });
+    assert_eq!(
+        RangeFold::new(&readings, SECOND, &set, &night, at(0)).err(),
+        refused,
+        "no activity holds the values from admission to 10 s"
+    );
+    assert!(
+        RangeFold::new(&readings, SECOND, &set, &night, at(10 * SECOND)).is_ok(),
+        "a day may start at admission"
+    );
+}
