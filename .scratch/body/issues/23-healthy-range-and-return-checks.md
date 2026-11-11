@@ -5,7 +5,7 @@ Status: resolved
 Claimed by: 23-range-return-checks
 Blocked by: none
 
-**What to build:** The two checks of record 0004 that no code holds yet. The healthy-range check tests each reading in the lens against its healthy range, over every sliding window of its study's length, for the activity that window lies in. The return check tests each anchor 24 and 48 hours after admission against the change its within-subject variation allows. Both run in validation on a synthetic healthy-range set, read a run through the lens with no observation error, and name the run and the set they read (record 0005). The [foundation map](../../foundation/map.md) lists them as unticketed.
+**What to build:** The two checks of record 0004 that no code holds yet. The healthy-range check tests each reading in the lens against its healthy range, over every sliding window of its study's length, for the activity that window lies in. The return check tests each anchor 24 and 48 hours after admission against the change its within-subject variation allows. Both run in validation on a synthetic healthy-range set, read a run through the lens with no observation error, and name the run and the set they read (record 0005). The [foundation map](../../foundation/map.md) listed them as unticketed.
 
 - [x] A synthetic run built to leave its range for one window fails the healthy-range check, and the failure names the reading and the window
 - [x] A run that stays in range but ends a day away from its anchor fails the return check and passes the other. A run that returns to its anchor but leaves its range between fails the healthy-range check and passes the other
@@ -33,6 +33,6 @@ Model defaults, each a reading of record 0004 that admits two:
 
 Handoffs:
 
-- **Ticket 24 and the milestone.** A cycle anchor's morning window runs one cycle past 24 h and 48 h, so a run that must show the 48 h return runs one cycle past 48 h. Until the packet's day can give the day's activities ([ticket 05](05-the-days-inputs.md)), the caller states them. A sliding window holds one value per grid period, so a 24 h range on a 10 ms grid holds 8.64 million values per reading.
+- **Ticket 24 and the milestone.** A cycle anchor's morning window runs one cycle past 24 h and 48 h, so a run that must show the 48 h return runs one cycle past 48 h. The packet's day ([ticket 05](05-the-days-inputs.md)) holds sleep and posture, but no code reads the day's activities from it, so the caller states them. A sliding window holds one value per grid period, so a 24 h range on a 10 ms grid holds 8.64 million values per reading.
 - **Binding the anchors to the run.** The return report names the packet whose anchors it read. Refusing another packet's anchors needs the run to keep its packet's own hash, because the run's identity seals only the hash admission closes. [Native-contract 37](../../native-contract/issues/37-the-return-check-reads-its-runs-own-anchors.md) does that before ticket 24.
 - **The reviewed kind.** Its I16 refusals belong to foundation 07's inference-records item and to [research 10](../../research/issues/10-reviewed-packet-builder.md). Matching a range to the patient's sex and age waits for a packet that states them.
