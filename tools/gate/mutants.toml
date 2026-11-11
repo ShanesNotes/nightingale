@@ -566,6 +566,27 @@ new = ''')'''
 test = "-p ng-contract --test scopes disjoint_sets_of_one_wall_and_species_take_two_cards"
 
 [[mutant]]
+name = "circulation-leaves-the-liver-bed"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|&pair| !anatomy.is_valve(pair) && !sinusoidal(anatomy, pair))'''
+new = '''.filter(|&pair| !anatomy.is_valve(pair))'''
+test = "-p ng-contract --test sinusoids every_plain_vascular_edge_is_reached_by_circulation_or_the_sinusoids_and_never_both"
+
+[[mutant]]
+name = "sinusoids-reach-the-liver-bed"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|&pair| !anatomy.is_valve(pair) && sinusoidal(anatomy, pair))'''
+new = '''.filter(|&pair| anatomy.is_valve(pair) && sinusoidal(anatomy, pair))'''
+test = "-p ng-contract --test sinusoids every_plain_vascular_edge_is_reached_by_circulation_or_the_sinusoids_and_never_both"
+
+[[mutant]]
+name = "edge-flow-at-the-liver-bed"
+path = "crates/ng-contract/src/compile.rs"
+old = '''(Family::Sinusoids, crate::Hepatic::CARD)'''
+new = '''(Family::Circulation, law.owner)'''
+test = "-p ng-contract --test sinusoids the_flow_at_a_liver_bed_edge_is_the_sinusoids_whoever_reads_it"
+
+[[mutant]]
 name = "cargo-held-at-both-ends"
 path = "crates/ng-contract/tests/map_reads.rs"
 old = '''        cargo(false, false).err(),'''

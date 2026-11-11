@@ -301,6 +301,9 @@ Every transfer of one kind the map implies: one per site of a class, such as pla
 **Cargo class**:
 The species a card's wall or passage port may move, closed in the contract, such as the fuels the metabolism card moves into cells. A species outside the class does not compile.
 
+**Sinusoids**:
+The liver bed's own edges: every plain vascular edge with an end at a bed that serves the liver. The hepatic card's law holds their flow, and circulation reaches every other plain vascular edge.
+
 **Passage**:
 A route along a network, one species at a time: the airway's gas, the gut's transit, absorption into a bed, fat into the lymph, shedding from the gut's cells and secretion from the tubule's cells.
 

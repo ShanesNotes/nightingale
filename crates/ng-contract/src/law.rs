@@ -200,6 +200,7 @@ impl HeatRoute {
 pub(crate) enum Family {
     Circulation,
     Valves,
+    Sinusoids,
     Starling,
     Lymph,
     Filtration,
@@ -222,6 +223,7 @@ impl Family {
         match self {
             Family::Circulation => "circulation",
             Family::Valves => "valves",
+            Family::Sinusoids => "sinusoids",
             Family::Starling => "starling",
             Family::Lymph => "lymph",
             Family::Filtration => "filtration",
@@ -245,6 +247,7 @@ impl Family {
             self,
             Family::Circulation
                 | Family::Valves
+                | Family::Sinusoids
                 | Family::Starling
                 | Family::Lymph
                 | Family::Filtration

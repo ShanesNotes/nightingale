@@ -1,8 +1,9 @@
-use super::process_route;
+use super::{BLOOD_PRESSURE, process_route};
 use crate::law::{Brand, Family};
 use crate::{
-    AdmissionError, Beds, BoundaryProcess, BoundaryRoute, CellFuel, FragmentBuilder, Hepatic, Liver,
-    SiteRoute, SiteSet, Wall,
+    AdmissionError, Beds, Blood, BoundaryProcess, BoundaryRoute, Cardiovascular, CellFuel, EdgeRoute,
+    FragmentBuilder, Hepatic, LawName, Liver, Owner, PerSite, Pressure, ReadPort, SiteRoute, SiteSet, Wall,
+    Water,
 };
 use core::marker::PhantomData;
 
@@ -49,6 +50,18 @@ impl<'b> HepaticPorts<'b> {
         let family = Family::Across(Wall::Cell, <Beds<Liver> as SiteSet>::SET, Q::SPECIES);
         laws.request(family);
         SiteRoute::requested(family)
+    }
+    /// Every plain vascular edge with an end at a liver bed: the liver bed's own edges, which circulation leaves out.
+    pub fn sinusoids(&self, laws: &mut FragmentBuilder<'b, Hepatic>) -> EdgeRoute<'b, Hepatic, Water> {
+        laws.request(Family::Sinusoids);
+        EdgeRoute::requested(Family::Sinusoids)
+    }
+    /// The pressure of every blood site, which the cardiovascular card defines.
+    pub fn blood_pressure(&self) -> ReadPort<'b, Hepatic, PerSite<Blood, Pressure>> {
+        ReadPort::field(LawName {
+            owner: Cardiovascular::CARD,
+            local: BLOOD_PRESSURE,
+        })
     }
     pub fn boundary<P: BoundaryProcess<Card = Hepatic>>(
         &self,

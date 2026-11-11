@@ -881,6 +881,11 @@ impl Reaches {
         Species::WATER_BORNE.into_iter().filter(apart).collect()
     }
 }
+fn sinusoidal(anatomy: &Anatomy, (from, to): (SiteId, SiteId)) -> bool {
+    let liver = |site| anatomy.tissue(site) == Some(crate::Tissue::Liver);
+    liver(from) || liver(to)
+}
+
 fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
     let anatomy = &schema.anatomy;
     let edge = |(from, to): (SiteId, SiteId), ends: [PoolRef; 2]| Reach {
@@ -902,11 +907,15 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
     let heat = |site| species_at(site, Space::Thermal, Species::Energy);
     match family {
         Family::Circulation => (anatomy.vascular())
-            .filter(|&pair| !anatomy.is_valve(pair))
+            .filter(|&pair| !anatomy.is_valve(pair) && !sinusoidal(anatomy, pair))
             .map(blood)
             .collect(),
         Family::Valves => (anatomy.vascular())
             .filter(|&pair| anatomy.is_valve(pair))
+            .map(blood)
+            .collect(),
+        Family::Sinusoids => (anatomy.vascular())
+            .filter(|&pair| !anatomy.is_valve(pair) && sinusoidal(anatomy, pair))
             .map(blood)
             .collect(),
         Family::Starling => (anatomy.in_set(Sites::Class(Class::CapillaryBed)).into_iter())
@@ -1868,13 +1877,15 @@ fn addresses(
                 Address::Height(anatomy.axial(site).to_bits())
             }
             (Input::EdgeFlow, Context::Edge { from, to }) => {
-                let family = if anatomy.is_valve((from, to)) {
-                    Family::Valves
+                let (family, owner) = if anatomy.is_valve((from, to)) {
+                    (Family::Valves, law.owner)
+                } else if sinusoidal(anatomy, (from, to)) {
+                    (Family::Sinusoids, crate::Hepatic::CARD)
                 } else {
-                    Family::Circulation
+                    (Family::Circulation, law.owner)
                 };
                 let flow = LawName {
-                    owner: law.owner,
+                    owner,
                     local: family.name(),
                 };
                 unknown(

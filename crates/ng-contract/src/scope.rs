@@ -561,8 +561,8 @@ pub struct CardiovascularPorts<'b> {
     brand: Brand<'b>,
 }
 impl<'b> CardiovascularPorts<'b> {
-    /// Records a law owed for every plain vascular edge before returning the route, so dropping the route
-    /// never drops what the fragment owes.
+    /// Records a law owed for every plain vascular edge but the liver bed's own before returning the route, so
+    /// dropping the route never drops what the fragment owes.
     pub fn circulation(
         &self,
         laws: &mut FragmentBuilder<'b, Cardiovascular>,
