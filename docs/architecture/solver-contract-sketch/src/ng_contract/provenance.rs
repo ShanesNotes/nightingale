@@ -320,6 +320,28 @@ impl<K: PacketKind> ParameterPacket<K> {
     pub fn hash(&self) -> PacketHash {
         todo!()
     }
+    /// What admission reads of each anchor, in id order, and never its value.
+    pub fn anchors(&self) -> Anchors {
+        todo!()
+    }
+}
+/// One anchor as admission reads it: its id, row, method, statistic and window, with no value. The return check
+/// compares each later morning with the run's own admission morning by it.
+pub struct AnchorReading {
+    _id: AnchorId,
+    _row: RowKind,
+    _method: &'static str,
+    _statistic: AnchorStatistic,
+    _window_ns: u64,
+}
+/// Every anchor of one packet. Nothing builds one or drops an entry, so a check that takes it reads them all.
+pub struct Anchors {
+    _readings: Vec<AnchorReading>,
+}
+impl Anchors {
+    pub fn iter(&self) -> core::slice::Iter<'_, AnchorReading> {
+        todo!()
+    }
 }
 impl ParameterPacket<SyntheticFixture> {
     /// Fixture-only: a dimensioned synthetic design value with no anchor and no citation.
@@ -330,6 +352,81 @@ impl ParameterPacket<SyntheticFixture> {
         _unit: Unit<U>,
         _note: &'static str,
     ) -> Result<(), AdmissionError> {
+        todo!()
+    }
+}
+/// What the patient is doing that a source shows shifts a reading, such as asleep.
+#[derive(Clone, Copy)]
+pub struct Activity {
+    _name: &'static str,
+}
+impl Activity {
+    pub const fn new(_name: &'static str) -> Self {
+        Self { _name }
+    }
+}
+/// The activities a healthy range covers: every one, one, or a change from one to the next.
+pub enum Scope {
+    Every,
+    During(Activity),
+    Change { from: Activity, to: Activity },
+}
+/// How a range's study averaged its reading: a sliding window's length, or the whole period of one activity.
+pub enum Averaging {
+    Sliding(NonZeroU64),
+    WholePeriod,
+}
+/// The central 95% of healthy adults for one reading, a row by a method, with limits in the row's dimension.
+pub struct HealthyRange<K: PacketKind> {
+    _id: &'static str,
+    _row: RowKind,
+    _method: &'static str,
+    _scope: Scope,
+    _averaging: Averaging,
+    _low: Compensated,
+    _high: Compensated,
+    _trace: K::Trace,
+}
+impl HealthyRange<SyntheticFixture> {
+    /// Refuses a high limit below the low one, and a whole period not scoped to one activity.
+    pub fn synthetic<U>(_id: &'static str, _row: RowKind, _method: &'static str, _scope: Scope,
+        _averaging: Averaging, _low: Measure<U>, _high: Measure<U>, _note: &'static str)
+        -> Result<Self, AdmissionError> {
+        todo!()
+    }
+}
+/// How far one healthy adult's reading moves from one day to the next, as an SD in the reading's unit.
+pub struct WithinSubjectVariation<K: PacketKind> {
+    _id: &'static str,
+    _row: RowKind,
+    _method: &'static str,
+    _sd: Compensated,
+    _trace: K::Trace,
+}
+impl WithinSubjectVariation<SyntheticFixture> {
+    /// Refuses a negative variation.
+    pub fn synthetic<U>(_id: &'static str, _row: RowKind, _method: &'static str, _sd: Measure<U>,
+        _note: &'static str) -> Result<Self, AdmissionError> {
+        todo!()
+    }
+}
+/// Every healthy range and within-subject variation, with its own digest. No law reads it and nothing that
+/// builds a run's identity takes it (record 0005). Only the synthetic kind can be built until the reviewed kind
+/// has its refusals (I16).
+pub struct HealthyRangeSet<K: PacketKind> {
+    _ranges: Vec<HealthyRange<K>>,
+    _variations: Vec<WithinSubjectVariation<K>>,
+    _digest: Digest,
+}
+impl HealthyRangeSet<SyntheticFixture> {
+    /// Refuses a repeated id, two ranges of one reading, scope and averaging, and two variations of one reading.
+    pub fn synthetic(_ranges: Vec<HealthyRange<SyntheticFixture>>,
+        _variations: Vec<WithinSubjectVariation<SyntheticFixture>>) -> Result<Self, AdmissionError> {
+        todo!()
+    }
+}
+impl<K: PacketKind> HealthyRangeSet<K> {
+    pub fn digest(&self) -> Digest {
         todo!()
     }
 }

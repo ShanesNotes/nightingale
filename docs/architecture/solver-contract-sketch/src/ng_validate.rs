@@ -6,7 +6,8 @@
 use core::num::{NonZeroU32, NonZeroU64};
 use crate::ng_contract::*;
 use crate::ng_record::{
-    CheckpointError, ConservationView, FaultReport, HistorySeal, HistoryStore, RecordDigests, Running, Session,
+    CheckpointError, ConservationView, FaultReport, HistorySeal, HistoryStore, ObservationRefusal, RecordDigests,
+    Running, Session,
 };
 
 /// One combination's limits. `absolute + relative * gross exchange in the window` bounds closure, so
@@ -441,6 +442,87 @@ impl ArenaScore {
 /// Every row of the day table, checked on one run and its counterfactuals.
 pub struct DayReport {
     _run: Digest,
+}
+/// Which activity each instant of a run lies in, from admission on: each span from its start until the next.
+pub struct DayActivities {
+    _spans: Vec<(SimTime, Activity)>,
+}
+impl DayActivities {
+    /// Refuses no span, starts out of order and one activity twice running.
+    pub fn new(_spans: Vec<(SimTime, Activity)>) -> Result<Self, ReadingCheckError> {
+        todo!()
+    }
+}
+/// A lens's readings with no window, delay or error: one channel for each row and method of the lens and each
+/// kind of mean.
+pub struct BareLens {
+    _lens: ObservationLens,
+    _learner: Digest,
+}
+impl BareLens {
+    pub fn new(_body: &CompiledBody, _lens: &ObservationLens) -> Result<Self, ReadingCheckError> {
+        todo!()
+    }
+}
+/// The healthy-range check and the return check as one fold over a session from admission (record 0004).
+pub struct ReadingChecks<'b> {
+    _lens: &'b BareLens,
+}
+impl<'b> ReadingChecks<'b> {
+    /// Reads the admission revision. It takes every anchor of the packet, so none can be left out.
+    pub fn new<K: PacketKind, S>(_body: &CompiledBody, _bare: &'b BareLens, _set: &HealthyRangeSet<K>,
+        _day: &DayActivities, _anchors: Anchors, _admitted: &Session<'_, S>) -> Result<Self, ReadingCheckError> {
+        todo!()
+    }
+    /// Reads the next accepted revision; one that does not follow the last read is refused.
+    pub fn read<S>(&mut self, _session: &Session<'_, S>) -> Result<(), ObservationRefusal> {
+        todo!()
+    }
+    pub fn finish(self) -> (RangeReport, ReturnReport) {
+        todo!()
+    }
+}
+/// Fail when a window or morning failed, else Blocked when a coverage gap is named, else Pass.
+pub enum CheckVerdict {
+    Pass,
+    Fail,
+    Blocked,
+}
+pub enum ReadingCheckError {
+    OtherBody,
+    AfterAdmission,
+    Admission(AdmissionError),
+}
+/// Names the run's identity, the last seal read, the set, the lens and the day, so a corrected set gives a new
+/// result for the same run.
+pub struct RangeReport {
+    _run: Digest,
+    _seal: Digest,
+    _set: Digest,
+    _lens: Digest,
+    _day: Digest,
+}
+impl RangeReport {
+    pub fn verdict(&self) -> CheckVerdict {
+        todo!()
+    }
+}
+/// Names the run, the last seal read, the set and the lens; each anchor read at admission and 24 and 48 hours
+/// later, allowed 1.96 x sqrt(2) times its within-subject variation.
+pub struct ReturnReport {
+    _run: Digest,
+    _seal: Digest,
+    _set: Digest,
+    _lens: Digest,
+}
+impl ReturnReport {
+    pub fn verdict(&self) -> CheckVerdict {
+        todo!()
+    }
+    /// The verdict over one later morning alone.
+    pub fn morning(&self, _morning: NonZeroU32) -> CheckVerdict {
+        todo!()
+    }
 }
 /// What a score spans from the 06:55 admission, how many times the arena times that span, and the
 /// error scales and minimum interval every core it scores declares.
