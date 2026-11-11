@@ -165,7 +165,7 @@ struct Held {
 pub(crate) struct ReturnFold {
     period_ns: u64,
     held: Vec<Held>,
-    readings: Vec<Vec<usize>>,
+    anchors_by_reading: Vec<Vec<usize>>,
     gaps: Vec<ReturnGap>,
 }
 impl ReturnFold {
@@ -184,7 +184,7 @@ impl ReturnFold {
         if plans.is_empty() {
             gaps.push(ReturnGap::NoAnchors);
         }
-        let mut by_reading = vec![Vec::new(); readings.len()];
+        let mut anchors_by_reading = vec![Vec::new(); readings.len()];
         for plan in plans {
             let anchor = plan.anchor;
             let taken = match plan.statistic {
@@ -219,7 +219,7 @@ impl ReturnFold {
                 seen: 0,
                 absent: false,
             });
-            by_reading[reading].push(held.len());
+            anchors_by_reading[reading].push(held.len());
             held.push(Held {
                 anchor,
                 first_ns,
@@ -231,7 +231,7 @@ impl ReturnFold {
         Ok(Self {
             period_ns,
             held,
-            readings: by_reading,
+            anchors_by_reading,
             gaps,
         })
     }
@@ -239,10 +239,10 @@ impl ReturnFold {
         let Self {
             period_ns,
             held,
-            readings,
+            anchors_by_reading,
             ..
         } = self;
-        for &place in readings.get(reading).into_iter().flatten() {
+        for &place in anchors_by_reading.get(reading).into_iter().flatten() {
             let held = &mut held[place];
             for window in &mut held.windows {
                 let first = window.at.nanoseconds().saturating_add(held.first_ns);
