@@ -2,7 +2,7 @@
 
 Type: task
 Status: open
-Blocked by: 11, 12, 16, 17, 18, 23, 25, 27, 30
+Blocked by: 11, 12, 16, 17, 18, 23, 25, 27, 30, ../../native-contract/issues/37-the-return-check-reads-its-runs-own-anchors.md
 
 **What to build:** The whole body, with no hold left that pass 1 names, lives 24 hours of the synthetic day on the heavy-run machine: sleep, two posture changes, three meals, drinks and room air. This is the map's destination for pass 1. It is not the first milestone: every number is synthetic, and only a reviewed packet can pass I19.
 
