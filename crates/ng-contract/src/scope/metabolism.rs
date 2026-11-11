@@ -51,7 +51,7 @@ impl<'b> MetabolismPorts<'b> {
         laws.request(family);
         SiteRoute::requested(family)
     }
-    /// A fuel across the cell membrane of every bed but the liver's. A species outside the class does not compile.
+    /// A fuel across the cell membrane of every bed but the liver's.
     /// ```compile_fail,E0277
     /// use ng_contract::*;
     /// fn crossed<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, ports: &MetabolismPorts<'b>)
