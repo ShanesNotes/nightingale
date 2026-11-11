@@ -340,6 +340,22 @@ fn a_change_between_activities_that_share_the_every_activity_range_is_judged_by_
     );
 }
 
+#[test]
+fn a_window_across_two_shared_changes_is_judged_by_the_every_activity_range() {
+    let set = set(
+        vec![range("xx.every", Scope::Every, sliding(4 * SECOND), 0.0, 20.0)],
+        Vec::new(),
+    );
+    let day = day(&[(0, "a"), (2 * SECOND, "b"), (4 * SECOND, "c")]);
+    let report = each_second(&set, &day, &[0.0, 30.0, 20.0, 20.0, 30.0, 0.0, 0.0, 0.0]);
+    assert_eq!(report.gaps(), []);
+    assert_eq!(
+        failure(&report, "xx.every"),
+        (at(4 * SECOND), 4 * SECOND, Some(value(25.0))),
+        "the window of the values at 1 s to 4 s, from a through b to c"
+    );
+}
+
 fn nights(night: [f64; 4]) -> RangeReport {
     let day = day(&[
         (0, "asleep"),
@@ -391,6 +407,80 @@ fn a_whole_period_range_judges_each_whole_periods_mean_and_counts_the_periods_th
     assert_eq!(report.verdict(), CheckVerdict::Fail);
     let named = (at(11 * SECOND), 4 * SECOND, Some(value(12.0)));
     assert_eq!(failure(&report, "xx.night"), named, "the night from 8 s to 12 s");
+}
+
+fn night_and_day() -> HealthyRangeSet<SyntheticFixture> {
+    let asleep = Scope::During(Activity::new("asleep"));
+    set(
+        vec![
+            range("xx.awake", Scope::Every, sliding(SECOND), 0.0, 100.0),
+            range("xx.night", asleep, Averaging::WholePeriod, 0.0, 10.0),
+        ],
+        Vec::new(),
+    )
+}
+
+#[test]
+fn a_period_that_starts_at_admission_is_whole() {
+    let day = day(&[(2 * SECOND, "asleep"), (6 * SECOND, "awake")]);
+    let stream = each_period(2 * SECOND, SECOND, &[5.0, 5.0, 5.0, 5.0, 50.0, 50.0]);
+    let report = ranged(
+        &[sampled(reading())],
+        SECOND,
+        &night_and_day(),
+        &day,
+        2 * SECOND,
+        &stream,
+    );
+    let night = result(&report, "xx.night");
+    assert_eq!(
+        (night.judged(), night.cut()),
+        (1, 0),
+        "the night from admission at 2 s to 6 s"
+    );
+}
+
+#[test]
+fn a_time_mean_whole_period_holds_every_mean_closing_in_its_span() {
+    let day = day(&[(0, "awake"), (4 * SECOND, "asleep"), (8 * SECOND, "awake")]);
+    let values = [50.0, 50.0, 50.0, 50.0, 12.0, 12.0, 12.0, 2.0, 50.0, 50.0];
+    let stream = each_period(SECOND, SECOND, &values);
+    let report = ranged(
+        &[integrated(reading())],
+        SECOND,
+        &night_and_day(),
+        &day,
+        0,
+        &stream,
+    );
+    let night = result(&report, "xx.night");
+    assert_eq!(
+        (night.judged(), night.cut(), night.failure()),
+        (1, 0, None),
+        "mean 9.5 over the four means closing in (4 s, 8 s]"
+    );
+}
+
+#[test]
+fn a_time_mean_takes_the_activity_of_the_period_it_covers() {
+    let (a, b) = (Activity::new("a"), Activity::new("b"));
+    let set = set(
+        vec![
+            range("xx.a", Scope::During(a), sliding(SECOND), 0.0, 10.0),
+            range("xx.b", Scope::During(b), sliding(SECOND), 20.0, 30.0),
+        ],
+        Vec::new(),
+    );
+    let day = day(&[(0, "a"), (4 * SECOND, "b")]);
+    let stream = each_period(SECOND, SECOND, &[5.0, 5.0, 5.0, 5.0, 25.0, 25.0, 25.0, 25.0]);
+    let report = ranged(&[integrated(reading())], SECOND, &set, &day, 0, &stream);
+    assert_eq!(
+        report.verdict(),
+        CheckVerdict::Pass,
+        "the mean closing at 4 s covers (3 s, 4 s], in a"
+    );
+    let judged = (result(&report, "xx.a").judged(), result(&report, "xx.b").judged());
+    assert_eq!(judged, (4, 4));
 }
 
 #[test]

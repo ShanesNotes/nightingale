@@ -1016,3 +1016,45 @@ path = "crates/ng-validate/src/healthy/returns.rs"
 old = '''if plans.is_empty() {'''
 new = '''if false {'''
 test = "-p ng-validate --lib healthy::tests::a_packet_with_no_anchors_blocks_the_return_check"
+
+[[mutant]]
+name = "healthy-range-no-range-named-twice"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''note(&mut gaps, RangeGap::NoRange { row, method });'''
+new = '''gaps.push(RangeGap::NoRange { row, method });'''
+test = "-p ng-validate --lib healthy::tests::a_reading_with_no_range_is_named_once_however_the_lens_reads_it"
+
+[[mutant]]
+name = "healthy-range-day-after-admission-taken"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''&& at > admission'''
+new = '''&& false'''
+test = "-p ng-validate --lib healthy::tests::a_day_that_starts_after_admission_is_refused"
+
+[[mutant]]
+name = "healthy-range-time-mean-tagged-by-its-closing-instant"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''at.nanoseconds().saturating_sub(*period_ns)'''
+new = '''at.nanoseconds()'''
+test = "-p ng-validate --lib healthy::tests::a_time_mean_takes_the_activity_of_the_period_it_covers"
+
+[[mutant]]
+name = "healthy-range-time-mean-period-closes-one-mean-early"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''        let last = if fold.integrated {'''
+new = '''        let last = if false {'''
+test = "-p ng-validate --lib healthy::tests::a_time_mean_whole_period_holds_every_mean_closing_in_its_span"
+
+[[mutant]]
+name = "healthy-range-window-across-two-changes-never-judged"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''None => Ok(self.every),'''
+new = '''None => Ok(None),'''
+test = "-p ng-validate --lib healthy::tests::a_window_across_two_shared_changes_is_judged_by_the_every_activity_range"
+
+[[mutant]]
+name = "healthy-range-period-starting-at-admission-cut"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''before_admission: start < admission,'''
+new = '''before_admission: start <= admission,'''
+test = "-p ng-validate --lib healthy::tests::a_period_that_starts_at_admission_is_whole"
