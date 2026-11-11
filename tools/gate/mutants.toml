@@ -791,6 +791,26 @@ impl ReactsAt<crate::Beds<crate::Muscle>> for crate::Hepatic {}'''
 test = "--doc -p ng-contract ReactsAt"
 
 [[mutant]]
+name = "guard-reads-its-routes-flow"
+path = "crates/ng-contract/src/compile.rs"
+old = '''                Over::Route(family) => Some(family),
+                _ => None,
+            };
+            let sorted'''
+new = '''                Over::Route(_) => None,
+                _ => None,
+            };
+            let sorted'''
+test = "-p ng-contract --test sinusoids a_guard_on_a_switch_along_circulation_reads_the_flow_at_its_own_edge"
+
+[[mutant]]
+name = "sinusoids-are-vascular"
+path = "crates/ng-contract/src/law.rs"
+old = '''Family::Circulation | Family::Valves | Family::Sinusoids | Family::GravityWork'''
+new = '''Family::Circulation | Family::Valves | Family::GravityWork'''
+test = "-p ng-contract --test sinusoids the_hepatic_card_reads_the_flow_along_its_own_sinusoids"
+
+[[mutant]]
 name = "enclosure-owed-by-its-card"
 path = "crates/ng-contract/src/compile.rs"
 old = '''
