@@ -11,9 +11,9 @@ const SECOND: u64 = 1_000_000_000;
 const WINDOW_NS: u64 = 30 * SECOND;
 /// Inflow and outflow agree to 2% of inflow over the first 30 s. At the arena's heart work of about 12,000 a second
 /// that is a gap of at most 240 a second, which a store leaving at `bd.heat-speed`, 0.001 a second, reads as a start
-/// about `240 * 30 / (1 - exp(-0.03))`, 2.4 × 10⁵, off its balance; over a 24 h window it relaxes all of that, a drift
-/// of about 2.4 × 10⁵. Chosen before the Radau cycle was measured; it is a numerical regression bound, not the energy
-/// drift limit.
+/// about `240 * 30 / (1 - exp(-0.03))`, 2.4 × 10⁵, off its balance. So it bounds admission's offset, as a numerical
+/// regression bound chosen before the Radau cycle was measured. It is no drift allowance: the arena certificate holds
+/// energy's drift over a 24 h window to 2 × 10⁵.
 const GAP_SHARE: f64 = 0.02;
 
 fn hi(value: Compensated) -> f64 {

@@ -13,5 +13,6 @@ Blocked by: 05, 09, `.scratch/research/issues/12-law-forms-heat.md`
 - [ ] Run: a warmer room raises skin flow and then sweat. A cooler room narrows skin vessels and then starts shivering. The set point's daily swing shows in core temperature, with no law setting a temperature
 - [ ] The certificate passes on the whole body with the heat book held by this loop, and the body's trace is updated
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
+- [ ] From [ticket 05](05-the-days-inputs.md): each law here that reads a lasting input is reviewed against the rule by reading: the input scales a gain or a set point and never stands for a produced quantity. Compile's `UnscaledInput` is only a stand-in: it passes a law that reads any parameter, such as `0 = k (T - room_air())`, and refuses one that reads only inputs
 
 **Non-goals:** more than two nodes, fever, exercise, and clothing as anything but one insulation value.

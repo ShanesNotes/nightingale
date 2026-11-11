@@ -33,7 +33,7 @@ Every named model carries the named totals, plus any named memory the screen add
 
 The drive u is the public posture payload, the trunk's sine and two leg indicators. No engine law form is copied into any model. Every rate, its dependence on state and drive, and every reading is learned. The parameter count of every model stays at most 100,000; R stays inside it because its networks are shared per origin.
 
-**A named model's beats.** Its decoder gives the heart rate and the pressure at every instant. A phase integrates the decoded rate and wraps at one, as the teacher's does (`crates/ng-cardiovascular/src/rhythm.rs:59-89`); a wrap is located within 1 microsecond by bisection. A beat reading is one over the beat's length and the beat's mean pressure, the same definitions the driver uses. C2's beat length is one over its own heart rate.
+**A named model's beats.** Its decoder gives the heart rate and the pressure at every instant. A phase integrates the decoded rate and wraps at one, as the teacher's does (`crates/ng-cardiovascular/src/rhythm/phase.rs:15-32`); a wrap is located within 1 microsecond by bisection. A beat reading is one over the beat's length and the beat's mean pressure, the same definitions the driver uses. C2's beat length is one over its own heart rate.
 
 **Integration.** Classical fourth-order Runge-Kutta at 0.1 s, on integer nanoseconds, with every interval split at an event and at a beat edge. A step that would leave any total negative is refused and halved, down to 1/64 of the step; past that the run stops with `ModelFault`. Nothing is clamped. The learned object is a rate per simulated second, never a per-step increment.
 

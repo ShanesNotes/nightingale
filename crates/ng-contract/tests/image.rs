@@ -82,6 +82,10 @@ fn water(id: &[u8], from: SimTime, to: SimTime) -> BoundaryEvent {
 }
 
 fn image(body: &CompiledBody, sites: [SiteId; 2]) -> ImageParts {
+    image_with(body, sites, Vec::new())
+}
+
+fn image_with(body: &CompiledBody, sites: [SiteId; 2], more: Vec<BoundaryEvent>) -> ImageParts {
     let mut packet = ParameterPacket::new();
     let edges = Binding::Network(Network::Vascular);
     let elastance = measure::<Elastance>(1.0);
@@ -99,10 +103,9 @@ fn image(body: &CompiledBody, sites: [SiteId; 2]) -> ImageParts {
             .expect("a start");
     }
     let parameters = body.bind(packet).expect("bound");
-    let port = BoundaryPort::new(vec![
-        water(b"running", at(0), at(2)),
-        water(b"waiting", at(5), at(9)),
-    ]);
+    let mut events = vec![water(b"running", at(0), at(2)), water(b"waiting", at(5), at(9))];
+    events.extend(more);
+    let port = BoundaryPort::new(events);
     let request = InitializationRequest::at(at(0));
     let system = body
         .initialization(parameters, port.expect("a port"), request)
@@ -385,4 +388,104 @@ fn a_reader_stops_at_its_bytes() {
             .map(|digest| *digest.as_bytes()),
         Ok([7; 32])
     );
+}
+
+fn lasting(id: &[u8], from: SimTime, payload: BoundaryInput) -> BoundaryEvent {
+    BoundaryEvent::new(InputId::new(Digest::of_canonical(id)), from, payload)
+}
+
+fn lasting_image(body: &CompiledBody, sites: [SiteId; 2]) -> ImageParts {
+    let room = Room {
+        air: measure(309.0),
+        radiant: measure(310.0),
+        humidity: measure(0.25),
+        air_speed: measure(7.0),
+        pressure: measure(735.0),
+        oxygen: measure(0.35),
+        carbon_dioxide: measure(0.08),
+        clothing: measure(0.3),
+    };
+    let seven = 7 * 3600 * SECOND;
+    let events = vec![
+        lasting(
+            b"clock",
+            at(0),
+            BoundaryInput::Clock(Clock {
+                since_midnight_ns: seven,
+            }),
+        ),
+        lasting(b"sleep", at(5), BoundaryInput::Sleep(Sleep::Nrem)),
+        lasting(b"room", at(5), BoundaryInput::Room(room)),
+        lasting(b"void", at(6), BoundaryInput::Void(Gate::Open)),
+    ];
+    image_with(body, sites, events)
+}
+
+fn named(bytes: &[u8], name: &str) -> (usize, usize) {
+    let mut text = (name.len() as u64).to_be_bytes().to_vec();
+    text.extend_from_slice(name.as_bytes());
+    let found: Vec<usize> = (0..bytes.len() - text.len())
+        .filter(|&at| bytes[at..at + text.len()] == text[..])
+        .collect();
+    assert_eq!(found.len(), 1, "{name} once");
+    (found[0] - 8, found[0] + text.len() + 16)
+}
+
+#[test]
+fn every_lasting_input_reads_back_to_the_same_bytes_under_its_own_tag() {
+    let (body, sites) = body().expect("a body");
+    let parts = lasting_image(&body, sites);
+    let bytes = parts.canonical();
+    let read = ImageParts::parse(&body, &bytes).expect("parsed");
+    assert_eq!(read.canonical(), bytes);
+    assert_eq!(read.pending.applied().digest(), parts.pending.applied().digest());
+    assert_eq!(read.pending.waiting_digest(), parts.pending.waiting_digest());
+    for (name, tag) in [("clock", 13), ("sleep", 14), ("room", 15), ("void", 16)] {
+        let (at, _) = named(&bytes, name);
+        assert_eq!(bytes[at..at + 8], u64::to_be_bytes(tag), "{name}");
+    }
+    let (_, clock) = named(&bytes, "clock");
+    assert_eq!(bytes[clock..clock + 8], u64::to_be_bytes(7 * 3600 * SECOND));
+}
+
+#[test]
+fn a_lasting_value_no_payload_can_carry_is_malformed() {
+    let (body, sites) = body().expect("a body");
+    let bytes = lasting_image(&body, sites).canonical();
+    let value = |name: &str, offset: usize, value: u64| {
+        let mut broken = bytes.clone();
+        let (_, at) = named(&bytes, name);
+        put(&mut broken, at + offset, value);
+        broken
+    };
+    let tagged = |name: &str, tag: u64| {
+        let mut broken = bytes.clone();
+        let (at, _) = named(&bytes, name);
+        put(&mut broken, at, tag);
+        broken
+    };
+    let day = 24 * 3600 * SECOND;
+    let breaks = [
+        ("a clock at a whole day", value("clock", 0, day)),
+        (
+            "a sleep between waking and sleep",
+            value("sleep", 0, 0.5_f64.to_bits()),
+        ),
+        ("a sleep of 2", value("sleep", 0, 2.0_f64.to_bits())),
+        ("a gate half open", value("void", 0, 0.5_f64.to_bits())),
+        ("a gate of minus 1", value("void", 0, (-1.0_f64).to_bits())),
+        ("air at absolute zero", value("room", 0, 0.0_f64.to_bits())),
+        ("a humidity past 1", value("room", 16, 1.5_f64.to_bits())),
+        (
+            "an inspired fraction past 1",
+            value("room", 40, 1.5_f64.to_bits()),
+        ),
+        ("a tag no writer uses", tagged("void", 17)),
+        ("a species tag no writer uses", tagged("void", 5)),
+    ];
+    for (name, broken) in breaks {
+        assert_eq!(ImageParts::parse(&body, &broken).err(), Some(Malformed), "{name}");
+    }
+    let shut = value("void", 0, 0.0_f64.to_bits());
+    assert!(ImageParts::parse(&body, &shut).is_ok(), "a shut gate reads back");
 }
