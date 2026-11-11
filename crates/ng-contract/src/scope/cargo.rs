@@ -15,8 +15,7 @@ mod membership {
     pub enum FatStore {}
 }
 macro_rules! classes {
-    ($($(#[$doc:meta])* $class:ident: $bound:path = $($member:ty),+;)*) => {$(
-        $(#[$doc])*
+    ($($class:ident: $bound:path = $($member:ty),+;)*) => {$(
         pub trait $class: $bound + membership::Of<membership::$class> {}
         $(
             impl membership::Of<membership::$class> for $member {}
