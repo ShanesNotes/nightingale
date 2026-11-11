@@ -911,3 +911,66 @@ path = "crates/ng-contract/src/scheme.rs"
 old = '''stage(whole, part(second), Some(0), second, 1),'''
 new = '''stage(whole, part(second), None, second, 1),'''
 test = "-p ng-contract --lib scheme::tests::the_halved_set_is_the_doubled_sets_two_halves"
+
+[[mutant]]
+name = "clock-past-a-day"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''BoundaryInput::Clock(Clock { since_midnight_ns }) if since_midnight_ns >= DAY_NS => {'''
+new = '''BoundaryInput::Clock(Clock { since_midnight_ns }) if false && since_midnight_ns >= DAY_NS => {'''
+test = "-p ng-contract --lib boundary::tests::a_clock_of_a_day_or_more_and_a_room_out_of_range_are_refused"
+
+[[mutant]]
+name = "clock-read-past-a-day"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''reading if reading >= DAY_NS => return Err(Malformed),'''
+new = '''reading if false && reading >= DAY_NS => return Err(Malformed),'''
+test = "-p ng-contract --test image a_held_value_no_payload_can_carry_is_malformed"
+
+[[mutant]]
+name = "room-humidity-unchecked"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''        && fraction(humidity)'''
+new = '''        && (fraction(humidity) || humidity > 0.0)'''
+test = "-p ng-contract --lib boundary::tests::a_clock_of_a_day_or_more_and_a_room_out_of_range_are_refused"
+
+[[mutant]]
+name = "gate-reads-any-value"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''.find(|gate| gate.value().to_bits() == value.to_bits())'''
+new = '''.find(|gate| gate.value() <= value.abs().ceil())'''
+test = "-p ng-contract --test image a_held_value_no_payload_can_carry_is_malformed"
+
+[[mutant]]
+name = "sleep-reads-any-value"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''.find(|sleep| sleep.value().to_bits() == value.to_bits())'''
+new = '''.find(|sleep| sleep.value() >= value.floor())'''
+test = "-p ng-contract --test image a_held_value_no_payload_can_carry_is_malformed"
+
+[[mutant]]
+name = "step-crosses-a-minute"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''                .chain(next_turn)'''
+new = '''                .chain(next_turn.filter(|_| false))'''
+test = "-p ng-contract --test day_inputs a_step_never_crosses_a_clock_edge_in_a_body_that_reads_the_clock"
+
+[[mutant]]
+name = "minute-off-the-grid-admitted"
+path = "crates/ng-contract/src/boundary.rs"
+old = '''|| (reads_clock && turns_off(delivery))'''
+new = '''|| (false && reads_clock && turns_off(delivery))'''
+test = "-p ng-contract --lib boundary::tests::a_clock_whose_minute_turns_between_two_points_is_off_the_grid_only_in_a_body_that_reads_it"
+
+[[mutant]]
+name = "unscaled-input-compiles"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if reads.contains(&false) && !reads.contains(&true) {'''
+new = '''if false && reads.contains(&false) && !reads.contains(&true) {'''
+test = "-p ng-contract --test day_inputs compile_refuses_a_law_that_sets_its_row_to_an_input_and_takes_one_that_scales_a_parameter_by_it"
+
+[[mutant]]
+name = "unstated-input-admitted"
+path = "crates/ng-contract/src/admission.rs"
+old = '''.find(|held| !frames[0].states(**held))'''
+new = '''.find(|held| false && !frames[0].states(**held))'''
+test = "-p ng-contract --test day_inputs admission_refuses_a_body_that_reads_a_held_input_the_day_never_states"
