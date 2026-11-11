@@ -27,6 +27,8 @@ SLICE_LINES = {
     "outside": [84, 85, 92, 93, 94, 95, 103, 104, 107, 109],
     "unresolved": [111],
 }
+BODY_LIVE = [77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 88, 89, 90, 91, 95, 97, 98, 114]
+BODY_HELD = [92, 93, 94, 100, 102, 103, 105, 106, 107, 108, 109, 110, 111, 112, 113]
 RELATIONS = [82, 96, 99, 101, 104]
 WIRE_AND_HOLD = [79, 87, 89, 90, 95, 114]
 
@@ -238,6 +240,8 @@ for kind, want in SLICE_LINES.items():
     if got != want:
         failures.append(f"slice census: {kind} are lines {got}, not {want}")
 for name, got, want in (
+    ("live", [r["line"] for r in rows if r["wired"]], BODY_LIVE),
+    ("held", [r["line"] for r in rows if r["held"] and not r["wired"]], BODY_HELD),
     ("relations", [r["line"] for r in rows if r["relation"] is not None], RELATIONS),
     ("wire and hold", [r["line"] for r in rows if r["wired"] and r["held"]], WIRE_AND_HOLD),
 ):

@@ -477,13 +477,7 @@ const _: () = {
     }
 };
 const _: () = {
-    let relations = [82, 96, 99, 101, 104];
     let wire_and_hold = [79, 87, 89, 90, 95, 114];
-    let mut i = 0;
-    while i < relations.len() {
-        assert!(matches!(ARROWS[relations[i] - 77].carries, Carries::Relation { .. }));
-        i += 1;
-    }
     let mut i = 0;
     while i < wire_and_hold.len() {
         let carries = ARROWS[wire_and_hold[i] - 77].carries;
@@ -492,12 +486,12 @@ const _: () = {
     }
 };
 
-macro_rules! slice_lines {
-    ($kind:pat, $lines:expr) => {{
+macro_rules! census_lines {
+    ($census:expr, $kind:pat, $lines:expr) => {{
         let lines: &[usize] = &$lines;
         let (mut i, mut n) = (0, 0);
         while i < MAP_EDGES {
-            if matches!(ARROWS[i].slice, $kind) {
+            if matches!($census.row(&ARROWS[i]).disposition, $kind) {
                 assert!(n < lines.len() && lines[n] == 77 + i);
                 n += 1;
             }
@@ -507,12 +501,23 @@ macro_rules! slice_lines {
     }};
 }
 const _: () = {
-    slice_lines!(Disposition::Live, [77, 80, 97]);
-    slice_lines!(Disposition::ExternalInput, [83, 90, 91, 99, 100, 102, 105, 106, 108, 114]);
-    slice_lines!(Disposition::ExternalSink, [78, 79, 81, 86, 87, 88, 89, 98, 110, 112, 113]);
-    slice_lines!(Disposition::AnatomyRelation { .. }, [82, 96, 101]);
-    slice_lines!(Disposition::OutsideSlice { .. }, [84, 85, 92, 93, 94, 95, 103, 104, 107, 109]);
-    slice_lines!(Disposition::Unresolved { .. }, [111]);
+    census_lines!(Census::Slice, Disposition::Live, [77, 80, 97]);
+    census_lines!(Census::Slice, Disposition::ExternalInput, [83, 90, 91, 99, 100, 102, 105, 106, 108, 114]);
+    census_lines!(Census::Slice, Disposition::ExternalSink, [78, 79, 81, 86, 87, 88, 89, 98, 110, 112, 113]);
+    census_lines!(Census::Slice, Disposition::AnatomyRelation { .. }, [82, 96, 101]);
+    census_lines!(Census::Slice, Disposition::OutsideSlice { .. }, [84, 85, 92, 93, 94, 95, 103, 104, 107, 109]);
+    census_lines!(Census::Slice, Disposition::Unresolved { .. }, [111]);
+    census_lines!(
+        Census::WholeBody,
+        Disposition::Live,
+        [77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 88, 89, 90, 91, 95, 97, 98, 114]
+    );
+    census_lines!(Census::WholeBody, Disposition::AnatomyRelation { .. }, [82, 96, 99, 101, 104]);
+    census_lines!(
+        Census::WholeBody,
+        Disposition::Held,
+        [92, 93, 94, 100, 102, 103, 105, 106, 107, 108, 109, 110, 111, 112, 113]
+    );
 };
 
 struct FieldCount {
