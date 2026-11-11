@@ -650,6 +650,34 @@ new = '''if let [first, second, ..] = spaces[..1] {'''
 test = "-p ng-contract --test scopes a_reaction_that_takes_its_glucose_across_the_cell_membrane_is_refused_naming_both_spaces"
 
 [[mutant]]
+name = "reaction-owned-twice-refused"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|pair| pair[0].0 == pair[1].0)'''
+new = '''.filter(|pair| false && pair[0].0 == pair[1].0)'''
+test = "-p ng-contract --test scopes the_musculoskeletal_card_making_metabolisms_glycogen_at_the_muscle_bed_is_refused_naming_both_laws_and_the_bed"
+
+[[mutant]]
+name = "reaction-owners-compared"
+path = "crates/ng-contract/src/compile.rs"
+old = '''placed.dedup_by(|later, earlier| later.0 == earlier.0 && later.1.owner == earlier.1.owner);'''
+new = '''placed.dedup_by(|later, earlier| later == earlier);'''
+test = "-p ng-contract --test scopes one_card_declaring_one_chemistry_under_two_names_compiles"
+
+[[mutant]]
+name = "reaction-counts-divided"
+path = "crates/ng-contract/src/compile.rs"
+old = '''count(term.change) / divisor,'''
+new = '''count(term.change),'''
+test = "-p ng-contract --test scopes a_copy_with_every_count_doubled_is_the_same_chemistry_and_is_refused"
+
+[[mutant]]
+name = "reaction-owners-compared-where-placed"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(stands)'''
+new = '''.filter(|_| true)'''
+test = "-p ng-contract --test scopes a_grant_shared_where_one_chemistry_has_no_pools_is_no_second_owner"
+
+[[mutant]]
 name = "circulation-owes-the-sinusoids"
 path = "crates/ng-contract/src/compile.rs"
 old = '''if requested(Family::Circulation) && unowed {'''
