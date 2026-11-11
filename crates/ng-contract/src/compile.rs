@@ -398,6 +398,14 @@ fn obligations<'f>(
             law: LawName { owner, local },
         });
     }
+    let requested = |family| (fragments.iter()).any(|fragment| fragment.families.contains(&family));
+    let unowed = !requested(Family::Sinusoids) && !reaches_of(Family::Sinusoids, schema).is_empty();
+    if requested(Family::Circulation) && unowed {
+        let (owner, local) = (crate::Hepatic::CARD, Family::Sinusoids.name());
+        return Err(CompileDefect::OmittedLaw {
+            law: LawName { owner, local },
+        });
+    }
     let mut owed = Vec::new();
     for water in &schema.boundaries {
         let owner = route_owner(schema, held, water.name);

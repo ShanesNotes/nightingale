@@ -54,8 +54,15 @@ fn circuit(liver: bool) -> Result<Schema, AdmissionError> {
     Ok(schema)
 }
 
-fn circulate(liver: bool) -> Result<CompiledBody, AdmissionError> {
-    assemble(circuit(liver)?, |mut body| {
+#[derive(Clone, Copy, PartialEq)]
+enum Liver {
+    Unstated,
+    Built,
+    Held,
+}
+
+fn circulate(liver: Liver) -> Result<CompiledBody, AdmissionError> {
+    assemble(circuit(liver != Liver::Unstated)?, |mut body| {
         let class = slow()?;
         let (mut cv, ports) = body.cardiovascular()?.parts();
         let (pressure, _) = ports.blood_pressure(&mut cv);
@@ -80,17 +87,33 @@ fn circulate(liver: bool) -> Result<CompiledBody, AdmissionError> {
         });
         cv.transfer_along(&fallen, paid);
         body.add(cv.finish());
-        if liver {
-            let (mut hp, ports) = body.hepatic(None)?.parts();
-            let route = ports.sinusoids(&mut hp);
-            let pressure = ports.blood_pressure();
-            let still = hp.edge_kernel(|mut k| {
-                let (_up, _down) = (k.upstream(&pressure), k.downstream(&pressure));
-                let zero = k.zero::<Rate<Water>>();
-                k.finish(zero, hp.every_mode(), class)
-            });
-            hp.transfer_along(&route, still);
-            body.add(hp.finish());
+        match liver {
+            Liver::Unstated => {}
+            Liver::Built => {
+                let (mut hp, ports) = body.hepatic(None)?.parts();
+                let route = ports.sinusoids(&mut hp);
+                let pressure = ports.blood_pressure();
+                let still = hp.edge_kernel(|mut k| {
+                    let (_up, _down) = (k.upstream(&pressure), k.downstream(&pressure));
+                    let zero = k.zero::<Rate<Water>>();
+                    k.finish(zero, hp.every_mode(), class)
+                });
+                hp.transfer_along(&route, still);
+                body.add(hp.finish());
+            }
+            Liver::Held => {
+                let validity = "the liver bed's flow: a stand-in until the hepatic card's law";
+                let mut held = body.hold(HeldDeclaration::<Hepatic>::new(vec![], vec![], validity))?;
+                let (stand_ins, _) = held.stand_ins();
+                let still = stand_ins.edge_kernel(|mut k| {
+                    let zero = k.zero::<Rate<Water>>();
+                    k.finish(zero, stand_ins.every_mode(), class)
+                });
+                let (mut hp, ports) = body.hepatic(Some(held))?.parts();
+                let route = ports.sinusoids(&mut hp);
+                hp.transfer_along(&route, still);
+                body.add(hp.finish());
+            }
         }
         body.compile()
     })
@@ -128,7 +151,7 @@ fn every_plain_vascular_edge_is_reached_by_circulation_or_the_sinusoids_and_neve
         edge(muscle_bed, vein),
         edge(vein, artery),
     ];
-    let body = circulate(true)?;
+    let body = circulate(Liver::Built)?;
     assert_eq!(
         columns_of(&body, law("CV", "circulation")),
         sorted(other_edges.clone())
@@ -137,7 +160,7 @@ fn every_plain_vascular_edge_is_reached_by_circulation_or_the_sinusoids_and_neve
         columns_of(&body, law("HP", "sinusoids")),
         sorted(liver_edges.clone())
     );
-    let body = circulate(false)?;
+    let body = circulate(Liver::Unstated)?;
     assert_eq!(
         columns_of(&body, law("CV", "circulation")),
         sorted([liver_edges, other_edges].concat())
@@ -149,7 +172,7 @@ fn every_plain_vascular_edge_is_reached_by_circulation_or_the_sinusoids_and_neve
 fn the_flow_at_a_liver_bed_edge_is_the_sinusoids_whoever_reads_it() -> Result<(), AdmissionError> {
     let (artery, vein) = (site::<VesselSegment>("artery"), site::<VesselSegment>("vein"));
     let liver_bed = site::<CapillaryBed>("liver bed");
-    let body = circulate(true)?;
+    let body = circulate(Liver::Built)?;
     let rows = (body.rows().iter()).filter_map(|row| match row.kind() {
         RowKind::Algebraic(Slot { law: found, at }) if found == law("HP", "sinusoids") => Some(at),
         _ => None,
@@ -213,4 +236,99 @@ fn the_sinusoids_leave_a_valved_edge_of_the_liver_bed_to_the_valves() -> Result<
         [edge(artery, liver_bed)]
     );
     Ok(())
+}
+
+#[test]
+fn a_held_hepatic_cards_stand_in_holds_the_liver_beds_edges() -> Result<(), AdmissionError> {
+    let (artery, vein) = (site::<VesselSegment>("artery"), site::<VesselSegment>("vein"));
+    let liver_bed = site::<CapillaryBed>("liver bed");
+    let body = circulate(Liver::Held)?;
+    assert_eq!(body.held().collect::<Vec<_>>(), ["HP"]);
+    assert_eq!(
+        columns_of(&body, law("HP", "sinusoids")),
+        sorted(vec![edge(artery, liver_bed), edge(liver_bed, vein)])
+    );
+    Ok(())
+}
+
+fn drained(sinusoids: bool, lymph: Option<Tissue>) -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let artery = map.site::<VesselSegment>("artery", at()?);
+    let vein = map.site::<VesselSegment>("vein", at()?);
+    let liver_bed = map.site::<CapillaryBed>("liver bed", at()?);
+    let muscle_bed = map.site::<CapillaryBed>("muscle bed", at()?);
+    for child in [artery.id(), vein.id(), liver_bed.id(), muscle_bed.id()] {
+        map.contain(root.id(), child);
+    }
+    for (from, to) in [
+        (artery.id(), liver_bed.id()),
+        (liver_bed.id(), vein.id()),
+        (artery.id(), muscle_bed.id()),
+        (muscle_bed.id(), vein.id()),
+        (vein.id(), artery.id()),
+    ] {
+        map.connect(Network::Vascular, from, to);
+    }
+    match lymph {
+        Some(Tissue::Liver) => map.connect(Network::Lymph, liver_bed.id(), vein.id()),
+        Some(_) => map.connect(Network::Lymph, muscle_bed.id(), vein.id()),
+        None => {}
+    }
+    map.serves(&liver_bed, Tissue::Liver);
+    map.serves(&muscle_bed, Tissue::Muscle);
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.leave_out(Space::Cells, "a bench of blood and the beds' interstitium");
+    schema.carry::<Sodium, Blood>(Space::Plasma);
+    schema.carry::<Sodium, Blood>(Space::Lumen);
+    schema.carry::<Sodium, CapillaryBed>(Space::Interstitium);
+    assemble(schema, |mut body| {
+        let class = slow()?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, still);
+        body.add(cv.finish());
+        if sinusoids {
+            let (mut hp, ports) = body.hepatic(None)?.parts();
+            let route = ports.sinusoids(&mut hp);
+            let still = hp.edge_kernel(|mut k| {
+                let zero = k.zero::<Rate<Water>>();
+                k.finish(zero, hp.every_mode(), class)
+            });
+            hp.transfer_along(&route, still);
+            body.add(hp.finish());
+        }
+        let (mut fl, ports) = body.fluids()?.parts();
+        let wall = ports.starling(&mut fl);
+        let still = fl.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, fl.every_mode(), class)
+        });
+        fl.transfer_at(&wall, still);
+        if lymph.is_some() {
+            let route = ports.lymph(&mut fl);
+            let read = fl.edge_kernel(|mut k| {
+                let _flow = k.edge_flow();
+                let zero = k.zero::<Rate<Water>>();
+                k.finish(zero, fl.every_mode(), class)
+            });
+            fl.transfer_along(&route, read);
+        }
+        body.add(fl.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn a_liver_bed_beside_circulation_owes_the_hepatic_cards_sinusoids() {
+    assert_eq!(
+        drained(false, None).map(|body| body.model_hash()),
+        Err(AdmissionError::Compile(CompileDefect::OmittedLaw {
+            law: law("HP", "sinusoids")
+        }))
+    );
 }
