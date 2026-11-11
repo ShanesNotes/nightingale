@@ -299,8 +299,8 @@ fn a_window_across_a_change_takes_the_changes_own_range() {
     assert_eq!(report.gaps(), []);
     assert_eq!(
         result(&report, "xx.sitting-up").judged(),
-        1,
-        "one window of two crosses the change"
+        2,
+        "the window across the change, and the one from the change in the 1 s its shift lasts"
     );
     let report = each_second(&sitting_up(Some(12.0)), &day, &AROUND_SITTING_UP);
     assert_eq!(report.verdict(), CheckVerdict::Fail);
@@ -312,6 +312,150 @@ fn a_window_across_a_change_takes_the_changes_own_range() {
     );
     assert_eq!(result(&report, "xx.supine").failure(), None);
     assert_eq!(result(&report, "xx.seated").failure(), None);
+}
+
+/// Supine to seated at 4 s, where a source shows his pressure dips for 4 s: 70 to 140 over a 4 s window then, and
+/// 90 to 140 otherwise.
+fn sitting_up_dips(ranges: Vec<HealthyRange<SyntheticFixture>>) -> HealthyRangeSet<SyntheticFixture> {
+    let mut ranges = ranges;
+    ranges.push(range("xx.every", Scope::Every, sliding(4 * SECOND), 90.0, 140.0));
+    let change = sitting_up_for(4 * SECOND);
+    ranges.push(range("xx.sitting-up", change, sliding(4 * SECOND), 70.0, 140.0));
+    set(ranges, Vec::new())
+}
+
+/// The samples of one a second from the clock's zero: 100, then 75 for `dip` seconds from 5 s, then 100.
+fn dipping(dip: usize, values: usize) -> Vec<f64> {
+    let mut read = vec![100.0; values];
+    read[5..5 + dip].fill(75.0);
+    read
+}
+
+#[test]
+fn a_changes_range_judges_each_window_in_the_time_its_shift_lasts() {
+    let day = day(&[(0, "supine"), (4 * SECOND, "seated")]);
+    let report = each_second(&sitting_up_dips(Vec::new()), &day, &dipping(3, 12));
+    assert_eq!(
+        report.verdict(),
+        CheckVerdict::Pass,
+        "a dip to 75 in the 4 s from the change"
+    );
+    assert_eq!(report.gaps(), []);
+    let judged = (
+        result(&report, "xx.sitting-up").judged(),
+        result(&report, "xx.every").judged(),
+    );
+    assert_eq!(
+        judged,
+        (7, 2),
+        "the windows ending at 4 s to 10 s cross the change or start in its 4 s"
+    );
+    let report = each_second(&sitting_up_dips(Vec::new()), &day, &dipping(6, 15));
+    assert_eq!(result(&report, "xx.sitting-up").failure(), None);
+    assert_eq!(
+        failure(&report, "xx.every"),
+        (at(11 * SECOND), 4 * SECOND, Some(value(81.25))),
+        "a dip that outlasts the shift fails the first window wholly past it, the values at 8 s to 11 s"
+    );
+}
+
+#[test]
+fn a_change_owns_the_time_its_longest_lasting_range_states() {
+    let brief = range(
+        "xx.brief",
+        sitting_up_for(2 * SECOND),
+        sliding(2 * SECOND),
+        70.0,
+        140.0,
+    );
+    let day = day(&[(0, "supine"), (4 * SECOND, "seated")]);
+    let report = each_second(&sitting_up_dips(vec![brief]), &day, &dipping(3, 12));
+    assert_eq!(
+        report.verdict(),
+        CheckVerdict::Pass,
+        "the 4 s windows from 6 s and 7 s lie in the 4 s the longer range states, not the 2 s"
+    );
+    assert_eq!(result(&report, "xx.every").judged(), 2);
+}
+
+#[test]
+fn a_window_of_a_length_the_change_has_no_range_for_is_not_judged_in_the_time_its_shift_lasts() {
+    let set = set(
+        vec![
+            range("xx.every", Scope::Every, sliding(4 * SECOND), 0.0, 20.0),
+            range(
+                "xx.sitting-up",
+                sitting_up_for(4 * SECOND),
+                sliding(2 * SECOND),
+                0.0,
+                40.0,
+            ),
+        ],
+        Vec::new(),
+    );
+    let day = day(&[(0, "supine"), (8 * SECOND, "seated")]);
+    let mut values = [10.0; 16];
+    values[6..10].fill(30.0);
+    let report = each_second(&set, &day, &values);
+    assert_eq!(
+        report.verdict(),
+        CheckVerdict::Pass,
+        "the 4 s windows holding 30s cross the change or start in its 4 s, which its 2 s windows cover"
+    );
+    assert_eq!(report.gaps(), []);
+    let judged = (
+        result(&report, "xx.sitting-up").judged(),
+        result(&report, "xx.every").judged(),
+    );
+    assert_eq!(
+        judged,
+        (5, 6),
+        "2 s windows ending at 8 s to 12 s; 4 s windows ending at 3 s to 7 s and at 15 s"
+    );
+}
+
+#[test]
+fn a_window_that_belongs_to_two_changes_blocks_at_the_first_after_its_first_value() {
+    let change = |from, to| Scope::Change {
+        from: Activity::new(from),
+        to: Activity::new(to),
+        lasting: NonZeroU64::new(4 * SECOND).expect("not zero"),
+    };
+    let set = set(
+        vec![
+            range("xx.every", Scope::Every, sliding(4 * SECOND), 0.0, 100.0),
+            range(
+                "xx.sitting-up",
+                change("supine", "seated"),
+                sliding(4 * SECOND),
+                0.0,
+                100.0,
+            ),
+            range(
+                "xx.standing-up",
+                change("seated", "standing"),
+                sliding(4 * SECOND),
+                0.0,
+                100.0,
+            ),
+        ],
+        Vec::new(),
+    );
+    let day = day(&[(0, "supine"), (4 * SECOND, "seated"), (6 * SECOND, "standing")]);
+    let report = each_second(&set, &day, &[50.0; 12]);
+    assert_eq!(report.verdict(), CheckVerdict::Blocked);
+    let named = |from, to, seconds| RangeGap::NoChangeRange {
+        row: reading(),
+        method: METHOD,
+        from: Activity::new(from),
+        to: Activity::new(to),
+        at: at(seconds * SECOND),
+    };
+    assert_eq!(
+        report.gaps(),
+        [named("supine", "seated", 4), named("seated", "standing", 6)],
+        "the window from 3 s crosses both changes, and those from 4 s and 5 s start in sitting up's 4 s and cross standing up"
+    );
 }
 
 #[test]

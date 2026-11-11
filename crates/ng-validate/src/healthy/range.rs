@@ -126,7 +126,8 @@ pub enum RangeGap {
         method: &'static str,
         activity: Activity,
     },
-    /// A window across this change, whose activities' ranges differ, and no range of the change's own.
+    /// A window that no one range judges at this change: it crosses the change, whose activities' ranges differ
+    /// and which has no range of its own, or it belongs to this change and to another whose shift it lies in.
     NoChangeRange {
         row: RowKind,
         method: &'static str,
@@ -161,24 +162,31 @@ struct Span {
 /// both its activities fall back to, or by nothing, which blocks.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Across {
-    Own(usize),
+    /// The change's range of this length, if it has one, and the end of the longest shift its ranges state.
+    Own {
+        range: Option<usize>,
+        until_ns: u64,
+    },
     Shared,
     Unranged,
 }
 
-/// The running sum and count of values not present before one value, and that value's span.
+/// The running sum and count of values not present before one value, that value's span, and the instant it
+/// covers: a sample's own, or the start of a time mean's period.
 #[derive(Clone, Copy)]
 struct Before {
     sum: Compensated,
     absent: u64,
     span: usize,
+    covers: u64,
 }
 
-/// One window's values: their sum, how many were not present, and the first one's span.
+/// One window's values: their sum, how many were not present, and the first one's span and instant.
 struct Window {
     sum: Compensated,
     absent: u64,
     first: usize,
+    covers: u64,
 }
 
 /// Every window of one length over one reading, one ending at each value, each from two running sums, so memory
@@ -197,11 +205,12 @@ struct Slider {
     every: Option<usize>,
 }
 impl Slider {
-    fn push(&mut self, span: usize, value: Option<Compensated>) -> Option<Window> {
+    fn push(&mut self, span: usize, covers: u64, value: Option<Compensated>) -> Option<Window> {
         self.held.push_back(Before {
             sum: self.sum,
             absent: self.absent,
             span,
+            covers,
         });
         self.sum = self.sum.plus(value.unwrap_or(Compensated::ZERO));
         self.absent += u64::from(value.is_none());
@@ -217,25 +226,30 @@ impl Slider {
             sum: self.sum.minus(first.sum),
             absent: self.absent - first.absent,
             first: first.span,
+            covers: first.covers,
         })
     }
-    /// The range that judges a window from span `first` to span `last`, or the change into a span that no range
-    /// covers. A window across more than one change falls back to the every-activity range only where each of its
-    /// changes would.
-    fn judging(&self, first: usize, last: usize) -> Result<Option<usize>, usize> {
-        if first == last {
-            return Ok(self.within[last]);
-        }
-        if first + 1 == last {
-            return match self.across[last - 1] {
-                Across::Own(range) => Ok(Some(range)),
-                Across::Shared => Ok(self.every),
-                Across::Unranged => Err(last),
-            };
-        }
-        match (first + 1..=last).find(|&change| self.across[change - 1] != Across::Shared) {
-            Some(change) => Err(change),
-            None => Ok(self.every),
+    /// The range that judges a window from span `first`, whose first value covers `covers`, to span `last`, or else
+    /// the span whose change no one range judges it at. A window belongs to a change with ranges of its own when it
+    /// crosses the change or its first value lies in the time the change's shift lasts, and only that change's
+    /// range of the window's length judges a window that belongs to one. A window that belongs to two, or crosses
+    /// a change no range judges, blocks at the first such change after its first value (record 0004).
+    fn judging(&self, first: usize, covers: u64, last: usize) -> Result<Option<usize>, usize> {
+        let lasting = (first.checked_sub(1)).and_then(|change| match self.across[change] {
+            Across::Own { range, until_ns } if covers < until_ns => Some(range),
+            Across::Own { .. } | Across::Shared | Across::Unranged => None,
+        });
+        let mut unshared = (first + 1..=last).filter(|&change| self.across[change - 1] != Across::Shared);
+        let Some(change) = unshared.next() else {
+            return Ok(match lasting {
+                Some(range) => range,
+                None if first == last => self.within[last],
+                None => self.every,
+            });
+        };
+        match (lasting, unshared.next(), self.across[change - 1]) {
+            (None, None, Across::Own { range, .. }) => Ok(range),
+            _ => Err(change),
         }
     }
 }
@@ -271,17 +285,16 @@ impl Reading {
                 .find(|&&(_, held, by)| (held, by) == (scope, averaging))
                 .map(|&(range, _, _)| range)
         };
-        let change = |from: Activity, to: Activity, averaging: Averaging| {
-            (own.iter())
-                .find(|&&(_, scope, by)| match scope {
+        let changes = |from: Activity, to: Activity| {
+            own.iter()
+                .filter_map(move |&(range, scope, averaging)| match scope {
                     Scope::Change {
                         from: left,
                         to: entered,
-                        ..
-                    } => (left, entered, by) == (from, to, averaging),
-                    Scope::Every | Scope::During(_) => false,
+                        lasting,
+                    } if (left, entered) == (from, to) => Some((range, averaging, lasting.get())),
+                    Scope::Every | Scope::During(_) | Scope::Change { .. } => None,
                 })
-                .map(|&(range, _, _)| range)
         };
         let during = |activity: Activity| own.iter().any(|&(_, scope, _)| scope == Scope::During(activity));
         let every = own.iter().any(|&(_, scope, _)| scope == Scope::Every);
@@ -306,8 +319,12 @@ impl Reading {
                 let across = (spans.windows(2))
                     .map(|pair| {
                         let (from, to) = (pair[0].activity, pair[1].activity);
-                        match change(from, to, sliding) {
-                            Some(range) => Across::Own(range),
+                        match changes(from, to).map(|(_, _, lasting)| lasting).max() {
+                            Some(lasting) => Across::Own {
+                                range: (changes(from, to).find(|&(_, by, _)| by == sliding))
+                                    .map(|(range, _, _)| range),
+                                until_ns: pair[1].start.nanoseconds().saturating_add(lasting),
+                            },
                             None if !during(from) && !during(to) => Across::Shared,
                             None => Across::Unranged,
                         }
@@ -468,10 +485,10 @@ impl RangeFold {
             );
         }
         for slider in &mut fold.sliders {
-            let Some(window) = slider.push(span, value) else {
+            let Some(window) = slider.push(span, covers, value) else {
                 continue;
             };
-            match slider.judging(window.first, span) {
+            match slider.judging(window.first, window.covers, span) {
                 Ok(Some(range)) => {
                     let mean = mean(window.sum, window.absent, slider.count);
                     judge(&limits[range], &mut results[range], mean, at, slider.length_ns);

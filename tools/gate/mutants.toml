@@ -922,15 +922,15 @@ test = "-p ng-validate --lib healthy::tests::a_reading_that_leaves_its_range_bet
 [[mutant]]
 name = "healthy-range-change-takes-an-activitys-range"
 path = "crates/ng-validate/src/healthy/range.rs"
-old = '''if first == last {'''
-new = '''if first + 1 >= last {'''
+old = '''(None, None, Across::Own { range, .. }) => Ok(range),'''
+new = '''(None, None, Across::Own { .. }) => Ok(self.within[last]),'''
 test = "-p ng-validate --lib healthy::tests::a_window_across_a_change_takes_the_changes_own_range"
 
 [[mutant]]
 name = "healthy-range-unranged-change-passes"
 path = "crates/ng-validate/src/healthy/range.rs"
-old = '''Across::Unranged => Err(last),'''
-new = '''Across::Unranged => Ok(None),'''
+old = '''None => Across::Unranged,'''
+new = '''None => Across::Shared,'''
 test = "-p ng-validate --lib healthy::tests::a_change_between_activities_with_different_ranges_and_none_of_its_own_blocks_naming_the_change"
 
 [[mutant]]
@@ -1048,8 +1048,8 @@ test = "-p ng-validate --lib healthy::tests::a_time_mean_whole_period_holds_ever
 [[mutant]]
 name = "healthy-range-window-across-two-changes-never-judged"
 path = "crates/ng-validate/src/healthy/range.rs"
-old = '''None => Ok(self.every),'''
-new = '''None => Ok(None),'''
+old = '''None => self.every,'''
+new = '''None => None,'''
 test = "-p ng-validate --lib healthy::tests::a_window_across_two_shared_changes_is_judged_by_the_every_activity_range"
 
 [[mutant]]
@@ -1072,3 +1072,38 @@ path = "crates/ng-contract/src/healthy.rs"
 old = '''&& known.scope.same_activities(range.scope)'''
 new = '''&& known.scope == range.scope'''
 test = "-p ng-contract --lib healthy::tests::a_set_holds_one_entry_per_id_per_reading_scope_and_averaging_and_one_variation_per_reading"
+
+[[mutant]]
+name = "healthy-range-owned-period-judged-by-the-activitys-range"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''Some(range) => range,'''
+new = '''Some(_) => self.within[last],'''
+test = "-p ng-validate --lib healthy::tests::a_changes_range_judges_each_window_in_the_time_its_shift_lasts"
+
+[[mutant]]
+name = "healthy-range-owned-period-drops-lasting"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''until_ns: pair[1].start.nanoseconds().saturating_add(lasting),'''
+new = '''until_ns: pair[1].start.nanoseconds(),'''
+test = "-p ng-validate --lib healthy::tests::a_changes_range_judges_each_window_in_the_time_its_shift_lasts"
+
+[[mutant]]
+name = "healthy-range-owned-period-takes-the-shortest-lasting"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''.map(|(_, _, lasting)| lasting).max()'''
+new = '''.map(|(_, _, lasting)| lasting).min()'''
+test = "-p ng-validate --lib healthy::tests::a_change_owns_the_time_its_longest_lasting_range_states"
+
+[[mutant]]
+name = "healthy-range-owned-period-falls-back-to-every"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''Some(range) => range,'''
+new = '''Some(range) => range.or(self.every),'''
+test = "-p ng-validate --lib healthy::tests::a_window_of_a_length_the_change_has_no_range_for_is_not_judged_in_the_time_its_shift_lasts"
+
+[[mutant]]
+name = "healthy-range-window-in-two-changes-judged"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''(None, None, Across::Own { range, .. }) => Ok(range),'''
+new = '''(_, None, Across::Own { range, .. }) => Ok(range),'''
+test = "-p ng-validate --lib healthy::tests::a_window_that_belongs_to_two_changes_blocks_at_the_first_after_its_first_value"
