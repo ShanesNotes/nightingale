@@ -2,9 +2,10 @@ use crate::identity::{Canonical, Seal};
 use crate::landing::Bracket;
 use crate::pinned::turn;
 use crate::{
-    AdmissionError, ByteReader, Chloride, CompiledBody, CoupledProblem, Cycle, Digest, Dimensionless,
-    EngineFault, EngineFaultKind, Interval, Malformed, Measure, Potassium, Pressure, Refused, SimTime,
-    Sodium, Species, StepTicket, Substance, Temperature, TrialFailure, VerifiedStep, Water,
+    AdmissionError, AminoAcids, ByteReader, Calcium, Chloride, CompiledBody, CoupledProblem, Cycle, DietBase,
+    Digest, Dimensionless, EngineFault, EngineFaultKind, Glucose, Interval, Iron, Magnesium, Malformed,
+    Measure, Phosphate, Potassium, Pressure, Refused, SimTime, Sodium, Species, StepTicket, Temperature,
+    TrialFailure, Triglyceride, VerifiedStep, Water,
 };
 use core::num::NonZeroU64;
 
@@ -53,6 +54,96 @@ pub enum BoundaryInput {
     Room(Room),
     /// The bladder's outlet from this instant until the next void.
     Void(Gate),
+    Meal(Meal),
+}
+/// A meal: one event with one id, which lands whole and once. It delivers each species with an amount above zero
+/// into the gut, from the event's instant until `ends`, as a delivery of its own whose id comes from the meal's.
+pub struct Meal {
+    ends: SimTime,
+    amounts: [f64; Meal::SPECIES.len()],
+}
+impl Meal {
+    /// Body 01's boundary rows, in their order.
+    pub const SPECIES: [Species; 12] = [
+        Species::Water,
+        Species::Sodium,
+        Species::Potassium,
+        Species::Chloride,
+        Species::Glucose,
+        Species::Triglyceride,
+        Species::AminoAcids,
+        Species::DietBase,
+        Species::Calcium,
+        Species::Phosphate,
+        Species::Magnesium,
+        Species::Iron,
+    ];
+    /// The gut's boundary for each species, in the order of `SPECIES`.
+    pub const BOUNDARIES: [&'static str; 12] = [
+        "gut water",
+        "gut sodium",
+        "gut potassium",
+        "gut chloride",
+        "gut glucose",
+        "gut triglyceride",
+        "gut amino acids",
+        "gut diet base",
+        "gut calcium",
+        "gut phosphate",
+        "gut magnesium",
+        "gut iron",
+    ];
+    pub fn new(ends: SimTime) -> Self {
+        Self {
+            ends,
+            amounts: [0.0; Meal::SPECIES.len()],
+        }
+    }
+    pub fn with<Q: Eaten>(mut self, amount: Measure<Q>) -> Self {
+        self.amounts[<Q as eaten::Sealed>::PLACE] = amount.value();
+        self
+    }
+}
+const fn place(species: Species) -> usize {
+    let mut at = 0;
+    while Meal::SPECIES[at] as usize != species as usize {
+        at += 1;
+    }
+    at
+}
+mod eaten {
+    pub trait Sealed: crate::Substance {
+        const PLACE: usize = super::place(Self::SPECIES);
+    }
+}
+/// A species a meal delivers: exactly those of `Meal::SPECIES`.
+pub trait Eaten: eaten::Sealed {}
+macro_rules! eaten {
+    ($($species:ident),*) => {$(
+        impl eaten::Sealed for $species {}
+        impl Eaten for $species {}
+    )*};
+}
+eaten!(
+    Water,
+    Sodium,
+    Potassium,
+    Chloride,
+    Glucose,
+    Triglyceride,
+    AminoAcids,
+    DietBase,
+    Calcium,
+    Phosphate,
+    Magnesium,
+    Iron
+);
+/// A meal part's id, from the meal's id and the species' place.
+fn part_id(meal: InputId, place: usize) -> InputId {
+    let mut out = Canonical::new("ng-contract meal part 1");
+    meal.seal(&mut out);
+    out.number(place as u64);
+    InputId::new(out.digest())
 }
 /// The time of day at the event's instant. The clock's phase is zero at midnight and makes one turn a day.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -257,10 +348,11 @@ pub(crate) struct Delivery {
     rate: f64,
     kind: Kind,
 }
-/// A posture and a held input never end, and each replaces the one of its kind before it.
+/// A posture and a held input never end, and each replaces the one of its kind before it. A delivery names its
+/// species by its place in `Meal::SPECIES`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Kind {
-    Species(Species),
+    Delivered(usize),
     Posture,
     Clock(u64),
     Sleep(Sleep),
@@ -271,7 +363,7 @@ impl Kind {
     /// After the fields every payload shares, so a delivery and a posture keep the bytes they had.
     fn seal_setting(&self, out: &mut Canonical) {
         match *self {
-            Kind::Species(_) | Kind::Posture => {}
+            Kind::Delivered(_) | Kind::Posture => {}
             Kind::Clock(reading) => out.number(reading),
             Kind::Sleep(sleep) => sleep.value().seal(out),
             Kind::Room(values) => values.iter().for_each(|value| value.seal(out)),
@@ -311,11 +403,9 @@ impl BoundaryPort {
     pub fn new(events: Vec<BoundaryEvent>) -> Result<Self, AdmissionError> {
         let mut deliveries: Vec<Delivery> = Vec::with_capacity(events.len());
         for event in events {
-            let delivery = Delivery::parsed(event)?;
-            match deliveries.iter().find(|known| known.id == delivery.id) {
-                Some(known) if *known == delivery => {}
-                Some(_) => return Err(AdmissionError::InputConflict { id: delivery.id }),
-                None => deliveries.push(delivery),
+            let arrival = Delivery::parsed(event)?;
+            if arrival.new_to(&deliveries)? {
+                deliveries.extend(arrival.parts);
             }
         }
         deliveries.sort_by_key(|delivery| (delivery.at, delivery.id));
@@ -361,10 +451,80 @@ impl BoundaryPort {
             .map(|delivery| delivery.id)
     }
 }
+/// One event's deliveries: a meal's parts, or the one delivery of any other event.
+struct Arrival {
+    id: InputId,
+    /// Every id the event can hold a part under.
+    ids: Vec<InputId>,
+    parts: Vec<Delivery>,
+}
+impl Arrival {
+    fn one(delivery: Delivery) -> Self {
+        Self {
+            id: delivery.id,
+            ids: vec![delivery.id],
+            parts: vec![delivery],
+        }
+    }
+    /// The same parts again are the same request; another payload under the same id is a conflict.
+    fn new_to(&self, known: &[Delivery]) -> Result<bool, AdmissionError> {
+        let found: Vec<&Delivery> = (known.iter())
+            .filter(|known| self.ids.contains(&known.id))
+            .collect();
+        if found.is_empty() {
+            return Ok(true);
+        }
+        let same = found.len() == self.parts.len() && self.parts.iter().all(|part| found.contains(&part));
+        if same {
+            Ok(false)
+        } else {
+            Err(AdmissionError::InputConflict { id: self.id })
+        }
+    }
+    fn payload(&self) -> Digest {
+        match self.parts.as_slice() {
+            [part] => part.payload(),
+            parts => {
+                let mut out = Canonical::new("ng-contract meal 1");
+                parts.seal(&mut out);
+                out.digest()
+            }
+        }
+    }
+    /// A refusal names the event, never one of a meal's parts.
+    fn named(&self, error: AdmissionError) -> AdmissionError {
+        match error {
+            AdmissionError::EventBeforeHead { .. } => AdmissionError::EventBeforeHead { id: self.id },
+            other => other,
+        }
+    }
+}
 impl Delivery {
-    fn parsed(event: BoundaryEvent) -> Result<Self, AdmissionError> {
+    /// Refuses the whole meal when any part would be refused, so no part lands alone.
+    fn meal(id: InputId, at: SimTime, meal: Meal) -> Result<Arrival, AdmissionError> {
+        let Meal { ends, amounts } = meal;
+        if ends <= at || amounts.iter().all(|amount| *amount == 0.0) {
+            return Err(AdmissionError::EmptyDelivery { id });
+        }
+        if amounts.iter().any(|amount| *amount < 0.0) {
+            return Err(AdmissionError::NegativeDelivery { id });
+        }
+        let mut parts = Vec::new();
+        for (place, amount) in amounts
+            .into_iter()
+            .enumerate()
+            .filter(|(_, amount)| *amount > 0.0)
+        {
+            let boundary = Meal::BOUNDARIES[place];
+            let part = Delivery::checked(part_id(id, place), at, boundary, amount, ends, place);
+            parts.push(part.map_err(|_| AdmissionError::UnboundedDelivery { id })?);
+        }
+        let ids = (0..Meal::SPECIES.len()).map(|place| part_id(id, place)).collect();
+        Ok(Arrival { id, ids, parts })
+    }
+    fn parsed(event: BoundaryEvent) -> Result<Arrival, AdmissionError> {
         let BoundaryEvent { id, at, payload } = event;
-        fn delivered<Q: Substance>(
+        fn delivered<Q: Eaten>(
             id: InputId,
             at: SimTime,
             delivery: Delivered<Q>,
@@ -374,9 +534,17 @@ impl Delivery {
                 amount,
                 ends,
             } = delivery;
-            Delivery::checked(id, at, boundary, amount.value(), ends, Q::SPECIES)
+            Delivery::checked(
+                id,
+                at,
+                boundary,
+                amount.value(),
+                ends,
+                <Q as eaten::Sealed>::PLACE,
+            )
         }
-        match payload {
+        let single = match payload {
+            BoundaryInput::Meal(meal) => return Self::meal(id, at, meal),
             BoundaryInput::Water(delivery) => delivered(id, at, delivery),
             BoundaryInput::Sodium(delivery) => delivered(id, at, delivery),
             BoundaryInput::Potassium(delivery) => delivered(id, at, delivery),
@@ -394,7 +562,8 @@ impl Delivery {
             }
             BoundaryInput::Room(room) => Ok(Self::held(id, at, Kind::Room(room.values()))),
             BoundaryInput::Void(gate) => Ok(Self::held(id, at, Kind::Void(gate))),
-        }
+        };
+        single.map(Arrival::one)
     }
     fn posture(id: InputId, at: SimTime, trunk: f64, legs: Legs) -> Self {
         Self {
@@ -409,7 +578,7 @@ impl Delivery {
     }
     fn held(id: InputId, at: SimTime, kind: Kind) -> Self {
         let boundary = match kind {
-            Kind::Species(_) | Kind::Posture => POSTURE,
+            Kind::Delivered(_) | Kind::Posture => POSTURE,
             Kind::Clock(_) => "clock",
             Kind::Sleep(_) => "sleep",
             Kind::Room(_) => "room",
@@ -431,7 +600,7 @@ impl Delivery {
         boundary: &'static str,
         amount: f64,
         ends: SimTime,
-        species: Species,
+        place: usize,
     ) -> Result<Self, AdmissionError> {
         if ends <= at {
             return Err(AdmissionError::EmptyDelivery { id });
@@ -451,15 +620,15 @@ impl Delivery {
             amount,
             ends,
             rate,
-            kind: Kind::Species(species),
+            kind: Kind::Delivered(place),
         })
     }
     /// A posture or a held input, which no boundary carries.
     pub(crate) fn held_event(&self) -> bool {
-        !matches!(self.kind, Kind::Species(_))
+        !matches!(self.kind, Kind::Delivered(_))
     }
     pub(crate) fn carries(&self, species: Species) -> bool {
-        self.kind == Kind::Species(species)
+        matches!(self.kind, Kind::Delivered(place) if Meal::SPECIES[place] == species)
     }
     fn payload(&self) -> Digest {
         let mut out = Canonical::new("ng-contract delivery 1");
@@ -686,24 +855,26 @@ impl PendingInputs {
         head: SimTime,
         event: BoundaryEvent,
     ) -> Result<Digest, AdmissionError> {
-        let delivery = Delivery::parsed(event)?;
-        let id = delivery.id;
-        if let Some(known) = self.timeline.iter().find(|known| known.id == id) {
-            if *known == delivery {
-                return Ok(known.payload());
-            }
-            return Err(AdmissionError::InputConflict { id });
+        let arrival = Delivery::parsed(event)?;
+        let (id, payload) = (arrival.id, arrival.payload());
+        if !arrival.new_to(&self.timeline)? {
+            return Ok(payload);
         }
-        body.check_delivery(&delivery, head)?;
         let fence = self.past.fence;
-        if delivery.at < fence {
-            return Err(AdmissionError::EventBeforeFence { id, fence });
+        for part in &arrival.parts {
+            body.check_delivery(part, head)
+                .map_err(|error| arrival.named(error))?;
+            if part.at < fence {
+                return Err(AdmissionError::EventBeforeFence { id, fence });
+            }
         }
-        let waiting = &self.timeline[self.past.cursor..];
-        let key = (delivery.at, delivery.id);
-        let at = waiting.partition_point(|known| (known.at, known.id) < key);
-        self.timeline.insert(self.past.cursor + at, delivery);
-        Ok(delivery.payload())
+        for part in arrival.parts {
+            let waiting = &self.timeline[self.past.cursor..];
+            let key = (part.at, part.id);
+            let at = waiting.partition_point(|known| (known.at, known.id) < key);
+            self.timeline.insert(self.past.cursor + at, part);
+        }
+        Ok(payload)
     }
     /// The earliest stamp `admit` takes at `head`.
     pub fn earliest_stamp(&self, head: SimTime) -> SimTime {
@@ -807,9 +978,9 @@ impl PendingInputs {
                 }
                 VOID_PAYLOAD => Delivery::held(id, at, Kind::Void(Gate::of_value(read.float()?)?)),
                 tag => {
-                    let species = payload_species(tag)?;
+                    let place = delivered_place(tag)?;
                     let boundary = body.boundary_name(name).ok_or(Malformed)?;
-                    Delivery::checked(id, at, boundary, amount, ends, species).map_err(|_| Malformed)?
+                    Delivery::checked(id, at, boundary, amount, ends, place).map_err(|_| Malformed)?
                 }
             };
             let start_of_time = SimTime::from_ns(0);
@@ -889,10 +1060,8 @@ fn land<T>(
 }
 
 const POSTURE: &str = "posture";
-const WATER_PAYLOAD: u64 = 0;
-const SODIUM_PAYLOAD: u64 = 1;
-const POTASSIUM_PAYLOAD: u64 = 2;
-const CHLORIDE_PAYLOAD: u64 = 3;
+/// The record tag of a delivery of each species of `Meal::SPECIES`.
+const DELIVERED_PAYLOADS: [u64; Meal::SPECIES.len()] = [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12];
 const POSTURE_PAYLOAD: u64 = 4;
 const CLOCK_PAYLOAD: u64 = 13;
 const SLEEP_PAYLOAD: u64 = 14;
@@ -901,10 +1070,7 @@ const VOID_PAYLOAD: u64 = 16;
 
 fn payload_tag(kind: Kind) -> u64 {
     match kind {
-        Kind::Species(Species::Sodium) => SODIUM_PAYLOAD,
-        Kind::Species(Species::Potassium) => POTASSIUM_PAYLOAD,
-        Kind::Species(Species::Chloride) => CHLORIDE_PAYLOAD,
-        Kind::Species(_) => WATER_PAYLOAD,
+        Kind::Delivered(place) => DELIVERED_PAYLOADS[place],
         Kind::Posture => POSTURE_PAYLOAD,
         Kind::Clock(_) => CLOCK_PAYLOAD,
         Kind::Sleep(_) => SLEEP_PAYLOAD,
@@ -912,14 +1078,10 @@ fn payload_tag(kind: Kind) -> u64 {
         Kind::Void(_) => VOID_PAYLOAD,
     }
 }
-fn payload_species(tag: u64) -> Result<Species, Malformed> {
-    match tag {
-        WATER_PAYLOAD => Ok(Species::Water),
-        SODIUM_PAYLOAD => Ok(Species::Sodium),
-        POTASSIUM_PAYLOAD => Ok(Species::Potassium),
-        CHLORIDE_PAYLOAD => Ok(Species::Chloride),
-        _ => Err(Malformed),
-    }
+fn delivered_place(tag: u64) -> Result<usize, Malformed> {
+    (DELIVERED_PAYLOADS.iter())
+        .position(|known| *known == tag)
+        .ok_or(Malformed)
 }
 const DELIVERY_BYTES: usize = 32 + 8 + 8 + 8 + 8 + 8;
 
@@ -960,7 +1122,7 @@ impl DriveFrame {
     /// `(time, id)` order. The clock's value is the one at `now`.
     fn take(&mut self, delivery: &Delivery, now: SimTime, reads: &[Held]) {
         match delivery.kind {
-            Kind::Species(_) => self.add(delivery.boundary, delivery.rate),
+            Kind::Delivered(_) => self.add(delivery.boundary, delivery.rate),
             Kind::Posture => (self.trunk, self.legs) = (delivery.amount, delivery.rate),
             Kind::Clock(reading) => {
                 let (cosine, sine) = turn(minute_of_day(delivery.at, reading, now), EIGHTH_OF_A_DAY);

@@ -1383,8 +1383,8 @@ pub use admission::*;
 pub use anatomy::*;
 pub use body::*;
 pub use boundary::{
-    AppliedInputs, Attempt, BoundaryEvent, BoundaryInput, BoundaryPort, Clock, Delivered, Gate, Held,
-    InputId, Legs, PendingInputs, Posture, Room, Sleep, WaterDelivery,
+    AppliedInputs, Attempt, BoundaryEvent, BoundaryInput, BoundaryPort, Clock, Delivered, Eaten, Gate, Held,
+    InputId, Legs, Meal, PendingInputs, Posture, Room, Sleep, WaterDelivery,
 };
 pub use compensated::*;
 pub use conservation::*;
