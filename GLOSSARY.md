@@ -614,6 +614,9 @@ The systems the arena runs for real: pulsatile cardiovascular, fluids, renal, a 
 **Whole body**:
 All 13 systems, the receptor layer and the boundary, as body ticket 01 plans them at rung 0. Its census accounts for every arrow of the coupling map, field by field.
 
+**Assembly**:
+The set of systems one compiled body holds: the slice or the whole body. Each assembly has its own census. The code's `Assembly` is the builder that issues each card's scope and compiles one body from them: it builds an assembly in this sense and is not one.
+
 **Held stand-in**:
 A system's laws that stand in for physiology, held by a declaration that names every route on which they supply or remove an amount, so stability bought with held support shows in the certificate. A card outside the slice stands in whole, and a card with a crate keeps only its named holds this way.
 _Avoid_: stub, mock
