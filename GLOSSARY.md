@@ -17,7 +17,7 @@ The one person an engine simulates, described by a packet.
 The bundle of one patient's parameters and the day the patient lives. It holds every parameter value with where it came from (cited, drawn from a population range or chosen inside one with a reason, derived by an identity, fitted when the start state is solved, or inferred by a model), the anchors the start state must meet, the day (sleep, posture, meals, drinks and room conditions) that the run's boundary events are made from, and the source, population and inference records behind them. A packet is either reviewed (clinical values with citations, and a count of its inferred values) or a synthetic test fixture. Its hash is fixed at admission and is part of the run's identity.
 
 **Day**:
-The timeline of the patient's day that a packet holds: posture, meals, drinks, the clock, sleep, room conditions and voids. Admission makes the run's boundary events from it, and the packet's hash covers it. A held input stated before the anchor moment is restamped at it, and a meal is one item of the day. A reviewed packet always holds a day; only a synthetic fixture may hold none.
+The timeline of the patient's day that a packet holds: posture, meals, drinks, the clock, sleep, room conditions and voids. Admission makes the run's boundary events from it, and the packet's hash covers it. A held input stated before the anchor moment is restamped at it, unless one of its kind is stated at the moment. A delivery that ended before the moment is dropped, and one that runs across it is refused. A meal is one item of the day. A reviewed packet always holds a day; only a synthetic fixture may hold none.
 
 **Admission**:
 The moment a run starts. The start state is solved once here and never imposed again.
