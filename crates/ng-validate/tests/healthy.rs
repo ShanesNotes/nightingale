@@ -27,7 +27,8 @@ fn excursion() -> TwoReservoirs {
         to: at(60),
         amount: water(100_000.0),
     };
-    let case = TwoReservoirs::delivering([water(500_500.0), water(499_500.0)], vec![delivery]).expect("a body");
+    let case =
+        TwoReservoirs::delivering([water(500_500.0), water(499_500.0)], vec![delivery]).expect("a body");
     case.until(at(600))
 }
 
@@ -39,8 +40,17 @@ fn amount(case: &TwoReservoirs) -> RowKind {
 fn set(case: &TwoReservoirs, high: f64) -> HealthyRangeSet<SyntheticFixture> {
     let averaging = Averaging::Sliding(count(4 * SECOND));
     let (low, high) = (water(490_000.0), water(high));
-    let range = HealthyRange::synthetic("xx.reservoir", amount(case), METHOD, Scope::Every, averaging, low, high, "synthetic")
-        .expect("a range");
+    let range = HealthyRange::synthetic(
+        "xx.reservoir",
+        amount(case),
+        METHOD,
+        Scope::Every,
+        averaging,
+        low,
+        high,
+        "synthetic",
+    )
+    .expect("a range");
     HealthyRangeSet::synthetic(vec![range], Vec::new()).expect("a set")
 }
 
@@ -98,14 +108,28 @@ fn a_run_pushed_past_its_healthy_range_for_a_while_fails_naming_the_reading_and_
     let [result] = range.results() else {
         panic!("one result for the one range: {:?}", range.results());
     };
-    assert_eq!((result.range(), result.row(), result.method()), ("xx.reservoir", amount(&case), METHOD));
+    assert_eq!(
+        (result.range(), result.row(), result.method()),
+        ("xx.reservoir", amount(&case), METHOD)
+    );
     let failure = result.failure().expect("a window above 575 000");
     let opens = SimTime::from_ns(failure.end().nanoseconds() - failure.length_ns());
-    assert!(at(40) <= opens && failure.end() <= at(60), "{failure:?} lies inside the delivery that drives the excursion");
+    assert!(
+        at(40) <= opens && failure.end() <= at(60),
+        "{failure:?} lies inside the delivery that drives the excursion"
+    );
     let mean = failure.mean().expect("every value present");
     assert!(!mean.at_most(Compensated::of(&water(575_000.0))), "{mean:?}");
-    assert_eq!(range.lens(), lens(&case).digest(), "the report names the learner's lens");
-    assert_eq!(checked.returns.verdict(), CheckVerdict::Pass, "the fixture has no anchor to return to");
+    assert_eq!(
+        range.lens(),
+        lens(&case).digest(),
+        "the report names the learner's lens"
+    );
+    assert_eq!(
+        checked.returns.verdict(),
+        CheckVerdict::Pass,
+        "the fixture has no anchor to return to"
+    );
 }
 
 #[test]
@@ -115,10 +139,20 @@ fn a_corrected_set_rechecks_a_finished_replay_and_gives_a_new_result_for_the_sam
     let corrected = checked(&case, &set(&case, 700_000.0));
     assert_eq!(first.run, corrected.run, "one run identity before and after");
     assert_eq!((first.range.run(), corrected.range.run()), (first.run, first.run));
-    assert_eq!(first.range.seal(), corrected.range.seal(), "the replay reached the same last revision");
+    assert_eq!(
+        first.range.seal(),
+        corrected.range.seal(),
+        "the replay reached the same last revision"
+    );
     assert_ne!(first.range.set(), corrected.range.set());
-    assert_eq!((first.range.verdict(), corrected.range.verdict()), (CheckVerdict::Fail, CheckVerdict::Pass));
-    assert_eq!((first.returns.run(), first.returns.set()), (first.run, first.range.set()));
+    assert_eq!(
+        (first.range.verdict(), corrected.range.verdict()),
+        (CheckVerdict::Fail, CheckVerdict::Pass)
+    );
+    assert_eq!(
+        (first.returns.run(), first.returns.set()),
+        (first.run, first.range.set())
+    );
 }
 
 #[test]
@@ -126,7 +160,10 @@ fn the_checks_read_this_bodys_lens_from_admission() {
     let case = excursion();
     let closed = TwoReservoirs::closed().expect("another body");
     let elsewhere = closed.body().lens(Vec::new(), count(SECOND)).expect("a lens");
-    assert_eq!(BareLens::new(case.body(), &elsewhere).err(), Some(ReadingCheckError::OtherBody));
+    assert_eq!(
+        BareLens::new(case.body(), &elsewhere).err(),
+        Some(ReadingCheckError::OtherBody)
+    );
     let core = ReferenceIntegrator::new(8 * SECOND);
     let store = MemoryStore::default();
     let bare = BareLens::new(case.body(), &lens(&case)).expect("this body's lens");

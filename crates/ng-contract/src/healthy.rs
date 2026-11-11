@@ -2,7 +2,8 @@ use crate::identity::{Canonical, Seal};
 use crate::provenance::seal_trace;
 use crate::quantity::dimension;
 use crate::{
-    AdmissionError, Compensated, CompiledBody, Digest, Dimension, Measure, PacketKind, RowKind, SyntheticFixture,
+    AdmissionError, Compensated, CompiledBody, Digest, Dimension, Measure, PacketKind, RowKind,
+    SyntheticFixture,
 };
 use core::num::NonZeroU64;
 
@@ -308,7 +309,8 @@ impl CompiledBody {
     /// error, because one set serves every body.
     pub fn check_set<K: PacketKind>(&self, set: &HealthyRangeSet<K>) -> Result<(), AdmissionError> {
         let ranges = (set.ranges.iter()).map(|range| (range.id, range.row, &range.dimension));
-        let variations = (set.variations.iter()).map(|variation| (variation.id, variation.row, &variation.dimension));
+        let variations =
+            (set.variations.iter()).map(|variation| (variation.id, variation.row, &variation.dimension));
         for (id, row, dimension) in ranges.chain(variations) {
             if (self.rows().iter()).any(|known| known.kind == row && known.dimension != *dimension) {
                 return Err(AdmissionError::RangeDimension { id });
@@ -321,28 +323,17 @@ impl CompiledBody {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LawName, Pressure, Reviewed};
+    use crate::{Context, LawName, Pressure, Reviewed, Slot, Volume};
 
     const SECOND: u64 = 1_000_000_000;
+    const NIGHT: Activity = Activity::new("asleep");
+    const DAY: Activity = Activity::new("seated");
 
-    fn reading() -> RowKind {
-        RowKind::Algebraic(
-            LawName {
-                owner: "XX",
-                local: "reading",
-            }
-            .into(),
-        )
-    }
-
-    fn other_reading() -> RowKind {
-        RowKind::Algebraic(
-            LawName {
-                owner: "XX",
-                local: "other",
-            }
-            .into(),
-        )
+    const fn reading(local: &'static str) -> RowKind {
+        RowKind::Algebraic(Slot {
+            law: LawName { owner: "XX", local },
+            at: Context::Body,
+        })
     }
 
     fn limit(value: f64) -> Measure<Pressure> {
@@ -353,167 +344,245 @@ mod tests {
         Averaging::Sliding(NonZeroU64::new(seconds * SECOND).expect("not zero"))
     }
 
-    fn range(
+    /// A synthetic range's arguments, changed one at a time.
+    #[derive(Clone, Copy)]
+    struct Range {
         id: &'static str,
+        row: RowKind,
+        method: &'static str,
         scope: Scope,
         averaging: Averaging,
         low: f64,
         high: f64,
-    ) -> Result<HealthyRange<SyntheticFixture>, AdmissionError> {
-        HealthyRange::synthetic(id, reading(), "a synthetic gauge", scope, averaging, limit(low), limit(high), "synthetic")
+        note: &'static str,
+    }
+    impl Range {
+        fn of(id: &'static str) -> Self {
+            Self {
+                id,
+                row: reading("reading"),
+                method: "a synthetic gauge",
+                scope: Scope::Every,
+                averaging: sliding(4),
+                low: 0.0,
+                high: 20.0,
+                note: "synthetic",
+            }
+        }
+        fn built(self) -> Result<HealthyRange<SyntheticFixture>, AdmissionError> {
+            let Self {
+                id,
+                row,
+                method,
+                scope,
+                averaging,
+                low,
+                high,
+                note,
+            } = self;
+            HealthyRange::synthetic(id, row, method, scope, averaging, limit(low), limit(high), note)
+        }
+        fn range(self) -> HealthyRange<SyntheticFixture> {
+            self.built().expect("a range")
+        }
     }
 
-    fn variation(id: &'static str, row: RowKind, sd: f64) -> Result<WithinSubjectVariation<SyntheticFixture>, AdmissionError> {
-        WithinSubjectVariation::synthetic(id, row, "a synthetic gauge", limit(sd), "synthetic")
+    /// A synthetic variation's arguments, changed one at a time.
+    #[derive(Clone, Copy)]
+    struct Variation {
+        id: &'static str,
+        row: RowKind,
+        method: &'static str,
+        sd: f64,
+        note: &'static str,
+    }
+    impl Variation {
+        fn of(id: &'static str) -> Self {
+            Self {
+                id,
+                row: reading("reading"),
+                method: "a synthetic gauge",
+                sd: 1.0,
+                note: "synthetic",
+            }
+        }
+        fn built(self) -> Result<WithinSubjectVariation<SyntheticFixture>, AdmissionError> {
+            let Self {
+                id,
+                row,
+                method,
+                sd,
+                note,
+            } = self;
+            WithinSubjectVariation::synthetic(id, row, method, limit(sd), note)
+        }
+        fn variation(self) -> WithinSubjectVariation<SyntheticFixture> {
+            self.built().expect("a variation")
+        }
     }
 
-    fn every(id: &'static str) -> HealthyRange<SyntheticFixture> {
-        range(id, Scope::Every, sliding(4), 0.0, 20.0).expect("a range")
+    fn set(
+        ranges: Vec<HealthyRange<SyntheticFixture>>,
+        variations: Vec<WithinSubjectVariation<SyntheticFixture>>,
+    ) -> Result<HealthyRangeSet<SyntheticFixture>, AdmissionError> {
+        HealthyRangeSet::synthetic(ranges, variations)
     }
 
     #[test]
     fn a_range_whose_high_limit_is_below_its_low_one_is_refused() {
-        let reversed = range("xx.range", Scope::Every, sliding(4), 20.0, 10.0);
-        assert_eq!(reversed.err(), Some(AdmissionError::ReversedRange { id: "xx.range" }));
-        assert!(range("xx.range", Scope::Every, sliding(4), 10.0, 10.0).is_ok());
+        let reversed = Range {
+            low: 20.0,
+            high: 10.0,
+            ..Range::of("xx.range")
+        };
+        let refused = Some(AdmissionError::ReversedRange { id: "xx.range" });
+        assert_eq!(reversed.built().err(), refused);
+        let point = Range {
+            low: 10.0,
+            high: 10.0,
+            ..Range::of("xx.range")
+        };
+        assert!(point.built().is_ok());
     }
 
     #[test]
     fn a_whole_period_holds_only_during_one_activity() {
-        let night = Activity::new("asleep");
-        let day = Activity::new("seated");
+        let whole = |scope| Range {
+            scope,
+            averaging: Averaging::WholePeriod,
+            ..Range::of("xx.range")
+        };
         let refused = Some(AdmissionError::WholePeriodScope { id: "xx.range" });
-        assert_eq!(range("xx.range", Scope::Every, Averaging::WholePeriod, 0.0, 20.0).err(), refused);
-        let change = Scope::Change { from: night, to: day };
-        assert_eq!(range("xx.range", change, Averaging::WholePeriod, 0.0, 20.0).err(), refused);
-        assert!(range("xx.range", Scope::During(night), Averaging::WholePeriod, 0.0, 20.0).is_ok());
+        assert_eq!(whole(Scope::Every).built().err(), refused);
+        let change = Scope::Change { from: NIGHT, to: DAY };
+        assert_eq!(whole(change).built().err(), refused);
+        assert!(whole(Scope::During(NIGHT)).built().is_ok());
     }
 
     #[test]
     fn a_negative_within_subject_variation_is_refused() {
-        let refused = variation("xx.variation", reading(), -1.0);
-        assert_eq!(refused.err(), Some(AdmissionError::NegativeVariation { id: "xx.variation" }));
-        assert!(variation("xx.variation", reading(), 0.0).is_ok());
+        let negative = Variation {
+            sd: -1.0,
+            ..Variation::of("xx.variation")
+        };
+        let refused = Some(AdmissionError::NegativeVariation { id: "xx.variation" });
+        assert_eq!(negative.built().err(), refused);
+        let none = Variation {
+            sd: 0.0,
+            ..Variation::of("xx.variation")
+        };
+        assert!(none.built().is_ok());
     }
 
     #[test]
     fn a_set_holds_one_entry_per_id_per_reading_scope_and_averaging_and_one_variation_per_reading() {
         let repeated = |id| Some(AdmissionError::DuplicateRangeEntry { id });
-        let set = HealthyRangeSet::synthetic(vec![every("xx.a"), every("xx.a")], Vec::new());
-        assert_eq!(set.err(), repeated("xx.a"));
-        let set = HealthyRangeSet::synthetic(vec![every("xx.a"), every("xx.b")], Vec::new());
-        assert_eq!(set.err(), repeated("xx.b"));
-        let longer = range("xx.b", Scope::Every, sliding(8), 0.0, 20.0).expect("a range");
-        assert!(HealthyRangeSet::synthetic(vec![every("xx.a"), longer], Vec::new()).is_ok());
-        let variations = vec![
-            variation("xx.v", reading(), 1.0).expect("a variation"),
-            variation("xx.w", reading(), 2.0).expect("a variation"),
+        let twice = vec![Range::of("xx.a").range(), Range::of("xx.a").range()];
+        assert_eq!(set(twice, Vec::new()).err(), repeated("xx.a"));
+        let same = vec![Range::of("xx.a").range(), Range::of("xx.b").range()];
+        assert_eq!(set(same, Vec::new()).err(), repeated("xx.b"));
+        let longer = Range {
+            averaging: sliding(8),
+            ..Range::of("xx.b")
+        };
+        assert!(set(vec![Range::of("xx.a").range(), longer.range()], Vec::new()).is_ok());
+        let one_reading = vec![
+            Variation::of("xx.v").variation(),
+            Variation::of("xx.w").variation(),
         ];
-        assert_eq!(HealthyRangeSet::synthetic(Vec::new(), variations).err(), repeated("xx.w"));
-        let variations = vec![variation("xx.a", other_reading(), 1.0).expect("a variation")];
-        assert_eq!(HealthyRangeSet::synthetic(vec![every("xx.a")], variations).err(), repeated("xx.a"));
+        assert_eq!(set(Vec::new(), one_reading).err(), repeated("xx.w"));
+        let elsewhere = Variation {
+            row: reading("other"),
+            ..Variation::of("xx.a")
+        };
+        let shared_id = set(vec![Range::of("xx.a").range()], vec![elsewhere.variation()]);
+        assert_eq!(shared_id.err(), repeated("xx.a"));
     }
 
     #[test]
     fn a_set_keeps_its_entries_in_id_order() {
-        let set = HealthyRangeSet::synthetic(vec![every("xx.b"), every_longer("xx.a")], Vec::new()).expect("a set");
+        let later = Range {
+            averaging: sliding(8),
+            ..Range::of("xx.a")
+        };
+        let set = set(vec![Range::of("xx.b").range(), later.range()], Vec::new()).expect("a set");
         let ids: Vec<&str> = set.ranges().iter().map(HealthyRange::id).collect();
         assert_eq!(ids, ["xx.a", "xx.b"]);
     }
 
-    fn every_longer(id: &'static str) -> HealthyRange<SyntheticFixture> {
-        range(id, Scope::Every, sliding(8), 0.0, 20.0).expect("a range")
-    }
-
     #[test]
     fn a_set_digest_covers_every_field_of_every_entry() {
-        let night = Activity::new("asleep");
-        let day = Activity::new("seated");
-        let digest = |ranges: Vec<HealthyRange<SyntheticFixture>>, variations| {
-            HealthyRangeSet::synthetic(ranges, variations).expect("a set").digest()
-        };
-        let base = || {
-            (
-                vec![range("xx.a", Scope::During(night), sliding(4), 0.0, 20.0).expect("a range")],
-                vec![variation("xx.v", reading(), 1.0).expect("a variation")],
-            )
-        };
-        let (ranges, variations) = base();
-        let first = digest(ranges, variations);
-        let (ranges, variations) = base();
-        assert_eq!(digest(ranges, variations), first, "one set, one digest");
-        let changed: Vec<(&str, HealthyRange<SyntheticFixture>)> = vec![
-            ("id", range("xx.b", Scope::During(night), sliding(4), 0.0, 20.0).expect("a range")),
-            ("scope", range("xx.a", Scope::During(day), sliding(4), 0.0, 20.0).expect("a range")),
-            ("scope kind", range("xx.a", Scope::Every, sliding(4), 0.0, 20.0).expect("a range")),
-            (
-                "change",
-                range("xx.a", Scope::Change { from: night, to: day }, sliding(4), 0.0, 20.0).expect("a range"),
-            ),
-            ("averaging", range("xx.a", Scope::During(night), sliding(8), 0.0, 20.0).expect("a range")),
-            ("whole period", range("xx.a", Scope::During(night), Averaging::WholePeriod, 0.0, 20.0).expect("a range")),
-            ("low", range("xx.a", Scope::During(night), sliding(4), 1.0, 20.0).expect("a range")),
-            ("high", range("xx.a", Scope::During(night), sliding(4), 0.0, 21.0).expect("a range")),
-            (
-                "row",
-                HealthyRange::synthetic("xx.a", other_reading(), "a synthetic gauge", Scope::During(night), sliding(4), limit(0.0), limit(20.0), "synthetic")
-                    .expect("a range"),
-            ),
-            (
-                "method",
-                HealthyRange::synthetic("xx.a", reading(), "another gauge", Scope::During(night), sliding(4), limit(0.0), limit(20.0), "synthetic")
-                    .expect("a range"),
-            ),
-            (
-                "dimension",
-                HealthyRange::synthetic("xx.a", reading(), "a synthetic gauge", Scope::During(night), sliding(4), Measure::<crate::Volume>::new(0.0).expect("finite"), Measure::new(20.0).expect("finite"), "synthetic")
-                    .expect("a range"),
-            ),
-            (
-                "note",
-                HealthyRange::synthetic("xx.a", reading(), "a synthetic gauge", Scope::During(night), sliding(4), limit(0.0), limit(20.0), "another note")
-                    .expect("a range"),
-            ),
+        let mut range = Range::of("xx.a");
+        range.scope = Scope::During(NIGHT);
+        let variation = Variation::of("xx.v");
+        let digest = |ranges, variations| set(ranges, variations).expect("a set").digest();
+        let first = digest(vec![range.range()], vec![variation.variation()]);
+        let again = digest(vec![range.range()], vec![variation.variation()]);
+        assert_eq!(again, first, "one set, one digest");
+        let ranges: [(&str, fn(&mut Range)); 11] = [
+            ("id", |range| range.id = "xx.b"),
+            ("row", |range| range.row = reading("other")),
+            ("method", |range| range.method = "another gauge"),
+            ("activity", |range| range.scope = Scope::During(DAY)),
+            ("scope", |range| range.scope = Scope::Every),
+            ("change", |range| {
+                range.scope = Scope::Change { from: NIGHT, to: DAY }
+            }),
+            ("length", |range| range.averaging = sliding(8)),
+            ("averaging", |range| range.averaging = Averaging::WholePeriod),
+            ("low", |range| range.low = 1.0),
+            ("high", |range| range.high = 21.0),
+            ("note", |range| range.note = "another note"),
         ];
-        for (field, changed) in changed {
-            let (_, variations) = base();
-            assert_ne!(digest(vec![changed], variations), first, "a range's {field}");
+        for (field, change) in ranges {
+            let mut changed = range;
+            change(&mut changed);
+            let changed = digest(vec![changed.range()], vec![variation.variation()]);
+            assert_ne!(changed, first, "a range's {field}");
         }
-        let changed = vec![
-            ("id", variation("xx.w", reading(), 1.0).expect("a variation")),
-            ("row", variation("xx.v", other_reading(), 1.0).expect("a variation")),
-            ("sd", variation("xx.v", reading(), 2.0).expect("a variation")),
-            (
-                "method",
-                WithinSubjectVariation::synthetic("xx.v", reading(), "another gauge", limit(1.0), "synthetic")
-                    .expect("a variation"),
-            ),
-            (
-                "dimension",
-                WithinSubjectVariation::synthetic("xx.v", reading(), "a synthetic gauge", Measure::<crate::Volume>::new(1.0).expect("finite"), "synthetic")
-                    .expect("a variation"),
-            ),
-            (
-                "note",
-                WithinSubjectVariation::synthetic("xx.v", reading(), "a synthetic gauge", limit(1.0), "another note")
-                    .expect("a variation"),
-            ),
+        let (low, high) = (Measure::<Volume>::new(0.0), Measure::<Volume>::new(20.0));
+        let (low, high) = (low.expect("finite"), high.expect("finite"));
+        let Range {
+            id,
+            row,
+            method,
+            scope,
+            averaging,
+            note,
+            ..
+        } = range;
+        let volume = HealthyRange::synthetic(id, row, method, scope, averaging, low, high, note);
+        let changed = digest(vec![volume.expect("a range")], vec![variation.variation()]);
+        assert_ne!(changed, first, "a range's dimension");
+        let variations: [(&str, fn(&mut Variation)); 5] = [
+            ("id", |variation| variation.id = "xx.w"),
+            ("row", |variation| variation.row = reading("other")),
+            ("method", |variation| variation.method = "another gauge"),
+            ("sd", |variation| variation.sd = 2.0),
+            ("note", |variation| variation.note = "another note"),
         ];
-        for (field, changed) in changed {
-            let (ranges, _) = base();
-            assert_ne!(digest(ranges, vec![changed]), first, "a variation's {field}");
+        for (field, change) in variations {
+            let mut changed = variation;
+            change(&mut changed);
+            let changed = digest(vec![range.range()], vec![changed.variation()]);
+            assert_ne!(changed, first, "a variation's {field}");
         }
-        let (ranges, _) = base();
-        assert_ne!(digest(ranges, Vec::new()), first, "the variations it holds");
+        let sd = Measure::<Volume>::new(1.0).expect("finite");
+        let volume =
+            WithinSubjectVariation::synthetic("xx.v", variation.row, variation.method, sd, "synthetic");
+        let changed = digest(vec![range.range()], vec![volume.expect("a variation")]);
+        assert_ne!(changed, first, "a variation's dimension");
+        let none = digest(vec![range.range()], Vec::new());
+        assert_ne!(none, first, "the variations it holds");
     }
 
     #[test]
     fn a_synthetic_set_and_a_reviewed_one_seal_their_kind() {
-        let empty = HealthyRangeSet::<Reviewed> {
+        let reviewed = HealthyRangeSet::<Reviewed> {
             ranges: Vec::new(),
             variations: Vec::new(),
         };
-        let synthetic = HealthyRangeSet::synthetic(Vec::new(), Vec::new()).expect("a set");
-        assert_ne!(empty.digest(), synthetic.digest());
+        let synthetic = set(Vec::new(), Vec::new()).expect("a set");
+        assert_ne!(reviewed.digest(), synthetic.digest());
     }
 }

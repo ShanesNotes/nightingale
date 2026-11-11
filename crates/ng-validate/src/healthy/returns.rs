@@ -186,8 +186,9 @@ impl ReturnFold {
         for plan in plans {
             let anchor = plan.anchor;
             let integrated = plan.statistic == AnchorStatistic::CycleTimeMean;
-            let reading = (readings.iter())
-                .position(|bare| (bare.row, bare.method, bare.integrated) == (plan.row, plan.method, integrated));
+            let reading = (readings.iter()).position(|bare| {
+                (bare.row, bare.method, bare.integrated) == (plan.row, plan.method, integrated)
+            });
             let variation = (set.variations().iter())
                 .find(|variation| (variation.row(), variation.method()) == (plan.row, plan.method));
             if reading.is_none() {
@@ -223,7 +224,11 @@ impl ReturnFold {
                 windows,
             });
         }
-        Ok(Self { period_ns, held, gaps })
+        Ok(Self {
+            period_ns,
+            held,
+            gaps,
+        })
     }
     pub(crate) fn feed(&mut self, reading: usize, at: SimTime, value: Option<Compensated>) {
         let period_ns = self.period_ns;
@@ -246,7 +251,8 @@ impl ReturnFold {
         for anchor in &held {
             let read = |window: &Window| {
                 (window.seen == anchor.count).then(|| {
-                    (!window.absent).then(|| Compensated::between(Compensated::ZERO, window.sum, 1, anchor.count))
+                    (!window.absent)
+                        .then(|| Compensated::between(Compensated::ZERO, window.sum, 1, anchor.count))
                 })
             };
             let [admission, later @ ..] = &anchor.windows;

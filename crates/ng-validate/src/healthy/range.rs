@@ -2,7 +2,8 @@ use super::{BareReading, CheckVerdict, DayActivities, ReadingCheckError};
 use alloc::collections::VecDeque;
 use core::num::NonZeroU64;
 use ng_contract::{
-    Activity, Averaging, Compensated, Digest, HealthyRange, HealthyRangeSet, PacketKind, RowKind, Scope, SimTime,
+    Activity, Averaging, Compensated, Digest, HealthyRange, HealthyRangeSet, PacketKind, RowKind, Scope,
+    SimTime,
 };
 
 /// The healthy-range check of one run against one set (record 0004). Only `ReadingChecks::finish` makes one.
@@ -50,7 +51,10 @@ impl RangeReport {
 }
 
 fn verdict(results: &[RangeResult], gaps: &[RangeGap]) -> CheckVerdict {
-    CheckVerdict::of(results.iter().any(|result| result.failure.is_some()), !gaps.is_empty())
+    CheckVerdict::of(
+        results.iter().any(|result| result.failure.is_some()),
+        !gaps.is_empty(),
+    )
 }
 
 /// What one set range judged: windows or whole periods, the earliest that failed, and the periods the run's start
@@ -310,7 +314,10 @@ impl Reading {
             method: reading.method,
             integrated: reading.integrated,
             ranged: !own.is_empty(),
-            unranged: spans.iter().map(|span| !during(span.activity) && !every).collect(),
+            unranged: spans
+                .iter()
+                .map(|span| !during(span.activity) && !every)
+                .collect(),
             whole: (spans.iter())
                 .map(|span| find(Scope::During(span.activity), Averaging::WholePeriod))
                 .collect(),
@@ -341,7 +348,10 @@ impl RangeFold {
     ) -> Result<Self, ReadingCheckError> {
         let day = day.spans();
         let changes = day.iter().skip(1).map(|&(at, _)| at);
-        if let Some(at) = changes.clone().find(|at| !at.nanoseconds().is_multiple_of(period_ns)) {
+        if let Some(at) = changes
+            .clone()
+            .find(|at| !at.nanoseconds().is_multiple_of(period_ns))
+        {
             return Err(ReadingCheckError::ChangeOffGrid { at });
         }
         let ends = changes.map(Some).chain([None]);
@@ -428,11 +438,14 @@ impl RangeFold {
         let span = fold.span;
         if fold.unranged[span] {
             let activity = spans[span].activity;
-            note(gaps, RangeGap::NoActivityRange {
-                row: fold.row,
-                method: fold.method,
-                activity,
-            });
+            note(
+                gaps,
+                RangeGap::NoActivityRange {
+                    row: fold.row,
+                    method: fold.method,
+                    activity,
+                },
+            );
         }
         for slider in &mut fold.sliders {
             let Some(window) = slider.push(span, value) else {
@@ -446,13 +459,16 @@ impl RangeFold {
                 Ok(None) => {}
                 Err(change) => {
                     let (from, to) = (spans[change - 1], spans[change]);
-                    note(gaps, RangeGap::NoChangeRange {
-                        row: fold.row,
-                        method: fold.method,
-                        from: from.activity,
-                        to: to.activity,
-                        at: to.start,
-                    });
+                    note(
+                        gaps,
+                        RangeGap::NoChangeRange {
+                            row: fold.row,
+                            method: fold.method,
+                            from: from.activity,
+                            to: to.activity,
+                            at: to.start,
+                        },
+                    );
                 }
             }
         }
@@ -497,7 +513,13 @@ impl RangeFold {
             result.cut += 1;
         } else {
             let length_ns = end.nanoseconds() - start.nanoseconds();
-            judge(&limits[range], result, mean(period.sum, period.absent, period.seen), at, length_ns);
+            judge(
+                &limits[range],
+                result,
+                mean(period.sum, period.absent, period.seen),
+                at,
+                length_ns,
+            );
         }
     }
     /// A period still open when the run ends is cut: counted, not judged.

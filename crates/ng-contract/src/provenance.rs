@@ -249,8 +249,8 @@ pub(crate) fn seal_trace(trace: &[&'static str; 2], out: &mut Canonical) {
 #[cfg(test)]
 mod tests {
     use crate::{
-        Anchor, AnchorId, AnchorStatistic, Cycle, LawName, Measure, ParameterPacket, Pressure, RowKind, Snapshot,
-        SyntheticFixture,
+        Anchor, AnchorId, AnchorStatistic, Cycle, LawName, Measure, ParameterPacket, Pressure, RowKind,
+        Snapshot, SyntheticFixture,
     };
     use core::num::{NonZeroU32, NonZeroU64};
 
@@ -258,9 +258,17 @@ mod tests {
         RowKind::Algebraic(LawName { owner: "XX", local }.into())
     }
 
-    fn anchor(id: &'static str, local: &'static str, statistic: AnchorStatistic) -> Anchor<SyntheticFixture, Pressure> {
+    fn anchor(
+        id: &'static str,
+        local: &'static str,
+        statistic: AnchorStatistic,
+    ) -> Anchor<SyntheticFixture, Pressure> {
         let value = Measure::new(10.0).expect("finite");
-        Anchor::new(AnchorId::new(id), Snapshot::new(row(local), "a synthetic gauge", statistic, value), "synthetic")
+        Anchor::new(
+            AnchorId::new(id),
+            Snapshot::new(row(local), "a synthetic gauge", statistic, value),
+            "synthetic",
+        )
     }
 
     #[test]
@@ -268,19 +276,51 @@ mod tests {
         let period = NonZeroU64::new(4_000_000_000).expect("not zero");
         let cycle = Cycle::new(period, NonZeroU32::new(4).expect("not zero")).expect("a cycle");
         let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
-        packet.anchor(anchor("xx.c", "third", AnchorStatistic::CycleTimeMean)).expect("an anchor");
-        packet.anchor(anchor("xx.a", "first", AnchorStatistic::Instant)).expect("an anchor");
-        packet.anchor(anchor("xx.b", "second", AnchorStatistic::CycleMean)).expect("an anchor");
+        packet
+            .anchor(anchor("xx.c", "third", AnchorStatistic::CycleTimeMean))
+            .expect("an anchor");
+        packet
+            .anchor(anchor("xx.a", "first", AnchorStatistic::Instant))
+            .expect("an anchor");
+        packet
+            .anchor(anchor("xx.b", "second", AnchorStatistic::CycleMean))
+            .expect("an anchor");
         let read: Vec<_> = (packet.anchors().iter())
-            .map(|reading| (reading.id(), reading.row(), reading.method(), reading.statistic(), reading.window_ns()))
+            .map(|reading| {
+                (
+                    reading.id(),
+                    reading.row(),
+                    reading.method(),
+                    reading.statistic(),
+                    reading.window_ns(),
+                )
+            })
             .collect();
         let method = "a synthetic gauge";
         assert_eq!(
             read,
             [
-                (AnchorId::new("xx.a"), row("first"), method, AnchorStatistic::Instant, 0),
-                (AnchorId::new("xx.b"), row("second"), method, AnchorStatistic::CycleMean, period.get()),
-                (AnchorId::new("xx.c"), row("third"), method, AnchorStatistic::CycleTimeMean, period.get()),
+                (
+                    AnchorId::new("xx.a"),
+                    row("first"),
+                    method,
+                    AnchorStatistic::Instant,
+                    0
+                ),
+                (
+                    AnchorId::new("xx.b"),
+                    row("second"),
+                    method,
+                    AnchorStatistic::CycleMean,
+                    period.get()
+                ),
+                (
+                    AnchorId::new("xx.c"),
+                    row("third"),
+                    method,
+                    AnchorStatistic::CycleTimeMean,
+                    period.get()
+                ),
             ]
         );
     }
