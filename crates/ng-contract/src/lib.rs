@@ -547,7 +547,7 @@
 //! use ng_contract::*;
 //! let _ = Proportions::<Glucose>::using(Space::Interstitium).energy_into(Space::Thermal);
 //! ```
-//! Only a card the contract grants a site class reacts there.
+//! Only a card the contract grants a site set reacts there.
 //! ```compile_fail,E0277
 //! use ng_contract::*;
 //! fn ungranted<'b>(laws: &mut FragmentBuilder<'b, Renal>, burn: Proportions<Glucose>)
