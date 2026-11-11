@@ -955,3 +955,52 @@ fn one_card_crosses_both_walls_of_one_bed_with_oxygen() -> Result<(), AdmissionE
     })?;
     Ok(())
 }
+
+fn glycogen_made(glucose: Space) -> Result<CompiledBody, AdmissionError> {
+    let mut schema = tissues(&MUSCLE_BED, &[Space::Plasma, Space::Lumen])?;
+    for space in [Space::Interstitium, Space::Cells] {
+        schema.carry::<Glucose, CapillaryBed>(space);
+    }
+    schema.carry::<Glycogen, CapillaryBed>(Space::Cells);
+    schema.carry::<Energy, CapillaryBed>(Space::Thermal);
+    schema.energy_content::<Glucose>(Measure::new(1_000.0)?)?;
+    schema.energy_content::<Glycogen>(Measure::new(900.0)?)?;
+    assemble(schema, |mut body| {
+        let (mut fl, ports) = body.fluids()?.parts();
+        let water = ports.cell_membrane::<CapillaryBed, Water>(&mut fl);
+        still(&mut fl, &water)?;
+        body.add(fl.finish());
+        let (mut mt, ports) = body.metabolism(None)?.parts();
+        let route = ports.fuel_into_cells::<Glucose>(&mut mt);
+        still(&mut mt, &route)?;
+        body.add(mt.finish());
+        let (mut ms, _) = body.musculoskeletal(None)?.parts();
+        let stored = Proportions::<Glucose>::using(glucose)
+            .makes::<Glycogen, 1>(Space::Cells)
+            .makes::<Water, 1>(Space::Cells)
+            .energy_into(Space::Thermal);
+        let made = ms.reaction::<Beds<Muscle>, Glucose>("glycogen made", stored);
+        let class = slow()?;
+        let rate = ms.site_kernel(|mut k| {
+            let zero = k.zero::<Rate<Glucose>>();
+            k.finish(zero, ms.every_mode(), class)
+        });
+        ms.react_at(&made, rate);
+        body.add(ms.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn a_reaction_that_takes_its_glucose_across_the_cell_membrane_is_refused_naming_both_spaces()
+-> Result<(), AdmissionError> {
+    glycogen_made(Space::Cells)?;
+    assert_eq!(
+        glycogen_made(Space::Interstitium).map(|body| body.model_hash()),
+        Err(defect(CompileDefect::ReactionInTwoSpaces {
+            law: law("MS", "glycogen made"),
+            spaces: [Space::Interstitium, Space::Cells],
+        }))
+    );
+    Ok(())
+}

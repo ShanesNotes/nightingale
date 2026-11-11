@@ -643,6 +643,13 @@ new = '''.filter(|&pair| sinusoidal(anatomy, pair))'''
 test = "-p ng-contract --test sinusoids the_sinusoids_leave_a_valved_edge_of_the_liver_bed_to_the_valves"
 
 [[mutant]]
+name = "reaction-in-one-space"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if let [first, second, ..] = spaces[..] {'''
+new = '''if let [first, second, ..] = spaces[..1] {'''
+test = "-p ng-contract --test scopes a_reaction_that_takes_its_glucose_across_the_cell_membrane_is_refused_naming_both_spaces"
+
+[[mutant]]
 name = "enclosure-owed-by-its-card"
 path = "crates/ng-contract/src/compile.rs"
 old = '''

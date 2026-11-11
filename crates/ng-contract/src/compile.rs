@@ -311,6 +311,15 @@ fn check_reactions(fragments: &[FragmentData], schema: &Schema) -> Result<(), Co
                 let species = pair[0];
                 return Err(CompileDefect::SpeciesTwice { law, species });
             }
+            let mut spaces: Vec<Space> = reaction.terms.iter().map(|term| term.space).collect();
+            spaces.sort_unstable();
+            spaces.dedup();
+            if let [first, second, ..] = spaces[..] {
+                return Err(CompileDefect::ReactionInTwoSpaces {
+                    law,
+                    spaces: [first, second],
+                });
+            }
             let fuel = |species: Species| matches!(species.makeup(), Makeup::Atoms { fuel: true, .. });
             let stated = |species: Species| schema.energy.iter().any(|content| content.0 == species);
             if let Some(&species) = species.iter().find(|&&species| fuel(species) && !stated(species)) {

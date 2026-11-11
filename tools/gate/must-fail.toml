@@ -134,6 +134,10 @@ mutants = [
 ]
 
 [[row]]
+core = "A reaction that moves an amount between two spaces of its site"
+mutants = ["reaction-in-one-space"]
+
+[[row]]
 core = "A card serving a boundary route another card owns"
 mutants = ["process-owned-by-its-card", "process-of-another-card-supplied", "boundary-port-offers-no-process"]
 doctests = [
