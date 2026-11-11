@@ -84,7 +84,7 @@ pub enum Makeup {
     /// No reaction may use or make it: it only moves from pool to pool, holding the fixed charge it states.
     Carried { charge: i64 },
     /// Whole counts of each element's atoms, and no fixed charge. A fuel holds energy, whose content per unit the
-    /// schema states; the rest hold none, measured against carbon dioxide and water.
+    /// schema states; the rest hold none, measured against carbon dioxide, water and nitrogen gas.
     Atoms {
         elements: &'static [(Element, i64)],
         fuel: bool,
