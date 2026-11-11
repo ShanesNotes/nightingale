@@ -306,7 +306,7 @@ impl Reading {
                         find(Scope::Every, sliding)
                     }
                 };
-                let into = (spans.windows(2)).map(|pair| {
+                let into_later_spans = (spans.windows(2)).map(|pair| {
                     let (from, to) = (pair[0].activity, pair[1].activity);
                     match changes(from, to).map(|(_, _, lasting)| lasting).max() {
                         Some(lasting) => Across::Own {
@@ -318,7 +318,9 @@ impl Reading {
                         None => Across::Unranged,
                     }
                 });
-                let across = core::iter::once(Across::Unranged).chain(into).collect();
+                let across = core::iter::once(Across::Unranged)
+                    .chain(into_later_spans)
+                    .collect();
                 Slider {
                     length_ns: length.get(),
                     count: length.get() / period_ns,

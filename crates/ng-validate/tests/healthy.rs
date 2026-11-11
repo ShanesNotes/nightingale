@@ -279,8 +279,9 @@ fn anchored(gauged: &Gauged) -> ParameterPacket<SyntheticFixture> {
     let cycle = Cycle::new(count(HOUR), NonZeroU32::new(4).expect("not zero")).expect("even");
     let mut packet = ParameterPacket::periodic(cycle);
     packet.within(admission_tolerance());
-    let stored = water(STORED_WATER);
-    packet.start(gauged.stored, stored, "synthetic").expect("once");
+    packet
+        .start(gauged.stored, water(STORED_WATER), "synthetic")
+        .expect("once");
     packet
         .start(gauged.gauge, measure::<Rate<Water>>(1.0), "synthetic")
         .expect("once");
@@ -306,7 +307,7 @@ fn anchored(gauged: &Gauged) -> ParameterPacket<SyntheticFixture> {
 }
 
 /// Water in over the cycle's first quarter and out over the whole cycle, so the vessel ends the cycle where it began
-/// and the gauge reads only the first quarter.
+/// and the gauge's cycle mean differs from each of its samples.
 fn first_cycle() -> BoundaryPort {
     let delivery = |id: &[u8], boundary, ends| {
         let delivered = WaterDelivery {
