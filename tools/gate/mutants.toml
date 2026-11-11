@@ -911,3 +911,94 @@ path = "crates/ng-contract/src/scheme.rs"
 old = '''stage(whole, part(second), Some(0), second, 1),'''
 new = '''stage(whole, part(second), None, second, 1),'''
 test = "-p ng-contract --lib scheme::tests::the_halved_set_is_the_doubled_sets_two_halves"
+
+[[mutant]]
+name = "healthy-range-windows-tumble"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if self.received < self.count {'''
+new = '''if self.received % self.count != 0 {'''
+test = "-p ng-validate --lib healthy::tests::a_reading_that_leaves_its_range_between_two_tumbling_means_fails_a_sliding_window"
+
+[[mutant]]
+name = "healthy-range-change-takes-an-activitys-range"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if first == last {'''
+new = '''if first + 1 >= last {'''
+test = "-p ng-validate --lib healthy::tests::a_window_across_a_change_takes_the_changes_own_range"
+
+[[mutant]]
+name = "healthy-range-unranged-change-passes"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''Across::Unranged => Err(last),'''
+new = '''Across::Unranged => Ok(None),'''
+test = "-p ng-validate --lib healthy::tests::a_change_between_activities_with_different_ranges_and_none_of_its_own_blocks_naming_the_change"
+
+[[mutant]]
+name = "healthy-range-shared-range-not-across-a-change"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''None if !during(from) && !during(to) => Across::Shared,'''
+new = '''None if false => Across::Shared,'''
+test = "-p ng-validate --lib healthy::tests::a_change_between_activities_that_share_the_every_activity_range_is_judged_by_it"
+
+[[mutant]]
+name = "healthy-range-whole-period-judges-each-value"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if at != last {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::a_whole_period_range_judges_each_whole_periods_mean_and_counts_the_periods_the_run_cuts"
+
+[[mutant]]
+name = "healthy-range-cut-period-judged"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if before_admission {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::a_whole_period_range_judges_each_whole_periods_mean_and_counts_the_periods_the_run_cuts"
+
+[[mutant]]
+name = "healthy-range-unranged-reading-passes"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if own.is_empty() {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::a_lens_reading_with_no_range_in_the_set_blocks_and_is_named"
+
+[[mutant]]
+name = "healthy-range-unranged-activity-passes"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if fold.unranged[span] {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::an_activity_with_no_range_blocks_and_is_named"
+
+[[mutant]]
+name = "return-morning-half-a-day-on"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''days * DAY_NS'''
+new = '''days * DAY_NS / 2'''
+test = "-p ng-validate --lib healthy::tests::a_run_inside_its_range_but_away_from_its_admission_reading_at_24_hours_fails_only_the_return_check"
+
+[[mutant]]
+name = "return-allows-1-96-variations"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''const RETURN_FACTOR: f64 = 1.96 * core::f64::consts::SQRT_2;'''
+new = '''const RETURN_FACTOR: f64 = 1.96;'''
+test = "-p ng-validate --lib healthy::tests::a_morning_may_move_from_admission_by_1_96_root_2_within_subject_variations"
+
+[[mutant]]
+name = "return-measured-from-zero"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''reading.minus(admission).abs().at_most(self.allowed)'''
+new = '''reading.minus(Compensated::ZERO).abs().at_most(self.allowed)'''
+test = "-p ng-validate --lib healthy::tests::a_run_back_at_its_admission_reading_that_left_its_range_between_fails_only_the_range_check"
+
+[[mutant]]
+name = "return-unvaried-anchor-skipped"
+path = "crates/ng-validate/src/healthy/returns.rs"
+old = '''if variation.is_none() {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::an_anchor_with_no_within_subject_variation_blocks_and_is_named"
+
+[[mutant]]
+name = "healthy-range-set-digest-skips-the-high-limit"
+path = "crates/ng-contract/src/healthy.rs"
+old = '''high.seal(out);'''
+new = '''low.seal(out);'''
+test = "-p ng-validate --test healthy a_corrected_set_rechecks_a_finished_replay_and_gives_a_new_result_for_the_same_run"
