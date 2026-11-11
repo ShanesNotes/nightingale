@@ -946,3 +946,36 @@ path = "crates/ng-contract/src/catalog.rs"
 old = '''if held[i].reason.is_empty() {'''
 new = '''if held[i].name.is_empty() {'''
 test = "-p ng-contract --test census the_census_refuses_an_empty_reason"
+
+[[mutant]]
+name = "energy-drift-falls-back-to-the-common-limit"
+path = "crates/ng-validate/src/slice.rs"
+old = '''Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_ENERGY_DRIFT),'''
+new = '''Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_DRIFT),'''
+test = "-p ng-validate --test arena_certificate energy_drifts_up_to_2e5_over_the_arenas_day_and_no_further"
+
+# This row changes the species and element arms together, and the water test sees only the species arm: the slice
+# has no reaction, so no element is a quantity of its own there, and a change to the element arm alone would survive.
+# The element arm gets its own row with the first body that has a reaction.
+[[mutant]]
+name = "every-quantity-takes-energys-drift-limit"
+path = "crates/ng-validate/src/slice.rs"
+old = '''
+        Book::Of(species) => species.visit(Limits(quantity, SYNTHETIC_DRIFT)),
+        Book::Element(_) => QuantityPolicy::element(
+            quantity,
+            Measure::new(0.0)?,
+            Measure::new(CLOSURE_RELATIVE)?,
+            Measure::new(SYNTHETIC_DRIFT)?,
+        ),
+'''
+new = '''
+        Book::Of(species) => species.visit(Limits(quantity, SYNTHETIC_ENERGY_DRIFT)),
+        Book::Element(_) => QuantityPolicy::element(
+            quantity,
+            Measure::new(0.0)?,
+            Measure::new(CLOSURE_RELATIVE)?,
+            Measure::new(SYNTHETIC_ENERGY_DRIFT)?,
+        ),
+'''
+test = "-p ng-validate --test arena_certificate water_drifts_up_to_1e4_as_every_quantity_but_energy_does"
