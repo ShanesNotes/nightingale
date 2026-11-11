@@ -1168,6 +1168,27 @@ new = '''fatigue: Dimensionless => Musculoskeletal ""'''
 test = "-p ng-contract --test census every_arrow_of_the_catalog_keeps_the_census_rules"
 
 [[mutant]]
+name = "v-holder-moved-to-the-other-end-111"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''intracranial_pressure: Pressure => Nervous'''
+new = '''intracranial_pressure: Pressure => Fluids'''
+test = "-p ng-contract --test census every_arrow_of_the_catalog_keeps_the_census_rules"
+
+[[mutant]]
+name = "v-holder-moved-to-the-other-end-106"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''permeability: PerSite<CapillaryBed, Dimensionless> => Immune'''
+new = '''permeability: PerSite<CapillaryBed, Dimensionless> => Fluids'''
+test = "-p ng-contract --test census every_arrow_of_the_catalog_keeps_the_census_rules"
+
+[[mutant]]
+name = "v-wired-ticket-moved-inside-the-range"
+path = "crates/ng-contract/src/catalog.rs"
+old = '''wired (BloodViscosity { viscosity: Viscosity => 8 })'''
+new = '''wired (BloodViscosity { viscosity: Viscosity => 21 })'''
+test = "-p ng-contract --test census every_arrow_of_the_catalog_keeps_the_census_rules"
+
+[[mutant]]
 name = "energy-drift-falls-back-to-the-common-limit"
 path = "crates/ng-validate/src/slice.rs"
 old = '''Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_ENERGY_DRIFT),'''

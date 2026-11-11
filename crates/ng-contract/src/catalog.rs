@@ -636,6 +636,97 @@ const _: () = {
     );
 };
 
+const _: () = {
+    let plan: [(usize, &str, &str); 29] = [
+        (79, "ventricular_wall_stress", "CV"),
+        (87, "thermostat_set_point", "NS"),
+        (87, "sweat_drive", "NS"),
+        (89, "crh_drive", "NS"),
+        (89, "circadian_phase", "NS"),
+        (90, "temperature", "CV"),
+        (92, "temperature", "HC"),
+        (93, "temperature", "HP"),
+        (94, "temperature", "BC"),
+        (95, "fatigue", "MS"),
+        (100, "plasma_ammonia", "HP"),
+        (102, "intra_abdominal_pressure", "GI"),
+        (103, "intra_abdominal_pressure", "GI"),
+        (105, "inos_activity", "IM"),
+        (105, "myocardial_depression", "IM"),
+        (106, "permeability", "IM"),
+        (106, "glycocalyx", "IM"),
+        (107, "tissue_factor", "IM"),
+        (107, "hepcidin", "IM"),
+        (108, "set_point_shift", "IM"),
+        (109, "mitochondrial_efficiency", "IM"),
+        (110, "lung_water", "FL"),
+        (111, "brain_water", "FL"),
+        (111, "intracranial_pressure", "NS"),
+        (112, "gut_wall_water", "FL"),
+        (113, "skin_water", "FL"),
+        (113, "compartment_water", "FL"),
+        (114, "bleeding_competence", "HC"),
+        (114, "thrombosis", "HC"),
+    ];
+    let (mut i, mut n) = (0, 0);
+    while i < MAP_EDGES {
+        let held = ARROWS[i].carries.held();
+        let mut j = 0;
+        while j < held.len() {
+            let (line, name, holder) = plan[n];
+            assert!(
+                line == 77 + i && same(held[j].name, name) && same(held[j].holder, holder),
+                "a held field's holder is not the plan's"
+            );
+            j += 1;
+            n += 1;
+        }
+        i += 1;
+    }
+    assert!(n == plan.len());
+};
+const _: () = {
+    let plan: [(usize, &str, u8); 21] = [
+        (77, "carotid_sinus_stretch", 6),
+        (77, "aortic_arch_stretch", 6),
+        (78, "myocardial_work", 9),
+        (78, "flow_per_bed", 9),
+        (79, "atrial_wall_stress", 17),
+        (80, "capillary_pressure", 6),
+        (80, "venous_pressure", 6),
+        (81, "pulmonary_capillary_flow", 10),
+        (83, "pulmonary_stretch", 11),
+        (84, "work_of_breathing", 10),
+        (85, "pump_load", 10),
+        (86, "respiratory_drive", 11),
+        (87, "shiver_drive", 12),
+        (88, "motor_drive", 11),
+        (89, "vasopressin_drive", 17),
+        (90, "oxygen_debt_per_bed", 9),
+        (91, "core_temperature", 12),
+        (95, "pump_force", 10),
+        (97, "afferent_tone", 6),
+        (98, "renin_secretion", 17),
+        (114, "viscosity", 8),
+    ];
+    let (mut i, mut n) = (0, 0);
+    while i < MAP_EDGES {
+        let wired = ARROWS[i].carries.wired();
+        let mut j = 0;
+        while j < wired.len() {
+            let (line, name, ticket) = plan[n];
+            assert!(
+                line == 77 + i && same(wired[j].name, name) && wired[j].body_ticket == ticket,
+                "a wired field's body ticket is not the plan's"
+            );
+            j += 1;
+            n += 1;
+        }
+        i += 1;
+    }
+    assert!(n == plan.len());
+};
+
 struct FieldCount {
     wired: usize,
     held: usize,

@@ -32,6 +32,60 @@ BODY_LIVE = [77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 88, 89, 90, 91, 95, 97, 98,
 BODY_HELD = [92, 93, 94, 100, 102, 103, 105, 106, 107, 108, 109, 110, 111, 112, 113]
 RELATIONS = [82, 96, 99, 101, 104]
 WIRE_AND_HOLD = [79, 87, 89, 90, 95, 114]
+HELD_BY = [
+    (79, "ventricular_wall_stress", "CV"),
+    (87, "thermostat_set_point", "NS"),
+    (87, "sweat_drive", "NS"),
+    (89, "crh_drive", "NS"),
+    (89, "circadian_phase", "NS"),
+    (90, "temperature", "CV"),
+    (92, "temperature", "HC"),
+    (93, "temperature", "HP"),
+    (94, "temperature", "BC"),
+    (95, "fatigue", "MS"),
+    (100, "plasma_ammonia", "HP"),
+    (102, "intra_abdominal_pressure", "GI"),
+    (103, "intra_abdominal_pressure", "GI"),
+    (105, "inos_activity", "IM"),
+    (105, "myocardial_depression", "IM"),
+    (106, "permeability", "IM"),
+    (106, "glycocalyx", "IM"),
+    (107, "tissue_factor", "IM"),
+    (107, "hepcidin", "IM"),
+    (108, "set_point_shift", "IM"),
+    (109, "mitochondrial_efficiency", "IM"),
+    (110, "lung_water", "FL"),
+    (111, "brain_water", "FL"),
+    (111, "intracranial_pressure", "NS"),
+    (112, "gut_wall_water", "FL"),
+    (113, "skin_water", "FL"),
+    (113, "compartment_water", "FL"),
+    (114, "bleeding_competence", "HC"),
+    (114, "thrombosis", "HC"),
+]
+WIRED_BY = [
+    (77, "carotid_sinus_stretch", 6),
+    (77, "aortic_arch_stretch", 6),
+    (78, "myocardial_work", 9),
+    (78, "flow_per_bed", 9),
+    (79, "atrial_wall_stress", 17),
+    (80, "capillary_pressure", 6),
+    (80, "venous_pressure", 6),
+    (81, "pulmonary_capillary_flow", 10),
+    (83, "pulmonary_stretch", 11),
+    (84, "work_of_breathing", 10),
+    (85, "pump_load", 10),
+    (86, "respiratory_drive", 11),
+    (87, "shiver_drive", 12),
+    (88, "motor_drive", 11),
+    (89, "vasopressin_drive", 17),
+    (90, "oxygen_debt_per_bed", 9),
+    (91, "core_temperature", 12),
+    (95, "pump_force", 10),
+    (97, "afferent_tone", 6),
+    (98, "renin_secretion", 17),
+    (114, "viscosity", 8),
+]
 
 owners = re.findall(r'^\s*(\w+) = "(\w+)", (slice|held);$', open(OWNERS, encoding="utf-8").read(), re.M)
 CARD = {name: card for name, card, _ in owners}
@@ -221,6 +275,12 @@ for r in rows:
         failures.append(f"line {r['line']}: a field has a second holder")
     if any(ticket not in BODY_TICKETS for *_, ticket in r["wired"]):
         failures.append(f"line {r['line']}: a wired field names no body ticket from 06 to 25")
+
+held_by = [(r["line"], name, holder) for r in rows for name, _, holder, _ in r["held"]]
+wired_by = [(r["line"], name, ticket) for r in rows for name, _, ticket in r["wired"]]
+for name, got, want in (("holder", held_by, HELD_BY), ("body ticket", wired_by, WIRED_BY)):
+    if got != want:
+        failures.append(f"a {name} is not the plan's: {sorted(set(got) ^ set(want), key=str)}")
 
 incident = [r for r in rows if r["from"] in SLICE or r["to"] in SLICE]
 slice_census = {
