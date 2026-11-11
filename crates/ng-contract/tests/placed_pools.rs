@@ -76,3 +76,27 @@ fn a_species_in_a_space_it_may_not_hold_is_refused() {
         }))
     );
 }
+
+#[test]
+fn oxygen_may_sit_in_a_beds_gas_and_glucose_may_not() {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("synthetic body", position());
+    let vessel = map.site::<VesselSegment>("synthetic vessel", position());
+    let bed = map.site::<CapillaryBed>("synthetic lung bed", position());
+    map.contain(root.id(), vessel.id());
+    map.contain(root.id(), bed.id());
+    map.connect(Network::Vascular, vessel.id(), bed.id());
+    map.connect(Network::Vascular, bed.id(), vessel.id());
+    let mut schema = Schema::new(map.finish().expect("a map")).expect("a schema");
+    schema.pool::<Oxygen>(bed.id(), Space::Gas).expect("a bed has a gas space");
+    schema.pool::<Glucose>(bed.id(), Space::Gas).expect("a bed has a gas space");
+    let compiled = assemble(schema, |body| body.compile());
+    assert_eq!(
+        compiled.err(),
+        Some(AdmissionError::Compile(CompileDefect::OutOfPlace {
+            site: bed.id(),
+            space: Space::Gas,
+            species: Species::Glucose,
+        }))
+    );
+}
