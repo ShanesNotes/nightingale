@@ -18,8 +18,8 @@ C=<the main commit the audit runs from>
 git rev-parse "$C:crates"                       # the teaching engine's crates tree; the Answer records it
 git diff --quiet 84744af86ae9feac3a90e610ce21b741990f9cae "$C" -- crates Cargo.toml Cargo.lock rust-toolchain.toml clippy.toml rustfmt.toml \
   && echo engine-as-designed || echo engine-moved-since-design
-git show "$C:crates/ng-validate/tests/trace.rs" | grep -c -e 6d709479f0b103cadc1972febf6437a2dde172e19242eb76908b9dabde5bb752 \
-  -e 58233f790617a4f1bf5122b47fc44efaeface2ebb7d4c3652567bb44ba176ecf   # 2: A0's pins still hold at C
+git show "$C:crates/ng-validate/tests/trace.rs" | sed -n '/^fn the_first_second_of_the_slice_on_ng_solver_stays_where_it_was/,/^}$/p' \
+  | grep -o -e '[0-9a-f]\{64\}' -e '[0-9]\{4\}\.[0-9]\{6\} ms'   # 3 lines, A0's pins at C: the packet digest, the seal, the head
 git archive --format=tar --prefix="nightingale-$C/" -o "nightingale-$C.tar" "$C"
 sha256sum "nightingale-$C.tar" > "nightingale-$C.tar.sha256"
 ```
@@ -46,7 +46,7 @@ python3 -I tools/generative-physiology/gp.py audit --data DATA --source-commit "
 - **Engine input.** The engine the audit approves is the crates tree at C, which the Answer records, and every later teacher run (tickets 06, 09 and 12) must come from a commit whose engine inputs equal C's: the same `git diff --quiet` from C to that commit exits 0, or the audit runs again. At 84744af, the commit this design last read, the crates tree is `23cbe1846b8d98cefc6f462214360b690a8843af`; `engine-moved-since-design` means the Answer lists what changed before trusting the plan. For a check without git, `Cargo.lock` has SHA-256 `24b7896024353dc8a9f8d81bebd8aeee4c1a3ceb7eefdf8bb3245cf041083f07` and `rust-toolchain.toml` has `41ab86880726126e91a8f858567213dcf5332b624151ba8a6ed3b691e611f5d9` at 84744af.
 - **Snapshot.** The archive's SHA-256, recorded on both machines; every `summary.txt` records C.
 - **Toolchain.** rustc and cargo 1.98.1 (`rust-toolchain.toml:2`). Whether rustup on the heavy-run machine honors the pin with rust-src is unconfirmed; the audit needs only rustc and cargo.
-- **The engine's bits on that machine.** A0 must reproduce what `crates/ng-validate/tests/trace.rs:135-136` pins for Core at a 10 ms cap: packet digest `6d709479f0b103cadc1972febf6437a2dde172e19242eb76908b9dabde5bb752` and seal `58233f790617a4f1bf5122b47fc44efaeface2ebb7d4c3652567bb44ba176ecf` at the first head at or after 1 s, which is at 1000.079707 ms (`trace.rs:147`).
+- **The engine's bits on that machine.** A0 must reproduce what the test `the_first_second_of_the_slice_on_ng_solver_stays_where_it_was` in `crates/ng-validate/tests/trace.rs` pins at C for Core at a 10 ms cap: the packet digest, the seal at the first head at or after 1 s, and that head's instant, the last line of the test's trace. This ticket quotes none of the three, because a change to the engine moves them. The report reads them from the test by its name (`a0_pins` in `tools/generative-physiology/audit.py`), and Usage prints them at C as three lines. Any other count means the test has changed shape, and `a0_pins` is read again before the audit runs.
 - **Seeds.** None of the audit's own. The slice carries one forcing on the skin's water loss and one stir hazard (`crates/ng-validate/src/slice.rs:376-414`), and both read the run seed, which `admit_at` fixes at `[1, 2, 3, 4]` (`crates/ng-validate/src/initialize.rs:236`). So every run shares one forcing course and one stir instant, and a replica repeats them. The arena lens has no measurement error (`crates/ng-validate/src/slice.rs:954-960`), every event is written out, and B7's rule is deterministic.
 
 ## Runs
@@ -148,7 +148,7 @@ Toolchain: rustc <..>, cargo <..>, python3 <..>; rust-src present: <yes/no/unkno
 Machine: the heavy-run machine; logical processors <..>; memory limit <..>; swap limit <..>
 
 | Check                 | Runs    | Measured                                             | Criterion                 | Verdict |
-| A0 pinned second      | A0      | packet <..>, seal <..>, head <.. ms>                 | trace.rs:135-136, 147     |         |
+| A0 pinned second      | A0      | packet <..>, seal <..>, head <.. ms>                 | the pinned values         |         |
 | A1 across checkpoint  | A1      | equal seals from revision <r> to <r'>                | all equal                 |         |
 | A2, A3 reflex         | A2, A3  | traffic <..> vs <..>; rate <..>; leg-vein water <..>; stretch gap <..> | the reference test's bars |  |
 | A4 late checkpoint    | A4      | equal <..>; resume <s>                               | all equal                 |         |
@@ -265,3 +265,5 @@ Technical gate: fail. Informativeness gate: pass.
 Derived: teaching core none: the technical gate failed and the experiment stops here.
 Evidence: summaries.sha256 635bec7b014b0270fbedb9ae27bb327c3e9100f28e60f2d691e05e92f0377e11; report.txt's sha256 is recorded beside it; the data stay on the heavy-run machine.
 ```
+
+This ticket once quoted A0's pins and their line numbers as they stood at 84744af. Native-contract 28 (nightingale#91) moved the pins, so the Usage check printed 0 at every later C, and body ticket 02 (nightingale#103) moved their lines. The ticket now names the test that holds the pins, and Usage prints them at C. The report above stays as the tool wrote it. Its A0 criterion, `trace.rs:135-136, 147`, is the label in `tools/generative-physiology/audit.py`, which still cites the lines of 84744af, while the check behind it reads the test by its name. The next code change to that tool corrects the label, and [ticket 05](05-reduction-and-balance.md)'s acceptance holds it.

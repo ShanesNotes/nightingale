@@ -113,6 +113,7 @@ A drive piece carries the public posture payload, the trunk's sine and two leg i
 - [ ] On every beat of every audit run, each named total's change equals the sum of the column terms on its pools and the sum of its transfers' net extents, each within 64 times 2^-52 of the sum of the magnitudes involved. Each transmitter pair's sum also equals, at every edge, the sum of `HistorySegment::inventory` over the conserved combinations whose terms are its pools (`crates/ng-record/src/history.rs:565-567, 613-615`). Release, reuptake and binding join pools only at one junction (`crates/ng-nervous/src/lib.rs:39, 46`, `crates/ng-receptor/src/lib.rs:85`), so each junction is its own combination (`crates/ng-contract/src/conservation.rs:37-38, 113`): four for the pooled norepinephrine pair, one for the renal pair and one for acetylcholine.
 - [ ] R's schema compiles, and its identity holds on the same beats.
 - [ ] The audit report gains these balance rows and each transfer's reversal share, its gross reverse part over its gross forward part per beat.
+- [ ] The report's A0 row names the test that holds its pins, as its A2, A3 row names its test. Its criterion still reads `trace.rs:135-136, 147`, the pins' lines at 84744af.
 
 ## Non-goals
 
