@@ -1,6 +1,6 @@
 # 33: The slice's leg veins empty within 30 s of head-down, and every core faults
 
-Spec: `crates/ng-cardiovascular/src/lib.rs` (`valves` and `drive`), the upwind instruction in `crates/ng-contract/src/evaluate.rs`, and the posture's heights in `crates/ng-contract/src/boundary.rs`
+Spec: `crates/ng-cardiovascular/src/valves.rs` (`valves`) and `crates/ng-cardiovascular/src/shared.rs` (`drive`), the upwind instruction in `crates/ng-contract/src/evaluate.rs`, and the posture's heights in `crates/ng-contract/src/boundary.rs`
 
 Type: research
 
