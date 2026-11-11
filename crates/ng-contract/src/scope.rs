@@ -279,8 +279,9 @@ pub enum Space {
     Elastic,
     /// Heat: one store on the same site, and a bed's own where a reaction there releases energy.
     Thermal,
-    /// Gas with no water of its own: a lung bed's alveolar gas, or an airway site's, which is a tissue site for the
-    /// reason `Network::Airway` gives. The gas law sets its volume, so no law reads it from water.
+    /// Gas with no water of its own. Every capillary bed and every tissue site has one, and a schema pools gas in it
+    /// where gas sits: a lung bed's alveolar gas, or an airway site's, which is a tissue site for the reason
+    /// `Network::Airway` gives. The gas law sets its volume, so no law reads it from water.
     Gas,
 }
 impl Space {

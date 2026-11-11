@@ -119,6 +119,12 @@ macro_rules! species {
         species!(@sum Osmoles $name);
     };
     (@osmole inert $name:ident) => {};
+    (@osmotic osmotic) => {
+        true
+    };
+    (@osmotic inert) => {
+        false
+    };
     (@sum $total:ident $name:ident) => {
         impl identities::Sealed<$total> for $name {}
         impl SameDimension<$total> for $name {}
@@ -197,6 +203,12 @@ macro_rules! species {
             pub(crate) const fn may_hold(self, space: Space) -> bool {
                 match self {
                     $(Species::$name => $(species!(@spaces $kinds space))||+,)*
+                }
+            }
+            #[cfg(test)]
+            const fn osmotic(self) -> bool {
+                match self {
+                    $(Species::$name => species!(@osmotic $osmole),)*
                 }
             }
             /// Calls the visitor with this species' marker type.
@@ -364,7 +376,37 @@ mod tests {
     }
 
     #[test]
-    fn the_new_rows_state_body_01s_makeup_carriage_and_spaces() {
+    fn only_the_osmotic_rows_count_in_osmolality() {
+        let osmotic: Vec<Species> = Species::ALL
+            .into_iter()
+            .filter(|species| species.osmotic())
+            .collect();
+        assert_eq!(
+            osmotic,
+            [
+                Species::Sodium,
+                Species::Potassium,
+                Species::Chloride,
+                Species::CarbonDioxide,
+                Species::Glucose,
+                Species::AminoAcids,
+                Species::Lactate,
+                Species::Ketones,
+                Species::Urea,
+                Species::Ammonium,
+                Species::Creatinine,
+                Species::FixedAcid,
+                Species::DietBase,
+                Species::CellAnion,
+                Species::Calcium,
+                Species::Magnesium,
+                Species::Phosphate,
+            ]
+        );
+    }
+
+    #[test]
+    fn the_new_rows_keep_the_tables_makeup_carriage_and_spaces() {
         use super::{
             Ammonium, Calcium, CellAnion, Chloride, Creatinine, DietBase, FixedAcid, Glucose, Ketones,
             Lactate, Magnesium, Phosphate, Potassium, Sodium, Urea,

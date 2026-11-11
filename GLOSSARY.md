@@ -287,7 +287,7 @@ The diet's organic anions, counted as one species. They burn to carbon dioxide a
 The anions a cell's own molecules hold, which cross no membrane. A species with a fixed charge of -1 that sits only in cells.
 
 **Osmoles**:
-Dissolved particles that pull water across a wall that holds them back. A space's osmolality is their concentration. A species counts when it is a small solute, free in water, that reaches about a millimole a litre in some watery space; a colloid such as albumin pulls water through its own oncotic row, and water is the solvent.
+Dissolved particles that pull water across a wall that holds them back. A space's osmolality is their concentration. A species counts when it is a small solute, free in water, that reaches about a millimole a litre in some watery space in a state the body can reach, a fast of a few days included; a colloid such as albumin pulls water through its own oncotic row, and water is the solvent.
 
 **Receipt pool**:
 A named pool outside the body, or behind a held stand-in, that takes what crosses the boundary, so a boundary transfer still has two ends.

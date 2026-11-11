@@ -722,7 +722,14 @@ name = "cell-anion-stays-in-cells"
 path = "crates/ng-contract/src/species.rs"
 old = '''CellAnion = "cell anion" => carried(-1), not_water_borne, [cells]'''
 new = '''CellAnion = "cell anion" => carried(-1), water_borne, [cells]'''
-test = "-p ng-contract --lib species::tests::the_new_rows_state_body_01s_makeup_carriage_and_spaces"
+test = "-p ng-contract --lib species::tests::the_new_rows_keep_the_tables_makeup_carriage_and_spaces"
+
+[[mutant]]
+name = "glycerol-stays-out-of-osmolality"
+path = "crates/ng-contract/src/species.rs"
+old = '''Glycerol = "glycerol" => fuel(C 3, H 8, O 3), water_borne, [watery], uncharged(), inert;'''
+new = '''Glycerol = "glycerol" => fuel(C 3, H 8, O 3), water_borne, [watery], uncharged(), osmotic;'''
+test = "-p ng-contract --lib species::tests::only_the_osmotic_rows_count_in_osmolality"
 
 [[mutant]]
 name = "species-in-its-spaces"
