@@ -1023,3 +1023,225 @@ impl Seal for DriveFrame {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        BoundaryEvent, BoundaryInput, BoundaryPort, Clock, Cycle, DriveFrame, EIGHTH_OF_A_DAY, Gate, Held,
+        InputId, MINUTE_NS, PendingInputs, Room, Sleep, turn,
+    };
+    use crate::identity::{Canonical, Seal};
+    use crate::{AdmissionError, Digest, Measure, SimTime};
+    use core::num::{NonZeroU32, NonZeroU64};
+
+    const SECOND: u64 = 1_000_000_000;
+    const HOUR: u64 = 60 * MINUTE_NS;
+    const CLOCK: [Held; 2] = [Held::ClockCosine, Held::ClockSine];
+
+    fn event(name: &[u8], at: u64, payload: BoundaryInput) -> BoundaryEvent {
+        BoundaryEvent::new(
+            InputId::new(Digest::of_canonical(name)),
+            SimTime::from_ns(at),
+            payload,
+        )
+    }
+    fn clock(at: u64, since_midnight_ns: u64) -> BoundaryEvent {
+        event(b"clock", at, BoundaryInput::Clock(Clock { since_midnight_ns }))
+    }
+    fn opened(events: Vec<BoundaryEvent>) -> Result<PendingInputs, AdmissionError> {
+        Ok(PendingInputs::opening(
+            BoundaryPort::new(events)?,
+            SimTime::from_ns(0),
+        ))
+    }
+    /// Every event has applied and still runs, as after a step past them all.
+    fn applied(events: Vec<BoundaryEvent>) -> Result<PendingInputs, AdmissionError> {
+        let mut pending = opened(events)?;
+        pending.past.cursor = pending.timeline.len();
+        pending.past.active = pending.timeline.clone();
+        Ok(pending)
+    }
+    fn bits(frame: &DriveFrame) -> (u64, u64) {
+        (
+            frame.held(Held::ClockCosine).to_bits(),
+            frame.held(Held::ClockSine).to_bits(),
+        )
+    }
+    fn turned(minute: u64) -> (u64, u64) {
+        let (cosine, sine) = turn(minute, EIGHTH_OF_A_DAY);
+        (cosine.to_bits(), sine.to_bits())
+    }
+
+    #[test]
+    fn the_clock_is_zero_at_midnight_turns_once_a_day_and_moves_each_whole_minute()
+    -> Result<(), AdmissionError> {
+        let half_past_seven = 7 * HOUR + 30 * MINUTE_NS;
+        let pending = opened(vec![clock(0, half_past_seven)])?;
+        let frame = |at: u64| pending.frame_at(SimTime::from_ns(at), &CLOCK);
+        // 07:30 is 112.5 degrees past midnight.
+        let (cosine, sine) = (frame(0).held(Held::ClockCosine), frame(0).held(Held::ClockSine));
+        assert!((cosine + 0.382_683_432_365_089_8).abs() < 1e-15, "{cosine}");
+        assert!((sine - 0.923_879_532_511_286_7).abs() < 1e-15, "{sine}");
+        assert_eq!(bits(&frame(0)), turned(450));
+        assert_eq!(bits(&frame(MINUTE_NS - 1)), turned(450));
+        assert_eq!(bits(&frame(MINUTE_NS)), turned(451));
+        let midnight = opened(vec![clock(0, 24 * HOUR - 30 * SECOND)])?;
+        let frame = |at: u64| midnight.frame_at(SimTime::from_ns(at), &CLOCK);
+        assert_eq!(bits(&frame(29 * SECOND)), turned(1439));
+        assert_eq!(bits(&frame(30 * SECOND)), (1.0_f64.to_bits(), 0.0_f64.to_bits()));
+        assert_eq!(bits(&frame(30 * SECOND + 24 * HOUR)), turned(0), "a day later");
+        Ok(())
+    }
+
+    #[test]
+    fn a_held_input_replaces_the_one_before_it_and_a_frame_holds_only_what_the_body_reads()
+    -> Result<(), AdmissionError> {
+        let pending = opened(vec![
+            event(b"awake", 0, BoundaryInput::Sleep(Sleep::Awake)),
+            event(b"asleep", 10 * SECOND, BoundaryInput::Sleep(Sleep::Nrem)),
+            event(b"open", 0, BoundaryInput::Void(Gate::Open)),
+            event(b"shut", 10 * SECOND, BoundaryInput::Void(Gate::Shut)),
+        ])?;
+        let reads = [Held::Sleep, Held::Void];
+        let early = pending.frame_at(SimTime::from_ns(5 * SECOND), &reads);
+        let late = pending.frame_at(SimTime::from_ns(10 * SECOND), &reads);
+        assert_eq!((early.held(Held::Sleep), early.held(Held::Void)), (0.0, 1.0));
+        assert_eq!((late.held(Held::Sleep), late.held(Held::Void)), (1.0, 0.0));
+        let unread = pending.frame_at(SimTime::from_ns(10 * SECOND), &[Held::Void]);
+        assert!(!unread.states(Held::Sleep) && unread.held(Held::Sleep).is_nan());
+        Ok(())
+    }
+
+    #[test]
+    fn a_frame_seals_its_held_inputs_only_when_it_holds_one() -> Result<(), AdmissionError> {
+        let sealed = |frame: &DriveFrame| {
+            let mut out = Canonical::new("frame");
+            frame.seal(&mut out);
+            out.digest()
+        };
+        let mut before = Canonical::new("frame");
+        before.length(0);
+        0.0_f64.seal(&mut before);
+        0.0_f64.seal(&mut before);
+        let pending = opened(vec![event(b"open", 0, BoundaryInput::Void(Gate::Open))])?;
+        let unread = pending.frame_at(SimTime::from_ns(0), &[Held::Sleep]);
+        let read = pending.frame_at(SimTime::from_ns(0), &[Held::Void]);
+        assert_eq!(sealed(&DriveFrame::default()), before.digest());
+        assert_eq!(sealed(&unread), before.digest());
+        assert_ne!(sealed(&read), before.digest());
+        Ok(())
+    }
+
+    #[test]
+    fn in_a_body_that_reads_the_clock_each_whole_minute_ends_a_step_and_starts_one_after_a_breakpoint()
+    -> Result<(), AdmissionError> {
+        let pending = applied(vec![clock(0, 7 * HOUR + 20 * SECOND)])?;
+        let edge = SimTime::from_ns(40 * SECOND);
+        let inside = pending.plan(SimTime::from_ns(SECOND), false, &CLOCK);
+        assert_eq!(inside.running_end, Some(edge));
+        assert!(!inside.after_breakpoint);
+        let at_edge = pending.plan(edge, false, &CLOCK);
+        assert!(at_edge.after_breakpoint);
+        assert_eq!(
+            at_edge.running_end,
+            SimTime::from_ns(40 * SECOND).plus_ns(MINUTE_NS)
+        );
+        let blind = pending.plan(edge, false, &[Held::Sleep]);
+        assert!(!blind.after_breakpoint);
+        assert_eq!(blind.running_end, Some(SimTime::from_ns(u64::MAX)));
+        Ok(())
+    }
+
+    #[test]
+    fn a_clock_whose_minute_turns_between_two_points_is_off_the_grid_only_in_a_body_that_reads_it()
+    -> Result<(), AdmissionError> {
+        let id = InputId::new(Digest::of_canonical(b"clock"));
+        let port = BoundaryPort::new(vec![clock(0, 7 * HOUR + 20 * SECOND)])?;
+        let cycle = |seconds: u64, intervals: u32| {
+            let period = NonZeroU64::new(seconds * SECOND).expect("a period");
+            Cycle::new(period, NonZeroU32::new(intervals).expect("intervals"))
+        };
+        let start = SimTime::from_ns(0);
+        assert_eq!(
+            port.off_grid(start, cycle(48, 4)?, true),
+            Some(id),
+            "40 s between 36 and 48"
+        );
+        assert_eq!(port.off_grid(start, cycle(48, 4)?, false), None);
+        assert_eq!(port.off_grid(start, cycle(50, 5)?, true), None, "40 s is a point");
+        assert_eq!(port.off_grid(start, cycle(30, 4)?, true), None, "past the window");
+        Ok(())
+    }
+
+    #[test]
+    fn a_clock_of_a_day_or_more_and_a_room_out_of_range_are_refused() -> Result<(), AdmissionError> {
+        let late = clock(0, 24 * HOUR);
+        let id = late.id();
+        assert_eq!(
+            BoundaryPort::new(vec![late]).err(),
+            Some(AdmissionError::ClockOutOfRange { id })
+        );
+        assert!(BoundaryPort::new(vec![clock(0, 24 * HOUR - 1)]).is_ok());
+        let room = |change: fn(&mut [f64; 8])| -> Result<BoundaryEvent, AdmissionError> {
+            let mut values = [293.0, 293.0, 0.5, 1.0, 760.0, 0.21, 0.0004, 1.0];
+            change(&mut values);
+            let [
+                air,
+                radiant,
+                humidity,
+                air_speed,
+                pressure,
+                oxygen,
+                carbon_dioxide,
+                clothing,
+            ] = values;
+            Ok(event(
+                b"room",
+                0,
+                BoundaryInput::Room(Room {
+                    air: Measure::new(air)?,
+                    radiant: Measure::new(radiant)?,
+                    humidity: Measure::new(humidity)?,
+                    air_speed: Measure::new(air_speed)?,
+                    pressure: Measure::new(pressure)?,
+                    oxygen: Measure::new(oxygen)?,
+                    carbon_dioxide: Measure::new(carbon_dioxide)?,
+                    clothing: Measure::new(clothing)?,
+                }),
+            ))
+        };
+        let id = InputId::new(Digest::of_canonical(b"room"));
+        assert!(BoundaryPort::new(vec![room(|_| {})?]).is_ok());
+        let edges: [fn(&mut [f64; 8]); 6] = [
+            |values| values[2] = 0.0,
+            |values| values[2] = 1.0,
+            |values| values[3] = 0.0,
+            |values| values[7] = 0.0,
+            |values| (values[5], values[6]) = (0.75, 0.25),
+            |values| (values[5], values[6]) = (1.0, 0.0),
+        ];
+        for edge in edges {
+            assert!(BoundaryPort::new(vec![room(edge)?]).is_ok());
+        }
+        let breaks: [(&str, fn(&mut [f64; 8])); 11] = [
+            ("air at absolute zero", |values| values[0] = 0.0),
+            ("radiant at absolute zero", |values| values[1] = 0.0),
+            ("humidity below 0", |values| values[2] = -0.1),
+            ("humidity past 1", |values| values[2] = 1.1),
+            ("negative air speed", |values| values[3] = -0.1),
+            ("no pressure", |values| values[4] = 0.0),
+            ("oxygen past 1", |values| values[5] = 1.1),
+            ("negative carbon dioxide", |values| values[6] = -0.1),
+            ("carbon dioxide past 1", |values| values[6] = 1.1),
+            ("fractions past 1 together", |values| {
+                (values[5], values[6]) = (0.75, 0.3)
+            }),
+            ("negative clothing", |values| values[7] = -0.1),
+        ];
+        for (name, change) in breaks {
+            let refused = BoundaryPort::new(vec![room(change)?]).err();
+            assert_eq!(refused, Some(AdmissionError::RoomOutOfRange { id }), "{name}");
+        }
+        Ok(())
+    }
+}
