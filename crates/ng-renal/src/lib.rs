@@ -126,7 +126,7 @@ pub fn declare<'b>(scope: RenalScope<'b>) -> Result<Fragment<'b, Renal>, Admissi
         let (inside, outside) = (k.upstream(&blood), k.downstream(&lumen));
         let head = k.subtract(inside, outside);
         let (albumin, water) = (
-            k.at_edge(&filtration.from_amount()),
+            k.at_edge(&filtration.from_amount::<Albumin>()),
             k.at_edge(&filtration.from_amount()),
         );
         let volume = k.volume(water);
