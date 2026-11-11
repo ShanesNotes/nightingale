@@ -2,7 +2,7 @@
 
 Type: task
 Status: open
-Blocked by: 03, 04
+Blocked by: 03, 04, 14
 Runs on: written on the workstation; compiled, tested and checked against the audit's runs on the heavy-run machine
 
 **What it builds:** the reduction that turns a teacher run into what the named model learns from. A schema file lists the named totals. The driver compiles the schema against the arena body once, derives the transfers from the body's columns, proves the grouping with an exact integer identity, and writes one compiled reduction that the Python side reads and never re-derives. The study then checks, on every beat of every audit run, that each named total's change equals its transfers' net extents. The same machinery compiles R's richer reduction from a one-line schema.

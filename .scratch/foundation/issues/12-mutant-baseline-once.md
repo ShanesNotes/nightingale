@@ -11,7 +11,7 @@ One guard moves. Today the baseline proves a test passes unmutated in the sweep'
 - [ ] `10-rust` records what its test phase ran and passed: the commit, the build settings, and the crates and test targets. `40-mutants` skips each baseline that record covers
 - [ ] A `--release` baseline, a crate the plan did not test, a record from another commit or other build settings, and a missing record each run the baseline as today. A check shows each of these
 - [ ] A hand run of `tools/mutate.py` runs every baseline, as today. Rows that [ticket 11](11-proof-fails-fast.md) runs before `10-rust` keep their baselines, since `10-rust` has not run yet
-- [ ] The seconds saved on a full proof, measured in three alternating proofs each way on one head on the tower. All six show the same CAUGHT count and the same `10-rust` test counts
+- [ ] The seconds saved on a full proof, measured in three alternating proofs each way on one head on one build worker under the same other load, with the worker named beside each number. All six show the same CAUGHT count and the same `10-rust` test counts
 - [ ] One full proof run under `pidstat -u 5` or `sar -u 5`, with the record kept beside its log. It shows whether cores sit idle during the arena test binary and the heavy mutant rows. That decides the next cut. If cores sit idle, running `40-mutants` beside `10-rust` could save up to 766 s, or the arena binary beside the other test binaries up to about 230 s, both estimates. If the arena tests fill the cores, that cut is dropped
 - [ ] The PR body names the guard that moves and marks it a model default open to review
 
