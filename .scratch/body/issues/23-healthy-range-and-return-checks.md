@@ -20,7 +20,7 @@ This lands the healthy-range set item of [foundation 07](../../foundation/issues
 
 ## Answer
 
-Both checks are built in `ng-validate` as one fold over a session from admission, `ReadingChecks`. It reads every accepted revision through a `BareLens`: the run lens's rows and methods, with no window, delay or error. The healthy-range set is in `ng-contract`, beside the packet and the lens, because only there can a range's dimension be checked against its row. It has its own digest, nothing that builds a run's identity takes it, and only the synthetic kind can be built. `ParameterPacket::anchors` lists each anchor's id, row, method, statistic and window, never its value. Every rule has a test on a synthetic stream or a synthetic run made to break it alone, and a mutant row in `tools/gate/mutants.toml`.
+Both checks are built in `ng-validate` as one fold over a session from admission, `ReadingChecks`. It reads every accepted revision through a `BareLens`: the run lens's rows and methods, with no window, delay or error. The healthy-range set is in `ng-contract`, beside the packet and the lens, because only there can a range's dimension be checked against its row. It has its own digest, nothing that builds a run's identity takes it, and only the synthetic kind can be built. `ParameterPacket::anchors` lists each anchor's id, row, method, statistic and window, never its value. Every rule has a test on a synthetic stream or a synthetic run made to break it alone. Every rule that one mutation can break has a row in `tools/gate/mutants.toml`, 67 rows in all. The type rules have compile-fail doctests that `gate.py codes` holds.
 
 Model defaults, each a reading of record 0004 that admits two:
 
@@ -29,7 +29,7 @@ Model defaults, each a reading of record 0004 that admits two:
 - **A change with no range of its own blocks** when its two activities' ranges differ. It is judged by the every-activity range when both activities fall back to it. Alternative: leave such windows unjudged, which record 0004 rejects as a gap.
 - **A whole period that the run's start or end cuts** is counted, not judged. A range that judged no whole window or whole period blocks, by the coordinator's ruling.
 - **The return check compares two mornings.** It compares each later 06:55 reading with the run's own admission-morning reading by the same method and window, which admission solved onto the anchor. The coordinator ruled this reading.
-- **A check that tested nothing never passes.** A range whose activity or change the run holds but which judged nothing blocks, and so does a packet with no anchors.
+- **A check that tested nothing never passes.** A range whose activity or change the run holds but which judged nothing blocks. So does a range check that judged nothing at all, and a packet with no anchors.
 
 Handoffs:
 

@@ -631,7 +631,7 @@ A lens's readings with no window, delay or measurement error: each grid instant'
 The whole span of one activity, such as the night, when a healthy range's study averaged over it. The healthy-range check judges each whole period the run holds and counts the ones the run's start or end cuts.
 
 **Coverage gap**:
-Something a check could not judge: a reading, an activity or a change with no healthy range, an anchor with no within-subject variation or no bare reading, a morning the run did not reach, or a range whose activity the run holds but which judged no whole window or whole period. Each is named and blocks the verdict, and none leaves a reading unchecked silently (record 0004). It is not a missing reading in the chart.
+Something a check could not judge: a reading, an activity or a change with no healthy range, an anchor with no within-subject variation or no bare reading, a morning the run did not reach, a range whose activity the run holds but which judged no whole window or whole period, or a check that judged nothing at all. Each is named and blocks the verdict, and none leaves a reading unchecked silently (record 0004). It is not a missing reading in the chart.
 _Avoid_: skipped, exempt
 
 **Accuracy gate**:
