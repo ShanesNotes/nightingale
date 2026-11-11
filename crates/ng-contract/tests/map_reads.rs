@@ -349,7 +349,7 @@ fn felt_residuals<const N: usize>(
     share: Binding,
     sites: [SiteId; N],
 ) -> Result<[f64; N], InitializationFailure> {
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     let value = Measure::<Dimensionless>::new(0.25)?;
     packet.synthetic(ParameterKey::new("re.share"), share, value, "synthetic")?;
     let start = |row| match row {
@@ -1376,7 +1376,7 @@ fn a_drain_takes_a_delivery_its_own_law_reads() -> Result<(), InitializationFail
         body.add(laws.finish());
         body.compile()
     })?;
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     packet.start_rest(&body, |_| 1.0, "synthetic")?;
     let parameters = body.bind(packet)?;
     let water = BoundaryInput::Water(Delivered {

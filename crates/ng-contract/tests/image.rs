@@ -86,7 +86,7 @@ fn image(body: &CompiledBody, sites: [SiteId; 2]) -> ImageParts {
 }
 
 fn image_with(body: &CompiledBody, sites: [SiteId; 2], more: Vec<BoundaryEvent>) -> ImageParts {
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     let edges = Binding::Network(Network::Vascular);
     let elastance = measure::<Elastance>(1.0);
     let conductance = measure::<Conductance<Water>>(0.5);

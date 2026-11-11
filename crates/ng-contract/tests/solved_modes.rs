@@ -98,7 +98,7 @@ const BASE: Start = Start {
 fn system(body: &CompiledBody, moment_ns: u64) -> Result<InitializationSystem<'_>, InitializationFailure> {
     let period = NonZeroU64::new(2_000_000_000).expect("not zero");
     let cycle = Cycle::new(period, NonZeroU32::new(2).expect("not zero"))?;
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
+    let mut packet = ParameterPacket::periodic(cycle);
     packet.within(ErrorScales::uniform(measure(1e-12), measure(1e-9))?);
     let threshold = measure::<Dimensionless>(1.0);
     packet.synthetic(

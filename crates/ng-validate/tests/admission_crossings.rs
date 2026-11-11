@@ -338,7 +338,7 @@ impl Relaxer {
         up: Up,
     ) -> ParameterPacket<SyntheticFixture> {
         let cycle = Cycle::new(count(SECOND), NonZeroU32::new(intervals).expect("not zero")).expect("even");
-        let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
+        let mut packet = ParameterPacket::periodic(cycle);
         packet.within(admission_tolerance());
         let (banded, following) = (shape.gate || shape.touch, shape.gate || shape.seen);
         let mut rates = vec![("synthetic.slow", SLOW)];

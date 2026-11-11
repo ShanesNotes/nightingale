@@ -235,7 +235,7 @@ fn a_cycle_solves_field_rows_at_every_point_and_leaves_held_pools_where_they_are
         NonZeroU64::new(SECOND).expect("not zero"),
         NonZeroU32::new(4).expect("not zero"),
     )?;
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
+    let mut packet = ParameterPacket::periodic(cycle);
     packet.within(admission_tolerance());
     let class = Binding::Class(Class::CapillaryBed);
     let one = Measure::<Elastance>::new(1.0)?;
@@ -394,7 +394,7 @@ fn a_validity_range_on_a_definition_judges_the_row() -> Result<(), Initializatio
         body.add(laws.finish());
         body.compile()
     })?;
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     let outside = Measure::<Dimensionless>::new(4.0)?;
     packet.synthetic(
         ParameterKey::new("cv.stretch"),
@@ -473,7 +473,7 @@ fn a_loop_of_two_couplings_is_solved_as_one_coupled_step() -> Result<(), Initial
     let climbing = RowKind::Memory(named("RS", "climbing").into());
     let stretch = RowKind::Algebraic(named("RS", "pulmonary_stretch").into());
     let drive = RowKind::Algebraic(named("NS", "respiratory_drive").into());
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     for key in ["bench.a", "bench.b"] {
         let value = Measure::<Dimensionless>::new(0.5)?;
         packet.synthetic(ParameterKey::new(key), Binding::Body, value, "synthetic")?;

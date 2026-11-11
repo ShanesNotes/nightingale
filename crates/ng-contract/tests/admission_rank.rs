@@ -57,7 +57,7 @@ fn a_one_point_cycle_with_a_total_nothing_regulates_has_no_rank() {
         NonZeroU32::new(1).unwrap(),
     )
     .expect("a one-point cycle");
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
+    let mut packet = ParameterPacket::periodic(cycle);
     packet
         .synthetic(
             ParameterKey::new("bd.speed"),
@@ -123,7 +123,7 @@ fn two_proportional_rows_gain_no_rank_from_rounding() {
         body.compile()
     })
     .expect("compiled");
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     for (key, value) in [("ns.a", 3.0), ("ns.b", 7.0), ("ns.c", 0.1)] {
         packet
             .synthetic(
@@ -194,7 +194,7 @@ fn two_fits_of_one_anchors_worth_of_information_have_no_rank() {
         body.compile()
     })
     .expect("compiled");
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     let amount = RowKind::Amount {
         site,
         space: Space::Thermal,
@@ -269,7 +269,7 @@ fn an_instants_stage_reads_the_row_it_returns() -> Result<(), InitializationFail
         body.add(ns.finish());
         body.compile()
     })?;
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     packet.start_rest(&body, |_| 1.0, "synthetic")?;
     let parameters = body.bind(packet)?;
     let request = InitializationRequest::at(SimTime::from_ns(0));

@@ -1099,7 +1099,7 @@
 //! }
 //! ```
 //! A reviewed packet always holds a day, so no clinical run takes its day from plain events.
-//! ```compile_fail,E0061
+//! ```compile_fail,E0599
 //! use ng_contract::*;
 //! fn dayless() -> ParameterPacket<Reviewed> {
 //!     ParameterPacket::<Reviewed>::new()
@@ -1108,7 +1108,7 @@
 //! ```
 //! use ng_contract::*;
 //! fn holding(day: Day) -> ParameterPacket<Reviewed> {
-//!     ParameterPacket::<Reviewed>::new(day)
+//!     ParameterPacket::<Reviewed>::with_day(day)
 //! }
 //! ```
 //! An anchor states its method and window (rule 17).

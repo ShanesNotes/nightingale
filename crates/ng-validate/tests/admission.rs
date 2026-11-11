@@ -430,7 +430,7 @@ impl PulsatileCase {
         Synthetic::new(id, read, NOTE)
     }
     fn packet_without_fit(&self) -> ParameterPacket<SyntheticFixture> {
-        let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(self.intervals));
+        let mut packet = ParameterPacket::periodic(cycle(self.intervals));
         packet.within(admission_tolerance());
         let g = measure::<Conductance<Water>>(CONDUCTANCE);
         packet.synthetic(G, NETWORK, g, NOTE).expect("once");
@@ -652,7 +652,7 @@ fn a_stiff_row_driven_inside_the_beat_is_admitted_on_odd_and_even_rings() {
     for intervals in [2_u32, 4, 5, 8, 25] {
         let case = PulsatileCase::plain().with_intervals(intervals);
         let step = PERIOD_NS / u64::from(intervals);
-        let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(intervals));
+        let mut packet = ParameterPacket::periodic(cycle(intervals));
         packet.within(admission_tolerance());
         let g = measure::<Conductance<Water>>(conductance);
         packet.synthetic(G, NETWORK, g, NOTE).expect("once");
@@ -706,7 +706,7 @@ fn an_instant_anchor_on_a_pulsatile_row_is_refused_and_on_a_slow_row_is_read() {
     let bare = ChannelSpec::new(GAUGE, lumen(slow.a));
     let lens = slow.body.lens(vec![bare], count(SECOND)).expect("a lens");
     let packet = |value| {
-        let mut packet = ParameterPacket::<SyntheticFixture>::new();
+        let mut packet = ParameterPacket::new();
         let read = Snapshot::new(
             lumen(slow.a),
             GAUGE,
@@ -748,7 +748,7 @@ fn an_instant_anchor_on_a_pulsatile_row_is_refused_and_on_a_slow_row_is_read() {
 #[test]
 fn a_cycle_mean_anchor_needs_a_cycle() {
     let case = PulsatileCase::plain();
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     packet
         .anchor(case.mean_anchor(MEAN, case.a(), MEAN_A))
         .expect("once");
@@ -862,7 +862,7 @@ fn steady_packet_missing(
     let elastance = 2.0;
     let difference = DELIVERED / (CONDUCTANCE * elastance);
     let (a, b) = ((TOTAL + difference) / 2.0, (TOTAL - difference) / 2.0);
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(4));
+    let mut packet = ParameterPacket::periodic(cycle(4));
     packet.within(admission_tolerance());
     let g = measure::<Conductance<Water>>(CONDUCTANCE);
     packet.synthetic(G, NETWORK, g, NOTE).expect("once");
@@ -965,7 +965,7 @@ fn a_moved_conserved_total_is_refused_with_its_quantity() {
 }
 
 fn sized_packet(case: &PulsatileCase) -> ParameterPacket<SyntheticFixture> {
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     packet.within(admission_tolerance());
     packet
         .synthetic(E, NETWORK, measure::<Elastance>(GUESS), NOTE)
@@ -1043,7 +1043,7 @@ fn a_row_size_that_names_no_row_or_is_not_a_size_is_refused() {
 fn an_instant_moves_no_conserved_total_past_its_scale() {
     let case = PulsatileCase::new(Variant::Slow);
     let lens = case.body().lens(Vec::new(), count(SECOND)).expect("a lens");
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     packet.within(admission_tolerance());
     packet
         .synthetic(E, NETWORK, measure::<Elastance>(GUESS), NOTE)
@@ -1132,7 +1132,7 @@ fn a_total_moved_by_less_than_a_pools_rounding_is_refused() {
     const POOL: f64 = 1_099_511_627_776.0;
     let case = PulsatileCase::plain().with_intervals(4);
     let body = case.body();
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(4));
+    let mut packet = ParameterPacket::periodic(cycle(4));
     packet.within(ErrorScales::uniform(measure(1e-9), measure(0.0)).expect("scales"));
     let g = measure::<Conductance<Water>>(0.0);
     packet
@@ -1164,7 +1164,7 @@ fn a_total_moved_by_less_than_a_pools_rounding_is_refused() {
 #[test]
 fn a_defect_that_overflows_is_refused_however_wide_the_tolerance() {
     let body = filter_body();
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     packet.within(ErrorScales::uniform(measure(1.0), measure(2.0)).expect("scales"));
     let slow = measure::<Rate<Dimensionless>>(1e-100);
     packet.synthetic(PACE, Binding::Body, slow, NOTE).expect("once");
@@ -1199,7 +1199,7 @@ fn a_net_flow_spread_over_every_row_is_still_refused_with_its_quantity() {
     let flow = DELIVERED - net / 2.0;
     let difference = flow / (CONDUCTANCE * elastance);
     let (a, b) = ((TOTAL + difference) / 2.0, (TOTAL - difference) / 2.0);
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(intervals as u32));
+    let mut packet = ParameterPacket::periodic(cycle(intervals as u32));
     packet.within(admission_tolerance());
     let g = measure::<Conductance<Water>>(CONDUCTANCE);
     packet.synthetic(G, NETWORK, g, NOTE).expect("once");
@@ -1227,7 +1227,7 @@ fn a_net_flow_spread_over_every_row_is_still_refused_with_its_quantity() {
 fn the_row_a_total_replaced_is_read_at_its_own_scale() {
     let case = PulsatileCase::plain();
     let (small, large) = (1.0, 1e9);
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(4));
+    let mut packet = ParameterPacket::periodic(cycle(4));
     packet.within(admission_tolerance());
     let g = measure::<Conductance<Water>>(4.0);
     packet.synthetic(G, NETWORK, g, NOTE).expect("once");
@@ -1260,7 +1260,7 @@ fn the_row_a_total_replaced_is_read_at_its_own_scale() {
 fn a_march_gives_a_guess_with_no_head_a_head_to_fit() {
     let store = MemoryStore::default();
     let case = PulsatileCase::plain();
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(INTERVALS));
+    let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
     packet.within(admission_tolerance());
     let g = measure::<Conductance<Water>>(CONDUCTANCE);
     packet.synthetic(G, NETWORK, g, NOTE).expect("once");
@@ -1347,7 +1347,7 @@ fn a_fit_no_law_behind_its_anchor_reads_is_refused_by_its_key() {
         AnchorStatistic::Instant,
         measure::<Water>(START[0]),
     );
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     packet.anchor(Synthetic::new(MEAN, read, NOTE)).expect("once");
     packet
         .calibrated(E, NETWORK, measure::<Elastance>(GUESS), MEAN)
@@ -1375,7 +1375,7 @@ fn a_fit_no_law_behind_its_anchor_reads_is_refused_by_its_key() {
 fn an_orbit_that_leaves_a_rows_set_inside_the_beat_is_refused_with_its_row() {
     let store = MemoryStore::default();
     let case = PulsatileCase::plain();
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(INTERVALS));
+    let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
     packet.within(admission_tolerance());
     let g = measure::<Conductance<Water>>(CONDUCTANCE);
     packet.synthetic(G, NETWORK, g, NOTE).expect("once");
@@ -1449,7 +1449,7 @@ fn filter_body() -> CompiledBody {
 }
 
 fn filter_packet(reading: f64) -> ParameterPacket<SyntheticFixture> {
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     let nervous = |local| LawName { owner: "NS", local };
     let speed = measure::<Rate<Dimensionless>>(0.01);
     packet.synthetic(PACE, Binding::Body, speed, NOTE).expect("once");
@@ -1555,7 +1555,7 @@ fn an_instant_solve_stands_though_rounding_moves_a_row_inside_the_tolerance() {
     let core = reference(SECOND);
     let lens = body.lens(Vec::new(), count(SECOND)).expect("a lens");
     for (filter, gain, reading) in [(1e-3, 1.5, 1.0), (1e-3, 3.0, 4.0), (7e-3, 1.5, 1.0)] {
-        let mut packet = ParameterPacket::<SyntheticFixture>::new();
+        let mut packet = ParameterPacket::new();
         packet.within(admission_tolerance());
         let speed = measure::<Rate<Dimensionless>>(1.0);
         packet.synthetic(PACE, Binding::Body, speed, NOTE).expect("once");
@@ -1592,7 +1592,7 @@ fn tiny_flow<'m>(
 ) -> Result<Admitted<'m>, InitializationFailure> {
     let (v, tau) = (tiny / seconds(PERIOD_NS), seconds(PULSE_NS));
     let mean = TOTAL / 2.0 + tiny * (1.0 - tau) / 4.0 + v / (2.0 * 2.0 * CONDUCTANCE);
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(INTERVALS));
+    let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
     packet.within(admission_tolerance());
     let g = measure::<Conductance<Water>>(CONDUCTANCE);
     packet.synthetic(G, NETWORK, g, NOTE).expect("once");
@@ -1720,7 +1720,7 @@ fn a_net_flow_a_row_cannot_hold_is_still_refused() {
     let row = boundary_row(SWING);
     let spec = ChannelSpec::new(GAUGE, row).averaged(count(4));
     let lens = body.lens(vec![spec], count(SECOND / 4)).expect("a lens");
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(4));
+    let mut packet = ParameterPacket::periodic(cycle(4));
     (packet.start(lumen(vessel), measure::<Water>(1.0), NOTE)).expect("once");
     (packet.start(row, measure::<Rate<Water>>(WIDE), NOTE)).expect("once");
     let flows = [(RISE[0], WIDE), (FALL[0], 1.0), (FALL[1], WIDE)];
@@ -1769,7 +1769,7 @@ fn a_net_flow_is_read_pool_by_pool() {
     let (body, [filling, emptying]) = parted_body();
     let bare = ChannelSpec::new(GAUGE, lumen(filling));
     let lens = body.lens(vec![bare], count(SECOND)).expect("a lens");
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(4));
+    let mut packet = ParameterPacket::periodic(cycle(4));
     packet.within(admission_tolerance());
     for site in [filling, emptying] {
         (packet.start(lumen(site), measure::<Water>(10.0), NOTE)).expect("once");
@@ -1798,8 +1798,7 @@ fn a_cycle_mean_is_summed_as_the_observer_sums_it() {
     let core = reference(SECOND);
     let solved = |target: f64| {
         let beat = NonZeroU32::new(3).expect("not zero");
-        let mut packet =
-            ParameterPacket::<SyntheticFixture>::periodic(Cycle::new(count(3 * SECOND), beat).expect("even"));
+        let mut packet = ParameterPacket::periodic(Cycle::new(count(3 * SECOND), beat).expect("even"));
         packet.within(admission_tolerance());
         (packet.start(lumen(vessel), measure::<Water>(1e6), NOTE)).expect("once");
         (packet.start(row, measure::<Rate<Water>>(WIDE), NOTE)).expect("once");
@@ -1863,7 +1862,7 @@ fn a_small_body_is_solved_on_its_own_scale() {
     let case = PulsatileCase::plain();
     let small = 1e-16;
     let floor = measure::<Dimensionless>(1e-30);
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(INTERVALS));
+    let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
     packet.within(ErrorScales::uniform(floor, measure(1e-12)).expect("positive"));
     let g = measure::<Conductance<Water>>(CONDUCTANCE);
     packet.synthetic(G, NETWORK, g, NOTE).expect("once");
@@ -1902,7 +1901,7 @@ fn a_small_nonlinear_body_with_no_fit_is_solved_on_its_own_scale() {
     let case = PulsatileCase::new(Variant::Divided);
     let small = 1e-16;
     let floor = measure::<Dimensionless>(1e-30);
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(4));
+    let mut packet = ParameterPacket::periodic(cycle(4));
     packet.within(ErrorScales::uniform(floor, measure(1e-12)).expect("positive"));
     let g = measure::<Conductance<Water>>(CONDUCTANCE);
     packet.synthetic(G, NETWORK, g, NOTE).expect("once");
@@ -1964,7 +1963,7 @@ fn hazard_system<'c>(
 ) -> InitializationSystem<'c> {
     let period_ns = 100_000_000 * u64::from(intervals);
     let cycle = Cycle::new(count(period_ns), NonZeroU32::new(intervals).expect("not zero")).expect("even");
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
+    let mut packet = ParameterPacket::periodic(cycle);
     packet.within(admission_tolerance());
     let g = measure::<Conductance<Water>>(CONDUCTANCE);
     packet.synthetic(G, NETWORK, g, NOTE).expect("once");
@@ -2079,7 +2078,7 @@ fn a_fit_felt_at_one_point_of_the_ring_is_solved() {
     let step = PERIOD_NS / 8;
     let channel = ChannelSpec::new(GAUGE, reading).averaged(count(8));
     let lens = case.body().lens(vec![channel], count(step)).expect("a lens");
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(8));
+    let mut packet = ParameterPacket::periodic(cycle(8));
     packet.within(admission_tolerance());
     packet
         .synthetic(E, NETWORK, measure::<Elastance>(GUESS), NOTE)
@@ -2192,7 +2191,7 @@ fn boundary_row(local: &'static str) -> RowKind {
 }
 
 fn instant_packet(case: &PulsatileCase, row: RowKind, target: f64) -> ParameterPacket<SyntheticFixture> {
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     packet.within(admission_tolerance());
     packet
         .synthetic(E, NETWORK, measure::<Elastance>(GUESS), NOTE)
@@ -2531,7 +2530,7 @@ fn a_fit_names_one_anchor_its_packet_holds_and_an_anchor_takes_one_fit() {
             binding: NETWORK
         })
     );
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(INTERVALS));
+    let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
     packet
         .anchor(case.mean_anchor(MEAN, case.a(), MEAN_A))
         .expect("once");
@@ -2684,7 +2683,7 @@ fn a_fit_no_row_feels_at_the_start_is_refused_by_its_key() {
     let store = MemoryStore::default();
     let case = PulsatileCase::plain();
     let even = 50.0;
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(INTERVALS));
+    let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
     packet.within(admission_tolerance());
     let g = measure::<Conductance<Water>>(CONDUCTANCE);
     packet.synthetic(G, NETWORK, g, NOTE).expect("once");
@@ -2721,7 +2720,7 @@ fn a_fit_felt_only_away_from_its_anchor_is_refused_by_its_key() {
         .collect();
     let (elastance, even) = (2.0, 50.0);
     let difference = DELIVERED / (CONDUCTANCE * elastance);
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(4));
+    let mut packet = ParameterPacket::periodic(cycle(4));
     packet.within(admission_tolerance());
     let g = measure::<Conductance<Water>>(CONDUCTANCE);
     packet.synthetic(G, NETWORK, g, NOTE).expect("once");
@@ -2767,7 +2766,7 @@ fn a_fit_felt_only_away_from_its_anchor_is_refused_by_its_key() {
 fn a_first_mode_has_a_record() {
     let store = MemoryStore::default();
     let case = PulsatileCase::new(Variant::Hazard);
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     let g = measure::<Conductance<Water>>(CONDUCTANCE);
     packet.synthetic(G, NETWORK, g, NOTE).expect("once");
     packet
@@ -2919,7 +2918,7 @@ fn two_builds_of_one_packet_start_on_the_same_bits() {
     let second = AnchorId::new("fixture.mean-b");
     let mean = |id, row, value| case.mean_anchor(id, row, value);
     let build = |fits_first: bool| {
-        let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle(INTERVALS));
+        let mut packet = ParameterPacket::periodic(cycle(INTERVALS));
         if fits_first {
             packet
                 .anchor(mean(second, case.b(), TOTAL - MEAN_A))
@@ -3089,7 +3088,7 @@ fn a_delivery_inside_the_window_is_in_the_hash_a_run_names_and_one_past_it_is_no
 fn the_moment_a_run_starts_is_in_the_hash_it_names() {
     let case = PulsatileCase::new(Variant::Slow);
     let named = |moment: u64| {
-        let mut packet = ParameterPacket::<SyntheticFixture>::new();
+        let mut packet = ParameterPacket::new();
         packet
             .synthetic(E, NETWORK, measure::<Elastance>(GUESS), NOTE)
             .expect("once");

@@ -155,7 +155,7 @@ fn admitted<'m>(
         space: Space::Lumen,
         species: Species::Water,
     };
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     packet.synthetic(
         ParameterKey::new("cv.e"),
         network,

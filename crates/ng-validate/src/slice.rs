@@ -567,7 +567,7 @@ pub fn arena_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixt
         NonZeroU32::MIN.saturating_add(POINTS - 1),
     )?
     .paced(phase.into(), rate);
-    let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
+    let mut packet = ParameterPacket::periodic(cycle);
     let unit = |value| Measure::<Dimensionless>::new(value);
     let scales = ErrorScales::uniform(unit(1e-9)?, unit(1e-10)?)?;
     packet.within(scales);

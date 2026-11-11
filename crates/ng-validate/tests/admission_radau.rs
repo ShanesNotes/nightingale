@@ -209,7 +209,7 @@ impl Pacemaker {
             Clock::Unpaced => cycle,
             Clock::Timed | Clock::Sampled => cycle.paced(name("phase").into(), RATE),
         };
-        let mut packet = ParameterPacket::<SyntheticFixture>::periodic(cycle);
+        let mut packet = ParameterPacket::periodic(cycle);
         packet.within(admission_tolerance());
         let unit = |local, value| (key(local), measure::<Dimensionless>(value));
         for (key, value) in [

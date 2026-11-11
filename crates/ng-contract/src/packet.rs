@@ -519,12 +519,12 @@ impl<K: PacketKind> ParameterPacket<K> {
 }
 impl ParameterPacket<Reviewed> {
     /// A packet whose start state stands at one instant, and the day its run's events are made from.
-    pub fn new(day: Day) -> Self {
+    pub fn with_day(day: Day) -> Self {
         Self::opened(None, Some(day))
     }
     /// A packet whose start state returns after `cycle`: the periodic goal. Its start values are the guess
     /// at every point.
-    pub fn periodic(cycle: Cycle, day: Day) -> Self {
+    pub fn periodic_with_day(cycle: Cycle, day: Day) -> Self {
         Self::opened(Some(cycle), Some(day))
     }
 }
@@ -1118,7 +1118,7 @@ mod tests {
 
     fn holding(payload: BoundaryInput) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
         let id = InputId::new(Digest::of_canonical(b"input"));
-        let mut packet = ParameterPacket::<SyntheticFixture>::new();
+        let mut packet = ParameterPacket::new();
         packet.day(Day::new(vec![BoundaryEvent::new(
             id,
             SimTime::from_ns(0),
@@ -1142,7 +1142,7 @@ mod tests {
 
     #[test]
     fn the_hash_covers_the_day_and_one_amount_moves_it() -> Result<(), AdmissionError> {
-        let none = ParameterPacket::<SyntheticFixture>::new().hash();
+        let none = ParameterPacket::new().hash();
         let one = holding(drink(1.0)?)?.hash();
         assert_ne!(one, none, "a day enters the hash");
         assert_eq!(holding(drink(1.0)?)?.hash(), one);

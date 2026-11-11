@@ -165,7 +165,7 @@ impl BurningBeds {
     }
     /// Each bed starts a little above the one before it, so no two beds' quantities hold one value.
     pub fn packet(&self) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
-        let mut packet = ParameterPacket::<SyntheticFixture>::new();
+        let mut packet = ParameterPacket::new();
         let key = |entry: (&'static str, f64)| ParameterKey::new(entry.0);
         let value = |entry: (&'static str, f64)| entry.1;
         let body = Binding::Body;

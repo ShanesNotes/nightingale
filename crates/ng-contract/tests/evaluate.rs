@@ -178,7 +178,7 @@ fn delivery(
 fn reservoir_bench(amounts: [f64; 2], events: Vec<BoundaryEvent>) -> Result<Bench, InitializationFailure> {
     let (body, a, b) = reservoirs()?;
     let network = Binding::Network(Network::Vascular);
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     packet.synthetic(
         ParameterKey::new("cv.e"),
         network,
@@ -357,7 +357,7 @@ fn memory(local: &'static str) -> RowKind {
 fn derivatives_match_central_differences_on_nearly_nearly_every_operator() -> Result<(), InitializationFailure>
 {
     let (body, _) = nearly_every_operator()?;
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     let bind = Binding::Body;
     packet.synthetic(
         ParameterKey::new("ns.speed"),
@@ -514,7 +514,7 @@ fn two_beds() -> Result<(CompiledBody, [SiteId; 2]), AdmissionError> {
 #[test]
 fn a_coupling_field_leans_on_its_own_beds_row_alone() -> Result<(), InitializationFailure> {
     let (body, [a, b]) = two_beds()?;
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     let bed_values = [(a, 2.0, 3.0), (b, 5.0, 7.0)];
     for (site, kf, pressure) in bed_values {
         let site_binding = Binding::Site(site);
@@ -597,7 +597,7 @@ fn a_smooth_limit_is_defined_where_its_root_is_zero() -> Result<(), Initializati
         body.add(laws.finish());
         body.compile()
     })?;
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     packet.synthetic(
         ParameterKey::new("ns.width"),
         Binding::Body,
@@ -652,7 +652,7 @@ fn reading_chance(entries: &[usize]) -> Result<Bench, InitializationFailure> {
         body.add(laws.finish());
         body.compile()
     })?;
-    let mut packet = ParameterPacket::<SyntheticFixture>::new();
+    let mut packet = ParameterPacket::new();
     let (bind, note) = (Binding::Body, "synthetic");
     packet.synthetic(
         ParameterKey::new("ns.pace"),
