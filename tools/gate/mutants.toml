@@ -1373,3 +1373,10 @@ path = "crates/ng-contract/src/healthy.rs"
 old = '''out.number(K::TAG);'''
 new = '''out.number(0);'''
 test = "-p ng-contract --lib healthy::tests::a_synthetic_set_and_a_reviewed_one_seal_their_kind"
+
+[[mutant]]
+name = "healthy-range-nothing-judged-passes"
+path = "crates/ng-validate/src/healthy/range.rs"
+old = '''if gaps.is_empty() && results.iter().all(|result| result.judged == 0) {'''
+new = '''if false {'''
+test = "-p ng-validate --lib healthy::tests::a_range_check_that_judged_nothing_blocks"

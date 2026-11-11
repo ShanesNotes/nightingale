@@ -880,6 +880,21 @@ fn a_change_the_run_crosses_whose_range_judged_nothing_blocks_and_is_named() {
 }
 
 #[test]
+fn a_range_check_that_judged_nothing_blocks() {
+    let set = set(
+        vec![range("xx.range", Scope::Every, sliding(SECOND), 0.0, 100.0)],
+        Vec::new(),
+    );
+    let awake = day(&[(0, "awake")]);
+    let no_reading = ranged(&[], SECOND, &set, &awake, 0, &[]);
+    let no_value = ranged(&[sampled(reading())], SECOND, &set, &awake, 0, &[]);
+    for report in [no_reading, no_value] {
+        assert_eq!(report.verdict(), CheckVerdict::Blocked);
+        assert_eq!(report.gaps(), [RangeGap::NothingJudged]);
+    }
+}
+
+#[test]
 fn a_packet_with_no_anchors_blocks_the_return_check() {
     let set = set(Vec::new(), vec![variation(10.0)]);
     let report = returned(&[sampled(reading())], &set, &[], &hourly(48, |_| 100.0));

@@ -143,6 +143,9 @@ pub enum RangeGap {
         row: RowKind,
         method: &'static str,
     },
+    /// The check judged no window or whole period at all and named nothing else, as with a lens of no reading or a
+    /// run that gave no value, so a check that tested nothing never passes.
+    NothingJudged,
 }
 
 #[derive(Clone, Copy)]
@@ -589,6 +592,9 @@ impl RangeFold {
                     method: result.method,
                 });
             }
+        }
+        if gaps.is_empty() && results.iter().all(|result| result.judged == 0) {
+            gaps.push(RangeGap::NothingJudged);
         }
         (results, gaps)
     }
