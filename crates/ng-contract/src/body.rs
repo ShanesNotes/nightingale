@@ -6,7 +6,7 @@ use crate::law::{Op, Validity};
 use crate::problem::Jacobian;
 use crate::sources::{RefusalSource, refusal_sources};
 use crate::{
-    AdmissibleSet, Class, ConservedBasis, Crossing, Digest, LawName, Network, ParameterKey, Predicate,
+    AdmissibleSet, Class, ConservedBasis, Crossing, Digest, Held, LawName, Network, ParameterKey, Predicate,
     RateClass, Schema, SiteId, Space, Species,
 };
 
@@ -52,6 +52,7 @@ pub struct CompiledBody {
     pub(crate) sources: Vec<RefusalSource>,
     pub(crate) tape: Tape,
     totals: Vec<AdmissionTotal>,
+    held: Vec<Held>,
 }
 pub(crate) struct Layout {
     pub(crate) schema: Schema,
@@ -74,6 +75,15 @@ impl CompiledBody {
     pub(crate) fn seal(layout: Layout, elimination: Elimination, totals: Vec<AdmissionTotal>) -> Self {
         let mut out = Canonical::new("ng-contract model 2");
         layout.seal(&mut out);
+        let mut held: Vec<Held> = (layout.instances.iter())
+            .flat_map(|instance| &instance.inputs)
+            .filter_map(|input| match *input {
+                Bound::Held(held) => Some(held),
+                _ => None,
+            })
+            .collect();
+        held.sort_unstable();
+        held.dedup();
         Self {
             hash: ModelHash { digest: out.digest() },
             sources: refusal_sources(&layout),
@@ -81,7 +91,12 @@ impl CompiledBody {
             layout,
             elimination,
             totals,
+            held,
         }
+    }
+    /// The held inputs of the day some law reads, in order.
+    pub(crate) fn held_reads(&self) -> &[Held] {
+        &self.held
     }
     pub fn model_hash(&self) -> ModelHash {
         self.hash
@@ -525,6 +540,7 @@ pub(crate) enum Bound {
     Forcing(usize),
     Gauge,
     Height(u64),
+    Held(Held),
 }
 impl Bound {
     pub(crate) fn unknown(&self) -> Option<UnknownId> {
@@ -535,7 +551,8 @@ impl Bound {
             | Bound::Draw(_)
             | Bound::Forcing(_)
             | Bound::Gauge
-            | Bound::Height(_) => None,
+            | Bound::Height(_)
+            | Bound::Held(_) => None,
         }
     }
 }
@@ -566,6 +583,10 @@ impl Seal for Bound {
             Bound::Height(axial) => {
                 out.number(6);
                 out.number(*axial);
+            }
+            Bound::Held(held) => {
+                out.number(7);
+                held.seal(out);
             }
         }
     }

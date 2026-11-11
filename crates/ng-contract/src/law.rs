@@ -4,10 +4,10 @@ use crate::quantity::dimension;
 use crate::scope::ENCLOSURE_PRESSURE;
 use crate::{
     Admissible, AdmissibleSet, AdmissionError, Airway, Alimentary, Basis, Blood, Boundary, CapillaryBed,
-    Conductance, Deviation, Dimension, Dimensionless, Landmark, Length, Metabolism, Network, NonMaterial,
-    Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reactant, Reference,
-    SameDimension, Sensed, SiteSet, Sites, Space, Species, Substance, Time, Urinary, ValidityRange, Volume,
-    Water,
+    Conductance, Deviation, Dimension, Dimensionless, Held, Landmark, Length, Metabolism, Network,
+    NonMaterial, Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reactant,
+    Reference, SameDimension, Sensed, SiteSet, Sites, Space, Species, Substance, Temperature, Time, Urinary,
+    ValidityRange, Volume, Water,
 };
 use core::cell::Cell;
 use core::marker::PhantomData;
@@ -489,6 +489,10 @@ impl Seal for Source {
                 out.text(reaction);
                 out.number(species as u64);
             }
+            Source::Held(held) => {
+                out.number(8);
+                held.seal(out);
+            }
         }
     }
 }
@@ -668,6 +672,53 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
     }
     pub fn read<U: Dimension>(&mut self, port: &ReadPort<'b, O, U>) -> Expr<'b, 'k, O, U> {
         self.read_at(port.source, Where::Here)
+    }
+    fn held<U: Dimension>(&mut self, held: Held) -> Expr<'b, 'k, O, U> {
+        self.read_at(Source::Held(held), Where::Here)
+    }
+    /// The cosine and the sine of the clock's phase, which is zero at midnight and makes one turn a day. Each
+    /// changes at a whole minute. Compile refuses a law that reads a held input of the day and no parameter or
+    /// memory slot, so an input scales a gain or a set point and never sets a produced quantity.
+    pub fn clock(&mut self) -> (Expr<'b, 'k, O, Dimensionless>, Expr<'b, 'k, O, Dimensionless>) {
+        (self.held(Held::ClockCosine), self.held(Held::ClockSine))
+    }
+    /// 1 in non-REM sleep, 0 awake.
+    pub fn asleep(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.held(Held::Sleep)
+    }
+    /// 1 while the bladder's outlet is open, 0 while it is shut.
+    pub fn voiding(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.held(Held::Void)
+    }
+    pub fn room_air(&mut self) -> Expr<'b, 'k, O, Temperature> {
+        self.held(Held::AirTemperature)
+    }
+    pub fn room_radiant(&mut self) -> Expr<'b, 'k, O, Temperature> {
+        self.held(Held::RadiantTemperature)
+    }
+    /// Relative humidity, from 0 to 1.
+    pub fn room_humidity(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.held(Held::Humidity)
+    }
+    /// Air speed over 0.1 m/s.
+    pub fn room_air_speed(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.held(Held::AirSpeed)
+    }
+    /// Barometric pressure.
+    pub fn room_pressure(&mut self) -> Expr<'b, 'k, O, Pressure> {
+        self.held(Held::Pressure)
+    }
+    /// The inspired gas's dry fraction of oxygen.
+    pub fn inspired_oxygen(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.held(Held::InspiredOxygen)
+    }
+    /// The inspired gas's dry fraction of carbon dioxide.
+    pub fn inspired_carbon_dioxide(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.held(Held::InspiredCarbonDioxide)
+    }
+    /// Clothing or bedding, in clo.
+    pub fn clothing(&mut self) -> Expr<'b, 'k, O, Dimensionless> {
+        self.held(Held::Clothing)
     }
     /// The entry at the junction that supplies this site, or the site this edge runs into. Compile refuses a site the
     /// map says no nerve reaches, a site it says nothing of, a junction with no such entry and a law of the whole body,
@@ -933,6 +984,7 @@ pub(crate) enum Source {
     Flow(Family),
     Extravascular,
     Reacting(&'static str, Species),
+    Held(Held),
 }
 impl<'b, O, U> ReadPort<'b, O, U> {
     fn of(source: Source) -> Self {

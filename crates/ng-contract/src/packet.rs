@@ -944,7 +944,8 @@ impl CompiledBody {
                 | Bound::Draw(_)
                 | Bound::Forcing(_)
                 | Bound::Gauge
-                | Bound::Height(_) => false,
+                | Bound::Height(_)
+                | Bound::Held(_) => false,
             })
     }
     fn pulsatile(&self, row: RowId) -> bool {

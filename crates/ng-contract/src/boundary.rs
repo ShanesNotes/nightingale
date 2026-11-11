@@ -1,12 +1,18 @@
 use crate::identity::{Canonical, Seal};
 use crate::landing::Bracket;
+use crate::pinned::turn;
 use crate::{
     AdmissionError, ByteReader, Chloride, CompiledBody, CoupledProblem, Cycle, Digest, Dimensionless,
-    EngineFault, EngineFaultKind, Interval, Malformed, Measure, Potassium, Refused, SimTime, Sodium, Species,
-    StepTicket, Substance, TrialFailure, VerifiedStep, Water,
+    EngineFault, EngineFaultKind, Interval, Malformed, Measure, Potassium, Pressure, Refused, SimTime,
+    Sodium, Species, StepTicket, Substance, Temperature, TrialFailure, VerifiedStep, Water,
 };
+use core::num::NonZeroU64;
 
 const NANOSECONDS_PER_SECOND: f64 = 1e9;
+const MINUTE_NS: u64 = 60_000_000_000;
+const DAY_NS: u64 = 24 * 60 * MINUTE_NS;
+/// Eight times this many minutes make the day's one turn.
+const EIGHTH_OF_A_DAY: NonZeroU64 = NonZeroU64::new(180).unwrap();
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct InputId {
@@ -41,7 +47,150 @@ pub enum BoundaryInput {
     /// How the body lies from this instant until the next one. An event is one instant, so a ramp is a train of events.
     /// Each ends a step, and every site's head follows from its place.
     Posture(Posture),
+    /// The time of day from this instant until the next clock.
+    Clock(Clock),
+    Sleep(Sleep),
+    Room(Room),
+    /// The bladder's outlet from this instant until the next void.
+    Void(Gate),
 }
+/// The time of day at the event's instant. The clock's phase is zero at midnight and makes one turn a day.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Clock {
+    pub since_midnight_ns: u64,
+}
+/// Non-REM sleep reads 1 and waking 0. Rung 0 has no REM sleep.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sleep {
+    Awake,
+    Nrem,
+}
+impl Sleep {
+    const fn value(self) -> f64 {
+        match self {
+            Sleep::Awake => 0.0,
+            Sleep::Nrem => 1.0,
+        }
+    }
+    fn of_value(value: f64) -> Result<Self, Malformed> {
+        let found = [Sleep::Awake, Sleep::Nrem];
+        (found.into_iter())
+            .find(|sleep| sleep.value().to_bits() == value.to_bits())
+            .ok_or(Malformed)
+    }
+}
+/// The room around the body. Temperatures are absolute. Air speed is its ratio to 0.1 m/s and clothing or bedding
+/// a count of clo, because the table has no speed and insulation has no dimension. Oxygen and carbon dioxide are
+/// the inspired gas's dry fractions, and nitrogen gas is the rest.
+pub struct Room {
+    pub air: Measure<Temperature>,
+    pub radiant: Measure<Temperature>,
+    pub humidity: Measure<Dimensionless>,
+    pub air_speed: Measure<Dimensionless>,
+    pub pressure: Measure<Pressure>,
+    pub oxygen: Measure<Dimensionless>,
+    pub carbon_dioxide: Measure<Dimensionless>,
+    pub clothing: Measure<Dimensionless>,
+}
+impl Room {
+    fn values(&self) -> [f64; ROOM.len()] {
+        let Self {
+            air,
+            radiant,
+            humidity,
+            air_speed,
+            pressure,
+            oxygen,
+            carbon_dioxide,
+            clothing,
+        } = self;
+        [
+            air.value(),
+            radiant.value(),
+            humidity.value(),
+            air_speed.value(),
+            pressure.value(),
+            oxygen.value(),
+            carbon_dioxide.value(),
+            clothing.value(),
+        ]
+    }
+}
+fn room_in_range(values: [f64; ROOM.len()]) -> bool {
+    let [
+        air,
+        radiant,
+        humidity,
+        air_speed,
+        pressure,
+        oxygen,
+        carbon_dioxide,
+        clothing,
+    ] = values;
+    let fraction = |value: f64| (0.0..=1.0).contains(&value);
+    values.iter().all(|value| value.is_finite())
+        && air > 0.0
+        && radiant > 0.0
+        && fraction(humidity)
+        && air_speed >= 0.0
+        && pressure > 0.0
+        && fraction(oxygen)
+        && fraction(carbon_dioxide)
+        && oxygen + carbon_dioxide <= 1.0
+        && clothing >= 0.0
+}
+/// A void carries no amount, because the volume voided is a produced quantity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gate {
+    Open,
+    Shut,
+}
+impl Gate {
+    const fn value(self) -> f64 {
+        match self {
+            Gate::Open => 1.0,
+            Gate::Shut => 0.0,
+        }
+    }
+    fn of_value(value: f64) -> Result<Self, Malformed> {
+        let found = [Gate::Open, Gate::Shut];
+        (found.into_iter())
+            .find(|gate| gate.value().to_bits() == value.to_bits())
+            .ok_or(Malformed)
+    }
+}
+/// A value of the day's held inputs a law reads. Each is held from its event until the next of its kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Held {
+    ClockCosine,
+    ClockSine,
+    Sleep,
+    AirTemperature,
+    RadiantTemperature,
+    Humidity,
+    AirSpeed,
+    Pressure,
+    InspiredOxygen,
+    InspiredCarbonDioxide,
+    Clothing,
+    Void,
+}
+impl Seal for Held {
+    fn seal(&self, out: &mut Canonical) {
+        out.number(*self as u64);
+    }
+}
+const HELD: usize = 12;
+const ROOM: [Held; 8] = [
+    Held::AirTemperature,
+    Held::RadiantTemperature,
+    Held::Humidity,
+    Held::AirSpeed,
+    Held::Pressure,
+    Held::InspiredOxygen,
+    Held::InspiredCarbonDioxide,
+    Held::Clothing,
+];
 /// `trunk` is the sine of the trunk's angle from flat: 0 lying flat, 1 sitting up or standing, a negative
 /// value head down.
 pub struct Posture {
@@ -106,7 +255,29 @@ pub(crate) struct Delivery {
     amount: f64,
     pub(crate) ends: SimTime,
     rate: f64,
-    species: Option<Species>,
+    kind: Kind,
+}
+/// A posture and a held input never end, and each replaces the one of its kind before it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Kind {
+    Species(Species),
+    Posture,
+    Clock(u64),
+    Sleep(Sleep),
+    Room([f64; ROOM.len()]),
+    Void(Gate),
+}
+impl Kind {
+    /// After the fields every payload shares, so a delivery and a posture keep the bytes they had.
+    fn seal_setting(&self, out: &mut Canonical) {
+        match *self {
+            Kind::Species(_) | Kind::Posture => {}
+            Kind::Clock(reading) => out.number(reading),
+            Kind::Sleep(sleep) => sleep.value().seal(out),
+            Kind::Room(values) => values.iter().for_each(|value| value.seal(out)),
+            Kind::Void(gate) => gate.value().seal(out),
+        }
+    }
 }
 impl Seal for Delivery {
     fn seal(&self, out: &mut Canonical) {
@@ -117,7 +288,7 @@ impl Seal for Delivery {
             amount,
             ends,
             rate,
-            species,
+            kind,
         } = self;
         id.seal(out);
         at.seal(out);
@@ -125,7 +296,8 @@ impl Seal for Delivery {
         amount.seal(out);
         ends.seal(out);
         rate.seal(out);
-        out.number(payload_tag(*species));
+        out.number(payload_tag(*kind));
+        kind.seal_setting(out);
     }
 }
 
@@ -156,16 +328,36 @@ impl BoundaryPort {
         deliveries.seal(&mut out);
         out.digest()
     }
-    /// The first delivery that starts or ends inside the window between two points. A point's frame holds one
-    /// interval, so such an edge would read a drive the run never gives.
-    pub(crate) fn off_grid(&self, start: SimTime, cycle: Cycle) -> Option<InputId> {
-        let (start, step) = (start.nanoseconds(), cycle.step_ns());
+    /// The first delivery that starts or ends inside the window between two points, or the first clock whose
+    /// minute turns there in a body that reads it. A point's frame holds one interval, so such an edge would read
+    /// a drive the run never gives.
+    pub(crate) fn off_grid(&self, start: SimTime, cycle: Cycle, reads_clock: bool) -> Option<InputId> {
+        let (from, step) = (start.nanoseconds(), cycle.step_ns());
+        let window = SimTime::from_ns(from.saturating_add(cycle.period_ns()));
         let off = |edge: SimTime| {
-            let reached = edge.nanoseconds().saturating_sub(start);
-            edge.nanoseconds() > start && reached < cycle.period_ns() && !reached.is_multiple_of(step)
+            let reached = edge.nanoseconds().saturating_sub(from);
+            edge.nanoseconds() > from && reached < cycle.period_ns() && !reached.is_multiple_of(step)
+        };
+        let clocks: Vec<&Delivery> = (self.deliveries.iter())
+            .filter(|delivery| matches!(delivery.kind, Kind::Clock(_)))
+            .collect();
+        let turns_off = |delivery: &Delivery| {
+            let Kind::Clock(reading) = delivery.kind else {
+                return false;
+            };
+            let next = clocks.iter().map(|clock| clock.at).find(|at| *at > delivery.at);
+            let held_until = next.unwrap_or(window).min(window);
+            let mut edge = next_minute(delivery.at, reading, delivery.at.max(start));
+            while edge < held_until {
+                if off(edge) {
+                    return true;
+                }
+                edge = SimTime::from_ns(edge.nanoseconds().saturating_add(MINUTE_NS));
+            }
+            false
         };
         (self.deliveries.iter())
-            .find(|delivery| off(delivery.at) || off(delivery.ends))
+            .find(|delivery| off(delivery.at) || off(delivery.ends) || (reads_clock && turns_off(delivery)))
             .map(|delivery| delivery.id)
     }
 }
@@ -190,6 +382,18 @@ impl Delivery {
             BoundaryInput::Potassium(delivery) => delivered(id, at, delivery),
             BoundaryInput::Chloride(delivery) => delivered(id, at, delivery),
             BoundaryInput::Posture(Posture { trunk, legs }) => Ok(Self::posture(id, at, trunk, legs)),
+            BoundaryInput::Clock(Clock { since_midnight_ns }) if since_midnight_ns >= DAY_NS => {
+                Err(AdmissionError::ClockOutOfRange { id })
+            }
+            BoundaryInput::Clock(Clock { since_midnight_ns }) => {
+                Ok(Self::held(id, at, Kind::Clock(since_midnight_ns)))
+            }
+            BoundaryInput::Sleep(sleep) => Ok(Self::held(id, at, Kind::Sleep(sleep))),
+            BoundaryInput::Room(room) if !room_in_range(room.values()) => {
+                Err(AdmissionError::RoomOutOfRange { id })
+            }
+            BoundaryInput::Room(room) => Ok(Self::held(id, at, Kind::Room(room.values()))),
+            BoundaryInput::Void(gate) => Ok(Self::held(id, at, Kind::Void(gate))),
         }
     }
     fn posture(id: InputId, at: SimTime, trunk: f64, legs: Legs) -> Self {
@@ -200,7 +404,25 @@ impl Delivery {
             amount: trunk,
             ends: SimTime::from_ns(u64::MAX),
             rate: legs.share(),
-            species: None,
+            kind: Kind::Posture,
+        }
+    }
+    fn held(id: InputId, at: SimTime, kind: Kind) -> Self {
+        let boundary = match kind {
+            Kind::Species(_) | Kind::Posture => POSTURE,
+            Kind::Clock(_) => "clock",
+            Kind::Sleep(_) => "sleep",
+            Kind::Room(_) => "room",
+            Kind::Void(_) => "void",
+        };
+        Self {
+            id,
+            at,
+            boundary,
+            amount: 0.0,
+            ends: SimTime::from_ns(u64::MAX),
+            rate: 0.0,
+            kind,
         }
     }
     fn checked(
@@ -229,14 +451,15 @@ impl Delivery {
             amount,
             ends,
             rate,
-            species: Some(species),
+            kind: Kind::Species(species),
         })
     }
-    pub(crate) fn posture_event(&self) -> bool {
-        self.species.is_none()
+    /// A posture or a held input, which no boundary carries.
+    pub(crate) fn held_event(&self) -> bool {
+        !matches!(self.kind, Kind::Species(_))
     }
     pub(crate) fn carries(&self, species: Species) -> bool {
-        self.species == Some(species)
+        self.kind == Kind::Species(species)
     }
     fn payload(&self) -> Digest {
         let mut out = Canonical::new("ng-contract delivery 1");
@@ -249,8 +472,8 @@ pub(crate) struct Plan {
     pub(crate) due: Vec<InputId>,
     pub(crate) frame: DriveFrame,
     pub(crate) after_breakpoint: bool,
-    /// The earliest end of a delivery running or due here. That input has applied or applies with this
-    /// step, so every run at this head knows this instant.
+    /// The earliest end of a delivery running or due here, or the next minute of a clock the body reads. That
+    /// input has applied or applies with this step, so every run at this head knows this instant.
     pub(crate) running_end: Option<SimTime>,
 }
 
@@ -339,11 +562,11 @@ impl PendingInputs {
     }
     /// The drives running across `[at, at + 1 ns)`, as a ticket starting at `at` would freeze them. Unlike `plan`
     /// it reads the whole timeline, because nothing has applied yet and a delivery can end inside a window.
-    pub(crate) fn frame_at(&self, at: SimTime) -> DriveFrame {
+    pub(crate) fn frame_at(&self, at: SimTime, reads: &[Held]) -> DriveFrame {
         let mut frame = DriveFrame::default();
         for delivery in &self.timeline {
             if delivery.at <= at && at < delivery.ends {
-                frame.take(delivery);
+                frame.take(delivery, at, reads);
             }
         }
         frame
@@ -356,18 +579,30 @@ impl PendingInputs {
         let running = (self.past.active.iter()).filter(move |delivery| delivery.ends > start);
         running.chain(self.due_at(start))
     }
-    pub(crate) fn plan(&self, start: SimTime, fired: bool) -> Plan {
+    /// In a body that reads the clock, each minute's edge ends a step as a delivery's end does.
+    pub(crate) fn plan(&self, start: SimTime, fired: bool, reads: &[Held]) -> Plan {
         let due = self.due_at(start);
         let ended = self.past.active.iter().any(|delivery| delivery.ends == start);
         let mut frame = DriveFrame::default();
         for delivery in self.running_at(start) {
-            frame.take(delivery);
+            frame.take(delivery, start, reads);
         }
+        let clock = (self.running_at(start))
+            .filter_map(|delivery| match delivery.kind {
+                Kind::Clock(reading) => Some((delivery.at, reading)),
+                _ => None,
+            })
+            .last()
+            .filter(|_| reads_clock(reads));
+        let turned = clock.is_some_and(|(at, reading)| into_minute(at, reading, start) == 0);
+        let next_turn = clock.map(|(at, reading)| next_minute(at, reading, start));
         Plan {
             due: due.iter().map(|delivery| delivery.id).collect(),
             frame,
-            after_breakpoint: !due.is_empty() || ended || fired,
-            running_end: self.running_at(start).map(|delivery| delivery.ends).min(),
+            after_breakpoint: !due.is_empty() || ended || fired || turned,
+            running_end: (self.running_at(start).map(|delivery| delivery.ends))
+                .chain(next_turn)
+                .min(),
         }
     }
     /// One attempt of a step: issues its ticket and hands it to `solved`, which solves and validates. It finds
@@ -404,7 +639,7 @@ impl PendingInputs {
             attempted_ns: span_ns,
             last_refusal: None,
         };
-        let plan = self.plan(start, problem.accepted.state().fired);
+        let plan = self.plan(start, problem.accepted.state().fired, problem.body.held_reads());
         let capped = span_ns.min(problem.longest_span_ns());
         let wanted = start.plus_ns(capped).ok_or(mismatch)?;
         let end = plan.running_end.map_or(wanted, |ends| ends.min(wanted));
@@ -518,17 +753,18 @@ impl PendingInputs {
                 amount,
                 ends,
                 rate,
-                species,
+                kind,
             } = delivery;
             out.raw(id.digest.as_bytes());
             at.seal(out);
-            out.number(payload_tag(*species));
+            out.number(payload_tag(*kind));
             out.text(boundary);
             amount.seal(out);
             ends.seal(out);
-            if species.is_none() {
+            if *kind == Kind::Posture {
                 rate.seal(out);
             }
+            kind.seal_setting(out);
         }
         cursor.seal(out);
         out.length(active.len());
@@ -547,14 +783,31 @@ impl PendingInputs {
         for _ in 0..read.count(DELIVERY_BYTES)? {
             let id = InputId::new(read.digest()?);
             let at = read.time()?;
-            let species = payload_species(read.number()?)?;
+            let tag = read.number()?;
             let name = read.text()?;
             let amount = read.float()?;
             let ends = read.time()?;
-            let delivery = match species {
-                None if amount.abs() > 1.0 => return Err(Malformed),
-                None => Delivery::posture(id, at, amount, Legs::of_share(read.float()?)?),
-                Some(species) => {
+            let delivery = match tag {
+                POSTURE_PAYLOAD if amount.abs() > 1.0 => return Err(Malformed),
+                POSTURE_PAYLOAD => Delivery::posture(id, at, amount, Legs::of_share(read.float()?)?),
+                CLOCK_PAYLOAD => match read.number()? {
+                    reading if reading >= DAY_NS => return Err(Malformed),
+                    reading => Delivery::held(id, at, Kind::Clock(reading)),
+                },
+                SLEEP_PAYLOAD => Delivery::held(id, at, Kind::Sleep(Sleep::of_value(read.float()?)?)),
+                ROOM_PAYLOAD => {
+                    let mut values = [0.0; ROOM.len()];
+                    for value in &mut values {
+                        *value = read.float()?;
+                    }
+                    if !room_in_range(values) {
+                        return Err(Malformed);
+                    }
+                    Delivery::held(id, at, Kind::Room(values))
+                }
+                VOID_PAYLOAD => Delivery::held(id, at, Kind::Void(Gate::of_value(read.float()?)?)),
+                tag => {
+                    let species = payload_species(tag)?;
                     let boundary = body.boundary_name(name).ok_or(Malformed)?;
                     Delivery::checked(id, at, boundary, amount, ends, species).map_err(|_| Malformed)?
                 }
@@ -641,33 +894,61 @@ const SODIUM_PAYLOAD: u64 = 1;
 const POTASSIUM_PAYLOAD: u64 = 2;
 const CHLORIDE_PAYLOAD: u64 = 3;
 const POSTURE_PAYLOAD: u64 = 4;
+const CLOCK_PAYLOAD: u64 = 13;
+const SLEEP_PAYLOAD: u64 = 14;
+const ROOM_PAYLOAD: u64 = 15;
+const VOID_PAYLOAD: u64 = 16;
 
-fn payload_tag(species: Option<Species>) -> u64 {
-    match species {
-        Some(Species::Sodium) => SODIUM_PAYLOAD,
-        Some(Species::Potassium) => POTASSIUM_PAYLOAD,
-        Some(Species::Chloride) => CHLORIDE_PAYLOAD,
-        Some(_) => WATER_PAYLOAD,
-        None => POSTURE_PAYLOAD,
+fn payload_tag(kind: Kind) -> u64 {
+    match kind {
+        Kind::Species(Species::Sodium) => SODIUM_PAYLOAD,
+        Kind::Species(Species::Potassium) => POTASSIUM_PAYLOAD,
+        Kind::Species(Species::Chloride) => CHLORIDE_PAYLOAD,
+        Kind::Species(_) => WATER_PAYLOAD,
+        Kind::Posture => POSTURE_PAYLOAD,
+        Kind::Clock(_) => CLOCK_PAYLOAD,
+        Kind::Sleep(_) => SLEEP_PAYLOAD,
+        Kind::Room(_) => ROOM_PAYLOAD,
+        Kind::Void(_) => VOID_PAYLOAD,
     }
 }
-fn payload_species(tag: u64) -> Result<Option<Species>, Malformed> {
+fn payload_species(tag: u64) -> Result<Species, Malformed> {
     match tag {
-        WATER_PAYLOAD => Ok(Some(Species::Water)),
-        SODIUM_PAYLOAD => Ok(Some(Species::Sodium)),
-        POTASSIUM_PAYLOAD => Ok(Some(Species::Potassium)),
-        CHLORIDE_PAYLOAD => Ok(Some(Species::Chloride)),
-        POSTURE_PAYLOAD => Ok(None),
+        WATER_PAYLOAD => Ok(Species::Water),
+        SODIUM_PAYLOAD => Ok(Species::Sodium),
+        POTASSIUM_PAYLOAD => Ok(Species::Potassium),
+        CHLORIDE_PAYLOAD => Ok(Species::Chloride),
         _ => Err(Malformed),
     }
 }
 const DELIVERY_BYTES: usize = 32 + 8 + 8 + 8 + 8 + 8;
+
+fn reads_clock(reads: &[Held]) -> bool {
+    reads.contains(&Held::ClockCosine) || reads.contains(&Held::ClockSine)
+}
+/// How far `now` lies past the clock's last whole minute, for a clock that read `reading` at `at`.
+fn into_minute(at: SimTime, reading: u64, now: SimTime) -> u64 {
+    let elapsed = now.nanoseconds().saturating_sub(at.nanoseconds());
+    (reading % MINUTE_NS + elapsed % MINUTE_NS) % MINUTE_NS
+}
+/// The clock's first whole minute after `now`.
+fn next_minute(at: SimTime, reading: u64, now: SimTime) -> SimTime {
+    let left = MINUTE_NS - into_minute(at, reading, now);
+    SimTime::from_ns(now.nanoseconds().saturating_add(left))
+}
+/// The time of day at `now` in whole minutes: the phase is zero at midnight and makes one turn a day.
+fn minute_of_day(at: SimTime, reading: u64, now: SimTime) -> u64 {
+    let elapsed = now.nanoseconds().saturating_sub(at.nanoseconds());
+    (reading + elapsed % DAY_NS) % DAY_NS / MINUTE_NS
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct DriveFrame {
     drives: Vec<(&'static str, f64)>,
     trunk: f64,
     legs: f64,
+    /// Only the held inputs the body reads, so a ticket never seals one no law sees.
+    held: [Option<f64>; HELD],
 }
 impl DriveFrame {
     /// A site's height in gravity from its place in the body frame, so posture reaches every law through one read and no
@@ -675,12 +956,37 @@ impl DriveFrame {
     pub(crate) fn height(&self, axial: f64) -> f64 {
         axial * if axial < 0.0 { self.legs } else { self.trunk }
     }
-    /// Deliveries add, and a posture replaces the one before it: both arrive here in `(time, id)` order.
-    fn take(&mut self, delivery: &Delivery) {
-        match delivery.species {
-            None => (self.trunk, self.legs) = (delivery.amount, delivery.rate),
-            Some(_) => self.add(delivery.boundary, delivery.rate),
+    /// Deliveries add, and a posture or a held input replaces the one of its kind before it: all arrive here in
+    /// `(time, id)` order. The clock's value is the one at `now`.
+    fn take(&mut self, delivery: &Delivery, now: SimTime, reads: &[Held]) {
+        match delivery.kind {
+            Kind::Species(_) => self.add(delivery.boundary, delivery.rate),
+            Kind::Posture => (self.trunk, self.legs) = (delivery.amount, delivery.rate),
+            Kind::Clock(reading) => {
+                let (cosine, sine) = turn(minute_of_day(delivery.at, reading, now), EIGHTH_OF_A_DAY);
+                self.set(Held::ClockCosine, cosine, reads);
+                self.set(Held::ClockSine, sine, reads);
+            }
+            Kind::Sleep(sleep) => self.set(Held::Sleep, sleep.value(), reads),
+            Kind::Room(values) => {
+                for (held, value) in ROOM.into_iter().zip(values) {
+                    self.set(held, value, reads);
+                }
+            }
+            Kind::Void(gate) => self.set(Held::Void, gate.value(), reads),
         }
+    }
+    fn set(&mut self, held: Held, value: f64, reads: &[Held]) {
+        if reads.contains(&held) {
+            self.held[held as usize] = Some(value);
+        }
+    }
+    pub(crate) fn states(&self, held: Held) -> bool {
+        self.held[held as usize].is_some()
+    }
+    /// Admission refuses a body that reads a held input with no value, so a run never reads this NaN.
+    pub(crate) fn held(&self, held: Held) -> f64 {
+        self.held[held as usize].unwrap_or(f64::NAN)
     }
     fn add(&mut self, boundary: &'static str, rate: f64) {
         match self.drives.binary_search_by_key(&boundary, |drive| drive.0) {
@@ -697,7 +1003,12 @@ impl DriveFrame {
 }
 impl Seal for DriveFrame {
     fn seal(&self, out: &mut Canonical) {
-        let Self { drives, trunk, legs } = self;
+        let Self {
+            drives,
+            trunk,
+            legs,
+            held,
+        } = self;
         out.length(drives.len());
         for (boundary, rate) in drives {
             out.text(boundary);
@@ -705,5 +1016,10 @@ impl Seal for DriveFrame {
         }
         trunk.seal(out);
         legs.seal(out);
+        // A frame that holds no held input seals the bytes it did before there were any.
+        if held.iter().any(Option::is_some) {
+            out.number(u64::MAX);
+            held.seal(out);
+        }
     }
 }

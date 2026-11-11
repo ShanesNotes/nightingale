@@ -285,7 +285,9 @@ fn read(bound: &Bound, inputs: &Inputs<'_>) -> Option<f64> {
         Bound::Unknown(unknown) => inputs.unknowns.get(unknown.index()).copied(),
         Bound::Draw(stream) => inputs.draws.get(stream).copied(),
         Bound::Forcing(forcing) => inputs.factors.get(forcing).copied(),
-        Bound::Boundary(_) | Bound::Gauge | Bound::Height(_) => Some(CompiledBody::bound(bound, inputs)),
+        Bound::Boundary(_) | Bound::Gauge | Bound::Height(_) | Bound::Held(_) => {
+            Some(CompiledBody::bound(bound, inputs))
+        }
     }
 }
 
@@ -526,6 +528,7 @@ impl CompiledBody {
             Bound::Forcing(forcing) => inputs.factors[forcing],
             Bound::Gauge => 0.0,
             Bound::Height(axial) => inputs.frame.height(f64::from_bits(axial)),
+            Bound::Held(held) => inputs.frame.held(held),
         }
     }
     fn undefined(&self, instance: &Instance, domain: OperatorDomain) -> Undefined {
