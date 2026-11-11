@@ -60,6 +60,19 @@
 //!     map.served_by(site, segment, Afferent::Stretch);
 //! }
 //! ```
+//! Only a capillary bed serves a tissue, so a tissue's site set holds beds alone.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn served(map: &mut AnatomyBuilder, site: &Site<TissueSite>) {
+//!     map.serves(site, Tissue::Liver);
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn served(map: &mut AnatomyBuilder, bed: &Site<CapillaryBed>) {
+//!     map.serves(bed, Tissue::Liver);
+//! }
+//! ```
 //! The six site classes are closed; a new class is a contract version, so there is no legal twin.
 //! ```compile_fail,E0277
 //! enum Spleen {}

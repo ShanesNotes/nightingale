@@ -630,6 +630,68 @@ fn a_network_edge_of_the_wrong_classes_and_a_landmark_placed_twice_are_refused()
     Ok(())
 }
 
+struct GasAndGut {
+    map: AnatomyBuilder,
+    airway: SiteId,
+    vessel: SiteId,
+    bed: SiteId,
+}
+
+fn gas_and_gut() -> Result<GasAndGut, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let airway = map.site::<TissueSite>("airway", at()?);
+    let vessel = map.site::<VesselSegment>("vessel", at()?);
+    let bed = map.site::<CapillaryBed>("bed", at()?);
+    for site in [airway.id(), vessel.id(), bed.id()] {
+        map.contain(root.id(), site);
+    }
+    map.connect(Network::Vascular, vessel.id(), bed.id());
+    map.connect(Network::Vascular, bed.id(), vessel.id());
+    Ok(GasAndGut {
+        map,
+        airway: airway.id(),
+        vessel: vessel.id(),
+        bed: bed.id(),
+    })
+}
+
+fn joined(
+    network: Network,
+    ends: fn(&GasAndGut) -> (SiteId, SiteId),
+) -> Result<Result<Anatomy, AdmissionError>, AdmissionError> {
+    let mut sites = gas_and_gut()?;
+    let (from, to) = ends(&sites);
+    sites.map.connect(network, from, to);
+    Ok(sites.map.finish())
+}
+
+/// The airway's gas sits in tissue sites, so an airway edge runs out of one.
+#[test]
+fn an_airway_edge_out_of_a_vessel_segment_is_refused() -> Result<(), AdmissionError> {
+    assert!(joined(Network::Airway, |sites| (sites.airway, sites.bed))?.is_ok());
+    assert_eq!(
+        joined(Network::Airway, |sites| (sites.vessel, sites.bed))?.err(),
+        Some(AdmissionError::Anatomy(AnatomyDefect::WrongNetwork {
+            site: "vessel"
+        }))
+    );
+    Ok(())
+}
+
+/// A gut edge runs from a lumen to a lumen or to the bed that absorbs it, so one into a tissue site loses its load.
+#[test]
+fn a_gut_edge_into_a_tissue_site_is_refused() -> Result<(), AdmissionError> {
+    assert!(joined(Network::Gut, |sites| (sites.vessel, sites.bed))?.is_ok());
+    assert_eq!(
+        joined(Network::Gut, |sites| (sites.vessel, sites.airway))?.err(),
+        Some(AdmissionError::Anatomy(AnatomyDefect::WrongNetwork {
+            site: "vessel"
+        }))
+    );
+    Ok(())
+}
+
 /// A tissue has no lumen, so a route from one would lose its flow with nothing said.
 #[test]
 fn a_urinary_edge_out_of_a_site_with_no_lumen_is_refused() -> Result<(), AdmissionError> {

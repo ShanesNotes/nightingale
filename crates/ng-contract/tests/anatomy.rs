@@ -576,3 +576,29 @@ fn spaces_that_enclose_each_other_are_refused() -> Result<(), AdmissionError> {
     );
     Ok(())
 }
+
+#[test]
+fn a_bed_that_serves_two_tissues_is_refused() -> Result<(), AdmissionError> {
+    let Manufactured { mut map, first, .. } = manufactured()?;
+    map.serves(&first, Tissue::Liver);
+    map.serves(&first, Tissue::Gut);
+    assert_eq!(
+        map.finish().err(),
+        refused(AnatomyDefect::ServesTwice { site: "bed 1" })
+    );
+    Ok(())
+}
+
+#[test]
+fn a_tissue_enters_the_digest_and_its_repeat_is_one_fact() -> Result<(), AdmissionError> {
+    let served = |times: usize| -> Result<Digest, AdmissionError> {
+        let Manufactured { mut map, first, .. } = manufactured()?;
+        for _ in 0..times {
+            map.serves(&first, Tissue::Liver);
+        }
+        Ok(map.finish()?.digest())
+    };
+    assert_ne!(served(1)?, served(0)?);
+    assert_eq!(served(2)?, served(1)?);
+    Ok(())
+}

@@ -760,6 +760,34 @@ new = '''let found = (schema.pools()).find(|pool| (body(pool) || true) && pool.1
 test = "-p ng-contract --test reactions dissipation_reaches_the_body_store_whatever_sorts_before_it"
 
 [[mutant]]
+name = "tissue-served-once"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''self.tissues.windows(2).find(|pair| pair[0].0 == pair[1].0)'''
+new = '''self.tissues.windows(2).find(|_| false)'''
+test = "-p ng-contract --test anatomy a_bed_that_serves_two_tissues_is_refused"
+
+[[mutant]]
+name = "airway-fit"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''from.class == Class::TissueSite && matches!(to.class, Class::TissueSite | Class::CapillaryBed)'''
+new = '''matches!(to.class, Class::TissueSite | Class::CapillaryBed)'''
+test = "-p ng-contract --test map_reads an_airway_edge_out_of_a_vessel_segment_is_refused"
+
+[[mutant]]
+name = "gut-fit"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''&& matches!(to.class, Class::VesselSegment | Class::CapillaryBed)'''
+new = '''&& true'''
+test = "-p ng-contract --test map_reads a_gut_edge_into_a_tissue_site_is_refused"
+
+[[mutant]]
+name = "besides-leaves-out-its-tissue"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''Sites::Besides(tissue) => bed(site) && self.tissue(site) != Some(tissue),'''
+new = '''Sites::Besides(_) => bed(site),'''
+test = "-p ng-contract --test routes each_site_set_holds_the_sites_the_map_places_on_it"
+
+[[mutant]]
 name = "exchange-on-receipts"
 path = "crates/ng-record/src/history.rs"
 old = '''    if !crosses {

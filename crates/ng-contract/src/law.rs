@@ -3,10 +3,11 @@ use crate::identity::{Canonical, Seal};
 use crate::quantity::dimension;
 use crate::scope::ENCLOSURE_PRESSURE;
 use crate::{
-    Admissible, AdmissibleSet, AdmissionError, Basis, Blood, Boundary, CapillaryBed, Conductance, Deviation,
-    Dimension, Dimensionless, Landmark, Length, Metabolism, Network, NonMaterial, Owner, ParameterKey,
-    PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reactant, Reference, SameDimension, Sensed, SiteSet,
-    Sites, Space, Species, Substance, Time, Urinary, ValidityRange, Volume, Water,
+    Admissible, AdmissibleSet, AdmissionError, Airway, Alimentary, Basis, Blood, Boundary, CapillaryBed,
+    Conductance, Deviation, Dimension, Dimensionless, Landmark, Length, Metabolism, Network, NonMaterial,
+    Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reactant, Reference,
+    SameDimension, Sensed, SiteSet, Sites, Space, Species, Substance, Time, Urinary, ValidityRange, Volume,
+    Water,
 };
 use core::cell::Cell;
 use core::marker::PhantomData;
@@ -106,6 +107,12 @@ edge_kinds! {
     TubuleEdge: Urinary => Urinary, Urinary;
     /// Every reclaim edge: a lumen back to a bed's plasma.
     ReclaimEdge: Urinary => Blood, Reclaim;
+    /// Every airway edge: one site's gas to the next, toward the alveolar gas.
+    AirwayEdge: Airway => Airway, Airway;
+    /// Every gut edge between two lumens: the stomach to the small intestine.
+    GutEdge: Alimentary => Alimentary, Gut;
+    /// Every gut edge into a bed: a lumen to the bed whose wall absorbs it.
+    AbsorbingEdge: Alimentary => CapillaryBed, Gut;
 }
 
 /// One kind of transfer the map implies. In a body that carries more than water, a fluid route's water rate is a row

@@ -29,6 +29,33 @@ macro_rules! site_classes {
 
 pub trait SiteClass: sealed::SiteClass {}
 
+macro_rules! tissues {
+    ($($name:ident),*) => {
+        mod tissue {
+            pub trait Sealed {
+                const TISSUE: super::Tissue;
+            }
+        }
+        /// What a capillary bed serves. The map states it, so a site set can name one tissue's beds and a split bed
+        /// keeps its tissue.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+        pub enum Tissue {
+            $($name),*
+        }
+        pub trait TissueKind: tissue::Sealed {}
+        $(
+            pub enum $name {}
+            impl tissue::Sealed for $name {
+                const TISSUE: Tissue = Tissue::$name;
+            }
+            impl TissueKind for $name {}
+        )*
+    };
+}
+tissues!(
+    Lung, Gut, Muscle, Glomerulus, Tubule, Brain, Heart, Liver, Fat, Skin, Bone
+);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Sites {
     Class(sealed::Class),
@@ -36,6 +63,14 @@ pub enum Sites {
     Blood,
     /// Every vessel segment on the urinary network.
     Urinary,
+    /// Every vessel segment on the gut network.
+    Alimentary,
+    /// Every site on the airway network.
+    Airway,
+    /// The capillary beds that serve one tissue.
+    Tissue(Tissue),
+    /// Every capillary bed that serves another tissue, or none.
+    Besides(Tissue),
 }
 mod sets {
     pub trait Sealed {}
@@ -57,6 +92,28 @@ impl SiteSet for Blood {
 }
 impl SiteSet for Urinary {
     const SET: Sites = Sites::Urinary;
+}
+pub enum Alimentary {}
+pub enum Airway {}
+/// The capillary beds that serve tissue `T`.
+pub struct Beds<T>(PhantomData<T>);
+/// Every capillary bed that serves a tissue other than `T`, or none.
+pub struct Besides<T>(PhantomData<T>);
+impl sets::Sealed for Alimentary {}
+impl sets::Sealed for Airway {}
+impl<T: TissueKind> sets::Sealed for Beds<T> {}
+impl<T: TissueKind> sets::Sealed for Besides<T> {}
+impl SiteSet for Alimentary {
+    const SET: Sites = Sites::Alimentary;
+}
+impl SiteSet for Airway {
+    const SET: Sites = Sites::Airway;
+}
+impl<T: TissueKind> SiteSet for Beds<T> {
+    const SET: Sites = Sites::Tissue(T::TISSUE);
+}
+impl<T: TissueKind> SiteSet for Besides<T> {
+    const SET: Sites = Sites::Besides(T::TISSUE);
 }
 
 site_classes!(
@@ -130,6 +187,11 @@ pub enum Network {
     Urinary,
     /// From a lumen back to a bed's plasma: what a tubule wall takes back.
     Reclaim,
+    /// From the room's side of the airway toward the alveolar gas: a tissue site's gas to the next tissue site's, or
+    /// to a bed's.
+    Airway,
+    /// From the stomach on: a gut lumen to the next, or to the bed whose wall absorbs it.
+    Gut,
 }
 
 /// A place a whole-body law reads by what it is, so the law names no site and a refined map moves the mark.
@@ -139,6 +201,24 @@ pub enum Landmark {
     AorticArch,
     Pacemaker,
     MaculaDensa,
+    /// At the brain bed, reading a brain space's acidity.
+    CentralChemoreceptor,
+    /// At the systemic arteries.
+    PeripheralChemoreceptor,
+    /// At the skin heat site.
+    SkinThermoreceptor,
+    /// At the brain bed.
+    Osmoreceptor,
+    /// At the central veins.
+    VolumeReceptor,
+    /// At the systemic arteries, reading potassium.
+    Adrenal,
+    /// At the systemic arteries, reading glucose.
+    Islets,
+    /// At the systemic arteries.
+    Parathyroid,
+    /// At the liver bed, where GI's iron absorption reads the liver cells' iron store.
+    IronStore,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -233,6 +313,10 @@ pub enum AnatomyDefect {
     SuppliedTwice {
         site: &'static str,
     },
+    /// A bed stated to serve two tissues.
+    ServesTwice {
+        site: &'static str,
+    },
 }
 
 struct Declared {
@@ -255,6 +339,7 @@ pub struct AnatomyBuilder {
     compliances: Vec<(SiteId, Compliance)>,
     served_by: Vec<(SiteId, SiteId, Afferent)>,
     regions: Vec<(&'static str, SiteId)>,
+    tissues: Vec<(SiteId, Tissue)>,
 }
 impl AnatomyBuilder {
     pub fn new() -> Self {
@@ -313,6 +398,10 @@ impl AnatomyBuilder {
         self.regions.push((key, root));
         RegionId { key }
     }
+    /// The tissue a capillary bed serves. A repeat is one fact, and a second tissue for one bed is refused at `finish`.
+    pub fn serves(&mut self, bed: &Site<CapillaryBed>, tissue: Tissue) {
+        self.tissues.push((bed.id(), tissue));
+    }
     /// Runs every check and refuses at the first that fails. An identical repeat of a relation is one
     /// fact, so neither repeats nor declaration order change the result.
     pub fn finish(self) -> Result<Anatomy, AdmissionError> {
@@ -339,6 +428,7 @@ struct Facts {
     compliances: Vec<(usize, Compliance)>,
     served_by: Vec<(usize, usize, Afferent)>,
     regions: Vec<(&'static str, usize)>,
+    tissues: Vec<(SiteId, Tissue)>,
 }
 impl Facts {
     fn resolve(builder: AnatomyBuilder) -> Result<Self, AnatomyDefect> {
@@ -373,6 +463,7 @@ impl Facts {
                 .flat_map(|&(junction, site)| [junction, site]),
         )
         .chain(builder.unsupplied.iter().copied())
+        .chain(builder.tissues.iter().map(|&(site, _)| site))
         .chain(
             builder
                 .landmarks
@@ -393,6 +484,7 @@ impl Facts {
             supplies: relation(builder.supplies, same)?,
             unsupplied: relation(builder.unsupplied, same)?,
             landmarks: relation(builder.landmarks, same)?,
+            tissues: relation(builder.tissues, same)?,
             contains: relation(builder.contains, pair)?,
             vascular: relation(builder.vascular, pair)?,
             encloses: relation(builder.encloses, pair)?,
@@ -422,12 +514,22 @@ impl Facts {
                     && to.class == Class::VesselSegment
             }
             Network::Reclaim => from.class == Class::VesselSegment && to.class == Class::CapillaryBed,
+            Network::Airway => {
+                from.class == Class::TissueSite && matches!(to.class, Class::TissueSite | Class::CapillaryBed)
+            }
+            Network::Gut => {
+                from.class == Class::VesselSegment
+                    && matches!(to.class, Class::VesselSegment | Class::CapillaryBed)
+            }
         };
         if let Some(edge) = self.others.iter().find(|edge| !fits(edge)) {
             return Err(AnatomyDefect::WrongNetwork { site: edge.1.key });
         }
         if let Some(pair) = (self.landmarks.windows(2)).find(|pair| pair[0].0 == pair[1].0) {
             return Err(AnatomyDefect::LandmarkTwice { site: pair[0].1.key });
+        }
+        if let Some(pair) = self.tissues.windows(2).find(|pair| pair[0].0 == pair[1].0) {
+            return Err(AnatomyDefect::ServesTwice { site: pair[0].0.key });
         }
         let mut supplied: Vec<SiteId> = self.supplies.iter().map(|&(_, site)| site).collect();
         supplied.extend_from_slice(&self.unsupplied);
@@ -681,6 +783,7 @@ pub struct Anatomy {
     landmarks: Vec<(Landmark, SiteId, SiteId)>,
     served_by: Vec<(usize, usize, Afferent)>,
     regions: Vec<(&'static str, usize)>,
+    tissues: Vec<(SiteId, Tissue)>,
 }
 impl Anatomy {
     fn lay_out(facts: Facts, tree: Tree, enclosure: Enclosure) -> Self {
@@ -715,6 +818,7 @@ impl Anatomy {
             landmarks: facts.landmarks,
             served_by: facts.served_by,
             regions: facts.regions,
+            tissues: facts.tissues,
         }
     }
 
@@ -731,6 +835,7 @@ impl Anatomy {
             landmarks,
             served_by,
             regions,
+            tissues,
         } = self;
         let mut bytes = Canonical::new("ng-contract anatomy 1");
         let index = |bytes: &mut Canonical, site: usize| bytes.number(site as u64);
@@ -819,6 +924,15 @@ impl Anatomy {
             site.seal(&mut bytes);
             height.seal(&mut bytes);
         }
+        // Only a map that states a tissue writes these, after a tag no count equals, so no other map's bytes move.
+        if !tissues.is_empty() {
+            bytes.number(u64::MAX);
+            bytes.length(tissues.len());
+            for (site, tissue) in tissues {
+                site.seal(&mut bytes);
+                bytes.number(*tissue as u64);
+            }
+        }
         bytes.digest()
     }
 
@@ -882,19 +996,25 @@ impl Anatomy {
     pub(crate) fn in_set(&self, set: Sites) -> Vec<SiteId> {
         let vascular: Vec<(SiteId, SiteId)> = self.vascular().collect();
         let on_network = |site: SiteId| vascular.iter().any(|edge| edge.0 == site || edge.1 == site);
-        let on_tract = |site: SiteId| {
-            site.class == Class::VesselSegment
-                && self
-                    .edges(Network::Urinary)
-                    .any(|edge| edge.0 == site || edge.1 == site)
-        };
+        let on = |network, site: SiteId| self.edges(network).any(|edge| edge.0 == site || edge.1 == site);
+        let segment = |site: SiteId| site.class == Class::VesselSegment;
+        let bed = |site: SiteId| site.class == Class::CapillaryBed;
         (self.sites())
             .filter(|&site| match set {
                 Sites::Class(class) => site.class == class,
                 Sites::Blood => on_network(site),
-                Sites::Urinary => on_tract(site),
+                Sites::Urinary => segment(site) && on(Network::Urinary, site),
+                Sites::Alimentary => segment(site) && on(Network::Gut, site),
+                Sites::Airway => on(Network::Airway, site),
+                Sites::Tissue(tissue) => self.tissue(site) == Some(tissue),
+                Sites::Besides(tissue) => bed(site) && self.tissue(site) != Some(tissue),
             })
             .collect()
+    }
+
+    pub(crate) fn tissue(&self, site: SiteId) -> Option<Tissue> {
+        let at = self.tissues.binary_search_by_key(&site, |served| served.0).ok()?;
+        Some(self.tissues[at].1)
     }
 
     pub(crate) fn junction(&self, site: SiteId) -> Option<SiteId> {
