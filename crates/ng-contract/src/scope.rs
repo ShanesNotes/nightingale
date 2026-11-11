@@ -902,11 +902,96 @@ impl<'b, S> HeldPorts<'b, S> {
 
 #[cfg(test)]
 mod tests {
+    use super::processes::TABLE;
+
     #[test]
     fn every_boundary_process_has_a_name_of_its_own() {
-        let mut names = super::processes::NAMES.to_vec();
+        let mut names: Vec<&str> = TABLE.iter().map(|process| process.0).collect();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), super::processes::NAMES.len());
+        assert_eq!(names.len(), TABLE.len());
+    }
+
+    #[test]
+    fn each_boundary_process_keeps_its_card_species_direction_and_drain() {
+        use crate::BoundaryDirection::{IntoBody, OutOfBody};
+        use crate::Species::*;
+        let pinned = [
+            ("insulin secretion", "EN", Insulin, IntoBody, false),
+            ("insulin clearance", "EN", Insulin, OutOfBody, false),
+            ("glucagon secretion", "EN", Glucagon, IntoBody, false),
+            ("glucagon clearance", "EN", Glucagon, OutOfBody, false),
+            ("renin secretion", "EN", Renin, IntoBody, false),
+            ("renin clearance", "EN", Renin, OutOfBody, false),
+            ("angiotensin II made", "EN", AngiotensinII, IntoBody, false),
+            ("angiotensin II clearance", "EN", AngiotensinII, OutOfBody, false),
+            ("aldosterone secretion", "EN", Aldosterone, IntoBody, false),
+            ("aldosterone clearance", "EN", Aldosterone, OutOfBody, false),
+            (
+                "natriuretic peptide secretion",
+                "EN",
+                NatriureticPeptide,
+                IntoBody,
+                false,
+            ),
+            (
+                "natriuretic peptide clearance",
+                "EN",
+                NatriureticPeptide,
+                OutOfBody,
+                false,
+            ),
+            (
+                "parathyroid hormone secretion",
+                "EN",
+                ParathyroidHormone,
+                IntoBody,
+                false,
+            ),
+            (
+                "parathyroid hormone clearance",
+                "EN",
+                ParathyroidHormone,
+                OutOfBody,
+                false,
+            ),
+            ("cortisol secretion", "EN", Cortisol, IntoBody, false),
+            ("cortisol clearance", "EN", Cortisol, OutOfBody, false),
+            ("vasopressin secretion", "EN", Vasopressin, IntoBody, false),
+            ("vasopressin clearance", "EN", Vasopressin, OutOfBody, false),
+            ("insulin first pass", "HP", Insulin, OutOfBody, false),
+            ("albumin synthesis", "HP", Albumin, IntoBody, false),
+            ("albumin loss", "HP", Albumin, OutOfBody, false),
+            ("fixed acid made", "HP", FixedAcid, IntoBody, false),
+            ("hemoglobin production", "HC", Hemoglobin, IntoBody, false),
+            ("hemoglobin destruction", "HC", Hemoglobin, OutOfBody, false),
+            ("feces water", "GI", Water, OutOfBody, false),
+            ("feces sodium", "GI", Sodium, OutOfBody, false),
+            ("feces potassium", "GI", Potassium, OutOfBody, false),
+            ("feces chloride", "GI", Chloride, OutOfBody, false),
+            ("feces glucose", "GI", Glucose, OutOfBody, false),
+            ("feces triglyceride", "GI", Triglyceride, OutOfBody, false),
+            ("feces amino acids", "GI", AminoAcids, OutOfBody, false),
+            ("feces calcium", "GI", Calcium, OutOfBody, false),
+            ("feces phosphate", "GI", Phosphate, OutOfBody, false),
+            ("feces magnesium", "GI", Magnesium, OutOfBody, false),
+            ("feces iron", "GI", Iron, OutOfBody, false),
+            ("skin evaporation", "MT", Water, OutOfBody, false),
+            ("sweat water", "MT", Water, OutOfBody, false),
+            ("sweat sodium", "MT", Sodium, OutOfBody, false),
+            ("sweat chloride", "MT", Chloride, OutOfBody, false),
+            ("dry heat loss", "MT", Energy, OutOfBody, false),
+            ("skin evaporative heat", "MT", Energy, OutOfBody, false),
+            ("inspired oxygen", "RS", Oxygen, IntoBody, false),
+            ("inspired carbon dioxide", "RS", CarbonDioxide, IntoBody, false),
+            ("inspired nitrogen gas", "RS", NitrogenGas, IntoBody, false),
+            ("expired oxygen", "RS", Oxygen, OutOfBody, false),
+            ("expired carbon dioxide", "RS", CarbonDioxide, OutOfBody, false),
+            ("expired nitrogen gas", "RS", NitrogenGas, OutOfBody, false),
+            ("expired water", "RS", Water, OutOfBody, false),
+            ("airway heat", "RS", Energy, OutOfBody, false),
+            ("urine", "RN", Water, OutOfBody, true),
+        ];
+        assert_eq!(TABLE, &pinned[..]);
     }
 }

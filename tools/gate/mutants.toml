@@ -552,6 +552,58 @@ new = '''owner: Boundary::CARD,'''
 test = "-p ng-contract --test scopes a_process_at_a_pool_the_body_lacks_is_named_under_its_card"
 
 [[mutant]]
+name = "enclosure-owed-by-its-card"
+path = "crates/ng-contract/src/compile.rs"
+old = '''
+            fragment.owner == *card
+                && (fragment.slots.iter())'''
+new = '''
+            (fragment.slots.iter())'''
+test = "-p ng-contract --test scopes another_cards_owed_pressure_does_not_cover_an_enclosure_whose_card_owes_none"
+
+[[mutant]]
+name = "enclosure-owed-by-its-slot"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.any(|slot| slot.name == ENCLOSURE_PRESSURE && slot.over == Over::HeldEnclosures)'''
+new = '''.any(|slot| slot.name == ENCLOSURE_PRESSURE)'''
+test = "-p ng-contract --test scopes a_field_named_like_the_enclosure_pressure_is_not_the_pressure_an_enclosure_is_owed"
+
+[[mutant]]
+name = "kept-port-reads-its-own-supplies"
+path = "crates/ng-contract/src/scope/outside.rs"
+old = '''.find(|card| card.card == S::CARD)'''
+new = '''.find(|_| true)'''
+test = "-p ng-contract --test scopes a_kept_cards_ports_leave_the_routes_its_stand_ins_supply"
+
+[[mutant]]
+name = "enclosure-fluid-held-by-its-card"
+path = "crates/ng-contract/src/compile.rs"
+old = '''Some(Compliance::Held { card }) if held.iter().any(|known| known.card == card) => Some(card),'''
+new = '''Some(Compliance::Held { card }) if !held.is_empty() => Some(card),'''
+test = "-p ng-contract --test scopes a_built_cards_enclosure_fluid_that_nothing_moves_is_an_orphan"
+
+[[mutant]]
+name = "enclosure-fluid-owed-by-its-card"
+path = "crates/ng-contract/src/compile.rs"
+old = '''let stood_in = |card: &&'static str| held.iter().any(|known| known.card == *card);'''
+new = '''let stood_in = |_: &&'static str| !held.is_empty();'''
+test = "-p ng-contract --test scopes a_built_respiratory_card_defines_its_enclosures_pressure_and_holds_no_fluid"
+
+[[mutant]]
+name = "process-direction-recorded"
+path = "crates/ng-contract/src/scope.rs"
+old = '''direction: P::DIRECTION,'''
+new = '''direction: BoundaryDirection::IntoBody,'''
+test = "-p ng-contract --test scopes a_card_serves_its_own_boundary_processes_through_its_ports"
+
+[[mutant]]
+name = "process-table-pinned"
+path = "crates/ng-contract/src/scope/processes.rs"
+old = '''Clearance<Glucagon> = "glucagon clearance": Endocrine, Glucagon, OutOfBody;'''
+new = '''Clearance<Glucagon> = "glucagon clearance": Hepatic, Glucagon, IntoBody;'''
+test = "-p ng-contract --lib scope::tests::each_boundary_process_keeps_its_card_species_direction_and_drain"
+
+[[mutant]]
 name = "cargo-held-at-both-ends"
 path = "crates/ng-contract/tests/map_reads.rs"
 old = '''        cargo(false, false).err(),'''

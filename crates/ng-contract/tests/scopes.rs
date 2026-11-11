@@ -31,19 +31,22 @@ fn lone() -> Result<Schema, AdmissionError> {
     Schema::new(map.finish()?)
 }
 
-fn enclosed(card: &'static str, fluid: bool) -> Result<Schema, AdmissionError> {
+fn enclosed(cards: &[&'static str], fluid: bool) -> Result<Schema, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at()?);
     let vessel = map.site::<VesselSegment>("vessel", at()?);
-    let bed = map.site::<CapillaryBed>("bed", at()?);
-    let space = map.site::<EnclosedSpace>("space", at()?);
-    for child in [vessel.id(), bed.id(), space.id()] {
-        map.contain(root.id(), child);
+    map.contain(root.id(), vessel.id());
+    for (&card, (bed, space)) in cards.iter().zip([("bed", "space"), ("bed two", "space two")]) {
+        let bed = map.site::<CapillaryBed>(bed, at()?);
+        let space = map.site::<EnclosedSpace>(space, at()?);
+        for child in [bed.id(), space.id()] {
+            map.contain(root.id(), child);
+        }
+        for (from, to) in [(vessel.id(), bed.id()), (bed.id(), vessel.id())] {
+            map.connect(Network::Vascular, from, to);
+        }
+        map.enclose(&space, &[bed.id()], Compliance::Held { card });
     }
-    for (from, to) in [(vessel.id(), bed.id()), (bed.id(), vessel.id())] {
-        map.connect(Network::Vascular, from, to);
-    }
-    map.enclose(&space, &[bed.id()], Compliance::Held { card });
     let mut schema = Schema::new(map.finish()?)?;
     schema.leave_out(Space::Cells, "a bench with no cell water");
     if !fluid {
@@ -52,7 +55,7 @@ fn enclosed(card: &'static str, fluid: bool) -> Result<Schema, AdmissionError> {
     Ok(schema)
 }
 
-fn circulation(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
+fn heart<'b>(body: &mut Assembly<'b>) -> Result<FragmentBuilder<'b, Cardiovascular>, AdmissionError> {
     let class = slow()?;
     let (mut cv, ports) = body.cardiovascular()?.parts();
     let route = ports.circulation(&mut cv);
@@ -61,12 +64,21 @@ fn circulation(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
         k.finish(zero, cv.every_mode(), class)
     });
     cv.transfer_along(&route, still);
+    Ok(cv)
+}
+
+fn circulation(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
+    let cv = heart(body)?;
     body.add(cv.finish());
     Ok(())
 }
 
 fn organs(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     circulation(body)?;
+    fluids(body)
+}
+
+fn fluids(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let class = slow()?;
     let (mut fl, ports) = body.fluids()?.parts();
     let route = ports.starling(&mut fl);
@@ -168,9 +180,13 @@ fn every_card_outside_the_slice_has_a_scope_of_its_own() -> Result<(), Admission
     Ok(())
 }
 
-fn built(fluid: bool) -> Result<CompiledBody, AdmissionError> {
-    assemble(enclosed(Respiratory::CARD, fluid)?, |mut body| {
+fn built(schema: Schema, beside_held: bool) -> Result<CompiledBody, AdmissionError> {
+    assemble(schema, |mut body| {
         organs(&mut body)?;
+        if beside_held {
+            let bc = body.hold(HeldDeclaration::<BloodChemistry>::new(vec![], vec![], "a bench"))?;
+            body.add(bc.parts().0.finish());
+        }
         let (mut rs, ports) = body.respiratory(None)?.parts();
         pressure(&mut rs, &ports.enclosure_pressure)?;
         body.add(rs.finish());
@@ -181,24 +197,66 @@ fn built(fluid: bool) -> Result<CompiledBody, AdmissionError> {
 #[test]
 fn a_built_respiratory_card_defines_its_enclosures_pressure_and_holds_no_fluid() -> Result<(), AdmissionError>
 {
-    assert_eq!(built(false)?.held().count(), 0);
+    let alone = built(enclosed(&[Respiratory::CARD], false)?, false)?;
+    assert_eq!(alone.held().count(), 0);
+    let beside = built(enclosed(&[Respiratory::CARD], false)?, true)?;
+    assert_eq!(beside.held().collect::<Vec<_>>(), ["BC"]);
     Ok(())
 }
 
 #[test]
-fn a_built_cards_enclosure_fluid_that_nothing_moves_is_an_orphan() {
+fn a_built_cards_enclosure_fluid_that_nothing_moves_is_an_orphan() -> Result<(), AdmissionError> {
+    for beside_held in [false, true] {
+        assert_eq!(
+            built(enclosed(&[Respiratory::CARD], true)?, beside_held).map(|body| body.model_hash()),
+            Err(defect(CompileDefect::OrphanPool {
+                site: site::<EnclosedSpace>("space"),
+                space: Space::Fluid,
+            }))
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn another_cards_owed_pressure_does_not_cover_an_enclosure_whose_card_owes_none() -> Result<(), AdmissionError>
+{
+    let found = built(
+        enclosed(&[Respiratory::CARD, Cardiovascular::CARD], false)?,
+        false,
+    );
     assert_eq!(
-        built(true).map(|body| body.model_hash()),
-        Err(defect(CompileDefect::OrphanPool {
-            site: site::<EnclosedSpace>("space"),
-            space: Space::Fluid,
+        found.map(|body| body.model_hash()),
+        Err(defect(CompileDefect::OmittedLaw {
+            law: law("CV", "enclosure_pressure")
         }))
     );
+    Ok(())
+}
+
+#[test]
+fn a_field_named_like_the_enclosure_pressure_is_not_the_pressure_an_enclosure_is_owed()
+-> Result<(), AdmissionError> {
+    let found = assemble(enclosed(&[Cardiovascular::CARD], false)?, |mut body| {
+        let mut cv = heart(&mut body)?;
+        let (field, _) = cv.site_field::<EnclosedSpace, Pressure>("enclosure_pressure", Admissible::finite());
+        pressure(&mut cv, &field)?;
+        body.add(cv.finish());
+        fluids(&mut body)?;
+        body.compile()
+    });
+    assert_eq!(
+        found.map(|body| body.model_hash()),
+        Err(defect(CompileDefect::OmittedLaw {
+            law: law("CV", "enclosure_pressure")
+        }))
+    );
+    Ok(())
 }
 
 #[test]
 fn a_card_whose_ports_carry_no_pressure_cannot_own_an_enclosure_unheld() -> Result<(), AdmissionError> {
-    let found = assemble(enclosed(Gastrointestinal::CARD, false)?, |mut body| {
+    let found = assemble(enclosed(&[Gastrointestinal::CARD], false)?, |mut body| {
         organs(&mut body)?;
         let fragment = body.gastrointestinal(None)?.parts().0.finish();
         body.add(fragment);
@@ -215,7 +273,7 @@ fn a_card_whose_ports_carry_no_pressure_cannot_own_an_enclosure_unheld() -> Resu
 
 #[test]
 fn a_built_card_the_map_does_not_name_cannot_define_an_enclosures_pressure() -> Result<(), AdmissionError> {
-    let found = assemble(enclosed(Gastrointestinal::CARD, true)?, |mut body| {
+    let found = assemble(enclosed(&[Gastrointestinal::CARD], true)?, |mut body| {
         organs(&mut body)?;
         let declaration = HeldDeclaration::<Gastrointestinal>::new(vec![], vec![], "a bench");
         let (mut gi, held) = body.hold(declaration)?.parts();
@@ -238,7 +296,7 @@ fn a_built_card_the_map_does_not_name_cannot_define_an_enclosures_pressure() -> 
 #[test]
 fn a_card_that_keeps_a_declaration_holds_its_enclosures_fluid_while_its_crate_defines_the_pressure()
 -> Result<(), AdmissionError> {
-    let body = assemble(enclosed(Respiratory::CARD, true)?, |mut body| {
+    let body = assemble(enclosed(&[Respiratory::CARD], true)?, |mut body| {
         organs(&mut body)?;
         let validity = "the pleural fluid: a healthy day moves none";
         let rs = body.hold(HeldDeclaration::<Respiratory>::new(vec![], vec![], validity))?;
@@ -261,7 +319,7 @@ fn a_card_that_keeps_a_declaration_holds_its_enclosures_fluid_while_its_crate_de
 }
 
 fn gut(handed: bool, feces: bool) -> Result<CompiledBody, AdmissionError> {
-    let mut schema = enclosed(Gastrointestinal::CARD, true)?;
+    let mut schema = enclosed(&[Gastrointestinal::CARD], true)?;
     let vessel = site::<VesselSegment>("vessel");
     schema.boundary::<Water>("gut water", BoundaryDirection::IntoBody, vessel, Space::Lumen)?;
     if feces {
@@ -340,20 +398,25 @@ fn a_card_serves_its_own_boundary_processes_through_its_ports() -> Result<(), Ad
         body.add(en.finish());
         body.compile()
     })?;
-    let served: Vec<(LawName, Option<&str>)> = (body.columns().iter())
+    let served: Vec<(LawName, Option<&str>, Vec<i64>)> = (body.columns().iter())
         .filter(|column| column.origin().owner == "EN")
         .map(|column| {
             (
                 column.origin(),
                 column.receipt().map(|receipt| receipt.boundary()),
+                column.terms().iter().map(|term| term.1).collect(),
             )
         })
         .collect();
     assert_eq!(
         served,
         [
-            (law("EN", "insulin clearance"), Some("insulin clearance")),
-            (law("EN", "insulin secretion"), Some("insulin secretion")),
+            (
+                law("EN", "insulin clearance"),
+                Some("insulin clearance"),
+                vec![-1]
+            ),
+            (law("EN", "insulin secretion"), Some("insulin secretion"), vec![1]),
         ]
     );
     assert!(held_routes(&body).is_empty());
@@ -457,10 +520,17 @@ fn a_process_whose_card_has_no_scope_is_omitted_under_that_card() -> Result<(), 
     Ok(())
 }
 
-#[test]
-fn a_kept_cards_ports_leave_the_routes_its_stand_ins_supply() -> Result<(), AdmissionError> {
-    let body = assemble(hormones(insulin_both)?, |mut body| {
+fn kept_endocrine(another_held: bool) -> Result<CompiledBody, AdmissionError> {
+    assemble(hormones(insulin_both)?, |mut body| {
         circulation(&mut body)?;
+        if another_held {
+            let gi = body.hold(HeldDeclaration::<Gastrointestinal>::new(
+                vec![],
+                vec![],
+                "a bench",
+            ))?;
+            body.add(gi.parts().0.finish());
+        }
         let declaration = HeldDeclaration::<Endocrine>::new(vec!["insulin secretion"], vec![], "a bench");
         let mut en = body.hold(declaration)?;
         let (laws, held) = en.stand_ins();
@@ -475,8 +545,17 @@ fn a_kept_cards_ports_leave_the_routes_its_stand_ins_supply() -> Result<(), Admi
         serve(&mut laws, &ports.boundary::<Clearance<Insulin>>()?.route)?;
         body.add(laws.finish());
         body.compile()
-    })?;
-    assert_eq!(held_routes(&body), [("EN", "insulin secretion")]);
+    })
+}
+
+#[test]
+fn a_kept_cards_ports_leave_the_routes_its_stand_ins_supply() -> Result<(), AdmissionError> {
+    for another_held in [false, true] {
+        assert_eq!(
+            held_routes(&kept_endocrine(another_held)?),
+            [("EN", "insulin secretion")]
+        );
+    }
     Ok(())
 }
 

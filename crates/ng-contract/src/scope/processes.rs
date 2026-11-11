@@ -83,7 +83,13 @@ macro_rules! processes {
             }
         )*
         #[cfg(test)]
-        pub(super) const NAMES: &[&str] = &[$($name),*];
+        pub(super) const TABLE: &[(&str, &str, crate::Species, BoundaryDirection, bool)] = &[$((
+            <$process as BoundaryProcess>::NAME,
+            <<$process as BoundaryProcess>::Card as Owner>::CARD,
+            <<$process as BoundaryProcess>::Quantity as Substance>::SPECIES,
+            <$process as BoundaryProcess>::DIRECTION,
+            <$process as BoundaryProcess>::DRAINS,
+        )),*];
     };
 }
 processes! {
