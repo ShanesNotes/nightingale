@@ -3,7 +3,7 @@ use ng_contract::catalog::{Arrow, Carries, Disposition, HeldField, WiredField};
 const ATRIAL: WiredField = WiredField {
     name: "atrial_wall_stress",
     unit: "Pressure",
-    ticket: 17,
+    body_ticket: 17,
 };
 
 const fn held(name: &'static str, holder: &'static str) -> HeldField {
@@ -15,8 +15,11 @@ const fn held(name: &'static str, holder: &'static str) -> HeldField {
     }
 }
 
-const fn wired(ticket: u8) -> WiredField {
-    WiredField { ticket, ..ATRIAL }
+const fn wired(body_ticket: u8) -> WiredField {
+    WiredField {
+        body_ticket,
+        ..ATRIAL
+    }
 }
 
 const fn wall_stress(carries: Carries) -> Arrow {

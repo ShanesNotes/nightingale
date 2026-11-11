@@ -82,7 +82,7 @@ impl CensusRow {
 pub struct WiredField {
     pub name: &'static str,
     pub unit: &'static str,
-    pub ticket: u8,
+    pub body_ticket: u8,
 }
 #[derive(Clone, Copy)]
 pub struct HeldField {
@@ -150,7 +150,7 @@ impl Arrow {
         let wired = self.carries.wired();
         let mut i = 0;
         while i < wired.len() {
-            if wired[i].ticket < FIRST_WIRING_TICKET || wired[i].ticket > LAST_WIRING_TICKET {
+            if wired[i].body_ticket < FIRST_WIRING_TICKET || wired[i].body_ticket > LAST_WIRING_TICKET {
                 return false;
             }
             i += 1;
@@ -335,7 +335,7 @@ macro_rules! coupling_map {
             wired: &[$(WiredField {
                 name: stringify!($field),
                 unit: stringify!($unit),
-                ticket: $ticket,
+                body_ticket: $ticket,
             }),+],
             held: coupling_map!(@held $($held)?),
         }
@@ -378,7 +378,7 @@ coupling_map! {
     86 Nervous => Respiratory, "respiratory drive", sink,
         wired (RespiratoryDrive { respiratory_drive: Dimensionless => 11 });
     87 Nervous => Metabolism, "thermostat, shiver and sweat", sink,
-        wired (ThermostatShiverSweat { shiver_drive: Dimensionless => 12 })
+        wired (ShiverDrive { shiver_drive: Dimensionless => 12 })
         held [thermostat_set_point: Temperature => Nervous "the set point is NS memory and no MT law reads it",
             sweat_drive: Dimensionless => Nervous "sweat answers release at the skin junction (S10)"];
     88 Nervous => Musculoskeletal, "motor drive", sink,
@@ -388,7 +388,7 @@ coupling_map! {
         held [crh_drive: Dimensionless => Nervous "cortisol's profile follows the clock input directly (ticket 20)",
             circadian_phase: Phase => Nervous "the clock is a boundary input every law reads (ticket 05)"];
     90 Metabolism => Cardiovascular, "O2 debt per bed, temperature", input,
-        wired (OxygenDebtAndTemperature { oxygen_debt_per_bed: PerSite<CapillaryBed, Oxygen> => 9 })
+        wired (OxygenDebtPerBed { oxygen_debt_per_bed: PerSite<CapillaryBed, Oxygen> => 9 })
         held [temperature: Temperature => Cardiovascular "CV's laws run at a reference temperature"];
     91 Metabolism => Nervous, "temperature", input,
         wired (CoreTemperature { core_temperature: Temperature => 12 });
@@ -399,7 +399,7 @@ coupling_map! {
     94 Metabolism => BloodChemistry, "temperature", outside "neither end in the arena slice",
         held [temperature: Temperature => BloodChemistry "BC's speciation runs at a reference temperature (ticket 12)"];
     95 Musculoskeletal => Respiratory, "pump force and fatigue", outside "neither end in the arena slice",
-        wired (PumpForceAndFatigue { pump_force: Pressure => 10 })
+        wired (PumpForce { pump_force: Pressure => 10 })
         held [fatigue: Dimensionless => Musculoskeletal "a resting day has no fatigue law"];
     96 Musculoskeletal => Cardiovascular, "position and gravity",
         relation "site positions under the boundary's posture",
@@ -449,7 +449,7 @@ coupling_map! {
         held [skin_water: Volume => Fluids "pressure injury is absent",
             compartment_water: Volume => Fluids "limb compartments are absent"];
     114 Hematology => Cardiovascular, "bleeding competence, viscosity, thrombosis", input,
-        wired (BleedingViscosityThrombosis { viscosity: Viscosity => 8 })
+        wired (BloodViscosity { viscosity: Viscosity => 8 })
         held [bleeding_competence: Dimensionless => Hematology "no bleeding edge (ticket 21)",
             thrombosis: Dimensionless => Hematology "zero flux (ticket 21)"];
 }
