@@ -1,25 +1,10 @@
 //! The coupling catalog: one declaration per arrow of the "Direct couplings" graph in
-//! `docs/atlas/coupling-map.md` (lines 77-114). Each row emits its census entry in two assemblies and, when it wires
-//! a field, its port type: a structured payload carrying every field a body ticket wires. There is no second
-//! hand-written list of ports.
+//! `docs/atlas/coupling-map.md` (lines 77-114).
 //!
 //! A payload is generic over a [`Side`]: the emitting owner receives `Payload<Defines<..>>` (one
 //! [`Output`] per field, each defined once), the receiving owner `Payload<Reads<..>>` (one
 //! [`ReadPort`] per field). `FragmentBuilder::receive` requires `To = Owner`, so a wire the map
 //! does not draw cannot be read.
-//!
-//! After its label a row gives the arrow's disposition in the slice, which stays as the slice was built: `live`
-//! (both ends in the arena slice), `input` (a held stand-in emits into the slice), `sink` (the slice emits to a held
-//! stand-in that consumes no physiology), `relation`, `outside` (neither end in the slice) and `unresolved` (an
-//! ownership conflict kept visible). Then it gives what the arrow carries in the whole body as body ticket 01 plans
-//! rung 0: a `relation`, or fields. A wired field, `name: Unit => ticket`, names the body ticket that wires it. A held
-//! field, `name: Unit => Holder "reason"`, names the one card that holds it and why, and is no member of the payload.
-//! Mapped means the route has a declared home, not that the outside system is simulated.
-//!
-//! Both censuses' counts are compiler-checked below. `tools/verify` reruns `evidence/census-check.py`, which compares
-//! the crate's rows line by line with `docs/atlas/coupling-map.md` and these rows with the crate's byte for byte, and
-//! counts both censuses again, so an added, removed or relabelled arrow or field fails the build rather than waiting
-//! for a review.
 //!
 use super::*;
 use core::marker::PhantomData;
@@ -42,25 +27,20 @@ impl<'b, O> Side for Defines<'b, O> {
 mod sealed {
     pub trait Coupling {}
 }
-/// A coupling-map arrow that wires a field. Implemented only by the generated payloads below.
 pub trait Coupling: sealed::Coupling {
     type From: System;
     type To: System;
     type Side: Side;
 }
 
-/// An arrow's disposition in one census.
 #[derive(Clone, Copy)]
 pub enum Disposition {
     Live,
     ExternalInput,
     ExternalSink,
-    /// Realized by an anatomy relation, not a wire: the enclosing space's pressure, site
-    /// positions under the boundary's posture, or the portal circuit.
     AnatomyRelation { reason: &'static str },
     OutsideSlice { reason: &'static str },
     Unresolved { reason: &'static str },
-    /// Both ends run and every field is held, each by one end with its reason.
     Held,
 }
 impl Disposition {
@@ -74,7 +54,6 @@ impl Disposition {
         )
     }
 }
-/// An arrow's row in one census, with whether the assembly runs each end's card.
 #[derive(Clone, Copy)]
 pub struct CensusRow {
     pub line: u16,
@@ -86,7 +65,6 @@ impl CensusRow {
     const fn incident(&self) -> bool {
         self.sender_runs || self.receiver_runs
     }
-    /// A disposition says which ends of its arrow run in the assembly.
     const fn ends_fit(&self) -> bool {
         let (sender, receiver) = (self.sender_runs, self.receiver_runs);
         match self.disposition {
@@ -99,15 +77,12 @@ impl CensusRow {
     }
 }
 
-/// A field a body ticket wires: the sender's law defines it and the receiver's law reads it.
 #[derive(Clone, Copy)]
 pub struct WiredField {
     pub name: &'static str,
     pub unit: &'static str,
     pub ticket: u8,
 }
-/// A field no rung 0 law defines or reads. One end of its arrow holds it with its reason, and it
-/// keeps its unit so a later rung can wire it. It is no member of its arrow's payload.
 #[derive(Clone, Copy)]
 pub struct HeldField {
     pub name: &'static str,
@@ -115,8 +90,6 @@ pub struct HeldField {
     pub holder: &'static str,
     pub reason: &'static str,
 }
-/// What an arrow carries in the whole body at rung 0. No arrow is outside the whole body or
-/// unresolved in it.
 #[derive(Clone, Copy)]
 pub enum Carries {
     Relation { reason: &'static str },
@@ -144,7 +117,6 @@ impl Carries {
     }
 }
 
-/// One arrow of the map, with its disposition in the slice and what it carries in the whole body.
 #[derive(Clone, Copy)]
 pub struct Arrow {
     pub line: u16,
@@ -156,14 +128,12 @@ pub struct Arrow {
     pub carries: Carries,
 }
 impl Arrow {
-    /// It is an anatomy relation or carries a field, so the whole body accounts for it.
     pub const fn accounted(&self) -> bool {
         match self.carries {
             Carries::Relation { .. } => true,
             Carries::Fields { wired, held } => !wired.is_empty() || !held.is_empty(),
         }
     }
-    /// Each field it holds has one of its two ends as its holder.
     pub const fn held_at_its_ends(&self) -> bool {
         let held = self.carries.held();
         let mut i = 0;
@@ -175,20 +145,17 @@ impl Arrow {
         }
         true
     }
-    /// Each field it wires names a body ticket from 06 to 25, the tickets that build the whole
-    /// body's systems.
     pub const fn wired_by_body_tickets(&self) -> bool {
         let wired = self.carries.wired();
         let mut i = 0;
         while i < wired.len() {
-            if wired[i].ticket < 6 || wired[i].ticket > 25 {
+            if wired[i].ticket < FIRST_WIRING_TICKET || wired[i].ticket > LAST_WIRING_TICKET {
                 return false;
             }
             i += 1;
         }
         true
     }
-    /// No field name appears twice, wired or held, so no field has a second holder.
     pub const fn one_holder_per_field(&self) -> bool {
         let (wired, held) = (self.carries.wired(), self.carries.held());
         let fields = wired.len() + held.len();
@@ -224,11 +191,9 @@ const fn same(a: &str, b: &str) -> bool {
     true
 }
 
-/// Which assembly a census counts.
 #[derive(Clone, Copy)]
 pub enum Census {
     Slice,
-    /// Every card runs, as body ticket 01 plans rung 0.
     WholeBody,
 }
 impl Census {
@@ -282,8 +247,6 @@ impl Census {
         count
     }
 }
-/// How many of the map's arrows stand in each disposition in one census, and how many touch a
-/// card it runs.
 #[derive(Clone, Copy)]
 pub struct Count {
     pub live: usize,
@@ -305,19 +268,15 @@ impl Count {
     }
 }
 
-/// The unit as the table writes it, which compiles only for a type in scope, held fields' included.
-const fn unit<U>(written: &'static str) -> &'static str {
-    written
-}
 
-/// Arrows in the map's "Direct couplings" graph. The table's type has this length.
 pub const MAP_EDGES: usize = 38;
+const FIRST_WIRING_TICKET: u8 = 6;
+const LAST_WIRING_TICKET: u8 = 25;
 
 macro_rules! coupling_map {
     ($($line:literal $from:ident => $to:ident, $label:literal, $slice:ident $($why:literal)?,
         $plan:ident $carried:tt $(held $held:tt)?;)*) => {
         $(coupling_map!(@payload $plan $carried $line $from $to $label);)*
-        /// The only list of coupling-map arrows. Port types above are generated from it.
         pub const ARROWS: [Arrow; MAP_EDGES] = [$(Arrow {
             line: $line,
             from: <$from as System>::CARD,
@@ -354,7 +313,7 @@ macro_rules! coupling_map {
         Carries::Fields {
             wired: &[$(WiredField {
                 name: stringify!($field),
-                unit: unit::<$unit>(stringify!($unit)),
+                unit: stringify!($unit),
                 ticket: $ticket,
             }),+],
             held: coupling_map!(@held $($held)?),
@@ -365,7 +324,7 @@ macro_rules! coupling_map {
     (@held [$($field:ident: $unit:ty => $holder:ident $reason:literal),+ $(,)?]) => {
         &[$(HeldField {
             name: stringify!($field),
-            unit: unit::<$unit>(stringify!($unit)),
+            unit: stringify!($unit),
             holder: <$holder as System>::CARD,
             reason: $reason,
         }),+]
@@ -474,17 +433,14 @@ coupling_map! {
             thrombosis: Dimensionless => Hematology "zero flux (ticket 21)"];
 }
 
-/// The slice's census: the arrows as the slice was built.
 pub const SLICE: Count = Census::Slice.count();
-/// The whole body's census at rung 0.
 pub const WHOLE_BODY: Count = Census::WholeBody.count();
-// The slice: 38 = mapped + listed unmapped, the figures the design doc states. The whole body:
-// every arrow accounted for, field by field. Rows are the map's consecutive arrow lines 77..=114.
 const _: () = assert!(SLICE.mapped() + SLICE.unmapped() == MAP_EDGES);
 const _: () = assert!(SLICE.mapped() == 27 && SLICE.unmapped() == 11);
 const _: () = assert!(SLICE.incident_mapped == 27 && SLICE.incident_unmapped == 1);
 const _: () = assert!(WHOLE_BODY.live == 18 && WHOLE_BODY.relation == 5 && WHOLE_BODY.held == 15);
-const _: () = assert!(matches!(fields(), (21, 29, 6)));
+const FIELDS: FieldCount = field_count();
+const _: () = assert!(FIELDS.wired == 21 && FIELDS.held == 29 && FIELDS.wire_and_hold == 6);
 const _: () = {
     let mut i = 0;
     while i < MAP_EDGES {
@@ -500,32 +456,36 @@ const _: () = {
 };
 const _: () = {
     let relations = [82, 96, 99, 101, 104];
-    let mixed = [79, 87, 89, 90, 95, 114];
+    let wire_and_hold = [79, 87, 89, 90, 95, 114];
     let mut i = 0;
     while i < relations.len() {
         assert!(matches!(ARROWS[relations[i] - 77].carries, Carries::Relation { .. }));
         i += 1;
     }
     let mut i = 0;
-    while i < mixed.len() {
-        let carries = ARROWS[mixed[i] - 77].carries;
+    while i < wire_and_hold.len() {
+        let carries = ARROWS[wire_and_hold[i] - 77].carries;
         assert!(!carries.wired().is_empty() && !carries.held().is_empty());
         i += 1;
     }
 };
 
-/// How many fields the whole body wires and holds, and how many arrows do both.
-const fn fields() -> (usize, usize, usize) {
-    let (mut wired, mut held, mut mixed) = (0, 0, 0);
+struct FieldCount {
+    wired: usize,
+    held: usize,
+    wire_and_hold: usize,
+}
+const fn field_count() -> FieldCount {
+    let mut count = FieldCount { wired: 0, held: 0, wire_and_hold: 0 };
     let mut i = 0;
     while i < MAP_EDGES {
         let carries = ARROWS[i].carries;
-        wired += carries.wired().len();
-        held += carries.held().len();
+        count.wired += carries.wired().len();
+        count.held += carries.held().len();
         if !carries.wired().is_empty() && !carries.held().is_empty() {
-            mixed += 1;
+            count.wire_and_hold += 1;
         }
         i += 1;
     }
-    (wired, held, mixed)
+    count
 }

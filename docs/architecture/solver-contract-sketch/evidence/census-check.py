@@ -1,11 +1,10 @@
 """Compare the crate's coupling catalog with the "Direct couplings" graph of
-docs/atlas/coupling-map.md, row by row, hold the sketch's copy of the table to the crate's,
-byte for byte, and count both censuses: the slice's and the whole body's at rung 0.
+docs/atlas/coupling-map.md, row by row, and hold the sketch's copy of the table to the crate's,
+byte for byte.
 
 Run from solver-contract-sketch/:  python3 -I evidence/census-check.py
 tools/verify (verify.d/20-sketch.sh) runs this as a gate. A change to the crate's catalog or owner
 table runs everything (tools/gate/paths.toml), so a change to either file alone reaches this script.
-Every row and field must parse, or the check fails rather than counting what it understood.
 """
 import re
 import sys

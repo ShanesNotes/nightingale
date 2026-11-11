@@ -929,8 +929,8 @@ test = "-p ng-contract --test census the_census_refuses_a_holder_at_neither_end_
 [[mutant]]
 name = "wiring-ticket-open-above"
 path = "crates/ng-contract/src/catalog.rs"
-old = '''if wired[i].ticket < 6 || wired[i].ticket > 25 {'''
-new = '''if wired[i].ticket < 6 {'''
+old = '''if wired[i].ticket < FIRST_WIRING_TICKET || wired[i].ticket > LAST_WIRING_TICKET {'''
+new = '''if wired[i].ticket < FIRST_WIRING_TICKET {'''
 test = "-p ng-contract --test census the_census_refuses_a_wired_field_no_body_ticket_wires"
 
 [[mutant]]
