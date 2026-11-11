@@ -27,6 +27,20 @@ impl<'b> GastrointestinalPorts<'b> {
         EdgeRoute::requested(family)
     }
     /// A gut lumen to its bed's plasma along every absorbing edge.
+    /// ```compile_fail,E0277
+    /// use ng_contract::*;
+    /// fn absorbed<'b>(gi: &mut FragmentBuilder<'b, Gastrointestinal>, ports: &GastrointestinalPorts<'b>)
+    ///     -> EdgeRoute<'b, Gastrointestinal, Triglyceride, AbsorbingEdge> {
+    ///     ports.absorption::<Triglyceride>(gi)
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// fn absorbed<'b>(gi: &mut FragmentBuilder<'b, Gastrointestinal>, ports: &GastrointestinalPorts<'b>)
+    ///     -> EdgeRoute<'b, Gastrointestinal, Glucose, AbsorbingEdge> {
+    ///     ports.absorption::<Glucose>(gi)
+    /// }
+    /// ```
     pub fn absorption<Q: Absorbed>(
         &self,
         laws: &mut FragmentBuilder<'b, Gastrointestinal>,

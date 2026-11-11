@@ -188,6 +188,7 @@ The forbidden moves fail to compile (`src/lib.rs` and `src/scope/`; each probe a
 | Serve a boundary process another card owns (the urine drain from the respiratory card's ports) | E0271 |
 | Make a boundary process outside the contract | E0277 |
 | Cross a wall with a species outside the port's cargo class | E0277 |
+| Absorb triglyceride, which enters only by the chyle | E0277 |
 | Cross fuels at the liver bed from the metabolism card's ports | E0308 |
 | Cancel a coefficient against a numerator or denominator that is not its own | E0277 |
 | Give a membrane's reflection a dimension | E0308 |
