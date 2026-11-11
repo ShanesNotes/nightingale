@@ -5,7 +5,7 @@ pub struct ImmunePorts<'b> {
     brand: Brand<'b>,
 }
 impl ImmunePorts<'_> {
-    pub(super) fn issued() -> Self {
+    pub(super) fn issued(_: Vec<&'static str>) -> Self {
         Self { brand: PhantomData }
     }
 }

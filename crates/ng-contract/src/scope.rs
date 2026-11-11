@@ -21,6 +21,7 @@ mod immune;
 mod metabolism;
 mod musculoskeletal;
 mod outside;
+mod processes;
 mod respiratory;
 pub use blood_chemistry::BloodChemistryPorts;
 pub use endocrine::EndocrinePorts;
@@ -30,6 +31,7 @@ pub use hepatic::HepaticPorts;
 pub use immune::ImmunePorts;
 pub use metabolism::MetabolismPorts;
 pub use musculoskeletal::MusculoskeletalPorts;
+pub use processes::*;
 pub use respiratory::RespiratoryPorts;
 
 pub(crate) const ENCLOSURE_PRESSURE: &str = "enclosure_pressure";
@@ -53,6 +55,7 @@ pub(crate) struct RouteBoundary {
     pub(crate) direction: BoundaryDirection,
     pub(crate) pool: PoolRef,
     pub(crate) drains: bool,
+    pub(crate) owner: Option<&'static str>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BoundaryDirection {
@@ -123,6 +126,7 @@ impl Schema {
             direction,
             pool,
             drains,
+            owner: None,
         })
     }
 
@@ -136,6 +140,20 @@ impl Schema {
             direction: BoundaryDirection::OutOfBody,
             pool,
             drains: true,
+            owner: None,
+        })
+    }
+
+    /// Places one card's boundary process at a pool. The process states its card, species, direction and name, so
+    /// composition data names only the site and space, and only that card serves it. Refuses a name declared twice.
+    pub fn process<P: BoundaryProcess>(&mut self, site: SiteId, space: Space) -> Result<(), AdmissionError> {
+        let species = <P::Quantity as Substance>::SPECIES;
+        self.named(RouteBoundary {
+            name: P::NAME,
+            direction: P::DIRECTION,
+            pool: PoolRef { site, space, species },
+            drains: P::DRAINS,
+            owner: Some(<P::Card as Owner>::CARD),
         })
     }
 
@@ -247,6 +265,7 @@ impl Seal for Schema {
             direction,
             pool: PoolRef { site, space, species },
             drains,
+            owner,
         } in boundaries
         {
             out.text(name);
@@ -255,6 +274,10 @@ impl Seal for Schema {
             out.number(*space as u64);
             out.number(*species as u64);
             out.number(u64::from(*drains));
+            if let Some(card) = owner {
+                out.number(u64::MAX);
+                out.text(card);
+            }
         }
         partial_volume.as_ref().map(Measure::bits).seal(out);
         let mut left_out = left_out.clone();
@@ -361,17 +384,19 @@ impl<'b> Assembly<'b> {
             },
         })
     }
-    fn boundary_names(&self) -> Vec<(&'static str, Species)> {
-        self.schema
-            .boundaries
-            .iter()
+    fn boundary_names(&self, offered: impl Fn(&RouteBoundary) -> bool) -> Vec<(&'static str, Species)> {
+        (self.schema.boundaries.iter())
+            .filter(|boundary| offered(boundary))
             .map(|boundary| (boundary.name, boundary.pool.species))
             .collect()
     }
     pub fn renal(&mut self) -> Result<RenalScope<'b>, AdmissionError> {
         Ok(RenalScope {
             laws: self.issue()?,
-            ports: RenalPorts { brand: PhantomData },
+            ports: RenalPorts {
+                processes: self.processes_of::<Renal>(&[]),
+                brand: PhantomData,
+            },
         })
     }
     pub fn receptor(&mut self) -> Result<ReceptorScope<'b>, AdmissionError> {
@@ -384,17 +409,17 @@ impl<'b> Assembly<'b> {
         Ok(BoundaryScope {
             laws: self.issue()?,
             ports: BoundaryPorts {
-                names: self.boundary_names(),
+                names: self.boundary_names(|known| known.owner.is_none()),
                 brand: PhantomData,
             },
         })
     }
-    /// Refuses a route the schema does not name, and one another card declared.
+    /// Refuses a route the schema does not name, one another card declared, and another card's boundary process.
     pub fn hold<S: OutsideSlice>(
         &mut self,
         declaration: HeldDeclaration<S>,
     ) -> Result<HeldScope<'b, S>, AdmissionError> {
-        let names = self.boundary_names();
+        let names = self.boundary_names(|_| true);
         let HeldDeclaration {
             mut supplies,
             mut holds,
@@ -412,7 +437,13 @@ impl<'b> Assembly<'b> {
             if self.held.iter().any(|held| held.supplies.contains(&name)) {
                 return Err(AdmissionError::BoundaryNamedTwice { name });
             }
+            if (self.schema.boundaries.iter())
+                .any(|known| known.name == name && known.owner.is_some_and(|card| card != S::CARD))
+            {
+                return Err(AdmissionError::BoundaryNamedTwice { name });
+            }
         }
+        let offered = self.boundary_names(|known| known.owner.is_none() || supplies.contains(&known.name));
         let laws = self.issue_outside::<S>()?;
         self.held.push(HeldCard {
             card: S::CARD,
@@ -424,7 +455,7 @@ impl<'b> Assembly<'b> {
             laws,
             ports: HeldPorts {
                 enclosure_pressure: Output::named(ENCLOSURE_PRESSURE),
-                names,
+                names: offered,
                 brand: PhantomData,
             },
         })
@@ -498,6 +529,15 @@ fn named_route<'b, Q: Substance, O>(
         _ => Err(AdmissionError::UnknownBoundary { name }),
     }
 }
+fn process_route<'b, P: BoundaryProcess>(
+    processes: &[&'static str],
+) -> Result<BoundaryRoute<'b, P::Quantity, P::Card>, AdmissionError> {
+    if processes.contains(&P::NAME) {
+        Ok(BoundaryRoute::named(P::NAME))
+    } else {
+        Err(AdmissionError::UnknownBoundary { name: P::NAME })
+    }
+}
 fn effect<'b, O, C: SiteSet, Q: Substance>() -> ReadPort<'b, O, PerSite<C, Dimensionless>> {
     ReadPort::field(LawName {
         owner: Receptor::CARD,
@@ -510,7 +550,8 @@ pub struct BoundaryPorts<'b> {
     brand: Brand<'b>,
 }
 impl<'b> BoundaryPorts<'b> {
-    /// The schema boundary's pair and drive. Refuses a name the schema does not declare for `Q`.
+    /// The schema boundary's pair and drive. Refuses a name the schema does not declare for `Q`, and a card's boundary
+    /// process, which only that card's ports serve.
     pub fn route<Q: Substance>(&self, name: &'static str) -> Result<BoundaryRoute<'b, Q>, AdmissionError> {
         named_route(&self.names, name)
     }
@@ -671,6 +712,7 @@ impl<'b> NervousPorts<'b> {
     }
 }
 pub struct RenalPorts<'b> {
+    processes: Vec<&'static str>,
     brand: Brand<'b>,
 }
 impl<'b> RenalPorts<'b> {
@@ -718,6 +760,13 @@ impl<'b> RenalPorts<'b> {
     }
     pub fn effect<Q: Substance>(&self) -> ReadPort<'b, Renal, PerSite<Blood, Dimensionless>> {
         effect::<_, _, Q>()
+    }
+    /// The route of a boundary process the renal card owns: the urine drain, once the void is the kidney's. Refuses
+    /// one the schema does not place.
+    pub fn boundary<P: BoundaryProcess<Card = Renal>>(
+        &self,
+    ) -> Result<BoundaryRoute<'b, P::Quantity, Renal>, AdmissionError> {
+        process_route::<P>(&self.processes)
     }
 }
 pub struct ReceptorPorts<'b> {
@@ -847,8 +896,20 @@ pub struct HeldPorts<'b, S> {
     brand: Brand<'b>,
 }
 impl<'b, S> HeldPorts<'b, S> {
-    /// Refuses a name the schema does not declare for `Q`. Compile refuses a law on a route the declaration omits.
+    /// Refuses a name the schema does not declare for `Q`, and a boundary process the declaration does not supply.
+    /// Compile refuses a law on a route the declaration omits.
     pub fn route<Q: Substance>(&self, name: &'static str) -> Result<BoundaryRoute<'b, Q, S>, AdmissionError> {
         named_route(&self.names, name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_boundary_process_has_a_name_of_its_own() {
+        let mut names = super::processes::NAMES.to_vec();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), super::processes::NAMES.len());
     }
 }

@@ -292,6 +292,9 @@ Dissolved particles that pull water across a wall that holds them back. A space'
 **Receipt pool**:
 A named pool outside the body, or behind a held stand-in, that takes what crosses the boundary, so a boundary transfer still has two ends.
 
+**Boundary process**:
+A card's way across the body's boundary, such as insulin's secretion, the fecal exit of sodium or the urine drain. The contract states its card, species, direction and name, and the schema places it at a site, so only that card serves it.
+
 **Route family**:
 Every transfer of one kind the map implies: one per site of a class, such as plasma to interstitium at every capillary bed, or one per vascular edge. A system requests it whole through its scope, so the body owes a law for every one, and no law names a site.
 

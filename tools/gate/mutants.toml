@@ -442,8 +442,8 @@ test = "-p ng-contract --test held a_pool_no_law_moves_and_no_declaration_holds_
 [[mutant]]
 name = "outside-issued-once"
 path = "crates/ng-contract/src/scope/outside.rs"
-old = '''None => self.issue_outside::<S>(),'''
-new = '''None => Ok(FragmentBuilder::new()),'''
+old = '''None => (self.issue_outside::<S>()?, Vec::new()),'''
+new = '''None => (FragmentBuilder::new(), Vec::new()),'''
 test = "-p ng-contract --test scopes a_card_outside_the_slice_is_issued_once_held_or_built"
 
 [[mutant]]
@@ -477,9 +477,79 @@ test = "-p ng-contract --test scopes a_built_respiratory_card_defines_its_enclos
 [[mutant]]
 name = "handoff-keeps-the-builder"
 path = "crates/ng-contract/src/scope/outside.rs"
-old = '''Some(HeldScope { laws, .. }) => Ok(laws),'''
-new = '''Some(_) => self.issue_outside::<S>(),'''
+old = '''Some(HeldScope { laws, .. }) => (laws, self.supplied_by::<S>()),'''
+new = '''Some(_) => (self.issue_outside::<S>()?, self.supplied_by::<S>()),'''
 test = "-p ng-contract --test scopes handing_a_held_scope_to_its_cards_scope_moves_no_byte"
+
+[[mutant]]
+name = "process-owned-by-its-card"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.or(process)'''
+new = '''.or(None)'''
+test = "-p ng-contract --test scopes a_card_serves_its_own_boundary_processes_through_its_ports"
+
+[[mutant]]
+name = "process-of-another-card-supplied"
+path = "crates/ng-contract/src/scope.rs"
+old = '''known.owner.is_some_and(|card| card != S::CARD)'''
+new = '''known.owner.is_some_and(|_| false)'''
+test = "-p ng-contract --test scopes a_held_card_cannot_supply_another_cards_process"
+
+[[mutant]]
+name = "held-port-offers-declared-processes"
+path = "crates/ng-contract/src/scope.rs"
+old = '''known.owner.is_none() || supplies.contains(&known.name)'''
+new = '''true'''
+test = "-p ng-contract --test scopes a_held_stand_in_serves_its_own_process_only_when_its_declaration_supplies_it"
+
+[[mutant]]
+name = "boundary-port-offers-no-process"
+path = "crates/ng-contract/src/scope.rs"
+old = '''names: self.boundary_names(|known| known.owner.is_none()),'''
+new = '''names: self.boundary_names(|_| true),'''
+test = "-p ng-contract --test scopes the_boundary_scope_cannot_serve_a_cards_process"
+
+[[mutant]]
+name = "unscoped-process-names-its-card"
+path = "crates/ng-contract/src/compile.rs"
+old = '''None if owner == Boundary::CARD => unissued,'''
+new = '''None => unissued,'''
+test = "-p ng-contract --test scopes a_process_whose_card_has_no_scope_is_omitted_under_that_card"
+
+[[mutant]]
+name = "kept-port-leaves-held-routes"
+path = "crates/ng-contract/src/scope/outside.rs"
+old = '''.filter(|boundary| boundary.owner == Some(O::CARD) && !supplied.contains(&boundary.name))'''
+new = '''.filter(|boundary| boundary.owner == Some(O::CARD))'''
+test = "-p ng-contract --test scopes a_kept_cards_ports_leave_the_routes_its_stand_ins_supply"
+
+[[mutant]]
+name = "process-names-distinct"
+path = "crates/ng-contract/src/scope/processes.rs"
+old = '''Clearance<Insulin> = "insulin clearance"'''
+new = '''Clearance<Insulin> = "insulin secretion"'''
+test = "-p ng-contract --lib scope::tests::every_boundary_process_has_a_name_of_its_own"
+
+[[mutant]]
+name = "port-refuses-an-unplaced-process"
+path = "crates/ng-contract/src/scope.rs"
+old = '''if processes.contains(&P::NAME) {'''
+new = '''if true {'''
+test = "-p ng-contract --test scopes a_port_refuses_a_process_the_schema_does_not_place"
+
+[[mutant]]
+name = "process-card-sealed"
+path = "crates/ng-contract/src/scope.rs"
+old = '''if let Some(card) = owner {'''
+new = '''if let Some(card) = owner.filter(|_| false) {'''
+test = "-p ng-contract --test scopes the_card_a_process_names_enters_the_model_hash"
+
+[[mutant]]
+name = "process-endpoint-names-its-card"
+path = "crates/ng-contract/src/compile.rs"
+old = '''owner: boundary.owner.unwrap_or(Boundary::CARD),'''
+new = '''owner: Boundary::CARD,'''
+test = "-p ng-contract --test scopes a_process_at_a_pool_the_body_lacks_is_named_under_its_card"
 
 [[mutant]]
 name = "cargo-held-at-both-ends"

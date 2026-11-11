@@ -6,7 +6,7 @@ use super::{
 };
 use crate::{
     AdmissionError, BloodChemistry, Endocrine, FragmentBuilder, Gastrointestinal, Hematology, Hepatic,
-    Immune, Metabolism, Musculoskeletal, OutsideSlice, Respiratory,
+    Immune, Metabolism, Musculoskeletal, OutsideSlice, Owner, Respiratory,
 };
 
 macro_rules! outside {
@@ -18,9 +18,10 @@ macro_rules! outside {
                     &mut self,
                     held: Option<HeldScope<'b, $owner>>,
                 ) -> Result<$scope<'b>, AdmissionError> {
+                    let (laws, processes) = self.outside(held)?;
                     Ok($scope {
-                        laws: self.outside(held)?,
-                        ports: $ports::issued(),
+                        laws,
+                        ports: $ports::issued(processes),
                     })
                 }
             )*
@@ -58,10 +59,22 @@ impl<'b> Assembly<'b> {
     fn outside<S: OutsideSlice>(
         &mut self,
         held: Option<HeldScope<'b, S>>,
-    ) -> Result<FragmentBuilder<'b, S>, AdmissionError> {
-        match held {
-            None => self.issue_outside::<S>(),
-            Some(HeldScope { laws, .. }) => Ok(laws),
-        }
+    ) -> Result<(FragmentBuilder<'b, S>, Vec<&'static str>), AdmissionError> {
+        let (laws, supplied) = match held {
+            None => (self.issue_outside::<S>()?, Vec::new()),
+            Some(HeldScope { laws, .. }) => (laws, self.supplied_by::<S>()),
+        };
+        Ok((laws, self.processes_of::<S>(&supplied)))
+    }
+    fn supplied_by<S: Owner>(&self) -> Vec<&'static str> {
+        (self.held.iter())
+            .find(|card| card.card == S::CARD)
+            .map_or_else(Vec::new, |card| card.supplies.clone())
+    }
+    pub(super) fn processes_of<O: Owner>(&self, supplied: &[&'static str]) -> Vec<&'static str> {
+        (self.schema.boundaries.iter())
+            .filter(|boundary| boundary.owner == Some(O::CARD) && !supplied.contains(&boundary.name))
+            .map(|boundary| boundary.name)
+            .collect()
     }
 }

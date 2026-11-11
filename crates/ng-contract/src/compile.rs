@@ -142,10 +142,15 @@ fn check_fragments(
         .try_for_each(|fragment| check_names(fragment, schema, held))
 }
 
-fn route_owner(held: &[HeldCard], route: &'static str) -> &'static str {
+fn route_owner(schema: &Schema, held: &[HeldCard], route: &'static str) -> &'static str {
+    let process = (schema.boundaries.iter())
+        .find(|boundary| boundary.name == route)
+        .and_then(|boundary| boundary.owner);
     (held.iter())
         .find(|card| card.supplies.contains(&route))
-        .map_or(Boundary::CARD, |card| card.card)
+        .map(|card| card.card)
+        .or(process)
+        .unwrap_or(Boundary::CARD)
 }
 
 /// Whether a route's columns come from one flow row: a valve's always, and any fluid route's in a body that carries
@@ -193,7 +198,7 @@ fn check_names(fragment: &FragmentData, schema: &Schema, held: &[HeldCard]) -> R
         )
         .chain(
             (schema.boundaries.iter())
-                .filter(|boundary| route_owner(held, boundary.name) == fragment.owner)
+                .filter(|boundary| route_owner(schema, held, boundary.name) == fragment.owner)
                 .map(|boundary| boundary.name),
         )
         .chain(fragment.reactions.iter().map(|reaction| reaction.name))
@@ -231,7 +236,7 @@ fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
     {
         Some(boundary) => Err(CompileDefect::BoundaryEndpoint {
             law: LawName {
-                owner: Boundary::CARD,
+                owner: boundary.owner.unwrap_or(Boundary::CARD),
                 local: boundary.name,
             },
         }),
@@ -356,10 +361,17 @@ fn obligations<'f>(
     }
     let mut owed = Vec::new();
     for water in &schema.boundaries {
-        let owner = route_owner(held, water.name);
-        let fragment = (fragments.iter())
-            .find(|fragment| fragment.owner == owner)
-            .unwrap_or(unissued);
+        let owner = route_owner(schema, held, water.name);
+        let fragment = match (fragments.iter()).find(|fragment| fragment.owner == owner) {
+            Some(fragment) => fragment,
+            None if owner == Boundary::CARD => unissued,
+            None => {
+                let local = water.name;
+                return Err(CompileDefect::OmittedLaw {
+                    law: LawName { owner, local },
+                });
+            }
+        };
         owed.push(Owed::gather(
             fragment,
             water.name,
@@ -684,7 +696,7 @@ impl Rows {
         let rate = crate::quantity::dimension::<crate::Rate<crate::Water>>();
         for boundary in schema.boundaries.iter().filter(|boundary| boundary.drains) {
             let law = LawName {
-                owner: route_owner(held, boundary.name),
+                owner: route_owner(schema, held, boundary.name),
                 local: boundary.name,
             };
             slots.push((SlotKind::Defined, Slot::from(law), AdmissibleSet::Finite, &rate));
@@ -1411,7 +1423,7 @@ fn fluid_columns(placement: &mut Placement, places: &Places) -> Result<(), Compi
     }
     for boundary in schema.boundaries.iter().filter(|boundary| boundary.drains) {
         let law = LawName {
-            owner: route_owner(held, boundary.name),
+            owner: route_owner(schema, held, boundary.name),
             local: boundary.name,
         };
         let flow = Address::Unknown(UnknownId::at(rows.declared(law, Context::Body)));
@@ -1784,7 +1796,7 @@ fn addresses(
                 unknown(rows.amount(pool).ok_or(left_out(law, pool))?)
             }
             Source::Drive(route) => {
-                if route_owner(held, route) != law.owner {
+                if route_owner(schema, held, route) != law.owner {
                     return Err(CompileDefect::DriveOfAnotherRoute { law, route });
                 }
                 Address::Boundary(route)

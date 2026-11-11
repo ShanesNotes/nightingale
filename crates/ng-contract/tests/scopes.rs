@@ -52,7 +52,7 @@ fn enclosed(card: &'static str, fluid: bool) -> Result<Schema, AdmissionError> {
     Ok(schema)
 }
 
-fn organs(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
+fn circulation(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let class = slow()?;
     let (mut cv, ports) = body.cardiovascular()?.parts();
     let route = ports.circulation(&mut cv);
@@ -62,6 +62,12 @@ fn organs(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     });
     cv.transfer_along(&route, still);
     body.add(cv.finish());
+    Ok(())
+}
+
+fn organs(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
+    circulation(body)?;
+    let class = slow()?;
     let (mut fl, ports) = body.fluids()?.parts();
     let route = ports.starling(&mut fl);
     let kf = fl.site_parameter::<CapillaryBed, Conductance<Water>>(
@@ -92,6 +98,19 @@ fn pressure<'b, O: Owner>(
         k.finish(value, laws.every_mode(), class)
     });
     laws.define_at(output, value);
+    Ok(())
+}
+
+fn serve<'b, O: Owner, Q: Substance>(
+    laws: &mut FragmentBuilder<'b, O>,
+    route: &Pair<'b, O, Q>,
+) -> Result<(), AdmissionError> {
+    let class = slow()?;
+    let rate = laws.kernel(|mut k| {
+        let zero = k.zero::<Rate<Q>>();
+        k.finish(zero, laws.every_mode(), class)
+    });
+    laws.transfer(Transfer::new(route, rate));
     Ok(())
 }
 
@@ -241,25 +260,26 @@ fn a_card_that_keeps_a_declaration_holds_its_enclosures_fluid_while_its_crate_de
     Ok(())
 }
 
-fn gut(handed: bool) -> Result<CompiledBody, AdmissionError> {
+fn gut(handed: bool, feces: bool) -> Result<CompiledBody, AdmissionError> {
     let mut schema = enclosed(Gastrointestinal::CARD, true)?;
     let vessel = site::<VesselSegment>("vessel");
     schema.boundary::<Water>("gut water", BoundaryDirection::IntoBody, vessel, Space::Lumen)?;
+    if feces {
+        schema.process::<Feces<Water>>(vessel, Space::Lumen)?;
+    }
     assemble(schema, |mut body| {
         organs(&mut body)?;
         let declaration = HeldDeclaration::<Gastrointestinal>::new(vec!["gut water"], vec![], "a bench");
         let mut gi = body.hold(declaration)?;
         let (laws, held) = gi.stand_ins();
         pressure(laws, &held.enclosure_pressure)?;
-        let route = held.route::<Water>("gut water")?.route;
-        let class = slow()?;
-        let rate = laws.kernel(|mut k| {
-            let zero = k.zero::<Rate<Water>>();
-            k.finish(zero, laws.every_mode(), class)
-        });
-        laws.transfer(Transfer::new(&route, rate));
+        serve(laws, &held.route::<Water>("gut water")?.route)?;
         let laws = if handed {
-            body.gastrointestinal(Some(gi))?.parts().0
+            let (mut laws, ports) = body.gastrointestinal(Some(gi))?.parts();
+            if feces {
+                serve(&mut laws, &ports.boundary::<Feces<Water>>()?.route)?;
+            }
+            laws
         } else {
             gi.parts().0
         };
@@ -270,8 +290,274 @@ fn gut(handed: bool) -> Result<CompiledBody, AdmissionError> {
 
 #[test]
 fn handing_a_held_scope_to_its_cards_scope_moves_no_byte() -> Result<(), AdmissionError> {
-    let (kept, handed) = (gut(false)?, gut(true)?);
+    let (kept, handed) = (gut(false, false)?, gut(true, false)?);
     assert_eq!(kept.model_hash(), handed.model_hash());
     assert_eq!(kept.conserved_basis().digest(), handed.conserved_basis().digest());
+    Ok(())
+}
+
+fn hormones(
+    place: impl FnOnce(&mut Schema, SiteId) -> Result<(), AdmissionError>,
+) -> Result<Schema, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let veins = map.site::<VesselSegment>("veins", at()?);
+    let bed = map.site::<CapillaryBed>("bed", at()?);
+    for child in [veins.id(), bed.id()] {
+        map.contain(root.id(), child);
+    }
+    for (from, to) in [(veins.id(), bed.id()), (bed.id(), veins.id())] {
+        map.connect(Network::Vascular, from, to);
+    }
+    let mut schema = Schema::new(map.finish()?)?;
+    for space in [Space::Interstitium, Space::Cells] {
+        schema.leave_out(space, "a bench of blood alone");
+    }
+    schema.carry::<Insulin, Blood>(Space::Plasma);
+    schema.carry::<Insulin, Blood>(Space::Lumen);
+    place(&mut schema, veins.id())?;
+    Ok(schema)
+}
+
+fn insulin_both(schema: &mut Schema, veins: SiteId) -> Result<(), AdmissionError> {
+    schema.process::<Secretion<Insulin>>(veins, Space::Lumen)?;
+    schema.process::<Clearance<Insulin>>(veins, Space::Lumen)
+}
+
+fn held_routes(body: &CompiledBody) -> Vec<(&'static str, &'static str)> {
+    (body.conserved_basis().coverage().held_routes().iter())
+        .map(|route| (route.card(), route.name()))
+        .collect()
+}
+
+#[test]
+fn a_card_serves_its_own_boundary_processes_through_its_ports() -> Result<(), AdmissionError> {
+    let body = assemble(hormones(insulin_both)?, |mut body| {
+        circulation(&mut body)?;
+        let (mut en, ports) = body.endocrine(None)?.parts();
+        serve(&mut en, &ports.boundary::<Secretion<Insulin>>()?.route)?;
+        serve(&mut en, &ports.boundary::<Clearance<Insulin>>()?.route)?;
+        body.add(en.finish());
+        body.compile()
+    })?;
+    let served: Vec<(LawName, Option<&str>)> = (body.columns().iter())
+        .filter(|column| column.origin().owner == "EN")
+        .map(|column| {
+            (
+                column.origin(),
+                column.receipt().map(|receipt| receipt.boundary()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        served,
+        [
+            (law("EN", "insulin clearance"), Some("insulin clearance")),
+            (law("EN", "insulin secretion"), Some("insulin secretion")),
+        ]
+    );
+    assert!(held_routes(&body).is_empty());
+    Ok(())
+}
+
+#[test]
+fn a_port_refuses_a_process_the_schema_does_not_place() -> Result<(), AdmissionError> {
+    let found = assemble(hormones(insulin_both)?, |mut body| {
+        circulation(&mut body)?;
+        let (en, ports) = body.endocrine(None)?.parts();
+        ports.boundary::<Secretion<Glucagon>>()?;
+        body.add(en.finish());
+        body.compile()
+    });
+    assert_eq!(
+        found.map(|body| body.model_hash()),
+        Err(AdmissionError::UnknownBoundary {
+            name: "glucagon secretion"
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn a_held_card_cannot_supply_another_cards_process() -> Result<(), AdmissionError> {
+    let found = assemble(hormones(insulin_both)?, |mut body| {
+        body.hold(HeldDeclaration::<Hepatic>::new(
+            vec!["insulin secretion"],
+            vec![],
+            "a bench",
+        ))?;
+        body.compile()
+    });
+    assert_eq!(
+        found.map(|body| body.model_hash()),
+        Err(AdmissionError::BoundaryNamedTwice {
+            name: "insulin secretion"
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn the_boundary_scope_cannot_serve_a_cards_process() -> Result<(), AdmissionError> {
+    let found = assemble(hormones(insulin_both)?, |mut body| {
+        body.boundary()?.parts().1.route::<Insulin>("insulin secretion")?;
+        body.compile()
+    });
+    assert_eq!(
+        found.map(|body| body.model_hash()),
+        Err(AdmissionError::UnknownBoundary {
+            name: "insulin secretion"
+        })
+    );
+    Ok(())
+}
+
+fn insulin_held(supplies: Vec<&'static str>) -> Result<CompiledBody, AdmissionError> {
+    assemble(hormones(insulin_both)?, |mut body| {
+        circulation(&mut body)?;
+        let declaration = HeldDeclaration::<Endocrine>::new(supplies, vec![], "a bench");
+        let (mut en, ports) = body.hold(declaration)?.parts();
+        for name in ["insulin secretion", "insulin clearance"] {
+            serve(&mut en, &ports.route::<Insulin>(name)?.route)?;
+        }
+        body.add(en.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn a_held_stand_in_serves_its_own_process_only_when_its_declaration_supplies_it() -> Result<(), AdmissionError>
+{
+    assert_eq!(
+        insulin_held(vec![]).map(|body| body.model_hash()),
+        Err(AdmissionError::UnknownBoundary {
+            name: "insulin secretion"
+        })
+    );
+    let body = insulin_held(vec!["insulin secretion", "insulin clearance"])?;
+    assert_eq!(
+        held_routes(&body),
+        [("EN", "insulin clearance"), ("EN", "insulin secretion")]
+    );
+    Ok(())
+}
+
+#[test]
+fn a_process_whose_card_has_no_scope_is_omitted_under_that_card() -> Result<(), AdmissionError> {
+    let found = assemble(hormones(insulin_both)?, |mut body| {
+        circulation(&mut body)?;
+        body.compile()
+    });
+    assert_eq!(
+        found.map(|body| body.model_hash()),
+        Err(defect(CompileDefect::OmittedLaw {
+            law: law("EN", "insulin clearance")
+        }))
+    );
+    Ok(())
+}
+
+#[test]
+fn a_kept_cards_ports_leave_the_routes_its_stand_ins_supply() -> Result<(), AdmissionError> {
+    let body = assemble(hormones(insulin_both)?, |mut body| {
+        circulation(&mut body)?;
+        let declaration = HeldDeclaration::<Endocrine>::new(vec!["insulin secretion"], vec![], "a bench");
+        let mut en = body.hold(declaration)?;
+        let (laws, held) = en.stand_ins();
+        serve(laws, &held.route::<Insulin>("insulin secretion")?.route)?;
+        let (mut laws, ports) = body.endocrine(Some(en))?.parts();
+        assert_eq!(
+            ports.boundary::<Secretion<Insulin>>().err(),
+            Some(AdmissionError::UnknownBoundary {
+                name: "insulin secretion"
+            })
+        );
+        serve(&mut laws, &ports.boundary::<Clearance<Insulin>>()?.route)?;
+        body.add(laws.finish());
+        body.compile()
+    })?;
+    assert_eq!(held_routes(&body), [("EN", "insulin secretion")]);
+    Ok(())
+}
+
+fn secreted(typed: bool) -> Result<CompiledBody, AdmissionError> {
+    let place = |schema: &mut Schema, veins: SiteId| {
+        if typed {
+            schema.process::<Secretion<Insulin>>(veins, Space::Lumen)
+        } else {
+            schema.boundary::<Insulin>(
+                "insulin secretion",
+                BoundaryDirection::IntoBody,
+                veins,
+                Space::Lumen,
+            )
+        }
+    };
+    assemble(hormones(place)?, |mut body| {
+        circulation(&mut body)?;
+        let declaration = HeldDeclaration::<Endocrine>::new(vec!["insulin secretion"], vec![], "a bench");
+        let (mut en, held) = body.hold(declaration)?.parts();
+        serve(&mut en, &held.route::<Insulin>("insulin secretion")?.route)?;
+        body.add(en.finish());
+        body.compile()
+    })
+}
+
+#[test]
+fn the_card_a_process_names_enters_the_model_hash() -> Result<(), AdmissionError> {
+    assert_ne!(secreted(true)?.model_hash(), secreted(false)?.model_hash());
+    Ok(())
+}
+
+#[test]
+fn a_process_at_a_pool_the_body_lacks_is_named_under_its_card() -> Result<(), AdmissionError> {
+    let lacking =
+        |schema: &mut Schema, veins: SiteId| schema.process::<Secretion<Insulin>>(veins, Space::Gas);
+    let found = assemble(hormones(lacking)?, |mut body| {
+        circulation(&mut body)?;
+        body.compile()
+    });
+    assert_eq!(
+        found.map(|body| body.model_hash()),
+        Err(defect(CompileDefect::BoundaryEndpoint {
+            law: law("EN", "insulin secretion")
+        }))
+    );
+    Ok(())
+}
+
+#[test]
+fn the_renal_card_serves_the_urine_drain_placed_as_its_process() -> Result<(), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let bladder = map.site::<VesselSegment>("bladder", at()?);
+    map.contain(root.id(), bladder.id());
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.process::<Urine>(bladder.id(), Space::Lumen)?;
+    let body = assemble(schema, |mut body| {
+        let (mut rn, ports) = body.renal()?.parts();
+        serve(&mut rn, &ports.boundary::<Urine>()?.route)?;
+        body.add(rn.finish());
+        body.compile()
+    })?;
+    let urine = RowKind::Algebraic(Slot {
+        law: law("RN", "urine"),
+        at: Context::Body,
+    });
+    assert!(body.rows().iter().any(|row| row.kind() == urine));
+    Ok(())
+}
+
+#[test]
+fn a_kept_cards_built_process_is_no_held_support() -> Result<(), AdmissionError> {
+    let body = gut(true, true)?;
+    assert_eq!(held_routes(&body), [("GI", "gut water")]);
+    let feces = (body.columns().iter()).find(|column| column.origin() == law("GI", "feces water"));
+    assert_eq!(
+        feces
+            .and_then(|column| column.receipt())
+            .map(|receipt| receipt.boundary()),
+        Some("feces water")
+    );
     Ok(())
 }
