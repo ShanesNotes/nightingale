@@ -187,6 +187,27 @@
 //!     day_checks(body, core, spec)
 //! }
 //! ```
+//! A healthy-range report and a return report come only from the checks that read the run.
+//! ```compile_fail,E0451
+//! use ng_contract::Digest;
+//! use ng_validate::*;
+//! fn forged(run: Digest, results: Vec<RangeResult>, gaps: Vec<RangeGap>) -> RangeReport {
+//!     RangeReport { run, seal: run, set: run, lens: run, day: run, results, gaps }
+//! }
+//! ```
+//! ```compile_fail,E0451
+//! use ng_contract::{Digest, PacketHash};
+//! use ng_validate::*;
+//! fn forged(run: Digest, packet: PacketHash, results: Vec<AnchorReturn>, gaps: Vec<ReturnGap>) -> ReturnReport {
+//!     ReturnReport { run, seal: run, set: run, lens: run, packet, results, gaps }
+//! }
+//! ```
+//! ```
+//! use ng_validate::*;
+//! fn read(checks: ReadingChecks<'_>) -> (RangeReport, ReturnReport) {
+//!     checks.finish()
+//! }
+//! ```
 //! A score comes only from `Arena::score`, so every part it holds came from a gate the arena ran.
 //! ```compile_fail,E0451
 //! use ng_contract::DeclaredResolution;
@@ -238,6 +259,7 @@ mod burning;
 mod certificate;
 mod day;
 mod fixture;
+mod healthy;
 mod initialize;
 mod reference;
 mod replay;
@@ -260,6 +282,10 @@ pub use day::{
     DayCheck, DayFailure, DayPlan, DayQuantity, DayReport, DaySpec, Miss, Unavailable, Verdict, day_checks,
 };
 pub use fixture::{ChanceCase, Delivery, TwoReservoirs, admit_fixture, admit_seeded};
+pub use healthy::{
+    AnchorReturn, BareLens, CheckVerdict, DayActivities, RangeFailure, RangeGap, RangeReport, RangeResult,
+    ReadingCheckError, ReadingChecks, ReturnGap, ReturnReport,
+};
 pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved};
 pub use reference::ReferenceIntegrator;
 pub use replay::{

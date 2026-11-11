@@ -670,6 +670,20 @@ _Avoid_: health check, normal-range check
 The check that the patient meets the anchors again, within the change their within-subject variation allows, at the same time of day on each later day of the run, with nothing reimposed since admission. With the certificate and the healthy-range check, it decides the first milestone (record 0004).
 _Avoid_: re-anchoring, daily reset
 
+**Activity**:
+What the patient is doing that a source shows shifts a reading, such as asleep or seated after a meal. A run's day is a series of activities, each from its start until the next, and a change is the instant one gives way to the next. The healthy-range check matches each window to the activity it lies in, and a window across a change, or in the time the change's shift lasts, takes the change's own range (record 0004).
+_Avoid_: state, phase, mode
+
+**Bare lens**:
+A lens's readings with no window, delay or measurement error: each grid instant's value, or each grid period's time mean for a reading that integrates. The healthy-range check and the return check read a run through it and slide their own windows (record 0004).
+
+**Whole period**:
+The whole span of one activity, such as the night, when a healthy range's study averaged over it. The healthy-range check judges each whole period the run holds and counts the ones the run's start or end cuts.
+
+**Coverage gap**:
+Something a check could not judge: a reading, an activity or a change with no healthy range, an anchor with no within-subject variation or no bare reading, a morning the run did not reach, a range whose activity or change the run holds but which judged no whole window or whole period, a reading that gave no value, or a check that judged nothing at all. Each is named and blocks the verdict, and none leaves a reading unchecked silently (record 0004). It is not a missing reading in the chart.
+_Avoid_: skipped, exempt
+
 **Accuracy gate**:
 The arena check that runs a solver core on manufactured cases with known answers and against the reference integrator, because a step can close every ledger and still be wrong.
 
