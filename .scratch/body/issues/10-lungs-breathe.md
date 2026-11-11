@@ -17,3 +17,5 @@ Breathing is tidal unless ticket 26's budget forbids it. Prototype tidal breathi
 - [ ] Cost: the firings and landings a breath adds, unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** more than one alveolar unit, airway resistance by generation, hypoxic vasoconstriction, and lung water (arrow 110).
+
+From [research 12](../../research/issues/12-law-forms-heat.md): Kingma's supplement, now on hand, gives respiratory heat at rest, evaporative and convective together, as a fixed 8% of the metabolic rate (its Eq A2). Research 11 had no form for the dry heat of warming inspired air.

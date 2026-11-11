@@ -15,6 +15,7 @@ Blocked by: 02, 08, `.scratch/research/issues/11-law-forms-gas-loop.md`
 - [ ] Run: the slice's posture checks once with the heart's work paid at the muscle bed and no coronary bed. The coronary bed stays only if they fail without it (record 0002)
 - [ ] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved
 - [ ] The body admits over a cycle with its reactions running, which [ticket 02](02-reactions.md) left unshown
+- [ ] From [research 12](../../research/issues/12-law-forms-heat.md): every bed's heat, the skin bed's included, reaches the core heat store, which replaces the skin heat store for the skin bed above. A reaction's heat lands in its bed's own thermal pool, so each bed needs a transfer to the core store, first order in that pool at a declared speed (a model default)
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** which fuel a bed burns (ticket 16), temperature's effect on rate, and heat exchange with the room (ticket 12).

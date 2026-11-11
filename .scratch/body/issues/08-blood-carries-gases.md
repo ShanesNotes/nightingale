@@ -15,3 +15,5 @@ Blocked by: 06, 26, 29, `.scratch/research/issues/11-law-forms-gas-loop.md`
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against [ticket 26](26-cost-budget.md)'s budget
 
 **Non-goals:** the making and excretion of the lumped anion and the diet's organic anion (ticket 18), abnormal hemoglobins, and red cell turnover (ticket 21).
+
+From [research 14](../../research/issues/14-law-forms-volume-and-acid.md): the ticket that states acidity, this one under the default, writes hemoglobin's charge in blood, the last row of research 14's acid balance. Whether compile accepts a site field that reads its own row at its own site was not checked, and if it does not, `[H+]` and bicarbonate become two fields that read each other.
