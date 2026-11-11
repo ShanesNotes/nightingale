@@ -24,8 +24,6 @@ pub trait Visit {
     fn visit<Q: Substance>(self) -> Self::Output;
 }
 
-/// Each row is the only place a species is stated: its name, its makeup, whether water carries it, the kinds of space
-/// that may hold it, its charge after speciation, and whether it counts in osmolality.
 macro_rules! species {
     (@marker [$($attr:tt)*] $name:ident fixed()) => {
         $($attr)*
@@ -42,7 +40,7 @@ macro_rules! species {
         #[doc = "After speciation its charge follows its space's acidity."]
         pub enum $name {}
     };
-    (@marker [$($attr:tt)*] $name:ident none()) => {
+    (@marker [$($attr:tt)*] $name:ident uncharged()) => {
         $($attr)*
         pub enum $name {}
     };
@@ -79,10 +77,10 @@ macro_rules! species {
     };
     (@reactant carried $name:ident) => {};
     (@reactant energy $name:ident) => {};
-    (@carried water) => {
+    (@borne water_borne) => {
         true
     };
-    (@carried still) => {
+    (@borne not_water_borne) => {
         false
     };
     (@spaces watery $space:ident) => {
@@ -116,8 +114,8 @@ macro_rules! species {
         species!(@sum Charge $name);
     };
     (@charged weak $name:ident) => {};
-    (@charged none $name:ident) => {};
-    (@osmole osmole $name:ident) => {
+    (@charged uncharged $name:ident) => {};
+    (@osmole osmotic $name:ident) => {
         species!(@sum Osmoles $name);
     };
     (@osmole inert $name:ident) => {};
@@ -164,8 +162,6 @@ macro_rules! species {
                     $(Species::$name => species!(@makeup $kind($($made)*)),)*
                 }
             }
-            /// The names of its per-species routes and outputs: reclaim, release, reuptake, binding, effect and
-            /// exchange.
             pub(crate) const fn names(self) -> [&'static str; 6] {
                 match self {
                     $(Species::$name => [
@@ -183,13 +179,11 @@ macro_rules! species {
                     $(Species::$name => String::from($text),)*
                 }
             }
-            /// Whether water carries it, so a fluid route moves it as a share of its flow.
-            pub(crate) const fn carried(self) -> bool {
+            pub(crate) const fn water_borne(self) -> bool {
                 match self {
-                    $(Species::$name => species!(@carried $carry),)*
+                    $(Species::$name => species!(@borne $carry),)*
                 }
             }
-            /// Whether a space of this kind may hold it.
             pub(crate) const fn may_hold(self, space: Space) -> bool {
                 match self {
                     $(Species::$name => $(species!(@spaces $kinds space))||+,)*
@@ -207,64 +201,64 @@ macro_rules! species {
 
 species! {
     /// Water, whose amount is in the canonical amount unit; its volume derives from it. In a gas space it is vapor.
-    Water = "water" => atoms(H 2, O 1), water, [watery, gas], none(), inert;
-    Sodium = "sodium" => carried(1), water, [watery], fixed(), osmole;
-    Potassium = "potassium" => carried(1), water, [watery], fixed(), osmole;
-    Chloride = "chloride" => carried(-1), water, [watery], fixed(), osmole;
-    Albumin = "albumin" => carried(0), water, [outside], weak(), inert;
-    Vasopressin = "vasopressin" => carried(0), water, [outside, bound], none(), inert;
-    Norepinephrine = "norepinephrine" => carried(0), water, [synapse, outside], none(), inert;
-    Acetylcholine = "acetylcholine" => carried(0), water, [synapse, outside], none(), inert;
-    Energy = "energy" => energy(), still, [stores], none(), inert;
-    Oxygen = "oxygen" => atoms(O 2), water, [watery, gas], none(), inert;
+    Water = "water" => atoms(H 2, O 1), water_borne, [watery, gas], uncharged(), inert;
+    Sodium = "sodium" => carried(1), water_borne, [watery], fixed(), osmotic;
+    Potassium = "potassium" => carried(1), water_borne, [watery], fixed(), osmotic;
+    Chloride = "chloride" => carried(-1), water_borne, [watery], fixed(), osmotic;
+    Albumin = "albumin" => carried(0), water_borne, [outside], weak(), inert;
+    Vasopressin = "vasopressin" => carried(0), water_borne, [outside, bound], uncharged(), inert;
+    Norepinephrine = "norepinephrine" => carried(0), water_borne, [synapse, outside], uncharged(), inert;
+    Acetylcholine = "acetylcholine" => carried(0), water_borne, [synapse, outside], uncharged(), inert;
+    Energy = "energy" => energy(), not_water_borne, [stores], uncharged(), inert;
+    Oxygen = "oxygen" => atoms(O 2), water_borne, [watery, gas], uncharged(), inert;
     /// Total carbon dioxide: dissolved, bicarbonate and carbamino, one moiety.
-    CarbonDioxide = "carbon dioxide" => atoms(C 1, O 2), water, [watery, gas], weak(), osmole;
-    Glucose = "glucose" => fuel(C 6, H 12, O 6), water, [watery], none(), osmole;
-    NitrogenGas = "nitrogen gas" => carried(0), still, [gas], none(), inert;
+    CarbonDioxide = "carbon dioxide" => atoms(C 1, O 2), water_borne, [watery, gas], weak(), osmotic;
+    Glucose = "glucose" => fuel(C 6, H 12, O 6), water_borne, [watery], uncharged(), osmotic;
+    NitrogenGas = "nitrogen gas" => carried(0), not_water_borne, [gas], uncharged(), inert;
     /// One glucosyl residue stands for a unit of glycogen.
-    Glycogen = "glycogen" => fuel(C 6, H 10, O 5), still, [cells], none(), inert;
+    Glycogen = "glycogen" => fuel(C 6, H 10, O 5), not_water_borne, [cells], uncharged(), inert;
     /// Tripalmitin stands for every triglyceride.
-    Triglyceride = "triglyceride" => fuel(C 51, H 98, O 6), water, [watery], none(), inert;
+    Triglyceride = "triglyceride" => fuel(C 51, H 98, O 6), water_borne, [watery], uncharged(), inert;
     /// Palmitic acid stands for every fatty acid.
-    FattyAcids = "fatty acids" => fuel(C 16, H 32, O 2), water, [watery], none(), inert;
-    Glycerol = "glycerol" => fuel(C 3, H 8, O 3), water, [watery], none(), osmole;
+    FattyAcids = "fatty acids" => fuel(C 16, H 32, O 2), water_borne, [watery], uncharged(), inert;
+    Glycerol = "glycerol" => fuel(C 3, H 8, O 3), water_borne, [watery], uncharged(), osmotic;
     /// Alanine stands for every amino acid.
-    AminoAcids = "amino acids" => fuel(C 3, H 7, N 1, O 2), water, [watery], none(), osmole;
+    AminoAcids = "amino acids" => fuel(C 3, H 7, N 1, O 2), water_borne, [watery], uncharged(), osmotic;
     /// An alanine residue, the amino acid less a water, stands for a unit of body protein.
-    BodyProtein = "body protein" => fuel(C 3, H 5, N 1, O 1), still, [cells], none(), inert;
+    BodyProtein = "body protein" => fuel(C 3, H 5, N 1, O 1), not_water_borne, [cells], uncharged(), inert;
     /// Lactic acid's atoms stand for lactate.
-    Lactate = "lactate" => fuel(C 3, H 6, O 3), water, [watery], strong(-1), osmole;
+    Lactate = "lactate" => fuel(C 3, H 6, O 3), water_borne, [watery], strong(-1), osmotic;
     /// Acetoacetic acid stands for every ketone.
-    Ketones = "ketones" => fuel(C 4, H 6, O 3), water, [watery], strong(-1), osmole;
-    Urea = "urea" => fuel(C 1, H 4, N 2, O 1), water, [watery], none(), osmole;
+    Ketones = "ketones" => fuel(C 4, H 6, O 3), water_borne, [watery], strong(-1), osmotic;
+    Urea = "urea" => fuel(C 1, H 4, N 2, O 1), water_borne, [watery], uncharged(), osmotic;
     /// Ammonia's atoms, its uncharged form, stand for ammonium.
-    Ammonium = "ammonium" => fuel(N 1, H 3), water, [watery], strong(1), osmole;
-    Creatinine = "creatinine" => fuel(C 4, H 7, N 3, O 1), water, [watery], none(), osmole;
+    Ammonium = "ammonium" => fuel(N 1, H 3), water_borne, [watery], strong(1), osmotic;
+    Creatinine = "creatinine" => fuel(C 4, H 7, N 3, O 1), water_borne, [watery], uncharged(), osmotic;
     /// The strong anion the diet's protein sulfur leaves. A synthesis route makes it, never a reaction.
-    FixedAcid = "fixed acid" => carried(0), water, [watery], strong(-1), osmole;
+    FixedAcid = "fixed acid" => carried(0), water_borne, [watery], strong(-1), osmotic;
     /// Acetic acid stands for the diet's organic anions: one unit is one equivalent of base.
-    DietBase = "diet base" => fuel(C 2, H 4, O 2), water, [watery], strong(-1), osmole;
+    DietBase = "diet base" => fuel(C 2, H 4, O 2), water_borne, [watery], strong(-1), osmotic;
     /// The cells' own anions, which cross no membrane.
-    CellAnion = "cell anion" => carried(-1), still, [cells], fixed(), osmole;
-    Calcium = "calcium" => carried(2), water, [watery], fixed(), osmole;
-    Magnesium = "magnesium" => carried(2), water, [watery], fixed(), osmole;
-    Phosphate = "phosphate" => carried(0), water, [watery], weak(), osmole;
-    Hemoglobin = "hemoglobin" => carried(0), water, [blood], weak(), inert;
-    Iron = "iron" => carried(0), water, [watery], none(), inert;
-    Insulin = "insulin" => carried(0), water, [outside, bound], none(), inert;
-    Glucagon = "glucagon" => carried(0), water, [outside, bound], none(), inert;
-    Renin = "renin" => carried(0), water, [blood], none(), inert;
-    AngiotensinII = "angiotensin II" => carried(0), water, [outside, bound], none(), inert;
-    Aldosterone = "aldosterone" => carried(0), water, [outside, bound], none(), inert;
-    NatriureticPeptide = "natriuretic peptide" => carried(0), water, [outside, bound], none(), inert;
-    ParathyroidHormone = "parathyroid hormone" => carried(0), water, [outside, bound], none(), inert;
-    Cortisol = "cortisol" => carried(0), water, [outside, bound], none(), inert;
+    CellAnion = "cell anion" => carried(-1), not_water_borne, [cells], fixed(), osmotic;
+    Calcium = "calcium" => carried(2), water_borne, [watery], fixed(), osmotic;
+    Magnesium = "magnesium" => carried(2), water_borne, [watery], fixed(), osmotic;
+    Phosphate = "phosphate" => carried(0), water_borne, [watery], weak(), osmotic;
+    Hemoglobin = "hemoglobin" => carried(0), water_borne, [blood], weak(), inert;
+    Iron = "iron" => carried(0), water_borne, [watery], uncharged(), inert;
+    Insulin = "insulin" => carried(0), water_borne, [outside, bound], uncharged(), inert;
+    Glucagon = "glucagon" => carried(0), water_borne, [outside, bound], uncharged(), inert;
+    Renin = "renin" => carried(0), water_borne, [blood], uncharged(), inert;
+    AngiotensinII = "angiotensin II" => carried(0), water_borne, [outside, bound], uncharged(), inert;
+    Aldosterone = "aldosterone" => carried(0), water_borne, [outside, bound], uncharged(), inert;
+    NatriureticPeptide = "natriuretic peptide" => carried(0), water_borne, [outside, bound], uncharged(), inert;
+    ParathyroidHormone = "parathyroid hormone" => carried(0), water_borne, [outside, bound], uncharged(), inert;
+    Cortisol = "cortisol" => carried(0), water_borne, [outside, bound], uncharged(), inert;
 }
 
 const CARRIED_COUNT: usize = {
     let (mut count, mut at) = (0, 0);
     while at < Species::ALL.len() {
-        if Species::ALL[at].carried() {
+        if Species::ALL[at].water_borne() {
             count += 1;
         }
         at += 1;
@@ -273,12 +267,11 @@ const CARRIED_COUNT: usize = {
 };
 
 impl Species {
-    /// What water carries, water first, in the table's order, which is the order of a fluid route's carried columns.
     pub(crate) const CARRIED: [Species; CARRIED_COUNT] = {
         let mut carried = [Species::Water; CARRIED_COUNT];
         let (mut at, mut next) = (0, 0);
         while at < Species::ALL.len() {
-            if Species::ALL[at].carried() {
+            if Species::ALL[at].water_borne() {
                 carried[next] = Species::ALL[at];
                 next += 1;
             }
@@ -287,7 +280,6 @@ impl Species {
         carried
     };
 
-    /// Charge in units of the amount: a carried species' fixed charge, and none for one that states atoms.
     pub(crate) const fn charge(self) -> i64 {
         match self.makeup() {
             Makeup::Carried { charge } => charge,
@@ -302,10 +294,8 @@ mod tests {
 
     const PREFIXES: [&str; 6] = ["reclaim", "release", "reuptake", "binding", "effect", "exchange"];
 
-    /// A seal writes a species' discriminant and its names, and a fluid route's columns follow `CARRIED`, so the slice's
-    /// model hash holds all three.
     #[test]
-    fn the_first_twelve_species_keep_their_places_and_names() {
+    fn the_first_twelve_species_keep_what_the_slice_model_hash_reads() {
         let pinned = [
             (Species::Water, "water"),
             (Species::Sodium, "sodium"),
@@ -341,8 +331,6 @@ mod tests {
         assert_eq!(Species::CARRIED[..carried.len()], carried);
     }
 
-    /// The basis's charge combination weighs each amount by its species' fixed charge, so these six ions are the only
-    /// terms it can hold.
     #[test]
     fn only_carried_species_hold_a_fixed_charge() {
         let charged: Vec<(Species, i64)> = (Species::ALL.into_iter())

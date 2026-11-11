@@ -29,15 +29,12 @@ impl Book {
     }
 }
 
-/// A conserved quantity a reaction's counts balance: an element's atoms, or energy. No reactant holds a fixed charge,
-/// so no reaction can leave charge open.
 #[derive(Clone, Copy)]
 pub(crate) enum Balanced {
     Element(Element),
     Energy,
 }
 impl Balanced {
-    /// Each element, then energy: the order in which a reaction's first open quantity is named.
     pub(crate) fn all() -> impl Iterator<Item = Balanced> {
         Element::ALL
             .into_iter()

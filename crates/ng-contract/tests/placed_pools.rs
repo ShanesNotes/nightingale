@@ -60,8 +60,6 @@ fn a_species_placed_pool_by_pool_travels_on_the_route_too() {
     );
 }
 
-/// Energy lives only in an elastic or thermal store, so the class-wide control with energy in one lumen is refused at
-/// that pool.
 #[test]
 fn a_species_in_a_space_it_may_not_hold_is_refused() {
     let misplaced = |schema: &mut Schema, sites: [SiteId; 2]| -> Result<(), AdmissionError> {

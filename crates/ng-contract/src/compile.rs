@@ -239,7 +239,6 @@ fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
     }
 }
 
-/// The first pool, in key order, whose species a space of that kind may not hold.
 fn check_places(schema: &Schema) -> Result<(), CompileDefect> {
     match (schema.pools()).find(|&(_, space, species)| !species.may_hold(space)) {
         Some((site, space, species)) => Err(CompileDefect::OutOfPlace { site, space, species }),
