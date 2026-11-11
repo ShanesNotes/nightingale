@@ -911,3 +911,33 @@ path = "crates/ng-contract/src/scheme.rs"
 old = '''stage(whole, part(second), Some(0), second, 1),'''
 new = '''stage(whole, part(second), None, second, 1),'''
 test = "-p ng-contract --lib scheme::tests::the_halved_set_is_the_doubled_sets_two_halves"
+
+[[mutant]]
+name = "energy-drift-falls-back-to-the-common-limit"
+path = "crates/ng-validate/src/slice.rs"
+old = '''Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_ENERGY_DRIFT),'''
+new = '''Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_DRIFT),'''
+test = "-p ng-validate --test arena_certificate energy_drifts_up_to_4e5_over_the_arenas_day_and_no_further"
+
+[[mutant]]
+name = "every-quantity-takes-energys-drift-limit"
+path = "crates/ng-validate/src/slice.rs"
+old = '''
+        Book::Of(species) => species.visit(Limits(quantity, SYNTHETIC_DRIFT)),
+        Book::Element(_) => QuantityPolicy::element(
+            quantity,
+            Measure::new(0.0)?,
+            Measure::new(CLOSURE_RELATIVE)?,
+            Measure::new(SYNTHETIC_DRIFT)?,
+        ),
+'''
+new = '''
+        Book::Of(species) => species.visit(Limits(quantity, SYNTHETIC_ENERGY_DRIFT)),
+        Book::Element(_) => QuantityPolicy::element(
+            quantity,
+            Measure::new(0.0)?,
+            Measure::new(CLOSURE_RELATIVE)?,
+            Measure::new(SYNTHETIC_ENERGY_DRIFT)?,
+        ),
+'''
+test = "-p ng-validate --test arena_certificate water_drifts_up_to_1e4_as_every_quantity_but_energy_does"
