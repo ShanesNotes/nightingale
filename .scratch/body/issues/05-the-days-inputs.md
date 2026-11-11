@@ -1,7 +1,8 @@
 # 05: The day's inputs: the clock, sleep, the room and meals
 
 Type: task
-Status: open
+Status: claimed
+Claimed by: 05-days-inputs
 Blocked by: 03
 
 **What to build:** The boundary carries everything the day does to the body. Today it carries deliveries of water, sodium, potassium and chloride, and posture. No payload carries the clock, sleep or the room, a meal goes straight into the splanchnic veins, and the day's events are written into a test fixture.
