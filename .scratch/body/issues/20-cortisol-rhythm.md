@@ -9,6 +9,11 @@ Blocked by: 05, 14, `.scratch/research/issues/15-law-forms-slow-books.md`
 - [ ] Tests: the secretion profile and the clearance match their forms at stated points
 - [ ] Run: the liver's glucose output rises toward morning with cortisol, and no law sets glucose
 - [ ] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved
+- [ ] From [research 15](../../research/issues/15-law-forms-slow-books.md): the receptor layer's effect reads one ligand with a fixed efficacy, so this ticket picks how cortisol lowers insulin's efficacy at the liver: the effect kernel reads a second input, or the layer publishes occupancy and HP's law finishes the effect
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** the stress response, pulsed secretion, and cortisol's other actions.
+
+From [research 15](../../research/issues/15-law-forms-slow-books.md): Scheer counts cortisol's phase from the core temperature minimum, so the secretion law maps that zero to the one [ticket 05](05-the-days-inputs.md) states.
+
+From [research 13](../../research/issues/13-law-forms-gut-and-fuels.md): the liver's glucose output is the sum of its reactions, and only the glycogen rows read insulin's effect, while gluconeogenesis reads glucagon alone, so lowering insulin's efficacy reaches glycogen synthesis and breakdown only. Research 13 splits it, so this ticket can still take the gain on gluconeogenesis that research 15 set aside.

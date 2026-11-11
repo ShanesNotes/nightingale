@@ -15,3 +15,11 @@ Blocked by: 13, 15, 17, `.scratch/research/issues/15-law-forms-slow-books.md`
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
 
 **Non-goals:** bone remodeling, calcitriol as a moving hormone, and calcitonin.
+
+From [research 15](../../research/issues/15-law-forms-slow-books.md): ticket 01 gives magnesium no bone bed cells, so [ticket 03](03-whole-body-lists.md) lists them or this ticket drops magnesium's bone pool. PTH moves only calcium's reclaim threshold, and if a meal takes phosphate out of its healthy range, PTH's effect on phosphate's threshold is the first term to add.
+
+From [research 14](../../research/issues/14-law-forms-volume-and-acid.md): the acid balance counts calcium as its whole amount until this ticket's row states ionized calcium, and as its ionized amount after. It counts magnesium as its whole amount, because no row states magnesium's ionized share.
+
+From [research 13](../../research/issues/13-law-forms-gut-and-fuels.md): a meal's minerals leave the stomach with every other species by its emptying row, and each one's fecal exit is its absorption times `(1 - f_i) / f_i`, so each mineral declares its absorbed share `f_i`. Research 13 states insulin's receptor effect `E_ins`, which phosphate's uptake into cells reads, in the interstitium of the muscle and fat beds and at the liver bed. [research 15](../../research/issues/15-law-forms-slow-books.md)'s phosphate row reads that effect in every bed's cells, so this ticket limits phosphate's uptake with insulin to those beds or states the effect in the others.
+
+A finding of the plan review, for this ticket's run to settle: [research 13](../../research/issues/13-law-forms-gut-and-fuels.md)'s fecal exit leaves in a fixed proportion to absorption, so the share of a meal's calcium or magnesium that is absorbed is `f_i` at any load, and the saturable term changes only how long the lumen takes to empty. [research 15](../../research/issues/15-law-forms-slow-books.md) chose the saturable term so that the share falls as the load rises. If the run cannot show that fall, the minerals' exit needs a term that does not follow absorption, such as the onward flow first order in the lumen's contents that research 13 names as the competing form.
