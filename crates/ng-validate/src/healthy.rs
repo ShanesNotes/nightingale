@@ -318,8 +318,7 @@ impl<'b> ReadingChecks<'b> {
     }
 }
 
-/// What the folds take of one observation: its value, an absent value for one not present, never a zero, and
-/// nothing while it is pending.
+/// A value not present is fed as absent, so its window fails rather than shrinks. A pending one waits.
 fn fed(value: ObservedValue) -> Option<Option<Compensated>> {
     match value {
         ObservedValue::Present(value) => Some(Some(value)),

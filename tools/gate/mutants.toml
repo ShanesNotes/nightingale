@@ -1228,7 +1228,7 @@ new = '''let crossed = self.read[span - 1];'''
 test = "-p ng-validate --lib healthy::tests::a_range_whose_activity_the_run_holds_but_never_judges_blocks_and_is_named"
 
 [[mutant]]
-name = "return-unread-anchor-skipped"
+name = "return-unread-anchor-unnamed"
 path = "crates/ng-validate/src/healthy/returns.rs"
 old = '''if reading.is_none() {'''
 new = '''if false {'''
