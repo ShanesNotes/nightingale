@@ -136,7 +136,6 @@ pub enum RangeGap {
     },
 }
 
-/// One range's limits, at its place among the results.
 #[derive(Clone, Copy)]
 struct Limits {
     low: Compensated,
@@ -544,7 +543,6 @@ fn mean(sum: Compensated, absent: u64, count: u64) -> Option<Compensated> {
     (absent == 0).then(|| Compensated::between(Compensated::ZERO, sum, 1, count))
 }
 
-/// Counts one window and keeps the earliest that fell outside the limits.
 fn judge(limits: &Limits, result: &mut RangeResult, mean: Option<Compensated>, end: SimTime, length_ns: u64) {
     result.judged += 1;
     if mean.is_some_and(|mean| limits.low.at_most(mean) && mean.at_most(limits.high)) {

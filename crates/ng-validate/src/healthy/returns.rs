@@ -150,11 +150,10 @@ struct Window {
     absent: bool,
 }
 
-/// One anchor the check can hold: its reading, its window's shape and its allowance, then its window from
-/// admission and from each later morning.
+/// One anchor the check can hold: its window's shape and its allowance, then its window from admission and from
+/// each later morning.
 struct Held {
     anchor: AnchorId,
-    reading: usize,
     first_ns: u64,
     count: u64,
     allowed: Compensated,
@@ -165,6 +164,8 @@ struct Held {
 pub(crate) struct ReturnFold {
     period_ns: u64,
     held: Vec<Held>,
+    /// Per bare reading, its anchors' places in `held`.
+    readings: Vec<Vec<usize>>,
     gaps: Vec<ReturnGap>,
 }
 impl ReturnFold {
@@ -183,6 +184,7 @@ impl ReturnFold {
         }
         let factor = Measure::<Dimensionless>::new(RETURN_FACTOR)?;
         let (mut held, mut gaps) = (Vec::new(), Vec::new());
+        let mut by_reading = vec![Vec::new(); readings.len()];
         for plan in plans {
             let anchor = plan.anchor;
             let integrated = plan.statistic == AnchorStatistic::CycleTimeMean;
@@ -215,9 +217,9 @@ impl ReturnFold {
                 seen: 0,
                 absent: false,
             });
+            by_reading[reading].push(held.len());
             held.push(Held {
                 anchor,
-                reading,
                 first_ns,
                 count,
                 allowed: variation.sd().times(&factor),
@@ -227,15 +229,22 @@ impl ReturnFold {
         Ok(Self {
             period_ns,
             held,
+            readings: by_reading,
             gaps,
         })
     }
     pub(crate) fn feed(&mut self, reading: usize, at: SimTime, value: Option<Compensated>) {
-        let period_ns = self.period_ns;
-        for held in self.held.iter_mut().filter(|held| held.reading == reading) {
+        let Self {
+            period_ns,
+            held,
+            readings,
+            ..
+        } = self;
+        for &place in readings.get(reading).into_iter().flatten() {
+            let held = &mut held[place];
             for window in &mut held.windows {
                 let first = window.at.nanoseconds().saturating_add(held.first_ns);
-                let last = first.saturating_add((held.count - 1).saturating_mul(period_ns));
+                let last = first.saturating_add((held.count - 1).saturating_mul(*period_ns));
                 if (first..=last).contains(&at.nanoseconds()) && window.seen < held.count {
                     window.sum = window.sum.plus(value.unwrap_or(Compensated::ZERO));
                     window.absent |= value.is_none();

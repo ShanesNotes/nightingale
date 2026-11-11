@@ -144,7 +144,8 @@ impl<K: PacketKind> HealthyRange<K> {
     }
 }
 
-/// One healthy adult's own day-to-day SD of one reading, its row by its method, in the reading's own unit.
+/// How far one healthy adult's own reading, its row by its method, varies from one day to the next: an SD in
+/// the reading's own unit.
 pub struct WithinSubjectVariation<K: PacketKind> {
     id: &'static str,
     row: RowKind,
