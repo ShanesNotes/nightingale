@@ -28,14 +28,14 @@ SLICE = {card for _, card, place in owners if place == "slice"}
 
 arrows = []
 in_graph = False
-for number, text in enumerate(open(MAP, encoding="utf-8").read().splitlines(), start=1):
+for map_line, text in enumerate(open(MAP, encoding="utf-8").read().splitlines(), start=1):
     if text.startswith("## Direct couplings"):
         in_graph = True
     elif in_graph and text.startswith("## "):
         break
     match = re.match(r'^\s+([A-Z]{2}) -- "([^"]+)" --> ([A-Z]{2})\s*$', text)
     if in_graph and match:
-        arrows.append((number, match.group(1), match.group(3), match.group(2)))
+        arrows.append((map_line, match.group(1), match.group(3), match.group(2)))
 
 
 def table(path):
