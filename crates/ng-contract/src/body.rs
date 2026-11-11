@@ -336,8 +336,6 @@ impl Column {
     pub fn receipt(&self) -> Option<Receipt> {
         self.receipt
     }
-    /// A kernel's value, in its reference species per second, or a slope of it, as turnovers: what each term's count
-    /// multiplies. A transfer's count is one, so its value is its rate.
     pub(crate) fn turnovers(&self, value: f64) -> f64 {
         value / f64::from(self.reference_count.get())
     }
@@ -355,8 +353,6 @@ impl Seal for Column {
         origin.seal(out);
         context.seal(out);
         receipt.seal(out);
-        // Only a count above one writes, after a tag no term count and no program count equals, so every body that
-        // counts each reference once keeps its bytes.
         if *reference_count != NonZeroU32::MIN {
             out.number(u64::MAX);
             out.number(u64::from(reference_count.get()));

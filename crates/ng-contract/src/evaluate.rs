@@ -1175,9 +1175,6 @@ mod tests {
 
     const STORE_SPEED: f64 = 0.001;
 
-    /// Glycogen made at nineteen a turnover from twenty glucose, its rate the glycogen made per second: a speed times
-    /// the glucose held. A glucose burn beside it at a rate of zero names the direction its six pools under four books
-    /// leave.
     fn stored() -> (CompiledBody, BoundParameters) {
         let origin = || Position::new(measure(0.0), measure(0.0), measure(0.0));
         let mut map = AnatomyBuilder::new();

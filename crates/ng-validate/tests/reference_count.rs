@@ -13,10 +13,6 @@ const REACTION: LawName = LawName {
     owner: <Metabolism as Owner>::CARD,
     local: "reaction",
 };
-/// A move is the difference of two amounts near a thousand, each rounded once, so it is known to about this share of
-/// itself.
-const ROUNDING: f64 = 1e-13;
-
 fn hex(digest: Digest) -> String {
     digest
         .as_bytes()
@@ -37,8 +33,6 @@ fn at_origin() -> Result<Position, AdmissionError> {
     ))
 }
 
-/// Run at a rate of zero, it moves nothing. Beside a reaction that joins six pools under four books it names the
-/// direction those books leave, as the body's own burn will.
 fn burn() -> Proportions<Glucose> {
     Proportions::<Glucose>::using(Space::Cells)
         .uses::<Oxygen, 6>(Space::Cells)
@@ -65,8 +59,6 @@ fn paced<Q: Reactant, const N: u32>(
     Ok(())
 }
 
-/// One capillary bed whose cells hold what the reaction uses and makes and whose thermal store takes its heat, at a
-/// constant rate, so the rate's integral over the run is the rate times the run. Every number here is synthetic.
 fn bed<Q: Reactant, const N: u32>(
     carry: impl FnOnce(&mut Schema),
     proportions: Proportions<Q, N>,
@@ -129,32 +121,41 @@ fn policy(body: &CompiledBody, windows: SlidingWindows) -> Result<CertificatePol
     CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows)
 }
 
+fn within_rounding(got: f64, wanted: f64, read: &[f64]) -> bool {
+    let scale: f64 = (read.iter().chain([&got, &wanted]))
+        .map(|value| value.abs())
+        .sum();
+    (got - wanted).abs() <= 2.0 * f64::EPSILON * scale
+}
+
 struct Run {
-    moved: Vec<(Species, f64)>,
+    amounts: Vec<(Species, f64, f64)>,
     turnovers: f64,
     books: Vec<Book>,
 }
 impl Run {
-    fn moved(&self, species: Species) -> f64 {
-        (self.moved.iter())
-            .find(|moved| moved.0 == species)
-            .map(|moved| moved.1)
+    fn amount(&self, species: Species) -> (f64, f64) {
+        (self.amounts.iter())
+            .find(|amount| amount.0 == species)
+            .map(|&(_, was, now)| (was, now))
             .expect("a pool at the bed")
     }
-    /// One turnover moves each species by its count, so each moves by its count times the turnovers.
+    fn moved(&self, species: Species) -> f64 {
+        let (was, now) = self.amount(species);
+        now - was
+    }
     fn moves(&self, counts: &[(Species, i64)], turnovers: f64) {
-        let near = |got: f64, wanted: f64| (got - wanted).abs() <= ROUNDING * wanted.abs();
         assert!(
-            near(self.turnovers, turnovers),
+            within_rounding(self.turnovers, turnovers, &[]),
             "the record's extent is {} turnovers, the rate's integral over the reference's count {turnovers}",
             self.turnovers
         );
         for &(species, count) in counts {
-            let wanted = count as f64 * turnovers;
-            let got = self.moved(species);
+            let ((was, now), wanted) = (self.amount(species), count as f64 * turnovers);
             assert!(
-                near(got, wanted),
-                "{species:?} moved {got}, {count} a turnover is {wanted}"
+                within_rounding(now - was, wanted, &[was, now]),
+                "{species:?} moved {}, {count} a turnover is {wanted}",
+                now - was
             );
         }
     }
@@ -173,7 +174,7 @@ fn run<Q: Reactant>((body, bed): &(CompiledBody, SiteId), rate: f64, partnered: 
     let (store, core) = (MemoryStore::default(), ReferenceIntegrator::new(10 * SECOND));
     let port = BoundaryPort::new(Vec::new()).expect("an empty port");
     let session = admit_fixture(body, packet, port, &core, &store).expect("admitted at an instant");
-    let amounts = |session: &Session<'_, Running>| -> Vec<(Species, f64)> {
+    let held = |session: &Session<'_, Running>| -> Vec<(Species, f64)> {
         (body.rows().iter())
             .filter_map(|row| match row.kind() {
                 RowKind::Amount { site, species, .. } if site == *bed => {
@@ -183,12 +184,12 @@ fn run<Q: Reactant>((body, bed): &(CompiledBody, SiteId), rate: f64, partnered: 
             })
             .collect()
     };
-    let before = amounts(&session);
+    let before = held(&session);
     let end = SimTime::from_ns(RUN_SECONDS * SECOND);
     let Ok(session) = run_until(session, end) else {
         panic!("the run faulted");
     };
-    let after = amounts(&session);
+    let after = held(&session);
     let view = session.conservation();
     let window = NonZeroU64::new(60 * SECOND).expect("positive");
     let windows = SlidingWindows::new(window, end.nanoseconds()).expect("a coverage");
@@ -208,11 +209,11 @@ fn run<Q: Reactant>((body, bed): &(CompiledBody, SiteId), rate: f64, partnered: 
     let at_end = |curve: &[Compensated]| number(curve[1]);
     let turnovers = at_end(&forward.on(head.interval()).expect("the head's own interval"))
         - at_end(&reverse.on(head.interval()).expect("the head's own interval"));
-    let moved = (before.iter().zip(&after))
-        .map(|(&(species, was), &(_, now))| (species, now - was))
+    let amounts = (before.iter().zip(&after))
+        .map(|(&(species, was), &(_, now))| (species, was, now))
         .collect();
     Run {
-        moved,
+        amounts,
         turnovers,
         books,
     }
