@@ -16,10 +16,8 @@ pub fn explicit_stage(
     problem.evaluate(&workspace.point(time))
 }
 
-const UPDATES: usize = 2;
+const UPDATES_FOR_A_LINEAR_BODY: usize = 2;
 
-/// Backward Euler from the workspace's own unknowns to `offset_ns`, across `span_ns`, by a fixed count of Newton
-/// updates: exact to rounding on the linear test bodies.
 pub fn implicit_stage(
     problem: &CoupledProblem<'_>,
     workspace: &mut SolveWorkspace,
@@ -38,7 +36,7 @@ pub fn implicit_stage(
         }
         let point = workspace.point(time);
         let stage = problem.evaluate(&point)?;
-        if updates == UPDATES {
+        if updates == UPDATES_FOR_A_LINEAR_BODY {
             return Ok(stage);
         }
         let jacobian = problem.linearize(&point, shift)?;

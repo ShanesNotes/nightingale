@@ -123,8 +123,6 @@ struct WitnessStage {
     derivative: Vec<f64>,
 }
 impl StageWitness {
-    /// The only arithmetic of an error estimate. `Difference` keeps the operations the doubled scheme always ran,
-    /// so its bits hold.
     fn error(
         &self,
         estimate: Estimate,

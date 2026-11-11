@@ -62,7 +62,6 @@ impl Ratio {
     }
 }
 
-/// Each number enters the resolution digest, so a number never moves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Method {
     ForwardEuler = 0,
@@ -96,13 +95,10 @@ fn stage(offset_ns: u64, weight: Ratio, from: Option<usize>, span_ns: u64, slope
     }
 }
 
-/// The stages one ticket must show under its run's declared scheme, read from the ticket alone.
-/// `StepProposal::verify` holds a witness to its set, and a core reads it from `CoupledProblem::stage_set`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StageSet {
     ForwardEuler,
     Heun,
-    /// One backward Euler stage over the whole ticket, at weight one: a ticket under 2 ns.
     Whole,
     Doubled,
     Halved,
@@ -136,13 +132,10 @@ impl StageSet {
     }
 }
 
-/// How the record recomputes a set's error estimate from its witnessed stages, each row over its declared
-/// tolerance at the end value.
+/// On a smooth row `|end - 2 half + start|` is `h^2 y'' / 4`, the leading term of `|fine - coarse|`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Estimate {
-    /// `|fine - coarse|`.
     Difference { fine: usize, coarse: usize },
-    /// `|end - 2 half + start|`: on a smooth row `h^2 y'' / 4`, the difference's leading term.
     SecondDifference { half: usize, end: usize },
 }
 
@@ -171,14 +164,14 @@ impl StageScheme {
         }
     }
     /// The doubled scheme's two halves alone, and the estimate is their second difference from the start. A
-    /// ticket after a breakpoint shows the doubled scheme's stages, since a firing restarts stiff transients the
-    /// second difference over-reads. A length of 1 ns has one whole stage and no estimate.
+    /// ticket after a breakpoint shows the doubled scheme's stages, since a firing or a delivery's start or end
+    /// can start a stiff transient the second difference over-reads. A length of 1 ns has one whole stage and no
+    /// estimate.
     pub fn backward_euler_halved() -> Self {
         Self {
             method: Method::BackwardEulerHalved,
         }
     }
-    /// Only sealed ticket fields, so every attempt at a head and a resumed run read the same rule.
     pub(crate) fn set(self, ticket: &StepTicket) -> StageSet {
         let whole = ticket.length_ns() < 2;
         match self.method {

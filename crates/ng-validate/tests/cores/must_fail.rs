@@ -82,8 +82,6 @@ impl CoupledSolver for UnreachedStage {
     }
 }
 
-/// Declares the halved scheme and shows the reference integrator's doubled set on every ticket, so the kinder
-/// difference would judge its error.
 pub struct ShowsTheDoubledSet {
     pub inner: ReferenceIntegrator,
 }
@@ -99,8 +97,6 @@ impl CoupledSolver for ShowsTheDoubledSet {
     }
 }
 
-/// Declares the halved scheme, shows the halves on every ticket, after a breakpoint too, and never reads its
-/// estimate, so only the record refuses it.
 pub struct AlwaysHalves {
     pub interval_ns: u64,
     pub scales: ErrorScales,

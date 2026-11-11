@@ -332,8 +332,6 @@ fn no_span_passes_the_cap_and_a_quiet_body_runs_at_it() {
     assert!(lengths.iter().all(|&length| length == 16 * SECOND), "{lengths:?}");
 }
 
-/// A cap far past the relaxation time leaves the estimate above the scales on the first step, so the first attempts
-/// are refused for accuracy and the span the core carries on comes down.
 #[test]
 fn excess_error_is_refused_and_the_span_comes_down() {
     let case = Reservoirs::new([1_000_000.0, 1_000.0], Vec::new());
@@ -341,7 +339,10 @@ fn excess_error_is_refused_and_the_span_comes_down() {
     let core = Core::new(cap);
     let mut run = Run::admit(&case, &core);
     let first = run.step(&core).expect("a step");
-    assert!(!first.refusals.is_empty());
+    assert!(
+        !first.refusals.is_empty(),
+        "a cap far past the relaxation time is refused for accuracy first"
+    );
     for refused in &first.refusals {
         assert!(
             matches!(refused.reason(), NumericalRefusal::Accuracy { .. }),
@@ -651,7 +652,6 @@ fn a_nonlinear_memory_meets_the_implicit_quadratic_root() {
     }
 }
 
-/// The doubled estimate passes this stiff step where the second difference refuses it, so the step shows the fallback.
 #[test]
 fn a_guess_past_a_law_s_domain_falls_back_and_the_stage_still_solves() {
     let (body, packet) = logarithm();
@@ -663,6 +663,16 @@ fn a_guess_past_a_law_s_domain_falls_back_and_the_stage_still_solves() {
     let [x, log] = [0, 1].map(|at| run.amount(body.rows()[at].id()));
     assert!((x - 1.0 / 9.0).abs() < 1e-12, "{x}");
     assert!((exp(log) - 1.0 / 9.0).abs() < 1e-9, "{log}");
+    let (stiff, packet) = logarithm();
+    let halved = Core::new(SECOND / 10);
+    let refused = Run::admit_body(&stiff, packet, Vec::new(), &halved)
+        .step(&halved)
+        .expect("a step")
+        .refusals;
+    assert!(
+        (refused.iter()).any(|refused| matches!(refused.reason(), NumericalRefusal::Accuracy { .. })),
+        "the second difference refuses this stiff first step: {refused:?}"
+    );
 }
 
 #[test]
@@ -680,7 +690,6 @@ fn excess_error_at_the_floor_is_an_engine_fault() {
     );
 }
 
-/// Counts the solves its core refused, so a refusal of a proposal is the record's.
 struct Counting<'c> {
     core: &'c Core,
     refused: Cell<usize>,
