@@ -126,7 +126,12 @@ mutants = ["orphan-held"]
 
 [[row]]
 core = "A wall crossing two cards own"
-mutants = ["crossed-twice-refused", "crossed-twice-at-one-site"]
+mutants = [
+  "crossed-twice-refused",
+  "crossed-twice-at-one-site",
+  "endothelium-crosses-the-capillary-wall",
+  "endothelium-crosses-the-cell-membrane",
+]
 
 [[row]]
 core = "A card serving a boundary route another card owns"

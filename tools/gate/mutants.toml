@@ -568,16 +568,30 @@ test = "-p ng-contract --test scopes disjoint_sets_of_one_wall_and_species_take_
 [[mutant]]
 name = "owned-crossing-at-the-capillary-wall"
 path = "crates/ng-contract/src/law.rs"
-old = '''Family::Exchange(species) => Some((Crossed::Capillary, species)),'''
+old = '''Family::Exchange(species) => Some((&[Crossed::Capillary], species)),'''
 new = '''Family::Exchange(_) => None,'''
 test = "-p ng-contract --test scopes the_metabolism_card_and_fluids_cannot_both_move_oxygen_across_the_capillary_wall"
 
 [[mutant]]
 name = "owned-crossing-across-a-wall"
 path = "crates/ng-contract/src/law.rs"
-old = '''Family::Across(wall, _, species) => Some((Crossed::Wall(wall), species)),'''
+old = '''Family::Across(wall, _, species) => Some((wall.crossed(), species)),'''
 new = '''Family::Across(..) => None,'''
 test = "-p ng-contract --test scopes two_cards_crossing_one_wall_with_one_species_at_one_bed_is_refused"
+
+[[mutant]]
+name = "endothelium-crosses-the-capillary-wall"
+path = "crates/ng-contract/src/law.rs"
+old = '''Wall::Endothelium => &[Crossed::Capillary, Crossed::Cell],'''
+new = '''Wall::Endothelium => &[Crossed::Cell],'''
+test = "-p ng-contract --test scopes the_endothelial_route_crosses_the_capillary_wall_another_card_crosses"
+
+[[mutant]]
+name = "endothelium-crosses-the-cell-membrane"
+path = "crates/ng-contract/src/law.rs"
+old = '''Wall::Endothelium => &[Crossed::Capillary, Crossed::Cell],'''
+new = '''Wall::Endothelium => &[Crossed::Capillary],'''
+test = "-p ng-contract --test scopes the_endothelial_route_crosses_the_cell_membrane_another_card_crosses"
 
 [[mutant]]
 name = "circulation-leaves-the-liver-bed"

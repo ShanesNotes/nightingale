@@ -256,7 +256,7 @@ fn check_crossings(fragments: &[FragmentData], reaches: &Reaches) -> Result<(), 
     let mut crossings = Vec::new();
     for fragment in fragments {
         for &family in &fragment.families {
-            let Some((wall, species)) = family.owned_crossing() else {
+            let Some((walls, species)) = family.owned_crossing() else {
                 continue;
             };
             let law = LawName {
@@ -265,7 +265,7 @@ fn check_crossings(fragments: &[FragmentData], reaches: &Reaches) -> Result<(), 
             };
             for reach in reaches.of_family(family) {
                 if let Context::Site(site) = reach.context {
-                    crossings.push((wall, species, site, law));
+                    crossings.extend(walls.iter().map(|&wall| (wall, species, site, law)));
                 }
             }
         }

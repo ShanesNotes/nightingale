@@ -138,6 +138,14 @@ impl Wall {
             Wall::Endothelium => 9,
         }
     }
+    const fn crossed(self) -> &'static [Crossed] {
+        match self {
+            Wall::Cell => &[Crossed::Cell],
+            Wall::Alveolar => &[Crossed::Alveolar],
+            Wall::Lining => &[Crossed::Lining],
+            Wall::Endothelium => &[Crossed::Capillary, Crossed::Cell],
+        }
+    }
 }
 
 /// A route along the edges of a network, one species at a time.
@@ -254,10 +262,10 @@ impl Family {
                 | Family::Tubular
         )
     }
-    pub(crate) fn owned_crossing(self) -> Option<(Crossed, Species)> {
+    pub(crate) fn owned_crossing(self) -> Option<(&'static [Crossed], Species)> {
         match self {
-            Family::Exchange(species) => Some((Crossed::Capillary, species)),
-            Family::Across(wall, _, species) => Some((Crossed::Wall(wall), species)),
+            Family::Exchange(species) => Some((&[Crossed::Capillary], species)),
+            Family::Across(wall, _, species) => Some((wall.crossed(), species)),
             Family::Circulation
             | Family::Valves
             | Family::Sinusoids
@@ -278,10 +286,13 @@ impl Family {
         }
     }
 }
+/// A membrane of a capillary bed, as `CrossedTwice` counts the crossings of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Crossed {
     Capillary,
-    Wall(Wall),
+    Cell,
+    Alveolar,
+    Lining,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum End {

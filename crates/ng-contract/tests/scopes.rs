@@ -641,16 +641,18 @@ fn a_kept_cards_built_process_is_no_held_support() -> Result<(), AdmissionError>
     Ok(())
 }
 
-fn tissues(left_out: [Space; 2]) -> Result<Schema, AdmissionError> {
+const THREE_BEDS: [(&str, Tissue); 3] = [
+    ("bone bed", Tissue::Bone),
+    ("liver bed", Tissue::Liver),
+    ("muscle bed", Tissue::Muscle),
+];
+
+fn tissues(beds: &[(&'static str, Tissue)], left_out: &[Space]) -> Result<Schema, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at()?);
     let vessel = map.site::<VesselSegment>("vessel", at()?);
     map.contain(root.id(), vessel.id());
-    for (key, tissue) in [
-        ("bone bed", Tissue::Bone),
-        ("liver bed", Tissue::Liver),
-        ("muscle bed", Tissue::Muscle),
-    ] {
+    for &(key, tissue) in beds {
         let bed = map.site::<CapillaryBed>(key, at()?);
         map.contain(root.id(), bed.id());
         map.connect(Network::Vascular, vessel.id(), bed.id());
@@ -658,7 +660,7 @@ fn tissues(left_out: [Space; 2]) -> Result<Schema, AdmissionError> {
         map.serves(&bed, tissue);
     }
     let mut schema = Schema::new(map.finish()?)?;
-    for space in left_out {
+    for &space in left_out {
         schema.leave_out(space, "a bench of one wall");
     }
     Ok(schema)
@@ -686,7 +688,7 @@ fn liver_glucose(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
 }
 
 fn fluids_and_liver(liver_first: bool) -> Result<CompiledBody, AdmissionError> {
-    let mut schema = tissues([Space::Plasma, Space::Lumen])?;
+    let mut schema = tissues(&THREE_BEDS, &[Space::Plasma, Space::Lumen])?;
     schema.carry::<Glucose, CapillaryBed>(Space::Interstitium);
     schema.carry::<Glucose, CapillaryBed>(Space::Cells);
     assemble(schema, |mut body| {
@@ -725,7 +727,7 @@ fn two_cards_crossing_one_wall_with_one_species_at_one_bed_is_refused() {
 #[test]
 fn the_metabolism_card_and_fluids_cannot_both_move_oxygen_across_the_capillary_wall()
 -> Result<(), AdmissionError> {
-    let mut schema = tissues([Space::Lumen, Space::Cells])?;
+    let mut schema = tissues(&THREE_BEDS, &[Space::Lumen, Space::Cells])?;
     schema.carry::<Oxygen, CapillaryBed>(Space::Plasma);
     schema.carry::<Oxygen, CapillaryBed>(Space::Interstitium);
     let found = assemble(schema, |mut body| {
@@ -751,7 +753,7 @@ fn the_metabolism_card_and_fluids_cannot_both_move_oxygen_across_the_capillary_w
 
 #[test]
 fn disjoint_sets_of_one_wall_and_species_take_two_cards() -> Result<(), AdmissionError> {
-    let mut schema = tissues([Space::Plasma, Space::Lumen])?;
+    let mut schema = tissues(&THREE_BEDS, &[Space::Plasma, Space::Lumen])?;
     for space in [Space::Interstitium, Space::Cells] {
         schema.carry::<Glucose, CapillaryBed>(space);
         schema.carry::<Phosphate, CapillaryBed>(space);
@@ -786,4 +788,75 @@ fn the_crossing_refusal_names_the_same_pair_whatever_the_order() {
         fluids_and_liver(true).map(|body| body.model_hash()),
         Err(glucose_crossed_twice())
     );
+}
+
+const MUSCLE_BED: [(&str, Tissue); 1] = [("muscle bed", Tissue::Muscle)];
+
+fn fat_stored<Q: Substance>(
+    crossing: impl for<'b> FnOnce(
+        &mut FragmentBuilder<'b, Fluids>,
+        &FluidsPorts<'b>,
+    ) -> Result<(), AdmissionError>,
+) -> Result<CompiledBody, AdmissionError> {
+    let mut schema = tissues(&MUSCLE_BED, &[Space::Lumen])?;
+    for space in [Space::Plasma, Space::Interstitium, Space::Cells] {
+        schema.carry::<Triglyceride, CapillaryBed>(space);
+        schema.carry::<Q, CapillaryBed>(space);
+    }
+    assemble(schema, |mut body| {
+        let (mut fl, ports) = body.fluids()?.parts();
+        let route = ports.starling(&mut fl);
+        still(&mut fl, &route)?;
+        let water = ports.cell_membrane::<CapillaryBed, Water>(&mut fl);
+        still(&mut fl, &water)?;
+        crossing(&mut fl, &ports)?;
+        body.add(fl.finish());
+        let (mut mt, ports) = body.metabolism(None)?.parts();
+        let route = ports.fat_into_cells::<Beds<Muscle>>(&mut mt);
+        still(&mut mt, &route)?;
+        body.add(mt.finish());
+        body.compile()
+    })
+}
+
+fn fat_crossed_twice(fluids: &'static str) -> AdmissionError {
+    defect(CompileDefect::CrossedTwice {
+        laws: [law("FL", fluids), law("MT", "endothelium triglyceride")],
+        site: site::<CapillaryBed>("muscle bed"),
+    })
+}
+
+#[test]
+fn the_endothelial_route_crosses_the_capillary_wall_another_card_crosses() {
+    let found = fat_stored::<Triglyceride>(|fl, ports| {
+        let route = ports.exchange::<Triglyceride>(fl);
+        still(fl, &route)
+    });
+    assert_eq!(
+        found.map(|body| body.model_hash()),
+        Err(fat_crossed_twice("exchange triglyceride"))
+    );
+}
+
+#[test]
+fn the_endothelial_route_crosses_the_cell_membrane_another_card_crosses() {
+    let found = fat_stored::<Triglyceride>(|fl, ports| {
+        let route = ports.cell_membrane::<Beds<Muscle>, Triglyceride>(fl);
+        still(fl, &route)
+    });
+    assert_eq!(
+        found.map(|body| body.model_hash()),
+        Err(fat_crossed_twice("cell membrane triglyceride"))
+    );
+}
+
+#[test]
+fn another_species_crosses_both_walls_the_endothelial_route_spans() -> Result<(), AdmissionError> {
+    fat_stored::<Glucose>(|fl, ports| {
+        let wall = ports.exchange::<Glucose>(fl);
+        still(fl, &wall)?;
+        let membrane = ports.cell_membrane::<CapillaryBed, Glucose>(fl);
+        still(fl, &membrane)
+    })?;
+    Ok(())
 }
