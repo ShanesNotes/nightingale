@@ -402,7 +402,10 @@ fn a_validity_range_judges_the_kernels_value_before_the_division() {
     let carry = |schema: &mut Schema| {
         schema.carry::<Glucose, CapillaryBed>(Space::Cells);
     };
-    let (lower, upper) = (Measure::new(0.0).expect("finite"), Measure::new(0.008).expect("finite"));
+    let (lower, upper) = (
+        Measure::new(0.0).expect("finite"),
+        Measure::new(0.008).expect("finite"),
+    );
     let range = ValidityRange::new(lower, upper, Basis::Fixture(SYNTHETIC)).expect("ordered");
     let (body, _) = bed(carry, burn_twice(), Some(range), false).expect("compiled");
     let (store, core) = (MemoryStore::default(), ReferenceIntegrator::new(10 * SECOND));
@@ -416,5 +419,9 @@ fn a_validity_range_judges_the_kernels_value_before_the_division() {
         panic!("one excursion: {:?}", receipt.excursions());
     };
     assert_eq!(excursion.side(), ExcursionSide::Above);
-    assert_eq!(number(excursion.value()), 0.01, "the column's rate, 0.005 turnovers a second, is inside");
+    assert_eq!(
+        number(excursion.value()),
+        0.01,
+        "the column's rate, 0.005 turnovers a second, is inside"
+    );
 }
