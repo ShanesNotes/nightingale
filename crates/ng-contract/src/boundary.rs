@@ -1199,6 +1199,7 @@ mod tests {
     const SECOND: u64 = 1_000_000_000;
     const HOUR: u64 = 60 * MINUTE_NS;
     const CLOCK: [Held; 2] = [Held::ClockCosine, Held::ClockSine];
+    type Change = fn(&mut [f64; 8]);
 
     fn event(name: &[u8], at: u64, payload: BoundaryInput) -> BoundaryEvent {
         BoundaryEvent::new(
@@ -1344,7 +1345,7 @@ mod tests {
             Some(AdmissionError::ClockOutOfRange { id })
         );
         assert!(BoundaryPort::new(vec![clock(0, 24 * HOUR - 1)]).is_ok());
-        let room = |change: fn(&mut [f64; 8])| -> Result<BoundaryEvent, AdmissionError> {
+        let room = |change: Change| -> Result<BoundaryEvent, AdmissionError> {
             let mut values = [293.0, 293.0, 0.5, 1.0, 760.0, 0.21, 0.0004, 1.0];
             change(&mut values);
             let [
@@ -1374,7 +1375,7 @@ mod tests {
         };
         let id = InputId::new(Digest::of_canonical(b"room"));
         assert!(BoundaryPort::new(vec![room(|_| {})?]).is_ok());
-        let edges: [fn(&mut [f64; 8]); 6] = [
+        let edges: [Change; 6] = [
             |values| values[2] = 0.0,
             |values| values[2] = 1.0,
             |values| values[3] = 0.0,
@@ -1385,7 +1386,7 @@ mod tests {
         for edge in edges {
             assert!(BoundaryPort::new(vec![room(edge)?]).is_ok());
         }
-        let breaks: [(&str, fn(&mut [f64; 8])); 11] = [
+        let breaks: [(&str, Change); 11] = [
             ("air at absolute zero", |values| values[0] = 0.0),
             ("radiant at absolute zero", |values| values[1] = 0.0),
             ("humidity below 0", |values| values[2] = -0.1),
