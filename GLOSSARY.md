@@ -546,7 +546,7 @@ The crates a step's arithmetic runs through: the rows the crate table in `docs/a
 What a system crate declares: its laws, ports, parameter slots, modes and streams, as data the contract compiles. No fragment runs during a solve.
 
 **Scope**:
-What an assembly issues each card once: the builder its laws are declared on and the ports that grant only what the card owns at rung 0. A card outside the slice is issued fresh, or its scope takes over the builder its held stand-ins wrote to, so it keeps named holds beside its crate's laws.
+What the code's `Assembly` issues each card once while it builds an assembly: the builder its laws are declared on and the ports that grant only what the card owns at rung 0. A card outside the slice is issued fresh, or its scope takes over the builder its held stand-ins wrote to, so it keeps named holds beside its crate's laws.
 
 **Kernel**:
 One law's closed expression graph, built once at declaration from the contract's own operators. It reads no time step, solver, state store or host math.
