@@ -115,9 +115,9 @@ edge_kinds! {
     AbsorbingEdge: Alimentary => CapillaryBed, Gut;
 }
 
-/// A wall between two spaces of one capillary bed, crossed one species at a time. The capillary wall's crossings are
-/// Starling's water and each species' exchange, the tubule wall's are reclaim, and the gut wall's are passages. These
-/// are the rest.
+/// A wall between two spaces of one capillary bed, crossed one species at a time. Water crosses the capillary wall by
+/// Starling's law, a carriage that is not a crossing one owner holds, and each other species crosses it by its
+/// exchange. The tubule wall's crossings are reclaim, and the gut wall's are passages. These are the rest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Wall {
     /// The cell membrane: interstitium to cells.
@@ -254,7 +254,7 @@ impl Family {
                 | Family::Tubular
         )
     }
-    pub(crate) fn crossing(self) -> Option<(Crossed, Species)> {
+    pub(crate) fn owned_crossing(self) -> Option<(Crossed, Species)> {
         match self {
             Family::Exchange(species) => Some((Crossed::Capillary, species)),
             Family::Across(wall, _, species) => Some((Crossed::Wall(wall), species)),
