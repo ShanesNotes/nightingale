@@ -517,7 +517,7 @@ pub fn arena_seed() -> Seed {
 const CLOSURE_RELATIVE: f64 = 1e-12;
 const SYNTHETIC_DRIFT: f64 = 1e4;
 
-pub(crate) fn arena_certificate(
+pub fn arena_certificate(
     body: &CompiledBody,
     windows: SlidingWindows,
 ) -> Result<CertificatePolicy, AdmissionError> {
