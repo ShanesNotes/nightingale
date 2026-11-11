@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 
-READS = 3
+READS = 2
 ANCHOR_NS = 24_900_000_000_000
 PRESSURE = "algebraic/CV/blood pressure/systemic arteries"
 AORTIC_WATER = "CV/valves/left ventricle>systemic arteries/Water/inside"

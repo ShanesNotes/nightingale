@@ -7,7 +7,7 @@ use ng_contract::{
 };
 use ng_validate::{ReferenceIntegrator, anchor_moment};
 
-pub const CAPTURE_VERSION: u32 = 3;
+pub const CAPTURE_VERSION: u32 = 2;
 
 const GRAMMAR: u32 = 1;
 const NS_PER_MS: u64 = 1_000_000;
