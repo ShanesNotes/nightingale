@@ -362,12 +362,17 @@ fn check_reactions(fragments: &[FragmentData], schema: &Schema) -> Result<(), Co
                 })
                 .collect();
             terms.sort_unstable();
+            if terms.first().is_some_and(|&(_, _, made, _)| made) {
+                for (_, _, made, _) in &mut terms {
+                    *made = !*made;
+                }
+            }
             let stands = |site: &SiteId| {
                 (reaction.terms.iter())
                     .all(|term| pools.binary_search(&(*site, term.space, term.species)).is_ok())
             };
             for site in schema.anatomy.in_set(reaction.set).into_iter().filter(stands) {
-                placed.push(((site, terms.clone(), reaction.energy), law));
+                placed.push(((site, terms.clone()), law));
             }
         }
     }
