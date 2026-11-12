@@ -14,6 +14,7 @@ Blocked by: 06, 26, `.scratch/research/issues/14-law-forms-volume-and-acid.md`
 - [ ] Every link of each loop moves its reader the way the loop needs, on the admitted start
 - [ ] The certificate passes with the sodium, potassium, chloride and water books held by these loops, and the body's trace is updated
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
+- [ ] From [ticket 05](05-the-days-inputs.md): each law here that reads a lasting input is reviewed against the rule by reading: the input scales a gain or a set point and never stands for a produced quantity. Compile's `UnscaledInput` is only a stand-in: it passes a law that reads any parameter, such as `0 = k (T - room_air())`, and refuses one that reads only inputs
 
 **Non-goals:** thirst as behavior (drinks are scheduled), sodium stored in skin, and renal nerves beyond what the slice has.
 
