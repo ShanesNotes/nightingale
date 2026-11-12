@@ -1166,12 +1166,11 @@ fn a_copy_with_every_count_doubled_is_the_same_chemistry_and_is_refused() -> Res
 #[test]
 fn the_hepatic_cards_storage_beside_metabolisms_burn_at_the_liver_bed_compiles() -> Result<(), AdmissionError>
 {
-    chemistry(cell_schema(&BOTH_BEDS)?, &BOTH_BEDS.map(|bed| bed.0), |body| {
+    chemistry(cell_schema(&BOTH_BEDS)?, &["liver bed"], |body| {
         metabolism(body, burns)?;
         hepatic(body, |hp| {
             react::<_, Beds<Liver>, _, 1>(hp, "glycogen made", stored())
-        })?;
-        musculoskeletal(body, stored::<1>())
+        })
     })?;
     Ok(())
 }
@@ -1210,6 +1209,81 @@ fn a_grant_shared_where_one_chemistry_has_no_pools_is_no_second_owner() -> Resul
         found.map(|body| body.model_hash()),
         Err(defect(CompileDefect::ReactionNowhere {
             law: law("MS", "glycogen made"),
+        }))
+    );
+    Ok(())
+}
+
+fn lactate_in_cells(beds: &[(&'static str, Tissue)], content: f64) -> Result<Schema, AdmissionError> {
+    let mut schema = cell_schema(beds)?;
+    schema.carry::<Lactate, CapillaryBed>(Space::Cells);
+    schema.energy_content::<Lactate>(Measure::new(content)?)?;
+    Ok(schema)
+}
+
+fn glycolysis() -> Proportions<Glucose> {
+    Proportions::<Glucose>::using(Space::Cells).makes::<Lactate, 2>(Space::Cells)
+}
+
+fn beside_glycolysis(made: Proportions<Glucose>) -> Result<CompiledBody, AdmissionError> {
+    chemistry(lactate_in_cells(&BOTH_BEDS, 400.0)?, &[], |body| {
+        metabolism(body, |mt| {
+            burns(mt)?;
+            react::<_, CapillaryBed, _, 1>(mt, "glycolysis", glycolysis().energy_into(Space::Thermal))
+        })?;
+        hepatic(body, |hp| {
+            react::<_, Beds<Liver>, _, 1>(hp, "glucose from lactate", made)
+        })
+    })
+}
+
+#[test]
+fn the_hepatic_card_writing_metabolisms_glycolysis_in_reverse_at_the_liver_bed_is_refused_naming_both_laws_and_the_bed()
+-> Result<(), AdmissionError> {
+    let reverse = Proportions::<Glucose>::making(Space::Cells)
+        .uses::<Lactate, 2>(Space::Cells)
+        .energy_into(Space::Thermal);
+    assert_eq!(
+        beside_glycolysis(reverse).map(|body| body.model_hash()),
+        Err(defect(CompileDefect::ReactionOwnedTwice {
+            laws: [law("HP", "glucose from lactate"), law("MT", "glycolysis")],
+            site: site::<CapillaryBed>("liver bed"),
+        }))
+    );
+    Ok(())
+}
+
+#[test]
+fn the_hepatic_cards_glucose_from_lactate_with_its_own_fuel_terms_beside_metabolisms_glycolysis_compiles()
+-> Result<(), AdmissionError> {
+    let forward = Proportions::<Glucose>::making(Space::Cells)
+        .uses::<Lactate, 3>(Space::Cells)
+        .uses::<Oxygen, 3>(Space::Cells)
+        .makes::<CarbonDioxide, 3>(Space::Cells)
+        .makes::<Water, 3>(Space::Cells)
+        .energy_into(Space::Thermal);
+    beside_glycolysis(forward)?;
+    Ok(())
+}
+
+#[test]
+fn two_cards_with_one_chemistry_that_leaves_no_energy_are_refused_though_only_one_names_an_energy_space()
+-> Result<(), AdmissionError> {
+    let found = chemistry(lactate_in_cells(&MUSCLE_BED, 500.0)?, &[], |body| {
+        metabolism(body, |mt| {
+            burns(mt)?;
+            react::<_, CapillaryBed, _, 1>(mt, "glycolysis", glycolysis().energy_into(Space::Thermal))
+        })?;
+        let (mut ms, _) = body.musculoskeletal(None)?.parts();
+        react::<_, Beds<Muscle>, _, 1>(&mut ms, "glycolysis", glycolysis())?;
+        body.add(ms.finish());
+        Ok(())
+    });
+    assert_eq!(
+        found.map(|body| body.model_hash()),
+        Err(defect(CompileDefect::ReactionOwnedTwice {
+            laws: [law("MS", "glycolysis"), law("MT", "glycolysis")],
+            site: site::<CapillaryBed>("muscle bed"),
         }))
     );
     Ok(())

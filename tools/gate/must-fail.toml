@@ -144,6 +144,8 @@ mutants = [
   "reaction-owners-compared",
   "reaction-counts-divided",
   "reaction-owners-compared-where-placed",
+  "reaction-and-its-reverse-are-one",
+  "reaction-owners-compared-without-energy",
 ]
 
 [[row]]

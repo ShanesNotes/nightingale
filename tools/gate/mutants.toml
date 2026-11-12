@@ -685,6 +685,20 @@ new = '''.filter(|_| true)'''
 test = "-p ng-contract --test scopes a_grant_shared_where_one_chemistry_has_no_pools_is_no_second_owner"
 
 [[mutant]]
+name = "reaction-and-its-reverse-are-one"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if terms.first().is_some_and(|&(_, _, made, _)| made) {'''
+new = '''if false && terms.first().is_some_and(|&(_, _, made, _)| made) {'''
+test = "-p ng-contract --test scopes the_hepatic_card_writing_metabolisms_glycolysis_in_reverse_at_the_liver_bed_is_refused_naming_both_laws_and_the_bed"
+
+[[mutant]]
+name = "reaction-owners-compared-without-energy"
+path = "crates/ng-contract/src/compile.rs"
+old = '''placed.push(((site, terms.clone()), law));'''
+new = '''placed.push(((site, terms.clone(), reaction.energy), law));'''
+test = "-p ng-contract --test scopes two_cards_with_one_chemistry_that_leaves_no_energy_are_refused_though_only_one_names_an_energy_space"
+
+[[mutant]]
 name = "circulation-owes-the-sinusoids"
 path = "crates/ng-contract/src/compile.rs"
 old = '''if requested(Family::Circulation) && unowed {'''
