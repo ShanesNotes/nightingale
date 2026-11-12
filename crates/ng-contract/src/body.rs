@@ -9,6 +9,7 @@ use crate::{
     AdmissibleSet, Class, ConservedBasis, Crossing, Digest, Lasting, LawName, Network, ParameterKey,
     Predicate, RateClass, Schema, SiteId, Space, Species,
 };
+use core::num::NonZeroU32;
 
 macro_rules! index {
     ($($(#[$doc:meta])* $name:ident),*) => {$(
@@ -331,6 +332,7 @@ pub struct Column {
     pub(crate) origin: LawName,
     pub(crate) context: Context,
     pub(crate) receipt: Option<Receipt>,
+    pub(crate) reference_count: NonZeroU32,
 }
 impl Column {
     /// In row order. A transfer whose two ends are one pool has none.
@@ -348,6 +350,9 @@ impl Column {
     pub fn receipt(&self) -> Option<Receipt> {
         self.receipt
     }
+    pub(crate) fn turnovers(&self, value: f64) -> f64 {
+        value / f64::from(self.reference_count.get())
+    }
 }
 impl Seal for Column {
     fn seal(&self, out: &mut Canonical) {
@@ -356,11 +361,16 @@ impl Seal for Column {
             origin,
             context,
             receipt,
+            reference_count,
         } = self;
         terms.seal(out);
         origin.seal(out);
         context.seal(out);
         receipt.seal(out);
+        if *reference_count != NonZeroU32::MIN {
+            out.number(u64::MAX);
+            out.number(u64::from(reference_count.get()));
+        }
     }
 }
 /// The receipt pool outside the body that takes what a boundary transfer moves, so the transfer still
@@ -825,5 +835,45 @@ impl Seal for HazardLayout {
         variable.seal(out);
         leaves.seal(out);
         enters.seal(out);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Column, Context, RowId};
+    use crate::LawName;
+    use crate::identity::{Canonical, Seal};
+    use core::num::NonZeroU32;
+
+    fn column(reference_count: NonZeroU32) -> Column {
+        Column {
+            terms: vec![(RowId::at(0), -2), (RowId::at(1), 1)],
+            origin: LawName {
+                owner: "MT",
+                local: "reaction",
+            },
+            context: Context::Body,
+            receipt: None,
+            reference_count,
+        }
+    }
+
+    fn sealed(column: &Column) -> Vec<u8> {
+        let mut out = Canonical::new("column");
+        column.seal(&mut out);
+        out.into_bytes()
+    }
+
+    #[test]
+    fn a_count_above_one_moves_the_seal_and_a_count_of_one_seals_only_the_other_fields() {
+        let once = column(NonZeroU32::MIN);
+        let twice = column(NonZeroU32::new(2).expect("above zero"));
+        assert_ne!(sealed(&once), sealed(&twice));
+        let mut fields = Canonical::new("column");
+        once.terms.seal(&mut fields);
+        once.origin.seal(&mut fields);
+        once.context.seal(&mut fields);
+        once.receipt.seal(&mut fields);
+        assert_eq!(sealed(&once), fields.into_bytes());
     }
 }

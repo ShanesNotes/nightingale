@@ -407,6 +407,9 @@ pub enum CompileDefect {
     /// A reaction whose terms sit in two spaces of its site, named in space order. A reaction's terms sit in one space,
     /// apart from the space `energy_into` names.
     ReactionInTwoSpaces { law: LawName, spaces: [Space; 2] },
+    /// One chemistry where two cards' reactions both stand: terms that match up to an overall sign once each reaction's
+    /// counts are divided by their greatest common divisor, so a reaction and its reverse are one reaction.
+    ReactionOwnedTwice { laws: [LawName; 2], site: SiteId },
     /// A reaction that names a fuel whose energy content the schema does not state, so its energy has no value.
     UnstatedEnergy { law: LawName, species: Species },
     /// A reaction whose counts leave a conserved quantity open: an element its uses and makes do not hold alike, or

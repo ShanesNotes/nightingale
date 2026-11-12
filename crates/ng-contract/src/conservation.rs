@@ -667,7 +667,7 @@ mod tests {
                 .makes::<CarbonDioxide, 6>(Space::Interstitium)
                 .makes::<Water, 6>(Space::Interstitium)
                 .energy_into(Space::Thermal);
-            let burn = laws.reaction::<CapillaryBed, Glucose>("burn", burn);
+            let burn = laws.reaction::<CapillaryBed, Glucose, _>("burn", burn);
             let pace = laws.site_parameter::<CapillaryBed, Rate<Dimensionless>>(
                 ParameterKey::new("mt.burn-speed"),
                 Admissible::nonnegative(),

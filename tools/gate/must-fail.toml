@@ -138,6 +138,17 @@ core = "A reaction that moves an amount between two spaces of its site"
 mutants = ["reaction-in-one-space"]
 
 [[row]]
+core = "One chemistry two cards declare at one site"
+mutants = [
+  "reaction-owned-twice-refused",
+  "reaction-owners-compared",
+  "reaction-counts-divided",
+  "reaction-owners-compared-where-placed",
+  "reaction-and-its-reverse-are-one",
+  "reaction-owners-compared-without-energy",
+]
+
+[[row]]
 core = "A card serving a boundary route another card owns"
 mutants = ["process-owned-by-its-card", "process-of-another-card-supplied", "boundary-port-offers-no-process"]
 doctests = [

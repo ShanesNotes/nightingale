@@ -13,12 +13,14 @@ use crate::law::{
     ParameterContext, ParameterDeclaration, ReactionDeclaration, Selector, SlotDeclaration, SlotKind, Source,
     Where,
 };
+use crate::scheme::greatest_common_divisor;
 use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, PoolRef, RouteBoundary};
 use crate::{
     AdmissibleSet, AdmissionError, Anatomy, Book, Boundary, BoundaryDirection, Class, CompileDefect,
     Compliance, HeatRoute, Lasting, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Passage,
     Predicate, RateClass, Schema, SiteId, Sites, Space, Species, Wall,
 };
+use core::num::NonZeroU32;
 
 pub(crate) fn compile(
     schema: Schema,
@@ -337,7 +339,53 @@ fn check_reactions(fragments: &[FragmentData], schema: &Schema) -> Result<(), Co
             }
         }
     }
-    Ok(())
+    let pools: Vec<(SiteId, Space, Species)> = schema.pools().collect();
+    let mut placed = Vec::new();
+    for fragment in fragments {
+        for reaction in &fragment.reactions {
+            let law = LawName {
+                owner: fragment.owner,
+                local: reaction.name,
+            };
+            let count = |change: i64| u128::from(change.unsigned_abs());
+            let divisor = (reaction.terms.iter()).fold(0, |divisor, term| {
+                greatest_common_divisor(divisor, count(term.change))
+            });
+            let mut terms: Vec<(Species, Space, bool, u128)> = (reaction.terms.iter())
+                .map(|term| {
+                    (
+                        term.species,
+                        term.space,
+                        term.change > 0,
+                        count(term.change) / divisor,
+                    )
+                })
+                .collect();
+            terms.sort_unstable();
+            if terms.first().is_some_and(|&(_, _, made, _)| made) {
+                for (_, _, made, _) in &mut terms {
+                    *made = !*made;
+                }
+            }
+            let stands = |site: &SiteId| {
+                (reaction.terms.iter())
+                    .all(|term| pools.binary_search(&(*site, term.space, term.species)).is_ok())
+            };
+            for site in schema.anatomy.in_set(reaction.set).into_iter().filter(stands) {
+                placed.push(((site, terms.clone()), law));
+            }
+        }
+    }
+    placed.sort_unstable();
+    placed.dedup_by(|later, earlier| later.0 == earlier.0 && later.1.owner == earlier.1.owner);
+    let doubled = (placed.windows(2))
+        .filter(|pair| pair[0].0 == pair[1].0)
+        .map(|pair| ([pair[0].1, pair[1].1], pair[0].0.0))
+        .min();
+    match doubled {
+        Some((laws, site)) => Err(CompileDefect::ReactionOwnedTwice { laws, site }),
+        None => Ok(()),
+    }
 }
 
 fn declarations(fragments: &[FragmentData]) -> Result<Vec<&ParameterDeclaration>, CompileDefect> {
@@ -1520,6 +1568,7 @@ fn fluid_columns(placement: &mut Placement, places: &Places) -> Result<(), Compi
                     boundary: boundary.name,
                     coefficient: 1,
                 }),
+                reference_count: NonZeroU32::MIN,
             });
             let (amount, solvent) = (
                 Address::Unknown(UnknownId::at(row)),
@@ -1624,6 +1673,7 @@ fn column(law: LawName, reach: &Reach, rows: &Rows) -> Result<Column, CompileDef
         origin: law,
         context: reach.context,
         receipt,
+        reference_count: NonZeroU32::MIN,
     })
 }
 
@@ -1672,6 +1722,7 @@ fn reaction_columns(
             origin: law,
             context: Context::Site(site),
             receipt: None,
+            reference_count: reaction.reference_count,
         };
         columns.push((site, column));
     }
@@ -1695,6 +1746,7 @@ fn exterior(law: LawName, water: &RouteBoundary, rows: &Rows) -> Result<Column, 
             boundary: water.name,
             coefficient: -coefficient,
         }),
+        reference_count: NonZeroU32::MIN,
     })
 }
 

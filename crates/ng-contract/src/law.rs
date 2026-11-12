@@ -11,6 +11,7 @@ use crate::{
 };
 use core::cell::Cell;
 use core::marker::PhantomData;
+use core::num::NonZeroU32;
 
 /// Invariant in `'a`, so values branded by two assemblies or two kernels never unify.
 pub(crate) type Brand<'a> = PhantomData<fn(&'a ()) -> &'a ()>;
@@ -1192,39 +1193,68 @@ pub(crate) struct Term {
     pub(crate) space: Space,
     pub(crate) change: i64,
 }
-/// What a reaction uses and makes for each unit of its reference species `Q`: each species once, with its space and a
-/// whole count, and the space whose energy pool takes what the uses hold beyond the makes. It is built only from typed
-/// species, so no law writes a coefficient, a pool or a heat, and `Assembly::compile` checks it against each species'
-/// makeup.
-pub struct Proportions<Q> {
+/// What a reaction uses and makes in one turnover: `N` units of its reference species `Q`, used or made, and each other
+/// species once, each with its space and a whole count, and the space whose energy pool takes what the uses hold beyond
+/// the makes. It is built only from typed species, so no law writes a coefficient, a pool or a heat, and
+/// `Assembly::compile` checks it against each species' makeup.
+pub struct Proportions<Q, const N: u32 = 1> {
     terms: Vec<Term>,
     energy: Option<Space>,
     reference: PhantomData<Q>,
 }
-impl<Q: Reactant> Proportions<Q> {
-    /// One unit of `Q` used in `space`, so the reaction's rate counts `Q` used per second.
+impl<Q: Reactant, const N: u32> Proportions<Q, N> {
+    /// `N` units of `Q` used in `space`, so the reaction's rate counts `Q` used per second. A count of zero does not
+    /// compile.
+    /// ```compile_fail,E0080
+    /// use ng_contract::*;
+    /// let _ = Proportions::<Glucose, 0>::using(Space::Cells);
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// let _ = Proportions::<Glucose, 20>::using(Space::Cells);
+    /// ```
     pub fn using(space: Space) -> Self {
+        Self::counting(space, -i64::from(Self::COUNT.get()))
+    }
+    /// `N` units of `Q` made in `space`, so the reaction's rate counts `Q` made per second. A count of zero does not
+    /// compile.
+    /// ```compile_fail,E0080
+    /// use ng_contract::*;
+    /// let _ = Proportions::<Glycogen, 0>::making(Space::Cells);
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// let _ = Proportions::<Glycogen, 19>::making(Space::Cells);
+    /// ```
+    pub fn making(space: Space) -> Self {
+        Self::counting(space, i64::from(Self::COUNT.get()))
+    }
+    fn counting(space: Space, change: i64) -> Self {
         Self {
             terms: vec![Term {
                 species: Q::SPECIES,
                 space,
-                change: -1,
+                change,
             }],
             energy: None,
             reference: PhantomData,
         }
     }
 }
-impl<Q> Proportions<Q> {
-    /// `N` units of `R` used in `space`. A count of zero does not compile.
-    pub fn uses<R: Reactant, const N: u32>(self, space: Space) -> Self {
-        const { assert!(N > 0, "a reaction's count is a whole number above zero") };
-        self.term(R::SPECIES, space, -i64::from(N))
+impl<Q, const N: u32> Proportions<Q, N> {
+    const COUNT: NonZeroU32 = match NonZeroU32::new(N) {
+        Some(count) => count,
+        None => panic!("a reaction's count is a whole number above zero"),
+    };
+    /// `M` units of `R` used in `space`. A count of zero does not compile.
+    pub fn uses<R: Reactant, const M: u32>(self, space: Space) -> Self {
+        const { assert!(M > 0, "a reaction's count is a whole number above zero") };
+        self.term(R::SPECIES, space, -i64::from(M))
     }
-    /// `N` units of `R` made in `space`. A count of zero does not compile.
-    pub fn makes<R: Reactant, const N: u32>(self, space: Space) -> Self {
-        const { assert!(N > 0, "a reaction's count is a whole number above zero") };
-        self.term(R::SPECIES, space, i64::from(N))
+    /// `M` units of `R` made in `space`. A count of zero does not compile.
+    pub fn makes<R: Reactant, const M: u32>(self, space: Space) -> Self {
+        const { assert!(M > 0, "a reaction's count is a whole number above zero") };
+        self.term(R::SPECIES, space, i64::from(M))
     }
     /// The energy the uses hold beyond the makes enters the energy pool in `space` at the reaction's site, and a
     /// reaction that holds less than none draws it from there.
@@ -1265,70 +1295,70 @@ mod grants {
 /// use ng_contract::*;
 /// fn ungranted<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, made: Proportions<Glucose>)
 ///     -> Reaction<'b, Metabolism, TissueSite, Glucose> {
-///     mt.reaction::<TissueSite, Glucose>("burn", made)
+///     mt.reaction::<TissueSite, Glucose, _>("burn", made)
 /// }
 /// ```
 /// ```
 /// use ng_contract::*;
 /// fn granted<'b>(mt: &mut FragmentBuilder<'b, Metabolism>, made: Proportions<Glucose>)
 ///     -> Reaction<'b, Metabolism, CapillaryBed, Glucose> {
-///     mt.reaction::<CapillaryBed, Glucose>("burn", made)
+///     mt.reaction::<CapillaryBed, Glucose, _>("burn", made)
 /// }
 /// ```
 /// ```compile_fail,E0277
 /// use ng_contract::*;
 /// fn ungranted<'b>(hp: &mut FragmentBuilder<'b, Hepatic>, made: Proportions<Glucose>)
 ///     -> Reaction<'b, Hepatic, CapillaryBed, Glucose> {
-///     hp.reaction::<CapillaryBed, Glucose>("glycogen made", made)
+///     hp.reaction::<CapillaryBed, Glucose, _>("glycogen made", made)
 /// }
 /// ```
 /// ```compile_fail,E0277
 /// use ng_contract::*;
 /// fn ungranted<'b>(hp: &mut FragmentBuilder<'b, Hepatic>, made: Proportions<Glucose>)
 ///     -> Reaction<'b, Hepatic, Beds<Muscle>, Glucose> {
-///     hp.reaction::<Beds<Muscle>, Glucose>("glycogen made", made)
+///     hp.reaction::<Beds<Muscle>, Glucose, _>("glycogen made", made)
 /// }
 /// ```
 /// ```
 /// use ng_contract::*;
 /// fn granted<'b>(hp: &mut FragmentBuilder<'b, Hepatic>, made: Proportions<Glucose>)
 ///     -> Reaction<'b, Hepatic, Beds<Liver>, Glucose> {
-///     hp.reaction::<Beds<Liver>, Glucose>("glycogen made", made)
+///     hp.reaction::<Beds<Liver>, Glucose, _>("glycogen made", made)
 /// }
 /// ```
 /// ```compile_fail,E0277
 /// use ng_contract::*;
 /// fn ungranted<'b>(ms: &mut FragmentBuilder<'b, Musculoskeletal>, made: Proportions<Glucose>)
 ///     -> Reaction<'b, Musculoskeletal, CapillaryBed, Glucose> {
-///     ms.reaction::<CapillaryBed, Glucose>("glycogen made", made)
+///     ms.reaction::<CapillaryBed, Glucose, _>("glycogen made", made)
 /// }
 /// ```
 /// ```compile_fail,E0277
 /// use ng_contract::*;
 /// fn ungranted<'b>(ms: &mut FragmentBuilder<'b, Musculoskeletal>, made: Proportions<Glucose>)
 ///     -> Reaction<'b, Musculoskeletal, Beds<Liver>, Glucose> {
-///     ms.reaction::<Beds<Liver>, Glucose>("glycogen made", made)
+///     ms.reaction::<Beds<Liver>, Glucose, _>("glycogen made", made)
 /// }
 /// ```
 /// ```
 /// use ng_contract::*;
 /// fn granted<'b>(ms: &mut FragmentBuilder<'b, Musculoskeletal>, made: Proportions<Glucose>)
 ///     -> Reaction<'b, Musculoskeletal, Beds<Muscle>, Glucose> {
-///     ms.reaction::<Beds<Muscle>, Glucose>("glycogen made", made)
+///     ms.reaction::<Beds<Muscle>, Glucose, _>("glycogen made", made)
 /// }
 /// ```
 /// ```compile_fail,E0277
 /// use ng_contract::*;
 /// fn ungranted<'b>(rn: &mut FragmentBuilder<'b, Renal>, made: Proportions<AminoAcids>)
 ///     -> Reaction<'b, Renal, Beds<Liver>, AminoAcids> {
-///     rn.reaction::<Beds<Liver>, AminoAcids>("ammonium made", made)
+///     rn.reaction::<Beds<Liver>, AminoAcids, _>("ammonium made", made)
 /// }
 /// ```
 /// ```
 /// use ng_contract::*;
 /// fn granted<'b>(rn: &mut FragmentBuilder<'b, Renal>, made: Proportions<AminoAcids>)
 ///     -> Reaction<'b, Renal, Beds<Tubule>, AminoAcids> {
-///     rn.reaction::<Beds<Tubule>, AminoAcids>("ammonium made", made)
+///     rn.reaction::<Beds<Tubule>, AminoAcids, _>("ammonium made", made)
 /// }
 /// ```
 pub trait ReactsAt<C: SiteSet>: grants::Sealed<C> + Owner {}
@@ -1345,6 +1375,7 @@ pub(crate) struct ReactionDeclaration {
     pub(crate) set: Sites,
     pub(crate) terms: Vec<Term>,
     pub(crate) energy: Option<Space>,
+    pub(crate) reference_count: NonZeroU32,
 }
 
 /// A transfer law on a pair: what leaves one end enters the other.
@@ -1926,10 +1957,10 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
         self.attach(transfer.serves, transfer.rate.data);
     }
     /// Declares a reaction at every site of `C` where each pool it uses or makes exists, and records the rate it owes.
-    pub fn reaction<C: SiteSet, Q: Reactant>(
+    pub fn reaction<C: SiteSet, Q: Reactant, const N: u32>(
         &mut self,
         name: &'static str,
-        proportions: Proportions<Q>,
+        proportions: Proportions<Q, N>,
     ) -> Reaction<'b, O, C, Q>
     where
         O: ReactsAt<C>,
@@ -1944,6 +1975,7 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
             set: C::SET,
             terms,
             energy,
+            reference_count: Proportions::<Q, N>::COUNT,
         });
         Reaction {
             name,
@@ -1951,7 +1983,8 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
             kind: PhantomData,
         }
     }
-    /// The reaction's rate in units of its reference species, positive forward: one law in each mode, as a route's.
+    /// The reaction's rate in its reference species used or made per second, as a source states it, positive forward:
+    /// one law in each mode, as a route's. The column's rate, in turnovers, is this value over the reference's count.
     pub fn react_at<C: SiteSet, Q>(
         &mut self,
         reaction: &Reaction<'b, O, C, Q>,

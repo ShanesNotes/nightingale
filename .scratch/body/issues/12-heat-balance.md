@@ -16,3 +16,5 @@ Blocked by: 05, 09, `.scratch/research/issues/12-law-forms-heat.md`
 - [ ] From [ticket 05](05-the-days-inputs.md): each law here that reads a lasting input is reviewed against the rule by reading: the input scales a gain or a set point and never stands for a produced quantity. Compile's `UnscaledInput` is only a stand-in: it passes a law that reads any parameter, such as `0 = k (T - room_air())`, and refuses one that reads only inputs
 
 **Non-goals:** more than two nodes, fever, exercise, and clothing as anything but one insulation value.
+
+From [ticket 04](04-scopes-ports-and-census.md): MT's conduction feeds the conducting airway's heat store, and [ticket 10](10-lungs-breathe.md)'s airway heat exit leaves from that store. Until this ticket lands, MT's stand-in in [ticket 06](06-whole-body-on-holds.md)'s body serves conduction at the airway. This ticket's conduction law reaches the airway too, and replaces that stand-in there.

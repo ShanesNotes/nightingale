@@ -588,7 +588,9 @@ impl CompiledBody {
                 }
                 match swept.instance.target {
                     Target::Column(column) => {
-                        for &(_, coefficient) in &self.layout.columns[column.index()].terms {
+                        let column = &self.layout.columns[column.index()];
+                        let slope = column.turnovers(slope);
+                        for &(_, coefficient) in &column.terms {
                             values[next()] -= coefficient as f64 * slope;
                         }
                     }
@@ -621,7 +623,9 @@ impl CompiledBody {
             let slope: f64 = fitted.map(|&(slot, _)| swept.slope(slot)).sum();
             match swept.instance.target {
                 Target::Column(column) => {
-                    for &(row, coefficient) in &self.layout.columns[column.index()].terms {
+                    let column = &self.layout.columns[column.index()];
+                    let slope = column.turnovers(slope);
+                    for &(row, coefficient) in &column.terms {
                         slopes[row.index()] -= coefficient as f64 * slope;
                     }
                 }
@@ -643,7 +647,9 @@ impl CompiledBody {
         for (instance, value) in self.layout.instances.iter().zip(values) {
             let Some(value) = *value else { continue };
             match instance.target {
-                Target::Column(column) => columns[column.index()] = value,
+                Target::Column(column) => {
+                    columns[column.index()] = self.layout.columns[column.index()].turnovers(value);
+                }
                 Target::Row(row) => rows[row.index()] += positive_part(instance, value),
             }
         }
@@ -1168,5 +1174,176 @@ mod tests {
         let switching = switching();
         assert_eq!(switching.layout.guards.len(), 2);
         reads_back(&switching);
+    }
+
+    const STORE_SPEED: f64 = 0.001;
+
+    fn stored() -> (CompiledBody, BoundParameters) {
+        let origin = || Position::new(measure(0.0), measure(0.0), measure(0.0));
+        let mut map = AnatomyBuilder::new();
+        let root = map.site::<TissueSite>("body", origin()).id();
+        let vessel = map.site::<VesselSegment>("vessel", origin()).id();
+        let bed = map.site::<CapillaryBed>("bed", origin()).id();
+        map.contain(root, vessel);
+        map.contain(root, bed);
+        map.connect(Network::Vascular, vessel, bed);
+        map.connect(Network::Vascular, bed, vessel);
+        let mut schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+        for space in [Space::Plasma, Space::Interstitium, Space::Lumen] {
+            schema.leave_out(space, "the bench reacts in the cells alone");
+        }
+        schema.carry::<Glucose, CapillaryBed>(Space::Cells);
+        schema.carry::<Glycogen, CapillaryBed>(Space::Cells);
+        schema.carry::<Oxygen, CapillaryBed>(Space::Cells);
+        schema.carry::<CarbonDioxide, CapillaryBed>(Space::Cells);
+        schema.carry::<Energy, CapillaryBed>(Space::Thermal);
+        (schema.energy_content::<Glucose>(measure(1_000.0))).expect("a content");
+        (schema.energy_content::<Glycogen>(measure(900.0))).expect("a content");
+        let body = assemble(schema, |mut body| {
+            let held = HeldDeclaration::<Metabolism>::new(Vec::new(), Vec::new(), "synthetic");
+            let (mut laws, _) = body.hold(held)?.parts();
+            let class = RateClass::new(RateBand::Minutes, 10_000_000_000)?;
+            let stored = Proportions::<Glycogen, 19>::making(Space::Cells)
+                .uses::<Glucose, 20>(Space::Cells)
+                .uses::<Oxygen, 6>(Space::Cells)
+                .makes::<CarbonDioxide, 6>(Space::Cells)
+                .makes::<Water, 25>(Space::Cells)
+                .energy_into(Space::Thermal);
+            let store = laws.reaction::<CapillaryBed, Glycogen, 19>("store", stored);
+            let speed = laws.site_parameter::<CapillaryBed, Quotient<Rate<Glycogen>, Glucose>>(
+                ParameterKey::new("mt.store-speed"),
+                Admissible::nonnegative(),
+            );
+            let fuel = store.amount::<Glucose>();
+            let rate = laws.site_kernel(|mut k| {
+                let (fuel, speed) = (k.at_site(&fuel), k.site_parameter(&speed));
+                let rate = k.multiply(speed, fuel);
+                let rate = k.as_dimension::<_, Rate<Glycogen>>(rate);
+                k.finish(rate, laws.every_mode(), class)
+            });
+            laws.react_at(&store, rate);
+            let burnt = Proportions::<Glucose>::using(Space::Cells)
+                .uses::<Oxygen, 6>(Space::Cells)
+                .makes::<CarbonDioxide, 6>(Space::Cells)
+                .makes::<Water, 6>(Space::Cells)
+                .energy_into(Space::Thermal);
+            let burn = laws.reaction::<CapillaryBed, Glucose, 1>("burn", burnt);
+            let still = laws.site_parameter::<CapillaryBed, Rate<Glucose>>(
+                ParameterKey::new("mt.burn-rate"),
+                Admissible::nonnegative(),
+            );
+            let rate = laws.site_kernel(|mut k| {
+                let still = k.site_parameter(&still);
+                k.finish(still, laws.every_mode(), class)
+            });
+            laws.react_at(&burn, rate);
+            body.add(laws.finish());
+            body.compile()
+        })
+        .expect("compiled");
+        let mut packet: ParameterPacket<SyntheticFixture> = ParameterPacket::new();
+        let beds = Binding::Class(Class::CapillaryBed);
+        let speed = measure::<Quotient<Rate<Glycogen>, Glucose>>(STORE_SPEED);
+        (packet.synthetic(ParameterKey::new("mt.store-speed"), beds, speed, "synthetic")).expect("once");
+        let still = measure::<Rate<Glucose>>(0.0);
+        (packet.synthetic(ParameterKey::new("mt.burn-rate"), beds, still, "synthetic")).expect("once");
+        (packet.start_rest(&body, |_| 100.0, "synthetic")).expect("a start for each row");
+        let bound = body.bind(packet).expect("bound");
+        (body, bound)
+    }
+
+    fn still_residuals(
+        body: &CompiledBody,
+        modes: &[usize],
+        parameters: &[f64],
+        unknowns: &[f64],
+    ) -> Vec<f64> {
+        let frame = DriveFrame::default();
+        let inputs = Inputs {
+            parameters,
+            frame: &frame,
+            unknowns,
+            modes,
+            draws: &[],
+            factors: &[],
+        };
+        let values = body.instance_values(&inputs).expect("defined");
+        let (columns, rows) = body.targets(&values);
+        body.residuals(&columns, &rows, &vec![0.0; unknowns.len()])
+    }
+
+    #[test]
+    fn the_slopes_of_a_reaction_counting_its_reference_nineteen_times_match_central_differences() {
+        let (body, bound) = stored();
+        let (modes, parameters) = (&bound.modes, &bound.values);
+        let start: Vec<f64> = body
+            .rows()
+            .iter()
+            .map(|row| bound.starts[row.id().index()])
+            .collect();
+        let row_of = |wanted: Species| {
+            (body.rows().iter())
+                .position(|row| matches!(row.kind(), RowKind::Amount { species, .. } if species == wanted))
+                .expect("a pool at the bed")
+        };
+        let (glucose, glycogen) = (row_of(Species::Glucose), row_of(Species::Glycogen));
+        let speed = (body.parameters().iter())
+            .position(|slot| slot.key() == ParameterKey::new("mt.store-speed"))
+            .expect("the store's speed");
+        let frame = DriveFrame::default();
+        let inputs = Inputs {
+            parameters,
+            frame: &frame,
+            unknowns: &start,
+            modes,
+            draws: &[],
+            factors: &[],
+        };
+        let jacobian = body.jacobian(&inputs, 0.0).expect("defined");
+        let slopes = (body.parameter_slopes(&inputs, &[ParameterId::at(speed)])).expect("defined");
+        let sparsity = body.sparsity();
+        let entry = |row: usize| {
+            (sparsity.offsets[row]..sparsity.offsets[row + 1])
+                .find(|&at| sparsity.unknowns[at] == UnknownId::at(glucose))
+                .map_or(0.0, |at| jacobian[at])
+        };
+        let near = |difference: f64, slope: f64| (difference - slope).abs() <= 1e-9 * difference.abs();
+        let nudged = |values: &[f64], at: usize, by: f64| {
+            let mut nudged = values.to_vec();
+            nudged[at] += by;
+            nudged
+        };
+        let (more, less) = (nudged(&start, glucose, 1.0), nudged(&start, glucose, -1.0));
+        let (up, down) = (
+            still_residuals(&body, modes, parameters, &more),
+            still_residuals(&body, modes, parameters, &less),
+        );
+        for row in 0..start.len() {
+            let difference = (up[row] - down[row]) / 2.0;
+            assert!(
+                near(difference, entry(row)),
+                "row {row} against glucose: a central difference of {difference}, an entry of {}",
+                entry(row)
+            );
+        }
+        let step = STORE_SPEED / 10.0;
+        let (faster, slower) = (nudged(parameters, speed, step), nudged(parameters, speed, -step));
+        let (up, down) = (
+            still_residuals(&body, modes, &faster, &start),
+            still_residuals(&body, modes, &slower, &start),
+        );
+        for row in 0..start.len() {
+            let difference = (up[row] - down[row]) / (2.0 * step);
+            assert!(
+                near(difference, slopes[row]),
+                "row {row} against the speed: a central difference of {difference}, a slope of {}",
+                slopes[row]
+            );
+        }
+        assert!(
+            (entry(glycogen) + STORE_SPEED).abs() <= 1e-12 * STORE_SPEED,
+            "glycogen is made at the speed per glucose held, not {}",
+            -entry(glycogen)
+        );
     }
 }

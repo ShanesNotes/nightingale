@@ -246,7 +246,7 @@ fn burn() -> Proportions<Glucose> {
 }
 
 fn burned(laws: &mut FragmentBuilder<'_, Metabolism>, proportions: Proportions<Glucose>, class: RateClass) {
-    let burn = laws.reaction::<CapillaryBed, Glucose>(BURN, proportions);
+    let burn = laws.reaction::<CapillaryBed, Glucose, _>(BURN, proportions);
     let speed = laws.site_parameter::<CapillaryBed, Rate<Dimensionless>>(
         ParameterKey::new(BURN_SPEED.0),
         Admissible::nonnegative(),

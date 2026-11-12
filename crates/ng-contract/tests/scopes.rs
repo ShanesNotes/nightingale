@@ -979,7 +979,7 @@ fn glycogen_made(glucose: Space) -> Result<CompiledBody, AdmissionError> {
             .makes::<Glycogen, 1>(Space::Cells)
             .makes::<Water, 1>(Space::Cells)
             .energy_into(Space::Thermal);
-        let made = ms.reaction::<Beds<Muscle>, Glucose>("glycogen made", stored);
+        let made = ms.reaction::<Beds<Muscle>, Glucose, _>("glycogen made", stored);
         let class = slow()?;
         let rate = ms.site_kernel(|mut k| {
             let zero = k.zero::<Rate<Glucose>>();
@@ -1000,6 +1000,290 @@ fn a_reaction_that_takes_its_glucose_across_the_cell_membrane_is_refused_naming_
         Err(defect(CompileDefect::ReactionInTwoSpaces {
             law: law("MS", "glycogen made"),
             spaces: [Space::Interstitium, Space::Cells],
+        }))
+    );
+    Ok(())
+}
+
+fn react<'b, O: ReactsAt<C>, C: SiteSet, Q: Reactant, const N: u32>(
+    laws: &mut FragmentBuilder<'b, O>,
+    name: &'static str,
+    proportions: Proportions<Q, N>,
+) -> Result<(), AdmissionError> {
+    let made = laws.reaction::<C, Q, N>(name, proportions);
+    let class = slow()?;
+    let rate = laws.site_kernel(|mut k| {
+        let zero = k.zero::<Rate<Q>>();
+        k.finish(zero, laws.every_mode(), class)
+    });
+    laws.react_at(&made, rate);
+    Ok(())
+}
+
+fn stored<const N: u32>() -> Proportions<Glucose, N> {
+    Proportions::<Glucose, N>::using(Space::Cells)
+        .makes::<Glycogen, N>(Space::Cells)
+        .makes::<Water, N>(Space::Cells)
+        .energy_into(Space::Thermal)
+}
+
+fn burned() -> Proportions<Glucose> {
+    Proportions::<Glucose>::using(Space::Cells)
+        .uses::<Oxygen, 6>(Space::Cells)
+        .makes::<CarbonDioxide, 6>(Space::Cells)
+        .makes::<Water, 6>(Space::Cells)
+        .energy_into(Space::Thermal)
+}
+
+const BOTH_BEDS: [(&str, Tissue); 2] = [("liver bed", Tissue::Liver), ("muscle bed", Tissue::Muscle)];
+
+fn chemistry(
+    mut schema: Schema,
+    glycogen_at: &[&'static str],
+    cards: impl for<'b> FnOnce(&mut Assembly<'b>) -> Result<(), AdmissionError>,
+) -> Result<CompiledBody, AdmissionError> {
+    for space in [Space::Interstitium, Space::Cells] {
+        schema.carry::<Glucose, CapillaryBed>(space);
+    }
+    schema.carry::<Oxygen, CapillaryBed>(Space::Cells);
+    schema.carry::<CarbonDioxide, CapillaryBed>(Space::Cells);
+    schema.carry::<Energy, CapillaryBed>(Space::Thermal);
+    for &key in glycogen_at {
+        schema.pool::<Glycogen>(site::<CapillaryBed>(key), Space::Cells)?;
+    }
+    schema.energy_content::<Glucose>(Measure::new(1_000.0)?)?;
+    schema.energy_content::<Glycogen>(Measure::new(900.0)?)?;
+    assemble(schema, |mut body| {
+        let (mut fl, ports) = body.fluids()?.parts();
+        let water = ports.cell_membrane::<CapillaryBed, Water>(&mut fl);
+        still(&mut fl, &water)?;
+        body.add(fl.finish());
+        cards(&mut body)?;
+        body.compile()
+    })
+}
+
+fn cell_schema(beds: &[(&'static str, Tissue)]) -> Result<Schema, AdmissionError> {
+    tissues(beds, &[Space::Plasma, Space::Lumen])
+}
+
+fn metabolism<'b>(
+    body: &mut Assembly<'b>,
+    reactions: impl FnOnce(&mut FragmentBuilder<'b, Metabolism>) -> Result<(), AdmissionError>,
+) -> Result<(), AdmissionError> {
+    let (mut mt, ports) = body.metabolism(None)?.parts();
+    let route = ports.fuel_into_cells::<Glucose>(&mut mt);
+    still(&mut mt, &route)?;
+    reactions(&mut mt)?;
+    body.add(mt.finish());
+    Ok(())
+}
+
+fn hepatic<'b>(
+    body: &mut Assembly<'b>,
+    reactions: impl FnOnce(&mut FragmentBuilder<'b, Hepatic>) -> Result<(), AdmissionError>,
+) -> Result<(), AdmissionError> {
+    let (mut hp, ports) = body.hepatic(None)?.parts();
+    let route = ports.fuel_into_cells::<Glucose>(&mut hp);
+    still(&mut hp, &route)?;
+    reactions(&mut hp)?;
+    body.add(hp.finish());
+    Ok(())
+}
+
+fn musculoskeletal<'b, const N: u32>(
+    body: &mut Assembly<'b>,
+    made: Proportions<Glucose, N>,
+) -> Result<(), AdmissionError> {
+    let (mut ms, _) = body.musculoskeletal(None)?.parts();
+    react::<_, Beds<Muscle>, _, N>(&mut ms, "glycogen made", made)?;
+    body.add(ms.finish());
+    Ok(())
+}
+
+fn stores_and_burns(mt: &mut FragmentBuilder<'_, Metabolism>) -> Result<(), AdmissionError> {
+    react::<_, CapillaryBed, _, 1>(mt, "glycogen made", stored())?;
+    react::<_, CapillaryBed, _, 1>(mt, "burn", burned())
+}
+
+fn burns(mt: &mut FragmentBuilder<'_, Metabolism>) -> Result<(), AdmissionError> {
+    react::<_, CapillaryBed, _, 1>(mt, "burn", burned())
+}
+
+#[test]
+fn the_musculoskeletal_card_making_metabolisms_glycogen_at_the_muscle_bed_is_refused_naming_both_laws_and_the_bed()
+-> Result<(), AdmissionError> {
+    let found = chemistry(cell_schema(&MUSCLE_BED)?, &["muscle bed"], |body| {
+        metabolism(body, stores_and_burns)?;
+        musculoskeletal(body, stored::<1>())
+    });
+    assert_eq!(
+        found.map(|body| body.model_hash()),
+        Err(defect(CompileDefect::ReactionOwnedTwice {
+            laws: [law("MS", "glycogen made"), law("MT", "glycogen made")],
+            site: site::<CapillaryBed>("muscle bed"),
+        }))
+    );
+    Ok(())
+}
+
+#[test]
+fn the_hepatic_card_burning_glucose_as_metabolism_does_at_the_liver_bed_is_refused()
+-> Result<(), AdmissionError> {
+    let found = chemistry(cell_schema(&BOTH_BEDS)?, &["muscle bed"], |body| {
+        metabolism(body, burns)?;
+        hepatic(body, |hp| {
+            react::<_, Beds<Liver>, _, 1>(hp, "storage burn", burned())
+        })?;
+        musculoskeletal(body, stored::<1>())
+    });
+    assert_eq!(
+        found.map(|body| body.model_hash()),
+        Err(defect(CompileDefect::ReactionOwnedTwice {
+            laws: [law("HP", "storage burn"), law("MT", "burn")],
+            site: site::<CapillaryBed>("liver bed"),
+        }))
+    );
+    Ok(())
+}
+
+#[test]
+fn a_copy_with_every_count_doubled_is_the_same_chemistry_and_is_refused() -> Result<(), AdmissionError> {
+    let found = chemistry(cell_schema(&MUSCLE_BED)?, &["muscle bed"], |body| {
+        metabolism(body, stores_and_burns)?;
+        musculoskeletal(body, stored::<2>())
+    });
+    assert_eq!(
+        found.map(|body| body.model_hash()),
+        Err(defect(CompileDefect::ReactionOwnedTwice {
+            laws: [law("MS", "glycogen made"), law("MT", "glycogen made")],
+            site: site::<CapillaryBed>("muscle bed"),
+        }))
+    );
+    Ok(())
+}
+
+#[test]
+fn the_hepatic_cards_storage_beside_metabolisms_burn_at_the_liver_bed_compiles() -> Result<(), AdmissionError>
+{
+    chemistry(cell_schema(&BOTH_BEDS)?, &["liver bed"], |body| {
+        metabolism(body, burns)?;
+        hepatic(body, |hp| {
+            react::<_, Beds<Liver>, _, 1>(hp, "glycogen made", stored())
+        })
+    })?;
+    Ok(())
+}
+
+#[test]
+fn one_card_declaring_one_chemistry_under_two_names_compiles() -> Result<(), AdmissionError> {
+    chemistry(cell_schema(&MUSCLE_BED)?, &["muscle bed"], |body| {
+        metabolism(body, |mt| {
+            stores_and_burns(mt)?;
+            react::<_, CapillaryBed, _, 2>(mt, "glycogen kept", stored())
+        })
+    })?;
+    Ok(())
+}
+
+#[test]
+fn two_cards_with_one_chemistry_at_two_beds_compile() -> Result<(), AdmissionError> {
+    chemistry(cell_schema(&BOTH_BEDS)?, &BOTH_BEDS.map(|bed| bed.0), |body| {
+        metabolism(body, burns)?;
+        hepatic(body, |hp| {
+            react::<_, Beds<Liver>, _, 1>(hp, "glycogen made", stored())
+        })?;
+        musculoskeletal(body, stored::<1>())
+    })?;
+    Ok(())
+}
+
+#[test]
+fn a_grant_shared_where_one_chemistry_has_no_pools_is_no_second_owner() -> Result<(), AdmissionError> {
+    let found = chemistry(cell_schema(&BOTH_BEDS)?, &["liver bed"], |body| {
+        metabolism(body, stores_and_burns)?;
+        hepatic(body, |_| Ok(()))?;
+        musculoskeletal(body, stored::<1>())
+    });
+    assert_eq!(
+        found.map(|body| body.model_hash()),
+        Err(defect(CompileDefect::ReactionNowhere {
+            law: law("MS", "glycogen made"),
+        }))
+    );
+    Ok(())
+}
+
+fn lactate_in_cells(beds: &[(&'static str, Tissue)], content: f64) -> Result<Schema, AdmissionError> {
+    let mut schema = cell_schema(beds)?;
+    schema.carry::<Lactate, CapillaryBed>(Space::Cells);
+    schema.energy_content::<Lactate>(Measure::new(content)?)?;
+    Ok(schema)
+}
+
+fn glycolysis() -> Proportions<Glucose> {
+    Proportions::<Glucose>::using(Space::Cells).makes::<Lactate, 2>(Space::Cells)
+}
+
+fn beside_glycolysis(made: Proportions<Glucose>) -> Result<CompiledBody, AdmissionError> {
+    chemistry(lactate_in_cells(&BOTH_BEDS, 400.0)?, &[], |body| {
+        metabolism(body, |mt| {
+            burns(mt)?;
+            react::<_, CapillaryBed, _, 1>(mt, "glycolysis", glycolysis().energy_into(Space::Thermal))
+        })?;
+        hepatic(body, |hp| {
+            react::<_, Beds<Liver>, _, 1>(hp, "glucose from lactate", made)
+        })
+    })
+}
+
+#[test]
+fn the_hepatic_card_writing_metabolisms_glycolysis_in_reverse_at_the_liver_bed_is_refused_naming_both_laws_and_the_bed()
+-> Result<(), AdmissionError> {
+    let reverse = Proportions::<Glucose>::making(Space::Cells)
+        .uses::<Lactate, 2>(Space::Cells)
+        .energy_into(Space::Thermal);
+    assert_eq!(
+        beside_glycolysis(reverse).map(|body| body.model_hash()),
+        Err(defect(CompileDefect::ReactionOwnedTwice {
+            laws: [law("HP", "glucose from lactate"), law("MT", "glycolysis")],
+            site: site::<CapillaryBed>("liver bed"),
+        }))
+    );
+    Ok(())
+}
+
+#[test]
+fn the_hepatic_cards_glucose_from_lactate_with_its_own_fuel_terms_beside_metabolisms_glycolysis_compiles()
+-> Result<(), AdmissionError> {
+    let forward = Proportions::<Glucose>::making(Space::Cells)
+        .uses::<Lactate, 3>(Space::Cells)
+        .uses::<Oxygen, 3>(Space::Cells)
+        .makes::<CarbonDioxide, 3>(Space::Cells)
+        .makes::<Water, 3>(Space::Cells)
+        .energy_into(Space::Thermal);
+    beside_glycolysis(forward)?;
+    Ok(())
+}
+
+#[test]
+fn two_cards_with_one_chemistry_that_leaves_no_energy_are_refused_though_only_one_names_an_energy_space()
+-> Result<(), AdmissionError> {
+    let found = chemistry(lactate_in_cells(&MUSCLE_BED, 500.0)?, &[], |body| {
+        metabolism(body, |mt| {
+            burns(mt)?;
+            react::<_, CapillaryBed, _, 1>(mt, "glycolysis", glycolysis().energy_into(Space::Thermal))
+        })?;
+        let (mut ms, _) = body.musculoskeletal(None)?.parts();
+        react::<_, Beds<Muscle>, _, 1>(&mut ms, "glycolysis", glycolysis())?;
+        body.add(ms.finish());
+        Ok(())
+    });
+    assert_eq!(
+        found.map(|body| body.model_hash()),
+        Err(defect(CompileDefect::ReactionOwnedTwice {
+            laws: [law("MS", "glycolysis"), law("MT", "glycolysis")],
+            site: site::<CapillaryBed>("muscle bed"),
         }))
     );
     Ok(())

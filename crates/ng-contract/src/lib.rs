@@ -552,14 +552,14 @@
 //! use ng_contract::*;
 //! fn ungranted<'b>(laws: &mut FragmentBuilder<'b, Renal>, burn: Proportions<Glucose>)
 //!     -> Reaction<'b, Renal, CapillaryBed, Glucose> {
-//!     laws.reaction::<CapillaryBed, Glucose>("burn", burn)
+//!     laws.reaction::<CapillaryBed, Glucose, _>("burn", burn)
 //! }
 //! ```
 //! ```
 //! use ng_contract::*;
 //! fn granted<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, burn: Proportions<Glucose>)
 //!     -> Reaction<'b, Metabolism, CapillaryBed, Glucose> {
-//!     laws.reaction::<CapillaryBed, Glucose>("burn", burn)
+//!     laws.reaction::<CapillaryBed, Glucose, _>("burn", burn)
 //! }
 //! ```
 //! A reaction's rate counts its reference species.
