@@ -128,7 +128,7 @@ fn policy(body: &CompiledBody, windows: SlidingWindows) -> Result<CertificatePol
             Measure::new(1e-12)?,
             Measure::<Energy>::new(1e4)?,
         ),
-        other => panic!("a book this bench does not hold: {other:?}"),
+        other => panic!("a quantity this bench does not hold: {other:?}"),
     });
     let quantities = quantities.collect::<Result<Vec<_>, _>>()?;
     CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows)
@@ -211,7 +211,8 @@ fn run<Q: Reactant>((body, bed): &(CompiledBody, SiteId), rate: f64, partnered: 
     let view = session.conservation();
     let window = NonZeroU64::new(60 * SECOND).expect("positive");
     let windows = SlidingWindows::new(window, end.nanoseconds()).expect("a coverage");
-    let certificate = certify(&view, &policy(body, windows).expect("a policy")).expect("every book closes");
+    let certificate =
+        certify(&view, &policy(body, windows).expect("a policy")).expect("every quantity closes");
     let mut books: Vec<Book> = (certificate.results().iter())
         .map(|result| result.quantity().book())
         .collect();
@@ -249,7 +250,7 @@ fn books(elements: &[Element]) -> Vec<Book> {
 }
 
 #[test]
-fn glycogen_stored_from_twenty_glucose_moves_glucose_by_its_rate_and_closes_every_book() {
+fn glycogen_stored_from_twenty_glucose_moves_glucose_by_its_rate_and_every_quantity_closes() {
     let stored = Proportions::<Glucose, 20>::using(Space::Cells)
         .uses::<Oxygen, 6>(Space::Cells)
         .makes::<Glycogen, 19>(Space::Cells)
@@ -279,7 +280,7 @@ fn glycogen_stored_from_twenty_glucose_moves_glucose_by_its_rate_and_closes_ever
 }
 
 #[test]
-fn urea_made_from_amino_acids_moves_by_its_rate_and_closes_every_book() {
+fn urea_made_from_amino_acids_moves_by_its_rate_and_every_quantity_closes() {
     let made = Proportions::<Urea>::making(Space::Cells)
         .uses::<AminoAcids, 2>(Space::Cells)
         .uses::<Oxygen, 6>(Space::Cells)
@@ -312,7 +313,7 @@ fn urea_made_from_amino_acids_moves_by_its_rate_and_closes_every_book() {
 }
 
 #[test]
-fn creatinine_made_from_body_protein_moves_by_its_rate_and_closes_every_book() {
+fn creatinine_made_from_body_protein_moves_by_its_rate_and_every_quantity_closes() {
     let made = Proportions::<Creatinine>::making(Space::Cells)
         .uses::<BodyProtein, 3>(Space::Cells)
         .uses::<Oxygen, 6>(Space::Cells)
@@ -345,7 +346,7 @@ fn creatinine_made_from_body_protein_moves_by_its_rate_and_closes_every_book() {
 }
 
 #[test]
-fn glucose_made_from_lactate_warms_its_bed_and_closes_every_book() {
+fn glucose_made_from_lactate_warms_its_bed_and_every_quantity_closes() {
     let made = Proportions::<Glucose>::making(Space::Cells)
         .uses::<Lactate, 3>(Space::Cells)
         .uses::<Oxygen, 3>(Space::Cells)

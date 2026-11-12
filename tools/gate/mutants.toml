@@ -1222,7 +1222,7 @@ name = "extent-per-reference"
 path = "crates/ng-contract/src/evaluate.rs"
 old = '''columns[column.index()] = self.layout.columns[column.index()].turnovers(value);'''
 new = '''columns[column.index()] = value;'''
-test = "-p ng-validate --test reference_count glycogen_stored_from_twenty_glucose_moves_glucose_by_its_rate_and_closes_every_book"
+test = "-p ng-validate --test reference_count glycogen_stored_from_twenty_glucose_moves_glucose_by_its_rate_and_every_quantity_closes"
 
 [[mutant]]
 name = "jacobian-per-reference"
