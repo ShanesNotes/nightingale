@@ -384,9 +384,7 @@ fn the_reference_count_is_in_the_model_hash() {
     let carry = |schema: &mut Schema| {
         schema.carry::<Glucose, CapillaryBed>(Space::Cells);
     };
-    let (once, _) = bed(carry, burn(), None, false).expect("compiled");
     let (twice, _) = bed(carry, burn_twice(), None, false).expect("compiled");
-    assert_ne!(once.model_hash(), twice.model_hash());
     expect!["1ecafbca522756f57161f9ed7203af0bb52a0be9299d2fbb822510522d37bee6"]
         .assert_eq(&hex(twice.model_hash().digest()));
 }

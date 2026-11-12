@@ -1260,6 +1260,14 @@ new = '''if false && *reference_count != NonZeroU32::MIN {'''
 test = "-p ng-contract --lib body::tests::a_count_above_one_moves_the_seal_and_a_count_of_one_seals_only_the_other_fields"
 
 [[mutant]]
+name = "reference-count-tagged"
+path = "crates/ng-contract/src/body.rs"
+old = '''            out.number(u64::MAX);
+            out.number(u64::from(reference_count.get()));'''
+new = '''            out.number(u64::from(reference_count.get()));'''
+test = "-p ng-validate --test reference_count the_reference_count_is_in_the_model_hash"
+
+[[mutant]]
 name = "reacting-part-spanned"
 path = "crates/ng-contract/src/conservation.rs"
 old = '''if !spans_conserved(part, inside, amounts, &found).ok_or(overflow)? {'''
