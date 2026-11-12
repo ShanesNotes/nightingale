@@ -552,6 +552,272 @@ new = '''owner: Boundary::CARD,'''
 test = "-p ng-contract --test scopes a_process_at_a_pool_the_body_lacks_is_named_under_its_card"
 
 [[mutant]]
+name = "crossed-twice-refused"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|pair| pair[0].0 == pair[1].0 && pair[0].1 == pair[1].1 && pair[0].2 == pair[1].2)'''
+new = '''.filter(|_| false)'''
+test = "-p ng-contract --test scopes two_cards_crossing_one_wall_with_one_species_at_one_bed_is_refused"
+
+[[mutant]]
+name = "crossed-twice-at-one-site"
+path = "crates/ng-contract/src/compile.rs"
+old = '''&& pair[0].2 == pair[1].2)'''
+new = ''')'''
+test = "-p ng-contract --test scopes disjoint_sets_of_one_wall_and_species_take_two_cards"
+
+[[mutant]]
+name = "owned-crossing-at-the-capillary-wall"
+path = "crates/ng-contract/src/law.rs"
+old = '''Family::Exchange(species) => Some((&[Crossed::Capillary], species)),'''
+new = '''Family::Exchange(_) => None,'''
+test = "-p ng-contract --test scopes the_metabolism_card_and_fluids_cannot_both_move_oxygen_across_the_capillary_wall"
+
+[[mutant]]
+name = "owned-crossing-across-a-wall"
+path = "crates/ng-contract/src/law.rs"
+old = '''Family::Across(wall, _, species) => Some((wall.crossed(), species)),'''
+new = '''Family::Across(..) => None,'''
+test = "-p ng-contract --test scopes two_cards_crossing_one_wall_with_one_species_at_one_bed_is_refused"
+
+[[mutant]]
+name = "endothelium-crosses-the-capillary-wall"
+path = "crates/ng-contract/src/law.rs"
+old = '''Wall::Endothelium => &[Crossed::Capillary, Crossed::Cell],'''
+new = '''Wall::Endothelium => &[Crossed::Cell],'''
+test = "-p ng-contract --test scopes the_endothelial_route_crosses_the_capillary_wall_another_card_crosses"
+
+[[mutant]]
+name = "endothelium-crosses-the-cell-membrane"
+path = "crates/ng-contract/src/law.rs"
+old = '''Wall::Endothelium => &[Crossed::Capillary, Crossed::Cell],'''
+new = '''Wall::Endothelium => &[Crossed::Capillary],'''
+test = "-p ng-contract --test scopes the_endothelial_route_crosses_the_cell_membrane_another_card_crosses"
+
+[[mutant]]
+name = "a-route-stands-where-both-its-pools-are"
+path = "crates/ng-contract/src/compile.rs"
+old = '''reach.ends.iter().all(|end| match end {'''
+new = '''reach.ends.iter().any(|end| match end {'''
+test = "-p ng-contract --test scopes hematology_crosses_iron_into_cells_only_at_the_beds_whose_cells_hold_iron"
+
+[[mutant]]
+name = "circulation-leaves-the-liver-bed"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|&pair| !anatomy.is_valve(pair) && !sinusoidal(anatomy, pair))'''
+new = '''.filter(|&pair| !anatomy.is_valve(pair))'''
+test = "-p ng-contract --test sinusoids every_plain_vascular_edge_is_reached_by_circulation_or_the_sinusoids_and_never_both"
+
+[[mutant]]
+name = "sinusoids-reach-the-liver-bed"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|&pair| !anatomy.is_valve(pair) && sinusoidal(anatomy, pair))'''
+new = '''.filter(|&pair| anatomy.is_valve(pair) && sinusoidal(anatomy, pair))'''
+test = "-p ng-contract --test sinusoids every_plain_vascular_edge_is_reached_by_circulation_or_the_sinusoids_and_never_both"
+
+[[mutant]]
+name = "edge-flow-at-the-liver-bed"
+path = "crates/ng-contract/src/compile.rs"
+old = '''(Family::Sinusoids, crate::Hepatic::CARD)'''
+new = '''(Family::Circulation, law.owner)'''
+test = "-p ng-contract --test sinusoids the_flow_at_a_liver_bed_edge_is_the_sinusoids_whoever_reads_it"
+
+[[mutant]]
+name = "crossings-compare-the-wall"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|pair| pair[0].0 == pair[1].0 && pair[0].1 == pair[1].1 && pair[0].2 == pair[1].2)'''
+new = '''.filter(|pair| pair[0].1 == pair[1].1 && pair[0].2 == pair[1].2)'''
+test = "-p ng-contract --test scopes oxygen_crosses_the_gas_exchange_surface_and_the_capillary_wall_of_one_lung_bed_by_two_cards"
+
+[[mutant]]
+name = "crossings-compare-the-species"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|pair| pair[0].0 == pair[1].0 && pair[0].1 == pair[1].1 && pair[0].2 == pair[1].2)'''
+new = '''.filter(|pair| pair[0].0 == pair[1].0 && pair[0].2 == pair[1].2)'''
+test = "-p ng-contract --test scopes water_and_oxygen_cross_one_cell_membrane_by_two_cards"
+
+[[mutant]]
+name = "each-wall-crosses-its-own-membranes"
+path = "crates/ng-contract/src/law.rs"
+old = '''Family::Across(wall, _, species) => Some((wall.crossed(), species)),'''
+new = '''Family::Across(_, _, species) => Some((&[Crossed::Capillary], species)),'''
+test = "-p ng-contract --test scopes glucose_crosses_the_capillary_wall_by_fluids_and_each_beds_cell_membrane_by_its_own_card"
+
+[[mutant]]
+name = "sinusoids-leave-the-valves"
+path = "crates/ng-contract/src/compile.rs"
+old = '''.filter(|&pair| !anatomy.is_valve(pair) && sinusoidal(anatomy, pair))'''
+new = '''.filter(|&pair| sinusoidal(anatomy, pair))'''
+test = "-p ng-contract --test sinusoids the_sinusoids_leave_a_valved_edge_of_the_liver_bed_to_the_valves"
+
+[[mutant]]
+name = "reaction-in-one-space"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if let [first, second, ..] = spaces[..] {'''
+new = '''if let [first, second, ..] = spaces[..1] {'''
+test = "-p ng-contract --test scopes a_reaction_that_takes_its_glucose_across_the_cell_membrane_is_refused_naming_both_spaces"
+
+[[mutant]]
+name = "circulation-owes-the-sinusoids"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if requested(Family::Circulation) && unowed {'''
+new = '''if false && unowed {'''
+test = "-p ng-contract --test sinusoids a_liver_bed_beside_circulation_owes_the_hepatic_cards_sinusoids"
+
+[[mutant]]
+name = "edge-flow-on-a-vascular-edge"
+path = "crates/ng-contract/src/compile.rs"
+old = '''(Input::EdgeFlow, Context::Edge { from, to }) if route.is_some_and(Family::vascular) => {'''
+new = '''(Input::EdgeFlow, Context::Edge { from, to }) => {'''
+test = "-p ng-contract --test sinusoids a_lymph_law_reads_no_blood_flow_at_the_liver_bed_as_at_any_other"
+
+[[mutant]]
+name = "reacts-at-its-grant-alone"
+path = "crates/ng-contract/src/law.rs"
+old = '''impl ReactsAt<crate::Beds<crate::Liver>> for crate::Hepatic {}'''
+new = '''impl ReactsAt<crate::Beds<crate::Liver>> for crate::Hepatic {}
+impl grants::Sealed<CapillaryBed> for crate::Hepatic {}
+impl ReactsAt<CapillaryBed> for crate::Hepatic {}'''
+test = "--doc -p ng-contract ReactsAt"
+
+[[mutant]]
+name = "cargo-class-closed"
+path = "crates/ng-contract/src/scope/cargo.rs"
+old = '''Respired: Substance = Oxygen, CarbonDioxide;'''
+new = '''Respired: Substance = Oxygen, CarbonDioxide, Sodium;'''
+test = "--doc -p ng-contract alveolar"
+
+[[mutant]]
+name = "chyle-reaches-the-interstitium"
+path = "crates/ng-contract/src/scope/gastrointestinal.rs"
+old = '''Family::Along(Passage::Chyle, Species::Triglyceride)'''
+new = '''Family::Along(Passage::Absorption, Species::Triglyceride)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "shedding-leaves-the-gut-cells"
+path = "crates/ng-contract/src/scope/gastrointestinal.rs"
+old = '''Family::Along(Passage::Shedding, Species::Iron)'''
+new = '''Family::Along(Passage::Absorption, Species::Iron)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "transit-stays-between-lumens"
+path = "crates/ng-contract/src/scope/gastrointestinal.rs"
+old = '''Family::Along(Passage::Transit, Q::SPECIES)'''
+new = '''Family::Along(Passage::Absorption, Q::SPECIES)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "absorption-reaches-the-plasma"
+path = "crates/ng-contract/src/scope/gastrointestinal.rs"
+old = '''Family::Along(Passage::Absorption, Q::SPECIES)'''
+new = '''Family::Along(Passage::Chyle, Q::SPECIES)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "lining-wets-the-gas"
+path = "crates/ng-contract/src/scope/respiratory.rs"
+old = '''Family::Across(Wall::Lining, <Beds<Lung> as SiteSet>::SET, Species::Water)'''
+new = '''Family::Across(Wall::Cell, <Beds<Lung> as SiteSet>::SET, Species::Water)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "airway-runs-along-the-airway"
+path = "crates/ng-contract/src/scope/respiratory.rs"
+old = '''Family::Along(Passage::Airway, Q::SPECIES)'''
+new = '''Family::Along(Passage::Transit, Q::SPECIES)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "alveolar-crosses-gas-to-plasma"
+path = "crates/ng-contract/src/scope/respiratory.rs"
+old = '''Family::Across(Wall::Alveolar, <Beds<Lung> as SiteSet>::SET, Q::SPECIES)'''
+new = '''Family::Across(Wall::Lining, <Beds<Lung> as SiteSet>::SET, Q::SPECIES)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "iron-crosses-as-iron"
+path = "crates/ng-contract/src/scope/hematology.rs"
+old = '''Family::Across(Wall::Cell, <CapillaryBed as SiteSet>::SET, Species::Iron)'''
+new = '''Family::Across(Wall::Cell, <CapillaryBed as SiteSet>::SET, Species::Calcium)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "bed-heat-reaches-the-core"
+path = "crates/ng-contract/src/scope/metabolism.rs"
+old = '''Family::Heat(HeatRoute::FromBeds)'''
+new = '''Family::Heat(HeatRoute::Conduction)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "conduction-leaves-the-core"
+path = "crates/ng-contract/src/scope/metabolism.rs"
+old = '''Family::Heat(HeatRoute::Conduction)'''
+new = '''Family::Heat(HeatRoute::FromBeds)'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "lining-is-its-own-membrane"
+path = "crates/ng-contract/src/law.rs"
+old = '''Wall::Lining => &[Crossed::Lining],'''
+new = '''Wall::Lining => &[Crossed::Cell],'''
+test = "-p ng-contract --test scopes each_port_moves_its_cargo_between_the_two_pools_its_route_names"
+
+[[mutant]]
+name = "ingested-class-closed"
+path = "crates/ng-contract/src/scope/cargo.rs"
+old = '''Ingested: Substance = Triglyceride;'''
+new = '''Ingested: Substance = Triglyceride, Oxygen;'''
+test = "--doc -p ng-contract transit"
+
+[[mutant]]
+name = "absorbed-class-closed"
+path = "crates/ng-contract/src/scope/cargo.rs"
+old = '''Magnesium, Iron;
+    Ingested'''
+new = '''Magnesium, Iron, Oxygen;
+    Ingested'''
+test = "--doc -p ng-contract absorption"
+
+[[mutant]]
+name = "musculoskeletal-reacts-at-the-muscle-bed-alone"
+path = "crates/ng-contract/src/law.rs"
+old = '''impl ReactsAt<crate::Beds<crate::Muscle>> for crate::Musculoskeletal {}'''
+new = '''impl ReactsAt<crate::Beds<crate::Muscle>> for crate::Musculoskeletal {}
+impl grants::Sealed<crate::Beds<crate::Liver>> for crate::Musculoskeletal {}
+impl ReactsAt<crate::Beds<crate::Liver>> for crate::Musculoskeletal {}'''
+test = "--doc -p ng-contract ReactsAt"
+
+[[mutant]]
+name = "hepatic-reacts-at-the-liver-bed-alone"
+path = "crates/ng-contract/src/law.rs"
+old = '''impl ReactsAt<crate::Beds<crate::Liver>> for crate::Hepatic {}'''
+new = '''impl ReactsAt<crate::Beds<crate::Liver>> for crate::Hepatic {}
+impl grants::Sealed<crate::Beds<crate::Muscle>> for crate::Hepatic {}
+impl ReactsAt<crate::Beds<crate::Muscle>> for crate::Hepatic {}'''
+test = "--doc -p ng-contract ReactsAt"
+
+[[mutant]]
+name = "guard-reads-its-routes-flow"
+path = "crates/ng-contract/src/compile.rs"
+old = '''                Over::Route(family) => Some(family),
+                _ => None,
+            };
+            let sorted'''
+new = '''                Over::Route(_) => None,
+                _ => None,
+            };
+            let sorted'''
+test = "-p ng-contract --test sinusoids a_guard_on_a_switch_along_circulation_reads_the_flow_at_its_own_edge"
+
+[[mutant]]
+name = "sinusoids-are-vascular"
+path = "crates/ng-contract/src/law.rs"
+old = '''Family::Circulation | Family::Valves | Family::Sinusoids | Family::GravityWork'''
+new = '''Family::Circulation | Family::Valves | Family::GravityWork'''
+test = "-p ng-contract --test sinusoids the_hepatic_card_reads_the_flow_along_its_own_sinusoids"
+
+[[mutant]]
 name = "enclosure-owed-by-its-card"
 path = "crates/ng-contract/src/compile.rs"
 old = '''

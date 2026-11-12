@@ -291,7 +291,7 @@ A sum of pools that no transfer or reaction inside the body changes, such as all
 A flow with two ends: what leaves one pool enters another pool or a receipt pool, so no amount appears or vanishes (I10).
 
 **Reaction**:
-At one site, several amounts used and made in fixed whole-number proportion, at one rate. Its two ends are what it uses and what it makes, and they hold the same count of every element and the same energy, so it keeps I10 as a transfer does. Only a species that states its atoms takes part, and such a species holds no fixed charge, so a reaction never moves charge. Only a card granted its site class declares one.
+At one site, several amounts used and made in fixed whole-number proportion, at one rate. Its two ends are what it uses and what it makes, and they hold the same count of every element and the same energy, so it keeps I10 as a transfer does. Only a species that states its atoms takes part, and such a species holds no fixed charge, so a reaction never moves charge. Its terms sit in one space of its site, apart from the space its energy goes into. Only a card granted its site set declares one.
 
 **Energy content**:
 The energy one unit of a fuel holds beyond the carbon dioxide, water and nitrogen gas it burns to, stated in a body's schema. A reaction's heat follows from the contents of what it uses and makes, so no law writes a heat.
@@ -323,6 +323,12 @@ A card's way across the body's boundary, such as insulin's secretion, the fecal 
 
 **Route family**:
 Every transfer of one kind the map implies: one per site of a class, such as plasma to interstitium at every capillary bed, or one per vascular edge. A system requests it whole through its scope, so the body owes a law for every one, and no law names a site.
+
+**Cargo class**:
+The species a card's wall or passage port may move, closed in the contract, such as the fuels the metabolism card moves into cells. A species outside the class does not compile.
+
+**Sinusoids**:
+The liver bed's own edges: every plain vascular edge with an end at a bed that serves the liver. The hepatic card's law holds their flow, and circulation reaches every other plain vascular edge.
 
 **Passage**:
 A route along a network, one species at a time: the airway's gas, the gut's transit, absorption into a bed, fat into the lymph, shedding from the gut's cells and secretion from the tubule's cells.

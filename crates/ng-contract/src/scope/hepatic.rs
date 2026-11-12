@@ -1,6 +1,10 @@
-use super::process_route;
-use crate::law::Brand;
-use crate::{AdmissionError, BoundaryProcess, BoundaryRoute, Hepatic};
+use super::{BLOOD_PRESSURE, process_route};
+use crate::law::{Brand, Family};
+use crate::{
+    AdmissionError, Beds, Blood, BoundaryProcess, BoundaryRoute, Cardiovascular, CellFuel, EdgeRoute,
+    FragmentBuilder, Hepatic, LawName, Liver, Owner, PerSite, Pressure, ReadPort, SiteRoute, SiteSet, Wall,
+    Water,
+};
 use core::marker::PhantomData;
 
 pub struct HepaticPorts<'b> {
@@ -13,6 +17,33 @@ impl<'b> HepaticPorts<'b> {
             processes,
             brand: PhantomData,
         }
+    }
+    /// A fuel across the cell membrane of each liver bed, interstitium to cells.
+    /// ```
+    /// use ng_contract::*;
+    /// fn crossed<'b>(hp: &mut FragmentBuilder<'b, Hepatic>, ports: &HepaticPorts<'b>)
+    ///     -> SiteRoute<'b, Hepatic, Beds<Liver>, Glucose> {
+    ///     ports.fuel_into_cells::<Glucose>(hp)
+    /// }
+    /// ```
+    pub fn fuel_into_cells<Q: CellFuel>(
+        &self,
+        laws: &mut FragmentBuilder<'b, Hepatic>,
+    ) -> SiteRoute<'b, Hepatic, Beds<Liver>, Q> {
+        let family = Family::Across(Wall::Cell, <Beds<Liver> as SiteSet>::SET, Q::SPECIES);
+        laws.request(family);
+        SiteRoute::requested(family)
+    }
+    /// Every plain vascular edge with an end at a liver bed.
+    pub fn sinusoids(&self, laws: &mut FragmentBuilder<'b, Hepatic>) -> EdgeRoute<'b, Hepatic, Water> {
+        laws.request(Family::Sinusoids);
+        EdgeRoute::requested(Family::Sinusoids)
+    }
+    pub fn blood_pressure(&self) -> ReadPort<'b, Hepatic, PerSite<Blood, Pressure>> {
+        ReadPort::field(LawName {
+            owner: Cardiovascular::CARD,
+            local: BLOOD_PRESSURE,
+        })
     }
     pub fn boundary<P: BoundaryProcess<Card = Hepatic>>(
         &self,

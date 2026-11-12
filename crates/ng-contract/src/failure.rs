@@ -400,8 +400,13 @@ pub enum CompileDefect {
         site: SiteId,
         space: Space,
     },
+    /// One species across one wall at one site by two cards.
+    CrossedTwice { laws: [LawName; 2], site: SiteId },
     /// A reaction that names one species twice.
     SpeciesTwice { law: LawName, species: Species },
+    /// A reaction whose terms sit in two spaces of its site, named in space order. A reaction's terms sit in one space,
+    /// apart from the space `energy_into` names.
+    ReactionInTwoSpaces { law: LawName, spaces: [Space; 2] },
     /// A reaction that names a fuel whose energy content the schema does not state, so its energy has no value.
     UnstatedEnergy { law: LawName, species: Species },
     /// A reaction whose counts leave a conserved quantity open: an element its uses and makes do not hold alike, or

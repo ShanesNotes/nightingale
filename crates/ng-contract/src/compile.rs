@@ -41,6 +41,7 @@ pub(crate) fn compile(
     check_volume(&schema, &owed, &fragments)?;
 
     let reaches = Reaches::of(&schema, &fragments);
+    check_crossings(&fragments, &reaches)?;
     let rows = Rows::lay_out(&schema, &fragments, &reaches, &held);
     let chance = ChanceNames::of(&fragments);
     let places = Places {
@@ -251,6 +252,35 @@ fn check_places(schema: &Schema) -> Result<(), CompileDefect> {
     }
 }
 
+fn check_crossings(fragments: &[FragmentData], reaches: &Reaches) -> Result<(), CompileDefect> {
+    let mut crossings = Vec::new();
+    for fragment in fragments {
+        for &family in &fragment.families {
+            let Some((walls, species)) = family.transport() else {
+                continue;
+            };
+            let law = LawName {
+                owner: fragment.owner,
+                local: family.name(),
+            };
+            for reach in reaches.of_family(family) {
+                if let Context::Site(site) = reach.context {
+                    crossings.extend(walls.iter().map(|&wall| (wall, species, site, law)));
+                }
+            }
+        }
+    }
+    crossings.sort_unstable();
+    let doubled = (crossings.windows(2))
+        .filter(|pair| pair[0].0 == pair[1].0 && pair[0].1 == pair[1].1 && pair[0].2 == pair[1].2)
+        .map(|pair| ([pair[0].3, pair[1].3], pair[0].2))
+        .min();
+    match doubled {
+        Some((laws, site)) => Err(CompileDefect::CrossedTwice { laws, site }),
+        None => Ok(()),
+    }
+}
+
 fn left_over(reaction: &ReactionDeclaration, book: Balanced, contents: &[(Species, i64)]) -> Option<i64> {
     let exact = i128::from(BINARY64_EXACT);
     let mut sum = 0;
@@ -280,6 +310,15 @@ fn check_reactions(fragments: &[FragmentData], schema: &Schema) -> Result<(), Co
             if let Some(pair) = species.windows(2).find(|pair| pair[0] == pair[1]) {
                 let species = pair[0];
                 return Err(CompileDefect::SpeciesTwice { law, species });
+            }
+            let mut spaces: Vec<Space> = reaction.terms.iter().map(|term| term.space).collect();
+            spaces.sort_unstable();
+            spaces.dedup();
+            if let [first, second, ..] = spaces[..] {
+                return Err(CompileDefect::ReactionInTwoSpaces {
+                    law,
+                    spaces: [first, second],
+                });
             }
             let fuel = |species: Species| matches!(species.makeup(), Makeup::Atoms { fuel: true, .. });
             let stated = |species: Species| schema.energy.iter().any(|content| content.0 == species);
@@ -355,6 +394,14 @@ fn obligations<'f>(
         .min();
     if let Some(owner) = unheld {
         let local = ENCLOSURE_PRESSURE;
+        return Err(CompileDefect::OmittedLaw {
+            law: LawName { owner, local },
+        });
+    }
+    let requested = |family| (fragments.iter()).any(|fragment| fragment.families.contains(&family));
+    let unowed = !requested(Family::Sinusoids) && !reaches_of(Family::Sinusoids, schema).is_empty();
+    if requested(Family::Circulation) && unowed {
+        let (owner, local) = (crate::Hepatic::CARD, Family::Sinusoids.name());
         return Err(CompileDefect::OmittedLaw {
             law: LawName { owner, local },
         });
@@ -848,6 +895,11 @@ impl Reaches {
         Species::WATER_BORNE.into_iter().filter(apart).collect()
     }
 }
+fn sinusoidal(anatomy: &Anatomy, (from, to): (SiteId, SiteId)) -> bool {
+    let liver = |site| anatomy.tissue(site) == Some(crate::Tissue::Liver);
+    liver(from) || liver(to)
+}
+
 fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
     let anatomy = &schema.anatomy;
     let edge = |(from, to): (SiteId, SiteId), ends: [PoolRef; 2]| Reach {
@@ -869,11 +921,15 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
     let heat = |site| species_at(site, Space::Thermal, Species::Energy);
     match family {
         Family::Circulation => (anatomy.vascular())
-            .filter(|&pair| !anatomy.is_valve(pair))
+            .filter(|&pair| !anatomy.is_valve(pair) && !sinusoidal(anatomy, pair))
             .map(blood)
             .collect(),
         Family::Valves => (anatomy.vascular())
             .filter(|&pair| anatomy.is_valve(pair))
+            .map(blood)
+            .collect(),
+        Family::Sinusoids => (anatomy.vascular())
+            .filter(|&pair| !anatomy.is_valve(pair) && sinusoidal(anatomy, pair))
             .map(blood)
             .collect(),
         Family::Starling => (anatomy.in_set(Sites::Class(Class::CapillaryBed)).into_iter())
@@ -1293,6 +1349,10 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                 targets
             }
         };
+        let route = match law.serves {
+            Serves::Family(family) | Serves::Slot(Over::Route(family)) => Some(family),
+            _ => None,
+        };
         for &(_, kernel) in &law.laws {
             if let Serves::Boundary(water) = law.serves {
                 let written = (kernel.code.iter())
@@ -1347,7 +1407,7 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                     program,
                     context,
                     target,
-                    addresses: addresses(law.name, kernel, context, places)?,
+                    addresses: addresses(law.name, route, kernel, context, places)?,
                 });
             }
         }
@@ -1695,6 +1755,7 @@ fn place_of(place: Where, context: Context, anatomy: &Anatomy) -> Option<SiteId>
 
 fn addresses(
     law: LawName,
+    route: Option<Family>,
     kernel: &KernelData,
     context: Context,
     places: &Places,
@@ -1854,14 +1915,16 @@ fn addresses(
                 let site = place_of(place, context, anatomy).ok_or(CompileDefect::NoSuchRead { law })?;
                 Address::Height(anatomy.axial(site).to_bits())
             }
-            (Input::EdgeFlow, Context::Edge { from, to }) => {
-                let family = if anatomy.is_valve((from, to)) {
-                    Family::Valves
+            (Input::EdgeFlow, Context::Edge { from, to }) if route.is_some_and(Family::vascular) => {
+                let (family, owner) = if anatomy.is_valve((from, to)) {
+                    (Family::Valves, law.owner)
+                } else if sinusoidal(anatomy, (from, to)) {
+                    (Family::Sinusoids, crate::Hepatic::CARD)
                 } else {
-                    Family::Circulation
+                    (Family::Circulation, law.owner)
                 };
                 let flow = LawName {
-                    owner: law.owner,
+                    owner,
                     local: family.name(),
                 };
                 unknown(
@@ -2013,6 +2076,10 @@ fn guards(
                 owner: fragment.owner,
                 local: mode.name,
             };
+            let route = match mode.over {
+                Over::Route(family) => Some(family),
+                _ => None,
+            };
             let sorted = |index: usize| {
                 let mut values = mode.values.clone();
                 values.sort_unstable();
@@ -2042,7 +2109,7 @@ fn guards(
                     inputs: Vec::new(),
                     resets: reset,
                 };
-                guards.push((layout, addresses(law, zero, at, places)?));
+                guards.push((layout, addresses(law, route, zero, at, places)?));
             }
         }
     }

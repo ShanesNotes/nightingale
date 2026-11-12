@@ -13,6 +13,7 @@ use crate::{
 use core::marker::PhantomData;
 
 mod blood_chemistry;
+mod cargo;
 mod endocrine;
 mod gastrointestinal;
 mod hematology;
@@ -24,6 +25,7 @@ mod outside;
 mod processes;
 mod respiratory;
 pub use blood_chemistry::BloodChemistryPorts;
+pub use cargo::*;
 pub use endocrine::EndocrinePorts;
 pub use gastrointestinal::GastrointestinalPorts;
 pub use hematology::HematologyPorts;
@@ -559,8 +561,8 @@ pub struct CardiovascularPorts<'b> {
     brand: Brand<'b>,
 }
 impl<'b> CardiovascularPorts<'b> {
-    /// Records a law owed for every plain vascular edge before returning the route, so dropping the route
-    /// never drops what the fragment owes.
+    /// Records a law owed for every plain vascular edge but the liver bed's own before returning the route, so
+    /// dropping the route never drops what the fragment owes.
     pub fn circulation(
         &self,
         laws: &mut FragmentBuilder<'b, Cardiovascular>,
