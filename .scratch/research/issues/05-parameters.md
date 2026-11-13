@@ -1,7 +1,8 @@
 # 05: Parameters of the body at rung 0
 
 Type: research
-Status: open
+Status: claimed
+Claimed by: r05-list
 Blocked by: 02
 Data: ns.*
 
