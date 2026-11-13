@@ -1,7 +1,8 @@
 # 10: Add the nightly job
 
 Type: task
-Status: ready-for-human
+Status: claimed
+Claimed by: f10-nightly
 Blocked by: none
 
 [First crate](03-first-crate.md) built the repo side of the nightly full run. Its schedule is machine-state's, and a `policy/jobs.d` declaration with its predicate is the developer reviewer's to add.
