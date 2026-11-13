@@ -14,7 +14,7 @@ use crate::law::{
     Where,
 };
 use crate::scheme::greatest_common_divisor;
-use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, PoolRef, RouteBoundary};
+use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, HeldSpecies, PoolRef, RouteBoundary};
 use crate::{
     AdmissibleSet, AdmissionError, Anatomy, Book, Boundary, BoundaryDirection, Class, CompileDefect,
     Compliance, HeatRoute, Lasting, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Passage,
@@ -2047,8 +2047,9 @@ fn holder(schema: &Schema, held: &[HeldCard], pool: PoolRef) -> Result<Option<&'
         Some(Compliance::Held { card }) if held.iter().any(|known| known.card == card) => Some(card),
         _ => None,
     };
+    let named = |card: &&HeldCard| card.pools.iter().any(|hold| names(hold, schema, &pool));
     let declared = (held.iter())
-        .filter(|card| card.holds.contains(&pool.space))
+        .filter(|card| card.holds.contains(&pool.space) || named(card))
         .map(|card| card.card);
     let mut cards = enclosure.into_iter().chain(declared);
     let first = cards.next();
@@ -2057,23 +2058,47 @@ fn holder(schema: &Schema, held: &[HeldCard], pool: PoolRef) -> Result<Option<&'
             cards: [first, second],
             site: pool.site,
             space: pool.space,
+            species: pool.species,
         }),
         _ => Ok(first),
     }
+}
+
+fn names(hold: &HeldSpecies, schema: &Schema, pool: &PoolRef) -> bool {
+    hold.space == pool.space
+        && hold.species == pool.species
+        && schema.anatomy.in_set(hold.sites).contains(&pool.site)
 }
 
 fn check_holds(rows: &Rows, schema: &Schema, held: &[HeldCard]) -> Result<(), CompileDefect> {
     let claims = (held.iter()).flat_map(|card| card.holds.iter().map(|&space| (card.card, space)));
     for (card, space) in claims {
         if !rows.amounts.iter().any(|pool| pool.space == space) {
-            return Err(CompileDefect::HeldNothing { card, space });
+            return Err(CompileDefect::HeldNothing {
+                card,
+                space,
+                species: None,
+            });
+        }
+    }
+    let species = (held.iter()).flat_map(|card| card.pools.iter().map(|hold| (card.card, hold)));
+    for (card, hold) in species {
+        if !rows.amounts.iter().any(|pool| names(hold, schema, pool)) {
+            return Err(CompileDefect::HeldNothing {
+                card,
+                space: hold.space,
+                species: Some(hold.species),
+            });
         }
     }
     let stood_in = |card: &&'static str| held.iter().any(|known| known.card == *card);
     for (site, card) in (schema.anatomy.held_enclosures()).filter(|(_, card)| stood_in(card)) {
         if !rows.amounts.iter().any(|pool| pool.site == site) {
-            let space = Space::Fluid;
-            return Err(CompileDefect::HeldNothing { card, space });
+            return Err(CompileDefect::HeldNothing {
+                card,
+                space: Space::Fluid,
+                species: None,
+            });
         }
     }
     Ok(())

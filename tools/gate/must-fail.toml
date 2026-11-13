@@ -122,7 +122,7 @@ mutants = ["held-route-declared", "held-pool-left-to-the-slice", "held-port-offe
 
 [[row]]
 core = "An orphan pool"
-mutants = ["orphan-held"]
+mutants = ["orphan-held", "species-hold-matches-species", "species-hold-matches-sites"]
 
 [[row]]
 core = "A wall crossing two cards own"
