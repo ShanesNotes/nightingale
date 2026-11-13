@@ -2483,7 +2483,7 @@ test = "-p ng-validate --test arena_certificate energy_drifts_up_to_2e5_over_the
 name = "every-quantity-takes-energys-drift-limit"
 path = "crates/ng-validate/src/slice.rs"
 old = '''
-        Book::Of(species) => species.visit(Limits(quantity, SYNTHETIC_DRIFT)),
+        Book::Of(species) => species.visit(Limits(quantity, species_drift(species))),
         Book::Element(_) => QuantityPolicy::element(
             quantity,
             Measure::new(0.0)?,
@@ -2500,7 +2500,42 @@ new = '''
             Measure::new(SYNTHETIC_ENERGY_DRIFT)?,
         ),
 '''
-test = "-p ng-validate --test arena_certificate water_drifts_up_to_1e4_as_every_quantity_but_energy_does"
+test = "-p ng-validate --test arena_certificate water_drifts_up_to_5e2_twice_the_slices_measured_day"
+
+[[mutant]]
+name = "sodium-and-chloride-drift-fall-back-to-the-common-limit"
+path = "crates/ng-validate/src/slice.rs"
+old = '''Species::Sodium | Species::Chloride => 4e4,'''
+new = '''Species::Sodium | Species::Chloride => SYNTHETIC_DRIFT,'''
+test = "-p ng-validate --test arena_certificate sodium_drifts_up_to_4e4_twice_the_slices_measured_day"
+
+[[mutant]]
+name = "potassium-drift-falls-back-to-the-common-limit"
+path = "crates/ng-validate/src/slice.rs"
+old = '''Species::Potassium => 2e3,'''
+new = '''Species::Potassium => SYNTHETIC_DRIFT,'''
+test = "-p ng-validate --test arena_certificate potassium_drifts_up_to_2e3_twice_the_slices_measured_day"
+
+[[mutant]]
+name = "vasopressin-drift-falls-back-to-the-common-limit"
+path = "crates/ng-validate/src/slice.rs"
+old = '''Species::Vasopressin => 8e2,'''
+new = '''Species::Vasopressin => SYNTHETIC_DRIFT,'''
+test = "-p ng-validate --test arena_certificate vasopressin_drifts_up_to_8e2_twice_the_slices_measured_day"
+
+[[mutant]]
+name = "water-drift-falls-back-to-the-common-limit"
+path = "crates/ng-validate/src/slice.rs"
+old = '''Species::Water => 5e2,'''
+new = '''Species::Water => SYNTHETIC_DRIFT,'''
+test = "-p ng-validate --test arena_certificate water_drifts_up_to_5e2_twice_the_slices_measured_day"
+
+[[mutant]]
+name = "held-drift-falls-back-to-the-common-limit"
+path = "crates/ng-validate/src/slice.rs"
+old = '''_ => HELD_DRIFT,'''
+new = '''_ => SYNTHETIC_DRIFT,'''
+test = "-p ng-validate --test arena_certificate albumin_drifts_up_to_the_floor_of_a_quantity_the_slice_does_not_move"
 
 [[mutant]]
 name = "keep-back-starling"

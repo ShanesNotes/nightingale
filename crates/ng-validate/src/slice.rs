@@ -516,9 +516,26 @@ pub fn arena_seed() -> Seed {
 
 const CLOSURE_RELATIVE: f64 = 1e-12;
 const SYNTHETIC_DRIFT: f64 = 1e4;
-/// About twice energy's measured drift over the arena's own day from 06:55, 8.3e4. Like `SYNTHETIC_DRIFT`, it is
+/// About twice energy's measured drift over the arena's own day from 06:55, 8.3e4. Like `species_drift`, it is
 /// fixture data until the healthy-range set holds energy's within-subject variation.
 const SYNTHETIC_ENERGY_DRIFT: f64 = 2e5;
+/// The slice moves none of these, so closure alone holds them at zero there. The floor binds on the first body whose
+/// route moves one: under 1% of the smallest held store, a transmitter pool's 101, so that body measures its own day.
+const HELD_DRIFT: f64 = 1.0;
+
+/// Fixture data until the healthy-range set holds each within-subject variation: twice the species' change over the
+/// pick's window from 06:55, measured on the slice at `39bdb91`, rounded up to one significant figure. The slice does
+/// not answer its own sodium, so these admit its measured day, and the milestone protocol's second-day windows are
+/// read for growth.
+fn species_drift(species: Species) -> f64 {
+    match species {
+        Species::Sodium | Species::Chloride => 4e4,
+        Species::Potassium => 2e3,
+        Species::Vasopressin => 8e2,
+        Species::Water => 5e2,
+        _ => HELD_DRIFT,
+    }
+}
 
 pub fn arena_certificate(
     body: &CompiledBody,
@@ -538,7 +555,7 @@ pub fn arena_certificate(
     let basis = body.conserved_basis();
     let quantities = basis.ids().map(|quantity| match quantity.book() {
         Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_ENERGY_DRIFT),
-        Book::Of(species) => species.visit(Limits(quantity, SYNTHETIC_DRIFT)),
+        Book::Of(species) => species.visit(Limits(quantity, species_drift(species))),
         Book::Element(_) => QuantityPolicy::element(
             quantity,
             Measure::new(0.0)?,
