@@ -106,11 +106,7 @@ fn body_01() -> Vec<Row> {
             &[EVERY_WATERY_SPACE, &[URINE, GAS]],
         ),
         row("01:531 nitrogen gas", &[NitrogenGas], &[&[GAS]]),
-        row(
-            "01:533 glucose",
-            &[Glucose],
-            &[EVERY_WATERY_SPACE, &[URINE, GUT]],
-        ),
+        row("01:533 glucose", &[Glucose], &[EVERY_WATERY_SPACE, &[URINE, GUT]]),
         row(
             "01:534 glycogen",
             &[Glycogen],
@@ -153,11 +149,7 @@ fn body_01() -> Vec<Row> {
             &[AminoAcids],
             &[
                 OUTSIDE_CELLS,
-                &[
-                    URINE,
-                    GUT,
-                    cells(&["muscle bed", "liver bed", "peritubular bed"]),
-                ],
+                &[URINE, GUT, cells(&["muscle bed", "liver bed", "peritubular bed"])],
             ],
         ),
         row(
@@ -190,11 +182,7 @@ fn body_01() -> Vec<Row> {
             &[FixedAcid],
             &[OUTSIDE_CELLS, &[URINE, cells(&["liver bed"])]],
         ),
-        row(
-            "01:546 diet base",
-            &[DietBase],
-            &[EVERY_WATERY_SPACE, &[GUT]],
-        ),
+        row("01:546 diet base", &[DietBase], &[EVERY_WATERY_SPACE, &[GUT]]),
         row("01:547 cell anion", &[CellAnion], &[&[CELLS]]),
         row(
             "01:548 calcium, plan row 5: bone cells",
@@ -278,7 +266,9 @@ fn sorted(mut pools: Vec<Pool>) -> Vec<Pool> {
 
 fn schema_pools() -> Result<Vec<Pool>, AdmissionError> {
     let schema = body_schema()?;
-    let pools = schema.pools().map(|(site, space, species)| (site.key(), space, species));
+    let pools = schema
+        .pools()
+        .map(|(site, space, species)| (site.key(), space, species));
     Ok(sorted(pools.collect()))
 }
 

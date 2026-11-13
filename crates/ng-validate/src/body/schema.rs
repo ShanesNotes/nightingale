@@ -85,7 +85,11 @@ pub fn body_schema() -> Result<Schema, AdmissionError> {
     schema.pool::<Vasopressin>(site::<CapillaryBed>("peritubular bed")?, Space::Bound)?;
     let body = site::<TissueSite>("body")?;
     schema.pool::<Energy>(body, Space::Elastic)?;
-    for heat in [body, site::<TissueSite>("skin heat site")?, site::<TissueSite>("conducting airway")?] {
+    for heat in [
+        body,
+        site::<TissueSite>("skin heat site")?,
+        site::<TissueSite>("conducting airway")?,
+    ] {
         schema.pool::<Energy>(heat, Space::Thermal)?;
     }
     Ok(schema)
