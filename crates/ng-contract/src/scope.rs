@@ -894,10 +894,10 @@ impl Seal for HeldCard {
         if !pools.is_empty() {
             out.number(u64::MAX);
             out.length(pools.len());
-            for pool in pools {
-                out.number(pool.space as u64);
-                out.number(pool.species as u64);
-                pool.sites.seal(out);
+            for HeldSpecies { space, species, sites } in pools {
+                out.number(*space as u64);
+                out.number(*species as u64);
+                sites.seal(out);
             }
         }
     }
