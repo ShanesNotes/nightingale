@@ -8,7 +8,7 @@ Status: resolved
 
 Blocked by: the statecharts PR (agreed order: statechart first). The runs this ticket enables also need a synthetic 24 h energy drift limit for the slice fixture (`.scratch/foundation/issues/01-arena-and-milestone.md`, comments from native-contract 24): until it exists every core fails the certificate on energy, so no scored run starts before it. It exists since nightingale#134, which set 2e5 for energy (native-contract 28).
 
-Decided (the developer reviewer, 2026-11-07): the arena picks a core from the short gates plus one 24 h run, then the winner runs 48 h once as the evidence for SRS invariant I19 (record 0004). The 48 h run stops being a gate every seat pays.
+Decided (the developer reviewer): the arena picks a core from the short gates plus one 24 h run, then the winner runs 48 h once as the evidence for SRS invariant I19 (record 0004). The 48 h run stops being a gate every seat pays.
 
 **Why.** The 48 h run is I19's check: drift over every sliding 24 h window needs 48 h, because 24 h windows starting at every time of day span two days. It barely tells two cores apart. Closure, accuracy, replay, step policy, late admission and rewind already run on short windows; speed needs one run that covers a whole day's phases (sleep, meals, posture); and drift mostly judges the body, which every core shares. A full protocol per seat costs about 40 h of tower time and 296 to 342 GB of history after native-contract 25.
 
