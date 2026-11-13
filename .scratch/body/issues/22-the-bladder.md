@@ -13,3 +13,5 @@ Blocked by: 05, 06, 26, `.scratch/research/issues/15-law-forms-slow-books.md`
 - [ ] From [ticket 05](05-the-days-inputs.md): each law here that reads a lasting input is reviewed against the rule by reading: the input scales a gain or a set point and never stands for a produced quantity. Compile's `UnscaledInput` is only a stand-in: it passes a law that reads any parameter, such as `0 = k (T - room_air())`, and refuses one that reads only inputs. A void flow `voiding() * k_V` passes it, though it empties a fixed flow whatever the bladder holds
 
 **Non-goals:** the urge to void, and bladder pressure.
+
+From [ticket 06](06-whole-body-on-holds.md)'s plan: RN's `urine` process is placed here, not in ticket 06. It shares its name with the slice's boundary drain, and the scope refuses a second boundary of one name (`BoundaryNamedTwice`, `crates/ng-contract/src/scope.rs`). Body 01 keeps the slice's drain until this ticket (01:60), so ticket 06 places 49 processes, and this ticket replaces the drain with RN's `urine`.

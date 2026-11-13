@@ -8,7 +8,7 @@ Status: resolved
 
 Claimed by: owner-nc25
 
-Scope (Shane, 2026-11-07): build moves 1 and 2's first half (write once, end values only). Measure the delta with zstd on a 30-minute window and report it; it does not ship here. No full 48 h run.
+Scope (the developer reviewer, 2026-11-07): build moves 1 and 2's first half (write once, end values only). Measure the delta with zstd on a 30-minute window and report it; it does not ship here. No full 48 h run.
 
 Blocked by: none
 
