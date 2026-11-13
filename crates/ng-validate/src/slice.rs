@@ -515,25 +515,27 @@ pub fn arena_seed() -> Seed {
 }
 
 const CLOSURE_RELATIVE: f64 = 1e-12;
+/// An element's bound, set for a 2 s window. The slice has no reaction, so no day has measured one.
 const SYNTHETIC_DRIFT: f64 = 1e4;
 /// About twice energy's measured drift over the arena's own day from 06:55, 8.3e4. Like `species_drift`, it is
 /// fixture data until the healthy-range set holds energy's within-subject variation.
 const SYNTHETIC_ENERGY_DRIFT: f64 = 2e5;
-/// The slice moves none of these, so closure alone holds them at zero there. The floor binds on the first body whose
-/// route moves one: under 1% of the smallest held store, a transmitter pool's 101, so that body measures its own day.
-const HELD_DRIFT: f64 = 1.0;
+/// For a species the slice does not move, such as albumin and the transmitters, closure alone holds it at zero there.
+/// This bound binds on the first body whose route moves one. It is under 1% of a transmitter pool's 101, the smallest
+/// such pool, so that body measures its own day.
+const UNMOVED_DRIFT: f64 = 1.0;
 
 /// Fixture data until the healthy-range set holds each within-subject variation: twice the species' change over the
 /// pick's window from 06:55, measured on the slice at `39bdb91`, rounded up to one significant figure. The slice does
 /// not answer its own sodium, so these admit its measured day, and the milestone protocol's second-day windows are
-/// read for growth.
+/// read for growth. Water's held pools share water's bound, and closure holds them at zero.
 fn species_drift(species: Species) -> f64 {
     match species {
         Species::Sodium | Species::Chloride => 4e4,
         Species::Potassium => 2e3,
         Species::Vasopressin => 8e2,
         Species::Water => 5e2,
-        _ => HELD_DRIFT,
+        _ => UNMOVED_DRIFT,
     }
 }
 

@@ -2531,9 +2531,9 @@ new = '''Species::Water => SYNTHETIC_DRIFT,'''
 test = "-p ng-validate --test arena_certificate water_drifts_up_to_5e2_twice_the_slices_measured_day"
 
 [[mutant]]
-name = "held-drift-falls-back-to-the-common-limit"
+name = "unmoved-drift-falls-back-to-the-common-limit"
 path = "crates/ng-validate/src/slice.rs"
-old = '''_ => HELD_DRIFT,'''
+old = '''_ => UNMOVED_DRIFT,'''
 new = '''_ => SYNTHETIC_DRIFT,'''
 test = "-p ng-validate --test arena_certificate norepinephrine_drifts_up_to_the_floor_of_a_quantity_the_slice_does_not_move"
 
