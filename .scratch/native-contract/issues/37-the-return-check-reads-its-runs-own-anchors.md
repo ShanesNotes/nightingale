@@ -14,8 +14,9 @@ Blocked by: none
 
 - [ ] The admitted run, or its record, names the hash of the packet it bound, without moving the run's identity or any pinned seal
 - [ ] `ReadingChecks::new` refuses an `Anchors` whose packet is not that one, named, with a test and a mutant row
+- [ ] The activities the healthy-range check reads are made from the packet's day, or checked against it. Today `ReadingChecks::new` checks a caller's `DayActivities` only for order, repeats, a first span that holds admission and changes on the grid, so a caller that states one waking span for a run whose packet's day has a night is not refused, and the night's values are judged as waking values. The range report names the stated spans' digest, which cannot be compared with the packet's hash. The last check of nightingale#133 found it. A test states a day that disagrees with the packet's and is refused, named, with a mutant row
 - [ ] The contract and its sketch say so
 
-**Non-goals:** any change to what the identity seals, and any anchor value leaving the packet (I14).
+**Non-goals:** any change to what the identity seals, any anchor value leaving the packet (I14), and any code that turns a packet's day into activities beyond what the check reads.
 
 This lands before [body ticket 24](../../body/issues/24-the-synthetic-day.md), which builds on the return report.

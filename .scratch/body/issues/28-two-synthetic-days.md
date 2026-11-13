@@ -4,7 +4,7 @@ Type: task
 Status: open
 Blocked by: 19, 20, 21, 22, 24
 
-**What to build:** Both passes together, over 48 hours of the synthetic day on the heavy-run machine. This is the map's destination. Every number is synthetic, so it is not the first milestone: it is the body that [foundation 01](../../foundation/issues/01-arena-and-milestone.md), step 4, binds the reviewed packet to.
+**What to build:** Both passes together, over 48 hours of the synthetic day on one named build worker. This is the map's destination. Every number is synthetic, so it is not the first milestone: it is the body that [foundation 01](../../foundation/issues/01-arena-and-milestone.md), step 4, binds the reviewed packet to.
 
 - [ ] The certificate passes on every sliding 24 h window of the 48 hours
 - [ ] The healthy-range check passes on a synthetic set, and the return check passes at 24 and at 48 hours. Missing coverage is named and never counts as a pass

@@ -19,7 +19,7 @@ So the clinical workspace prototype's monitor replays a recorded `lens.npy`.
 
 **What to build:** a host program outside the physiology closure, as `gp-driver` is, that admits a run, steps it at a pace, passes each accepted step through an `Observer` (`crates/ng-observe/src/observer.rs`), and writes each observation as soon as it is made, in the lens row format the driver already writes. Decide:
 
-- the transport: a line stream on stdout, a local socket, or server-sent events, and where the host runs while Omarchy builds no engine;
+- the transport: a line stream on stdout, a local socket, or server-sent events;
 - pace: 1 by default, with pause and faster pace as the SRS's Pace allows;
 - a bedside lens: its channels, including arterial pressure at the output grid without averaging, so a monitor can find systolic, diastolic and mean for each beat, and a temperature if the body produces one;
 - how a client learns the patient's clock: the run's time with each observation, and a heartbeat when no observation is due.
