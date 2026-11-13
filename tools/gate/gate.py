@@ -62,9 +62,8 @@ MUTANTS = "tools/gate/mutants.toml"
 MUTATE = "tools/mutate.py"
 TESTED = "target/gate/tested.jsonl"
 TESTED_RESET = "python3 -I tools/gate/gate.py tested --reset"
-# What a proof's fresh clone holds outside its commit when 10-rust writes the record: the build's own target, the
-# bytecode 05-seam leaves and 20-sketch's target. No test reads them. Any other path runs every baseline.
-HELD = frozenset({"target/", "tools/__pycache__/", "docs/architecture/solver-contract-sketch/target/"})
+# A proof's fresh clone holds these outside its commit when 10-rust writes the record, and no test reads them.
+CLONE_BUILD_OUTPUTS = frozenset({"target/", "tools/__pycache__/", "docs/architecture/solver-contract-sketch/target/"})
 UNEXTRACTED = ("status", "--porcelain", "-z", "--ignored=matching", "--untracked-files=all")
 SCRUB = "tools/gate/scrub.sh"
 STEPS = "tools/verify.d"
@@ -2972,7 +2971,7 @@ def tested(args: list[str], root: pathlib.Path = ROOT) -> int:
         record.unlink(missing_ok=True)
         return 0
     if unextracted := [
-        *(e for e in _git_z(root, *UNEXTRACTED) if e[:3] != "!! " or e[3:] not in HELD),
+        *(e for e in _git_z(root, *UNEXTRACTED) if e[:3] != "!! " or e[3:] not in CLONE_BUILD_OUTPUTS),
         *_git_z(root, "ls-files", "-z", "--", ":(attr:export-ignore)", ":(attr:export-subst)"),
     ]:
         print(f"10-rust: the sweep's extract would lack {unextracted[:3]}, so the sweep runs every baseline")
@@ -3258,7 +3257,7 @@ def _touch(root: pathlib.Path, *paths: str) -> None:
 
 WRITER_CASES: tuple[tuple[str, Callable[[pathlib.Path], object], bool], ...] = (
     ("a clean checkout", lambda r: None, True),
-    ("the paths a proof's clone holds", lambda r: _touch(r, *(f"{p}x" for p in HELD)), True),
+    ("the paths a proof's clone holds", lambda r: _touch(r, *(f"{p}x" for p in CLONE_BUILD_OUTPUTS)), True),
     ("an untracked file", lambda r: _touch(r, "crates/ng-a/src/two.rs"), False),
     (
         "an untracked file git status is set to hide",
