@@ -1,8 +1,8 @@
 # 12: A mutant baseline is not run twice
 
 Type: task
-Status: resolved
-Claimed by: sweep-12-13
+Status: claimed
+Claimed by: sweep-12-fix
 Blocked by: none
 
 **What to build:** In a run of `tools/verify`, `40-mutants` skips the baseline of each test command that `10-rust`'s test phase already ran and passed on the same commit with the same build settings. A baseline runs a whole test on the unmutated tree before any row runs. The diagnosis at `~/lanes/logs/ng-optimize/proof-time.md` (section 5, cut 3) measured the baselines at a median of 420 s, 22.7% of a full proof. Every baseline that is not `--release` reruns a test `10-rust` already passed on the same commit at the same `opt-level = 2` profile. The `--release` baselines run a profile `10-rust` never builds, so they stay. So does the baseline for any crate the plan did not test. The diagnosis estimates the saving at 300 to 400 s on a green proof at the 1,871 s median, and 441 to 569 s on the newest proof. The range is wide because the sweep's own cold build rides in its first baselines, and that build moves to the first row.
