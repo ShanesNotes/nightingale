@@ -66,6 +66,13 @@ fn steady<'b, Q: Substance>(
     Ok(())
 }
 
+fn solute<Q: Substance>(schema: &mut Schema, species: Species, vessel: SiteId) -> Result<(), AdmissionError> {
+    schema.pool::<Q>(vessel, Space::Lumen)?;
+    let into = BoundaryDirection::IntoBody;
+    schema.boundary::<Q>(inflow(species), into, vessel, Space::Lumen)?;
+    Ok(())
+}
+
 fn steady_inflows() -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>(ROOT, origin()?).id();
@@ -76,11 +83,11 @@ fn steady_inflows() -> Result<CompiledBody, AdmissionError> {
     let into = BoundaryDirection::IntoBody;
     schema.boundary::<Energy>(inflow(Species::Energy), into, root, Space::Thermal)?;
     schema.boundary::<Water>(inflow(Species::Water), into, vessel, Space::Lumen)?;
-    schema.boundary::<Sodium>(inflow(Species::Sodium), into, vessel, Space::Lumen)?;
-    schema.boundary::<Potassium>(inflow(Species::Potassium), into, vessel, Space::Lumen)?;
-    schema.boundary::<Chloride>(inflow(Species::Chloride), into, vessel, Space::Lumen)?;
-    schema.boundary::<Vasopressin>(inflow(Species::Vasopressin), into, vessel, Space::Lumen)?;
-    schema.boundary::<Norepinephrine>(inflow(Species::Norepinephrine), into, vessel, Space::Lumen)?;
+    solute::<Sodium>(&mut schema, Species::Sodium, vessel)?;
+    solute::<Potassium>(&mut schema, Species::Potassium, vessel)?;
+    solute::<Chloride>(&mut schema, Species::Chloride, vessel)?;
+    solute::<Vasopressin>(&mut schema, Species::Vasopressin, vessel)?;
+    solute::<Norepinephrine>(&mut schema, Species::Norepinephrine, vessel)?;
     assemble(schema, |mut body| {
         let (mut laws, ports) = body.boundary()?.parts();
         steady::<Energy>(&mut laws, &ports, Species::Energy)?;
