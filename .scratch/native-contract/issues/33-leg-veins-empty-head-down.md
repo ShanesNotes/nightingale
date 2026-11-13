@@ -86,4 +86,4 @@ What stays open:
 
 Sitting up does not engage this cause: no vein sits above its drain, and the leg veins fill from 471 to 562 mL and never reach their unstressed volume.
 
-Evidence: `~/lanes/logs/ng-body-wave-3/nc33-leg-veins/`, with `REPORT.md`, every run's trace and summary under `runs/`, the patches under `patches/`, and the evidence search in `evidence-search.md`.
+Evidence: `~/lanes/logs/ng-body-wave-3/nc33-leg-veins/`, with `NOTES.md`, every run's trace and summary under `runs/`, the patches under `patches/`, and the evidence search in `evidence-search.md`.
