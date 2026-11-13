@@ -32,7 +32,7 @@ fn inflow(species: Species) -> &'static str {
         Species::Potassium => "potassium in",
         Species::Chloride => "chloride in",
         Species::Vasopressin => "vasopressin in",
-        Species::Albumin => "albumin in",
+        Species::Norepinephrine => "norepinephrine in",
         _ => panic!("not a quantity this body takes in"),
     }
 }
@@ -45,7 +45,7 @@ fn rate_key(species: Species) -> ParameterKey {
         Species::Potassium => "bd.potassium-in",
         Species::Chloride => "bd.chloride-in",
         Species::Vasopressin => "bd.vasopressin-in",
-        Species::Albumin => "bd.albumin-in",
+        Species::Norepinephrine => "bd.norepinephrine-in",
         _ => panic!("not a quantity this body takes in"),
     })
 }
@@ -80,7 +80,7 @@ fn steady_inflows() -> Result<CompiledBody, AdmissionError> {
     schema.boundary::<Potassium>(inflow(Species::Potassium), into, vessel, Space::Lumen)?;
     schema.boundary::<Chloride>(inflow(Species::Chloride), into, vessel, Space::Lumen)?;
     schema.boundary::<Vasopressin>(inflow(Species::Vasopressin), into, vessel, Space::Lumen)?;
-    schema.boundary::<Albumin>(inflow(Species::Albumin), into, vessel, Space::Lumen)?;
+    schema.boundary::<Norepinephrine>(inflow(Species::Norepinephrine), into, vessel, Space::Lumen)?;
     assemble(schema, |mut body| {
         let (mut laws, ports) = body.boundary()?.parts();
         steady::<Energy>(&mut laws, &ports, Species::Energy)?;
@@ -89,7 +89,7 @@ fn steady_inflows() -> Result<CompiledBody, AdmissionError> {
         steady::<Potassium>(&mut laws, &ports, Species::Potassium)?;
         steady::<Chloride>(&mut laws, &ports, Species::Chloride)?;
         steady::<Vasopressin>(&mut laws, &ports, Species::Vasopressin)?;
-        steady::<Albumin>(&mut laws, &ports, Species::Albumin)?;
+        steady::<Norepinephrine>(&mut laws, &ports, Species::Norepinephrine)?;
         body.add(laws.finish());
         body.compile()
     })
@@ -133,9 +133,21 @@ fn packet(inflows: &[(Species, f64)]) -> Result<ParameterPacket<SyntheticFixture
     supply::<Sodium>(&mut packet, sodium, a_day(sodium), lumen(sodium), 1e5)?;
     supply::<Potassium>(&mut packet, potassium, a_day(potassium), lumen(potassium), 1e5)?;
     supply::<Chloride>(&mut packet, chloride, a_day(chloride), lumen(chloride), 2e5)?;
-    let (vasopressin, albumin) = (Species::Vasopressin, Species::Albumin);
-    supply::<Vasopressin>(&mut packet, vasopressin, a_day(vasopressin), lumen(vasopressin), 1e3)?;
-    supply::<Albumin>(&mut packet, albumin, a_day(albumin), lumen(albumin), 1e3)?;
+    let (vasopressin, norepinephrine) = (Species::Vasopressin, Species::Norepinephrine);
+    supply::<Vasopressin>(
+        &mut packet,
+        vasopressin,
+        a_day(vasopressin),
+        lumen(vasopressin),
+        1e3,
+    )?;
+    supply::<Norepinephrine>(
+        &mut packet,
+        norepinephrine,
+        a_day(norepinephrine),
+        lumen(norepinephrine),
+        1e2,
+    )?;
     Ok(packet)
 }
 
@@ -176,7 +188,7 @@ fn drifts_up_to(species: Species, limit: f64, partner: Option<Species>) {
         inflows
     };
     let passed = certified(&beside(under)).expect("inside its limit");
-    assert!((drift(&passed, species) - under).abs() < 1e-6 * limit.max(1.0));
+    assert!((drift(&passed, species) - under).abs() < 1e-6 * limit);
     let failed = certified(&beside(over)).expect_err("past its limit");
     assert_eq!(
         refused(failed),
@@ -215,6 +227,6 @@ fn vasopressin_drifts_up_to_8e2_twice_the_slices_measured_day() {
 }
 
 #[test]
-fn albumin_drifts_up_to_the_floor_of_a_quantity_the_slice_does_not_move() {
-    drifts_up_to(Species::Albumin, 1.0, None);
+fn norepinephrine_drifts_up_to_the_floor_of_a_quantity_the_slice_does_not_move() {
+    drifts_up_to(Species::Norepinephrine, 1.0, None);
 }

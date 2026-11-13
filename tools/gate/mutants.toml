@@ -2535,7 +2535,7 @@ name = "held-drift-falls-back-to-the-common-limit"
 path = "crates/ng-validate/src/slice.rs"
 old = '''_ => HELD_DRIFT,'''
 new = '''_ => SYNTHETIC_DRIFT,'''
-test = "-p ng-validate --test arena_certificate albumin_drifts_up_to_the_floor_of_a_quantity_the_slice_does_not_move"
+test = "-p ng-validate --test arena_certificate norepinephrine_drifts_up_to_the_floor_of_a_quantity_the_slice_does_not_move"
 
 [[mutant]]
 name = "keep-back-starling"
