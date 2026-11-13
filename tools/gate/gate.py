@@ -6,9 +6,10 @@ Python 3.11 stdlib only. Run as `python3 -I tools/gate/gate.py <command>`; it fi
     seam                                     the workspace rules, every rule's probe, the plan, scan and comment cases
     mutants [first|rest]                     40-mutants: first checks that every row applies, then sweeps the rows the
                                              change adds or edits or whose path it changes; rest sweeps the run's
-                                             other rows, skipping the baselines 10-rust passed; with no part, both
-                                             in turn. A sweep stops at its first row that is not caught
-    tested --reset | -- ARGS                 10-rust's record of the `cargo test` calls it passed on a clean HEAD
+                                             other rows, skipping in a merge run the baselines 10-rust passed; with
+                                             no part, both in turn. A sweep stops at its first row that is not caught
+    tested --reset | -- ARGS                 10-rust's record of the `cargo test` calls it passed, written only when
+                                             the checkout holds nothing the sweep's extract lacks
     bans                                     clippy rejects a probe built from clippy.toml, entry by entry
     f64                                      no bare f64 or f32 in a public API outside its row's allow list
     nightly-record <exit> <log>              record a nightly full run (tools/gate/nightly.sh)

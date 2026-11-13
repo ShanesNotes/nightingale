@@ -33,10 +33,11 @@ tools/verify's 40-mutants step runs this script through `gate.py mutants`. Befor
 adds or edits, or whose path it changes, and after 10-rust the rest. It stops each sweep at the first row that is not
 CAUGHT, so a red run reports only its first failure. A hand run reports every row.
 
---tested names the record 10-rust writes of the test calls it passed. The rest part passes it, and the sweep then
-skips each baseline that a passed call covers on this commit with these build settings, and builds its test instead,
-so a tree that does not build still stops the sweep. A `--release`, `--doc` or other flagged test, a crate 10-rust did
-not test, and a record from another commit or other settings run the baseline. A hand run runs every baseline.
+--tested names the record 10-rust writes of the test calls it passed. The rest part of a merge run passes it, and the
+sweep then skips each baseline that a passed call covers on this commit with these build settings, and builds its test
+instead, so a tree that does not build still stops the sweep. A call covers only when it ran every test, or every test
+with the ignored ones. A `--release`, `--doc` or other flagged test, a crate 10-rust did not test, and a record from
+another commit or other settings run the baseline. A full run and a hand run run every baseline.
 """
 import argparse
 import collections
