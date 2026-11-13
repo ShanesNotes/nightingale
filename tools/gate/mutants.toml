@@ -2314,3 +2314,27 @@ new = '''
         ),
 '''
 test = "-p ng-validate --test arena_certificate water_drifts_up_to_1e4_as_every_quantity_but_energy_does"
+
+[[mutant]]
+name = "keep-back-starling"
+path = "crates/ng-fluids/src/starling.rs"
+old = '''    route.keeps_back::<Cortisol>(fl);
+'''
+new = ''''''
+test = "-p ng-validate --test keep_back a_hormone_in_blood_alone_compiles_on_the_slices_own_fluid_routes"
+
+[[mutant]]
+name = "keep-back-lymph"
+path = "crates/ng-fluids/src/lymph.rs"
+old = '''    lymph.keeps_back::<Cortisol>(fl);
+'''
+new = ''''''
+test = "-p ng-validate --test keep_back a_hormone_in_blood_alone_compiles_on_the_slices_own_fluid_routes"
+
+[[mutant]]
+name = "keep-back-filtration"
+path = "crates/ng-renal/src/filtration.rs"
+old = '''    filtration.keeps_back::<Cortisol>(rn);
+'''
+new = ''''''
+test = "-p ng-validate --test keep_back a_hormone_in_blood_alone_compiles_on_the_slices_own_fluid_routes"

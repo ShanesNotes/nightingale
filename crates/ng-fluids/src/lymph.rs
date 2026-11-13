@@ -9,6 +9,33 @@ pub(crate) fn declare<'b>(
     // Lymph runs when tissue pressure stands past a threshold, softly. Model default.
     let lymph = ports.lymph(fl);
     lymph.keeps_back::<Vasopressin>(fl);
+    lymph.keeps_back::<Oxygen>(fl);
+    lymph.keeps_back::<CarbonDioxide>(fl);
+    lymph.keeps_back::<Glucose>(fl);
+    lymph.keeps_back::<Triglyceride>(fl);
+    lymph.keeps_back::<FattyAcids>(fl);
+    lymph.keeps_back::<Glycerol>(fl);
+    lymph.keeps_back::<AminoAcids>(fl);
+    lymph.keeps_back::<Lactate>(fl);
+    lymph.keeps_back::<Ketones>(fl);
+    lymph.keeps_back::<Urea>(fl);
+    lymph.keeps_back::<Ammonium>(fl);
+    lymph.keeps_back::<Creatinine>(fl);
+    lymph.keeps_back::<FixedAcid>(fl);
+    lymph.keeps_back::<DietBase>(fl);
+    lymph.keeps_back::<Calcium>(fl);
+    lymph.keeps_back::<Magnesium>(fl);
+    lymph.keeps_back::<Phosphate>(fl);
+    lymph.keeps_back::<Hemoglobin>(fl);
+    lymph.keeps_back::<Iron>(fl);
+    lymph.keeps_back::<Insulin>(fl);
+    lymph.keeps_back::<Glucagon>(fl);
+    lymph.keeps_back::<Renin>(fl);
+    lymph.keeps_back::<AngiotensinII>(fl);
+    lymph.keeps_back::<Aldosterone>(fl);
+    lymph.keeps_back::<NatriureticPeptide>(fl);
+    lymph.keeps_back::<ParathyroidHormone>(fl);
+    lymph.keeps_back::<Cortisol>(fl);
     let conductance = fl.edge_parameter::<LymphEdge, Conductance<Water>>(
         ParameterKey::new("fl.lymph-conductance"),
         Admissible::positive(),
