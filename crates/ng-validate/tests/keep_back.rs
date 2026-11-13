@@ -194,5 +194,6 @@ fn each_keep_back_line_names_the_ticket_that_releases_it() {
         Filtration NatriureticPeptide Kept
         Filtration ParathyroidHormone Kept
         Filtration Cortisol Kept
-    "#]].assert_eq(&lines);
+    "#]]
+    .assert_eq(&lines);
 }

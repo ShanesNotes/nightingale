@@ -527,7 +527,8 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         HC Pool(Iron, Cells, Tissue(Gut)) Ticket(21, "HC") 01:309, 884
         HC Pool(Iron, Interstitium, Tissue(Liver)) Ticket(21, "FL") 01:306
         HC Pool(Iron, Interstitium, Tissue(Gut)) Ticket(21, "FL") 01:306
-    "#]].assert_eq(&rows);
+    "#]]
+    .assert_eq(&rows);
 }
 
 #[test]
