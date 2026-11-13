@@ -27,6 +27,10 @@ core = "Evaluates blocks at stale coordinates under the coupled plan"
 mutants = ["no-block-behind-on-the-slice", "no-block-behind-in-the-window"]
 
 [[row]]
+core = "Keeps each interval's exchange error inside its distance but always of one sign, so the error over a whole beat leaves the beat's distance"
+mutants = ["window-judges-whole-beats"]
+
+[[row]]
 core = "Books one sample at the start while its endpoint came from other stages (rate 1 + t over h = 1: one sample books 1, the trapezoid 1.5)"
 mutants = ["one-sample-books-heun"]
 doctests = [{ path = "crates/ng-contract/src/lib.rs", code = "E0451", text = "Extents { layout, forward, reverse }" }]
