@@ -17,6 +17,11 @@ phase() {
   local line="time: 10-rust $1 $((SECONDS - start)) s"
   if [ -n "${NG_GATE_TIMES:-}" ]; then echo "$line" >>"$NG_GATE_TIMES"; else echo "$line"; fi
 }
+tested() {
+  phase "$1" cargo test --locked "${@:2}" || return
+  python3 -I tools/gate/gate.py tested -- "${@:2}"
+}
+python3 -I tools/gate/gate.py tested --reset
 phase fmt cargo fmt --all --check
 pkgs=()
 for crate in $NG_GATE_CRATES; do
@@ -30,17 +35,17 @@ if [ ${#pkgs[@]} -gt 0 ]; then
     first=() rest=()
     for name in $NG_GATE_FIRST; do first+=(--test "$name"); done
     for name in ${NG_GATE_REST:-}; do rest+=(--test "$name"); done
-    phase "test first" cargo test --locked "${pkgs[@]}" "${first[@]}" "${ignored[@]}"
-    phase test cargo test --locked "${pkgs[@]}" --lib "${rest[@]}" "${ignored[@]}"
-    phase "test doc" cargo test --locked "${pkgs[@]}" --doc "${ignored[@]}"
+    tested "test first" "${pkgs[@]}" "${first[@]}" "${ignored[@]}"
+    tested test "${pkgs[@]}" --lib "${rest[@]}" "${ignored[@]}"
+    tested "test doc" "${pkgs[@]}" --doc "${ignored[@]}"
   else
-    phase test cargo test --locked "${pkgs[@]}" "${ignored[@]}"
+    tested test "${pkgs[@]}" "${ignored[@]}"
   fi
 fi
 for smoke in ${NG_GATE_SMOKE:-}; do
   case " $NG_GATE_CRATES " in
     *" ${smoke%%:*} "*) ;;
-    *) phase "smoke $smoke" cargo test --locked -p "${smoke%%:*}" --test "${smoke#*:}" ;;
+    *) tested "smoke $smoke" -p "${smoke%%:*}" --test "${smoke#*:}" ;;
   esac
 done
 phase doctests python3 -I tools/gate/gate.py doctests

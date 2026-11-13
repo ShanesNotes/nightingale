@@ -1,6 +1,7 @@
 """Breaks one rule at a time on a commit and reports whether a test notices.
 
     python3 -I tools/mutate.py TABLE [--rev REV] [--only NAME ...] [--since REV] [--budget SECONDS] [--check]
+                                     [--tested RECORD]
 
 Python 3.11 stdlib only. TABLE is TOML with one [[mutant]] per rule, aimed at the test that holds it. `old` must match
 exactly once. `test` is what follows `cargo test`, and a row's own `test` replaces the table's. It may not pass
@@ -31,10 +32,16 @@ group, and that group dies with the command and with this script, however this s
 tools/verify's 40-mutants step runs this script through `gate.py mutants`. Before 10-rust it replays the rows a change
 adds or edits, or whose path it changes, and after 10-rust the rest. It stops each sweep at the first row that is not
 CAUGHT, so a red run reports only its first failure. A hand run reports every row.
+
+--tested names the record 10-rust writes of the test calls it passed. The rest part passes it, and the sweep then
+skips each baseline that a passed call covers on this commit with these build settings, and builds its test instead,
+so a tree that does not build still stops the sweep. A `--release`, `--doc` or other flagged test, a crate 10-rust did
+not test, and a record from another commit or other settings run the baseline. A hand run runs every baseline.
 """
 import argparse
 import collections
 import fcntl
+import json
 import os
 import pathlib
 import re
@@ -57,6 +64,7 @@ FAULTS = {signal.SIGABRT, signal.SIGILL, signal.SIGSEGV, signal.SIGBUS, signal.S
 SHOWN = 3
 ROW_KEYS = {"name", "path", "old", "new", "test"}
 MOVES = {"--manifest-path", "--target-dir", "--config"}
+SET_HERE = {"CARGO_TARGET_DIR", "CARGO_BUILD_BUILD_DIR", "CARGO_TERM_COLOR", "CARGO_NET_OFFLINE"}
 
 
 def refuse(why):
@@ -90,6 +98,67 @@ def touched(row, changed):
     crates += [a[2:] for a in args if a.startswith("-p") and len(a) > 2]
     tests = [f"crates/{crate}/tests/" for crate in crates] or ["crates/"]
     return row["path"] in changed or any(path.startswith(t) and "/tests/" in path for t in tests for path in changed)
+
+
+def build_settings(env):
+    named = {k for k in env if k.startswith(("CARGO", "RUST")) or k == "UPDATE_EXPECT"}
+    return {k: env[k] for k in sorted(named - SET_HERE)}
+
+
+def selection(args, filters):
+    """The crates and targets a `cargo test` call runs, or None when it passes anything else."""
+    crates, targets = [], set()
+    args = iter(args)
+    for arg in args:
+        if arg in ("-p", "--package"):
+            crates.append(next(args, ""))
+        elif arg.startswith("--package="):
+            crates.append(arg.removeprefix("--package="))
+        elif arg.startswith("-p") and not arg.startswith("--"):
+            crates.append(arg[2:])
+        elif arg in ("--lib", "--doc"):
+            targets.add(arg[2:])
+        elif arg == "--test":
+            targets.add("test " + next(args, ""))
+        elif arg.startswith("--test="):
+            targets.add("test " + arg.removeprefix("--test="))
+        elif arg.startswith("-") or not filters:
+            return None
+    return (crates, targets or {"all"}) if crates else None
+
+
+def built(test):
+    crates, targets = selection(shlex.split(test), filters=True)
+    return " ".join([*(f"-p {crate}" for crate in crates), *(f"--{t}" for t in sorted(targets - {"all"}))])
+
+
+def passed_calls(record, sha, settings):
+    try:
+        lines = pathlib.Path(record).read_text().splitlines()
+    except FileNotFoundError:
+        return []
+    try:
+        entries = [json.loads(line) for line in lines]
+    except json.JSONDecodeError as e:
+        refuse(f"{record} does not read: {e}")
+    calls = []
+    for entry in entries:
+        if entry["commit"] == sha and entry["settings"] == settings:
+            args = entry["args"]
+            calls.append(selection(args[: args.index("--")] if "--" in args else args, filters=False))
+    return [call for call in calls if call]
+
+
+def covered(test, calls):
+    wanted = selection(shlex.split(test), filters=True)
+    if wanted is None or "doc" in wanted[1]:
+        return False
+    crates, targets = wanted
+    return all(
+        any(crate in done and ("all" in kinds or target in kinds) for done, kinds in calls)
+        for crate in crates
+        for target in targets
+    )
 
 
 def run_tethered(argv, budget=None, **popen):
@@ -170,6 +239,7 @@ def main():
     parser.add_argument("--budget", type=int, default=420, metavar="SECONDS", help="limit on one cargo test")
     parser.add_argument("--since", metavar="REV", help="only rows whose path or test crate's tests/ changed after REV")
     parser.add_argument("--check", action="store_true", help="stop before any build")
+    parser.add_argument("--tested", metavar="RECORD", help="skip the baselines 10-rust's passed test calls cover")
     args = parser.parse_args()
 
     rows = load_rows(args.table, args.only)
@@ -227,13 +297,26 @@ def main():
     # UPDATE_EXPECT rewrites a trace where it should fail.
     env.pop("UPDATE_EXPECT", None)
 
+    calls = passed_calls(args.tested, sha, build_settings(env)) if args.tested else []
+    skipped = []
     for test in dict.fromkeys(row["test"] for row in applied):
+        if covered(test, calls):
+            skipped.append(test)
+            continue
         began = time.monotonic()
         code, output = cargo_test(test, env, args.budget)
         if code != 0 or not PASSED.search(output):
             gave = output[-2000:] or f"nothing in {args.budget} s"
             refuse(f"`cargo test {test}` must pass some test on the unmutated tree, and it gave:\n{gave}\n")
         print(f"baseline  {time.monotonic() - began:.0f} s  cargo test {test}", flush=True)
+    if skipped:
+        print(f"baselines skipped: {len(skipped)}, whose tests 10-rust passed on this commit", flush=True)
+    for build in dict.fromkeys(built(test) for test in skipped):
+        began = time.monotonic()
+        code, output = cargo_test(f"--no-run {build}", env, args.budget)
+        if code != 0:
+            refuse(f"`cargo test --no-run {build}` must build on the unmutated tree, and it gave:\n{output[-2000:]}\n")
+        print(f"build     {time.monotonic() - began:.0f} s  cargo test --no-run {build}", flush=True)
 
     for row in applied:
         file = TREE / row["path"]

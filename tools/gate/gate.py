@@ -6,8 +6,9 @@ Python 3.11 stdlib only. Run as `python3 -I tools/gate/gate.py <command>`; it fi
     seam                                     the workspace rules, every rule's probe, the plan, scan and comment cases
     mutants [first|rest]                     40-mutants: first checks that every row applies, then sweeps the rows the
                                              change adds or edits or whose path it changes; rest sweeps the run's
-                                             other rows; with no part, both in turn. A sweep stops at its first row
-                                             that is not caught
+                                             other rows, skipping the baselines 10-rust passed; with no part, both
+                                             in turn. A sweep stops at its first row that is not caught
+    tested --reset | -- ARGS                 10-rust's record of the `cargo test` calls it passed on a clean HEAD
     bans                                     clippy rejects a probe built from clippy.toml, entry by entry
     f64                                      no bare f64 or f32 in a public API outside its row's allow list
     nightly-record <exit> <log>              record a nightly full run (tools/gate/nightly.sh)
@@ -57,6 +58,7 @@ PATHS = "tools/gate/paths.toml"
 MUST_FAIL = "tools/gate/must-fail.toml"
 MUTANTS = "tools/gate/mutants.toml"
 MUTATE = "tools/mutate.py"
+TESTED = "target/gate/tested.jsonl"
 STEPS = "tools/verify.d"
 CONTRACT = "docs/architecture/solver-contract.md"
 REGULAR = "100644"
@@ -2950,8 +2952,24 @@ def mutants(part: str | None) -> int:
     if part != "first" and mode != "changed":
         print(f"40-mutants: rest part, {len(parts.rest)} rows", flush=True)
         only = [] if len(parts.rest) == len(rows) else ["--only", *parts.rest]
-        if parts.rest and sweep([*command, *only], parts.rest, 0):
+        tested = ["--tested", str(ROOT / TESTED)] if part == "rest" else []
+        if parts.rest and sweep([*command, *tested, *only], parts.rest, 0):
             return 1
+    return 0
+
+
+def tested(args: list[str]) -> int:
+    record = ROOT / TESTED
+    if args == ["--reset"]:
+        record.unlink(missing_ok=True)
+        return 0
+    if git(ROOT, "status", "--porcelain") != "":
+        print("10-rust: the checkout differs from HEAD, so the sweep runs every baseline")
+        return 0
+    entry = {"commit": git(ROOT, "rev-parse", "HEAD"), "settings": mutate_py().build_settings(os.environ), "args": args}
+    record.parent.mkdir(parents=True, exist_ok=True)
+    with record.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(entry) + "\n")
     return 0
 
 
@@ -3102,7 +3120,57 @@ def check_case() -> list[Violation]:
     return out
 
 
-DRIVER_CASES: tuple[Callable[[], list[Violation]], ...] = (survivor_case, failed_sweep_case, check_case)
+SHA, OTHER_SHA = "1" * 40, "2" * 40
+SETTINGS = {"RUSTFLAGS": ""}
+TESTED_RECORD = (
+    (SHA, SETTINGS, ["-p", "ng-a", "-p", "ng-b", "--", "--include-ignored"]),
+    (SHA, SETTINGS, ["-p", "ng-c", "--lib", "--test", "beta"]),
+    (SHA, SETTINGS, ["-p", "ng-f", "--test", "alpha", "only_this_one"]),
+    (OTHER_SHA, SETTINGS, ["-p", "ng-d"]),
+    (SHA, {"RUSTFLAGS": "-Cdebug-assertions=off"}, ["-p", "ng-e"]),
+)
+TESTED_CASES: tuple[tuple[str, bool, str], ...] = (
+    ("-p ng-a --test alpha a_filter", True, "a crate 10-rust tested whole"),
+    ("-p ng-b --lib a_filter", True, "the library of a crate 10-rust tested whole"),
+    ("--package=ng-a -png-b --test=alpha", True, "two crates spelled the other ways"),
+    ("-p ng-c --test beta a_filter", True, "a test target 10-rust named"),
+    ("-p ng-c --lib", True, "the library 10-rust named"),
+    ("--release -p ng-a --test alpha", False, "a --release baseline"),
+    ("--doc -p ng-a Thing", False, "a doctest, which only a run builds"),
+    ("-p ng-a --test alpha -- --ignored", False, "a test's own runner flags"),
+    ("-p ng-c --test gamma", False, "a test target 10-rust did not name"),
+    ("-p ng-a -p ng-c --test gamma", False, "two crates, one of them short of the target"),
+    ("-p ng-z --test alpha", False, "a crate the plan did not test"),
+    ("-p ng-d --test alpha", False, "a record from another commit"),
+    ("-p ng-e --test alpha", False, "a record from other build settings"),
+    ("-p ng-f --test alpha", False, "a call that ran only some tests"),
+)
+
+
+def tested_cases() -> list[Violation]:
+    out = []
+    mutate = mutate_py()
+    with tempfile.TemporaryDirectory(prefix="gate-tested-") as tmp:
+        record = pathlib.Path(tmp) / "tested.jsonl"
+        missing = mutate.passed_calls(str(record), SHA, SETTINGS)
+        lines = [json.dumps({"commit": c, "settings": s, "args": a}) for c, s, a in TESTED_RECORD]
+        record.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        calls = mutate.passed_calls(str(record), SHA, SETTINGS)
+    for test, skips, what in TESTED_CASES:
+        if mutate.covered(test, calls) != skips:
+            out.append(Violation("baseline", what, f"`{test}` {'runs' if skips else 'skips'} its baseline"))
+    if missing or mutate.covered(TESTED_CASES[0][0], missing):
+        out.append(Violation("baseline", "a missing record", "it skips a baseline"))
+    scrubs = []
+    for step in ("10-rust", "40-mutants"):
+        text = _read(ROOT / STEPS / f"{step}.sh")
+        scrubs.append(text[text.find('export RUSTFLAGS=""') : text.find("UPDATE_EXPECT\n") + len("UPDATE_EXPECT")])
+    if not scrubs[0].startswith("export") or scrubs[0] != scrubs[1]:
+        out.append(Violation("baseline", "40-mutants.sh", "it clears the build settings 10-rust.sh clears, line for line"))
+    return out
+
+
+DRIVER_CASES: tuple[Callable[[], list[Violation]], ...] = (survivor_case, failed_sweep_case, check_case, tested_cases)
 ORDER_CASES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("01-toolchain.sh", "99-unplaced.sh"), "verify: tools/verify.d/99-unplaced.sh has no place in the run order"),
     (("01-toolchain.sh", "40-mutants.sh"), "verify: the plan failed"),
@@ -3171,6 +3239,10 @@ def main(argv: list[str]) -> int:
                 return mutants(None)
             case ["mutants", "first" | "rest" as part]:
                 return mutants(part)
+            case ["tested", "--reset"]:
+                return tested(["--reset"])
+            case ["tested", "--", *args]:
+                return tested(args)
             case ["bans"]:
                 return bans()
             case ["f64"]:
