@@ -825,9 +825,12 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
     }
     let basis = body.conserved_basis();
     let pin = format!(
-        "rows {} {kinds:?}, columns {}, conserved combinations {}, held pools {}, held route columns {}\nmodel hash {}\nconserved basis {}\n",
+        "rows {} {kinds:?}, columns {}, jacobian nonzeros {}, blocks {}, parameter slots {}, conserved combinations {}, held pools {}, held route columns {}\nmodel hash {}\nconserved basis {}\n",
         body.rows().len(),
         body.columns().len(),
+        body.sparsity().unknowns().len(),
+        body.blocks().len(),
+        body.parameters().len(),
         basis.combinations().len(),
         basis.coverage().pools().len(),
         basis.coverage().held_routes().len(),
@@ -835,8 +838,8 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(basis.digest()),
     );
     expect![[r#"
-        rows 1372 {"algebraic": 126, "amount": 1236, "memory": 10}, columns 1288, conserved combinations 480, held pools 409, held route columns 62
-        model hash dfbd80cb51946e1c2e348a0485c2e6a4e1c2d56b7f647b4c7bd3175760902884
+        rows 1372 {"algebraic": 126, "amount": 1236, "memory": 10}, columns 1288, jacobian nonzeros 8892, blocks 492, parameter slots 465, conserved combinations 480, held pools 409, held route columns 62
+        model hash a24da7b7e1ff3e5c533f8bf8c674380f916b118350c13f1d34ec865931d175b7
         conserved basis b709d2da159c9858a6d354b4b2145cb46845e18e809d0180814671f21d0ef03f
     "#]].assert_eq(&pin);
     Ok(())

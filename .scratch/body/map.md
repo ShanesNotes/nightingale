@@ -34,7 +34,7 @@ Tickets 01, 02, 03, 04, 05, 07, 23, 27 and 29 and research tickets 11 to 15 are 
 | [03](issues/03-whole-body-lists.md) Species, spaces and networks | 01, 02, 29 | The contract's closed lists, grown once |
 | [04](issues/04-scopes-ports-and-census.md) Scopes, ports and a census for each assembly | 03 | Nine systems can declare laws, and no system ticket edits a shared constant |
 | [05](issues/05-the-days-inputs.md) The day's inputs | 03 | The clock, sleep, the room and meals reach the body |
-| [06](issues/06-whole-body-on-holds.md) The whole body on holds | 04, 05 | The second assembly and its hold table |
+| [06](issues/06-whole-body-on-holds.md) The whole body on holds | 04, 05 | The second assembly and its hold table, admitted, run, certified and pinned on its own trace |
 | [07](issues/07-what-limits-the-step.md) What limits the step | nothing | Where a step's cost goes on the slice, and its limiter |
 | [27](issues/27-step-plan.md) A step plan that can reach the speed aim | 07 | Prototypes and a pick, on main before the synthetic day |
 | [30](issues/30-step-plans-on-the-whole-body.md) The step plans measured on the whole body | 06, 27 | Whether ticket 27's pick holds on all 13 systems |
