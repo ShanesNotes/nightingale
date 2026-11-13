@@ -681,6 +681,7 @@ fn two_cards_cannot_hold_one_pool() -> Result<(), AdmissionError> {
             cards: ["BC", "HP"],
             site: bed,
             space: Space::Cells,
+            species: Species::Water,
         })
     );
     compiled(Defect::LiverHoldsCells)?;
@@ -696,6 +697,7 @@ fn a_card_cannot_hold_the_fluid_of_an_enclosure_another_card_is_named_for() -> R
             cards: ["GI", "HP"],
             site: belly,
             space: Space::Fluid,
+            species: Species::Water,
         })
     );
     compiled(Defect::NamedCardListsItsFluid)?;
@@ -708,7 +710,8 @@ fn a_space_cannot_be_both_held_and_left_out() {
         refused(Defect::CellsLeftOut),
         defect(CompileDefect::HeldNothing {
             card: "BC",
-            space: Space::Cells
+            space: Space::Cells,
+            species: None,
         })
     );
 }
@@ -719,7 +722,8 @@ fn a_held_enclosures_own_fluid_cannot_be_left_out() {
         refused(Defect::FluidLeftOut),
         defect(CompileDefect::HeldNothing {
             card: "GI",
-            space: Space::Fluid
+            space: Space::Fluid,
+            species: None,
         })
     );
 }
@@ -738,7 +742,8 @@ fn a_held_space_the_map_does_not_have_is_refused() -> Result<(), AdmissionError>
         found.err(),
         Some(defect(CompileDefect::HeldNothing {
             card: "HP",
-            space: Space::Lumen
+            space: Space::Lumen,
+            species: None,
         }))
     );
     Ok(())
@@ -1061,21 +1066,118 @@ fn two_cards_cannot_hold_one_species_where_their_site_sets_overlap() -> Result<(
             cards: ["BC", "MT"],
             site: bed_at("muscle bed")?,
             space: Space::Cells,
+            species: Species::Potassium,
         }))
     );
     Ok(())
 }
 
 #[test]
-fn a_species_hold_that_names_no_pool_is_refused() {
+fn a_species_hold_cannot_share_a_pool_with_another_cards_whole_space_hold_in_either_order()
+-> Result<(), AdmissionError> {
+    let whole = |space| vec![space];
+    let bc_whole = held_by(|body| {
+        hold(
+            body,
+            HeldDeclaration::<BloodChemistry>::new(vec![], whole(Space::Cells), "a synthetic bench"),
+        )?;
+        hold(body, mt().pool::<Potassium, Beds<Muscle>>(Space::Cells))
+    });
+    let mt_whole = held_by(|body| {
+        hold(body, bc().pool::<Potassium, Beds<Muscle>>(Space::Cells))?;
+        hold(
+            body,
+            HeldDeclaration::<Metabolism>::new(vec![], whole(Space::Cells), "a synthetic bench"),
+        )
+    });
+    let twice = Some(defect(CompileDefect::PoolHeldTwice {
+        cards: ["BC", "MT"],
+        site: bed_at("muscle bed")?,
+        space: Space::Cells,
+        species: Species::Potassium,
+    }));
+    assert_eq!(bc_whole.err(), twice);
+    assert_eq!(mt_whole.err(), twice);
+    Ok(())
+}
+
+#[test]
+fn a_species_hold_that_names_no_pool_is_refused_and_named() {
     let every = || water_and_anion().pool::<Potassium, CapillaryBed>(Space::Cells);
-    let nothing = |space| Some(defect(CompileDefect::HeldNothing { card: "BC", space }));
+    let nothing = |space, species| {
+        Some(defect(CompileDefect::HeldNothing {
+            card: "BC",
+            space,
+            species: Some(species),
+        }))
+    };
     let no_iron = held_by(|body| hold(body, every().pool::<Iron, CapillaryBed>(Space::Cells)));
-    assert_eq!(no_iron.err(), nothing(Space::Cells));
+    assert_eq!(no_iron.err(), nothing(Space::Cells, Species::Iron));
     let no_liver = held_by(|body| hold(body, every().pool::<Potassium, Beds<Liver>>(Space::Cells)));
-    assert_eq!(no_liver.err(), nothing(Space::Cells));
+    assert_eq!(no_liver.err(), nothing(Space::Cells, Species::Potassium));
     let no_plasma = held_by(|body| hold(body, every().pool::<Potassium, CapillaryBed>(Space::Plasma)));
-    assert_eq!(no_plasma.err(), nothing(Space::Plasma));
+    assert_eq!(no_plasma.err(), nothing(Space::Plasma, Species::Potassium));
+}
+
+#[test]
+fn a_species_hold_written_twice_seals_as_one() -> Result<(), AdmissionError> {
+    let once = held_by(|body| {
+        hold(
+            body,
+            water_and_anion().pool::<Potassium, CapillaryBed>(Space::Cells),
+        )
+    })?;
+    let twice = held_by(|body| {
+        let declaration = (water_and_anion().pool::<Potassium, CapillaryBed>(Space::Cells))
+            .pool::<Potassium, CapillaryBed>(Space::Cells);
+        hold(body, declaration)
+    })?;
+    assert_eq!(once.model_hash(), twice.model_hash());
+    Ok(())
+}
+
+#[test]
+fn the_coverage_manifest_reads_each_cards_species_holds() -> Result<(), AdmissionError> {
+    let body = held_by(|body| {
+        let declaration = (bc().pool::<CellAnion, CapillaryBed>(Space::Cells))
+            .pool::<Potassium, Besides<Muscle>>(Space::Cells)
+            .pool::<Water, CapillaryBed>(Space::Cells);
+        hold(body, declaration)?;
+        hold(body, mt().pool::<Potassium, Beds<Muscle>>(Space::Cells))
+    })?;
+    let read = |card: &HeldCard| {
+        let holds = card.species().iter();
+        let holds = holds.map(|hold| (hold.space(), hold.species(), hold.sites()));
+        (card.card(), card.spaces().to_vec(), holds.collect::<Vec<_>>())
+    };
+    let cards: Vec<_> = body
+        .conserved_basis()
+        .coverage()
+        .declarations()
+        .iter()
+        .map(read)
+        .collect();
+    let beds = CapillaryBed::SET;
+    assert_eq!(
+        cards,
+        [
+            (
+                "BC",
+                vec![],
+                vec![
+                    (Space::Cells, Species::Water, beds),
+                    (Space::Cells, Species::Potassium, Besides::<Muscle>::SET),
+                    (Space::Cells, Species::CellAnion, beds),
+                ]
+            ),
+            (
+                "MT",
+                vec![],
+                vec![(Space::Cells, Species::Potassium, Beds::<Muscle>::SET)]
+            ),
+        ]
+    );
+    Ok(())
 }
 
 #[test]

@@ -657,7 +657,7 @@ A system's laws that stand in for physiology, held by a declaration that names e
 _Avoid_: stub, mock
 
 **Coverage manifest**:
-The compiled list of which conserved combinations close inside the slice and which rest on held stand-ins: each held declaration with its routes, spaces and validity, each route's columns, and each held pool with its own combination.
+The compiled list of which conserved combinations close inside the slice and which rest on held stand-ins: each held declaration with its routes, the spaces it holds at every site, the species it holds by site set, and its validity, each route's columns, and each held pool with its own combination.
 
 **Held support**:
 What a held stand-in moves across the boundary on one route. The certificate reports, for each route, the most any window carried into and out of the body.

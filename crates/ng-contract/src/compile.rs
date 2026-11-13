@@ -2058,6 +2058,7 @@ fn holder(schema: &Schema, held: &[HeldCard], pool: PoolRef) -> Result<Option<&'
             cards: [first, second],
             site: pool.site,
             space: pool.space,
+            species: pool.species,
         }),
         _ => Ok(first),
     }
@@ -2073,7 +2074,11 @@ fn check_holds(rows: &Rows, schema: &Schema, held: &[HeldCard]) -> Result<(), Co
     let claims = (held.iter()).flat_map(|card| card.holds.iter().map(|&space| (card.card, space)));
     for (card, space) in claims {
         if !rows.amounts.iter().any(|pool| pool.space == space) {
-            return Err(CompileDefect::HeldNothing { card, space });
+            return Err(CompileDefect::HeldNothing {
+                card,
+                space,
+                species: None,
+            });
         }
     }
     let species = (held.iter()).flat_map(|card| card.pools.iter().map(|hold| (card.card, hold)));
@@ -2082,14 +2087,18 @@ fn check_holds(rows: &Rows, schema: &Schema, held: &[HeldCard]) -> Result<(), Co
             return Err(CompileDefect::HeldNothing {
                 card,
                 space: hold.space,
+                species: Some(hold.species),
             });
         }
     }
     let stood_in = |card: &&'static str| held.iter().any(|known| known.card == *card);
     for (site, card) in (schema.anatomy.held_enclosures()).filter(|(_, card)| stood_in(card)) {
         if !rows.amounts.iter().any(|pool| pool.site == site) {
-            let space = Space::Fluid;
-            return Err(CompileDefect::HeldNothing { card, space });
+            return Err(CompileDefect::HeldNothing {
+                card,
+                space: Space::Fluid,
+                species: None,
+            });
         }
     }
     Ok(())

@@ -841,11 +841,23 @@ impl<S: OutsideSlice> HeldDeclaration<S> {
         self
     }
 }
+/// One species in one space at the sites of one set, as a held card holds it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct HeldSpecies {
+pub struct HeldSpecies {
     pub(crate) space: Space,
     pub(crate) species: Species,
     pub(crate) sites: Sites,
+}
+impl HeldSpecies {
+    pub fn space(&self) -> Space {
+        self.space
+    }
+    pub fn species(&self) -> Species {
+        self.species
+    }
+    pub fn sites(&self) -> Sites {
+        self.sites
+    }
 }
 /// A held declaration as compiled, normalized so its order never reaches the model hash.
 #[derive(Clone, Debug, PartialEq)]
@@ -864,9 +876,13 @@ impl HeldCard {
     pub fn routes(&self) -> &[&'static str] {
         &self.supplies
     }
-    /// The spaces whose pools it stands behind, in space order.
+    /// The spaces whose pools it stands behind at every site, in space order.
     pub fn spaces(&self) -> &[Space] {
         &self.holds
+    }
+    /// The species it holds by site set, in space, then species, then set order.
+    pub fn species(&self) -> &[HeldSpecies] {
+        &self.pools
     }
     pub fn validity(&self) -> &'static str {
         self.validity
@@ -1050,18 +1066,6 @@ mod tests {
     fn a_species_hold_seals_after_a_tag_and_a_card_without_one_seals_only_its_older_fields() {
         use super::{Canonical, Class, HeldCard, HeldSpecies, Seal, Sites, Space};
         use crate::{Species, Tissue};
-        let card = |pools| HeldCard {
-            card: "BC",
-            supplies: vec!["a route"],
-            holds: vec![Space::Cells],
-            pools,
-            validity: "a bench",
-        };
-        let sealed = |card: &HeldCard| {
-            let mut out = Canonical::new("");
-            card.seal(&mut out);
-            out.into_bytes()
-        };
         let older = || {
             let mut out = Canonical::new("");
             out.text("BC");
@@ -1072,51 +1076,77 @@ mod tests {
             out.text("a bench");
             out
         };
-        let muscle = HeldSpecies {
-            space: Space::Cells,
-            species: Species::Potassium,
-            sites: Sites::Tissue(Tissue::Muscle),
+        let hold = |space, species, sites| HeldSpecies {
+            space,
+            species,
+            sites,
         };
-        let beds = HeldSpecies {
-            space: Space::Interstitium,
-            species: Species::Iron,
-            sites: Sites::Class(Class::CapillaryBed),
-        };
-        let mut one = older();
-        for word in [
-            u64::MAX,
-            1,
-            Space::Cells as u64,
-            Species::Potassium as u64,
-            5,
-            Tissue::Muscle as u64,
-        ] {
-            one.number(word);
+        let holds = [
+            (
+                hold(Space::Cells, Species::Potassium, Sites::Tissue(Tissue::Muscle)),
+                [Space::Cells as u64, Species::Potassium as u64, 5, 2],
+            ),
+            (
+                hold(
+                    Space::Interstitium,
+                    Species::Iron,
+                    Sites::Class(Class::VesselSegment),
+                ),
+                [Space::Interstitium as u64, Species::Iron as u64, 0, 1],
+            ),
+            (
+                hold(Space::Plasma, Species::Water, Sites::Besides(Tissue::Fat)),
+                [Space::Plasma as u64, Species::Water as u64, 6, 8],
+            ),
+        ];
+        for count in 0..=holds.len() {
+            let pools = holds[..count].iter().map(|(hold, _)| *hold).collect();
+            let card = HeldCard {
+                card: "BC",
+                supplies: vec!["a route"],
+                holds: vec![Space::Cells],
+                pools,
+                validity: "a bench",
+            };
+            let mut sealed = Canonical::new("");
+            card.seal(&mut sealed);
+            let mut expected = older();
+            if count > 0 {
+                expected.number(u64::MAX);
+                expected.number(count as u64);
+            }
+            for word in holds[..count].iter().flat_map(|(_, words)| words) {
+                expected.number(*word);
+            }
+            assert_eq!(
+                sealed.into_bytes(),
+                expected.into_bytes(),
+                "{count} species holds"
+            );
         }
-        let mut two = older();
-        for word in [
-            u64::MAX,
-            2,
-            Space::Cells as u64,
-            Species::Potassium as u64,
-            5,
-            Tissue::Muscle as u64,
-        ] {
-            two.number(word);
+    }
+
+    #[test]
+    fn each_kind_of_site_set_seals_to_two_words_of_its_own() {
+        use super::{Canonical, Class, Seal, Sites};
+        use crate::Tissue;
+        let pinned = [
+            (Sites::Class(Class::VesselSegment), [0, 1]),
+            (Sites::Blood, [1, 0]),
+            (Sites::Urinary, [2, 0]),
+            (Sites::Alimentary, [3, 0]),
+            (Sites::Airway, [4, 0]),
+            (Sites::Tissue(Tissue::Muscle), [5, 2]),
+            (Sites::Besides(Tissue::Fat), [6, 8]),
+        ];
+        for (sites, words) in pinned {
+            let mut sealed = Canonical::new("");
+            sites.seal(&mut sealed);
+            let mut expected = Canonical::new("");
+            for word in words {
+                expected.number(word);
+            }
+            assert_eq!(sealed.into_bytes(), expected.into_bytes(), "{sites:?}");
         }
-        for word in [
-            Space::Interstitium as u64,
-            Species::Iron as u64,
-            0,
-            Class::CapillaryBed as u64,
-        ] {
-            two.number(word);
-        }
-        let without = sealed(&card(vec![]));
-        assert_eq!(without, older().into_bytes());
-        assert_eq!(sealed(&card(vec![muscle])), one.into_bytes());
-        assert_eq!(sealed(&card(vec![muscle, beds])), two.into_bytes());
-        let first_word = |bytes: &[u8]| bytes[8..16].to_vec();
-        assert_ne!(first_word(&without), u64::MAX.to_be_bytes());
     }
 }
