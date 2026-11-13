@@ -434,7 +434,7 @@ A gate counts only if it rejects a core built to fail it. Each one below is part
 
 ### 8. Diagram source
 
-The Mermaid source below is the single source. [solver-contract.svg](solver-contract.svg) and [solver-contract.png](solver-contract.png) are rendered from it with `@mermaid-js/mermaid-cli` 11.17.0 (`-w 3200`, and `-b white` for the PNG) under `~/lanes/heavy.sh`; re-render both whenever it changes.
+The Mermaid source below is the single source. [solver-contract.svg](solver-contract.svg) and [solver-contract.png](solver-contract.png) are rendered from it with `@mermaid-js/mermaid-cli` 11.17.0 (`-w 3200`, and `-b white` for the PNG); re-render both whenever it changes.
 
 ```mermaid
 flowchart LR
@@ -627,6 +627,7 @@ Rejected: rejecting algebraic loops, and a quasi-steady reflex. An i64 ledger wi
 - We accept healthy-range windows that end only on a grid instant, in exchange for checks that read what each method gives. A sampled method has no value between grid instants. A time-mean window that ends between them differs from the nearest judged window by at most the grid period over the window's length, times the reading's swing.
 - We accept a blocked verdict at every change between activities whose ranges differ until a source gives the change a range of its own, in exchange for never judging a window against men doing something else.
 - We accept that a whole period the run's start or end cuts is counted and not judged, in exchange for never judging part of a period against a study of the whole. A range that judged no whole period still blocks.
+- We accept that a stretch at the run's start or end shorter than a window, beside a ranged change, is judged by no window, in exchange for a change's range owning every window that crosses it. A window at the run's start that crosses the change has no earlier window of its length before the change, so the values before the change are judged only where the change's own window reaches them, and the same holds at the run's end. At most one window's length goes unjudged at each end: on record 0004's day, admitted at 06:55 and sitting up at 07:00, the first five minutes of any reading whose every-activity window is longer than five minutes. Such a stretch is not yet counted or named, as a cut period is.
 - We accept a blocked verdict for a window that belongs to two changes with ranges of their own, in exchange for never judging him against men who made one change. No set lifts it, since a scope names one change: only a day whose ranged changes lie further apart than a window and the first change's shift, or a set without one of the two ranges, avoids it.
 - We accept one grid per lens, in exchange for no per-channel schedule: a waveform and a lab are two lenses and two observers.
 - We accept a measurement error bounded at six standard deviations, in exchange for a draw made of sums alone, with no rejection loop.

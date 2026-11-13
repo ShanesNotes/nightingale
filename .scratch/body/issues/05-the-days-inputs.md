@@ -36,7 +36,7 @@ The boundary carries the whole day, and a packet holds it. Every value in the te
 
 **What holds "an input scales a gain or a set point and never sets a produced quantity".** Three things hold parts of it:
 
-- Compile refuses a law that reads a lasting input and no parameter or memory slot (`UnscaledInput`). It has a test and a mutant row. It is a stand-in for the rule. It passes a law that reads any parameter, such as `0 = k (T - room_air())` or a void flow `voiding() * k_V`. It refuses a valid law that reads only inputs, such as Dalton's `inspired_oxygen() * room_pressure()`. So each law that reads an input is reviewed against the rule by reading, and tickets 10, 12, 20, 22 and 25 carry that line.
+- Compile refuses a law that reads a lasting input and no parameter or memory slot (`UnscaledInput`). It has a test and a mutant row. It is a stand-in for the rule. It passes a law that reads any parameter, such as `0 = k (T - room_air())` or a void flow `voiding() * k_V`. It refuses a valid law that reads only inputs, such as Dalton's `inspired_oxygen() * room_pressure()`. So each law that reads an input is reviewed against the rule by reading, and tickets 10, 11, 12, 17, 20, 22 and 25 carry that line.
 - A void carries no amount, by type: a `compile_fail,E0308` probe and its legal twin.
 - No delivery carries a negative amount (`NegativeDelivery`), for every species of a meal.
 

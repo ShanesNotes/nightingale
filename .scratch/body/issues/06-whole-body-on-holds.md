@@ -14,7 +14,7 @@ Blocked by: 04, 05
 - [ ] Iron's pools in cells stand at the liver and gut beds and at no other bed, asserted on the whole body's rows. Ticket 04 grants HC's iron crossing of the cell membrane at every capillary bed by type, and only the schema's placement of iron's pools holds it to body 01's two beds. HC's iron stays held in this body until [ticket 21](21-blood-cells-and-systems-at-rest.md) (01:884), and compile refuses a law that moves a held pool (`HeldPoolMoved`), so the crossing has no column here. Ticket 21 asserts the crossing's columns
 - [ ] The replay gates pass on the body
 - [ ] The body has its own expect trace and its own size pins, so a system ticket updates the body's and never the slice's
-- [ ] Cost: unknowns, rows and milliseconds a step for the body on holds against the slice, measured on the heavy-run machine. [Ticket 26](26-cost-budget.md) sets the budgets from this
+- [ ] Cost: unknowns, rows and milliseconds a step for the body on holds against the slice, measured on one named build worker. [Ticket 26](26-cost-budget.md) sets the budgets from this
 
 **Non-goals:** any new law. A stand-in is a constant or the simplest balanced flow that lets the body compile.
 
