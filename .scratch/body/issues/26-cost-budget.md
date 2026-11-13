@@ -8,6 +8,7 @@ Blocked by: 06, 07
 
 - [ ] The body on holds measured against the slice under one repeat protocol: unknowns, rows, the cost of a step by part, and wall time for each simulated second
 - [ ] Admission's wall time and the wall time of a full `tools/verify` run, measured the same way, each with a ceiling. A run pays admission once, however short it is, and the gate's time limits how many tickets merge in a day
+- [ ] From [ticket 06](06-whole-body-on-holds.md)'s plan: a ceiling on the time the body's replay gates add to a full `tools/verify` run. Each replay gate runs a core several times over its run, so the body's gates cost in proportion to the body's step, which ticket 06's last part measures
 - [ ] A budget for each loop and a ceiling for the synthetic day, in the map's order table, with the run that set them
 - [ ] One command that prints a ticket's cost line the same way every time
 - [ ] The rule the map states: a ticket over its budget does not merge until the budget's owner records an exception with its reason

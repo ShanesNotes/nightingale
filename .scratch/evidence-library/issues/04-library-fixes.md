@@ -33,7 +33,7 @@ Two real faults sit behind this:
   - Rebuild candidates and links; only new pairs are sent to Jev.
   - Record the changed pipeline's hashes before scoring.
   - Hold the graph to the eight frozen bars with the sealed answer key, the same traps, and a fresh blind Codex rating of the new top 20 against fresh random edges.
-  - Check each find against its source passages and record the verdict with the evidence. This replaces Shane's blind rating ([ticket 02](02-reviewer-blind-rating.md)).
+  - Check each find against its source passages and record the verdict with the evidence. This replaces the developer reviewer's blind rating ([ticket 02](02-reviewer-blind-rating.md)).
 
 Jev cost: $13.86 on top of the slice's $43.43, for $57.29 in all, inside the $60 bar. This ticket estimated $10, but the retag alone ran $13.23. MIMIC rows stay local; the text corpus holds none.
 

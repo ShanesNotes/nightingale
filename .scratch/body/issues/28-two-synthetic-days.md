@@ -14,3 +14,5 @@ Blocked by: 19, 20, 21, 22, 24
 - [ ] The Answer lists what must change before the reviewed packet is bound
 
 **Non-goals:** any clinical claim, and the speed aim itself.
+
+From [ticket 06](06-whole-body-on-holds.md)'s plan: the hold table this ticket lists gains the cell anion, which body 01's table of the holds rung 0 keeps (01:635-651) leaves out. BC holds it in the cells of every bed, because no rung 0 law moves it, and [ticket 17](17-volume-hormones.md) reads it (01:547).
