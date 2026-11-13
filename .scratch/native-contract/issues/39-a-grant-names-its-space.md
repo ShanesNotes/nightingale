@@ -28,5 +28,7 @@ new = '''                        Space::Cells,
 - [ ] A mutant row that undoes the fix, CAUGHT by that test, on the PR's head (`tools/mutate.py --only`)
 - [ ] The row `v-owner-key-ignores-space` above is CAUGHT by a test, or the Answer shows that no two cards can be given one chemistry in two spaces of one bed
 - [ ] Metabolism's grant still reaches the space ticket 09 picks for its burn: the cells, or the interstitium beside the tissue store (ticket 09's second form)
+- [ ] The sort the reverse rule rests on, `terms.sort_unstable()` in `check_reactions` (`crates/ng-contract/src/compile.rs`), is held by a test: a second card's reverse of a reaction written from its other species is refused. A mutant row that removes the sort is CAUGHT by that test. Every test today writes both cards' terms in one order, so the check of nightingale#139 found its row `r2-terms-not-sorted` SURVIVED
+- [ ] The unit test `a_count_above_one_moves_the_seal_and_a_count_of_one_seals_only_the_other_fields` in `crates/ng-contract/src/body.rs` holds the seal's tag in bytes at counts two and three: each column seals to the four older fields, then `u64::MAX`, then the count. Today it holds the seal at count two only, so the check's rows `r2-tag-only-at-count-two` and `r2-count-sealed-as-two-at-most` survive
 
 **Non-goals:** any reaction a body ticket declares, and any change to the one-owner rule within one space.

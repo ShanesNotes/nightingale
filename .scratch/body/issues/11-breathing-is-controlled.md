@@ -14,5 +14,6 @@ Blocked by: 05, 10, `.scratch/research/issues/11-law-forms-gas-loop.md`
 - [ ] Every link of the loop moves its reader the way the loop needs, on the admitted start
 - [ ] The certificate passes with the oxygen and carbon dioxide books held by this loop, and the body's trace is updated
 - [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
+- [ ] From [ticket 05](05-the-days-inputs.md): each law here that reads a lasting input is reviewed against the rule by reading: the input scales a gain or a set point and never stands for a produced quantity. Compile's `UnscaledInput` is only a stand-in: it passes a law that reads any parameter, such as `0 = k (T - room_air())`, and refuses one that reads only inputs. Sleep's shift of the set point and its lower gain are such reads
 
 **Non-goals:** transport delays, periodic breathing, cough, and breathing under voluntary control.

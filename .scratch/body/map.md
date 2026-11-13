@@ -18,13 +18,13 @@ All 13 systems run at rung 0 in one body, on a synthetic fixture. The body admit
   - The [evidence library](../evidence-library/map.md), in the store's `data/graph/`: passages tagged by system, condition and timescale (`layer0-tagged.parquet`), and links between terms across systems with the works and passages behind each link (`edges.parquet`).
   - MIMIC rows stay on this machine and never go to a cloud model.
 - **Every build ticket is one PR that ends in three checks.** Tests: a closed-form case for each new law, a refusal test for each new rule, and a mutant row that puts the stand-in back and must fail. A run: the whole body admits, the certificate passes on a short window, each new link of a loop moves its reader the right way, and the body's expect trace is updated with one sentence on why it moved. A cost line: unknowns and rows before and after, and wall time for each simulated second inside [ticket 26](issues/26-cost-budget.md)'s budget. A ticket over its budget does not merge until an exception is recorded with its reason.
-- **Loop PRs merge one at a time.** Each one moves the body's trace and its size pins, and a code proof runs on the heavy-run machine. A PR that waited merges main and regenerates its trace before its proof.
+- **Loop PRs merge one at a time.** Each one moves the body's trace and its size pins, and a code proof runs on a build worker. A PR that waited merges main and regenerates its trace before its proof.
 - **Docs tickets go first and in parallel.** Ticket 01 and the research tickets prove on any machine.
 - The two drafts that derived the body from its books are outside the repo: `~/lanes/logs/ng-q1-healthy-body-draft.md` and `~/lanes/logs/ng-q1-frame-followup.md`. They are model proposals from before the contract, never sources (SRS rule 16).
 
 ## Order
 
-Tickets 04, 05 and 23 can start today. Tickets 01, 02, 03, 07, 27 and 29 and research tickets 11 to 15 are resolved. Ticket 06 follows 04 and 05, and ticket 30 follows 06.
+Tickets 01, 02, 03, 04, 05, 07, 23, 27 and 29 and research tickets 11 to 15 are resolved. Ticket 06 follows 04 and 05, and ticket 30 follows 06. Ticket 06 can start today.
 
 | Ticket | Waits for | What it lands |
 |---|---|---|
@@ -55,7 +55,7 @@ Tickets 04, 05 and 23 can start today. Tickets 01, 02, 03, 07, 27 and 29 and res
 | [20](issues/20-cortisol-rhythm.md) Cortisol's daily rhythm | 05, 14, research 15 | Pass 2 |
 | [21](issues/21-blood-cells-and-systems-at-rest.md) Blood cells, plasma proteins and the systems at rest | 08, 14, research 15 | Pass 2 |
 | [22](issues/22-the-bladder.md) The bladder | 05, 06, 26, research 15 | Pass 2 |
-| [23](issues/23-healthy-range-and-return-checks.md) The healthy-range check and the return check | nothing | The two milestone checks no code holds |
+| [23](issues/23-healthy-range-and-return-checks.md) The healthy-range check and the return check | nothing | The healthy-range check and the return check |
 | [24](issues/24-the-synthetic-day.md) The synthetic day | 11, 12, 16, 17, 18, 23, 25, 27, 30 | Pass 1 checked: 24 hours on the whole body |
 | [28](issues/28-two-synthetic-days.md) The whole body lives two synthetic days | 19, 20, 21, 22, 24 | The destination: both passes, 48 hours |
 
@@ -66,6 +66,7 @@ After tickets 06 and 26, three lanes can be built side by side: the gases (08), 
 - [What limits the step](issues/07-what-limits-the-step.md): on the slice the accuracy estimate sets the step in the first half of each beat, on the heart's rows, and the body's 10 ms wave rate class sets it in the second half. A longer cap on the core changes nothing, and the restart after a firing costs Newton work, not steps. The 15 landings a beat take 21% of the wall time. The core takes 62% of a step and the record 38%, and a step's fixed cost alone is 58% of the budget at 100 times real time. Each outflow valve opens and shuts more than once a beat, 6 of the 15 landings, and [native-contract 32](../native-contract/issues/32-valves-shut-inside-ejection.md) asks why.
 - [Rung 0, system by system](issues/01-rung-0-specification.md): the Answer specifies rung 0 for all 13 systems as tables, and ticket 06 builds the whole body with every row held. Each conserved quantity the day moves closes on paper for the reference man's day, from water to the blood's cells and proteins, with the law that holds each term and the ticket that releases its stand-in. Each of the 38 arrows' 56 fields is wired, an anatomy relation, or held with its reason: 18 arrows wire at least one field, 5 are anatomy relations, and 15 hold every field. The holds rung 0 keeps at the destination each carry their reason, and the Answer lists which holds each ticket from 08 to 25 releases. Forks name the owner of a law, never of a pool.
 - [A reaction and its books](issues/02-reactions.md): a reaction is one column at each site where its pools exist, with one rate, a whole-number term for each pool it uses or makes, and no receipt. Each species states what one unit is made of, a body's schema states a fuel's energy content, and the compile refuses a reaction unless its counts balance every element, charge and energy. Where a reaction joins species the conserved quantities are carbon, hydrogen, oxygen and energy, and a body with no reaction compiles to the same bytes. Oxygen, carbon dioxide and glucose joined the species.
+- [Scopes, ports and a census for each assembly](issues/04-scopes-ports-and-census.md): a reaction counts its reference species N times, used or made, and the contract divides its rate by N; a reaction at one site has one owner. [Record 0010](../../docs/adr/0010-a-reaction-counts-its-reference-n-times.md) is the standing rule (nightingale#139).
 
 ## Model defaults, open to review
 
@@ -89,7 +90,6 @@ After tickets 06 and 26, three lanes can be built side by side: the gases (08), 
 ## Not yet specified
 
 - **One guard no test reaches yet.** The record's check for a receipt where it counts exchange: the compile refuses every reaction that would reach it. The other, the charge leg of the compile's balance check, is retired: [ticket 03](issues/03-whole-body-lists.md) holds [ticket 29](issues/29-the-charge-default.md)'s rule in the species type, so only a carried species states a fixed charge and no reaction names one.
-- **A reaction counts its reference species once.** [Ticket 03](issues/03-whole-body-lists.md)'s Answer shows what that costs: a single storage reaction that burns a share below one half in its own counts cannot be written, urea and creatinine compile only reversed, to run on a negative rate, and gluconeogenesis has no form that takes its energy from fuel. [Ticket 04](issues/04-scopes-ports-and-census.md) decides whether the reference may be counted N times, before tickets 14 and 16 write those reactions.
 - **Three contract follow-ups from ticket 03**, each a ticket of its own: the fluids crate's reflection through the one membrane type ([native-contract 34](../native-contract/issues/34-reflections-through-the-membrane.md)), a refusal that names the wrong reaction ([native-contract 35](../native-contract/issues/35-unnamed-quantity-names-its-reaction.md)), and a set point that a law can rebuild through a width ratio ([native-contract 36](../native-contract/issues/36-set-point-through-a-width-ratio.md)).
 - **One orphan kept for the hash.** `Combination::regulated()` lost its readers in ticket 02 and is still sealed, so removing it would move the basis digest.
 - **Which readings the lens carries at the milestone.** [Research 06](../research/issues/06-healthy-ranges-and-lens.md) proposes the list. If it keeps total calcium and phosphate, ticket 19 moves into pass 1 and joins ticket 24's blockers.

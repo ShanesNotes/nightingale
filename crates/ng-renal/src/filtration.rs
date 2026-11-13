@@ -11,6 +11,33 @@ pub(crate) fn declare<'b>(
     let filtration = ports.filtration(rn);
     filtration.keeps_back::<Albumin>(rn);
     filtration.keeps_back::<Vasopressin>(rn);
+    filtration.keeps_back::<Oxygen>(rn);
+    filtration.keeps_back::<CarbonDioxide>(rn);
+    filtration.keeps_back::<Glucose>(rn);
+    filtration.keeps_back::<Triglyceride>(rn);
+    filtration.keeps_back::<FattyAcids>(rn);
+    filtration.keeps_back::<Glycerol>(rn);
+    filtration.keeps_back::<AminoAcids>(rn);
+    filtration.keeps_back::<Lactate>(rn);
+    filtration.keeps_back::<Ketones>(rn);
+    filtration.keeps_back::<Urea>(rn);
+    filtration.keeps_back::<Ammonium>(rn);
+    filtration.keeps_back::<Creatinine>(rn);
+    filtration.keeps_back::<FixedAcid>(rn);
+    filtration.keeps_back::<DietBase>(rn);
+    filtration.keeps_back::<Calcium>(rn);
+    filtration.keeps_back::<Magnesium>(rn);
+    filtration.keeps_back::<Phosphate>(rn);
+    filtration.keeps_back::<Hemoglobin>(rn);
+    filtration.keeps_back::<Iron>(rn);
+    filtration.keeps_back::<Insulin>(rn);
+    filtration.keeps_back::<Glucagon>(rn);
+    filtration.keeps_back::<Renin>(rn);
+    filtration.keeps_back::<AngiotensinII>(rn);
+    filtration.keeps_back::<Aldosterone>(rn);
+    filtration.keeps_back::<NatriureticPeptide>(rn);
+    filtration.keeps_back::<ParathyroidHormone>(rn);
+    filtration.keeps_back::<Cortisol>(rn);
     let coefficient = rn.edge_parameter::<FilterEdge, Conductance<Water>>(
         ParameterKey::new("rn.filtration"),
         Admissible::positive(),
