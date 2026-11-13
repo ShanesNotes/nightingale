@@ -4,7 +4,9 @@ Spec: `crates/ng-cardiovascular/src/valves.rs` (`valves`) and `crates/ng-cardiov
 
 Type: research
 
-Status: open
+Status: claimed
+
+Claimed by: nc-33
 
 Blocked by: none
 
