@@ -138,7 +138,7 @@ impl<S: OutsideSlice> HeldDeclaration<S> {
     }
     /// Also stands behind the pools of species `Q` in `space` at the sites of `C`. Two cards may
     /// hold one species on disjoint sets; compile refuses a pool both reach, and a hold that names
-    /// no pool. In the crate `Q` is a substance and `C` any site set.
+    /// no pool.
     pub fn pool<Q, C: SiteClass>(self, _space: Space) -> Self {
         todo!()
     }
