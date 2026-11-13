@@ -846,7 +846,6 @@ mod tests {
     use crate::*;
     use core::num::NonZeroU32;
 
-    /// One variable with values `a` and `b`, and a guard each way.
     fn there_and_back() -> CompiledBody {
         let origin = || {
             Position::new(
@@ -884,7 +883,6 @@ mod tests {
         .expect("compiled")
     }
 
-    /// Both guards stand crossed. Only the one armed before the firing moves the variable, held first or last.
     #[test]
     fn a_firing_moves_the_same_guards_whatever_order_they_are_held_in() {
         let mut body = there_and_back();

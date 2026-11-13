@@ -1,7 +1,5 @@
-//! The slice with memory rows that decay to zero and that nothing reads. Each sits before the heart's rows, so it moves
-//! the index of every row the guards read, and compile orders guards by a digest that holds those indices: each count
-//! of rows holds the slice's twelve guards in another order, the clock before or after the guard that ends systole.
-//! Admission must not see it.
+//! Each inert row sits before the heart's rows, so it moves the index of every row the guards read, and compile orders
+//! guards by a digest that holds those indices.
 
 use ng_contract::*;
 use ng_validate::*;
@@ -9,7 +7,7 @@ use ng_validate::*;
 const MILLISECOND: u64 = 1_000_000;
 const INERT: [&str; 4] = ["a0", "a1", "a2", "a3"];
 
-/// The slice's exits, with `inert` rows in the same fragment. With none it is the slice's own.
+/// The slice's exits, with `inert` rows in the same fragment.
 fn exits(body: &mut Assembly<'_>, inert: &[&'static str]) -> Result<(), AdmissionError> {
     let (mut laws, ports) = body.boundary()?.parts();
     let urine = ports.route::<Water>("urine")?.route;
@@ -71,7 +69,6 @@ fn slice(inert: &[&'static str]) -> CompiledBody {
     .expect("compiled")
 }
 
-/// Each row's admitted value, by kind, or why admission refused.
 fn admitted(body: &CompiledBody) -> Result<Vec<(RowKind, u64)>, String> {
     let store = MemoryStore::default();
     let core = ng_solver::Core::new(10 * MILLISECOND);

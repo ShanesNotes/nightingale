@@ -35,7 +35,6 @@ fn key(local: &'static str) -> ParameterKey {
 }
 
 /// The arena heart's two rhythm guards on a clock whose rate reads a held pool, so its anchor rests on an amount.
-/// Each name in `inert` is a memory row that reads nothing and that nothing reads.
 fn pacemaker(inert: &[&'static str]) -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", Position::new(measure(0.0), measure(0.0), measure(0.0)));
@@ -140,8 +139,6 @@ fn packet(body: &CompiledBody) -> ParameterPacket<SyntheticFixture> {
     packet
 }
 
-/// The first leg's phase origin after the wrap's knot is read again, less what its stages add over the leg, which no
-/// guard order changes: the origin is zero where the clock fired and reset it, and the last leg's end where it did not.
 fn phase_after_the_wrap(inert: &[&'static str]) -> f64 {
     let body = pacemaker(inert).expect("a body");
     let channel =
