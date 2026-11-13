@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-# Cargo takes the first flag source it finds, so an empty RUSTFLAGS shuts out a host config's
-# `--cap-lints allow`, which would silently disable forbid. RUSTC_BOOTSTRAP would admit #![feature] and
-# with it the unstable float methods the bans probe does not classify; UPDATE_EXPECT would rewrite a trace.
-export RUSTFLAGS="" RUSTDOCFLAGS=""
-unset CARGO_ENCODED_RUSTFLAGS CARGO_ENCODED_RUSTDOCFLAGS CLIPPY_CONF_DIR RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER RUSTC_BOOTSTRAP \
-  UPDATE_EXPECT
+. tools/gate/scrub.sh
 if [ -z "${NG_GATE_CRATES+set}" ]; then
   plan=$(python3 -I tools/gate/gate.py plan full) || { printf '%s\n' "$plan"; exit 1; }
   NG_GATE_CRATES=$(sed -n 's/^crates=//p' <<<"$plan")

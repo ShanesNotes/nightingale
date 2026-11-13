@@ -144,6 +144,8 @@ def passed_calls(record, sha, settings):
     for entry in entries:
         if entry["commit"] == sha and entry["settings"] == settings:
             args = entry["args"]
+            if "--" in args and args[args.index("--") + 1 :] != ["--include-ignored"]:
+                continue
             calls.append(selection(args[: args.index("--")] if "--" in args else args, filters=False))
     return [call for call in calls if call]
 
@@ -314,7 +316,8 @@ def main():
         began = time.monotonic()
         code, output = cargo_test(f"--no-run {build}", env, args.budget)
         if code != 0:
-            refuse(f"`cargo test --no-run {build}` must build on the unmutated tree, and it gave:\n{output[-2000:]}\n")
+            gave = output[-2000:] or f"nothing in {args.budget} s"
+            refuse(f"`cargo test --no-run {build}` must build on the unmutated tree, and it gave:\n{gave}\n")
         print(f"build     {time.monotonic() - began:.0f} s  cargo test --no-run {build}", flush=True)
 
     for row in applied:

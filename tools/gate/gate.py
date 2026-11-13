@@ -48,6 +48,7 @@ import time
 import tomllib
 from collections.abc import Callable, Iterable, Mapping, Sequence, Set
 from typing import Literal
+from unittest import mock
 
 Mode = Literal["merge", "changed", "full"]
 Scope = Literal["docs-only", "affected", "everything"]
@@ -59,6 +60,12 @@ MUST_FAIL = "tools/gate/must-fail.toml"
 MUTANTS = "tools/gate/mutants.toml"
 MUTATE = "tools/mutate.py"
 TESTED = "target/gate/tested.jsonl"
+TESTED_RESET = "python3 -I tools/gate/gate.py tested --reset"
+# What a proof's fresh clone holds outside its commit when 10-rust writes the record: the build's own target, the
+# bytecode 05-seam leaves and 20-sketch's target. No test reads them. Any other path runs every baseline.
+HELD = frozenset({"target/", "tools/__pycache__/", "docs/architecture/solver-contract-sketch/target/"})
+UNEXTRACTED = ("status", "--porcelain", "-z", "--ignored=matching", "--untracked-files=all")
+SCRUB = "tools/gate/scrub.sh"
 STEPS = "tools/verify.d"
 CONTRACT = "docs/architecture/solver-contract.md"
 REGULAR = "100644"
@@ -2952,21 +2959,24 @@ def mutants(part: str | None) -> int:
     if part != "first" and mode != "changed":
         print(f"40-mutants: rest part, {len(parts.rest)} rows", flush=True)
         only = [] if len(parts.rest) == len(rows) else ["--only", *parts.rest]
-        tested = ["--tested", str(ROOT / TESTED)] if part == "rest" else []
+        tested = ["--tested", str(ROOT / TESTED)] if part == "rest" and mode != "full" else []
         if parts.rest and sweep([*command, *tested, *only], parts.rest, 0):
             return 1
     return 0
 
 
-def tested(args: list[str]) -> int:
-    record = ROOT / TESTED
+def tested(args: list[str], root: pathlib.Path = ROOT) -> int:
+    record = root / TESTED
     if args == ["--reset"]:
         record.unlink(missing_ok=True)
         return 0
-    if git(ROOT, "status", "--porcelain") != "":
-        print("10-rust: the checkout differs from HEAD, so the sweep runs every baseline")
+    if unextracted := [
+        *(e for e in _git_z(root, *UNEXTRACTED) if e[:3] != "!! " or e[3:] not in HELD),
+        *_git_z(root, "ls-files", "-z", "--", ":(attr:export-ignore)", ":(attr:export-subst)"),
+    ]:
+        print(f"10-rust: the sweep's extract would lack {unextracted[:3]}, so the sweep runs every baseline")
         return 0
-    entry = {"commit": git(ROOT, "rev-parse", "HEAD"), "settings": mutate_py().build_settings(os.environ), "args": args}
+    entry = {"commit": git(root, "rev-parse", "HEAD"), "settings": mutate_py().build_settings(os.environ), "args": args}
     record.parent.mkdir(parents=True, exist_ok=True)
     with record.open("a", encoding="utf-8") as file:
         file.write(json.dumps(entry) + "\n")
@@ -3128,6 +3138,9 @@ TESTED_RECORD = (
     (SHA, SETTINGS, ["-p", "ng-f", "--test", "alpha", "only_this_one"]),
     (OTHER_SHA, SETTINGS, ["-p", "ng-d"]),
     (SHA, {"RUSTFLAGS": "-Cdebug-assertions=off"}, ["-p", "ng-e"]),
+    (SHA, SETTINGS, ["-p", "ng-g", "--", "--ignored"]),
+    (SHA, SETTINGS, ["-p", "ng-h", "--", "--skip", "slow"]),
+    (SHA, SETTINGS, ["-p", "ng-i", "--", "only_this_one"]),
 )
 TESTED_CASES: tuple[tuple[str, bool, str], ...] = (
     ("-p ng-a --test alpha a_filter", True, "a crate 10-rust tested whole"),
@@ -3144,6 +3157,9 @@ TESTED_CASES: tuple[tuple[str, bool, str], ...] = (
     ("-p ng-d --test alpha", False, "a record from another commit"),
     ("-p ng-e --test alpha", False, "a record from other build settings"),
     ("-p ng-f --test alpha", False, "a call that ran only some tests"),
+    ("-p ng-g --test alpha", False, "a call that ran only ignored tests"),
+    ("-p ng-h --test alpha", False, "a call that skipped some tests"),
+    ("-p ng-i --test alpha", False, "a call with a name filter after --"),
 )
 
 
@@ -3161,16 +3177,192 @@ def tested_cases() -> list[Violation]:
             out.append(Violation("baseline", what, f"`{test}` {'runs' if skips else 'skips'} its baseline"))
     if missing or mutate.covered(TESTED_CASES[0][0], missing):
         out.append(Violation("baseline", "a missing record", "it skips a baseline"))
-    scrubs = []
-    for step in ("10-rust", "40-mutants"):
-        text = _read(ROOT / STEPS / f"{step}.sh")
-        scrubs.append(text[text.find('export RUSTFLAGS=""') : text.find("UPDATE_EXPECT\n") + len("UPDATE_EXPECT")])
-    if not scrubs[0].startswith("export") or scrubs[0] != scrubs[1]:
-        out.append(Violation("baseline", "40-mutants.sh", "it clears the build settings 10-rust.sh clears, line for line"))
+    named = {"CARGO_HOME": "h", "RUSTFLAGS": "", "RUSTUP_TOOLCHAIN": "t", "UPDATE_EXPECT": "1"}
+    got = mutate.build_settings({**named, "CARGO_TARGET_DIR": "x", "PATH": "/bin", "NG_GATE_MODE": "merge"})
+    if got != named:
+        out.append(Violation("baseline", "the build settings", f"{MUTATE} compares {got}; want {named}"))
     return out
 
 
-DRIVER_CASES: tuple[Callable[[], list[Violation]], ...] = (survivor_case, failed_sweep_case, check_case, tested_cases)
+ARGV_CASES: tuple[tuple[str, str | None, tuple[bool, ...]], ...] = (
+    ("merge", "rest", (True,)),
+    ("full", "rest", (False,)),
+    ("merge", "first", (False, False)),
+    ("merge", None, (False, False, False)),
+)
+
+
+def argv_cases() -> list[Violation]:
+    out = []
+    this = sys.modules[__name__]
+    for mode, part, want in ARGV_CASES:
+        seen: list[bool] = []
+        env = {"NG_GATE_MODE": mode, "NG_GATE_SCOPE": "everything", "NG_GATE_BASE": "-"}
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(this, "sweep", lambda argv, names, later: seen.append("--tested" in argv) or 0),
+            mock.patch.object(this, "sweep_parts", lambda *_: SweepParts(("a",), ("b",))),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            mutants(part)
+        if tuple(seen) != want:
+            out.append(Violation("baseline", f"a {mode} run, part {part}", f"hands the record to {seen}; want {want}"))
+    return out
+
+
+COMMIT = ("-c", "user.name=gate", "-c", "user.email=gate@invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m")
+SWEEP_TABLE = """\
+[[mutant]]
+name = "covered"
+path = "crates/ng-a/src/one.rs"
+old = "a"
+new = "b"
+test = "-p ng-a --test alpha"
+
+[[mutant]]
+name = "uncovered"
+path = "crates/ng-a/src/one.rs"
+old = "a"
+new = "c"
+test = "-p ng-b --test beta"
+"""
+
+
+def _commit(root: pathlib.Path, path: str, text: str) -> None:
+    (root / path).parent.mkdir(parents=True, exist_ok=True)
+    (root / path).write_text(text, encoding="utf-8")
+    _git_z(root, "add", path)
+    _git_z(root, *COMMIT, path)
+
+
+def _fixture(tmp: pathlib.Path) -> pathlib.Path:
+    root = tmp / "repo"
+    (root / "tools").mkdir(parents=True)
+    shutil.copyfile(ROOT / MUTATE, root / MUTATE)
+    shutil.copyfile(ROOT / ".gitignore", root / ".gitignore")
+    (root / "crates/ng-a/src").mkdir(parents=True)
+    (root / "crates/ng-a/src/one.rs").write_text("a\n", encoding="utf-8")
+    (root / "mutants.toml").write_text(SWEEP_TABLE, encoding="utf-8")
+    _git_z(root, "init", "-q")
+    _git_z(root, "-c", "core.hooksPath=/dev/null", "add", "-A")
+    _git_z(root, "-c", "core.hooksPath=/dev/null", *COMMIT, "fixture")
+    return root
+
+
+def _touch(root: pathlib.Path, *paths: str) -> None:
+    for path in paths:
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text("x\n", encoding="utf-8")
+
+
+WRITER_CASES: tuple[tuple[str, Callable[[pathlib.Path], object], bool], ...] = (
+    ("a clean checkout", lambda r: None, True),
+    ("the paths a proof's clone holds", lambda r: _touch(r, *(f"{p}x" for p in HELD)), True),
+    ("an untracked file", lambda r: _touch(r, "crates/ng-a/src/two.rs"), False),
+    (
+        "an untracked file git status is set to hide",
+        lambda r: (_git_z(r, "config", "status.showUntrackedFiles", "no"), _touch(r, "crates/ng-a/src/two.rs")),
+        False,
+    ),
+    ("an ignored file a test can read", lambda r: _touch(r, "crates/ng-a/tests/reference/probe.txt"), False),
+    ("a changed file", lambda r: _touch(r, "crates/ng-a/src/one.rs"), False),
+    ("a path git archive leaves out", lambda r: _commit(r, ".gitattributes", "/mutants.toml export-ignore\n"), False),
+    ("a file git archive rewrites", lambda r: _commit(r, ".gitattributes", "/mutants.toml export-subst\n"), False),
+)
+
+
+def writer_cases() -> list[Violation]:
+    out = []
+    for what, change, writes in WRITER_CASES:
+        with tempfile.TemporaryDirectory(prefix="gate-writer-") as tmp:
+            root = _fixture(pathlib.Path(tmp))
+            change(root)
+            with contextlib.redirect_stdout(io.StringIO()):
+                tested(["-p", "ng-a"], root)
+            if (root / TESTED).exists() != writes:
+                out.append(Violation("baseline", what, f"10-rust {'writes no' if writes else 'writes a'} record"))
+            tested(["--reset"], root)
+            if (root / TESTED).exists():
+                out.append(Violation("baseline", what, "`tested --reset` leaves the record"))
+    return out
+
+
+SWEEP_CALLS = (
+    ("a clean checkout", lambda r: None, ("-p ng-b --test beta", "--no-run -p ng-a --test alpha")),
+    (
+        "an ignored file a test can read",
+        lambda r: _touch(r, "crates/ng-a/tests/reference/probe.txt"),
+        ("-p ng-a --test alpha", "-p ng-b --test beta"),
+    ),
+)
+
+
+def sweep_case() -> list[Violation]:
+    out = []
+    for what, change, before in SWEEP_CALLS:
+        with tempfile.TemporaryDirectory(prefix="gate-sweep-") as tmp:
+            root = _fixture(pathlib.Path(tmp))
+            calls, stub = pathlib.Path(tmp) / "calls", pathlib.Path(tmp) / "bin"
+            stub.mkdir()
+            (stub / "cargo").write_text(f"#!/bin/sh\necho \"$*\" >>'{calls}'\necho 'test t ... ok'\n", encoding="utf-8")
+            (stub / "cargo").chmod(0o755)
+            change(root)
+            with mock.patch.dict(os.environ, {"PATH": f"{stub}:{os.environ['PATH']}"}):
+                os.environ.pop("UPDATE_EXPECT", None)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    tested(["-p", "ng-a"], root)
+                argv = [sys.executable, "-I", MUTATE, "mutants.toml", "--tested", str(root / TESTED)]
+                subprocess.run(argv, cwd=root, capture_output=True, env=dict(os.environ))
+            ran = tuple(re.sub(r"^test --manifest-path \S+ ", "", c) for c in _read(calls).splitlines())
+            want = (*before, "-p ng-a --test alpha", "-p ng-b --test beta")
+            if ran != want:
+                out.append(Violation("baseline", f"a sweep after {what}", f"ran cargo test {ran}; want {want}"))
+    return out
+
+
+def step_cases() -> list[Violation]:
+    out = []
+    for step in ("10-rust", "40-mutants"):
+        lines = _read(ROOT / STEPS / f"{step}.sh").splitlines()
+        runs = [i for i, line in enumerate(lines) if re.search(r"\b(python3|cargo|phase|tested|exec)\b", line)]
+        if f". {SCRUB}" not in lines or (runs and lines.index(f". {SCRUB}") > runs[0]):
+            out.append(Violation("baseline", f"{STEPS}/{step}.sh", f"source {SCRUB} before any command"))
+    lines = _read(ROOT / STEPS / "10-rust.sh").splitlines()
+    calls = [i for i, line in enumerate(lines) if re.match(r"\s*tested ", line)]
+    if TESTED_RESET not in lines or not calls or lines.index(TESTED_RESET) > calls[0]:
+        out.append(Violation("baseline", f"{STEPS}/10-rust.sh", f"run `{TESTED_RESET}` before its first test call"))
+    text = "\n".join(lines) + "\n"
+    wrapper = text[text.find("phase() {") : text.find(TESTED_RESET)]
+    with tempfile.TemporaryDirectory(prefix="gate-wrapper-") as tmp:
+        (pathlib.Path(tmp) / "tools/gate").mkdir(parents=True)
+        (pathlib.Path(tmp) / "tools/gate/gate.py").write_text("print('recorded')\n", encoding="utf-8")
+        stub = pathlib.Path(tmp) / "bin"
+        stub.mkdir()
+        for code, want in ((0, ["recorded", "after"]), (101, [])):
+            (stub / "cargo").write_text(f"#!/bin/sh\nexit {code}\n", encoding="utf-8")
+            (stub / "cargo").chmod(0o755)
+            env = {**os.environ, "PATH": f"{stub}:{os.environ['PATH']}"}
+            env.pop("NG_GATE_TIMES", None)
+            script = f"set -euo pipefail\n{wrapper}\ntested test -p ng-a\necho after\n"
+            run = subprocess.run(["bash", "-c", script], cwd=tmp, env=env, capture_output=True, text=True)
+            got = [line for line in run.stdout.splitlines() if not line.startswith("time: ")]
+            if got != want or (run.returncode == 0) != (code == 0):
+                out.append(
+                    Violation("baseline", "10-rust.sh's test wrapper", f"cargo exit {code} gave {got}; want {want}")
+                )
+    return out
+
+
+DRIVER_CASES: tuple[Callable[[], list[Violation]], ...] = (
+    survivor_case,
+    failed_sweep_case,
+    check_case,
+    tested_cases,
+    argv_cases,
+    writer_cases,
+    sweep_case,
+    step_cases,
+)
 ORDER_CASES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("01-toolchain.sh", "99-unplaced.sh"), "verify: tools/verify.d/99-unplaced.sh has no place in the run order"),
     (("01-toolchain.sh", "40-mutants.sh"), "verify: the plan failed"),
