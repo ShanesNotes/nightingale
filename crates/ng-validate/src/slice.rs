@@ -520,7 +520,7 @@ const SYNTHETIC_DRIFT: f64 = 1e4;
 /// About twice energy's measured drift over the arena's own day from 06:55, 8.3e4. Like `species_drift`, it is
 /// fixture data until the healthy-range set holds energy's within-subject variation.
 const SYNTHETIC_ENERGY_DRIFT: f64 = 2e5;
-/// For a species the slice does not move, such as albumin and the transmitters, closure alone holds it at zero there.
+/// For a species no boundary route carries, such as albumin and the transmitters, closure alone holds it at zero there.
 /// This bound binds on the first body whose route moves one. It is under 1% of a transmitter pool's 101, the smallest
 /// such pool, so that body measures its own day.
 const UNMOVED_DRIFT: f64 = 1.0;

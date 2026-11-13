@@ -1,7 +1,8 @@
 //! The arena certificate's drift limits, on a synthetic body that each limited quantity enters at a steady rate. An
 //! arena history cannot serve: its drift is whatever the day's physiology makes it, over a day that takes hours to
-//! run, and each limit needs a drift just under it and one just over. An ion enters beside its counter-ion, so the
-//! drift under test is the only one past its limit.
+//! run, and each limit needs a drift just under it and one just over. An ion enters beside its counter-ion, so charge
+//! holds in the run that passes; in the run that fails the certificate names the species first, since charge comes
+//! last in the basis.
 
 use ng_contract::*;
 use ng_validate::*;
@@ -185,15 +186,15 @@ fn refused(failure: CertificateFailure) -> (CertificateCheck, Option<Book>) {
     (failure.check(), failure.quantity().map(QuantityId::book))
 }
 
-fn drifts_up_to(species: Species, limit: f64, partner: Option<Species>) {
-    let (under, over) = (limit * 0.999, limit * 1.001);
+fn drifts_up_to(species: Species, limit: f64, margin: f64, partner: Option<Species>) {
+    let (under, over) = (limit - margin, limit + margin);
     let beside = |amount| {
         let mut inflows = vec![(species, amount)];
         inflows.extend(partner.map(|partner| (partner, under)));
         inflows
     };
     let passed = certified(&beside(under)).expect("inside its limit");
-    assert!((drift(&passed, species) - under).abs() < 1e-6 * limit);
+    assert!((drift(&passed, species) - under).abs() < 1e-3 * margin);
     let failed = certified(&beside(over)).expect_err("past its limit");
     assert_eq!(
         refused(failed),
@@ -203,35 +204,35 @@ fn drifts_up_to(species: Species, limit: f64, partner: Option<Species>) {
 
 #[test]
 fn energy_drifts_up_to_2e5_over_the_arenas_day_and_no_further() {
-    drifts_up_to(Species::Energy, 2e5, None);
+    drifts_up_to(Species::Energy, 2e5, 1.0, None);
 }
 
 #[test]
 fn sodium_drifts_up_to_4e4_twice_the_slices_measured_day() {
-    drifts_up_to(Species::Sodium, 4e4, Some(Species::Chloride));
+    drifts_up_to(Species::Sodium, 4e4, 40.0, Some(Species::Chloride));
 }
 
 #[test]
 fn chloride_drifts_up_to_4e4_twice_the_slices_measured_day() {
-    drifts_up_to(Species::Chloride, 4e4, Some(Species::Sodium));
+    drifts_up_to(Species::Chloride, 4e4, 40.0, Some(Species::Sodium));
 }
 
 #[test]
 fn potassium_drifts_up_to_2e3_twice_the_slices_measured_day() {
-    drifts_up_to(Species::Potassium, 2e3, Some(Species::Chloride));
+    drifts_up_to(Species::Potassium, 2e3, 2.0, Some(Species::Chloride));
 }
 
 #[test]
 fn water_drifts_up_to_5e2_twice_the_slices_measured_day() {
-    drifts_up_to(Species::Water, 5e2, None);
+    drifts_up_to(Species::Water, 5e2, 0.5, None);
 }
 
 #[test]
 fn vasopressin_drifts_up_to_8e2_twice_the_slices_measured_day() {
-    drifts_up_to(Species::Vasopressin, 8e2, None);
+    drifts_up_to(Species::Vasopressin, 8e2, 0.8, None);
 }
 
 #[test]
 fn norepinephrine_drifts_up_to_the_floor_of_a_quantity_the_slice_does_not_move() {
-    drifts_up_to(Species::Norepinephrine, 1.0, None);
+    drifts_up_to(Species::Norepinephrine, 1.0, 1e-3, None);
 }

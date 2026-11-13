@@ -2510,6 +2510,13 @@ new = '''Species::Sodium | Species::Chloride => SYNTHETIC_DRIFT,'''
 test = "-p ng-validate --test arena_certificate sodium_drifts_up_to_4e4_twice_the_slices_measured_day"
 
 [[mutant]]
+name = "sodium-and-chloride-drift-loosen-to-energys-limit"
+path = "crates/ng-validate/src/slice.rs"
+old = '''Species::Sodium | Species::Chloride => 4e4,'''
+new = '''Species::Sodium | Species::Chloride => SYNTHETIC_ENERGY_DRIFT,'''
+test = "-p ng-validate --test arena_certificate sodium_drifts_up_to_4e4_twice_the_slices_measured_day"
+
+[[mutant]]
 name = "potassium-drift-falls-back-to-the-common-limit"
 path = "crates/ng-validate/src/slice.rs"
 old = '''Species::Potassium => 2e3,'''
