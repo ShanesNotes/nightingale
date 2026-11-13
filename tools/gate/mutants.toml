@@ -601,8 +601,16 @@ test = "-p ng-contract --test held a_species_hold_that_names_no_pool_is_refused_
 [[mutant]]
 name = "held-twice-names-the-species"
 path = "crates/ng-contract/src/compile.rs"
-old = '''            species: pool.species,'''
-new = '''            species: Species::Water,'''
+old = '''
+            space: pool.space,
+            species: pool.species,
+        }),
+'''
+new = '''
+            space: pool.space,
+            species: Species::Water,
+        }),
+'''
 test = "-p ng-contract --test held two_cards_cannot_hold_one_species_where_their_site_sets_overlap"
 
 [[mutant]]
