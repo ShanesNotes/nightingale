@@ -247,7 +247,7 @@ fn body_01() -> Vec<Row> {
             ]],
         ),
         row(
-            "the slice's body stores, 01:568 skin heat store, 06:29 the airway's heat store",
+            "the slice's body stores, 01:568 skin heat store, 06:31 the airway's heat store",
             &[Energy],
             &[&[
                 (&["body"], Space::Elastic),
@@ -383,6 +383,14 @@ fn pool_of(body: &CompiledBody, row: RowId) -> (SiteId, Space, Species) {
         Some(RowKind::Amount { site, space, species }) => (site, space, species),
         other => panic!("a column's term on {other:?}"),
     }
+}
+
+#[test]
+fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
+    let rows: String = (HOLD_TABLE.iter())
+        .map(|hold| format!("{} {:?} {:?} {}\n", hold.card, hold.held, hold.release, hold.line))
+        .collect();
+    expect![[""]].assert_eq(&rows);
 }
 
 #[test]

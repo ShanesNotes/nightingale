@@ -99,3 +99,14 @@ fn each_keep_back_line_stops_its_species_on_its_route_and_every_other_species_in
     "#]].assert_eq(&pin);
     Ok(())
 }
+
+#[test]
+fn each_keep_back_line_names_the_ticket_that_releases_it() {
+    let lines: String = (KEEP_BACKS.iter())
+        .map(|line| {
+            let inert = if line.inert { " inert" } else { "" };
+            format!("{:?} {:?} {:?}{inert}\n", line.route, line.species, line.release)
+        })
+        .collect();
+    expect![[""]].assert_eq(&lines);
+}

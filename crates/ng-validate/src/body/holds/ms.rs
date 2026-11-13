@@ -5,8 +5,10 @@ const SKIN_WATER: &str = "skin water";
 
 pub(super) fn musculoskeletal(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let declaration = HeldDeclaration::<Musculoskeletal>::new(vec![SKIN_WATER], Vec::new(), FIXED)
-        .pool::<Magnesium, CapillaryBed>(Space::Cells)
-        .pool::<Phosphate, CapillaryBed>(Space::Cells)
+        .pool::<Magnesium, Beds<Bone>>(Space::Cells)
+        .pool::<Phosphate, Beds<Bone>>(Space::Cells)
+        .pool::<Magnesium, Besides<Bone>>(Space::Cells)
+        .pool::<Phosphate, Besides<Bone>>(Space::Cells)
         .pool::<Calcium, Beds<Bone>>(Space::Cells)
         .pool::<Creatinine, Beds<Muscle>>(Space::Cells)
         .pool::<BodyProtein, Beds<Muscle>>(Space::Cells)

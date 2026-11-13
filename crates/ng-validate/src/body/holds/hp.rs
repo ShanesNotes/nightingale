@@ -42,7 +42,8 @@ pub(super) fn hepatic(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
         .pool::<AminoAcids, Beds<Liver>>(Space::Cells)
         .pool::<Urea, Beds<Liver>>(Space::Cells)
         .pool::<Glycogen, Beds<Liver>>(Space::Cells)
-        .pool::<Ketones, CapillaryBed>(Space::Cells)
+        .pool::<Ketones, Beds<Liver>>(Space::Cells)
+        .pool::<Ketones, Besides<Liver>>(Space::Cells)
         .pool::<Glycerol, CapillaryBed>(Space::Interstitium)
         .pool::<Ketones, CapillaryBed>(Space::Interstitium)
         .pool::<Urea, CapillaryBed>(Space::Interstitium);
