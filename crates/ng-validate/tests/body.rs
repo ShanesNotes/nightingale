@@ -247,7 +247,7 @@ fn body_01() -> Vec<Row> {
             ]],
         ),
         row(
-            "the slice's body stores, 01:568 skin heat store, the airway's heat store",
+            "the slice's body stores, 01:568 skin heat store, 06:29 the airway's heat store",
             &[Energy],
             &[&[
                 (&["body"], Space::Elastic),
