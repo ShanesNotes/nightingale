@@ -844,3 +844,57 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
     "#]].assert_eq(&pin);
     Ok(())
 }
+
+#[test]
+fn the_gut_transit_reads_both_lumens_so_admission_can_place_each_species_between_them()
+-> Result<(), AdmissionError> {
+    let body = whole_body()?;
+    let (stomach, intestine) = ("stomach", "small intestine");
+    let lumen = |row: RowId| match body.rows()[row.index()].kind() {
+        RowKind::Amount {
+            site,
+            space: Space::Lumen,
+            species,
+        } => Some((site.key(), species)),
+        _ => None,
+    };
+    let transit: BTreeSet<Species> = body
+        .columns()
+        .iter()
+        .filter_map(|column| {
+            let ends: Vec<_> = column.terms().iter().filter_map(|(row, _)| lumen(*row)).collect();
+            match ends[..] {
+                [(a, species), (b, other)]
+                    if species == other && [a, b].contains(&stomach) && [a, b].contains(&intestine) =>
+                {
+                    Some(species)
+                }
+                _ => None,
+            }
+        })
+        .collect();
+    assert_eq!(transit.len(), 12, "the gut carries {transit:?}");
+    let unknown = |key: &str, species: Species| {
+        let found = body
+            .rows()
+            .iter()
+            .find(|row| lumen(row.id()) == Some((key, species)));
+        found
+            .unwrap_or_else(|| panic!("no {species:?} in the {key}"))
+            .unknown()
+    };
+    let sparsity = body.sparsity();
+    for species in transit {
+        for key in [stomach, intestine] {
+            let row = unknown(key, species).index();
+            let reads = &sparsity.unknowns()[sparsity.row_offsets()[row]..sparsity.row_offsets()[row + 1]];
+            for end in [stomach, intestine] {
+                assert!(
+                    reads.contains(&unknown(end, species)),
+                    "the {key}'s {species:?} does not read the {end}'s, so the split between them is free"
+                );
+            }
+        }
+    }
+    Ok(())
+}

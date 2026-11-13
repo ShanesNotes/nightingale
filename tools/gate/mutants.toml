@@ -2636,4 +2636,4 @@ path = "crates/ng-validate/src/body/holds/gi.rs"
 old = '''        let (up, down, pace) = (k.at_edge(&from), k.at_edge(&to), k.parameter(&pace));
         let rate = k.relax(up, down, pace);'''
 new = '''        let rate = k.zero::<Rate<Q>>();'''
-test = "-p ng-validate --test body_run the_whole_body_admits_runs_its_first_minute_and_holds_its_pins"
+test = "-p ng-validate --test body the_gut_transit_reads_both_lumens_so_admission_can_place_each_species_between_them"
