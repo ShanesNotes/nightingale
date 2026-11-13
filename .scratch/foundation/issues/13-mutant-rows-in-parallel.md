@@ -1,7 +1,8 @@
 # 13: The mutant sweep runs its rows in parallel
 
 Type: task
-Status: open
+Status: claimed
+Claimed by: sweep-12-13
 Blocked by: none
 
 **What to build:** `40-mutants` runs its rows side by side instead of one after another, and the gate means what it means today. One seat does this ticket and [ticket 12](12-mutant-baseline-once.md), because both change the sweep in `tools/mutate.py` and its driver in `tools/gate/gate.py`.
