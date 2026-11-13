@@ -374,9 +374,12 @@ impl InitializationSystem<'_> {
     /// What fires at the start of `leg` after modes `before`: the crossing's guards there, or a paced cycle's clock at
     /// the wrap, and every other guard those modes arm whose gap is not below zero at the knot, read in the leg's own
     /// drive frame; then, in turn, each guard armed before the knot that the resets and modes so far leave crossed. A
-    /// guard only a firing arms waits for the next knot, as it waits for the next step in a run. Each firing runs
-    /// through `Layout::fire`, so its order is the run's. A guard at its own zero there fires only if the curve that
-    /// reaches the knot was raising it. A guard that would fire twice at one knot is unresolved.
+    /// guard only a firing arms waits for the next knot, as it waits for the next step in a run, but the crossing's
+    /// guards and the clock stand crossed at their knot: one a firing arms fires in the next turn, so the clock fires
+    /// at the wrap after the guard that leaves systole there. Each turn runs through `Layout::fire`, which reads only
+    /// the modes the turn starts from, so no order the guards are held in moves what fires. A guard at its own zero
+    /// there fires only if the curve that reaches the knot was raising it. A guard that would fire twice at one knot
+    /// is unresolved.
     fn knot(
         &self,
         workspace: &AdmissionWorkspace,
@@ -402,7 +405,7 @@ impl InitializationSystem<'_> {
         for round in 0..=guards.len() {
             let mut crossed = Vec::with_capacity(guards.len());
             for (at, guard) in guards.iter().enumerate() {
-                let forcing = round == 0 && forced.contains(&at);
+                let forcing = forced.contains(&at);
                 let open = Some(at) != reference && armed[at] && guard.armed(&modes);
                 crossed.push(
                     forcing

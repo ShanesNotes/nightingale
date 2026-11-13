@@ -168,17 +168,18 @@ impl CompiledBody {
     }
 }
 impl Layout {
-    /// One firing, in stable order: each crossed guard still armed on what those before it left moves its mode, so of two
-    /// guards on one variable the first wins, and a guard a firing arms waits for the next step. The run and the ring
-    /// both fire here.
+    /// One firing, in stable order: each crossed guard armed before the firing and still armed on what those before it
+    /// left moves its mode, so of two guards on one variable the first wins, and a guard a firing arms waits for the
+    /// next step wherever it is held. The run and the ring both fire here.
     pub(crate) fn fire(&self, modes: &mut [usize], crossed: &[bool]) -> Vec<&GuardLayout> {
         let fired = self.fired(modes, crossed);
         fired.into_iter().map(|at| &self.guards[at]).collect()
     }
     pub(crate) fn fired(&self, modes: &mut [usize], crossed: &[bool]) -> Vec<usize> {
+        let before = modes.to_vec();
         let mut fired = Vec::new();
         for (at, (guard, &crossed)) in self.guards.iter().zip(crossed).enumerate() {
-            if crossed && guard.armed(modes) {
+            if crossed && guard.armed(&before) && guard.armed(modes) {
                 modes[guard.variable] = guard.enters;
                 fired.push(at);
             }
@@ -841,9 +842,66 @@ impl Seal for HazardLayout {
 #[cfg(test)]
 mod tests {
     use super::{Column, Context, RowId};
-    use crate::LawName;
     use crate::identity::{Canonical, Seal};
+    use crate::*;
     use core::num::NonZeroU32;
+
+    /// One variable with values `a` and `b`, and a guard each way.
+    fn there_and_back() -> CompiledBody {
+        let origin = || {
+            Position::new(
+                Measure::new(0.0).expect("finite"),
+                Measure::new(0.0).expect("finite"),
+                Measure::new(0.0).expect("finite"),
+            )
+        };
+        let mut map = AnatomyBuilder::new();
+        map.site::<TissueSite>("body", origin());
+        let schema = Schema::new(map.finish().expect("an anatomy")).expect("a schema");
+        assemble(schema, |mut body| {
+            let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
+            let (mut ns, _) = body.nervous()?.parts();
+            let x = ns.state::<Dimensionless>("x", Admissible::finite());
+            let speed =
+                ns.parameter::<Rate<Dimensionless>>(ParameterKey::new("speed"), Admissible::positive());
+            let rate = ns.kernel(|mut k| {
+                let (zero, current, speed) = (k.zero(), k.state(&x), k.parameter(&speed));
+                let rate = k.relax(zero, current, speed);
+                k.finish(rate, ns.every_mode(), class)
+            });
+            ns.memory_rate(&x, rate);
+            let [a, b] = ns.modes("switch", ["a", "b"]);
+            for (from, to) in [(&a, &b), (&b, &a)] {
+                let gap = ns.kernel(|mut k| {
+                    let value = k.state(&x);
+                    k.finish(value, from.only(), class)
+                });
+                ns.event(Guard::new(gap, Crossing::Rising, from.to(to)?));
+            }
+            body.add(ns.finish());
+            body.compile()
+        })
+        .expect("compiled")
+    }
+
+    /// Both guards stand crossed. Only the one armed before the firing moves the variable, held first or last.
+    #[test]
+    fn a_firing_moves_the_same_guards_whatever_order_they_are_held_in() {
+        let mut body = there_and_back();
+        let mut read = Vec::new();
+        for _ in 0..2 {
+            let mut modes = vec![0];
+            let fired = body.layout.fired(&mut modes, &[true, true]);
+            let guards = &body.layout.guards;
+            let moved: Vec<(usize, usize)> = (fired.iter())
+                .map(|&at| (guards[at].leaves, guards[at].enters))
+                .collect();
+            read.push((modes, moved));
+            body.layout.guards.reverse();
+        }
+        assert_eq!(read[0], (vec![1], vec![(0, 1)]), "held first, only a to b fires");
+        assert_eq!(read[1], read[0], "held last, the same");
+    }
 
     fn column(reference_count: NonZeroU32) -> Column {
         Column {
