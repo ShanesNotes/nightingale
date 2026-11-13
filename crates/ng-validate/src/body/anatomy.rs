@@ -8,7 +8,7 @@ pub(super) fn at(axial: f64) -> Result<Position, AdmissionError> {
     ))
 }
 
-/// The slice's map under body 01's names, with the sites the whole body adds. Heights are synthetic and
+/// The slice's map with the sites the whole body adds. Heights are synthetic and
 /// run from the hip. An edge into a bed stands for its arterioles, and the gut bed drains through the
 /// portal vein into the liver bed.
 pub fn body_anatomy() -> Result<Anatomy, AdmissionError> {

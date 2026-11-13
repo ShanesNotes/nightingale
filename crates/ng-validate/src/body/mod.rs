@@ -1,5 +1,3 @@
-//! The whole body's assembly: its anatomy and where each species lives, beside the slice's.
-
 mod anatomy;
 mod schema;
 

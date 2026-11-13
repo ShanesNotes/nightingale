@@ -1,7 +1,6 @@
 use super::anatomy::{at, body_anatomy};
 use ng_contract::*;
 
-/// Each row places every species it names in each (site set, space) it lists.
 macro_rules! placements {
     ($schema:ident; $([$($species:ident),+] in $places:tt;)+) => {
         $($(placements!(@one $schema, $species, $places);)+)+

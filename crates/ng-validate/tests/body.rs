@@ -76,7 +76,6 @@ fn row(source: &'static str, species: &'static [Species], groups: &[&[Place]]) -
     }
 }
 
-/// Body 01's placements, stated apart from the schema's own table.
 fn body_01() -> Vec<Row> {
     use Species::*;
     let enclosure_fluid: Place = (ENCLOSURES, Space::Fluid);
