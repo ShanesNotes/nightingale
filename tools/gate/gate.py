@@ -3235,6 +3235,15 @@ def _commit(root: pathlib.Path, path: str, text: str) -> None:
     _git_z(root, *COMMIT, path)
 
 
+@contextlib.contextmanager
+def _scratch_git() -> Iterable[None]:
+    # A git hook's GIT_DIR would aim the scratch repository's commands at this one.
+    with mock.patch.dict(os.environ):
+        for key in [k for k in os.environ if k.startswith("GIT_")]:
+            del os.environ[key]
+        yield
+
+
 def _fixture(tmp: pathlib.Path) -> pathlib.Path:
     root = tmp / "repo"
     (root / "tools").mkdir(parents=True)
@@ -3273,17 +3282,18 @@ WRITER_CASES: tuple[tuple[str, Callable[[pathlib.Path], object], bool], ...] = (
 
 def writer_cases() -> list[Violation]:
     out = []
-    for what, change, writes in WRITER_CASES:
-        with tempfile.TemporaryDirectory(prefix="gate-writer-") as tmp:
-            root = _fixture(pathlib.Path(tmp))
-            change(root)
-            with contextlib.redirect_stdout(io.StringIO()):
-                tested(["-p", "ng-a"], root)
-            if (root / TESTED).exists() != writes:
-                out.append(Violation("baseline", what, f"10-rust {'writes no' if writes else 'writes a'} record"))
-            tested(["--reset"], root)
-            if (root / TESTED).exists():
-                out.append(Violation("baseline", what, "`tested --reset` leaves the record"))
+    with _scratch_git():
+        for what, change, writes in WRITER_CASES:
+            with tempfile.TemporaryDirectory(prefix="gate-writer-") as tmp:
+                root = _fixture(pathlib.Path(tmp))
+                change(root)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    tested(["-p", "ng-a"], root)
+                if (root / TESTED).exists() != writes:
+                    out.append(Violation("baseline", what, f"10-rust {'writes no' if writes else 'writes a'} record"))
+                tested(["--reset"], root)
+                if (root / TESTED).exists():
+                    out.append(Violation("baseline", what, "`tested --reset` leaves the record"))
     return out
 
 
@@ -3299,24 +3309,26 @@ SWEEP_CALLS = (
 
 def sweep_case() -> list[Violation]:
     out = []
-    for what, change, before in SWEEP_CALLS:
-        with tempfile.TemporaryDirectory(prefix="gate-sweep-") as tmp:
-            root = _fixture(pathlib.Path(tmp))
-            calls, stub = pathlib.Path(tmp) / "calls", pathlib.Path(tmp) / "bin"
-            stub.mkdir()
-            (stub / "cargo").write_text(f"#!/bin/sh\necho \"$*\" >>'{calls}'\necho 'test t ... ok'\n", encoding="utf-8")
-            (stub / "cargo").chmod(0o755)
-            change(root)
-            with mock.patch.dict(os.environ, {"PATH": f"{stub}:{os.environ['PATH']}"}):
-                os.environ.pop("UPDATE_EXPECT", None)
-                with contextlib.redirect_stdout(io.StringIO()):
-                    tested(["-p", "ng-a"], root)
-                argv = [sys.executable, "-I", MUTATE, "mutants.toml", "--tested", str(root / TESTED)]
-                subprocess.run(argv, cwd=root, capture_output=True, env=dict(os.environ))
-            ran = tuple(re.sub(r"^test --manifest-path \S+ ", "", c) for c in _read(calls).splitlines())
-            want = (*before, "-p ng-a --test alpha", "-p ng-b --test beta")
-            if ran != want:
-                out.append(Violation("baseline", f"a sweep after {what}", f"ran cargo test {ran}; want {want}"))
+    with _scratch_git():
+        for what, change, before in SWEEP_CALLS:
+            with tempfile.TemporaryDirectory(prefix="gate-sweep-") as tmp:
+                root = _fixture(pathlib.Path(tmp))
+                calls, stub = pathlib.Path(tmp) / "calls", pathlib.Path(tmp) / "bin"
+                stub.mkdir()
+                cargo = f"#!/bin/sh\necho \"$*\" >>'{calls}'\necho 'test t ... ok'\n"
+                (stub / "cargo").write_text(cargo, encoding="utf-8")
+                (stub / "cargo").chmod(0o755)
+                change(root)
+                with mock.patch.dict(os.environ, {"PATH": f"{stub}:{os.environ['PATH']}"}):
+                    os.environ.pop("UPDATE_EXPECT", None)
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        tested(["-p", "ng-a"], root)
+                    argv = [sys.executable, "-I", MUTATE, "mutants.toml", "--tested", str(root / TESTED)]
+                    subprocess.run(argv, cwd=root, capture_output=True, env=dict(os.environ))
+                ran = tuple(re.sub(r"^test --manifest-path \S+ ", "", c) for c in _read(calls).splitlines())
+                want = (*before, "-p ng-a --test alpha", "-p ng-b --test beta")
+                if ran != want:
+                    out.append(Violation("baseline", f"a sweep after {what}", f"ran cargo test {ran}; want {want}"))
     return out
 
 
