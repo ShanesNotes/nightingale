@@ -136,7 +136,6 @@ struct Transition {
     at: SimTime,
 }
 
-/// Where a beat ends, with each compared exchange's total since admission, in compared order.
 struct Beat {
     at: SimTime,
     totals: Vec<Compensated>,
@@ -148,7 +147,6 @@ struct Trace {
     beats: Vec<Beat>,
 }
 impl Trace {
-    /// Each exchange's net over each whole beat, from one edge to the next, with the instant the beat ends.
     fn beat_nets(&self) -> impl Iterator<Item = (SimTime, Vec<Compensated>)> + '_ {
         self.beats.windows(2).map(|pair| {
             let nets = (pair[1].totals.iter().zip(&pair[0].totals))
@@ -207,7 +205,6 @@ struct Measured {
     compared: Vec<Compared>,
     target: Trace,
     distances: Vec<Compensated>,
-    /// One for each compared exchange, in compared order.
     beat_distances: Vec<Compensated>,
     transition_distances: Vec<(Kind, u64)>,
     most_apart: usize,
@@ -454,13 +451,13 @@ impl SliceWindow {
             .find(|row| row.kind() == HEART_PHASE)
             .ok_or(AccuracyFailure::TooFewBeats)?
             .id();
-        let finest = trace(&body, &start, &policy, &finest, Edges::Find(phase))?;
+        let finest = trace(&body, &start, &policy, &finest, Edges::PhaseFalls(phase))?;
         if finest.beat_nets().count() < 2 {
             return Err(AccuracyFailure::TooFewBeats);
         }
         let edges: Vec<SimTime> = finest.beats.iter().map(|beat| beat.at).collect();
-        let [coarse, middle] =
-            [&coarse, &middle].map(|reference| trace(&body, &start, &policy, reference, Edges::At(&edges)));
+        let [coarse, middle] = [&coarse, &middle]
+            .map(|reference| trace(&body, &start, &policy, reference, Edges::Finest(&edges)));
         let measured = Measured::new(&policy, compared(&body), finest, &[&coarse?, &middle?], end());
         Ok(Self {
             body,
@@ -478,7 +475,7 @@ impl SliceWindow {
         case: usize,
     ) -> Result<Compensated, AccuracyFailure> {
         let edges: Vec<SimTime> = self.measured.target.beats.iter().map(|beat| beat.at).collect();
-        let run = trace(&self.body, &self.start, &self.policy, core, Edges::At(&edges))?;
+        let run = trace(&self.body, &self.start, &self.policy, core, Edges::Finest(&edges))?;
         self.measured.verdict(&run, case)
     }
     /// Everything the window judges by, so two windows that would judge a core apart never share an identity.
@@ -515,13 +512,9 @@ fn compared(body: &CompiledBody) -> Vec<Compared> {
     rows.chain(columns.into_iter().map(Compared::Exchange)).collect()
 }
 
-/// Where a run reads its exchange totals for the whole-beat nets.
 enum Edges<'a> {
-    /// The finest refinement finds its own, at each step that ends where the heart's phase falls: the step ends at
-    /// the firing that resets it.
-    Find(RowId),
-    /// Every other run reads at the finest's.
-    At(&'a [SimTime]),
+    PhaseFalls(RowId),
+    Finest(&'a [SimTime]),
 }
 
 fn trace(
@@ -549,8 +542,8 @@ fn trace(
     while session.record().accepted().time().nanoseconds() < end + policy.past_end_ns {
         let before = session.record().accepted().modes().to_vec();
         let phase_was = match edges {
-            Edges::Find(phase) => high(session.record().accepted().value(phase)),
-            Edges::At(_) => 0.0,
+            Edges::PhaseFalls(phase) => high(session.record().accepted().value(phase)),
+            Edges::Finest(_) => 0.0,
         };
         session = advance(session).map_err(faulted)?;
         let accepted = session.record().accepted();
@@ -571,12 +564,13 @@ fn trace(
                 .collect(),
         };
         match edges {
-            Edges::Find(phase) => {
+            Edges::PhaseFalls(phase) => {
+                // The step ends at the firing that resets the phase, so the edge is the step's end.
                 if high(accepted.value(phase)) < phase_was && now.nanoseconds() <= end {
                     trace.beats.push(beat(now));
                 }
             }
-            Edges::At(instants) => {
+            Edges::Finest(instants) => {
                 for at in &instants[trace.beats.len()..] {
                     if *at > now {
                         break;
@@ -714,8 +708,6 @@ mod tests {
         Compensated::of(&Measure::<Dimensionless>::new(v).expect("finite"))
     }
 
-    /// One exchange over nine 10 ms intervals, whose beat edges end the first, fifth and ninth: two whole beats of
-    /// four intervals.
     fn one_exchange(nets: [f64; 9]) -> Trace {
         let (mut total, mut instants, mut beats) = (Compensated::ZERO, Vec::new(), Vec::new());
         for (net, step) in nets.into_iter().zip(1_u64..) {

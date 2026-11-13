@@ -243,8 +243,7 @@ pub enum AccuracyFailure {
         error: Compensated,
         distance: Compensated,
     },
-    /// A slice window's finest refinement made fewer than two whole beats, so its whole-beat nets would judge
-    /// nothing.
+    /// A slice window's body holds no heart phase, or its finest refinement made fewer than two whole beats.
     TooFewBeats,
     /// A slice window's run held other modes than the reference's finest refinement at more compared instants than
     /// its window allows.
