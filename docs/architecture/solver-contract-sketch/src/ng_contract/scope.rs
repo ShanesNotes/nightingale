@@ -117,7 +117,7 @@ pub struct HeldScope<'b, S> {
     _builder: FragmentBuilder<'b, S>,
 }
 /// What a held stand-in answers for: every route on which it supplies or removes material or
-/// energy, the spaces whose pools it stands behind, and where it is meant to hold. What it
+/// energy, the pools it stands behind, and where it is meant to hold. What it
 /// prescribes shows in the rows it defines, and the catalog rows it does not answer are the sink
 /// rows it does not read. It enters the model hash and the coverage manifest, each supply becomes
 /// a `HeldRoute` whose exchange the history keeps apart, and the certificate reports each route's
@@ -131,9 +131,15 @@ pub struct HeldDeclaration<S> {
 impl<S: OutsideSlice> HeldDeclaration<S> {
     /// `supplies` names every schema route this card moves material on: compile refuses a law on
     /// any other, and a named route no law serves. `holds` names the spaces whose pools this card
-    /// stands behind: they stay amounts, no law moves them, and a held enclosure's own fluid needs
-    /// no entry.
+    /// stands behind at every site: they stay amounts, no law moves them, and a held enclosure's
+    /// own fluid needs no entry.
     pub fn new(_supplies: Vec<&'static str>, _holds: Vec<Space>, _validity: &'static str) -> Self {
+        todo!()
+    }
+    /// Also stands behind the pools of species `Q` in `space` at the sites of `C`. Two cards may
+    /// hold one species on disjoint sets; compile refuses a pool both reach, and a hold that names
+    /// no pool. In the crate `Q` is a substance and `C` any site set.
+    pub fn pool<Q, C: SiteClass>(self, _space: Space) -> Self {
         todo!()
     }
     /// An intensive value held as if from an external reservoir of `book`, so its implicit support

@@ -424,6 +424,7 @@ impl<'b> Assembly<'b> {
         let HeldDeclaration {
             mut supplies,
             mut holds,
+            mut pools,
             validity,
             card: _,
         } = declaration;
@@ -431,6 +432,8 @@ impl<'b> Assembly<'b> {
         supplies.dedup();
         holds.sort_unstable();
         holds.dedup();
+        pools.sort_unstable();
+        pools.dedup();
         for &name in &supplies {
             if !names.iter().any(|known| known.0 == name) {
                 return Err(AdmissionError::UnknownBoundary { name });
@@ -450,6 +453,7 @@ impl<'b> Assembly<'b> {
             card: S::CARD,
             supplies,
             holds,
+            pools,
             validity,
         });
         Ok(HeldScope {
@@ -799,20 +803,49 @@ impl<'b> ReceptorPorts<'b> {
 pub struct HeldDeclaration<S> {
     supplies: Vec<&'static str>,
     holds: Vec<Space>,
+    pools: Vec<HeldSpecies>,
     validity: &'static str,
     card: PhantomData<S>,
 }
 impl<S: OutsideSlice> HeldDeclaration<S> {
     /// `supplies` names every boundary route its stand-ins serve. `holds` names the spaces whose pools it stands
-    /// behind: no law moves them, and the fluid of an enclosure the map names this card on needs no entry.
+    /// behind at every site: no law moves them, and the fluid of an enclosure the map names this card on needs no
+    /// entry.
     pub fn new(supplies: Vec<&'static str>, holds: Vec<Space>, validity: &'static str) -> Self {
         Self {
             supplies,
             holds,
+            pools: Vec::new(),
             validity,
             card: PhantomData,
         }
     }
+    /// Also stands behind the pools of `Q` in `space` at the sites of `C`, and no other species there. Compile
+    /// refuses a hold that names no pool.
+    /// ```compile_fail,E0277
+    /// use ng_contract::*;
+    /// let declaration = HeldDeclaration::<BloodChemistry>::new(vec![], vec![], "a bench");
+    /// let _ = declaration.pool::<Pressure, CapillaryBed>(Space::Cells);
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// let declaration = HeldDeclaration::<BloodChemistry>::new(vec![], vec![], "a bench");
+    /// let _ = declaration.pool::<Potassium, CapillaryBed>(Space::Cells);
+    /// ```
+    pub fn pool<Q: Substance, C: SiteSet>(mut self, space: Space) -> Self {
+        self.pools.push(HeldSpecies {
+            space,
+            species: Q::SPECIES,
+            sites: C::SET,
+        });
+        self
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct HeldSpecies {
+    pub(crate) space: Space,
+    pub(crate) species: Species,
+    pub(crate) sites: Sites,
 }
 /// A held declaration as compiled, normalized so its order never reaches the model hash.
 #[derive(Clone, Debug, PartialEq)]
@@ -820,6 +853,7 @@ pub struct HeldCard {
     pub(crate) card: &'static str,
     pub(crate) supplies: Vec<&'static str>,
     pub(crate) holds: Vec<Space>,
+    pub(crate) pools: Vec<HeldSpecies>,
     pub(crate) validity: &'static str,
 }
 impl HeldCard {
@@ -844,6 +878,7 @@ impl Seal for HeldCard {
             card,
             supplies,
             holds,
+            pools,
             validity,
         } = self;
         out.text(card);
@@ -856,6 +891,15 @@ impl Seal for HeldCard {
             out.number(*space as u64);
         }
         out.text(validity);
+        if !pools.is_empty() {
+            out.number(u64::MAX);
+            out.length(pools.len());
+            for pool in pools {
+                out.number(pool.space as u64);
+                out.number(pool.species as u64);
+                pool.sites.seal(out);
+            }
+        }
     }
 }
 
@@ -995,5 +1039,79 @@ mod tests {
             ("urine", "RN", Water, OutOfBody, true),
         ];
         assert_eq!(TABLE, &pinned[..]);
+    }
+
+    #[test]
+    fn a_species_hold_seals_after_a_tag_and_a_card_without_one_seals_only_its_older_fields() {
+        use super::{Canonical, Class, HeldCard, HeldSpecies, Seal, Sites, Space};
+        use crate::{Species, Tissue};
+        let card = |pools| HeldCard {
+            card: "BC",
+            supplies: vec!["a route"],
+            holds: vec![Space::Cells],
+            pools,
+            validity: "a bench",
+        };
+        let sealed = |card: &HeldCard| {
+            let mut out = Canonical::new("");
+            card.seal(&mut out);
+            out.into_bytes()
+        };
+        let older = || {
+            let mut out = Canonical::new("");
+            out.text("BC");
+            out.length(1);
+            out.text("a route");
+            out.length(1);
+            out.number(Space::Cells as u64);
+            out.text("a bench");
+            out
+        };
+        let muscle = HeldSpecies {
+            space: Space::Cells,
+            species: Species::Potassium,
+            sites: Sites::Tissue(Tissue::Muscle),
+        };
+        let beds = HeldSpecies {
+            space: Space::Interstitium,
+            species: Species::Iron,
+            sites: Sites::Class(Class::CapillaryBed),
+        };
+        let mut one = older();
+        for word in [
+            u64::MAX,
+            1,
+            Space::Cells as u64,
+            Species::Potassium as u64,
+            5,
+            Tissue::Muscle as u64,
+        ] {
+            one.number(word);
+        }
+        let mut two = older();
+        for word in [
+            u64::MAX,
+            2,
+            Space::Cells as u64,
+            Species::Potassium as u64,
+            5,
+            Tissue::Muscle as u64,
+        ] {
+            two.number(word);
+        }
+        for word in [
+            Space::Interstitium as u64,
+            Species::Iron as u64,
+            0,
+            Class::CapillaryBed as u64,
+        ] {
+            two.number(word);
+        }
+        let without = sealed(&card(vec![]));
+        assert_eq!(without, older().into_bytes());
+        assert_eq!(sealed(&card(vec![muscle])), one.into_bytes());
+        assert_eq!(sealed(&card(vec![muscle, beds])), two.into_bytes());
+        let first_word = |bytes: &[u8]| bytes[8..16].to_vec();
+        assert_ne!(first_word(&without), u64::MAX.to_be_bytes());
     }
 }
