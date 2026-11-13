@@ -106,7 +106,6 @@ def build_settings(env):
 
 
 def selection(args, filters):
-    """The crates and targets a `cargo test` call runs, or None when it passes anything else."""
     crates, targets = [], set()
     args = iter(args)
     for arg in args:
