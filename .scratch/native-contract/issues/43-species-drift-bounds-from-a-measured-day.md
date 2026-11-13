@@ -4,7 +4,9 @@ Spec: [solver contract](../../../docs/architecture/solver-contract.md) §7 (Slic
 
 Type: task
 
-Status: open
+Status: claimed
+
+Claimed by: nc43-bounds
 
 Blocked by: 42
 
