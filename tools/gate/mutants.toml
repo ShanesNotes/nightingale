@@ -2525,3 +2525,10 @@ old = '''    filtration.keeps_back::<Cortisol>(rn);
 '''
 new = ''''''
 test = "-p ng-validate --test keep_back a_hormone_in_blood_alone_compiles_on_the_slices_own_fluid_routes"
+
+[[mutant]]
+name = "body-iron-two-beds"
+path = "crates/ng-validate/src/body/schema.rs"
+old = '''Beds<Liver>: Cells, Beds<Gut>: Cells'''
+new = '''Beds<Liver>: Cells, CapillaryBed: Cells'''
+test = "-p ng-validate --test body iron_lives_in_cells_at_the_liver_and_gut_beds_only"
