@@ -2532,3 +2532,26 @@ path = "crates/ng-validate/src/body/schema.rs"
 old = '''Beds<Liver>: Cells, Beds<Gut>: Cells'''
 new = '''Beds<Liver>: Cells, CapillaryBed: Cells'''
 test = "-p ng-validate --test body iron_lives_in_cells_at_the_liver_and_gut_beds_only"
+
+[[mutant]]
+name = "body-hold-table-pinned"
+path = "crates/ng-validate/src/body/table.rs"
+old = '''    pool::<CellAnion, CapillaryBed>(BC, Cells, "a cell amount no law ever moves", Kept, "01:120, 547"),
+'''
+new = ''''''
+test = "-p ng-validate --test body the_hold_table_is_the_compiled_bodys_coverage_manifest_row_for_row"
+
+[[mutant]]
+name = "body-process-sites"
+path = "crates/ng-validate/src/body/schema.rs"
+old = '''        glomerular in Plasma: [Secretion<Renin>];'''
+new = '''        lung in Plasma: [Secretion<Renin>];'''
+test = "-p ng-validate --test body each_of_the_49_processes_moves_the_pool_body_01_puts_it_at"
+
+[[mutant]]
+name = "body-fl-crossings"
+path = "crates/ng-fluids/src/starling.rs"
+old = '''    route.keeps_back::<Oxygen>(fl);
+'''
+new = ''''''
+test = "-p ng-validate --test body fl_crosses_each_wall_with_only_the_species_body_01_gives_it"
