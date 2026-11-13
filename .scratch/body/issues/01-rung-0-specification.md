@@ -143,7 +143,7 @@ Pass 1. Ventilation under the central chemoreflex controls it, reading the acidi
 | Term | Kind | Where | Law | Owner | Ticket |
 |---|---|---|---|---|---|
 | carbon dioxide made | made | cells of every bed | the bed's oxidation reaction | MT | 09 |
-| tissue store | moves | cells and interstitium of every bed | the carbon dioxide a bed makes fills the bed's tissue water, and diffusion across both walls empties it into blood | MT | 09 |
+| tissue store | moves | cells and interstitium of every bed | the carbon dioxide a bed makes fills the bed's tissue water, and diffusion across both walls empties it into blood | MT | 08, 09 |
 | carriage | moves | blood | advection, with dissolved, bicarbonate and bound forms as speciation in the strong-ion frame | CV, BC | 08 |
 | alveolar elimination | moves | pulmonary bed plasma to alveolar gas | diffusion across the gas-exchange surface | RS | 10 |
 | inspired carbon dioxide | enters | conducting airway | the room's inspired gas | RS | 10 |
