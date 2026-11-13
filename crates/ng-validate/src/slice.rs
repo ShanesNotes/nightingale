@@ -515,7 +515,7 @@ pub fn arena_seed() -> Seed {
 }
 
 const CLOSURE_RELATIVE: f64 = 1e-12;
-/// An element's bound, set for a 2 s window. The slice has no reaction, so no day has measured one.
+/// Ticket 14's bound for a 2 s window, which elements keep: the slice has no reaction, so no day has measured one.
 const SYNTHETIC_DRIFT: f64 = 1e4;
 /// About twice energy's measured drift over the arena's own day from 06:55, 8.3e4. Like `species_drift`, it is
 /// fixture data until the healthy-range set holds energy's within-subject variation.

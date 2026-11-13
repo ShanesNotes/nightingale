@@ -185,8 +185,6 @@ fn refused(failure: CertificateFailure) -> (CertificateCheck, Option<Book>) {
     (failure.check(), failure.quantity().map(QuantityId::book))
 }
 
-/// `species` drifts a thousandth under `limit` and then a thousandth over it, beside `partner` held a thousandth
-/// under, which balances an ion's charge.
 fn drifts_up_to(species: Species, limit: f64, partner: Option<Species>) {
     let (under, over) = (limit * 0.999, limit * 1.001);
     let beside = |amount| {
