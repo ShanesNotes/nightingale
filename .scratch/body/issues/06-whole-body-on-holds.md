@@ -2,7 +2,7 @@
 
 Type: task
 Status: claimed
-Claimed by: body-06-p3
+Claimed by: body-06-p3, then body-06-p4a for part 4a
 Blocked by: 04, 05
 
 **What to build:** A second assembly beside the slice: the whole body. It has every site, space, pool and route the 13 systems need at rung 0, and every law the slice lacks is a declared stand-in owned by its card, as the slice already holds the nine cards outside it. The slice stays as it is, so the arena's fixture does not move while cores are scored on it, and it stays the reference a deeper body is compared with.
