@@ -102,14 +102,15 @@ fn the_body_admits_at_06_55(start: &Start) {
 fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> Session<'_, Running> {
     let pools = start.held_pools();
     assert_eq!(pools.len(), 409);
-    let amounts = |session: &Session<'_, Running>| -> Vec<f64> {
+    let amounts = |session: &Session<'_, Running>| -> Vec<[u64; 2]> {
         let view = session.record().accepted();
-        pools.iter().map(|(row, _)| lead(view.value(*row))).collect()
+        pools.iter().map(|(row, _)| view.value(*row).bits()).collect()
     };
     let mut session = start.session();
     let admitted = amounts(&session);
     for ((_, kind), amount) in pools.iter().zip(&admitted) {
-        assert_eq!(*amount, body_start_guess(*kind), "{kind:?} moved at admission");
+        let guess = Compensated::of(&body_start_guess(*kind).expect("a finite guess"));
+        assert_eq!(*amount, guess.bits(), "{kind:?} moved at admission");
     }
     for mark in 1..=6 {
         session = until(session, 10 * mark * SECOND);

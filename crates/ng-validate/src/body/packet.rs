@@ -107,7 +107,11 @@ fn water_guess(site: &str, space: Space) -> Option<f64> {
     })
 }
 
-pub fn body_start_guess(row: RowKind) -> f64 {
+pub fn body_start_guess(row: RowKind) -> Result<Measure<Dimensionless>, AdmissionError> {
+    Measure::new(start_guess(row))
+}
+
+fn start_guess(row: RowKind) -> f64 {
     match row {
         RowKind::Amount { site, species, space } => {
             let guess = water_guess(site.key(), space);
@@ -311,7 +315,7 @@ pub fn body_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixtu
 
     table(&mut packet)?;
     zero_stand_ins(&mut packet, body)?;
-    packet.start_rest(body, body_start_guess, NOTE)?;
+    packet.start_rest(body, start_guess, NOTE)?;
     for row in body.rows() {
         let kind = row.kind();
         if let RowKind::Memory(slot) | RowKind::Algebraic(slot) = kind {
