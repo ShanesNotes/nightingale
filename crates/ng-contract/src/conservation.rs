@@ -764,15 +764,11 @@ mod tests {
         let after = basis.into_bytes().len();
         let mut basis = Canonical::new("ng-contract conserved basis 1");
         body.conserved_basis().seal(&mut basis);
-        let CoverageManifest {
-            declarations: _,
-            routes,
-            pools,
-        } = &body.conserved_basis().coverage;
-        routes.seal(&mut basis);
-        pools.seal(&mut basis);
+        let coverage = &body.conserved_basis().coverage;
+        coverage.routes.seal(&mut basis);
+        coverage.pools.seal(&mut basis);
         assert_eq!(basis.digest(), body.conserved_basis().digest());
         let next = &basis.into_bytes()[after..after + 8];
-        assert_eq!(next, (routes.len() as u64).to_be_bytes());
+        assert_eq!(next, (coverage.routes.len() as u64).to_be_bytes());
     }
 }
