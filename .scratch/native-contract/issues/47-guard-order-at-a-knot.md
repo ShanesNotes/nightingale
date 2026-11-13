@@ -24,7 +24,7 @@ The whole body has 1,372 rows where the slice has 241, so its first run depends 
 Evidence: `~/lanes/logs/ng-wave-4/nc47-guard-order/`.
 
 - [x] The failing case is a test, red on main and green after the fix
-- [x] What fires at one knot no longer depends on the order guards are held in, and a test shows it
+- [x] What fires at one knot no longer depends on the order guards are held in, and a test shows it, except for two guards that leave one value of one variable: that race is open in [native-contract 48](48-two-guards-out-of-one-value.md)
 - [x] A mutant row that puts the order dependence back is caught by a named test
 - [x] The slice's model hash, basis, first-second traces and the pins of `crates/ng-validate/tests/trace.rs` stay, or each change is listed with its reason
 
@@ -45,4 +45,4 @@ Two tests hold it. `body::tests::a_firing_moves_the_same_guards_whatever_order_t
 
 The slice's model hash, basis and every pin of `crates/ng-validate/tests/trace.rs` stay.
 
-Left open: two guards that leave one value of one variable and cross at one landing still race, and the first in stable order wins. No body declares such a pair. Closing it needs an order the laws state or a refusal, which changes what a guard is.
+Left open: two guards that leave one value of one variable and cross at one landing still race, and the first in stable order wins. No body declares such a pair. Closing it needs an order the laws state or a refusal, which changes what a guard is. [Native-contract 48](48-two-guards-out-of-one-value.md) is open for the refusal.

@@ -24,7 +24,7 @@ All 13 systems run at rung 0 in one body, on a synthetic fixture. The body admit
 
 ## Order
 
-Tickets 01, 02, 03, 04, 05, 07, 23, 27 and 29 and research tickets 11 to 15 are resolved. Ticket 06 follows 04 and 05, and ticket 30 follows 06. Ticket 06 can start today.
+Tickets 01, 02, 03, 04, 05, 07, 23, 27 and 29 and research tickets 11 to 15 are resolved. Ticket 06 lands in parts. Parts 1, 2, 3a and 3b are on main, so the whole body compiles on its holds, and part 4 is being planned. Ticket 30 follows 06.
 
 | Ticket | Waits for | What it lands |
 |---|---|---|
@@ -56,7 +56,7 @@ Tickets 01, 02, 03, 04, 05, 07, 23, 27 and 29 and research tickets 11 to 15 are 
 | [21](issues/21-blood-cells-and-systems-at-rest.md) Blood cells, plasma proteins and the systems at rest | 08, 14, research 15 | Pass 2 |
 | [22](issues/22-the-bladder.md) The bladder | 05, 06, 26, research 15 | Pass 2 |
 | [23](issues/23-healthy-range-and-return-checks.md) The healthy-range check and the return check | nothing | The healthy-range check and the return check |
-| [24](issues/24-the-synthetic-day.md) The synthetic day | 11, 12, 16, 17, 18, 23, 25, 27, 30 | Pass 1 checked: 24 hours on the whole body |
+| [24](issues/24-the-synthetic-day.md) The synthetic day | 11, 12, 16, 17, 18, 23, 25, 27, 30, [native-contract 37](../native-contract/issues/37-the-return-check-reads-its-runs-own-anchors.md) and [40](../native-contract/issues/40-the-range-check-names-a-short-stretch.md) | Pass 1 checked: 24 hours on the whole body |
 | [28](issues/28-two-synthetic-days.md) The whole body lives two synthetic days | 19, 20, 21, 22, 24 | The destination: both passes, 48 hours |
 
 After tickets 06 and 26, three lanes can be built side by side: the gases (08), the gut (13) and the volume hormones (17). They share the body's assembly and add laws to the cardiovascular and renal crates, so ticket 04 puts each law in its own module and the PRs merge one at a time.

@@ -16,6 +16,6 @@ Blocked by: 06, 26, 29, `.scratch/research/issues/11-law-forms-gas-loop.md`
 
 **Non-goals:** the making and excretion of the lumped anion and the diet's organic anion (ticket 18), abnormal hemoglobins, and red cell turnover (ticket 21).
 
-From [ticket 06](06-whole-body-on-holds.md)'s plan: body 01 releases the held gas in blood and tissue here (01:871) and gives carbon dioxide's tissue store to [ticket 09](09-tissues-respire.md) (01:146). So this ticket takes carbon dioxide's crossings of the capillary wall and the cell membrane, and ticket 09 takes its tissue store, the pools in the cells and the interstitium of every bed that the bed's burn fills.
+From [ticket 06](06-whole-body-on-holds.md)'s plan: body 01 releases the held gas in blood and tissue here (01:871) and gives carbon dioxide's tissue store to [ticket 09](09-tissues-respire.md) (01:146). So this ticket takes carbon dioxide's crossings of the capillary wall and the cell membrane, with its pools in the cells and the interstitium of every bed, and ticket 09 takes its tissue store: the bed's burn, which fills those pools.
 
 From [research 14](../../research/issues/14-law-forms-volume-and-acid.md): the ticket that states acidity, this one under the default, writes hemoglobin's charge in blood, the last row of research 14's acid balance. Whether compile accepts a site field that reads its own row at its own site was not checked, and if it does not, `[H+]` and bicarbonate become two fields that read each other.
