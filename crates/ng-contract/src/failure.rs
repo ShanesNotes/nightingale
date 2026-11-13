@@ -393,12 +393,17 @@ pub enum CompileDefect {
     /// A law that reads a lasting input of the day and no parameter or memory slot. An input scales a gain or a set
     /// point and never sets a produced quantity.
     UnscaledInput { law: LawName },
-    /// A space a held card answers for that has no pool in this body.
-    HeldNothing { card: &'static str, space: Space },
+    /// A hold of a card that names no pool in this body: a whole space, with no species, or one species by site set.
+    HeldNothing {
+        card: &'static str,
+        space: Space,
+        species: Option<Species>,
+    },
     PoolHeldTwice {
         cards: [&'static str; 2],
         site: SiteId,
         space: Space,
+        species: Species,
     },
     /// One species across one wall at one site by two cards.
     CrossedTwice { laws: [LawName; 2], site: SiteId },

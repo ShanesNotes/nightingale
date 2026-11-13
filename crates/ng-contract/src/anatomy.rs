@@ -162,6 +162,21 @@ impl Seal for SiteId {
         out.number(*class as u64);
     }
 }
+impl Seal for Sites {
+    fn seal(&self, out: &mut Canonical) {
+        let (set, argument) = match *self {
+            Sites::Class(class) => (0, class as u64),
+            Sites::Blood => (1, 0),
+            Sites::Urinary => (2, 0),
+            Sites::Alimentary => (3, 0),
+            Sites::Airway => (4, 0),
+            Sites::Tissue(tissue) => (5, tissue as u64),
+            Sites::Besides(tissue) => (6, tissue as u64),
+        };
+        out.number(set);
+        out.number(argument);
+    }
+}
 
 pub struct Position {
     axial: Measure<Length>,

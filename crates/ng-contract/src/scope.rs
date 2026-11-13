@@ -424,6 +424,7 @@ impl<'b> Assembly<'b> {
         let HeldDeclaration {
             mut supplies,
             mut holds,
+            mut pools,
             validity,
             card: _,
         } = declaration;
@@ -431,6 +432,8 @@ impl<'b> Assembly<'b> {
         supplies.dedup();
         holds.sort_unstable();
         holds.dedup();
+        pools.sort_unstable();
+        pools.dedup();
         for &name in &supplies {
             if !names.iter().any(|known| known.0 == name) {
                 return Err(AdmissionError::UnknownBoundary { name });
@@ -450,6 +453,7 @@ impl<'b> Assembly<'b> {
             card: S::CARD,
             supplies,
             holds,
+            pools,
             validity,
         });
         Ok(HeldScope {
@@ -799,19 +803,60 @@ impl<'b> ReceptorPorts<'b> {
 pub struct HeldDeclaration<S> {
     supplies: Vec<&'static str>,
     holds: Vec<Space>,
+    pools: Vec<HeldSpecies>,
     validity: &'static str,
     card: PhantomData<S>,
 }
 impl<S: OutsideSlice> HeldDeclaration<S> {
     /// `supplies` names every boundary route its stand-ins serve. `holds` names the spaces whose pools it stands
-    /// behind: no law moves them, and the fluid of an enclosure the map names this card on needs no entry.
+    /// behind at every site: no law moves them, and the fluid of an enclosure the map names this card on needs no
+    /// entry.
     pub fn new(supplies: Vec<&'static str>, holds: Vec<Space>, validity: &'static str) -> Self {
         Self {
             supplies,
             holds,
+            pools: Vec::new(),
             validity,
             card: PhantomData,
         }
+    }
+    /// Also stands behind the pools of `Q` in `space` at the sites of `C`, and no other species there. Compile
+    /// refuses a hold that names no pool.
+    /// ```compile_fail,E0277
+    /// use ng_contract::*;
+    /// let declaration = HeldDeclaration::<BloodChemistry>::new(vec![], vec![], "a bench");
+    /// let _ = declaration.pool::<Pressure, CapillaryBed>(Space::Cells);
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// let declaration = HeldDeclaration::<BloodChemistry>::new(vec![], vec![], "a bench");
+    /// let _ = declaration.pool::<Potassium, CapillaryBed>(Space::Cells);
+    /// ```
+    pub fn pool<Q: Substance, C: SiteSet>(mut self, space: Space) -> Self {
+        self.pools.push(HeldSpecies {
+            space,
+            species: Q::SPECIES,
+            sites: C::SET,
+        });
+        self
+    }
+}
+/// One species in one space at the sites of one set, as a held card holds it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct HeldSpecies {
+    pub(crate) space: Space,
+    pub(crate) species: Species,
+    pub(crate) sites: Sites,
+}
+impl HeldSpecies {
+    pub fn space(&self) -> Space {
+        self.space
+    }
+    pub fn species(&self) -> Species {
+        self.species
+    }
+    pub fn sites(&self) -> Sites {
+        self.sites
     }
 }
 /// A held declaration as compiled, normalized so its order never reaches the model hash.
@@ -820,6 +865,7 @@ pub struct HeldCard {
     pub(crate) card: &'static str,
     pub(crate) supplies: Vec<&'static str>,
     pub(crate) holds: Vec<Space>,
+    pub(crate) pools: Vec<HeldSpecies>,
     pub(crate) validity: &'static str,
 }
 impl HeldCard {
@@ -830,9 +876,13 @@ impl HeldCard {
     pub fn routes(&self) -> &[&'static str] {
         &self.supplies
     }
-    /// The spaces whose pools it stands behind, in space order.
+    /// The spaces whose pools it stands behind at every site, in space order.
     pub fn spaces(&self) -> &[Space] {
         &self.holds
+    }
+    /// The species it holds by site set, in space, then species, then set order.
+    pub fn species(&self) -> &[HeldSpecies] {
+        &self.pools
     }
     pub fn validity(&self) -> &'static str {
         self.validity
@@ -844,6 +894,7 @@ impl Seal for HeldCard {
             card,
             supplies,
             holds,
+            pools,
             validity,
         } = self;
         out.text(card);
@@ -856,6 +907,20 @@ impl Seal for HeldCard {
             out.number(*space as u64);
         }
         out.text(validity);
+        if !pools.is_empty() {
+            out.number(u64::MAX);
+            out.length(pools.len());
+            for HeldSpecies {
+                space,
+                species,
+                sites,
+            } in pools
+            {
+                out.number(*space as u64);
+                out.number(*species as u64);
+                sites.seal(out);
+            }
+        }
     }
 }
 
@@ -995,5 +1060,93 @@ mod tests {
             ("urine", "RN", Water, OutOfBody, true),
         ];
         assert_eq!(TABLE, &pinned[..]);
+    }
+
+    #[test]
+    fn a_species_hold_seals_after_a_tag_and_a_card_without_one_seals_only_its_older_fields() {
+        use super::{Canonical, Class, HeldCard, HeldSpecies, Seal, Sites, Space};
+        use crate::{Species, Tissue};
+        let older = || {
+            let mut out = Canonical::new("");
+            out.text("BC");
+            out.length(1);
+            out.text("a route");
+            out.length(1);
+            out.number(Space::Cells as u64);
+            out.text("a bench");
+            out
+        };
+        let hold = |space, species, sites| HeldSpecies {
+            space,
+            species,
+            sites,
+        };
+        let holds = [
+            (
+                hold(Space::Cells, Species::Potassium, Sites::Tissue(Tissue::Muscle)),
+                [Space::Cells as u64, Species::Potassium as u64, 5, 2],
+            ),
+            (
+                hold(
+                    Space::Interstitium,
+                    Species::Iron,
+                    Sites::Class(Class::VesselSegment),
+                ),
+                [Space::Interstitium as u64, Species::Iron as u64, 0, 1],
+            ),
+            (
+                hold(Space::Plasma, Species::Water, Sites::Besides(Tissue::Fat)),
+                [Space::Plasma as u64, Species::Water as u64, 6, 8],
+            ),
+        ];
+        for count in 0..=holds.len() {
+            let pools = holds[..count].iter().map(|(hold, _)| *hold).collect();
+            let card = HeldCard {
+                card: "BC",
+                supplies: vec!["a route"],
+                holds: vec![Space::Cells],
+                pools,
+                validity: "a bench",
+            };
+            let mut sealed = Canonical::new("");
+            card.seal(&mut sealed);
+            let mut expected = older();
+            if count > 0 {
+                expected.number(u64::MAX);
+                expected.number(count as u64);
+            }
+            for word in holds[..count].iter().flat_map(|(_, words)| words) {
+                expected.number(*word);
+            }
+            assert_eq!(
+                sealed.into_bytes(),
+                expected.into_bytes(),
+                "{count} species holds"
+            );
+        }
+    }
+
+    #[test]
+    fn each_kind_of_site_set_seals_to_two_words_of_its_own() {
+        use super::{Canonical, Class, Seal, Sites};
+        use crate::Tissue;
+        let pinned = [
+            (Sites::Class(Class::VesselSegment), [0, 1]),
+            (Sites::Blood, [1, 0]),
+            (Sites::Urinary, [2, 0]),
+            (Sites::Alimentary, [3, 0]),
+            (Sites::Airway, [4, 0]),
+            (Sites::Tissue(Tissue::Muscle), [5, 2]),
+            (Sites::Besides(Tissue::Fat), [6, 8]),
+        ];
+        for (sites, words) in pinned {
+            let mut sealed = Canonical::new("");
+            sites.seal(&mut sealed);
+            let mut expected = Canonical::new("");
+            for word in words {
+                expected.number(word);
+            }
+            assert_eq!(sealed.into_bytes(), expected.into_bytes(), "{sites:?}");
+        }
     }
 }

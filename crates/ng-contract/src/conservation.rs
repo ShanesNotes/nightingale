@@ -725,4 +725,50 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn the_held_cards_end_the_model_hashs_stream_and_a_list_length_follows_them_in_the_basis_digest() {
+        use crate::identity::{Canonical, Seal};
+        let mut map = AnatomyBuilder::new();
+        let root = map.site::<TissueSite>("body", at_origin().expect("finite"));
+        let vessel = map.site::<VesselSegment>("vessel", at_origin().expect("finite"));
+        let bed = map.site::<CapillaryBed>("bed", at_origin().expect("finite"));
+        for site in [vessel.id(), bed.id()] {
+            map.contain(root.id(), site);
+        }
+        map.connect(Network::Vascular, vessel.id(), bed.id());
+        map.connect(Network::Vascular, bed.id(), vessel.id());
+        let mut schema = Schema::new(map.finish().expect("a map")).expect("a schema");
+        for space in [Space::Lumen, Space::Plasma, Space::Interstitium] {
+            schema.leave_out(space, "a bench of cell water");
+        }
+        let body = assemble(schema, |mut body| {
+            let held = HeldDeclaration::<BloodChemistry>::new(vec![], vec![], "a synthetic bench")
+                .pool::<Water, CapillaryBed>(Space::Cells);
+            let (laws, _) = body.hold(held)?.parts();
+            body.add(laws.finish());
+            body.compile()
+        })
+        .expect("compiled");
+        let declarations = &body.conserved_basis().coverage.declarations;
+        assert!(declarations.iter().any(|card| !card.pools.is_empty()));
+        let mut cards = Canonical::new("");
+        declarations.seal(&mut cards);
+        let cards = cards.into_bytes().split_off(8);
+        let mut model = Canonical::new("ng-contract model 2");
+        body.layout.seal(&mut model);
+        assert_eq!(model.digest(), body.model_hash().digest());
+        assert!(model.into_bytes().ends_with(&cards));
+        let mut basis = Canonical::new("ng-contract conserved basis 1");
+        body.conserved_basis().seal(&mut basis);
+        let after = basis.into_bytes().len();
+        let mut basis = Canonical::new("ng-contract conserved basis 1");
+        body.conserved_basis().seal(&mut basis);
+        let coverage = &body.conserved_basis().coverage;
+        coverage.routes.seal(&mut basis);
+        coverage.pools.seal(&mut basis);
+        assert_eq!(basis.digest(), body.conserved_basis().digest());
+        let next = &basis.into_bytes()[after..after + 8];
+        assert_eq!(next, (coverage.routes.len() as u64).to_be_bytes());
+    }
 }

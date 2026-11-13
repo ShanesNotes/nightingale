@@ -440,6 +440,193 @@ new = '''        Defect::LiverHoldsCells => vec![],'''
 test = "-p ng-contract --test held a_pool_no_law_moves_and_no_declaration_holds_is_an_orphan"
 
 [[mutant]]
+name = "species-hold-matches-species"
+path = "crates/ng-contract/src/compile.rs"
+old = '''
+    hold.space == pool.space
+        && hold.species == pool.species
+'''
+new = '''
+    hold.space == pool.space
+'''
+test = "-p ng-contract --test held a_hold_by_species_holds_that_species_and_leaves_the_others_of_its_space_orphaned"
+
+[[mutant]]
+name = "species-hold-matches-sites"
+path = "crates/ng-contract/src/compile.rs"
+old = '''
+        && hold.species == pool.species
+        && schema.anatomy.in_set(hold.sites).contains(&pool.site)
+'''
+new = '''
+        && hold.species == pool.species
+'''
+test = "-p ng-contract --test held a_hold_by_site_set_holds_its_species_only_at_the_sites_of_its_set"
+
+[[mutant]]
+name = "species-hold-holds-something"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if !rows.amounts.iter().any(|pool| names(hold, schema, pool)) {'''
+new = '''if false && !rows.amounts.iter().any(|pool| names(hold, schema, pool)) {'''
+test = "-p ng-contract --test held a_species_hold_that_names_no_pool_is_refused"
+
+[[mutant]]
+name = "species-hold-sealed"
+path = "crates/ng-contract/src/scope.rs"
+old = '''
+        if !pools.is_empty() {
+            out.number(u64::MAX);
+'''
+new = '''
+        if false {
+            out.number(u64::MAX);
+'''
+test = "-p ng-contract --lib a_species_hold_seals_after_a_tag_and_a_card_without_one_seals_only_its_older_fields"
+
+[[mutant]]
+name = "species-hold-tag-only-when-held"
+path = "crates/ng-contract/src/scope.rs"
+old = '''
+        if !pools.is_empty() {
+            out.number(u64::MAX);
+'''
+new = '''
+        {
+            out.number(u64::MAX);
+'''
+test = "-p ng-contract --lib a_species_hold_seals_after_a_tag_and_a_card_without_one_seals_only_its_older_fields"
+
+[[mutant]]
+name = "species-hold-sorted"
+path = "crates/ng-contract/src/scope.rs"
+old = '''
+        holds.dedup();
+        pools.sort_unstable();
+'''
+new = '''
+        holds.dedup();
+'''
+test = "-p ng-contract --test held the_model_hash_seals_each_species_hold_and_not_the_order_they_are_written_in"
+
+[[mutant]]
+name = "v-besides-seals-as-beds"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''            Sites::Besides(tissue) => (6, tissue as u64),'''
+new = '''            Sites::Besides(tissue) => (5, tissue as u64),'''
+test = "-p ng-contract --lib each_kind_of_site_set_seals_to_two_words_of_its_own"
+
+[[mutant]]
+name = "v-besides-argument-unsealed"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''            Sites::Besides(tissue) => (6, tissue as u64),'''
+new = '''            Sites::Besides(_) => (6, 0),'''
+test = "-p ng-contract --lib each_kind_of_site_set_seals_to_two_words_of_its_own"
+
+[[mutant]]
+name = "v-class-argument-unsealed"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''            Sites::Class(class) => (0, class as u64),'''
+new = '''            Sites::Class(_) => (0, 0),'''
+test = "-p ng-contract --lib each_kind_of_site_set_seals_to_two_words_of_its_own"
+
+[[mutant]]
+name = "v-blood-seals-as-class"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''            Sites::Blood => (1, 0),'''
+new = '''            Sites::Blood => (0, 0),'''
+test = "-p ng-contract --lib each_kind_of_site_set_seals_to_two_words_of_its_own"
+
+[[mutant]]
+name = "v-urinary-seals-as-blood"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''            Sites::Urinary => (2, 0),'''
+new = '''            Sites::Urinary => (1, 0),'''
+test = "-p ng-contract --lib each_kind_of_site_set_seals_to_two_words_of_its_own"
+
+[[mutant]]
+name = "v-airway-seals-as-alimentary"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''            Sites::Airway => (4, 0),'''
+new = '''            Sites::Airway => (3, 0),'''
+test = "-p ng-contract --lib each_kind_of_site_set_seals_to_two_words_of_its_own"
+
+[[mutant]]
+name = "v-tag-only-up-to-two-holds"
+path = "crates/ng-contract/src/scope.rs"
+old = '''
+        if !pools.is_empty() {
+            out.number(u64::MAX);
+'''
+new = '''
+        if !pools.is_empty() && pools.len() <= 2 {
+            out.number(u64::MAX);
+'''
+test = "-p ng-contract --lib a_species_hold_seals_after_a_tag_and_a_card_without_one_seals_only_its_older_fields"
+
+[[mutant]]
+name = "v-count-sealed-as-two-at-most"
+path = "crates/ng-contract/src/scope.rs"
+old = '''            out.length(pools.len());'''
+new = '''            out.length(pools.len().min(2));'''
+test = "-p ng-contract --lib a_species_hold_seals_after_a_tag_and_a_card_without_one_seals_only_its_older_fields"
+
+[[mutant]]
+name = "v-species-hold-written-twice-kept"
+path = "crates/ng-contract/src/scope.rs"
+old = '''
+        holds.dedup();
+        pools.sort_unstable();
+        pools.dedup();
+'''
+new = '''
+        holds.dedup();
+        pools.sort_unstable();
+'''
+test = "-p ng-contract --test held a_species_hold_written_twice_seals_as_one"
+
+[[mutant]]
+name = "v-whole-space-holder-hides-a-species-holder"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        .filter(|card| card.holds.contains(&pool.space) || named(card))'''
+new = '''        .filter(|card| card.holds.contains(&pool.space) || (named(card) && !held.iter().any(|other| other.holds.contains(&pool.space))))'''
+test = "-p ng-contract --test held a_species_hold_cannot_share_a_pool_with_another_cards_whole_space_hold_in_either_order"
+
+[[mutant]]
+name = "held-nothing-names-the-species"
+path = "crates/ng-contract/src/compile.rs"
+old = '''                species: Some(hold.species),'''
+new = '''                species: None,'''
+test = "-p ng-contract --test held a_species_hold_that_names_no_pool_is_refused_and_named"
+
+[[mutant]]
+name = "held-twice-names-the-species"
+path = "crates/ng-contract/src/compile.rs"
+old = '''
+            space: pool.space,
+            species: pool.species,
+        }),
+'''
+new = '''
+            space: pool.space,
+            species: Species::Water,
+        }),
+'''
+test = "-p ng-contract --test held two_cards_cannot_hold_one_species_where_their_site_sets_overlap"
+
+[[mutant]]
+name = "held-cards-end-the-model-stream"
+path = "crates/ng-contract/src/conservation.rs"
+old = '''
+        combinations.seal(out);
+        coverage.seal(out);
+'''
+new = '''
+        coverage.seal(out);
+        combinations.seal(out);
+'''
+test = "-p ng-contract --lib the_held_cards_end_the_model_hashs_stream_and_a_list_length_follows_them_in_the_basis_digest"
+
+[[mutant]]
 name = "outside-issued-once"
 path = "crates/ng-contract/src/scope/outside.rs"
 old = '''None => (self.issue_outside::<S>()?, Vec::new()),'''

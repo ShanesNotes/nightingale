@@ -346,7 +346,7 @@ The heat store of the containment root, the site that stands for the whole body.
 A space the schema states this body does not model, with its reason, such as cell water in a bench with no cell-water law. Its pools are not amounts, and no law may move or read them. Every other pool is an amount some transfer must move or a held declaration holds; one that neither covers is an orphan pool, which compilation refuses.
 
 **Held pool**:
-A pool a held stand-in answers for: an amount in the state and the ledger that no law moves. One card holds it, and a law that moves it is refused.
+A pool a held stand-in answers for: an amount in the state and the ledger that no law moves. One card holds it, and a law that moves it is refused. A card holds every pool of a kind of space, or the pools of one species in one space at the sites of one site set. So two cards may hold one species on two site sets that share no site, and a law can take over a species at some sites while it stays held at the rest.
 
 **Partial volume**:
 The volume one unit amount of a species takes up. A space's volume derives from its amounts through it. Water's is a fixed coefficient of the schema. Albumin's is a parameter a wall's law reads, and a small ion takes up none.
@@ -657,7 +657,7 @@ A system's laws that stand in for physiology, held by a declaration that names e
 _Avoid_: stub, mock
 
 **Coverage manifest**:
-The compiled list of which conserved combinations close inside the slice and which rest on held stand-ins: each held declaration with its routes, spaces and validity, each route's columns, and each held pool with its own combination.
+The compiled list of which conserved combinations close inside the slice and which rest on held stand-ins: each held declaration with its routes, the spaces it holds at every site, the species it holds by site set, and its validity, each route's columns, and each held pool with its own combination.
 
 **Held support**:
 What a held stand-in moves across the boundary on one route. The certificate reports, for each route, the most any window carried into and out of the body.
