@@ -1,7 +1,6 @@
 use super::table::Release::{self, Kept, Ticket};
 use ng_contract::*;
 
-/// A fluid route whose law keeps species back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FluidRoute {
     Starling,
@@ -63,8 +62,7 @@ const RN: &str = Renal::CARD;
 const MT: &str = Metabolism::CARD;
 use FluidRoute::{Filtration, Lymph, Starling};
 
-/// `crates/ng-fluids/src/starling.rs`, `lymph.rs` and `crates/ng-renal/src/filtration.rs`, line for line, with the
-/// ticket body 01 gives each crossing. Filtration's are kept where body 01 puts no urinary pool of the species.
+/// `crates/ng-fluids/src/starling.rs`, `lymph.rs` and `crates/ng-renal/src/filtration.rs`, line for line.
 pub const KEEP_BACKS: &[KeepBack] = &[
     line::<Vasopressin>(Starling, Kept),
     line::<Oxygen>(Starling, Ticket(8, MT)),

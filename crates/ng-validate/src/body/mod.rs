@@ -11,8 +11,6 @@ pub use table::{HOLD_TABLE, Held, Hold, Release};
 
 use ng_contract::*;
 
-/// The slice's exits: the bladder drains in proportion to what it holds past a rest, and the core store loses heat in
-/// proportion to what it holds, until tickets 22 and 12.
 fn exits(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let (mut laws, ports) = body.boundary()?.parts();
     let urine = ports.route::<Water>("urine")?.route;
@@ -46,7 +44,7 @@ fn exits(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     Ok(())
 }
 
-/// The composition root of the whole body: the slice's systems on body 01's map, and every other card held.
+/// The composition root of the whole body: the slice's systems, and every other card held.
 pub fn whole_body() -> Result<CompiledBody, AdmissionError> {
     assemble(body_schema()?, |mut body| {
         holds::hold_every_card(&mut body)?;

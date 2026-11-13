@@ -1,9 +1,6 @@
 use super::FIXED;
 use ng_contract::*;
 
-/// Cell water, sodium and potassium until FL's cell membrane laws (15, 17), the cell anion for good, and the acid
-/// books' pools until ticket 18: the diet base and the fixed acid outside the liver's cells, and ammonium and its
-/// amino acids in the peritubular bed's cells, whose law is RN's, a slice card that cannot hold.
 pub(super) fn blood_chemistry(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let declaration = HeldDeclaration::<BloodChemistry>::new(Vec::new(), Vec::new(), FIXED)
         .pool::<Water, CapillaryBed>(Space::Cells)

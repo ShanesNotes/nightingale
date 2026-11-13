@@ -23,8 +23,6 @@ constant_routes! {Endocrine;
 const SECRETION: &str = <Secretion<Vasopressin> as BoundaryProcess>::NAME;
 const CLEARANCE: &str = <Clearance<Vasopressin> as BoundaryProcess>::NAME;
 
-/// The slice's vasopressin: secretion follows the central veins' sodium concentration on a logistic, clearance is
-/// first order.
 fn vasopressin<'b>(
     laws: &mut FragmentBuilder<'b, Endocrine>,
     ports: &HeldPorts<'b, Endocrine>,
@@ -68,8 +66,6 @@ fn vasopressin<'b>(
     Ok(())
 }
 
-/// Each hormone's secretion and clearance, and each hormone in the interstitium, which the capillary wall keeps
-/// back until its ticket.
 pub(super) fn endocrine(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let supplies = [CONSTANT, &[SECRETION, CLEARANCE]].concat();
     let declaration = HeldDeclaration::<Endocrine>::new(supplies, Vec::new(), FIXED)

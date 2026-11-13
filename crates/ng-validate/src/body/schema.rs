@@ -101,10 +101,6 @@ pub fn body_schema() -> Result<Schema, AdmissionError> {
     Ok(schema)
 }
 
-/// The meal's twelve routes into the portal vein (01:876), the slice's skin water, drain and heat exit, and each
-/// typed process where 01:51-314 and 01:603-611 put it. Model defaults where body 01 names a site and no space: the
-/// insulin first pass at the liver bed's plasma, and the skin's water and salt exits at the skin bed's interstitium,
-/// as the slice's skin water.
 fn boundaries(schema: &mut Schema) -> Result<(), AdmissionError> {
     let portal = site::<VesselSegment>("portal vein")?;
     let into = BoundaryDirection::IntoBody;

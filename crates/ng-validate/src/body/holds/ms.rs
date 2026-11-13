@@ -3,8 +3,6 @@ use ng_contract::*;
 
 const SKIN_WATER: &str = "skin water";
 
-/// The slice's skin water, which wanders smoothly with time, and its stir, the replay gates' chance fixture
-/// (01:651). Muscle and bone's stores and the minerals outside cells wait for tickets 16 and 19.
 pub(super) fn musculoskeletal(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let declaration = HeldDeclaration::<Musculoskeletal>::new(vec![SKIN_WATER], Vec::new(), FIXED)
         .pool::<Magnesium, CapillaryBed>(Space::Cells)

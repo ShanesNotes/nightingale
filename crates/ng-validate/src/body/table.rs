@@ -1,11 +1,9 @@
 use ng_contract::*;
 
-/// What a held card stands behind in place of a law.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Held {
     /// A boundary route its stand-in serves.
     Route(&'static str),
-    /// One species in one space at the sites of one set.
     Pool(Species, Space, Sites),
 }
 
@@ -17,8 +15,6 @@ pub enum Release {
     Kept,
 }
 
-/// One row of the whole body's to-do list: the card that holds, what it holds, what the hold fixes in place of the
-/// law, what releases it, and body 01's line.
 #[derive(Clone, Copy, Debug)]
 pub struct Hold {
     pub card: &'static str,
@@ -82,8 +78,7 @@ const fn pool<Q: Substance, C: SiteSet>(
 use Release::{Kept, Ticket};
 use Space::{Cells, Gas, Interstitium};
 
-/// Every hold of the whole body, by card. Its rows equal the compiled body's coverage manifest, so its length is
-/// what the later tickets have left to release.
+/// Every hold of the whole body, by card. Its rows equal the compiled body's coverage manifest.
 pub const HOLD_TABLE: &[Hold] = &[
     route(RS, "inspired oxygen", CONSTANT, Ticket(10, RS), "01:128"),
     route(RS, "inspired carbon dioxide", CONSTANT, Ticket(10, RS), "01:149"),

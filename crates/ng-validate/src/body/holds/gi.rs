@@ -15,7 +15,6 @@ constant_routes! {Gastrointestinal;
     Feces<Iron> => "gi.feces-iron",
 }
 
-/// The slice's absorption law: a basal rate plus the meal's delivery, straight into the portal vein.
 fn absorption<'b, Q: Substance>(
     laws: &mut FragmentBuilder<'b, Gastrointestinal>,
     ports: &HeldPorts<'b, Gastrointestinal>,
@@ -34,7 +33,6 @@ fn absorption<'b, Q: Substance>(
     Ok(())
 }
 
-/// No food leaves the stomach until ticket 13's emptying, so each gut lumen pool moves along the gut at a zero rate.
 fn still<'b, Q: Ingested>(
     laws: &mut FragmentBuilder<'b, Gastrointestinal>,
     ports: &GastrointestinalPorts<'b>,

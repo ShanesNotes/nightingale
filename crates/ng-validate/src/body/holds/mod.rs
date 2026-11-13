@@ -6,8 +6,6 @@ fn hours() -> Result<RateClass, AdmissionError> {
     RateClass::new(RateBand::Hours, 3_600_000_000_000)
 }
 
-/// Each typed process a held card serves, at a constant rate from a packet parameter named for its card and process,
-/// so the packet chooses it.
 macro_rules! constant_routes {
     ($card:ty; $($process:ty => $key:literal),+ $(,)?) => {
         const CONSTANT: &[&str] = &[$(<$process as BoundaryProcess>::NAME),+];
@@ -61,7 +59,6 @@ fn enclosure_law<'b, S: OutsideSlice>(
     Ok(())
 }
 
-/// Every card outside the slice, each held whole or keeping the holds its ticket has not released.
 pub(super) fn hold_every_card(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     rs::respiratory(body)?;
     gi::gastrointestinal(body)?;

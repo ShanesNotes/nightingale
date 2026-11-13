@@ -6,8 +6,6 @@ constant_routes! {Hematology;
     HemoglobinDestruction => "hc.hemoglobin-destruction",
 }
 
-/// Red cell mass made and lost, and iron outside blood at the two beds that store it, until ticket 21. Blood
-/// carries iron, so its blood pools are moved (01:306 against 01:334).
 pub(super) fn hematology(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let declaration = HeldDeclaration::<Hematology>::new(CONSTANT.to_vec(), Vec::new(), FIXED)
         .pool::<Iron, Beds<Liver>>(Space::Cells)

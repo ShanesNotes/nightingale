@@ -440,7 +440,6 @@ fn the_hold_table_is_the_compiled_bodys_coverage_manifest_row_for_row() -> Resul
     Ok(())
 }
 
-/// Each typed process, where body 01 puts it: (name, site, space, line).
 const PROCESSES: &[(&str, &str, Space, &str)] = &[
     ("insulin secretion", "portal vein", Space::Lumen, "01:605"),
     ("glucagon secretion", "portal vein", Space::Lumen, "01:605"),
@@ -602,9 +601,6 @@ fn each_of_the_49_processes_moves_the_pool_body_01_puts_it_at() -> Result<(), Ad
     Ok(())
 }
 
-/// 01:38: FL owns every crossing of the capillary wall and the cell membrane but the gases' (MT's), the fuels' at the
-/// cell membrane (MT's, and HP's at the liver), iron's at the liver and gut beds' cells (HC's) and the minerals' at
-/// the bone bed's cells (MS's).
 fn fl_owns(wall: &str, species: Species, bed: &str) -> bool {
     use Species::*;
     let gas = matches!(species, Oxygen | CarbonDioxide);
@@ -621,7 +617,6 @@ fn fl_owns(wall: &str, species: Species, bed: &str) -> bool {
     }
 }
 
-/// The laws that cross, and the beds they cross at.
 type Crossed = (BTreeSet<&'static str>, BTreeSet<&'static str>);
 
 #[test]

@@ -12,8 +12,6 @@ constant_routes! {Respiratory;
     AirwayHeat => "rs.airway-heat",
 }
 
-/// The pleural pressure as the slice holds it, the airway's processes, and the alveolar gas, which no law moves
-/// until ticket 10's alveolar exchange.
 pub(super) fn respiratory(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let declaration = HeldDeclaration::<Respiratory>::new(CONSTANT.to_vec(), Vec::new(), FIXED)
         .pool::<Oxygen, Beds<Lung>>(Space::Gas)
