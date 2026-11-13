@@ -1,7 +1,9 @@
+extern crate alloc;
+
+use alloc::collections::BTreeMap;
 use expect_test::expect;
 use ng_contract::*;
 use ng_validate::*;
-use std::collections::BTreeMap;
 
 const BEDS: &[&str] = &[
     "pulmonary bed",
