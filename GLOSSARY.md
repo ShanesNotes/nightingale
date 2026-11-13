@@ -348,6 +348,12 @@ A space the schema states this body does not model, with its reason, such as cel
 **Held pool**:
 A pool a held stand-in answers for: an amount in the state and the ledger that no law moves. One card holds it, and a law that moves it is refused. A card holds every pool of a kind of space, or the pools of one species in one space at the sites of one site set. So two cards may hold one species on two site sets that share no site, and a law can take over a species at some sites while it stays held at the rest.
 
+**Hold table**:
+The whole body's list of what its held cards stand behind: one row for each boundary route a held stand-in serves and each species a card holds on a site set, with what the hold fixes, the ticket and card whose law releases it, and body 01's line. It equals the compiled body's coverage manifest row for row, so its length is the work the later tickets have left.
+
+**Keep-back**:
+A fluid route's statement that its wall stops one species whole, so one end may hold the species and the other not. It lives in the route's own law module, one line a species, and a ticket releases it when its law carries that species across.
+
 **Partial volume**:
 The volume one unit amount of a species takes up. A space's volume derives from its amounts through it. Water's is a fixed coefficient of the schema. Albumin's is a parameter a wall's law reads, and a small ion takes up none.
 

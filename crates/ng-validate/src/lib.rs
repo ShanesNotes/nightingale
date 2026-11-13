@@ -274,7 +274,9 @@ pub use accuracy::{
     AccuracyCase, AccuracyEvidence, AccuracyFailure, AccuracyPolicy, accuracy, observed_order,
 };
 pub use arena::{Arena, ArenaProtocol};
-pub use body::{body_anatomy, body_schema};
+pub use body::{
+    FluidRoute, HOLD_TABLE, Held, Hold, KEEP_BACKS, KeepBack, Release, body_anatomy, body_schema, whole_body,
+};
 pub use burning::BurningBeds;
 pub use certificate::{
     Certificate, CertificateCheck, CertificateFailure, CertificatePolicy, ExpectedDrift, HeldSupport,

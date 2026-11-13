@@ -10,6 +10,12 @@ macro_rules! placements {
     };
 }
 
+macro_rules! processes {
+    ($schema:ident; $($site:ident in $space:ident: [$($process:ty),+ $(,)?];)+) => {
+        $($($schema.process::<$process>($site, Space::$space)?;)+)+
+    };
+}
+
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     Ok(AnatomyBuilder::new().site::<C>(key, at(0.0)?).id())
 }
@@ -91,5 +97,65 @@ pub fn body_schema() -> Result<Schema, AdmissionError> {
     ] {
         schema.pool::<Energy>(heat, Space::Thermal)?;
     }
+    boundaries(&mut schema)?;
     Ok(schema)
+}
+
+fn boundaries(schema: &mut Schema) -> Result<(), AdmissionError> {
+    let portal = site::<VesselSegment>("portal vein")?;
+    let into = BoundaryDirection::IntoBody;
+    schema.boundary::<Water>("gut water", into, portal, Space::Lumen)?;
+    schema.boundary::<Sodium>("gut sodium", into, portal, Space::Lumen)?;
+    schema.boundary::<Potassium>("gut potassium", into, portal, Space::Lumen)?;
+    schema.boundary::<Chloride>("gut chloride", into, portal, Space::Lumen)?;
+    schema.boundary::<Glucose>("gut glucose", into, portal, Space::Lumen)?;
+    schema.boundary::<Triglyceride>("gut triglyceride", into, portal, Space::Lumen)?;
+    schema.boundary::<AminoAcids>("gut amino acids", into, portal, Space::Lumen)?;
+    schema.boundary::<DietBase>("gut diet base", into, portal, Space::Lumen)?;
+    schema.boundary::<Calcium>("gut calcium", into, portal, Space::Lumen)?;
+    schema.boundary::<Phosphate>("gut phosphate", into, portal, Space::Lumen)?;
+    schema.boundary::<Magnesium>("gut magnesium", into, portal, Space::Lumen)?;
+    schema.boundary::<Iron>("gut iron", into, portal, Space::Lumen)?;
+    let out = BoundaryDirection::OutOfBody;
+    let muscle = site::<CapillaryBed>("muscle bed")?;
+    schema.boundary::<Water>("skin water", out, muscle, Space::Interstitium)?;
+    schema.drain("urine", site::<VesselSegment>("bladder")?, Space::Lumen)?;
+    schema.boundary::<Energy>("heat", out, site::<TissueSite>("body")?, Space::Thermal)?;
+
+    let veins = site::<VesselSegment>("central veins")?;
+    let glomerular = site::<CapillaryBed>("glomerular bed")?;
+    let lung = site::<CapillaryBed>("pulmonary bed")?;
+    let liver = site::<CapillaryBed>("liver bed")?;
+    let gut = site::<CapillaryBed>("gut bed")?;
+    let intestine = site::<VesselSegment>("small intestine")?;
+    let skin = site::<CapillaryBed>("skin bed")?;
+    let skin_heat = site::<TissueSite>("skin heat site")?;
+    let airway = site::<TissueSite>("conducting airway")?;
+    processes! {schema;
+        portal in Lumen: [Secretion<Insulin>, Secretion<Glucagon>];
+        glomerular in Plasma: [Secretion<Renin>];
+        lung in Plasma: [AngiotensinIIMade];
+        veins in Lumen: [
+            Clearance<Insulin>, Clearance<Glucagon>, Clearance<Renin>, Clearance<AngiotensinII>,
+            Secretion<Aldosterone>, Clearance<Aldosterone>, Secretion<NatriureticPeptide>,
+            Clearance<NatriureticPeptide>, Secretion<ParathyroidHormone>, Clearance<ParathyroidHormone>,
+            Secretion<Cortisol>, Clearance<Cortisol>, Secretion<Vasopressin>, Clearance<Vasopressin>,
+            HemoglobinProduction
+        ];
+        liver in Plasma: [InsulinFirstPass, AlbuminSynthesis, AlbuminLoss];
+        liver in Cells: [FixedAcidMade];
+        gut in Plasma: [HemoglobinDestruction];
+        intestine in Lumen: [
+            Feces<Water>, Feces<Sodium>, Feces<Potassium>, Feces<Chloride>, Feces<Glucose>, Feces<Triglyceride>,
+            Feces<AminoAcids>, Feces<Calcium>, Feces<Phosphate>, Feces<Magnesium>, Feces<Iron>
+        ];
+        skin in Interstitium: [SkinEvaporation, Sweat<Water>, Sweat<Sodium>, Sweat<Chloride>];
+        skin_heat in Thermal: [DryHeatLoss, SkinEvaporativeHeat];
+        airway in Gas: [
+            Inspired<Oxygen>, Inspired<CarbonDioxide>, Inspired<NitrogenGas>, Expired<Oxygen>,
+            Expired<CarbonDioxide>, Expired<NitrogenGas>, Expired<Water>
+        ];
+        airway in Thermal: [AirwayHeat];
+    }
+    Ok(())
 }

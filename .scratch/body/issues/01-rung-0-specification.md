@@ -143,7 +143,7 @@ Pass 1. Ventilation under the central chemoreflex controls it, reading the acidi
 | Term | Kind | Where | Law | Owner | Ticket |
 |---|---|---|---|---|---|
 | carbon dioxide made | made | cells of every bed | the bed's oxidation reaction | MT | 09 |
-| tissue store | moves | cells and interstitium of every bed | the carbon dioxide a bed makes fills the bed's tissue water, and diffusion across both walls empties it into blood | MT | 09 |
+| tissue store | moves | cells and interstitium of every bed | the carbon dioxide a bed makes fills the bed's tissue water, and diffusion across both walls empties it into blood | MT | 08, 09 |
 | carriage | moves | blood | advection, with dissolved, bicarbonate and bound forms as speciation in the strong-ion frame | CV, BC | 08 |
 | alveolar elimination | moves | pulmonary bed plasma to alveolar gas | diffusion across the gas-exchange surface | RS | 10 |
 | inspired carbon dioxide | enters | conducting airway | the room's inspired gas | RS | 10 |
@@ -273,7 +273,7 @@ Pass 2. If research 06 keeps total calcium and phosphate in the lens, they are p
 | meal phosphate | enters | stomach lumen | the meal's delivery | boundary | 05 |
 | meal magnesium | enters | stomach lumen | the meal's delivery | boundary | 05 |
 | mineral absorption | moves | small intestine lumen to portal blood | absorption of a share of each mineral | GI | 19 |
-| circulation and capillary exchange | moves | blood and interstitium | advection, Starling exchange and lymph | CV, FL | 06 |
+| circulation, then capillary exchange | moves | blood, then interstitium | advection; Starling exchange and lymph | CV, FL | 06, 19 |
 | bone partner pool | moves | bone bed cells | fast exchange with bone's partner pool | MS | 19 |
 | cell phosphate and magnesium | moves | cells of every bed | phosphate moves into cells with insulin, and magnesium with the cells' content | FL | 19 |
 | filtration and reclaim | moves | glomerular bed, tubule | filtration, reclaim under parathyroid hormone for calcium, saturable reclaim for phosphate and magnesium | RN | 19 |

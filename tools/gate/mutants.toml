@@ -8,7 +8,7 @@ test = "-p ng-contract --test map_reads a_binding_stands_only_on_its_own_set_of_
 [[mutant]]
 name = "first-wins"
 path = "crates/ng-contract/src/body.rs"
-old = '''if crossed && guard.armed(modes) {'''
+old = '''if crossed && guard.armed(&before) && guard.armed(modes) {'''
 new = '''if crossed {'''
 test = "-p ng-validate --test firing of_two_guards_on_one_variable_only_the_first_fires"
 
@@ -1311,6 +1311,20 @@ new = '''let open = Some(at) != reference && guard.armed(&modes);'''
 test = "-p ng-validate --test firing a_guard_a_firing_arms_waits_for_the_next_step_on_the_ring_and_in_a_run"
 
 [[mutant]]
+name = "firing-arms-in-held-order"
+path = "crates/ng-contract/src/body.rs"
+old = '''if crossed && guard.armed(&before) && guard.armed(modes) {'''
+new = '''if crossed && guard.armed(modes) {'''
+test = "-p ng-contract --lib body::tests::a_firing_moves_the_same_guards_whatever_order_they_are_held_in"
+
+[[mutant]]
+name = "admission-knot-forces-one-turn"
+path = "crates/ng-contract/src/admission/crossings.rs"
+old = '''let forcing = forced.contains(&at);'''
+new = '''let forcing = round == 0 && forced.contains(&at);'''
+test = "-p ng-validate --test wrap_firing the_clock_fires_at_the_wrap_whatever_the_guard_order"
+
+[[mutant]]
 name = "admission-settled-keeps-a-gone-crossing"
 path = "crates/ng-contract/src/admission/crossings.rs"
 old = '''
@@ -2574,3 +2588,44 @@ path = "crates/ng-validate/src/body/schema.rs"
 old = '''Beds<Liver>: Cells, Beds<Gut>: Cells'''
 new = '''Beds<Liver>: Cells, CapillaryBed: Cells'''
 test = "-p ng-validate --test body iron_lives_in_cells_at_the_liver_and_gut_beds_only"
+
+[[mutant]]
+name = "body-hold-table-pinned"
+path = "crates/ng-validate/src/body/table.rs"
+old = '''    pool::<CellAnion, CapillaryBed>(BC, Cells, "a cell amount no law ever moves", Kept, "01:120, 547"),
+'''
+new = ''''''
+test = "-p ng-validate --test body the_hold_table_is_the_compiled_bodys_coverage_manifest_row_for_row"
+
+[[mutant]]
+name = "body-process-sites"
+path = "crates/ng-validate/src/body/schema.rs"
+old = '''        glomerular in Plasma: [Secretion<Renin>];'''
+new = '''        lung in Plasma: [Secretion<Renin>];'''
+test = "-p ng-validate --test body each_of_the_49_processes_moves_the_pool_body_01_puts_it_at"
+
+[[mutant]]
+name = "body-fl-crossings"
+path = "crates/ng-fluids/src/starling.rs"
+old = '''    route.keeps_back::<Oxygen>(fl);
+'''
+new = ''''''
+test = "-p ng-validate --test body fl_crosses_each_wall_with_only_the_species_body_01_gives_it"
+
+[[mutant]]
+name = "body-hold-release-swap"
+path = "crates/ng-validate/src/body/table.rs"
+old = '''    pool::<FattyAcids, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(16, HP), "01:202"),
+    pool::<Glycerol, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(14, HP), "01:204"),'''
+new = '''    pool::<FattyAcids, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(14, HP), "01:202"),
+    pool::<Glycerol, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(16, HP), "01:204"),'''
+test = "-p ng-validate --test body each_hold_names_the_ticket_that_releases_it_and_its_body_01_line"
+
+[[mutant]]
+name = "body-keep-back-release-swap"
+path = "crates/ng-validate/src/body/keep_back.rs"
+old = '''    line::<Glucose>(Starling, Ticket(9, FL)),
+    line::<Triglyceride>(Starling, Kept),'''
+new = '''    line::<Glucose>(Starling, Kept),
+    line::<Triglyceride>(Starling, Ticket(9, FL)),'''
+test = "-p ng-validate --test keep_back each_keep_back_line_names_the_ticket_that_releases_it"
