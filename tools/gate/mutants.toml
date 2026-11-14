@@ -3142,8 +3142,13 @@ test = "-p ng-contract --test map_reads a_law_on_a_set_reads_at_its_own_site_the
 [[mutant]]
 name = "collapse-floor-restored"
 path = "crates/ng-cardiovascular/src/walls.rs"
-old = '''        k.add_from(above, &self.collapsed)'''
-new = '''        above'''
+old = '''
+    let share = k.site_parameter(share);
+    k.scale(below, share)'''
+new = '''
+    let share = k.site_parameter(share);
+    let none = k.subtract(below, below);
+    k.scale(none, share)'''
 test = "-p ng-validate --test veins below_its_unstressed_volume_a_marked_vein_follows_the_closed_form"
 
 [[mutant]]
