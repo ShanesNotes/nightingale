@@ -196,7 +196,8 @@ fn the_first_window_holds_each_core_to_the_references_own_distances() {
         assert!(share > 0.0 && share < 1.0, "{share}");
     }
 
-    // A floor of one millisecond cannot land the stir's constant-rate hazard within the reference's landing distance.
+    // On this slice a floor of one millisecond lands the stir 0.30 ms from the finest reference, past the 0.2 ms
+    // landing distance. Where that lands rests on where the crossing falls on the core's grid.
     let to_a_millisecond = accuracy(&fixed(5 * MILLISECOND, MILLISECOND), &policy);
     assert!(
         matches!(

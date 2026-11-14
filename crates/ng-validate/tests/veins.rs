@@ -96,11 +96,11 @@ fn head_down_at_trunk_minus_a_fifth_runs_past_thirty_seconds_on_the_halved_core(
     );
 }
 
-/// The leg veins sit in no enclosure, so their pressure is `E s`. No requirement bounds heat or muscle work, so the
-/// test holds neither.
+/// The leg veins sit in no enclosure, so their pressure is `E s`. The vein's part of the store has its own test,
+/// `below_its_unstressed_volume_a_marked_veins_part_of_the_store_grows`. No requirement bounds heat or muscle work,
+/// so the test holds neither.
 #[test]
-fn a_vein_below_its_unstressed_volume_holds_a_growing_store_and_the_ledger_closes() {
-    let elastance = 0.4;
+fn a_vein_below_its_unstressed_volume_lowers_its_pressure_as_it_empties_and_the_ledger_closes() {
     let (leg, water) = (
         pressure(vessel("leg veins")),
         lumen(vessel("leg veins"), Species::Water),
@@ -116,24 +116,27 @@ fn a_vein_below_its_unstressed_volume_holds_a_growing_store_and_the_ledger_close
         let held = value(body, session, store);
         let closure = (held - value(body, session, sum)).abs();
         assert!(held > 0.0 && closure <= 1e-6 * held, "{held} {closure}");
-        let (stressed, volume) = (value(body, session, leg) / elastance, value(body, session, water));
-        if stressed < 0.0 {
-            let part = elastance * stressed * stressed / 2.0;
-            collapsed.get_or_insert((volume, part));
+        let (pressure, volume) = (value(body, session, leg), value(body, session, water));
+        if pressure < 0.0 {
+            collapsed.get_or_insert((volume, pressure));
             if volume < emptied.0 {
-                emptied = (volume, part);
+                emptied = (volume, pressure);
             }
         }
     });
-    let (start, start_part) = collapsed.expect("the leg veins went below their unstressed volume");
-    let (least, part) = emptied;
+    let (start, start_pressure) = collapsed.expect("the leg veins went below their unstressed volume");
+    let (least, pressure) = emptied;
     assert!(
-        least < start - 10.0 && part > start_part,
-        "{start} {start_part} {least} {part}"
+        least < start - 10.0 && pressure < start_pressure,
+        "{start} {start_pressure} {least} {pressure}"
     );
 }
 
-fn residual_at(body: &CompiledBody, key: &'static str, volume: f64) -> Result<f64, InitializationFailure> {
+fn residuals_at(
+    body: &CompiledBody,
+    key: &'static str,
+    volume: f64,
+) -> Result<Vec<f64>, InitializationFailure> {
     let (packet, lens) = (arena_packet(body)?, arena_lens(body)?);
     let parameters = body.bind(packet)?;
     let port = BoundaryPort::new(Vec::new())?;
@@ -141,57 +144,87 @@ fn residual_at(body: &CompiledBody, key: &'static str, volume: f64) -> Result<f6
     let system = body.initialization(parameters, port, request)?;
     let mut workspace = system.workspace();
     let at = vessel(key);
-    let (water, albumin, row) = (
+    let (water, albumin) = (
         index(body, lumen(at, Species::Water)),
         index(body, lumen(at, Species::Albumin)),
-        index(body, pressure(at)),
     );
     let held = workspace.unknowns_mut()[albumin];
     let stages = workspace.fitted_slots().start;
     for slot in (0..stages).filter(|slot| slot % body.rows().len() == water) {
         workspace.unknowns_mut()[slot] = volume - ALBUMIN_VOLUME * held;
     }
-    let residuals = system.stage_residuals(&workspace, workspace.legs_of(0)[0])?;
-    Ok(residuals[row])
+    Ok(system
+        .stage_residuals(&workspace, workspace.legs_of(0)[0])?
+        .to_vec())
 }
 
 /// Below `V_u` a marked vein's pressure, less what lies outside it, is `E share (V_u / n) (1 - (V_u / V)^n)` up to
 /// the soft floor's and the soft limit's widths. A stage's row is its value less its law, so the law's change
 /// between two volumes is the residual's fall, and the outside pressure cancels. At `V_u` the stressed volume is
-/// `(1 - share) w / 2`.
+/// `(1 - share) w / 2`. The staged workspace reads the junction's effect as one, so the leg veins, which a nerve
+/// reaches, stand at `V_u` 566 - 200 = 366 mL.
 #[test]
 fn below_its_unstressed_volume_a_marked_vein_follows_the_closed_form() -> Result<(), InitializationFailure> {
     let body = arena_body()?;
-    let (elastance, unstressed) = (0.1, 300.0);
-    let rest = residual_at(&body, "central veins", unstressed)?;
-    for volume in [unstressed / 2.0, unstressed / 4.0] {
-        let wall =
-            rest - residual_at(&body, "central veins", volume)? + elastance * (1.0 - SHARE) * WIDTH / 2.0;
-        let ratio = unstressed / volume;
-        let shrunk = (unstressed / 1.5) * (1.0 - ratio * ratio.sqrt());
-        let closed = elastance * SHARE * shrunk;
-        let (low, high) = (
-            -elastance * SHARE * WIDTH * WIDTH / (4.0 * -shrunk),
-            elastance * WIDTH * WIDTH / (4.0 * (unstressed - volume)),
-        );
-        let gap = wall - closed;
-        assert!(
-            gap > low - 1e-12 && gap < high + 1e-12,
-            "at {volume} mL: {wall} against {closed}"
-        );
+    for (key, elastance, unstressed) in [("central veins", 0.1, 300.0), ("leg veins", 0.4, 366.0)] {
+        let row = index(&body, pressure(vessel(key)));
+        let rest = residuals_at(&body, key, unstressed)?[row];
+        for volume in [unstressed / 2.0, unstressed / 4.0] {
+            let wall =
+                rest - residuals_at(&body, key, volume)?[row] + elastance * (1.0 - SHARE) * WIDTH / 2.0;
+            let ratio: f64 = unstressed / volume;
+            let shrunk = (unstressed / 1.5) * (1.0 - ratio * ratio.sqrt());
+            let closed = elastance * SHARE * shrunk;
+            let (low, high) = (
+                -elastance * SHARE * WIDTH * WIDTH / (4.0 * -shrunk),
+                elastance * WIDTH * WIDTH / (4.0 * (unstressed - volume)),
+            );
+            let gap = wall - closed;
+            assert!(
+                gap > low - 1e-12 && gap < high + 1e-12,
+                "{key} at {volume} mL: {wall} against {closed}"
+            );
+        }
     }
     let (elastance, unstressed) = (1.0, 700.0);
-    let rest = residual_at(&body, "systemic arteries", unstressed)?;
-    let wall = rest - residual_at(&body, "systemic arteries", unstressed / 2.0)? + elastance * WIDTH / 2.0;
+    let row = index(&body, pressure(vessel("systemic arteries")));
+    let rest = residuals_at(&body, "systemic arteries", unstressed)?[row];
+    let wall =
+        rest - residuals_at(&body, "systemic arteries", unstressed / 2.0)?[row] + elastance * WIDTH / 2.0;
     let floor = elastance * smooth_max(-unstressed / 2.0, WIDTH);
     assert!((wall - floor).abs() < 1e-12, "{wall} against the floor {floor}");
+    Ok(())
+}
+
+/// The elastic energy row is its value less the sum of `E s^2 / 2` over the blood sites, so its fall between two
+/// staged volumes of one vein is the growth of that vein's part, which the pressure row's `E s` gives.
+#[test]
+fn below_its_unstressed_volume_a_marked_veins_part_of_the_store_grows() -> Result<(), InitializationFailure> {
+    let body = arena_body()?;
+    let energy = index(&body, algebraic("CV", "elastic energy", Context::Body));
+    let row = index(&body, pressure(vessel("central veins")));
+    let (elastance, unstressed) = (0.1, 300.0);
+    let rest = residuals_at(&body, "central veins", unstressed)?;
+    let at_rest = elastance * (1.0 - SHARE) * WIDTH / 2.0;
+    let mut last = 0.0;
+    for volume in [unstressed / 2.0, unstressed / 4.0] {
+        let staged = residuals_at(&body, "central veins", volume)?;
+        let wall = rest[row] - staged[row] + at_rest;
+        let grown = rest[energy] - staged[energy];
+        let expected = (wall * wall - at_rest * at_rest) / (2.0 * elastance);
+        assert!(
+            grown > last && (grown - expected).abs() <= 1e-9 * expected,
+            "at {volume} mL: the store's part grew {grown} against {expected}"
+        );
+        last = grown;
+    }
     Ok(())
 }
 
 #[test]
 fn a_marked_vein_with_no_volume_is_refused_by_the_collapse() -> Result<(), InitializationFailure> {
     let body = arena_body()?;
-    let refused = residual_at(&body, "central veins", -1.0);
+    let refused = residuals_at(&body, "central veins", -1.0);
     let collapse = LawName {
         owner: "CV",
         local: "vein collapse",

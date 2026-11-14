@@ -14,6 +14,8 @@ Blocked by: none
 
 **The grid and the span.** The contract says the metrics are read at every step of the finest refinement, and an exchange by its net over the coarsest step. Grids of 1.25, 2.5 and 5 ms, and nets over 2.5 and 20 ms, pass the window's lib tests and `tests/window.rs`. On the 5 ms grid the 16 s reference fails from an offset of 3.75 ms. The arena test and the gate were not run on those mutants.
 
+**A floor of one millisecond.** `tests/window.rs` expects the 5 ms core with a 1 ms floor to fail the first slice window. Since [native-contract 42](42-veins-collapse-branch.md)'s part 3 it fails as `TransitionMoved` on the stir, 0.30 ms off against 0.2 ms, where main failed four checks first. Whether the window should refuse a 1 ms floor by rule is open: today that rests on where one crossing falls on the core's grid.
+
 **The whole-beat margin.** Through the real window nothing holds the whole-beat distance's margin: a margin a thousand times larger passes `tests/window.rs`. The lib fixture holds it from both sides. The fixed 5 ms reference with a 300 µs landing floor fails only on the whole-beat check at the head, so it can hold the margin through the real window.
 
 - [ ] A window that starts after admission reads a young net from the total at its own start, and the honest cores pass at starts of 0.75 s, a beat and a posture step after admission. A test holds it before any path builds such a window

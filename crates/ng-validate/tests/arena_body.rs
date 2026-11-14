@@ -878,7 +878,7 @@ fn settled(solved: &Solved, posture: Vec<AuthorizedInput>) -> ([f64; 5], f64) {
 }
 
 fn swing(start: f64, samples: &[(f64, f64, f64)]) -> f64 {
-    let (mut last, mut beat, mut length, mut whole) = (start, 0.0, 0.0, false);
+    let (mut last, mut beat, mut length, mut whole) = (start, 0.0, 0.0, start == 0.0);
     let (mut least, mut most) = (f64::INFINITY, 0.0_f64);
     for &(span, pressure, phase) in samples {
         beat += span * pressure;
@@ -901,6 +901,13 @@ fn a_beat_whose_edge_falls_in_the_first_step_is_counted() {
     let beat = |pressure| [(1.0, pressure, 0.5), (1.0, pressure, 0.9), (1.0, pressure, 0.1)];
     let samples: Vec<_> = [[(1.0, 100.0, 0.1)].as_slice(), &beat(120.0), &beat(90.0)].concat();
     assert_eq!(swing(0.9, &samples), 30.0);
+}
+
+#[test]
+fn a_window_starting_at_a_beat_edge_keeps_its_first_whole_beat() {
+    let beat = |pressure| [(1.0, pressure, 0.5), (1.0, pressure, 0.9), (1.0, pressure, 0.0)];
+    let samples: Vec<_> = [beat(120.0), beat(90.0), beat(90.0)].concat();
+    assert_eq!(swing(0.0, &samples), 30.0);
 }
 
 /// What the contract's 07:00 case checks, by direction, because magnitudes wait for a reviewed packet: at
