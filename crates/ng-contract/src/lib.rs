@@ -425,6 +425,75 @@
 //!     k.at_junction_if_supplied(nerve)
 //! }
 //! ```
+//! Only a vessel segment is marked as a vein.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn mark(map: &mut AnatomyBuilder, bed: &Site<CapillaryBed>) {
+//!     map.vein(bed);
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn mark(map: &mut AnatomyBuilder, segment: &Site<VesselSegment>) {
+//!     map.vein(segment);
+//! }
+//! ```
+//! A law reads across sets only from a set that includes its own.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn blood<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
+//!     collapse: &ReadPort<'b, Cardiovascular, PerSite<Veins, Volume>>) -> Expr<'b, 'k, Cardiovascular, Volume> {
+//!     k.at_site_in(collapse)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn vein<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Veins>,
+//!     water: &ReadPort<'b, Cardiovascular, PerSite<Blood, Water>>) -> Expr<'b, 'k, Cardiovascular, Water> {
+//!     k.at_site_in(water)
+//! }
+//! ```
+//! The same holds for a site parameter.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn blood<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
+//!     share: &SiteParameter<'b, Cardiovascular, Veins, Volume>) -> Expr<'b, 'k, Cardiovascular, Volume> {
+//!     k.site_parameter_in(share)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn vein<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Veins>,
+//!     share: &SiteParameter<'b, Cardiovascular, Blood, Volume>) -> Expr<'b, 'k, Cardiovascular, Volume> {
+//!     k.site_parameter_in(share)
+//! }
+//! ```
+//! Blood includes the marked veins and not every vessel segment.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn segment<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VesselSegment>,
+//!     volume: &ReadPort<'b, Cardiovascular, PerSite<Blood, Volume>>) -> Expr<'b, 'k, Cardiovascular, Volume> {
+//!     k.at_site_in(volume)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn vein<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Veins>,
+//!     volume: &ReadPort<'b, Cardiovascular, PerSite<Blood, Volume>>) -> Expr<'b, 'k, Cardiovascular, Volume> {
+//!     k.at_site_in(volume)
+//! }
+//! ```
+//! Only this crate says which set includes which.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! enum Invented {}
+//! impl Includes<Veins> for Invented {}
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn included<C: SiteSet>() where Blood: Includes<C> {}
+//! included::<Veins>();
+//! ```
 //! A route comes from a scope, whole: a hand-made route does not compile. A binding is a transfer of one ligand between
 //! two pools.
 //! ```compile_fail,E0451

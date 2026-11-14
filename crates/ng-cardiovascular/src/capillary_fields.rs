@@ -8,7 +8,7 @@ pub(crate) fn capillary_fields<'b>(
 ) {
     let fields: CapillaryAndVenousPressure<Defines<'_, Cardiovascular>> = cv.emit();
     let capillary = cv.site_kernel(|mut k| {
-        let value = k.in_blood(pressure);
+        let value = k.at_site_in(pressure);
         k.finish(value, cv.every_mode(), wave)
     });
     cv.define_at(&fields.capillary_pressure, capillary);

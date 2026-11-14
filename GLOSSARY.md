@@ -203,6 +203,9 @@ A closed set of six: capillary bed (a tissue bed), vessel segment, junction, enc
 **Vessel segment**:
 A conducting segment of a flow network between two branch points.
 
+**Vein**:
+A vessel segment on the vascular network that the map marks as a vein, such as the central veins, the femoral veins or the portal vein. The marked veins are a site set, and every vein is a blood site.
+
 **Junction**:
 A neuroeffector junction, where a nerve releases a transmitter that is then cleared. A branch point of a network is not a junction.
 
@@ -253,7 +256,7 @@ One of the 13 body systems in the atlas, such as cardiovascular, fluids, renal o
 What a capillary bed serves: lung, gut, muscle, glomerulus, tubule, brain, heart, liver, fat, skin or bone. The map states it, so a site set can name one tissue's beds, and a split bed keeps its tissue.
 
 **Site set**:
-A site class, or the sites a relation picks across classes: those of one network (blood, the urinary tract, the gut, the airway), or the capillary beds that serve one tissue or any other. A law on a set is still one law.
+A site class, or the sites a relation picks across classes: those of one network (blood, the urinary tract, the gut, the airway), the veins the map marks, or the capillary beds that serve one tissue or any other. A set includes another when every site of the other is one of its own: blood includes the veins and the capillary beds. This is not containment, the part-of tree. A law on a set is still one law.
 
 **Landmark**:
 A place a whole-body law reads by what it is, such as the carotid sinus or the macula densa. The map says where it stands, so the law names no site.
