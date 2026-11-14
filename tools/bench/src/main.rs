@@ -98,18 +98,34 @@ fn arena(arguments: &[String]) {
     let (interval_ms, simulated_s) = (number(0, "a step interval in ms"), number(2, "simulated seconds"));
     let named = arguments.get(1).expect("a core");
     let repeats = u32::try_from(number(3, "repeats")).ok().and_then(NonZeroU32::new);
+    let whole = match arguments.get(4).map(String::as_str) {
+        None | Some("slice") => false,
+        Some("body") => true,
+        Some(other) => panic!("no assembly named {other}"),
+    };
     let clock = HostClock(Instant::now());
-    let body = arena_body().expect("compiled");
+    let body = if whole { whole_body() } else { arena_body() }.expect("compiled");
     let compiled = clock.elapsed_ns().expect("a reading");
     println!("time compile_ms {:.1}", compiled as f64 / 1e6);
+    println!(
+        "work rows {} columns {} jacobian_nonzeros {}",
+        body.rows().len(),
+        body.columns().len(),
+        body.sparsity().unknowns().len()
+    );
     let core = solver(named, interval_ms);
     println!("work core {named}");
     let origin = anchor_moment();
     let end = SimTime::from_ns(origin.nanoseconds() + simulated_s * 1_000 * MS);
+    let (packet, lens) = if whole {
+        (body_packet(&body), body_lens(&body))
+    } else {
+        (arena_packet(&body), arena_lens(&body))
+    };
     let spec = ArenaSpec {
         window: Interval::new(origin, end).expect("a window"),
-        packet: arena_packet(&body).expect("packet"),
-        lens: arena_lens(&body).expect("lens"),
+        packet: packet.expect("packet"),
+        lens: lens.expect("lens"),
         boundary: BoundaryPort::new(Vec::new()).expect("port"),
         seed: arena_seed(),
         repeats: repeats.expect("at least one repeat"),

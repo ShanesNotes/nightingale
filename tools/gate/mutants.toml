@@ -2645,3 +2645,11 @@ old = '''    line::<Glucose>(Starling, Ticket(9, FL)),
 new = '''    line::<Glucose>(Starling, Kept),
     line::<Triglyceride>(Starling, Ticket(9, FL)),'''
 test = "-p ng-validate --test keep_back each_keep_back_line_names_the_ticket_that_releases_it"
+
+[[mutant]]
+name = "body-transit-balanced"
+path = "crates/ng-validate/src/body/holds/gi.rs"
+old = '''        let (up, down, pace) = (k.at_edge(&from), k.at_edge(&to), k.parameter(&pace));
+        let rate = k.relax(up, down, pace);'''
+new = '''        let rate = k.zero::<Rate<Q>>();'''
+test = "-p ng-validate --test body the_gut_transit_reads_both_lumens_so_admission_can_place_each_species_between_them"
