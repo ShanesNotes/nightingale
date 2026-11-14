@@ -446,7 +446,6 @@ impl SliceWindow {
     pub fn first() -> Result<Self, AccuracyFailure> {
         Self::offset(0)
     }
-    /// The window with its grid started `offset_ns` after admission instead of on it.
     pub(crate) fn offset(offset_ns: u64) -> Result<Self, AccuracyFailure> {
         let body = arena_body().map_err(admission)?;
         let (packet, lens) = (
@@ -583,7 +582,7 @@ fn trace(
         beats: Vec::new(),
     };
     let mut next = grid_from.nanoseconds() + policy.grid_ns;
-    let span = (policy.refinements_ns[0] / policy.grid_ns) as usize;
+    let coarsest_steps = (policy.refinements_ns[0] / policy.grid_ns) as usize;
     let mut reached = Vec::new();
     while session.record().accepted().time().nanoseconds() < end + policy.past_end_ns {
         let before = session.record().accepted().modes().to_vec();
@@ -641,7 +640,7 @@ fn trace(
             trace.instants.push(Instant {
                 at,
                 modes: if at == now { after.to_vec() } else { before.clone() },
-                values: over_span(compared.iter().map(read), &mut reached, span),
+                values: over_span(compared.iter().map(read), &mut reached, coarsest_steps),
             });
             next += policy.grid_ns;
         }
@@ -655,16 +654,14 @@ enum Reading {
     Total(Compensated),
 }
 
-/// A level as it stands, and an exchange's net over the `span` instants the instant ends, the coarsest refinement's
-/// step, or since admission while the window is younger. A running total would add up an honest core's own one-sign
-/// error: it failed the 16 s reference at every grid phase measured. A single finest step's net fails an honest core,
-/// since it carries the whole of a valve's offset in timing.
+/// A running total would add up an honest core's own one-sign error: it failed the 16 s reference at every grid phase
+/// measured. A single finest step's net fails an honest core, since it carries the whole of a valve's offset in timing.
 fn over_span(
     readings: impl Iterator<Item = Reading>,
     reached: &mut Vec<Vec<Compensated>>,
-    span: usize,
+    coarsest_steps: usize,
 ) -> Vec<Compensated> {
-    let back = reached.len().checked_sub(span).map(|at| &reached[at]);
+    let back = reached.len().checked_sub(coarsest_steps).map(|at| &reached[at]);
     let mut totals = Vec::new();
     let values = readings
         .map(|reading| match reading {
@@ -815,6 +812,8 @@ mod tests {
         assert_eq!(instants, expected);
     }
 
+    const RUNG_BEAT_ERROR: f64 = 0.03125;
+
     fn one_beat_apart() -> Measured {
         let fixture = TwoReservoirs::closed().expect("the fixture compiles");
         let column = fixture.circulation().expect("a circulation column");
@@ -822,7 +821,10 @@ mod tests {
             &WindowPolicy::of(SECOND),
             vec![Compared::Exchange(column)],
             one_exchange([1.0; 9]),
-            &[&one_exchange(alternating(1.1328125, 0.8828125))],
+            &[&one_exchange(alternating(
+                1.125 + RUNG_BEAT_ERROR / 4.0,
+                0.875 + RUNG_BEAT_ERROR / 4.0,
+            ))],
             SimTime::from_ns(90 * MILLISECOND),
         )
     }
@@ -831,7 +833,6 @@ mod tests {
         [high, low, high, low, high, low, high, low, high]
     }
 
-    /// The rung's beats each net 0.03125 over the finest's, so a beat may stand 0.0625 from it.
     #[test]
     fn a_one_sign_error_inside_every_interval_fails_on_its_whole_beat() {
         let window = one_beat_apart();
@@ -847,9 +848,9 @@ mod tests {
         );
         let both_signs = window.verdict(&one_exchange(alternating(1.15, 0.85)), 0);
         assert!(both_signs.is_ok(), "{both_signs:?}");
-        let inside = window.verdict(&one_exchange([1.015; 9]), 0);
+        let inside = window.verdict(&one_exchange([1.0 + 0.48 * RUNG_BEAT_ERROR; 9]), 0);
         assert!(inside.is_ok(), "{inside:?}");
-        let outside = window.verdict(&one_exchange([1.016; 9]), 0);
+        let outside = window.verdict(&one_exchange([1.0 + 0.52 * RUNG_BEAT_ERROR; 9]), 0);
         assert!(
             matches!(
                 outside,
@@ -946,8 +947,6 @@ mod tests {
         ));
     }
 
-    /// On a 10 ms grid from 2 ms the 5 ms references failed on the tricuspid valve's memory at 3.772 s, and from
-    /// 8 ms `Core::new` failed on stroke work at 2.898 s.
     #[test]
     fn honest_cores_pass_wherever_the_grid_falls_in_the_beat() {
         let scales = |absolute, relative| {
