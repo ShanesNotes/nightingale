@@ -4,7 +4,9 @@ Spec: `crates/ng-contract/src/ring.rs`, `crates/ng-contract/src/elimination.rs` 
 
 Type: task
 
-Status: open
+Status: resolved
+
+Claimed by: nc50-build
 
 Blocked by: none
 
@@ -22,9 +24,43 @@ The nightly full gate runs that test since part 4: about 470 s more on the beeli
 
 This ticket measures and chooses. It names no fix as chosen.
 
-- [ ] The ring solve's share of admission on the whole body is measured on one named build worker, with the update count and each update's linearize and solve seconds
-- [ ] At least two ways to cut it are compared on that body, each with its admission seconds and the same admitted state, and one is chosen with its reasons
-- [ ] The body's test binary costs no more than `tests/arena.rs` on the same worker, so its run test leaves the ignored tier
-- [ ] The slice's model hash, basis and the pins of `crates/ng-validate/tests/trace.rs` stay, and the body's pins in `crates/ng-validate/tests/body_run.rs` stay
+- [x] The ring solve's share of admission on the whole body is measured on one named build worker, with the update count and each update's linearize and solve seconds
+- [x] At least two ways to cut it are compared on that body, each with its admission seconds and the same admitted state, and one is chosen with its reasons
+- [x] The body's test binary costs no more than `tests/arena.rs` on the same worker, so its run test leaves the ignored tier
+- [x] The slice's model hash, basis and the pins of `crates/ng-validate/tests/trace.rs` stay, and the body's pins in `crates/ng-validate/tests/body_run.rs` stay
 
 **Non-goals:** a step's cost in a run, which [body 30](../../body/issues/30-step-plans-on-the-whole-body.md) measures; any change to what admission solves.
+
+## Answer
+
+Chosen: the plan's way T, built in three parts. What admission solves does not change, and every admitted bit holds: the body's seal `c28be00fec6e1426` and the slice's `0b8f63bb10c36e97` read the same in every timed run, and no pin or expect string in `tests/trace.rs` or `tests/body_run.rs` moved.
+
+What the plan found. On the beelink, with census off, the body's admission took 390 to 403 s: the march 30.4 s, then 52 Newton updates, each linearized in 0.19 s and solved in 6.44 s on average (334.7 s in all, 83% of admission). The cost was the memory layout, not the arithmetic: the old solve gathered eight side columns at a time out of a 28 MB row-major matrix, and that gather alone took 27% of a profile. Eleven ways were built and timed on the body and the slice with the same seals; walks that stayed row-major (ways A to C) stayed at 327 to 381 s. The plan, its table, profiles and logs are kept outside the repo with the run's evidence.
+
+What was built, each part a commit that holds every pin:
+
+1. The dense corner eliminates a panel of 16 pivots at a time. Each cell takes the same terms in the same order as a pivot at a time gives it. Held by `ring::tests::a_panel_at_a_time_keeps_every_bit_of_a_pivot_at_a_time`, whose matrices also pivot off the diagonal and keep a later panel's columns zero (rows `panel-order-swapped`, `panel-swap-dropped`, `panel-fill-dropped`).
+2. The walk keeps each group of eight sides together, each group's slab in the block's pivot order, and walks only the rows a nonzero side reaches through a nonzero factor. A row it leaves out takes zero over its pivot, as the full walk gives it, and a value that is not finite sends the group to the full walk. Held by `elimination::tests::each_side_keeps_the_bits_it_had_alone_or_beside_others` (its digest unchanged), `a_group_walks_only_the_rows_its_sides_reach` (row `reach-walks-every-row`), `a_value_that_is_not_finite_takes_the_full_walk_and_keeps_its_bits` (row `walk-never-falls-back`) and `a_negative_zero_side_keeps_its_sign_through_negative_pivots` (rows `reach-ignores-negative-zero` and `skipped-row-plain-zero`). `Reach::of` also refuses a factor that is not finite, a second guard behind `factor`, which refuses that case first. A ring of one leg or of no rows takes the dense path, so the walk needs no refusal for a missing stage plan.
+3. Block 0 orders the side columns by the rows each reaches, and each term of a column `read` names or of a fit goes to its own lane. Held by `ring::tests::a_ring_keeps_the_bits_it_had_on_zeros_of_both_signs`, whose digest is what main's ring gave synthetic rings with zeros of both signs and with one infinite entry, each NaN counted as one pattern (rows `zero-term-skips-the-right-side`, `right-side-skips-seed-zero-term`, `general-never`, `skip-a-read-times-not-finite` and `anchor-skips-not-finite`). It also holds the order: main's natural order and the reach order give the same digest.
+
+Measured on this branch's head against main, one admission and one simulated second of `tools/bench`, alternating, user instructions under `perf stat`. Wall seconds carry the load; each way's instruction counts on the beelink span at most 1.1e6.
+
+| Worker, round | Load (1 min) main / head | Body admission s, main / head | Body instructions, main / head | Slice admission s, main / head | Slice instructions, main / head |
+|---|---|---|---|---|---|
+| beelink 1 | 18.5 / 11.1 | 604.7 / 276.3 | 4.513e12 / 2.206e12 | 15.4 / 14.9 | 149.35e9 / 145.82e9 |
+| beelink 2 | 9.0 / 34.6 | 618.9 / 396.0 | 4.513e12 / 2.206e12 | 11.4 / 19.5 | 149.35e9 / 145.82e9 |
+| beelink 3 | 23.3 / 7.4 | 581.8 / 216.5 | 4.513e12 / 2.206e12 | 22.4 / 9.7 | 149.35e9 / 145.82e9 |
+| ryzen 1 | 10.0 / 12.3 | 555.1 / 366.6 | 4.512e12 / 2.206e12 | 18.4 / 17.7 | 149.34e9 / 145.81e9 |
+
+The body's admission takes 51% fewer instructions and 37% to 63% fewer cycles; the slice's takes 2.4% fewer instructions. Beside the beelink's other seats' jobs (one other seat's job in one slot, the head's own runs in another), wall seconds moved with the load.
+
+The bar. On ryzen, in one job at a load of 8.7 to 9.7 on 12 threads, `tests/arena.rs` took 593 s and the body's run test binary 407 s, so the run test leaves the ignored tier. On the beelink the run test passed at the last code commit in 380 s beside the timing runs.
+
+When the corner becomes the limiter, an estimate from the plan's profile shares and not measured: the corner is dense and grows as the cube of the last block's rows and the fits, 7.0e9 multiply-adds an update today and 6.4% of the profile after the panel. The walk grows near linearly while new rows form new networks. The corner rules at about four to six times today's rows. The next cut there is to reduce the last block's own sparse part before the dense corner, which changes the pivots and so the bits, so it belongs to a later ticket.
+
+Low notes from the independent check. A NaN's own bits are not kept: where two NaNs of different bits meet in one operation, the compiled code picks either, so the digest test counts each NaN as one pattern, and no admitted state holds a NaN. The place of a term of a column `read` names or of a fit among a row's reads of the block before is held only where the term comes last; on a ring `linearize` lays out, a lane takes at most one term and one read a row, and two subtractions from a positive zero commute, so no real ring can tell (mutant `term-before-reads` survives).
+
+Not built, and why: taking held pools' columns out of the sides (no column is zero over a whole block, and taking them out changes the corner's pivots and so the bits); reusing a block's work across updates (each update relinearizes every block); fewer updates from a better start (it moves pins, and the bar is met without it); reusing the slab buffers across blocks (a small follow-up, not timed); threads (none are allowed, and none are needed).
+
+Two mutant rows that replay the run test move to [body 06](../../body/issues/06-whole-body-on-holds.md): `body-trace-pinned` (the afferent filter's start guess moves, so the admitted start and the pins move) and `body-held-pool-guess` (the held-pool assertion's guess moves while the packet's start does not, so that assertion fails by itself). With `tools/mutate.py --only` on ryzen at a load of 8 to 10 on 12 threads they were caught in 248 and 270 s, and inside this branch's proof on ryzen in 278 and 281 s. The run test's baseline took 342 to 365 s there. A replay is one body admission plus a rebuild, and the head's admission took 396 s on the beelink at a load of 34.6, so on a loaded beelink a row would pass the budget of 420 s a cargo test and read UNCLEAR.
+
