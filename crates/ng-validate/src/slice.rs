@@ -1,7 +1,5 @@
 use crate::initialize::{AdmissionSolve, admit_from, solve_admission};
-use crate::{
-    CertificatePolicy, ExpectedDrift, MemoryStore, QuantityPolicy, ReplayCase, SlidingWindows,
-};
+use crate::{CertificatePolicy, ExpectedDrift, MemoryStore, QuantityPolicy, ReplayCase, SlidingWindows};
 use core::cell::RefCell;
 use core::marker::PhantomData;
 use core::num::{NonZeroU32, NonZeroU64};
