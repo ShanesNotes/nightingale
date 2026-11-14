@@ -2766,6 +2766,57 @@ new = '''        let rate = k.zero::<Rate<Q>>();'''
 test = "-p ng-validate --test body the_gut_transit_reads_both_lumens_so_admission_can_place_each_species_between_them"
 
 [[mutant]]
+name = "case-withheld-start-knows-the-inputs"
+path = "crates/ng-validate/src/slice.rs"
+old = '''let inputs = if withheld { Vec::new() } else { self.events()? };'''
+new = '''let inputs = self.events()?;'''
+test = "-p ng-validate --test arena_body one_admission_solve_admits_each_start_to_the_bits_its_own_admission_gives"
+
+[[mutant]]
+name = "case-one-start-for-every-core"
+path = "crates/ng-validate/src/slice.rs"
+old = '''        let resolution = core.resolution().digest();
+        let found =
+            |start: &Start| start.withheld == withheld && start.identity.resolution().digest() == resolution;'''
+new = '''        let found = |start: &Start| start.withheld == withheld;'''
+test = "-p ng-validate --test arena_body one_admission_solve_admits_each_start_to_the_bits_its_own_admission_gives"
+
+[[mutant]]
+name = "case-takes-an-input-before-the-fence"
+path = "crates/ng-validate/src/initialize.rs"
+old = '''if let Some(early) = events.iter().find(|event| event.at() < *fence) {'''
+new = '''if let Some(early) = events.iter().find(|event| event.at() < *origin) {'''
+test = "-p ng-validate --lib a_start_from_the_shared_solve_refuses_an_input_a_nanosecond_before_its_fence_and_takes_one_at_it"
+
+[[mutant]]
+name = "case-refusal-a-nanosecond-short"
+path = "crates/ng-validate/src/initialize.rs"
+old = '''if let Some(early) = events.iter().find(|event| event.at() < *fence) {'''
+new = '''if let Some(early) = events.iter().find(|event| event.at().nanoseconds() + 1 < fence.nanoseconds()) {'''
+test = "-p ng-validate --lib a_start_from_the_shared_solve_refuses_an_input_a_nanosecond_before_its_fence_and_takes_one_at_it"
+
+[[mutant]]
+name = "case-refusal-removed"
+path = "crates/ng-validate/src/initialize.rs"
+old = '''if let Some(early) = events.iter().find(|event| event.at() < *fence) {'''
+new = '''if let Some(early) = events.iter().find(|_| false) {'''
+test = "-p ng-validate --lib a_start_from_the_shared_solve_refuses_an_input_a_nanosecond_before_its_fence_and_takes_one_at_it"
+
+[[mutant]]
+name = "case-fence-a-constant-second"
+path = "crates/ng-validate/src/initialize.rs"
+old = '''let fence = system.fence();'''
+new = '''let fence = SimTime::from_ns(origin.nanoseconds() + 1_000_000_000);'''
+test = "-p ng-validate --test assembly_fence an_assembly_case_places_its_inputs_at_the_fence_its_packets_admission_cycle_sets"
+
+[[mutant]]
+name = "admission-fence-reads-the-anchor"
+path = "crates/ng-contract/src/admission.rs"
+old = '''self.pending.earliest_stamp(self.anchor_moment)'''
+new = '''self.anchor_moment'''
+test = "-p ng-contract --lib the_fence_is_the_earliest_stamp_the_admitted_start_takes_with_a_cycle_and_without"
+
+[[mutant]]
 name = "vein-marks-sealed-when-none"
 path = "crates/ng-contract/src/anatomy.rs"
 old = '''if !veins.is_empty() {'''

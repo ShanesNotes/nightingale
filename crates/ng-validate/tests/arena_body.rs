@@ -1081,3 +1081,49 @@ fn a_slice_window_passes_every_replay_gate_with_the_reference_core() {
     assert_eq!(evidence.of(ReplayGate::Pace).clock(), Some(ClockSource::Scripted));
     assert_eq!(evidence.of(ReplayGate::StepPolicy).tolerance_ns(), Some(floor));
 }
+
+#[test]
+fn one_admission_solve_admits_each_start_to_the_bits_its_own_admission_gives() {
+    let case = SliceCase::new().expect("solved");
+    let starts: [(Box<dyn CoupledSolver>, bool); 4] = [
+        (Box::new(ng_solver::Core::new(10 * MILLISECOND)), false),
+        (Box::new(ng_solver::Core::new(10 * MILLISECOND)), true),
+        (Box::new(ng_solver::Core::new(5 * MILLISECOND)), false),
+        (Box::new(reference(3 * MILLISECOND)), false),
+    ];
+    let body = case.body();
+    for (core, withheld) in &starts {
+        let core = &**core;
+        let shared_links = MemoryStore::default();
+        let shared = match withheld {
+            true => case.admit_withheld(core, &shared_links),
+            false => case.admit(core, &shared_links),
+        };
+        let shared = shared.expect("admitted from the solve");
+        let inputs = if *withheld {
+            Vec::new()
+        } else {
+            case.events().expect("the inputs")
+        };
+        let port = BoundaryPort::new(inputs).expect("a port");
+        let (packet, lens) = (
+            arena_packet(body).expect("a packet"),
+            arena_lens(body).expect("a lens"),
+        );
+        let own_links = MemoryStore::default();
+        let own = admit_at(body, packet, port, core, &lens, anchor_moment(), &own_links).expect("admitted");
+        let (shared, own) = (shared.record(), own.session.record());
+        let resolution = core.resolution().digest();
+        assert_eq!(
+            shared.identity().digest(),
+            own.identity().digest(),
+            "{resolution:?} {withheld}"
+        );
+        assert_eq!(shared.digests(), own.digests(), "{resolution:?} {withheld}");
+        assert_eq!(
+            shared.seal().digest(),
+            own.seal().digest(),
+            "{resolution:?} {withheld}"
+        );
+    }
+}

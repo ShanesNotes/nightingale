@@ -1,3 +1,4 @@
+use core::cell::Cell;
 use core::fmt::Write;
 use core::num::NonZeroU64;
 use expect_test::expect;
@@ -7,6 +8,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
+const PACKET: &str = "65794c8df1131031c5659b9de0a949fcad72dbf2228e22d07483a66040a02929";
+const ADMITTED_SEAL: &str = "1af389e17451eec87befc15c14416a01f310dcdaa30f487b21193990bea57b32";
 
 /// The body's admission costs minutes, so one solve serves every check, each from a checkpoint of the admitted start.
 struct Start {
@@ -97,6 +100,8 @@ fn field(owner: &'static str, local: &'static str, at: Context) -> RowKind {
 fn the_body_admits_at_06_55(start: &Start) {
     let at = start.session().record().accepted().time().nanoseconds();
     assert_eq!(at, (6 * 3_600 + 55 * 60) * SECOND);
+    assert_eq!(hex(start.identity.packet().digest()), PACKET);
+    assert_eq!(hex(start.session().record().seal().digest()), ADMITTED_SEAL);
 }
 
 fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> Session<'_, Running> {
@@ -109,7 +114,7 @@ fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> Se
     let mut session = start.session();
     let admitted = amounts(&session);
     for ((_, kind), amount) in pools.iter().zip(&admitted) {
-        let guess = Compensated::of(&body_start_guess(*kind).expect("a finite guess"));
+        let guess = body_start_guess(*kind).expect("a finite guess");
         assert_eq!(*amount, guess.bits(), "{kind:?} moved at admission");
     }
     for mark in 1..=6 {
@@ -254,6 +259,86 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
          908.059522 ms  arterial pressure 73.854992  right atrial pressure 1.951324  heart rate 0.982016  sympathetic traffic 0.902234  filtration 1.592549  urine 0.020000  wall power 4010.470565  aortic flow 0.000000
         1000.179885 ms  arterial pressure 68.861012  right atrial pressure 2.199761  heart rate 1.020599  sympathetic traffic 0.976716  filtration 1.404097  urine 0.020000  wall power 3214.815454  aortic flow 0.000000
     "#]].assert_eq(&trace);
+}
+
+struct Ticks(Cell<u64>);
+impl WallClock for Ticks {
+    fn elapsed_ns(&self) -> Option<u64> {
+        self.0.set(self.0.get() + 90 * MILLISECOND);
+        Some(self.0.get())
+    }
+    fn source(&self) -> ClockSource {
+        ClockSource::Scripted
+    }
+}
+
+/// Its own solve, so the run test's mutant rows never pay for the gates.
+#[test]
+fn the_whole_body_passes_every_replay_gate() {
+    let case = BodyCase::new().expect("solved");
+    let step = 10 * MILLISECOND;
+    let (first, second) = (
+        move || ng_solver::Core::new(step),
+        move || ng_solver::Core::new(step / 2),
+    );
+    let finest = case.body().longest_step_ns() / 16;
+    let scale = |value| Measure::<Dimensionless>::new(value).expect("finite");
+    let reference = move || {
+        ReferenceIntegrator::new(finest)
+            .with_scales(ErrorScales::uniform(scale(1e9), scale(1.0)).expect("positive"))
+            .with_floor(NonZeroU64::new(100_000).expect("a floor"))
+    };
+    let clock = Ticks(Cell::new(0));
+    let plan = ReplayPlan {
+        clock: &clock,
+        simulated_per_wall: 1,
+        chunks: vec![70 * MILLISECOND, 130 * MILLISECOND + 1],
+        resume_every: 1000,
+        chance: Some(ChancePlan {
+            second_policy: &second,
+            reference: &reference,
+            event_tolerance_ns: 100_000,
+        }),
+    };
+    let evidence = replay_gates(&case, &first, &plan).expect("every gate");
+    let store = MemoryStore::default();
+    let core = first();
+    let withheld = case.admit_withheld(&core, &store).expect("admitted");
+    assert_eq!(withheld.record().identity().digest(), evidence.run());
+    assert_eq!(hex(withheld.record().identity().packet().digest()), PACKET);
+    assert_eq!(hex(withheld.record().seal().digest()), ADMITTED_SEAL);
+    let fence = anchor_moment().nanoseconds() + SECOND;
+    let events = case.events().expect("the inputs");
+    assert_eq!(events.len(), 2);
+    assert!(events.iter().all(|event| event.at().nanoseconds() == fence));
+    let stream = LawName {
+        owner: Musculoskeletal::CARD,
+        local: "stir",
+    };
+    for gate in [
+        ReplayGate::Pace,
+        ReplayGate::Resume,
+        ReplayGate::LateAdmission,
+        ReplayGate::Rewind,
+        ReplayGate::ExtraEvaluation,
+        ReplayGate::StepPolicy,
+        ReplayGate::NonPerturbation,
+    ] {
+        let of = evidence.of(gate);
+        assert_eq!((of.gate(), of.run()), (gate, evidence.run()));
+        assert!(of.runs().len() >= 2, "{gate:?} compared {} runs", of.runs().len());
+        let [stir] = of.fired() else {
+            panic!("{gate:?} fired {:?}", of.fired());
+        };
+        assert_eq!((stir.stream(), stir.ordinal()), (stream, 0), "{gate:?}");
+        assert!(
+            stir.at().nanoseconds() < fence,
+            "{gate:?} stirred at {:?}",
+            stir.at()
+        );
+    }
+    assert_eq!(evidence.of(ReplayGate::Pace).clock(), Some(ClockSource::Scripted));
+    assert_eq!(evidence.of(ReplayGate::StepPolicy).tolerance_ns(), Some(100_000));
 }
 
 #[test]
