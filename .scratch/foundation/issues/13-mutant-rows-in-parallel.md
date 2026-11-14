@@ -2,7 +2,7 @@
 
 Type: task
 Status: open
-Blocked by: none
+Blocked by: parked, see What the plan measured
 
 **What to build:** `40-mutants` runs its rows side by side instead of one after another, and the gate means what it means today. It builds on [ticket 12](12-mutant-baseline-once.md), which changed the same sweep in `tools/mutate.py` and its driver in `tools/gate/gate.py`.
 
@@ -25,3 +25,25 @@ What must not change:
 - [ ] Carried from the check of nightingale#142: a sweep case marks a changed file assume-unchanged after `10-rust` wrote its record, and the sweep then runs every baseline. The case fails when the sweep's second look stops reading the marks
 
 **Non-goals:** changing which rows a proof runs, or any row's test. Sharing a build target between rows or across proofs.
+
+## What the plan measured
+
+The plan is `~/lanes/logs/ng-wave-4/f13/PLAN.md`. It built a sweep that runs its rows in K lanes, each lane with its own extract and its own target, and timed it on the beelink against a serial sweep. The rows were 64, the ten slowest of a proof among them, all in one build job, one run each.
+
+- Serial took 926 and 1,104 s on the same job, 19% apart from the other load alone.
+- The rows phase fell to 0.59 to 0.62 of serial at K=2, 0.44 to 0.53 at K=3 and 0.48 to 0.52 at K=6. Each row slowed as lanes were added: the rows' total seconds grew 1.3 times at K=2, 1.4 to 1.7 at K=3 and 2.5 to 2.9 at K=6, so throughput topped out near 2.1 times serial by K=3.
+- The whole sweep fell only to 0.59 to 0.64 of serial at its best, because the setup did not shrink.
+- Every parallel run gave all 64 rows the serial verdict, by name.
+- The shape it recommends is the seed shape: lane 0 extracts and builds every test once, then copies its extract and target to the other lanes. Its setup stayed 142 to 175 s at every K, against 388 s for K cold builds at K=6, and it peaked at 3.44 GB of memory at K=6 against 5.58 GB.
+
+## Why it is parked
+
+The plan's stop condition was met: no shape halves the sweep's wall time on the beelink at any K tried. The plan infers the cause: the beelink has 8 cores, and a serial row already rebuilds on 3 to 4 threads. Ryzen was not measured. The plan's estimates for a full proof are inferred from the beelink's ratios and are not measured. If ryzen also does not halve, the levers left are calls for the developer reviewer: moving the arena rows to other tests, or grouping rows by mutated file so one rebuild serves several. [Ticket 14](14-slow-mutant-rows-run-long-tests.md) takes the first.
+
+## Hazards the plan found
+
+- `timed-run-knows-no-input` took 149 s alone and 296 to 306 s at K=6 on the beelink, and 280 s serial on ryzen beside a bench. At K=3 on ryzen it would pass 420 s and read UNCLEAR. It fails closed, but load alone would turn proofs red. Measure this row on ryzen at K=2 and 3 beside a bench before setting K.
+- The halving is not shown on ryzen.
+- A Cargo config inside a lane's directory is read by that lane's cargo. The sweep removes the lanes at its start, but the seam check and the writer must name the place.
+- The copy needs a filesystem that shares blocks (btrfs or XFS). On another it copies in full, about 3 GB a lane. Ryzen's filesystem was not read.
+- A row's printed seconds would include the other lanes' load, so a row's time would no longer compare across proofs.
