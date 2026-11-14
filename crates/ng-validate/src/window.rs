@@ -2,7 +2,8 @@ use crate::accuracy::{faulted, net_at};
 use crate::initialize::{admit_start, solved_start};
 use crate::run::advance;
 use crate::{
-    AccuracyFailure, MemoryStore, ReferenceIntegrator, anchor_moment, arena_body, arena_lens, arena_packet,
+    AccuracyFailure, HEART_PHASE, MemoryStore, ReferenceIntegrator, anchor_moment, arena_body, arena_lens,
+    arena_packet,
 };
 use core::num::NonZeroU64;
 use ng_contract::{
@@ -135,11 +136,25 @@ struct Transition {
     at: SimTime,
 }
 
+struct Beat {
+    at: SimTime,
+    totals: Vec<Compensated>,
+}
+
 struct Trace {
     instants: Vec<Instant>,
     transitions: Vec<Transition>,
+    beats: Vec<Beat>,
 }
 impl Trace {
+    fn beat_nets(&self) -> impl Iterator<Item = (SimTime, Vec<Compensated>)> + '_ {
+        self.beats.windows(2).map(|pair| {
+            let nets = (pair[1].totals.iter().zip(&pair[0].totals))
+                .map(|(end, start)| end.minus(*start))
+                .collect();
+            (pair[1].at, nets)
+        })
+    }
     fn apart(&self, target: &Trace) -> usize {
         let other = |(instant, target): &(&Instant, &Instant)| instant.modes != target.modes;
         self.instants.iter().zip(&target.instants).filter(other).count()
@@ -179,10 +194,18 @@ fn larger(one: f64, other: f64) -> f64 {
     if other > one { other } else { one }
 }
 
+fn exchange(quantity: &Compared) -> Option<ColumnId> {
+    match *quantity {
+        Compared::Exchange(column) => Some(column),
+        Compared::Row(_) => None,
+    }
+}
+
 struct Measured {
     compared: Vec<Compared>,
     target: Trace,
     distances: Vec<Compensated>,
+    beat_distances: Vec<Compensated>,
     transition_distances: Vec<(Kind, u64)>,
     most_apart: usize,
     end: SimTime,
@@ -220,6 +243,28 @@ impl Measured {
                 distance.scaled(margin as i64)
             })
             .collect();
+        let exact: Vec<Vec<Compensated>> = target.beat_nets().map(|(_, nets)| nets).collect();
+        let beat_distances = (0..compared.iter().filter_map(exchange).count())
+            .map(|column| {
+                let mut most = Compensated::ZERO;
+                for nets in &exact {
+                    let held = nets[column].abs();
+                    if !held.at_most(most) {
+                        most = held;
+                    }
+                }
+                let mut distance = most.times(&floor);
+                for rung in rungs {
+                    for ((_, nets), exact) in rung.beat_nets().zip(&exact) {
+                        let error = nets[column].minus(exact[column]).abs();
+                        if !error.at_most(distance) {
+                            distance = error;
+                        }
+                    }
+                }
+                distance.scaled(margin as i64)
+            })
+            .collect();
         let transition_distances = (target.kinds().into_iter())
             .map(|kind| {
                 let most = (rungs.iter())
@@ -233,6 +278,7 @@ impl Measured {
         Self {
             compared,
             distances,
+            beat_distances,
             transition_distances,
             most_apart: margin as usize * most_apart,
             target,
@@ -272,6 +318,28 @@ impl Measured {
                 }
             }
         }
+        for ((beat_end, nets), (_, exact)) in run.beat_nets().zip(self.target.beat_nets()) {
+            let columns = self
+                .compared
+                .iter()
+                .filter_map(exchange)
+                .zip(&self.beat_distances);
+            for ((net, exact), (column, distance)) in nets.iter().zip(&exact).zip(columns) {
+                let error = net.minus(*exact).abs();
+                if !error.at_most(*distance) {
+                    return Err(AccuracyFailure::BeatOutside {
+                        case,
+                        beat_end,
+                        column,
+                        error,
+                        distance: *distance,
+                    });
+                }
+                if high(*distance) > 0.0 {
+                    worst = larger(worst, high(error) / high(*distance));
+                }
+            }
+        }
         for kind in run.kinds() {
             let distance_ns = (self.transition_distances.iter())
                 .find(|(known, _)| *known == kind)
@@ -298,6 +366,7 @@ impl Measured {
             compared,
             target,
             distances,
+            beat_distances,
             transition_distances,
             most_apart,
             end,
@@ -313,6 +382,7 @@ impl Measured {
         let Trace {
             instants,
             transitions,
+            beats,
         } = target;
         for Instant { at, modes, values } in instants {
             number(at.nanoseconds());
@@ -327,8 +397,14 @@ impl Measured {
             number(kind.entered as u64);
             number(at.nanoseconds());
         }
-        distances
-            .iter()
+        for Beat { at, totals } in beats {
+            number(at.nanoseconds());
+            totals
+                .iter()
+                .flat_map(|total| total.bits())
+                .for_each(&mut *number);
+        }
+        (distances.iter().chain(beat_distances))
             .flat_map(|distance| distance.bits())
             .for_each(&mut *number);
         for (Kind { mode, entered }, distance_ns) in transition_distances {
@@ -371,9 +447,18 @@ impl SliceWindow {
         let start = solved_start(&body, packet, boundary, &coarse, &lens, anchor_moment())
             .map(Box::new)
             .map_err(AccuracyFailure::Admission)?;
-        let [coarse, middle, finest] =
-            [&coarse, &middle, &finest].map(|reference| trace(&body, &start, &policy, reference));
-        let measured = Measured::new(&policy, compared(&body), finest?, &[&coarse?, &middle?], end());
+        let phase = (body.rows().iter())
+            .find(|row| row.kind() == HEART_PHASE)
+            .ok_or(AccuracyFailure::TooFewBeats)?
+            .id();
+        let finest = trace(&body, &start, &policy, &finest, Edges::PhaseFalls(phase))?;
+        if finest.beat_nets().count() < 2 {
+            return Err(AccuracyFailure::TooFewBeats);
+        }
+        let edges: Vec<SimTime> = finest.beats.iter().map(|beat| beat.at).collect();
+        let [coarse, middle] = [&coarse, &middle]
+            .map(|reference| trace(&body, &start, &policy, reference, Edges::Finest(&edges)));
+        let measured = Measured::new(&policy, compared(&body), finest, &[&coarse?, &middle?], end());
         Ok(Self {
             body,
             start,
@@ -389,7 +474,8 @@ impl SliceWindow {
         core: &dyn CoupledSolver,
         case: usize,
     ) -> Result<Compensated, AccuracyFailure> {
-        let run = trace(&self.body, &self.start, &self.policy, core)?;
+        let edges: Vec<SimTime> = self.measured.target.beats.iter().map(|beat| beat.at).collect();
+        let run = trace(&self.body, &self.start, &self.policy, core, Edges::Finest(&edges))?;
         self.measured.verdict(&run, case)
     }
     /// Everything the window judges by, so two windows that would judge a core apart never share an identity.
@@ -426,13 +512,20 @@ fn compared(body: &CompiledBody) -> Vec<Compared> {
     rows.chain(columns.into_iter().map(Compared::Exchange)).collect()
 }
 
+enum Edges<'a> {
+    PhaseFalls(RowId),
+    Finest(&'a [SimTime]),
+}
+
 fn trace(
     body: &CompiledBody,
     start: &InitialRevision,
     policy: &WindowPolicy,
     core: &dyn CoupledSolver,
+    edges: Edges<'_>,
 ) -> Result<Trace, AccuracyFailure> {
     let compared = compared(body);
+    let exchanges: Vec<ColumnId> = compared.iter().filter_map(exchange).collect();
     let history = MethodHistory::new(core.resolution().policy(), anchor_moment(), Vec::new());
     let start = start.with_history(history);
     let store = MemoryStore::default();
@@ -442,11 +535,16 @@ fn trace(
     let mut trace = Trace {
         instants: Vec::new(),
         transitions: Vec::new(),
+        beats: Vec::new(),
     };
     let mut next = anchor_moment().nanoseconds() + policy.grid_ns;
     let mut reached = vec![Compensated::ZERO; compared.len()];
     while session.record().accepted().time().nanoseconds() < end + policy.past_end_ns {
         let before = session.record().accepted().modes().to_vec();
+        let phase_was = match edges {
+            Edges::PhaseFalls(phase) => high(session.record().accepted().value(phase)),
+            Edges::Finest(_) => 0.0,
+        };
         session = advance(session).map_err(faulted)?;
         let accepted = session.record().accepted();
         let (now, after) = (accepted.time(), accepted.modes());
@@ -458,6 +556,29 @@ fn trace(
         }
         let segment = session.conservation().head().expect("a step was accepted");
         let dense = accepted.last_segment();
+        let beat = |at: SimTime| Beat {
+            at,
+            totals: exchanges
+                .iter()
+                .map(|column| net_at(&segment, *column, at))
+                .collect(),
+        };
+        match edges {
+            Edges::PhaseFalls(phase) => {
+                // The step ends at the firing that resets the phase, so the edge is the step's end.
+                if high(accepted.value(phase)) < phase_was && now.nanoseconds() <= end {
+                    trace.beats.push(beat(now));
+                }
+            }
+            Edges::Finest(instants) => {
+                for at in &instants[trace.beats.len()..] {
+                    if *at > now {
+                        break;
+                    }
+                    trace.beats.push(beat(*at));
+                }
+            }
+        }
         while next <= now.nanoseconds() && next <= end {
             let at = SimTime::from_ns(next);
             // A segment ends at a firing's left limit, so its end instant reads the accepted state, as an
@@ -551,8 +672,10 @@ fn timeline() -> Result<Vec<BoundaryEvent>, AdmissionError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Instant, Kind, Measured, Reading, Trace, Transition, WindowPolicy, over_interval};
-    use crate::AccuracyFailure;
+    use super::{
+        Beat, Compared, Instant, Kind, Measured, Reading, Trace, Transition, WindowPolicy, over_interval,
+    };
+    use crate::{AccuracyFailure, TwoReservoirs};
     use ng_contract::{Compensated, Dimensionless, Measure, SimTime};
 
     const MILLISECOND: u64 = 1_000_000;
@@ -577,6 +700,35 @@ mod tests {
         Trace {
             instants,
             transitions,
+            beats: Vec::new(),
+        }
+    }
+
+    fn value(v: f64) -> Compensated {
+        Compensated::of(&Measure::<Dimensionless>::new(v).expect("finite"))
+    }
+
+    fn one_exchange(nets: [f64; 9]) -> Trace {
+        let (mut total, mut instants, mut beats) = (Compensated::ZERO, Vec::new(), Vec::new());
+        for (net, step) in nets.into_iter().zip(1_u64..) {
+            total = total.plus(value(net));
+            let at = SimTime::from_ns(step * 10 * MILLISECOND);
+            instants.push(Instant {
+                at,
+                modes: vec![0],
+                values: vec![value(net)],
+            });
+            if step % 4 == 1 {
+                beats.push(Beat {
+                    at,
+                    totals: vec![total],
+                });
+            }
+        }
+        Trace {
+            instants,
+            transitions: Vec::new(),
+            beats,
         }
     }
 
@@ -594,7 +746,6 @@ mod tests {
 
     #[test]
     fn an_exchange_is_compared_by_its_net_over_each_interval_and_a_level_as_it_stands() {
-        let value = |v: f64| Compensated::of(&Measure::<Dimensionless>::new(v).expect("finite"));
         let mut reached = [Compensated::ZERO; 2];
         let read =
             |level: f64, total: f64| [Reading::Level(value(level)), Reading::Total(value(total))].into_iter();
@@ -603,6 +754,31 @@ mod tests {
         let expected =
             [(5.0, 1.0), (7.0, 2.0), (7.0, 3.0)].map(|(level, net)| vec![value(level), value(net)]);
         assert_eq!(instants, expected);
+    }
+
+    #[test]
+    fn a_one_sign_error_inside_every_interval_fails_on_its_whole_beat() {
+        let fixture = TwoReservoirs::closed().expect("the fixture compiles");
+        let column = fixture.circulation().expect("a circulation column");
+        let alternating = |high: f64, low: f64| [high, low, high, low, high, low, high, low, high];
+        let window = Measured::new(
+            &WindowPolicy::of(SECOND),
+            vec![Compared::Exchange(column)],
+            one_exchange([1.0; 9]),
+            &[&one_exchange(alternating(1.1, 0.9))],
+            SimTime::from_ns(90 * MILLISECOND),
+        );
+        let one_sign = window.verdict(&one_exchange([1.15; 9]), 0);
+        assert!(
+            matches!(
+                one_sign,
+                Err(AccuracyFailure::BeatOutside { beat_end, column: failed, .. })
+                    if beat_end == SimTime::from_ns(50 * MILLISECOND) && failed == column
+            ),
+            "{one_sign:?}"
+        );
+        let both_signs = window.verdict(&one_exchange(alternating(1.15, 0.85)), 0);
+        assert!(both_signs.is_ok(), "{both_signs:?}");
     }
 
     #[test]

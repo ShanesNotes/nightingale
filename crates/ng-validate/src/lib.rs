@@ -306,3 +306,11 @@ pub use slice::{
 };
 pub use split::{SplitFailure, draw_split_trace, split_gate};
 pub use window::{Compared, SliceWindow, WindowPolicy};
+
+pub(crate) const HEART_PHASE: ng_contract::RowKind = ng_contract::RowKind::Memory(ng_contract::Slot {
+    law: ng_contract::LawName {
+        owner: "CV",
+        local: "phase",
+    },
+    at: ng_contract::Context::Body,
+});

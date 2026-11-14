@@ -697,7 +697,7 @@ _Avoid_: skipped, exempt
 The arena check that runs a solver core on manufactured cases with known answers and against the reference integrator, because a step can close every ledger and still be wrong.
 
 **Slice window**:
-A stretch of the slice that the accuracy gate runs against the reference integrator at three refinements, because it has no closed form. The first is admission, a posture change and a meal. The finest refinement stands for the solution, and a core may stand no further from it, on any compared value or mode transition, than the coarser refinements do.
+A stretch of the slice that the accuracy gate runs against the reference integrator at three refinements, because it has no closed form. The first is admission, a posture change and a meal. The finest refinement stands for the solution, and a core may stand no further from it, on any compared value, whole-beat net or mode transition, than the coarser refinements do.
 
 **Replay gates**:
 The arena checks that pace, resuming, late events, rewinding, extra evaluations and attached observers never change physiology bits, and that a step policy moves no event further from the reference integrator than a declared tolerance.
