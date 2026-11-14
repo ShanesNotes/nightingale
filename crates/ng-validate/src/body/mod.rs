@@ -1,11 +1,13 @@
 mod anatomy;
 mod holds;
 mod keep_back;
+mod packet;
 mod schema;
 mod table;
 
 pub use anatomy::body_anatomy;
 pub use keep_back::{FluidRoute, KEEP_BACKS, KeepBack};
+pub use packet::{body_lens, body_packet, body_start_guess};
 pub use schema::body_schema;
 pub use table::{HOLD_TABLE, Held, Hold, Release};
 

@@ -275,7 +275,8 @@ pub use accuracy::{
 };
 pub use arena::{Arena, ArenaProtocol};
 pub use body::{
-    FluidRoute, HOLD_TABLE, Held, Hold, KEEP_BACKS, KeepBack, Release, body_anatomy, body_schema, whole_body,
+    FluidRoute, HOLD_TABLE, Held, Hold, KEEP_BACKS, KeepBack, Release, body_anatomy, body_lens, body_packet,
+    body_schema, body_start_guess, whole_body,
 };
 pub use burning::BurningBeds;
 pub use certificate::{
@@ -306,3 +307,11 @@ pub use slice::{
 };
 pub use split::{SplitFailure, draw_split_trace, split_gate};
 pub use window::{Compared, SliceWindow, WindowPolicy};
+
+pub(crate) const HEART_PHASE: ng_contract::RowKind = ng_contract::RowKind::Memory(ng_contract::Slot {
+    law: ng_contract::LawName {
+        owner: "CV",
+        local: "phase",
+    },
+    at: ng_contract::Context::Body,
+});

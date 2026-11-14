@@ -4,7 +4,7 @@ Type: task
 Status: open
 Blocked by: 05, 06, 26, `.scratch/research/issues/13-law-forms-gut-and-fuels.md`
 
-**What to build:** The stomach and the small intestine are lumen spaces. A meal empties from the stomach and is absorbed along the intestine: water, sodium, potassium, chloride, glucose and amino acids into portal blood, and fat by the lymph route. Secretion into the lumen and its reabsorption are one balanced held flow at rung 0. This replaces the stand-in that puts a meal straight into the splanchnic veins. Abdominal pressure stays held.
+**What to build:** The stomach and the small intestine are lumen spaces. A meal empties from the stomach and is absorbed along the intestine: water, sodium, potassium, chloride, glucose and amino acids into portal blood, and fat by the lymph route. Secretion into the lumen and its reabsorption are one balanced held flow at rung 0. This replaces the stand-in that puts a meal straight into the splanchnic veins. Abdominal pressure stays held. Gut motility also replaces the transit stand-in, the balanced exchange between the stomach and the small intestine that [ticket 06](06-whole-body-on-holds.md) set, and removes its parameter `gi.transit-exchange`.
 
 **Releases:** the gastrointestinal card's absorption hold, and coupling arrow 104 (portal delivery to the liver).
 

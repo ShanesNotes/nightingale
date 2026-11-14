@@ -234,6 +234,17 @@ pub enum AccuracyFailure {
         error: Compensated,
         distance: Compensated,
     },
+    /// The first whole beat of a slice window's finest refinement, in time order, over which an exchange's net stood
+    /// further from the finest's than its distance.
+    BeatOutside {
+        case: usize,
+        beat_end: SimTime,
+        column: ColumnId,
+        error: Compensated,
+        distance: Compensated,
+    },
+    /// A slice window's body holds no heart phase, or its finest refinement made fewer than two whole beats.
+    TooFewBeats,
     /// A slice window's run held other modes than the reference's finest refinement at more compared instants than
     /// its window allows.
     ModesApart {

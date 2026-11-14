@@ -33,17 +33,21 @@ fn absorption<'b, Q: Substance>(
     Ok(())
 }
 
-fn still<'b, Q: Ingested>(
+fn exchange<'b, Q: Ingested>(
     laws: &mut FragmentBuilder<'b, Gastrointestinal>,
     ports: &GastrointestinalPorts<'b>,
 ) -> Result<(), AdmissionError> {
     let route = ports.transit::<Q>(laws);
+    let pace = laws
+        .parameter::<Rate<Dimensionless>>(ParameterKey::new("gi.transit-exchange"), Admissible::positive());
     let class = hours()?;
-    let zero = laws.edge_kernel(|mut k| {
-        let zero = k.zero::<Rate<Q>>();
-        k.finish(zero, laws.every_mode(), class)
+    let (from, to) = (route.from_amount::<Q>(), route.to_amount::<Q>());
+    let balanced = laws.edge_kernel(|mut k| {
+        let (up, down, pace) = (k.at_edge(&from), k.at_edge(&to), k.parameter(&pace));
+        let rate = k.relax(up, down, pace);
+        k.finish(rate, laws.every_mode(), class)
     });
-    laws.transfer_along(&route, zero);
+    laws.transfer_along(&route, balanced);
     Ok(())
 }
 
@@ -69,18 +73,18 @@ pub(super) fn gastrointestinal(body: &mut Assembly<'_>) -> Result<(), AdmissionE
     absorption::<Iron>(laws, ports, "gut iron", "gi.basal-iron")?;
     constants(laws, ports)?;
     let (mut laws, ports) = body.gastrointestinal(Some(held))?.parts();
-    still::<Water>(&mut laws, &ports)?;
-    still::<Sodium>(&mut laws, &ports)?;
-    still::<Potassium>(&mut laws, &ports)?;
-    still::<Chloride>(&mut laws, &ports)?;
-    still::<Glucose>(&mut laws, &ports)?;
-    still::<Triglyceride>(&mut laws, &ports)?;
-    still::<AminoAcids>(&mut laws, &ports)?;
-    still::<DietBase>(&mut laws, &ports)?;
-    still::<Calcium>(&mut laws, &ports)?;
-    still::<Phosphate>(&mut laws, &ports)?;
-    still::<Magnesium>(&mut laws, &ports)?;
-    still::<Iron>(&mut laws, &ports)?;
+    exchange::<Water>(&mut laws, &ports)?;
+    exchange::<Sodium>(&mut laws, &ports)?;
+    exchange::<Potassium>(&mut laws, &ports)?;
+    exchange::<Chloride>(&mut laws, &ports)?;
+    exchange::<Glucose>(&mut laws, &ports)?;
+    exchange::<Triglyceride>(&mut laws, &ports)?;
+    exchange::<AminoAcids>(&mut laws, &ports)?;
+    exchange::<DietBase>(&mut laws, &ports)?;
+    exchange::<Calcium>(&mut laws, &ports)?;
+    exchange::<Phosphate>(&mut laws, &ports)?;
+    exchange::<Magnesium>(&mut laws, &ports)?;
+    exchange::<Iron>(&mut laws, &ports)?;
     body.add(laws.finish());
     Ok(())
 }

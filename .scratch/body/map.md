@@ -24,7 +24,7 @@ All 13 systems run at rung 0 in one body, on a synthetic fixture. The body admit
 
 ## Order
 
-Tickets 01, 02, 03, 04, 05, 07, 23, 27 and 29 and research tickets 11 to 15 are resolved. Ticket 06 lands in parts. Parts 1, 2, 3a and 3b are on main, so the whole body compiles on its holds, and part 4 is being planned. Ticket 30 follows 06.
+Tickets 01, 02, 03, 04, 05, 07, 23, 27 and 29 and research tickets 11 to 15 are resolved. Ticket 06 lands in parts. Parts 1 to 3 and the first of part 4 are on main: the whole body compiles on its holds, admits at 06:55, runs its first minute, passes its certificate and holds its own pins. Its replay gates wait on [native-contract 50](../native-contract/issues/50-admission-ring-solve-cost.md), and its keep-back accessor is owed. Ticket 30 follows 06.
 
 | Ticket | Waits for | What it lands |
 |---|---|---|
@@ -34,7 +34,7 @@ Tickets 01, 02, 03, 04, 05, 07, 23, 27 and 29 and research tickets 11 to 15 are 
 | [03](issues/03-whole-body-lists.md) Species, spaces and networks | 01, 02, 29 | The contract's closed lists, grown once |
 | [04](issues/04-scopes-ports-and-census.md) Scopes, ports and a census for each assembly | 03 | Nine systems can declare laws, and no system ticket edits a shared constant |
 | [05](issues/05-the-days-inputs.md) The day's inputs | 03 | The clock, sleep, the room and meals reach the body |
-| [06](issues/06-whole-body-on-holds.md) The whole body on holds | 04, 05 | The second assembly and its hold table |
+| [06](issues/06-whole-body-on-holds.md) The whole body on holds | 04, 05 | The second assembly and its hold table, admitted, run, certified and pinned on its own trace |
 | [07](issues/07-what-limits-the-step.md) What limits the step | nothing | Where a step's cost goes on the slice, and its limiter |
 | [27](issues/27-step-plan.md) A step plan that can reach the speed aim | 07 | Prototypes and a pick, on main before the synthetic day |
 | [30](issues/30-step-plans-on-the-whole-body.md) The step plans measured on the whole body | 06, 27 | Whether ticket 27's pick holds on all 13 systems |
