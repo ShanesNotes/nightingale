@@ -38,7 +38,7 @@ The plan is `~/lanes/logs/ng-wave-4/f13/PLAN.md`. It built a sweep that runs its
 
 ## Why it is parked
 
-The plan's stop condition was met: no shape halves the sweep's wall time on the beelink at any K tried. The plan infers the cause: the beelink has 8 cores, and a serial row already rebuilds on 3 to 4 threads. Ryzen was not measured. The plan's estimates for a full proof are inferred from the beelink's ratios and are not measured. If ryzen also does not halve, the levers left are calls for the developer reviewer: moving the arena rows to other tests, or grouping rows by mutated file so one rebuild serves several. [Ticket 14](14-slow-mutant-rows-run-long-tests.md) takes the first.
+The plan's stop condition was met: no shape halves the sweep's wall time on the beelink at any K tried. The plan infers the cause: the beelink has 8 cores, and a serial row already rebuilds on 3 to 4 threads. Ryzen was not measured. The plan's estimates for a full proof are inferred from the beelink's ratios and are not measured. If ryzen also does not halve, the levers left are moving the arena rows to other tests, or grouping rows by mutated file so one rebuild serves several. [Ticket 14](14-slow-mutant-rows-run-long-tests.md) takes the first.
 
 ## Hazards the plan found
 
