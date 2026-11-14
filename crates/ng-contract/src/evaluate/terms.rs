@@ -1271,7 +1271,9 @@ mod forms {
             };
             assert_eq!(
                 refused(&added),
-                Some(CompileDefect::TermInGuard { variable: cv("valve") })
+                Some(CompileDefect::TermInGuard {
+                    variable: cv("valve")
+                })
             );
         }
     }
