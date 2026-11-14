@@ -81,7 +81,10 @@ impl<'b> Lumen<'b> {
     fn volumes<'k, C: SiteSet>(
         &self,
         k: &mut Kernel<'b, 'k, Cardiovascular, C>,
-    ) -> (Expr<'b, 'k, Cardiovascular, Volume>, Expr<'b, 'k, Cardiovascular, Volume>)
+    ) -> (
+        Expr<'b, 'k, Cardiovascular, Volume>,
+        Expr<'b, 'k, Cardiovascular, Volume>,
+    )
     where
         Blood: Includes<C>,
     {

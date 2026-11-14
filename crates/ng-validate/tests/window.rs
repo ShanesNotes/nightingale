@@ -199,7 +199,10 @@ fn the_first_window_holds_each_core_to_the_references_own_distances() {
     // A floor of one millisecond cannot land the stir's constant-rate hazard within the reference's 0.2 ms.
     let to_a_millisecond = accuracy(&fixed(5 * MILLISECOND, MILLISECOND), &policy);
     assert!(
-        matches!(to_a_millisecond, Err(AccuracyFailure::TransitionMoved { case: 0, .. })),
+        matches!(
+            to_a_millisecond,
+            Err(AccuracyFailure::TransitionMoved { case: 0, .. })
+        ),
         "{to_a_millisecond:?}"
     );
 

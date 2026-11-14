@@ -90,7 +90,10 @@ fn head_down_at_trunk_minus_a_fifth_runs_past_thirty_seconds_on_the_halved_core(
         least = if water < least { water } else { least };
     });
     let first = first.expect("a step");
-    assert!(least > 0.5 * first, "the leg veins fell from {first} to {least} mL");
+    assert!(
+        least > 0.5 * first,
+        "the leg veins fell from {first} to {least} mL"
+    );
 }
 
 /// Below `V_u` the store holds `E s^2 / 2` at a vein, positive and growing as it empties, and the walls' ledger still
@@ -138,7 +141,10 @@ fn a_vein_below_its_unstressed_volume_holds_a_growing_store_and_the_ledger_close
         "leg veins below V_u: {start} mL holding {start_part}, then {least} mL holding {part}; heat {heat}, \
          muscle work {muscle}"
     );
-    assert!(least < start - 10.0 && part > start_part, "{start} {start_part} {least} {part}");
+    assert!(
+        least < start - 10.0 && part > start_part,
+        "{start} {start_part} {least} {part}"
+    );
 }
 
 /// The residual of one vessel's pressure row, with its water set so its volume is `volume`, on the start the
@@ -175,7 +181,8 @@ fn below_its_unstressed_volume_a_marked_vein_follows_the_closed_form() -> Result
     let (elastance, unstressed) = (0.1, 300.0);
     let rest = residual_at(&body, "central veins", unstressed)?;
     for volume in [unstressed / 2.0, unstressed / 4.0] {
-        let wall = rest - residual_at(&body, "central veins", volume)? + elastance * (1.0 - SHARE) * WIDTH / 2.0;
+        let wall =
+            rest - residual_at(&body, "central veins", volume)? + elastance * (1.0 - SHARE) * WIDTH / 2.0;
         let ratio = unstressed / volume;
         let shrunk = (unstressed / 1.5) * (1.0 - ratio * ratio.sqrt());
         let closed = elastance * SHARE * shrunk;
@@ -184,7 +191,10 @@ fn below_its_unstressed_volume_a_marked_vein_follows_the_closed_form() -> Result
             elastance * WIDTH * WIDTH / (4.0 * (unstressed - volume)),
         );
         let gap = wall - closed;
-        assert!(gap > low - 1e-12 && gap < high + 1e-12, "at {volume} mL: {wall} against {closed}");
+        assert!(
+            gap > low - 1e-12 && gap < high + 1e-12,
+            "at {volume} mL: {wall} against {closed}"
+        );
     }
     let (elastance, unstressed) = (1.0, 700.0);
     let rest = residual_at(&body, "systemic arteries", unstressed)?;
