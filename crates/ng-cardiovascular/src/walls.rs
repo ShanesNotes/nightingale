@@ -16,7 +16,7 @@ type Knob<'b, U> = SiteParameter<'b, Cardiovascular, Blood, U>;
 /// empties, so no head drains it dry. The form is the collapse branch of Toro and others 2021 Eqs 3 to 5, read in
 /// volume; its slope at `V_u` is the share, after the collapsed compliance Shi, Lawford and Hose 2011 restate. Neither
 /// gives the numbers. The ratio needs `V_u` above zero, so a marked vein needs `cv.unstressed` above
-/// `cv.unstressed-gain`, or a run refuses by this term's name. Model default.
+/// `cv.unstressed-gain`. Model default.
 fn collapsing<'b, 'k>(
     k: &mut Kernel<'b, 'k, Cardiovascular, Veins>,
     lumen: &Lumen<'b>,
@@ -67,7 +67,6 @@ pub(crate) struct Walls<'b, 'h> {
     collapsed: SiteTerm<'b, Cardiovascular, Veins, Volume>,
     activation: &'h StateSlot<'b, Cardiovascular, Dimensionless>,
 }
-/// What a blood site holds and how much of it stretches the wall, read by the wall law and by a vein's collapse.
 struct Lumen<'b> {
     water: Port<'b, Water>,
     albumin: Port<'b, Albumin>,
@@ -160,7 +159,7 @@ impl<'b, 'h> Walls<'b, 'h> {
     }
     /// `V - V_u`, with `V` the water's volume and the albumin's, `V_u = V_u_base - S E_a1` (research 02), held no
     /// less than zero off the veins: a chamber or a bed below its unstressed volume collapses and sucks nothing in,
-    /// so it cannot pull itself dry. At a marked vein the term `vein collapse` carries it below zero. Model default.
+    /// so it cannot pull itself dry. Model default.
     pub(crate) fn stressed<'k>(
         &self,
         k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,

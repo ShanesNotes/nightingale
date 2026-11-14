@@ -877,9 +877,6 @@ fn settled(solved: &Solved, posture: Vec<AuthorizedInput>) -> ([f64; 5], f64) {
     (sums.map(|sum| sum / total), swing(first, &beats))
 }
 
-/// The largest less the smallest of the pressure's time-weighted mean over each whole beat. A beat ends at the step
-/// where the phase falls, read against the phase the window starts at, so an edge in the first step is kept. The beat
-/// the window's start cuts is not counted.
 fn swing(start: f64, samples: &[(f64, f64, f64)]) -> f64 {
     let (mut last, mut beat, mut length, mut whole) = (start, 0.0, 0.0, false);
     let (mut least, mut most) = (f64::INFINITY, 0.0_f64);

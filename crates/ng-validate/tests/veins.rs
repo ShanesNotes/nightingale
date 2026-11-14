@@ -6,6 +6,7 @@ const SECOND: u64 = 1_000_000_000;
 const MILLISECOND: u64 = 1_000_000;
 const SHARE: f64 = 0.05;
 const WIDTH: f64 = 1.0;
+const ALBUMIN_VOLUME: f64 = 0.05;
 
 fn site<C: SiteClass>(key: &'static str) -> SiteId {
     let origin = || Measure::new(0.0).expect("finite");
@@ -52,7 +53,6 @@ fn head_down(trunk: f64) -> AuthorizedInput {
     AuthorizedInput::from_command_receipt(Digest::of_canonical(b"a test's own command"), event)
 }
 
-/// Admits the slice on the halved core, tilts it head-down at 1 s and hands each accepted step to `each` until `until`.
 fn tilted(trunk: f64, until: u64, mut each: impl FnMut(&CompiledBody, &Session<'_, Running>)) {
     let (store, core) = (MemoryStore::default(), ng_solver::Core::new(10 * MILLISECOND));
     let body = arena_body().expect("compiled");
@@ -96,8 +96,7 @@ fn head_down_at_trunk_minus_a_fifth_runs_past_thirty_seconds_on_the_halved_core(
     );
 }
 
-/// Below `V_u` the store holds `E s^2 / 2` at a vein, positive and growing as it empties, and the walls' ledger still
-/// closes. The leg veins sit in no enclosure, so their pressure is `E s`. What the store gains past its receipts is
+/// The leg veins sit in no enclosure, so their pressure is `E s`. What the store gains past its receipts is
 /// muscle work and what it sheds is heat: printed, because no requirement bounds them.
 #[test]
 fn a_vein_below_its_unstressed_volume_holds_a_growing_store_and_the_ledger_closes() {
@@ -147,8 +146,6 @@ fn a_vein_below_its_unstressed_volume_holds_a_growing_store_and_the_ledger_close
     );
 }
 
-/// The residual of one vessel's pressure row, with its water set so its volume is `volume`, on the start the
-/// initializer guesses.
 fn residual_at(body: &CompiledBody, key: &'static str, volume: f64) -> Result<f64, InitializationFailure> {
     let (packet, lens) = (arena_packet(body)?, arena_lens(body)?);
     let parameters = body.bind(packet)?;
@@ -165,16 +162,16 @@ fn residual_at(body: &CompiledBody, key: &'static str, volume: f64) -> Result<f6
     let held = workspace.unknowns_mut()[albumin];
     let stages = workspace.fitted_slots().start;
     for slot in (0..stages).filter(|slot| slot % body.rows().len() == water) {
-        workspace.unknowns_mut()[slot] = volume - 0.05 * held;
+        workspace.unknowns_mut()[slot] = volume - ALBUMIN_VOLUME * held;
     }
     let residuals = system.stage_residuals(&workspace, workspace.legs_of(0)[0])?;
     Ok(residuals[row])
 }
 
 /// Below `V_u` a marked vein's pressure, less what lies outside it, is `E share (V_u / n) (1 - (V_u / V)^n)` up to
-/// the soft floor's and the soft limit's widths, and at an unmarked vessel it is the floor of main. The power 1.5 is
-/// `r sqrt(r)`. A stage's row is its value less its law, so the law's change between two volumes is the residual's
-/// fall, and the outside pressure cancels. At `V_u` the stressed volume is `(1 - share) w / 2`.
+/// the soft floor's and the soft limit's widths. A stage's row is its value less its law, so the law's change
+/// between two volumes is the residual's fall, and the outside pressure cancels. At `V_u` the stressed volume is
+/// `(1 - share) w / 2`.
 #[test]
 fn below_its_unstressed_volume_a_marked_vein_follows_the_closed_form() -> Result<(), InitializationFailure> {
     let body = arena_body()?;
@@ -204,8 +201,6 @@ fn below_its_unstressed_volume_a_marked_vein_follows_the_closed_form() -> Result
     Ok(())
 }
 
-/// The collapse divides by the volume and takes the logarithm of `V_u / V`, so a marked vein with no volume left, or
-/// with an unstressed volume at or below zero, is refused by the term's own name.
 #[test]
 fn a_marked_vein_with_no_volume_is_refused_by_the_collapse() -> Result<(), InitializationFailure> {
     let body = arena_body()?;
