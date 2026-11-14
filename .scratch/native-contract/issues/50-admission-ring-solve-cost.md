@@ -4,7 +4,9 @@ Spec: `crates/ng-contract/src/ring.rs`, `crates/ng-contract/src/elimination.rs` 
 
 Type: task
 
-Status: open
+Status: claimed
+
+Claimed by: nc50-build
 
 Blocked by: none
 
