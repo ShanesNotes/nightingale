@@ -1,5 +1,5 @@
 use crate::admission::{AdmissionWorkspace, Correction};
-use crate::elimination::Factors;
+use crate::elimination::{Factors, LANES, Marks, Reach};
 use crate::{InitializationSystem, Jacobian};
 
 const ROUNDING: f64 = 8.0 * f64::EPSILON;
@@ -91,20 +91,47 @@ enum Block<'b> {
     Whole(Vec<Vec<f64>>),
 }
 impl Block<'_> {
-    fn solve(&self, sides: &mut [f64], width: usize) {
+    fn reach(&self) -> Option<Reach> {
         match self {
-            Block::Fixed(factors) => factors.solve_sides(sides, width),
+            Block::Fixed(factors) => factors.reach(),
+            Block::Whole(_) => None,
+        }
+    }
+    /// `group` lies in pivot order: `at_row` places each row's side, `at_unknown` each unknown's update.
+    fn solve_group(
+        &self,
+        group: &mut [[f64; LANES]],
+        reach: Option<&Reach>,
+        (at_row, at_unknown): (&[usize], &[usize]),
+        spare: &mut [[f64; LANES]],
+        marks: &mut Marks,
+    ) {
+        match self {
+            Block::Fixed(factors) => factors.solve_pivoted(group, reach, spare, marks),
+            Block::Whole(_) => {
+                let mut sides: Vec<Vec<f64>> = (0..LANES)
+                    .map(|lane| at_row.iter().map(|&at| group[at][lane]).collect())
+                    .collect();
+                for side in &mut sides {
+                    self.solve(side);
+                }
+                for (unknown, &at) in at_unknown.iter().enumerate() {
+                    for (cell, side) in group[at].iter_mut().zip(&sides) {
+                        *cell = side[unknown];
+                    }
+                }
+            }
+        }
+    }
+    fn solve(&self, side: &mut [f64]) {
+        match self {
+            Block::Fixed(factors) => factors.solve(side),
             Block::Whole(inverse) => {
-                let answer = |slot: usize| -> f64 {
-                    let side = sides.iter().skip(slot % width).step_by(width);
-                    inverse[slot / width]
-                        .iter()
-                        .zip(side)
-                        .map(|(cell, value)| cell * value)
-                        .sum()
+                let answer = |row: &Vec<f64>| -> f64 {
+                    row.iter().zip(&*side).map(|(cell, value)| cell * value).sum()
                 };
-                let answers: Vec<f64> = (0..sides.len()).map(answer).collect();
-                sides.copy_from_slice(&answers);
+                let answers: Vec<f64> = inverse.iter().map(answer).collect();
+                side.copy_from_slice(&answers);
             }
         }
     }
@@ -152,7 +179,8 @@ impl InitializationSystem<'_> {
         let system = self;
         let view = ring.view();
         let (size, points) = (system.width(), workspace.leg_count());
-        if points == 1 {
+        let plan = system.stage_plan().filter(|_| points > 1 && size > 0);
+        let Some(plan) = plan else {
             let mut matrix = vec![vec![0.0; right.len() + 1]; right.len()];
             for (row, cells) in matrix.iter_mut().enumerate() {
                 for entry in view.row_offsets()[row]..view.row_offsets()[row + 1] {
@@ -161,7 +189,7 @@ impl InitializationSystem<'_> {
                 cells[right.len()] = right[row];
             }
             return eliminate(matrix);
-        }
+        };
         let border = points * size;
         let fits = right.len() - border;
         let line = |slot: usize| {
@@ -183,43 +211,80 @@ impl InitializationSystem<'_> {
         let seeds = read.len() + fits;
         let width = seeds + 1;
         let mut factors = Vec::with_capacity(last);
-        let (mut before, mut first) = (Vec::new(), Vec::new());
+        let groups = width.div_ceil(LANES);
+        let (at_row, at_unknown) = plan.places();
+        let (mut before, mut first): (Vec<[f64; LANES]>, Vec<[f64; LANES]>) = (Vec::new(), Vec::new());
         let mut anchors = vec![vec![0.0; width]; fits];
+        let mut spare = vec![[0.0; LANES]; size];
+        let mut marks = Marks::new(size);
         for point in 0..last {
             let block = system.block(ring, point);
             let lu = match system.factor(&block) {
                 Ok(factors) => Block::Fixed(factors),
                 Err(_) => Block::Whole(inverse(&block)?),
             };
-            let mut walked = vec![0.0; size * width];
-            for (row, sides) in walked.chunks_mut(width).enumerate() {
-                let slot = point * size + row;
-                sides[seeds] = right[slot];
-                for (place, value) in line(slot).filter(|(place, _)| !own(point).contains(place)) {
-                    if place >= border {
-                        let fit = read.len() + place - border;
-                        for (at, side) in sides.iter_mut().enumerate() {
-                            *side -= value * f64::from(at == fit);
-                        }
-                    } else if point == 0 {
-                        let seed = read.binary_search(&(place - last * size));
-                        for (at, side) in sides.iter_mut().enumerate() {
-                            *side -= value * f64::from(seed == Ok(at));
-                        }
-                    } else {
-                        let earlier = &before[(place - (point - 1) * size) * width..][..width];
-                        for (side, earlier) in sides.iter_mut().zip(earlier) {
-                            *side -= value * earlier;
+            let reach = lu.reach();
+            let foreign: Vec<Vec<(usize, f64)>> = (0..size)
+                .map(|row| {
+                    (line(point * size + row).filter(|(place, _)| !own(point).contains(place))).collect()
+                })
+                .collect();
+            let mut walked = vec![[0.0; LANES]; groups * size];
+            for (group, cells) in walked.chunks_mut(size).enumerate() {
+                let lanes = group * LANES..((group + 1) * LANES).min(width);
+                let holds_right = lanes.contains(&seeds);
+                for (row, entries) in foreign.iter().enumerate() {
+                    let sides = &mut cells[at_row[row]];
+                    if holds_right {
+                        sides[seeds % LANES] = right[point * size + row];
+                    }
+                    for &(place, value) in entries {
+                        if place >= border || point == 0 {
+                            let column = if place >= border {
+                                Ok(read.len() + place - border)
+                            } else {
+                                read.binary_search(&(place - last * size))
+                            };
+                            for (side, at) in sides.iter_mut().zip(lanes.clone()) {
+                                *side -= value * f64::from(column == Ok(at));
+                            }
+                        } else {
+                            let earlier = &before[group * size + at_unknown[place - (point - 1) * size]];
+                            // A seed's or fit's side is a positive zero or not zero, so a finite term over a zero
+                            // read leaves it as it is. The right side's can be a negative zero, and takes every term.
+                            if !holds_right && value.is_finite() && earlier.iter().all(|value| *value == 0.0)
+                            {
+                                continue;
+                            }
+                            for ((side, earlier), _) in sides.iter_mut().zip(earlier).zip(lanes.clone()) {
+                                *side -= value * earlier;
+                            }
                         }
                     }
                 }
+                lu.solve_group(
+                    cells,
+                    reach.as_ref(),
+                    (&at_row, &at_unknown),
+                    &mut spare,
+                    &mut marks,
+                );
             }
-            lu.solve(&mut walked, width);
             for (fit, row) in anchors.iter_mut().enumerate() {
-                for (place, value) in line(border + fit).filter(|(place, _)| own(point).contains(place)) {
-                    let walked = &walked[(place - point * size) * width..][..width];
-                    for (cell, walked) in row.iter_mut().zip(walked) {
-                        *cell += value * walked;
+                let entries: Vec<(usize, f64)> = (line(border + fit)
+                    .filter(|(place, _)| own(point).contains(place)))
+                .map(|(place, value)| (at_unknown[place - point * size], value))
+                .collect();
+                for (group, cells) in walked.chunks(size).enumerate() {
+                    let lanes = group * LANES..((group + 1) * LANES).min(width);
+                    for &(at, value) in &entries {
+                        // An anchor's cell is a positive zero or not zero, so a finite term over a zero read leaves it.
+                        if value.is_finite() && cells[at].iter().all(|value| *value == 0.0) {
+                            continue;
+                        }
+                        for (cell, walked) in row[lanes.clone()].iter_mut().zip(&cells[at]) {
+                            *cell += value * walked;
+                        }
                     }
                 }
             }
@@ -231,15 +296,15 @@ impl InitializationSystem<'_> {
         }
         let corner = size + fits;
         let mut matrix = vec![vec![0.0; corner + 1]; corner];
-        let add = |cells: &mut Vec<f64>, source: &[f64], place: usize, value: f64| {
-            let sides = &source[place * width..][..width];
+        let add = |cells: &mut Vec<f64>, source: &[[f64; LANES]], place: usize, value: f64| {
+            let side = |at: usize| source[at / LANES * size + at_unknown[place]][at % LANES];
             for (at, &seed) in read.iter().enumerate() {
-                cells[seed] += value * sides[at];
+                cells[seed] += value * side(at);
             }
             for fit in 0..fits {
-                cells[size + fit] += value * sides[read.len() + fit];
+                cells[size + fit] += value * side(read.len() + fit);
             }
-            cells[corner] -= value * sides[seeds];
+            cells[corner] -= value * side(seeds);
         };
         for (row, cells) in matrix.iter_mut().enumerate().take(size) {
             let slot = last * size + row;
@@ -284,7 +349,7 @@ impl InitializationSystem<'_> {
                 let foreign = line(slot).filter(|(place, _)| !own(point).contains(place));
                 *cell = right[slot] - foreign.map(|(place, value)| value * update[place]).sum::<f64>();
             }
-            lu.solve(&mut side, 1);
+            lu.solve(&mut side);
             update[point * size..(point + 1) * size].copy_from_slice(&side);
         }
         Ok(update)
@@ -294,6 +359,7 @@ impl InitializationSystem<'_> {
 #[cfg(test)]
 mod tests {
     use super::{Block, ROUNDING, inverse, reduced};
+    use crate::elimination::{LANES, Marks};
     use crate::{Jacobian, UnknownId};
 
     fn reduced_by_pivot(mut matrix: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>, usize> {
@@ -566,14 +632,19 @@ mod tests {
         let sides: Vec<Vec<f64>> = (0..width)
             .map(|side| (0..size).map(|row| value(side, row)).collect())
             .collect();
-        let mut together: Vec<f64> = (0..size * width)
-            .map(|slot| sides[slot % width][slot / width])
-            .collect();
-        whole.solve(&mut together, width);
-        for (at, mut alone) in sides.into_iter().enumerate() {
-            whole.solve(&mut alone, 1);
-            for (row, value) in alone.iter().enumerate() {
-                assert_eq!(value.to_bits(), together[row * width + at].to_bits());
+        let (at_row, at_unknown) = ([2, 0, 3, 1], [1, 3, 0, 2]);
+        let mut group = vec![[0.0; LANES]; size];
+        for (lane, side) in sides.iter().enumerate() {
+            for (row, &value) in side.iter().enumerate() {
+                group[at_row[row]][lane] = value;
+            }
+        }
+        let (mut spare, mut marks) = (vec![[0.0; LANES]; size], Marks::new(size));
+        whole.solve_group(&mut group, None, (&at_row, &at_unknown), &mut spare, &mut marks);
+        for (lane, mut alone) in sides.into_iter().enumerate() {
+            whole.solve(&mut alone);
+            for (unknown, value) in alone.iter().enumerate() {
+                assert_eq!(value.to_bits(), group[at_unknown[unknown]][lane].to_bits());
             }
         }
     }

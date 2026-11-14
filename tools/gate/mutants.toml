@@ -1370,6 +1370,13 @@ new = '''            for pivot in (start..end.min(row)).rev() {'''
 test = "-p ng-contract --lib ring::tests::a_panel_at_a_time_keeps_every_bit_of_a_pivot_at_a_time"
 
 [[mutant]]
+name = "reach-walks-every-row"
+path = "crates/ng-contract/src/elimination.rs"
+old = '''            if values.iter().any(|value| value.to_bits() != 0) {'''
+new = '''            if values.iter().any(|value| value.to_bits() != 0) || true {'''
+test = "-p ng-contract --lib elimination::tests::a_group_walks_only_the_rows_its_sides_reach"
+
+[[mutant]]
 name = "observation-time-mean-counts-samples"
 path = "crates/ng-observe/src/observer.rs"
 old = '''covered: covered.saturating_add(length),'''

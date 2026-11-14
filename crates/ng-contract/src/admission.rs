@@ -1133,6 +1133,10 @@ impl InitializationSystem<'_> {
         }
         Jacobian::of_parts(offsets.to_vec(), unknowns.to_vec(), values)
     }
+    /// The plan each leg's block factors over, where the system is a cycle's.
+    pub(crate) fn stage_plan(&self) -> Option<&Elimination> {
+        self.pattern.as_ref().map(|pattern| &pattern.plan)
+    }
     pub fn factor(&self, block: &Jacobian) -> Result<Factors<'_>, usize> {
         match &self.pattern {
             Some(pattern) => pattern.plan.factor(&block.values),
