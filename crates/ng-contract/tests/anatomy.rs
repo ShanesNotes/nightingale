@@ -619,14 +619,156 @@ fn a_vein_enters_the_digest_and_its_repeat_is_one_fact() -> Result<(), Admission
 
 #[test]
 fn a_vein_off_the_vascular_network_is_refused() -> Result<(), AdmissionError> {
-    let Manufactured { mut map, body, .. } = manufactured()?;
-    let stray = map.site::<VesselSegment>("stray", at(0.0)?);
-    map.contain(body.id(), stray.id());
-    map.vein(&stray);
+    for network in [None, Some(Network::Urinary), Some(Network::Gut)] {
+        let map_with = |marked: bool| -> Result<AnatomyBuilder, AdmissionError> {
+            let Manufactured {
+                mut map, body, first, ..
+            } = manufactured()?;
+            let stray = map.site::<VesselSegment>("stray", at(0.0)?);
+            let lumen = map.site::<VesselSegment>("lumen", at(0.0)?);
+            map.contain(body.id(), stray.id());
+            map.contain(body.id(), lumen.id());
+            match network {
+                Some(Network::Urinary) => map.connect(Network::Urinary, first.id(), stray.id()),
+                Some(network) => map.connect(network, stray.id(), lumen.id()),
+                None => {}
+            }
+            if marked {
+                map.vein(&stray);
+            }
+            Ok(map)
+        };
+        assert!(map_with(false)?.finish().is_ok(), "{network:?}");
+        assert_eq!(
+            map_with(true)?.finish().err(),
+            refused(AnatomyDefect::VeinOffVascularNetwork { site: "stray" }),
+            "{network:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn a_vein_that_only_receives_blood_is_admitted() -> Result<(), AdmissionError> {
+    let Manufactured {
+        mut map,
+        body,
+        vessel,
+        ..
+    } = manufactured()?;
+    let blind = map.site::<VesselSegment>("blind", at(0.0)?);
+    map.contain(body.id(), blind.id());
+    map.connect(Network::Vascular, vessel.id(), blind.id());
+    map.vein(&blind);
+    assert!(map.finish().is_ok());
+    Ok(())
+}
+
+fn ring(tissue: bool, veins: &[&str]) -> Result<Digest, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let body = map.site::<TissueSite>("body", at(0.0)?);
+    let artery = map.site::<VesselSegment>("artery", at(0.0)?);
+    let bed = map.site::<CapillaryBed>("bed", at(0.0)?);
+    let upper = map.site::<VesselSegment>("upper vein", at(0.0)?);
+    let lower = map.site::<VesselSegment>("lower vein", at(0.0)?);
+    let sites = [artery.id(), bed.id(), upper.id(), lower.id()];
+    for (next, &site) in sites.iter().enumerate() {
+        map.contain(body.id(), site);
+        map.connect(Network::Vascular, site, sites[(next + 1) % sites.len()]);
+    }
+    map.unsupplied(&sites);
+    if tissue {
+        map.serves(&bed, Tissue::Muscle);
+    }
+    for &vein in veins {
+        map.vein(if vein == "upper vein" { &upper } else { &lower });
+    }
+    Ok(map.finish()?.digest())
+}
+
+fn number(out: &mut Vec<u8>, number: u64) {
+    out.extend_from_slice(&number.to_be_bytes());
+}
+
+fn site_id(out: &mut Vec<u8>, key: &str, class: Class) {
+    number(out, key.len() as u64);
+    out.extend_from_slice(key.as_bytes());
+    number(out, class as u64);
+}
+
+fn ring_by_hand(tissue: bool, veins: &[&str]) -> Digest {
+    let mut out = Vec::new();
+    let tag = "ng-contract anatomy 1";
+    number(&mut out, tag.len() as u64);
+    out.extend_from_slice(tag.as_bytes());
+    let sites = [
+        ("artery", Class::VesselSegment),
+        ("bed", Class::CapillaryBed),
+        ("body", Class::TissueSite),
+        ("lower vein", Class::VesselSegment),
+        ("upper vein", Class::VesselSegment),
+    ];
+    number(&mut out, sites.len() as u64);
+    for (key, class) in sites {
+        site_id(&mut out, key, class);
+        for _ in 0..3 {
+            number(&mut out, 0);
+        }
+    }
+    let contains: &[u64] = &[0, 2, 1, 2, 3, 2, 4, 2];
+    let vascular: &[u64] = &[0, 1, 1, 4, 3, 0, 4, 3];
+    let none: &[u64] = &[];
+    for (count, pairs) in [(4, contains), (0, none), (0, none), (4, vascular)] {
+        number(&mut out, count);
+        for &index in pairs {
+            number(&mut out, index);
+        }
+    }
+    for _ in 0..5 {
+        number(&mut out, 0);
+    }
+    number(&mut out, 4);
+    for key in ["artery", "bed", "lower vein", "upper vein"] {
+        let class = if key == "bed" {
+            Class::CapillaryBed
+        } else {
+            Class::VesselSegment
+        };
+        site_id(&mut out, key, class);
+    }
+    number(&mut out, 0);
+    if tissue {
+        number(&mut out, u64::MAX);
+        number(&mut out, 1);
+        site_id(&mut out, "bed", Class::CapillaryBed);
+        number(&mut out, Tissue::Muscle as u64);
+    }
+    if !veins.is_empty() {
+        number(&mut out, u64::MAX - 1);
+        number(&mut out, veins.len() as u64);
+        for key in veins {
+            site_id(&mut out, key, Class::VesselSegment);
+        }
+    }
+    Digest::of_canonical(&out)
+}
+
+#[test]
+fn a_marked_map_seals_its_veins_in_key_order_after_its_tissues() -> Result<(), AdmissionError> {
     assert_eq!(
-        map.finish().err(),
-        refused(AnatomyDefect::VeinOffVascularNetwork { site: "stray" })
+        ring(true, &["upper vein", "lower vein"])?,
+        ring_by_hand(true, &["lower vein", "upper vein"])
     );
+    assert_eq!(ring(true, &[])?, ring_by_hand(true, &[]));
+    assert_eq!(
+        ring(false, &["upper vein"])?,
+        ring_by_hand(false, &["upper vein"])
+    );
+    assert_eq!(
+        ring(false, &["lower vein"])?,
+        ring_by_hand(false, &["lower vein"])
+    );
+    assert_ne!(ring(false, &["upper vein"])?, ring(false, &["lower vein"])?);
     Ok(())
 }
 

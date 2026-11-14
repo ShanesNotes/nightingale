@@ -2834,6 +2834,89 @@ test = "-p ng-contract --lib evaluate::terms::a_placed_terms_derivatives_are_the
 [[mutant]]
 name = "a-set-includes-itself"
 path = "crates/ng-contract/src/anatomy.rs"
-old = '''impl<C: SiteSet> Contains<C> for C {}'''
+old = '''impl<C: SiteSet> Includes<C> for C {}'''
 new = ''''''
 test = "-p ng-contract --lib evaluate::terms::a_read_in_its_own_set_writes_the_op_a_plain_read_writes"
+
+[[mutant]]
+name = "vein-tag-is-the-tissue-tag"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''bytes.number(u64::MAX - 1);'''
+new = '''bytes.number(u64::MAX);'''
+test = "-p ng-contract --test anatomy a_marked_map_seals_its_veins_in_key_order_after_its_tissues"
+
+[[mutant]]
+name = "vein-count-not-sealed"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''            bytes.length(veins.len());
+'''
+new = ''''''
+test = "-p ng-contract --test anatomy a_marked_map_seals_its_veins_in_key_order_after_its_tissues"
+
+[[mutant]]
+name = "vein-sealed-by-key-alone"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''vein.seal(&mut bytes);'''
+new = '''bytes.text(vein.key);'''
+test = "-p ng-contract --test anatomy a_marked_map_seals_its_veins_in_key_order_after_its_tissues"
+
+[[mutant]]
+name = "vein-extension-sealed-with-tissues"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''if !veins.is_empty() {'''
+new = '''if !veins.is_empty() || !tissues.is_empty() {'''
+test = "-p ng-contract --test anatomy a_marked_map_seals_its_veins_in_key_order_after_its_tissues"
+
+[[mutant]]
+name = "vein-on-network-only-upstream"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''match (self.veins.iter()).find(|vein| !ends().any(|site| self.key(site) == vein.key)) {'''
+new = '''match (self.veins.iter()).find(|vein| !self.vascular.iter().any(|&(from, _)| self.key(from) == vein.key)) {'''
+test = "-p ng-contract --test anatomy a_vein_that_only_receives_blood_is_admitted"
+
+[[mutant]]
+name = "vein-on-any-network"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''match (self.veins.iter()).find(|vein| !ends().any(|site| self.key(site) == vein.key)) {'''
+new = '''match (self.veins.iter()).find(|vein| {
+            !ends().any(|site| self.key(site) == vein.key)
+                && !(self.others.iter()).any(|&(_, from, to)| from.key == vein.key || to.key == vein.key)
+        }) {'''
+test = "-p ng-contract --test anatomy a_vein_off_the_vascular_network_is_refused"
+
+[[mutant]]
+name = "blood-includes-every-vessel-segment"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''impl Includes<CapillaryBed> for Blood {}'''
+new = '''impl Includes<CapillaryBed> for Blood {}
+impl Includes<VesselSegment> for Blood {}'''
+test = "--doc -p ng-contract"
+
+[[mutant]]
+name = "site-parameter-in-takes-any-set"
+path = "crates/ng-contract/src/law.rs"
+old = '''pub fn site_parameter_in<D: Includes<C>, U: Dimension>('''
+new = '''pub fn site_parameter_in<D: SiteSet, U: Dimension>('''
+test = "--doc -p ng-contract"
+
+[[mutant]]
+name = "at-site-in-reads-at-the-drain"
+path = "crates/ng-contract/src/law.rs"
+old = '''        port: &ReadPort<'b, O, PerSite<D, U>>,
+    ) -> Expr<'b, 'k, O, U> {
+        self.read_at(port.source, Where::Here)'''
+new = '''        port: &ReadPort<'b, O, PerSite<D, U>>,
+    ) -> Expr<'b, 'k, O, U> {
+        self.read_at(port.source, Where::Drain)'''
+test = "-p ng-contract --test map_reads a_law_on_a_set_reads_at_its_own_site_the_entry_and_parameter_of_a_set_that_includes_it"
+
+[[mutant]]
+name = "site-parameter-in-binds-at-the-body"
+path = "crates/ng-contract/src/law.rs"
+old = '''        parameter: &SiteParameter<'b, O, D, U>,
+    ) -> Expr<'b, 'k, O, U> {
+        self.input(Input::SiteParameter(parameter.key))'''
+new = '''        parameter: &SiteParameter<'b, O, D, U>,
+    ) -> Expr<'b, 'k, O, U> {
+        self.input(Input::Parameter(parameter.key))'''
+test = "-p ng-contract --test map_reads a_law_on_a_set_reads_at_its_own_site_the_entry_and_parameter_of_a_set_that_includes_it"

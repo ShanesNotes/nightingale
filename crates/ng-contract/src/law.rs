@@ -4,7 +4,7 @@ use crate::quantity::dimension;
 use crate::scope::ENCLOSURE_PRESSURE;
 use crate::{
     Admissible, AdmissibleSet, AdmissionError, Airway, Alimentary, Basis, Blood, Boundary, CapillaryBed,
-    Conductance, Contains, Deviation, Dimension, Dimensionless, Landmark, Lasting, Length, Metabolism,
+    Conductance, Deviation, Dimension, Dimensionless, Includes, Landmark, Lasting, Length, Metabolism,
     Network, NonMaterial, Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reactant,
     Reference, SameDimension, Sensed, SiteSet, Sites, Space, Species, Substance, Temperature, Time, Urinary,
     ValidityRange, Volume, Water,
@@ -1172,8 +1172,8 @@ impl<'b, 'k, O, C: SiteSet> Kernel<'b, 'k, O, C> {
     pub fn at_site<U: Dimension>(&mut self, port: &ReadPort<'b, O, PerSite<C, U>>) -> Expr<'b, 'k, O, U> {
         self.read_at(port.source, Where::Here)
     }
-    /// This site's entry of a port over a set that contains this kernel's.
-    pub fn at_site_in<D: Contains<C>, U: Dimension>(
+    /// This site's entry of a port over a set that includes this kernel's.
+    pub fn at_site_in<D: Includes<C>, U: Dimension>(
         &mut self,
         port: &ReadPort<'b, O, PerSite<D, U>>,
     ) -> Expr<'b, 'k, O, U> {
@@ -1190,8 +1190,8 @@ impl<'b, 'k, O, C: SiteSet> Kernel<'b, 'k, O, C> {
     ) -> Expr<'b, 'k, O, U> {
         self.input(Input::SiteParameter(parameter.key))
     }
-    /// This site's value of a parameter over a set that contains this kernel's.
-    pub fn site_parameter_in<D: Contains<C>, U: Dimension>(
+    /// This site's value of a parameter over a set that includes this kernel's.
+    pub fn site_parameter_in<D: Includes<C>, U: Dimension>(
         &mut self,
         parameter: &SiteParameter<'b, O, D, U>,
     ) -> Expr<'b, 'k, O, U> {
@@ -1204,7 +1204,7 @@ impl<'b, 'k, O, C: SiteSet> Kernel<'b, 'k, O, C> {
         term: &SiteTerm<'b, O, D, U>,
     ) -> Expr<'b, 'k, O, U>
     where
-        C: Contains<D>,
+        C: Includes<D>,
     {
         let at = self.push(Op::AsDimension([base.at]));
         let term = term.data.clone();
