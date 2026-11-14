@@ -629,8 +629,8 @@ fn check_guards(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     };
     for fragment in fragments {
         if let Some(guard) = fragment.guards.iter().find(|guard| guard.zero.placing.is_some()) {
-            return Err(CompileDefect::NoSuchRead {
-                law: LawName {
+            return Err(CompileDefect::TermInGuard {
+                variable: LawName {
                     owner: fragment.owner,
                     local: fragment.modes[guard.variable].name,
                 },

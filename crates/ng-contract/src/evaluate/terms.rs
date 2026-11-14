@@ -1271,7 +1271,7 @@ mod forms {
             };
             assert_eq!(
                 refused(&added),
-                Some(CompileDefect::NoSuchRead { law: cv("valve") })
+                Some(CompileDefect::TermInGuard { variable: cv("valve") })
             );
         }
     }
