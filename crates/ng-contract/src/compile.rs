@@ -39,7 +39,7 @@ pub(crate) fn compile(
     let unissued = FragmentData::empty(Boundary::CARD);
     let owed = obligations(&fragments, &schema, &held, &unissued)?;
     check_guards(&fragments)?;
-    check_chance(&fragments)?;
+    check_chance(&fragments, &schema.anatomy)?;
     check_volume(&schema, &owed, &fragments)?;
 
     let reaches = Reaches::of(&schema, &fragments);
@@ -628,6 +628,14 @@ fn check_guards(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
         Selector::Only { variable, value } => variable == guard.variable && value == guard.leaves,
     };
     for fragment in fragments {
+        if let Some(guard) = fragment.guards.iter().find(|guard| guard.zero.placing.is_some()) {
+            return Err(CompileDefect::NoSuchRead {
+                law: LawName {
+                    owner: fragment.owner,
+                    local: fragment.modes[guard.variable].name,
+                },
+            });
+        }
         let mut outside: Vec<ModeValue> = (fragment.guards.iter())
             .filter(|guard| !holds(guard))
             .map(|guard| {
@@ -652,7 +660,7 @@ fn check_guards(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     Ok(())
 }
 
-fn check_chance(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
+fn check_chance(fragments: &[FragmentData], anatomy: &Anatomy) -> Result<(), CompileDefect> {
     for fragment in fragments {
         let named = |local| LawName {
             owner: fragment.owner,
@@ -697,7 +705,8 @@ fn check_chance(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
         forcings.sort_unstable();
         for &forcing in &forcings {
             let read = Op::Input(Input::Forcing(forcing));
-            if !(fragment.laws.iter()).any(|law| law.kernel.every_op().contains(&&read)) {
+            let reads = |law: &crate::law::LawDeclaration| law.kernel.judged(anatomy).iter().any(|ops| ops.contains(&&read));
+            if !fragment.laws.iter().any(reads) {
                 return Err(CompileDefect::UnreadForcing {
                     forcing: named(forcing),
                 });
@@ -711,8 +720,10 @@ fn check_volume(schema: &Schema, owed: &[Owed], fragments: &[FragmentData]) -> R
     if schema.partial_volume.is_some() {
         return Ok(());
     }
-    let reads_volume =
-        |kernel: &KernelData| (kernel.every_op().into_iter()).any(|op| matches!(op, Op::Volume(_)));
+    let reads_volume = |kernel: &KernelData| {
+        let judged = kernel.judged(&schema.anatomy);
+        judged.iter().flatten().any(|op| matches!(op, Op::Volume(_)))
+    };
     let laws = (owed.iter())
         .filter(|law| law.laws.iter().any(|(_, kernel)| reads_volume(kernel)))
         .map(|law| law.name);
@@ -1406,7 +1417,8 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
         };
         for &(_, kernel) in &law.laws {
             if let Serves::Boundary(water) = law.serves {
-                let written = (kernel.every_op().into_iter())
+                let judged = kernel.judged(anatomy);
+                let written = (judged.iter().flatten())
                     .filter_map(|op| match op {
                         Op::Input(input) => Some(input),
                         _ => None,
@@ -1430,13 +1442,16 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                 | Input::Memory(_) => Some(true),
                 _ => None,
             };
-            let reads: Vec<bool> = (kernel.every_op().into_iter())
-                .filter_map(|op| match op {
-                    Op::Input(input) => read(input),
-                    _ => None,
-                })
-                .collect();
-            if reads.contains(&false) && !reads.contains(&true) {
+            let unscaled = |ops: &Vec<&Op>| {
+                let reads: Vec<bool> = (ops.iter())
+                    .filter_map(|op| match op {
+                        Op::Input(input) => read(input),
+                        _ => None,
+                    })
+                    .collect();
+                reads.contains(&false) && !reads.contains(&true)
+            };
+            if kernel.judged(anatomy).iter().any(unscaled) {
                 return Err(CompileDefect::UnscaledInput { law: law.name });
             }
             let defined;

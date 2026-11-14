@@ -545,8 +545,8 @@ fn a_terms_unused_invalid_read_is_still_refused() {
 }
 
 /// Ruling 10: a term cannot hide what its host may not read. A draw an algebraic law reads is refused at admission
-/// whether the law reads it by hand or through a term at a marked vein, and a day's input read with no parameter is
-/// refused through a term as by hand.
+/// whether the law reads it by hand or through a term at a marked vein. A day's input a term reads with no parameter
+/// is refused where a vein runs the variant, and with no vein the body is the one with no term.
 #[test]
 fn a_read_main_refuses_by_hand_is_refused_through_a_term() {
     let modes = |case: Case| {
@@ -568,17 +568,19 @@ fn a_read_main_refuses_by_hand_is_refused_through_a_term() {
     assert_eq!(modes(by_hand), refused);
     assert_eq!(modes(PLAIN), refused);
     assert_eq!(modes(Case { marks: &[], ..PLAIN }), None);
-    for marks in [&[][..], &[0]] {
-        let unscaled = compiled(Case {
+    let unscaled = |marks: &'static [usize]| {
+        compiled(Case {
             marks,
             term: Term::Clock,
             ..PLAIN
-        });
-        assert!(matches!(
-            unscaled.err(),
-            Some(AdmissionError::Compile(CompileDefect::UnscaledInput { .. }))
-        ));
-    }
+        })
+        .err()
+    };
+    assert!(matches!(
+        unscaled(&[0]),
+        Some(AdmissionError::Compile(CompileDefect::UnscaledInput { .. }))
+    ));
+    assert_eq!(unscaled(&[]), None);
 }
 
 /// Ruling 5: `at_site_in` on a kernel's own set writes the op `at_site` writes.
@@ -651,10 +653,12 @@ fn a_term_whose_ops_all_merge_into_its_hosts_repeats_the_hosts_law() {
 /// parameter equal those of the same expression written by hand, bit for bit, and the program is the same.
 #[test]
 fn a_placed_terms_derivatives_are_the_hand_written_expressions() {
-    let (placed, [_, _, upper, lower]) = bench(Case {
+    let placed = compiled(Case {
         marks: &[0, 1],
         ..PLAIN
     });
+    assert!(placed.is_ok(), "a variant closes its row as main closes it: {:?}", placed.err());
+    let (placed, [_, _, upper, lower]) = placed.expect("compiled");
     let (by_hand, _) = bench(Case {
         marks: &[0, 1],
         host: Host::ByHand,
@@ -728,4 +732,721 @@ fn a_term_named_as_a_slot_is_refused() {
     .err();
     let twice = AdmissionError::Compile(CompileDefect::NamedTwice { law: cv("level") });
     assert_eq!(named, Some(twice));
+}
+
+/// A term added and its sum thrown away leaves the variant equal to main's program, so a marked vein runs main's
+/// program with main's id.
+#[test]
+fn a_term_whose_sum_is_thrown_away_runs_mains_program_at_a_marked_vein() {
+    let (main, _) = bench(Case { marks: &[0], ..MAIN });
+    let (discarded, _) = bench(Case {
+        host: Host::Discarded,
+        ..PLAIN
+    });
+    assert_eq!(sealed_all(&discarded), sealed_all(&main));
+    assert_eq!(discarded.model_hash(), main.model_hash());
+}
+
+/// Which op a term computes is sealed, not only how many it computes and whose they are.
+#[test]
+fn an_origins_position_is_sealed() {
+    let (body, _) = bench(PLAIN);
+    let program = (body.programs().iter())
+        .find(|program| !program.code.origins.is_empty())
+        .expect("a variant");
+    let code = &program.code;
+    let free = (0..code.ops.len()).find(|at| code.origin(*at).is_none()).expect("a host op");
+    let mut origins = code.origins.clone();
+    origins[0].0 = free;
+    origins.sort_unstable_by_key(|origin| origin.0);
+    let moved = crate::body::Code {
+        ops: code.ops.clone(),
+        dimension: code.dimension.clone(),
+        predicate: code.predicate,
+        rate: code.rate,
+        validity: code.validity.clone(),
+        defines: code.defines,
+        origins,
+    };
+    let seal = |code: &crate::body::Code| {
+        let mut out = crate::identity::Canonical::new("code");
+        crate::identity::Seal::seal(code, &mut out);
+        out.digest()
+    };
+    assert_ne!(seal(&moved), seal(code));
+}
+
+mod forms {
+    use super::*;
+
+    type Cv = Cardiovascular;
+    type K<'b, 'k, S> = Kernel<'b, 'k, Cv, S>;
+    type X<'b, 'k> = Expr<'b, 'k, Cv, Dimensionless>;
+
+    struct Decl<'b> {
+        share: SiteParameter<'b, Cv, Blood, Dimensionless>,
+        t: SiteParameter<'b, Cv, Veins, Dimensionless>,
+        p: Parameter<'b, Cv, Dimensionless>,
+        x: ReadPort<'b, Cv, PerSite<Blood, Dimensionless>>,
+        y: ReadPort<'b, Cv, PerSite<Blood, Dimensionless>>,
+        water: ReadPort<'b, Cv, PerSite<Blood, Water>>,
+        effect: ReadPort<'b, Cv, PerSite<Junction, Dimensionless>>,
+        wobble: Option<Forcing<'b, Cv>>,
+        inner: Vec<SiteTerm<'b, Cv, Veins, Dimensionless>>,
+        veins: Vec<SiteTerm<'b, Cv, Veins, Dimensionless>>,
+    }
+
+    type BloodFn = for<'b, 'k> fn(&mut K<'b, 'k, Blood>, &Decl<'b>) -> X<'b, 'k>;
+    type VeinFn = for<'b, 'k> fn(&mut K<'b, 'k, Veins>, &Decl<'b>) -> X<'b, 'k>;
+
+    #[derive(Clone, Default)]
+    struct Fix {
+        marks: Vec<usize>,
+        no_partial: bool,
+        forcing: bool,
+        spare: Option<VeinFn>,
+        inner: Vec<(&'static str, VeinFn)>,
+        veins: Vec<(&'static str, VeinFn)>,
+        hosts: Vec<(&'static str, BloodFn, bool)>,
+        hands: Vec<(&'static str, VeinFn)>,
+        guard: Option<BloodFn>,
+    }
+
+    fn build(fix: &Fix) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
+        let mut map = AnatomyBuilder::new();
+        let root = map.site::<TissueSite>("body", at());
+        let artery = map.site::<VesselSegment>("artery", at());
+        let bed = map.site::<CapillaryBed>("bed", at());
+        let upper = map.site::<VesselSegment>("upper vein", at());
+        let lower = map.site::<VesselSegment>("lower vein", at());
+        let sites = [artery.id(), bed.id(), upper.id(), lower.id()];
+        for (at, &site) in sites.iter().enumerate() {
+            map.contain(root.id(), site);
+            map.connect(Network::Vascular, site, sites[(at + 1) % sites.len()]);
+        }
+        map.unsupplied(&sites);
+        let veins = [&upper, &lower];
+        for &mark in &fix.marks {
+            map.vein(veins[mark]);
+        }
+        let mut schema = Schema::new(map.finish()?)?;
+        if !fix.no_partial {
+            schema.partial_volume(Measure::new(1.0)?)?;
+        }
+        schema.leave_out(Space::Interstitium, "a bench with no tissue");
+        schema.leave_out(Space::Cells, "a bench with no tissue");
+        let body = assemble(schema, |mut body| {
+            let class = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let route = ports.circulation(&mut cv);
+            let still = cv.edge_kernel(|mut k| {
+                let zero = k.zero::<Rate<Water>>();
+                k.finish(zero, cv.every_mode(), class)
+            });
+            cv.transfer_along(&route, still);
+            let share =
+                cv.site_parameter::<Blood, Dimensionless>(ParameterKey::new("cv.share"), Admissible::finite());
+            let t = cv.site_parameter::<Veins, Dimensionless>(ParameterKey::new("cv.t"), Admissible::finite());
+            let p = cv.parameter::<Dimensionless>(ParameterKey::new("cv.p"), Admissible::finite());
+            let (level, x) = cv.site_field::<Blood, Dimensionless>("level", Admissible::finite());
+            let (depth, y) = cv.site_field::<Blood, Dimensionless>("depth", Admissible::finite());
+            for out in [&level, &depth] {
+                let held = cv.site_kernel(|mut k| {
+                    let value = k.site_parameter(&share);
+                    k.finish(value, cv.every_mode(), class)
+                });
+                cv.define_at(out, held);
+            }
+            let wobble = fix.forcing.then(|| {
+                cv.forcing(
+                    "wobble",
+                    ParameterKey::new("cv.period"),
+                    ParameterKey::new("cv.amplitude"),
+                )
+            });
+            let mut decl = Decl {
+                share,
+                t,
+                p,
+                x,
+                y,
+                water: ports.amount::<Water>(),
+                effect: ports.effect::<Norepinephrine>(),
+                wobble,
+                inner: Vec::new(),
+                veins: Vec::new(),
+            };
+            for (terms, declared) in [(&fix.inner, false), (&fix.veins, true)] {
+                for &(name, shape) in terms {
+                    let term = cv.site_term::<Veins, Dimensionless, _>(name, |mut k| {
+                        let value = shape(&mut k, &decl);
+                        k.finish_term(value)
+                    });
+                    if declared {
+                        decl.veins.push(term);
+                    } else {
+                        decl.inner.push(term);
+                    }
+                }
+            }
+            if let Some(shape) = fix.spare {
+                let _ = cv.site_term::<Veins, Dimensionless, _>("spare", |mut k| {
+                    let value = shape(&mut k, &decl);
+                    k.finish_term(value)
+                });
+            }
+            for &(name, shape, summed) in &fix.hosts {
+                let hosted = cv.site_kernel::<Blood, Dimensionless, _>(|mut k| {
+                    let value = shape(&mut k, &decl);
+                    k.finish(value, cv.every_mode(), class)
+                });
+                if summed {
+                    let total = cv.algebraic::<Dimensionless>(name, Admissible::finite());
+                    let own = cv.kernel(|mut k| {
+                        let value = k.algebraic(&total);
+                        k.finish(value, cv.every_mode(), class)
+                    });
+                    cv.sum_at(&total, own, hosted);
+                } else {
+                    let (probe, _) = cv.site_field::<Blood, Dimensionless>(name, Admissible::finite());
+                    cv.define_at(&probe, hosted);
+                }
+            }
+            for &(name, shape) in &fix.hands {
+                let written = cv.site_kernel::<Veins, Dimensionless, _>(|mut k| {
+                    let value = shape(&mut k, &decl);
+                    k.finish(value, cv.every_mode(), class)
+                });
+                let (probe, _) = cv.site_field::<Veins, Dimensionless>(name, Admissible::finite());
+                cv.define_at(&probe, written);
+            }
+            if let Some(shape) = fix.guard {
+                let [on, off] = cv.modes("valve", ["on", "off"]);
+                let zero = cv.site_kernel::<Blood, Dimensionless, _>(|mut k| {
+                    let value = shape(&mut k, &decl);
+                    k.finish(value, on.only(), class)
+                });
+                cv.event(Guard::new(zero, Crossing::Rising, on.to(&off)?));
+            }
+            body.add(cv.finish());
+            body.compile()
+        })?;
+        Ok((body, sites))
+    }
+
+    fn plus<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>, mut value: X<'b, 'k>) -> X<'b, 'k> {
+        for term in &d.veins {
+            value = k.add_from(value, term);
+        }
+        value
+    }
+    fn h_param<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>) -> X<'b, 'k> {
+        let base = k.site_parameter(&d.share);
+        plus(k, d, base)
+    }
+    fn h_level<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>) -> X<'b, 'k> {
+        let base = k.at_site(&d.x);
+        plus(k, d, base)
+    }
+    fn h_clock<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>) -> X<'b, 'k> {
+        let (cosine, _) = k.clock();
+        let level = k.at_site(&d.x);
+        let base = k.scale(level, cosine);
+        plus(k, d, base)
+    }
+    fn h_clock_discards<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>) -> X<'b, 'k> {
+        let (cosine, _) = k.clock();
+        let level = k.at_site(&d.x);
+        let base = k.scale(level, cosine);
+        let _ = plus(k, d, base);
+        base
+    }
+    fn h_big<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>) -> X<'b, 'k> {
+        let level = k.at_site(&d.x);
+        let sum = plus(k, d, level);
+        let big = k.site_parameter(&d.share);
+        k.scale(sum, big)
+    }
+    fn h_guard<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>) -> X<'b, 'k> {
+        let bar = k.parameter(&d.p);
+        plus(k, d, bar)
+    }
+    fn h_nerve<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>) -> X<'b, 'k> {
+        let felt = k.at_junction_if_supplied(&d.effect);
+        let level = k.at_site(&d.x);
+        let base = k.scale(level, felt);
+        plus(k, d, base)
+    }
+    fn h_nerve_plain<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>) -> X<'b, 'k> {
+        let felt = k.at_junction(&d.effect);
+        let level = k.at_site(&d.x);
+        let base = k.scale(level, felt);
+        plus(k, d, base)
+    }
+
+    fn t_param<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        k.site_parameter(&d.t)
+    }
+    fn t_ln<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        let knob = k.site_parameter(&d.t);
+        k.ln(knob)
+    }
+    fn t_ln_level<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        let level = k.at_site_in(&d.x);
+        k.ln(level)
+    }
+    fn t_y_times_t<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        let depth = k.at_site_in(&d.y);
+        let knob = k.site_parameter(&d.t);
+        k.scale(depth, knob)
+    }
+    fn t_collapse_y<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        let depth = k.at_site_in(&d.y);
+        let knob = k.site_parameter(&d.t);
+        let log = k.ln(knob);
+        let fitted = k.parameter(&d.p);
+        let product = k.scale(depth, fitted);
+        k.scale(log, product)
+    }
+    fn t_forcing<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        let varied = k.forcing(d.wobble.as_ref().expect("forcing"));
+        let knob = k.site_parameter(&d.t);
+        k.scale(knob, varied)
+    }
+    fn t_ln_level_plus_inner<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        let level = k.at_site_in(&d.x);
+        let log = k.ln(level);
+        k.add_from(log, &d.inner[0])
+    }
+    fn t_volume<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        let water = k.at_site_in(&d.water);
+        let volume = k.volume(water);
+        let knob = k.site_parameter(&d.t);
+        let per = k.divide(knob, volume);
+        let back = k.multiply(per, volume);
+        k.as_dimension(back)
+    }
+    fn t_volume_unused<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        let water = k.at_site_in(&d.water);
+        let _ = k.volume(water);
+        k.site_parameter(&d.t)
+    }
+    fn t_nerve<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        let felt = k.at_junction_if_supplied(&d.effect);
+        let knob = k.site_parameter(&d.t);
+        k.scale(knob, felt)
+    }
+    fn t_nerve_plain<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        let felt = k.at_junction(&d.effect);
+        let knob = k.site_parameter(&d.t);
+        k.scale(knob, felt)
+    }
+    fn hand_param_collapse_y<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        let base = k.site_parameter_in(&d.share);
+        let value = t_collapse_y(k, d);
+        k.add(base, value)
+    }
+
+    fn two(shape: BloodFn) -> Vec<(&'static str, BloodFn, bool)> {
+        vec![("probe", shape, false), ("echo", shape, false)]
+    }
+    fn term(name: &'static str, shape: VeinFn) -> Vec<(&'static str, VeinFn)> {
+        vec![(name, shape)]
+    }
+    fn refused(fix: &Fix) -> Option<CompileDefect> {
+        match build(fix) {
+            Err(AdmissionError::Compile(defect)) => Some(defect),
+            Err(other) => panic!("{other:?}"),
+            Ok(_) => None,
+        }
+    }
+
+    fn bind(body: &CompiledBody) -> BoundParameters {
+        let mut packet: ParameterPacket<SyntheticFixture> = ParameterPacket::new();
+        let mut seen: Vec<(ParameterKey, Binding)> = Vec::new();
+        for slot in body.parameters() {
+            let entry = (slot.key, slot.default.unwrap_or(slot.binding));
+            if !seen.contains(&entry) {
+                seen.push(entry);
+                (packet.synthetic(entry.0, entry.1, measure::<Dimensionless>(1.0), "synthetic")).expect("once");
+            }
+        }
+        packet.start_rest(body, |_| 1.0, "synthetic").expect("once");
+        body.bind(packet).expect("bound")
+    }
+
+    struct Point<'a> {
+        body: &'a CompiledBody,
+        bound: BoundParameters,
+        unknowns: Vec<f64>,
+        frame: DriveFrame,
+    }
+    impl<'a> Point<'a> {
+        fn new(body: &'a CompiledBody) -> Self {
+            let bound = bind(body);
+            let unknowns = starts(body, &bound);
+            Self {
+                body,
+                bound,
+                unknowns,
+                frame: DriveFrame::default(),
+            }
+        }
+        fn inputs(&self) -> Inputs<'_> {
+            inputs(&self.bound, &self.frame, &self.unknowns)
+        }
+        fn set(&mut self, key: &'static str, value: f64) {
+            for (slot, parameter) in self.body.parameters().iter().enumerate() {
+                if parameter.key() == ParameterKey::new(key) {
+                    self.bound.values[slot] = value;
+                }
+            }
+        }
+        fn know(&mut self, local: &str, at: Option<SiteId>, value: f64) {
+            for (row, known) in self.body.rows().iter().enumerate() {
+                let (RowKind::Algebraic(slot) | RowKind::Memory(slot)) = known.kind() else {
+                    continue;
+                };
+                let here = at.is_none_or(|site| slot.at == Context::Site(site));
+                if slot.law.local == local && here {
+                    self.unknowns[row] = value;
+                }
+            }
+        }
+        fn values_at(&self, site: SiteId) -> Option<Undefined> {
+            let mut values = vec![0.0; self.body.tape.longest];
+            let inputs = self.inputs();
+            (self.body.layout.instances.iter().enumerate())
+                .filter(|(_, instance)| instance.context == Context::Site(site))
+                .find_map(|(at, instance)| {
+                    let (arithmetic, reads) = (self.body.tape.program(instance.program), self.body.tape.instance(at));
+                    let partial_volume = self.body.partial_volume();
+                    let refused = super::super::forward(arithmetic, reads, &inputs, partial_volume, &mut values).err()?;
+                    Some(self.body.undefined(at, &inputs, refused))
+                })
+        }
+    }
+
+    fn row_of(body: &CompiledBody, instance: &crate::body::Instance) -> Option<LawName> {
+        match instance.target() {
+            Target::Row(row) => match body.rows()[row.index()].kind() {
+                RowKind::Algebraic(slot) | RowKind::Memory(slot) => Some(slot.law),
+                RowKind::Amount { .. } => None,
+            },
+            Target::Column(_) => None,
+        }
+    }
+    fn ops_of(body: &CompiledBody, local: &str, site: SiteId) -> Vec<Op> {
+        let instance = (body.instances().iter())
+            .find(|instance| {
+                instance.context() == Context::Site(site) && row_of(body, instance).is_some_and(|law| law.local == local)
+            })
+            .expect("an instance");
+        body.programs()[instance.program().index()].code.ops.clone()
+    }
+
+    /// Ruling 1, defect 1 of the check: the host is judged as main judges it, so a term that reads a parameter does
+    /// not lend it one, with or without a vein marked, the sum used or thrown away.
+    #[test]
+    fn a_host_main_refuses_for_an_unscaled_input_is_refused_when_it_adds_a_term() {
+        let main = Fix {
+            hosts: two(h_clock),
+            ..Fix::default()
+        };
+        let added = Fix {
+            veins: term("collapse", t_param),
+            ..main.clone()
+        };
+        let discarded = Fix {
+            hosts: two(h_clock_discards),
+            ..added.clone()
+        };
+        for fix in [main, added, discarded] {
+            for marks in [vec![], vec![0]] {
+                let fix = Fix { marks, ..fix.clone() };
+                assert!(matches!(refused(&fix), Some(CompileDefect::UnscaledInput { .. })));
+            }
+        }
+    }
+
+    /// Ruling 1: a forcing only a term reads counts as read where a site of the term's set runs it, through a term the
+    /// term adds too, and with no such site it is unread, as with no term.
+    #[test]
+    fn a_forcing_a_term_reads_counts_only_where_a_site_runs_the_term() {
+        let unread = Fix {
+            forcing: true,
+            hosts: two(h_level),
+            ..Fix::default()
+        };
+        let direct = Fix {
+            veins: term("collapse", t_forcing),
+            ..unread.clone()
+        };
+        let nested = Fix {
+            inner: term("inner", t_forcing),
+            veins: term("collapse", t_ln_level_plus_inner),
+            ..unread.clone()
+        };
+        let spare = Fix {
+            spare: Some(t_forcing),
+            ..unread.clone()
+        };
+        let unread_forcing = Some(CompileDefect::UnreadForcing { forcing: cv("wobble") });
+        for fix in [&unread, &direct, &nested, &spare] {
+            assert_eq!(refused(fix), unread_forcing);
+        }
+        for fix in [direct, nested] {
+            assert_eq!(refused(&Fix { marks: vec![0], ..fix }), None);
+        }
+        assert_eq!(refused(&Fix { marks: vec![0], ..spare }), unread_forcing);
+    }
+
+    /// Ruling 1: a volume a term reads, used or not, needs a partial volume where a site of its set runs the term, and
+    /// with no such site the body compiles as with no term.
+    #[test]
+    fn a_volume_a_term_reads_needs_a_partial_volume_only_where_a_site_runs_the_term() {
+        let main = Fix {
+            no_partial: true,
+            hosts: two(h_level),
+            ..Fix::default()
+        };
+        assert_eq!(refused(&main), None);
+        for shape in [t_volume as VeinFn, t_volume_unused] {
+            let added = Fix {
+                veins: term("collapse", shape),
+                ..main.clone()
+            };
+            assert_eq!(refused(&added), None);
+            let marked = refused(&Fix { marks: vec![0], ..added });
+            assert!(matches!(marked, Some(CompileDefect::MissingPartialVolume { .. })));
+        }
+    }
+
+    /// Ruling 2: a guard stands at the body or an edge, never at a site, so a guard whose zero adds a term is refused
+    /// by its mode variable's name.
+    #[test]
+    fn a_guard_whose_zero_adds_a_term_is_refused_by_name() {
+        let plain = Fix {
+            marks: vec![0, 1],
+            guard: Some(h_guard),
+            ..Fix::default()
+        };
+        assert_eq!(refused(&plain), None);
+        for marks in [vec![], vec![0, 1]] {
+            let added = Fix {
+                marks,
+                veins: term("collapse", t_param),
+                ..plain.clone()
+            };
+            assert_eq!(refused(&added), Some(CompileDefect::NoSuchRead { law: cv("valve") }));
+        }
+    }
+
+    /// Ruling 3: a term's read that takes no nerve keeps that at a site the map says no nerve reaches, and a plain read
+    /// in a term is refused there beside a host read that takes no nerve.
+    #[test]
+    fn a_terms_read_that_takes_no_nerve_keeps_that_through_placing_and_sharing() {
+        let fix = |marks: Vec<usize>, host: BloodFn, shape: VeinFn| Fix {
+            marks,
+            veins: term("collapse", shape),
+            hosts: two(host),
+            ..Fix::default()
+        };
+        let unsupplied = |fix: &Fix| matches!(refused(fix), Some(CompileDefect::UnsuppliedRead { .. }));
+        assert_eq!(refused(&fix(vec![0], h_level, t_nerve)), None);
+        assert_eq!(refused(&fix(vec![0], h_nerve, t_nerve)), None);
+        assert!(unsupplied(&fix(vec![0], h_nerve, t_nerve_plain)));
+        assert!(unsupplied(&fix(vec![0], h_nerve_plain, t_nerve)));
+        assert_eq!(refused(&fix(vec![], h_nerve, t_nerve_plain)), None);
+    }
+
+    /// Ruling 3: a summed law that adds a term is closed at a vein as main closes a summed law, and its value there is
+    /// the hand-written law's, bit for bit.
+    #[test]
+    fn a_summed_law_that_adds_a_term_closes_as_main_closes_it() {
+        let summed = |with_term: bool| Fix {
+            marks: vec![0],
+            veins: if with_term { term("collapse", t_collapse_y) } else { Vec::new() },
+            hosts: vec![("total", h_param as BloodFn, true)],
+            ..Fix::default()
+        };
+        let (placed, [_, _, upper, lower]) = build(&summed(true)).expect("compiled");
+        let (plain, _) = build(&summed(false)).expect("compiled");
+        let by_hand = Fix {
+            marks: vec![0],
+            hands: vec![("probe", hand_param_collapse_y as VeinFn)],
+            ..Fix::default()
+        };
+        let (written, _) = build(&by_hand).expect("compiled");
+        let (on, off) = (ops_of(&placed, "total", upper), ops_of(&placed, "total", lower));
+        let hand = ops_of(&written, "probe", upper);
+        assert_eq!(off, ops_of(&plain, "total", lower));
+        assert!(matches!(on[on.len() - 2..], [Op::Zero(_), Op::Subtract(_)]));
+        assert_eq!(on[..on.len() - 2], hand[..hand.len() - 2]);
+        let value = |body: &CompiledBody, local: &'static str| {
+            let mut point = Point::new(body);
+            point.set("cv.t", 2.5);
+            point.set("cv.p", 0.75);
+            point.know("depth", None, 0.4375);
+            point.know(local, None, 0.0);
+            let values = body.instance_values(&point.inputs()).expect("defined");
+            (body.instances().iter().zip(values))
+                .find(|(instance, _)| {
+                    instance.context() == Context::Site(upper) && row_of(body, instance) == Some(cv(local))
+                })
+                .and_then(|(_, value)| value)
+                .expect("a value")
+                .to_bits()
+        };
+        assert_eq!(value(&placed, "total"), value(&written, "probe"));
+    }
+
+    fn stroke(marks: &[usize], with_term: bool) -> Result<CompiledBody, AdmissionError> {
+        let mut map = AnatomyBuilder::new();
+        let root = map.site::<TissueSite>("body", at());
+        let artery = map.site::<VesselSegment>("artery", at());
+        let bed = map.site::<CapillaryBed>("bed", at());
+        let upper = map.site::<VesselSegment>("upper vein", at());
+        let lower = map.site::<VesselSegment>("lower vein", at());
+        let sites = [artery.id(), bed.id(), upper.id(), lower.id()];
+        for (at, &site) in sites.iter().enumerate() {
+            map.contain(root.id(), site);
+            map.connect(Network::Vascular, site, sites[(at + 1) % sites.len()]);
+        }
+        map.unsupplied(&sites);
+        let veins = [&upper, &lower];
+        for &mark in marks {
+            map.vein(veins[mark]);
+        }
+        let store = root.id();
+        let mut schema = Schema::new(map.finish()?)?;
+        schema.partial_volume(Measure::new(1.0)?)?;
+        schema.leave_out(Space::Interstitium, "a bench with no tissue");
+        schema.leave_out(Space::Cells, "a bench with no tissue");
+        schema.pool::<Energy>(store, Space::Elastic)?;
+        assemble(schema, |mut body| {
+            let class = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
+            let (mut cv, ports) = body.cardiovascular()?.parts();
+            let route = ports.circulation(&mut cv);
+            let still = cv.edge_kernel(|mut k| {
+                let zero = k.zero::<Rate<Water>>();
+                k.finish(zero, cv.every_mode(), class)
+            });
+            cv.transfer_along(&route, still);
+            let share =
+                cv.site_parameter::<Blood, Dimensionless>(ParameterKey::new("cv.share"), Admissible::finite());
+            let (level, x) = cv.site_field::<Blood, Dimensionless>("level", Admissible::finite());
+            let held = cv.site_kernel(|mut k| {
+                let value = k.site_parameter(&share);
+                k.finish(value, cv.every_mode(), class)
+            });
+            cv.define_at(&level, held);
+            let work = cv.site_parameter::<Blood, Rate<Energy>>(ParameterKey::new("cv.work"), Admissible::finite());
+            let leak = cv.site_parameter::<Veins, Rate<Energy>>(ParameterKey::new("cv.leak"), Admissible::finite());
+            let collapse = with_term.then(|| {
+                cv.site_term::<Veins, Rate<Energy>, _>("collapse", |mut k| {
+                    let rate = k.site_parameter(&leak);
+                    let level = k.at_site_in(&x);
+                    let value = k.scale(rate, level);
+                    k.finish_term(value)
+                })
+            });
+            let paid_into = ports.stroke_work(&mut cv);
+            let paid = cv.site_kernel::<Blood, Rate<Energy>, _>(|mut k| {
+                let base = k.site_parameter(&work);
+                let value = match &collapse {
+                    Some(term) => k.add_from(base, term),
+                    None => base,
+                };
+                k.finish(value, cv.every_mode(), class)
+            });
+            cv.transfer_at(&paid_into, paid);
+            body.add(cv.finish());
+            body.compile()
+        })
+    }
+
+    /// Ruling 3: a column into a store that adds a term runs a variant at a vein, which reads an unknown and so makes
+    /// the energy book regulated, and with no vein the body is the one with no term.
+    #[test]
+    fn a_column_that_adds_a_term_runs_it_at_a_vein() {
+        let energy = |body: &CompiledBody| {
+            (body.conserved_basis().combinations().iter())
+                .find(|combination| format!("{:?}", combination.book()).contains("Energy"))
+                .map(|combination| combination.regulated())
+        };
+        let (marked, plain) = (stroke(&[0], true).expect("compiled"), stroke(&[0], false).expect("compiled"));
+        let (none, bare) = (stroke(&[], true).expect("compiled"), stroke(&[], false).expect("compiled"));
+        assert_eq!(none.model_hash(), bare.model_hash());
+        assert_eq!(sealed_all(&none), sealed_all(&bare));
+        let main_programs = sealed_all(&plain);
+        assert_eq!(sealed_all(&marked)[..main_programs.len()], main_programs[..]);
+        assert_eq!((energy(&plain), energy(&none), energy(&marked)), (Some(false), Some(false), Some(true)));
+    }
+
+    /// Two laws whose variants have one code keep a program each, so a refusal in either names its own law.
+    #[test]
+    fn variants_of_two_laws_with_one_code_stay_apart() {
+        let fix = Fix {
+            marks: vec![0],
+            veins: term("collapse", t_param),
+            hosts: vec![("total", h_param as BloodFn, true), ("whole", h_param, true)],
+            ..Fix::default()
+        };
+        let (body, _) = build(&fix).expect("compiled");
+        for instance in body.instances() {
+            if let Some(law) = row_of(&body, instance) {
+                assert_eq!(body.programs()[instance.program().index()].law, law);
+            }
+        }
+    }
+
+    /// Ruling 4: of two reads that are not finite, the first in program order names its law, here the host's.
+    #[test]
+    fn of_two_reads_that_are_not_finite_the_first_names_its_law() {
+        let fix = Fix {
+            marks: vec![0],
+            veins: term("collapse", t_ln),
+            hosts: two(h_level),
+            ..Fix::default()
+        };
+        let (body, [_, _, upper, _]) = build(&fix).expect("compiled");
+        let mut point = Point::new(&body);
+        point.know("level", Some(upper), f64::NAN);
+        point.set("cv.t", f64::NAN);
+        let refused = point.values_at(upper).expect("refused");
+        assert_ne!(refused.law, cv("collapse"));
+        assert_eq!(format!("{:?}", refused.domain), "NonFinite");
+    }
+
+    /// Ruling 5 of the fix round: a slope that is not finite names the law of the read it belongs to, so the host for a
+    /// read the host shares and the term for a read only the term makes.
+    #[test]
+    fn a_slope_that_is_not_finite_names_the_law_of_its_read() {
+        let jacobian = |body: &CompiledBody, point: &Point<'_>| body.jacobian(&point.inputs(), 0.0).err().expect("refused");
+        let shared = Fix {
+            marks: vec![0],
+            veins: term("collapse", t_ln_level),
+            hosts: two(h_level),
+            ..Fix::default()
+        };
+        let (body, [_, _, upper, _]) = build(&shared).expect("compiled");
+        let mut point = Point::new(&body);
+        point.know("level", Some(upper), 1.0e-320);
+        let refused = jacobian(&body, &point);
+        assert_ne!(refused.law, cv("collapse"));
+        assert_eq!(format!("{:?}", refused.domain), "NonFinite");
+        let own = Fix {
+            marks: vec![0],
+            veins: term("collapse", t_y_times_t),
+            hosts: two(h_big),
+            ..Fix::default()
+        };
+        let (body, _) = build(&own).expect("compiled");
+        let mut point = Point::new(&body);
+        point.set("cv.share", 1.0e200);
+        point.set("cv.t", 1.0e200);
+        point.know("depth", None, 0.0);
+        assert_eq!(jacobian(&body, &point).law, cv("collapse"));
+    }
 }
