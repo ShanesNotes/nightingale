@@ -4,8 +4,8 @@ use crate::quantity::dimension;
 use crate::scope::ENCLOSURE_PRESSURE;
 use crate::{
     Admissible, AdmissibleSet, AdmissionError, Airway, Alimentary, Basis, Blood, Boundary, CapillaryBed,
-    Conductance, Deviation, Dimension, Dimensionless, Landmark, Lasting, Length, Metabolism, Network,
-    NonMaterial, Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reactant,
+    Conductance, Contains, Deviation, Dimension, Dimensionless, Landmark, Lasting, Length, Metabolism,
+    Network, NonMaterial, Owner, ParameterKey, PerEdge, PerSite, Pressure, Product, Quotient, Rate, Reactant,
     Reference, SameDimension, Sensed, SiteSet, Sites, Space, Species, Substance, Temperature, Time, Urinary,
     ValidityRange, Volume, Water,
 };
@@ -929,12 +929,6 @@ impl<'b, 'k, O> Kernel<'b, 'k, O> {
     }
 }
 impl<'b, 'k, O> Kernel<'b, 'k, O, CapillaryBed> {
-    pub fn in_blood<U: Dimension>(
-        &mut self,
-        port: &ReadPort<'b, O, PerSite<Blood, U>>,
-    ) -> Expr<'b, 'k, O, U> {
-        self.read_at(port.source, Where::Here)
-    }
     /// The entry at the one site this bed drains to. Compile refuses a bed with more or fewer.
     pub fn drained<U: Dimension>(&mut self, port: &ReadPort<'b, O, PerSite<Blood, U>>) -> Expr<'b, 'k, O, U> {
         self.read_at(port.source, Where::Drain)
@@ -942,6 +936,13 @@ impl<'b, 'k, O> Kernel<'b, 'k, O, CapillaryBed> {
 }
 impl<'b, 'k, O, C: SiteSet> Kernel<'b, 'k, O, C> {
     pub fn at_site<U: Dimension>(&mut self, port: &ReadPort<'b, O, PerSite<C, U>>) -> Expr<'b, 'k, O, U> {
+        self.read_at(port.source, Where::Here)
+    }
+    /// This site's entry of a port over a set that contains this kernel's.
+    pub fn at_site_in<D: Contains<C>, U: Dimension>(
+        &mut self,
+        port: &ReadPort<'b, O, PerSite<D, U>>,
+    ) -> Expr<'b, 'k, O, U> {
         self.read_at(port.source, Where::Here)
     }
     /// This site's height in gravity under the drive frame's posture.
@@ -952,6 +953,13 @@ impl<'b, 'k, O, C: SiteSet> Kernel<'b, 'k, O, C> {
     pub fn site_parameter<U: Dimension>(
         &mut self,
         parameter: &SiteParameter<'b, O, C, U>,
+    ) -> Expr<'b, 'k, O, U> {
+        self.input(Input::SiteParameter(parameter.key))
+    }
+    /// This site's value of a parameter over a set that contains this kernel's.
+    pub fn site_parameter_in<D: Contains<C>, U: Dimension>(
+        &mut self,
+        parameter: &SiteParameter<'b, O, D, U>,
     ) -> Expr<'b, 'k, O, U> {
         self.input(Input::SiteParameter(parameter.key))
     }

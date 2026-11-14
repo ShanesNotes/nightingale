@@ -2653,3 +2653,34 @@ old = '''        let (up, down, pace) = (k.at_edge(&from), k.at_edge(&to), k.par
         let rate = k.relax(up, down, pace);'''
 new = '''        let rate = k.zero::<Rate<Q>>();'''
 test = "-p ng-validate --test body the_gut_transit_reads_both_lumens_so_admission_can_place_each_species_between_them"
+
+[[mutant]]
+name = "vein-marks-sealed-when-none"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''if !veins.is_empty() {'''
+new = '''if true {'''
+test = "-p ng-contract --test anatomy a_map_that_marks_no_vein_keeps_the_digest_it_had_before_veins"
+
+[[mutant]]
+name = "vein-off-network-admitted"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''Some(vein) => Err(AnatomyDefect::VeinOffVascularNetwork { site: vein.key }),'''
+new = '''Some(_) => Ok(()),'''
+test = "-p ng-contract --test anatomy a_vein_off_the_vascular_network_is_refused"
+
+[[mutant]]
+name = "v-veins-seal-as-besides"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''            Sites::Veins => (7, 0),'''
+new = '''            Sites::Veins => (6, 0),'''
+test = "-p ng-contract --lib each_kind_of_site_set_seals_to_two_words_of_its_own"
+
+[[mutant]]
+name = "vein-parameter-defaults-by-class"
+path = "crates/ng-contract/src/compile.rs"
+old = '''ParameterContext::Site(Sites::Blood | Sites::Veins) => {
+                        Some(Binding::Network(Network::Vascular))
+                    }'''
+new = '''ParameterContext::Site(Sites::Blood) => Some(Binding::Network(Network::Vascular)),
+                    ParameterContext::Site(Sites::Veins) => Some(Binding::Class(Class::VesselSegment)),'''
+test = "-p ng-contract --test map_reads a_parameter_on_the_veins_defaults_from_the_vascular_network"

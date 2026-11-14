@@ -1613,3 +1613,186 @@ fn a_read_of_a_flow_that_is_no_row_is_refused_by_name() -> Result<(), AdmissionE
     );
     Ok(())
 }
+
+fn two_veins(marks: usize) -> Result<(Schema, [SiteId; 4]), AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let artery = map.site::<VesselSegment>("artery", at()?);
+    let bed = map.site::<CapillaryBed>("bed", at()?);
+    let upper = map.site::<VesselSegment>("upper vein", at()?);
+    let lower = map.site::<VesselSegment>("lower vein", at()?);
+    let sites = [artery.id(), bed.id(), upper.id(), lower.id()];
+    for (at, &site) in sites.iter().enumerate() {
+        map.contain(root.id(), site);
+        map.connect(Network::Vascular, site, sites[(at + 1) % sites.len()]);
+    }
+    map.unsupplied(&sites);
+    for vein in [&upper, &lower].into_iter().take(marks) {
+        map.vein(vein);
+    }
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.partial_volume(Measure::new(1.0)?)?;
+    schema.leave_out(Space::Interstitium, "a bench with no tissue");
+    schema.leave_out(Space::Cells, "a bench with no tissue");
+    Ok((schema, sites))
+}
+
+fn laws_across_sets(marks: usize) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
+    let (schema, sites) = two_veins(marks)?;
+    let body = assemble(schema, |mut body| {
+        let class = fast()?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, still);
+        let share =
+            cv.site_parameter::<Blood, Dimensionless>(ParameterKey::new("cv.share"), Admissible::finite());
+        let (level, read) = cv.site_field::<Blood, Dimensionless>("level", Admissible::finite());
+        let held = cv.site_kernel(|mut k| {
+            let value = k.site_parameter(&share);
+            k.finish(value, cv.every_mode(), class)
+        });
+        cv.define_at(&level, held);
+        let (vein, _) = cv.site_field::<Veins, Dimensionless>("vein", Admissible::finite());
+        let in_vein = cv.site_kernel(|mut k| {
+            let entry = k.at_site_in(&read);
+            let knob = k.site_parameter_in(&share);
+            let value = k.add(entry, knob);
+            k.finish(value, cv.every_mode(), class)
+        });
+        cv.define_at(&vein, in_vein);
+        let (bed, _) = cv.site_field::<CapillaryBed, Dimensionless>("bed", Admissible::finite());
+        let in_bed = cv.site_kernel(|mut k| {
+            let value = k.at_site_in(&read);
+            k.finish(value, cv.every_mode(), class)
+        });
+        cv.define_at(&bed, in_bed);
+        body.add(cv.finish());
+        body.compile()
+    })?;
+    Ok((body, sites))
+}
+
+fn rows_of(body: &CompiledBody, local: &'static str) -> Vec<SiteId> {
+    let named = LawName { owner: "CV", local };
+    let mut sites: Vec<SiteId> = (body.rows().iter())
+        .filter_map(|row| match row.kind() {
+            RowKind::Algebraic(Slot {
+                law,
+                at: Context::Site(site),
+            }) if law == named => Some(site),
+            _ => None,
+        })
+        .collect();
+    sites.sort_unstable();
+    sites
+}
+
+fn residuals(body: &CompiledBody) -> Result<Vec<(&'static str, SiteId, f64)>, InitializationFailure> {
+    let mut packet = ParameterPacket::new();
+    let value = Measure::<Dimensionless>::new(0.25)?;
+    let share = ParameterKey::new("cv.share");
+    packet.synthetic(share, Binding::Network(Network::Vascular), value, "synthetic")?;
+    let level = LawName {
+        owner: "CV",
+        local: "level",
+    };
+    let start = |row| match row {
+        RowKind::Algebraic(Slot { law, .. }) if law == level => 0.25,
+        _ => 0.0,
+    };
+    packet.start_rest(body, start, "synthetic")?;
+    let port = BoundaryPort::new(Vec::new())?;
+    let request = InitializationRequest::at(SimTime::from_ns(0));
+    let system = body.initialization(body.bind(packet)?, port, request)?;
+    let values = system.evaluate(&system.workspace())?;
+    Ok((body.rows().iter())
+        .filter_map(|row| match row.kind() {
+            RowKind::Algebraic(Slot {
+                law,
+                at: Context::Site(site),
+            }) => Some((law.local, site, values[row.id().index()])),
+            _ => None,
+        })
+        .collect())
+}
+
+#[test]
+fn a_law_on_the_veins_stands_at_the_segments_the_map_marks() -> Result<(), AdmissionError> {
+    for marks in 0..=2 {
+        let (body, [artery, bed, upper, lower]) = laws_across_sets(marks)?;
+        let mut veins: Vec<SiteId> = [upper, lower].into_iter().take(marks).collect();
+        veins.sort_unstable();
+        assert_eq!(rows_of(&body, "vein"), veins);
+        assert_eq!(rows_of(&body, "bed"), vec![bed]);
+        let mut blood = vec![artery, bed, upper, lower];
+        blood.sort_unstable();
+        assert_eq!(rows_of(&body, "level"), blood);
+    }
+    Ok(())
+}
+
+#[test]
+fn a_law_on_a_set_reads_the_entry_and_parameter_of_a_set_that_contains_it()
+-> Result<(), InitializationFailure> {
+    let (body, [_, bed, upper, lower]) = laws_across_sets(2)?;
+    let found = residuals(&body)?;
+    let at = |law: &str, site: SiteId| {
+        (found.iter())
+            .find(|row| row.0 == law && row.1 == site)
+            .map(|row| row.2)
+    };
+    assert_eq!(at("vein", upper), Some(-0.5));
+    assert_eq!(at("vein", lower), Some(-0.5));
+    assert_eq!(at("bed", bed), Some(-0.25));
+    assert_eq!(at("level", upper), Some(0.0));
+    Ok(())
+}
+
+fn a_parameter_on_the_veins(marks: usize) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
+    let (schema, sites) = two_veins(marks)?;
+    let body = assemble(schema, |mut body| {
+        let class = fast()?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, still);
+        let share = cv
+            .site_parameter::<Veins, Dimensionless>(ParameterKey::new("cv.vein-share"), Admissible::finite());
+        let (vein, _) = cv.site_field::<Veins, Dimensionless>("vein", Admissible::finite());
+        let held = cv.site_kernel(|mut k| {
+            let value = k.site_parameter(&share);
+            k.finish(value, cv.every_mode(), class)
+        });
+        cv.define_at(&vein, held);
+        body.add(cv.finish());
+        body.compile()
+    })?;
+    Ok((body, sites))
+}
+
+#[test]
+fn a_parameter_on_the_veins_defaults_from_the_vascular_network() -> Result<(), InitializationFailure> {
+    let (body, [_, _, upper, _]) = a_parameter_on_the_veins(1)?;
+    let key = ParameterKey::new("cv.vein-share");
+    let slots: Vec<(Binding, Option<Binding>)> = (body.parameters().iter())
+        .filter(|slot| slot.key() == key)
+        .map(|slot| (slot.binding(), slot.default_binding()))
+        .collect();
+    assert_eq!(
+        slots,
+        vec![(Binding::Site(upper), Some(Binding::Network(Network::Vascular)))]
+    );
+    let mut packet = ParameterPacket::new();
+    let value = Measure::<Dimensionless>::new(0.25)?;
+    packet.synthetic(key, Binding::Network(Network::Vascular), value, "synthetic")?;
+    packet.start_rest(&body, |_| 0.0, "synthetic")?;
+    body.bind(packet)?;
+    Ok(())
+}

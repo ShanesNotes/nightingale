@@ -602,3 +602,55 @@ fn a_tissue_enters_the_digest_and_its_repeat_is_one_fact() -> Result<(), Admissi
     assert_eq!(served(2)?, served(1)?);
     Ok(())
 }
+
+#[test]
+fn a_vein_enters_the_digest_and_its_repeat_is_one_fact() -> Result<(), AdmissionError> {
+    let marked = |times: usize| -> Result<Digest, AdmissionError> {
+        let Manufactured { mut map, vessel, .. } = manufactured()?;
+        for _ in 0..times {
+            map.vein(&vessel);
+        }
+        Ok(map.finish()?.digest())
+    };
+    assert_ne!(marked(1)?, marked(0)?);
+    assert_eq!(marked(2)?, marked(1)?);
+    Ok(())
+}
+
+#[test]
+fn a_vein_off_the_vascular_network_is_refused() -> Result<(), AdmissionError> {
+    let Manufactured { mut map, body, .. } = manufactured()?;
+    let stray = map.site::<VesselSegment>("stray", at(0.0)?);
+    map.contain(body.id(), stray.id());
+    map.vein(&stray);
+    assert_eq!(
+        map.finish().err(),
+        refused(AnatomyDefect::VeinOffVascularNetwork { site: "stray" })
+    );
+    Ok(())
+}
+
+#[test]
+fn a_vein_this_anatomy_does_not_declare_is_refused() -> Result<(), AdmissionError> {
+    let Manufactured { mut map, .. } = manufactured()?;
+    let elsewhere = AnatomyBuilder::new().site::<VesselSegment>("elsewhere", at(0.0)?);
+    map.vein(&elsewhere);
+    assert_eq!(
+        map.finish().err(),
+        refused(AnatomyDefect::Undeclared { site: "elsewhere" })
+    );
+    Ok(())
+}
+
+#[test]
+fn a_map_that_marks_no_vein_keeps_the_digest_it_had_before_veins() -> Result<(), AdmissionError> {
+    let digest = manufactured()?.map.finish()?.digest();
+    let hex: String = (digest.as_bytes().iter())
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(
+        hex,
+        "8a829560b4b67915e7ae30543902f322c1a1c03a5b7dee9fbca3d7ce5b25263b"
+    );
+    Ok(())
+}

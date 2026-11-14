@@ -425,6 +425,45 @@
 //!     k.at_junction_if_supplied(nerve)
 //! }
 //! ```
+//! Only a vessel segment is marked as a vein.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn mark(map: &mut AnatomyBuilder, bed: &Site<CapillaryBed>) {
+//!     map.vein(bed);
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn mark(map: &mut AnatomyBuilder, segment: &Site<VesselSegment>) {
+//!     map.vein(segment);
+//! }
+//! ```
+//! A law reads across sets only from a set that contains its own.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn blood<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
+//!     collapse: &ReadPort<'b, Cardiovascular, PerSite<Veins, Volume>>) -> Expr<'b, 'k, Cardiovascular, Volume> {
+//!     k.at_site_in(collapse)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn vein<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Veins>,
+//!     water: &ReadPort<'b, Cardiovascular, PerSite<Blood, Water>>) -> Expr<'b, 'k, Cardiovascular, Water> {
+//!     k.at_site_in(water)
+//! }
+//! ```
+//! Only this crate says which set contains which.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! enum Invented {}
+//! impl Contains<Veins> for Invented {}
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn contained<C: SiteSet>() where Blood: Contains<C> {}
+//! contained::<Veins>();
+//! ```
 //! A route comes from a scope, whole: a hand-made route does not compile. A binding is a transfer of one ligand between
 //! two pools.
 //! ```compile_fail,E0451

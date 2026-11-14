@@ -71,6 +71,8 @@ pub enum Sites {
     Tissue(Tissue),
     /// Every capillary bed that serves another tissue, or none.
     Besides(Tissue),
+    /// The vessel segments the map marks as veins.
+    Veins,
 }
 mod sets {
     pub trait Sealed {}
@@ -115,6 +117,24 @@ impl<T: TissueKind> SiteSet for Beds<T> {
 impl<T: TissueKind> SiteSet for Besides<T> {
     const SET: Sites = Sites::Besides(T::TISSUE);
 }
+/// The vessel segments `AnatomyBuilder::vein` marks.
+pub enum Veins {}
+impl sets::Sealed for Veins {}
+impl SiteSet for Veins {
+    const SET: Sites = Sites::Veins;
+}
+mod containment {
+    pub trait Sealed<Inner> {}
+}
+/// Every site of `Inner` is a site of `Self` on every map, so a law on `Inner` reads `Self`'s entries and parameters at
+/// its own site. Only this crate states the relation.
+pub trait Contains<Inner: SiteSet>: SiteSet + containment::Sealed<Inner> {}
+impl<C: SiteSet> containment::Sealed<C> for C {}
+impl<C: SiteSet> Contains<C> for C {}
+impl containment::Sealed<Veins> for Blood {}
+impl Contains<Veins> for Blood {}
+impl containment::Sealed<CapillaryBed> for Blood {}
+impl Contains<CapillaryBed> for Blood {}
 
 site_classes!(
     CapillaryBed,
@@ -172,6 +192,7 @@ impl Seal for Sites {
             Sites::Airway => (4, 0),
             Sites::Tissue(tissue) => (5, tissue as u64),
             Sites::Besides(tissue) => (6, tissue as u64),
+            Sites::Veins => (7, 0),
         };
         out.number(set);
         out.number(argument);
@@ -334,6 +355,10 @@ pub enum AnatomyDefect {
     ServesTwice {
         site: &'static str,
     },
+    /// A vein no vascular edge reaches, which would put a vein outside the blood sites.
+    VeinOffVascularNetwork {
+        site: &'static str,
+    },
 }
 
 struct Declared {
@@ -357,6 +382,7 @@ pub struct AnatomyBuilder {
     served_by: Vec<(SiteId, SiteId, Afferent)>,
     regions: Vec<(&'static str, SiteId)>,
     tissues: Vec<(SiteId, Tissue)>,
+    veins: Vec<SiteId>,
 }
 impl AnatomyBuilder {
     pub fn new() -> Self {
@@ -419,6 +445,10 @@ impl AnatomyBuilder {
     pub fn serves(&mut self, bed: &Site<CapillaryBed>, tissue: Tissue) {
         self.tissues.push((bed.id(), tissue));
     }
+    /// This vessel segment is a vein. A repeat is one fact, and a vein off the vascular network is refused at `finish`.
+    pub fn vein(&mut self, segment: &Site<VesselSegment>) {
+        self.veins.push(segment.id());
+    }
     /// Runs every check and refuses at the first that fails. An identical repeat of a relation is one
     /// fact, so neither repeats nor declaration order change the result.
     pub fn finish(self) -> Result<Anatomy, AdmissionError> {
@@ -446,6 +476,7 @@ struct Facts {
     served_by: Vec<(usize, usize, Afferent)>,
     regions: Vec<(&'static str, usize)>,
     tissues: Vec<(SiteId, Tissue)>,
+    veins: Vec<SiteId>,
 }
 impl Facts {
     fn resolve(builder: AnatomyBuilder) -> Result<Self, AnatomyDefect> {
@@ -481,6 +512,7 @@ impl Facts {
         )
         .chain(builder.unsupplied.iter().copied())
         .chain(builder.tissues.iter().map(|&(site, _)| site))
+        .chain(builder.veins.iter().copied())
         .chain(
             builder
                 .landmarks
@@ -502,6 +534,7 @@ impl Facts {
             unsupplied: relation(builder.unsupplied, same)?,
             landmarks: relation(builder.landmarks, same)?,
             tissues: relation(builder.tissues, same)?,
+            veins: relation(builder.veins, same)?,
             contains: relation(builder.contains, pair)?,
             vascular: relation(builder.vascular, pair)?,
             encloses: relation(builder.encloses, pair)?,
@@ -559,9 +592,12 @@ impl Facts {
 
     fn check_relations(&self) -> Result<(), AnatomyDefect> {
         let carries_blood = |site| matches!(self.class(site), Class::CapillaryBed | Class::VesselSegment);
-        let ends = self.vascular.iter().flat_map(|&(from, to)| [from, to]);
-        match ends.filter(|&site| !carries_blood(site)).min() {
-            Some(site) => Err(AnatomyDefect::WrongRelation { site: self.key(site) }),
+        let ends = || self.vascular.iter().flat_map(|&(from, to)| [from, to]);
+        if let Some(site) = ends().filter(|&site| !carries_blood(site)).min() {
+            return Err(AnatomyDefect::WrongRelation { site: self.key(site) });
+        }
+        match (self.veins.iter()).find(|vein| !ends().any(|site| self.key(site) == vein.key)) {
+            Some(vein) => Err(AnatomyDefect::VeinOffVascularNetwork { site: vein.key }),
             None => Ok(()),
         }
     }
@@ -801,6 +837,7 @@ pub struct Anatomy {
     served_by: Vec<(usize, usize, Afferent)>,
     regions: Vec<(&'static str, usize)>,
     tissues: Vec<(SiteId, Tissue)>,
+    veins: Vec<SiteId>,
 }
 impl Anatomy {
     fn lay_out(facts: Facts, tree: Tree, enclosure: Enclosure) -> Self {
@@ -836,6 +873,7 @@ impl Anatomy {
             served_by: facts.served_by,
             regions: facts.regions,
             tissues: facts.tissues,
+            veins: facts.veins,
         }
     }
 
@@ -853,6 +891,7 @@ impl Anatomy {
             served_by,
             regions,
             tissues,
+            veins,
         } = self;
         let mut bytes = Canonical::new("ng-contract anatomy 1");
         let index = |bytes: &mut Canonical, site: usize| bytes.number(site as u64);
@@ -949,6 +988,13 @@ impl Anatomy {
                 bytes.number(*tissue as u64);
             }
         }
+        if !veins.is_empty() {
+            bytes.number(u64::MAX - 1);
+            bytes.length(veins.len());
+            for vein in veins {
+                vein.seal(&mut bytes);
+            }
+        }
         bytes.digest()
     }
 
@@ -1024,6 +1070,7 @@ impl Anatomy {
                 Sites::Airway => on(Network::Airway, site),
                 Sites::Tissue(tissue) => self.tissue(site) == Some(tissue),
                 Sites::Besides(tissue) => bed(site) && self.tissue(site) != Some(tissue),
+                Sites::Veins => self.veins.binary_search(&site).is_ok(),
             })
             .collect()
     }

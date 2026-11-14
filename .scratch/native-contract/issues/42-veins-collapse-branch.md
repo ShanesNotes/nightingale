@@ -4,9 +4,7 @@ Spec: `crates/ng-cardiovascular/src/walls.rs` (`Walls::stressed`), the slice's p
 
 Type: task
 
-Status: claimed
-
-Claimed by: nc42-pr1
+Status: open
 
 Blocked by: none
 
@@ -23,3 +21,12 @@ Below its unstressed volume a vein's stressed volume is held at zero, so its pre
 **Non-goals:** a bed's collapse and a waterfall outlet, which trunk -1.0 would need: there the leg veins hold and pull the leg bed's plasma dry. The healthy figure for head-down tilt, which no source on hand gives.
 
 The foundation map's route says when this lands against the arena pick, because it moves what the pick is scored on.
+
+## Part 1 of 3: the vein set
+
+This PR lands the vein set. `AnatomyBuilder::vein` marks a vessel segment as a vein, and `finish` refuses an undeclared mark (`Undeclared`) and one off the vascular network (`VeinOffVascularNetwork`). The site set `Veins` names the marked veins. A sealed relation, `Contains`, says each set contains itself and blood contains the veins and the beds. A law on a set reads a containing set's entry with `at_site_in` and its site parameter with `site_parameter_in`, and `in_blood` is gone. A parameter on the veins defaults from the vascular network, as one on blood does, so a network value binds it at each marked vein and an unmarked vessel asks for none. A map that marks no vein keeps the digest it had, so no pin moves, and the slice marks no vein yet.
+
+The design first tried a broadened `at_site` and `site_parameter` that take a containing set. It left one existing kernel unable to infer its set (E0283, in `map_reads.rs`'s `a_site_rate_on_a_body_memory_is_refused_by_name`), so the separate reads landed.
+
+Two PRs follow. The term: a law writes a site term once on the veins and adds it at each use, and compile places it where the site is a vein, leaving main's bytes at every other site. Then the wall law: the collapse branch on the four veins, with the pins moved once and the cost measured.
+
