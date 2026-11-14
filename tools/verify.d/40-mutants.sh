@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+. tools/gate/scrub.sh
 exec python3 -I tools/gate/gate.py mutants "$@"
