@@ -144,6 +144,9 @@ pub fn arena_anatomy() -> Result<Anatomy, AdmissionError> {
     map.supply(&arteriolar, &[splanchnic.id(), leg.id()]);
     map.supply(&venous, &[splanchnic_veins.id(), leg_veins.id()]);
     map.supply(&renal, &[glomerular.id()]);
+    for vein in [&pulmonary_vein, &central_veins, &splanchnic_veins, &leg_veins] {
+        map.vein(vein);
+    }
     map.unsupplied(&[
         right_atrium.id(),
         left_atrium.id(),
@@ -796,6 +799,8 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>, note: &'static str) -> 
     }
     set::<Pressure>(packet, "cv.stretch-reference", body, 100.0, note)?;
     set::<Volume>(packet, "cv.collapse-width", body, 1.0, note)?;
+    set::<Dimensionless>(packet, "cv.collapse-power", body, 1.5, note)?;
+    set::<Dimensionless>(packet, "cv.collapse-share", blood, 0.05, note)?;
     set::<Rate<Energy>>(packet, "cv.heat-width", body, 100.0, note)?;
     set::<Quotient<Volume, Albumin>>(packet, "cv.albumin-volume", body, 0.05, note)?;
     set::<Quotient<Volume, Albumin>>(packet, "fl.albumin-volume", body, 0.05, note)?;

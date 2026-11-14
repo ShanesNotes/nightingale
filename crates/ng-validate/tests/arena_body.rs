@@ -841,6 +841,8 @@ fn a_seeded_run_stirs_once_and_reads_the_skins_forcing(solved: &Solved) {
     assert!(apart(1.0), "the factor held at one");
 }
 
+/// The read runs from 30 s to 40 s, 15 s after the ramp to sitting ends, so the swing reads hunting and not the
+/// settling after the sit-up.
 fn settled(solved: &Solved, posture: Vec<AuthorizedInput>) -> ([f64; 5], f64) {
     let output = valve_flow(vessel("left ventricle"), vessel("systemic arteries"));
     let filtration = algebraic(
@@ -855,11 +857,12 @@ fn settled(solved: &Solved, posture: Vec<AuthorizedInput>) -> ([f64; 5], f64) {
     for input in posture {
         run.enqueue(input).expect("enqueued");
     }
-    let run = steps(run, 20 * SECOND, |_| {});
+    let phase = memory("CV", "phase", Context::Body);
+    let run = steps(run, 30 * SECOND, |_| {});
     let mut then = run.record().accepted().time().nanoseconds();
-    let (mut sums, mut beat, mut length, mut last) = ([0.0; 5], 0.0, 0.0, 0.0);
-    let (mut least, mut most, mut total, mut whole) = (f64::INFINITY, 0.0_f64, 0.0, false);
-    steps(run, 30 * SECOND, |session| {
+    let first = solved.value(&run, phase);
+    let (mut sums, mut total, mut beats) = ([0.0; 5], 0.0, Vec::new());
+    steps(run, 40 * SECOND, |session| {
         let now = session.record().accepted().time().nanoseconds();
         let span = (now - then) as f64;
         then = now;
@@ -869,9 +872,20 @@ fn settled(solved: &Solved, posture: Vec<AuthorizedInput>) -> ([f64; 5], f64) {
         for (sum, value) in sums.iter_mut().zip(reading) {
             *sum += span * value;
         }
-        beat += span * reading[0];
+        beats.push((span, reading[0], solved.value(session, phase)));
+    });
+    (sums.map(|sum| sum / total), swing(first, &beats))
+}
+
+/// The largest less the smallest of the pressure's time-weighted mean over each whole beat. A beat ends at the step
+/// where the phase falls, read against the phase the window starts at, so an edge in the first step is kept. The beat
+/// the window's start cuts is not counted.
+fn swing(start: f64, samples: &[(f64, f64, f64)]) -> f64 {
+    let (mut last, mut beat, mut length, mut whole) = (start, 0.0, 0.0, false);
+    let (mut least, mut most) = (f64::INFINITY, 0.0_f64);
+    for &(span, pressure, phase) in samples {
+        beat += span * pressure;
         length += span;
-        let phase = solved.value(session, memory("CV", "phase", Context::Body));
         if phase < last {
             let mean = beat / length;
             if whole {
@@ -881,8 +895,15 @@ fn settled(solved: &Solved, posture: Vec<AuthorizedInput>) -> ([f64; 5], f64) {
             (beat, length, whole) = (0.0, 0.0, true);
         }
         last = phase;
-    });
-    (sums.map(|sum| sum / total), most - least)
+    }
+    most - least
+}
+
+#[test]
+fn a_beat_whose_edge_falls_in_the_first_step_is_counted() {
+    let beat = |pressure| [(1.0, pressure, 0.5), (1.0, pressure, 0.9), (1.0, pressure, 0.1)];
+    let samples: Vec<_> = [[(1.0, 100.0, 0.1)].as_slice(), &beat(120.0), &beat(90.0)].concat();
+    assert_eq!(swing(0.9, &samples), 30.0);
 }
 
 /// What the contract's 07:00 case checks, by direction, because magnitudes wait for a reviewed packet: at

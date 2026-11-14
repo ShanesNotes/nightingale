@@ -3138,3 +3138,24 @@ new = '''        parameter: &SiteParameter<'b, O, D, U>,
     ) -> Expr<'b, 'k, O, U> {
         self.input(Input::Parameter(parameter.key))'''
 test = "-p ng-contract --test map_reads a_law_on_a_set_reads_at_its_own_site_the_entry_and_parameter_of_a_set_that_includes_it"
+
+[[mutant]]
+name = "collapse-floor-restored"
+path = "crates/ng-cardiovascular/src/walls.rs"
+old = '''        k.add_from(above, &self.collapsed)'''
+new = '''        above'''
+test = "-p ng-validate --test veins below_its_unstressed_volume_a_marked_vein_follows_the_closed_form"
+
+[[mutant]]
+name = "collapse-power-read"
+path = "crates/ng-cardiovascular/src/walls.rs"
+old = '''    let scaled = k.scale(log, power);'''
+new = '''    let scaled = log;'''
+test = "-p ng-validate --test veins below_its_unstressed_volume_a_marked_vein_follows_the_closed_form"
+
+[[mutant]]
+name = "beat-rule-keeps-the-first-edge"
+path = "crates/ng-validate/tests/arena_body.rs"
+old = '''    let (mut last, mut beat, mut length, mut whole) = (start, 0.0, 0.0, false);'''
+new = '''    let (mut last, mut beat, mut length, mut whole) = (0.0, 0.0, 0.0, false);'''
+test = "-p ng-validate --test arena_body a_beat_whose_edge_falls_in_the_first_step_is_counted"

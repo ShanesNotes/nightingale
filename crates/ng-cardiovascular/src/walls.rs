@@ -12,6 +12,35 @@ type Port<'b, U> = ReadPort<'b, Cardiovascular, PerSite<Blood, U>>;
 type Effect<'b> = ReadPort<'b, Cardiovascular, PerSite<Junction, Dimensionless>>;
 type Knob<'b, U> = SiteParameter<'b, Cardiovascular, Blood, U>;
 
+/// Below `V_u` a marked vein's stressed volume falls on `share (V_u / n) (1 - (V_u / V)^n)`, without bound as it
+/// empties, so no head drains it dry. The form is the collapse branch of Toro and others 2021 Eqs 3 to 5, read in
+/// volume; its slope at `V_u` is the share, after the collapsed compliance Shi, Lawford and Hose 2011 restate. Neither
+/// gives the numbers. The ratio needs `V_u` above zero, so a marked vein needs `cv.unstressed` above
+/// `cv.unstressed-gain`, or a run refuses by this term's name. Model default.
+fn collapsing<'b, 'k>(
+    k: &mut Kernel<'b, 'k, Cardiovascular, Veins>,
+    lumen: &Lumen<'b>,
+    share: &SiteParameter<'b, Cardiovascular, Veins, Dimensionless>,
+    power: &Parameter<'b, Cardiovascular, Dimensionless>,
+    width: &Parameter<'b, Cardiovascular, Volume>,
+) -> Expr<'b, 'k, Cardiovascular, Volume> {
+    let (volume, unstressed) = lumen.volumes(k);
+    let quotient = k.divide(unstressed, volume);
+    let ratio: Expr<'_, '_, _, Dimensionless> = k.as_dimension(quotient);
+    let power = k.parameter(power);
+    let log = k.ln(ratio);
+    let scaled = k.scale(log, power);
+    let raised = k.exp(scaled);
+    let reach = k.scale(unstressed, raised);
+    let gap = k.subtract(unstressed, reach);
+    let per = k.divide(gap, power);
+    let shrunk: Expr<'_, '_, _, Volume> = k.as_dimension(per);
+    let (zero, soft) = (k.zero(), k.parameter(width));
+    let below = k.smooth_min(shrunk, zero, soft);
+    let share = k.site_parameter(share);
+    k.scale(below, share)
+}
+
 fn shed<'b, 'k>(
     k: &mut Kernel<'b, 'k, Cardiovascular>,
     net: Expr<'b, 'k, Cardiovascular, Rate<Energy>>,
@@ -35,7 +64,40 @@ pub(crate) struct Walls<'b, 'h> {
     unstressed: Knob<'b, Volume>,
     unstressed_gain: Knob<'b, Volume>,
     collapse: Parameter<'b, Cardiovascular, Volume>,
+    collapsed: SiteTerm<'b, Cardiovascular, Veins, Volume>,
     activation: &'h StateSlot<'b, Cardiovascular, Dimensionless>,
+}
+/// What a blood site holds and how much of it stretches the wall, read by the wall law and by a vein's collapse.
+struct Lumen<'b> {
+    water: Port<'b, Water>,
+    albumin: Port<'b, Albumin>,
+    room: Parameter<'b, Cardiovascular, Quotient<Volume, Albumin>>,
+    adrenergic: Effect<'b>,
+    unstressed: Knob<'b, Volume>,
+    unstressed_gain: Knob<'b, Volume>,
+}
+impl<'b> Lumen<'b> {
+    /// `V`, the water's volume and the albumin's, and `V_u = V_u_base - S E_a1` (research 02).
+    fn volumes<'k, C: SiteSet>(
+        &self,
+        k: &mut Kernel<'b, 'k, Cardiovascular, C>,
+    ) -> (Expr<'b, 'k, Cardiovascular, Volume>, Expr<'b, 'k, Cardiovascular, Volume>)
+    where
+        Blood: Includes<C>,
+    {
+        let water = k.at_site_in(&self.water);
+        let solvent = k.volume(water);
+        let held = k.at_site_in(&self.albumin);
+        let per = k.parameter(&self.room);
+        let product = k.multiply(per, held);
+        let solute: Expr<'_, '_, _, Volume> = k.as_dimension(product);
+        let volume = k.add(solvent, solute);
+        let base = k.site_parameter_in(&self.unstressed);
+        let gain = k.site_parameter_in(&self.unstressed_gain);
+        let effect = k.at_junction_if_supplied(&self.adrenergic);
+        let moved = k.scale(gain, effect);
+        (volume, k.subtract(base, moved))
+    }
 }
 impl<'b, 'h> Walls<'b, 'h> {
     pub(crate) fn declare(
@@ -46,25 +108,56 @@ impl<'b, 'h> Walls<'b, 'h> {
         let mut knob =
             |key| cv.site_parameter::<Blood, Elastance>(ParameterKey::new(key), Admissible::nonnegative());
         let (passive, active) = (knob("cv.elastance"), knob("cv.active-elastance"));
-        Self {
+        let room = cv.parameter(ParameterKey::new("cv.albumin-volume"), Admissible::nonnegative());
+        let inotropy = cv.site_parameter(ParameterKey::new("cv.inotropy"), Admissible::nonnegative());
+        let unstressed = cv.site_parameter(ParameterKey::new("cv.unstressed"), Admissible::nonnegative());
+        let unstressed_gain =
+            cv.site_parameter(ParameterKey::new("cv.unstressed-gain"), Admissible::nonnegative());
+        let collapse = cv.parameter(ParameterKey::new("cv.collapse-width"), Admissible::positive());
+        let lumen = Lumen {
             water: ports.amount::<Water>(),
             albumin: ports.amount::<Albumin>(),
-            room: cv.parameter(ParameterKey::new("cv.albumin-volume"), Admissible::nonnegative()),
-            outside: ports.extravascular_pressure(),
+            room,
             adrenergic: ports.effect::<Norepinephrine>(),
+            unstressed,
+            unstressed_gain,
+        };
+        let share = cv.site_parameter::<Veins, Dimensionless>(
+            ParameterKey::new("cv.collapse-share"),
+            Admissible::nonnegative(),
+        );
+        let power = cv.parameter(ParameterKey::new("cv.collapse-power"), Admissible::positive());
+        let collapsed = cv.site_term("vein collapse", |mut k| {
+            let value = collapsing(&mut k, &lumen, &share, &power, &collapse);
+            k.finish_term(value)
+        });
+        let Lumen {
+            water,
+            albumin,
+            room,
+            adrenergic,
+            unstressed,
+            unstressed_gain,
+        } = lumen;
+        Self {
+            water,
+            albumin,
+            room,
+            outside: ports.extravascular_pressure(),
+            adrenergic,
             passive,
             active,
-            inotropy: cv.site_parameter(ParameterKey::new("cv.inotropy"), Admissible::nonnegative()),
-            unstressed: cv.site_parameter(ParameterKey::new("cv.unstressed"), Admissible::nonnegative()),
-            unstressed_gain: cv
-                .site_parameter(ParameterKey::new("cv.unstressed-gain"), Admissible::nonnegative()),
-            collapse: cv.parameter(ParameterKey::new("cv.collapse-width"), Admissible::positive()),
+            inotropy,
+            unstressed,
+            unstressed_gain,
+            collapse,
+            collapsed,
             activation: &heart.activation,
         }
     }
-    /// `V - V_u`, with `V` the water's volume and the albumin's, `V_u = V_u_base - S E_a1` (research 02), and no
-    /// less than zero: a vessel below its unstressed volume collapses and sucks nothing in, so a chamber cannot pull
-    /// itself dry. Model default.
+    /// `V - V_u`, with `V` the water's volume and the albumin's, `V_u = V_u_base - S E_a1` (research 02), held no
+    /// less than zero off the veins: a chamber or a bed below its unstressed volume collapses and sucks nothing in,
+    /// so it cannot pull itself dry. At a marked vein the term `vein collapse` carries it below zero. Model default.
     pub(crate) fn stressed<'k>(
         &self,
         k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
@@ -83,7 +176,8 @@ impl<'b, 'h> Walls<'b, 'h> {
         let unstressed = k.subtract(base, moved);
         let stretched = k.subtract(volume, unstressed);
         let (zero, soft) = (k.zero(), k.parameter(&self.collapse));
-        k.smooth_max(stretched, zero, soft)
+        let above = k.smooth_max(stretched, zero, soft);
+        k.add_from(above, &self.collapsed)
     }
     fn contractile<'k>(
         &self,

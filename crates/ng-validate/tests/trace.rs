@@ -110,7 +110,7 @@ fn first_second(core: &dyn CoupledSolver) -> FirstSecond {
 #[test]
 fn the_slices_model_hash_and_conserved_basis_stay_where_they_were() {
     let body = arena_body().expect("compiled");
-    expect!["8e46139470a550a84d482a1c41e6f94e2eadd7e56d1e9783ba58efefa6e635ea"]
+    expect!["42c60687773009095b67ace5189ef3a658bbbb62901f9e03a2bff2d20a917ecd"]
         .assert_eq(&hex(body.model_hash().digest()));
     expect!["1e5235d9018ec8b93dcb9045ec3bde7f6e024fc3de2f77e7bf7b94256e189b25"]
         .assert_eq(&hex(body.conserved_basis().digest()));
@@ -122,56 +122,56 @@ fn the_first_second_of_the_slice_stays_where_it_was() {
     let core = ReferenceIntegrator::new(MILLISECOND)
         .with_scales(ErrorScales::uniform(scale(1.0), scale(1e-3)).expect("positive"));
     let FirstSecond { named, trace, sealed } = first_second(&core);
-    expect!["eba44c9749d69c7791aeee5208dd8b467e6186affb03ce0f07da0d5afeaea981"].assert_eq(&named);
-    expect!["cfb87b8d6c1e0f297e3b3937291bb61b7c1ff36ccb5e1fd6244f2a70bb314854"].assert_eq(&sealed);
+    expect!["f57a2a57ecf1ba2cda50db70849ad55efbf8a236944f48a5a8a97ab828756217"].assert_eq(&named);
+    expect!["de4f1fd46c4713e0d622d6e84ce8aee0fbe5b7af4b4209b4502d1fa787a9ad42"].assert_eq(&sealed);
     expect![[r#"
-         100.000000 ms  arterial pressure 125.034455  right atrial pressure 1.617394  heart rate 1.053684  sympathetic traffic 0.709794  filtration 1.709744  urine 0.020000  wall power 14119.392387  aortic flow 0.000000
-         200.000000 ms  arterial pressure 120.538735  right atrial pressure 2.047878  heart rate 1.070960  sympathetic traffic 0.129996  filtration 2.082523  urine 0.020000  wall power 10381.269823  aortic flow 39.901422
-         300.000000 ms  arterial pressure 114.952630  right atrial pressure 2.409895  heart rate 1.045808  sympathetic traffic 0.035414  filtration 2.289627  urine 0.020000  wall power 34172.503681  aortic flow 0.000000
-         400.000000 ms  arterial pressure 108.094965  right atrial pressure 2.236688  heart rate 1.008752  sympathetic traffic 0.025692  filtration 2.355712  urine 0.020000  wall power 10962.345897  aortic flow 0.000000
-         500.000000 ms  arterial pressure 101.750158  right atrial pressure 0.687175  heart rate 0.977374  sympathetic traffic 0.037741  filtration 2.314930  urine 0.020000  wall power 8834.665940  aortic flow 0.000000
-         600.000000 ms  arterial pressure 95.840930  right atrial pressure 0.260726  heart rate 0.956181  sympathetic traffic 0.083351  filtration 2.197128  urine 0.020000  wall power 6639.067239  aortic flow 0.000000
-         700.000000 ms  arterial pressure 90.303691  right atrial pressure 0.296159  heart rate 0.947383  sympathetic traffic 0.214704  filtration 2.035474  urine 0.020000  wall power 5155.672110  aortic flow 0.000000
-         800.000000 ms  arterial pressure 85.099323  right atrial pressure 0.522489  heart rate 0.953604  sympathetic traffic 0.486405  filtration 1.856741  urine 0.020000  wall power 4337.566670  aortic flow 0.000000
-         900.000000 ms  arterial pressure 80.215792  right atrial pressure 0.766121  heart rate 0.975960  sympathetic traffic 0.777711  filtration 1.675287  urine 0.020000  wall power 3738.096527  aortic flow 0.000000
-        1000.000000 ms  arterial pressure 75.650158  right atrial pressure 0.978124  heart rate 1.011713  sympathetic traffic 0.929052  filtration 1.498346  urine 0.020000  wall power 3233.475834  aortic flow 0.000000
+         100.000000 ms  arterial pressure 125.031526  right atrial pressure 1.614839  heart rate 1.053678  sympathetic traffic 0.709790  filtration 1.709556  urine 0.020000  wall power 14114.728469  aortic flow 0.000000
+         200.000000 ms  arterial pressure 120.536165  right atrial pressure 2.050066  heart rate 1.070955  sympathetic traffic 0.130025  filtration 2.082239  urine 0.020000  wall power 10372.769345  aortic flow 39.898583
+         300.000000 ms  arterial pressure 114.951075  right atrial pressure 2.417766  heart rate 1.045808  sympathetic traffic 0.035426  filtration 2.289425  urine 0.020000  wall power 34166.774232  aortic flow 0.000000
+         400.000000 ms  arterial pressure 108.094858  right atrial pressure 2.243974  heart rate 1.008756  sympathetic traffic 0.025700  filtration 2.355691  urine 0.020000  wall power 10963.917607  aortic flow 0.000000
+         500.000000 ms  arterial pressure 101.751143  right atrial pressure 0.692859  heart rate 0.977379  sympathetic traffic 0.037747  filtration 2.315063  urine 0.020000  wall power 8836.768728  aortic flow 0.000000
+         600.000000 ms  arterial pressure 95.842549  right atrial pressure 0.264476  heart rate 0.956186  sympathetic traffic 0.083349  filtration 2.197330  urine 0.020000  wall power 6641.087460  aortic flow 0.000000
+         700.000000 ms  arterial pressure 90.305500  right atrial pressure 0.298147  heart rate 0.947386  sympathetic traffic 0.214674  filtration 2.035672  urine 0.020000  wall power 5158.081829  aortic flow 0.000000
+         800.000000 ms  arterial pressure 85.100901  right atrial pressure 0.523339  heart rate 0.953605  sympathetic traffic 0.486334  filtration 1.856880  urine 0.020000  wall power 4340.378297  aortic flow 0.000000
+         900.000000 ms  arterial pressure 80.216803  right atrial pressure 0.766230  heart rate 0.975957  sympathetic traffic 0.777658  filtration 1.675338  urine 0.020000  wall power 3740.630129  aortic flow 0.000000
+        1000.000000 ms  arterial pressure 75.650457  right atrial pressure 0.977602  heart rate 1.011708  sympathetic traffic 0.929035  filtration 1.498308  urine 0.020000  wall power 3234.807083  aortic flow 0.000000
     "#]].assert_eq(&trace);
 }
 
 #[test]
 fn the_first_second_of_the_slice_on_ng_solver_stays_where_it_was() {
     let FirstSecond { named, trace, sealed } = first_second(&ng_solver::Core::new(10 * MILLISECOND));
-    expect!["2dde20ac6a13aa9e6de955f917fb1bff57b9d62ecb8ae3f33e3cc377e893045b"].assert_eq(&named);
-    expect!["0b8f63bb10c36e9775afabaadff72c7c263768bfdc167bf463584670a62d2d5c"].assert_eq(&sealed);
+    expect!["28b0fe0d5a70bcb7c136c01b2aa2e9aa9b1cf1d43a623af75dff55b8271a8de2"].assert_eq(&named);
+    expect!["f8cf81f256f7aa31c0537ecb24e2d1b984e0f245e9065cb762f1e9be5b8edba0"].assert_eq(&sealed);
     expect![[r#"
-         100.957461 ms  arterial pressure 124.891549  right atrial pressure 1.621167  heart rate 1.053978  sympathetic traffic 0.702227  filtration 1.714502  urine 0.020000  wall power 14087.179447  aortic flow 0.000000
-         204.226356 ms  arterial pressure 120.438831  right atrial pressure 2.063713  heart rate 1.070076  sympathetic traffic 0.122377  filtration 2.092503  urine 0.020000  wall power 10297.772025  aortic flow 38.724785
-         301.817767 ms  arterial pressure 114.728378  right atrial pressure 2.413156  heart rate 1.044702  sympathetic traffic 0.035883  filtration 2.288269  urine 0.020000  wall power 33403.593889  aortic flow 0.000000
-         404.902739 ms  arterial pressure 107.689151  right atrial pressure 2.134023  heart rate 1.006999  sympathetic traffic 0.026738  filtration 2.351036  urine 0.020000  wall power 10781.035506  aortic flow 0.000000
-         500.213593 ms  arterial pressure 101.662543  right atrial pressure 0.719399  heart rate 0.977648  sympathetic traffic 0.039169  filtration 2.309499  urine 0.020000  wall power 8819.338041  aortic flow 0.000000
-         608.059522 ms  arterial pressure 95.318358  right atrial pressure 0.267674  heart rate 0.955818  sympathetic traffic 0.092843  filtration 2.180488  urine 0.020000  wall power 6563.592614  aortic flow 0.000000
-         708.059522 ms  arterial pressure 89.818007  right atrial pressure 0.310961  heart rate 0.948720  sympathetic traffic 0.237418  filtration 2.018034  urine 0.020000  wall power 5112.590823  aortic flow 0.000000
-         808.059522 ms  arterial pressure 84.648877  right atrial pressure 0.533800  heart rate 0.956887  sympathetic traffic 0.519570  filtration 1.840042  urine 0.020000  wall power 4295.430638  aortic flow 0.000000
-         908.059522 ms  arterial pressure 79.801444  right atrial pressure 0.775706  heart rate 0.980979  sympathetic traffic 0.799395  filtration 1.659635  urine 0.020000  wall power 3697.635974  aortic flow 0.000000
-        1000.226001 ms  arterial pressure 75.614739  right atrial pressure 0.973215  heart rate 1.014599  sympathetic traffic 0.930479  filtration 1.497486  urine 0.020000  wall power 3165.995117  aortic flow 0.000000
+         101.025507 ms  arterial pressure 124.881347  right atrial pressure 1.618933  heart rate 1.053998  sympathetic traffic 0.701724  filtration 1.714622  urine 0.020000  wall power 14073.303740  aortic flow 0.000000
+         204.196333 ms  arterial pressure 120.437817  right atrial pressure 2.066060  heart rate 1.070075  sympathetic traffic 0.122474  filtration 2.092131  urine 0.020000  wall power 10290.114714  aortic flow 38.733973
+         301.819179 ms  arterial pressure 114.726834  right atrial pressure 2.421059  heart rate 1.044703  sympathetic traffic 0.035896  filtration 2.288072  urine 0.020000  wall power 33397.853059  aortic flow 0.000000
+         404.750633 ms  arterial pressure 107.699129  right atrial pressure 2.143814  heart rate 1.007057  sympathetic traffic 0.026741  filtration 2.351021  urine 0.020000  wall power 10792.719486  aortic flow 0.000000
+         500.220928 ms  arterial pressure 101.663114  right atrial pressure 0.724932  heart rate 0.977652  sympathetic traffic 0.039177  filtration 2.309621  urine 0.020000  wall power 8821.359356  aortic flow 0.000000
+         608.059522 ms  arterial pressure 95.320008  right atrial pressure 0.271199  heart rate 0.955824  sympathetic traffic 0.092840  filtration 2.180685  urine 0.020000  wall power 6565.691001  aortic flow 0.000000
+         708.059522 ms  arterial pressure 89.819790  right atrial pressure 0.312766  heart rate 0.948724  sympathetic traffic 0.237384  filtration 2.018221  urine 0.020000  wall power 5115.043705  aortic flow 0.000000
+         808.059522 ms  arterial pressure 84.650386  right atrial pressure 0.534494  heart rate 0.956889  sympathetic traffic 0.519500  filtration 1.840168  urine 0.020000  wall power 4298.193786  aortic flow 0.000000
+         908.059522 ms  arterial pressure 79.802371  right atrial pressure 0.775696  heart rate 0.980977  sympathetic traffic 0.799346  filtration 1.659674  urine 0.020000  wall power 3699.996202  aortic flow 0.000000
+        1000.225153 ms  arterial pressure 75.615069  right atrial pressure 0.972701  heart rate 1.014594  sympathetic traffic 0.930462  filtration 1.497448  urine 0.020000  wall power 3167.497723  aortic flow 0.000000
     "#]].assert_eq(&trace);
 }
 
 #[test]
 fn the_first_second_of_the_slice_on_the_doubled_core_stays_where_it_was() {
     let FirstSecond { named, trace, sealed } = first_second(&ng_solver::Core::doubled(10 * MILLISECOND));
-    expect!["2dde20ac6a13aa9e6de955f917fb1bff57b9d62ecb8ae3f33e3cc377e893045b"].assert_eq(&named);
-    expect!["c48212762c2f817a19126ad017ac9e3ee00fc9203923c668f6caa6c20b2ced7e"].assert_eq(&sealed);
+    expect!["28b0fe0d5a70bcb7c136c01b2aa2e9aa9b1cf1d43a623af75dff55b8271a8de2"].assert_eq(&named);
+    expect!["b2a04a45e8cf58b124a153d6b060c1208df73ba067d62a4f2888e681a18df29e"].assert_eq(&sealed);
     expect![[r#"
-         100.976282 ms  arterial pressure 124.892593  right atrial pressure 1.621228  heart rate 1.053980  sympathetic traffic 0.701829  filtration 1.714747  urine 0.020000  wall power 14084.714534  aortic flow 0.000000
-         203.732841 ms  arterial pressure 120.451780  right atrial pressure 2.061712  heart rate 1.070090  sympathetic traffic 0.123378  filtration 2.091194  urine 0.020000  wall power 10303.511849  aortic flow 37.681462
-         301.933952 ms  arterial pressure 114.715182  right atrial pressure 2.413377  heart rate 1.044606  sympathetic traffic 0.035894  filtration 2.288238  urine 0.020000  wall power 33352.656889  aortic flow 0.000000
-         405.975048 ms  arterial pressure 107.614406  right atrial pressure 2.112523  heart rate 1.006598  sympathetic traffic 0.026813  filtration 2.350821  urine 0.020000  wall power 10714.649980  aortic flow 0.000000
-         502.679847 ms  arterial pressure 101.508134  right atrial pressure 0.699883  heart rate 0.976998  sympathetic traffic 0.039853  filtration 2.307114  urine 0.020000  wall power 8775.852881  aortic flow 0.000000
-         608.059522 ms  arterial pressure 95.314397  right atrial pressure 0.267472  heart rate 0.955824  sympathetic traffic 0.092960  filtration 2.180273  urine 0.020000  wall power 6564.546065  aortic flow 0.000000
-         708.059522 ms  arterial pressure 89.814211  right atrial pressure 0.310531  heart rate 0.948740  sympathetic traffic 0.237653  filtration 2.017851  urine 0.020000  wall power 5112.736809  aortic flow 0.000000
-         808.059522 ms  arterial pressure 84.645257  right atrial pressure 0.533318  heart rate 0.956922  sympathetic traffic 0.519874  filtration 1.839884  urine 0.020000  wall power 4295.204966  aortic flow 0.000000
-         908.059522 ms  arterial pressure 79.798020  right atrial pressure 0.775253  heart rate 0.981027  sympathetic traffic 0.799579  filtration 1.659492  urine 0.020000  wall power 3697.335290  aortic flow 0.000000
-        1000.229928 ms  arterial pressure 75.611325  right atrial pressure 0.972800  heart rate 1.014656  sympathetic traffic 0.930553  filtration 1.497348  urine 0.020000  wall power 3165.684347  aortic flow 0.000000
+         100.995240 ms  arterial pressure 124.888330  right atrial pressure 1.618767  heart rate 1.053981  sympathetic traffic 0.701687  filtration 1.714644  urine 0.020000  wall power 14077.854381  aortic flow 0.000000
+         203.737601 ms  arterial pressure 120.449016  right atrial pressure 2.064166  heart rate 1.070086  sympathetic traffic 0.123396  filtration 2.090924  urine 0.020000  wall power 10295.099976  aortic flow 37.677959
+         301.935596 ms  arterial pressure 114.713576  right atrial pressure 2.421279  heart rate 1.044606  sympathetic traffic 0.035906  filtration 2.288044  urine 0.020000  wall power 33346.830128  aortic flow 0.000000
+         405.821773 ms  arterial pressure 107.624420  right atrial pressure 2.122305  heart rate 1.006655  sympathetic traffic 0.026815  filtration 2.350810  urine 0.020000  wall power 10726.286318  aortic flow 0.000000
+         502.685028 ms  arterial pressure 101.508806  right atrial pressure 0.705360  heart rate 0.977002  sympathetic traffic 0.039860  filtration 2.307240  urine 0.020000  wall power 8777.878578  aortic flow 0.000000
+         608.059522 ms  arterial pressure 95.315999  right atrial pressure 0.270982  heart rate 0.955829  sympathetic traffic 0.092957  filtration 2.180470  urine 0.020000  wall power 6566.605452  aortic flow 0.000000
+         708.059522 ms  arterial pressure 89.815947  right atrial pressure 0.312328  heart rate 0.948743  sympathetic traffic 0.237620  filtration 2.018037  urine 0.020000  wall power 5115.173379  aortic flow 0.000000
+         808.059522 ms  arterial pressure 84.646721  right atrial pressure 0.534007  heart rate 0.956923  sympathetic traffic 0.519806  filtration 1.840007  urine 0.020000  wall power 4297.960902  aortic flow 0.000000
+         908.059522 ms  arterial pressure 79.798903  right atrial pressure 0.775238  heart rate 0.981024  sympathetic traffic 0.799532  filtration 1.659529  urine 0.020000  wall power 3699.690007  aortic flow 0.000000
+        1000.229729 ms  arterial pressure 75.611585  right atrial pressure 0.972281  heart rate 1.014652  sympathetic traffic 0.930536  filtration 1.497307  urine 0.020000  wall power 3167.178828  aortic flow 0.000000
     "#]].assert_eq(&trace);
 }
