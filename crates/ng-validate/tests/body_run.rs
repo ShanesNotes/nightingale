@@ -270,8 +270,7 @@ impl WallClock for Ticks {
     }
 }
 
-/// Its own solve, so the run test's mutant rows never pay for the gates. The withheld start on the run test's core is
-/// the run test's start: one packet, one identity.
+/// Its own solve, so the run test's mutant rows never pay for the gates.
 #[test]
 fn the_whole_body_passes_every_replay_gate() {
     let case = BodyCase::new().expect("solved");

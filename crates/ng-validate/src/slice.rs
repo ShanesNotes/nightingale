@@ -1,6 +1,6 @@
+use crate::initialize::{AdmissionSolve, admit_from, solve_admission};
 use crate::{
-    AdmissionSolve, CertificatePolicy, ExpectedDrift, MemoryStore, QuantityPolicy, ReplayCase,
-    SlidingWindows, admit_from, solve_admission,
+    CertificatePolicy, ExpectedDrift, MemoryStore, QuantityPolicy, ReplayCase, SlidingWindows,
 };
 use core::cell::RefCell;
 use core::marker::PhantomData;
@@ -1039,7 +1039,6 @@ pub fn arena_lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError
 
 const PAST_THE_FENCE_NS: u64 = 50_000_000;
 
-/// An assembly a replay case runs: its compiled body, its fixture packet and its lens.
 pub trait CaseAssembly {
     fn compiled() -> Result<CompiledBody, AdmissionError>;
     fn packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError>;
@@ -1059,9 +1058,6 @@ impl CaseAssembly for Slice {
     }
 }
 
-/// An assembly from 06:55 until just past its first cycle. The stir fires inside it, and a stand and a gut water bolus
-/// wait at the fence. One admission solve serves every start: each core resolution's start is admitted from it once,
-/// with the inputs and without, and every run resumes from a checkpoint of it.
 pub struct AssemblyCase<A> {
     body: CompiledBody,
     solved: AdmissionSolve,
@@ -1079,8 +1075,6 @@ impl<A: CaseAssembly> AssemblyCase<A> {
     pub fn new() -> Result<Self, InitializationFailure> {
         Self::inputs_at(fence())
     }
-    /// The solve reads a port with no input, so an input admission would read with the known port, one before the
-    /// fence, is refused: the solve could not have read it.
     fn inputs_at(at: SimTime) -> Result<Self, InitializationFailure> {
         let fence = fence();
         if let Some(early) = inputs(at)?.iter().find(|input| input.at() < fence) {

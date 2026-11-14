@@ -291,9 +291,7 @@ pub use healthy::{
     AnchorReturn, BareLens, CheckVerdict, DayActivities, RangeFailure, RangeGap, RangeReport, RangeResult,
     ReadingCheckError, ReadingChecks, ReturnGap, ReturnReport,
 };
-pub use initialize::{
-    AdmissionSolve, Admitted, admission_tolerance, admit_at, admit_from, admit_solved, solve_admission,
-};
+pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved};
 pub use reference::ReferenceIntegrator;
 pub use replay::{
     ChancePlan, ClockSource, CoreFactory, GateEvidence, MemoryStore, ReplayCase, ReplayEvidence,

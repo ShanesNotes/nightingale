@@ -301,16 +301,15 @@ pub fn admit_at<'m>(
     Ok(Admitted { session, provenance })
 }
 
-/// One admission solve, which every core and either port of a case starts from.
 #[derive(Clone)]
-pub struct AdmissionSolve {
+pub(crate) struct AdmissionSolve {
     workspace: AdmissionWorkspace,
     origin: SimTime,
 }
 
 /// The admission solve alone, on a port with no input. No core reaches it, and the admission system's identity leaves
 /// the port out, so a port with no input before the fence starts from this solve as from its own.
-pub fn solve_admission(
+pub(crate) fn solve_admission(
     body: &CompiledBody,
     packet: ParameterPacket<SyntheticFixture>,
     lens: &ObservationLens,
@@ -321,8 +320,7 @@ pub fn solve_admission(
     Ok(AdmissionSolve { workspace, origin })
 }
 
-/// Admits a session from `solved`, checked as `admit_at` checks its own solve.
-pub fn admit_from<'m>(
+pub(crate) fn admit_from<'m>(
     body: &'m CompiledBody,
     solved: &AdmissionSolve,
     packet: ParameterPacket<SyntheticFixture>,

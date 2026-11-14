@@ -1082,8 +1082,6 @@ fn a_slice_window_passes_every_replay_gate_with_the_reference_core() {
     assert_eq!(evidence.of(ReplayGate::StepPolicy).tolerance_ns(), Some(floor));
 }
 
-/// No core reaches the admission solve and its identity leaves the port out, so the case's one solve gives each start
-/// the bits that start's own admission gives.
 #[test]
 fn one_admission_solve_admits_each_start_to_the_bits_its_own_admission_gives() {
     let case = SliceCase::new().expect("solved");
