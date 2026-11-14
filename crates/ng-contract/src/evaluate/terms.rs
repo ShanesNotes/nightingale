@@ -1473,7 +1473,7 @@ mod forms {
     #[test]
     fn a_slope_that_is_not_finite_names_the_law_of_its_read() {
         let jacobian = |body: &CompiledBody, point: &Point<'_>| {
-            body.jacobian(&point.inputs(), 0.0).err().expect("refused")
+            body.jacobian(&point.inputs(), 0.0).expect_err("refused")
         };
         let shared = Fix {
             marks: vec![0],
