@@ -1377,6 +1377,14 @@ new = '''            if values.iter().any(|value| value.to_bits() != 0) || true 
 test = "-p ng-contract --lib elimination::tests::a_group_walks_only_the_rows_its_sides_reach"
 
 [[mutant]]
+name = "zero-term-skips-the-right-side"
+path = "crates/ng-contract/src/ring.rs"
+old = '''                                if !holds_right
+                                    && value.is_finite()'''
+new = '''                                if value.is_finite()'''
+test = "-p ng-contract --lib ring::tests::a_ring_keeps_the_bits_it_had_on_zeros_of_both_signs"
+
+[[mutant]]
 name = "observation-time-mean-counts-samples"
 path = "crates/ng-observe/src/observer.rs"
 old = '''covered: covered.saturating_add(length),'''

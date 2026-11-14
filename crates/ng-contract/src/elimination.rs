@@ -100,7 +100,6 @@ impl Elimination {
         }
     }
 
-    /// Where each row pivots, and where each unknown.
     pub(crate) fn places(&self) -> (Vec<usize>, Vec<usize>) {
         let (mut rows, mut unknowns) = (vec![0; self.rows.len()], vec![0; self.rows.len()]);
         for (at, (&row, &unknown)) in self.rows.iter().zip(&self.unknowns).enumerate() {
@@ -169,8 +168,6 @@ impl Factors<'_> {
     pub(crate) fn reach(&self) -> Option<Reach> {
         Reach::of(self)
     }
-    /// One group of sides in pivot order, each row's side where its row pivots, replaced by their updates where each
-    /// unknown pivots.
     pub(crate) fn solve_pivoted(
         &self,
         group: &mut [[f64; LANES]],
@@ -274,7 +271,6 @@ impl Factors<'_> {
     }
 }
 
-/// For each row, the rows whose nonzero factor reads it: below the diagonal going forward, above it going back.
 pub(crate) struct Reach {
     lower_starts: Vec<u32>,
     lower: Vec<u32>,
@@ -282,6 +278,37 @@ pub(crate) struct Reach {
     upper: Vec<u32>,
 }
 impl Reach {
+    pub(crate) fn key(
+        &self,
+        rows: &[usize],
+        at_row: &[usize],
+        marks: &mut Marks,
+    ) -> (usize, usize, usize, u64) {
+        marks.clear();
+        for &row in rows {
+            let at = at_row[row];
+            if !marks.forward[at] {
+                marks.forward[at] = true;
+                marks.stack.push(at as u32);
+            }
+        }
+        marks.spread(|marks| &mut marks.forward, &self.lower_starts, &self.lower);
+        marks.back.copy_from_slice(&marks.forward);
+        marks
+            .stack
+            .extend((0..marks.forward.len() as u32).filter(|&at| marks.forward[index(at)]));
+        marks.spread(|marks| &mut marks.back, &self.upper_starts, &self.upper);
+        let mut key = (usize::MAX, 0, 0, 0_u64);
+        for at in (0..marks.back.len()).filter(|&at| marks.back[at]) {
+            key.0 = key.0.min(at);
+            key.1 = at;
+            key.2 += 1;
+            key.3 = key
+                .3
+                .wrapping_add((at as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        }
+        key
+    }
     /// `None` where a factor is not finite, since a zero times it is not zero.
     fn of(factors: &Factors<'_>) -> Option<Self> {
         let Elimination {
@@ -326,7 +353,6 @@ impl Reach {
     }
 }
 
-/// The rows a reach walk marks, kept from one group to the next so no group allocates.
 pub(crate) struct Marks {
     forward: Vec<bool>,
     back: Vec<bool>,
@@ -413,7 +439,6 @@ mod tests {
         (Elimination::plan(&offsets, &unknowns, matching), values)
     }
 
-    /// Each group of `LANES` sides laid in pivot order, solved, and read back one side at a time.
     fn grouped(factors: &Factors<'_>, sides: &[Vec<f64>], reached: bool, marks: &mut Marks) -> Vec<Vec<f64>> {
         let (at_row, at_unknown) = factors.plan.places();
         let size = at_row.len();
@@ -521,7 +546,6 @@ mod tests {
         assert_eq!(hex(&full), had);
     }
 
-    /// Two parts that never read each other: sides nonzero on one part walk that part's rows and no others.
     #[test]
     fn a_group_walks_only_the_rows_its_sides_reach() {
         let mut state = 0x9E37_79B9_7F4A_7C15;

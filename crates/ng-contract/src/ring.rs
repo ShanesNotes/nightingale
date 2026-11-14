@@ -23,8 +23,7 @@ fn reduced(mut matrix: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>, usize> {
     let down: Vec<f64> = (0..size)
         .map(|column| matrix.iter().map(|row| row[column]).fold(0.0, largest))
         .collect();
-    // A panel of pivots is taken on its own columns first, then every later row takes the panel's terms one after
-    // another in pivot order: each cell takes the same terms in the same order as a pivot at a time gives it.
+    // Each cell takes the same terms in the same order as a pivot at a time gives it.
     let mut pending: Vec<[Option<f64>; PANEL]> = vec![[None; PANEL]; size];
     for start in (0..size).step_by(PANEL) {
         let end = (start + PANEL).min(size);
@@ -50,6 +49,7 @@ fn reduced(mut matrix: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>, usize> {
             let (above, below) = matrix.split_at_mut(pivot + 1);
             let leading = &above[pivot][pivot..end];
             for (row, waiting) in below.iter_mut().zip(&mut pending[pivot + 1..]) {
+                // A row with nothing under the pivot keeps its cells; a zero factor would only rewrite a zero's sign.
                 if row[pivot] == 0.0 {
                     continue;
                 }
@@ -97,7 +97,6 @@ impl Block<'_> {
             Block::Whole(_) => None,
         }
     }
-    /// `group` lies in pivot order: `at_row` places each row's side, `at_unknown` each unknown's update.
     fn solve_group(
         &self,
         group: &mut [[f64; LANES]],
@@ -213,10 +212,18 @@ impl InitializationSystem<'_> {
         let mut factors = Vec::with_capacity(last);
         let groups = width.div_ceil(LANES);
         let (at_row, at_unknown) = plan.places();
+        let (mut order, mut slot_of): (Vec<usize>, Vec<usize>) = ((0..width).collect(), (0..width).collect());
         let (mut before, mut first): (Vec<[f64; LANES]>, Vec<[f64; LANES]>) = (Vec::new(), Vec::new());
         let mut anchors = vec![vec![0.0; width]; fits];
         let mut spare = vec![[0.0; LANES]; size];
         let mut marks = Marks::new(size);
+        let target = |place: usize| {
+            if place >= border {
+                Ok(read.len() + place - border)
+            } else {
+                read.binary_search(&(place - last * size))
+            }
+        };
         for point in 0..last {
             let block = system.block(ring, point);
             let lu = match system.factor(&block) {
@@ -229,34 +236,98 @@ impl InitializationSystem<'_> {
                     (line(point * size + row).filter(|(place, _)| !own(point).contains(place))).collect()
                 })
                 .collect();
+            let seeded = |place: usize| place >= border || point == 0;
+            if let (0, Some(reach)) = (point, &reach) {
+                let mut rows: Vec<Vec<usize>> = vec![Vec::new(); width];
+                for (row, entries) in foreign.iter().enumerate() {
+                    for column in entries.iter().filter_map(|&(place, _)| target(place).ok()) {
+                        rows[column].push(row);
+                    }
+                }
+                rows[seeds] = (0..size).collect();
+                let keys: Vec<_> = rows
+                    .iter()
+                    .map(|rows| reach.key(rows, &at_row, &mut marks))
+                    .collect();
+                order.sort_by_key(|&column| (keys[column], column));
+                for (slot, &column) in order.iter().enumerate() {
+                    slot_of[column] = slot;
+                }
+            }
+            let general =
+                (foreign.iter().flatten()).any(|&(place, value)| seeded(place) && !value.is_finite());
+            let mut reads: Vec<Vec<(usize, f64)>> = vec![Vec::new(); size];
+            let mut terms: Vec<Vec<(usize, usize, usize, f64)>> = vec![Vec::new(); groups];
+            for (row, entries) in foreign.iter().enumerate() {
+                for &(place, value) in entries {
+                    if !seeded(place) {
+                        reads[row].push((at_unknown[place - (point - 1) * size], value));
+                    } else if let Ok(column) = target(place) {
+                        let slot = slot_of[column];
+                        terms[slot / LANES].push((row, reads[row].len(), slot % LANES, value));
+                    }
+                }
+            }
             let mut walked = vec![[0.0; LANES]; groups * size];
             for (group, cells) in walked.chunks_mut(size).enumerate() {
-                let lanes = group * LANES..((group + 1) * LANES).min(width);
-                let holds_right = lanes.contains(&seeds);
-                for (row, entries) in foreign.iter().enumerate() {
-                    let sides = &mut cells[at_row[row]];
-                    if holds_right {
-                        sides[seeds % LANES] = right[point * size + row];
-                    }
-                    for &(place, value) in entries {
-                        if place >= border || point == 0 {
-                            let column = if place >= border {
-                                Ok(read.len() + place - border)
+                let lanes = &order[group * LANES..((group + 1) * LANES).min(width)];
+                let holds_right = group == slot_of[seeds] / LANES;
+                if holds_right || general {
+                    for (row, entries) in foreign.iter().enumerate() {
+                        let sides = &mut cells[at_row[row]];
+                        if holds_right {
+                            sides[slot_of[seeds] % LANES] = right[point * size + row];
+                        }
+                        for &(place, value) in entries {
+                            if seeded(place) {
+                                let column = target(place);
+                                if value.is_finite() {
+                                    // A seed's or fit's side is a positive zero or not zero, so a finite term leaves
+                                    // every side but its own and the right side's as it is.
+                                    for at in column.ok().into_iter().chain([seeds]) {
+                                        if slot_of[at] / LANES == group {
+                                            sides[slot_of[at] % LANES] -= value * f64::from(column == Ok(at));
+                                        }
+                                    }
+                                } else {
+                                    for (side, &at) in sides.iter_mut().zip(lanes) {
+                                        *side -= value * f64::from(column == Ok(at));
+                                    }
+                                }
                             } else {
-                                read.binary_search(&(place - last * size))
-                            };
-                            for (side, at) in sides.iter_mut().zip(lanes.clone()) {
-                                *side -= value * f64::from(column == Ok(at));
+                                let earlier = &before[group * size + at_unknown[place - (point - 1) * size]];
+                                // A seed's or fit's side is a positive zero or not zero, so a finite term over a zero
+                                // read leaves it as it is. The right side's can be a negative zero, and takes every term.
+                                if !holds_right
+                                    && value.is_finite()
+                                    && earlier.iter().all(|value| *value == 0.0)
+                                {
+                                    continue;
+                                }
+                                for ((side, earlier), _) in sides.iter_mut().zip(earlier).zip(lanes) {
+                                    *side -= value * earlier;
+                                }
                             }
-                        } else {
-                            let earlier = &before[group * size + at_unknown[place - (point - 1) * size]];
-                            // A seed's or fit's side is a positive zero or not zero, so a finite term over a zero
-                            // read leaves it as it is. The right side's can be a negative zero, and takes every term.
-                            if !holds_right && value.is_finite() && earlier.iter().all(|value| *value == 0.0)
+                        }
+                    }
+                } else {
+                    let mut waiting = terms[group].iter().peekable();
+                    for (row, reads) in reads.iter().enumerate() {
+                        let sides = &mut cells[at_row[row]];
+                        for at in 0..=reads.len() {
+                            while let Some(&(_, _, lane, value)) =
+                                waiting.next_if(|term| (term.0, term.1) == (row, at))
                             {
+                                sides[lane] -= value;
+                            }
+                            let Some(&(unknown, value)) = reads.get(at) else {
+                                continue;
+                            };
+                            let earlier = &before[group * size + unknown];
+                            if value.is_finite() && earlier.iter().all(|value| *value == 0.0) {
                                 continue;
                             }
-                            for ((side, earlier), _) in sides.iter_mut().zip(earlier).zip(lanes.clone()) {
+                            for ((side, earlier), _) in sides.iter_mut().zip(earlier).zip(lanes) {
                                 *side -= value * earlier;
                             }
                         }
@@ -276,14 +347,14 @@ impl InitializationSystem<'_> {
                 .map(|(place, value)| (at_unknown[place - point * size], value))
                 .collect();
                 for (group, cells) in walked.chunks(size).enumerate() {
-                    let lanes = group * LANES..((group + 1) * LANES).min(width);
+                    let lanes = &order[group * LANES..((group + 1) * LANES).min(width)];
                     for &(at, value) in &entries {
                         // An anchor's cell is a positive zero or not zero, so a finite term over a zero read leaves it.
                         if value.is_finite() && cells[at].iter().all(|value| *value == 0.0) {
                             continue;
                         }
-                        for (cell, walked) in row[lanes.clone()].iter_mut().zip(&cells[at]) {
-                            *cell += value * walked;
+                        for (&column, walked) in lanes.iter().zip(&cells[at]) {
+                            row[column] += value * walked;
                         }
                     }
                 }
@@ -297,7 +368,8 @@ impl InitializationSystem<'_> {
         let corner = size + fits;
         let mut matrix = vec![vec![0.0; corner + 1]; corner];
         let add = |cells: &mut Vec<f64>, source: &[[f64; LANES]], place: usize, value: f64| {
-            let side = |at: usize| source[at / LANES * size + at_unknown[place]][at % LANES];
+            let side =
+                |at: usize| source[slot_of[at] / LANES * size + at_unknown[place]][slot_of[at] % LANES];
             for (at, &seed) in read.iter().enumerate() {
                 cells[seed] += value * side(at);
             }
@@ -484,9 +556,6 @@ mod tests {
         })
     }
 
-    /// One ring over a five-row chain's stage pattern with synthetic values: zeros of both signs among the entries
-    /// and the right sides, subnormals, sparse blocks, seeds and fits. A right side is a negative zero but for `drawn`
-    /// of them.
     fn ring_bits(body: &crate::CompiledBody, legs: u32, fits: usize, drawn: f64, state: &mut u64) -> Vec<u8> {
         use crate::*;
         use core::num::{NonZeroU32, NonZeroU64};
@@ -576,8 +645,6 @@ mod tests {
         }
     }
 
-    /// The digest is what main's ring gave these rings. In the sparse ones a negative zero on a right side meets a
-    /// zero read of the block before, which only the right side's group must take.
     #[test]
     fn a_ring_keeps_the_bits_it_had_on_zeros_of_both_signs() {
         let body = chain_body().expect("a chain");
