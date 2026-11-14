@@ -2230,12 +2230,14 @@ fn bind(
                 default: match context {
                     ParameterContext::Body => None,
                     ParameterContext::Site(Sites::Class(class)) => Some(Binding::Class(*class)),
-                    ParameterContext::Site(Sites::Blood) => Some(Binding::Network(Network::Vascular)),
                     ParameterContext::Site(Sites::Urinary) => Some(Binding::Network(Network::Urinary)),
                     ParameterContext::Site(Sites::Alimentary) => Some(Binding::Network(Network::Gut)),
                     ParameterContext::Site(Sites::Airway) => Some(Binding::Network(Network::Airway)),
                     ParameterContext::Site(Sites::Tissue(_) | Sites::Besides(_)) => {
                         Some(Binding::Class(Class::CapillaryBed))
+                    }
+                    ParameterContext::Site(Sites::Blood | Sites::Veins) => {
+                        Some(Binding::Network(Network::Vascular))
                     }
                     ParameterContext::Edge(network) => Some(Binding::Network(*network)),
                 },
