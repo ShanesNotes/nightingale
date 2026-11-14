@@ -257,7 +257,6 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
 }
 
 #[test]
-#[ignore = "admits the whole body and runs its first minute; the full gate runs it"]
 fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     let start = Start::admitted();
     the_body_admits_at_06_55(&start);
