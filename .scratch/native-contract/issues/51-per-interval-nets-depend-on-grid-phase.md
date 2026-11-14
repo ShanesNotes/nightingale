@@ -45,3 +45,11 @@ What the new shape stops seeing: within-beat errors on three cardiac work column
 
 What no check sees: a reshaped pulse that nets to zero each beat on gravity work c7, stroke work c30 and wall work c34. Energy's certificate sees a drift in their total, not that reshape.
 
+The independent check of this change (`~/lanes/logs/ng-wave-4/nc51-build/verify-coordinator/VERIFY-pr158.md`) found more that the new shape stops seeing, and what bounds each loss.
+
+- A distance is one number for a quantity over the whole window: twice the coarser refinements' largest error at any compared instant. Reading sixteen times as many instants found the coarse rung's sharpest errors: a jump at a posture step, read 0.625 ms into the rung's 10 ms step, and a valve event the rung makes 3 to 5 ms early. So 187 of 241 level distances and 177 of 257 net distances grew, 12 rows and 27 columns by more than a tenth, and none fell. Main's tighter numbers were phase luck against the posture steps as well as the beats.
+- Four flows of the circulation and the tricuspid valve's memory: rows 201, 196, 203, 199 and 160. Their level distances grew 2.7 to 23 times. A run that holds row 196 flat, or row 160 flat at half its peak, now passes. A flow's error that its water column carries is still caught by that column's net, from 0.64 to 28.5 held for 10 ms.
+- Gravity work c7. Main refused a pulse 10 ms late. The new shape passes every delay to 200 ms, because the built net distance, 0.0098, is wider than the column's whole swing, 0.0084. Wall work c34's net distance is wider than its swing too.
+- What still holds these: the whole-beat nets for c22, c30, c34 and c7, whose distances did not move; the water column's net for each flow; and the transition times for the valve. No run ties the valve's memory to its columns.
+- Thirty real cores, from honest to must-fail, pass or fail at the head as they do on main, at admission. That is a small family, and no proof that no core gets through.
+- A window that starts 0.75 s or more after admission fails honest cores, because a young window reads each net since admission. No shipped path starts one. [Native-contract 53](53-a-late-window-fails-honest-cores.md) holds that, and the two rules of this change that no test holds.
