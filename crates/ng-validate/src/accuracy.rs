@@ -243,6 +243,12 @@ pub enum AccuracyFailure {
         error: Compensated,
         distance: Compensated,
     },
+    /// A slice window's run read another number of whole beats than the reference's finest refinement made.
+    OtherBeats {
+        case: usize,
+        beats: usize,
+        finest: usize,
+    },
     /// A slice window's body holds no heart phase, or its finest refinement made fewer than two whole beats.
     TooFewBeats,
     /// A slice window's run held other modes than the reference's finest refinement at more compared instants than
@@ -314,7 +320,7 @@ fn comparisons(
 /// Runs each case with the same core. After every accepted step it compares the accepted segment with the
 /// closed form: both amounts, the circulation exchange and any boundary exchange. A core that diverges fails
 /// here at its first bad instant, before positivity can intervene. A slice window's worst is the largest share
-/// of its distance any quantity or transition reached.
+/// of its distance any quantity, any exchange's net over a whole beat or any transition reached.
 pub fn accuracy(
     solver: &dyn CoupledSolver,
     policy: &AccuracyPolicy,

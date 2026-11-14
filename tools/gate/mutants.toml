@@ -1393,6 +1393,20 @@ new = '''if false {
 test = "-p ng-validate --lib window::tests::a_one_sign_error_inside_every_interval_fails_on_its_whole_beat"
 
 [[mutant]]
+name = "verdict-refuses-other-beats"
+path = "crates/ng-validate/src/window.rs"
+old = '''if beats != finest {'''
+new = '''if false {'''
+test = "-p ng-validate --lib window::tests::a_run_with_other_beats_than_the_window_is_refused"
+
+[[mutant]]
+name = "window-refuses-one-beat"
+path = "crates/ng-validate/src/window.rs"
+old = '''if finest.beat_nets().count() < 2 {'''
+new = '''if false {'''
+test = "-p ng-validate --lib window::tests::a_window_of_one_whole_beat_is_refused_and_one_of_two_admitted"
+
+[[mutant]]
 name = "window-finds-beat-edges"
 path = "crates/ng-validate/src/window.rs"
 old = '''if high(accepted.value(phase)) < phase_was && now.nanoseconds() <= end {'''

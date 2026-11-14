@@ -42,12 +42,13 @@ impl WindowPolicy {
             refinement_scales: ErrorScales::uniform(scale(1e9), scale(1.0)).expect("positive constants"),
         }
     }
-    /// How many times the coarser refinements' spread a core may stand from the finest, on values, transitions and
-    /// instants in other modes.
+    /// How many times the coarser refinements' spread a core may stand from the finest, on values, exchanges' nets
+    /// over whole beats, transitions and instants in other modes.
     pub fn margin(&self) -> u64 {
         self.margin
     }
-    /// The least a quantity's distance may be, as a share of the most the finest refinement holds of it.
+    /// The least a quantity's distance may be, as a share of the most the finest refinement holds of it, and the
+    /// least an exchange's whole-beat distance may be, as a share of its largest net over a whole beat.
     pub fn distance_floor(&self) -> Compensated {
         Compensated::of(&self.floor())
     }
@@ -318,6 +319,10 @@ impl Measured {
                 }
             }
         }
+        let (beats, finest) = (run.beat_nets().count(), self.target.beat_nets().count());
+        if beats != finest {
+            return Err(AccuracyFailure::OtherBeats { case, beats, finest });
+        }
         for ((beat_end, nets), (_, exact)) in run.beat_nets().zip(self.target.beat_nets()) {
             let columns = self
                 .compared
@@ -425,8 +430,9 @@ fn admission(error: AdmissionError) -> AccuracyFailure {
 /// 06:55, then a ramp from supine to seated past the first cycle, then a meal of water, sodium, potassium and
 /// chloride, on a compressed synthetic day. The finest refinement stands for the solution. A core passes where it
 /// stands no more than twice as far from it as the coarser two do, the coarsest being the body's longest step. Values
-/// are compared where a run holds the finest's modes, and where the modes differ the window compares when each run
-/// made its transitions and how many instants it spent in other modes.
+/// are compared where a run holds the finest's modes, and each exchange's net over each whole beat of the finest,
+/// from one beat edge to the next. Where the modes differ the window compares when each run made its transitions
+/// and how many instants it spent in other modes.
 pub struct SliceWindow {
     body: CompiledBody,
     start: Box<InitialRevision>,
@@ -451,10 +457,7 @@ impl SliceWindow {
             .find(|row| row.kind() == HEART_PHASE)
             .ok_or(AccuracyFailure::TooFewBeats)?
             .id();
-        let finest = trace(&body, &start, &policy, &finest, Edges::PhaseFalls(phase))?;
-        if finest.beat_nets().count() < 2 {
-            return Err(AccuracyFailure::TooFewBeats);
-        }
+        let finest = whole_beats(trace(&body, &start, &policy, &finest, Edges::PhaseFalls(phase))?)?;
         let edges: Vec<SimTime> = finest.beats.iter().map(|beat| beat.at).collect();
         let [coarse, middle] = [&coarse, &middle]
             .map(|reference| trace(&body, &start, &policy, reference, Edges::Finest(&edges)));
@@ -493,6 +496,13 @@ impl SliceWindow {
         measured.seal(&mut number);
         Digest::of_canonical(&bytes)
     }
+}
+
+fn whole_beats(finest: Trace) -> Result<Trace, AccuracyFailure> {
+    if finest.beat_nets().count() < 2 {
+        return Err(AccuracyFailure::TooFewBeats);
+    }
+    Ok(finest)
 }
 
 fn end() -> SimTime {
@@ -609,8 +619,8 @@ enum Reading {
     Total(Compensated),
 }
 
-/// A level as it stands, and an exchange's net over the interval the instant ends. A running total carries its signed
-/// error from interval to interval, where it cancels or grows by where the grid falls in the beat.
+/// A level as it stands, and an exchange's net over the interval the instant ends. A running total would add up an
+/// honest core's own one-sign error: it failed the 16 s reference at every grid phase measured.
 fn over_interval(readings: impl Iterator<Item = Reading>, reached: &mut [Compensated]) -> Vec<Compensated> {
     (readings.zip(reached.iter_mut()))
         .map(|(reading, before)| match reading {
@@ -674,6 +684,7 @@ fn timeline() -> Result<Vec<BoundaryEvent>, AdmissionError> {
 mod tests {
     use super::{
         Beat, Compared, Instant, Kind, Measured, Reading, Trace, Transition, WindowPolicy, over_interval,
+        whole_beats,
     };
     use crate::{AccuracyFailure, TwoReservoirs};
     use ng_contract::{Compensated, Dimensionless, Measure, SimTime};
@@ -756,29 +767,89 @@ mod tests {
         assert_eq!(instants, expected);
     }
 
-    #[test]
-    fn a_one_sign_error_inside_every_interval_fails_on_its_whole_beat() {
+    fn one_beat_apart() -> Measured {
         let fixture = TwoReservoirs::closed().expect("the fixture compiles");
         let column = fixture.circulation().expect("a circulation column");
-        let alternating = |high: f64, low: f64| [high, low, high, low, high, low, high, low, high];
-        let window = Measured::new(
+        Measured::new(
             &WindowPolicy::of(SECOND),
             vec![Compared::Exchange(column)],
             one_exchange([1.0; 9]),
-            &[&one_exchange(alternating(1.1, 0.9))],
+            &[&one_exchange(alternating(1.1328125, 0.8828125))],
             SimTime::from_ns(90 * MILLISECOND),
-        );
+        )
+    }
+
+    fn alternating(high: f64, low: f64) -> [f64; 9] {
+        [high, low, high, low, high, low, high, low, high]
+    }
+
+    /// The rung's beats each net 0.03125 over the finest's, so a beat may stand 0.0625 from it.
+    #[test]
+    fn a_one_sign_error_inside_every_interval_fails_on_its_whole_beat() {
+        let window = one_beat_apart();
+        let column = window.compared[0];
         let one_sign = window.verdict(&one_exchange([1.15; 9]), 0);
         assert!(
             matches!(
                 one_sign,
                 Err(AccuracyFailure::BeatOutside { beat_end, column: failed, .. })
-                    if beat_end == SimTime::from_ns(50 * MILLISECOND) && failed == column
+                    if beat_end == SimTime::from_ns(50 * MILLISECOND) && Compared::Exchange(failed) == column
             ),
             "{one_sign:?}"
         );
         let both_signs = window.verdict(&one_exchange(alternating(1.15, 0.85)), 0);
         assert!(both_signs.is_ok(), "{both_signs:?}");
+        let inside = window.verdict(&one_exchange([1.015; 9]), 0);
+        assert!(inside.is_ok(), "{inside:?}");
+        let outside = window.verdict(&one_exchange([1.016; 9]), 0);
+        assert!(
+            matches!(
+                outside,
+                Err(AccuracyFailure::BeatOutside { beat_end, .. }) if beat_end == SimTime::from_ns(50 * MILLISECOND)
+            ),
+            "{outside:?}"
+        );
+    }
+
+    #[test]
+    fn a_run_with_other_beats_than_the_window_is_refused() {
+        let window = one_beat_apart();
+        let mut fewer = one_exchange([1.0; 9]);
+        fewer.beats.pop();
+        let refused = window.verdict(&fewer, 3);
+        assert!(
+            matches!(
+                refused,
+                Err(AccuracyFailure::OtherBeats {
+                    case: 3,
+                    beats: 1,
+                    finest: 2
+                })
+            ),
+            "{refused:?}"
+        );
+        fewer.beats.clear();
+        let none = window.verdict(&fewer, 3);
+        assert!(
+            matches!(
+                none,
+                Err(AccuracyFailure::OtherBeats {
+                    beats: 0,
+                    finest: 2,
+                    ..
+                })
+            ),
+            "{none:?}"
+        );
+    }
+
+    #[test]
+    fn a_window_of_one_whole_beat_is_refused_and_one_of_two_admitted() {
+        let mut finest = one_exchange([1.0; 9]);
+        assert_eq!(finest.beat_nets().count(), 2);
+        assert!(whole_beats(one_exchange([1.0; 9])).is_ok());
+        finest.beats.pop();
+        assert!(matches!(whole_beats(finest), Err(AccuracyFailure::TooFewBeats)));
     }
 
     #[test]
