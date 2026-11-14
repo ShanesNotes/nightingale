@@ -1363,6 +1363,13 @@ new = '''                }
 test = "-p ng-validate --test admission_crossings a_guard_that_reads_a_fit_has_the_slopes_its_differences_give"
 
 [[mutant]]
+name = "panel-order-swapped"
+path = "crates/ng-contract/src/ring.rs"
+old = '''            for pivot in start..end.min(row) {'''
+new = '''            for pivot in (start..end.min(row)).rev() {'''
+test = "-p ng-contract --lib ring::tests::a_panel_at_a_time_keeps_every_bit_of_a_pivot_at_a_time"
+
+[[mutant]]
 name = "observation-time-mean-counts-samples"
 path = "crates/ng-observe/src/observer.rs"
 old = '''covered: covered.saturating_add(length),'''
