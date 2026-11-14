@@ -18,6 +18,8 @@ On ryzen, beside one or two other jobs at a load of 5.6 to 13 on 12 threads, the
 
 Two things wait on this ticket. The body's run test (`the_whole_body_admits_runs_its_first_minute_and_holds_its_pins` in `crates/ng-validate/tests/body_run.rs`) is ignored, so only the full gate runs it. It leaves the ignored tier, and a mutant row that replays it (`body-trace-pinned`) can land, once its binary costs no more than the slowest test binary the merge gate runs today. That is `crates/ng-validate/tests/arena.rs`: 303 s in the beelink's proof of `7b56123` and 535 s in ryzen's proof of `e9a0a06`. The body's binary took 470 s on the beelink beside one other job and 886 s on ryzen.
 
+The nightly full gate runs that test since part 4: about 470 s more on the beelink, and 886 s on ryzen beside other jobs. The nightly took 3,650 s at main `28d0d78`, at a low CPU weight, against a limit of 7,200 s. A nightly that nears the limit is answered by this ticket's cut or by a longer limit, never by leaving the test out. When the run test rejoins the merge gate, a mutant row shows its held-pool assertion fail by itself: the independent check of nightingale#155 opened an exit on a held pool, and admission refused that body before the assertion ran.
+
 This ticket measures and chooses. It names no fix as chosen.
 
 - [ ] The ring solve's share of admission on the whole body is measured on one named build worker, with the update count and each update's linearize and solve seconds
