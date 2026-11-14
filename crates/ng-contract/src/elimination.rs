@@ -100,6 +100,14 @@ impl Elimination {
         }
     }
 
+    pub(crate) fn places(&self) -> (Vec<usize>, Vec<usize>) {
+        let (mut rows, mut unknowns) = (vec![0; self.rows.len()], vec![0; self.rows.len()]);
+        for (at, (&row, &unknown)) in self.rows.iter().zip(&self.unknowns).enumerate() {
+            rows[index(row)] = at;
+            unknowns[index(unknown)] = at;
+        }
+        (rows, unknowns)
+    }
     pub(crate) fn solved_by(&self) -> Vec<RowId> {
         let mut solved_by = vec![RowId::at(0); self.rows.len()];
         for (&unknown, &row) in self.unknowns.iter().zip(&self.rows) {
@@ -145,7 +153,7 @@ pub struct Factors<'b> {
     plan: &'b Elimination,
     lu: Vec<f64>,
 }
-const LANES: usize = 8;
+pub(crate) const LANES: usize = 8;
 
 impl Factors<'_> {
     /// Replaces a right side, one slot per row, with the update, one slot per unknown.
@@ -157,25 +165,77 @@ impl Factors<'_> {
             side[index(unknown)] = value;
         }
     }
-    pub(crate) fn solve_sides(&self, sides: &mut [f64], width: usize) {
-        let Elimination { rows, unknowns, .. } = self.plan;
-        let mut pivoted = vec![[0.0; LANES]; rows.len()];
-        for group in (0..width).step_by(LANES) {
-            let lanes = LANES.min(width - group);
-            for (pivot, &row) in pivoted.iter_mut().zip(rows) {
-                let side = &sides[index(row) * width + group..][..lanes];
-                for (lane, &value) in pivot.iter_mut().zip(side.iter().chain(core::iter::repeat(&0.0))) {
-                    *lane = value;
-                }
-            }
-            self.substitute(&mut pivoted);
-            for (pivot, &unknown) in pivoted.iter().zip(unknowns) {
-                let side = &mut sides[index(unknown) * width + group..][..lanes];
-                for (value, &lane) in side.iter_mut().zip(pivot) {
-                    *value = lane;
-                }
+    pub(crate) fn reach(&self) -> Option<Reach> {
+        Reach::of(self)
+    }
+    pub(crate) fn solve_pivoted(
+        &self,
+        group: &mut [[f64; LANES]],
+        reach: Option<&Reach>,
+        spare: &mut [[f64; LANES]],
+        marks: &mut Marks,
+    ) {
+        spare.copy_from_slice(group);
+        if !reach.is_some_and(|reach| self.substitute_reached(group, reach, marks)) {
+            group.copy_from_slice(spare);
+            self.substitute(group);
+        }
+    }
+    /// Walks only the rows a nonzero side reaches through a nonzero factor, in the order a full walk takes them. A row
+    /// whose side is a positive zero and whose nonzero factors read only such rows keeps that zero going forward and
+    /// takes zero over its pivot going back, as a full walk gives it. A value that is not finite sends the group back
+    /// to the full walk, since a zero factor times it is not zero.
+    fn substitute_reached(&self, pivoted: &mut [[f64; LANES]], reach: &Reach, marks: &mut Marks) -> bool {
+        let Elimination {
+            starts,
+            columns,
+            diagonals,
+            ..
+        } = self.plan;
+        let size = pivoted.len();
+        marks.clear();
+        for (at, values) in pivoted.iter().enumerate() {
+            if values.iter().any(|value| value.to_bits() != 0) {
+                marks.forward[at] = true;
+                marks.stack.push(at as u32);
             }
         }
+        marks.spread(|marks| &mut marks.forward, &reach.lower_starts, &reach.lower);
+        for at in (0..size).filter(|&at| marks.forward[at]) {
+            let line = index(starts[at])..index(diagonals[at]);
+            let mut sum = pivoted[at];
+            for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
+                for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
+                    *value -= cell * read;
+                }
+            }
+            pivoted[at] = sum;
+        }
+        marks.back.copy_from_slice(&marks.forward);
+        marks
+            .stack
+            .extend((0..size as u32).filter(|&at| marks.forward[index(at)]));
+        marks.spread(|marks| &mut marks.back, &reach.upper_starts, &reach.upper);
+        for at in (0..size).filter(|&at| !marks.back[at]) {
+            pivoted[at] = [0.0 / self.lu[index(diagonals[at])]; LANES];
+        }
+        for at in (0..size).rev().filter(|&at| marks.back[at]) {
+            let line = index(diagonals[at]) + 1..index(starts[at + 1]);
+            let mut sum = pivoted[at];
+            for (cell, &column) in self.lu[line.clone()].iter().zip(&columns[line]) {
+                for (value, read) in sum.iter_mut().zip(pivoted[index(column)]) {
+                    *value -= cell * read;
+                }
+            }
+            let pivot = self.lu[index(diagonals[at])];
+            for value in &mut sum {
+                *value /= pivot;
+            }
+            pivoted[at] = sum;
+        }
+        (0..size)
+            .filter(|&at| marks.back[at])
+            .all(|at| pivoted[at].iter().all(|value| value.is_finite()))
     }
     fn substitute<const L: usize>(&self, pivoted: &mut [[f64; L]]) {
         let Elimination {
@@ -211,9 +271,128 @@ impl Factors<'_> {
     }
 }
 
+pub(crate) struct Reach {
+    lower_starts: Vec<u32>,
+    lower: Vec<u32>,
+    upper_starts: Vec<u32>,
+    upper: Vec<u32>,
+}
+impl Reach {
+    pub(crate) fn key(
+        &self,
+        rows: &[usize],
+        at_row: &[usize],
+        marks: &mut Marks,
+    ) -> (usize, usize, usize, u64) {
+        marks.clear();
+        for &row in rows {
+            let at = at_row[row];
+            if !marks.forward[at] {
+                marks.forward[at] = true;
+                marks.stack.push(at as u32);
+            }
+        }
+        marks.spread(|marks| &mut marks.forward, &self.lower_starts, &self.lower);
+        marks.back.copy_from_slice(&marks.forward);
+        marks
+            .stack
+            .extend((0..marks.forward.len() as u32).filter(|&at| marks.forward[index(at)]));
+        marks.spread(|marks| &mut marks.back, &self.upper_starts, &self.upper);
+        let mut key = (usize::MAX, 0, 0, 0_u64);
+        for at in (0..marks.back.len()).filter(|&at| marks.back[at]) {
+            key.0 = key.0.min(at);
+            key.1 = at;
+            key.2 += 1;
+            key.3 = key
+                .3
+                .wrapping_add((at as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        }
+        key
+    }
+    /// `None` where a factor is not finite, since a zero times it is not zero. `factor` refuses that case first, so
+    /// this is a second guard.
+    fn of(factors: &Factors<'_>) -> Option<Self> {
+        let Elimination {
+            starts,
+            columns,
+            diagonals,
+            ..
+        } = factors.plan;
+        if !factors.lu.iter().all(|cell| cell.is_finite()) {
+            return None;
+        }
+        let size = diagonals.len();
+        let transpose = |lines: &dyn Fn(usize) -> core::ops::Range<usize>| {
+            let mut counts = vec![0_u32; size + 1];
+            for at in 0..size {
+                for entry in lines(at).filter(|&entry| factors.lu[entry] != 0.0) {
+                    counts[index(columns[entry]) + 1] += 1;
+                }
+            }
+            for at in 0..size {
+                counts[at + 1] += counts[at];
+            }
+            let mut filled = counts.clone();
+            let mut readers = vec![0_u32; index(counts[size])];
+            for at in 0..size {
+                for entry in lines(at).filter(|&entry| factors.lu[entry] != 0.0) {
+                    let column = index(columns[entry]);
+                    readers[index(filled[column])] = at as u32;
+                    filled[column] += 1;
+                }
+            }
+            (counts, readers)
+        };
+        let (lower_starts, lower) = transpose(&|at| index(starts[at])..index(diagonals[at]));
+        let (upper_starts, upper) = transpose(&|at| index(diagonals[at]) + 1..index(starts[at + 1]));
+        Some(Self {
+            lower_starts,
+            lower,
+            upper_starts,
+            upper,
+        })
+    }
+}
+
+pub(crate) struct Marks {
+    forward: Vec<bool>,
+    back: Vec<bool>,
+    stack: Vec<u32>,
+}
+impl Marks {
+    pub(crate) fn new(size: usize) -> Self {
+        Self {
+            forward: vec![false; size],
+            back: vec![false; size],
+            stack: Vec::with_capacity(size),
+        }
+    }
+    fn clear(&mut self) {
+        self.forward.fill(false);
+        self.back.fill(false);
+        self.stack.clear();
+    }
+    fn spread(&mut self, set: impl Fn(&mut Self) -> &mut Vec<bool>, starts: &[u32], readers: &[u32]) {
+        while let Some(row) = self.stack.pop() {
+            let row = index(row);
+            for &reader in &readers[index(starts[row])..index(starts[row + 1])] {
+                let marked = &mut set(self)[index(reader)];
+                if !*marked {
+                    *marked = true;
+                    self.stack.push(reader);
+                }
+            }
+        }
+    }
+    #[cfg(test)]
+    fn walked(&self) -> usize {
+        self.back.iter().filter(|&&marked| marked).count()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Elimination, LANES};
+    use super::{Elimination, Factors, LANES, Marks};
     use crate::body::{RowId, UnknownId};
 
     fn next(state: &mut u64) -> f64 {
@@ -247,6 +426,44 @@ mod tests {
         b
     }
 
+    /// A negative zero in `a` is an entry of the pattern whose value is zero.
+    fn planned(a: &[Vec<f64>], matching: &[RowId]) -> (Elimination, Vec<f64>) {
+        let (mut offsets, mut unknowns, mut values) = (vec![0], Vec::new(), Vec::new());
+        for line in a {
+            for (column, &value) in line.iter().enumerate() {
+                if value.to_bits() != 0 {
+                    unknowns.push(UnknownId::at(column));
+                    values.push(value);
+                }
+            }
+            offsets.push(unknowns.len());
+        }
+        (Elimination::plan(&offsets, &unknowns, matching), values)
+    }
+
+    fn grouped(factors: &Factors<'_>, sides: &[Vec<f64>], reached: bool, marks: &mut Marks) -> Vec<Vec<f64>> {
+        let (at_row, at_unknown) = factors.plan.places();
+        let size = at_row.len();
+        let reach = if reached { factors.reach() } else { None };
+        let mut answers = vec![vec![0.0; size]; sides.len()];
+        let mut spare = vec![[0.0; LANES]; size];
+        for (chunk, answers) in sides.chunks(LANES).zip(answers.chunks_mut(LANES)) {
+            let mut slab = vec![[0.0; LANES]; size];
+            for (lane, side) in chunk.iter().enumerate() {
+                for (row, &value) in side.iter().enumerate() {
+                    slab[at_row[row]][lane] = value;
+                }
+            }
+            factors.solve_pivoted(&mut slab, reach.as_ref(), &mut spare, marks);
+            for (lane, answer) in answers.iter_mut().enumerate() {
+                for (unknown, value) in answer.iter_mut().enumerate() {
+                    *value = slab[at_unknown[unknown]][lane];
+                }
+            }
+        }
+        answers
+    }
+
     fn shuffled(size: usize, state: &mut u64) -> (Vec<Vec<f64>>, Elimination, Vec<f64>) {
         let shuffle: Vec<usize> = (0..size).map(|at| (at * 7 + 3) % size).collect();
         let mut a = vec![vec![0.0; size]; size];
@@ -259,18 +476,8 @@ mod tests {
                 }
             }
         }
-        let (mut offsets, mut unknowns, mut values) = (vec![0], Vec::new(), Vec::new());
-        for line in &a {
-            for (column, &value) in line.iter().enumerate() {
-                if value != 0.0 {
-                    unknowns.push(UnknownId::at(column));
-                    values.push(value);
-                }
-            }
-            offsets.push(unknowns.len());
-        }
         let matching: Vec<RowId> = shuffle.iter().map(|&row| RowId::at(row)).collect();
-        let plan = Elimination::plan(&offsets, &unknowns, &matching);
+        let (plan, values) = planned(&a, &matching);
         (a, plan, values)
     }
 
@@ -315,26 +522,142 @@ mod tests {
     #[test]
     fn each_side_keeps_the_bits_it_had_alone_or_beside_others() {
         let mut state = 0x2545_F491_4F6C_DD1D;
-        let (mut alone, mut together) = (Vec::new(), Vec::new());
+        let (mut alone, mut reached, mut full) = (Vec::new(), Vec::new(), Vec::new());
+        let bits = |side: &[f64]| {
+            side.iter()
+                .flat_map(|value| value.to_bits().to_be_bytes())
+                .collect::<Vec<u8>>()
+        };
         for size in [1, 2, 5, 17, 40] {
             let (_, plan, values) = shuffled(size, &mut state);
             let factors = plan.factor(&values).expect("a pivot");
             let sides = sides(size, &mut state);
-            let width = sides.len();
-            let mut rows: Vec<f64> = (0..size * width)
-                .map(|slot| sides[slot % width][slot / width])
-                .collect();
-            factors.solve_sides(&mut rows, width);
-            for (at, mut side) in sides.into_iter().enumerate() {
+            let mut marks = Marks::new(size);
+            let walked = grouped(&factors, &sides, true, &mut marks);
+            let whole = grouped(&factors, &sides, false, &mut marks);
+            for ((mut side, walked), whole) in sides.into_iter().zip(walked).zip(whole) {
                 factors.solve(&mut side);
-                alone.extend(side.iter().flat_map(|value| value.to_bits().to_be_bytes()));
-                let column = rows.iter().skip(at).step_by(width);
-                together.extend(column.flat_map(|value| value.to_bits().to_be_bytes()));
+                alone.extend(bits(&side));
+                reached.extend(bits(&walked));
+                full.extend(bits(&whole));
             }
         }
         let had = "9c64d90d69b25c98bf72b65448a978ef42f6406db1317f7541e070b3d7eb3478";
         assert_eq!(hex(&alone), had);
-        assert_eq!(hex(&together), had);
+        assert_eq!(hex(&reached), had);
+        assert_eq!(hex(&full), had);
+    }
+
+    /// Two parts of `part` rows, each reading only its own rows, but for one entry of the second part that reads the
+    /// first with a value of zero, and a last row that reads only itself. Odd rows are negated, so some pivots are
+    /// negative.
+    fn two_parts(part: usize) -> (Elimination, Vec<f64>) {
+        let mut state = 0x9E37_79B9_7F4A_7C15;
+        let mut a = vec![vec![0.0; 2 * part + 1]; 2 * part + 1];
+        for (row, line) in a.iter_mut().enumerate() {
+            let first = row / part * part;
+            line[row] = 4.0 + next(&mut state);
+            if row < 2 * part {
+                line[first + (row + 1) % part] = next(&mut state) - 0.5;
+                line[first + (row + 5) % part] = next(&mut state) - 0.5;
+            }
+            if row % 2 == 1 {
+                line.iter_mut()
+                    .filter(|cell| **cell != 0.0)
+                    .for_each(|cell| *cell = -*cell);
+            }
+        }
+        a[part + 3][2] = -0.0;
+        let matching: Vec<RowId> = (0..=2 * part).map(RowId::at).collect();
+        planned(&a, &matching)
+    }
+
+    #[test]
+    fn a_group_walks_only_the_rows_its_sides_reach() {
+        let mut state = 0x9E37_79B9_7F4A_7C15;
+        let part = 12;
+        let mut a = vec![vec![0.0; 2 * part]; 2 * part];
+        for (row, line) in a.iter_mut().enumerate() {
+            let first = row / part * part;
+            line[row] = 4.0 + next(&mut state);
+            line[first + (row + 1) % part] = next(&mut state) - 0.5;
+            line[first + (row + 5) % part] = next(&mut state) - 0.5;
+        }
+        let matching: Vec<RowId> = (0..2 * part).map(RowId::at).collect();
+        let (plan, values) = planned(&a, &matching);
+        let factors = plan.factor(&values).expect("a pivot");
+        let sides: Vec<Vec<f64>> = (0..LANES)
+            .map(|lane| {
+                (0..2 * part)
+                    .map(|row| {
+                        if row < part && row % 3 == lane % 3 {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut marks = Marks::new(2 * part);
+        let walked = grouped(&factors, &sides, true, &mut marks);
+        assert_eq!(marks.walked(), part, "the group walks its own part's rows");
+        for (mut side, walked) in sides.into_iter().zip(walked) {
+            factors.solve(&mut side);
+            let same = side
+                .iter()
+                .zip(&walked)
+                .all(|(one, other)| one.to_bits() == other.to_bits());
+            assert!(same, "a short walk keeps every bit");
+        }
+    }
+
+    fn alone_and_walked(factors: &Factors<'_>, sides: Vec<Vec<f64>>) -> bool {
+        let size = sides[0].len();
+        let walked = grouped(factors, &sides, true, &mut Marks::new(size));
+        sides.into_iter().zip(walked).all(|(mut side, walked)| {
+            factors.solve(&mut side);
+            side.iter()
+                .zip(&walked)
+                .all(|(one, other)| one.to_bits() == other.to_bits())
+        })
+    }
+
+    /// A row the walk leaves out reads an infinite one through a factor of zero, which the full walk turns into NaN.
+    #[test]
+    fn a_value_that_is_not_finite_takes_the_full_walk_and_keeps_its_bits() {
+        let (plan, values) = two_parts(12);
+        let factors = plan.factor(&values).expect("a pivot");
+        let sides: Vec<Vec<f64>> = (0..LANES)
+            .map(|lane| {
+                (0..25)
+                    .map(|row| match (lane, row) {
+                        (2, 2) => f64::INFINITY,
+                        (5, 7) => f64::NEG_INFINITY,
+                        _ => 0.0,
+                    })
+                    .collect()
+            })
+            .collect();
+        assert!(
+            alone_and_walked(&factors, sides),
+            "a value that is not finite keeps the full walk's bits"
+        );
+    }
+
+    /// Rows whose pivots are negative turn a zero over the pivot into a negative zero.
+    #[test]
+    fn a_negative_zero_side_keeps_its_sign_through_negative_pivots() {
+        let (plan, values) = two_parts(12);
+        let factors = plan.factor(&values).expect("a pivot");
+        let sides: Vec<Vec<f64>> = (0..LANES)
+            .map(|lane| {
+                (0..25)
+                    .map(|row| if lane > 0 && row == lane + 17 { -0.0 } else { 0.0 })
+                    .collect()
+            })
+            .collect();
+        assert!(alone_and_walked(&factors, sides), "zeros keep their signs");
     }
 
     #[test]

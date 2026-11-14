@@ -24,7 +24,7 @@ All 13 systems run at rung 0 in one body, on a synthetic fixture. The body admit
 
 ## Order
 
-Tickets 01, 02, 03, 04, 05, 07, 23, 27 and 29 and research tickets 11 to 15 are resolved. Ticket 06 lands in parts. Parts 1 to 3 and the first of part 4 are on main: the whole body compiles on its holds, admits at 06:55, runs its first minute, passes its certificate and holds its own pins. Its replay gates wait on [native-contract 50](../native-contract/issues/50-admission-ring-solve-cost.md), and its keep-back accessor is owed. Ticket 30 follows 06.
+Tickets 01, 02, 03, 04, 05, 07, 23, 27 and 29 and research tickets 11 to 15 are resolved. Ticket 06 lands in parts. Parts 1 to 3 and the first of part 4 are on main: the whole body compiles on its holds, admits at 06:55, runs its first minute, passes its certificate and holds its own pins. The body's run test is in the merge proof since nightingale#160, which landed [native-contract 50](../native-contract/issues/50-admission-ring-solve-cost.md). Its replay gates are next, and its keep-back accessor is owed. Ticket 30 follows 06.
 
 | Ticket | Waits for | What it lands |
 |---|---|---|
