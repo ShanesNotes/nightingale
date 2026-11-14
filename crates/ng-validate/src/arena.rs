@@ -170,7 +170,7 @@ impl Arena {
         second_policy: &dyn CoreFactory,
         clock: &dyn WallClock,
     ) -> Result<ReplayEvidence, ArenaFailure> {
-        let case = SliceCase::new().map_err(|error| ArenaFailure::Initialization(error.into()))?;
+        let case = SliceCase::new().map_err(ArenaFailure::Initialization)?;
         let window = self.window;
         let reference = move || window.finest();
         let either_floor = window.landing_ns().max(self.protocol.minimum_interval_ns);

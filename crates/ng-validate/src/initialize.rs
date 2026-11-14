@@ -301,6 +301,42 @@ pub fn admit_at<'m>(
     Ok(Admitted { session, provenance })
 }
 
+/// One admission solve, which every core and either port of a case starts from.
+#[derive(Clone)]
+pub struct AdmissionSolve {
+    workspace: AdmissionWorkspace,
+    origin: SimTime,
+}
+
+/// The admission solve alone, on a port with no input. No core reaches it, and the admission system's identity leaves
+/// the port out, so a port with no input before the fence starts from this solve as from its own.
+pub fn solve_admission(
+    body: &CompiledBody,
+    packet: ParameterPacket<SyntheticFixture>,
+    lens: &ObservationLens,
+    origin: SimTime,
+) -> Result<AdmissionSolve, InitializationFailure> {
+    let system = system(body, packet, BoundaryPort::new(Vec::new())?, lens, origin)?;
+    let workspace = initialize(&system, body);
+    Ok(AdmissionSolve { workspace, origin })
+}
+
+/// Admits a session from `solved`, checked as `admit_at` checks its own solve.
+pub fn admit_from<'m>(
+    body: &'m CompiledBody,
+    solved: &AdmissionSolve,
+    packet: ParameterPacket<SyntheticFixture>,
+    boundary: BoundaryPort,
+    core: &'m dyn CoupledSolver,
+    lens: &ObservationLens,
+    store: &'m dyn HistoryStore,
+) -> Result<Session<'m, Running>, InitializationFailure> {
+    let AdmissionSolve { workspace, origin } = solved;
+    let system = system(body, packet, boundary, lens, *origin)?;
+    let start = started(system, workspace.clone(), core, *origin)?;
+    admit_start(body, core, start, crate::arena_seed(), store)
+}
+
 fn system<'m>(
     body: &'m CompiledBody,
     packet: ParameterPacket<SyntheticFixture>,

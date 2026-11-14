@@ -1,8 +1,9 @@
 use crate::{
-    Admitted, CertificatePolicy, ExpectedDrift, MemoryStore, QuantityPolicy, ReplayCase, SlidingWindows,
-    admit_at,
+    AdmissionSolve, CertificatePolicy, ExpectedDrift, MemoryStore, QuantityPolicy, ReplayCase,
+    SlidingWindows, admit_from, solve_admission,
 };
 use core::cell::RefCell;
+use core::marker::PhantomData;
 use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::*;
 use ng_record::{Checkpoint, CheckpointError, HistoryStore, Running, Session};
@@ -1038,23 +1039,62 @@ pub fn arena_lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError
 
 const PAST_THE_FENCE_NS: u64 = 50_000_000;
 
-/// The slice from 06:55 until just past its first cycle. The stir fires inside it, and a stand and a gut water bolus wait
-/// at the fence. Each core resolution's start is admitted once, with the inputs and without, and every run resumes from a
-/// checkpoint of it.
-pub struct SliceCase {
-    body: CompiledBody,
-    starts: RefCell<Vec<Start>>,
+/// An assembly a replay case runs: its compiled body, its fixture packet and its lens.
+pub trait CaseAssembly {
+    fn compiled() -> Result<CompiledBody, AdmissionError>;
+    fn packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError>;
+    fn lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError>;
 }
+
+pub struct Slice;
+impl CaseAssembly for Slice {
+    fn compiled() -> Result<CompiledBody, AdmissionError> {
+        arena_body()
+    }
+    fn packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+        arena_packet(body)
+    }
+    fn lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError> {
+        arena_lens(body)
+    }
+}
+
+/// An assembly from 06:55 until just past its first cycle. The stir fires inside it, and a stand and a gut water bolus
+/// wait at the fence. One admission solve serves every start: each core resolution's start is admitted from it once,
+/// with the inputs and without, and every run resumes from a checkpoint of it.
+pub struct AssemblyCase<A> {
+    body: CompiledBody,
+    solved: AdmissionSolve,
+    inputs_at: SimTime,
+    starts: RefCell<Vec<Start>>,
+    assembly: PhantomData<A>,
+}
+pub type SliceCase = AssemblyCase<Slice>;
 struct Start {
     withheld: bool,
     saved: Checkpoint,
     identity: RunIdentity,
 }
-impl SliceCase {
-    pub fn new() -> Result<Self, AdmissionError> {
+impl<A: CaseAssembly> AssemblyCase<A> {
+    pub fn new() -> Result<Self, InitializationFailure> {
+        Self::inputs_at(fence())
+    }
+    /// The solve reads a port with no input, so an input admission would read with the known port, one before the
+    /// fence, is refused: the solve could not have read it.
+    fn inputs_at(at: SimTime) -> Result<Self, InitializationFailure> {
+        let fence = fence();
+        if let Some(early) = inputs(at)?.iter().find(|input| input.at() < fence) {
+            let id = early.id();
+            return Err(AdmissionError::EventBeforeFence { id, fence }.into());
+        }
+        let body = A::compiled()?;
+        let solved = solve_admission(&body, A::packet(&body)?, &A::lens(&body)?, anchor_moment())?;
         Ok(Self {
-            body: arena_body()?,
+            body,
+            solved,
+            inputs_at: at,
             starts: RefCell::default(),
+            assembly: PhantomData,
         })
     }
     fn start<'m>(
@@ -1071,11 +1111,10 @@ impl SliceCase {
             Some(at) => at,
             None => {
                 let inputs = if withheld { Vec::new() } else { self.events()? };
-                let (packet, lens) = (arena_packet(&self.body)?, arena_lens(&self.body)?);
+                let (packet, lens) = (A::packet(&self.body)?, A::lens(&self.body)?);
                 let port = BoundaryPort::new(inputs)?;
                 let links = MemoryStore::default();
-                let Admitted { session, .. } =
-                    admit_at(&self.body, packet, port, core, &lens, anchor_moment(), &links)?;
+                let session = admit_from(&self.body, &self.solved, packet, port, core, &lens, &links)?;
                 let start = Start {
                     withheld,
                     saved: session.checkpoint().map_err(moved)?,
@@ -1096,32 +1135,35 @@ fn fence() -> SimTime {
     SimTime::from_ns(anchor_moment().nanoseconds() + SECOND)
 }
 
+fn inputs(at: SimTime) -> Result<Vec<BoundaryEvent>, AdmissionError> {
+    let id = |name: &[u8]| InputId::new(Digest::of_canonical(name));
+    let stand = Posture::new(Measure::new(1.0)?, Legs::Standing)?;
+    let bolus = WaterDelivery {
+        boundary: GUT_WATER,
+        amount: Measure::new(400.0)?,
+        ends: SimTime::from_ns(at.nanoseconds() + SECOND),
+    };
+    Ok(vec![
+        BoundaryEvent::new(id(b"slice stand"), at, BoundaryInput::Posture(stand)),
+        BoundaryEvent::new(id(b"slice bolus"), at, BoundaryInput::Water(bolus)),
+    ])
+}
+
 /// At admission no link exists for a checkpoint or a resume to miss, so the one refusal left is a core whose resolution
 /// moved.
 fn moved(_: CheckpointError) -> InitializationFailure {
     InitializationFailure::Admission(AdmissionError::IdentityMismatch)
 }
 
-impl ReplayCase for SliceCase {
+impl<A: CaseAssembly> ReplayCase for AssemblyCase<A> {
     fn body(&self) -> &CompiledBody {
         &self.body
     }
     fn end(&self) -> SimTime {
-        SimTime::from_ns(fence().nanoseconds() + PAST_THE_FENCE_NS)
+        SimTime::from_ns(self.inputs_at.nanoseconds() + PAST_THE_FENCE_NS)
     }
     fn events(&self) -> Result<Vec<BoundaryEvent>, AdmissionError> {
-        let at = fence();
-        let id = |name: &[u8]| InputId::new(Digest::of_canonical(name));
-        let stand = Posture::new(Measure::new(1.0)?, Legs::Standing)?;
-        let bolus = WaterDelivery {
-            boundary: GUT_WATER,
-            amount: Measure::new(400.0)?,
-            ends: SimTime::from_ns(at.nanoseconds() + SECOND),
-        };
-        Ok(vec![
-            BoundaryEvent::new(id(b"slice stand"), at, BoundaryInput::Posture(stand)),
-            BoundaryEvent::new(id(b"slice bolus"), at, BoundaryInput::Water(bolus)),
-        ])
+        inputs(self.inputs_at)
     }
     fn admit<'m>(
         &'m self,
@@ -1136,5 +1178,24 @@ impl ReplayCase for SliceCase {
         store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         self.start(core, store, true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_case_refuses_an_input_before_the_fence_because_its_solve_read_none() {
+        let early = SimTime::from_ns(anchor_moment().nanoseconds() + SECOND / 2);
+        let refused = AssemblyCase::<Slice>::inputs_at(early).err();
+        assert!(
+            matches!(
+                refused,
+                Some(InitializationFailure::Admission(AdmissionError::EventBeforeFence { fence: at, .. }))
+                    if at == fence()
+            ),
+            "{refused:?}"
+        );
     }
 }

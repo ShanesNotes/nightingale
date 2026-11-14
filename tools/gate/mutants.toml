@@ -2766,6 +2766,29 @@ new = '''        let rate = k.zero::<Rate<Q>>();'''
 test = "-p ng-validate --test body the_gut_transit_reads_both_lumens_so_admission_can_place_each_species_between_them"
 
 [[mutant]]
+name = "case-withheld-start-knows-the-inputs"
+path = "crates/ng-validate/src/slice.rs"
+old = '''let inputs = if withheld { Vec::new() } else { self.events()? };'''
+new = '''let inputs = self.events()?;'''
+test = "-p ng-validate --test arena_body one_admission_solve_admits_each_start_to_the_bits_its_own_admission_gives"
+
+[[mutant]]
+name = "case-one-start-for-every-core"
+path = "crates/ng-validate/src/slice.rs"
+old = '''        let resolution = core.resolution().digest();
+        let found =
+            |start: &Start| start.withheld == withheld && start.identity.resolution().digest() == resolution;'''
+new = '''        let found = |start: &Start| start.withheld == withheld;'''
+test = "-p ng-validate --test arena_body one_admission_solve_admits_each_start_to_the_bits_its_own_admission_gives"
+
+[[mutant]]
+name = "case-takes-an-input-before-the-fence"
+path = "crates/ng-validate/src/slice.rs"
+old = '''if let Some(early) = inputs(at)?.iter().find(|input| input.at() < fence) {'''
+new = '''if let Some(early) = inputs(at)?.iter().find(|input| input.at() < anchor_moment()) {'''
+test = "-p ng-validate --lib a_case_refuses_an_input_before_the_fence_because_its_solve_read_none"
+
+[[mutant]]
 name = "vein-marks-sealed-when-none"
 path = "crates/ng-contract/src/anatomy.rs"
 old = '''if !veins.is_empty() {'''

@@ -275,8 +275,8 @@ pub use accuracy::{
 };
 pub use arena::{Arena, ArenaProtocol};
 pub use body::{
-    FluidRoute, HOLD_TABLE, Held, Hold, KEEP_BACKS, KeepBack, Release, body_anatomy, body_lens, body_packet,
-    body_schema, body_start_guess, whole_body,
+    BodyCase, FluidRoute, HOLD_TABLE, Held, Hold, KEEP_BACKS, KeepBack, Release, WholeBody, body_anatomy,
+    body_lens, body_packet, body_schema, body_start_guess, whole_body,
 };
 pub use burning::BurningBeds;
 pub use certificate::{
@@ -291,7 +291,9 @@ pub use healthy::{
     AnchorReturn, BareLens, CheckVerdict, DayActivities, RangeFailure, RangeGap, RangeReport, RangeResult,
     ReadingCheckError, ReadingChecks, ReturnGap, ReturnReport,
 };
-pub use initialize::{Admitted, admission_tolerance, admit_at, admit_solved};
+pub use initialize::{
+    AdmissionSolve, Admitted, admission_tolerance, admit_at, admit_from, admit_solved, solve_admission,
+};
 pub use reference::ReferenceIntegrator;
 pub use replay::{
     ChancePlan, ClockSource, CoreFactory, GateEvidence, MemoryStore, ReplayCase, ReplayEvidence,
@@ -302,8 +304,8 @@ pub use run::{
 };
 pub use score::{ArenaScore, ScorePart};
 pub use slice::{
-    SliceCase, anchor_moment, arena_anatomy, arena_body, arena_certificate, arena_lens, arena_organs,
-    arena_packet, arena_schema, arena_seed, hold_outside_slice,
+    AssemblyCase, CaseAssembly, Slice, SliceCase, anchor_moment, arena_anatomy, arena_body,
+    arena_certificate, arena_lens, arena_organs, arena_packet, arena_schema, arena_seed, hold_outside_slice,
 };
 pub use split::{SplitFailure, draw_split_trace, split_gate};
 pub use window::{Compared, SliceWindow, WindowPolicy};
