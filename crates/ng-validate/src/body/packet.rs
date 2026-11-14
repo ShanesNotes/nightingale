@@ -107,8 +107,8 @@ fn water_guess(site: &str, space: Space) -> Option<f64> {
     })
 }
 
-pub fn body_start_guess(row: RowKind) -> Result<Measure<Dimensionless>, AdmissionError> {
-    Measure::new(start_guess(row))
+pub fn body_start_guess(row: RowKind) -> Result<Compensated, AdmissionError> {
+    Ok(Compensated::of(&Measure::<Dimensionless>::new(start_guess(row))?))
 }
 
 fn start_guess(row: RowKind) -> f64 {

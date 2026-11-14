@@ -11,7 +11,22 @@ pub use packet::{body_lens, body_packet, body_start_guess};
 pub use schema::body_schema;
 pub use table::{HOLD_TABLE, Held, Hold, Release};
 
+use crate::{AssemblyCase, CaseAssembly};
 use ng_contract::*;
+
+pub struct WholeBody;
+impl CaseAssembly for WholeBody {
+    fn compiled() -> Result<CompiledBody, AdmissionError> {
+        whole_body()
+    }
+    fn packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+        body_packet(body)
+    }
+    fn lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError> {
+        body_lens(body)
+    }
+}
+pub type BodyCase = AssemblyCase<WholeBody>;
 
 fn exits(body: &mut Assembly<'_>) -> Result<(), AdmissionError> {
     let (mut laws, ports) = body.boundary()?.parts();

@@ -560,6 +560,10 @@ pub struct InitializationSystem<'m> {
     factors: Vec<f64>,
 }
 impl InitializationSystem<'_> {
+    /// The fence: the first instant the drive frames do not read, and the earliest stamp the admitted start takes.
+    pub fn fence(&self) -> SimTime {
+        self.pending.earliest_stamp(self.anchor_moment)
+    }
     pub(crate) fn width(&self) -> usize {
         let rows = self.body.rows().len();
         if self.interval.is_some() { 2 * rows } else { rows }
@@ -1915,6 +1919,58 @@ enum Reach {
 #[cfg(test)]
 mod tests {
     use super::{END, INTERIOR, RADAU};
+    use crate::*;
+    use core::num::{NonZeroU32, NonZeroU64};
+
+    const SECOND: u64 = 1_000_000_000;
+
+    fn pooled() -> Result<CompiledBody, AdmissionError> {
+        let mut map = AnatomyBuilder::new();
+        let at = Position::new(Measure::new(0.0)?, Measure::new(0.0)?, Measure::new(0.0)?);
+        let site = map.site::<VesselSegment>("synthetic vessel", at);
+        let mut schema = Schema::new(map.finish()?)?;
+        schema.boundary::<Water>("gut water", BoundaryDirection::IntoBody, site.id(), Space::Lumen)?;
+        assemble(schema, |mut body| {
+            let (mut laws, ports) = body.boundary()?.parts();
+            let BoundaryRoute { route, drive } = ports.route::<Water>("gut water")?;
+            let class = RateClass::new(RateBand::Wave, SECOND)?;
+            let flow = laws.kernel(|mut k| {
+                let value = k.read(&drive);
+                k.finish(value, laws.every_mode(), class)
+            });
+            laws.transfer(Transfer::new(&route, flow));
+            body.add(laws.finish());
+            body.compile()
+        })
+    }
+
+    #[test]
+    fn the_fence_is_the_earliest_stamp_the_admitted_start_takes_with_a_cycle_and_without()
+    -> Result<(), InitializationFailure> {
+        let body = pooled()?;
+        let anchor = SimTime::from_ns(7 * SECOND);
+        let cycle = Cycle::new(
+            NonZeroU64::new(2 * SECOND).expect("a period"),
+            NonZeroU32::new(2).expect("two intervals"),
+        )?;
+        let mut fences = Vec::new();
+        for mut packet in [
+            ParameterPacket::<SyntheticFixture>::new(),
+            ParameterPacket::periodic(cycle),
+        ] {
+            packet.start(body.rows()[0].kind(), Measure::<Water>::new(10.0)?, "synthetic")?;
+            let request = InitializationRequest::at(anchor);
+            let system = body.initialization(body.bind(packet)?, BoundaryPort::new(Vec::new())?, request)?;
+            let fence = system.fence();
+            let history = MethodHistory::new(Digest::of_canonical(b"fence test"), anchor, Vec::new());
+            let guess = system.workspace();
+            let parts = system.admit(guess, history)?.into_parts();
+            assert_eq!(fence, parts.pending.earliest_stamp(parts.time));
+            fences.push(fence.nanoseconds() - anchor.nanoseconds());
+        }
+        assert_eq!(fences, [1, 2 * SECOND]);
+        Ok(())
+    }
 
     fn interval(start: f64, h: f64, speed: f64, target: f64) -> [f64; 2] {
         let a = |j: usize, k: usize| h * speed * RADAU[j][k];

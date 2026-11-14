@@ -1,8 +1,7 @@
-use crate::{
-    Admitted, CertificatePolicy, ExpectedDrift, MemoryStore, QuantityPolicy, ReplayCase, SlidingWindows,
-    admit_at,
-};
+use crate::initialize::{AdmissionSolve, admit_from, solve_admission};
+use crate::{CertificatePolicy, ExpectedDrift, MemoryStore, QuantityPolicy, ReplayCase, SlidingWindows};
 use core::cell::RefCell;
+use core::marker::PhantomData;
 use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::*;
 use ng_record::{Checkpoint, CheckpointError, HistoryStore, Running, Session};
@@ -1043,23 +1042,46 @@ pub fn arena_lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError
 
 const PAST_THE_FENCE_NS: u64 = 50_000_000;
 
-/// The slice from 06:55 until just past its first cycle. The stir fires inside it, and a stand and a gut water bolus wait
-/// at the fence. Each core resolution's start is admitted once, with the inputs and without, and every run resumes from a
-/// checkpoint of it.
-pub struct SliceCase {
-    body: CompiledBody,
-    starts: RefCell<Vec<Start>>,
+pub trait CaseAssembly {
+    fn compiled() -> Result<CompiledBody, AdmissionError>;
+    fn packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError>;
+    fn lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError>;
 }
+
+pub struct Slice;
+impl CaseAssembly for Slice {
+    fn compiled() -> Result<CompiledBody, AdmissionError> {
+        arena_body()
+    }
+    fn packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+        arena_packet(body)
+    }
+    fn lens(body: &CompiledBody) -> Result<ObservationLens, AdmissionError> {
+        arena_lens(body)
+    }
+}
+
+pub struct AssemblyCase<A> {
+    body: CompiledBody,
+    solved: AdmissionSolve,
+    starts: RefCell<Vec<Start>>,
+    assembly: PhantomData<A>,
+}
+pub type SliceCase = AssemblyCase<Slice>;
 struct Start {
     withheld: bool,
     saved: Checkpoint,
     identity: RunIdentity,
 }
-impl SliceCase {
-    pub fn new() -> Result<Self, AdmissionError> {
+impl<A: CaseAssembly> AssemblyCase<A> {
+    pub fn new() -> Result<Self, InitializationFailure> {
+        let body = A::compiled()?;
+        let solved = solve_admission(&body, A::packet(&body)?, &A::lens(&body)?, anchor_moment())?;
         Ok(Self {
-            body: arena_body()?,
+            body,
+            solved,
             starts: RefCell::default(),
+            assembly: PhantomData,
         })
     }
     fn start<'m>(
@@ -1076,11 +1098,9 @@ impl SliceCase {
             Some(at) => at,
             None => {
                 let inputs = if withheld { Vec::new() } else { self.events()? };
-                let (packet, lens) = (arena_packet(&self.body)?, arena_lens(&self.body)?);
-                let port = BoundaryPort::new(inputs)?;
+                let (packet, lens) = (A::packet(&self.body)?, A::lens(&self.body)?);
                 let links = MemoryStore::default();
-                let Admitted { session, .. } =
-                    admit_at(&self.body, packet, port, core, &lens, anchor_moment(), &links)?;
+                let session = admit_from(&self.body, &self.solved, packet, inputs, core, &lens, &links)?;
                 let start = Start {
                     withheld,
                     saved: session.checkpoint().map_err(moved)?,
@@ -1097,8 +1117,18 @@ impl SliceCase {
     }
 }
 
-fn fence() -> SimTime {
-    SimTime::from_ns(anchor_moment().nanoseconds() + SECOND)
+fn inputs(at: SimTime) -> Result<Vec<BoundaryEvent>, AdmissionError> {
+    let id = |name: &[u8]| InputId::new(Digest::of_canonical(name));
+    let stand = Posture::new(Measure::new(1.0)?, Legs::Standing)?;
+    let bolus = WaterDelivery {
+        boundary: GUT_WATER,
+        amount: Measure::new(400.0)?,
+        ends: SimTime::from_ns(at.nanoseconds() + SECOND),
+    };
+    Ok(vec![
+        BoundaryEvent::new(id(b"slice stand"), at, BoundaryInput::Posture(stand)),
+        BoundaryEvent::new(id(b"slice bolus"), at, BoundaryInput::Water(bolus)),
+    ])
 }
 
 /// At admission no link exists for a checkpoint or a resume to miss, so the one refusal left is a core whose resolution
@@ -1107,26 +1137,15 @@ fn moved(_: CheckpointError) -> InitializationFailure {
     InitializationFailure::Admission(AdmissionError::IdentityMismatch)
 }
 
-impl ReplayCase for SliceCase {
+impl<A: CaseAssembly> ReplayCase for AssemblyCase<A> {
     fn body(&self) -> &CompiledBody {
         &self.body
     }
     fn end(&self) -> SimTime {
-        SimTime::from_ns(fence().nanoseconds() + PAST_THE_FENCE_NS)
+        SimTime::from_ns(self.solved.fence().nanoseconds() + PAST_THE_FENCE_NS)
     }
     fn events(&self) -> Result<Vec<BoundaryEvent>, AdmissionError> {
-        let at = fence();
-        let id = |name: &[u8]| InputId::new(Digest::of_canonical(name));
-        let stand = Posture::new(Measure::new(1.0)?, Legs::Standing)?;
-        let bolus = WaterDelivery {
-            boundary: GUT_WATER,
-            amount: Measure::new(400.0)?,
-            ends: SimTime::from_ns(at.nanoseconds() + SECOND),
-        };
-        Ok(vec![
-            BoundaryEvent::new(id(b"slice stand"), at, BoundaryInput::Posture(stand)),
-            BoundaryEvent::new(id(b"slice bolus"), at, BoundaryInput::Water(bolus)),
-        ])
+        inputs(self.solved.fence())
     }
     fn admit<'m>(
         &'m self,
@@ -1141,5 +1160,41 @@ impl ReplayCase for SliceCase {
         store: &'m dyn HistoryStore,
     ) -> Result<Session<'m, Running>, InitializationFailure> {
         self.start(core, store, true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_start_from_the_shared_solve_refuses_an_input_a_nanosecond_before_its_fence_and_takes_one_at_it() {
+        let case = SliceCase::new().expect("solved");
+        let fence = case.solved.fence();
+        let core = crate::ReferenceIntegrator::new(3_000_000);
+        let start = |at: SimTime| -> Result<SimTime, InitializationFailure> {
+            let (packet, lens) = (arena_packet(&case.body)?, arena_lens(&case.body)?);
+            let links = MemoryStore::default();
+            let session = admit_from(
+                &case.body,
+                &case.solved,
+                packet,
+                inputs(at)?,
+                &core,
+                &lens,
+                &links,
+            )?;
+            Ok(session.record().earliest_stamp())
+        };
+        let refused = start(SimTime::from_ns(fence.nanoseconds() - 1)).err();
+        assert!(
+            matches!(
+                refused,
+                Some(InitializationFailure::Admission(AdmissionError::EventBeforeFence { fence: at, .. }))
+                    if at == fence
+            ),
+            "{refused:?}"
+        );
+        assert_eq!(start(fence).expect("taken at the fence"), fence);
     }
 }

@@ -24,5 +24,6 @@ The newest case is two rows that left nightingale#160 and wait on [body 06](../.
 - [ ] Each row moved to a shorter test is still CAUGHT, run alone with `tools/mutate.py --only`, and its seconds before and after are measured on one named build worker
 - [ ] The sweep's wall time before and after, on one build worker under the same other load, with the worker named beside each number
 - [ ] Body 06's two rows land, or the Answer says what a run of one would have to cost first
+- [ ] A row can name its own budget, so a row that runs one body admission is held to its own limit and not to the sweep's one 420 s. Body 06 part 4c left both body rows out for this: each is one rebuild and one body admission, about 300 s on a quiet beelink and up to twice that under load, against the sweep's 420 s. The table's `tools/mutate.py` reads one budget for every row today
 
 **Non-goals:** running rows in parallel, which is ticket 13. Changing a row's mutation, or what any test checks. Raising the 420 s a cargo test has.
