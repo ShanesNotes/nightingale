@@ -16,7 +16,7 @@ A profile of one whole run, 480 s of admission and 51 s of running (`08-perf.log
 
 On ryzen, beside one or two other jobs at a load of 5.6 to 13 on 12 threads, the body admitted in 558, 578 and 657 s against the slice's 14.9 to 16.4 s, and its test binary took 886 s.
 
-Two things wait on this ticket. The body's run test (`the_whole_body_admits_runs_its_first_minute_and_holds_its_pins` in `crates/ng-validate/tests/body_run.rs`) is ignored, so only the full gate runs it. It leaves the ignored tier, and a mutant row that replays it (`body-trace-pinned`) can land, once its binary costs no more than the slowest test binary the merge gate runs today. That is `crates/ng-validate/tests/arena.rs`: 303 s in the beelink's proof of `7b56123` and 535 s in ryzen's proof of `e9a0a06`. The body's binary took about 490 s on the beelink and 886 s on ryzen.
+Two things wait on this ticket. The body's run test (`the_whole_body_admits_runs_its_first_minute_and_holds_its_pins` in `crates/ng-validate/tests/body_run.rs`) is ignored, so only the full gate runs it. It leaves the ignored tier, and a mutant row that replays it (`body-trace-pinned`) can land, once its binary costs no more than the slowest test binary the merge gate runs today. That is `crates/ng-validate/tests/arena.rs`: 303 s in the beelink's proof of `7b56123` and 535 s in ryzen's proof of `e9a0a06`. The body's binary took 470 s on the beelink beside one other job and 886 s on ryzen.
 
 This ticket measures and chooses. It names no fix as chosen.
 
