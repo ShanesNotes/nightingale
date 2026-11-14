@@ -1385,6 +1385,74 @@ new = '''                                if value.is_finite()'''
 test = "-p ng-contract --lib ring::tests::a_ring_keeps_the_bits_it_had_on_zeros_of_both_signs"
 
 [[mutant]]
+name = "walk-never-falls-back"
+path = "crates/ng-contract/src/elimination.rs"
+old = '''        (0..size)
+            .filter(|&at| marks.back[at])
+            .all(|at| pivoted[at].iter().all(|value| value.is_finite()))'''
+new = '''        true'''
+test = "-p ng-contract --lib elimination::tests::a_value_that_is_not_finite_takes_the_full_walk_and_keeps_its_bits"
+
+[[mutant]]
+name = "reach-ignores-negative-zero"
+path = "crates/ng-contract/src/elimination.rs"
+old = '''if values.iter().any(|value| value.to_bits() != 0) {'''
+new = '''if values.iter().any(|value| *value != 0.0) {'''
+test = "-p ng-contract --lib elimination::tests::a_negative_zero_side_keeps_its_sign_through_negative_pivots"
+
+[[mutant]]
+name = "skipped-row-plain-zero"
+path = "crates/ng-contract/src/elimination.rs"
+old = '''pivoted[at] = [0.0 / self.lu[index(diagonals[at])]; LANES];'''
+new = '''pivoted[at] = [0.0; LANES];'''
+test = "-p ng-contract --lib elimination::tests::a_negative_zero_side_keeps_its_sign_through_negative_pivots"
+
+[[mutant]]
+name = "panel-swap-dropped"
+path = "crates/ng-contract/src/ring.rs"
+old = '''            pending.swap(pivot, best);
+'''
+new = ''''''
+test = "-p ng-contract --lib ring::tests::a_panel_at_a_time_keeps_every_bit_of_a_pivot_at_a_time"
+
+[[mutant]]
+name = "panel-fill-dropped"
+path = "crates/ng-contract/src/ring.rs"
+old = '''        pending.fill([None; PANEL]);
+'''
+new = ''''''
+test = "-p ng-contract --lib ring::tests::a_panel_at_a_time_keeps_every_bit_of_a_pivot_at_a_time"
+
+[[mutant]]
+name = "right-side-skips-seed-zero-term"
+path = "crates/ng-contract/src/ring.rs"
+old = '''for at in column.ok().into_iter().chain([seeds]) {'''
+new = '''for at in column.ok() {'''
+test = "-p ng-contract --lib ring::tests::a_ring_keeps_the_bits_it_had_on_zeros_of_both_signs"
+
+[[mutant]]
+name = "general-never"
+path = "crates/ng-contract/src/ring.rs"
+old = '''            let general =
+                (foreign.iter().flatten()).any(|&(place, value)| seeded(place) && !value.is_finite());'''
+new = '''            let general = false;'''
+test = "-p ng-contract --lib ring::tests::a_ring_keeps_the_bits_it_had_on_zeros_of_both_signs"
+
+[[mutant]]
+name = "skip-a-read-times-not-finite"
+path = "crates/ng-contract/src/ring.rs"
+old = '''if value.is_finite() && earlier.iter().all(|value| *value == 0.0) {'''
+new = '''if earlier.iter().all(|value| *value == 0.0) {'''
+test = "-p ng-contract --lib ring::tests::a_ring_keeps_the_bits_it_had_on_zeros_of_both_signs"
+
+[[mutant]]
+name = "anchor-skips-not-finite"
+path = "crates/ng-contract/src/ring.rs"
+old = '''if value.is_finite() && cells[at].iter().all(|value| *value == 0.0) {'''
+new = '''if cells[at].iter().all(|value| *value == 0.0) {'''
+test = "-p ng-contract --lib ring::tests::a_ring_keeps_the_bits_it_had_on_zeros_of_both_signs"
+
+[[mutant]]
 name = "observation-time-mean-counts-samples"
 path = "crates/ng-observe/src/observer.rs"
 old = '''covered: covered.saturating_add(length),'''

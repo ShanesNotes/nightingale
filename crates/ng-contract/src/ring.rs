@@ -282,8 +282,8 @@ impl InitializationSystem<'_> {
                             if seeded(place) {
                                 let column = target(place);
                                 if value.is_finite() {
-                                    // A seed's or fit's side is a positive zero or not zero, so a finite term leaves
-                                    // every side but its own and the right side's as it is.
+                                    // A side for a column `read` names or for a fit is a positive zero or not zero,
+                                    // so a finite term leaves every side but its own and the right side's as it is.
                                     for at in column.ok().into_iter().chain([seeds]) {
                                         if slot_of[at] / LANES == group {
                                             sides[slot_of[at] % LANES] -= value * f64::from(column == Ok(at));
@@ -296,8 +296,9 @@ impl InitializationSystem<'_> {
                                 }
                             } else {
                                 let earlier = &before[group * size + at_unknown[place - (point - 1) * size]];
-                                // A seed's or fit's side is a positive zero or not zero, so a finite term over a zero
-                                // read leaves it as it is. The right side's can be a negative zero, and takes every term.
+                                // A side for a column `read` names or for a fit is a positive zero or not zero, so a
+                                // finite term over a zero read leaves it as it is. The right side's can be a negative
+                                // zero, and takes every term.
                                 if !holds_right
                                     && value.is_finite()
                                     && earlier.iter().all(|value| *value == 0.0)
@@ -494,7 +495,23 @@ mod tests {
             state ^= state << 17;
             (state >> 11) as f64 / (1_u64 << 53) as f64
         };
-        for size in [1, 2, 15, 16, 17, 40, 70] {
+        // The mirrored cases pivot off the diagonal, so rows swap inside a panel. The blocked cases keep the second
+        // panel's columns zero under the first panel's rows and in the third panel's rows.
+        let cases = [
+            (1, 0),
+            (2, 0),
+            (15, 0),
+            (16, 0),
+            (17, 0),
+            (40, 0),
+            (70, 0),
+            (17, 1),
+            (40, 1),
+            (70, 1),
+            (40, 2),
+            (48, 2),
+        ];
+        for (size, shape) in cases {
             let mut matrix = vec![vec![0.0; size + 3]; size];
             for row in matrix.iter_mut() {
                 for cell in row.iter_mut() {
@@ -509,12 +526,16 @@ mod tests {
                 }
             }
             for (at, row) in matrix.iter_mut().enumerate() {
-                row[at] += 2.0;
+                let column = if shape == 1 { size - 1 - at } else { at };
+                row[column] += 2.0;
+                if shape == 2 && !(16..32).contains(&at) {
+                    row[16..32].fill(0.0);
+                }
             }
             let one = reduced_by_pivot(matrix.clone()).expect("rank");
             let panel = reduced(matrix).expect("rank");
             for (a, b) in one.iter().flatten().zip(panel.iter().flatten()) {
-                assert_eq!(a.to_bits(), b.to_bits(), "size {size}");
+                assert_eq!(a.to_bits(), b.to_bits(), "size {size}, shape {shape}");
             }
         }
     }
@@ -556,7 +577,22 @@ mod tests {
         })
     }
 
-    fn ring_bits(body: &crate::CompiledBody, legs: u32, fits: usize, drawn: f64, state: &mut u64) -> Vec<u8> {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Infinite {
+        Seed,
+        Read,
+        Anchor,
+    }
+
+    /// `infinite` puts one infinite entry in the first row that holds one of its kind: a point 0 row's read of the
+    /// last block, a point 1 row's read of point 0, or a fit's row's read of a block before the last.
+    fn ring_bits(
+        body: &crate::CompiledBody,
+        (legs, fits): (u32, usize),
+        drawn: f64,
+        infinite: Option<Infinite>,
+        state: &mut u64,
+    ) -> Vec<u8> {
         use crate::*;
         use core::num::{NonZeroU32, NonZeroU64};
         let cycle = Cycle::new(
@@ -591,7 +627,7 @@ mod tests {
             _ => next(state) - 0.5,
         };
         let (mut offsets, mut columns, mut values) = (vec![0], Vec::new(), Vec::new());
-        let mut right = Vec::new();
+        let (mut right, mut placed) = (Vec::new(), false);
         for slot in 0..border + fits {
             let mut line = alloc::collections::BTreeMap::new();
             if slot < border {
@@ -628,6 +664,22 @@ mod tests {
                     line.insert(fit, value(state));
                 }
             }
+            let kind = match slot {
+                _ if slot >= border => Some((Infinite::Anchor, 0..(points - 1) * size)),
+                _ if slot < size => Some((Infinite::Seed, (points - 1) * size..border)),
+                _ if slot < 2 * size => Some((Infinite::Read, 0..size)),
+                _ => None,
+            };
+            if let Some((kind, reads)) = kind.filter(|(kind, _)| !placed && infinite == Some(*kind))
+                && let Some((_, cell)) = line.range_mut(reads).next()
+            {
+                *cell = if kind == Infinite::Read {
+                    f64::NEG_INFINITY
+                } else {
+                    f64::INFINITY
+                };
+                placed = true;
+            }
             for (column, cell) in line {
                 columns.push(UnknownId::at(column));
                 values.push(cell);
@@ -639,7 +691,11 @@ mod tests {
         match system.ring(&workspace, &ring, &right) {
             Ok(update) => update
                 .iter()
-                .flat_map(|value| value.to_bits().to_be_bytes())
+                .flat_map(|value| {
+                    if value.is_nan() { f64::NAN } else { *value }
+                        .to_bits()
+                        .to_be_bytes()
+                })
                 .collect(),
             Err(row) => (row as u64).to_be_bytes().to_vec(),
         }
@@ -660,11 +716,31 @@ mod tests {
             (5, 3),
             (6, 10),
         ] {
-            bits.extend(ring_bits(&body, legs, fits, 0.2, &mut state));
+            bits.extend(ring_bits(&body, (legs, fits), 0.2, None, &mut state));
         }
-        for (seed, legs, fits) in [(7_u64, 4_u32, 0), (11, 3, 0), (11, 3, 4), (42, 3, 4), (49, 3, 4)] {
+        let sparse = [
+            (7_u64, 4_u32, 0),
+            (11, 3, 0),
+            (11, 3, 4),
+            (42, 3, 4),
+            (49, 3, 4),
+            (4, 5, 3),
+            (10, 3, 4),
+        ];
+        let cases = (sparse
+            .into_iter()
+            .map(|(seed, legs, fits)| (seed, (legs, fits), 0.02, None)))
+        .chain([
+            (15, (4, 2), 0.02, Some(Infinite::Seed)),
+            (24, (3, 4), 0.02, Some(Infinite::Seed)),
+            (15, (4, 2), 0.02, Some(Infinite::Read)),
+            (24, (3, 4), 0.02, Some(Infinite::Read)),
+            (3, (3, 4), 0.02, Some(Infinite::Anchor)),
+            (5, (4, 2), 0.2, Some(Infinite::Anchor)),
+        ]);
+        for (seed, shape, drawn, infinite) in cases {
             let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
-            bits.extend(ring_bits(&body, legs, fits, 0.02, &mut state));
+            bits.extend(ring_bits(&body, shape, drawn, infinite, &mut state));
         }
         let digest = crate::Digest::of_canonical(&bits);
         let hex: alloc::string::String = (digest.as_bytes().iter())
@@ -672,7 +748,7 @@ mod tests {
             .collect();
         assert_eq!(
             hex,
-            "731be4bc0bd2cce94eadc2dd4c04ef6502cb3a5b11bb6a170e9afd2b643f8dc1"
+            "cf8a842fd3e17358f1d2980482d9999c17b4f452b6d2dd8eb7f2c537a3ecf10e"
         );
     }
 

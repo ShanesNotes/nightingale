@@ -309,7 +309,8 @@ impl Reach {
         }
         key
     }
-    /// `None` where a factor is not finite, since a zero times it is not zero.
+    /// `None` where a factor is not finite, since a zero times it is not zero. `factor` refuses that case first, so
+    /// this is a second guard.
     fn of(factors: &Factors<'_>) -> Option<Self> {
         let Elimination {
             starts,
@@ -425,11 +426,12 @@ mod tests {
         b
     }
 
+    /// A negative zero in `a` is an entry of the pattern whose value is zero.
     fn planned(a: &[Vec<f64>], matching: &[RowId]) -> (Elimination, Vec<f64>) {
         let (mut offsets, mut unknowns, mut values) = (vec![0], Vec::new(), Vec::new());
         for line in a {
             for (column, &value) in line.iter().enumerate() {
-                if value != 0.0 {
+                if value.to_bits() != 0 {
                     unknowns.push(UnknownId::at(column));
                     values.push(value);
                 }
@@ -546,6 +548,30 @@ mod tests {
         assert_eq!(hex(&full), had);
     }
 
+    /// Two parts of `part` rows, each reading only its own rows, but for one entry of the second part that reads the
+    /// first with a value of zero, and a last row that reads only itself. Odd rows are negated, so some pivots are
+    /// negative.
+    fn two_parts(part: usize) -> (Elimination, Vec<f64>) {
+        let mut state = 0x9E37_79B9_7F4A_7C15;
+        let mut a = vec![vec![0.0; 2 * part + 1]; 2 * part + 1];
+        for (row, line) in a.iter_mut().enumerate() {
+            let first = row / part * part;
+            line[row] = 4.0 + next(&mut state);
+            if row < 2 * part {
+                line[first + (row + 1) % part] = next(&mut state) - 0.5;
+                line[first + (row + 5) % part] = next(&mut state) - 0.5;
+            }
+            if row % 2 == 1 {
+                line.iter_mut()
+                    .filter(|cell| **cell != 0.0)
+                    .for_each(|cell| *cell = -*cell);
+            }
+        }
+        a[part + 3][2] = -0.0;
+        let matching: Vec<RowId> = (0..=2 * part).map(RowId::at).collect();
+        planned(&a, &matching)
+    }
+
     #[test]
     fn a_group_walks_only_the_rows_its_sides_reach() {
         let mut state = 0x9E37_79B9_7F4A_7C15;
@@ -586,32 +612,52 @@ mod tests {
         }
     }
 
+    fn alone_and_walked(factors: &Factors<'_>, sides: Vec<Vec<f64>>) -> bool {
+        let size = sides[0].len();
+        let walked = grouped(factors, &sides, true, &mut Marks::new(size));
+        sides.into_iter().zip(walked).all(|(mut side, walked)| {
+            factors.solve(&mut side);
+            side.iter()
+                .zip(&walked)
+                .all(|(one, other)| one.to_bits() == other.to_bits())
+        })
+    }
+
+    /// A row the walk leaves out reads an infinite one through a factor of zero, which the full walk turns into NaN.
     #[test]
     fn a_value_that_is_not_finite_takes_the_full_walk_and_keeps_its_bits() {
-        let mut state = 0x2545_F491_4F6C_DD1D;
-        let (_, plan, values) = shuffled(17, &mut state);
+        let (plan, values) = two_parts(12);
         let factors = plan.factor(&values).expect("a pivot");
         let sides: Vec<Vec<f64>> = (0..LANES)
             .map(|lane| {
-                (0..17)
-                    .map(|row| match (lane + row) % 7 {
-                        0 if lane == 2 => f64::INFINITY,
-                        0 if lane == 5 => f64::NAN,
-                        1 => -0.0,
+                (0..25)
+                    .map(|row| match (lane, row) {
+                        (2, 2) => f64::INFINITY,
+                        (5, 7) => f64::NEG_INFINITY,
                         _ => 0.0,
                     })
                     .collect()
             })
             .collect();
-        let walked = grouped(&factors, &sides, true, &mut Marks::new(17));
-        for (mut side, walked) in sides.into_iter().zip(walked) {
-            factors.solve(&mut side);
-            let same = side
-                .iter()
-                .zip(&walked)
-                .all(|(one, other)| one.to_bits() == other.to_bits());
-            assert!(same, "a value that is not finite keeps the full walk's bits");
-        }
+        assert!(
+            alone_and_walked(&factors, sides),
+            "a value that is not finite keeps the full walk's bits"
+        );
+    }
+
+    /// Rows whose pivots are negative turn a zero over the pivot into a negative zero.
+    #[test]
+    fn a_negative_zero_side_keeps_its_sign_through_negative_pivots() {
+        let (plan, values) = two_parts(12);
+        let factors = plan.factor(&values).expect("a pivot");
+        let sides: Vec<Vec<f64>> = (0..LANES)
+            .map(|lane| {
+                (0..25)
+                    .map(|row| if lane > 0 && row == lane + 17 { -0.0 } else { 0.0 })
+                    .collect()
+            })
+            .collect();
+        assert!(alone_and_walked(&factors, sides), "zeros keep their signs");
     }
 
     #[test]
