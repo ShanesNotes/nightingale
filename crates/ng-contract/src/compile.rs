@@ -705,7 +705,9 @@ fn check_chance(fragments: &[FragmentData], anatomy: &Anatomy) -> Result<(), Com
         forcings.sort_unstable();
         for &forcing in &forcings {
             let read = Op::Input(Input::Forcing(forcing));
-            let reads = |law: &crate::law::LawDeclaration| law.kernel.judged(anatomy).iter().any(|ops| ops.contains(&&read));
+            let reads = |law: &crate::law::LawDeclaration| {
+                law.kernel.judged(anatomy).iter().any(|ops| ops.contains(&&read))
+            };
             if !fragment.laws.iter().any(reads) {
                 return Err(CompileDefect::UnreadForcing {
                     forcing: named(forcing),

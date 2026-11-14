@@ -44,16 +44,20 @@ This PR lands the site term in `ng-contract`. A law's author declares a term onc
 
 What it holds, each with a test in `crates/ng-contract/src/evaluate/terms.rs` and a mutant row:
 
-- A refusal names the law of the first op, in program order, that fails the check that refused. The evaluator finds that op only after a refusal, by running `forward` on prefixes, so a step's code is main's. The prototype named the term when a host op refused before a term's read that was not finite; the search now runs only the steps and reads before such a read.
+- A refused step names the law of the first op, in program order, that fails the check that refused. The evaluator finds that op only after a refusal, by running `forward` on prefixes, so a step's code is main's. The prototype named the term when a host op refused before a term's read that was not finite; the search now runs only the steps and reads before such a read.
+- A slope that is not finite names the law of the read it belongs to: the law's for a read the law shares with its term, the term's for a read only the term makes.
 - The erasure rule is for a site term: a term with no site in its set leaves every byte of the body as it is with no term. A plain law on a set with no site still seals its unplaced program, on main too, and that is unchanged.
+- The declaration checks (a day's input with no parameter, a forcing some law must read, a volume with no partial volume, another route's drive) judge the law's own program as main judges it, and each variant a site runs, as written before pruning. So with no site in the set a body compiles or is refused as with no term, a law cannot borrow its term's parameter, and a term cannot hide a read. A draw an algebraic law reads is refused at admission through a term as by hand.
+- A guard stands at the body or an edge, never at a site, so a guard whose zero adds a term is refused, by its mode variable, as `NoSuchRead`.
 - `at_site_in` on a kernel's own set writes the op `at_site` writes, so the reflexive case has a test and a row.
 - A term may add a term. No set lies strictly inside the veins, so the test takes an outer term on the veins (a site in neither set, and in both) and an outer term on blood (a site in the outer only, and in both). Each refusal names its own law.
-- A term cannot hide what its law may not read: a draw an algebraic law reads, and a day's input read with no parameter, are refused through a term as by hand. The checks that ask what a law reads at all read every op of its terms.
-- A guard never adds a term: modes are over the body or a route, so no guard runs at a site. Guard refusals keep main's code.
+- The host forms part 3 uses: a term's read that takes no nerve keeps that, a summed law closes its variant as main closes it, and a column runs its variant at a vein.
 
 What it leaves:
 
-- A term whose ops all merge into its law's leaves no op of its own, so the law's variant lists the law again in the refusal sources, as main lists a law whose programs are not adjacent. A test pins it.
+- [ ] A refusal at compile or admission names the law that adds the term, not the term: `UnemittedField` and `UnbackedConstant` take their law from the whole kernel, and an unused read has no op to carry an origin. Naming the term there needs the law threaded through each read's address.
+- An op two terms both compute carries the law of the term added first.
+- A term whose ops all merge into its law's leaves no op of its own, so the law's variant lists the law again in the refusal sources, as main lists a law whose programs are not adjacent, and the term's name is not in the model hash. A test pins the sources.
 - A term declared and never added is not validated, as a kernel never attached is not. Its name still joins the names checked twice.
 - The three-halves power as `r * sqrt(r)` would cut the term's cost from +2.4% to +0.2% seated against main (the plan's bench, four veins, 32 pairs), but needs a square-root op in the evaluator. Part 3 or a later ticket weighs it.
 

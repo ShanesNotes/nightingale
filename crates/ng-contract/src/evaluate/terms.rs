@@ -657,7 +657,11 @@ fn a_placed_terms_derivatives_are_the_hand_written_expressions() {
         marks: &[0, 1],
         ..PLAIN
     });
-    assert!(placed.is_ok(), "a variant closes its row as main closes it: {:?}", placed.err());
+    assert!(
+        placed.is_ok(),
+        "a variant closes its row as main closes it: {:?}",
+        placed.err()
+    );
     let (placed, [_, _, upper, lower]) = placed.expect("compiled");
     let (by_hand, _) = bench(Case {
         marks: &[0, 1],
@@ -755,7 +759,9 @@ fn an_origins_position_is_sealed() {
         .find(|program| !program.code.origins.is_empty())
         .expect("a variant");
     let code = &program.code;
-    let free = (0..code.ops.len()).find(|at| code.origin(*at).is_none()).expect("a host op");
+    let free = (0..code.ops.len())
+        .find(|at| code.origin(*at).is_none())
+        .expect("a host op");
     let mut origins = code.origins.clone();
     origins[0].0 = free;
     origins.sort_unstable_by_key(|origin| origin.0);
@@ -844,9 +850,10 @@ mod forms {
                 k.finish(zero, cv.every_mode(), class)
             });
             cv.transfer_along(&route, still);
-            let share =
-                cv.site_parameter::<Blood, Dimensionless>(ParameterKey::new("cv.share"), Admissible::finite());
-            let t = cv.site_parameter::<Veins, Dimensionless>(ParameterKey::new("cv.t"), Admissible::finite());
+            let share = cv
+                .site_parameter::<Blood, Dimensionless>(ParameterKey::new("cv.share"), Admissible::finite());
+            let t =
+                cv.site_parameter::<Veins, Dimensionless>(ParameterKey::new("cv.t"), Admissible::finite());
             let p = cv.parameter::<Dimensionless>(ParameterKey::new("cv.p"), Admissible::finite());
             let (level, x) = cv.site_field::<Blood, Dimensionless>("level", Admissible::finite());
             let (depth, y) = cv.site_field::<Blood, Dimensionless>("depth", Admissible::finite());
@@ -1068,7 +1075,8 @@ mod forms {
             let entry = (slot.key, slot.default.unwrap_or(slot.binding));
             if !seen.contains(&entry) {
                 seen.push(entry);
-                (packet.synthetic(entry.0, entry.1, measure::<Dimensionless>(1.0), "synthetic")).expect("once");
+                (packet.synthetic(entry.0, entry.1, measure::<Dimensionless>(1.0), "synthetic"))
+                    .expect("once");
             }
         }
         packet.start_rest(body, |_| 1.0, "synthetic").expect("once");
@@ -1119,9 +1127,14 @@ mod forms {
             (self.body.layout.instances.iter().enumerate())
                 .filter(|(_, instance)| instance.context == Context::Site(site))
                 .find_map(|(at, instance)| {
-                    let (arithmetic, reads) = (self.body.tape.program(instance.program), self.body.tape.instance(at));
+                    let (arithmetic, reads) = (
+                        self.body.tape.program(instance.program),
+                        self.body.tape.instance(at),
+                    );
                     let partial_volume = self.body.partial_volume();
-                    let refused = super::super::forward(arithmetic, reads, &inputs, partial_volume, &mut values).err()?;
+                    let refused =
+                        super::super::forward(arithmetic, reads, &inputs, partial_volume, &mut values)
+                            .err()?;
                     Some(self.body.undefined(at, &inputs, refused))
                 })
         }
@@ -1139,7 +1152,8 @@ mod forms {
     fn ops_of(body: &CompiledBody, local: &str, site: SiteId) -> Vec<Op> {
         let instance = (body.instances().iter())
             .find(|instance| {
-                instance.context() == Context::Site(site) && row_of(body, instance).is_some_and(|law| law.local == local)
+                instance.context() == Context::Site(site)
+                    && row_of(body, instance).is_some_and(|law| law.local == local)
             })
             .expect("an instance");
         body.programs()[instance.program().index()].code.ops.clone()
@@ -1191,14 +1205,28 @@ mod forms {
             spare: Some(t_forcing),
             ..unread.clone()
         };
-        let unread_forcing = Some(CompileDefect::UnreadForcing { forcing: cv("wobble") });
+        let unread_forcing = Some(CompileDefect::UnreadForcing {
+            forcing: cv("wobble"),
+        });
         for fix in [&unread, &direct, &nested, &spare] {
             assert_eq!(refused(fix), unread_forcing);
         }
         for fix in [direct, nested] {
-            assert_eq!(refused(&Fix { marks: vec![0], ..fix }), None);
+            assert_eq!(
+                refused(&Fix {
+                    marks: vec![0],
+                    ..fix
+                }),
+                None
+            );
         }
-        assert_eq!(refused(&Fix { marks: vec![0], ..spare }), unread_forcing);
+        assert_eq!(
+            refused(&Fix {
+                marks: vec![0],
+                ..spare
+            }),
+            unread_forcing
+        );
     }
 
     /// Ruling 1: a volume a term reads, used or not, needs a partial volume where a site of its set runs the term, and
@@ -1217,7 +1245,10 @@ mod forms {
                 ..main.clone()
             };
             assert_eq!(refused(&added), None);
-            let marked = refused(&Fix { marks: vec![0], ..added });
+            let marked = refused(&Fix {
+                marks: vec![0],
+                ..added
+            });
             assert!(matches!(marked, Some(CompileDefect::MissingPartialVolume { .. })));
         }
     }
@@ -1238,7 +1269,10 @@ mod forms {
                 veins: term("collapse", t_param),
                 ..plain.clone()
             };
-            assert_eq!(refused(&added), Some(CompileDefect::NoSuchRead { law: cv("valve") }));
+            assert_eq!(
+                refused(&added),
+                Some(CompileDefect::NoSuchRead { law: cv("valve") })
+            );
         }
     }
 
@@ -1266,7 +1300,11 @@ mod forms {
     fn a_summed_law_that_adds_a_term_closes_as_main_closes_it() {
         let summed = |with_term: bool| Fix {
             marks: vec![0],
-            veins: if with_term { term("collapse", t_collapse_y) } else { Vec::new() },
+            veins: if with_term {
+                term("collapse", t_collapse_y)
+            } else {
+                Vec::new()
+            },
             hosts: vec![("total", h_param as BloodFn, true)],
             ..Fix::default()
         };
@@ -1333,16 +1371,18 @@ mod forms {
                 k.finish(zero, cv.every_mode(), class)
             });
             cv.transfer_along(&route, still);
-            let share =
-                cv.site_parameter::<Blood, Dimensionless>(ParameterKey::new("cv.share"), Admissible::finite());
+            let share = cv
+                .site_parameter::<Blood, Dimensionless>(ParameterKey::new("cv.share"), Admissible::finite());
             let (level, x) = cv.site_field::<Blood, Dimensionless>("level", Admissible::finite());
             let held = cv.site_kernel(|mut k| {
                 let value = k.site_parameter(&share);
                 k.finish(value, cv.every_mode(), class)
             });
             cv.define_at(&level, held);
-            let work = cv.site_parameter::<Blood, Rate<Energy>>(ParameterKey::new("cv.work"), Admissible::finite());
-            let leak = cv.site_parameter::<Veins, Rate<Energy>>(ParameterKey::new("cv.leak"), Admissible::finite());
+            let work =
+                cv.site_parameter::<Blood, Rate<Energy>>(ParameterKey::new("cv.work"), Admissible::finite());
+            let leak =
+                cv.site_parameter::<Veins, Rate<Energy>>(ParameterKey::new("cv.leak"), Admissible::finite());
             let collapse = with_term.then(|| {
                 cv.site_term::<Veins, Rate<Energy>, _>("collapse", |mut k| {
                     let rate = k.site_parameter(&leak);
@@ -1375,13 +1415,22 @@ mod forms {
                 .find(|combination| format!("{:?}", combination.book()).contains("Energy"))
                 .map(|combination| combination.regulated())
         };
-        let (marked, plain) = (stroke(&[0], true).expect("compiled"), stroke(&[0], false).expect("compiled"));
-        let (none, bare) = (stroke(&[], true).expect("compiled"), stroke(&[], false).expect("compiled"));
+        let (marked, plain) = (
+            stroke(&[0], true).expect("compiled"),
+            stroke(&[0], false).expect("compiled"),
+        );
+        let (none, bare) = (
+            stroke(&[], true).expect("compiled"),
+            stroke(&[], false).expect("compiled"),
+        );
         assert_eq!(none.model_hash(), bare.model_hash());
         assert_eq!(sealed_all(&none), sealed_all(&bare));
         let main_programs = sealed_all(&plain);
         assert_eq!(sealed_all(&marked)[..main_programs.len()], main_programs[..]);
-        assert_eq!((energy(&plain), energy(&none), energy(&marked)), (Some(false), Some(false), Some(true)));
+        assert_eq!(
+            (energy(&plain), energy(&none), energy(&marked)),
+            (Some(false), Some(false), Some(true))
+        );
     }
 
     /// Two laws whose variants have one code keep a program each, so a refusal in either names its own law.
@@ -1423,7 +1472,9 @@ mod forms {
     /// read the host shares and the term for a read only the term makes.
     #[test]
     fn a_slope_that_is_not_finite_names_the_law_of_its_read() {
-        let jacobian = |body: &CompiledBody, point: &Point<'_>| body.jacobian(&point.inputs(), 0.0).err().expect("refused");
+        let jacobian = |body: &CompiledBody, point: &Point<'_>| {
+            body.jacobian(&point.inputs(), 0.0).err().expect("refused")
+        };
         let shared = Fix {
             marks: vec![0],
             veins: term("collapse", t_ln_level),
