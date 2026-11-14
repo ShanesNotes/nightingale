@@ -37,7 +37,11 @@ CAUGHT, so a red run reports only its first failure. A hand run reports every ro
 sweep then skips each baseline that a passed call covers on this commit with these build settings, and builds its test
 instead, so a tree that does not build still stops the sweep. A call covers only when it ran every test, or every test
 with the ignored ones. A `--release`, `--doc` or other flagged test, a crate 10-rust did not test, and a record from
-another commit or other settings run the baseline. A full run and a hand run run every baseline.
+another commit or other settings run the baseline. A full run and a hand run run every baseline. The record counts
+only while the checkout holds no changed or untracked file and no tracked file marked assume-unchanged or skip-worktree.
+A row caught at build runs its skipped baseline, so a filter that names no test still fails. The sweep refuses a Cargo
+config in target/.cargo or target/mutate/.cargo, which its cargo reads and 10-rust's does not, and an extract that
+lacks a tracked path.
 """
 import argparse
 import collections
@@ -66,6 +70,7 @@ SHOWN = 3
 ROW_KEYS = {"name", "path", "old", "new", "test"}
 MOVES = {"--manifest-path", "--target-dir", "--config"}
 SET_HERE = {"CARGO_TARGET_DIR", "CARGO_BUILD_BUILD_DIR", "CARGO_TERM_COLOR", "CARGO_NET_OFFLINE"}
+CARGO_CONFIGS = ("target/.cargo", "target/mutate/.cargo")
 
 
 def refuse(why):
@@ -163,6 +168,12 @@ def covered(test, calls):
     )
 
 
+def unseen(root):
+    listed = subprocess.run(["git", "ls-files", "-z", "-v"], cwd=root, capture_output=True, check=True).stdout
+    hidden = [entry for entry in listed.decode().split("\0") if entry and not entry.startswith("H ")]
+    return [*hidden, *(place for place in CARGO_CONFIGS if os.path.lexists(os.path.join(root, place)))]
+
+
 def run_tethered(argv, budget=None, **popen):
     read_end, write_end = os.pipe()
     keeper = subprocess.Popen(
@@ -203,6 +214,11 @@ def extract(sha):
         code, output = run_tethered(argv, cwd=ROOT)
         if code != 0:
             refuse(f"{argv[0]} failed:\n{output.decode(errors='replace')}")
+    code, listed = run_tethered(["git", "ls-tree", "-r", "-z", "--name-only", sha], cwd=ROOT)
+    if code != 0:
+        refuse(f"git ls-tree failed:\n{listed.decode(errors='replace')}")
+    if lacking := [path for path in listed.decode().split("\0") if path and not os.path.lexists(TREE / path)]:
+        refuse(f"the extract lacks {lacking[:3]}, which git archive left out")
 
 
 def matches(sha, row):
@@ -280,6 +296,8 @@ def main():
         print(f"{len(applied)} of {len(rows)} rows apply")
         sys.exit(0 if len(applied) == len(rows) else 1)
 
+    if configs := [place for place in CARGO_CONFIGS if os.path.lexists(ROOT / place)]:
+        refuse(f"cargo in the sweep's tree reads {configs} and the checkout's cargo does not; delete them")
     WORK.mkdir(parents=True, exist_ok=True)
     lock = open(WORK / "lock", "w")
     try:
@@ -300,17 +318,27 @@ def main():
     env.pop("UPDATE_EXPECT", None)
 
     calls = passed_calls(args.tested, sha, build_settings(env)) if args.tested else []
-    skipped = []
-    for test in dict.fromkeys(row["test"] for row in applied):
-        if covered(test, calls):
-            skipped.append(test)
-            continue
+    code, status = run_tethered(["git", "status", "--porcelain", "-z", "--untracked-files=all"], cwd=ROOT)
+    if code != 0:
+        refuse(f"git status failed:\n{status.decode(errors='replace')}")
+    if calls and (moved := [*filter(None, status.decode().split("\0")), *unseen(ROOT)]):
+        print(f"the checkout holds {moved[:3]} outside {sha}, so every baseline runs", flush=True)
+        calls = []
+
+    def baseline(test):
         began = time.monotonic()
         code, output = cargo_test(test, env, args.budget)
         if code != 0 or not PASSED.search(output):
             gave = output[-2000:] or f"nothing in {args.budget} s"
             refuse(f"`cargo test {test}` must pass some test on the unmutated tree, and it gave:\n{gave}\n")
         print(f"baseline  {time.monotonic() - began:.0f} s  cargo test {test}", flush=True)
+
+    skipped = []
+    for test in dict.fromkeys(row["test"] for row in applied):
+        if covered(test, calls):
+            skipped.append(test)
+        else:
+            baseline(test)
     if skipped:
         print(f"baselines skipped: {len(skipped)}, whose tests 10-rust passed on this commit", flush=True)
     for build in dict.fromkeys(built(test) for test in skipped):
@@ -329,7 +357,11 @@ def main():
         code, output = cargo_test(row["test"], env, args.budget)
         file.write_bytes(original)
         verdict, detail = judge(code, output, args.budget)
-        report(verdict, row["name"], time.monotonic() - began, detail)
+        seconds = time.monotonic() - began
+        if verdict == "CAUGHT at build" and row["test"] in skipped:
+            skipped.remove(row["test"])
+            baseline(row["test"])
+        report(verdict, row["name"], seconds, detail)
 
     counts = ", ".join(f"{count} {verdict}" for verdict, count in tally.items())
     print(f"summary: {counts}, of {len(rows)} rows at {sha}")
