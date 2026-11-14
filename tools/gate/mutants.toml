@@ -1379,9 +1379,16 @@ test = "--release -p ng-validate --test arena_body the_slice_compiles_initialize
 [[mutant]]
 name = "window-judges-exchange-nets"
 path = "crates/ng-validate/src/window.rs"
-old = '''let net = total.minus(*before);'''
-new = '''let net = total;'''
-test = "-p ng-validate --lib window::tests::an_exchange_is_compared_by_its_net_over_each_interval_and_a_level_as_it_stands"
+old = '''total.minus(before)'''
+new = '''total'''
+test = "-p ng-validate --lib window::tests::an_exchange_is_compared_by_its_net_over_the_coarsest_step_ending_at_each_instant_and_a_level_as_it_stands"
+
+[[mutant]]
+name = "window-reads-every-finest-step"
+path = "crates/ng-validate/src/window.rs"
+old = '''grid_ns: longest / (REFINEMENT * REFINEMENT),'''
+new = '''grid_ns: 10 * MILLISECOND,'''
+test = "-p ng-validate --lib window::tests::honest_cores_pass_wherever_the_grid_falls_in_the_beat"
 
 [[mutant]]
 name = "window-judges-whole-beats"

@@ -36,7 +36,7 @@ impl WindowPolicy {
             distance_floor: 1e-6,
             // At 1 µs the reference's Newton could not settle on a landing's span and the run faulted.
             landing_ns: NonZeroU64::MIN.saturating_add(100_000 - 1),
-            grid_ns: 10 * MILLISECOND,
+            grid_ns: longest / (REFINEMENT * REFINEMENT),
             past_end_ns: 500 * MILLISECOND,
             refinements_ns: [longest, longest / REFINEMENT, longest / (REFINEMENT * REFINEMENT)],
             refinement_scales: ErrorScales::uniform(scale(1e9), scale(1.0)).expect("positive constants"),
@@ -56,6 +56,7 @@ impl WindowPolicy {
     pub fn landing_ns(&self) -> NonZeroU64 {
         self.landing_ns
     }
+    /// The finest refinement's step, at each of which the window reads every compared value.
     pub fn grid_ns(&self) -> u64 {
         self.grid_ns
     }
@@ -429,18 +430,24 @@ fn admission(error: AdmissionError) -> AccuracyFailure {
 /// §7's first window of the slice, measured once against `ReferenceIntegrator` at three refinements: admission at
 /// 06:55, then a ramp from supine to seated past the first cycle, then a meal of water, sodium, potassium and
 /// chloride, on a compressed synthetic day. The finest refinement stands for the solution. A core passes where it
-/// stands no more than twice as far from it as the coarser two do, the coarsest being the body's longest step. Values
-/// are compared where a run holds the finest's modes, and each exchange's net over each whole beat of the finest,
-/// from one beat edge to the next. Where the modes differ the window compares when each run made its transitions
-/// and how many instants it spent in other modes.
+/// stands no more than twice as far from it as the coarser two do, the coarsest being the body's longest step. Every
+/// value is read at each step of the finest refinement, an exchange as its net over the coarsest step ending there,
+/// and compared where a run holds the finest's modes; each exchange's net over each whole beat of the finest, from
+/// one beat edge to the next, is compared too. Where the modes differ the window compares when each run made its
+/// transitions and how many instants it spent in other modes.
 pub struct SliceWindow {
     body: CompiledBody,
     start: Box<InitialRevision>,
     policy: WindowPolicy,
+    grid_from: SimTime,
     measured: Measured,
 }
 impl SliceWindow {
     pub fn first() -> Result<Self, AccuracyFailure> {
+        Self::offset(0)
+    }
+    /// The window with its grid started `offset_ns` after admission instead of on it.
+    pub(crate) fn offset(offset_ns: u64) -> Result<Self, AccuracyFailure> {
         let body = arena_body().map_err(admission)?;
         let (packet, lens) = (
             arena_packet(&body).map_err(admission)?,
@@ -457,15 +464,33 @@ impl SliceWindow {
             .find(|row| row.kind() == HEART_PHASE)
             .ok_or(AccuracyFailure::TooFewBeats)?
             .id();
-        let finest = whole_beats(trace(&body, &start, &policy, &finest, Edges::PhaseFalls(phase))?)?;
+        let grid_from = SimTime::from_ns(anchor_moment().nanoseconds() + offset_ns);
+        let finest = trace(
+            &body,
+            &start,
+            &policy,
+            &finest,
+            grid_from,
+            Edges::PhaseFalls(phase),
+        )?;
+        let finest = whole_beats(finest)?;
         let edges: Vec<SimTime> = finest.beats.iter().map(|beat| beat.at).collect();
-        let [coarse, middle] = [&coarse, &middle]
-            .map(|reference| trace(&body, &start, &policy, reference, Edges::Finest(&edges)));
+        let [coarse, middle] = [&coarse, &middle].map(|reference| {
+            trace(
+                &body,
+                &start,
+                &policy,
+                reference,
+                grid_from,
+                Edges::Finest(&edges),
+            )
+        });
         let measured = Measured::new(&policy, compared(&body), finest, &[&coarse?, &middle?], end());
         Ok(Self {
             body,
             start,
             policy,
+            grid_from,
             measured,
         })
     }
@@ -478,7 +503,14 @@ impl SliceWindow {
         case: usize,
     ) -> Result<Compensated, AccuracyFailure> {
         let edges: Vec<SimTime> = self.measured.target.beats.iter().map(|beat| beat.at).collect();
-        let run = trace(&self.body, &self.start, &self.policy, core, Edges::Finest(&edges))?;
+        let run = trace(
+            &self.body,
+            &self.start,
+            &self.policy,
+            core,
+            self.grid_from,
+            Edges::Finest(&edges),
+        )?;
         self.measured.verdict(&run, case)
     }
     /// Everything the window judges by, so two windows that would judge a core apart never share an identity.
@@ -487,12 +519,14 @@ impl SliceWindow {
             body,
             start,
             policy,
+            grid_from,
             measured,
         } = self;
         let mut bytes = body.model_hash().digest().as_bytes().to_vec();
         policy.seal(&mut bytes);
         bytes.extend_from_slice(start.packet_hash().digest().as_bytes());
         let mut number = |value: u64| bytes.extend_from_slice(&value.to_be_bytes());
+        number(grid_from.nanoseconds());
         measured.seal(&mut number);
         Digest::of_canonical(&bytes)
     }
@@ -532,6 +566,7 @@ fn trace(
     start: &InitialRevision,
     policy: &WindowPolicy,
     core: &dyn CoupledSolver,
+    grid_from: SimTime,
     edges: Edges<'_>,
 ) -> Result<Trace, AccuracyFailure> {
     let compared = compared(body);
@@ -547,8 +582,9 @@ fn trace(
         transitions: Vec::new(),
         beats: Vec::new(),
     };
-    let mut next = anchor_moment().nanoseconds() + policy.grid_ns;
-    let mut reached = vec![Compensated::ZERO; compared.len()];
+    let mut next = grid_from.nanoseconds() + policy.grid_ns;
+    let span = (policy.refinements_ns[0] / policy.grid_ns) as usize;
+    let mut reached = Vec::new();
     while session.record().accepted().time().nanoseconds() < end + policy.past_end_ns {
         let before = session.record().accepted().modes().to_vec();
         let phase_was = match edges {
@@ -605,7 +641,7 @@ fn trace(
             trace.instants.push(Instant {
                 at,
                 modes: if at == now { after.to_vec() } else { before.clone() },
-                values: over_interval(compared.iter().map(read), &mut reached),
+                values: over_span(compared.iter().map(read), &mut reached, span),
             });
             next += policy.grid_ns;
         }
@@ -619,19 +655,29 @@ enum Reading {
     Total(Compensated),
 }
 
-/// A level as it stands, and an exchange's net over the interval the instant ends. A running total would add up an
-/// honest core's own one-sign error: it failed the 16 s reference at every grid phase measured.
-fn over_interval(readings: impl Iterator<Item = Reading>, reached: &mut [Compensated]) -> Vec<Compensated> {
-    (readings.zip(reached.iter_mut()))
-        .map(|(reading, before)| match reading {
+/// A level as it stands, and an exchange's net over the `span` instants the instant ends, the coarsest refinement's
+/// step, or since admission while the window is younger. A running total would add up an honest core's own one-sign
+/// error: it failed the 16 s reference at every grid phase measured. A single finest step's net fails an honest core,
+/// since it carries the whole of a valve's offset in timing.
+fn over_span(
+    readings: impl Iterator<Item = Reading>,
+    reached: &mut Vec<Vec<Compensated>>,
+    span: usize,
+) -> Vec<Compensated> {
+    let back = reached.len().checked_sub(span).map(|at| &reached[at]);
+    let mut totals = Vec::new();
+    let values = readings
+        .map(|reading| match reading {
             Reading::Level(value) => value,
             Reading::Total(total) => {
-                let net = total.minus(*before);
-                *before = total;
-                net
+                let before = back.map_or(Compensated::ZERO, |back| back[totals.len()]);
+                totals.push(total);
+                total.minus(before)
             }
         })
-        .collect()
+        .collect();
+    reached.push(totals);
+    values
 }
 
 fn after(ns: u64, tag: &[u8], payload: BoundaryInput) -> BoundaryEvent {
@@ -683,11 +729,12 @@ fn timeline() -> Result<Vec<BoundaryEvent>, AdmissionError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Beat, Compared, Instant, Kind, Measured, Reading, Trace, Transition, WindowPolicy, over_interval,
-        whole_beats,
+        Beat, Compared, Instant, Kind, Measured, Reading, SliceWindow, Trace, Transition, WindowPolicy,
+        over_span, whole_beats,
     };
-    use crate::{AccuracyFailure, TwoReservoirs};
-    use ng_contract::{Compensated, Dimensionless, Measure, SimTime};
+    use crate::{AccuracyFailure, ReferenceIntegrator, TwoReservoirs};
+    use core::num::NonZeroU64;
+    use ng_contract::{Compensated, CoupledSolver, Dimensionless, ErrorScales, Measure, SimTime};
 
     const MILLISECOND: u64 = 1_000_000;
     const SECOND: u64 = 1_000_000_000;
@@ -756,14 +803,15 @@ mod tests {
     }
 
     #[test]
-    fn an_exchange_is_compared_by_its_net_over_each_interval_and_a_level_as_it_stands() {
-        let mut reached = [Compensated::ZERO; 2];
+    fn an_exchange_is_compared_by_its_net_over_the_coarsest_step_ending_at_each_instant_and_a_level_as_it_stands()
+     {
+        let mut reached = Vec::new();
         let read =
             |level: f64, total: f64| [Reading::Level(value(level)), Reading::Total(value(total))].into_iter();
-        let instants = [(5.0, 1.0), (7.0, 3.0), (7.0, 6.0)]
-            .map(|(level, total)| over_interval(read(level, total), &mut reached));
-        let expected =
-            [(5.0, 1.0), (7.0, 2.0), (7.0, 3.0)].map(|(level, net)| vec![value(level), value(net)]);
+        let instants = [(5.0, 1.0), (7.0, 3.0), (7.0, 6.0), (8.0, 10.0)]
+            .map(|(level, total)| over_span(read(level, total), &mut reached, 2));
+        let expected = [(5.0, 1.0), (7.0, 3.0), (7.0, 5.0), (8.0, 7.0)]
+            .map(|(level, net)| vec![value(level), value(net)]);
         assert_eq!(instants, expected);
     }
 
@@ -896,5 +944,39 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    /// On a 10 ms grid from 2 ms the 5 ms references failed on the tricuspid valve's memory at 3.772 s, and from
+    /// 8 ms `Core::new` failed on stroke work at 2.898 s.
+    #[test]
+    fn honest_cores_pass_wherever_the_grid_falls_in_the_beat() {
+        let scales = |absolute, relative| {
+            let scale = |value| Measure::<Dimensionless>::new(value).expect("a finite constant");
+            ErrorScales::uniform(scale(absolute), scale(relative)).expect("positive")
+        };
+        let reference = |scales| {
+            ReferenceIntegrator::new(5 * MILLISECOND)
+                .with_scales(scales)
+                .with_floor(NonZeroU64::new(100_000).expect("a floor"))
+        };
+        let mut verdicts = Vec::new();
+        {
+            let window = SliceWindow::offset(2 * MILLISECOND).expect("the window runs from 2 ms");
+            let fixed = reference(scales(1e9, 1.0));
+            let adapting = reference(scales(1.0, 1e-3));
+            for (name, core) in [
+                ("fixed 5 ms", &fixed as &dyn CoupledSolver),
+                ("adapting 5 ms", &adapting),
+            ] {
+                verdicts.push((name, 2, window.judge(core, 0)));
+            }
+        }
+        let window = SliceWindow::offset(8 * MILLISECOND).expect("the window runs from 8 ms");
+        let core = ng_solver::Core::new(window.body.longest_step_ns());
+        verdicts.push(("Core::new", 8, window.judge(&core, 0)));
+        assert!(
+            verdicts.iter().all(|(.., verdict)| verdict.is_ok()),
+            "{verdicts:?}"
+        );
     }
 }

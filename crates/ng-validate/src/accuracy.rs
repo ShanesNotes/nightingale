@@ -225,8 +225,8 @@ pub enum AccuracyFailure {
     Dependent {
         case: usize,
     },
-    /// The first instant a slice window's quantity stood further from the reference's finest refinement than its
-    /// distance.
+    /// The first instant, at a step of the finest refinement, a slice window's quantity stood further from the
+    /// reference's finest refinement than its distance.
     Outside {
         case: usize,
         at: SimTime,
