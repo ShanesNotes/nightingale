@@ -2830,3 +2830,10 @@ old = '''
 new = '''
 '''
 test = "-p ng-contract --lib evaluate::terms::a_placed_terms_derivatives_are_the_hand_written_expressions"
+
+[[mutant]]
+name = "a-set-includes-itself"
+path = "crates/ng-contract/src/anatomy.rs"
+old = '''impl<C: SiteSet> Contains<C> for C {}'''
+new = ''''''
+test = "-p ng-contract --lib evaluate::terms::a_read_in_its_own_set_writes_the_op_a_plain_read_writes"

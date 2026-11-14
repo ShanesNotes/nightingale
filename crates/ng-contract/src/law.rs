@@ -1135,7 +1135,7 @@ pub struct FinishedTerm<'b, 'k, O, U, S> {
     kernel: Brand<'k>,
     kind: PhantomData<(O, U, S)>,
 }
-/// A named value over the sites of `C` that no row holds. A law over a set that contains `C` adds it with `add_from`,
+/// A named value over the sites of `C` that no row holds. A law over a set that includes `C` adds it with `add_from`,
 /// and compile writes it into that law's program at each site of `C` and leaves the program as it was elsewhere.
 pub struct SiteTerm<'b, O, C, U> {
     data: TermData,

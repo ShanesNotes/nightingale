@@ -472,7 +472,7 @@
 //!     k.add_from(base, collapse)
 //! }
 //! ```
-//! A law adds a term only from a set that contains the term's: the veins are blood sites, not urinary ones.
+//! A law adds a term only from a set that includes the term's: the veins are blood sites, not urinary ones.
 //! ```compile_fail,E0308
 //! use ng_contract::*;
 //! fn tract<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Urinary>, base: Expr<'b, 'k, Cardiovascular, Volume>,
