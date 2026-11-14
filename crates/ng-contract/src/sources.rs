@@ -46,10 +46,11 @@ pub(crate) fn refusal_sources(layout: &Layout) -> Vec<RefusalSource> {
             (layout.programs.iter())
                 .filter(|program| program.law == law || !program.code.origins.is_empty())
                 .any(|program| {
-                let ops = program.code.ops.iter().enumerate();
-                let of_law = |&(at, _): &(usize, &Op)| program.code.origin(at).unwrap_or(program.law) == law;
-                ops.filter(of_law).any(|(_, op)| wanted(op))
-            })
+                    let ops = program.code.ops.iter().enumerate();
+                    let of_law =
+                        |&(at, _): &(usize, &Op)| program.code.origin(at).unwrap_or(program.law) == law;
+                    ops.filter(of_law).any(|(_, op)| wanted(op))
+                })
         };
         if reads(|op| matches!(op, Op::Divide(_))) {
             sources.push(RefusalSource::Divisor { law });

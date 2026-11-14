@@ -135,7 +135,8 @@ fn compiled(case: Case) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
             });
             cv.memory_rate(&integral, rate);
         }
-        let share = cv.site_parameter::<Blood, Dimensionless>(ParameterKey::new("cv.share"), Admissible::finite());
+        let share =
+            cv.site_parameter::<Blood, Dimensionless>(ParameterKey::new("cv.share"), Admissible::finite());
         let (level, x) = cv.site_field::<Blood, Dimensionless>("level", Admissible::finite());
         let modes = split.then(|| cv.modes("valve", ["off", "on"]));
         let holding = match &modes {
@@ -155,8 +156,10 @@ fn compiled(case: Case) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
         }
         let t = cv.site_parameter::<Veins, Dimensionless>(ParameterKey::new("cv.t"), Admissible::finite());
         let p = cv.parameter::<Dimensionless>(ParameterKey::new("cv.p"), Admissible::finite());
-        let absent: ReadPort<'_, Cardiovascular, PerSite<Blood, Dimensionless>> =
-            ReadPort::field(LawName { owner: "CV", local: "absent" });
+        let absent: ReadPort<'_, Cardiovascular, PerSite<Blood, Dimensionless>> = ReadPort::field(LawName {
+            owner: "CV",
+            local: "absent",
+        });
         let declared = !matches!(host, Host::ByHand | Host::Main | Host::MainIn);
         let inner = (declared && matches!(shape, Term::NestedInVeins | Term::NestedInBlood)).then(|| {
             cv.site_term::<Veins, Dimensionless, _>("inner", |mut k| {
@@ -267,7 +270,8 @@ fn packet(body: &CompiledBody, level: f64) -> ParameterPacket<SyntheticFixture> 
     let mut packet: ParameterPacket<SyntheticFixture> = ParameterPacket::new();
     let vascular = Binding::Network(Network::Vascular);
     let synthetic = "synthetic";
-    let wanted = |key: &'static str| (body.parameters().iter()).any(|slot| slot.key() == ParameterKey::new(key));
+    let wanted =
+        |key: &'static str| (body.parameters().iter()).any(|slot| slot.key() == ParameterKey::new(key));
     let share = measure::<Dimensionless>(level);
     (packet.synthetic(ParameterKey::new("cv.share"), vascular, share, synthetic)).expect("once");
     if wanted("cv.t") {
@@ -309,7 +313,9 @@ fn inputs<'a>(bound: &'a BoundParameters, frame: &'a DriveFrame, unknowns: &'a [
 }
 
 fn starts(body: &CompiledBody, bound: &BoundParameters) -> Vec<f64> {
-    (body.rows().iter()).map(|row| bound.starts[row.id().index()]).collect()
+    (body.rows().iter())
+        .map(|row| bound.starts[row.id().index()])
+        .collect()
 }
 
 fn cv(local: &'static str) -> LawName {
@@ -334,7 +340,8 @@ fn refusal_at(body: &CompiledBody, site: SiteId, t: f64, level: f64) -> Option<U
         .filter(|(_, instance)| instance.context == Context::Site(site))
         .find_map(|(at, instance)| {
             let (arithmetic, reads) = (body.tape.program(instance.program), body.tape.instance(at));
-            let refused = super::forward(arithmetic, reads, &inputs, body.partial_volume(), &mut values).err()?;
+            let refused =
+                super::forward(arithmetic, reads, &inputs, body.partial_volume(), &mut values).err()?;
             Some(body.undefined(at, &inputs, refused))
         })
 }
@@ -344,7 +351,10 @@ fn named(refused: Option<Undefined>) -> Option<(&'static str, String)> {
 }
 
 fn count(body: &CompiledBody, source: RefusalSource) -> usize {
-    body.refusal_sources().iter().filter(|known| **known == source).count()
+    body.refusal_sources()
+        .iter()
+        .filter(|known| **known == source)
+        .count()
 }
 
 fn log() -> String {
@@ -361,15 +371,27 @@ fn a_refusal_in_a_term_names_the_terms_law_and_one_in_the_host_names_the_host() 
     });
     assert_eq!(named(refusal(&body, 0.0, 0.5)), Some(("collapse", log())));
     assert_eq!(named(refusal(&body, 2.0, -0.5)), Some(("echo", log())));
-    assert_eq!(count(&body, RefusalSource::LogarithmArgument { law: cv("collapse") }), 1);
+    assert_eq!(
+        count(&body, RefusalSource::LogarithmArgument { law: cv("collapse") }),
+        1
+    );
     assert_eq!(count(&body, RefusalSource::NonFinite { law: cv("collapse") }), 1);
-    assert_eq!(count(&body, RefusalSource::LogarithmArgument { law: cv("probe") }), 1);
+    assert_eq!(
+        count(&body, RefusalSource::LogarithmArgument { law: cv("probe") }),
+        1
+    );
     let (plain, _) = bench(Case {
         marks: &[0, 1],
         ..PLAIN
     });
-    assert_eq!(count(&plain, RefusalSource::LogarithmArgument { law: cv("probe") }), 0);
-    assert_eq!(count(&plain, RefusalSource::LogarithmArgument { law: cv("collapse") }), 1);
+    assert_eq!(
+        count(&plain, RefusalSource::LogarithmArgument { law: cv("probe") }),
+        0
+    );
+    assert_eq!(
+        count(&plain, RefusalSource::LogarithmArgument { law: cv("collapse") }),
+        1
+    );
 }
 
 /// Ruling 4: where an op of the host and an op of the term both refuse, the first in program order names its law,
@@ -388,7 +410,10 @@ fn where_host_and_term_both_refuse_the_first_in_program_order_names_its_law() {
     assert_eq!(at_vein(&host_first, 0.0), Some(("echo", log())));
     assert_eq!(at_vein(&term_first, 0.0), Some(("collapse", log())));
     assert_eq!(at_vein(&host_first, f64::NAN), Some(("echo", log())));
-    assert_eq!(at_vein(&term_first, f64::NAN), Some(("collapse", "NonFinite".into())));
+    assert_eq!(
+        at_vein(&term_first, f64::NAN),
+        Some(("collapse", "NonFinite".into()))
+    );
 }
 
 /// A logarithm the host and the term both take is one op, and the host's: the host computes it with or without the
@@ -401,7 +426,10 @@ fn a_logarithm_host_and_term_both_take_is_the_hosts() {
         ..PLAIN
     });
     assert_eq!(named(refusal(&body, 1.0, -0.5)), Some(("echo", log())));
-    assert_eq!(count(&body, RefusalSource::LogarithmArgument { law: cv("collapse") }), 0);
+    assert_eq!(
+        count(&body, RefusalSource::LogarithmArgument { law: cv("collapse") }),
+        0
+    );
 }
 
 fn programs_at(body: &CompiledBody, local: &'static str) -> Vec<(SiteId, ProgramId)> {
@@ -441,7 +469,10 @@ fn off_its_set_each_host_runs_mains_program_with_mains_id() {
         assert_eq!(programs[..main_programs.len()], main_programs[..]);
         for local in ["probe", "echo"] {
             let marked: Vec<SiteId> = marks.iter().map(|&mark| [upper, lower][mark]).collect();
-            for ((site, program), (_, on_main)) in programs_at(&body, local).into_iter().zip(programs_at(&main, local)) {
+            for ((site, program), (_, on_main)) in programs_at(&body, local)
+                .into_iter()
+                .zip(programs_at(&main, local))
+            {
                 if marked.contains(&site) {
                     assert!(program.index() >= main_programs.len());
                 } else {
@@ -499,7 +530,10 @@ fn a_marked_terms_name_is_in_the_model_hash() {
 fn with_no_vein_marked_the_refusal_sources_are_mains_and_list_each_law_once() {
     let (main, _) = bench(Case { split: true, ..MAIN });
     let laws: Vec<LawName> = main.programs().iter().map(|program| program.law).collect();
-    assert!(laws.windows(2).any(|pair| pair[0] == pair[1]), "a law with adjacent programs");
+    assert!(
+        laws.windows(2).any(|pair| pair[0] == pair[1]),
+        "a law with adjacent programs"
+    );
     let (body, _) = bench(Case {
         marks: &[],
         split: true,
@@ -508,7 +542,11 @@ fn with_no_vein_marked_the_refusal_sources_are_mains_and_list_each_law_once() {
     let sources = body.refusal_sources();
     assert_eq!(sources, main.refusal_sources());
     for source in sources {
-        assert_eq!(sources.iter().filter(|known| *known == source).count(), 1, "{source:?}");
+        assert_eq!(
+            sources.iter().filter(|known| *known == source).count(),
+            1,
+            "{source:?}"
+        );
     }
 }
 
@@ -596,14 +634,23 @@ fn a_term_that_adds_a_term_names_each_refusal_by_its_own_law() {
     let outer_only = nested(&[], Term::NestedInBlood);
     assert_eq!(named(refusal(&outer_only, 2.0, -0.5)), Some(("collapse", log())));
     assert_eq!(named(refusal(&outer_only, 0.0, 0.5)), None);
-    assert_eq!(count(&outer_only, RefusalSource::LogarithmArgument { law: cv("inner") }), 0);
+    assert_eq!(
+        count(&outer_only, RefusalSource::LogarithmArgument { law: cv("inner") }),
+        0
+    );
     for term in [Term::NestedInVeins, Term::NestedInBlood] {
         let both = nested(&[0], term);
         assert_eq!(named(refusal(&both, 0.0, 0.5)), Some(("inner", log())));
         assert_eq!(named(refusal(&both, 2.0, -0.5)), Some(("collapse", log())));
         assert_eq!(named(refusal(&both, 0.0, -0.5)), Some(("collapse", log())));
-        assert_eq!(count(&both, RefusalSource::LogarithmArgument { law: cv("inner") }), 1);
-        assert_eq!(count(&both, RefusalSource::LogarithmArgument { law: cv("collapse") }), 1);
+        assert_eq!(
+            count(&both, RefusalSource::LogarithmArgument { law: cv("inner") }),
+            1
+        );
+        assert_eq!(
+            count(&both, RefusalSource::LogarithmArgument { law: cv("collapse") }),
+            1
+        );
     }
 }
 
@@ -622,7 +669,10 @@ fn a_term_whose_ops_all_merge_into_its_hosts_repeats_the_hosts_law() {
     let finite = RefusalSource::NonFinite { law: cv("probe") };
     assert_eq!(count(&merged(&[]), finite), 1);
     assert_eq!(count(&merged(&[0]), finite), 2);
-    assert_eq!(count(&merged(&[0]), RefusalSource::NonFinite { law: cv("collapse") }), 0);
+    assert_eq!(
+        count(&merged(&[0]), RefusalSource::NonFinite { law: cv("collapse") }),
+        0
+    );
 }
 
 /// Find-out 4: the Jacobian and the parameter slopes of a host that adds a term reading an algebraic unknown and a
@@ -657,18 +707,32 @@ fn a_placed_terms_derivatives_are_the_hand_written_expressions() {
         let rows = body.rows();
         let mut out = Vec::new();
         for (at, row) in rows.iter().enumerate() {
-            let RowKind::Algebraic(slot) = row.kind() else { continue };
-            if !matches!(slot.at, Context::Site(site) if site == upper || site == lower) || slot.law.local == "level" {
+            let RowKind::Algebraic(slot) = row.kind() else {
+                continue;
+            };
+            if !matches!(slot.at, Context::Site(site) if site == upper || site == lower)
+                || slot.law.local == "level"
+            {
                 continue;
             }
             for entry in sparsity.row_offsets()[at]..sparsity.row_offsets()[at + 1] {
                 let column = rows[sparsity.unknowns()[entry].index()].kind();
-                out.push(format!("{row:?} d/{column:?} {:016x}", jacobian[entry].to_bits(), row = row.kind()));
+                out.push(format!(
+                    "{row:?} d/{column:?} {:016x}",
+                    jacobian[entry].to_bits(),
+                    row = row.kind()
+                ));
             }
             for slot in 0..bound.values.len() {
                 let key = body.parameters()[slot].key();
-                let slopes = body.parameter_slopes(&inputs, &[crate::body::ParameterId::at(slot)]).expect("finite");
-                out.push(format!("{:?} d/{key:?} {:016x}", row.kind(), slopes[at].to_bits()));
+                let slopes = body
+                    .parameter_slopes(&inputs, &[crate::body::ParameterId::at(slot)])
+                    .expect("finite");
+                out.push(format!(
+                    "{:?} d/{key:?} {:016x}",
+                    row.kind(),
+                    slopes[at].to_bits()
+                ));
             }
         }
         out.sort();
@@ -676,7 +740,11 @@ fn a_placed_terms_derivatives_are_the_hand_written_expressions() {
     };
     let placed_slopes = row_slopes(&placed);
     assert_eq!(placed_slopes, row_slopes(&by_hand));
-    assert!(placed_slopes.iter().any(|line| line.contains("cv.p") && !line.ends_with("0000000000000000")));
+    assert!(
+        placed_slopes
+            .iter()
+            .any(|line| line.contains("cv.p") && !line.ends_with("0000000000000000"))
+    );
 }
 
 /// A term's name is a law's name: one that a slot of the same owner holds is refused, as two slots' would be.

@@ -364,7 +364,12 @@ fn forward(
 /// it, and `forward` stays the one caller of `apply`, so a step's code is main's. A read that is not finite stops
 /// `forward` there, so the search runs the steps before it with the reads before it.
 #[cold]
-fn refused_at(arithmetic: Arithmetic<'_>, reads: Reads<'_>, inputs: &Inputs<'_>, partial_volume: f64) -> usize {
+fn refused_at(
+    arithmetic: Arithmetic<'_>,
+    reads: Reads<'_>,
+    inputs: &Inputs<'_>,
+    partial_volume: f64,
+) -> usize {
     let mut values = vec![0.0; arithmetic.length];
     let none = Arithmetic {
         length: arithmetic.length,
@@ -375,10 +380,18 @@ fn refused_at(arithmetic: Arithmetic<'_>, reads: Reads<'_>, inputs: &Inputs<'_>,
         let slots = (reads.parameters.iter().map(|read| read.0))
             .chain(reads.unknowns.iter().map(|read| read.0))
             .chain(reads.others.iter().map(|read| read.0));
-        read = slots.filter(|&slot| !values[slot].is_finite()).min().unwrap_or(read);
+        read = slots
+            .filter(|&slot| !values[slot].is_finite())
+            .min()
+            .unwrap_or(read);
     }
     let (parameters, unknowns, others): (Vec<_>, Vec<_>, Vec<_>) = (
-        reads.parameters.iter().copied().filter(|at| at.0 < read).collect(),
+        reads
+            .parameters
+            .iter()
+            .copied()
+            .filter(|at| at.0 < read)
+            .collect(),
         reads.unknowns.iter().copied().filter(|at| at.0 < read).collect(),
         reads.others.iter().copied().filter(|at| at.0 < read).collect(),
     );

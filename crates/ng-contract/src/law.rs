@@ -688,7 +688,8 @@ impl Written {
     /// One op for each value the program computes twice, as a term reads what its host reads. An op the host and a
     /// term both compute is the host's, since the host computes it with or without the term.
     fn shared(self) -> Self {
-        let expects = |at: usize| (self.fields.iter().find(|read| read.at == at)).map(|read| read.expects.clone());
+        let expects =
+            |at: usize| (self.fields.iter().find(|read| read.at == at)).map(|read| read.expects.clone());
         let mut kept: Vec<(Op, bool, Option<String>)> = Vec::new();
         let mut origins: Vec<Option<LawName>> = Vec::new();
         let mut map: Vec<usize> = Vec::with_capacity(self.code.len());
@@ -1926,7 +1927,11 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
         self.close(build(Kernel::open()))
     }
     /// Declares a term named `name` over the sites of `C`. It is no row: compile writes it into each law that adds it.
-    pub fn site_term<C: SiteSet, U: Dimension, F>(&mut self, name: &'static str, build: F) -> SiteTerm<'b, O, C, U>
+    pub fn site_term<C: SiteSet, U: Dimension, F>(
+        &mut self,
+        name: &'static str,
+        build: F,
+    ) -> SiteTerm<'b, O, C, U>
     where
         F: for<'k> FnOnce(Kernel<'b, 'k, O, C>) -> FinishedTerm<'b, 'k, O, U, C>,
     {

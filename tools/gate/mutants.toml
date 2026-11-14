@@ -2705,3 +2705,128 @@ old = '''ParameterContext::Site(Sites::Blood | Sites::Veins) => {
 new = '''ParameterContext::Site(Sites::Blood) => Some(Binding::Network(Network::Vascular)),
                     ParameterContext::Site(Sites::Veins) => Some(Binding::Class(Class::VesselSegment)),'''
 test = "-p ng-contract --test map_reads a_parameter_on_the_veins_defaults_from_the_vascular_network"
+
+[[mutant]]
+name = "term-origin-kept"
+path = "crates/ng-contract/src/law.rs"
+old = '''origins.extend((written.origins.iter()).map(|origin| Some(origin.unwrap_or(term.law))));'''
+new = '''origins.extend((written.origins.iter()).map(|_| None));'''
+test = "-p ng-contract --lib evaluate::terms::a_refusal_in_a_term_names_the_terms_law_and_one_in_the_host_names_the_host"
+
+[[mutant]]
+name = "inner-term-keeps-its-law"
+path = "crates/ng-contract/src/law.rs"
+old = '''origins.extend((written.origins.iter()).map(|origin| Some(origin.unwrap_or(term.law))));'''
+new = '''origins.extend((written.origins.iter()).map(|_| Some(term.law)));'''
+test = "-p ng-contract --lib evaluate::terms::a_term_that_adds_a_term_names_each_refusal_by_its_own_law"
+
+[[mutant]]
+name = "term-erased-off-set"
+path = "crates/ng-contract/src/law.rs"
+old = '''if !inside(term.set) {'''
+new = '''if false {'''
+test = "-p ng-contract --lib evaluate::terms::off_its_set_each_host_runs_mains_program_with_mains_id"
+
+[[mutant]]
+name = "variant-ids-after-main"
+path = "crates/ng-contract/src/compile.rs"
+old = '''placed.program = ProgramId::at(first + index);'''
+new = '''placed.program = ProgramId::at(index);'''
+test = "-p ng-contract --lib evaluate::terms::off_its_set_each_host_runs_mains_program_with_mains_id"
+
+[[mutant]]
+name = "variant-reads-addressed"
+path = "crates/ng-contract/src/compile.rs"
+old = '''                        (program, variant)'''
+new = '''                        (program, kernel)'''
+test = "-p ng-contract --lib evaluate::terms::a_read_main_refuses_by_hand_is_refused_through_a_term"
+
+[[mutant]]
+name = "origins-sealed"
+path = "crates/ng-contract/src/body.rs"
+old = '''if !origins.is_empty() {'''
+new = '''if false {'''
+test = "-p ng-contract --lib evaluate::terms::a_marked_terms_name_is_in_the_model_hash"
+
+[[mutant]]
+name = "origins-sealed-only-when-some"
+path = "crates/ng-contract/src/body.rs"
+old = '''if !origins.is_empty() {'''
+new = '''if true {'''
+test = "-p ng-validate --test trace the_slices_model_hash_and_conserved_basis_stay_where_they_were"
+
+[[mutant]]
+name = "term-reads-checked"
+path = "crates/ng-contract/src/law.rs"
+old = '''        unreached.splice(0..0, pruned.unreached);
+'''
+new = '''
+'''
+test = "-p ng-contract --lib evaluate::terms::a_terms_unused_invalid_read_is_still_refused"
+
+[[mutant]]
+name = "term-reads-every-op"
+path = "crates/ng-contract/src/compile.rs"
+old = '''let reads: Vec<bool> = (kernel.every_op().into_iter())'''
+new = '''let reads: Vec<bool> = (kernel.code.iter())'''
+test = "-p ng-contract --lib evaluate::terms::a_read_main_refuses_by_hand_is_refused_through_a_term"
+
+[[mutant]]
+name = "sources-by-origin"
+path = "crates/ng-contract/src/sources.rs"
+old = '''program.code.origin(at).unwrap_or(program.law) == law'''
+new = '''program.law == law'''
+test = "-p ng-contract --lib evaluate::terms::a_refusal_in_a_term_names_the_terms_law_and_one_in_the_host_names_the_host"
+
+[[mutant]]
+name = "sources-adjacent"
+path = "crates/ng-contract/src/sources.rs"
+old = '''if laws.last() != Some(&program.law) && !variant {'''
+new = '''if !variant {'''
+test = "-p ng-contract --lib evaluate::terms::with_no_vein_marked_the_refusal_sources_are_mains_and_list_each_law_once"
+
+[[mutant]]
+name = "refused-at-op"
+path = "crates/ng-contract/src/evaluate.rs"
+old = '''    steps[failed - 1].0
+}'''
+new = '''    0
+}'''
+test = "-p ng-contract --lib evaluate::terms::where_host_and_term_both_refuse_the_first_in_program_order_names_its_law"
+
+[[mutant]]
+name = "refused-before-a-bad-read"
+path = "crates/ng-contract/src/evaluate.rs"
+old = '''let steps = &arithmetic.steps[..arithmetic.steps.partition_point(|&(at, _)| at < read)];'''
+new = '''let steps = &arithmetic.steps[..0];'''
+test = "-p ng-contract --lib evaluate::terms::where_host_and_term_both_refuse_the_first_in_program_order_names_its_law"
+
+[[mutant]]
+name = "shared-op-is-the-hosts"
+path = "crates/ng-contract/src/law.rs"
+old = '''
+                Some(index) => {
+                    if self.origins[at].is_none() {
+                        origins[index] = None;
+                    }
+                    index
+                }
+'''
+new = '''
+                Some(index) => index,
+'''
+test = "-p ng-contract --lib evaluate::terms::a_logarithm_host_and_term_both_take_is_the_hosts"
+
+[[mutant]]
+name = "closing-written"
+path = "crates/ng-contract/src/law.rs"
+old = '''
+        for first in &placing.closing {
+            let value = written.code.len() - 1;
+            written.code.push(first.clone());
+            written.code.push(Op::Subtract([value + 1, value]));
+        }
+'''
+new = '''
+'''
+test = "-p ng-contract --lib evaluate::terms::a_placed_terms_derivatives_are_the_hand_written_expressions"

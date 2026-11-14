@@ -464,17 +464,18 @@
 //! fn contained<C: SiteSet>() where Blood: Contains<C> {}
 //! contained::<Veins>();
 //! ```
-//! A law adds a term only from a set that contains the term's: the veins are blood sites, not urinary ones.
-//! ```compile_fail,E0308
+//! A law on blood adds a vein term of its own owner to a value of the term's dimension.
+//! ```
 //! use ng_contract::*;
-//! fn tract<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Urinary>, base: Expr<'b, 'k, Cardiovascular, Volume>,
+//! fn blood<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Blood>, base: Expr<'b, 'k, Cardiovascular, Volume>,
 //!     collapse: &SiteTerm<'b, Cardiovascular, Veins, Volume>) -> Expr<'b, 'k, Cardiovascular, Volume> {
 //!     k.add_from(base, collapse)
 //! }
 //! ```
-//! ```
+//! A law adds a term only from a set that contains the term's: the veins are blood sites, not urinary ones.
+//! ```compile_fail,E0308
 //! use ng_contract::*;
-//! fn blood<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Blood>, base: Expr<'b, 'k, Cardiovascular, Volume>,
+//! fn tract<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Urinary>, base: Expr<'b, 'k, Cardiovascular, Volume>,
 //!     collapse: &SiteTerm<'b, Cardiovascular, Veins, Volume>) -> Expr<'b, 'k, Cardiovascular, Volume> {
 //!     k.add_from(base, collapse)
 //! }
