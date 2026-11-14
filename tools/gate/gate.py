@@ -62,8 +62,8 @@ MUTANTS = "tools/gate/mutants.toml"
 MUTATE = "tools/mutate.py"
 TESTED = "target/gate/tested.jsonl"
 TESTED_RESET = "python3 -I tools/gate/gate.py tested --reset"
-# A proof's fresh clone holds these outside its commit when 10-rust writes the record. No test reads them, and
-# mutate.py's `unseen` refuses the Cargo configs in them that only the sweep's cargo would read.
+# A proof's fresh clone holds these outside its commit when 10-rust writes the record, and no test reads them. Only
+# the sweep's cargo would read a Cargo config under target/, so the writer refuses one there.
 CLONE_BUILD_OUTPUTS = frozenset({"target/", "tools/__pycache__/", "docs/architecture/solver-contract-sketch/target/"})
 UNEXTRACTED = ("status", "--porcelain", "-z", "--ignored=matching", "--untracked-files=all")
 SCRUB = "tools/gate/scrub.sh"
