@@ -593,8 +593,6 @@ fn reachable_placed(
     (pruned, placed)
 }
 
-/// A kernel as its law wrote it, with each `add_from` an identity on its base. Compile writes it out per site: the
-/// term added where the site is in the term's set, and the base alone elsewhere.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Placing {
     code: Vec<Op>,
@@ -602,7 +600,6 @@ pub(crate) struct Placing {
     accepting: Vec<usize>,
     fields: Vec<FieldRead>,
     splices: Vec<Splice>,
-    /// What `summing` and `defining` subtract the value from, written after it as they write it into `code`.
     closing: Vec<Op>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -617,7 +614,6 @@ struct TermData {
     graph: Placing,
 }
 
-/// A placed graph, with the law of each op that a term and not its host computes.
 struct Written {
     code: Vec<Op>,
     origins: Vec<Option<LawName>>,
@@ -685,8 +681,7 @@ impl Placing {
     }
 }
 impl Written {
-    /// One op for each value the program computes twice, as a term reads what its host reads. An op the host and a
-    /// term both compute is the host's, since the host computes it with or without the term.
+    /// An op the host and a term both compute is the host's, since the host computes it with or without the term.
     fn shared(self) -> Self {
         let expects =
             |at: usize| (self.fields.iter().find(|read| read.at == at)).map(|read| read.expects.clone());
@@ -819,13 +814,10 @@ pub(crate) struct KernelData {
     pub(crate) modes: Selector,
     pub(crate) rate: RateClass,
     pub(crate) defines: bool,
-    /// The graph as written, kept only when it adds a term; `code` is its form at a site in no term's set.
     pub(crate) placing: Option<Box<Placing>>,
-    /// The ops a term computes and its host does not, each with the term's law. Empty off every term's set.
     pub(crate) origins: Vec<(usize, LawName)>,
 }
 impl KernelData {
-    /// The kernel as it runs at a site inside the sets `inside` holds, or `None` where that is `code` as it stands.
     pub(crate) fn at(&self, inside: impl Fn(Sites) -> bool) -> Option<KernelData> {
         let placing = self.placing.as_ref()?;
         if !placing.any_inside(&inside) {
@@ -849,7 +841,6 @@ impl KernelData {
             ..self.clone()
         })
     }
-    /// Every op the kernel or a term it adds holds, for checks that ask what a law reads at all.
     pub(crate) fn every_op(&self) -> Vec<&Op> {
         fn walk<'a>(placing: &'a Placing, out: &mut Vec<&'a Op>) {
             for splice in &placing.splices {

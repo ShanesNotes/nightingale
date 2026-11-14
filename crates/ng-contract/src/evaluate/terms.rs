@@ -1,6 +1,3 @@
-//! A site term placed by compile: its refusals, its derivatives and its absence, against bodies that write the same
-//! arithmetic by hand.
-
 use super::{Inputs, Undefined};
 use crate::body::Target;
 use crate::boundary::DriveFrame;
@@ -17,44 +14,29 @@ fn at() -> Position {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Host {
-    /// The level, plus the term on its set.
     Plain,
-    /// The logarithm of the level, plus the term on its set.
     Logarithm,
-    /// The level plus the term, times the logarithm of the level: the host's logarithm follows the term's ops.
     LogarithmAfter,
-    /// The term written into a law over the veins by hand, with no term declared.
     ByHand,
-    /// The level with no term declared: main's law.
     Main,
-    /// Main's law, its read spelled `at_site_in` on its own set.
     MainIn,
-    /// The level, with the term added and its sum thrown away.
     Discarded,
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum Term {
-    /// `ln(t) (x p)`, with `x` the level.
     Collapse,
-    /// `ln(x)`.
     LogLevel,
-    /// `x` alone, which its host reads too.
     Level,
-    /// `x` times the day's clock, reading no parameter.
     Clock,
-    /// `ln(x)` on the veins, adding a term `inner`, `ln(t)`, on the veins.
     NestedInVeins,
-    /// `ln(x)` on blood, adding a term `inner`, `ln(t)`, on the veins.
     NestedInBlood,
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum Read {
     Clean,
-    /// The term also reads a field no law emits.
     Absent,
-    /// The term, or the law by hand, also reads a hazard's stream.
     Draw,
 }
 
@@ -65,7 +47,6 @@ struct Case {
     term: Term,
     name: &'static str,
     read: Read,
-    /// The level is held by one kernel in each of two modes, so its law has two adjacent programs.
     split: bool,
 }
 
@@ -84,8 +65,6 @@ const MAIN: Case = Case {
     ..PLAIN
 };
 
-/// Four blood sites, two of them vein-shaped and `marks` of those marked. `level` is an algebraic row on every blood
-/// site, `t` a parameter on the veins and `p` a body parameter. Two hosts, `probe` and `echo`, add the term.
 fn compiled(case: Case) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
     let Case {
         marks,
@@ -290,7 +269,6 @@ fn packet(body: &CompiledBody, level: f64) -> ParameterPacket<SyntheticFixture> 
     packet
 }
 
-/// The bound packet, with `t` at every vein set to `t`, finite or not.
 fn bound(body: &CompiledBody, t: f64, level: f64) -> BoundParameters {
     let mut bound = body.bind(packet(body, level)).expect("bound");
     for (slot, parameter) in body.parameters().iter().enumerate() {
@@ -329,7 +307,6 @@ fn refusal(body: &CompiledBody, t: f64, level: f64) -> Option<Undefined> {
     body.instance_values(&inputs(&bound, &frame, &unknowns)).err()
 }
 
-/// The first refusal among the instances at `site`, as `instance_values` finds it.
 fn refusal_at(body: &CompiledBody, site: SiteId, t: f64, level: f64) -> Option<Undefined> {
     let bound = bound(body, t, level);
     let frame = DriveFrame::default();
@@ -416,8 +393,6 @@ fn where_host_and_term_both_refuse_the_first_in_program_order_names_its_law() {
     );
 }
 
-/// A logarithm the host and the term both take is one op, and the host's: the host computes it with or without the
-/// term, even where the term's comes first in the program.
 #[test]
 fn a_logarithm_host_and_term_both_take_is_the_hosts() {
     let (body, _) = bench(Case {
@@ -513,7 +488,6 @@ fn with_no_vein_marked_every_byte_is_mains() {
     }
 }
 
-/// At a marked vein the term's name is sealed: two bodies that differ only in it are two models.
 #[test]
 fn a_marked_terms_name_is_in_the_model_hash() {
     let (collapse, _) = bench(PLAIN);
@@ -524,8 +498,6 @@ fn a_marked_terms_name_is_in_the_model_hash() {
     assert_ne!(collapse.model_hash(), renamed.model_hash());
 }
 
-/// Refusal sources list a law once where its programs are adjacent, as main lists them, with a term declared and no
-/// vein marked.
 #[test]
 fn with_no_vein_marked_the_refusal_sources_are_mains_and_list_each_law_once() {
     let (main, _) = bench(Case { split: true, ..MAIN });
@@ -747,7 +719,6 @@ fn a_placed_terms_derivatives_are_the_hand_written_expressions() {
     );
 }
 
-/// A term's name is a law's name: one that a slot of the same owner holds is refused, as two slots' would be.
 #[test]
 fn a_term_named_as_a_slot_is_refused() {
     let named = compiled(Case {

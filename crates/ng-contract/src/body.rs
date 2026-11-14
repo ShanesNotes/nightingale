@@ -452,8 +452,6 @@ pub(crate) struct Code {
     pub(crate) rate: RateClass,
     pub(crate) validity: Vec<Validity>,
     pub(crate) defines: bool,
-    /// The ops a term computes and the law that declares it, so a refusal there names that law. Empty in a program
-    /// that adds no term, and then it seals no byte.
     pub(crate) origins: Vec<(usize, LawName)>,
 }
 impl Code {

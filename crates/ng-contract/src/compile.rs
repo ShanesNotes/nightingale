@@ -1500,8 +1500,6 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
     Ok(placement)
 }
 
-/// Where a variant's provisional id starts: variants follow every program a site outside each term's set runs, so
-/// those programs keep the ids they have when no term is placed.
 const VARIANT: usize = usize::MAX / 2;
 
 fn inside(anatomy: &Anatomy, set: Sites, context: Context) -> bool {

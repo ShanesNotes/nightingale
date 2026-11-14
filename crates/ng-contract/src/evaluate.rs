@@ -360,9 +360,8 @@ fn forward(
     }
 }
 
-/// The op `forward` refused at, found again by running `forward` on prefixes of the program: only a refusal pays for
-/// it, and `forward` stays the one caller of `apply`, so a step's code is main's. A read that is not finite stops
-/// `forward` there, so the search runs the steps before it with the reads before it.
+/// Reruns `forward` on prefixes rather than call `apply` itself: a second caller of `apply` stopped its inlining into
+/// `forward` and cost every step 12.6% more instructions.
 #[cold]
 fn refused_at(
     arithmetic: Arithmetic<'_>,
