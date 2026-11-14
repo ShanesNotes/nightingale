@@ -96,9 +96,8 @@ fn head_down_at_trunk_minus_a_fifth_runs_past_thirty_seconds_on_the_halved_core(
     );
 }
 
-/// The leg veins sit in no enclosure, so their pressure is `E s`. The vein's part of the store has its own test,
-/// `below_its_unstressed_volume_a_marked_veins_part_of_the_store_grows`. No requirement bounds heat or muscle work,
-/// so the test holds neither.
+/// The leg veins sit in no enclosure, so their pressure is `E s`. No requirement bounds heat or muscle work, so the
+/// test holds neither.
 #[test]
 fn a_vein_below_its_unstressed_volume_lowers_its_pressure_as_it_empties_and_the_ledger_closes() {
     let (leg, water) = (
