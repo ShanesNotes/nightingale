@@ -305,6 +305,12 @@ pub fn admit_at<'m>(
 pub(crate) struct AdmissionSolve {
     workspace: AdmissionWorkspace,
     origin: SimTime,
+    fence: SimTime,
+}
+impl AdmissionSolve {
+    pub(crate) fn fence(&self) -> SimTime {
+        self.fence
+    }
 }
 
 /// The admission solve alone, on a port with no input. No core reaches it, and the admission system's identity leaves
@@ -317,20 +323,33 @@ pub(crate) fn solve_admission(
 ) -> Result<AdmissionSolve, InitializationFailure> {
     let system = system(body, packet, BoundaryPort::new(Vec::new())?, lens, origin)?;
     let workspace = initialize(&system, body);
-    Ok(AdmissionSolve { workspace, origin })
+    let fence = system.fence();
+    Ok(AdmissionSolve {
+        workspace,
+        origin,
+        fence,
+    })
 }
 
 pub(crate) fn admit_from<'m>(
     body: &'m CompiledBody,
     solved: &AdmissionSolve,
     packet: ParameterPacket<SyntheticFixture>,
-    boundary: BoundaryPort,
+    events: Vec<BoundaryEvent>,
     core: &'m dyn CoupledSolver,
     lens: &ObservationLens,
     store: &'m dyn HistoryStore,
 ) -> Result<Session<'m, Running>, InitializationFailure> {
-    let AdmissionSolve { workspace, origin } = solved;
-    let system = system(body, packet, boundary, lens, *origin)?;
+    let AdmissionSolve {
+        workspace,
+        origin,
+        fence,
+    } = solved;
+    if let Some(early) = events.iter().find(|event| event.at() < *fence) {
+        let (id, fence) = (early.id(), *fence);
+        return Err(AdmissionError::EventBeforeFence { id, fence }.into());
+    }
+    let system = system(body, packet, BoundaryPort::new(events)?, lens, *origin)?;
     let start = started(system, workspace.clone(), core, *origin)?;
     admit_start(body, core, start, crate::arena_seed(), store)
 }

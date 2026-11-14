@@ -1059,7 +1059,6 @@ impl CaseAssembly for Slice {
 pub struct AssemblyCase<A> {
     body: CompiledBody,
     solved: AdmissionSolve,
-    inputs_at: SimTime,
     starts: RefCell<Vec<Start>>,
     assembly: PhantomData<A>,
 }
@@ -1071,20 +1070,11 @@ struct Start {
 }
 impl<A: CaseAssembly> AssemblyCase<A> {
     pub fn new() -> Result<Self, InitializationFailure> {
-        Self::inputs_at(fence())
-    }
-    fn inputs_at(at: SimTime) -> Result<Self, InitializationFailure> {
-        let fence = fence();
-        if let Some(early) = inputs(at)?.iter().find(|input| input.at() < fence) {
-            let id = early.id();
-            return Err(AdmissionError::EventBeforeFence { id, fence }.into());
-        }
         let body = A::compiled()?;
         let solved = solve_admission(&body, A::packet(&body)?, &A::lens(&body)?, anchor_moment())?;
         Ok(Self {
             body,
             solved,
-            inputs_at: at,
             starts: RefCell::default(),
             assembly: PhantomData,
         })
@@ -1104,9 +1094,8 @@ impl<A: CaseAssembly> AssemblyCase<A> {
             None => {
                 let inputs = if withheld { Vec::new() } else { self.events()? };
                 let (packet, lens) = (A::packet(&self.body)?, A::lens(&self.body)?);
-                let port = BoundaryPort::new(inputs)?;
                 let links = MemoryStore::default();
-                let session = admit_from(&self.body, &self.solved, packet, port, core, &lens, &links)?;
+                let session = admit_from(&self.body, &self.solved, packet, inputs, core, &lens, &links)?;
                 let start = Start {
                     withheld,
                     saved: session.checkpoint().map_err(moved)?,
@@ -1121,10 +1110,6 @@ impl<A: CaseAssembly> AssemblyCase<A> {
         let Start { saved, identity, .. } = &starts[at];
         Session::resume(saved, identity, &self.body, core, store).map_err(moved)
     }
-}
-
-fn fence() -> SimTime {
-    SimTime::from_ns(anchor_moment().nanoseconds() + SECOND)
 }
 
 fn inputs(at: SimTime) -> Result<Vec<BoundaryEvent>, AdmissionError> {
@@ -1152,10 +1137,10 @@ impl<A: CaseAssembly> ReplayCase for AssemblyCase<A> {
         &self.body
     }
     fn end(&self) -> SimTime {
-        SimTime::from_ns(self.inputs_at.nanoseconds() + PAST_THE_FENCE_NS)
+        SimTime::from_ns(self.solved.fence().nanoseconds() + PAST_THE_FENCE_NS)
     }
     fn events(&self) -> Result<Vec<BoundaryEvent>, AdmissionError> {
-        inputs(self.inputs_at)
+        inputs(self.solved.fence())
     }
     fn admit<'m>(
         &'m self,
@@ -1178,16 +1163,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_case_refuses_an_input_before_the_fence_because_its_solve_read_none() {
-        let early = SimTime::from_ns(anchor_moment().nanoseconds() + SECOND / 2);
-        let refused = AssemblyCase::<Slice>::inputs_at(early).err();
+    fn a_start_from_the_shared_solve_refuses_an_input_a_nanosecond_before_its_fence_and_takes_one_at_it() {
+        let case = SliceCase::new().expect("solved");
+        let fence = case.solved.fence();
+        let core = crate::ReferenceIntegrator::new(3_000_000);
+        let start = |at: SimTime| -> Result<SimTime, InitializationFailure> {
+            let (packet, lens) = (arena_packet(&case.body)?, arena_lens(&case.body)?);
+            let links = MemoryStore::default();
+            let session = admit_from(
+                &case.body,
+                &case.solved,
+                packet,
+                inputs(at)?,
+                &core,
+                &lens,
+                &links,
+            )?;
+            Ok(session.record().earliest_stamp())
+        };
+        let refused = start(SimTime::from_ns(fence.nanoseconds() - 1)).err();
         assert!(
             matches!(
                 refused,
                 Some(InitializationFailure::Admission(AdmissionError::EventBeforeFence { fence: at, .. }))
-                    if at == fence()
+                    if at == fence
             ),
             "{refused:?}"
         );
+        assert_eq!(start(fence).expect("taken at the fence"), fence);
     }
 }

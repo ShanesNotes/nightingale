@@ -9,6 +9,7 @@ use ng_validate::*;
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
 const PACKET: &str = "65794c8df1131031c5659b9de0a949fcad72dbf2228e22d07483a66040a02929";
+const ADMITTED_SEAL: &str = "1af389e17451eec87befc15c14416a01f310dcdaa30f487b21193990bea57b32";
 
 /// The body's admission costs minutes, so one solve serves every check, each from a checkpoint of the admitted start.
 struct Start {
@@ -100,6 +101,7 @@ fn the_body_admits_at_06_55(start: &Start) {
     let at = start.session().record().accepted().time().nanoseconds();
     assert_eq!(at, (6 * 3_600 + 55 * 60) * SECOND);
     assert_eq!(hex(start.identity.packet().digest()), PACKET);
+    assert_eq!(hex(start.session().record().seal().digest()), ADMITTED_SEAL);
 }
 
 fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> Session<'_, Running> {
@@ -304,6 +306,7 @@ fn the_whole_body_passes_every_replay_gate() {
     let withheld = case.admit_withheld(&core, &store).expect("admitted");
     assert_eq!(withheld.record().identity().digest(), evidence.run());
     assert_eq!(hex(withheld.record().identity().packet().digest()), PACKET);
+    assert_eq!(hex(withheld.record().seal().digest()), ADMITTED_SEAL);
     let fence = anchor_moment().nanoseconds() + SECOND;
     let events = case.events().expect("the inputs");
     assert_eq!(events.len(), 2);
