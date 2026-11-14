@@ -1384,6 +1384,22 @@ new = '''let net = total;'''
 test = "-p ng-validate --lib window::tests::an_exchange_is_compared_by_its_net_over_each_interval_and_a_level_as_it_stands"
 
 [[mutant]]
+name = "window-judges-whole-beats"
+path = "crates/ng-validate/src/window.rs"
+old = '''if !error.at_most(*distance) {
+                    return Err(AccuracyFailure::BeatOutside {'''
+new = '''if false {
+                    return Err(AccuracyFailure::BeatOutside {'''
+test = "-p ng-validate --lib window::tests::a_one_sign_error_inside_every_interval_fails_on_its_whole_beat"
+
+[[mutant]]
+name = "window-finds-beat-edges"
+path = "crates/ng-validate/src/window.rs"
+old = '''if high(accepted.value(phase)) < phase_was && now.nanoseconds() <= end {'''
+new = '''if high(accepted.value(phase)) < phase_was && false {'''
+test = "-p ng-validate --test window the_first_window_holds_each_core_to_the_references_own_distances"
+
+[[mutant]]
 name = "reaction-balanced"
 path = "crates/ng-contract/src/compile.rs"
 old = '''left.iter().find(|&&(book, over)| over != 0 && !taken(book))'''

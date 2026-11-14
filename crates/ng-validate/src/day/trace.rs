@@ -323,7 +323,7 @@ impl Readings {
             })
         };
         let duct_sodium = lumen(duct, Species::Sodium)?;
-        let (phase, _) = row(RowKind::Memory(law("CV", "phase", Context::Body)))?;
+        let (phase, _) = row(crate::HEART_PHASE)?;
         let aortic = Context::Edge {
             from: ventricle,
             to: arteries,
