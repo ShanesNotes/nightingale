@@ -96,8 +96,8 @@ fn head_down_at_trunk_minus_a_fifth_runs_past_thirty_seconds_on_the_halved_core(
     );
 }
 
-/// The leg veins sit in no enclosure, so their pressure is `E s`. What the store gains past its receipts is
-/// muscle work and what it sheds is heat: printed, because no requirement bounds them.
+/// The leg veins sit in no enclosure, so their pressure is `E s`. No requirement bounds heat or muscle work, so the
+/// test holds neither.
 #[test]
 fn a_vein_below_its_unstressed_volume_holds_a_growing_store_and_the_ledger_closes() {
     let elastance = 0.4;
@@ -111,20 +111,11 @@ fn a_vein_below_its_unstressed_volume_holds_a_growing_store_and_the_ledger_close
         species: Species::Energy,
     };
     let sum = algebraic("CV", "elastic energy", Context::Body);
-    let power = algebraic("CV", "wall power", Context::Body);
-    let (mut then, mut heat, mut muscle) = (anchor_moment().nanoseconds(), 0.0, 0.0);
     let (mut collapsed, mut emptied) = (None, (f64::INFINITY, 0.0));
     tilted(-0.2, 11 * SECOND, |body, session| {
         let held = value(body, session, store);
         let closure = (held - value(body, session, sum)).abs();
         assert!(held > 0.0 && closure <= 1e-6 * held, "{held} {closure}");
-        let now = session.record().accepted().time().nanoseconds();
-        let span = (now - then) as f64 / 1e9;
-        then = now;
-        let net = value(body, session, power);
-        let shed = smooth_max(net, 100.0);
-        heat += span * shed;
-        muscle += span * (shed - net);
         let (stressed, volume) = (value(body, session, leg) / elastance, value(body, session, water));
         if stressed < 0.0 {
             let part = elastance * stressed * stressed / 2.0;
@@ -136,10 +127,6 @@ fn a_vein_below_its_unstressed_volume_holds_a_growing_store_and_the_ledger_close
     });
     let (start, start_part) = collapsed.expect("the leg veins went below their unstressed volume");
     let (least, part) = emptied;
-    println!(
-        "leg veins below V_u: {start} mL holding {start_part}, then {least} mL holding {part}; heat {heat}, \
-         muscle work {muscle}"
-    );
     assert!(
         least < start - 10.0 && part > start_part,
         "{start} {start_part} {least} {part}"
