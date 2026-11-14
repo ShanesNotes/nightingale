@@ -629,8 +629,8 @@ fn check_guards(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     };
     for fragment in fragments {
         if let Some(guard) = fragment.guards.iter().find(|guard| guard.zero.placing.is_some()) {
-            return Err(CompileDefect::TermInGuard {
-                variable: LawName {
+            return Err(CompileDefect::TermOffSite {
+                law: LawName {
                     owner: fragment.owner,
                     local: fragment.modes[guard.variable].name,
                 },
@@ -1418,6 +1418,10 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
             _ => None,
         };
         for &(_, kernel) in &law.laws {
+            let off_site = |&(context, _): &(Context, Target)| !matches!(context, Context::Site(_));
+            if kernel.placing.is_some() && targets.iter().any(off_site) {
+                return Err(CompileDefect::TermOffSite { law: law.name });
+            }
             if let Serves::Boundary(water) = law.serves {
                 let judged = kernel.judged(anatomy);
                 let written = (judged.iter().flatten())

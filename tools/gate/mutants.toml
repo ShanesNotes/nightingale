@@ -2955,6 +2955,20 @@ new = '''.filter(|&slot| !values[slot].is_finite())
 test = "-p ng-contract --lib evaluate::terms::forms::of_two_reads_that_are_not_finite_the_first_names_its_law"
 
 [[mutant]]
+name = "term-stands-at-sites"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if kernel.placing.is_some() && targets.iter().any(off_site) {'''
+new = '''if false && targets.iter().any(off_site) {'''
+test = "-p ng-contract --test site_term_context a_site_term_cannot_hide_a_site_read_on_a_body_memory"
+
+[[mutant]]
+name = "shared-op-bound-once"
+path = "crates/ng-contract/src/law.rs"
+old = '''let index = match kept.iter().position(|known| *known == key) {'''
+new = '''let index = match None::<usize> {'''
+test = "-p ng-contract --lib evaluate::terms::forms::a_shared_op_has_the_slopes_of_the_law_with_it_bound_once"
+
+[[mutant]]
 name = "vein-tag-is-the-tissue-tag"
 path = "crates/ng-contract/src/anatomy.rs"
 old = '''bytes.number(u64::MAX - 1);'''

@@ -650,7 +650,8 @@ fn a_term_whose_ops_all_merge_into_its_hosts_repeats_the_hosts_law() {
 }
 
 /// Find-out 4: the Jacobian and the parameter slopes of a host that adds a term reading an algebraic unknown and a
-/// parameter equal those of the same expression written by hand, bit for bit, and the program is the same.
+/// parameter equal, bit for bit, those of the same expression written by hand with the read they share bound once,
+/// and the program is the same.
 #[test]
 fn a_placed_terms_derivatives_are_the_hand_written_expressions() {
     let placed = compiled(Case {
@@ -1271,9 +1272,7 @@ mod forms {
             };
             assert_eq!(
                 refused(&added),
-                Some(CompileDefect::TermInGuard {
-                    variable: cv("valve")
-                })
+                Some(CompileDefect::TermOffSite { law: cv("valve") })
             );
         }
     }
@@ -1297,7 +1296,7 @@ mod forms {
     }
 
     /// Ruling 3: a summed law that adds a term is closed at a vein as main closes a summed law, and its value there is
-    /// the hand-written law's, bit for bit.
+    /// the hand-written law's, bit for bit, with the read they share bound once.
     #[test]
     fn a_summed_law_that_adds_a_term_closes_as_main_closes_it() {
         let summed = |with_term: bool| Fix {
@@ -1501,5 +1500,54 @@ mod forms {
         point.set("cv.t", 1.0e200);
         point.know("depth", None, 0.0);
         assert_eq!(jacobian(&body, &point).law, cv("collapse"));
+    }
+
+    fn h_shared_ln_by_hand<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>) -> X<'b, 'k> {
+        let level = k.at_site(&d.x);
+        let log = k.ln(level);
+        let sum = k.add(level, log);
+        k.scale(sum, log)
+    }
+    fn h_term_then_ln<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>) -> X<'b, 'k> {
+        let level = k.at_site(&d.x);
+        let sum = plus(k, d, level);
+        let log = k.ln(level);
+        k.scale(sum, log)
+    }
+
+    /// Fix round 2: an op the host and the term both compute is one op, so the program and its slopes are those of
+    /// the law written with that op bound once, bit for bit. A law that writes the op twice adds its slopes in another
+    /// order and may differ near overflow.
+    #[test]
+    fn a_shared_op_has_the_slopes_of_the_law_with_it_bound_once() {
+        let fix = |veins: Vec<(&'static str, VeinFn)>, host: BloodFn| Fix {
+            marks: vec![0],
+            veins,
+            hosts: vec![("probe", host, false)],
+            ..Fix::default()
+        };
+        let (placed, [_, _, upper, _]) =
+            build(&fix(term("collapse", t_ln_level), h_term_then_ln)).expect("compiled");
+        let (by_hand, _) = build(&fix(Vec::new(), h_shared_ln_by_hand)).expect("compiled");
+        assert_eq!(ops_of(&placed, "probe", upper), ops_of(&by_hand, "probe", upper));
+        let row_slopes = |body: &CompiledBody| {
+            let mut point = Point::new(body);
+            point.know("level", None, 0.625);
+            let entries = body.jacobian(&point.inputs(), 0.0).expect("finite");
+            let rows = body.rows();
+            let sparsity = body.sparsity();
+            let at = (rows.iter())
+                .position(|row| matches!(row.kind(), RowKind::Algebraic(slot) if slot.law == cv("probe") && slot.at == Context::Site(upper)))
+                .expect("a row");
+            (sparsity.row_offsets()[at]..sparsity.row_offsets()[at + 1])
+                .map(|entry| {
+                    (
+                        rows[sparsity.unknowns()[entry].index()].kind(),
+                        entries[entry].to_bits(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(row_slopes(&placed), row_slopes(&by_hand));
     }
 }

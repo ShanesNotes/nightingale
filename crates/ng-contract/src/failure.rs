@@ -369,9 +369,9 @@ pub enum CompileDefect {
     /// place, a bed without exactly one drain, a segment without exactly one urinary edge in, a junction read of a
     /// route's amount, or a site's or an edge's entry in a kernel attached where neither stands.
     NoSuchRead { law: LawName },
-    /// A guard whose zero adds a site term. A guard stands at the body or an edge, never at a site, so the term would
-    /// never be placed. Named by the guard's mode variable.
-    TermInGuard { variable: LawName },
+    /// A kernel that adds a site term, attached where it stands at no site: a body memory's rate, or a guard's zero,
+    /// named by its mode variable. A term is written in only at a site of its set, so there it would vanish.
+    TermOffSite { law: LawName },
     /// A guard that resets a row whose set does not hold zero, so a firing would publish a state no run can resume.
     ResetOutsideSet { law: LawName },
     /// A law reads a junction at a site the map neither supplies nor states that no nerve reaches.
