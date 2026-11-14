@@ -452,6 +452,13 @@ pub(crate) struct Code {
     pub(crate) rate: RateClass,
     pub(crate) validity: Vec<Validity>,
     pub(crate) defines: bool,
+    pub(crate) origins: Vec<(usize, LawName)>,
+}
+impl Code {
+    pub(crate) fn origin(&self, op: usize) -> Option<LawName> {
+        let found = self.origins.binary_search_by_key(&op, |&(at, _)| at);
+        found.ok().map(|at| self.origins[at].1)
+    }
 }
 impl Seal for Code {
     fn seal(&self, out: &mut Canonical) {
@@ -462,6 +469,7 @@ impl Seal for Code {
             rate,
             validity,
             defines,
+            origins,
         } = self;
         ops.seal(out);
         dimension.seal(out);
@@ -469,6 +477,14 @@ impl Seal for Code {
         rate.seal(out);
         validity.seal(out);
         out.number(u64::from(*defines));
+        if !origins.is_empty() {
+            out.number(u64::MAX);
+            out.length(origins.len());
+            for (at, law) in origins {
+                out.number(*at as u64);
+                law.seal(out);
+            }
+        }
     }
 }
 

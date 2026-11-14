@@ -39,7 +39,7 @@ pub(crate) fn compile(
     let unissued = FragmentData::empty(Boundary::CARD);
     let owed = obligations(&fragments, &schema, &held, &unissued)?;
     check_guards(&fragments)?;
-    check_chance(&fragments)?;
+    let unread = check_chance(&fragments)?;
     check_volume(&schema, &owed, &fragments)?;
 
     let reaches = Reaches::of(&schema, &fragments);
@@ -55,7 +55,7 @@ pub(crate) fn compile(
         fragments: &fragments,
         held: &held,
     };
-    let placement = place(&owed, &places)?;
+    let placement = place(&owed, &places, &unread)?;
     check_holds(&rows, &schema, &held)?;
     check_orphans(&rows, &placement.columns, &schema, &held)?;
     let modes = modes(&fragments, &places);
@@ -205,6 +205,7 @@ fn check_names(fragment: &FragmentData, schema: &Schema, held: &[HeldCard]) -> R
                 .map(|boundary| boundary.name),
         )
         .chain(fragment.reactions.iter().map(|reaction| reaction.name))
+        .chain(fragment.terms.iter().copied())
         .collect();
     names.sort_unstable();
     if let Some(pair) = names.windows(2).find(|pair| pair[0] == pair[1]) {
@@ -627,6 +628,14 @@ fn check_guards(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
         Selector::Only { variable, value } => variable == guard.variable && value == guard.leaves,
     };
     for fragment in fragments {
+        if let Some(guard) = fragment.guards.iter().find(|guard| guard.zero.placing.is_some()) {
+            return Err(CompileDefect::TermOffSite {
+                law: LawName {
+                    owner: fragment.owner,
+                    local: fragment.modes[guard.variable].name,
+                },
+            });
+        }
         let mut outside: Vec<ModeValue> = (fragment.guards.iter())
             .filter(|guard| !holds(guard))
             .map(|guard| {
@@ -651,7 +660,10 @@ fn check_guards(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
     Ok(())
 }
 
-fn check_chance(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
+/// The forcings no law's own program reads, in a fragment where a law adds a term: a variant may read one, and
+/// `place` answers once the variants are written.
+fn check_chance(fragments: &[FragmentData]) -> Result<Vec<LawName>, CompileDefect> {
+    let mut unread = Vec::new();
     for fragment in fragments {
         let named = |local| LawName {
             owner: fragment.owner,
@@ -697,13 +709,17 @@ fn check_chance(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
         for &forcing in &forcings {
             let read = Op::Input(Input::Forcing(forcing));
             if !(fragment.laws.iter()).any(|law| law.kernel.code.contains(&read)) {
+                if (fragment.laws.iter()).any(|law| law.kernel.placing.is_some()) {
+                    unread.push(named(forcing));
+                    continue;
+                }
                 return Err(CompileDefect::UnreadForcing {
                     forcing: named(forcing),
                 });
             }
         }
     }
-    Ok(())
+    Ok(unread)
 }
 
 fn check_volume(schema: &Schema, owed: &[Owed], fragments: &[FragmentData]) -> Result<(), CompileDefect> {
@@ -1338,7 +1354,7 @@ fn marked(
     Ok(instances)
 }
 
-fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
+fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement, CompileDefect> {
     let Places {
         rows,
         reaches,
@@ -1351,6 +1367,7 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
         programs: Vec::new(),
         instances: Vec::new(),
     };
+    let mut variants: Vec<Program> = Vec::new();
     for law in owed {
         let targets = match law.serves {
             Serves::Slot(over) => places_of(anatomy, reaches, schema, law.name.owner, over)
@@ -1402,6 +1419,10 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
             _ => None,
         };
         for &(_, kernel) in &law.laws {
+            let off_site = |&(context, _): &(Context, Target)| !matches!(context, Context::Site(_));
+            if kernel.placing.is_some() && targets.iter().any(off_site) {
+                return Err(CompileDefect::TermOffSite { law: law.name });
+            }
             if let Serves::Boundary(water) = law.serves {
                 let written = (kernel.code.iter())
                     .filter_map(|op| match op {
@@ -1444,13 +1465,43 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                 defined = kernel.clone().defining(water.name);
                 kernel = &defined;
             }
-            let program = ProgramId::at(placement.programs.len());
-            placement.programs.push(Program {
-                id: program,
-                law: law.name,
-                code: code(law.fragment, kernel),
-            });
+            let declared = ProgramId::at(placement.programs.len());
+            let base = code(law.fragment, kernel);
             for &(context, target) in &targets {
+                let variant = kernel.at(|set| inside(anatomy, set, context));
+                let (program, kernel) = match &variant {
+                    None => (declared, kernel),
+                    Some(variant) => {
+                        let inputs = (variant.code.iter()).filter_map(|op| match op {
+                            Op::Input(input) => Some(input),
+                            _ => None,
+                        });
+                        let reads: Vec<bool> = inputs.filter_map(read).collect();
+                        if !reads.contains(&true) && reads.contains(&false) {
+                            return Err(CompileDefect::UnscaledInput { law: law.name });
+                        }
+                        let volume = variant.code.iter().any(|op| matches!(op, Op::Volume(_)));
+                        if volume && schema.partial_volume.is_none() {
+                            return Err(CompileDefect::MissingPartialVolume { law: law.name });
+                        }
+                        let written = code(law.fragment, variant);
+                        let known = (variants.iter().enumerate())
+                            .find(|(_, known)| known.law == law.name && known.code == written);
+                        let program = match known {
+                            _ if written == base => declared,
+                            Some((index, _)) => ProgramId::at(VARIANT + index),
+                            None => {
+                                variants.push(Program {
+                                    id: ProgramId::at(VARIANT + variants.len()),
+                                    law: law.name,
+                                    code: written,
+                                });
+                                ProgramId::at(VARIANT + variants.len() - 1)
+                            }
+                        };
+                        (program, variant)
+                    }
+                };
                 placement.instances.push(Placed {
                     program,
                     context,
@@ -1458,10 +1509,38 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                     addresses: addresses(law.name, route, kernel, context, places)?,
                 });
             }
+            placement.programs.push(Program {
+                id: declared,
+                law: law.name,
+                code: base,
+            });
+        }
+    }
+    for &forcing in unread {
+        let read = Op::Input(Input::Forcing(forcing.local));
+        let ran = |program: &Program| program.law.owner == forcing.owner && program.code.ops.contains(&read);
+        if !variants.iter().any(ran) {
+            return Err(CompileDefect::UnreadForcing { forcing });
         }
     }
     fluid_columns(&mut placement, places)?;
+    let first = placement.programs.len();
+    for placed in &mut placement.instances {
+        if let Some(index) = placed.program.index().checked_sub(VARIANT) {
+            placed.program = ProgramId::at(first + index);
+        }
+    }
+    for (index, mut program) in variants.into_iter().enumerate() {
+        program.id = ProgramId::at(first + index);
+        placement.programs.push(program);
+    }
     Ok(placement)
+}
+
+const VARIANT: usize = usize::MAX / 2;
+
+fn inside(anatomy: &Anatomy, set: Sites, context: Context) -> bool {
+    matches!(context, Context::Site(site) if anatomy.in_set(set).contains(&site))
 }
 
 /// Every column of every fluid route, written here and not by a law: water reads the flow row, and each species a
@@ -1642,6 +1721,7 @@ fn fluid_program(
             rate,
             validity: Vec::new(),
             defines: false,
+            origins: Vec::new(),
         },
     });
     id
@@ -1769,6 +1849,8 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
         modes,
         rate,
         defines,
+        placing: _,
+        origins,
     } = kernel;
     let mut validity: Vec<_> = (fragment.validity.iter())
         .filter(|(kernel, _)| kernel == id)
@@ -1782,6 +1864,7 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
         rate: *rate,
         validity,
         defines: *defines,
+        origins: origins.clone(),
     }
 }
 

@@ -596,6 +596,9 @@ What the code's `Assembly` issues each card once while it builds an assembly: th
 One law's closed expression graph, built once at declaration from the contract's own operators. It reads no time step, solver, state store or host math.
 _Avoid_: callback
 
+**Site term**:
+A named part of a kernel's graph, declared once on a site set and holding no row, that a law on a set that includes its set adds to one of its values. Compilation writes it into the law's program at each site of its set and leaves the program as it was at every other site. A refused step names the site term when the op that failed is the term's alone.
+
 **Compiled body**:
 The checked, immutable result of compiling the map and every fragment. A solver core sees only this, through the solver interface.
 
