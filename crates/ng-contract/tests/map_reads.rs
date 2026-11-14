@@ -1666,7 +1666,9 @@ fn laws_across_sets(marks: usize) -> Result<(CompiledBody, [SiteId; 4]), Admissi
         cv.define_at(&vein, in_vein);
         let (bed, _) = cv.site_field::<CapillaryBed, Dimensionless>("bed", Admissible::finite());
         let in_bed = cv.site_kernel(|mut k| {
-            let value = k.at_site_in(&read);
+            let entry = k.at_site_in(&read);
+            let knob = k.site_parameter_in(&share);
+            let value = k.add(entry, knob);
             k.finish(value, cv.every_mode(), class)
         });
         cv.define_at(&bed, in_bed);
@@ -1691,17 +1693,31 @@ fn rows_of(body: &CompiledBody, local: &'static str) -> Vec<SiteId> {
     sites
 }
 
-fn residuals(body: &CompiledBody) -> Result<Vec<(&'static str, SiteId, f64)>, InitializationFailure> {
+fn residuals(
+    body: &CompiledBody,
+    [artery, bed, upper, lower]: [SiteId; 4],
+) -> Result<Vec<(&'static str, SiteId, f64)>, InitializationFailure> {
     let mut packet = ParameterPacket::new();
-    let value = Measure::<Dimensionless>::new(0.25)?;
     let share = ParameterKey::new("cv.share");
-    packet.synthetic(share, Binding::Network(Network::Vascular), value, "synthetic")?;
+    for (binding, value) in [
+        (Binding::Network(Network::Vascular), 64.0),
+        (Binding::Site(upper), 16.0),
+        (Binding::Site(lower), 32.0),
+    ] {
+        packet.synthetic(share, binding, Measure::<Dimensionless>::new(value)?, "synthetic")?;
+    }
     let level = LawName {
         owner: "CV",
         local: "level",
     };
+    let levels = [(upper, 1.0), (lower, 2.0), (artery, 4.0), (bed, 8.0)];
     let start = |row| match row {
-        RowKind::Algebraic(Slot { law, .. }) if law == level => 0.25,
+        RowKind::Algebraic(Slot {
+            law,
+            at: Context::Site(site),
+        }) if law == level => (levels.iter())
+            .find(|entry| entry.0 == site)
+            .map_or(0.0, |entry| entry.1),
         _ => 0.0,
     };
     packet.start_rest(body, start, "synthetic")?;
@@ -1736,19 +1752,21 @@ fn a_law_on_the_veins_stands_at_the_segments_the_map_marks() -> Result<(), Admis
 }
 
 #[test]
-fn a_law_on_a_set_reads_the_entry_and_parameter_of_a_set_that_contains_it()
+fn a_law_on_a_set_reads_at_its_own_site_the_entry_and_parameter_of_a_set_that_includes_it()
 -> Result<(), InitializationFailure> {
-    let (body, [_, bed, upper, lower]) = laws_across_sets(2)?;
-    let found = residuals(&body)?;
+    let (body, sites) = laws_across_sets(2)?;
+    let [artery, bed, upper, lower] = sites;
+    let found = residuals(&body, sites)?;
     let at = |law: &str, site: SiteId| {
         (found.iter())
             .find(|row| row.0 == law && row.1 == site)
             .map(|row| row.2)
     };
-    assert_eq!(at("vein", upper), Some(-0.5));
-    assert_eq!(at("vein", lower), Some(-0.5));
-    assert_eq!(at("bed", bed), Some(-0.25));
-    assert_eq!(at("level", upper), Some(0.0));
+    assert_eq!(at("vein", upper), Some(-17.0));
+    assert_eq!(at("vein", lower), Some(-34.0));
+    assert_eq!(at("bed", bed), Some(-72.0));
+    assert_eq!(at("level", upper), Some(-15.0));
+    assert_eq!(at("level", artery), Some(-60.0));
     Ok(())
 }
 

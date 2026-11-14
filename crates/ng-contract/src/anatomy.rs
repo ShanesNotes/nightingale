@@ -123,18 +123,12 @@ impl sets::Sealed for Veins {}
 impl SiteSet for Veins {
     const SET: Sites = Sites::Veins;
 }
-mod containment {
-    pub trait Sealed<Inner> {}
-}
 /// Every site of `Inner` is a site of `Self` on every map, so a law on `Inner` reads `Self`'s entries and parameters at
 /// its own site. Only this crate states the relation.
-pub trait Contains<Inner: SiteSet>: SiteSet + containment::Sealed<Inner> {}
-impl<C: SiteSet> containment::Sealed<C> for C {}
-impl<C: SiteSet> Contains<C> for C {}
-impl containment::Sealed<Veins> for Blood {}
-impl Contains<Veins> for Blood {}
-impl containment::Sealed<CapillaryBed> for Blood {}
-impl Contains<CapillaryBed> for Blood {}
+pub trait Includes<Inner: SiteSet>: SiteSet {}
+impl<C: SiteSet> Includes<C> for C {}
+impl Includes<Veins> for Blood {}
+impl Includes<CapillaryBed> for Blood {}
 
 site_classes!(
     CapillaryBed,

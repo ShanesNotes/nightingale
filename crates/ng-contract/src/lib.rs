@@ -438,7 +438,7 @@
 //!     map.vein(segment);
 //! }
 //! ```
-//! A law reads across sets only from a set that contains its own.
+//! A law reads across sets only from a set that includes its own.
 //! ```compile_fail,E0277
 //! use ng_contract::*;
 //! fn blood<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
@@ -453,16 +453,46 @@
 //!     k.at_site_in(water)
 //! }
 //! ```
-//! Only this crate says which set contains which.
+//! The same holds for a site parameter.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn blood<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
+//!     share: &SiteParameter<'b, Cardiovascular, Veins, Volume>) -> Expr<'b, 'k, Cardiovascular, Volume> {
+//!     k.site_parameter_in(share)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn vein<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Veins>,
+//!     share: &SiteParameter<'b, Cardiovascular, Blood, Volume>) -> Expr<'b, 'k, Cardiovascular, Volume> {
+//!     k.site_parameter_in(share)
+//! }
+//! ```
+//! Blood includes the marked veins and not every vessel segment.
+//! ```compile_fail,E0277
+//! use ng_contract::*;
+//! fn segment<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, VesselSegment>,
+//!     volume: &ReadPort<'b, Cardiovascular, PerSite<Blood, Volume>>) -> Expr<'b, 'k, Cardiovascular, Volume> {
+//!     k.at_site_in(volume)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn vein<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Veins>,
+//!     volume: &ReadPort<'b, Cardiovascular, PerSite<Blood, Volume>>) -> Expr<'b, 'k, Cardiovascular, Volume> {
+//!     k.at_site_in(volume)
+//! }
+//! ```
+//! Only this crate says which set includes which.
 //! ```compile_fail,E0277
 //! use ng_contract::*;
 //! enum Invented {}
-//! impl Contains<Veins> for Invented {}
+//! impl Includes<Veins> for Invented {}
 //! ```
 //! ```
 //! use ng_contract::*;
-//! fn contained<C: SiteSet>() where Blood: Contains<C> {}
-//! contained::<Veins>();
+//! fn included<C: SiteSet>() where Blood: Includes<C> {}
+//! included::<Veins>();
 //! ```
 //! A route comes from a scope, whole: a hand-made route does not compile. A binding is a transfer of one ligand between
 //! two pools.
