@@ -60,3 +60,15 @@ Six proofs ran on ryzen, alternating between main at `c4760e8` (before) and this
 All six runs caught all 302 rows and ran the same 10-rust tests: 93 test results with 1,464 tests passed. Each after run skipped 225 baselines and ran 6, two `--release` and four doctests. Baselines plus their builds fell from a mean of 851 s to 227 s, a mean saving of 624 s a proof: 584, 588 and 699 s pair by pair. Mean proof time fell from 5,311 s to 4,350 s, but the before runs had more company, so the rows the change does not touch also ran slower then. The 624 s is the number to trust, measured beside one or two other jobs.
 
 Run 6 ran under `sar -u 5` and `pidstat -u 5`, with another whole proof running beside it. While 10-rust's arena binary ran, 42% of ryzen's 12 threads sat idle, and the binary itself used a mean of 1.9 cores. During the rest sweep, 43% sat idle, and each heavy row's test ran on about one core. Cores sit idle, so rows beside rows stays open as [ticket 13](13-mutant-rows-in-parallel.md). The run's evidence folder holds the logs, the CPU records and the scripts that read them.
+
+The independent check of this change found the limits of the skip. It is sound for a proof taken in a fresh clone, and every proof that merges a PR is taken in one. On a checkout changed by hand, five shapes still let a mutant that changes nothing read CAUGHT. No gate step makes any of them, and the nightly's full run runs every baseline.
+
+- An ignored file that a test reads through `expect_file!` appears between `10-rust` and the sweep. The sweep's second look leaves ignored files out.
+- A Cargo config at the root, hidden by `.git/info/exclude`, is written after the record.
+- With `core.trustctime` off, a same-size edit that keeps the file's modification time and inode is one `git status` cannot see. So "changed" above means changed as `git status` sees it, and `prove.sh` reads the same status for `worktree: clean`.
+- An `export-subst` attribute is added through `.git/info/attributes` after the record.
+- HEAD moves between the test call and the writer's reading of it. `prove.sh` checks `head_unchanged`.
+
+None of these is closed. The closes the check names are to hash every tracked file and not trust its stat, to read the export attributes again in the sweep, to look for an ignored `.cargo` between the checkout and the extract, and to read HEAD before the test call.
+
+Three smaller notes. The sweep's second look at the assume-unchanged and skip-worktree marks has no case, and [ticket 13](13-mutant-rows-in-parallel.md) carries one as a box. The line `baselines skipped: N` is printed before the rows run, so it counts a test whose baseline then runs because one of its rows is caught at build: in this change's proof it read 251, and one of those ran later. And "harmless while a test cannot read the environment" holds only for a variable that does not change the build: one that is not compared and picks another `cargo`, such as `PATH`, would not be harmless, and no step sets one.
