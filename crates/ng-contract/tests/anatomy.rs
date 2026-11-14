@@ -651,7 +651,10 @@ fn a_vein_off_the_vascular_network_is_refused() -> Result<(), AdmissionError> {
 #[test]
 fn a_vein_that_only_receives_blood_is_admitted() -> Result<(), AdmissionError> {
     let Manufactured {
-        mut map, body, vessel, ..
+        mut map,
+        body,
+        vessel,
+        ..
     } = manufactured()?;
     let blind = map.site::<VesselSegment>("blind", at(0.0)?);
     map.contain(body.id(), blind.id());
@@ -726,7 +729,11 @@ fn ring_by_hand(tissue: bool, veins: &[&str]) -> Digest {
     }
     number(&mut out, 4);
     for key in ["artery", "bed", "lower vein", "upper vein"] {
-        let class = if key == "bed" { Class::CapillaryBed } else { Class::VesselSegment };
+        let class = if key == "bed" {
+            Class::CapillaryBed
+        } else {
+            Class::VesselSegment
+        };
         site_id(&mut out, key, class);
     }
     number(&mut out, 0);
@@ -753,8 +760,14 @@ fn a_marked_map_seals_its_veins_in_key_order_after_its_tissues() -> Result<(), A
         ring_by_hand(true, &["lower vein", "upper vein"])
     );
     assert_eq!(ring(true, &[])?, ring_by_hand(true, &[]));
-    assert_eq!(ring(false, &["upper vein"])?, ring_by_hand(false, &["upper vein"]));
-    assert_eq!(ring(false, &["lower vein"])?, ring_by_hand(false, &["lower vein"]));
+    assert_eq!(
+        ring(false, &["upper vein"])?,
+        ring_by_hand(false, &["upper vein"])
+    );
+    assert_eq!(
+        ring(false, &["lower vein"])?,
+        ring_by_hand(false, &["lower vein"])
+    );
     assert_ne!(ring(false, &["upper vein"])?, ring(false, &["lower vein"])?);
     Ok(())
 }
