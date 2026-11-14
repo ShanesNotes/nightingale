@@ -20,6 +20,13 @@ No fix is chosen. One option: ticket 31's whole-beat nets fail all four must-fai
 - [ ] The four must-fail cores still fail the window
 - [ ] §7's lines on the window change only as much as the rule needs
 
+Carried from the independent check of nightingale#154, because this ticket edits the same lines (`~/lanes/logs/ng-wave-4/nc31-build/verify-coordinator/VERIFY-pr154.md`):
+
+- [ ] `Measured::verdict` refuses a run whose beat count differs from the window's, with a test and a mutant row. Today it pairs the two lists, so a run with no beats would pass; `trace` cannot make one
+- [ ] A test names `TooFewBeats`: a window of one whole beat is refused and one of two is admitted, with a mutant row that removes the refusal
+- [ ] The whole-beat fixture gains a run just inside its beat distance and one just outside. Today's failing run is 75,000 times the distance, so a far wider margin would pass both tests
+- [ ] The comment in `window.rs` on a running total says what ticket 31 found, and the public docs of the window and of the accuracy failure name the whole-beat nets
+
 This closes before the scored pick, and before any window that starts off a beat edge is built ([ticket 16](16-slice-accuracy-window.md) and [ticket 21](21-day-checks-read-the-trace.md) name those windows).
 
 **Non-goals:** the whole-beat check ticket 31 added; the energy drift limit; the window's margins.
