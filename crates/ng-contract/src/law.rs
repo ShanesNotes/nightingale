@@ -623,18 +623,6 @@ struct Written {
 }
 
 impl Placing {
-    fn sets(&self, out: &mut Vec<Sites>) {
-        for splice in &self.splices {
-            out.push(splice.term.set);
-            splice.term.graph.sets(out);
-        }
-    }
-    fn written<'a>(&'a self, inside: &dyn Fn(Sites) -> bool, out: &mut Vec<&'a Op>) {
-        for splice in self.splices.iter().filter(|splice| inside(splice.term.set)) {
-            out.extend(&splice.term.graph.code);
-            splice.term.graph.written(inside, out);
-        }
-    }
     fn any_inside(&self, inside: &dyn Fn(Sites) -> bool) -> bool {
         (self.splices.iter()).any(|splice| inside(splice.term.set))
     }
@@ -852,26 +840,6 @@ impl KernelData {
                 .collect(),
             ..self.clone()
         })
-    }
-    /// What a declaration check judges: the kernel's own program as main judges it, and each variant a site of a term's
-    /// set runs, as written before pruning. With no site in any term's set it is the kernel's own program alone.
-    pub(crate) fn judged(&self, anatomy: &crate::anatomy::Anatomy) -> Vec<Vec<&Op>> {
-        let mut out: Vec<Vec<&Op>> = vec![self.code.iter().collect()];
-        let Some(placing) = &self.placing else {
-            return out;
-        };
-        let mut sets = Vec::new();
-        placing.sets(&mut sets);
-        let sites: Vec<crate::SiteId> = sets.iter().flat_map(|&set| anatomy.in_set(set)).collect();
-        for site in sites {
-            let inside = |set: Sites| anatomy.in_set(set).contains(&site);
-            let mut ops: Vec<&Op> = placing.code.iter().collect();
-            placing.written(&inside, &mut ops);
-            if !out.contains(&ops) {
-                out.push(ops);
-            }
-        }
-        out
     }
     /// `value`, negated, so one body row's laws add to `row - sum`.
     fn summing(mut self) -> Self {

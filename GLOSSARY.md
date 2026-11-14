@@ -597,7 +597,7 @@ One law's closed expression graph, built once at declaration from the contract's
 _Avoid_: callback
 
 **Site term**:
-A named part of a kernel's graph, declared once on a site set and holding no row, that a law on a set that includes its set adds to one of its values. Compilation writes it into the law's program at each site of its set and leaves the program as it was at every other site. A refused step in it names the site term, not the law that adds it.
+A named part of a kernel's graph, declared once on a site set and holding no row, that a law on a set that includes its set adds to one of its values. Compilation writes it into the law's program at each site of its set and leaves the program as it was at every other site. A refused step names the site term when the op that failed is the term's alone.
 
 **Compiled body**:
 The checked, immutable result of compiling the map and every fragment. A solver core sees only this, through the solver interface.

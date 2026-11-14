@@ -793,6 +793,7 @@ mod forms {
     struct Decl<'b> {
         share: SiteParameter<'b, Cv, Blood, Dimensionless>,
         t: SiteParameter<'b, Cv, Veins, Dimensionless>,
+        b: SiteParameter<'b, Cv, CapillaryBed, Dimensionless>,
         p: Parameter<'b, Cv, Dimensionless>,
         x: ReadPort<'b, Cv, PerSite<Blood, Dimensionless>>,
         y: ReadPort<'b, Cv, PerSite<Blood, Dimensionless>>,
@@ -801,10 +802,12 @@ mod forms {
         wobble: Option<Forcing<'b, Cv>>,
         inner: Vec<SiteTerm<'b, Cv, Veins, Dimensionless>>,
         veins: Vec<SiteTerm<'b, Cv, Veins, Dimensionless>>,
+        beds: Vec<SiteTerm<'b, Cv, CapillaryBed, Dimensionless>>,
     }
 
     type BloodFn = for<'b, 'k> fn(&mut K<'b, 'k, Blood>, &Decl<'b>) -> X<'b, 'k>;
     type VeinFn = for<'b, 'k> fn(&mut K<'b, 'k, Veins>, &Decl<'b>) -> X<'b, 'k>;
+    type BedFn = for<'b, 'k> fn(&mut K<'b, 'k, CapillaryBed>, &Decl<'b>) -> X<'b, 'k>;
 
     #[derive(Clone, Default)]
     struct Fix {
@@ -814,6 +817,7 @@ mod forms {
         spare: Option<VeinFn>,
         inner: Vec<(&'static str, VeinFn)>,
         veins: Vec<(&'static str, VeinFn)>,
+        beds: Vec<(&'static str, BedFn)>,
         hosts: Vec<(&'static str, BloodFn, bool)>,
         hands: Vec<(&'static str, VeinFn)>,
         guard: Option<BloodFn>,
@@ -855,6 +859,10 @@ mod forms {
                 .site_parameter::<Blood, Dimensionless>(ParameterKey::new("cv.share"), Admissible::finite());
             let t =
                 cv.site_parameter::<Veins, Dimensionless>(ParameterKey::new("cv.t"), Admissible::finite());
+            let b = cv.site_parameter::<CapillaryBed, Dimensionless>(
+                ParameterKey::new("cv.b"),
+                Admissible::finite(),
+            );
             let p = cv.parameter::<Dimensionless>(ParameterKey::new("cv.p"), Admissible::finite());
             let (level, x) = cv.site_field::<Blood, Dimensionless>("level", Admissible::finite());
             let (depth, y) = cv.site_field::<Blood, Dimensionless>("depth", Admissible::finite());
@@ -875,6 +883,7 @@ mod forms {
             let mut decl = Decl {
                 share,
                 t,
+                b,
                 p,
                 x,
                 y,
@@ -883,7 +892,15 @@ mod forms {
                 wobble,
                 inner: Vec::new(),
                 veins: Vec::new(),
+                beds: Vec::new(),
             };
+            for &(name, shape) in &fix.beds {
+                let term = cv.site_term::<CapillaryBed, Dimensionless, _>(name, |mut k| {
+                    let value = shape(&mut k, &decl);
+                    k.finish_term(value)
+                });
+                decl.beds.push(term);
+            }
             for (terms, declared) in [(&fix.inner, false), (&fix.veins, true)] {
                 for &(name, shape) in terms {
                     let term = cv.site_term::<Veins, Dimensionless, _>(name, |mut k| {
@@ -944,6 +961,9 @@ mod forms {
 
     fn plus<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>, mut value: X<'b, 'k>) -> X<'b, 'k> {
         for term in &d.veins {
+            value = k.add_from(value, term);
+        }
+        for term in &d.beds {
             value = k.add_from(value, term);
         }
         value
@@ -1230,8 +1250,8 @@ mod forms {
         );
     }
 
-    /// Ruling 1: a volume a term reads, used or not, needs a partial volume where a site of its set runs the term, and
-    /// with no such site the body compiles as with no term.
+    /// Ruling 1: a volume a term uses needs a partial volume where a site of its set runs the term. One it never uses
+    /// counts no more than in main's program, and with no such site the body compiles as with no term.
     #[test]
     fn a_volume_a_term_reads_needs_a_partial_volume_only_where_a_site_runs_the_term() {
         let main = Fix {
@@ -1240,7 +1260,7 @@ mod forms {
             ..Fix::default()
         };
         assert_eq!(refused(&main), None);
-        for shape in [t_volume as VeinFn, t_volume_unused] {
+        for (shape, used) in [(t_volume as VeinFn, true), (t_volume_unused, false)] {
             let added = Fix {
                 veins: term("collapse", shape),
                 ..main.clone()
@@ -1250,7 +1270,10 @@ mod forms {
                 marks: vec![0],
                 ..added
             });
-            assert!(matches!(marked, Some(CompileDefect::MissingPartialVolume { .. })));
+            assert_eq!(
+                matches!(marked, Some(CompileDefect::MissingPartialVolume { .. })),
+                used
+            );
         }
     }
 
@@ -1549,5 +1572,102 @@ mod forms {
                 .collect::<Vec<_>>()
         };
         assert_eq!(row_slopes(&placed), row_slopes(&by_hand));
+    }
+
+    fn t_clock_bare<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        let (cosine, _) = k.clock();
+        let level = k.at_site_in(&d.x);
+        k.scale(level, cosine)
+    }
+    fn t_clock_dead_param<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        let _ = k.site_parameter(&d.t);
+        t_clock_bare(k, d)
+    }
+    fn t_forcing_dead<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        let _ = k.forcing(d.wobble.as_ref().expect("forcing"));
+        k.site_parameter(&d.t)
+    }
+    fn h_level_dead_share<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>) -> X<'b, 'k> {
+        let _ = k.site_parameter(&d.share);
+        h_level(k, d)
+    }
+    fn h_level_dead_forcing<'b, 'k>(k: &mut K<'b, 'k, Blood>, d: &Decl<'b>) -> X<'b, 'k> {
+        let _ = k.forcing(d.wobble.as_ref().expect("forcing"));
+        h_level(k, d)
+    }
+    fn hand_clock_dead_param<'b, 'k>(k: &mut K<'b, 'k, Veins>, d: &Decl<'b>) -> X<'b, 'k> {
+        let base = k.at_site_in(&d.x);
+        let (cosine, _) = k.clock();
+        let _ = k.site_parameter(&d.t);
+        let wave = k.scale(base, cosine);
+        k.add(base, wave)
+    }
+    fn bt_param<'b, 'k>(k: &mut K<'b, 'k, CapillaryBed>, d: &Decl<'b>) -> X<'b, 'k> {
+        k.site_parameter(&d.b)
+    }
+    fn bt_clock<'b, 'k>(k: &mut K<'b, 'k, CapillaryBed>, d: &Decl<'b>) -> X<'b, 'k> {
+        let (cosine, _) = k.clock();
+        let level = k.at_site_in(&d.x);
+        k.scale(level, cosine)
+    }
+
+    /// Ruling 5 of fix round 2: a variant is judged as main judges a program, pruned, so a read nothing uses neither
+    /// passes a check nor fails one. A parameter or a forcing a term or its host reads and never uses is refused at a
+    /// marked vein as main refuses the law written by hand.
+    #[test]
+    fn a_read_nothing_uses_neither_passes_nor_fails_a_check_at_a_marked_vein() {
+        let unscaled = |fix: &Fix| matches!(refused(fix), Some(CompileDefect::UnscaledInput { .. }));
+        let by_hand = Fix {
+            marks: vec![0],
+            hands: vec![("probe", hand_clock_dead_param as VeinFn)],
+            ..Fix::default()
+        };
+        assert!(unscaled(&by_hand));
+        let marked = |veins, hosts| Fix {
+            marks: vec![0],
+            veins,
+            hosts,
+            ..Fix::default()
+        };
+        assert!(unscaled(&marked(
+            term("collapse", t_clock_dead_param),
+            two(h_level)
+        )));
+        assert!(unscaled(&marked(
+            term("collapse", t_clock_bare),
+            two(h_level_dead_share)
+        )));
+        let unread = Some(CompileDefect::UnreadForcing {
+            forcing: cv("wobble"),
+        });
+        for (veins, hosts) in [
+            (term("collapse", t_forcing_dead), two(h_level)),
+            (term("collapse", t_param), two(h_level_dead_forcing)),
+        ] {
+            assert_eq!(
+                refused(&Fix {
+                    forcing: true,
+                    ..marked(veins, hosts)
+                }),
+                unread
+            );
+        }
+    }
+
+    /// Ruling 8 of fix round 2: two terms on different sets are each judged only where their own set holds the site.
+    #[test]
+    fn two_terms_on_different_sets_are_each_judged_at_their_own_sites() {
+        let fix = |marks: Vec<usize>, vein: VeinFn, bed: BedFn| Fix {
+            marks,
+            veins: term("vein part", vein),
+            beds: vec![("bed part", bed)],
+            hosts: two(h_level),
+            ..Fix::default()
+        };
+        let unscaled = |fix: &Fix| matches!(refused(fix), Some(CompileDefect::UnscaledInput { .. }));
+        assert!(unscaled(&fix(vec![], t_param, bt_clock)));
+        assert!(unscaled(&fix(vec![0], t_param, bt_clock)));
+        assert!(unscaled(&fix(vec![0], t_clock_bare, bt_param)));
+        assert_eq!(refused(&fix(vec![], t_clock_bare, bt_param)), None);
     }
 }

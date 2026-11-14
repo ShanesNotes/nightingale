@@ -2256,8 +2256,8 @@ test = "-p ng-contract --lib boundary::tests::a_clock_whose_minute_turns_between
 [[mutant]]
 name = "unscaled-input-compiles"
 path = "crates/ng-contract/src/compile.rs"
-old = '''if kernel.judged(anatomy).iter().any(unscaled) {'''
-new = '''if false && kernel.judged(anatomy).iter().any(unscaled) {'''
+old = '''if reads.contains(&false) && !reads.contains(&true) {'''
+new = '''if false && reads.contains(&false) && !reads.contains(&true) {'''
 test = "-p ng-contract --test day_inputs compile_refuses_a_law_that_sets_its_row_to_an_input_and_takes_one_that_scales_a_parameter_by_it"
 
 [[mutant]]
@@ -2765,15 +2765,6 @@ new = '''
 test = "-p ng-contract --lib evaluate::terms::a_terms_unused_invalid_read_is_still_refused"
 
 [[mutant]]
-name = "variant-judged-whole"
-path = "crates/ng-contract/src/law.rs"
-old = '''            placing.written(&inside, &mut ops);
-'''
-new = '''
-'''
-test = "-p ng-contract --lib evaluate::terms::a_read_main_refuses_by_hand_is_refused_through_a_term"
-
-[[mutant]]
 name = "sources-by-origin"
 path = "crates/ng-contract/src/sources.rs"
 old = '''program.code.origin(at).unwrap_or(program.law) == law'''
@@ -2839,48 +2830,6 @@ path = "crates/ng-contract/src/anatomy.rs"
 old = '''impl<C: SiteSet> Includes<C> for C {}'''
 new = ''''''
 test = "-p ng-contract --lib evaluate::terms::a_read_in_its_own_set_writes_the_op_a_plain_read_writes"
-
-[[mutant]]
-name = "host-judged-as-main"
-path = "crates/ng-contract/src/law.rs"
-old = '''let mut out: Vec<Vec<&Op>> = vec![self.code.iter().collect()];'''
-new = '''let mut out: Vec<Vec<&Op>> = Vec::new();'''
-test = "-p ng-contract --lib evaluate::terms::forms::a_host_main_refuses_for_an_unscaled_input_is_refused_when_it_adds_a_term"
-
-[[mutant]]
-name = "judged-only-where-a-site-runs-the-term"
-path = "crates/ng-contract/src/law.rs"
-old = '''        let sites: Vec<crate::SiteId> = sets.iter().flat_map(|&set| anatomy.in_set(set)).collect();
-        for site in sites {
-            let inside = |set: Sites| anatomy.in_set(set).contains(&site);
-'''
-new = '''        for _ in anatomy.in_set(Sites::Blood) {
-            let inside = |_: Sites| true;
-'''
-test = "-p ng-contract --lib evaluate::terms::forms::a_forcing_a_term_reads_counts_only_where_a_site_runs_the_term"
-
-[[mutant]]
-name = "inner-term-judged"
-path = "crates/ng-contract/src/law.rs"
-old = '''            splice.term.graph.written(inside, out);
-'''
-new = '''
-'''
-test = "-p ng-contract --lib evaluate::terms::forms::a_forcing_a_term_reads_counts_only_where_a_site_runs_the_term"
-
-[[mutant]]
-name = "forcing-judged-through-terms"
-path = "crates/ng-contract/src/compile.rs"
-old = '''law.kernel.judged(anatomy).iter().any(|ops| ops.contains(&&read))'''
-new = '''law.kernel.code.contains(&read)'''
-test = "-p ng-contract --lib evaluate::terms::forms::a_forcing_a_term_reads_counts_only_where_a_site_runs_the_term"
-
-[[mutant]]
-name = "volume-judged-through-terms"
-path = "crates/ng-contract/src/compile.rs"
-old = '''let judged = kernel.judged(&schema.anatomy);'''
-new = '''let judged = vec![kernel.code.iter().collect::<Vec<_>>()];'''
-test = "-p ng-contract --lib evaluate::terms::forms::a_volume_a_term_reads_needs_a_partial_volume_only_where_a_site_runs_the_term"
 
 [[mutant]]
 name = "guard-term-refused"
@@ -2967,6 +2916,55 @@ path = "crates/ng-contract/src/law.rs"
 old = '''let index = match kept.iter().position(|known| *known == key) {'''
 new = '''let index = match None::<usize> {'''
 test = "-p ng-contract --lib evaluate::terms::forms::a_shared_op_has_the_slopes_of_the_law_with_it_bound_once"
+
+[[mutant]]
+name = "variant-unscaled-judged"
+path = "crates/ng-contract/src/compile.rs"
+old = '''let reads: Vec<bool> = inputs.filter_map(read).collect();'''
+new = '''let reads: Vec<bool> = Vec::new();'''
+test = "-p ng-contract --lib evaluate::terms::a_read_main_refuses_by_hand_is_refused_through_a_term"
+
+[[mutant]]
+name = "dead-read-not-judged"
+path = "crates/ng-contract/src/compile.rs"
+old = '''let reads: Vec<bool> = inputs.filter_map(read).collect();'''
+new = '''let reads: Vec<bool> = inputs.chain(variant.unreached.iter().map(|read| &read.input)).filter_map(read).collect();'''
+test = "-p ng-contract --lib evaluate::terms::forms::a_read_nothing_uses_neither_passes_nor_fails_a_check_at_a_marked_vein"
+
+[[mutant]]
+name = "variant-volume-judged"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if volume && schema.partial_volume.is_none() {'''
+new = '''if false {'''
+test = "-p ng-contract --lib evaluate::terms::forms::a_volume_a_term_reads_needs_a_partial_volume_only_where_a_site_runs_the_term"
+
+[[mutant]]
+name = "variant-forcing-counted"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if !variants.iter().any(ran) {'''
+new = '''if true {'''
+test = "-p ng-contract --lib evaluate::terms::forms::a_forcing_a_term_reads_counts_only_where_a_site_runs_the_term"
+
+[[mutant]]
+name = "unread-forcing-checked-after-variants"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if !variants.iter().any(ran) {'''
+new = '''if false {'''
+test = "-p ng-contract --lib evaluate::terms::forms::a_forcing_a_term_reads_counts_only_where_a_site_runs_the_term"
+
+[[mutant]]
+name = "term-stands-at-sites-on-a-valve"
+path = "crates/ng-contract/src/compile.rs"
+old = '''if kernel.placing.is_some() && targets.iter().any(off_site) {'''
+new = '''if false && targets.iter().any(off_site) {'''
+test = "-p ng-contract --test site_term_context a_site_term_on_a_valves_flow_memory_is_refused"
+
+[[mutant]]
+name = "two-terms-at-their-own-sites"
+path = "crates/ng-contract/src/law.rs"
+old = '''if !inside(term.set) {'''
+new = '''if false {'''
+test = "-p ng-contract --lib evaluate::terms::forms::two_terms_on_different_sets_are_each_judged_at_their_own_sites"
 
 [[mutant]]
 name = "vein-tag-is-the-tissue-tag"

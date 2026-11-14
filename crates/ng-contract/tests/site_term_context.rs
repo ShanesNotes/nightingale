@@ -72,3 +72,54 @@ fn a_site_term_cannot_hide_a_site_read_on_a_body_memory() {
     assert_eq!(body_memory(false).err(), inline);
     assert_eq!(body_memory(true).err(), through);
 }
+
+fn valve_memory() -> Result<CompiledBody, AdmissionError> {
+    let mut map = AnatomyBuilder::new();
+    let root = map.site::<TissueSite>("body", at()?);
+    let (a, b) = (
+        map.site::<VesselSegment>("a", at()?),
+        map.site::<VesselSegment>("b", at()?),
+    );
+    map.contain(root.id(), a.id());
+    map.contain(root.id(), b.id());
+    map.connect(Network::Vascular, a.id(), b.id());
+    map.valve(b.id(), a.id());
+    map.vein(&b);
+    let mut schema = Schema::new(map.finish()?)?;
+    schema.partial_volume(Measure::new(1.0)?)?;
+    assemble(schema, |mut body| {
+        let class = RateClass::new(RateBand::Wave, 3_600_000_000_000)?;
+        let (mut cv, ports) = body.cardiovascular()?.parts();
+        let route = ports.circulation(&mut cv);
+        let still = cv.edge_kernel(|mut k| {
+            let zero = k.zero::<Rate<Water>>();
+            k.finish(zero, cv.every_mode(), class)
+        });
+        cv.transfer_along(&route, still);
+        let valves = ports.valves(&mut cv);
+        let flow = valves.flow_memory();
+        let pace =
+            cv.site_parameter::<Veins, Rate<Rate<Water>>>(ParameterKey::new("cv.pace"), Admissible::finite());
+        let term = cv.site_term::<Veins, Rate<Rate<Water>>, _>("site pace", |mut k| {
+            let value = k.site_parameter(&pace);
+            k.finish_term(value)
+        });
+        let rate = cv.site_kernel::<Blood, Rate<Rate<Water>>, _>(|mut k| {
+            let zero = k.zero::<Rate<Rate<Water>>>();
+            let value = k.add_from(zero, &term);
+            k.finish(value, cv.every_mode(), class)
+        });
+        cv.memory_rate(&flow, rate);
+        body.add(cv.finish());
+        body.compile()
+    })
+}
+
+/// A kernel that adds a term stands at sites: on a valve's flow memory, which stands at each valve edge, it is refused.
+#[test]
+fn a_site_term_on_a_valves_flow_memory_is_refused() {
+    assert!(matches!(
+        valve_memory().err(),
+        Some(AdmissionError::Compile(CompileDefect::TermOffSite { .. }))
+    ));
+}
