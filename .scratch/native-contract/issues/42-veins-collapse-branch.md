@@ -4,7 +4,9 @@ Spec: `crates/ng-cardiovascular/src/walls.rs` (`Walls::stressed`), the slice's p
 
 Type: task
 
-Status: open
+Status: claimed
+
+Claimed by: nc42-pr1
 
 Blocked by: none
 
