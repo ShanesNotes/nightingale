@@ -546,6 +546,15 @@ impl Seal for Source {
 }
 
 fn reachable(code: &[Op], result: usize, accepting: &[usize], fields: &[FieldRead]) -> Pruned {
+    reachable_placed(code, result, accepting, fields).0
+}
+
+fn reachable_placed(
+    code: &[Op],
+    result: usize,
+    accepting: &[usize],
+    fields: &[FieldRead],
+) -> (Pruned, Vec<Option<usize>>) {
     fn place(code: &[Op], at: usize, placed: &mut [Option<usize>], out: &mut Vec<Op>) -> usize {
         if let Some(done) = placed[at] {
             return done;
@@ -569,7 +578,7 @@ fn reachable(code: &[Op], result: usize, accepting: &[usize], fields: &[FieldRea
             _ => None,
         })
         .collect();
-    Pruned {
+    let pruned = Pruned {
         code: out,
         accepts_no_nerve: accepting.iter().filter_map(|&at| placed[at]).collect(),
         fields: (fields.iter())
@@ -580,6 +589,156 @@ fn reachable(code: &[Op], result: usize, accepting: &[usize], fields: &[FieldRea
             })
             .collect(),
         unreached,
+    };
+    (pruned, placed)
+}
+
+/// A kernel as its law wrote it, with each `add_from` an identity on its base. Compile writes it out per site: the
+/// term added where the site is in the term's set, and the base alone elsewhere.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Placing {
+    code: Vec<Op>,
+    result: usize,
+    accepting: Vec<usize>,
+    fields: Vec<FieldRead>,
+    splices: Vec<Splice>,
+    /// What `summing` and `defining` subtract the value from, written after it as they write it into `code`.
+    closing: Vec<Op>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Splice {
+    at: usize,
+    term: TermData,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TermData {
+    law: LawName,
+    set: Sites,
+    graph: Placing,
+}
+
+/// A placed graph, with the law of each op that a term and not its host computes.
+struct Written {
+    code: Vec<Op>,
+    origins: Vec<Option<LawName>>,
+    accepting: Vec<usize>,
+    fields: Vec<FieldRead>,
+    unreached: Vec<UnreachedRead>,
+}
+
+impl Placing {
+    fn any_inside(&self, inside: &dyn Fn(Sites) -> bool) -> bool {
+        (self.splices.iter()).any(|splice| inside(splice.term.set))
+    }
+    fn write(&self, inside: &dyn Fn(Sites) -> bool) -> Written {
+        let mut code = self.code.clone();
+        let mut origins: Vec<Option<LawName>> = vec![None; code.len()];
+        let (mut accepting, mut fields) = (self.accepting.clone(), self.fields.clone());
+        let mut unreached = Vec::new();
+        let mut redirect: Vec<usize> = (0..code.len()).collect();
+        for Splice { at, term } in &self.splices {
+            let base = code[*at].operands()[0];
+            if !inside(term.set) {
+                redirect[*at] = base;
+                continue;
+            }
+            let written = term.graph.write(inside);
+            let offset = code.len();
+            code.extend(written.code.iter().map(|op| op.map(|operand| operand + offset)));
+            origins.extend((written.origins.iter()).map(|origin| Some(origin.unwrap_or(term.law))));
+            redirect.extend(offset..code.len());
+            accepting.extend(written.accepting.iter().map(|at| at + offset));
+            fields.extend(written.fields.iter().map(|read| FieldRead {
+                at: read.at + offset,
+                expects: read.expects.clone(),
+            }));
+            unreached.extend(written.unreached);
+            code[*at] = Op::Add([base, code.len() - 1]);
+        }
+        let follow = |mut at: usize| {
+            while redirect[at] != at {
+                at = redirect[at];
+            }
+            at
+        };
+        let code: Vec<Op> = code.iter().map(|op| op.map(follow)).collect();
+        let (pruned, placed) = reachable_placed(&code, follow(self.result), &accepting, &fields);
+        unreached.splice(0..0, pruned.unreached);
+        let mut kept = vec![None; pruned.code.len()];
+        for (at, place) in placed.iter().enumerate() {
+            if let Some(place) = place {
+                kept[*place] = origins[at];
+            }
+        }
+        let written = Written {
+            code: pruned.code,
+            origins: kept,
+            accepting: pruned.accepts_no_nerve,
+            fields: pruned.fields,
+            unreached,
+        };
+        if self.any_inside(inside) {
+            written.shared()
+        } else {
+            written
+        }
+    }
+}
+impl Written {
+    /// One op for each value the program computes twice, as a term reads what its host reads. An op the host and a
+    /// term both compute is the host's, since the host computes it with or without the term.
+    fn shared(self) -> Self {
+        let expects = |at: usize| (self.fields.iter().find(|read| read.at == at)).map(|read| read.expects.clone());
+        let mut kept: Vec<(Op, bool, Option<String>)> = Vec::new();
+        let mut origins: Vec<Option<LawName>> = Vec::new();
+        let mut map: Vec<usize> = Vec::with_capacity(self.code.len());
+        for (at, op) in self.code.iter().enumerate() {
+            let key = (
+                op.map(|operand| map[operand]),
+                self.accepting.contains(&at),
+                expects(at),
+            );
+            let index = match kept.iter().position(|known| *known == key) {
+                Some(index) => {
+                    if self.origins[at].is_none() {
+                        origins[index] = None;
+                    }
+                    index
+                }
+                None => {
+                    kept.push(key);
+                    origins.push(self.origins[at]);
+                    kept.len() - 1
+                }
+            };
+            map.push(index);
+        }
+        let accepting: Vec<usize> = (kept.iter().enumerate())
+            .filter(|(_, (_, accepts, _))| *accepts)
+            .map(|(at, _)| at)
+            .collect();
+        let fields: Vec<FieldRead> = (kept.iter().enumerate())
+            .filter_map(|(at, (_, _, expects))| {
+                let expects = expects.clone()?;
+                Some(FieldRead { at, expects })
+            })
+            .collect();
+        let code: Vec<Op> = kept.into_iter().map(|(op, _, _)| op).collect();
+        let root = map[self.code.len() - 1];
+        let (pruned, placed) = reachable_placed(&code, root, &accepting, &fields);
+        let mut kept_origins = vec![None; pruned.code.len()];
+        for (at, place) in placed.iter().enumerate() {
+            if let Some(place) = place {
+                kept_origins[*place] = origins[at];
+            }
+        }
+        Written {
+            code: pruned.code,
+            origins: kept_origins,
+            accepting: pruned.accepts_no_nerve,
+            fields: pruned.fields,
+            unreached: self.unreached,
+        }
     }
 }
 
@@ -609,6 +768,7 @@ pub struct Kernel<'b, 'k, O, S = Body> {
     code: Vec<Op>,
     accepts_no_nerve: Vec<usize>,
     fields: Vec<FieldRead>,
+    splices: Vec<Splice>,
     brand: Brand<'b>,
     kernel: Brand<'k>,
     kind: PhantomData<(O, S)>,
@@ -630,6 +790,7 @@ pub struct Finished<'b, 'k, O, U, S = Body> {
     code: Vec<Op>,
     accepts_no_nerve: Vec<usize>,
     fields: Vec<FieldRead>,
+    splices: Vec<Splice>,
     result: usize,
     dimension: String,
     modes: ModeSet<'b, O>,
@@ -657,13 +818,58 @@ pub(crate) struct KernelData {
     pub(crate) modes: Selector,
     pub(crate) rate: RateClass,
     pub(crate) defines: bool,
+    /// The graph as written, kept only when it adds a term; `code` is its form at a site in no term's set.
+    pub(crate) placing: Option<Box<Placing>>,
+    /// The ops a term computes and its host does not, each with the term's law. Empty off every term's set.
+    pub(crate) origins: Vec<(usize, LawName)>,
 }
 impl KernelData {
+    /// The kernel as it runs at a site inside the sets `inside` holds, or `None` where that is `code` as it stands.
+    pub(crate) fn at(&self, inside: impl Fn(Sites) -> bool) -> Option<KernelData> {
+        let placing = self.placing.as_ref()?;
+        if !placing.any_inside(&inside) {
+            return None;
+        }
+        let mut written = placing.write(&inside);
+        for first in &placing.closing {
+            let value = written.code.len() - 1;
+            written.code.push(first.clone());
+            written.code.push(Op::Subtract([value + 1, value]));
+        }
+        Some(KernelData {
+            code: written.code,
+            accepts_no_nerve: written.accepting,
+            fields: written.fields,
+            unreached: written.unreached,
+            placing: None,
+            origins: (written.origins.iter().enumerate())
+                .filter_map(|(at, origin)| Some((at, (*origin)?)))
+                .collect(),
+            ..self.clone()
+        })
+    }
+    /// Every op the kernel or a term it adds holds, for checks that ask what a law reads at all.
+    pub(crate) fn every_op(&self) -> Vec<&Op> {
+        fn walk<'a>(placing: &'a Placing, out: &mut Vec<&'a Op>) {
+            for splice in &placing.splices {
+                out.extend(&splice.term.graph.code);
+                walk(&splice.term.graph, out);
+            }
+        }
+        let mut out: Vec<&Op> = self.code.iter().collect();
+        if let Some(placing) = &self.placing {
+            walk(placing, &mut out);
+        }
+        out
+    }
     /// `value`, negated, so one body row's laws add to `row - sum`.
     fn summing(mut self) -> Self {
         let value = self.code.len() - 1;
         self.code.push(Op::Zero(self.dimension.clone()));
         self.code.push(Op::Subtract([value + 1, value]));
+        if let Some(placing) = &mut self.placing {
+            placing.closing.push(Op::Zero(self.dimension.clone()));
+        }
         self
     }
     /// `row - value`, so a coupling is a plain algebraic row and a loop of couplings a coupled residual.
@@ -672,6 +878,9 @@ impl KernelData {
         self.code.push(Op::Input(Input::Algebraic(row)));
         self.code.push(Op::Subtract([value + 1, value]));
         self.defines = true;
+        if let Some(placing) = &mut self.placing {
+            placing.closing.push(Op::Input(Input::Algebraic(row)));
+        }
         self
     }
 }
@@ -682,6 +891,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
             code: Vec::new(),
             accepts_no_nerve: Vec::new(),
             fields: Vec::new(),
+            splices: Vec::new(),
             brand: PhantomData,
             kernel: PhantomData,
             kind: PhantomData,
@@ -890,6 +1100,7 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
             code: self.code,
             accepts_no_nerve: self.accepts_no_nerve,
             fields: self.fields,
+            splices: self.splices,
             result: value.at,
             dimension: dimension::<U>(),
             modes,
@@ -898,6 +1109,37 @@ impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
             kind: PhantomData,
         }
     }
+    /// Closes a term's graph. A term has no modes or rate of its own: it holds where the law that adds it holds.
+    pub fn finish_term<U: Dimension>(self, value: Expr<'b, 'k, O, U>) -> FinishedTerm<'b, 'k, O, U, S> {
+        FinishedTerm {
+            graph: Placing {
+                code: self.code,
+                result: value.at,
+                accepting: self.accepts_no_nerve,
+                fields: self.fields,
+                splices: self.splices,
+                closing: Vec::new(),
+            },
+            brand: PhantomData,
+            kernel: PhantomData,
+            kind: PhantomData,
+        }
+    }
+}
+
+/// A term's closed graph, before `site_term` names it.
+pub struct FinishedTerm<'b, 'k, O, U, S> {
+    graph: Placing,
+    brand: Brand<'b>,
+    kernel: Brand<'k>,
+    kind: PhantomData<(O, U, S)>,
+}
+/// A named value over the sites of `C` that no row holds. A law over a set that contains `C` adds it with `add_from`,
+/// and compile writes it into that law's program at each site of `C` and leaves the program as it was elsewhere.
+pub struct SiteTerm<'b, O, C, U> {
+    data: TermData,
+    brand: Brand<'b>,
+    kind: PhantomData<(O, C, U)>,
 }
 
 impl<'b, 'k, S> Kernel<'b, 'k, crate::Cardiovascular, S> {
@@ -962,6 +1204,20 @@ impl<'b, 'k, O, C: SiteSet> Kernel<'b, 'k, O, C> {
         parameter: &SiteParameter<'b, O, D, U>,
     ) -> Expr<'b, 'k, O, U> {
         self.input(Input::SiteParameter(parameter.key))
+    }
+    /// `base` plus the term at a site of the term's set, and `base` itself, unchanged, at any other site.
+    pub fn add_from<D: SiteSet, U: Dimension>(
+        &mut self,
+        base: Expr<'b, 'k, O, U>,
+        term: &SiteTerm<'b, O, D, U>,
+    ) -> Expr<'b, 'k, O, U>
+    where
+        C: Contains<D>,
+    {
+        let at = self.push(Op::AsDimension([base.at]));
+        let term = term.data.clone();
+        self.splices.push(Splice { at: at.at, term });
+        at
     }
 }
 impl<'b, 'k, O, E: EdgeKind> Kernel<'b, 'k, O, E> {
@@ -1607,17 +1863,38 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
     fn close<U, S>(&self, finished: Finished<'b, '_, O, U, S>) -> PureKernel<'b, O, U, S> {
         let id = self.kernels.get();
         self.kernels.set(id + 1);
+        let placing = (!finished.splices.is_empty()).then(|| {
+            Box::new(Placing {
+                code: finished.code.clone(),
+                result: finished.result,
+                accepting: finished.accepts_no_nerve.clone(),
+                fields: finished.fields.clone(),
+                splices: finished.splices,
+                closing: Vec::new(),
+            })
+        });
         let Pruned {
             code,
             accepts_no_nerve,
             fields,
             unreached,
-        } = reachable(
-            &finished.code,
-            finished.result,
-            &finished.accepts_no_nerve,
-            &finished.fields,
-        );
+        } = match &placing {
+            None => reachable(
+                &finished.code,
+                finished.result,
+                &finished.accepts_no_nerve,
+                &finished.fields,
+            ),
+            Some(placing) => {
+                let written = placing.write(&|_| false);
+                Pruned {
+                    code: written.code,
+                    accepts_no_nerve: written.accepting,
+                    fields: written.fields,
+                    unreached: written.unreached,
+                }
+            }
+        };
         PureKernel {
             data: KernelData {
                 id,
@@ -1629,6 +1906,8 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
                 modes: finished.modes.selector,
                 rate: finished.rate,
                 defines: false,
+                placing,
+                origins: Vec::new(),
             },
             brand: PhantomData,
             kind: PhantomData,
@@ -1645,6 +1924,26 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
         F: for<'k> FnOnce(Kernel<'b, 'k, O, C>) -> Finished<'b, 'k, O, U, C>,
     {
         self.close(build(Kernel::open()))
+    }
+    /// Declares a term named `name` over the sites of `C`. It is no row: compile writes it into each law that adds it.
+    pub fn site_term<C: SiteSet, U: Dimension, F>(&mut self, name: &'static str, build: F) -> SiteTerm<'b, O, C, U>
+    where
+        F: for<'k> FnOnce(Kernel<'b, 'k, O, C>) -> FinishedTerm<'b, 'k, O, U, C>,
+    {
+        self.data.terms.push(name);
+        let law = LawName {
+            owner: self.data.owner,
+            local: name,
+        };
+        SiteTerm {
+            data: TermData {
+                law,
+                set: C::SET,
+                graph: build(Kernel::open()).graph,
+            },
+            brand: PhantomData,
+            kind: PhantomData,
+        }
     }
     pub fn edge_kernel<E: EdgeKind, U: Dimension, F>(&self, build: F) -> PureKernel<'b, O, U, E>
     where
@@ -2106,6 +2405,7 @@ pub(crate) struct FragmentData {
     pub(crate) reflections: Vec<(Family, Species, ParameterKey)>,
     pub(crate) kept_back: Vec<(Family, Species)>,
     pub(crate) reactions: Vec<ReactionDeclaration>,
+    pub(crate) terms: Vec<&'static str>,
 }
 impl FragmentData {
     pub(crate) fn owe_flow(&mut self, family: Family) {
@@ -2134,6 +2434,7 @@ impl FragmentData {
             reflections: Vec::new(),
             kept_back: Vec::new(),
             reactions: Vec::new(),
+            terms: Vec::new(),
         }
     }
 }

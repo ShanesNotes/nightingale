@@ -464,6 +464,37 @@
 //! fn contained<C: SiteSet>() where Blood: Contains<C> {}
 //! contained::<Veins>();
 //! ```
+//! A law adds a term only from a set that contains the term's: the veins are blood sites, not urinary ones.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn tract<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Urinary>, base: Expr<'b, 'k, Cardiovascular, Volume>,
+//!     collapse: &SiteTerm<'b, Cardiovascular, Veins, Volume>) -> Expr<'b, 'k, Cardiovascular, Volume> {
+//!     k.add_from(base, collapse)
+//! }
+//! ```
+//! ```
+//! use ng_contract::*;
+//! fn blood<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Blood>, base: Expr<'b, 'k, Cardiovascular, Volume>,
+//!     collapse: &SiteTerm<'b, Cardiovascular, Veins, Volume>) -> Expr<'b, 'k, Cardiovascular, Volume> {
+//!     k.add_from(base, collapse)
+//! }
+//! ```
+//! A term adds only to a value of its own dimension.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn blood<'b, 'k>(k: &mut Kernel<'b, 'k, Cardiovascular, Blood>, base: Expr<'b, 'k, Cardiovascular, Pressure>,
+//!     collapse: &SiteTerm<'b, Cardiovascular, Veins, Volume>) -> Expr<'b, 'k, Cardiovascular, Pressure> {
+//!     k.add_from(base, collapse)
+//! }
+//! ```
+//! A term is its owner's: another owner's law cannot add it.
+//! ```compile_fail,E0308
+//! use ng_contract::*;
+//! fn fluids<'b, 'k>(k: &mut Kernel<'b, 'k, Fluids, Blood>, base: Expr<'b, 'k, Fluids, Volume>,
+//!     collapse: &SiteTerm<'b, Cardiovascular, Veins, Volume>) -> Expr<'b, 'k, Fluids, Volume> {
+//!     k.add_from(base, collapse)
+//! }
+//! ```
 //! A route comes from a scope, whole: a hand-made route does not compile. A binding is a transfer of one ligand between
 //! two pools.
 //! ```compile_fail,E0451

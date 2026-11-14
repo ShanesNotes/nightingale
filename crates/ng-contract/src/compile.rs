@@ -205,6 +205,7 @@ fn check_names(fragment: &FragmentData, schema: &Schema, held: &[HeldCard]) -> R
                 .map(|boundary| boundary.name),
         )
         .chain(fragment.reactions.iter().map(|reaction| reaction.name))
+        .chain(fragment.terms.iter().copied())
         .collect();
     names.sort_unstable();
     if let Some(pair) = names.windows(2).find(|pair| pair[0] == pair[1]) {
@@ -696,7 +697,7 @@ fn check_chance(fragments: &[FragmentData]) -> Result<(), CompileDefect> {
         forcings.sort_unstable();
         for &forcing in &forcings {
             let read = Op::Input(Input::Forcing(forcing));
-            if !(fragment.laws.iter()).any(|law| law.kernel.code.contains(&read)) {
+            if !(fragment.laws.iter()).any(|law| law.kernel.every_op().contains(&&read)) {
                 return Err(CompileDefect::UnreadForcing {
                     forcing: named(forcing),
                 });
@@ -710,7 +711,8 @@ fn check_volume(schema: &Schema, owed: &[Owed], fragments: &[FragmentData]) -> R
     if schema.partial_volume.is_some() {
         return Ok(());
     }
-    let reads_volume = |kernel: &KernelData| kernel.code.iter().any(|op| matches!(op, Op::Volume(_)));
+    let reads_volume =
+        |kernel: &KernelData| (kernel.every_op().into_iter()).any(|op| matches!(op, Op::Volume(_)));
     let laws = (owed.iter())
         .filter(|law| law.laws.iter().any(|(_, kernel)| reads_volume(kernel)))
         .map(|law| law.name);
@@ -1351,6 +1353,7 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
         programs: Vec::new(),
         instances: Vec::new(),
     };
+    let mut variants: Vec<Program> = Vec::new();
     for law in owed {
         let targets = match law.serves {
             Serves::Slot(over) => places_of(anatomy, reaches, schema, law.name.owner, over)
@@ -1403,7 +1406,7 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
         };
         for &(_, kernel) in &law.laws {
             if let Serves::Boundary(water) = law.serves {
-                let written = (kernel.code.iter())
+                let written = (kernel.every_op().into_iter())
                     .filter_map(|op| match op {
                         Op::Input(input) => Some(input),
                         _ => None,
@@ -1427,7 +1430,7 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                 | Input::Memory(_) => Some(true),
                 _ => None,
             };
-            let reads: Vec<bool> = (kernel.code.iter())
+            let reads: Vec<bool> = (kernel.every_op().into_iter())
                 .filter_map(|op| match op {
                     Op::Input(input) => read(input),
                     _ => None,
@@ -1444,13 +1447,31 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                 defined = kernel.clone().defining(water.name);
                 kernel = &defined;
             }
-            let program = ProgramId::at(placement.programs.len());
-            placement.programs.push(Program {
-                id: program,
-                law: law.name,
-                code: code(law.fragment, kernel),
-            });
+            let declared = ProgramId::at(placement.programs.len());
+            let base = code(law.fragment, kernel);
             for &(context, target) in &targets {
+                let variant = kernel.at(|set| inside(anatomy, set, context));
+                let (program, kernel) = match &variant {
+                    None => (declared, kernel),
+                    Some(variant) => {
+                        let written = code(law.fragment, variant);
+                        let known = (variants.iter().enumerate())
+                            .find(|(_, known)| known.law == law.name && known.code == written);
+                        let program = match known {
+                            _ if written == base => declared,
+                            Some((index, _)) => ProgramId::at(VARIANT + index),
+                            None => {
+                                variants.push(Program {
+                                    id: ProgramId::at(VARIANT + variants.len()),
+                                    law: law.name,
+                                    code: written,
+                                });
+                                ProgramId::at(VARIANT + variants.len() - 1)
+                            }
+                        };
+                        (program, variant)
+                    }
+                };
                 placement.instances.push(Placed {
                     program,
                     context,
@@ -1458,10 +1479,33 @@ fn place(owed: &[Owed], places: &Places) -> Result<Placement, CompileDefect> {
                     addresses: addresses(law.name, route, kernel, context, places)?,
                 });
             }
+            placement.programs.push(Program {
+                id: declared,
+                law: law.name,
+                code: base,
+            });
         }
     }
     fluid_columns(&mut placement, places)?;
+    let first = placement.programs.len();
+    for placed in &mut placement.instances {
+        if let Some(index) = placed.program.index().checked_sub(VARIANT) {
+            placed.program = ProgramId::at(first + index);
+        }
+    }
+    for (index, mut program) in variants.into_iter().enumerate() {
+        program.id = ProgramId::at(first + index);
+        placement.programs.push(program);
+    }
     Ok(placement)
+}
+
+/// Where a variant's provisional id starts: variants follow every program a site outside each term's set runs, so
+/// those programs keep the ids they have when no term is placed.
+const VARIANT: usize = usize::MAX / 2;
+
+fn inside(anatomy: &Anatomy, set: Sites, context: Context) -> bool {
+    matches!(context, Context::Site(site) if anatomy.in_set(set).contains(&site))
 }
 
 /// Every column of every fluid route, written here and not by a law: water reads the flow row, and each species a
@@ -1642,6 +1686,7 @@ fn fluid_program(
             rate,
             validity: Vec::new(),
             defines: false,
+            origins: Vec::new(),
         },
     });
     id
@@ -1769,6 +1814,8 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
         modes,
         rate,
         defines,
+        placing: _,
+        origins,
     } = kernel;
     let mut validity: Vec<_> = (fragment.validity.iter())
         .filter(|(kernel, _)| kernel == id)
@@ -1782,6 +1829,7 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
         rate: *rate,
         validity,
         defines: *defines,
+        origins: origins.clone(),
     }
 }
 

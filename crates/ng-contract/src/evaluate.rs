@@ -6,6 +6,8 @@ use crate::{Compensated, CompiledBody, Crossing, ExcursionSide, LawName, SimTime
 use core::ops::Range;
 
 mod enclosure;
+#[cfg(test)]
+mod terms;
 pub(crate) use enclosure::{Bounds, Jet};
 
 pub(crate) struct GuardSlopes {
@@ -358,6 +360,53 @@ fn forward(
     }
 }
 
+/// The op `forward` refused at, found again by running `forward` on prefixes of the program: only a refusal pays for
+/// it, and `forward` stays the one caller of `apply`, so a step's code is main's. A read that is not finite stops
+/// `forward` there, so the search runs the steps before it with the reads before it.
+#[cold]
+fn refused_at(arithmetic: Arithmetic<'_>, reads: Reads<'_>, inputs: &Inputs<'_>, partial_volume: f64) -> usize {
+    let mut values = vec![0.0; arithmetic.length];
+    let none = Arithmetic {
+        length: arithmetic.length,
+        steps: &[],
+    };
+    let mut read = arithmetic.length;
+    if forward(none, reads, inputs, partial_volume, &mut values).is_err() {
+        let slots = (reads.parameters.iter().map(|read| read.0))
+            .chain(reads.unknowns.iter().map(|read| read.0))
+            .chain(reads.others.iter().map(|read| read.0));
+        read = slots.filter(|&slot| !values[slot].is_finite()).min().unwrap_or(read);
+    }
+    let (parameters, unknowns, others): (Vec<_>, Vec<_>, Vec<_>) = (
+        reads.parameters.iter().copied().filter(|at| at.0 < read).collect(),
+        reads.unknowns.iter().copied().filter(|at| at.0 < read).collect(),
+        reads.others.iter().copied().filter(|at| at.0 < read).collect(),
+    );
+    let before = Reads {
+        parameters: &parameters,
+        unknowns: &unknowns,
+        others: &others,
+    };
+    let steps = &arithmetic.steps[..arithmetic.steps.partition_point(|&(at, _)| at < read)];
+    let prefix = |count: usize| Arithmetic {
+        length: arithmetic.length,
+        steps: &steps[..count],
+    };
+    if forward(prefix(steps.len()), before, inputs, partial_volume, &mut values).is_ok() {
+        return read.min(arithmetic.length - 1);
+    }
+    let (mut passed, mut failed) = (0, steps.len());
+    while failed - passed > 1 {
+        let middle = passed + (failed - passed) / 2;
+        if forward(prefix(middle), before, inputs, partial_volume, &mut values).is_err() {
+            failed = middle;
+        } else {
+            passed = middle;
+        }
+    }
+    steps[failed - 1].0
+}
+
 fn backward(arithmetic: Arithmetic<'_>, values: &[f64], partial_volume: f64, slopes: &mut [f64]) {
     slopes[..arithmetic.length].fill(0.0);
     slopes[arithmetic.length - 1] = 1.0;
@@ -531,8 +580,22 @@ impl CompiledBody {
             Bound::Lasting(input) => inputs.frame.lasting(input),
         }
     }
-    fn undefined(&self, instance: &Instance, domain: OperatorDomain) -> Undefined {
-        let law = self.layout.programs[instance.program.index()].law;
+    fn undefined(&self, at: usize, inputs: &Inputs<'_>, domain: OperatorDomain) -> Undefined {
+        let instance = &self.layout.instances[at];
+        let program = &self.layout.programs[instance.program.index()];
+        if program.code.origins.is_empty() {
+            return Undefined {
+                law: program.law,
+                domain,
+            };
+        }
+        let (arithmetic, reads) = (self.tape.program(instance.program), self.tape.instance(at));
+        let op = refused_at(arithmetic, reads, inputs, self.partial_volume());
+        self.undefined_at(instance, op, domain)
+    }
+    fn undefined_at(&self, instance: &Instance, op: usize, domain: OperatorDomain) -> Undefined {
+        let program = &self.layout.programs[instance.program.index()];
+        let law = program.code.origin(op).unwrap_or(program.law);
         Undefined { law, domain }
     }
     pub(crate) fn instance_values(&self, inputs: &Inputs<'_>) -> Result<Vec<Option<f64>>, Undefined> {
@@ -546,7 +609,7 @@ impl CompiledBody {
             }
             let (arithmetic, reads) = (self.tape.program(instance.program), self.tape.instance(at));
             let value = forward(arithmetic, reads, inputs, partial_volume, &mut values);
-            out.push(Some(value.map_err(|domain| self.undefined(instance, domain))?));
+            out.push(Some(value.map_err(|domain| self.undefined(at, inputs, domain))?));
         }
         Ok(out)
     }
@@ -563,7 +626,7 @@ impl CompiledBody {
             }
             let (arithmetic, reads) = (self.tape.program(instance.program), self.tape.instance(at));
             let value = forward(arithmetic, reads, inputs, partial_volume, &mut values)
-                .map_err(|domain| self.undefined(instance, domain))?;
+                .map_err(|domain| self.undefined(at, inputs, domain))?;
             backward(arithmetic, &values, partial_volume, &mut slopes);
             let flat = positive_part(instance, value) != value;
             each(&Swept {
@@ -584,7 +647,7 @@ impl CompiledBody {
             for &(slot, _) in swept.reads.unknowns {
                 let slope = swept.slope(slot);
                 if !slope.is_finite() {
-                    return Err(self.undefined(swept.instance, OperatorDomain::NonFinite));
+                    return Err(self.undefined_at(swept.instance, slot, OperatorDomain::NonFinite));
                 }
                 match swept.instance.target {
                     Target::Column(column) => {

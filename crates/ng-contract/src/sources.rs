@@ -29,13 +29,27 @@ pub(crate) fn refusal_sources(layout: &Layout) -> Vec<RefusalSource> {
     let mut sources: Vec<RefusalSource> = (layout.rows.iter())
         .map(|row| RefusalSource::Row { row: row.id() })
         .collect();
-    let mut laws: Vec<LawName> = layout.programs.iter().map(|program| program.law).collect();
-    laws.dedup();
+    let mut laws: Vec<LawName> = Vec::new();
+    for program in &layout.programs {
+        let variant = !program.code.origins.is_empty() && laws.contains(&program.law);
+        if laws.last() != Some(&program.law) && !variant {
+            laws.push(program.law);
+        }
+    }
+    for &(_, term) in layout.programs.iter().flat_map(|program| &program.code.origins) {
+        if !laws.contains(&term) {
+            laws.push(term);
+        }
+    }
     for law in laws {
         let reads = |wanted: fn(&Op) -> bool| {
             (layout.programs.iter())
-                .filter(|program| program.law == law)
-                .any(|program| program.code.ops.iter().any(wanted))
+                .filter(|program| program.law == law || !program.code.origins.is_empty())
+                .any(|program| {
+                let ops = program.code.ops.iter().enumerate();
+                let of_law = |&(at, _): &(usize, &Op)| program.code.origin(at).unwrap_or(program.law) == law;
+                ops.filter(of_law).any(|(_, op)| wanted(op))
+            })
         };
         if reads(|op| matches!(op, Op::Divide(_))) {
             sources.push(RefusalSource::Divisor { law });
