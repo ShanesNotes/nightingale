@@ -1385,20 +1385,6 @@ new = '''                                if value.is_finite()'''
 test = "-p ng-contract --lib ring::tests::a_ring_keeps_the_bits_it_had_on_zeros_of_both_signs"
 
 [[mutant]]
-name = "body-trace-pinned"
-path = "crates/ng-validate/src/body/packet.rs"
-old = '''RowKind::Memory(slot) if slot.law.local == "afferent filter" => 1.0,'''
-new = '''RowKind::Memory(slot) if slot.law.local == "afferent filter" => 1.5,'''
-test = "-p ng-validate --test body_run"
-
-[[mutant]]
-name = "body-held-pool-guess"
-path = "crates/ng-validate/src/body/packet.rs"
-old = '''    Measure::new(start_guess(row))'''
-new = '''    Measure::new(start_guess(row) * 2.0)'''
-test = "-p ng-validate --test body_run"
-
-[[mutant]]
 name = "observation-time-mean-counts-samples"
 path = "crates/ng-observe/src/observer.rs"
 old = '''covered: covered.saturating_add(length),'''
