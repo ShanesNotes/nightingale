@@ -217,7 +217,8 @@ fn below_its_unstressed_volume_a_marked_vein_follows_the_closed_form() -> Result
 /// potential at a smoothed volume, which a model of the two smoothings moves by about `share (V_u / V)^(n + 1)` times
 /// as much, with `n` the slice's 1.5. The margin here is twice that.
 fn margin(elastance: f64, unstressed: f64, volume: f64) -> f64 {
-    let (apart, ratio) = (volume - unstressed, (unstressed / volume).max(1.0));
+    let apart = volume - unstressed;
+    let ratio = if apart < 0.0 { unstressed / volume } else { 1.0 };
     let collapsed = 2.0 * SHARE * ratio * ratio * ratio.sqrt();
     elastance * WIDTH * WIDTH * (1.0 + collapsed) / (4.0 * (apart * apart + WIDTH * WIDTH).sqrt())
 }
