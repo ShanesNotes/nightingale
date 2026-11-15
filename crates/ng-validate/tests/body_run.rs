@@ -378,7 +378,12 @@ impl Edge {
         );
         let view = session.record().accepted();
         let value = |kind: RowKind| {
-            let row = start.body.rows().iter().find(|row| row.kind() == kind).expect("a row");
+            let row = start
+                .body
+                .rows()
+                .iter()
+                .find(|row| row.kind() == kind)
+                .expect("a row");
             lead(view.value(row.id()))
         };
         let pressure = |at| value(field("CV", "blood pressure", Context::Site(at)));
@@ -412,7 +417,10 @@ fn a_water_bolus_lowers_viscosity_and_the_resistance_it_sets(start: &Start) {
     let mut session = start.session();
     let before = Edge::at(start, &session);
     let at_start = before.resistance() / CORONARY_RESISTANCE;
-    assert!((at_start - 1.0).abs() < 1e-6, "viscosity over its reference at the start is {at_start}");
+    assert!(
+        (at_start - 1.0).abs() < 1e-6,
+        "viscosity over its reference at the start is {at_start}"
+    );
     let water = WaterDelivery {
         boundary: "gut water",
         amount: Measure::new(400.0).expect("finite"),

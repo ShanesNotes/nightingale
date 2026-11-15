@@ -13,13 +13,17 @@ pub(crate) fn viscosity<'b>(
     let plasma = hc.parameter::<Viscosity>(key("hc.plasma-viscosity"), Admissible::positive());
     let red_cell =
         hc.parameter::<Concentration<Hemoglobin>>(key("hc.red-cell-hemoglobin"), Admissible::positive());
-    let reference = hc.parameter::<Dimensionless>(key("hc.reference-hematocrit"), Admissible::unit_interval());
+    let reference =
+        hc.parameter::<Dimensionless>(key("hc.reference-hematocrit"), Admissible::unit_interval());
     let at_reference =
         hc.parameter::<Dimensionless>(key("hc.relative-viscosity-at-reference"), Admissible::positive());
     let exponent = hc.parameter::<Dimensionless>(key("hc.viscosity-exponent"), Admissible::finite());
     let wall = hc.parameter::<Dimensionless>(key("hc.wall-factor"), Admissible::positive());
     let unit = hc.parameter::<Dimensionless>(key("hc.unit"), Admissible::positive());
-    let (hemoglobin, water) = (central_veins.amount::<Hemoglobin>(), central_veins.amount::<Water>());
+    let (hemoglobin, water) = (
+        central_veins.amount::<Hemoglobin>(),
+        central_veins.amount::<Water>(),
+    );
     let out: BloodViscosity<Defines<'b, Hematology>> = hc.emit();
     let law = hc.kernel(|mut k| {
         let (amount, water) = (k.read(&hemoglobin), k.read(&water));

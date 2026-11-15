@@ -61,10 +61,10 @@ fn staged(body: &CompiledBody, each: &[Vec<(usize, f64)>]) -> Result<Vec<Vec<f64
     Ok(residuals)
 }
 
-/// The packet's row at an exponent of -1, so `(1 - Hct)^C - 1` is `Hct / (1 - Hct)`: plasma 2, red cells' own
-/// hemoglobin 5, the reference hematocrit 0.5, 3 at the reference and a wall factor of 1.25.
+/// The packet's row at an exponent of -1, so `(1 - Hct)^C - 1` is `Hct / (1 - Hct)`, which is one at the reference
+/// hematocrit 0.5: plasma 2, red cells' own hemoglobin 5, 3 at the reference and a wall factor of 1.25.
 fn closed_form(hematocrit: f64) -> f64 {
-    let fraction = (hematocrit / (1.0 - hematocrit)) / (0.5 / (1.0 - 0.5));
+    let fraction = hematocrit / (1.0 - hematocrit);
     2.0 * 1.25 * (1.0 + (3.0 - 1.0) * fraction * 1.25)
 }
 
@@ -78,7 +78,13 @@ fn viscosity_at_two_hematocrits_follows_the_row() -> Result<(), InitializationFa
     );
     let hematocrits = [0.4, 0.2];
     let each: Vec<_> = (hematocrits.iter())
-        .map(|hematocrit| vec![(water, WATER), (hemoglobin, 5.0 * hematocrit * WATER), (field, 1.0)])
+        .map(|hematocrit| {
+            vec![
+                (water, WATER),
+                (hemoglobin, 5.0 * hematocrit * WATER),
+                (field, 1.0),
+            ]
+        })
         .collect();
     for (hematocrit, residuals) in hematocrits.iter().zip(staged(&body, &each)?) {
         let (law, closed) = (1.0 - residuals[field], closed_form(*hematocrit));
@@ -123,7 +129,10 @@ fn a_plain_edges_flow_falls_as_viscosity_over_its_reference_rises() -> Result<()
             ]
         })
         .collect();
-    let laws: Vec<f64> = staged(&body, &each)?.iter().map(|residuals| -residuals[flow]).collect();
+    let laws: Vec<f64> = staged(&body, &each)?
+        .iter()
+        .map(|residuals| -residuals[flow])
+        .collect();
     assert!(laws[0] > 0.0, "{laws:?}");
     for (mu, law) in viscosities.iter().zip(&laws) {
         let closed = laws[0] / mu;

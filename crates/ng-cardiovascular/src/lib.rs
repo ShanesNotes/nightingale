@@ -59,7 +59,15 @@ fn declare_with<'b>(
     blood_pressure::declare(&mut cv, pressure_row, &walls, wave);
 
     let circulation = ports.circulation(&mut cv);
-    plain_edges(&mut cv, &ports, &circulation, &pressure, &head, wave, reads_viscosity)?;
+    plain_edges(
+        &mut cv,
+        &ports,
+        &circulation,
+        &pressure,
+        &head,
+        wave,
+        reads_viscosity,
+    )?;
     valves(&mut cv, &ports, &pressure, &head, wave)?;
     afferents(&mut cv, &pressure, &head, wave)?;
     capillary_fields(&mut cv, &pressure, wave);
