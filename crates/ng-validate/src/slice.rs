@@ -522,11 +522,11 @@ const SYNTHETIC_DRIFT: f64 = 1e4;
 /// About twice energy's measured drift over the arena's own day from 06:55, 8.3e4. Like `species_drift`, it is
 /// fixture data until the healthy-range set holds energy's within-subject variation.
 const SYNTHETIC_ENERGY_DRIFT: f64 = 2e5;
-/// Energy's bound over the milestone protocol's sliding windows, fixture data like the pick's: twice the worst window,
-/// 1.83e6, rounded up to one significant figure. Measured on the slice at model hash `93c12728`, on `Core::new` at
-/// 10 ms over four days of the arena's plan, at every start on a 60 s grid from admission to 24 h later. Admission
-/// solves the man at one beat's balance and not his day's, so his first day settles, and a window that starts in it
-/// reads that.
+/// Energy's bound over the milestone protocol's sliding windows, fixture data like the pick's: twice the worst
+/// window's drift, 1.83e6, rounded up to one significant figure. Measured on the slice at model hash `93c12728`, on
+/// `Core::new` at 10 ms over four days of the arena's plan, at every start on a 60 s grid from admission to 24 h later.
+/// Admission solves the man at one beat's balance, not his day's, so a window that starts in his first day reads him
+/// settling (native-contract 62).
 const SYNTHETIC_MILESTONE_ENERGY_DRIFT: f64 = 4e6;
 /// For a species no boundary route carries, such as albumin and the transmitters, closure alone holds it at zero there.
 /// This bound binds on the first body whose route moves one. It is under 1% of a transmitter pool's 101, the smallest
@@ -535,8 +535,9 @@ const UNMOVED_DRIFT: f64 = 1.0;
 
 /// Fixture data until the healthy-range set holds each within-subject variation: twice the species' change over the
 /// pick's window from 06:55, measured on the slice at `39bdb91`, rounded up to one significant figure. Admission solves
-/// the slice's sodium at one beat's balance, but nothing returns it to an amount after that, so these admit its
-/// measured day, and the milestone protocol's second-day windows are read for growth. Water's held pools share water's bound, and closure holds them at zero.
+/// the slice's sodium at one beat's balance (native-contract 62), but nothing returns it to an amount after that, so
+/// these admit its measured day, and the milestone protocol's second-day windows are read for growth. Water's held
+/// pools share water's bound, and closure holds them at zero.
 fn species_drift(species: Species) -> f64 {
     match species {
         Species::Sodium | Species::Chloride => 4e4,
@@ -565,7 +566,8 @@ pub fn arena_certificate(
     let basis = body.conserved_basis();
     let quantities = basis.ids().map(|quantity| match quantity.book() {
         Book::Of(Species::Energy) | Book::Energy => {
-            let drift = if windows.coverage_ns() > windows.window_ns().get() {
+            let sliding = windows.coverage_ns() > windows.window_ns().get();
+            let drift = if sliding {
                 SYNTHETIC_MILESTONE_ENERGY_DRIFT
             } else {
                 SYNTHETIC_ENERGY_DRIFT
