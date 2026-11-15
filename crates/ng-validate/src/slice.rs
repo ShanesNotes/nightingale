@@ -519,12 +519,14 @@ pub fn arena_seed() -> Seed {
 const CLOSURE_RELATIVE: f64 = 1e-12;
 /// Ticket 14's bound for a 2 s window, which elements keep: the slice has no reaction, so no day has measured one.
 const SYNTHETIC_DRIFT: f64 = 1e4;
-/// About twice energy's measured drift over the arena's own day from 06:55, 8.3e4. Like `species_drift`, it is
-/// fixture data until the healthy-range set holds energy's within-subject variation.
+/// Twice energy's change over the arena's own day from 06:55 as native-contract 28 measured it, 8.3e4, rounded up; at
+/// model hash `93c12728` that day changes by 164,356, so 2e5 is 1.22 times it, and the pick keeps 2e5 (native-contract
+/// 52). Like `species_drift`, it is fixture data until the healthy-range set holds energy's within-subject variation.
 const SYNTHETIC_ENERGY_DRIFT: f64 = 2e5;
-/// Energy's bound over the milestone protocol's sliding windows, fixture data like the pick's: twice the worst
-/// window's drift, 1.83e6, rounded up to one significant figure. Measured on the slice at model hash `93c12728`, on
-/// `Core::new` at 10 ms over four days of the arena's plan, at every start on a 60 s grid from admission to 24 h later.
+/// Energy's bound for every protocol whose coverage is longer than its window, the milestone protocol's among them,
+/// fixture data like the pick's: twice the milestone's worst window's drift, 1.83e6, rounded up to one significant
+/// figure. Measured on the slice at model hash `93c12728`, on `Core::new` at 10 ms over four days of the arena's plan,
+/// at every start on a 60 s grid from admission to 24 h later.
 /// Admission solves the man at one beat's balance, not his day's, so a window that starts in his first day reads him
 /// settling (native-contract 62).
 const SYNTHETIC_MILESTONE_ENERGY_DRIFT: f64 = 4e6;
@@ -535,9 +537,9 @@ const UNMOVED_DRIFT: f64 = 1.0;
 
 /// Fixture data until the healthy-range set holds each within-subject variation: twice the species' change over the
 /// pick's window from 06:55, measured on the slice at `39bdb91`, rounded up to one significant figure. Admission solves
-/// the slice's sodium at one beat's balance (native-contract 62), but nothing returns it to an amount after that, so
-/// these admit its measured day, and the milestone protocol's second-day windows are read for growth. Water's held
-/// pools share water's bound, and closure holds them at zero.
+/// the slice's sodium at one beat's balance (native-contract 62), but the day's balance is not that beat's: a four-day
+/// run keeps most of its first day's loss. So these admit its measured day, and the milestone protocol's second-day
+/// windows are read for growth. Water's held pools share water's bound, and closure holds them at zero.
 fn species_drift(species: Species) -> f64 {
     match species {
         Species::Sodium | Species::Chloride => 4e4,
