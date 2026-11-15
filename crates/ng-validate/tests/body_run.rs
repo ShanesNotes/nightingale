@@ -11,7 +11,6 @@ const SECOND: u64 = 1_000 * MILLISECOND;
 const PACKET: &str = "65794c8df1131031c5659b9de0a949fcad72dbf2228e22d07483a66040a02929";
 const ADMITTED_SEAL: &str = "1af389e17451eec87befc15c14416a01f310dcdaa30f487b21193990bea57b32";
 
-/// Counts every trial the record asks for, landings and refusals included, and changes nothing it delegates.
 struct Counted {
     core: ng_solver::Core,
     solves: Cell<u64>,

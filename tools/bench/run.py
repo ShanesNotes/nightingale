@@ -24,8 +24,8 @@ What a run did (its `work` lines) must match across its length's or interval's r
 seal ends the script with no median. Each run's numbers print as it ends, so a killed script keeps them.
 
 The cost mode prints one cost line, the figure a body ticket's PR quotes against ticket 26's budget. It admits the
-assembly once on ng-solver at 10 ms, then runs the first 60 simulated seconds from that start, 5 times for the
-slice and 3 for the body, and refuses repeats that took other steps, solves or seals. Its fields come in a fixed
+assembly once on ng-solver at 10 ms, then runs the first COST_SPAN_S simulated seconds from that start, a few
+times, and refuses repeats that took other steps, solves or seals. Its fields come in a fixed
 order, units in their names. Under perf the counters run only inside the repeats, so the user instructions a
 simulated second leave out compiling and admission and hold to a few parts a million at any load. Where perf
 cannot count them the field reads none, and such a line cannot show a budget met. Wall time is the median repeat.
@@ -146,7 +146,6 @@ def memory(core):
 
 
 def cost(assembly):
-    """One cost line: the bench's counts, then user instructions a simulated second when perf can count them."""
     executable = built()
     repeats = {"slice": 5, "body": 3}[assembly]
     describe = ["git", "rev-parse", "--short=12", "HEAD"]
