@@ -365,6 +365,26 @@ fn the_whole_body_compiles_on_its_holds() {
     }
 }
 
+#[test]
+fn the_whole_body_marks_the_slices_four_veins_and_no_other_vessel() -> Result<(), AdmissionError> {
+    let body = whole_body()?;
+    let marked: BTreeSet<&str> = (body.parameters().iter())
+        .filter(|slot| slot.key() == ParameterKey::new("cv.collapse-share"))
+        .filter_map(|slot| match slot.binding() {
+            Binding::Site(site) => Some(site.key()),
+            _ => None,
+        })
+        .collect();
+    let table = BTreeSet::from(["central veins", "leg veins", "portal vein", "pulmonary vein"]);
+    let unmarked: Vec<_> = table.difference(&marked).collect();
+    let beyond: Vec<_> = marked.difference(&table).collect();
+    assert!(
+        unmarked.is_empty() && beyond.is_empty(),
+        "unmarked: {unmarked:?}, marked beyond the table: {beyond:?}"
+    );
+    Ok(())
+}
+
 fn hex(digest: Digest) -> String {
     digest
         .as_bytes()
@@ -838,8 +858,8 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(basis.digest()),
     );
     expect![[r#"
-        rows 1372 {"algebraic": 126, "amount": 1236, "memory": 10}, columns 1288, jacobian nonzeros 8892, blocks 492, parameter slots 465, conserved combinations 480, held pools 409, held route columns 62
-        model hash a24da7b7e1ff3e5c533f8bf8c674380f916b118350c13f1d34ec865931d175b7
+        rows 1372 {"algebraic": 126, "amount": 1236, "memory": 10}, columns 1288, jacobian nonzeros 8892, blocks 492, parameter slots 470, conserved combinations 480, held pools 409, held route columns 62
+        model hash b034f0a9a49b370df13d431ecb0df0ee30f3f42849ca2ba60ab3dc944f13eca5
         conserved basis b709d2da159c9858a6d354b4b2145cb46845e18e809d0180814671f21d0ef03f
     "#]].assert_eq(&pin);
     Ok(())
