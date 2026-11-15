@@ -11,10 +11,96 @@ const SECOND: u64 = 1_000 * MILLISECOND;
 const PACKET: &str = "65794c8df1131031c5659b9de0a949fcad72dbf2228e22d07483a66040a02929";
 const ADMITTED_SEAL: &str = "1af389e17451eec87befc15c14416a01f310dcdaa30f487b21193990bea57b32";
 
+struct Counted {
+    core: ng_solver::Core,
+    solves: Cell<u64>,
+}
+impl CoupledSolver for Counted {
+    fn resolution(&self) -> DeclaredResolution {
+        self.core.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.core.next_step(accepted)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.solves.set(self.solves.get() + 1);
+        self.core.solve(problem, ticket)
+    }
+}
+
+/// The body's first minute against body 26's ceilings, twice today's counts but for steps, which the heart sets.
+#[derive(Clone, Copy, Debug)]
+struct Counts {
+    rows: usize,
+    jacobian_nonzeros: usize,
+    steps: u64,
+    solves: u64,
+}
+const CEILINGS: Counts = Counts {
+    rows: 2_744,
+    jacobian_nonzeros: 17_784,
+    steps: 14_000,
+    solves: 29_000,
+};
+
+fn over_ceilings(counts: Counts, ceilings: Counts) -> Vec<&'static str> {
+    let over = [
+        ("rows", counts.rows > ceilings.rows),
+        (
+            "jacobian_nonzeros",
+            counts.jacobian_nonzeros > ceilings.jacobian_nonzeros,
+        ),
+        ("steps", counts.steps > ceilings.steps),
+        ("solves", counts.solves > ceilings.solves),
+    ];
+    over.into_iter()
+        .filter(|(_, over)| *over)
+        .map(|(name, _)| name)
+        .collect()
+}
+
+#[test]
+fn a_count_over_its_ceiling_fails_and_names_that_count() {
+    let ceilings = Counts {
+        rows: 10,
+        jacobian_nonzeros: 20,
+        steps: 30,
+        solves: 40,
+    };
+    assert_eq!(over_ceilings(ceilings, ceilings), Vec::<&str>::new());
+    let cases = [
+        ("rows", Counts { rows: 11, ..ceilings }),
+        (
+            "jacobian_nonzeros",
+            Counts {
+                jacobian_nonzeros: 21,
+                ..ceilings
+            },
+        ),
+        (
+            "steps",
+            Counts {
+                steps: 31,
+                ..ceilings
+            },
+        ),
+        (
+            "solves",
+            Counts {
+                solves: 41,
+                ..ceilings
+            },
+        ),
+    ];
+    for (name, counts) in cases {
+        assert_eq!(over_ceilings(counts, ceilings), [name]);
+    }
+}
+
 /// The body's admission costs minutes, so one solve serves every check, each from a checkpoint of the admitted start.
 struct Start {
     body: CompiledBody,
-    core: ng_solver::Core,
+    core: Counted,
     saved: Checkpoint,
     identity: RunIdentity,
     links: MemoryStore,
@@ -22,7 +108,11 @@ struct Start {
 impl Start {
     fn admitted() -> Self {
         let body = whole_body().expect("compiled");
-        let (core, links) = (ng_solver::Core::new(10 * MILLISECOND), MemoryStore::default());
+        let core = Counted {
+            core: ng_solver::Core::new(10 * MILLISECOND),
+            solves: Cell::new(0),
+        };
+        let links = MemoryStore::default();
         let (saved, identity) = {
             let (packet, lens) = (
                 body_packet(&body).expect("a packet"),
@@ -346,6 +436,14 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     let start = Start::admitted();
     the_body_admits_at_06_55(&start);
     the_first_second_of_the_body_on_ng_solver_stays_where_it_was(&start);
+    let before = start.core.solves.get();
     let minute = no_held_pool_moves_at_admission_or_over_the_first_minute(&start);
     the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_held_support(&start, &minute);
+    let counts = Counts {
+        rows: start.body.rows().len(),
+        jacobian_nonzeros: start.body.sparsity().unknowns().len(),
+        steps: minute.record().revision(),
+        solves: start.core.solves.get() - before,
+    };
+    assert_eq!(over_ceilings(counts, CEILINGS), Vec::<&str>::new(), "{counts:?}");
 }

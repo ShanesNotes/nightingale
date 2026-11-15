@@ -711,6 +711,9 @@ The arena checks that pace, resuming, late events, rewinding, extra evaluations 
 **Throughput**:
 The arena's speed evidence for one run: the wall time of each repeat of its window with full waveform, read from a wall clock the host passes in, with admission timed apart. Every repeat is kept, each must end on the same seal, and none of it enters the certificate.
 
+**Cost line**:
+One line from `tools/bench/run.py cost` that gives an assembly's cost over its first simulated minute, from one admission. It lists the rows, unknowns, columns and Jacobian nonzeros, the steps and solves, the user instructions for each simulated second, and the wall time. A solve is one trial the record asks a core for, a landing or a refused trial included. Body 26's budget is stated in the instructions, which hold to a few parts a million at any load. The wall time is reported only. The fields come in a fixed order, with units in their names.
+
 **Numerical health**:
 The arena's evidence of how hard a solver core worked for one run, beside the certificate and never in it: its refusals by reason and by refusal source, its floor faults and its validity excursions. A floor fault is the engine fault with no admissible step, a refusal at the minimum interval or past the retry budget. A faulted run reports its health up to the fault, and every repeat must report the same.
 _Avoid_: health check (that is the healthy-range check)

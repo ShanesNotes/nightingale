@@ -2,6 +2,7 @@
 
     python3 -I tools/bench/run.py [reference | ng-solver]
     python3 -I tools/bench/run.py memory [reference | ng-solver]
+    python3 -I tools/bench/run.py cost (slice | body)
 
 Python 3.11 stdlib only. A run is one process of src/main.rs: one admission of the arena body, then simulated
 seconds on the named core (the reference by default), with no observer, then a resume of its checkpoint into a
@@ -22,10 +23,20 @@ What a run did (its `work` lines) must match across its length's or interval's r
 `memory` lines may differ. A fault, a killed run, a lost line, different work or a resume that lands on another
 seal ends the script with no median. Each run's numbers print as it ends, so a killed script keeps them.
 
+The cost mode prints one cost line, the figure a body ticket's PR quotes against ticket 26's budget. It admits the
+assembly once on ng-solver at 10 ms, then runs the first COST_SPAN_S simulated seconds from that start, a few
+times, and refuses repeats that took other steps, solves or seals. Its fields come in a fixed
+order, units in their names. Under perf the counters run only inside the repeats, so the user instructions a
+simulated second leave out compiling and admission and hold to a few parts a million at any load. Where perf
+cannot count them the field reads none, and a tree with changed tracked files marks the head -dirty. Neither
+line can show a budget met. Wall time is the median repeat.
+
 tools/verify never runs this: a wall clock cannot gate a merge, and the workspace bans one, so this project sits
 outside it.
 """
 import json
+import shutil
+import tempfile
 import math
 import os
 import pathlib
@@ -38,6 +49,7 @@ INTERVALS_MS = {"reference": (5, 1), "ng-solver": (10, 5)}
 SECONDS = (5, 50)
 # Eight times the 64 kB spread of run peaks measured on the tower, and 50 bytes a step over 10424 steps.
 MARGIN_KB = 512
+COST_SPAN_S = 60
 HERE = pathlib.Path(__file__).resolve().parent
 
 
@@ -134,8 +146,55 @@ def memory(core):
     sys.exit(0 if flat else 1)
 
 
+def cost(assembly):
+    executable = built()
+    repeats = {"slice": 5, "body": 3}[assembly]
+    describe = ["git", "rev-parse", "--short=12", "HEAD"]
+    head = subprocess.run(describe, cwd=HERE, stdout=subprocess.PIPE, text=True).stdout.strip()
+    if subprocess.run(["git", "diff", "--quiet", "HEAD"], cwd=HERE).returncode != 0:
+        head += "-dirty"
+    command = [executable, "cost", assembly, str(COST_SPAN_S), str(repeats)]
+    with tempfile.TemporaryDirectory() as fifos:
+        ctl, ack, counts = (os.path.join(fifos, name) for name in ("ctl", "ack", "counts"))
+        os.mkfifo(ctl)
+        os.mkfifo(ack)
+        perf = ["perf", "stat", "-e", "instructions:u", "-x,"]
+        probe = shutil.which("perf") and subprocess.run(perf + ["true"], stderr=subprocess.PIPE, text=True)
+        counted = bool(probe) and probe.returncode == 0 and probe.stderr.split(",")[0].isdigit()
+        perf += ["-D", "-1", "--control", f"fifo:{ctl},{ack}", "-o", counts, "--"]
+        environment = dict(os.environ, NG_PERF_CTL=ctl, NG_PERF_ACK=ack) if counted else os.environ
+        load = os.getloadavg()[0]
+        run = subprocess.run((perf if counted else []) + command, cwd=HERE, env=environment,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if run.returncode != 0:
+            sys.stderr.write(run.stderr)
+            refuse(f"the {assembly} run exited {run.returncode}")
+        fields = run.stdout.split()
+        if fields[:1] != ["cost"]:
+            refuse("the run printed no cost line")
+        instructions = "none"
+        if counted:
+            for row in pathlib.Path(counts).read_text().splitlines():
+                parts = row.split(",")
+                if len(parts) > 2 and parts[2].startswith("instructions") and parts[0].isdigit():
+                    instructions = f"{int(parts[0]) / (COST_SPAN_S * repeats) / 1e6:.1f}"
+    named = dict(field.split("=", 1) for field in fields[1:])
+    order = ["assembly", "core", "span_s", "repeats", "rows", "unknowns", "columns", "jacobian_nonzeros", "steps",
+             "solves", "steps_a_simulated_s", "solves_a_step"]
+    timed = ["wall_ms_a_simulated_s", "wall_spread_pct", "admission_wall_s"]
+    print(" ".join(
+        [f"cost head={head} worker={os.uname().nodename} load_1min={load:.1f}"]
+        + [f"{name}={named[name]}" for name in order]
+        + [f"minstructions_a_simulated_s={instructions}"]
+        + [f"{name}={named[name]}" for name in timed]
+        + [f"seal={named['seal']}"]
+    ))
+
+
 def main():
     arguments = sys.argv[1:]
+    if arguments[:1] == ["cost"] and arguments[1:2] in (["slice"], ["body"]):
+        return cost(arguments[1])
     mode = memory if arguments[:1] == ["memory"] else speed
     core = (arguments[1:] if mode is memory else arguments)[:1] or ["reference"]
     if core[0] not in INTERVALS_MS:

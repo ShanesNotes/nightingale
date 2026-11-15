@@ -3,7 +3,7 @@ mod link_log;
 use core::num::{NonZeroU32, NonZeroU64};
 use link_log::LinkLog;
 use ng_contract::*;
-use ng_record::Session;
+use ng_record::{HistoryStore, Session};
 use ng_validate::*;
 use std::hint::black_box;
 use std::time::Instant;
@@ -313,10 +313,137 @@ fn day(arguments: &[String]) {
     println!("time day_checks_s {seconds:.1}");
 }
 
+struct Counted {
+    core: ng_solver::Core,
+    solves: core::cell::Cell<u64>,
+}
+impl CoupledSolver for Counted {
+    fn resolution(&self) -> DeclaredResolution {
+        self.core.resolution()
+    }
+    fn next_step(&self, accepted: AcceptedStateView<'_>) -> u64 {
+        self.core.next_step(accepted)
+    }
+    fn solve(&self, problem: &CoupledProblem<'_>, ticket: &StepTicket) -> Result<StepProposal, TrialFailure> {
+        self.solves.set(self.solves.get() + 1);
+        self.core.solve(problem, ticket)
+    }
+}
+
+/// Under `perf stat -D -1 --control fifo:CTL,ACK` the counters cover the repeats' runs only.
+fn perf(command: &str) {
+    let (Ok(ctl), Ok(ack)) = (std::env::var("NG_PERF_CTL"), std::env::var("NG_PERF_ACK")) else {
+        return;
+    };
+    std::fs::write(ctl, format!("{command}\n")).expect("perf's control fifo");
+    let mut answer = [0u8; 4];
+    std::io::Read::read_exact(
+        &mut std::fs::File::open(ack).expect("perf's ack fifo"),
+        &mut answer,
+    )
+    .expect("perf acknowledges");
+}
+
+fn cost(arguments: &[String]) {
+    let whole = match arguments.first().map(String::as_str) {
+        Some("slice") => false,
+        Some("body") => true,
+        other => panic!("no assembly named {other:?}"),
+    };
+    let number = |at: usize, what: &str| -> u64 {
+        let given = arguments.get(at).and_then(|given| given.parse().ok());
+        given.unwrap_or_else(|| panic!("{what}"))
+    };
+    let (span_s, repeats) = (number(1, "simulated seconds"), number(2, "repeats"));
+    assert!(repeats > 0, "at least one repeat");
+    let body = if whole { whole_body() } else { arena_body() }.expect("compiled");
+    let core = Counted {
+        core: ng_solver::Core::new(10 * MS),
+        solves: core::cell::Cell::new(0),
+    };
+    let (packet, lens) = if whole {
+        (body_packet(&body), body_lens(&body))
+    } else {
+        (arena_packet(&body), arena_lens(&body))
+    };
+    let (disk, memory) = (LinkLog::create(), MemoryStore::default());
+    let log: &dyn HistoryStore = match arguments.get(3).map(String::as_str) {
+        None | Some("memory") => &memory,
+        Some("disk") => &disk,
+        Some(other) => panic!("no store named {other}"),
+    };
+    let port = BoundaryPort::new(Vec::new()).expect("port");
+    let started = Instant::now();
+    let admitted = admit_at(
+        &body,
+        packet.expect("packet"),
+        port,
+        &core,
+        &lens.expect("lens"),
+        anchor_moment(),
+        log,
+    )
+    .expect("admitted");
+    let admission_s = started.elapsed().as_secs_f64();
+    core.solves.set(0);
+    let (saved, identity) = (
+        admitted.session.checkpoint().expect("a checkpoint"),
+        admitted.session.record().identity().clone(),
+    );
+    let from = admitted.session.record().revision();
+    drop(admitted);
+    let end = SimTime::from_ns(anchor_moment().nanoseconds() + span_s * 1_000 * MS);
+    let mut walls = Vec::new();
+    let mut work = None;
+    for repeat in 0..repeats {
+        let session = Session::resume(&saved, &identity, &body, &core, log).expect("resumed");
+        perf("enable");
+        let started = Instant::now();
+        let reached =
+            run_until(session, end).unwrap_or_else(|stopped| panic!("fault: {:?}", stopped.fault()));
+        let wall = started.elapsed().as_secs_f64();
+        perf("disable");
+        let done = (
+            reached.record().revision() - from,
+            core.solves.replace(0),
+            hex(reached.record().seal().digest()),
+        );
+        eprintln!(
+            "cost repeat {repeat} wall_s {wall:.3} steps {} solves {}",
+            done.0, done.1
+        );
+        assert!(
+            work.as_ref().is_none_or(|first| *first == done),
+            "repeat {repeat} did other work"
+        );
+        work = Some(done);
+        walls.push(wall);
+    }
+    let (steps, solves, seal) = work.expect("a repeat");
+    walls.sort_by(f64::total_cmp);
+    let median = walls[walls.len() / 2];
+    let spread = 100.0 * (walls[walls.len() - 1] - walls[0]) / median;
+    let unknowns: std::collections::BTreeSet<_> = body.sparsity().unknowns().iter().collect();
+    println!(
+        "cost assembly={} core=ng-solver-10ms span_s={span_s} repeats={repeats} rows={} unknowns={} columns={} \
+         jacobian_nonzeros={} steps={steps} solves={solves} steps_a_simulated_s={:.1} solves_a_step={:.3} \
+         wall_ms_a_simulated_s={:.1} wall_spread_pct={spread:.1} admission_wall_s={admission_s:.1} seal={seal}",
+        if whole { "body" } else { "slice" },
+        body.rows().len(),
+        unknowns.len(),
+        body.columns().len(),
+        body.sparsity().unknowns().len(),
+        steps as f64 / span_s as f64,
+        solves as f64 / steps as f64,
+        1e3 * median / span_s as f64,
+    );
+}
+
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     match arguments.split_first().map(|(mode, rest)| (mode.as_str(), rest)) {
         Some(("arena", rest)) => return arena(rest),
+        Some(("cost", rest)) => return cost(rest),
         Some(("day", rest)) => return day(rest),
         Some(("score", rest)) => return score(rest),
         _ => {}

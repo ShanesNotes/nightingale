@@ -3266,3 +3266,10 @@ old = '''        (volume, k.subtract(base, moved))'''
 new = '''        let none = k.subtract(moved, moved);
         (volume, k.subtract(base, none))'''
 test = "-p ng-validate --test veins below_its_unstressed_volume_a_marked_vein_follows_the_closed_form"
+
+[[mutant]]
+name = "cost-ceiling-lets-one-solve-over"
+path = "crates/ng-validate/tests/body_run.rs"
+old = '''("solves", counts.solves > ceilings.solves),'''
+new = '''("solves", counts.solves > ceilings.solves + 1),'''
+test = "-p ng-validate --test body_run a_count_over_its_ceiling_fails_and_names_that_count"
