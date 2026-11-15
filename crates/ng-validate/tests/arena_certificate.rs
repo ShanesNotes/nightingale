@@ -189,7 +189,13 @@ fn drifts_up_to(species: Species, limit: f64, margin: f64, partner: Option<Speci
     drifts_up_to_on(ArenaProtocol::pick(), species, limit, margin, partner);
 }
 
-fn drifts_up_to_on(protocol: ArenaProtocol, species: Species, limit: f64, margin: f64, partner: Option<Species>) {
+fn drifts_up_to_on(
+    protocol: ArenaProtocol,
+    species: Species,
+    limit: f64,
+    margin: f64,
+    partner: Option<Species>,
+) {
     let (under, over) = (limit - margin, limit + margin);
     let beside = |amount| {
         let mut inflows = vec![(species, amount)];
