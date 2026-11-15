@@ -513,12 +513,22 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         MT Route("sweat chloride") Ticket(12, "MT") 01:115
         MT Route("dry heat loss") Ticket(12, "MT") 01:170
         MT Route("skin evaporative heat") Ticket(12, "MT") 01:171
-        MT Pool(Oxygen, Interstitium, Class(CapillaryBed)) Ticket(8, "MT") 01:131, 871
+        MT Route("pulmonary bed oxygen use") Ticket(9, "MT") 01:132, 872
+        MT Route("gut bed oxygen use") Ticket(9, "MT") 01:132, 872
+        MT Route("muscle bed oxygen use") Ticket(9, "MT") 01:132, 872
+        MT Route("glomerular bed oxygen use") Ticket(9, "MT") 01:132, 872
+        MT Route("peritubular bed oxygen use") Ticket(9, "MT") 01:132, 872
+        MT Route("brain bed oxygen use") Ticket(9, "MT") 01:132, 872
+        MT Route("coronary bed oxygen use") Ticket(9, "MT") 01:132, 872
+        MT Route("liver bed oxygen use") Ticket(9, "MT") 01:132, 872
+        MT Route("fat bed oxygen use") Ticket(9, "MT") 01:132, 872
+        MT Route("skin bed oxygen use") Ticket(9, "MT") 01:132, 872
+        MT Route("bone bed oxygen use") Ticket(9, "MT") 01:132, 872
+        MT Route("lung oxygen") Ticket(10, "RS") 01:129, 873
         MT Pool(CarbonDioxide, Interstitium, Class(CapillaryBed)) Ticket(8, "MT") 01:146, 871
         MT Pool(Glucose, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 533
         MT Pool(FattyAcids, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 536
         MT Pool(Lactate, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 540
-        MT Pool(Oxygen, Cells, Class(CapillaryBed)) Ticket(8, "MT") 01:131, 871
         MT Pool(CarbonDioxide, Cells, Class(CapillaryBed)) Ticket(8, "MT") 01:38, 871, 08:19
         MT Pool(Glucose, Cells, Besides(Liver)) Ticket(9, "MT") 01:190
         MT Pool(FattyAcids, Cells, Besides(Liver)) Ticket(9, "MT") 01:200
@@ -599,9 +609,9 @@ fn the_hold_table_is_the_compiled_bodys_coverage_manifest_row_for_row() -> Resul
         HOLD_TABLE.len() - routes
     );
     expect![[r#"
-        holds 136: routes 62, pools 74
-        by card {"BC": 19, "EN": 25, "GI": 25, "HC": 6, "HP": 16, "MS": 15, "MT": 18, "RS": 12}
-        by ticket {"08": 4, "09": 6, "10": 12, "12": 7, "13": 16, "14": 8, "15": 9, "16": 12, "17": 24, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
+        holds 146: routes 74, pools 72
+        by card {"BC": 19, "EN": 25, "GI": 25, "HC": 6, "HP": 16, "MS": 15, "MT": 28, "RS": 12}
+        by ticket {"08": 2, "09": 17, "10": 13, "12": 7, "13": 16, "14": 8, "15": 9, "16": 12, "17": 24, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -858,9 +868,9 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(basis.digest()),
     );
     expect![[r#"
-        rows 1373 {"algebraic": 127, "amount": 1236, "memory": 10}, columns 1288, jacobian nonzeros 8916, blocks 491, parameter slots 478, conserved combinations 480, held pools 409, held route columns 62
-        model hash d83a7acd645a21470097014a2da4f4e6d85515c2bcf29c242da1a0e15476f009
-        conserved basis b709d2da159c9858a6d354b4b2145cb46845e18e809d0180814671f21d0ef03f
+        rows 1396 {"algebraic": 150, "amount": 1236, "memory": 10}, columns 1322, jacobian nonzeros 9105, blocks 480, parameter slots 541, conserved combinations 458, held pools 387, held route columns 74
+        model hash 257be256d3ef4fb98b304591f4013fb18527f3647651f2e3091035df65da8f92
+        conserved basis 3743eba5ab87327f6b92bd849473e2437c5e121937bba4c5c548811ef8082467
     "#]].assert_eq(&pin);
     Ok(())
 }

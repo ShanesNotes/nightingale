@@ -40,6 +40,7 @@ const MEAL: &str = "the slice's absorption: a basal rate and the meal, straight 
 const KEPT_BACK: &str = "an interstitial amount the capillary wall keeps back";
 const UNCROSSED: &str = "a cell amount no membrane law moves";
 const ALVEOLAR: &str = "alveolar gas no exchange moves";
+const LUNG: &str = "a held exchange on the pulmonary bed's partial pressure";
 
 const fn route(
     card: &'static str,
@@ -230,6 +231,18 @@ pub const HOLD_TABLE: &[Hold] = &[
     route(MT, "sweat chloride", CONSTANT, Ticket(12, MT), "01:115"),
     route(MT, "dry heat loss", CONSTANT, Ticket(12, MT), "01:170"),
     route(MT, "skin evaporative heat", CONSTANT, Ticket(12, MT), "01:171"),
+    route(MT, "pulmonary bed oxygen use", CONSTANT, Ticket(9, MT), "01:132, 872"),
+    route(MT, "gut bed oxygen use", CONSTANT, Ticket(9, MT), "01:132, 872"),
+    route(MT, "muscle bed oxygen use", CONSTANT, Ticket(9, MT), "01:132, 872"),
+    route(MT, "glomerular bed oxygen use", CONSTANT, Ticket(9, MT), "01:132, 872"),
+    route(MT, "peritubular bed oxygen use", CONSTANT, Ticket(9, MT), "01:132, 872"),
+    route(MT, "brain bed oxygen use", CONSTANT, Ticket(9, MT), "01:132, 872"),
+    route(MT, "coronary bed oxygen use", CONSTANT, Ticket(9, MT), "01:132, 872"),
+    route(MT, "liver bed oxygen use", CONSTANT, Ticket(9, MT), "01:132, 872"),
+    route(MT, "fat bed oxygen use", CONSTANT, Ticket(9, MT), "01:132, 872"),
+    route(MT, "skin bed oxygen use", CONSTANT, Ticket(9, MT), "01:132, 872"),
+    route(MT, "bone bed oxygen use", CONSTANT, Ticket(9, MT), "01:132, 872"),
+    route(MT, "lung oxygen", LUNG, Ticket(10, RS), "01:129, 873"),
     pool::<CarbonDioxide, CapillaryBed>(MT, Interstitium, KEPT_BACK, Ticket(8, MT), "01:146, 871"),
     pool::<Glucose, CapillaryBed>(MT, Interstitium, KEPT_BACK, Ticket(9, FL), "01:485, 533"),
     pool::<FattyAcids, CapillaryBed>(MT, Interstitium, KEPT_BACK, Ticket(9, FL), "01:485, 536"),
