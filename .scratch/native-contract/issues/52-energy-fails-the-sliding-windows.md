@@ -4,7 +4,9 @@ Spec: [solver contract](../../../docs/architecture/solver-contract.md) §7 (the 
 
 Type: task
 
-Status: open
+Status: claimed
+
+Claimed by: nc52-build
 
 Blocked by: none
 
