@@ -376,10 +376,12 @@ fn the_whole_body_marks_its_systemic_veins_and_no_other_vessel() -> Result<(), A
             _ => None,
         })
         .collect();
-    assert_eq!(
-        marked,
-        BTreeSet::from(["central veins", "leg veins", "portal vein"]),
-        "the body's marked veins"
+    let table = BTreeSet::from(["central veins", "leg veins", "portal vein"]);
+    let unmarked: Vec<_> = table.difference(&marked).collect();
+    let beyond: Vec<_> = marked.difference(&table).collect();
+    assert!(
+        unmarked.is_empty() && beyond.is_empty(),
+        "unmarked: {unmarked:?}, marked beyond the table: {beyond:?}"
     );
     Ok(())
 }
