@@ -534,9 +534,9 @@ const SYNTHETIC_MILESTONE_ENERGY_DRIFT: f64 = 4e6;
 const UNMOVED_DRIFT: f64 = 1.0;
 
 /// Fixture data until the healthy-range set holds each within-subject variation: twice the species' change over the
-/// pick's window from 06:55, measured on the slice at `39bdb91`, rounded up to one significant figure. The slice does
-/// not answer its own sodium, so these admit its measured day, and the milestone protocol's second-day windows are
-/// read for growth. Water's held pools share water's bound, and closure holds them at zero.
+/// pick's window from 06:55, measured on the slice at `39bdb91`, rounded up to one significant figure. Admission solves
+/// the slice's sodium at one beat's balance, but nothing returns it to an amount after that, so these admit its
+/// measured day, and the milestone protocol's second-day windows are read for growth. Water's held pools share water's bound, and closure holds them at zero.
 fn species_drift(species: Species) -> f64 {
     match species {
         Species::Sodium | Species::Chloride => 4e4,
