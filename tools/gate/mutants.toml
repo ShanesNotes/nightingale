@@ -3224,40 +3224,64 @@ new = '''    let (mut last, mut beat, mut length, mut whole) = (start, 0.0, 0.0,
 test = "-p ng-validate --test arena_body a_window_starting_at_a_beat_edge_keeps_its_first_whole_beat"
 
 [[mutant]]
-name = "store-falls-below"
+name = "store-squared-below"
 path = "crates/ng-cardiovascular/src/walls.rs"
 old = '''
-        let stressed = self.stressed(k);
-        let product = k.multiply(stiffness, stressed);
+        let stretched = self.stretched(k);
+        let product = k.multiply(stiffness, stretched);
         let pressure: Expr<'_, '_, _, Pressure> = k.as_dimension(product);
-        let product = k.multiply(pressure, stressed);'''
+        let product = k.multiply(pressure, stretched);
+        let doubled: Expr<'_, '_, _, Energy> = k.as_dimension(product);
+        let share = k.parameter(half);
+        let held = k.scale(doubled, share);
+        k.add_from(held, below)'''
 new = '''
-        let stressed = self.stressed(k);
-        let (zero, soft) = (k.zero(), k.parameter(&self.collapse));
-        let stressed = k.smooth_max(stressed, zero, soft);
-        let product = k.multiply(stiffness, stressed);
+        let stretched = self.stressed(k);
+        let product = k.multiply(stiffness, stretched);
         let pressure: Expr<'_, '_, _, Pressure> = k.as_dimension(product);
-        let product = k.multiply(pressure, stressed);'''
-test = "-p ng-validate --test veins below_its_unstressed_volume_a_marked_veins_part_of_the_store_grows"
+        let product = k.multiply(pressure, stretched);
+        let doubled: Expr<'_, '_, _, Energy> = k.as_dimension(product);
+        let share = k.parameter(half);
+        let _ = below;
+        k.scale(doubled, share)'''
+test = "-p ng-validate --test veins below_its_unstressed_volume_a_marked_veins_store_is_the_work_of_its_pressure"
 
 [[mutant]]
 name = "store-negative-below"
 path = "crates/ng-cardiovascular/src/walls.rs"
 old = '''
-        let stressed = self.stressed(k);
-        let product = k.multiply(stiffness, stressed);
-        let pressure: Expr<'_, '_, _, Pressure> = k.as_dimension(product);
-        let product = k.multiply(pressure, stressed);'''
+        let share = k.site_parameter(&self.share);
+        k.scale(work, share)'''
 new = '''
-        let stressed = self.stressed(k);
-        let product = k.multiply(stiffness, stressed);
-        let pressure: Expr<'_, '_, _, Pressure> = k.as_dimension(product);
-        let (zero, soft) = (k.zero(), k.parameter(&self.collapse));
-        let floored = k.smooth_max(stressed, zero, soft);
-        let twice = k.add(floored, floored);
-        let stressed = k.subtract(twice, stressed);
-        let product = k.multiply(pressure, stressed);'''
-test = "-p ng-validate --test veins below_its_unstressed_volume_a_marked_veins_part_of_the_store_grows"
+        let share = k.site_parameter(&self.share);
+        let none = k.subtract(work, work);
+        let lost = k.subtract(none, work);
+        k.scale(lost, share)'''
+test = "-p ng-validate --test veins below_its_unstressed_volume_a_marked_veins_store_is_the_work_of_its_pressure"
+
+[[mutant]]
+name = "store-factor-where-a-nerve-reaches"
+path = "crates/ng-cardiovascular/src/walls.rs"
+old = '''
+        let share = k.site_parameter(&self.share);
+        k.scale(work, share)'''
+new = '''
+        let share = k.site_parameter(&self.share);
+        let gain = k.site_parameter_in(&self.lumen.unstressed_gain);
+        let quotient = k.divide(gain, unstressed);
+        let factor: Expr<'_, '_, _, Dimensionless> = k.as_dimension(quotient);
+        let more = k.scale(work, factor);
+        let work = k.add(work, more);
+        k.scale(work, share)'''
+test = "-p ng-validate --test veins below_its_unstressed_volume_a_marked_veins_store_is_the_work_of_its_pressure"
+
+[[mutant]]
+name = "store-read-at-the-volume-itself"
+path = "crates/ng-cardiovascular/src/walls.rs"
+old = '''        let held = k.add(unstressed, short);'''
+new = '''        let _ = k.add(unstressed, short);
+        let (short, held) = (stretched, volume);'''
+test = "-p ng-validate --test veins at_its_unstressed_volume_a_marked_veins_store_and_its_slope_join_the_store_above"
 
 [[mutant]]
 name = "collapse-join-reads-the-base-unstressed-volume"

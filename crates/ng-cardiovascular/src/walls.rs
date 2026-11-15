@@ -252,8 +252,8 @@ impl<'b, 'h> Walls<'b, 'h> {
         k.scale(work, share)
     }
     /// One mechanical store and one thermal store. Each blood site's wall holds `E s^2 / 2`, a marked vein's below
-    /// `V_u` the work its pressure did, and the store is held to their sum. Work enters where activation stiffens a stretched wall, in systole only, and gravity's enters beside
-    /// it. The wall power is what the store must lose to stay on the sum: no law's choice, so closure sits in the stage
+    /// `V_u` the work its pressure did, and the store is held to their sum. Work enters where activation stiffens a
+    /// stretched wall, in systole only, and gravity's enters beside it. The wall power is what the store must lose to stay on the sum: no law's choice, so closure sits in the stage
     /// residual and `verify` judges it with the rest. What the walls shed leaves as heat, and heat never comes back. What
     /// they gain past those receipts, as a vein's muscle tightens or water enters, is muscle work from the chemical
     /// energy the heart draws on. So the account can run no pool dry. The moving blood's energy and the stretch of tissue
