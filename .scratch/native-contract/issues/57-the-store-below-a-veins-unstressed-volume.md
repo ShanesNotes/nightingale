@@ -4,7 +4,9 @@ Spec: `crates/ng-cardiovascular/src/walls.rs` (`Walls::elastic_energy` and the t
 
 Type: task
 
-Status: open
+Status: claimed
+
+Claimed by: nc57
 
 Blocked by: none
 
