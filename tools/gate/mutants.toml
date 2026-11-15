@@ -2768,9 +2768,9 @@ test = "-p ng-validate --test body the_gut_transit_reads_both_lumens_so_admissio
 [[mutant]]
 name = "body-portal-vein-unmarked"
 path = "crates/ng-validate/src/body/anatomy.rs"
-old = '''for vein in [&central_veins, &portal_vein, &leg_veins] {'''
-new = '''for vein in [&central_veins, &leg_veins] {'''
-test = "-p ng-validate --test body the_whole_body_marks_its_systemic_veins_and_no_other_vessel"
+old = '''for vein in [&pulmonary_vein, &central_veins, &portal_vein, &leg_veins] {'''
+new = '''for vein in [&pulmonary_vein, &central_veins, &leg_veins] {'''
+test = "-p ng-validate --test body the_whole_body_marks_the_slices_four_veins_and_no_other_vessel"
 
 [[mutant]]
 name = "case-withheld-start-knows-the-inputs"

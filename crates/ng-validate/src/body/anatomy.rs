@@ -178,7 +178,7 @@ pub fn body_anatomy() -> Result<Anatomy, AdmissionError> {
     map.supply(&venous, &[portal_vein.id(), leg_veins.id()]);
     map.supply(&renal, &[glomerular.id()]);
     map.supply(&skin_junction, &[skin.id()]);
-    for vein in [&central_veins, &portal_vein, &leg_veins] {
+    for vein in [&pulmonary_vein, &central_veins, &portal_vein, &leg_veins] {
         map.vein(vein);
     }
     map.unsupplied(&[
