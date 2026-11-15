@@ -8,6 +8,7 @@ Blocked by: 06, 27
 
 - [ ] Each plan run on the body: the doubled step (the reference integrator still declares it), the halved step (ticket 27's pick, on `main`), and the two plans ticket 27 set aside on the slice. Those are two-stage Radau IIA (branch `claude/body-27-radau`) and the extrapolated step (branch `claude/body-27-lean`). Each run reports its steps, its wall time for each simulated second, `NumericalHealth::most_refusals` and `shortest_retry_ns`, and passes the replay gates and the accuracy gate
 - [ ] Why each plan's steps fall where they do: steps a beat by reason (accuracy, cap, landing, retry, growth, after a breakpoint) and solves a step, as ticket 27's Answer reads them on the slice
+- [ ] The cost of the body's step by part, as [ticket 07](07-what-limits-the-step.md)'s Answer splits the slice's: the core against the record, and a step's fixed cost. [Ticket 26](26-cost-budget.md)'s first box left it here
 - [ ] Whether the halved step's rule holds on every firing the body adds: a ticket after a breakpoint takes the doubled stages
 - [ ] Every number carries its machine, its run count and its spread (pstack `benchmark-checklist`)
 
