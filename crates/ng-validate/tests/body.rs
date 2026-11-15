@@ -365,7 +365,6 @@ fn the_whole_body_compiles_on_its_holds() {
     }
 }
 
-/// The pulmonary vein stays unmarked: body 01 treats only the systemic veins as veins that collapse.
 #[test]
 fn the_whole_body_marks_its_systemic_veins_and_no_other_vessel() -> Result<(), AdmissionError> {
     let body = whole_body()?;
