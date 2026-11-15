@@ -375,6 +375,8 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     }
     set::<Pressure>(packet, "cv.stretch-reference", body, 100.0)?;
     set::<Volume>(packet, "cv.collapse-width", body, 1.0)?;
+    set::<Dimensionless>(packet, "cv.collapse-power", body, 1.5)?;
+    set::<Dimensionless>(packet, "cv.collapse-share", blood, 0.05)?;
     set::<Rate<Energy>>(packet, "cv.heat-width", body, 100.0)?;
     set::<Quotient<Volume, Albumin>>(packet, "cv.albumin-volume", body, 0.05)?;
     set::<Quotient<Volume, Albumin>>(packet, "fl.albumin-volume", body, 0.05)?;

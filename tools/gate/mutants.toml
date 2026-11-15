@@ -2766,6 +2766,13 @@ new = '''        let rate = k.zero::<Rate<Q>>();'''
 test = "-p ng-validate --test body the_gut_transit_reads_both_lumens_so_admission_can_place_each_species_between_them"
 
 [[mutant]]
+name = "body-portal-vein-unmarked"
+path = "crates/ng-validate/src/body/anatomy.rs"
+old = '''for vein in [&central_veins, &portal_vein, &leg_veins] {'''
+new = '''for vein in [&central_veins, &leg_veins] {'''
+test = "-p ng-validate --test body the_whole_body_marks_its_systemic_veins_and_no_other_vessel"
+
+[[mutant]]
 name = "case-withheld-start-knows-the-inputs"
 path = "crates/ng-validate/src/slice.rs"
 old = '''let inputs = if withheld { Vec::new() } else { self.events()? };'''

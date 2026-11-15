@@ -365,6 +365,25 @@ fn the_whole_body_compiles_on_its_holds() {
     }
 }
 
+/// The pulmonary vein stays unmarked: body 01 treats only the systemic veins as veins that collapse.
+#[test]
+fn the_whole_body_marks_its_systemic_veins_and_no_other_vessel() -> Result<(), AdmissionError> {
+    let body = whole_body()?;
+    let marked: BTreeSet<&str> = (body.parameters().iter())
+        .filter(|slot| slot.key() == ParameterKey::new("cv.collapse-share"))
+        .filter_map(|slot| match slot.binding() {
+            Binding::Site(site) => Some(site.key()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        marked,
+        BTreeSet::from(["central veins", "leg veins", "portal vein"]),
+        "the body's marked veins"
+    );
+    Ok(())
+}
+
 fn hex(digest: Digest) -> String {
     digest
         .as_bytes()
@@ -838,8 +857,8 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(basis.digest()),
     );
     expect![[r#"
-        rows 1372 {"algebraic": 126, "amount": 1236, "memory": 10}, columns 1288, jacobian nonzeros 8892, blocks 492, parameter slots 465, conserved combinations 480, held pools 409, held route columns 62
-        model hash a24da7b7e1ff3e5c533f8bf8c674380f916b118350c13f1d34ec865931d175b7
+        rows 1372 {"algebraic": 126, "amount": 1236, "memory": 10}, columns 1288, jacobian nonzeros 8892, blocks 492, parameter slots 469, conserved combinations 480, held pools 409, held route columns 62
+        model hash 3b00c14ff890ef5c268193b1e3db97b451e115ee4b447465d1e6d9e035a3490b
         conserved basis b709d2da159c9858a6d354b4b2145cb46845e18e809d0180814671f21d0ef03f
     "#]].assert_eq(&pin);
     Ok(())
