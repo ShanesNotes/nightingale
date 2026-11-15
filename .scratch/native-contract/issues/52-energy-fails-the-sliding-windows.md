@@ -20,6 +20,8 @@ The man is still settling on day three, more slowly. Sodium sheds 18,317 on day 
 
 This bears on the options below. A bound from the measured windows would be set by day one alone. A run cannot say how many days the man needs to settle: three are not enough. The night windows hold on both days. A man admitted in his daily balance needs fixture amounts that sodium takes more than three days to find by running.
 
+**The collapse branch.** [Native-contract 42](42-veins-collapse-branch.md)'s part 3 moved the slice's day: energy's change from 06:55 to 06:55 is -164,356, 0.82 of its 2e5 bound with its sign flipped, where it was +83,434. No run splits the cause.
+
 **What to build:** a milestone protocol the working core passes on the slice, with energy's bound or statistic chosen by runs. Options:
 
 - Energy's bound from the measured windows, by native-contract 43's rule: about twice 1.96e6. That is 0.4% of a day's gross flow (1.0e9), where 2e5 is 0.02%, so it passes a steady leak twenty times larger than today's bound passes.

@@ -3189,3 +3189,80 @@ new = '''        parameter: &SiteParameter<'b, O, D, U>,
     ) -> Expr<'b, 'k, O, U> {
         self.input(Input::Parameter(parameter.key))'''
 test = "-p ng-contract --test map_reads a_law_on_a_set_reads_at_its_own_site_the_entry_and_parameter_of_a_set_that_includes_it"
+
+[[mutant]]
+name = "collapse-floor-restored"
+path = "crates/ng-cardiovascular/src/walls.rs"
+old = '''
+    let share = k.site_parameter(share);
+    k.scale(below, share)'''
+new = '''
+    let share = k.site_parameter(share);
+    let none = k.subtract(below, below);
+    k.scale(none, share)'''
+test = "-p ng-validate --test veins below_its_unstressed_volume_a_marked_vein_follows_the_closed_form"
+
+[[mutant]]
+name = "collapse-power-read"
+path = "crates/ng-cardiovascular/src/walls.rs"
+old = '''    let scaled = k.scale(log, power);'''
+new = '''    let scaled = log;'''
+test = "-p ng-validate --test veins below_its_unstressed_volume_a_marked_vein_follows_the_closed_form"
+
+[[mutant]]
+name = "beat-rule-keeps-the-first-edge"
+path = "crates/ng-validate/tests/arena_body.rs"
+old = '''    let (mut last, mut beat, mut length, mut whole) = (start, 0.0, 0.0, start == 0.0);'''
+new = '''    let (mut last, mut beat, mut length, mut whole) = (0.0, 0.0, 0.0, start == 0.0);'''
+test = "-p ng-validate --test arena_body a_beat_whose_edge_falls_in_the_first_step_is_counted"
+
+[[mutant]]
+name = "beat-rule-drops-a-first-whole-beat"
+path = "crates/ng-validate/tests/arena_body.rs"
+old = '''    let (mut last, mut beat, mut length, mut whole) = (start, 0.0, 0.0, start == 0.0);'''
+new = '''    let (mut last, mut beat, mut length, mut whole) = (start, 0.0, 0.0, false);'''
+test = "-p ng-validate --test arena_body a_window_starting_at_a_beat_edge_keeps_its_first_whole_beat"
+
+[[mutant]]
+name = "store-falls-below"
+path = "crates/ng-cardiovascular/src/walls.rs"
+old = '''
+        let stressed = self.stressed(k);
+        let product = k.multiply(stiffness, stressed);
+        let pressure: Expr<'_, '_, _, Pressure> = k.as_dimension(product);
+        let product = k.multiply(pressure, stressed);'''
+new = '''
+        let stressed = self.stressed(k);
+        let (zero, soft) = (k.zero(), k.parameter(&self.collapse));
+        let stressed = k.smooth_max(stressed, zero, soft);
+        let product = k.multiply(stiffness, stressed);
+        let pressure: Expr<'_, '_, _, Pressure> = k.as_dimension(product);
+        let product = k.multiply(pressure, stressed);'''
+test = "-p ng-validate --test veins below_its_unstressed_volume_a_marked_veins_part_of_the_store_grows"
+
+[[mutant]]
+name = "store-negative-below"
+path = "crates/ng-cardiovascular/src/walls.rs"
+old = '''
+        let stressed = self.stressed(k);
+        let product = k.multiply(stiffness, stressed);
+        let pressure: Expr<'_, '_, _, Pressure> = k.as_dimension(product);
+        let product = k.multiply(pressure, stressed);'''
+new = '''
+        let stressed = self.stressed(k);
+        let product = k.multiply(stiffness, stressed);
+        let pressure: Expr<'_, '_, _, Pressure> = k.as_dimension(product);
+        let (zero, soft) = (k.zero(), k.parameter(&self.collapse));
+        let floored = k.smooth_max(stressed, zero, soft);
+        let twice = k.add(floored, floored);
+        let stressed = k.subtract(twice, stressed);
+        let product = k.multiply(pressure, stressed);'''
+test = "-p ng-validate --test veins below_its_unstressed_volume_a_marked_veins_part_of_the_store_grows"
+
+[[mutant]]
+name = "collapse-join-reads-the-base-unstressed-volume"
+path = "crates/ng-cardiovascular/src/walls.rs"
+old = '''        (volume, k.subtract(base, moved))'''
+new = '''        let none = k.subtract(moved, moved);
+        (volume, k.subtract(base, none))'''
+test = "-p ng-validate --test veins below_its_unstressed_volume_a_marked_vein_follows_the_closed_form"

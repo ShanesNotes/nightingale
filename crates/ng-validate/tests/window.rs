@@ -196,9 +196,14 @@ fn the_first_window_holds_each_core_to_the_references_own_distances() {
         assert!(share > 0.0 && share < 1.0, "{share}");
     }
 
+    // On this slice a floor of one millisecond lands the stir 0.30 ms from the finest reference, past the 0.2 ms
+    // landing distance. Where that lands rests on where the crossing falls on the core's grid.
     let to_a_millisecond = accuracy(&fixed(5 * MILLISECOND, MILLISECOND), &policy);
     assert!(
-        matches!(to_a_millisecond, Err(AccuracyFailure::Outside { case: 0, .. })),
+        matches!(
+            to_a_millisecond,
+            Err(AccuracyFailure::TransitionMoved { case: 0, .. })
+        ),
         "{to_a_millisecond:?}"
     );
 
