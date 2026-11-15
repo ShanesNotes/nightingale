@@ -337,8 +337,11 @@ fn perf(command: &str) {
     };
     std::fs::write(ctl, format!("{command}\n")).expect("perf's control fifo");
     let mut answer = [0u8; 4];
-    std::io::Read::read_exact(&mut std::fs::File::open(ack).expect("perf's ack fifo"), &mut answer)
-        .expect("perf acknowledges");
+    std::io::Read::read_exact(
+        &mut std::fs::File::open(ack).expect("perf's ack fifo"),
+        &mut answer,
+    )
+    .expect("perf acknowledges");
 }
 
 fn cost(arguments: &[String]) {
@@ -371,10 +374,18 @@ fn cost(arguments: &[String]) {
     };
     let port = BoundaryPort::new(Vec::new()).expect("port");
     let started = Instant::now();
-    let admitted = admit_at(&body, packet.expect("packet"), port, &core, &lens.expect("lens"), anchor_moment(), log)
-        .expect("admitted");
+    let admitted = admit_at(
+        &body,
+        packet.expect("packet"),
+        port,
+        &core,
+        &lens.expect("lens"),
+        anchor_moment(),
+        log,
+    )
+    .expect("admitted");
     let admission_s = started.elapsed().as_secs_f64();
-    let admission_solves = core.solves.replace(0);
+    core.solves.set(0);
     let (saved, identity) = (
         admitted.session.checkpoint().expect("a checkpoint"),
         admitted.session.record().identity().clone(),
@@ -388,7 +399,8 @@ fn cost(arguments: &[String]) {
         let session = Session::resume(&saved, &identity, &body, &core, log).expect("resumed");
         perf("enable");
         let started = Instant::now();
-        let reached = run_until(session, end).unwrap_or_else(|stopped| panic!("fault: {:?}", stopped.fault()));
+        let reached =
+            run_until(session, end).unwrap_or_else(|stopped| panic!("fault: {:?}", stopped.fault()));
         let wall = started.elapsed().as_secs_f64();
         perf("disable");
         let done = (
@@ -396,8 +408,14 @@ fn cost(arguments: &[String]) {
             core.solves.replace(0),
             hex(reached.record().seal().digest()),
         );
-        eprintln!("cost repeat {repeat} wall_s {wall:.3} steps {} solves {}", done.0, done.1);
-        assert!(work.as_ref().is_none_or(|first| *first == done), "repeat {repeat} did other work");
+        eprintln!(
+            "cost repeat {repeat} wall_s {wall:.3} steps {} solves {}",
+            done.0, done.1
+        );
+        assert!(
+            work.as_ref().is_none_or(|first| *first == done),
+            "repeat {repeat} did other work"
+        );
         work = Some(done);
         walls.push(wall);
     }
@@ -407,10 +425,9 @@ fn cost(arguments: &[String]) {
     let spread = 100.0 * (walls[walls.len() - 1] - walls[0]) / median;
     let unknowns: std::collections::BTreeSet<_> = body.sparsity().unknowns().iter().collect();
     println!(
-        "cost assembly={} core=ng-solver-10ms span_s={span_s} rows={} unknowns={} columns={} jacobian_nonzeros={} \
-         admission_solves={admission_solves} steps={steps} solves={solves} steps_a_simulated_s={:.1} \
-         solves_a_step={:.3} admission_wall_s={admission_s:.1} repeats={repeats} wall_ms_a_simulated_s={:.1} \
-         wall_spread_pct={spread:.1} seal={seal}",
+        "cost assembly={} core=ng-solver-10ms span_s={span_s} repeats={repeats} rows={} unknowns={} columns={} \
+         jacobian_nonzeros={} steps={steps} solves={solves} steps_a_simulated_s={:.1} solves_a_step={:.3} \
+         wall_ms_a_simulated_s={:.1} wall_spread_pct={spread:.1} admission_wall_s={admission_s:.1} seal={seal}",
         if whole { "body" } else { "slice" },
         body.rows().len(),
         unknowns.len(),

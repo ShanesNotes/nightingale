@@ -2,6 +2,7 @@
 
     python3 -I tools/bench/run.py [reference | ng-solver]
     python3 -I tools/bench/run.py memory [reference | ng-solver]
+    python3 -I tools/bench/run.py cost (slice | body)
 
 Python 3.11 stdlib only. A run is one process of src/main.rs: one admission of the arena body, then simulated
 seconds on the named core (the reference by default), with no observer, then a resume of its checkpoint into a
@@ -21,6 +22,13 @@ exits 0, when the run peaks' medians differ by at most MARGIN_KB.
 What a run did (its `work` lines) must match across its length's or interval's runs, and only its `time` and
 `memory` lines may differ. A fault, a killed run, a lost line, different work or a resume that lands on another
 seal ends the script with no median. Each run's numbers print as it ends, so a killed script keeps them.
+
+The cost mode prints one cost line, the figure a body ticket's PR quotes against ticket 26's budget. It admits the
+assembly once on ng-solver at 10 ms, then runs the first 60 simulated seconds from that start, 5 times for the
+slice and 3 for the body, and refuses repeats that took other steps, solves or seals. Its fields come in a fixed
+order, units in their names. Under perf the counters run only inside the repeats, so the user instructions a
+simulated second leave out compiling and admission and hold to a few parts a million at any load. Where perf
+cannot count them the field reads none, and such a line cannot show a budget met. Wall time is the median repeat.
 
 tools/verify never runs this: a wall clock cannot gate a merge, and the workspace bans one, so this project sits
 outside it.
@@ -148,13 +156,16 @@ def cost(assembly):
         ctl, ack, counts = (os.path.join(fifos, name) for name in ("ctl", "ack", "counts"))
         os.mkfifo(ctl)
         os.mkfifo(ack)
-        perf = ["perf", "stat", "-D", "-1", "--control", f"fifo:{ctl},{ack}", "-e", "instructions:u", "-x,", "-o", counts]
-        counted = shutil.which("perf") is not None
+        perf = ["perf", "stat", "-e", "instructions:u", "-x,"]
+        probe = shutil.which("perf") and subprocess.run(perf + ["true"], stderr=subprocess.PIPE, text=True)
+        counted = bool(probe) and probe.returncode == 0 and probe.stderr.split(",")[0].isdigit()
+        perf += ["-D", "-1", "--control", f"fifo:{ctl},{ack}", "-o", counts, "--"]
         environment = dict(os.environ, NG_PERF_CTL=ctl, NG_PERF_ACK=ack) if counted else os.environ
         load = os.getloadavg()[0]
-        run = subprocess.run((perf + ["--"] if counted else []) + command, cwd=HERE, env=environment,
-                             stdout=subprocess.PIPE, text=True)
+        run = subprocess.run((perf if counted else []) + command, cwd=HERE, env=environment,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if run.returncode != 0:
+            sys.stderr.write(run.stderr)
             refuse(f"the {assembly} run exited {run.returncode}")
         fields = run.stdout.split()
         if fields[:1] != ["cost"]:
