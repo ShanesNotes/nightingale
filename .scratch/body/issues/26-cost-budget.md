@@ -1,7 +1,8 @@
 # 26: A cost budget for the whole body
 
 Type: task
-Status: open
+Status: claimed
+Claimed by: b26-measure
 Blocked by: 06, 07
 
 **What to build:** The budget each loop ticket is held to. Measure [ticket 06](06-whole-body-on-holds.md)'s body against the slice on one named build worker, and from [ticket 07](07-what-limits-the-step.md)'s limiter set how much wall time for a simulated second each loop may add, and a ceiling for the whole body after pass 1.
