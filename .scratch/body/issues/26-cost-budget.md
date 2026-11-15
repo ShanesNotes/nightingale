@@ -47,7 +47,7 @@ Every run took the same counts, so these figures have no spread at all.
 | User instructions a simulated second | 887.8 M, within 1.7 parts a million over 7 jobs | 5,960.1 M, within 14 parts a million over 7 jobs |
 | Slice admission | 9.3 to 10.5 s quiet, 26.1 s among 15 processes | |
 
-The body's 11,797 steps equal the count the run test pins. A history kept on disk adds 0.17% to the body's instructions. The run is one thread and bound by the processor in user mode. Its task clock equals its wall time within 2% on a quiet machine, and it takes 3.5 instructions a cycle. Load takes the core away and leaves the work as it was. Each candidate unit's spread over the eight jobs:
+The body's 11,797 steps equal the count the run test pins. Since nightingale#166 the slice takes 11,614 steps, 14,749 solves and 896.6 M instructions a simulated second, and the body takes the same counts and seal as before, with 5,960.2 M (one job at this ticket's head). A history kept on disk adds 0.17% to the body's instructions. The run is one thread and bound by the processor in user mode. Its task clock equals its wall time within 2% on a quiet machine, and it takes 3.5 instructions a cycle. Load takes the core away and leaves the work as it was. Each candidate unit's spread over the eight jobs:
 
 - Wall time a simulated second: 396.9 to 422.4 ms quiet (6.4%), and up to 1,271.3 ms with load. It does not reproduce.
 - The body's wall time over the slice's in one job: 6.10 to 6.43 quiet, and 5.40 to 7.35 with load. It does not reproduce either, because the two runs see different load.
