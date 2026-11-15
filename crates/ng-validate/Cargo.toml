@@ -9,6 +9,7 @@ publish.workspace = true
 ng-cardiovascular = { path = "../ng-cardiovascular" }
 ng-contract = { path = "../ng-contract" }
 ng-fluids = { path = "../ng-fluids" }
+ng-hematology = { path = "../ng-hematology" }
 ng-nervous = { path = "../ng-nervous" }
 ng-observe = { path = "../ng-observe" }
 ng-receptor = { path = "../ng-receptor" }

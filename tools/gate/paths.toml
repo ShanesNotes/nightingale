@@ -261,6 +261,9 @@ name = "ng-nervous"
 name = "ng-receptor"
 
 [[crate]]
+name = "ng-hematology"
+
+[[crate]]
 name = "ng-solver"
 
 [[crate]]

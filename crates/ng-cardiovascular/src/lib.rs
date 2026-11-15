@@ -32,6 +32,21 @@ const WAVE_NS: u64 = 10_000_000;
 /// Emits baroreceptor afferents (line 77) and capillary and venous pressure (line 80). Reads tubuloglomerular feedback
 /// (line 97) and the effect of each transmitter at its junction. Each law is declared once, and the map says where.
 pub fn declare<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardiovascular>, AdmissionError> {
+    declare_with(scope, false)
+}
+
+/// As `declare`, and each plain edge's resistance also scales by viscosity (line 114) over a reference. Only a root
+/// that declares hematology's law calls it, so the slice keeps its model.
+pub fn declare_reading_viscosity<'b>(
+    scope: CardiovascularScope<'b>,
+) -> Result<Fragment<'b, Cardiovascular>, AdmissionError> {
+    declare_with(scope, true)
+}
+
+fn declare_with<'b>(
+    scope: CardiovascularScope<'b>,
+    reads_viscosity: bool,
+) -> Result<Fragment<'b, Cardiovascular>, AdmissionError> {
     let (mut cv, ports) = scope.parts();
     let wave = RateClass::new(RateBand::Wave, WAVE_NS)?;
     let heart = rhythm::declare(&mut cv, &ports, wave)?;
@@ -44,7 +59,7 @@ pub fn declare<'b>(scope: CardiovascularScope<'b>) -> Result<Fragment<'b, Cardio
     blood_pressure::declare(&mut cv, pressure_row, &walls, wave);
 
     let circulation = ports.circulation(&mut cv);
-    plain_edges(&mut cv, &ports, &circulation, &pressure, &head, wave)?;
+    plain_edges(&mut cv, &ports, &circulation, &pressure, &head, wave, reads_viscosity)?;
     valves(&mut cv, &ports, &pressure, &head, wave)?;
     afferents(&mut cv, &pressure, &head, wave)?;
     capillary_fields(&mut cv, &pressure, wave);
