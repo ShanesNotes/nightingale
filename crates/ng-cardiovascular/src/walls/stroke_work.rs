@@ -9,12 +9,13 @@ impl<'b, 'h> Walls<'b, 'h> {
         ports: &CardiovascularPorts<'b>,
         heart: &Heart<'b>,
         half: &Parameter<'b, Cardiovascular, Dimensionless>,
+        below: &SiteTerm<'b, Cardiovascular, Veins, Energy>,
         wave: RateClass,
     ) {
         let work = ports.stroke_work(cv);
         let into_wall = cv.site_kernel::<Blood, _, _>(|mut k| {
             let contractile = self.contractile(&mut k);
-            let per_unit = self.stored(&mut k, half, contractile);
+            let per_unit = self.stored(&mut k, half, contractile, below);
             let (target, current, speed) = (
                 k.parameter(&heart.peak),
                 k.state(&heart.activation),

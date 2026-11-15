@@ -7,6 +7,7 @@ impl<'b, 'h> Walls<'b, 'h> {
         cv: &mut FragmentBuilder<'b, Cardiovascular>,
         half: &Parameter<'b, Cardiovascular, Dimensionless>,
         elastic: &AlgebraicSlot<'b, Cardiovascular, Energy>,
+        below: &SiteTerm<'b, Cardiovascular, Veins, Energy>,
         wave: RateClass,
     ) {
         let row = cv.kernel(|mut k| {
@@ -15,7 +16,7 @@ impl<'b, 'h> Walls<'b, 'h> {
         });
         let held = cv.site_kernel::<Blood, _, _>(|mut k| {
             let stiffness = self.elastance(&mut k);
-            let held = self.stored(&mut k, half, stiffness);
+            let held = self.stored(&mut k, half, stiffness, below);
             k.finish(held, cv.every_mode(), wave)
         });
         cv.sum_at(elastic, row, held);
