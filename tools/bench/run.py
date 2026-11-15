@@ -28,7 +28,8 @@ assembly once on ng-solver at 10 ms, then runs the first COST_SPAN_S simulated s
 times, and refuses repeats that took other steps, solves or seals. Its fields come in a fixed
 order, units in their names. Under perf the counters run only inside the repeats, so the user instructions a
 simulated second leave out compiling and admission and hold to a few parts a million at any load. Where perf
-cannot count them the field reads none, and such a line cannot show a budget met. Wall time is the median repeat.
+cannot count them the field reads none, and a tree with changed tracked files marks the head -dirty. Neither
+line can show a budget met. Wall time is the median repeat.
 
 tools/verify never runs this: a wall clock cannot gate a merge, and the workspace bans one, so this project sits
 outside it.
@@ -150,6 +151,8 @@ def cost(assembly):
     repeats = {"slice": 5, "body": 3}[assembly]
     describe = ["git", "rev-parse", "--short=12", "HEAD"]
     head = subprocess.run(describe, cwd=HERE, stdout=subprocess.PIPE, text=True).stdout.strip()
+    if subprocess.run(["git", "diff", "--quiet", "HEAD"], cwd=HERE).returncode != 0:
+        head += "-dirty"
     command = [executable, "cost", assembly, str(COST_SPAN_S), str(repeats)]
     with tempfile.TemporaryDirectory() as fifos:
         ctl, ack, counts = (os.path.join(fifos, name) for name in ("ctl", "ack", "counts"))
