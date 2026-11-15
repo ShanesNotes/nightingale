@@ -6,10 +6,12 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+ng-blood-chemistry = { path = "../ng-blood-chemistry" }
 ng-cardiovascular = { path = "../ng-cardiovascular" }
 ng-contract = { path = "../ng-contract" }
 ng-fluids = { path = "../ng-fluids" }
 ng-hematology = { path = "../ng-hematology" }
+ng-metabolism = { path = "../ng-metabolism" }
 ng-nervous = { path = "../ng-nervous" }
 ng-observe = { path = "../ng-observe" }
 ng-receptor = { path = "../ng-receptor" }

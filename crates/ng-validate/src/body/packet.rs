@@ -2,6 +2,7 @@ use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::*;
 
 use super::anatomy::at;
+use super::schema::OXYGEN_USE;
 
 const SECOND: u64 = 1_000_000_000;
 const POINTS: u32 = 100;
@@ -14,6 +15,18 @@ const HEMOGLOBIN: f64 = 2.0;
 /// The central veins' viscosity at the admitted start, read from an admission whose vessels did not read it, so the
 /// vessels' ratio is one at the start.
 const START_VISCOSITY: f64 = 7.115_102_244_801_436;
+
+/// Each bed's held oxygen use in its cells, in `OXYGEN_USE`'s order, and the head of partial pressure that every wall,
+/// cell membrane and the lung's exchange take at that use.
+const USES: [f64; 11] = [1.0, 20.0, 25.0, 3.0, 10.0, 8.0, 8.0, 15.0, 2.0, 2.0, 2.0];
+const HEAD: f64 = 5.0;
+const ALVEOLAR: f64 = 100.0;
+const SOLUBILITY: f64 = 0.001;
+const HEME: f64 = 4.0;
+const P50: f64 = 25.0;
+const HILL: (f64, f64, f64) = (2.5, 1.0, 10.0);
+/// The start's arterial and venous partial pressures as `P50 e^t`, so the curve's start needs no logarithm.
+const REACH: (f64, f64) = (1.3, 0.5);
 
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     Ok(AnatomyBuilder::new().site::<C>(key, at(0.0)?).id())
@@ -129,6 +142,9 @@ fn start_guess(row: RowKind) -> f64 {
                 (Species::Albumin, Space::Interstitium) => 0.1 * holds,
                 (Species::Albumin, _) => holds,
                 (Species::Hemoglobin, _) => HEMOGLOBIN * holds,
+                (Species::Oxygen, Space::Plasma | Space::Lumen | Space::Interstitium | Space::Cells) => {
+                    oxygen_guess(site.key(), space) * water
+                }
                 (Species::Vasopressin, Space::Bound) => 0.8,
                 (Species::Vasopressin, _) => 0.4 * holds,
                 (Species::Energy, Space::Thermal) => 2e7,
@@ -140,7 +156,35 @@ fn start_guess(row: RowKind) -> f64 {
         RowKind::Memory(slot) if slot.law.local == "afferent filter" => 1.0,
         RowKind::Memory(slot) if slot.law.local == "baroreflex set point" => 1.0,
         RowKind::Memory(_) => 0.0,
-        RowKind::Algebraic(_) => 1.0,
+        RowKind::Algebraic(slot) => match (slot.law.local, slot.at) {
+            ("oxygen partial pressure", Context::Site(site)) => blood_oxygen(site.key()).0,
+            ("oxygen saturation", Context::Site(site)) => blood_oxygen(site.key()).1,
+            ("pulmonary oxygen partial pressure", _) => blood_oxygen("pulmonary bed").0,
+            _ => 1.0,
+        },
+    }
+}
+
+/// A blood space's start partial pressure and saturation on the packet's curve at its standard.
+fn blood_oxygen(site: &str) -> (f64, f64) {
+    let arterial = matches!(
+        site,
+        "pulmonary bed" | "pulmonary vein" | "left atrium" | "left ventricle" | "systemic arteries"
+    );
+    let reach = if arterial { REACH.0 } else { REACH.1 };
+    let pressure = P50 * exp(reach);
+    let exponent = HILL.0 - HILL.1 * exp(-pressure / HILL.2);
+    (pressure, 1.0 / (1.0 + exp(-exponent * reach)))
+}
+
+/// Oxygen a unit of water holds at the start: dissolved and bound in blood, and dissolved one head and two heads
+/// below the bed's plasma in its interstitium and cells.
+fn oxygen_guess(site: &str, space: Space) -> f64 {
+    let (pressure, saturation) = blood_oxygen(site);
+    match space {
+        Space::Plasma | Space::Lumen => SOLUBILITY * pressure + HEME * HEMOGLOBIN * saturation,
+        Space::Interstitium => SOLUBILITY * (pressure - HEAD),
+        _ => SOLUBILITY * (pressure - 2.0 * HEAD),
     }
 }
 
@@ -591,7 +635,8 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     set::<Affinity<Concentration<Vasopressin>>>(packet, "rc.avp-on", blood, 0.6)?;
     set::<Rate<Dimensionless>>(packet, "rc.avp-off", blood, 0.1)?;
     set::<Dimensionless>(packet, "rc.avp-efficacy", blood, 2.0)?;
-    hematology(packet)
+    hematology(packet)?;
+    oxygen(packet)
 }
 
 fn hematology(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
@@ -613,4 +658,49 @@ fn hematology(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admi
         body,
         1.0 / START_VISCOSITY,
     )
+}
+
+/// Oxygen's curve, wall diffusion and stand-ins: each a round number, and none a source's figure. At the held use each
+/// wall, cell membrane and the lung's exchange takes one head of partial pressure.
+fn oxygen(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+    let body = Binding::Body;
+    type Solubility = Quotient<Concentration<Oxygen>, Pressure>;
+    set::<Solubility>(packet, "bc.oxygen-solubility", body, SOLUBILITY)?;
+    set::<Solubility>(packet, "mt.tissue-oxygen-solubility", body, SOLUBILITY)?;
+    set::<Quotient<Concentration<Oxygen>, Concentration<Hemoglobin>>>(packet, "bc.heme-oxygen", body, HEME)?;
+    for (key, value) in [
+        ("bc.p50", P50),
+        ("bc.hill-reach", HILL.2),
+        ("bc.standard-carbon-dioxide", 40.0),
+        ("bc.plasma-carbon-dioxide", 40.0),
+        ("bc.carbon-dioxide-scale", 40.0),
+        ("mt.alveolar-oxygen", ALVEOLAR),
+    ] {
+        set::<Pressure>(packet, key, body, value)?;
+    }
+    for (key, value) in [
+        ("bc.hill-ceiling", HILL.0),
+        ("bc.hill-fall", HILL.1),
+        ("bc.standard-acidity", 7.4),
+        ("bc.plasma-acidity", 7.4),
+        ("bc.p50-acidity-1", -1.0),
+        ("bc.p50-acidity-2", 0.5),
+        ("bc.p50-acidity-3", -0.25),
+        ("bc.p50-carbon-dioxide-1", 0.1),
+        ("bc.p50-carbon-dioxide-2", 0.01),
+    ] {
+        set::<Dimensionless>(packet, key, body, value)?;
+    }
+    let total: f64 = USES.iter().sum();
+    set::<Conductance<Oxygen>>(packet, "mt.lung-oxygen-exchange", body, total / HEAD)?;
+    set::<Dimensionless>(packet, "mt.lung-share", Binding::Class(Class::CapillaryBed), 0.0)?;
+    let lung = Binding::Site(site::<CapillaryBed>("pulmonary bed")?);
+    set::<Dimensionless>(packet, "mt.lung-share", lung, 1.0)?;
+    for ((bed, _, key), used) in OXYGEN_USE.into_iter().zip(USES) {
+        set::<Rate<Oxygen>>(packet, key, body, used)?;
+        let at = Binding::Site(site::<CapillaryBed>(bed)?);
+        set::<Conductance<Oxygen>>(packet, "mt.wall-oxygen-conductance", at, used / HEAD)?;
+        set::<Conductance<Oxygen>>(packet, "mt.cell-oxygen-conductance", at, used / HEAD)?;
+    }
+    Ok(())
 }
