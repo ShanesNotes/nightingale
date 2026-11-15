@@ -522,6 +522,12 @@ const SYNTHETIC_DRIFT: f64 = 1e4;
 /// About twice energy's measured drift over the arena's own day from 06:55, 8.3e4. Like `species_drift`, it is
 /// fixture data until the healthy-range set holds energy's within-subject variation.
 const SYNTHETIC_ENERGY_DRIFT: f64 = 2e5;
+/// Energy's bound over the milestone protocol's sliding windows, fixture data like the pick's: twice the worst window,
+/// 1.83e6, rounded up to one significant figure. Measured on the slice at model hash `93c12728`, on `Core::new` at
+/// 10 ms over four days of the arena's plan, at every start on a 60 s grid from admission to 24 h later. Admission
+/// solves the man at one beat's balance and not his day's, so his first day settles, and a window that starts in it
+/// reads that.
+const SYNTHETIC_MILESTONE_ENERGY_DRIFT: f64 = 4e6;
 /// For a species no boundary route carries, such as albumin and the transmitters, closure alone holds it at zero there.
 /// This bound binds on the first body whose route moves one. It is under 1% of a transmitter pool's 101, the smallest
 /// such pool, so that body measures its own day.
@@ -558,7 +564,14 @@ pub fn arena_certificate(
     }
     let basis = body.conserved_basis();
     let quantities = basis.ids().map(|quantity| match quantity.book() {
-        Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_ENERGY_DRIFT),
+        Book::Of(Species::Energy) | Book::Energy => {
+            let drift = if windows.coverage_ns() > windows.window_ns().get() {
+                SYNTHETIC_MILESTONE_ENERGY_DRIFT
+            } else {
+                SYNTHETIC_ENERGY_DRIFT
+            };
+            limits::<Energy>(quantity, drift)
+        }
         Book::Of(species) => species.visit(Limits(quantity, species_drift(species))),
         Book::Element(_) => QuantityPolicy::element(
             quantity,
