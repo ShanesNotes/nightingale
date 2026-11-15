@@ -19,6 +19,8 @@ Blocked by: 42
 
 The plan names the logarithm and the exponential as what limits the branch's cost. The square-root op it built was for measurement only and is not on main.
 
+**Since native-contract 57.** Below `V_u` the store is now the work of the branch's pressure, in a closed form that divides by `n - 1` ([native-contract 57](57-the-store-below-a-veins-unstressed-volume.md)). Just above a power of one that store is rounding ([native-contract 60](60-a-collapse-power-just-above-one.md)). With the exponent in the form, the store is written at three halves and native-contract 60 closes with this ticket.
+
 - [ ] The question first: the exponent leaves the packet and becomes part of the law's form. Today `cv.collapse-power` is a body parameter, so a packet can set it. Written as `r * sqrt(r)`, the form holds 1.5 and no packet can change it. The Answer says whether a fixed exponent is acceptable for the form's sources and for the arena, and the ticket stops there if it is not
 - [ ] The evaluator gains a square-root op, with its value and its derivatives, and the op is on the exact list the bans probe in `10-rust` holds, or the Answer says why it cannot be
 - [ ] A closed-form test: `r * sqrt(r)` equals the branch's value below the unstressed volume, at a vein with a share above zero
