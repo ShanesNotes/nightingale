@@ -8,9 +8,9 @@ const SHARE: f64 = 0.05;
 const WIDTH: f64 = 1.0;
 const ALBUMIN_VOLUME: f64 = 0.05;
 const INTERVALS: usize = 400;
-/// Each marked vein a test stages, its elastance and its unstressed volume. The staged workspace reads the junction's
-/// effect as one, so the leg veins, which a nerve reaches, stand at 566 - 200 = 366 mL.
-const VEINS: [(&str, f64, f64); 2] = [("central veins", 0.1, 300.0), ("leg veins", 0.4, 366.0)];
+/// The staged workspace reads the junction's effect as one, so the leg veins, which a nerve reaches, stand at
+/// `V_u = 566 - 200` mL.
+const VEINS: [(&str, f64, f64); 2] = [("central veins", 0.1, 300.0), ("leg veins", 0.4, 566.0 - 200.0)];
 
 fn site<C: SiteClass>(key: &'static str) -> SiteId {
     let origin = || Measure::new(0.0).expect("finite");
@@ -214,8 +214,8 @@ fn below_its_unstressed_volume_a_marked_vein_follows_the_closed_form() -> Result
 
 /// How far the smoothing at `V_u` lets the store's slope stand off the pressure. The stretched part's slope is
 /// `E s s'`, not `E s`, which is `E w^2 / (4 sqrt(x^2 + w^2))` less at `x = V - V_u`. The collapsed part reads its
-/// potential at a smoothed volume, which moves it by at most `share (V_u / V)^(n + 1)` times as much: the margin here
-/// is twice that.
+/// potential at a smoothed volume, which a model of the two smoothings moves by about `share (V_u / V)^(n + 1)` times
+/// as much, with `n` the slice's 1.5. The margin here is twice that.
 fn margin(elastance: f64, unstressed: f64, volume: f64) -> f64 {
     let (apart, ratio) = (volume - unstressed, (unstressed / volume).max(1.0));
     let collapsed = 2.0 * SHARE * ratio * ratio * ratio.sqrt();
@@ -228,9 +228,8 @@ struct Filled {
     band: f64,
 }
 
-/// A vein's part of the store at `volume` less its part at `V_u`, read from the elastic energy row, which is its value
-/// less the sum of the blood sites' parts. Beside it, the work the vein's own pressure does from `V_u`, by Simpson's
-/// rule over the staged pressure row, and the margin summed the same way.
+/// The elastic energy row is its value less the sum of the blood sites' parts, so its fall between two staged volumes
+/// is the growth of the staged vein's part.
 fn filled(
     body: &CompiledBody,
     key: &'static str,
@@ -261,7 +260,6 @@ fn filled(
     })
 }
 
-/// Below `V_u` a marked vein's wall holds the work its pressure did to empty it, the integral of `E s` from `V_u`.
 #[test]
 fn below_its_unstressed_volume_a_marked_veins_store_is_the_work_of_its_pressure()
 -> Result<(), InitializationFailure> {
@@ -278,8 +276,6 @@ fn below_its_unstressed_volume_a_marked_veins_store_is_the_work_of_its_pressure(
     Ok(())
 }
 
-/// Across `V_u` the store grows by the work of the pressure on both sides, and its slope, read between two staged
-/// volumes, is that pressure, so the store below joins the store above with its slope.
 #[test]
 fn at_its_unstressed_volume_a_marked_veins_store_and_its_slope_join_the_store_above()
 -> Result<(), InitializationFailure> {

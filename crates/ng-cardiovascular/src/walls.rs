@@ -32,7 +32,6 @@ fn collapsing<'b, 'k>(
     k.scale(below, share)
 }
 
-/// `(V_u / n) (1 - (V_u / V)^n)`.
 fn shrinking<'b, 'k>(
     k: &mut Kernel<'b, 'k, Cardiovascular, Veins>,
     unstressed: Expr<'b, 'k, Cardiovascular, Volume>,
@@ -200,7 +199,6 @@ impl<'b, 'h> Walls<'b, 'h> {
         let driven = k.scale(contractile, activation);
         k.add(passive, driven)
     }
-    /// `E s^2 / 2` of the stretch, and at a marked vein the term that holds its store below `V_u`.
     fn stored<'k>(
         &self,
         k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
@@ -219,10 +217,10 @@ impl<'b, 'h> Walls<'b, 'h> {
     }
     /// Below `V_u` a marked vein's wall holds the work its pressure did, `E share Psi` with
     /// `Psi = (V_u / n) ((V - V_u) - (V_u / (1 - n)) ((V / V_u)^(1 - n) - 1))`, the integral of the collapse branch's
-    /// stressed volume from `V_u`. It is written `V_u ((V - V_u) - (V / V_u) shrunk) / (n - 1)`, so it needs a power
-    /// above one, and read at `V = V_u + smooth_min(V - V_u, 0, w)`, so it and its slope vanish at `V_u` and the
-    /// store joins `E s^2 / 2` above. That volume reaches zero at `w^2 / (4 V_u)`, where the term refuses. With a
-    /// power above one the store grows without bound as the vein empties. Model default.
+    /// stressed volume from `V_u`. It is written `V_u ((V - V_u) - (V / V_u) shrunk) / (n - 1)`, so a power of one or
+    /// less refuses on its divisor. It is read at `V_u + smooth_min(V - V_u, 0, w)`, so it fades above `V_u` and the
+    /// store joins `E s^2 / 2` there with its slope. That volume reaches zero at `w^2 / (4 V_u)`, where the term
+    /// refuses. With a power above one the store grows without bound as the vein empties. Model default.
     fn emptied<'k>(
         &self,
         k: &mut Kernel<'b, 'k, Cardiovascular, Veins>,
@@ -232,9 +230,9 @@ impl<'b, 'h> Walls<'b, 'h> {
         let stretched = k.subtract(volume, unstressed);
         let (zero, soft) = (k.zero(), k.parameter(&self.collapse));
         let short = k.smooth_min(stretched, zero, soft);
-        let held = k.add(unstressed, short);
-        let shrunk = shrinking(k, unstressed, held, &self.power);
-        let quotient = k.divide(held, unstressed);
+        let smoothed = k.add(unstressed, short);
+        let shrunk = shrinking(k, unstressed, smoothed, &self.power);
+        let quotient = k.divide(smoothed, unstressed);
         let fraction: Expr<'_, '_, _, Dimensionless> = k.as_dimension(quotient);
         let left = k.scale(shrunk, fraction);
         let gap = k.subtract(short, left);
@@ -253,11 +251,12 @@ impl<'b, 'h> Walls<'b, 'h> {
     }
     /// One mechanical store and one thermal store. Each blood site's wall holds `E s^2 / 2`, a marked vein's below
     /// `V_u` the work its pressure did, and the store is held to their sum. Work enters where activation stiffens a
-    /// stretched wall, in systole only, and gravity's enters beside it. The wall power is what the store must lose to stay on the sum: no law's choice, so closure sits in the stage
-    /// residual and `verify` judges it with the rest. What the walls shed leaves as heat, and heat never comes back. What
-    /// they gain past those receipts, as a vein's muscle tightens or water enters, is muscle work from the chemical
-    /// energy the heart draws on. So the account can run no pool dry. The moving blood's energy and the stretch of tissue
-    /// and tubule are not in the sum, so what they hold passes through this rate.
+    /// stretched wall, in systole only, and gravity's enters beside it. The wall power is what the store must lose to
+    /// stay on the sum: no law's choice, so closure sits in the stage residual and `verify` judges it with the rest.
+    /// What the walls shed leaves as heat, and heat never comes back. What they gain past those receipts, as a vein's
+    /// muscle tightens or water enters, is muscle work from the chemical energy the heart draws on. So the account can
+    /// run no pool dry. The moving blood's energy and the stretch of tissue and tubule are not in the sum, so what they
+    /// hold passes through this rate.
     pub(crate) fn energy(
         &self,
         cv: &mut FragmentBuilder<'b, Cardiovascular>,

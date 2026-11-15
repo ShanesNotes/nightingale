@@ -3278,9 +3278,9 @@ test = "-p ng-validate --test veins below_its_unstressed_volume_a_marked_veins_s
 [[mutant]]
 name = "store-read-at-the-volume-itself"
 path = "crates/ng-cardiovascular/src/walls.rs"
-old = '''        let held = k.add(unstressed, short);'''
+old = '''        let smoothed = k.add(unstressed, short);'''
 new = '''        let _ = k.add(unstressed, short);
-        let (short, held) = (stretched, volume);'''
+        let (short, smoothed) = (stretched, volume);'''
 test = "-p ng-validate --test veins at_its_unstressed_volume_a_marked_veins_store_and_its_slope_join_the_store_above"
 
 [[mutant]]
