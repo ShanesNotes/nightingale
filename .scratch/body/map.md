@@ -17,7 +17,7 @@ All 13 systems run at rung 0 in one body, on a synthetic fixture. The body admit
   - The evidence store, `~/nightingale-evidence-store`: the cleaned text of every source and a full-text search. Its README gives the query.
   - The [evidence library](../evidence-library/map.md), in the store's `data/graph/`: passages tagged by system, condition and timescale (`layer0-tagged.parquet`), and links between terms across systems with the works and passages behind each link (`edges.parquet`).
   - MIMIC rows stay on this machine and never go to a cloud model.
-- **Every build ticket is one PR that ends in three checks.** Tests: a closed-form case for each new law, a refusal test for each new rule, and a mutant row that puts the stand-in back and must fail. A run: the whole body admits, the certificate passes on a short window, each new link of a loop moves its reader the right way, and the body's expect trace is updated with one sentence on why it moved. A cost line: unknowns and rows before and after, and wall time for each simulated second inside [ticket 26](issues/26-cost-budget.md)'s budget. A ticket over its budget does not merge until an exception is recorded with its reason.
+- **Every build ticket is one PR that ends in three checks.** Tests: a closed-form case for each new law, a refusal test for each new rule, and a mutant row that puts the stand-in back and must fail. A run: the whole body admits, the certificate passes on a short window, each new link of a loop moves its reader the right way, and the body's expect trace is updated with one sentence on why it moved. A cost line: `python3 -I tools/bench/run.py cost body` on the beelink, at the PR's base and at its head, both in the PR. Its user instructions for each simulated second must stay inside [ticket 26](issues/26-cost-budget.md)'s budget, and the body's run test holds its count ceilings. A line that reads `minstructions_a_simulated_s=none` cannot show a budget met. A ticket over its budget does not merge until the oversight seat records an exception with its reason in the ticket, open to the developer reviewer.
 - **Loop PRs merge one at a time.** Each one moves the body's trace and its size pins, and a code proof runs on a build worker. A PR that waited merges main and regenerates its trace before its proof.
 - **Docs tickets go first and in parallel.** Ticket 01 and the research tickets prove on any machine.
 - The two drafts that derived the body from its books are outside the repo: `~/lanes/logs/ng-q1-healthy-body-draft.md` and `~/lanes/logs/ng-q1-frame-followup.md`. They are model proposals from before the contract, never sources (SRS rule 16).
@@ -38,25 +38,25 @@ Tickets 01, 02, 03, 04, 05, 07, 23, 27 and 29 and research tickets 11 to 15 are 
 | [07](issues/07-what-limits-the-step.md) What limits the step | nothing | Where a step's cost goes on the slice, and its limiter |
 | [27](issues/27-step-plan.md) A step plan that can reach the speed aim | 07 | Prototypes and a pick, on main before the synthetic day |
 | [30](issues/30-step-plans-on-the-whole-body.md) The step plans measured on the whole body | 06, 27 | Whether ticket 27's pick holds on all 13 systems |
-| [26](issues/26-cost-budget.md) A cost budget for the whole body | 06, 07 | The budget each loop is held to, with ceilings for admission and the gate |
-| [08](issues/08-blood-carries-gases.md) Blood carries the gases | 06, 26, 29, research 11 | Gas loop |
-| [09](issues/09-tissues-respire.md) Tissues respire | 02, 08, research 11 | Gas loop |
-| [10](issues/10-lungs-breathe.md) The lungs breathe | 08, 09, research 11 | Gas loop |
-| [11](issues/11-breathing-is-controlled.md) Breathing is controlled | 05, 10, research 11 | Gas loop, closed |
-| [12](issues/12-heat-balance.md) Heat balance | 05, 09, research 12 | Heat loop, closed |
-| [25](issues/25-sleep-and-the-circulation.md) Sleep reaches the circulation and the metabolic rate | 05, 09, research 12 | The night's fall in rate, pressure and oxygen use |
-| [13](issues/13-gut-absorbs-a-meal.md) The gut absorbs a meal | 05, 06, 26, research 13 | Fuel loop |
-| [14](issues/14-liver-glucose-hub.md) The liver is the glucose hub | 02, 13, research 13 | Fuel loop |
-| [15](issues/15-insulin-and-glucagon.md) Insulin and glucagon | 14, 17, research 13 | Fuel loop |
-| [16](issues/16-fuel-stores.md) Fuel stores close over a day | 09, 15, research 13 | Fuel loop, closed |
-| [17](issues/17-volume-hormones.md) Volume hormones and the kidney's pressure answer | 06, 26, research 14 | Water and salt loop, closed |
-| [18](issues/18-acid-loop.md) The acid loop | 08, 09, 11, 14, 17, 29, research 14 | Acid loop, closed |
+| [26](issues/26-cost-budget.md) A cost budget for the whole body | 06, 07 | The budget each loop is held to: 12% of the user instructions a simulated second it starts from, and 11,920 M after pass 1, twice today's 5,960 M (eight jobs on the beelink at `71c7549`). Admission, the body's run test and the gate have reported wall ceilings |
+| [08](issues/08-blood-carries-gases.md) Blood carries the gases | 06, 26, 29, research 11 | Gas loop. Budget: 12%, shared by 08 to 11 |
+| [09](issues/09-tissues-respire.md) Tissues respire | 02, 08, research 11 | Gas loop. Budget: 12%, shared by 08 to 11 |
+| [10](issues/10-lungs-breathe.md) The lungs breathe | 08, 09, research 11 | Gas loop. Budget: 12%, shared by 08 to 11 |
+| [11](issues/11-breathing-is-controlled.md) Breathing is controlled | 05, 10, research 11 | Gas loop, closed. Budget: 12%, shared by 08 to 11 |
+| [12](issues/12-heat-balance.md) Heat balance | 05, 09, research 12 | Heat loop, closed. Budget: 12% |
+| [25](issues/25-sleep-and-the-circulation.md) Sleep reaches the circulation and the metabolic rate | 05, 09, research 12 | The night's fall in rate, pressure and oxygen use. Budget: 12% |
+| [13](issues/13-gut-absorbs-a-meal.md) The gut absorbs a meal | 05, 06, 26, research 13 | Fuel loop. Budget: 12%, shared by 13 to 16 |
+| [14](issues/14-liver-glucose-hub.md) The liver is the glucose hub | 02, 13, research 13 | Fuel loop. Budget: 12%, shared by 13 to 16 |
+| [15](issues/15-insulin-and-glucagon.md) Insulin and glucagon | 14, 17, research 13 | Fuel loop. Budget: 12%, shared by 13 to 16 |
+| [16](issues/16-fuel-stores.md) Fuel stores close over a day | 09, 15, research 13 | Fuel loop, closed. Budget: 12%, shared by 13 to 16 |
+| [17](issues/17-volume-hormones.md) Volume hormones and the kidney's pressure answer | 06, 26, research 14 | Water and salt loop, closed. Budget: 12% |
+| [18](issues/18-acid-loop.md) The acid loop | 08, 09, 11, 14, 17, 29, research 14 | Acid loop, closed. Budget: 12% |
 | [19](issues/19-minerals-and-bone.md) Minerals and bone | 13, 15, 17, research 15 | Pass 2 |
 | [20](issues/20-cortisol-rhythm.md) Cortisol's daily rhythm | 05, 14, research 15 | Pass 2 |
 | [21](issues/21-blood-cells-and-systems-at-rest.md) Blood cells, plasma proteins and the systems at rest | 08, 14, research 15 | Pass 2 |
 | [22](issues/22-the-bladder.md) The bladder | 05, 06, 26, research 15 | Pass 2 |
 | [23](issues/23-healthy-range-and-return-checks.md) The healthy-range check and the return check | nothing | The healthy-range check and the return check |
-| [24](issues/24-the-synthetic-day.md) The synthetic day | 11, 12, 16, 17, 18, 23, 25, 27, 30, [native-contract 37](../native-contract/issues/37-the-return-check-reads-its-runs-own-anchors.md) and [40](../native-contract/issues/40-the-range-check-names-a-short-stretch.md) | Pass 1 checked: 24 hours on the whole body |
+| [24](issues/24-the-synthetic-day.md) The synthetic day | 11, 12, 16, 17, 18, 23, 25, 27, 30, [native-contract 37](../native-contract/issues/37-the-return-check-reads-its-runs-own-anchors.md) and [40](../native-contract/issues/40-the-range-check-names-a-short-stretch.md) | Pass 1 checked: 24 hours on the whole body, at most 11,920 M user instructions a simulated second over the first minute. The day's own ceiling is set here from the first measured day, and pass 2's allowance with it, inside the real-time line of 14,600 M |
 | [28](issues/28-two-synthetic-days.md) The whole body lives two synthetic days | 19, 20, 21, 22, 24 | The destination: both passes, 48 hours |
 
 After tickets 06 and 26, three lanes can be built side by side: the gases (08), the gut (13) and the volume hormones (17). They share the body's assembly and add laws to the cardiovascular and renal crates, so ticket 04 puts each law in its own module and the PRs merge one at a time.
