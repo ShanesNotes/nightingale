@@ -7,6 +7,10 @@ const MILLISECOND: u64 = 1_000_000;
 const SHARE: f64 = 0.05;
 const WIDTH: f64 = 1.0;
 const ALBUMIN_VOLUME: f64 = 0.05;
+const INTERVALS: usize = 400;
+/// The staged workspace reads the junction's effect as one, so the leg veins, which a nerve reaches, stand at
+/// `V_u = 566 - 200` mL.
+const VEINS: [(&str, f64, f64); 2] = [("central veins", 0.1, 300.0), ("leg veins", 0.4, 566.0 - 200.0)];
 
 fn site<C: SiteClass>(key: &'static str) -> SiteId {
     let origin = || Measure::new(0.0).expect("finite");
@@ -131,11 +135,11 @@ fn a_vein_below_its_unstressed_volume_lowers_its_pressure_as_it_empties_and_the_
     );
 }
 
-fn residuals_at(
+fn staged(
     body: &CompiledBody,
     key: &'static str,
-    volume: f64,
-) -> Result<Vec<f64>, InitializationFailure> {
+    volumes: &[f64],
+) -> Result<Vec<Vec<f64>>, InitializationFailure> {
     let (packet, lens) = (arena_packet(body)?, arena_lens(body)?);
     let parameters = body.bind(packet)?;
     let port = BoundaryPort::new(Vec::new())?;
@@ -149,23 +153,36 @@ fn residuals_at(
     );
     let held = workspace.unknowns_mut()[albumin];
     let stages = workspace.fitted_slots().start;
-    for slot in (0..stages).filter(|slot| slot % body.rows().len() == water) {
-        workspace.unknowns_mut()[slot] = volume - ALBUMIN_VOLUME * held;
+    let mut each = Vec::with_capacity(volumes.len());
+    for volume in volumes {
+        for slot in (0..stages).filter(|slot| slot % body.rows().len() == water) {
+            workspace.unknowns_mut()[slot] = volume - ALBUMIN_VOLUME * held;
+        }
+        each.push(
+            system
+                .stage_residuals(&workspace, workspace.legs_of(0)[0])?
+                .to_vec(),
+        );
     }
-    Ok(system
-        .stage_residuals(&workspace, workspace.legs_of(0)[0])?
-        .to_vec())
+    Ok(each)
+}
+
+fn residuals_at(
+    body: &CompiledBody,
+    key: &'static str,
+    volume: f64,
+) -> Result<Vec<f64>, InitializationFailure> {
+    Ok(staged(body, key, &[volume])?.remove(0))
 }
 
 /// Below `V_u` a marked vein's pressure, less what lies outside it, is `E share (V_u / n) (1 - (V_u / V)^n)` up to
 /// the soft floor's and the soft limit's widths. A stage's row is its value less its law, so the law's change
 /// between two volumes is the residual's fall, and the outside pressure cancels. At `V_u` the stressed volume is
-/// `(1 - share) w / 2`. The staged workspace reads the junction's effect as one, so the leg veins, which a nerve
-/// reaches, stand at `V_u` 566 - 200 = 366 mL.
+/// `(1 - share) w / 2`.
 #[test]
 fn below_its_unstressed_volume_a_marked_vein_follows_the_closed_form() -> Result<(), InitializationFailure> {
     let body = arena_body()?;
-    for (key, elastance, unstressed) in [("central veins", 0.1, 300.0), ("leg veins", 0.4, 366.0)] {
+    for (key, elastance, unstressed) in VEINS {
         let row = index(&body, pressure(vessel(key)));
         let rest = residuals_at(&body, key, unstressed)?[row];
         for volume in [unstressed / 2.0, unstressed / 4.0] {
@@ -195,27 +212,94 @@ fn below_its_unstressed_volume_a_marked_vein_follows_the_closed_form() -> Result
     Ok(())
 }
 
-/// The elastic energy row is its value less the sum of `E s^2 / 2` over the blood sites, so its fall between two
-/// staged volumes of one vein is the growth of that vein's part, which the pressure row's `E s` gives.
+/// How far the smoothing at `V_u` lets the store's slope stand off the pressure. The stretched part's slope is
+/// `E s s'`, not `E s`, which is `E w^2 / (4 sqrt(x^2 + w^2))` less at `x = V - V_u`. The collapsed part reads its
+/// potential at a smoothed volume, which a model of the two smoothings moves by about `share (V_u / V)^(n + 1)` times
+/// as much, with `n` the slice's 1.5. The margin here is twice that.
+fn margin(elastance: f64, unstressed: f64, volume: f64) -> f64 {
+    let apart = volume - unstressed;
+    let ratio = if apart < 0.0 { unstressed / volume } else { 1.0 };
+    let collapsed = 2.0 * SHARE * ratio * ratio * ratio.sqrt();
+    elastance * WIDTH * WIDTH * (1.0 + collapsed) / (4.0 * (apart * apart + WIDTH * WIDTH).sqrt())
+}
+
+struct Filled {
+    grown: f64,
+    work: f64,
+    band: f64,
+}
+
+/// The elastic energy row is its value less the sum of the blood sites' parts, so its fall between two staged volumes
+/// is the growth of the staged vein's part.
+fn filled(
+    body: &CompiledBody,
+    key: &'static str,
+    elastance: f64,
+    unstressed: f64,
+    volume: f64,
+) -> Result<Filled, InitializationFailure> {
+    let energy = index(body, algebraic("CV", "elastic energy", Context::Body));
+    let row = index(body, pressure(vessel(key)));
+    let step = (volume - unstressed) / INTERVALS as f64;
+    let volumes: Vec<f64> = (0..=INTERVALS).map(|at| unstressed + step * at as f64).collect();
+    let staged = staged(body, key, &volumes)?;
+    let at_rest = elastance * (1.0 - SHARE) * WIDTH / 2.0;
+    let (mut work, mut band) = (0.0, 0.0);
+    for (at, (volume, residuals)) in volumes.iter().zip(&staged).enumerate() {
+        let weight = match at {
+            0 | INTERVALS => 1.0,
+            odd if odd % 2 == 1 => 4.0,
+            _ => 2.0,
+        };
+        work += weight * (staged[0][row] - residuals[row] + at_rest);
+        band += weight * margin(elastance, unstressed, *volume);
+    }
+    Ok(Filled {
+        grown: staged[0][energy] - staged[INTERVALS][energy],
+        work: work * step / 3.0,
+        band: (band * step / 3.0).abs(),
+    })
+}
+
 #[test]
-fn below_its_unstressed_volume_a_marked_veins_part_of_the_store_grows() -> Result<(), InitializationFailure> {
+fn below_its_unstressed_volume_a_marked_veins_store_is_the_work_of_its_pressure()
+-> Result<(), InitializationFailure> {
+    let body = arena_body()?;
+    for (key, elastance, unstressed) in VEINS {
+        for volume in [unstressed / 2.0, unstressed / 4.0] {
+            let Filled { grown, work, band } = filled(&body, key, elastance, unstressed, volume)?;
+            assert!(
+                (grown - work).abs() <= band,
+                "{key} at {volume} mL: the store grew {grown} against the work {work}, margin {band}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn at_its_unstressed_volume_a_marked_veins_store_and_its_slope_join_the_store_above()
+-> Result<(), InitializationFailure> {
     let body = arena_body()?;
     let energy = index(&body, algebraic("CV", "elastic energy", Context::Body));
-    let row = index(&body, pressure(vessel("central veins")));
-    let (elastance, unstressed) = (0.1, 300.0);
-    let rest = residuals_at(&body, "central veins", unstressed)?;
-    let at_rest = elastance * (1.0 - SHARE) * WIDTH / 2.0;
-    let mut last = 0.0;
-    for volume in [unstressed / 2.0, unstressed / 4.0] {
-        let staged = residuals_at(&body, "central veins", volume)?;
-        let wall = rest[row] - staged[row] + at_rest;
-        let grown = rest[energy] - staged[energy];
-        let expected = (wall * wall - at_rest * at_rest) / (2.0 * elastance);
-        assert!(
-            grown > last && (grown - expected).abs() <= 1e-9 * expected,
-            "at {volume} mL: the store's part grew {grown} against {expected}"
-        );
-        last = grown;
+    let apart = 0.05;
+    for (key, elastance, unstressed) in VEINS {
+        let row = index(&body, pressure(vessel(key)));
+        for volume in [unstressed - 10.0, unstressed + 10.0] {
+            let Filled { grown, work, band } = filled(&body, key, elastance, unstressed, volume)?;
+            assert!(
+                (grown - work).abs() <= band,
+                "{key} at {volume} mL: the store grew {grown} against the work {work}, margin {band}"
+            );
+            let near = staged(&body, key, &[unstressed, volume - apart, volume, volume + apart])?;
+            let slope = (near[1][energy] - near[3][energy]) / (2.0 * apart);
+            let wall = near[0][row] - near[2][row] + elastance * (1.0 - SHARE) * WIDTH / 2.0;
+            let off = margin(elastance, unstressed, volume);
+            assert!(
+                (slope - wall).abs() <= off,
+                "{key} at {volume} mL: the store's slope {slope} against the pressure {wall}, margin {off}"
+            );
+        }
     }
     Ok(())
 }

@@ -25,6 +25,19 @@ fn collapsing<'b, 'k>(
     width: &Parameter<'b, Cardiovascular, Volume>,
 ) -> Expr<'b, 'k, Cardiovascular, Volume> {
     let (volume, unstressed) = lumen.volumes(k);
+    let shrunk = shrinking(k, unstressed, volume, power);
+    let (zero, soft) = (k.zero(), k.parameter(width));
+    let below = k.smooth_min(shrunk, zero, soft);
+    let share = k.site_parameter(share);
+    k.scale(below, share)
+}
+
+fn shrinking<'b, 'k>(
+    k: &mut Kernel<'b, 'k, Cardiovascular, Veins>,
+    unstressed: Expr<'b, 'k, Cardiovascular, Volume>,
+    volume: Expr<'b, 'k, Cardiovascular, Volume>,
+    power: &Parameter<'b, Cardiovascular, Dimensionless>,
+) -> Expr<'b, 'k, Cardiovascular, Volume> {
     let quotient = k.divide(unstressed, volume);
     let ratio: Expr<'_, '_, _, Dimensionless> = k.as_dimension(quotient);
     let power = k.parameter(power);
@@ -34,11 +47,7 @@ fn collapsing<'b, 'k>(
     let reach = k.scale(unstressed, raised);
     let gap = k.subtract(unstressed, reach);
     let per = k.divide(gap, power);
-    let shrunk: Expr<'_, '_, _, Volume> = k.as_dimension(per);
-    let (zero, soft) = (k.zero(), k.parameter(width));
-    let below = k.smooth_min(shrunk, zero, soft);
-    let share = k.site_parameter(share);
-    k.scale(below, share)
+    k.as_dimension(per)
 }
 
 fn shed<'b, 'k>(
@@ -53,17 +62,14 @@ fn shed<'b, 'k>(
 /// One wall law for a vein, a bed and a ventricle: a site with no active elastance is passive, and a site no nerve
 /// reaches reads no effect.
 pub(crate) struct Walls<'b, 'h> {
-    water: Port<'b, Water>,
-    albumin: Port<'b, Albumin>,
-    room: Parameter<'b, Cardiovascular, Quotient<Volume, Albumin>>,
+    lumen: Lumen<'b>,
     pub(crate) outside: Port<'b, Pressure>,
-    adrenergic: Effect<'b>,
     passive: Knob<'b, Elastance>,
     active: Knob<'b, Elastance>,
     inotropy: Knob<'b, Dimensionless>,
-    unstressed: Knob<'b, Volume>,
-    unstressed_gain: Knob<'b, Volume>,
     collapse: Parameter<'b, Cardiovascular, Volume>,
+    share: SiteParameter<'b, Cardiovascular, Veins, Dimensionless>,
+    power: Parameter<'b, Cardiovascular, Dimensionless>,
     collapsed: SiteTerm<'b, Cardiovascular, Veins, Volume>,
     activation: &'h StateSlot<'b, Cardiovascular, Dimensionless>,
 }
@@ -133,26 +139,15 @@ impl<'b, 'h> Walls<'b, 'h> {
             let value = collapsing(&mut k, &lumen, &share, &power, &collapse);
             k.finish_term(value)
         });
-        let Lumen {
-            water,
-            albumin,
-            room,
-            adrenergic,
-            unstressed,
-            unstressed_gain,
-        } = lumen;
         Self {
-            water,
-            albumin,
-            room,
+            lumen,
             outside: ports.extravascular_pressure(),
-            adrenergic,
             passive,
             active,
             inotropy,
-            unstressed,
-            unstressed_gain,
             collapse,
+            share,
+            power,
             collapsed,
             activation: &heart.activation,
         }
@@ -164,40 +159,41 @@ impl<'b, 'h> Walls<'b, 'h> {
         &self,
         k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
     ) -> Expr<'b, 'k, Cardiovascular, Volume> {
-        let water = k.at_site(&self.water);
-        let solvent = k.volume(water);
-        let held = k.at_site(&self.albumin);
-        let per = k.parameter(&self.room);
-        let product = k.multiply(per, held);
-        let solute: Expr<'_, '_, _, Volume> = k.as_dimension(product);
-        let volume = k.add(solvent, solute);
-        let base = k.site_parameter(&self.unstressed);
-        let gain = k.site_parameter(&self.unstressed_gain);
-        let effect = k.at_junction_if_supplied(&self.adrenergic);
-        let moved = k.scale(gain, effect);
-        let unstressed = k.subtract(base, moved);
-        let stretched = k.subtract(volume, unstressed);
-        let (zero, soft) = (k.zero(), k.parameter(&self.collapse));
-        let above = k.smooth_max(stretched, zero, soft);
+        let above = self.stretched(k);
         k.add_from(above, &self.collapsed)
     }
-    fn contractile<'k>(
+    fn stretched<'k>(
         &self,
         k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
-    ) -> Expr<'b, 'k, Cardiovascular, Elastance> {
-        let active = k.site_parameter(&self.active);
-        let gain = k.site_parameter(&self.inotropy);
-        let effect = k.at_junction_if_supplied(&self.adrenergic);
+    ) -> Expr<'b, 'k, Cardiovascular, Volume> {
+        let (volume, unstressed) = self.lumen.volumes(k);
+        let stretched = k.subtract(volume, unstressed);
+        let (zero, soft) = (k.zero(), k.parameter(&self.collapse));
+        k.smooth_max(stretched, zero, soft)
+    }
+    fn contractile<'k, C: SiteSet>(
+        &self,
+        k: &mut Kernel<'b, 'k, Cardiovascular, C>,
+    ) -> Expr<'b, 'k, Cardiovascular, Elastance>
+    where
+        Blood: Includes<C>,
+    {
+        let active = k.site_parameter_in(&self.active);
+        let gain = k.site_parameter_in(&self.inotropy);
+        let effect = k.at_junction_if_supplied(&self.lumen.adrenergic);
         let tuned = k.scale(active, gain);
         let strengthened = k.scale(tuned, effect);
         k.add(active, strengthened)
     }
     /// `E_passive + a E_active (1 + S E_b1)`. Model default.
-    pub(crate) fn elastance<'k>(
+    pub(crate) fn elastance<'k, C: SiteSet>(
         &self,
-        k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
-    ) -> Expr<'b, 'k, Cardiovascular, Elastance> {
-        let passive = k.site_parameter(&self.passive);
+        k: &mut Kernel<'b, 'k, Cardiovascular, C>,
+    ) -> Expr<'b, 'k, Cardiovascular, Elastance>
+    where
+        Blood: Includes<C>,
+    {
+        let passive = k.site_parameter_in(&self.passive);
         let contractile = self.contractile(k);
         let activation = k.state(self.activation);
         let driven = k.scale(contractile, activation);
@@ -208,22 +204,59 @@ impl<'b, 'h> Walls<'b, 'h> {
         k: &mut Kernel<'b, 'k, Cardiovascular, Blood>,
         half: &Parameter<'b, Cardiovascular, Dimensionless>,
         stiffness: Expr<'b, 'k, Cardiovascular, Elastance>,
+        below: &SiteTerm<'b, Cardiovascular, Veins, Energy>,
     ) -> Expr<'b, 'k, Cardiovascular, Energy> {
-        let stressed = self.stressed(k);
-        let product = k.multiply(stiffness, stressed);
+        let stretched = self.stretched(k);
+        let product = k.multiply(stiffness, stretched);
         let pressure: Expr<'_, '_, _, Pressure> = k.as_dimension(product);
-        let product = k.multiply(pressure, stressed);
+        let product = k.multiply(pressure, stretched);
         let doubled: Expr<'_, '_, _, Energy> = k.as_dimension(product);
         let share = k.parameter(half);
-        k.scale(doubled, share)
+        let held = k.scale(doubled, share);
+        k.add_from(held, below)
     }
-    /// One mechanical store and one thermal store. Each blood site's wall holds `E s^2 / 2`, and the store is held to
-    /// their sum. Work enters where activation stiffens a stretched wall, in systole only, and gravity's enters beside
-    /// it. The wall power is what the store must lose to stay on the sum: no law's choice, so closure sits in the stage
-    /// residual and `verify` judges it with the rest. What the walls shed leaves as heat, and heat never comes back. What
-    /// they gain past those receipts, as a vein's muscle tightens or water enters, is muscle work from the chemical
-    /// energy the heart draws on. So the account can run no pool dry. The moving blood's energy and the stretch of tissue
-    /// and tubule are not in the sum, so what they hold passes through this rate.
+    /// Below `V_u` a marked vein's wall holds the work its pressure did, `E share Psi` with
+    /// `Psi = (V_u / n) ((V - V_u) - (V_u / (1 - n)) ((V / V_u)^(1 - n) - 1))`, the integral of the collapse branch's
+    /// stressed volume from `V_u`. It is written `V_u ((V - V_u) - (V / V_u) shrunk) / (n - 1)`, so a power of one or
+    /// less refuses on its divisor. It is read at `V_u + smooth_min(V - V_u, 0, w)`, so it fades above `V_u` and the
+    /// store joins `E s^2 / 2` there with its slope. That volume reaches zero at `w^2 / (4 V_u)`, where the term
+    /// refuses. With a power above one the store grows without bound as the vein empties. Model default.
+    fn emptied<'k>(
+        &self,
+        k: &mut Kernel<'b, 'k, Cardiovascular, Veins>,
+        stiffness: Expr<'b, 'k, Cardiovascular, Elastance>,
+    ) -> Expr<'b, 'k, Cardiovascular, Energy> {
+        let (volume, unstressed) = self.lumen.volumes(k);
+        let stretched = k.subtract(volume, unstressed);
+        let (zero, soft) = (k.zero(), k.parameter(&self.collapse));
+        let short = k.smooth_min(stretched, zero, soft);
+        let smoothed = k.add(unstressed, short);
+        let shrunk = shrinking(k, unstressed, smoothed, &self.power);
+        let quotient = k.divide(smoothed, unstressed);
+        let fraction: Expr<'_, '_, _, Dimensionless> = k.as_dimension(quotient);
+        let left = k.scale(shrunk, fraction);
+        let gap = k.subtract(short, left);
+        let power = k.parameter(&self.power);
+        let lifted = k.scale(unstressed, power);
+        let excess = k.subtract(lifted, unstressed);
+        let quotient = k.divide(unstressed, excess);
+        let per: Expr<'_, '_, _, Dimensionless> = k.as_dimension(quotient);
+        let reach = k.scale(gap, per);
+        let product = k.multiply(stiffness, reach);
+        let pressure: Expr<'_, '_, _, Pressure> = k.as_dimension(product);
+        let product = k.multiply(pressure, unstressed);
+        let work: Expr<'_, '_, _, Energy> = k.as_dimension(product);
+        let share = k.site_parameter(&self.share);
+        k.scale(work, share)
+    }
+    /// One mechanical store and one thermal store. Each blood site's wall holds `E s^2 / 2`, a marked vein's below
+    /// `V_u` the work its pressure did, and the store is held to their sum. Work enters where activation stiffens a
+    /// stretched wall, in systole only, and gravity's enters beside it. The wall power is what the store must lose to
+    /// stay on the sum: no law's choice, so closure sits in the stage residual and `verify` judges it with the rest.
+    /// What the walls shed leaves as heat, and heat never comes back. What they gain past those receipts, as a vein's
+    /// muscle tightens or water enters, is muscle work from the chemical energy the heart draws on. So the account can
+    /// run no pool dry. The moving blood's energy and the stretch of tissue and tubule are not in the sum, so what they
+    /// hold passes through this rate.
     pub(crate) fn energy(
         &self,
         cv: &mut FragmentBuilder<'b, Cardiovascular>,
@@ -234,8 +267,18 @@ impl<'b, 'h> Walls<'b, 'h> {
     ) -> Result<(), AdmissionError> {
         let half = cv.parameter::<Dimensionless>(ParameterKey::new("cv.half"), Admissible::positive());
         let elastic = cv.algebraic::<Energy>("elastic energy", Admissible::nonnegative());
-        self.elastic_energy(cv, &half, &elastic, wave);
-        self.stroke_work(cv, ports, heart, &half, wave);
+        let below = cv.site_term("vein collapse store", |mut k| {
+            let stiffness = self.elastance(&mut k);
+            let value = self.emptied(&mut k, stiffness);
+            k.finish_term(value)
+        });
+        let contracting = cv.site_term("vein collapse stroke work", |mut k| {
+            let stiffness = self.contractile(&mut k);
+            let value = self.emptied(&mut k, stiffness);
+            k.finish_term(value)
+        });
+        self.elastic_energy(cv, &half, &elastic, &below, wave);
+        self.stroke_work(cv, ports, heart, &half, &contracting, wave);
         gravity_work::declare(cv, ports, head, wave);
 
         let store = ports.dissipation(cv);
