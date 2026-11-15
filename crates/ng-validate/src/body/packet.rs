@@ -13,7 +13,7 @@ const NEW_BED: f64 = 0.1;
 const HEMOGLOBIN: f64 = 2.0;
 /// The central veins' viscosity at the admitted start, read from an admission whose vessels did not read it, so the
 /// vessels' ratio is one at the start.
-const START_VISCOSITY: f64 = 8.5;
+const START_VISCOSITY: f64 = 7.115_102_244_801_436;
 
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     Ok(AnatomyBuilder::new().site::<C>(key, at(0.0)?).id())

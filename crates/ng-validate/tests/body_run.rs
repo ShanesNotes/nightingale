@@ -3,13 +3,13 @@ use core::fmt::Write;
 use core::num::NonZeroU64;
 use expect_test::expect;
 use ng_contract::*;
-use ng_record::{Checkpoint, Running, Session};
+use ng_record::{AuthorizedInput, Checkpoint, Running, Session};
 use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "d3411f7ce491109f9a58f3c9f660848dc06e1c2813e574de2b0dee550b14ebe9";
-const ADMITTED_SEAL: &str = "9040a97ac5572486cee34c0c76c03a915e26659b1b25369e73f0ccb4d94485b7";
+const PACKET: &str = "a653b631be94842a10a9871eae045ecedf9f8e4c7dfd9c3012388f3c3a40e237";
+const ADMITTED_SEAL: &str = "d4730924b9fe6368116651d7d93727baa10fcadb77b74b3d6bdb4b8b5377b0cd";
 
 struct Counted {
     core: ng_solver::Core,
@@ -245,7 +245,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         writeln!(report, "{} {} moved", route.card(), route.name()).expect("a string takes it");
     }
     expect![[r#"
-        steps 11794, quantities 480, held routes 62
+        steps 11797, quantities 480, held routes 62
         EN vasopressin clearance moved
         EN vasopressin secretion moved
         GI gut chloride moved
@@ -340,23 +340,115 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet d3411f7ce491109f9a58f3c9f660848dc06e1c2813e574de2b0dee550b14ebe9
-        seal 4a7fde4c8e7a5769dea090dfc1ad6c6572173609f1bf8ad0d89d7c1f00ecaac1
+        packet a653b631be94842a10a9871eae045ecedf9f8e4c7dfd9c3012388f3c3a40e237
+        seal 1e354bb5feb27495cef9a26fb0f0a0fd021c720c044f09e2453f11ba5f9f2f57
         steps 198
     "#]]
     .assert_eq(&pin);
     expect![[r#"
-         100.432883 ms  arterial pressure 134.633468  right atrial pressure 3.008818  portal vein pressure 6.258075  leg vein pressure 3.596946  heart rate 1.063945  sympathetic traffic 0.786091  filtration 1.670059  urine 0.020000  wall power 24549.774592  aortic flow 0.000000
-         200.972493 ms  arterial pressure 127.073929  right atrial pressure 3.567014  portal vein pressure 6.406726  leg vein pressure 3.850298  heart rate 1.081239  sympathetic traffic 0.086528  filtration 2.109293  urine 0.020000  wall power 15618.327492  aortic flow 39.437189
-         300.346342 ms  arterial pressure 119.006854  right atrial pressure 4.057817  portal vein pressure 6.216568  leg vein pressure 4.180947  heart rate 1.048357  sympathetic traffic 0.016674  filtration 2.344810  urine 0.020000  wall power 39547.568657  aortic flow 0.000000
-         403.707336 ms  arterial pressure 109.434896  right atrial pressure 3.675895  portal vein pressure 5.988828  leg vein pressure 4.614348  heart rate 1.004394  sympathetic traffic 0.012228  filtration 2.415998  urine 0.020000  wall power 13948.549809  aortic flow 0.000000
-         504.102217 ms  arterial pressure 101.045105  right atrial pressure 2.024984  portal vein pressure 5.767247  leg vein pressure 4.365019  heart rate 0.970296  sympathetic traffic 0.022846  filtration 2.358743  urine 0.020000  wall power 12015.672581  aortic flow 0.000000
-         608.059522 ms  arterial pressure 93.141401  right atrial pressure 1.494983  portal vein pressure 5.498156  leg vein pressure 3.709240  heart rate 0.947449  sympathetic traffic 0.073838  filtration 2.207971  urine 0.020000  wall power 8662.306473  aortic flow 0.000000
-         708.059522 ms  arterial pressure 86.170598  right atrial pressure 1.466172  portal vein pressure 5.280771  leg vein pressure 3.176864  heart rate 0.940358  sympathetic traffic 0.258647  filtration 2.015384  urine 0.020000  wall power 6352.024723  aortic flow 0.000000
-         808.059522 ms  arterial pressure 79.751643  right atrial pressure 1.672377  portal vein pressure 5.262452  leg vein pressure 2.969114  heart rate 0.951979  sympathetic traffic 0.637062  filtration 1.805023  urine 0.020000  wall power 4974.935647  aortic flow 0.000000
-         908.059522 ms  arterial pressure 73.855007  right atrial pressure 1.951321  portal vein pressure 5.528065  leg vein pressure 3.094512  heart rate 0.982017  sympathetic traffic 0.902234  filtration 1.592550  urine 0.020000  wall power 4010.466126  aortic flow 0.000000
-        1000.179868 ms  arterial pressure 68.861027  right atrial pressure 2.199760  portal vein pressure 5.891259  leg vein pressure 3.309528  heart rate 1.020599  sympathetic traffic 0.976716  filtration 1.404098  urine 0.020000  wall power 3214.808695  aortic flow 0.000000
+         100.432831 ms  arterial pressure 134.633292  right atrial pressure 3.008802  portal vein pressure 6.258052  leg vein pressure 3.596931  heart rate 1.063945  sympathetic traffic 0.786091  filtration 1.670060  urine 0.020000  wall power 24549.627276  aortic flow 0.000000
+         200.972252 ms  arterial pressure 127.073817  right atrial pressure 3.566992  portal vein pressure 6.406698  leg vein pressure 3.850277  heart rate 1.081239  sympathetic traffic 0.086530  filtration 2.109290  urine 0.020000  wall power 15618.218659  aortic flow 39.436862
+         300.343654 ms  arterial pressure 119.007051  right atrial pressure 4.057781  portal vein pressure 6.216546  leg vein pressure 4.180909  heart rate 1.048358  sympathetic traffic 0.016675  filtration 2.344802  urine 0.020000  wall power 39549.002871  aortic flow 0.000000
+         403.707430 ms  arterial pressure 109.434877  right atrial pressure 3.675871  portal vein pressure 5.988799  leg vein pressure 4.614320  heart rate 1.004394  sympathetic traffic 0.012228  filtration 2.415994  urine 0.020000  wall power 13948.485344  aortic flow 0.000000
+         504.102529 ms  arterial pressure 101.045102  right atrial pressure 2.024956  portal vein pressure 5.767216  leg vein pressure 4.364992  heart rate 0.970296  sympathetic traffic 0.022847  filtration 2.358741  urine 0.020000  wall power 12015.605553  aortic flow 0.000000
+         608.059522 ms  arterial pressure 93.141455  right atrial pressure 1.494962  portal vein pressure 5.498127  leg vein pressure 3.709215  heart rate 0.947449  sympathetic traffic 0.073838  filtration 2.207971  urine 0.020000  wall power 8662.269543  aortic flow 0.000000
+         708.059522 ms  arterial pressure 86.170673  right atrial pressure 1.466155  portal vein pressure 5.280744  leg vein pressure 3.176841  heart rate 0.940358  sympathetic traffic 0.258646  filtration 2.015385  urine 0.020000  wall power 6352.013960  aortic flow 0.000000
+         808.059522 ms  arterial pressure 79.751724  right atrial pressure 1.672362  portal vein pressure 5.262427  leg vein pressure 2.969095  heart rate 0.951979  sympathetic traffic 0.637060  filtration 1.805026  urine 0.020000  wall power 4974.942726  aortic flow 0.000000
+         908.059522 ms  arterial pressure 73.855081  right atrial pressure 1.951307  portal vein pressure 5.528042  leg vein pressure 3.094495  heart rate 0.982017  sympathetic traffic 0.902233  filtration 1.592553  urine 0.020000  wall power 4010.478322  aortic flow 0.000000
+        1000.179867 ms  arterial pressure 68.861094  right atrial pressure 2.199746  portal vein pressure 5.891237  leg vein pressure 3.309513  heart rate 1.020599  sympathetic traffic 0.976716  filtration 1.404101  urine 0.020000  wall power 3214.816811  aortic flow 0.000000
     "#]].assert_eq(&trace);
+}
+
+/// The coronary bed's inflow edge has no tone, no feedback share and no fall, so its pressure drop over its flow is
+/// the packet's resistance times viscosity over its reference.
+const CORONARY_RESISTANCE: f64 = 1.4 / 0.1;
+
+struct Edge {
+    hematocrit: f64,
+    viscosity: f64,
+    drop: f64,
+    flow: f64,
+}
+impl Edge {
+    fn at(start: &Start, session: &Session<'_, Running>) -> Self {
+        let (arteries, coronary, veins) = (
+            site::<VesselSegment>("systemic arteries"),
+            site::<CapillaryBed>("coronary bed"),
+            site::<VesselSegment>("central veins"),
+        );
+        let view = session.record().accepted();
+        let value = |kind: RowKind| {
+            let row = start.body.rows().iter().find(|row| row.kind() == kind).expect("a row");
+            lead(view.value(row.id()))
+        };
+        let pressure = |at| value(field("CV", "blood pressure", Context::Site(at)));
+        let lumen = |species| {
+            value(RowKind::Amount {
+                site: veins,
+                species,
+                space: Space::Lumen,
+            })
+        };
+        let edge = Context::Edge {
+            from: arteries,
+            to: coronary,
+        };
+        Self {
+            hematocrit: lumen(Species::Hemoglobin) / lumen(Species::Water) / 5.0,
+            viscosity: value(field("HC", "viscosity", Context::Body)),
+            drop: pressure(arteries) - pressure(coronary),
+            flow: value(field("CV", "circulation", edge)),
+        }
+    }
+    fn resistance(&self) -> f64 {
+        self.drop / self.flow
+    }
+}
+
+/// At the admitted start viscosity is its reference, so the edge keeps the packet's resistance. A 400 mL water bolus
+/// into the gut then lowers the hematocrit, viscosity and the edge's resistance, and the edge's flow is its drop over
+/// the packet's resistance times viscosity's ratio, so the run tells viscosity's part of the flow from the drop's.
+fn a_water_bolus_lowers_viscosity_and_the_resistance_it_sets(start: &Start) {
+    let mut session = start.session();
+    let before = Edge::at(start, &session);
+    let at_start = before.resistance() / CORONARY_RESISTANCE;
+    assert!((at_start - 1.0).abs() < 1e-6, "viscosity over its reference at the start is {at_start}");
+    let water = WaterDelivery {
+        boundary: "gut water",
+        amount: Measure::new(400.0).expect("finite"),
+        ends: SimTime::from_ns(anchor_moment().nanoseconds() + 2 * SECOND),
+    };
+    let at = SimTime::from_ns(anchor_moment().nanoseconds() + SECOND);
+    let event = BoundaryEvent::new(
+        InputId::new(Digest::of_canonical(b"water bolus")),
+        at,
+        BoundaryInput::Water(water),
+    );
+    let input = AuthorizedInput::from_command_receipt(Digest::of_canonical(b"a test's own command"), event);
+    session.enqueue(input).expect("enqueued");
+    let after = Edge::at(start, &until(session, 30 * SECOND));
+    let (ratio, resisted) = (
+        after.viscosity / before.viscosity,
+        after.resistance() / before.resistance(),
+    );
+    let report = format!(
+        "hematocrit {} to {}, viscosity {} to {}, resistance ratio {resisted}, drop {} to {}, flow {} to {}",
+        before.hematocrit,
+        after.hematocrit,
+        before.viscosity,
+        after.viscosity,
+        before.drop,
+        after.drop,
+        before.flow,
+        after.flow
+    );
+    assert!(after.hematocrit < before.hematocrit && ratio < 1.0, "{report}");
+    assert!((resisted - ratio).abs() < 1e-9, "{report}");
+    let through_viscosity = after.drop / before.drop / ratio;
+    assert!(
+        after.flow > before.flow && (after.flow / before.flow - through_viscosity).abs() < 1e-9,
+        "{report}"
+    );
 }
 
 struct Ticks(Cell<u64>);
@@ -454,4 +546,5 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         solves: start.core.solves.get() - before,
     };
     assert_eq!(over_ceilings(counts, CEILINGS), Vec::<&str>::new(), "{counts:?}");
+    a_water_bolus_lowers_viscosity_and_the_resistance_it_sets(&start);
 }

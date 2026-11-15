@@ -360,6 +360,9 @@ A fluid route's statement that its wall stops one species whole, so one end may 
 **Partial volume**:
 The volume one unit amount of a species takes up. A space's volume derives from its amounts through it. Water's is a fixed coefficient of the schema. Albumin's is a parameter a wall's law reads, and a small ion takes up none.
 
+**Hematocrit**:
+The share of a blood space's volume that red cells take: the space's hemoglobin amount over its volume, over the red cells' own hemoglobin concentration. Hematology reads it at the central veins, and blood viscosity follows from it.
+
 **Coupling field**:
 One value an arrow of the coupling map carries, held as an algebraic row that the map's sender defines and its receiver reads. A per-site field has one row per site.
 
