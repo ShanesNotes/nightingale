@@ -800,7 +800,7 @@ What a core's declared error scales allow a row at a value: the absolute scale t
 The arena's result for one solver core under one arena protocol: the run the arena timed, with its throughput and numerical health, a certificate of the history that run ended on, accuracy evidence of its solver core on every manufactured case and the first slice window at the model-default bound, replay evidence of its run identity, and the day checks of its day plan, whose fed run must end on its seal. Each part is its own result with the policy values it was judged by, so a failed part leaves the others standing. A part from another run, or from a gate that did not run, is missing evidence and never a pass.
 
 **Policy value**:
-A model default the validation crate sets for a gate and every result reports: the accuracy tolerances, a slice window's margin, distance floor, landing tolerance, grid and reference refinements, the error scales, each core's minimum interval and the certificate's closure floor.
+A model default the validation crate sets for a gate and every result reports: the accuracy tolerances, a slice window's margin, distance floor, landing tolerance, grid and reference refinements, the error scales, each core's minimum interval, the certificate's closure floor and the count of last places one row update may round.
 
 **Pulse**:
 The Pulse Physiology Engine, a reference to compare against and never a pass bar (rule 6). A Pulse diff, a match to published data and clinical validity are three separate claims.
