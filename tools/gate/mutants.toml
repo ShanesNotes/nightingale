@@ -3353,8 +3353,11 @@ test = "-p ng-validate --test viscosity a_plain_edges_flow_falls_as_viscosity_ov
 [[mutant]]
 name = "ledger-total-folds-again"
 path = "crates/ng-record/src/history.rs"
-old = '''(finite.then(|| sum.pair()).flatten())'''
-new = '''(false.then(|| sum.pair()).flatten())'''
+old = '''    sum.pair()
+}'''
+new = '''    let _ = sum.pair();
+    terms.fold(Compensated::ZERO, |total, (value, weight)| total.plus(value.scaled(weight)))
+}'''
 test = "-p ng-record --lib history::tests::an_exact_total_reads_one_value_however_its_rows_split_it"
 
 [[mutant]]
@@ -3383,6 +3386,60 @@ name = "closure-counts-one-step-a-window"
 path = "crates/ng-validate/src/certificate.rs"
 old = '''let steps = behind.abs_diff(ahead) + 1;'''
 new = '''let steps = behind.abs_diff(ahead) * 0 + 1;'''
+test = "-p ng-validate --test closure_rounding"
+
+[[mutant]]
+name = "ledger-total-past-the-range-folds"
+path = "crates/ng-record/src/history.rs"
+old = '''    sum.pair()
+}'''
+new = '''    Some(sum.pair()).filter(|total| total.at_most(*total)).unwrap_or_else(|| {
+        terms.fold(Compensated::ZERO, |total, (value, weight)| total.plus(value.scaled(weight)))
+    })
+}'''
+test = "-p ng-record --lib history::tests::an_exact_total_past_the_finite_range_is_not_finite_where_the_fold_reads_a_finite_one"
+
+[[mutant]]
+name = "ledger-total-tie-never-rounds-up"
+path = "crates/ng-record/src/history.rs"
+old = '''if bit(shift - 1) && (below(shift - 1) || mantissa & 1 == 1) {'''
+new = '''if bit(shift - 1) && below(shift - 1) {'''
+test = "-p ng-record --lib history::tests::an_exact_total_breaks_a_tie_to_even"
+
+[[mutant]]
+name = "closure-place-of-the-rounded-sum"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let biased = (total.bits()[0] >> 52) & 0x7ff;'''
+new = '''let biased = ((f64::from_bits(total.bits()[0]) + f64::from_bits(total.bits()[1])).to_bits() >> 52) & 0x7ff;'''
+test = "-p ng-validate --lib certificate::tests::a_total_just_below_a_power_of_two_takes_its_larger_parts_last_place"
+
+[[mutant]]
+name = "closure-count-past-i64-admits-nothing"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''floor.plus(place.scaled(i64::try_from(last_places).unwrap_or(i64::MAX)))'''
+new = '''floor.plus(place.scaled(i64::try_from(last_places).unwrap_or(0)))'''
+test = "-p ng-validate --lib certificate::tests::a_count_scales_as_a_float_and_holds_at_the_largest_signed_integer"
+
+[[mutant]]
+name = "closure-steps-without-the-one"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let steps = behind.abs_diff(ahead) + 1;'''
+new = '''let steps = behind.abs_diff(ahead);'''
+test = "-p ng-validate --test closure_rounding"
+
+[[mutant]]
+name = "closure-allowance-at-the-early-end"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let place = last_place(closing);'''
+new = '''let place = last_place(opening);'''
+test = "-p ng-validate --test closure_rounding"
+
+[[mutant]]
+name = "closure-result-keeps-its-first-windows-place"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''            result.closure_last_places = last_places;
+            result.closure_place = place;'''
+new = '''            let _ = (last_places, place);'''
 test = "-p ng-validate --test closure_rounding"
 
 [[mutant]]

@@ -398,6 +398,8 @@ impl<'r> Holding<'r> {
     }
 }
 
+/// 2^(e - 105), with 2^e the power of two at or below the total's larger part, never below the smallest float, and
+/// zero for a total that is not finite.
 fn last_place(total: Compensated) -> Compensated {
     let biased = (total.bits()[0] >> 52) & 0x7ff;
     let place = match biased {
@@ -409,6 +411,8 @@ fn last_place(total: Compensated) -> Compensated {
     Measure::<Dimensionless>::new(place).map_or(Compensated::ZERO, |place| Compensated::of(&place))
 }
 
+/// Scales the place by the count as a float: exact up to 2^53, to within one part in 2^53 above it, and held at the
+/// largest signed integer past that.
 fn admitted(floor: Compensated, place: Compensated, last_places: u64) -> Compensated {
     floor.plus(place.scaled(i64::try_from(last_places).unwrap_or(i64::MAX)))
 }
@@ -734,6 +738,38 @@ mod tests {
         assert!(
             at.plus(floor).at_most(admitted(floor, place, 7 * 31 * 1_000)),
             "the floor adds to it"
+        );
+    }
+
+    #[test]
+    fn a_total_just_below_a_power_of_two_takes_its_larger_parts_last_place() {
+        let total = exact(4096.0).plus(exact(-6.39e-14));
+        assert_eq!(total.bits()[0], 4096.0_f64.to_bits(), "the larger part is 2^12");
+        assert_eq!(
+            last_place(total).bits(),
+            exact(f64::from_bits((1023 - 93) << 52)).bits(),
+            "so the place is 2^-93, though the sum is below 2^12"
+        );
+    }
+
+    #[test]
+    fn a_count_scales_as_a_float_and_holds_at_the_largest_signed_integer() {
+        let one = exact(1.0);
+        let two_to = |power: u64| exact(f64::from_bits((1023 + power) << 52));
+        assert_eq!(
+            admitted(Compensated::ZERO, one, (1 << 53) + 1).bits(),
+            two_to(53).bits(),
+            "past 2^53 a count rounds down"
+        );
+        assert_eq!(
+            admitted(Compensated::ZERO, one, (1 << 53) + 3).bits(),
+            two_to(53).plus(exact(4.0)).bits(),
+            "or up, by one part in 2^53 at most"
+        );
+        assert_eq!(
+            admitted(Compensated::ZERO, one, u64::MAX).bits(),
+            two_to(63).bits(),
+            "past the largest signed integer it holds at that, which scales as 2^63"
         );
     }
 

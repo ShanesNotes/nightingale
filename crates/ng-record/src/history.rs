@@ -106,14 +106,18 @@ impl ExactSum {
             biased << 52 | (mantissa & ((1 << 52) - 1))
         })
     }
-    fn pair(mut self) -> Option<Compensated> {
+    fn pair(mut self) -> Compensated {
         let sign = |negative: bool, magnitude: f64| if negative { -magnitude } else { magnitude };
         let negative = self.settled_negative();
         let hi = self.nearest();
+        let Ok(high) = Measure::<Dimensionless>::new(sign(negative, hi)) else {
+            return Compensated::from_bits([sign(negative, hi).to_bits(), 0]).expect("an infinite part");
+        };
         self.add(hi, -1);
         let lo = sign(self.settled_negative(), self.nearest());
-        let [hi, lo] = [sign(negative, hi), sign(negative, lo)].map(Measure::<Dimensionless>::new);
-        Some(Compensated::of(&hi.ok()?).plus(Compensated::of(&lo.ok()?)))
+        let low =
+            Measure::<Dimensionless>::new(sign(negative, lo)).expect("the rest is under half a last place");
+        Compensated::of(&high).plus(Compensated::of(&low))
     }
 }
 
@@ -129,21 +133,18 @@ fn exact_total(terms: impl Iterator<Item = (Compensated, i64)> + Clone) -> Compe
         }
     }
     let mut sum = ExactSum::new();
-    let mut finite = true;
     for (value, weight) in terms.clone() {
         for part in value.bits().map(f64::from_bits) {
-            finite &= part.is_finite();
-            if finite {
-                sum.add(part, weight);
+            if !part.is_finite() {
+                // A part that is not finite has no limbs: the fold carries it into a total that is not finite.
+                return terms.fold(Compensated::ZERO, |total, (value, weight)| {
+                    total.plus(value.scaled(weight))
+                });
             }
+            sum.add(part, weight);
         }
     }
-    // Past the finite range the fold's total carries what is not finite.
-    (finite.then(|| sum.pair()).flatten()).unwrap_or_else(|| {
-        terms.fold(Compensated::ZERO, |total, (value, weight)| {
-            total.plus(value.scaled(weight))
-        })
-    })
+    sum.pair()
 }
 
 /// What one combination gains on one column as exchange. Only a column with a receipt crosses the boundary, so a column
@@ -1037,7 +1038,10 @@ mod tests {
 
     #[test]
     fn an_exact_total_past_the_finite_range_is_not_finite_where_the_fold_reads_a_finite_one() {
-        let heavy = [(exact(two_to(970)), (1 << 53) - 2), (exact(two_to(970)), (1 << 53) + 1)];
+        let heavy = [
+            (exact(two_to(970)), (1 << 53) - 2),
+            (exact(two_to(970)), (1 << 53) + 1),
+        ];
         let below = two_to(970) - two_to(917);
         let light = [two_to(1023), two_to(1023) - two_to(971), below]
             .into_iter()
@@ -1089,7 +1093,7 @@ mod tests {
                 for part in row.bits().map(f64::from_bits) {
                     limbs.add(part, weight);
                 }
-                let read = limbs.pair().expect("finite");
+                let read = limbs.pair();
                 assert_eq!(total(&[(row, weight)]).bits(), read.bits(), "{row:?} at {weight}");
             }
         }
