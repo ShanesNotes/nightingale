@@ -313,12 +313,7 @@ fn energy_parts(start: &Start, session: &Session<'_, Running>) -> [f64; 4] {
     let mut parts = [0.0; 4];
     for row in start.body.rows() {
         let held = || lead(view.value(row.id()));
-        if let RowKind::Amount {
-            site,
-            species,
-            space,
-        } = row.kind()
-        {
+        if let RowKind::Amount { site, species, space } = row.kind() {
             match (species, space) {
                 (Species::Energy, Space::Thermal) if site.key().ends_with(" bed") => parts[1] += held(),
                 (Species::Energy, Space::Thermal) => parts[0] += held(),
@@ -738,11 +733,7 @@ fn extents(session: &Session<'_, Running>, columns: &[ColumnId], at: u64) -> Vec
 fn count(body: &CompiledBody, column: ColumnId, on: impl Fn(SiteId, Species, Space) -> bool) -> f64 {
     (body.columns()[column.index()].terms().iter())
         .filter(|(row, _)| match body.rows()[row.index()].kind() {
-            RowKind::Amount {
-                site,
-                species,
-                space,
-            } => on(site, species, space),
+            RowKind::Amount { site, species, space } => on(site, species, space),
             RowKind::Memory(_) | RowKind::Algebraic(_) => false,
         })
         .map(|&(_, count)| count as f64)
@@ -855,7 +846,9 @@ fn only_the_core_store_takes_the_beds_heat(body: &CompiledBody, columns: &[Colum
 /// times each gas's content difference then meets what the ledger says the beds' burns used and made, to LEDGER, the
 /// body's settling over nine beats. The same beats hold the quotient, the lung's exchange and the beds' heat, and the
 /// muscle bed's oxygen over the part of the first beat in which its inflow moves most.
-fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned_over_whole_beats(start: &Start) {
+fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned_over_whole_beats(
+    start: &Start,
+) {
     let (muscle, lung_bed) = (
         site::<CapillaryBed>("muscle bed"),
         site::<CapillaryBed>("pulmonary bed"),
@@ -942,7 +935,10 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
     let body = &start.body;
     let columns = every_column(body);
     let sample = |at: u64| samples.iter().find(|sample| sample.at == at).expect("a sample");
-    let (beginning, end) = (extents(&session, &columns, first), extents(&session, &columns, last));
+    let (beginning, end) = (
+        extents(&session, &columns, first),
+        extents(&session, &columns, last),
+    );
     let beats = burned(body, &columns, &beginning, &end);
     let (oxygen, carbon_dioxide) = (beats.oxygen / held, beats.carbon_dioxide / held);
     let systemic = (
@@ -966,7 +962,11 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
     let at_onset = sample(first).inflow;
     let moved = (samples.iter())
         .filter(|sample| first < sample.at && sample.at <= onsets[1])
-        .max_by(|a, b| (a.inflow - at_onset).abs().total_cmp(&(b.inflow - at_onset).abs()))
+        .max_by(|a, b| {
+            (a.inflow - at_onset)
+                .abs()
+                .total_cmp(&(b.inflow - at_onset).abs())
+        })
         .expect("a step inside the first beat");
     let (mut used, mut net) = (0.0, 0.0);
     let after = extents(&session, &columns, moved.at);
@@ -1010,11 +1010,16 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
         (quotient - QUOTIENT).abs() <= 1e-12,
         "the burns made {quotient} carbon dioxide an oxygen"
     );
-    for (gas, rate) in [(Species::Oxygen, oxygen), (Species::CarbonDioxide, carbon_dioxide)] {
+    for (gas, rate) in [
+        (Species::Oxygen, oxygen),
+        (Species::CarbonDioxide, carbon_dioxide),
+    ] {
         let lung: f64 = (columns.iter())
             .filter(|column| body.columns()[column.index()].receipt().is_some())
             .map(|column| {
-                let at_lung = count(body, *column, |site, species, _| site == lung_bed && species == gas);
+                let at_lung = count(body, *column, |site, species, _| {
+                    site == lung_bed && species == gas
+                });
                 ((end[column.index()] - beginning[column.index()]) * at_lung).abs() / held
             })
             .sum();
