@@ -30,6 +30,10 @@ impl ExactSum {
     }
     fn add(&mut self, part: f64, weight: i64) {
         let bits = part.to_bits();
+        // A zero adds nothing, and would stretch the limbs each reading carries down to the first.
+        if bits << 1 == 0 {
+            return;
+        }
         let biased = (bits >> 52) & 0x7ff;
         let fraction = bits & ((1 << 52) - 1);
         let mantissa = i128::from(if biased == 0 { fraction } else { fraction | 1 << 52 });
