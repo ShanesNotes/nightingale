@@ -862,12 +862,8 @@ impl KernelData {
         }
         self
     }
-    /// This kernel with each read of an explicit field replaced by the field's expression. The field's ops stand where
-    /// the read stood, each named for the field's law, and none is shared with the host's own: a shared op would take
-    /// the host's name and change the order the host's slopes add in. A closing `row - value` stays last. A read at a
-    /// landmark moves the field's own site reads there. `None` when the kernel reads no such field, so its program
-    /// keeps its bytes.
-    pub(crate) fn written_in(&self, fields: &[ExplicitLaw]) -> Result<Option<KernelData>, WriteIn> {
+    /// Shares no op with the host's own: a shared op would take the host's name and change the order its slopes add in.
+    pub(crate) fn written_in(&self, fields: &[ExplicitLaw]) -> Result<Option<KernelData>, Unwritable> {
         let field_of = |input: &Input| match input {
             Input::Read(Source::Field(name), place) => {
                 (fields.iter().find(|field| field.name == *name)).map(|field| (field, *place))
@@ -876,7 +872,7 @@ impl KernelData {
         };
         let stands = |place: Where| match place {
             Where::Here | Where::Mark(_) | Where::MarkOn(..) => Ok(()),
-            _ => Err(WriteIn::NoSuchRead),
+            _ => Err(Unwritable::NoSuchRead),
         };
         let inputs = (self.code.iter()).filter_map(|op| match op {
             Op::Input(input) => Some(input),
@@ -907,13 +903,13 @@ impl KernelData {
                 continue;
             };
             if (reads.iter()).any(|read| read.at == at && read.expects != field.kernel.dimension) {
-                return Err(WriteIn::Dimension(field.name));
+                return Err(Unwritable::Dimension(field.name));
             }
             let moved = |input: Input| match (input, place) {
                 (input, Where::Here) | (input @ Input::Parameter(_), _) => Ok(input),
                 (Input::Read(source, Where::Here), _) => Ok(Input::Read(source, place)),
                 (Input::Height(Where::Here), _) => Ok(Input::Height(place)),
-                _ => Err(WriteIn::NoSuchRead),
+                _ => Err(Unwritable::NoSuchRead),
             };
             let offset = code.len();
             for op in &field.kernel.code {
@@ -1512,15 +1508,13 @@ pub struct Explicit<'b, O, U> {
 }
 /// The expression to attach with `express_at`, and the read of it, which a reader cannot tell from a row's read.
 pub type ExplicitField<'b, O, C, U> = (Explicit<'b, O, PerSite<C, U>>, ReadPort<'b, O, PerSite<C, U>>);
-/// An explicit field's one law and the set it stands on, as compile writes it in.
 pub(crate) struct ExplicitLaw<'f> {
     pub(crate) name: LawName,
     pub(crate) set: Sites,
     pub(crate) kernel: &'f KernelData,
 }
-/// Why a read of an explicit field cannot be written in where it stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WriteIn {
+pub(crate) enum Unwritable {
     NoSuchRead,
     Dimension(LawName),
 }
@@ -2245,7 +2239,6 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
             ReadPort::field(LawName { owner, local: name }),
         )
     }
-    /// A field at every site of a set with no row, its law attached with `express_at`, and the read of it.
     pub(crate) fn explicit_field<C: SiteSet, U: Dimension>(
         &mut self,
         name: &'static str,
@@ -2652,7 +2645,6 @@ pub(crate) enum SlotKind {
     Algebraic,
     /// Only a definition serves it and only a port reads it, so a plain slot of its name does neither.
     Defined,
-    /// No row: compile writes its law's expression into each program that reads it.
     Explicit,
 }
 pub(crate) struct ModeDeclaration {

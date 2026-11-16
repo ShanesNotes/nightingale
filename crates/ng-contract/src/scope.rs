@@ -483,7 +483,6 @@ impl<'b> Assembly<'b> {
         let readers = &crate::catalog::SPECIATION_READERS;
         compile(self.schema, self.issued, self.held, self.fragments, readers)
     }
-    /// Compiles against another readers' table, so a test can wire a reader today's table holds.
     #[cfg(test)]
     pub(crate) fn compile_reading(
         self,

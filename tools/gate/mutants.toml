@@ -3615,8 +3615,8 @@ new = '''            if reason.len() > usize::MAX - 1 {'''
 test = "-p ng-contract --test census the_readers_table_refuses_an_empty_reason"
 
 [[mutant]]
-name = "reader-set-ignored"
+name = "reader-ignored-in-one-row-rule"
 path = "crates/ng-contract/src/catalog.rs"
 old = '''if same(table[i].reader, table[j].reader) && same_sites(table[i].sites, table[j].sites) {'''
-new = '''if same(table[i].reader, table[j].reader) && same_sites(table[i].sites, table[i].sites) {'''
+new = '''if same_sites(table[i].sites, table[j].sites) {'''
 test = "-p ng-contract --test census the_readers_table_refuses_two_rows_for_one_reader_and_set"

@@ -357,7 +357,6 @@ fn starts(body: &CompiledBody, bound: &BoundParameters) -> Vec<f64> {
         .collect()
 }
 
-/// Each instance's law, place and value bits, from the starts.
 fn values(body: &CompiledBody, sites: [SiteId; 4]) -> Vec<(LawName, Context, u64)> {
     let bound = bound(body, sites, &[]);
     let frame = DriveFrame::default();
@@ -386,7 +385,6 @@ fn refusal(body: &CompiledBody, sites: [SiteId; 4], overrides: &[(&'static str, 
     Some(refused.law)
 }
 
-/// Every Jacobian entry and every parameter slope, each as its row, its column and its bits.
 fn slopes(body: &CompiledBody, sites: [SiteId; 4]) -> Vec<String> {
     let bound = bound(body, sites, &[]);
     let frame = DriveFrame::default();
@@ -546,6 +544,11 @@ fn the_closing_row_read_stays_last() {
     };
     assert_eq!(*row, Op::Input(crate::law::Input::Algebraic("probe")));
     assert_eq!(*close, Op::Subtract([ops.len() - 2, ops.len() - 3]));
+    assert_eq!(
+        ops.iter().filter(|op| *op == row).count(),
+        1,
+        "the row is read once, last"
+    );
 }
 
 #[test]

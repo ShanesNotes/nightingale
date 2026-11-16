@@ -12,7 +12,7 @@ use crate::identity::{Canonical, Seal};
 use crate::law::{
     End, ExplicitLaw, Family, FragmentData, GuardDeclaration, Input, KernelData, ModeDeclaration, Obligation,
     Op, Over, ParameterContext, ParameterDeclaration, ReactionDeclaration, Selector, SlotDeclaration,
-    SlotKind, Source, Where, WriteIn,
+    SlotKind, Source, Unwritable, Where,
 };
 use crate::scheme::greatest_common_divisor;
 use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, HeldSpecies, PoolRef, RouteBoundary};
@@ -1470,8 +1470,8 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
             }
             let write = |kernel: &KernelData| {
                 kernel.written_in(&fields).map_err(|refused| match refused {
-                    WriteIn::NoSuchRead => CompileDefect::NoSuchRead { law: law.name },
-                    WriteIn::Dimension(field) => CompileDefect::FieldDimension { law: law.name, field },
+                    Unwritable::NoSuchRead => CompileDefect::NoSuchRead { law: law.name },
+                    Unwritable::Dimension(field) => CompileDefect::FieldDimension { law: law.name, field },
                 })
             };
             let own = kernel;
@@ -1558,9 +1558,6 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
 
 const VARIANT: usize = usize::MAX / 2;
 
-/// Each explicit field's one law, which `check_coverage` has already found. Writing one in is one level deep and holds
-/// in every mode, and its expression names nothing a reader's own name would capture: no slot, stream, forcing, route
-/// or reaction by its local name.
 fn explicit_laws<'f>(owed: &[Owed<'f>]) -> Result<Vec<ExplicitLaw<'f>>, CompileDefect> {
     let explicit: Vec<(&Owed<'f>, Sites)> = (owed.iter())
         .filter_map(|owed| match owed.serves {
@@ -1614,8 +1611,6 @@ fn explicit_laws<'f>(owed: &[Owed<'f>]) -> Result<Vec<ExplicitLaw<'f>>, CompileD
     Ok(fields)
 }
 
-/// Every sampled segment has a law of another card that reads blood chemistry's rows there, a written-in field's
-/// reads included, so a stale mark cannot keep its rows.
 fn check_samples(placement: &Placement, rows: &Rows, anatomy: &Anatomy) -> Result<(), CompileDefect> {
     let stater = crate::BloodChemistry::CARD;
     let stated_at = |address: &Address, site: SiteId| match address {
@@ -1637,8 +1632,6 @@ fn check_samples(placement: &Placement, rows: &Rows, anatomy: &Anatomy) -> Resul
     }
 }
 
-/// A law of another card reads a field blood chemistry states only where a row of the readers' table wires that
-/// quantity to its card on a set that holds the site the read lands at.
 fn check_wired(
     law: LawName,
     kernel: &KernelData,
@@ -1675,7 +1668,6 @@ fn check_wired(
     Ok(())
 }
 
-/// A read of an explicit field lands at a site of the field's set: the reader's own site, or its landmark's.
 fn check_landing(
     law: LawName,
     kernel: &KernelData,

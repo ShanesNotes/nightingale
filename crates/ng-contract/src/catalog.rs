@@ -910,16 +910,12 @@ const fn same_sites(a: Sites, b: Sites) -> bool {
     }
 }
 
-/// A row's set lies inside the speciated sites, or the crate does not build.
 const fn inside_speciation<C: SiteSet>()
 where
     Speciated: Includes<C>,
 {
 }
 
-/// One macro emits the table and, for a row that wires a quantity, a payload with one member per wired quantity. The
-/// payload is a `Coupling` only on its reading side, so its reader takes it with `receive` and blood chemistry cannot
-/// `emit` it.
 macro_rules! speciation_readers {
     ($($reader:ident at $set:ty, $label:literal, $plan:ident $carried:tt $(held $held:tt)?;)*) => {
         $(speciation_readers!(@payload $plan $carried $reader $set);)*
