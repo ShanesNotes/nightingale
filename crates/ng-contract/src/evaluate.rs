@@ -550,15 +550,22 @@ impl CompiledBody {
         let layout = &self.layout.guards[guard];
         let (arithmetic, reads) = self.tape.guard(guard);
         let mut values = vec![0.0; arithmetic.length];
-        let value =
-            forward(arithmetic, reads, inputs, self.partial_volume(), &mut values).map_err(|domain| {
-                let law = self.layout.modes[layout.variable].variable.law;
-                Undefined { law, domain }
-            })?;
+        let value = forward(arithmetic, reads, inputs, self.partial_volume(), &mut values)
+            .map_err(|domain| self.guard_undefined(guard, inputs, domain))?;
         Ok(match layout.crossing {
             Crossing::Rising => value,
             Crossing::Falling => -value,
         })
+    }
+    fn guard_undefined(&self, guard: usize, inputs: &Inputs<'_>, domain: OperatorDomain) -> Undefined {
+        let layout = &self.layout.guards[guard];
+        let mut law = self.layout.modes[layout.variable].variable.law;
+        if !layout.code.origins.is_empty() {
+            let (arithmetic, reads) = self.tape.guard(guard);
+            let op = refused_at(arithmetic, reads, inputs, self.partial_volume());
+            law = layout.code.origin(op).unwrap_or(law);
+        }
+        Undefined { law, domain }
     }
     fn guard_sign(&self, guard: usize) -> f64 {
         match self.layout.guards[guard].crossing {
@@ -575,7 +582,8 @@ impl CompiledBody {
             law: self.layout.modes[layout.variable].variable.law,
             domain,
         };
-        forward(arithmetic, reads, inputs, partial_volume, &mut values).map_err(undefined)?;
+        forward(arithmetic, reads, inputs, partial_volume, &mut values)
+            .map_err(|domain| self.guard_undefined(guard, inputs, domain))?;
         backward(arithmetic, &values, partial_volume, &mut slopes);
         let sign = self.guard_sign(guard);
         let finite = |(index, slope): (usize, f64)| {

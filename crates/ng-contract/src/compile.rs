@@ -58,12 +58,13 @@ pub(crate) fn compile(
         held: &held,
         readers,
     };
-    let placement = place(&owed, &places, &unread)?;
-    check_samples(&placement, &rows, &schema.anatomy)?;
+    let fields = explicit_laws(&owed)?;
+    let placement = place(&owed, &places, &unread, &fields)?;
     check_holds(&rows, &schema, &held)?;
     check_orphans(&rows, &placement.columns, &schema, &held)?;
     let modes = modes(&fragments, &places);
-    let guards = guards(&fragments, &places, &modes)?;
+    let guards = guards(&fragments, &places, &modes, &fields)?;
+    check_samples(&placement, &guards, &modes, &rows, &schema.anatomy)?;
     let forced = forcing_parameters(&fragments);
     let (parameters, instances, guards) = bind(placement.instances, guards, &forced, &declarations);
     let closed = closed_rows(&fragments, &rows);
@@ -1355,7 +1356,12 @@ fn marked(
     Ok(instances)
 }
 
-fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement, CompileDefect> {
+fn place(
+    owed: &[Owed],
+    places: &Places,
+    unread: &[LawName],
+    fields: &[ExplicitLaw],
+) -> Result<Placement, CompileDefect> {
     let Places {
         rows,
         reaches,
@@ -1369,7 +1375,6 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
         instances: Vec::new(),
     };
     let mut variants: Vec<Program> = Vec::new();
-    let fields = explicit_laws(owed)?;
     for law in owed {
         let targets = match law.serves {
             Serves::Explicit(_) => continue,
@@ -1451,6 +1456,18 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
                 | Input::Memory(_) => Some(true),
                 _ => None,
             };
+            let defined;
+            let mut kernel = kernel;
+            if let Serves::Boundary(water) = law.serves
+                && water.drains
+            {
+                defined = kernel.clone().defining(water.name);
+                kernel = &defined;
+            }
+            let write = |kernel: &KernelData| written(law.name, kernel, fields);
+            let own = kernel;
+            let written = write(own)?;
+            let kernel = written.as_ref().unwrap_or(own);
             let reads: Vec<bool> = (kernel.code.iter())
                 .filter_map(|op| match op {
                     Op::Input(input) => read(input),
@@ -1460,23 +1477,6 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
             if reads.contains(&false) && !reads.contains(&true) {
                 return Err(CompileDefect::UnscaledInput { law: law.name });
             }
-            let defined;
-            let mut kernel = kernel;
-            if let Serves::Boundary(water) = law.serves
-                && water.drains
-            {
-                defined = kernel.clone().defining(water.name);
-                kernel = &defined;
-            }
-            let write = |kernel: &KernelData| {
-                kernel.written_in(&fields).map_err(|refused| match refused {
-                    Unwritable::NoSuchRead => CompileDefect::NoSuchRead { law: law.name },
-                    Unwritable::Dimension(field) => CompileDefect::FieldDimension { law: law.name, field },
-                })
-            };
-            let own = kernel;
-            let written = write(own)?;
-            let kernel = written.as_ref().unwrap_or(own);
             let declared = ProgramId::at(placement.programs.len());
             let base = code(law.fragment, kernel);
             for &(context, target) in &targets {
@@ -1618,7 +1618,24 @@ fn explicit_laws<'f>(owed: &[Owed<'f>]) -> Result<Vec<ExplicitLaw<'f>>, CompileD
     Ok(fields)
 }
 
-fn check_samples(placement: &Placement, rows: &Rows, anatomy: &Anatomy) -> Result<(), CompileDefect> {
+fn written(
+    law: LawName,
+    kernel: &KernelData,
+    fields: &[ExplicitLaw],
+) -> Result<Option<KernelData>, CompileDefect> {
+    kernel.written_in(fields).map_err(|refused| match refused {
+        Unwritable::NoSuchRead => CompileDefect::NoSuchRead { law },
+        Unwritable::Dimension(field) => CompileDefect::FieldDimension { law, field },
+    })
+}
+
+fn check_samples(
+    placement: &Placement,
+    guards: &[(GuardLayout, Vec<Address>)],
+    modes: &[ModeLayout],
+    rows: &Rows,
+    anatomy: &Anatomy,
+) -> Result<(), CompileDefect> {
     let stater = crate::BloodChemistry::CARD;
     let stated_at = |address: &Address, site: SiteId| match address {
         Address::Unknown(row) => matches!(
@@ -1627,11 +1644,12 @@ fn check_samples(placement: &Placement, rows: &Rows, anatomy: &Anatomy) -> Resul
         ),
         _ => false,
     };
+    let laws = (placement.instances.iter())
+        .map(|placed| (placement.programs[placed.program.index()].law, &placed.addresses))
+        .chain((guards.iter()).map(|(guard, addresses)| (modes[guard.variable].variable.law, addresses)));
+    let readers: Vec<(LawName, &Vec<Address>)> = laws.filter(|(law, _)| law.owner != stater).collect();
     let read_at = |site: SiteId| {
-        (placement.instances.iter()).any(|placed| {
-            placement.programs[placed.program.index()].law.owner != stater
-                && placed.addresses.iter().any(|address| stated_at(address, site))
-        })
+        (readers.iter()).any(|(_, addresses)| addresses.iter().any(|address| stated_at(address, site)))
     };
     match anatomy.sampled().iter().find(|&&site| !read_at(site)) {
         Some(&site) => Err(CompileDefect::UnreadSample { site }),
@@ -2381,6 +2399,7 @@ fn guards(
     fragments: &[FragmentData],
     places: &Places,
     modes: &[ModeLayout],
+    fields: &[ExplicitLaw],
 ) -> Result<Vec<(GuardLayout, Vec<Address>)>, CompileDefect> {
     let Places {
         rows,
@@ -2421,7 +2440,10 @@ fn guards(
             if resets.as_ref().is_some_and(positive) {
                 return Err(CompileDefect::ResetOutsideSet { law });
             }
+            let written = written(law, zero, fields)?;
+            let program = written.as_ref().unwrap_or(zero);
             for at in places_of(anatomy, reaches, schema, fragment.owner, mode.over) {
+                check_landing(law, zero, fields, at, anatomy)?;
                 let reset = resets.map(|local| {
                     let owner = fragment.owner;
                     let row = rows.slot(LawName { owner, local }, at).map(RowId::at);
@@ -2434,11 +2456,11 @@ fn guards(
                     leaves: sorted(*leaves),
                     enters: sorted(*enters),
                     crossing: *crossing,
-                    code: code(fragment, zero),
+                    code: code(fragment, program),
                     inputs: Vec::new(),
                     resets: reset,
                 };
-                guards.push((layout, addresses(law, route, zero, at, places)?));
+                guards.push((layout, addresses(law, route, program, at, places)?));
                 check_wired(law, zero, at, places)?;
             }
         }

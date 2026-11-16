@@ -47,6 +47,14 @@ struct Case {
     oxygen: bool,
     carbon_dioxide: bool,
     metabolism: bool,
+    guard: bool,
+    asleep: Option<Reader>,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Reader {
+    Written,
+    ByHand,
 }
 
 const SENSED: Case = Case {
@@ -55,6 +63,8 @@ const SENSED: Case = Case {
     oxygen: true,
     carbon_dioxide: true,
     metabolism: false,
+    guard: false,
+    asleep: None,
 };
 
 fn compiled(case: Case) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
@@ -138,6 +148,30 @@ fn compiled(case: Case) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
             k.finish(value, bc.every_mode(), class)
         });
         bc.define_at(&volume_out, volume);
+        if let Some(reader) = case.asleep {
+            let (probe, _) = bc.site_field::<Speciated, Pressure>("probe", Admissible::finite());
+            let value = bc.site_kernel(|mut k| {
+                let pressure = match reader {
+                    Reader::Written => k.at_site(&stated.carbon_dioxide_partial_pressure.1),
+                    Reader::ByHand => {
+                        let (oxygen, acid) = (
+                            k.at_site(&stated.oxygen_partial_pressure.1),
+                            k.at_site(&stated.acidity.1),
+                        );
+                        let pk = k.parameter(&pk);
+                        let above = k.subtract(acid, pk);
+                        let ln_ten = k.parameter(&ln_ten);
+                        let power = k.scale(above, ln_ten);
+                        let ratio = k.exp(power);
+                        k.scale(oxygen, ratio)
+                    }
+                };
+                let sleep = k.asleep();
+                let value = k.scale(pressure, sleep);
+                k.finish(value, bc.every_mode(), class)
+            });
+            bc.define_at(&probe, value);
+        }
         body.add(bc.finish());
 
         let (mut ns, _) = body.nervous()?.parts();
@@ -157,6 +191,15 @@ fn compiled(case: Case) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
                 owner: "BC",
                 local: quantity,
             });
+            if case.guard {
+                let [low, high] = ns.modes(name, ["low", "high"]);
+                let zero = ns.kernel(|mut k| {
+                    let value = k.at_landmark(mark, &read);
+                    k.finish(value, low.only(), class)
+                });
+                ns.event(Guard::new(zero, Crossing::Rising, low.to(&high)?));
+                continue;
+            }
             let slot = ns.algebraic::<Pressure>(name, Admissible::finite());
             let residual = ns.kernel(|mut k| {
                 let value = k.at_landmark(mark, &read);
@@ -402,4 +445,72 @@ fn a_sensor_at_a_segment_the_map_does_not_sample_is_refused() {
             field
         }
     );
+}
+
+fn guard_reads(body: &CompiledBody, law: LawName, site: SiteId) -> bool {
+    let row = RowKind::Algebraic(Slot {
+        law,
+        at: Context::Site(site),
+    });
+    let inputs = body.layout.guards.iter().flat_map(|guard| &guard.inputs);
+    inputs.into_iter().any(|input| {
+        matches!(input, crate::body::Bound::Unknown(unknown) if body.rows()[unknown.index()].kind() == row)
+    })
+}
+
+#[test]
+fn a_sampled_segment_read_only_by_a_wired_guard_is_not_unread() {
+    let case = Case {
+        guard: true,
+        carbon_dioxide: false,
+        ..SENSED
+    };
+    let (body, sites) = compiled(case).unwrap_or_else(|refused| panic!("{refused:?}"));
+    let law = LawName {
+        owner: "BC",
+        local: OxygenPartialPressure::NAME,
+    };
+    assert!(
+        guard_reads(&body, law, sites[0]),
+        "the guard reads the artery's oxygen row"
+    );
+}
+
+#[test]
+fn a_guard_reads_an_explicit_field_at_a_landmark() {
+    let case = Case {
+        guard: true,
+        oxygen: false,
+        ..SENSED
+    };
+    let (body, sites) = compiled(case).unwrap_or_else(|refused| panic!("{refused:?}"));
+    let field = LawName {
+        owner: "BC",
+        local: CarbonDioxidePartialPressure::NAME,
+    };
+    let [guard] = &body.layout.guards[..] else {
+        panic!("one guard")
+    };
+    assert!(!guard.code.origins.is_empty());
+    assert!(guard.code.origins.iter().all(|&(_, law)| law == field));
+    let row = |local| LawName { owner: "BC", local };
+    for local in [OxygenPartialPressure::NAME, Acidity::NAME] {
+        assert!(
+            guard_reads(&body, row(local), sites[0]),
+            "the field's own reads land at the artery"
+        );
+    }
+}
+
+#[test]
+fn a_day_input_scaled_inside_an_explicit_field_is_judged_as_by_hand() {
+    for reader in [Reader::ByHand, Reader::Written] {
+        let case = Case {
+            asleep: Some(reader),
+            ..SENSED
+        };
+        let (body, _) = compiled(case).unwrap_or_else(|refused| panic!("{reader:?}: {refused:?}"));
+        let probe = (body.programs().iter()).find(|program| program.law.local == "probe");
+        assert!(probe.is_some(), "{reader:?}");
+    }
 }

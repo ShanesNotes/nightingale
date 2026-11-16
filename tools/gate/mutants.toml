@@ -3635,3 +3635,25 @@ path = "crates/ng-contract/src/law.rs"
 old = '''.flat_map(|(at, field)| field.validity.iter().map(move |&range| (at, field.name, range)))'''
 new = '''.flat_map(|(at, field)| field.validity.iter().take(0).map(move |&range| (at, field.name, range)))'''
 test = "-p ng-contract --lib written::a_fields_range_is_judged_under_the_field_in_each_program_it_is_written_into"
+
+[[mutant]]
+name = "guard-reads-the-field-unwritten"
+path = "crates/ng-contract/src/compile.rs"
+old = '''            let program = written.as_ref().unwrap_or(zero);'''
+new = '''            let program = zero;
+            let _ = written;'''
+test = "-p ng-contract --lib speciated::a_guard_reads_an_explicit_field_at_a_landmark"
+
+[[mutant]]
+name = "unscaled-input-judges-the-unwritten-law"
+path = "crates/ng-contract/src/compile.rs"
+old = '''            let reads: Vec<bool> = (kernel.code.iter())'''
+new = '''            let reads: Vec<bool> = (own.code.iter())'''
+test = "-p ng-contract --lib speciated::a_day_input_scaled_inside_an_explicit_field_is_judged_as_by_hand"
+
+[[mutant]]
+name = "sample-read-by-a-guard-unread"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        .chain((guards.iter()).map(|(guard, addresses)| (modes[guard.variable].variable.law, addresses)));'''
+new = '''        .chain((guards.iter()).map(|(guard, addresses)| (modes[guard.variable].variable.law, addresses)).take(0));'''
+test = "-p ng-contract --lib speciated::a_sampled_segment_read_only_by_a_wired_guard_is_not_unread"
