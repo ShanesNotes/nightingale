@@ -903,7 +903,6 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
         let at = Binding::Site(site::<CapillaryBed>(bed)?);
         set::<Rate<Oxygen>>(packet, "mt.oxygen-demand", at, used)?;
         set::<Conductance<Oxygen>>(packet, "mt.oxygen-reach", at, used / CELL_PRESSURE_AT_DEMAND)?;
-        set::<Rate<Oxygen>>(packet, "mt.oxygen-rate-width", at, WIDTH_SHARE_OF_DEMAND * used)?;
         set::<Conductance<Oxygen>>(packet, "mt.wall-oxygen-conductance", at, used / HEAD)?;
         set::<Conductance<Oxygen>>(packet, "mt.cell-oxygen-conductance", at, used / HEAD)?;
         let made = PER_OXYGEN * used / CARBON_DIOXIDE_HEAD;
@@ -917,6 +916,7 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
 fn burn(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
     let (body, beds) = (Binding::Body, Binding::Class(Class::CapillaryBed));
     set::<Dimensionless>(packet, "mt.glucose-share", beds, GLUCOSE_SHARE)?;
+    set::<Dimensionless>(packet, "mt.oxygen-rate-width-share", beds, WIDTH_SHARE_OF_DEMAND)?;
     set::<Rate<Dimensionless>>(packet, "mt.bed-heat-speed", beds, BED_HEAT_SPEED)?;
     set::<Rate<Dimensionless>>(packet, "mt.feed-speed", body, FEED_SPEED)?;
     set::<Glucose>(packet, "mt.cell-glucose-set", body, GLUCOSE_SET)?;

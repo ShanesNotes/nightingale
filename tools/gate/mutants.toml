@@ -3408,6 +3408,18 @@ new = '''{
 test = "-p ng-validate --test gases the_oxygen_rate_bends_below_a_raised_demand_or_a_halved_flow_with_no_step_refused"
 
 [[mutant]]
+name = "oxygen-rate-keeps-its-offset"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''
+        let bent = k.smooth_min(demand, allowed, width);
+        let none = k.zero();
+        let offset = k.smooth_min(demand, none, width);
+        k.subtract(bent, offset)'''
+new = '''
+        k.smooth_min(demand, allowed, width)'''
+test = "-p ng-validate --test gases the_oxygen_rate_is_zero_with_no_cell_oxygen_and_never_runs_a_burn_backward"
+
+[[mutant]]
 name = "p50-acidity-shift-reversed"
 path = "crates/ng-blood-chemistry/src/oxygen.rs"
 old = '''        let d = k.subtract(acidity, standard);'''

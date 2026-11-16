@@ -507,6 +507,7 @@ struct Start {
     arterial: Speciated,
     renewal: f64,
     demand: f64,
+    cell_conductance: f64,
 }
 impl Start {
     fn at(plasma: Speciated) -> Self {
@@ -521,6 +522,7 @@ impl Start {
             arterial: speciated(ARTERIAL),
             renewal: RENEWAL,
             demand: DEMAND,
+            cell_conductance: used() / HEAD,
         }
     }
     fn cold(plasma: Speciated) -> Self {
@@ -685,9 +687,13 @@ fn packet_from(
         CARBAMINO.half_rise,
     )?;
     let beds = Binding::Class(Class::CapillaryBed);
-    for key in ["mt.wall-oxygen-conductance", "mt.cell-oxygen-conductance"] {
-        set::<Conductance<Oxygen>>(&mut packet, key, beds, used() / HEAD)?;
-    }
+    set::<Conductance<Oxygen>>(&mut packet, "mt.wall-oxygen-conductance", beds, used() / HEAD)?;
+    set::<Conductance<Oxygen>>(
+        &mut packet,
+        "mt.cell-oxygen-conductance",
+        beds,
+        start.cell_conductance,
+    )?;
     for key in [
         "mt.wall-carbon-dioxide-conductance",
         "mt.cell-carbon-dioxide-conductance",
@@ -715,11 +721,11 @@ fn packet_from(
             beds,
             DEMAND / CELL_PRESSURE_AT_DEMAND,
         )?;
-        set::<Rate<Oxygen>>(
+        set::<Dimensionless>(
             &mut packet,
-            "mt.oxygen-rate-width",
+            "mt.oxygen-rate-width-share",
             beds,
-            WIDTH_SHARE_OF_DEMAND * DEMAND,
+            WIDTH_SHARE_OF_DEMAND,
         )?;
         set::<Dimensionless>(&mut packet, "mt.glucose-share", beds, GLUCOSE_SHARE)?;
         set::<Rate<Dimensionless>>(&mut packet, "mt.bed-heat-speed", beds, BED_HEAT_SPEED)?;
@@ -1316,14 +1322,17 @@ fn only_the_whole_body_speciates() -> Result<(), AdmissionError> {
     Ok(())
 }
 
-/// `B = smooth_min(D, k P, w)` with the reach and width at rest.
+/// `B = smooth_min(D, k P, s D) - smooth_min(D, 0, s D)` with the reach at rest.
 fn oxygen_rate(demand: f64, cell_pressure: f64) -> f64 {
     let (reach, width) = (
         DEMAND / CELL_PRESSURE_AT_DEMAND * cell_pressure,
-        WIDTH_SHARE_OF_DEMAND * DEMAND,
+        WIDTH_SHARE_OF_DEMAND * demand,
     );
-    let gap = demand - reach;
-    0.5 * (demand + reach - (gap * gap + width * width).sqrt())
+    let bent = |allowed: f64| {
+        let gap = demand - allowed;
+        0.5 * (demand + allowed - (gap * gap + width * width).sqrt())
+    };
+    bent(reach) - bent(0.0)
 }
 
 fn tissue_oxygen(
@@ -1489,9 +1498,25 @@ struct Stressed {
     refusals: Vec<String>,
     rate: f64,
     expected: f64,
+    least_burn: f64,
+    most_burn: f64,
 }
 
 fn stepped_from_rest(demand: f64, renewal: f64) -> Result<Stressed, InitializationFailure> {
+    let start = Start {
+        demand,
+        renewal,
+        ..Start::at(speciated(ARTERIAL))
+    };
+    stepped(start, None, 300)
+}
+
+/// From the bed at rest, with the start's parameters and, if given, the cells' oxygen at a partial pressure.
+fn stepped(
+    start: Start,
+    cell_pressure: Option<f64>,
+    seconds: u64,
+) -> Result<Stressed, InitializationFailure> {
     let (body, core, store) = (
         compiled(Cells::Burning)?,
         ng_solver::Core::new(SECOND / 100),
@@ -1501,14 +1526,13 @@ fn stepped_from_rest(demand: f64, renewal: f64) -> Result<Stressed, Initializati
     let settled: Vec<(RowKind, f64)> = (body.rows().iter())
         .map(|row| (row.kind(), value(&body, &rest, row.kind())))
         .collect();
-    let start = Start {
-        demand,
-        renewal,
-        ..Start::at(speciated(ARTERIAL))
-    };
-    let held = |row| {
-        let found = settled.iter().find(|(kind, _)| *kind == row);
-        found.unwrap_or_else(|| panic!("no settled {row:?}")).1
+    let cells = amount(Species::Oxygen, Space::Cells)?;
+    let held = |row| match cell_pressure {
+        Some(pressure) if row == cells => SOLUBILITY * pressure * WATER[2],
+        _ => {
+            let found = settled.iter().find(|(kind, _)| *kind == row);
+            found.unwrap_or_else(|| panic!("no settled {row:?}")).1
+        }
     };
     let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
     let mut session = admit(&body, &core, &store, packet_from(&body, start, held)?)?;
@@ -1518,8 +1542,10 @@ fn stepped_from_rest(demand: f64, renewal: f64) -> Result<Stressed, Initializati
         refusals: Vec::new(),
         rate: 0.0,
         expected: 0.0,
+        least_burn: f64::INFINITY,
+        most_burn: f64::NEG_INFINITY,
     };
-    while session.record().accepted().time().nanoseconds() < 300 * SECOND {
+    while session.record().accepted().time().nanoseconds() < seconds * SECOND {
         let mut attempt = session.step();
         loop {
             match attempt {
@@ -1549,10 +1575,15 @@ fn stepped_from_rest(demand: f64, renewal: f64) -> Result<Stressed, Initializati
                 *least = pressure;
             }
         }
+        for local in ["glucose burn", "fatty acid burn"] {
+            let oxygen = burned(&body, &session, local).oxygen;
+            seen.least_burn = seen.least_burn.min(oxygen);
+            seen.most_burn = seen.most_burn.max(oxygen);
+        }
     }
     let [glucose, fat] = ["glucose burn", "fatty acid burn"].map(|local| burned(&body, &session, local));
     seen.rate = glucose.oxygen + fat.oxygen;
-    seen.expected = oxygen_rate(demand, tissue_oxygen(&body, &session, Space::Cells)?);
+    seen.expected = oxygen_rate(start.demand, tissue_oxygen(&body, &session, Space::Cells)?);
     Ok(seen)
 }
 
@@ -1570,6 +1601,31 @@ fn the_oxygen_rate_bends_below_a_raised_demand_or_a_halved_flow_with_no_step_ref
         assert!(seen.least.iter().all(|least| *least > 0.0), "{report}");
         assert!(close(seen.rate, seen.expected, 1e-6), "{report}");
         assert!(seen.rate < demand, "{report}");
+    }
+    Ok(())
+}
+
+/// With the cell membrane shut, the cells keep only the oxygen they start with. At none the burns stand still, and
+/// just above none, or at no demand, neither burn runs backward or draws the cells below none.
+#[test]
+fn the_oxygen_rate_is_zero_with_no_cell_oxygen_and_never_runs_a_burn_backward()
+-> Result<(), InitializationFailure> {
+    for (cell_pressure, demand) in [(0.0, DEMAND), (1e-3, DEMAND), (0.0, 0.0), (1e-3, 0.0)] {
+        let start = Start {
+            demand,
+            cell_conductance: 0.0,
+            ..Start::at(speciated(ARTERIAL))
+        };
+        let seen = stepped(start, Some(cell_pressure), 20)?;
+        let report = format!("cells at {cell_pressure} mmHg, demand {demand}: {seen:?}");
+        assert!(seen.refusals.is_empty(), "{report}");
+        assert!(seen.least_burn >= 0.0, "{report}");
+        assert!(seen.least[2] >= 0.0, "{report}");
+        if cell_pressure == 0.0 || demand == 0.0 {
+            assert_eq!(seen.most_burn, 0.0, "{report}");
+        } else {
+            assert!(seen.least[2] < cell_pressure, "{report}");
+        }
     }
     Ok(())
 }

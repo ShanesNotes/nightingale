@@ -6,13 +6,15 @@ type SiteKey<'b, U> = SiteParameter<'b, Metabolism, CapillaryBed, U>;
 
 const BURN_NS: u64 = 1_000_000_000;
 
-/// The oxygen a bed's cells burn each second: `B = smooth_min(D, k P, w)`, its demand until its cells' partial
-/// pressure can no longer pass that much, so the burn cannot draw a cell's oxygen below zero.
+/// The oxygen a bed's cells burn each second: `B = smooth_min(D, k P, s D) - smooth_min(D, 0, s D)`, its demand
+/// until its cells' partial pressure can no longer pass that much. The second term takes off the bend's own offset, so
+/// the rate is zero at no cell oxygen, rises with the partial pressure and never passes `k P`: it never runs a burn
+/// backward or draws a cell's oxygen below zero. The width is a share of the demand, so no demand burns nothing.
 struct OxygenRate<'a, 'b> {
     cells: &'a CellOxygen<'b>,
     demand: SiteKey<'b, Rate<Oxygen>>,
     reach: SiteKey<'b, Conductance<Oxygen>>,
-    width: SiteKey<'b, Rate<Oxygen>>,
+    width_share: SiteKey<'b, Dimensionless>,
 }
 
 impl<'b> OxygenRate<'_, 'b> {
@@ -20,8 +22,15 @@ impl<'b> OxygenRate<'_, 'b> {
         let pressure = self.cells.pressure(k);
         let reach = k.site_parameter(&self.reach);
         let allowed = k.conductance_flow(reach, pressure);
-        let (demand, width) = (k.site_parameter(&self.demand), k.site_parameter(&self.width));
-        k.smooth_min(demand, allowed, width)
+        let (demand, share) = (
+            k.site_parameter(&self.demand),
+            k.site_parameter(&self.width_share),
+        );
+        let width = k.scale(demand, share);
+        let bent = k.smooth_min(demand, allowed, width);
+        let none = k.zero();
+        let offset = k.smooth_min(demand, none, width);
+        k.subtract(bent, offset)
     }
 }
 
@@ -38,7 +47,7 @@ pub fn burn<'b>(
         cells,
         demand: laws.site_parameter(key("mt.oxygen-demand"), Admissible::nonnegative()),
         reach: laws.site_parameter(key("mt.oxygen-reach"), Admissible::positive()),
-        width: laws.site_parameter(key("mt.oxygen-rate-width"), Admissible::positive()),
+        width_share: laws.site_parameter(key("mt.oxygen-rate-width-share"), Admissible::positive()),
     };
     let share: SiteKey<'b, Dimensionless> =
         laws.site_parameter(key("mt.glucose-share"), Admissible::unit_interval());

@@ -385,7 +385,7 @@ A reaction in a bed's cells that turns one fuel and oxygen into carbon dioxide a
 The oxygen a bed's cells would burn each second with oxygen enough, a parameter of each bed.
 
 **Oxygen rate**:
-The oxygen a bed's cells burn each second. It follows the oxygen demand until the cells' oxygen partial pressure can no longer pass that much, and then follows the partial pressure, a smooth minimum of the two, so the burn cannot draw a cell's oxygen below zero.
+The oxygen a bed's cells burn each second. It follows the oxygen demand until the cells' oxygen partial pressure can no longer pass that much, and then follows the partial pressure: a smooth minimum of the two, less that minimum's value at no cell oxygen. So it is zero when the cells hold no oxygen, never runs a burn backward and cannot draw a cell's oxygen below zero.
 
 **Respiratory quotient**:
 The carbon dioxide a bed makes over the oxygen it burns. At rung 0 the glucose share of the oxygen rate fixes it.
