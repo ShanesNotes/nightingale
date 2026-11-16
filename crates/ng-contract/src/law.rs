@@ -1463,7 +1463,48 @@ impl<C: SiteSet, U: Dimension> Carried for PerSite<C, U> {
 }
 pub type SiteField<'b, O, C, U> = (Output<'b, O, PerSite<C, U>>, ReadPort<'b, O, PerSite<C, U>>);
 /// A field with no row. Compile writes its expression into each program that reads it, where the read stood, and each
-/// op it writes there names this field's law. Only a contract port issues one.
+/// op it writes there names this field's law. Only a contract port issues one, and a row is not expressed.
+/// ```compile_fail,E0308
+/// use ng_contract::*;
+/// fn expressed<'b>(
+///     bc: &mut FragmentBuilder<'b, BloodChemistry>,
+///     outputs: &SpeciationOutputs<'b>,
+///     acidity: PureKernel<'b, BloodChemistry, Dimensionless, Speciated>,
+/// ) {
+///     bc.express_at(&outputs.acidity.0, acidity);
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn expressed<'b>(
+///     bc: &mut FragmentBuilder<'b, BloodChemistry>,
+///     outputs: &SpeciationOutputs<'b>,
+///     pressure: PureKernel<'b, BloodChemistry, Pressure, Speciated>,
+/// ) {
+///     bc.express_at(&outputs.carbon_dioxide_partial_pressure.0, pressure);
+/// }
+/// ```
+/// Nor is a row-free field defined as a row is.
+/// ```compile_fail,E0308
+/// use ng_contract::*;
+/// fn defined<'b>(
+///     bc: &mut FragmentBuilder<'b, BloodChemistry>,
+///     outputs: &SpeciationOutputs<'b>,
+///     pressure: PureKernel<'b, BloodChemistry, Pressure, Speciated>,
+/// ) {
+///     bc.define_at(&outputs.carbon_dioxide_partial_pressure.0, pressure);
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn defined<'b>(
+///     bc: &mut FragmentBuilder<'b, BloodChemistry>,
+///     outputs: &SpeciationOutputs<'b>,
+///     pressure: PureKernel<'b, BloodChemistry, Pressure, Speciated>,
+/// ) {
+///     bc.define_at(&outputs.oxygen_partial_pressure.0, pressure);
+/// }
+/// ```
 pub struct Explicit<'b, O, U> {
     name: &'static str,
     brand: Brand<'b>,

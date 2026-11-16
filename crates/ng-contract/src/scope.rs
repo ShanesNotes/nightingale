@@ -24,7 +24,10 @@ mod musculoskeletal;
 mod outside;
 mod processes;
 mod respiratory;
-pub use blood_chemistry::BloodChemistryPorts;
+pub use blood_chemistry::{
+    Acidity, Bicarbonate, BloodChemistryPorts, CarbonDioxidePartialPressure, OxygenPartialPressure,
+    OxygenSaturation, Speciation, SpeciationOutputs,
+};
 pub use cargo::*;
 pub use endocrine::EndocrinePorts;
 pub use gastrointestinal::GastrointestinalPorts;
