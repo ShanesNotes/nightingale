@@ -860,8 +860,8 @@ test = "-p ng-contract --test scopes one_card_declaring_one_chemistry_under_two_
 [[mutant]]
 name = "reaction-counts-divided"
 path = "crates/ng-contract/src/compile.rs"
-old = '''count(term.change) / divisor,'''
-new = '''count(term.change),'''
+old = '''count(term.change) / divisor))'''
+new = '''count(term.change)))'''
 test = "-p ng-contract --test scopes a_copy_with_every_count_doubled_is_the_same_chemistry_and_is_refused"
 
 [[mutant]]
@@ -874,9 +874,42 @@ test = "-p ng-contract --test scopes a_grant_shared_where_one_chemistry_has_no_p
 [[mutant]]
 name = "reaction-and-its-reverse-are-one"
 path = "crates/ng-contract/src/compile.rs"
-old = '''if terms.first().is_some_and(|&(_, _, made, _)| made) {'''
-new = '''if false && terms.first().is_some_and(|&(_, _, made, _)| made) {'''
+old = '''if terms.first().is_some_and(|&(_, made, _)| made) {'''
+new = '''if false && terms.first().is_some_and(|&(_, made, _)| made) {'''
 test = "-p ng-contract --test scopes the_hepatic_card_writing_metabolisms_glycolysis_in_reverse_at_the_liver_bed_is_refused_naming_both_laws_and_the_bed"
+
+[[mutant]]
+name = "reaction-owners-compared-in-one-space"
+path = "crates/ng-contract/src/compile.rs"
+old = '''placed.push(((site, terms.clone()), law));'''
+new = '''placed.push(((site, terms.clone(), reaction.terms[0].space), law));'''
+test = "-p ng-contract --test scopes the_musculoskeletal_cards_burn_in_the_muscle_beds_interstitium_beside_metabolisms_in_its_cells_is_refused"
+
+[[mutant]]
+name = "reaction-terms-sorted"
+path = "crates/ng-contract/src/compile.rs"
+old = '''            terms.sort_unstable();
+            if terms.first().is_some_and(|&(_, made, _)| made) {'''
+new = '''            if terms.first().is_some_and(|&(_, made, _)| made) {'''
+test = "-p ng-contract --test scopes the_hepatic_card_writing_metabolisms_glycolysis_in_reverse_from_lactate_is_refused"
+
+[[mutant]]
+name = "column-count-tagged-at-every-count"
+path = "crates/ng-contract/src/body.rs"
+old = '''            out.number(u64::MAX);
+            out.number(u64::from(reference_count.get()));'''
+new = '''            if reference_count.get() == 2 {
+                out.number(u64::MAX);
+            }
+            out.number(u64::from(reference_count.get()));'''
+test = "-p ng-contract --lib body::tests::a_count_above_one_moves_the_seal_and_a_count_of_one_seals_only_the_other_fields"
+
+[[mutant]]
+name = "column-count-sealed-whole"
+path = "crates/ng-contract/src/body.rs"
+old = '''out.number(u64::from(reference_count.get()));'''
+new = '''out.number(u64::from(reference_count.get().min(2)));'''
+test = "-p ng-contract --lib body::tests::a_count_above_one_moves_the_seal_and_a_count_of_one_seals_only_the_other_fields"
 
 [[mutant]]
 name = "reaction-owners-compared-without-energy"

@@ -150,6 +150,8 @@ mutants = [
   "reaction-owners-compared-where-placed",
   "reaction-and-its-reverse-are-one",
   "reaction-owners-compared-without-energy",
+  "reaction-owners-compared-in-one-space",
+  "reaction-terms-sorted",
 ]
 
 [[row]]

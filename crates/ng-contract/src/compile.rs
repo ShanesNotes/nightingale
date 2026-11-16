@@ -352,19 +352,12 @@ fn check_reactions(fragments: &[FragmentData], schema: &Schema) -> Result<(), Co
             let divisor = (reaction.terms.iter()).fold(0, |divisor, term| {
                 greatest_common_divisor(divisor, count(term.change))
             });
-            let mut terms: Vec<(Species, Space, bool, u128)> = (reaction.terms.iter())
-                .map(|term| {
-                    (
-                        term.species,
-                        term.space,
-                        term.change > 0,
-                        count(term.change) / divisor,
-                    )
-                })
+            let mut terms: Vec<(Species, bool, u128)> = (reaction.terms.iter())
+                .map(|term| (term.species, term.change > 0, count(term.change) / divisor))
                 .collect();
             terms.sort_unstable();
-            if terms.first().is_some_and(|&(_, _, made, _)| made) {
-                for (_, _, made, _) in &mut terms {
+            if terms.first().is_some_and(|&(_, made, _)| made) {
+                for (_, made, _) in &mut terms {
                     *made = !*made;
                 }
             }
