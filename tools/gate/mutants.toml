@@ -3312,3 +3312,10 @@ old = '''                k.scale(total, ratio)'''
 new = '''                let _ = ratio;
                 total'''
 test = "-p ng-validate --test viscosity a_plain_edges_flow_falls_as_viscosity_over_its_reference_rises"
+
+[[mutant]]
+name = "oxygen-wall-diffusion-held"
+path = "crates/ng-metabolism/src/diffusion.rs"
+old = '''    let wall = (Side::Plasma(plasma), Side::Tissue(&interstitium));'''
+new = '''    let wall = (Side::Tissue(&interstitium), Side::Tissue(&interstitium));'''
+test = "-p ng-validate --test oxygen the_bed_settles_where_the_fick_identity_puts_it"

@@ -187,6 +187,28 @@ fn field(owner: &'static str, local: &'static str, at: Context) -> RowKind {
     })
 }
 
+fn value(start: &Start, session: &Session<'_, Running>, kind: RowKind) -> f64 {
+    let row = (start.body.rows().iter()).find(|row| row.kind() == kind).unwrap_or_else(|| panic!("no row {kind:?}"));
+    lead(session.record().accepted().value(row.id()))
+}
+
+fn concentration(start: &Start, session: &Session<'_, Running>, key: &'static str, species: Species) -> f64 {
+    let lumen = |species| RowKind::Amount {
+        site: site::<VesselSegment>(key),
+        species,
+        space: Space::Lumen,
+    };
+    value(start, session, lumen(species)) / value(start, session, lumen(Species::Water))
+}
+
+fn body_oxygen(start: &Start, session: &Session<'_, Running>) -> f64 {
+    let view = session.record().accepted();
+    (start.body.rows().iter())
+        .filter(|row| matches!(row.kind(), RowKind::Amount { species: Species::Oxygen, .. }))
+        .map(|row| lead(view.value(row.id())))
+        .sum()
+}
+
 fn the_body_admits_at_06_55(start: &Start) {
     let at = start.session().record().accepted().time().nanoseconds();
     assert_eq!(at, (6 * 3_600 + 55 * 60) * SECOND);
@@ -196,7 +218,7 @@ fn the_body_admits_at_06_55(start: &Start) {
 
 fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> Session<'_, Running> {
     let pools = start.held_pools();
-    assert_eq!(pools.len(), 409);
+    assert_eq!(pools.len(), 387);
     let amounts = |session: &Session<'_, Running>| -> Vec<[u64; 2]> {
         let view = session.record().accepted();
         pools.iter().map(|(row, _)| view.value(*row).bits()).collect()
@@ -412,8 +434,9 @@ impl Edge {
 
 /// At the admitted start viscosity is its reference, so the edge keeps the packet's resistance. A 400 mL water bolus
 /// into the gut then lowers the hematocrit, viscosity and the edge's resistance, and the edge's flow is its drop over
-/// the packet's resistance times viscosity's ratio, so the run tells viscosity's part of the flow from the drop's.
-fn a_water_bolus_lowers_viscosity_and_the_resistance_it_sets(start: &Start) {
+/// the packet's resistance times viscosity's ratio, so the run tells viscosity's part of the flow from the drop's. The
+/// water carries no oxygen, so the body's oxygen holds over the bolus while arterial hemoglobin and content fall.
+fn a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(start: &Start) {
     let mut session = start.session();
     let before = Edge::at(start, &session);
     let at_start = before.resistance() / CORONARY_RESISTANCE;
@@ -434,7 +457,25 @@ fn a_water_bolus_lowers_viscosity_and_the_resistance_it_sets(start: &Start) {
     );
     let input = AuthorizedInput::from_command_receipt(Digest::of_canonical(b"a test's own command"), event);
     session.enqueue(input).expect("enqueued");
-    let after = Edge::at(start, &until(session, 30 * SECOND));
+    let arterial = |session: &Session<'_, Running>| {
+        [Species::Hemoglobin, Species::Oxygen].map(|species| concentration(start, session, "systemic arteries", species))
+    };
+    let before_arterial = arterial(&session);
+    let session = until(session, SECOND);
+    let held = body_oxygen(start, &session);
+    let session = until(session, 2 * SECOND);
+    let delivered = body_oxygen(start, &session);
+    assert!(
+        (delivered - held).abs() <= 1e-5 * held,
+        "the body's oxygen went from {held} to {delivered} over the bolus"
+    );
+    let session = until(session, 30 * SECOND);
+    let after_arterial = arterial(&session);
+    assert!(
+        after_arterial[0] < before_arterial[0] && after_arterial[1] < before_arterial[1],
+        "arterial hemoglobin and oxygen content went from {before_arterial:?} to {after_arterial:?}"
+    );
+    let after = Edge::at(start, &session);
     let (ratio, resisted) = (
         after.viscosity / before.viscosity,
         after.resistance() / before.resistance(),
@@ -456,6 +497,47 @@ fn a_water_bolus_lowers_viscosity_and_the_resistance_it_sets(start: &Start) {
     assert!(
         after.flow > before.flow && (after.flow / before.flow - through_viscosity).abs() < 1e-9,
         "{report}"
+    );
+}
+
+/// Every bed's held use but the lung's, whose own plasma serves its cells before the pulmonary vein.
+const SYSTEMIC_USE: f64 = 95.0;
+
+/// Over the first minute's last ten seconds, step by step, the mean aortic flow times the systemic arteries' less the
+/// pulmonary artery's mean oxygen content meets the systemic beds' held use. Means over whole beats stand in for the
+/// identity's steady flows, and the arteries and veins between the two reads store a beat's oxygen, so it holds to 1%.
+fn the_flow_times_the_arterial_less_the_venous_content_meets_the_held_use(start: &Start) {
+    let (ventricle, arteries) = (
+        site::<VesselSegment>("left ventricle"),
+        site::<VesselSegment>("systemic arteries"),
+    );
+    let aortic = RowKind::Memory(Slot {
+        law: LawName {
+            owner: "CV",
+            local: "valves",
+        },
+        at: Context::Edge {
+            from: ventricle,
+            to: arteries,
+        },
+    });
+    let mut session = until(start.session(), 50 * SECOND);
+    let (end, mut held) = (anchor_moment().nanoseconds() + 60 * SECOND, 0.0);
+    let (mut flow, mut arterial, mut venous) = (0.0, 0.0, 0.0);
+    while session.record().accepted().time().nanoseconds() < end {
+        let before = session.record().accepted().time().nanoseconds();
+        session = until(session, before + 1 - anchor_moment().nanoseconds());
+        let length = (session.record().accepted().time().nanoseconds() - before) as f64 / 1e9;
+        held += length;
+        flow += length * value(start, &session, aortic);
+        arterial += length * concentration(start, &session, "systemic arteries", Species::Oxygen);
+        venous += length * concentration(start, &session, "pulmonary artery", Species::Oxygen);
+    }
+    let (flow, arterial, venous) = (flow / held, arterial / held, venous / held);
+    let taken = flow * (arterial - venous);
+    assert!(
+        (taken - SYSTEMIC_USE).abs() <= 0.01 * SYSTEMIC_USE,
+        "flow {flow} times arterial {arterial} less venous {venous} is {taken} against {SYSTEMIC_USE}"
     );
 }
 
@@ -554,5 +636,6 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         solves: start.core.solves.get() - before,
     };
     assert_eq!(over_ceilings(counts, CEILINGS), Vec::<&str>::new(), "{counts:?}");
-    a_water_bolus_lowers_viscosity_and_the_resistance_it_sets(&start);
+    a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(&start);
+    the_flow_times_the_arterial_less_the_venous_content_meets_the_held_use(&start);
 }
