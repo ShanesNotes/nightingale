@@ -5,7 +5,7 @@ use core::num::NonZeroU64;
 use ng_blood_chemistry::{Plasma, oxygenate};
 use ng_contract::*;
 use ng_metabolism::{OxygenRoutes, wall_diffusion};
-use ng_record::{Running, Session};
+use ng_record::{Running, Session, Step};
 use ng_validate::*;
 
 const SECOND: u64 = 1_000_000_000;
@@ -124,26 +124,46 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
     })
 }
 
+/// The partial pressure and saturation whose dissolved and bound oxygen make `content`, by bisection on `ln(P / P50)`.
+fn solved(content: f64) -> (f64, f64) {
+    let (mut low, mut high) = (-30.0, 15.0);
+    for _ in 0..200 {
+        let middle = 0.5 * (low + high);
+        if curve(middle).2 < content {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    let (pressure, saturation, _) = curve(0.5 * (low + high));
+    (pressure, saturation)
+}
+
 #[derive(Clone, Copy)]
 struct Start {
     content: f64,
     pressure: f64,
     saturation: f64,
+    arterial: f64,
 }
 impl Start {
-    fn settled() -> Self {
-        let (pressure, saturation, content) = curve(REACH.1);
+    fn solved(content: f64) -> Self {
+        let (pressure, saturation) = solved(content);
         Self {
             content,
             pressure,
             saturation,
+            arterial: curve(REACH.0).2,
         }
+    }
+    fn settled() -> Self {
+        Self::solved(curve(REACH.1).2)
     }
     fn cold(content: f64) -> Self {
         Self {
-            content,
             pressure: 1.0,
             saturation: 0.01,
+            ..Self::solved(content)
         }
     }
 }
@@ -230,7 +250,7 @@ fn packet(body: &CompiledBody, start: Start) -> Result<ParameterPacket<Synthetic
         &mut packet,
         "fixture.arterial-oxygen",
         body_wide,
-        flow() * curve(REACH.0).2,
+        flow() * start.arterial,
     )?;
     set::<Rate<Oxygen>>(&mut packet, "fixture.oxygen-use", body_wide, used())?;
     set::<Rate<Dimensionless>>(&mut packet, "fixture.renewal", body_wide, RENEWAL)?;
@@ -291,9 +311,9 @@ fn speciation_meets_the_curve_at_three_partial_pressures_from_a_cold_guess_and_a
     for t in [-0.5, REACH.1, REACH.0] {
         let (p, s, content) = curve(t);
         let warm = Start {
-            content,
             pressure: p,
             saturation: s,
+            ..Start::solved(content)
         };
         for start in [warm, Start::cold(content)] {
             let session = admitted(&body, &core, &store, start)?;
@@ -316,13 +336,10 @@ fn settling<'m>(
     core: &'m ng_solver::Core,
     store: &'m MemoryStore,
 ) -> Result<Session<'m, Running>, InitializationFailure> {
-    let (pressure, saturation, content) = curve(REACH.0);
-    let start = Start {
-        content,
-        pressure,
-        saturation,
-    };
-    Ok(after(admitted(body, core, store, start)?, 20))
+    Ok(after(
+        admitted(body, core, store, Start::solved(curve(REACH.0).2))?,
+        20,
+    ))
 }
 
 #[test]
@@ -412,19 +429,23 @@ fn oxygen_closes_to_the_ledgers_floor_through_speciation() -> Result<(), Initial
     Ok(())
 }
 
-/// At or above capacity no partial pressure leaves the bound share under one, so its logarithm has no value.
+/// A trial whose bound share is at or above one, or at or below zero, has no logarithm: the engine refuses it by name.
 #[test]
-fn oxygen_content_at_capacity_has_no_partial_pressure() -> Result<(), AdmissionError> {
+fn a_trial_whose_bound_share_leaves_zero_to_one_is_refused_by_name() -> Result<(), AdmissionError> {
     let (body, core, store) = (
         compiled()?,
         ng_solver::Core::new(SECOND / 100),
         MemoryStore::default(),
     );
-    for content in [HEME * HEMOGLOBIN + 1.0, 2.0 * HEME * HEMOGLOBIN] {
-        let start = Start {
-            content,
-            ..Start::settled()
-        };
+    let above = Start {
+        pressure: 41.0,
+        ..Start::solved(HEME * HEMOGLOBIN + 1.0)
+    };
+    let below = Start {
+        pressure: 7_000.0,
+        ..Start::solved(6.0)
+    };
+    for start in [above, below] {
         match admitted(&body, &core, &store, start) {
             Err(InitializationFailure::Undefined { law }) => assert_eq!(
                 law,
@@ -433,10 +454,80 @@ fn oxygen_content_at_capacity_has_no_partial_pressure() -> Result<(), AdmissionE
                     local: "oxygen partial pressure"
                 }
             ),
-            Err(other) => panic!("at {content} mM: {other:?}"),
-            Ok(_) => panic!("at {content} mM the fixture admitted"),
+            Err(other) => panic!("from {} mmHg: {other:?}", start.pressure),
+            Ok(_) => panic!("from {} mmHg the fixture admitted", start.pressure),
         }
     }
+    Ok(())
+}
+
+/// The dissolved oxygen carries a content above hemoglobin's capacity, so it has a partial pressure.
+#[test]
+fn a_content_above_capacity_admits_at_its_partial_pressure() -> Result<(), InitializationFailure> {
+    let (body, core, store) = (
+        compiled()?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
+    let start = Start::solved(HEME * HEMOGLOBIN + 1.0);
+    let session = admitted(&body, &core, &store, start)?;
+    let pressure = value(&body, &session, field("oxygen partial pressure")?);
+    assert!(
+        (pressure - start.pressure).abs() <= 1e-9 * start.pressure,
+        "{pressure} against {}",
+        start.pressure
+    );
+    Ok(())
+}
+
+/// Arterial blood above capacity carries the plasma's content across it while the bed settles over 200 s, ten of the
+/// tissue's time constants at that pressure. No trial leaves the partial pressure's domain, so no step is refused.
+#[test]
+fn a_run_carries_the_content_across_capacity() -> Result<(), InitializationFailure> {
+    let (body, core, store) = (
+        compiled()?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
+    let arterial = HEME * HEMOGLOBIN + 2.0;
+    let start = Start {
+        arterial,
+        ..Start::settled()
+    };
+    let mut session = admitted(&body, &core, &store, start)?;
+    let mut refusals: Vec<String> = Vec::new();
+    while session.record().accepted().time().nanoseconds() < 200 * SECOND {
+        let mut attempt = session.step();
+        loop {
+            match attempt {
+                Step::Accepted(next, _) => {
+                    session = next;
+                    break;
+                }
+                Step::Refused(retrying) => {
+                    refusals.push(format!(
+                        "{:?} after {} ns",
+                        retrying.refused().reason(),
+                        retrying.refused().attempted_ns()
+                    ));
+                    attempt = retrying.retry();
+                }
+                Step::Faulted(faulted) => panic!("{:?} after {refusals:?}", faulted.fault()),
+            }
+        }
+    }
+    let settled = arterial - used() / flow();
+    let content = value(&body, &session, plasma_oxygen()?) / WATER[0];
+    let pressure = value(&body, &session, field("oxygen partial pressure")?);
+    assert!(refusals.is_empty(), "{refusals:?}");
+    assert!(
+        (content - settled).abs() <= 1e-6 * settled,
+        "{content} against {settled}"
+    );
+    assert!(
+        (pressure - solved(settled).0).abs() <= 1e-6 * pressure,
+        "{pressure}"
+    );
     Ok(())
 }
 

@@ -111,7 +111,7 @@ The paths are direct: anatomy → schema; organ → fragment → compiler; solve
 
 ### 1. Organ declarations are consumable, typed data
 
-`ng-renal`, `ng-cardiovascular`, `ng-fluids`, `ng-nervous` and `ng-receptor` return `Fragment<'b, Owner>`; there is no runtime `Organ` trait and no organ object survives compilation. This keeps CA's owned handles and deterministic registry but replaces string lookups and runtime bind errors with assembly-scoped capabilities (CA/src/id.rs:26, CA/src/organ.rs:88–155), and it adopts CB's complete-law coverage, including an explicit zero kernel for an inactive mode (CB/src/numerics.rs:87–100). An omitted law is not zero.
+`ng-renal`, `ng-cardiovascular`, `ng-fluids`, `ng-nervous`, `ng-receptor` and `ng-hematology` return `Fragment<'b, Owner>`, and `ng-blood-chemistry` and `ng-metabolism` declare into a builder the root hands them; there is no runtime `Organ` trait and no organ object survives compilation. This keeps CA's owned handles and deterministic registry but replaces string lookups and runtime bind errors with assembly-scoped capabilities (CA/src/id.rs:26, CA/src/organ.rs:88–155), and it adopts CB's complete-law coverage, including an explicit zero kernel for an inactive mode (CB/src/numerics.rs:87–100). An omitted law is not zero.
 
 **No organ owns a pool**, so no organ can name one: the `(site, species)` registry belongs to the body and its amounts to the record (MAP:7–20). An endpoint capability refers to the registry under one law's authority; it carries no amount and no public pool id (`PoolRef` is private). `Assembly` issues each scope once under an invariant lifetime brand. `Pair<Owner, Q>` needs both ends with one species and unit. `StateSlot<Owner, U: NonMaterial>` excludes water, ions, mass and energy.
 

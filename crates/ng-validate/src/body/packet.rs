@@ -158,29 +158,58 @@ fn start_guess(row: RowKind) -> f64 {
         RowKind::Memory(slot) if slot.law.local == "baroreflex set point" => 1.0,
         RowKind::Memory(_) => 0.0,
         RowKind::Algebraic(slot) => match (slot.law.local, slot.at) {
-            ("oxygen partial pressure", Context::Site(site)) => blood_oxygen(site.key()).0,
-            ("oxygen saturation", Context::Site(site)) => blood_oxygen(site.key()).1,
-            ("pulmonary oxygen partial pressure", _) => blood_oxygen("pulmonary bed").0,
+            ("oxygen partial pressure", Context::Site(site)) => {
+                solved(oxygen_guess(site.key(), Space::Plasma)).0
+            }
+            ("oxygen saturation", Context::Site(site)) => solved(oxygen_guess(site.key(), Space::Plasma)).1,
+            ("pulmonary oxygen partial pressure", _) => {
+                solved(oxygen_guess("pulmonary bed", Space::Plasma)).0
+            }
             _ => 1.0,
         },
     }
 }
 
-fn blood_oxygen(site: &str) -> (f64, f64) {
+/// The curve at its standard where `ln(P / P50)` is `t`: partial pressure, saturation and oxygen content.
+fn curve(t: f64) -> (f64, f64, f64) {
+    let pressure = P50 * exp(t);
+    let exponent = HILL.0 - HILL.1 * exp(-pressure / HILL.2);
+    let saturation = 1.0 / (1.0 + exp(-exponent * t));
+    (
+        pressure,
+        saturation,
+        SOLUBILITY * pressure + HEME * HEMOGLOBIN * saturation,
+    )
+}
+
+/// The partial pressure and saturation whose dissolved and bound oxygen make `content`, by bisection on `ln(P / P50)`,
+/// so a content above capacity starts inside the partial pressure's row too.
+fn solved(content: f64) -> (f64, f64) {
+    let (mut low, mut high) = (-30.0, 15.0);
+    for _ in 0..200 {
+        let middle = 0.5 * (low + high);
+        if curve(middle).2 < content {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    let (pressure, saturation, _) = curve(0.5 * (low + high));
+    (pressure, saturation)
+}
+
+fn blood_oxygen(site: &str) -> (f64, f64, f64) {
     let arterial = matches!(
         site,
         "pulmonary bed" | "pulmonary vein" | "left atrium" | "left ventricle" | "systemic arteries"
     );
-    let reach = if arterial { REACH.0 } else { REACH.1 };
-    let pressure = P50 * exp(reach);
-    let exponent = HILL.0 - HILL.1 * exp(-pressure / HILL.2);
-    (pressure, 1.0 / (1.0 + exp(-exponent * reach)))
+    curve(if arterial { REACH.0 } else { REACH.1 })
 }
 
 fn oxygen_guess(site: &str, space: Space) -> f64 {
-    let (pressure, saturation) = blood_oxygen(site);
+    let (pressure, _, content) = blood_oxygen(site);
     match space {
-        Space::Plasma | Space::Lumen => SOLUBILITY * pressure + HEME * HEMOGLOBIN * saturation,
+        Space::Plasma | Space::Lumen => content,
         Space::Interstitium => SOLUBILITY * (pressure - HEAD),
         _ => SOLUBILITY * (pressure - 2.0 * HEAD),
     }
@@ -701,9 +730,11 @@ fn oxygen(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admissio
     Ok(())
 }
 
-/// The body's own drift bound for each species it moves that the slice does not, in place of the slice's table:
-/// twice the worst change over a ten-second window of the body's first minute, rounded up to one significant figure.
-/// Fixture data measured on this body at its admitted start, until the body's measured day (ticket 24) replaces it.
+/// The body's own drift bound for each species it moves that the slice's table does not hold. As on the slice
+/// (solver contract, section 7), each is fixture data that stands in for 1.96 times a within-subject variation: twice
+/// the species' worst change over a ten-second window of this body's first minute from its admitted start, rounded up
+/// to one significant figure. It is a synthetic target that scores a solver and judges no body. The body's measured
+/// day (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set (record 0004).
 /// Oxygen's change is mostly its 35 umol swing within a beat, read across windows that hold no whole number of beats;
 /// the rest is the run settling from the admitted orbit onto the core's own, which a smaller step cap moves.
 const DRIFTS: [(Species, f64); 1] = [(Species::Oxygen, OXYGEN_DRIFT)];
