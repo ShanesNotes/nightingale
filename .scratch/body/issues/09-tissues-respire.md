@@ -43,6 +43,7 @@ The ticket lands as four PRs: 09a the burn, 09b lactate and the oxygen debt, 09c
 
 - 09d waits on a contract change: the heart's and the vessel walls' work start at the exterior's chemical energy, and no route family starts at a bed's heat store.
 - Research 11's debt in memory cannot be stated, because memory is body-wide only. So 09b reads the debt from the cells' lactate.
+- The oxygen rate is research 11's smooth minimum less its value at no cell oxygen, `smooth_min(D, k P, s D) - smooth_min(D, 0, s D)`, with the width a share `s` of the demand. A review of nightingale#180 found the plain form below zero there, and on the one-bed fixture with the cell membrane shut and the cells at 0 mmHg it ran both burns backward at up to 9.4e-3 oxygen a second, raising the cells to 2e-3 mmHg. 09b's debt form takes the same offset.
 
 ## Cost
 
