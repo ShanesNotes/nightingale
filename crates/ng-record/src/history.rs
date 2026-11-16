@@ -118,6 +118,16 @@ impl ExactSum {
 }
 
 fn exact_total(terms: impl Iterator<Item = (Compensated, i64)> + Clone) -> Compensated {
+    let mut lone = terms.clone();
+    if let (Some((value, weight @ (1 | -1))), None) = (lone.next(), lone.next()) {
+        // A lone row of unit weight is its own total, read as the limbs would read it: most of the body's
+        // combinations are one held pool each.
+        let [hi, lo] =
+            (value.scaled(weight).bits()).map(|part| Measure::<Dimensionless>::new(f64::from_bits(part)));
+        if let (Ok(hi), Ok(lo)) = (hi, lo) {
+            return Compensated::of(&hi).plus(Compensated::of(&lo));
+        }
+    }
     let mut sum = ExactSum::new();
     let mut finite = true;
     for (value, weight) in terms.clone() {
@@ -874,7 +884,7 @@ impl Curve<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{exact_total, exchanged};
+    use super::{ExactSum, exact_total, exchanged};
     use ng_contract::{Compensated, Dimensionless, Measure};
 
     fn two_to(power: i32) -> f64 {
@@ -1038,6 +1048,26 @@ mod tests {
             let low = self.float(power - 54 - below);
             let low = if self.next() & 1 == 1 { -low } else { low };
             exact(self.float(power)).plus(exact(low))
+        }
+    }
+
+    #[test]
+    fn a_lone_row_of_unit_weight_reads_as_the_limbs_read_it() {
+        let mut draws = Draws(0x51_7CC1_B727_220A);
+        let zero_low = pair(5.0, -0.0);
+        let rows = (0..2_000).map(|_| {
+            let power = draws.below(80) as i32 - 40;
+            draws.value(power)
+        });
+        for row in rows.chain([zero_low, Compensated::ZERO.minus(zero_low)]) {
+            for weight in [1, -1] {
+                let mut limbs = ExactSum::new();
+                for part in row.bits().map(f64::from_bits) {
+                    limbs.add(part, weight);
+                }
+                let read = limbs.pair().expect("finite");
+                assert_eq!(total(&[(row, weight)]).bits(), read.bits(), "{row:?} at {weight}");
+            }
         }
     }
 

@@ -3391,3 +3391,10 @@ path = "crates/ng-metabolism/src/diffusion.rs"
 old = '''    let wall = (Side::Plasma(plasma), Side::Tissue(&interstitium));'''
 new = '''    let wall = (Side::Tissue(&interstitium), Side::Tissue(&interstitium));'''
 test = "-p ng-validate --test oxygen the_bed_settles_where_the_fick_identity_puts_it"
+
+[[mutant]]
+name = "ledger-lone-row-skips-its-weight"
+path = "crates/ng-record/src/history.rs"
+old = '''            return Compensated::of(&hi).plus(Compensated::of(&lo));'''
+new = '''            return value.plus(Compensated::ZERO.minus(Compensated::of(&hi)).plus(Compensated::of(&hi)));'''
+test = "-p ng-record --lib history::tests::a_lone_row_of_unit_weight_reads_as_the_limbs_read_it"
