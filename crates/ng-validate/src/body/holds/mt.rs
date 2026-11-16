@@ -70,11 +70,15 @@ pub(super) fn metabolism(body: &mut Assembly<'_>) -> Result<(), AdmissionError> 
 /// The held feeds of glucose and fatty acids into each bed's cells, `k (N_set - N)`, and the held drain of their
 /// water, `k_w (W - W_set)`, until the cells take fuel across their membranes (ticket 16) and the fluids move cell
 /// water (ticket 17).
-fn feeds<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, ports: &HeldPorts<'b, Metabolism>) -> Result<(), AdmissionError> {
+fn feeds<'b>(
+    laws: &mut FragmentBuilder<'b, Metabolism>,
+    ports: &HeldPorts<'b, Metabolism>,
+) -> Result<(), AdmissionError> {
     let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
     let key = ParameterKey::new;
     let speed = laws.parameter::<Rate<Dimensionless>>(key("mt.feed-speed"), Admissible::nonnegative());
-    let water_speed = laws.parameter::<Rate<Dimensionless>>(key("mt.cell-water-speed"), Admissible::nonnegative());
+    let water_speed =
+        laws.parameter::<Rate<Dimensionless>>(key("mt.cell-water-speed"), Admissible::nonnegative());
     let glucose = laws.parameter::<Glucose>(key("mt.cell-glucose-set"), Admissible::nonnegative());
     let fat = laws.parameter::<FattyAcids>(key("mt.cell-fatty-acid-set"), Admissible::nonnegative());
     let water = laws.parameter::<Water>(key("mt.cell-water-set"), Admissible::positive());
@@ -95,7 +99,10 @@ fn restore<'b, Q: Substance>(
     laws: &mut FragmentBuilder<'b, Metabolism>,
     ports: &HeldPorts<'b, Metabolism>,
     name: &'static str,
-    (set, speed): (&Parameter<'b, Metabolism, Q>, &Parameter<'b, Metabolism, Rate<Dimensionless>>),
+    (set, speed): (
+        &Parameter<'b, Metabolism, Q>,
+        &Parameter<'b, Metabolism, Rate<Dimensionless>>,
+    ),
     class: RateClass,
     toward: Toward,
 ) -> Result<(), AdmissionError> {

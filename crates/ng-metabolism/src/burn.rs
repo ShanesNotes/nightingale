@@ -28,7 +28,10 @@ impl<'b> OxygenRate<'_, 'b> {
 /// Each bed's cells burn glucose, `glucose + 6 O2 -> 6 CO2 + 6 H2O`, and fatty acids, `fatty acid + 23 O2 -> 16 CO2 +
 /// 16 H2O`, each releasing its energy into the bed's heat. The glucose burn takes a share `s` of the bed's oxygen rate
 /// and the fatty acid burn the rest, so the share fixes the respiratory quotient at `s + 16 (1 - s) / 23`.
-pub fn burn<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, cells: &CellOxygen<'b>) -> Result<(), AdmissionError> {
+pub fn burn<'b>(
+    laws: &mut FragmentBuilder<'b, Metabolism>,
+    cells: &CellOxygen<'b>,
+) -> Result<(), AdmissionError> {
     let class = RateClass::new(RateBand::Reflex, BURN_NS)?;
     let key = ParameterKey::new;
     let rate = OxygenRate {
@@ -37,7 +40,8 @@ pub fn burn<'b>(laws: &mut FragmentBuilder<'b, Metabolism>, cells: &CellOxygen<'
         reach: laws.site_parameter(key("mt.oxygen-reach"), Admissible::positive()),
         width: laws.site_parameter(key("mt.oxygen-rate-width"), Admissible::positive()),
     };
-    let share: SiteKey<'b, Dimensionless> = laws.site_parameter(key("mt.glucose-share"), Admissible::unit_interval());
+    let share: SiteKey<'b, Dimensionless> =
+        laws.site_parameter(key("mt.glucose-share"), Admissible::unit_interval());
     let at = Space::Cells;
     let glucose = laws.reaction::<CapillaryBed, Oxygen, 6>(
         "glucose burn",

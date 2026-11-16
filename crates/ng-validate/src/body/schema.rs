@@ -187,7 +187,12 @@ fn boundaries(schema: &mut Schema) -> Result<(), AdmissionError> {
     schema.boundary::<Water>("skin water", out, muscle, Space::Interstitium)?;
     schema.drain("urine", site::<VesselSegment>("bladder")?, Space::Lumen)?;
     schema.boundary::<Energy>("heat", out, site::<TissueSite>("body")?, Space::Thermal)?;
-    for (((bed, glucose), fat), water) in BEDS.into_iter().zip(GLUCOSE_FEED).zip(FAT_FEED).zip(CELL_WATER_OUT) {
+    for (((bed, glucose), fat), water) in BEDS
+        .into_iter()
+        .zip(GLUCOSE_FEED)
+        .zip(FAT_FEED)
+        .zip(CELL_WATER_OUT)
+    {
         let bed = site::<CapillaryBed>(bed)?;
         schema.boundary::<Glucose>(glucose, into, bed, Space::Cells)?;
         schema.boundary::<FattyAcids>(fat, into, bed, Space::Cells)?;

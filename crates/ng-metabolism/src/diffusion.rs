@@ -34,7 +34,12 @@ struct Tissue<'a, 'b, Q> {
 
 impl<'b, Q: Substance + Plain> Tissue<'_, 'b, Q> {
     fn pressure<'k>(&self, k: &mut Bed<'b, 'k>) -> Expr<'b, 'k, Metabolism, Pressure> {
-        tissue_pressure(k, (&self.gas, &self.water), self.solubility, self.buffered.as_ref())
+        tissue_pressure(
+            k,
+            (&self.gas, &self.water),
+            self.solubility,
+            self.buffered.as_ref(),
+        )
     }
 }
 
