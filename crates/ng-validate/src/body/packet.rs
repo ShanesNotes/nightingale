@@ -3,7 +3,7 @@ use ng_contract::*;
 
 use super::anatomy::at;
 use super::schema::OXYGEN_USE;
-use crate::{CertificatePolicy, SlidingWindows};
+use crate::{CertificatePolicy, DriftTable, SlidingWindows};
 
 const SECOND: u64 = 1_000_000_000;
 const POINTS: u32 = 100;
@@ -709,9 +709,17 @@ fn oxygen(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admissio
 const DRIFTS: [(Species, f64); 1] = [(Species::Oxygen, OXYGEN_DRIFT)];
 const OXYGEN_DRIFT: f64 = 4.0;
 
+struct BodyDrifts;
+impl DriftTable for BodyDrifts {
+    fn drift<Q: Substance>(&self) -> Result<Option<Measure<Q>>, AdmissionError> {
+        let named = DRIFTS.iter().find(|(species, _)| *species == Q::SPECIES);
+        named.map(|(_, drift)| Measure::new(*drift)).transpose()
+    }
+}
+
 pub fn body_certificate(
     body: &CompiledBody,
     windows: SlidingWindows,
 ) -> Result<CertificatePolicy, AdmissionError> {
-    crate::certificate_with(body, windows, &DRIFTS)
+    crate::certificate_with(body, windows, &BodyDrifts)
 }

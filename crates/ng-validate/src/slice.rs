@@ -545,35 +545,51 @@ pub fn arena_certificate(
     body: &CompiledBody,
     windows: SlidingWindows,
 ) -> Result<CertificatePolicy, AdmissionError> {
-    certificate_with(body, windows, &[])
+    certificate_with(body, windows, &SliceDrifts)
+}
+
+/// A body's own drift bounds, each in its species' unit, for the species the slice's table does not hold.
+pub trait DriftTable {
+    fn drift<Q: Substance>(&self) -> Result<Option<Measure<Q>>, AdmissionError>;
+}
+
+struct SliceDrifts;
+impl DriftTable for SliceDrifts {
+    fn drift<Q: Substance>(&self) -> Result<Option<Measure<Q>>, AdmissionError> {
+        Ok(None)
+    }
 }
 
 /// The arena's policy with `drifts` in place of the slice's bound for each species it names.
 pub fn certificate_with(
     body: &CompiledBody,
     windows: SlidingWindows,
-    drifts: &[(Species, f64)],
+    drifts: &impl DriftTable,
 ) -> Result<CertificatePolicy, AdmissionError> {
-    let drift = |species: Species| {
-        (drifts.iter())
-            .find(|(named, _)| *named == species)
-            .map_or_else(|| species_drift(species), |(_, drift)| *drift)
-    };
-    fn limits<U: Substance>(quantity: QuantityId, drift: f64) -> Result<QuantityPolicy, AdmissionError> {
+    fn limits<U: Substance>(
+        quantity: QuantityId,
+        drift: Measure<U>,
+    ) -> Result<QuantityPolicy, AdmissionError> {
         let relative = Measure::new(CLOSURE_RELATIVE)?;
-        QuantityPolicy::new(quantity, Measure::<U>::new(0.0)?, relative, Measure::new(drift)?)
+        QuantityPolicy::new(quantity, Measure::<U>::new(0.0)?, relative, drift)
     }
-    struct Limits(QuantityId, f64);
-    impl Visit for Limits {
+    struct Limits<'t, T>(QuantityId, &'t T);
+    impl<T: DriftTable> Visit for Limits<'_, T> {
         type Output = Result<QuantityPolicy, AdmissionError>;
         fn visit<Q: Substance>(self) -> Self::Output {
-            limits::<Q>(self.0, self.1)
+            let drift = match self.1.drift::<Q>()? {
+                Some(drift) => drift,
+                None => Measure::new(species_drift(Q::SPECIES))?,
+            };
+            limits::<Q>(self.0, drift)
         }
     }
     let basis = body.conserved_basis();
     let quantities = basis.ids().map(|quantity| match quantity.book() {
-        Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_ENERGY_DRIFT),
-        Book::Of(species) => species.visit(Limits(quantity, drift(species))),
+        Book::Of(Species::Energy) | Book::Energy => {
+            limits::<Energy>(quantity, Measure::new(SYNTHETIC_ENERGY_DRIFT)?)
+        }
+        Book::Of(species) => species.visit(Limits(quantity, drifts)),
         Book::Element(_) => QuantityPolicy::element(
             quantity,
             Measure::new(0.0)?,

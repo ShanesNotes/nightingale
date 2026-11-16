@@ -302,7 +302,7 @@ pub use run::{
 };
 pub use score::{ArenaScore, ScorePart};
 pub use slice::{
-    AssemblyCase, CaseAssembly, Slice, SliceCase, anchor_moment, arena_anatomy, arena_body,
+    AssemblyCase, CaseAssembly, DriftTable, Slice, SliceCase, anchor_moment, arena_anatomy, arena_body,
     arena_certificate, arena_lens, arena_organs, arena_packet, arena_schema, arena_seed, certificate_with,
     hold_outside_slice,
 };
