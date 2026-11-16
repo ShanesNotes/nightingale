@@ -67,7 +67,11 @@ impl<'b, O: Owner> Curve<'b, O> {
         }
     }
 
-    fn exponent<'k>(&self, k: &mut Bed<'b, 'k, O>, pressure: Value<'b, 'k, O, Pressure>) -> Value<'b, 'k, O, Dimensionless> {
+    fn exponent<'k>(
+        &self,
+        k: &mut Bed<'b, 'k, O>,
+        pressure: Value<'b, 'k, O, Pressure>,
+    ) -> Value<'b, 'k, O, Dimensionless> {
         let reach = k.parameter(&self.reach);
         let quotient = k.divide(pressure, reach);
         let reached: Value<'b, 'k, O, Dimensionless> = k.as_dimension(quotient);

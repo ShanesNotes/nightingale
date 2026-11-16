@@ -35,7 +35,11 @@ enum Side<'a, 'b> {
 }
 
 impl<'b> Side<'_, 'b> {
-    fn pressure<'k>(&self, k: &mut Bed<'b, 'k>, solubility: &Solubility<'b>) -> Expr<'b, 'k, Metabolism, Pressure> {
+    fn pressure<'k>(
+        &self,
+        k: &mut Bed<'b, 'k>,
+        solubility: &Solubility<'b>,
+    ) -> Expr<'b, 'k, Metabolism, Pressure> {
         match self {
             Self::Plasma(pressure) => k.at_site(pressure),
             Self::Tissue(space) => {
@@ -59,8 +63,10 @@ fn diffuse<'b>(
     solubility: &Solubility<'b>,
     class: RateClass,
 ) {
-    let conductance =
-        laws.site_parameter::<CapillaryBed, Conductance<Oxygen>>(ParameterKey::new(key), Admissible::nonnegative());
+    let conductance = laws.site_parameter::<CapillaryBed, Conductance<Oxygen>>(
+        ParameterKey::new(key),
+        Admissible::nonnegative(),
+    );
     let rate = laws.site_kernel(|mut k| {
         let (high, low) = (from.pressure(&mut k, solubility), to.pressure(&mut k, solubility));
         let head = k.subtract(high, low);
@@ -79,7 +85,10 @@ pub fn wall_diffusion<'b>(
     plasma: &Port<'b, Pressure>,
 ) -> Result<(), AdmissionError> {
     let class = RateClass::new(RateBand::Reflex, DIFFUSION_NS)?;
-    let solubility = laws.parameter(ParameterKey::new("mt.tissue-oxygen-solubility"), Admissible::positive());
+    let solubility = laws.parameter(
+        ParameterKey::new("mt.tissue-oxygen-solubility"),
+        Admissible::positive(),
+    );
     let interstitium = Tissue {
         oxygen: routes.wall.to_amount::<Oxygen>(),
         water: routes.wall.to_amount::<Water>(),
@@ -89,8 +98,22 @@ pub fn wall_diffusion<'b>(
         water: routes.membrane.to_amount::<Water>(),
     };
     let wall = (Side::Plasma(plasma), Side::Tissue(&interstitium));
-    diffuse(laws, &routes.wall, "mt.wall-oxygen-conductance", wall, &solubility, class);
+    diffuse(
+        laws,
+        &routes.wall,
+        "mt.wall-oxygen-conductance",
+        wall,
+        &solubility,
+        class,
+    );
     let membrane = (Side::Tissue(&interstitium), Side::Tissue(&cells));
-    diffuse(laws, &routes.membrane, "mt.cell-oxygen-conductance", membrane, &solubility, class);
+    diffuse(
+        laws,
+        &routes.membrane,
+        "mt.cell-oxygen-conductance",
+        membrane,
+        &solubility,
+        class,
+    );
     Ok(())
 }

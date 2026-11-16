@@ -3,6 +3,7 @@ use ng_contract::*;
 
 use super::anatomy::at;
 use super::schema::OXYGEN_USE;
+use crate::{CertificatePolicy, SlidingWindows};
 
 const SECOND: u64 = 1_000_000_000;
 const POINTS: u32 = 100;
@@ -703,4 +704,19 @@ fn oxygen(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admissio
         set::<Conductance<Oxygen>>(packet, "mt.cell-oxygen-conductance", at, used / HEAD)?;
     }
     Ok(())
+}
+
+/// The body's own drift bound for each species it moves that the slice does not, in place of the slice's table:
+/// twice the worst change over a ten-second window of the body's first minute, rounded up to one significant figure.
+/// Fixture data measured on this body at its admitted start, which settles over that minute, until the body's measured
+/// day (ticket 24) replaces it.
+const DRIFTS: [(Species, f64); 1] = [(Species::Oxygen, OXYGEN_DRIFT)];
+const OXYGEN_DRIFT: f64 = 4.0;
+
+/// The arena's certificate with the body's own drift table.
+pub fn body_certificate(
+    body: &CompiledBody,
+    windows: SlidingWindows,
+) -> Result<CertificatePolicy, AdmissionError> {
+    crate::certificate_with(body, windows, &DRIFTS)
 }

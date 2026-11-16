@@ -103,13 +103,29 @@ pub fn body_schema() -> Result<Schema, AdmissionError> {
 
 /// Each bed's held oxygen use in its cells: its bed, its boundary's name and the key of its rate.
 pub(super) const OXYGEN_USE: [(&str, &str, &str); 11] = [
-    ("pulmonary bed", "pulmonary bed oxygen use", "mt.oxygen-use-pulmonary"),
+    (
+        "pulmonary bed",
+        "pulmonary bed oxygen use",
+        "mt.oxygen-use-pulmonary",
+    ),
     ("gut bed", "gut bed oxygen use", "mt.oxygen-use-gut"),
     ("muscle bed", "muscle bed oxygen use", "mt.oxygen-use-muscle"),
-    ("glomerular bed", "glomerular bed oxygen use", "mt.oxygen-use-glomerular"),
-    ("peritubular bed", "peritubular bed oxygen use", "mt.oxygen-use-peritubular"),
+    (
+        "glomerular bed",
+        "glomerular bed oxygen use",
+        "mt.oxygen-use-glomerular",
+    ),
+    (
+        "peritubular bed",
+        "peritubular bed oxygen use",
+        "mt.oxygen-use-peritubular",
+    ),
     ("brain bed", "brain bed oxygen use", "mt.oxygen-use-brain"),
-    ("coronary bed", "coronary bed oxygen use", "mt.oxygen-use-coronary"),
+    (
+        "coronary bed",
+        "coronary bed oxygen use",
+        "mt.oxygen-use-coronary",
+    ),
     ("liver bed", "liver bed oxygen use", "mt.oxygen-use-liver"),
     ("fat bed", "fat bed oxygen use", "mt.oxygen-use-fat"),
     ("skin bed", "skin bed oxygen use", "mt.oxygen-use-skin"),

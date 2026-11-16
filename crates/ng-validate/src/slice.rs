@@ -545,6 +545,21 @@ pub fn arena_certificate(
     body: &CompiledBody,
     windows: SlidingWindows,
 ) -> Result<CertificatePolicy, AdmissionError> {
+    certificate_with(body, windows, &[])
+}
+
+/// The arena's policy with `drifts` in place of the slice's bound for each species it names, so a body that moves a
+/// species the slice does not states its own bound and leaves the slice's policy as it is.
+pub fn certificate_with(
+    body: &CompiledBody,
+    windows: SlidingWindows,
+    drifts: &[(Species, f64)],
+) -> Result<CertificatePolicy, AdmissionError> {
+    let drift = |species: Species| {
+        (drifts.iter())
+            .find(|(named, _)| *named == species)
+            .map_or_else(|| species_drift(species), |(_, drift)| *drift)
+    };
     fn limits<U: Substance>(quantity: QuantityId, drift: f64) -> Result<QuantityPolicy, AdmissionError> {
         let relative = Measure::new(CLOSURE_RELATIVE)?;
         QuantityPolicy::new(quantity, Measure::<U>::new(0.0)?, relative, Measure::new(drift)?)
@@ -559,7 +574,7 @@ pub fn arena_certificate(
     let basis = body.conserved_basis();
     let quantities = basis.ids().map(|quantity| match quantity.book() {
         Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_ENERGY_DRIFT),
-        Book::Of(species) => species.visit(Limits(quantity, species_drift(species))),
+        Book::Of(species) => species.visit(Limits(quantity, drift(species))),
         Book::Element(_) => QuantityPolicy::element(
             quantity,
             Measure::new(0.0)?,

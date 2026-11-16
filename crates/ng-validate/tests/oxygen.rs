@@ -52,7 +52,11 @@ fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
 
 fn compiled() -> Result<CompiledBody, AdmissionError> {
     let origin = || -> Result<Position, AdmissionError> {
-        Ok(Position::new(Measure::new(0.0)?, Measure::new(0.0)?, Measure::new(0.0)?))
+        Ok(Position::new(
+            Measure::new(0.0)?,
+            Measure::new(0.0)?,
+            Measure::new(0.0)?,
+        ))
     };
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", origin()?).id();
@@ -78,7 +82,9 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
         for space in SPACES {
             held = held.pool::<Water, CapillaryBed>(space);
         }
-        let (laws, _) = body.hold(held.pool::<Hemoglobin, CapillaryBed>(Space::Plasma))?.parts();
+        let (laws, _) = body
+            .hold(held.pool::<Hemoglobin, CapillaryBed>(Space::Plasma))?
+            .parts();
         body.add(laws.finish());
 
         let (mut laws, ports) = body.metabolism(None)?.parts();
@@ -95,8 +101,10 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
         let (mut laws, ports) = body.boundary()?.parts();
         let class = RateClass::new(RateBand::Reflex, SECOND)?;
         let key = ParameterKey::new;
-        let delivered = laws.parameter::<Rate<Oxygen>>(key("fixture.arterial-oxygen"), Admissible::nonnegative());
-        let renewal = laws.parameter::<Rate<Dimensionless>>(key("fixture.renewal"), Admissible::nonnegative());
+        let delivered =
+            laws.parameter::<Rate<Oxygen>>(key("fixture.arterial-oxygen"), Admissible::nonnegative());
+        let renewal =
+            laws.parameter::<Rate<Dimensionless>>(key("fixture.renewal"), Admissible::nonnegative());
         let use_rate = laws.parameter::<Rate<Oxygen>>(key("fixture.oxygen-use"), Admissible::nonnegative());
         for (name, rate) in [("artery oxygen", &delivered), ("oxygen use", &use_rate)] {
             let route = ports.route::<Oxygen>(name)?.route;
@@ -151,7 +159,12 @@ fn guess(row: RowKind, start: Start) -> f64 {
             species: Species::Water,
             space,
             ..
-        } => WATER[SPACES.iter().position(|of| *of == space).expect("a fixture space")],
+        } => {
+            WATER[SPACES
+                .iter()
+                .position(|of| *of == space)
+                .expect("a fixture space")]
+        }
         RowKind::Amount {
             species: Species::Hemoglobin,
             ..
@@ -185,7 +198,12 @@ fn packet(body: &CompiledBody, start: Start) -> Result<ParameterPacket<Synthetic
     type Solubility = Quotient<Concentration<Oxygen>, Pressure>;
     set::<Solubility>(&mut packet, "bc.oxygen-solubility", body_wide, SOLUBILITY)?;
     set::<Solubility>(&mut packet, "mt.tissue-oxygen-solubility", body_wide, SOLUBILITY)?;
-    set::<Quotient<Concentration<Oxygen>, Concentration<Hemoglobin>>>(&mut packet, "bc.heme-oxygen", body_wide, HEME)?;
+    set::<Quotient<Concentration<Oxygen>, Concentration<Hemoglobin>>>(
+        &mut packet,
+        "bc.heme-oxygen",
+        body_wide,
+        HEME,
+    )?;
     for (key, value) in [
         ("bc.p50", P50),
         ("bc.hill-reach", HILL.2),
@@ -212,7 +230,12 @@ fn packet(body: &CompiledBody, start: Start) -> Result<ParameterPacket<Synthetic
     for key in ["mt.wall-oxygen-conductance", "mt.cell-oxygen-conductance"] {
         set::<Conductance<Oxygen>>(&mut packet, key, beds, used() / HEAD)?;
     }
-    set::<Rate<Oxygen>>(&mut packet, "fixture.arterial-oxygen", body_wide, flow() * curve(REACH.0).2)?;
+    set::<Rate<Oxygen>>(
+        &mut packet,
+        "fixture.arterial-oxygen",
+        body_wide,
+        flow() * curve(REACH.0).2,
+    )?;
     set::<Rate<Oxygen>>(&mut packet, "fixture.oxygen-use", body_wide, used())?;
     set::<Rate<Dimensionless>>(&mut packet, "fixture.renewal", body_wide, RENEWAL)?;
     packet.start_rest(body, |row| guess(row, start), NOTE)?;
@@ -232,7 +255,8 @@ fn admitted<'m>(
 }
 
 fn value(body: &CompiledBody, session: &Session<'_, Running>, kind: RowKind) -> f64 {
-    let row = (body.rows().iter().find(|row| row.kind() == kind)).unwrap_or_else(|| panic!("no row {kind:?}"));
+    let row =
+        (body.rows().iter().find(|row| row.kind() == kind)).unwrap_or_else(|| panic!("no row {kind:?}"));
     f64::from_bits(session.record().accepted().value(row.id()).bits()[0])
 }
 
@@ -255,13 +279,18 @@ fn plasma_oxygen() -> Result<RowKind, AdmissionError> {
 }
 
 fn after<'m>(session: Session<'m, Running>, seconds: u64) -> Session<'m, Running> {
-    run_until(session, SimTime::from_ns(seconds * SECOND)).unwrap_or_else(|stopped| panic!("{:?}", stopped.fault()))
+    run_until(session, SimTime::from_ns(seconds * SECOND))
+        .unwrap_or_else(|stopped| panic!("{:?}", stopped.fault()))
 }
 
 #[test]
 fn speciation_meets_the_curve_at_three_partial_pressures_from_a_cold_guess_and_a_warm_one()
 -> Result<(), InitializationFailure> {
-    let (body, core, store) = (compiled()?, ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    let (body, core, store) = (
+        compiled()?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
     let (pressure, saturation) = (field("oxygen partial pressure")?, field("oxygen saturation")?);
     for t in [-0.5, REACH.1, REACH.0] {
         let (p, s, content) = curve(t);
@@ -272,7 +301,10 @@ fn speciation_meets_the_curve_at_three_partial_pressures_from_a_cold_guess_and_a
         };
         for start in [warm, Start::cold(content)] {
             let session = admitted(&body, &core, &store, start)?;
-            let (solved, share) = (value(&body, &session, pressure), value(&body, &session, saturation));
+            let (solved, share) = (
+                value(&body, &session, pressure),
+                value(&body, &session, saturation),
+            );
             assert!(
                 (solved - p).abs() <= 1e-12 * p && (share - s).abs() <= 1e-12,
                 "at t {t} from {} mmHg: {solved} and {share} against {p} and {s}",
@@ -300,7 +332,11 @@ fn settling<'m>(
 
 #[test]
 fn the_bed_settles_where_the_fick_identity_puts_it() -> Result<(), InitializationFailure> {
-    let (body, core, store) = (compiled()?, ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    let (body, core, store) = (
+        compiled()?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
     let session = settling(&body, &core, &store)?;
     let venous = value(&body, &session, plasma_oxygen()?) / WATER[0];
     let taken = flow() * (curve(REACH.0).2 - venous);
@@ -310,7 +346,10 @@ fn the_bed_settles_where_the_fick_identity_puts_it() -> Result<(), Initializatio
         used()
     );
     let pressure = value(&body, &session, field("oxygen partial pressure")?);
-    assert!((pressure - curve(REACH.1).0).abs() <= 1e-6 * pressure, "{pressure}");
+    assert!(
+        (pressure - curve(REACH.1).0).abs() <= 1e-6 * pressure,
+        "{pressure}"
+    );
     Ok(())
 }
 
@@ -320,14 +359,23 @@ const CLOSURE: f64 = 1e-12;
 
 #[test]
 fn oxygen_closes_to_the_ledgers_floor_through_speciation() -> Result<(), InitializationFailure> {
-    let (body, core, store) = (compiled()?, ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    let (body, core, store) = (
+        compiled()?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
     let session = settling(&body, &core, &store)?;
     let windows = SlidingWindows::new(NonZeroU64::MIN.saturating_add(10 * SECOND - 1), 20 * SECOND)?;
     struct Unbounded(QuantityId);
     impl Visit for Unbounded {
         type Output = Result<QuantityPolicy, AdmissionError>;
         fn visit<Q: Substance>(self) -> Self::Output {
-            QuantityPolicy::new(self.0, Measure::<Q>::new(0.0)?, Measure::new(CLOSURE)?, Measure::new(1e9)?)
+            QuantityPolicy::new(
+                self.0,
+                Measure::<Q>::new(0.0)?,
+                Measure::new(CLOSURE)?,
+                Measure::new(1e9)?,
+            )
         }
     }
     let basis = body.conserved_basis();
@@ -341,18 +389,31 @@ fn oxygen_closes_to_the_ledgers_floor_through_speciation() -> Result<(), Initial
                 }
                 quantities.push(species.visit(Unbounded(quantity))?);
             }
-            Book::Charge => quantities.push(QuantityPolicy::charge(quantity, Measure::new(0.0)?, Measure::new(CLOSURE)?)?),
+            Book::Charge => quantities.push(QuantityPolicy::charge(
+                quantity,
+                Measure::new(0.0)?,
+                Measure::new(CLOSURE)?,
+            )?),
             other => panic!("no element or energy in this fixture: {other:?}"),
         }
     }
     let policy = CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows)?;
-    let certificate = certify(&session.conservation(), &policy)
-        .unwrap_or_else(|failed| {
-            let residual = f64::from_bits(failed.residual().bits()[0]);
-            panic!("{:?} {:?} {:?} {residual:e}", failed.check(), failed.quantity(), failed.window())
-        });
+    let certificate = certify(&session.conservation(), &policy).unwrap_or_else(|failed| {
+        let residual = f64::from_bits(failed.residual().bits()[0]);
+        panic!(
+            "{:?} {:?} {:?} {residual:e}",
+            failed.check(),
+            failed.quantity(),
+            failed.window()
+        )
+    });
     let oxygen = oxygen.expect("oxygen is conserved");
-    assert!(certificate.results().iter().any(|result| result.quantity() == oxygen));
+    assert!(
+        certificate
+            .results()
+            .iter()
+            .any(|result| result.quantity() == oxygen)
+    );
     Ok(())
 }
 
@@ -360,7 +421,11 @@ fn oxygen_closes_to_the_ledgers_floor_through_speciation() -> Result<(), Initial
 /// engine refuses and names the law, and no number stands for it.
 #[test]
 fn oxygen_content_at_capacity_has_no_partial_pressure() -> Result<(), AdmissionError> {
-    let (body, core, store) = (compiled()?, ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    let (body, core, store) = (
+        compiled()?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
     for content in [HEME * HEMOGLOBIN + 1.0, 2.0 * HEME * HEMOGLOBIN] {
         let start = Start {
             content,

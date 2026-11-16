@@ -188,7 +188,9 @@ fn field(owner: &'static str, local: &'static str, at: Context) -> RowKind {
 }
 
 fn value(start: &Start, session: &Session<'_, Running>, kind: RowKind) -> f64 {
-    let row = (start.body.rows().iter()).find(|row| row.kind() == kind).unwrap_or_else(|| panic!("no row {kind:?}"));
+    let row = (start.body.rows().iter())
+        .find(|row| row.kind() == kind)
+        .unwrap_or_else(|| panic!("no row {kind:?}"));
     lead(session.record().accepted().value(row.id()))
 }
 
@@ -204,7 +206,15 @@ fn concentration(start: &Start, session: &Session<'_, Running>, key: &'static st
 fn body_oxygen(start: &Start, session: &Session<'_, Running>) -> f64 {
     let view = session.record().accepted();
     (start.body.rows().iter())
-        .filter(|row| matches!(row.kind(), RowKind::Amount { species: Species::Oxygen, .. }))
+        .filter(|row| {
+            matches!(
+                row.kind(),
+                RowKind::Amount {
+                    species: Species::Oxygen,
+                    ..
+                }
+            )
+        })
         .map(|row| lead(view.value(row.id())))
         .sum()
 }
@@ -245,7 +255,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
     let reached = minute.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
     let window = NonZeroU64::new(10 * SECOND).expect("a window");
     let windows = SlidingWindows::new(window, reached).expect("windows");
-    let policy = arena_certificate(&start.body, windows).expect("a policy");
+    let policy = body_certificate(&start.body, windows).expect("a policy");
     let certificate = certify(&minute.conservation(), &policy).unwrap_or_else(|failed| {
         panic!(
             "{:?} {:?} {:?}",
@@ -458,7 +468,8 @@ fn a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(start: &St
     let input = AuthorizedInput::from_command_receipt(Digest::of_canonical(b"a test's own command"), event);
     session.enqueue(input).expect("enqueued");
     let arterial = |session: &Session<'_, Running>| {
-        [Species::Hemoglobin, Species::Oxygen].map(|species| concentration(start, session, "systemic arteries", species))
+        [Species::Hemoglobin, Species::Oxygen]
+            .map(|species| concentration(start, session, "systemic arteries", species))
     };
     let before_arterial = arterial(&session);
     let session = until(session, SECOND);
