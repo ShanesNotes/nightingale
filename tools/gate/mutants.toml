@@ -2796,10 +2796,10 @@ test = "-p ng-validate --test body fl_crosses_each_wall_with_only_the_species_bo
 [[mutant]]
 name = "body-hold-release-swap"
 path = "crates/ng-validate/src/body/table.rs"
-old = '''    pool::<FattyAcids, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(16, HP), "01:202"),
-    pool::<Glycerol, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(14, HP), "01:204"),'''
-new = '''    pool::<FattyAcids, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(14, HP), "01:202"),
-    pool::<Glycerol, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(16, HP), "01:204"),'''
+old = '''    pool::<Glycogen, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(14, HP), "01:188, 877"),
+    pool::<Ketones, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(16, HP), "01:38, 201-202, 879"),'''
+new = '''    pool::<Glycogen, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(16, HP), "01:188, 877"),
+    pool::<Ketones, Beds<Liver>>(HP, Cells, UNCROSSED, Ticket(14, HP), "01:38, 201-202, 879"),'''
 test = "-p ng-validate --test body each_hold_names_the_ticket_that_releases_it_and_its_body_01_line"
 
 [[mutant]]
