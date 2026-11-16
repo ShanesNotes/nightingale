@@ -3377,6 +3377,16 @@ new = '''        let doubled = k.add(head, head);
 test = "-p ng-validate --test gases the_bed_settles_where_the_fick_identity_puts_it"
 
 [[mutant]]
+name = "burn-reads-no-demand"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''k.smooth_min(demand, allowed, width)'''
+new = '''{
+            let _ = (allowed, width);
+            demand
+        }'''
+test = "-p ng-validate --test gases the_oxygen_rate_bends_below_a_raised_demand_or_a_halved_flow_with_no_step_refused"
+
+[[mutant]]
 name = "p50-acidity-shift-reversed"
 path = "crates/ng-blood-chemistry/src/oxygen.rs"
 old = '''        let d = k.subtract(acidity, standard);'''
