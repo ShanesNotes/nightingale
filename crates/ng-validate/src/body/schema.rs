@@ -16,6 +16,10 @@ macro_rules! processes {
     };
 }
 
+/// Each fuel's energy content, plainly synthetic.
+pub(super) const GLUCOSE_ENERGY: f64 = 1_000.0;
+pub(super) const FAT_ENERGY: f64 = 3_000.0;
+
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     Ok(AnatomyBuilder::new().site::<C>(key, at(0.0)?).id())
 }
@@ -55,7 +59,7 @@ pub fn body_schema() -> Result<Schema, AdmissionError> {
             Beds<Muscle>: Cells, Beds<Liver>: Cells, Beds<Tubule>: Cells
         ];
         [FattyAcids] in [
-            Blood: Plasma, Blood: Lumen, CapillaryBed: Interstitium, Besides<Brain>: Cells
+            Blood: Plasma, Blood: Lumen, CapillaryBed: Interstitium, CapillaryBed: Cells
         ];
         [Glycerol] in [
             Blood: Plasma, Blood: Lumen, CapillaryBed: Interstitium, Beds<Fat>: Cells, Beds<Liver>: Cells
@@ -82,7 +86,10 @@ pub fn body_schema() -> Result<Schema, AdmissionError> {
             Cortisol
         ] in [Blood: Plasma, Blood: Lumen, CapillaryBed: Interstitium];
         [Norepinephrine] in [Junction: Vesicle, Junction: Cleft, Junction: Bound];
+        [Energy] in [CapillaryBed: Thermal];
     }
+    schema.energy_content::<Glucose>(Measure::new(GLUCOSE_ENERGY)?)?;
+    schema.energy_content::<FattyAcids>(Measure::new(FAT_ENERGY)?)?;
 
     for space in [Space::Vesicle, Space::Cleft, Space::Bound] {
         schema.pool::<Acetylcholine>(site::<Junction>("sinoatrial junction")?, space)?;
@@ -101,51 +108,63 @@ pub fn body_schema() -> Result<Schema, AdmissionError> {
     Ok(schema)
 }
 
-/// Each bed's held oxygen use in its cells: its bed, its boundary's name and the key of its rate.
-pub(super) const OXYGEN_USE: [(&str, &str, &str); 11] = [
-    (
-        "pulmonary bed",
-        "pulmonary bed oxygen use",
-        "mt.oxygen-use-pulmonary",
-    ),
-    ("gut bed", "gut bed oxygen use", "mt.oxygen-use-gut"),
-    ("muscle bed", "muscle bed oxygen use", "mt.oxygen-use-muscle"),
-    (
-        "glomerular bed",
-        "glomerular bed oxygen use",
-        "mt.oxygen-use-glomerular",
-    ),
-    (
-        "peritubular bed",
-        "peritubular bed oxygen use",
-        "mt.oxygen-use-peritubular",
-    ),
-    ("brain bed", "brain bed oxygen use", "mt.oxygen-use-brain"),
-    (
-        "coronary bed",
-        "coronary bed oxygen use",
-        "mt.oxygen-use-coronary",
-    ),
-    ("liver bed", "liver bed oxygen use", "mt.oxygen-use-liver"),
-    ("fat bed", "fat bed oxygen use", "mt.oxygen-use-fat"),
-    ("skin bed", "skin bed oxygen use", "mt.oxygen-use-skin"),
-    ("bone bed", "bone bed oxygen use", "mt.oxygen-use-bone"),
+/// The beds whose cells burn fuel.
+pub(super) const BEDS: [&str; 11] = [
+    "pulmonary bed",
+    "gut bed",
+    "muscle bed",
+    "glomerular bed",
+    "peritubular bed",
+    "brain bed",
+    "coronary bed",
+    "liver bed",
+    "fat bed",
+    "skin bed",
+    "bone bed",
+];
+/// Each bed's held glucose feed into its cells, in `BEDS`' order.
+pub(super) const GLUCOSE_FEED: [&str; 11] = [
+    "pulmonary bed glucose feed",
+    "gut bed glucose feed",
+    "muscle bed glucose feed",
+    "glomerular bed glucose feed",
+    "peritubular bed glucose feed",
+    "brain bed glucose feed",
+    "coronary bed glucose feed",
+    "liver bed glucose feed",
+    "fat bed glucose feed",
+    "skin bed glucose feed",
+    "bone bed glucose feed",
+];
+/// Each bed's held fatty acid feed into its cells, in `BEDS`' order.
+pub(super) const FAT_FEED: [&str; 11] = [
+    "pulmonary bed fatty acid feed",
+    "gut bed fatty acid feed",
+    "muscle bed fatty acid feed",
+    "glomerular bed fatty acid feed",
+    "peritubular bed fatty acid feed",
+    "brain bed fatty acid feed",
+    "coronary bed fatty acid feed",
+    "liver bed fatty acid feed",
+    "fat bed fatty acid feed",
+    "skin bed fatty acid feed",
+    "bone bed fatty acid feed",
+];
+/// Each bed's held drain of cell water, in `BEDS`' order.
+pub(super) const CELL_WATER_OUT: [&str; 11] = [
+    "pulmonary bed cell water out",
+    "gut bed cell water out",
+    "muscle bed cell water out",
+    "glomerular bed cell water out",
+    "peritubular bed cell water out",
+    "brain bed cell water out",
+    "coronary bed cell water out",
+    "liver bed cell water out",
+    "fat bed cell water out",
+    "skin bed cell water out",
+    "bone bed cell water out",
 ];
 pub(super) const LUNG_OXYGEN: &str = "lung oxygen";
-/// Each bed's held carbon dioxide made in its cells, in `OXYGEN_USE`'s order.
-pub(super) const CARBON_DIOXIDE_MADE: [&str; 11] = [
-    "pulmonary bed carbon dioxide made",
-    "gut bed carbon dioxide made",
-    "muscle bed carbon dioxide made",
-    "glomerular bed carbon dioxide made",
-    "peritubular bed carbon dioxide made",
-    "brain bed carbon dioxide made",
-    "coronary bed carbon dioxide made",
-    "liver bed carbon dioxide made",
-    "fat bed carbon dioxide made",
-    "skin bed carbon dioxide made",
-    "bone bed carbon dioxide made",
-];
 pub(super) const LUNG_CARBON_DIOXIDE: &str = "lung carbon dioxide";
 
 fn boundaries(schema: &mut Schema) -> Result<(), AdmissionError> {
@@ -168,10 +187,11 @@ fn boundaries(schema: &mut Schema) -> Result<(), AdmissionError> {
     schema.boundary::<Water>("skin water", out, muscle, Space::Interstitium)?;
     schema.drain("urine", site::<VesselSegment>("bladder")?, Space::Lumen)?;
     schema.boundary::<Energy>("heat", out, site::<TissueSite>("body")?, Space::Thermal)?;
-    for ((bed, used, _), made) in OXYGEN_USE.into_iter().zip(CARBON_DIOXIDE_MADE) {
+    for (((bed, glucose), fat), water) in BEDS.into_iter().zip(GLUCOSE_FEED).zip(FAT_FEED).zip(CELL_WATER_OUT) {
         let bed = site::<CapillaryBed>(bed)?;
-        schema.boundary::<Oxygen>(used, out, bed, Space::Cells)?;
-        schema.boundary::<CarbonDioxide>(made, into, bed, Space::Cells)?;
+        schema.boundary::<Glucose>(glucose, into, bed, Space::Cells)?;
+        schema.boundary::<FattyAcids>(fat, into, bed, Space::Cells)?;
+        schema.boundary::<Water>(water, out, bed, Space::Cells)?;
     }
     let lung = site::<CapillaryBed>("pulmonary bed")?;
     schema.boundary::<Oxygen>(LUNG_OXYGEN, into, lung, Space::Plasma)?;
