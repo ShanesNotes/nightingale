@@ -363,6 +363,24 @@ The volume one unit amount of a species takes up. A space's volume derives from 
 **Hematocrit**:
 The share of a blood space's volume that red cells take: the space's hemoglobin amount over its volume, over the red cells' own hemoglobin concentration. Hematology reads it at the central veins, and blood viscosity follows from it.
 
+**Partial pressure**:
+The pressure a dissolved gas would hold in a gas at equilibrium with its space, whose difference wall diffusion follows. Speciation sets it in a blood space from the space's oxygen, and in a tissue space it is the dissolved oxygen over its solubility.
+_Avoid_: tension
+
+**Saturation**:
+The share of hemoglobin's oxygen sites that hold oxygen in a blood space, from 0 to 1, which speciation sets from the oxygen partial pressure.
+
+**Oxygen content**:
+All the oxygen a volume of a space holds, dissolved and bound together: the space's oxygen amount over its volume. It is not a chart entry's content.
+_Avoid_: content alone
+
+**Speciation**:
+The algebraic rows that split a space's total of a gas or a weak acid into its forms and its partial pressure. They read amounts and move none, so the total closes through them.
+
+**Wall diffusion**:
+A transfer of a dissolved gas across a capillary wall or a cell membrane, at a conductance times the difference of its partial pressures either side.
+_Avoid_: crossing (a guard's)
+
 **Coupling field**:
 One value an arrow of the coupling map carries, held as an algebraic row that the map's sender defines and its receiver reads. A per-site field has one row per site.
 

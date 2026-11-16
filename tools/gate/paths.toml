@@ -264,6 +264,12 @@ name = "ng-receptor"
 name = "ng-hematology"
 
 [[crate]]
+name = "ng-blood-chemistry"
+
+[[crate]]
+name = "ng-metabolism"
+
+[[crate]]
 name = "ng-solver"
 
 [[crate]]
