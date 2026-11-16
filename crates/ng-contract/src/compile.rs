@@ -3,6 +3,7 @@ use crate::body::{
     HazardLayout, Instance, Layout, ModeLayout, ParameterId, ParameterSlot, Program, ProgramId, Receipt, Row,
     RowId, RowKind, Slot, Sparsity, StreamLayout, Target, UnknownId,
 };
+use crate::catalog::SpeciationReader;
 use crate::chance::key_word;
 use crate::conservation::{Balanced, admission_totals, conserved_basis, weight};
 use crate::elimination::Elimination;
@@ -27,6 +28,7 @@ pub(crate) fn compile(
     issued: Vec<&'static str>,
     mut held: Vec<HeldCard>,
     mut fragments: Vec<FragmentData>,
+    readers: &[SpeciationReader],
 ) -> Result<CompiledBody, AdmissionError> {
     fragments.sort_by_key(|fragment| fragment.owner);
     lift_flows(&mut fragments, &schema);
@@ -54,6 +56,7 @@ pub(crate) fn compile(
         schema: &schema,
         fragments: &fragments,
         held: &held,
+        readers,
     };
     let placement = place(&owed, &places, &unread)?;
     check_samples(&placement, &rows, &schema.anatomy)?;
@@ -1207,6 +1210,7 @@ struct Places<'a> {
     schema: &'a Schema,
     fragments: &'a [FragmentData],
     held: &'a [HeldCard],
+    readers: &'a [SpeciationReader],
 }
 
 struct ChanceNames {
@@ -1476,17 +1480,13 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
             let declared = ProgramId::at(placement.programs.len());
             let base = code(law.fragment, kernel);
             for &(context, target) in &targets {
-                let variant = match own.at(|set| inside(anatomy, set, context)) {
-                    Some(variant) => {
-                        let written = write(&variant)?;
-                        check_landing(law.name, &variant, &fields, context, anatomy)?;
-                        Some(written.unwrap_or(variant))
-                    }
-                    None => {
-                        check_landing(law.name, own, &fields, context, anatomy)?;
-                        None
-                    }
+                let unwritten = own.at(|set| inside(anatomy, set, context));
+                let variant = match &unwritten {
+                    Some(unwritten) => Some(write(unwritten)?.unwrap_or_else(|| unwritten.clone())),
+                    None => None,
                 };
+                let reads = unwritten.as_ref().unwrap_or(own);
+                check_landing(law.name, reads, &fields, context, anatomy)?;
                 let (program, kernel) = match &variant {
                     None => (declared, kernel),
                     Some(variant) => {
@@ -1526,6 +1526,7 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
                     target,
                     addresses: addresses(law.name, route, kernel, context, places)?,
                 });
+                check_wired(law.name, reads, context, places)?;
             }
             placement.programs.push(Program {
                 id: declared,
@@ -1634,6 +1635,44 @@ fn check_samples(placement: &Placement, rows: &Rows, anatomy: &Anatomy) -> Resul
         Some(&site) => Err(CompileDefect::UnreadSample { site }),
         None => Ok(()),
     }
+}
+
+/// A law of another card reads a field blood chemistry states only where a row of the readers' table wires that
+/// quantity to its card on a set that holds the site the read lands at.
+fn check_wired(
+    law: LawName,
+    kernel: &KernelData,
+    context: Context,
+    places: &Places,
+) -> Result<(), CompileDefect> {
+    let stater = crate::BloodChemistry::CARD;
+    if law.owner == stater {
+        return Ok(());
+    }
+    let inputs = (kernel.code.iter())
+        .filter_map(|op| match op {
+            Op::Input(input) => Some(input),
+            _ => None,
+        })
+        .chain(kernel.unreached.iter().map(|read| &read.input));
+    for input in inputs {
+        let &Input::Read(Source::Field(field), place) = input else {
+            continue;
+        };
+        if field.owner != stater {
+            continue;
+        }
+        let landed = place_of(place, context, places.anatomy);
+        let wires = |row: &SpeciationReader| {
+            row.reader == law.owner
+                && row.wired.iter().any(|read| read.quantity == field.local)
+                && landed.is_some_and(|site| places.anatomy.in_set(row.sites).contains(&site))
+        };
+        if !places.readers.iter().any(wires) {
+            return Err(CompileDefect::UnwiredRead { law, field });
+        }
+    }
+    Ok(())
 }
 
 /// A read of a row-free field lands at a site of the field's set: the reader's own site, or its landmark's.
@@ -2030,6 +2069,7 @@ fn addresses(
         schema,
         fragments,
         held,
+        readers: _,
     } = *places;
     let inputs = kernel
         .code
@@ -2397,6 +2437,7 @@ fn guards(
                     resets: reset,
                 };
                 guards.push((layout, addresses(law, route, zero, at, places)?));
+                check_wired(law, zero, at, places)?;
             }
         }
     }

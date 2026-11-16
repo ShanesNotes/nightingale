@@ -4,9 +4,11 @@
 //! Mapped means the route has a declared home, not that the outside system is simulated.
 use crate::law::{Brand, Carried, Output, ReadPort};
 use crate::{
-    Ammonia, BloodChemistry, CapillaryBed, Cardiovascular, Concentration, Dimensionless, Endocrine, Energy,
-    Fluids, Gastrointestinal, Hematology, Hepatic, Immune, LawName, Metabolism, Musculoskeletal, Nervous,
-    Owner, Oxygen, PerSite, Phase, Pressure, Rate, Renal, Renin, Respiratory, Temperature, Viscosity, Volume,
+    Acidity, Ammonia, Beds, BloodChemistry, Brain, CapillaryBed, CarbonDioxidePartialPressure,
+    Cardiovascular, Class, Concentration, Dimensionless, Endocrine, Energy, Fluids, Gastrointestinal,
+    Hematology, Hepatic, Immune, Includes, LawName, Lung, Metabolism, Musculoskeletal, Nervous, Owner,
+    Oxygen, OxygenPartialPressure, PerSite, Phase, Pressure, Rate, Renal, Renin, Respiratory, SiteSet, Sites,
+    Speciated, Speciation, Temperature, Tissue, Tubule, Viscosity, Volume,
 };
 use core::marker::PhantomData;
 
@@ -750,3 +752,345 @@ const fn field_count() -> FieldCount {
     }
     count
 }
+
+/// One reader of speciation: a card whose laws read what blood chemistry states, at the sites of one set. Speciation is
+/// a shared substrate's derived property, so its readers are this second table and not arrows. Each quantity a row
+/// reads is wired by the body ticket that builds the reading law, or held by the reader with a reason. Blood chemistry
+/// states every quantity whoever reads it, and compile refuses a read no row wires (`UnwiredRead`).
+///
+/// A reader reads only what its row lists: metabolism reads no acidity.
+/// ```compile_fail,E0609
+/// use ng_contract::{catalog::*, *};
+/// fn read<'b>(gases: PlasmaGases<Reads<'b, Metabolism>>) -> ReadPort<'b, Metabolism, PerSite<CapillaryBed, Dimensionless>> {
+///     gases.acidity
+/// }
+/// ```
+/// ```
+/// use ng_contract::{catalog::*, *};
+/// fn read<'b>(gases: PlasmaGases<Reads<'b, Metabolism>>) -> ReadPort<'b, Metabolism, PerSite<CapillaryBed, Pressure>> {
+///     gases.carbon_dioxide_partial_pressure
+/// }
+/// ```
+/// Only the row's reader receives it.
+/// ```compile_fail,E0271
+/// use ng_contract::{catalog::*, *};
+/// fn received<'b>(ns: &FragmentBuilder<'b, Nervous>) -> PlasmaGases<Reads<'b, Nervous>> {
+///     ns.receive()
+/// }
+/// ```
+/// ```
+/// use ng_contract::{catalog::*, *};
+/// fn received<'b>(mt: &FragmentBuilder<'b, Metabolism>) -> PlasmaGases<Reads<'b, Metabolism>> {
+///     mt.receive()
+/// }
+/// ```
+/// Blood chemistry states through its port and emits no reader's row.
+/// ```compile_fail,E0277
+/// use ng_contract::{catalog::*, *};
+/// fn emitted<'b>(bc: &mut FragmentBuilder<'b, BloodChemistry>) -> PlasmaGases<Defines<'b, BloodChemistry>> {
+///     bc.emit()
+/// }
+/// ```
+/// ```
+/// use ng_contract::*;
+/// fn stated<'b>(bc: &mut FragmentBuilder<'b, BloodChemistry>, ports: &BloodChemistryPorts<'b>) -> SpeciationOutputs<'b> {
+///     ports.speciation(bc)
+/// }
+/// ```
+/// A held row has no payload: the nervous system reads no arterial gases until its row is wired.
+/// ```compile_fail,E0412
+/// use ng_contract::{catalog::*, *};
+/// fn received<'b>(ns: &FragmentBuilder<'b, Nervous>) -> ArterialGases<Reads<'b, Nervous>> {
+///     ns.receive()
+/// }
+/// ```
+/// ```
+/// use ng_contract::catalog::*;
+/// fn held() -> &'static [HeldRead] {
+///     SPECIATION_READERS[3].held
+/// }
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SpeciationReader {
+    pub reader: &'static str,
+    pub sites: Sites,
+    pub label: &'static str,
+    pub wired: &'static [WiredRead],
+    pub held: &'static [HeldRead],
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WiredRead {
+    pub quantity: &'static str,
+    pub body_ticket: u8,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HeldRead {
+    pub quantity: &'static str,
+    pub reason: &'static str,
+}
+
+impl SpeciationReader {
+    pub const fn accounted(&self) -> bool {
+        !self.wired.is_empty() || !self.held.is_empty()
+    }
+    pub const fn read_by_another_card(&self) -> bool {
+        !same(self.reader, BloodChemistry::CARD)
+    }
+    pub const fn each_quantity_once(&self) -> bool {
+        let reads = self.wired.len() + self.held.len();
+        let mut i = 0;
+        while i < reads {
+            let mut j = i + 1;
+            while j < reads {
+                if same(self.quantity(i), self.quantity(j)) {
+                    return false;
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+        true
+    }
+    pub const fn wired_by_body_tickets(&self) -> bool {
+        let mut i = 0;
+        while i < self.wired.len() {
+            let ticket = self.wired[i].body_ticket;
+            if ticket < FIRST_WIRING_TICKET || ticket > LAST_WIRING_TICKET {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+    pub const fn every_reason_given(&self) -> bool {
+        let mut i = 0;
+        while i < self.held.len() {
+            if self.held[i].reason.is_empty() {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+    /// No two rows of `table` share a reader and a set.
+    pub const fn one_row_per_reader_and_set(table: &[SpeciationReader]) -> bool {
+        let mut i = 0;
+        while i < table.len() {
+            let mut j = i + 1;
+            while j < table.len() {
+                if same(table[i].reader, table[j].reader) && same_sites(table[i].sites, table[j].sites) {
+                    return false;
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+        true
+    }
+    const fn quantity(&self, i: usize) -> &'static str {
+        if i < self.wired.len() {
+            self.wired[i].quantity
+        } else {
+            self.held[i - self.wired.len()].quantity
+        }
+    }
+}
+const fn same_sites(a: Sites, b: Sites) -> bool {
+    match (a, b) {
+        (Sites::Class(a), Sites::Class(b)) => a as u8 == b as u8,
+        (Sites::Tissue(a), Sites::Tissue(b)) | (Sites::Besides(a), Sites::Besides(b)) => a as u8 == b as u8,
+        (Sites::Blood, Sites::Blood)
+        | (Sites::Urinary, Sites::Urinary)
+        | (Sites::Alimentary, Sites::Alimentary)
+        | (Sites::Airway, Sites::Airway)
+        | (Sites::Veins, Sites::Veins)
+        | (Sites::Speciated, Sites::Speciated) => true,
+        _ => false,
+    }
+}
+
+/// A row's set lies inside the speciated sites, or the crate does not build.
+const fn inside_speciation<C: SiteSet>()
+where
+    Speciated: Includes<C>,
+{
+}
+
+/// One macro emits the table and, for a row that wires a quantity, a payload with one member per wired quantity. The
+/// payload is a `Coupling` only on its reading side, so its reader takes it with `receive` and blood chemistry cannot
+/// `emit` it.
+macro_rules! speciation_readers {
+    ($($reader:ident at $set:ty, $label:literal, $plan:ident $carried:tt $(held $held:tt)?;)*) => {
+        $(speciation_readers!(@payload $plan $carried $reader $set);)*
+        pub const SPECIATION_READERS: [SpeciationReader; READERS] = [$(SpeciationReader {
+            reader: <$reader as Owner>::CARD,
+            sites: <$set as SiteSet>::SET,
+            label: $label,
+            wired: speciation_readers!(@wired $plan $carried),
+            held: speciation_readers!(@held $plan $carried $($held)?),
+        },)*];
+        $(const _: () = inside_speciation::<$set>();)*
+    };
+    (@payload wired ($name:ident { $($field:ident: $quantity:ident => $ticket:literal),+ $(,)? }) $reader:ident $set:ty) => {
+        #[doc = concat!("What ", stringify!($reader), " reads of speciation.")]
+        pub struct $name<S: Side> {
+            $(pub $field: S::Field<PerSite<$set, <$quantity as Speciation>::Unit>>,)+
+        }
+        impl<'b, O> Coupling for $name<Reads<'b, O>> {
+            type From = BloodChemistry;
+            type To = $reader;
+            type Side = Reads<'b, O>;
+            fn issue(token: Token) -> (Self, Vec<Field>) {
+                let stater = <BloodChemistry as Owner>::CARD;
+                let payload = Self {
+                    $($field: <Reads<'b, O> as Side>::field::<PerSite<$set, <$quantity as Speciation>::Unit>>(
+                        token,
+                        stater,
+                        <$quantity as Speciation>::NAME,
+                    ),)+
+                };
+                (payload, Vec::new())
+            }
+        }
+    };
+    (@payload held $carried:tt $reader:ident $set:ty) => {};
+    (@wired wired ($name:ident { $($field:ident: $quantity:ident => $ticket:literal),+ $(,)? })) => {
+        &[$(WiredRead { quantity: <$quantity as Speciation>::NAME, body_ticket: $ticket }),+]
+    };
+    (@wired held $carried:tt) => {
+        &[]
+    };
+    (@held wired $carried:tt) => {
+        &[]
+    };
+    (@held wired $carried:tt [$($quantity:ident $reason:literal),+ $(,)?]) => {
+        &[$(HeldRead { quantity: <$quantity as Speciation>::NAME, reason: $reason }),+]
+    };
+    (@held held [$($quantity:ident $reason:literal),+ $(,)?]) => {
+        &[$(HeldRead { quantity: <$quantity as Speciation>::NAME, reason: $reason }),+]
+    };
+}
+
+const READERS: usize = 5;
+
+speciation_readers! {
+    Metabolism at CapillaryBed, "each bed's plasma gases, for wall diffusion and the held lung exchange",
+        wired (PlasmaGases {
+            oxygen_partial_pressure: OxygenPartialPressure => 8,
+            carbon_dioxide_partial_pressure: CarbonDioxidePartialPressure => 8,
+        });
+    Respiratory at Beds<Lung>, "the pulmonary bed's gases, for alveolar exchange",
+        held [OxygenPartialPressure "metabolism's held lung exchange reads the pulmonary bed until ticket 10's alveoli",
+            CarbonDioxidePartialPressure "the same held exchange"];
+    Nervous at Beds<Brain>, "the brain bed's acidity, at the central chemoreceptor",
+        held [Acidity "no central sensor until ticket 11"];
+    Nervous at Speciated, "arterial gases, at the peripheral chemoreceptor",
+        held [OxygenPartialPressure "no peripheral sensor until ticket 11, which samples the systemic arteries",
+            CarbonDioxidePartialPressure "the same sensor"];
+    Renal at Beds<Tubule>, "the peritubular bed's acidity, for the kidney's acid feedback",
+        held [Acidity "ticket 18's text names the strong ion difference as what the kidney's feedback reads"];
+}
+
+#[derive(Clone, Copy)]
+struct ReadCount {
+    wired: usize,
+    held: usize,
+}
+const fn read_count() -> ReadCount {
+    let mut count = ReadCount { wired: 0, held: 0 };
+    let mut i = 0;
+    while i < READERS {
+        count.wired += SPECIATION_READERS[i].wired.len();
+        count.held += SPECIATION_READERS[i].held.len();
+        i += 1;
+    }
+    count
+}
+const READ: ReadCount = read_count();
+const _: () = assert!(READ.wired == 2 && READ.held == 6);
+const _: () = assert!(SpeciationReader::one_row_per_reader_and_set(&SPECIATION_READERS));
+const _: () = {
+    let mut i = 0;
+    while i < READERS {
+        let row = &SPECIATION_READERS[i];
+        assert!(row.accounted(), "a reader reads nothing");
+        assert!(
+            row.read_by_another_card(),
+            "blood chemistry is no reader of its own speciation"
+        );
+        assert!(row.each_quantity_once(), "a reader names one quantity twice");
+        assert!(
+            row.wired_by_body_tickets(),
+            "a wired read names no body ticket from 06 to 25"
+        );
+        assert!(row.every_reason_given(), "a reason is empty");
+        i += 1;
+    }
+};
+const _: () = {
+    let plan: [(&str, Sites, &str, u8); 2] = [
+        (
+            "MT",
+            Sites::Class(Class::CapillaryBed),
+            "oxygen partial pressure",
+            8,
+        ),
+        (
+            "MT",
+            Sites::Class(Class::CapillaryBed),
+            "carbon dioxide partial pressure",
+            8,
+        ),
+    ];
+    let (mut i, mut n) = (0, 0);
+    while i < READERS {
+        let row = &SPECIATION_READERS[i];
+        let mut j = 0;
+        while j < row.wired.len() {
+            let (reader, sites, quantity, ticket) = plan[n];
+            assert!(
+                same(row.reader, reader)
+                    && same_sites(row.sites, sites)
+                    && same(row.wired[j].quantity, quantity)
+                    && row.wired[j].body_ticket == ticket,
+                "a wired read is not the plan's"
+            );
+            j += 1;
+            n += 1;
+        }
+        i += 1;
+    }
+    assert!(n == plan.len());
+};
+const _: () = {
+    let plan: [(&str, Sites, &str); 6] = [
+        ("RS", Sites::Tissue(Tissue::Lung), "oxygen partial pressure"),
+        (
+            "RS",
+            Sites::Tissue(Tissue::Lung),
+            "carbon dioxide partial pressure",
+        ),
+        ("NS", Sites::Tissue(Tissue::Brain), "acidity"),
+        ("NS", Sites::Speciated, "oxygen partial pressure"),
+        ("NS", Sites::Speciated, "carbon dioxide partial pressure"),
+        ("RN", Sites::Tissue(Tissue::Tubule), "acidity"),
+    ];
+    let (mut i, mut n) = (0, 0);
+    while i < READERS {
+        let row = &SPECIATION_READERS[i];
+        let mut j = 0;
+        while j < row.held.len() {
+            let (reader, sites, quantity) = plan[n];
+            assert!(
+                same(row.reader, reader)
+                    && same_sites(row.sites, sites)
+                    && same(row.held[j].quantity, quantity),
+                "a held read is not the plan's"
+            );
+            j += 1;
+            n += 1;
+        }
+        i += 1;
+    }
+    assert!(n == plan.len());
+};

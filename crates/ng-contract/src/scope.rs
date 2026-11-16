@@ -480,7 +480,16 @@ impl<'b> Assembly<'b> {
     /// Checks the schema and every fragment into one hashed body. A scope issued here whose fragment
     /// was never added is refused, so dropping a builder never drops what it owed.
     pub fn compile(self) -> Result<CompiledBody, AdmissionError> {
-        compile(self.schema, self.issued, self.held, self.fragments)
+        let readers = &crate::catalog::SPECIATION_READERS;
+        compile(self.schema, self.issued, self.held, self.fragments, readers)
+    }
+    /// Compiles against another readers' table, so a test can wire a reader today's table holds.
+    #[cfg(test)]
+    pub(crate) fn compile_reading(
+        self,
+        readers: &[crate::catalog::SpeciationReader],
+    ) -> Result<CompiledBody, AdmissionError> {
+        compile(self.schema, self.issued, self.held, self.fragments, readers)
     }
 }
 
