@@ -155,7 +155,6 @@ fn exchanged<R>(weight: impl Fn(R) -> i64, terms: impl Iterator<Item = (R, i64)>
     terms.map(|(row, coefficient)| coefficient * weight(row)).sum()
 }
 
-/// A combination's columns with a nonzero net weight, in column order: the step's exchange reads only these.
 fn nonzero(dense: impl Iterator<Item = i64>) -> Vec<(usize, i64)> {
     dense.enumerate().filter(|&(_, net)| net != 0).collect()
 }
@@ -179,8 +178,7 @@ fn flowed(
     (into, out_of)
 }
 
-/// The seal and digest hold every column's net weight, zeros included.
-fn push_incidence(bytes: &mut Vec<u8>, incidence: &[Vec<(usize, i64)>], columns: usize) {
+fn push_every_column(bytes: &mut Vec<u8>, incidence: &[Vec<(usize, i64)>], columns: usize) {
     for row in incidence {
         let mut row = row.iter().peekable();
         for column in 0..columns {
@@ -526,7 +524,7 @@ impl History {
             push_bits(&mut bytes, *value);
         }
         let columns = body.columns().len();
-        push_incidence(&mut bytes, &incidence, columns);
+        push_every_column(&mut bytes, &incidence, columns);
         bytes.extend_from_slice(parameters.as_bytes());
         let seal = linked(format.hash(), run, 0, image, &bytes);
         Self {
@@ -718,7 +716,7 @@ impl History {
         for value in opening {
             push_bits(&mut bytes, *value);
         }
-        push_incidence(&mut bytes, incidence, *columns);
+        push_every_column(&mut bytes, incidence, *columns);
         if let Some(head) = chain.head() {
             head.chunk.write(&mut bytes);
         }
@@ -909,7 +907,7 @@ impl Curve<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExactSum, exact_total, exchanged, flowed, nonzero, push_incidence};
+    use super::{ExactSum, exact_total, exchanged, flowed, nonzero, push_every_column};
     use ng_contract::{Compensated, Dimensionless, Measure};
 
     fn two_to(power: i32) -> f64 {
@@ -1238,7 +1236,7 @@ mod tests {
                 .collect();
             let sparse = nonzero(dense.iter().copied());
             let mut bytes = Vec::new();
-            push_incidence(&mut bytes, &[sparse.clone()], columns);
+            push_every_column(&mut bytes, core::slice::from_ref(&sparse), columns);
             let every: Vec<u8> = dense.iter().flat_map(|net| net.to_be_bytes()).collect();
             assert_eq!(bytes, every, "the seal reads every column's weight");
             let (mut sparse_flow, mut dense_flow) = (
