@@ -449,7 +449,10 @@ fn a_written_field_is_its_hand_written_twin_in_ops_values_and_slopes_on_three_ho
 
 #[test]
 fn each_bed_reads_its_own_value_of_the_field() {
-    let (body, sites) = bench(PLAIN);
+    let (body, sites) = bench(Case {
+        landmark: Some(3),
+        ..PLAIN
+    });
     let found = values(&body, sites);
     assert_ne!(closed_form(0).to_bits(), closed_form(1).to_bits());
     for (bed, site) in [(0, sites[1]), (1, sites[3])] {

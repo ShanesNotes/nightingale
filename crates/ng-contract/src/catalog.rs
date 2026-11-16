@@ -865,7 +865,8 @@ impl SpeciationReader {
     pub const fn every_reason_given(&self) -> bool {
         let mut i = 0;
         while i < self.held.len() {
-            if self.held[i].reason.is_empty() {
+            let reason = self.held[i].reason;
+            if reason.is_empty() {
                 return false;
             }
             i += 1;

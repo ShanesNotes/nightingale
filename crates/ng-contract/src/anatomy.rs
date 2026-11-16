@@ -617,16 +617,12 @@ impl Facts {
         if let Some(site) = ends().filter(|&site| !carries_blood(site)).min() {
             return Err(AnatomyDefect::WrongRelation { site: self.key(site) });
         }
-        let off = |marked: &[SiteId]| {
-            (marked.iter())
-                .map(|mark| mark.key)
-                .find(|&key| !ends().any(|site| self.key(site) == key))
-        };
-        if let Some(site) = off(&self.veins) {
-            return Err(AnatomyDefect::VeinOffVascularNetwork { site });
+        let sampled = (self.sampled.iter()).find(|segment| !ends().any(|site| self.key(site) == segment.key));
+        if let Some(segment) = sampled {
+            return Err(AnatomyDefect::SampledOffVascularNetwork { site: segment.key });
         }
-        match off(&self.sampled) {
-            Some(site) => Err(AnatomyDefect::SampledOffVascularNetwork { site }),
+        match (self.veins.iter()).find(|vein| !ends().any(|site| self.key(site) == vein.key)) {
+            Some(vein) => Err(AnatomyDefect::VeinOffVascularNetwork { site: vein.key }),
             None => Ok(()),
         }
     }

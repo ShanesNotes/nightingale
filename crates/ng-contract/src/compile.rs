@@ -2487,7 +2487,8 @@ fn bind(
                     ParameterContext::Site(Sites::Tissue(_) | Sites::Besides(_)) => {
                         Some(Binding::Class(Class::CapillaryBed))
                     }
-                    ParameterContext::Site(Sites::Blood | Sites::Veins | Sites::Speciated) => {
+                    ParameterContext::Site(Sites::Speciated) => Some(Binding::Network(Network::Vascular)),
+                    ParameterContext::Site(Sites::Blood | Sites::Veins) => {
                         Some(Binding::Network(Network::Vascular))
                     }
                     ParameterContext::Edge(network) => Some(Binding::Network(*network)),
