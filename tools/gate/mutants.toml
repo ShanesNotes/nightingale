@@ -860,8 +860,8 @@ test = "-p ng-contract --test scopes one_card_declaring_one_chemistry_under_two_
 [[mutant]]
 name = "reaction-counts-divided"
 path = "crates/ng-contract/src/compile.rs"
-old = '''count(term.change) / divisor,'''
-new = '''count(term.change),'''
+old = '''count(term.change) / divisor))'''
+new = '''count(term.change)))'''
 test = "-p ng-contract --test scopes a_copy_with_every_count_doubled_is_the_same_chemistry_and_is_refused"
 
 [[mutant]]
