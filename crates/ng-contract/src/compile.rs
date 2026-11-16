@@ -9,9 +9,9 @@ use crate::elimination::Elimination;
 use crate::graph::Digraph;
 use crate::identity::{Canonical, Seal};
 use crate::law::{
-    End, Family, FragmentData, GuardDeclaration, Input, KernelData, ModeDeclaration, Obligation, Op, Over,
-    ParameterContext, ParameterDeclaration, ReactionDeclaration, Selector, SlotDeclaration, SlotKind, Source,
-    Where,
+    End, ExplicitLaw, Family, FragmentData, GuardDeclaration, Input, KernelData, ModeDeclaration, Obligation,
+    Op, Over, ParameterContext, ParameterDeclaration, ReactionDeclaration, Selector, SlotDeclaration,
+    SlotKind, Source, Where, WriteIn,
 };
 use crate::scheme::greatest_common_divisor;
 use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, HeldSpecies, PoolRef, RouteBoundary};
@@ -415,6 +415,7 @@ enum Serves<'f> {
     Boundary(&'f RouteBoundary),
     Sum(Sites),
     Reaction(&'f ReactionDeclaration),
+    Explicit(Sites),
 }
 
 fn obligations<'f>(
@@ -470,16 +471,14 @@ fn obligations<'f>(
     }
     for fragment in fragments {
         for slot in &fragment.slots {
-            let obligation = match slot.kind {
-                SlotKind::Defined => Obligation::Defined(slot.name),
-                SlotKind::Memory | SlotKind::Algebraic => Obligation::Slot(slot.name),
+            let (serves, obligation) = match (slot.kind, slot.over) {
+                (SlotKind::Explicit, Over::Every(set)) => {
+                    (Serves::Explicit(set), Obligation::Explicit(slot.name))
+                }
+                (SlotKind::Defined, over) => (Serves::Slot(over), Obligation::Defined(slot.name)),
+                (_, over) => (Serves::Slot(over), Obligation::Slot(slot.name)),
             };
-            owed.push(Owed::gather(
-                fragment,
-                slot.name,
-                Serves::Slot(slot.over),
-                obligation,
-            ));
+            owed.push(Owed::gather(fragment, slot.name, serves, obligation));
         }
         for &family in fragment.families.iter().filter(|family| !flows(**family, schema)) {
             owed.push(Owed::gather(
@@ -778,7 +777,11 @@ impl Rows {
             .collect();
         let mut slots: Vec<(SlotKind, Slot, AdmissibleSet, &String)> = (fragments.iter())
             .flat_map(|fragment| {
-                fragment.slots.iter().flat_map(|slot| {
+                let rows = fragment
+                    .slots
+                    .iter()
+                    .filter(|slot| slot.kind != SlotKind::Explicit);
+                rows.flat_map(|slot| {
                     let SlotDeclaration {
                         name,
                         kind,
@@ -817,7 +820,7 @@ impl Rows {
         let slot_rows = slots.iter().map(|&(kind, slot, set, dimension)| {
             let kind = match kind {
                 SlotKind::Memory => RowKind::Memory(slot),
-                SlotKind::Algebraic | SlotKind::Defined => RowKind::Algebraic(slot),
+                SlotKind::Algebraic | SlotKind::Defined | SlotKind::Explicit => RowKind::Algebraic(slot),
             };
             (kind, set, dimension.clone())
         });
@@ -1361,8 +1364,10 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
         instances: Vec::new(),
     };
     let mut variants: Vec<Program> = Vec::new();
+    let fields = explicit_laws(owed)?;
     for law in owed {
         let targets = match law.serves {
+            Serves::Explicit(_) => continue,
             Serves::Slot(over) => places_of(anatomy, reaches, schema, law.name.owner, over)
                 .into_iter()
                 .map(|at| {
@@ -1458,10 +1463,29 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
                 defined = kernel.clone().defining(water.name);
                 kernel = &defined;
             }
+            let write = |kernel: &KernelData| {
+                kernel.written_in(&fields).map_err(|refused| match refused {
+                    WriteIn::NoSuchRead => CompileDefect::NoSuchRead { law: law.name },
+                    WriteIn::Dimension(field) => CompileDefect::FieldDimension { law: law.name, field },
+                })
+            };
+            let own = kernel;
+            let written = write(own)?;
+            let kernel = written.as_ref().unwrap_or(own);
             let declared = ProgramId::at(placement.programs.len());
             let base = code(law.fragment, kernel);
             for &(context, target) in &targets {
-                let variant = kernel.at(|set| inside(anatomy, set, context));
+                let variant = match own.at(|set| inside(anatomy, set, context)) {
+                    Some(variant) => {
+                        let written = write(&variant)?;
+                        check_landing(law.name, &variant, &fields, context, anatomy)?;
+                        Some(written.unwrap_or(variant))
+                    }
+                    None => {
+                        check_landing(law.name, own, &fields, context, anatomy)?;
+                        None
+                    }
+                };
                 let (program, kernel) = match &variant {
                     None => (declared, kernel),
                     Some(variant) => {
@@ -1531,6 +1555,92 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
 }
 
 const VARIANT: usize = usize::MAX / 2;
+
+/// Each row-free field's one law, which `check_coverage` has already found. Writing one in is one level deep and holds
+/// in every mode, and its expression names nothing a reader's own name would capture: no slot, stream, forcing, route
+/// or reaction by its local name.
+fn explicit_laws<'f>(owed: &[Owed<'f>]) -> Result<Vec<ExplicitLaw<'f>>, CompileDefect> {
+    let explicit: Vec<(&Owed<'f>, Sites)> = (owed.iter())
+        .filter_map(|owed| match owed.serves {
+            Serves::Explicit(set) => Some((owed, set)),
+            _ => None,
+        })
+        .collect();
+    let mut fields = Vec::new();
+    for &(owed, set) in &explicit {
+        let law = owed.name;
+        let &(_, kernel) = owed
+            .laws
+            .first()
+            .expect("check_coverage refuses a field with no law");
+        if let Selector::Only { variable, value } = kernel.modes {
+            let mode = &owed.fragment.modes[variable];
+            let missed = (0..mode.values.len())
+                .filter(|&other| other != value)
+                .min_by_key(|&other| mode.values[other])
+                .unwrap_or(value);
+            let mode = ModeValue {
+                variable: mode.name,
+                value: mode.values[missed],
+            };
+            return Err(CompileDefect::UncoveredMode { law, mode });
+        }
+        let local = |input: &Input| match input {
+            Input::Memory(_) | Input::Algebraic(_) | Input::Draw(_) | Input::Forcing(_) => true,
+            Input::Read(
+                Source::Drive(_) | Source::RoutePool(..) | Source::Reacting(..) | Source::Flow(_),
+                _,
+            ) => true,
+            Input::Read(Source::Field(name), _) => explicit.iter().any(|(field, _)| field.name == *name),
+            _ => false,
+        };
+        let mut inputs = (kernel.code.iter())
+            .filter_map(|op| match op {
+                Op::Input(input) => Some(input),
+                _ => None,
+            })
+            .chain(kernel.unreached.iter().map(|read| &read.input));
+        if kernel.placing.is_some() || inputs.any(local) {
+            return Err(CompileDefect::NoSuchRead { law });
+        }
+        fields.push(ExplicitLaw {
+            name: law,
+            set,
+            kernel,
+        });
+    }
+    Ok(fields)
+}
+
+/// A read of a row-free field lands at a site of the field's set: the reader's own site, or its landmark's.
+fn check_landing(
+    law: LawName,
+    kernel: &KernelData,
+    fields: &[ExplicitLaw],
+    context: Context,
+    anatomy: &Anatomy,
+) -> Result<(), CompileDefect> {
+    let inputs = (kernel.code.iter())
+        .filter_map(|op| match op {
+            Op::Input(input) => Some(input),
+            _ => None,
+        })
+        .chain(kernel.unreached.iter().map(|read| &read.input));
+    for input in inputs {
+        let Input::Read(Source::Field(name), place) = input else {
+            continue;
+        };
+        let Some(field) = fields.iter().find(|field| field.name == *name) else {
+            continue;
+        };
+        let landed = place_of(*place, context, anatomy);
+        if !landed.is_some_and(|site| anatomy.in_set(field.set).contains(&site)) {
+            let field = field.name;
+            return Err(CompileDefect::UnemittedField { law, field });
+        }
+    }
+    Ok(())
+}
 
 fn inside(anatomy: &Anatomy, set: Sites, context: Context) -> bool {
     matches!(context, Context::Site(site) if anatomy.in_set(set).contains(&site))

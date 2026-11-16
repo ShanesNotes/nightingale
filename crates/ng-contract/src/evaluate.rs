@@ -8,6 +8,8 @@ use core::ops::Range;
 mod enclosure;
 #[cfg(test)]
 mod terms;
+#[cfg(test)]
+mod written;
 pub(crate) use enclosure::{Bounds, Jet};
 
 pub(crate) struct GuardSlopes {

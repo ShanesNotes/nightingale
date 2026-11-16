@@ -862,6 +862,133 @@ impl KernelData {
         }
         self
     }
+    /// This kernel with each read of a row-free field replaced by the field's expression. The field's ops stand where
+    /// the read stood, each named for the field's law, and none is shared with the host's own: a shared op would take
+    /// the host's name and change the order the host's slopes add in. A closing `row - value` stays last. A read at a
+    /// landmark moves the field's own site reads there. `None` when the kernel reads no such field, so its program
+    /// keeps its bytes.
+    pub(crate) fn written_in(&self, fields: &[ExplicitLaw]) -> Result<Option<KernelData>, WriteIn> {
+        let field_of = |input: &Input| match input {
+            Input::Read(Source::Field(name), place) => {
+                (fields.iter().find(|field| field.name == *name)).map(|field| (field, *place))
+            }
+            _ => None,
+        };
+        let stands = |place: Where| match place {
+            Where::Here | Where::Mark(_) | Where::MarkOn(..) => Ok(()),
+            _ => Err(WriteIn::NoSuchRead),
+        };
+        let inputs = (self.code.iter()).filter_map(|op| match op {
+            Op::Input(input) => Some(input),
+            _ => None,
+        });
+        let written: Vec<Where> = (inputs.chain(self.unreached.iter().map(|read| &read.input)))
+            .filter_map(|input| field_of(input).map(|(_, place)| place))
+            .collect();
+        if written.is_empty() {
+            return Ok(None);
+        }
+        for &place in &written {
+            stands(place)?;
+        }
+        let mut code = self.code.clone();
+        let mut origins: Vec<Option<LawName>> = vec![None; code.len()];
+        for &(at, law) in &self.origins {
+            origins[at] = Some(law);
+        }
+        let (mut accepting, mut reads) = (self.accepts_no_nerve.clone(), self.fields.clone());
+        let mut moved_unreached = Vec::new();
+        let mut redirect: Vec<usize> = (0..code.len()).collect();
+        for (at, op) in self.code.iter().enumerate() {
+            let Some((field, place)) = (match op {
+                Op::Input(input) => field_of(input),
+                _ => None,
+            }) else {
+                continue;
+            };
+            if (reads.iter()).any(|read| read.at == at && read.expects != field.kernel.dimension) {
+                return Err(WriteIn::Dimension(field.name));
+            }
+            let moved = |input: Input| match (input, place) {
+                (input, Where::Here) | (input @ Input::Parameter(_), _) => Ok(input),
+                (Input::Read(source, Where::Here), _) => Ok(Input::Read(source, place)),
+                (Input::Height(Where::Here), _) => Ok(Input::Height(place)),
+                _ => Err(WriteIn::NoSuchRead),
+            };
+            let offset = code.len();
+            for op in &field.kernel.code {
+                code.push(match op {
+                    Op::Input(input) => Op::Input(moved(*input)?),
+                    op => op.map(|operand| operand + offset),
+                });
+                origins.push(Some(field.name));
+                redirect.push(redirect.len());
+            }
+            accepting.extend(field.kernel.accepts_no_nerve.iter().map(|at| at + offset));
+            reads.extend(field.kernel.fields.iter().map(|read| FieldRead {
+                at: read.at + offset,
+                expects: read.expects.clone(),
+            }));
+            for read in &field.kernel.unreached {
+                let input = moved(read.input)?;
+                moved_unreached.push(UnreachedRead {
+                    input,
+                    ..read.clone()
+                });
+            }
+            redirect[at] = code.len() - 1;
+        }
+        let follow = |at: usize| redirect[at];
+        let code: Vec<Op> = code.iter().map(|op| op.map(follow)).collect();
+        let last = self.code.len() - 1;
+        let closing = match (self.code.get(last.wrapping_sub(1)), &self.code[last]) {
+            (Some(row @ Op::Input(Input::Algebraic(_))), Op::Subtract([at, value]))
+                if self.defines && *at == last - 1 =>
+            {
+                Some((row.clone(), *value))
+            }
+            (Some(row @ Op::Zero(_)), Op::Subtract([at, value])) if *at == last - 1 => {
+                Some((row.clone(), *value))
+            }
+            _ => None,
+        };
+        let result = follow(closing.as_ref().map_or(last, |&(_, value)| value));
+        let (pruned, placed) = reachable_placed(&code, result, &accepting, &reads);
+        let closing_row = closing.as_ref().map(|(row, _)| row);
+        let unreached = (pruned.unreached.into_iter())
+            .filter(|read| field_of(&read.input).is_none() && closing_row != Some(&Op::Input(read.input)))
+            .chain(
+                self.unreached
+                    .iter()
+                    .filter(|read| field_of(&read.input).is_none())
+                    .cloned(),
+            )
+            .chain(moved_unreached)
+            .collect();
+        let mut kept = vec![None; pruned.code.len()];
+        for (at, place) in placed.iter().enumerate() {
+            if let Some(place) = place {
+                kept[*place] = origins[at];
+            }
+        }
+        let mut code = pruned.code;
+        if let Some((row, _)) = closing {
+            let value = code.len() - 1;
+            code.push(row);
+            code.push(Op::Subtract([value + 1, value]));
+            kept.extend([None, None]);
+        }
+        Ok(Some(KernelData {
+            code,
+            accepts_no_nerve: pruned.accepts_no_nerve,
+            fields: pruned.fields,
+            unreached,
+            origins: (kept.iter().enumerate())
+                .filter_map(|(at, origin)| Some((at, (*origin)?)))
+                .collect(),
+            ..self.clone()
+        }))
+    }
 }
 
 impl<'b, 'k, O, S> Kernel<'b, 'k, O, S> {
@@ -1335,6 +1462,27 @@ impl<C: SiteSet, U: Dimension> Carried for PerSite<C, U> {
     }
 }
 pub type SiteField<'b, O, C, U> = (Output<'b, O, PerSite<C, U>>, ReadPort<'b, O, PerSite<C, U>>);
+/// A field with no row. Compile writes its expression into each program that reads it, where the read stood, and each
+/// op it writes there names this field's law. Only a contract port issues one.
+pub struct Explicit<'b, O, U> {
+    name: &'static str,
+    brand: Brand<'b>,
+    kind: PhantomData<(O, U)>,
+}
+/// The expression to attach with `express_at`, and the read of it, which a reader cannot tell from a row's read.
+pub type ExplicitField<'b, O, C, U> = (Explicit<'b, O, PerSite<C, U>>, ReadPort<'b, O, PerSite<C, U>>);
+/// A row-free field's one law and the set it stands on, as compile writes it in.
+pub(crate) struct ExplicitLaw<'f> {
+    pub(crate) name: LawName,
+    pub(crate) set: Sites,
+    pub(crate) kernel: &'f KernelData,
+}
+/// Why a read of a row-free field cannot be written in where it stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WriteIn {
+    NoSuchRead,
+    Dimension(LawName),
+}
 /// A route family at every site of the set `C`: one column per site and per species carried.
 pub struct SiteRoute<'b, O, C, Q> {
     family: Family,
@@ -2056,6 +2204,35 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
             ReadPort::field(LawName { owner, local: name }),
         )
     }
+    /// A field at every site of a set with no row, its law attached with `express_at`, and the read of it.
+    pub(crate) fn explicit_field<C: SiteSet, U: Dimension>(
+        &mut self,
+        name: &'static str,
+    ) -> ExplicitField<'b, O, C, U> {
+        self.data.slots.push(SlotDeclaration {
+            name,
+            kind: SlotKind::Explicit,
+            dimension: dimension::<U>(),
+            set: AdmissibleSet::Finite,
+            over: Over::Every(C::SET),
+        });
+        let field = Explicit {
+            name,
+            brand: PhantomData,
+            kind: PhantomData,
+        };
+        let owner = O::CARD;
+        (field, ReadPort::field(LawName { owner, local: name }))
+    }
+    /// The expression of a row-free field at each site of its set. Unlike `define_at` it closes on no row: a read of
+    /// the field is this kernel's value, written where the read stands.
+    pub fn express_at<C: SiteSet, U: Dimension>(
+        &mut self,
+        field: &Explicit<'b, O, PerSite<C, U>>,
+        value: PureKernel<'b, O, U, C>,
+    ) {
+        self.attach(Obligation::Explicit(field.name), value.data);
+    }
     /// Declares one mode variable of this owner and returns its values in order.
     pub fn modes<const N: usize>(
         &mut self,
@@ -2434,6 +2611,8 @@ pub(crate) enum SlotKind {
     Algebraic,
     /// Only a definition serves it and only a port reads it, so a plain slot of its name does neither.
     Defined,
+    /// No row: compile writes its law's expression into each program that reads it.
+    Explicit,
 }
 pub(crate) struct ModeDeclaration {
     pub(crate) name: &'static str,
@@ -2464,6 +2643,7 @@ pub(crate) enum Obligation {
     Boundary(&'static str),
     Sum(&'static str, Sites),
     Reaction(&'static str),
+    Explicit(&'static str),
 }
 impl Obligation {
     pub(crate) fn local(self) -> &'static str {
@@ -2472,7 +2652,8 @@ impl Obligation {
             | Obligation::Defined(name)
             | Obligation::Boundary(name)
             | Obligation::Sum(name, _)
-            | Obligation::Reaction(name) => name,
+            | Obligation::Reaction(name)
+            | Obligation::Explicit(name) => name,
             Obligation::Family(family) => family.name(),
         }
     }
