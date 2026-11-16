@@ -640,7 +640,7 @@ fn a_written_fields_non_finite_guard_value_names_the_field() {
     let (body, bound) = overflowing(PK + 1.0);
     let (frame, unknowns) = (DriveFrame::default(), starts(&body, &bound));
     let inputs = guard_inputs(&bound, &frame, &unknowns);
-    let refused = body.guard_gap(0, &inputs).err().expect("the value overflows");
+    let refused = body.guard_gap(0, &inputs).expect_err("the value overflows");
     assert!(matches!(
         refused.domain,
         crate::evaluate::OperatorDomain::NonFinite
