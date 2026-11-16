@@ -711,9 +711,12 @@ const OXYGEN_DRIFT: f64 = 4.0;
 
 struct BodyDrifts;
 impl DriftTable for BodyDrifts {
-    fn drift<Q: Substance>(&self) -> Result<Option<Measure<Q>>, AdmissionError> {
+    fn names(&self, species: Species) -> bool {
+        DRIFTS.iter().any(|(named, _)| *named == species)
+    }
+    fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError> {
         let named = DRIFTS.iter().find(|(species, _)| *species == Q::SPECIES);
-        named.map(|(_, drift)| Measure::new(*drift)).transpose()
+        Measure::new(named.map_or(f64::NAN, |(_, drift)| *drift))
     }
 }
 
