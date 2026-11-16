@@ -525,11 +525,21 @@ fn each_hold_names_the_ticket_that_releases_it_and_its_body_01_line() {
         MT Route("skin bed oxygen use") Ticket(9, "MT") 01:132, 872
         MT Route("bone bed oxygen use") Ticket(9, "MT") 01:132, 872
         MT Route("lung oxygen") Ticket(10, "RS") 01:129, 873
-        MT Pool(CarbonDioxide, Interstitium, Class(CapillaryBed)) Ticket(8, "MT") 01:146, 871
+        MT Route("pulmonary bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
+        MT Route("gut bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
+        MT Route("muscle bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
+        MT Route("glomerular bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
+        MT Route("peritubular bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
+        MT Route("brain bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
+        MT Route("coronary bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
+        MT Route("liver bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
+        MT Route("fat bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
+        MT Route("skin bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
+        MT Route("bone bed carbon dioxide made") Ticket(9, "MT") 01:145, 872
+        MT Route("lung carbon dioxide") Ticket(10, "RS") 01:148, 873
         MT Pool(Glucose, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 533
         MT Pool(FattyAcids, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 536
         MT Pool(Lactate, Interstitium, Class(CapillaryBed)) Ticket(9, "FL") 01:485, 540
-        MT Pool(CarbonDioxide, Cells, Class(CapillaryBed)) Ticket(8, "MT") 01:38, 871, 08:19
         MT Pool(Glucose, Cells, Besides(Liver)) Ticket(9, "MT") 01:190
         MT Pool(FattyAcids, Cells, Besides(Liver)) Ticket(9, "MT") 01:200
         MT Pool(Lactate, Cells, Besides(Liver)) Ticket(9, "MT") 01:194-196
@@ -609,9 +619,9 @@ fn the_hold_table_is_the_compiled_bodys_coverage_manifest_row_for_row() -> Resul
         HOLD_TABLE.len() - routes
     );
     expect![[r#"
-        holds 146: routes 74, pools 72
-        by card {"BC": 19, "EN": 25, "GI": 25, "HC": 6, "HP": 16, "MS": 15, "MT": 28, "RS": 12}
-        by ticket {"08": 2, "09": 17, "10": 13, "12": 7, "13": 16, "14": 8, "15": 9, "16": 12, "17": 24, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
+        holds 156: routes 86, pools 70
+        by card {"BC": 19, "EN": 25, "GI": 25, "HC": 6, "HP": 16, "MS": 15, "MT": 38, "RS": 12}
+        by ticket {"09": 28, "10": 14, "12": 7, "13": 16, "14": 8, "15": 9, "16": 12, "17": 24, "18": 7, "19": 17, "20": 3, "21": 10, "kept": 1}
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -854,8 +864,9 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         *kinds.entry(kind).or_insert(0) += 1;
     }
     let basis = body.conserved_basis();
+    let stated = body.bind(body_packet(&body)?)?.packet_hash().digest();
     let pin = format!(
-        "rows {} {kinds:?}, columns {}, jacobian nonzeros {}, blocks {}, parameter slots {}, conserved combinations {}, held pools {}, held route columns {}\nmodel hash {}\nconserved basis {}\n",
+        "rows {} {kinds:?}, columns {}, jacobian nonzeros {}, blocks {}, parameter slots {}, conserved combinations {}, held pools {}, held route columns {}\nmodel hash {}\nconserved basis {}\nstated packet {}\n",
         body.rows().len(),
         body.columns().len(),
         body.sparsity().unknowns().len(),
@@ -866,11 +877,13 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         basis.coverage().held_routes().len(),
         hex(body.model_hash().digest()),
         hex(basis.digest()),
+        hex(stated),
     );
     expect![[r#"
-        rows 1396 {"algebraic": 150, "amount": 1236, "memory": 10}, columns 1322, jacobian nonzeros 9105, blocks 480, parameter slots 541, conserved combinations 458, held pools 387, held route columns 74
-        model hash 9c9566d335b4ff5ac53eae3c7895c3f6acb602b958c64ca6c83f3ac2b03d51e7
-        conserved basis 3743eba5ab87327f6b92bd849473e2437c5e121937bba4c5c548811ef8082467
+        rows 1419 {"algebraic": 173, "amount": 1236, "memory": 10}, columns 1356, jacobian nonzeros 9514, blocks 446, parameter slots 583, conserved combinations 436, held pools 365, held route columns 86
+        model hash 15b4411445eba027ee8ad396d13fc92a04291e623394facf48d284e1af9dd9fe
+        conserved basis 842e23ef989077823835f65f1e0ab8fc77e6ce2d99931db729da415b83269934
+        stated packet 4851ee170367b2ee54419c11f7c6b4a6bcf47f6b3d97be0b64894a39c48ca7d5
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -925,6 +938,35 @@ fn the_gut_transit_reads_both_lumens_so_admission_can_place_each_species_between
                 );
             }
         }
+    }
+    Ok(())
+}
+
+#[test]
+fn the_bodys_own_drift_bounds_are_oxygens_and_carbon_dioxides_stated_ones() -> Result<(), AdmissionError> {
+    struct Stated([(Species, f64); 2]);
+    impl DriftTable for Stated {
+        fn names(&self, species: Species) -> bool {
+            self.0.iter().any(|(named, _)| *named == species)
+        }
+        fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError> {
+            let named = self.0.iter().find(|(species, _)| *species == Q::SPECIES);
+            Measure::new(named.map_or(f64::NAN, |(_, drift)| *drift))
+        }
+    }
+    let body = whole_body()?;
+    let window = core::num::NonZeroU64::new(10_000_000_000).ok_or(AdmissionError::NonFinite)?;
+    let windows = SlidingWindows::new(window, 60_000_000_000)?;
+    let digest = |table: &Stated| -> Result<Digest, AdmissionError> {
+        Ok(certificate_with(&body, windows, table)?.digest())
+    };
+    let stated = [(Species::Oxygen, 3.0), (Species::CarbonDioxide, 0.8)];
+    let policy = body_certificate(&body, windows)?.digest();
+    assert_eq!(policy, digest(&Stated(stated))?);
+    for (index, by) in [(0, 0.5), (0, 2.0), (1, 0.5), (1, 2.0)] {
+        let mut moved = stated;
+        moved[index].1 *= by;
+        assert_ne!(policy, digest(&Stated(moved))?, "{moved:?}");
     }
     Ok(())
 }

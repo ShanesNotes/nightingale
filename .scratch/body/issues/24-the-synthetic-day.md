@@ -16,3 +16,5 @@ Blocked by: 11, 12, 16, 17, 18, 23, 25, 27, 30, 33, ../../native-contract/issues
 - [ ] The Answer lists what must change before [foundation 01](../../foundation/issues/01-arena-and-milestone.md), step 4, binds the reviewed packet
 
 **Non-goals:** a 48 h run and pass 2, which are [ticket 28](28-two-synthetic-days.md), and any clinical claim.
+
+From [ticket 08](08-blood-carries-gases.md): the body's gas drift bounds, oxygen's and carbon dioxide's, are fixture data for its undisturbed start, twice each gas's worst ten-second change over the first minute. A disturbed run goes far past them: after a 400 mL water bolus the check of the second PR read oxygen's worst window at 276 umol against its bound of 4. This ticket's measured day replaces them.
