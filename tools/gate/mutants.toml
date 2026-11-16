@@ -3566,3 +3566,10 @@ path = "crates/ng-blood-chemistry/src/acidity.rs"
 old = '''            charge(k, &self.ketones),'''
 new = '''            charge(k, &self.lactate),'''
 test = "-p ng-validate --test gases speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_warm_one"
+
+[[mutant]]
+name = "ledger-walk-drops-the-last-nonzero-column"
+path = "crates/ng-record/src/history.rs"
+old = '''    for &(column, net) in nonzero {'''
+new = '''    for &(column, net) in nonzero.split_last().map_or(nonzero, |(_, rest)| rest) {'''
+test = "-p ng-record --lib history::tests::the_nonzero_columns_flow_and_seal_with_the_bits_of_every_column"
