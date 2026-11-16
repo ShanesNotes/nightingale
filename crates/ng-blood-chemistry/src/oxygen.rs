@@ -1,26 +1,10 @@
+use super::{Bed, Field, Plasma, Speciated, Value};
 use ng_contract::*;
-
-type Port<'b, O, U> = ReadPort<'b, O, PerSite<CapillaryBed, U>>;
-type Bed<'b, 'k, O> = Kernel<'b, 'k, O, CapillaryBed>;
-type Value<'b, 'k, O, U> = Expr<'b, 'k, O, U>;
-
-const SPECIATION_NS: u64 = 1_000_000_000;
-
-pub struct Plasma<'b, O> {
-    pub water: Port<'b, O, Water>,
-    pub oxygen: Port<'b, O, Oxygen>,
-    pub hemoglobin: Port<'b, O, Hemoglobin>,
-}
-
-pub struct Oxygenated<'b, O> {
-    pub partial_pressure: Port<'b, O, Pressure>,
-    pub saturation: Port<'b, O, Dimensionless>,
-}
 
 /// The dissociation curve: `S = logistic(n ln(P / P50))`, with `n = a - b exp(-P / g)` and
 /// `P50 = P50s (1 + c1 d + c2 d^2 + c3 d^3) (1 + q1 u + q2 u^2)`, `d` the plasma's acidity less its standard and `u` its
-/// carbon dioxide partial pressure less its standard, over a scale. Both read stated values here. Temperature's factor
-/// is one, because its arrow is held.
+/// carbon dioxide partial pressure less its standard, over a scale. Temperature's factor is one, because its arrow is
+/// held.
 pub(crate) struct Curve<'b, O> {
     solubility: Parameter<'b, O, Quotient<Concentration<Oxygen>, Pressure>>,
     heme: Parameter<'b, O, Quotient<Concentration<Oxygen>, Concentration<Hemoglobin>>>,
@@ -28,9 +12,9 @@ pub(crate) struct Curve<'b, O> {
     ceiling: Parameter<'b, O, Dimensionless>,
     fall: Parameter<'b, O, Dimensionless>,
     reach: Parameter<'b, O, Pressure>,
-    acidity: [Parameter<'b, O, Dimensionless>; 2],
+    standard_acidity: Parameter<'b, O, Dimensionless>,
     by_acidity: [Parameter<'b, O, Dimensionless>; 3],
-    carbon_dioxide: [Parameter<'b, O, Pressure>; 3],
+    carbon_dioxide: [Parameter<'b, O, Pressure>; 2],
     by_carbon_dioxide: [Parameter<'b, O, Dimensionless>; 2],
 }
 
@@ -44,10 +28,7 @@ impl<'b, O: Owner> Curve<'b, O> {
             ceiling: laws.parameter(key("bc.hill-ceiling"), Admissible::positive()),
             fall: laws.parameter(key("bc.hill-fall"), Admissible::finite()),
             reach: laws.parameter(key("bc.hill-reach"), Admissible::positive()),
-            acidity: [
-                laws.parameter(key("bc.standard-acidity"), Admissible::finite()),
-                laws.parameter(key("bc.plasma-acidity"), Admissible::finite()),
-            ],
+            standard_acidity: laws.parameter(key("bc.standard-acidity"), Admissible::finite()),
             by_acidity: [
                 laws.parameter(key("bc.p50-acidity-1"), Admissible::finite()),
                 laws.parameter(key("bc.p50-acidity-2"), Admissible::finite()),
@@ -55,7 +36,6 @@ impl<'b, O: Owner> Curve<'b, O> {
             ],
             carbon_dioxide: [
                 laws.parameter(key("bc.standard-carbon-dioxide"), Admissible::finite()),
-                laws.parameter(key("bc.plasma-carbon-dioxide"), Admissible::finite()),
                 laws.parameter(key("bc.carbon-dioxide-scale"), Admissible::positive()),
             ],
             by_carbon_dioxide: [
@@ -81,9 +61,9 @@ impl<'b, O: Owner> Curve<'b, O> {
         k.subtract(ceiling, less)
     }
 
-    fn half<'k>(&self, k: &mut Bed<'b, 'k, O>) -> Value<'b, 'k, O, Pressure> {
-        let [standard, read] = self.acidity.each_ref().map(|value| k.parameter(value));
-        let d = k.subtract(read, standard);
+    fn half<'k>(&self, k: &mut Bed<'b, 'k, O>, speciated: &Speciated<'b, O>) -> Value<'b, 'k, O, Pressure> {
+        let (acidity, standard) = (k.at_site(&speciated.acidity), k.parameter(&self.standard_acidity));
+        let d = k.subtract(acidity, standard);
         let [c1, c2, c3] = self.by_acidity.each_ref().map(|value| k.parameter(value));
         let square = k.scale(d, d);
         let cube = k.scale(square, d);
@@ -93,7 +73,8 @@ impl<'b, O: Owner> Curve<'b, O> {
         let standard = k.parameter(&self.half);
         let shifted = k.scale(standard, shift);
         let by_acidity = k.add(standard, shifted);
-        let [standard, read, scale] = self.carbon_dioxide.each_ref().map(|value| k.parameter(value));
+        let read = speciated.carbon_dioxide_partial_pressure(k);
+        let [standard, scale] = self.carbon_dioxide.each_ref().map(|value| k.parameter(value));
         let apart = k.subtract(read, standard);
         let quotient = k.divide(apart, scale);
         let u: Value<'b, 'k, O, Dimensionless> = k.as_dimension(quotient);
@@ -106,20 +87,18 @@ impl<'b, O: Owner> Curve<'b, O> {
     }
 }
 
-/// States each bed's plasma oxygen partial pressure and saturation as two fields. The partial pressure is the
-/// curve's inverse at the bound share of capacity, `P = P50 exp(logit(S_c) / n(P))` with
-/// `S_c = (C - alpha P) / (4 c_Hb)`, so its row subtracts no two near-equal numbers but inside a logarithm, and
-/// saturation is the curve at that pressure.
-pub fn oxygenate<'b, O: Owner>(
+/// Each bed's plasma oxygen partial pressure and saturation. The partial pressure is the curve's inverse at the bound
+/// share of capacity, `P = P50 exp(logit(S_c) / n(P))` with `S_c = (C - alpha P) / (4 c_Hb)`, so its row subtracts no
+/// two near-equal numbers but inside a logarithm, and saturation is the curve at that pressure.
+pub(crate) fn define<'b, O: Owner>(
     laws: &mut FragmentBuilder<'b, O>,
     plasma: &Plasma<'b, O>,
-) -> Result<Oxygenated<'b, O>, AdmissionError> {
+    speciated: &Speciated<'b, O>,
+    (pressure_out, saturation_out): (&Field<'b, O, Pressure>, &Field<'b, O, Dimensionless>),
+    class: RateClass,
+) {
     let curve = Curve::declare(laws);
-    let class = RateClass::new(RateBand::Reflex, SPECIATION_NS)?;
-    let (pressure_out, pressure) =
-        laws.site_field::<CapillaryBed, Pressure>("oxygen partial pressure", Admissible::finite());
-    let (saturation_out, saturation) =
-        laws.site_field::<CapillaryBed, Dimensionless>("oxygen saturation", Admissible::finite());
+    let pressure = &speciated.oxygen_partial_pressure;
     let law = laws.site_kernel(|mut k| {
         let (oxygen, hemoglobin, water) = (
             k.at_site(&plasma.oxygen),
@@ -134,7 +113,7 @@ pub fn oxygenate<'b, O: Owner>(
         let heme = k.parameter(&curve.heme);
         let product = k.multiply(heme, carrier);
         let capacity: Value<'b, '_, O, Concentration<Oxygen>> = k.as_dimension(product);
-        let now = k.at_site(&pressure);
+        let now = k.at_site(pressure);
         let solubility = k.parameter(&curve.solubility);
         let product = k.multiply(solubility, now);
         let dissolved: Value<'b, '_, O, Concentration<Oxygen>> = k.as_dimension(product);
@@ -147,14 +126,14 @@ pub fn oxygenate<'b, O: Owner>(
         let quotient = k.divide(logit, exponent);
         let power: Value<'b, '_, O, Dimensionless> = k.as_dimension(quotient);
         let rise = k.exp(power);
-        let half = curve.half(&mut k);
+        let half = curve.half(&mut k, speciated);
         let value = k.scale(half, rise);
         k.finish(value, laws.every_mode(), class)
     });
-    laws.define_at(&pressure_out, law);
+    laws.define_at(pressure_out, law);
     let law = laws.site_kernel(|mut k| {
-        let now = k.at_site(&pressure);
-        let half = curve.half(&mut k);
+        let now = k.at_site(pressure);
+        let half = curve.half(&mut k, speciated);
         let quotient = k.divide(now, half);
         let ratio: Value<'b, '_, O, Dimensionless> = k.as_dimension(quotient);
         let log = k.ln(ratio);
@@ -163,9 +142,5 @@ pub fn oxygenate<'b, O: Owner>(
         let value = k.logistic(argument);
         k.finish(value, laws.every_mode(), class)
     });
-    laws.define_at(&saturation_out, law);
-    Ok(Oxygenated {
-        partial_pressure: pressure,
-        saturation,
-    })
+    laws.define_at(saturation_out, law);
 }

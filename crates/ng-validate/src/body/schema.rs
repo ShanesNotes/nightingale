@@ -132,6 +132,21 @@ pub(super) const OXYGEN_USE: [(&str, &str, &str); 11] = [
     ("bone bed", "bone bed oxygen use", "mt.oxygen-use-bone"),
 ];
 pub(super) const LUNG_OXYGEN: &str = "lung oxygen";
+/// Each bed's held carbon dioxide made in its cells, in `OXYGEN_USE`'s order.
+pub(super) const CARBON_DIOXIDE_MADE: [&str; 11] = [
+    "pulmonary bed carbon dioxide made",
+    "gut bed carbon dioxide made",
+    "muscle bed carbon dioxide made",
+    "glomerular bed carbon dioxide made",
+    "peritubular bed carbon dioxide made",
+    "brain bed carbon dioxide made",
+    "coronary bed carbon dioxide made",
+    "liver bed carbon dioxide made",
+    "fat bed carbon dioxide made",
+    "skin bed carbon dioxide made",
+    "bone bed carbon dioxide made",
+];
+pub(super) const LUNG_CARBON_DIOXIDE: &str = "lung carbon dioxide";
 
 fn boundaries(schema: &mut Schema) -> Result<(), AdmissionError> {
     let portal = site::<VesselSegment>("portal vein")?;
@@ -153,11 +168,14 @@ fn boundaries(schema: &mut Schema) -> Result<(), AdmissionError> {
     schema.boundary::<Water>("skin water", out, muscle, Space::Interstitium)?;
     schema.drain("urine", site::<VesselSegment>("bladder")?, Space::Lumen)?;
     schema.boundary::<Energy>("heat", out, site::<TissueSite>("body")?, Space::Thermal)?;
-    for (bed, name, _) in OXYGEN_USE {
-        schema.boundary::<Oxygen>(name, out, site::<CapillaryBed>(bed)?, Space::Cells)?;
+    for ((bed, used, _), made) in OXYGEN_USE.into_iter().zip(CARBON_DIOXIDE_MADE) {
+        let bed = site::<CapillaryBed>(bed)?;
+        schema.boundary::<Oxygen>(used, out, bed, Space::Cells)?;
+        schema.boundary::<CarbonDioxide>(made, into, bed, Space::Cells)?;
     }
     let lung = site::<CapillaryBed>("pulmonary bed")?;
     schema.boundary::<Oxygen>(LUNG_OXYGEN, into, lung, Space::Plasma)?;
+    schema.boundary::<CarbonDioxide>(LUNG_CARBON_DIOXIDE, out, lung, Space::Plasma)?;
 
     let veins = site::<VesselSegment>("central veins")?;
     let glomerular = site::<CapillaryBed>("glomerular bed")?;

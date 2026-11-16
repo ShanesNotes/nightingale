@@ -41,6 +41,7 @@ const KEPT_BACK: &str = "an interstitial amount the capillary wall keeps back";
 const UNCROSSED: &str = "a cell amount no membrane law moves";
 const ALVEOLAR: &str = "alveolar gas no exchange moves";
 const LUNG: &str = "a held exchange on the pulmonary bed's partial pressure";
+const MADE: &str = "the bed's held oxygen use times a stated quotient";
 
 const fn route(
     card: &'static str,
@@ -273,11 +274,21 @@ pub const HOLD_TABLE: &[Hold] = &[
     route(MT, "skin bed oxygen use", CONSTANT, Ticket(9, MT), "01:132, 872"),
     route(MT, "bone bed oxygen use", CONSTANT, Ticket(9, MT), "01:132, 872"),
     route(MT, "lung oxygen", LUNG, Ticket(10, RS), "01:129, 873"),
-    pool::<CarbonDioxide, CapillaryBed>(MT, Interstitium, KEPT_BACK, Ticket(8, MT), "01:146, 871"),
+    route(MT, "pulmonary bed carbon dioxide made", MADE, Ticket(9, MT), "01:145, 872"),
+    route(MT, "gut bed carbon dioxide made", MADE, Ticket(9, MT), "01:145, 872"),
+    route(MT, "muscle bed carbon dioxide made", MADE, Ticket(9, MT), "01:145, 872"),
+    route(MT, "glomerular bed carbon dioxide made", MADE, Ticket(9, MT), "01:145, 872"),
+    route(MT, "peritubular bed carbon dioxide made", MADE, Ticket(9, MT), "01:145, 872"),
+    route(MT, "brain bed carbon dioxide made", MADE, Ticket(9, MT), "01:145, 872"),
+    route(MT, "coronary bed carbon dioxide made", MADE, Ticket(9, MT), "01:145, 872"),
+    route(MT, "liver bed carbon dioxide made", MADE, Ticket(9, MT), "01:145, 872"),
+    route(MT, "fat bed carbon dioxide made", MADE, Ticket(9, MT), "01:145, 872"),
+    route(MT, "skin bed carbon dioxide made", MADE, Ticket(9, MT), "01:145, 872"),
+    route(MT, "bone bed carbon dioxide made", MADE, Ticket(9, MT), "01:145, 872"),
+    route(MT, "lung carbon dioxide", LUNG, Ticket(10, RS), "01:148, 873"),
     pool::<Glucose, CapillaryBed>(MT, Interstitium, KEPT_BACK, Ticket(9, FL), "01:485, 533"),
     pool::<FattyAcids, CapillaryBed>(MT, Interstitium, KEPT_BACK, Ticket(9, FL), "01:485, 536"),
     pool::<Lactate, CapillaryBed>(MT, Interstitium, KEPT_BACK, Ticket(9, FL), "01:485, 540"),
-    pool::<CarbonDioxide, CapillaryBed>(MT, Cells, UNCROSSED, Ticket(8, MT), "01:38, 871, 08:19"),
     pool::<Glucose, Besides<Liver>>(MT, Cells, UNCROSSED, Ticket(9, MT), "01:190"),
     pool::<FattyAcids, Besides<Liver>>(MT, Cells, UNCROSSED, Ticket(9, MT), "01:200"),
     pool::<Lactate, Besides<Liver>>(MT, Cells, UNCROSSED, Ticket(9, MT), "01:194-196"),
