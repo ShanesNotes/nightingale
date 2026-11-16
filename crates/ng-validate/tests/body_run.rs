@@ -622,16 +622,29 @@ fn exchanged(session: &Session<'_, Running>, quantity: QuantityId, at: u64, outf
     panic!("no segment holds {at}")
 }
 
-/// Over the whole beats of the first minute's last ten seconds, the trapezoid means of the aortic flow and of the
-/// systemic arteries' and the pulmonary artery's oxygen and carbon dioxide contents. Flow times each content difference
-/// meets the systemic beds' held rate to TOLERANCE: at this head it reads 0.7% over for oxygen and 0.4% over for
-/// carbon dioxide, a gap between the two vessels' contents and the beds' own flows that the sum's rule does not move
-/// (the mean of the products reads the same to 1e-7). The ledger's own exchange at the lung over the same beats meets
-/// the whole body's held rate to LEDGER, the body's settling over nine beats.
+/// Over the whole beats of the first minute's last ten seconds, the flow is the water the left ventricle loses while
+/// its valve stands open: the trapezoid of the valve's flow at the ends of steps reads it 0.6% high. The lung's lymph
+/// takes water and no gas from the pulmonary bed to the central veins, so the pulmonary artery carries the flow and
+/// the lymph at its own oxygen and carbon dioxide contents. With the trapezoid means of the two vessels' contents of
+/// each gas, what the systemic beds take and make meets their held rates to LEDGER, the body's settling over nine
+/// beats, as the ledger's own exchange at the lung meets the whole body's.
 fn the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_held_rates_over_whole_beats(
     start: &Start,
 ) {
-    let mut samples: Vec<(u64, [f64; 5])> = Vec::new();
+    let mut samples: Vec<(u64, [f64; 5], f64, f64)> = Vec::new();
+    let lymph = field(
+        "FL",
+        "lymph",
+        Context::Edge {
+            from: site::<CapillaryBed>("pulmonary bed"),
+            to: site::<VesselSegment>("central veins"),
+        },
+    );
+    let ventricle = RowKind::Amount {
+        site: site::<VesselSegment>("left ventricle"),
+        species: Species::Water,
+        space: Space::Lumen,
+    };
     let mut openings: Vec<(u64, u64)> = Vec::new();
     let session = until(start.session(), 50 * SECOND);
     let session = beats(start, session, 60 * SECOND, |session, opened| {
@@ -643,46 +656,56 @@ fn the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_
         samples.push((
             at,
             [
-                aortic_flow(start, session),
                 read("systemic arteries", Species::Oxygen),
                 read("pulmonary artery", Species::Oxygen),
                 read("systemic arteries", Species::CarbonDioxide),
                 read("pulmonary artery", Species::CarbonDioxide),
+                value(start, session, lymph),
             ],
+            aortic_flow(start, session),
+            value(start, session, ventricle),
         ));
     });
     let onsets = onsets(&openings);
     let (first, last) = (onsets[0], onsets[onsets.len() - 1]);
     let held = (last - first) as f64 / 1e9;
-    let mut means = [0.0; 5];
+    let (mut means, mut ejected) = ([0.0; 5], 0.0);
     for pair in samples.windows(2) {
-        let ((from, then), (to, now)) = (pair[0], pair[1]);
+        let ((from, then, opened, before), (to, now, open, after)) = (pair[0], pair[1]);
         if from >= first && to <= last {
             let length = (to - from) as f64 / 1e9;
             for (mean, (then, now)) in means.iter_mut().zip(then.iter().zip(&now)) {
                 *mean += 0.5 * length * (then + now) / held;
             }
+            if opened > 0.0 || open > 0.0 {
+                ejected += before - after;
+            }
         }
     }
     let [
-        flow,
         arterial_oxygen,
         venous_oxygen,
         arterial_carbon_dioxide,
         venous_carbon_dioxide,
+        lymph,
     ] = means;
+    let (flow, returned) = (ejected / held, ejected / held + lymph);
     let fick = [
-        ("oxygen", flow * (arterial_oxygen - venous_oxygen), SYSTEMIC * USE),
+        (
+            "oxygen",
+            flow * arterial_oxygen - returned * venous_oxygen,
+            SYSTEMIC * USE,
+        ),
         (
             "carbon dioxide",
-            flow * (venous_carbon_dioxide - arterial_carbon_dioxide),
+            returned * venous_carbon_dioxide - flow * arterial_carbon_dioxide,
             SYSTEMIC * MADE,
         ),
     ];
     for (gas, taken, rate) in fick {
         assert!(
-            (taken - rate).abs() <= TOLERANCE * rate,
-            "over {} beats flow {flow} times the {gas} content difference is {taken} against {rate}",
+            (taken - rate).abs() <= LEDGER * rate,
+            "over {} beats flow {flow} and lymph {lymph} move {taken} of {gas} a second against {rate}",
             onsets.len() - 1
         );
     }
@@ -705,7 +728,6 @@ fn the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_
         );
     }
 }
-const TOLERANCE: f64 = 0.01;
 const LEDGER: f64 = 1e-4;
 
 struct Ticks(Cell<u64>);

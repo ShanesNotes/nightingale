@@ -131,7 +131,7 @@ fn pulmonary_row<'b>(
     plasma: PlasmaPressure<'_, 'b>,
 ) -> Result<AlgebraicSlot<'b, Metabolism, Pressure>, AdmissionError> {
     let class = RateClass::new(RateBand::Reflex, 1_000_000_000)?;
-    let pulmonary = laws.algebraic::<Pressure>(name, Admissible::finite());
+    let pulmonary = laws.algebraic::<Pressure>(name, Admissible::positive());
     let row = laws.kernel(|mut k| {
         let value = k.algebraic(&pulmonary);
         k.finish(value, laws.every_mode(), class)

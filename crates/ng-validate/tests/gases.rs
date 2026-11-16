@@ -30,15 +30,15 @@ const HEMOGLOBIN_CHARGE: (f64, f64) = (5.0, 30.0);
 const CARBAMINO: (f64, f64, f64) = (4.0, 10.0, 10.0);
 const BUFFER_RATIOS: (f64, f64) = (15.0, 10.0);
 const IONS: [(Species, f64, f64); 9] = [
-    (Species::Sodium, 100.0, 1.0),
-    (Species::Potassium, 5.0, 1.0),
-    (Species::Magnesium, 1.0, 2.0),
-    (Species::Calcium, 1.0, 2.0),
-    (Species::Chloride, 100.0, -1.0),
-    (Species::Lactate, 1.0, -1.0),
-    (Species::Ketones, 1.0, -1.0),
-    (Species::DietBase, 1.0, -1.0),
-    (Species::FixedAcid, 1.0, -1.0),
+    (Species::Sodium, 103.0, 1.0),
+    (Species::Potassium, 4.5, 1.0),
+    (Species::Magnesium, 0.8, 2.0),
+    (Species::Calcium, 1.3, 2.0),
+    (Species::Chloride, 97.0, -1.0),
+    (Species::Lactate, 1.7, -1.0),
+    (Species::Ketones, 0.4, -1.0),
+    (Species::DietBase, 2.2, -1.0),
+    (Species::FixedAcid, 0.9, -1.0),
 ];
 const RENEWAL: f64 = 1.0;
 /// `ln(P / P50)` and the carbon dioxide partial pressure of the arterial blood and of the bed's settled plasma.
@@ -813,11 +813,36 @@ fn a_bicarbonate_at_or_above_what_the_total_leaves_is_refused_by_name() -> Resul
     Ok(())
 }
 
-fn a_fast_renewal_is_refused_by(
+#[test]
+fn a_saturation_outside_zero_to_one_is_refused_before_carbamino_reads_it() -> Result<(), InitializationFailure>
+{
+    let (body, core, store) = (
+        compiled()?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
+    let plasma = speciated(ARTERIAL);
+    let _session = admitted(&body, &core, &store, Start::at(plasma))?;
+    let saturation_row = field("oxygen saturation")?;
+    for saturation in [-0.25, 1.5] {
+        let start = Start {
+            guess: (plasma.oxygen.0, saturation, plasma.bicarbonate, plasma.acidity),
+            ..Start::at(plasma)
+        };
+        match body.bind(packet(&body, start)?) {
+            Err(AdmissionError::StartOutsideSet { row }) => assert_eq!(row, saturation_row),
+            Err(other) => panic!("from a saturation of {saturation}: {other:?}"),
+            Ok(_) => panic!("a saturation of {saturation} bound outside zero to one"),
+        }
+    }
+    Ok(())
+}
+
+fn a_fast_renewal(
     arterial: Speciated,
     renewal: f64,
     local: &'static str,
-) -> Result<(), InitializationFailure> {
+) -> Result<(usize, usize), InitializationFailure> {
     let (body, core, store) = (
         compiled()?,
         ng_solver::Core::new(SECOND / 100),
@@ -829,7 +854,7 @@ fn a_fast_renewal_is_refused_by(
         ..Start::at(speciated(ARTERIAL))
     };
     let mut session = admitted(&body, &core, &store, start)?;
-    let mut named = 0;
+    let (mut named, mut accepted) = (0, 0);
     let finite = |session: &Session<'_, Running>| {
         let view = session.record().accepted();
         (body.rows().iter()).all(|row| f64::from_bits(view.value(row.id()).bits()[0]).is_finite())
@@ -840,6 +865,7 @@ fn a_fast_renewal_is_refused_by(
             match attempt {
                 Step::Accepted(next, _) => {
                     session = next;
+                    accepted += 1;
                     assert!(finite(&session), "an accepted value that is not finite");
                     break;
                 }
@@ -853,6 +879,15 @@ fn a_fast_renewal_is_refused_by(
             }
         }
     }
+    Ok((named, accepted))
+}
+
+fn a_fast_renewal_is_refused_by(
+    arterial: Speciated,
+    renewal: f64,
+    local: &'static str,
+) -> Result<(), InitializationFailure> {
+    let (named, _) = a_fast_renewal(arterial, renewal, local)?;
     assert!(named > 0, "no step was refused by {local}");
     Ok(())
 }
@@ -871,6 +906,18 @@ fn a_step_whose_bicarbonate_passes_what_the_total_leaves_is_refused_by_acidity()
         ..speciated(ARTERIAL)
     };
     a_fast_renewal_is_refused_by(arterial, 10_000.0, "acidity")
+}
+
+#[test]
+fn steps_that_bring_bicarbonate_near_what_the_total_leaves_are_accepted_finite()
+-> Result<(), InitializationFailure> {
+    let arterial = Speciated {
+        carbon_dioxide: (ARTERIAL.1, 1.0),
+        ..speciated(ARTERIAL)
+    };
+    let (_, accepted) = a_fast_renewal(arterial, 100.0, "acidity")?;
+    assert!(accepted > 0, "no step was accepted near acidity's edge");
+    Ok(())
 }
 
 #[test]

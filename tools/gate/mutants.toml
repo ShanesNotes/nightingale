@@ -3377,3 +3377,24 @@ path = "crates/ng-validate/src/body/packet.rs"
 old = '''const CARBON_DIOXIDE_DRIFT: f64 = 0.8;'''
 new = '''const CARBON_DIOXIDE_DRIFT: f64 = 0.4;'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_oxygens_and_carbon_dioxides_stated_ones"
+
+[[mutant]]
+name = "saturation-set-finite"
+path = "crates/ng-blood-chemistry/src/lib.rs"
+old = '''("oxygen saturation", Admissible::unit_interval())'''
+new = '''("oxygen saturation", Admissible::finite())'''
+test = "-p ng-validate --test gases a_saturation_outside_zero_to_one_is_refused_before_carbamino_reads_it"
+
+[[mutant]]
+name = "chloride-read-as-sodium"
+path = "crates/ng-blood-chemistry/src/acidity.rs"
+old = '''            charge(k, &self.chloride),'''
+new = '''            charge(k, &self.sodium),'''
+test = "-p ng-validate --test gases speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_warm_one"
+
+[[mutant]]
+name = "ketones-read-as-lactate"
+path = "crates/ng-blood-chemistry/src/acidity.rs"
+old = '''            charge(k, &self.ketones),'''
+new = '''            charge(k, &self.lactate),'''
+test = "-p ng-validate --test gases speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_warm_one"

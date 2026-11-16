@@ -64,11 +64,11 @@ pub fn speciate<'b, O: Owner>(
 ) -> Result<Speciated<'b, O>, AdmissionError> {
     let class = RateClass::new(RateBand::Reflex, SPECIATION_NS)?;
     let (pressure_out, oxygen_partial_pressure) =
-        laws.site_field::<CapillaryBed, Pressure>("oxygen partial pressure", Admissible::finite());
+        laws.site_field::<CapillaryBed, Pressure>("oxygen partial pressure", Admissible::positive());
     let (saturation_out, saturation) =
-        laws.site_field::<CapillaryBed, Dimensionless>("oxygen saturation", Admissible::finite());
+        laws.site_field::<CapillaryBed, Dimensionless>("oxygen saturation", Admissible::unit_interval());
     let (bicarbonate_out, bicarbonate) =
-        laws.site_field::<CapillaryBed, Concentration<CarbonDioxide>>("bicarbonate", Admissible::finite());
+        laws.site_field::<CapillaryBed, Concentration<CarbonDioxide>>("bicarbonate", Admissible::positive());
     let (acidity_out, acidity) =
         laws.site_field::<CapillaryBed, Dimensionless>("acidity", Admissible::finite());
     let speciated = Speciated {
