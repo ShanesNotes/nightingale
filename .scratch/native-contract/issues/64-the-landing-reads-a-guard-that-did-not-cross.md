@@ -1,0 +1,33 @@
+# 64: The landing reads a guard that did not cross
+
+Spec: `crates/ng-contract/src/boundary.rs` (`land`) and `crates/ng-contract/src/problem.rs` (`crossed`)
+
+Type: task
+
+Status: open
+
+Blocked by: none
+
+**Why.** The first milestone (SRS invariant I19) runs the whole body for 48 hours, and each pass 1 loop may add 12% of the user instructions a simulated second it starts from ([body 26](../../body/issues/26-cost-budget.md)). The check of nightingale#172 found the body's cost up 5.0%, from 5,960.2 to 6,257.2 M a simulated second, and the rise is not the laws' work. It is extra landing solves on one step a beat (`~/lanes/logs/ng-wave-4/b06-veins/verify-coordinator/VERIFY-pr172.md`, item 6). While it stands, a loop's cost line moves with the landing by about 5% either way.
+
+**What the check found.**
+
+- The landing (`boundary.rs`, `land`) re-solves shorter tickets to land a crossing. It reads one guard's gap: the first armed guard, in layout order, whose gap is at or past zero at the trial's end (`problem.rs`, `crossed`).
+- On the whole body, 59 steps of the first minute carry the extra solves, one a beat from the second beat: at 1.279 s, then every 0.998 to 0.999 s. Each is the step that crosses the end of systole, about 280 ms into the beat.
+- With the pulmonary vein unmarked, that step lands in 3 calls, and the secant aims at 2.09 ms, as the phase gap predicts. With the four veins marked, it takes 9 calls on the first such beat and 14 to 16 on the other 58, and the secant aims at 9.74 ms. So the landing reads a guard whose gap the crossing does not show, and the bracket stalls and halves.
+- Those 59 steps hold 824 extra calls, and the rest of the run differs by -70, so the net is 754: 15,264 core solves against 14,510. Accepted steps (11,794 against 11,797) and refusals (725, with the same reasons) do not move.
+- What switches it: the pulmonary vein's mark, whose collapse term's tail moves pressures by about 1e-5 mmHg. Which guard the landing reads is inferred, not run: most likely a valve guard whose gap sits near zero at that instant.
+- Body 08's prototype ran with the knife-edge partly off: 2,109 landing solves against main's 2,745 (`~/lanes/logs/ng-wave-4/b08-plan/PLAN.md`, F8 and section 5). So its cost line moved with the landing, not only with its laws.
+
+Inferred, not built: a landing that read the crossed guard whose root is earliest, or the guard that crossed inside the stages, would close in about 3 calls on this step.
+
+- [ ] A probe on main names the step and the guard the landing reads on it
+- [ ] The Answer names that guard and why its gap is at or past zero at the trial's end
+- [ ] The landing reads the guard that crossed, picked from two prototypes: the crossed guard whose root is earliest, and the guard that crossed inside the stages. Each reports solves by kind, ordinary and landing, on the slice and on the whole body
+- [ ] Replay stays exact, and each pin that moves has its sentence
+- [ ] A test fails on today's landing, with its mutant row
+- [ ] Cost lines before and after, on the slice and on the whole body
+
+**Check.** The contract crate's: this ticket changes `ng-contract`.
+
+**Non-goals:** which guards exist, and the accuracy gate.
