@@ -3304,3 +3304,11 @@ path = "crates/ng-validate/tests/body_run.rs"
 old = '''("solves", counts.solves > ceilings.solves),'''
 new = '''("solves", counts.solves > ceilings.solves + 1),'''
 test = "-p ng-validate --test body_run a_count_over_its_ceiling_fails_and_names_that_count"
+
+[[mutant]]
+name = "viscosity-arrow-114-disconnected"
+path = "crates/ng-cardiovascular/src/circulation.rs"
+old = '''                k.scale(total, ratio)'''
+new = '''                let _ = ratio;
+                total'''
+test = "-p ng-validate --test viscosity a_plain_edges_flow_falls_as_viscosity_over_its_reference_rises"

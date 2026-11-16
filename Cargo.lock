@@ -37,6 +37,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ng-hematology"
+version = "0.0.0"
+dependencies = [
+ "ng-contract",
+]
+
+[[package]]
 name = "ng-nervous"
 version = "0.0.0"
 dependencies = [
@@ -87,6 +94,7 @@ dependencies = [
  "ng-cardiovascular",
  "ng-contract",
  "ng-fluids",
+ "ng-hematology",
  "ng-nervous",
  "ng-observe",
  "ng-receptor",

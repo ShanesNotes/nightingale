@@ -1,5 +1,5 @@
 use crate::shared::drive;
-use ng_contract::catalog::{Reads, TubuloglomerularFeedback};
+use ng_contract::catalog::{BloodViscosity, Reads, TubuloglomerularFeedback};
 use ng_contract::*;
 
 pub(crate) fn plain_edges<'b>(
@@ -9,6 +9,7 @@ pub(crate) fn plain_edges<'b>(
     pressure: &ReadPort<'b, Cardiovascular, PerSite<Blood, Pressure>>,
     head: &Parameter<'b, Cardiovascular, Quotient<Pressure, Length>>,
     wave: RateClass,
+    reads_viscosity: bool,
 ) -> Result<(), AdmissionError> {
     let resistance =
         cv.edge_parameter::<_, Resistance>(ParameterKey::new("cv.resistance"), Admissible::positive());
@@ -20,6 +21,14 @@ pub(crate) fn plain_edges<'b>(
     );
     let alpha = ports.effect::<Norepinephrine>();
     let feedback: TubuloglomerularFeedback<Reads<'_, Cardiovascular>> = cv.receive();
+    let viscosity = reads_viscosity.then(|| {
+        let line: BloodViscosity<Reads<'b, Cardiovascular>> = cv.receive();
+        let reciprocal = cv.parameter::<Quotient<Dimensionless, Viscosity>>(
+            ParameterKey::new("cv.reference-viscosity-reciprocal"),
+            Admissible::positive(),
+        );
+        (line.viscosity, reciprocal)
+    });
     let flow = cv.edge_kernel(|mut k| {
         let head_across = drive(&mut k, pressure, head);
         let base = k.edge_parameter(&resistance);
@@ -38,6 +47,15 @@ pub(crate) fn plain_edges<'b>(
         let weight = k.edge_parameter(&share);
         let shared = k.scale(extra, weight);
         let total = k.add(with_tone, shared);
+        let total = match &viscosity {
+            Some((mu, reciprocal)) => {
+                let (mu, reciprocal) = (k.read(mu), k.parameter(reciprocal));
+                let ratio = k.multiply(reciprocal, mu);
+                let ratio: Expr<'_, '_, _, Dimensionless> = k.as_dimension(ratio);
+                k.scale(total, ratio)
+            }
+            None => total,
+        };
         let quotient = k.divide(head_across, total);
         let flow = k.as_dimension(quotient);
         k.finish(flow, cv.every_mode(), wave)

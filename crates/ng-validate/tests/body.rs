@@ -858,8 +858,8 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         hex(basis.digest()),
     );
     expect![[r#"
-        rows 1372 {"algebraic": 126, "amount": 1236, "memory": 10}, columns 1288, jacobian nonzeros 8892, blocks 492, parameter slots 470, conserved combinations 480, held pools 409, held route columns 62
-        model hash b034f0a9a49b370df13d431ecb0df0ee30f3f42849ca2ba60ab3dc944f13eca5
+        rows 1373 {"algebraic": 127, "amount": 1236, "memory": 10}, columns 1288, jacobian nonzeros 8916, blocks 491, parameter slots 478, conserved combinations 480, held pools 409, held route columns 62
+        model hash d83a7acd645a21470097014a2da4f4e6d85515c2bcf29c242da1a0e15476f009
         conserved basis b709d2da159c9858a6d354b4b2145cb46845e18e809d0180814671f21d0ef03f
     "#]].assert_eq(&pin);
     Ok(())
