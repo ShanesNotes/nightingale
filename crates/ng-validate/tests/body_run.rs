@@ -8,8 +8,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "cb3f34d7647042285110ceecdfc0850a55ad0f7be68ecc50a4edc1d290de1661";
-const ADMITTED_SEAL: &str = "6f33b90cf5073aa577ba302cd36957f2ffd9a2bec78cf4a76ffb2d132acf80a8";
+const PACKET: &str = "e9943a87f779d37f8514aa50f1017961ccab29f66400152357e8b617b7af8e40";
+const ADMITTED_SEAL: &str = "e5e80c60e0204cdaf793148a49f92313eee4dcaed756ccbcae2b2cd4b1f58cdc";
 
 struct Counted {
     core: ng_solver::Core,
@@ -203,20 +203,59 @@ fn concentration(start: &Start, session: &Session<'_, Running>, key: &'static st
     value(start, session, lumen(species)) / value(start, session, lumen(Species::Water))
 }
 
-fn body_oxygen(start: &Start, session: &Session<'_, Running>) -> f64 {
+fn body_gas(start: &Start, session: &Session<'_, Running>, gas: Species) -> f64 {
     let view = session.record().accepted();
     (start.body.rows().iter())
-        .filter(|row| {
-            matches!(
-                row.kind(),
-                RowKind::Amount {
-                    species: Species::Oxygen,
-                    ..
-                }
-            )
-        })
+        .filter(|row| matches!(row.kind(), RowKind::Amount { species, .. } if species == gas))
         .map(|row| lead(view.value(row.id())))
         .sum()
+}
+
+fn aortic_flow(start: &Start, session: &Session<'_, Running>) -> f64 {
+    let at = Context::Edge {
+        from: site::<VesselSegment>("left ventricle"),
+        to: site::<VesselSegment>("systemic arteries"),
+    };
+    let valves = LawName {
+        owner: "CV",
+        local: "valves",
+    };
+    value(start, session, RowKind::Memory(Slot { law: valves, at }))
+}
+
+/// One accepted step at a time until `end` after admission. `each` sees every step's session and, at a step where
+/// the aortic valve's flow leaves zero, how long it stood at zero before.
+fn beats<'s>(
+    start: &Start,
+    mut session: Session<'s, Running>,
+    end: u64,
+    mut each: impl FnMut(&Session<'_, Running>, Option<u64>),
+) -> Session<'s, Running> {
+    let at = |session: &Session<'_, Running>| session.record().accepted().time().nanoseconds();
+    let mut closed = (aortic_flow(start, &session) == 0.0).then(|| at(&session));
+    while at(&session) < anchor_moment().nanoseconds() + end {
+        let before = at(&session);
+        session = until(session, before + 1 - anchor_moment().nanoseconds());
+        let (flow, now) = (aortic_flow(start, &session), at(&session));
+        let opened = closed.filter(|_| flow > 0.0).map(|since| now - since);
+        each(&session, opened);
+        closed = match (flow > 0.0, closed) {
+            (true, _) => None,
+            (false, None) => Some(now),
+            (false, since) => since,
+        };
+    }
+    session
+}
+
+/// The beats' onsets among the valve's openings: those after a closure at least half the longest, because the valve
+/// also closes and opens again briefly within an ejection.
+fn onsets(openings: &[(u64, u64)]) -> Vec<u64> {
+    let longest = openings.iter().map(|(_, closed)| *closed).max().unwrap_or(0);
+    (openings.iter())
+        .filter(|(_, closed)| 2 * closed >= longest)
+        .map(|(at, _)| *at)
+        .collect()
 }
 
 fn the_body_admits_at_06_55(start: &Start) {
@@ -228,7 +267,7 @@ fn the_body_admits_at_06_55(start: &Start) {
 
 fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> Session<'_, Running> {
     let pools = start.held_pools();
-    assert_eq!(pools.len(), 387);
+    assert_eq!(pools.len(), 365);
     let amounts = |session: &Session<'_, Running>| -> Vec<[u64; 2]> {
         let view = session.record().accepted();
         pools.iter().map(|(row, _)| view.value(*row).bits()).collect()
@@ -277,7 +316,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         writeln!(report, "{} {} moved", route.card(), route.name()).expect("a string takes it");
     }
     expect![[r#"
-        steps 11797, quantities 458, held routes 74
+        steps 11794, quantities 436, held routes 86
         EN vasopressin clearance moved
         EN vasopressin secretion moved
         GI gut chloride moved
@@ -285,17 +324,29 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         GI gut sodium moved
         GI gut water moved
         MS skin water moved
+        MT bone bed carbon dioxide made moved
         MT bone bed oxygen use moved
+        MT brain bed carbon dioxide made moved
         MT brain bed oxygen use moved
+        MT coronary bed carbon dioxide made moved
         MT coronary bed oxygen use moved
+        MT fat bed carbon dioxide made moved
         MT fat bed oxygen use moved
+        MT glomerular bed carbon dioxide made moved
         MT glomerular bed oxygen use moved
+        MT gut bed carbon dioxide made moved
         MT gut bed oxygen use moved
+        MT liver bed carbon dioxide made moved
         MT liver bed oxygen use moved
+        MT lung carbon dioxide moved
         MT lung oxygen moved
+        MT muscle bed carbon dioxide made moved
         MT muscle bed oxygen use moved
+        MT peritubular bed carbon dioxide made moved
         MT peritubular bed oxygen use moved
+        MT pulmonary bed carbon dioxide made moved
         MT pulmonary bed oxygen use moved
+        MT skin bed carbon dioxide made moved
         MT skin bed oxygen use moved
     "#]]
     .assert_eq(&report);
@@ -385,23 +436,23 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet cb3f34d7647042285110ceecdfc0850a55ad0f7be68ecc50a4edc1d290de1661
-        seal a9addc49ec64ffcbfac41d6e4c5144aa6e46a5e4ec6a9fd27d60ba0c5449fc48
+        packet e9943a87f779d37f8514aa50f1017961ccab29f66400152357e8b617b7af8e40
+        seal 2d7770894926021e4ee597deffd352819359f97c9b3dc4b74ba6d9c65e695d20
         steps 198
         viscosity over its reference at the start 1.000000413
     "#]]
     .assert_eq(&pin);
     expect![[r#"
          100.432831 ms  arterial pressure 134.633292  right atrial pressure 3.008802  portal vein pressure 6.258052  leg vein pressure 3.596931  heart rate 1.063945  sympathetic traffic 0.786091  filtration 1.670060  urine 0.020000  wall power 24549.627276  aortic flow 0.000000
-         200.971980 ms  arterial pressure 127.073834  right atrial pressure 3.566990  portal vein pressure 6.406698  leg vein pressure 3.850277  heart rate 1.081239  sympathetic traffic 0.086530  filtration 2.109289  urine 0.020000  wall power 15618.227416  aortic flow 39.436549
-         300.343597 ms  arterial pressure 119.007058  right atrial pressure 4.057781  portal vein pressure 6.216546  leg vein pressure 4.180909  heart rate 1.048358  sympathetic traffic 0.016675  filtration 2.344802  urine 0.020000  wall power 39549.033730  aortic flow 0.000000
-         403.707425 ms  arterial pressure 109.434878  right atrial pressure 3.675871  portal vein pressure 5.988799  leg vein pressure 4.614320  heart rate 1.004394  sympathetic traffic 0.012228  filtration 2.415994  urine 0.020000  wall power 13948.485472  aortic flow 0.000000
-         504.102524 ms  arterial pressure 101.045103  right atrial pressure 2.024956  portal vein pressure 5.767216  leg vein pressure 4.364992  heart rate 0.970296  sympathetic traffic 0.022847  filtration 2.358741  urine 0.020000  wall power 12015.605764  aortic flow 0.000000
-         608.059522 ms  arterial pressure 93.141456  right atrial pressure 1.494962  portal vein pressure 5.498127  leg vein pressure 3.709215  heart rate 0.947449  sympathetic traffic 0.073838  filtration 2.207971  urine 0.020000  wall power 8662.269590  aortic flow 0.000000
-         708.059522 ms  arterial pressure 86.170674  right atrial pressure 1.466155  portal vein pressure 5.280744  leg vein pressure 3.176841  heart rate 0.940358  sympathetic traffic 0.258646  filtration 2.015385  urine 0.020000  wall power 6352.014031  aortic flow 0.000000
-         808.059522 ms  arterial pressure 79.751724  right atrial pressure 1.672362  portal vein pressure 5.262427  leg vein pressure 2.969095  heart rate 0.951979  sympathetic traffic 0.637060  filtration 1.805026  urine 0.020000  wall power 4974.942807  aortic flow 0.000000
-         908.059522 ms  arterial pressure 73.855082  right atrial pressure 1.951307  portal vein pressure 5.528042  leg vein pressure 3.094495  heart rate 0.982017  sympathetic traffic 0.902233  filtration 1.592553  urine 0.020000  wall power 4010.478396  aortic flow 0.000000
-        1000.179869 ms  arterial pressure 68.861095  right atrial pressure 2.199746  portal vein pressure 5.891237  leg vein pressure 3.309513  heart rate 1.020599  sympathetic traffic 0.976716  filtration 1.404101  urine 0.020000  wall power 3214.816860  aortic flow 0.000000
+         200.971783 ms  arterial pressure 127.073846  right atrial pressure 3.566989  portal vein pressure 6.406698  leg vein pressure 3.850276  heart rate 1.081239  sympathetic traffic 0.086531  filtration 2.109289  urine 0.020000  wall power 15618.233755  aortic flow 39.436322
+         300.343558 ms  arterial pressure 119.007062  right atrial pressure 4.057781  portal vein pressure 6.216546  leg vein pressure 4.180908  heart rate 1.048358  sympathetic traffic 0.016675  filtration 2.344802  urine 0.020000  wall power 39549.054176  aortic flow 0.000000
+         403.707420 ms  arterial pressure 109.434879  right atrial pressure 3.675871  portal vein pressure 5.988799  leg vein pressure 4.614320  heart rate 1.004394  sympathetic traffic 0.012228  filtration 2.415994  urine 0.020000  wall power 13948.485600  aortic flow 0.000000
+         504.102519 ms  arterial pressure 101.045104  right atrial pressure 2.024956  portal vein pressure 5.767216  leg vein pressure 4.364992  heart rate 0.970296  sympathetic traffic 0.022847  filtration 2.358741  urine 0.020000  wall power 12015.605952  aortic flow 0.000000
+         608.059522 ms  arterial pressure 93.141457  right atrial pressure 1.494962  portal vein pressure 5.498127  leg vein pressure 3.709215  heart rate 0.947449  sympathetic traffic 0.073838  filtration 2.207971  urine 0.020000  wall power 8662.269616  aortic flow 0.000000
+         708.059522 ms  arterial pressure 86.170674  right atrial pressure 1.466155  portal vein pressure 5.280744  leg vein pressure 3.176841  heart rate 0.940358  sympathetic traffic 0.258646  filtration 2.015385  urine 0.020000  wall power 6352.014084  aortic flow 0.000000
+         808.059522 ms  arterial pressure 79.751725  right atrial pressure 1.672362  portal vein pressure 5.262427  leg vein pressure 2.969095  heart rate 0.951979  sympathetic traffic 0.637060  filtration 1.805026  urine 0.020000  wall power 4974.942873  aortic flow 0.000000
+         908.059522 ms  arterial pressure 73.855082  right atrial pressure 1.951307  portal vein pressure 5.528042  leg vein pressure 3.094495  heart rate 0.982016  sympathetic traffic 0.902233  filtration 1.592553  urine 0.020000  wall power 4010.478457  aortic flow 0.000000
+        1000.179870 ms  arterial pressure 68.861095  right atrial pressure 2.199746  portal vein pressure 5.891237  leg vein pressure 3.309513  heart rate 1.020599  sympathetic traffic 0.976716  filtration 1.404101  urine 0.020000  wall power 3214.816905  aortic flow 0.000000
     "#]].assert_eq(&trace);
 }
 
@@ -458,8 +509,9 @@ impl Edge {
 
 /// A 400 mL water bolus into the gut lowers the hematocrit, viscosity and the edge's resistance, and the edge's flow is
 /// its drop over the packet's resistance times viscosity's ratio, so the run tells viscosity's part of the flow from
-/// the drop's.
-fn a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(start: &Start) {
+/// the drop's. The body's gases are read at the start of a beat before the bolus and after it, so the beat's swing in
+/// them does not enter.
+fn a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(start: &Start) {
     let mut session = start.session();
     let before = Edge::at(start, &session);
     let water = WaterDelivery {
@@ -480,14 +532,41 @@ fn a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(start: &St
             .map(|species| concentration(start, session, "systemic arteries", species))
     };
     let before_arterial = arterial(&session);
-    let session = until(session, SECOND);
-    let held = body_oxygen(start, &session);
-    let session = until(session, 2 * SECOND);
-    let delivered = body_oxygen(start, &session);
-    assert!(
-        (delivered - held).abs() <= 1e-5 * held,
-        "the body's oxygen went from {held} to {delivered} over the bolus"
+    let mut openings: Vec<(u64, u64, [f64; 2])> = Vec::new();
+    let session = beats(start, session, 3 * SECOND, |session, opened| {
+        if let Some(closed) = opened {
+            let at = session.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
+            let gases = [Species::Oxygen, Species::CarbonDioxide].map(|gas| body_gas(start, session, gas));
+            openings.push((at, closed, gases));
+        }
+    });
+    let starts = onsets(
+        &openings
+            .iter()
+            .map(|(at, closed, _)| (*at, *closed))
+            .collect::<Vec<_>>(),
     );
+    let gases = |at: u64| {
+        openings
+            .iter()
+            .find(|opening| opening.0 == at)
+            .map(|opening| opening.2)
+    };
+    let held = (starts.iter().find(|at| **at < 2 * SECOND)).and_then(|at| gases(*at));
+    let delivered = (starts.iter().find(|at| **at >= 2 * SECOND)).and_then(|at| gases(*at));
+    let (held, delivered) = (
+        held.expect("a beat starts before the bolus ends"),
+        delivered.expect("a beat starts after the bolus"),
+    );
+    for (gas, (held, delivered)) in ["oxygen", "carbon dioxide"]
+        .iter()
+        .zip(held.iter().zip(&delivered))
+    {
+        assert!(
+            (delivered - held).abs() <= 1e-5 * held,
+            "the body's {gas} went from {held} to {delivered} over the bolus, each at a beat's start"
+        );
+    }
     let session = until(session, 30 * SECOND);
     let after_arterial = arterial(&session);
     assert!(
@@ -519,45 +598,135 @@ fn a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(start: &St
     );
 }
 
-/// Every bed's held use but the lung's, whose own plasma serves its cells before the pulmonary vein.
-const SYSTEMIC_USE: f64 = 95.0;
+const USE: f64 = 96.0;
+const MADE: f64 = 0.75 * USE;
+/// The lung's own bed takes its use from its plasma before the pulmonary vein, so the arteries carry the rest.
+const LUNG_BED_USE: f64 = 1.0;
+const SYSTEMIC: f64 = (USE - LUNG_BED_USE) / USE;
 
-/// Over the first minute's last ten seconds. Means over whole beats stand in for the identity's steady flows, and the
-/// arteries and veins between the two reads store a beat's oxygen, so it holds to 1%.
-fn the_flow_times_the_arterial_less_the_venous_oxygen_content_meets_the_held_use(start: &Start) {
-    let (ventricle, arteries) = (
-        site::<VesselSegment>("left ventricle"),
-        site::<VesselSegment>("systemic arteries"),
-    );
-    let aortic = RowKind::Memory(Slot {
-        law: LawName {
-            owner: "CV",
-            local: "valves",
-        },
-        at: Context::Edge {
-            from: ventricle,
-            to: arteries,
-        },
-    });
-    let mut session = until(start.session(), 50 * SECOND);
-    let (end, mut held) = (anchor_moment().nanoseconds() + 60 * SECOND, 0.0);
-    let (mut flow, mut arterial, mut venous) = (0.0, 0.0, 0.0);
-    while session.record().accepted().time().nanoseconds() < end {
-        let before = session.record().accepted().time().nanoseconds();
-        session = until(session, before + 1 - anchor_moment().nanoseconds());
-        let length = (session.record().accepted().time().nanoseconds() - before) as f64 / 1e9;
-        held += length;
-        flow += length * value(start, &session, aortic);
-        arterial += length * concentration(start, &session, "systemic arteries", Species::Oxygen);
-        venous += length * concentration(start, &session, "pulmonary artery", Species::Oxygen);
+fn exchanged(session: &Session<'_, Running>, quantity: QuantityId, at: u64, outflow: bool) -> f64 {
+    for segment in session.conservation().newest_first() {
+        let segment = segment.expect("a segment");
+        let interval = segment.interval();
+        let (from, to) = (interval.start().nanoseconds(), interval.end().nanoseconds());
+        if from < at && at <= to {
+            let curve = if outflow {
+                segment.outflow(quantity)
+            } else {
+                segment.inflow(quantity)
+            };
+            let piece = Interval::new(interval.start(), SimTime::from_ns(at)).expect("a piece");
+            return lead(curve.on(piece).expect("inside its segment")[1]);
+        }
     }
-    let (flow, arterial, venous) = (flow / held, arterial / held, venous / held);
-    let taken = flow * (arterial - venous);
-    assert!(
-        (taken - SYSTEMIC_USE).abs() <= 0.01 * SYSTEMIC_USE,
-        "flow {flow} times arterial {arterial} less venous {venous} is {taken} against {SYSTEMIC_USE}"
-    );
+    panic!("no segment holds {at}")
 }
+
+/// The flow is the water the left ventricle loses while its valve stands open, because the trapezoid of the valve's
+/// flow at the ends of steps reads it 0.6% high. The lung's lymph takes water and no gas from the pulmonary bed to the
+/// central veins, so the pulmonary artery carries that water too. Both gases then meet their held rates to LEDGER, the
+/// body's settling over nine beats.
+fn the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_held_rates_over_whole_beats(
+    start: &Start,
+) {
+    let mut samples: Vec<(u64, [f64; 5], bool, f64)> = Vec::new();
+    let lymph = field(
+        "FL",
+        "lymph",
+        Context::Edge {
+            from: site::<CapillaryBed>("pulmonary bed"),
+            to: site::<VesselSegment>("central veins"),
+        },
+    );
+    let ventricle = RowKind::Amount {
+        site: site::<VesselSegment>("left ventricle"),
+        species: Species::Water,
+        space: Space::Lumen,
+    };
+    let mut openings: Vec<(u64, u64)> = Vec::new();
+    let session = until(start.session(), 50 * SECOND);
+    let session = beats(start, session, 60 * SECOND, |session, opened| {
+        let at = session.record().accepted().time().nanoseconds();
+        if let Some(closed) = opened {
+            openings.push((at, closed));
+        }
+        let read = |key, gas| concentration(start, session, key, gas);
+        samples.push((
+            at,
+            [
+                read("systemic arteries", Species::Oxygen),
+                read("pulmonary artery", Species::Oxygen),
+                read("systemic arteries", Species::CarbonDioxide),
+                read("pulmonary artery", Species::CarbonDioxide),
+                value(start, session, lymph),
+            ],
+            aortic_flow(start, session) > 0.0,
+            value(start, session, ventricle),
+        ));
+    });
+    let onsets = onsets(&openings);
+    let (first, last) = (onsets[0], onsets[onsets.len() - 1]);
+    let held = (last - first) as f64 / 1e9;
+    let (mut means, mut ejected) = ([0.0; 5], 0.0);
+    for pair in samples.windows(2) {
+        let ((from, then, was_ejecting, before), (to, now, ejecting, after)) = (pair[0], pair[1]);
+        if from >= first && to <= last {
+            let length = (to - from) as f64 / 1e9;
+            for (mean, (then, now)) in means.iter_mut().zip(then.iter().zip(&now)) {
+                *mean += 0.5 * length * (then + now) / held;
+            }
+            if was_ejecting || ejecting {
+                ejected += before - after;
+            }
+        }
+    }
+    let [
+        arterial_oxygen,
+        venous_oxygen,
+        arterial_carbon_dioxide,
+        venous_carbon_dioxide,
+        lymph,
+    ] = means;
+    let (flow, returned) = (ejected / held, ejected / held + lymph);
+    let fick = [
+        (
+            "oxygen",
+            flow * arterial_oxygen - returned * venous_oxygen,
+            SYSTEMIC * USE,
+        ),
+        (
+            "carbon dioxide",
+            returned * venous_carbon_dioxide - flow * arterial_carbon_dioxide,
+            SYSTEMIC * MADE,
+        ),
+    ];
+    for (gas, taken, rate) in fick {
+        assert!(
+            (taken - rate).abs() <= LEDGER * rate,
+            "over {} beats flow {flow} and lymph {lymph} move {taken} of {gas} a second against {rate}",
+            onsets.len() - 1
+        );
+    }
+    let basis = start.body.conserved_basis();
+    for (gas, outflow, rate) in [
+        (Species::Oxygen, false, USE),
+        (Species::CarbonDioxide, true, MADE),
+    ] {
+        let lung = (basis.ids())
+            .filter(|quantity| quantity.book() == Book::Of(gas))
+            .map(|quantity| {
+                let moved = exchanged(&session, quantity, last, outflow)
+                    - exchanged(&session, quantity, first, outflow);
+                moved / held
+            })
+            .fold(0.0, |most, moved| if moved > most { moved } else { most });
+        assert!(
+            (lung - rate).abs() <= LEDGER * rate,
+            "the ledger's {gas:?} exchange at the lung over the beats is {lung} a second against {rate}"
+        );
+    }
+}
+const LEDGER: f64 = 1e-4;
 
 struct Ticks(Cell<u64>);
 impl WallClock for Ticks {
@@ -654,6 +823,8 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         solves: start.core.solves.get() - before,
     };
     assert_eq!(over_ceilings(counts, CEILINGS), Vec::<&str>::new(), "{counts:?}");
-    a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(&start);
-    the_flow_times_the_arterial_less_the_venous_oxygen_content_meets_the_held_use(&start);
+    a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(&start);
+    the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_held_rates_over_whole_beats(
+        &start,
+    );
 }

@@ -364,7 +364,7 @@ The volume one unit amount of a species takes up. A space's volume derives from 
 The share of a blood space's volume that red cells take: the space's hemoglobin amount over its volume, over the red cells' own hemoglobin concentration. Hematology reads it at the central veins, and blood viscosity follows from it.
 
 **Partial pressure**:
-The pressure a dissolved gas would hold in a gas at equilibrium with its space, whose difference wall diffusion follows. Speciation sets it in a blood space from the space's oxygen, and in a tissue space it is the dissolved oxygen over its solubility.
+The pressure a dissolved gas would hold in a gas at equilibrium with its space, whose difference wall diffusion follows. Speciation sets oxygen's in a blood space from the space's oxygen, and carbon dioxide's from its bicarbonate and acidity. In a tissue space it is the dissolved gas over its solubility, and carbon dioxide's sits on a buffer line.
 _Avoid_: tension
 
 **Saturation**:
@@ -373,6 +373,25 @@ The share of hemoglobin's oxygen sites that hold oxygen in a blood space, from 0
 **Oxygen content**:
 All the oxygen a volume of a space holds, dissolved and bound together: the space's oxygen amount over its volume. It is not a chart entry's content.
 _Avoid_: content alone
+
+**Carbon dioxide content**:
+All the carbon dioxide a volume of a space holds, dissolved, as bicarbonate and bound to hemoglobin: the space's carbon dioxide amount over its volume.
+_Avoid_: content alone
+
+**Acidity**:
+A plasma's pH, which speciation sets from its strong ion difference, its weak acids and its carbon dioxide total. Each bed's plasma has one; the interstitium and the cells have none, and a buffer line stands in for theirs.
+
+**Strong ion difference**:
+The charge of a space's strong and fixed ions, cations less anions, over its volume, which bicarbonate and the weak acids' charge balance. A bed's plasma counts its ions' charge plus one stated offset.
+
+**Bicarbonate**:
+The carbon dioxide a plasma holds in its ionized form: a field that speciation sets from the charge balance, and a form of the carbon dioxide total, never a species of its own.
+
+**Carbamino carbon dioxide**:
+The carbon dioxide hemoglobin binds in a blood space, which speciation sets from the dissolved carbon dioxide and the saturation, so blood that gives up oxygen holds more.
+
+**Buffer line**:
+A tissue space's carbon dioxide partial pressure as its total over its solubility times one plus a stated ratio of bicarbonate to dissolved carbon dioxide, which stands in for the space's acidity, since the space has none.
 
 **Speciation**:
 The algebraic rows that split a space's total of a gas or a weak acid into its forms and its partial pressure. They read amounts and move none, so the total closes through them.
