@@ -490,8 +490,8 @@ impl Seal for Code {
         if !judged.is_empty() {
             out.number(u64::MAX - 1);
             out.length(judged.len());
-            for (at, law, range) in judged {
-                out.number(*at as u64);
+            for &(op, law, range) in judged {
+                out.number(op as u64);
                 law.seal(out);
                 range.seal(out);
             }
