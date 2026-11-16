@@ -37,7 +37,15 @@ fn index(body: &CompiledBody, kind: RowKind) -> usize {
 /// Each row's residual at every stage, with each named row's unknown set at every stage first. A stage's row is its
 /// value less its law.
 fn staged(body: &CompiledBody, each: &[Vec<(usize, f64)>]) -> Result<Vec<Vec<f64>>, InitializationFailure> {
-    let (packet, lens) = (body_packet(body)?, body_lens(body)?);
+    staged_on(body, body_packet(body)?, each)
+}
+
+fn staged_on(
+    body: &CompiledBody,
+    packet: ParameterPacket<SyntheticFixture>,
+    each: &[Vec<(usize, f64)>],
+) -> Result<Vec<Vec<f64>>, InitializationFailure> {
+    let lens = body_lens(body)?;
     let parameters = body.bind(packet)?;
     let port = BoundaryPort::new(Vec::new())?;
     let request = InitializationRequest::at(anchor_moment()).reading(&lens);
@@ -68,6 +76,36 @@ fn closed_form(hematocrit: f64) -> f64 {
     let odds = |share: f64| share / (1.0 - share);
     let fraction = odds(hematocrit) / odds(0.6);
     2.0 * 1.25 * (1.0 + (4.0 - 1.0) * fraction * 1.25)
+}
+
+/// At an exponent of 1 the row is linear in the hematocrit: `(1 - h)^1 - 1` is `-h`, so the fraction is `h / 0.6`.
+#[test]
+fn viscosity_at_a_positive_exponent_follows_the_row() -> Result<(), InitializationFailure> {
+    let body = whole_body()?;
+    let (hemoglobin, water, field) = (
+        index(&body, veins(Species::Hemoglobin)),
+        index(&body, veins(Species::Water)),
+        index(&body, viscosity()),
+    );
+    let packet = body_packet_at_viscosity_exponent(&body, Measure::new(1.0)?)?;
+    let cases = [(0.4, 8.75), (0.2, 5.625)];
+    let each: Vec<_> = (cases.iter())
+        .map(|(hematocrit, _)| {
+            vec![
+                (water, WATER),
+                (hemoglobin, 5.0 * hematocrit * WATER),
+                (field, 1.0),
+            ]
+        })
+        .collect();
+    for ((hematocrit, closed), residuals) in cases.iter().zip(staged_on(&body, packet, &each)?) {
+        let law = 1.0 - residuals[field];
+        assert!(
+            (law - closed).abs() <= 1e-12 * closed,
+            "at a hematocrit of {hematocrit}: {law} against {closed}"
+        );
+    }
+    Ok(())
 }
 
 #[test]

@@ -304,6 +304,15 @@ fn zero_stand_ins(
 }
 
 pub fn body_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+    body_packet_at_viscosity_exponent(body, Measure::new(-1.0)?)
+}
+
+/// The body's packet with viscosity's exponent `C` at `exponent`, so a test reads the row at a sign the body does not
+/// take.
+pub fn body_packet_at_viscosity_exponent(
+    body: &CompiledBody,
+    exponent: Measure<Dimensionless>,
+) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
     let rate = AnchorId::new("heart rate");
     let phase = LawName {
         owner: Cardiovascular::CARD,
@@ -390,7 +399,7 @@ pub fn body_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixtu
     };
     packet.start_mode(stirring, "still", NOTE)?;
 
-    table(&mut packet)?;
+    table(&mut packet, exponent)?;
     zero_stand_ins(&mut packet, body)?;
     packet.start_rest(body, start_guess, NOTE)?;
     for row in body.rows() {
@@ -408,7 +417,10 @@ pub fn body_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixtu
     Ok(packet)
 }
 
-fn table(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+fn table(
+    packet: &mut ParameterPacket<SyntheticFixture>,
+    exponent: Measure<Dimensionless>,
+) -> Result<(), AdmissionError> {
     let blood = Binding::Network(Network::Vascular);
     let (urinary, lymph) = (
         Binding::Network(Network::Urinary),
@@ -663,22 +675,25 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     set::<Affinity<Concentration<Vasopressin>>>(packet, "rc.avp-on", blood, 0.6)?;
     set::<Rate<Dimensionless>>(packet, "rc.avp-off", blood, 0.1)?;
     set::<Dimensionless>(packet, "rc.avp-efficacy", blood, 2.0)?;
-    hematology(packet)?;
+    hematology(packet, exponent)?;
     oxygen(packet)
 }
 
-fn hematology(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+fn hematology(
+    packet: &mut ParameterPacket<SyntheticFixture>,
+    exponent: Measure<Dimensionless>,
+) -> Result<(), AdmissionError> {
     let body = Binding::Body;
     set::<Viscosity>(packet, "hc.plasma-viscosity", body, 2.0)?;
     set::<Concentration<Hemoglobin>>(packet, "hc.red-cell-hemoglobin", body, 5.0)?;
     for (key, value) in [
-        ("hc.reference-hematocrit", 0.6),
-        ("hc.relative-viscosity-at-reference", 4.0),
-        ("hc.viscosity-exponent", -1.0),
-        ("hc.wall-factor", 1.25),
-        ("hc.unit", 1.0),
+        ("hc.reference-hematocrit", Measure::new(0.6)?),
+        ("hc.relative-viscosity-at-reference", Measure::new(4.0)?),
+        ("hc.viscosity-exponent", exponent),
+        ("hc.wall-factor", Measure::new(1.25)?),
+        ("hc.unit", Measure::new(1.0)?),
     ] {
-        set::<Dimensionless>(packet, key, body, value)?;
+        packet.synthetic(ParameterKey::new(key), body, value, NOTE)?;
     }
     set::<Quotient<Dimensionless, Viscosity>>(
         packet,
