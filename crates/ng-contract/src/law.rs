@@ -862,7 +862,7 @@ impl KernelData {
         }
         self
     }
-    /// This kernel with each read of a row-free field replaced by the field's expression. The field's ops stand where
+    /// This kernel with each read of an explicit field replaced by the field's expression. The field's ops stand where
     /// the read stood, each named for the field's law, and none is shared with the host's own: a shared op would take
     /// the host's name and change the order the host's slopes add in. A closing `row - value` stays last. A read at a
     /// landmark moves the field's own site reads there. `None` when the kernel reads no such field, so its program
@@ -1484,7 +1484,7 @@ pub type SiteField<'b, O, C, U> = (Output<'b, O, PerSite<C, U>>, ReadPort<'b, O,
 ///     bc.express_at(&outputs.carbon_dioxide_partial_pressure.0, pressure);
 /// }
 /// ```
-/// Nor is a row-free field defined as a row is.
+/// Nor is an explicit field defined as a row is.
 /// ```compile_fail,E0308
 /// use ng_contract::*;
 /// fn defined<'b>(
@@ -1512,13 +1512,13 @@ pub struct Explicit<'b, O, U> {
 }
 /// The expression to attach with `express_at`, and the read of it, which a reader cannot tell from a row's read.
 pub type ExplicitField<'b, O, C, U> = (Explicit<'b, O, PerSite<C, U>>, ReadPort<'b, O, PerSite<C, U>>);
-/// A row-free field's one law and the set it stands on, as compile writes it in.
+/// An explicit field's one law and the set it stands on, as compile writes it in.
 pub(crate) struct ExplicitLaw<'f> {
     pub(crate) name: LawName,
     pub(crate) set: Sites,
     pub(crate) kernel: &'f KernelData,
 }
-/// Why a read of a row-free field cannot be written in where it stands.
+/// Why a read of an explicit field cannot be written in where it stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WriteIn {
     NoSuchRead,
@@ -2265,7 +2265,7 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
         let owner = O::CARD;
         (field, ReadPort::field(LawName { owner, local: name }))
     }
-    /// The expression of a row-free field at each site of its set. Unlike `define_at` it closes on no row: a read of
+    /// The expression of an explicit field at each site of its set. Unlike `define_at` it closes on no row: a read of
     /// the field is this kernel's value, written where the read stands.
     pub fn express_at<C: SiteSet, U: Dimension>(
         &mut self,

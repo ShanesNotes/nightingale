@@ -1558,7 +1558,7 @@ fn place(owed: &[Owed], places: &Places, unread: &[LawName]) -> Result<Placement
 
 const VARIANT: usize = usize::MAX / 2;
 
-/// Each row-free field's one law, which `check_coverage` has already found. Writing one in is one level deep and holds
+/// Each explicit field's one law, which `check_coverage` has already found. Writing one in is one level deep and holds
 /// in every mode, and its expression names nothing a reader's own name would capture: no slot, stream, forcing, route
 /// or reaction by its local name.
 fn explicit_laws<'f>(owed: &[Owed<'f>]) -> Result<Vec<ExplicitLaw<'f>>, CompileDefect> {
@@ -1675,7 +1675,7 @@ fn check_wired(
     Ok(())
 }
 
-/// A read of a row-free field lands at a site of the field's set: the reader's own site, or its landmark's.
+/// A read of an explicit field lands at a site of the field's set: the reader's own site, or its landmark's.
 fn check_landing(
     law: LawName,
     kernel: &KernelData,

@@ -195,3 +195,11 @@ doctests = [{ path = "crates/ng-contract/src/lib.rs", code = "E0599", text = "x.
 [[row]]
 core = "An initializer returning a packet guess that violates a row or anchor"
 mutants = ["guess-that-solves", "anchor-met"]
+
+[[row]]
+core = "A law reads speciation that no row of the readers' table wires to its card on a set holding the site"
+mutants = ["unwired-read-passes", "unwired-read-off-the-rows-set"]
+
+[[row]]
+core = "A sensor reads arterial speciation at a segment the map does not sample"
+mutants = ["speciated-takes-every-segment", "explicit-read-off-its-set"]

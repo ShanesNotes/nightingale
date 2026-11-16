@@ -11,7 +11,7 @@ mod quantity {
 /// One quantity speciation states in a speciated site's blood. The list is closed, so a reader's row names only these,
 /// in their own units, and blood chemistry states each once.
 pub trait Speciation: quantity::Sealed {
-    /// The local name of blood chemistry's row or row-free field.
+    /// The local name of blood chemistry's row or explicit field.
     const NAME: &'static str;
     type Unit: Dimension;
 }
@@ -35,11 +35,11 @@ speciation! {
     Bicarbonate = "bicarbonate", Concentration<CarbonDioxide>;
     /// A row.
     Acidity = "acidity", Dimensionless;
-    /// A row-free field, written into each program that reads it.
+    /// An explicit field, written into each program that reads it.
     CarbonDioxidePartialPressure = "carbon dioxide partial pressure", Pressure;
 }
 
-/// What blood chemistry states at every speciated site: four rows and one row-free field, each owed one law, with
+/// What blood chemistry states at every speciated site: four rows and one explicit field, each owed one law, with
 /// blood chemistry's own read of each.
 pub struct SpeciationOutputs<'b> {
     pub oxygen_partial_pressure: SiteField<'b, BloodChemistry, Speciated, Pressure>,
@@ -107,7 +107,7 @@ impl<'b> BloodChemistryPorts<'b> {
     pub fn blood<Q: Substance>(&self) -> ReadPort<'b, BloodChemistry, PerSite<Speciated, Q>> {
         ReadPort::pool(Q::SPECIES)
     }
-    /// Speciation's four rows and its row-free field at every speciated site, under the contract's names. Called
+    /// Speciation's four rows and its explicit field at every speciated site, under the contract's names. Called
     /// twice, it names each twice, which compile refuses (`NamedTwice`).
     pub fn speciation(&self, laws: &mut FragmentBuilder<'b, BloodChemistry>) -> SpeciationOutputs<'b> {
         SpeciationOutputs {
