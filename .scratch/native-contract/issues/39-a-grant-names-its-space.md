@@ -4,7 +4,8 @@ Spec: `crates/ng-contract/src/law.rs` (`ReactsAt`) and `crates/ng-contract/src/c
 
 Type: task
 
-Status: open
+Status: resolved
+Claimed by: nc39
 
 Blocked by: none
 
@@ -32,3 +33,12 @@ new = '''                        Space::Cells,
 - [ ] The unit test `a_count_above_one_moves_the_seal_and_a_count_of_one_seals_only_the_other_fields` in `crates/ng-contract/src/body.rs` holds the seal's tag in bytes at counts two and three: each column seals to the four older fields, then `u64::MAX`, then the count. Today it holds the seal at count two only, so the check's rows `r2-tag-only-at-count-two` and `r2-count-sealed-as-two-at-most` survive
 
 **Non-goals:** any reaction a body ticket declares, and any change to the one-owner rule within one space.
+
+## Answer
+
+The grant names no space. The one-owner check compares a reaction's terms without their spaces, so one chemistry from two cards at one site is `ReactionOwnedTwice` in whichever spaces of the site they stand. Record 0010 and the contract's must-fail row put one owner at one site, and a grant that named a space would close the hole only while every card's grant named the same one. Ticket 09's second form, metabolism's burn in the interstitium, stays open, and the musculoskeletal card's copy in the cells is refused beside it. Moving metabolism's grant to the cells would have moved the burning-beds pin.
+
+- Probe A5 is a test in `crates/ng-contract/tests/scopes.rs`, and so is its mirror. Both are refused naming both laws and the muscle bed. The row `reaction-owners-compared-in-one-space` puts the space back in the key, and they catch it.
+- The row `v-owner-key-ignores-space` is the rule now, so it stays out.
+- The hepatic card's reverse of glycolysis, written from lactate, is refused. The row `reaction-terms-sorted` removes the sort, and that test catches it.
+- The unit test on a column's seal holds the tag in bytes at counts two and three. The rows `column-count-tagged-at-every-count` and `column-count-sealed-whole` are the check's `r2-tag-only-at-count-two` and `r2-count-sealed-as-two-at-most`, and it catches both.
