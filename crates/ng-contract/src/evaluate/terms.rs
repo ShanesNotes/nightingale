@@ -774,6 +774,7 @@ fn an_origins_position_is_sealed() {
         validity: code.validity.clone(),
         defines: code.defines,
         origins,
+        judged: Vec::new(),
     };
     let seal = |code: &crate::body::Code| {
         let mut out = crate::identity::Canonical::new("code");

@@ -453,6 +453,7 @@ pub(crate) struct Code {
     pub(crate) validity: Vec<Validity>,
     pub(crate) defines: bool,
     pub(crate) origins: Vec<(usize, LawName)>,
+    pub(crate) judged: Vec<(usize, LawName, Validity)>,
 }
 impl Code {
     pub(crate) fn origin(&self, op: usize) -> Option<LawName> {
@@ -470,6 +471,7 @@ impl Seal for Code {
             validity,
             defines,
             origins,
+            judged,
         } = self;
         ops.seal(out);
         dimension.seal(out);
@@ -483,6 +485,15 @@ impl Seal for Code {
             for (at, law) in origins {
                 out.number(*at as u64);
                 law.seal(out);
+            }
+        }
+        if !judged.is_empty() {
+            out.number(u64::MAX - 1);
+            out.length(judged.len());
+            for (at, law, range) in judged {
+                out.number(*at as u64);
+                law.seal(out);
+                range.seal(out);
             }
         }
     }

@@ -816,6 +816,8 @@ pub(crate) struct KernelData {
     pub(crate) defines: bool,
     pub(crate) placing: Option<Box<Placing>>,
     pub(crate) origins: Vec<(usize, LawName)>,
+    /// A written explicit field's value, by its op, judged by that field's validity ranges.
+    pub(crate) judged: Vec<(usize, LawName, Validity)>,
 }
 impl KernelData {
     pub(crate) fn at(&self, inside: impl Fn(Sites) -> bool) -> Option<KernelData> {
@@ -894,6 +896,7 @@ impl KernelData {
         }
         let (mut accepting, mut reads) = (self.accepts_no_nerve.clone(), self.fields.clone());
         let mut moved_unreached = Vec::new();
+        let mut results: Vec<(usize, &ExplicitLaw)> = Vec::new();
         let mut redirect: Vec<usize> = (0..code.len()).collect();
         for (at, op) in self.code.iter().enumerate() {
             let Some((field, place)) = (match op {
@@ -933,6 +936,7 @@ impl KernelData {
                 });
             }
             redirect[at] = code.len() - 1;
+            results.push((code.len() - 1, field));
         }
         let follow = |at: usize| redirect[at];
         let code: Vec<Op> = code.iter().map(|op| op.map(follow)).collect();
@@ -967,6 +971,11 @@ impl KernelData {
                 kept[*place] = origins[at];
             }
         }
+        let mut judged: Vec<(usize, LawName, Validity)> = (results.iter())
+            .filter_map(|&(at, field)| Some((placed[at]?, field)))
+            .flat_map(|(at, field)| field.validity.iter().map(move |&range| (at, field.name, range)))
+            .collect();
+        judged.sort_unstable();
         let mut code = pruned.code;
         if let Some((row, _)) = closing {
             let value = code.len() - 1;
@@ -982,6 +991,7 @@ impl KernelData {
             origins: (kept.iter().enumerate())
                 .filter_map(|(at, origin)| Some((at, (*origin)?)))
                 .collect(),
+            judged,
             ..self.clone()
         }))
     }
@@ -1512,6 +1522,7 @@ pub(crate) struct ExplicitLaw<'f> {
     pub(crate) name: LawName,
     pub(crate) set: Sites,
     pub(crate) kernel: &'f KernelData,
+    pub(crate) validity: Vec<Validity>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Unwritable {
@@ -2070,6 +2081,7 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
                 defines: false,
                 placing,
                 origins: Vec::new(),
+                judged: Vec::new(),
             },
             brand: PhantomData,
             kind: PhantomData,

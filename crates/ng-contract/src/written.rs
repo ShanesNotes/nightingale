@@ -36,6 +36,8 @@ enum Wrong {
     Drain,
     EdgeEnd,
     OffItsSet,
+    SiteParameter,
+    Ranged,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -173,6 +175,10 @@ fn compiled(case: Case) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
                     k.scale(value, gain)
                 }
                 (_, Some(term)) => k.add_from(value, term),
+                _ if case.wrong == Wrong::SiteParameter => {
+                    let acid = k.site_parameter(&acid_at);
+                    k.add(value, acid)
+                }
                 _ => value,
             };
             match &modes {
@@ -186,6 +192,11 @@ fn compiled(case: Case) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
                 k.finish(value, shut.only(), class)
             });
             bc.express_at(&explicit, other);
+        }
+        if case.wrong == Wrong::Ranged {
+            let basis = Basis::Fixture("below either bed's value");
+            let range = ValidityRange::new(Measure::new(-1.0)?, Measure::new(1.0)?, basis)?;
+            bc.validity(&expression, range);
         }
         bc.express_at(&explicit, expression);
         if case.wrong == Wrong::ReadsAnother {
@@ -642,5 +653,53 @@ fn a_read_off_the_fields_set_is_refused() {
             law: bc("sensed"),
             field
         }
+    );
+}
+
+#[test]
+fn a_field_that_reads_a_site_parameter_is_refused_at_a_site_and_at_a_landmark() {
+    for landmark in [None, Some(3)] {
+        let refused = refused(Case {
+            wrong: Wrong::SiteParameter,
+            landmark,
+            ..PLAIN
+        });
+        assert_eq!(
+            refused,
+            CompileDefect::NoSuchRead { law: bc(FIELD) },
+            "{landmark:?}"
+        );
+    }
+}
+
+#[test]
+fn a_fields_range_is_judged_under_the_field_in_each_program_it_is_written_into() {
+    let (body, sites) = bench(Case {
+        wrong: Wrong::Ranged,
+        second: true,
+        ..PLAIN
+    });
+    let bound = bound(&body, sites, &[]);
+    let frame = DriveFrame::default();
+    let unknowns = starts(&body, &bound);
+    let values = body
+        .instance_values(&inputs(&bound, &frame, &unknowns))
+        .expect("finite");
+    let excursions = body.excursions(&values, &unknowns, SimTime::from_ns(0));
+    let mut found: Vec<(LawName, Context)> = excursions
+        .iter()
+        .map(|excursion| (excursion.law(), excursion.context()))
+        .collect();
+    found.sort_unstable();
+    let beds = [Context::Site(sites[1]), Context::Site(sites[3])];
+    assert!(closed_form(0) > 1.0 && closed_form(1) > 1.0);
+    let mut wanted: Vec<(LawName, Context)> = beds
+        .iter()
+        .flat_map(|&bed| [(bc(FIELD), bed), (bc(FIELD), bed)])
+        .collect();
+    wanted.sort_unstable();
+    assert_eq!(
+        found, wanted,
+        "the probe's and the uptake's programs each judge the field at each bed"
     );
 }

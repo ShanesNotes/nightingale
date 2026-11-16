@@ -12,7 +12,7 @@ use crate::identity::{Canonical, Seal};
 use crate::law::{
     End, ExplicitLaw, Family, FragmentData, GuardDeclaration, Input, KernelData, ModeDeclaration, Obligation,
     Op, Over, ParameterContext, ParameterDeclaration, ReactionDeclaration, Selector, SlotDeclaration,
-    SlotKind, Source, Unwritable, Where,
+    SlotKind, Source, Unwritable, Validity, Where,
 };
 use crate::scheme::greatest_common_divisor;
 use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, HeldSpecies, PoolRef, RouteBoundary};
@@ -1586,6 +1586,7 @@ fn explicit_laws<'f>(owed: &[Owed<'f>]) -> Result<Vec<ExplicitLaw<'f>>, CompileD
         }
         let local = |input: &Input| match input {
             Input::Memory(_) | Input::Algebraic(_) | Input::Draw(_) | Input::Forcing(_) => true,
+            Input::SiteParameter(_) => true,
             Input::Read(
                 Source::Drive(_) | Source::RoutePool(..) | Source::Reacting(..) | Source::Flow(_),
                 _,
@@ -1602,10 +1603,16 @@ fn explicit_laws<'f>(owed: &[Owed<'f>]) -> Result<Vec<ExplicitLaw<'f>>, CompileD
         if kernel.placing.is_some() || inputs.any(local) {
             return Err(CompileDefect::NoSuchRead { law });
         }
+        let mut validity: Vec<Validity> = (owed.fragment.validity.iter())
+            .filter(|&&(id, _)| id == kernel.id)
+            .map(|&(_, range)| range)
+            .collect();
+        validity.sort_unstable();
         fields.push(ExplicitLaw {
             name: law,
             set,
             kernel,
+            validity,
         });
     }
     Ok(fields)
@@ -1880,6 +1887,7 @@ fn fluid_program(
             validity: Vec::new(),
             defines: false,
             origins: Vec::new(),
+            judged: Vec::new(),
         },
     });
     id
@@ -2009,6 +2017,7 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
         defines,
         placing: _,
         origins,
+        judged,
     } = kernel;
     let mut validity: Vec<_> = (fragment.validity.iter())
         .filter(|(kernel, _)| kernel == id)
@@ -2023,6 +2032,7 @@ fn code(fragment: &FragmentData, kernel: &KernelData) -> Code {
         validity,
         defines: *defines,
         origins: origins.clone(),
+        judged: judged.clone(),
     }
 }
 

@@ -3620,3 +3620,18 @@ path = "crates/ng-contract/src/catalog.rs"
 old = '''if same(table[i].reader, table[j].reader) && same_sites(table[i].sites, table[j].sites) {'''
 new = '''if same_sites(table[i].sites, table[j].sites) {'''
 test = "-p ng-contract --test census the_readers_table_refuses_two_rows_for_one_reader_and_set"
+
+[[mutant]]
+name = "explicit-reads-a-site-parameter"
+path = "crates/ng-contract/src/compile.rs"
+old = '''            Input::SiteParameter(_) => true,
+'''
+new = ''''''
+test = "-p ng-contract --lib written::a_field_that_reads_a_site_parameter_is_refused_at_a_site_and_at_a_landmark"
+
+[[mutant]]
+name = "written-range-dropped"
+path = "crates/ng-contract/src/law.rs"
+old = '''.flat_map(|(at, field)| field.validity.iter().map(move |&range| (at, field.name, range)))'''
+new = '''.flat_map(|(at, field)| field.validity.iter().take(0).map(move |&range| (at, field.name, range)))'''
+test = "-p ng-contract --lib written::a_fields_range_is_judged_under_the_field_in_each_program_it_is_written_into"
