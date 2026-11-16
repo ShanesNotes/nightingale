@@ -1,7 +1,7 @@
 use core::num::NonZeroU64;
 use ng_contract::{
-    AdmissionError, Atoms, Book, BoundaryDirection, Charge, Compensated, ConservedBasis, CoverageManifest,
-    Digest, Dimensionless, HeldRoute, Interval, Measure, QuantityId, SimTime, Substance,
+    AdmissionError, Atoms, Book, BoundaryDirection, Charge, Compensated, CompiledBody, ConservedBasis,
+    CoverageManifest, Digest, Dimensionless, HeldRoute, Interval, Measure, QuantityId, SimTime, Substance,
 };
 use ng_record::{CheckpointError, ConservationView, Curve, HistorySeal, HistorySegment, NewestFirst};
 
@@ -102,6 +102,12 @@ pub struct CertificatePolicy {
     quantities: Vec<QuantityPolicy>,
     expected: ExpectedDrift,
     windows: SlidingWindows,
+    rounding: RowRounding,
+}
+/// The last places one row update may round, and how many row updates each combination takes a step.
+struct RowRounding {
+    per_update: u64,
+    updates: Vec<u64>,
 }
 impl CertificatePolicy {
     /// Refuses unless every combination of the basis has exactly one entry, in basis order.
@@ -115,12 +121,41 @@ impl CertificatePolicy {
         if !held.eq(basis.ids()) {
             return Err(AdmissionError::PolicyCoverage);
         }
+        let rounding = RowRounding {
+            per_update: 0,
+            updates: vec![0; quantities.len()],
+        };
         Ok(Self {
             basis: basis.digest(),
             quantities,
             expected,
             windows,
+            rounding,
         })
+    }
+    /// Each closure may also be `per_update` last places of its combination's total at the window's late end for each
+    /// row update the window's accepted steps make in that combination, counted from `body`'s columns. That bounds
+    /// the rows' own rounding only where the weighted rows share one sign, so no row exceeds the total. Where they
+    /// have both signs, as charge's do, a row may be far larger than the total, whose last place then bounds nothing.
+    /// Refuses a body whose basis is not the policy's.
+    pub fn admitting_row_rounding(self, body: &CompiledBody, per_update: u64) -> Result<Self, AdmissionError> {
+        let basis = body.conserved_basis();
+        if basis.digest() != self.basis {
+            return Err(AdmissionError::PolicyCoverage);
+        }
+        let mut member = vec![false; body.rows().len()];
+        let updates = (basis.combinations().iter())
+            .map(|combination| {
+                member.fill(false);
+                for &(row, _) in combination.terms() {
+                    member[row.index()] = true;
+                }
+                let terms = body.columns().iter().flat_map(|column| column.terms());
+                terms.filter(|(row, _)| member[row.index()]).count() as u64
+            })
+            .collect();
+        let rounding = RowRounding { per_update, updates };
+        Ok(Self { rounding, ..self })
     }
     pub fn digest(&self) -> Digest {
         let Self {
@@ -128,8 +163,10 @@ impl CertificatePolicy {
             quantities,
             expected,
             windows,
+            rounding: RowRounding { per_update, updates },
         } = self;
         let mut bytes = basis.as_bytes().to_vec();
+        bytes.extend_from_slice(&per_update.to_be_bytes());
         let ExpectedDrift::Zero = expected;
         let SlidingWindows {
             window_ns,
@@ -137,7 +174,8 @@ impl CertificatePolicy {
         } = windows;
         bytes.extend_from_slice(&window_ns.get().to_be_bytes());
         bytes.extend_from_slice(&coverage_ns.to_be_bytes());
-        for quantity in quantities {
+        for (quantity, updates) in quantities.iter().zip(updates) {
+            bytes.extend_from_slice(&updates.to_be_bytes());
             let QuantityPolicy {
                 quantity: _,
                 absolute,
@@ -161,8 +199,11 @@ pub struct QuantityResult {
     quantity: QuantityId,
     closure_floor: Compensated,
     closure_relative: Compensated,
+    row_rounding: u64,
     worst_closure: Compensated,
     closure_window: Interval,
+    closure_last_places: u64,
+    closure_place: Compensated,
     worst_drift: Compensated,
     drift_window: Interval,
 }
@@ -176,12 +217,23 @@ impl QuantityResult {
     pub fn closure_relative(&self) -> Compensated {
         self.closure_relative
     }
+    /// The policy's last places for one row update.
+    pub fn row_rounding(&self) -> u64 {
+        self.row_rounding
+    }
     /// The largest `|inventory change - net boundary exchange|` over any window.
     pub fn worst_closure(&self) -> Compensated {
         self.worst_closure
     }
     pub fn closure_window(&self) -> Interval {
         self.closure_window
+    }
+    /// The last places the worst closure's window admitted, each of `closure_place`.
+    pub fn closure_last_places(&self) -> u64 {
+        self.closure_last_places
+    }
+    pub fn closure_place(&self) -> Compensated {
+        self.closure_place
     }
     /// The largest `|inventory change - expected change|` over any window.
     pub fn worst_drift(&self) -> Compensated {
@@ -307,6 +359,7 @@ struct Holding<'r> {
     walk: NewestFirst<'r>,
     at: Option<HistorySegment>,
     admission: u64,
+    taken: u64,
 }
 impl<'r> Holding<'r> {
     fn new(view: &ConservationView<'r>, admission: u64) -> Self {
@@ -314,9 +367,11 @@ impl<'r> Holding<'r> {
             walk: view.newest_first(),
             at: None,
             admission,
+            taken: 0,
         }
     }
-    fn holding(&mut self, instant: u64) -> Result<&HistorySegment, CertificateFailure> {
+    /// The segment holding `instant`, and how many segments the walk has taken to reach it.
+    fn holding(&mut self, instant: u64) -> Result<(&HistorySegment, u64), CertificateFailure> {
         let admission = self.admission;
         let before = |segment: &HistorySegment| {
             let start = segment.interval().start().nanoseconds();
@@ -327,9 +382,27 @@ impl<'r> Holding<'r> {
             let next = self.walk.next().ok_or(of_history(CertificateCheck::Coverage))?;
             let read = |error| of_history(CertificateCheck::History(error));
             self.at = Some(next.map_err(read)?);
+            self.taken += 1;
         }
-        self.at.as_ref().ok_or(of_history(CertificateCheck::Coverage))
+        let taken = self.taken;
+        (self.at.as_ref().map(|at| (at, taken))).ok_or(of_history(CertificateCheck::Coverage))
     }
+}
+
+/// 2^(e - 105), with 2^e the power of two at or below `total`'s larger part, and never below the smallest float.
+fn last_place(total: Compensated) -> Compensated {
+    let biased = (total.bits()[0] >> 52) & 0x7ff;
+    let place = match biased {
+        0x7ff => 0.0,
+        106.. => f64::from_bits((biased - 105) << 52),
+        54.. => f64::from_bits(1 << (biased - 54)),
+        _ => f64::from_bits(1),
+    };
+    Measure::<Dimensionless>::new(place).map_or(Compensated::ZERO, |place| Compensated::of(&place))
+}
+
+fn admitted(floor: Compensated, place: Compensated, last_places: u64) -> Compensated {
+    floor.plus(place.scaled(i64::try_from(last_places).unwrap_or(i64::MAX)))
 }
 
 #[derive(Clone, Copy)]
@@ -345,25 +418,25 @@ impl Stretch {
         };
         [from, to].into_iter().take(count)
     }
-    fn changes(
+    /// Each window's late and early value.
+    fn ends(
         self,
         (later, leading): (&Curve<'_>, Interval),
         (earlier, trailing): (&Curve<'_>, Interval),
         length: u64,
-    ) -> Option<Vec<Compensated>> {
+    ) -> Option<Vec<(Compensated, Compensated)>> {
         let at = SimTime::from_ns;
-        let difference = |(later, earlier): (&Compensated, &Compensated)| later.minus(*earlier);
         match self {
             Stretch::Between { from, to } => {
                 let early = Interval::new(at(from), at(to))?;
                 let late = Interval::new(at(from + length), at(to + length))?;
                 let (later, earlier) = (later.on(late)?, earlier.on(early)?);
-                Some(later.iter().zip(&earlier).map(difference).collect())
+                Some(later.into_iter().zip(earlier).collect())
             }
             Stretch::FromAdmission { at: start } => {
                 let late = later.on(Interval::new(leading.start(), at(start + length))?)?;
                 let early = earlier.on(Interval::new(at(start), trailing.end())?)?;
-                Some(vec![late.last()?.minus(*early.first()?)])
+                Some(vec![(*late.last()?, *early.first()?)])
             }
         }
     }
@@ -373,6 +446,8 @@ struct Window {
     quantity: usize,
     interval: Interval,
     closure: Compensated,
+    last_places: u64,
+    place: Compensated,
     drift: Compensated,
 }
 struct Carried {
@@ -392,28 +467,35 @@ fn pair(
     routes: &[HeldRoute],
     trailing: &HistorySegment,
     leading: &HistorySegment,
-    stretch: Stretch,
+    (stretch, steps): (Stretch, u64),
 ) -> Result<Pair, CertificateFailure> {
     let coverage = of_history(CertificateCheck::Coverage);
     let length = policy.windows.window_ns.get();
     let (early, late) = (trailing.interval(), leading.interval());
-    let differences =
-        |later: &Curve<'_>, earlier: &Curve<'_>| stretch.changes((later, late), (earlier, early), length);
+    let ends = |later: &Curve<'_>, earlier: &Curve<'_>| stretch.ends((later, late), (earlier, early), length);
+    let differences = |later: &Curve<'_>, earlier: &Curve<'_>| {
+        let ends = ends(later, earlier)?;
+        Some(ends.into_iter().map(|(later, earlier)| later.minus(earlier)).collect::<Vec<_>>())
+    };
     let window =
         |start: u64| Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + length)).ok_or(coverage);
     let mut drifted = None;
     let mut windows = Vec::with_capacity(2 * policy.quantities.len());
     for (at, limits) in policy.quantities.iter().enumerate() {
         let quantity = limits.quantity;
-        let change =
-            differences(&leading.inventory(quantity), &trailing.inventory(quantity)).ok_or(coverage)?;
+        let inventory = ends(&leading.inventory(quantity), &trailing.inventory(quantity)).ok_or(coverage)?;
         let inflow = differences(&leading.inflow(quantity), &trailing.inflow(quantity)).ok_or(coverage)?;
         let outflow = differences(&leading.outflow(quantity), &trailing.outflow(quantity)).ok_or(coverage)?;
+        let rounding = &policy.rounding;
+        let last_places = (rounding.per_update.saturating_mul(rounding.updates[at])).saturating_mul(steps);
         for (index, start) in stretch.starts().enumerate() {
             let interval = window(start)?;
-            let closure = change[index].minus(inflow[index].minus(outflow[index])).abs();
+            let (closing, opening) = inventory[index];
+            let change = closing.minus(opening);
+            let closure = change.minus(inflow[index].minus(outflow[index])).abs();
             let gross = inflow[index].plus(outflow[index]);
-            let allowed = limits.absolute.plus(gross.times(&limits.relative));
+            let place = last_place(closing);
+            let allowed = admitted(limits.absolute.plus(gross.times(&limits.relative)), place, last_places);
             if !closure.at_most(allowed) {
                 return Err(CertificateFailure {
                     check: CertificateCheck::Closure,
@@ -422,7 +504,7 @@ fn pair(
                     residual: closure,
                 });
             }
-            let drift = change[index].abs();
+            let drift = change.abs();
             if !drift.at_most(limits.drift.unwrap_or(allowed)) && drifted.is_none() {
                 drifted = Some(CertificateFailure {
                     check: CertificateCheck::Drift,
@@ -435,6 +517,8 @@ fn pair(
                 quantity: at,
                 interval,
                 closure,
+                last_places,
+                place,
                 drift,
             });
         }
@@ -504,6 +588,8 @@ fn keep_the_earliest_worst(
             quantity,
             interval,
             closure,
+            last_places,
+            place,
             drift,
         } = window;
         let limits = &policy.quantities[quantity];
@@ -511,14 +597,19 @@ fn keep_the_earliest_worst(
             quantity: limits.quantity,
             closure_floor: limits.absolute,
             closure_relative: Compensated::of(&limits.relative),
+            row_rounding: policy.rounding.per_update,
             worst_closure: closure,
             closure_window: interval,
+            closure_last_places: last_places,
+            closure_place: place,
             worst_drift: drift,
             drift_window: interval,
         });
         if result.worst_closure.at_most(closure) {
             result.worst_closure = closure;
             result.closure_window = interval;
+            result.closure_last_places = last_places;
+            result.closure_place = place;
         }
         if result.worst_drift.at_most(drift) {
             result.worst_drift = drift;
@@ -557,8 +648,9 @@ pub fn certify(
         span.end().nanoseconds() - length
     };
     loop {
-        let trailing = early.holding(to)?;
-        let leading = late.holding(to + length)?;
+        let (trailing, behind) = early.holding(to)?;
+        let (leading, ahead) = late.holding(to + length)?;
+        let steps = behind.abs_diff(ahead) + 1;
         let start = |segment: &HistorySegment| segment.interval().start().nanoseconds();
         let from = start(trailing).max(start(leading).saturating_sub(length));
         pieces += 1;
@@ -567,7 +659,7 @@ pub fn certify(
         } else {
             Stretch::Between { from, to }
         };
-        match pair(policy, routes, trailing, leading, stretch) {
+        match pair(policy, routes, trailing, leading, (stretch, steps)) {
             Err(failure) => failed = Some(failure),
             Ok(pair) => {
                 drifted = pair.drifted.or(drifted);
@@ -596,4 +688,40 @@ pub fn certify(
         support,
         pieces,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{admitted, last_place};
+    use ng_contract::{Compensated, Dimensionless, Measure};
+
+    fn exact(value: f64) -> Compensated {
+        Compensated::of(&Measure::<Dimensionless>::new(value).expect("finite"))
+    }
+
+    #[test]
+    fn a_closure_at_its_last_places_passes_and_one_place_over_refuses() {
+        let total = exact(4254.0).plus(exact(6.39e-14));
+        let place = last_place(total);
+        assert_eq!(place.bits(), exact(f64::from_bits((1023 - 93) << 52)).bits(), "4,254's last place is 2^-93");
+        let allowed = admitted(Compensated::ZERO, place, 7 * 31 * 1_000);
+        let at = place.scaled(7 * 31 * 1_000);
+        assert!(at.at_most(allowed), "a closure at its allowance passes");
+        assert!(!at.plus(place).at_most(allowed), "one last place over refuses");
+        let floor = exact(1e-20);
+        assert!(at.plus(floor).at_most(admitted(floor, place, 7 * 31 * 1_000)), "the floor adds to it");
+    }
+
+    #[test]
+    fn a_last_place_holds_from_the_smallest_float_to_the_largest() {
+        let smallest = f64::from_bits(1);
+        assert_eq!(last_place(exact(1.0)).bits(), exact(f64::from_bits((1023 - 105) << 52)).bits());
+        assert_eq!(last_place(exact(1.5)).bits(), last_place(exact(1.0)).bits(), "the power of two at or below");
+        assert_eq!(last_place(exact(f64::from_bits(106 << 52))).bits(), exact(f64::from_bits(1 << 52)).bits());
+        assert_eq!(last_place(exact(f64::from_bits(105 << 52))).bits(), exact(f64::from_bits(1 << 51)).bits());
+        assert_eq!(last_place(exact(smallest)).bits(), exact(smallest).bits(), "never below the smallest float");
+        assert_eq!(last_place(exact(-2.0)).bits(), last_place(exact(2.0)).bits(), "on either sign");
+        let unbounded = exact(f64::MAX).scaled(2);
+        assert_eq!(last_place(unbounded).bits(), Compensated::ZERO.bits(), "zero for a total that is not finite");
+    }
 }

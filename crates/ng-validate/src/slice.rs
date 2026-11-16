@@ -517,6 +517,10 @@ pub fn arena_seed() -> Seed {
 }
 
 const CLOSURE_RELATIVE: f64 = 1e-12;
+/// The last places of a combination's total that one row update, `row.plus(net.scaled(coefficient))`, may round. At a
+/// unit coefficient the product is exact and the sum rounds under 3u^2 + 13u^3 of its result, under 4 last places; at
+/// any other the product rounds under 3u^2 of its own size too, so under 7 (native-contract 68).
+const ROW_ROUNDING: u64 = 7;
 /// Ticket 14's bound for a 2 s window, which elements keep: the slice has no reaction, so no day has measured one.
 const SYNTHETIC_DRIFT: f64 = 1e4;
 /// Twice energy's change over the arena's own day from 06:55 as native-contract 28 measured it, 8.3e4, rounded up; at
@@ -530,9 +534,9 @@ const SYNTHETIC_ENERGY_DRIFT: f64 = 2e5;
 /// Admission solves the man at one beat's balance, not his day's, so a window that starts in his first day reads him
 /// settling (native-contract 62).
 const SYNTHETIC_MILESTONE_ENERGY_DRIFT: f64 = 4e6;
-/// For a species no boundary route carries, such as albumin and the transmitters, closure alone holds it at zero there.
-/// This bound binds on the first body whose route moves one. It is under 1% of a transmitter pool's 101, the smallest
-/// such pool, so that body measures its own day.
+/// For a species no boundary route carries, such as albumin and the transmitters, closure alone holds it to its rows'
+/// rounding there. This bound binds on the first body whose route moves one. It is under 1% of a transmitter pool's
+/// 101, the smallest such pool, so that body measures its own day.
 const UNMOVED_DRIFT: f64 = 1.0;
 
 /// Fixture data until the healthy-range set holds each within-subject variation: twice the species' change over the
@@ -586,7 +590,7 @@ pub fn arena_certificate(
         Book::Charge => QuantityPolicy::charge(quantity, Measure::new(0.0)?, Measure::new(CLOSURE_RELATIVE)?),
     });
     let quantities = quantities.collect::<Result<Vec<_>, _>>()?;
-    CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows)
+    CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows)?.admitting_row_rounding(body, ROW_ROUNDING)
 }
 
 /// One beat in 100 intervals, paced by the heart's phase: the cycle's period and the heart rate's time mean state one
