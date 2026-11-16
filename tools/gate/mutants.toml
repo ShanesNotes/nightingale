@@ -3436,6 +3436,13 @@ new = '''const USES: [f64; 11] = [1.0, 20.0, 25.0, 3.0, 10.0, 8.0, 8.0, 15.0, 2.
 test = "-p ng-validate --test body the_whole_body_holds_its_rows_columns_and_digests"
 
 [[mutant]]
+name = "energy-ignores-the-bodys-own-bound"
+path = "crates/ng-validate/src/slice.rs"
+old = '''        Book::Of(Species::Energy) | Book::Energy if drifts.names(Species::Energy) => {'''
+new = '''        Book::Of(Species::Energy) | Book::Energy if false && drifts.names(Species::Energy) => {'''
+test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
+
+[[mutant]]
 name = "carbon-dioxide-drift-bound-tightened"
 path = "crates/ng-validate/src/body/packet.rs"
 old = '''const CARBON_DIOXIDE_DRIFT: f64 = 0.8;'''
