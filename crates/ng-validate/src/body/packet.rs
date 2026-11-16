@@ -10,6 +10,10 @@ const POWER_SIZE: f64 = 1e6;
 const NOTE: &str = "body fixture: synthetic";
 const METHOD: &str = "a synthetic monitor";
 const NEW_BED: f64 = 0.1;
+const HEMOGLOBIN: f64 = 2.0;
+/// The central veins' viscosity at the admitted start, read from an admission whose vessels did not read it, so the
+/// vessels' ratio is one at the start.
+const START_VISCOSITY: f64 = 7.115_102_244_801_436;
 
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     Ok(AnatomyBuilder::new().site::<C>(key, at(0.0)?).id())
@@ -124,6 +128,7 @@ fn start_guess(row: RowKind) -> f64 {
                 (Species::Chloride, _) => 105.0 * holds,
                 (Species::Albumin, Space::Interstitium) => 0.1 * holds,
                 (Species::Albumin, _) => holds,
+                (Species::Hemoglobin, _) => HEMOGLOBIN * holds,
                 (Species::Vasopressin, Space::Bound) => 0.8,
                 (Species::Vasopressin, _) => 0.4 * holds,
                 (Species::Energy, Space::Thermal) => 2e7,
@@ -375,6 +380,8 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     }
     set::<Pressure>(packet, "cv.stretch-reference", body, 100.0)?;
     set::<Volume>(packet, "cv.collapse-width", body, 1.0)?;
+    set::<Dimensionless>(packet, "cv.collapse-power", body, 1.5)?;
+    set::<Dimensionless>(packet, "cv.collapse-share", blood, 0.05)?;
     set::<Rate<Energy>>(packet, "cv.heat-width", body, 100.0)?;
     set::<Quotient<Volume, Albumin>>(packet, "cv.albumin-volume", body, 0.05)?;
     set::<Quotient<Volume, Albumin>>(packet, "fl.albumin-volume", body, 0.05)?;
@@ -583,5 +590,27 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     set::<Vasopressin>(packet, "rc.avp-sites", blood, 1.0)?;
     set::<Affinity<Concentration<Vasopressin>>>(packet, "rc.avp-on", blood, 0.6)?;
     set::<Rate<Dimensionless>>(packet, "rc.avp-off", blood, 0.1)?;
-    set::<Dimensionless>(packet, "rc.avp-efficacy", blood, 2.0)
+    set::<Dimensionless>(packet, "rc.avp-efficacy", blood, 2.0)?;
+    hematology(packet)
+}
+
+fn hematology(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+    let body = Binding::Body;
+    set::<Viscosity>(packet, "hc.plasma-viscosity", body, 2.0)?;
+    set::<Concentration<Hemoglobin>>(packet, "hc.red-cell-hemoglobin", body, 5.0)?;
+    for (key, value) in [
+        ("hc.reference-hematocrit", 0.5),
+        ("hc.relative-viscosity-at-reference", 3.0),
+        ("hc.viscosity-exponent", -1.0),
+        ("hc.wall-factor", 1.25),
+        ("hc.unit", 1.0),
+    ] {
+        set::<Dimensionless>(packet, key, body, value)?;
+    }
+    set::<Quotient<Dimensionless, Viscosity>>(
+        packet,
+        "cv.reference-viscosity-reciprocal",
+        body,
+        1.0 / START_VISCOSITY,
+    )
 }

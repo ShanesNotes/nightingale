@@ -12,8 +12,11 @@ pub(super) fn hematology(body: &mut Assembly<'_>) -> Result<(), AdmissionError> 
         .pool::<Iron, Beds<Gut>>(Space::Cells)
         .pool::<Iron, Beds<Liver>>(Space::Interstitium)
         .pool::<Iron, Beds<Gut>>(Space::Interstitium);
-    let (mut laws, ports) = body.hold(declaration)?.parts();
-    constants(&mut laws, &ports)?;
-    body.add(laws.finish());
+    let mut held = body.hold(declaration)?;
+    let (laws, ports) = held.stand_ins();
+    constants(laws, ports)?;
+    let production = ports.route::<Hemoglobin>(<HemoglobinProduction as BoundaryProcess>::NAME)?;
+    let fragment = ng_hematology::declare(body.hematology(Some(held))?, &production)?;
+    body.add(fragment);
     Ok(())
 }
