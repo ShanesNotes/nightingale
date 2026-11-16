@@ -1472,22 +1472,31 @@ pub type SiteField<'b, O, C, U> = (Output<'b, O, PerSite<C, U>>, ReadPort<'b, O,
 /// op it writes there names this field's law. Only a contract port issues one, and a row is not expressed.
 /// ```compile_fail,E0308
 /// use ng_contract::*;
-/// fn expressed<'b>(
-///     bc: &mut FragmentBuilder<'b, BloodChemistry>,
-///     outputs: &SpeciationOutputs<'b>,
-///     acidity: PureKernel<'b, BloodChemistry, Dimensionless, Speciated>,
-/// ) {
-///     bc.express_at(&outputs.acidity.0, acidity);
+/// fn expressed<'b>(bc: &mut FragmentBuilder<'b, BloodChemistry>, outputs: &SpeciationOutputs<'b>) {
+///     bc.express_at(&outputs.acidity.0, |mut k| {
+///         let value = k.at_site(&outputs.acidity.1);
+///         k.finish_term(value)
+///     });
 /// }
 /// ```
 /// ```
 /// use ng_contract::*;
-/// fn expressed<'b>(
-///     bc: &mut FragmentBuilder<'b, BloodChemistry>,
-///     outputs: &SpeciationOutputs<'b>,
-///     pressure: PureKernel<'b, BloodChemistry, Pressure, Speciated>,
-/// ) {
-///     bc.express_at(&outputs.carbon_dioxide_partial_pressure.0, pressure);
+/// fn expressed<'b>(bc: &mut FragmentBuilder<'b, BloodChemistry>, outputs: &SpeciationOutputs<'b>) {
+///     bc.express_at(&outputs.carbon_dioxide_partial_pressure.0, |mut k| {
+///         let value = k.at_site(&outputs.oxygen_partial_pressure.1);
+///         k.finish_term(value)
+///     });
+/// }
+/// ```
+/// The field states no rate class and no mode: the law that reads it holds them.
+/// ```compile_fail,E0308
+/// use ng_contract::*;
+/// fn expressed<'b>(bc: &mut FragmentBuilder<'b, BloodChemistry>, outputs: &SpeciationOutputs<'b>, class: RateClass) {
+///     let modes = bc.every_mode();
+///     bc.express_at(&outputs.carbon_dioxide_partial_pressure.0, |mut k| {
+///         let value = k.at_site(&outputs.oxygen_partial_pressure.1);
+///         k.finish(value, modes, class)
+///     });
 /// }
 /// ```
 /// Nor is an explicit field defined as a row is.
@@ -1516,7 +1525,8 @@ pub struct Explicit<'b, O, U> {
     brand: Brand<'b>,
     kind: PhantomData<(O, U)>,
 }
-/// The expression to attach with `express_at`, and the read of it, which a reader cannot tell from a row's read.
+/// The expression to attach with `express_at`, and the read of it, which a law or a guard reads as it reads a row. A
+/// lens channel needs a row, so it does not read one.
 pub type ExplicitField<'b, O, C, U> = (Explicit<'b, O, PerSite<C, U>>, ReadPort<'b, O, PerSite<C, U>>);
 pub(crate) struct ExplicitLaw<'f> {
     pub(crate) name: LawName,
@@ -2270,14 +2280,48 @@ impl<'b, O: Owner> FragmentBuilder<'b, O> {
         let owner = O::CARD;
         (field, ReadPort::field(LawName { owner, local: name }))
     }
-    /// The expression of an explicit field at each site of its set. Unlike `define_at` it closes on no row: a read of
-    /// the field is this kernel's value, written where the read stands.
-    pub fn express_at<C: SiteSet, U: Dimension>(
+    /// The expression of an explicit field at each site of its set, closed as a site term's is: it closes on no row,
+    /// and it holds where and at the rate class of the law that reads it, where the read stands.
+    pub fn express_at<C: SiteSet, U: Dimension, F>(
         &mut self,
         field: &Explicit<'b, O, PerSite<C, U>>,
-        value: PureKernel<'b, O, U, C>,
+        build: F,
+    ) where
+        F: for<'k> FnOnce(Kernel<'b, 'k, O, C>) -> FinishedTerm<'b, 'k, O, U, C>,
+    {
+        let Placing {
+            code,
+            result,
+            accepting,
+            fields,
+            splices,
+            ..
+        } = build(Kernel::open()).graph;
+        let finished: Finished<'b, '_, O, U, C> = Finished {
+            code,
+            accepts_no_nerve: accepting,
+            fields,
+            splices,
+            result,
+            dimension: dimension::<U>(),
+            modes: self.every_mode(),
+            rate: RateClass::UNMOVED,
+            kernel: PhantomData,
+            kind: PhantomData,
+        };
+        let kernel = self.close(finished);
+        self.attach(Obligation::Explicit(field.name), kernel.data);
+    }
+    /// Where an explicit field's value is trusted. Each program the field is written into judges it, and leaving the
+    /// range is reported under the field's law, never refused.
+    pub fn field_validity<C: SiteSet, U>(
+        &mut self,
+        field: &Explicit<'b, O, PerSite<C, U>>,
+        range: ValidityRange<U>,
     ) {
-        self.attach(Obligation::Explicit(field.name), value.data);
+        let (lower, upper, basis) = range.parts();
+        let validity = Validity { lower, upper, basis };
+        self.data.field_validity.push((field.name, validity));
     }
     /// Declares one mode variable of this owner and returns its values in order.
     pub fn modes<const N: usize>(
@@ -2612,6 +2656,7 @@ pub(crate) struct FragmentData {
     pub(crate) kept_back: Vec<(Family, Species)>,
     pub(crate) reactions: Vec<ReactionDeclaration>,
     pub(crate) terms: Vec<&'static str>,
+    pub(crate) field_validity: Vec<(&'static str, Validity)>,
 }
 impl FragmentData {
     pub(crate) fn owe_flow(&mut self, family: Family) {
@@ -2641,6 +2686,7 @@ impl FragmentData {
             kept_back: Vec::new(),
             reactions: Vec::new(),
             terms: Vec::new(),
+            field_validity: Vec::new(),
         }
     }
 }

@@ -649,7 +649,7 @@ _Avoid_: callback
 A named part of a kernel's graph, declared once on a site set and holding no row, that a law on a set that includes its set adds to one of its values. Compilation writes it into the law's program at each site of its set and leaves the program as it was at every other site. A refused step names the site term when the op that failed is the term's alone.
 
 **Explicit field**:
-A field with no row. Compilation writes its expression into each program that reads it, where the read stood, and names each op it writes for the field's law, so a refused step there names the field. Carbon dioxide's partial pressure in blood is one.
+A field with no row. Compilation writes its expression into each program that reads it, where the read stood, and names each op it writes for the field's law, so a refused step there names the field. Blood chemistry's port issues carbon dioxide's partial pressure in blood as one.
 
 **Compiled body**:
 The checked, immutable result of compiling the map and every fragment. A solver core sees only this, through the solver interface.

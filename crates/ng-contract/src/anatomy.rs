@@ -464,6 +464,18 @@ impl AnatomyBuilder {
     }
     /// Blood chemistry speciates this vessel segment's lumen, as it does every capillary bed's plasma. A repeat is one
     /// fact, a segment off the vascular network is refused at `finish`, and compile refuses one no other card reads.
+    /// ```compile_fail,E0308
+    /// use ng_contract::*;
+    /// fn sampled(map: &mut AnatomyBuilder, bed: &Site<CapillaryBed>) {
+    ///     map.sample(bed);
+    /// }
+    /// ```
+    /// ```
+    /// use ng_contract::*;
+    /// fn sampled(map: &mut AnatomyBuilder, segment: &Site<VesselSegment>) {
+    ///     map.sample(segment);
+    /// }
+    /// ```
     pub fn sample(&mut self, segment: &Site<VesselSegment>) {
         self.sampled.push(segment.id());
     }

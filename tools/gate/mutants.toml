@@ -3623,17 +3623,6 @@ new = '''Input::Read(Source::Field(_), _) => false,'''
 test = "-p ng-contract --lib written::a_field_that_reads_another_row_free_field_is_refused"
 
 [[mutant]]
-name = "explicit-holds-by-a-mode"
-path = "crates/ng-contract/src/compile.rs"
-old = '''            return Err(CompileDefect::UncoveredMode { law, mode });
-        }
-        let local'''
-new = '''            let _ = mode;
-        }
-        let local'''
-test = "-p ng-contract --lib written::a_field_that_holds_by_a_mode_is_refused"
-
-[[mutant]]
 name = "explicit-reads-a-local-slot"
 path = "crates/ng-contract/src/compile.rs"
 old = '''Input::Memory(_) | Input::Algebraic(_) | Input::Draw(_) | Input::Forcing(_) => true,'''
@@ -3792,3 +3781,66 @@ path = "crates/ng-contract/src/compile.rs"
 old = '''        .chain((guards.iter()).map(|(guard, addresses)| (modes[guard.variable].variable.law, addresses)));'''
 new = '''        .chain((guards.iter()).map(|(guard, addresses)| (modes[guard.variable].variable.law, addresses)).take(0));'''
 test = "-p ng-contract --lib speciated::a_sampled_segment_read_only_by_a_wired_guard_is_not_unread"
+
+[[mutant]]
+name = "summed-close-placed-again"
+path = "crates/ng-contract/src/law.rs"
+old = '''(Some(row @ Op::Zero(_)), Op::Subtract([at, value])) if *at == last - 1 => {'''
+new = '''(Some(row @ Op::Zero(_)), Op::Subtract([at, value])) if false && *at == last - 1 => {'''
+test = "-p ng-contract --lib written::a_summed_law_keeps_its_close_last_as_by_hand"
+
+[[mutant]]
+name = "second-copy-loses-its-origin"
+path = "crates/ng-contract/src/law.rs"
+old = '''                origins.push(Some(field.name));'''
+new = '''                origins.push((origins.len() < self.code.len() + field.kernel.code.len()).then_some(field.name));'''
+test = "-p ng-contract --lib written::each_copy_of_a_field_in_one_program_names_the_field"
+
+[[mutant]]
+name = "read-in-another-dimension-passes"
+path = "crates/ng-contract/src/law.rs"
+old = '''return Err(Unwritable::Dimension(field.name));'''
+new = ''''''
+test = "-p ng-contract --lib written::a_read_of_a_field_in_another_dimension_is_refused"
+
+[[mutant]]
+name = "explicit-reads-a-memory-slot"
+path = "crates/ng-contract/src/compile.rs"
+old = '''Input::Memory(_) | Input::Algebraic(_) | Input::Draw(_) | Input::Forcing(_) => true,'''
+new = '''Input::Algebraic(_) | Input::Draw(_) | Input::Forcing(_) => true,'''
+test = "-p ng-contract --lib written::a_field_that_reads_a_set_point_or_a_forcing_is_refused"
+
+[[mutant]]
+name = "explicit-reads-a-forcing"
+path = "crates/ng-contract/src/compile.rs"
+old = '''Input::Memory(_) | Input::Algebraic(_) | Input::Draw(_) | Input::Forcing(_) => true,'''
+new = '''Input::Memory(_) | Input::Algebraic(_) | Input::Draw(_) => true,'''
+test = "-p ng-contract --lib written::a_field_that_reads_a_set_point_or_a_forcing_is_refused"
+
+[[mutant]]
+name = "sample-read-at-any-site"
+path = "crates/ng-contract/src/compile.rs"
+old = '''RowKind::Algebraic(Slot { law, at: Context::Site(at) }) if law.owner == stater && at == site'''
+new = '''RowKind::Algebraic(Slot { law, at: Context::Site(_) }) if law.owner == stater'''
+test = "-p ng-contract --lib speciated::a_sample_read_only_at_another_site_is_unread"
+
+[[mutant]]
+name = "unwired-read-ignores-the-quantity"
+path = "crates/ng-contract/src/compile.rs"
+old = '''&& row.wired.iter().any(|read| read.quantity == field.local)'''
+new = '''&& !row.wired.is_empty()'''
+test = "-p ng-contract --lib speciated::a_wired_reader_of_a_quantity_its_row_holds_is_refused"
+
+[[mutant]]
+name = "unwired-read-ignores-the-reader"
+path = "crates/ng-contract/src/compile.rs"
+old = '''row.reader == law.owner'''
+new = '''!row.reader.is_empty()'''
+test = "-p ng-contract --lib speciated::a_card_with_no_wired_row_is_refused_where_another_card_is_wired"
+
+[[mutant]]
+name = "guard-read-not-held-to-the-table"
+path = "crates/ng-contract/src/compile.rs"
+old = '''check_wired(law, zero, at, places)?;'''
+new = ''''''
+test = "-p ng-contract --lib speciated::a_guards_read_is_held_to_the_table"

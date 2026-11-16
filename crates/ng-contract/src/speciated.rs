@@ -47,6 +47,8 @@ struct Case {
     oxygen: bool,
     carbon_dioxide: bool,
     metabolism: bool,
+    acidity: bool,
+    respiratory: bool,
     guard: bool,
     asleep: Option<Reader>,
 }
@@ -63,6 +65,8 @@ const SENSED: Case = Case {
     oxygen: true,
     carbon_dioxide: true,
     metabolism: false,
+    acidity: false,
+    respiratory: false,
     guard: false,
     asleep: None,
 };
@@ -127,7 +131,7 @@ fn compiled(case: Case) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
             k.finish(value, bc.every_mode(), class)
         });
         bc.define_at(&stated.bicarbonate.0, value);
-        let value = bc.site_kernel(|mut k| {
+        bc.express_at(&stated.carbon_dioxide_partial_pressure.0, |mut k| {
             let (oxygen, acid) = (
                 k.at_site(&stated.oxygen_partial_pressure.1),
                 k.at_site(&stated.acidity.1),
@@ -138,9 +142,8 @@ fn compiled(case: Case) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
             let power = k.scale(above, ln_ten);
             let ratio = k.exp(power);
             let value = k.scale(oxygen, ratio);
-            k.finish(value, bc.every_mode(), class)
+            k.finish_term(value)
         });
-        bc.express_at(&stated.carbon_dioxide_partial_pressure.0, value);
         let water = ports.blood::<Water>();
         let (volume_out, _) = bc.site_field::<Speciated, Water>("volume", Admissible::finite());
         let volume = bc.site_kernel(|mut k| {
@@ -224,6 +227,35 @@ fn compiled(case: Case) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
             });
             mt.define_at(&uptake_out, uptake);
             body.add(mt.finish());
+        }
+        if case.acidity {
+            let (mut mt, _) = body.metabolism(None)?.parts();
+            let read: ReadPort<'_, Metabolism, PerSite<CapillaryBed, Dimensionless>> =
+                ReadPort::field(LawName {
+                    owner: "BC",
+                    local: Acidity::NAME,
+                });
+            let (acid_out, _) = mt.site_field::<CapillaryBed, Dimensionless>("acid", Admissible::finite());
+            let acid = mt.site_kernel(|mut k| {
+                let value = k.at_site(&read);
+                k.finish(value, mt.every_mode(), class)
+            });
+            mt.define_at(&acid_out, acid);
+            body.add(mt.finish());
+        }
+        if case.respiratory {
+            let (mut rs, _) = body.respiratory(None)?.parts();
+            let read: ReadPort<'_, Respiratory, PerSite<CapillaryBed, Pressure>> = ReadPort::field(LawName {
+                owner: "BC",
+                local: OxygenPartialPressure::NAME,
+            });
+            let (alveolar_out, _) = rs.site_field::<CapillaryBed, Pressure>("alveolar", Admissible::finite());
+            let alveolar = rs.site_kernel(|mut k| {
+                let value = k.at_site(&read);
+                k.finish(value, rs.every_mode(), class)
+            });
+            rs.define_at(&alveolar_out, alveolar);
+            body.add(rs.finish());
         }
         match case.table {
             Table::Sensors => body.compile_reading(&SENSORS),
@@ -513,4 +545,73 @@ fn a_day_input_scaled_inside_an_explicit_field_is_judged_as_by_hand() {
         let probe = (body.programs().iter()).find(|program| program.law.local == "probe");
         assert!(probe.is_some(), "{reader:?}");
     }
+}
+
+#[test]
+fn a_sample_read_only_at_another_site_is_unread() {
+    let (_, sites) = compiled(SENSED).unwrap_or_else(|refused| panic!("{refused:?}"));
+    let refused = refused(Case {
+        landmark: 1,
+        ..SENSED
+    });
+    assert_eq!(refused, CompileDefect::UnreadSample { site: sites[0] });
+}
+
+#[test]
+fn a_wired_reader_of_a_quantity_its_row_holds_is_refused() {
+    let law = LawName {
+        owner: "MT",
+        local: "acid",
+    };
+    let field = LawName {
+        owner: "BC",
+        local: Acidity::NAME,
+    };
+    let refused = refused(Case {
+        table: Table::Today,
+        oxygen: false,
+        carbon_dioxide: false,
+        acidity: true,
+        ..SENSED
+    });
+    assert_eq!(refused, CompileDefect::UnwiredRead { law, field });
+}
+
+#[test]
+fn a_card_with_no_wired_row_is_refused_where_another_card_is_wired() {
+    let law = LawName {
+        owner: "RS",
+        local: "alveolar",
+    };
+    let field = LawName {
+        owner: "BC",
+        local: OxygenPartialPressure::NAME,
+    };
+    let refused = refused(Case {
+        table: Table::Today,
+        oxygen: false,
+        carbon_dioxide: false,
+        respiratory: true,
+        ..SENSED
+    });
+    assert_eq!(refused, CompileDefect::UnwiredRead { law, field });
+}
+
+#[test]
+fn a_guards_read_is_held_to_the_table() {
+    let law = LawName {
+        owner: "NS",
+        local: "sensed oxygen",
+    };
+    let field = LawName {
+        owner: "BC",
+        local: OxygenPartialPressure::NAME,
+    };
+    let refused = refused(Case {
+        table: Table::Today,
+        guard: true,
+        carbon_dioxide: false,
+        ..SENSED
+    });
+    assert_eq!(refused, CompileDefect::UnwiredRead { law, field });
 }

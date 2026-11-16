@@ -1572,18 +1572,6 @@ fn explicit_laws<'f>(owed: &[Owed<'f>]) -> Result<Vec<ExplicitLaw<'f>>, CompileD
             .laws
             .first()
             .expect("check_coverage refuses a field with no law");
-        if let Selector::Only { variable, value } = kernel.modes {
-            let mode = &owed.fragment.modes[variable];
-            let missed = (0..mode.values.len())
-                .filter(|&other| other != value)
-                .min_by_key(|&other| mode.values[other])
-                .unwrap_or(value);
-            let mode = ModeValue {
-                variable: mode.name,
-                value: mode.values[missed],
-            };
-            return Err(CompileDefect::UncoveredMode { law, mode });
-        }
         let local = |input: &Input| match input {
             Input::Memory(_) | Input::Algebraic(_) | Input::Draw(_) | Input::Forcing(_) => true,
             Input::SiteParameter(_) => true,
@@ -1603,8 +1591,8 @@ fn explicit_laws<'f>(owed: &[Owed<'f>]) -> Result<Vec<ExplicitLaw<'f>>, CompileD
         if kernel.placing.is_some() || inputs.any(local) {
             return Err(CompileDefect::NoSuchRead { law });
         }
-        let mut validity: Vec<Validity> = (owed.fragment.validity.iter())
-            .filter(|&&(id, _)| id == kernel.id)
+        let mut validity: Vec<Validity> = (owed.fragment.field_validity.iter())
+            .filter(|&&(name, _)| name == law.local)
             .map(|&(_, range)| range)
             .collect();
         validity.sort_unstable();

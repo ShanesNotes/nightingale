@@ -67,11 +67,10 @@ fn speciated(twice: bool) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError>
             k.finish(value, bc.every_mode(), class)
         });
         bc.define_at(&stated.bicarbonate.0, value);
-        let value = bc.site_kernel(|mut k| {
+        bc.express_at(&stated.carbon_dioxide_partial_pressure.0, |mut k| {
             let value = k.at_site(&stated.oxygen_partial_pressure.1);
-            k.finish(value, bc.every_mode(), class)
+            k.finish_term(value)
         });
-        bc.express_at(&stated.carbon_dioxide_partial_pressure.0, value);
         body.add(bc.finish());
         body.compile()
     })?;

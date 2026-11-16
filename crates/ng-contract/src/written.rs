@@ -23,13 +23,13 @@ enum Host {
     Plain,
     Twice,
     Cancel,
+    TwoCopies,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Wrong {
     Nothing,
     ReadsAnother,
-    ByMode,
     OwnSlot,
     Term,
     Junction,
@@ -38,6 +38,10 @@ enum Wrong {
     OffItsSet,
     SiteParameter,
     Ranged,
+    Dimension,
+    SetPoint,
+    Forcing,
+    Summed,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -158,15 +162,30 @@ fn compiled(case: Case) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
             bc.residual(&gain, residual);
             gain
         });
+        let goal = (case.wrong == Wrong::SetPoint).then(|| {
+            let goal = bc.set_point::<Pressure>("goal", Admissible::finite());
+            let rate = bc.kernel(|mut k| {
+                let zero = k.zero::<Rate<Reference<Pressure>>>();
+                k.finish(zero, bc.every_mode(), class)
+            });
+            bc.memory_rate(&goal, rate);
+            goal
+        });
+        let wave =
+            (case.wrong == Wrong::Forcing).then(|| bc.forcing("wave", key("bc.period"), key("bc.swing")));
         let term = (case.wrong == Wrong::Term).then(|| {
             bc.site_term::<CapillaryBed, Dimensionless, _>("acid term", |mut k| {
                 let value = k.at_site(&acid);
                 k.finish_term(value)
             })
         });
-        let modes = (case.wrong == Wrong::ByMode).then(|| bc.modes("valve", ["open", "shut"]));
         let (explicit, port) = bc.explicit_field::<CapillaryBed, Dimensionless>(FIELD);
-        let expression = bc.site_kernel(|mut k| {
+        if case.wrong == Wrong::Ranged {
+            let basis = Basis::Fixture("below either bed's value");
+            let range = ValidityRange::new(Measure::new(-1.0)?, Measure::new(1.0)?, basis)?;
+            bc.field_validity(&explicit, range);
+        }
+        bc.express_at(&explicit, |mut k| {
             let (level, acid) = (k.at_site(&level), k.at_site(&acid));
             let value = pressure(&mut k, &henry, level, acid);
             let value = match (&gain, &term) {
@@ -181,32 +200,26 @@ fn compiled(case: Case) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
                 }
                 _ => value,
             };
-            match &modes {
-                Some([open, _]) => k.finish(value, open.only(), class),
-                None => k.finish(value, bc.every_mode(), class),
-            }
+            let value = match (&goal, &wave) {
+                (Some(goal), _) => {
+                    let _ = k.state(goal);
+                    value
+                }
+                (_, Some(wave)) => {
+                    let wave = k.forcing(wave);
+                    k.scale(value, wave)
+                }
+                _ => value,
+            };
+            k.finish_term(value)
         });
-        if let Some([_, shut]) = &modes {
-            let other = bc.site_kernel(|mut k| {
-                let value = k.at_site(&level);
-                k.finish(value, shut.only(), class)
-            });
-            bc.express_at(&explicit, other);
-        }
-        if case.wrong == Wrong::Ranged {
-            let basis = Basis::Fixture("below either bed's value");
-            let range = ValidityRange::new(Measure::new(-1.0)?, Measure::new(1.0)?, basis)?;
-            bc.validity(&expression, range);
-        }
-        bc.express_at(&explicit, expression);
         if case.wrong == Wrong::ReadsAnother {
             let (twice, _) = bc.explicit_field::<CapillaryBed, Dimensionless>("twice");
-            let doubled = bc.site_kernel(|mut k| {
+            bc.express_at(&twice, |mut k| {
                 let value = k.at_site(&port);
                 let value = k.add(value, value);
-                k.finish(value, bc.every_mode(), class)
+                k.finish_term(value)
             });
-            bc.express_at(&twice, doubled);
         }
         let (probe_out, _) = bc.site_field::<CapillaryBed, Dimensionless>("probe", Admissible::finite());
         let probe = bc.site_kernel(|mut k| {
@@ -225,6 +238,16 @@ fn compiled(case: Case) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
                     let own = k.at_site(&acid);
                     let square = k.scale(own, own);
                     k.add(read, square)
+                }
+                Host::TwoCopies => {
+                    let again = match case.reader {
+                        Reader::Written => k.at_site(&port),
+                        Reader::ByHand => {
+                            let (level, acid) = (k.at_site(&level), k.at_site(&acid));
+                            pressure(&mut k, &henry, level, acid)
+                        }
+                    };
+                    k.add(read, again)
                 }
                 Host::Cancel => {
                     let (first, second, third) = (k.at_site(&acid), k.at_site(&acid), k.at_site(&acid));
@@ -260,6 +283,32 @@ fn compiled(case: Case) -> Result<(CompiledBody, [SiteId; 4]), AdmissionError> {
                 k.finish(residual, bc.every_mode(), class)
             });
             bc.residual(&sensed, residual);
+        }
+        if case.wrong == Wrong::Dimension {
+            let (pressed_out, _) = bc.site_field::<CapillaryBed, Pressure>("pressed", Admissible::finite());
+            let pressed = bc.site_kernel(|mut k| {
+                let value = k.at_site(&ReadPort::field(field));
+                k.finish(value, bc.every_mode(), class)
+            });
+            bc.define_at(&pressed_out, pressed);
+        }
+        if case.wrong == Wrong::Summed {
+            let total = bc.algebraic::<Dimensionless>("total", Admissible::finite());
+            let row = bc.kernel(|mut k| {
+                let value = k.algebraic(&total);
+                k.finish(value, bc.every_mode(), class)
+            });
+            let each = bc.site_kernel(|mut k| {
+                let value = match case.reader {
+                    Reader::Written => k.at_site(&port),
+                    Reader::ByHand => {
+                        let (level, acid) = (k.at_site(&level), k.at_site(&acid));
+                        pressure(&mut k, &henry, level, acid)
+                    }
+                };
+                k.finish(value, bc.every_mode(), class)
+            });
+            bc.sum_at(&total, row, each);
         }
         if case.wrong == Wrong::OffItsSet {
             let (spread_out, _) = bc.site_field::<Blood, Dimensionless>("spread", Admissible::finite());
@@ -580,19 +629,6 @@ fn a_field_that_reads_another_row_free_field_is_refused() {
 }
 
 #[test]
-fn a_field_that_holds_by_a_mode_is_refused() {
-    let refused = refused(Case {
-        wrong: Wrong::ByMode,
-        ..PLAIN
-    });
-    let mode = ModeValue {
-        variable: "valve",
-        value: "shut",
-    };
-    assert_eq!(refused, CompileDefect::UncoveredMode { law: bc(FIELD), mode });
-}
-
-#[test]
 fn a_field_that_reads_its_owners_slot_by_its_local_name_is_refused() {
     let refused = refused(Case {
         wrong: Wrong::OwnSlot,
@@ -702,4 +738,59 @@ fn a_fields_range_is_judged_under_the_field_in_each_program_it_is_written_into()
         found, wanted,
         "the probe's and the uptake's programs each judge the field at each bed"
     );
+}
+
+#[test]
+fn a_summed_law_keeps_its_close_last_as_by_hand() {
+    let case = Case {
+        wrong: Wrong::Summed,
+        ..PLAIN
+    };
+    let (written, sites) = bench(case);
+    let (by_hand, _) = bench(Case {
+        reader: Reader::ByHand,
+        ..case
+    });
+    let ops = |body: &CompiledBody| -> Vec<Vec<Op>> {
+        (body.programs().iter())
+            .filter(|program| program.law == bc("total"))
+            .map(|program| program.code.ops.clone())
+            .collect()
+    };
+    assert_eq!(ops(&written), ops(&by_hand));
+    assert_eq!(values(&written, sites), values(&by_hand, sites));
+}
+
+#[test]
+fn each_copy_of_a_field_in_one_program_names_the_field() {
+    let named = |host| {
+        let (body, _) = bench(Case { host, ..PLAIN });
+        let origins = &program_of(&body, bc("probe")).code.origins;
+        assert!(origins.iter().all(|&(_, law)| law == bc(FIELD)), "{host:?}");
+        origins.len()
+    };
+    assert_eq!(named(Host::TwoCopies), 2 * named(Host::Plain));
+}
+
+#[test]
+fn a_read_of_a_field_in_another_dimension_is_refused() {
+    let refused = refused(Case {
+        wrong: Wrong::Dimension,
+        ..PLAIN
+    });
+    assert_eq!(
+        refused,
+        CompileDefect::FieldDimension {
+            law: bc("pressed"),
+            field: bc(FIELD)
+        }
+    );
+}
+
+#[test]
+fn a_field_that_reads_a_set_point_or_a_forcing_is_refused() {
+    for wrong in [Wrong::SetPoint, Wrong::Forcing] {
+        let refused = refused(Case { wrong, ..PLAIN });
+        assert_eq!(refused, CompileDefect::NoSuchRead { law: bc(FIELD) }, "{wrong:?}");
+    }
 }
