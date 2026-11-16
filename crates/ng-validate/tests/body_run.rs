@@ -11,8 +11,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "5d944e4797f5b14232af5dfac6e2fb542a3654e6e19b31dba214e097932bde20";
-const ADMITTED_SEAL: &str = "a8eafac53a56992828da78aa7b445b9a0e8ccbd05d0e7f0c918e4effd9c4dcaf";
+const PACKET: &str = "cb439bb8b1525e9b8bc86ef20275aae820c40f2daef9b4bb9d54e4955e05bf42";
+const ADMITTED_SEAL: &str = "020537da74bf27e34c116e3b001d008a9b4078dd1e671c48bf441b87da113162";
 
 struct Counted {
     core: ng_solver::Core,
@@ -487,8 +487,8 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet 5d944e4797f5b14232af5dfac6e2fb542a3654e6e19b31dba214e097932bde20
-        seal c44ea89b01c5e83ee5e994ffa90f3fead72082a29fe0fe01d2fccab9036fe9b4
+        packet cb439bb8b1525e9b8bc86ef20275aae820c40f2daef9b4bb9d54e4955e05bf42
+        seal 0529b29e15bcd7c633bdfc233ea0192caf876e1ecbf1096fce93ab7da4ca215b
         steps 198
         viscosity over its reference at the start 1.000000413
     "#]]
@@ -979,6 +979,74 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
 }
 const LEDGER: f64 = 1e-4;
 
+/// Each bed's oxygen demand, as the packet states it.
+const DEMANDS: [(&str, f64); 11] = [
+    ("pulmonary bed", 1.0),
+    ("gut bed", 20.0),
+    ("muscle bed", 25.0),
+    ("glomerular bed", 3.0),
+    ("peritubular bed", 10.0),
+    ("brain bed", 8.0),
+    ("coronary bed", 8.0),
+    ("liver bed", 15.0),
+    ("fat bed", 2.0),
+    ("skin bed", 2.0),
+    ("bone bed", 2.0),
+];
+const AT_DEMAND: f64 = 2e-4;
+const AT_REST: f64 = 2e-4;
+
+/// Over the first step from the admitted start, each bed's two burns use its demand of oxygen, and its cells' fuels
+/// and water and its heat sit at the rest the packet guesses, where each held feed, the drain and the way to the core
+/// store meet the burns at that demand.
+fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
+    let body = &start.body;
+    let columns = every_column(body);
+    let stepped = until(start.session(), 1);
+    let view = stepped.conservation();
+    let head = view.head().expect("a step");
+    let interval = head.interval();
+    let seconds = interval.length_ns() as f64 / 1e9;
+    let gained = |curve: Curve<'_>| {
+        let ends = curve.on(interval).expect("the head's interval");
+        lead(ends[1]) - lead(ends[0])
+    };
+    let admitted = start.session();
+    for (key, demand) in DEMANDS {
+        let bed = site::<CapillaryBed>(key);
+        let used: f64 = (columns.iter())
+            .filter(|column| burns(body, **column) && at_bed(body, **column, bed))
+            .map(|column| {
+                let (forward, reverse) = head.exchange(*column);
+                let oxygen = count(body, *column, |_, species, _| species == Species::Oxygen);
+                -oxygen * (gained(forward) - gained(reverse)) / seconds
+            })
+            .sum();
+        assert!(
+            (used - demand).abs() <= AT_DEMAND * demand,
+            "the {key} burns {used} oxygen a second against its demand of {demand}"
+        );
+        for (species, space) in [
+            (Species::Glucose, Space::Cells),
+            (Species::FattyAcids, Space::Cells),
+            (Species::Water, Space::Cells),
+            (Species::Energy, Space::Thermal),
+        ] {
+            let kind = RowKind::Amount {
+                site: bed,
+                species,
+                space,
+            };
+            let held = value(start, &admitted, kind);
+            let rest = lead(body_start_guess(kind).expect("a finite guess"));
+            assert!(
+                (held - rest).abs() <= AT_REST * rest.abs(),
+                "the {key} admits {held} of {species:?} in {space:?} against its rest of {rest}"
+            );
+        }
+    }
+}
+
 struct Ticks(Cell<u64>);
 impl WallClock for Ticks {
     fn elapsed_ns(&self) -> Option<u64> {
@@ -1062,6 +1130,7 @@ fn the_whole_body_passes_every_replay_gate() {
 #[test]
 fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     let start = Start::admitted();
+    each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(&start);
     the_body_admits_at_06_55(&start);
     the_first_second_of_the_body_on_ng_solver_stays_where_it_was(&start);
     let before = start.core.solves.get();

@@ -1,6 +1,7 @@
 //! The arena certificate's element limit, on the burning beds, the cheapest body with a reaction and so with element
-//! books of their own, one set a bed. Nothing burns and nothing leaves, and only oxygen enters, at a steady rate, so
-//! each bed's oxygen element book rises by twice the oxygen let in over each window and every other book holds still.
+//! quantities of their own, one set a bed. Nothing burns and nothing leaves, and only oxygen enters, at a steady
+//! rate, so each bed's oxygen element quantity rises by twice the oxygen let in over each window and every other
+//! quantity holds still.
 //! Every value is synthetic.
 
 use core::num::NonZeroU64;
@@ -99,7 +100,7 @@ fn an_element_drifts_up_to_1e4_a_window_and_no_further() {
     let passed = certified(limit - margin).expect("inside its limit");
     let result = (passed.results().iter())
         .find(|result| result.quantity().book() == oxygen)
-        .expect("oxygen's element book");
+        .expect("oxygen's element quantity");
     let drift = f64::from_bits(result.worst_drift().bits()[0]);
     assert!((drift - (limit - margin)).abs() < 1e-6 * limit, "{drift}");
     let failed = certified(limit + margin).expect_err("past its limit");

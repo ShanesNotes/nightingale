@@ -958,35 +958,39 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
     set::<Concentration<CarbonDioxide>>(packet, "bc.carbamino-half-rise", body, CARBAMINO.half_rise)
 }
 
-/// The body's own drift bound for each species it moves that the slice's table does not hold. As on the slice
-/// (solver contract, section 7), each is fixture data that stands in for 1.96 times a within-subject variation: twice
-/// the species' worst change over a ten-second window of this body's first minute from its admitted start, rounded up
-/// to one significant figure. It is a synthetic target that scores a solver and judges no body. The body's measured
-/// day (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set (record 0004).
-/// Each gas's change is mostly its swing within a beat, read across windows that hold no whole number of beats; the
-/// rest is the run settling from the admitted orbit onto the core's own, which a smaller step cap moves. Measured on
-/// the run of body 08's third PR: oxygen 1.489 umol and carbon dioxide 0.386 umol. Energy's bound is the body's own
-/// once its beds burn fuel, in place of the slice's day-long one. Its change is the walls' elastic store filling and
-/// the heat stores emptying as the run settles from the admitted start, 4,971 in and 1,583 out over the first ten
-/// seconds, while the fuels and the beds' heat move under 0.003. Measured on the run of body 09's first PR: energy
-/// 3,364.5.
-const DRIFTS: [(Species, f64); 3] = [
-    (Species::Oxygen, OXYGEN_DRIFT),
-    (Species::CarbonDioxide, CARBON_DIOXIDE_DRIFT),
-    (Species::Energy, ENERGY_DRIFT),
-];
+/// The body's own drift bounds for energy and for the elements its burns join. As on the slice (solver contract,
+/// section 7), each is fixture data that stands in for 1.96 times a within-subject variation: twice the quantity's
+/// worst change over a ten-second window of this body's first minute from its admitted start, rounded up to one
+/// significant figure. It is a synthetic target that scores a solver and judges no body. The body's measured day
+/// (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set (record 0004).
+/// Energy's change is the walls' elastic store filling and the core's heat store emptying as the run settles from the
+/// admitted start, 4,946.6 in and 1,582.1 out over the first ten seconds, while the fuels and the beds' heat move
+/// under 0.003. Oxygen's and carbon's change is mostly the blood gases' swing within a beat, read across windows that
+/// hold no whole number of beats, and hydrogen's is a bed's cell water and fuels settling. Measured on the run of body
+/// 09's first PR: energy 3,364.5, oxygen 2.388, carbon 0.3864 and hydrogen 1.171e-5. Oxygen and carbon dioxide as
+/// species keep only held pools that never move, so the slice's bound for an unmoved species holds them.
 const ENERGY_DRIFT: f64 = 7e3;
-const OXYGEN_DRIFT: f64 = 3.0;
-const CARBON_DIOXIDE_DRIFT: f64 = 0.8;
+const ELEMENT_DRIFTS: [(Element, f64); 3] = [
+    (Element::Carbon, 0.8),
+    (Element::Hydrogen, 3e-5),
+    (Element::Oxygen, 5.0),
+];
 
 struct BodyDrifts;
 impl DriftTable for BodyDrifts {
     fn names(&self, species: Species) -> bool {
-        DRIFTS.iter().any(|(named, _)| *named == species)
+        species == Species::Energy
     }
     fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError> {
-        let named = DRIFTS.iter().find(|(species, _)| *species == Q::SPECIES);
-        Measure::new(named.map_or(f64::NAN, |(_, drift)| *drift))
+        Measure::new(if Q::SPECIES == Species::Energy {
+            ENERGY_DRIFT
+        } else {
+            f64::NAN
+        })
+    }
+    fn element(&self, element: Element) -> Result<Option<Measure<Atoms>>, AdmissionError> {
+        let named = ELEMENT_DRIFTS.iter().find(|(named, _)| *named == element);
+        named.map(|(_, drift)| Measure::new(*drift)).transpose()
     }
 }
 

@@ -2694,20 +2694,24 @@ name = "every-quantity-takes-energys-drift-limit"
 path = "crates/ng-validate/src/slice.rs"
 old = '''
         Book::Of(species) => species.visit(Limits(quantity, species_drift(species))),
-        Book::Element(_) => QuantityPolicy::element(
+        Book::Element(element) => QuantityPolicy::element(
             quantity,
             Measure::new(0.0)?,
             Measure::new(CLOSURE_RELATIVE)?,
-            Measure::new(SYNTHETIC_DRIFT)?,
+            drifts
+                .element(element)?
+                .map_or_else(|| Measure::new(SYNTHETIC_DRIFT), Ok)?,
         ),
 '''
 new = '''
         Book::Of(species) => species.visit(Limits(quantity, SYNTHETIC_ENERGY_DRIFT)),
-        Book::Element(_) => QuantityPolicy::element(
+        Book::Element(element) => QuantityPolicy::element(
             quantity,
             Measure::new(0.0)?,
             Measure::new(CLOSURE_RELATIVE)?,
-            Measure::new(SYNTHETIC_ENERGY_DRIFT)?,
+            drifts
+                .element(element)?
+                .map_or_else(|| Measure::new(SYNTHETIC_ENERGY_DRIFT), Ok)?,
         ),
 '''
 test = "-p ng-validate --test arena_certificate water_drifts_up_to_5e2_twice_the_slices_measured_day"
@@ -2716,19 +2720,23 @@ test = "-p ng-validate --test arena_certificate water_drifts_up_to_5e2_twice_the
 name = "element-drift-takes-energys-limit"
 path = "crates/ng-validate/src/slice.rs"
 old = '''
-        Book::Element(_) => QuantityPolicy::element(
+        Book::Element(element) => QuantityPolicy::element(
             quantity,
             Measure::new(0.0)?,
             Measure::new(CLOSURE_RELATIVE)?,
-            Measure::new(SYNTHETIC_DRIFT)?,
+            drifts
+                .element(element)?
+                .map_or_else(|| Measure::new(SYNTHETIC_DRIFT), Ok)?,
         ),
 '''
 new = '''
-        Book::Element(_) => QuantityPolicy::element(
+        Book::Element(element) => QuantityPolicy::element(
             quantity,
             Measure::new(0.0)?,
             Measure::new(CLOSURE_RELATIVE)?,
-            Measure::new(SYNTHETIC_ENERGY_DRIFT)?,
+            drifts
+                .element(element)?
+                .map_or_else(|| Measure::new(SYNTHETIC_ENERGY_DRIFT), Ok)?,
         ),
 '''
 test = "-p ng-validate --test arena_elements an_element_drifts_up_to_1e4_a_window_and_no_further"
@@ -3535,12 +3543,23 @@ test = "-p ng-validate --test gases the_bed_settles_where_the_fick_identity_puts
 [[mutant]]
 name = "burn-reads-no-demand"
 path = "crates/ng-metabolism/src/burn.rs"
-old = '''k.smooth_min(demand, allowed, width)'''
-new = '''{
-            let _ = (allowed, width);
-            demand
-        }'''
+old = '''
+        let bent = k.smooth_min(demand, allowed, width);
+        let none = k.zero();
+        let offset = k.smooth_min(demand, none, width);
+        k.subtract(bent, offset)'''
+new = '''
+        let bent = k.smooth_min(demand, allowed, width);
+        let none = k.subtract(bent, bent);
+        k.add(demand, none)'''
 test = "-p ng-validate --test gases the_oxygen_rate_bends_below_a_raised_demand_or_a_halved_flow_with_no_step_refused"
+
+[[mutant]]
+name = "oxygen-rate-is-a-smooth-max"
+path = "crates/ng-metabolism/src/burn.rs"
+old = '''let bent = k.smooth_min(demand, allowed, width);'''
+new = '''let bent = k.smooth_max(demand, allowed, width);'''
+test = "-p ng-validate --test gases the_bed_at_rest_burns_its_demand"
 
 [[mutant]]
 name = "oxygen-rate-keeps-its-offset"
@@ -3569,10 +3588,10 @@ new = '''        let apart = k.subtract(standard, read);'''
 test = "-p ng-validate --test gases speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_warm_one"
 
 [[mutant]]
-name = "oxygen-drift-bound-loosened"
+name = "oxygen-element-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''const OXYGEN_DRIFT: f64 = 3.0;'''
-new = '''const OXYGEN_DRIFT: f64 = 6.0;'''
+old = '''(Element::Oxygen, 5.0),'''
+new = '''(Element::Oxygen, 10.0),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
@@ -3590,10 +3609,31 @@ new = '''        Book::Of(Species::Energy) | Book::Energy if false && drifts.nam
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
-name = "carbon-dioxide-drift-bound-tightened"
+name = "element-ignores-the-bodys-own-bound"
+path = "crates/ng-validate/src/slice.rs"
+old = '''.map_or_else(|| Measure::new(SYNTHETIC_DRIFT), Ok)?,'''
+new = '''.map_or_else(|| Measure::new(SYNTHETIC_DRIFT), |_| Measure::new(SYNTHETIC_DRIFT))?,'''
+test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
+
+[[mutant]]
+name = "fatty-acid-energy-2800"
+path = "crates/ng-validate/src/body/schema.rs"
+old = '''pub(super) const FAT_ENERGY: f64 = 3_000.0;'''
+new = '''pub(super) const FAT_ENERGY: f64 = 2_800.0;'''
+test = "-p ng-validate --test body each_beds_burns_carry_their_fuels_atoms_and_energy_into_its_cells_and_heat"
+
+[[mutant]]
+name = "carbon-element-drift-bound-tightened"
 path = "crates/ng-validate/src/body/packet.rs"
-old = '''const CARBON_DIOXIDE_DRIFT: f64 = 0.8;'''
-new = '''const CARBON_DIOXIDE_DRIFT: f64 = 0.4;'''
+old = '''(Element::Carbon, 0.8),'''
+new = '''(Element::Carbon, 0.4),'''
+test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
+
+[[mutant]]
+name = "hydrogen-element-drift-bound-loosened"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''(Element::Hydrogen, 3e-5),'''
+new = '''(Element::Hydrogen, 6e-5),'''
 test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]

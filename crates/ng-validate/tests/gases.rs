@@ -1438,6 +1438,29 @@ fn each_burn_takes_its_share_of_the_oxygen_rate_the_cells_allow_and_makes_its_ca
     Ok(())
 }
 
+/// The rate passes the demand by at most its offset at no cell oxygen, `D (sqrt(1 + s^2) - 1) / 2`, which is 1e-4 of the
+/// demand at a width share of 0.02.
+const AT_DEMAND: f64 = 1e-4;
+
+#[test]
+fn the_bed_at_rest_burns_its_demand() -> Result<(), InitializationFailure> {
+    let (body, core, store) = (
+        compiled(Cells::Burning)?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
+    let session = settling(&body, &core, &store)?;
+    let rate: f64 = ["glucose burn", "fatty acid burn"]
+        .map(|local| burned(&body, &session, local).oxygen)
+        .iter()
+        .sum();
+    assert!(
+        close(rate, DEMAND, AT_DEMAND),
+        "the bed at rest burns {rate} against a demand of {DEMAND}"
+    );
+    Ok(())
+}
+
 #[test]
 fn the_respiratory_quotient_is_the_one_glucoses_share_fixes() -> Result<(), InitializationFailure> {
     let (body, core, store) = (
@@ -1634,6 +1657,44 @@ fn the_oxygen_rate_is_zero_with_no_cell_oxygen_and_never_runs_a_burn_backward()
     Ok(())
 }
 
+/// From the warm bed at rest with its cells open, a demand of zero leaves both burns idle on the first step.
+#[test]
+fn zero_oxygen_demand_leaves_both_burns_idle() -> Result<(), InitializationFailure> {
+    let (body, core, store) = (
+        compiled(Cells::Burning)?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
+    let rest = settling(&body, &core, &store)?;
+    let settled: Vec<(RowKind, f64)> = (body.rows().iter())
+        .map(|row| (row.kind(), value(&body, &rest, row.kind())))
+        .collect();
+    let start = Start {
+        demand: 0.0,
+        ..Start::at(speciated(ARTERIAL))
+    };
+    let held = |row| {
+        let found = settled.iter().find(|(kind, _)| *kind == row);
+        found.unwrap_or_else(|| panic!("no settled {row:?}")).1
+    };
+    let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    let session = admit(&body, &core, &store, packet_from(&body, start, held)?)?;
+    let session = match session.step() {
+        Step::Accepted(next, _) => next,
+        Step::Refused(retrying) => panic!("zero demand was refused: {:?}", retrying.refused().reason()),
+        Step::Faulted(faulted) => panic!("zero demand faulted: {:?}", faulted.fault()),
+    };
+    for local in ["glucose burn", "fatty acid burn"] {
+        let measured = burned(&body, &session, local);
+        assert_eq!(
+            [measured.oxygen, measured.carbon_dioxide, measured.heat],
+            [0.0; 3],
+            "{local}: {measured:?} at zero demand"
+        );
+    }
+    Ok(())
+}
+
 fn refused(cells: Cells) -> CompileDefect {
     match compiled(cells) {
         Err(AdmissionError::Compile(defect)) => defect,
@@ -1642,9 +1703,9 @@ fn refused(cells: Cells) -> CompileDefect {
     }
 }
 
-/// One burn of both fuels at once leaves six glucose less five fatty acids a combination no book names.
+/// One burn of both fuels at once leaves six glucose less five fatty acids, a combination that is no quantity.
 #[test]
-fn a_single_burn_of_both_fuels_is_refused_for_a_quantity_no_book_names() {
+fn a_single_burn_of_both_fuels_is_refused_for_a_combination_that_is_no_quantity() {
     assert_eq!(
         refused(Cells::OneMixedBurn),
         CompileDefect::UnnamedConservedQuantity {

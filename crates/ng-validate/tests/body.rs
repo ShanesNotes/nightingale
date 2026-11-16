@@ -872,9 +872,9 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
     );
     expect![[r#"
         rows 1431 {"algebraic": 173, "amount": 1248, "memory": 10}, columns 1400, jacobian nonzeros 9625, blocks 447, parameter slots 631, conserved combinations 415, held pools 333, held route columns 97
-        model hash 8e24c77c6d438e92e3bf182338e0cdfcf7d061eaa946b862efbd31a03f999cfa
+        model hash 402f829b2fb89e7aeba781d474c628e14610275429f550cb91db5ddbf8e1ed56
         conserved basis 7b3616fb513a82fada3ed5c221f95b43c8940b425f1b354e80a9a35d87b5dad2
-        stated packet 64ea96b1eba029ba73061e8b7eba39c9005ee8407eb4ee463ef7abd0b2a8ba60
+        stated packet 5e5f6bb0201422c2ce19d3b552059c19d0b119df4611e9a62df9a24b22046b2c
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -935,14 +935,25 @@ fn the_gut_transit_reads_both_lumens_so_admission_can_place_each_species_between
 
 #[test]
 fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError> {
-    struct Stated([(Species, f64); 3]);
+    #[derive(Clone, Copy)]
+    struct Stated {
+        energy: f64,
+        elements: [(Element, f64); 3],
+    }
     impl DriftTable for Stated {
         fn names(&self, species: Species) -> bool {
-            self.0.iter().any(|(named, _)| *named == species)
+            species == Species::Energy
         }
         fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError> {
-            let named = self.0.iter().find(|(species, _)| *species == Q::SPECIES);
-            Measure::new(named.map_or(f64::NAN, |(_, drift)| *drift))
+            Measure::new(if Q::SPECIES == Species::Energy {
+                self.energy
+            } else {
+                f64::NAN
+            })
+        }
+        fn element(&self, element: Element) -> Result<Option<Measure<Atoms>>, AdmissionError> {
+            let named = self.elements.iter().find(|(named, _)| *named == element);
+            named.map(|(_, drift)| Measure::new(*drift)).transpose()
         }
     }
     let body = whole_body()?;
@@ -951,17 +962,81 @@ fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError
     let digest = |table: &Stated| -> Result<Digest, AdmissionError> {
         Ok(certificate_with(&body, windows, table)?.digest())
     };
-    let stated = [
-        (Species::Oxygen, 3.0),
-        (Species::CarbonDioxide, 0.8),
-        (Species::Energy, 7e3),
-    ];
+    let stated = Stated {
+        energy: 7e3,
+        elements: [
+            (Element::Carbon, 0.8),
+            (Element::Hydrogen, 3e-5),
+            (Element::Oxygen, 5.0),
+        ],
+    };
     let policy = body_certificate(&body, windows)?.digest();
-    assert_eq!(policy, digest(&Stated(stated))?);
-    for (index, by) in [(0, 0.5), (0, 2.0), (1, 0.5), (1, 2.0), (2, 0.5), (2, 2.0)] {
-        let mut moved = stated;
-        moved[index].1 *= by;
-        assert_ne!(policy, digest(&Stated(moved))?, "{moved:?}");
+    assert_eq!(policy, digest(&stated)?);
+    for by in [0.5, 2.0] {
+        let moved = Stated {
+            energy: stated.energy * by,
+            ..stated
+        };
+        assert_ne!(policy, digest(&moved)?, "energy times {by}");
+        for index in 0..3 {
+            let mut moved = stated;
+            moved.elements[index].1 *= by;
+            assert_ne!(
+                policy,
+                digest(&moved)?,
+                "{:?} times {by}",
+                moved.elements[index].0
+            );
+        }
     }
+    Ok(())
+}
+
+#[test]
+fn each_beds_burns_carry_their_fuels_atoms_and_energy_into_its_cells_and_heat() -> Result<(), AdmissionError>
+{
+    let body = whole_body()?;
+    let mut seen = [0; 2];
+    for column in body.columns() {
+        let (which, fuel, expected) = match column.origin().local {
+            "glucose burn" => (0, Species::Glucose, [-1, -6, 6, 6, 1_000]),
+            "fatty acid burn" => (1, Species::FattyAcids, [-1, -23, 16, 16, 3_000]),
+            _ => continue,
+        };
+        let Context::Site(bed) = column.context() else {
+            panic!("a burn off a bed: {:?}", column.context());
+        };
+        let at = |species, space| RowKind::Amount {
+            site: bed,
+            species,
+            space,
+        };
+        let rows = [
+            at(fuel, Space::Cells),
+            at(Species::Oxygen, Space::Cells),
+            at(Species::CarbonDioxide, Space::Cells),
+            at(Species::Water, Space::Cells),
+            at(Species::Energy, Space::Thermal),
+        ];
+        let terms: Vec<(RowKind, i64)> = (column.terms().iter())
+            .map(|(row, count)| (body.rows()[row.index()].kind(), *count))
+            .collect();
+        let wanted: Vec<(RowKind, i64)> = rows.into_iter().zip(expected).collect();
+        assert_eq!(
+            terms.len(),
+            wanted.len(),
+            "{:?} at {bed:?}: {terms:?}",
+            column.origin()
+        );
+        for term in &wanted {
+            assert!(
+                terms.contains(term),
+                "{:?} at {bed:?} lacks {term:?}: {terms:?}",
+                column.origin()
+            );
+        }
+        seen[which] += 1;
+    }
+    assert_eq!(seen, [11, 11]);
     Ok(())
 }
