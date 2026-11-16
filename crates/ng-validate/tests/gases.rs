@@ -1322,17 +1322,16 @@ fn only_the_whole_body_speciates() -> Result<(), AdmissionError> {
     Ok(())
 }
 
-/// `B = smooth_min(D, k P, s D) - smooth_min(D, 0, s D)` with the reach at rest.
 fn oxygen_rate(demand: f64, cell_pressure: f64) -> f64 {
-    let (reach, width) = (
+    let (allowed, width) = (
         DEMAND / CELL_PRESSURE_AT_DEMAND * cell_pressure,
         WIDTH_SHARE_OF_DEMAND * demand,
     );
-    let bent = |allowed: f64| {
-        let gap = demand - allowed;
-        0.5 * (demand + allowed - (gap * gap + width * width).sqrt())
+    let bent = |flow: f64| {
+        let gap = demand - flow;
+        0.5 * (demand + flow - (gap * gap + width * width).sqrt())
     };
-    bent(reach) - bent(0.0)
+    bent(allowed) - bent(0.0)
 }
 
 fn tissue_oxygen(
@@ -1534,7 +1533,6 @@ fn stepped_from_rest(demand: f64, renewal: f64) -> Result<Stressed, Initializati
     stepped(start, None, 300)
 }
 
-/// From the bed at rest, with the start's parameters and, if given, the cells' oxygen at a partial pressure.
 fn stepped(
     start: Start,
     cell_pressure: Option<f64>,
@@ -1632,8 +1630,7 @@ fn the_oxygen_rate_bends_below_a_raised_demand_or_a_halved_flow_with_no_step_ref
     Ok(())
 }
 
-/// With the cell membrane shut, the cells keep only the oxygen they start with. At none the burns stand still, and
-/// just above none, or at no demand, neither burn runs backward or draws the cells below none.
+/// With the cell membrane shut, the cells keep only the oxygen they start with.
 #[test]
 fn the_oxygen_rate_is_zero_with_no_cell_oxygen_and_never_runs_a_burn_backward()
 -> Result<(), InitializationFailure> {
@@ -1657,7 +1654,6 @@ fn the_oxygen_rate_is_zero_with_no_cell_oxygen_and_never_runs_a_burn_backward()
     Ok(())
 }
 
-/// From the warm bed at rest with its cells open, a demand of zero leaves both burns idle on the first step.
 #[test]
 fn zero_oxygen_demand_leaves_both_burns_idle() -> Result<(), InitializationFailure> {
     let (body, core, store) = (

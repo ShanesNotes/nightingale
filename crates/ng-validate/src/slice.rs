@@ -563,7 +563,7 @@ pub fn arena_certificate(
 }
 
 /// A body's own drift bounds, each in its species' unit, for the species it `names` in place of the slice's table,
-/// and in atoms for each element it bounds in place of ticket 14's.
+/// and in atoms for each element it bounds in place of `SYNTHETIC_DRIFT`.
 pub trait DriftTable {
     fn names(&self, species: Species) -> bool;
     fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError>;

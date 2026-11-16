@@ -979,7 +979,6 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
 }
 const LEDGER: f64 = 1e-4;
 
-/// Each bed's oxygen demand, as the packet states it.
 const DEMANDS: [(&str, f64); 11] = [
     ("pulmonary bed", 1.0),
     ("gut bed", 20.0),
@@ -996,9 +995,6 @@ const DEMANDS: [(&str, f64); 11] = [
 const AT_DEMAND: f64 = 2e-4;
 const AT_REST: f64 = 2e-4;
 
-/// Over the first step from the admitted start, each bed's two burns use its demand of oxygen, and its cells' fuels
-/// and water and its heat sit at the rest the packet guesses, where each held feed, the drain and the way to the core
-/// store meet the burns at that demand.
 fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
     let body = &start.body;
     let columns = every_column(body);

@@ -7,9 +7,10 @@ type SiteKey<'b, U> = SiteParameter<'b, Metabolism, CapillaryBed, U>;
 const BURN_NS: u64 = 1_000_000_000;
 
 /// The oxygen a bed's cells burn each second: `B = smooth_min(D, k P, s D) - smooth_min(D, 0, s D)`, its demand
-/// until its cells' partial pressure can no longer pass that much. The second term takes off the bend's own offset, so
-/// the rate is zero at no cell oxygen, rises with the partial pressure and never passes `k P`: it never runs a burn
-/// backward or draws a cell's oxygen below zero. The width is a share of the demand, so no demand burns nothing.
+/// until its cells' partial pressure can no longer pass that much. The second term takes off the smooth minimum's own
+/// offset, so the rate is zero at no cell oxygen, rises with the partial pressure and never passes `k P`: it never
+/// runs a burn backward or draws a cell's oxygen below zero. The width is a share of the demand, so a zero demand burns
+/// nothing.
 struct OxygenRate<'a, 'b> {
     cells: &'a CellOxygen<'b>,
     demand: SiteKey<'b, Rate<Oxygen>>,
