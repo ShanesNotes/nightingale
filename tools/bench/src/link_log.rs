@@ -16,6 +16,9 @@ pub struct LinkLog {
     newer: Cell<usize>,
     newest: RefCell<Option<(Digest, Vec<u8>)>>,
     replay: Cell<u64>,
+    /// Each cursor's link before the one it last gave: a walk newest first asks for that link next.
+    held: RefCell<[Option<(Digest, Vec<u8>)>; 2]>,
+    links_read: Cell<u64>,
 }
 
 struct Record {
@@ -49,6 +52,8 @@ impl LinkLog {
             newer: Cell::new(0),
             newest: RefCell::new(None),
             replay: Cell::new(0),
+            held: RefCell::new([None, None]),
+            links_read: Cell::new(0),
         }
     }
 
@@ -83,6 +88,7 @@ impl LinkLog {
     }
 
     fn compact_link(&self, record: &Record) -> Vec<u8> {
+        self.links_read.set(self.links_read.get() + 1);
         let length = usize::try_from(record.length).expect("a link fits in memory");
         self.read(record.start + HEAD, length)
     }
@@ -148,11 +154,14 @@ impl HistoryStore for LinkLog {
             let previous = self.record_before(record.start);
             (previous.seal, self.compact_link(&previous))
         });
+        let held = std::mem::replace(&mut self.held.borrow_mut()[hit], previous.clone());
+        let own = (held.filter(|(seal, _)| *seal == record.seal))
+            .map_or_else(|| self.compact_link(&record), |(_, kept)| kept);
         let previous = previous.as_ref().map(|(seal, kept)| CompactLink {
             seal: *seal,
             bytes: kept,
         });
-        expand(previous, &self.compact_link(&record))
+        expand(previous, &own)
     }
 
     fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
@@ -176,5 +185,69 @@ impl Drop for LinkLog {
         if let Err(error) = std::fs::remove_file(&self.path) {
             eprintln!("bench: {} stays: {error}", self.path.display());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LinkLog;
+    use ng_contract::{Digest, Measure, SimTime};
+    use ng_record::{CheckpointError, HistoryStore};
+    use ng_validate::{ReplayCase, TwoReservoirs, run_until};
+    use std::cell::RefCell;
+
+    struct Kept<'l> {
+        log: &'l LinkLog,
+        links: RefCell<Vec<(Digest, Vec<u8>)>>,
+    }
+    impl HistoryStore for Kept<'_> {
+        fn resolve(&self, seal: &Digest) -> Option<Vec<u8>> {
+            self.log.resolve(seal)
+        }
+        fn keep(&self, seal: Digest, link: &[u8]) -> Result<(), CheckpointError> {
+            self.links.borrow_mut().push((seal, link.to_vec()));
+            self.log.keep(seal, link)
+        }
+    }
+
+    #[test]
+    fn two_walks_hand_back_each_link_as_kept_reading_each_link_once() {
+        let log = LinkLog::create();
+        let kept = Kept {
+            log: &log,
+            links: RefCell::new(Vec::new()),
+        };
+        let start = [Measure::new(600.0).expect("a"), Measure::new(424.0).expect("b")];
+        let case = TwoReservoirs::delivering(start, Vec::new()).expect("a body");
+        let case = case.until(SimTime::from_ns(20_000_000_000));
+        let core = ng_solver::Core::new(100_000_000);
+        let session = case.admit(&core, &kept).expect("admitted");
+        assert!(run_until(session, case.end()).is_ok(), "the run reaches its end");
+        let links = kept.links.take();
+        let (all, older) = (links.len(), links.len() / 2);
+        assert!(older > 10, "a walk of many links: {all}");
+        let before = log.links_read.get();
+        let mut late = links.iter().rev();
+        let mut early = links[..older].iter().rev();
+        loop {
+            let (late, early) = (late.next(), early.next());
+            if late.is_none() && early.is_none() {
+                break;
+            }
+            for (seal, link) in late.into_iter().chain(early) {
+                assert_eq!(
+                    log.resolve(seal).as_deref(),
+                    Some(link.as_slice()),
+                    "a link expands as it was kept"
+                );
+            }
+        }
+        let read = log.links_read.get() - before;
+        let unheld = 2 * all - 1 + 2 * older - 1;
+        assert_eq!(
+            read as usize,
+            all + older,
+            "each link read once a walk, where reading the one before each reads {unheld}"
+        );
     }
 }

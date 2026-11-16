@@ -1193,8 +1193,8 @@ test = "-p ng-record --test session a_fault_after_a_refused_link_exports_once_th
 [[mutant]]
 name = "one-window-ends-where-the-head-starts"
 path = "crates/ng-validate/src/certificate.rs"
-old = '''Some(vec![late.last()?.minus(*early.first()?)])'''
-new = '''Some(vec![late.first()?.minus(*early.first()?)])'''
+old = '''Some(vec![(*late.last()?, *early.first()?)])'''
+new = '''Some(vec![(*late.first()?, *early.first()?)])'''
 test = "-p ng-validate --test transaction a_history_one_window_long_is_certified_on_its_one_window"
 
 [[mutant]]
@@ -2646,9 +2646,45 @@ test = "-p ng-contract --test census every_arrow_of_the_catalog_keeps_the_census
 [[mutant]]
 name = "energy-drift-falls-back-to-the-common-limit"
 path = "crates/ng-validate/src/slice.rs"
-old = '''Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_ENERGY_DRIFT),'''
-new = '''Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_DRIFT),'''
+old = '''
+            } else {
+                SYNTHETIC_ENERGY_DRIFT
+            };
+'''
+new = '''
+            } else {
+                SYNTHETIC_DRIFT
+            };
+'''
 test = "-p ng-validate --test arena_certificate energy_drifts_up_to_2e5_over_the_arenas_day_and_no_further"
+
+[[mutant]]
+name = "pick-energy-drift-takes-the-milestones"
+path = "crates/ng-validate/src/slice.rs"
+old = '''
+            } else {
+                SYNTHETIC_ENERGY_DRIFT
+            };
+'''
+new = '''
+            } else {
+                SYNTHETIC_MILESTONE_ENERGY_DRIFT
+            };
+'''
+test = "-p ng-validate --test arena_certificate energy_drifts_up_to_2e5_over_the_arenas_day_and_no_further"
+
+[[mutant]]
+name = "milestone-energy-drift-falls-back-to-the-picks"
+path = "crates/ng-validate/src/slice.rs"
+old = '''
+                SYNTHETIC_MILESTONE_ENERGY_DRIFT
+            } else {
+'''
+new = '''
+                SYNTHETIC_ENERGY_DRIFT
+            } else {
+'''
+test = "-p ng-validate --test arena_certificate energy_drifts_up_to_4e6_over_the_milestones_windows_and_no_further"
 
 # This row changes the species and element arms together, and the water test sees only the species arm: the slice
 # has no reaction, so no element is a quantity of its own there, and a change to the element arm alone would survive.
@@ -3348,11 +3384,110 @@ new = '''                let scaled = k.scale(total, ratio);
 test = "-p ng-validate --test viscosity a_plain_edges_flow_falls_as_viscosity_over_its_reference_rises"
 
 [[mutant]]
+name = "ledger-total-folds-again"
+path = "crates/ng-record/src/history.rs"
+old = '''    sum.pair()
+}'''
+new = '''    let _ = sum.pair();
+    terms.fold(Compensated::ZERO, |total, (value, weight)| total.plus(value.scaled(weight)))
+}'''
+test = "-p ng-record --lib history::tests::an_exact_total_reads_one_value_however_its_rows_split_it"
+
+[[mutant]]
+name = "ledger-total-tie-away-from-even"
+path = "crates/ng-record/src/history.rs"
+old = '''if bit(shift - 1) && (below(shift - 1) || mantissa & 1 == 1) {'''
+new = '''if bit(shift - 1) && (below(shift - 1) || mantissa & 1 == 1 || true) {'''
+test = "-p ng-record --lib history::tests::an_exact_total_breaks_a_tie_to_even"
+
+[[mutant]]
+name = "ledger-total-drops-its-low-part"
+path = "crates/ng-record/src/history.rs"
+old = '''        Compensated::of(&high).plus(Compensated::of(&low))'''
+new = '''        Compensated::of(&high).plus(Compensated::of(&low).scaled(0))'''
+test = "-p ng-record --lib history::tests::an_exact_total_cancels_weighs_and_keeps_its_low_part"
+
+[[mutant]]
+name = "closure-drops-the-rows-rounding"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''floor.plus(place.scaled(i64::try_from(last_places).unwrap_or(i64::MAX)))'''
+new = '''floor.plus(place.scaled(i64::try_from(last_places).unwrap_or(i64::MAX) * 0))'''
+test = "-p ng-validate --test closure_rounding"
+
+[[mutant]]
+name = "closure-counts-one-step-a-window"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let steps = behind.abs_diff(ahead) + 1;'''
+new = '''let steps = behind.abs_diff(ahead) * 0 + 1;'''
+test = "-p ng-validate --test closure_rounding"
+
+[[mutant]]
+name = "ledger-total-past-the-range-folds"
+path = "crates/ng-record/src/history.rs"
+old = '''    sum.pair()
+}'''
+new = '''    Some(sum.pair()).filter(|total| total.at_most(*total)).unwrap_or_else(|| {
+        terms.fold(Compensated::ZERO, |total, (value, weight)| total.plus(value.scaled(weight)))
+    })
+}'''
+test = "-p ng-record --lib history::tests::an_exact_total_past_the_finite_range_is_not_finite_where_the_fold_reads_a_finite_one"
+
+[[mutant]]
+name = "ledger-total-tie-never-rounds-up"
+path = "crates/ng-record/src/history.rs"
+old = '''if bit(shift - 1) && (below(shift - 1) || mantissa & 1 == 1) {'''
+new = '''if bit(shift - 1) && below(shift - 1) {'''
+test = "-p ng-record --lib history::tests::an_exact_total_breaks_a_tie_to_even"
+
+[[mutant]]
+name = "closure-place-below-the-larger-part"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let biased = (total.bits()[0] >> 52) & 0x7ff;'''
+new = '''let biased = ((total.bits()[0] - u64::from(f64::from_bits(total.bits()[1]) < 0.0)) >> 52) & 0x7ff;'''
+test = "-p ng-validate --lib certificate::tests::a_total_just_below_a_power_of_two_takes_its_larger_parts_last_place"
+
+[[mutant]]
+name = "closure-count-past-i64-admits-nothing"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''floor.plus(place.scaled(i64::try_from(last_places).unwrap_or(i64::MAX)))'''
+new = '''floor.plus(place.scaled(i64::try_from(last_places).unwrap_or(0)))'''
+test = "-p ng-validate --lib certificate::tests::a_count_scales_as_a_float_and_holds_at_the_largest_signed_integer"
+
+[[mutant]]
+name = "closure-steps-without-the-one"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let steps = behind.abs_diff(ahead) + 1;'''
+new = '''let steps = behind.abs_diff(ahead);'''
+test = "-p ng-validate --test closure_rounding"
+
+[[mutant]]
+name = "closure-allowance-at-the-early-end"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let place = last_place(closing);'''
+new = '''let place = last_place(opening);'''
+test = "-p ng-validate --test closure_rounding"
+
+[[mutant]]
+name = "closure-result-keeps-its-first-windows-place"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''            result.closure_last_places = last_places;
+            result.closure_place = place;'''
+new = '''            let _ = (last_places, place);'''
+test = "-p ng-validate --test closure_rounding"
+
+[[mutant]]
 name = "oxygen-wall-diffusion-held"
 path = "crates/ng-metabolism/src/diffusion.rs"
 old = '''    let wall = (Side::Plasma(plasma), Side::Tissue(&interstitium));'''
 new = '''    let wall = (Side::Tissue(&interstitium), Side::Tissue(&interstitium));'''
 test = "-p ng-validate --test gases the_bed_settles_where_the_fick_identity_puts_it"
+
+[[mutant]]
+name = "ledger-lone-row-skips-its-weight"
+path = "crates/ng-record/src/history.rs"
+old = '''            return Compensated::of(&hi).plus(Compensated::of(&lo));'''
+new = '''            return value.plus(Compensated::ZERO.minus(Compensated::of(&hi)).plus(Compensated::of(&hi)));'''
+test = "-p ng-record --lib history::tests::a_lone_row_of_unit_weight_reads_as_the_limbs_read_it"
 
 [[mutant]]
 name = "carbon-dioxide-wall-diffusion-held"

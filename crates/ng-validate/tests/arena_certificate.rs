@@ -8,7 +8,6 @@ use ng_contract::*;
 use ng_validate::*;
 
 const HOUR: u64 = 3_600_000_000_000;
-const DAY: u64 = 24 * HOUR;
 const DAY_SECONDS: f64 = 86_400.0;
 const ROOT: &str = "body";
 const VESSEL: &str = "vessel";
@@ -159,16 +158,16 @@ fn packet(inflows: &[(Species, f64)]) -> Result<ParameterPacket<SyntheticFixture
     Ok(packet)
 }
 
-fn certified(inflows: &[(Species, f64)]) -> Result<Certificate, CertificateFailure> {
+fn certified(inflows: &[(Species, f64)], protocol: ArenaProtocol) -> Result<Certificate, CertificateFailure> {
     let body = steady_inflows().expect("compiled");
     let packet = packet(inflows).expect("a packet");
     let (core, store) = (ReferenceIntegrator::new(HOUR), MemoryStore::default());
     let boundary = BoundaryPort::new(Vec::new()).expect("no event");
     let session = admit_fixture(&body, packet, boundary, &core, &store).expect("admitted");
-    let Ok(session) = run_until(session, SimTime::from_ns(DAY)) else {
-        panic!("the day faulted");
+    let Ok(session) = run_until(session, SimTime::from_ns(protocol.windows.coverage_ns())) else {
+        panic!("the run faulted");
     };
-    let policy = arena_certificate(&body, ArenaProtocol::pick().windows).expect("a policy");
+    let policy = arena_certificate(&body, protocol.windows).expect("a policy");
     certify(&session.conservation(), &policy)
 }
 
@@ -187,15 +186,25 @@ fn refused(failure: CertificateFailure) -> (CertificateCheck, Option<Book>) {
 }
 
 fn drifts_up_to(species: Species, limit: f64, margin: f64, partner: Option<Species>) {
+    drifts_up_to_on(ArenaProtocol::pick(), species, limit, margin, partner);
+}
+
+fn drifts_up_to_on(
+    protocol: ArenaProtocol,
+    species: Species,
+    limit: f64,
+    margin: f64,
+    partner: Option<Species>,
+) {
     let (under, over) = (limit - margin, limit + margin);
     let beside = |amount| {
         let mut inflows = vec![(species, amount)];
         inflows.extend(partner.map(|partner| (partner, under)));
         inflows
     };
-    let passed = certified(&beside(under)).expect("inside its limit");
+    let passed = certified(&beside(under), protocol).expect("inside its limit");
     assert!((drift(&passed, species) - under).abs() < 1e-3 * margin);
-    let failed = certified(&beside(over)).expect_err("past its limit");
+    let failed = certified(&beside(over), protocol).expect_err("past its limit");
     assert_eq!(
         refused(failed),
         (CertificateCheck::Drift, Some(Book::Of(species)))
@@ -205,6 +214,11 @@ fn drifts_up_to(species: Species, limit: f64, margin: f64, partner: Option<Speci
 #[test]
 fn energy_drifts_up_to_2e5_over_the_arenas_day_and_no_further() {
     drifts_up_to(Species::Energy, 2e5, 1.0, None);
+}
+
+#[test]
+fn energy_drifts_up_to_4e6_over_the_milestones_windows_and_no_further() {
+    drifts_up_to_on(ArenaProtocol::milestone(), Species::Energy, 4e6, 4.0, None);
 }
 
 #[test]
@@ -245,7 +259,7 @@ fn the_slices_certificate_policy_stays_as_it_was() -> Result<(), AdmissionError>
         .collect();
     assert_eq!(
         digest,
-        "efcf3a80eea3f2d307a9ee4e6970d213eef5a40e8762599a1c31f2b901507620"
+        "ad3cb7ae10bebfd0367ed76a576f281c707af7c4f8308d98373c9fca733de8b0"
     );
     Ok(())
 }

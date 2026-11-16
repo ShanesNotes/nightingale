@@ -4,7 +4,9 @@ Spec: [solver contract](../../../docs/architecture/solver-contract.md) §7 (the 
 
 Type: task
 
-Status: open
+Status: claimed
+
+Claimed by: nc52-build
 
 Blocked by: none
 
@@ -29,8 +31,38 @@ This bears on the options below. A bound from the measured windows would be set 
 - Admit the man in his daily balance: fixture amounts for which the state at 06:55 repeats a day later. Then every book's bound can be tight, and the check reads a leak and not the first day's settling.
 
 - [x] A third day confirms or corrects the cause: day three against day two, at every start. It corrects it in part: "The third day" above, with `~/lanes/logs/ng-wave-4/nc52/by-day.txt`
-- [ ] The milestone protocol passes on the slice with the working core, and each bound states its source as native-contract 43 states the species'.
-- [ ] A bound that is raised, or a check that covers fewer windows, has its reason in the fixture's own doc line or in §7, and a mutant row holds it.
-- [ ] The PR says what the chosen check still sees: the smallest steady leak in a boundary energy flow that fails it, beside the slice window's whole-beat check ([native-contract 31](31-cross-interval-drift-check.md)).
+- [ ] The milestone protocol passes on the slice with the working core, with [native-contract 68](68-the-ledgers-sum-reads-one-last-place-off.md), and each bound states its source as native-contract 43 states the species'. Each bound now states its source. The pass is the certificate's own 48 h run, which the coordinator starts from `~/lanes/logs/ng-wave-4/nc52-build/milestone-certificate.sh`; this box stays open until that run is read.
+- [x] A bound that is raised, or a check that covers fewer windows, has its reason in the fixture's own doc line or in §7, and a mutant row holds it.
+- [x] The PR says what the chosen check still sees: the smallest steady leak in a boundary energy flow that fails it, beside the slice window's whole-beat check ([native-contract 31](31-cross-interval-drift-check.md)).
 
 **Non-goals:** the species' bounds; the pick's one-window protocol; the whole body's bounds, which come from the healthy-range set.
+
+## Answer
+
+**Fixture amounts cannot place the man in his day.** Contract §4: admission "cannot move a conserved total, unless a boundary law reads the body: then the total answers its own flows, admission solves it, and the packet's value is a guess". On the slice a boundary law reads water, sodium, potassium, chloride, energy and vasopressin. A packet start of -5,000 sodium in the splanchnic interstitium, with -250 potassium and -5,250 chloride, was admitted with the same sodium total, 866,616.6, to 1e-9. So admission always solves the man at one beat's balance at 06:55, and the ticket's third option has nothing to set. [Native-contract 62](62-admission-places-the-man-at-one-beats-balance.md) holds that question. Evidence: `~/lanes/logs/ng-wave-4/nc52-plan/` (`PLAN.md` §1 and §3, `r0.log`, `r0-windows.txt`).
+
+**Energy's windows by start day.** A four-day run of the arena's plan on `ng_solver::Core::new` at 10 ms, at model hash `93c12728`, on a 60 s grid of starts, against 2e5. A start in day d sets day d+1 against day d.
+
+| Starts in | Failing of all | Worst | Its start |
+|---|---|---|---|
+| Day 1, the milestone's | 625 of 1,440 | 1,828,020 (9.14 of 2e5) | 08:51 |
+| Day 2 | 191 of 1,440 | 520,803 (2.60) | 07:36 |
+| Day 3 | 59 of 1,441 | 248,374 (1.24) | 17:46 |
+
+With the baroreflex set point held, the counts are 622, 142 and 128, so the set point is not what fails energy. No warm-up of a few days passes at 2e5.
+
+**The bound.** The ticket's first option, as fixture data: twice energy's worst sliding window, 1.83e6, rounded up to one significant figure, 4e6 (`SYNTHETIC_MILESTONE_ENERGY_DRIFT` in `crates/ng-validate/src/slice.rs`). `arena_certificate` takes it when the windows' coverage is longer than one window, so the pick's one window keeps 2e5 and the pick's policy is unchanged. Every protocol whose coverage is longer than its window takes 4e6 for energy where it took 2e5, not the milestone protocol alone: the whole body's run test (`crates/ng-validate/tests/body_run.rs`, 10 s windows over its first minute), `crates/ng-validate/tests/arena.rs` (1 s windows over 2 s, and 155.5 s windows over 311 s) and a bench `score` with a span past its window. Over windows of seconds that changes no verdict, since 2e5 bound nothing there. Over 120 s windows across the sit-up energy reads 300,206, which 2e5 would refuse, and no gate runs such a protocol. A test holds each bound just under and just over, and three mutant rows hold the choice. [Native-contract 63](63-the-sliding-energy-bound-holds-more-protocols.md) holds what those tests leave open. §7's milestone bullet says where the bound comes from and why.
+
+**Will the certificate pass?** On the same run, for every conserved quantity with a bound: the grid's worst day-1 window plus twice its largest one-minute change, as a fraction of its bound. The three worst are vasopressin 0.800, energy 0.534 of 4e6 and water 0.476. Sodium, chloride and potassium are 0.42 to 0.44, and every other quantity is 0. None is over 0.9 (`~/lanes/logs/ng-wave-4/nc52-build/ruling5.txt`).
+
+**What the check still sees.** Heat leaves by `relax(held, 0, bd.heat-speed)` with k = 1e-3 a second, so energy answers its own flows within about 1,000 s.
+
+- A steady leak in a boundary energy law is part of the model: admission solves the store at its balance and the store absorbs it. No drift bound sees it.
+- A core's steady bias b, from admission, moves the store by b/k (1 - e^(-kt)). A window from start s reads b/k (e^(-ks) - e^(-k(s+W))): at most 1,000 b, and only in windows that start within about an hour of admission.
+- With the honest change of -164,356 in that window, b fails at 4e6 from about 3.84e3 to 4.16e3 a second for a bias from admission, depending on its sign. A bias that starts later is read whole by a window that holds its start, so over all starts the range is 2.2e3 to 4.2e3 a second, about a fifth to a third of the heart's mean work, 1.17e4 a second. At 2e5 it failed from 36 to 364 a second.
+- A ramping bias of a a second squared fails when a·W/k passes the bound: a growth of 4e3 a second over a day at 4e6, and 200 at 2e5.
+- Native-contract 31's whole-beat window passes a stroke-work bias up to 2.7e3 a second. That is its plan's figure, measured at main `7f0cbfe`, for a check that reads the first 6 s. So for a bias from admission energy's drift at 4e6 adds nothing below it, and a bias that starts after those 6 s is drift's alone, read from 2.2e3 a second as a loss. Native-contract 31's plan gave energy's bound as a rate of 2.3 a second, assuming the store adds up the bias. On this slice the store relaxes, so the figures above are what it catches. The repo carries that rate nowhere.
+
+**The 48 h gate.** The whole gate over 48 h is the milestone route's own run, after the developer reviewer confirms the pick. The certificate's own 48 h pass comes first, from `milestone-certificate.sh`, and box 1 waits on it.
+
+**The pick's record.** The pick ran at model hash `42c60687`. The merge of nightingale#168 moved the slice's solution at rounding only (item 6 of `~/lanes/logs/ng-wave-4/nc57/verify-coordinator/VERIFY-pr168.md`), and this ticket's PR leaves the pick's policy as it was.

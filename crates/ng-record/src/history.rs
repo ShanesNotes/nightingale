@@ -2,13 +2,148 @@ use crate::checkpoint::{CheckpointError, HistoryStore, RecordFormat};
 use core::num::NonZeroU64;
 use ng_contract::{
     AcceptedStateView, AdmissibleSet, ByteReader, ColumnId, Compensated, CompiledBody, ConservedBasis,
-    DenseBasis, Digest, Interval, Malformed, QuantityId, RecordHash, SimTime, VerifiedStep,
+    DenseBasis, Digest, Dimensionless, Interval, Malformed, Measure, QuantityId, RecordHash, SimTime,
+    VerifiedStep,
 };
 
 pub(crate) fn push_bits(bytes: &mut Vec<u8>, value: Compensated) {
     for limb in value.bits() {
         bytes.extend_from_slice(&limb.to_be_bytes());
     }
+}
+
+const LIMBS: usize = 36;
+const LIMB: i128 = (1 << 64) - 1;
+
+struct ExactSum {
+    limbs: [i128; LIMBS],
+    low: usize,
+    high: usize,
+}
+impl ExactSum {
+    fn new() -> Self {
+        Self {
+            limbs: [0; LIMBS],
+            low: LIMBS,
+            high: 0,
+        }
+    }
+    fn add(&mut self, part: f64, weight: i64) {
+        let bits = part.to_bits();
+        // A zero adds nothing, and would stretch the limbs each reading carries down to the first.
+        if bits << 1 == 0 {
+            return;
+        }
+        let biased = (bits >> 52) & 0x7ff;
+        let fraction = bits & ((1 << 52) - 1);
+        let mantissa = i128::from(if biased == 0 { fraction } else { fraction | 1 << 52 });
+        let signed = if bits >> 63 == 1 { -mantissa } else { mantissa };
+        let value = signed * i128::from(weight);
+        let position = biased.max(1) as usize - 1;
+        let (limb, offset) = (position / 64, position % 64);
+        self.put(limb, (value & LIMB) << offset);
+        self.put(limb + 1, (value >> 64) << offset);
+        self.low = self.low.min(limb);
+        self.high = self.high.max(limb + 2);
+    }
+    fn put(&mut self, limb: usize, value: i128) {
+        self.limbs[limb] += value & LIMB;
+        self.limbs[limb + 1] += value >> 64;
+    }
+    fn settled_negative(&mut self) -> bool {
+        let reached = self.low..=self.high;
+        let carry = |limbs: &mut [i128; LIMBS]| {
+            for at in reached.clone() {
+                let over = limbs[at] >> 64;
+                limbs[at] &= LIMB;
+                limbs[at + 1] += over;
+            }
+        };
+        carry(&mut self.limbs);
+        let negative = self.limbs[self.high + 1] < 0;
+        if negative {
+            for limb in &mut self.limbs[self.low..=self.high + 1] {
+                *limb = -*limb;
+            }
+            carry(&mut self.limbs);
+        }
+        negative
+    }
+    fn nearest(&self) -> f64 {
+        let limbs = &self.limbs;
+        let Some(top) = (self.low..=self.high + 1).rev().find(|&at| limbs[at] != 0) else {
+            return 0.0;
+        };
+        let highest = 64 * top + 63 - (limbs[top] as u64).leading_zeros() as usize;
+        let bit = |at: usize| (limbs[at / 64] >> (at % 64)) & 1 == 1;
+        let below = |at: usize| {
+            let whole = self.low.min(at / 64)..at / 64;
+            limbs[whole].iter().any(|&limb| limb != 0) || limbs[at / 64] & ((1 << (at % 64)) - 1) != 0
+        };
+        let bits_from = |shift: usize| {
+            let (at, offset) = (shift / 64, shift % 64);
+            let next = limbs
+                .get(at + 1)
+                .map_or(0, |&limb| (limb as u128) << (64 - offset));
+            ((((limbs[at] as u128) >> offset) | next) & ((1 << 53) - 1)) as u64
+        };
+        if highest < 53 {
+            return f64::from_bits(bits_from(0));
+        }
+        let mut shift = highest - 52;
+        let mut mantissa = bits_from(shift);
+        if bit(shift - 1) && (below(shift - 1) || mantissa & 1 == 1) {
+            mantissa += 1;
+            if mantissa == 1 << 53 {
+                mantissa >>= 1;
+                shift += 1;
+            }
+        }
+        let biased = shift as u64 + 1;
+        f64::from_bits(if biased >= 0x7ff {
+            0x7ff << 52
+        } else {
+            biased << 52 | (mantissa & ((1 << 52) - 1))
+        })
+    }
+    fn pair(mut self) -> Compensated {
+        let sign = |negative: bool, magnitude: f64| if negative { -magnitude } else { magnitude };
+        let negative = self.settled_negative();
+        let hi = self.nearest();
+        let Ok(high) = Measure::<Dimensionless>::new(sign(negative, hi)) else {
+            return Compensated::from_bits([sign(negative, hi).to_bits(), 0]).expect("an infinite part");
+        };
+        self.add(hi, -1);
+        let lo = sign(self.settled_negative(), self.nearest());
+        let low =
+            Measure::<Dimensionless>::new(sign(negative, lo)).expect("the rest is under half a last place");
+        Compensated::of(&high).plus(Compensated::of(&low))
+    }
+}
+
+fn exact_total(terms: impl Iterator<Item = (Compensated, i64)> + Clone) -> Compensated {
+    let mut lone = terms.clone();
+    if let (Some((value, weight @ (1 | -1))), None) = (lone.next(), lone.next()) {
+        // A lone row of unit weight is its own total, read as the limbs would read it: most of the body's
+        // combinations are one held pool each.
+        let [hi, lo] =
+            (value.scaled(weight).bits()).map(|part| Measure::<Dimensionless>::new(f64::from_bits(part)));
+        if let (Ok(hi), Ok(lo)) = (hi, lo) {
+            return Compensated::of(&hi).plus(Compensated::of(&lo));
+        }
+    }
+    let mut sum = ExactSum::new();
+    for (value, weight) in terms.clone() {
+        for part in value.bits().map(f64::from_bits) {
+            if !part.is_finite() {
+                return terms.fold(Compensated::ZERO, |total, (value, weight)| {
+                    total.plus(value.scaled(weight))
+                });
+            }
+            sum.add(part, weight);
+        }
+    }
+    sum.pair()
 }
 
 /// What one combination gains on one column as exchange. Only a column with a receipt crosses the boundary, so a column
@@ -55,10 +190,8 @@ impl LedgerChunk {
         let basis = body.conserved_basis();
         let quantities = (basis.combinations().iter().enumerate())
             .map(|(at, combination)| {
-                let inventory = (combination.terms().iter())
-                    .fold(Compensated::ZERO, |sum, &(row, weight)| {
-                        sum.plus(step.value(row).scaled(weight))
-                    });
+                let inventory =
+                    exact_total((combination.terms().iter()).map(|&(row, weight)| (step.value(row), weight)));
                 let (start, inflow, outflow) = previous.map_or(
                     (history.opening[at], Compensated::ZERO, Compensated::ZERO),
                     |chunk| {
@@ -333,9 +466,7 @@ impl History {
         let combinations = body.conserved_basis().combinations();
         let opening = (combinations.iter())
             .map(|combination| {
-                (combination.terms().iter()).fold(Compensated::ZERO, |sum, &(row, weight)| {
-                    sum.plus(accepted.value(row).scaled(weight))
-                })
+                exact_total((combination.terms().iter()).map(|&(row, weight)| (accepted.value(row), weight)))
             })
             .collect();
         Self::from_opening(format, body, opening, run, image, parameters)
@@ -753,7 +884,287 @@ impl Curve<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::exchanged;
+    use super::{ExactSum, exact_total, exchanged};
+    use ng_contract::{Compensated, Dimensionless, Measure};
+
+    fn two_to(power: i32) -> f64 {
+        f64::from_bits(((1023 + power) as u64) << 52)
+    }
+    fn exact(value: f64) -> Compensated {
+        Compensated::of(&Measure::<Dimensionless>::new(value).expect("finite"))
+    }
+    fn pair(hi: f64, lo: f64) -> Compensated {
+        Compensated::from_bits([hi.to_bits(), lo.to_bits()]).expect("a normalized pair")
+    }
+    fn total(terms: &[(Compensated, i64)]) -> Compensated {
+        exact_total(terms.iter().copied())
+    }
+    fn fold(terms: &[(Compensated, i64)]) -> Compensated {
+        (terms.iter()).fold(Compensated::ZERO, |sum, &(value, weight)| {
+            sum.plus(value.scaled(weight))
+        })
+    }
+    fn finite(value: Compensated) -> bool {
+        value.at_most(value)
+    }
+
+    #[test]
+    fn an_exact_total_reads_one_value_however_its_rows_split_it() {
+        let rows = [
+            pair(1000.0, 3.8173233833909553e-17),
+            pair(599.9999999999999, -2.158212844549645e-14),
+            pair(85.0, 2.096380695060251e-20),
+        ];
+        let moved = exact(7.506156663584488e-24);
+        let after = [rows[0], rows[1].minus(moved), rows[2].plus(moved)];
+        assert_eq!(
+            after[1].plus(moved).bits(),
+            rows[1].bits(),
+            "the second row holds the transfer exactly"
+        );
+        assert_eq!(
+            after[2].minus(moved).bits(),
+            rows[2].bits(),
+            "the third row holds the transfer exactly"
+        );
+        let [before, after] = [rows, after].map(|rows| rows.map(|row| (row, 1)));
+        let folded = fold(&after).minus(fold(&before));
+        assert_eq!(
+            folded.bits(),
+            exact(-two_to(-96)).bits(),
+            "the fold moves by one last place"
+        );
+        assert_eq!(
+            total(&after).bits(),
+            total(&before).bits(),
+            "the exact total does not"
+        );
+    }
+
+    #[test]
+    fn an_exact_total_cancels_weighs_and_keeps_its_low_part() {
+        let cancelled = total(&[(exact(1e16), 1), (exact(1.0), 3), (exact(-1e16), 1)]);
+        assert_eq!(cancelled.bits(), exact(3.0).bits(), "rows of both signs cancel");
+        let weighed = total(&[(exact(1.0).plus(exact(two_to(-80))), 1000), (exact(-1000.0), 1)]);
+        assert_eq!(
+            weighed.bits(),
+            exact(1000.0 * two_to(-80)).bits(),
+            "a weight multiplies the low part too"
+        );
+        let negative = total(&[(exact(-2.5), 2), (exact(two_to(-200)), -1)]);
+        assert_eq!(negative.bits(), pair(-5.0, -two_to(-200)).bits());
+        let low = total(&[(exact(1.0), 1), (exact(two_to(-60)), 1)]);
+        assert_eq!(low.bits(), pair(1.0, two_to(-60)).bits(), "the low part stays");
+        let rounded = total(&[(exact(1.0), 1), (exact(two_to(-60)), 1), (exact(two_to(-120)), 1)]);
+        assert_eq!(
+            rounded.bits(),
+            pair(1.0, two_to(-60)).bits(),
+            "rounded once below the pair's last place"
+        );
+    }
+
+    #[test]
+    fn an_exact_total_breaks_a_tie_to_even() {
+        let even = total(&[(exact(1.0), 1), (exact(two_to(-53)), 1)]);
+        assert_eq!(
+            even.bits(),
+            pair(1.0, two_to(-53)).bits(),
+            "a tie in the high part keeps the even float"
+        );
+        let odd = 1.0 + two_to(-52);
+        let up = total(&[(exact(odd), 1), (exact(two_to(-53)), 1)]);
+        assert_eq!(
+            up.bits(),
+            pair(1.0 + two_to(-51), -two_to(-53)).bits(),
+            "and rounds an odd one up"
+        );
+        let low = total(&[(exact(1.0), 1), (exact(two_to(-60)), 1), (exact(two_to(-113)), 1)]);
+        assert_eq!(
+            low.bits(),
+            pair(1.0, two_to(-60)).bits(),
+            "a tie in the low part keeps the even float"
+        );
+        let negative = total(&[
+            (exact(-1.0), 1),
+            (exact(-two_to(-60)), 1),
+            (exact(-two_to(-113)), 1),
+        ]);
+        assert_eq!(negative.bits(), pair(-1.0, -two_to(-60)).bits(), "on either sign");
+        let odd = two_to(-60) + two_to(-112);
+        let up = total(&[(exact(1.0), 1), (exact(odd), 1), (exact(two_to(-113)), 1)]);
+        assert_eq!(
+            up.bits(),
+            pair(1.0, two_to(-60) + two_to(-111)).bits(),
+            "and a tie in the low part rounds an odd one up"
+        );
+    }
+
+    #[test]
+    fn an_exact_total_holds_the_smallest_and_largest_parts() {
+        let smallest = f64::from_bits(1);
+        assert_eq!(
+            total(&[(exact(smallest), 3)]).bits(),
+            exact(f64::from_bits(3)).bits()
+        );
+        let subnormal = total(&[(exact(two_to(-1022)), 1), (exact(-smallest), 1)]);
+        assert_eq!(
+            subnormal.bits(),
+            exact(two_to(-1022) - smallest).bits(),
+            "below the smallest normal"
+        );
+        let largest = total(&[(exact(f64::MAX), 1), (exact(1.0), 1), (exact(f64::MAX), -1)]);
+        assert_eq!(
+            largest.bits(),
+            exact(1.0).bits(),
+            "the largest part cancels exactly"
+        );
+        assert_eq!(total(&[(exact(f64::MAX), 1)]).bits(), exact(f64::MAX).bits());
+        assert!(
+            !finite(total(&[(exact(f64::MAX), 2)])),
+            "a sum past the finite range is not finite"
+        );
+        let overflowed = exact(f64::MAX).scaled(2);
+        assert!(
+            !finite(total(&[(exact(1.0), 1), (overflowed, 1)])),
+            "a row that is not finite gives a total that is not"
+        );
+        let nan = overflowed.minus(overflowed);
+        assert!(
+            !finite(total(&[(nan, 1), (exact(1.0), 1)])),
+            "nor does a part that is not a number"
+        );
+    }
+
+    #[test]
+    fn an_exact_total_past_the_finite_range_is_not_finite_where_the_fold_reads_a_finite_one() {
+        let heavy = [
+            (exact(two_to(970)), (1 << 53) - 2),
+            (exact(two_to(970)), (1 << 53) + 1),
+        ];
+        let below = two_to(970) - two_to(917);
+        let light = [two_to(1023), two_to(1023) - two_to(971), below]
+            .into_iter()
+            .chain([two_to(915); 4])
+            .map(|row| (exact(row), 1))
+            .collect::<Vec<_>>();
+        for (terms, rows) in [(&heavy[..], "weights past 2^53"), (&light[..], "unit weights")] {
+            assert!(finite(fold(terms)), "the fold reads {rows} as finite");
+            assert!(!finite(total(terms)), "2^1024 - 2^970 from {rows} is not finite");
+            let negated: Vec<_> = terms.iter().map(|&(row, weight)| (row, -weight)).collect();
+            assert!(!finite(total(&negated)), "nor its negative from {rows}");
+        }
+    }
+
+    struct Draws(u64);
+    impl Draws {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn below(&mut self, limit: u64) -> u64 {
+            self.next() % limit
+        }
+        fn float(&mut self, power: i32) -> f64 {
+            let mantissa = self.next() >> 11 | 1 << 52;
+            f64::from_bits(((1023 + power) as u64) << 52 | (mantissa & ((1 << 52) - 1)))
+        }
+        fn value(&mut self, power: i32) -> Compensated {
+            let below = self.below(40) as i32;
+            let low = self.float(power - 54 - below);
+            let low = if self.next() & 1 == 1 { -low } else { low };
+            exact(self.float(power)).plus(exact(low))
+        }
+    }
+
+    #[test]
+    fn a_lone_row_of_unit_weight_reads_as_the_limbs_read_it() {
+        let mut draws = Draws(0x51_7CC1_B727_220A);
+        let zero_low = pair(5.0, -0.0);
+        let rows = (0..2_000).map(|_| {
+            let power = draws.below(80) as i32 - 40;
+            draws.value(power)
+        });
+        for row in rows.chain([zero_low, Compensated::ZERO.minus(zero_low)]) {
+            for weight in [1, -1] {
+                let mut limbs = ExactSum::new();
+                for part in row.bits().map(f64::from_bits) {
+                    limbs.add(part, weight);
+                }
+                let read = limbs.pair();
+                assert_eq!(total(&[(row, weight)]).bits(), read.bits(), "{row:?} at {weight}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_fold_and_the_exact_total_agree_where_the_fold_is_exact() {
+        let mut draws = Draws(0x9E37_79B9_7F4A_7C15);
+        for _ in 0..2_000 {
+            let terms: Vec<_> = (0..1 + draws.below(12))
+                .map(|_| (exact((draws.next() >> 24) as f64), draws.below(7) as i64 - 3))
+                .collect();
+            assert_eq!(total(&terms).bits(), fold(&terms).bits(), "{terms:?}");
+        }
+    }
+
+    fn last_place(value: Compensated) -> f64 {
+        f64::from_bits((((value.bits()[0] >> 52) & 0x7ff) - 105) << 52)
+    }
+
+    #[test]
+    fn a_row_update_rounds_under_4_last_places_at_a_unit_coefficient_and_under_7_at_any_other() {
+        let mut draws = Draws(0x2545_F491_4F6C_DD1D);
+        let (mut unit, mut other) = (0.0f64, 0.0f64);
+        for _ in 0..200_000 {
+            let power = draws.below(60) as i32 - 30;
+            let row = draws.value(power);
+            let coefficient = match draws.below(3) {
+                0 => 1,
+                1 => -1,
+                _ => (2 + draws.below(9) as i64) * if draws.next() & 1 == 1 { 1 } else { -1 },
+            };
+            let smaller = draws.below(64) as i32 + 4;
+            let transfer = draws.value(power - smaller);
+            let transfer = if draws.next() & 1 == 1 {
+                transfer
+            } else {
+                Compensated::ZERO.minus(transfer)
+            };
+            let exact_after = total(&[(row, 1), (transfer, coefficient)]);
+            if !Compensated::ZERO.at_most(exact_after) {
+                continue;
+            }
+            let after = row.plus(transfer.scaled(coefficient));
+            let error = total(&[(after, 1), (row, -1), (transfer, -coefficient)]).abs();
+            let larger = if row.at_most(exact_after) {
+                exact_after
+            } else {
+                row
+            };
+            let error_hi = f64::from_bits(error.bits()[0]);
+            let used = error_hi / last_place(larger);
+            if coefficient.abs() == 1 {
+                let own = error_hi / last_place(exact_after);
+                assert!(
+                    error.at_most(exact(4.0 * last_place(exact_after))),
+                    "{own} last places at a unit coefficient"
+                );
+                unit = if own > unit { own } else { unit };
+            } else {
+                assert!(
+                    error.at_most(exact(7.0 * last_place(larger))),
+                    "{used} last places at {coefficient}"
+                );
+                other = if used > other { used } else { other };
+            }
+        }
+        assert!(
+            unit > 0.5 && other > 0.5,
+            "the draws reach the rounding: {unit} {other}"
+        );
+    }
 
     const FUEL: usize = 0;
     const CARBON_DIOXIDE: usize = 1;
