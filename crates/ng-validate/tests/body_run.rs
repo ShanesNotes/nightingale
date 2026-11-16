@@ -9,7 +9,7 @@ use ng_validate::*;
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
 const PACKET: &str = "e9943a87f779d37f8514aa50f1017961ccab29f66400152357e8b617b7af8e40";
-const ADMITTED_SEAL: &str = "cb24aadc333ae9d070bac0dc59a0ae82958e541c6f4eea3aa6336b23df30b242";
+const ADMITTED_SEAL: &str = "e5e80c60e0204cdaf793148a49f92313eee4dcaed756ccbcae2b2cd4b1f58cdc";
 
 struct Counted {
     core: ng_solver::Core,
@@ -437,7 +437,7 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
     );
     expect![[r#"
         packet e9943a87f779d37f8514aa50f1017961ccab29f66400152357e8b617b7af8e40
-        seal f39ca24a6634d6f8d9036c84cad01ff4fdc6feeba0a61e6eb2dd0145ede0ad11
+        seal 2d7770894926021e4ee597deffd352819359f97c9b3dc4b74ba6d9c65e695d20
         steps 198
         viscosity over its reference at the start 1.000000413
     "#]]
@@ -622,16 +622,14 @@ fn exchanged(session: &Session<'_, Running>, quantity: QuantityId, at: u64, outf
     panic!("no segment holds {at}")
 }
 
-/// Over the whole beats of the first minute's last ten seconds, the flow is the water the left ventricle loses while
-/// its valve stands open: the trapezoid of the valve's flow at the ends of steps reads it 0.6% high. The lung's lymph
-/// takes water and no gas from the pulmonary bed to the central veins, so the pulmonary artery carries the flow and
-/// the lymph at its own oxygen and carbon dioxide contents. With the trapezoid means of the two vessels' contents of
-/// each gas, what the systemic beds take and make meets their held rates to LEDGER, the body's settling over nine
-/// beats, as the ledger's own exchange at the lung meets the whole body's.
+/// The flow is the water the left ventricle loses while its valve stands open, because the trapezoid of the valve's
+/// flow at the ends of steps reads it 0.6% high. The lung's lymph takes water and no gas from the pulmonary bed to the
+/// central veins, so the pulmonary artery carries that water too. Both gases then meet their held rates to LEDGER, the
+/// body's settling over nine beats.
 fn the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_held_rates_over_whole_beats(
     start: &Start,
 ) {
-    let mut samples: Vec<(u64, [f64; 5], f64, f64)> = Vec::new();
+    let mut samples: Vec<(u64, [f64; 5], bool, f64)> = Vec::new();
     let lymph = field(
         "FL",
         "lymph",
@@ -662,7 +660,7 @@ fn the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_
                 read("pulmonary artery", Species::CarbonDioxide),
                 value(start, session, lymph),
             ],
-            aortic_flow(start, session),
+            aortic_flow(start, session) > 0.0,
             value(start, session, ventricle),
         ));
     });
@@ -671,13 +669,13 @@ fn the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_
     let held = (last - first) as f64 / 1e9;
     let (mut means, mut ejected) = ([0.0; 5], 0.0);
     for pair in samples.windows(2) {
-        let ((from, then, opened, before), (to, now, open, after)) = (pair[0], pair[1]);
+        let ((from, then, was_ejecting, before), (to, now, ejecting, after)) = (pair[0], pair[1]);
         if from >= first && to <= last {
             let length = (to - from) as f64 / 1e9;
             for (mean, (then, now)) in means.iter_mut().zip(then.iter().zip(&now)) {
                 *mean += 0.5 * length * (then + now) / held;
             }
-            if opened > 0.0 || open > 0.0 {
+            if was_ejecting || ejecting {
                 ejected += before - after;
             }
         }
