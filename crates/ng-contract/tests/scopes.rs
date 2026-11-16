@@ -1218,12 +1218,23 @@ fn a_grant_shared_where_one_chemistry_has_no_pools_is_no_second_owner() -> Resul
     Ok(())
 }
 
-fn burns_in_two_spaces_of_the_muscle_bed(metabolisms: Space, musculoskeletal: Space) -> Result<(), AdmissionError> {
+fn burns_in_two_spaces_of_the_muscle_bed(
+    metabolisms: Space,
+    musculoskeletal: Space,
+) -> Result<(), AdmissionError> {
     let mut schema = cell_schema(&MUSCLE_BED)?;
     schema.carry::<Oxygen, CapillaryBed>(Space::Interstitium);
     schema.carry::<CarbonDioxide, CapillaryBed>(Space::Interstitium);
     let found = chemistry(schema, &[], |body| {
-        metabolism(body, |mt| react::<_, CapillaryBed, _, 1>(mt, "burn", burned_in(metabolisms)))?;
+        let (mut mt, ports) = body.metabolism(None)?.parts();
+        let glucose = ports.fuel_into_cells::<Glucose>(&mut mt);
+        still(&mut mt, &glucose)?;
+        let oxygen = ports.gas_into_cells::<Oxygen>(&mut mt);
+        still(&mut mt, &oxygen)?;
+        let carbon_dioxide = ports.gas_into_cells::<CarbonDioxide>(&mut mt);
+        still(&mut mt, &carbon_dioxide)?;
+        react::<_, CapillaryBed, _, 1>(&mut mt, "burn", burned_in(metabolisms))?;
+        body.add(mt.finish());
         let (mut ms, _) = body.musculoskeletal(None)?.parts();
         react::<_, Beds<Muscle>, _, 1>(&mut ms, "burn", burned_in(musculoskeletal))?;
         body.add(ms.finish());
@@ -1262,7 +1273,9 @@ fn glycolysis() -> Proportions<Glucose> {
     Proportions::<Glucose>::using(Space::Cells).makes::<Lactate, 2>(Space::Cells)
 }
 
-fn beside_glycolysis<Q: Reactant, const N: u32>(made: Proportions<Q, N>) -> Result<CompiledBody, AdmissionError> {
+fn beside_glycolysis<Q: Reactant, const N: u32>(
+    made: Proportions<Q, N>,
+) -> Result<CompiledBody, AdmissionError> {
     chemistry(lactate_in_cells(&BOTH_BEDS, 400.0)?, &[], |body| {
         metabolism(body, |mt| {
             burns(mt)?;
@@ -1291,7 +1304,8 @@ fn the_hepatic_card_writing_metabolisms_glycolysis_in_reverse_at_the_liver_bed_i
 }
 
 #[test]
-fn the_hepatic_card_writing_metabolisms_glycolysis_in_reverse_from_lactate_is_refused() -> Result<(), AdmissionError> {
+fn the_hepatic_card_writing_metabolisms_glycolysis_in_reverse_from_lactate_is_refused()
+-> Result<(), AdmissionError> {
     let reverse = Proportions::<Lactate, 2>::using(Space::Cells)
         .makes::<Glucose, 1>(Space::Cells)
         .energy_into(Space::Thermal);
