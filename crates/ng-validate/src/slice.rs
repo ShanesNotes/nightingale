@@ -591,6 +591,9 @@ pub fn certificate_with(
     }
     let basis = body.conserved_basis();
     let quantities = basis.ids().map(|quantity| match quantity.book() {
+        Book::Of(Species::Energy) | Book::Energy if drifts.names(Species::Energy) => {
+            Species::Energy.visit(Bounded(quantity, drifts))
+        }
         Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_ENERGY_DRIFT),
         Book::Of(species) if drifts.names(species) => species.visit(Bounded(quantity, drifts)),
         Book::Of(species) => species.visit(Limits(quantity, species_drift(species))),

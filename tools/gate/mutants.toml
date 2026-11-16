@@ -3426,7 +3426,7 @@ name = "oxygen-drift-bound-loosened"
 path = "crates/ng-validate/src/body/packet.rs"
 old = '''const OXYGEN_DRIFT: f64 = 3.0;'''
 new = '''const OXYGEN_DRIFT: f64 = 6.0;'''
-test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_oxygens_and_carbon_dioxides_stated_ones"
+test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
 name = "packet-one-bed-use-doubled"
@@ -3440,7 +3440,7 @@ name = "carbon-dioxide-drift-bound-tightened"
 path = "crates/ng-validate/src/body/packet.rs"
 old = '''const CARBON_DIOXIDE_DRIFT: f64 = 0.8;'''
 new = '''const CARBON_DIOXIDE_DRIFT: f64 = 0.4;'''
-test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_oxygens_and_carbon_dioxides_stated_ones"
+test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_its_stated_ones"
 
 [[mutant]]
 name = "saturation-set-finite"

@@ -969,11 +969,17 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// day (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set (record 0004).
 /// Each gas's change is mostly its swing within a beat, read across windows that hold no whole number of beats; the
 /// rest is the run settling from the admitted orbit onto the core's own, which a smaller step cap moves. Measured on
-/// the run of body 08's third PR: oxygen 1.489 umol and carbon dioxide 0.386 umol.
-const DRIFTS: [(Species, f64); 2] = [
+/// the run of body 08's third PR: oxygen 1.489 umol and carbon dioxide 0.386 umol. Energy's bound is the body's own
+/// once its beds burn fuel, in place of the slice's day-long one. Its change is the walls' elastic store filling and
+/// the heat stores emptying as the run settles from the admitted start, 4,971 in and 1,583 out over the first ten
+/// seconds, while the fuels and the beds' heat move under 0.003. Measured on the run of body 09's first PR: energy
+/// 3,364.5.
+const DRIFTS: [(Species, f64); 3] = [
     (Species::Oxygen, OXYGEN_DRIFT),
     (Species::CarbonDioxide, CARBON_DIOXIDE_DRIFT),
+    (Species::Energy, ENERGY_DRIFT),
 ];
+const ENERGY_DRIFT: f64 = 7e3;
 const OXYGEN_DRIFT: f64 = 3.0;
 const CARBON_DIOXIDE_DRIFT: f64 = 0.8;
 

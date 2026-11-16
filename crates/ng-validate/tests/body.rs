@@ -934,8 +934,8 @@ fn the_gut_transit_reads_both_lumens_so_admission_can_place_each_species_between
 }
 
 #[test]
-fn the_bodys_own_drift_bounds_are_oxygens_and_carbon_dioxides_stated_ones() -> Result<(), AdmissionError> {
-    struct Stated([(Species, f64); 2]);
+fn the_bodys_own_drift_bounds_are_its_stated_ones() -> Result<(), AdmissionError> {
+    struct Stated([(Species, f64); 3]);
     impl DriftTable for Stated {
         fn names(&self, species: Species) -> bool {
             self.0.iter().any(|(named, _)| *named == species)
@@ -951,10 +951,14 @@ fn the_bodys_own_drift_bounds_are_oxygens_and_carbon_dioxides_stated_ones() -> R
     let digest = |table: &Stated| -> Result<Digest, AdmissionError> {
         Ok(certificate_with(&body, windows, table)?.digest())
     };
-    let stated = [(Species::Oxygen, 3.0), (Species::CarbonDioxide, 0.8)];
+    let stated = [
+        (Species::Oxygen, 3.0),
+        (Species::CarbonDioxide, 0.8),
+        (Species::Energy, 7e3),
+    ];
     let policy = body_certificate(&body, windows)?.digest();
     assert_eq!(policy, digest(&Stated(stated))?);
-    for (index, by) in [(0, 0.5), (0, 2.0), (1, 0.5), (1, 2.0)] {
+    for (index, by) in [(0, 0.5), (0, 2.0), (1, 0.5), (1, 2.0), (2, 0.5), (2, 2.0)] {
         let mut moved = stated;
         moved[index].1 *= by;
         assert_ne!(policy, digest(&Stated(moved))?, "{moved:?}");
