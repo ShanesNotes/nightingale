@@ -40,7 +40,7 @@ fn flow() -> f64 {
     RENEWAL * WATER[0]
 }
 
-/// The use the settled bed meets: the flow times the arterial less the settled content.
+/// The use the settled bed meets: the flow times the arterial less the settled oxygen content.
 fn used() -> f64 {
     flow() * (curve(REACH.0).2 - curve(REACH.1).2)
 }
@@ -283,7 +283,7 @@ fn speciation_meets_the_curve_at_three_partial_pressures_from_a_cold_guess_and_a
     Ok(())
 }
 
-/// The plasma starts at the arterial content, so its oxygen falls to where the use takes it, through speciation.
+/// The plasma starts at the arterial oxygen content, so its oxygen falls to where the use takes it, through speciation.
 fn settling<'m>(
     body: &'m CompiledBody,
     core: &'m ng_solver::Core,
@@ -306,7 +306,7 @@ fn the_bed_settles_where_the_fick_identity_puts_it() -> Result<(), Initializatio
     let taken = flow() * (curve(REACH.0).2 - venous);
     assert!(
         (taken - used()).abs() <= 1e-6 * used(),
-        "the flow times the arterial less the venous content is {taken} against a use of {}",
+        "the flow times the arterial less the venous oxygen content is {taken} against a use of {}",
         used()
     );
     let pressure = value(&body, &session, field("oxygen partial pressure")?);
@@ -315,7 +315,7 @@ fn the_bed_settles_where_the_fick_identity_puts_it() -> Result<(), Initializatio
 }
 
 /// The arena certificate's closure, a part in 10^12 of the total, with no bound on the drift, because the settling bed's
-/// total falls as its plasma gives up the arterial content.
+/// total falls as its plasma gives up the arterial oxygen content.
 const CLOSURE: f64 = 1e-12;
 
 #[test]
@@ -359,7 +359,7 @@ fn oxygen_closes_to_the_ledgers_floor_through_speciation() -> Result<(), Initial
 /// At or above capacity no partial pressure leaves the bound share under one, so its logarithm has no value: the
 /// engine refuses and names the law, and no number stands for it.
 #[test]
-fn content_at_capacity_has_no_partial_pressure() -> Result<(), AdmissionError> {
+fn oxygen_content_at_capacity_has_no_partial_pressure() -> Result<(), AdmissionError> {
     let (body, core, store) = (compiled()?, ng_solver::Core::new(SECOND / 100), MemoryStore::default());
     for content in [HEME * HEMOGLOBIN + 1.0, 2.0 * HEME * HEMOGLOBIN] {
         let start = Start {

@@ -8,8 +8,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "a653b631be94842a10a9871eae045ecedf9f8e4c7dfd9c3012388f3c3a40e237";
-const ADMITTED_SEAL: &str = "d4730924b9fe6368116651d7d93727baa10fcadb77b74b3d6bdb4b8b5377b0cd";
+const PACKET: &str = "5fc7d74e14c510181246e61d07e8ec9666fc9017cf34ba412a3e34123cfe65e2";
+const ADMITTED_SEAL: &str = "06fdb3d8f1ec14847338d689d3918a329f0e546dcf3583a0a08b4ac1b9e458d4";
 
 struct Counted {
     core: ng_solver::Core,
@@ -362,22 +362,22 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet a653b631be94842a10a9871eae045ecedf9f8e4c7dfd9c3012388f3c3a40e237
-        seal 1e354bb5feb27495cef9a26fb0f0a0fd021c720c044f09e2453f11ba5f9f2f57
+        packet 5fc7d74e14c510181246e61d07e8ec9666fc9017cf34ba412a3e34123cfe65e2
+        seal 31c8cc32ceb8bb7a2abacd3e713fb09188a4d5e5664211a32402243a744ab450
         steps 198
     "#]]
     .assert_eq(&pin);
     expect![[r#"
          100.432831 ms  arterial pressure 134.633292  right atrial pressure 3.008802  portal vein pressure 6.258052  leg vein pressure 3.596931  heart rate 1.063945  sympathetic traffic 0.786091  filtration 1.670060  urine 0.020000  wall power 24549.627276  aortic flow 0.000000
-         200.972252 ms  arterial pressure 127.073817  right atrial pressure 3.566992  portal vein pressure 6.406698  leg vein pressure 3.850277  heart rate 1.081239  sympathetic traffic 0.086530  filtration 2.109290  urine 0.020000  wall power 15618.218659  aortic flow 39.436862
-         300.343654 ms  arterial pressure 119.007051  right atrial pressure 4.057781  portal vein pressure 6.216546  leg vein pressure 4.180909  heart rate 1.048358  sympathetic traffic 0.016675  filtration 2.344802  urine 0.020000  wall power 39549.002871  aortic flow 0.000000
-         403.707430 ms  arterial pressure 109.434877  right atrial pressure 3.675871  portal vein pressure 5.988799  leg vein pressure 4.614320  heart rate 1.004394  sympathetic traffic 0.012228  filtration 2.415994  urine 0.020000  wall power 13948.485344  aortic flow 0.000000
-         504.102529 ms  arterial pressure 101.045102  right atrial pressure 2.024956  portal vein pressure 5.767216  leg vein pressure 4.364992  heart rate 0.970296  sympathetic traffic 0.022847  filtration 2.358741  urine 0.020000  wall power 12015.605553  aortic flow 0.000000
-         608.059522 ms  arterial pressure 93.141455  right atrial pressure 1.494962  portal vein pressure 5.498127  leg vein pressure 3.709215  heart rate 0.947449  sympathetic traffic 0.073838  filtration 2.207971  urine 0.020000  wall power 8662.269543  aortic flow 0.000000
-         708.059522 ms  arterial pressure 86.170673  right atrial pressure 1.466155  portal vein pressure 5.280744  leg vein pressure 3.176841  heart rate 0.940358  sympathetic traffic 0.258646  filtration 2.015385  urine 0.020000  wall power 6352.013960  aortic flow 0.000000
-         808.059522 ms  arterial pressure 79.751724  right atrial pressure 1.672362  portal vein pressure 5.262427  leg vein pressure 2.969095  heart rate 0.951979  sympathetic traffic 0.637060  filtration 1.805026  urine 0.020000  wall power 4974.942726  aortic flow 0.000000
-         908.059522 ms  arterial pressure 73.855081  right atrial pressure 1.951307  portal vein pressure 5.528042  leg vein pressure 3.094495  heart rate 0.982017  sympathetic traffic 0.902233  filtration 1.592553  urine 0.020000  wall power 4010.478322  aortic flow 0.000000
-        1000.179867 ms  arterial pressure 68.861094  right atrial pressure 2.199746  portal vein pressure 5.891237  leg vein pressure 3.309513  heart rate 1.020599  sympathetic traffic 0.976716  filtration 1.404101  urine 0.020000  wall power 3214.816811  aortic flow 0.000000
+         200.971980 ms  arterial pressure 127.073834  right atrial pressure 3.566990  portal vein pressure 6.406698  leg vein pressure 3.850277  heart rate 1.081239  sympathetic traffic 0.086530  filtration 2.109289  urine 0.020000  wall power 15618.227416  aortic flow 39.436549
+         300.343597 ms  arterial pressure 119.007058  right atrial pressure 4.057781  portal vein pressure 6.216546  leg vein pressure 4.180909  heart rate 1.048358  sympathetic traffic 0.016675  filtration 2.344802  urine 0.020000  wall power 39549.033730  aortic flow 0.000000
+         403.707425 ms  arterial pressure 109.434878  right atrial pressure 3.675871  portal vein pressure 5.988799  leg vein pressure 4.614320  heart rate 1.004394  sympathetic traffic 0.012228  filtration 2.415994  urine 0.020000  wall power 13948.485472  aortic flow 0.000000
+         504.102524 ms  arterial pressure 101.045103  right atrial pressure 2.024956  portal vein pressure 5.767216  leg vein pressure 4.364992  heart rate 0.970296  sympathetic traffic 0.022847  filtration 2.358741  urine 0.020000  wall power 12015.605764  aortic flow 0.000000
+         608.059522 ms  arterial pressure 93.141456  right atrial pressure 1.494962  portal vein pressure 5.498127  leg vein pressure 3.709215  heart rate 0.947449  sympathetic traffic 0.073838  filtration 2.207971  urine 0.020000  wall power 8662.269590  aortic flow 0.000000
+         708.059522 ms  arterial pressure 86.170674  right atrial pressure 1.466155  portal vein pressure 5.280744  leg vein pressure 3.176841  heart rate 0.940358  sympathetic traffic 0.258646  filtration 2.015385  urine 0.020000  wall power 6352.014031  aortic flow 0.000000
+         808.059522 ms  arterial pressure 79.751724  right atrial pressure 1.672362  portal vein pressure 5.262427  leg vein pressure 2.969095  heart rate 0.951979  sympathetic traffic 0.637060  filtration 1.805026  urine 0.020000  wall power 4974.942807  aortic flow 0.000000
+         908.059522 ms  arterial pressure 73.855082  right atrial pressure 1.951307  portal vein pressure 5.528042  leg vein pressure 3.094495  heart rate 0.982017  sympathetic traffic 0.902233  filtration 1.592553  urine 0.020000  wall power 4010.478396  aortic flow 0.000000
+        1000.179869 ms  arterial pressure 68.861095  right atrial pressure 2.199746  portal vein pressure 5.891237  leg vein pressure 3.309513  heart rate 1.020599  sympathetic traffic 0.976716  filtration 1.404101  urine 0.020000  wall power 3214.816860  aortic flow 0.000000
     "#]].assert_eq(&trace);
 }
 
@@ -435,7 +435,7 @@ impl Edge {
 /// At the admitted start viscosity is its reference, so the edge keeps the packet's resistance. A 400 mL water bolus
 /// into the gut then lowers the hematocrit, viscosity and the edge's resistance, and the edge's flow is its drop over
 /// the packet's resistance times viscosity's ratio, so the run tells viscosity's part of the flow from the drop's. The
-/// water carries no oxygen, so the body's oxygen holds over the bolus while arterial hemoglobin and content fall.
+/// water carries no oxygen, so the body's oxygen holds over the bolus while arterial hemoglobin and oxygen content fall.
 fn a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(start: &Start) {
     let mut session = start.session();
     let before = Edge::at(start, &session);
@@ -506,7 +506,7 @@ const SYSTEMIC_USE: f64 = 95.0;
 /// Over the first minute's last ten seconds, step by step, the mean aortic flow times the systemic arteries' less the
 /// pulmonary artery's mean oxygen content meets the systemic beds' held use. Means over whole beats stand in for the
 /// identity's steady flows, and the arteries and veins between the two reads store a beat's oxygen, so it holds to 1%.
-fn the_flow_times_the_arterial_less_the_venous_content_meets_the_held_use(start: &Start) {
+fn the_flow_times_the_arterial_less_the_venous_oxygen_content_meets_the_held_use(start: &Start) {
     let (ventricle, arteries) = (
         site::<VesselSegment>("left ventricle"),
         site::<VesselSegment>("systemic arteries"),
@@ -637,5 +637,5 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
     };
     assert_eq!(over_ceilings(counts, CEILINGS), Vec::<&str>::new(), "{counts:?}");
     a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(&start);
-    the_flow_times_the_arterial_less_the_venous_content_meets_the_held_use(&start);
+    the_flow_times_the_arterial_less_the_venous_oxygen_content_meets_the_held_use(&start);
 }
