@@ -60,7 +60,7 @@ impl<'b, O: Owner> Henry<'b, O> {
     }
 }
 
-/// A weak acid's charge after speciation, `c (a pH - b)`, linear in pH.
+/// A weak acid's charge after speciation, `c (a pH - b)`.
 struct Weak<'b, O, Q> {
     slope: Parameter<'b, O, PerAcid<Q>>,
     offset: Parameter<'b, O, PerAcid<Q>>,
@@ -164,8 +164,6 @@ fn charge<'b, 'k, O: Owner, Q: Substance + SameDimension<Charge>>(
 }
 
 impl<'b, O: Owner> StrongIons<'b, O> {
-    /// Sodium, potassium and twice magnesium and calcium, less chloride, lactate, ketones, the diet's organic anion and
-    /// the lumped fixed acid, over the plasma's volume.
     fn difference<'k>(
         &self,
         k: &mut Bed<'b, 'k, O>,
@@ -199,7 +197,10 @@ pub(crate) fn define<'b, O: Owner>(
     laws: &mut FragmentBuilder<'b, O>,
     plasma: &Plasma<'b, O>,
     speciated: &Speciated<'b, O>,
-    (bicarbonate_out, acidity_out): (&Field<'b, O, Concentration<CarbonDioxide>>, &Field<'b, O, Dimensionless>),
+    (bicarbonate_out, acidity_out): (
+        &Field<'b, O, Concentration<CarbonDioxide>>,
+        &Field<'b, O, Dimensionless>,
+    ),
     class: RateClass,
 ) {
     let acid = Acid::declare(laws);

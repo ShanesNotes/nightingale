@@ -883,7 +883,7 @@ fn the_whole_body_holds_its_rows_columns_and_digests() -> Result<(), AdmissionEr
         rows 1419 {"algebraic": 173, "amount": 1236, "memory": 10}, columns 1356, jacobian nonzeros 9514, blocks 446, parameter slots 583, conserved combinations 436, held pools 365, held route columns 86
         model hash cc466698fddbf01bc402aa5ecdae29bfff28a6bdb0ee93b3b57e7751be72e60a
         conserved basis 842e23ef989077823835f65f1e0ab8fc77e6ce2d99931db729da415b83269934
-        stated packet a2843d78026de5244f4cd31d2b1f0ed52a8ff17f198aa502661030e0f68a1fff
+        stated packet 4851ee170367b2ee54419c11f7c6b4a6bcf47f6b3d97be0b64894a39c48ca7d5
     "#]].assert_eq(&pin);
     Ok(())
 }
@@ -942,8 +942,6 @@ fn the_gut_transit_reads_both_lumens_so_admission_can_place_each_species_between
     Ok(())
 }
 
-/// Each of the body's own drift bounds, read from `body_certificate`'s policy, which holds it from both sides: the
-/// policy is the one these bounds give, and halving or doubling either gives another.
 #[test]
 fn the_bodys_own_drift_bounds_are_oxygens_and_carbon_dioxides_stated_ones() -> Result<(), AdmissionError> {
     struct Stated([(Species, f64); 2]);
@@ -962,7 +960,7 @@ fn the_bodys_own_drift_bounds_are_oxygens_and_carbon_dioxides_stated_ones() -> R
     let digest = |table: &Stated| -> Result<Digest, AdmissionError> {
         Ok(certificate_with(&body, windows, table)?.digest())
     };
-    let stated = [(Species::Oxygen, 4.0), (Species::CarbonDioxide, 1e6)];
+    let stated = [(Species::Oxygen, 3.0), (Species::CarbonDioxide, 0.8)];
     let policy = body_certificate(&body, windows)?.digest();
     assert_eq!(policy, digest(&Stated(stated))?);
     for (index, by) in [(0, 0.5), (0, 2.0), (1, 0.5), (1, 2.0)] {

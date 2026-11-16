@@ -41,14 +41,12 @@ const WEAK: [(f64, f64, f64); 2] = [(1.0, 10.0, 60.0), (1.0, 1.0, 6.0)];
 const HEMOGLOBIN_CHARGE: (f64, f64) = (5.0, 30.0);
 /// Carbamino's sites on each hemoglobin, its half-saturation when deoxygenated, and that half's rise at saturation.
 const CARBAMINO: (f64, f64, f64) = (4.0, 10.0, 10.0);
-/// The interstitium's and the cells' stated ratios of bicarbonate to dissolved carbon dioxide.
-const BUFFER_RATIOS: (f64, f64) = (15.0, 10.0);
+const INTERSTITIAL_BUFFER_RATIO: f64 = 15.0;
+const CELL_BUFFER_RATIO: f64 = 10.0;
 const PER_OXYGEN: f64 = 0.75;
 const ALVEOLAR_CARBON_DIOXIDE: f64 = 30.0;
-/// The head of carbon dioxide partial pressure that every wall, cell membrane and the lung's exchange take.
 const CARBON_DIOXIDE_HEAD: f64 = 1.0;
-/// The start's venous carbon dioxide partial pressure, a guess admission moves.
-const VENOUS_CARBON_DIOXIDE: f64 = 35.0;
+const VENOUS_CARBON_DIOXIDE_GUESS: f64 = 35.0;
 
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     Ok(AnatomyBuilder::new().site::<C>(key, at(0.0)?).id())
@@ -172,9 +170,10 @@ fn start_guess(row: RowKind) -> f64 {
                 {
                     0.5
                 }
-                (Species::CarbonDioxide, Space::Plasma | Space::Lumen | Space::Interstitium | Space::Cells) => {
-                    carbon_dioxide_guess(site.key(), space) * water
-                }
+                (
+                    Species::CarbonDioxide,
+                    Space::Plasma | Space::Lumen | Space::Interstitium | Space::Cells,
+                ) => carbon_dioxide_guess(site.key(), space) * water,
                 (Species::Vasopressin, Space::Bound) => 0.8,
                 (Species::Vasopressin, _) => 0.4 * holds,
                 (Species::Energy, Space::Thermal) => 2e7,
@@ -208,7 +207,6 @@ fn ten_to(power: f64) -> f64 {
     exp(power * core::f64::consts::LN_10)
 }
 
-/// The weak acids' charge at `acidity`: albumin's and phosphate's at their stated concentrations, and hemoglobin's.
 fn weak(acidity: f64) -> f64 {
     let acids: f64 = (WEAK.iter())
         .map(|(held, slope, offset)| held * (slope * acidity - offset))
@@ -272,7 +270,7 @@ fn blood(site: &str) -> Blood {
     if arterial {
         speciated(REACH.0, arterial_pressure)
     } else {
-        speciated(REACH.1, VENOUS_CARBON_DIOXIDE)
+        speciated(REACH.1, VENOUS_CARBON_DIOXIDE_GUESS)
     }
 }
 
@@ -292,8 +290,8 @@ fn carbon_dioxide_guess(site: &str, space: Space) -> f64 {
     };
     match space {
         Space::Plasma | Space::Lumen => total,
-        Space::Interstitium => tissue(BUFFER_RATIOS.0, 1.0),
-        _ => tissue(BUFFER_RATIOS.1, 2.0),
+        Space::Interstitium => tissue(INTERSTITIAL_BUFFER_RATIO, 1.0),
+        _ => tissue(CELL_BUFFER_RATIO, 2.0),
     }
 }
 
@@ -813,8 +811,8 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
         ("bc.p50-carbon-dioxide-2", q2),
         ("bc.pk", PK),
         ("bc.ln-ten", core::f64::consts::LN_10),
-        ("mt.interstitial-buffer-ratio", BUFFER_RATIOS.0),
-        ("mt.cell-buffer-ratio", BUFFER_RATIOS.1),
+        ("mt.interstitial-buffer-ratio", INTERSTITIAL_BUFFER_RATIO),
+        ("mt.cell-buffer-ratio", CELL_BUFFER_RATIO),
     ] {
         set::<Dimensionless>(packet, key, body, value)?;
     }
@@ -842,7 +840,12 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
 fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
     let body = Binding::Body;
     type Solubility = Quotient<Concentration<CarbonDioxide>, Pressure>;
-    set::<Solubility>(packet, "bc.carbon-dioxide-solubility", body, CARBON_DIOXIDE_SOLUBILITY)?;
+    set::<Solubility>(
+        packet,
+        "bc.carbon-dioxide-solubility",
+        body,
+        CARBON_DIOXIDE_SOLUBILITY,
+    )?;
     set::<Solubility>(
         packet,
         "mt.tissue-carbon-dioxide-solubility",
@@ -853,7 +856,10 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
     set::<Concentration<Charge>>(packet, "bc.strong-ion-offset", body, STRONG_ION_OFFSET)?;
     type PerCharge = Quotient<Concentration<CarbonDioxide>, Concentration<Charge>>;
     set::<PerCharge>(packet, "bc.bicarbonate-per-charge", body, 1.0)?;
-    let [(albumin, albumin_slope, albumin_offset), (phosphate, phosphate_slope, phosphate_offset)] = WEAK;
+    let [
+        (albumin, albumin_slope, albumin_offset),
+        (phosphate, phosphate_slope, phosphate_offset),
+    ] = WEAK;
     set::<Concentration<Albumin>>(packet, "bc.plasma-albumin", body, albumin)?;
     set::<Concentration<Phosphate>>(packet, "bc.plasma-phosphate", body, phosphate)?;
     type PerAcid<Q> = Quotient<Concentration<Charge>, Concentration<Q>>;
@@ -874,14 +880,15 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
 /// the species' worst change over a ten-second window of this body's first minute from its admitted start, rounded up
 /// to one significant figure. It is a synthetic target that scores a solver and judges no body. The body's measured
 /// day (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set (record 0004).
-/// Oxygen's change is mostly its 35 umol swing within a beat, read across windows that hold no whole number of beats;
-/// the rest is the run settling from the admitted orbit onto the core's own, which a smaller step cap moves.
+/// Each gas's change is mostly its swing within a beat, read across windows that hold no whole number of beats; the
+/// rest is the run settling from the admitted orbit onto the core's own, which a smaller step cap moves. Measured on
+/// the run of body 08's third PR: oxygen 1.489 umol and carbon dioxide 0.386 umol.
 const DRIFTS: [(Species, f64); 2] = [
     (Species::Oxygen, OXYGEN_DRIFT),
     (Species::CarbonDioxide, CARBON_DIOXIDE_DRIFT),
 ];
-const OXYGEN_DRIFT: f64 = 4.0;
-const CARBON_DIOXIDE_DRIFT: f64 = 1e6;
+const OXYGEN_DRIFT: f64 = 3.0;
+const CARBON_DIOXIDE_DRIFT: f64 = 0.8;
 
 struct BodyDrifts;
 impl DriftTable for BodyDrifts {

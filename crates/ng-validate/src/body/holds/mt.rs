@@ -66,7 +66,6 @@ pub(super) fn metabolism(body: &mut Assembly<'_>) -> Result<(), AdmissionError> 
     Ok(())
 }
 
-/// Each bed's held oxygen use, and the carbon dioxide its cells make at a stated quotient of that use.
 fn respiration<'b>(
     laws: &mut FragmentBuilder<'b, Metabolism>,
     ports: &HeldPorts<'b, Metabolism>,
@@ -109,7 +108,11 @@ fn lung_exchange<'b>(
         ParameterKey::new("mt.lung-share"),
         Admissible::unit_interval(),
     );
-    let oxygen_keys = ["pulmonary oxygen partial pressure", "mt.alveolar-oxygen", "mt.lung-oxygen-exchange"];
+    let oxygen_keys = [
+        "pulmonary oxygen partial pressure",
+        "mt.alveolar-oxygen",
+        "mt.lung-oxygen-exchange",
+    ];
     let pulmonary = pulmonary_row(laws, oxygen_keys, &share, oxygen_pressure)?;
     exchange(laws, oxygen, oxygen_keys, &pulmonary, Head::Into)?;
     let carbon_dioxide_keys = [

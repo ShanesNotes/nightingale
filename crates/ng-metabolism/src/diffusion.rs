@@ -66,10 +66,8 @@ fn diffuse<'b, Q: Substance + Plain>(
     (from, to): (Side<'_, 'b, Q>, Side<'_, 'b, Q>),
     class: RateClass,
 ) {
-    let conductance = laws.site_parameter::<CapillaryBed, Conductance<Q>>(
-        ParameterKey::new(key),
-        Admissible::nonnegative(),
-    );
+    let conductance = laws
+        .site_parameter::<CapillaryBed, Conductance<Q>>(ParameterKey::new(key), Admissible::nonnegative());
     let rate = laws.site_kernel(|mut k| {
         let (high, low) = (from.pressure(&mut k), to.pressure(&mut k));
         let head = k.subtract(high, low);
@@ -117,7 +115,13 @@ pub fn oxygen_diffusion<'b>(
     let wall = (Side::Plasma(plasma), Side::Tissue(&interstitium));
     diffuse(laws, &routes.wall, "mt.wall-oxygen-conductance", wall, class);
     let membrane = (Side::Tissue(&interstitium), Side::Tissue(&cells));
-    diffuse(laws, &routes.membrane, "mt.cell-oxygen-conductance", membrane, class);
+    diffuse(
+        laws,
+        &routes.membrane,
+        "mt.cell-oxygen-conductance",
+        membrane,
+        class,
+    );
     Ok(())
 }
 
@@ -137,8 +141,20 @@ pub fn carbon_dioxide_diffusion<'b>(
     ];
     let [interstitium, cells] = tissues(routes, &solubility, ratios.map(Some));
     let outward = (Side::Plasma(plasma), Side::Tissue(&interstitium));
-    diffuse(laws, &routes.wall, "mt.wall-carbon-dioxide-conductance", outward, class);
+    diffuse(
+        laws,
+        &routes.wall,
+        "mt.wall-carbon-dioxide-conductance",
+        outward,
+        class,
+    );
     let membrane = (Side::Tissue(&interstitium), Side::Tissue(&cells));
-    diffuse(laws, &routes.membrane, "mt.cell-carbon-dioxide-conductance", membrane, class);
+    diffuse(
+        laws,
+        &routes.membrane,
+        "mt.cell-carbon-dioxide-conductance",
+        membrane,
+        class,
+    );
     Ok(())
 }

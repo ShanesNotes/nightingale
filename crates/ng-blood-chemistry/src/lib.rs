@@ -69,7 +69,8 @@ pub fn speciate<'b, O: Owner>(
         laws.site_field::<CapillaryBed, Dimensionless>("oxygen saturation", Admissible::finite());
     let (bicarbonate_out, bicarbonate) =
         laws.site_field::<CapillaryBed, Concentration<CarbonDioxide>>("bicarbonate", Admissible::finite());
-    let (acidity_out, acidity) = laws.site_field::<CapillaryBed, Dimensionless>("acidity", Admissible::finite());
+    let (acidity_out, acidity) =
+        laws.site_field::<CapillaryBed, Dimensionless>("acidity", Admissible::finite());
     let speciated = Speciated {
         oxygen_partial_pressure,
         saturation,
