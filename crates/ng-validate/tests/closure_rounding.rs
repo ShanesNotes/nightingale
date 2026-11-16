@@ -67,22 +67,20 @@ fn two_reservoirs_whose_rows_round_their_transfer_close_within_their_rows_roundi
 
 #[test]
 fn a_total_that_crosses_powers_of_two_in_a_window_is_allowed_at_its_closing_end() {
+    let (from, to) = (10_200 * SECOND, 6 * 3_600 * SECOND);
     let inflow = Delivery {
         id: b"inflow",
-        from: SimTime::from_ns(3_600 * SECOND),
-        to: SimTime::from_ns(5 * 3_600 * SECOND),
+        from: SimTime::from_ns(from),
+        to: SimTime::from_ns(to),
         amount: Measure::new(f64::from(1 << 20)).expect("an amount"),
     };
     let passed = certified([0.5, 0.5], vec![inflow], 0.0, 7).expect("within 7 last places a row update");
     let water = &passed.results()[0];
-    let place = water.closure_place();
-    assert!(
-        place.bits()[0] >= (1023 + 10 - 105) << 52,
-        "the worst window closes past 2^10, so its place is at least 2^-95: {place:?}"
-    );
-    let count = i64::try_from(water.closure_last_places()).expect("a count");
-    assert!(
-        water.worst_closure().at_most(place.scaled(count)),
-        "the worst window closed within the places it reports"
+    let end = water.closure_window().end().nanoseconds();
+    let total = 1.0 + f64::from(1 << 20) * (end.saturating_sub(from) as f64 / (to - from) as f64);
+    assert_eq!(
+        water.closure_place().bits()[0],
+        ((total.to_bits() >> 52) - 105) << 52,
+        "the worst window's place is its closing total's, {total} at {end} ns, and not the first window's"
     );
 }

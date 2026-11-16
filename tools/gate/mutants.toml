@@ -3407,10 +3407,10 @@ new = '''if bit(shift - 1) && below(shift - 1) {'''
 test = "-p ng-record --lib history::tests::an_exact_total_breaks_a_tie_to_even"
 
 [[mutant]]
-name = "closure-place-of-the-rounded-sum"
+name = "closure-place-below-the-larger-part"
 path = "crates/ng-validate/src/certificate.rs"
 old = '''let biased = (total.bits()[0] >> 52) & 0x7ff;'''
-new = '''let biased = ((f64::from_bits(total.bits()[0]) + f64::from_bits(total.bits()[1])).to_bits() >> 52) & 0x7ff;'''
+new = '''let biased = ((total.bits()[0] - u64::from(f64::from_bits(total.bits()[1]) < 0.0)) >> 52) & 0x7ff;'''
 test = "-p ng-validate --lib certificate::tests::a_total_just_below_a_power_of_two_takes_its_larger_parts_last_place"
 
 [[mutant]]

@@ -398,8 +398,8 @@ impl<'r> Holding<'r> {
     }
 }
 
-/// 2^(e - 105), with 2^e the power of two at or below the total's larger part, never below the smallest float, and
-/// zero for a total that is not finite.
+/// 2^(e - 105), where 2^e is the power of two at or below the total's larger part; never below the smallest float,
+/// and zero for a total that is not finite.
 fn last_place(total: Compensated) -> Compensated {
     let biased = (total.bits()[0] >> 52) & 0x7ff;
     let place = match biased {
@@ -411,8 +411,7 @@ fn last_place(total: Compensated) -> Compensated {
     Measure::<Dimensionless>::new(place).map_or(Compensated::ZERO, |place| Compensated::of(&place))
 }
 
-/// Scales the place by the count as a float: exact up to 2^53, to within one part in 2^53 above it, and held at the
-/// largest signed integer past that.
+/// The count enters as a float: exact to 2^53, within one part in 2^53 above that, and held at `i64::MAX` past it.
 fn admitted(floor: Compensated, place: Compensated, last_places: u64) -> Compensated {
     floor.plus(place.scaled(i64::try_from(last_places).unwrap_or(i64::MAX)))
 }

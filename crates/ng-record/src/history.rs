@@ -136,7 +136,6 @@ fn exact_total(terms: impl Iterator<Item = (Compensated, i64)> + Clone) -> Compe
     for (value, weight) in terms.clone() {
         for part in value.bits().map(f64::from_bits) {
             if !part.is_finite() {
-                // A part that is not finite has no limbs: the fold carries it into a total that is not finite.
                 return terms.fold(Compensated::ZERO, |total, (value, weight)| {
                     total.plus(value.scaled(weight))
                 });
