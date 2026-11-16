@@ -4,7 +4,8 @@ Spec: `crates/ng-contract/src/law.rs` (`ReactsAt`) and `crates/ng-contract/src/c
 
 Type: task
 
-Status: open
+Status: claimed
+Claimed by: nc39
 
 Blocked by: none
 
