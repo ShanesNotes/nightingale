@@ -36,7 +36,7 @@ Cost lines on the beelink, `python3 -I tools/bench/run.py cost`, user instructio
 | Slice | 907.4 M (load 6.5) | 890.4 M (load 17.7) | equal: 241 rows, 257 columns, 11,614 steps, 14,749 solves, seal a50fdfdb08184a02 |
 | Body | 6,964.4 M (load 6.1) | 4,958.9 M (load 13.7) | equal: 1,419 rows, 1,356 columns, 11,794 steps, 15,263 solves, seal 848db8e180cf19c7 |
 
-The body fell by 28.8%, about 34.0 M a step (196.6 steps a simulated second). The slice fell by 1.9%.
+A step of the body fell from 35.42 M to 25.22 M (196.6 steps a simulated second), 28.8%. A step of the slice fell from 4.69 M to 4.60 M (193.6 steps), 1.9%.
 
 The profile at the head: the ledger's walk fell from 28.32% to 0.48% (the closure 0.15% and `flowed` 0.33%). The next three symbols under `ng_record` are `LedgerChunk::write` 0.92%, `exact_total` 0.73% and the columns' closure in `after` 0.66%. Nothing under `ng_record` is over 2%.
 
