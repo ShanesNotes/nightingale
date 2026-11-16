@@ -698,7 +698,7 @@ fn the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_
                     - exchanged(&session, quantity, first, outflow);
                 moved / held
             })
-            .fold(0.0, f64::max);
+            .fold(0.0, |most, moved| if moved > most { moved } else { most });
         assert!(
             (lung - rate).abs() <= LEDGER * rate,
             "the ledger's {gas:?} exchange at the lung over the beats is {lung} a second against {rate}"
