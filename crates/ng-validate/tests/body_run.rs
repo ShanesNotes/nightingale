@@ -277,7 +277,7 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         writeln!(report, "{} {} moved", route.card(), route.name()).expect("a string takes it");
     }
     expect![[r#"
-        steps 11797, quantities 480, held routes 62
+        steps 11797, quantities 458, held routes 74
         EN vasopressin clearance moved
         EN vasopressin secretion moved
         GI gut chloride moved
@@ -285,6 +285,18 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
         GI gut sodium moved
         GI gut water moved
         MS skin water moved
+        MT bone bed oxygen use moved
+        MT brain bed oxygen use moved
+        MT coronary bed oxygen use moved
+        MT fat bed oxygen use moved
+        MT glomerular bed oxygen use moved
+        MT gut bed oxygen use moved
+        MT liver bed oxygen use moved
+        MT lung oxygen moved
+        MT muscle bed oxygen use moved
+        MT peritubular bed oxygen use moved
+        MT pulmonary bed oxygen use moved
+        MT skin bed oxygen use moved
     "#]]
     .assert_eq(&report);
 }
