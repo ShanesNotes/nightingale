@@ -1,3 +1,6 @@
+extern crate alloc;
+
+use alloc::collections::BTreeMap;
 use core::cell::Cell;
 use core::fmt::Write;
 use core::num::NonZeroU64;
@@ -5,7 +8,6 @@ use expect_test::expect;
 use ng_contract::*;
 use ng_record::{AuthorizedInput, Checkpoint, Curve, Running, Session, Step};
 use ng_validate::*;
-use std::collections::BTreeMap;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
