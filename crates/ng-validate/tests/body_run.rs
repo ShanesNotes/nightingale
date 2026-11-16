@@ -8,8 +8,8 @@ use ng_validate::*;
 
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
-const PACKET: &str = "7308506d1ebfa861ad6ccb6fe791f10977c05229da21c26ebe38462d8ce39b06";
-const ADMITTED_SEAL: &str = "3cc7344dbf57fd5e775c609cc66b78e1baffc44462d3b84c62284882b2d1b61c";
+const PACKET: &str = "3c4854cb46c3b0e43c4dd2214da8c8ac4b62d1a33fcdd0e130e9626a8a859dde";
+const ADMITTED_SEAL: &str = "b9c55d3a7070646bfdbe1c6eeb0662ebd3ffa9658ecb9b8051d955b763cec774";
 
 struct Counted {
     core: ng_solver::Core,
@@ -385,9 +385,10 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         record.revision()
     );
     expect![[r#"
-        packet 7308506d1ebfa861ad6ccb6fe791f10977c05229da21c26ebe38462d8ce39b06
-        seal 6e66632f375aba10546534e9fdbd3021c6af0e76b870562e0c0841f3ccad5308
+        packet 3c4854cb46c3b0e43c4dd2214da8c8ac4b62d1a33fcdd0e130e9626a8a859dde
+        seal abf241c13efc583b3faff2cd2faaa3857d634d2cf465f936f55eca0c2ce273c1
         steps 198
+        viscosity over its reference at the start 1.000000413
     "#]]
     .assert_eq(&pin);
     expect![[r#"
