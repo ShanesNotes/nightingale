@@ -4,12 +4,12 @@ use ng_validate::*;
 
 const SECOND: u64 = 1_000_000_000;
 
-/// Two reservoirs of different size relax toward each other with nothing crossing a boundary. Each step moves an amount
-/// finer than the larger one's last place, so the two rows round it to different places and their total moves.
-fn certified(per_update: u64) -> Result<Certificate, CertificateFailure> {
+fn two_reservoirs_certified(per_update: u64) -> Result<Certificate, CertificateFailure> {
     let end = SimTime::from_ns(6 * 3_600 * SECOND);
     let start = [Measure::new(600.0).expect("a"), Measure::new(424.0).expect("b")];
-    let case = TwoReservoirs::delivering(start, Vec::new()).expect("a body").until(end);
+    let case = TwoReservoirs::delivering(start, Vec::new())
+        .expect("a body")
+        .until(end);
     let (store, core) = (MemoryStore::default(), ng_solver::Core::new(100_000_000));
     let session = case.admit(&core, &store).expect("admitted");
     let Ok(session) = run_until(session, case.end()) else {
@@ -34,19 +34,19 @@ fn certified(per_update: u64) -> Result<Certificate, CertificateFailure> {
 
 #[test]
 fn two_reservoirs_whose_rows_round_their_transfer_close_within_their_rows_rounding() {
-    let refused = certified(0);
+    let refused = two_reservoirs_certified(0);
     assert!(
         matches!(&refused, Err(failure) if failure.check() == CertificateCheck::Closure),
         "with no rounding admitted the rows' rounding refuses closure: {refused:?}"
     );
-    let passed = certified(7).expect("within 7 last places a row update");
+    let passed = two_reservoirs_certified(7).expect("within 7 last places a row update");
     let water = &passed.results()[0];
     let place = f64::from_bits(water.closure_place().bits()[0]);
     let used = f64::from_bits(water.worst_closure().bits()[0]) / place;
-    println!(
-        "the worst window used {used} last places of the {} it allowed, {} for one update",
-        water.closure_last_places(),
-        water.row_rounding()
+    assert_eq!(water.row_rounding(), 7);
+    assert!(
+        used > 1.0 && used < water.closure_last_places() as f64,
+        "the rows rounded: the worst window used {used} last places of the {} it allowed",
+        water.closure_last_places()
     );
-    assert!(used > 1.0, "the rows rounded");
 }

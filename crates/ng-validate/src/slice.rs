@@ -517,9 +517,10 @@ pub fn arena_seed() -> Seed {
 }
 
 const CLOSURE_RELATIVE: f64 = 1e-12;
-/// The last places of a combination's total that one row update, `row.plus(net.scaled(coefficient))`, may round. At a
-/// unit coefficient the product is exact and the sum rounds under 3u^2 + 13u^3 of its result, under 4 last places; at
-/// any other the product rounds under 3u^2 of its own size too, so under 7 (native-contract 68).
+/// The last places of a combination's total one row update in `next_state` may round. `Compensated::plus` is the
+/// accurate double-word sum of Joldes, Muller and Popescu (ACM Transactions on Mathematical Software 44(2), 2017),
+/// within 3u^2 + 13u^3 of its result, under 4 last places; a coefficient other than one rounds its product under
+/// 3u^2 of the transfer too, so under 7 (native-contract 68).
 const ROW_ROUNDING: u64 = 7;
 /// Ticket 14's bound for a 2 s window, which elements keep: the slice has no reaction, so no day has measured one.
 const SYNTHETIC_DRIFT: f64 = 1e4;
@@ -590,7 +591,8 @@ pub fn arena_certificate(
         Book::Charge => QuantityPolicy::charge(quantity, Measure::new(0.0)?, Measure::new(CLOSURE_RELATIVE)?),
     });
     let quantities = quantities.collect::<Result<Vec<_>, _>>()?;
-    CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows)?.admitting_row_rounding(body, ROW_ROUNDING)
+    CertificatePolicy::new(basis, quantities, ExpectedDrift::Zero, windows)?
+        .admitting_row_rounding(body, ROW_ROUNDING)
 }
 
 /// One beat in 100 intervals, paced by the heart's phase: the cycle's period and the heart rate's time mean state one

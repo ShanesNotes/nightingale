@@ -9,7 +9,7 @@ use ng_validate::*;
 const MILLISECOND: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MILLISECOND;
 const PACKET: &str = "a653b631be94842a10a9871eae045ecedf9f8e4c7dfd9c3012388f3c3a40e237";
-const ADMITTED_SEAL: &str = "d4730924b9fe6368116651d7d93727baa10fcadb77b74b3d6bdb4b8b5377b0cd";
+const ADMITTED_SEAL: &str = "af6ac6b0ce458c0cad1cf4b855be36fe2660fbca40445655ab25bd2d173b1504";
 
 struct Counted {
     core: ng_solver::Core,
@@ -341,7 +341,7 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
     );
     expect![[r#"
         packet a653b631be94842a10a9871eae045ecedf9f8e4c7dfd9c3012388f3c3a40e237
-        seal 1e354bb5feb27495cef9a26fb0f0a0fd021c720c044f09e2453f11ba5f9f2f57
+        seal 17d2cc5ab3c50a6a33902ee6ae57b57697584c1ddfb45a7d36b23bcdcf65efc5
         steps 198
     "#]]
     .assert_eq(&pin);

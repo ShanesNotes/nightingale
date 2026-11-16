@@ -1160,8 +1160,8 @@ test = "-p ng-record --test session a_fault_after_a_refused_link_exports_once_th
 [[mutant]]
 name = "one-window-ends-where-the-head-starts"
 path = "crates/ng-validate/src/certificate.rs"
-old = '''Some(vec![late.last()?.minus(*early.first()?)])'''
-new = '''Some(vec![late.first()?.minus(*early.first()?)])'''
+old = '''Some(vec![(*late.last()?, *early.first()?)])'''
+new = '''Some(vec![(*late.first()?, *early.first()?)])'''
 test = "-p ng-validate --test transaction a_history_one_window_long_is_certified_on_its_one_window"
 
 [[mutant]]
@@ -3348,3 +3348,38 @@ old = '''                k.scale(total, ratio)'''
 new = '''                let _ = ratio;
                 total'''
 test = "-p ng-validate --test viscosity a_plain_edges_flow_falls_as_viscosity_over_its_reference_rises"
+
+[[mutant]]
+name = "ledger-total-folds-again"
+path = "crates/ng-record/src/history.rs"
+old = '''(finite.then(|| sum.pair()).flatten())'''
+new = '''(false.then(|| sum.pair()).flatten())'''
+test = "-p ng-record --lib history::tests::an_exact_total_reads_one_value_however_its_rows_split_it"
+
+[[mutant]]
+name = "ledger-total-tie-away-from-even"
+path = "crates/ng-record/src/history.rs"
+old = '''if bit(shift - 1) && (below(shift - 1) || mantissa & 1 == 1) {'''
+new = '''if bit(shift - 1) && (below(shift - 1) || mantissa & 1 == 1 || true) {'''
+test = "-p ng-record --lib history::tests::an_exact_total_breaks_a_tie_to_even"
+
+[[mutant]]
+name = "ledger-total-drops-its-low-part"
+path = "crates/ng-record/src/history.rs"
+old = '''Some(Compensated::of(&hi.ok()?).plus(Compensated::of(&lo.ok()?)))'''
+new = '''Some(Compensated::of(&hi.ok()?).plus(Compensated::of(&lo.ok()?).scaled(0)))'''
+test = "-p ng-record --lib history::tests::an_exact_total_cancels_weighs_and_keeps_its_low_part"
+
+[[mutant]]
+name = "closure-drops-the-rows-rounding"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''floor.plus(place.scaled(i64::try_from(last_places).unwrap_or(i64::MAX)))'''
+new = '''floor.plus(place.scaled(i64::try_from(last_places).unwrap_or(i64::MAX) * 0))'''
+test = "-p ng-validate --test closure_rounding"
+
+[[mutant]]
+name = "closure-counts-one-step-a-window"
+path = "crates/ng-validate/src/certificate.rs"
+old = '''let steps = behind.abs_diff(ahead) + 1;'''
+new = '''let steps = behind.abs_diff(ahead) * 0 + 1;'''
+test = "-p ng-validate --test closure_rounding"

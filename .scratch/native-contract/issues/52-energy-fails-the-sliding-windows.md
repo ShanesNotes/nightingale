@@ -31,7 +31,7 @@ This bears on the options below. A bound from the measured windows would be set 
 - Admit the man in his daily balance: fixture amounts for which the state at 06:55 repeats a day later. Then every book's bound can be tight, and the check reads a leak and not the first day's settling.
 
 - [x] A third day confirms or corrects the cause: day three against day two, at every start. It corrects it in part: "The third day" above, with `~/lanes/logs/ng-wave-4/nc52/by-day.txt`
-- [ ] The milestone protocol passes on the slice with the working core, and each bound states its source as native-contract 43 states the species'. Each bound now states its source. The pass is the certificate's own 48 h run, which the coordinator starts from `~/lanes/logs/ng-wave-4/nc52-build/milestone-certificate.sh`; this box stays open until that run is read.
+- [ ] The milestone protocol passes on the slice with the working core, with [native-contract 68](68-the-ledgers-sum-reads-one-last-place-off.md), and each bound states its source as native-contract 43 states the species'. Each bound now states its source. The pass is the certificate's own 48 h run, which the coordinator starts from `~/lanes/logs/ng-wave-4/nc52-build/milestone-certificate.sh`; this box stays open until that run is read.
 - [x] A bound that is raised, or a check that covers fewer windows, has its reason in the fixture's own doc line or in §7, and a mutant row holds it.
 - [x] The PR says what the chosen check still sees: the smallest steady leak in a boundary energy flow that fails it, beside the slice window's whole-beat check ([native-contract 31](31-cross-interval-drift-check.md)).
 

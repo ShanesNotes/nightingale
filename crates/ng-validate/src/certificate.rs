@@ -104,10 +104,9 @@ pub struct CertificatePolicy {
     windows: SlidingWindows,
     rounding: RowRounding,
 }
-/// The last places one row update may round, and how many row updates each combination takes a step.
 struct RowRounding {
-    per_update: u64,
-    updates: Vec<u64>,
+    last_places_an_update: u64,
+    updates_a_step: Vec<u64>,
 }
 impl CertificatePolicy {
     /// Refuses unless every combination of the basis has exactly one entry, in basis order.
@@ -122,8 +121,8 @@ impl CertificatePolicy {
             return Err(AdmissionError::PolicyCoverage);
         }
         let rounding = RowRounding {
-            per_update: 0,
-            updates: vec![0; quantities.len()],
+            last_places_an_update: 0,
+            updates_a_step: vec![0; quantities.len()],
         };
         Ok(Self {
             basis: basis.digest(),
@@ -138,13 +137,17 @@ impl CertificatePolicy {
     /// the rows' own rounding only where the weighted rows share one sign, so no row exceeds the total. Where they
     /// have both signs, as charge's do, a row may be far larger than the total, whose last place then bounds nothing.
     /// Refuses a body whose basis is not the policy's.
-    pub fn admitting_row_rounding(self, body: &CompiledBody, per_update: u64) -> Result<Self, AdmissionError> {
+    pub fn admitting_row_rounding(
+        self,
+        body: &CompiledBody,
+        per_update: u64,
+    ) -> Result<Self, AdmissionError> {
         let basis = body.conserved_basis();
         if basis.digest() != self.basis {
             return Err(AdmissionError::PolicyCoverage);
         }
         let mut member = vec![false; body.rows().len()];
-        let updates = (basis.combinations().iter())
+        let updates_a_step = (basis.combinations().iter())
             .map(|combination| {
                 member.fill(false);
                 for &(row, _) in combination.terms() {
@@ -154,7 +157,10 @@ impl CertificatePolicy {
                 terms.filter(|(row, _)| member[row.index()]).count() as u64
             })
             .collect();
-        let rounding = RowRounding { per_update, updates };
+        let rounding = RowRounding {
+            last_places_an_update: per_update,
+            updates_a_step,
+        };
         Ok(Self { rounding, ..self })
     }
     pub fn digest(&self) -> Digest {
@@ -163,10 +169,14 @@ impl CertificatePolicy {
             quantities,
             expected,
             windows,
-            rounding: RowRounding { per_update, updates },
+            rounding:
+                RowRounding {
+                    last_places_an_update,
+                    updates_a_step,
+                },
         } = self;
         let mut bytes = basis.as_bytes().to_vec();
-        bytes.extend_from_slice(&per_update.to_be_bytes());
+        bytes.extend_from_slice(&last_places_an_update.to_be_bytes());
         let ExpectedDrift::Zero = expected;
         let SlidingWindows {
             window_ns,
@@ -174,7 +184,7 @@ impl CertificatePolicy {
         } = windows;
         bytes.extend_from_slice(&window_ns.get().to_be_bytes());
         bytes.extend_from_slice(&coverage_ns.to_be_bytes());
-        for (quantity, updates) in quantities.iter().zip(updates) {
+        for (quantity, updates) in quantities.iter().zip(updates_a_step) {
             bytes.extend_from_slice(&updates.to_be_bytes());
             let QuantityPolicy {
                 quantity: _,
@@ -370,7 +380,6 @@ impl<'r> Holding<'r> {
             taken: 0,
         }
     }
-    /// The segment holding `instant`, and how many segments the walk has taken to reach it.
     fn holding(&mut self, instant: u64) -> Result<(&HistorySegment, u64), CertificateFailure> {
         let admission = self.admission;
         let before = |segment: &HistorySegment| {
@@ -389,7 +398,6 @@ impl<'r> Holding<'r> {
     }
 }
 
-/// 2^(e - 105), with 2^e the power of two at or below `total`'s larger part, and never below the smallest float.
 fn last_place(total: Compensated) -> Compensated {
     let biased = (total.bits()[0] >> 52) & 0x7ff;
     let place = match biased {
@@ -418,7 +426,6 @@ impl Stretch {
         };
         [from, to].into_iter().take(count)
     }
-    /// Each window's late and early value.
     fn ends(
         self,
         (later, leading): (&Curve<'_>, Interval),
@@ -475,7 +482,11 @@ fn pair(
     let ends = |later: &Curve<'_>, earlier: &Curve<'_>| stretch.ends((later, late), (earlier, early), length);
     let differences = |later: &Curve<'_>, earlier: &Curve<'_>| {
         let ends = ends(later, earlier)?;
-        Some(ends.into_iter().map(|(later, earlier)| later.minus(earlier)).collect::<Vec<_>>())
+        Some(
+            ends.into_iter()
+                .map(|(later, earlier)| later.minus(earlier))
+                .collect::<Vec<_>>(),
+        )
     };
     let window =
         |start: u64| Interval::new(SimTime::from_ns(start), SimTime::from_ns(start + length)).ok_or(coverage);
@@ -487,7 +498,10 @@ fn pair(
         let inflow = differences(&leading.inflow(quantity), &trailing.inflow(quantity)).ok_or(coverage)?;
         let outflow = differences(&leading.outflow(quantity), &trailing.outflow(quantity)).ok_or(coverage)?;
         let rounding = &policy.rounding;
-        let last_places = (rounding.per_update.saturating_mul(rounding.updates[at])).saturating_mul(steps);
+        let last_places = (rounding
+            .last_places_an_update
+            .saturating_mul(rounding.updates_a_step[at]))
+        .saturating_mul(steps);
         for (index, start) in stretch.starts().enumerate() {
             let interval = window(start)?;
             let (closing, opening) = inventory[index];
@@ -495,7 +509,11 @@ fn pair(
             let closure = change.minus(inflow[index].minus(outflow[index])).abs();
             let gross = inflow[index].plus(outflow[index]);
             let place = last_place(closing);
-            let allowed = admitted(limits.absolute.plus(gross.times(&limits.relative)), place, last_places);
+            let allowed = admitted(
+                limits.absolute.plus(gross.times(&limits.relative)),
+                place,
+                last_places,
+            );
             if !closure.at_most(allowed) {
                 return Err(CertificateFailure {
                     check: CertificateCheck::Closure,
@@ -597,7 +615,7 @@ fn keep_the_earliest_worst(
             quantity: limits.quantity,
             closure_floor: limits.absolute,
             closure_relative: Compensated::of(&limits.relative),
-            row_rounding: policy.rounding.per_update,
+            row_rounding: policy.rounding.last_places_an_update,
             worst_closure: closure,
             closure_window: interval,
             closure_last_places: last_places,
@@ -703,25 +721,57 @@ mod tests {
     fn a_closure_at_its_last_places_passes_and_one_place_over_refuses() {
         let total = exact(4254.0).plus(exact(6.39e-14));
         let place = last_place(total);
-        assert_eq!(place.bits(), exact(f64::from_bits((1023 - 93) << 52)).bits(), "4,254's last place is 2^-93");
+        assert_eq!(
+            place.bits(),
+            exact(f64::from_bits((1023 - 93) << 52)).bits(),
+            "4,254's last place is 2^-93"
+        );
         let allowed = admitted(Compensated::ZERO, place, 7 * 31 * 1_000);
         let at = place.scaled(7 * 31 * 1_000);
         assert!(at.at_most(allowed), "a closure at its allowance passes");
         assert!(!at.plus(place).at_most(allowed), "one last place over refuses");
         let floor = exact(1e-20);
-        assert!(at.plus(floor).at_most(admitted(floor, place, 7 * 31 * 1_000)), "the floor adds to it");
+        assert!(
+            at.plus(floor).at_most(admitted(floor, place, 7 * 31 * 1_000)),
+            "the floor adds to it"
+        );
     }
 
     #[test]
     fn a_last_place_holds_from_the_smallest_float_to_the_largest() {
         let smallest = f64::from_bits(1);
-        assert_eq!(last_place(exact(1.0)).bits(), exact(f64::from_bits((1023 - 105) << 52)).bits());
-        assert_eq!(last_place(exact(1.5)).bits(), last_place(exact(1.0)).bits(), "the power of two at or below");
-        assert_eq!(last_place(exact(f64::from_bits(106 << 52))).bits(), exact(f64::from_bits(1 << 52)).bits());
-        assert_eq!(last_place(exact(f64::from_bits(105 << 52))).bits(), exact(f64::from_bits(1 << 51)).bits());
-        assert_eq!(last_place(exact(smallest)).bits(), exact(smallest).bits(), "never below the smallest float");
-        assert_eq!(last_place(exact(-2.0)).bits(), last_place(exact(2.0)).bits(), "on either sign");
+        assert_eq!(
+            last_place(exact(1.0)).bits(),
+            exact(f64::from_bits((1023 - 105) << 52)).bits()
+        );
+        assert_eq!(
+            last_place(exact(1.5)).bits(),
+            last_place(exact(1.0)).bits(),
+            "the power of two at or below"
+        );
+        assert_eq!(
+            last_place(exact(f64::from_bits(106 << 52))).bits(),
+            exact(f64::from_bits(1 << 52)).bits()
+        );
+        assert_eq!(
+            last_place(exact(f64::from_bits(105 << 52))).bits(),
+            exact(f64::from_bits(1 << 51)).bits()
+        );
+        assert_eq!(
+            last_place(exact(smallest)).bits(),
+            exact(smallest).bits(),
+            "never below the smallest float"
+        );
+        assert_eq!(
+            last_place(exact(-2.0)).bits(),
+            last_place(exact(2.0)).bits(),
+            "on either sign"
+        );
         let unbounded = exact(f64::MAX).scaled(2);
-        assert_eq!(last_place(unbounded).bits(), Compensated::ZERO.bits(), "zero for a total that is not finite");
+        assert_eq!(
+            last_place(unbounded).bits(),
+            Compensated::ZERO.bits(),
+            "zero for a total that is not finite"
+        );
     }
 }
