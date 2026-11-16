@@ -990,6 +990,13 @@ mod tests {
             (exact(-two_to(-113)), 1),
         ]);
         assert_eq!(negative.bits(), pair(-1.0, -two_to(-60)).bits(), "on either sign");
+        let odd = two_to(-60) + two_to(-112);
+        let up = total(&[(exact(1.0), 1), (exact(odd), 1), (exact(two_to(-113)), 1)]);
+        assert_eq!(
+            up.bits(),
+            pair(1.0, two_to(-60) + two_to(-111)).bits(),
+            "and a tie in the low part rounds an odd one up"
+        );
     }
 
     #[test]
@@ -1026,6 +1033,23 @@ mod tests {
             !finite(total(&[(nan, 1), (exact(1.0), 1)])),
             "nor does a part that is not a number"
         );
+    }
+
+    #[test]
+    fn an_exact_total_past_the_finite_range_is_not_finite_where_the_fold_reads_a_finite_one() {
+        let heavy = [(exact(two_to(970)), (1 << 53) - 2), (exact(two_to(970)), (1 << 53) + 1)];
+        let below = two_to(970) - two_to(917);
+        let light = [two_to(1023), two_to(1023) - two_to(971), below]
+            .into_iter()
+            .chain([two_to(915); 4])
+            .map(|row| (exact(row), 1))
+            .collect::<Vec<_>>();
+        for (terms, rows) in [(&heavy[..], "weights past 2^53"), (&light[..], "unit weights")] {
+            assert!(finite(fold(terms)), "the fold reads {rows} as finite");
+            assert!(!finite(total(terms)), "2^1024 - 2^970 from {rows} is not finite");
+            let negated: Vec<_> = terms.iter().map(|&(row, weight)| (row, -weight)).collect();
+            assert!(!finite(total(&negated)), "nor its negative from {rows}");
+        }
     }
 
     struct Draws(u64);
