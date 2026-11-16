@@ -1,7 +1,8 @@
 # 08: Blood carries oxygen and carbon dioxide
 
 Type: task
-Status: open
+Status: claimed
+Claimed by: b08c-build
 Blocked by: 06, 26, 29, `.scratch/research/issues/11-law-forms-gas-loop.md`
 
 **What to build:** Oxygen and carbon dioxide are amounts in every blood and tissue space, moved by the flows that already move water, and by diffusion across the capillary wall and the cell membrane. Blood chemistry turns each total into its partial pressure and its saturation as algebraic rows that never make or lose mass. It also states acidity in plasma from the strong ion difference, the weak acids and total carbon dioxide, with the lumped anion and the diet's organic anion held. Tissue carbon dioxide follows research 11's linear store until [ticket 18](18-acid-loop.md). Hemoglobin is a mass in blood, so its concentration follows dilution, and the hematocrit it gives sets viscosity by the form research 02 gives. No vessel law reads viscosity yet, so this ticket adds that reader. The lungs and the tissues stay held: a held exchange at the lung and a fixed use at each bed.
