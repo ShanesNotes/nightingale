@@ -101,6 +101,38 @@ pub fn body_schema() -> Result<Schema, AdmissionError> {
     Ok(schema)
 }
 
+/// Each bed's held oxygen use in its cells: its bed, its boundary's name and the key of its rate.
+pub(super) const OXYGEN_USE: [(&str, &str, &str); 11] = [
+    (
+        "pulmonary bed",
+        "pulmonary bed oxygen use",
+        "mt.oxygen-use-pulmonary",
+    ),
+    ("gut bed", "gut bed oxygen use", "mt.oxygen-use-gut"),
+    ("muscle bed", "muscle bed oxygen use", "mt.oxygen-use-muscle"),
+    (
+        "glomerular bed",
+        "glomerular bed oxygen use",
+        "mt.oxygen-use-glomerular",
+    ),
+    (
+        "peritubular bed",
+        "peritubular bed oxygen use",
+        "mt.oxygen-use-peritubular",
+    ),
+    ("brain bed", "brain bed oxygen use", "mt.oxygen-use-brain"),
+    (
+        "coronary bed",
+        "coronary bed oxygen use",
+        "mt.oxygen-use-coronary",
+    ),
+    ("liver bed", "liver bed oxygen use", "mt.oxygen-use-liver"),
+    ("fat bed", "fat bed oxygen use", "mt.oxygen-use-fat"),
+    ("skin bed", "skin bed oxygen use", "mt.oxygen-use-skin"),
+    ("bone bed", "bone bed oxygen use", "mt.oxygen-use-bone"),
+];
+pub(super) const LUNG_OXYGEN: &str = "lung oxygen";
+
 fn boundaries(schema: &mut Schema) -> Result<(), AdmissionError> {
     let portal = site::<VesselSegment>("portal vein")?;
     let into = BoundaryDirection::IntoBody;
@@ -121,10 +153,14 @@ fn boundaries(schema: &mut Schema) -> Result<(), AdmissionError> {
     schema.boundary::<Water>("skin water", out, muscle, Space::Interstitium)?;
     schema.drain("urine", site::<VesselSegment>("bladder")?, Space::Lumen)?;
     schema.boundary::<Energy>("heat", out, site::<TissueSite>("body")?, Space::Thermal)?;
+    for (bed, name, _) in OXYGEN_USE {
+        schema.boundary::<Oxygen>(name, out, site::<CapillaryBed>(bed)?, Space::Cells)?;
+    }
+    let lung = site::<CapillaryBed>("pulmonary bed")?;
+    schema.boundary::<Oxygen>(LUNG_OXYGEN, into, lung, Space::Plasma)?;
 
     let veins = site::<VesselSegment>("central veins")?;
     let glomerular = site::<CapillaryBed>("glomerular bed")?;
-    let lung = site::<CapillaryBed>("pulmonary bed")?;
     let liver = site::<CapillaryBed>("liver bed")?;
     let gut = site::<CapillaryBed>("gut bed")?;
     let intestine = site::<VesselSegment>("small intestine")?;

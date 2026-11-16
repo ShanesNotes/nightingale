@@ -236,3 +236,16 @@ fn vasopressin_drifts_up_to_8e2_twice_the_slices_measured_day() {
 fn norepinephrine_drifts_up_to_the_floor_of_a_quantity_the_slice_does_not_move() {
     drifts_up_to(Species::Norepinephrine, 1.0, 1e-3, None);
 }
+
+#[test]
+fn the_slices_certificate_policy_stays_as_it_was() -> Result<(), AdmissionError> {
+    let policy = arena_certificate(&arena_body()?, ArenaProtocol::pick().windows)?;
+    let digest: String = (policy.digest().as_bytes().iter())
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(
+        digest,
+        "efcf3a80eea3f2d307a9ee4e6970d213eef5a40e8762599a1c31f2b901507620"
+    );
+    Ok(())
+}

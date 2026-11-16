@@ -545,6 +545,31 @@ pub fn arena_certificate(
     body: &CompiledBody,
     windows: SlidingWindows,
 ) -> Result<CertificatePolicy, AdmissionError> {
+    certificate_with(body, windows, &SliceDrifts)
+}
+
+/// A body's own drift bounds, each in its species' unit, for the species it `names` in place of the slice's table.
+pub trait DriftTable {
+    fn names(&self, species: Species) -> bool;
+    fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError>;
+}
+
+struct SliceDrifts;
+impl DriftTable for SliceDrifts {
+    fn names(&self, _: Species) -> bool {
+        false
+    }
+    fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError> {
+        Measure::new(species_drift(Q::SPECIES))
+    }
+}
+
+/// The arena's policy with `drifts` in place of the slice's bound for each species it names.
+pub fn certificate_with(
+    body: &CompiledBody,
+    windows: SlidingWindows,
+    drifts: &impl DriftTable,
+) -> Result<CertificatePolicy, AdmissionError> {
     fn limits<U: Substance>(quantity: QuantityId, drift: f64) -> Result<QuantityPolicy, AdmissionError> {
         let relative = Measure::new(CLOSURE_RELATIVE)?;
         QuantityPolicy::new(quantity, Measure::<U>::new(0.0)?, relative, Measure::new(drift)?)
@@ -556,9 +581,18 @@ pub fn arena_certificate(
             limits::<Q>(self.0, self.1)
         }
     }
+    struct Bounded<'t, T>(QuantityId, &'t T);
+    impl<T: DriftTable> Visit for Bounded<'_, T> {
+        type Output = Result<QuantityPolicy, AdmissionError>;
+        fn visit<Q: Substance>(self) -> Self::Output {
+            let relative = Measure::new(CLOSURE_RELATIVE)?;
+            QuantityPolicy::new(self.0, Measure::<Q>::new(0.0)?, relative, self.1.drift::<Q>()?)
+        }
+    }
     let basis = body.conserved_basis();
     let quantities = basis.ids().map(|quantity| match quantity.book() {
         Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_ENERGY_DRIFT),
+        Book::Of(species) if drifts.names(species) => species.visit(Bounded(quantity, drifts)),
         Book::Of(species) => species.visit(Limits(quantity, species_drift(species))),
         Book::Element(_) => QuantityPolicy::element(
             quantity,

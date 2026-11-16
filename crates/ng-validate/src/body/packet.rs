@@ -2,6 +2,8 @@ use core::num::{NonZeroU32, NonZeroU64};
 use ng_contract::*;
 
 use super::anatomy::at;
+use super::schema::OXYGEN_USE;
+use crate::{CertificatePolicy, DriftTable, SlidingWindows};
 
 const SECOND: u64 = 1_000_000_000;
 const POINTS: u32 = 100;
@@ -11,9 +13,22 @@ const NOTE: &str = "body fixture: synthetic";
 const METHOD: &str = "a synthetic monitor";
 const NEW_BED: f64 = 0.1;
 const HEMOGLOBIN: f64 = 2.0;
-/// The central veins' viscosity at the admitted start, read from an admission whose vessels did not read it, so the
-/// vessels' ratio is one at the start.
+/// The viscosity the packet's edge resistances are stated at. It was read once, at 08a's admitted start from an
+/// admission whose vessels did not read it, so 08a moved no pressure at rest. It is not read again when the admitted
+/// hematocrit moves: the resistances then move with viscosity, as a later ticket's change asks.
 const START_VISCOSITY: f64 = 7.115_102_244_801_436;
+
+/// Each bed's held oxygen use in its cells, in `OXYGEN_USE`'s order, and the head of partial pressure that every wall,
+/// cell membrane and the lung's exchange take at that use.
+const USES: [f64; 11] = [1.0, 20.0, 25.0, 3.0, 10.0, 8.0, 8.0, 15.0, 2.0, 2.0, 2.0];
+const HEAD: f64 = 5.0;
+const ALVEOLAR: f64 = 100.0;
+const SOLUBILITY: f64 = 0.001;
+const HEME: f64 = 4.0;
+const P50: f64 = 25.0;
+const HILL: (f64, f64, f64) = (2.5, 1.0, 10.0);
+/// The start's arterial and venous partial pressures as `P50 e^t`, because the host's logarithm is banned.
+const REACH: (f64, f64) = (1.3, 0.5);
 
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     Ok(AnatomyBuilder::new().site::<C>(key, at(0.0)?).id())
@@ -129,6 +144,9 @@ fn start_guess(row: RowKind) -> f64 {
                 (Species::Albumin, Space::Interstitium) => 0.1 * holds,
                 (Species::Albumin, _) => holds,
                 (Species::Hemoglobin, _) => HEMOGLOBIN * holds,
+                (Species::Oxygen, Space::Plasma | Space::Lumen | Space::Interstitium | Space::Cells) => {
+                    oxygen_guess(site.key(), space) * water
+                }
                 (Species::Vasopressin, Space::Bound) => 0.8,
                 (Species::Vasopressin, _) => 0.4 * holds,
                 (Species::Energy, Space::Thermal) => 2e7,
@@ -140,7 +158,61 @@ fn start_guess(row: RowKind) -> f64 {
         RowKind::Memory(slot) if slot.law.local == "afferent filter" => 1.0,
         RowKind::Memory(slot) if slot.law.local == "baroreflex set point" => 1.0,
         RowKind::Memory(_) => 0.0,
-        RowKind::Algebraic(_) => 1.0,
+        RowKind::Algebraic(slot) => match (slot.law.local, slot.at) {
+            ("oxygen partial pressure", Context::Site(site)) => {
+                solved(oxygen_guess(site.key(), Space::Plasma)).0
+            }
+            ("oxygen saturation", Context::Site(site)) => solved(oxygen_guess(site.key(), Space::Plasma)).1,
+            ("pulmonary oxygen partial pressure", _) => {
+                solved(oxygen_guess("pulmonary bed", Space::Plasma)).0
+            }
+            _ => 1.0,
+        },
+    }
+}
+
+/// The curve at its standard where `ln(P / P50)` is `t`: partial pressure, saturation and oxygen content.
+fn curve(t: f64) -> (f64, f64, f64) {
+    let pressure = P50 * exp(t);
+    let exponent = HILL.0 - HILL.1 * exp(-pressure / HILL.2);
+    let saturation = 1.0 / (1.0 + exp(-exponent * t));
+    (
+        pressure,
+        saturation,
+        SOLUBILITY * pressure + HEME * HEMOGLOBIN * saturation,
+    )
+}
+
+/// The partial pressure and saturation whose dissolved and bound oxygen make `content`, by bisection on `ln(P / P50)`,
+/// so a content above capacity starts inside the partial pressure's row too.
+fn solved(content: f64) -> (f64, f64) {
+    let (mut low, mut high) = (-30.0, 15.0);
+    for _ in 0..200 {
+        let middle = 0.5 * (low + high);
+        if curve(middle).2 < content {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    let (pressure, saturation, _) = curve(0.5 * (low + high));
+    (pressure, saturation)
+}
+
+fn blood_oxygen(site: &str) -> (f64, f64, f64) {
+    let arterial = matches!(
+        site,
+        "pulmonary bed" | "pulmonary vein" | "left atrium" | "left ventricle" | "systemic arteries"
+    );
+    curve(if arterial { REACH.0 } else { REACH.1 })
+}
+
+fn oxygen_guess(site: &str, space: Space) -> f64 {
+    let (pressure, _, content) = blood_oxygen(site);
+    match space {
+        Space::Plasma | Space::Lumen => content,
+        Space::Interstitium => SOLUBILITY * (pressure - HEAD),
+        _ => SOLUBILITY * (pressure - 2.0 * HEAD),
     }
 }
 
@@ -232,6 +304,15 @@ fn zero_stand_ins(
 }
 
 pub fn body_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+    body_packet_at_viscosity_exponent(body, Measure::new(-1.0)?)
+}
+
+/// The body's packet with viscosity's exponent `C` at `exponent`, so a test reads the row at a sign the body does not
+/// take.
+pub fn body_packet_at_viscosity_exponent(
+    body: &CompiledBody,
+    exponent: Measure<Dimensionless>,
+) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
     let rate = AnchorId::new("heart rate");
     let phase = LawName {
         owner: Cardiovascular::CARD,
@@ -318,7 +399,7 @@ pub fn body_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixtu
     };
     packet.start_mode(stirring, "still", NOTE)?;
 
-    table(&mut packet)?;
+    table(&mut packet, exponent)?;
     zero_stand_ins(&mut packet, body)?;
     packet.start_rest(body, start_guess, NOTE)?;
     for row in body.rows() {
@@ -336,7 +417,10 @@ pub fn body_packet(body: &CompiledBody) -> Result<ParameterPacket<SyntheticFixtu
     Ok(packet)
 }
 
-fn table(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+fn table(
+    packet: &mut ParameterPacket<SyntheticFixture>,
+    exponent: Measure<Dimensionless>,
+) -> Result<(), AdmissionError> {
     let blood = Binding::Network(Network::Vascular);
     let (urinary, lymph) = (
         Binding::Network(Network::Urinary),
@@ -591,21 +675,25 @@ fn table(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     set::<Affinity<Concentration<Vasopressin>>>(packet, "rc.avp-on", blood, 0.6)?;
     set::<Rate<Dimensionless>>(packet, "rc.avp-off", blood, 0.1)?;
     set::<Dimensionless>(packet, "rc.avp-efficacy", blood, 2.0)?;
-    hematology(packet)
+    hematology(packet, exponent)?;
+    oxygen(packet)
 }
 
-fn hematology(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+fn hematology(
+    packet: &mut ParameterPacket<SyntheticFixture>,
+    exponent: Measure<Dimensionless>,
+) -> Result<(), AdmissionError> {
     let body = Binding::Body;
     set::<Viscosity>(packet, "hc.plasma-viscosity", body, 2.0)?;
     set::<Concentration<Hemoglobin>>(packet, "hc.red-cell-hemoglobin", body, 5.0)?;
     for (key, value) in [
-        ("hc.reference-hematocrit", 0.5),
-        ("hc.relative-viscosity-at-reference", 3.0),
-        ("hc.viscosity-exponent", -1.0),
-        ("hc.wall-factor", 1.25),
-        ("hc.unit", 1.0),
+        ("hc.reference-hematocrit", Measure::new(0.6)?),
+        ("hc.relative-viscosity-at-reference", Measure::new(4.0)?),
+        ("hc.viscosity-exponent", exponent),
+        ("hc.wall-factor", Measure::new(1.25)?),
+        ("hc.unit", Measure::new(1.0)?),
     ] {
-        set::<Dimensionless>(packet, key, body, value)?;
+        packet.synthetic(ParameterKey::new(key), body, value, NOTE)?;
     }
     set::<Quotient<Dimensionless, Viscosity>>(
         packet,
@@ -613,4 +701,75 @@ fn hematology(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admi
         body,
         1.0 / START_VISCOSITY,
     )
+}
+
+fn oxygen(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
+    let body = Binding::Body;
+    type Solubility = Quotient<Concentration<Oxygen>, Pressure>;
+    set::<Solubility>(packet, "bc.oxygen-solubility", body, SOLUBILITY)?;
+    set::<Solubility>(packet, "mt.tissue-oxygen-solubility", body, SOLUBILITY)?;
+    set::<Quotient<Concentration<Oxygen>, Concentration<Hemoglobin>>>(packet, "bc.heme-oxygen", body, HEME)?;
+    for (key, value) in [
+        ("bc.p50", P50),
+        ("bc.hill-reach", HILL.2),
+        ("bc.standard-carbon-dioxide", 40.0),
+        ("bc.plasma-carbon-dioxide", 40.0),
+        ("bc.carbon-dioxide-scale", 40.0),
+        ("mt.alveolar-oxygen", ALVEOLAR),
+    ] {
+        set::<Pressure>(packet, key, body, value)?;
+    }
+    for (key, value) in [
+        ("bc.hill-ceiling", HILL.0),
+        ("bc.hill-fall", HILL.1),
+        ("bc.standard-acidity", 7.4),
+        ("bc.plasma-acidity", 7.4),
+        ("bc.p50-acidity-1", -1.0),
+        ("bc.p50-acidity-2", 0.5),
+        ("bc.p50-acidity-3", -0.25),
+        ("bc.p50-carbon-dioxide-1", 0.1),
+        ("bc.p50-carbon-dioxide-2", 0.01),
+    ] {
+        set::<Dimensionless>(packet, key, body, value)?;
+    }
+    let total: f64 = USES.iter().sum();
+    set::<Conductance<Oxygen>>(packet, "mt.lung-oxygen-exchange", body, total / HEAD)?;
+    set::<Dimensionless>(packet, "mt.lung-share", Binding::Class(Class::CapillaryBed), 0.0)?;
+    let lung = Binding::Site(site::<CapillaryBed>("pulmonary bed")?);
+    set::<Dimensionless>(packet, "mt.lung-share", lung, 1.0)?;
+    for ((bed, _, key), used) in OXYGEN_USE.into_iter().zip(USES) {
+        set::<Rate<Oxygen>>(packet, key, body, used)?;
+        let at = Binding::Site(site::<CapillaryBed>(bed)?);
+        set::<Conductance<Oxygen>>(packet, "mt.wall-oxygen-conductance", at, used / HEAD)?;
+        set::<Conductance<Oxygen>>(packet, "mt.cell-oxygen-conductance", at, used / HEAD)?;
+    }
+    Ok(())
+}
+
+/// The body's own drift bound for each species it moves that the slice's table does not hold. As on the slice
+/// (solver contract, section 7), each is fixture data that stands in for 1.96 times a within-subject variation: twice
+/// the species' worst change over a ten-second window of this body's first minute from its admitted start, rounded up
+/// to one significant figure. It is a synthetic target that scores a solver and judges no body. The body's measured
+/// day (ticket 24) replaces it, and a reviewed packet's bound comes only from the healthy-range set (record 0004).
+/// Oxygen's change is mostly its 35 umol swing within a beat, read across windows that hold no whole number of beats;
+/// the rest is the run settling from the admitted orbit onto the core's own, which a smaller step cap moves.
+const DRIFTS: [(Species, f64); 1] = [(Species::Oxygen, OXYGEN_DRIFT)];
+const OXYGEN_DRIFT: f64 = 4.0;
+
+struct BodyDrifts;
+impl DriftTable for BodyDrifts {
+    fn names(&self, species: Species) -> bool {
+        DRIFTS.iter().any(|(named, _)| *named == species)
+    }
+    fn drift<Q: Substance>(&self) -> Result<Measure<Q>, AdmissionError> {
+        let named = DRIFTS.iter().find(|(species, _)| *species == Q::SPECIES);
+        Measure::new(named.map_or(f64::NAN, |(_, drift)| *drift))
+    }
+}
+
+pub fn body_certificate(
+    body: &CompiledBody,
+    windows: SlidingWindows,
+) -> Result<CertificatePolicy, AdmissionError> {
+    crate::certificate_with(body, windows, &BodyDrifts)
 }

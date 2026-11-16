@@ -3,7 +3,8 @@ use ng_contract::*;
 
 /// Research 02's row, Pries's in vivo form at one fixed diameter (Secomb and Pries 2013 Eqs 5 to 7), so `m` (Eq 6),
 /// `C` (Eq 5) and the wall factor `W = (D / (D - 1.1))^2` are numbers:
-/// `mu = mu_plasma W (1 + (m - 1) W ((1 - Hct)^C - 1) / ((1 - H_ref)^C - 1))`, with `Hct = c_Hb / c_rbc`.
+/// `mu = mu_plasma W (1 + (m - 1) W ((1 - Hct)^C - 1) / ((1 - H_ref)^C - 1))`, with `Hct = c_Hb / c_rbc`. The quotient
+/// is taken over the denominator's square, a positive divisor whatever the exponent's sign.
 pub(crate) fn viscosity<'b>(
     hc: &mut FragmentBuilder<'b, Hematology>,
     central_veins: &Pair<'b, Hematology, Hemoglobin>,
@@ -45,7 +46,8 @@ pub(crate) fn viscosity<'b>(
         let power = k.scale(c, log);
         let raised = k.exp(power);
         let whole = k.subtract(raised, one);
-        let quotient = k.divide(at, whole);
+        let (product, square) = (k.scale(at, whole), k.scale(whole, whole));
+        let quotient = k.divide(product, square);
         let fraction: Expr<'_, '_, _, Dimensionless> = k.as_dimension(quotient);
         let (m, w) = (k.parameter(&at_reference), k.parameter(&wall));
         let above = k.subtract(m, one);

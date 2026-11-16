@@ -3309,6 +3309,14 @@ test = "-p ng-validate --test body_run a_count_over_its_ceiling_fails_and_names_
 name = "viscosity-arrow-114-disconnected"
 path = "crates/ng-cardiovascular/src/circulation.rs"
 old = '''                k.scale(total, ratio)'''
-new = '''                let _ = ratio;
-                total'''
+new = '''                let scaled = k.scale(total, ratio);
+                let back = k.divide(scaled, ratio);
+                k.as_dimension(back)'''
 test = "-p ng-validate --test viscosity a_plain_edges_flow_falls_as_viscosity_over_its_reference_rises"
+
+[[mutant]]
+name = "oxygen-wall-diffusion-held"
+path = "crates/ng-metabolism/src/diffusion.rs"
+old = '''    let wall = (Side::Plasma(plasma), Side::Tissue(&interstitium));'''
+new = '''    let wall = (Side::Tissue(&interstitium), Side::Tissue(&interstitium));'''
+test = "-p ng-validate --test oxygen the_bed_settles_where_the_fick_identity_puts_it"

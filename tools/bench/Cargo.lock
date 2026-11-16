@@ -13,6 +13,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ng-blood-chemistry"
+version = "0.0.0"
+dependencies = [
+ "ng-contract",
+]
+
+[[package]]
 name = "ng-cardiovascular"
 version = "0.0.0"
 dependencies = [
@@ -32,6 +39,13 @@ dependencies = [
 
 [[package]]
 name = "ng-hematology"
+version = "0.0.0"
+dependencies = [
+ "ng-contract",
+]
+
+[[package]]
+name = "ng-metabolism"
 version = "0.0.0"
 dependencies = [
  "ng-contract",
@@ -84,10 +98,12 @@ dependencies = [
 name = "ng-validate"
 version = "0.0.0"
 dependencies = [
+ "ng-blood-chemistry",
  "ng-cardiovascular",
  "ng-contract",
  "ng-fluids",
  "ng-hematology",
+ "ng-metabolism",
  "ng-nervous",
  "ng-observe",
  "ng-receptor",
