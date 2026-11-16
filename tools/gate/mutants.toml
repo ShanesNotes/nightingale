@@ -2650,9 +2650,9 @@ old = '''Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, 
 new = '''Book::Of(Species::Energy) | Book::Energy => limits::<Energy>(quantity, SYNTHETIC_DRIFT),'''
 test = "-p ng-validate --test arena_certificate energy_drifts_up_to_2e5_over_the_arenas_day_and_no_further"
 
-# This row changes the species and element arms together, and the water test sees only the species arm: the slice
-# has no reaction, so no element is a quantity of its own there, and a change to the element arm alone would survive.
-# The element arm gets its own row with the first body that has a reaction.
+# This row changes the species and element arms together, and the water test sees only the species arm: its body,
+# the steady inflows of arena_certificate.rs, has no reaction, so no element is a quantity of its own there. The row
+# after it changes the element arm alone, on the burning beds.
 [[mutant]]
 name = "every-quantity-takes-energys-drift-limit"
 path = "crates/ng-validate/src/slice.rs"
@@ -2675,6 +2675,27 @@ new = '''
         ),
 '''
 test = "-p ng-validate --test arena_certificate water_drifts_up_to_5e2_twice_the_slices_measured_day"
+
+[[mutant]]
+name = "element-drift-takes-energys-limit"
+path = "crates/ng-validate/src/slice.rs"
+old = '''
+        Book::Element(_) => QuantityPolicy::element(
+            quantity,
+            Measure::new(0.0)?,
+            Measure::new(CLOSURE_RELATIVE)?,
+            Measure::new(SYNTHETIC_DRIFT)?,
+        ),
+'''
+new = '''
+        Book::Element(_) => QuantityPolicy::element(
+            quantity,
+            Measure::new(0.0)?,
+            Measure::new(CLOSURE_RELATIVE)?,
+            Measure::new(SYNTHETIC_ENERGY_DRIFT)?,
+        ),
+'''
+test = "-p ng-validate --test arena_elements an_element_drifts_up_to_1e4_a_window_and_no_further"
 
 [[mutant]]
 name = "sodium-and-chloride-drift-fall-back-to-the-common-limit"
