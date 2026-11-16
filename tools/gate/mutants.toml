@@ -3370,8 +3370,8 @@ test = "-p ng-record --lib history::tests::an_exact_total_breaks_a_tie_to_even"
 [[mutant]]
 name = "ledger-total-drops-its-low-part"
 path = "crates/ng-record/src/history.rs"
-old = '''Some(Compensated::of(&hi.ok()?).plus(Compensated::of(&lo.ok()?)))'''
-new = '''Some(Compensated::of(&hi.ok()?).plus(Compensated::of(&lo.ok()?).scaled(0)))'''
+old = '''        Compensated::of(&high).plus(Compensated::of(&low))'''
+new = '''        Compensated::of(&high).plus(Compensated::of(&low).scaled(0))'''
 test = "-p ng-record --lib history::tests::an_exact_total_cancels_weighs_and_keeps_its_low_part"
 
 [[mutant]]
