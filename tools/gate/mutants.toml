@@ -3319,4 +3319,54 @@ name = "oxygen-wall-diffusion-held"
 path = "crates/ng-metabolism/src/diffusion.rs"
 old = '''    let wall = (Side::Plasma(plasma), Side::Tissue(&interstitium));'''
 new = '''    let wall = (Side::Tissue(&interstitium), Side::Tissue(&interstitium));'''
-test = "-p ng-validate --test oxygen the_bed_settles_where_the_fick_identity_puts_it"
+test = "-p ng-validate --test gases the_bed_settles_where_the_fick_identity_puts_it"
+
+[[mutant]]
+name = "carbon-dioxide-wall-diffusion-held"
+path = "crates/ng-metabolism/src/diffusion.rs"
+old = '''    let outward = (Side::Plasma(plasma), Side::Tissue(&interstitium));'''
+new = '''    let outward = (Side::Tissue(&interstitium), Side::Tissue(&interstitium));'''
+test = "-p ng-validate --test gases the_bed_settles_where_the_fick_identity_puts_it"
+
+[[mutant]]
+name = "acidity-reads-no-carbon-dioxide"
+path = "crates/ng-blood-chemistry/src/acidity.rs"
+old = '''        let total = concentration(&mut k, &plasma.carbon_dioxide, volume);'''
+new = '''        let total = k.add(bicarbonate, bicarbonate);'''
+test = "-p ng-validate --test gases speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_warm_one"
+
+[[mutant]]
+name = "wall-diffusion-doubled"
+path = "crates/ng-metabolism/src/diffusion.rs"
+old = '''        let flow = k.conductance_flow(conductance, head);'''
+new = '''        let doubled = k.add(head, head);
+        let flow = k.conductance_flow(conductance, doubled);'''
+test = "-p ng-validate --test gases the_bed_settles_where_the_fick_identity_puts_it"
+
+[[mutant]]
+name = "p50-acidity-shift-reversed"
+path = "crates/ng-blood-chemistry/src/oxygen.rs"
+old = '''        let d = k.subtract(acidity, standard);'''
+new = '''        let d = k.subtract(standard, acidity);'''
+test = "-p ng-validate --test gases speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_warm_one"
+
+[[mutant]]
+name = "p50-carbon-dioxide-shift-reversed"
+path = "crates/ng-blood-chemistry/src/oxygen.rs"
+old = '''        let apart = k.subtract(read, standard);'''
+new = '''        let apart = k.subtract(standard, read);'''
+test = "-p ng-validate --test gases speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_warm_one"
+
+[[mutant]]
+name = "oxygen-drift-bound-loosened"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''const OXYGEN_DRIFT: f64 = 4.0;'''
+new = '''const OXYGEN_DRIFT: f64 = 8.0;'''
+test = "-p ng-validate --test body the_bodys_own_drift_bounds_are_oxygens_and_carbon_dioxides_stated_ones"
+
+[[mutant]]
+name = "packet-one-bed-use-doubled"
+path = "crates/ng-validate/src/body/packet.rs"
+old = '''const USES: [f64; 11] = [1.0, 20.0, 25.0, 3.0, 10.0, 8.0, 8.0, 15.0, 2.0, 2.0, 2.0];'''
+new = '''const USES: [f64; 11] = [1.0, 20.0, 25.0, 3.0, 10.0, 8.0, 8.0, 15.0, 2.0, 2.0, 4.0];'''
+test = "-p ng-validate --test body the_whole_body_holds_its_rows_columns_and_digests"
