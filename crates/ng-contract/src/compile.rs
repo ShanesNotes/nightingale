@@ -56,6 +56,7 @@ pub(crate) fn compile(
         held: &held,
     };
     let placement = place(&owed, &places, &unread)?;
+    check_samples(&placement, &rows, &schema.anatomy)?;
     check_holds(&rows, &schema, &held)?;
     check_orphans(&rows, &placement.columns, &schema, &held)?;
     let modes = modes(&fragments, &places);
@@ -1612,6 +1613,29 @@ fn explicit_laws<'f>(owed: &[Owed<'f>]) -> Result<Vec<ExplicitLaw<'f>>, CompileD
     Ok(fields)
 }
 
+/// Every sampled segment has a law of another card that reads blood chemistry's rows there, a written-in field's
+/// reads included, so a stale mark cannot keep its rows.
+fn check_samples(placement: &Placement, rows: &Rows, anatomy: &Anatomy) -> Result<(), CompileDefect> {
+    let stater = crate::BloodChemistry::CARD;
+    let stated_at = |address: &Address, site: SiteId| match address {
+        Address::Unknown(row) => matches!(
+            rows.rows[row.index()].kind,
+            RowKind::Algebraic(Slot { law, at: Context::Site(at) }) if law.owner == stater && at == site
+        ),
+        _ => false,
+    };
+    let read_at = |site: SiteId| {
+        (placement.instances.iter()).any(|placed| {
+            placement.programs[placed.program.index()].law.owner != stater
+                && placed.addresses.iter().any(|address| stated_at(address, site))
+        })
+    };
+    match anatomy.sampled().iter().find(|&&site| !read_at(site)) {
+        Some(&site) => Err(CompileDefect::UnreadSample { site }),
+        None => Ok(()),
+    }
+}
+
 /// A read of a row-free field lands at a site of the field's set: the reader's own site, or its landmark's.
 fn check_landing(
     law: LawName,
@@ -2422,7 +2446,7 @@ fn bind(
                     ParameterContext::Site(Sites::Tissue(_) | Sites::Besides(_)) => {
                         Some(Binding::Class(Class::CapillaryBed))
                     }
-                    ParameterContext::Site(Sites::Blood | Sites::Veins) => {
+                    ParameterContext::Site(Sites::Blood | Sites::Veins | Sites::Speciated) => {
                         Some(Binding::Network(Network::Vascular))
                     }
                     ParameterContext::Edge(network) => Some(Binding::Network(*network)),

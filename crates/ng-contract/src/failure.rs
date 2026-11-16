@@ -360,6 +360,9 @@ pub enum CompileDefect {
     UnclaimedLaw { law: LawName },
     /// A read of a coupling field no owner emits. An omitted law is not zero.
     UnemittedField { law: LawName, field: LawName },
+    /// A segment the map samples where no law of another card reads blood chemistry's speciation, so the mark would
+    /// keep rows nothing uses.
+    UnreadSample { site: SiteId },
     /// A read of a field in another dimension than the field's own.
     FieldDimension { law: LawName, field: LawName },
     /// A kernel that holds by a route's mode at a place that route does not stand, or a hazard on a mode with no one

@@ -664,7 +664,7 @@ fn a_vein_that_only_receives_blood_is_admitted() -> Result<(), AdmissionError> {
     Ok(())
 }
 
-fn ring(tissue: bool, veins: &[&str]) -> Result<Digest, AdmissionError> {
+fn ring(tissue: bool, veins: &[&str], sampled: &[&str]) -> Result<Digest, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let body = map.site::<TissueSite>("body", at(0.0)?);
     let artery = map.site::<VesselSegment>("artery", at(0.0)?);
@@ -683,6 +683,9 @@ fn ring(tissue: bool, veins: &[&str]) -> Result<Digest, AdmissionError> {
     for &vein in veins {
         map.vein(if vein == "upper vein" { &upper } else { &lower });
     }
+    for &segment in sampled {
+        map.sample(if segment == "artery" { &artery } else { &upper });
+    }
     Ok(map.finish()?.digest())
 }
 
@@ -696,7 +699,7 @@ fn site_id(out: &mut Vec<u8>, key: &str, class: Class) {
     number(out, class as u64);
 }
 
-fn ring_by_hand(tissue: bool, veins: &[&str]) -> Digest {
+fn ring_by_hand(tissue: bool, veins: &[&str], sampled: &[&str]) -> Digest {
     let mut out = Vec::new();
     let tag = "ng-contract anatomy 1";
     number(&mut out, tag.len() as u64);
@@ -750,25 +753,101 @@ fn ring_by_hand(tissue: bool, veins: &[&str]) -> Digest {
             site_id(&mut out, key, Class::VesselSegment);
         }
     }
+    if !sampled.is_empty() {
+        number(&mut out, u64::MAX - 2);
+        number(&mut out, sampled.len() as u64);
+        for key in sampled {
+            site_id(&mut out, key, Class::VesselSegment);
+        }
+    }
     Digest::of_canonical(&out)
 }
 
 #[test]
 fn a_marked_map_seals_its_veins_in_key_order_after_its_tissues() -> Result<(), AdmissionError> {
     assert_eq!(
-        ring(true, &["upper vein", "lower vein"])?,
-        ring_by_hand(true, &["lower vein", "upper vein"])
+        ring(true, &["upper vein", "lower vein"], &[])?,
+        ring_by_hand(true, &["lower vein", "upper vein"], &[])
     );
-    assert_eq!(ring(true, &[])?, ring_by_hand(true, &[]));
+    assert_eq!(ring(true, &[], &[])?, ring_by_hand(true, &[], &[]));
     assert_eq!(
-        ring(false, &["upper vein"])?,
-        ring_by_hand(false, &["upper vein"])
+        ring(false, &["upper vein"], &[])?,
+        ring_by_hand(false, &["upper vein"], &[])
     );
     assert_eq!(
-        ring(false, &["lower vein"])?,
-        ring_by_hand(false, &["lower vein"])
+        ring(false, &["lower vein"], &[])?,
+        ring_by_hand(false, &["lower vein"], &[])
     );
-    assert_ne!(ring(false, &["upper vein"])?, ring(false, &["lower vein"])?);
+    assert_ne!(
+        ring(false, &["upper vein"], &[])?,
+        ring(false, &["lower vein"], &[])?
+    );
+    Ok(())
+}
+
+#[test]
+fn a_sampled_map_seals_its_samples_in_key_order_after_its_veins() -> Result<(), AdmissionError> {
+    let both = ["upper vein", "artery"];
+    assert_eq!(
+        ring(true, &["upper vein"], &both)?,
+        ring_by_hand(true, &["upper vein"], &["artery", "upper vein"])
+    );
+    assert_eq!(
+        ring(false, &[], &["artery"])?,
+        ring_by_hand(false, &[], &["artery"])
+    );
+    assert_eq!(
+        ring(false, &[], &["artery", "artery"])?,
+        ring(false, &[], &["artery"])?
+    );
+    assert_ne!(ring(false, &[], &["artery"])?, ring(false, &[], &[])?);
+    assert_ne!(
+        ring(false, &["upper vein"], &[])?,
+        ring(false, &[], &["upper vein"])?
+    );
+    Ok(())
+}
+
+#[test]
+fn a_sampled_segment_off_the_vascular_network_is_refused() -> Result<(), AdmissionError> {
+    for network in [None, Some(Network::Urinary), Some(Network::Gut)] {
+        let map_with = |sampled: bool| -> Result<AnatomyBuilder, AdmissionError> {
+            let Manufactured {
+                mut map, body, first, ..
+            } = manufactured()?;
+            let stray = map.site::<VesselSegment>("stray", at(0.0)?);
+            let lumen = map.site::<VesselSegment>("lumen", at(0.0)?);
+            map.contain(body.id(), stray.id());
+            map.contain(body.id(), lumen.id());
+            match network {
+                Some(Network::Urinary) => map.connect(Network::Urinary, first.id(), stray.id()),
+                Some(network) => map.connect(network, stray.id(), lumen.id()),
+                None => {}
+            }
+            if sampled {
+                map.sample(&stray);
+            }
+            Ok(map)
+        };
+        assert!(map_with(false)?.finish().is_ok(), "{network:?}");
+        assert_eq!(
+            map_with(true)?.finish().err(),
+            refused(AnatomyDefect::SampledOffVascularNetwork { site: "stray" }),
+            "{network:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn a_sample_this_anatomy_does_not_declare_is_refused() -> Result<(), AdmissionError> {
+    let Manufactured { mut map, .. } = manufactured()?;
+    let elsewhere = AnatomyBuilder::new().site::<VesselSegment>("elsewhere", at(0.0)?);
+    map.sample(&elsewhere);
+    assert_eq!(
+        map.finish().err(),
+        refused(AnatomyDefect::Undeclared { site: "elsewhere" })
+    );
     Ok(())
 }
 

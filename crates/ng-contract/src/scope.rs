@@ -1139,6 +1139,7 @@ mod tests {
             (Sites::Tissue(Tissue::Muscle), [5, 2]),
             (Sites::Besides(Tissue::Fat), [6, 8]),
             (Sites::Veins, [7, 0]),
+            (Sites::Speciated, [8, 0]),
         ];
         for (sites, words) in pinned {
             let mut sealed = Canonical::new("");
