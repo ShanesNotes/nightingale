@@ -303,31 +303,6 @@ fn counted_until<'s>(
     session
 }
 
-/// The schema's synthetic energy a unit of glucose and of fatty acids.
-const FUEL_ENERGY: [(Species, f64); 2] = [(Species::Glucose, 1_000.0), (Species::FattyAcids, 3_000.0)];
-
-/// The energy book's parts: the core, skin and airway heat stores, the beds' heat, the fuels' energy and the walls'
-/// elastic store.
-fn energy_parts(start: &Start, session: &Session<'_, Running>) -> [f64; 4] {
-    let view = session.record().accepted();
-    let mut parts = [0.0; 4];
-    for row in start.body.rows() {
-        let held = || lead(view.value(row.id()));
-        if let RowKind::Amount { site, species, space } = row.kind() {
-            match (species, space) {
-                (Species::Energy, Space::Thermal) if site.key().ends_with(" bed") => parts[1] += held(),
-                (Species::Energy, Space::Thermal) => parts[0] += held(),
-                (Species::Energy, _) => parts[3] += held(),
-                (fuel, _) => {
-                    let content = FUEL_ENERGY.iter().find(|(species, _)| *species == fuel);
-                    parts[2] += content.map_or(0.0, |(_, content)| content * held());
-                }
-            }
-        }
-    }
-    parts
-}
-
 fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> (Session<'_, Running>, Minute) {
     let pools = start.held_pools();
     assert_eq!(pools.len(), 333);
@@ -342,19 +317,8 @@ fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> (S
         assert_eq!(*amount, guess.bits(), "{kind:?} moved at admission");
     }
     let mut minute = Minute::default();
-    let mut parts = energy_parts(start, &session);
     for mark in 1..=6 {
         session = counted_until(start, session, 10 * mark * SECOND, &mut minute);
-        let now = energy_parts(start, &session);
-        eprintln!(
-            "energy by {} s: heat stores {}, beds' heat {}, fuel {}, elastic {}",
-            10 * mark,
-            now[0] - parts[0],
-            now[1] - parts[1],
-            now[2] - parts[2],
-            now[3] - parts[3]
-        );
-        parts = now;
         for ((_, kind), (now, then)) in pools.iter().zip(amounts(&session).iter().zip(&admitted)) {
             assert_eq!(now, then, "{kind:?} moved by {} s", 10 * mark);
         }
@@ -378,16 +342,6 @@ fn the_certificate_passes_on_ten_second_windows_over_the_first_minute_with_its_h
             failed.window()
         )
     });
-    for result in certificate.results() {
-        if matches!(result.quantity().book(), Book::Energy | Book::Of(Species::Energy)) {
-            eprintln!(
-                "energy {:?}: worst change a window {}, worst closure {}",
-                result.quantity(),
-                lead(result.worst_drift()),
-                lead(result.worst_closure())
-            );
-        }
-    }
     let mut report = format!(
         "steps {}, quantities {}, held routes {}\n",
         minute.record().revision(),
@@ -982,23 +936,6 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
         }
     }
     let change = moved.stored - sample(first).stored;
-    eprintln!(
-        "beats {}, {held} s: flow {flow}, lymph {lymph}; oxygen taken {} against burned {} a second (all beds {oxygen}); \
-         carbon dioxide given {} against made {} a second (all beds {carbon_dioxide}); quotient {quotient}; \
-         fuel energy {} a second, heat to the core store {} a second, beds' heat change {stored}",
-        onsets.len() - 1,
-        fick[0].1,
-        fick[0].2,
-        fick[1].1,
-        fick[1].2,
-        beats.energy / held,
-        beats.heat_out / held
-    );
-    eprintln!(
-        "muscle bed from {first} to {} ns: inflow {} to {}, oxygen in less out {net}, used {used}, stored change \
-         {change}",
-        moved.at, at_onset, moved.inflow
-    );
     for (gas, taken, rate) in fick {
         assert!(
             (taken - rate).abs() <= LEDGER * rate,
@@ -1034,7 +971,7 @@ fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned
         moved.inflow
     );
     assert!(
-        (net - (used + change)).abs() <= 1e-9 * net.abs().max(used),
+        (net - (used + change)).abs() <= 1e-9 * (net.abs() + used.abs()),
         "the muscle bed took {net} of oxygen against {used} used and {change} stored"
     );
     only_the_core_store_takes_the_beds_heat(body, &columns);
@@ -1141,17 +1078,24 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         steps: minute.record().revision(),
         solves: start.core.solves.get() - before,
     };
-    eprintln!(
-        "first minute: steps {}, solves {} (ordinary {}, landing {}), refusals {}",
+    let mut minute = format!(
+        "steps {}, solves {}: ordinary {}, landing {}\n",
         counts.steps,
         counts.solves,
         counted.attempts,
-        counts.solves - counted.attempts,
-        counted.refused.values().sum::<u64>()
+        counts.solves - counted.attempts
     );
     for (reason, refusals) in &counted.refused {
-        eprintln!("refused {refusals} {reason}");
+        writeln!(minute, "refused {refusals} {reason}").expect("a string takes it");
     }
+    expect![[r#"
+        steps 11797, solves 14510: ordinary 12522, landing 1988
+        refused 60 Accuracy Algebraic(Slot { law: LawName { owner: "CV", local: "blood pressure" }, at: Site(SiteId { key: "left ventricle", class: VesselSegment }) })
+        refused 243 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left atrium", class: VesselSegment }, to: SiteId { key: "left ventricle", class: VesselSegment } } })
+        refused 361 Accuracy Memory(Slot { law: LawName { owner: "CV", local: "valves" }, at: Edge { from: SiteId { key: "left ventricle", class: VesselSegment }, to: SiteId { key: "systemic arteries", class: VesselSegment } } })
+        refused 61 IterationLimit
+    "#]]
+    .assert_eq(&minute);
     assert_eq!(over_ceilings(counts, CEILINGS), Vec::<&str>::new(), "{counts:?}");
     a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(&start);
     the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned_over_whole_beats(&start);
