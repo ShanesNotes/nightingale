@@ -1577,8 +1577,12 @@ fn stepped(
         }
         for local in ["glucose burn", "fatty acid burn"] {
             let oxygen = burned(&body, &session, local).oxygen;
-            seen.least_burn = seen.least_burn.min(oxygen);
-            seen.most_burn = seen.most_burn.max(oxygen);
+            if oxygen < seen.least_burn {
+                seen.least_burn = oxygen;
+            }
+            if oxygen > seen.most_burn {
+                seen.most_burn = oxygen;
+            }
         }
     }
     let [glucose, fat] = ["glucose burn", "fatty acid burn"].map(|local| burned(&body, &session, local));
