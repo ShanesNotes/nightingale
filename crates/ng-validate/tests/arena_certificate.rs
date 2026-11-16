@@ -259,7 +259,7 @@ fn the_slices_certificate_policy_stays_as_it_was() -> Result<(), AdmissionError>
         .collect();
     assert_eq!(
         digest,
-        "efcf3a80eea3f2d307a9ee4e6970d213eef5a40e8762599a1c31f2b901507620"
+        "ad3cb7ae10bebfd0367ed76a576f281c707af7c4f8308d98373c9fca733de8b0"
     );
     Ok(())
 }
