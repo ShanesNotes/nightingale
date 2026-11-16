@@ -20,7 +20,7 @@ Blocked by: 06, 07
 
 ## Answer
 
-The budget is stated in user instructions for each simulated second over the body's first minute, read on the beelink from the [cost line](../../../GLOSSARY.md). Today's body takes 5,960.1 M. Each pass 1 loop may add 12% of the figure it starts from, and its tickets share that 12%. After pass 1 the body takes at most 11,920 M, twice today's. The body's run test holds four count ceilings, and the cost line a loop PR quotes holds the instructions. Wall time is reported beside them and holds nothing: on one machine it moved 3.2 times with load while the instructions moved 14 parts a million.
+The budget is stated in user instructions for each simulated second over the body's first minute, read on the beelink from the [cost line](../../../GLOSSARY.md). Today's body takes 5,960.1 M. Each pass 1 loop may add 12% of the figure it starts from, and its tickets share that 12%. After pass 1 the body takes at most 11,920 M, twice today's. The body's run test holds four count ceilings, and the cost line a loop PR quotes holds the instructions. Wall time is reported beside them and holds nothing: on one machine it moved 3.2 times with load while the instructions moved 14 parts a million. The body's cost line fell from 6,964.4 M to 4,958.9 M by [native-contract 69](../../native-contract/issues/69-the-ledger-walks-every-combination-against-every-column.md), which changed no bit, and a loop's budget is counted from the line at its base.
 
 ### The measured table
 
