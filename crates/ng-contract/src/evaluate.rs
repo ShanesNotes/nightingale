@@ -578,23 +578,22 @@ impl CompiledBody {
         let (arithmetic, reads) = self.tape.guard(guard);
         let (mut values, mut slopes) = (vec![0.0; arithmetic.length], vec![0.0; arithmetic.length]);
         let partial_volume = self.partial_volume();
-        let undefined = |domain| Undefined {
-            law: self.layout.modes[layout.variable].variable.law,
-            domain,
-        };
         forward(arithmetic, reads, inputs, partial_volume, &mut values)
             .map_err(|domain| self.guard_undefined(guard, inputs, domain))?;
         backward(arithmetic, &values, partial_volume, &mut slopes);
         let sign = self.guard_sign(guard);
-        let finite = |(index, slope): (usize, f64)| {
-            if slope.is_finite() {
-                Ok((index, sign * slope))
+        let finite = |&(slot, index): &(usize, usize)| {
+            if slopes[slot].is_finite() {
+                Ok((index, sign * slopes[slot]))
             } else {
-                Err(undefined(OperatorDomain::NonFinite))
+                let law = self.layout.modes[layout.variable].variable.law;
+                let law = layout.code.origin(slot).unwrap_or(law);
+                let domain = OperatorDomain::NonFinite;
+                Err(Undefined { law, domain })
             }
         };
-        let unknowns = (reads.unknowns.iter()).map(|&(slot, index)| finite((index, slopes[slot])));
-        let parameters = (reads.parameters.iter()).map(|&(slot, index)| finite((index, slopes[slot])));
+        let unknowns = reads.unknowns.iter().map(finite);
+        let parameters = reads.parameters.iter().map(finite);
         Ok(GuardSlopes {
             unknowns: unknowns.collect::<Result<_, _>>()?,
             parameters: parameters.collect::<Result<_, _>>()?,
@@ -808,8 +807,12 @@ impl CompiledBody {
             (program.code.judged.iter()).map(move |&(_, law, range)| (instance.context, law, range))
         });
         let tail = &values[self.layout.instances.len().min(values.len())..];
+        let mut reported: Vec<(LawName, Context, Validity)> = Vec::new();
         for ((context, law, range), value) in judged.zip(tail) {
-            if let Some(value) = *value {
+            if let Some(value) = *value
+                && !reported.contains(&(law, context, range))
+            {
+                reported.push((law, context, range));
                 excursions.extend(excursion(law, context, at, value, range.lower, range.upper));
             }
         }

@@ -534,6 +534,120 @@ fn a_guard_reads_an_explicit_field_at_a_landmark() {
     }
 }
 
+/// A guard reading the field at the artery, with the field's exponent read at `acid` against a huge `ln_ten`.
+fn overflowing(acid: f64) -> (CompiledBody, BoundParameters) {
+    let case = Case {
+        guard: true,
+        oxygen: false,
+        ..SENSED
+    };
+    let (body, sites) = compiled(case).unwrap_or_else(|refused| panic!("{refused:?}"));
+    let [guard] = &body.layout.guards[..] else {
+        panic!("one guard")
+    };
+    let mut packet: ParameterPacket<SyntheticFixture> = ParameterPacket::new();
+    let note = "synthetic";
+    for (index, site) in [(0, sites[0]), (1, sites[1]), (3, sites[3])] {
+        let binding = Binding::Site(site);
+        let pressure = measure::<Pressure>(PRESSURE[index]);
+        packet
+            .synthetic(ParameterKey::new("bc.pressure"), binding, pressure, note)
+            .expect("once");
+        let acid = measure::<Dimensionless>(ACID[index]);
+        packet
+            .synthetic(ParameterKey::new("bc.acid"), binding, acid, note)
+            .expect("once");
+        let share = measure::<Dimensionless>(0.5);
+        packet
+            .synthetic(ParameterKey::new("bc.share"), binding, share, note)
+            .expect("once");
+        let base = measure::<Concentration<CarbonDioxide>>(24.0);
+        packet
+            .synthetic(ParameterKey::new("bc.base"), binding, base, note)
+            .expect("once");
+    }
+    for (key, value) in [("bc.pk", PK), ("bc.ln-ten", 1.0e200)] {
+        let value = measure::<Dimensionless>(value);
+        packet
+            .synthetic(ParameterKey::new(key), Binding::Body, value, note)
+            .expect("once");
+    }
+    let index = |site: SiteId| sites.iter().position(|known| *known == site).expect("a site");
+    let start = |row: RowKind| match row {
+        RowKind::Amount { site, .. } => 10.0 + 7.0 * index(site) as f64,
+        RowKind::Algebraic(Slot {
+            law,
+            at: Context::Site(site),
+        }) => match law.local {
+            "oxygen partial pressure" if site == sites[0] => 1.0e200,
+            "acidity" if site == sites[0] => acid,
+            "oxygen partial pressure" => PRESSURE[index(site)],
+            "acidity" => ACID[index(site)],
+            "bicarbonate" => 24.0,
+            "oxygen saturation" => 0.5,
+            _ => 0.0,
+        },
+        _ => 0.0,
+    };
+    packet.start_rest(&body, start, note).expect("once");
+    let mode = &body.layout.modes[guard.variable];
+    packet
+        .start_mode(mode.variable, mode.values[guard.leaves], note)
+        .expect("once");
+    let bound = body.bind(packet).expect("bound");
+    assert!(guard.armed(&bound.modes));
+    (body, bound)
+}
+
+fn guard_inputs<'a>(bound: &'a BoundParameters, frame: &'a DriveFrame, unknowns: &'a [f64]) -> Inputs<'a> {
+    Inputs {
+        parameters: &bound.values,
+        frame,
+        unknowns,
+        modes: &bound.modes,
+        draws: &[],
+        factors: &[],
+    }
+}
+
+fn starts(body: &CompiledBody, bound: &BoundParameters) -> Vec<f64> {
+    (body.rows().iter())
+        .map(|row| bound.starts[row.id().index()])
+        .collect()
+}
+
+const FIELD: LawName = LawName {
+    owner: "BC",
+    local: CarbonDioxidePartialPressure::NAME,
+};
+
+#[test]
+fn a_written_fields_non_finite_guard_slope_names_the_field() {
+    let (body, bound) = overflowing(PK);
+    let (frame, unknowns) = (DriveFrame::default(), starts(&body, &bound));
+    let inputs = guard_inputs(&bound, &frame, &unknowns);
+    assert_eq!(body.guard_gap(0, &inputs).expect("finite"), 1.0e200);
+    let refused = body.guard_slopes(0, &inputs).err().expect("the slope overflows");
+    assert!(matches!(
+        refused.domain,
+        crate::evaluate::OperatorDomain::NonFinite
+    ));
+    assert_eq!(refused.law, FIELD);
+}
+
+#[test]
+fn a_written_fields_non_finite_guard_value_names_the_field() {
+    let (body, bound) = overflowing(PK + 1.0);
+    let (frame, unknowns) = (DriveFrame::default(), starts(&body, &bound));
+    let inputs = guard_inputs(&bound, &frame, &unknowns);
+    let refused = body.guard_gap(0, &inputs).err().expect("the value overflows");
+    assert!(matches!(
+        refused.domain,
+        crate::evaluate::OperatorDomain::NonFinite
+    ));
+    assert_eq!(refused.law, FIELD);
+}
+
 #[test]
 fn a_day_input_scaled_inside_an_explicit_field_is_judged_as_by_hand() {
     for reader in [Reader::ByHand, Reader::Written] {

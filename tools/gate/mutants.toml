@@ -3844,3 +3844,24 @@ path = "crates/ng-contract/src/compile.rs"
 old = '''check_wired(law, zero, at, places)?;'''
 new = ''''''
 test = "-p ng-contract --lib speciated::a_guards_read_is_held_to_the_table"
+
+[[mutant]]
+name = "guard-slope-names-the-guard"
+path = "crates/ng-contract/src/evaluate.rs"
+old = '''let law = layout.code.origin(slot).unwrap_or(law);'''
+new = ''''''
+test = "-p ng-contract --lib speciated::a_written_fields_non_finite_guard_slope_names_the_field"
+
+[[mutant]]
+name = "guard-value-names-the-guard"
+path = "crates/ng-contract/src/evaluate.rs"
+old = '''            law = layout.code.origin(op).unwrap_or(law);'''
+new = '''            let _ = op;'''
+test = "-p ng-contract --lib speciated::a_written_fields_non_finite_guard_value_names_the_field"
+
+[[mutant]]
+name = "field-range-reported-for-each-program"
+path = "crates/ng-contract/src/evaluate.rs"
+old = '''                && !reported.contains(&(law, context, range))'''
+new = ''''''
+test = "-p ng-contract --lib written::a_fields_range_is_judged_under_the_field_in_each_program_it_is_written_into"

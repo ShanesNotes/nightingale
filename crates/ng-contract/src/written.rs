@@ -729,14 +729,11 @@ fn a_fields_range_is_judged_under_the_field_in_each_program_it_is_written_into()
     found.sort_unstable();
     let beds = [Context::Site(sites[1]), Context::Site(sites[3])];
     assert!(closed_form(0) > 1.0 && closed_form(1) > 1.0);
-    let mut wanted: Vec<(LawName, Context)> = beds
-        .iter()
-        .flat_map(|&bed| [(bc(FIELD), bed), (bc(FIELD), bed)])
-        .collect();
+    let mut wanted: Vec<(LawName, Context)> = beds.iter().map(|&bed| (bc(FIELD), bed)).collect();
     wanted.sort_unstable();
     assert_eq!(
         found, wanted,
-        "the probe's and the uptake's programs each judge the field at each bed"
+        "the field leaves its range once at each bed, though two programs read it there"
     );
 }
 
