@@ -377,8 +377,9 @@ fn the_first_second_of_the_body_on_ng_solver_stays_where_it_was(start: &Start) {
         trace.push('\n');
     }
     let record = session.record();
+    let ratio = Edge::at(start, &start.session()).resistance() / CORONARY_RESISTANCE;
     let pin = format!(
-        "packet {}\nseal {}\nsteps {}\n",
+        "packet {}\nseal {}\nsteps {}\nviscosity over its reference at the start {ratio:.9}\n",
         hex(start.identity.packet().digest()),
         hex(record.seal().digest()),
         record.revision()
@@ -454,17 +455,12 @@ impl Edge {
     }
 }
 
-/// At the admitted start viscosity is its reference, so the edge keeps the packet's resistance. A 400 mL water bolus
-/// into the gut then lowers the hematocrit, viscosity and the edge's resistance, and the edge's flow is its drop over
-/// the packet's resistance times viscosity's ratio, so the run tells viscosity's part of the flow from the drop's.
+/// A 400 mL water bolus into the gut lowers the hematocrit, viscosity and the edge's resistance, and the edge's flow is
+/// its drop over the packet's resistance times viscosity's ratio, so the run tells viscosity's part of the flow from
+/// the drop's.
 fn a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(start: &Start) {
     let mut session = start.session();
     let before = Edge::at(start, &session);
-    let at_start = before.resistance() / CORONARY_RESISTANCE;
-    assert!(
-        (at_start - 1.0).abs() < 1e-6,
-        "viscosity over its reference at the start is {at_start}"
-    );
     let water = WaterDelivery {
         boundary: "gut water",
         amount: Measure::new(400.0).expect("finite"),

@@ -61,11 +61,13 @@ fn staged(body: &CompiledBody, each: &[Vec<(usize, f64)>]) -> Result<Vec<Vec<f64
     Ok(residuals)
 }
 
-/// The packet's row at an exponent of -1, so `(1 - Hct)^C - 1` is `Hct / (1 - Hct)`, which is one at the reference
-/// hematocrit 0.5: plasma 2, red cells' own hemoglobin 5, 3 at the reference and a wall factor of 1.25.
+/// The packet's row at an exponent of -1, so `(1 - h)^C - 1` is `h / (1 - h)`: 1.5 at the reference hematocrit 0.6,
+/// so a row that read `H_ref` for `1 - H_ref` would take 2/3 there. Plasma 2, red cells' own hemoglobin 5, 4 at the
+/// reference and a wall factor of 1.25.
 fn closed_form(hematocrit: f64) -> f64 {
-    let fraction = hematocrit / (1.0 - hematocrit);
-    2.0 * 1.25 * (1.0 + (3.0 - 1.0) * fraction * 1.25)
+    let odds = |share: f64| share / (1.0 - share);
+    let fraction = odds(hematocrit) / odds(0.6);
+    2.0 * 1.25 * (1.0 + (4.0 - 1.0) * fraction * 1.25)
 }
 
 #[test]
@@ -153,5 +155,46 @@ fn only_the_whole_body_reads_viscosity() -> Result<(), AdmissionError> {
     };
     assert_eq!(reads(&whole_body()?), (true, true));
     assert_eq!(reads(&arena_body()?), (false, false));
+    Ok(())
+}
+
+/// Viscosity scales each of the body's 21 circulation edges by its ratio, and no other law reads it: the five valves,
+/// the liver's three sinusoids and the lymph and kidney edges keep theirs.
+#[test]
+fn viscosity_scales_every_circulation_edge_and_no_other_law() -> Result<(), InitializationFailure> {
+    let body = whole_body()?;
+    let field = index(&body, viscosity());
+    let cv = |row: &&Row, local: &dyn Fn(&str) -> bool| matches!(row.kind(), RowKind::Algebraic(slot) if slot.law.owner == "CV" && local(slot.law.local));
+    let rows: Vec<&Row> = body.rows().iter().collect();
+    let of = |local: &dyn Fn(&str) -> bool| -> Vec<usize> {
+        (0..rows.len()).filter(|&at| cv(&rows[at], local)).collect()
+    };
+    let circulation = of(&|local| local == "circulation");
+    let pressures = of(&|local| local.contains("pressure"));
+    let mut start: Vec<(usize, f64)> = (pressures.iter().enumerate())
+        .map(|(n, &at)| (at, 10.0 + 7.0 * n as f64))
+        .collect();
+    start.extend(circulation.iter().map(|&at| (at, 0.0)));
+    let each: Vec<_> = [1.0, 2.0]
+        .iter()
+        .map(|mu| start.iter().copied().chain([(field, *mu)]).collect::<Vec<_>>())
+        .collect();
+    let staged = staged(&body, &each)?;
+    let moved: Vec<usize> = (0..rows.len())
+        .filter(|&at| staged[0][at] != staged[1][at])
+        .collect();
+    let mut read = circulation.clone();
+    read.push(field);
+    read.sort_unstable();
+    assert_eq!(circulation.len(), 21);
+    assert_eq!(moved, read);
+    for at in circulation {
+        let (once, twice) = (-staged[0][at], -staged[1][at]);
+        assert!(
+            once != 0.0 && (twice - once / 2.0).abs() <= 1e-12 * once.abs(),
+            "{:?}: {once} at viscosity 1 and {twice} at 2",
+            rows[at].kind()
+        );
+    }
     Ok(())
 }

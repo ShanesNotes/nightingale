@@ -13,8 +13,9 @@ const NOTE: &str = "body fixture: synthetic";
 const METHOD: &str = "a synthetic monitor";
 const NEW_BED: f64 = 0.1;
 const HEMOGLOBIN: f64 = 2.0;
-/// The central veins' viscosity at the admitted start, read from an admission whose vessels did not read it, so the
-/// vessels' ratio is one at the start.
+/// The viscosity the packet's edge resistances are stated at. It was read once, at 08a's admitted start from an
+/// admission whose vessels did not read it, so 08a moved no pressure at rest. It is not read again when the admitted
+/// hematocrit moves: the resistances then move with viscosity, as a later ticket's change asks.
 const START_VISCOSITY: f64 = 7.115_102_244_801_436;
 
 /// Each bed's held oxygen use in its cells, in `OXYGEN_USE`'s order, and the head of partial pressure that every wall,
@@ -671,8 +672,8 @@ fn hematology(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admi
     set::<Viscosity>(packet, "hc.plasma-viscosity", body, 2.0)?;
     set::<Concentration<Hemoglobin>>(packet, "hc.red-cell-hemoglobin", body, 5.0)?;
     for (key, value) in [
-        ("hc.reference-hematocrit", 0.5),
-        ("hc.relative-viscosity-at-reference", 3.0),
+        ("hc.reference-hematocrit", 0.6),
+        ("hc.relative-viscosity-at-reference", 4.0),
         ("hc.viscosity-exponent", -1.0),
         ("hc.wall-factor", 1.25),
         ("hc.unit", 1.0),
