@@ -29,18 +29,53 @@ const P50: f64 = 25.0;
 const HILL: (f64, f64, f64) = (2.5, 1.0, 10.0);
 /// The start's arterial and venous oxygen partial pressures as `P50 e^t`, because the host's logarithm is banned.
 const REACH: (f64, f64) = (1.3, 0.5);
-/// The factors on P50: the standard acidity and its cubic's coefficients, and the standard carbon dioxide partial
-/// pressure, its scale and its quadratic's coefficients.
-const BY_ACIDITY: (f64, [f64; 3]) = (7.5, [-1.0, 0.5, -0.25]);
-const BY_CARBON_DIOXIDE: (f64, f64, [f64; 2]) = (30.0, 10.0, [0.1, 0.01]);
+struct ByAcidity {
+    standard: f64,
+    cubic: [f64; 3],
+}
+const BY_ACIDITY: ByAcidity = ByAcidity {
+    standard: 7.5,
+    cubic: [-1.0, 0.5, -0.25],
+};
+struct ByCarbonDioxide {
+    standard: f64,
+    scale: f64,
+    quadratic: [f64; 2],
+}
+const BY_CARBON_DIOXIDE: ByCarbonDioxide = ByCarbonDioxide {
+    standard: 30.0,
+    scale: 10.0,
+    quadratic: [0.1, 0.01],
+};
 const CARBON_DIOXIDE_SOLUBILITY: f64 = 0.02;
 const PK: f64 = 6.0;
 const STRONG_ION_OFFSET: f64 = 50.0;
-/// Albumin's and phosphate's stated concentrations, and each weak acid's charge `a pH - b` for each unit of it.
-const WEAK: [(f64, f64, f64); 2] = [(1.0, 10.0, 60.0), (1.0, 1.0, 6.0)];
+struct WeakAcid {
+    concentration: f64,
+    slope: f64,
+    offset: f64,
+}
+const ALBUMIN: WeakAcid = WeakAcid {
+    concentration: 1.0,
+    slope: 10.0,
+    offset: 60.0,
+};
+const PHOSPHATE: WeakAcid = WeakAcid {
+    concentration: 1.0,
+    slope: 1.0,
+    offset: 6.0,
+};
 const HEMOGLOBIN_CHARGE: (f64, f64) = (5.0, 30.0);
-/// Carbamino's sites on each hemoglobin, its half-saturation when deoxygenated, and that half's rise at saturation.
-const CARBAMINO: (f64, f64, f64) = (4.0, 10.0, 10.0);
+struct Carbamino {
+    sites: f64,
+    half: f64,
+    half_rise: f64,
+}
+const CARBAMINO: Carbamino = Carbamino {
+    sites: 4.0,
+    half: 10.0,
+    half_rise: 10.0,
+};
 const INTERSTITIAL_BUFFER_RATIO: f64 = 15.0;
 const CELL_BUFFER_RATIO: f64 = 10.0;
 /// The respiratory quotient that glucose's share of the oxygen burned fixes, `s + 16 (1 - s) / 23`: 21/28.
@@ -208,11 +243,11 @@ fn start_guess(row: RowKind) -> f64 {
             };
             let blood = blood(bed);
             match slot.law.local {
-                "oxygen partial pressure" | "pulmonary oxygen partial pressure" => blood.oxygen.0,
-                "oxygen saturation" => blood.oxygen.1,
+                "oxygen partial pressure" | "pulmonary oxygen partial pressure" => blood.oxygen_pressure,
+                "oxygen saturation" => blood.saturation,
                 "bicarbonate" => blood.bicarbonate,
                 "acidity" => blood.acidity,
-                "pulmonary carbon dioxide partial pressure" => blood.carbon_dioxide.0,
+                "pulmonary carbon dioxide partial pressure" => blood.carbon_dioxide_pressure,
                 _ => 1.0,
             }
         }
@@ -238,8 +273,8 @@ fn ten_to(power: f64) -> f64 {
 }
 
 fn weak(acidity: f64) -> f64 {
-    let acids: f64 = (WEAK.iter())
-        .map(|(held, slope, offset)| held * (slope * acidity - offset))
+    let acids: f64 = ([ALBUMIN, PHOSPHATE].iter())
+        .map(|acid| acid.concentration * (acid.slope * acidity - acid.offset))
         .sum();
     acids + HEMOGLOBIN * (HEMOGLOBIN_CHARGE.0 * acidity - HEMOGLOBIN_CHARGE.1)
 }
@@ -260,34 +295,39 @@ fn acidity_at(pressure: f64) -> f64 {
     0.5 * (low + high)
 }
 
-/// A plasma's speciation at a carbon dioxide partial pressure, and at an oxygen partial pressure `P50 e^t`.
 struct Blood {
-    oxygen: (f64, f64, f64),
+    oxygen_pressure: f64,
+    saturation: f64,
+    oxygen_content: f64,
     acidity: f64,
     bicarbonate: f64,
-    carbon_dioxide: (f64, f64),
+    carbon_dioxide_pressure: f64,
+    carbon_dioxide_total: f64,
 }
 
 fn speciated(t: f64, pressure: f64) -> Blood {
     let acidity = acidity_at(pressure);
     let bicarbonate = STRONG_ION_OFFSET - weak(acidity);
-    let d = acidity - BY_ACIDITY.0;
-    let [c1, c2, c3] = BY_ACIDITY.1;
-    let u = (pressure - BY_CARBON_DIOXIDE.0) / BY_CARBON_DIOXIDE.1;
-    let [q1, q2] = BY_CARBON_DIOXIDE.2;
+    let d = acidity - BY_ACIDITY.standard;
+    let [c1, c2, c3] = BY_ACIDITY.cubic;
+    let u = (pressure - BY_CARBON_DIOXIDE.standard) / BY_CARBON_DIOXIDE.scale;
+    let [q1, q2] = BY_CARBON_DIOXIDE.quadratic;
     let half = P50 * (1.0 + c1 * d + c2 * d * d + c3 * d * d * d) * (1.0 + q1 * u + q2 * u * u);
     let oxygen = half * exp(t);
     let exponent = HILL.0 - HILL.1 * exp(-oxygen / HILL.2);
     let saturation = 1.0 / (1.0 + exp(-exponent * t));
     let content = SOLUBILITY * oxygen + HEME * HEMOGLOBIN * saturation;
     let dissolved = CARBON_DIOXIDE_SOLUBILITY * pressure;
-    let reach = CARBAMINO.1 + CARBAMINO.2 * saturation;
-    let carbamino = CARBAMINO.0 * HEMOGLOBIN * dissolved / (dissolved + reach);
+    let reach = CARBAMINO.half + CARBAMINO.half_rise * saturation;
+    let carbamino = CARBAMINO.sites * HEMOGLOBIN * dissolved / (dissolved + reach);
     Blood {
-        oxygen: (oxygen, saturation, content),
+        oxygen_pressure: oxygen,
+        saturation,
+        oxygen_content: content,
         acidity,
         bicarbonate,
-        carbon_dioxide: (pressure, bicarbonate + dissolved + carbamino),
+        carbon_dioxide_pressure: pressure,
+        carbon_dioxide_total: bicarbonate + dissolved + carbamino,
     }
 }
 
@@ -305,7 +345,11 @@ fn blood(site: &str) -> Blood {
 }
 
 fn oxygen_guess(site: &str, space: Space) -> f64 {
-    let (pressure, _, content) = blood(site).oxygen;
+    let Blood {
+        oxygen_pressure: pressure,
+        oxygen_content: content,
+        ..
+    } = blood(site);
     match space {
         Space::Plasma | Space::Lumen => content,
         Space::Interstitium => SOLUBILITY * (pressure - HEAD),
@@ -314,7 +358,11 @@ fn oxygen_guess(site: &str, space: Space) -> f64 {
 }
 
 fn carbon_dioxide_guess(site: &str, space: Space) -> f64 {
-    let (pressure, total) = blood(site).carbon_dioxide;
+    let Blood {
+        carbon_dioxide_pressure: pressure,
+        carbon_dioxide_total: total,
+        ..
+    } = blood(site);
     let tissue = |ratio: f64, heads: f64| {
         CARBON_DIOXIDE_SOLUBILITY * (1.0 + ratio) * (pressure + heads * CARBON_DIOXIDE_HEAD)
     };
@@ -821,19 +869,19 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     for (key, value) in [
         ("bc.p50", P50),
         ("bc.hill-reach", HILL.2),
-        ("bc.standard-carbon-dioxide", BY_CARBON_DIOXIDE.0),
-        ("bc.carbon-dioxide-scale", BY_CARBON_DIOXIDE.1),
+        ("bc.standard-carbon-dioxide", BY_CARBON_DIOXIDE.standard),
+        ("bc.carbon-dioxide-scale", BY_CARBON_DIOXIDE.scale),
         ("mt.alveolar-oxygen", ALVEOLAR),
         ("mt.alveolar-carbon-dioxide", ALVEOLAR_CARBON_DIOXIDE),
     ] {
         set::<Pressure>(packet, key, body, value)?;
     }
-    let [c1, c2, c3] = BY_ACIDITY.1;
-    let [q1, q2] = BY_CARBON_DIOXIDE.2;
+    let [c1, c2, c3] = BY_ACIDITY.cubic;
+    let [q1, q2] = BY_CARBON_DIOXIDE.quadratic;
     for (key, value) in [
         ("bc.hill-ceiling", HILL.0),
         ("bc.hill-fall", HILL.1),
-        ("bc.standard-acidity", BY_ACIDITY.0),
+        ("bc.standard-acidity", BY_ACIDITY.standard),
         ("bc.p50-acidity-1", c1),
         ("bc.p50-acidity-2", c2),
         ("bc.p50-acidity-3", c3),
@@ -899,23 +947,19 @@ fn carbon_dioxide(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), 
     set::<Concentration<Charge>>(packet, "bc.strong-ion-offset", body, STRONG_ION_OFFSET)?;
     type PerCharge = Quotient<Concentration<CarbonDioxide>, Concentration<Charge>>;
     set::<PerCharge>(packet, "bc.bicarbonate-per-charge", body, 1.0)?;
-    let [
-        (albumin, albumin_slope, albumin_offset),
-        (phosphate, phosphate_slope, phosphate_offset),
-    ] = WEAK;
-    set::<Concentration<Albumin>>(packet, "bc.plasma-albumin", body, albumin)?;
-    set::<Concentration<Phosphate>>(packet, "bc.plasma-phosphate", body, phosphate)?;
+    set::<Concentration<Albumin>>(packet, "bc.plasma-albumin", body, ALBUMIN.concentration)?;
+    set::<Concentration<Phosphate>>(packet, "bc.plasma-phosphate", body, PHOSPHATE.concentration)?;
     type PerAcid<Q> = Quotient<Concentration<Charge>, Concentration<Q>>;
-    set::<PerAcid<Albumin>>(packet, "bc.albumin-slope", body, albumin_slope)?;
-    set::<PerAcid<Albumin>>(packet, "bc.albumin-offset", body, albumin_offset)?;
-    set::<PerAcid<Phosphate>>(packet, "bc.phosphate-slope", body, phosphate_slope)?;
-    set::<PerAcid<Phosphate>>(packet, "bc.phosphate-offset", body, phosphate_offset)?;
+    set::<PerAcid<Albumin>>(packet, "bc.albumin-slope", body, ALBUMIN.slope)?;
+    set::<PerAcid<Albumin>>(packet, "bc.albumin-offset", body, ALBUMIN.offset)?;
+    set::<PerAcid<Phosphate>>(packet, "bc.phosphate-slope", body, PHOSPHATE.slope)?;
+    set::<PerAcid<Phosphate>>(packet, "bc.phosphate-offset", body, PHOSPHATE.offset)?;
     set::<PerAcid<Hemoglobin>>(packet, "bc.hemoglobin-slope", body, HEMOGLOBIN_CHARGE.0)?;
     set::<PerAcid<Hemoglobin>>(packet, "bc.hemoglobin-offset", body, HEMOGLOBIN_CHARGE.1)?;
     type Sites = Quotient<Concentration<CarbonDioxide>, Concentration<Hemoglobin>>;
-    set::<Sites>(packet, "bc.carbamino-sites", body, CARBAMINO.0)?;
-    set::<Concentration<CarbonDioxide>>(packet, "bc.carbamino-half", body, CARBAMINO.1)?;
-    set::<Concentration<CarbonDioxide>>(packet, "bc.carbamino-half-rise", body, CARBAMINO.2)
+    set::<Sites>(packet, "bc.carbamino-sites", body, CARBAMINO.sites)?;
+    set::<Concentration<CarbonDioxide>>(packet, "bc.carbamino-half", body, CARBAMINO.half)?;
+    set::<Concentration<CarbonDioxide>>(packet, "bc.carbamino-half-rise", body, CARBAMINO.half_rise)
 }
 
 /// The body's own drift bound for each species it moves that the slice's table does not hold. As on the slice

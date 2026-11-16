@@ -20,14 +20,53 @@ const SOLUBILITY: f64 = 0.001;
 const HEME: f64 = 4.0;
 const P50: f64 = 25.0;
 const HILL: (f64, f64, f64) = (2.5, 1.0, 10.0);
-const BY_ACIDITY: (f64, [f64; 3]) = (7.5, [-1.0, 0.5, -0.25]);
-const BY_CARBON_DIOXIDE: (f64, f64, [f64; 2]) = (30.0, 10.0, [0.1, 0.01]);
+struct ByAcidity {
+    standard: f64,
+    cubic: [f64; 3],
+}
+const BY_ACIDITY: ByAcidity = ByAcidity {
+    standard: 7.5,
+    cubic: [-1.0, 0.5, -0.25],
+};
+struct ByCarbonDioxide {
+    standard: f64,
+    scale: f64,
+    quadratic: [f64; 2],
+}
+const BY_CARBON_DIOXIDE: ByCarbonDioxide = ByCarbonDioxide {
+    standard: 30.0,
+    scale: 10.0,
+    quadratic: [0.1, 0.01],
+};
 const CARBON_DIOXIDE_SOLUBILITY: f64 = 0.02;
 const PK: f64 = 6.0;
 const STRONG_ION_OFFSET: f64 = 50.0;
-const WEAK: [(f64, f64, f64); 2] = [(1.0, 10.0, 60.0), (1.0, 1.0, 6.0)];
+struct WeakAcid {
+    concentration: f64,
+    slope: f64,
+    offset: f64,
+}
+const ALBUMIN: WeakAcid = WeakAcid {
+    concentration: 1.0,
+    slope: 10.0,
+    offset: 60.0,
+};
+const PHOSPHATE: WeakAcid = WeakAcid {
+    concentration: 1.0,
+    slope: 1.0,
+    offset: 6.0,
+};
 const HEMOGLOBIN_CHARGE: (f64, f64) = (5.0, 30.0);
-const CARBAMINO: (f64, f64, f64) = (4.0, 10.0, 10.0);
+struct Carbamino {
+    sites: f64,
+    half: f64,
+    half_rise: f64,
+}
+const CARBAMINO: Carbamino = Carbamino {
+    sites: 4.0,
+    half: 10.0,
+    half_rise: 10.0,
+};
 const BUFFER_RATIOS: (f64, f64) = (15.0, 10.0);
 const IONS: [(Species, f64, f64); 9] = [
     (Species::Sodium, 103.0, 1.0),
@@ -41,9 +80,19 @@ const IONS: [(Species, f64, f64); 9] = [
     (Species::FixedAcid, 0.9, -1.0),
 ];
 const RENEWAL: f64 = 1.0;
-/// `ln(P / P50)` and the carbon dioxide partial pressure of the arterial blood and of the bed's settled plasma.
-const ARTERIAL: (f64, f64) = (1.3, 31.0);
-const VENOUS: (f64, f64) = (0.5, 35.0);
+#[derive(Clone, Copy, Debug)]
+struct Point {
+    ln_over_p50: f64,
+    carbon_dioxide_pressure: f64,
+}
+const ARTERIAL: Point = Point {
+    ln_over_p50: 1.3,
+    carbon_dioxide_pressure: 31.0,
+};
+const VENOUS: Point = Point {
+    ln_over_p50: 0.5,
+    carbon_dioxide_pressure: 35.0,
+};
 const HEAD: f64 = 5.0;
 const CARBON_DIOXIDE_HEAD: f64 = 1.0;
 
@@ -52,8 +101,8 @@ fn ten_to(power: f64) -> f64 {
 }
 
 fn weak(acidity: f64) -> f64 {
-    let acids: f64 = (WEAK.iter())
-        .map(|(held, slope, offset)| held * (slope * acidity - offset))
+    let acids: f64 = ([ALBUMIN, PHOSPHATE].iter())
+        .map(|acid| acid.concentration * (acid.slope * acidity - acid.offset))
         .sum();
     acids + HEMOGLOBIN * (HEMOGLOBIN_CHARGE.0 * acidity - HEMOGLOBIN_CHARGE.1)
 }
@@ -67,31 +116,33 @@ fn bicarbonate(acidity: f64) -> f64 {
 }
 
 fn half(acidity: f64, pressure: f64) -> f64 {
-    let d = acidity - BY_ACIDITY.0;
-    let [c1, c2, c3] = BY_ACIDITY.1;
-    let u = (pressure - BY_CARBON_DIOXIDE.0) / BY_CARBON_DIOXIDE.1;
-    let [q1, q2] = BY_CARBON_DIOXIDE.2;
+    let d = acidity - BY_ACIDITY.standard;
+    let [c1, c2, c3] = BY_ACIDITY.cubic;
+    let u = (pressure - BY_CARBON_DIOXIDE.standard) / BY_CARBON_DIOXIDE.scale;
+    let [q1, q2] = BY_CARBON_DIOXIDE.quadratic;
     P50 * (1.0 + c1 * d + c2 * d * d + c3 * d * d * d) * (1.0 + q1 * u + q2 * u * u)
 }
 
 fn carbamino(dissolved: f64, saturation: f64) -> f64 {
-    let reach = CARBAMINO.1 + CARBAMINO.2 * saturation;
-    CARBAMINO.0 * HEMOGLOBIN * dissolved / (dissolved + reach)
+    let reach = CARBAMINO.half + CARBAMINO.half_rise * saturation;
+    CARBAMINO.sites * HEMOGLOBIN * dissolved / (dissolved + reach)
 }
 
-/// A plasma's closed forms: the oxygen partial pressure, saturation and oxygen content, the acidity and bicarbonate,
-/// and the carbon dioxide partial pressure and total.
 #[derive(Clone, Copy, Debug)]
 struct Speciated {
-    oxygen: (f64, f64, f64),
+    oxygen_pressure: f64,
+    saturation: f64,
+    oxygen_content: f64,
     acidity: f64,
     bicarbonate: f64,
-    carbon_dioxide: (f64, f64),
+    carbon_dioxide_pressure: f64,
+    carbon_dioxide_total: f64,
 }
 
 /// The plasma at a carbon dioxide partial pressure, whose charge balance sets the acidity by bisection, and at an
 /// oxygen partial pressure `P50 e^t` with P50 at that acidity and partial pressure.
-fn speciated((t, pressure): (f64, f64)) -> Speciated {
+fn speciated(point: Point) -> Speciated {
+    let (t, pressure) = (point.ln_over_p50, point.carbon_dioxide_pressure);
     let (mut low, mut high) = (5.0, 9.0);
     for _ in 0..200 {
         let middle = 0.5 * (low + high);
@@ -107,17 +158,13 @@ fn speciated((t, pressure): (f64, f64)) -> Speciated {
     let saturation = 1.0 / (1.0 + exp(-exponent * t));
     let dissolved = CARBON_DIOXIDE_SOLUBILITY * pressure;
     Speciated {
-        oxygen: (
-            oxygen,
-            saturation,
-            SOLUBILITY * oxygen + HEME * HEMOGLOBIN * saturation,
-        ),
+        oxygen_pressure: oxygen,
+        saturation,
+        oxygen_content: SOLUBILITY * oxygen + HEME * HEMOGLOBIN * saturation,
         acidity,
         bicarbonate: bicarbonate(acidity),
-        carbon_dioxide: (
-            pressure,
-            bicarbonate(acidity) + dissolved + carbamino(dissolved, saturation),
-        ),
+        carbon_dioxide_pressure: pressure,
+        carbon_dioxide_total: bicarbonate(acidity) + dissolved + carbamino(dissolved, saturation),
     }
 }
 
@@ -126,11 +173,11 @@ fn flow(renewal: f64) -> f64 {
 }
 
 fn used() -> f64 {
-    flow(RENEWAL) * (speciated(ARTERIAL).oxygen.2 - speciated(VENOUS).oxygen.2)
+    flow(RENEWAL) * (speciated(ARTERIAL).oxygen_content - speciated(VENOUS).oxygen_content)
 }
 
 fn made() -> f64 {
-    flow(RENEWAL) * (speciated(VENOUS).carbon_dioxide.1 - speciated(ARTERIAL).carbon_dioxide.1)
+    flow(RENEWAL) * (speciated(VENOUS).carbon_dioxide_total - speciated(ARTERIAL).carbon_dioxide_total)
 }
 
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
@@ -284,13 +331,20 @@ fn solved(content: f64, pressure: f64) -> Speciated {
     let (mut low, mut high) = (-30.0, 15.0);
     for _ in 0..200 {
         let middle = 0.5 * (low + high);
-        if speciated((middle, pressure)).oxygen.2 < content {
+        let point = Point {
+            ln_over_p50: middle,
+            carbon_dioxide_pressure: pressure,
+        };
+        if speciated(point).oxygen_content < content {
             low = middle;
         } else {
             high = middle;
         }
     }
-    speciated((0.5 * (low + high), pressure))
+    speciated(Point {
+        ln_over_p50: 0.5 * (low + high),
+        carbon_dioxide_pressure: pressure,
+    })
 }
 
 /// The plasma whose oxygen content and carbon dioxide content are `content` and `total`, by bisection on the carbon
@@ -299,7 +353,7 @@ fn solved_both(content: f64, total: f64) -> Speciated {
     let (mut low, mut high) = (1.0, 200.0);
     for _ in 0..200 {
         let middle = 0.5 * (low + high);
-        if solved(content, middle).carbon_dioxide.1 < total {
+        if solved(content, middle).carbon_dioxide_total < total {
             low = middle;
         } else {
             high = middle;
@@ -308,11 +362,18 @@ fn solved_both(content: f64, total: f64) -> Speciated {
     solved(content, 0.5 * (low + high))
 }
 
-/// The plasma's amounts and the four fields' guesses at admission, and the blood the artery delivers.
+#[derive(Clone, Copy, Debug)]
+struct Fields {
+    oxygen_pressure: f64,
+    saturation: f64,
+    bicarbonate: f64,
+    acidity: f64,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct Start {
     plasma: Speciated,
-    guess: (f64, f64, f64, f64),
+    guess: Fields,
     arterial: Speciated,
     renewal: f64,
 }
@@ -320,19 +381,24 @@ impl Start {
     fn at(plasma: Speciated) -> Self {
         Self {
             plasma,
-            guess: (
-                plasma.oxygen.0,
-                plasma.oxygen.1,
-                plasma.bicarbonate,
-                plasma.acidity,
-            ),
+            guess: Fields {
+                oxygen_pressure: plasma.oxygen_pressure,
+                saturation: plasma.saturation,
+                bicarbonate: plasma.bicarbonate,
+                acidity: plasma.acidity,
+            },
             arterial: speciated(ARTERIAL),
             renewal: RENEWAL,
         }
     }
     fn cold(plasma: Speciated) -> Self {
         Self {
-            guess: (1.0, 0.01, 1.0, 7.0),
+            guess: Fields {
+                oxygen_pressure: 1.0,
+                saturation: 0.01,
+                bicarbonate: 1.0,
+                acidity: 7.0,
+            },
             ..Self::at(plasma)
         }
     }
@@ -347,7 +413,9 @@ fn guess(row: RowKind, start: Start) -> f64 {
             .expect("a fixture space")
     };
     let tissue = |ratio: f64, heads: f64| {
-        CARBON_DIOXIDE_SOLUBILITY * (1.0 + ratio) * (settled.carbon_dioxide.0 + heads * CARBON_DIOXIDE_HEAD)
+        CARBON_DIOXIDE_SOLUBILITY
+            * (1.0 + ratio)
+            * (settled.carbon_dioxide_pressure + heads * CARBON_DIOXIDE_HEAD)
     };
     match row {
         RowKind::Amount {
@@ -358,10 +426,10 @@ fn guess(row: RowKind, start: Start) -> f64 {
                 * match (species, at) {
                     (Species::Water, _) => 1.0,
                     (Species::Hemoglobin, _) => HEMOGLOBIN,
-                    (Species::Oxygen, Space::Plasma) => start.plasma.oxygen.2,
-                    (Species::Oxygen, Space::Interstitium) => SOLUBILITY * (settled.oxygen.0 - HEAD),
-                    (Species::Oxygen, _) => SOLUBILITY * (settled.oxygen.0 - 2.0 * HEAD),
-                    (Species::CarbonDioxide, Space::Plasma) => start.plasma.carbon_dioxide.1,
+                    (Species::Oxygen, Space::Plasma) => start.plasma.oxygen_content,
+                    (Species::Oxygen, Space::Interstitium) => SOLUBILITY * (settled.oxygen_pressure - HEAD),
+                    (Species::Oxygen, _) => SOLUBILITY * (settled.oxygen_pressure - 2.0 * HEAD),
+                    (Species::CarbonDioxide, Space::Plasma) => start.plasma.carbon_dioxide_total,
                     (Species::CarbonDioxide, Space::Interstitium) => tissue(BUFFER_RATIOS.0, 1.0),
                     (Species::CarbonDioxide, _) => tissue(BUFFER_RATIOS.1, 2.0),
                     (ion, _) => {
@@ -371,10 +439,10 @@ fn guess(row: RowKind, start: Start) -> f64 {
                 }
         }
         RowKind::Algebraic(slot) => match slot.law.local {
-            "oxygen partial pressure" => start.guess.0,
-            "oxygen saturation" => start.guess.1,
-            "bicarbonate" => start.guess.2,
-            "acidity" => start.guess.3,
+            "oxygen partial pressure" => start.guess.oxygen_pressure,
+            "oxygen saturation" => start.guess.saturation,
+            "bicarbonate" => start.guess.bicarbonate,
+            "acidity" => start.guess.acidity,
             _ => panic!("no start for {row:?}"),
         },
         other => panic!("no start for {other:?}"),
@@ -411,16 +479,16 @@ fn packet(body: &CompiledBody, start: Start) -> Result<ParameterPacket<Synthetic
     for (key, value) in [
         ("bc.p50", P50),
         ("bc.hill-reach", HILL.2),
-        ("bc.standard-carbon-dioxide", BY_CARBON_DIOXIDE.0),
-        ("bc.carbon-dioxide-scale", BY_CARBON_DIOXIDE.1),
+        ("bc.standard-carbon-dioxide", BY_CARBON_DIOXIDE.standard),
+        ("bc.carbon-dioxide-scale", BY_CARBON_DIOXIDE.scale),
     ] {
         set::<Pressure>(&mut packet, key, body_wide, value)?;
     }
-    let ([c1, c2, c3], [q1, q2]) = (BY_ACIDITY.1, BY_CARBON_DIOXIDE.2);
+    let ([c1, c2, c3], [q1, q2]) = (BY_ACIDITY.cubic, BY_CARBON_DIOXIDE.quadratic);
     for (key, value) in [
         ("bc.hill-ceiling", HILL.0),
         ("bc.hill-fall", HILL.1),
-        ("bc.standard-acidity", BY_ACIDITY.0),
+        ("bc.standard-acidity", BY_ACIDITY.standard),
         ("bc.p50-acidity-1", c1),
         ("bc.p50-acidity-2", c2),
         ("bc.p50-acidity-3", c3),
@@ -436,17 +504,18 @@ fn packet(body: &CompiledBody, start: Start) -> Result<ParameterPacket<Synthetic
     set::<Concentration<Charge>>(&mut packet, "bc.strong-ion-offset", body_wide, STRONG_ION_OFFSET)?;
     type PerCharge = Quotient<Concentration<CarbonDioxide>, Concentration<Charge>>;
     set::<PerCharge>(&mut packet, "bc.bicarbonate-per-charge", body_wide, 1.0)?;
-    let [
-        (albumin, albumin_slope, albumin_offset),
-        (phosphate, phosphate_slope, phosphate_offset),
-    ] = WEAK;
-    set::<Concentration<Albumin>>(&mut packet, "bc.plasma-albumin", body_wide, albumin)?;
-    set::<Concentration<Phosphate>>(&mut packet, "bc.plasma-phosphate", body_wide, phosphate)?;
+    set::<Concentration<Albumin>>(&mut packet, "bc.plasma-albumin", body_wide, ALBUMIN.concentration)?;
+    set::<Concentration<Phosphate>>(
+        &mut packet,
+        "bc.plasma-phosphate",
+        body_wide,
+        PHOSPHATE.concentration,
+    )?;
     type PerAcid<Q> = Quotient<Concentration<Charge>, Concentration<Q>>;
-    set::<PerAcid<Albumin>>(&mut packet, "bc.albumin-slope", body_wide, albumin_slope)?;
-    set::<PerAcid<Albumin>>(&mut packet, "bc.albumin-offset", body_wide, albumin_offset)?;
-    set::<PerAcid<Phosphate>>(&mut packet, "bc.phosphate-slope", body_wide, phosphate_slope)?;
-    set::<PerAcid<Phosphate>>(&mut packet, "bc.phosphate-offset", body_wide, phosphate_offset)?;
+    set::<PerAcid<Albumin>>(&mut packet, "bc.albumin-slope", body_wide, ALBUMIN.slope)?;
+    set::<PerAcid<Albumin>>(&mut packet, "bc.albumin-offset", body_wide, ALBUMIN.offset)?;
+    set::<PerAcid<Phosphate>>(&mut packet, "bc.phosphate-slope", body_wide, PHOSPHATE.slope)?;
+    set::<PerAcid<Phosphate>>(&mut packet, "bc.phosphate-offset", body_wide, PHOSPHATE.offset)?;
     set::<PerAcid<Hemoglobin>>(&mut packet, "bc.hemoglobin-slope", body_wide, HEMOGLOBIN_CHARGE.0)?;
     set::<PerAcid<Hemoglobin>>(
         &mut packet,
@@ -455,9 +524,14 @@ fn packet(body: &CompiledBody, start: Start) -> Result<ParameterPacket<Synthetic
         HEMOGLOBIN_CHARGE.1,
     )?;
     type Sites = Quotient<Concentration<CarbonDioxide>, Concentration<Hemoglobin>>;
-    set::<Sites>(&mut packet, "bc.carbamino-sites", body_wide, CARBAMINO.0)?;
-    set::<Concentration<CarbonDioxide>>(&mut packet, "bc.carbamino-half", body_wide, CARBAMINO.1)?;
-    set::<Concentration<CarbonDioxide>>(&mut packet, "bc.carbamino-half-rise", body_wide, CARBAMINO.2)?;
+    set::<Sites>(&mut packet, "bc.carbamino-sites", body_wide, CARBAMINO.sites)?;
+    set::<Concentration<CarbonDioxide>>(&mut packet, "bc.carbamino-half", body_wide, CARBAMINO.half)?;
+    set::<Concentration<CarbonDioxide>>(
+        &mut packet,
+        "bc.carbamino-half-rise",
+        body_wide,
+        CARBAMINO.half_rise,
+    )?;
     let beds = Binding::Class(Class::CapillaryBed);
     for key in ["mt.wall-oxygen-conductance", "mt.cell-oxygen-conductance"] {
         set::<Conductance<Oxygen>>(&mut packet, key, beds, used() / HEAD)?;
@@ -473,13 +547,13 @@ fn packet(body: &CompiledBody, start: Start) -> Result<ParameterPacket<Synthetic
         &mut packet,
         "fixture.arterial-oxygen",
         body_wide,
-        flow * start.arterial.oxygen.2,
+        flow * start.arterial.oxygen_content,
     )?;
     set::<Rate<CarbonDioxide>>(
         &mut packet,
         "fixture.arterial-carbon-dioxide",
         body_wide,
-        flow * start.arterial.carbon_dioxide.1,
+        flow * start.arterial.carbon_dioxide_total,
     )?;
     set::<Rate<Oxygen>>(&mut packet, "fixture.oxygen-use", body_wide, used())?;
     set::<Rate<CarbonDioxide>>(&mut packet, "fixture.carbon-dioxide-made", body_wide, made())?;
@@ -524,13 +598,13 @@ fn amount(species: Species, space: Space) -> Result<RowKind, AdmissionError> {
     })
 }
 
-fn fields(body: &CompiledBody, session: &Session<'_, Running>) -> Result<[f64; 4], AdmissionError> {
-    Ok([
-        value(body, session, field("oxygen partial pressure")?),
-        value(body, session, field("oxygen saturation")?),
-        value(body, session, field("bicarbonate")?),
-        value(body, session, field("acidity")?),
-    ])
+fn fields(body: &CompiledBody, session: &Session<'_, Running>) -> Result<Fields, AdmissionError> {
+    Ok(Fields {
+        oxygen_pressure: value(body, session, field("oxygen partial pressure")?),
+        saturation: value(body, session, field("oxygen saturation")?),
+        bicarbonate: value(body, session, field("bicarbonate")?),
+        acidity: value(body, session, field("acidity")?),
+    })
 }
 
 fn after<'m>(session: Session<'m, Running>, seconds: u64) -> Session<'m, Running> {
@@ -547,21 +621,34 @@ fn speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_war
         ng_solver::Core::new(SECOND / 100),
         MemoryStore::default(),
     );
-    for point in [(-0.5, 20.0), ARTERIAL, (0.5, 45.0)] {
+    let low = Point {
+        ln_over_p50: -0.5,
+        carbon_dioxide_pressure: 20.0,
+    };
+    let high = Point {
+        ln_over_p50: 0.5,
+        carbon_dioxide_pressure: 45.0,
+    };
+    for point in [low, ARTERIAL, high] {
         let expected = speciated(point);
         for start in [Start::at(expected), Start::cold(expected)] {
             let session = admitted(&body, &core, &store, start)?;
             let solved = fields(&body, &session)?;
-            let [pressure, saturation, bicarbonate, acidity] = solved;
+            let Fields {
+                oxygen_pressure: pressure,
+                saturation,
+                bicarbonate,
+                acidity,
+            } = solved;
             let report = format!(
                 "at {point:?} from {:?}: {solved:?} against {expected:?}",
                 start.guess
             );
             assert!(
-                (pressure - expected.oxygen.0).abs() <= 1e-12 * expected.oxygen.0,
+                (pressure - expected.oxygen_pressure).abs() <= 1e-12 * expected.oxygen_pressure,
                 "{report}"
             );
-            assert!((saturation - expected.oxygen.1).abs() <= 1e-12, "{report}");
+            assert!((saturation - expected.saturation).abs() <= 1e-12, "{report}");
             assert!(
                 (bicarbonate - expected.bicarbonate).abs() <= 1e-12 * expected.bicarbonate,
                 "{report}"
@@ -629,28 +716,36 @@ fn the_bed_settles_where_the_fick_identity_puts_it() -> Result<(), Initializatio
     let content = |species| -> Result<f64, AdmissionError> {
         Ok(value(&body, &session, amount(species, Space::Plasma)?) / WATER[0])
     };
-    let taken = flow(RENEWAL) * (arterial.oxygen.2 - content(Species::Oxygen)?);
+    let taken = flow(RENEWAL) * (arterial.oxygen_content - content(Species::Oxygen)?);
     assert!(
         (taken - used()).abs() <= 1e-6 * used(),
         "the flow times the arterial less the venous oxygen content is {taken} against a use of {}",
         used()
     );
-    let given = flow(RENEWAL) * (content(Species::CarbonDioxide)? - arterial.carbon_dioxide.1);
+    let given = flow(RENEWAL) * (content(Species::CarbonDioxide)? - arterial.carbon_dioxide_total);
     assert!(
         (given - made()).abs() <= 1e-6 * made(),
         "the flow times the venous less the arterial carbon dioxide content is {given} against {} made",
         made()
     );
     let settled = fields(&body, &session)?;
-    let [pressure, _, bicarbonate, acidity] = settled;
+    let Fields {
+        oxygen_pressure: pressure,
+        bicarbonate,
+        acidity,
+        ..
+    } = settled;
     let report = format!("{settled:?} against {venous:?}");
-    assert!((pressure - venous.oxygen.0).abs() <= 1e-6 * pressure, "{report}");
+    assert!(
+        (pressure - venous.oxygen_pressure).abs() <= 1e-6 * pressure,
+        "{report}"
+    );
     assert!((acidity - venous.acidity).abs() <= 1e-6, "{report}");
     assert!(
         (bicarbonate - venous.bicarbonate).abs() <= 1e-6 * bicarbonate,
         "{report}"
     );
-    let plasma = venous.carbon_dioxide.0;
+    let plasma = venous.carbon_dioxide_pressure;
     for (species, space, expected) in [
         (Species::Oxygen, Space::Interstitium, pressure - HEAD),
         (Species::Oxygen, Space::Cells, pressure - 2.0 * HEAD),
@@ -763,9 +858,12 @@ fn a_trial_whose_bound_share_leaves_zero_to_one_is_refused_by_name() -> Result<(
         MemoryStore::default(),
     );
     let at = |content, pressure| {
-        let plasma = solved(content, ARTERIAL.1);
+        let plasma = solved(content, ARTERIAL.carbon_dioxide_pressure);
         Start {
-            guess: (pressure, plasma.oxygen.1, plasma.bicarbonate, plasma.acidity),
+            guess: Fields {
+                oxygen_pressure: pressure,
+                ..Start::at(plasma).guess
+            },
             ..Start::at(plasma)
         }
     };
@@ -793,9 +891,12 @@ fn a_bicarbonate_at_or_above_what_the_total_leaves_is_refused_by_name() -> Resul
         MemoryStore::default(),
     );
     let plasma = speciated(ARTERIAL);
-    for bicarbonate in [plasma.carbon_dioxide.1, plasma.carbon_dioxide.1 + 1.0] {
+    for bicarbonate in [plasma.carbon_dioxide_total, plasma.carbon_dioxide_total + 1.0] {
         let start = Start {
-            guess: (plasma.oxygen.0, plasma.oxygen.1, bicarbonate, plasma.acidity),
+            guess: Fields {
+                bicarbonate,
+                ..Start::at(plasma).guess
+            },
             ..Start::at(plasma)
         };
         match admitted(&body, &core, &store, start) {
@@ -826,7 +927,10 @@ fn a_saturation_outside_zero_to_one_is_refused_before_carbamino_reads_it() -> Re
     let saturation_row = field("oxygen saturation")?;
     for saturation in [-0.25, 1.5] {
         let start = Start {
-            guess: (plasma.oxygen.0, saturation, plasma.bicarbonate, plasma.acidity),
+            guess: Fields {
+                saturation,
+                ..Start::at(plasma).guess
+            },
             ..Start::at(plasma)
         };
         match body.bind(packet(&body, start)?) {
@@ -895,14 +999,19 @@ fn a_fast_renewal_is_refused_by(
 #[test]
 fn a_step_into_an_oxygen_content_far_above_capacity_is_refused_by_oxygens_partial_pressure()
 -> Result<(), InitializationFailure> {
-    a_fast_renewal_is_refused_by(solved(30.0, ARTERIAL.1), 1_000.0, "oxygen partial pressure")
+    a_fast_renewal_is_refused_by(
+        solved(30.0, ARTERIAL.carbon_dioxide_pressure),
+        1_000.0,
+        "oxygen partial pressure",
+    )
 }
 
 #[test]
 fn a_step_whose_bicarbonate_passes_what_the_total_leaves_is_refused_by_acidity()
 -> Result<(), InitializationFailure> {
     let arterial = Speciated {
-        carbon_dioxide: (ARTERIAL.1, 1.0),
+        carbon_dioxide_pressure: ARTERIAL.carbon_dioxide_pressure,
+        carbon_dioxide_total: 1.0,
         ..speciated(ARTERIAL)
     };
     a_fast_renewal_is_refused_by(arterial, 10_000.0, "acidity")
@@ -912,7 +1021,8 @@ fn a_step_whose_bicarbonate_passes_what_the_total_leaves_is_refused_by_acidity()
 fn steps_that_bring_bicarbonate_near_what_the_total_leaves_are_accepted_finite()
 -> Result<(), InitializationFailure> {
     let arterial = Speciated {
-        carbon_dioxide: (ARTERIAL.1, 1.0),
+        carbon_dioxide_pressure: ARTERIAL.carbon_dioxide_pressure,
+        carbon_dioxide_total: 1.0,
         ..speciated(ARTERIAL)
     };
     let (_, accepted) = a_fast_renewal(arterial, 100.0, "acidity")?;
@@ -927,13 +1037,13 @@ fn an_oxygen_content_above_capacity_admits_at_its_partial_pressure() -> Result<(
         ng_solver::Core::new(SECOND / 100),
         MemoryStore::default(),
     );
-    let start = Start::at(solved(HEME * HEMOGLOBIN + 1.0, ARTERIAL.1));
+    let start = Start::at(solved(HEME * HEMOGLOBIN + 1.0, ARTERIAL.carbon_dioxide_pressure));
     let session = admitted(&body, &core, &store, start)?;
     let pressure = value(&body, &session, field("oxygen partial pressure")?);
     assert!(
-        (pressure - start.guess.0).abs() <= 1e-9 * start.guess.0,
+        (pressure - start.guess.oxygen_pressure).abs() <= 1e-9 * start.guess.oxygen_pressure,
         "{pressure} against {}",
-        start.guess.0
+        start.guess.oxygen_pressure
     );
     Ok(())
 }
@@ -951,7 +1061,9 @@ fn a_run_carries_the_oxygen_content_across_capacity() -> Result<(), Initializati
     let content = HEME * HEMOGLOBIN + 2.0;
     let start = Start {
         arterial: Speciated {
-            oxygen: (0.0, 0.0, content),
+            oxygen_pressure: 0.0,
+            saturation: 0.0,
+            oxygen_content: content,
             ..speciated(ARTERIAL)
         },
         ..Start::at(speciated(VENOUS))
@@ -980,15 +1092,15 @@ fn a_run_carries_the_oxygen_content_across_capacity() -> Result<(), Initializati
     }
     let settled = content - used() / flow(RENEWAL);
     let held = value(&body, &session, amount(Species::Oxygen, Space::Plasma)?) / WATER[0];
-    let [pressure, ..] = fields(&body, &session)?;
-    let plasma = solved_both(settled, speciated(VENOUS).carbon_dioxide.1);
+    let pressure = fields(&body, &session)?.oxygen_pressure;
+    let plasma = solved_both(settled, speciated(VENOUS).carbon_dioxide_total);
     assert!(refusals.is_empty(), "{refusals:?}");
     assert!(
         (held - settled).abs() <= 1e-6 * settled,
         "{held} against {settled}"
     );
     assert!(
-        (pressure - plasma.oxygen.0).abs() <= 1e-6 * pressure,
+        (pressure - plasma.oxygen_pressure).abs() <= 1e-6 * pressure,
         "{pressure} against {plasma:?}"
     );
     Ok(())
