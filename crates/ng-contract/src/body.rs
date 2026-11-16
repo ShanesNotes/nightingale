@@ -947,5 +947,16 @@ mod tests {
         once.context.seal(&mut fields);
         once.receipt.seal(&mut fields);
         assert_eq!(sealed(&once), fields.into_bytes());
+        for count in [2, 3] {
+            let counted = column(NonZeroU32::new(count).expect("above zero"));
+            let mut fields = Canonical::new("column");
+            counted.terms.seal(&mut fields);
+            counted.origin.seal(&mut fields);
+            counted.context.seal(&mut fields);
+            counted.receipt.seal(&mut fields);
+            fields.number(u64::MAX);
+            fields.number(u64::from(count));
+            assert_eq!(sealed(&counted), fields.into_bytes(), "count {count}");
+        }
     }
 }
