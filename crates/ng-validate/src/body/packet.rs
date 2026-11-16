@@ -26,7 +26,7 @@ const SOLUBILITY: f64 = 0.001;
 const HEME: f64 = 4.0;
 const P50: f64 = 25.0;
 const HILL: (f64, f64, f64) = (2.5, 1.0, 10.0);
-/// The start's arterial and venous partial pressures as `P50 e^t`, so the curve's start needs no logarithm.
+/// The start's arterial and venous partial pressures as `P50 e^t`, because the host's logarithm is banned.
 const REACH: (f64, f64) = (1.3, 0.5);
 
 fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
@@ -166,7 +166,6 @@ fn start_guess(row: RowKind) -> f64 {
     }
 }
 
-/// A blood space's start partial pressure and saturation on the packet's curve at its standard.
 fn blood_oxygen(site: &str) -> (f64, f64) {
     let arterial = matches!(
         site,
@@ -178,8 +177,6 @@ fn blood_oxygen(site: &str) -> (f64, f64) {
     (pressure, 1.0 / (1.0 + exp(-exponent * reach)))
 }
 
-/// Oxygen a unit of water holds at the start: dissolved and bound in blood, and dissolved one head and two heads
-/// below the bed's plasma in its interstitium and cells.
 fn oxygen_guess(site: &str, space: Space) -> f64 {
     let (pressure, saturation) = blood_oxygen(site);
     match space {
@@ -661,8 +658,6 @@ fn hematology(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admi
     )
 }
 
-/// Oxygen's curve, wall diffusion and stand-ins: each a round number, and none a source's figure. At the held use each
-/// wall, cell membrane and the lung's exchange takes one head of partial pressure.
 fn oxygen(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), AdmissionError> {
     let body = Binding::Body;
     type Solubility = Quotient<Concentration<Oxygen>, Pressure>;
@@ -713,7 +708,6 @@ fn oxygen(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admissio
 const DRIFTS: [(Species, f64); 1] = [(Species::Oxygen, OXYGEN_DRIFT)];
 const OXYGEN_DRIFT: f64 = 4.0;
 
-/// The arena's certificate with the body's own drift table.
 pub fn body_certificate(
     body: &CompiledBody,
     windows: SlidingWindows,

@@ -6,14 +6,12 @@ type Value<'b, 'k, O, U> = Expr<'b, 'k, O, U>;
 
 const SPECIATION_NS: u64 = 1_000_000_000;
 
-/// The amounts a bed's plasma speciation reads.
 pub struct Plasma<'b, O> {
     pub water: Port<'b, O, Water>,
     pub oxygen: Port<'b, O, Oxygen>,
     pub hemoglobin: Port<'b, O, Hemoglobin>,
 }
 
-/// What speciation states at every bed's plasma.
 pub struct Oxygenated<'b, O> {
     pub partial_pressure: Port<'b, O, Pressure>,
     pub saturation: Port<'b, O, Dimensionless>,
@@ -111,7 +109,7 @@ impl<'b, O: Owner> Curve<'b, O> {
 /// States each bed's plasma oxygen partial pressure and saturation as two fields. The partial pressure is the
 /// curve's inverse at the bound share of capacity, `P = P50 exp(logit(S_c) / n(P))` with
 /// `S_c = (C - alpha P) / (4 c_Hb)`, so its row subtracts no two near-equal numbers but inside a logarithm, and
-/// saturation is the curve at that pressure. Both read amounts and move none.
+/// saturation is the curve at that pressure.
 pub fn oxygenate<'b, O: Owner>(
     laws: &mut FragmentBuilder<'b, O>,
     plasma: &Plasma<'b, O>,

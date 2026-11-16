@@ -18,13 +18,11 @@ const SOLUBILITY: f64 = 0.001;
 const HEME: f64 = 4.0;
 const P50: f64 = 25.0;
 const HILL: (f64, f64, f64) = (2.5, 1.0, 10.0);
-/// The plasma renews once a second, so the bed's flow is its plasma water a second.
 const RENEWAL: f64 = 1.0;
-/// `ln(P / P50)` of the arterial blood and of the bed's settled plasma, so the curve needs no logarithm here.
+/// `ln(P / P50)` of the arterial blood and of the bed's settled plasma, because the host's logarithm is banned.
 const REACH: (f64, f64) = (1.3, 0.5);
 const HEAD: f64 = 5.0;
 
-/// The curve at its standard where `ln(P / P50)` is `t`: partial pressure, saturation and oxygen content.
 fn curve(t: f64) -> (f64, f64, f64) {
     let pressure = P50 * exp(t);
     let exponent = HILL.0 - HILL.1 * exp(-pressure / HILL.2);
@@ -40,7 +38,6 @@ fn flow() -> f64 {
     RENEWAL * WATER[0]
 }
 
-/// The use the settled bed meets: the flow times the arterial less the settled oxygen content.
 fn used() -> f64 {
     flow() * (curve(REACH.0).2 - curve(REACH.1).2)
 }
@@ -127,7 +124,6 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
     })
 }
 
-/// Where the fixture starts: its plasma's oxygen content and its fields' guesses.
 #[derive(Clone, Copy)]
 struct Start {
     content: f64,
@@ -315,7 +311,6 @@ fn speciation_meets_the_curve_at_three_partial_pressures_from_a_cold_guess_and_a
     Ok(())
 }
 
-/// The plasma starts at the arterial oxygen content, so its oxygen falls to where the use takes it, through speciation.
 fn settling<'m>(
     body: &'m CompiledBody,
     core: &'m ng_solver::Core,
@@ -417,8 +412,7 @@ fn oxygen_closes_to_the_ledgers_floor_through_speciation() -> Result<(), Initial
     Ok(())
 }
 
-/// At or above capacity no partial pressure leaves the bound share under one, so its logarithm has no value: the
-/// engine refuses and names the law, and no number stands for it.
+/// At or above capacity no partial pressure leaves the bound share under one, so its logarithm has no value.
 #[test]
 fn oxygen_content_at_capacity_has_no_partial_pressure() -> Result<(), AdmissionError> {
     let (body, core, store) = (

@@ -444,8 +444,7 @@ impl Edge {
 
 /// At the admitted start viscosity is its reference, so the edge keeps the packet's resistance. A 400 mL water bolus
 /// into the gut then lowers the hematocrit, viscosity and the edge's resistance, and the edge's flow is its drop over
-/// the packet's resistance times viscosity's ratio, so the run tells viscosity's part of the flow from the drop's. The
-/// water carries no oxygen, so the body's oxygen holds over the bolus while arterial hemoglobin and oxygen content fall.
+/// the packet's resistance times viscosity's ratio, so the run tells viscosity's part of the flow from the drop's.
 fn a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(start: &Start) {
     let mut session = start.session();
     let before = Edge::at(start, &session);
@@ -514,9 +513,8 @@ fn a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(start: &St
 /// Every bed's held use but the lung's, whose own plasma serves its cells before the pulmonary vein.
 const SYSTEMIC_USE: f64 = 95.0;
 
-/// Over the first minute's last ten seconds, step by step, the mean aortic flow times the systemic arteries' less the
-/// pulmonary artery's mean oxygen content meets the systemic beds' held use. Means over whole beats stand in for the
-/// identity's steady flows, and the arteries and veins between the two reads store a beat's oxygen, so it holds to 1%.
+/// Over the first minute's last ten seconds. Means over whole beats stand in for the identity's steady flows, and the
+/// arteries and veins between the two reads store a beat's oxygen, so it holds to 1%.
 fn the_flow_times_the_arterial_less_the_venous_oxygen_content_meets_the_held_use(start: &Start) {
     let (ventricle, arteries) = (
         site::<VesselSegment>("left ventricle"),

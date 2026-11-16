@@ -237,7 +237,6 @@ fn norepinephrine_drifts_up_to_the_floor_of_a_quantity_the_slice_does_not_move()
     drifts_up_to(Species::Norepinephrine, 1.0, 1e-3, None);
 }
 
-/// A body's own drift table leaves the slice's policy as it was before the body's oxygen moved.
 #[test]
 fn the_slices_certificate_policy_stays_as_it_was() -> Result<(), AdmissionError> {
     let policy = arena_certificate(&arena_body()?, ArenaProtocol::pick().windows)?;

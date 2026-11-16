@@ -6,8 +6,6 @@ type Solubility<'b> = Parameter<'b, Metabolism, Quotient<Concentration<Oxygen>, 
 
 const DIFFUSION_NS: u64 = 1_000_000_000;
 
-/// Oxygen's two routes at every bed: the capillary wall from plasma to the interstitium, and the cell membrane from
-/// the interstitium to the cells.
 pub struct OxygenRoutes<'b> {
     pub wall: SiteRoute<'b, Metabolism, CapillaryBed, Oxygen>,
     pub membrane: SiteRoute<'b, Metabolism, CapillaryBed, Oxygen>,
@@ -28,7 +26,6 @@ struct Tissue<'b> {
     water: Port<'b, Water>,
 }
 
-/// One side of a wall: the plasma, whose partial pressure speciation states, or a tissue space.
 enum Side<'a, 'b> {
     Plasma(&'a Port<'b, Pressure>),
     Tissue(&'a Tissue<'b>),

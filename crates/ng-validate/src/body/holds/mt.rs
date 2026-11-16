@@ -47,7 +47,6 @@ pub(super) fn metabolism(body: &mut Assembly<'_>) -> Result<(), AdmissionError> 
     Ok(())
 }
 
-/// Each bed's cells use oxygen at a held rate until ticket 09's burn.
 fn oxygen_use<'b>(
     laws: &mut FragmentBuilder<'b, Metabolism>,
     ports: &HeldPorts<'b, Metabolism>,

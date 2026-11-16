@@ -548,8 +548,7 @@ pub fn arena_certificate(
     certificate_with(body, windows, &[])
 }
 
-/// The arena's policy with `drifts` in place of the slice's bound for each species it names, so a body that moves a
-/// species the slice does not states its own bound and leaves the slice's policy as it is.
+/// The arena's policy with `drifts` in place of the slice's bound for each species it names.
 pub fn certificate_with(
     body: &CompiledBody,
     windows: SlidingWindows,
