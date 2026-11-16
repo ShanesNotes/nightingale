@@ -96,10 +96,8 @@ const VENOUS: Point = Point {
 const HEAD: f64 = 5.0;
 const CARBON_DIOXIDE_HEAD: f64 = 1.0;
 const DEMAND: f64 = 100.0;
-/// The cell partial pressure at which the reach `k P` meets the demand at rest.
-const BEND: f64 = 20.0;
-const WIDTH: f64 = 0.02;
-/// Glucose's share of the oxygen burned, chosen so the quotient `s + 16 (1 - s) / 23` is 3/4.
+const CELL_PRESSURE_AT_DEMAND: f64 = 20.0;
+const WIDTH_SHARE_OF_DEMAND: f64 = 0.02;
 const GLUCOSE_SHARE: f64 = 5.0 / 28.0;
 const QUOTIENT: f64 = 0.75;
 const GLUCOSE_ENERGY: f64 = 1_000.0;
@@ -434,7 +432,6 @@ fn held_rate<'b, Q: Substance>(
     Ok(())
 }
 
-/// A held feed into the cells, `k (N_set - N)`, or a held drain out of them, `k (N - N_set)`.
 fn restoring<'b, Q: Substance>(
     laws: &mut FragmentBuilder<'b, Boundary>,
     ports: &BoundaryPorts<'b>,
@@ -712,8 +709,18 @@ fn packet_from(
     )?;
     if declares(body, "mt.oxygen-demand") {
         set::<Rate<Oxygen>>(&mut packet, "mt.oxygen-demand", beds, start.demand)?;
-        set::<Conductance<Oxygen>>(&mut packet, "mt.oxygen-reach", beds, DEMAND / BEND)?;
-        set::<Rate<Oxygen>>(&mut packet, "mt.oxygen-rate-width", beds, WIDTH * DEMAND)?;
+        set::<Conductance<Oxygen>>(
+            &mut packet,
+            "mt.oxygen-reach",
+            beds,
+            DEMAND / CELL_PRESSURE_AT_DEMAND,
+        )?;
+        set::<Rate<Oxygen>>(
+            &mut packet,
+            "mt.oxygen-rate-width",
+            beds,
+            WIDTH_SHARE_OF_DEMAND * DEMAND,
+        )?;
         set::<Dimensionless>(&mut packet, "mt.glucose-share", beds, GLUCOSE_SHARE)?;
         set::<Rate<Dimensionless>>(&mut packet, "mt.bed-heat-speed", beds, BED_HEAT_SPEED)?;
         set::<Rate<Dimensionless>>(&mut packet, "fixture.feed-speed", body_wide, FEED_SPEED)?;
@@ -1311,7 +1318,10 @@ fn only_the_whole_body_speciates() -> Result<(), AdmissionError> {
 
 /// `B = smooth_min(D, k P, w)` with the reach and width at rest.
 fn oxygen_rate(demand: f64, cell_pressure: f64) -> f64 {
-    let (reach, width) = (DEMAND / BEND * cell_pressure, WIDTH * DEMAND);
+    let (reach, width) = (
+        DEMAND / CELL_PRESSURE_AT_DEMAND * cell_pressure,
+        WIDTH_SHARE_OF_DEMAND * DEMAND,
+    );
     let gap = demand - reach;
     0.5 * (demand + reach - (gap * gap + width * width).sqrt())
 }
@@ -1332,7 +1342,6 @@ struct Burned {
     heat: f64,
 }
 
-/// What one burn took and made each second over the last step, from its column's extent and counts in the ledger.
 fn burned(body: &CompiledBody, session: &Session<'_, Running>, local: &'static str) -> Burned {
     let law = LawName {
         owner: Metabolism::CARD,
@@ -1372,9 +1381,6 @@ fn close(measured: f64, expected: f64, relative: f64) -> bool {
     (measured - expected).abs() <= relative * expected.abs()
 }
 
-/// At the settled bed, the oxygen rate is its form at the cells' partial pressure, the glucose burn takes the share of
-/// it and the fatty acid burn the rest, each makes its carbon dioxide and heat by its counts, and the plasma gives up
-/// that oxygen.
 #[test]
 fn each_burn_takes_its_share_of_the_oxygen_rate_the_cells_allow_and_makes_its_carbon_dioxide_and_heat()
 -> Result<(), InitializationFailure> {
@@ -1450,7 +1456,6 @@ fn the_respiratory_quotient_is_the_one_glucoses_share_fixes() -> Result<(), Init
     Ok(())
 }
 
-/// The bed's heat starts at zero and settles where its way to the core store, `k E`, carries the burns' heat.
 #[test]
 fn the_beds_heat_settles_at_the_burns_heat_over_its_speed() -> Result<(), InitializationFailure> {
     let (body, core, store) = (
@@ -1486,9 +1491,7 @@ struct Stressed {
     expected: f64,
 }
 
-/// The bed settles at rest, then is admitted again from that state with its demand or its flow stepped, and runs
-/// 300 s.
-fn stressed(demand: f64, renewal: f64) -> Result<Stressed, InitializationFailure> {
+fn stepped_from_rest(demand: f64, renewal: f64) -> Result<Stressed, InitializationFailure> {
     let (body, core, store) = (
         compiled(Cells::Burning)?,
         ng_solver::Core::new(SECOND / 100),
@@ -1553,8 +1556,6 @@ fn stressed(demand: f64, renewal: f64) -> Result<Stressed, InitializationFailure
     Ok(seen)
 }
 
-/// Past what the cells' partial pressure allows, the oxygen rate falls below the demand, so no oxygen partial pressure
-/// reaches zero and no step is refused.
 #[test]
 fn the_oxygen_rate_bends_below_a_raised_demand_or_a_halved_flow_with_no_step_refused()
 -> Result<(), InitializationFailure> {
@@ -1563,7 +1564,7 @@ fn the_oxygen_rate_bends_below_a_raised_demand_or_a_halved_flow_with_no_step_ref
         (3.0 * DEMAND, RENEWAL),
         (DEMAND, 0.5 * RENEWAL),
     ] {
-        let seen = stressed(demand, renewal)?;
+        let seen = stepped_from_rest(demand, renewal)?;
         let report = format!("demand {demand}, renewal {renewal}: {seen:?}");
         assert!(seen.refusals.is_empty(), "{report}");
         assert!(seen.least.iter().all(|least| *least > 0.0), "{report}");

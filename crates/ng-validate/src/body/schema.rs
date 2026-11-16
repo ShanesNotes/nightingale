@@ -108,7 +108,6 @@ pub fn body_schema() -> Result<Schema, AdmissionError> {
     Ok(schema)
 }
 
-/// The beds whose cells burn fuel.
 pub(super) const BEDS: [&str; 11] = [
     "pulmonary bed",
     "gut bed",
@@ -122,7 +121,6 @@ pub(super) const BEDS: [&str; 11] = [
     "skin bed",
     "bone bed",
 ];
-/// Each bed's held glucose feed into its cells, in `BEDS`' order.
 pub(super) const GLUCOSE_FEED: [&str; 11] = [
     "pulmonary bed glucose feed",
     "gut bed glucose feed",
@@ -136,7 +134,6 @@ pub(super) const GLUCOSE_FEED: [&str; 11] = [
     "skin bed glucose feed",
     "bone bed glucose feed",
 ];
-/// Each bed's held fatty acid feed into its cells, in `BEDS`' order.
 pub(super) const FAT_FEED: [&str; 11] = [
     "pulmonary bed fatty acid feed",
     "gut bed fatty acid feed",
@@ -150,7 +147,6 @@ pub(super) const FAT_FEED: [&str; 11] = [
     "skin bed fatty acid feed",
     "bone bed fatty acid feed",
 ];
-/// Each bed's held drain of cell water, in `BEDS`' order.
 pub(super) const CELL_WATER_OUT: [&str; 11] = [
     "pulmonary bed cell water out",
     "gut bed cell water out",

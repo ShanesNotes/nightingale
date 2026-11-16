@@ -73,8 +73,6 @@ fn packet(oxygen: f64) -> Result<ParameterPacket<SyntheticFixture>, AdmissionErr
     Ok(packet)
 }
 
-/// The arena's policy on ten-second windows over a run in which each bed's oxygen element book moves by `drift` a
-/// window.
 fn certified(drift: f64) -> Result<Certificate, CertificateFailure> {
     let case = BurningBeds::burning().expect("compiled");
     let oxygen = drift / (2.0 * WINDOW_S as f64);

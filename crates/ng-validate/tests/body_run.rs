@@ -266,7 +266,6 @@ fn the_body_admits_at_06_55(start: &Start) {
     assert_eq!(hex(start.session().record().seal().digest()), ADMITTED_SEAL);
 }
 
-/// The first minute's attempts and its refusals by reason, each refusal of a row named by that row.
 #[derive(Default)]
 struct Minute {
     attempts: u64,
@@ -648,7 +647,6 @@ fn a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(start: &
     );
 }
 
-/// The respiratory quotient glucose's share fixes, `s + 16 (1 - s) / 23` at the packet's share of 5/28.
 const QUOTIENT: f64 = 0.75;
 
 fn every_column(body: &CompiledBody) -> Vec<ColumnId> {
@@ -664,7 +662,6 @@ fn every_column(body: &CompiledBody) -> Vec<ColumnId> {
     columns
 }
 
-/// Every column's extent from admission to `at`, forward less reverse, by column index.
 fn extents(session: &Session<'_, Running>, columns: &[ColumnId], at: u64) -> Vec<f64> {
     for segment in session.conservation().newest_first() {
         let segment = segment.expect("a segment");
@@ -683,7 +680,6 @@ fn extents(session: &Session<'_, Running>, columns: &[ColumnId], at: u64) -> Vec
     panic!("no segment holds {at}")
 }
 
-/// A column's count over the amount rows `on` picks.
 fn count(body: &CompiledBody, column: ColumnId, on: impl Fn(SiteId, Species, Space) -> bool) -> f64 {
     (body.columns()[column.index()].terms().iter())
         .filter(|(row, _)| match body.rows()[row.index()].kind() {
@@ -726,8 +722,6 @@ fn bed_heat(start: &Start, session: &Session<'_, Running>) -> f64 {
         .sum()
 }
 
-/// What the ledger says crossed between `from` and `to`: the burns' oxygen used, carbon dioxide made and fuel energy,
-/// the oxygen the lung's own bed burned, and the heat the beds' thermal pools passed on.
 #[derive(Debug)]
 struct Burned {
     oxygen: f64,
@@ -798,8 +792,7 @@ fn only_the_core_store_takes_the_beds_heat(body: &CompiledBody, columns: &[Colum
 /// the pulmonary bed to the central veins, so the pulmonary artery carries that water too, and the lung's own bed
 /// takes its oxygen from its plasma before the pulmonary vein, so the arteries carry the other beds' burn. The flow
 /// times each gas's content difference then meets what the ledger says the beds' burns used and made, to LEDGER, the
-/// body's settling over nine beats. The same beats hold the quotient, the lung's exchange and the beds' heat, and the
-/// muscle bed's oxygen over the part of the first beat in which its inflow moves most.
+/// body's settling over nine beats.
 fn the_flow_times_the_oxygen_content_difference_meets_the_oxygen_the_beds_burned_over_whole_beats(
     start: &Start,
 ) {

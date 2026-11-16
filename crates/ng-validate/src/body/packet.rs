@@ -78,15 +78,11 @@ const CARBAMINO: Carbamino = Carbamino {
 };
 const INTERSTITIAL_BUFFER_RATIO: f64 = 15.0;
 const CELL_BUFFER_RATIO: f64 = 10.0;
-/// The respiratory quotient that glucose's share of the oxygen burned fixes, `s + 16 (1 - s) / 23`: 21/28.
-const PER_OXYGEN: f64 = 0.75;
 const GLUCOSE_SHARE: f64 = 5.0 / 28.0;
-/// The cell partial pressure at which a bed's reach `k P` meets its demand, and the oxygen rate's width as a share of
-/// the demand.
-const BEND: f64 = 20.0;
-const WIDTH: f64 = 0.02;
+const PER_OXYGEN: f64 = GLUCOSE_SHARE + 16.0 * (1.0 - GLUCOSE_SHARE) / 23.0;
+const CELL_PRESSURE_AT_DEMAND: f64 = 20.0;
+const WIDTH_SHARE_OF_DEMAND: f64 = 0.02;
 const BED_HEAT_SPEED: f64 = 0.05;
-/// The held feeds' speed and set amounts in each bed's cells, and the cell water drain's.
 const FEED_SPEED: f64 = 0.1;
 const GLUCOSE_SET: f64 = 3_000.0;
 const FAT_SET: f64 = 600.0;
@@ -906,8 +902,8 @@ fn gases(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admission
     for (bed, used) in BEDS.into_iter().zip(USES) {
         let at = Binding::Site(site::<CapillaryBed>(bed)?);
         set::<Rate<Oxygen>>(packet, "mt.oxygen-demand", at, used)?;
-        set::<Conductance<Oxygen>>(packet, "mt.oxygen-reach", at, used / BEND)?;
-        set::<Rate<Oxygen>>(packet, "mt.oxygen-rate-width", at, WIDTH * used)?;
+        set::<Conductance<Oxygen>>(packet, "mt.oxygen-reach", at, used / CELL_PRESSURE_AT_DEMAND)?;
+        set::<Rate<Oxygen>>(packet, "mt.oxygen-rate-width", at, WIDTH_SHARE_OF_DEMAND * used)?;
         set::<Conductance<Oxygen>>(packet, "mt.wall-oxygen-conductance", at, used / HEAD)?;
         set::<Conductance<Oxygen>>(packet, "mt.cell-oxygen-conductance", at, used / HEAD)?;
         let made = PER_OXYGEN * used / CARBON_DIOXIDE_HEAD;
