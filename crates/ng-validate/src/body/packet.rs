@@ -703,8 +703,9 @@ fn oxygen(packet: &mut ParameterPacket<SyntheticFixture>) -> Result<(), Admissio
 
 /// The body's own drift bound for each species it moves that the slice does not, in place of the slice's table:
 /// twice the worst change over a ten-second window of the body's first minute, rounded up to one significant figure.
-/// Fixture data measured on this body at its admitted start, which settles over that minute, until the body's measured
-/// day (ticket 24) replaces it.
+/// Fixture data measured on this body at its admitted start, until the body's measured day (ticket 24) replaces it.
+/// Oxygen's change is mostly its 35 umol swing within a beat, read across windows that hold no whole number of beats;
+/// the rest is the run settling from the admitted orbit onto the core's own, which a smaller step cap moves.
 const DRIFTS: [(Species, f64); 1] = [(Species::Oxygen, OXYGEN_DRIFT)];
 const OXYGEN_DRIFT: f64 = 4.0;
 
