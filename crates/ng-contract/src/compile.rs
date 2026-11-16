@@ -1486,7 +1486,7 @@ fn place(
                     None => None,
                 };
                 let reads = unwritten.as_ref().unwrap_or(own);
-                check_landing(law.name, reads, &fields, context, anatomy)?;
+                check_landing(law.name, reads, fields, context, anatomy)?;
                 let (program, kernel) = match &variant {
                     None => (declared, kernel),
                     Some(variant) => {
