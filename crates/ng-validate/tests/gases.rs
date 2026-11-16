@@ -278,8 +278,8 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
     })
 }
 
-/// The oxygen partial pressure and saturation whose dissolved and bound oxygen make `content` at a carbon dioxide
-/// partial pressure, by bisection on `ln(P / P50)`.
+/// The oxygen partial pressure and saturation whose dissolved and bound oxygen make the oxygen content `content` at a
+/// carbon dioxide partial pressure, by bisection on `ln(P / P50)`.
 fn solved(content: f64, pressure: f64) -> Speciated {
     let (mut low, mut high) = (-30.0, 15.0);
     for _ in 0..200 {
@@ -293,7 +293,7 @@ fn solved(content: f64, pressure: f64) -> Speciated {
     speciated((0.5 * (low + high), pressure))
 }
 
-/// The plasma whose oxygen content and carbon dioxide total are `content` and `total`, by bisection on the carbon
+/// The plasma whose oxygen content and carbon dioxide content are `content` and `total`, by bisection on the carbon
 /// dioxide partial pressure, which carbamino's reading of saturation couples to the oxygen.
 fn solved_both(content: f64, total: f64) -> Speciated {
     let (mut low, mut high) = (1.0, 200.0);
@@ -568,8 +568,9 @@ fn speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_war
     Ok(())
 }
 
-/// The tissues' buffered carbon dioxide empties only through the plasma's renewal, whose content moves less for each
-/// mmHg than theirs, so it is the bed's slowest store: the bed settles to 1e-6 by 400 s and not by 120 s.
+/// The tissues' buffered carbon dioxide empties only through the plasma's renewal, whose carbon dioxide content
+/// moves less for each mmHg than theirs, so it is the bed's slowest store: the bed settles to 1e-6 by 400 s and not
+/// by 120 s.
 const SETTLED_S: u64 = 400;
 
 fn settling<'m>(
@@ -837,7 +838,7 @@ fn a_fast_renewal_is_refused_by(
 }
 
 #[test]
-fn a_step_into_a_content_far_above_capacity_is_refused_by_oxygens_partial_pressure()
+fn a_step_into_an_oxygen_content_far_above_capacity_is_refused_by_oxygens_partial_pressure()
 -> Result<(), InitializationFailure> {
     a_fast_renewal_is_refused_by(solved(30.0, ARTERIAL.1), 1_000.0, "oxygen partial pressure")
 }
@@ -852,9 +853,9 @@ fn a_step_whose_bicarbonate_passes_what_the_total_leaves_is_refused_by_acidity()
     a_fast_renewal_is_refused_by(arterial, 10_000.0, "acidity")
 }
 
-/// The dissolved oxygen carries a content above hemoglobin's capacity, so it has a partial pressure.
+/// The dissolved oxygen carries an oxygen content above hemoglobin's capacity, so it has a partial pressure.
 #[test]
-fn a_content_above_capacity_admits_at_its_partial_pressure() -> Result<(), InitializationFailure> {
+fn an_oxygen_content_above_capacity_admits_at_its_partial_pressure() -> Result<(), InitializationFailure> {
     let (body, core, store) = (
         compiled()?,
         ng_solver::Core::new(SECOND / 100),
@@ -871,10 +872,10 @@ fn a_content_above_capacity_admits_at_its_partial_pressure() -> Result<(), Initi
     Ok(())
 }
 
-/// Arterial blood above capacity carries the plasma's content across it while the bed settles over 200 s, ten of the
+/// Arterial blood above capacity carries the plasma's oxygen content across it while the bed settles over 200 s, ten of the
 /// tissue's time constants at that pressure. No trial leaves the partial pressure's domain, so no step is refused.
 #[test]
-fn a_run_carries_the_content_across_capacity() -> Result<(), InitializationFailure> {
+fn a_run_carries_the_oxygen_content_across_capacity() -> Result<(), InitializationFailure> {
     let (body, core, store) = (
         compiled()?,
         ng_solver::Core::new(SECOND / 100),

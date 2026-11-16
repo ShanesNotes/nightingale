@@ -203,20 +203,48 @@ fn concentration(start: &Start, session: &Session<'_, Running>, key: &'static st
     value(start, session, lumen(species)) / value(start, session, lumen(Species::Water))
 }
 
-fn body_oxygen(start: &Start, session: &Session<'_, Running>) -> f64 {
+fn body_gas(start: &Start, session: &Session<'_, Running>, gas: Species) -> f64 {
     let view = session.record().accepted();
     (start.body.rows().iter())
-        .filter(|row| {
-            matches!(
-                row.kind(),
-                RowKind::Amount {
-                    species: Species::Oxygen,
-                    ..
-                }
-            )
-        })
+        .filter(|row| matches!(row.kind(), RowKind::Amount { species, .. } if species == gas))
         .map(|row| lead(view.value(row.id())))
         .sum()
+}
+
+fn aortic_flow(start: &Start, session: &Session<'_, Running>) -> f64 {
+    let at = Context::Edge {
+        from: site::<VesselSegment>("left ventricle"),
+        to: site::<VesselSegment>("systemic arteries"),
+    };
+    let valves = LawName {
+        owner: "CV",
+        local: "valves",
+    };
+    value(start, session, RowKind::Memory(Slot { law: valves, at }))
+}
+
+/// One accepted step at a time until `end` after admission, handing `each` every step's session and noting each beat's
+/// onset: the step where the aortic valve's flow leaves zero, half a second or more after the last onset, because the
+/// valve can close and open again within one ejection.
+fn beats<'s>(
+    start: &Start,
+    mut session: Session<'s, Running>,
+    end: u64,
+    mut each: impl FnMut(&Session<'_, Running>, bool),
+) -> Session<'s, Running> {
+    let (mut flow, mut onset) = (aortic_flow(start, &session), None);
+    while session.record().accepted().time().nanoseconds() < anchor_moment().nanoseconds() + end {
+        let before = session.record().accepted().time().nanoseconds();
+        session = until(session, before + 1 - anchor_moment().nanoseconds());
+        let (now, at) = (aortic_flow(start, &session), session.record().accepted().time().nanoseconds());
+        let opened = flow == 0.0 && now > 0.0 && onset.is_none_or(|last| at - last >= SECOND / 2);
+        if opened {
+            onset = Some(at);
+        }
+        each(&session, opened);
+        flow = now;
+    }
+    session
 }
 
 fn the_body_admits_at_06_55(start: &Start) {
@@ -228,7 +256,7 @@ fn the_body_admits_at_06_55(start: &Start) {
 
 fn no_held_pool_moves_at_admission_or_over_the_first_minute(start: &Start) -> Session<'_, Running> {
     let pools = start.held_pools();
-    assert_eq!(pools.len(), 387);
+    assert_eq!(pools.len(), 365);
     let amounts = |session: &Session<'_, Running>| -> Vec<[u64; 2]> {
         let view = session.record().accepted();
         pools.iter().map(|(row, _)| view.value(*row).bits()).collect()
@@ -458,8 +486,9 @@ impl Edge {
 
 /// A 400 mL water bolus into the gut lowers the hematocrit, viscosity and the edge's resistance, and the edge's flow is
 /// its drop over the packet's resistance times viscosity's ratio, so the run tells viscosity's part of the flow from
-/// the drop's.
-fn a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(start: &Start) {
+/// the drop's. The body's gases are read at the start of a beat before the bolus and after it, so the beat's swing in
+/// them does not enter.
+fn a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(start: &Start) {
     let mut session = start.session();
     let before = Edge::at(start, &session);
     let water = WaterDelivery {
@@ -480,14 +509,22 @@ fn a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(start: &St
             .map(|species| concentration(start, session, "systemic arteries", species))
     };
     let before_arterial = arterial(&session);
-    let session = until(session, SECOND);
-    let held = body_oxygen(start, &session);
-    let session = until(session, 2 * SECOND);
-    let delivered = body_oxygen(start, &session);
-    assert!(
-        (delivered - held).abs() <= 1e-5 * held,
-        "the body's oxygen went from {held} to {delivered} over the bolus"
-    );
+    let mut onsets: Vec<(u64, [f64; 2])> = Vec::new();
+    let session = beats(start, session, 3 * SECOND, |session, onset| {
+        if onset {
+            let at = session.record().accepted().time().nanoseconds() - anchor_moment().nanoseconds();
+            let gases = [Species::Oxygen, Species::CarbonDioxide].map(|gas| body_gas(start, session, gas));
+            onsets.push((at, gases));
+        }
+    });
+    let held = (onsets.iter().rev().find(|(at, _)| *at <= SECOND)).expect("a beat starts by 1 s");
+    let delivered = (onsets.iter().find(|(at, _)| *at >= 2 * SECOND)).expect("a beat starts after 2 s");
+    for (gas, (held, delivered)) in ["oxygen", "carbon dioxide"].iter().zip(held.1.iter().zip(&delivered.1)) {
+        assert!(
+            (delivered - held).abs() <= 1e-5 * held,
+            "the body's {gas} went from {held} to {delivered} over the bolus, each at a beat's start"
+        );
+    }
     let session = until(session, 30 * SECOND);
     let after_arterial = arterial(&session);
     assert!(
@@ -519,45 +556,98 @@ fn a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(start: &St
     );
 }
 
-/// Every bed's held use but the lung's, whose own plasma serves its cells before the pulmonary vein.
-const SYSTEMIC_USE: f64 = 95.0;
+/// Every bed's held oxygen use, and the carbon dioxide made at 0.75 of it.
+const USE: f64 = 96.0;
+const MADE: f64 = 0.75 * USE;
+/// The lung's own bed takes 1 of the use from its plasma before the pulmonary vein, so the arteries carry the rest.
+const SYSTEMIC: f64 = 95.0 / 96.0;
 
-/// Over the first minute's last ten seconds. Means over whole beats stand in for the identity's steady flows, and the
-/// arteries and veins between the two reads store a beat's oxygen, so it holds to 1%.
-fn the_flow_times_the_arterial_less_the_venous_oxygen_content_meets_the_held_use(start: &Start) {
-    let (ventricle, arteries) = (
-        site::<VesselSegment>("left ventricle"),
-        site::<VesselSegment>("systemic arteries"),
-    );
-    let aortic = RowKind::Memory(Slot {
-        law: LawName {
-            owner: "CV",
-            local: "valves",
-        },
-        at: Context::Edge {
-            from: ventricle,
-            to: arteries,
-        },
-    });
-    let mut session = until(start.session(), 50 * SECOND);
-    let (end, mut held) = (anchor_moment().nanoseconds() + 60 * SECOND, 0.0);
-    let (mut flow, mut arterial, mut venous) = (0.0, 0.0, 0.0);
-    while session.record().accepted().time().nanoseconds() < end {
-        let before = session.record().accepted().time().nanoseconds();
-        session = until(session, before + 1 - anchor_moment().nanoseconds());
-        let length = (session.record().accepted().time().nanoseconds() - before) as f64 / 1e9;
-        held += length;
-        flow += length * value(start, &session, aortic);
-        arterial += length * concentration(start, &session, "systemic arteries", Species::Oxygen);
-        venous += length * concentration(start, &session, "pulmonary artery", Species::Oxygen);
+/// The cumulative gross inflow or outflow of `quantity` at `at`, from the ledger's own segments.
+fn exchanged(session: &Session<'_, Running>, quantity: QuantityId, at: u64, outflow: bool) -> f64 {
+    for segment in session.conservation().newest_first() {
+        let segment = segment.expect("a segment");
+        let interval = segment.interval();
+        let (from, to) = (interval.start().nanoseconds(), interval.end().nanoseconds());
+        if from < at && at <= to {
+            let curve = if outflow {
+                segment.outflow(quantity)
+            } else {
+                segment.inflow(quantity)
+            };
+            let piece = Interval::new(interval.start(), SimTime::from_ns(at)).expect("a piece");
+            return lead(curve.on(piece).expect("inside its segment")[1]);
+        }
     }
-    let (flow, arterial, venous) = (flow / held, arterial / held, venous / held);
-    let taken = flow * (arterial - venous);
-    assert!(
-        (taken - SYSTEMIC_USE).abs() <= 0.01 * SYSTEMIC_USE,
-        "flow {flow} times arterial {arterial} less venous {venous} is {taken} against {SYSTEMIC_USE}"
-    );
+    panic!("no segment holds {at}")
 }
+
+/// Over the whole beats of the first minute's last ten seconds, the trapezoid means of the aortic flow and of the
+/// systemic arteries' and the pulmonary artery's oxygen and carbon dioxide contents. Flow times the content difference
+/// meets each gas's held rate to TOLERANCE, because the product of means stands in for the mean of the products while
+/// the two vessels' oxygen and carbon dioxide contents swing out of phase with the aortic flow within a beat. The ledger's own exchange at the
+/// lung over the same beats meets the held rate to LEDGER, the body's settling over ten seconds.
+fn the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_held_rates_over_whole_beats(start: &Start) {
+    let mut samples: Vec<(u64, [f64; 5])> = Vec::new();
+    let mut onsets: Vec<u64> = Vec::new();
+    let session = until(start.session(), 50 * SECOND);
+    let session = beats(start, session, 60 * SECOND, |session, onset| {
+        let at = session.record().accepted().time().nanoseconds();
+        if onset {
+            onsets.push(at);
+        }
+        let read = |key, gas| concentration(start, session, key, gas);
+        samples.push((
+            at,
+            [
+                aortic_flow(start, session),
+                read("systemic arteries", Species::Oxygen),
+                read("pulmonary artery", Species::Oxygen),
+                read("systemic arteries", Species::CarbonDioxide),
+                read("pulmonary artery", Species::CarbonDioxide),
+            ],
+        ));
+    });
+    let (first, last) = (onsets[0], onsets[onsets.len() - 1]);
+    let held = (last - first) as f64 / 1e9;
+    let mut means = [0.0; 5];
+    for pair in samples.windows(2) {
+        let ((from, then), (to, now)) = (pair[0], pair[1]);
+        if from >= first && to <= last {
+            let length = (to - from) as f64 / 1e9;
+            for (mean, (then, now)) in means.iter_mut().zip(then.iter().zip(&now)) {
+                *mean += 0.5 * length * (then + now) / held;
+            }
+        }
+    }
+    let [flow, arterial_oxygen, venous_oxygen, arterial_carbon_dioxide, venous_carbon_dioxide] = means;
+    let fick = [
+        ("oxygen", flow * (arterial_oxygen - venous_oxygen), SYSTEMIC * USE),
+        ("carbon dioxide", flow * (venous_carbon_dioxide - arterial_carbon_dioxide), SYSTEMIC * MADE),
+    ];
+    for (gas, taken, rate) in fick {
+        assert!(
+            (taken - rate).abs() <= TOLERANCE * rate,
+            "over {} beats flow {flow} times the {gas} content difference is {taken} against {rate}",
+            onsets.len() - 1
+        );
+    }
+    let basis = start.body.conserved_basis();
+    for (gas, outflow, rate) in [(Species::Oxygen, false, USE), (Species::CarbonDioxide, true, MADE)] {
+        let lung = (basis.ids())
+            .filter(|quantity| quantity.book() == Book::Of(gas))
+            .map(|quantity| {
+                let moved = exchanged(&session, quantity, last, outflow) - exchanged(&session, quantity, first, outflow);
+                moved / held
+            })
+            .fold(0.0, f64::max);
+        assert!(
+            (lung - rate).abs() <= LEDGER * rate,
+            "the ledger's {gas:?} exchange at the lung over the beats is {lung} a second against {rate}"
+        );
+    }
+}
+const TOLERANCE: f64 = 0.01;
+const LEDGER: f64 = 0.001;
 
 struct Ticks(Cell<u64>);
 impl WallClock for Ticks {
@@ -654,6 +744,6 @@ fn the_whole_body_admits_runs_its_first_minute_and_holds_its_pins() {
         solves: start.core.solves.get() - before,
     };
     assert_eq!(over_ceilings(counts, CEILINGS), Vec::<&str>::new(), "{counts:?}");
-    a_water_bolus_dilutes_the_blood_and_leaves_its_oxygen_where_it_was(&start);
-    the_flow_times_the_arterial_less_the_venous_oxygen_content_meets_the_held_use(&start);
+    a_water_bolus_dilutes_the_blood_and_leaves_its_gases_where_they_were(&start);
+    the_flow_times_the_oxygen_and_carbon_dioxide_content_differences_meets_their_held_rates_over_whole_beats(&start);
 }

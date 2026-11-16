@@ -167,6 +167,11 @@ fn start_guess(row: RowKind) -> f64 {
                 (Species::Oxygen, Space::Plasma | Space::Lumen | Space::Interstitium | Space::Cells) => {
                     oxygen_guess(site.key(), space) * water
                 }
+                (Species::CarbonDioxide, Space::Lumen)
+                    if matches!(site.key(), "renal tubule" | "collecting duct" | "bladder") =>
+                {
+                    0.5
+                }
                 (Species::CarbonDioxide, Space::Plasma | Space::Lumen | Space::Interstitium | Space::Cells) => {
                     carbon_dioxide_guess(site.key(), space) * water
                 }
