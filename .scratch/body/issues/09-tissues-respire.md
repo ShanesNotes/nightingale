@@ -9,15 +9,15 @@ Blocked by: 02, 08, `.scratch/research/issues/11-law-forms-gas-loop.md`
 
 **Releases:** the metabolism card's hold, and coupling arrows 78 (work and flow to metabolism) and 90 (oxygen debt to the vessels).
 
-- [ ] Tests: the reaction's proportions close every book, and each rate law matches its form at stated points
-- [ ] Run: over a window in which a bed's flow changes, oxygen in less oxygen out equals oxygen used plus the change in what the bed stores, and at a steady state that is flow times the difference between arterial and venous content. Carbon dioxide made over oxygen used equals the declared quotient. The energy book closes: heat equals the fuel's energy less work
-- [ ] No work is paid from outside the body: the exterior chemical energy that pays the heart and the vessel walls in the slice is replaced by fuel burned at the bed
-- [ ] Run: halving one bed's flow raises its extraction, then its debt, then its flow, in that order
-- [ ] Run: the slice's posture checks once with the heart's work paid at the muscle bed and no coronary bed. The coronary bed stays only if they fail without it (record 0002)
-- [ ] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved
-- [ ] The body admits over a cycle with its reactions running, which [ticket 02](02-reactions.md) left unshown
-- [ ] From [research 12](../../research/issues/12-law-forms-heat.md): every bed's heat, the skin bed's included, reaches the core heat store, which replaces the skin heat store for the skin bed above. A reaction's heat lands in its bed's own thermal pool, so each bed needs a transfer to the core store, first order in that pool at a declared speed (a model default)
-- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget
+- [ ] Tests: the reaction's proportions close every book, and each rate law matches its form at stated points. 09a meets it for the two burns, the oxygen rate and the bed heat on the one-bed fixture; 09b takes glycolysis and lactate's burn
+- [ ] Run: over a window in which a bed's flow changes, oxygen in less oxygen out equals oxygen used plus the change in what the bed stores, and at a steady state that is flow times the difference between arterial and venous content. Carbon dioxide made over oxygen used equals the declared quotient. The energy book closes: heat equals the fuel's energy less work. 09a meets it with no work paid by fuel yet (heat to the core store equals the fuel's energy less the beds' change); 09d adds the work
+- [ ] No work is paid from outside the body: the exterior chemical energy that pays the heart and the vessel walls in the slice is replaced by fuel burned at the bed. 09d, after a native-contract change (below)
+- [ ] Run: halving one bed's flow raises its extraction, then its debt, then its flow, in that order. 09b states the debt and 09c arrow 90
+- [ ] Run: the slice's posture checks once with the heart's work paid at the muscle bed and no coronary bed. The coronary bed stays only if they fail without it (record 0002). 09d
+- [x] The certificate passes on the whole body, and the body's trace is updated with one sentence on why it moved (09a)
+- [x] The body admits over a cycle with its reactions running, which [ticket 02](02-reactions.md) left unshown (09a)
+- [x] From [research 12](../../research/issues/12-law-forms-heat.md): every bed's heat, the skin bed's included, reaches the core heat store, which replaces the skin heat store for the skin bed above. A reaction's heat lands in its bed's own thermal pool, so each bed needs a transfer to the core store, first order in that pool at a declared speed (a model default). 09a
+- [ ] Cost: unknowns and rows before and after, and wall time for each simulated second against ticket 26's budget. Each PR of this ticket gives its lines (below)
 
 **Non-goals:** which fuel a bed burns (ticket 16), temperature's effect on rate, and heat exchange with the room (ticket 12).
 
@@ -36,3 +36,16 @@ From [ticket 04](04-scopes-ports-and-census.md):
 From [ticket 08](08-blood-carries-gases.md)'s second PR: a fixed use can outrun supply. The plan's one-bed fixture drove a cell's oxygen partial pressure below zero at +50% of its use, so 08's runs keep their steps in use small, and this ticket's uptake, which supply limits, ends that.
 
 From [ticket 08](08-blood-carries-gases.md)'s third PR: the body packet's `BY_ACIDITY`, `BY_CARBON_DIOXIDE`, `WEAK` and `CARBAMINO` and its `Blood`, and the gas fixture's `ARTERIAL`, `Speciated` and `Start`, name their values by a tuple's positions, with a comment to say which is which. Named fields would let those eight comments go, at about 60 changed lines, so the first ticket that restates the packet's gases takes them.
+
+## The four PRs
+
+The ticket lands as four PRs: 09a the burn, 09b lactate and the oxygen debt, 09c arrow 90, 09d arrow 78. The plan and its prototypes are outside the repo.
+
+- 09d waits on a contract change: the heart's and the vessel walls' work start at the exterior's chemical energy, and no route family starts at a bed's heat store.
+- Research 11's debt in memory cannot be stated, because memory is body-wide only. So 09b reads the debt from the cells' lactate.
+
+## Cost
+
+Exception to ticket 26's budget, recorded by the oversight seat: this ticket may pass the gas loop's allowance. Ticket 08 took 677.7 M of the loop's 750.9 M, nearly all of it in the cost of a solve, and the burn alone adds about 109 M at a fixed landing count. A quarter of the body's line is the ledger's walk of every combination against every column, which is no law's work and is to be removed with the same bits. The loop's budget is restated in ticket 26 from measured lines once that walk is gone. Until then each PR of this ticket gives its line, its solves by kind and its instructions a solve at its base and its head.
+
+09a's lines: COST_LINES_PENDING

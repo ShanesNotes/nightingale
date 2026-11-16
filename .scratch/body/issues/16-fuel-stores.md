@@ -4,7 +4,7 @@ Type: task
 Status: open
 Blocked by: 09, 15, `.scratch/research/issues/13-law-forms-gut-and-fuels.md`
 
-**What to build:** Fat is stored after meals and released overnight. Muscle holds glycogen. Body protein turns over at its smallest, with creatinine made from muscle, filtered by the kidney and not reclaimed. Ketones are one species, made by the liver from fat overnight and burned by the tissues. Each bed's fuel mix replaces the single mixed fuel of [ticket 09](09-tissues-respire.md), so the respiratory quotient follows the day, and heat production rises after a meal.
+**What to build:** Fat is stored after meals and released overnight. Muscle holds glycogen. Body protein turns over at its smallest, with creatinine made from muscle, filtered by the kidney and not reclaimed. Ketones are one species, made by the liver from fat overnight and burned by the tissues. Each bed's fuel mix replaces the one glucose share that every bed's burns take in [ticket 09](09-tissues-respire.md), so the respiratory quotient follows the day, and heat production rises after a meal. Until then the brain burns fatty acids at the body's share. Ticket 09's held feeds of glucose and fatty acids into each bed's cells name this ticket.
 
 **Releases:** the musculoskeletal card's holds on its stores, and the metabolism card's hold on fuel uptake.
 
