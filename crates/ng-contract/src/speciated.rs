@@ -1,6 +1,6 @@
-use super::Inputs;
 use crate::boundary::DriveFrame;
 use crate::catalog::{SpeciationReader, WiredRead};
+use crate::evaluate::Inputs;
 use crate::law::ReadPort;
 use crate::*;
 use core::f64::consts::LN_10;

@@ -3437,14 +3437,14 @@ name = "written-op-names-the-reader"
 path = "crates/ng-contract/src/law.rs"
 old = '''                origins.push(Some(field.name));'''
 new = '''                origins.push(None);'''
-test = "-p ng-contract --lib evaluate::written::a_failure_in_the_field_names_the_field_and_one_in_the_reader_names_the_reader"
+test = "-p ng-contract --lib written::a_failure_in_the_field_names_the_field_and_one_in_the_reader_names_the_reader"
 
 [[mutant]]
 name = "written-closing-placed-again"
 path = "crates/ng-contract/src/law.rs"
 old = '''let result = follow(closing.as_ref().map_or(last, |&(_, value)| value));'''
 new = '''let result = follow(last);'''
-test = "-p ng-contract --lib evaluate::written::the_closing_row_read_stays_last"
+test = "-p ng-contract --lib written::the_closing_row_read_stays_last"
 
 [[mutant]]
 name = "written-shares-the-hosts-reads"
@@ -3454,7 +3454,7 @@ old = '''                redirect.push(redirect.len());
 new = '''                let known = self.code.iter().position(|known| *known == code[redirect.len()]);
                 redirect.push(known.unwrap_or(redirect.len()));
             }'''
-test = "-p ng-contract --lib evaluate::written::a_written_field_is_its_hand_written_twin_in_ops_values_and_slopes_on_three_hosts"
+test = "-p ng-contract --lib written::a_written_field_is_its_hand_written_twin_in_ops_values_and_slopes_on_three_hosts"
 
 [[mutant]]
 name = "written-read-at-the-landmark-everywhere"
@@ -3464,28 +3464,28 @@ new = '''                (Input::Read(source, Where::Here), Where::Here) => {
                     Ok(Input::Read(source, Where::Mark(Landmark::PeripheralChemoreceptor)))
                 }
                 (input, Where::Here) | (input @ Input::Parameter(_), _) => Ok(input),'''
-test = "-p ng-contract --lib evaluate::written::each_bed_reads_its_own_value_of_the_field"
+test = "-p ng-contract --lib written::each_bed_reads_its_own_value_of_the_field"
 
 [[mutant]]
 name = "written-landmark-reads-here"
 path = "crates/ng-contract/src/law.rs"
 old = '''                (Input::Read(source, Where::Here), _) => Ok(Input::Read(source, place)),'''
 new = '''                (Input::Read(source, Where::Here), _) => Ok(Input::Read(source, Where::Here)),'''
-test = "-p ng-contract --lib evaluate::written::a_read_at_a_landmark_reads_the_field_where_the_landmark_stands"
+test = "-p ng-contract --lib written::a_read_at_a_landmark_reads_the_field_where_the_landmark_stands"
 
 [[mutant]]
 name = "explicit-slot-laid-out"
 path = "crates/ng-contract/src/compile.rs"
 old = '''.filter(|slot| slot.kind != SlotKind::Explicit);'''
 new = '''.filter(|_| true);'''
-test = "-p ng-contract --lib evaluate::written::a_second_reader_adds_no_row_and_reads_each_beds_own_value"
+test = "-p ng-contract --lib written::a_second_reader_adds_no_row_and_reads_each_beds_own_value"
 
 [[mutant]]
 name = "explicit-reads-explicit"
 path = "crates/ng-contract/src/compile.rs"
 old = '''Input::Read(Source::Field(name), _) => explicit.iter().any(|(field, _)| field.name == *name),'''
 new = '''Input::Read(Source::Field(_), _) => false,'''
-test = "-p ng-contract --lib evaluate::written::a_field_that_reads_another_row_free_field_is_refused"
+test = "-p ng-contract --lib written::a_field_that_reads_another_row_free_field_is_refused"
 
 [[mutant]]
 name = "explicit-holds-by-a-mode"
@@ -3496,21 +3496,21 @@ old = '''            return Err(CompileDefect::UncoveredMode { law, mode });
 new = '''            let _ = mode;
         }
         let local'''
-test = "-p ng-contract --lib evaluate::written::a_field_that_holds_by_a_mode_is_refused"
+test = "-p ng-contract --lib written::a_field_that_holds_by_a_mode_is_refused"
 
 [[mutant]]
 name = "explicit-reads-a-local-slot"
 path = "crates/ng-contract/src/compile.rs"
 old = '''Input::Memory(_) | Input::Algebraic(_) | Input::Draw(_) | Input::Forcing(_) => true,'''
 new = '''Input::Memory(_) | Input::Draw(_) | Input::Forcing(_) => true,'''
-test = "-p ng-contract --lib evaluate::written::a_field_that_reads_its_owners_slot_by_its_local_name_is_refused"
+test = "-p ng-contract --lib written::a_field_that_reads_its_owners_slot_by_its_local_name_is_refused"
 
 [[mutant]]
 name = "explicit-adds-a-term"
 path = "crates/ng-contract/src/compile.rs"
 old = '''if kernel.placing.is_some() || inputs.any(local) {'''
 new = '''if inputs.any(local) {'''
-test = "-p ng-contract --lib evaluate::written::a_field_that_adds_a_site_term_is_refused"
+test = "-p ng-contract --lib written::a_field_that_adds_a_site_term_is_refused"
 
 [[mutant]]
 name = "explicit-read-stands-anywhere"
@@ -3521,14 +3521,14 @@ old = '''        for &place in &written {
 new = '''        for &place in &written {
             let _ = stands(place);
         }'''
-test = "-p ng-contract --lib evaluate::written::a_read_through_a_junction_a_drain_or_an_edges_end_is_refused"
+test = "-p ng-contract --lib written::a_read_through_a_junction_a_drain_or_an_edges_end_is_refused"
 
 [[mutant]]
 name = "explicit-read-off-its-set"
 path = "crates/ng-contract/src/compile.rs"
 old = '''if !landed.is_some_and(|site| anatomy.in_set(field.set).contains(&site)) {'''
 new = '''if landed.is_none() {'''
-test = "-p ng-contract --lib evaluate::written::a_read_off_the_fields_set_is_refused"
+test = "-p ng-contract --lib written::a_read_off_the_fields_set_is_refused"
 
 [[mutant]]
 name = "sample-off-the-network"
@@ -3549,35 +3549,35 @@ name = "speciated-misses-samples"
 path = "crates/ng-contract/src/anatomy.rs"
 old = '''Sites::Speciated => bed(site) || self.sampled.binary_search(&site).is_ok(),'''
 new = '''Sites::Speciated => bed(site),'''
-test = "-p ng-contract --lib evaluate::speciated::a_sampled_segment_is_speciated_and_its_sensor_reads_it_at_the_landmark"
+test = "-p ng-contract --lib speciated::a_sampled_segment_is_speciated_and_its_sensor_reads_it_at_the_landmark"
 
 [[mutant]]
 name = "speciated-takes-every-segment"
 path = "crates/ng-contract/src/anatomy.rs"
 old = '''Sites::Speciated => bed(site) || self.sampled.binary_search(&site).is_ok(),'''
 new = '''Sites::Speciated => bed(site) || segment(site),'''
-test = "-p ng-contract --lib evaluate::speciated::a_sensor_at_a_segment_the_map_does_not_sample_is_refused"
+test = "-p ng-contract --lib speciated::a_sensor_at_a_segment_the_map_does_not_sample_is_refused"
 
 [[mutant]]
 name = "unread-sample-kept"
 path = "crates/ng-contract/src/compile.rs"
 old = '''Some(&site) => Err(CompileDefect::UnreadSample { site }),'''
 new = '''Some(_) => Ok(()),'''
-test = "-p ng-contract --lib evaluate::speciated::a_sampled_segment_no_other_card_reads_is_refused"
+test = "-p ng-contract --lib speciated::a_sampled_segment_no_other_card_reads_is_refused"
 
 [[mutant]]
 name = "unwired-read-passes"
 path = "crates/ng-contract/src/compile.rs"
 old = '''if !places.readers.iter().any(wires) {'''
 new = '''if false && !places.readers.iter().any(wires) {'''
-test = "-p ng-contract --lib evaluate::speciated::a_read_todays_table_does_not_wire_is_refused"
+test = "-p ng-contract --lib speciated::a_read_todays_table_does_not_wire_is_refused"
 
 [[mutant]]
 name = "unwired-read-off-the-rows-set"
 path = "crates/ng-contract/src/compile.rs"
 old = '''                && landed.is_some_and(|site| places.anatomy.in_set(row.sites).contains(&site))'''
 new = ''''''
-test = "-p ng-contract --lib evaluate::speciated::a_wired_reader_off_its_rows_set_is_refused"
+test = "-p ng-contract --lib speciated::a_wired_reader_off_its_rows_set_is_refused"
 
 [[mutant]]
 name = "reader-reads-nothing"

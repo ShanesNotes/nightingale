@@ -195,7 +195,7 @@ The forbidden moves fail to compile (`src/lib.rs`, `src/law.rs`, and for the sco
 | Read a quantity the reader's row of speciation's readers does not list | E0609 |
 | Receive another card's row of speciation's readers | E0271 |
 | Emit a reader's row from blood chemistry | E0277 |
-| Read a held row of speciation's readers | E0412 |
+| Read a held row of speciation's readers | E0425 |
 | Serve a boundary process another card owns (the urine drain from the respiratory card's ports) | E0271 |
 | Make a boundary process outside the contract | E0277 |
 | Cross a wall with a species outside the port's cargo class | E0277 |

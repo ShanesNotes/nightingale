@@ -1,5 +1,5 @@
-use super::Inputs;
 use crate::boundary::DriveFrame;
+use crate::evaluate::Inputs;
 use crate::law::{Op, ReadPort};
 use crate::*;
 use core::f64::consts::LN_10;

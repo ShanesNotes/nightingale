@@ -1567,11 +1567,15 @@ mod scheme;
 mod scope;
 mod seam;
 mod sources;
+#[cfg(test)]
+mod speciated;
 mod species;
 mod split;
 mod state;
 mod system;
 mod time;
+#[cfg(test)]
+mod written;
 
 pub use admission::*;
 pub use anatomy::*;

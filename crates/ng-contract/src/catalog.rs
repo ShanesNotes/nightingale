@@ -798,7 +798,7 @@ const fn field_count() -> FieldCount {
 /// }
 /// ```
 /// A held row has no payload: the nervous system reads no arterial gases until its row is wired.
-/// ```compile_fail,E0412
+/// ```compile_fail,E0425
 /// use ng_contract::{catalog::*, *};
 /// fn received<'b>(ns: &FragmentBuilder<'b, Nervous>) -> ArterialGases<Reads<'b, Nervous>> {
 ///     ns.receive()
