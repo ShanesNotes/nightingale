@@ -1,12 +1,12 @@
-//! One bed whose plasma a held artery renews and whose cells use oxygen and make carbon dioxide at held rates, so blood
-//! chemistry's speciation and metabolism's wall diffusion meet closed forms with no body admission. Every value is
-//! synthetic.
+//! One bed whose plasma a held artery renews and whose cells use oxygen and make carbon dioxide at held rates, or burn
+//! glucose and fatty acids by metabolism's laws from held feeds, so blood chemistry's speciation, metabolism's wall
+//! diffusion and its burn meet closed forms with no body admission. Every value is synthetic.
 
 use core::f64::consts::LN_10;
 use core::num::NonZeroU64;
 use ng_blood_chemistry::{Plasma, StrongIons, speciate};
 use ng_contract::*;
-use ng_metabolism::{GasRoutes, PlasmaPressure, carbon_dioxide_diffusion, oxygen_diffusion};
+use ng_metabolism::{GasRoutes, PlasmaPressure, bed_heat, burn, carbon_dioxide_diffusion, oxygen_diffusion};
 use ng_record::{Running, Session, Step};
 use ng_validate::*;
 
@@ -95,6 +95,20 @@ const VENOUS: Point = Point {
 };
 const HEAD: f64 = 5.0;
 const CARBON_DIOXIDE_HEAD: f64 = 1.0;
+const DEMAND: f64 = 100.0;
+/// The cell partial pressure at which the reach `k P` meets the demand at rest.
+const BEND: f64 = 20.0;
+const WIDTH: f64 = 0.02;
+/// Glucose's share of the oxygen burned, chosen so the quotient `s + 16 (1 - s) / 23` is 3/4.
+const GLUCOSE_SHARE: f64 = 5.0 / 28.0;
+const QUOTIENT: f64 = 0.75;
+const GLUCOSE_ENERGY: f64 = 1_000.0;
+const FAT_ENERGY: f64 = 3_000.0;
+const BED_HEAT_SPEED: f64 = 0.05;
+const FEED_SPEED: f64 = 0.1;
+const GLUCOSE_SET: f64 = 3_000.0;
+const FAT_SET: f64 = 600.0;
+const CELL_WATER_SPEED: f64 = 10.0;
 
 fn ten_to(power: f64) -> f64 {
     exp(power * LN_10)
@@ -185,7 +199,15 @@ fn site<C: SiteClass>(key: &'static str) -> Result<SiteId, AdmissionError> {
     Ok(AnatomyBuilder::new().site::<C>(key, origin).id())
 }
 
-fn compiled() -> Result<CompiledBody, AdmissionError> {
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Cells {
+    HeldUse,
+    Burning,
+    OneMixedBurn,
+    BurningUnderTwoCards,
+}
+
+fn compiled(cells: Cells) -> Result<CompiledBody, AdmissionError> {
     let origin = || -> Result<Position, AdmissionError> {
         Ok(Position::new(
             Measure::new(0.0)?,
@@ -196,7 +218,11 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", origin()?).id();
     let vessel = map.site::<VesselSegment>("vessel", origin()?).id();
-    let bed = map.site::<CapillaryBed>(BED, origin()?).id();
+    let bed_site = map.site::<CapillaryBed>(BED, origin()?);
+    let bed = bed_site.id();
+    if cells == Cells::BurningUnderTwoCards {
+        map.serves(&bed_site, Tissue::Muscle);
+    }
     map.contain(root, vessel);
     map.contain(root, bed);
     map.connect(Network::Vascular, vessel, bed);
@@ -219,15 +245,31 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
     schema.carry::<DietBase, CapillaryBed>(Space::Plasma);
     schema.carry::<FixedAcid, CapillaryBed>(Space::Plasma);
     let (into, out) = (BoundaryDirection::IntoBody, BoundaryDirection::OutOfBody);
+    let burns = cells != Cells::HeldUse;
     schema.boundary::<Oxygen>("artery oxygen", into, bed, Space::Plasma)?;
     schema.boundary::<Oxygen>("vein oxygen", out, bed, Space::Plasma)?;
-    schema.boundary::<Oxygen>("oxygen use", out, bed, Space::Cells)?;
     schema.boundary::<CarbonDioxide>("artery carbon dioxide", into, bed, Space::Plasma)?;
     schema.boundary::<CarbonDioxide>("vein carbon dioxide", out, bed, Space::Plasma)?;
-    schema.boundary::<CarbonDioxide>("carbon dioxide made", into, bed, Space::Cells)?;
+    if burns {
+        schema.carry::<Glucose, CapillaryBed>(Space::Cells);
+        schema.carry::<FattyAcids, CapillaryBed>(Space::Cells);
+        schema.carry::<Energy, CapillaryBed>(Space::Thermal);
+        schema.pool::<Energy>(root, Space::Thermal)?;
+        schema.energy_content::<Glucose>(Measure::new(GLUCOSE_ENERGY)?)?;
+        schema.energy_content::<FattyAcids>(Measure::new(FAT_ENERGY)?)?;
+        schema.boundary::<Glucose>("glucose feed", into, bed, Space::Cells)?;
+        schema.boundary::<FattyAcids>("fatty acid feed", into, bed, Space::Cells)?;
+        schema.boundary::<Water>("cell water out", out, bed, Space::Cells)?;
+    } else {
+        schema.boundary::<Oxygen>("oxygen use", out, bed, Space::Cells)?;
+        schema.boundary::<CarbonDioxide>("carbon dioxide made", into, bed, Space::Cells)?;
+    }
     assemble(schema, |mut body| {
         let mut held = HeldDeclaration::<BloodChemistry>::new(Vec::new(), Vec::new(), NOTE);
-        for space in SPACES {
+        for space in SPACES
+            .into_iter()
+            .filter(|&space| !(burns && space == Space::Cells))
+        {
             held = held.pool::<Water, CapillaryBed>(space);
         }
         let plasma = Space::Plasma;
@@ -269,42 +311,74 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
         let oxygen_pressure: PlasmaPressure<'_, '_> = &|k| k.at_site(&speciated.oxygen_partial_pressure);
         let carbon_dioxide_pressure: PlasmaPressure<'_, '_> =
             &|k| speciated.carbon_dioxide_partial_pressure(k);
-        oxygen_diffusion(&mut laws, &oxygen, oxygen_pressure)?;
+        let cell_oxygen = oxygen_diffusion(&mut laws, &oxygen, oxygen_pressure)?;
         carbon_dioxide_diffusion(&mut laws, &carbon_dioxide, carbon_dioxide_pressure)?;
+        match cells {
+            Cells::HeldUse => {}
+            Cells::Burning | Cells::BurningUnderTwoCards => burn(&mut laws, &cell_oxygen)?,
+            Cells::OneMixedBurn => {
+                let at = Space::Cells;
+                let mixed = laws.reaction::<CapillaryBed, Oxygen, 168>(
+                    "mixed burn",
+                    Proportions::<Oxygen, 168>::using(at)
+                        .uses::<Glucose, 5>(at)
+                        .uses::<FattyAcids, 6>(at)
+                        .makes::<CarbonDioxide, 126>(at)
+                        .makes::<Water, 126>(at)
+                        .energy_into(Space::Thermal),
+                );
+                let class = RateClass::new(RateBand::Reflex, SECOND)?;
+                let rate = laws.site_kernel(|mut k| {
+                    let zero = k.zero::<Rate<Oxygen>>();
+                    k.finish(zero, laws.every_mode(), class)
+                });
+                laws.react_at(&mixed, rate);
+            }
+        }
+        if burns {
+            bed_heat(&mut laws, &ports)?;
+        }
         body.add(laws.finish());
+
+        if cells == Cells::BurningUnderTwoCards {
+            let held = HeldDeclaration::<Musculoskeletal>::new(Vec::new(), Vec::new(), NOTE);
+            let (mut laws, _) = body.hold(held)?.parts();
+            let at = Space::Cells;
+            let glucose = laws.reaction::<Beds<Muscle>, Glucose, 1>(
+                "glucose burn",
+                Proportions::<Glucose>::using(at)
+                    .uses::<Oxygen, 6>(at)
+                    .makes::<CarbonDioxide, 6>(at)
+                    .makes::<Water, 6>(at)
+                    .energy_into(Space::Thermal),
+            );
+            let class = RateClass::new(RateBand::Reflex, SECOND)?;
+            let rate = laws.site_kernel(|mut k| {
+                let zero = k.zero::<Rate<Glucose>>();
+                k.finish(zero, laws.every_mode(), class)
+            });
+            laws.react_at(&glucose, rate);
+            body.add(laws.finish());
+        }
 
         let (mut laws, ports) = body.boundary()?.parts();
         let class = RateClass::new(RateBand::Reflex, SECOND)?;
         let key = ParameterKey::new;
         let renewal =
             laws.parameter::<Rate<Dimensionless>>(key("fixture.renewal"), Admissible::nonnegative());
-        let delivered =
-            laws.parameter::<Rate<Oxygen>>(key("fixture.arterial-oxygen"), Admissible::nonnegative());
-        let use_rate = laws.parameter::<Rate<Oxygen>>(key("fixture.oxygen-use"), Admissible::nonnegative());
-        for (name, rate) in [("artery oxygen", &delivered), ("oxygen use", &use_rate)] {
-            let route = ports.route::<Oxygen>(name)?.route;
-            let law = laws.kernel(|mut k| {
-                let value = k.parameter(rate);
-                k.finish(value, laws.every_mode(), class)
-            });
-            laws.transfer(Transfer::new(&route, law));
-        }
-        let delivered = laws.parameter::<Rate<CarbonDioxide>>(
-            key("fixture.arterial-carbon-dioxide"),
-            Admissible::nonnegative(),
-        );
-        let made_rate = laws
-            .parameter::<Rate<CarbonDioxide>>(key("fixture.carbon-dioxide-made"), Admissible::nonnegative());
-        for (name, rate) in [
-            ("artery carbon dioxide", &delivered),
-            ("carbon dioxide made", &made_rate),
-        ] {
-            let route = ports.route::<CarbonDioxide>(name)?.route;
-            let law = laws.kernel(|mut k| {
-                let value = k.parameter(rate);
-                k.finish(value, laws.every_mode(), class)
-            });
-            laws.transfer(Transfer::new(&route, law));
+        held_rate::<Oxygen>(
+            &mut laws,
+            &ports,
+            "artery oxygen",
+            "fixture.arterial-oxygen",
+            class,
+        )?;
+        let delivered = ("artery carbon dioxide", "fixture.arterial-carbon-dioxide");
+        held_rate::<CarbonDioxide>(&mut laws, &ports, delivered.0, delivered.1, class)?;
+        if !burns {
+            held_rate::<Oxygen>(&mut laws, &ports, "oxygen use", "fixture.oxygen-use", class)?;
+            let made = ("carbon dioxide made", "fixture.carbon-dioxide-made");
+            held_rate::<CarbonDioxide>(&mut laws, &ports, made.0, made.1, class)?;
         }
         let route = ports.route::<Oxygen>("vein oxygen")?.route;
         let held = route.amount::<Oxygen>();
@@ -322,9 +396,68 @@ fn compiled() -> Result<CompiledBody, AdmissionError> {
             k.finish(value, laws.every_mode(), class)
         });
         laws.transfer(Transfer::new(&route, law));
+        if burns {
+            let speed = laws.parameter(key("fixture.feed-speed"), Admissible::nonnegative());
+            let feed = (into, &speed);
+            restoring::<Glucose>(
+                &mut laws,
+                &ports,
+                "glucose feed",
+                ("fixture.glucose-set", feed),
+                class,
+            )?;
+            let fat = ("fixture.fatty-acid-set", feed);
+            restoring::<FattyAcids>(&mut laws, &ports, "fatty acid feed", fat, class)?;
+            let speed = laws.parameter(key("fixture.cell-water-speed"), Admissible::nonnegative());
+            let water = ("fixture.cell-water-set", (out, &speed));
+            restoring::<Water>(&mut laws, &ports, "cell water out", water, class)?;
+        }
         body.add(laws.finish());
         body.compile()
     })
+}
+
+fn held_rate<'b, Q: Substance>(
+    laws: &mut FragmentBuilder<'b, Boundary>,
+    ports: &BoundaryPorts<'b>,
+    name: &'static str,
+    key: &'static str,
+    class: RateClass,
+) -> Result<(), AdmissionError> {
+    let rate = laws.parameter::<Rate<Q>>(ParameterKey::new(key), Admissible::nonnegative());
+    let route = ports.route::<Q>(name)?.route;
+    let law = laws.kernel(|mut k| {
+        let value = k.parameter(&rate);
+        k.finish(value, laws.every_mode(), class)
+    });
+    laws.transfer(Transfer::new(&route, law));
+    Ok(())
+}
+
+/// A held feed into the cells, `k (N_set - N)`, or a held drain out of them, `k (N - N_set)`.
+fn restoring<'b, Q: Substance>(
+    laws: &mut FragmentBuilder<'b, Boundary>,
+    ports: &BoundaryPorts<'b>,
+    name: &'static str,
+    (set, (direction, speed)): (
+        &'static str,
+        (BoundaryDirection, &Parameter<'b, Boundary, Rate<Dimensionless>>),
+    ),
+    class: RateClass,
+) -> Result<(), AdmissionError> {
+    let set = laws.parameter::<Q>(ParameterKey::new(set), Admissible::nonnegative());
+    let route = ports.route::<Q>(name)?.route;
+    let held = route.amount::<Q>();
+    let law = laws.kernel(|mut k| {
+        let (set, held, speed) = (k.parameter(&set), k.read(&held), k.parameter(speed));
+        let value = match direction {
+            BoundaryDirection::IntoBody => k.relax(set, held, speed),
+            BoundaryDirection::OutOfBody => k.relax(held, set, speed),
+        };
+        k.finish(value, laws.every_mode(), class)
+    });
+    laws.transfer(Transfer::new(&route, law));
+    Ok(())
 }
 
 fn solved(content: f64, pressure: f64) -> Speciated {
@@ -376,6 +509,7 @@ struct Start {
     guess: Fields,
     arterial: Speciated,
     renewal: f64,
+    demand: f64,
 }
 impl Start {
     fn at(plasma: Speciated) -> Self {
@@ -389,6 +523,7 @@ impl Start {
             },
             arterial: speciated(ARTERIAL),
             renewal: RENEWAL,
+            demand: DEMAND,
         }
     }
     fn cold(plasma: Speciated) -> Self {
@@ -418,6 +553,18 @@ fn guess(row: RowKind, start: Start) -> f64 {
             * (settled.carbon_dioxide_pressure + heads * CARBON_DIOXIDE_HEAD)
     };
     match row {
+        RowKind::Amount {
+            species: Species::Glucose,
+            ..
+        } => GLUCOSE_SET,
+        RowKind::Amount {
+            species: Species::FattyAcids,
+            ..
+        } => FAT_SET,
+        RowKind::Amount {
+            species: Species::Energy,
+            ..
+        } => 0.0,
         RowKind::Amount {
             species, space: at, ..
         } => {
@@ -450,6 +597,14 @@ fn guess(row: RowKind, start: Start) -> f64 {
 }
 
 fn packet(body: &CompiledBody, start: Start) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
+    packet_from(body, start, |row| guess(row, start))
+}
+
+fn packet_from(
+    body: &CompiledBody,
+    start: Start,
+    guesses: impl Fn(RowKind) -> f64,
+) -> Result<ParameterPacket<SyntheticFixture>, AdmissionError> {
     let mut packet = ParameterPacket::new();
     fn set<U: Dimension>(
         packet: &mut ParameterPacket<SyntheticFixture>,
@@ -555,12 +710,35 @@ fn packet(body: &CompiledBody, start: Start) -> Result<ParameterPacket<Synthetic
         body_wide,
         flow * start.arterial.carbon_dioxide_total,
     )?;
-    set::<Rate<Oxygen>>(&mut packet, "fixture.oxygen-use", body_wide, used())?;
-    set::<Rate<CarbonDioxide>>(&mut packet, "fixture.carbon-dioxide-made", body_wide, made())?;
+    if declares(body, "mt.oxygen-demand") {
+        set::<Rate<Oxygen>>(&mut packet, "mt.oxygen-demand", beds, start.demand)?;
+        set::<Conductance<Oxygen>>(&mut packet, "mt.oxygen-reach", beds, DEMAND / BEND)?;
+        set::<Rate<Oxygen>>(&mut packet, "mt.oxygen-rate-width", beds, WIDTH * DEMAND)?;
+        set::<Dimensionless>(&mut packet, "mt.glucose-share", beds, GLUCOSE_SHARE)?;
+        set::<Rate<Dimensionless>>(&mut packet, "mt.bed-heat-speed", beds, BED_HEAT_SPEED)?;
+        set::<Rate<Dimensionless>>(&mut packet, "fixture.feed-speed", body_wide, FEED_SPEED)?;
+        set::<Glucose>(&mut packet, "fixture.glucose-set", body_wide, GLUCOSE_SET)?;
+        set::<FattyAcids>(&mut packet, "fixture.fatty-acid-set", body_wide, FAT_SET)?;
+        set::<Water>(&mut packet, "fixture.cell-water-set", body_wide, WATER[2])?;
+        set::<Rate<Dimensionless>>(
+            &mut packet,
+            "fixture.cell-water-speed",
+            body_wide,
+            CELL_WATER_SPEED,
+        )?;
+    } else {
+        set::<Rate<Oxygen>>(&mut packet, "fixture.oxygen-use", body_wide, used())?;
+        set::<Rate<CarbonDioxide>>(&mut packet, "fixture.carbon-dioxide-made", body_wide, made())?;
+    }
     set::<Rate<Dimensionless>>(&mut packet, "fixture.renewal", body_wide, start.renewal)?;
-    packet.start_rest(body, |row| guess(row, start), NOTE)?;
+    packet.start_rest(body, guesses, NOTE)?;
     packet.within(ErrorScales::uniform(Measure::new(1e-9)?, Measure::new(1e-10)?)?);
     Ok(packet)
+}
+
+fn declares(body: &CompiledBody, key: &'static str) -> bool {
+    let key = ParameterKey::new(key);
+    body.parameters().iter().any(|slot| slot.key() == key)
 }
 
 fn admitted<'m>(
@@ -569,9 +747,18 @@ fn admitted<'m>(
     store: &'m MemoryStore,
     start: Start,
 ) -> Result<Session<'m, Running>, InitializationFailure> {
+    admit(body, core, store, packet(body, start)?)
+}
+
+fn admit<'m>(
+    body: &'m CompiledBody,
+    core: &'m ng_solver::Core,
+    store: &'m MemoryStore,
+    packet: ParameterPacket<SyntheticFixture>,
+) -> Result<Session<'m, Running>, InitializationFailure> {
     let lens = body.lens(Vec::new(), NonZeroU64::MIN.saturating_add(SECOND - 1))?;
     let port = BoundaryPort::new(Vec::new())?;
-    Ok(admit_solved(body, packet(body, start)?, port, core, &lens, store)?.session)
+    Ok(admit_solved(body, packet, port, core, &lens, store)?.session)
 }
 
 fn value(body: &CompiledBody, session: &Session<'_, Running>, kind: RowKind) -> f64 {
@@ -617,7 +804,7 @@ fn after<'m>(session: Session<'m, Running>, seconds: u64) -> Session<'m, Running
 fn speciation_meets_its_closed_forms_at_three_points_from_a_cold_guess_and_a_warm_one()
 -> Result<(), InitializationFailure> {
     let (body, core, store) = (
-        compiled()?,
+        compiled(Cells::HeldUse)?,
         ng_solver::Core::new(SECOND / 100),
         MemoryStore::default(),
     );
@@ -707,7 +894,7 @@ fn tissue_pressure(
 #[test]
 fn the_bed_settles_where_the_fick_identity_puts_it() -> Result<(), InitializationFailure> {
     let (body, core, store) = (
-        compiled()?,
+        compiled(Cells::HeldUse)?,
         ng_solver::Core::new(SECOND / 100),
         MemoryStore::default(),
     );
@@ -777,7 +964,7 @@ const CLOSURE: f64 = 1e-12;
 fn oxygen_and_carbon_dioxide_close_to_the_ledgers_floor_through_speciation()
 -> Result<(), InitializationFailure> {
     let (body, core, store) = (
-        compiled()?,
+        compiled(Cells::HeldUse)?,
         ng_solver::Core::new(SECOND / 100),
         MemoryStore::default(),
     );
@@ -853,7 +1040,7 @@ fn refused_by(body: &CompiledBody, source: SourceId, local: &'static str) -> boo
 #[test]
 fn a_trial_whose_bound_share_leaves_zero_to_one_is_refused_by_name() -> Result<(), AdmissionError> {
     let (body, core, store) = (
-        compiled()?,
+        compiled(Cells::HeldUse)?,
         ng_solver::Core::new(SECOND / 100),
         MemoryStore::default(),
     );
@@ -886,7 +1073,7 @@ fn a_trial_whose_bound_share_leaves_zero_to_one_is_refused_by_name() -> Result<(
 #[test]
 fn a_bicarbonate_at_or_above_what_the_total_leaves_is_refused_by_name() -> Result<(), AdmissionError> {
     let (body, core, store) = (
-        compiled()?,
+        compiled(Cells::HeldUse)?,
         ng_solver::Core::new(SECOND / 100),
         MemoryStore::default(),
     );
@@ -918,7 +1105,7 @@ fn a_bicarbonate_at_or_above_what_the_total_leaves_is_refused_by_name() -> Resul
 fn a_saturation_outside_zero_to_one_is_refused_before_carbamino_reads_it() -> Result<(), InitializationFailure>
 {
     let (body, core, store) = (
-        compiled()?,
+        compiled(Cells::HeldUse)?,
         ng_solver::Core::new(SECOND / 100),
         MemoryStore::default(),
     );
@@ -948,7 +1135,7 @@ fn a_fast_renewal(
     local: &'static str,
 ) -> Result<(usize, usize), InitializationFailure> {
     let (body, core, store) = (
-        compiled()?,
+        compiled(Cells::HeldUse)?,
         ng_solver::Core::new(SECOND / 100),
         MemoryStore::default(),
     );
@@ -1033,7 +1220,7 @@ fn steps_that_bring_bicarbonate_near_what_the_total_leaves_are_accepted_finite()
 #[test]
 fn an_oxygen_content_above_capacity_admits_at_its_partial_pressure() -> Result<(), InitializationFailure> {
     let (body, core, store) = (
-        compiled()?,
+        compiled(Cells::HeldUse)?,
         ng_solver::Core::new(SECOND / 100),
         MemoryStore::default(),
     );
@@ -1054,7 +1241,7 @@ fn an_oxygen_content_above_capacity_admits_at_its_partial_pressure() -> Result<(
 #[test]
 fn a_run_carries_the_oxygen_content_across_capacity() -> Result<(), InitializationFailure> {
     let (body, core, store) = (
-        compiled()?,
+        compiled(Cells::HeldUse)?,
         ng_solver::Core::new(SECOND / 100),
         MemoryStore::default(),
     );
@@ -1119,5 +1306,307 @@ fn only_the_whole_body_speciates() -> Result<(), AdmissionError> {
     };
     assert_eq!(speciates(&whole_body()?), (true, [true, true]));
     assert_eq!(speciates(&arena_body()?), (false, [false, false]));
+    Ok(())
+}
+
+/// `B = smooth_min(D, k P, w)` with the reach and width at rest.
+fn oxygen_rate(demand: f64, cell_pressure: f64) -> f64 {
+    let (reach, width) = (DEMAND / BEND * cell_pressure, WIDTH * DEMAND);
+    let gap = demand - reach;
+    0.5 * (demand + reach - (gap * gap + width * width).sqrt())
+}
+
+fn tissue_oxygen(
+    body: &CompiledBody,
+    session: &Session<'_, Running>,
+    space: Space,
+) -> Result<f64, AdmissionError> {
+    let gas = value(body, session, amount(Species::Oxygen, space)?);
+    Ok(gas / value(body, session, amount(Species::Water, space)?) / SOLUBILITY)
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Burned {
+    oxygen: f64,
+    carbon_dioxide: f64,
+    heat: f64,
+}
+
+/// What one burn took and made each second over the last step, from its column's extent and counts in the ledger.
+fn burned(body: &CompiledBody, session: &Session<'_, Running>, local: &'static str) -> Burned {
+    let law = LawName {
+        owner: Metabolism::CARD,
+        local,
+    };
+    let column = (body.instances().iter())
+        .find_map(|instance| match instance.target() {
+            Target::Column(column) if body.columns()[column.index()].origin() == law => Some(column),
+            Target::Column(_) | Target::Row(_) => None,
+        })
+        .unwrap_or_else(|| panic!("no column for {local}"));
+    let view = session.conservation();
+    let head = view.head().expect("a step");
+    let interval = head.interval();
+    let (forward, reverse) = head.exchange(column);
+    let gained =
+        |curve: &[Compensated]| f64::from_bits(curve[1].bits()[0]) - f64::from_bits(curve[0].bits()[0]);
+    let extent = gained(&forward.on(interval).expect("the head's interval"))
+        - gained(&reverse.on(interval).expect("the head's interval"));
+    let per_second = extent * SECOND as f64 / interval.length_ns() as f64;
+    let count = |species: Species| -> f64 {
+        (body.columns()[column.index()].terms().iter())
+            .filter(|(row, _)| {
+                matches!(body.rows()[row.index()].kind(), RowKind::Amount { species: of, .. } if of == species)
+            })
+            .map(|&(_, count)| count as f64)
+            .sum()
+    };
+    Burned {
+        oxygen: -count(Species::Oxygen) * per_second,
+        carbon_dioxide: count(Species::CarbonDioxide) * per_second,
+        heat: count(Species::Energy) * per_second,
+    }
+}
+
+fn close(measured: f64, expected: f64, relative: f64) -> bool {
+    (measured - expected).abs() <= relative * expected.abs()
+}
+
+/// At the settled bed, the oxygen rate is its form at the cells' partial pressure, the glucose burn takes the share of
+/// it and the fatty acid burn the rest, each makes its carbon dioxide and heat by its counts, and the plasma gives up
+/// that oxygen.
+#[test]
+fn each_burn_takes_its_share_of_the_oxygen_rate_the_cells_allow_and_makes_its_carbon_dioxide_and_heat()
+-> Result<(), InitializationFailure> {
+    let (body, core, store) = (
+        compiled(Cells::Burning)?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
+    let session = settling(&body, &core, &store)?;
+    let rate = oxygen_rate(DEMAND, tissue_oxygen(&body, &session, Space::Cells)?);
+    let (glucose, fat) = (GLUCOSE_SHARE * rate, (1.0 - GLUCOSE_SHARE) * rate);
+    let expected = [
+        (
+            "glucose burn",
+            Burned {
+                oxygen: glucose,
+                carbon_dioxide: glucose,
+                heat: glucose / 6.0 * GLUCOSE_ENERGY,
+            },
+        ),
+        (
+            "fatty acid burn",
+            Burned {
+                oxygen: fat,
+                carbon_dioxide: 16.0 / 23.0 * fat,
+                heat: fat / 23.0 * FAT_ENERGY,
+            },
+        ),
+    ];
+    for (local, expected) in expected {
+        let measured = burned(&body, &session, local);
+        let report = format!("{local}: {measured:?} against {expected:?} at an oxygen rate of {rate}");
+        assert!(close(measured.oxygen, expected.oxygen, 1e-6), "{report}");
+        assert!(
+            close(measured.carbon_dioxide, expected.carbon_dioxide, 1e-6),
+            "{report}"
+        );
+        assert!(close(measured.heat, expected.heat, 1e-6), "{report}");
+    }
+    let plasma = value(&body, &session, amount(Species::Oxygen, Space::Plasma)?) / WATER[0];
+    let taken = flow(RENEWAL) * (speciated(ARTERIAL).oxygen_content - plasma);
+    assert!(
+        close(taken, rate, 1e-6),
+        "the plasma gave up {taken} against an oxygen rate of {rate}"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_respiratory_quotient_is_the_one_glucoses_share_fixes() -> Result<(), InitializationFailure> {
+    let (body, core, store) = (
+        compiled(Cells::Burning)?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
+    let session = settling(&body, &core, &store)?;
+    let declared = GLUCOSE_SHARE + 16.0 * (1.0 - GLUCOSE_SHARE) / 23.0;
+    assert!(close(declared, QUOTIENT, 1e-15), "{declared}");
+    let [glucose, fat] = ["glucose burn", "fatty acid burn"].map(|local| burned(&body, &session, local));
+    let burns = (glucose.carbon_dioxide + fat.carbon_dioxide) / (glucose.oxygen + fat.oxygen);
+    assert!(close(burns, QUOTIENT, 1e-12), "the burns' quotient is {burns}");
+    let content = |species| -> Result<f64, AdmissionError> {
+        Ok(value(&body, &session, amount(species, Space::Plasma)?) / WATER[0])
+    };
+    let arterial = speciated(ARTERIAL);
+    let given = content(Species::CarbonDioxide)? - arterial.carbon_dioxide_total;
+    let taken = arterial.oxygen_content - content(Species::Oxygen)?;
+    assert!(
+        close(given / taken, QUOTIENT, 1e-6),
+        "the plasma's quotient is {}",
+        given / taken
+    );
+    Ok(())
+}
+
+/// The bed's heat starts at zero and settles where its way to the core store, `k E`, carries the burns' heat.
+#[test]
+fn the_beds_heat_settles_at_the_burns_heat_over_its_speed() -> Result<(), InitializationFailure> {
+    let (body, core, store) = (
+        compiled(Cells::Burning)?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
+    let session = settling(&body, &core, &store)?;
+    let [glucose, fat] = ["glucose burn", "fatty acid burn"].map(|local| burned(&body, &session, local));
+    let settled = (glucose.heat + fat.heat) / BED_HEAT_SPEED;
+    let held = value(
+        &body,
+        &session,
+        RowKind::Amount {
+            site: site::<CapillaryBed>(BED)?,
+            species: Species::Energy,
+            space: Space::Thermal,
+        },
+    );
+    assert!(
+        close(held, settled, 1e-6),
+        "the bed holds {held} against {settled}"
+    );
+    Ok(())
+}
+
+#[derive(Debug)]
+struct Stressed {
+    least: [f64; 3],
+    steps: u64,
+    refusals: Vec<String>,
+    rate: f64,
+    expected: f64,
+}
+
+/// The bed settles at rest, then is admitted again from that state with its demand or its flow stepped, and runs
+/// 300 s.
+fn stressed(demand: f64, renewal: f64) -> Result<Stressed, InitializationFailure> {
+    let (body, core, store) = (
+        compiled(Cells::Burning)?,
+        ng_solver::Core::new(SECOND / 100),
+        MemoryStore::default(),
+    );
+    let rest = settling(&body, &core, &store)?;
+    let settled: Vec<(RowKind, f64)> = (body.rows().iter())
+        .map(|row| (row.kind(), value(&body, &rest, row.kind())))
+        .collect();
+    let start = Start {
+        demand,
+        renewal,
+        ..Start::at(speciated(ARTERIAL))
+    };
+    let held = |row| {
+        let found = settled.iter().find(|(kind, _)| *kind == row);
+        found.unwrap_or_else(|| panic!("no settled {row:?}")).1
+    };
+    let (core, store) = (ng_solver::Core::new(SECOND / 100), MemoryStore::default());
+    let mut session = admit(&body, &core, &store, packet_from(&body, start, held)?)?;
+    let mut seen = Stressed {
+        least: [f64::INFINITY; 3],
+        steps: 0,
+        refusals: Vec::new(),
+        rate: 0.0,
+        expected: 0.0,
+    };
+    while session.record().accepted().time().nanoseconds() < 300 * SECOND {
+        let mut attempt = session.step();
+        loop {
+            match attempt {
+                Step::Accepted(next, _) => {
+                    session = next;
+                    seen.steps += 1;
+                    break;
+                }
+                Step::Refused(retrying) => {
+                    seen.refusals.push(format!(
+                        "{:?} after {} ns",
+                        retrying.refused().reason(),
+                        retrying.refused().attempted_ns()
+                    ));
+                    attempt = retrying.retry();
+                }
+                Step::Faulted(faulted) => panic!("{:?} after {:?}", faulted.fault(), seen.refusals),
+            }
+        }
+        let pressures = [
+            value(&body, &session, field("oxygen partial pressure")?),
+            tissue_oxygen(&body, &session, Space::Interstitium)?,
+            tissue_oxygen(&body, &session, Space::Cells)?,
+        ];
+        for (least, pressure) in seen.least.iter_mut().zip(pressures) {
+            if pressure < *least {
+                *least = pressure;
+            }
+        }
+    }
+    let [glucose, fat] = ["glucose burn", "fatty acid burn"].map(|local| burned(&body, &session, local));
+    seen.rate = glucose.oxygen + fat.oxygen;
+    seen.expected = oxygen_rate(demand, tissue_oxygen(&body, &session, Space::Cells)?);
+    Ok(seen)
+}
+
+/// Past what the cells' partial pressure allows, the oxygen rate falls below the demand, so no oxygen partial pressure
+/// reaches zero and no step is refused.
+#[test]
+fn the_oxygen_rate_bends_below_a_raised_demand_or_a_halved_flow_with_no_step_refused()
+-> Result<(), InitializationFailure> {
+    for (demand, renewal) in [
+        (1.5 * DEMAND, RENEWAL),
+        (3.0 * DEMAND, RENEWAL),
+        (DEMAND, 0.5 * RENEWAL),
+    ] {
+        let seen = stressed(demand, renewal)?;
+        let report = format!("demand {demand}, renewal {renewal}: {seen:?}");
+        assert!(seen.refusals.is_empty(), "{report}");
+        assert!(seen.least.iter().all(|least| *least > 0.0), "{report}");
+        assert!(close(seen.rate, seen.expected, 1e-6), "{report}");
+        assert!(seen.rate < demand, "{report}");
+    }
+    Ok(())
+}
+
+fn refused(cells: Cells) -> CompileDefect {
+    match compiled(cells) {
+        Err(AdmissionError::Compile(defect)) => defect,
+        Err(other) => panic!("refused outside the compile: {other:?}"),
+        Ok(_) => panic!("{cells:?} compiled"),
+    }
+}
+
+/// One burn of both fuels at once leaves six glucose less five fatty acids a combination no book names.
+#[test]
+fn a_single_burn_of_both_fuels_is_refused_for_a_quantity_no_book_names() {
+    assert_eq!(
+        refused(Cells::OneMixedBurn),
+        CompileDefect::UnnamedConservedQuantity {
+            law: LawName {
+                owner: Metabolism::CARD,
+                local: "mixed burn",
+            }
+        }
+    );
+}
+
+#[test]
+fn a_second_cards_glucose_burn_at_the_bed_is_refused_as_owned_twice() -> Result<(), AdmissionError> {
+    let CompileDefect::ReactionOwnedTwice { laws, site: at } = refused(Cells::BurningUnderTwoCards) else {
+        panic!("not refused as owned twice");
+    };
+    let local = "glucose burn";
+    let [metabolism, muscle] =
+        [Metabolism::CARD, Musculoskeletal::CARD].map(|owner| LawName { owner, local });
+    assert!(
+        laws == [metabolism, muscle] || laws == [muscle, metabolism],
+        "{laws:?}"
+    );
+    assert_eq!(at, site::<CapillaryBed>(BED)?);
     Ok(())
 }
