@@ -797,11 +797,13 @@ fn value(body: &CompiledBody, session: &Session<'_, Running>, kind: RowKind) -> 
 }
 
 fn field(local: &'static str) -> Result<RowKind, AdmissionError> {
+    let owner = if SPECIATION.contains(&local) {
+        BloodChemistry::CARD
+    } else {
+        Metabolism::CARD
+    };
     Ok(RowKind::Algebraic(Slot {
-        law: LawName {
-            owner: BloodChemistry::CARD,
-            local,
-        },
+        law: LawName { owner, local },
         at: Context::Site(site::<CapillaryBed>(BED)?),
     }))
 }
