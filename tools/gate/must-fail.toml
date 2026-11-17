@@ -212,6 +212,8 @@ mutants = [
   "edge-read-end-off-set-checks-its-first-set-alone",
   "edge-read-lands-tests-the-upstream-end",
   "edge-read-end-off-set-passes-a-law-with-no-edge",
+  "edge-read-discarded-read-is-not-checked",
+  "edge-read-end-off-set-passes-a-guard-off-a-route",
 ]
 doctests = [
   { path = "crates/ng-contract/src/law.rs", code = "E0277", text = "PerSite<Beds<Muscle>, Dimensionless>" },

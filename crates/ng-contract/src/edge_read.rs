@@ -288,6 +288,8 @@ enum Reads {
     ToneThenDebt,
     Plain,
     ValveRate,
+    Discarded,
+    BodyGuard,
 }
 
 fn stated<'b, D: SiteSet>(
@@ -355,6 +357,10 @@ fn ring_without_veins(valves: &[usize], reads: Reads) -> Result<CompiledBody, Ad
                     let d = k.downstream_if_in(&debt);
                     k.scale(g, d)
                 }
+                (Reads::Discarded, _) => {
+                    let _ = k.downstream_if_in(&debt);
+                    g
+                }
                 _ => g,
             };
             k.finish(value, cv.every_mode(), class)
@@ -374,6 +380,14 @@ fn ring_without_veins(valves: &[usize], reads: Reads) -> Result<CompiledBody, Ad
             k.finish(value, cv.every_mode(), class)
         });
         cv.memory_rate(&memory, rate);
+        if reads == Reads::BodyGuard {
+            let [on, off] = cv.modes("switch", ["on", "off"]);
+            let gap = cv.edge_kernel::<VascularEdge, _, _>(|mut k| {
+                let d = k.downstream_if_in(&debt);
+                k.finish(d, on.only(), class)
+            });
+            cv.event(Guard::new(gap, Crossing::Rising, on.to(&off)?));
+        }
         body.add(cv.finish());
         body.compile()
     })
@@ -409,5 +423,22 @@ fn a_law_with_no_edge_at_all_is_refused_when_it_states_the_read() {
     assert_eq!(
         ring_without_veins(&[], Reads::ValveRate).err(),
         end_off_set("valves")
+    );
+}
+
+#[test]
+fn a_read_the_law_discards_is_still_checked() {
+    assert_eq!(ring_without_veins(&[], Reads::Discarded).map(|_| ()).err(), None);
+    assert_eq!(
+        ring_without_veins(&[0, 2], Reads::Discarded).err(),
+        end_off_set("circulation")
+    );
+}
+
+#[test]
+fn a_guard_on_a_body_wide_mode_that_states_the_read_is_refused() {
+    assert_eq!(
+        ring_without_veins(&[], Reads::BodyGuard).err(),
+        end_off_set("switch")
     );
 }

@@ -4124,3 +4124,23 @@ new = '''    let (copy_out, copy) = laws.site_field::<CapillaryBed, Pressure>("c
     laws.define_at(&copy_out, stated);
     let carbon_dioxide_pressure = &copy;'''
 test = "-p ng-validate --test gases blood_chemistry_alone_states_speciation_and_names_the_explicit_fields_ops"
+
+[[mutant]]
+name = "edge-read-discarded-read-is-not-checked"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        .chain(kernel.unreached.iter().map(|read| &read.input));
+    for input in inputs {
+        let &Input::Read(_, Where::DownIn(set)) = input else {'''
+new = '''        ;
+    for input in inputs {
+        let &Input::Read(_, Where::DownIn(set)) = input else {'''
+test = "-p ng-contract --lib edge_read::a_read_the_law_discards_is_still_checked"
+
+[[mutant]]
+name = "edge-read-end-off-set-passes-a-guard-off-a-route"
+path = "crates/ng-contract/src/compile.rs"
+old = '''            check_ends(law, zero, &contexts, anatomy)?;'''
+new = '''            if route.is_some() {
+                check_ends(law, zero, &contexts, anatomy)?;
+            }'''
+test = "-p ng-contract --lib edge_read::a_guard_on_a_body_wide_mode_that_states_the_read_is_refused"
