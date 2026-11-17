@@ -1150,12 +1150,16 @@ fn each_bed_burns_its_demand_and_rests_where_the_packet_puts_it(start: &Start) {
             space: Space::Cells,
         };
         let debt = field("MT", "oxygen_debt_per_bed", Context::Site(bed));
+        let (share, half) = (if key == "peritubular bed" { 0.0 } else { 0.5 }, demand * 1e-3);
         for (when, session) in [("admitted", &admitted), ("a step on", &stepped)] {
             let (held, owed) = (value(start, session, lactate), value(start, session, debt));
             assert!(
                 held.abs() <= AT_REST_LACTATE && owed.abs() <= 3.0 * AT_REST_LACTATE,
                 "the {key} {when} holds {held} lactate in its cells and owes {owed} oxygen"
             );
+            let whole = owed + half;
+            let kept = (whole - share * owed) / whole;
+            assert_eq!(kept.to_bits(), 1f64.to_bits(), "the {key}'s inflow {when} keeps {kept} of its resistance at a debt of {owed}");
         }
     }
 }
