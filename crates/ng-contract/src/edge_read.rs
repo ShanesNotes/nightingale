@@ -17,8 +17,6 @@ fn cv(local: &'static str) -> LawName {
     LawName { owner: "CV", local }
 }
 
-/// A ring of artery, first bed, vein and second bed, or of the two vessels alone. The circulation's law is
-/// `g d + g`, with `d` each edge's downstream entry of a field over the beds.
 fn compiled(with_beds: bool) -> Result<(CompiledBody, Vec<SiteId>), AdmissionError> {
     let mut map = AnatomyBuilder::new();
     let root = map.site::<TissueSite>("body", at());
