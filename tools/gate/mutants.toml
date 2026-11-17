@@ -4080,6 +4080,108 @@ new = '''    for &(column, net) in nonzero.split_last().map_or(nonzero, |(_, res
 test = "-p ng-record --lib history::tests::the_nonzero_columns_flow_and_seal_with_the_bits_of_every_column"
 
 [[mutant]]
+name = "work-paid-from-outside"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        Some(&(_, bed)) => Terminal::Pool(heat(bed)),'''
+new = '''        Some(_) => Terminal::Exterior("chemical energy"),'''
+test = "-p ng-contract --test routes a_named_bed_pays_the_heart_and_the_walls_from_its_heat_and_the_pumps_keep_their_receipt"
+
+[[mutant]]
+name = "work-paid-from-outside-in-the-run"
+path = "crates/ng-contract/src/compile.rs"
+old = '''        Some(&(_, bed)) => Terminal::Pool(heat(bed)),'''
+new = '''        Some(_) => Terminal::Exterior("chemical energy"),'''
+test = "-p ng-validate --test paying with_the_burn_raised_by_the_work_the_beds_heat_passes_the_burn_less_the_work_to_the_core_store"
+
+[[mutant]]
+name = "a-payer-without-heat-compiles"
+path = "crates/ng-contract/src/compile.rs"
+old = '''find(|&&(_, bed)| !held(bed, Space::Thermal))'''
+new = '''find(|_| false)'''
+test = "-p ng-contract --test routes a_payer_must_be_a_bed_on_the_map_named_once_for_each_work_and_hold_heat"
+
+[[mutant]]
+name = "paid-work-without-a-store-compiles"
+path = "crates/ng-contract/src/compile.rs"
+old = '''find(|&&(work, _)| !stored && requested(work))'''
+new = '''find(|_| false)'''
+test = "-p ng-contract --test routes named_work_without_an_elastic_store_is_refused_instead_of_dropped"
+
+[[mutant]]
+name = "payer-check-reads-the-first-payer-alone"
+path = "crates/ng-contract/src/compile.rs"
+old = '''(schema.payers.iter()).find(|&&(_, bed)| !held(bed, Space::Thermal))'''
+new = '''(schema.payers.iter().take(1)).find(|&&(_, bed)| !held(bed, Space::Thermal))'''
+test = "-p ng-contract --test routes every_payer_is_checked_for_heat_whichever_work_it_pays"
+
+
+[[mutant]]
+name = "payer-check-skips-the-first-payer"
+path = "crates/ng-contract/src/compile.rs"
+old = '''(schema.payers.iter()).find(|&&(_, bed)| !held(bed, Space::Thermal))'''
+new = '''(schema.payers.iter().skip(1)).find(|&&(_, bed)| !held(bed, Space::Thermal))'''
+test = "-p ng-contract --test routes every_payer_is_checked_for_heat_whichever_work_it_pays"
+
+
+[[mutant]]
+name = "payers-kept-in-the-order-named"
+path = "crates/ng-contract/src/scope.rs"
+old = '''                self.payers.insert(at, (work, bed));'''
+new = '''                self.payers.push((work, bed));'''
+test = "-p ng-contract --test routes either_order_of_naming_the_payers_compiles_one_body"
+
+
+[[mutant]]
+name = "payers-kept-in-the-order-named-in-the-seal"
+path = "crates/ng-contract/src/scope.rs"
+old = '''                self.payers.insert(at, (work, bed));'''
+new = '''                self.payers.push((work, bed));'''
+test = "-p ng-contract --lib scope::tests::the_payers_seal_in_the_order_of_their_works_after_their_own_tag_and_the_bare_seal_stays"
+
+
+[[mutant]]
+name = "payer-tag-is-the-energy-tag"
+path = "crates/ng-contract/src/scope.rs"
+old = '''            out.number(u64::MAX - 1);'''
+new = '''            out.number(u64::MAX);'''
+test = "-p ng-contract --lib scope::tests::the_payers_seal_in_the_order_of_their_works_after_their_own_tag_and_the_bare_seal_stays"
+
+
+[[mutant]]
+name = "payers-seal-with-no-tag"
+path = "crates/ng-contract/src/scope.rs"
+old = '''            out.number(u64::MAX - 1);'''
+new = '''            let _ = u64::MAX;'''
+test = "-p ng-contract --lib scope::tests::the_payers_seal_in_the_order_of_their_works_after_their_own_tag_and_the_bare_seal_stays"
+
+
+[[mutant]]
+name = "payer-off-the-map-taken"
+path = "crates/ng-contract/src/scope.rs"
+old = '''        if !self.anatomy.sites().any(|known| known == bed) {'''
+new = '''        if false && !self.anatomy.sites().any(|known| known == bed) {'''
+test = "-p ng-contract --test routes a_payer_must_be_a_bed_on_the_map_named_once_for_each_work_and_hold_heat"
+
+
+[[mutant]]
+name = "payer-not-a-bed-taken"
+path = "crates/ng-contract/src/scope.rs"
+old = '''        if bed.class() != Class::CapillaryBed {'''
+new = '''        if false && bed.class() != Class::CapillaryBed {'''
+test = "-p ng-contract --test routes a_payer_must_be_a_bed_on_the_map_named_once_for_each_work_and_hold_heat"
+
+
+[[mutant]]
+name = "work-paid-twice-takes-the-second-bed"
+path = "crates/ng-contract/src/scope.rs"
+old = '''            Ok(_) => Err(AdmissionError::WorkPaidTwice { work }),'''
+new = '''            Ok(at) => {
+                self.payers[at].1 = bed;
+                Ok(())
+            }'''
+test = "-p ng-contract --test routes a_payer_must_be_a_bed_on_the_map_named_once_for_each_work_and_hold_heat"
+
+[[mutant]]
 name = "edge-read-at-the-upstream-end"
 path = "crates/ng-contract/src/compile.rs"
 old = '''Where::Down | Where::DownIn(_) => ends.map(|end| end.1),'''

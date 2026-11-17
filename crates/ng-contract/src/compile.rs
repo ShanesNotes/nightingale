@@ -19,7 +19,7 @@ use crate::scope::{BINARY64_EXACT, ENCLOSURE_PRESSURE, HeldCard, HeldSpecies, Po
 use crate::{
     AdmissibleSet, AdmissionError, Anatomy, Book, Boundary, BoundaryDirection, Class, CompileDefect,
     Compliance, HeatRoute, Lasting, LawName, Makeup, ModeValue, Network, Owner, ParameterKey, Passage,
-    Predicate, RateClass, Schema, SiteId, Sites, Space, Species, Wall,
+    Predicate, RateClass, Schema, SiteId, Sites, Space, Species, Wall, Work,
 };
 use core::num::NonZeroU32;
 
@@ -36,6 +36,7 @@ pub(crate) fn compile(
     check_fragments(&issued, &fragments, &schema, &held)?;
     check_boundaries(&schema)?;
     check_places(&schema)?;
+    check_payers(&schema, &fragments)?;
     check_reactions(&fragments, &schema)?;
     let declarations = declarations(&fragments)?;
     let unissued = FragmentData::empty(Boundary::CARD);
@@ -249,6 +250,27 @@ fn check_boundaries(schema: &Schema) -> Result<(), CompileDefect> {
                 local: boundary.name,
             },
         }),
+        None => Ok(()),
+    }
+}
+
+fn check_payers(schema: &Schema, fragments: &[FragmentData]) -> Result<(), CompileDefect> {
+    let pools: Vec<(SiteId, Space, Species)> = schema.pools().collect();
+    let held = |site, space| pools.contains(&(site, space, Species::Energy));
+    if let Some(&(_, site)) = (schema.payers.iter()).find(|&&(_, bed)| !held(bed, Space::Thermal)) {
+        return Err(CompileDefect::PayerHoldsNoHeat { site });
+    }
+    let root = (schema.anatomy.root()).filter(|root| root.class() == Class::TissueSite);
+    let stored = root.is_some_and(|root| held(root, Space::Elastic));
+    let requested = |work| {
+        let family = match work {
+            Work::Stroke => Family::StrokeWork,
+            Work::Walls => Family::WallWork,
+        };
+        (fragments.iter()).any(|fragment| fragment.families.contains(&family))
+    };
+    match (schema.payers.iter()).find(|&&(work, _)| !stored && requested(work)) {
+        Some(&(work, _)) => Err(CompileDefect::PaidWorkHasNoStore { work }),
         None => Ok(()),
     }
 }
@@ -984,6 +1006,10 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
         Some(species_at(root, space, Species::Energy))
     };
     let heat = |site| species_at(site, Space::Thermal, Species::Energy);
+    let paid = |work| match schema.payers.iter().find(|payer| payer.0 == work) {
+        Some(&(_, bed)) => Terminal::Pool(heat(bed)),
+        None => Terminal::Exterior("chemical energy"),
+    };
     match family {
         Family::Circulation => (anatomy.vascular())
             .filter(|&pair| !anatomy.is_valve(pair) && !sinusoidal(anatomy, pair))
@@ -1071,10 +1097,7 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
             .filter_map(|site| {
                 Some(Reach {
                     context: Context::Site(site),
-                    ends: [
-                        Terminal::Exterior("chemical energy"),
-                        Terminal::Pool(store(Space::Elastic)?),
-                    ],
+                    ends: [paid(Work::Stroke), Terminal::Pool(store(Space::Elastic)?)],
                 })
             })
             .collect(),
@@ -1092,7 +1115,7 @@ fn reaches_of(family: Family, schema: &Schema) -> Vec<Reach> {
         Family::WallWork => (store(Space::Elastic).into_iter())
             .map(|elastic| Reach {
                 context: Context::Body,
-                ends: [Terminal::Exterior("chemical energy"), Terminal::Pool(elastic)],
+                ends: [paid(Work::Walls), Terminal::Pool(elastic)],
             })
             .collect(),
         Family::Dissipation => (store(Space::Elastic).zip(store(Space::Thermal)).into_iter())

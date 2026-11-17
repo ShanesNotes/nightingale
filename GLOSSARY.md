@@ -397,7 +397,10 @@ The oxygen a bed's cells burn each second. It follows the oxygen demand until th
 The carbon dioxide a bed makes over the oxygen it burns. At rung 0 the glucose share of the oxygen rate fixes it.
 
 **Bed heat**:
-The heat store at each bed that takes its reactions' energy and passes it to the core store, first order at one declared speed.
+The heat store at each bed that takes its reactions' energy and passes it to the core store, first order at one declared speed. A paying bed's heat also pays the work the schema names it for.
+
+**Paying bed**:
+The capillary bed whose heat pays the heart's stroke work or the walls' work, named in the schema for each work. With none named, the work starts at the receipt `chemical energy`.
 
 **Oxygen reach**:
 A bed's conductance from its cells' oxygen partial pressure to the oxygen they can burn, a parameter of each bed. The oxygen rate follows the reach times that pressure until it nears the demand.
@@ -467,7 +470,7 @@ Slow memory in the unit of the variable it guards, compared with that variable o
 How far a sensed value stands from its set point. It is its own dimension, so a set point can never become the variable it guards.
 
 **Wall power**:
-What the walls' elastic store must lose to stay on the sum of the walls. What they shed leaves as heat. What they gain past the heart's work and gravity's is muscle work from chemical energy.
+What the walls' elastic store must lose to stay on the sum of the walls. What they shed leaves as heat. What they gain past the heart's work and gravity's is muscle work, paid by the bed the schema names to pay it, or else by the receipt `chemical energy`.
 
 **Regulated total**:
 A conserved total that answers its own flows, because a boundary law reads the body, as water does through urine. Admission solves it, and the packet's value is only a guess.

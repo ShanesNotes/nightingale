@@ -44,7 +44,8 @@ const BLOOD_PRESSURE: &str = "blood pressure";
 pub(crate) const BINARY64_EXACT: i64 = 1 << 53;
 
 /// The anatomy and the composition data laws never see: which species live in which spaces, where a route crosses
-/// the boundary, the partial-volume coefficient, each fuel's energy content and the spaces this body leaves out.
+/// the boundary, the partial-volume coefficient, each fuel's energy content, the bed that pays each named work and the
+/// spaces this body leaves out.
 pub struct Schema {
     pub(crate) anatomy: Anatomy,
     pub(crate) carried: Vec<(Sites, Space, Species)>,
@@ -53,6 +54,15 @@ pub struct Schema {
     pub(crate) partial_volume: Option<Measure<PartialVolume<Water>>>,
     pub(crate) left_out: Vec<(Space, &'static str)>,
     pub(crate) energy: Vec<(Species, i64)>,
+    pub(crate) payers: Vec<(Work, SiteId)>,
+}
+
+/// Work into the elastic store that a bed's heat pays once the schema names that bed, and the receipt
+/// `chemical energy` pays otherwise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Work {
+    Stroke,
+    Walls,
 }
 #[derive(Clone, Copy)]
 pub(crate) struct RouteBoundary {
@@ -78,7 +88,26 @@ impl Schema {
             partial_volume: None,
             left_out: Vec::new(),
             energy: Vec::new(),
+            payers: Vec::new(),
         })
+    }
+
+    /// Names the capillary bed whose heat pays `work`. Refuses a site the map does not hold, a site that is no bed,
+    /// and a work already paid, by this bed or another.
+    pub fn pay_work(&mut self, work: Work, bed: SiteId) -> Result<(), AdmissionError> {
+        if !self.anatomy.sites().any(|known| known == bed) {
+            return Err(AdmissionError::SiteOffTheMap { site: bed });
+        }
+        if bed.class() != Class::CapillaryBed {
+            return Err(AdmissionError::PayerNotABed { site: bed });
+        }
+        match self.payers.binary_search_by_key(&work, |known| known.0) {
+            Ok(_) => Err(AdmissionError::WorkPaidTwice { work }),
+            Err(at) => {
+                self.payers.insert(at, (work, bed));
+                Ok(())
+            }
+        }
     }
 
     /// `Q` lives in this space of every site of a set, so blood and urine can hold different things in a lumen.
@@ -252,6 +281,7 @@ impl Seal for Schema {
             partial_volume,
             left_out,
             energy,
+            payers,
         } = self;
         anatomy.digest().seal(out);
         let mut pools: Vec<(SiteId, Space, Species)> = self.pools().collect();
@@ -300,6 +330,16 @@ impl Seal for Schema {
             for &(species, content) in energy {
                 out.number(species as u64);
                 out.number(content as u64);
+            }
+        }
+        // Written only when a payer is named, so no other body's bytes move, after a tag that neither a row count nor
+        // the energy tag equals.
+        if !payers.is_empty() {
+            out.number(u64::MAX - 1);
+            out.length(payers.len());
+            for &(work, bed) in payers {
+                out.number(work as u64);
+                bed.seal(out);
             }
         }
     }
@@ -612,7 +652,8 @@ impl<'b> CardiovascularPorts<'b> {
     pub fn effect<Q: Substance>(&self) -> ReadPort<'b, Cardiovascular, PerSite<Junction, Dimensionless>> {
         effect::<_, _, Q>()
     }
-    /// Work into the elastic store at each blood site. The far end is a receipt: the chemical energy MT stands behind.
+    /// Work into the elastic store at each blood site. The far end is the heat of the bed `Schema::pay_work` names for
+    /// `Work::Stroke`, or else a receipt: the chemical energy MT stands behind.
     pub fn stroke_work(
         &self,
         laws: &mut FragmentBuilder<'b, Cardiovascular>,
@@ -629,7 +670,8 @@ impl<'b> CardiovascularPorts<'b> {
         laws.request(Family::GravityWork);
         EdgeRoute::requested(Family::GravityWork)
     }
-    /// Work into the elastic store past what the heart and gravity pay, from the chemical energy MT stands behind.
+    /// Work into the elastic store past what the heart and gravity pay. The far end is the heat of the bed
+    /// `Schema::pay_work` names for `Work::Walls`, or else the chemical energy MT stands behind.
     pub fn wall_work(
         &self,
         laws: &mut FragmentBuilder<'b, Cardiovascular>,
@@ -693,8 +735,8 @@ impl<'b> FluidsPorts<'b> {
         laws.request(family);
         SiteRoute::requested(family)
     }
-    /// Metabolism's chemical energy into each bed's heat: the work of its cells' pumps. The far end is a receipt, as
-    /// the heart's stroke work's is.
+    /// Metabolism's chemical energy into each bed's heat: the work of its cells' pumps. The far end is always a
+    /// receipt, whatever `Schema::pay_work` names for the heart and the walls.
     pub fn pump_work(
         &self,
         laws: &mut FragmentBuilder<'b, Fluids>,
@@ -981,6 +1023,57 @@ impl<'b, S> HeldPorts<'b, S> {
 #[cfg(test)]
 mod tests {
     use super::processes::TABLE;
+    use super::{Schema, Work};
+    use crate::identity::{Canonical, Seal};
+    use crate::{
+        AnatomyBuilder, CapillaryBed, Measure, Network, Position, SiteId, TissueSite, VesselSegment,
+    };
+
+    fn schema() -> (Schema, SiteId, SiteId) {
+        let zero = || Measure::new(0.0).expect("finite");
+        let at = || Position::new(zero(), zero(), zero());
+        let mut map = AnatomyBuilder::new();
+        let root = map.site::<TissueSite>("body", at());
+        let vessel = map.site::<VesselSegment>("vessel", at());
+        map.contain(root.id(), vessel.id());
+        let beds = [
+            map.site::<CapillaryBed>("first bed", at()).id(),
+            map.site::<CapillaryBed>("second bed", at()).id(),
+        ];
+        for bed in beds {
+            map.contain(root.id(), bed);
+            map.connect(Network::Vascular, vessel.id(), bed);
+            map.connect(Network::Vascular, bed, vessel.id());
+        }
+        let schema = Schema::new(map.finish().expect("a map")).expect("a schema");
+        (schema, beds[0], beds[1])
+    }
+
+    fn sealed(schema: &Schema) -> Vec<u8> {
+        let mut out = Canonical::new("schema");
+        schema.seal(&mut out);
+        out.into_bytes()
+    }
+
+    #[test]
+    fn the_payers_seal_in_the_order_of_their_works_after_their_own_tag_and_the_bare_seal_stays() {
+        let (mut named, first, second) = schema();
+        named.pay_work(Work::Walls, second).expect("a bed");
+        named.pay_work(Work::Stroke, first).expect("a bed");
+        let (bare, ..) = schema();
+        let mut expected = Canonical::new("schema");
+        bare.seal(&mut expected);
+        assert_eq!(expected.into_bytes(), sealed(&bare));
+        let mut expected = Canonical::new("schema");
+        bare.seal(&mut expected);
+        expected.number(u64::MAX - 1);
+        expected.length(2);
+        for (work, bed) in [(Work::Stroke, first), (Work::Walls, second)] {
+            expected.number(work as u64);
+            bed.seal(&mut expected);
+        }
+        assert_eq!(sealed(&named), expected.into_bytes());
+    }
 
     #[test]
     fn every_boundary_process_has_a_name_of_its_own() {
